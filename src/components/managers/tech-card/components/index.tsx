@@ -131,6 +131,8 @@ import {
 import { fusingOverrideText, fusingSaveOverrides } from './fusing-override';
 import { PresenceLossBanner, VersionSkewBanner, type VersionSkew } from './save-audit-banners';
 import { useTechCardStagingRequired, type CommitOutcome } from './useTechCardStaging';
+import { fuseOwed } from './card-owed';
+import { useSeamsStore } from './assembly-seams/seams-store';
 import {
   FUSING_SHEETS_KEY,
   fusingSheetsChange,
@@ -1039,13 +1041,20 @@ export function TechCardForm({
   // THE ONE GUARD LEFT in place of the drafts: the browser asks before a tab with unsaved work is closed
   // or reloaded. Asked at the moment of leaving (mn-3: dirt nobody can write is no reason to hold the
   // page); a new card's create writes the style facts too, so all of its dirt counts.
+  // L16: a fusing rebuild alone holds nothing — it is owed in this browser (card-owed.ts) and a
+  // reloaded page takes it back. A seam row on the wire holds: its step link is written only after it.
   const canWriteCard = canWrite(SECTION.techCards) && !frozen;
-  const unsavedWork = form.formState.isDirty || staging.changes.length > 0;
   useEffect(() => {
-    if (!canWriteCard || !unsavedWork) return;
+    if (!canWriteCard) return;
     const guard = (e: BeforeUnloadEvent) => {
       const work = isEditMode ? bodyWorkOf(form) : !!form.control._formState.isDirty;
-      if (!work && staging.peek().length === 0) return;
+      const queued = staging
+        .peek()
+        .some((c) => c.key !== FUSING_SHEETS_KEY || !numId || !fuseOwed(numId));
+      const seams = useSeamsStore.getState();
+      const seamInFlight =
+        Object.keys(seams.pending).length > 0 || Object.keys(seams.posePending).length > 0;
+      if (!work && !queued && !seamInFlight) return;
       e.preventDefault();
       e.returnValue = '';
     };
@@ -1053,7 +1062,7 @@ export function TechCardForm({
     return () => window.removeEventListener('beforeunload', guard);
     // `form` and `staging` are read live, at the moment of leaving.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canWriteCard, unsavedWork, isEditMode]);
+  }, [canWriteCard, isEditMode, numId]);
 
   // Section-completion progress (Q9): a visible "how filled is this card" signal, per tab + overall.
   const len = (v: unknown) => (Array.isArray(v) ? v.length : 0);
@@ -3149,6 +3158,24 @@ export function TechCardForm({
     getBaseLockVersion: () => base.current.version,
     adoptBase: adoptExternalBase,
   });
+  // L16: the rebuild a page before this one owed (the tab closed or reloaded before it succeeded). The
+  // rebuild is idempotent: sheets that are already right are reused and nothing is written.
+  useEffect(() => {
+    if (!autosaveEnabled || !numId || !fuseOwed(numId)) return;
+    if (staging.peek().some((c) => c.key === FUSING_SHEETS_KEY)) return;
+    staging.stage(
+      fusingSheetsChange(
+        numId,
+        (v) => {
+          ownBodyVersion.current = v;
+        },
+        saveSessionId,
+      ),
+    );
+    autosave.request('fusing-owed');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autosaveEnabled, numId]);
+
   const undoHistory = useTechCardUndoHistory({
     scope: numId ?? clientRequestId.current,
     enabled: autosaveEnabled,
@@ -3831,6 +3858,7 @@ export function TechCardForm({
           firstError={formErrorRows[0]}
           onRevealError={revealError}
           onOpenConflict={openConflict}
+          onRetry={() => void autosave.saveNow('retry')}
         />
       )}
 

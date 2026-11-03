@@ -1,6 +1,7 @@
 import { GENERATED_FUSING_NAME_PREFIX, regenerateFusingSheets } from 'lib/fusing-dxf';
 import { SECTION } from 'lib/pattern-import/fabrics/scope';
 import { notify } from 'lib/stores/store';
+import { clearFuseOwed, markFuseOwed } from '../card-owed';
 import type { StagedChange } from '../useTechCardStaging';
 
 // THE FUSIBLE SHEETS FOLLOW THE FUSE MARKUP. One staged change, shared by the PIECES modal (which
@@ -50,12 +51,14 @@ export function subscribeFusingSheetGeneration(
 // failure of the change: it stays staged and the next save retries it — swallowed, the queue called
 // the save complete and the form's baseline already held the new fuse inputs, so nothing would ever
 // rebuild the stale sheets. `onWrote` hears the version the rebuild's own card write left, only when
-// it actually wrote.
+// it actually wrote. The queue lives in memory and the debt must not: card-owed.ts holds it from here
+// until a rebuild succeeds, so a reloaded page takes it back.
 export function fusingSheetsChange(
   techCardId: number,
   onWrote?: (lockVersion: number) => void,
   saveSessionId?: string,
 ): StagedChange {
+  markFuseOwed(techCardId);
   return {
     key: FUSING_SHEETS_KEY,
     label: 'fusing DXF',
@@ -82,6 +85,7 @@ export function fusingSheetsChange(
             text: `${r.skippedSizes.length} sizes skipped`,
             detail: r.skippedSizes.map((x) => `${x.piece} ${x.size}: ${x.reason}`).join('\n'),
           });
+        clearFuseOwed(techCardId);
         publishGeneration(techCardId, { phase: 'generated', at: Date.now(), run });
       } catch (error) {
         publishGeneration(techCardId, { phase: 'error', at: Date.now(), run });

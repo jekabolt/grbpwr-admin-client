@@ -19,9 +19,9 @@
 //       потолок держит только панель, перестейдживающую саму себя (R-9); flush, не дождавшийся
 //       тишины, отвечает `busy` (R-10); работа, возникшая раньше машины, взводится при создании
 //       (R-12); запись, которую вела не машина, заканчивает её статус там же, где кончилась (R-7);
-//       упавшая запись повторяется сама — лестница 5 / 15 / 45 с, потом каждые 30 с, пока есть
-//       работа, правка не ждёт шага, затихшая карточка повторы снимает; потолок `restaged` — тоже
-//       шаг, а не конец (O-60, D-59: двери «retry» нет);
+//       упавшая запись повторяется сама — лестница 5 / 15 / 45 с и стоп, причина `stopped`, таймера
+//       нет; правка и дверь `retry` — по одной попытке, затихшая карточка стоп снимает (L16). Потолок
+//       `restaged` — шаг 30 с, а не конец: там ничего не падало (O-60, D-59);
 //   (9) ревью Codex O-60 (r4): диалог перевода, ждущий записи, ушедшей до него, слышит её 409 как
 //       `conflict`, а не как паузу; правка, пришедшая, пока летела падающая запись, пишется своим
 //       дебаунсом, а не ступенью лестницы; `off` терминален для записи в полёте — ни «saved», ни
@@ -237,13 +237,29 @@ const MUTANTS = {
   restoreKeepsEmptyRows: [
     [`${C}/save-history.ts`, 'if (!text.trim() && (d.mediaIds?.length ?? 0) === 0) continue;', ''],
   ],
-  // (7k) ОТКАТ D-59 (1): лестница 5 / 15 / 45 с кончилась — повторов больше нет, запись ждёт человека
-  // с «retry», которого нет
-  noRetryStep: [
+  // (7k) ОТКАТ L16: лестница 5 / 15 / 45 с кончилась, а упавшая запись всё равно идёт каждые 30 с —
+  // панель, которой этот бандл не может записать, крутила бы статус вечно
+  ladderNeverStops: [
     [
       `${C}/useTechCardAutosave.ts`,
-      "        } else {\n          arm(retryInterval, 'retry');\n        }",
-      '        } else {\n          clearTimer();\n        }',
+      "        } else {\n          clearTimer();\n        }\n        set({ status: 'error', message: r.message, cause: spent",
+      "        } else {\n          arm(retryInterval, 'retry');\n        }\n        set({ status: 'error', message: r.message, cause: spent",
+    ],
+  ],
+  // (7k′) ОТКАТ L16: правка снова раздаёт полную лестницу — каждая правка покупает ещё четыре попытки
+  editRestartsSpentLadder: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      'if (retryIndex < deps.retryDelaysMs.length) retryIndex = 0;',
+      'retryIndex = 0;',
+    ],
+  ],
+  // (7k″) ОТКАТ L16: конец паузы будит остановленную запись, как будто она ещё на лестнице
+  resumeWakesStopped: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      "      if (state.status === 'error' && state.cause === 'stopped') return;\n",
+      '',
     ],
   ],
   // (7l) ОТКАТ D-59 (2): потолок `restaged` снова останавливает запись насовсем
@@ -411,12 +427,12 @@ const MUTANTS = {
   rateLimitRefused: [
     [`${C}/useTechCardAutosave.ts`, ' || status === 429 || status < 400', ' || status < 400'],
   ],
-  // (7m) правка поверх упавшей записи ждёт шага повторов, а не пишет своим дебаунсом
-  changeWaitsForTheStep: [
+  // (7m) правка поверх остановленной записи не пишет: снова только дверь
+  changeDoesNotWrite: [
     [
       `${C}/useTechCardAutosave.ts`,
-      "      retryIndex = 0;\n      if (state.status === 'saved' || state.status === 'idle' || state.status === 'error') {",
-      "      if (state.status === 'error') return;\n      retryIndex = 0;\n      if (state.status === 'saved' || state.status === 'idle' || state.status === 'error') {",
+      '      if (retryIndex < deps.retryDelaysMs.length) retryIndex = 0;\n',
+      "      if (state.status === 'error') return;\n      if (retryIndex < deps.retryDelaysMs.length) retryIndex = 0;\n",
     ],
   ],
 };
@@ -998,45 +1014,90 @@ async function promise7(mod) {
   const capped = await r.m.flush('paid door');
   out.flushOnTheCapIsBusy = capped === 'busy' && r.saves === 4 && r.m.state().status === 'error';
 
-  // D-59 · a write that keeps failing: the ladder (5 / 15 / 45 s), then the step — every 30 s, for as
-  // long as the card has work; a change does not wait for either (its own debounce); a card that went
-  // quiet stops the retries (no save, no timer). Saves at 2 (debounce) · 7 · 22 · 67 · 97 · 127.
+  // L16 · a write that keeps failing: the ladder (5 / 15 / 45 s) and no more. Saves at 2 (debounce) · 7 ·
+  // 22 · 67; then one cause, no timer, for as long as nobody asks.
   let failing = true;
+  const failingRig = () =>
+    bareRig(mod, (rig) => ({
+      hasWork: () => failing,
+      save: async () => {
+        rig.saves += 1;
+        return { outcome: 'error', message: 'network down' };
+      },
+    }));
+  r = failingRig();
+  r.m.notifyChange();
+  await r.clock.advance(66_000);
+  const ladder = r.saves === 3 && r.m.state().cause === 'failed';
+  await r.clock.advance(2_000); // 68 s: the last rung (67 s) has come
+  const afterLadder =
+    r.saves === 4 &&
+    r.m.state().status === 'error' &&
+    r.m.state().cause === 'stopped' &&
+    r.clock.pending() === 0;
+  await r.clock.advance(600_000);
+  out.retryStopsAfterLadder = ladder && afterLadder && r.saves === 4 && r.clock.pending() === 0;
+  // a change gets one attempt at its own debounce, and not a new ladder
+  const beforeChange = r.saves;
+  r.m.notifyChange();
+  const saysDirty = r.m.state().status === 'dirty';
+  await r.clock.advance(2_000);
+  const oneForTheChange = r.saves === beforeChange + 1 && r.m.state().cause === 'stopped';
+  await r.clock.advance(600_000);
+  out.changeGetsOneAttempt = saysDirty && oneForTheChange && r.saves === beforeChange + 1;
+  // …and so does a door (the `retry` of the failure line, a paid door, ⌘S)
+  const beforeFlush = r.saves;
+  const flushed = await r.m.flush('retry');
+  await r.clock.advance(600_000);
+  out.flushGetsOneAttempt =
+    flushed === 'error' && r.saves === beforeFlush + 1 && r.m.state().cause === 'stopped';
+  // the work went away (reverted by hand, written by another door): the status rests, and the card
+  // that fails later starts on a whole ladder
+  failing = false;
+  r.m.notifyChange();
+  const rested = r.m.state().status !== 'error' && r.clock.pending() === 0;
+  failing = true;
+  r.m.notifyChange();
+  await r.clock.advance(2_000);
+  out.quietCardEndsTheStop = rested && r.m.state().cause === 'failed' && r.clock.pending() === 1;
+  // the door that writes it through: `saved`, no cause left to read
+  let healed = false;
   r = bareRig(mod, (rig) => ({
-    hasWork: () => failing,
+    hasWork: () => !healed,
     save: async () => {
       rig.saves += 1;
-      return { outcome: 'error', message: 'network down' };
+      if (rig.saves < 5) return { outcome: 'error', message: 'worker error' };
+      healed = true;
+      return { outcome: 'complete' };
     },
   }));
   r.m.notifyChange();
-  await r.clock.advance(66_000);
-  const ladder = r.saves === 3 && r.m.state().status === 'error';
-  await r.clock.advance(2_000); // 68 s: the last rung (67 s) has come
-  const afterLadder = r.saves === 4;
-  await r.clock.advance(28_000); // 96 s: the step is not due yet
-  const stepNotEarly = r.saves === 4;
-  await r.clock.advance(2_000); // 98 s: the step (97 s) came — once
-  const stepOnce = r.saves === 5;
-  await r.clock.advance(30_000); // 128 s: and again (127 s)
-  out.retryStepAfterLadder =
-    ladder &&
-    afterLadder &&
-    stepNotEarly &&
-    stepOnce &&
-    r.saves === 6 &&
-    r.m.state().status === 'error';
-  // a change while the step is pending writes at its own debounce (130 s), not at the step (157 s)
-  const beforeChange = r.saves;
+  await r.clock.advance(70_000);
+  const stoppedThen = r.m.state().cause === 'stopped';
+  const healedAnswer = await r.m.flush('retry');
+  out.retryDoorHeals = stoppedThen && healedAnswer === 'ok' && r.m.state().status === 'saved';
+  // a stopped card over the end of a pause stays stopped (nothing changed)
+  let holding = false;
+  let wakes = 0;
+  r = bareRig(mod, (rig) => ({
+    hasWork: () => true,
+    isPaused: () => holding,
+    save: async () => {
+      rig.saves += 1;
+      wakes += 1;
+      return { outcome: 'error', message: 'worker error' };
+    },
+  }));
   r.m.notifyChange();
-  await r.clock.advance(2_000);
-  out.changeDoesNotWaitForTheStep = r.saves === beforeChange + 1;
-  // the work went away (reverted by hand, written by another door): the next retry finds nothing, rests
-  const beforeQuiet = r.saves;
-  failing = false;
-  await r.clock.advance(120_000);
-  out.retryStopsOverAQuietCard =
-    r.saves === beforeQuiet && r.m.state().status !== 'error' && r.clock.pending() === 0;
+  await r.clock.advance(70_000);
+  holding = true;
+  const heldByPause = await r.m.flush('door');
+  holding = false;
+  const wakesBefore = wakes;
+  r.m.resume();
+  await r.clock.advance(600_000);
+  out.resumeHoldsTheStop =
+    heldByPause === 'needs-confirm' && wakes === wakesBefore && r.m.state().cause === 'stopped';
 
   // R-10 · a flush over a card that is never quiet (every pass leaves work) answers `busy`
   r = bareRig(mod, (rig) => ({
@@ -1874,14 +1935,24 @@ report('(7) mutant mountDirtArmed', await promise7(await load('mountDirtArmed'))
   'pausedCycleResumes',
 ]);
 report('(7) mutant noResume', await promise7(await load('noResume')), ['pausedCycleResumes']);
-report('(7) mutant noRetryStep', await promise7(await load('noRetryStep')), [
-  'retryStepAfterLadder',
+report('(7) mutant ladderNeverStops', await promise7(await load('ladderNeverStops')), [
+  'retryStopsAfterLadder',
+  'changeGetsOneAttempt',
+  'flushGetsOneAttempt',
+]);
+report(
+  '(7) mutant editRestartsSpentLadder',
+  await promise7(await load('editRestartsSpentLadder')),
+  ['changeGetsOneAttempt'],
+);
+report('(7) mutant resumeWakesStopped', await promise7(await load('resumeWakesStopped')), [
+  'resumeHoldsTheStop',
 ]);
 report('(7) mutant capStopsSaving', await promise7(await load('capStopsSaving')), [
   'selfRestagingStillCapped',
 ]);
-report('(7) mutant changeWaitsForTheStep', await promise7(await load('changeWaitsForTheStep')), [
-  'changeDoesNotWaitForTheStep',
+report('(7) mutant changeDoesNotWrite', await promise7(await load('changeDoesNotWrite')), [
+  'changeGetsOneAttempt',
 ]);
 report(
   '(7) mutant conflictDuringCheckOverwritten',

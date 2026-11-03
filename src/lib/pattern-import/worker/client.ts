@@ -17,6 +17,8 @@ import type {
   StageIO,
   StageName,
 } from '../types';
+import { workerLoadFailed } from 'lib/stale-reload';
+import { classifyWorkerError } from 'lib/worker-load';
 import { checkInputSet } from './limits';
 import { ImportLog } from './report';
 
@@ -76,6 +78,10 @@ export class ImportWorkerClient {
   readonly kind = 'worker' as const;
   private worker: Worker | null = null;
   private nextId = 1;
+  private ran = false;
+  private loadRetried = false;
+  /** `open`, waiting for a fresh worker to prove it loaded (see `whenRunning`). */
+  private waiters: { resolve: () => void; reject: (e: Error) => void }[] = [];
   private pending = new Map<number, Pending>();
   /** Sessions of the CURRENT worker; a respawn empties it (their state died with the worker). */
   private live = new Set<number>();
@@ -98,7 +104,11 @@ export class ImportWorkerClient {
       type: 'module',
       name: 'pattern-import',
     });
+    this.ran = false;
     w.onmessage = (ev: MessageEvent<WorkerMessage>) => {
+      this.ran = true;
+      this.loadRetried = false;
+      this.waiters.splice(0).forEach((waiter) => waiter.resolve());
       const msg = ev.data;
       if (msg.heapMb != null) {
         this.heapMb = msg.heapMb;
@@ -119,6 +129,19 @@ export class ImportWorkerClient {
       // A crashed worker (out of memory, a throw outside any request) fails every pending job;
       // its sessions are gone, the next call respawns clean.
       e.preventDefault?.();
+      const failure = classifyWorkerError(e, this.ran, this.loadRetried);
+      if (failure === 'retry') {
+        // Nothing ran and no bytes left yet (`whenRunning`): the waiters wait for a recreated worker.
+        this.loadRetried = true;
+        w.terminate();
+        this.worker = null;
+        this.spawn();
+        return;
+      }
+      if (failure === 'load') {
+        this.kill(workerLoadFailed());
+        return;
+      }
       this.log.push({
         event: 'crash',
         code: 'crashed',
@@ -136,11 +159,13 @@ export class ImportWorkerClient {
     return w;
   }
 
-  private kill(err: ImportWorkerError) {
+  private kill(err: Error) {
     this.worker?.terminate();
     this.worker = null;
+    this.ran = false;
     this.live.clear();
     this.running = null;
+    this.waiters.splice(0).forEach((waiter) => waiter.reject(err));
     // Reject, never abandon: an unsettled promise pins its closure (and the bytes it holds).
     for (const h of this.pending.values()) h.reject(err);
     this.pending.clear();
@@ -163,6 +188,16 @@ export class ImportWorkerClient {
     });
   }
 
+  /**
+   * The bytes of `open` are transferred and cannot go out a second time, so a fresh worker first
+   * proves that its script ran. Everything else needs a live session, so it follows an `open`.
+   */
+  private whenRunning(): Promise<void> {
+    this.spawn();
+    if (this.ran) return Promise.resolve();
+    return new Promise((resolve, reject) => this.waiters.push({ resolve, reject }));
+  }
+
   async open(
     files: { name: string; bytes: ArrayBuffer }[],
   ): Promise<{ sessionId: number; files: SourceFileInfo[] }> {
@@ -178,13 +213,17 @@ export class ImportWorkerClient {
       throw new ImportWorkerError(refusal.code, refusal.message);
     }
     // Transferred: the bytes leave the main thread (the wizard keeps the File objects).
-    const msg = await this.request(
-      { type: 'open', id, files },
-      files.map((f) => f.bytes),
-    ).catch((e) => {
-      this.logError(e);
-      throw e;
-    });
+    const msg = await this.whenRunning()
+      .then(() =>
+        this.request(
+          { type: 'open', id, files },
+          files.map((f) => f.bytes),
+        ),
+      )
+      .catch((e) => {
+        this.logError(e);
+        throw e;
+      });
     if (msg.type !== 'opened') throw new ImportWorkerError('internal', 'unexpected worker reply');
     this.live.add(msg.sessionId);
     return { sessionId: msg.sessionId, files: msg.files };

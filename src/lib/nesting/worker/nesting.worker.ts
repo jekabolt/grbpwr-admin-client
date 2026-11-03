@@ -2,6 +2,7 @@
 // Worker entry: owns the parsed pieces (keyed by parse job) so re-nesting with new
 // settings never re-parses, and the GA runs off the main thread with cooperative yields
 // so cancel/progress messages drain mid-run.
+import { announceWorkerReady } from 'lib/worker-load';
 import type { NestConfig, ParseOpts, PieceDTO, WorkerRequest, WorkerResponse } from '../types';
 import { parseSheets, type SheetBytes } from './parse-files';
 import { packPieces } from './piece-transfer';
@@ -236,3 +237,5 @@ self.onmessage = (ev: MessageEvent<WorkerRequest>) => {
       break;
   }
 };
+
+announceWorkerReady();

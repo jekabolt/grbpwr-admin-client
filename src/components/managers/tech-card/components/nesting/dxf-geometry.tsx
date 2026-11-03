@@ -28,6 +28,7 @@ import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { grainDisplaySegment } from 'lib/nesting/geom/grain-display';
 import { NEST_DEFAULTS, type PieceDTO } from 'lib/nesting/types';
 import { NestingWorkerClient } from 'lib/nesting/worker/client';
+import { retryWorkerLoad } from 'lib/worker-load';
 import type { ConversionManifest } from 'lib/pattern-import/types';
 import { memo, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { clothPatternDefs, hatchId } from '../cloth-hatch';
@@ -96,6 +97,10 @@ export function dxfGeometryQuery(files: readonly ScopedDxfFile[]) {
     // Ретрай тут вреден: недоступный CDN — это ответ («не удалось скачать»), с которым экран
     // умеет жить, а повтор стоит второго скачивания всего, что скачалось.
     retry: false,
+    // Воркер, который не загрузился, — другое дело: файлы не качались вовсе, и новая попытка ничего
+    // не повторяет. Недоступный CDN этим не будит: его ошибка не WorkerLoadError.
+    refetchOnWindowFocus: retryWorkerLoad,
+    refetchOnReconnect: retryWorkerLoad,
     queryFn: async ({ signal }: { signal: AbortSignal }): Promise<DxfBundle> => {
       const client = new NestingWorkerClient();
       const abort = () => client.terminate();

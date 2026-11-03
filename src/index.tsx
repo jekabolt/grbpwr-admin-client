@@ -11,6 +11,7 @@ import { ROUTES, SECTION } from 'constants/routes';
 import { ContextProvider } from 'context';
 import { initObservability, observabilityEnabled, reportBoundaryError } from 'lib/observability';
 import { DictionaryProvider } from 'lib/providers/dictionary-provider';
+import { reloadForNewVersion, reloadWindowOpen } from 'lib/stale-reload';
 import { lazy, StrictMode, Suspense, type ComponentType } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ErrorBoundary, type FallbackProps } from 'react-error-boundary';
@@ -27,11 +28,7 @@ import './global.css';
 //
 // The error boundary could not fix it either: resetErrorBoundary re-renders and asks for the SAME
 // dead URL, so "Try again" fails identically every time.
-const RELOAD_STAMP = 'chunk-reload-at';
-
-// Reload once to pick up the new manifest. A timestamp rather than a flag: a tab left open across
-// two separate deploys deserves its one reload each time, but a chunk error that repeats within
-// seconds of a reload is a real failure and belongs in the boundary, not in a reload loop.
+// Reload once to pick up the new manifest (lib/stale-reload.ts holds the stamp and why it is one).
 // The constraint mirrors React.lazy's own (ComponentType<any>) rather than narrowing it: anything
 // tighter is not assignable to what lazy() accepts, and narrowing here would only re-type the 44
 // routes this wraps.
@@ -39,22 +36,8 @@ const RELOAD_STAMP = 'chunk-reload-at';
 function lazyRoute<T extends ComponentType<any>>(factory: () => Promise<{ default: T }>) {
   return lazy(() =>
     factory().catch((err) => {
-      // Storage is behind try/catch on purpose: this is the recovery path, and a sessionStorage
-      // that throws (locked-down privacy mode) must not be what turns a stale chunk into a crash.
-      // Unreadable storage means "no reload recorded", so the one reload still happens.
-      let last = 0;
-      try {
-        last = Number(sessionStorage.getItem(RELOAD_STAMP) ?? 0);
-      } catch {
-        /* storage unavailable */
-      }
-      if (isStaleChunkError(err) && Date.now() - last > 10_000) {
-        try {
-          sessionStorage.setItem(RELOAD_STAMP, String(Date.now()));
-        } catch {
-          /* storage unavailable — the reload below still happens, just unguarded */
-        }
-        window.location.reload();
+      if (isStaleChunkError(err) && reloadWindowOpen()) {
+        reloadForNewVersion();
         // Never resolves — the reload takes over before React can render anything from it.
         return new Promise<{ default: T }>(() => {});
       }

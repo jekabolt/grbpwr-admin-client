@@ -8,6 +8,7 @@
 //         `thumb` = also paint the still (OffscreenCanvas 2D) and send it as a PNG blob.
 //   pom   { input }            → pom (measurePattern for every size)
 import { readSeamGraph, segmentAll } from 'lib/assembly-skeleton/pipeline';
+import { announceWorkerReady } from 'lib/worker-load';
 import type { SeamGraph, SkeletonFacts } from 'lib/assembly-skeleton/types';
 import { measurePattern, type PomInput, type PomReport } from 'lib/pom';
 import { grainDegOf } from 'lib/seams/frame';
@@ -148,3 +149,5 @@ self.onmessage = async (ev: MessageEvent<DollWorkerRequest>) => {
     post({ id, type: 'error', message: e instanceof Error ? e.message : String(e) });
   }
 };
+
+announceWorkerReady();

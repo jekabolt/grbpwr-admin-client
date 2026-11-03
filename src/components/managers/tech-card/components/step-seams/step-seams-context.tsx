@@ -22,6 +22,8 @@ import {
 import { useFormContext } from 'react-hook-form';
 import type { AssemblyGeometry } from '../../techpack/use-assembly-geometry';
 import { useAssemblyGeometry } from '../../techpack/use-assembly-geometry';
+import { clearLinkOwed, markLinkOwed, owedLinks, planOwedLinks } from '../card-owed';
+import { useTechCardAutosave } from '../design/autosave-contract';
 import { hydrateSeams, rowPairSig, rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import { useSeamWrites, type SeamWrites } from '../assembly-seams/use-seam-decisions';
 import type { TechCardFormData } from '../schema';
@@ -47,17 +49,47 @@ const Ctx = createContext<StepSeamsCtx | null>(null);
 /** Null outside a provider: the row then draws nothing (print, stands, other tabs). */
 export const useStepSeams = () => useContext(Ctx);
 
+/**
+ * ACCEPT WRITES AT ONCE (L16). The row has its own request; the step's link to it travels in the
+ * whole-card body, which waited out the autosave's debounce. A link stays owed from before the row's
+ * request until a read shows it stored (card-owed.ts): a page that dies on the way leaves the row with
+ * no step, and the next page finishes the link.
+ */
+function useFlushLink() {
+  const autosave = useTechCardAutosave();
+  const latest = useRef(autosave);
+  latest.current = autosave;
+  return useCallback(() => {
+    // The form tells the machine of a change a microtask after the event.
+    window.setTimeout(() => void latest.current.flush('seam'), 0);
+  }, []);
+}
+
 /** Store one seam row, then attach the server's canonical key to this form step; that key, or null. */
 export function useAttachStepSeam(index: number) {
   const ctx = useStepSeams();
   const { getValues, setValue } = useFormContext<TechCardFormData>();
+  const flushLink = useFlushLink();
   return useCallback(
     // `keepPlace`: same row with a new flag, its place stays because the order of rows moves pieces.
     async (row: StoredSeam, keepPlace = false): Promise<string | null> => {
       if (!ctx) return null;
-      const ok = await ctx.writes.upsert([row]);
-      if (!ok) return null;
       const sig = rowPairSig(row);
+      const op = getValues(`operations.${index}.operationNumber`) ?? 0;
+      const owes = !!ctx.cardId && op > 0;
+      if (owes)
+        markLinkOwed(ctx.cardId!, {
+          op,
+          field: 'seamKeys',
+          key: row.seamKey,
+          sig,
+          at: Date.now(),
+        });
+      const ok = await ctx.writes.upsert([row]);
+      if (!ok) {
+        if (owes) clearLinkOwed(ctx.cardId!, row.seamKey);
+        return null;
+      }
       const stored = rowsOf(useSeamsStore.getState()).find(
         (candidate) => rowPairSig(candidate) === sig,
       );
@@ -67,9 +99,10 @@ export function useAttachStepSeam(index: number) {
       setValue(`operations.${index}.seamKeys`, [...current.filter((item) => item !== key), key], {
         shouldDirty: true,
       });
+      flushLink();
       return key;
     },
-    [ctx, getValues, index, setValue],
+    [ctx, flushLink, getValues, index, setValue],
   );
 }
 
@@ -83,6 +116,7 @@ export function useStepSeamActions(index: number) {
       if (!ctx || ctx.frozen) return false;
       const operations = getValues('operations') ?? [];
       const removal = planStepSeamRemoval(operations, index, seamKey);
+      if (ctx.cardId) clearLinkOwed(ctx.cardId, seamKey);
       if (removal.deleteRow && row && !(await ctx.writes.remove([row]))) return false;
       const field = `operations.${index}.seamKeys` as const;
       const seamKeys = removal.deleteRow
@@ -105,6 +139,7 @@ export function useStepSeamActions(index: number) {
 export function useAttachStepPose(index: number) {
   const ctx = useStepSeams();
   const { getValues, setValue } = useFormContext<TechCardFormData>();
+  const flushLink = useFlushLink();
   return useCallback(
     async (
       put: readonly StoredPose[],
@@ -116,6 +151,7 @@ export function useAttachStepPose(index: number) {
       const field = `operations.${index}.poseKeys` as const;
       const keys = () => ((getValues(field) ?? []) as string[]).slice();
       if (drop.length) {
+        if (ctx.cardId) for (const r of drop) clearLinkOwed(ctx.cardId, r.seamKey);
         if (!(await ctx.writes.removePoses([...drop]))) return false;
         const gone = new Set(drop.map((r) => r.seamKey));
         const left = keys().filter((k) => !gone.has(k));
@@ -123,13 +159,22 @@ export function useAttachStepPose(index: number) {
       }
       if (reflag.length && !(await ctx.writes.upsertPoses([...reflag]))) return false;
       if (put.length) {
-        if (!(await ctx.writes.upsertPoses([...put]))) return false;
+        const op = getValues(`operations.${index}.operationNumber`) ?? 0;
+        const owes = !!ctx.cardId && op > 0;
+        if (owes)
+          for (const r of put)
+            markLinkOwed(ctx.cardId!, { op, field: 'poseKeys', key: r.seamKey, at: Date.now() });
+        if (!(await ctx.writes.upsertPoses([...put]))) {
+          if (owes) for (const r of put) clearLinkOwed(ctx.cardId!, r.seamKey);
+          return false;
+        }
         const add = new Set(put.map((r) => r.seamKey));
         setValue(field, [...keys().filter((k) => !add.has(k)), ...add], { shouldDirty: true });
+        flushLink();
       }
       return true;
     },
-    [ctx, getValues, index, setValue],
+    [ctx, flushLink, getValues, index, setValue],
   );
 }
 
@@ -191,6 +236,38 @@ export function StepSeamsProvider({
       });
     });
   }, [cardId, getValues, setValue]);
+
+  // L16: the links a page before this one owed, and the ones this page's own writes have now landed.
+  // Every card read comes through here; the timeout lets the page's effects put the card in the form.
+  const autosave = useTechCardAutosave();
+  const autosaveRef = useRef(autosave);
+  autosaveRef.current = autosave;
+  const autosaveOff = autosave.status === 'off';
+  useEffect(() => {
+    if (!cardId || frozen || autosaveOff || !owedLinks(cardId).length) return;
+    const timer = window.setTimeout(() => {
+      const seams = useSeamsStore.getState();
+      if (seams.cardId !== cardId) return;
+      const plan = planOwedLinks(
+        owedLinks(cardId),
+        (techCard?.techCard?.operations ?? []) as never,
+        (getValues('operations') ?? []) as never,
+        [
+          ...seams.server.map((r) => ({ seamKey: r.seamKey, sig: rowPairSig(r) })),
+          ...seams.poses.map((r) => ({ seamKey: r.seamKey })),
+        ],
+        Date.now(),
+      );
+      for (const link of plan.drop) clearLinkOwed(cardId, link.key);
+      for (const { index, field, key } of plan.attach) {
+        const path = `operations.${index}.${field}` as const;
+        const current = (getValues(path) ?? []) as string[];
+        setValue(path, [...current, key], { shouldDirty: true });
+      }
+      if (plan.attach.length) autosaveRef.current.request('seam-link');
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [cardId, frozen, autosaveOff, techCard, getValues, setValue]);
 
   const seamHints = useSeamHints(
     cardId,

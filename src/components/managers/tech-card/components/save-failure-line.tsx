@@ -1,4 +1,4 @@
-import { Text } from 'ui';
+import { Button, Text } from 'ui';
 import type { AutosaveStatus } from './design/autosave-contract';
 import { saveSentence } from './save-status-chip';
 import type { FormErrorRow } from './stage-progress';
@@ -13,8 +13,9 @@ import type { MachineState } from './useTechCardAutosave';
  * когда запись НЕ прошла:
  *   invalid  — фраза чипа («N fields do not validate; nothing is saved until they do»), дверь
  *              «→ field» — тот же путь к первому полю, что у первой строки поповера чипа;
- *   error    — фраза чипа («the last save failed: <причина>; the card keeps retrying on its own»);
- *              отказ самому телу (4xx, D-66) — слова сервера ДОСЛОВНО, без обещания повторов; потолок
+ *   error    — фраза чипа («the last save failed: <причина>; the card keeps retrying on its own», пока
+ *              повторы есть); повторы кончились (`stopped`, L16) — та же причина без обещания и дверь
+ *              «retry»; отказ самому телу (4xx, D-66) — слова сервера ДОСЛОВНО, без обещания повторов; потолок
  *              `restaged` — его правдивая фраза («the card kept changing while it was being saved — it
  *              retries on its own»);
  *   conflict — фраза чипа («another editor saved this card meanwhile» / «someone saved this card
@@ -40,7 +41,7 @@ import type { MachineState } from './useTechCardAutosave';
  * текстового размера (подчёркнутое слово, как «→ tab» в поповере чипа), не кнопка.
  */
 export type SaveFailure = {
-  kind: 'invalid' | 'error' | 'refused' | 'conflict' | 'auth';
+  kind: 'invalid' | 'error' | 'stopped' | 'refused' | 'conflict' | 'auth';
   sentence: string;
 };
 
@@ -56,6 +57,7 @@ function failureKindOf(
       return 'conflict';
     case 'error':
       // D-66: a refusal of the body itself is held, not retried — its line is the server's words.
+      if (cause === 'stopped') return 'stopped';
       return cause === 'refused' ? 'refused' : 'error';
     case 'off':
       // D-66′: a 401/403 stopped the card saving — the server's words say which (the session, the rights).
@@ -92,6 +94,7 @@ export function SaveFailureLine({
   firstError,
   onRevealError,
   onOpenConflict,
+  onRetry,
 }: {
   status: AutosaveStatus;
   errorsCount?: number;
@@ -102,6 +105,8 @@ export function SaveFailureLine({
   firstError?: FormErrorRow;
   onRevealError: (path: string) => void;
   onOpenConflict: () => void;
+  /** `stopped`: one more attempt. */
+  onRetry: () => void;
 }) {
   const failure = saveFailureOf(status, errorsCount, message, cause, refusal);
   return (
@@ -133,6 +138,11 @@ export function SaveFailureLine({
                 → field
               </Text>
             </button>
+          )}
+          {failure.kind === 'stopped' && (
+            <Button type='button' variant='secondary' size='xs' onClick={onRetry}>
+              retry
+            </Button>
           )}
           {failure.kind === 'conflict' && (
             <button type='button' className={DOOR} onClick={onOpenConflict}>

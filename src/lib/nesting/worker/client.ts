@@ -15,6 +15,8 @@ import type {
   RollSearchPlan,
   RollSearchResult,
 } from 'lib/pattern-export/roll-search';
+import { workerLoadFailed } from 'lib/stale-reload';
+import { classifyWorkerError } from 'lib/worker-load';
 import { unpackPieces } from './piece-transfer';
 
 export type ParseOutcome = {
@@ -60,9 +62,15 @@ export type NestProgressMsg = {
 export class NestingWorkerClient {
   private worker: Worker | null = null;
   private nextId = 1;
+  // The current worker's script ran; a worker that did not load was already recreated, and none has
+  // loaded since.
+  private ran = false;
+  private loadRetried = false;
   private handlers = new Map<
     number,
     {
+      // Kept to go out again if the worker turns out never to have loaded.
+      request: WorkerRequest;
       resolve: (msg: WorkerResponse) => void;
       reject: (e: Error) => void;
       onProgress?: (msg: Extract<WorkerResponse, { type: 'progress' }>) => void;
@@ -73,7 +81,10 @@ export class NestingWorkerClient {
   private spawn(): Worker {
     if (this.worker) return this.worker;
     const w = new Worker(new URL('./nesting.worker.ts', import.meta.url), { type: 'module' });
+    this.ran = false;
     w.onmessage = (ev: MessageEvent<WorkerResponse>) => {
+      this.ran = true;
+      this.loadRetried = false;
       const msg = ev.data;
       const h = this.handlers.get(msg.id);
       if (!h) return;
@@ -90,8 +101,18 @@ export class NestingWorkerClient {
       else h.resolve(msg);
     };
     w.onerror = (e) => {
+      const failure = classifyWorkerError(e, this.ran, this.loadRetried);
+      if (failure === 'retry') {
+        // Nothing ran, so nothing repeats: the same requests go to one recreated worker.
+        this.loadRetried = true;
+        w.terminate();
+        this.worker = null;
+        const next = this.spawn();
+        for (const h of this.handlers.values()) next.postMessage(h.request);
+        return;
+      }
       // A crashed worker fails every pending job; the next call respawns clean.
-      const err = new Error(e.message || 'worker error');
+      const err = failure === 'load' ? workerLoadFailed() : new Error(e.message || 'worker error');
       for (const h of this.handlers.values()) h.reject(err);
       this.handlers.clear();
       this.terminate();
@@ -105,6 +126,7 @@ export class NestingWorkerClient {
     const w = this.spawn();
     return new Promise<ParseOutcome>((resolve, reject) => {
       this.handlers.set(id, {
+        request,
         resolve: (msg) => {
           if (msg.type === 'parsed') {
             resolve({
@@ -152,8 +174,10 @@ export class NestingWorkerClient {
   ): { id: number; done: Promise<NestResult> } {
     const id = this.nextId++;
     const w = this.spawn();
+    const request: WorkerRequest = { type: 'nest', id, parseId, config };
     const done = new Promise<NestResult>((resolve, reject) => {
       this.handlers.set(id, {
+        request,
         resolve: (msg) => {
           if (msg.type === 'result') resolve(msg.result);
           else reject(new Error('unexpected worker reply'));
@@ -169,7 +193,7 @@ export class NestingWorkerClient {
           });
         },
       });
-      w.postMessage({ type: 'nest', id, parseId, config });
+      w.postMessage(request);
     });
     return { id, done };
   }
@@ -181,8 +205,10 @@ export class NestingWorkerClient {
   ): { id: number; done: Promise<RollSearchResult> } {
     const id = this.nextId++;
     const w = this.spawn();
+    const request: WorkerRequest = { type: 'roll-search', id, job };
     const done = new Promise<RollSearchResult>((resolve, reject) => {
       this.handlers.set(id, {
+        request,
         resolve: (msg) => {
           if (msg.type === 'roll-result') resolve(msg.result);
           else reject(new Error('unexpected worker reply'));
@@ -190,7 +216,7 @@ export class NestingWorkerClient {
         reject,
         onRollSeed: onSeed,
       });
-      w.postMessage({ type: 'roll-search', id, job });
+      w.postMessage(request);
     });
     return { id, done };
   }

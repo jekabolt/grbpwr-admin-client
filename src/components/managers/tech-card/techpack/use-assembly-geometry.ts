@@ -27,6 +27,8 @@ import {
   pieceRefKey,
   rollGoodsScopes,
 } from 'components/managers/tech-card/components/piece-block-refs';
+import { workerLoadFailed } from 'lib/stale-reload';
+import { classifyWorkerError, retryWorkerLoad, WORKER_READY } from 'lib/worker-load';
 import { isDxfUrl } from 'utils/pattern';
 
 import {
@@ -55,29 +57,45 @@ function buildInWorker(
       reject(new DOMException('assembly geometry cancelled', 'AbortError'));
       return;
     }
-    const worker = new Worker(new URL('./assembly-geometry.worker.ts', import.meta.url), {
-      type: 'module',
-    });
-    const finish = () => {
-      signal.removeEventListener('abort', abort);
-      worker.terminate();
+    const start = (retried: boolean) => {
+      let ran = false;
+      const worker = new Worker(new URL('./assembly-geometry.worker.ts', import.meta.url), {
+        type: 'module',
+      });
+      const finish = () => {
+        signal.removeEventListener('abort', abort);
+        worker.terminate();
+      };
+      const abort = () => {
+        finish();
+        reject(new DOMException('assembly geometry cancelled', 'AbortError'));
+      };
+      signal.addEventListener('abort', abort, { once: true });
+      worker.onmessage = (event: MessageEvent<AssemblyGeometryWorkerResponse>) => {
+        const message = event.data;
+        if ((message as unknown) === WORKER_READY) {
+          ran = true;
+          return;
+        }
+        finish();
+        if ('error' in message) reject(new Error(message.error));
+        else resolve(message.result);
+      };
+      worker.onerror = (event) => {
+        finish();
+        const failure = classifyWorkerError(event, ran, retried);
+        if (failure === 'retry') start(true);
+        else if (failure === 'load') reject(workerLoadFailed());
+        else reject(new Error(event.message || 'assembly geometry worker failed'));
+      };
+      worker.postMessage({
+        id: 1,
+        input,
+        found,
+        grainLayer,
+      } satisfies AssemblyGeometryWorkerRequest);
     };
-    const abort = () => {
-      finish();
-      reject(new DOMException('assembly geometry cancelled', 'AbortError'));
-    };
-    signal.addEventListener('abort', abort, { once: true });
-    worker.onmessage = (event: MessageEvent<AssemblyGeometryWorkerResponse>) => {
-      const message = event.data;
-      finish();
-      if ('error' in message) reject(new Error(message.error));
-      else resolve(message.result);
-    };
-    worker.onerror = (event) => {
-      finish();
-      reject(new Error(event.message || 'assembly geometry worker failed'));
-    };
-    worker.postMessage({ id: 1, input, found, grainLayer } satisfies AssemblyGeometryWorkerRequest);
+    start(false);
   });
 }
 
@@ -164,6 +182,8 @@ export function useAssemblyGeometry(techCard: common_TechCard, enabled = true): 
     staleTime: Infinity,
     gcTime: 5 * 60_000,
     retry: false,
+    refetchOnWindowFocus: retryWorkerLoad,
+    refetchOnReconnect: retryWorkerLoad,
   });
 
   const parseStatus = files.length ? depStatus(geometry.isLoading, geometry.isError) : 'ok';
