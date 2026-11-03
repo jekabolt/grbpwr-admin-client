@@ -329,6 +329,7 @@ const ECHO_AWARE = {
   operationSeamsAware: true,
   // and each step's foldKeys
   operationFoldsAware: true,
+  operationLayerOrderAware: true,
   bomQtyAware: true,
   labelsAware: true,
 } satisfies Partial<common_TechCardInsert>;

@@ -22,6 +22,7 @@ type Row = {
   seamKeys?: string[];
   poseKeys?: string[];
   foldKeys?: string[];
+  layerOrder?: string[];
 };
 type RemoveEntry = Extract<HistoryEntry<Row>, { kind: 'remove' }>;
 
@@ -60,6 +61,13 @@ const noRefusalState = (list: Row[]) => ({
 });
 
 describe('undo of a removed step', () => {
+  it('brings back the order of its layers', () => {
+    const list = rows('a', 'b');
+    list[1].layerOrder = ['top', 'bottom'];
+    undo(list, remove(list, 1));
+    expect(list[1].layerOrder).toEqual(['top', 'bottom']);
+  });
+
   it.each([
     ['first', 0],
     ['middle', 2],

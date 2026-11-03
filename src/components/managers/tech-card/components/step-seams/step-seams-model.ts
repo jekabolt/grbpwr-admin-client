@@ -59,6 +59,8 @@ export type FormOpLike = {
   poseKeys?: readonly string[];
   /** The fold rows this step closes. */
   foldKeys?: readonly string[];
+  /** The owner's order of the step's inputs, bottom to top; empty = the rows say. */
+  layerOrder?: readonly string[];
   operationNumber?: number;
   assemblyBlockDetached?: boolean;
   fullnessRatio?: string | number;

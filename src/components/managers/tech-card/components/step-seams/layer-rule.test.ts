@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { withSeamLayer, type SeamLayer, type StoredPose, type StoredSeam } from 'lib/seams';
+import type { SeamLayer } from 'lib/seams';
 
 import {
   CARD6_CHAIN_OPS,
@@ -10,16 +10,7 @@ import {
   card6ChainGeoms,
   card6ChainInnerLines,
 } from './card6-chain.fixture';
-import {
-  blockRelation,
-  joinsBlocks,
-  onTopChip,
-  pendingLayerRows,
-  pendingStacking,
-  pressEdits,
-  pressLayer,
-  type PendingLayerEdits,
-} from './pose-picking';
+import { pendingLayerRows, pendingStacking, type PendingLayerEdits } from './pose-picking';
 import { posePickup } from './step-pose';
 import {
   layersOf,
@@ -132,169 +123,93 @@ describe('layersOf: a claim is about two blocks', () => {
   });
 });
 
-describe('pressLayer: one press, one fact', () => {
-  const backBlocks = [block('PCK'), block('TOP_R', 'TOP_L')];
-  const backRows = [
-    row('surface', 'PCK', 'TOP_L TOP_R'),
-    pose('pose r', 'TOP_R:over', 'PCK'),
-    pose('pose l', 'TOP_L:over', 'PCK'),
+describe('layersOf with an order: the window beats the flags between blocks', () => {
+  const blocks = [
+    { key: 'a', pieces: ['A'] },
+    { key: 'b', pieces: ['B1', 'B2'] },
   ];
-  const flags = (rows: readonly LayerRow[]) =>
-    rows.flatMap((one) => [...one.sideA, ...one.sideB].filter((a) => a.layer));
 
-  it('a press on any part takes the whole block', () => {
-    for (const [piece, host, layer] of [
-      ['TOP_R', 'PCK', 'under'],
-      ['TOP_L', 'PCK', 'under'],
-      ['PCK', 'TOP_L', 'over'],
-    ] as const) {
-      const pressed = pressLayer(backRows, backBlocks, piece, host, layer);
-      const out = layersOf(backBlocks, pressed);
-      expect(flags(pressed)).toHaveLength(1);
-      expect(sorted(out.stacked)).toEqual(['TOP_L<PCK', 'TOP_R<PCK']);
-      expect(out.layers[2]).toBe('PCK');
-      expect(out.conflicts).toEqual([]);
-    }
-  });
-
-  it('a press on a part that is on no row stores the flag on a row of its block', () => {
-    const blocks = [block('U1'), block('MAIN', 'U')];
-    const rows = [row('edge', 'U1', 'MAIN')];
-    const pressed = pressLayer(rows, blocks, 'U', 'U1', 'under');
-    expect(pressed[0].sideB[0].layer).toBe('under');
-    expect(sorted(layersOf(blocks, pressed).stacked)).toEqual(['MAIN<U1', 'U<U1']);
-  });
-
-  it('stores the flag on the other block when that anchor relates only the two blocks', () => {
-    const blocks = [block('A'), block('B'), block('C')];
-    const pressed = pressLayer([row('s', 'A', 'B C')], blocks, 'A', 'B', 'under');
-    expect(pressed[0].sideA[0].layer).toBeUndefined();
-    expect(pressed[0].sideB[0].layer).toBe('over');
-    expect(sorted(layersOf(blocks, pressed).stacked)).toEqual(['A<B']);
-  });
-
-  it('flags one anchor of a repeated piece and clears the hosts flag of a pose', () => {
-    const blocks = [block('A'), block('B')];
-    const pressed = pressLayer(
-      [row('s', 'A', 'B B'), pose('p', 'A', 'B:over')],
-      blocks,
-      'A',
-      'B',
-      'over',
-    );
-    expect(flags(pressed)).toEqual([{ piece: 'A', layer: 'over' }]);
-    expect(pressed[0].sideA[0].layer).toBe('over');
-  });
-
-  it('leaves rows it does not touch and returns the same rows with no row to store on', () => {
-    const blocks = [block('A'), block('B'), block('C')];
-    const rows = [row('ab', 'A', 'B'), row('bc', 'B:under', 'C')];
-    const pressed = pressLayer(rows, blocks, 'A', 'B', 'under');
-    expect(pressed[1]).toBe(rows[1]);
-    expect(pressLayer(rows, blocks, 'A', 'C', 'under')).toBe(rows);
-    expect(joinsBlocks(rows, ['A'], ['C'])).toBe(false);
-    expect(joinsBlocks(rows, ['C'], ['B'])).toBe(true);
-  });
-
-  it('keeps a press through a third block: the path that contradicts it is cleared', () => {
-    const blocks = [block('A'), block('B'), block('C')];
-    const rows = [row('ab', 'A:under', 'B'), row('bc', 'B:under', 'C'), row('ca', 'C', 'A')];
-    const out = layersOf(blocks, pressLayer(rows, blocks, 'C', 'A', 'under'));
-    expect(sorted(out.stacked)).toEqual(['C<A']);
-    expect(out.conflicts).toEqual([]);
-  });
-
-  // Every state reachable by ANY sequence of presses, so no depth limit is assumed.
-  const reachable = (blocks: readonly LayerBlock[], start: readonly LayerRow[]) => {
-    const pieces = blocks.flatMap((one) => one.pieces);
-    const key = (rows: readonly LayerRow[]) =>
-      JSON.stringify(rows.map((one) => [one.sideA, one.sideB]));
-    const blockOf = (piece: string) => blocks.find((one) => one.pieces.includes(piece))!.pieces;
-    const states = new Set([key(start)]);
-    const queue = [start];
-    const wrong: string[] = [];
-    let presses = 0;
-    while (queue.length) {
-      const rows = queue.pop()!;
-      for (const piece of pieces)
-        for (const host of pieces) {
-          const own = blockOf(piece);
-          const other = blockOf(host);
-          if (own === other || !joinsBlocks(rows, own, other)) continue;
-          for (const layer of ['under', 'over'] as const) {
-            presses++;
-            const next = pressLayer(rows, blocks, piece, host, layer);
-            const out = layersOf(blocks, next);
-            const said = `${key(rows)} ${piece} ${layer} ${host}`;
-            if (out.conflicts.length) wrong.push(`contrary after ${said}`);
-            if (blockRelation(out.stacked, own, other) !== layer) wrong.push(`lost: ${said}`);
-            for (const a of own)
-              for (const b of other)
-                if (out.layers.indexOf(a) < out.layers.indexOf(b) !== (layer === 'under'))
-                  wrong.push(`mixed: ${said}`);
-            for (const [under, over] of out.stacked)
-              if (out.layers.indexOf(under) > out.layers.indexOf(over))
-                wrong.push(`order: ${said}`);
-            if (key(pressLayer(next, blocks, piece, host, layer)) !== key(next))
-              wrong.push(`second press: ${said}`);
-            // One fact per pair of blocks, never a flag on every anchor.
-            if (flags(next).length > (blocks.length * (blocks.length - 1)) / 2)
-              wrong.push(`flags: ${said}`);
-            if (!states.has(key(next))) {
-              states.add(key(next));
-              queue.push(next);
-            }
-          }
-        }
-    }
-    expect(wrong.slice(0, 5)).toEqual([]);
-    return { states: states.size, presses };
-  };
-
-  it(
-    'no press sequence stores contrary flags: two blocks, seam and pose rows',
-    { timeout: 60_000 },
-    () => {
-      const { states, presses } = reachable(
-        [block('A1', 'A2'), block('B1', 'B2')],
-        [row('s', 'A1', 'B1'), row('t', 'A2', 'B1 B2'), pose('p', 'A2', 'B2')],
-      );
-      expect(states).toBeGreaterThan(2);
-      expect(presses).toBeGreaterThan(20);
-    },
-  );
-
-  it(
-    'no press sequence stores contrary flags: three blocks in a triangle',
-    { timeout: 60_000 },
-    () => {
-      const { states } = reachable(
-        [block('A1', 'A2'), block('B1'), block('C1', 'C2')],
-        [row('ab', 'A1', 'B1'), row('bc', 'B1', 'C1'), pose('ca', 'C2', 'A2')],
-      );
-      expect(states).toBeGreaterThan(8);
-    },
-  );
-
-  it(
-    'no press sequence stores contrary flags: rows that cross three and four blocks',
-    { timeout: 60_000 },
-    () => {
-      const { states } = reachable(
-        [block('A'), block('B'), block('C'), block('D')],
-        [row('wide', 'A D', 'B C'), row('thin', 'B', 'D'), pose('p', 'C', 'D')],
-      );
-      expect(states).toBeGreaterThan(8);
-    },
-  );
-
-  it('a press wins over legacy contrary flags between its two blocks', () => {
-    const blocks = [block('A'), block('B1', 'B2')];
-    const rows = [row('one', 'A:under', 'B1'), row('two', 'B2:under', 'A')];
-    expect(layersOf(blocks, rows).conflicts).toHaveLength(1);
-    const out = layersOf(blocks, pressLayer(rows, blocks, 'B1', 'A', 'under'));
+  it('puts the blocks as the order says, whatever the flags between them say', () => {
+    const rows = [row('one', 'A:under', 'B1'), pose('two', 'B2:under', 'A')];
+    const out = layersOf(blocks, rows, ['b', 'a']);
+    expect(out.layers).toEqual(['B1', 'B2', 'A']);
     expect(sorted(out.stacked)).toEqual(['B1<A', 'B2<A']);
     expect(out.conflicts).toEqual([]);
+    agreesWithOrder(out);
+  });
+
+  it('never lists a flag between blocks as a conflict', () => {
+    const rows = [row('one', 'A:over', 'B1'), row('two', 'B2:over', 'A')];
+    expect(layersOf(blocks, rows).conflicts).toHaveLength(1);
+    expect(layersOf(blocks, rows, ['a', 'b']).conflicts).toEqual([]);
+    expect(layersOf(blocks, rows, ['b', 'a']).conflicts).toEqual([]);
+  });
+
+  it('the flags themselves are not rewritten', () => {
+    const rows = [row('one', 'A:under', 'B1')];
+    layersOf(blocks, rows, ['b', 'a']);
+    expect(rows[0].sideA[0].layer).toBe('under');
+  });
+
+  it('a flag inside a block works as before, and a contrary one is still listed', () => {
+    const rows = [row('in', 'B2:under', 'B1'), row('in2', 'B1:under', 'B2')];
+    const out = layersOf(blocks, rows, ['b', 'a']);
+    expect(out.layers).toEqual(['B2', 'B1', 'A']);
+    expect(out.stacked).toContainEqual(['B2', 'B1']);
+    expect(out.conflicts.map((conflict) => conflict.key)).toEqual(['in2']);
+  });
+
+  it('keeps the carried inner order of a block it moves', () => {
+    const out = layersOf(
+      [
+        { key: 'u', pieces: ['MAIN', 'U'], layers: ['U', 'MAIN'], stacked: [['U', 'MAIN']] },
+        { key: 'one', pieces: ['U1'] },
+      ],
+      [],
+      ['one', 'u'],
+    );
+    expect(out.layers).toEqual(['U1', 'U', 'MAIN']);
+    agreesWithOrder(out);
+  });
+
+  it('a key no longer among the inputs is skipped, a new input goes on top', () => {
+    const three = [...blocks, { key: 'c', pieces: ['C'] }];
+    expect(layersOf(three, [], ['gone', 'b', 'a']).layers).toEqual(['B1', 'B2', 'A', 'C']);
+    expect(layersOf(three, [], ['b', 'gone', 'b', 'a']).layers).toEqual(['B1', 'B2', 'A', 'C']);
+  });
+
+  it('a block with no pieces takes no place', () => {
+    const empty = [...blocks, { key: 'none', pieces: [] }];
+    expect(layersOf(empty, [], ['none', 'b', 'a']).layers).toEqual(['B1', 'B2', 'A']);
+  });
+
+  it('no order, an empty one and one of stale keys all read as today, byte for byte', () => {
+    const rows = [row('one', 'A:over', 'B1'), row('two', 'B2:under', 'A')];
+    const today = layersOf(blocks, rows);
+    expect(today).not.toHaveProperty('ordered');
+    expect(layersOf(blocks, rows, [])).toEqual(today);
+    expect(layersOf(blocks, rows, ['gone'])).toEqual(today);
+    expect(layersOf(blocks, rows, ['gone'])).not.toHaveProperty('ordered');
+  });
+
+  it('names every pair it set, and a block hands its own pairs on', () => {
+    const out = layersOf(blocks, [], ['b', 'a']);
+    expect(sorted(out.ordered ?? [])).toEqual(['B1<A', 'B2<A']);
+    const next = layersOf(
+      [
+        {
+          key: 'whole',
+          pieces: ['A', 'B1', 'B2'],
+          layers: out.layers,
+          stacked: out.stacked,
+          ordered: out.ordered,
+        },
+        { key: 'c', pieces: ['C'] },
+      ],
+      [],
+    );
+    expect(next.layers).toEqual(['B1', 'B2', 'A', 'C']);
+    expect(sorted(next.ordered ?? [])).toEqual(['B1<A', 'B2<A']);
   });
 });
 
@@ -306,13 +221,17 @@ describe('pendingStacking: the same rule on the pending rows', () => {
     expect(pendingStacking({ blocks, rows }, {})).toEqual(layersOf(blocks, rows));
   });
 
-  it('a seam edit, a flag edit, a dropped and a moved pose all reach the rule', () => {
-    const seam = { sideA: [anchor('A:over')], sideB: [anchor('B1')] };
-    expect(
-      sorted(
-        pendingStacking({ blocks, rows: [rows[0]] }, { seams: new Map([['s', seam]]) }).stacked,
-      ),
-    ).toEqual(['B1<A', 'B2<A']);
+  it('reads the same order as the result', () => {
+    const named = [
+      { key: 'a', pieces: ['A'] },
+      { key: 'b', pieces: ['B1', 'B2'] },
+    ];
+    const pending = pendingStacking({ blocks: named, rows, order: ['b', 'a'] }, {});
+    expect(pending).toEqual(layersOf(named, rows, ['b', 'a']));
+    expect(pending.layers).toEqual(['B1', 'B2', 'A']);
+  });
+
+  it('a flag edit, a dropped and a moved pose all reach the rule', () => {
     expect(
       sorted(pendingStacking({ blocks, rows }, { layers: new Map([['B2', 'under']]) }).stacked),
     ).toEqual(['B1<A', 'B2<A']);
@@ -340,165 +259,12 @@ describe('pendingStacking: the same rule on the pending rows', () => {
     expect(keys({ moved: new Map([['B1', { host: 'A' }]]) })).toEqual(['p2', 'p1']);
   });
 
-  it('a re-flagged seam keeps its place, an otherwise edited one goes last', () => {
-    const rows = [row('s1', 'B1', 'A'), row('s2', 'B2', 'A')];
-    const edit = (side: LayerRow['sideA']) =>
-      new Map([['s1', { sideA: side, sideB: rows[0].sideB }]]);
-    const keys = (seams: ReturnType<typeof edit>) =>
-      pendingLayerRows(rows, { seams }).map((one) => one.key);
-    expect(keys(edit([{ piece: 'B1', layer: 'under' }]))).toEqual(['s1', 's2']);
-    expect(keys(edit([{ piece: 'B3' }]))).toEqual(['s2', 's1']);
-  });
-
   it('a new pose joins the blocks and carries its flag', () => {
     const pending = pendingLayerRows([], {
       moved: new Map([['B1', { host: 'A' }]]),
       layers: new Map([['B1', 'under']]),
     });
-    expect(joinsBlocks(pending, ['B1', 'B2'], ['A'])).toBe(true);
     expect(sorted(layersOf(blocks, pending).stacked)).toEqual(['B1<A', 'B2<A']);
-  });
-});
-
-describe('onTopChip: one chip, never off', () => {
-  const pressChip = (
-    blocks: readonly LayerBlock[],
-    rows: readonly LayerRow[],
-    press: NonNullable<ReturnType<typeof onTopChip>>['press'],
-  ) =>
-    press!.hosts.reduce<readonly LayerRow[]>(
-      (all, host) => pressLayer(all, blocks, press!.piece, host, 'over'),
-      rows,
-    );
-  const flagsIn = (rows: readonly LayerRow[]) =>
-    rows.flatMap((one) => [...one.sideA, ...one.sideB]).filter((one) => one.layer).length;
-
-  describe('with two inputs', () => {
-    const blocks = [block('A'), block('B', 'C')];
-    const rows = [row('s', 'A', 'B C')];
-
-    it('nothing picked: names the input on top, active, and a press swaps', () => {
-      const first = onTopChip(blocks, rows, layersOf(blocks, rows).layers, null)!;
-      expect(first).toMatchObject({ input: 2, active: true });
-
-      const swapped = pressChip(blocks, rows, first.press);
-      const swappedOrder = layersOf(blocks, swapped).layers;
-      expect(swappedOrder).toEqual(['B', 'C', 'A']);
-      const second = onTopChip(blocks, swapped, swappedOrder, null)!;
-      expect(second).toMatchObject({ input: 1, active: true });
-
-      const back = pressChip(blocks, swapped, second.press);
-      expect(onTopChip(blocks, back, layersOf(blocks, back).layers, null)).toMatchObject({
-        input: 2,
-        active: true,
-      });
-      // Two presses, one pair: one fact, never an off state and never two facts.
-      expect(flagsIn(back)).toBe(1);
-    });
-
-    it('a block picked: names it, active when on top, and a press puts it on top', () => {
-      const layers = layersOf(blocks, rows).layers;
-      const low = onTopChip(blocks, rows, layers, 'A')!;
-      expect(low).toMatchObject({ input: 1, active: false });
-
-      const pressed = pressChip(blocks, rows, low.press);
-      const after = layersOf(blocks, pressed).layers;
-      expect(after.at(-1)).toBe('A');
-      expect(onTopChip(blocks, pressed, after, 'A')).toEqual({
-        input: 1,
-        active: true,
-        press: null,
-      });
-    });
-
-    it('already on top: the press writes nothing, from any piece of the block', () => {
-      const layers = layersOf(blocks, rows).layers;
-      for (const picked of ['B', 'C'])
-        expect(onTopChip(blocks, rows, layers, picked)).toEqual({
-          input: 2,
-          active: true,
-          press: null,
-        });
-    });
-
-    it('a piece of no input reads as nothing picked', () => {
-      const layers = layersOf(blocks, rows).layers;
-      const chip = onTopChip(blocks, rows, layers, 'GHOST')!;
-      expect(chip).toMatchObject({ input: 2, active: true, press: { piece: 'A' } });
-    });
-  });
-
-  describe('with three inputs, the same chip on the picked block', () => {
-    const blocks = [block('A'), block('B'), block('C')];
-    const rows = [row('ab', 'A', 'B'), row('bc', 'B', 'C'), row('ac', 'A', 'C')];
-    const layers = layersOf(blocks, rows).layers;
-
-    it('names the top with nothing picked and has nothing to swap', () => {
-      expect(onTopChip(blocks, rows, layers, null)).toEqual({
-        input: 3,
-        active: true,
-        press: null,
-      });
-    });
-
-    it('lifts the picked block over each block above it, one fact per pair', () => {
-      const bottom = onTopChip(blocks, rows, layers, 'A')!;
-      expect(bottom).toMatchObject({ input: 1, active: false });
-      expect(bottom.press?.hosts).toEqual(['B', 'C']);
-
-      const pressed = pressChip(blocks, rows, bottom.press);
-      const after = layersOf(blocks, pressed);
-      expect(after.layers.at(-1)).toBe('A');
-      expect(after.conflicts).toEqual([]);
-      expect(flagsIn(pressed)).toBe(2);
-      expect(onTopChip(blocks, pressed, after.layers, 'A')).toMatchObject({
-        active: true,
-        press: null,
-      });
-
-      const middle = onTopChip(blocks, rows, layers, 'B')!;
-      expect(middle.press?.hosts).toEqual(['C']);
-      const lifted = pressChip(blocks, rows, middle.press);
-      expect(layersOf(blocks, lifted).layers).toEqual(['A', 'C', 'B']);
-      expect(flagsIn(lifted)).toBe(1);
-    });
-  });
-
-  it('with a block above and not joined, a press writes nothing and the chip stays disabled', () => {
-    const blocks = [block('A'), block('B'), block('C')];
-    const rows = [row('ab', 'A', 'B')];
-    const layers = layersOf(blocks, rows).layers;
-    expect(layers).toEqual(['A', 'B', 'C']);
-
-    // A is joined to B only and C stays above it: lifting over B alone would store a fact and leave
-    // the chip inactive after a reload.
-    expect(onTopChip(blocks, rows, layers, 'A')).toEqual({ input: 1, active: false, press: null });
-    // B is below C with no row between them, too.
-    expect(onTopChip(blocks, rows, layers, 'B')).toEqual({ input: 2, active: false, press: null });
-  });
-
-  it('with no row between the blocks there is no fact to store', () => {
-    const blocks = [block('A'), block('B')];
-    const layers = layersOf(blocks, []).layers;
-    expect(onTopChip(blocks, [], layers, null)).toEqual({ input: 2, active: true, press: null });
-    expect(onTopChip(blocks, [], layers, 'A')).toEqual({ input: 1, active: false, press: null });
-  });
-
-  it('shows no chip when the step has no input with a piece', () => {
-    expect(onTopChip([], [], [], null)).toBeNull();
-    expect(onTopChip([block()], [], [], null)).toBeNull();
-  });
-
-  it('preview equals saved: the pending picture is the picture of the pressed rows', () => {
-    const blocks = [block('A'), block('B', 'C')];
-    const rows = [row('s', 'A', 'B C'), pose('p', 'C', 'A')];
-    const chip = onTopChip(blocks, rows, layersOf(blocks, rows).layers, 'A')!;
-    const pressed = pressChip(blocks, rows, chip.press);
-    const stored = (key: string) => rows.find((one) => one.key === key);
-    const edits = pressEdits(rows, pressed, stored, { seams: new Map(), layers: new Map() });
-
-    expect(pendingStacking({ blocks, rows }, edits)).toEqual(layersOf(blocks, pressed));
-    expect(pendingStacking({ blocks, rows }, edits).layers.at(-1)).toBe('A');
   });
 });
 
@@ -512,117 +278,68 @@ describe('preview equals saved', () => {
     pieceKeys: CARD6_CHAIN_PIECE_KEYS,
   };
 
-  /** What «done» stores after a press: re-flagged rows, each in its place. */
-  const saved = (
-    opIndex: number,
-    seams: ReadonlyMap<string, StoredSeam>,
-    layers: ReadonlyMap<string, SeamLayer | null>,
-  ): StepResultsInput => {
-    const byKey = new Map(input.byKey);
-    for (const [key, one] of seams) byKey.set(key, one);
-    const poses = new Map<string, StoredPose>(input.poses);
-    const op = input.ops[opIndex];
-    for (const [piece, layer] of layers) {
-      const key = (op.poseKeys ?? []).find((k) => poses.get(k)?.sideA[0]?.piece === piece);
-      const own = key ? poses.get(key) : undefined;
-      if (!key || !own) continue;
-      poses.set(key, {
-        ...own,
-        sideA: [withSeamLayer(own.sideA[0], layer), ...own.sideA.slice(1)],
-        sideB: own.sideB.map((a) => withSeamLayer(a, null)),
-      });
-    }
-    return { ...input, byKey, poses };
-  };
-
+  const withOrder = (opIndex: number, order: readonly string[]): StepResultsInput => ({
+    ...input,
+    ops: input.ops.map((op, at) => (at === opIndex ? { ...op, layerOrder: [...order] } : op)),
+  });
   const prefix = (one: StepResultsInput, opIndex: number): StepResultsInput => ({
     ...one,
     ops: one.ops.slice(0, opIndex + 1),
   });
   const indexOfOp = (operationNumber: number) =>
     input.ops.findIndex((op) => op.operationNumber === operationNumber);
-  const storedOf = (key: string) => input.byKey.get(key);
 
   it.each([380, 490, 570])(
-    'op %i: any press on any part, then the opposite one',
+    'op %i: every rotation of the blocks, what the preview shows is what is saved',
     { timeout: 60_000 },
     (operationNumber) => {
       const opIndex = indexOfOp(operationNumber);
       const result = stepResults(prefix(input, opIndex), OWNER_FIT)[opIndex];
       const { blocks, rows } = result.layerInput;
-      expect(blocks.length).toBeGreaterThan(1);
-      const check = (
-        edits: ReturnType<typeof pressEdits<StoredSeam>>,
-        pickup: ReturnType<typeof posePickup>,
-        layer: SeamLayer,
-      ) => {
-        const preview = pendingStacking({ blocks, rows }, edits);
-        const after = stepResults(
-          prefix(saved(opIndex, edits.seams, edits.layers), opIndex),
-          OWNER_FIT,
-        )[opIndex];
+      const keys = blocks.map((one) => one.key!);
+      expect(keys.length).toBeGreaterThan(1);
+      for (let turn = 0; turn < keys.length; turn++) {
+        const order = [...keys.slice(turn), ...keys.slice(0, turn)];
+        const preview = pendingStacking({ blocks, rows, order }, {});
+        const after = stepResults(prefix(withOrder(opIndex, order), opIndex), OWNER_FIT)[opIndex];
         expect(after.layers).toEqual(preview.layers);
         expect(after.stacked).toEqual(preview.stacked);
         expect(after.lower).toEqual(preview.lower);
+        expect(after.ordered).toEqual(preview.ordered);
         expect(after.layerConflicts).toEqual([]);
+        // The order moves no piece.
         expect(after.transforms).toEqual(result.transforms);
-        expect(blockRelation(after.stacked, pickup.block, pickup.hostBlock)).toBe(layer);
-      };
-      for (const piece of blocks.flatMap((one) => one.pieces)) {
-        const pickup = posePickup(
-          piece,
-          { blocks: result.blocks, transforms: result.transforms, hung: result.hung },
-          input.geoms,
-        );
-        expect(pickup.host).not.toBeNull();
-        expect(joinsBlocks(rows, pickup.block, pickup.hostBlock)).toBe(true);
-        for (const [first, second] of [
-          ['under', 'over'],
-          ['over', 'under'],
-        ] as const) {
-          let edits = pressEdits(
-            rows,
-            pressLayer(rows, blocks, piece, pickup.host!, first),
-            storedOf,
-            {
-              seams: new Map(),
-              layers: new Map(),
-            },
-          );
-          check(edits, pickup, first);
-          const pending = pendingLayerRows(rows, edits);
-          edits = pressEdits(
-            pending,
-            pressLayer(pending, blocks, piece, pickup.host!, second),
-            storedOf,
-            edits,
-          );
-          check(edits, pickup, second);
-        }
+        const at = (key: string) =>
+          blocks.find((one) => one.key === key)!.pieces.map((piece) => after.layers.indexOf(piece));
+        order.slice(1).forEach((key, index) => {
+          expect(Math.max(...at(order[index]))).toBeLessThan(Math.min(...at(key)));
+        });
       }
     },
   );
 
-  it('a saved press rides whole in the block to the later steps', { timeout: 60_000 }, () => {
+  it('with no order on any step the results carry none', { timeout: 60_000 }, () => {
+    for (const one of stepResults(input, OWNER_FIT)) expect(one).not.toHaveProperty('ordered');
+  });
+
+  it('a saved order rides whole in the block to the later steps', { timeout: 60_000 }, () => {
     const opIndex = indexOfOp(380);
     const result = stepResults(prefix(input, opIndex), OWNER_FIT)[opIndex];
-    const { blocks, rows } = result.layerInput;
-    const big = blocks.find((one) => one.pieces.length > 1)!.pieces;
-    const small = blocks.find((one) => one.pieces.length === 1)!.pieces;
-    const edits = pressEdits(rows, pressLayer(rows, blocks, big[0], small[0], 'under'), storedOf, {
-      seams: new Map(),
-      layers: new Map(),
-    });
-    const later = stepResults(saved(opIndex, edits.seams, edits.layers), OWNER_FIT).find(
+    const { blocks } = result.layerInput;
+    const big = blocks.find((one) => one.pieces.length > 1)!;
+    const small = blocks.find((one) => one.pieces.length === 1)!;
+    const later = stepResults(withOrder(opIndex, [big.key!, small.key!]), OWNER_FIT).find(
       (one) =>
         one.opIndex > opIndex &&
         one.layerInput.blocks.some((block) =>
-          [...big, ...small].every((p) => block.pieces.includes(p)),
+          [...big.pieces, ...small.pieces].every((p) => block.pieces.includes(p)),
         ),
     )!;
-    for (const under of big) expect(later.stacked).toContainEqual([under, small[0]]);
-    for (const under of big)
-      expect(later.layers.indexOf(under)).toBeLessThan(later.layers.indexOf(small[0]));
+    for (const under of big.pieces) {
+      expect(later.stacked).toContainEqual([under, small.pieces[0]]);
+      expect(later.ordered).toContainEqual([under, small.pieces[0]]);
+      expect(later.layers.indexOf(under)).toBeLessThan(later.layers.indexOf(small.pieces[0]));
+    }
   });
 });
 

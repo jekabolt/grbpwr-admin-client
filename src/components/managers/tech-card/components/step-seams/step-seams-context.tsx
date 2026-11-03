@@ -71,8 +71,7 @@ export function useAttachStepSeam(index: number) {
   const { getValues, setValue } = useFormContext<TechCardFormData>();
   const flushLink = useFlushLink();
   return useCallback(
-    // `keepPlace`: same row with a new flag, its place stays because the order of rows moves pieces.
-    async (row: StoredSeam, keepPlace = false): Promise<string | null> => {
+    async (row: StoredSeam): Promise<string | null> => {
       if (!ctx) return null;
       const sig = rowPairSig(row);
       const op = getValues(`operations.${index}.operationNumber`) ?? 0;
@@ -95,7 +94,6 @@ export function useAttachStepSeam(index: number) {
       );
       const key = stored?.seamKey ?? row.seamKey;
       const current = (getValues(`operations.${index}.seamKeys`) ?? []) as string[];
-      if (keepPlace && current.includes(key)) return key;
       setValue(`operations.${index}.seamKeys`, [...current.filter((item) => item !== key), key], {
         shouldDirty: true,
       });

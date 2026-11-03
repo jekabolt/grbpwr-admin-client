@@ -7,20 +7,11 @@ import {
   poseRow,
   type SeamLayer,
   type StoredPose,
-  type StoredSeam,
   withSeamLayer,
 } from 'lib/seams';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useSeamsStore } from '../assembly-seams/seams-store';
-import {
-  onlyFlagsDiffer,
-  onTopChip,
-  pendingLayerRows,
-  pendingStacking,
-  pressEdits,
-  pressLayer,
-  type PendingLayerEdits,
-} from './pose-picking';
+import { pendingStacking, type PendingLayerEdits } from './pose-picking';
 import { foldedDrawing } from './step-folds';
 import { pictureBounds } from './step-picture-view';
 import {
@@ -44,7 +35,7 @@ import {
   type PoseSnap,
 } from './step-pose';
 import type { boxOf, StepLayout } from './step-picture';
-import type { LayerRow, StepResult } from './step-result';
+import type { StepResult } from './step-result';
 import type { SurfacePicture } from './surface-picture';
 
 type Box = ReturnType<typeof boxOf>;
@@ -72,14 +63,12 @@ export function usePoseEdit({
   poses,
   stepPicture,
   stepResult,
-  stepRows,
   geoms,
   grainDeg,
   busy,
   frozen,
   setBusy,
   setRefused,
-  attach,
   attachPose,
   fitSource,
 }: {
@@ -87,14 +76,12 @@ export function usePoseEdit({
   poses: ReadonlyMap<string, StoredPose>;
   stepPicture: SurfacePicture | null;
   stepResult: StepResult | undefined;
-  stepRows: readonly StoredSeam[];
   geoms: ReadonlyMap<string, PieceGeom>;
   grainDeg: ReadonlyMap<string, number> | undefined;
   busy: boolean;
   frozen?: boolean;
   setBusy: (busy: boolean) => void;
   setRefused: (message: string) => void;
-  attach: (row: StoredSeam, keepPlace?: boolean) => Promise<string | null>;
   attachPose: (
     put: readonly StoredPose[],
     drop?: readonly StoredPose[],
@@ -108,8 +95,7 @@ export function usePoseEdit({
     drop: new Set(),
   }));
   const poseEdits = poseChanges.edits;
-  const [handEdits, setHandEdits] = useState<Map<string, StoredSeam>>(() => new Map());
-  // The under/over switch on a pose row: piece → layer, null = cleared; saved with ACCEPT.
+  // The flag a pose row takes over from a row going away: piece → layer; saved with ACCEPT.
   const [poseLayerEdits, setPoseLayerEdits] = useState<Map<string, SeamLayer | null>>(
     () => new Map(),
   );
@@ -225,11 +211,7 @@ export function usePoseEdit({
   const fitFrame = () => {
     if (frameKey && shownBounds) setFrame({ key: frameKey, box: shownBounds });
   };
-  const posePending =
-    poseEdits.size > 0 ||
-    poseChanges.drop.size > 0 ||
-    handEdits.size > 0 ||
-    poseLayerEdits.size > 0;
+  const posePending = poseEdits.size > 0 || poseChanges.drop.size > 0 || poseLayerEdits.size > 0;
   const fitReady = useMemo(
     () =>
       !!fitSource &&
@@ -250,7 +232,6 @@ export function usePoseEdit({
   const clearPose = () => {
     fitCycle.current = null;
     setPoseChanges({ edits: new Map(), drop: new Set() });
-    setHandEdits(new Map());
     setPoseLayerEdits(new Map());
     setPoseSel(null);
     setSnapOn(false);
@@ -409,13 +390,9 @@ export function usePoseEdit({
     const moved = new Map<string, { host: string; layer?: SeamLayer }>();
     for (const [piece, pin] of poseEdits)
       moved.set(piece, { host: pin.host, layer: ownPoseRows.get(piece)?.sideA[0]?.layer });
-    return { seams: handEdits, layers: poseLayerEdits, moved, dropped: poseChanges.drop };
-  }, [handEdits, poseLayerEdits, poseEdits, poseChanges.drop, ownPoseRows]);
+    return { layers: poseLayerEdits, moved, dropped: poseChanges.drop };
+  }, [poseLayerEdits, poseEdits, poseChanges.drop, ownPoseRows]);
   const layerInput = stepResult?.layerInput;
-  const pendingRows = useMemo(
-    () => (layerInput ? pendingLayerRows(layerInput.rows, layerEdits) : []),
-    [layerInput, layerEdits],
-  );
   const shownPoseStacking = useMemo(
     () =>
       layerInput
@@ -425,32 +402,13 @@ export function usePoseEdit({
   );
   const shownPoseLayers = shownPoseStacking.layers;
   const shownPoseStacked = shownPoseStacking.stacked;
-
-  const onTop = layerInput
-    ? onTopChip(layerInput.blocks, pendingRows, shownPoseLayers, poseSel)
-    : null;
-  const pressOnTop = () => {
-    const press = onTop?.press;
-    if (!press || !layerInput || busy) return;
-    const pressed = press.hosts.reduce<readonly LayerRow[]>(
-      (rows, host) => pressLayer(rows, layerInput.blocks, press.piece, host, 'over'),
-      pendingRows,
-    );
-    const { seams, layers } = pressEdits(
-      pendingRows,
-      pressed,
-      (key) => stepRows.find((row) => row.seamKey === key),
-      { seams: handEdits, layers: poseLayerEdits },
-    );
-    setHandEdits(seams);
-    setPoseLayerEdits(layers);
-  };
+  const shownPoseOrdered = 'ordered' in shownPoseStacking ? shownPoseStacking.ordered : undefined;
 
   const resetPose = async () => {
     if (busy) return;
     const selected = poseSel ? new Set(pickupOf(poseSel).group) : null;
     const inScope = (piece: string) => !selected || selected.has(piece);
-    // A press stores its flag on either block's row, so a pose row's flag belongs to its host's block too.
+    // A pose row's flag belongs to its host's block too.
     const layerInScope = (piece: string) => {
       const host = poseEdits.get(piece)?.host ?? storedPoseHosts.get(piece);
       return inScope(piece) || (host != null && inScope(host));
@@ -460,9 +418,6 @@ export function usePoseEdit({
         selected ? pickupOf(piece).group.some((member) => selected.has(member)) : true,
       ) ||
       [...poseChanges.drop].some(inScope) ||
-      [...handEdits.values()].some((row) =>
-        [...row.sideA, ...row.sideB].some((anchor) => inScope(anchor.piece)),
-      ) ||
       [...poseLayerEdits.keys()].some(layerInScope);
     // Nothing unsaved left to undo: «reset» removes this step's saved poses (the picked block's,
     // else all of them) and the step is laid automatically again.
@@ -482,14 +437,6 @@ export function usePoseEdit({
       for (const piece of current.edits.keys())
         if (pickupOf(piece).group.some((member) => selected.has(member))) next.delete(piece);
       return resolvePoseEdits(storedPoseHosts, next);
-    });
-    setHandEdits((current) => {
-      if (!selected) return new Map();
-      const next = new Map(current);
-      for (const [key, row] of current)
-        if ([...row.sideA, ...row.sideB].some((anchor) => selected.has(anchor.piece)))
-          next.delete(key);
-      return next;
     });
     setPoseLayerEdits((current) => {
       if (!selected) return new Map();
@@ -539,21 +486,13 @@ export function usePoseEdit({
       const row = ownPoseRows.get(piece);
       return row ? [row] : [];
     });
-    if (!put.length && !drop.length && !reflag.length && !handEdits.size) {
+    if (!put.length && !drop.length && !reflag.length) {
       clearPose();
       return true;
     }
     setBusy(true);
     setRefused('');
-    for (const row of handEdits.values()) {
-      const stored = stepRows.find((one) => one.seamKey === row.seamKey);
-      if (await attach(row, !!stored && onlyFlagsDiffer(stored, row))) continue;
-      setBusy(false);
-      setRefused(useSeamsStore.getState().errors[row.seamKey] ?? 'not saved');
-      return false;
-    }
-    const ok =
-      (!put.length && !drop.length && !reflag.length) || (await attachPose(put, drop, reflag));
+    const ok = await attachPose(put, drop, reflag);
     setBusy(false);
     if (!ok) {
       const key = put[0]?.seamKey ?? reflag[0]?.seamKey ?? drop[0]?.seamKey ?? '';
@@ -568,7 +507,6 @@ export function usePoseEdit({
   return {
     posePending,
     poseEdits,
-    handEdits,
     poseLayerEdits,
     poseSel,
     setPoseSel,
@@ -585,8 +523,7 @@ export function usePoseEdit({
     poseShown,
     shownPoseLayers,
     shownPoseStacked,
-    onTop,
-    pressOnTop,
+    shownPoseOrdered,
     clearPose,
     pickupOf,
     dropPose,
