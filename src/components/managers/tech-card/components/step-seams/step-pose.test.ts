@@ -363,7 +363,7 @@ describe('picker helpers', () => {
       ] as const,
     };
     const pickup = posePickup('A', layout, g);
-    expect(pickup).toEqual({ group: ['A', 'D'], host: 'B' });
+    expect(pickup).toEqual({ group: ['A', 'D'], host: 'B', block: ['A'], hostBlock: ['B'] });
     expect(poseBlockGroup('A', pickup.host, layout)).toEqual(['A', 'D']);
     expect(posePickup('C', layout, g).host).toBe('B');
 

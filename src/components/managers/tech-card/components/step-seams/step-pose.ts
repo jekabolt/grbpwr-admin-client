@@ -271,8 +271,16 @@ export type PoseBlockLayout = {
   hung?: readonly (readonly [string, string])[];
 };
 
-/** The rigid pieces and fixed host captured when PLACE starts dragging. */
-export type PosePickup = { group: string[]; host: string | null };
+/**
+ * The rigid pieces and fixed host captured when PLACE starts dragging. `host` is a piece because a
+ * pose needs its frame; `block` and `hostBlock` are the two input blocks a layer press relates.
+ */
+export type PosePickup = {
+  group: string[];
+  host: string | null;
+  block: string[];
+  hostBlock: string[];
+};
 
 const blockIndexOf = (layout: Pick<PoseBlockLayout, 'blocks'>) => {
   const out = new Map<string, number>();
@@ -323,7 +331,7 @@ export function posePickup(
 ): PosePickup {
   const input = blockIndexOf(layout);
   const own = input.get(piece);
-  if (own == null) return { group: [piece], host: null };
+  if (own == null) return { group: [piece], host: null, block: [piece], hostBlock: [] };
   let host: string | null = null;
   for (const [child, parent] of layout.hung ?? []) {
     if (input.get(child) !== own || input.get(parent) == null || input.get(parent) === own)
@@ -350,7 +358,13 @@ export function posePickup(
         null,
       ) ?? null;
   }
-  return { group: poseBlockGroup(piece, host, layout), host };
+  const hostInput = host == null ? null : input.get(host);
+  return {
+    group: poseBlockGroup(piece, host, layout),
+    host,
+    block: [...layout.blocks[own].pieces],
+    hostBlock: hostInput == null ? [] : [...layout.blocks[hostInput].pieces],
+  };
 }
 
 /** A dropped pose value ready to be wrapped in `poseRow`. */

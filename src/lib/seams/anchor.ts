@@ -235,7 +235,10 @@ export function newSeamKey(now = Date.now(), rand: () => number = Math.random): 
 }
 
 /** The anchor with its under/over set to `layer`, or without one (no claim) when there is none. */
-export function withSeamLayer(anchor: EdgeAnchor, layer: SeamLayer | null | undefined): EdgeAnchor {
+export function withSeamLayer<A extends { layer?: SeamLayer }>(
+  anchor: A,
+  layer: SeamLayer | null | undefined,
+): A {
   const next = { ...anchor };
   delete next.layer;
   return layer ? { ...next, layer } : next;

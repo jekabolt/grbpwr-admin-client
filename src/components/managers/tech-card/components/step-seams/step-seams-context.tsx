@@ -53,7 +53,8 @@ export function useAttachStepSeam(index: number) {
   const ctx = useStepSeams();
   const { getValues, setValue } = useFormContext<TechCardFormData>();
   return useCallback(
-    async (row: StoredSeam): Promise<string | null> => {
+    // `keepPlace`: same row with a new flag, its place stays because the order of rows moves pieces.
+    async (row: StoredSeam, keepPlace = false): Promise<string | null> => {
       if (!ctx) return null;
       const ok = await ctx.writes.upsert([row]);
       if (!ok) return null;
@@ -63,6 +64,7 @@ export function useAttachStepSeam(index: number) {
       );
       const key = stored?.seamKey ?? row.seamKey;
       const current = (getValues(`operations.${index}.seamKeys`) ?? []) as string[];
+      if (keepPlace && current.includes(key)) return key;
       setValue(`operations.${index}.seamKeys`, [...current.filter((item) => item !== key), key], {
         shouldDirty: true,
       });
@@ -113,7 +115,12 @@ export function useAttachStepPose(index: number) {
   const ctx = useStepSeams();
   const { getValues, setValue } = useFormContext<TechCardFormData>();
   return useCallback(
-    async (put: readonly StoredPose[], drop: readonly StoredPose[] = []): Promise<boolean> => {
+    async (
+      put: readonly StoredPose[],
+      drop: readonly StoredPose[] = [],
+      // Same rows with a new flag: they keep their place, the order of pose rows moves pieces.
+      reflag: readonly StoredPose[] = [],
+    ): Promise<boolean> => {
       if (!ctx) return false;
       const field = `operations.${index}.poseKeys` as const;
       const keys = () => ((getValues(field) ?? []) as string[]).slice();
@@ -123,6 +130,7 @@ export function useAttachStepPose(index: number) {
         const left = keys().filter((k) => !gone.has(k));
         if (left.length !== keys().length) setValue(field, left, { shouldDirty: true });
       }
+      if (reflag.length && !(await ctx.writes.upsertPoses([...reflag]))) return false;
       if (put.length) {
         if (!(await ctx.writes.upsertPoses([...put]))) return false;
         const add = new Set(put.map((r) => r.seamKey));
