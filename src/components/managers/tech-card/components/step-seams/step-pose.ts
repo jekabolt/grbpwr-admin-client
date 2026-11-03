@@ -576,7 +576,7 @@ export function poseAfterDrop(
   return { piece, host, placement: poseAt(hostGeom, pieceGeom, hostT, droppedT) };
 }
 
-function invert(T: Affine): Affine {
+export function invert(T: Affine): Affine {
   const [a, b, c, d, e, f] = T;
   const k = a * d - b * c || 1;
   return [d / k, -b / k, -c / k, a / k, (c * f - d * e) / k, (b * e - a * f) / k];
@@ -585,6 +585,91 @@ function invert(T: Affine): Affine {
 const still = (D: Affine) =>
   Math.abs(D[0] - 1) + Math.abs(D[1]) + Math.abs(D[2]) + Math.abs(D[3] - 1) < 1e-9 &&
   Math.abs(D[4]) + Math.abs(D[5]) < 1e-6;
+
+/**
+ * How far a picture landed from where it stood, read on its largest piece: the others may have been
+ * re-laid by the write itself. Null when it stands.
+ */
+export function layoutDrift(
+  before: ReadonlyMap<string, Affine>,
+  after: ReadonlyMap<string, Affine>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): Pt2 | null {
+  const area = (key: string) => Math.abs(geoms.get(key)?.areaMm2 ?? 0);
+  const anchor = [...after.keys()]
+    .filter((key) => before.has(key) && (geoms.get(key)?.rs.length ?? 0) >= 3)
+    .sort((a, b) => area(b) - area(a))[0];
+  if (!anchor) return null;
+  const b = box(geoms.get(anchor)!.rs);
+  const centre: Pt2 = [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
+  const [x0, y0] = apply(before.get(anchor)!, centre);
+  const [x1, y1] = apply(after.get(anchor)!, centre);
+  return Math.hypot(x1 - x0, y1 - y0) < 0.01 ? null : [x1 - x0, y1 - y0];
+}
+
+export type PoseMovePlan = {
+  /** Where the moved piece is pinned; null when nothing can carry it: the whole step shifts instead. */
+  pin: DroppedPose | null;
+  /** Poses resting on the moved pieces, rewritten so that they stay where they are. */
+  keep: DroppedPose[];
+};
+
+/**
+ * What one hand move writes so that only the moved pieces change place. `D` moves `group` in the
+ * frame of `transforms`. A host never rests on the moved pieces (that would be a loop: the first
+ * pose dropped, its piece back to the automatic place); with no such block left the move is the
+ * whole step's. Every pose resting on the moved pieces is measured again from the new place.
+ */
+export function planPoseMove(
+  piece: string,
+  pickup: Pick<PosePickup, 'group' | 'host'>,
+  D: Affine,
+  layout: Pick<PoseBlockLayout, 'blocks' | 'transforms'>,
+  pinHosts: ReadonlyMap<string, string>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): PoseMovePlan {
+  const group = new Set(pickup.group);
+  const blockOf = (key: string) => layout.blocks.find((block) => block.pieces.includes(key));
+  const restsOnGroup = (key: string) => {
+    const seen = new Set<string>();
+    const queue = [key];
+    while (queue.length) {
+      const at = queue.pop()!;
+      if (seen.has(at)) continue;
+      seen.add(at);
+      if (group.has(at)) return true;
+      const host = pinHosts.get(at);
+      if (host) queue.push(host);
+      queue.push(...(blockOf(at)?.pieces ?? []));
+    }
+    return false;
+  };
+  const area = (key: string) => Math.abs(geoms.get(key)?.areaMm2 ?? 0);
+  const others = layout.blocks
+    .flatMap((block) => block.pieces)
+    .filter((key) => !group.has(key))
+    .sort((a, b) => area(b) - area(a));
+  const host = [...(pickup.host ? [pickup.host] : []), ...others].find(
+    (key) => !group.has(key) && !restsOnGroup(key) && layout.transforms.has(key),
+  );
+  const T0 = layout.transforms.get(piece);
+  const pin = host && T0 ? poseAfterDrop(piece, compose(D, T0), { host }, layout, geoms) : null;
+  const keep = [...pinHosts].flatMap(([key, on]) => {
+    if (group.has(key) || !group.has(on)) return [];
+    const T = layout.transforms.get(key);
+    const onT = layout.transforms.get(on);
+    const hostGeom = geoms.get(on);
+    const keyGeom = geoms.get(key);
+    if (!T || !onT || !hostGeom || !keyGeom) return [];
+    // With a pin the host moved and the piece stood; without one the whole step moves, so the piece
+    // is measured back through the same D.
+    const placement = pin
+      ? poseAt(hostGeom, keyGeom, compose(D, onT), T)
+      : poseAt(hostGeom, keyGeom, onT, compose(invert(D), T));
+    return [{ piece: key, host: on, placement }];
+  });
+  return { pin, keep };
+}
 
 /**
  * Pin the posed pieces of a laid picture, in place: each where its row says on its host (`T` of

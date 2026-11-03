@@ -9,7 +9,7 @@ import {
   type StoredSeam,
   withSeamLayer,
 } from 'lib/seams';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useSeamsStore } from '../assembly-seams/seams-store';
 import {
   onlyFlagsDiffer,
@@ -23,8 +23,11 @@ import {
 import { foldedDrawing } from './step-folds';
 import { pictureBounds } from './step-picture-view';
 import {
+  invert,
+  layoutDrift,
   pinPoses,
   fitPlan,
+  planPoseMove,
   poseAfterDrop,
   poseBlockGroup,
   posePickup,
@@ -38,9 +41,14 @@ import {
   type PosePickup,
   type PoseSnap,
 } from './step-pose';
-import type { StepLayout } from './step-picture';
+import type { boxOf, StepLayout } from './step-picture';
 import type { LayerRow, StepResult } from './step-result';
 import type { SurfacePicture } from './surface-picture';
+
+type Box = ReturnType<typeof boxOf>;
+
+const sameBox = (a: Box, b: Box) =>
+  Math.abs(a.x0 - b.x0) + Math.abs(a.y0 - b.y0) + Math.abs(a.x1 - b.x1) + Math.abs(a.y1 - b.y1) < 1;
 
 const EMPTY_CANVAS_LAYOUT: StepLayout = {
   T: new Map(),
@@ -159,8 +167,11 @@ export function usePoseEdit({
     }
     return { ...poseLayout, T };
   }, [poseLayout, poseDrag, poseFree]);
-  // The zoom frame stays the result's own while pieces move: a drag never rescales the picture.
-  const poseBounds = useMemo(
+  // The canvas frame stands while this window is open: neither a move nor a write rescales the
+  // picture. It is taken once the step's pieces are known, and again only by `fit`.
+  const frameKey = stepPicture ? `${[...resultLayout.T.keys()].sort().join()}|${geoms.size}` : '';
+  const [frame, setFrame] = useState<{ key: string; box: Box } | null>(null);
+  const resultBounds = useMemo(
     () =>
       stepPicture
         ? pictureBounds(
@@ -171,6 +182,48 @@ export function usePoseEdit({
         : undefined,
     [stepPicture, resultLayout, geoms],
   );
+  useEffect(() => {
+    if (frameKey && resultBounds)
+      setFrame((held) => (held?.key === frameKey ? held : { key: frameKey, box: resultBounds }));
+  }, [frameKey, resultBounds]);
+  const poseBounds = frame?.key === frameKey ? frame.box : resultBounds;
+  const shownBounds = useMemo(
+    () => (stepPicture ? pictureBounds(poseShown, geoms, 'canvas') : undefined),
+    [stepPicture, poseShown, geoms],
+  );
+  const frameStale = !!shownBounds && !!poseBounds && !sameBox(shownBounds, poseBounds);
+  // A write lays the step anew, and the whole picture may land elsewhere in the same frame (the
+  // automatic places depend on the poses; a shift of the whole step is stored nowhere). The frame
+  // follows, before the paint, so that what the owner saw stands.
+  const shownBefore = useRef(poseShown.T);
+  const resultBefore = useRef(resultLayout);
+  const settling = useRef(false);
+  useLayoutEffect(() => {
+    const before = shownBefore.current;
+    shownBefore.current = poseShown.T;
+    const relaid = resultBefore.current !== resultLayout;
+    resultBefore.current = resultLayout;
+    if (!relaid && !settling.current) return;
+    if (!poseFree) settling.current = false;
+    const drift = layoutDrift(before, poseShown.T, geoms);
+    if (!drift) return;
+    setFrame((held) =>
+      held?.key === frameKey
+        ? {
+            key: frameKey,
+            box: {
+              x0: held.box.x0 + drift[0],
+              y0: held.box.y0 + drift[1],
+              x1: held.box.x1 + drift[0],
+              y1: held.box.y1 + drift[1],
+            },
+          }
+        : held,
+    );
+  });
+  const fitFrame = () => {
+    if (frameKey && shownBounds) setFrame({ key: frameKey, box: shownBounds });
+  };
   const posePending =
     poseEdits.size > 0 ||
     poseChanges.drop.size > 0 ||
@@ -205,32 +258,46 @@ export function usePoseEdit({
   };
   const pickupOf = (piece: string): PosePickup =>
     posePickup(piece, { blocks: poseBlocks, transforms: poseLayout.T, hung: poseHung }, geoms);
-  const putPose = (piece: string, T: Affine, pickup: PosePickup) => {
+  // Every pose as it stands now, saved or moved here: a move must leave the others where they are.
+  const pinHosts = useMemo(() => {
+    const out = new Map(storedPoseHosts);
+    for (const piece of poseChanges.drop) out.delete(piece);
+    for (const [piece, pin] of poseEdits) out.set(piece, pin.host);
+    return out;
+  }, [storedPoseHosts, poseChanges.drop, poseEdits]);
+  /** `D` as seen on the canvas: only the moved pieces change place there. */
+  const movePose = (piece: string, pickup: PosePickup, D: Affine) => {
     // A hand move changes what FIT measures from: the next press starts a new cycle.
     fitCycle.current = null;
-    const dropped = poseAfterDrop(piece, T, pickup, { transforms: poseLayout.T }, geoms);
-    if (!dropped) {
-      setRefused('no host');
-      return;
-    }
     setRefused('');
-    setPoseChanges((current) =>
-      resolvePoseEdit(storedPoseHosts, current, piece, {
-        host: dropped.host,
-        placement: dropped.placement,
-      }),
+    const local = poseFree ? compose(invert(poseFree), compose(D, poseFree)) : D;
+    const plan = planPoseMove(
+      piece,
+      pickup,
+      local,
+      { blocks: poseBlocks, transforms: poseLayout.T },
+      pinHosts,
+      geoms,
     );
+    if (!plan.pin) setPoseFree((free) => (free ? compose(D, free) : D));
+    setPoseChanges((current) => {
+      const edits = new Map(current.edits);
+      const drop = new Set(current.drop);
+      // Carried by nothing: a pose it still has rests on a block resting on it, a loop.
+      if (!plan.pin && pinHosts.has(piece)) {
+        edits.delete(piece);
+        drop.add(piece);
+      }
+      return [...(plan.pin ? [plan.pin] : []), ...plan.keep].reduce(
+        (next, { piece: key, host, placement }) =>
+          resolvePoseEdit(storedPoseHosts, next, key, { host, placement }),
+        { edits, drop } as PoseEditResolution,
+      );
+    });
   };
   const dropPose = (piece: string, pickup: PosePickup, D: Affine, snap: PoseSnap | null) => {
     setPoseDrag(null);
-    if (!pickup.host) {
-      setPoseFree((free) => (free ? compose(D, free) : D));
-      return;
-    }
-    const T0 = poseLayout.T.get(piece);
-    if (!T0) return;
-    const moved = snap ? compose(translate(snap.dx, snap.dy), D) : D;
-    putPose(piece, compose(moved, T0), pickup);
+    movePose(piece, pickup, snap ? compose(translate(snap.dx, snap.dy), D) : D);
   };
   const fitPose = () => {
     if (!fitSource || !fitReady || busy || !stepPicture) return;
@@ -278,8 +345,7 @@ export function usePoseEdit({
   };
   const transformPose = (command: 'left' | 'right' | 'mirror' | 'upright') => {
     const piece = poseSel;
-    const free = piece ? !pickupOf(piece).host : false;
-    const T0 = piece ? (free ? poseShown : poseLayout).T.get(piece) : undefined;
+    const T0 = piece ? poseShown.T.get(piece) : undefined;
     const g = piece ? geoms.get(piece) : undefined;
     if (!piece || !T0 || !g || busy) return;
     const D =
@@ -294,8 +360,7 @@ export function usePoseEdit({
                 0,
               );
     setPoseDrag(null);
-    if (free) setPoseFree((current) => (current ? compose(D, current) : D));
-    else putPose(piece, compose(D, T0), pickupOf(piece));
+    movePose(piece, pickupOf(piece), D);
   };
 
   // What ACCEPT will save, read by the one layer rule: the canvas and the switch show exactly this.
@@ -456,6 +521,7 @@ export function usePoseEdit({
       setRefused(useSeamsStore.getState().errors[key] ?? 'not saved');
       return false;
     }
+    settling.current = true;
     clearPose();
     return true;
   };
@@ -473,6 +539,8 @@ export function usePoseEdit({
     setPoseDrag,
     poseFree,
     poseBounds,
+    frameStale,
+    fitFrame,
     fitReady,
     ownPoseRows,
     resultLayout,

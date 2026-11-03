@@ -64,6 +64,8 @@ import {
   turnToGrain,
   upright,
   mirrorPlacement,
+  planPoseMove,
+  layoutDrift,
 } from './step-pose';
 import { stepResults } from './step-result';
 import { dropKeys } from './step-seams-model';
@@ -854,5 +856,135 @@ describe('mirrorPlacement: mirror left for surface and pose rows', () => {
     const sort = (pts: number[][]) =>
       [...pts].sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((p) => p.map((v) => +v.toFixed(1)));
     expect(sort(got)).toEqual(sort(want));
+  });
+});
+
+describe('planPoseMove: only the moved pieces change place', () => {
+  const square = (key: string, areaMm2: number): PieceGeom =>
+    ({
+      key,
+      areaMm2,
+      rs: [
+        [0, 0],
+        [100, 0],
+        [100, 100],
+        [0, 100],
+      ],
+    }) as unknown as PieceGeom;
+  const geoms = new Map([
+    ['a', square('a', 900)],
+    ['b', square('b', 400)],
+    ['c', square('c', 100)],
+  ]);
+  const blocks = [{ pieces: ['a'] }, { pieces: ['b'] }, { pieces: ['c'] }];
+  const transforms = new Map<string, Affine>([
+    ['a', [1, 0, 0, 1, 0, 0]],
+    ['b', [1, 0, 0, 1, 200, 0]],
+    ['c', [1, 0, 0, 1, 400, 0]],
+  ]);
+  const D: Affine = [1, 0, 0, 1, 30, 40];
+  const layout = (keys: string[]) => ({
+    blocks: blocks.filter((block) => keys.includes(block.pieces[0])),
+    transforms,
+  });
+  const laid = (pin: { host: string; placement: Parameters<typeof placementT>[2] }, of: string) =>
+    compose(
+      transforms.get(pin.host)!,
+      placementT(geoms.get(pin.host)!, geoms.get(of)!, pin.placement),
+    );
+
+  it('never pins a piece on a block resting on it, and takes the next block', () => {
+    const plan = planPoseMove(
+      'a',
+      { group: ['a'], host: 'b' },
+      D,
+      layout(['a', 'b', 'c']),
+      new Map([['b', 'a']]),
+      geoms,
+    );
+    expect(plan.pin?.host).toBe('c');
+    expect(plan.keep.map((row) => [row.piece, row.host])).toEqual([['b', 'a']]);
+  });
+
+  it('measures a pose resting on the moved piece again, so that it stands', () => {
+    const plan = planPoseMove(
+      'a',
+      { group: ['a'], host: 'c' },
+      D,
+      layout(['a', 'b', 'c']),
+      new Map([['b', 'a']]),
+      geoms,
+    );
+    const placement = plan.keep[0].placement;
+    const stands = compose(
+      compose(D, transforms.get('a')!),
+      placementT(geoms.get('a')!, geoms.get('b')!, placement),
+    );
+    expect(stands[4]).toBeCloseTo(200, 1);
+    expect(stands[5]).toBeCloseTo(0, 1);
+  });
+
+  it('with no free block the whole step moves and the resting piece is measured back', () => {
+    const plan = planPoseMove(
+      'a',
+      { group: ['a'], host: 'b' },
+      D,
+      layout(['a', 'b']),
+      new Map([['b', 'a']]),
+      geoms,
+    );
+    expect(plan.pin).toBeNull();
+    const seen = compose(
+      D,
+      compose(
+        transforms.get('a')!,
+        placementT(geoms.get('a')!, geoms.get('b')!, plan.keep[0].placement),
+      ),
+    );
+    expect(seen[4]).toBeCloseTo(200, 1);
+    expect(seen[5]).toBeCloseTo(0, 1);
+  });
+
+  it('pins as usual when nothing rests on the piece', () => {
+    const plan = planPoseMove(
+      'b',
+      { group: ['b'], host: 'a' },
+      D,
+      layout(['a', 'b']),
+      new Map(),
+      geoms,
+    );
+    expect(plan.keep).toEqual([]);
+    const placed = laid(plan.pin!, 'b');
+    expect(placed[4]).toBeCloseTo(230, 1);
+    expect(placed[5]).toBeCloseTo(40, 1);
+  });
+});
+
+describe('layoutDrift: how far the automatic layout went', () => {
+  const big = { ...square('BIG', 0, 0, 100, 100), areaMm2: 10000 };
+  const small = { ...square('SMALL', 0, 0, 10, 10), areaMm2: 100 };
+  const geoms = new Map([
+    ['BIG', big],
+    ['SMALL', small],
+  ]);
+  const at = (x: number, y: number): Affine => [1, 0, 0, 1, x, y];
+
+  it('follows the largest piece, not the one the owner moved', () => {
+    const before = new Map([
+      ['BIG', at(0, 0)],
+      ['SMALL', at(0, 0)],
+    ]);
+    const after = new Map([
+      ['BIG', at(5, -3)],
+      ['SMALL', at(500, 500)],
+    ]);
+    expect(layoutDrift(before, after, geoms)).toEqual([5, -3]);
+  });
+
+  it('is null when the layout stood still or shares no piece', () => {
+    const same = new Map([['BIG', at(7, 7)]]);
+    expect(layoutDrift(same, same, geoms)).toBeNull();
+    expect(layoutDrift(new Map(), same, geoms)).toBeNull();
   });
 });

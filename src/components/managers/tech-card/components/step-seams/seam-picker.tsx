@@ -229,6 +229,8 @@ export function SeamPickerBody({
     setPoseDrag,
     poseFree,
     poseBounds,
+    frameStale,
+    fitFrame,
     fitReady,
     ownPoseRows,
     resultLayout,
@@ -584,7 +586,7 @@ export function SeamPickerBody({
 
   const [canvasEl, canvas] = useBoxSize();
   const phone = canvas.w > 0 && canvas.w < 600;
-  const zoom = usePictureZoom(canvas.w, canvas.h, index);
+  const zoom = usePictureZoom(index, canvas.w, canvas.h, fitFrame);
 
   // «guess»: the proposal's two sides become the pick, shown as the owner's — nothing is saved.
   const fillGuess = () => {
@@ -744,16 +746,18 @@ export function SeamPickerBody({
             }}
             className={cn(
               'relative min-h-0 min-w-0 flex-1 touch-none overflow-hidden select-none',
-              zoom.zoomed && 'cursor-grab active:cursor-grabbing',
+              'cursor-grab active:cursor-grabbing',
+              zoom.spaceHeld && '[&_*]:cursor-grab!',
             )}
             data-seam-picker-canvas=''
             // A press on the canvas keeps the keys here: Esc lets go, Enter accepts.
-            onPointerDownCapture={(e) =>
+            {...zoom.handlers}
+            onPointerDownCapture={(e) => {
               e.currentTarget
                 .closest<HTMLElement>('[data-seam-picker]')
-                ?.focus({ preventScroll: true })
-            }
-            {...zoom.handlers}
+                ?.focus({ preventScroll: true });
+              zoom.handlers.onPointerDownCapture(e);
+            }}
           >
             {loading && !drawn ? (
               <div className='absolute inset-0 grid place-items-center'>
@@ -867,7 +871,6 @@ export function SeamPickerBody({
                   variant='underline'
                   size='xs'
                   onClick={zoom.zoomOut}
-                  disabled={!zoom.zoomed}
                   aria-label='zoom out'
                 >
                   −
@@ -881,7 +884,7 @@ export function SeamPickerBody({
                 >
                   +
                 </Button>
-                {zoom.zoomed && (
+                {(zoom.moved || frameStale) && (
                   <Button type='button' variant='underline' size='xs' onClick={zoom.fit}>
                     fit
                   </Button>
