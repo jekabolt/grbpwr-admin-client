@@ -10,6 +10,9 @@ import {
 
 describe('taskFileViewOf', () => {
   it('opens tables, text and html in place', () => {
+    expect(taskFileViewOf('План пошива.xlsx')).toBe('sheet');
+    expect(taskFileViewOf('old.XLS')).toBe('sheet');
+    expect(taskFileViewOf('noext', 'application/vnd.ms-excel')).toBe('sheet');
     expect(taskFileViewOf('suppliers.CSV', 'application/octet-stream')).toBe('delimited');
     expect(taskFileViewOf('a.tsv')).toBe('delimited');
     expect(taskFileViewOf('Закупка ткани Прато.html', 'text/html')).toBe('html');
@@ -55,8 +58,14 @@ describe('bytesFromBase64', () => {
 
 describe('parseDelimited', () => {
   it('detects the delimiter', () => {
-    expect(parseDelimited('a,b\n1,2\n')).toEqual([['a', 'b'], ['1', '2']]);
-    expect(parseDelimited('a;b\n1,5;2\n')).toEqual([['a', 'b'], ['1,5', '2']]);
+    expect(parseDelimited('a,b\n1,2\n')).toEqual([
+      ['a', 'b'],
+      ['1', '2'],
+    ]);
+    expect(parseDelimited('a;b\n1,5;2\n')).toEqual([
+      ['a', 'b'],
+      ['1,5', '2'],
+    ]);
     expect(parseDelimited('a\tb')).toEqual([['a', 'b']]);
   });
 

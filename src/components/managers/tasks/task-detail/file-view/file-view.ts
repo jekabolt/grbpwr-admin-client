@@ -3,15 +3,41 @@
  * Байты приходят с бэка (`GetTaskFileContent`): из бакета браузер читать не может, у него нет CORS.
  */
 
-export type TaskFileView = 'delimited' | 'text' | 'html' | 'as-is' | 'download';
+export type TaskFileView = 'sheet' | 'delimited' | 'text' | 'html' | 'as-is' | 'download';
+
+export type TableCell = { text: string; numeric: boolean; fill?: string };
 
 /** Сверх этого таблица не рисуется: сто тысяч строк в DOM вешают вкладку. */
 export const MAX_TABLE_ROWS = 5000;
 
+const SHEET_EXT = new Set(['xlsx', 'xls', 'xlsm']);
 const DELIMITED_EXT = new Set(['csv', 'tsv']);
 const HTML_EXT = new Set(['html', 'htm']);
-const TEXT_EXT = new Set(['txt', 'md', 'markdown', 'log', 'json', 'xml', 'yaml', 'yml', 'ini', 'conf']);
-const AS_IS_EXT = new Set(['pdf', 'svg', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'mp4', 'mov', 'webm']);
+const TEXT_EXT = new Set([
+  'txt',
+  'md',
+  'markdown',
+  'log',
+  'json',
+  'xml',
+  'yaml',
+  'yml',
+  'ini',
+  'conf',
+]);
+const AS_IS_EXT = new Set([
+  'pdf',
+  'svg',
+  'png',
+  'jpg',
+  'jpeg',
+  'gif',
+  'webp',
+  'avif',
+  'mp4',
+  'mov',
+  'webm',
+]);
 
 export function taskFileViewOf(fileName?: string, contentType?: string): TaskFileView {
   const name = (fileName ?? '').toLowerCase();
@@ -20,11 +46,13 @@ export function taskFileViewOf(fileName?: string, contentType?: string): TaskFil
   const ct = (contentType ?? '').split(';')[0].trim().toLowerCase();
 
   // Расширение первым: бакет часто отдаёт csv как text/plain, а то и octet-stream.
+  if (SHEET_EXT.has(ext)) return 'sheet';
   if (DELIMITED_EXT.has(ext)) return 'delimited';
   if (HTML_EXT.has(ext)) return 'html';
   if (TEXT_EXT.has(ext)) return 'text';
   if (AS_IS_EXT.has(ext)) return 'as-is';
 
+  if (ct === 'application/vnd.ms-excel' || ct.includes('spreadsheetml')) return 'sheet';
   if (ct === 'text/csv' || ct === 'text/tab-separated-values') return 'delimited';
   if (ct === 'text/html') return 'html';
   if (ct === 'application/pdf' || /^(image|video|audio)\//.test(ct)) return 'as-is';
