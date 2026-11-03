@@ -4919,7 +4919,7 @@ function OperationEditor({
         {linkedMaterials.map((material) => (
           <span
             key={material.lineKey}
-            className='group relative size-18'
+            className='group relative h-18 w-24'
             onMouseEnter={() => onActiveBomChange?.(material.lineKey ?? null)}
             onMouseLeave={() => onActiveBomChange?.(null)}
           >
