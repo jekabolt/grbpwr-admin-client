@@ -99,7 +99,7 @@ export function StepFoldsGroup({
               onClick={() => setOpen(on ? null : r.geom.pieceKey)}
               aria-pressed={on}
               className={cn(
-                'flex items-center gap-1.5 border-b-2 pb-0.5 text-left',
+                'group flex items-center gap-1.5 border-b-2 pb-0.5 text-left hover:border-textColor active:translate-y-px',
                 on ? 'border-textColor' : 'border-transparent',
               )}
               data-step-fold-piece={r.geom.name}
@@ -121,7 +121,10 @@ export function StepFoldsGroup({
                 <Text
                   size='micro'
                   component='span'
-                  className={cn('uppercase', !on && !isFolded && 'text-labelColor')}
+                  className={cn(
+                    'uppercase group-hover:text-textColor',
+                    !on && !isFolded && 'text-labelColor',
+                  )}
                 >
                   {r.geom.name}
                 </Text>
