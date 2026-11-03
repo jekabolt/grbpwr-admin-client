@@ -44,7 +44,7 @@ function rectangle(key: string, x: number, y: number, width: number, height: num
 function syntheticStyle(
   geoms: readonly PieceGeom[],
   layers: readonly string[],
-  options: Partial<Pick<LayerStyleInput, 'T' | 'marks' | 'innerLines'>> = {},
+  options: Partial<Pick<LayerStyleInput, 'T' | 'marks' | 'innerLines' | 'colliding'>> = {},
 ) {
   return layerStyle({
     layers,
@@ -52,6 +52,7 @@ function syntheticStyle(
     geoms: new Map(geoms.map((geom) => [geom.pieceKey, geom])),
     marks: options.marks,
     innerLines: options.innerLines,
+    colliding: options.colliding,
   });
 }
 
@@ -317,6 +318,29 @@ describe('layerStyle', () => {
     const bag = rectangle('bag', 4, 2, 6, 6);
     const placket = rectangle('placket', 6, 1, 4, 8);
     const deep = rectangle('deep', 5, 3, 2, 2);
+
+    it('pieces that only collide neither cover each other nor change a level', () => {
+      const body = rectangle('body', 0, 0, 10, 10);
+      const sleeve = rectangle('sleeve', 4, 2, 6, 6);
+      const cuff = rectangle('cuff', 4, 2, 6, 2);
+      const colliding: [string, string][] = [
+        ['body', 'sleeve'],
+        ['body', 'cuff'],
+      ];
+      for (const order of ordersOf(['body', 'sleeve', 'cuff'])) {
+        const style = syntheticStyle([body, sleeve, cuff], order, { colliding });
+        // The cuff still lies on its own sleeve.
+        expect(levelsIn(style)).toEqual({ body: 0, sleeve: 0, cuff: 1 });
+        expect(style.pieces.get('body')?.coveredBy).toEqual([]);
+        expect(style.pieces.get('body')?.whole).toBe(true);
+      }
+      // The same shapes without that fact stack, so the fact is what changed them.
+      expect(levelsIn(syntheticStyle([body, sleeve, cuff], ['body', 'sleeve', 'cuff']))).toEqual({
+        body: 0,
+        sleeve: 1,
+        cuff: 2,
+      });
+    });
 
     it('counts what a piece really lies on, one step per layer', () => {
       expect(levelsIn(syntheticStyle([front, bag], ['front', 'bag']))).toEqual({

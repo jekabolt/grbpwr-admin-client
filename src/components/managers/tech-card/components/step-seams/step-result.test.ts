@@ -2,10 +2,10 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import type { Affine, PieceGeom } from 'lib/assembly-skeleton/types';
+import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply, compose } from 'lib/assembly-skeleton/union/affine';
-import { poseRow, type StoredPose } from 'lib/seams';
+import { poseRow, type EdgeAnchor, type StoredPose, type StoredSeam } from 'lib/seams';
 
 import {
   CARD6_CHAIN_OPS,
@@ -31,6 +31,8 @@ import { placementT, poseAfterDrop, posePickup } from './step-pose';
 import { StepResultProvider, useStepResult } from './step-result-context';
 import { OWNER_FIT, stepResults, type StepResult, type StepResultsInput } from './step-result';
 import type { FormOpLike } from './step-seams-model';
+import { seamIsLaid } from './step-rows';
+import { layerStyle } from './layer-style';
 
 const closeAffine = (actual: Affine, expected: Affine, digits = 6) =>
   actual.forEach((value, index) => expect(value).toBeCloseTo(expected[index], digits));
@@ -471,5 +473,154 @@ describe('stepResults: one carried owner result per operation', () => {
     });
     expect(later[0].cycles).toEqual(['later:FUTURE@30']);
     expect(later).toHaveLength(2);
+  });
+});
+
+describe('a seam that does not lie where it is drawn links nothing', () => {
+  // The shape of step 370 of card 83: a sleeve sewn into an armhole nobody placed, so it is seated by
+  // translation only, its cap on the bottom of the armhole and the sleeve hanging across the body.
+  const armhole: Pt2[] = [
+    [200, 0],
+    [140, -100],
+    [100, -150],
+    [60, -100],
+    [0, 0],
+  ];
+  const cap: Pt2[] = [
+    [200, 0],
+    [140, 100],
+    [100, 150],
+    [60, 100],
+    [0, 0],
+  ];
+  const piece = (key: string, rs: Pt2[], seamLine: Pt2[], from: number, to: number): PieceGeom =>
+    ({
+      pieceKey: key,
+      name: key,
+      hand: null,
+      cloth: null,
+      corners: [],
+      rect: false,
+      twinOf: [],
+      notchIdx: [],
+      rs,
+      perimMm: 3000,
+      areaMm2: 100000,
+      edges: [
+        {
+          id: `${key}#0`,
+          pieceKey: key,
+          k: 0,
+          s: from,
+          e: to,
+          pts: seamLine,
+          lenMm: 420,
+          chordMm: 200,
+          turnDeg: 0,
+          notchesMm: [],
+          kind: 'edge' as const,
+        },
+      ],
+    }) as PieceGeom;
+  const geoms = new Map([
+    [
+      'BODY',
+      piece('BODY', [[-200, 0], [-200, -800], [400, -800], [400, 0], ...armhole], armhole, 4, 8),
+    ],
+    ['SLEEVE', piece('SLEEVE', [[0, 0], [0, -500], [200, -500], ...cap.slice(0, -1)], cap, 3, 0)],
+  ]);
+  const anchor = (at: string): EdgeAnchor => ({
+    piece: at.slice(0, at.lastIndexOf('#')),
+    samples: [
+      [0, 0],
+      [0.25, 0],
+      [0.5, 0],
+      [0.75, 0],
+      [1, 0],
+    ],
+    perimShare: 0.25,
+    lenMm: 420,
+    notches: 0,
+    turnDeg: 0,
+    range: [0, 1],
+    edgeHint: at,
+    contourSig: 'same',
+  });
+  const seam: StoredSeam = {
+    seamKey: 'armhole',
+    status: 'confirmed',
+    kind: 'edge',
+    direction: 'reversed',
+    source: 'manual',
+    sideA: [anchor('BODY#0')],
+    sideB: [anchor('SLEEVE#0')],
+    anchoredSize: '',
+    note: '',
+  };
+  const T = (sleeve: Affine) =>
+    new Map<string, Affine>([
+      ['BODY', [1, 0, 0, 1, 0, 0]],
+      ['SLEEVE', sleeve],
+    ]);
+
+  it('measures whether the two sides of a seam meet', () => {
+    // The cap turned onto the armhole, side on side.
+    expect(seamIsLaid(seam, T([1, 0, 0, -1, 0, 0]), geoms)).toBe(true);
+    // The cap touches the armhole's bottom and no more.
+    expect(seamIsLaid(seam, T([1, 0, 0, 1, 0, -300]), geoms)).toBe(false);
+    expect(seamIsLaid({ ...seam, kind: 'surface' }, T([1, 0, 0, 1, 0, -300]), geoms)).toBe(true);
+    // What cannot be measured stays a seam.
+    const lost = { ...seam, sideA: [anchor('GONE#0')] };
+    expect(seamIsLaid(lost, T([1, 0, 0, 1, 0, -300]), geoms)).toBe(true);
+  });
+
+  it('the sleeve stays level 0 on its step and on every later one, and the pieces do not move', () => {
+    const ops: FormOpLike[] = [
+      {
+        operationNumber: 370,
+        inputKeys: ['BODY', 'SLEEVE'],
+        outputUnitKey: 'WHOLE',
+        seamKeys: ['armhole'],
+      },
+      { operationNumber: 380, inputKeys: ['WHOLE'], outputUnitKey: 'WHOLE_2' },
+    ];
+    const results = stepResults(
+      {
+        ops,
+        byKey: new Map([['armhole', seam]]),
+        geoms,
+        innerLines: new Map(),
+        pieceKeys: new Set(['BODY', 'SLEEVE']),
+      },
+      OWNER_FIT,
+    );
+    for (const result of results) {
+      const input = { layers: result.layers, T: result.layout.T, geoms };
+      const onlyShapes = layerStyle(input);
+      expect(Math.max(...[...onlyShapes.pieces.values()].map((one) => one.level))).toBe(1);
+
+      expect(seamIsLaid(seam, result.layout.T, geoms)).toBe(false);
+      expect(result.layout.colliding).toEqual([['BODY', 'SLEEVE']]);
+      const linked = layerStyle({ ...input, colliding: result.layout.colliding });
+      for (const one of linked.pieces.values()) {
+        expect(one.level).toBe(0);
+        expect(one.coveredBy).toEqual([]);
+      }
+    }
+    closeAffine(results[1].transforms.get('SLEEVE')!, results[0].transforms.get('SLEEVE')!);
+  });
+
+  it('a step with no seam row reports no collision', () => {
+    const rowless = stepResults(
+      {
+        ops: [{ operationNumber: 10, inputKeys: ['BODY', 'SLEEVE'] }],
+        byKey: new Map(),
+        geoms,
+        innerLines: new Map(),
+        pieceKeys: new Set(['BODY', 'SLEEVE']),
+      },
+      OWNER_FIT,
+    );
+    expect(rowless[0].layout.colliding).toEqual([]);
   });
 });

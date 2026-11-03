@@ -889,6 +889,48 @@ describe('the back pocket and the two back tops sewn on it', () => {
       expect(picture.levels).toEqual({ pocket: 0, right: 1, left: 1 });
     }
   });
+
+  describe('when the tops only collide with the pocket', () => {
+    const colliding: [string, string][] = [
+      ['pocket', 'right'],
+      ['pocket', 'left'],
+    ];
+
+    it.each(['canvas', 'tile', 'print'] as const)(
+      'no piece goes grey or dashed in the %s renderer, in either order',
+      (look) => {
+        for (const order of [over, under]) {
+          const markup = renderToStaticMarkup(
+            <StepPictureSvg
+              w={300}
+              h={300}
+              pad={4}
+              look={look}
+              layout={{ ...backLayout, colliding }}
+              layers={order}
+              geoms={backGeoms}
+            />,
+          );
+          for (const key of over) {
+            expect(fillOf(markup, key)).toBe(levelFill(0));
+            expect(markup).not.toContain(`data-piece-hidden="${key}"`);
+          }
+        }
+      },
+    );
+
+    it('the unit pictogram reads the same test', () => {
+      for (const order of [over, under]) {
+        const picture = unionPictureOfLayout(
+          { T: backLayout.T, stacked: [], onRuns: [], colliding },
+          backGeoms,
+          order,
+        );
+        expect(picture.levels ?? {}).not.toHaveProperty('right', 1);
+        expect(picture.lowerLayerRuns).toBeUndefined();
+      }
+    });
+  });
 });
 
 describe('StepPictureSvg step highlight', () => {

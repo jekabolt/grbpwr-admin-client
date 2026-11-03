@@ -8,6 +8,7 @@ import {
   pointInPiece,
   uncoveredRuns,
   type CoverPiece,
+  type CollidingPairs,
   type OutlineRun,
 } from 'lib/assembly-skeleton/union/layer-cover';
 
@@ -51,6 +52,8 @@ export type LayerStyleInput = {
   innerLines?: ReadonlyMap<string, readonly (readonly Pt2[])[]>;
   /** The ring a piece covers and is covered with; the geometry's own by default. */
   ringOf?: (geom: PieceGeom) => readonly Pt2[];
+  /** Pieces that only collide: neither covers the other (`StepLayout.colliding`). */
+  colliding?: CollidingPairs;
 };
 
 /** The one source of the pieces' rings, bottom to top. */
@@ -76,7 +79,7 @@ function orderedPieces(input: LayerStyleInput): CoverPiece[] {
 export function layerStyle(input: LayerStyleInput): LayerStyle {
   const ordered = orderedPieces(input);
   const indexByKey = new Map(ordered.map((piece, index) => [piece.key, index]));
-  const { covers, sameShape, levels } = coverOrder(ordered);
+  const { covers, sameShape, levels } = coverOrder(ordered, input.colliding);
   const piecesAt = (indexes: readonly number[]) => indexes.map((upper) => ordered[upper]);
 
   const pieces = new Map<string, PieceLayerStyle>();

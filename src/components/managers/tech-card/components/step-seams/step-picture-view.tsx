@@ -1846,9 +1846,10 @@ export function StepPictureSvg({
             marks: actionGlyphs,
             innerLines,
             ringOf: (geom) => drawnRing(geom.rs),
+            colliding: layout.colliding,
           })
         : null,
-    [actionGlyphs, geoms, innerLines, layers, ownedOrder, ownedT],
+    [actionGlyphs, geoms, innerLines, layers, layout.colliding, ownedOrder, ownedT],
   );
   const orderedOwnedPieces = useMemo(() => {
     const byKey = new Map(pieces.map((piece) => [piece.key, piece]));

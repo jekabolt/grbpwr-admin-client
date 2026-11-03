@@ -1,9 +1,10 @@
 // WHO COVERS WHOM IN ONE PICTURE, AND ON WHICH LEVEL EACH PIECE LIES. Two pieces stack when their
-// overlap reaches COVER_SHARE of the smaller one, so seam allowance never counts.
+// overlap reaches COVER_SHARE of the smaller one, so seam allowance never counts, unless they only
+// collide in the laid-out picture (`CollidingPairs`).
 // The order (bottom to top, the owner's choice) says which of a stack is covered: its contour is
-// dashed there. The level says the colour and reads the shapes alone: a piece lying on a larger one
-// is a level above it, a seam adds no level. No flag, row or order enters it, so two pockets sewn the
-// same keep one colour whichever way round their layers are, and on every later step.
+// dashed there. The level says the colour and reads the shapes and that link alone: a piece lying on
+// a larger one is a level above it, a seam adds no level. No flag, pose or order enters it, so two
+// pockets sewn the same keep one colour whichever way round their layers are, and on every later step.
 // The step picture and the unit pictogram both read this one rule.
 
 import { Clipper, FillRule, Path64, Paths64, Point64, PointInPolygonResult } from 'clipper2-js';
@@ -23,6 +24,9 @@ const LEVEL_FILLS = ['var(--color-bgColor)', '#d9d9d9', '#b8b8b8', '#9c9c9c', '#
 export const levelFill = (level: number) => LEVEL_FILLS[Math.min(level, LEVEL_FILLS.length - 1)];
 
 type Box = { x0: number; y0: number; x1: number; y1: number };
+
+/** Pairs of pieces that overlap in the picture without lying on each other: neither covers the other. */
+export type CollidingPairs = readonly (readonly [string, string])[];
 
 export type CoverPiece = {
   key: string;
@@ -100,7 +104,12 @@ export function coverPiece(key: string, points: readonly Pt2[]): CoverPiece | nu
 }
 
 /** One pass over the bottom-to-top pieces: the covers, which read the order, and the levels, which do not. */
-export function coverOrder(ordered: readonly CoverPiece[]): CoverOrder {
+export function coverOrder(ordered: readonly CoverPiece[], colliding?: CollidingPairs): CoverOrder {
+  const apart = new Set<string>();
+  for (const [a, b] of colliding ?? []) {
+    apart.add(`${a}\u0000${b}`);
+    apart.add(`${b}\u0000${a}`);
+  }
   const covers = ordered.map(() => [] as number[]);
   const stacks = ordered.map(() => [] as number[]);
   const sameShape = ordered.map(() => false);
@@ -108,6 +117,7 @@ export function coverOrder(ordered: readonly CoverPiece[]): CoverOrder {
     const a = ordered[lower];
     for (let upper = lower + 1; upper < ordered.length; upper++) {
       const b = ordered[upper];
+      if (apart.has(`${a.key}\u0000${b.key}`)) continue;
       const smaller = Math.min(a.area, b.area);
       // The boxes bound the overlap: neighbours along a seam never reach the clipper.
       if (smaller <= EPS || boxOverlap(a.box, b.box) / smaller + EPS < COVER_SHARE) continue;

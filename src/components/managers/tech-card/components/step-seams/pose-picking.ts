@@ -352,8 +352,9 @@ export type OnTopChip = {
 
 /**
  * Nothing picked: names the input on top, and with exactly two inputs a press swaps them. A block
- * picked: names that block, active when it is on top, and a press lifts it over every block above it
- * that a row joins it to, one fact per pair. A block with no such row has no fact to store.
+ * picked: names that block, active when it is on top, and a press lifts it over every block above it,
+ * one fact per pair. When a row does not join it to one of those blocks a press could not put it on
+ * top, so it writes nothing.
  */
 export function onTopChip(
   blocks: readonly LayerBlock[],
@@ -370,9 +371,9 @@ export function onTopChip(
   if (top < 0) return null;
   const pickedInput = picked == null ? -1 : inputOf(picked);
   const lift = (input: number, over: readonly number[]): OnTopChip['press'] => {
-    const hosts = over
-      .filter((other) => joinsBlocks(rows, inputs[input].pieces, inputs[other].pieces))
-      .map((other) => inputs[other].pieces[0]);
+    if (!over.every((other) => joinsBlocks(rows, inputs[input].pieces, inputs[other].pieces)))
+      return null;
+    const hosts = over.map((other) => inputs[other].pieces[0]);
     const piece = input === pickedInput && picked ? picked : inputs[input].pieces[0];
     return hosts.length ? { piece, hosts } : null;
   };

@@ -464,6 +464,19 @@ describe('onTopChip: one chip, never off', () => {
     });
   });
 
+  it('with a block above and not joined, a press writes nothing and the chip stays disabled', () => {
+    const blocks = [block('A'), block('B'), block('C')];
+    const rows = [row('ab', 'A', 'B')];
+    const layers = layersOf(blocks, rows).layers;
+    expect(layers).toEqual(['A', 'B', 'C']);
+
+    // A is joined to B only and C stays above it: lifting over B alone would store a fact and leave
+    // the chip inactive after a reload.
+    expect(onTopChip(blocks, rows, layers, 'A')).toEqual({ input: 1, active: false, press: null });
+    // B is below C with no row between them, too.
+    expect(onTopChip(blocks, rows, layers, 'B')).toEqual({ input: 2, active: false, press: null });
+  });
+
   it('with no row between the blocks there is no fact to store', () => {
     const blocks = [block('A'), block('B')];
     const layers = layersOf(blocks, []).layers;

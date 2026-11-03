@@ -425,6 +425,11 @@ export type StepLayout = {
   hung?: [string, string][];
   /** The pieces a pose (P8) pinned, where their rows say. */
   posed?: string[];
+  /**
+   * Pieces that only collide in this picture: a seam joins their blocks but does not lie where it is
+   * drawn. Neither covers the other, on later steps too.
+   */
+  colliding?: [string, string][];
   /** Extent of every drawn piece and ghost, picture frame. */
   bbox: Box;
 };

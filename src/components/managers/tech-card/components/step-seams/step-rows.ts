@@ -2,8 +2,9 @@
 // the geometry engine. Result computation deliberately does not read the seam graph: a row either
 // resolves against today's geometry here or contributes no placement.
 
-import type { PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
+import type { Affine, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
 import { orderSideAlongOutline } from 'lib/assembly-skeleton/union';
+import { apply } from 'lib/assembly-skeleton/union/affine';
 import { resolveEdge } from 'lib/assembly-skeleton/union';
 import {
   resolveSeamDecisions,
@@ -134,6 +135,70 @@ export function candidateOfStoredSeam(
     return resolved ? { ...resolved, sewn: true } : null;
   }
   return seamOfSides(parts, geoms, innerLines, placement);
+}
+
+/** Half of a seam's shorter side within this of the other side: the seam is laid. */
+const SEAM_LAID_MM = 50;
+const SEAM_SAMPLE_MM = 10;
+
+function sideSamples(
+  side: readonly EdgeAnchor[],
+  T: ReadonlyMap<string, Affine>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): Pt2[] {
+  return side.flatMap((anchor) => {
+    const edge = resolveEdge(anchor.edgeHint, geoms);
+    const at = T.get(anchor.piece);
+    if (!edge || !at) return [];
+    const lengths = edge.pts
+      .slice(1)
+      .map((point, index) =>
+        Math.hypot(point[0] - edge.pts[index][0], point[1] - edge.pts[index][1]),
+      );
+    const total = lengths.reduce((sum, length) => sum + length, 0);
+    const [start, end] = anchor.range[1] > anchor.range[0] ? anchor.range : [0, 1];
+    const out: Pt2[] = [];
+    let walked = 0;
+    lengths.forEach((length, index) => {
+      const [x0, y0] = edge.pts[index];
+      const [x1, y1] = edge.pts[index + 1];
+      for (
+        let along = Math.ceil(walked / SEAM_SAMPLE_MM) * SEAM_SAMPLE_MM;
+        along <= walked + length;
+        along += SEAM_SAMPLE_MM
+      ) {
+        if (along < start * total || along > end * total) continue;
+        const share = length ? (along - walked) / length : 0;
+        out.push(apply(at, [x0 + (x1 - x0) * share, y0 + (y1 - y0) * share]));
+      }
+      walked += length;
+    });
+    return out;
+  });
+}
+
+/**
+ * Does this row's seam lie where it is drawn? A surface row always does; an edge row when its two
+ * sides meet in the picture. A row nobody placed is seated by translation only, so a sleeve cap can
+ * touch its armhole at one point and hang across the body: those pieces collide, they do not lie on
+ * each other. A side that cannot be measured counts as laid.
+ */
+export function seamIsLaid(
+  row: Pick<StoredSeam, 'kind' | 'sideA' | 'sideB'>,
+  T: ReadonlyMap<string, Affine>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): boolean {
+  if (row.kind === 'surface') return true;
+  const a = sideSamples(row.sideA, T, geoms);
+  const b = sideSamples(row.sideB, T, geoms);
+  if (!a.length || !b.length) return true;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  const gaps = short
+    .map((point) =>
+      Math.min(...long.map((other) => Math.hypot(point[0] - other[0], point[1] - other[1]))),
+    )
+    .sort((left, right) => left - right);
+  return gaps[Math.floor(gaps.length / 2)] <= SEAM_LAID_MM;
 }
 
 export type StepStoredRow = {

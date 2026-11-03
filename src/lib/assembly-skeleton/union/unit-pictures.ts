@@ -8,7 +8,13 @@
 
 import type { Affine, PieceGeom, SeamGraph, UnionLayout, UnionPlacement } from '../types';
 import { apply } from './affine';
-import { coverOrder, coverPiece, outlineRuns, uncoveredRuns } from './layer-cover';
+import {
+  coverOrder,
+  coverPiece,
+  outlineRuns,
+  uncoveredRuns,
+  type CollidingPairs,
+} from './layer-cover';
 import { unionLayout } from './layout';
 import { unionPicture, type UnionPicture } from './picture';
 
@@ -40,6 +46,7 @@ type StepLayoutPicture = {
   stacked: readonly (readonly string[])[];
   onRuns: readonly string[];
   hung?: readonly (readonly [piece: string, host: string])[];
+  colliding?: CollidingPairs;
 };
 
 const layoutBox = (
@@ -99,7 +106,7 @@ export function unionPictureOfLayout(
   };
   const picture = unionPicture(union, geoms);
   const shapes = picture.shapes.flatMap((shape) => coverPiece(shape.pieceKey, shape.pts) ?? []);
-  const { covers, levels } = coverOrder(shapes);
+  const { covers, levels } = coverOrder(shapes, layout.colliding);
   if (!levels.some(Boolean)) return picture;
   const lowerLayerRuns: NonNullable<UnionPicture['lowerLayerRuns']> = {};
   shapes.forEach((shape, index) => {

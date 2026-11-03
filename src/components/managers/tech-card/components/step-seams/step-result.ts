@@ -10,7 +10,7 @@ import { handsFromSeams } from './step-hand';
 import { inputGroups, type FormOpLike, type InputGroup } from './step-seams-model';
 import { invert, stepLayout, type StepLayout } from './step-picture';
 import { pinPoses, poseBlockGroup, type PosePin } from './step-pose';
-import { storedRowsOfStep } from './step-rows';
+import { seamIsLaid, storedRowsOfStep, type StepStoredRow } from './step-rows';
 
 export type StepResultBlock = {
   inputKey: string;
@@ -342,6 +342,47 @@ export function layersOf(blocks: readonly LayerBlock[], rows: readonly LayerRow[
   };
 }
 
+/**
+ * RULE 8'S LINK. Inputs of a step and the pieces of a carried block are linked, so they can cover each
+ * other. The exception is two input blocks joined by a seam that does not lie where it is drawn, and
+ * by no seam that does: they only collide in the picture, and that holds on later steps, when they
+ * are one carried block. Reads the seams' geometry only, no layer flag and no pose.
+ */
+function collidingOfStep(
+  inputs: readonly ResolvedInput[],
+  stored: readonly StepStoredRow[],
+  transforms: ReadonlyMap<string, Affine>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): [string, string][] {
+  const blockOf = new Map<string, number>();
+  inputs.forEach((group, index) => {
+    for (const piece of group.pieces) if (!blockOf.has(piece)) blockOf.set(piece, index);
+  });
+  const blocksOf = (side: readonly { piece: string }[]) =>
+    unique(side.flatMap((anchor) => blockOf.get(anchor.piece) ?? []));
+  const pairKey = (a: number, b: number) => (a < b ? `${a}:${b}` : `${b}:${a}`);
+  const laid = new Set<string>();
+  const notLaid = new Map<string, [number, number]>();
+  for (const { row } of stored) {
+    const lies = seamIsLaid(row, transforms, geoms);
+    for (const a of blocksOf(row.sideA))
+      for (const b of blocksOf(row.sideB)) {
+        if (a === b) continue;
+        if (lies) laid.add(pairKey(a, b));
+        else notLaid.set(pairKey(a, b), [a, b]);
+      }
+  }
+  const carried = inputs.flatMap((group) => group.seed?.layout.colliding ?? []);
+  const fresh = [...notLaid].flatMap(([key, [a, b]]) =>
+    laid.has(key)
+      ? []
+      : inputs[a].pieces.flatMap((piece) =>
+          inputs[b].pieces.map((other): [string, string] => [piece, other]),
+        ),
+  );
+  return [...carried, ...fresh];
+}
+
 function neutralLayout(
   pieces: readonly string[],
   geoms: ReadonlyMap<string, PieceGeom>,
@@ -398,6 +439,7 @@ function computeStep(
     blockTransforms,
   );
   const transforms = new Map(layout.T);
+  layout.colliding = collidingOfStep(inputs, stored, transforms, input.geoms);
   const ownRow =
     stored.length > 0 || (op?.poseKeys ?? []).some((key) => input.poses?.has(key) ?? false);
   const ignored = new Set(ignoredPoses);
