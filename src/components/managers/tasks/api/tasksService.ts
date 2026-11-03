@@ -57,6 +57,8 @@ export interface TasksService {
     to: Date,
   ): Promise<{ tasks: Task[]; total: number; closed: TaskClosed[] }>;
   getTask(id: number): Promise<Task | undefined>;
+  /** Bytes of an attachment, base64. `tooLarge` is a state of the file, not a failure. */
+  getTaskFileContent(taskId: number, fileId: number): Promise<{ content: string; tooLarge: boolean }>;
   /**
    * `parentTaskId` — РОДИТЕЛЬ СОЗДАВАЕМОЙ карточки; 0 = верхний уровень. Единственное место, где
    * родитель едет не отдельным `SetTaskParent`: «создать сабтаску» обязано быть ОДНИМ вызовом,
@@ -423,6 +425,12 @@ export const tasksService: TasksService = {
           approximate: !!c.approximate,
         })),
       })),
+
+  getTaskFileContent: (taskId, fileId) =>
+    adminService.GetTaskFileContent({ taskId, fileId }).then((r) => ({
+      content: r.content ?? '',
+      tooLarge: !!r.tooLarge,
+    })),
 
   getTask: (id) =>
     adminService.GetTask({ id }).then((r) =>
