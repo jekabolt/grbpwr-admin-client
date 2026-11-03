@@ -4,19 +4,53 @@
 
 import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { compose, IDENTITY } from 'lib/assembly-skeleton/union/affine';
-import { poseOf, type EdgeAnchor, type StoredPose, type StoredSeam } from 'lib/seams';
+import { poseAnchorOf, poseOf, type SeamLayer, type StoredPose, type StoredSeam } from 'lib/seams';
 
+import { cardFoldsOf, foldOnceOf, type CardFolds, type StepFolds } from './step-folds';
 import { handsFromSeams } from './step-hand';
 import { inputGroups, type FormOpLike, type InputGroup } from './step-seams-model';
 import { invert, stepLayout, type StepLayout } from './step-picture';
 import { pinPoses, poseBlockGroup, type PosePin } from './step-pose';
-import { storedRowsOfStep, type StepStoredRow } from './step-rows';
+import { seamIsLaid, storedRowsOfStep, type StepStoredRow } from './step-rows';
 
 export type StepResultBlock = {
   inputKey: string;
   pieces: readonly string[];
   /** The one affine applied to this input's seeded result in this step. */
   T: Affine;
+};
+
+export type LayerRelation = readonly [under: string, over: string];
+
+/** The part of a stored anchor the layer rule reads. */
+export type LayerAnchor = { readonly piece: string; readonly layer?: SeamLayer };
+
+/** One input of a step, rigid: its pieces and the order and claims it carries from earlier steps. */
+export type LayerBlock = {
+  pieces: readonly string[];
+  layers?: readonly string[];
+  stacked?: readonly LayerRelation[];
+};
+
+/** One stored seam or pose row of a step, in the order it is read. */
+export type LayerRow = {
+  key: string;
+  pose?: boolean;
+  sideA: readonly LayerAnchor[];
+  sideB: readonly LayerAnchor[];
+};
+
+export type LayerInput = { blocks: readonly LayerBlock[]; rows: readonly LayerRow[] };
+
+/** A stored flag that lost to an earlier one. */
+export type LayerConflict = { key: string; piece: string; partner: string; layer: SeamLayer };
+
+export type LayerStacking = {
+  /** Bottom → top. Every pair of `stacked` agrees with this order. */
+  layers: string[];
+  stacked: LayerRelation[];
+  lower: string[];
+  conflicts: LayerConflict[];
 };
 
 export type StepResult = {
@@ -31,6 +65,10 @@ export type StepResult = {
   stacked: readonly (readonly [string, string])[];
   /** Pieces some claim puts under another piece; every other piece is not lower. */
   lower: readonly string[];
+  /** What `layersOf` read for this result: PLACE recomputes its preview from the same input. */
+  layerInput: LayerInput;
+  /** Stored flags the first-flag rule did not apply: listed, never rewritten. */
+  layerConflicts: readonly LayerConflict[];
   blocks: readonly StepResultBlock[];
   /** Piece-level [input, host] links in this operation's result, for rigid PLACE pickup. */
   hung: readonly (readonly [string, string])[];
@@ -51,6 +89,8 @@ export type StepResultsInput = {
   geoms: ReadonlyMap<string, PieceGeom>;
   innerLines: ReadonlyMap<string, Pt2[][]>;
   pieceKeys: ReadonlySet<string>;
+  /** The card's stored folds; only a step that sees one draws it. */
+  folds?: CardFolds;
 };
 
 export type StepResultsOptions = {
@@ -144,11 +184,12 @@ function applyCurrentPoses(
   const pins = new Map<string, PosePin>();
   for (const key of op.poseKeys) {
     const row = rows.get(key);
-    const pose = row ? poseOf(row) : null;
+    const anchor = row ? poseAnchorOf(row) : null;
+    const pose = anchor ? { ...anchor, host: anchor.piece } : row ? poseOf(row) : null;
     if (!pose) continue;
     const pieceInput = inputOf.get(pose.piece);
     const hostInput = inputOf.get(pose.host);
-    if (pieceInput != null && pieceInput === hostInput) {
+    if (!anchor && pieceInput != null && pieceInput === hostInput) {
       ignored.push(key);
       continue;
     }
@@ -182,9 +223,10 @@ function applyCurrentPoses(
   return unique(ignored);
 }
 
-type LayerRelation = readonly [under: string, over: string];
-
-/** Stable topological order: input order is the tie-breaker, constraints only move layers. */
+/**
+ * Stable topological order: input order is the tie-breaker, constraints only move layers. Relations
+ * come in priority order; one that would close a cycle with those before it is dropped.
+ */
 function orderedLayers(base: readonly string[], relations: readonly LayerRelation[]): string[] {
   const order = unique(base);
   const present = new Set(order);
@@ -192,20 +234,16 @@ function orderedLayers(base: readonly string[], relations: readonly LayerRelatio
   const degree = new Map(order.map((key) => [key, 0]));
   for (const [under, over] of relations) {
     if (under === over || !present.has(under) || !present.has(over)) continue;
+    if (next.get(under)?.has(over)) continue;
+    if (reachesAny(next, [over], new Set([under]))) continue;
     if (!next.has(under)) next.set(under, new Set());
-    if (next.get(under)!.has(over)) continue;
     next.get(under)!.add(over);
     degree.set(over, (degree.get(over) ?? 0) + 1);
   }
   const left = new Set(order);
   const out: string[] = [];
   while (left.size) {
-    const key = order.find((candidate) => left.has(candidate) && degree.get(candidate) === 0);
-    // Contradictory owner relations retain the remaining carried/input order deterministically.
-    if (!key) {
-      out.push(...order.filter((candidate) => left.has(candidate)));
-      break;
-    }
+    const key = order.find((candidate) => left.has(candidate) && degree.get(candidate) === 0)!;
     left.delete(key);
     out.push(key);
     for (const over of next.get(key) ?? []) degree.set(over, (degree.get(over) ?? 0) - 1);
@@ -213,70 +251,140 @@ function orderedLayers(base: readonly string[], relations: readonly LayerRelatio
   return out;
 }
 
-/**
- * Bottom→top rule. Stacking claims come only from the owner: an anchor's explicit `layer` (the PLACE
- * under/over switch, on seam and pose rows). A hand place's `inside` is not a claim. Claims made at an earlier step ride
- * in the carried block (`stacked`). With no claim two pieces are equal: no piece is lower
- * (`lower` stays empty), and the order is only the paint order: carried order, then input order,
- * a current surface part before its host.
- */
-function layersOf(
-  inputs: readonly ResolvedInput[],
-  rows: readonly StepStoredRow[],
-  poses: readonly StoredPose[],
-  transforms: ReadonlyMap<string, Affine>,
-): { layers: string[]; stacked: LayerRelation[]; lower: string[] } {
-  const base = inputs.flatMap((group) => {
-    const carried = group.seed?.result.layers.filter((piece) => group.pieces.includes(piece)) ?? [];
-    return [...carried, ...group.pieces.filter((piece) => !carried.includes(piece))];
-  });
-  const stacked: LayerRelation[] = [];
-  for (const group of inputs)
-    for (const [under, over] of group.seed?.result.stacked ?? [])
-      if (group.pieces.includes(under) && group.pieces.includes(over)) stacked.push([under, over]);
-  const claim = (anchor: EdgeAnchor, other: readonly EdgeAnchor[]) => {
-    const partners = unique(other.map((candidate) => candidate.piece)).filter(
-      (piece) => piece !== anchor.piece,
-    );
-    if (anchor.layer === 'under')
-      for (const partner of partners) stacked.push([anchor.piece, partner]);
-    else if (anchor.layer === 'over')
-      for (const partner of partners) stacked.push([partner, anchor.piece]);
-  };
-  const hints: LayerRelation[] = [];
-  for (const group of inputs) {
-    const carried = group.seed?.result.layers.filter((piece) => group.pieces.includes(piece)) ?? [];
-    for (let index = 1; index < carried.length; index++)
-      hints.push([carried[index - 1], carried[index]]);
+/** Does any of `from` reach any of `to` along accepted relations? */
+function reachesAny(
+  next: ReadonlyMap<string, ReadonlySet<string>>,
+  from: readonly string[],
+  to: ReadonlySet<string>,
+): boolean {
+  const seen = new Set(from);
+  const stack = [...from];
+  while (stack.length) {
+    const key = stack.pop()!;
+    if (to.has(key)) return true;
+    for (const over of next.get(key) ?? [])
+      if (!seen.has(over)) {
+        seen.add(over);
+        stack.push(over);
+      }
   }
-  for (const stored of rows) {
-    const surface = stored.candidate.kind === 'surface' ? stored.candidate.surface : undefined;
-    if (surface) hints.push([surface.part, surface.host]);
-    for (const anchor of stored.row.sideA) claim(anchor, stored.row.sideB);
-    for (const anchor of stored.row.sideB) claim(anchor, stored.row.sideA);
-  }
-  for (const pose of poses) {
-    for (const anchor of pose.sideA) claim(anchor, pose.sideB);
-    for (const anchor of pose.sideB) claim(anchor, pose.sideA);
-  }
-  const present = (piece: string) => transforms.has(piece);
-  const claims = uniqueRelations(stacked.filter(([u, o]) => u !== o && present(u) && present(o)));
-  const claimed = new Set(claims.map(([u, o]) => `${u}\u0000${o}`));
-  const layers = orderedLayers(base.filter(present), [
-    ...claims,
-    ...hints.filter(([u, o]) => !claimed.has(`${o}\u0000${u}`)),
-  ]);
-  return { layers, stacked: claims, lower: unique(claims.map(([under]) => under)) };
+  return false;
 }
 
-function uniqueRelations(relations: readonly LayerRelation[]): LayerRelation[] {
-  const seen = new Set<string>();
-  return relations.filter(([u, o]) => {
-    const key = `${u}\u0000${o}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
+/**
+ * THE LAYER RULE. Bottom→top order and claims of one step, one source for the result, the preview
+ * and paper. Claims come only from the owner: an anchor's explicit `layer` on a seam or pose row. A
+ * hand place's `inside` is not a claim. A flag says how the two input blocks of its row relate, so
+ * it is read as every piece of the lower block under every piece of the upper one; both blocks stay
+ * rigid and whole. Rows are read in order and the first flag wins: a flag contrary to what is already
+ * read, directly or through another block, is listed in `conflicts` and not applied (the row is not
+ * rewritten). A flag between two pieces of one block stays a claim about those two pieces. Claims made
+ * at an earlier step ride in the block (`stacked`). With no claim nothing is lower and the later input
+ * lies on top: carried order, then input order, a surface part like any other input.
+ */
+export function layersOf(blocks: readonly LayerBlock[], rows: readonly LayerRow[]): LayerStacking {
+  const blockOf = new Map<string, number>();
+  blocks.forEach((block, index) => {
+    for (const piece of block.pieces) if (!blockOf.has(piece)) blockOf.set(piece, index);
   });
+  const members = blocks.map((block, index) =>
+    unique(block.pieces).filter((piece) => blockOf.get(piece) === index),
+  );
+  const carriedOf = (block: LayerBlock, index: number) =>
+    (block.layers ?? []).filter((piece) => members[index].includes(piece));
+
+  const above = new Map<string, Set<string>>();
+  const stacked: LayerRelation[] = [];
+  const add = (under: string, over: string) => {
+    if (!above.has(under)) above.set(under, new Set());
+    if (above.get(under)!.has(over)) return;
+    above.get(under)!.add(over);
+    stacked.push([under, over]);
+  };
+  blocks.forEach((block, index) => {
+    for (const [under, over] of block.stacked ?? [])
+      if (members[index].includes(under) && members[index].includes(over)) add(under, over);
+  });
+
+  const conflicts: LayerConflict[] = [];
+  const read = (key: string, anchor: LayerAnchor, other: readonly LayerAnchor[]) => {
+    const own = blockOf.get(anchor.piece);
+    if (!anchor.layer || own == null) return;
+    for (const partner of unique(other.map((candidate) => candidate.piece))) {
+      const theirs = blockOf.get(partner);
+      if (partner === anchor.piece || theirs == null) continue;
+      const mine = own === theirs ? [anchor.piece] : members[own];
+      const yours = own === theirs ? [partner] : members[theirs];
+      const [unders, overs] = anchor.layer === 'under' ? [mine, yours] : [yours, mine];
+      if (reachesAny(above, overs, new Set(unders))) {
+        conflicts.push({ key, piece: anchor.piece, partner, layer: anchor.layer });
+        continue;
+      }
+      for (const under of unders) for (const over of overs) add(under, over);
+    }
+  };
+  for (const row of rows) {
+    for (const anchor of row.sideA) read(row.key, anchor, row.sideB);
+    for (const anchor of row.sideB) read(row.key, anchor, row.sideA);
+  }
+
+  const hints: LayerRelation[] = [];
+  blocks.forEach((block, index) => {
+    const carried = carriedOf(block, index);
+    for (let at = 1; at < carried.length; at++) hints.push([carried[at - 1], carried[at]]);
+  });
+
+  const base = blocks.flatMap((block, index) => {
+    const carried = carriedOf(block, index);
+    return [...carried, ...members[index].filter((piece) => !carried.includes(piece))];
+  });
+  return {
+    layers: orderedLayers(base, [...stacked, ...hints]),
+    stacked,
+    lower: unique(stacked.map(([under]) => under)),
+    conflicts,
+  };
+}
+
+/**
+ * RULE 8'S LINK. Inputs of a step and the pieces of a carried block are linked, so they can cover each
+ * other. The exception is two input blocks joined by a seam that does not lie where it is drawn, and
+ * by no seam that does: they only collide in the picture, and that holds on later steps, when they
+ * are one carried block. Reads the seams' geometry only, no layer flag and no pose.
+ */
+function collidingOfStep(
+  inputs: readonly ResolvedInput[],
+  stored: readonly StepStoredRow[],
+  transforms: ReadonlyMap<string, Affine>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): [string, string][] {
+  const blockOf = new Map<string, number>();
+  inputs.forEach((group, index) => {
+    for (const piece of group.pieces) if (!blockOf.has(piece)) blockOf.set(piece, index);
+  });
+  const blocksOf = (side: readonly { piece: string }[]) =>
+    unique(side.flatMap((anchor) => blockOf.get(anchor.piece) ?? []));
+  const pairKey = (a: number, b: number) => (a < b ? `${a}:${b}` : `${b}:${a}`);
+  const laid = new Set<string>();
+  const notLaid = new Map<string, [number, number]>();
+  for (const { row } of stored) {
+    const lies = seamIsLaid(row, transforms, geoms);
+    for (const a of blocksOf(row.sideA))
+      for (const b of blocksOf(row.sideB)) {
+        if (a === b) continue;
+        if (lies) laid.add(pairKey(a, b));
+        else notLaid.set(pairKey(a, b), [a, b]);
+      }
+  }
+  const carried = inputs.flatMap((group) => group.seed?.layout.colliding ?? []);
+  const fresh = [...notLaid].flatMap(([key, [a, b]]) =>
+    laid.has(key)
+      ? []
+      : inputs[a].pieces.flatMap((piece) =>
+          inputs[b].pieces.map((other): [string, string] => [piece, other]),
+        ),
+  );
+  return [...carried, ...fresh];
 }
 
 function neutralLayout(
@@ -292,6 +400,7 @@ function computeStep(
   index: number,
   latestByOutput: ReadonlyMap<string, ComputedStep>,
   outputAt: ReadonlyMap<string, readonly number[]>,
+  folds: StepFolds | null,
 ): ComputedStep {
   const op = input.ops[index];
   const inputs = resolvedInputs(input, index, latestByOutput, outputAt);
@@ -312,8 +421,10 @@ function computeStep(
       inputLayouts: inputs.map((group) => group.seed?.layout),
       bagsAsLayers: false,
       manualFit: opts.manualFit === true,
+      ...(folds ? { foldOnce: foldOnceOf(folds, input.geoms, input.folds?.grainDeg) } : {}),
     },
   );
+  if (folds && layout.T.size) layout.folds = folds;
 
   const neutral = inputs.map(
     (group) => group.seed?.layout ?? neutralLayout(group.pieces, input.geoms),
@@ -335,6 +446,7 @@ function computeStep(
     blockTransforms,
   );
   const transforms = new Map(layout.T);
+  layout.colliding = collidingOfStep(inputs, stored, transforms, input.geoms);
   const ownRow =
     stored.length > 0 || (op?.poseKeys ?? []).some((key) => input.poses?.has(key) ?? false);
   const ignored = new Set(ignoredPoses);
@@ -342,13 +454,34 @@ function computeStep(
     const row = ignored.has(key) ? undefined : input.poses?.get(key);
     return row ? [row] : [];
   });
-  const stacking = layersOf(inputs, stored, currentPoses, transforms);
+  const layerInput: LayerInput = {
+    blocks: inputs.map((group) => ({
+      pieces: group.pieces.filter((piece) => transforms.has(piece)),
+      ...(group.seed
+        ? { layers: group.seed.result.layers, stacked: group.seed.result.stacked }
+        : {}),
+    })),
+    rows: [
+      ...stored.map(({ key, row }): LayerRow => ({ key, sideA: row.sideA, sideB: row.sideB })),
+      ...currentPoses.map(
+        (pose): LayerRow => ({
+          key: pose.seamKey,
+          pose: true,
+          sideA: pose.sideA,
+          sideB: pose.sideB,
+        }),
+      ),
+    ],
+  };
+  const stacking = layersOf(layerInput.blocks, layerInput.rows);
   const result: StepResult = {
     opIndex: index,
     transforms,
     layers: stacking.layers,
     stacked: stacking.stacked,
     lower: stacking.lower,
+    layerInput,
+    layerConflicts: stacking.conflicts,
     blocks: inputs.map((group, groupIndex) => ({
       inputKey: group.key,
       pieces: group.pieces.filter((piece) => transforms.has(piece)),
@@ -394,12 +527,16 @@ export function stepResultsSignature(
       poseKeys: op.poseKeys,
       operationNumber: op.operationNumber,
       assemblyBlockDetached: op.assemblyBlockDetached,
+      ...(op.foldKeys?.length ? { foldKeys: op.foldKeys } : {}),
     })),
     rows: sortedEntries(input.byKey),
     poses: sortedEntries(input.poses ?? new Map()),
     pieceKeys: [...input.pieceKeys].sort(),
     innerLines: identityOf(input.innerLines as object),
     ...(opts.manualFit ? { manualFit: true } : {}),
+    ...(input.folds?.rows.length
+      ? { folds: input.folds.rows, grainDeg: sortedEntries(input.folds.grainDeg) }
+      : {}),
   });
 }
 
@@ -434,8 +571,16 @@ export function stepResults(
   });
   const latestByOutput = new Map<string, ComputedStep>();
   const computed: ComputedStep[] = [];
+  const foldsAt = cardFoldsOf(input.ops, input.folds, input.geoms, input.innerLines);
   input.ops.forEach((op, index) => {
-    const step = computeStep(input, opts, index, latestByOutput, outputAt);
+    const step = computeStep(
+      input,
+      opts,
+      index,
+      latestByOutput,
+      outputAt,
+      foldsAt?.(index) ?? null,
+    );
     computed.push(step);
     const output = (op.outputUnitKey ?? '').trim();
     if (output) latestByOutput.set(output, step);

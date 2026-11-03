@@ -9,11 +9,15 @@ import {
   resolveSeamDecisions,
   seamFromCandidate,
   SEAMS,
+  normalizeParts,
+  sidePartEdges,
+  type SidePart,
   type StoredSeam,
   type StoredSeamDirection,
 } from 'lib/seams';
 import type { ReviewItem } from './review-model';
 import { edgeOf, pieceOf } from './words';
+import { sideLengthMm } from '../step-seams/seam-length';
 
 export type AnchorCtx = {
   pieces: readonly PieceGeom[];
@@ -79,27 +83,69 @@ export function runsOfSide(edges: readonly EdgeId[], geoms: ReadonlyMap<string, 
 
 /** A hand connection (click A, click B; shift-click for more runs on a side) → a confirmed row. */
 export function rowFromHand(
-  a: readonly EdgeId[],
-  b: readonly EdgeId[],
+  a: readonly EdgeId[] | readonly SidePart[],
+  b: readonly EdgeId[] | readonly SidePart[],
   geoms: ReadonlyMap<string, PieceGeom>,
   ctx: AnchorCtx,
   o: { direction: StoredSeamDirection; seamKey?: string; note?: string },
 ): StoredSeam | null {
-  const ra = runsOfSide(a, geoms);
-  const rb = runsOfSide(b, geoms);
+  const partsOf = (side: readonly EdgeId[] | readonly SidePart[]) =>
+    normalizeParts(
+      side.map((part) => (typeof part === 'string' ? { target: part } : part)),
+      geoms,
+    );
+  const pa = partsOf(a);
+  const pb = partsOf(b);
+  const repeatsEdge = (parts: readonly SidePart[]) => {
+    const seen = new Set<EdgeId>();
+    for (const part of parts)
+      for (const edge of sidePartEdges(part)) {
+        if (seen.has(edge)) return true;
+        seen.add(edge);
+      }
+    return false;
+  };
+  if (repeatsEdge(pa) || repeatsEdge(pb)) return null;
+  const anyRange = [...pa, ...pb].some((part) => !!part.range);
+  const runs = (parts: readonly SidePart[]): SidePart[] =>
+    anyRange
+      ? [...parts]
+      : runsOfSide(
+          parts.map((part) => part.target as EdgeId),
+          geoms,
+        ).map((target): SidePart => ({ target }));
+  const ra = runs(pa);
+  const rb = runs(pb);
   if (ra.length === 0 || rb.length === 0) return null;
   const composite = ra.length > 1 || rb.length > 1;
-  const len = (ids: readonly EdgeId[]) =>
-    ids.reduce((s, id) => s + (edgeOf(id, geoms)?.lenMm ?? 0), 0);
-  const aLen = len(a);
-  const bLen = len(b);
+  const partial = !composite && anyRange;
+  const aLen = sideLengthMm(pa, geoms, () => 0);
+  const bLen = sideLengthMm(pb, geoms, () => 0);
   const d = Math.abs(aLen - bLen);
+  const partRange: Record<EdgeId, [number, number]> = {};
+  if (composite)
+    for (const part of [...ra, ...rb])
+      if (part.range) partRange[part.target] = [part.range[0], part.range[1]];
   const c: SeamCandidate = {
-    a: ra[0],
-    b: rb[0],
-    ...(composite ? { aParts: ra, bParts: rb } : {}),
+    a: ra[0].target,
+    b: rb[0].target,
+    ...(composite
+      ? {
+          aParts: ra.map((part) => part.target),
+          bParts: rb.map((part) => part.target),
+        }
+      : {}),
     score: 1,
-    kind: composite ? 'composite' : 'edge',
+    kind: composite ? 'composite' : partial ? 'partial' : 'edge',
+    ...(partial
+      ? {
+          range: {
+            a: ra[0].range ? [ra[0].range[0], ra[0].range[1]] : [0, aLen],
+            b: rb[0].range ? [rb[0].range[0], rb[0].range[1]] : [0, bLen],
+          },
+        }
+      : {}),
+    ...(Object.keys(partRange).length ? { partRange } : {}),
     evidence: {
       dLenMm: Math.round(d * 10) / 10,
       relLen: Math.max(aLen, bLen) > 0 ? d / Math.max(aLen, bLen) : 0,
@@ -107,7 +153,7 @@ export function rowFromHand(
       curvature: 'flat',
       hand: 'neutral',
       twin: 'none',
-      self: new Set([...a, ...b].map(pieceOf)).size === 1,
+      self: new Set([...pa, ...pb].map((part) => pieceOf(part.target))).size === 1,
       rule: 'connected by hand',
       aLenMm: aLen,
       bLenMm: bLen,
@@ -176,6 +222,3 @@ export function reconfirmRow(item: ReviewItem, ctx: AnchorCtx): StoredSeam | nul
     ...opts(ctx),
   });
 }
-
-export const flipped = (d: StoredSeamDirection): StoredSeamDirection =>
-  d === 'same' ? 'reversed' : 'same';

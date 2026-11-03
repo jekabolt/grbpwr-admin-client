@@ -39,12 +39,12 @@ export type UnionPicture = {
   overflow: string[];
   underlay: string[];
   overlap: number;
-  /** Owner-result pieces that must be redrawn as the translucent lower layer. */
+  /** Owner-result pieces with a piece above covering them, bottom to top. */
   lowerLayers?: string[];
-  /** Claimed upper pieces whose union clips each lower-layer tint. */
-  lowerLayerCovers?: Record<string, string[]>;
-  /** One translucent pass per depth level, capped at two. */
-  lowerLayerDepths?: Record<string, 1 | 2>;
+  /** A lower piece's contour cut at its covers, and its inner lines where nothing covers them. */
+  lowerLayerRuns?: Record<string, { visible: Pt2[][]; hidden: Pt2[][]; lines: Pt2[][] }>;
+  /** Per piece its hierarchy level, the one thing its colour depends on. */
+  levels?: Record<string, number>;
   /** Visible numbers for offset followers of an identical stack. */
   twinLabels?: Record<string, number>;
 };

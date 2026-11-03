@@ -130,7 +130,7 @@ export function assignSeams(P: CandidatePool, input: SeamAssignmentInput): SeamG
     if (c.kind === 'closure-not-seam') continue;
     if (same) forcedSame.add(same);
     forced.push(
-      same && !c.aParts && !c.bParts
+      same && !c.aParts && !c.bParts && !c.range
         ? { ...c, evidence: { ...same.evidence, rule: c.evidence.rule } }
         : c,
     );

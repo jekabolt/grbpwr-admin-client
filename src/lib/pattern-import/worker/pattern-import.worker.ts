@@ -8,6 +8,7 @@
 //
 // Messages are handled one at a time (a queue), so a stage never sees half of another stage's
 // state; `cancel` jumps the queue — it is read while a stage awaits (page by page, file by file).
+import { announceWorkerReady } from 'lib/worker-load';
 import type { ImportWorkerRequest, StageIO, StageName } from '../types';
 import type { WorkerMessage } from './client';
 import { ImportError, cancelled, toWireError } from './errors';
@@ -153,3 +154,5 @@ scope.onmessage = (ev) => {
     }
   });
 };
+
+announceWorkerReady();

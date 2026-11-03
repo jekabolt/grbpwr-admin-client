@@ -19,6 +19,7 @@ export {
   anchorOfRunId,
   newSeamKey,
   outlineAnchor,
+  poseAnchorOf,
   poseOf,
   poseRow,
   seamFromCandidate,
@@ -27,6 +28,13 @@ export {
 } from './anchor';
 export { contourSig, frameOf, grainDegOf, runsOfPiece } from './frame';
 export { resolveSeamDecisions, sideEdges } from './resolve';
+export {
+  candidateSideParts,
+  expandSidePart,
+  normalizeParts,
+  sidePartEdges,
+  type SidePart,
+} from './span';
 export {
   POSE_KIND_WIRE,
   fromWire,
@@ -40,6 +48,7 @@ export {
 export {
   TRANSFER,
   edgeMapOf,
+  mirrorEdgeMapOf,
   resolveAcrossSizes,
   type EdgeMap,
   type SizePieces,

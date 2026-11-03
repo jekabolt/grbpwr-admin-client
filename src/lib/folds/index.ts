@@ -9,9 +9,17 @@
 
 export * from './types';
 export { defaultFlipMm, foldFromHint, foldFromLine, type FoldMeta } from './anchor';
+export { coincidentGroups, foldedSideLengthMm } from './coincide';
 export { foldHints, type FoldHintOptions } from './hints';
 export { resolveFolds } from './resolve';
 export { foldFromWire, foldsFromWire, foldToWire } from './wire';
+export {
+  activeFoldKeys,
+  activeFoldRows,
+  foldMap,
+  type FoldMapGeometry,
+  type FoldStep,
+} from './fold-map';
 export {
   clipSide,
   doubleTurn,

@@ -3,13 +3,18 @@ import { isJoin, stepConfidence, type MapRead } from 'lib/assembly-skeleton/map'
 import { edgesOf } from 'lib/assembly-skeleton/map/frame';
 import { pieceKeyOf, resolveEdge } from 'lib/assembly-skeleton/union/layout';
 import type { SeamCandidate } from 'lib/assembly-skeleton/types';
+import { activeFoldRows, type StoredFold } from 'lib/folds';
+import { candidateSideParts } from 'lib/seams';
 import { Text } from 'ui';
+import { useFoldRows } from '../assembly-folds/folds-store';
 import { stepHighlightOf } from '../step-seams/step-highlight';
 import { useStepResults } from '../step-seams/step-result-context';
 import type { StepResult } from '../step-seams/step-result';
 import { StepPictureSvg, useCardGeoms, useSeamRows } from '../step-seams/step-picture-view';
+import { sideLengthMm } from '../step-seams/seam-length';
 import { stepPictureOf, type SurfacePicture } from '../step-seams/surface-picture';
 import { SewnStrip } from './sewn-strip';
+import { StepFoldThumbs } from './step-fold-thumbs';
 import type { MapModel } from './use-map-model';
 
 /** Inner width of the 320px column after the block padding and outline. */
@@ -24,28 +29,59 @@ export const mapStepPictureOf = (
   index: number,
 ): SurfacePicture | null => stepPictureOf(results, index);
 
-function mismatchFacts(read: MapRead, seam: SeamCandidate): string[] {
-  // A side sewn along several runs (upper + main front edge) is as long as all its runs.
-  const lengthOf = (ids: readonly string[], evidence?: number) => {
-    if (evidence != null) return evidence;
-    const lens = ids.map((id) => resolveEdge(id, read.geoms)?.len);
-    return lens.every((len) => len != null) ? lens.reduce((sum, len) => sum! + len!, 0)! : null;
+export function mismatchFacts(
+  read: MapRead,
+  seam: SeamCandidate,
+  activeFolds: readonly StoredFold[] = [],
+  grainDeg?: ReadonlyMap<string, number>,
+): string[] {
+  const aParts = candidateSideParts(seam, 'a', read.geoms);
+  const bParts = candidateSideParts(seam, 'b', read.geoms);
+  const plainLengthOf = (parts: typeof aParts) =>
+    parts.every((part) => resolveEdge(part.target, read.geoms))
+      ? sideLengthMm(parts, read.geoms, () => 0)
+      : null;
+  const aPlain = plainLengthOf(aParts);
+  const bPlain = plainLengthOf(bParts);
+  /** The side's length once its plies lie on each other; null when no active fold changes it. */
+  const foldedOf = (parts: typeof aParts, plain: number | null, other: number | null) => {
+    if (!activeFolds.length || plain == null) return null;
+    const folded = sideLengthMm(parts, read.geoms, () => 0, {
+      activeFolds,
+      otherSideMm: other,
+      grainDeg,
+    });
+    return folded !== plain ? folded : null;
   };
-  const aIds = seam.aParts?.length ? seam.aParts : [seam.a];
-  const bIds = seam.bParts?.length ? seam.bParts : [seam.b];
-  const a = lengthOf(aIds, seam.evidence?.aLenMm);
-  const b = lengthOf(bIds, seam.evidence?.bLenMm);
+  const aFolded = foldedOf(aParts, aPlain, bPlain);
+  const bFolded = foldedOf(bParts, bPlain, aPlain);
+  // Without a fold event, evidence remains the first and byte-identical answer.
+  const a = aFolded ?? seam.evidence?.aLenMm ?? aPlain;
+  const b = bFolded ?? seam.evidence?.bLenMm ?? bPlain;
   const facts: string[] = [];
   if (a != null && b != null && Math.round(a) !== Math.round(b)) {
     facts.push(`length ${Math.round(a)} / ${Math.round(b)} mm`);
   }
 
-  const notchCount = (id: string) => {
-    const geom = read.geoms.get(pieceKeyOf(id));
-    return geom ? edgesOf(id, geom).reduce((total, edge) => total + edge.notchesMm.length, 0) : 0;
+  const notchCount = (part: (typeof aParts)[number]) => {
+    const geom = read.geoms.get(pieceKeyOf(part.target));
+    if (!geom) return 0;
+    let at = 0;
+    return edgesOf(part.target, geom).reduce((total, edge) => {
+      const from = part.range ? Math.max(0, part.range[0] - at) : 0;
+      const to = part.range ? Math.min(edge.lenMm, part.range[1] - at) : edge.lenMm;
+      at += edge.lenMm;
+      if (to <= from) return total;
+      return total + edge.notchesMm.filter((notch) => notch > from + 3 && notch < to - 3).length;
+    }, 0);
   };
-  const na = aIds.reduce((total, id) => total + notchCount(id), 0);
-  const nb = bIds.reduce((total, id) => total + notchCount(id), 0);
+  // Folded plies sew as one: a notch cut in one ply only is not a notch of this seam.
+  const notchesOf = (parts: typeof aParts, folded: number | null) =>
+    folded != null
+      ? Math.min(...parts.map(notchCount))
+      : parts.reduce((total, part) => total + notchCount(part), 0);
+  const na = notchesOf(aParts, aFolded);
+  const nb = notchesOf(bParts, bFolded);
   const matched =
     seam.evidence?.notchesMatched ??
     ((seam.evidence?.notchScore ?? 0) >= 0.7 ? Math.min(na, nb) : 0);
@@ -59,11 +95,13 @@ export function StepView({ model, index }: { model: MapModel; index: number }) {
   const { read, ops, pieceName, unitName, isUnit } = model;
   const results = useStepResults();
   const picture = mapStepPictureOf(results, index);
-  const { geoms, innerLines } = useCardGeoms();
+  const { geo, geoms, innerLines } = useCardGeoms();
   const byKey = useSeamRows();
+  const foldRows = useFoldRows();
+  const activeFolds = activeFoldRows(ops, index, foldRows);
   const op = ops[index];
   if (!op) return null;
-  const stepEdges = stepHighlightOf(ops, index, byKey).targets;
+  const highlight = stepHighlightOf(ops, index, byKey);
 
   const inputs = (op.inputKeys ?? []).filter(Boolean);
   const nameOf = (key: string) => (isUnit(key) ? unitName(key) : pieceName(key));
@@ -84,7 +122,13 @@ export function StepView({ model, index }: { model: MapModel; index: number }) {
   const inputNames = inputs.map(nameOf);
   const fallbackNames = [...new Set(inputNames)];
   const facts = read
-    ? [...new Set((read.seams[index] ?? []).flatMap((seam) => mismatchFacts(read, seam)))]
+    ? [
+        ...new Set(
+          (read.seams[index] ?? []).flatMap((seam) =>
+            mismatchFacts(read, seam, activeFolds, geo?.grainDeg),
+          ),
+        ),
+      ]
     : [];
   const drawn = !!picture && picture.layout.T.size > 0;
 
@@ -121,8 +165,10 @@ export function StepView({ model, index }: { model: MapModel; index: number }) {
             layers={picture.layers}
             geoms={geoms}
             innerLines={innerLines}
-            stepEdges={stepEdges}
+            stepEdges={highlight.targets}
+            stepParts={highlight.parts}
             names={inputNames}
+            foldGhost
           />
         ) : (
           <div className='flex flex-wrap items-center justify-center gap-2 p-2' data-map-names=''>
@@ -134,6 +180,8 @@ export function StepView({ model, index }: { model: MapModel; index: number }) {
           </div>
         )}
       </div>
+
+      <StepFoldThumbs ops={ops} index={index} />
 
       {facts.map((fact) => (
         <Text key={fact} size='micro' variant='errorLabel' data-map-fact=''>

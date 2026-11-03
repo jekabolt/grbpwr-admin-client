@@ -40,6 +40,20 @@ export const isServerManagedFusingStep = (
   !!operation && operation.operationType === FUSING_OPERATION_TYPE && operation.draft === true;
 
 /**
+ * The server puts a dropped draft automatic step back on the next save, before the first step that
+ * uses its piece, so removing it would only reorder the steps.
+ */
+export function serverKeepsFusingStep(
+  operation: (FusingOperationLike & { pieceLineKeys?: readonly string[] }) | undefined,
+  pieces: readonly FusedPieceLike[],
+): boolean {
+  if (!isServerManagedFusingStep(operation)) return false;
+  const own = inputKeySet(operation);
+  for (const key of operation?.pieceLineKeys ?? []) own.add(keyOf(key));
+  return pieces.some((piece) => piece.fused === true && own.has(keyOf(piece.lineKey)));
+}
+
+/**
  * Refuse only a fused piece that already has a FUSING owner from being added to another FUSING
  * row. After reconciliation that owner is the automatic row, even when it has been reviewed and
  * therefore no longer carries `draft`; prefer the draft candidate while reading older duplicates.

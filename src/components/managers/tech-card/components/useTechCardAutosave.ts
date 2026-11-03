@@ -39,10 +39,11 @@ import { STYLE_FACT_KEYS } from './tech-card-options';
  *   · цикл, пришедшийся на паузу (диалог перевода), взводится концом паузы (m9);
  *   · запись, которую ведёт не машина (перевод в auxiliary после диалога), сообщает ей исход
  *     `settleExternal` — статус и уборка тихой карточки кончаются там же, где запись (R-7);
- *   · ошибка → повторы через 5 / 15 / 45 с, а дальше каждые 30 с, пока у карточки есть работа;
- *     следующая правка пишет своим обычным дебаунсом, не дожидаясь шага. Двери «retry» нет: кнопки
- *     сохранения нет вовсе, карточка сохраняет себя сама (O-60, D-59). Потолок `restaged` тоже не
- *     конец: панель, перестейдживающая сама себя, пишется раз в 30 с, а не раз в две;
+ *   · ошибка → повторы через 5 / 15 / 45 с, и всё: четыре попытки, потом причина `stopped` — статус
+ *     один, таймера нет (L16, зацикленная запись: упавшая панель крутилась бы вечно). Снова пишет
+ *     следующая правка, дверь `retry` и возврат сети, каждая — одной попыткой. Запись тела при этом
+ *     идёт: упавшая панель стоит в очереди ПОСЛЕ него. Потолок `restaged` — другое: там ничего не
+ *     падало, и панель, перестейдживающая сама себя, пишется раз в 30 с, а не раз в две;
  *   · 409 → статус `conflict`, и автосейв стоит ЦЕЛИКОМ, явные записи тоже (ревью M-01: ⌘S под
  *     модалкой отправил бы ту же протухшую версию). Выходов два, и оба в модалке: «reload theirs»
  *     уходит со страницы, «keep mine» читает текущую версию и снимает паузу `resolveConflict()`.
@@ -61,9 +62,8 @@ import { STYLE_FACT_KEYS } from './tech-card-options';
 export const AUTOSAVE_DEBOUNCE_MS = 2000;
 export const AUTOSAVE_RETRY_MS: readonly number[] = [5000, 15000, 45000];
 /**
- * Шаг повторов ПОСЛЕ лестницы `AUTOSAVE_RETRY_MS` (O-60, D-59). Двери «retry» больше нет, и запись,
- * упавшая трижды, не ждёт человека: она повторяется сама, пока у карточки есть работа, — редко, чтобы
- * лежащий сервер не получал запрос на каждую секунду открытой вкладки.
+ * Шаг потолка `restaged` (O-60, D-59): ни одна запись не падала, панель менялась, пока писалась. Она
+ * пишется сама, но редко. Упавшая запись этого шага не получает: лестница и стоп (L16).
  */
 export const AUTOSAVE_RETRY_INTERVAL_MS = 30000;
 /**
@@ -136,9 +136,10 @@ export type MachineState = {
    * запись не падала, а панель менялась, пока писалась, и потолок `restaged` отдал её шагу повторов.
    * Поповер чипа не говорит «the last save failed» над картой, чьи записи все легли. `refused` — сервер
    * отказал самому телу (D-66): повторов по таймеру нет, следующая попытка — со следующей правкой.
+   * `stopped` — лестница повторов кончилась (L16): таймера нет, снова пишут правка, дверь и сеть.
    * При `off` — `auth` (D-66′): 401/403, карточка больше не сохраняется, `message` — слова сервера.
    */
-  cause?: 'failed' | 'restaged' | 'refused' | 'auth';
+  cause?: 'failed' | 'restaged' | 'refused' | 'stopped' | 'auth';
   /** При `error`/`refused`: слова сервера как есть (`SaveResult.refusalMessage`), если страница их дала. */
   refusal?: string;
 };
@@ -146,7 +147,7 @@ export type MachineState = {
 export type MachineDeps = {
   debounceMs: number;
   retryDelaysMs: readonly number[];
-  /** Шаг повторов после лестницы `retryDelaysMs` (D-59); без ответа — `AUTOSAVE_RETRY_INTERVAL_MS`. */
+  /** Шаг потолка `restaged` (D-59); без ответа — `AUTOSAVE_RETRY_INTERVAL_MS`. */
   retryIntervalMs?: number;
   setTimer: (fn: () => void, ms: number) => unknown;
   clearTimer: (handle: unknown) => void;
@@ -503,21 +504,23 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
           set({ status: 'error', message: r.message, refusal: r.refusalMessage, cause: 'refused' });
           return 'error';
         }
+        // L16: the ladder is spent. No timer is left, and a later edit gets one attempt, not a new
+        // ladder: the panel that failed stays queued and goes out with every body write.
+        const spent = retryIndex >= deps.retryDelaysMs.length;
         if (changedMeanwhile) {
           // P1-3 (O-60 r4): a change was heard while this write was out, and it armed its own debounce
           // (notifyChange). The failure does not trade that for a retry rung: the debounce stays — or,
           // when it already fired, the pass it queued runs next — and the ladder starts over.
-          retryIndex = 0;
+          if (!spent) retryIndex = 0;
           if (timer == null && !queued) arm(deps.debounceMs, 'debounce');
-        } else if (retryIndex < deps.retryDelaysMs.length) {
-          // D-59: the ladder, then the step — for as long as the card has work (a cycle over a quiet
-          // card rests and clears the timer, see runCycle).
+        } else if (!spent) {
+          // A cycle over a quiet card rests and clears the timer (see runCycle).
           arm(deps.retryDelaysMs[retryIndex], 'retry');
           retryIndex += 1;
         } else {
-          arm(retryInterval, 'retry');
+          clearTimer();
         }
-        set({ status: 'error', message: r.message, cause: 'failed' });
+        set({ status: 'error', message: r.message, cause: spent ? 'stopped' : 'failed' });
         return 'error';
       }
     }
@@ -528,6 +531,8 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
     if (running) {
       if (queued) {
         if (mode === 'explicit') queued.mode = 'explicit';
+        // The queued pass must outlive the page it was queued on (see runCycle).
+        if (reason === 'unmount') queued.reason = reason;
         return queued.promise;
       }
       const q = { mode, reason, promise: undefined as unknown as Promise<CycleResult> };
@@ -586,7 +591,8 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
         restIfNoWork();
         return;
       }
-      retryIndex = 0;
+      // L16: an edit restarts a ladder in progress, not a spent one (see settle).
+      if (retryIndex < deps.retryDelaysMs.length) retryIndex = 0;
       if (state.status === 'saved' || state.status === 'idle' || state.status === 'error') {
         set({ status: 'dirty', message: undefined });
       }
@@ -627,6 +633,8 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
       // D-66: a refusal holds until the next change, and the end of a pause is not one — a change made
       // under the dialog has already turned the status to `dirty`.
       if (state.status === 'error' && state.cause === 'refused') return;
+      // L16: and so does a spent ladder.
+      if (state.status === 'error' && state.cause === 'stopped') return;
       if (!deps.hasWork()) {
         restIfNoWork();
         return;
@@ -1404,9 +1412,16 @@ export function useTechCardAutosaveController(opts: {
     };
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('pagehide', onPageHide);
+    // L16: the connection came back over a stopped card: the one attempt the timer no longer makes.
+    const onOnline = () => {
+      const m = machineRef.current;
+      if (m?.state().status === 'error' && m.state().cause === 'stopped') void m.flush('online');
+    };
+    window.addEventListener('online', onOnline);
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('online', onOnline);
     };
   }, [opts.enabled]);
 

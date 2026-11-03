@@ -44,6 +44,7 @@ const RECT_STRAIGHT = 0.995;
 const SEAM_LOOP_MIN_SHARE = 0.3;
 /** Drills: closed layer-8/13 loops no bigger than this. */
 const DRILL_MAX_MM = 12;
+const VERTEX_TURN_DEG = 8;
 
 const NOTCH_LAYER = '4';
 const CUT_LAYER = '1';
@@ -129,6 +130,71 @@ export function findCorners(pts: readonly Pt2[]): number[] {
     merged.pop();
   }
   return merged;
+}
+
+/** Source-polyline turns mapped onto the resample, without changing the edge segmentation. */
+function sourceVertexIndices(loop: readonly Pt2[], rs: readonly Pt2[], grid?: PointGrid): number[] {
+  if (!grid || loop.length < 3 || rs.length < 3) return [];
+  const source = loop.filter((point, index) => index === 0 || dist(point, loop[index - 1]) > 1e-6);
+  if (source.length > 1 && dist(source[0], source[source.length - 1]) <= 1e-6) source.pop();
+  if (signedArea(source) < 0) source.reverse();
+  const out: number[] = [];
+  for (let index = 0; index < source.length; index++) {
+    if (Math.abs(angleAt(source, index, 1)) < VERTEX_TURN_DEG) continue;
+    const nearest = grid.nearest(source[index], Math.max(2, SKELETON.resampleMm * 2));
+    if (nearest.idx < 0) continue;
+    const duplicate = out.some((candidate) => {
+      const delta = Math.abs(candidate - nearest.idx);
+      return delta <= 1 || rs.length - delta <= 1;
+    });
+    if (!duplicate) out.push(nearest.idx);
+  }
+  return out.sort((a, b) => a - b);
+}
+
+export type EdgeBreakPoint = {
+  atMm: number;
+  kind: 'start' | 'end' | 'notch' | 'turn';
+};
+
+/** Ends, all source notches, and real source-polyline turns along one unchanged engine edge. */
+export function breakPoints(geom: PieceGeom, edge: Edge): EdgeBreakPoint[] {
+  if (edge.pts.length < 2 || geom.rs.length < 2) {
+    return [
+      { atMm: 0, kind: 'start' },
+      { atMm: Math.max(0, edge.lenMm), kind: 'end' },
+    ];
+  }
+  const cumulative = [0];
+  for (let index = 1; index < edge.pts.length; index++)
+    cumulative.push(cumulative[index - 1] + dist(edge.pts[index - 1], edge.pts[index]));
+  const n = geom.rs.length;
+  const end = ((edge.e % n) + n) % n;
+  const span = edge.e > edge.s ? edge.e - edge.s : n - edge.s + end;
+  const at = (index: number) => {
+    const relative = (index - edge.s + n) % n;
+    return relative <= span ? cumulative[Math.min(relative, cumulative.length - 1)] : null;
+  };
+  const points: EdgeBreakPoint[] = [
+    { atMm: 0, kind: 'start' as const },
+    { atMm: cumulative[cumulative.length - 1], kind: 'end' as const },
+    ...geom.notchIdx.flatMap((index) => {
+      const position = at(index);
+      return position == null ? [] : [{ atMm: position, kind: 'notch' as const }];
+    }),
+    ...(geom.vertexIdx ?? []).flatMap((index) => {
+      const position = at(index);
+      return position == null ? [] : [{ atMm: position, kind: 'turn' as const }];
+    }),
+  ].sort((a, b) => a.atMm - b.atMm);
+  const priority: Record<EdgeBreakPoint['kind'], number> = { start: 3, end: 3, notch: 2, turn: 1 };
+  const unique: EdgeBreakPoint[] = [];
+  for (const point of points) {
+    const previous = unique[unique.length - 1];
+    if (!previous || Math.abs(previous.atMm - point.atMm) > 0.05) unique.push(point);
+    else if (priority[point.kind] > priority[previous.kind]) unique[unique.length - 1] = point;
+  }
+  return unique;
 }
 
 // ── which contour is the sewing line ────────────────────────────────────────────────────────
@@ -281,6 +347,7 @@ export function segmentPiece(input: SkeletonPieceInput): PieceGeom {
   // The resample on a grid, built once: the notches snap to its nearest point here, the marks read
   // their sewing line through it below (card 61: the notch scan over every point was 7 % of the build).
   const grid = n ? new PointGrid(rs, SEW_CELL_MM) : undefined;
+  const vertexIdx = sourceVertexIndices(loop, rs, grid);
 
   // Notches: snapped to the resample, one per ±NOTCH_DEDUPE_MM along the contour.
   const dedupe = Math.round(NOTCH_DEDUPE_MM / SKELETON.resampleMm);
@@ -344,6 +411,7 @@ export function segmentPiece(input: SkeletonPieceInput): PieceGeom {
     rs,
     corners,
     notchIdx,
+    vertexIdx,
     edges,
     rect,
     areaMm2: Math.abs(signedArea(loop)),

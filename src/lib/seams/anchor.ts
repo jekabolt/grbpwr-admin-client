@@ -4,6 +4,7 @@
 import { edgeIdsOf } from 'lib/assembly-skeleton/geometry';
 import type { EdgeId, PieceGeom, SeamCandidate } from 'lib/assembly-skeleton/types';
 import { contourSig, frameOf, runById, runSamples, type SeamRun } from './frame';
+import { candidateSideParts } from './span';
 import {
   SEAMS,
   type EdgeAnchor,
@@ -79,8 +80,8 @@ export function seamFromCandidate(
   pieces: readonly PieceGeom[],
   o: SeamFromCandidateOptions,
 ): StoredSeam | null {
-  const sideIds = (side: 'a' | 'b'): EdgeId[] =>
-    side === 'a' ? c.aParts ?? [c.a] : c.bParts ?? [c.b];
+  const geoms = new Map(pieces.map((piece) => [piece.pieceKey, piece]));
+  const sideParts = (side: 'a' | 'b') => candidateSideParts(c, side, geoms);
   const lenOf = (id: EdgeId) => {
     const p = pieces.find((q) => q.pieceKey === pieceOfId(id));
     return p ? runById(p, id, SEAMS.maxChain)?.lenMm ?? 0 : 0;
@@ -101,8 +102,15 @@ export function seamFromCandidate(
   }
   const side = (s: 'a' | 'b'): EdgeAnchor[] | null => {
     const out: EdgeAnchor[] = [];
-    for (const id of sideIds(s)) {
-      const a = anchorOfRunId(pieces, id, o.grainDeg, ranges[s]);
+    for (const part of sideParts(s)) {
+      const len = lenOf(part.target);
+      const range: [number, number] =
+        c.kind === 'partial'
+          ? ranges[s]
+          : c.kind === 'composite' && part.range && len > 0
+            ? [part.range[0] / len, part.range[1] / len]
+            : [0, 1];
+      const a = anchorOfRunId(pieces, part.target as EdgeId, o.grainDeg, range);
       if (!a) return null;
       out.push(a);
     }
@@ -201,6 +209,18 @@ export function poseOf(
   return { piece: a.piece, host: b.piece, placement: a.placement };
 }
 
+/**
+ * A pose row whose piece is its own host: the block stands in the step's frame, `placement` read
+ * from the piece's own box. What a turn of the step's only root writes, there being nothing to
+ * measure it from. The step's own: a later step does not inherit it. `poseOf` does not read it.
+ */
+export function poseAnchorOf(row: StoredPose): { piece: string; placement: SeamPlacement } | null {
+  const a = row.sideA[0];
+  const b = row.sideB[0];
+  if (!a?.placement || !a.piece || a.piece !== b?.piece) return null;
+  return { piece: a.piece, placement: a.placement };
+}
+
 /** Edge ids a stored side stands for, by its hints (diagnostics only — never for resolution). */
 export const hintedEdges = (side: readonly EdgeAnchor[]): EdgeId[] =>
   side.flatMap((a) => edgeIdsOf(a.edgeHint));
@@ -227,7 +247,10 @@ export function newSeamKey(now = Date.now(), rand: () => number = Math.random): 
 }
 
 /** The anchor with its under/over set to `layer`, or without one (no claim) when there is none. */
-export function withSeamLayer(anchor: EdgeAnchor, layer: SeamLayer | null | undefined): EdgeAnchor {
+export function withSeamLayer<A extends { layer?: SeamLayer }>(
+  anchor: A,
+  layer: SeamLayer | null | undefined,
+): A {
   const next = { ...anchor };
   delete next.layer;
   return layer ? { ...next, layer } : next;

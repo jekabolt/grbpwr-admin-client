@@ -334,6 +334,8 @@ export const it = {
     article: 'articolo',
     pin: 'riferimento',
     placement: 'posizione',
+    tooFewPatternMarks: 'pochi riferimenti sul cartamodello',
+    marksOutsideOperationZone: 'riferimenti fuori zona operativa',
     operation: 'operazione',
     quantityTotal: 'q.tà totale',
     interlining: 'rinforzo termoadesivo',

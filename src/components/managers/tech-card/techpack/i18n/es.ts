@@ -334,6 +334,8 @@ export const es = {
     article: 'artículo',
     pin: 'marca',
     placement: 'ubicación',
+    tooFewPatternMarks: 'pocas marcas de patrón',
+    marksOutsideOperationZone: 'marcas fuera de zona operativa',
     operation: 'operación',
     quantityTotal: 'cant. total',
     interlining: 'entretela',

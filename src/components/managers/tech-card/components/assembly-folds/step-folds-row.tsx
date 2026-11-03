@@ -4,17 +4,26 @@
 // hint nobody took yet. A tap opens the fold picker in place under the row, on that piece. Folds
 // belong to the PIECE, not the step: the same piece reads the same in every step.
 
-import type { PieceGeom } from 'lib/assembly-skeleton/types';
+import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
+import type { StoredFold } from 'lib/folds';
 import { cn } from 'lib/utility';
 import { useMemo, useState } from 'react';
 import { useWatch } from 'react-hook-form';
-import { Button, GroupLabel, Text } from 'ui';
+import { Close, GroupLabel, Text, Tile, TILE_QUIET } from 'ui';
 import type { FoundPiece } from '../nesting/dxf-geometry';
 import type { TechCardFormData } from '../schema';
 import { useStepSeams } from '../step-seams/step-seams-context';
 import { sizeOf } from './fold-model';
-import { FlatThumb, FoldedThumb, HintIcon, KindIcon, SectionSvg } from './fold-picture';
+import { FlatThumb, FoldedThumb } from './fold-picture';
 import { FoldPicker, usePieceReads } from './fold-picker';
+import { useFoldStep } from './fold-step';
+import { useFoldsStore } from './folds-store';
+import { useFoldWrites } from './use-fold-writes';
+
+const FOLD_CLOSE = cn(
+  'absolute top-px right-px z-10 size-7 bg-bgColor p-0 [@media(pointer:coarse)]:size-11',
+  TILE_QUIET,
+);
 
 export function StepFoldsRow({ index }: { index: number }) {
   const ctx = useStepSeams();
@@ -34,6 +43,19 @@ export function StepFoldsRow({ index }: { index: number }) {
     }
     return out;
   }, [inputKeys, geo?.pieces]);
+  const innerLines = useMemo(() => {
+    const out = new Map<string, Pt2[][]>();
+    for (const raw of inputKeys ?? []) {
+      const key = raw.trim();
+      const piece = geo?.pieces.get(key);
+      if (!piece) continue;
+      out.set(
+        key,
+        piece.inner.map((line) => line.map(([x, y]) => [x, -y])),
+      );
+    }
+    return out;
+  }, [inputKeys, geo?.pieces]);
 
   if (!ctx || !geo || !pieces.length) return null;
   return (
@@ -42,8 +64,43 @@ export function StepFoldsRow({ index }: { index: number }) {
       pieces={pieces}
       shapes={geo.shapes.shapeByKey}
       grainDeg={geo.grainDeg}
+      innerLines={innerLines}
       cardId={ctx.cardId}
       frozen={ctx.frozen}
+    />
+  );
+}
+
+/** Removes the piece's folds and takes their keys off the steps, or the next save is refused. */
+function FoldTileClose({
+  name,
+  rows,
+  disabled,
+  remove,
+  onRemoved,
+}: {
+  name: string;
+  rows: readonly StoredFold[];
+  disabled: boolean;
+  remove: (rows: StoredFold[]) => Promise<boolean>;
+  onRemoved: () => void;
+}) {
+  const foldStep = useFoldStep();
+  return (
+    <Close
+      aria-label={`remove folds ${name}`}
+      disabled={disabled}
+      onClick={() => {
+        onRemoved();
+        void remove([...rows]).then((removed) => {
+          if (removed)
+            foldStep.assign(
+              rows.map((row) => row.foldKey),
+              null,
+            );
+        });
+      }}
+      className={FOLD_CLOSE}
     />
   );
 }
@@ -54,6 +111,7 @@ export function StepFoldsGroup({
   pieces,
   shapes,
   grainDeg,
+  innerLines,
   cardId,
   frozen,
 }: {
@@ -61,59 +119,77 @@ export function StepFoldsGroup({
   pieces: readonly PieceGeom[];
   shapes: ReadonlyMap<string, FoundPiece | null> | null;
   grainDeg: ReadonlyMap<string, number>;
+  innerLines?: ReadonlyMap<string, readonly Pt2[][]>;
   cardId: number | undefined;
   frozen: boolean;
 }) {
-  const reads = usePieceReads(pieces, shapes, grainDeg);
+  const reads = usePieceReads(pieces, shapes, grainDeg, innerLines);
   const [open, setOpen] = useState<string | null>(null);
   const size = useMemo(() => sizeOf(shapes), [shapes]);
   const openRead = reads.find((r) => r.geom.pieceKey === open) ?? null;
+  const writes = useFoldWrites(cardId, frozen);
+  const pendingWrites = useFoldsStore((state) => state.pending);
 
   if (!reads.length) return null;
   return (
     <div className='flex flex-col' data-step-folds={stepKey}>
       <GroupLabel>folds</GroupLabel>
-      <div className='flex flex-wrap items-center gap-x-4 gap-y-1.5'>
+      <div className='flex flex-wrap items-start gap-x-4 gap-y-2'>
         {reads.map((r) => {
           const on = r.geom.pieceKey === open;
           const isFolded = r.groups.length > 0;
+          const rows = r.groups.flatMap((group) => group.rows);
+          const writing = rows.some((row) => !!pendingWrites[row.foldKey]);
           return (
-            <Button
+            <div
               key={r.geom.pieceKey}
-              onClick={() => setOpen(on ? null : r.geom.pieceKey)}
-              aria-pressed={on}
-              className={cn(
-                'flex items-center gap-1.5 border-b-2 pb-0.5 text-left',
-                on ? 'border-textColor' : 'border-transparent',
-              )}
+              className='group relative size-18'
               data-step-fold-piece={r.geom.name}
             >
-              <FlatThumb piece={r.geom} deg={r.deg} groups={r.groups} hints={r.hints} />
-              {isFolded && (
-                <>
-                  <FoldedThumb piece={r.geom} deg={r.deg} groups={r.groups} />
-                  <SectionSvg piece={r.geom} groups={r.groups} />
-                </>
-              )}
-              <span className='flex flex-col gap-0.5'>
+              <Tile
+                onClick={() => setOpen(on ? null : r.geom.pieceKey)}
+                pressed={on}
+                selected={on}
+                className={cn(
+                  'items-center overflow-hidden p-1',
+                  on && 'border-textColor bg-textColor text-bgColor [&_svg]:invert',
+                )}
+              >
+                <span className='flex h-12 items-center justify-center'>
+                  {isFolded ? (
+                    <FoldedThumb piece={r.geom} deg={r.deg} groups={r.groups} />
+                  ) : (
+                    <FlatThumb
+                      piece={r.geom}
+                      deg={r.deg}
+                      inner={r.inner}
+                      groups={r.groups}
+                      hints={[]}
+                    />
+                  )}
+                </span>
                 <Text
                   size='micro'
                   component='span'
-                  className={cn('uppercase', !on && !isFolded && 'text-labelColor')}
+                  tracking='label'
+                  variant={on ? 'selected' : 'uppercase'}
+                  className='mt-0.5 w-full truncate text-center leading-tight'
                 >
                   {r.geom.name}
                 </Text>
-                <span className='flex items-center gap-1'>
-                  {isFolded
-                    ? r.groups.map((x, i) => <KindIcon key={i} kind={x.kind} size={12} />)
-                    : r.hints.length > 0 && (
-                        <span className='text-labelColor'>
-                          <HintIcon size={12} />
-                        </span>
-                      )}
-                </span>
-              </span>
-            </Button>
+              </Tile>
+              {isFolded && (
+                <FoldTileClose
+                  name={r.geom.name}
+                  rows={rows}
+                  disabled={frozen || writing}
+                  remove={writes.remove}
+                  onRemoved={() => {
+                    if (on) setOpen(null);
+                  }}
+                />
+              )}
+            </div>
           );
         })}
       </div>

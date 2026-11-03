@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button, Text, Tiles } from 'ui';
+import { Text, Tiles } from 'ui';
 import { WORK_ICON, type WorkToken } from '../../op-icons';
 import type { TechCardFormData } from '../schema';
-import { IconTile, TileRow, useStepFieldErrors } from './icon-tile';
+import { IconTile, MoreTile, TileRow, useStepFieldErrors } from './icon-tile';
 import { useStepWrite } from './use-step-write';
 
 type PressActionItem = { action: string; work: string; label: string };
@@ -46,16 +46,10 @@ export function PressActionTiles({ index }: { index: number }) {
 
   return (
     <TileRow field={`operations.${index}.pressAction`} errors={errors}>
-      <Tiles min={72}>{COMMON.map(tile)}</Tiles>
-      <Button
-        type='button'
-        variant='underline'
-        size='xs'
-        className='self-start'
-        onClick={() => setMoreOpen((open) => !open)}
-      >
-        {moreOpen ? 'less' : 'more'}
-      </Button>
+      <Tiles min={72}>
+        {COMMON.map(tile)}
+        <MoreTile open={moreOpen} onClick={() => setMoreOpen((open) => !open)} />
+      </Tiles>
       {moreOpen && (
         <div className='flex flex-col gap-1'>
           <Text size='micro' variant='label' tracking='label' className='uppercase'>

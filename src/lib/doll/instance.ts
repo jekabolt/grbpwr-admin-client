@@ -60,6 +60,7 @@ function mirrorGeom(g: PieceGeom, key: string): PieceGeom {
     rs,
     corners: g.corners.map(ni).sort((a, b) => a - b),
     notchIdx: g.notchIdx.map(ni).sort((a, b) => a - b),
+    vertexIdx: g.vertexIdx?.map(ni).sort((a, b) => a - b),
     edges,
     twinOf: [{ key: g.pieceKey, kind: 'mirror' }],
   };

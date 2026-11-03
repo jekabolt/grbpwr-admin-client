@@ -40,6 +40,7 @@ import {
   revealField,
   transportRefusal,
 } from 'utils/field-errors';
+import { foldRefusalOf } from './assembly-folds/fold-step';
 import { notify, updateNotify } from 'lib/stores/store';
 import type { NotifyInput, NotifySev } from 'lib/stores/store-types';
 import { firstMarkedOperation, type CardOperation } from 'lib/dxf-reconcile';
@@ -121,6 +122,7 @@ import { TechCardFittings } from './tech-card-fittings';
 import {
   acceptOperationDrops,
   auditOperationPresence,
+  carryManagedStepKeys,
   contradictsScreen,
   hasPresenceLoss,
   mergeOperationsAfterSave,
@@ -129,6 +131,8 @@ import {
 import { fusingOverrideText, fusingSaveOverrides } from './fusing-override';
 import { PresenceLossBanner, VersionSkewBanner, type VersionSkew } from './save-audit-banners';
 import { useTechCardStagingRequired, type CommitOutcome } from './useTechCardStaging';
+import { fuseOwed } from './card-owed';
+import { useSeamsStore } from './assembly-seams/seams-store';
 import {
   FUSING_SHEETS_KEY,
   fusingSheetsChange,
@@ -1037,13 +1041,20 @@ export function TechCardForm({
   // THE ONE GUARD LEFT in place of the drafts: the browser asks before a tab with unsaved work is closed
   // or reloaded. Asked at the moment of leaving (mn-3: dirt nobody can write is no reason to hold the
   // page); a new card's create writes the style facts too, so all of its dirt counts.
+  // L16: a fusing rebuild alone holds nothing — it is owed in this browser (card-owed.ts) and a
+  // reloaded page takes it back. A seam row on the wire holds: its step link is written only after it.
   const canWriteCard = canWrite(SECTION.techCards) && !frozen;
-  const unsavedWork = form.formState.isDirty || staging.changes.length > 0;
   useEffect(() => {
-    if (!canWriteCard || !unsavedWork) return;
+    if (!canWriteCard) return;
     const guard = (e: BeforeUnloadEvent) => {
       const work = isEditMode ? bodyWorkOf(form) : !!form.control._formState.isDirty;
-      if (!work && staging.peek().length === 0) return;
+      const queued = staging
+        .peek()
+        .some((c) => c.key !== FUSING_SHEETS_KEY || !numId || !fuseOwed(numId));
+      const seams = useSeamsStore.getState();
+      const seamInFlight =
+        Object.keys(seams.pending).length > 0 || Object.keys(seams.posePending).length > 0;
+      if (!work && !queued && !seamInFlight) return;
       e.preventDefault();
       e.returnValue = '';
     };
@@ -1051,7 +1062,7 @@ export function TechCardForm({
     return () => window.removeEventListener('beforeunload', guard);
     // `form` and `staging` are read live, at the moment of leaving.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canWriteCard, unsavedWork, isEditMode]);
+  }, [canWriteCard, isEditMode, numId]);
 
   // Section-completion progress (Q9): a visible "how filled is this card" signal, per tab + overall.
   const len = (v: unknown) => (Array.isArray(v) ? v.length : 0);
@@ -1308,8 +1319,7 @@ export function TechCardForm({
     lockOverride.current = null;
     needsRead.current = false;
     ownBodyVersion.current = null;
-    if (lastBody.current)
-      lastBody.current = { ...lastBody.current, lock: card.lockVersion ?? 0 };
+    if (lastBody.current) lastBody.current = { ...lastBody.current, lock: card.lockVersion ?? 0 };
   };
   // G1: the approval door's own question — did a body write that CARRIED the requested approval
   // land? Marked inside writeTechCard, so a concurrent autosave that did not carry it cannot answer.
@@ -1666,6 +1676,7 @@ export function TechCardForm({
       if (readIndex < 0 || !readOps[readIndex] || !sentOps[sentIndex]?.historyKey) return;
       readOps[readIndex] = { ...readOps[readIndex], historyKey: sentOps[sentIndex].historyKey };
     });
+    const keyedReadOps = carryManagedStepKeys(sentOps, readOps);
     if (fuseOverrides.length > 0) {
       notify({
         sev: 'warn',
@@ -1673,7 +1684,7 @@ export function TechCardForm({
         text: fusingOverrideText(fuseOverrides),
       });
     }
-    const merged = mergeOperationsAfterSave(sentOps, readOps, operationAudit);
+    const merged = mergeOperationsAfterSave(sentOps, keyedReadOps, operationAudit);
     return done(
       {
         ...sent,
@@ -2210,6 +2221,8 @@ export function TechCardForm({
       // owning tab so the error dot + focus land where the user can act (Q1/S24).
       const { applied, unmapped, contradictions } = applyServerFieldErrors(error, form.setError, {
         stripPrefixes: ['tech_card'],
+        // A step's fold link has no input to pin on: its refusal is said in words below.
+        allow: (path) => !/\.foldKeys(\.|$)/.test(path),
         // ОТКАЗ, ПРОТИВОРЕЧАЩИЙ ЭКРАНУ. `required` / `unknown_value` про поле, которое форма
         // держит ЗАПОЛНЕННЫМ, означает не «человек не заполнил», а «сервер не узнал значения» —
         // бэкенд старше приложения и выбросил незнакомый член словаря по дороге. Предикат тот же
@@ -2245,15 +2258,19 @@ export function TechCardForm({
       // D-63′: over a 409 the decision is the conflict modal's (opened above), and this sentence is what
       // the chip's popover and the line at the top of the form print — not the list's «Reload to get
       // the latest version» (techCardErrorMessage), which names a door this page does not have.
+      const foldRefusal = foldRefusalOf(error);
       const base =
-        transport || contradictions.length > 0
+        foldRefusal ??
+        (transport || contradictions.length > 0
           ? 'the backend did not recognise part of this card — see the banner on the card'
           : status === 409
             ? 'another editor saved this card meanwhile'
-            : techCardErrorMessage(error, 'Failed to submit tech card');
-      const message = unmapped.length
-        ? `${base} — ${unmapped.map((u) => u.description).join('; ')}`
-        : base;
+            : techCardErrorMessage(error, 'Failed to submit tech card'));
+      const message = foldRefusal
+        ? foldRefusal
+        : unmapped.length
+          ? `${base} — ${unmapped.map((u) => u.description).join('; ')}`
+          : base;
       if (!silent) {
         const cls = failureClassOfError(error);
         const banner = !!transport || contradictions.length > 0;
@@ -3141,6 +3158,24 @@ export function TechCardForm({
     getBaseLockVersion: () => base.current.version,
     adoptBase: adoptExternalBase,
   });
+  // L16: the rebuild a page before this one owed (the tab closed or reloaded before it succeeded). The
+  // rebuild is idempotent: sheets that are already right are reused and nothing is written.
+  useEffect(() => {
+    if (!autosaveEnabled || !numId || !fuseOwed(numId)) return;
+    if (staging.peek().some((c) => c.key === FUSING_SHEETS_KEY)) return;
+    staging.stage(
+      fusingSheetsChange(
+        numId,
+        (v) => {
+          ownBodyVersion.current = v;
+        },
+        saveSessionId,
+      ),
+    );
+    autosave.request('fusing-owed');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autosaveEnabled, numId]);
+
   const undoHistory = useTechCardUndoHistory({
     scope: numId ?? clientRequestId.current,
     enabled: autosaveEnabled,
@@ -3823,6 +3858,7 @@ export function TechCardForm({
           firstError={formErrorRows[0]}
           onRevealError={revealError}
           onOpenConflict={openConflict}
+          onRetry={() => void autosave.saveNow('retry')}
         />
       )}
 

@@ -3,7 +3,16 @@
 // (TechCard.seams on today's DXF), every other op draws the key of its technique next to the
 // outline of what it acts on. Rows are measured in the DOM once the print font is in and paginated
 // so an operation row never splits.
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  memo,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { DataTable, HeaderNote, SectionHeader } from 'ui';
 
 import type { common_TechCard, common_TechCardOperationMedia } from 'api/proto-http/admin';
@@ -23,6 +32,7 @@ import {
   type SceneOp,
   type StepPicture,
 } from 'components/managers/tech-card/components/step-seams/step-picture-view';
+import { cardFoldsOf } from 'components/managers/tech-card/components/step-seams/step-folds';
 import { inputGroups } from 'components/managers/tech-card/components/step-seams/step-seams-model';
 import {
   boxOf,
@@ -49,6 +59,7 @@ import { pairOverlap, pieceKeyOf, rasterize, resolveEdge } from 'lib/assembly-sk
 import { apply, compose, rigid, translate } from 'lib/assembly-skeleton/union/affine';
 import { nameTokens, readName } from 'lib/assembly-skeleton/skeleton/model';
 import { ROLE_BOOK } from 'lib/assembly-skeleton/skeleton/template';
+import { foldsFromWire } from 'lib/folds';
 import { isPoseWire, poseKeysOfWire } from 'lib/seams';
 import { viewerOrigin } from 'utils/viewer-origin';
 import {
@@ -135,7 +146,6 @@ const THUMB_BADGE_PX = 5.5;
 
 export type ResultStepPicture = StepPicture & {
   resultLayers?: readonly string[];
-  resultLower?: readonly string[];
   resultStacked?: StepResult['stacked'];
 };
 
@@ -2942,6 +2952,7 @@ const sceneOperations = (techCard: common_TechCard): SceneOp[] => {
       outputUnitName: operation.outputUnitName,
       seamKeys: posed.length ? keys.filter((key) => !poseKeys.has(key)) : keys,
       ...(posed.length ? { poseKeys: posed } : {}),
+      ...(operation.foldKeys?.length ? { foldKeys: operation.foldKeys } : {}),
       fullnessRatio: operation.stitching?.fullnessRatio?.value,
     };
   });
@@ -3334,6 +3345,10 @@ export function editorOperationPictures(
     // The editor provider reads the stored/form operations before the PDF model resolves DXF
     // aliases. Keep that exact input for shared results; legacy pictures still use resolved keys.
     const resultOperations = sceneOperations(techCard);
+    const foldRows = foldsFromWire(techCard.pieceFolds ?? resolvedCard.pieceFolds).folds;
+    const cardFolds = foldRows.length
+      ? { rows: foldRows, grainDeg: model.grainDeg ?? new Map<string, number>() }
+      : undefined;
     // With no stored row every result is provably rowless; keep that legacy path allocation-free
     // until the one shared flag opts rowless cards into editor parity.
     const ownerResults =
@@ -3346,6 +3361,7 @@ export function editorOperationPictures(
               geoms,
               innerLines,
               pieceKeys,
+              ...(cardFolds ? { folds: cardFolds } : {}),
             },
             OWNER_FIT,
           )
@@ -3396,7 +3412,6 @@ export function editorOperationPictures(
               inputLayouts: picture.groups.map((group) => assembledByUnit.get(group.key)),
               stackIdentical: true,
               joinedOverlap: 0.15,
-              honorRanges: true,
               garmentLayout: true,
             }
           : {
@@ -3404,7 +3419,6 @@ export function editorOperationPictures(
               rasterMm: STEP_TILE_RASTER_MM,
               ...picture.hands,
               joinedOverlap: 0,
-              honorRanges: false,
               bagsAsLayers: false,
             },
       );
@@ -3427,7 +3441,6 @@ export function editorOperationPictures(
             layoutLeaves: picture.leaves,
             layout,
             resultLayers: ownerResult.layers,
-            resultLower: ownerResult.lower,
             resultStacked: ownerResult.stacked,
           });
           const output = operation.outputUnitKey?.trim();
@@ -3512,7 +3525,6 @@ export function editorOperationPictures(
             inputLayouts,
             stackIdentical: true,
             joinedOverlap: 0.15,
-            honorRanges: true,
             garmentLayout: true,
           },
         );
@@ -4181,10 +4193,19 @@ export function editorOperationPictures(
           input: new Map(ownerResult.layout.input),
         },
         resultLayers: ownerResult.layers,
-        resultLower: ownerResult.lower,
         resultStacked: ownerResult.stacked,
       });
     });
+    // Whichever way a step's layout was reached, it draws the folds that step sees.
+    const foldsAt = cardFoldsOf(resultOperations, cardFolds, geoms, innerLines);
+    if (foldsAt)
+      resultOperations.forEach((operation, index) => {
+        const number = operation.operationNumber ?? 0;
+        const picture = pictures.get(number);
+        const folds = foldsAt(index);
+        if (picture && folds && !picture.layout.folds)
+          pictures.set(number, { ...picture, layout: { ...picture.layout, folds } });
+      });
     return pictures;
   } catch {
     // A malformed pattern still prints through the legacy drawings.
@@ -4426,13 +4447,22 @@ export function Delta({ metrics }: { metrics: readonly SeamMetric[] }) {
   );
 }
 
+/**
+ * true inside the hidden measuring probe. A row's height does not depend on its picture: the
+ * `.asm-picture-box` carries an inline width × height and caps its svg at 100%, so the probe draws
+ * the empty box. Before, it drew the whole picture — on card 81 that was 65 print svgs (3.4 MB of
+ * path data) rendered, committed and discarded before the paginated sheets drew them once more.
+ */
+const MeasureOnly = createContext(false);
+
 function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
   const d = DIM[orient];
   const picture = pictureDimensions(orient);
   const drawing = r.pic ?? r.sil;
+  const measureOnly = useContext(MeasureOnly);
   return (
     <div className='asm-picture-box' style={{ width: d.joinW, height: d.joinH }}>
-      {r.editorPic && r.print ? (
+      {measureOnly ? null : r.editorPic && r.print ? (
         <StepPictureSvg
           w={picture.join[0]}
           h={picture.join[1]}
@@ -4440,11 +4470,11 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
           look='print'
           layout={r.editorPic.layout}
           layers={r.editorPic.resultLayers}
-          lower={r.editorPic.resultLower}
           stacked={r.editorPic.resultStacked}
           geoms={r.editorPic.geoms}
           innerLines={r.editorPic.innerLines}
           stepEdges={r.editorPic.stepEdges}
+          stepParts={r.editorPic.stepParts}
           actionLines={r.print.action.lines}
           actionGlyphs={r.print.action.glyphs}
           className='asm-editor-picture'
@@ -4465,9 +4495,10 @@ function SegLine({ seg, className }: { seg: Seg; className?: string }) {
   return <div className={className}>{seg.t}</div>;
 }
 
-// Memoized on the row object: `rows` is memoized, so the same row is drawn in the hidden probe,
-// then in its paginated page, and again when the whole document renders after `onLaidOut` flips —
-// that last render redrew every picture (card 85: 109 print SVGs, seconds of markup per render).
+// Memoized on the row object: `rows` is memoized, so the same row is measured in the hidden probe
+// (without its picture), then drawn in its paginated page, and again when the whole document
+// renders after `onLaidOut` flips — that last render redrew every picture (card 85: 109 print SVGs,
+// seconds of markup per render).
 const OpRow = memo(function OpRow({ r, orient }: { r: Row; orient: PrintOrient }) {
   const { t } = useT();
   const w = r.words;
@@ -4835,20 +4866,22 @@ export function AssemblyPage({
     <>
       <style>{KEYS_CSS + ASM_CSS}</style>
       {rows.length > 0 && !cols && (
-        <div
-          ref={probe}
-          className='asm-measure'
-          style={{ width: BODY_PX[orient].w + 90, height: BODY_PX[orient].h + 106 }}
-        >
-          <div className='tp-body'>
-            <SectionHeader title={title} action={<HeaderNote>0</HeaderNote>} />
-            <div className='asm-cols' data-orient={orient}>
-              <div className='asm-col'>
-                <Table col={rows} orient={orient} />
+        <MeasureOnly.Provider value>
+          <div
+            ref={probe}
+            className='asm-measure'
+            style={{ width: BODY_PX[orient].w + 90, height: BODY_PX[orient].h + 106 }}
+          >
+            <div className='tp-body'>
+              <SectionHeader title={title} action={<HeaderNote>0</HeaderNote>} />
+              <div className='asm-cols' data-orient={orient}>
+                <div className='asm-col'>
+                  <Table col={rows} orient={orient} />
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        </MeasureOnly.Provider>
       )}
       {pages.map((pg, pageIndex) => {
         const first = pg[0][0].n;

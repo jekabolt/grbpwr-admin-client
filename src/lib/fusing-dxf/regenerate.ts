@@ -327,6 +327,8 @@ const ECHO_AWARE = {
   operationReviewAware: true,
   // the echoed card carries each step's seamKeys as stored
   operationSeamsAware: true,
+  // and each step's foldKeys
+  operationFoldsAware: true,
   bomQtyAware: true,
   labelsAware: true,
 } satisfies Partial<common_TechCardInsert>;
@@ -357,7 +359,17 @@ export async function regenerateFusingSheets(
 
   if (fused && lines.length) {
     const patterns = mainPatterns(oldPatterns, bomByKey);
-    if (!patterns.length) throw new Error('no main-fabric DXF sheet is attached to the tech card');
+    // Nothing to build from is not a failed rebuild: the card keeps what it has, and the toast says so.
+    if (!patterns.length)
+      return {
+        generated: 0,
+        uploaded: 0,
+        reused: 0,
+        removed: 0,
+        changed: false,
+        warnings: ['no main-fabric DXF sheet is attached to the tech card'],
+        skippedSizes: [],
+      };
     const blobs = await Promise.all(
       patterns.map(async (pattern) => ({
         name: pattern.filename?.trim() || `pattern-${pattern.lineKey ?? 'sheet'}.dxf`,
@@ -415,8 +427,9 @@ export async function regenerateFusingSheets(
       );
       warnings.push(...prepared.warnings);
       pieceLineKeyByIdentity = prepared.pieceLineKeyByIdentity;
+      // A piece without a block has nothing to build from: a warning, the other sheets still build.
       if (prepared.unmatchedFused.length)
-        throw new Error(
+        warnings.push(
           `fused card pieces are not linked to the main DXF: ${prepared.unmatchedFused.join(', ')}`,
         );
       built = buildFusingSheets({

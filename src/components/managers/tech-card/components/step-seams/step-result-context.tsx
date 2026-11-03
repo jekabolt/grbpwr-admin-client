@@ -4,6 +4,7 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
+import { foldRowsOf, useFoldRowsSig, useFoldsStore } from '../assembly-folds/folds-store';
 import type { TechCardFormData } from '../schema';
 import { useCardGeoms, useCardPieceKeys, usePoseRows, useSeamRows } from './step-picture-view';
 import { OWNER_FIT, stepResults, type StepResult, type StepResultsInput } from './step-result';
@@ -20,6 +21,7 @@ const operationsSignature = (ops: readonly FormOpLike[]) =>
       poseKeys: op.poseKeys,
       operationNumber: op.operationNumber,
       assemblyBlockDetached: op.assemblyBlockDetached,
+      ...(op.foldKeys?.length ? { foldKeys: op.foldKeys } : {}),
     })),
   );
 
@@ -47,13 +49,21 @@ function CardStepResultProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [opsSignature, getValues],
   );
-  const { geoms, innerLines } = useCardGeoms();
+  const { geoms, innerLines, geo } = useCardGeoms();
   const pieceKeys = useCardPieceKeys();
   const byKey = useSeamRows();
   const poses = usePoseRows();
+  const foldSig = useFoldRowsSig();
+  const grainDeg = geo?.grainDeg;
+  const folds = useMemo(() => {
+    const rows = foldRowsOf(useFoldsStore.getState());
+    return rows.length && grainDeg ? { rows, grainDeg } : undefined;
+    // the rows' signature is the dependency: their array is new on every store read
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [foldSig, grainDeg]);
   const input = useMemo<StepResultsInput>(
-    () => ({ ops, byKey, poses, geoms, innerLines, pieceKeys }),
-    [ops, byKey, poses, geoms, innerLines, pieceKeys],
+    () => ({ ops, byKey, poses, geoms, innerLines, pieceKeys, ...(folds ? { folds } : {}) }),
+    [ops, byKey, poses, geoms, innerLines, pieceKeys, folds],
   );
   return <ResultsValueProvider input={input}>{children}</ResultsValueProvider>;
 }

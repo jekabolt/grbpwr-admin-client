@@ -56,6 +56,8 @@ import {
   InputField,
   SelectField,
   Tile,
+  TILE_PRESS,
+  TILE_QUIET,
 } from 'ui';
 import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-textarea-field';
 import { decimalToInput, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
@@ -144,7 +146,7 @@ import {
   type WorkItem,
 } from './operation-work';
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
-import { autoFuseRefusal, operationStepNumber } from './fusing-override';
+import { autoFuseRefusal, operationStepNumber, serverKeepsFusingStep } from './fusing-override';
 import { operationMoveMembership } from './operation-move';
 import { AdoptMachineIntoProfile, AdoptPressIntoProfile } from './equipment-park';
 import {
@@ -206,6 +208,7 @@ import {
 } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
 import { assemblySweep, classifyAssemblyInputs, type AssemblyResult } from './assembly-frontier';
+import { removeGate, removePrice, savedSeamsOnStep, type AssemblyPrice } from './assembly-cause';
 import { assemblyBlocks, type AssemblyBlock } from './assembly-blocks';
 import { drawnTailSteps, processedPieceOf } from './assembly-layout';
 import type { AssemblyStep as AssemblyStepShape } from './assembly-frontier';
@@ -221,8 +224,8 @@ import {
   appendLabel,
   canRedo,
   canUndo,
-  dissolveLabel,
   dropForm,
+  dropStale,
   dropMove,
   dropRedoTop,
   dropUndoTop,
@@ -243,11 +246,17 @@ import {
   undoStep,
   undoTitle,
   type History,
+  type HistoryEntry,
   type PendingAppend,
   type RenameInputSite,
   type RenameOutputSite,
+  removeLabel,
+  removeRestoreIndex,
+  removeUndoRefusal,
 } from './last-mutation';
 import { AssemblyFullscreen, FROZEN_REFUSAL, restoreScreenFocus } from './assembly-fullscreen';
+import { SeamWalk } from './seam-walk';
+import { StepTimeField } from './step-time-field';
 import { AssemblySchematic } from './assembly-schematic';
 import { SequenceRail } from './sequence-rail';
 import {
@@ -266,17 +275,19 @@ import { type SchematicMode, useSchematicPrefs } from './use-schematic-prefs';
 import { PieceAddChip, PieceRef, useFormPieces } from './piece-picker';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
-import { rowsOf, useSeamsStore } from './assembly-seams/seams-store';
+import { posesOf, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
 import { useStepSeams } from './step-seams/step-seams-context';
 import { UnitPictureTile } from './step-seams/unit-picture-tile';
 import {
   hasMultipleStepPieces,
   easeOf,
+  fullyUsedEdges,
   suggestStepPair,
   usedEdgesBeforeStep,
   type FormOpLike,
 } from './step-seams/step-seams-model';
-import { StepSeamsRow } from './step-seams/step-seams-row';
+import { StepSeamsDoor, StepSeamsRow, type SeamPickerRequest } from './step-seams/step-seams-row';
+import { FOLD_STEP_REFUSAL, foldsClosingOn } from './assembly-folds/fold-step';
 import { StepFoldsRow } from './assembly-folds/step-folds-row';
 import type { PieceShapeMap } from './use-piece-shapes';
 import {
@@ -307,6 +318,10 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 const EMPTY_MEDIA_URLS: Map<number, string> = new Map();
 // The WITH row: every tile shares one 72 px footprint, the silhouette fills it.
 const WITH_BOX = { w: 72, h: 72 };
+const WITH_CLOSE = cn(
+  'absolute top-px right-px z-10 size-7 bg-bgColor p-0 [@media(pointer:coarse)]:size-11',
+  TILE_QUIET,
+);
 
 type ReviewPatternRow = {
   lineKey?: string;
@@ -1284,7 +1299,10 @@ function OperationsHeaderWarnings({
       ) {
         return [];
       }
-      const used = usedEdgesBeforeStep(ops, index, seamsByKey);
+      const used = fullyUsedEdges(
+        usedEdgesBeforeStep(ops, index, seamsByKey, seamGeoms),
+        seamGeoms,
+      );
       return suggestStepPair(
         ops,
         index,
@@ -1693,6 +1711,7 @@ function TrayChip({
         {...dragProps}
         className={cn(
           'cursor-grab border border-borderColor bg-bgColor transition-colors active:cursor-grabbing',
+          TILE_PRESS,
           'hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
           highlighted && 'motion-safe:animate-pulse border-textColor',
         )}
@@ -1741,19 +1760,12 @@ function ProducesBlock({
   inputKeys,
   pieces,
   assembly,
-  onDissolve,
   onEdit,
 }: {
   index: number;
   inputKeys: string[];
   pieces: PieceRef[];
   assembly: AssemblyView;
-  /**
-   * Мутатор растворения — ТОТ ЖЕ, что зовут полотно и схема. Свой `setValue` здесь стоял и делал
-   * ровно то же самое, только мимо истории: растворение чипом отменить было нельзя, а
-   * растворение с полотна — можно, хотя это один и тот же поступок.
-   */
-  onDissolve: (index: number) => void;
   /**
    * Шаг ИЗМЕНЁН кнопкой этого блока — гасит формовую историю отмены.
    *
@@ -1773,7 +1785,7 @@ function ProducesBlock({
   const byKey = useMemo(() => new Map(pieces.map((p) => [p.lineKey, p])), [pieces]);
   const usable = inputKeys.filter((k) => byKey.has(k) || assembly.res.units.has(k));
   // Защитная гигиена для старых/внешних мутаций: без внутреннего ключа имя не имеет владельца и
-  // сервер отвергнет теневое значение. Обычный dissolve очищает оба поля одним жестом.
+  // сервер отвергнет теневое значение. Удаление шага уносит оба поля вместе со строкой.
   useEffect(() => {
     if (!outputKey && outputName) {
       setValue(`operations.${index}.outputUnitName`, '', { shouldDirty: true });
@@ -1813,23 +1825,12 @@ function ProducesBlock({
   if (usable.length < 2 && !outputKey) return null;
 
   return (
-    <>
-      <GroupLabel
-        action={
-          outputKey ? (
-            // ТОТ ЖЕ МУТАТОР, ЧТО У ПОЛОТНА. Свой `setValue` здесь гасил историю вместо того,
-            // чтобы класть в неё запись, — и один и тот же поступок отменялся с полотна и не
-            // отменялся из редактора.
-            <Button type='button' variant='underline' size='xs' onClick={() => onDissolve(index)}>
-              dissolve
-            </Button>
-          ) : undefined
-        }
-      >
+    <div className='col-span-2 space-y-px sm:col-span-1'>
+      <Text size='micro' variant='label' tracking='label' className='leading-none uppercase'>
         unit
-      </GroupLabel>
+      </Text>
       {!outputKey ? (
-        <div className='max-w-60'>
+        <div>
           <Input
             value={draftName}
             aria-label='unit name'
@@ -1849,7 +1850,7 @@ function ProducesBlock({
         </div>
       ) : (
         <>
-          <div className='max-w-60'>
+          <div>
             {/* Имя живёт на первом производителе. Поглощающий шаг показывает то же поле, но пишет
                 в канонический адрес: сервер очищает outputUnitName на всех поглощениях, потому
                 что второе имя одного узла было бы вторым мнением о факте. */}
@@ -1864,7 +1865,7 @@ function ProducesBlock({
           <BootstrapEatenRefs index={index} outputKey={outputKey} assembly={assembly} />
         </>
       )}
-    </>
+    </div>
   );
 }
 
@@ -2468,7 +2469,6 @@ function OperationEditor({
   onDropPiece,
   onReplaceGhost,
   onRemoveGhost,
-  onDissolveUnit,
   mediaUrls,
   onEdit,
   frozen = false,
@@ -2512,7 +2512,6 @@ function OperationEditor({
   /** Убрать призрака только из этого шага и перейти к следующей метке. */
   onRemoveGhost: (index: number, ghostKey: string) => void;
   /** Растворение — тот же мутатор, что зовут полотно и схема. */
-  onDissolveUnit: (index: number) => void;
   /** Адреса операционных снимков; форма возит только media_id. */
   mediaUrls?: Map<number, string>;
   /**
@@ -2539,6 +2538,7 @@ function OperationEditor({
     0) as number;
   const [addingMaterial, setAddingMaterial] = useState(false);
   const [over, setOver] = useState(false);
+  const [seamPicker, setSeamPicker] = useState<SeamPickerRequest | null>(null);
 
   // The overrides fold. Open when the step already differs — a folded panel hiding a value the
   // operator set is worse than an open one showing nothing.
@@ -2683,7 +2683,8 @@ function OperationEditor({
     '') as string;
   const attachPattern = (useWatch({ control, name: `operations.${index}.attachPattern` }) ??
     NONE_ATTACH_PATTERN) as string;
-  const buttonHoles = (useWatch({ control, name: `operations.${index}.buttonHoles` }) ?? 0) as number;
+  const buttonHoles = (useWatch({ control, name: `operations.${index}.buttonHoles` }) ??
+    0) as number;
   const zipperApplication = (useWatch({ control, name: `operations.${index}.zipperApplication` }) ??
     NONE_ZIPPER_APPLICATION) as string;
   const bindingStyle = (useWatch({ control, name: `operations.${index}.bindingStyle` }) ??
@@ -4479,7 +4480,7 @@ function OperationEditor({
 
   const variantOneEditor = (
     <>
-      <div className='mb-3 flex min-w-0 items-center gap-2 border-b border-hairline pb-2'>
+      <div className='mb-3 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-hairline pb-2'>
         <StepHeaderIcon index={index} />
         <Text size='default' component='h4' className='shrink-0 tabular-nums'>
           {opNumber}
@@ -4489,7 +4490,7 @@ function OperationEditor({
           variant='uppercase'
           tracking='label'
           component='span'
-          className='min-w-0 flex-1 truncate'
+          className='min-w-20 flex-1 truncate'
           data-editor-heading={index}
         >
           {editorHeading}
@@ -4517,20 +4518,30 @@ function OperationEditor({
               accept review
             </Button>
           )}
-          <span className='hidden items-center gap-3 sm:flex'>
-            <Button type='button' variant='underline' size='xs' onClick={onInsertAfter}>
-              + below
-            </Button>
-            <Button type='button' variant='underline' size='xs' onClick={onRemove}>
-              remove
-            </Button>
+          <span className='flex items-center gap-6'>
+            <StepSeamsDoor index={index} onOpen={setSeamPicker} />
+            <span className='hidden items-center gap-6 sm:flex'>
+              <Button type='button' variant='underline' size='xs' onClick={onInsertAfter}>
+                + below
+              </Button>
+              <Button type='button' variant='underline' size='xs' onClick={onRemove}>
+                remove
+              </Button>
+            </span>
           </span>
         </div>
       </div>
 
-      <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
+      <div className='grid grid-cols-2 gap-2'>
+        <ProducesBlock
+          index={index}
+          inputKeys={selectedPieceKeys}
+          pieces={pieces}
+          assembly={assembly}
+          onEdit={onEdit}
+        />
         <div
-          className='col-span-2 space-y-px'
+          className='col-span-2 space-y-px sm:col-span-1'
           data-kind-picker={index}
           data-step-work={workValue || undefined}
         >
@@ -4548,7 +4559,7 @@ function OperationEditor({
           />
         </div>
         <div
-          className='space-y-px'
+          className='col-start-1 space-y-px'
           onFocusCapture={() => {
             zoneTouchedRef.current = true;
           }}
@@ -4560,7 +4571,7 @@ function OperationEditor({
             className={selectNoGrow}
           />
         </div>
-        <DecimalField name={`operations.${index}.smv`} label='time, min' min={0} />
+        <StepTimeField name={`operations.${index}.smv`} label='time, min' />
         {showIdentityOperation && (
           <SelectField
             name={`operations.${index}.operationType`}
@@ -4763,7 +4774,7 @@ function OperationEditor({
       <GroupLabel>with</GroupLabel>
       <div className='flex flex-wrap gap-1.5'>
         {chosenLivePieces.map((key) => (
-          <span key={key} className='relative inline-flex size-18 border border-borderColor'>
+          <span key={key} className='group relative inline-flex size-18 border border-borderColor'>
             <PieceTile
               found={pieceShapes?.get(pieceRefKey(key)) ?? null}
               previousFound={previousPieceShapes?.get(pieceRefKey(key)) ?? null}
@@ -4774,28 +4785,27 @@ function OperationEditor({
               className='size-18'
             />
             <Close
-              size='sm'
               aria-label={`remove piece ${byKey.get(key)?.name ?? ''}`}
-              title='remove piece'
               onClick={() => removePieceKey(key)}
-              className='absolute top-0 right-0 bg-bgColor/80 focus-visible:-outline-offset-2'
+              className={cn(WITH_CLOSE, 'focus-visible:-outline-offset-2')}
             />
           </span>
         ))}
         {danglingPieces.map((key) => (
-          <span key={key} className='relative inline-flex size-18 border border-error'>
+          <span key={key} className='group relative inline-flex size-18 border border-error'>
             <PieceTile found={null} name='missing' pxBox={WITH_BOX} className='size-18' />
             <Close
-              size='sm'
               aria-label='remove missing piece'
-              title='remove piece'
               onClick={() => removePieceKey(key)}
-              className='absolute top-0 right-0 bg-bgColor/80 text-error'
+              className={cn(WITH_CLOSE, 'text-error')}
             />
           </span>
         ))}
         {chosenUnits.map((key) => (
-          <span key={`u:${key}`} className='relative inline-flex size-18 border border-borderColor'>
+          <span
+            key={`u:${key}`}
+            className='group relative inline-flex size-18 border border-borderColor'
+          >
             <UnitPictureTile
               leaves={assembly.res.units.get(key)?.leaves ?? []}
               unitKey={key}
@@ -4806,11 +4816,9 @@ function OperationEditor({
               })}
             />
             <Close
-              size='sm'
               aria-label='remove unit'
-              title='remove unit'
               onClick={() => removePieceKey(key)}
-              className='absolute top-0 right-0 bg-bgColor/80 focus-visible:-outline-offset-2'
+              className={cn(WITH_CLOSE, 'focus-visible:-outline-offset-2')}
             />
           </span>
         ))}
@@ -4819,7 +4827,7 @@ function OperationEditor({
           const previous = previousPieceShapes?.get(pieceRefKey(ghostKey)) ?? null;
           return (
             <Fragment key={`ghost:${ghostKey}`}>
-              <span className='relative inline-flex size-18 border border-dashed border-error'>
+              <span className='group relative inline-flex size-18 border border-dashed border-error'>
                 <PieceTile
                   found={null}
                   previousFound={previous}
@@ -4829,11 +4837,9 @@ function OperationEditor({
                   className='size-18'
                 />
                 <Close
-                  size='sm'
                   aria-label={`remove missing piece ${ghostName}`}
-                  title='remove piece'
                   onClick={() => onRemoveGhost(index, ghostKey)}
-                  className='absolute top-0 right-0 bg-bgColor/80 text-error'
+                  className={cn(WITH_CLOSE, 'text-error')}
                 />
               </span>
               {(candidatesByGhost.get(ghostKey) ?? []).map((candidate) => {
@@ -4863,7 +4869,7 @@ function OperationEditor({
         {linkedMaterials.map((material) => (
           <span
             key={material.lineKey}
-            className='relative size-18'
+            className='group relative size-18'
             onMouseEnter={() => onActiveBomChange?.(material.lineKey ?? null)}
             onMouseLeave={() => onActiveBomChange?.(null)}
           >
@@ -4873,14 +4879,12 @@ function OperationEditor({
               className='justify-center'
             />
             <Close
-              size='sm'
               aria-label={`remove material ${material.name?.trim() || ''}`}
-              title='remove material'
               onClick={() => {
                 if (material.lineKey && material.lineKey === applied.thread) dismiss('thread');
                 toggleBom(material.lineKey ?? '');
               }}
-              className='absolute top-0 right-0 bg-bgColor/80'
+              className={WITH_CLOSE}
             />
           </span>
         ))}
@@ -4911,7 +4915,7 @@ function OperationEditor({
           onEdit={onEdit}
         />
       </div>
-      <StepSeamsRow index={index} />
+      <StepSeamsRow index={index} picker={seamPicker} onPicker={setSeamPicker} />
       <StepFoldsRow index={index} />
       {addingMaterial && unlinkedBySection.length > 0 && (
         <div className='mt-2 space-y-2'>
@@ -4964,15 +4968,6 @@ function OperationEditor({
           </div>
         </CalloutBox>
       )}
-
-      <ProducesBlock
-        index={index}
-        inputKeys={selectedPieceKeys}
-        pieces={pieces}
-        assembly={assembly}
-        onDissolve={onDissolveUnit}
-        onEdit={onEdit}
-      />
 
       <div className='mt-3'>
         <AiTextareaField
@@ -5661,7 +5656,7 @@ export function OperationsField({
   /** The tab's own controls for the block header (pattern parsing state, the skeleton door). */
   headerAction?: ReactNode;
 } = {}) {
-  const { control, getValues, setValue, watch } = useFormContext<TechCardFormData>();
+  const { clearErrors, control, getValues, setValue, watch } = useFormContext<TechCardFormData>();
   const { fields, append, remove, insert, move, replace } = useFieldArray({
     control,
     name: 'operations',
@@ -5742,6 +5737,7 @@ export function OperationsField({
   // гаснуть и зажигаться, а ref никого не перерисовывает. Оба пишутся ОДНОЙ функцией, чтобы
   // разойтись им было негде.
   type Hist = History<OperationFormValue>;
+  type RemoveEntry = Extract<HistoryEntry<OperationFormValue>, { kind: 'remove' }>;
   const history = useRef<Hist>(emptyHistory<OperationFormValue>());
   const [histView, setHistView] = useState<Hist>(history.current);
   const pendingAppend = useRef<PendingAppend<OperationFormValue> | null>(null);
@@ -5766,6 +5762,13 @@ export function OperationsField({
    * хоронить вместе с формой возможность вернуть подвинутую ноду не за что.
    */
   const clearFormHistory = useCallback(() => {
+    if (applying.current) return;
+    pendingAppend.current = null;
+    setHistory(dropStale(history.current));
+  }, [setHistory]);
+
+  /** The card was replaced, frozen, or the screen left: removals die here too. */
+  const dropFormHistory = useCallback(() => {
     if (applying.current) return;
     pendingAppend.current = null;
     setHistory(dropForm(history.current));
@@ -5810,10 +5813,10 @@ export function OperationsField({
     const sub = watch((_, { name }) => {
       if (name) return;
       placeBlankOnFirstInput.current.clear();
-      clearFormHistory();
+      dropFormHistory();
     });
     return () => sub.unsubscribe();
-  }, [watch, clearFormHistory]);
+  }, [watch, dropFormHistory]);
 
   // ВТОРОЙ ТАКТ ЗАПИСИ append. `append()` из RHF ничего не возвращает, а `fields` в замыкании
   // мутатора — снимок ДО вставки: `fields[at]?.id` там всегда `undefined`, и записанный синхронно
@@ -5831,6 +5834,39 @@ export function OperationsField({
     setHistory(p.redone ? pushUndo(history.current, rec) : record(history.current, rec));
   }, [fields, setHistory]);
 
+  /** Everything a removal must return, read while the row is still on the card. */
+  const removeRecord = (index: number): RemoveEntry | null => {
+    const operations = (getValues('operations') ?? []) as OperationFormValue[];
+    const row = operations[index];
+    if (!row?.historyKey) return null;
+    const onCard = cardKeysNow();
+    const seamKeys = [...(row.seamKeys ?? []), ...(row.poseKeys ?? [])];
+    const number = operationStepNumber(index);
+    const issueIndexes = (getValues('issues') ?? []).flatMap((issue, i) =>
+      issue.operationNumber === number ? [i] : [],
+    );
+    return {
+      kind: 'remove',
+      historyKey: row.historyKey,
+      row: structuredClone(row),
+      before: operations.map((op) => op.historyKey ?? ''),
+      issueIndexes,
+      pieceKeys: [...new Set(row.inputKeys ?? [])].filter((key) => onCard.pieceKeys.has(key)),
+      seamKeys: [...new Set(seamKeys)].filter((key) => onCard.seamKeys.has(key)),
+      bomLineKeys: [...new Set(row.bomLineKeys ?? [])].filter((key) => onCard.bomLineKeys.has(key)),
+      label: removeLabel(index),
+    };
+  };
+
+  const cardKeysNow = () => {
+    const seams = useSeamsStore.getState();
+    return {
+      pieceKeys: new Set((getValues('pieces') ?? []).map((piece) => piece.lineKey ?? '')),
+      seamKeys: new Set([...rowsOf(seams), ...posesOf(seams)].map((row) => row.seamKey)),
+      bomLineKeys: new Set((getValues('bomItems') ?? []).map((item) => item.lineKey ?? '')),
+    };
+  };
+
   // ГЕЙТ ЗАМОРОЗКИ ПЕРВОЙ СТРОКОЙ У КАЖДОГО МУТАТОРА, как у `appendStep` и `addInputToOperation`.
   // Сегодня все трое прикрыты косвенно: кнопки редактора и ручка перетаскивания — настоящие
   // <button> под внешним `<fieldset disabled>`, а док фулскрина обёрнут своим fieldset. Но
@@ -5838,11 +5874,22 @@ export function OperationsField({
   // Ф6в), и первый вызыватель вне формы дописал бы перенумерацию в выпущенную карточку молча.
   const removeOperation = (index: number) => {
     if (frozen) return;
+    const operations = (getValues('operations') ?? []) as OperationFormValue[];
+    if (foldsClosingOn(operations, index).length > 0) {
+      refuseGesture('FOLDS', FOLD_STEP_REFUSAL, 'NO STEP');
+      return;
+    }
+    if (!applying.current && serverKeepsFusingStep(operations[index], getValues('pieces') ?? [])) {
+      refuseGesture(`STEP ${operationStepNumber(index)}`, 'auto fuse', 'piece is fused');
+      return;
+    }
+    const undoRecord = applying.current ? null : removeRecord(index);
     const historyKey = getValues(`operations.${index}.historyKey`);
     if (historyKey) placeBlankOnFirstInput.current.delete(historyKey);
     clearFormHistory(); // (1/10) массив поехал — формовые записи протухли
     remapIssues((old) => (old === index ? null : old > index ? old - 1 : old));
     remove(index);
+    if (undoRecord) setHistory(record(history.current, undoRecord));
     // Clamp the STORED index, not just the rendered one: deleting the open last row leaves
     // `selected` past the end, and the next reorder would then compute the selection from a
     // position that no longer exists and open the wrong step.
@@ -5882,9 +5929,9 @@ export function OperationsField({
         return;
       }
       // Производящий шаг — несущая точка графа: снятие его выхода превращает каждую позднюю ссылку
-      // на узел в unknown-key, а строгий свип затем не производит и все зависимые узлы. Структурное
-      // растворение остаётся отдельным явным жестом.
-      refuseGesture('SEQUENCE', 'join kept', `dissolve ▣ ${membership.outputUnitKey} explicitly`);
+      // на узел в unknown-key, а строгий свип затем не производит и все зависимые узлы. Снять его
+      // можно только явным удалением шага.
+      refuseGesture('SEQUENCE', 'join kept', `remove ▣ ${membership.outputUnitKey} explicitly`);
       return;
     }
     if (from === to && !!operation.assemblyBlockDetached === membership.assemblyBlockDetached)
@@ -6600,6 +6647,11 @@ export function OperationsField({
   // Незавершённый жест создания: что уже назначено входами и не предлагается ли поглощение.
   // Живёт здесь, а не в схеме, потому что пишет в форму тоже отсюда.
   const [pendingCreate, setPendingCreate] = useState<CreatePrefill | null>(null);
+  const [removeWarning, setRemoveWarning] = useState<{
+    stepIndex: number;
+    fieldId: string;
+    price: AssemblyPrice;
+  } | null>(null);
   // ВСЕ ОРГАНЫ СОЗДАНИЯ ВХОДЯТ ЧЕРЕЗ ЭТУ ДВЕРЬ. Ховер-полоса уже несёт явный `at`; выбор одной
   // детали или одного узла раньше нёс только состав и потому дописывал тот же шаг в общий хвост.
   const openCreate = useCallback(
@@ -6622,14 +6674,15 @@ export function OperationsField({
   useEffect(() => {
     if (!frozen) return;
     setPendingCreate(null);
+    setRemoveWarning(null);
     // (8/10) ГОНКА RELEASE. Карточку выпустили, пока фулскрин открыт: жест, сделанный секунду
     // назад, отменять уже нельзя — правка выпущенной карточки запрещена целиком (R10). Гейт на
     // самом ⌘Z стоит тоже, но записи обязаны умереть, а не ждать, пока в них упрутся.
     //
     // УМИРАЮТ ТОЛЬКО ФОРМОВЫЕ, и это ровно то, ради чего сброс стал по-родовым: раскладка на
     // выпущенной карточке ЗАКОННА (R10), значит и отмена перестановки обязана её пережить.
-    clearFormHistory();
-  }, [frozen, clearFormHistory]);
+    dropFormHistory();
+  }, [frozen, dropFormHistory]);
   // ЯВНЫЙ ВЫБОР ПОЛЬЗОВАТЕЛЯ СИЛЬНЕЕ ВЫВОДА — иначе получается замкнутый круг, в который я и
   // попал: схема была доступна только на размеченной карточке, а разметить первый узел можно было
   // только в списке. Схема, на которой сборку собирают с нуля, обязана быть достижима с нуля.
@@ -6705,7 +6758,7 @@ export function OperationsField({
   // Считается через getValues НА СОБЫТИИ, а не подпиской: подписка на весь массив operations в
   // корне поля перерисовывала бы всё на каждое нажатие клавиши.
   const addInputToOperation = (index: number, key: string) => {
-    // ГЕЙТ ЗАМОРОЗКИ ПЕРВОЙ СТРОКОЙ, как у `appendStep` и `dissolveUnit`. Внешний
+    // ГЕЙТ ЗАМОРОЗКИ ПЕРВОЙ СТРОКОЙ, как у `appendStep` и `removeOperation`. Внешний
     // `<fieldset disabled>` карточки глушит клик и фокус, но НЕ pointer/DnD-жест на div — а
     // единственный настоящий вызыватель этого мутатора и есть дроп чипа детали на строку рельса
     // (`onDropPiece`). То есть на ВЫПУЩЕННОЙ карточке дроп правил форму, взводя isDirty, и никакая
@@ -6864,7 +6917,7 @@ export function OperationsField({
     const next = operations.map((operation, i) => (i === index ? nextRow : operation));
     // Призрак из джойна двух оставил бы узел из одного входа: сборка такого не примет, а снятая
     // метка увела бы на следующий шаг мимо нарушения. Отказ — словами движка, как у дропа;
-    // джойн чинят входом, растворением или заменой призрака.
+    // джойн чинят входом, удалением шага или заменой призрака.
     const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
     const pieceKeys = new Set(sweepPieces.map((p) => p.lineKey));
     const violationsOf = (ops: readonly OperationFormValue[]) =>
@@ -7080,27 +7133,23 @@ export function OperationsField({
     insertStepAt(at === undefined ? fields.length : Math.min(Math.max(at, 0), fields.length), r);
   };
 
-  /** Растворить узел: шаг перестаёт собирать, его входы возвращаются на стол следующим. */
-  const dissolveUnit = (stepIndex: number) => {
-    if (frozen) return; // тот же гейт: растворение — мутация, и разметке она не подотчётна
-    // ЗНАЧЕНИЯ ЧИТАЮТСЯ ДО ОБНУЛЕНИЯ — возвращать отмене больше неоткуда. `fieldId` здесь доступен
-    // синхронно (строка существует, массив не двигался), и второй такт не нужен.
-    const unitKey = ((getValues(`operations.${stepIndex}.outputUnitKey`) as string) ?? '').trim();
-    const unitName = ((getValues(`operations.${stepIndex}.outputUnitName`) as string) ?? '').trim();
+  /**
+   * Every user door of REMOVE asks this gate; undo of a created step calls the mutator directly.
+   * A fold refusal comes first and stays inside the mutator, so it is said in one place.
+   */
+  const requestRemoveOperation = (stepIndex: number) => {
+    if (frozen) return;
+    const ops = getValues('operations') ?? [];
+    const closing = foldsClosingOn(ops, stepIndex);
+    const seamsLost = savedSeamsOnStep(ops[stepIndex]?.seamKeys, rowsOf(useSeamsStore.getState()));
+    const price = removePrice(pieces, grouping.schematicSteps, stepIndex, seamsLost);
     const fieldId = fields[stepIndex]?.id;
-    setValue(`operations.${stepIndex}.outputUnitKey`, '', { shouldDirty: true });
-    setValue(`operations.${stepIndex}.outputUnitName`, '', { shouldDirty: true });
-    if (!fieldId || !unitKey) return; // растворять было нечего — и отменять нечего
-    setHistory(
-      record(history.current, {
-        kind: 'dissolve',
-        index: stepIndex,
-        fieldId,
-        unitKey,
-        unitName,
-        label: dissolveLabel(unitKey, unitName),
-      }),
-    );
+    const refused = serverKeepsFusingStep(ops[stepIndex], getValues('pieces') ?? []);
+    if (refused || removeGate(closing, price) !== 'ask' || !price || !fieldId) {
+      removeOperation(stepIndex);
+      return;
+    }
+    setRemoveWarning({ stepIndex, fieldId, price });
   };
 
   /**
@@ -7190,7 +7239,7 @@ export function OperationsField({
     prefs.reset();
   }, [prefs, setHistory]);
 
-  /** Выход шага, как его читает движок сборки: щит растворения сверяется с ним же. */
+  /** Выход шага, как его читает движок сборки: щит переименования сверяется с ним же. */
   const outputUnitKeyOf = (i: number) =>
     (getValues(`operations.${i}.outputUnitKey`) as string) ?? '';
 
@@ -7300,6 +7349,48 @@ export function OperationsField({
    * ревью Ф4 («молчание на ⌘Z хуже»). Провалившийся guard молчанием НЕ покрывается: там запись
    * БЫЛА, и молчание читалось бы как «отменил», хотя не отменено ничего.
    */
+  const undoRemoval = (rec: RemoveEntry) => {
+    const rowKeys = ((getValues('operations') ?? []) as OperationFormValue[]).map(
+      (op) => op.historyKey ?? '',
+    );
+    const refused = removeUndoRefusal(rec, { rowKeys, ...cardKeysNow() });
+    if (refused) {
+      setHistory(dropUndoTop(history.current));
+      refuseGesture('SEQUENCE', 'not undone', refused);
+      return;
+    }
+    const at = removeRestoreIndex(rec.before, rec.historyKey, rowKeys);
+    applyToForm(() => {
+      remapIssues((old) => (old >= at ? old + 1 : old));
+      insert(at, structuredClone(rec.row), { shouldFocus: false });
+      for (const i of rec.issueIndexes) {
+        if (getValues(`issues.${i}.operationNumber`)) continue;
+        setValue(`issues.${i}.operationNumber`, operationStepNumber(at), { shouldDirty: true });
+      }
+      // A refusal of the save without this step names rows by position: none of them holds now.
+      clearErrors('operations');
+    });
+    setSelected(at);
+    setHistory(undoStep(history.current));
+  };
+
+  const redoRemoval = (rec: RemoveEntry) => {
+    const operations = (getValues('operations') ?? []) as OperationFormValue[];
+    const index = operations.findIndex((op) => op.historyKey === rec.historyKey);
+    const fresh =
+      index < 0 || foldsClosingOn(operations, index).length > 0 ? null : removeRecord(index);
+    if (!fresh) {
+      setHistory(dropRedoTop(history.current));
+      refuseGesture('SEQUENCE', 'nothing to redo', 'the sequence has changed since');
+      return;
+    }
+    applyToForm(() => {
+      removeOperation(index);
+      clearErrors('operations');
+    });
+    setHistory(pushUndo(dropRedoTop(history.current), fresh));
+  };
+
   const undoGesture = () => {
     const rec = peekUndo(history.current);
     if (!rec) return; // тишина: отменять нечего, и говорить не о чем
@@ -7315,10 +7406,14 @@ export function OperationsField({
       }
       return;
     }
+    if (rec.kind === 'remove') {
+      undoRemoval(rec);
+      return;
+    }
     if (!canUndo(rec, fields, outputUnitKeyOf, inputKeysOf)) {
       // Ряд строк уехал (чаще всего — ресет формы после save). Умирает ВСЯ формовая половина
       // истории, а не одна запись: они все из той же, уже несуществующей эпохи. Раскладочные живут.
-      setHistory(dropForm(history.current));
+      setHistory(dropStale(history.current));
       refuseGesture('SEQUENCE', 'nothing to undo', 'the sequence has changed since');
       return;
     }
@@ -7335,7 +7430,7 @@ export function OperationsField({
           setValue('assemblyCleared', rec.clearedBefore, { shouldDirty: true });
         }
       });
-    } else if (rec.kind === 'rename') {
+    } else {
       // ОДНО НАЖАТИЕ ВОЗВРАЩАЕТ ВСЕ ТРИ ВИДА МЕСТ. Тем же переписывателем, что их и правил, — по
       // адресам, записанным жестом, а не по повторному скану: шаг, дописавший ссылку на НОВЫЙ ключ
       // уже после переименования, эту ссылку сделал сам, и отмена чужой работы не касается.
@@ -7345,11 +7440,6 @@ export function OperationsField({
       prefs.restore(rec.posBack);
       // …и выделение: инверсия переименования — тоже переименование, только в другую сторону.
       setRenamedUnit({ from: rec.to, to: rec.from });
-    } else {
-      applyToForm(() => {
-        setValue(`operations.${rec.index}.outputUnitKey`, rec.unitKey, { shouldDirty: true });
-        setValue(`operations.${rec.index}.outputUnitName`, rec.unitName, { shouldDirty: true });
-      });
     }
     setHistory(undoStep(history.current));
   };
@@ -7361,8 +7451,12 @@ export function OperationsField({
       refuseGesture('SEQUENCE', 'frozen', FROZEN_REFUSAL);
       return;
     }
+    if (rec.kind === 'remove') {
+      redoRemoval(rec);
+      return;
+    }
     if (!canRedo(rec, fields, outputUnitKeyOf, inputKeysOf)) {
-      setHistory(dropForm(history.current));
+      setHistory(dropStale(history.current));
       refuseGesture('SEQUENCE', 'nothing to redo', 'the sequence has changed since');
       return;
     }
@@ -7437,17 +7531,9 @@ export function OperationsField({
       setSelected(rec.index);
       return;
     }
-    if (rec.kind === 'rename') {
-      applyToForm(() => rewriteUnitKeySites(rec, rec.to));
-      prefs.restore(rec.posForward); // зеркало отмены: раскладка возвращается тем же нажатием
-      setRenamedUnit({ from: rec.from, to: rec.to });
-      setHistory(redoStep(history.current));
-      return;
-    }
-    applyToForm(() => {
-      setValue(`operations.${rec.index}.outputUnitKey`, '', { shouldDirty: true });
-      setValue(`operations.${rec.index}.outputUnitName`, '', { shouldDirty: true });
-    });
+    applyToForm(() => rewriteUnitKeySites(rec, rec.to));
+    prefs.restore(rec.posForward); // зеркало отмены: раскладка возвращается тем же нажатием
+    setRenamedUnit({ from: rec.from, to: rec.to });
     setHistory(redoStep(history.current));
   };
 
@@ -7626,6 +7712,27 @@ export function OperationsField({
     [setParams],
   );
 
+  // The seam walk lives in the URL too: a reload returns to it, Back leaves the page.
+  const walkOpen = params.get('walk') === '1' && !fsOpen && !!techCardId;
+  const setWalk = useCallback(
+    (on: boolean) => {
+      setParams(
+        (prev) => {
+          const p = new URLSearchParams(prev);
+          if (on) {
+            p.set('walk', '1');
+            p.set('tab', 'construction');
+          } else {
+            p.delete('walk');
+          }
+          return p;
+        },
+        { replace: true },
+      );
+    },
+    [setParams],
+  );
+
   // ЧЕРНОВИК СИЛЬНЕЕ АДРЕСА. Восстановленный черновик объявляет себя коллаутом в корне карточки —
   // под оверлеем его не видно, а «restore», нажатый после выхода, затёр бы всю работу, сделанную в
   // фулскрине. Поэтому автооткрытие по адресу подавляется; ручной вход позже работает как обычно.
@@ -7702,8 +7809,8 @@ export function OperationsField({
   // заметкой — ровно то, от чего точка 6 стережёт добор детали. Отмена обещает «ой» сразу после
   // жеста; жест из прошлого визита — уже не «сразу».
   useEffect(() => {
-    clearFormHistory();
-  }, [fsOpen, clearFormHistory]);
+    dropFormHistory();
+  }, [fsOpen, dropFormHistory]);
 
   const routeHistoryKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.defaultPrevented || event.repeat || event.nativeEvent.isComposing || event.altKey)
@@ -7823,7 +7930,20 @@ export function OperationsField({
           писателей; а `AssemblyCreateDialog` и корневой `StepNumberDrift` живут СНАРУЖИ этого
           блока и остаются смонтированными всегда: диалог создания нужен фулскрину так же, как
           инлайну. */}
-      {fsOpen ? null : fields.length === 0 &&
+      {walkOpen && (
+        <SeamWalk
+          fields={fields}
+          cardId={techCardId}
+          frozen={frozen}
+          selectedIndex={selectedIndex}
+          onExit={(index) => {
+            setSelected(index);
+            setWalk(false);
+          }}
+        />
+      )}
+
+      {fsOpen || walkOpen ? null : fields.length === 0 &&
         unplacedReuploadedKeys.length === 0 &&
         effectiveMode !== 'schematic' ? (
         <div className='flex flex-col items-center gap-2 border border-dashed border-borderColor px-3 py-8 text-center'>
@@ -7894,6 +8014,11 @@ export function OperationsField({
                     черновик формы, поэтому у несохранённой карточки кнопки нет — печатать было бы
                     нечего, и кнопка, печатающая «не то, что на экране», хуже отсутствующей. */}
                 {techCardId ? (
+                  <Chip nonForm quiet onClick={() => setWalk(true)} data-seam-walk-door=''>
+                    seams
+                  </Chip>
+                ) : null}
+                {techCardId ? (
                   <Chip
                     nonForm
                     quiet
@@ -7939,7 +8064,6 @@ export function OperationsField({
                   cloth={inlineCloth?.map ?? null}
                   smvOfBlock={grouping.smvOfBlock}
                   tailSmv={grouping.tailSmv}
-                  onDissolve={dissolveUnit}
                   positions={prefs.pos}
                   // ИНЛАЙНОВАЯ СХЕМА ПИШЕТ В ТУ ЖЕ ИСТОРИЮ, хотя ⌘Z в ней нет. Иначе жест,
                   // сделанный здесь, оказался бы невидим для истории, и первое же ⌘Z в фулскрине
@@ -8035,7 +8159,7 @@ export function OperationsField({
                   cloth={inlineCloth?.map ?? null}
                   pinOptions={pinOptions}
                   onInsertAfter={() => insertAfter(selectedIndex)}
-                  onRemove={() => removeOperation(selectedIndex)}
+                  onRemove={() => requestRemoveOperation(selectedIndex)}
                   onMarkReviewed={() => markReviewed(selectedIndex)}
                   onReviewAccepted={() => acceptReview(selectedIndex)}
                   onFlashPieces={flashPieces}
@@ -8044,7 +8168,6 @@ export function OperationsField({
                   onDropPiece={addInputToOperation}
                   onReplaceGhost={replaceStepGhost}
                   onRemoveGhost={removeStepGhost}
-                  onDissolveUnit={dissolveUnit}
                   mediaUrls={operationMediaUrls}
                   frozen={frozen}
                 />
@@ -8078,7 +8201,6 @@ export function OperationsField({
           selectedIndex={selectedIndex}
           onPickStep={pickStepInline}
           setPendingCreate={openCreate}
-          dissolveUnit={dissolveUnit}
           addInputToOperation={addInputToOperation}
           // `addOperation` ФУЛСКРИНУ БОЛЬШЕ НЕ ОТДАЁТСЯ. Его «+ new operation» ведёт в диалог
           // создания (`setPendingCreate`), а не дописывает пустой шаг: там нет ни лотка, ни
@@ -8143,7 +8265,7 @@ export function OperationsField({
                 cloth={inlineCloth?.map ?? null}
                 pinOptions={pinOptions}
                 onInsertAfter={() => insertAfter(selectedIndex)}
-                onRemove={() => removeOperation(selectedIndex)}
+                onRemove={() => requestRemoveOperation(selectedIndex)}
                 onMarkReviewed={() => markReviewed(selectedIndex)}
                 onReviewAccepted={() => acceptReview(selectedIndex)}
                 onFlashPieces={addPiece.onArm}
@@ -8152,7 +8274,6 @@ export function OperationsField({
                 onDropPiece={addInputToOperation}
                 onReplaceGhost={replaceStepGhost}
                 onRemoveGhost={removeStepGhost}
-                onDissolveUnit={dissolveUnit}
                 mediaUrls={operationMediaUrls}
                 frozen={frozen}
               />
@@ -8179,6 +8300,67 @@ export function OperationsField({
           onExit={() => setFullscreen(false)}
         />
       )}
+
+      <ConfirmationModal
+        open={removeWarning != null}
+        onOpenChange={(open) => {
+          if (!open) setRemoveWarning(null);
+        }}
+        onConfirm={() => {
+          if (!removeWarning) return;
+          // The dialog holds an address: an autosave reset or a release can move the rows under it,
+          // and removing by a stale index would delete someone else's step.
+          if (fields[removeWarning.stepIndex]?.id !== removeWarning.fieldId) {
+            refuseGesture('SEQUENCE', 'not removed', 'the sequence has changed since');
+            return;
+          }
+          removeOperation(removeWarning.stepIndex);
+        }}
+        title={
+          removeWarning
+            ? `REMOVE ${getValues(`operations.${removeWarning.stepIndex}.operationNumber`) || (removeWarning.stepIndex + 1) * 10} ${labelOfStep(removeWarning.stepIndex).split(' · ')[0]}?`.toUpperCase()
+            : ''
+        }
+        confirmLabel='remove'
+        cancelLabel='cancel'
+        onCloseAutoFocus={restoreScreenFocus}
+      >
+        {removeWarning && (
+          <ChipRow className='gap-2'>
+            {removeWarning.price.breaks.map((stepIndex) => (
+              <Chip key={stepIndex}>
+                {getValues(`operations.${stepIndex}.operationNumber`) || (stepIndex + 1) * 10}{' '}
+                {labelOfStep(stepIndex).split(' · ')[0]}
+              </Chip>
+            ))}
+            {removeWarning.price.breaks.length > 0 && (
+              <Chip tone='error'>
+                breaks {removeWarning.price.breaks.length}{' '}
+                {removeWarning.price.breaks.length === 1 ? 'op' : 'ops'}
+              </Chip>
+            )}
+            {removeWarning.price.seamsLost > 0 && (
+              <Chip tone='error'>
+                {removeWarning.price.seamsLost}{' '}
+                {removeWarning.price.seamsLost === 1 ? 'seam' : 'seams'}
+              </Chip>
+            )}
+            {removeWarning.price.unitsLost.map((key) => {
+              const producer = grouping.schematicSteps.find((step) => step.outputUnitKey === key);
+              return (
+                <Chip key={`unit:${key}`} tone='error'>
+                  lost {unitDisplayName({ key, outputUnitName: producer?.outputUnitName })}
+                </Chip>
+              );
+            })}
+            {removeWarning.price.piecesDropped.map((key) => (
+              <Chip key={`piece:${key}`} tone='error'>
+                dropped {pieces.find((piece) => piece.lineKey === key)?.name ?? key}
+              </Chip>
+            ))}
+          </ChipRow>
+        )}
+      </ConfirmationModal>
 
       {/* ПАНЕЛЬ РАТИФИКАЦИИ МОНТИРУЕТСЯ ЗДЕСЬ, СНАРУЖИ ОБОИХ РЕЖИМОВ РЕЛЬСА, — как и прочие
           диалоги этого файла. Открывает её счётчик неназванных, который стоит НАД обоими режимами

@@ -53,6 +53,7 @@ import {
   labelSpot,
   midAlong,
   partnerOf,
+  pathOf,
   seamOfSides,
   seamSig,
   splitSeams,
@@ -68,6 +69,7 @@ import {
 import type { HandOn } from './step-hand';
 import { frameSeamsOf, innerSeamsOf, splitLaid } from './step-picture-view';
 import {
+  fullyUsedEdges,
   inputGroups,
   pieceOfTarget,
   sewnBeforeStep,
@@ -142,6 +144,50 @@ describe('fitBox', () => {
   it('survives a degenerate box', () => {
     const f = fitBox({ x0: 5, y0: 5, x1: 5, y1: 5 }, 100, 100, 10);
     expect(Number.isFinite(f.s)).toBe(true);
+  });
+});
+
+describe('pathOf', () => {
+  it('writes a point once when its neighbour prints the same 0.1 px', () => {
+    expect(
+      pathOf([
+        [1, 1],
+        [1.01, 1.04],
+        [1.04, 0.96],
+        [2, 2],
+        [2.02, 2.01],
+      ]),
+    ).toBe('M1.0,1.0L2.0,2.0');
+    expect(
+      pathOf(
+        [
+          [0, 0],
+          [3, 0],
+          [3, 0.01],
+          [3, 3],
+        ],
+        true,
+      ),
+    ).toBe('M0.0,0.0L3.0,0.0L3.0,3.0Z');
+  });
+
+  it('keeps a dot two points long and a repeat that is not adjacent', () => {
+    expect(
+      pathOf([
+        [5, 5],
+        [5, 5],
+        [5.02, 4.98],
+      ]),
+    ).toBe('M5.0,5.0L5.0,5.0');
+    expect(pathOf([[5, 5]])).toBe('M5.0,5.0');
+    expect(
+      pathOf([
+        [0, 0],
+        [4, 0],
+        [0, 0],
+      ]),
+    ).toBe('M0.0,0.0L4.0,0.0L0.0,0.0');
+    expect(pathOf([])).toBe('');
   });
 });
 
@@ -386,7 +432,7 @@ describe('stepLayout on card 58', () => {
     const i = at(op);
     const leaves = inputGroups(ops, i, pieceKeys).map((g) => g.pieces);
     const raw = splitSeams(graph.chosen, leaves, geoms);
-    const used = usedEdgesBeforeStep(ops, i, new Map());
+    const used = fullyUsedEdges(usedEdgesBeforeStep(ops, i, new Map(), geoms), geoms);
     const proposals = suggestStepPairs(ops, i, pieceKeys, geoms, used, null, new Map());
     const own = (every ? proposals : proposals.slice(0, 1))
       .map((p) => seamOfSides(p, geoms, innerLines))
@@ -486,7 +532,7 @@ describe('stepLayout on card 83', () => {
   const steps = ops.map((op, i) => {
     const leaves = inputGroups(ops, i, pieceKeys).map((g) => g.pieces);
     const raw = splitSeams(graph.chosen, leaves, geoms);
-    const used = usedEdgesBeforeStep(ops, i, new Map());
+    const used = fullyUsedEdges(usedEdgesBeforeStep(ops, i, new Map(), geoms), geoms);
     const suggestion = suggestStepPair(ops, i, pieceKeys, geoms, used, null, new Map());
     const own = suggestion ? [seamOfSides(suggestion, geoms, innerLines)!].filter(Boolean) : [];
     // Inside each input: the engine's sure seams, and what the steps before sewed there.
@@ -647,7 +693,7 @@ describe('stepLayout on card 83', () => {
     // the left front touches the back's side.
     expect(sideBySide(s.result, 'FL', 'BP')).toBeLessThan(12);
     // Both proposals sewn: each front on its own side of the back.
-    const used = usedEdgesBeforeStep(ops, s.index, new Map());
+    const used = fullyUsedEdges(usedEdgesBeforeStep(ops, s.index, new Map(), geoms), geoms);
     const sides = suggestStepPairs(ops, s.index, pieceKeys, geoms, used, null, new Map());
     expect(sides.map((p) => p.hand)).toEqual(['L', 'R']);
     const own = sides.map((p) => seamOfSides(p, geoms, innerLines)!).filter(Boolean);
@@ -926,7 +972,7 @@ describe('stepLayout on card 77: a pocket bag lies on the piece it is sewn to (a
     const index = card77Step(op);
     const leaves = inputGroups(ops, index, pieceKeys).map((g) => g.pieces);
     const byKey = new Map();
-    const used = new Set(usedEdgesBeforeStep(ops, index, byKey));
+    const used = fullyUsedEdges(usedEdgesBeforeStep(ops, index, byKey, geoms), geoms);
     const [sug] = suggestStepPairs(ops, index, pieceKeys, geoms, used, null, byKey);
     const split = splitLaid(graph.chosen, leaves, geoms, innerLines, byKey);
     const inner = innerSeamsOf(split, ops, index, pieceKeys, leaves, geoms, innerLines, byKey);
@@ -989,7 +1035,7 @@ describe('stepLayout on card 77 op 1020: the sleeves into the armholes of a yoke
   const index = card77Step(1020);
   const leaves = inputGroups(ops, index, pieceKeys).map((g) => g.pieces);
   const byKey = new Map();
-  const used = new Set(usedEdgesBeforeStep(ops, index, byKey));
+  const used = fullyUsedEdges(usedEdgesBeforeStep(ops, index, byKey, geoms), geoms);
   const proposals = suggestStepPairs(ops, index, pieceKeys, geoms, used, null, byKey);
   const split = splitLaid(graph.chosen, leaves, geoms, innerLines, byKey);
   const inner = innerSeamsOf(split, ops, index, pieceKeys, leaves, geoms, innerLines, byKey);
@@ -1069,7 +1115,7 @@ describe('stepLayout on card 63: a hand placement beats the guess (the back pock
     const index = card63Step(op);
     const leaves = inputGroups(ops, index, pieceKeys).map((g) => g.pieces);
     const byKey = new Map();
-    const used = new Set(usedEdgesBeforeStep(ops, index, byKey));
+    const used = fullyUsedEdges(usedEdgesBeforeStep(ops, index, byKey, geoms), geoms);
     const [sug] = suggestStepPairs(ops, index, pieceKeys, geoms, used, null, byKey);
     const split = splitLaid(graph.chosen, leaves, geoms, innerLines, byKey);
     const inner = innerSeamsOf(split, ops, index, pieceKeys, leaves, geoms, innerLines, byKey);

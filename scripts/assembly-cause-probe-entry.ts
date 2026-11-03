@@ -8,7 +8,9 @@
 export {
   assemblyFaults,
   assemblyPrice,
-  dissolvePrice,
+  priceNeedsConfirmation,
+  removeGate,
+  removePrice,
 } from '../src/components/managers/tech-card/components/assembly-cause';
 export {
   assemblySweep,

@@ -1219,7 +1219,7 @@ export function greedyAssign(P: CandidatePool): SeamGraph {
     const same = candById.get([c.a, c.b].sort(cmp).join('~'));
     if (same) forcedSame.add(same);
     forced.push(
-      same && !c.aParts && !c.bParts
+      same && !c.aParts && !c.bParts && !c.range
         ? { ...c, evidence: { ...same.evidence, rule: c.evidence.rule } }
         : c,
     );

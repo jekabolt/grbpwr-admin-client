@@ -2,21 +2,14 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import { newSeamKey, poseRow, type EdgeAnchor, type StoredSeam } from 'lib/seams';
-
 import { card6Geoms, card6InnerLines } from './card6.fixture';
 import {
   cycleLayerHit,
   isGuess,
-  mirrorLeftPoses,
-  mirrorLeftRows,
   pickTarget,
-  pieceWord,
   seamSideName,
   sideForClick,
 } from './seam-focus';
-import { decodeHandPlace, withHandPlace } from './step-hand';
-import { mirrorPlacement } from './step-pose';
 import { stepLayout } from './step-picture';
 import { DOOR_SPAN_MM, spanMm, StepPictureSvg } from './step-picture-view';
 
@@ -104,147 +97,10 @@ describe('side names', () => {
     );
   });
 
-  it('keeps a generic placket run at the human piece name', () => {
+  it('names a generic placket run by the piece alone', () => {
     const placket = geoms.get('FLP_L_MAIN')!;
     const longest = placket.edges.reduce((best, edge) => (edge.lenMm > best.lenMm ? edge : best));
     expect(seamSideName([longest.id], geoms, nameOf, pieceOf)).toBe('placket');
-  });
-});
-
-describe('pieceWord', () => {
-  it('turns card codes into plain words and keeps prose names', () => {
-    expect(pieceWord('SLV_L')).toBe('sleeve');
-    expect(pieceWord('FLP_L_MAIN')).toBe('placket');
-    expect(pieceWord('YK')).toBe('yoke');
-    expect(pieceWord('LIN_FP_L')).toBe('lining front piece');
-    expect(pieceWord('Left Sleeve')).toBe('left sleeve');
-    expect(pieceWord('BP_U_1')).toBe('back piece');
-    expect(pieceWord('BP_MAIN')).toBe('back piece');
-    expect(pieceWord('P_L_MAIN')).toBe('front');
-  });
-});
-
-describe('mirror left', () => {
-  const anchor = (piece: string): EdgeAnchor => ({
-    piece,
-    samples: [
-      [0, 0],
-      [1, 0],
-    ],
-    perimShare: 0.1,
-    lenMm: 100,
-    notches: 0,
-    turnDeg: 0,
-    range: [0, 1],
-    edgeHint: `${piece}#0`,
-    contourSig: 'same',
-  });
-  const row = (key: string, piece: string, partner: string): StoredSeam => ({
-    seamKey: key,
-    status: 'confirmed',
-    kind: 'edge',
-    direction: 'reversed',
-    source: 'manual',
-    sideA: [anchor(piece)],
-    sideB: [anchor(partner)],
-    anchoredSize: '',
-    note: '',
-  });
-
-  it('copies an explicit left edge placement only onto the matching right row', () => {
-    const geoms = card6Geoms();
-    const left = withHandPlace(row('left', 'SLV_L', 'P_L_MAIN'), 'SLV_L', {
-      inside: true,
-      rotDeg: 90,
-      flip: false,
-      slideMm: 12,
-    });
-    const right = row('right', 'SLV_R', 'P_R_MAIN');
-    const [update] = mirrorLeftRows([right], [left, right], geoms);
-    expect(update.piece).toBe('SLV_R');
-    expect(decodeHandPlace(update.row.sideA[0].placement)).toEqual({
-      inside: true,
-      rotDeg: 90,
-      flip: false,
-      slideMm: -12,
-    });
-  });
-
-  it('copies a left flag set without a move onto the right twin, leaving its place alone', () => {
-    const geoms = card6Geoms();
-    const base = row('left', 'SLV_L', 'P_L_MAIN');
-    const left = { ...base, sideA: [{ ...base.sideA[0], layer: 'over' as const }] };
-    const right = row('right', 'SLV_R', 'P_R_MAIN');
-    const [update] = mirrorLeftRows([right], [left, right], geoms);
-    expect(update.piece).toBe('SLV_R');
-    expect(update.row.sideA[0].layer).toBe('over');
-    expect(update.row.sideA[0].placement).toBeUndefined();
-  });
-});
-
-describe('mirror left: surface and pose', () => {
-  const geoms = card6Geoms();
-  const at = { xMm: 30, yMm: 120, rotDeg: 37, flip: false };
-  const twinKind = (right: string, left: string) =>
-    geoms.get(right)!.twinOf.find((twin) => twin.key === left)!.kind;
-  const expected = () =>
-    mirrorPlacement(
-      geoms.get('SLV_L')!,
-      geoms.get('FLP_L_MAIN')!,
-      at,
-      geoms.get('SLV_R')!,
-      geoms.get('FLP_R_MAIN')!,
-      twinKind('SLV_R', 'SLV_L'),
-      twinKind('FLP_R_MAIN', 'FLP_L_MAIN'),
-    );
-
-  it('poses the right placket on the right sleeve as the left pose mirrored', () => {
-    const left = poseRow({
-      seamKey: newSeamKey(),
-      piece: geoms.get('FLP_L_MAIN')!,
-      host: geoms.get('SLV_L')!,
-      placement: at,
-    });
-    const [pose, ...rest] = mirrorLeftPoses(['SLV_R', 'FLP_R_MAIN'], [left], geoms);
-    expect(rest).toHaveLength(0);
-    expect(pose).toEqual({ piece: 'FLP_R_MAIN', host: 'SLV_R', placement: expected() });
-    expect(mirrorLeftPoses(['SLV_R'], [left], geoms)).toHaveLength(0);
-  });
-
-  it('re-lays a right surface row from its left twin, both anchors', () => {
-    const anchor = (piece: string, placement?: typeof at): EdgeAnchor => ({
-      piece,
-      samples: [
-        [0, 0],
-        [1, 0],
-      ],
-      perimShare: 0.1,
-      lenMm: 100,
-      notches: 0,
-      turnDeg: 0,
-      range: [0, 1],
-      edgeHint: `${piece}#0`,
-      contourSig: 'same',
-      ...(placement ? { placement } : {}),
-    });
-    const surface = (key: string, host: string, part: string, placement?: typeof at) => ({
-      seamKey: key,
-      status: 'confirmed' as const,
-      kind: 'surface' as const,
-      direction: 'unknown' as const,
-      source: 'manual' as const,
-      sideA: [anchor(host, placement)],
-      sideB: [anchor(part, placement)],
-      anchoredSize: '',
-      note: '',
-    });
-    const left = surface('left', 'SLV_L', 'FLP_L_MAIN', at);
-    const right = surface('right', 'SLV_R', 'FLP_R_MAIN');
-    const [update, ...rest] = mirrorLeftRows([right], [left, right], geoms);
-    expect(rest).toHaveLength(0);
-    expect(update.piece).toBe('FLP_R_MAIN');
-    expect(update.row.sideA[0].placement).toEqual(expected());
-    expect(update.row.sideB[0].placement).toEqual(expected());
   });
 });
 

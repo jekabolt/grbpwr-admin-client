@@ -6,14 +6,9 @@
 // узла в рельсе), рисуется байт-в-байт как раньше. Контекст, а не проп, потому что эти поверхности
 // живут в трёх разных деревьях (полотно, полка, рельс) и пропу пришлось бы пройти пять слоёв ради
 // данных, которых пока нет.
-import {
-  LOWER_LAYER_STROKE,
-  LOWER_LAYER_STROKE_SCALE,
-  type UnionPicture,
-} from 'lib/assembly-skeleton/union';
+import { levelFill, type UnionPicture } from 'lib/assembly-skeleton/union';
 import { cn } from 'lib/utility';
 import { createContext, useContext, useMemo, type ComponentProps, type ReactNode } from 'react';
-import { LowerLayerFills, lowerLayerTints } from './lower-layer-fill';
 import { fmtCm } from './nesting/dxf-geometry';
 import { UnitShape } from './nesting/unit-shape';
 import { TILE_BOX } from './piece-silhouette';
@@ -92,23 +87,6 @@ function LowerLayerUnitShape({
     () => picture.shapes.filter((shape) => lower.has(shape.pieceKey)),
     [lower, picture.shapes],
   );
-  const tints = useMemo(
-    () =>
-      lowerLayerTints(
-        picture.shapes.map((shape) => ({
-          key: shape.pieceKey,
-          ring: shape.pts,
-          path: `M${shapePoints(shape.pts)}Z`.replaceAll(' ', 'L'),
-        })),
-        bases.map((shape) => ({
-          key: shape.pieceKey,
-          depth: picture.lowerLayerDepths?.[shape.pieceKey] ?? 1,
-          coveredBy: picture.lowerLayerCovers?.[shape.pieceKey] ?? [],
-        })),
-      ),
-    [bases, picture.lowerLayerCovers, picture.lowerLayerDepths, picture.shapes],
-  );
-  const tintByKey = new Map(tints.map((tint) => [tint.key, tint]));
   const twinLabels = bases
     .flatMap((shape) => {
       const number = picture.twinLabels?.[shape.pieceKey];
@@ -116,6 +94,9 @@ function LowerLayerUnitShape({
     })
     .sort((left, right) => left.number - right.number);
   const lastTwin = twinLabels.at(-1)?.number ?? 0;
+  const levelOf = (shape: { pieceKey: string }) => picture.levels?.[shape.pieceKey] ?? 0;
+  // The highest level is painted last: the colours read the levels alone, never the order.
+  const surfaces = [...picture.shapes].sort((a, b) => levelOf(a) - levelOf(b));
 
   return (
     <span
@@ -129,52 +110,63 @@ function LowerLayerUnitShape({
         className='block h-full w-full'
         aria-hidden='true'
       >
-        {picture.shapes.map((shape) => (
-          <g key={shape.pieceKey}>
-            <polygon
-              points={shapePoints(shape.pts)}
-              fill='var(--color-bgColor)'
-              stroke={
-                !lower.has(shape.pieceKey) || tintByKey.get(shape.pieceKey)?.partial
-                  ? 'var(--color-textColor)'
-                  : 'none'
-              }
-              strokeWidth={1}
-              strokeLinejoin='round'
-              vectorEffect='non-scaling-stroke'
-              data-lower-layer-base={lower.has(shape.pieceKey) ? shape.pieceKey : undefined}
-            />
-            {!plain &&
-              !lower.has(shape.pieceKey) &&
-              shape.lines.map((line, index) => (
-                <polyline
-                  key={index}
-                  points={shapePoints(line)}
-                  fill='none'
-                  stroke='var(--color-textColor)'
-                  strokeWidth={0.6}
-                  strokeLinejoin='round'
-                  vectorEffect='non-scaling-stroke'
-                />
-              ))}
-          </g>
+        {surfaces.map((shape) => (
+          <polygon
+            key={shape.pieceKey}
+            points={shapePoints(shape.pts)}
+            fill={levelFill(levelOf(shape))}
+            stroke='none'
+            data-piece-level={levelOf(shape) || undefined}
+            data-lower-layer-base={lower.has(shape.pieceKey) ? shape.pieceKey : undefined}
+          />
         ))}
-        <LowerLayerFills tints={tints} />
-        {tints
-          .filter((tint) => !tint.partial)
-          .map((tint) => (
-            <path
-              key={`outline:${tint.key}`}
-              d={tint.path}
-              fill='none'
-              stroke={LOWER_LAYER_STROKE}
-              strokeWidth={LOWER_LAYER_STROKE_SCALE}
-              strokeLinejoin='round'
-              vectorEffect='non-scaling-stroke'
-              pointerEvents='none'
-              data-lower-layer-outline={tint.key}
-            />
-          ))}
+        <g
+          fill='none'
+          stroke='var(--color-textColor)'
+          strokeWidth={1}
+          strokeLinejoin='round'
+          pointerEvents='none'
+        >
+          {picture.shapes.map((shape) => {
+            const runs = picture.lowerLayerRuns?.[shape.pieceKey];
+            return (
+              <g key={shape.pieceKey}>
+                {runs ? (
+                  <>
+                    {runs.visible.map((run, index) => (
+                      <polyline
+                        key={index}
+                        points={shapePoints(run)}
+                        vectorEffect='non-scaling-stroke'
+                        data-lower-layer-outline={shape.pieceKey}
+                      />
+                    ))}
+                    {runs.hidden.map((run, index) => (
+                      <polyline
+                        key={index}
+                        points={shapePoints(run)}
+                        strokeDasharray='3 2'
+                        vectorEffect='non-scaling-stroke'
+                        data-lower-layer-hidden={shape.pieceKey}
+                      />
+                    ))}
+                  </>
+                ) : (
+                  <polygon points={shapePoints(shape.pts)} vectorEffect='non-scaling-stroke' />
+                )}
+                {!plain &&
+                  (runs?.lines ?? shape.lines).map((line, index) => (
+                    <polyline
+                      key={index}
+                      points={shapePoints(line)}
+                      strokeWidth={0.6}
+                      vectorEffect='non-scaling-stroke'
+                    />
+                  ))}
+              </g>
+            );
+          })}
+        </g>
       </svg>
       {twinLabels.length > 0 && (
         <svg
@@ -210,7 +202,7 @@ function LowerLayerUnitShape({
 }
 
 function UnitPictureShape(props: ComponentProps<typeof UnitShape>) {
-  return props.picture.lowerLayers?.length || Object.keys(props.picture.twinLabels ?? {}).length ? (
+  return props.picture.lowerLayerRuns || Object.keys(props.picture.twinLabels ?? {}).length ? (
     <LowerLayerUnitShape {...props} />
   ) : (
     <UnitShape {...props} />

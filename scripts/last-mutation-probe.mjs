@@ -46,7 +46,6 @@ const {
   appendLabel,
   canRedo,
   canUndo,
-  dissolveLabel,
   dropForm,
   dropMove,
   dropRedoTop,
@@ -99,7 +98,6 @@ console.log('подписи жестов — номер ЭКРАННЫЙ, (i + 1
 
 is('первый шаг — 10', appendLabel(0), 'create step 10');
 is('девятый шаг — 90', appendLabel(8), 'create step 90');
-is('растворение называет узел', dissolveLabel('SHELL'), 'dissolve ▣ Shell');
 // ВСТАВКА НАЗЫВАЕТСЯ СВОИМ ГЛАГОЛОМ: «create step 50» и «insert step 50» — разные обещания, и
 // второе честнее там, где следом за отменой поедут назад номера всех следующих шагов.
 is('вставка называет себя вставкой', insertLabel(4), 'insert step 50');
@@ -113,18 +111,6 @@ is(
   'чип называет жест создания',
   undoTitle({ kind: 'append', index: 8, fieldId: 'r9', row: row(), label: appendLabel(8) }),
   'undo — create step 90',
-);
-is(
-  'чип называет жест растворения',
-  undoTitle({
-    kind: 'dissolve',
-    index: 2,
-    fieldId: 'r3',
-    unitKey: 'SHELL',
-    unitName: 'корпус',
-    label: dissolveLabel('SHELL', 'корпус'),
-  }),
-  'undo — dissolve ▣ корпус',
 );
 is('переименование называет ОБА узла', renameLabel('SHELL', 'BODY'), 'rename ▣ Shell → Body');
 // «rename ▣ SHELL» не отличает «сейчас вернётся SHELL» от «сейчас вернётся BODY»: чип обязан
@@ -160,7 +146,6 @@ is(
 console.log('\nрод записи — на нём стоят и гейт заморозки, и сброс');
 
 yes('append — формовая', isFormEntry({ kind: 'append' }));
-yes('dissolve — формовая', isFormEntry({ kind: 'dissolve' }));
 yes('rename — формовая', isFormEntry({ kind: 'rename' }));
 no('move — не формовая', isFormEntry({ kind: 'move' }));
 
@@ -379,47 +364,6 @@ yes('дописали шаг следом', canUndo(APP, rows('r1', 'r2', 'r3', 
 // Отрицательный адрес не разбирается вовсе: он бывает только у битой записи.
 no('отрицательный адрес', canUndo({ ...APP, index: -1 }, rows('r1', 'r2', 'r3'), noUnits));
 
-// --- canUndo: dissolve ----------------------------------------------------------------------------
-console.log('\ncanUndo (dissolve) — плюс «узел всё ещё растворён»');
-
-const DIS = {
-  kind: 'dissolve',
-  index: 1,
-  fieldId: 'r2',
-  unitKey: 'SHELL',
-  unitName: 'корпус',
-  label: dissolveLabel('SHELL'),
-};
-
-yes('узел растворён — отмена честна', canUndo(DIS, rows('r1', 'r2', 'r3'), noUnits));
-
-// ШАГУ ВЕРНУЛИ ВЫХОД — руками или новым жестом. Вернуть поверх старый код значит переписать чужую
-// работу, а не отменить свою.
-no(
-  'шаг снова собирает узел',
-  canUndo(DIS, rows('r1', 'r2', 'r3'), (i) => (i === 1 ? 'BODY' : '')),
-);
-no(
-  'шагу вернули ТОТ ЖЕ код',
-  canUndo(DIS, rows('r1', 'r2', 'r3'), (i) => (i === 1 ? 'SHELL' : '')),
-);
-// ПРОБЕЛЫ — НЕ КОД УЗЛА, и щит обязан читать их так же, как движок сборки: тот сравнивает
-// `outputUnitKey.trim()`, то есть шаг с одними пробелами ничего не собирает. Прочитай щит строку
-// буквально — и отмена отказала бы на шаге, который по всем прочим правилам растворён.
-yes(
-  'одни пробелы — всё ещё растворён',
-  canUndo(DIS, rows('r1', 'r2', 'r3'), (i) => (i === 1 ? '   ' : '')),
-);
-// Чужой шаг с кодом на отмену не влияет: вопрос задаётся ровно про записанный адрес.
-yes(
-  'код у соседнего шага не мешает',
-  canUndo(DIS, rows('r1', 'r2', 'r3'), (i) => (i === 1 ? '' : 'X')),
-);
-
-// Тождество строки проверяется и здесь — первым.
-no('после ресета формы', canUndo(DIS, rows('n1', 'n2', 'n3'), noUnits));
-no('после перестановки', canUndo(DIS, rows('r2', 'r1', 'r3'), noUnits));
-
 // --- canUndo/canRedo: rename ----------------------------------------------------------------------
 console.log('\ncanUndo (rename) — ВСЕ переписанные места разом, иначе не отменяем ничего');
 
@@ -524,20 +468,6 @@ no('между ⌘Z и ⇧⌘Z дописали шаг', canRedo(APP, rows('r1',
 no('между ⌘Z и ⇧⌘Z удалили шаг', canRedo(APP, rows('r1'), noUnits));
 no('отрицательный адрес', canRedo({ ...APP, index: -1 }, rows('r1', 'r2'), noUnits));
 
-// У растворения щит — ЗЕРКАЛО отменного: узел на месте и это ТОТ ЖЕ код.
-yes(
-  'узел вернулся отменой — повтор честен',
-  canRedo(DIS, rows('r1', 'r2', 'r3'), (i) => (i === 1 ? 'SHELL' : '')),
-);
-no('узел так и не вернулся', canRedo(DIS, rows('r1', 'r2', 'r3'), noUnits));
-no(
-  'узлу дали ДРУГОЙ код',
-  canRedo(DIS, rows('r1', 'r2', 'r3'), (i) => (i === 1 ? 'BODY' : '')),
-);
-no(
-  'строка уже не та',
-  canRedo(DIS, rows('n1', 'n2', 'n3'), (i) => (i === 1 ? 'SHELL' : '')),
-);
 yes('раскладку повторяют всегда', canRedo(MOV, [], noUnits));
 
 // --- стопки ---------------------------------------------------------------------------------------
@@ -626,7 +556,7 @@ console.log('\nсброс по роду — формовые умирают, р�
 {
   const A = { kind: 'append', index: 0, fieldId: 'r1', row: row(), label: 'a' };
   const M = { kind: 'move', back: [], forward: [], label: 'm' };
-  const D = { kind: 'dissolve', index: 0, fieldId: 'r1', unitKey: 'X', unitName: '', label: 'd' };
+  const D = { kind: 'insert', index: 0, fieldId: 'r1', row: row(), lengthAfter: 2, label: 'd' };
   const h = { undo: [A, M, D], redo: [A, M] };
 
   is(
@@ -642,7 +572,7 @@ console.log('\nсброс по роду — формовые умирают, р�
   is(
     'dropMove оставил только форму',
     dropMove(h).undo.map((e) => e.kind),
-    ['append', 'dissolve'],
+    ['append', 'insert'],
   );
   is(
     'dropMove вычистил и возврат',
@@ -800,10 +730,7 @@ function stand(initialIds = [], pieces = []) {
         pieces,
       );
       if (act.kind === 'noop') return { ok: true };
-      if (act.kind === 'dissolve') {
-        api.dissolve(index);
-        return { ok: true };
-      }
+      if (act.kind === 'dissolve') return { ok: false, why: 'no unit' };
       if (act.kind === 'refuse') {
         said.push(act.why);
         return { ok: false, why: act.why };
@@ -859,22 +786,6 @@ function stand(initialIds = [], pieces = []) {
         ins.delete(id);
       }
       fields = fields.filter((_, i) => i !== index);
-    },
-
-    dissolve(index) {
-      if (frozen) return;
-      const id = fields[index]?.id;
-      const unitKey = (units.get(id) ?? '').trim();
-      units.set(id, '');
-      if (!id || !unitKey) return;
-      hist = record(hist, {
-        kind: 'dissolve',
-        index,
-        fieldId: id,
-        unitKey,
-        unitName: unitKey.toLowerCase(),
-        label: dissolveLabel(unitKey),
-      });
     },
 
     /** Жест раскладки. НИ ОДНОГО касания формы — иначе перетаскивание взводило бы isDirty. */
@@ -1301,7 +1212,7 @@ function chain() {
   is(
     'и отказ произнесён словами движка',
     s.said.at(-1),
-    'unit “GARMENT” is already produced by step 40 — pick another code, or dissolve that unit first',
+    'remove step 40 first',
   );
 }
 

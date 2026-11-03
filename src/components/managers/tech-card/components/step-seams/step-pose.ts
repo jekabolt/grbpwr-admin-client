@@ -6,8 +6,19 @@
 // Pure, below step-picture (which imports it): no import of step-picture here.
 
 import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
-import { apply, compose, IDENTITY, translate } from 'lib/assembly-skeleton/union/affine';
-import { poseOf, type SeamPlacement, type StoredPose } from 'lib/seams';
+import { breakPoints } from 'lib/assembly-skeleton/geometry';
+import { pieceKeyOf, resolveEdge, STACKED_TWIN_OFFSET_MM } from 'lib/assembly-skeleton/union';
+import { apply, compose, IDENTITY, rigid, translate } from 'lib/assembly-skeleton/union/affine';
+import {
+  expandSidePart,
+  normalizeParts,
+  poseAnchorOf,
+  poseOf,
+  poseRow,
+  type SeamPlacement,
+  type SidePart,
+  type StoredPose,
+} from 'lib/seams';
 
 /** A posed piece as the layout reads it: on `host`, at `placement` (the surface encoding). */
 export type PosePin = { host: string; placement: SeamPlacement; seamKey?: string };
@@ -17,6 +28,250 @@ export type PoseEditResolution = {
   /** Pieces whose stored pose must be removed. */
   drop: Set<string>;
 };
+
+export type SpanFit = { T: Affine; angleDeg: number; gapMm: number };
+
+export type FitSides = { a: readonly SidePart[]; b: readonly SidePart[] };
+
+export type FitSource = FitSides & { key: string };
+
+type FitSideInput = { a: readonly (SidePart | string)[]; b: readonly (SidePart | string)[] };
+
+const fitPartsOf = (side: readonly (SidePart | string)[]): SidePart[] =>
+  side.map((part) => (typeof part === 'string' ? { target: part } : part));
+
+const fitSourceKey = (sides: FitSides) =>
+  (['a', 'b'] as const)
+    .map((side) =>
+      sides[side]
+        .map(({ target, range }) => `${target}@${range ? `${range[0]}:${range[1]}` : '*'}`)
+        .sort()
+        .join('+'),
+    )
+    .join('~');
+
+/** The complete live pick wins; an optional selected stored row supplies its ranged parts. */
+export function fitSourceOf(
+  current: FitSideInput | null | undefined,
+  stored?: FitSides | null,
+): FitSource | null {
+  const live = current ? { a: fitPartsOf(current.a), b: fitPartsOf(current.b) } : { a: [], b: [] };
+  const sides = live.a.length && live.b.length ? live : stored;
+  if (!sides?.a.length || !sides.b.length) return null;
+  return { a: [...sides.a], b: [...sides.b], key: fitSourceKey(sides) };
+}
+
+const pointAlong = (points: readonly Pt2[], share: number): Pt2 => {
+  if (points.length < 2) return points[0] ?? [0, 0];
+  const lengths = [0];
+  for (let index = 1; index < points.length; index++)
+    lengths.push(
+      lengths[index - 1] +
+        Math.hypot(
+          points[index][0] - points[index - 1][0],
+          points[index][1] - points[index - 1][1],
+        ),
+    );
+  const target = Math.max(0, Math.min(1, share)) * lengths[lengths.length - 1];
+  let index = 1;
+  while (index < lengths.length - 1 && lengths[index] < target) index++;
+  const length = lengths[index] - lengths[index - 1];
+  const at = length ? (target - lengths[index - 1]) / length : 0;
+  return [
+    points[index - 1][0] + at * (points[index][0] - points[index - 1][0]),
+    points[index - 1][1] + at * (points[index][1] - points[index - 1][1]),
+  ];
+};
+
+/** Rigid, never mirrored, span-end fit. Reversed lays the first span's start on the second's end. */
+export function fitSpan(
+  from: readonly Pt2[],
+  onto: readonly Pt2[],
+  opts: { reversed: boolean },
+): SpanFit {
+  if (from.length < 2 || onto.length < 2) return { T: IDENTITY, angleDeg: 0, gapMm: Infinity };
+  const targetStart = opts.reversed ? onto[onto.length - 1] : onto[0];
+  const targetEnd = opts.reversed ? onto[0] : onto[onto.length - 1];
+  const T = rigid(targetStart, targetEnd, from[0], from[from.length - 1], false);
+  const samples = 32;
+  let gap = 0;
+  for (let index = 0; index <= samples; index++) {
+    const share = index / samples;
+    const moved = apply(T, pointAlong(from, share));
+    const target = pointAlong(onto, opts.reversed ? 1 - share : share);
+    gap += Math.hypot(moved[0] - target[0], moved[1] - target[1]);
+  }
+  const angleDeg = (Math.atan2(T[1], T[0]) * 180) / Math.PI;
+  return { T, angleDeg, gapMm: gap / (samples + 1) };
+}
+
+const rangedPoints = (
+  points: readonly Pt2[],
+  range: readonly [number, number] | undefined,
+  targetLength: number,
+): Pt2[] => {
+  if (!range || points.length < 2 || !(targetLength > 0)) return [...points];
+  const lengths = [0];
+  for (let index = 1; index < points.length; index++)
+    lengths.push(
+      lengths[index - 1] +
+        Math.hypot(
+          points[index][0] - points[index - 1][0],
+          points[index][1] - points[index - 1][1],
+        ),
+    );
+  const total = lengths[lengths.length - 1];
+  const start = (Math.max(0, Math.min(targetLength, range[0])) / targetLength) * total;
+  const end = (Math.max(start, Math.min(targetLength, range[1])) / targetLength) * total;
+  const out: Pt2[] = [];
+  for (let index = 1; index < points.length; index++) {
+    const from = lengths[index - 1];
+    const to = lengths[index];
+    const length = to - from;
+    if (!(length > 0) || to < start || from > end) continue;
+    const at = (distance: number): Pt2 => {
+      const share = Math.max(0, Math.min(1, (distance - from) / length));
+      return [
+        points[index - 1][0] + share * (points[index][0] - points[index - 1][0]),
+        points[index - 1][1] + share * (points[index][1] - points[index - 1][1]),
+      ];
+    };
+    if (!out.length) out.push(at(Math.max(start, from)));
+    out.push(at(Math.min(end, to)));
+    if (to >= end) break;
+  }
+  return out.length >= 2 ? out : [...points];
+};
+
+const stackedOffsets = (stacked: readonly (readonly string[])[]) => {
+  const out = new Map<string, Pt2>();
+  stacked.forEach((group) =>
+    group.slice(1).forEach((piece, index) => {
+      const offset = STACKED_TWIN_OFFSET_MM * (index + 1);
+      out.set(piece, [offset, -offset]);
+    }),
+  );
+  return out;
+};
+
+const partWorldPoints = (
+  part: SidePart,
+  transforms: ReadonlyMap<string, Affine>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  offsets: ReadonlyMap<string, Pt2>,
+): Pt2[] => {
+  const edge = resolveEdge(part.target, geoms);
+  const T = edge ? transforms.get(edge.pieceKey) : undefined;
+  if (!edge || !T) return [];
+  const [ox, oy] = offsets.get(edge.pieceKey) ?? [0, 0];
+  return rangedPoints(edge.pts, part.range, edge.len).map((point) => {
+    const world = apply(T, point);
+    return [world[0] + ox, world[1] + oy];
+  });
+};
+
+/** Join already-laid outline parts by their nearest ends, without adding resampled candidates. */
+const joinedWorldPoints = (
+  parts: readonly SidePart[],
+  transforms: ReadonlyMap<string, Affine>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  offsets: ReadonlyMap<string, Pt2>,
+): Pt2[] => {
+  const remaining = normalizeParts(parts, geoms)
+    .flatMap((part) => expandSidePart(part, geoms))
+    .map((part) => partWorldPoints(part, transforms, geoms, offsets))
+    .filter((points) => points.length >= 2);
+  const joined = remaining.shift() ?? [];
+  while (remaining.length && joined.length) {
+    const end = joined[joined.length - 1];
+    let best = { index: 0, reverse: false, distance: Infinity };
+    remaining.forEach((points, index) => {
+      for (const reverse of [false, true]) {
+        const next = reverse ? points[points.length - 1] : points[0];
+        const distance = Math.hypot(next[0] - end[0], next[1] - end[1]);
+        if (distance < best.distance) best = { index, reverse, distance };
+      }
+    });
+    const next = remaining.splice(best.index, 1)[0];
+    if (best.reverse) next.reverse();
+    joined.push(...next.slice(best.distance <= 0.05 ? 1 : 0));
+  }
+  return joined;
+};
+
+export type SpanFitPlan = {
+  piece: string;
+  host: string;
+  group: string[];
+  D: Affine;
+  fit: SpanFit;
+  reversed: boolean;
+  sourceKey: string;
+};
+
+/**
+ * Plan one FIT press from the exact current world layout. Side A moves when both sides have one
+ * part; otherwise the only one-part side moves. Both multi-part sides are deliberately disabled.
+ */
+export function fitPlan(
+  source: FitSource,
+  layout: PoseBlockLayout & { stacked?: readonly (readonly string[])[] },
+  geoms: ReadonlyMap<string, PieceGeom>,
+  alternate = false,
+): SpanFitPlan | null {
+  const movingSide = source.a.length === 1 ? source.a : source.b.length === 1 ? source.b : null;
+  const fixedSide = movingSide === source.a ? source.b : movingSide === source.b ? source.a : null;
+  if (!movingSide || !fixedSide?.length) return null;
+  const piece = pieceKeyOf(movingSide[0].target);
+  const host = pieceKeyOf(fixedSide[0].target);
+  if (!piece || !host || piece === host) return null;
+  const pickup = posePickup(piece, layout, geoms);
+  if (!pickup.group.length || pickup.group.includes(host)) return null;
+  const offsets = stackedOffsets(layout.stacked ?? []);
+  const from = joinedWorldPoints(movingSide, layout.transforms, geoms, offsets);
+  const onto = joinedWorldPoints(fixedSide, layout.transforms, geoms, offsets);
+  if (from.length < 2 || onto.length < 2) return null;
+  const choices = [false, true]
+    .map((reversed) => ({ reversed, fit: fitSpan(from, onto, { reversed }) }))
+    .sort((a, b) => Math.abs(a.fit.angleDeg) - Math.abs(b.fit.angleDeg));
+  const choice = choices[alternate ? 1 : 0];
+  const [ox, oy] = offsets.get(piece) ?? [0, 0];
+  // FIT measures the drawn stacked offset. Conjugate it back into the stored piece transform.
+  const D =
+    ox || oy
+      ? compose(translate(-ox, -oy), compose(choice.fit.T, translate(ox, oy)))
+      : choice.fit.T;
+  return {
+    piece,
+    host,
+    group: pickup.group,
+    D,
+    fit: choice.fit,
+    reversed: choice.reversed,
+    sourceKey: source.key,
+  };
+}
+
+/** Encode a span fit as the same placement a dropped pose writes. */
+export function poseRowFromFit(args: {
+  seamKey: string;
+  piece: PieceGeom;
+  host: PieceGeom;
+  fit: SpanFit;
+  pieceT?: Affine;
+  hostT?: Affine;
+  grainDeg?: ReadonlyMap<string, number>;
+}): StoredPose {
+  const pieceT = args.pieceT ?? IDENTITY;
+  const hostT = args.hostT ?? IDENTITY;
+  return poseRow({
+    seamKey: args.seamKey,
+    piece: args.piece,
+    host: args.host,
+    placement: poseAt(args.host, args.piece, hostT, compose(args.fit.T, pieceT)),
+    grainDeg: args.grainDeg,
+  });
+}
 
 /**
  * Record one pose edit without allowing a host cycle. The new edge wins: when its host already
@@ -30,12 +285,11 @@ export function resolvePoseEdit(
 ): PoseEditResolution {
   const edits = new Map(current.edits);
   const drop = new Set(current.drop);
-  if (piece === edit.host) return { edits, drop };
-
   // Re-setting a piece is the latest edit, including after an earlier cycle dropped its pose.
   edits.delete(piece);
   edits.set(piece, edit);
   drop.delete(piece);
+  if (piece === edit.host) return { edits, drop };
 
   const hostOf = (key: string) =>
     edits.get(key)?.host ?? (drop.has(key) ? undefined : storedHosts.get(key));
@@ -136,14 +390,21 @@ export function posePinsOf(
 ): Map<string, PosePin> {
   const out = new Map<string, PosePin>();
   if (!rows?.size) return out;
-  for (const step of steps)
+  steps.forEach((step, index) => {
     for (const key of step.poseKeys ?? []) {
       const row = rows.get(key);
+      const anchor = row && index === steps.length - 1 ? poseAnchorOf(row) : null;
+      if (anchor) {
+        out.delete(anchor.piece);
+        out.set(anchor.piece, { host: anchor.piece, placement: anchor.placement, seamKey: key });
+        continue;
+      }
       const pose = row ? poseOf(row) : null;
       if (!pose) continue;
       out.delete(pose.piece);
       out.set(pose.piece, { host: pose.host, placement: pose.placement, seamKey: key });
     }
+  });
   return out;
 }
 
@@ -193,7 +454,7 @@ export function poseGroup(
         seen.add(n);
         queue.push(n);
       }
-  return seen.has(host) ? [piece] : [...seen];
+  return host !== piece && seen.has(host) ? [piece] : [...seen];
 }
 
 /** The result metadata needed to choose a rigid PLACE pickup. */
@@ -204,8 +465,16 @@ export type PoseBlockLayout = {
   hung?: readonly (readonly [string, string])[];
 };
 
-/** The rigid pieces and fixed host captured when PLACE starts dragging. */
-export type PosePickup = { group: string[]; host: string | null };
+/**
+ * The rigid pieces and fixed host captured when PLACE starts dragging. `host` is a piece because a
+ * pose needs its frame; `block` and `hostBlock` are the two input blocks a layer press relates.
+ */
+export type PosePickup = {
+  group: string[];
+  host: string | null;
+  block: string[];
+  hostBlock: string[];
+};
 
 const blockIndexOf = (layout: Pick<PoseBlockLayout, 'blocks'>) => {
   const out = new Map<string, number>();
@@ -256,7 +525,7 @@ export function posePickup(
 ): PosePickup {
   const input = blockIndexOf(layout);
   const own = input.get(piece);
-  if (own == null) return { group: [piece], host: null };
+  if (own == null) return { group: [piece], host: null, block: [piece], hostBlock: [] };
   let host: string | null = null;
   for (const [child, parent] of layout.hung ?? []) {
     if (input.get(child) !== own || input.get(parent) == null || input.get(parent) === own)
@@ -283,7 +552,13 @@ export function posePickup(
         null,
       ) ?? null;
   }
-  return { group: poseBlockGroup(piece, host, layout), host };
+  const hostInput = host == null ? null : input.get(host);
+  return {
+    group: poseBlockGroup(piece, host, layout),
+    host,
+    block: [...layout.blocks[own].pieces],
+    hostBlock: hostInput == null ? [] : [...layout.blocks[hostInput].pieces],
+  };
 }
 
 /** A dropped pose value ready to be wrapped in `poseRow`. */
@@ -308,7 +583,7 @@ export function poseAfterDrop(
   return { piece, host, placement: poseAt(hostGeom, pieceGeom, hostT, droppedT) };
 }
 
-function invert(T: Affine): Affine {
+export function invert(T: Affine): Affine {
   const [a, b, c, d, e, f] = T;
   const k = a * d - b * c || 1;
   return [d / k, -b / k, -c / k, a / k, (c * f - d * e) / k, (b * e - a * f) / k];
@@ -317,6 +592,216 @@ function invert(T: Affine): Affine {
 const still = (D: Affine) =>
   Math.abs(D[0] - 1) + Math.abs(D[1]) + Math.abs(D[2]) + Math.abs(D[3] - 1) < 1e-9 &&
   Math.abs(D[4]) + Math.abs(D[5]) < 1e-6;
+
+/**
+ * How far a picture landed from where it stood, read on its largest piece: the others may have been
+ * re-laid by the write itself. Null when it stands.
+ */
+export function layoutDrift(
+  before: ReadonlyMap<string, Affine>,
+  after: ReadonlyMap<string, Affine>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): Pt2 | null {
+  const area = (key: string) => Math.abs(geoms.get(key)?.areaMm2 ?? 0);
+  const anchor = [...after.keys()]
+    .filter((key) => before.has(key) && (geoms.get(key)?.rs.length ?? 0) >= 3)
+    .sort((a, b) => area(b) - area(a))[0];
+  if (!anchor) return null;
+  const b = box(geoms.get(anchor)!.rs);
+  const centre: Pt2 = [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
+  const [x0, y0] = apply(before.get(anchor)!, centre);
+  const [x1, y1] = apply(after.get(anchor)!, centre);
+  return Math.hypot(x1 - x0, y1 - y0) < 0.01 ? null : [x1 - x0, y1 - y0];
+}
+
+export type PoseMovePlan = {
+  /** Where the moved piece is pinned; on itself, in the step's frame, when nothing can carry it. */
+  pin: DroppedPose | null;
+  /** The group's other poses: one rigid block stands by one row, and a second would pull against it. */
+  drop: string[];
+  /** Poses resting on the moved pieces, rewritten so that they stay where they are. */
+  keep: DroppedPose[];
+};
+
+/**
+ * What one hand move writes so that only the moved pieces change place. `D` moves `group` in the
+ * frame of `transforms`. A host never rests on the moved pieces (that would be a loop: the first
+ * pose dropped, its piece back to the automatic place); with no such block left the piece stands in
+ * the step's frame. Every pose resting on the moved pieces is measured again from the new place.
+ */
+export function planPoseMove(
+  piece: string,
+  pickup: Pick<PosePickup, 'group' | 'host'>,
+  D: Affine,
+  layout: Pick<PoseBlockLayout, 'blocks' | 'transforms'>,
+  pinHosts: ReadonlyMap<string, string>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): PoseMovePlan {
+  const group = new Set(pickup.group);
+  const blockOf = (key: string) => layout.blocks.find((block) => block.pieces.includes(key));
+  const restsOnGroup = (key: string) => {
+    const seen = new Set<string>();
+    const queue = [key];
+    while (queue.length) {
+      const at = queue.pop()!;
+      if (seen.has(at)) continue;
+      seen.add(at);
+      if (group.has(at)) return true;
+      const host = pinHosts.get(at);
+      if (host) queue.push(host);
+      queue.push(...(blockOf(at)?.pieces ?? []));
+    }
+    return false;
+  };
+  const area = (key: string) => Math.abs(geoms.get(key)?.areaMm2 ?? 0);
+  const others = layout.blocks
+    .flatMap((block) => block.pieces)
+    .filter((key) => !group.has(key))
+    .sort((a, b) => area(b) - area(a));
+  const host = [...(pickup.host ? [pickup.host] : []), ...others].find(
+    (key) => !group.has(key) && !restsOnGroup(key) && layout.transforms.has(key),
+  );
+  const T0 = layout.transforms.get(piece);
+  const own = geoms.get(piece);
+  const pin = !T0
+    ? null
+    : host
+      ? poseAfterDrop(piece, compose(D, T0), { host }, layout, geoms)
+      : own
+        ? { piece, host: piece, placement: placementOf(own, own, compose(D, T0)) }
+        : null;
+  const drop = [...pinHosts.keys()].filter((key) => key !== piece && group.has(key));
+  const keep = [...pinHosts].flatMap(([key, on]) => {
+    if (group.has(key) || !group.has(on)) return [];
+    const T = layout.transforms.get(key);
+    const onT = layout.transforms.get(on);
+    const hostGeom = geoms.get(on);
+    const keyGeom = geoms.get(key);
+    if (!T || !onT || !hostGeom || !keyGeom) return [];
+    // The host moved and the piece stood.
+    return [{ piece: key, host: on, placement: poseAt(hostGeom, keyGeom, compose(D, onT), T) }];
+  });
+  return { pin, drop, keep };
+}
+
+/**
+ * Break every loop of poses between blocks, leaving all pieces where `transforms` has them. A later
+ * row wins: the row closing a loop goes, its block standing in the step's frame unless another row
+ * carries it, and the other rows of the loop are measured again. No loop, nothing to write.
+ * `hosts` runs oldest first; the row of `fixed` is the one just made and is never measured again.
+ */
+export function poseLoopFix(
+  hosts: ReadonlyMap<string, string>,
+  layout: Pick<PoseBlockLayout, 'blocks' | 'transforms'>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  fixed?: string,
+): Pick<PoseMovePlan, 'drop' | 'keep'> {
+  const input = new Map<string, number>();
+  layout.blocks.forEach((block, index) =>
+    block.pieces.forEach((key) => {
+      if (!input.has(key)) input.set(key, index);
+    }),
+  );
+  const rows = [...hosts].filter(
+    ([key, on]) =>
+      key !== on &&
+      input.get(key) != null &&
+      input.get(on) != null &&
+      input.get(key) !== input.get(on),
+  );
+  const add = (edges: Map<number, Set<number>>, from: number, to: number) =>
+    edges.set(from, (edges.get(from) ?? new Set()).add(to));
+  const reaches = (edges: ReadonlyMap<number, ReadonlySet<number>>, from: number, to: number) => {
+    const seen = new Set<number>();
+    const queue = [from];
+    while (queue.length) {
+      const at = queue.pop()!;
+      if (at === to) return true;
+      if (seen.has(at)) continue;
+      seen.add(at);
+      queue.push(...(edges.get(at) ?? []));
+    }
+    return false;
+  };
+  const kept = new Map<number, Set<number>>();
+  const closing: string[] = [];
+  const stay: (readonly [string, string])[] = [];
+  for (const [key, on] of [...rows].reverse()) {
+    const from = input.get(key)!;
+    const to = input.get(on)!;
+    if (reaches(kept, to, from)) {
+      closing.push(key);
+      continue;
+    }
+    add(kept, from, to);
+    stay.push([key, on]);
+  }
+  if (!closing.length) return { drop: [], keep: [] };
+
+  const all = new Map<number, Set<number>>();
+  for (const [key, on] of rows) add(all, input.get(key)!, input.get(on)!);
+  const keep: DroppedPose[] = [];
+  for (const [key, on] of stay) {
+    if (key === fixed || !reaches(all, input.get(on)!, input.get(key)!)) continue;
+    const T = layout.transforms.get(key);
+    const onT = layout.transforms.get(on);
+    const keyGeom = geoms.get(key);
+    const hostGeom = geoms.get(on);
+    if (T && onT && keyGeom && hostGeom)
+      keep.push({ piece: key, host: on, placement: poseAt(hostGeom, keyGeom, onT, T) });
+  }
+  const stands = new Set(
+    [...hosts].flatMap(([key, on]) =>
+      key === on && input.get(key) != null ? [input.get(key)!] : [],
+    ),
+  );
+  const drop: string[] = [];
+  for (const key of closing) {
+    const block = input.get(key)!;
+    const T = layout.transforms.get(key);
+    const own = geoms.get(key);
+    if (kept.has(block) || stands.has(block) || !T || !own) {
+      drop.push(key);
+      continue;
+    }
+    stands.add(block);
+    keep.push({ piece: key, host: key, placement: placementOf(own, own, T) });
+  }
+  return { drop, keep };
+}
+
+/**
+ * What FIT writes: the piece on the host the seam asks for, whatever rests where. `D` moves `group`
+ * in the frame of `transforms`. The group's other rows go (one block stands by one row), and a host
+ * resting on the group stands where it is: FIT never leaves a loop between blocks.
+ */
+export function planPoseFit(
+  piece: string,
+  host: string,
+  group: readonly string[],
+  D: Affine,
+  layout: Pick<PoseBlockLayout, 'blocks' | 'transforms'>,
+  pinHosts: ReadonlyMap<string, string>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): PoseMovePlan {
+  const T0 = layout.transforms.get(piece);
+  const pin = T0 ? poseAfterDrop(piece, compose(D, T0), { host }, layout, geoms) : null;
+  if (!pin) return { pin: null, drop: [], keep: [] };
+  const moved = new Set(group);
+  const transforms = new Map(layout.transforms);
+  for (const key of group) {
+    const T = transforms.get(key);
+    if (T) transforms.set(key, compose(D, T));
+  }
+  const hosts = new Map([...pinHosts].filter(([key]) => !moved.has(key)));
+  hosts.set(piece, host);
+  const fix = poseLoopFix(hosts, { blocks: layout.blocks, transforms }, geoms, piece);
+  return {
+    pin,
+    drop: [...[...pinHosts.keys()].filter((key) => key !== piece && moved.has(key)), ...fix.drop],
+    keep: fix.keep,
+  };
+}
 
 /**
  * Pin the posed pieces of a laid picture, in place: each where its row says on its host (`T` of
@@ -336,7 +821,6 @@ export function pinPoses(
 ): { pinned: string[]; moved: boolean } {
   const pins = [...pose].filter(
     ([k, p]) =>
-      k !== p.host &&
       T.has(k) &&
       T.has(p.host) &&
       (geoms.get(k)?.rs.length ?? 0) >= 3 &&
@@ -356,10 +840,8 @@ export function pinPoses(
   for (let pass = 0; pass <= pins.length; pass++) {
     let moved = false;
     for (const [k, p] of pins) {
-      const want = compose(
-        T.get(p.host)!,
-        placementT(geoms.get(p.host)!, geoms.get(k)!, p.placement),
-      );
+      const on = placementT(geoms.get(p.host)!, geoms.get(k)!, p.placement);
+      const want = k === p.host ? on : compose(T.get(p.host)!, on);
       const D = compose(want, invert(T.get(k)!));
       if (still(D)) continue;
       for (const m of groups.get(k)!) T.set(m, m === k ? want : compose(D, T.get(m)!));
@@ -371,52 +853,115 @@ export function pinPoses(
   return { pinned: pins.map(([k]) => k), moved: any };
 }
 
-/** A drop's snap: the shift that lays a vertex of the dragged pieces on `host` at `at`. */
+/** A drop's snap: the shift that lays an allowed point of the dragged pieces on `host` at `at`. */
 export type PoseSnap = { dx: number; dy: number; at: Pt2; host: string };
 
-/**
- * Where a drop snaps (picture frame): a vertex of the dragged pieces onto a vertex of another piece
- * within `reach`, else onto the nearest point of its outline within `reach`; null — it stays put.
- */
+export type PoseSnapPoint = { piece: string; at: Pt2 };
+
+export type PoseSnapCandidates = {
+  spanEnds: readonly PoseSnapPoint[];
+  notches: readonly PoseSnapPoint[];
+  corners: readonly PoseSnapPoint[];
+};
+
+/** First candidate class with a hit wins; distance only decides within that class. */
 export function snapPose(
-  moving: readonly Pt2[],
-  others: readonly { piece: string; ring: readonly Pt2[] }[],
+  moving: PoseSnapCandidates,
+  others: PoseSnapCandidates,
   reach: number,
 ): PoseSnap | null {
-  if (!moving.length || !(reach > 0)) return null;
-  const mb = box(moving);
-  let vertex: (PoseSnap & { d: number }) | null = null;
-  let edge: (PoseSnap & { d: number }) | null = null;
-  for (const o of others) {
-    const ob = box(o.ring);
-    if (
-      ob.x0 > mb.x1 + reach ||
-      ob.x1 < mb.x0 - reach ||
-      ob.y0 > mb.y1 + reach ||
-      ob.y1 < mb.y0 - reach
-    )
-      continue;
-    const r = o.ring;
-    for (const v of moving)
-      for (let i = 0; i < r.length; i++) {
-        const a = r[i];
-        const b = r[(i + 1) % r.length];
-        const dv = Math.hypot(a[0] - v[0], a[1] - v[1]);
-        if (dv <= reach && (!vertex || dv < vertex.d))
-          vertex = { d: dv, dx: a[0] - v[0], dy: a[1] - v[1], at: a, host: o.piece };
-        const ex = b[0] - a[0];
-        const ey = b[1] - a[1];
-        const l2 = ex * ex + ey * ey;
-        const t = l2 ? Math.max(0, Math.min(1, ((v[0] - a[0]) * ex + (v[1] - a[1]) * ey) / l2)) : 0;
-        const p: Pt2 = [a[0] + ex * t, a[1] + ey * t];
-        const de = Math.hypot(p[0] - v[0], p[1] - v[1]);
-        if (de <= reach && (!edge || de < edge.d))
-          edge = { d: de, dx: p[0] - v[0], dy: p[1] - v[1], at: p, host: o.piece };
+  if (!(reach > 0)) return null;
+  for (const kind of ['spanEnds', 'notches', 'corners'] as const) {
+    let best: (PoseSnap & { distance: number }) | null = null;
+    for (const from of moving[kind])
+      for (const onto of others[kind]) {
+        const distance = Math.hypot(onto.at[0] - from.at[0], onto.at[1] - from.at[1]);
+        if (distance > reach || (best && distance >= best.distance)) continue;
+        best = {
+          distance,
+          dx: onto.at[0] - from.at[0],
+          dy: onto.at[1] - from.at[1],
+          at: onto.at,
+          host: onto.piece,
+        };
+      }
+    if (best) return { dx: best.dx, dy: best.dy, at: best.at, host: best.host };
+  }
+  return null;
+}
+
+const pointAtMm = (points: readonly Pt2[], atMm: number, targetLength: number): Pt2 | null => {
+  if (points.length < 2 || !(targetLength > 0)) return points[0] ?? null;
+  const total = points.reduce(
+    (sum, point, index) =>
+      index
+        ? sum + Math.hypot(point[0] - points[index - 1][0], point[1] - points[index - 1][1])
+        : sum,
+    0,
+  );
+  const target = (Math.max(0, Math.min(targetLength, atMm)) / targetLength) * total;
+  let walked = 0;
+  for (let index = 1; index < points.length; index++) {
+    const a = points[index - 1];
+    const b = points[index];
+    const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (walked + length >= target) {
+      const share = length ? (target - walked) / length : 0;
+      return [a[0] + share * (b[0] - a[0]), a[1] + share * (b[1] - a[1])];
+    }
+    walked += length;
+  }
+  return points[points.length - 1];
+};
+
+const uniqueSnapPoints = (points: PoseSnapPoint[]) => {
+  const seen = new Set<string>();
+  return points.filter(({ piece, at }) => {
+    const key = `${piece}:${at[0].toFixed(4)}:${at[1].toFixed(4)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const snapCandidatesOf = (
+  pieces: readonly string[],
+  transforms: ReadonlyMap<string, Affine>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  source?: FitSource | null,
+): PoseSnapCandidates => {
+  const present = new Set(pieces);
+  const spanParts = source ? [...source.a, ...source.b] : [];
+  const spanEnds: PoseSnapPoint[] = [];
+  const notches: PoseSnapPoint[] = [];
+  const corners: PoseSnapPoint[] = [];
+  for (const piece of pieces) {
+    const geom = geoms.get(piece);
+    const T = transforms.get(piece);
+    if (!geom || !T) continue;
+    for (const part of spanParts) {
+      const edge = resolveEdge(part.target, geoms);
+      if (!edge || edge.pieceKey !== piece) continue;
+      const points = rangedPoints(edge.pts, part.range, edge.len);
+      if (points.length < 2) continue;
+      spanEnds.push({ piece, at: apply(T, points[0]) });
+      spanEnds.push({ piece, at: apply(T, points[points.length - 1]) });
+    }
+    for (const edge of geom.edges)
+      for (const point of breakPoints(geom, edge)) {
+        const at = pointAtMm(edge.pts, point.atMm, edge.lenMm);
+        if (!at) continue;
+        const candidate = { piece, at: apply(T, at) };
+        if (point.kind === 'notch') notches.push(candidate);
+        else corners.push(candidate);
       }
   }
-  const best = vertex ?? edge;
-  return best ? { dx: best.dx, dy: best.dy, at: best.at, host: best.host } : null;
-}
+  return {
+    spanEnds: uniqueSnapPoints(spanEnds.filter(({ piece }) => present.has(piece))),
+    notches: uniqueSnapPoints(notches),
+    corners: uniqueSnapPoints(corners),
+  };
+};
 
 /** The snap candidate for the current drag delta, from the same geometry the drop will store. */
 export function snapPoseForDrag(
@@ -426,19 +971,20 @@ export function snapPoseForDrag(
   geoms: ReadonlyMap<string, PieceGeom>,
   stacked: ReadonlySet<string>,
   reach: number,
+  source?: FitSource | null,
 ): PoseSnap | null {
   const movingKeys = new Set(group);
-  const ringOf = (piece: string, T: Affine) =>
-    (geoms.get(piece)?.rs ?? []).map((point) => apply(T, point));
-  const moving = group.flatMap((piece) => {
+  const movedTransforms = new Map(transforms);
+  for (const piece of group) {
     const T = transforms.get(piece);
-    return T ? ringOf(piece, compose(D, T)) : [];
-  });
-  const others = [...transforms].flatMap(([piece, T]) =>
-    movingKeys.has(piece) || stacked.has(piece) || (geoms.get(piece)?.rs.length ?? 0) < 3
-      ? []
-      : [{ piece, ring: ringOf(piece, T) }],
+    if (T) movedTransforms.set(piece, compose(D, T));
+  }
+  const otherKeys = [...transforms.keys()].filter(
+    (piece) =>
+      !movingKeys.has(piece) && !stacked.has(piece) && (geoms.get(piece)?.rs.length ?? 0) >= 3,
   );
+  const moving = snapCandidatesOf(group, movedTransforms, geoms, source);
+  const others = snapCandidatesOf(otherKeys, transforms, geoms, source);
   return snapPose(moving, others, reach);
 }
 
@@ -468,6 +1014,32 @@ export function poseHostOf(
     if (keys.length) return keys.reduce((best, k) => (area(k) > area(best) ? k : best));
   }
   return null;
+}
+
+export type PoseRotation = { D: Affine; angleDeg: number };
+
+/** Pointer rotation about a fixed block centre, rounded to the requested degree step. */
+export function rotatePoseDrag(
+  centre: Pt2,
+  start: Pt2,
+  current: Pt2,
+  stepDeg: 1 | 15,
+): PoseRotation {
+  const startAngle = Math.atan2(start[1] - centre[1], start[0] - centre[0]);
+  const currentAngle = Math.atan2(current[1] - centre[1], current[0] - centre[0]);
+  const raw =
+    (Math.atan2(Math.sin(currentAngle - startAngle), Math.cos(currentAngle - startAngle)) * 180) /
+    Math.PI;
+  const angleDeg = Math.round(raw / stepDeg) * stepDeg;
+  if (angleDeg === 0) return { D: IDENTITY, angleDeg: 0 };
+  const angle = (angleDeg * Math.PI) / 180;
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  const R: Affine = [c, s, -s, c, 0, 0];
+  return {
+    D: compose(translate(centre[0], centre[1]), compose(R, translate(-centre[0], -centre[1]))),
+    angleDeg,
+  };
 }
 
 /** A quarter turn (⟲ +1, ⟳ −1) or a flip (0) of a piece about its box centre, picture frame. */

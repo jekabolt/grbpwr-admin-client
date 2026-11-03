@@ -82,8 +82,11 @@ function describe(
     case 'conflict':
       return { label: 'conflict', tone: 'warn' };
     case 'error':
-      // D-66: a refusal is not retried on a timer — «retrying» over it would be a promise nobody keeps.
-      return { label: cause === 'refused' ? 'not saved' : 'not saved · retrying', tone: 'warn' };
+      // D-66, L16: a refusal and a stopped ladder have no timer — «retrying» would be a promise nobody keeps.
+      return {
+        label: cause === 'refused' || cause === 'stopped' ? 'not saved' : 'not saved · retrying',
+        tone: 'warn',
+      };
     case 'saved':
     case 'idle':
     default:
@@ -132,6 +135,9 @@ export function saveSentence(
           message ||
           'the server refused the last save — it goes out again with your next change'
         );
+      // L16: the retries ran out, and the sentence does not promise another one.
+      if (cause === 'stopped')
+        return message ? `the last save failed: ${message}` : 'the last save failed';
       return message
         ? `the last save failed: ${message}; the card keeps retrying on its own`
         : 'the last save failed; the card keeps retrying on its own';

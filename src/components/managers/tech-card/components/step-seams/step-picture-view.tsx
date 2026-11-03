@@ -14,13 +14,20 @@ import {
 } from 'components/managers/tech-card/techpack/press-arrows';
 import type { EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
 import {
-  LOWER_LAYER_STROKE_SCALE,
   STACKED_TWIN_OFFSET_MM,
+  levelFill,
   orderedLayerKeys,
   resolveEdge,
 } from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
-import type { EdgeAnchor, SeamPlacement, StoredPose, StoredSeam } from 'lib/seams';
+import {
+  candidateSideParts,
+  type EdgeAnchor,
+  type SeamPlacement,
+  type SidePart,
+  type StoredPose,
+  type StoredSeam,
+} from 'lib/seams';
 import {
   useCallback,
   useEffect,
@@ -28,25 +35,30 @@ import {
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { plainEdges } from '../assembly-seams/words';
 import { posesOf, rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import { useCardSeamGraph } from '../card-unit-pictures';
-import { LowerLayerFills, lowerLayerTints, type LowerLayerClaim } from '../lower-layer-fill';
 import type { TechCardFormData } from '../schema';
 import { nameSpot } from './name-spot';
-import { fasteningPictureGlyphs, type ButtonholeOperation } from './buttonhole-glyph';
+import { mmOnPoints } from './span-pick';
+import { fmtMm } from './step-seams-model';
+import { placementPictureGlyphsForStep, type ButtonholeOperation } from './buttonhole-glyph';
 import { PAIR_INK, pairNo } from './palette';
 import { layerStyle } from './layer-style';
+import { foldedActionGlyphs, foldedActionLines, foldedDrawing } from './step-folds';
 import { NO_SEAM_TEXT, stepHighlightOf } from './step-highlight';
 import { stepHandsOf, type StepHands } from './step-hand';
 import { withPoseHosts, type PosePin } from './step-pose';
+import { storedSeamSides } from './step-rows';
 import { useStepResults } from './step-result-context';
 import { useStepSeams } from './step-seams-context';
 import {
   innerId,
   inputGroups,
+  fullyUsedEdges,
   parseInner,
   pieceOfTarget,
   sewnBeforeStep,
@@ -108,6 +120,7 @@ function sceneOpsSignature(ops: readonly SceneOp[], index: number): string {
       outputUnitKey: op?.outputUnitKey,
       seamKeys: op?.seamKeys,
       poseKeys: op?.poseKeys,
+      foldKeys: op?.foldKeys,
       operationNumber: op?.operationNumber,
       assemblyBlockDetached: op?.assemblyBlockDetached,
       fullnessRatio: op?.fullnessRatio,
@@ -151,6 +164,7 @@ export type StoredOnStep = {
   key: string;
   row: StoredSeam | undefined;
   sides: SeamSides;
+  parts: { a: SidePart[]; b: SidePart[] };
   /** The stored row resolved by the shared seam graph against today's geometry. */
   candidates: SeamCandidate[];
   /** A surface seam's hand placement (on its anchors). */
@@ -405,6 +419,7 @@ export function stepSeamsOfOp(
     const row = byKey.get(key);
     const candidates = chosenByKey.get(key) ?? [];
     const resolved = candidates.map(candidateSides);
+    const fallback = row ? storedSeamSides(row, geoms) : null;
     return {
       key,
       row,
@@ -414,17 +429,26 @@ export function stepSeamsOfOp(
             b: resolved.flatMap((sides) => sides.b),
           }
         : {
-            a: (row?.sideA ?? []).flatMap(targetsOfAnchor),
-            b: (row?.sideB ?? []).flatMap(targetsOfAnchor),
+            a: fallback?.a ?? [],
+            b: fallback?.b ?? [],
           },
+      parts: candidates.length
+        ? {
+            a: candidates.flatMap((candidate) => candidateSideParts(candidate, 'a', geoms)),
+            b: candidates.flatMap((candidate) => candidateSideParts(candidate, 'b', geoms)),
+          }
+        : fallback?.parts ?? { a: [], b: [] },
       candidates,
       placement: [...(row?.sideA ?? []), ...(row?.sideB ?? [])].find((anchor) => anchor.placement)
         ?.placement,
     };
   });
   const used = new Set<EdgeId>([
-    ...stored.flatMap((seam) => [...seam.sides.a, ...seam.sides.b]).filter((id) => !parseInner(id)),
-    ...usedEdgesBeforeStep(ops, index, byKey),
+    ...stored
+      .flatMap((seam) => [...seam.parts.a, ...seam.parts.b])
+      .filter((part) => !part.range && !parseInner(part.target))
+      .map((part) => part.target),
+    ...fullyUsedEdges(usedEdgesBeforeStep(ops, index + 1, byKey, geoms), geoms),
   ]);
   const suggestions = ready
     ? suggestStepPairs(ops, index, pieceKeys, geoms, used, ease, byKey)
@@ -549,16 +573,24 @@ export function stepPictureOfOp(
   );
   const marks: EdgeMark[] = [
     ...(stored.length
-      ? stored.flatMap((seam) => [...seam.sides.a, ...seam.sides.b])
+      ? stored.flatMap((seam) => [...seam.parts.a, ...seam.parts.b])
       : crossSeams.length
         ? crossSeams.flatMap((candidate) => {
             const sides = candidateSides(candidate);
-            return [...sides.a, ...sides.b];
+            return [...sides.a, ...sides.b].map((target): SidePart => ({ target }));
           })
         : surfaceMarks.length
           ? []
-          : suggestions.flatMap((candidate) => [...candidate.a, ...candidate.b])
-    ).map((id): EdgeMark => ({ id, tone: stored.length ? 'stored' : 'proposal' })),
+          : suggestions.flatMap((candidate) =>
+              [...candidate.a, ...candidate.b].map((target): SidePart => ({ target })),
+            )
+    ).map(
+      (part): EdgeMark => ({
+        id: part.target,
+        ...(part.range ? { range: part.range } : {}),
+        tone: stored.length ? 'stored' : 'proposal',
+      }),
+    ),
     ...(crossSeams.length ? [] : surfaceMarks).map((id): EdgeMark => ({ id, tone: 'proposal' })),
   ];
   const layoutLeaves = focusedStepLeaves(
@@ -567,6 +599,7 @@ export function stepPictureOfOp(
     innerSeams,
     hands.pose,
   );
+  const highlight = stepHighlightOf(options.operations, options.index, byKey);
   return {
     op: active,
     geoms,
@@ -590,7 +623,8 @@ export function stepPictureOfOp(
     crossSeams,
     storedSeams,
     marks,
-    stepEdges: stepHighlightOf(options.operations, options.index, byKey).targets,
+    stepEdges: highlight.targets,
+    ...(highlight.parts.some((part) => !!part.range) ? { stepParts: highlight.parts } : {}),
     layoutLeaves,
     hands,
     layout: skipLayout
@@ -689,42 +723,8 @@ export type StepSeamPreviewInput = {
   hands?: StepHands;
 };
 
-/** A proposal, pick, or stored unit seam laid without changing the shared owner result. */
-export function stepSeamPreview(
-  input: StepSeamPreviewInput,
-  target: { sides: SeamSides; source: 'live' | 'stored' },
-  options: { focus?: boolean; explode?: number; rasterMm?: number } = {},
-): { seams: SeamCandidate[]; layout: StepLayout } | null {
-  const own =
-    target.source === 'live' ? seamOfSides(target.sides, input.geoms, input.innerLines) : null;
-  if (target.source === 'live' && !own) return null;
-  const seams = frameSeamsOf(
-    input.innerSeams,
-    input.storedSeams,
-    own ? [own] : [],
-    input.crossSeams,
-  );
-  const leaves =
-    options.focus === false
-      ? input.leaves
-      : focusedStepLeaves(
-          input.leaves,
-          [...target.sides.a, ...target.sides.b],
-          input.innerSeams,
-          input.hands?.pose,
-        );
-  return {
-    seams,
-    layout: stepLayout(leaves, seams, input.geoms, {
-      explode: options.explode ?? STEP_TILE_EXPLODE,
-      rasterMm: options.rasterMm,
-      ...input.hands,
-    }),
-  };
-}
-
-/** Only a resolved multi-piece input needs the local seam preview path. */
-export const isUnitStepSeamPreview = (groups: readonly { pieces: readonly string[] }[]) =>
+/** One resolved multi-piece input: a seam inside a unit, its edges picked on the unit's picture. */
+export const isUnitStep = (groups: readonly { pieces: readonly string[] }[]) =>
   groups.length === 1 && groups[0].pieces.length > 1;
 
 /** `stepLayout`, memoised on the seams' identity. */
@@ -771,8 +771,17 @@ export function useBoxSize(): [(el: HTMLElement | null) => void, { w: number; h:
  * `pick` — side 2 (where it goes): blue.
  */
 export type Tone = 'proposal' | 'pickFirst' | 'pick' | 'stored' | 'hint';
-export type EdgeMark = { id: TargetId; tone: Tone; label?: string };
-export type NoMark = { id: TargetId; i: number };
+export type EdgeMark = {
+  id: TargetId;
+  tone: Tone;
+  label?: string;
+  range?: readonly [number, number];
+  /** The stored seam the owner selected: drawn heavier. */
+  active?: boolean;
+};
+export type NoMark = { id: TargetId; i: number; range?: readonly [number, number] };
+/** A break point shown on an edge in hand: a notch is a square, an end or a turn a circle. */
+export type EdgeTick = { id: TargetId; atMm: number; notch: boolean };
 export type PictureActionLine = {
   id: string;
   piece: string;
@@ -949,6 +958,8 @@ const LOOK: Record<'canvas' | 'result' | 'tile' | 'print', Look> = {
   // The existing PDF weights: ordinary ink 1.75 px, active seam 3 px, monochrome hairlines.
   print: { outline: 1.75, hair: 0.7, mark: 3, stored: 3, dash: '5 3', font: 9 },
 };
+/** A hidden contour is the thinner line (mockup: 1 under 1.6, and 1 under 1 on a tile). */
+const hiddenOutline = (outline: number) => Math.min(outline, Math.max(1, outline * 0.625));
 
 const pointSegmentDistance = (point: Pt2, a: Pt2, b: Pt2) => {
   const dx = b[0] - a[0];
@@ -995,7 +1006,29 @@ const isPick = (tone: Tone) => tone === 'pick' || tone === 'pickFirst';
 const PICK_FIRST_STROKE_SCALE = 1.5;
 const PICK_FIRST_FILL_OPACITY = 0.08;
 const FAINT = 'var(--color-borderColor)';
+/** A hidden contour must read on every level's colour, where FAINT would not. */
+const HIDDEN_CONTOUR = 'var(--color-labelColor)';
 const TWIN_NUMBER_PX = 10;
+
+/** The box a unit's name needs at this font. */
+const nameBoxOf = (text: string, font: number) => ({
+  w: text.length * font * 0.66 + 16,
+  h: font + 8,
+});
+// One shared empty per optional list prop. A `= []` default is a new array every render, and it
+// sits in the keys of `ownedStyle` (layerStyle) and the doors: the seam picker's hover
+// re-ran all of them per pointer event. With these, the memoised doors and name spots and a stable
+// `onPick`, a hover on a 23-piece step went 31 → 7 ms (node, production React, median of 40).
+const NO_MARKS: readonly EdgeMark[] = [];
+const NO_TICKS: readonly EdgeTick[] = [];
+const SPAN_DRAG_PX = 6;
+const STORED_ACTIVE_SCALE = 1.5;
+const TICK_NOTCH_PX = 5;
+const TICK_POINT_R_PX = 2.5;
+const NO_ACTION_LINES: readonly PictureActionLine[] = [];
+const NO_ACTION_GLYPHS: readonly PictureActionGlyph[] = [];
+const NO_NOS: readonly NoMark[] = [];
+const NO_STACKED: readonly (readonly [string, string])[] = [];
 
 /**
  * A press arrow in screen px: shaft from just off the seam outward, an open chevron head, and the
@@ -1122,7 +1155,7 @@ export function buttonGlyphGeometry(
   return { holes: points, thread };
 }
 
-/** The interior host chord through a drill mark, measured along the glyph's cross-piece axis. */
+/** The interior host chord through a drill mark, used only to cap the glyph's width. */
 export function buttonHostChord(
   mark: Pt2,
   direction: Pt2,
@@ -1152,8 +1185,8 @@ export function buttonHostChord(
     const width = high - low;
     if (width < 1e-6 || low > 1e-6 || high < -1e-6) continue;
     const middle = (low + high) / 2;
-    const at: Pt2 = [mark[0] + axis[0] * middle, mark[1] + axis[1] * middle];
-    if (insideRing(at, ring)) return { at, width };
+    const inside: Pt2 = [mark[0] + axis[0] * middle, mark[1] + axis[1] * middle];
+    if (insideRing(inside, ring)) return { at: [mark[0], mark[1]], width };
   }
   return null;
 }
@@ -1210,6 +1243,44 @@ export const spanMm = (line: readonly Pt2[]) => {
   const ys = line.map((p) => p[1]);
   return Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
 };
+
+export function rangedPicturePoints(
+  points: readonly Pt2[],
+  range: readonly [number, number] | undefined,
+  targetLength: number,
+): Pt2[] {
+  if (!range || points.length < 2 || !(targetLength > 0)) return [...points];
+  const total = points.reduce(
+    (sum, point, index) =>
+      index === 0
+        ? 0
+        : sum + Math.hypot(point[0] - points[index - 1][0], point[1] - points[index - 1][1]),
+    0,
+  );
+  const start = (Math.max(0, Math.min(targetLength, range[0])) / targetLength) * total;
+  const end = (Math.max(start, Math.min(targetLength, range[1])) / targetLength) * total;
+  const out: Pt2[] = [];
+  let at = 0;
+  for (let index = 1; index < points.length; index++) {
+    const a = points[index - 1];
+    const b = points[index];
+    const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const next = at + length;
+    if (length > 0 && next >= start && at <= end) {
+      const pointAt = (distance: number): Pt2 => {
+        const share = Math.max(0, Math.min(1, (distance - at) / length));
+        return [a[0] + share * (b[0] - a[0]), a[1] + share * (b[1] - a[1])];
+      };
+      const from = pointAt(Math.max(start, at));
+      const to = pointAt(Math.min(end, next));
+      if (!out.length) out.push(from);
+      out.push(to);
+    }
+    at = next;
+    if (at >= end) break;
+  }
+  return out.length >= 2 ? out : [...points];
+}
 
 export type PicturePickTarget = {
   id: TargetId;
@@ -1279,9 +1350,11 @@ export function withoutCoveredDoors<T extends { id: TargetId; points: readonly P
   doors: readonly T[],
   pieces: readonly { key: string; ring: readonly Pt2[]; input: number }[],
   coveredBy: (key: string) => readonly string[],
+  keep?: ReadonlySet<TargetId>,
 ): T[] {
   const byKey = new Map(pieces.map((piece) => [piece.key, piece]));
   return doors.filter(({ id, points }) => {
+    if (keep?.has(id)) return true;
     const piece = byKey.get(pieceOfTarget(id));
     if (!piece) return true;
     const covers = coveredBy(piece.key).flatMap((key) => {
@@ -1448,30 +1521,16 @@ const distToSegment = (p: Pt2, a: Pt2, b: Pt2): number => {
 };
 
 /**
- * Douglas–Peucker over a closed ring (first point not repeated), keeping the original point
- * objects. The ring is cut at its first point and the point farthest from it, so neither chord
- * degenerates; each half is then thinned on its own.
+ * Douglas–Peucker over the index ranges on `stack`: a range keeps the point farthest from its chord
+ * when that is more than `tol` away, then splits there. `at` reads a point (modulo n for a ring, so
+ * a range may end at n); the ends of every range are kept by the caller.
  */
-function simplifyClosed(ring: readonly Pt2[], tol: number): Pt2[] {
-  const n = ring.length;
-  if (n < 4) return [...ring];
-  const at = (i: number) => ring[i % n];
-  let far = 1;
-  let farD = 0;
-  for (let i = 1; i < n; i++) {
-    const d = Math.hypot(ring[i][0] - ring[0][0], ring[i][1] - ring[0][1]);
-    if (d > farD) {
-      far = i;
-      farD = d;
-    }
-  }
-  const keep = new Uint8Array(n);
-  keep[0] = 1;
-  keep[far] = 1;
-  const stack: [number, number][] = [
-    [0, far],
-    [far, n],
-  ];
+function thinRanges(
+  at: (i: number) => Pt2,
+  keep: Uint8Array,
+  stack: [number, number][],
+  tol: number,
+) {
   while (stack.length) {
     const [s, e] = stack.pop()!;
     let worst = -1;
@@ -1488,6 +1547,37 @@ function simplifyClosed(ring: readonly Pt2[], tol: number): Pt2[] {
       stack.push([s, worstAt], [worstAt, e]);
     }
   }
+}
+
+/**
+ * Douglas–Peucker over a closed ring (first point not repeated), keeping the original point
+ * objects. The ring is cut at its first point and the point farthest from it, so neither chord
+ * degenerates; each half is then thinned on its own.
+ */
+function simplifyClosed(ring: readonly Pt2[], tol: number): Pt2[] {
+  const n = ring.length;
+  if (n < 4) return [...ring];
+  let far = 1;
+  let farD = 0;
+  for (let i = 1; i < n; i++) {
+    const d = Math.hypot(ring[i][0] - ring[0][0], ring[i][1] - ring[0][1]);
+    if (d > farD) {
+      far = i;
+      farD = d;
+    }
+  }
+  const keep = new Uint8Array(n);
+  keep[0] = 1;
+  keep[far] = 1;
+  thinRanges(
+    (i) => ring[i % n],
+    keep,
+    [
+      [0, far],
+      [far, n],
+    ],
+    tol,
+  );
   const out: Pt2[] = [];
   for (let i = 0; i < n; i++) if (keep[i]) out.push(ring[i]);
   return out;
@@ -1543,25 +1633,32 @@ export function StepPictureSvg({
   look,
   layout,
   layers,
-  lower,
   stacked,
-  geoms,
-  innerLines,
-  marks = [],
+  geoms: flatGeoms,
+  innerLines: flatInnerLines,
+  marks = NO_MARKS,
   stepEdges: suppliedStepEdges,
-  actionLines = [],
-  actionGlyphs = [],
+  stepParts: suppliedStepParts,
+  actionLines = NO_ACTION_LINES,
+  actionGlyphs = NO_ACTION_GLYPHS,
   noSeamText,
-  nos = [],
+  nos = NO_NOS,
   names,
   namesBelow,
   ghostName,
   hover,
+  hoverRange,
+  ticks = NO_TICKS,
+  activeNo,
+  onClearNo,
+  onHoverAt,
+  onSpanDrag,
   onHover,
   onPick,
   pickTargets,
   view,
   bounds,
+  foldGhost,
   className,
 }: {
   w: number;
@@ -1571,8 +1668,6 @@ export function StepPictureSvg({
   layout: StepLayout;
   /** Authoritative bottom-to-top owner order. Omitted pictures keep the legacy drawing byte-for-byte. */
   layers?: readonly string[];
-  /** Pieces explicitly claimed below another piece by the shared result. */
-  lower?: readonly string[];
   /** Explicit [under, over] claims from the shared result. */
   stacked?: readonly (readonly [string, string])[];
   geoms: ReadonlyMap<string, PieceGeom>;
@@ -1580,6 +1675,8 @@ export function StepPictureSvg({
   marks?: readonly EdgeMark[];
   /** Exact owner targets worked by this step; an empty array means a known rowless step. */
   stepEdges?: readonly TargetId[];
+  /** The same owner targets with real sewn windows. */
+  stepParts?: readonly SidePart[];
   actionLines?: readonly PictureActionLine[];
   actionGlyphs?: readonly PictureActionGlyph[];
   /** Localized print wording. Screen pictures reuse the existing editor status. */
@@ -1590,17 +1687,35 @@ export function StepPictureSvg({
   /** A shapeless piece's name, written in its empty square (not on a tile). */
   ghostName?: (key: string) => string;
   hover?: TargetId | null;
+  /** The hovered segment of `hover`, mm from the edge's start. */
+  hoverRange?: readonly [number, number] | null;
+  ticks?: readonly EdgeTick[];
+  /** The selected stored seam's number: drawn inverted, with × beside it. */
+  activeNo?: number | null;
+  onClearNo?: () => void;
+  onHoverAt?: (id: TargetId | null, atMm: number | null) => void;
+  /** A drag that began on an edge, in mm along it; `done` on release. */
+  onSpanDrag?: (id: TargetId, fromMm: number, toMm: number, done: boolean) => void;
   onHover?: (id: TargetId | null) => void;
-  onPick?: (id: TargetId) => void;
+  onPick?: (id: TargetId, atMm?: number) => void;
   /** Hidden/folded targets that remain pickable on their projected visible host contour. */
   pickTargets?: readonly TargetId[];
   /** A zoom over the fitted picture: screen = fitted × k + (x, y). Lines and text keep their size. */
   view?: PictureView;
   /** Fit to this box instead of the picture's own (a piece dragged by hand keeps the frame). */
   bounds?: Box;
+  /** A piece whose fold closes on this step also shows flat, dashed (the assembly map). */
+  foldGhost?: boolean;
   className?: string;
 }) {
   const L = LOOK[look];
+  // `geoms` and `innerLines` below are what is drawn (`T ∘ foldMap`); action marks are read on the
+  // flat pieces and carried across. With no fold these are the very maps the caller gave.
+  const stepFolds = layout.folds?.flat;
+  const { geoms, innerLines, turned } = useMemo(
+    () => foldedDrawing(flatGeoms, flatInnerLines, stepFolds),
+    [flatGeoms, flatInnerLines, stepFolds],
+  );
   const form = useFormContext<TechCardFormData>();
   const byKey = useSeamRows();
   const contextResults = useStepResults();
@@ -1617,32 +1732,55 @@ export function StepPictureSvg({
   const operations = (form?.getValues('operations') ?? []) as SceneOp[];
   const operation = contextResult ? operations[contextResult.opIndex] : undefined;
   const automaticHighlight = useMemo(
-    () =>
-      contextResult ? stepHighlightOf(operations, contextResult.opIndex, byKey).targets : undefined,
+    () => (contextResult ? stepHighlightOf(operations, contextResult.opIndex, byKey) : undefined),
     [contextResult, operations, byKey],
   );
-  const stepEdges = suppliedStepEdges ?? automaticHighlight;
+  const stepEdges = suppliedStepEdges ?? automaticHighlight?.targets;
+  const stepParts: readonly SidePart[] | undefined =
+    suppliedStepParts ??
+    automaticHighlight?.parts ??
+    stepEdges?.map((target): SidePart => ({ target }));
   const stepEdgeSet = useMemo(() => new Set(stepEdges ?? []), [stepEdges]);
   const automaticActions = useMemo(
-    () => stepActionMarks(operation, stepEdges ?? [], geoms, innerLines ?? new Map()),
-    [operation, stepEdges, geoms, innerLines],
+    () => stepActionMarks(operation, stepEdges ?? [], flatGeoms, flatInnerLines ?? new Map()),
+    [operation, stepEdges, flatGeoms, flatInnerLines],
   );
-  const drawnActionLines = actionLines.length ? actionLines : automaticActions.lines;
-  const automaticFastenings = useMemo(
-    () =>
-      actionGlyphs.length
-        ? []
-        : fasteningPictureGlyphs(
-            operation as ButtonholeOperation | undefined,
-            [...layout.T.keys()],
-            geoms,
-          ),
-    [actionGlyphs.length, operation, layout.T, geoms],
+  const drawnActionLines = foldedActionLines(
+    actionLines.length ? actionLines : automaticActions.lines,
+    stepFolds,
+    flatGeoms,
   );
+  const givenGlyphs = useMemo(
+    () => foldedActionGlyphs(actionGlyphs, stepFolds, flatGeoms),
+    [actionGlyphs, stepFolds, flatGeoms],
+  );
+  const automaticFastenings = useMemo(() => {
+    if (actionGlyphs.length || !contextResult || !contextResults) return [];
+    const steps = operations.slice(0, contextResult.opIndex + 1).map((candidate, index) => ({
+      operation: candidate as ButtonholeOperation,
+      hosts: [...(contextResults[index]?.layout.T.keys() ?? [])].flatMap((key) => {
+        const geom = flatGeoms.get(key);
+        return geom ? [{ key, name: geom.name, geom }] : [];
+      }),
+    }));
+    return foldedActionGlyphs(
+      placementPictureGlyphsForStep(steps, contextResult.opIndex),
+      stepFolds,
+      flatGeoms,
+    );
+  }, [
+    actionGlyphs.length,
+    contextResult,
+    contextResults,
+    operations,
+    operation,
+    flatGeoms,
+    stepFolds,
+  ]);
   const drawnActionGlyphs: readonly PictureActionGlyph[] = actionGlyphs.length
-    ? actionGlyphs
+    ? givenGlyphs
     : [
-        ...automaticActions.glyphs,
+        ...foldedActionGlyphs(automaticActions.glyphs, stepFolds, flatGeoms),
         ...automaticFastenings.map((glyph) => ({
           id: glyph.id,
           piece: glyph.piece,
@@ -1652,8 +1790,7 @@ export function StepPictureSvg({
           kind: glyph.kind,
         })),
       ];
-  const resultLower = lower ?? contextResult?.lower ?? [];
-  const resultStacked = stacked ?? contextResult?.stacked ?? [];
+  const resultStacked = stacked ?? contextResult?.stacked ?? NO_STACKED;
   const claimedStackedKeys = useMemo(
     () => new Set(resultStacked.flatMap(([under, over]) => [under, over])),
     [resultStacked],
@@ -1679,7 +1816,22 @@ export function StepPictureSvg({
     if (look === 'canvas') points.push(...layout.ghosts.flatMap((ghost) => ghost.ring));
     return points.length ? boxOf(points) : layout.bbox;
   }, [claimedStackedKeys, geoms, layers, layout, look, twinNumbers]);
-  const fitBounds = bounds ?? layeredBounds ?? ownBounds;
+  const ghostPoints = useMemo(() => {
+    if (!foldGhost) return [];
+    return (layout.folds?.closing ?? []).flatMap((key) => {
+      const transform = layout.T.get(key);
+      return transform ? (flatGeoms.get(key)?.rs ?? []).map((p) => apply(transform, p)) : [];
+    });
+  }, [flatGeoms, foldGhost, layout.T, layout.folds]);
+  const ownFit = layeredBounds ?? ownBounds;
+  const fitBounds = useMemo(
+    () =>
+      bounds ??
+      (ghostPoints.length
+        ? boxOf([...ghostPoints, [ownFit.x0, ownFit.y0] as Pt2, [ownFit.x1, ownFit.y1] as Pt2])
+        : ownFit),
+    [bounds, ghostPoints, ownFit],
+  );
   const fitPad = drawnActionGlyphs.length ? Math.max(pad, 7) : pad;
   const vk = view?.k ?? 1;
   const vx = view?.x ?? 0;
@@ -1690,7 +1842,16 @@ export function StepPictureSvg({
   }, [fitBounds, w, h, fitPad, vk, vx, vy]);
 
   const pieces = useMemo(() => {
-    const out: { key: string; ring: Pt2[]; drawn: Pt2[]; input: number; centre: Pt2 }[] = [];
+    const out: {
+      key: string;
+      ring: Pt2[];
+      drawn: Pt2[];
+      input: number;
+      centre: Pt2;
+      plies?: { d: string; under: boolean }[];
+      flatGhost?: string;
+    }[] = [];
+    const ghostKeys = foldGhost ? layout.folds?.closing : undefined;
     for (const [key, T] of layout.T) {
       const g = geoms.get(key);
       if (!g) continue;
@@ -1704,48 +1865,59 @@ export function StepPictureSvg({
       // `ring` measures (centre, spots, hits); `drawn` is what the paths plot.
       const ring = g.rs.map(px);
       const drawn = drawnRing(g.rs).map(px);
-      out.push({ key, ring, drawn, input: layout.input.get(key) ?? 0, centre: centroidOf(ring) });
+      const plies = turned.get(key);
+      const flat = ghostKeys?.includes(key) ? flatGeoms.get(key) : undefined;
+      out.push({
+        key,
+        ring,
+        drawn,
+        input: layout.input.get(key) ?? 0,
+        centre: centroidOf(ring),
+        ...(plies?.length
+          ? { plies: plies.map((ply) => ({ d: pathOf(ply.ring.map(px), true), under: ply.under })) }
+          : {}),
+        ...(flat ? { flatGhost: pathOf(drawnRing(flat.rs).map(px), true) } : {}),
+      });
     }
     return out;
-  }, [claimedStackedKeys, layout, geoms, fit, layers, twinNumbers]);
+  }, [claimedStackedKeys, layout, geoms, flatGeoms, turned, foldGhost, fit, layers, twinNumbers]);
   const ownedOrder = useMemo(
     () =>
       layers
         ? orderedLayerKeys(
             layers,
             layout.stacked,
-            pieces.map((piece) => piece.key),
+            [...layout.T.keys()].filter((key) => geoms.has(key)),
           )
         : [],
-    [layers, layout.stacked, pieces],
+    [geoms, layers, layout.stacked, layout.T],
   );
-  const ownedLowerKeys = useMemo(() => new Set(resultLower), [resultLower]);
+  // A twin is drawn at its offset, so it covers and is covered from there. Kept off `fit`: a zoom
+  // moves no piece, and the cover test is the dear part of a whole-garment step.
+  const ownedT = useMemo(() => {
+    const out = new Map(layout.T);
+    for (const [key, twin] of twinNumbers) {
+      const T = layout.T.get(key);
+      if (!T || claimedStackedKeys.has(key)) continue;
+      const offset = STACKED_TWIN_OFFSET_MM * (twin - 1);
+      out.set(key, [T[0], T[1], T[2], T[3], T[4] + offset, T[5] - offset]);
+    }
+    return out;
+  }, [claimedStackedKeys, layout.T, twinNumbers]);
   const ownedStyle = useMemo(
     () =>
       layers
         ? layerStyle({
             layers: ownedOrder,
-            T: layout.T,
+            T: ownedT,
             geoms,
             marks: actionGlyphs,
-            stacked: resultStacked,
-            mode: look === 'tile' ? 'thumb' : look === 'print' ? 'print' : 'canvas',
+            innerLines,
+            ringOf: (geom) => drawnRing(geom.rs),
+            colliding: layout.colliding,
           })
         : null,
-    [actionGlyphs, geoms, layers, layout.T, look, ownedOrder, resultStacked],
-  );
-  const ownedCoverageStyle = useMemo(
-    () =>
-      layers && look === 'tile'
-        ? layerStyle({
-            layers: ownedOrder,
-            T: layout.T,
-            geoms,
-            stacked: resultStacked,
-            mode: 'canvas',
-          })
-        : ownedStyle,
-    [geoms, layers, layout.T, look, ownedOrder, ownedStyle, resultStacked],
+    [actionGlyphs, geoms, innerLines, layers, layout.colliding, ownedOrder, ownedT],
   );
   const orderedOwnedPieces = useMemo(() => {
     const byKey = new Map(pieces.map((piece) => [piece.key, piece]));
@@ -1754,41 +1926,51 @@ export function StepPictureSvg({
       return piece ? [piece] : [];
     });
   }, [ownedOrder, pieces]);
-  const ownedPath = (key: string, points: readonly Pt2[]) => {
-    const twin = twinNumbers.get(key);
-    const offset =
-      twin && !claimedStackedKeys.has(key) ? STACKED_TWIN_OFFSET_MM * (twin - 1) * fit.s : 0;
-    return points.map((point) => {
-      const [x, y] = toPx(fit, point);
-      return [x + offset, y + offset] as Pt2;
-    });
-  };
-  const ownedDepth = (key: string) =>
-    ownedStyle?.pieces.get(key)?.depth || (ownedLowerKeys.has(key) ? 1 : 0);
-  const ownedTints = useMemo(() => {
-    const claims = orderedOwnedPieces.flatMap((piece, index): LowerLayerClaim[] => {
-      const depth =
-        ownedStyle?.pieces.get(piece.key)?.depth || (ownedLowerKeys.has(piece.key) ? 1 : 0);
-      const claimed = ownedStyle?.pieces.get(piece.key)?.coveredBy ?? [];
-      // a live «under» (PLACE) carries no pair yet: every piece above it may cover it, and the
-      // tint is clipped to what they actually overlap
-      const coveredBy = claimed.length
-        ? claimed
-        : orderedOwnedPieces.slice(index + 1).map((upper) => upper.key);
-      return depth ? [{ key: piece.key, depth, coveredBy }] : [];
-    });
-    return lowerLayerTints(
-      orderedOwnedPieces.map((piece) => ({
-        key: piece.key,
-        ring: piece.ring,
-        path: pathOf(piece.drawn, true),
-      })),
-      claims,
-    );
-  }, [orderedOwnedPieces, ownedLowerKeys, ownedStyle]);
-  const ownedTintByKey = useMemo(
-    () => new Map(ownedTints.map((tint) => [tint.key, tint])),
-    [ownedTints],
+  // The colours read the levels alone: the highest level is painted last, whatever the order is.
+  const ownedSurfaces = useMemo(
+    () =>
+      orderedOwnedPieces
+        .map((piece) => ({ piece, level: ownedStyle?.pieces.get(piece.key)?.level ?? 0 }))
+        .sort((a, b) => a.level - b.level),
+    [orderedOwnedPieces, ownedStyle],
+  );
+  // Every owned piece's outline paths. Memoised: their `d` strings were 74 % of what a picker
+  // hover still rendered, and nothing here moves on hover.
+  const ownedOutlinePaths = useMemo(
+    () =>
+      orderedOwnedPieces.flatMap((piece) => {
+        const style = ownedStyle?.pieces.get(piece.key);
+        const runs = (lines: readonly Pt2[][] = []) =>
+          lines.map((line) => line.map((point) => toPx(fit, point)));
+        // A whole outline is the ring the surface is filled with (`drawnRing`, thinned once per
+        // geometry), closed by its first point again as `layerStyle` closes it.
+        const solid =
+          style?.whole && style.visible.length && piece.drawn.length > 1
+            ? [[...piece.drawn, piece.drawn[0]]]
+            : runs(style?.visible);
+        return [
+          ...solid.map((line, index) => (
+            <path
+              key={`${piece.key}:${index}`}
+              d={pathOf(line)}
+              stroke={FAINT}
+              strokeWidth={L.outline}
+              data-piece-outline={piece.key}
+            />
+          )),
+          ...runs(style?.covered).map((line, index) => (
+            <path
+              key={`${piece.key}:hidden:${index}`}
+              d={pathOf(line)}
+              stroke={HIDDEN_CONTOUR}
+              strokeWidth={hiddenOutline(L.outline)}
+              strokeDasharray={L.dash}
+              data-piece-hidden={piece.key}
+            />
+          )),
+        ];
+      }),
+    [L, fit, orderedOwnedPieces, ownedStyle],
   );
   const centreOf = useMemo(() => new Map(pieces.map((p) => [p.key, p.centre])), [pieces]);
   // A folded-on layer is a thin contour over its host. Identical plies share one outline.
@@ -1826,9 +2008,7 @@ export function StepPictureSvg({
       }),
     };
   }, [pieces, layout.layers, layout.pieceLayers]);
-  const visibleBase = layers
-    ? orderedOwnedPieces.filter((piece) => !ownedLowerKeys.has(piece.key))
-    : base;
+  const visibleBase = layers ? orderedOwnedPieces : base;
   const ghosts = useMemo(
     () => layout.ghosts.map((g) => ({ ...g, ring: g.ring.map((p) => toPx(fit, p)) })),
     [layout.ghosts, fit],
@@ -1861,16 +2041,26 @@ export function StepPictureSvg({
             Math.abs((lineBox.y0 + lineBox.y1) / 2 - glyph.markBox.cy) <= 2,
         );
         if (replaced) return;
-        out.push({ id: innerId(p.key, k), d: pathOf(l.map((q) => toPx(fit, apply(T, q)))) });
+        // An owned piece shows a line only where no piece above covers it.
+        const owned = ownedStyle?.pieces.get(p.key)?.lines[k];
+        const d = owned
+          ? owned.map((run) => pathOf(run.map((point) => toPx(fit, point)))).join('')
+          : pathOf(l.map((q) => toPx(fit, apply(T, q))));
+        if (d) out.push({ id: innerId(p.key, k), d });
       });
     }
     return out;
-  }, [look, visibleBase, layout, innerLines, fit, automaticFastenings]);
+  }, [look, visibleBase, layout, innerLines, fit, automaticFastenings, ownedStyle]);
 
+  // The doors depend on whether the picture is pickable, not on which closure picks: a caller's
+  // `onPick` changes with its selection (or every render), and keying on it rebuilt every door.
+  const pickable = !!onPick;
   const doors = useMemo(() => {
-    if (!onPick && look !== 'canvas') return [];
+    if (!pickable && look !== 'canvas') return [];
     // Owned pictures: bottom → top, so the top layer's edges sit last in the DOM and take the click;
-    // a stacked twin's edges follow its drawn offset. Local unit previews use only visible bases.
+    // a stacked twin's edges follow its drawn offset. An edge the caller names stays pickable even
+    // under a piece of its own unit: a seam inside a unit joins exactly such an edge.
+    const named = pickable && pickTargets ? new Set(pickTargets) : undefined;
     const targets = picturePickTargets(
       layout,
       geoms,
@@ -1888,16 +2078,21 @@ export function StepPictureSvg({
             },
           }
         : {
-            hiddenTargets: onPick && pickTargets ? new Set(pickTargets) : undefined,
+            hiddenTargets: named,
           },
     );
     return layers
-      ? withoutCoveredDoors(targets, pieces, (key) => ownedStyle?.pieces.get(key)?.coveredBy ?? [])
+      ? withoutCoveredDoors(
+          targets,
+          pieces,
+          (key) => resultStacked.flatMap(([under, over]) => (under === key ? [over] : [])),
+          named,
+        )
       : targets;
   }, [
     pieces,
-    ownedStyle,
-    onPick,
+    resultStacked,
+    pickable,
     look,
     layout,
     geoms,
@@ -1911,38 +2106,100 @@ export function StepPictureSvg({
   ]);
   // A second click on the same spot takes the edge of the layer below (owned pictures only).
   const lastPick = useRef<{ x: number; y: number; id: TargetId } | null>(null);
-  const pickAt = (event: ReactMouseEvent<SVGPathElement>, id: TargetId): TargetId => {
-    const { clientX: x, clientY: y } = event;
-    if (!layers) {
-      const rect = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
-      if (!rect) return id;
-      const point: Pt2 = [
-        ((x - rect.left) * w) / Math.max(rect.width, 1),
-        ((y - rect.top) * h) / Math.max(rect.height, 1),
-      ];
-      const hits = new Set(
-        document
-          .elementsFromPoint(x, y)
-          .map((element) => element.getAttribute('data-seam-target'))
-          .filter((hit): hit is TargetId => !!hit),
-      );
-      return (
-        nearestPictureTarget(
-          point,
-          doors.filter((target) => hits.has(target.id)),
-        )?.id ?? id
-      );
-    }
-    const hits = document
-      .elementsFromPoint(x, y)
-      .map((el) => el.getAttribute('data-seam-target'))
-      .filter((hit): hit is TargetId => !!hit);
-    const last = lastPick.current;
-    const again = last && Math.hypot(last.x - x, last.y - y) <= 4 ? hits.indexOf(last.id) : -1;
-    const chosen = again >= 0 && hits.length > 1 ? hits[(again + 1) % hits.length] : id;
-    lastPick.current = { x, y, id: chosen };
-    return chosen;
-  };
+  const pickAt = useCallback(
+    (event: ReactMouseEvent<SVGPathElement>, id: TargetId): TargetId => {
+      const { clientX: x, clientY: y } = event;
+      if (!layers) {
+        const rect = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
+        if (!rect) return id;
+        const point: Pt2 = [
+          ((x - rect.left) * w) / Math.max(rect.width, 1),
+          ((y - rect.top) * h) / Math.max(rect.height, 1),
+        ];
+        const hits = new Set(
+          document
+            .elementsFromPoint(x, y)
+            .map((element) => element.getAttribute('data-seam-target'))
+            .filter((hit): hit is TargetId => !!hit),
+        );
+        return (
+          nearestPictureTarget(
+            point,
+            doors.filter((target) => hits.has(target.id)),
+          )?.id ?? id
+        );
+      }
+      const hits = document
+        .elementsFromPoint(x, y)
+        .map((el) => el.getAttribute('data-seam-target'))
+        .filter((hit): hit is TargetId => !!hit);
+      const last = lastPick.current;
+      const again = last && Math.hypot(last.x - x, last.y - y) <= 4 ? hits.indexOf(last.id) : -1;
+      const chosen = again >= 0 && hits.length > 1 ? hits[(again + 1) % hits.length] : id;
+      lastPick.current = { x, y, id: chosen };
+      return chosen;
+    },
+    [layers, doors, w, h],
+  );
+  const pointerAt = useCallback(
+    (svg: SVGSVGElement | null, x: number, y: number): Pt2 | null => {
+      const rect = svg?.getBoundingClientRect();
+      return rect
+        ? [
+            ((x - rect.left) * w) / Math.max(rect.width, 1),
+            ((y - rect.top) * h) / Math.max(rect.height, 1),
+          ]
+        : null;
+    },
+    [w, h],
+  );
+  const mmOfDoor = useCallback(
+    (id: TargetId, at: Pt2 | null): number | null => {
+      const door = doors.find((candidate) => candidate.id === id);
+      const length = resolveEdge(id, geoms)?.len ?? 0;
+      return door && at && !door.inner && length > 0 ? mmOnPoints(door.points, at, length) : null;
+    },
+    [doors, geoms],
+  );
+  // The click that ends a drag is not a pick. A drag holds no capture: the click keeps its target.
+  const dragEnded = useRef(false);
+  const startSpanDrag = useCallback(
+    (event: ReactPointerEvent<SVGPathElement>, id: TargetId) => {
+      if (!onSpanDrag || event.button !== 0) return;
+      const svg = event.currentTarget.ownerSVGElement;
+      const from = mmOfDoor(id, pointerAt(svg, event.clientX, event.clientY));
+      if (from == null) return;
+      // An edge's drag is the edge's, not the zoom's pan.
+      event.stopPropagation();
+      const { clientX: startX, clientY: startY, pointerId } = event;
+      let dragging = false;
+      let to = from;
+      const onMove = (move: PointerEvent) => {
+        if (move.pointerId !== pointerId) return;
+        if (!dragging && Math.hypot(move.clientX - startX, move.clientY - startY) < SPAN_DRAG_PX)
+          return;
+        dragging = true;
+        to = mmOfDoor(id, pointerAt(svg, move.clientX, move.clientY)) ?? to;
+        onSpanDrag(id, from, to, false);
+      };
+      const finish = (end: PointerEvent) => {
+        if (end.pointerId !== pointerId) return;
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', finish);
+        window.removeEventListener('pointercancel', finish);
+        if (!dragging) return;
+        onSpanDrag(id, from, to, end.type === 'pointerup');
+        dragEnded.current = true;
+        window.setTimeout(() => {
+          dragEnded.current = false;
+        }, 0);
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', finish);
+      window.addEventListener('pointercancel', finish);
+    },
+    [onSpanDrag, mmOfDoor, pointerAt],
+  );
 
   const directPartner = new Map(layout.pieceLayers);
   const inputPartner = new Map(layout.layers);
@@ -1969,18 +2226,22 @@ export function StepPictureSvg({
   const pieceOfId = (id: TargetId) => parseInner(id)?.piece ?? id.slice(0, id.lastIndexOf('#'));
   const markLines = marks.flatMap((m) => {
     const points = ptsOf(m.id);
-    const shown = points && pointsOnDrawnPiece(pieceOfId(m.id), points);
+    const edge = resolveEdge(m.id, geoms);
+    const ranged = points && rangedPicturePoints(points, m.range, edge?.len ?? 0);
+    const shown = ranged && pointsOnDrawnPiece(pieceOfId(m.id), ranged);
     return shown ? [{ m, pts: shown }] : [];
   });
   const pickFirstKeys = new Set(
     marks.flatMap((m) => (m.tone === 'pickFirst' ? [pieceOfId(m.id)] : [])),
   );
   const pickFirstPieces = pieces.filter((piece) => pickFirstKeys.has(piece.key));
-  const stepLines = (stepEdges ?? []).flatMap((id) => {
-    if (marks.some((m) => m.id === id && isPick(m.tone))) return [];
-    const points = ptsOf(id);
-    const shown = points && pointsOnDrawnPiece(pieceOfId(id), points);
-    return shown ? [{ id, points: shown }] : [];
+  const stepLines = (stepParts ?? []).flatMap((part) => {
+    if (marks.some((m) => m.id === part.target && isPick(m.tone))) return [];
+    const points = ptsOf(part.target);
+    const edge = resolveEdge(part.target, geoms);
+    const ranged = points && rangedPicturePoints(points, part.range, edge?.len ?? 0);
+    const shown = ranged && pointsOnDrawnPiece(pieceOfId(part.target), ranged);
+    return shown ? [{ id: part.target, points: shown }] : [];
   });
   const actionLinePaths = drawnActionLines.flatMap((line) => {
     if (stepEdges && line.target && !stepEdgeSet.has(line.target)) return [];
@@ -1994,11 +2255,11 @@ export function StepPictureSvg({
     const points = pointsOnDrawnPiece(line.piece, raw);
     return points?.length ? [{ line, points }] : [];
   });
-  const pictureCentre: Pt2 = (() => {
+  const pictureCentre = useMemo((): Pt2 => {
     if (!pieces.length) return [w / 2, h / 2];
     const box = boxOf(pieces.flatMap((piece) => piece.ring));
     return [(box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2];
-  })();
+  }, [pieces, w, h]);
   const glyphCandidates = drawnActionGlyphs.flatMap((glyph) => {
     const T = layout.T.get(glyph.piece);
     const host = actionHost(glyph.piece);
@@ -2064,7 +2325,7 @@ export function StepPictureSvg({
           : null;
       return {
         glyph: candidate.glyph,
-        at: chord?.at ?? mark,
+        at: mark,
         direction: candidate.direction,
         mmPx: candidate.mmPx,
         hostWidth: chord?.width,
@@ -2095,11 +2356,15 @@ export function StepPictureSvg({
       .map((spot) => spot.glyph.id),
   );
   const hideCrowdedLabels = look === 'canvas' || look === 'result';
-  const pieceSize = new Map(
-    pieces.map((piece) => {
-      const box = boxOf(piece.ring);
-      return [piece.key, Math.min(box.x1 - box.x0, box.y1 - box.y0)] as const;
-    }),
+  const pieceSize = useMemo(
+    () =>
+      new Map(
+        pieces.map((piece) => {
+          const box = boxOf(piece.ring);
+          return [piece.key, Math.min(box.x1 - box.x0, box.y1 - box.y0)] as const;
+        }),
+      ),
+    [pieces],
   );
   const offsetOf = (id: TargetId, extra = 0) => {
     if (!hideCrowdedLabels) return 16 + extra;
@@ -2112,43 +2377,49 @@ export function StepPictureSvg({
       m,
       s: labelSpot(pts, centreOf.get(pieceOfId(m.id)) ?? pts[0], offsetOf(m.id)),
     }));
-  const noSpots = nos.flatMap(({ id, i }) => {
-    const pts = ptsOf(id);
+  const noSpots = nos.flatMap(({ id, i, range }) => {
+    const whole = ptsOf(id);
+    const pts = whole && rangedPicturePoints(whole, range, resolveEdge(id, geoms)?.len ?? 0);
     return pts
       ? [{ i, id, s: labelSpot(pts, centreOf.get(pieceOfId(id)) ?? pts[0], offsetOf(id, 2)) }]
       : [];
   });
   // A unit's name sits inside its own shape — in its biggest piece, on the widest run across it —
   // never across the gap between pieces that only stand together.
-  const nameBoxOf = (text: string) => ({ w: text.length * L.font * 0.66 + 16, h: L.font + 8 });
-  const nameSpots = (names ?? []).flatMap((text, gi) => {
-    const own = pieces.filter((p) => p.input === gi);
-    const ring = [
-      ...own.flatMap((p) => p.ring),
-      ...ghosts.filter((g) => g.input === gi).flatMap((g) => g.ring),
-    ];
-    if (!ring.length || !text) return [];
-    const b = boxOf(ring);
-    const avoid = pieces.filter((p) => p.input !== gi).map((p) => boxOf(p.ring));
-    const biggest = own.reduce<{ ring: Pt2[]; area: number } | null>((m, p) => {
-      const pb = boxOf(p.ring);
-      const area = (pb.x1 - pb.x0) * (pb.y1 - pb.y0);
-      return !m || area > m.area ? { ring: p.ring, area } : m;
-    }, null);
-    const at: Pt2 = namesBelow
-      ? [(b.x0 + b.x1) / 2, b.y1 + L.font + 2]
-      : biggest
-        ? nameSpot(
-            biggest.ring,
-            pieces.filter((p) => p.ring !== biggest.ring).map((p) => p.ring),
-            text.length * L.font * 0.62,
-            L.font + 4,
-            ring,
-            { frame: { x0: 0, y0: 0, x1: w, y1: h }, avoid, ...nameBoxOf(text) },
-          )
-        : [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
-    return [{ text, s: { at, anchor: 'middle' as const, t: [0, 1] as Pt2, avoid } }];
-  });
+  // The name search walks every ring of the step (≈ 5 ms on a whole-garment step); a hover or a
+  // pick changes none of its inputs, so it is kept until the pieces or the frame move.
+  const nameSpots = useMemo(
+    () =>
+      (names ?? []).flatMap((text, gi) => {
+        const own = pieces.filter((p) => p.input === gi);
+        const ring = [
+          ...own.flatMap((p) => p.ring),
+          ...ghosts.filter((g) => g.input === gi).flatMap((g) => g.ring),
+        ];
+        if (!ring.length || !text) return [];
+        const b = boxOf(ring);
+        const avoid = pieces.filter((p) => p.input !== gi).map((p) => boxOf(p.ring));
+        const biggest = own.reduce<{ ring: Pt2[]; area: number } | null>((m, p) => {
+          const pb = boxOf(p.ring);
+          const area = (pb.x1 - pb.x0) * (pb.y1 - pb.y0);
+          return !m || area > m.area ? { ring: p.ring, area } : m;
+        }, null);
+        const at: Pt2 = namesBelow
+          ? [(b.x0 + b.x1) / 2, b.y1 + L.font + 2]
+          : biggest
+            ? nameSpot(
+                biggest.ring,
+                pieces.filter((p) => p.ring !== biggest.ring).map((p) => p.ring),
+                text.length * L.font * 0.62,
+                L.font + 4,
+                ring,
+                { frame: { x0: 0, y0: 0, x1: w, y1: h }, avoid, ...nameBoxOf(text, L.font) },
+              )
+            : [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
+        return [{ text, s: { at, anchor: 'middle' as const, t: [0, 1] as Pt2, avoid } }];
+      }),
+    [names, pieces, ghosts, namesBelow, L, w, h],
+  );
   const namedInputs = (names ?? []).flatMap((text, input) => (text ? [input] : []));
   const coincidentNamePieces = new Map(
     orderedOwnedPieces.flatMap((piece) =>
@@ -2166,7 +2437,7 @@ export function StepPictureSvg({
   }
   const nameBoxes = nameSpots.map(({ text, s }, index) => ({
     ...s,
-    ...nameBoxOf(text),
+    ...nameBoxOf(text, L.font),
     required: coincidentNameInputs.has(namedInputs[index]) || undefined,
   }));
   const labelBoxes = labels.map(({ m, s }) => ({
@@ -2203,6 +2474,111 @@ export function StepPictureSvg({
     stepEdges !== undefined && stepEdges.length === 0 && !marks.some((m) => isPick(m.tone));
   const noStepSeamLabel = noSeamText ?? (look === 'print' ? '' : NO_SEAM_TEXT);
 
+  // The door strokes are the densest paths of the picture (every edge and inner line, twice: the
+  // faint dash and the wide transparent hit stroke). Their `d` strings and elements are kept across
+  // hovers — only the highlight path above them changes per pointer event.
+  const innerDoorPaths = useMemo(
+    () => doors.filter((x) => x.inner).map((x) => <path key={x.id} d={pathOf(x.points)} />),
+    [doors],
+  );
+  const doorHits = useMemo(
+    () =>
+      onPick
+        ? // Lines first: where an edge runs beside a line, the edge takes the click.
+          [...doors.filter((x) => x.inner), ...doors.filter((x) => !x.inner)].map((x) => (
+            <path
+              key={`h:${x.id}`}
+              d={pathOf(x.points)}
+              fill='none'
+              stroke='transparent'
+              strokeWidth={14}
+              pointerEvents='stroke'
+              className='cursor-pointer'
+              onPointerEnter={() => onHover?.(x.id)}
+              onPointerMove={
+                onHoverAt
+                  ? (event) =>
+                      onHoverAt(
+                        x.id,
+                        mmOfDoor(
+                          x.id,
+                          pointerAt(
+                            event.currentTarget.ownerSVGElement,
+                            event.clientX,
+                            event.clientY,
+                          ),
+                        ),
+                      )
+                  : undefined
+              }
+              onPointerLeave={() => {
+                onHover?.(null);
+                onHoverAt?.(null, null);
+              }}
+              onPointerDown={onSpanDrag ? (event) => startSpanDrag(event, x.id) : undefined}
+              onClick={(event) => {
+                if (dragEnded.current) return;
+                const id = pickAt(event, x.id);
+                const atMm = mmOfDoor(
+                  id,
+                  pointerAt(event.currentTarget.ownerSVGElement, event.clientX, event.clientY),
+                );
+                onPick(id, atMm ?? undefined);
+              }}
+              data-seam-target={x.id}
+            />
+          ))
+        : null,
+    [doors, onPick, onHover, onHoverAt, onSpanDrag, startSpanDrag, mmOfDoor, pointerAt, pickAt],
+  );
+
+  // The flat ghost of a closing step always lies under the folded outline.
+  const foldGhostPaths = pieces.some((piece) => piece.flatGhost) ? (
+    <g
+      fill='none'
+      stroke={GREY}
+      strokeWidth={L.hair * 1.5}
+      strokeDasharray={L.dash}
+      strokeLinejoin='round'
+      pointerEvents='none'
+    >
+      {pieces.map((piece) =>
+        piece.flatGhost ? (
+          <path key={piece.key} d={piece.flatGhost} data-fold-ghost={piece.key} />
+        ) : null,
+      )}
+    </g>
+  ) : null;
+  // The turned-under part reads dashed over the outline on the canvas. A tile and the print keep the
+  // folded outline solid: their plies go under it, so only what the outline does not cover shows.
+  const onCanvas = look === 'canvas';
+  const foldPlies = pieces.some((piece) => piece.plies) ? (
+    <g fill='none' strokeLinejoin='round' pointerEvents='none'>
+      {pieces.flatMap((piece) =>
+        (piece.plies ?? []).map((ply, index) =>
+          ply.under ? (
+            <path
+              key={`${piece.key}:${index}`}
+              d={ply.d}
+              stroke={onCanvas ? GREY : FAINT}
+              strokeWidth={onCanvas ? L.hair * 1.5 : L.hair}
+              strokeDasharray={L.dash}
+              data-fold-under={piece.key}
+            />
+          ) : (
+            <path
+              key={`${piece.key}:${index}`}
+              d={ply.d}
+              stroke={FAINT}
+              strokeWidth={L.hair}
+              data-fold-over={piece.key}
+            />
+          ),
+        ),
+      )}
+    </g>
+  ) : null;
+
   if (w < 2 || h < 2) return null;
   return (
     <svg
@@ -2216,57 +2592,32 @@ export function StepPictureSvg({
       {layers ? (
         <>
           <g stroke='none'>
-            {orderedOwnedPieces.map((piece) => {
-              const depth = ownedDepth(piece.key);
-              const fullyCovered = ownedStyle?.pieces.get(piece.key)?.fullyCovered ?? false;
-              return (
-                <g key={piece.key} data-layer-depth={depth}>
-                  <path
-                    d={pathOf(piece.drawn, true)}
-                    fill={FILL}
-                    data-piece-surface={piece.key}
-                    data-lower-layer-base={depth ? piece.key : undefined}
-                  />
-                  {fullyCovered && (
-                    <path
-                      d={pathOf(piece.drawn, true)}
-                      fill='none'
-                      stroke={FAINT}
-                      strokeWidth={L.outline * LOWER_LAYER_STROKE_SCALE}
-                      strokeDasharray={L.dash}
-                      strokeLinejoin='round'
-                      pointerEvents='none'
-                      data-stacked-underlay={piece.key}
-                    />
-                  )}
-                </g>
-              );
-            })}
+            {ownedSurfaces.map(({ piece, level }) => (
+              <path
+                key={piece.key}
+                d={pathOf(piece.drawn, true)}
+                fill={levelFill(level)}
+                data-piece-surface={piece.key}
+                data-piece-level={level || undefined}
+                data-lower-layer-base={
+                  ownedStyle?.pieces.get(piece.key)?.coveredBy.length ||
+                  !ownedStyle?.pieces.get(piece.key)?.whole
+                    ? piece.key
+                    : undefined
+                }
+              />
+            ))}
           </g>
-          <LowerLayerFills tints={ownedTints} />
+          {foldGhostPaths}
+          {!onCanvas && foldPlies}
           <g fill='none' strokeLinejoin='round'>
-            {orderedOwnedPieces.flatMap((piece) => {
-              const tint = ownedTintByKey.get(piece.key);
-              const depth = ownedDepth(piece.key);
-              const lines = tint?.partial
-                ? ownedCoverageStyle?.pieces.get(piece.key)?.visible ?? []
-                : ownedStyle?.pieces.get(piece.key)?.visible ?? [];
-              return lines.map((line, index) => (
-                <path
-                  key={`${piece.key}:${index}`}
-                  d={pathOf(ownedPath(piece.key, line))}
-                  stroke={FAINT}
-                  strokeWidth={
-                    depth && !tint?.partial ? L.outline * LOWER_LAYER_STROKE_SCALE : L.outline
-                  }
-                  data-piece-outline={piece.key}
-                />
-              ));
-            })}
+            {ownedOutlinePaths}
           </g>
         </>
       ) : (
         <>
+          {foldGhostPaths}
+          {!onCanvas && foldPlies}
           <g fill='none' stroke={FAINT} strokeWidth={L.outline} strokeLinejoin='round'>
             {base.map((p) => (
               <path key={p.key} d={pathOf(p.drawn, true)} data-piece-outline={p.key} />
@@ -2293,6 +2644,7 @@ export function StepPictureSvg({
           )}
         </>
       )}
+      {look === 'canvas' && foldPlies}
       {look === 'canvas' && ghosts.length > 0 && (
         <g
           fill={FILL}
@@ -2327,16 +2679,18 @@ export function StepPictureSvg({
         })}
       {look === 'canvas' && (
         <g fill='none' stroke={FAINT} strokeWidth={1} strokeDasharray='4 3'>
-          {doors
-            .filter((x) => x.inner)
-            .map((x) => (
-              <path key={x.id} d={pathOf(x.points)} />
-            ))}
+          {innerDoorPaths}
         </g>
       )}
-      {hover && !marks.some((m) => m.id === hover) && ptsOf(hover) && (
+      {hover && (hoverRange || !marks.some((m) => m.id === hover)) && ptsOf(hover) && (
         <path
-          d={pathOf(ptsOf(hover)!)}
+          d={pathOf(
+            rangedPicturePoints(
+              ptsOf(hover)!,
+              hoverRange ?? undefined,
+              resolveEdge(hover, geoms)?.len ?? 0,
+            ),
+          )}
           fill='none'
           stroke={INK}
           strokeWidth={L.mark}
@@ -2357,7 +2711,7 @@ export function StepPictureSvg({
       ))}
       {markLines.map(({ m, pts }) => (
         <path
-          key={`${m.tone}:${m.id}`}
+          key={`${m.tone}:${m.id}:${m.range?.join('-') ?? ''}`}
           d={pathOf(pts)}
           fill='none'
           stroke={
@@ -2373,7 +2727,9 @@ export function StepPictureSvg({
           }
           strokeWidth={
             m.tone === 'stored'
-              ? L.stored
+              ? m.active
+                ? L.stored * STORED_ACTIVE_SCALE
+                : L.stored
               : m.tone === 'pickFirst'
                 ? L.mark * PICK_FIRST_STROKE_SCALE
                 : L.mark
@@ -2584,24 +2940,27 @@ export function StepPictureSvg({
       {look !== 'tile' &&
         noSpots.map(({ id, i }, n) => {
           const at = noAt(n);
+          const on = activeNo === i;
           return at ? (
-            <g key={`n:${id}`} pointerEvents='none' data-pair-no={i + 1}>
+            <g key={`n:${id}:${i}`} data-pair-no={i + 1}>
               <rect
                 x={at[0] - 9}
                 y={at[1] - 9}
                 width={18}
                 height={18}
-                fill={FILL}
+                fill={on ? PAIR_INK : FILL}
                 stroke={PAIR_INK}
                 strokeWidth={1}
+                pointerEvents='none'
               />
               <text
                 x={at[0]}
                 y={at[1]}
                 textAnchor='middle'
                 dominantBaseline='central'
-                fill={PAIR_INK}
+                fill={on ? FILL : PAIR_INK}
                 fontSize={10}
+                pointerEvents='none'
               >
                 {pairNo(i)}
               </text>
@@ -2665,23 +3024,107 @@ export function StepPictureSvg({
             </text>,
           ];
         })}
-      {onPick &&
-        // Lines first: where an edge runs beside a line, the edge takes the click.
-        [...doors.filter((x) => x.inner), ...doors.filter((x) => !x.inner)].map((x) => (
-          <path
-            key={`h:${x.id}`}
-            d={pathOf(x.points)}
-            fill='none'
-            stroke='transparent'
-            strokeWidth={14}
-            pointerEvents='stroke'
-            className='cursor-pointer'
-            onPointerEnter={() => onHover?.(x.id)}
-            onPointerLeave={() => onHover?.(null)}
-            onClick={(event) => onPick(pickAt(event, x.id))}
-            data-seam-target={x.id}
+      {doorHits}
+      {look !== 'tile' &&
+        onClearNo &&
+        noSpots.map(({ id, i }, n) => {
+          const at = activeNo === i ? noAt(n) : null;
+          return at ? (
+            <g
+              key={`x:${id}:${i}`}
+              className='cursor-pointer'
+              pointerEvents='all'
+              role='button'
+              aria-label='remove seam'
+              onClick={onClearNo}
+              data-seam-remove-no=''
+            >
+              <rect
+                x={at[0] + 11}
+                y={at[1] - 9}
+                width={18}
+                height={18}
+                fill={FILL}
+                stroke={PAIR_INK}
+                strokeWidth={1}
+              />
+              <text
+                x={at[0] + 20}
+                y={at[1]}
+                textAnchor='middle'
+                dominantBaseline='central'
+                fill={PAIR_INK}
+                fontSize={12}
+                pointerEvents='none'
+              >
+                ×
+              </text>
+            </g>
+          ) : null;
+        })}
+      {ticks.map(({ id, atMm, notch }) => {
+        const whole = ptsOf(id);
+        const length = resolveEdge(id, geoms)?.len ?? 0;
+        const at = whole && rangedPicturePoints(whole, [0, atMm], length).at(-1);
+        if (!at) return null;
+        return notch ? (
+          <rect
+            key={`tick:${id}:${atMm}`}
+            x={at[0] - TICK_NOTCH_PX / 2}
+            y={at[1] - TICK_NOTCH_PX / 2}
+            width={TICK_NOTCH_PX}
+            height={TICK_NOTCH_PX}
+            fill={INK}
+            pointerEvents='none'
+            data-seam-tick='notch'
           />
-        ))}
+        ) : (
+          <circle
+            key={`tick:${id}:${atMm}`}
+            cx={at[0]}
+            cy={at[1]}
+            r={TICK_POINT_R_PX}
+            fill={FILL}
+            stroke={INK}
+            strokeWidth={1}
+            pointerEvents='none'
+            data-seam-tick='point'
+          />
+        );
+      })}
+      {hover &&
+        hoverRange &&
+        (() => {
+          const whole = ptsOf(hover);
+          const length = resolveEdge(hover, geoms)?.len ?? 0;
+          const at =
+            whole &&
+            rangedPicturePoints(whole, [0, (hoverRange[0] + hoverRange[1]) / 2], length).at(-1);
+          if (!at) return null;
+          const text = fmtMm(Math.abs(hoverRange[1] - hoverRange[0]));
+          return (
+            <g pointerEvents='none' data-seam-span-length=''>
+              <rect
+                x={at[0] + 10}
+                y={at[1] - 26}
+                width={text.length * 6.6 + 10}
+                height={15}
+                fill={FILL}
+                stroke={FAINT}
+                strokeWidth={1}
+              />
+              <text
+                x={at[0] + 15}
+                y={at[1] - 18.5}
+                dominantBaseline='central'
+                fill={INK}
+                fontSize={10}
+              >
+                {text}
+              </text>
+            </g>
+          );
+        })()}
     </svg>
   );
 }

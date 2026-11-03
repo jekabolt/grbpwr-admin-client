@@ -5,6 +5,7 @@ import { EMPTY_SEAM_HINTS, mergeSeamHints, seamHintsSchema, type SeamHints } fro
 import { CARD6_OPS, CARD6_PIECE_KEYS, CARD6_SEAMS, card6Geoms, card6Step } from '../card6.fixture';
 import {
   easeOf,
+  fullyUsedEdges,
   suggestStepPairs,
   suggestStepSurface,
   usedEdgesBeforeStep,
@@ -45,7 +46,7 @@ const proposal = (ops: readonly FormOpLike[], operationNumber: number) => {
     index,
     CARD6_PIECE_KEYS,
     geoms,
-    usedEdgesBeforeStep(ops, index, CARD6_SEAMS),
+    fullyUsedEdges(usedEdgesBeforeStep(ops, index, CARD6_SEAMS, geoms), geoms),
     easeOf(ops[index]),
     CARD6_SEAMS,
   )[0];
@@ -135,7 +136,10 @@ describe('AI seam signal: absent hints', () => {
           card6Step(operationNumber),
           CARD6_PIECE_KEYS,
           geoms,
-          usedEdgesBeforeStep(ops, card6Step(operationNumber), CARD6_SEAMS),
+          fullyUsedEdges(
+            usedEdgesBeforeStep(ops, card6Step(operationNumber), CARD6_SEAMS, geoms),
+            geoms,
+          ),
           easeOf(op),
           CARD6_SEAMS,
         );

@@ -51,8 +51,28 @@ await build({
   outfile,
   logLevel: 'silent',
 });
-const { assemblyFaults, assemblyPrice, dissolvePrice, assemblySweep, classifyAssemblyInputs } =
-  await import(pathToFileURL(outfile).href);
+const {
+  assemblyFaults,
+  assemblyPrice,
+  priceNeedsConfirmation,
+  removeGate,
+  removePrice,
+  assemblySweep,
+  classifyAssemblyInputs,
+} = await import(pathToFileURL(outfile).href);
+
+// Снятие кода с шага БЕЗ сдвига нумерации — гость контракта «одинаковые индексы». Кнопки такой больше
+// нет, но расчёт цены этим и проверяется: разность двух карточек одной длины.
+const clearKeyPrice = (pieces, steps, at) => {
+  const key = steps[at]?.outputUnitKey ?? '';
+  if (!key) return null;
+  return assemblyPrice(
+    pieces,
+    steps,
+    steps.map((s, i) => (i === at ? { ...s, outputUnitKey: '', outputUnitName: '' } : s)),
+    `clearing ▣ ${key[0]}${key.slice(1).toLowerCase()}`,
+  );
+};
 
 let checks = 0;
 const failed = new Set();
@@ -256,11 +276,11 @@ head('цена растворения — цепь падает');
     step(['SHELL', 'SLEEVE'], 'BODY'),
     step(['BODY', 'POCKET'], 'GARMENT'),
   ];
-  const p = dissolvePrice(PIECES, chain, 0);
+  const p = clearKeyPrice(PIECES, chain, 0);
   is('ломаются оба шага ниже', p.breaks, [1, 2]);
   is('и нижний только осиротеет', p.orphans, [2]);
   is('два узла перестают собираться', p.unitsLost, ['BODY', 'GARMENT']);
-  is('цена сказана словами', p.summary, 'dissolving ▣ Shell will break steps 20 and 30');
+  is('цена сказана словами', p.summary, 'clearing ▣ Shell will break steps 20 and 30');
 }
 
 head('цена растворения — джойн из трёх входов выживает');
@@ -272,7 +292,7 @@ head('цена растворения — джойн из трёх входов 
     step(['SHELL', 'SLEEVE', 'COLLAR'], 'BODY'),
     step(['BODY', 'POCKET'], 'GARMENT'),
   ];
-  const p = dissolvePrice(PIECES, wide, 0);
+  const p = clearKeyPrice(PIECES, wide, 0);
   is('ломается только сам джойн', p.breaks, [1]);
   is('сирот нет', p.orphans, []);
   is('и ни один узел не потерян', p.unitsLost, []);
@@ -284,7 +304,7 @@ head('цена растворения — джойн из трёх входов 
   is(
     'и приятное сказано вслух вместе с ценой',
     p.summary,
-    'dissolving ▣ Shell will break step 20, but ▣ Body still assembles, and front, back no longer reach any unit',
+    'clearing ▣ Shell will break step 20, but ▣ Body still assembles, and front, back no longer reach any unit',
   );
 }
 
@@ -309,15 +329,15 @@ head('приятное молчит, когда узел всё-таки пот�
 head('цена растворения — ломать нечего');
 {
   const two = [step(['FRONT', 'BACK'], 'SHELL'), step(['SLEEVE', 'COLLAR'], 'CUFFS')];
-  const p = dissolvePrice(PIECES, two, 1);
+  const p = clearKeyPrice(PIECES, two, 1);
   is('никто не зависел', p.breaks, []);
   is('и терять нечего', p.unitsLost, []);
   // И НИ СЛОВА ПРО ВЫПАВШИЕ ДЕТАЛИ. Входы растворённого узла возвращаются на стол — это и есть
   // сам жест, а не его цена; пересказать человеку его же намерение значит завести шум там, где
   // строка обязана молчать.
   is('входы растворённого узла потерей не считаются', p.piecesDropped, []);
-  is('так и сказано', p.summary, 'dissolving ▣ Cuffs breaks nothing that works today');
-  is('а на шаге без узла жеста нет вовсе', dissolvePrice(PIECES, [step(['FRONT'])], 0), null);
+  is('так и сказано', p.summary, 'clearing ▣ Cuffs breaks nothing that works today');
+  is('а на шаге без узла жеста нет вовсе', clearKeyPrice(PIECES, [step(['FRONT'])], 0), null);
 }
 
 head('цена называет и то, что жест чинит');
@@ -325,7 +345,7 @@ head('цена называет и то, что жест чинит');
   // Второй производитель того же кода — нарушение правила 2 у ВТОРОГО шага. Растворив первый, его
   // чинят: цена, умалчивающая про это, честна только наполовину.
   const twin = [step(['FRONT', 'BACK'], 'SHELL'), step(['SLEEVE', 'COLLAR'], 'SHELL')];
-  const p = dissolvePrice(PIECES, twin, 0);
+  const p = clearKeyPrice(PIECES, twin, 0);
   is('ничего не ломается', p.breaks, []);
   is('зато чинится второй шаг', p.heals, [1]);
   // ЖЕСТ НЕ ТОЛЬКО ЧИНИТ. Код SHELL переходит ко второму шагу, и узел под тем же именем состоит
@@ -335,7 +355,7 @@ head('цена называет и то, что жест чинит');
   is(
     'и об этом сказано вместе с починкой',
     p.summary,
-    'dissolving ▣ Shell breaks nothing that works today, and front, back no longer reach any unit, and step 20 stops being broken',
+    'clearing ▣ Shell breaks nothing that works today, and front, back no longer reach any unit, and step 20 stops being broken',
   );
 }
 
@@ -348,7 +368,7 @@ head('цена не пугает уже сломанным');
     step(['SHELL', 'TYPO'], 'BODY'),
     step(['SLEEVE', 'COLLAR'], 'CUFFS'),
   ];
-  const p = dissolvePrice(PIECES, messy, 2);
+  const p = clearKeyPrice(PIECES, messy, 2);
   is('уже сломанный шаг в цену не идёт', p.breaks, []);
   is('и не выдаётся за починенный', p.heals, []);
 }
@@ -366,7 +386,7 @@ head('цена — тот же расчёт, а не второй');
     i === 0 ? { ...s, outputUnitKey: '', outputUnitName: '' } : s,
   );
   const hand = faultsOf(after);
-  const p = dissolvePrice(PIECES, chain, 0);
+  const p = clearKeyPrice(PIECES, chain, 0);
   is(
     'ломаются ровно изъяны карточки-после',
     p.breaks,
@@ -387,7 +407,27 @@ head('цена — тот же расчёт, а не второй');
     assemblyPrice(PIECES, named, half, 'x').breaks,
     [0, 1, 2],
   );
-  is('а растворение целиком его не даёт', dissolvePrice(PIECES, named, 0).breaks, [1, 2]);
+  is('а растворение целиком его не даёт', clearKeyPrice(PIECES, named, 0).breaks, [1, 2]);
+}
+
+head('цена удаления — номера карточки до жеста');
+{
+  const steps = [
+    step(['COLLAR']),
+    ...[
+      step(['FRONT', 'BACK'], 'SHELL'),
+      step(['SHELL', 'SLEEVE'], 'BODY'),
+      step(['BODY', 'POCKET'], 'GARMENT'),
+    ],
+  ];
+  const p = removePrice(PIECES, steps, 1);
+  is('ломаются шаги ниже в старой нумерации', p.breaks, [2, 3]);
+  is('удалённый шаг в цену не идёт', p.breaks.includes(1), false);
+  is('сказано теми же номерами', p.summary, 'removing step 20 will break steps 30 and 40');
+  yes('и спрашивает', priceNeedsConfirmation(p));
+  is('сгиб отказывает первым', removeGate(['fold'], p), 'refuse');
+  is('без сгиба — вопрос', removeGate([], p), 'ask');
+  is('безобидный шаг удаляется сразу', removeGate([], removePrice(PIECES, steps, 0)), 'remove');
 }
 
 // --- СТРУКТУРА: одна формула, ни одного своего нарушения ---------------------------------------

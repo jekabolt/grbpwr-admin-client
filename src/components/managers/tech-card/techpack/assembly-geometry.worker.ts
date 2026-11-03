@@ -1,3 +1,4 @@
+import { announceWorkerReady } from 'lib/worker-load';
 import {
   buildAssemblyPiecesFromInput,
   type AssemblyCardInput,
@@ -35,3 +36,5 @@ workerScope.onmessage = (event) => {
     } satisfies AssemblyGeometryWorkerResponse);
   }
 };
+
+announceWorkerReady();

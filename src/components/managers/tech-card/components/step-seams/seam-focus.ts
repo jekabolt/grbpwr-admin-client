@@ -1,17 +1,4 @@
 import type { PieceGeom } from 'lib/assembly-skeleton/types';
-import { codeName } from 'lib/pattern-import/dictionary/codes';
-import {
-  poseOf,
-  type EdgeAnchor,
-  type SeamLayer,
-  type SeamPlacement,
-  type StoredPose,
-  type StoredSeam,
-  withSeamLayer,
-} from 'lib/seams';
-
-import { decodeHandPlace, isHandSeamKind, twinRowOf, withHandPlace } from './step-hand';
-import { mirrorPlacement } from './step-pose';
 import { edgeWordVote } from './signals/edge-words';
 
 /**
@@ -73,173 +60,16 @@ export function seamEdgeWord(
   return word === 'front_edge' ? 'front edge' : word ?? '';
 }
 
-/** Card codes the import dictionary does not list (card 6: SLV_L, FLP_L_MAIN, P_L_MAIN). */
-const PIECE_WORD_ALIASES: Readonly<Record<string, string>> = {
-  SLV: 'sleeve',
-  FLP: 'placket',
-  P: 'front',
-};
-const SIDE_TOKENS = new Set(['L', 'R', 'F', 'B', 'MAIN', '#']);
-
-/**
- * A piece name in plain words: `SLV_L` → «sleeve», `FLP_L_MAIN` → «placket», `BP_U_1` → «back
- * piece»; prose names stay. Unknown one- or two-letter tails (U, P P) are dropped, not spelled.
- */
-export function pieceWord(name: string): string {
-  if (!/[_]|^[A-Z0-9#]+$/.test(name)) return name.trim().toLowerCase();
-  const tokens = name.split(/[_\s]+/).filter(Boolean);
-  const words = tokens.flatMap((token) => {
-    const code = token.toUpperCase();
-    if (SIDE_TOKENS.has(code) || /^\d+$/.test(code)) return [];
-    const known = PIECE_WORD_ALIASES[code] ?? codeName(code);
-    if (known) return [known];
-    return code.length > 2 ? [token.toLowerCase()] : [];
-  });
-  return [...new Set(words)].join(' ') || tokens[0].toLowerCase();
-}
-
-/** Piece words plus a useful edge word, never an input/unit name. */
+/** Piece names as the card spells them, plus `slit` only when the target is truly an inner line. */
 export function seamSideName(
   ids: readonly string[],
   geoms: ReadonlyMap<string, PieceGeom>,
   nameOf: (piece: string) => string,
   pieceOf: (id: string) => string,
 ): string {
-  const names = [...new Set(ids.map((id) => pieceWord(nameOf(pieceOf(id)))).filter(Boolean))];
-  const edge = seamEdgeWord(ids, geoms);
+  const names = [...new Set(ids.map((id) => nameOf(pieceOf(id))).filter(Boolean))];
+  const edge = seamEdgeWord(ids, geoms) === 'slit' ? 'slit' : '';
   return [...names, edge].filter(Boolean).join(' ');
-}
-
-export type TwinMirrorUpdate = { row: StoredSeam; piece: string };
-
-/** The right twin of a left piece among `keys`, with how it relates (`PieceGeom.twinOf`). */
-function rightTwinOf(
-  left: string,
-  keys: Iterable<string>,
-  geoms: ReadonlyMap<string, PieceGeom>,
-): { key: string; kind: 'mirror' | 'identical' } | null {
-  for (const key of keys) {
-    if (key === left) continue;
-    const link = geoms.get(key)?.twinOf.find((twin) => twin.key === left);
-    if (link) return { key, kind: link.kind };
-  }
-  return null;
-}
-
-/** A left host + part laid at `at`, re-laid on their right twins; null when a twin is missing. */
-function mirroredOnTwins(
-  hostL: string,
-  partL: string,
-  at: SeamPlacement,
-  hostR: string,
-  partR: string,
-  geoms: ReadonlyMap<string, PieceGeom>,
-): SeamPlacement | null {
-  const host = rightTwinOf(hostL, [hostR], geoms);
-  const part = rightTwinOf(partL, [partR], geoms);
-  const [gHL, gPL, gHR, gPR] = [hostL, partL, hostR, partR].map((key) => geoms.get(key));
-  if (!host || !part || !gHL || !gPL || !gHR || !gPR) return null;
-  return mirrorPlacement(gHL, gPL, at, gHR, gPR, host.kind, part.kind);
-}
-
-/**
- * Copy explicit left-hand placements onto matching rows in this step: edge rows by hand place,
- * surface rows by the left part's placement re-laid on the right host.
- */
-export function mirrorLeftRows(
-  stepRows: readonly StoredSeam[],
-  cardRows: readonly StoredSeam[],
-  geoms: ReadonlyMap<string, PieceGeom>,
-): TwinMirrorUpdate[] {
-  const updates = new Map<string, TwinMirrorUpdate>();
-  for (const source of cardRows) {
-    if (source.kind === 'surface') {
-      const at = source.sideA[0]?.placement;
-      const hostL = source.sideA[0]?.piece;
-      const partL = source.sideB[0]?.piece;
-      if (!at || !hostL || !partL) continue;
-      if (geoms.get(hostL)?.hand !== 'L' && geoms.get(partL)?.hand !== 'L') continue;
-      for (const target of stepRows) {
-        const hostR = target.sideA[0]?.piece;
-        const partR = target.sideB[0]?.piece;
-        if (target.kind !== 'surface' || target.seamKey === source.seamKey || !hostR || !partR)
-          continue;
-        const placement = mirroredOnTwins(hostL, partL, at, hostR, partR, geoms);
-        if (!placement) continue;
-        updates.set(`${target.seamKey}:${partR}`, {
-          row: {
-            ...target,
-            sideA: target.sideA.map((anchor) =>
-              withLayer({ ...anchor, placement }, source.sideA[0]),
-            ),
-            sideB: target.sideB.map((anchor) =>
-              withLayer({ ...anchor, placement }, source.sideB[0]),
-            ),
-          },
-          piece: partR,
-        });
-      }
-      continue;
-    }
-    if (!isHandSeamKind(source.kind)) continue;
-    for (const [own, other] of [
-      [source.sideA, source.sideB],
-      [source.sideB, source.sideA],
-    ] as const) {
-      for (const anchor of own) {
-        if (geoms.get(anchor.piece)?.hand !== 'L') continue;
-        const hand = decodeHandPlace(anchor.placement);
-        const partner = other.find((candidate) => candidate.piece !== anchor.piece)?.piece;
-        // A flag set without a move has no hand place; it still goes to the twin, the place stays.
-        if (!partner || (!hand && !anchor.layer)) continue;
-        const target = twinRowOf(stepRows, anchor.piece, partner, hand, geoms);
-        if (!target || (hand && !target.place)) continue;
-        const key = `${target.row.seamKey}:${target.twin}`;
-        const placed = target.place
-          ? withHandPlace(target.row, target.twin, target.place)
-          : target.row;
-        const twinLayer = (side: readonly EdgeAnchor[]) =>
-          side.map((candidate) =>
-            candidate.piece === target.twin ? withLayer(candidate, anchor) : candidate,
-          );
-        updates.set(key, {
-          row: { ...placed, sideA: twinLayer(placed.sideA), sideB: twinLayer(placed.sideB) },
-          piece: target.twin,
-        });
-      }
-    }
-  }
-  return [...updates.values()];
-}
-
-export type TwinPose = { piece: string; host: string; placement: SeamPlacement; layer?: SeamLayer };
-
-/** The right anchor takes the left anchor's under/over (or none). */
-function withLayer(anchor: EdgeAnchor, left: EdgeAnchor | undefined): EdgeAnchor {
-  return withSeamLayer(anchor, left?.layer);
-}
-
-/**
- * Right pieces of this step posed as the mirror of their left twins' stored poses (piece and host
- * both have a right twin here). Only on the owner's `mirror left` click; nothing calls it alone.
- */
-export function mirrorLeftPoses(
-  stepPieces: readonly string[],
-  cardPoses: Iterable<StoredPose>,
-  geoms: ReadonlyMap<string, PieceGeom>,
-): TwinPose[] {
-  const out = new Map<string, TwinPose>();
-  for (const row of cardPoses) {
-    const pose = poseOf(row);
-    if (!pose || geoms.get(pose.piece)?.hand !== 'L') continue;
-    const piece = rightTwinOf(pose.piece, stepPieces, geoms)?.key;
-    const host = rightTwinOf(pose.host, stepPieces, geoms)?.key;
-    if (!piece || !host) continue;
-    const placement = mirroredOnTwins(pose.host, pose.piece, pose.placement, host, piece, geoms);
-    const layer = row.sideA[0]?.layer;
-    if (placement) out.set(piece, { piece, host, placement, ...(layer ? { layer } : {}) });
-  }
-  return [...out.values()];
 }
 
 export { cycleLayerHit, type LayerHit } from './pose-picking';

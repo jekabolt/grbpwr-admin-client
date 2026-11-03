@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button, Text, Tiles } from 'ui';
+import { Text, Tiles } from 'ui';
 import { ICONS, type IconKey } from '../../op-icons';
 import type { TechCardFormData } from '../schema';
-import { IconTile, TileRow, useStepFieldErrors } from './icon-tile';
+import { IconTile, MoreTile, TileRow, useStepFieldErrors } from './icon-tile';
 import {
   BIND_KIND_TILES,
   bindTileSelection,
@@ -116,18 +116,10 @@ export function SeamKindTiles({
       errors={errors}
       className={className}
     >
-      <Tiles min={TILE_MIN}>{tiles.map((t) => tile(t))}</Tiles>
-      {!bind && !hem && (
-        <Button
-          type='button'
-          variant='underline'
-          size='xs'
-          className='self-start'
-          onClick={() => setMoreOpen((open) => !open)}
-        >
-          {moreOpen ? 'less' : 'more'}
-        </Button>
-      )}
+      <Tiles min={TILE_MIN}>
+        {tiles.map((t) => tile(t))}
+        {!bind && !hem && <MoreTile open={moreOpen} onClick={() => setMoreOpen((open) => !open)} />}
+      </Tiles>
       {!bind && !hem && moreOpen && (
         <div className='flex flex-col gap-2 pt-1'>
           {seamKindGroups().map((g) => (

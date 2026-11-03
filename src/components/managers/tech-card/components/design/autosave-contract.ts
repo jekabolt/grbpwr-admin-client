@@ -121,7 +121,7 @@ export function flushRefusalSentence(
     case 'error':
       return refusal
         ? `the card is not saved — ${refusal}`
-        : 'the card is not saved yet — the last save failed and it keeps retrying on its own';
+        : 'the card is not saved yet — the last save failed';
     case 'busy':
       return 'the card kept changing while it was being saved — try again in a moment';
     default:

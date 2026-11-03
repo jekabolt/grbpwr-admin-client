@@ -14,9 +14,9 @@ import { unitDisplayName } from 'lib/assembly-unit-name';
 //   род        что инвертирует                            где правда
 //   ────────── ────────────────────────────────────────── ─────────────────────────────────────
 //   append     удаление строки + возврат assemblyCleared  форма (RHF)
-//   dissolve   два setValue назад                         форма (RHF)
 //   rename     ВСЕ переписанные ключом места разом        форма (RHF) + раскладка
 //   move       возврат оверрайдов раскладки               localStorage, презентация
+//   remove     строка обратно по historyKey                форма (RHF)
 //
 // ПЕРЕИМЕНОВАНИЕ УЗЛА — ОДНА ЗАПИСЬ, А НЕ ТРИ. Жест переписывает три вида мест (выход
 // производителя, выход каждого ПОГЛОЩАЮЩЕГО шага, ссылки потребителей во входах), но человек
@@ -93,7 +93,7 @@ export type RenameInputSite = { index: number; fieldId: string; at: number };
  * Состоявшийся жест, который ⌘Z умеет обратить, а ⇧⌘Z — повторить.
  *
  * `label` — имя жеста ЧЕЛОВЕЧЕСКИМИ словами, посчитанное в момент записи, а не при показе: к
- * моменту показа узла уже может не быть (его растворили), а чип обязан называть то, что отменяет.
+ * моменту показа узла уже может не быть (шаг удалили), а чип обязан называть то, что отменяет.
  *
  * `TRow` — строка формы, как её принимает `append`. Модуль о ней ничего не знает и знать не
  * должен: он только возит её от жеста к его повтору.
@@ -149,15 +149,6 @@ export type HistoryEntry<TRow = unknown> =
       label: string;
       /** См. `clearedBefore` у `append`: та же половина жеста и та же её инверсия. */
       clearedBefore?: boolean;
-    }
-  | {
-      kind: 'dissolve';
-      index: number;
-      fieldId: string;
-      /** Значения ДО обнуления — их и возвращает отмена. */
-      unitKey: string;
-      unitName: string;
-      label: string;
     }
   | {
       /**
@@ -235,6 +226,26 @@ export type HistoryEntry<TRow = unknown> =
         assemblyCleared: boolean;
         issues: number[];
       };
+      label: string;
+    }
+  | {
+      /**
+       * STEP REMOVAL. Addressed by `historyKey`, never by position: this record outlives saves and
+       * edits, so a number stored here would go stale. It undoes with an ordinary form write, and
+       * the next save carries the row back with its seam, pose and fold keys.
+       */
+      kind: 'remove';
+      historyKey: string;
+      /** The whole row as it stood; its nested lists are the step's own links. */
+      row: TRow;
+      /** Row keys before the removal, in order: the step returns after its nearest live predecessor. */
+      before: string[];
+      /** Defects that pointed at this step (their reference is cleared by the removal). */
+      issueIndexes: number[];
+      /** What the row names on the card: a later undo refuses when any of them is gone. */
+      pieceKeys: string[];
+      seamKeys: string[];
+      bomLineKeys: string[];
       label: string;
     };
 
@@ -422,6 +433,18 @@ export function dropForm<TRow>(h: History<TRow>): History<TRow> {
 }
 
 /**
+ * THE SOFT RESET: the rows moved or a field changed. Everything addressed by position or `fieldId`
+ * dies; a removal is keyed by `historyKey` and survives, so no surviving record holds a stale index.
+ * Redo dies whole: after a new gesture «forward» no longer leads back.
+ */
+export function dropStale<TRow>(h: History<TRow>): History<TRow> {
+  const undo = h.undo.filter((e) => e.kind === 'move' || e.kind === 'remove');
+  const redo = h.redo.filter((e) => e.kind === 'move');
+  if (undo.length === h.undo.length && redo.length === h.redo.length) return h;
+  return { undo, redo };
+}
+
+/**
  * Обратное: сброс РАСКЛАДКИ («reset layout», единственное подтверждение в системе — R8) уносит все
  * ручные позиции сразу. Отмена одного давнего перетаскивания после него вернула бы ОДНУ ноду в
  * место, которого на экране больше нигде нет, — это не «отменил», а «поломал заново».
@@ -501,9 +524,46 @@ export function insertLabel(index: number): string {
   return `insert step ${(index + 1) * 10}`;
 }
 
-/** Подпись жеста растворения. */
-export function dissolveLabel(unitKey: string, unitName?: string): string {
-  return `dissolve ▣ ${unitDisplayName({ key: unitKey, outputUnitName: unitName })}`;
+export function removeLabel(index: number): string {
+  return `remove step ${(index + 1) * 10}`;
+}
+
+/**
+ * Where the removed step returns: next to its nearest old neighbour still on the card, the one
+ * before it first. Walking one way only would throw it past a neighbour that lost its key.
+ */
+export function removeRestoreIndex(
+  before: readonly string[],
+  historyKey: string,
+  current: readonly string[],
+): number {
+  const home = before.indexOf(historyKey);
+  for (let distance = 1; distance < before.length; distance++) {
+    const previous = home - distance >= 0 ? current.indexOf(before[home - distance]) : -1;
+    if (previous >= 0) return previous + 1;
+    const next = home + distance < before.length ? current.indexOf(before[home + distance]) : -1;
+    if (next >= 0) return next;
+  }
+  return 0;
+}
+
+export type RemoveUndoState = {
+  rowKeys: readonly string[];
+  pieceKeys: ReadonlySet<string>;
+  seamKeys: ReadonlySet<string>;
+  bomLineKeys: ReadonlySet<string>;
+};
+
+/** Why this removal cannot come back whole; `null` when it can. Never a partial return. */
+export function removeUndoRefusal<TRow>(
+  rec: Extract<HistoryEntry<TRow>, { kind: 'remove' }>,
+  st: RemoveUndoState,
+): string | null {
+  if (st.rowKeys.includes(rec.historyKey)) return 'step is back';
+  if (rec.pieceKeys.some((k) => !st.pieceKeys.has(k))) return 'piece deleted';
+  if (rec.seamKeys.some((k) => !st.seamKeys.has(k))) return 'seam deleted';
+  if (rec.bomLineKeys.some((k) => !st.bomLineKeys.has(k))) return 'material deleted';
+  return null;
 }
 
 /**
@@ -568,9 +628,8 @@ export function resolvePending<TRow>(
  * карточку в состоянии, которого автор не создавал: половина мест смотрит на старый ключ, половина
  * на новый.
  *
- * СРАВНЕНИЕ ПОБАЙТНОЕ, без `trim` — в отличие от щита растворения. Тот спрашивает «шаг всё ещё
- * ничего не собирает», а движок читает выход подрезанным; здесь вопрос другой — «это ТОТ САМЫЙ
- * ключ, который я написал», а идентичность узла побайтна по контракту.
+ * СРАВНЕНИЕ ПОБАЙТНОЕ, без `trim`: вопрос здесь — «это ТОТ САМЫЙ ключ, который я написал», а
+ * идентичность узла побайтна по контракту.
  *
  * `getInputKeys` необязателен: без него щит удостоверяет только тождество строк потребителей. Это
  * слабее, но честно — читателя входов даёт вызывающий, и его отсутствие не повод отказывать.
@@ -602,11 +661,7 @@ function renameSitesHold<TRow>(
  * по индексу, после сохранения удалила бы шаг из СОХРАНЁННОЙ карточки, а после перестановки —
  * чужой шаг из текущей.
  *
- * Для растворения к тождеству добавляется вопрос «узел всё ещё растворён»: если после записи шагу
- * вернули выход руками или новым жестом, возвращать старый код поверх — значит переписать работу,
- * а не отменить свою.
- *
- * Для переименования тот же вопрос задаётся КАЖДОМУ переписанному месту: жест был один, и отмена
+ * Для переименования к тождеству добавляется вопрос КАЖДОМУ переписанному месту: жест был один, и отмена
  * либо возвращает все места, либо не трогает ни одного.
  *
  * Раскладка не спрашивается ни о чём: она не адресуется индексом строки и ресет формы её не
@@ -622,16 +677,14 @@ export function canUndo<TRow>(
 ): boolean {
   if (rec.kind === 'move') return true;
   // Каркас судится строками, а не `fieldId` — `skeletonCanUndo`; без строк ответ «нет».
-  if (rec.kind === 'skeleton') return false;
+  // Removal is judged by keys, `removeUndoRefusal`.
+  if (rec.kind === 'skeleton' || rec.kind === 'remove') return false;
   if (rec.index < 0) return false;
   if (fields[rec.index]?.id !== rec.fieldId) return false;
   // Тождество строки — весь щит и для вставки: инвертируется она тем же удалением по адресу, и
   // спрашивать у вставки больше нечего, как и у создания.
   if (rec.kind === 'append' || rec.kind === 'insert') return true;
-  if (rec.kind === 'rename') {
-    return renameSitesHold(rec, fields, getOutputUnitKey, getInputKeys, rec.to);
-  }
-  return getOutputUnitKey(rec.index).trim() === '';
+  return renameSitesHold(rec, fields, getOutputUnitKey, getInputKeys, rec.to);
 }
 
 /**
@@ -646,9 +699,6 @@ export function canUndo<TRow>(
  * `lengthAfter - 1`. Это и есть вся причина, по которой вставка отдельный род, а не `append` с
  * другим индексом.
  *
- * У растворения — зеркало щита отмены: узел на месте и это ТОТ ЖЕ код. Иначе ⇧⌘Z растворил бы
- * узел, которого запись не растворяла.
- *
  * У переименования зеркало полное: все места на месте и все носят СТАРЫЙ ключ — то есть ровно то
  * состояние, в которое их привела отмена. Тронули хоть одно — повторять нечего.
  */
@@ -660,6 +710,7 @@ export function canRedo<TRow>(
 ): boolean {
   if (rec.kind === 'move') return true;
   if (rec.kind === 'skeleton') return skeletonCanRedo(rec, fields.length);
+  if (rec.kind === 'remove') return false;
   if (rec.index < 0) return false;
   if (rec.kind === 'append') return fields.length === rec.index;
   // У ВСТАВКИ ЩИТ ТОТ ЖЕ ПО СМЫСЛУ, НО ДРУГОЙ ПО ЧИСЛУ. Отменённой строки в форме нет, тождества
@@ -669,15 +720,12 @@ export function canRedo<TRow>(
   // последовательность, которой никто не менял.
   if (rec.kind === 'insert') return fields.length === rec.lengthAfter - 1;
   if (fields[rec.index]?.id !== rec.fieldId) return false;
-  if (rec.kind === 'rename') {
-    return renameSitesHold(rec, fields, getOutputUnitKey, getInputKeys, rec.from);
-  }
-  return getOutputUnitKey(rec.index).trim() === rec.unitKey;
+  return renameSitesHold(rec, fields, getOutputUnitKey, getInputKeys, rec.from);
 }
 
 /**
  * Подпись чипа отмены. Чип обязан НАЗЫВАТЬ жест: «undo» в одиночку не отличает «сейчас исчезнет
- * созданный шаг» от «сейчас вернётся растворённый узел», а цена у этих двух разная.
+ * созданный шаг» от «сейчас вернётся старый ключ узла», а цена у этих двух разная.
  */
 export function undoTitle<TRow>(rec: HistoryEntry<TRow> | null): string {
   return rec ? `undo — ${rec.label}` : 'nothing to undo';

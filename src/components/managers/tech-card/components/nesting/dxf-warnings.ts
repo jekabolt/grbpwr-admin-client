@@ -21,6 +21,8 @@
 // would START blocking marker saves and hiding the table in cases that are not blocked today.
 // That is a behaviour change and therefore the owner's call — not a translation's.
 
+import { WorkerLoadError } from 'lib/worker-load';
+
 /** Prefix every download-failure text is built from, and the substring the predicate matches. */
 export const DOWNLOAD_FAILED = "couldn't download";
 
@@ -31,6 +33,17 @@ export function sheetDownloadFailed(sheetName: string): string {
 
 /** Not one sheet fetched — there is nothing to parse at all. Reported as an error, not a warning. */
 export const NO_DXF_DOWNLOADED = `${DOWNLOAD_FAILED} any DXF from the CDN`;
+
+/**
+ * The word for a geometry query that failed. «parse error» only when a file was read and did not
+ * parse; a file that never arrived and a worker of an older page version were not parsed at all.
+ */
+export function geometryFailureLabel(error: unknown): 'parse error' | 'not loaded' {
+  if (error instanceof WorkerLoadError) return 'not loaded';
+  return error instanceof Error && error.message === NO_DXF_DOWNLOADED
+    ? 'not loaded'
+    : 'parse error';
+}
 
 /** True when the warning says a pattern sheet did not download. The only legal way to ask. */
 export function isFetchFailure(w: string): boolean {

@@ -47,13 +47,19 @@ import { focusedStepLeaves, stepPictureOfOp, type SceneOp } from './step-picture
 import {
   placementOf,
   placementT,
+  fitPlan,
+  fitSourceOf,
   poseAfterDrop,
+  planPoseFit,
+  poseAt,
   poseBlockGroup,
+  poseLoopFix,
   poseGroup,
   poseHostOf,
   posePickup,
   posePinsOf,
   pinPoses,
+  rotatePoseDrag,
   resolvePoseEdits,
   snapPose,
   snapPoseForDrag,
@@ -61,11 +67,13 @@ import {
   turnToGrain,
   upright,
   mirrorPlacement,
+  planPoseMove,
+  layoutDrift,
 } from './step-pose';
 import { stepResults } from './step-result';
 import { dropKeys } from './step-seams-model';
 
-const square = (key: string, x: number, y: number, w: number, h: number): PieceGeom =>
+const globalSquare = (key: string, x: number, y: number, w: number, h: number): PieceGeom =>
   ({
     pieceKey: key,
     name: key,
@@ -86,6 +94,29 @@ const square = (key: string, x: number, y: number, w: number, h: number): PieceG
     areaMm2: w * h,
   }) as PieceGeom;
 
+const edgedSquare = (key: string, x: number, y: number, w: number, h: number): PieceGeom => {
+  const geom = square(key, x, y, w, h);
+  return {
+    ...geom,
+    edges: geom.rs.map((point, index) => {
+      const next = geom.rs[(index + 1) % geom.rs.length];
+      return {
+        id: `${key}#${index}`,
+        pieceKey: key,
+        k: index,
+        s: index,
+        e: (index + 1) % geom.rs.length,
+        pts: [point, next],
+        lenMm: Math.hypot(next[0] - point[0], next[1] - point[1]),
+        chordMm: Math.hypot(next[0] - point[0], next[1] - point[1]),
+        turnDeg: 0,
+        notchesMm: [],
+        kind: 'edge' as const,
+      };
+    }),
+  };
+};
+
 const near = (a: Affine, b: Affine, eps = 1e-6) =>
   a.every((v, i) => Math.abs(v - b[i]) < (i >= 4 ? Math.max(eps, 1e-4) : eps));
 
@@ -94,6 +125,8 @@ const relOf = (T: ReadonlyMap<string, Affine>, piece: string, host: string) =>
 
 const AT: SeamPlacement = { xMm: 61.25, yMm: 140.5, rotDeg: 90, flip: true };
 const posePin = (host: string) => ({ host, placement: AT });
+
+const square = globalSquare;
 
 describe('pose host cycles', () => {
   it('keeps the latest edit in a direct A↔B cycle', () => {
@@ -263,16 +296,18 @@ describe('stepLayout: a pose is pinned last', () => {
     }
   });
 
-  it('a pose on a piece not drawn, or on itself, changes nothing', () => {
+  it('a pose on a piece not drawn changes nothing; one on itself stands in the step frame', () => {
     const plain = stepLayout(leaves, [], geoms, { explode: 0.1 });
     const ghost = stepLayout(leaves, [], geoms, {
       explode: 0.1,
-      pose: new Map([
-        ['NOPE', { host: 'A', placement: at }],
-        ['A', { host: 'A', placement: at }],
-      ]),
+      pose: new Map([['NOPE', { host: 'A', placement: at }]]),
     });
     expect([...ghost.T]).toEqual([...plain.T]);
+    const stood = stepLayout(leaves, [], geoms, {
+      explode: 0.1,
+      pose: new Map([['A', { host: 'A', placement: at }]]),
+    });
+    expect(stood.T.get('A')).toEqual(placementT(geoms.get('A')!, geoms.get('A')!, at));
   });
 
   it('pinPoses: the hung pieces go along; a host hanging on the piece stays', () => {
@@ -363,7 +398,7 @@ describe('picker helpers', () => {
       ] as const,
     };
     const pickup = posePickup('A', layout, g);
-    expect(pickup).toEqual({ group: ['A', 'D'], host: 'B' });
+    expect(pickup).toEqual({ group: ['A', 'D'], host: 'B', block: ['A'], hostBlock: ['B'] });
     expect(poseBlockGroup('A', pickup.host, layout)).toEqual(['A', 'D']);
     expect(posePickup('C', layout, g).host).toBe('B');
 
@@ -373,24 +408,115 @@ describe('picker helpers', () => {
     expect(placementT(g.get('B')!, g.get('A')!, row.placement)).toEqual(dropped);
   });
 
-  it('snaps a vertex onto a vertex first, else onto the outline', () => {
-    const ring: Pt2[] = [
-      [0, 0],
-      [100, 0],
-      [100, 100],
-      [0, 100],
-    ];
-    const v = snapPose([[103, 4]], [{ piece: 'H', ring }], 8);
-    expect(v).toMatchObject({ host: 'H', at: [100, 0] });
-    expect(v!.dx).toBeCloseTo(-3);
-    const e = snapPose([[104, 50]], [{ piece: 'H', ring }], 8);
-    expect(e).toMatchObject({ host: 'H', at: [100, 50], dx: -4, dy: 0 });
-    expect(snapPose([[120, 50]], [{ piece: 'H', ring }], 8)).toBeNull();
+  it('FIT moves one whole block onto a multi-part side and rejects two multi-part sides', () => {
+    const moving = edgedSquare('MOVING', 0, 0, 20, 10);
+    const follower = edgedSquare('FOLLOWER', 30, 0, 15, 10);
+    const host = edgedSquare('HOST', 100, 50, 40, 20);
+    const geoms = new Map(
+      [moving, follower, host].map((piece) => [piece.pieceKey, piece] as const),
+    );
+    const transforms = new Map<string, Affine>([
+      ['MOVING', IDENTITY],
+      ['FOLLOWER', IDENTITY],
+      ['HOST', IDENTITY],
+    ]);
+    const layout = {
+      blocks: [{ pieces: ['MOVING', 'FOLLOWER'] }, { pieces: ['HOST'] }],
+      transforms,
+      hung: [] as const,
+      stacked: [] as const,
+    };
+    const source = fitSourceOf({
+      a: ['MOVING#0'],
+      b: ['HOST#0', 'HOST#1'],
+    })!;
+    const plan = fitPlan(source, layout, geoms);
+
+    expect(plan).toMatchObject({ piece: 'MOVING', host: 'HOST' });
+    expect(plan?.group).toEqual(['MOVING', 'FOLLOWER']);
+    const moved = new Map(transforms);
+    for (const piece of plan!.group) moved.set(piece, compose(plan!.D, transforms.get(piece)!));
+    expect(near(relOf(moved, 'FOLLOWER', 'MOVING'), relOf(transforms, 'FOLLOWER', 'MOVING'))).toBe(
+      true,
+    );
+    expect(
+      fitPlan(
+        fitSourceOf({ a: ['MOVING#0', 'MOVING#1'], b: ['HOST#0', 'HOST#1'] })!,
+        layout,
+        geoms,
+      ),
+    ).toBeNull();
+  });
+
+  it('FIT measures a stacked twin at the same offset the overlay draws', () => {
+    const leader = edgedSquare('LEADER', 0, 0, 20, 10);
+    const moving = edgedSquare('MOVING', 0, 0, 20, 10);
+    const host = edgedSquare('HOST', 100, 50, 20, 10);
+    const geoms = new Map([leader, moving, host].map((piece) => [piece.pieceKey, piece] as const));
+    const transforms = new Map<string, Affine>([
+      ['LEADER', IDENTITY],
+      ['MOVING', IDENTITY],
+      ['HOST', IDENTITY],
+    ]);
+    const plan = fitPlan(
+      fitSourceOf({ a: ['MOVING#0'], b: ['HOST#0'] })!,
+      {
+        blocks: [{ pieces: ['LEADER', 'MOVING'] }, { pieces: ['HOST'] }],
+        transforms,
+        hung: [],
+        stacked: [['LEADER', 'MOVING']],
+      },
+      geoms,
+    )!;
+    const movedT = compose(plan.D, transforms.get('MOVING')!);
+    const movingPoints = moving.edges[0].pts.map((point) => {
+      const [x, y] = apply(movedT, point);
+      return [x + 3, y - 3] as Pt2;
+    });
+    const hostPoints = host.edges[0].pts;
+    const target = plan.reversed ? [...hostPoints].reverse() : hostPoints;
+
+    expect(movingPoints[0]).toEqual([
+      expect.closeTo(target[0][0], 8),
+      expect.closeTo(target[0][1], 8),
+    ]);
+    expect(movingPoints[movingPoints.length - 1]).toEqual([
+      expect.closeTo(target[target.length - 1][0], 8),
+      expect.closeTo(target[target.length - 1][1], 8),
+    ]);
+  });
+
+  it('uses span ends before notches before corners, then nearest within that priority', () => {
+    const point = (piece: string, at: Pt2) => ({ piece, at });
+    const moving = {
+      spanEnds: [point('M', [0, 0])],
+      notches: [point('M', [0, 0])],
+      corners: [point('M', [0, 0])],
+    };
+    const others = {
+      spanEnds: [point('H', [7, 0]), point('H', [6, 0])],
+      notches: [point('H', [2, 0])],
+      corners: [point('H', [1, 0])],
+    };
+
+    expect(snapPose(moving, others, 8)).toMatchObject({ at: [6, 0], dx: 6, host: 'H' });
+    expect(snapPose({ ...moving, spanEnds: [] }, others, 8)).toMatchObject({
+      at: [2, 0],
+      dx: 2,
+      host: 'H',
+    });
+    expect(
+      snapPose(
+        { ...moving, spanEnds: [], notches: [] },
+        { ...others, spanEnds: [], notches: [] },
+        8,
+      ),
+    ).toMatchObject({ at: [1, 0], dx: 1, host: 'H' });
   });
 
   it('computes the drag-time snap from the drop transforms and skips collapsed followers', () => {
-    const moving = square('MOVING', 0, 0, 10, 10);
-    const host = square('HOST', 0, 0, 100, 100);
+    const moving = edgedSquare('MOVING', 0, 0, 10, 10);
+    const host = edgedSquare('HOST', 0, 0, 100, 100);
     const g = new Map([
       [moving.pieceKey, moving],
       [host.pieceKey, host],
@@ -408,6 +534,78 @@ describe('picker helpers', () => {
       dy: 0,
     });
     expect(snapPoseForDrag(['MOVING'], D, transforms, g, new Set(['HOST']), 8)).toBeNull();
+  });
+
+  it('does not snap a corner to a resampled curve point', () => {
+    const moving = edgedSquare('MOVING', 0, 0, 10, 10);
+    const hostBase = edgedSquare('HOST', 0, 0, 100, 100);
+    const host: PieceGeom = {
+      ...hostBase,
+      rs: [
+        [0, 0],
+        [50, 0],
+        [100, 0],
+        [100, 100],
+        [0, 100],
+      ],
+      corners: [0, 2, 3, 4],
+      edges: [
+        {
+          ...hostBase.edges[0],
+          s: 0,
+          e: 2,
+          pts: [
+            [0, 0],
+            [50, 0],
+            [100, 0],
+          ],
+          lenMm: 100,
+          chordMm: 100,
+        },
+        {
+          ...hostBase.edges[1],
+          k: 1,
+          s: 2,
+          e: 3,
+          pts: [
+            [100, 0],
+            [100, 100],
+          ],
+        },
+        {
+          ...hostBase.edges[2],
+          k: 2,
+          s: 3,
+          e: 4,
+          pts: [
+            [100, 100],
+            [0, 100],
+          ],
+        },
+        {
+          ...hostBase.edges[3],
+          k: 3,
+          s: 4,
+          e: 0,
+          pts: [
+            [0, 100],
+            [0, 0],
+          ],
+        },
+      ],
+    };
+    const geoms = new Map([
+      [moving.pieceKey, moving],
+      [host.pieceKey, host],
+    ]);
+    const transforms = new Map<string, Affine>([
+      ['MOVING', IDENTITY],
+      ['HOST', IDENTITY],
+    ]);
+
+    expect(
+      snapPoseForDrag(['MOVING'], [1, 0, 0, 1, 50, 4], transforms, geoms, new Set(), 8),
+    ).toBeNull();
   });
 
   it('the block root: the biggest piece of the cluster root, not the piece nor its group', () => {
@@ -443,6 +641,27 @@ describe('picker helpers', () => {
     expect(apply(turnAbout(ring, 1), [20, 5]).map((v) => Math.round(v))).toEqual([10, 15]);
     expect(apply(turnAbout(ring, -1), [20, 5]).map((v) => Math.round(v))).toEqual([10, -5]);
     expect(apply(turnAbout(ring, 0), [0, 0])).toEqual([20, 0]);
+  });
+
+  it('rotates a rigid block in 1° or 15° steps and is identity at zero drag', () => {
+    const centre: Pt2 = [10, 5];
+    const start: Pt2 = [20, 5];
+    const at = (degrees: number): Pt2 => {
+      const angle = (degrees * Math.PI) / 180;
+      return [centre[0] + 10 * Math.cos(angle), centre[1] + 10 * Math.sin(angle)];
+    };
+    const fine = rotatePoseDrag(centre, start, at(16.4), 1);
+    const coarse = rotatePoseDrag(centre, start, at(16.4), 15);
+
+    expect(fine.angleDeg).toBe(16);
+    expect(coarse.angleDeg).toBe(15);
+    expect(rotatePoseDrag(centre, start, start, 1)).toEqual({ D: IDENTITY, angleDeg: 0 });
+    expect(apply(fine.D, centre)).toEqual([expect.closeTo(10, 8), expect.closeTo(5, 8)]);
+    const before = Math.hypot(30 - 0, 12 - -4);
+    const a = apply(fine.D, [0, -4]);
+    const b = apply(fine.D, [30, 12]);
+    expect(Math.hypot(b[0] - a[0], b[1] - a[1])).toBeCloseTo(before, 8);
+    expect(fine.D[0] * fine.D[3] - fine.D[1] * fine.D[2]).toBeCloseTo(1, 8);
   });
 
   it('turns from grain-up quarters and clears a mirror on upright', () => {
@@ -644,5 +863,348 @@ describe('mirrorPlacement: mirror left for surface and pose rows', () => {
     const sort = (pts: number[][]) =>
       [...pts].sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((p) => p.map((v) => +v.toFixed(1)));
     expect(sort(got)).toEqual(sort(want));
+  });
+});
+
+describe('planPoseMove: only the moved pieces change place', () => {
+  const rect = (key: string) => globalSquare(key, 0, 0, 100, 100);
+  const square = (key: string, areaMm2: number): PieceGeom =>
+    ({
+      key,
+      areaMm2,
+      rs: [
+        [0, 0],
+        [100, 0],
+        [100, 100],
+        [0, 100],
+      ],
+    }) as unknown as PieceGeom;
+  const geoms = new Map([
+    ['a', square('a', 900)],
+    ['b', square('b', 400)],
+    ['c', square('c', 100)],
+  ]);
+  const blocks = [{ pieces: ['a'] }, { pieces: ['b'] }, { pieces: ['c'] }];
+  const transforms = new Map<string, Affine>([
+    ['a', [1, 0, 0, 1, 0, 0]],
+    ['b', [1, 0, 0, 1, 200, 0]],
+    ['c', [1, 0, 0, 1, 400, 0]],
+  ]);
+  const D: Affine = [1, 0, 0, 1, 30, 40];
+  const layout = (keys: string[]) => ({
+    blocks: blocks.filter((block) => keys.includes(block.pieces[0])),
+    transforms,
+  });
+  const laid = (pin: { host: string; placement: Parameters<typeof placementT>[2] }, of: string) =>
+    compose(
+      transforms.get(pin.host)!,
+      placementT(geoms.get(pin.host)!, geoms.get(of)!, pin.placement),
+    );
+
+  it('never pins a piece on a block resting on it, and takes the next block', () => {
+    const plan = planPoseMove(
+      'a',
+      { group: ['a'], host: 'b' },
+      D,
+      layout(['a', 'b', 'c']),
+      new Map([['b', 'a']]),
+      geoms,
+    );
+    expect(plan.pin?.host).toBe('c');
+    expect(plan.keep.map((row) => [row.piece, row.host])).toEqual([['b', 'a']]);
+  });
+
+  it('measures a pose resting on the moved piece again, so that it stands', () => {
+    const plan = planPoseMove(
+      'a',
+      { group: ['a'], host: 'c' },
+      D,
+      layout(['a', 'b', 'c']),
+      new Map([['b', 'a']]),
+      geoms,
+    );
+    const placement = plan.keep[0].placement;
+    const stands = compose(
+      compose(D, transforms.get('a')!),
+      placementT(geoms.get('a')!, geoms.get('b')!, placement),
+    );
+    expect(stands[4]).toBeCloseTo(200, 1);
+    expect(stands[5]).toBeCloseTo(0, 1);
+  });
+
+  it('with no free block the piece stands in the step frame and the resting piece stays', () => {
+    const turn: Affine = compose([0, 1, -1, 0, 0, 0], D);
+    const plan = planPoseMove(
+      'a',
+      { group: ['a'], host: 'b' },
+      turn,
+      layout(['a', 'b']),
+      new Map([['b', 'a']]),
+      geoms,
+    );
+    expect(plan.pin?.host).toBe('a');
+    const T = new Map(transforms);
+    const pins = new Map([
+      ['a', { host: 'a', placement: plan.pin!.placement }],
+      ['b', { host: 'a', placement: plan.keep[0].placement }],
+    ]);
+    pinPoses(T, pins, geoms, []);
+    const a = compose(turn, transforms.get('a')!);
+    T.get('a')!.forEach((v, i) => expect(v).toBeCloseTo(a[i], 1));
+    expect(T.get('b')![4]).toBeCloseTo(200, 1);
+    expect(T.get('b')![5]).toBeCloseTo(0, 1);
+  });
+
+  it('a block stands by one row: the other poses of the moved group go', () => {
+    const plan = planPoseMove(
+      'a',
+      { group: ['a', 'c'], host: 'b' },
+      D,
+      { blocks: [{ pieces: ['a', 'c'] }, { pieces: ['b'] }], transforms },
+      new Map([
+        ['b', 'a'],
+        ['c', 'b'],
+      ]),
+      geoms,
+    );
+    expect(plan.drop).toEqual(['c']);
+    expect(plan.pin?.host).toBe('a');
+  });
+
+  it("a stand in the step frame is the step's own: a later step does not inherit it", () => {
+    const row = poseRow({
+      seamKey: 'own',
+      piece: rect('a'),
+      host: rect('a'),
+      placement: { xMm: 5, yMm: 6, rotDeg: 30, flip: false },
+    });
+    expect(poseOf(row)).toBeNull();
+    const rows = new Map([['own', row]]);
+    const steps = [{ poseKeys: ['own'] }, {}];
+    expect(posePinsOf(steps.slice(0, 1), rows).get('a')?.host).toBe('a');
+    expect(posePinsOf(steps, rows).size).toBe(0);
+  });
+});
+
+describe('pose loops between blocks', () => {
+  const rect = (key: string): PieceGeom =>
+    ({
+      key,
+      areaMm2: 100,
+      rs: [
+        [0, 0],
+        [100, 0],
+        [100, 60],
+        [0, 60],
+      ],
+    }) as unknown as PieceGeom;
+  const keys = ['a', 'a2', 'b', 'b2', 'c', 'c2', 'd', 'd2'];
+  const geoms = new Map(keys.map((key) => [key, rect(key)]));
+  const blocks = [
+    { pieces: ['a', 'a2'] },
+    { pieces: ['b', 'b2'] },
+    { pieces: ['c', 'c2'] },
+    { pieces: ['d', 'd2'] },
+  ];
+  const blockOf = (key: string) => blocks.findIndex((block) => block.pieces.includes(key));
+  const start = () => {
+    const quarter = (i: number): Affine => {
+      const [c, s] = [
+        [1, 0],
+        [0, 1],
+        [-1, 0],
+        [0, -1],
+      ][i % 4];
+      return [c, s, -s, c, 170 * i + 11, 90 * (i % 3) - 7];
+    };
+    return new Map<string, Affine>(keys.map((key, i) => [key, quarter(i)]));
+  };
+  const hasLoop = (hosts: ReadonlyMap<string, string>) => {
+    const next = new Map<number, number[]>();
+    for (const [key, on] of hosts)
+      if (key !== on && blockOf(key) !== blockOf(on))
+        next.set(blockOf(key), [...(next.get(blockOf(key)) ?? []), blockOf(on)]);
+    const walk = (at: number, path: number[]): boolean =>
+      path.includes(at) || (next.get(at) ?? []).some((to) => walk(to, [...path, at]));
+    return blocks.some((_, index) => walk(index, []));
+  };
+  // Applies a plan and lays the pieces by the rows that remain, the way the result will.
+  const laidBy = (
+    hosts: ReadonlyMap<string, string>,
+    plan: {
+      drop: string[];
+      keep: { piece: string; host: string; placement: Parameters<typeof placementT>[2] }[];
+    },
+    pinOf: (key: string, on: string) => Parameters<typeof placementT>[2],
+    T: Map<string, Affine>,
+  ) => {
+    const after = new Map(hosts);
+    for (const key of plan.drop) after.delete(key);
+    const placed = new Map(plan.keep.map((row) => [row.piece, row] as const));
+    for (const row of plan.keep) after.set(row.piece, row.host);
+    const pose = new Map(
+      [...after].map(
+        ([key, on]) =>
+          [key, { host: on, placement: placed.get(key)?.placement ?? pinOf(key, on) }] as const,
+      ),
+    );
+    pinPoses(T, pose, geoms, [], {
+      groupOf: (piece, host) => poseBlockGroup(piece, host, { blocks }),
+    });
+    return after;
+  };
+  const near = (a: ReadonlyMap<string, Affine>, b: ReadonlyMap<string, Affine>) => {
+    for (const key of keys)
+      a.get(key)!.forEach((v, i) => expect(Math.abs(v - b.get(key)![i])).toBeLessThan(0.05));
+  };
+
+  it('a card with no loop has nothing to fix', () => {
+    const fix = poseLoopFix(
+      new Map([
+        ['a', 'b'],
+        ['b2', 'c'],
+        ['d', 'd'],
+      ]),
+      { blocks, transforms: start() },
+      geoms,
+    );
+    expect(fix).toEqual({ drop: [], keep: [] });
+  });
+
+  it('a row inside one block is no loop', () => {
+    const fix = poseLoopFix(
+      new Map([
+        ['a', 'a2'],
+        ['a2', 'a'],
+      ]),
+      { blocks, transforms: start() },
+      geoms,
+    );
+    expect(fix).toEqual({ drop: [], keep: [] });
+  });
+
+  it('a saved loop through different pieces is repaired with every piece where it stands', () => {
+    const T = start();
+    const hosts = new Map([
+      ['a', 'b2'],
+      ['b', 'a2'],
+    ]);
+    const fix = poseLoopFix(hosts, { blocks, transforms: T }, geoms);
+    expect(fix.keep.find((row) => row.piece === 'a')?.host).toBe('a');
+    expect(fix.keep.find((row) => row.piece === 'b')?.host).toBe('a2');
+    const laid = new Map(T);
+    const after = laidBy(hosts, fix, () => ({ xMm: 0, yMm: 0, rotDeg: 0, flip: false }), laid);
+    expect(hasLoop(after)).toBe(false);
+    near(laid, T);
+  });
+
+  it('a block carried by another row loses the closing row and takes no stand', () => {
+    const fix = poseLoopFix(
+      new Map([
+        ['a', 'b'],
+        ['b', 'a'],
+        ['a2', 'c'],
+      ]),
+      { blocks, transforms: start() },
+      geoms,
+    );
+    expect(fix.drop).toEqual(['a']);
+    expect(fix.keep.some((row) => row.host === row.piece)).toBe(false);
+  });
+
+  it('FIT never leaves a loop: the fitted block lands, the others stand, over every shape', () => {
+    let seed = 7;
+    const random = (n: number) => {
+      seed = (seed * 16807) % 2147483647;
+      return seed % n;
+    };
+    const D: Affine = [0, 1, -1, 0, 37.5, -12.25];
+    let loops = 0;
+    for (let run = 0; run < 400; run++) {
+      const T = start();
+      const hosts = new Map<string, string>();
+      for (let row = random(6); row >= 0; row--) {
+        const key = keys[random(keys.length)];
+        hosts.set(key, keys[random(keys.length)]);
+      }
+      const shown = new Map(T);
+      const measured = new Map(
+        [...hosts].map(([key, on]) => [
+          key,
+          key === on
+            ? placementOf(geoms.get(key)!, geoms.get(key)!, T.get(key)!)
+            : poseAt(geoms.get(on)!, geoms.get(key)!, T.get(on)!, T.get(key)!),
+        ]),
+      );
+      const piece = keys[random(keys.length)];
+      const others = keys.filter((key) => blockOf(key) !== blockOf(piece));
+      const host = others[random(others.length)];
+      const group = blocks[blockOf(piece)].pieces;
+      const layout = { blocks, transforms: T };
+      if (hasLoop(new Map([...hosts, [piece, host]]))) loops++;
+      const plan = planPoseFit(piece, host, group, D, layout, hosts, geoms);
+      expect(plan.pin?.host).toBe(host);
+      const after = new Map(hosts);
+      for (const key of plan.drop) after.delete(key);
+      for (const row of [plan.pin!, ...plan.keep]) after.set(row.piece, row.host);
+      expect(hasLoop(after)).toBe(false);
+      // The stored placements of untouched rows, the fresh ones of the rest.
+      const fresh = new Map([plan.pin!, ...plan.keep].map((row) => [row.piece, row] as const));
+      const pose = new Map(
+        [...after].map(([key, on]) => [
+          key,
+          { host: on, placement: fresh.get(key)?.placement ?? measured.get(key)! },
+        ]),
+      );
+      const laid = new Map(T);
+      // A block that keeps a row on the moved group goes along when FIT is pressed, as ever.
+      pinPoses(laid, pose, geoms, [], {
+        groupOf: (key, on) => poseBlockGroup(key, on, { blocks }),
+      });
+      for (const key of group)
+        compose(D, shown.get(key)!).forEach((v, i) =>
+          expect(Math.abs(v - laid.get(key)![i])).toBeLessThan(0.05),
+        );
+      const onGroup = (at: number, path: number[] = []): boolean =>
+        at === blockOf(piece) ||
+        (!path.includes(at) &&
+          [...after].some(
+            ([key, on]) => blockOf(key) === at && key !== on && onGroup(blockOf(on), [...path, at]),
+          ));
+      for (const key of keys)
+        if (!onGroup(blockOf(key)))
+          shown
+            .get(key)!
+            .forEach((v, i) => expect(Math.abs(v - laid.get(key)![i])).toBeLessThan(0.05));
+    }
+    expect(loops).toBeGreaterThan(50);
+  });
+});
+
+describe('layoutDrift: how far the automatic layout went', () => {
+  const big = { ...square('BIG', 0, 0, 100, 100), areaMm2: 10000 };
+  const small = { ...square('SMALL', 0, 0, 10, 10), areaMm2: 100 };
+  const geoms = new Map([
+    ['BIG', big],
+    ['SMALL', small],
+  ]);
+  const at = (x: number, y: number): Affine => [1, 0, 0, 1, x, y];
+
+  it('follows the largest piece, not the one the owner moved', () => {
+    const before = new Map([
+      ['BIG', at(0, 0)],
+      ['SMALL', at(0, 0)],
+    ]);
+    const after = new Map([
+      ['BIG', at(5, -3)],
+      ['SMALL', at(500, 500)],
+    ]);
+    expect(layoutDrift(before, after, geoms)).toEqual([5, -3]);
+  });
+
+  it('is null when the layout stood still or shares no piece', () => {
+    const same = new Map([['BIG', at(7, 7)]]);
+    expect(layoutDrift(same, same, geoms)).toBeNull();
+    expect(layoutDrift(new Map(), same, geoms)).toBeNull();
   });
 });

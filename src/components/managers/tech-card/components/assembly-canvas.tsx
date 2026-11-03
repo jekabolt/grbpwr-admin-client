@@ -235,7 +235,6 @@ export type AssemblyCanvasProps = {
    */
   onOpenUnit?: (unitKey: string) => void;
   /** Растворить узел — по индексу его производящего шага. */
-  onDissolve: (stepIndex: number) => void;
   pieceShapes: PieceShapeMap;
   /**
    * Ткань деталей — УЖЕ РАЗРЕШЁННАЯ карта показываемого колорвея, как у `AssemblySchematic`, а не
@@ -286,7 +285,6 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     openStep = null,
     onCreate,
     onOpenUnit,
-    onDissolve,
     pieceShapes,
     cloth,
     smvOfBlock,
@@ -1689,7 +1687,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
       // чипа съедает ПЕРВЫЙ законный клик. Замерено: утащить ноду за подвал в пустое место,
       // навести другую, нажать «steps · N» — выделение пусто, срабатывает только второй клик.
       // (Того чипа больше нет — замер снят на нём; починка касается ЛЮБОГО чипа полосы, и
-      // «+ operation» с «dissolve» держатся ею ровно так же.)
+      // «+ operation» держится ею ровно так же.)
       //
       // ФАЗА ПЕРЕХВАТА РАЗВОДИТ ЭТИ ДВА СВОЙСТВА, не жертвуя ни одним: перехват идёт от корня К
       // ЦЕЛИ и завершается ЦЕЛИКОМ до всплытия, поэтому полоса гасит жест ровно как гасила, а
@@ -1793,7 +1791,6 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
                 // узел считает `unitAddPrefill` — та же арифметика, что у хвостовой точки вставки
                 // мини-рельса. Вернула `null` — вставлять некуда, и чипа не будет вовсе.
                 onAddOperation={addPrefill ? clickGuard(() => onCreate(addPrefill)) : undefined}
-                onDissolveUnit={clickGuard(() => onDissolve(b.producedAt))}
               />
             );
           })}
@@ -2016,24 +2013,6 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
                 title='a step on the selection that assembles nothing (o)'
               >
                 processing · {pickedFree.length}
-              </Chip>
-            )}
-            {/* РАСТВОРИТЬ — гейт тот же, что у клавиши `d` и у кнопки в боксе: ровно один узел, и
-                он НА СТОЛЕ. Проверка стола здесь не украшение: выделение больше не ограничено
-                фронтиром, и без неё чип предлагал бы растворить уже съеденный узел — ровно то, что
-                клавиша `d` отказывается делать словами. */}
-            {!frozen && pickedFree.length === 1 && res.units.has(pickedFree[0]) && (
-              <Chip
-                dashed
-                onClick={() => {
-                  const b = blocks.find((x) => x.key === pickedFree[0]);
-                  if (!b) return;
-                  onDissolve(b.producedAt);
-                  onPicked([]);
-                }}
-                title='dissolve the unit — its inputs return to the table (d)'
-              >
-                dissolve
               </Chip>
             )}
             <Chip dashed onClick={() => onPicked([])} title='clear the selection (esc)'>

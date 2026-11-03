@@ -1,6 +1,6 @@
-import type { StoredSeam } from 'lib/seams';
+import { sidePartEdges, type SidePart, type StoredSeam } from 'lib/seams';
 
-import { storedSeamSides } from './step-rows';
+import { rowTargetsOfAnchor, storedSeamSides } from './step-rows';
 import { pieceOfTarget, type FormOpLike, type TargetId } from './step-seams-model';
 
 export const NO_SEAM_TEXT = 'no seam';
@@ -8,6 +8,8 @@ export const NO_SEAM_TEXT = 'no seam';
 export type StepHighlight = {
   /** Exact persisted targets to accent in every picture of this operation. */
   targets: TargetId[];
+  /** The same targets with a real stored span where one exists. */
+  parts: SidePart[];
   /** Rows that supplied those targets, for action-line geometry. */
   rows: StoredSeam[];
   /** True only when an edge-finishing operation reads its line from a producer. */
@@ -29,7 +31,7 @@ export function highlightTargetsOfRows(
   hostOnly = false,
   hostPieces: ReadonlySet<string> = new Set(),
 ): TargetId[] {
-  const sides = rows.map(storedSeamSides);
+  const sides = rows.map((row) => storedSeamSides(row));
   const unique = (targets: readonly TargetId[]) => [...new Set(targets)];
   const a = unique(sides.flatMap((side) => side.a));
   const b = unique(sides.flatMap((side) => side.b));
@@ -40,6 +42,54 @@ export function highlightTargetsOfRows(
   // chain. Surface rows retain their explicit contract: A is the host placement line.
   if (rows.some((row) => row.kind === 'surface')) return a;
   return b.length > a.length ? b : a;
+}
+
+export function highlightPartsOfRows(
+  rows: readonly StoredSeam[],
+  hostOnly = false,
+  hostPieces: ReadonlySet<string> = new Set(),
+): SidePart[] {
+  const targetOrder = highlightTargetsOfRows(rows, hostOnly, hostPieces);
+  const allowed = new Set(targetOrder);
+  const parts = rows.flatMap<SidePart>((row) =>
+    [...row.sideA, ...row.sideB].flatMap((anchor) => {
+      const targets = rowTargetsOfAnchor(anchor);
+      if (!targets.some((target) => allowed.has(target))) return [];
+      if (row.kind !== 'partial' && row.kind !== 'composite')
+        return targets.map((target): SidePart => ({ target }));
+      const length = anchor.lenMm;
+      const from = Math.max(0, Math.min(length, anchor.range[0] * length));
+      const to = Math.max(from, Math.min(length, anchor.range[1] * length));
+      return from > 0.05 || to < length - 0.05
+        ? [{ target: anchor.edgeHint, range: [from, to] as const }]
+        : targets.map((target): SidePart => ({ target }));
+    }),
+  );
+  const remaining = [
+    ...new Map(
+      parts.map((part) => [
+        `${part.target}:${part.range?.[0] ?? ''}:${part.range?.[1] ?? ''}`,
+        part,
+      ]),
+    ).values(),
+  ].filter(
+    (part) => allowed.has(part.target) || sidePartEdges(part).some((target) => allowed.has(target)),
+  );
+  const ordered: SidePart[] = [];
+  for (const target of targetOrder) {
+    const direct = remaining.filter((part) => part.target === target);
+    if (direct.length) {
+      ordered.push(...direct);
+      direct.forEach((part) => remaining.splice(remaining.indexOf(part), 1));
+      continue;
+    }
+    const chain = remaining.find((part) => sidePartEdges(part).includes(target));
+    if (chain) {
+      ordered.push(chain);
+      remaining.splice(remaining.indexOf(chain), 1);
+    }
+  }
+  return [...ordered, ...remaining];
 }
 
 type ProducerSource = { index: number; rows: StoredSeam[] };
@@ -134,15 +184,18 @@ export function stepHighlightOf(
     return {
       rows: own,
       targets: highlightTargetsOfRows(own),
+      parts: highlightPartsOfRows(own),
       inherited: false,
     };
   }
-  if (!isProducerLineOperation(ops[index])) return { rows: [], targets: [], inherited: false };
+  if (!isProducerLineOperation(ops[index]))
+    return { rows: [], targets: [], parts: [], inherited: false };
   const sources = producerSourcesOfStep(ops, index, byKey);
   const inherited = uniqueRows(sources.flatMap((source) => source.rows));
   return {
     rows: inherited,
     targets: highlightTargetsOfRows(inherited, true, producerHostPieces(ops, sources)),
+    parts: highlightPartsOfRows(inherited, true, producerHostPieces(ops, sources)),
     inherited: inherited.length > 0,
   };
 }

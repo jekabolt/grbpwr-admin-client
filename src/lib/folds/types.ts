@@ -46,8 +46,8 @@ export type StoredFold = {
 
 // ── hints (never saved until the owner accepts one) ─────────────────────────────────────────
 
-/** Where a hint came from: a classified fold mark, the layer-8 line of an unfolded piece, the AAMA mirror line. */
-export type FoldHintOrigin = 'mark' | 'unfolded' | 'mirror';
+/** Where a hint came from: a classified fold mark, an unfolded/mirror line, or a drawn inner line. */
+export type FoldHintOrigin = 'mark' | 'unfolded' | 'mirror' | 'inner';
 
 export type FoldHint = {
   /** Stable for one geometry: `${pieceKey}:${origin}:${i}`. */
@@ -58,7 +58,7 @@ export type FoldHint = {
   strength: 'strong' | 'weak';
   /** The source the row gets when accepted. */
   source: FoldSource;
-  /** mm, the piece's `rs` frame, already extended to the contour. */
+  /** mm, the piece's `rs` frame; an inner line keeps its ends, other hints reach the contour. */
   lineMm: [Pt2, Pt2];
   /** The same line in the seam frame. */
   line: [UV, UV];
@@ -68,7 +68,7 @@ export type FoldHint = {
 
 // ── resolution ────────────────────────────────────────────────────────────────────────────────
 
-export type FoldVia = 'hint' | 'shape' | 'uv';
+export type FoldVia = 'hint' | 'shape' | 'inner' | 'uv';
 
 export type UnresolvedFold = { foldKey: string; pieceKey: string; seq: number; words: string };
 
@@ -84,6 +84,8 @@ export type ResolvedFolds = {
 export const FOLDS = {
   /** RMS of the edge's five samples in the unit square (SEAMS.fitMax). */
   fitMax: 0.02,
+  /** RMS of a bounded line's two ends; grading moves these more than contour samples. */
+  innerFitMax: 0.04,
   /** The best edge must beat the next disjoint one by this much, else the locator is a tie. */
   tieMargin: 0.01,
   /** Candidate runs: chains of up to this many neighbouring edges. */
@@ -96,6 +98,8 @@ export const FOLDS = {
   flipProbeMm: [5, 2, 1, 10] as readonly number[],
   /** A drawn line is straight when no vertex is further than this from its chord. */
   straightMm: 1.5,
+  /** A generic inner line must be at least this long to be offered as a fold. */
+  innerMinMm: 30,
   /** An edge is «along» a line when their directions differ by less than this. */
   parallelDeg: 3,
   /** …and the line is no further from it than this (marks.ts search reach). */
@@ -112,6 +116,8 @@ export type FoldResolveOptions = {
   thresholds?: Partial<typeof FOLDS>;
   /** Display names for the words — never a ULID. */
   nameOf?: (pieceKey: string) => string;
+  /** Open construction lines on this size, in the piece's millimetre frame. */
+  innerLines?: ReadonlyMap<string, readonly (readonly Pt2[])[]>;
 };
 
 // ── wire shape (proto common.TechCardPieceFold as the generated HTTP client carries it) ──

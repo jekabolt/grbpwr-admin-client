@@ -81,11 +81,13 @@ const line = (v: PieceView, l: readonly [Pt2, Pt2], props: Record<string, string
 export function FlatThumb({
   piece,
   deg,
+  inner,
   groups,
   hints,
 }: {
   piece: PieceGeom;
   deg: number;
+  inner?: readonly Pt2[][];
   groups: readonly FoldGroup[];
   hints: readonly FoldHint[];
 }) {
@@ -105,16 +107,28 @@ export function FlatThumb({
         strokeWidth={1}
         strokeLinejoin='round'
       />
+      {inner?.map((polyline, i) => (
+        <polyline
+          key={`i${i}`}
+          points={ptsAttr(v, polyline)}
+          fill='none'
+          stroke={FAINT}
+          strokeWidth={0.6}
+          data-fold-inner=''
+        />
+      ))}
       {groups.flatMap((g, i) =>
         g.flat.map((f, j) => (
           <g key={`f${i}.${j}`}>{line(v, [f.a, f.b], { stroke: INK, strokeWidth: 1.2 })}</g>
         )),
       )}
-      {hints.map((h) => (
-        <g key={h.id}>
-          {line(v, h.lineMm, { stroke: INK, strokeWidth: 1, strokeDasharray: '2 1.5' })}
-        </g>
-      ))}
+      {hints
+        .filter((h) => h.origin !== 'inner')
+        .map((h) => (
+          <g key={h.id}>
+            {line(v, h.lineMm, { stroke: INK, strokeWidth: 1, strokeDasharray: '2 1.5' })}
+          </g>
+        ))}
     </svg>
   );
 }

@@ -127,7 +127,7 @@ import {
   writeBindings,
 } from './form-writers';
 import { normBlock, sizeTokensOf, splitBlockSize, uniOf } from './nesting/block-code';
-import { isFetchFailure } from './nesting/dxf-warnings';
+import { geometryFailureLabel, isFetchFailure } from './nesting/dxf-warnings';
 import { defaultContourLayer, layerOptions } from './nesting/contour-layer';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
 import { hydrateSeams, posesOf, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
@@ -577,7 +577,7 @@ function revisionOf(row: PatternRow): number | null {
 
 type SizeAudit =
   | { phase: 'loading' }
-  | { phase: 'error'; message: string }
+  | { phase: 'error'; message: string; label: string }
   // Хранится РОВНО ТО, ЧТО СКАЗАЛИ ФАЙЛЫ, — набор найденных размерных токенов. Нехватка выводится
   // при отрисовке, потому что она зависит ещё и от размерного ряда карточки, а ряд правится на
   // этой же вкладке. Сохранённый ответ «все размеры на месте» пережил бы добавление XXL и
@@ -1414,7 +1414,11 @@ export function PatternsField({
           uniOnly: scoped?.uniOnly ?? false,
         };
       } else if (geometry.isError) {
-        out[sig] = { phase: 'error', message: geometry.error?.message ?? 'reason unknown' };
+        out[sig] = {
+          phase: 'error',
+          message: geometry.error?.message ?? 'reason unknown',
+          label: geometryFailureLabel(geometry.error),
+        };
       } else if (armed) {
         out[sig] = { phase: 'loading' };
       }
@@ -3643,7 +3647,7 @@ export function PatternsField({
     if (a.phase === 'error') {
       return (
         <Text size='nano' component='span' className='text-error'>
-          parse error
+          {a.label}
         </Text>
       );
     }
@@ -4018,7 +4022,13 @@ export function PatternsField({
         <div className='relative'>
           <Placeholder
             dashed
-            label={geometry.isError ? 'parse error' : dxfIndex ? 'no shapes found' : 'parsing…'}
+            label={
+              geometry.isError
+                ? geometryFailureLabel(geometry.error)
+                : dxfIndex
+                  ? 'no shapes found'
+                  : 'parsing…'
+            }
             className='h-[84px] w-full'
           />
           <SlotStateOverlay state={slotState} />
@@ -4661,7 +4671,7 @@ export function PatternsField({
   const warnings: HeaderWarning[] = [
     ...pieceErrors,
     geometry.isError && {
-      text: `parsing failed: ${geometry.error?.message ?? 'reason unknown'}`,
+      text: `${geometryFailureLabel(geometry.error) === 'not loaded' ? 'not loaded' : 'parsing failed'}: ${geometry.error?.message ?? 'reason unknown'}`,
       error: true,
       action: reparse,
     },

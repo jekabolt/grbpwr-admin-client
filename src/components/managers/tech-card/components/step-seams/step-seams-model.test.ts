@@ -26,6 +26,7 @@ import {
   deltaMm,
   dropKeys,
   easeOf,
+  fullyUsedEdges,
   hasMultipleStepPieces,
   inputGroups,
   inputUnitsWithOuterEdges,
@@ -287,7 +288,7 @@ describe('step seam eligibility', () => {
       1,
       unitPieces,
       geoms,
-      usedEdgesBeforeStep(ops, 1, seams),
+      fullyUsedEdges(usedEdgesBeforeStep(ops, 1, seams, geoms), geoms),
       null,
       seams,
     );
@@ -436,7 +437,7 @@ describe('suggestStepPair', () => {
       ['right', storedSeam('right', 'SLV_R#1', 'R_PANEL#1')],
       ['left', storedSeam('left', 'SLV_L#1', 'L_PANEL#1')],
     ]);
-    const used = usedEdgesBeforeStep(ops, 3, rows);
+    const used = fullyUsedEdges(usedEdgesBeforeStep(ops, 3, rows, geoms), geoms);
     expect(inputUnitsWithOuterEdges(ops, 3, keys, geoms, used)).toHaveLength(3);
     expect(
       inputUnitsWithOuterEdges(ops, 3, keys, geoms, used)[0].edges.map((edge) => edge.id),
@@ -487,7 +488,7 @@ describe('suggestStepPair', () => {
       2,
       keys,
       geoms,
-      usedEdgesBeforeStep(ops, 2, rows),
+      fullyUsedEdges(usedEdgesBeforeStep(ops, 2, rows, geoms), geoms),
       null,
       rows,
     )!;
@@ -515,7 +516,7 @@ describe('suggestStepPair', () => {
       1,
       keys,
       geoms,
-      usedEdgesBeforeStep(ops, 1, rows),
+      fullyUsedEdges(usedEdgesBeforeStep(ops, 1, rows, geoms), geoms),
       null,
     );
     expect(suggestion).not.toBeNull();
@@ -540,7 +541,7 @@ describe('suggestStepPair', () => {
       1,
       keys,
       geoms,
-      usedEdgesBeforeStep(ops, 1, rows),
+      fullyUsedEdges(usedEdgesBeforeStep(ops, 1, rows, geoms), geoms),
       null,
     )!;
     const pieces = [...suggestion.a, ...suggestion.b].map((id) => id.slice(0, id.lastIndexOf('#')));
@@ -766,7 +767,7 @@ describe('card 83: chains across the seams earlier steps made', () => {
       at(370),
       keys,
       geoms,
-      usedEdgesBeforeStep(stored, at(370), rows),
+      fullyUsedEdges(usedEdgesBeforeStep(stored, at(370), rows, geoms), geoms),
       null,
       rows,
     )!;
@@ -776,7 +777,7 @@ describe('card 83: chains across the seams earlier steps made', () => {
       at(400),
       keys,
       geoms,
-      usedEdgesBeforeStep(stored, at(400), rows),
+      fullyUsedEdges(usedEdgesBeforeStep(stored, at(400), rows, geoms), geoms),
       null,
       rows,
     )!;
@@ -912,7 +913,7 @@ describe('card 85: assembled BASE shoulder step', () => {
       index,
       keys,
       geoms,
-      usedEdgesBeforeStep(ops, index, CARD85_SEAMS),
+      fullyUsedEdges(usedEdgesBeforeStep(ops, index, CARD85_SEAMS, geoms), geoms),
       null,
       CARD85_SEAMS,
     );
@@ -935,7 +936,7 @@ describe('card 6: layered seams keep their structural edge', () => {
       index,
       CARD6_PIECE_KEYS,
       geoms,
-      usedEdgesBeforeStep(CARD6_OPS, index, CARD6_SEAMS),
+      fullyUsedEdges(usedEdgesBeforeStep(CARD6_OPS, index, CARD6_SEAMS, geoms), geoms),
       null,
       CARD6_SEAMS,
     )[0];

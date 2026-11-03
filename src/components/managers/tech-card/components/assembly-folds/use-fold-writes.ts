@@ -9,8 +9,10 @@ import { useQueryClient } from '@tanstack/react-query';
 import { foldToWire, type StoredFold, type TechCardPieceFoldWire } from 'lib/folds';
 import { notify } from 'lib/stores/store';
 import { useCallback, useMemo } from 'react';
+import { useFormContext } from 'react-hook-form';
 import { FROZEN_REFUSAL } from '../assembly-fullscreen';
 import { refuseGesture } from '../refuse-gesture';
+import type { TechCardFormData } from '../schema';
 import { readFoldWire, useFoldsStore, type FoldPendingOp } from './folds-store';
 
 const message = (e: unknown) =>
@@ -24,8 +26,22 @@ export type FoldWrites = {
   frozen: boolean;
 };
 
+/** The steps a fold removal changes and what each is left with; other steps are not named. */
+export function stepsWithoutFolds(
+  operations: readonly { foldKeys?: readonly string[] }[],
+  removed: readonly string[],
+): { index: number; foldKeys: string[] }[] {
+  const gone = new Set(removed.map((key) => key.trim()));
+  return operations.flatMap((operation, index) => {
+    const keys = operation.foldKeys ?? [];
+    const foldKeys = keys.filter((key) => !gone.has(key.trim()));
+    return foldKeys.length === keys.length ? [] : [{ index, foldKeys }];
+  });
+}
+
 export function useFoldWrites(cardId: number | undefined, frozen: boolean): FoldWrites {
   const qc = useQueryClient();
+  const form = useFormContext<TechCardFormData>();
 
   const settle = useCallback(
     (keys: string[], echo: readonly TechCardPieceFoldWire[] | undefined, error?: string) => {
@@ -104,17 +120,24 @@ export function useFoldWrites(cardId: number | undefined, frozen: boolean): Fold
   );
 
   const remove = useCallback(
-    (rows: StoredFold[]) =>
-      run(
+    async (rows: StoredFold[]) => {
+      const keys = rows.map((r) => r.foldKey);
+      const removed = await run(
         Object.fromEntries(rows.map((row) => [row.foldKey, { kind: 'delete' as const, row }])),
-        () =>
-          adminService.DeleteTechCardPieceFolds({
-            techCardId: cardId,
-            foldKeys: rows.map((r) => r.foldKey),
-          }),
+        () => adminService.DeleteTechCardPieceFolds({ techCardId: cardId, foldKeys: keys }),
         'fold removal',
-      ),
-    [cardId, run],
+      );
+      // The server took these keys off every step in the same transaction. An open form still holds
+      // them, and its next save would be refused for naming a fold that is gone. Nothing is left to
+      // save here, so the form does not turn dirty.
+      if (removed && form) {
+        for (const { index, foldKeys } of stepsWithoutFolds(form.getValues('operations') ?? [], keys)) {
+          form.setValue(`operations.${index}.foldKeys`, foldKeys);
+        }
+      }
+      return removed;
+    },
+    [cardId, form, run],
   );
 
   return useMemo(() => ({ upsert, remove, frozen }), [upsert, remove, frozen]);

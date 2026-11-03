@@ -50,9 +50,22 @@ const anchor = (row: RawAnchor): EdgeAnchor => ({
   lenMm: row.len_mm,
   notches: row.notches,
   turnDeg: row.turn_deg,
-  range: [row.range_from, row.range_to],
+  range: row.range_from === 0 && row.range_to === 0 ? [0, 1] : [row.range_from, row.range_to],
   edgeHint: row.edge_hint,
   contourSig: row.contour_sig,
+  ...(row.placement
+    ? {
+        placement: {
+          xMm: row.placement.x_mm,
+          yMm: row.placement.y_mm,
+          rotDeg: row.placement.rot_deg,
+          flip: row.placement.flip,
+        },
+      }
+    : {}),
+  ...('layer' in row && (row.layer === 'under' || row.layer === 'over')
+    ? { layer: row.layer }
+    : {}),
 });
 
 /** Only the stored row linked by an operation before 970; unattached card rows cannot affect it. */

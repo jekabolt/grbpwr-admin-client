@@ -8,14 +8,18 @@
 
 import type { Affine, PieceGeom, SeamGraph, UnionLayout, UnionPlacement } from '../types';
 import { apply } from './affine';
+import {
+  coverOrder,
+  coverPiece,
+  outlineRuns,
+  uncoveredRuns,
+  type CollidingPairs,
+} from './layer-cover';
 import { unionLayout } from './layout';
 import { unionPicture, type UnionPicture } from './picture';
 
 export type UnitStep = { inputs: readonly string[]; outputUnitKey: string };
 
-export const LOWER_LAYER_FILL = 'rgba(0,0,0,.15)';
-export const LOWER_LAYER_STROKE = '#8a8a8a';
-export const LOWER_LAYER_STROKE_SCALE = 0.9;
 export const STACKED_TWIN_OFFSET_MM = 3;
 
 /** Bottom-to-top result order, with collapsed stack followers placed below their visible leader. */
@@ -42,11 +46,7 @@ type StepLayoutPicture = {
   stacked: readonly (readonly string[])[];
   onRuns: readonly string[];
   hung?: readonly (readonly [piece: string, host: string])[];
-};
-
-export type OwnerLayerClaims = {
-  lower: readonly string[];
-  stacked: readonly (readonly [under: string, over: string])[];
+  colliding?: CollidingPairs;
 };
 
 const layoutBox = (
@@ -73,7 +73,6 @@ export function unionPictureOfLayout(
   layout: StepLayoutPicture,
   geoms: ReadonlyMap<string, PieceGeom>,
   layers: readonly string[],
-  claims: OwnerLayerClaims,
 ): UnionPicture {
   const ordered = orderedLayerKeys(layers, layout.stacked, [...layout.T.keys()]).filter(
     (piece) => layout.T.has(piece) && geoms.has(piece),
@@ -105,30 +104,27 @@ export function unionPictureOfLayout(
     underlay: [],
     overlap: 0,
   };
-  const claimedUnder = new Set(claims.stacked.map(([under]) => under));
-  const lower = new Set(claims.lower.filter((piece) => claimedUnder.has(piece)));
   const picture = unionPicture(union, geoms);
-  if (!lower.size) return picture;
-  const covers = new Map<string, string[]>();
-  for (const [under, over] of claims.stacked) {
-    if (!lower.has(under) || !ordered.includes(over)) continue;
-    const current = covers.get(under) ?? [];
-    if (!current.includes(over)) current.push(over);
-    covers.set(under, current);
-  }
-  const depths = new Map<string, 1 | 2>();
-  for (let pass = 0; pass < 3; pass++)
-    for (const piece of [...ordered].reverse()) {
-      if (!lower.has(piece)) continue;
-      const above = covers.get(piece) ?? [];
-      const depth = Math.min(2, Math.max(1, ...above.map((key) => 1 + (depths.get(key) ?? 0))));
-      depths.set(piece, depth as 1 | 2);
-    }
+  const shapes = picture.shapes.flatMap((shape) => coverPiece(shape.pieceKey, shape.pts) ?? []);
+  const { covers, levels } = coverOrder(shapes, layout.colliding);
+  if (!levels.some(Boolean)) return picture;
+  const lowerLayerRuns: NonNullable<UnionPicture['lowerLayerRuns']> = {};
+  shapes.forEach((shape, index) => {
+    if (!covers[index].length) return;
+    const above = covers[index].map((upper) => shapes[upper]);
+    const runs = outlineRuns(shape, above);
+    const lines = picture.shapes.find((own) => own.pieceKey === shape.key)?.lines ?? [];
+    lowerLayerRuns[shape.key] = {
+      visible: runs.filter((run) => run.state === 'solid').map((run) => run.points),
+      hidden: runs.filter((run) => run.state === 'dashed').map((run) => run.points),
+      lines: lines.flatMap((line) => uncoveredRuns(line, above)),
+    };
+  });
   return {
     ...picture,
-    lowerLayers: ordered.filter((piece) => lower.has(piece)),
-    lowerLayerCovers: Object.fromEntries(covers),
-    lowerLayerDepths: Object.fromEntries(depths),
+    lowerLayers: shapes.filter((_, index) => covers[index].length).map((shape) => shape.key),
+    lowerLayerRuns,
+    levels: Object.fromEntries(shapes.map((shape, index) => [shape.key, levels[index]])),
     twinLabels: Object.fromEntries(twinLabels),
   };
 }

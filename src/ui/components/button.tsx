@@ -6,19 +6,34 @@ import { Link, type To } from 'react-router-dom';
 import { Loader } from './loader';
 
 export const buttonVariants = cva(
-  'disabled:cursor-not-allowed block focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+  'disabled:cursor-not-allowed block focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor press:translate-y-px',
   {
     variants: {
       variant: {
-        default: ['text-textBaseSize', 'disabled:opacity-50'],
-        simple: ['text-bgColor', 'bg-textColor', 'hover:bg-bgColor', 'hover:text-textColor'],
-        simpleReverse: ['text-textColor', 'bg-bgColor'],
+        default: [
+          'text-textBaseSize',
+          'disabled:opacity-50',
+          'press:bg-textColor',
+          'press:text-bgColor',
+        ],
+        simple: [
+          'text-bgColor',
+          'bg-textColor',
+          'hover:bg-bgColor',
+          'hover:text-textColor',
+          'press:bg-bgColor',
+          'press:text-textColor',
+        ],
+        simpleReverse: ['text-textColor', 'bg-bgColor', 'press:bg-textColor', 'press:text-bgColor'],
         simpleReverseWithBorder: [
           'text-textColor',
           'bg-bgColor',
           'border',
           'border-borderColor',
           'leading-4',
+          'press:border-textColor',
+          'press:bg-textColor',
+          'press:text-bgColor',
         ],
         main: [
           'border',
@@ -34,6 +49,8 @@ export const buttonVariants = cva(
           'disabled:border-borderColor',
           'leading-4',
           'text-center',
+          'press:bg-bgColor',
+          'press:text-textColor',
         ],
         secondary: [
           'border',
@@ -48,14 +65,33 @@ export const buttonVariants = cva(
           'disabled:hover:text-borderColor',
           'leading-4',
           'text-center',
+          'press:border-textColor',
+          'press:bg-textColor',
+          'press:text-bgColor',
         ],
-        underline: ['underline', 'disabled:text-borderColor'],
-        underlineReverse: ['text-bgColor', 'underline', 'disabled:text-borderColor'],
+        underline: [
+          'underline',
+          'disabled:text-borderColor',
+          'press:bg-textColor',
+          'press:text-bgColor',
+          'press:no-underline',
+        ],
+        underlineReverse: [
+          'text-bgColor',
+          'underline',
+          'disabled:text-borderColor',
+          'press:bg-bgColor',
+          'press:text-textColor',
+          'press:no-underline',
+        ],
         underlineWithColors: [
           'underline',
           'text-highlightColor',
           'disabled:text-borderColor',
           'visited:text-visitedLinkColor',
+          'press:bg-textColor',
+          'press:text-bgColor',
+          'press:no-underline',
         ],
         strikeThrough: [
           'relative',
@@ -70,6 +106,8 @@ export const buttonVariants = cva(
           "before:content-['']",
           'before:bg-[var(--inactive)]',
           'disabled:cursor-not-allowed',
+          'press:bg-textColor',
+          'press:text-bgColor',
         ],
       },
       isLoading: {

@@ -2,9 +2,17 @@
 // the geometry engine. Result computation deliberately does not read the seam graph: a row either
 // resolves against today's geometry here or contributes no placement.
 
-import type { PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
+import type { Affine, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
 import { orderSideAlongOutline } from 'lib/assembly-skeleton/union';
-import type { EdgeAnchor, SeamPlacement, StoredSeam } from 'lib/seams';
+import { apply } from 'lib/assembly-skeleton/union/affine';
+import { resolveEdge } from 'lib/assembly-skeleton/union';
+import {
+  resolveSeamDecisions,
+  type EdgeAnchor,
+  type SeamPlacement,
+  type SidePart,
+  type StoredSeam,
+} from 'lib/seams';
 
 import { rowFromHand, type AnchorCtx } from '../assembly-seams/seam-actions';
 import { innerId, parseInner, pieceOfTarget, type TargetId } from './step-seams-model';
@@ -39,9 +47,10 @@ export function edgeRowFromPick(
   sides: SeamSides,
   geoms: ReadonlyMap<string, PieceGeom>,
   anchorCtx: AnchorCtx,
+  parts?: { a: readonly SidePart[]; b: readonly SidePart[] },
 ): StoredSeam | null {
   const ordered = orderedPickSides(sides, geoms);
-  return rowFromHand(ordered.a, ordered.b, geoms, anchorCtx, {
+  return rowFromHand(parts?.a ?? ordered.a, parts?.b ?? ordered.b, geoms, anchorCtx, {
     direction: 'reversed',
   });
 }
@@ -59,10 +68,34 @@ export function rowTargetsOfAnchor(anchor: EdgeAnchor): TargetId[] {
 }
 
 /** The two target runs and optional placement persisted by one owner row. */
-export function storedSeamSides(row: StoredSeam): SeamSides & { placement?: SeamPlacement } {
+export function storedSeamSides(
+  row: StoredSeam,
+  geoms?: ReadonlyMap<string, PieceGeom>,
+): SeamSides & {
+  parts: { a: SidePart[]; b: SidePart[] };
+  placement?: SeamPlacement;
+} {
+  const sideParts = (anchors: readonly EdgeAnchor[]): SidePart[] =>
+    anchors.flatMap((anchor) => {
+      const targets = rowTargetsOfAnchor(anchor);
+      if (
+        row.kind === 'edge' ||
+        row.kind === 'surface' ||
+        row.kind === 'closure' ||
+        targets.length === 0
+      )
+        return targets.map((target) => ({ target }));
+      const length = resolveEdge(anchor.edgeHint, geoms ?? new Map())?.len ?? anchor.lenMm;
+      const from = Math.max(0, Math.min(length, anchor.range[0] * length));
+      const to = Math.max(from, Math.min(length, anchor.range[1] * length));
+      if (from <= 0.05 && to >= length - 0.05) return targets.map((target) => ({ target }));
+      return [{ target: anchor.edgeHint, range: [from, to] }];
+    });
+  const parts = { a: sideParts(row.sideA), b: sideParts(row.sideB) };
   return {
     a: row.sideA.flatMap(rowTargetsOfAnchor),
     b: row.sideB.flatMap(rowTargetsOfAnchor),
+    parts,
     placement: [...row.sideA, ...row.sideB].find((anchor) => anchor.placement)?.placement,
   };
 }
@@ -78,7 +111,7 @@ export function candidateOfStoredSeam(
   innerLines: ReadonlyMap<string, Pt2[][]>,
 ): SeamCandidate | null {
   if (row.kind === 'closure') return null;
-  const { a, b, placement } = storedSeamSides(row);
+  const { a, b, parts, placement } = storedSeamSides(row, geoms);
   if (row.kind === 'surface') {
     // The persisted surface contract is side A = host, side B = laid part. Old rows may have lost
     // their `iN` hint; their kind still makes them a surface, placed by the stored numbers (or a
@@ -91,7 +124,81 @@ export function candidateOfStoredSeam(
     const edge = b.find((target) => !parseInner(target));
     return surfaceSeam(host, part, line, geoms, placement, edge);
   }
-  return seamOfSides({ a, b }, geoms, innerLines, placement);
+  const hasRealRange =
+    (row.kind === 'partial' || row.kind === 'composite') &&
+    [...row.sideA, ...row.sideB].some(
+      (anchor) =>
+        anchor.range[1] > anchor.range[0] && (anchor.range[0] > 0.0001 || anchor.range[1] < 0.9999),
+    );
+  if (hasRealRange) {
+    const resolved = resolveSeamDecisions([row], [...geoms.values()]).applied[0]?.candidate;
+    return resolved ? { ...resolved, sewn: true } : null;
+  }
+  return seamOfSides(parts, geoms, innerLines, placement);
+}
+
+/** Half of a seam's shorter side within this of the other side: the seam is laid. */
+const SEAM_LAID_MM = 50;
+const SEAM_SAMPLE_MM = 10;
+
+function sideSamples(
+  side: readonly EdgeAnchor[],
+  T: ReadonlyMap<string, Affine>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): Pt2[] {
+  return side.flatMap((anchor) => {
+    const edge = resolveEdge(anchor.edgeHint, geoms);
+    const at = T.get(anchor.piece);
+    if (!edge || !at) return [];
+    const lengths = edge.pts
+      .slice(1)
+      .map((point, index) =>
+        Math.hypot(point[0] - edge.pts[index][0], point[1] - edge.pts[index][1]),
+      );
+    const total = lengths.reduce((sum, length) => sum + length, 0);
+    const [start, end] = anchor.range[1] > anchor.range[0] ? anchor.range : [0, 1];
+    const out: Pt2[] = [];
+    let walked = 0;
+    lengths.forEach((length, index) => {
+      const [x0, y0] = edge.pts[index];
+      const [x1, y1] = edge.pts[index + 1];
+      for (
+        let along = Math.ceil(walked / SEAM_SAMPLE_MM) * SEAM_SAMPLE_MM;
+        along <= walked + length;
+        along += SEAM_SAMPLE_MM
+      ) {
+        if (along < start * total || along > end * total) continue;
+        const share = length ? (along - walked) / length : 0;
+        out.push(apply(at, [x0 + (x1 - x0) * share, y0 + (y1 - y0) * share]));
+      }
+      walked += length;
+    });
+    return out;
+  });
+}
+
+/**
+ * Does this row's seam lie where it is drawn? A surface row always does; an edge row when its two
+ * sides meet in the picture. A row nobody placed is seated by translation only, so a sleeve cap can
+ * touch its armhole at one point and hang across the body: those pieces collide, they do not lie on
+ * each other. A side that cannot be measured counts as laid.
+ */
+export function seamIsLaid(
+  row: Pick<StoredSeam, 'kind' | 'sideA' | 'sideB'>,
+  T: ReadonlyMap<string, Affine>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): boolean {
+  if (row.kind === 'surface') return true;
+  const a = sideSamples(row.sideA, T, geoms);
+  const b = sideSamples(row.sideB, T, geoms);
+  if (!a.length || !b.length) return true;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  const gaps = short
+    .map((point) =>
+      Math.min(...long.map((other) => Math.hypot(point[0] - other[0], point[1] - other[1]))),
+    )
+    .sort((left, right) => left - right);
+  return gaps[Math.floor(gaps.length / 2)] <= SEAM_LAID_MM;
 }
 
 export type StepStoredRow = {

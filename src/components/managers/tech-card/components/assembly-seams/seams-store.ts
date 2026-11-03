@@ -124,9 +124,24 @@ export function rowsSig(rows: readonly StoredSeam[]): string {
 
 /** A row's pair, order-free: kind + both sides' run hints (the same pair from two clients agrees). */
 export function rowPairSig(r: StoredSeam): string {
+  // Two spans of one edge are two seams: a real range is part of the pair, a whole edge reads as before.
+  const span = (a: StoredSeam['sideA'][number]) =>
+    r.kind !== 'edge' && (a.range[0] > 0.0001 || a.range[1] < 0.9999)
+      ? `@${a.range[0].toFixed(3)}-${a.range[1].toFixed(3)}`
+      : '';
   const side = (xs: StoredSeam['sideA']) =>
     xs
-      .map((a) => a.edgeHint)
+      .map((a) => `${a.edgeHint}${span(a)}`)
+      .sort()
+      .join('+');
+  return `${r.kind}|${[side(r.sideA), side(r.sideB)].sort().join('~')}`;
+}
+
+/** A pair plus its sewn windows: two partial rows on one pair remain two independent rows. */
+export function rowPairRangeSig(r: StoredSeam): string {
+  const side = (xs: StoredSeam['sideA']) =>
+    xs
+      .map((anchor) => `${anchor.edgeHint}@${anchor.range[0]}-${anchor.range[1]}`)
       .sort()
       .join('+');
   return `${r.kind}|${[side(r.sideA), side(r.sideB)].sort().join('~')}`;
@@ -139,10 +154,11 @@ export function rowPairSig(r: StoredSeam): string {
 export function reuseKeys(rows: readonly StoredSeam[], have: readonly StoredSeam[]): StoredSeam[] {
   const keys = new Set(have.map((r) => r.seamKey));
   const bySig = new Map<string, string>();
-  for (const r of have) if (!bySig.has(rowPairSig(r))) bySig.set(rowPairSig(r), r.seamKey);
+  for (const r of have)
+    if (!bySig.has(rowPairRangeSig(r))) bySig.set(rowPairRangeSig(r), r.seamKey);
   return rows.map((r) => {
     if (keys.has(r.seamKey)) return r;
-    const k = bySig.get(rowPairSig(r));
+    const k = bySig.get(rowPairRangeSig(r));
     return k ? { ...r, seamKey: k } : r;
   });
 }

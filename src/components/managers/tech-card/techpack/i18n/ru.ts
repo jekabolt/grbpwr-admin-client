@@ -375,6 +375,8 @@ export const ru = {
     article: 'артикул',
     pin: 'метка',
     placement: 'расположение',
+    tooFewPatternMarks: 'мало меток на лекале',
+    marksOutsideOperationZone: 'метки вне зоны операции',
     operation: 'операция',
     quantityTotal: 'общее кол-во',
     interlining: 'клеевая прокладка',

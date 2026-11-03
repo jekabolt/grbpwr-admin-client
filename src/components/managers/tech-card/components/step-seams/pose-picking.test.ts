@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   cycleLayerHit,
-  pendingStacking,
   piecesUnder,
   posePieceOrder,
   snapAtDuringDrag,
@@ -25,7 +24,6 @@ describe('PLACE piece picking', () => {
       ['BOTTOM', 'STACK_HOST', 'STACK_TWIN', 'TOP'],
       [['STACK_HOST', 'STACK_TWIN']],
       ['BOTTOM', 'STACK_HOST', 'STACK_TWIN', 'TOP'],
-      ['BOTTOM'],
     );
     expect(order).toEqual(['BOTTOM', 'STACK_TWIN', 'STACK_HOST', 'TOP']);
 
@@ -59,44 +57,5 @@ describe('PLACE snap marker', () => {
 
   it('stays absent while a drag has no snap candidate', () => {
     expect(snapAtDuringDrag({ snap: null })).toBeNull();
-  });
-});
-
-describe('pendingStacking', () => {
-  const base = { layers: ['SLV', 'PLK'], lower: [], stacked: [] as [string, string][] };
-
-  it('a fresh «under» before save claims the pair, so only the overlap is grey', () => {
-    const shown = pendingStacking(base, [{ piece: 'SLV', host: 'PLK', under: true }]);
-    expect(shown.stacked).toEqual([['SLV', 'PLK']]);
-    expect(shown.lower).toEqual(['SLV']);
-    expect(shown.layers).toEqual(['SLV', 'PLK']);
-  });
-
-  it('«over» replaces the reverse claim instead of adding a second one', () => {
-    const shown = pendingStacking(
-      { layers: ['SLV', 'PLK'], lower: ['SLV'], stacked: [['SLV', 'PLK']] },
-      [{ piece: 'SLV', host: 'PLK', under: false }],
-    );
-    expect(shown.stacked).toEqual([['PLK', 'SLV']]);
-    expect(shown.lower).toEqual([]);
-    expect(shown.layers).toEqual(['PLK', 'SLV']);
-  });
-
-  it('a cleared switch drops the piece’s claims and grey', () => {
-    const shown = pendingStacking(
-      { layers: ['SLV', 'PLK'], lower: ['SLV'], stacked: [['SLV', 'PLK']] },
-      [{ piece: 'SLV', under: null }],
-    );
-    expect(shown.stacked).toEqual([]);
-    expect(shown.lower).toEqual([]);
-  });
-
-  it('no switches keep the shared result as it is', () => {
-    const stored = {
-      layers: ['A', 'B'],
-      lower: ['A'],
-      stacked: [['A', 'B']] as [string, string][],
-    };
-    expect(pendingStacking(stored, [])).toEqual(stored);
   });
 });

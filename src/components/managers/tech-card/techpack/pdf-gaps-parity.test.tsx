@@ -32,6 +32,7 @@ vi.mock('./use-l3-data', () => ({
 import { TechpackDocument } from './document';
 import { collectPdfGaps, gapKey } from './gaps';
 import { gapsToClientFindings } from './gap-findings';
+import type { AsmPiece } from './derive-assembly';
 import { PdfGapsGroup } from '../components/pdf-gaps-group';
 import { resolveClientFindings } from '../components/finding-seen';
 
@@ -51,6 +52,104 @@ const fixture = {
         machineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
         work: 'join_lockstitch',
         inputKeys: ['RIGHT_FRONT'],
+      },
+    ],
+    bomItems: [],
+    patterns: [],
+  },
+  colorways: [],
+  markers: [],
+  seams: [],
+  resolvedTechnicalMedia: [],
+} as unknown as common_TechCard;
+
+const fasteningPiece = (
+  key: string,
+  name: string,
+  kind: 'buttonhole' | 'drill',
+  count: number,
+): AsmPiece => {
+  const rs: [number, number][] = [
+    [0, 0],
+    [20, 0],
+    [20, 100],
+    [0, 100],
+  ];
+  return {
+    key,
+    name,
+    code: key,
+    cut: rs,
+    inner: [],
+    notch: [],
+    pocketing: false,
+    area: 2000,
+    geom: {
+      pieceKey: key,
+      name,
+      hand: null,
+      cloth: 'main',
+      rs,
+      corners: [0, 1, 2, 3],
+      notchIdx: [],
+      edges: [],
+      rect: true,
+      areaMm2: 2000,
+      perimMm: 240,
+      twinOf: [],
+      marks: Array.from({ length: count }, (_, index) => ({
+        id: `${key}@${index}`,
+        kind,
+        layer: 'mark',
+        closed: kind === 'drill',
+        pts: [
+          [10, 10 + index * 10],
+          [10, 12 + index * 10],
+        ],
+        bbox: { w: 0, h: 2, cx: 10, cy: 11 + index * 10 },
+        lenMm: 2,
+      })),
+    },
+  };
+};
+
+const fasteningFixture = {
+  id: 2,
+  lockVersion: 1,
+  techCard: {
+    name: 'Fastening gaps',
+    brand: 'GRBPWR',
+    status: 'released',
+    baseSampleSizeId: 1,
+    pieces: [
+      { lineKey: 'FRONT', name: 'front', piecesPerGarment: 1 },
+      { lineKey: 'SLV', name: 'sleeve', piecesPerGarment: 1 },
+    ],
+    operations: [
+      {
+        operationNumber: 5,
+        operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+        work: 'join',
+        inputKeys: ['SLV', 'FRONT'],
+        outputUnitKey: 'garment',
+      },
+      {
+        operationNumber: 10,
+        operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+        machineType: 'TECH_CARD_MACHINE_TYPE_BUTTONHOLE',
+        work: 'buttonhole',
+        zone: 'TECH_CARD_GARMENT_ZONE_FRONT',
+        inputKeys: ['FRONT'],
+        placementLayout: { count: 8, pitchMm: { value: '18' } },
+      },
+      {
+        operationNumber: 20,
+        operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+        machineType: 'TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH',
+        work: 'button_attach',
+        zone: 'TECH_CARD_GARMENT_ZONE_FRONT',
+        inputKeys: ['garment'],
+        placementLayout: { count: 1, pitchMm: { value: '18' } },
       },
     ],
     bomItems: [],
@@ -122,5 +221,45 @@ describe('PDF gaps in the audit', () => {
       `${window.location.origin}/tech-cards/1?tab=construction&op=560&pick=560`,
     );
     expect(pdf).toContain('construction · op 560');
+  });
+
+  it('keeps fastening mark gaps in the collected and printed lists', () => {
+    pieces.set('FRONT', fasteningPiece('FRONT', 'front', 'buttonhole', 7));
+    pieces.set('SLV', fasteningPiece('SLV', 'sleeve', 'drill', 1));
+    try {
+      const gaps = collectPdfGaps({
+        techCard: fasteningFixture,
+        sampleSizeName: 'M',
+        revisionLabel: 'rev 1',
+        pieces,
+        grainDeg,
+        pieceGeometry: shapes,
+        measurements: [],
+        sizeNames: { 1: 'M' },
+        markerLayouts: [],
+        patternOrigin: 'https://admin.beta.grbpwr.com',
+        markerOrigin: 'https://admin.beta.grbpwr.com',
+        netM2ByLine: {},
+        includeMarkerLayouts: false,
+        labelPlacement: '',
+      });
+      const fasteningGaps = gaps.filter((gap) =>
+        ['asm_placement_marks_short', 'asm_placement_marks_unrelated'].includes(gap.code),
+      );
+      expect(fasteningGaps.map((gap) => gap.label)).toEqual([
+        'too few pattern marks',
+        'marks outside operation zone',
+      ]);
+
+      const pdf = renderToStaticMarkup(
+        <TechpackDocument techCard={fasteningFixture} orient='land' revision='rev 1' />,
+      );
+      const listRows = [...pdf.matchAll(/data-gap-list-row="([^"]+)"/g)].map((match) =>
+        match[1].replaceAll('&amp;', '&'),
+      );
+      expect(listRows).toEqual(expect.arrayContaining(fasteningGaps.map(gapKey)));
+    } finally {
+      pieces.clear();
+    }
   });
 });

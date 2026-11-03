@@ -47,19 +47,23 @@ import {
   storedSeamSides,
 } from 'components/managers/tech-card/components/step-seams/step-rows';
 import { stepHighlightOf } from 'components/managers/tech-card/components/step-seams/step-highlight';
+import { sideLengthMm } from 'components/managers/tech-card/components/step-seams/seam-length';
 import {
   buttonholeDirection,
   buttonholeLengthMm,
   buttonholeOrientation,
-  isFrontHost,
+  walkPlacementMarks,
+  type PlacementMarkSelection,
 } from 'components/managers/tech-card/components/step-seams/buttonhole-glyph';
 import { nameTokens, readName } from 'lib/assembly-skeleton/skeleton/model';
 import { ROLE_BOOK } from 'lib/assembly-skeleton/skeleton/template';
 import type { Edge, PieceGeom, PieceMark, SeamCandidate } from 'lib/assembly-skeleton/types';
 import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { unitDisplayName } from 'lib/assembly-unit-name';
+import { activeFoldRows, foldsFromWire, type StoredFold } from 'lib/folds';
 import {
   contourSig,
+  candidateSideParts,
   frameOf,
   fromWire,
   resolveSeamDecisions,
@@ -68,6 +72,7 @@ import {
   SEAMS,
   type AnchorHit,
   type EdgeAnchor,
+  type SidePart,
   type StoredSeam,
   type TechCardSeamWire,
 } from 'lib/seams';
@@ -368,6 +373,8 @@ type SeamPart = {
   edgeId?: string;
   edgeName?: string;
   notches?: number;
+  /** Real sewn window, mm along `edgeId`; absent is the whole run. */
+  range?: [number, number];
 };
 
 type Placement = { xMm: number; yMm: number; rotDeg: number; flip: boolean };
@@ -403,10 +410,11 @@ function candidatePart(
     share: end - start,
     turn: turnOf(points),
     edgeId: edge.id,
+    ...(range ? { range: [start * edge.len, end * edge.len] as [number, number] } : {}),
   };
 }
 
-function seamOfCandidate(
+export function seamOfCandidate(
   candidate: SeamCandidate,
   operation: number,
   index: number,
@@ -414,11 +422,10 @@ function seamOfCandidate(
 ): AsmSeam | null {
   if (candidate.kind === 'closure-not-seam') return null;
   const side = (which: 'a' | 'b') => {
-    const ids =
-      which === 'a' ? candidate.aParts ?? [candidate.a] : candidate.bParts ?? [candidate.b];
-    const range = ids.length === 1 ? candidate.range?.[which] : undefined;
-    return ids
-      .map((id) => candidatePart(id, range, geoms))
+    return candidateSideParts(candidate, which, geoms)
+      .map((part) =>
+        candidatePart(part.target, part.range ? [part.range[0], part.range[1]] : undefined, geoms),
+      )
       .filter((part): part is SeamPart => !!part);
   };
   const a = side('a');
@@ -528,6 +535,8 @@ export type AssemblyModel = {
   garment?: GarmentAssembly;
   /** Operation inputs resolved against the active DXF without mutating the stored card. */
   techCard: common_TechCard;
+  /** The pieces' grain rotation; the fold lines are stored in that frame. */
+  grainDeg?: ReadonlyMap<string, number>;
 };
 
 export type DeriveAssemblyOptions = {
@@ -764,6 +773,7 @@ function partOf(hit: AnchorHit, geom: PieceGeom): SeamPart | null {
     edgeId: run.id,
     edgeName: run.edges.map(edgeNameOf).filter(Boolean).join(' + ') || undefined,
     notches: run.notches,
+    ...(whole ? {} : { range: [s * hit.lenMm, e * hit.lenMm] as [number, number] }),
   };
 }
 
@@ -2215,6 +2225,8 @@ function buildCards(
   ops: Op[],
   bound: Map<number, AsmSeam[]>,
   pieces: ReadonlyMap<string, AsmPiece>,
+  foldRows: readonly StoredFold[],
+  grainDeg: ReadonlyMap<string, number>,
   sink?: GapSink,
   t: PdfT = englishT,
   inferMissing = true,
@@ -2227,8 +2239,44 @@ function buildCards(
   const producer = new Map(ops.flatMap((op) => (op.out ? [[op.out, op] as const] : [])));
   const seamLessCard = [...bound.values()].every((seams) => seams.length === 0);
   const roles = pieceRoleMap(pieces, ops);
+  const metricGeoms = new Map([...pieces].map(([key, piece]) => [key, piece.geom]));
+  const plainMetricLength = (parts: readonly SeamPart[]) => {
+    if (parts.every((part) => !!part.edgeId))
+      return sideLengthMm(
+        parts.map(
+          (part): SidePart => ({
+            target: part.edgeId!,
+            ...(part.range ? { range: part.range } : {}),
+          }),
+        ),
+        metricGeoms,
+        () => 0,
+      );
+    return parts.reduce((total, part) => total + part.lenMm, 0);
+  };
+  const metricLength = (
+    parts: readonly SeamPart[],
+    otherSideMm: number | null,
+    activeFolds: readonly StoredFold[],
+  ) => {
+    if (parts.every((part) => !!part.edgeId))
+      return sideLengthMm(
+        parts.map(
+          (part): SidePart => ({
+            target: part.edgeId!,
+            ...(part.range ? { range: part.range } : {}),
+          }),
+        ),
+        metricGeoms,
+        () => 0,
+        { activeFolds, otherSideMm, grainDeg },
+      );
+    return parts.reduce((total, part) => total + part.lenMm, 0);
+  };
+  const foldSteps = ops.map(({ raw }) => raw);
 
-  for (const op of ops) {
+  for (const [stepIndex, op] of ops.entries()) {
+    const activeFolds = activeFoldRows(foldSteps, stepIndex, foldRows);
     if (!op.join) {
       const first = op.ins[0];
       const targetItems =
@@ -2430,9 +2478,11 @@ function buildCards(
     }
 
     const metrics: SeamMetric[] = seams.map((s, i) => {
-      const left = s.a.reduce((t, p) => t + p.lenMm, 0);
+      const leftPlain = plainMetricLength(s.a);
+      const rightPlain = plainMetricLength(s.b);
+      const left = metricLength(s.a, s.b.length ? rightPlain : null, activeFolds);
       if (!s.b.length) return { letter: String(i + 1), left, bad: false };
-      const right = s.b.reduce((t, p) => t + p.lenMm, 0);
+      const right = metricLength(s.b, leftPlain, activeFolds);
       const delta = left - right;
       const bad = Math.abs(delta) > STOP_DELTA_MM;
       const terms = opTerms(op);
@@ -2524,85 +2574,24 @@ function buildCards(
   return { cards, units, targets, targetSeams };
 }
 
-function placementPieceScore(piece: AsmPiece, op: Op, marks: readonly PieceMark[]): number {
-  const code = `${piece.code ?? ''} ${piece.name}`.toLocaleUpperCase();
-  const terms = opTerms(op);
-  let score = marks.length;
-  // Whole-garment fastening rows name the neckline, but their repeated closure marks live on the
-  // front/placket. Without this material cue a collar-stand buttonhole wins on the zone word and
-  // the final shirt's button is printed at the neck instead of on its closure.
-  if ((op.tech === 'button' || op.tech === 'buttonhole') && isFrontHost(code)) score += 200;
-  if (/neck|collar/.test(terms) && /(NCK|CLR|COLLAR)/.test(code)) score += 100;
-  if (/sleeve/.test(terms) && /(SLV|FLP|SLEEVE)/.test(code)) score += 100;
-  if (/front/.test(terms) && isFrontHost(code)) score += 100;
-  if (/lining/.test(terms) && /(PCK|POCKET)/.test(code)) score += 100;
-  if (/outer/.test(terms) && isFrontHost(code)) score += 40;
-  return score;
-}
-
-function placementMarks(
-  op: Op,
-  pieces: ReadonlyMap<string, AsmPiece>,
-  items: readonly Item[],
-  used: Set<string>,
-): PlacementGlyph[] {
-  const kind = op.tech === 'label' ? 'label' : op.tech;
-  if (kind !== 'button' && kind !== 'buttonhole' && kind !== 'label') return [];
-  const candidates = items.flatMap((item) => {
-    const piece = pieces.get(item.p);
-    if (!piece) return [];
-    const available = (piece.geom.marks ?? []).filter((mark) => !used.has(mark.id));
-    const exact = available.filter((mark) =>
-      kind === 'buttonhole'
-        ? mark.kind === 'buttonhole'
-        : kind === 'button'
-          ? mark.kind === 'drill'
-          : mark.kind === 'placement',
-    );
-    const fallback =
-      exact.length || kind === 'label'
-        ? exact
-        : available.filter((mark) => mark.kind === 'drill' || mark.kind === 'buttonhole');
-    return fallback.length
-      ? [{ item, piece, marks: fallback, score: placementPieceScore(piece, op, fallback) }]
-      : [];
-  });
-  const selected = candidates.sort((a, b) => b.score - a.score)[0];
+function placementGlyphs(op: Op, selected: PlacementMarkSelection | null): PlacementGlyph[] {
   if (!selected) return [];
-  const count = Math.max(0, op.raw.placementLayout?.count ?? selected.marks.length);
-  // A piece marked at both ends closes on itself: the button goes to the end away from its hole.
-  const partners = (selected.piece.geom.marks ?? []).filter(
-    (mark) =>
-      used.has(mark.id) &&
-      (kind === 'button'
-        ? mark.kind === 'buttonhole'
-        : kind === 'buttonhole' && mark.kind === 'drill'),
-  );
-  const awayFromPartner = (mark: PieceMark) =>
-    Math.min(
-      ...partners.map((partner) =>
-        Math.hypot(mark.bbox.cx - partner.bbox.cx, mark.bbox.cy - partner.bbox.cy),
-      ),
-    );
-  const ordered = partners.length
-    ? [...selected.marks].sort((a, b) => awayFromPartner(b) - awayFromPartner(a))
-    : selected.marks;
-  const marks = ordered.slice(0, count || ordered.length);
-  return marks.map((mark) => {
-    used.add(mark.id);
+  return selected.marks.map((mark) => {
     const first = mark.pts[0];
     const last = mark.pts[mark.pts.length - 1] ?? first;
     const measured = (Math.atan2(-(last[1] - first[1]), last[0] - first[0]) * 180) / Math.PI;
-    const direction = buttonholeDirection(selected.piece.geom.rs, buttonholeOrientation(op.raw));
+    const direction = buttonholeDirection(selected.host.geom.rs, buttonholeOrientation(op.raw));
     const angleDeg =
-      kind === 'buttonhole' ? (Math.atan2(-direction[1], direction[0]) * 180) / Math.PI : measured;
+      selected.kind === 'buttonhole'
+        ? (Math.atan2(-direction[1], direction[0]) * 180) / Math.PI
+        : measured;
     return {
       id: mark.id,
-      piece: selected.item.p,
-      kind,
+      piece: selected.host.key,
+      kind: selected.kind,
       point: [mark.bbox.cx, -mark.bbox.cy],
       angleDeg,
-      lengthMm: kind === 'buttonhole' ? buttonholeLengthMm(op.raw) : undefined,
+      lengthMm: selected.kind === 'buttonhole' ? buttonholeLengthMm(op.raw) : undefined,
     };
   });
 }
@@ -2678,6 +2667,7 @@ function actionOwnerRows(
 function actionPartOfTarget(
   target: string,
   pieces: ReadonlyMap<string, AsmPiece>,
+  range?: readonly [number, number],
 ): SeamPart | null {
   const inner = /^(.*):i(\d+)$/.exec(target);
   if (inner) {
@@ -2692,18 +2682,22 @@ function actionPartOfTarget(
       turn: turnOf(pts),
     };
   }
-  const split = target.lastIndexOf('#');
-  const piece = split >= 0 ? pieces.get(target.slice(0, split)) : undefined;
-  const edge = piece?.geom.edges.find((candidate) => candidate.id === target);
+  const geoms = new Map([...pieces].map(([key, piece]) => [key, piece.geom]));
+  const edge = resolveEdge(target, geoms);
+  const piece = edge ? pieces.get(edge.pieceKey) : undefined;
   if (!piece || !edge?.pts.length) return null;
-  const pts = edge.pts.map(([x, y]) => [x, -y] as Pt);
+  const from = range ? Math.max(0, Math.min(edge.len, range[0])) : 0;
+  const to = range ? Math.max(from, Math.min(edge.len, range[1])) : edge.len;
+  const points = range ? sliceRun(edge.pts, from / edge.len, to / edge.len) : edge.pts;
+  const pts = points.map(([x, y]) => [x, -y] as Pt);
   return {
     piece: piece.key,
     pts,
-    lenMm: polyLen(pts),
-    share: 1,
+    lenMm: to - from,
+    share: (to - from) / Math.max(edge.len, 1e-6),
     turn: turnOf(pts),
     edgeId: edge.id,
+    ...(range ? { range: [from, to] as [number, number] } : {}),
   };
 }
 
@@ -2712,25 +2706,34 @@ function actionPartsOfRows(
   rows: readonly StoredSeam[],
   pieces: ReadonlyMap<string, AsmPiece>,
 ): SeamPart[] {
+  const geoms = new Map([...pieces].map(([key, piece]) => [key, piece.geom]));
   const targets = rows.flatMap((row) => {
-    const sides = storedSeamSides(row);
-    if (row.kind !== 'surface') return [...sides.a, ...sides.b];
+    const sides = storedSeamSides(row, geoms);
+    if (row.kind !== 'surface') return [...sides.parts.a, ...sides.parts.b];
     const laidEdges = row.sideB
       .flatMap(rowTargetsOfAnchor)
       .filter((target) => !/:i\d+$/.test(target));
-    return laidEdges.length
-      ? laidEdges
-      : row.sideA.flatMap(rowTargetsOfAnchor).filter((target) => /:i\d+$/.test(target));
+    return (
+      laidEdges.length
+        ? laidEdges
+        : row.sideA.flatMap(rowTargetsOfAnchor).filter((target) => /:i\d+$/.test(target))
+    ).map((target) => ({ target }));
   });
   return actionPartsOfTargets(targets, pieces);
 }
 
 function actionPartsOfTargets(
-  targets: readonly string[],
+  targets: readonly string[] | readonly SidePart[],
   pieces: ReadonlyMap<string, AsmPiece>,
 ): SeamPart[] {
-  return [...new Set(targets)].flatMap((target) => {
-    const part = actionPartOfTarget(target, pieces);
+  const unique = new Map(
+    targets.map((part) => {
+      const value: SidePart = typeof part === 'string' ? { target: part } : part;
+      return [`${value.target}:${value.range?.[0] ?? ''}:${value.range?.[1] ?? ''}`, value];
+    }),
+  );
+  return [...unique.values()].flatMap((target) => {
+    const part = actionPartOfTarget(target.target, pieces, target.range);
     return part ? [part] : [];
   });
 }
@@ -2740,14 +2743,42 @@ function buildActions(
   pieces: ReadonlyMap<string, AsmPiece>,
   targets: ReadonlyMap<number, Item[]>,
   rows: ReadonlyMap<string, StoredSeam>,
+  sink?: GapSink,
+  t: PdfT = englishT,
 ): Map<number, AsmAction> {
   const actions = new Map<number, AsmAction>();
-  const usedMarks = new Set<string>();
+  const placementSelections = walkPlacementMarks(
+    ops.map((op) => ({
+      operation: op.raw,
+      hosts: [...new Set((targets.get(op.n) ?? []).map((item) => item.p))].flatMap((key) => {
+        const piece = pieces.get(key);
+        return piece ? [{ key, name: piece.name, code: piece.code, geom: piece.geom }] : [];
+      }),
+    })),
+  );
   for (const [opIndex, op] of ops.entries()) {
     if (op.join) continue;
     const items = targets.get(op.n) ?? [];
-    let placements = placementMarks(op, pieces, items, usedMarks);
-    if (!placements.length) placements = fallbackPlacements(op, pieces, items);
+    const placementSelection = placementSelections[opIndex];
+    let placements = placementGlyphs(op, placementSelection);
+    if (!placements.length && !placementSelection?.issue)
+      placements = fallbackPlacements(op, pieces, items);
+    if (placementSelection?.issue === 'count-exceeds-marks')
+      assemblyGap(
+        sink,
+        'asm_placement_marks_short',
+        t('gaps.tooFewPatternMarks'),
+        op.n,
+        'position',
+      );
+    if (placementSelection?.issue === 'marks-outside-zone')
+      assemblyGap(
+        sink,
+        'asm_placement_marks_unrelated',
+        t('gaps.marksOutsideOperationZone'),
+        op.n,
+        'position',
+      );
     const placementOp = op.tech === 'button' || op.tech === 'buttonhole' || op.tech === 'label';
     const edgeOp = ['topstitch', 'pressSide', 'bind', 'hem'].includes(op.tech);
     const finishingEdgeOp = ['topstitch', 'bind', 'hem'].includes(op.tech);
@@ -2760,7 +2791,7 @@ function buildActions(
           ops.map((candidate) => candidate.raw),
           opIndex,
           rows,
-        ).targets
+        ).parts
       : [];
     const edgeParts = finishingEdgeOp
       ? actionPartsOfTargets(highlighted, pieces)
@@ -3240,8 +3271,25 @@ export function deriveAssembly(
         return [op.n, stored.length ? stored : garmentSeams.get(op.n) ?? []] as const;
       }),
   );
-  const { cards, units, targets } = buildCards(ops, bound, input.pieces, gapSink, t, !garment);
-  const actions = buildActions(ops, input.pieces, targets, seamRowsOfCard(resolvedInput.techCard));
+  const foldRows = foldsFromWire(resolvedInput.techCard.pieceFolds).folds;
+  const { cards, units, targets } = buildCards(
+    ops,
+    bound,
+    input.pieces,
+    foldRows,
+    input.grainDeg,
+    gapSink,
+    t,
+    !garment,
+  );
+  const actions = buildActions(
+    ops,
+    input.pieces,
+    targets,
+    seamRowsOfCard(resolvedInput.techCard),
+    gapSink,
+    t,
+  );
   const unitName = new Map<string, string>();
   const unitStep = new Map<string, number>();
   for (const o of ops) {
@@ -3314,6 +3362,7 @@ export function deriveAssembly(
     emptyGap,
     garment,
     techCard,
+    grainDeg: input.grainDeg,
   };
 }
 

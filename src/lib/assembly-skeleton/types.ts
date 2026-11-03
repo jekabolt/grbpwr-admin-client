@@ -122,6 +122,8 @@ export type PieceGeom = {
   rs: Pt2[];
   corners: number[];
   notchIdx: number[];
+  /** Source-polyline vertices whose immediate turn is at least 8°; additive, never an edge cut. */
+  vertexIdx?: number[];
   edges: Edge[];
   rect: boolean;
   areaMm2: number;

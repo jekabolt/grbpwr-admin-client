@@ -325,7 +325,6 @@ export function renderSchematic(frozen: boolean): string {
           pieceNameOf={nameOf(CONVERGED_PIECES)}
           onPickStep={noop}
           onCreate={noop}
-          onDissolve={noop}
           pieceShapes={CONVERGED_SHAPES}
           cloth={CONVERGED_CLOTH}
           smvOfBlock={CONVERGED_SMV}
@@ -346,7 +345,6 @@ export function renderSchematic(frozen: boolean): string {
           pieceNameOf={nameOf(BROKEN_PIECES)}
           onPickStep={noop}
           onCreate={noop}
-          onDissolve={noop}
           // Карты нет вовсе: у карточки без колорвея вопрос про ткань не задавался, и разметка
           // обязана отличаться от «ключа в карте нет».
           pieceShapes={new Map<string, FoundPiece | null>()}
@@ -372,7 +370,6 @@ export function renderSchematic(frozen: boolean): string {
           pieceNameOf={nameOf(TAIL_PIECES)}
           onPickStep={noop}
           onCreate={noop}
-          onDissolve={noop}
           pieceShapes={TAIL_SHAPES}
           cloth={TAIL_CLOTH}
           smvOfBlock={new Map<string, string>()}
@@ -412,7 +409,6 @@ export function renderCanvas(fixture: 'converged' | 'tail', openStep: number | n
         onPickStep={noop}
         openStep={openStep}
         onCreate={noop}
-        onDissolve={noop}
         pieceShapes={fixture === 'tail' ? TAIL_SHAPES : CONVERGED_SHAPES}
         cloth={fixture === 'tail' ? TAIL_CLOTH : CONVERGED_CLOTH}
         smvOfBlock={fixture === 'tail' ? new Map<string, string>() : CONVERGED_SMV}
