@@ -14,6 +14,7 @@ import { StepPictureSvg, useCardGeoms, useSeamRows } from '../step-seams/step-pi
 import { sideLengthMm } from '../step-seams/seam-length';
 import { stepPictureOf, type SurfacePicture } from '../step-seams/surface-picture';
 import { SewnStrip } from './sewn-strip';
+import { StepFoldThumbs } from './step-fold-thumbs';
 import type { MapModel } from './use-map-model';
 
 /** Inner width of the 320px column after the block padding and outline. */
@@ -179,6 +180,8 @@ export function StepView({ model, index }: { model: MapModel; index: number }) {
           </div>
         )}
       </div>
+
+      <StepFoldThumbs ops={ops} index={index} />
 
       {facts.map((fact) => (
         <Text key={fact} size='micro' variant='errorLabel' data-map-fact=''>
