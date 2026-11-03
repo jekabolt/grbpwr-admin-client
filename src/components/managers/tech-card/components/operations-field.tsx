@@ -244,6 +244,7 @@ import {
   resolvePending,
   operationRowPrint,
   skeletonCanUndo,
+  skeletonIssueLinks,
   skeletonLabel,
   type SkeletonUndoState,
   undoStep,
@@ -6079,7 +6080,7 @@ export function OperationsField({
       rows: replacing ? structuredClone(settled) : [],
       mediaCleared: !!getValues('mediaCleared'),
       assemblyCleared: !!getValues('assemblyCleared'),
-      issues: (getValues('issues') ?? []).map((iss) => iss.operationNumber ?? 0),
+      issues: structuredClone(getValues('issues') ?? []),
     };
     if (replacing) {
       // Старые шаги уходят все: позиционные ссылки дефектов на них повисли бы на чужих шагах.
@@ -7321,7 +7322,8 @@ export function OperationsField({
    * Хвостовая пачка снимается удалением СВОИХ строк (`remove` — id стоящих шагов живут), замена —
    * снимком «до» целиком, с фото (`media[].mediaId`). Флаги `mediaCleared` / `assemblyCleared` —
    * как стояли: без отката replace поверх фото оставил бы `mediaCleared`, и следующая запись сняла
-   * бы фото со шагов, которые отмена вернула. Номера шагов в дефектах — из снимка.
+   * бы фото со шагов, которые отмена вернула. Номера шагов в дефектах — из снимка, по содержимому
+   * дефекта, а не по его месту в массиве.
    *
    * Щит — `skeletonCanUndo`: вся карточка в том, что пишет отмена, та же, что оставила запись. Отказ — словами, и запись
    * снимается: тронутую пачку вернуть нельзя, не стерев чужую работу. Возвращает текст отказа.
@@ -7347,12 +7349,10 @@ export function OperationsField({
       }
       setValue('mediaCleared', rec.before.mediaCleared, { shouldDirty: true });
       setValue('assemblyCleared', rec.before.assemblyCleared, { shouldDirty: true });
-      const issues = getValues('issues') ?? [];
-      if (issues.length === rec.before.issues.length)
-        rec.before.issues.forEach((n, ii) => {
-          if ((issues[ii]?.operationNumber ?? 0) !== n)
-            setValue(`issues.${ii}.operationNumber`, n, { shouldDirty: true });
-        });
+      const links = skeletonIssueLinks(rec.before.issues, getValues('issues') ?? []);
+      for (const { index, operationNumber } of links) {
+        setValue(`issues.${index}.operationNumber`, operationNumber, { shouldDirty: true });
+      }
     });
     setSelected(rec.mode === 'replace' ? 0 : Math.max(0, rec.from - 1));
     setHistory(undoStep(history.current));
