@@ -3563,6 +3563,8 @@ export type TechCardPackaging = {
   weightNetGrams: number | undefined;
   weightGrossGrams: number | undefined;
   notes: string | undefined;
+  packedSize: string | undefined;
+  packedMediaId: number | undefined;
 };
 
 // TechCardCareLabelFiber is one fibre row of a colourway's composition OVERRIDE on the composition
@@ -3648,6 +3650,20 @@ export type TechCardPackagingItem = {
   mediaIds: number[] | undefined;
   // The BOM line this item is bought as, by its stable line key (see TechCardGarmentLabel.bom_line_key).
   bomLineKey: string | undefined;
+  // The thing this item IS, picked from the catalog: a packaging material or an auxiliary tech card.
+  // At most one of the two; both set is a field violation. A pick needs no mockup of its own.
+  materialId: number | undefined;
+  auxTechCardId: number | undefined;
+  perOrder: boolean | undefined;
+  pickedName: string | undefined;
+  // OUTPUT-ONLY, ignored on write: the material's image, or the auxiliary card's list thumbnail
+  // (the same media TechCardListItem.preview_url resolves from). Absent when it has none.
+  pickedThumbnail: MediaFull | undefined;
+  // 15-19 stay reserved for the lane that took 14 (bom_line_key).
+  // The colourways of this card the item applies to, ascending; empty = all colourways. An id that is
+  // not a colourway of this card is a field violation. The same pick may appear on two items with
+  // different colourways and quantities.
+  colorwayIds: number[] | undefined;
 };
 
 // TechCardCostLine is one currency bucket of the materials rollup.
@@ -4315,6 +4331,11 @@ export type TechCardInsert = {
   // write that carries the field, or that would replace a card whose steps state it, is refused
   // (FailedPrecondition) instead of silently returning them to the default. Transport, not content.
   operationSeamToleranceAware: boolean | undefined;
+  // Declares support for the packaging picks (TechCardPackagingItem.material_id, aux_tech_card_id,
+  // per_order; TechCardPackaging.packed_size, packed_media_id). Without it a write that carries none of
+  // them, but would replace a card that has them, is refused (FailedPrecondition) instead of silently
+  // wiping them. Transport, not content.
+  packagingPicksAware: boolean | undefined;
 };
 
 // TechCard is a stored tech card with resolved sketch media.
