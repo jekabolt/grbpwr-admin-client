@@ -27,6 +27,8 @@ import {
   type AsmPiece,
   type AssemblyInput,
 } from '../../techpack/derive-assembly';
+import { toUV } from 'lib/seams/frame';
+import type { StoredFold } from 'lib/folds';
 import realFixture from './fixtures/span-real-geoms.json';
 import { sideLengthMm } from './seam-length';
 import { highlightPartsOfRows } from './step-highlight';
@@ -520,5 +522,48 @@ describe('#90 op 290 placement and PDF metric', () => {
     const direct = gap(a[0], b[0]) + gap(a[a.length - 1], b[b.length - 1]);
     const reversed = gap(a[0], b[b.length - 1]) + gap(a[a.length - 1], b[0]);
     expect(Math.min(direct, reversed)).toBeLessThan(4);
+  });
+});
+
+describe('sideLengthMm with active folds', () => {
+  const flap = piece('FLAP_R');
+  const frame = frameOf(flap.geom, 0);
+  const middle = (k: number) => {
+    const pts = flap.geom.edges[k].pts;
+    return [
+      (pts[0][0] + pts[pts.length - 1][0]) / 2,
+      (pts[0][1] + pts[pts.length - 1][1]) / 2,
+    ] as Pt2;
+  };
+  const line = [toUV(frame, middle(0)), toUV(frame, middle(2))] as [Pt2, Pt2];
+  const foldRow = {
+    foldKey: 'fold',
+    pieceKey: flap.key,
+    seq: 1,
+    kind: 'inward',
+    source: 'owner',
+    line,
+    flipAt: toUV(frame, middle(1)),
+    edge: null,
+    contourSig: '',
+    anchoredSize: 'M',
+    note: '',
+    stale: false,
+  } satisfies StoredFold;
+  const both = [{ target: id('FLAP_R', 1) }, { target: id('FLAP_R', 3) }];
+
+  it('counts two edges folded onto each other once, when the other side says so', () => {
+    expect(lengthOf(both)).toBeCloseTo(400, 0);
+    expect(
+      sideLengthMm(both, pantsGeoms, () => 0, { activeFolds: [foldRow], otherSideMm: 200 }),
+    ).toBeCloseTo(200, 0);
+  });
+
+  it('keeps the sum with no active fold, no other side, or an other side of the sum', () => {
+    expect(sideLengthMm(both, pantsGeoms, () => 0, { otherSideMm: 200 })).toBeCloseTo(400, 0);
+    expect(sideLengthMm(both, pantsGeoms, () => 0, { activeFolds: [foldRow] })).toBeCloseTo(400, 0);
+    expect(
+      sideLengthMm(both, pantsGeoms, () => 0, { activeFolds: [foldRow], otherSideMm: 400 }),
+    ).toBeCloseTo(400, 0);
   });
 });
