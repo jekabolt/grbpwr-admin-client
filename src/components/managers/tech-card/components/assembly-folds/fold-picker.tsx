@@ -81,7 +81,7 @@ export function usePieceReads(
             : null;
           const deg = grainDeg?.get(geom.pieceKey) ?? (dto ? grainRotation(dto) : 0);
           const inner = [...(innerLines?.get(geom.pieceKey) ?? [])];
-          const { groups } = foldGroupsOf(geom, rows, deg);
+          const { groups } = foldGroupsOf(geom, rows, deg, inner);
           let hints: FoldHint[] = [];
           if (dto) {
             try {

@@ -3,10 +3,10 @@
 // With an edge locator: find the edge again (the stored run id when the contour signature still
 // matches, else by the shape of its five samples), lay the line parallel to its chord at `offsetMm`
 // inward, extend it to the contour. A hem allowance stays 30 mm on every size, where a scaled (u, v)
-// line would grow with the piece. Without a locator, or when the edge is not found, the stored (u, v)
-// line of a drawn inner line (source dxf, no edge) keeps its ends; every other row is extended to the
-// contour. The flipping side is kept from the stored `flipAt`. What cannot be laid on this size is
-// reported in words and left out — never guessed.
+// line would grow with the piece. A bounded drawn line is matched to the corresponding construction
+// line on this size; without those lines, the stored (u, v) locator remains the legacy fallback.
+// Every other row is extended to the contour. The flipping side is kept from the stored `flipAt`.
+// What cannot be laid on this size is reported in words and left out — never guessed.
 
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import {
@@ -22,6 +22,7 @@ import {
 import type { Frame } from 'lib/seams/types';
 import {
   add,
+  chordDeviation,
   clampUV,
   clipThrough,
   contourSig,
@@ -88,7 +89,7 @@ export function resolveFolds(
       continue;
     }
     const f = frameOf(piece, opts.grainDeg?.get(piece.pieceKey) ?? 0);
-    const r = resolveOne(row, piece, f, th);
+    const r = resolveOne(row, piece, f, th, opts.innerLines?.get(piece.pieceKey));
     if (typeof r === 'string') {
       report(r);
       continue;
@@ -105,9 +106,14 @@ function resolveOne(
   piece: PieceGeom,
   f: PieceFrame,
   th: Th,
+  innerLines: readonly (readonly Pt2[])[] | undefined,
 ): { fold: DollFold; via: FoldVia } | string {
   const hit = row.edge ? findEdge(row, piece, f, th) : null;
-  const frame: Frame = hit?.frame ?? 'asis';
+  const inner =
+    row.source === 'dxf' && !row.edge && innerLines ? findInnerLine(row, f, innerLines, th) : null;
+  if (row.source === 'dxf' && !row.edge && innerLines && !inner)
+    return 'the drawn line is not on this size';
+  const frame: Frame = hit?.frame ?? inner?.frame ?? 'asis';
   // The stored line and flip point as they read on today's piece (mm).
   const sa = fromUV(f, mapUV(row.line[0], frame));
   const sb = fromUV(f, mapUV(row.line[1], frame));
@@ -123,6 +129,10 @@ function resolveOne(
     const p = add(mul(add(a, b), 0.5), mul(n, row.edge.offsetMm));
     line = clipThrough(piece.rs, p, d);
     if (line) via = hit.via;
+  }
+  if (!line && inner) {
+    line = inner.line;
+    via = 'inner';
   }
   if (!line) {
     if (len(sub(sb, sa)) < 1e-6) return 'the saved line has no length';
@@ -168,6 +178,59 @@ function resolveOne(
     },
     via,
   };
+}
+
+type InnerMatch = { line: [Pt2, Pt2]; frame: Frame };
+
+const lineFit = (samples: readonly Pt2[], stored: readonly Pt2[]) =>
+  Math.min(rmsFit(samples, stored), rmsFit([...samples].reverse(), stored));
+
+const sameDrawnLine = (left: readonly Pt2[], right: readonly Pt2[], th: Th) =>
+  lineFit(left, right) <= th.dedupeMm;
+
+/** Find the same bounded DXF construction line on this graded size. */
+function findInnerLine(
+  row: StoredFold,
+  f: PieceFrame,
+  innerLines: readonly (readonly Pt2[])[],
+  th: Th,
+): InnerMatch | null {
+  const candidates = innerLines.flatMap((points): { line: [Pt2, Pt2] }[] => {
+    if (
+      points.length < 2 ||
+      chordDeviation(points) > th.straightMm ||
+      len(sub(points[points.length - 1], points[0])) < th.innerMinMm
+    )
+      return [];
+    const line: [Pt2, Pt2] = [points[0], points[points.length - 1]];
+    return [{ line }];
+  });
+  for (const frame of FRAMES) {
+    const fits = candidates
+      .map(({ line }) => ({
+        line,
+        fit: lineFit(
+          inFrame(
+            line.map((point) => toUV(f, point)),
+            frame,
+          ),
+          row.line,
+        ),
+      }))
+      .filter((candidate) => candidate.fit <= th.innerFitMax)
+      .sort((a, b) => a.fit - b.fit);
+    const best = fits[0];
+    if (!best) continue;
+    const rival = fits.find(
+      (candidate) =>
+        candidate !== best &&
+        candidate.fit < best.fit + th.tieMargin &&
+        !sameDrawnLine(best.line, candidate.line, th),
+    );
+    if (rival) return null;
+    return { line: best.line, frame };
+  }
+  return null;
 }
 
 /**

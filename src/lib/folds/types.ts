@@ -68,7 +68,7 @@ export type FoldHint = {
 
 // ── resolution ────────────────────────────────────────────────────────────────────────────────
 
-export type FoldVia = 'hint' | 'shape' | 'uv';
+export type FoldVia = 'hint' | 'shape' | 'inner' | 'uv';
 
 export type UnresolvedFold = { foldKey: string; pieceKey: string; seq: number; words: string };
 
@@ -84,6 +84,8 @@ export type ResolvedFolds = {
 export const FOLDS = {
   /** RMS of the edge's five samples in the unit square (SEAMS.fitMax). */
   fitMax: 0.02,
+  /** RMS of a bounded line's two ends; grading moves these more than contour samples. */
+  innerFitMax: 0.04,
   /** The best edge must beat the next disjoint one by this much, else the locator is a tie. */
   tieMargin: 0.01,
   /** Candidate runs: chains of up to this many neighbouring edges. */
@@ -114,6 +116,8 @@ export type FoldResolveOptions = {
   thresholds?: Partial<typeof FOLDS>;
   /** Display names for the words — never a ULID. */
   nameOf?: (pieceKey: string) => string;
+  /** Open construction lines on this size, in the piece's millimetre frame. */
+  innerLines?: ReadonlyMap<string, readonly (readonly Pt2[])[]>;
 };
 
 // ── wire shape (proto common.TechCardPieceFold as the generated HTTP client carries it) ──

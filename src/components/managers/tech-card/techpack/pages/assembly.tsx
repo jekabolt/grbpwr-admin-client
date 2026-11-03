@@ -4197,7 +4197,7 @@ export function editorOperationPictures(
       });
     });
     // Whichever way a step's layout was reached, it draws the folds that step sees.
-    const foldsAt = cardFoldsOf(resultOperations, cardFolds, geoms);
+    const foldsAt = cardFoldsOf(resultOperations, cardFolds, geoms, innerLines);
     if (foldsAt)
       resultOperations.forEach((operation, index) => {
         const number = operation.operationNumber ?? 0;

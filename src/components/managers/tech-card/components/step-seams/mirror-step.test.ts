@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { apply } from 'lib/assembly-skeleton/union/affine';
+import type { StoredFold } from 'lib/folds';
 import {
   anchorOfRunId,
   fromWire,
+  mirrorEdgeMapOf,
   poseOf,
   poseRow,
   toWire,
@@ -12,6 +14,7 @@ import {
   type StoredRow,
   type StoredSeam,
 } from 'lib/seams';
+import { inFrame } from 'lib/seams/frame';
 
 import { CARD85_OPS, CARD85_SEAMS, card85Geoms, card85Step } from './card85.fixture';
 import { card63Geoms, card63InnerLines } from './card63.fixture';
@@ -381,6 +384,142 @@ describe('range and refusal rules', () => {
     }
   });
 
+  it('links the existing geometrically mirrored fold in the same plan', () => {
+    const sourcePiece = 'PCK_BACK_L';
+    const targetPiece = 'PCK_BACK_R';
+    const source: StoredFold = {
+      foldKey: 'left-fold',
+      pieceKey: sourcePiece,
+      seq: 1,
+      kind: 'inward',
+      source: 'dxf',
+      line: [
+        [0.2, 0.25],
+        [0.2, 0.75],
+      ],
+      flipAt: [0.3, 0.5],
+      edge: null,
+      contourSig: 'left',
+      anchoredSize: 'M',
+      note: '',
+      stale: false,
+    };
+    const edgeMap = mirrorEdgeMapOf(geoms.get(sourcePiece)!, geoms.get(targetPiece)!);
+    expect(edgeMap).not.toBeNull();
+    const target: StoredFold = {
+      ...source,
+      foldKey: 'right-fold',
+      pieceKey: targetPiece,
+      line: inFrame(source.line, edgeMap!.frame) as StoredFold['line'],
+      flipAt: inFrame([source.flipAt], edgeMap!.frame)[0],
+      contourSig: 'right',
+    };
+    const foldOps = [
+      { ...ops[0], foldKeys: [source.foldKey] },
+      { ...ops[1], foldKeys: [] },
+    ];
+    const plan = mirrorStepPlan({
+      step: foldOps[1],
+      cardOps: foldOps,
+      rows: [rangedRow('partial')],
+      poses: [],
+      folds: [source, target],
+      geoms,
+    });
+
+    expect(plan.kind).toBe('create');
+    expect(plan.foldKeys).toEqual([target.foldKey]);
+    expect(plan.upsert).toHaveLength(1);
+
+    const third = { ...ops[1], foldKeys: [target.foldKey] };
+    expect(
+      mirrorStepPlan({
+        step: foldOps[1],
+        cardOps: [...foldOps, third],
+        rows: [rangedRow('partial')],
+        poses: [],
+        folds: [source, target],
+        geoms,
+      }),
+    ).toMatchObject({ kind: 'edge-mismatch', upsert: [], foldKeys: [] });
+
+    const earlier: StoredFold = { ...target, foldKey: 'right-later', seq: 2 };
+    const orderOps = [{ ...foldOps[0], foldKeys: [source.foldKey, earlier.foldKey] }, foldOps[1]];
+    expect(
+      mirrorStepPlan({
+        step: orderOps[1],
+        cardOps: orderOps,
+        rows: [rangedRow('partial')],
+        poses: [],
+        folds: [
+          source,
+          target,
+          {
+            ...earlier,
+            line: [
+              [0.9, 0.9],
+              [0.8, 0.8],
+            ],
+          },
+        ],
+        geoms,
+      }),
+    ).toMatchObject({ kind: 'edge-mismatch', upsert: [], foldKeys: [] });
+  });
+
+  it('refuses the whole mirror when the right fold is missing or geometrically different', () => {
+    const source: StoredFold = {
+      foldKey: 'left-fold',
+      pieceKey: 'PCK_BACK_L',
+      seq: 1,
+      kind: 'inward',
+      source: 'dxf',
+      line: [
+        [0.2, 0.25],
+        [0.2, 0.75],
+      ],
+      flipAt: [0.3, 0.5],
+      edge: null,
+      contourSig: 'left',
+      anchoredSize: 'M',
+      note: '',
+      stale: false,
+    };
+    const foldOps = [
+      { ...ops[0], foldKeys: [source.foldKey] },
+      { ...ops[1], foldKeys: [] },
+    ];
+    const planOf = (folds: StoredFold[]) =>
+      mirrorStepPlan({
+        step: foldOps[1],
+        cardOps: foldOps,
+        rows: [rangedRow('partial')],
+        poses: [],
+        folds,
+        geoms,
+      });
+
+    expect(planOf([source])).toMatchObject({
+      kind: 'edge-mismatch',
+      upsert: [],
+      foldKeys: [],
+    });
+    expect(
+      planOf([
+        source,
+        {
+          ...source,
+          foldKey: 'right-fold',
+          pieceKey: 'PCK_BACK_R',
+          line: [
+            [0.7, 0.25],
+            [0.7, 0.75],
+          ],
+        },
+      ]),
+    ).toMatchObject({ kind: 'edge-mismatch', upsert: [], foldKeys: [] });
+  });
+
   it('says nothing about a twin on a step that holds a left piece', () => {
     const hands = new Map(
       [...geoms].map(([key, geom]) => [
@@ -434,6 +573,7 @@ describe('mirror write boundary', () => {
         upsert: [put],
         deleteKeys: ['drop'],
         linkKeys: ['put'],
+        foldKeys: ['right-fold'],
       },
       {
         upsert: async () => {
@@ -441,7 +581,7 @@ describe('mirror write boundary', () => {
           return true;
         },
         canonicalize: (rows) => [...rows],
-        link: () => calls.push('link'),
+        link: (_rows, foldKeys) => calls.push(`link:${foldKeys.join()}`),
         requestAutosave: () => calls.push('autosave'),
         rowsByKey: () => new Map([['drop', drop]]),
         remove: async () => {
@@ -453,7 +593,7 @@ describe('mirror write boundary', () => {
     );
 
     expect(result).toEqual({ ok: true });
-    expect(calls).toEqual(['upsert', 'link', 'autosave', 'delete']);
+    expect(calls).toEqual(['upsert', 'link:right-fold', 'autosave', 'delete']);
   });
 
   it('changes no visible state when the transaction fails', async () => {
@@ -462,7 +602,13 @@ describe('mirror write boundary', () => {
     const autosave = vi.fn();
     const remove = vi.fn();
     const result = await executeMirrorStep(
-      { kind: 'create', upsert: [row], deleteKeys: [], linkKeys: [row.seamKey] },
+      {
+        kind: 'create',
+        upsert: [row],
+        deleteKeys: [],
+        linkKeys: [row.seamKey],
+        foldKeys: [],
+      },
       {
         upsert: async () => false,
         canonicalize: (rows) => [...rows],

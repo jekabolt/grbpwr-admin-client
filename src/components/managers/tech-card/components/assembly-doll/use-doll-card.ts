@@ -467,8 +467,19 @@ export function dollRequest(c: DollCard, size: string, lining: boolean) {
   if (!facts) return null;
   // Resolve against this size's segmented facts. The resolver and doll both use grainDegOf(facts)
   // with lib/seams/frame.ts, so the returned (u, v) is exactly the doll's seam frame.
+  const innerLines = new Map(
+    facts.pieces.map(({ pieceKey, piece }) => [
+      pieceKey,
+      (piece.inner ?? [])
+        .filter((line) => !line.closed)
+        .map((line) => line.pts.map(({ x, y }) => [x * 10, y * 10] as Pt2)),
+    ]),
+  );
   const folds = c.foldRows.length
-    ? resolveFolds(c.foldRows, segmentAll(facts), { grainDeg: grainDegOf(facts) }).folds
+    ? resolveFolds(c.foldRows, segmentAll(facts), {
+        grainDeg: grainDegOf(facts),
+        innerLines,
+      }).folds
     : null;
   const anchorSizes = [...new Set(c.rows.map((r) => r.anchoredSize).filter(Boolean))].filter(
     (s) => s !== size,

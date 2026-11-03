@@ -19,7 +19,7 @@ export type MirrorStepWriteResult = { ok: true } | { ok: false; error: string };
 export type MirrorStepWriteDeps = {
   upsert: (rows: readonly StoredRow[]) => Promise<boolean>;
   canonicalize: (rows: readonly StoredRow[]) => StoredRow[];
-  link: (rows: readonly StoredRow[]) => void;
+  link: (rows: readonly StoredRow[], foldKeys: readonly string[]) => void;
   requestAutosave: () => void;
   rowsByKey: () => ReadonlyMap<string, StoredRow>;
   remove: (rows: readonly StoredRow[]) => Promise<boolean>;
@@ -33,14 +33,14 @@ export async function executeMirrorStep(
 ): Promise<MirrorStepWriteResult> {
   if (plan.kind !== 'create' && plan.kind !== 'replace') return { ok: false, error: 'not saved' };
   try {
-    if (!(await deps.upsert(plan.upsert))) {
+    if (plan.upsert.length && !(await deps.upsert(plan.upsert))) {
       return {
         ok: false,
         error: deps.errorOf(plan.upsert.map((row) => row.seamKey)) || 'not saved',
       };
     }
     const canonical = deps.canonicalize(plan.upsert);
-    deps.link(canonical);
+    deps.link(canonical, plan.foldKeys);
     deps.requestAutosave();
     const byKey = deps.rowsByKey();
     const dropping = plan.deleteKeys.flatMap((key) => byKey.get(key) ?? []);
@@ -85,6 +85,7 @@ export function useMirrorStep({
   cardOps,
   rows,
   poses,
+  folds,
   geoms,
   grainDeg,
 }: UseMirrorStepInput) {
@@ -100,10 +101,11 @@ export function useMirrorStep({
         cardOps,
         rows: rowList,
         poses: poseList,
+        folds,
         geoms,
         grainDeg,
       }),
-    [step, cardOps, rowList, poseList, geoms, grainDeg],
+    [step, cardOps, rowList, poseList, folds, geoms, grainDeg],
   );
   const visible = useMemo(
     () => plan.kind !== 'no-twin' || isRightMirrorStep(step, cardOps, geoms),
@@ -119,7 +121,7 @@ export function useMirrorStep({
     return executeMirrorStep(plan, {
       upsert: (put) => ctx.writes.upsert([...put]),
       canonicalize: (put) => canonicalMirrorRows(put, liveRows()),
-      link: (linked) => {
+      link: (linked, foldKeys) => {
         setValue(
           `operations.${index}.seamKeys`,
           linked.filter((row) => row.kind !== 'pose').map((row) => row.seamKey),
@@ -130,6 +132,7 @@ export function useMirrorStep({
           linked.filter((row) => row.kind === 'pose').map((row) => row.seamKey),
           { shouldDirty: true },
         );
+        setValue(`operations.${index}.foldKeys`, [...foldKeys], { shouldDirty: true });
       },
       requestAutosave: () => autosave.request('seams'),
       rowsByKey: () => new Map(liveRows().map((row) => [row.seamKey, row])),

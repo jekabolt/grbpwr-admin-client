@@ -16,7 +16,7 @@ export function StepFoldThumbs({ ops, index }: { ops: readonly FoldStep[]; index
       [...geoms.values()].find((g) => g.pieceKey.toUpperCase() === hit.pieceKey.toUpperCase());
     if (!piece) return [];
     const deg = geo?.grainDeg?.get(piece.pieceKey) ?? 0;
-    const { groups } = foldGroupsOf(piece, hit.rows, deg);
+    const { groups } = foldGroupsOf(piece, hit.rows, deg, innerLines.get(piece.pieceKey));
     return groups.length ? [{ piece, deg, groups }] : [];
   });
   if (!closing.length) return null;

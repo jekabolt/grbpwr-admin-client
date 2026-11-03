@@ -267,6 +267,7 @@ export function SeamPickerBody({
     cardOps: scene.ops,
     rows: byKey,
     poses,
+    folds: foldRows,
     geoms,
     grainDeg: geo?.grainDeg,
   });

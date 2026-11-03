@@ -62,6 +62,11 @@ function yMm(piece: PieceGeom, fold: DollFold): [number, number] {
   return [fromUV(f, fold.a)[1], fromUV(f, fold.b)[1]];
 }
 
+function lineMm(piece: PieceGeom, fold: DollFold): [Pt2, Pt2] {
+  const f = frameOf(piece, 0);
+  return [fromUV(f, fold.a), fromUV(f, fold.b)];
+}
+
 const S = geomOf(40, 30);
 const L = geomOf(44, 33);
 const XS = geomOf(36, 27);
@@ -167,6 +172,75 @@ describe('resolveFolds — grading keeps offset_mm', () => {
     const r = resolveFolds([row], [L]);
     expect(r.unresolved).toEqual([]);
     expect(r.via[row.foldKey]).toBe('uv');
+  });
+});
+
+describe('resolveFolds — bounded line across real grading', () => {
+  // Production fixture load-balance-SS26-005, detail SLV_M_R on layer 14. This is the exact
+  // bounding frame and one layer-8 construction line from each parsed size.
+  const sleeveSizes = [
+    {
+      size: 'XS',
+      geom: geomOf(26.171, 66.1377),
+      line: [
+        [28.269143, 1.611882],
+        [26.460305, 121.598271],
+      ] as [Pt2, Pt2],
+    },
+    {
+      size: 'M',
+      geom: geomOf(29.171, 67.1398),
+      line: [
+        [29.238869, 1.629948],
+        [27.240578, 121.616154],
+      ] as [Pt2, Pt2],
+    },
+    {
+      size: 'L',
+      geom: geomOf(30.6711, 67.6501),
+      line: [
+        [30.186891, 1.611882],
+        [28.093385, 121.598271],
+      ] as [Pt2, Pt2],
+    },
+  ];
+
+  it('uses the corresponding construction line on XS, M and L', () => {
+    const base = sleeveSizes.find((entry) => entry.size === 'M')!;
+    const row = foldFromLine(base.geom, base.line, [45, 60], {
+      seq: 1,
+      kind: 'inward',
+      source: 'dxf',
+      anchoredSize: 'M',
+      edge: null,
+    });
+
+    const lengths = sleeveSizes.map(({ size, geom, line }) => {
+      const result = resolveFolds([row], [geom], {
+        innerLines: new Map([[KEY, [line]]]),
+      });
+      expect(result.unresolved, size).toEqual([]);
+      expect(result.via[row.foldKey], size).toBe('inner');
+      const actual = lineMm(geom, result.folds[KEY][0]);
+      const direct = Math.hypot(
+        actual[0][0] - line[0][0],
+        actual[0][1] - line[0][1],
+        actual[1][0] - line[1][0],
+        actual[1][1] - line[1][1],
+      );
+      const reverse = Math.hypot(
+        actual[1][0] - line[0][0],
+        actual[1][1] - line[0][1],
+        actual[0][0] - line[1][0],
+        actual[0][1] - line[1][1],
+      );
+      expect(Math.min(direct, reverse), size).toBeLessThan(0.01);
+      return Math.hypot(actual[1][0] - actual[0][0], actual[1][1] - actual[0][1]);
+    });
+
+    expect(lengths[0]).toBeCloseTo(120.0, 2);
+    expect(lengths[1]).toBeCloseTo(120.003, 2);
+    expect(lengths[2]).toBeCloseTo(120.005, 2);
   });
 });
 

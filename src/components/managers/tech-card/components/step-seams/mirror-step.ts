@@ -1,5 +1,6 @@
 import { edgeIdsOf } from 'lib/assembly-skeleton/geometry';
 import type { EdgeId, PieceGeom } from 'lib/assembly-skeleton/types';
+import { FOLDS, type StoredFold } from 'lib/folds';
 import {
   anchorOfRunId,
   edgeMapOf,
@@ -15,7 +16,7 @@ import {
   type StoredRow,
   type StoredSeam,
 } from 'lib/seams';
-import { contourSig, frameOf, inFrame, reverses, runsOfPiece } from 'lib/seams/frame';
+import { contourSig, frameOf, inFrame, reverses, rmsFit, runsOfPiece } from 'lib/seams/frame';
 
 import { decodeHandPlace, encodeHandPlace, isHandSeamKind } from './step-hand';
 import { mirrorPlacement } from './step-pose';
@@ -29,6 +30,7 @@ export type MirrorStepPlan = {
   upsert: StoredRow[];
   deleteKeys: string[];
   linkKeys: string[];
+  foldKeys: string[];
 };
 
 export type MirrorStepPlanInput = {
@@ -36,6 +38,7 @@ export type MirrorStepPlanInput = {
   cardOps: readonly FormOpLike[];
   rows: readonly StoredSeam[];
   poses: readonly StoredPose[];
+  folds?: readonly StoredFold[];
   geoms: ReadonlyMap<string, PieceGeom>;
   grainDeg?: ReadonlyMap<string, number>;
 };
@@ -53,10 +56,15 @@ const EMPTY_PLAN = (kind: 'no-twin' | 'edge-mismatch', sourceOp?: FormOpLike): M
   upsert: [],
   deleteKeys: [],
   linkKeys: [],
+  foldKeys: [],
 });
 
 const opKeys = (op: FormOpLike | undefined) => [
   ...new Set([...(op?.seamKeys ?? []), ...(op?.poseKeys ?? [])]),
+];
+
+const opFactKeys = (op: FormOpLike | undefined) => [
+  ...new Set([...opKeys(op), ...(op?.foldKeys ?? [])]),
 ];
 
 const stepIndexOf = (step: FormOpLike, cardOps: readonly FormOpLike[]) => {
@@ -127,7 +135,7 @@ const twinCandidateOf = (
   const targetPieces = stepInputPieces(cardOps, targetIndex, pieceKeys);
   for (let index = targetIndex - 1; index >= 0; index--) {
     const op = cardOps[index];
-    if (!opKeys(op).some((key) => liveKeys.has(key))) continue;
+    if (!opFactKeys(op).some((key) => liveKeys.has(key))) continue;
     const pieces = stepInputPieces(cardOps, index, pieceKeys);
     const mappings = mappingsOf(pieces, targetPieces, geoms);
     if (!mappings.length) continue;
@@ -347,6 +355,87 @@ const mapPose = (
   });
 };
 
+const foldLineFit = (left: readonly [number, number][], right: readonly [number, number][]) =>
+  Math.min(rmsFit(left, right), rmsFit(left, [...right].reverse()));
+
+const foldSide = (line: readonly [number, number][], point: readonly [number, number]) => {
+  const [a, b] = line;
+  return Math.sign((b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0]));
+};
+
+const foldFit = (
+  source: StoredFold,
+  target: StoredFold,
+  frame: EdgeMap['frame'],
+): number | null => {
+  if (source.kind !== target.kind || source.seq !== target.seq || source.stale || target.stale)
+    return null;
+  if (!!source.edge !== !!target.edge) return null;
+  const line = inFrame(source.line, frame);
+  const direct = rmsFit(line, target.line);
+  const reverse = rmsFit(line, [...target.line].reverse());
+  const targetLine = direct <= reverse ? target.line : [...target.line].reverse();
+  const lineScore = Math.min(direct, reverse);
+  if (lineScore > FOLDS.fitMax) return null;
+  const flipAt = inFrame([source.flipAt], frame)[0];
+  if (foldSide(line, flipAt) !== foldSide(targetLine, target.flipAt)) return null;
+  if (!source.edge || !target.edge) return lineScore;
+  if (Math.abs(source.edge.offsetMm - target.edge.offsetMm) > 0.5) return null;
+  const edgeScore = foldLineFit(inFrame(source.edge.samples, frame), target.edge.samples);
+  return edgeScore <= FOLDS.fitMax ? Math.max(lineScore, edgeScore) : null;
+};
+
+/** Fold rows already exist on both pieces; MIRROR only links the geometrically matching right rows. */
+const mapFoldKeys = (
+  source: readonly StoredFold[],
+  all: readonly StoredFold[],
+  links: ReadonlyMap<string, TwinLink>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  grainDeg: ReadonlyMap<string, number> | undefined,
+  cardOps: readonly FormOpLike[],
+  targetIndex: number,
+): string[] | null => {
+  const stepOf = (foldKey: string) => cardOps.findIndex((op) => op.foldKeys?.includes(foldKey));
+  const used = new Set<string>();
+  const keys: string[] = [];
+  for (const row of source) {
+    const link = links.get(row.pieceKey);
+    const sourceGeom = geoms.get(row.pieceKey);
+    const targetGeom = link ? geoms.get(link.key) : undefined;
+    if (!link || !sourceGeom || !targetGeom) return null;
+    const edgeMap = edgeMapFor(sourceGeom, targetGeom, link, grainDeg);
+    if (!edgeMap) return null;
+    const fits = all
+      .filter(
+        (candidate) =>
+          !used.has(candidate.foldKey) &&
+          candidate.pieceKey.toUpperCase() === targetGeom.pieceKey.toUpperCase(),
+      )
+      .flatMap((candidate) => {
+        const fit = foldFit(row, candidate, edgeMap.frame);
+        return fit == null ? [] : [{ candidate, fit }];
+      })
+      .sort((left, right) => left.fit - right.fit);
+    const best = fits[0];
+    if (!best || (fits[1] && fits[1].fit < best.fit + FOLDS.tieMargin)) return null;
+    // The server refuses a fold on two steps, or folds of a piece out of their order.
+    const bestStep = stepOf(best.candidate.foldKey);
+    if (bestStep >= 0 && bestStep !== targetIndex) return null;
+    const outOfOrder = all.some((other) => {
+      if (other.pieceKey.toUpperCase() !== best.candidate.pieceKey.toUpperCase()) return false;
+      if (other.foldKey === best.candidate.foldKey || other.seq === best.candidate.seq)
+        return false;
+      const otherStep = stepOf(other.foldKey);
+      if (otherStep < 0) return false;
+      return other.seq < best.candidate.seq ? otherStep > targetIndex : otherStep < targetIndex;
+    });
+    if (outOfOrder) return null;
+    used.add(best.candidate.foldKey);
+    keys.push(best.candidate.foldKey);
+  }
+  return keys;
+};
+
 const anchorSig = (anchor: EdgeAnchor) =>
   `${anchor.piece}:${anchor.edgeHint}:${anchor.range[0]}-${anchor.range[1]}`;
 
@@ -409,6 +498,7 @@ export function mirrorStepPlan({
   cardOps,
   rows,
   poses,
+  folds = [],
   geoms,
   grainDeg,
 }: MirrorStepPlanInput): MirrorStepPlan {
@@ -416,7 +506,8 @@ export function mirrorStepPlan({
   if (targetIndex < 0) return EMPTY_PLAN('no-twin');
   const rowByKey = new Map(rows.map((row) => [row.seamKey, row]));
   const poseByKey = new Map(poses.map((row) => [row.seamKey, row]));
-  const liveKeys = new Set([...rowByKey.keys(), ...poseByKey.keys()]);
+  const foldByKey = new Map(folds.map((row) => [row.foldKey, row]));
+  const liveKeys = new Set([...rowByKey.keys(), ...poseByKey.keys(), ...foldByKey.keys()]);
   const candidate = twinCandidateOf(targetIndex, cardOps, geoms, liveKeys);
   if (!candidate) return EMPTY_PLAN('no-twin');
   if (candidate.ambiguous) return EMPTY_PLAN('edge-mismatch', candidate.op);
@@ -428,6 +519,14 @@ export function mirrorStepPlan({
   const mappedPoseRows = sourcePoses.map((row) => mapPose(row, candidate.links, geoms, grainDeg));
   if (mappedSeams.some((row) => !row) || mappedPoseRows.some((row) => !row))
     return EMPTY_PLAN('edge-mismatch', candidate.op);
+  const sourceFoldKeys = candidate.op.foldKeys ?? [];
+  const sourceFolds = sourceFoldKeys.flatMap((key) => foldByKey.get(key) ?? []);
+  if (sourceFolds.length !== sourceFoldKeys.length)
+    return EMPTY_PLAN('edge-mismatch', candidate.op);
+  const mappedFoldKeys = sourceFolds.length
+    ? mapFoldKeys(sourceFolds, folds, candidate.links, geoms, grainDeg, cardOps, targetIndex)
+    : [...(step.foldKeys ?? [])];
+  if (!mappedFoldKeys) return EMPTY_PLAN('edge-mismatch', candidate.op);
   const mappedPoses = new Map<string, StoredPose>();
   for (const row of mappedPoseRows as StoredPose[]) {
     const piece = poseOf(row)?.piece;
@@ -450,19 +549,30 @@ export function mirrorStepPlan({
   const all: StoredRow[] = [...rows, ...poses];
   const expected = attachStableKeys(expected0, linked, all, shared, linkedElsewhere);
   const linkKeys = expected.map((row) => row.seamKey);
-  if (sameRows(expected, linked)) {
-    return { kind: 'same', sourceOp: candidate.op, upsert: [], deleteKeys: [], linkKeys };
+  const sameFolds =
+    mappedFoldKeys.length === (step.foldKeys?.length ?? 0) &&
+    mappedFoldKeys.every((key, index) => key === step.foldKeys?.[index]);
+  if (sameRows(expected, linked) && sameFolds) {
+    return {
+      kind: 'same',
+      sourceOp: candidate.op,
+      upsert: [],
+      deleteKeys: [],
+      linkKeys,
+      foldKeys: mappedFoldKeys,
+    };
   }
   const keep = new Set(linkKeys);
   const deleteKeys = linked
     .map((row) => row.seamKey)
     .filter((key) => !keep.has(key) && !shared.has(key));
   return {
-    kind: linked.length ? 'replace' : 'create',
+    kind: linked.length || step.foldKeys?.length ? 'replace' : 'create',
     sourceOp: candidate.op,
     upsert: expected,
     deleteKeys,
     linkKeys,
+    foldKeys: mappedFoldKeys,
   };
 }
 

@@ -52,12 +52,14 @@ export function foldGroupsOf(
   piece: PieceGeom,
   rows: readonly StoredFold[],
   grainDeg: number,
+  innerLines?: readonly (readonly Pt2[])[],
 ): { groups: FoldGroup[]; unresolved: string[] } {
   const own = rows.filter((r) => r.pieceKey.toUpperCase() === piece.pieceKey.toUpperCase());
   if (!own.length) return { groups: [], unresolved: [] };
   const res = resolveFolds(own, [piece], {
     grainDeg: new Map([[piece.pieceKey, grainDeg]]),
     nameOf: () => piece.name,
+    ...(innerLines ? { innerLines: new Map([[piece.pieceKey, innerLines]]) } : {}),
   });
   const f = frameOf(piece, grainDeg);
   const laid = Object.values(res.folds)[0] ?? [];

@@ -571,7 +571,7 @@ export function stepResults(
   });
   const latestByOutput = new Map<string, ComputedStep>();
   const computed: ComputedStep[] = [];
-  const foldsAt = cardFoldsOf(input.ops, input.folds, input.geoms);
+  const foldsAt = cardFoldsOf(input.ops, input.folds, input.geoms, input.innerLines);
   input.ops.forEach((op, index) => {
     const step = computeStep(
       input,

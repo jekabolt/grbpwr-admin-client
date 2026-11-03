@@ -73,8 +73,9 @@ function layFolds(
   rows: readonly StoredFold[],
   geoms: ReadonlyMap<string, PieceGeom>,
   grainDeg: ReadonlyMap<string, number>,
+  innerLines?: ReadonlyMap<string, readonly (readonly Pt2[])[]>,
 ) {
-  const { folds, unresolved } = resolveFolds(rows, [...geoms.values()], { grainDeg });
+  const { folds, unresolved } = resolveFolds(rows, [...geoms.values()], { grainDeg, innerLines });
   const refused = new Set(unresolved.map((row) => row.foldKey));
   const laid = new Map<string, { piece: string; seq: number; flat: FlatFold }>();
   for (const [piece, list] of Object.entries(folds)) {
@@ -112,9 +113,10 @@ export function cardFoldsOf(
   steps: readonly FoldStep[],
   card: CardFolds | undefined,
   geoms: ReadonlyMap<string, PieceGeom>,
+  innerLines?: ReadonlyMap<string, readonly (readonly Pt2[])[]>,
 ): ((index: number) => StepFolds | null) | null {
   if (!card?.rows.length || !steps.some((step) => step.foldKeys?.length)) return null;
-  const laid = layFolds(card.rows, geoms, card.grainDeg);
+  const laid = layFolds(card.rows, geoms, card.grainDeg, innerLines);
   const shared = new Map<string, FlatFolds>();
   return (index) => {
     const rows = activeFoldRows(steps, index, card.rows).flatMap((row) => {
