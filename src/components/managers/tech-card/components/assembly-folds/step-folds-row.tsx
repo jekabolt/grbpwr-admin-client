@@ -5,6 +5,7 @@
 // belong to the PIECE, not the step: the same piece reads the same in every step.
 
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
+import type { StoredFold } from 'lib/folds';
 import { cn } from 'lib/utility';
 import { useMemo, useState } from 'react';
 import { useWatch } from 'react-hook-form';
@@ -15,6 +16,7 @@ import { useStepSeams } from '../step-seams/step-seams-context';
 import { sizeOf } from './fold-model';
 import { FlatThumb, FoldedThumb } from './fold-picture';
 import { FoldPicker, usePieceReads } from './fold-picker';
+import { useFoldStep } from './fold-step';
 import { useFoldsStore } from './folds-store';
 import { useFoldWrites } from './use-fold-writes';
 
@@ -65,6 +67,40 @@ export function StepFoldsRow({ index }: { index: number }) {
       innerLines={innerLines}
       cardId={ctx.cardId}
       frozen={ctx.frozen}
+    />
+  );
+}
+
+/** Removes the piece's folds and takes their keys off the steps, or the next save is refused. */
+function FoldTileClose({
+  name,
+  rows,
+  disabled,
+  remove,
+  onRemoved,
+}: {
+  name: string;
+  rows: readonly StoredFold[];
+  disabled: boolean;
+  remove: (rows: StoredFold[]) => Promise<boolean>;
+  onRemoved: () => void;
+}) {
+  const foldStep = useFoldStep();
+  return (
+    <Close
+      aria-label={`remove folds ${name}`}
+      disabled={disabled}
+      onClick={() => {
+        onRemoved();
+        void remove([...rows]).then((removed) => {
+          if (removed)
+            foldStep.assign(
+              rows.map((row) => row.foldKey),
+              null,
+            );
+        });
+      }}
+      className={FOLD_CLOSE}
     />
   );
 }
@@ -143,14 +179,14 @@ export function StepFoldsGroup({
                 </Text>
               </Tile>
               {isFolded && (
-                <Close
-                  aria-label={`remove folds ${r.geom.name}`}
+                <FoldTileClose
+                  name={r.geom.name}
+                  rows={rows}
                   disabled={frozen || writing}
-                  onClick={() => {
+                  remove={writes.remove}
+                  onRemoved={() => {
                     if (on) setOpen(null);
-                    void writes.remove(rows);
                   }}
-                  className={FOLD_CLOSE}
                 />
               )}
             </div>
