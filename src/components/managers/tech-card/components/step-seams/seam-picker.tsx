@@ -194,9 +194,18 @@ export function SeamPickerBody({
     initialPick ? wholeSel(initialPick) : null,
   );
   // FIT and the corner snap work on what is in hand: the spans, not the whole edges.
+  // With nothing in hand it works on the seam shown: the selected one, or the step's only one.
+  const shownSeam =
+    stored.find((s) => s.key === activeSeam) ??
+    (stored.length === 1 && !sel.a.length && !sel.b.length ? stored[0] : undefined);
+  const shownParts = shownSeam?.parts;
   const fitSource = useMemo(
-    () => fitSourceOf({ a: sideParts(sel.a, sel.spans.a), b: sideParts(sel.b, sel.spans.b) }),
-    [sel],
+    () =>
+      fitSourceOf(
+        { a: sideParts(sel.a, sel.spans.a), b: sideParts(sel.b, sel.spans.b) },
+        shownParts,
+      ),
+    [sel, shownParts],
   );
   const poses = scene.poses;
   const stepRows = useMemo(
@@ -537,9 +546,6 @@ export function SeamPickerBody({
   // Edge to edge on both sides (a part on its host's line has no Δ).
   const edgeToEdge = (s: { a: readonly TargetId[]; b: readonly TargetId[] }) =>
     s.a.length > 0 && s.b.length > 0 && [...s.a, ...s.b].every((id) => !parseInner(id));
-  const shownSeam =
-    stored.find((s) => s.key === activeSeam) ??
-    (stored.length === 1 && !sel.a.length && !sel.b.length ? stored[0] : undefined);
   const delta = pair
     ? deltaMm(
         sideLen(pickParts('a'), pickParts('b')),

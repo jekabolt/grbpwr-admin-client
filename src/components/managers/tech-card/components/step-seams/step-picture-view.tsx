@@ -2912,36 +2912,6 @@ export function StepPictureSvg({
               >
                 {pairNo(i)}
               </text>
-              {on && onClearNo && (
-                <g
-                  className='cursor-pointer'
-                  role='button'
-                  aria-label='remove seam'
-                  onClick={onClearNo}
-                  data-seam-remove-no=''
-                >
-                  <rect
-                    x={at[0] + 11}
-                    y={at[1] - 9}
-                    width={18}
-                    height={18}
-                    fill={FILL}
-                    stroke={PAIR_INK}
-                    strokeWidth={1}
-                  />
-                  <text
-                    x={at[0] + 20}
-                    y={at[1]}
-                    textAnchor='middle'
-                    dominantBaseline='central'
-                    fill={PAIR_INK}
-                    fontSize={12}
-                    pointerEvents='none'
-                  >
-                    ×
-                  </text>
-                </g>
-              )}
             </g>
           ) : null;
         })}
@@ -3003,6 +2973,42 @@ export function StepPictureSvg({
           ];
         })}
       {doorHits}
+      {look !== 'tile' &&
+        onClearNo &&
+        noSpots.map(({ id, i }, n) => {
+          const at = activeNo === i ? noAt(n) : null;
+          return at ? (
+            <g
+              key={`x:${id}:${i}`}
+              className='cursor-pointer'
+              role='button'
+              aria-label='remove seam'
+              onClick={onClearNo}
+              data-seam-remove-no=''
+            >
+              <rect
+                x={at[0] + 11}
+                y={at[1] - 9}
+                width={18}
+                height={18}
+                fill={FILL}
+                stroke={PAIR_INK}
+                strokeWidth={1}
+              />
+              <text
+                x={at[0] + 20}
+                y={at[1]}
+                textAnchor='middle'
+                dominantBaseline='central'
+                fill={PAIR_INK}
+                fontSize={12}
+                pointerEvents='none'
+              >
+                ×
+              </text>
+            </g>
+          ) : null;
+        })}
       {ticks.map(({ id, atMm, notch }) => {
         const whole = ptsOf(id);
         const length = resolveEdge(id, geoms)?.len ?? 0;
