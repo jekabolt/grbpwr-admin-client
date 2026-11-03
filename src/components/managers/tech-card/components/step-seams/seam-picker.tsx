@@ -940,29 +940,31 @@ export function SeamPickerBody({
               </span>
             );
           })}
-          <ChipRow>
-            <Chip
-              selected={sel.a.length > 0}
-              onClick={() => clearSide('a')}
-              disabled={!sel.a.length}
-              data-seam-side='1'
-            >
-              {sel.a.length
-                ? `1 ${sideName(sel.a)} ${mmText(sideLen(pickParts('a'), pickParts('b')))}`
-                : '1'}
-            </Chip>
-            <Chip
-              selected={sel.b.length > 0}
-              tone={sel.b.length ? 'attention' : 'default'}
-              onClick={() => clearSide('b')}
-              disabled={!sel.b.length}
-              data-seam-side='2'
-            >
-              {sel.b.length
-                ? `2 ${sideName(sel.b)} ${mmText(sideLen(pickParts('b'), pickParts('a')))}`
-                : '2'}
-            </Chip>
-          </ChipRow>
+          {(sel.a.length > 0 || sel.b.length > 0) && (
+            <ChipRow>
+              <Chip
+                selected={sel.a.length > 0}
+                onClick={() => clearSide('a')}
+                disabled={!sel.a.length}
+                data-seam-side='1'
+              >
+                {sel.a.length
+                  ? `1 ${sideName(sel.a)} ${mmText(sideLen(pickParts('a'), pickParts('b')))}`
+                  : '1'}
+              </Chip>
+              <Chip
+                selected={sel.b.length > 0}
+                tone={sel.b.length ? 'attention' : 'default'}
+                onClick={() => clearSide('b')}
+                disabled={!sel.b.length}
+                data-seam-side='2'
+              >
+                {sel.b.length
+                  ? `2 ${sideName(sel.b)} ${mmText(sideLen(pickParts('b'), pickParts('a')))}`
+                  : '2'}
+              </Chip>
+            </ChipRow>
+          )}
           {delta != null ? (
             <Text size='control' className='whitespace-nowrap tabular-nums' data-seam-delta=''>
               {`Δ ${fmtMm(delta)} mm`}
@@ -991,12 +993,14 @@ export function SeamPickerBody({
               FIT
             </Button>
           )}
-          {!frozen && (suggestion || surfaceSuggestion) && !sel.a.length && !sel.b.length && (
+          {!frozen && (suggestion || surfaceSuggestion) && (
             <Button
               type='button'
               variant='underline'
               size='xs'
               onClick={fillGuess}
+              // Holds its place while a pick is live, so the words beside it do not shift.
+              className={sel.a.length || sel.b.length ? 'invisible' : undefined}
               data-seam-guess=''
             >
               guess
