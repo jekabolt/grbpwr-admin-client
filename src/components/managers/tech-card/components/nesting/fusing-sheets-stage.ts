@@ -1,6 +1,6 @@
 import { GENERATED_FUSING_NAME_PREFIX, regenerateFusingSheets } from 'lib/fusing-dxf';
 import { SECTION } from 'lib/pattern-import/fabrics/scope';
-import { notify } from 'lib/stores/store';
+import { notify, removeNotify } from 'lib/stores/store';
 import { clearFuseOwed, markFuseOwed } from '../card-owed';
 import type { StagedChange } from '../useTechCardStaging';
 
@@ -47,12 +47,13 @@ export function subscribeFusingSheetGeneration(
   };
 }
 
-// A partial rebuild (skipped pieces or sizes) is a warning toast. A FAILED one is a toast AND a
+// A partial rebuild (skipped pieces or sizes) is a warning toast. A FAILED one is an inbox entry AND a
 // failure of the change: it stays staged and the next save retries it — swallowed, the queue called
 // the save complete and the form's baseline already held the new fuse inputs, so nothing would ever
-// rebuild the stale sheets. `onWrote` hears the version the rebuild's own card write left, only when
-// it actually wrote. The queue lives in memory and the debt must not: card-owed.ts holds it from here
-// until a rebuild succeeds, so a reloaded page takes it back.
+// rebuild the stale sheets. No toast for it (L16): each attempt would raise one over the status line
+// of the same failure, and a manual save has its own. `onWrote` hears the version the rebuild's own
+// card write left, only when it actually wrote. The queue lives in memory and the debt must not:
+// card-owed.ts holds it from here until a rebuild succeeds, so a reloaded page takes it back.
 export function fusingSheetsChange(
   techCardId: number,
   onWrote?: (lockVersion: number) => void,
@@ -86,15 +87,20 @@ export function fusingSheetsChange(
             detail: r.skippedSizes.map((x) => `${x.piece} ${x.size}: ${x.reason}`).join('\n'),
           });
         clearFuseOwed(techCardId);
+        removeNotify(`fusing-not-rebuilt:${techCardId}`);
         publishGeneration(techCardId, { phase: 'generated', at: Date.now(), run });
       } catch (error) {
         publishGeneration(techCardId, { phase: 'error', at: Date.now(), run });
-        notify({
-          sev: 'error',
-          subject: 'FUSING DXF',
-          text: 'not rebuilt',
-          detail: error instanceof Error ? error.message : String(error),
-        });
+        notify(
+          {
+            sev: 'error',
+            subject: 'FUSING DXF',
+            text: 'not rebuilt',
+            detail: error instanceof Error ? error.message : String(error),
+            key: `fusing-not-rebuilt:${techCardId}`,
+          },
+          { toast: false },
+        );
         throw error;
       }
     },

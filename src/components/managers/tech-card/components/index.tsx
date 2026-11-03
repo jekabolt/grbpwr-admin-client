@@ -1715,8 +1715,9 @@ export function TechCardForm({
   //
   // `mode: 'silent'` — запись автосейва: ни тоста об успехе, ни переключения вкладки на поле с
   // ошибкой, ни выхода из фулскрина из-за сетевой ошибки, от которой человеку нечего делать, — обо
-  // всём этом говорит чип статуса. Баннеры (частичное сохранение, расхождение версий, аудит
-  // присутствия) и модалка конфликта остаются в обоих режимах: это решения, а не уведомления.
+  // всём этом говорит чип статуса. Баннеры (расхождение версий, аудит присутствия) и модалка
+  // конфликта остаются в обоих режимах: это решения, а не уведомления. Частичное сохранение
+  // автосейва говорит строкой SaveFailureLine (L16).
   async function writeTechCard(
     data: TechCardFormData,
     opts: { mode: SaveMode; autoStage?: boolean; keepPurpose?: string } = { mode: 'explicit' },
@@ -2018,9 +2019,12 @@ export function TechCardForm({
           }
           const done = (bodyDirty ? 1 : 0) + outcome.committed.length;
           const why = techCardErrorMessage(error, 'unknown error');
-          setStagingError(
-            `saved ${done} of ${planned} — «${change.label}» failed: ${why}. Everything not yet saved is still staged.`,
-          );
+          // L16: the autosave's failure has one status, SaveFailureLine, which also holds the door. A
+          // banner beside it repeated the same words and outlived the attempt that wrote them.
+          if (!silent)
+            setStagingError(
+              `saved ${done} of ${planned} — «${change.label}» failed: ${why}. Everything not yet saved is still staged.`,
+            );
           // The «saved 2 of 4» banner says it on the page.
           if (!silent)
             reportFailure(
