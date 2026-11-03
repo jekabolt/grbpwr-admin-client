@@ -38,7 +38,6 @@ describe('usePoseEdit no-press invariant', () => {
       host,
       placement: { xMm: 5, yMm: 7, rotDeg: 12, flip: false },
     });
-    const attach = vi.fn(async () => null);
     const attachPose = vi.fn(async () => true);
     let snapshot: ReturnType<typeof usePoseEdit> | undefined;
 
@@ -48,7 +47,6 @@ describe('usePoseEdit no-press invariant', () => {
         poses: new Map([[stored.seamKey, stored]]),
         stepPicture: null,
         stepResult: undefined,
-        stepRows: [],
         geoms: new Map([
           [piece.pieceKey, piece],
           [host.pieceKey, host],
@@ -57,7 +55,6 @@ describe('usePoseEdit no-press invariant', () => {
         busy: false,
         setBusy: vi.fn(),
         setRefused: vi.fn(),
-        attach,
         attachPose,
       });
       return null;
@@ -68,7 +65,6 @@ describe('usePoseEdit no-press invariant', () => {
     expect(snapshot?.ownPoseRows.size).toBe(1);
     expect(snapshot?.posePending).toBe(false);
     expect(snapshot?.poseEdits.size).toBe(0);
-    expect(attach).not.toHaveBeenCalled();
     expect(attachPose).not.toHaveBeenCalled();
   });
 });

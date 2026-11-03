@@ -17,6 +17,8 @@ import {
   diffHistoryValues,
   emptyUndoHistory,
   historyBarrier,
+  type HistorySide,
+  pickHistorySide,
   recordUndoPatches,
   redoHistoryStep,
   undoHistoryStep,
@@ -26,6 +28,16 @@ import {
 
 const TEXT_BURST_MS = 1000;
 const HISTORY_OWNER = '[data-history-owner], [data-paint-parts], [data-assembly-screen]';
+
+/** A screen with its own stack, reached through the card's UNDO while no overlay of its own is up. */
+export type UndoHistoryOwner = {
+  undoDepth: number;
+  redoDepth: number;
+  undoLabel?: string;
+  redoLabel?: string;
+  undo: () => void;
+  redo: () => void;
+};
 
 export type UndoHistoryApi = {
   canUndo: boolean;
@@ -46,6 +58,7 @@ export type UndoHistoryApi = {
   flushThenCut: (reason: string) => Promise<FlushResult>;
   /** Ignore only the synchronous form writes performed by one server reconciliation. */
   beginServerReconciliation: () => () => void;
+  setOwner: (owner: UndoHistoryOwner | null) => void;
 };
 
 const OFF: UndoHistoryApi = {
@@ -58,6 +71,7 @@ const OFF: UndoHistoryApi = {
   waitThenCut: async <T,>(_reason: string, action: () => Promise<T>) => action(),
   flushThenCut: async () => 'off',
   beginServerReconciliation: () => () => {},
+  setOwner: () => {},
 };
 
 export const UndoHistoryContext = createContext<UndoHistoryApi>(OFF);
@@ -265,7 +279,18 @@ export function useTechCardUndoHistory({
   const reconciling = useRef(0);
   const heldWriteReleases = useRef(new Set<() => void>());
 
+  const owner = useRef<UndoHistoryOwner | null>(null);
+  const [ownerView, setOwnerView] = useState<UndoHistoryOwner | null>(null);
+  const lastSide = useRef<HistorySide>('page');
+
+  const setOwner = useCallback((next: UndoHistoryOwner | null) => {
+    if ((next?.undoDepth ?? 0) > (owner.current?.undoDepth ?? 0)) lastSide.current = 'owner';
+    owner.current = next;
+    setOwnerView(next);
+  }, []);
+
   const publish = useCallback((next: UndoHistoryState) => {
+    if (next.undo.length > core.current.undo.length) lastSide.current = 'page';
     core.current = next;
     setView(next);
   }, []);
@@ -375,6 +400,18 @@ export function useTechCardUndoHistory({
     async (direction: 'undo' | 'redo') => {
       closeGesture();
       await autosave.whenSettled();
+      const side = pickHistorySide(
+        lastSide.current,
+        direction === 'undo' ? core.current.undo.length : core.current.redo.length,
+        direction === 'undo' ? owner.current?.undoDepth ?? 0 : owner.current?.redoDepth ?? 0,
+      );
+      if (!side) return;
+      lastSide.current = side;
+      if (side === 'owner') {
+        if (direction === 'undo') owner.current?.undo();
+        else owner.current?.redo();
+        return;
+      }
       const current = form.getValues();
       const result =
         direction === 'undo'
@@ -468,7 +505,10 @@ export function useTechCardUndoHistory({
       if (isNativeText(target) || target?.closest(HISTORY_OWNER) || active?.closest(HISTORY_OWNER))
         return;
       if (active?.closest('[role="dialog"], [aria-modal="true"]')) return;
-      if (undo ? core.current.undo.length === 0 : core.current.redo.length === 0) return;
+      const depth = undo
+        ? core.current.undo.length + (owner.current?.undoDepth ?? 0)
+        : core.current.redo.length + (owner.current?.redoDepth ?? 0);
+      if (depth === 0) return;
       event.preventDefault();
       void apply(undo ? 'undo' : 'redo');
     };
@@ -528,10 +568,10 @@ export function useTechCardUndoHistory({
 
   const api = useMemo<UndoHistoryApi>(
     () => ({
-      canUndo: view.undo.length > 0,
-      canRedo: view.redo.length > 0,
-      undoLabel: view.undo.at(-1)?.label,
-      redoLabel: view.redo.at(-1)?.label,
+      canUndo: view.undo.length > 0 || (ownerView?.undoDepth ?? 0) > 0,
+      canRedo: view.redo.length > 0 || (ownerView?.redoDepth ?? 0) > 0,
+      undoLabel: view.undo.at(-1)?.label ?? ownerView?.undoLabel,
+      redoLabel: view.redo.at(-1)?.label ?? ownerView?.redoLabel,
       undo: () => apply('undo'),
       redo: () => apply('redo'),
       clear,
@@ -539,8 +579,19 @@ export function useTechCardUndoHistory({
       waitThenCut,
       flushThenCut,
       beginServerReconciliation,
+      setOwner,
     }),
-    [apply, beginServerReconciliation, clear, cut, flushThenCut, view, waitThenCut],
+    [
+      apply,
+      beginServerReconciliation,
+      clear,
+      cut,
+      flushThenCut,
+      ownerView,
+      setOwner,
+      view,
+      waitThenCut,
+    ],
   );
 
   return { api, captureProps };

@@ -421,16 +421,11 @@ export function AssemblySchematic({
         // даже не фокусируется.
         {};
 
-  // СТРОКА ШАГА В БОКСЕ — ОРГАН ОТКРЫТИЯ ПЛЮС ДВЕРЬ КАРТЫ СБОРКИ: наведение светит шаг на карте,
-  // щелчок выбирает его там липко (assembly-map/active-step). Без провайдера карты — как раньше.
+  // СТРОКА ШАГА В БОКСЕ — ОРГАН ОТКРЫТИЯ ПЛЮС ДВЕРЬ КАРТЫ СБОРКИ: наведение светит шаг на карте
+  // (assembly-map/active-step). Без провайдера карты — как раньше.
   const mapStore = useActiveStepStore();
   const stepOrgan = (i: number) => ({
-    ...activate(
-      clickGuard(() => {
-        onPickStep(i);
-        mapStore?.select(i);
-      }),
-    ),
+    ...activate(clickGuard(() => onPickStep(i))),
     onMouseEnter: () => mapStore?.hover(i),
     onMouseLeave: () => mapStore?.hover(null),
   });

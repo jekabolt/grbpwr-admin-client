@@ -8443,6 +8443,14 @@ export type common_TechCardInsert = {
   // carries fold_keys, or that would replace a card whose steps carry them, is refused
   // (FailedPrecondition) instead of silently leaving the pieces flat. Transport, not content.
   operationFoldsAware: boolean | undefined;
+  // Declares support for TechCardOperation.layer_order on full-replace writes. Without it a write
+  // that carries layer_order, or that would replace a card whose steps carry it, is refused
+  // (FailedPrecondition) instead of silently losing the order. Transport, not content.
+  operationLayerOrderAware: boolean | undefined;
+  // Declares support for TechCardOperation.seam_tolerance_mm on full-replace writes. Without it a
+  // write that carries the field, or that would replace a card whose steps state it, is refused
+  // (FailedPrecondition) instead of silently returning them to the default. Transport, not content.
+  operationSeamToleranceAware: boolean | undefined;
 };
 
 // StyleNumberSource records how a tech card's style_number was set (PLM-rework Q1): GENERATED = the
@@ -9484,6 +9492,18 @@ export type common_TechCardOperation = {
   // Written only with operation_folds_aware (130). Enters no section digest: the folds themselves
   // are outside every digest and outside lock_version.
   foldKeys: string[] | undefined;
+  // The order the owner set for this step's inputs, bottom to top, in the vocabulary of input_keys.
+  // Empty = no order set: the picture reads the seam and pose rows as it always did. Not checked
+  // against input_keys: a key no longer among the inputs is skipped and a new input lies on top, so
+  // a later edit of the inputs never makes this refuse a save. Written only with
+  // operation_layer_order_aware (131). Enters no section digest: it says how a step is drawn, not
+  // what is sewn.
+  layerOrder: string[] | undefined;
+  // How far apart the two sides of this step's seams may be before the assembly map calls them
+  // different, millimetres. UNSET = the client's default (1 mm), and 0 is a real value: only equal
+  // rounded lengths pass. Display only: it fits nothing and changes no PDF. Written only with
+  // operation_seam_tolerance_aware (132). Enters no section digest.
+  seamToleranceMm: googletype_Decimal | undefined;
 };
 
 // TechCardGarmentZone says WHERE ON THE GARMENT a step works — and it is one of the two fields a

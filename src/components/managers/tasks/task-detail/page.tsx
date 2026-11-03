@@ -739,7 +739,7 @@ export function TaskDetail() {
                  сделал своё дело. Протянутое выделение — тоже нет. */
             <div
               onClick={canWrite ? editDescriptionOnClick : undefined}
-              className={cn(canWrite && 'cursor-text hover:underline')}
+              className={cn(canWrite && 'cursor-text')}
             >
               {t.description ? (
                 /* МАРКДАУН, А НЕ СЫРОЙ ТЕКСТ (п.6 волны) — тем же разметчиком, что у заметок

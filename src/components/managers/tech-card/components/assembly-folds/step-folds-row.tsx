@@ -25,7 +25,7 @@ const FOLD_CLOSE = cn(
   TILE_QUIET,
 );
 
-export function StepFoldsRow({ index }: { index: number }) {
+export function StepFoldsRow({ index, openSingle }: { index: number; openSingle?: boolean }) {
   const ctx = useStepSeams();
   const geo = ctx?.geometry;
   const inputKeys = useWatch<TechCardFormData>({ name: `operations.${index}.inputKeys` }) as
@@ -67,6 +67,7 @@ export function StepFoldsRow({ index }: { index: number }) {
       innerLines={innerLines}
       cardId={ctx.cardId}
       frozen={ctx.frozen}
+      openSingle={openSingle}
     />
   );
 }
@@ -114,6 +115,7 @@ export function StepFoldsGroup({
   innerLines,
   cardId,
   frozen,
+  openSingle = false,
 }: {
   stepKey: number | string;
   pieces: readonly PieceGeom[];
@@ -122,9 +124,13 @@ export function StepFoldsGroup({
   innerLines?: ReadonlyMap<string, readonly Pt2[][]>;
   cardId: number | undefined;
   frozen: boolean;
+  /** The walk has nothing else on a seamless step: a lone piece opens at once. */
+  openSingle?: boolean;
 }) {
   const reads = usePieceReads(pieces, shapes, grainDeg, innerLines);
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(
+    openSingle && pieces.length === 1 ? pieces[0].pieceKey : null,
+  );
   const size = useMemo(() => sizeOf(shapes), [shapes]);
   const openRead = reads.find((r) => r.geom.pieceKey === open) ?? null;
   const writes = useFoldWrites(cardId, frozen);

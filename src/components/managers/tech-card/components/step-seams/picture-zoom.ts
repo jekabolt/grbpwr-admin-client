@@ -16,7 +16,7 @@ const SLOP = 4;
 const FIELD = 'input, textarea, select, [contenteditable="true"]';
 const DIALOG = '[role="dialog"], [role="alertdialog"]';
 /** The canvas's own buttons keep their press: a shaky click on them never pans. */
-const CANVAS_TOOLS = '[data-seam-zoom], [data-seam-pose-tools]';
+const CANVAS_TOOLS = '[data-seam-zoom], [data-seam-pose-tools], [data-seam-layers]';
 
 /** Zoom by f keeping the box point (px, py) still. The view has no frame: it goes anywhere. */
 export function zoomAt(v: PictureView, f: number, px: number, py: number): PictureView {

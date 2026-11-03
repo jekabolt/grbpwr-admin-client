@@ -11,7 +11,12 @@ import { stepHighlightOf } from '../step-seams/step-highlight';
 import { useStepResults } from '../step-seams/step-result-context';
 import type { StepResult } from '../step-seams/step-result';
 import { StepPictureSvg, useCardGeoms, useSeamRows } from '../step-seams/step-picture-view';
-import { sideLengthMm } from '../step-seams/seam-length';
+import {
+  DEFAULT_SEAM_TOLERANCE_MM,
+  lengthsDiffer,
+  seamToleranceOf,
+  sideLengthMm,
+} from '../step-seams/seam-length';
 import { stepPictureOf, type SurfacePicture } from '../step-seams/surface-picture';
 import { SewnStrip } from './sewn-strip';
 import { StepFoldThumbs } from './step-fold-thumbs';
@@ -34,6 +39,7 @@ export function mismatchFacts(
   seam: SeamCandidate,
   activeFolds: readonly StoredFold[] = [],
   grainDeg?: ReadonlyMap<string, number>,
+  toleranceMm: number = DEFAULT_SEAM_TOLERANCE_MM,
 ): string[] {
   const aParts = candidateSideParts(seam, 'a', read.geoms);
   const bParts = candidateSideParts(seam, 'b', read.geoms);
@@ -59,7 +65,7 @@ export function mismatchFacts(
   const a = aFolded ?? seam.evidence?.aLenMm ?? aPlain;
   const b = bFolded ?? seam.evidence?.bLenMm ?? bPlain;
   const facts: string[] = [];
-  if (a != null && b != null && Math.round(a) !== Math.round(b)) {
+  if (a != null && b != null && lengthsDiffer(a, b, toleranceMm)) {
     facts.push(`length ${Math.round(a)} / ${Math.round(b)} mm`);
   }
 
@@ -125,7 +131,7 @@ export function StepView({ model, index }: { model: MapModel; index: number }) {
     ? [
         ...new Set(
           (read.seams[index] ?? []).flatMap((seam) =>
-            mismatchFacts(read, seam, activeFolds, geo?.grainDeg),
+            mismatchFacts(read, seam, activeFolds, geo?.grainDeg, seamToleranceOf(op.seamToleranceMm)),
           ),
         ),
       ]

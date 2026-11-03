@@ -20,7 +20,7 @@ import { CARD85_OPS, CARD85_SEAMS, card85Geoms, card85Step } from './card85.fixt
 import { card63Geoms, card63InnerLines } from './card63.fixture';
 import { isRightMirrorStep, mirrorRowSig, mirrorStepPlan } from './mirror-step';
 import { placementT } from './step-pose';
-import { surfaceRow, type FormOpLike } from './step-seams-model';
+import { inputGroups, surfaceRow, type FormOpLike } from './step-seams-model';
 import { executeMirrorStep } from './use-mirror-step';
 
 const withKeys = (
@@ -561,6 +561,36 @@ describe('range and refusal rules', () => {
   });
 });
 
+describe('mirrorStepPlan carries the layer order', () => {
+  const geoms = card85Geoms();
+  const rows = [...CARD85_SEAMS.values()];
+  const plan = (ops: readonly FormOpLike[], target: FormOpLike) =>
+    mirrorStepPlan({ step: target, cardOps: ops, rows, poses: [], geoms });
+
+  it('no order on the source: none on the target', () => {
+    const target = card85Step(600);
+    expect(plan(CARD85_OPS, CARD85_OPS[target]).layerOrder).toEqual([]);
+  });
+
+  it('names the same blocks of the mirrored step, in the same order', () => {
+    const source = card85Step(560);
+    const target = card85Step(600);
+    const keys = inputGroups(CARD85_OPS, source, new Set(geoms.keys())).map((one) => one.key);
+    expect(keys.length).toBeGreaterThan(1);
+    const order = [...keys].reverse();
+    const ops = CARD85_OPS.map((op, at) => (at === source ? { ...op, layerOrder: order } : op));
+    const mapped = plan(ops, ops[target]).layerOrder;
+    expect(mapped).toHaveLength(order.length);
+    const groups = inputGroups(ops, target, new Set(geoms.keys()));
+    const sources = inputGroups(ops, source, new Set(geoms.keys()));
+    order.forEach((key, at) => {
+      const piece = sources.find((one) => one.key === key)!.pieces[0];
+      const pieces = groups.find((one) => one.key === mapped[at])!.pieces;
+      expect(geoms.get(piece)!.twinOf.some((link) => pieces.includes(link.key))).toBe(true);
+    });
+  });
+});
+
 describe('mirror write boundary', () => {
   it('upserts, links, requests autosave, then deletes', async () => {
     const row = [...CARD85_SEAMS.values()][0];
@@ -574,6 +604,7 @@ describe('mirror write boundary', () => {
         deleteKeys: ['drop'],
         linkKeys: ['put'],
         foldKeys: ['right-fold'],
+        layerOrder: [],
       },
       {
         upsert: async () => {
@@ -608,6 +639,7 @@ describe('mirror write boundary', () => {
         deleteKeys: [],
         linkKeys: [row.seamKey],
         foldKeys: [],
+        layerOrder: [],
       },
       {
         upsert: async () => false,

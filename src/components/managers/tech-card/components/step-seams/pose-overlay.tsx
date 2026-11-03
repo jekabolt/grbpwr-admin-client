@@ -3,7 +3,13 @@ import { STACKED_TWIN_OFFSET_MM } from 'lib/assembly-skeleton/union';
 import { apply, translate } from 'lib/assembly-skeleton/union/affine';
 import { cn } from 'lib/utility';
 import { useMemo, useRef, type PointerEvent, type ReactNode } from 'react';
-import { cycleLayerHit, piecesUnder, posePieceOrder, type LayerHit } from './pose-picking';
+import {
+  cycleLayerHit,
+  piecesUnder,
+  posePieceOrder,
+  type LayerHit,
+  type PosePieceRing,
+} from './pose-picking';
 import {
   rotatePoseDrag,
   snapPoseForDrag,
@@ -11,13 +17,54 @@ import {
   type PosePickup,
   type PoseSnap,
 } from './step-pose';
-import { boxOf, fitBox, pathOf, toPx, type StepLayout } from './step-picture';
+import { boxOf, fitBox, pathOf, toPx, type Fit, type StepLayout } from './step-picture';
 import type { PictureView } from './step-picture-view';
 
 /** A drop snaps within this many screen px (P8 pose). */
 const POSE_SNAP_PX = 8;
 /** A press only becomes a move past this many screen px: a shaky click stays a click. */
 const POSE_DEAD_ZONE_PX = 6;
+
+/** The canvas as zoomed: screen = fitted × k + x, y. */
+export function poseFit(
+  bounds: ReturnType<typeof boxOf>,
+  w: number,
+  h: number,
+  pad: number,
+  view: PictureView,
+): Fit {
+  const f = fitBox(bounds, w, h, pad);
+  return { s: f.s * view.k, tx: f.tx * view.k + view.x, ty: f.ty * view.k + view.y };
+}
+
+/** The pieces' rings on the screen in the order given, each twin at its offset. */
+export function poseRings(
+  layout: Pick<StepLayout, 'T' | 'stacked'>,
+  bottomToTop: readonly string[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+  fit: Fit,
+): PosePieceRing[] {
+  const twinNumbers = new Map<string, number>();
+  layout.stacked.forEach((group) =>
+    group.slice(1).forEach((piece, index) => twinNumbers.set(piece, index + 2)),
+  );
+  return bottomToTop.flatMap((piece) => {
+    const transform = layout.T.get(piece);
+    const geom = geoms.get(piece);
+    if (!transform || !geom || geom.rs.length < 3) return [];
+    const twin = twinNumbers.get(piece);
+    const offset = twin ? STACKED_TWIN_OFFSET_MM * (twin - 1) * fit.s : 0;
+    return [
+      {
+        piece,
+        ring: geom.rs.map((point) => {
+          const [x, y] = toPx(fit, apply(transform, point));
+          return [x + offset, y + offset] as Pt2;
+        }),
+      },
+    ];
+  });
+}
 
 /**
  * The canvas's hands (P8): every drawn piece a handle under the picture, whose edge doors stay on
@@ -72,41 +119,15 @@ export function PoseOverlay({
   /** The picture, laid between the piece handles and the selection. */
   children: ReactNode;
 }) {
-  const fit = useMemo(() => {
-    const f = fitBox(bounds, w, h, pad);
-    return { s: f.s * view.k, tx: f.tx * view.k + view.x, ty: f.ty * view.k + view.y };
-  }, [bounds, w, h, pad, view.k, view.x, view.y]);
+  const fit = useMemo(() => poseFit(bounds, w, h, pad, view), [bounds, w, h, pad, view]);
   const stacked = useMemo(
     () => new Set(layout.stacked.flatMap((group) => group.slice(1))),
     [layout.stacked],
   );
-  const twinNumbers = useMemo(() => {
-    const numbers = new Map<string, number>();
-    layout.stacked.forEach((group) =>
-      group.slice(1).forEach((piece, index) => numbers.set(piece, index + 2)),
-    );
-    return numbers;
-  }, [layout.stacked]);
   const pieces = useMemo(() => {
     const keys = [...layout.T.keys()].filter((piece) => (geoms.get(piece)?.rs.length ?? 0) >= 3);
-    const bottomToTop = posePieceOrder(layerOrder, layout.stacked, keys);
-    return bottomToTop.flatMap((piece) => {
-      const transform = layout.T.get(piece)!;
-      const geom = geoms.get(piece);
-      if (!geom || geom.rs.length < 3) return [];
-      const twin = twinNumbers.get(piece);
-      const offset = twin ? STACKED_TWIN_OFFSET_MM * (twin - 1) * fit.s : 0;
-      return [
-        {
-          piece,
-          ring: geom.rs.map((point) => {
-            const [x, y] = toPx(fit, apply(transform, point));
-            return [x + offset, y + offset] as Pt2;
-          }),
-        },
-      ];
-    });
-  }, [layout.T, layout.stacked, layerOrder, geoms, fit, twinNumbers]);
+    return poseRings(layout, posePieceOrder(layerOrder, layout.stacked, keys), geoms, fit);
+  }, [layout, layerOrder, geoms, fit]);
   const lastHit = useRef<LayerHit | null>(null);
   const drag = useRef<
     | {
@@ -277,6 +298,8 @@ export function PoseOverlay({
               onSelect(selected === item.piece ? null : item.piece);
             }}
             onPointerDown={(e) => {
+              // The right button opens the piece's menu, it moves nothing.
+              if (e.button !== 0 || e.ctrlKey) return;
               e.preventDefault();
               // A press on a piece moves it; only a press on the empty canvas pans.
               e.stopPropagation();

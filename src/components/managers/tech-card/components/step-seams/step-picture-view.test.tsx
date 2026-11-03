@@ -363,6 +363,54 @@ describe('StepPictureSvg lower layers', () => {
     expect(fillOf(render(10), 'upper')).toBe(fillOf(render(10), 'front'));
   });
 
+  it('paints by level with no order, and by the order when it names the pair', () => {
+    const sleeve = rectangle('sleeve', 'sleeve', 100, 100);
+    const strip = rectangle('strip', 'strip', 10, 120);
+    const liveGeoms = new Map([
+      ['sleeve', sleeve],
+      ['strip', strip],
+    ]);
+    const liveLayout: StepLayout = {
+      ...layout,
+      T: new Map([
+        ['sleeve', IDENTITY],
+        ['strip', translate(45, -10)],
+      ]),
+      input: new Map([
+        ['sleeve', 0],
+        ['strip', 1],
+      ]),
+      bbox: boxOf([
+        [0, -10],
+        [100, 110],
+      ]),
+      layers: [[0, 1]],
+    };
+    const render = (ordered?: readonly (readonly [string, string])[]) =>
+      renderToStaticMarkup(
+        <StepPictureSvg
+          w={140}
+          h={200}
+          pad={4}
+          look='canvas'
+          layout={liveLayout}
+          layers={['strip', 'sleeve']}
+          stacked={[['strip', 'sleeve']]}
+          ordered={ordered}
+          geoms={liveGeoms}
+        />,
+      );
+    const paintsFirst = (markup: string) =>
+      markup.indexOf(surfaceTag(markup, 'sleeve')) < markup.indexOf(surfaceTag(markup, 'strip'))
+        ? 'sleeve'
+        : 'strip';
+
+    expect(paintsFirst(render())).toBe('sleeve');
+    expect(paintsFirst(render([['strip', 'sleeve']]))).toBe('strip');
+    // The colour stays the level's either way.
+    expect(fillOf(render(), 'strip')).toBe(fillOf(render([['strip', 'sleeve']]), 'strip'));
+  });
+
   it('cuts the graph glyph by the same rule', () => {
     const sleeve = rectangle('sleeve', 'sleeve', 100, 100);
     const strip = rectangle('strip', 'strip', 10, 120);

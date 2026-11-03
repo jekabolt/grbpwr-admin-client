@@ -1323,6 +1323,9 @@ const operationSchema = z
     // it is gone: two time inputs with no rule about which to fill guarantee half the cards are timed
     // in the wrong one.
     smv: z.string().optional().default(''),
+    // How far apart this step's seam sides may be before the map calls them different, mm. Empty =
+    // the default; 0 is a real value.
+    seamToleranceMm: z.string().optional().default(''),
     calloutNumber: z.number().optional().default(0), // links a sketch callout.number; 0 = none
     // DRAFT (0410): the assembly skeleton wrote this step and nobody has reviewed it yet. A team mark,
     // not an instruction: the server keeps it out of the card digest. The first meaningful edit of the
@@ -1516,6 +1519,8 @@ const operationSchema = z
     // Folds that close on this step: fold keys of the card (TechCard.pieceFolds). A fold no step
     // names leaves its piece flat.
     foldKeys: z.array(z.string()).default([]),
+    // The owner's order of this step's inputs, bottom to top. Empty = no order: the rows say.
+    layerOrder: z.array(z.string()).default([]),
     // The off-part materials this operation consumes (thread, fusing). The legacy single bomLineKey
     // went with the break — the chip row was always the real answer.
     bomLineKeys: z.array(z.string()).default([]),
@@ -2855,6 +2860,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       seamKeys: (o.seamKeys ?? []).filter((k) => !!k && !poseKeySet.has(k)),
       poseKeys: (o.seamKeys ?? []).filter((k) => !!k && poseKeySet.has(k)),
       foldKeys: (o.foldKeys ?? []).filter(Boolean),
+      layerOrder: (o.layerOrder ?? []).filter(Boolean),
       bomLineKeys: (o.bomLineKeys ?? []).filter((key) => !!key && bomSectionByKey.has(key.trim())),
       // Фотографии шага с выносками. Координаты приходят Decimal'ом и остаются строкой: тот же
       // тип на проводе, в форме и в БД — круговой рейс без округлений.
@@ -2875,6 +2881,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       seamKind: (o.seamKind ?? '').trim(),
       workVariant: (o.workVariant ?? '').trim(),
       smv: decimalToInput(o.smv),
+      seamToleranceMm: decimalToInput(o.seamToleranceMm),
       draft: !!o.draft,
       review: (o.review ?? '').trim(),
       assemblyBlockDetached: !!o.assemblyBlockDetached,
@@ -3803,6 +3810,10 @@ export function mapFormToTechCardInsert(
     // Step folds (op.foldKeys) likewise: without the flag the server refuses a write over a card
     // whose steps close folds.
     operationFoldsAware: true,
+    // Step seam tolerance likewise.
+    operationSeamToleranceAware: true,
+    // Step layer order likewise.
+    operationLayerOrderAware: true,
     // `!!` and not `!== undefined`: a card with no construction row comes back with an explicit
     // `null` (the gateway marshals an unset message that way), and treating that as «had one» would
     // make every such card start writing an all-NULL construction row — see mapConstructionOut.
@@ -3972,6 +3983,8 @@ export function mapFormToTechCardInsert(
         ],
         // Same: the server refuses a key the card does not hold and a repeat on one step.
         foldKeys: [...new Set((o.foldKeys ?? []).map((k) => k.trim()).filter(Boolean))],
+        // The server refuses a repeat; a key no longer among the inputs is simply skipped.
+        layerOrder: [...new Set((o.layerOrder ?? []).map((k) => k.trim()).filter(Boolean))],
         bomLineKeys: opBomKeys,
         // Фотографии шага. Пустой список шлётся как есть — сервер трактует его так же, как
         // отсутствие поля, а щит совместимости смотрит на ФЛАГ `mediaAware`, а не на наличие
@@ -4024,6 +4037,7 @@ export function mapFormToTechCardInsert(
         review: (o.review ?? '').trim(),
         assemblyBlockDetached: !!o.assemblyBlockDetached,
         smv: inputToDecimal(o.smv),
+        seamToleranceMm: inputToDecimal(o.seamToleranceMm),
         calloutNumber: o.calloutNumber || 0,
         seamClass: (o.seamClass || 'TECH_CARD_SEAM_CLASS_UNKNOWN') as common_TechCardSeamClass,
         stitchesPerCm: inputToDecimal(o.stitchesPerCm),

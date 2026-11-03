@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { steppedTime } from './step-time-field';
 
 describe('steppedTime', () => {
+  it('starts an empty tolerance from its default', () => {
+    expect(steppedTime('', -1, 1)).toBe('0');
+    expect(steppedTime('', 1, 1)).toBe('2');
+    expect(steppedTime('0', -1, 1)).toBe('0');
+  });
+
   it('steps by the delta in the same string form', () => {
     expect(steppedTime('1.2', 0.1)).toBe('1.3');
     expect(steppedTime('1.2', -0.1)).toBe('1.1');

@@ -19,7 +19,11 @@ export type MirrorStepWriteResult = { ok: true } | { ok: false; error: string };
 export type MirrorStepWriteDeps = {
   upsert: (rows: readonly StoredRow[]) => Promise<boolean>;
   canonicalize: (rows: readonly StoredRow[]) => StoredRow[];
-  link: (rows: readonly StoredRow[], foldKeys: readonly string[]) => void;
+  link: (
+    rows: readonly StoredRow[],
+    foldKeys: readonly string[],
+    layerOrder: readonly string[],
+  ) => void;
   requestAutosave: () => void;
   rowsByKey: () => ReadonlyMap<string, StoredRow>;
   remove: (rows: readonly StoredRow[]) => Promise<boolean>;
@@ -40,7 +44,7 @@ export async function executeMirrorStep(
       };
     }
     const canonical = deps.canonicalize(plan.upsert);
-    deps.link(canonical, plan.foldKeys);
+    deps.link(canonical, plan.foldKeys, plan.layerOrder);
     deps.requestAutosave();
     const byKey = deps.rowsByKey();
     const dropping = plan.deleteKeys.flatMap((key) => byKey.get(key) ?? []);
@@ -121,7 +125,7 @@ export function useMirrorStep({
     return executeMirrorStep(plan, {
       upsert: (put) => ctx.writes.upsert([...put]),
       canonicalize: (put) => canonicalMirrorRows(put, liveRows()),
-      link: (linked, foldKeys) => {
+      link: (linked, foldKeys, layerOrder) => {
         setValue(
           `operations.${index}.seamKeys`,
           linked.filter((row) => row.kind !== 'pose').map((row) => row.seamKey),
@@ -133,6 +137,7 @@ export function useMirrorStep({
           { shouldDirty: true },
         );
         setValue(`operations.${index}.foldKeys`, [...foldKeys], { shouldDirty: true });
+        setValue(`operations.${index}.layerOrder`, [...layerOrder], { shouldDirty: true });
       },
       requestAutosave: () => autosave.request('seams'),
       rowsByKey: () => new Map(liveRows().map((row) => [row.seamKey, row])),

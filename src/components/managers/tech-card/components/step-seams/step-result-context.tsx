@@ -22,6 +22,7 @@ const operationsSignature = (ops: readonly FormOpLike[]) =>
       operationNumber: op.operationNumber,
       assemblyBlockDetached: op.assemblyBlockDetached,
       ...(op.foldKeys?.length ? { foldKeys: op.foldKeys } : {}),
+      ...(op.layerOrder?.length ? { layerOrder: op.layerOrder } : {}),
     })),
   );
 

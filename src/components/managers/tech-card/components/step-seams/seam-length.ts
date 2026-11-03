@@ -12,6 +12,20 @@ export type SideLengthOptions = {
   grainDeg?: number | ReadonlyMap<string, number> | null;
 };
 
+/** A step that states no tolerance: 51 / 50 is the same seam, 52 / 50 is not. */
+export const DEFAULT_SEAM_TOLERANCE_MM = 1;
+
+/** The step's stored tolerance, form string: empty means the default, and 0 is a real value. */
+export function seamToleranceOf(raw: string | undefined): number {
+  const value = Number.parseFloat((raw ?? '').trim().replace(',', '.'));
+  return Number.isFinite(value) && value >= 0 ? value : DEFAULT_SEAM_TOLERANCE_MM;
+}
+
+/** The sides as printed: whole mm are compared, so the numbers on the card explain the verdict. */
+export function lengthsDiffer(a: number, b: number, toleranceMm: number): boolean {
+  return Math.abs(Math.round(a) - Math.round(b)) > toleranceMm;
+}
+
 const INNER = /^(.*):i(\d+)$/;
 const LAYER_EDGE_REL = 0.01;
 const FOLD_SAMPLES = 9;

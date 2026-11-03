@@ -13,7 +13,7 @@ import {
   card6InnerLines,
   card6Step,
 } from './card6.fixture';
-import { layerStyle, type LayerStyleInput } from './layer-style';
+import { layerStyle, paintedOrder, type LayerStyleInput } from './layer-style';
 import type { PictureActionGlyph } from './step-picture-view';
 import { stepResults } from './step-result';
 
@@ -535,5 +535,43 @@ describe('layerStyle', () => {
         expect(levelsIn(reversed)).toEqual(levelsIn(style));
       }
     });
+  });
+});
+
+describe('paintedOrder', () => {
+  const style = (level: number, coveredBy: readonly string[] = []) => ({
+    level,
+    coveredBy: [...coveredBy],
+  });
+  const styles = new Map([
+    ['big', style(0, ['small'])],
+    ['small', style(1)],
+    ['loose', style(0)],
+  ]);
+
+  it('with no order the level alone decides, whatever the layers are', () => {
+    expect(paintedOrder(['small', 'big', 'loose'], styles)).toEqual(['big', 'loose', 'small']);
+    expect(paintedOrder(['small', 'big', 'loose'], styles, [])).toEqual(['big', 'loose', 'small']);
+  });
+
+  it('an owner pair beats the level between two pieces', () => {
+    const out = paintedOrder(['small', 'big', 'loose'], styles, [['small', 'big']]);
+    expect(out.indexOf('small')).toBeLessThan(out.indexOf('big'));
+  });
+
+  it('a pair no owner named keeps its level', () => {
+    const inner = new Map([
+      ['big', style(0, ['strip'])],
+      ['strip', style(1)],
+      ['other', style(2)],
+    ]);
+    const out = paintedOrder(['strip', 'big', 'other'], inner, [['other', 'big']]);
+    expect(out.indexOf('big')).toBeLessThan(out.indexOf('strip'));
+    expect(out.indexOf('other')).toBeLessThan(out.indexOf('big'));
+  });
+
+  it('a piece with no style reads as level 0, and nothing is lost', () => {
+    const out = paintedOrder(['ghost', 'small', 'big'], styles, [['small', 'big']]);
+    expect([...out].sort()).toEqual(['big', 'ghost', 'small']);
   });
 });

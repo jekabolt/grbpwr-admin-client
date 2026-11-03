@@ -27,9 +27,13 @@ export type LayerAnchor = { readonly piece: string; readonly layer?: SeamLayer }
 
 /** One input of a step, rigid: its pieces and the order and claims it carries from earlier steps. */
 export type LayerBlock = {
+  /** The input it is at its step: what the owner's order names. */
+  key?: string;
   pieces: readonly string[];
   layers?: readonly string[];
   stacked?: readonly LayerRelation[];
+  /** The part of `stacked` an owner's order set at an earlier step. */
+  ordered?: readonly LayerRelation[];
 };
 
 /** One stored seam or pose row of a step, in the order it is read. */
@@ -40,7 +44,12 @@ export type LayerRow = {
   sideB: readonly LayerAnchor[];
 };
 
-export type LayerInput = { blocks: readonly LayerBlock[]; rows: readonly LayerRow[] };
+export type LayerInput = {
+  blocks: readonly LayerBlock[];
+  rows: readonly LayerRow[];
+  /** The owner's order of the blocks, bottom to top, by block key. */
+  order?: readonly string[];
+};
 
 /** A stored flag that lost to an earlier one. */
 export type LayerConflict = { key: string; piece: string; partner: string; layer: SeamLayer };
@@ -51,6 +60,8 @@ export type LayerStacking = {
   stacked: LayerRelation[];
   lower: string[];
   conflicts: LayerConflict[];
+  /** The part of `stacked` an owner's order set, here or carried; absent with none. */
+  ordered?: LayerRelation[];
 };
 
 export type StepResult = {
@@ -63,6 +74,8 @@ export type StepResult = {
    * flag only), carried claims included. The only source of under/over.
    */
   stacked: readonly (readonly [string, string])[];
+  /** The part of `stacked` the owner's order set, here or at an earlier step; none = no order. */
+  ordered?: readonly LayerRelation[];
   /** Pieces some claim puts under another piece; every other piece is not lower. */
   lower: readonly string[];
   /** What `layersOf` read for this result: PLACE recomputes its preview from the same input. */
@@ -227,7 +240,10 @@ function applyCurrentPoses(
  * Stable topological order: input order is the tie-breaker, constraints only move layers. Relations
  * come in priority order; one that would close a cycle with those before it is dropped.
  */
-function orderedLayers(base: readonly string[], relations: readonly LayerRelation[]): string[] {
+export function orderedLayers(
+  base: readonly string[],
+  relations: readonly LayerRelation[],
+): string[] {
   const order = unique(base);
   const present = new Set(order);
   const next = new Map<string, Set<string>>();
@@ -281,8 +297,17 @@ function reachesAny(
  * rewritten). A flag between two pieces of one block stays a claim about those two pieces. Claims made
  * at an earlier step ride in the block (`stacked`). With no claim nothing is lower and the later input
  * lies on top: carried order, then input order, a surface part like any other input.
+ *
+ * THE OWNER'S ORDER (`order`, the LAYERS window, bottom to top, by block key) beats the flags between
+ * blocks: they are neither read nor listed. Flags inside a block read as before. A key no longer among
+ * the inputs is skipped and a new input lies on top; an order naming no block is no order. Its pairs
+ * ride to later steps in `stacked`, and in `ordered`, which is what the fills paint by.
  */
-export function layersOf(blocks: readonly LayerBlock[], rows: readonly LayerRow[]): LayerStacking {
+export function layersOf(
+  blocks: readonly LayerBlock[],
+  rows: readonly LayerRow[],
+  order?: readonly string[],
+): LayerStacking {
   const blockOf = new Map<string, number>();
   blocks.forEach((block, index) => {
     for (const piece of block.pieces) if (!blockOf.has(piece)) blockOf.set(piece, index);
@@ -292,6 +317,7 @@ export function layersOf(blocks: readonly LayerBlock[], rows: readonly LayerRow[
   );
   const carriedOf = (block: LayerBlock, index: number) =>
     (block.layers ?? []).filter((piece) => members[index].includes(piece));
+  const ranking = blockRanking(blocks, members, order);
 
   const above = new Map<string, Set<string>>();
   const stacked: LayerRelation[] = [];
@@ -313,6 +339,7 @@ export function layersOf(blocks: readonly LayerBlock[], rows: readonly LayerRow[
     for (const partner of unique(other.map((candidate) => candidate.piece))) {
       const theirs = blockOf.get(partner);
       if (partner === anchor.piece || theirs == null) continue;
+      if (ranking && own !== theirs) continue;
       const mine = own === theirs ? [anchor.piece] : members[own];
       const yours = own === theirs ? [partner] : members[theirs];
       const [unders, overs] = anchor.layer === 'under' ? [mine, yours] : [yours, mine];
@@ -334,8 +361,22 @@ export function layersOf(blocks: readonly LayerBlock[], rows: readonly LayerRow[
     for (let at = 1; at < carried.length; at++) hints.push([carried[at - 1], carried[at]]);
   });
 
-  const base = blocks.flatMap((block, index) => {
-    const carried = carriedOf(block, index);
+  const ordered: LayerRelation[] = blocks.flatMap((block, index) =>
+    (block.ordered ?? []).filter(
+      ([under, over]) => members[index].includes(under) && members[index].includes(over),
+    ),
+  );
+  ranking?.forEach((lower, at) => {
+    for (const upper of ranking.slice(at + 1))
+      for (const under of members[lower])
+        for (const over of members[upper]) {
+          add(under, over);
+          ordered.push([under, over]);
+        }
+  });
+
+  const base = (ranking ?? blocks.map((_, index) => index)).flatMap((index) => {
+    const carried = carriedOf(blocks[index], index);
     return [...carried, ...members[index].filter((piece) => !carried.includes(piece))];
   });
   return {
@@ -343,7 +384,24 @@ export function layersOf(blocks: readonly LayerBlock[], rows: readonly LayerRow[
     stacked,
     lower: unique(stacked.map(([under]) => under)),
     conflicts,
+    ...(ordered.length ? { ordered } : {}),
   };
+}
+
+/** Block indexes bottom to top by the owner's order; null when it names no block with a piece. */
+function blockRanking(
+  blocks: readonly LayerBlock[],
+  members: readonly (readonly string[])[],
+  order: readonly string[] | undefined,
+): number[] | null {
+  if (!order?.length) return null;
+  const named = unique(order).flatMap((key) => {
+    const index = blocks.findIndex((block, at) => block.key === key && members[at].length > 0);
+    return index < 0 ? [] : [index];
+  });
+  if (!named.length) return null;
+  const known = new Set(named);
+  return [...named, ...blocks.map((_, index) => index).filter((index) => !known.has(index))];
 }
 
 /**
@@ -456,11 +514,14 @@ function computeStep(
   });
   const layerInput: LayerInput = {
     blocks: inputs.map((group) => ({
+      key: group.key,
       pieces: group.pieces.filter((piece) => transforms.has(piece)),
       ...(group.seed
         ? { layers: group.seed.result.layers, stacked: group.seed.result.stacked }
         : {}),
+      ...(group.seed?.result.ordered ? { ordered: group.seed.result.ordered } : {}),
     })),
+    ...(op?.layerOrder?.length ? { order: op.layerOrder } : {}),
     rows: [
       ...stored.map(({ key, row }): LayerRow => ({ key, sideA: row.sideA, sideB: row.sideB })),
       ...currentPoses.map(
@@ -473,13 +534,14 @@ function computeStep(
       ),
     ],
   };
-  const stacking = layersOf(layerInput.blocks, layerInput.rows);
+  const stacking = layersOf(layerInput.blocks, layerInput.rows, layerInput.order);
   const result: StepResult = {
     opIndex: index,
     transforms,
     layers: stacking.layers,
     stacked: stacking.stacked,
     lower: stacking.lower,
+    ...(stacking.ordered ? { ordered: stacking.ordered } : {}),
     layerInput,
     layerConflicts: stacking.conflicts,
     blocks: inputs.map((group, groupIndex) => ({
@@ -528,6 +590,7 @@ export function stepResultsSignature(
       operationNumber: op.operationNumber,
       assemblyBlockDetached: op.assemblyBlockDetached,
       ...(op.foldKeys?.length ? { foldKeys: op.foldKeys } : {}),
+      ...(op.layerOrder?.length ? { layerOrder: op.layerOrder } : {}),
     })),
     rows: sortedEntries(input.byKey),
     poses: sortedEntries(input.poses ?? new Map()),

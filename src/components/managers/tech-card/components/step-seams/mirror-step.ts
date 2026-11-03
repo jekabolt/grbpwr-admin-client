@@ -20,7 +20,7 @@ import { contourSig, frameOf, inFrame, reverses, rmsFit, runsOfPiece } from 'lib
 
 import { decodeHandPlace, encodeHandPlace, isHandSeamKind } from './step-hand';
 import { mirrorPlacement } from './step-pose';
-import { stepInputPieces, type FormOpLike } from './step-seams-model';
+import { inputGroups, stepInputPieces, type FormOpLike } from './step-seams-model';
 
 export type MirrorStepKind = 'no-twin' | 'edge-mismatch' | 'same' | 'create' | 'replace';
 
@@ -31,6 +31,7 @@ export type MirrorStepPlan = {
   deleteKeys: string[];
   linkKeys: string[];
   foldKeys: string[];
+  layerOrder: string[];
 };
 
 export type MirrorStepPlanInput = {
@@ -46,6 +47,7 @@ export type MirrorStepPlanInput = {
 type TwinLink = { key: string; kind: 'mirror' | 'identical' };
 type TwinCandidate = {
   op: FormOpLike;
+  index: number;
   links: Map<string, TwinLink>;
   ambiguous: boolean;
 };
@@ -57,6 +59,7 @@ const EMPTY_PLAN = (kind: 'no-twin' | 'edge-mismatch', sourceOp?: FormOpLike): M
   deleteKeys: [],
   linkKeys: [],
   foldKeys: [],
+  layerOrder: [],
 });
 
 const opKeys = (op: FormOpLike | undefined) => [
@@ -141,6 +144,7 @@ const twinCandidateOf = (
     if (!mappings.length) continue;
     return {
       op,
+      index,
       links: mappings[0],
       ambiguous: mappings.length > 1,
     };
@@ -436,6 +440,26 @@ const mapFoldKeys = (
   return keys;
 };
 
+/** The left step's order of blocks on the right step, each block by the twin of its first piece. */
+const mapLayerOrder = (
+  source: number,
+  target: number,
+  links: ReadonlyMap<string, TwinLink>,
+  cardOps: readonly FormOpLike[],
+  pieceKeys: ReadonlySet<string>,
+): string[] => {
+  const order = cardOps[source]?.layerOrder ?? [];
+  if (!order.length) return [];
+  const sourceGroups = inputGroups(cardOps, source, pieceKeys);
+  const targetGroups = inputGroups(cardOps, target, pieceKeys);
+  const mapped = order.flatMap((key) => {
+    const piece = sourceGroups.find((group) => group.key === key)?.pieces[0];
+    const twin = piece ? links.get(piece)?.key : undefined;
+    return targetGroups.find((group) => twin && group.pieces.includes(twin))?.key ?? [];
+  });
+  return [...new Set(mapped)];
+};
+
 const anchorSig = (anchor: EdgeAnchor) =>
   `${anchor.piece}:${anchor.edgeHint}:${anchor.range[0]}-${anchor.range[1]}`;
 
@@ -552,7 +576,17 @@ export function mirrorStepPlan({
   const sameFolds =
     mappedFoldKeys.length === (step.foldKeys?.length ?? 0) &&
     mappedFoldKeys.every((key, index) => key === step.foldKeys?.[index]);
-  if (sameRows(expected, linked) && sameFolds) {
+  const layerOrder = mapLayerOrder(
+    candidate.index,
+    targetIndex,
+    candidate.links,
+    cardOps,
+    new Set(geoms.keys()),
+  );
+  const sameOrder =
+    layerOrder.length === (step.layerOrder?.length ?? 0) &&
+    layerOrder.every((key, index) => key === step.layerOrder?.[index]);
+  if (sameRows(expected, linked) && sameFolds && sameOrder) {
     return {
       kind: 'same',
       sourceOp: candidate.op,
@@ -560,6 +594,7 @@ export function mirrorStepPlan({
       deleteKeys: [],
       linkKeys,
       foldKeys: mappedFoldKeys,
+      layerOrder,
     };
   }
   const keep = new Set(linkKeys);
@@ -567,12 +602,13 @@ export function mirrorStepPlan({
     .map((row) => row.seamKey)
     .filter((key) => !keep.has(key) && !shared.has(key));
   return {
-    kind: linked.length || step.foldKeys?.length ? 'replace' : 'create',
+    kind: linked.length || step.foldKeys?.length || step.layerOrder?.length ? 'replace' : 'create',
     sourceOp: candidate.op,
     upsert: expected,
     deleteKeys,
     linkKeys,
     foldKeys: mappedFoldKeys,
+    layerOrder,
   };
 }
 

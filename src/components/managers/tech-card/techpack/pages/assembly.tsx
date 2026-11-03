@@ -147,6 +147,7 @@ const THUMB_BADGE_PX = 5.5;
 export type ResultStepPicture = StepPicture & {
   resultLayers?: readonly string[];
   resultStacked?: StepResult['stacked'];
+  resultOrdered?: StepResult['ordered'];
 };
 
 type Row = AsmRow & {
@@ -2953,6 +2954,7 @@ const sceneOperations = (techCard: common_TechCard): SceneOp[] => {
       seamKeys: posed.length ? keys.filter((key) => !poseKeys.has(key)) : keys,
       ...(posed.length ? { poseKeys: posed } : {}),
       ...(operation.foldKeys?.length ? { foldKeys: operation.foldKeys } : {}),
+      ...(operation.layerOrder?.length ? { layerOrder: operation.layerOrder } : {}),
       fullnessRatio: operation.stitching?.fullnessRatio?.value,
     };
   });
@@ -3442,6 +3444,8 @@ export function editorOperationPictures(
             layout,
             resultLayers: ownerResult.layers,
             resultStacked: ownerResult.stacked,
+            ...(ownerResult.ordered ? { resultOrdered: ownerResult.ordered } : {}),
+            ...(ownerResult.ordered ? { resultOrdered: ownerResult.ordered } : {}),
           });
           const output = operation.outputUnitKey?.trim();
           if (output) assembledByUnit.set(output, layout);
@@ -4471,6 +4475,7 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
           layout={r.editorPic.layout}
           layers={r.editorPic.resultLayers}
           stacked={r.editorPic.resultStacked}
+          ordered={r.editorPic.resultOrdered}
           geoms={r.editorPic.geoms}
           innerLines={r.editorPic.innerLines}
           stepEdges={r.editorPic.stepEdges}

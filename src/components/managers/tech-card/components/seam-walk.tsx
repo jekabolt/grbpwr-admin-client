@@ -19,7 +19,7 @@ import {
   type KeyboardEvent,
 } from 'react';
 import { Button, Placeholder, Text } from 'ui';
-import { useActiveStepStore } from './assembly-map/active-step';
+import { StepFoldsRow } from './assembly-folds/step-folds-row';
 import { mapStepPictureOf, StepView } from './assembly-map/step-view';
 import { useMapModel, type FormOp, type MapModel } from './assembly-map/use-map-model';
 import { useTechCardAutosave } from './design/autosave-contract';
@@ -80,7 +80,6 @@ export function SeamWalk({
   const ctx = useStepSeams();
   const model = useMapModel();
   const autosave = useTechCardAutosave();
-  const store = useActiveStepStore();
   const pieceKeys = useCardPieceKeys();
   const { geoms } = useCardGeoms();
   const { catalog } = useOperationWorkCatalog();
@@ -145,7 +144,6 @@ export function SeamWalk({
   const close = () => {
     autosave.request('seams');
     writeMemory(cardId, null);
-    if (index >= 0) store?.select(index, 'rail');
     onExit(index);
   };
 
@@ -212,7 +210,7 @@ export function SeamWalk({
                   />
                 </Suspense>
               ) : (
-                <WalkSinglePicture key={fields[shown]?.id} index={shown} model={model} />
+                <WalkSingle key={fields[shown]?.id} index={shown} model={model} />
               )}
             </main>
             <aside
@@ -332,7 +330,24 @@ function WalkRail({
   );
 }
 
-/** FUSING, PRESS, FOLD: the piece as the card draws it, nothing to pick. */
+/** FUSING, PRESS, FOLD: the same folds as the step editor, the picture only without a pattern. */
+function WalkSingle({ index, model }: { index: number; model: MapModel }) {
+  const pieces = useStepSeams()?.geometry?.pieces;
+  const foldable = (model.ops[index]?.inputKeys ?? []).some(
+    (key) => (pieces?.get(key.trim())?.geom?.rs.length ?? 0) >= 3,
+  );
+  if (!foldable) return <WalkSinglePicture index={index} model={model} />;
+  return (
+    <div
+      data-seam-walk-folds=''
+      className='h-full min-h-0 overflow-y-auto border border-borderColor bg-bgColor p-4'
+    >
+      <StepFoldsRow index={index} openSingle />
+    </div>
+  );
+}
+
+/** The piece as the card draws it, nothing to pick. */
 function WalkSinglePicture({ index, model }: { index: number; model: MapModel }) {
   const results = useStepResults();
   const picture = mapStepPictureOf(results, index);

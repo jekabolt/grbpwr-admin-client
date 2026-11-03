@@ -2225,8 +2225,8 @@ export function TechCardForm({
       // owning tab so the error dot + focus land where the user can act (Q1/S24).
       const { applied, unmapped, contradictions } = applyServerFieldErrors(error, form.setError, {
         stripPrefixes: ['tech_card'],
-        // A step's fold link has no input to pin on: its refusal is said in words below.
-        allow: (path) => !/\.foldKeys(\.|$)/.test(path),
+        // A step's fold link and layer order have no input to pin on: said in words below.
+        allow: (path) => !/\.(foldKeys|layerOrder)(\.|$)/.test(path),
         // ОТКАЗ, ПРОТИВОРЕЧАЩИЙ ЭКРАНУ. `required` / `unknown_value` про поле, которое форма
         // держит ЗАПОЛНЕННЫМ, означает не «человек не заполнил», а «сервер не узнал значения» —
         // бэкенд старше приложения и выбросил незнакомый член словаря по дороге. Предикат тот же

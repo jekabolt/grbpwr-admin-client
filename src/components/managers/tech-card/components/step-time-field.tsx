@@ -10,8 +10,9 @@ const STEPPER = 'absolute inset-y-px z-10 w-6 text-labelColor hover:text-textCol
  * One step of the field, in the form's own string. An empty field going down stays empty: nothing
  * was stated, and minus cannot state zero. Thousandths are rounded so 0.1 + 0.2 reads 0.3.
  */
-export function steppedTime(raw: string | undefined, delta: number): string {
-  const value = parseDecimalNumber(raw);
+export function steppedTime(raw: string | undefined, delta: number, empty?: number): string {
+  const parsed = parseDecimalNumber(raw);
+  const value = Number.isFinite(parsed) ? parsed : (empty ?? parsed);
   const known = Number.isFinite(value);
   if (!known && delta < 0) return raw ?? '';
   const next = Math.round(((known ? value : 0) + delta) * 1000) / 1000;
@@ -19,7 +20,20 @@ export function steppedTime(raw: string | undefined, delta: number): string {
 }
 
 /** The step's time, minutes: − and + at the box's edges, 0.1 a press, 1 with Shift; same for arrows. */
-export function StepTimeField({ name, label }: { name: string; label: string }) {
+export function StepTimeField({
+  name,
+  label,
+  what = 'time',
+  step: stepBy = STEP,
+  empty,
+}: {
+  name: string;
+  label: string;
+  what?: string;
+  step?: number;
+  /** What an empty field stands for: the ghost in the box, and where − and + start from. */
+  empty?: number;
+}) {
   const { control, trigger } = useFormContext();
 
   return (
@@ -28,14 +42,14 @@ export function StepTimeField({ name, label }: { name: string; label: string }) 
       name={name}
       render={({ field }) => {
         const step = (direction: 1 | -1, shift: boolean) =>
-          field.onChange(steppedTime(field.value, direction * (shift ? SHIFT_STEP : STEP)));
+          field.onChange(steppedTime(field.value, direction * (shift ? SHIFT_STEP : stepBy), empty));
         return (
           <FormItem>
             <FormLabel>{label}</FormLabel>
             <div className='relative'>
               <Button
                 tabIndex={-1}
-                aria-label='less time'
+                aria-label={`less ${what}`}
                 className={`${STEPPER} left-px`}
                 onClick={(e: React.MouseEvent) => step(-1, e.shiftKey)}
               >
@@ -46,6 +60,7 @@ export function StepTimeField({ name, label }: { name: string; label: string }) 
                   inputMode='decimal'
                   {...field}
                   value={field.value ?? ''}
+                  placeholder={empty === undefined ? undefined : String(empty)}
                   className='px-6 text-center tabular-nums'
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     field.onChange(sanitizeDecimal(e.target.value))
@@ -63,7 +78,7 @@ export function StepTimeField({ name, label }: { name: string; label: string }) 
               </FormControl>
               <Button
                 tabIndex={-1}
-                aria-label='more time'
+                aria-label={`more ${what}`}
                 className={`${STEPPER} right-px`}
                 onClick={(e: React.MouseEvent) => step(1, e.shiftKey)}
               >

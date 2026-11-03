@@ -9,20 +9,34 @@
 // one side is an inner line), its key goes onto the step after the ones already there, and the
 // picker closes. The same canvas moves any rigid input block by hand: a press on an edge picks or
 // spans it, a drag from inside a piece past a dead zone moves its block (snap is optional; ⟲ ⟳ ⇋,
-// upright, layer choice and reset stay pending). One ACCEPT stores the moves and the pair; a move is
-// stored by nothing else, and it leaves the pick as it was.
+// upright and reset stay pending). One ACCEPT stores the moves and the pair; a move is stored by
+// nothing else, and it leaves the pick as it was. The order of the blocks is not a move: the LAYERS
+// window and a right click write it to the step at once, through the card's autosave.
 
 import * as Dialog from '@radix-ui/react-dialog';
 import { activeFoldRows } from 'lib/folds';
 import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { anchorOfRunId, type EdgeAnchor, type SidePart, type StoredSeam } from 'lib/seams';
 import { cn } from 'lib/utility';
-import { useCallback, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
+} from 'react';
+import { useFormContext } from 'react-hook-form';
 import { Button, Chip, ChipRow, Close, ConfirmationModal, Placeholder, Text } from 'ui';
 import { runsOfSide } from '../assembly-seams/seam-actions';
 import { useSeamsStore } from '../assembly-seams/seams-store';
 import { useFoldRows } from '../assembly-folds/folds-store';
+import { useTechCardAutosave } from '../design/autosave-contract';
+import type { TechCardFormData } from '../schema';
 import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
+import { moveRow, orderOfRows, windowRows, type LayerMove } from './layers-window';
+import { LayersMenu, LayersWindow } from './layers-window-view';
 import { PairNo } from './pair-no';
 import { recordSeamDecision } from './seam-decisions';
 import { isGuess, pickTarget, seamSideName, sideForClick } from './seam-focus';
@@ -40,8 +54,8 @@ import {
   type SidePick,
   type SpanRange,
 } from './span-pick';
-import { snapAtDuringDrag } from './pose-picking';
-import { PoseOverlay } from './pose-overlay';
+import { piecesUnder, snapAtDuringDrag } from './pose-picking';
+import { poseFit, PoseOverlay, poseRings } from './pose-overlay';
 import { useStepResults } from './step-result-context';
 import { useAttachStepPose, useAttachStepSeam, useStepSeamActions } from './step-seams-context';
 import { stepWords } from './step-words';
@@ -95,6 +109,9 @@ const sameSel = (x: Sel, y: Sel) =>
 const polyLen = (pts: readonly Pt[]) =>
   pts.reduce((s, p, i) => (i ? s + Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) : s), 0);
 const mmText = (v: number) => `${fmtMm(v)} mm`;
+/** The LAYERS window stays as the owner left it from step to step while the tab lives. */
+let layersShown = true;
+const NO_PAINT: readonly string[] = [];
 
 export default function SeamPicker({
   index,
@@ -177,6 +194,8 @@ export function SeamPickerBody({
   } = scene;
   const frozen = (scene.ctx?.frozen ?? true) || readOnly;
   const cardId = scene.ctx?.cardId;
+  const form = useFormContext<TechCardFormData>();
+  const autosave = useTechCardAutosave();
   const attach = useAttachStepSeam(index);
   const attachPose = useAttachStepPose(index);
   const seamActions = useStepSeamActions(index);
@@ -215,10 +234,6 @@ export function SeamPickerBody({
   }, [sel, shownParts, stepFolds, geoms, geo?.grainDeg]);
   const [saved, setSaved] = useState(false);
   const poses = scene.poses;
-  const stepRows = useMemo(
-    () => (op?.seamKeys ?? []).flatMap((key) => byKey.get(key) ?? []),
-    [op?.seamKeys, byKey],
-  );
   const {
     posePending,
     poseSel,
@@ -236,8 +251,7 @@ export function SeamPickerBody({
     poseShown,
     shownPoseLayers,
     shownPoseStacked,
-    onTop,
-    pressOnTop,
+    shownPoseOrdered,
     clearPose,
     pickupOf,
     dropPose,
@@ -250,14 +264,12 @@ export function SeamPickerBody({
     poses,
     stepPicture,
     stepResult,
-    stepRows,
     geoms,
     grainDeg: geo?.grainDeg,
     busy,
     frozen,
     setBusy,
     setRefused,
-    attach,
     attachPose,
     fitSource,
   });
@@ -612,6 +624,10 @@ export function SeamPickerBody({
   };
 
   const escape = () => {
+    if (layerMenu) {
+      setLayerMenu(null);
+      return true;
+    }
     if (poseSel) {
       setPoseSel(null);
       return true;
@@ -680,15 +696,89 @@ export function SeamPickerBody({
   const activeIndex = shownActive ? stored.indexOf(shownActive) : -1;
 
   const movable = !frozen && !!cardId;
+  const pad = phone ? 28 : 64;
+
+  // ── the order of the blocks: the LAYERS window and a right click ──
+  const [painted, setPainted] = useState(NO_PAINT);
+  const onPainted = useCallback(
+    (next: readonly string[]) =>
+      setPainted((held) =>
+        held.length === next.length && held.every((key, at) => key === next[at]) ? held : next,
+      ),
+    [],
+  );
+  const stepOrder = op?.layerOrder;
+  const layerRows = useMemo(
+    () => windowRows(stepResult?.layerInput.blocks ?? [], painted, stepOrder),
+    [stepResult?.layerInput.blocks, painted, stepOrder],
+  );
+  const layersOn = movable && layerRows.length >= 2;
+  const [layersOpen, setLayersOpen] = useState(layersShown);
+  const [layerMenu, setLayerMenu] = useState<{ key: string; x: number; y: number } | null>(null);
+  const closeLayerMenu = useCallback(() => setLayerMenu(null), []);
+  useEffect(closeLayerMenu, [closeLayerMenu, index]);
+  const moveLayer = (key: string, move: LayerMove) => {
+    if (busy || !layersOn) return;
+    const next = moveRow(layerRows, key, move);
+    if (next === layerRows) return;
+    form.setValue(`operations.${index}.layerOrder`, orderOfRows(next), { shouldDirty: true });
+    autosave.request('layers');
+  };
+  const drawnGeoms = useMemo(
+    () => foldedDrawing(geoms, innerLines, stepFolds?.flat).geoms,
+    [geoms, innerLines, stepFolds?.flat],
+  );
+  const pickLayerRow = (pieces: readonly string[]) => {
+    setPoseSel(pieces[0]);
+    setPoseDrag(null);
+  };
+  // The piece seen under the pointer: the rings in the order of the fills, topmost first.
+  const onCanvasMenu = (e: MouseEvent<HTMLElement>) => {
+    if (!layersOn || (e.target as Element).closest('[data-seam-zoom], [data-seam-pose-tools]'))
+      return;
+    const box = e.currentTarget.getBoundingClientRect();
+    const fit = poseFit(poseBounds ?? poseShown.bbox, canvas.w, canvas.h, pad, zoom.view);
+    const [hit] = piecesUnder(
+      [e.clientX - box.left, e.clientY - box.top],
+      poseRings(poseShown, painted, drawnGeoms, fit),
+    );
+    const row = layerRows.find(({ pieces }) => pieces.includes(hit));
+    if (!row) return;
+    e.preventDefault();
+    setPoseSel(hit);
+    setPoseDrag(null);
+    setLayerMenu({ key: row.key, x: e.clientX, y: e.clientY });
+  };
+  const layersWindow = layersOn && layersOpen && (
+    <LayersWindow
+      rows={layerRows}
+      selected={layerRows.find(({ pieces }) => poseSel && pieces.includes(poseSel))?.key ?? null}
+      docked={phone}
+      disabled={busy}
+      T={resultLayout.T}
+      geoms={drawnGeoms}
+      nameOf={(row) => groups.find((group) => group.key === row.key)?.name ?? nameOf(row.pieces[0])}
+      onClose={() => {
+        layersShown = false;
+        setLayersOpen(false);
+      }}
+      onSelect={(row) => pickLayerRow(row.pieces)}
+      onMove={moveLayer}
+      onMenu={(key, x, y) => setLayerMenu({ key, x, y })}
+    />
+  );
+
   const picture = (passThrough?: string) => (
     <StepPictureSvg
       w={canvas.w}
       h={canvas.h}
-      pad={phone ? 28 : 64}
+      pad={pad}
       look='canvas'
       layout={poseShown}
       layers={posePending ? shownPoseLayers : stepPicture?.layers}
       stacked={posePending ? shownPoseStacked : undefined}
+      ordered={posePending ? shownPoseOrdered : undefined}
+      onPainted={movable ? onPainted : undefined}
       geoms={geoms}
       innerLines={innerLines}
       marks={marks}
@@ -753,6 +843,7 @@ export function SeamPickerBody({
             data-seam-picker-canvas=''
             // A press on the canvas keeps the keys here: Esc lets go, Enter accepts.
             {...zoom.handlers}
+            onContextMenu={onCanvasMenu}
             onPointerDownCapture={(e) => {
               e.currentTarget
                 .closest<HTMLElement>('[data-seam-picker]')
@@ -772,12 +863,12 @@ export function SeamPickerBody({
               <PoseOverlay
                 w={canvas.w}
                 h={canvas.h}
-                pad={phone ? 28 : 64}
+                pad={pad}
                 bounds={poseBounds ?? poseShown.bbox}
                 view={zoom.view}
                 layout={poseShown}
                 layerOrder={shownPoseLayers}
-                geoms={foldedDrawing(geoms, innerLines, stepFolds?.flat).geoms}
+                geoms={drawnGeoms}
                 nameOf={nameOf}
                 selected={poseSel}
                 snapAt={snapAtDuringDrag(poseDrag)}
@@ -798,50 +889,54 @@ export function SeamPickerBody({
             ) : (
               picture()
             )}
-            {movable && poseSel && (
+            {movable && drawn && (
               <div
                 className='absolute top-2 left-3 flex flex-wrap items-center gap-3'
                 data-seam-pose-tools=''
               >
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  aria-label='turn left'
-                  onClick={() => transformPose('left')}
-                  disabled={!poseSel || busy}
-                >
-                  ⟲
-                </Button>
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  aria-label='turn right'
-                  onClick={() => transformPose('right')}
-                  disabled={!poseSel || busy}
-                >
-                  ⟳
-                </Button>
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  aria-label='mirror'
-                  onClick={() => transformPose('mirror')}
-                  disabled={!poseSel || busy}
-                >
-                  ⇋
-                </Button>
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  onClick={() => transformPose('upright')}
-                  disabled={!poseSel || busy}
-                >
-                  upright
-                </Button>
+                {poseSel && (
+                  <>
+                    <Button
+                      type='button'
+                      variant='underline'
+                      size='xs'
+                      aria-label='turn left'
+                      onClick={() => transformPose('left')}
+                      disabled={busy}
+                    >
+                      ⟲
+                    </Button>
+                    <Button
+                      type='button'
+                      variant='underline'
+                      size='xs'
+                      aria-label='turn right'
+                      onClick={() => transformPose('right')}
+                      disabled={busy}
+                    >
+                      ⟳
+                    </Button>
+                    <Button
+                      type='button'
+                      variant='underline'
+                      size='xs'
+                      aria-label='mirror'
+                      onClick={() => transformPose('mirror')}
+                      disabled={busy}
+                    >
+                      ⇋
+                    </Button>
+                    <Button
+                      type='button'
+                      variant='underline'
+                      size='xs'
+                      onClick={() => transformPose('upright')}
+                      disabled={busy}
+                    >
+                      upright
+                    </Button>
+                  </>
+                )}
                 <Chip
                   selected={snapOn}
                   pressed={snapOn}
@@ -853,14 +948,16 @@ export function SeamPickerBody({
                 >
                   snap
                 </Chip>
-                {onTop && (
+                {layersOn && (
                   <Chip
-                    selected={onTop.active}
-                    pressed={onTop.active}
-                    onClick={pressOnTop}
-                    disabled={!onTop.press || busy}
+                    selected={layersOpen}
+                    pressed={layersOpen}
+                    onClick={() => {
+                      layersShown = !layersOpen;
+                      setLayersOpen(!layersOpen);
+                    }}
                   >
-                    on top {onTop.input}
+                    layers
                   </Chip>
                 )}
               </div>
@@ -892,8 +989,10 @@ export function SeamPickerBody({
                 )}
               </div>
             )}
+            {!phone && layersWindow}
           </div>
         </div>
+        {phone && layersWindow}
 
         <div
           className='sticky bottom-0 box-content flex h-21 flex-none flex-wrap content-center items-center gap-x-3 border-t border-hairline bg-bgColor px-3 pb-[env(safe-area-inset-bottom)] md:gap-4.5 md:px-5'
@@ -1090,6 +1189,20 @@ export function SeamPickerBody({
           {footerActions}
         </div>
       </div>
+      {layerMenu && (
+        <LayersMenu
+          x={layerMenu.x}
+          y={layerMenu.y}
+          atFront={layerRows[0]?.key === layerMenu.key}
+          atBack={layerRows[layerRows.length - 1]?.key === layerMenu.key}
+          disabled={busy}
+          onMove={(move) => {
+            moveLayer(layerMenu.key, move);
+            setLayerMenu(null);
+          }}
+          onClose={closeLayerMenu}
+        />
+      )}
       <ConfirmationModal
         open={replaceMirrorOpen}
         onOpenChange={setReplaceMirrorOpen}
