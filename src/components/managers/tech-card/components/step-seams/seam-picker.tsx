@@ -13,7 +13,7 @@
 // stored by nothing else, and it leaves the pick as it was.
 
 import * as Dialog from '@radix-ui/react-dialog';
-import { activeFoldRows, type FoldStep } from 'lib/folds';
+import { activeFoldRows } from 'lib/folds';
 import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { anchorOfRunId, type EdgeAnchor, type SidePart, type StoredSeam } from 'lib/seams';
 import { cn } from 'lib/utility';
@@ -270,8 +270,7 @@ export function SeamPickerBody({
   });
 
   const pieces = geo?.pieces;
-  const foldSteps = ops.map((operation) => operation as typeof operation & FoldStep);
-  const activeFolds = activeFoldRows(foldSteps, index, foldRows);
+  const activeFolds = activeFoldRows(ops, index, foldRows);
   // A stack of identical plies runs one layer long (the model's own count).
   const plainSideLen = (ids: readonly TargetId[] | readonly SidePart[]) =>
     targetsLen(ids, geoms, (piece, k) => polyLen(pieces?.get(piece)?.inner[k] ?? []));

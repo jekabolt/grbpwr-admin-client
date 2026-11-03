@@ -3,7 +3,7 @@ import { isJoin, stepConfidence, type MapRead } from 'lib/assembly-skeleton/map'
 import { edgesOf } from 'lib/assembly-skeleton/map/frame';
 import { pieceKeyOf, resolveEdge } from 'lib/assembly-skeleton/union/layout';
 import type { SeamCandidate } from 'lib/assembly-skeleton/types';
-import { activeFoldRows, type FoldStep, type StoredFold } from 'lib/folds';
+import { activeFoldRows, type StoredFold } from 'lib/folds';
 import { candidateSideParts } from 'lib/seams';
 import { Text } from 'ui';
 import { useFoldRows } from '../assembly-folds/folds-store';
@@ -98,8 +98,7 @@ export function StepView({ model, index }: { model: MapModel; index: number }) {
   const { geo, geoms, innerLines } = useCardGeoms();
   const byKey = useSeamRows();
   const foldRows = useFoldRows();
-  const foldSteps = ops.map((operation) => operation as typeof operation & FoldStep);
-  const activeFolds = activeFoldRows(foldSteps, index, foldRows);
+  const activeFolds = activeFoldRows(ops, index, foldRows);
   const op = ops[index];
   if (!op) return null;
   const highlight = stepHighlightOf(ops, index, byKey);

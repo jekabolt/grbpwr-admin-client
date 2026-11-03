@@ -60,7 +60,7 @@ import { ROLE_BOOK } from 'lib/assembly-skeleton/skeleton/template';
 import type { Edge, PieceGeom, PieceMark, SeamCandidate } from 'lib/assembly-skeleton/types';
 import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { unitDisplayName } from 'lib/assembly-unit-name';
-import { activeFoldRows, foldsFromWire, type FoldStep, type StoredFold } from 'lib/folds';
+import { activeFoldRows, foldsFromWire, type StoredFold } from 'lib/folds';
 import {
   contourSig,
   candidateSideParts,
@@ -2273,7 +2273,7 @@ function buildCards(
       );
     return parts.reduce((total, part) => total + part.lenMm, 0);
   };
-  const foldSteps = ops.map(({ raw }) => raw as typeof raw & FoldStep);
+  const foldSteps = ops.map(({ raw }) => raw);
 
   for (const [stepIndex, op] of ops.entries()) {
     const activeFolds = activeFoldRows(foldSteps, stepIndex, foldRows);
