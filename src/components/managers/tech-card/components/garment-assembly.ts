@@ -792,13 +792,14 @@ export function assembleGarment(input: GarmentAssemblyInput): GarmentAssembly {
   );
   const legs = legPanels([...geoms.values()]);
   chosen = chosen.filter((candidate) => {
+    // A row a person confirmed never gives way to a repair's guess.
+    if (candidate.provenance) return true;
     const candidatePieces = new Set([...edgePieces(candidate, 'a'), ...edgePieces(candidate, 'b')]);
     if (
       [...candidatePieces].some((key) => sidePocketKeys.has(key)) &&
       [...candidatePieces].some((key) => legs.has(key))
     )
       return false;
-    if (candidate.provenance) return true;
     const operation = formingOperation(candidate, operations, pieceKeys, assignedOperations);
     if (operation == null || !repairs.riseOps.has(operation)) return true;
     return ![...candidatePairKeys(candidate)].every((key) => {
