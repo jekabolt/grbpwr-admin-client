@@ -1730,6 +1730,7 @@ export function ArtifactsPanel({
       ...(values.pieces ?? []).map((p) => p.calloutNumber ?? 0),
       ...(values.operations ?? []).map((o) => o.calloutNumber ?? 0),
       ...(values.issues ?? []).map((i) => i.calloutNumber ?? 0),
+      ...(values.garmentLabels ?? []).map((l) => l.calloutNumber ?? 0),
     ].filter((n) => Number.isFinite(n) && n > 0);
     return Math.max(0, ...mine, ...referenced) + 1;
   }

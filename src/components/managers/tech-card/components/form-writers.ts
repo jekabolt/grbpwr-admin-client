@@ -216,8 +216,13 @@ const blankGarmentLabel = (key: string): FormGarmentLabel => ({
   size: '',
   qtyPerGarment: 1,
   bomItemId: 0,
+  bomLineKey: '',
   note: '',
   mediaIds: [],
+  calloutNumber: 0,
+  artworkPerSize: false,
+  artworkPerColorway: false,
+  files: [],
 });
 const blankPackagingItem = (key: string): FormPackagingItem => ({
   key,
@@ -226,6 +231,7 @@ const blankPackagingItem = (key: string): FormPackagingItem => ({
   size: '',
   qtyPerGarment: 1,
   bomItemId: 0,
+  bomLineKey: '',
   note: '',
   mediaIds: [],
 });

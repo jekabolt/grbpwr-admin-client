@@ -1,9 +1,13 @@
-import { common_MediaFull, type common_TechCardMediaFull } from 'api/proto-http/admin';
+import {
+  common_MediaFull,
+  type common_TechCard,
+  type common_TechCardMediaFull,
+} from 'api/proto-http/admin';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useUploadMedia } from 'components/managers/media/utils/useUploadMedia';
 import { useState, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { GroupLabel, Section, ComboField, InputField } from 'ui';
+import { AddDoor, Chip, ChipRow, GroupLabel, Section, ComboField, InputField, Text } from 'ui';
 import {
   MediaViewer,
   type MediaViewerItem,
@@ -18,16 +22,22 @@ import {
 } from './form-writers';
 import { KindPicker } from './kind-picker';
 import { LabelCard, type CardField, type CardRow } from './label-card';
-import { LABEL_NOTE_MAX, LABEL_SIZE_MAX, LABEL_TEXT_MAX } from './labels-schema';
+import {
+  LABEL_NOTE_MAX,
+  LABEL_SIZE_MAX,
+  LABEL_TEXT_MAX,
+  type FormGarmentLabel,
+} from './labels-schema';
 import type { TechCardFormData } from './schema';
+import { isCompositionLabel } from './sewn-label-model';
+import { bornLabelFacts, labelGaps, SewnLabelRow } from './sewn-label-row';
+import { useLabelAxes } from './use-label-axes';
 import { useUndoHistory } from './undo-history';
 import {
   foldingMethodOptions,
+  garmentLabelKindNames,
   garmentLabelKinds,
   kindLabel,
-  labelAttachmentOptions,
-  labelFoldingOptions,
-  labelPlacementOptions,
   packagingItemKinds,
   packagingPackingOptions,
   packagingUsageOptions,
@@ -36,43 +46,13 @@ import {
 
 /**
  * LABELS and PACKAGING — two blocks of the «labels & pkg» tab (02-DESIGN §2.1, §2.3–2.6; I-11).
- * Both are the construction-aspects grammar: the rows the card carries, each a `LabelCard`, and
- * under them ONE dashed add row that turns into the kind picker in place. Empty = only that row.
+ * Labels are rows of `SewnLabelRow`; packaging is still the construction-aspects grammar: the rows
+ * the card carries, each a `LabelCard`, and under them ONE dashed add row that turns into the kind
+ * picker in place. Empty = only that row.
  *
  * Every write goes through the keyed writers in `form-writers.ts` (live `getValues`, one row by
  * key, case-blind). The card passes `keepBare`: a row leaves only by its ✕.
  */
-
-const LABEL_FIELDS: CardField[] = [
-  {
-    name: 'placement',
-    label: 'placement',
-    kind: 'pick',
-    options: labelPlacementOptions,
-    max: LABEL_TEXT_MAX,
-    hint: 'where on the garment',
-  },
-  {
-    name: 'attachment',
-    label: 'attachment',
-    kind: 'pick',
-    options: labelAttachmentOptions,
-    max: LABEL_TEXT_MAX,
-    hint: 'sewn how / inserted where',
-  },
-  {
-    name: 'folding',
-    label: 'folding',
-    kind: 'pick',
-    options: labelFoldingOptions,
-    max: LABEL_TEXT_MAX,
-    hint: 'how it is folded',
-  },
-  { name: 'size', label: 'size', kind: 'text', max: LABEL_SIZE_MAX, hint: 'e.g. 50 × 20 mm' },
-  { name: 'qtyPerGarment', label: 'per garment', kind: 'qty' },
-  { name: 'bomItemId', label: 'material (BOM line)', kind: 'bom' },
-  { name: 'note', label: 'note', kind: 'note', max: LABEL_NOTE_MAX },
-];
 
 const ITEM_FIELDS: CardField[] = [
   {
@@ -194,8 +174,7 @@ function KeyedCards({
     if (!newId) throw new Error('upload failed');
 
     const latest = liveIds(viewer.key);
-    if (latest[targetIndex] !== sourceId)
-      throw new Error('slot changed');
+    if (latest[targetIndex] !== sourceId) throw new Error('slot changed');
 
     const nextIds = latest.slice();
     nextIds[targetIndex] = newId;
@@ -254,27 +233,89 @@ function KeyedCards({
   );
 }
 
-/** LABELS — every label on the garment but the composition one, each with its mockup (R-05..R-07). */
+/** The next free key of a kind: `other` is the one kind a garment may carry many of. */
+function freeKindKey(key: string, taken: string[]): string {
+  const has = (k: string) => taken.some((t) => t.trim().toLowerCase() === k);
+  if (!has(key)) return key;
+  for (let n = 2; ; n += 1) if (!has(`${key} ${n}`)) return `${key} ${n}`;
+}
+
+/** LABELS — every label on the garment but the composition one, which has its own block. */
 export function LabelsBlock({
-  resolvedMedia,
+  techCard,
   canEdit = true,
 }: {
-  resolvedMedia?: readonly common_TechCardMediaFull[];
+  techCard?: common_TechCard;
   canEdit?: boolean;
 }): JSX.Element {
+  const { control, getValues, setValue } = useFormContext<TechCardFormData>();
+  const all = (useWatch({ control, name: 'garmentLabels' }) ?? []) as FormGarmentLabel[];
+  const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as NonNullable<
+    TechCardFormData['bomItems']
+  >;
+  const axes = useLabelAxes(techCard);
+  const [adding, setAdding] = useState(false);
+
+  const rows = all.filter((r) => !isCompositionLabel(r.key));
+  const keys = rows.map((r) => r.key ?? '');
+  const free = garmentLabelKinds.filter(
+    (k) => k.key === 'other' || !keys.some((t) => t.trim().toLowerCase() === k.key),
+  );
+  const issues = rows.reduce((n, r) => {
+    const gap = labelGaps(r, axes, bomItems);
+    return n + (gap.material ? 1 : 0) + (gap.location ? 1 : 0) + gap.files;
+  }, 0);
+
   return (
-    <Section title='labels'>
-      <KeyedCards
-        field='garmentLabels'
-        kinds={garmentLabelKinds}
-        noun='label'
-        example='tax stamp'
-        fields={LABEL_FIELDS}
-        mockupBlocking
-        canEdit={canEdit}
-        writers={{ upsert: upsertGarmentLabel, remove: removeGarmentLabel }}
-        resolvedMedia={resolvedMedia}
-      />
+    <Section
+      title='labels'
+      action={
+        issues > 0 ? (
+          <Text size='micro' variant='errorLabel' component='span'>
+            ! {issues}
+          </Text>
+        ) : undefined
+      }
+    >
+      <div data-labels-rows=''>
+        {rows.map((r, i) => {
+          const key = r.key ?? '';
+          return (
+            <SewnLabelRow
+              key={key.toLowerCase() || i}
+              labelKey={key}
+              title={kindLabel(garmentLabelKindNames, key)}
+              removable
+              techCard={techCard}
+              axes={axes}
+              canEdit={canEdit}
+              last={i === rows.length - 1}
+            />
+          );
+        })}
+        {!canEdit ? null : adding ? (
+          <ChipRow className='pt-2'>
+            {free.map((k) => (
+              <Chip
+                key={k.key}
+                nonForm
+                data-label-kind={k.key}
+                onClick={() => {
+                  const key = freeKindKey(k.key, keys);
+                  upsertGarmentLabel(getValues, setValue, key, bornLabelFacts(key), {
+                    keepBare: true,
+                  });
+                  setAdding(false);
+                }}
+              >
+                {k.label}
+              </Chip>
+            ))}
+          </ChipRow>
+        ) : (
+          <AddDoor onClick={() => setAdding(true)}>label</AddDoor>
+        )}
+      </div>
     </Section>
   );
 }

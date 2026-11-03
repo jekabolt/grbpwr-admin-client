@@ -223,6 +223,7 @@ export function TechCardGallery({
       ...(v.pieces ?? []).map((p) => p.calloutNumber ?? 0),
       ...(v.operations ?? []).map((o) => o.calloutNumber ?? 0),
       ...(v.issues ?? []).map((i) => i.calloutNumber ?? 0),
+      ...(v.garmentLabels ?? []).map((l) => l.calloutNumber ?? 0),
     ].filter((n) => Number.isFinite(n) && n > 0);
   };
   const nextNumber = () =>

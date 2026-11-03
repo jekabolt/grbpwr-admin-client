@@ -40,6 +40,7 @@ import type { FormCareLabel } from '../labels-schema';
 import type { TechCardFormData } from '../schema';
 import { useTechCardStaging } from '../useTechCardStaging';
 import { wireInt } from '../wire-int';
+import { CompositionLabelRow } from './composition-label-row';
 import { CareSymbolsEditor, LogoEditor, QrEditor } from './doors';
 import { DraftInput, DraftLines } from './editable';
 import { EditorStrip } from './editor-strip';
@@ -1052,6 +1053,13 @@ export function CompositionLabelBlock({
             </div>
           )}
         </div>
+        <CompositionLabelRow
+          techCard={techCard}
+          plan={model.plan}
+          readiness={model.readiness}
+          skuOf={(id) => model.data?.colorways.find((c) => c.id === id)?.baseSku ?? ''}
+          canEdit={canEdit}
+        />
       </div>
     </Section>
   );

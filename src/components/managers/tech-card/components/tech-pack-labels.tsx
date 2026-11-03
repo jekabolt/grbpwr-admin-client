@@ -18,7 +18,8 @@ import {
   compositionLabelSummary,
   type CompositionLabelSummary,
 } from './composition-label/label-summary';
-import { garmentLabelKinds, kindLabel, packagingItemKinds } from './tech-card-options';
+import { isCompositionLabel } from './sewn-label-model';
+import { garmentLabelKindNames, kindLabel, packagingItemKinds } from './tech-card-options';
 import { wireInt } from './wire-int';
 import { useLabelDictionary } from '../care-labels/use-label-dictionary';
 import { EmptyCell } from 'ui';
@@ -128,6 +129,8 @@ export function TechPackLabelSheets({
   showItems: boolean;
 }): JSX.Element {
   const cw = summary?.colorway;
+  // The composition row holds where that label sits; its own sheet above prints the label itself.
+  const sewnLabels = labels.filter((l) => !isCompositionLabel(l.key));
   return (
     <>
       {showLabels && (
@@ -206,7 +209,7 @@ export function TechPackLabelSheets({
         </Sheet>
       )}
 
-      {showLabels && labels.length > 0 && (
+      {showLabels && sewnLabels.length > 0 && (
         <Sheet title='labels'>
           <table className='w-full border-collapse text-micro' data-tp-labels=''>
             <thead>
@@ -222,11 +225,11 @@ export function TechPackLabelSheets({
               </tr>
             </thead>
             <tbody>
-              {labels.map((l, i) => (
+              {sewnLabels.map((l, i) => (
                 <tr key={l.key || i} className='break-inside-avoid' data-tp-label={l.key ?? ''}>
                   <MockupCell ids={(l.mediaIds ?? []).map(wireInt)} urlOf={urlOf} />
                   <td className={`${TD} font-semibold`}>
-                    {txt(kindLabel(garmentLabelKinds, l.key))}
+                    {txt(kindLabel(garmentLabelKindNames, l.key))}
                   </td>
                   <td className={TD}>{txt(l.placement)}</td>
                   <td className={TD}>{txt(l.attachment)}</td>

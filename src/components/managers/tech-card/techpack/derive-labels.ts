@@ -4,7 +4,21 @@ import {
   LABEL_PART_NAME,
   type LabelPart,
 } from 'components/managers/tech-card/care-labels/label-parts';
+import {
+  artworkLines,
+  artworkMode,
+  cellIsFull,
+  isCompositionLabel,
+  labelFlat,
+  labelPin,
+  type LabelAxes,
+} from 'components/managers/tech-card/components/sewn-label-model';
+import {
+  garmentLabelKindNames,
+  kindLabel,
+} from 'components/managers/tech-card/components/tech-card-options';
 import { wireInt } from 'components/managers/tech-card/components/wire-int';
+import { publicFilePageUrl } from 'components/file-share-viewer/link';
 import { formatCompositionCell } from 'components/managers/materials/components/material-code';
 import {
   bomColourwayName,
@@ -14,13 +28,119 @@ import {
   colorwayName,
   decimal,
   mediaFromResolved,
+  resolveBomRef,
   technicalMedia,
 } from './derive-shared';
 import type { Gap, GapSink } from './gaps';
-import { englishT, type PdfT } from './i18n';
+import { englishT, own, type PdfT } from './i18n';
 
-export type LabelsDeriveOptions = { sampleSizeName?: string };
+export type LabelsDeriveOptions = {
+  sampleSizeName?: string;
+  sizeNames?: Readonly<Record<number, string>>;
+};
 export type LabelsModel = ReturnType<typeof deriveLabels>;
+
+export type SewnTableRow = {
+  key: string;
+  number: number | null;
+  item: string;
+  location: string;
+  attachment: string;
+  fold: string;
+  size: string;
+  material: string;
+  qty: number | null;
+};
+
+/** One line of the QR grid. An empty `url` prints `no file`: never a QR to nothing. */
+export type SewnQrLine = {
+  key: string;
+  title: string;
+  perSize: boolean;
+  cells: { key: string; sizeLabel: string; url: string }[];
+};
+
+/** A QR on paper carries the landing page; a preview tab falls back to the server's own address. */
+const printedUrl = (url?: string): string => {
+  const raw = clean(url);
+  return raw ? publicFilePageUrl(raw) || raw : '';
+};
+
+function labelAxes(techCard: common_TechCard, options: LabelsDeriveOptions, t: PdfT): LabelAxes {
+  return {
+    colorways: (techCard.colorways ?? [])
+      .map((colorway, index) => ({
+        id: wireInt(colorway.colorwayId),
+        name: colorwayName(colorway, index, t),
+      }))
+      .filter((colorway) => colorway.id > 0),
+    sizes: (techCard.techCard?.sizeIds ?? []).map((raw) => {
+      const id = wireInt(raw);
+      return { id, label: clean(options.sizeNames?.[id]).toUpperCase() || `#${id}` };
+    }),
+  };
+}
+
+function deriveSewn(techCard: common_TechCard, options: LabelsDeriveOptions, t: PdfT) {
+  const card = techCard.techCard;
+  const stored = card?.garmentLabels ?? [];
+  const rows = [
+    ...stored.filter((row) => isCompositionLabel(row.key)),
+    ...stored.filter((row) => !isCompositionLabel(row.key)),
+  ];
+  const refs = bomRefs(techCard);
+  const callouts = card?.callouts ?? [];
+  const axes = labelAxes(techCard, options, t);
+  const flatItem = labelFlat(techCard.resolvedTechnicalMedia ?? []);
+  const flat = mediaFromResolved(flatItem);
+  const pinned = rows.map((row) => labelPin(row, callouts));
+
+  const table: SewnTableRow[] = rows.map((row, index) => ({
+    key: clean(row.key) || `label-${index}`,
+    number: pinned[index]?.number ?? null,
+    item: kindLabel(garmentLabelKindNames, row.key),
+    location: clean(row.placement),
+    attachment: clean(row.attachment),
+    fold: clean(row.folding),
+    size: clean(row.size),
+    material: clean(
+      resolveBomRef(refs, { bomLineKey: row.bomLineKey, bomItemId: row.bomItemId })?.item.name,
+    ),
+    qty: row.qtyPerGarment ?? null,
+  }));
+
+  const lines: SewnQrLine[] = rows.flatMap((row, index) => {
+    const { perSize } = artworkMode(row, axes);
+    const { number, item, key } = table[index];
+    return artworkLines(row, axes).map((line) => ({
+      key: `${key}-${line.colorwayId}`,
+      title: [
+        [number, own(item)].filter((word) => word != null).join(' '),
+        line.colorName,
+        perSize ? '' : t('labels.allSizes'),
+      ]
+        .filter(Boolean)
+        .join(' · '),
+      perSize,
+      cells: line.cells.map((cell) => ({
+        key: `${cell.colorwayId}-${cell.sizeId}`,
+        sizeLabel: cell.sizeLabel,
+        url: cellIsFull(cell) ? printedUrl(cell.file?.publicUrl) : '',
+      })),
+    }));
+  });
+
+  return {
+    flat,
+    // A pin on another picture keeps its number and its words; only this flat is drawn.
+    pins: pinned.flatMap((pin) =>
+      pin && flat && pin.mediaId === flat.id ? [{ label: pin.number, x: pin.x, y: pin.y }] : [],
+    ),
+    table,
+    // Per-size lines read under one row of sizes, so the one-file lines close the grid.
+    qr: [...lines.filter((line) => line.perSize), ...lines.filter((line) => !line.perSize)],
+  };
+}
 
 const partFromWire = (value?: string): LabelPart => {
   const part = clean(value).replace('TECH_CARD_BOM_LABEL_PART_', '') as LabelPart;
@@ -86,10 +206,18 @@ export function deriveLabels(
         techCard.resolvedLabelMedia?.find((item) => wireInt(item.media?.id) === logoId),
       )
     : null;
+  // «Where the label goes» for the assembly words: a label of the garment, and the composition row
+  // only when it is the one row there is.
+  const garmentLabels = card?.garmentLabels ?? [];
   const placementLabel =
-    (card?.garmentLabels ?? []).find((label) =>
-      /brand|main|identity|size/i.test(clean(label.key)),
-    ) ?? card?.garmentLabels?.[0];
+    garmentLabels.find(
+      (label) =>
+        !isCompositionLabel(label.key) && /brand|main|identity|size/i.test(clean(label.key)),
+    ) ??
+    garmentLabels.find((label) => !isCompositionLabel(label.key)) ??
+    garmentLabels[0];
+  const sewn = deriveSewn(techCard, options, t);
+  const hasSewn = sewn.table.length > 0;
   const add = (code: string, label: string, field: string): Gap => {
     const gap: Gap = {
       code,
@@ -107,6 +235,11 @@ export function deriveLabels(
   const identitySize =
     clean(options.sampleSizeName) || (card?.baseSampleSizeId ? `#${card.baseSampleSizeId}` : '');
   const back = technicalMedia(techCard, 'TECH_CARD_MEDIA_KIND_BACK');
+  // With rows the page draws the flat they are pinned on, the same one the screen shows.
+  const drawn = hasSewn ? sewn.flat : back;
+  const placementMissing = hasSewn
+    ? sewn.table.some((row) => !row.location)
+    : !clean(placementLabel?.placement);
   const gaps = {
     name: !identityName ? add('pdf_name_missing', t('gaps.name'), 'name') : undefined,
     colour: !identityColour
@@ -116,10 +249,10 @@ export function deriveLabels(
     composition: !fallbackComposition.length
       ? add('pdf_composition_missing', t('gaps.composition'), 'composition')
       : undefined,
-    placement: !clean(placementLabel?.placement)
+    placement: placementMissing
       ? add('pdf_label_placement_missing', t('gaps.placement'), 'placement')
       : undefined,
-    back: !back ? add('pdf_back_flat_missing', t('gaps.backFlat'), 'back flat') : undefined,
+    back: !drawn ? add('pdf_back_flat_missing', t('gaps.backFlat'), 'back flat') : undefined,
   };
 
   return {
@@ -140,13 +273,15 @@ export function deriveLabels(
       qty: placementLabel?.qtyPerGarment ?? null,
     },
     back,
+    sewn,
+    hasSewn,
     gaps,
     missing: [
       !clean(card?.name) && 'name',
       !primary && !bomColourwayName(techCard) && 'colourway',
       !fallbackComposition.length && 'composition',
-      !clean(placementLabel?.placement) && 'placement',
-      !technicalMedia(techCard, 'TECH_CARD_MEDIA_KIND_BACK') && 'back flat',
+      placementMissing && 'placement',
+      !drawn && 'back flat',
     ].filter((value): value is string => Boolean(value)),
   };
 }

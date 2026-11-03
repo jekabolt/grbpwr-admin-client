@@ -79,10 +79,21 @@ export const detailKeyLabel = (key?: string): string =>
 
 export type LabelKind = { key: string; label: string };
 
+// The picker's list: sewn-ins only. Hangtag and barcode left for packaging (owner, 03.11.26).
 export const garmentLabelKinds: LabelKind[] = [
   { key: 'brand', label: 'brand label' },
-  { key: 'size', label: 'size label' },
+  { key: 'size', label: 'size tag' },
   { key: 'flag', label: 'flag label' },
+  { key: 'hanger_loop', label: 'hanger loop' },
+  { key: 'patch', label: 'patch' },
+  { key: 'neck_tape', label: 'neck tape' },
+  { key: 'other', label: 'other' },
+];
+
+// The names a stored row may carry, offered or not: rows with the old keys still read and save.
+export const garmentLabelKindNames: LabelKind[] = [
+  ...garmentLabelKinds,
+  { key: 'composition', label: 'composition label' },
   { key: 'hangtag', label: 'hangtag' },
   { key: 'barcode', label: 'barcode / price sticker' },
   { key: 'special', label: 'special / promo' },

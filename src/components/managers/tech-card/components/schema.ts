@@ -115,6 +115,7 @@ import {
   packagingItemSchema,
   packagingItemsOut,
   packagingItemsToForm,
+  type FormGarmentLabel,
 } from './labels-schema';
 // ТОКЕН РАБОТЫ «ПРОРЕЗЬ» — ИЗ ОБЩЕГО МОДУЛЯ ОСИ, а не строкой здесь: то же правило проверяет
 // редактор шага, решая, ПОКАЗАТЬ ли контрол, и две копии строки разъехались бы молча — отказ
@@ -1238,16 +1239,40 @@ export function isBlankCallout(
   return true;
 }
 
-// Номера выносок, на которые уже кто-то ссылается. Три ссылающихся списка — те же, по которым
+// A label's material link to a BOM line since taken off the card: the server refuses a link it
+// cannot resolve, and a label must never stop a save. The row just reads «no material» then.
+function liveLabelBomLinks(
+  labels: FormGarmentLabel[] | undefined,
+  bomItems: { id?: number; lineKey?: string | null }[] | undefined,
+): FormGarmentLabel[] {
+  const keys = new Set((bomItems ?? []).map((b) => (b.lineKey ?? '').trim()).filter(Boolean));
+  const ids = new Set((bomItems ?? []).map((b) => wireInt(b.id)).filter((id) => id > 0));
+  return (labels ?? []).map((l) => {
+    const key = (l.bomLineKey ?? '').trim();
+    return {
+      ...l,
+      bomLineKey: keys.has(key) ? key : '',
+      bomItemId: ids.has(wireInt(l.bomItemId)) ? wireInt(l.bomItemId) : 0,
+    };
+  });
+}
+
+// Номера выносок, на которые уже кто-то ссылается. Четыре ссылающихся списка — те же, по которым
 // считается следующий свободный номер (см. `nextNumber` на вкладке эскиза): номер, который
 // занят ссылкой, не свободен, и выноска под ним не пуста.
 export function referencedCalloutNumbers(data: {
   pieces?: { calloutNumber?: number }[];
   operations?: { calloutNumber?: number }[];
   issues?: { calloutNumber?: number }[];
+  garmentLabels?: { calloutNumber?: number }[];
 }): Set<number> {
   const out = new Set<number>();
-  for (const row of [...(data.pieces ?? []), ...(data.operations ?? []), ...(data.issues ?? [])]) {
+  for (const row of [
+    ...(data.pieces ?? []),
+    ...(data.operations ?? []),
+    ...(data.issues ?? []),
+    ...(data.garmentLabels ?? []),
+  ]) {
     const n = row.calloutNumber ?? 0;
     if (Number.isFinite(n) && n > 0) out.add(n);
   }
@@ -4128,7 +4153,7 @@ export function mapFormToTechCardInsert(
     // indistinguishable from «deleted all») and refuses LABELS / PACKAGING approval. Transport, not
     // content — not hashed. `careLabel` is always present (null would mean «keep the stored one»).
     careLabel: careLabelOut(data.careLabel),
-    garmentLabels: garmentLabelsOut(data.garmentLabels),
+    garmentLabels: garmentLabelsOut(liveLabelBomLinks(data.garmentLabels, data.bomItems)),
     packagingItems: packagingItemsOut(data.packagingItems),
     labelsAware: true,
     // Only a costing:write editor may change costing; everyone else preserves what was loaded.

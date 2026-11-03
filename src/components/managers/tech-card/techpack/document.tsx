@@ -302,7 +302,7 @@ export function TechpackDocument({
             </div>
           </TechpackSheet>
         )}
-        <LabelsPage {...page} n='05' sampleSizeName={sampleSizeName} />
+        <LabelsPage {...page} n='05' sampleSizeName={sampleSizeName} sizeNames={sizing.sizeNames} />
         <AssemblyPage {...page} n='06' model={model} pdfGaps={pdfGaps} onLaidOut={setLaidOut} />
         <MeasurementsPage
           {...page}
