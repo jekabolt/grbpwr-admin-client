@@ -4,13 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { LibraryFile } from 'api/proto-http/admin';
 import { filesService } from 'components/managers/files/api/filesService';
 import { notesService } from 'components/managers/files/api/notesService';
-import {
-  filesKeys,
-  useFileTopics,
-  useFilesTotal,
-  useLibraryFiles,
-  type FilesSort,
-} from 'components/managers/files/hooks/useFiles';
+import { filesKeys, useLibraryFiles } from 'components/managers/files/hooks/useFiles';
 import { canShowInText } from 'components/managers/files/note/file-refs';
 import { extensionOf, formatWhenShort, kindWord } from 'components/managers/files/utils/format';
 import { isMarkdownNote } from 'components/managers/files/utils/reader-find';
@@ -21,8 +15,6 @@ import { isMarkdownNote } from 'components/managers/files/utils/reader-find';
 import { formatBytes } from 'utils/pattern';
 import {
   Button,
-  Chip,
-  ChipRow,
   Close,
   ConfirmationModal,
   InfoCircledIcon,
@@ -33,7 +25,7 @@ import {
   Tiles,
 } from 'ui';
 import { PHONE_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
-import { OptionRow, PickerSheet, TaskPageShell } from './task-form-shell';
+import { PickerSheet, TaskPageShell } from './task-form-shell';
 
 /** How a file chosen from the note format bar is inserted into its markdown. */
 export type NoteFileInsert = 'link' | 'preview';
@@ -309,15 +301,11 @@ export function FilePicker(props: FilePickerProps) {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const [topicId, setTopicId] = useState(0);
-  const [sort, setSort] = useState<FilesSort>('new');
-  const [filtersOpen, setFiltersOpen] = useState(false);
-  const topicsQuery = useFileTopics();
   const filter = {
-    topicIds: topicId ? [topicId] : [],
+    topicIds: [],
     untopiced: false,
     search: query,
-    sort,
+    sort: 'new' as const,
   };
   const filesQuery = useLibraryFiles(filter);
 
@@ -326,22 +314,9 @@ export function FilePicker(props: FilePickerProps) {
     [filesQuery.data],
   );
   const previewFile = files.find((file) => Number(file.id) === previewId);
-  const topics = topicsQuery.data?.topics ?? [];
-  const activeTopic = topics.find((topic) => Number(topic.id) === topicId);
-  const topicName = activeTopic?.name ?? 'topic';
   const total = Number(filesQuery.data?.pages?.[0]?.total ?? 0);
-  const libraryEmpty = topicsQuery.isSuccess && Number(topicsQuery.data?.totalFiles ?? 0) === 0;
   const noFiles = !filesQuery.isLoading && !filesQuery.isError && files.length === 0;
-  const allTopicsQuery = useFilesTotal(
-    { ...filter, topicIds: [] },
-    topicId > 0 && noFiles && !libraryEmpty,
-  );
-  const allTopicsTotal = Number(allTopicsQuery.data?.total ?? 0);
-
-  const imageFiles = files.filter(
-    (file) => !!file.previewUrl || (file.contentType ?? '').toLowerCase().startsWith('image/'),
-  );
-  const documentFiles = files.filter((file) => !imageFiles.includes(file));
+  const libraryEmpty = !query && noFiles;
   const unchanged =
     selected.length === draft.length && selected.every((id, index) => draft[index] === id);
   const showSelection = !unchanged || draft.length > 0;
@@ -370,7 +345,6 @@ export function FilePicker(props: FilePickerProps) {
   const reset = () => {
     setSearch('');
     setQuery('');
-    setTopicId(0);
   };
   const commit = () => {
     if (notePicker) return;
@@ -441,104 +415,16 @@ export function FilePicker(props: FilePickerProps) {
 
   const browserContent = (
     <div className='flex flex-col gap-2.5'>
-      <div className='flex items-stretch gap-2'>
-        <Input
-          name={notePicker ? 'noteFileSearch' : 'pickerSearch'}
-          value={search}
-          placeholder={notePicker ? 'file name or topic' : 'search files'}
-          className='min-h-11 md:min-h-8'
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
-        />
-        {!notePicker && (
-          <PickerSheet
-            phone={phone}
-            open={filtersOpen}
-            onOpenChange={setFiltersOpen}
-            title='filters'
-            trigger={
-              <Button
-                type='button'
-                size='sm'
-                variant={topicId ? 'main' : 'secondary'}
-                aria-pressed={topicId > 0}
-                className='min-h-11 shrink-0 md:min-h-8'
-              >
-                filters{topicId ? ' · 1' : ''}
-              </Button>
-            }
-          >
-            <Text
-              size='micro'
-              variant='label'
-              tracking='label'
-              className='bg-pageBg px-4 py-1 uppercase md:px-1'
-            >
-              topic
-            </Text>
-            <OptionRow selected={topicId === 0} onClick={() => setTopicId(0)}>
-              all
-            </OptionRow>
-            {topics.map((topic) => {
-              const id = Number(topic.id);
-              return (
-                <OptionRow key={id} selected={topicId === id} onClick={() => setTopicId(id)}>
-                  <span className='min-w-0 truncate'>{topic.name}</span>
-                </OptionRow>
-              );
-            })}
-            <Text
-              size='micro'
-              variant='label'
-              tracking='label'
-              className='bg-pageBg px-4 py-1 uppercase md:px-1'
-            >
-              sort
-            </Text>
-            <OptionRow selected={sort === 'new'} onClick={() => setSort('new')}>
-              newest
-            </OptionRow>
-            <OptionRow selected={sort === 'name'} onClick={() => setSort('name')}>
-              name
-            </OptionRow>
-          </PickerSheet>
-        )}
-      </div>
-
-      {notePicker && topics.length > 0 ? (
-        <ChipRow>
-          <Chip selected={topicId === 0} pressed={topicId === 0} onClick={() => setTopicId(0)}>
-            all
-          </Chip>
-          {topics.map((topic) => {
-            const id = Number(topic.id);
-            return (
-              <Chip
-                key={id}
-                selected={topicId === id}
-                pressed={topicId === id}
-                onClick={() => setTopicId(id)}
-              >
-                {topic.name}
-              </Chip>
-            );
-          })}
-        </ChipRow>
-      ) : topicId > 0 ? (
-        <ChipRow>
-          <Chip
-            selected
-            pressed
-            onClick={() => setTopicId(0)}
-            onRemove={() => setTopicId(0)}
-            className='min-h-11 md:min-h-0'
-          >
-            {topicName}
-          </Chip>
-        </ChipRow>
-      ) : null}
+      <Input
+        name={notePicker ? 'noteFileSearch' : 'pickerSearch'}
+        value={search}
+        placeholder='search files'
+        className='min-h-11 md:min-h-8'
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
+      />
 
       <Text size='micro' variant='label'>
-        {total} files · {topicId ? topicName : 'all topics'}
+        {total} {total === 1 ? 'file' : 'files'}
         {query ? ` · "${query}"` : ''}
       </Text>
 
@@ -566,35 +452,16 @@ export function FilePicker(props: FilePickerProps) {
           <Text size='micro' variant='uppercase' tracking='group'>
             {libraryEmpty ? 'no files yet' : 'no files'}
           </Text>
-          {!libraryEmpty && (
-            <>
-              <Text size='micro' variant='label'>
-                {topicId ? topicName : 'all topics'}
-                {query ? ` · "${query}"` : ''}
-              </Text>
-              <div className='flex flex-wrap gap-2'>
-                {topicId > 0 && allTopicsTotal > 0 && (
-                  <Button
-                    type='button'
-                    size='sm'
-                    variant='secondary'
-                    className='min-h-11 md:min-h-0'
-                    onClick={() => setTopicId(0)}
-                  >
-                    all topics · {allTopicsTotal}
-                  </Button>
-                )}
-                <Button
-                  type='button'
-                  size='sm'
-                  variant='secondary'
-                  className='min-h-11 md:min-h-0'
-                  onClick={reset}
-                >
-                  reset
-                </Button>
-              </div>
-            </>
+          {query && (
+            <Button
+              type='button'
+              size='sm'
+              variant='secondary'
+              className='min-h-11 md:min-h-0'
+              onClick={reset}
+            >
+              reset
+            </Button>
           )}
         </div>
       ) : (
@@ -603,137 +470,54 @@ export function FilePicker(props: FilePickerProps) {
             phone ? 'flex flex-col gap-4' : 'flex max-h-[50vh] flex-col gap-4 overflow-y-auto pr-1'
           }
         >
-          {imageFiles.length > 0 && (
-            <div className='flex flex-col gap-2'>
-              <Text size='micro' variant='label' tracking='group' className='uppercase'>
-                images · {imageFiles.length}
-              </Text>
-              <Tiles min={110}>
-                {imageFiles.map((file) => {
-                  const id = Number(file.id);
-                  const name = file.fileName ?? '';
-                  const imageUrl = file.previewUrl || file.url;
-                  const order = draft.indexOf(id) + 1;
-                  return (
-                    <div key={id} className='relative'>
-                      <Tile
-                        title={name}
-                        name={name}
-                        sub={
-                          notePicker && insert === 'preview' && !canShowInText(file)
-                            ? 'no preview'
-                            : `${kindWord(
-                                file.contentType ?? undefined,
-                                name,
-                              )} · ${formatBytes(Number(file.sizeBytes ?? 0))}`
-                        }
-                        selected={order > 0}
-                        pressed={notePicker ? undefined : order > 0}
-                        onClick={() => choose(file)}
-                        media={
-                          <div className='relative aspect-square w-full bg-pageBg'>
-                            {imageUrl ? (
-                              <Media src={imageUrl} alt='' aspectRatio='1/1' fit='contain' />
-                            ) : (
-                              <div className='flex h-full w-full items-center justify-center'>
-                                <Text size='micro' variant='label' className='uppercase'>
-                                  {extensionOf(name)}
-                                </Text>
-                              </div>
-                            )}
-                            {order > 0 && (
-                              <span className='absolute top-1 right-1'>{selectionMarker(id)}</span>
-                            )}
-                          </div>
-                        }
-                      />
-                      <FilePreviewDoor
-                        active={previewId === id}
-                        onClick={() => togglePreview(id)}
-                        className='absolute top-1 left-1'
-                      />
-                    </div>
-                  );
-                })}
-              </Tiles>
-            </div>
-          )}
-
-          {documentFiles.length > 0 && (
-            <div className='flex flex-col gap-2'>
-              <Text size='micro' variant='label' tracking='group' className='uppercase'>
-                documents · {documentFiles.length}
-              </Text>
-              <div className='flex flex-col'>
-                {documentFiles.map((file) => {
-                  const id = Number(file.id);
-                  const name = file.fileName ?? '';
-                  const topicNames = (file.topics ?? [])
-                    .map((topic) => topic.name)
-                    .filter((value): value is string => !!value)
-                    .join(', ');
-                  const meta = [
-                    topicNames || 'no topic',
-                    formatWhenShort(file.createdAt),
-                    formatBytes(Number(file.sizeBytes ?? 0)),
-                  ]
-                    .filter(Boolean)
-                    .join(' · ');
-                  const order = draft.indexOf(id) + 1;
-                  return (
-                    <div
-                      key={id}
-                      className='flex items-center gap-1 border-b border-hairline last:border-b-0'
-                    >
-                      <Button
-                        type='button'
-                        variant='default'
-                        aria-pressed={notePicker ? undefined : order > 0}
-                        className='flex min-h-12 min-w-0 flex-1 items-center gap-2 px-1 py-2 text-left md:min-h-0 md:py-1.5'
-                        onClick={() => choose(file)}
-                      >
+          <Tiles min={110}>
+            {files.map((file) => {
+              const id = Number(file.id);
+              const name = file.fileName ?? '';
+              const order = draft.indexOf(id) + 1;
+              return (
+                <div key={id} className='relative'>
+                  <Tile
+                    title={name}
+                    name={name}
+                    sub={
+                      notePicker && insert === 'preview' && !canShowInText(file)
+                        ? 'no preview'
+                        : `${kindWord(
+                            file.contentType ?? undefined,
+                            name,
+                          )} · ${formatBytes(Number(file.sizeBytes ?? 0))}`
+                    }
+                    selected={order > 0}
+                    pressed={notePicker ? undefined : order > 0}
+                    onClick={() => choose(file)}
+                    media={
+                      <div className='relative aspect-square w-full bg-pageBg'>
                         {file.previewUrl ? (
-                          <span className='h-10 w-8 shrink-0 border border-borderColor bg-bgColor'>
-                            <Media src={file.previewUrl} alt='' aspectRatio='3/4' fit='cover' />
-                          </span>
+                          <Media src={file.previewUrl} alt='' aspectRatio='1/1' fit='contain' />
                         ) : (
-                          <span className='flex h-8 w-10 shrink-0 items-center justify-center border border-borderColor bg-pageBg'>
-                            <Text
-                              size='nano'
-                              variant='label'
-                              component='span'
-                              className='uppercase'
-                            >
-                              {extensionOf(name)}
+                          <div className='flex h-full w-full flex-col items-center justify-center gap-0.5'>
+                            <Text className='font-bold uppercase'>{extensionOf(name)}</Text>
+                            <Text size='micro' variant='label' className='uppercase'>
+                              {kindWord(file.contentType ?? undefined, name)}
                             </Text>
-                          </span>
+                          </div>
                         )}
-                        <span className='flex min-w-0 flex-1 flex-col gap-0.5'>
-                          <Text size='micro' component='span' className='truncate'>
-                            {name}
-                          </Text>
-                          <Text size='nano' variant='label' component='span' className='truncate'>
-                            {notePicker && insert === 'preview' && !canShowInText(file)
-                              ? 'no preview'
-                              : meta}
-                          </Text>
-                        </span>
-                        {!notePicker && (
-                          <span className='flex w-5 shrink-0 justify-end'>
-                            {selectionMarker(id)}
-                          </span>
+                        {order > 0 && (
+                          <span className='absolute top-1 right-1'>{selectionMarker(id)}</span>
                         )}
-                      </Button>
-                      <FilePreviewDoor
-                        active={previewId === id}
-                        onClick={() => togglePreview(id)}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+                      </div>
+                    }
+                  />
+                  <FilePreviewDoor
+                    active={previewId === id}
+                    onClick={() => togglePreview(id)}
+                    className='absolute top-1 left-1'
+                  />
+                </div>
+              );
+            })}
+          </Tiles>
 
           {filesQuery.hasNextPage && (
             <Button
@@ -811,11 +595,7 @@ export function FilePicker(props: FilePickerProps) {
       }}
       onConfirm={onClose}
       title={
-        notePicker
-          ? insert === 'preview'
-            ? 'insert preview'
-            : 'insert file'
-          : 'attach a file'
+        notePicker ? (insert === 'preview' ? 'insert preview' : 'insert file') : 'attach a file'
       }
       width='lg'
       hideActions
