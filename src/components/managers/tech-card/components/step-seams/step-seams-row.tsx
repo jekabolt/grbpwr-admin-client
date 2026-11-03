@@ -1,15 +1,15 @@
-// «SEAMS» GROUP OF A STEP CARD (assembly-schema T8, picker v2 owner OK 27.10): its own group, header
-// «seams» with `+ seam` (the picker) at the right. Below it every stored seam is a step-picture tile
-// with its two named, measured sides underneath and one quiet corner ×; removal deletes the card row
-// only when no other step uses it. With nothing stored, the proposal is a dashed picture that opens
-// the picker (a seam is stored only there, by hand), else red `no seam`.
+// «SEAMS» GROUP OF A STEP CARD (assembly-schema T8, picker v2 owner OK 27.10): its own group, the
+// door to the picker stands in the panel's head (`StepSeamsDoor`). Below it every stored seam is a
+// step-picture tile with its two named, measured sides underneath and one quiet corner ×; removal
+// deletes the card row only when no other step uses it. With nothing stored, the proposal is a dashed
+// picture that opens the picker (a seam is stored only there, by hand), else red `no seam`.
 // `?pick=<op number>` (a PDF-gap deep link) opens the picker on arrival.
 
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { activeFoldRows, type StoredFold } from 'lib/folds';
 import type { SidePart } from 'lib/seams';
 import { cn } from 'lib/utility';
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button, Close, GroupLabel, Text, TILE_PRESS, TILE_QUIET } from 'ui';
 import { useFoldRows } from '../assembly-folds/folds-store';
@@ -82,7 +82,48 @@ export function seamTileSideLines(
   return [line(sides.a, sides.b), line(sides.b, sides.a)];
 }
 
-export function StepSeamsRow({ index }: { index: number }) {
+/** The picker's state lives above both its doors: the panel head and the tiles of the group. */
+export type SeamPickerRequest = { proposal: number; preselect: boolean };
+const PLAIN_PICK: SeamPickerRequest = { proposal: 0, preselect: false };
+
+/** The step's way into the seam window, with its seam count. A step of one piece has no door. */
+export function StepSeamsDoor({
+  index,
+  onOpen,
+}: {
+  index: number;
+  onOpen: (request: SeamPickerRequest) => void;
+}) {
+  const { ctx, ops, geoms, pieceKeys, stored } = useStepScene(index);
+  const hasMultiplePieces = useMemo(
+    () => hasMultipleStepPieces(ops, index, pieceKeys, geoms),
+    [ops, index, pieceKeys, geoms],
+  );
+  if (!ctx || !hasMultiplePieces) return null;
+  return (
+    <Button
+      type='button'
+      variant='underline'
+      size='xs'
+      onClick={() => onOpen(PLAIN_PICK)}
+      disabled={!ctx.cardId}
+      title={ctx.cardId ? undefined : 'save first'}
+      data-step-seams-pick=''
+    >
+      seams {stored.length}
+    </Button>
+  );
+}
+
+export function StepSeamsRow({
+  index,
+  picker,
+  onPicker,
+}: {
+  index: number;
+  picker: SeamPickerRequest | null;
+  onPicker: (request: SeamPickerRequest | null) => void;
+}) {
   const scene = useStepScene(index);
   const foldRows = useFoldRows();
   const results = useStepResults();
@@ -92,10 +133,9 @@ export function StepSeamsRow({ index }: { index: number }) {
   const seamActions = useStepSeamActions(index);
   const pendingWrites = useSeamsStore((state) => state.pending);
   const opNumber = op?.operationNumber;
-  // A suggestion tile carries its pair into the picker; + seam and stored tiles start empty.
-  const [picker, setPicker] = useState<{ proposal: number; preselect: boolean } | null>(null);
+  // A suggestion tile carries its pair into the picker; the door and stored tiles start empty.
   const open = picker != null;
-  const setOpen = (next: boolean) => setPicker(next ? { proposal: 0, preselect: false } : null);
+  const setOpen = (next: boolean) => onPicker(next ? PLAIN_PICK : null);
 
   const hasMultiplePieces = useMemo(
     () => hasMultipleStepPieces(ops, index, pieceKeys, geoms),
@@ -106,7 +146,7 @@ export function StepSeamsRow({ index }: { index: number }) {
   const pick = params.get('pick');
   useEffect(() => {
     if (!ctx || !hasMultiplePieces || !pick || !opNumber || String(opNumber) !== pick) return;
-    setPicker({ proposal: 0, preselect: false });
+    onPicker(PLAIN_PICK);
     setParams(
       (p) => {
         const n = new URLSearchParams(p);
@@ -115,7 +155,7 @@ export function StepSeamsRow({ index }: { index: number }) {
       },
       { replace: true },
     );
-  }, [ctx, hasMultiplePieces, pick, opNumber, setParams]);
+  }, [ctx, hasMultiplePieces, pick, opNumber, setParams, onPicker]);
 
   if (!ctx || !hasMultiplePieces) return null;
   const { cardId, frozen } = ctx;
@@ -124,23 +164,7 @@ export function StepSeamsRow({ index }: { index: number }) {
 
   return (
     <div className='flex flex-col' data-step-seams={opNumber ?? ''}>
-      <GroupLabel
-        action={
-          <Button
-            type='button'
-            variant='underline'
-            size='xs'
-            onClick={() => setOpen(true)}
-            disabled={!cardId}
-            title={cardId ? undefined : 'save first'}
-            data-step-seams-pick=''
-          >
-            + seam
-          </Button>
-        }
-      >
-        seams
-      </GroupLabel>
+      <GroupLabel>seams</GroupLabel>
       <div className='flex flex-wrap items-start gap-x-4 gap-y-2'>
         {stored.map(({ key, row, parts }, i) => {
           const writing = !!pendingWrites[key];
@@ -196,7 +220,7 @@ export function StepSeamsRow({ index }: { index: number }) {
               marks={[...sug.a, ...sug.b].map((id) => ({ id, tone: 'proposal' }))}
               ownMarksOnly={unitStep}
               dashed
-              onOpen={cardId ? () => setPicker({ proposal: i, preselect: true }) : undefined}
+              onOpen={cardId ? () => onPicker({ proposal: i, preselect: true }) : undefined}
             />
           ))}
         {keys.length === 0 && !pending && suggestions.length === 0 && (

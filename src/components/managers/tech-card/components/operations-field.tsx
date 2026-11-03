@@ -286,7 +286,7 @@ import {
   usedEdgesBeforeStep,
   type FormOpLike,
 } from './step-seams/step-seams-model';
-import { StepSeamsRow } from './step-seams/step-seams-row';
+import { StepSeamsDoor, StepSeamsRow, type SeamPickerRequest } from './step-seams/step-seams-row';
 import { FOLD_STEP_REFUSAL, foldsClosingOn } from './assembly-folds/fold-step';
 import { StepFoldsRow } from './assembly-folds/step-folds-row';
 import type { PieceShapeMap } from './use-piece-shapes';
@@ -2538,6 +2538,7 @@ function OperationEditor({
     0) as number;
   const [addingMaterial, setAddingMaterial] = useState(false);
   const [over, setOver] = useState(false);
+  const [seamPicker, setSeamPicker] = useState<SeamPickerRequest | null>(null);
 
   // The overrides fold. Open when the step already differs — a folded panel hiding a value the
   // operator set is worse than an open one showing nothing.
@@ -4517,13 +4518,16 @@ function OperationEditor({
               accept review
             </Button>
           )}
-          <span className='hidden items-center gap-6 sm:flex'>
-            <Button type='button' variant='underline' size='xs' onClick={onInsertAfter}>
-              + below
-            </Button>
-            <Button type='button' variant='underline' size='xs' onClick={onRemove}>
-              remove
-            </Button>
+          <span className='flex items-center gap-6'>
+            <StepSeamsDoor index={index} onOpen={setSeamPicker} />
+            <span className='hidden items-center gap-6 sm:flex'>
+              <Button type='button' variant='underline' size='xs' onClick={onInsertAfter}>
+                + below
+              </Button>
+              <Button type='button' variant='underline' size='xs' onClick={onRemove}>
+                remove
+              </Button>
+            </span>
           </span>
         </div>
       </div>
@@ -4911,7 +4915,7 @@ function OperationEditor({
           onEdit={onEdit}
         />
       </div>
-      <StepSeamsRow index={index} />
+      <StepSeamsRow index={index} picker={seamPicker} onPicker={setSeamPicker} />
       <StepFoldsRow index={index} />
       {addingMaterial && unlinkedBySection.length > 0 && (
         <div className='mt-2 space-y-2'>
