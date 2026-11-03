@@ -685,6 +685,125 @@ export function planPoseMove(
 }
 
 /**
+ * Break every loop of poses between blocks, leaving all pieces where `transforms` has them. A later
+ * row wins: the row closing a loop goes, its block standing in the step's frame unless another row
+ * carries it, and the other rows of the loop are measured again. No loop, nothing to write.
+ * `hosts` runs oldest first; the row of `fixed` is the one just made and is never measured again.
+ */
+export function poseLoopFix(
+  hosts: ReadonlyMap<string, string>,
+  layout: Pick<PoseBlockLayout, 'blocks' | 'transforms'>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  fixed?: string,
+): Pick<PoseMovePlan, 'drop' | 'keep'> {
+  const input = new Map<string, number>();
+  layout.blocks.forEach((block, index) =>
+    block.pieces.forEach((key) => {
+      if (!input.has(key)) input.set(key, index);
+    }),
+  );
+  const rows = [...hosts].filter(
+    ([key, on]) =>
+      key !== on &&
+      input.get(key) != null &&
+      input.get(on) != null &&
+      input.get(key) !== input.get(on),
+  );
+  const add = (edges: Map<number, Set<number>>, from: number, to: number) =>
+    edges.set(from, (edges.get(from) ?? new Set()).add(to));
+  const reaches = (edges: ReadonlyMap<number, ReadonlySet<number>>, from: number, to: number) => {
+    const seen = new Set<number>();
+    const queue = [from];
+    while (queue.length) {
+      const at = queue.pop()!;
+      if (at === to) return true;
+      if (seen.has(at)) continue;
+      seen.add(at);
+      queue.push(...(edges.get(at) ?? []));
+    }
+    return false;
+  };
+  const kept = new Map<number, Set<number>>();
+  const closing: string[] = [];
+  const stay: (readonly [string, string])[] = [];
+  for (const [key, on] of [...rows].reverse()) {
+    const from = input.get(key)!;
+    const to = input.get(on)!;
+    if (reaches(kept, to, from)) {
+      closing.push(key);
+      continue;
+    }
+    add(kept, from, to);
+    stay.push([key, on]);
+  }
+  if (!closing.length) return { drop: [], keep: [] };
+
+  const all = new Map<number, Set<number>>();
+  for (const [key, on] of rows) add(all, input.get(key)!, input.get(on)!);
+  const keep: DroppedPose[] = [];
+  for (const [key, on] of stay) {
+    if (key === fixed || !reaches(all, input.get(on)!, input.get(key)!)) continue;
+    const T = layout.transforms.get(key);
+    const onT = layout.transforms.get(on);
+    const keyGeom = geoms.get(key);
+    const hostGeom = geoms.get(on);
+    if (T && onT && keyGeom && hostGeom)
+      keep.push({ piece: key, host: on, placement: poseAt(hostGeom, keyGeom, onT, T) });
+  }
+  const stands = new Set(
+    [...hosts].flatMap(([key, on]) =>
+      key === on && input.get(key) != null ? [input.get(key)!] : [],
+    ),
+  );
+  const drop: string[] = [];
+  for (const key of closing) {
+    const block = input.get(key)!;
+    const T = layout.transforms.get(key);
+    const own = geoms.get(key);
+    if (kept.has(block) || stands.has(block) || !T || !own) {
+      drop.push(key);
+      continue;
+    }
+    stands.add(block);
+    keep.push({ piece: key, host: key, placement: placementOf(own, own, T) });
+  }
+  return { drop, keep };
+}
+
+/**
+ * What FIT writes: the piece on the host the seam asks for, whatever rests where. `D` moves `group`
+ * in the frame of `transforms`. The group's other rows go (one block stands by one row), and a host
+ * resting on the group stands where it is: FIT never leaves a loop between blocks.
+ */
+export function planPoseFit(
+  piece: string,
+  host: string,
+  group: readonly string[],
+  D: Affine,
+  layout: Pick<PoseBlockLayout, 'blocks' | 'transforms'>,
+  pinHosts: ReadonlyMap<string, string>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): PoseMovePlan {
+  const T0 = layout.transforms.get(piece);
+  const pin = T0 ? poseAfterDrop(piece, compose(D, T0), { host }, layout, geoms) : null;
+  if (!pin) return { pin: null, drop: [], keep: [] };
+  const moved = new Set(group);
+  const transforms = new Map(layout.transforms);
+  for (const key of group) {
+    const T = transforms.get(key);
+    if (T) transforms.set(key, compose(D, T));
+  }
+  const hosts = new Map([...pinHosts].filter(([key]) => !moved.has(key)));
+  hosts.set(piece, host);
+  const fix = poseLoopFix(hosts, { blocks: layout.blocks, transforms }, geoms, piece);
+  return {
+    pin,
+    drop: [...[...pinHosts.keys()].filter((key) => key !== piece && moved.has(key)), ...fix.drop],
+    keep: fix.keep,
+  };
+}
+
+/**
  * Pin the posed pieces of a laid picture, in place: each where its row says on its host (`T` of
  * the host as laid), its group with it. A pose whose piece or host is not drawn is left out. Passes
  * until nothing moves (a pose on a posed host follows it), at most one per pose and one more.

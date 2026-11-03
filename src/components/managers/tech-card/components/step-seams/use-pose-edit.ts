@@ -27,8 +27,9 @@ import {
   layoutDrift,
   pinPoses,
   fitPlan,
+  planPoseFit,
   planPoseMove,
-  poseAfterDrop,
+  poseLoopFix,
   poseBlockGroup,
   posePickup,
   resolvePoseEdit,
@@ -38,6 +39,7 @@ import {
   upright,
   type FitSource,
   type PoseEditResolution,
+  type PoseMovePlan,
   type PosePickup,
   type PoseSnap,
 } from './step-pose';
@@ -74,6 +76,7 @@ export function usePoseEdit({
   geoms,
   grainDeg,
   busy,
+  frozen,
   setBusy,
   setRefused,
   attach,
@@ -88,6 +91,7 @@ export function usePoseEdit({
   geoms: ReadonlyMap<string, PieceGeom>;
   grainDeg: ReadonlyMap<string, number> | undefined;
   busy: boolean;
+  frozen?: boolean;
   setBusy: (busy: boolean) => void;
   setRefused: (message: string) => void;
   attach: (row: StoredSeam, keepPlace?: boolean) => Promise<string | null>;
@@ -262,28 +266,26 @@ export function usePoseEdit({
     return out;
   }, [storedPoseHosts, poseChanges.drop, poseEdits]);
   /** `D` as seen on the canvas: only the moved pieces change place there. */
-  const movePose = (piece: string, pickup: PosePickup, D: Affine) => {
-    // A hand move changes what FIT measures from: the next press starts a new cycle.
-    fitCycle.current = null;
-    setRefused('');
-    const plan = planPoseMove(
-      piece,
-      pickup,
-      D,
-      { blocks: poseBlocks, transforms: poseLayout.T },
-      pinHosts,
-      geoms,
-    );
+  const applyPlan = (plan: Pick<PoseMovePlan, 'drop' | 'keep'> & { pin?: PoseMovePlan['pin'] }) => {
+    const rows = [...(plan.pin ? [plan.pin] : []), ...plan.keep];
     // A flag between two blocks needs a row naming both: from a row going away to the other's row.
-    const leaving = [...plan.drop, ...(plan.pin?.host === piece ? [piece] : [])];
-    const flag = leaving
-      .map((key) => poseLayerEdits.get(key) ?? ownPoseRows.get(key)?.sideA[0]?.layer)
-      .find(Boolean);
-    const heir = plan.keep[0]?.piece;
-    if (flag && heir && !ownPoseRows.get(heir)?.sideA[0]?.layer && !poseLayerEdits.get(heir))
+    const leaving = [
+      ...plan.drop,
+      ...rows.flatMap((row) => (row.host === row.piece ? [row.piece] : [])),
+    ];
+    for (const key of leaving) {
+      const flag = poseLayerEdits.get(key) ?? ownPoseRows.get(key)?.sideA[0]?.layer;
+      const blockOfKey = poseBlocks.find((block) => block.pieces.includes(key));
+      const heir = rows.find(
+        (row) => row.host !== row.piece && !blockOfKey?.pieces.includes(row.piece),
+      )?.piece;
+      if (!flag || !heir || ownPoseRows.get(heir)?.sideA[0]?.layer || poseLayerEdits.get(heir))
+        continue;
       setPoseLayerEdits((current) =>
         new Map(current).set(heir, flag === 'under' ? 'over' : 'under'),
       );
+      break;
+    }
     setPoseChanges((current) => {
       const edits = new Map(current.edits);
       const drop = new Set(current.drop);
@@ -291,13 +293,49 @@ export function usePoseEdit({
         edits.delete(key);
         drop.add(key);
       }
-      return [...(plan.pin ? [plan.pin] : []), ...plan.keep].reduce(
+      return rows.reduce(
         (next, { piece: key, host, placement }) =>
           resolvePoseEdit(storedPoseHosts, next, key, { host, placement }),
         { edits, drop } as PoseEditResolution,
       );
     });
   };
+  const movePose = (piece: string, pickup: PosePickup, D: Affine) => {
+    // A hand move changes what FIT measures from: the next press starts a new cycle.
+    fitCycle.current = null;
+    setRefused('');
+    applyPlan(
+      planPoseMove(
+        piece,
+        pickup,
+        D,
+        { blocks: poseBlocks, transforms: poseLayout.T },
+        pinHosts,
+        geoms,
+      ),
+    );
+  };
+  // A loop saved earlier: its repair waits in hand, the picture as it stands, ACCEPT writes it.
+  const loopFixed = useRef(false);
+  useEffect(() => {
+    if (
+      frozen ||
+      loopFixed.current ||
+      poseEdits.size ||
+      poseChanges.drop.size ||
+      !poseBlocks.length
+    )
+      return;
+    const fix = poseLoopFix(
+      storedPoseHosts,
+      { blocks: poseBlocks, transforms: resultLayout.T },
+      geoms,
+    );
+    if (!fix.keep.length && !fix.drop.length) return;
+    loopFixed.current = true;
+    applyPlan(fix);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frozen, storedPoseHosts, poseBlocks, resultLayout, geoms]);
   const dropPose = (piece: string, pickup: PosePickup, D: Affine, snap: PoseSnap | null) => {
     setPoseDrag(null);
     movePose(piece, pickup, snap ? compose(translate(snap.dx, snap.dy), D) : D);
@@ -325,26 +363,26 @@ export function usePoseEdit({
       geoms,
       cycle.alternate,
     );
-    const T0 = plan ? cycle.transforms.get(plan.piece) : undefined;
-    if (!plan || !T0) return;
-    const dropped = poseAfterDrop(
+    if (!plan) return;
+    const fit = planPoseFit(
       plan.piece,
-      compose(plan.D, T0),
-      { host: plan.host },
-      { transforms: cycle.transforms },
+      plan.host,
+      posePickup(
+        plan.piece,
+        { blocks: poseBlocks, transforms: cycle.transforms, hung: poseHung },
+        geoms,
+      ).group,
+      plan.D,
+      { blocks: poseBlocks, transforms: cycle.transforms },
+      pinHosts,
       geoms,
     );
-    if (!dropped) return;
+    if (!fit.pin) return;
     fitCycle.current = { ...cycle, alternate: !cycle.alternate };
     setRefused('');
     setPoseDrag(null);
     setPoseSel(plan.piece);
-    setPoseChanges((current) =>
-      resolvePoseEdit(storedPoseHosts, current, plan.piece, {
-        host: dropped.host,
-        placement: dropped.placement,
-      }),
-    );
+    applyPlan(fit);
   };
   const transformPose = (command: 'left' | 'right' | 'mirror' | 'upright') => {
     const piece = poseSel;

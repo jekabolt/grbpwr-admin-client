@@ -254,6 +254,7 @@ export function SeamPickerBody({
     geoms,
     grainDeg: geo?.grainDeg,
     busy,
+    frozen,
     setBusy,
     setRefused,
     attach,

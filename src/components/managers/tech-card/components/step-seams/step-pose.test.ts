@@ -50,7 +50,10 @@ import {
   fitPlan,
   fitSourceOf,
   poseAfterDrop,
+  planPoseFit,
+  poseAt,
   poseBlockGroup,
+  poseLoopFix,
   poseGroup,
   poseHostOf,
   posePickup,
@@ -980,6 +983,201 @@ describe('planPoseMove: only the moved pieces change place', () => {
     const steps = [{ poseKeys: ['own'] }, {}];
     expect(posePinsOf(steps.slice(0, 1), rows).get('a')?.host).toBe('a');
     expect(posePinsOf(steps, rows).size).toBe(0);
+  });
+});
+
+describe('pose loops between blocks', () => {
+  const rect = (key: string): PieceGeom =>
+    ({
+      key,
+      areaMm2: 100,
+      rs: [
+        [0, 0],
+        [100, 0],
+        [100, 60],
+        [0, 60],
+      ],
+    }) as unknown as PieceGeom;
+  const keys = ['a', 'a2', 'b', 'b2', 'c', 'c2', 'd', 'd2'];
+  const geoms = new Map(keys.map((key) => [key, rect(key)]));
+  const blocks = [
+    { pieces: ['a', 'a2'] },
+    { pieces: ['b', 'b2'] },
+    { pieces: ['c', 'c2'] },
+    { pieces: ['d', 'd2'] },
+  ];
+  const blockOf = (key: string) => blocks.findIndex((block) => block.pieces.includes(key));
+  const start = () => {
+    const quarter = (i: number): Affine => {
+      const [c, s] = [
+        [1, 0],
+        [0, 1],
+        [-1, 0],
+        [0, -1],
+      ][i % 4];
+      return [c, s, -s, c, 170 * i + 11, 90 * (i % 3) - 7];
+    };
+    return new Map<string, Affine>(keys.map((key, i) => [key, quarter(i)]));
+  };
+  const hasLoop = (hosts: ReadonlyMap<string, string>) => {
+    const next = new Map<number, number[]>();
+    for (const [key, on] of hosts)
+      if (key !== on && blockOf(key) !== blockOf(on))
+        next.set(blockOf(key), [...(next.get(blockOf(key)) ?? []), blockOf(on)]);
+    const walk = (at: number, path: number[]): boolean =>
+      path.includes(at) || (next.get(at) ?? []).some((to) => walk(to, [...path, at]));
+    return blocks.some((_, index) => walk(index, []));
+  };
+  // Applies a plan and lays the pieces by the rows that remain, the way the result will.
+  const laidBy = (
+    hosts: ReadonlyMap<string, string>,
+    plan: {
+      drop: string[];
+      keep: { piece: string; host: string; placement: Parameters<typeof placementT>[2] }[];
+    },
+    pinOf: (key: string, on: string) => Parameters<typeof placementT>[2],
+    T: Map<string, Affine>,
+  ) => {
+    const after = new Map(hosts);
+    for (const key of plan.drop) after.delete(key);
+    const placed = new Map(plan.keep.map((row) => [row.piece, row] as const));
+    for (const row of plan.keep) after.set(row.piece, row.host);
+    const pose = new Map(
+      [...after].map(
+        ([key, on]) =>
+          [key, { host: on, placement: placed.get(key)?.placement ?? pinOf(key, on) }] as const,
+      ),
+    );
+    pinPoses(T, pose, geoms, [], {
+      groupOf: (piece, host) => poseBlockGroup(piece, host, { blocks }),
+    });
+    return after;
+  };
+  const near = (a: ReadonlyMap<string, Affine>, b: ReadonlyMap<string, Affine>) => {
+    for (const key of keys)
+      a.get(key)!.forEach((v, i) => expect(Math.abs(v - b.get(key)![i])).toBeLessThan(0.05));
+  };
+
+  it('a card with no loop has nothing to fix', () => {
+    const fix = poseLoopFix(
+      new Map([
+        ['a', 'b'],
+        ['b2', 'c'],
+        ['d', 'd'],
+      ]),
+      { blocks, transforms: start() },
+      geoms,
+    );
+    expect(fix).toEqual({ drop: [], keep: [] });
+  });
+
+  it('a row inside one block is no loop', () => {
+    const fix = poseLoopFix(
+      new Map([
+        ['a', 'a2'],
+        ['a2', 'a'],
+      ]),
+      { blocks, transforms: start() },
+      geoms,
+    );
+    expect(fix).toEqual({ drop: [], keep: [] });
+  });
+
+  it('a saved loop through different pieces is repaired with every piece where it stands', () => {
+    const T = start();
+    const hosts = new Map([
+      ['a', 'b2'],
+      ['b', 'a2'],
+    ]);
+    const fix = poseLoopFix(hosts, { blocks, transforms: T }, geoms);
+    expect(fix.keep.find((row) => row.piece === 'a')?.host).toBe('a');
+    expect(fix.keep.find((row) => row.piece === 'b')?.host).toBe('a2');
+    const laid = new Map(T);
+    const after = laidBy(hosts, fix, () => ({ xMm: 0, yMm: 0, rotDeg: 0, flip: false }), laid);
+    expect(hasLoop(after)).toBe(false);
+    near(laid, T);
+  });
+
+  it('a block carried by another row loses the closing row and takes no stand', () => {
+    const fix = poseLoopFix(
+      new Map([
+        ['a', 'b'],
+        ['b', 'a'],
+        ['a2', 'c'],
+      ]),
+      { blocks, transforms: start() },
+      geoms,
+    );
+    expect(fix.drop).toEqual(['a']);
+    expect(fix.keep.some((row) => row.host === row.piece)).toBe(false);
+  });
+
+  it('FIT never leaves a loop: the fitted block lands, the others stand, over every shape', () => {
+    let seed = 7;
+    const random = (n: number) => {
+      seed = (seed * 16807) % 2147483647;
+      return seed % n;
+    };
+    const D: Affine = [0, 1, -1, 0, 37.5, -12.25];
+    let loops = 0;
+    for (let run = 0; run < 400; run++) {
+      const T = start();
+      const hosts = new Map<string, string>();
+      for (let row = random(6); row >= 0; row--) {
+        const key = keys[random(keys.length)];
+        hosts.set(key, keys[random(keys.length)]);
+      }
+      const shown = new Map(T);
+      const measured = new Map(
+        [...hosts].map(([key, on]) => [
+          key,
+          key === on
+            ? placementOf(geoms.get(key)!, geoms.get(key)!, T.get(key)!)
+            : poseAt(geoms.get(on)!, geoms.get(key)!, T.get(on)!, T.get(key)!),
+        ]),
+      );
+      const piece = keys[random(keys.length)];
+      const others = keys.filter((key) => blockOf(key) !== blockOf(piece));
+      const host = others[random(others.length)];
+      const group = blocks[blockOf(piece)].pieces;
+      const layout = { blocks, transforms: T };
+      if (hasLoop(new Map([...hosts, [piece, host]]))) loops++;
+      const plan = planPoseFit(piece, host, group, D, layout, hosts, geoms);
+      expect(plan.pin?.host).toBe(host);
+      const after = new Map(hosts);
+      for (const key of plan.drop) after.delete(key);
+      for (const row of [plan.pin!, ...plan.keep]) after.set(row.piece, row.host);
+      expect(hasLoop(after)).toBe(false);
+      // The stored placements of untouched rows, the fresh ones of the rest.
+      const fresh = new Map([plan.pin!, ...plan.keep].map((row) => [row.piece, row] as const));
+      const pose = new Map(
+        [...after].map(([key, on]) => [
+          key,
+          { host: on, placement: fresh.get(key)?.placement ?? measured.get(key)! },
+        ]),
+      );
+      const laid = new Map(T);
+      // A block that keeps a row on the moved group goes along when FIT is pressed, as ever.
+      pinPoses(laid, pose, geoms, [], {
+        groupOf: (key, on) => poseBlockGroup(key, on, { blocks }),
+      });
+      for (const key of group)
+        compose(D, shown.get(key)!).forEach((v, i) =>
+          expect(Math.abs(v - laid.get(key)![i])).toBeLessThan(0.05),
+        );
+      const onGroup = (at: number, path: number[] = []): boolean =>
+        at === blockOf(piece) ||
+        (!path.includes(at) &&
+          [...after].some(
+            ([key, on]) => blockOf(key) === at && key !== on && onGroup(blockOf(on), [...path, at]),
+          ));
+      for (const key of keys)
+        if (!onGroup(blockOf(key)))
+          shown
+            .get(key)!
+            .forEach((v, i) => expect(Math.abs(v - laid.get(key)![i])).toBeLessThan(0.05));
+    }
+    expect(loops).toBeGreaterThan(50);
   });
 });
 
