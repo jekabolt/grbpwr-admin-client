@@ -362,6 +362,7 @@ export const it = {
     pressSide: 'lato stiro',
     topstitch: 'impuntura',
     button: 'bottone',
+    label: 'etichetta',
     openIssue: 'punto aperto',
     colour: 'colore',
     sectionCover: 'copertina',

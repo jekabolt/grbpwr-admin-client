@@ -403,6 +403,7 @@ export const pl = {
     pressSide: 'strona prasowania',
     topstitch: 'stębnowanie',
     button: 'guzik',
+    label: 'etykieta',
     openIssue: 'otwarta uwaga',
     colour: 'kolor',
     sectionCover: 'okładka',

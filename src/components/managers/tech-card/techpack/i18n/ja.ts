@@ -358,6 +358,7 @@ export const ja = {
     pressSide: '倒し方向',
     topstitch: 'ステッチ',
     button: 'ボタン',
+    label: 'ネーム',
     openIssue: '未解決',
     colour: '色',
     sectionCover: '表紙',

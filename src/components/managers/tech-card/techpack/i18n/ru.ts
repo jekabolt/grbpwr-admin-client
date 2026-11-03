@@ -403,6 +403,7 @@ export const ru = {
     pressSide: 'направление заутюжки',
     topstitch: 'отстрочка',
     button: 'пуговица',
+    label: 'этикетка',
     openIssue: 'открытое замечание',
     colour: 'цвет',
     sectionCover: 'обложка',

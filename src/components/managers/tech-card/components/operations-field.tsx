@@ -749,10 +749,8 @@ const OPERATION_LINKABLE_SECTIONS = [
 ];
 const LINKABLE_SECTION_INDEX = new Map(OPERATION_LINKABLE_SECTIONS.map((s, i) => [s, i]));
 
-// The lines that SHOULD end up on some step — the picker's set minus labels. A label reaches the
-// garment through tech_card_label / the style assembly bill, so a label line attached to no
-// operation is normal rather than an omission, and flagging it would train people to ignore the
-// whole check.
+// The lines that SHOULD end up on some step — the picker's set minus labels, which have their own
+// warning: a tag or a sticker sits in the same section and is never sewn.
 export const OPERATION_EXPECTED_SECTIONS = new Set(
   OPERATION_LINKABLE_SECTIONS.filter((s) => s !== 'TECH_CARD_BOM_SECTION_LABEL'),
 );
@@ -773,6 +771,18 @@ const OPERATION_TYPE_EXPECTS: Partial<Record<common_TechCardOperationType, Expec
     what: 'fusing',
   },
 };
+// Labels are keyed on the WORK: the same lockstitch sews seams too, so the machine says nothing here.
+const ATTACH_LABEL_WORK = 'attach_label';
+const LABEL_SECTION = 'TECH_CARD_BOM_SECTION_LABEL';
+const WORK_EXPECTS: Record<string, ExpectedMaterial> = {
+  [ATTACH_LABEL_WORK]: { section: LABEL_SECTION, what: 'label' },
+};
+// A label line of these kinds is tied or stuck on after sewing, so no step owes it a stitch.
+const NOT_SEWN_LABEL_KINDS = new Set([
+  'TECH_CARD_BOM_KIND_HANGTAG_STRING',
+  'TECH_CARD_BOM_KIND_STICKER',
+]);
+const NOT_SEWN_GARMENT_LABELS = new Set(['hangtag', 'barcode']);
 const MACHINE_TYPE_EXPECTS: Partial<Record<common_TechCardMachineType, ExpectedMaterial>> = {
   TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH: {
     section: 'TECH_CARD_BOM_SECTION_HARDWARE',
@@ -1334,13 +1344,12 @@ function OperationsHeaderWarnings({
     lineKey?: string;
     name?: string;
     section?: string;
+    kind?: string;
+    id?: number;
   }>;
-  const labels = (useWatch({ control, name: 'labels' }) ?? []) as Array<{
-    content?: string;
-    placement?: string;
-    attachment?: string;
-    size?: string;
-    note?: string;
+  const garmentLabels = (useWatch({ control, name: 'garmentLabels' }) ?? []) as Array<{
+    key?: string;
+    bomItemId?: number;
   }>;
   const total = operations.length;
   // An empty `work` is the only «not named»: the wire and the schema already carry it as a string.
@@ -1358,18 +1367,22 @@ function OperationsHeaderWarnings({
           return !key || !attachedKeys.has(key);
         })
       : [];
-  // Labels are declared but no step sews any of them on: that work is in neither the route nor the
-  // SAM. Card-level on purpose — one fact, not a list of every label.
-  const usedLabels = labels.filter((l) =>
-    [l.content, l.placement, l.attachment, l.size, l.note].some((v) => !!v?.trim()),
-  ).length;
-  const labelsOnSomeStep = bomItems.some(
-    (b) =>
-      (b.section ?? '') === 'TECH_CARD_BOM_SECTION_LABEL' &&
-      !!b.lineKey?.trim() &&
-      attachedKeys.has(b.lineKey.trim()),
+  // A label line no step sews on: that work is in neither the route nor the SAM. Not part of offStep
+  // because a tag or a sticker sits in the same section and is never sewn.
+  const notSewnBomIds = new Set(
+    garmentLabels
+      .filter((l) => NOT_SEWN_GARMENT_LABELS.has(l.key ?? ''))
+      .map((l) => l.bomItemId ?? 0),
   );
-  const labelsOffRoute = total > 0 && usedLabels > 0 && !labelsOnSomeStep;
+  const labelsOffRoute =
+    total > 0
+      ? bomItems.filter((b) => {
+          if ((b.section ?? '') !== LABEL_SECTION) return false;
+          if (NOT_SEWN_LABEL_KINDS.has(b.kind ?? '') || notSewnBomIds.has(b.id ?? 0)) return false;
+          const key = b.lineKey?.trim();
+          return !key || !attachedKeys.has(key);
+        })
+      : [];
   // Steps with no sketch pin — counted only once the sketch carries pins at all; on a card without
   // a pinned sketch every step is trivially unpinned.
   const pinCount = ((useWatch({ control, name: 'callouts' }) ?? []) as Array<{ number?: number }>)
@@ -1402,7 +1415,11 @@ function OperationsHeaderWarnings({
   if (offStep.length > 0) {
     items.push(`on no step: ${offStep.map((b) => b.name?.trim() || 'unnamed').join(' · ')}`);
   }
-  if (labelsOffRoute) items.push('no step sews the labels on');
+  if (labelsOffRoute.length > 0) {
+    items.push(
+      `no step sews on: ${labelsOffRoute.map((b) => b.name?.trim() || 'unnamed').join(' · ')}`,
+    );
+  }
   if (unpinned > 0)
     items.push(`${unpinned} ${unpinned === 1 ? 'step' : 'steps'} without a sketch pin`);
   if (items.length === 0) return null;
@@ -3152,7 +3169,7 @@ function OperationEditor({
   // поле стоит в ядре сетки рядом с пикером, и «ничего не названо» над пустым местом было бы
   // неправдой в обе стороны сразу.
   const [overridesOpen, setOverridesOpen] = useState(false);
-  const [stepParams] = useSearchParams();
+  const [stepParams, setStepParams] = useSearchParams();
   const seamPick = stepParams.get('pick');
   useEffect(() => {
     if (seamPick === String(storedOperationNumber)) setOverridesOpen(true);
@@ -4240,7 +4257,9 @@ function OperationEditor({
     ...preferredBomKinds(opType, machineType),
     ...(activeKind?.bomKinds ?? []),
   ]);
-  const isPreferred = (b: BomLine) => !!b.kind && preferredKinds.has(b.kind);
+  const isPreferred = (b: BomLine) =>
+    (!!b.kind && preferredKinds.has(b.kind)) ||
+    (workValue === ATTACH_LABEL_WORK && b.section === LABEL_SECTION);
   const unlinkedBySection = (() => {
     const groups = new Map<string, BomLine[]>();
     for (const b of unlinkedBoms) {
@@ -4269,10 +4288,26 @@ function OperationEditor({
   // it clears the moment the operator picks one. Both axes have an opinion: the step type answers
   // for fusing, the machine for the button-attach automat.
   const expects =
+    WORK_EXPECTS[workValue] ??
     OPERATION_TYPE_EXPECTS[opType as common_TechCardOperationType] ??
     (isMachineStep ? MACHINE_TYPE_EXPECTS[machineType as common_TechCardMachineType] : undefined);
   const expectsMaterial =
     expects && !linkedMaterials.some((b) => b.section === expects.section) ? expects : null;
+  // No label line to pick and none can be made here: they are made on the labels tab.
+  const noLabelToPick =
+    expectsMaterial?.section === LABEL_SECTION &&
+    !unlinkedBoms.some((b) => b.section === LABEL_SECTION);
+  const openLabelsTab = () =>
+    setStepParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('tab', 'labels');
+        next.delete('sample');
+        next.delete('fits');
+        return next;
+      },
+      { replace: true },
+    );
 
   // A pin that no longer resolves (its callout was deleted from the drawing) keeps a visible,
   // re-selectable option instead of reading as «— пин —» — the same defensive fallback the issues
@@ -4889,10 +4924,13 @@ function OperationEditor({
             onMouseLeave={() => onActiveBomChange?.(null)}
           >
             <Tile
-              name={material.name?.trim() || 'unnamed'}
               title={kindLabel(material.kind) ?? LINKABLE_SECTION_LABEL[material.section ?? '']}
               className='justify-center'
-            />
+            >
+              <Text size='micro' className='line-clamp-3 font-bold break-words uppercase'>
+                {material.name?.trim() || 'unnamed'}
+              </Text>
+            </Tile>
             <Close
               aria-label={`remove material ${material.name?.trim() || ''}`}
               onClick={() => {
@@ -4961,16 +4999,30 @@ function OperationEditor({
           material removed
         </Text>
       )}
-      {expectsMaterial && unlinkedBoms.length > 0 && !addingMaterial && (
+      {noLabelToPick ? (
         <Button
           type='button'
           variant='underline'
           size='xs'
           className='mt-1'
-          onClick={() => setAddingMaterial(true)}
+          onClick={openLabelsTab}
         >
-          material missing
+          material missing → labels & pkg
         </Button>
+      ) : (
+        expectsMaterial &&
+        unlinkedBoms.length > 0 &&
+        !addingMaterial && (
+          <Button
+            type='button'
+            variant='underline'
+            size='xs'
+            className='mt-1'
+            onClick={() => setAddingMaterial(true)}
+          >
+            material missing
+          </Button>
+        )
       )}
       {stepViolations.length > 0 && (
         <CalloutBox tone='error'>

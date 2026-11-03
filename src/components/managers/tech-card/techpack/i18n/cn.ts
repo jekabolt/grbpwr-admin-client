@@ -358,6 +358,7 @@ export const cn = {
     pressSide: '倒烫方向',
     topstitch: '明线',
     button: '纽扣',
+    label: '标签',
     openIssue: '未结问题',
     colour: '颜色',
     sectionCover: '封面',
