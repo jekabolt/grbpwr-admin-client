@@ -9,8 +9,8 @@
 // `src/lib/doll`, so the picker can swap to that one when it lands.
 
 import type { Pt2 } from 'lib/assembly-skeleton/types';
-import { add, cross, inside, mul, perp, sub, unit } from './geom';
-import type { FoldKind } from './types';
+import { add, clipThrough, cross, distToPoly, inside, mul, perp, sub, unit } from './geom';
+import { FOLDS, type FoldKind } from './types';
 
 /** One fold in the same frame as the polygon. */
 export type FlatFold = { a: Pt2; b: Pt2; flipAt: Pt2; kind: FoldKind };
@@ -42,6 +42,37 @@ const area = (p: readonly Pt2[]) => {
   return Math.abs(s) / 2;
 };
 
+const DOT_EPS = 1e-9;
+
+/**
+ * A line that reaches the contour at both ends keeps the old infinite-line fold. A line extended
+ * past the contour does too when its two perpendicular end planes already enclose the whole piece.
+ */
+export function isFoldBounded(poly: readonly Pt2[], fold: FlatFold): boolean {
+  if (
+    distToPoly(poly, fold.a) <= FOLDS.onContourMm &&
+    distToPoly(poly, fold.b) <= FOLDS.onContourMm
+  ) {
+    return false;
+  }
+  const d = sub(fold.b, fold.a);
+  const l2 = d[0] ** 2 + d[1] ** 2;
+  if (l2 <= DOT_EPS) return false;
+  return poly.some((q) => {
+    const t = (sub(q, fold.a)[0] * d[0] + sub(q, fold.a)[1] * d[1]) / l2;
+    return t < -DOT_EPS || t > 1 + DOT_EPS;
+  });
+}
+
+/** Whether `point` lies between the perpendiculars through a fold segment's ends. */
+export function inFoldBand(point: Pt2, fold: FlatFold): boolean {
+  const d = sub(fold.b, fold.a);
+  const l2 = d[0] ** 2 + d[1] ** 2;
+  if (l2 <= DOT_EPS) return true;
+  const t = (sub(point, fold.a)[0] * d[0] + sub(point, fold.a)[1] * d[1]) / l2;
+  return t >= -DOT_EPS && t <= 1 + DOT_EPS;
+}
+
 /** The part of `poly` on side `s` of the line a→b (s = +1 left, −1 right). Sutherland–Hodgman. */
 export function clipSide(poly: readonly Pt2[], a: Pt2, b: Pt2, s: number): Pt2[] {
   const d = sub(b, a);
@@ -58,6 +89,31 @@ export function clipSide(poly: readonly Pt2[], a: Pt2, b: Pt2, s: number): Pt2[]
   return out;
 }
 
+const useful = (poly: Pt2[]) => poly.length > 2 && area(poly) > 1;
+
+/** Split one ply into the stationary pieces and the one moving piece of a fold. */
+function splitFoldPly(
+  poly: readonly Pt2[],
+  fold: FlatFold,
+  side: number,
+  bounded: boolean,
+): { fixed: Pt2[][]; moving: Pt2[] } {
+  const near = clipSide(poly, fold.a, fold.b, -side);
+  const far = clipSide(poly, fold.a, fold.b, side);
+  if (!bounded || !useful(far)) return { fixed: useful(near) ? [near] : [], moving: far };
+
+  const d = sub(fold.b, fold.a);
+  // cross(-perp(d), q-a) = dot(d, q-a): positive is beyond the start.
+  const startDir = mul(perp(d), -1);
+  const before = clipSide(far, fold.a, add(fold.a, startDir), -1);
+  const afterStart = clipSide(far, fold.a, add(fold.a, startDir), 1);
+  // cross(perp(d), q-b) = -dot(d, q-b): positive is before the end.
+  const endDir = perp(d);
+  const moving = clipSide(afterStart, fold.b, add(fold.b, endDir), 1);
+  const after = clipSide(afterStart, fold.b, add(fold.b, endDir), -1);
+  return { fixed: [near, before, after].filter(useful), moving };
+}
+
 export function reflect(p: Pt2, a: Pt2, b: Pt2): Pt2 {
   const d = unit(sub(b, a));
   const v = sub(p, a);
@@ -71,7 +127,11 @@ export const sideOf = (a: Pt2, b: Pt2, p: Pt2): 1 | -1 =>
 
 /** The side of a→b holding the smaller part of the piece — the one that flips by default. */
 export function smallerSide(poly: readonly Pt2[], a: Pt2, b: Pt2): 1 | -1 {
-  return area(clipSide(poly, a, b, 1)) <= area(clipSide(poly, a, b, -1)) ? 1 : -1;
+  const fold: FlatFold = { a, b, flipAt: a, kind: 'inward' };
+  const bounded = isFoldBounded(poly, fold);
+  const sideArea = (side: 1 | -1) =>
+    area(bounded ? splitFoldPly(poly, fold, side, true).moving : clipSide(poly, a, b, side));
+  return sideArea(1) <= sideArea(-1) ? 1 : -1;
 }
 
 /** A point inside the piece on side `s` of a→b, near the middle of the line; null when none. */
@@ -91,14 +151,77 @@ export function pointOnSide(poly: readonly Pt2[], a: Pt2, b: Pt2, s: number): Pt
  */
 export function doubleTurn(poly: readonly Pt2[], a: Pt2, b: Pt2, s: number): [Pt2, Pt2][] {
   const dir = mul(perp(unit(sub(b, a))), s);
+  const fold: FlatFold = { a, b, flipAt: a, kind: 'inward' };
+  const bounded = isFoldBounded(poly, fold);
+  const moving = bounded ? splitFoldPly(poly, fold, s, true).moving : clipSide(poly, a, b, s);
   let ext = 0;
-  for (const q of clipSide(poly, a, b, s))
-    ext = Math.max(ext, sub(q, a)[0] * dir[0] + sub(q, a)[1] * dir[1]);
+  for (const q of moving) ext = Math.max(ext, sub(q, a)[0] * dir[0] + sub(q, a)[1] * dir[1]);
   const sh = mul(dir, ext / 2);
-  return [
-    [add(a, sh), add(b, sh)],
-    [a, b],
-  ];
+  const shifted: [Pt2, Pt2] = [add(a, sh), add(b, sh)];
+  // On a tapered piece the shifted ends of a full fold can miss the contour; it must stay full.
+  const stillFull =
+    !bounded &&
+    isFoldBounded(poly, { ...fold, a: shifted[0], b: shifted[1] }) &&
+    clipThrough(poly, mul(add(shifted[0], shifted[1]), 0.5), sub(b, a));
+  return [stillFull || shifted, [a, b]];
+}
+
+const pointKey = ([x, y]: Pt2) => `${Math.round(x * 1e7)},${Math.round(y * 1e7)}`;
+
+/** Join adjacent stationary clipping cells back into the fixed outline. */
+function joinedOutline(polys: readonly Pt2[][]): Pt2[] {
+  if (polys.length === 1) return polys[0];
+  const vertices = polys.flat();
+  const coords = new Map(vertices.map((p) => [pointKey(p), p]));
+  const boundary = new Map<string, { a: string; b: string; direction: number }>();
+
+  for (const poly of polys) {
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i];
+      const b = poly[(i + 1) % poly.length];
+      const ab = sub(b, a);
+      const l2 = ab[0] ** 2 + ab[1] ** 2;
+      if (l2 <= DOT_EPS) continue;
+      const cuts = vertices
+        .map((p) => {
+          const ap = sub(p, a);
+          const t = (ap[0] * ab[0] + ap[1] * ab[1]) / l2;
+          const off = Math.abs(cross(ab, ap)) / Math.sqrt(l2);
+          return { p, t, off };
+        })
+        .filter(({ t, off }) => t >= -DOT_EPS && t <= 1 + DOT_EPS && off <= 1e-7)
+        .sort((x, y) => x.t - y.t);
+      for (let j = 0; j + 1 < cuts.length; j++) {
+        const ak = pointKey(cuts[j].p);
+        const bk = pointKey(cuts[j + 1].p);
+        if (ak === bk) continue;
+        const forward = ak < bk;
+        const key = forward ? `${ak}|${bk}` : `${bk}|${ak}`;
+        const direction = forward ? 1 : -1;
+        const old = boundary.get(key);
+        if (!old) boundary.set(key, { a: ak, b: bk, direction });
+        else if (old.direction + direction === 0) boundary.delete(key);
+      }
+    }
+  }
+
+  const edges = [...boundary.values()].map(({ a, b }) => ({ a, b }));
+  const rings: Pt2[][] = [];
+  while (edges.length) {
+    const first = edges.pop()!;
+    const keys = [first.a, first.b];
+    while (keys[keys.length - 1] !== keys[0]) {
+      const at = keys[keys.length - 1];
+      const next = edges.findIndex((edge) => edge.a === at);
+      if (next < 0) break;
+      keys.push(edges.splice(next, 1)[0].b);
+    }
+    const ring = keys.slice(0, -1).map((key) => coords.get(key)!);
+    if (ring.length > 2) rings.push(ring);
+  }
+  return rings.length
+    ? rings.reduce((largest, ring) => (area(ring) > area(largest) ? ring : largest))
+    : polys.reduce((largest, poly) => (area(poly) > area(largest) ? poly : largest));
 }
 
 const lerp = (p: Pt2, q: Pt2, t: number): Pt2 => [
@@ -118,21 +241,23 @@ export function foldedOutline(
 ): FoldedShape {
   let plies: FoldPly[] = [{ poly: [...poly], flipped: false, by: 0, t: 1 }];
   const creases: [Pt2, Pt2][] = [];
+  let hasBoundedFold = false;
   folds.forEach((f, i) => {
     const pr = opts.progress;
     const t = !pr || i < pr.index ? 1 : i === pr.index ? Math.max(0, Math.min(1, pr.t)) : 0;
     creases.push([f.a, f.b]);
     if (t <= 0) return;
     const s = sideOf(f.a, f.b, f.flipAt);
+    const bounded = isFoldBounded(poly, f);
+    hasBoundedFold ||= bounded;
     const near: FoldPly[] = [];
     const far: FoldPly[] = [];
     for (const y of plies) {
-      const nb = clipSide(y.poly, f.a, f.b, -s);
-      const fb = clipSide(y.poly, f.a, f.b, s);
-      if (nb.length > 2 && area(nb) > 1) near.push({ ...y, poly: nb });
-      if (fb.length > 2 && area(fb) > 1)
+      const { fixed, moving } = splitFoldPly(y.poly, f, s, bounded);
+      near.push(...fixed.map((fixedPoly) => ({ ...y, poly: fixedPoly })));
+      if (useful(moving))
         far.push({
-          poly: fb.map((q) => lerp(q, reflect(q, f.a, f.b), t)),
+          poly: moving.map((q) => lerp(q, reflect(q, f.a, f.b), t)),
           flipped: !y.flipped,
           by: i + 1,
           t,
@@ -145,7 +270,9 @@ export function foldedOutline(
 
   const still = plies.filter((y) => y.by === 0);
   const outline = still.length
-    ? still.reduce((m, y) => (area(y.poly) > area(m.poly) ? y : m)).poly
+    ? hasBoundedFold
+      ? joinedOutline(still.map((y) => y.poly))
+      : still.reduce((m, y) => (area(y.poly) > area(m.poly) ? y : m)).poly
     : [];
   const last = folds[folds.length - 1];
   const span = (polys: readonly (readonly Pt2[])[], n: Pt2) => {
@@ -185,7 +312,10 @@ export type FoldSection = {
   fin: { lo: number; hi: number };
 };
 
-/** The stack across the first fold's normal (the folds of one piece are parallel in v1). */
+/**
+ * The stack across the first fold's normal (the folds of one piece are parallel in v1). A bounded
+ * fold also keeps the projected flat ply that exists beyond either end of its segment.
+ */
 export function foldSection(poly: readonly Pt2[], folds: readonly FlatFold[]): FoldSection | null {
   if (!folds.length) return null;
   const n = perp(unit(sub(folds[0].b, folds[0].a)));
@@ -200,6 +330,7 @@ export function foldSection(poly: readonly Pt2[], folds: readonly FlatFold[]): F
   let joins: (SectionJoin & { fresh?: boolean })[] = [];
   let nid = 1;
   for (const f of folds) {
+    const bounded = isFoldBounded(poly, f);
     const nl = perp(unit(sub(f.b, f.a)));
     const c = dot(f.a);
     const s = sideOf(f.a, f.b, f.flipAt);
@@ -218,6 +349,8 @@ export function foldSection(poly: readonly Pt2[], folds: readonly FlatFold[]): F
         if (X.hi > c + 1e-6) nr = [Math.max(X.lo, c), X.hi];
         if (X.lo < c - 1e-6) fr = [X.lo, Math.min(X.hi, c)];
       }
+      // Outside the endpoint band this same ply stays flat, so its aggregate projection stays whole.
+      if (bounded && fr) nr = [X.lo, X.hi];
       if (nr && nr[1] - nr[0] < 0.01) nr = null;
       if (fr && fr[1] - fr[0] < 0.01) fr = null;
       map[X.id] = {};

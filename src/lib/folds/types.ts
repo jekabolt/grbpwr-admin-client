@@ -58,7 +58,7 @@ export type FoldHint = {
   strength: 'strong' | 'weak';
   /** The source the row gets when accepted. */
   source: FoldSource;
-  /** mm, the piece's `rs` frame, already extended to the contour. */
+  /** mm, the piece's `rs` frame; an inner line keeps its ends, other hints reach the contour. */
   lineMm: [Pt2, Pt2];
   /** The same line in the seam frame. */
   line: [UV, UV];

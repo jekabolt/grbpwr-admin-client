@@ -88,6 +88,35 @@ describe('foldFromLine', () => {
     expect(row.line[0][1]).toBeCloseTo(0.1, 3);
     expect(row.contourSig).toMatch(/^[0-9a-f]{16}$/);
   });
+
+  it('does not give a short internal line a full-width edge locator', () => {
+    const row = foldFromLine(
+      S,
+      [
+        [100, 30],
+        [200, 30],
+      ],
+      [150, 15],
+      { seq: 1, kind: 'inward', source: 'dxf' },
+    );
+
+    expect(row.edge).toBeNull();
+    const fold = resolveFolds([row], [S]).folds[KEY][0];
+    expect(fold.a).toEqual([0.25, 0.1]);
+    expect(fold.b).toEqual([0.5, 0.1]);
+  });
+
+  it('keeps a saved row that is not a drawn inner line full width', () => {
+    const line: [Pt2, Pt2] = [
+      [100, 30],
+      [200, 30],
+    ];
+    const row = foldFromLine(S, line, [150, 15], { seq: 1, kind: 'inward', source: 'owner' });
+
+    const fold = resolveFolds([row], [S]).folds[KEY][0];
+    expect(fold.a).toEqual([0, 0.1]);
+    expect(fold.b).toEqual([1, 0.1]);
+  });
 });
 
 describe('resolveFolds — grading keeps offset_mm', () => {
@@ -286,7 +315,7 @@ describe('foldHints', () => {
     expect(row!.source).toBe('dxf');
   });
 
-  it('extends an inner vent line whose ends stop inside the piece', () => {
+  it('keeps an inner vent line bounded by its own ends', () => {
     const piece = dto(40, 30);
     const geom = segmentPiece(input(piece));
     const [hint] = foldHints(input(piece), geom, {
@@ -299,7 +328,15 @@ describe('foldHints', () => {
     });
 
     expect(hint.origin).toBe('inner');
-    expect(Math.abs(hint.lineMm[1][1] - hint.lineMm[0][1])).toBeCloseTo(300, 0);
+    expect(hint.lineMm).toEqual([
+      [200, 90],
+      [200, 210],
+    ]);
+    expect(hint.edge).toBeNull();
+    const row = foldFromHint(geom, hint, { seq: 1, kind: 'inward' });
+    expect(row).not.toBeNull();
+    const resolved = resolveFolds([row!], [geom]).folds[KEY][0];
+    expect(yMm(geom, resolved)).toEqual([90, 210]);
   });
 
   it('does not offer 3, 12 or 25 mm inner lines', () => {

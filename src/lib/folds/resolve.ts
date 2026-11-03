@@ -4,8 +4,9 @@
 // matches, else by the shape of its five samples), lay the line parallel to its chord at `offsetMm`
 // inward, extend it to the contour. A hem allowance stays 30 mm on every size, where a scaled (u, v)
 // line would grow with the piece. Without a locator, or when the edge is not found, the stored (u, v)
-// line is used as is (extended to the contour). The flipping side is kept from the stored `flipAt`.
-// What cannot be laid on this size is reported in words and left out — never guessed.
+// line of a drawn inner line (source dxf, no edge) keeps its ends; every other row is extended to the
+// contour. The flipping side is kept from the stored `flipAt`. What cannot be laid on this size is
+// reported in words and left out — never guessed.
 
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import {
@@ -24,6 +25,7 @@ import {
   clampUV,
   clipThrough,
   contourSig,
+  distToPoly,
   frameOf,
   fromUV,
   inside,
@@ -124,7 +126,28 @@ function resolveOne(
   }
   if (!line) {
     if (len(sub(sb, sa)) < 1e-6) return 'the saved line has no length';
-    line = clipThrough(piece.rs, mul(add(sa, sb), 0.5), sub(sb, sa));
+    const through = clipThrough(piece.rs, mul(add(sa, sb), 0.5), sub(sb, sa));
+    if (through) {
+      // Only a drawn inner line may stop inside the piece: it is saved as dxf with no edge. Any
+      // other row was laid across the piece, so ends that miss the outline on this size stay full.
+      const mayStopInside = row.source === 'dxf' && !row.edge;
+      const reachesOutline =
+        distToPoly(piece.rs, sa) <= th.onContourMm && distToPoly(piece.rs, sb) <= th.onContourMm;
+      if (!mayStopInside || reachesOutline) line = through;
+      else {
+        const d = unit(sub(sb, sa));
+        const rawLen = len(sub(sb, sa));
+        const along = (p: Pt2) => sub(p, sa)[0] * d[0] + sub(p, sa)[1] * d[1];
+        const lo = Math.max(0, along(through[0]));
+        const hi = Math.min(rawLen, along(through[1]));
+        if (hi > lo) {
+          line =
+            lo <= 1e-9 && hi >= rawLen - 1e-9
+              ? [sa, sb]
+              : [add(sa, mul(d, lo)), add(sa, mul(d, hi))];
+        }
+      }
+    }
   }
   if (!line) return 'the saved line falls outside the piece on this size';
   if (len(sub(line[1], line[0])) < th.minLenMm) return 'the line is too short on this size';

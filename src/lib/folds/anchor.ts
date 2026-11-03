@@ -9,6 +9,7 @@ import {
   add,
   clampUV,
   contourSig,
+  distToPoly,
   edgeAlong,
   foldEdgeOf,
   frameOf,
@@ -20,7 +21,7 @@ import {
   toUV,
   unit,
 } from './geom';
-import type { FoldHint, FoldKind, FoldSource, StoredFold } from './types';
+import { FOLDS, type FoldHint, type FoldKind, type FoldSource, type StoredFold } from './types';
 
 export type FoldMeta = {
   seq: number;
@@ -43,7 +44,8 @@ export function foldFromLine(
   meta: FoldMeta,
 ): StoredFold {
   const f = frameOf(piece, meta.grainDeg ?? 0);
-  const run = meta.edge === undefined ? edgeAlong(piece, lineMm) : meta.edge;
+  const reachesOutline = lineMm.every((point) => distToPoly(piece.rs, point) <= FOLDS.onContourMm);
+  const run = meta.edge === undefined && reachesOutline ? edgeAlong(piece, lineMm) : meta.edge;
   return {
     foldKey: meta.foldKey ?? newSeamKey(),
     pieceKey: piece.pieceKey,

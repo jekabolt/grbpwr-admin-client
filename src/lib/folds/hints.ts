@@ -8,8 +8,8 @@
 //             hint: a cuff cut on fold is folded there, a back cut on fold is not
 //   inner     an inner line from the assembly map — weak DXF evidence that may be a construction fold
 //
-// Straight lines only (v1). Each line is extended to the sewing loop; near-duplicates collapse to the
-// first (marks before layer lines, then assembly-map inner lines).
+// Straight lines only (v1). Classified / layer lines extend to the sewing loop; an assembly-map inner
+// line keeps its own ends. Near-duplicates collapse to the first (marks, layer lines, then inner lines).
 
 import type { PieceGeom, Pt2, SkeletonPieceInput } from 'lib/assembly-skeleton/types';
 import { runById } from 'lib/seams/frame';
@@ -27,6 +27,7 @@ import {
   mul,
   sub,
   toUV,
+  unit,
 } from './geom';
 import { FOLDS, type FoldHint, type FoldHintOrigin, type FoldSource } from './types';
 
@@ -109,10 +110,25 @@ export function foldHints(
     ) {
       continue;
     }
-    const lineMm = clipThrough(geom.rs, mid, sub(b, a));
-    if (!lineMm || len(sub(lineMm[1], lineMm[0])) < th.minLenMm) continue;
+    const through = clipThrough(geom.rs, mid, sub(b, a));
+    if (!through) continue;
+    let lineMm: [Pt2, Pt2] = through;
+    if (r.origin === 'inner') {
+      const d = unit(sub(b, a));
+      const along = (p: Pt2) => sub(p, a)[0] * d[0] + sub(p, a)[1] * d[1];
+      const lo = Math.max(0, along(through[0]));
+      const hi = Math.min(rawLen, along(through[1]));
+      if (hi <= lo) continue;
+      lineMm =
+        lo <= 1e-9 && hi >= rawLen - 1e-9 ? [a, b] : [add(a, mul(d, lo)), add(a, mul(d, hi))];
+    }
+    if (len(sub(lineMm[1], lineMm[0])) < th.minLenMm) continue;
     if (out.some((h) => sameLine(h.lineMm, lineMm, th))) continue;
-    let run = r.edgeId ? runById(geom, r.edgeId, 1) : undefined;
+    const boundedInner =
+      r.origin === 'inner' &&
+      (distToPoly(geom.rs, lineMm[0]) > th.onContourMm ||
+        distToPoly(geom.rs, lineMm[1]) > th.onContourMm);
+    let run = !boundedInner && r.edgeId ? runById(geom, r.edgeId, 1) : undefined;
     if (
       run &&
       angleBetween(sub(lineMm[1], lineMm[0]), sub(run.pts[run.pts.length - 1], run.pts[0])) >
@@ -120,7 +136,7 @@ export function foldHints(
     ) {
       run = undefined;
     }
-    const along = run ?? edgeAlong(geom, lineMm, th);
+    const along = boundedInner ? null : run ?? edgeAlong(geom, lineMm, th);
     out.push({
       id: `${geom.pieceKey}:${r.origin}:${count[r.origin]++}`,
       pieceKey: geom.pieceKey,
