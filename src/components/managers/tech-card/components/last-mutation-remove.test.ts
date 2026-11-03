@@ -4,6 +4,7 @@ import {
   dropForm,
   dropStale,
   emptyHistory,
+  issuesToRelink,
   moveLabel,
   peekUndo,
   record,
@@ -34,7 +35,7 @@ const removal = (list: Row[], index: number, patch: Partial<RemoveEntry> = {}): 
   historyKey: list[index].historyKey,
   row: structuredClone(list[index]),
   before: keysOf(list),
-  issueIndexes: [],
+  issues: [],
   pieceKeys: [],
   seamKeys: [],
   bomLineKeys: [],
@@ -260,5 +261,47 @@ describe('the step the server puts back on save', () => {
       serverKeepsFusingStep({ ...fuse, operationType: 'TECH_CARD_OPERATION_TYPE_PRESS' }, fused),
     ).toBe(false);
     expect(serverKeepsFusingStep(undefined, fused)).toBe(false);
+  });
+});
+
+describe('the reference of a defect when its step returns', () => {
+  const issue = (description: string, operationNumber = 0, status = 'open') => ({
+    description,
+    operationNumber,
+    raisedBy: 'me',
+    status,
+  });
+  const b = issue('B', 20);
+
+  it('follows the defect when another one was deleted before it', () => {
+    expect(issuesToRelink([b], [issue('B'), issue('C')])).toEqual([0]);
+  });
+
+  it('passes over a deleted defect and touches no other', () => {
+    expect(issuesToRelink([b], [issue('A'), issue('C')])).toEqual([]);
+  });
+
+  it('leaves a defect that was linked to another step meanwhile', () => {
+    expect(issuesToRelink([b], [issue('A'), issue('B', 40)])).toEqual([]);
+  });
+
+  it('finds a defect whose status was edited, not one whose text was rewritten', () => {
+    expect(issuesToRelink([b], [issue('C'), issue('B', 0, 'resolved')])).toEqual([1]);
+    expect(issuesToRelink([b], [issue('C'), issue('B rewritten')])).toEqual([]);
+  });
+
+  it('ignores the spaces a save trims', () => {
+    expect(issuesToRelink([issue(' B ', 20)], [issue('B')])).toEqual([0]);
+  });
+
+  it('prefers the untouched twin and refuses to guess between edited ones', () => {
+    const twins = [issue('B', 0, 'resolved'), issue('B')];
+    expect(issuesToRelink([b], twins)).toEqual([1]);
+    expect(issuesToRelink([b], [issue('B', 0, 'x'), issue('B', 0, 'y')])).toEqual([]);
+  });
+
+  it('gives each of two linked defects its own row', () => {
+    const linked = [issue('B', 20), issue('B', 20, 'resolved')];
+    expect(issuesToRelink(linked, [issue('B', 0, 'resolved'), issue('B')]).sort()).toEqual([0, 1]);
   });
 });

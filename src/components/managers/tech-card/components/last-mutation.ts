@@ -241,13 +241,24 @@ export type HistoryEntry<TRow = unknown> =
       /** Row keys before the removal, in order: the step returns after its nearest live predecessor. */
       before: string[];
       /** Defects that pointed at this step (their reference is cleared by the removal). */
-      issueIndexes: number[];
+      issues: IssueLinkShape[];
       /** What the row names on the card: a later undo refuses when any of them is gone. */
       pieceKeys: string[];
       seamKeys: string[];
       bomLineKeys: string[];
       label: string;
     };
+
+/** The part of a defect that tells it from another: it has no id, on the form or on the server. */
+export type IssueLinkShape = {
+  operationNumber?: number;
+  calloutNumber?: number;
+  raisedBy?: string;
+  severity?: string;
+  status?: string;
+  description?: string;
+  resolutionNote?: string;
+};
 
 /** Две стопки: чем дальше в конце, тем свежее. Вершина обеих — последний элемент. */
 export type History<TRow = unknown> = {
@@ -553,6 +564,49 @@ export type RemoveUndoState = {
   seamKeys: ReadonlySet<string>;
   bomLineKeys: ReadonlySet<string>;
 };
+
+const issueName = (issue: IssueLinkShape) =>
+  JSON.stringify([issue.description?.trim() ?? '', issue.raisedBy?.trim() ?? '']);
+const issueWhole = (issue: IssueLinkShape) =>
+  JSON.stringify([
+    issueName(issue),
+    issue.calloutNumber ?? 0,
+    issue.severity ?? '',
+    issue.status ?? '',
+    issue.resolutionNote?.trim() ?? '',
+  ]);
+
+/**
+ * Which defects of the card take the returning step's reference back, by position in `current`.
+ * The array moves under a removal record, so a remembered position can name another defect. A
+ * defect is found by its content, the whole of it first, then by text and author when the rest was
+ * edited and only one can be meant. A defect that was deleted, rewritten or linked to another step
+ * meanwhile is passed over: a lost reference is visible, a wrong one reads as true.
+ */
+export function issuesToRelink(
+  linked: readonly IssueLinkShape[],
+  current: readonly IssueLinkShape[],
+): number[] {
+  const free = new Set(current.flatMap((issue, index) => (issue.operationNumber ? [] : [index])));
+  const take = (index: number) => {
+    free.delete(index);
+    return index;
+  };
+  const left: IssueLinkShape[] = [];
+  const out: number[] = [];
+  for (const issue of linked) {
+    const whole = issueWhole(issue);
+    const same = [...free].find((index) => issueWhole(current[index]) === whole);
+    if (same === undefined) left.push(issue);
+    else out.push(take(same));
+  }
+  for (const issue of left) {
+    const name = issueName(issue);
+    const same = [...free].filter((index) => issueName(current[index]) === name);
+    if (same.length === 1) out.push(take(same[0]));
+  }
+  return out;
+}
 
 /** Why this removal cannot come back whole; `null` when it can. Never a partial return. */
 export function removeUndoRefusal<TRow>(

@@ -233,6 +233,7 @@ import {
   dropUndoTop,
   emptyHistory,
   insertLabel,
+  issuesToRelink,
   moveLabel,
   peekRedo,
   peekUndo,
@@ -5897,15 +5898,15 @@ export function OperationsField({
     const onCard = cardKeysNow();
     const seamKeys = [...(row.seamKeys ?? []), ...(row.poseKeys ?? [])];
     const number = operationStepNumber(index);
-    const issueIndexes = (getValues('issues') ?? []).flatMap((issue, i) =>
-      issue.operationNumber === number ? [i] : [],
+    const linkedIssues = (getValues('issues') ?? []).filter(
+      (issue) => issue.operationNumber === number,
     );
     return {
       kind: 'remove',
       historyKey: row.historyKey,
       row: structuredClone(row),
       before: operations.map((op) => op.historyKey ?? ''),
-      issueIndexes,
+      issues: structuredClone(linkedIssues),
       pieceKeys: [...new Set(row.inputKeys ?? [])].filter((key) => onCard.pieceKeys.has(key)),
       seamKeys: [...new Set(seamKeys)].filter((key) => onCard.seamKeys.has(key)),
       bomLineKeys: [...new Set(row.bomLineKeys ?? [])].filter((key) => onCard.bomLineKeys.has(key)),
@@ -7418,8 +7419,7 @@ export function OperationsField({
     applyToForm(() => {
       remapIssues((old) => (old >= at ? old + 1 : old));
       insert(at, structuredClone(rec.row), { shouldFocus: false });
-      for (const i of rec.issueIndexes) {
-        if (getValues(`issues.${i}.operationNumber`)) continue;
+      for (const i of issuesToRelink(rec.issues, getValues('issues') ?? [])) {
         setValue(`issues.${i}.operationNumber`, operationStepNumber(at), { shouldDirty: true });
       }
       // A refusal of the save without this step names rows by position: none of them holds now.
