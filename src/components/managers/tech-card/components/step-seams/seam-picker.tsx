@@ -67,7 +67,7 @@ import {
   type EdgeTick,
   type NoMark,
 } from './step-picture-view';
-import { foldedDrawing, withFoldPartners } from './step-folds';
+import { foldedDrawing, foldedFitSides, withFoldPartners } from './step-folds';
 import { edgeRowFromPick, initialPickerPick, orderedPickSides } from './step-rows';
 import { fitSourceOf } from './step-pose';
 import { stepPictureOf } from './surface-picture';
@@ -205,14 +205,14 @@ export function SeamPickerBody({
     stored.find((s) => s.key === activeSeam) ??
     (stored.length === 1 && !sel.a.length && !sel.b.length ? stored[0] : undefined);
   const shownParts = shownSeam?.parts;
-  const fitSource = useMemo(
-    () =>
-      fitSourceOf(
-        { a: sideParts(sel.a, sel.spans.a), b: sideParts(sel.b, sel.spans.b) },
-        shownParts,
-      ),
-    [sel, shownParts],
-  );
+  const fitSource = useMemo(() => {
+    const once = (sides: { a: readonly SidePart[]; b: readonly SidePart[] }) =>
+      foldedFitSides(sides, stepFolds, geoms, geo?.grainDeg);
+    return fitSourceOf(
+      once({ a: sideParts(sel.a, sel.spans.a), b: sideParts(sel.b, sel.spans.b) }),
+      shownParts && once(shownParts),
+    );
+  }, [sel, shownParts, stepFolds, geoms, geo?.grainDeg]);
   const [saved, setSaved] = useState(false);
   const poses = scene.poses;
   const stepRows = useMemo(

@@ -15,6 +15,7 @@ import {
   type StoredFold,
 } from 'lib/folds';
 import { frameOf, fromUV } from 'lib/folds/geom';
+import type { SidePart } from 'lib/seams';
 import { pickTarget } from './seam-focus';
 import type { SidePick, SpanRange, SpanSide } from './span-pick';
 
@@ -219,6 +220,9 @@ export function foldedDrawing(
     foldedGeoms.set(key, {
       ...geom,
       rs: ring,
+      // Both index the flat ring. Snap reads them through `breakPoints`: a folded piece offers its edge ends.
+      notchIdx: [],
+      vertexIdx: [],
       edges: geom.edges.map((edge) => ({
         ...edge,
         pts: foldedLine(resolveEdge(edge.id, geoms)?.pts ?? edge.pts, geom.rs, folds),
@@ -339,6 +343,30 @@ export function foldOnceOf(
         : group[0],
     );
   };
+}
+
+/** A live pick as FIT reads it: a run folded onto itself is one span, its never-moved edge. */
+export function foldedFitSides<S extends { a: readonly SidePart[]; b: readonly SidePart[] }>(
+  sides: S,
+  step: StepFolds | undefined,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  grainDeg: ReadonlyMap<string, number> | undefined,
+): S {
+  if (!step) return sides;
+  const once = foldOnceOf(step, geoms, grainDeg);
+  const sideOnce = (side: readonly SidePart[]) => {
+    // Whole edges: partners are whole edges too, each with its own stretch of the span.
+    const parts = side.flatMap(({ target }): RunPart[] => {
+      const edge = resolveEdge(target, geoms);
+      return edge ? [{ id: target, piece: edge.pieceKey, pts: edge.pts, lenMm: edge.len }] : [];
+    });
+    if (parts.length < 2) return side;
+    const kept = new Set(once(parts));
+    return side.filter(
+      ({ target }) => kept.has(target) || !parts.some((part) => part.id === target),
+    );
+  };
+  return { ...sides, a: sideOnce(sides.a), b: sideOnce(sides.b) };
 }
 
 /** The flat edges a click on a folded edge stands for: itself and whatever lies on it, itself first. */

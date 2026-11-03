@@ -1,5 +1,6 @@
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
-import { apply } from 'lib/assembly-skeleton/union/affine';
+import { breakPoints } from 'lib/assembly-skeleton/geometry';
+import { apply, IDENTITY, translate } from 'lib/assembly-skeleton/union/affine';
 import type { StoredFold } from 'lib/folds';
 import { describe, expect, it } from 'vitest';
 import {
@@ -8,10 +9,14 @@ import {
   foldedActionGlyphs,
   foldedActionLines,
   foldedDrawing,
+  foldedFitSides,
   foldOnceOf,
   foldPartnersOf,
+  withFoldPartners,
 } from './step-folds';
+import type { SidePick } from './span-pick';
 import { candidateOf, stepLayout } from './step-picture';
+import { fitPlan, fitSourceOf } from './step-pose';
 
 const row = (foldKey: string, pieceKey: string, seq = 1): StoredFold =>
   ({ foldKey, pieceKey, seq }) as StoredFold;
@@ -333,6 +338,99 @@ describe('coincident folded edges', () => {
       lenMm: 200,
     });
     expect(foldOnceOf(step, geoms, undefined)([part(3), part(1)])).toEqual(['FLAP#1']);
+  });
+});
+
+describe('FIT across a closed fold', () => {
+  const geoms = new Map([
+    ['FLAP', flap()],
+    ['SIDE', flap('SIDE', 40, 200)],
+  ]);
+  const step = cardFoldsOf(
+    [{ foldKeys: ['fold'] }],
+    { rows: [midFold()], grainDeg: new Map() },
+    geoms,
+  )!(0)!;
+  const parts = (...targets: string[]) => targets.map((target) => ({ target }));
+  const pick = { a: parts('SIDE#1'), b: parts('FLAP#1', 'FLAP#3') };
+
+  it('reads the coincident run as its never-moved edge', () => {
+    expect(foldedFitSides(pick, step, geoms, undefined)).toEqual({
+      a: parts('SIDE#1'),
+      b: parts('FLAP#1'),
+    });
+  });
+
+  it('seats the span on that edge, where the two flat edges would turn it', () => {
+    const layout = {
+      blocks: [{ pieces: ['SIDE'] }, { pieces: ['FLAP'] }],
+      transforms: new Map([
+        ['SIDE', translate(500, 30)],
+        ['FLAP', IDENTITY],
+      ]),
+    };
+    const plan = fitPlan(
+      fitSourceOf(foldedFitSides(pick, step, geoms, undefined))!,
+      layout,
+      geoms,
+    )!;
+    expect(plan.host).toBe('FLAP');
+    expect(plan.fit.gapMm).toBeLessThan(1e-6);
+    const flat = fitPlan(fitSourceOf(pick)!, layout, geoms)!;
+    expect(flat.fit.gapMm).toBeGreaterThan(10);
+  });
+
+  it('keeps a pick with no fold as it is', () => {
+    expect(foldedFitSides(pick, undefined, geoms, undefined)).toBe(pick);
+    const single = { a: parts('SIDE#1'), b: parts('FLAP#1') };
+    expect(foldedFitSides(single, step, geoms, undefined)).toEqual(single);
+  });
+
+  it('a folded piece snaps by its edge ends: flat ring indices do not read on the folded ring', () => {
+    const notched = new Map([['FLAP', { ...flap(), notchIdx: [1], vertexIdx: [2] }]]);
+    const drawn = foldedDrawing(notched, undefined, step.flat).geoms.get('FLAP')!;
+    expect(drawn.notchIdx).toEqual([]);
+    expect(
+      drawn.edges.flatMap((edge) => breakPoints(drawn, edge)).map((p) => p.kind),
+    ).not.toContain('notch');
+    expect(notched.get('FLAP')!.notchIdx).toEqual([1]);
+  });
+});
+
+describe('the span hand on a folded edge', () => {
+  const geoms = new Map([['FLAP', flap()]]);
+  const step = cardFoldsOf(
+    [{ foldKeys: ['fold'] }],
+    { rows: [midFold()], grainDeg: new Map() },
+    geoms,
+  )!(0)!;
+  const rules = { isInner: () => false, pieceOf: (id: string) => id.slice(0, id.indexOf('#')) };
+  const empty = { a: [], b: [], spans: { a: {}, b: {} } };
+  const hand = (pick: SidePick, id: string) =>
+    withFoldPartners(pick, 'a', id, step, geoms, undefined, rules);
+
+  it('a whole edge takes what lies on it, and lets it go with it', () => {
+    const on = hand({ ...empty, a: ['FLAP#3'] }, 'FLAP#3');
+    expect(on.a).toEqual(['FLAP#3', 'FLAP#1']);
+    expect(on.spans.a).toEqual({});
+    const off = hand({ ...on, a: ['FLAP#1'] }, 'FLAP#3');
+    expect(off.a).toEqual([]);
+  });
+
+  it('a span lands on the same stretch of the other edge, the other way along it', () => {
+    const on = hand(
+      { ...empty, a: ['FLAP#3'], spans: { a: { 'FLAP#3': [20, 60] }, b: {} } },
+      'FLAP#3',
+    );
+    expect(on.a).toEqual(['FLAP#3', 'FLAP#1']);
+    expect(on.spans.a['FLAP#3']).toEqual([20, 60]);
+    expect(on.spans.a['FLAP#1']).toEqual([140, 180]);
+  });
+
+  it('an edge nothing lies on, or a card with no fold, keeps the pick as it is', () => {
+    const pick = { ...empty, a: ['FLAP#0'] };
+    expect(hand(pick, 'FLAP#0')).toBe(pick);
+    expect(withFoldPartners(pick, 'a', 'FLAP#0', undefined, geoms, undefined, rules)).toBe(pick);
   });
 });
 
