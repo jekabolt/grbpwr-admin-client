@@ -153,6 +153,44 @@ export const KIND_LABEL: Partial<Record<common_TechCardBomKind, string>> = {
 export const kindLabel = (kind?: string): string | undefined =>
   kind && kind !== UNSET_KIND ? KIND_LABEL[kind as common_TechCardBomKind] ?? kind : undefined;
 
+const PACKAGING_KIND_BY_BOM: Partial<Record<common_TechCardBomKind, string>> = {
+  TECH_CARD_BOM_KIND_POLYBAG: 'polybag',
+  TECH_CARD_BOM_KIND_CARTON: 'box',
+  TECH_CARD_BOM_KIND_HANGER: 'hanger',
+  TECH_CARD_BOM_KIND_HANGTAG_STRING: 'hangtag_string',
+  TECH_CARD_BOM_KIND_STICKER: 'sticker',
+  TECH_CARD_BOM_KIND_TISSUE: 'tissue',
+  TECH_CARD_BOM_KIND_DUST_BAG: 'dust_bag',
+  TECH_CARD_BOM_KIND_GARMENT_CASE: 'garment_case',
+  TECH_CARD_BOM_KIND_INSERT_CARD: 'insert_card',
+};
+
+/** Resolve a shelf kind from the BOM classification first, then from a catalog name. */
+export function packagingItemKind(bomKind?: string, name?: string): string {
+  const mapped = PACKAGING_KIND_BY_BOM[bomKind as common_TechCardBomKind];
+  if (mapped) return mapped;
+
+  const value = (name ?? '').trim().toLowerCase();
+  const guesses: Array<[RegExp, string]> = [
+    [/shirt\s*board|cardboard\s*insert/, 'shirt_board'],
+    [/collar\s*(support|stay)/, 'collar_support'],
+    [/silica|desiccant/, 'silica_gel'],
+    [/hangtag.*string|string.*hangtag/, 'hangtag_string'],
+    [/spare.*(bag|kit)/, 'spare_kit_bag'],
+    [/garment\s*(case|cover)/, 'garment_case'],
+    [/dust\s*bag/, 'dust_bag'],
+    [/insert\s*card|thank.*card/, 'insert_card'],
+    [/poly\s*bag|polythene/, 'polybag'],
+    [/tissue/, 'tissue'],
+    [/sticker|seal/, 'sticker'],
+    [/hanger/, 'hanger'],
+    [/mailer|shipping\s*bag/, 'mailer'],
+    [/tote/, 'tote_bag'],
+    [/box|carton/, 'box'],
+  ];
+  return guesses.find(([pattern]) => pattern.test(value))?.[1] ?? '';
+}
+
 /** Sections that may carry a kind — the roll-goods complement minus labels, same as the server. */
 export const KIND_ELIGIBLE_SECTIONS = new Set([
   'TECH_CARD_BOM_SECTION_HARDWARE',

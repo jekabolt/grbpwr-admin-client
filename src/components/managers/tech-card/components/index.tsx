@@ -4294,6 +4294,8 @@ export function TechCardForm({
                 />
                 <LabelsBlock techCard={techCard} canEdit={canWrite(SECTION.techCards) && !frozen} />
                 <PackagingBlock
+                  techCardId={isEditMode && numId ? numId : undefined}
+                  colorwayRefs={techCard?.colorways}
                   resolvedMedia={techCard?.resolvedLabelMedia}
                   canEdit={canWrite(SECTION.techCards) && !frozen}
                 />

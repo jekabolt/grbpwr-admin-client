@@ -101,17 +101,29 @@ export const garmentLabelKindNames: LabelKind[] = [
 
 // Spelled like the TechCardBomKind packaging kinds, so a BOM line and an item read as one word.
 export const packagingItemKinds: LabelKind[] = [
-  { key: 'polybag', label: 'polybag' },
+  { key: 'hanger', label: 'hanger' },
+  { key: 'shirt_board', label: 'shirt board' },
+  { key: 'collar_support', label: 'collar support' },
   { key: 'tissue', label: 'tissue paper' },
-  { key: 'sticker', label: 'sticker' },
+  { key: 'silica_gel', label: 'silica gel' },
   { key: 'insert_card', label: 'insert card' },
+  { key: 'spare_kit_bag', label: 'spare kit bag' },
+  { key: 'hangtag_string', label: 'hangtag string' },
   { key: 'dust_bag', label: 'dust bag' },
   { key: 'garment_case', label: 'garment case' },
+  { key: 'polybag', label: 'polybag' },
+  { key: 'sticker', label: 'sticker' },
+  { key: 'box', label: 'box' },
+  { key: 'mailer', label: 'mailer' },
   { key: 'tote_bag', label: 'tote bag' },
-  { key: 'hanger', label: 'hanger' },
-  { key: 'hangtag_string', label: 'hangtag string' },
-  { key: 'spare_kit_bag', label: 'spare kit bag' },
 ];
+
+const packagingKindRanks = new Map(packagingItemKinds.map((kind, index) => [kind.key, index]));
+
+/** Known packaging kinds keep the shelf order; custom kinds follow them without being rewritten. */
+export function packagingItemRank(key?: string): number {
+  return packagingKindRanks.get((key ?? '').trim().toLowerCase()) ?? packagingItemKinds.length;
+}
 
 /** A known key reads as its word; a custom key reads as typed. Case-blind like the writers. */
 export function kindLabel(kinds: LabelKind[], key?: string): string {

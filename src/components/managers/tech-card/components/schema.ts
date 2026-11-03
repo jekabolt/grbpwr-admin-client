@@ -2120,6 +2120,8 @@ const labelSchema = z.object({
 
 const packagingSchema = z.object({
   foldingMethod: z.string().optional().default(''),
+  packedSize: z.string().optional().default(''),
+  packedMediaId: z.number().optional().default(0),
   polybag: z.string().optional().default(''),
   bagSticker: z.string().optional().default(''),
   inserts: z.string().optional().default(''),
@@ -2157,6 +2159,8 @@ export const emptyConstruction: z.input<typeof constructionSchema> = {
 
 export const emptyPackaging: z.input<typeof packagingSchema> = {
   foldingMethod: '',
+  packedSize: '',
+  packedMediaId: 0,
   polybag: '',
   bagSticker: '',
   inserts: '',
@@ -2348,7 +2352,7 @@ const techCardObject = z.object({
   // labels and the packaging items. Written ONLY through the writers in form-writers.ts.
   careLabel: careLabelSchema.default(newCareLabel),
   garmentLabels: keyedList(garmentLabelSchema, 'labels'),
-  packagingItems: keyedList(packagingItemSchema, 'packaging items'),
+  packagingItems: keyedList(packagingItemSchema, 'packaging items', false),
   costing: costingSchema,
   issues: z.array(issueSchema).default([]),
   signoffs: z.array(signoffSchema).default([]),
@@ -3008,6 +3012,8 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     packaging: insert?.packaging
       ? {
           foldingMethod: insert.packaging.foldingMethod || '',
+          packedSize: insert.packaging.packedSize || '',
+          packedMediaId: wireInt(insert.packaging.packedMediaId),
           polybag: insert.packaging.polybag || '',
           bagSticker: insert.packaging.bagSticker || '',
           inserts: insert.packaging.inserts || '',
@@ -3177,6 +3183,8 @@ function mapPackagingOut(p?: TechCardFormData['packaging']): common_TechCardPack
   if (
     !hasContent([
       p?.foldingMethod,
+      p?.packedSize,
+      p?.packedMediaId,
       p?.polybag,
       p?.bagSticker,
       p?.inserts,
@@ -3192,6 +3200,8 @@ function mapPackagingOut(p?: TechCardFormData['packaging']): common_TechCardPack
   }
   return {
     foldingMethod: p?.foldingMethod?.trim() || '',
+    packedSize: p?.packedSize?.trim() || '',
+    packedMediaId: p?.packedMediaId || 0,
     polybag: p?.polybag?.trim() || '',
     bagSticker: p?.bagSticker?.trim() || '',
     inserts: p?.inserts?.trim() || '',
@@ -4156,6 +4166,7 @@ export function mapFormToTechCardInsert(
     garmentLabels: garmentLabelsOut(liveLabelBomLinks(data.garmentLabels, data.bomItems)),
     packagingItems: packagingItemsOut(data.packagingItems),
     labelsAware: true,
+    packagingPicksAware: true,
     // Only a costing:write editor may change costing; everyone else preserves what was loaded.
     costing: canWriteCosting ? mapCostingOut(data.costing) : original?.costing,
     issues: (data.issues ?? []).map((i) => ({

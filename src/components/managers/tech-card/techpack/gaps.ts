@@ -10,6 +10,7 @@ import { deriveAssembly, type AsmPiece, type AssemblyModel } from './derive-asse
 import { deriveColourways } from './derive-colourways';
 import { deriveCover } from './derive-cover';
 import { deriveLabels } from './derive-labels';
+import { derivePackaging } from './derive-packaging';
 import { deriveMaterials } from './derive-materials';
 import { deriveMeasurementsPage, type TechpackMeasurement } from './derive-measurements';
 import { derivePatternsMarkerPage } from './derive-patterns';
@@ -133,6 +134,7 @@ export function collectPdfGaps(input: CollectPdfGapsInput): Gap[] {
   derivePieces(input.techCard, input.pieceGeometry, sink, t);
   deriveColourways(input.techCard, sink, t);
   const labels = deriveLabels(input.techCard, { sampleSizeName: input.sampleSizeName }, sink, t);
+  derivePackaging(input.techCard, sink, t);
   derivePatternsMarkerPage(
     {
       techCard: input.techCard,
