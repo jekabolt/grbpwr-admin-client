@@ -434,7 +434,7 @@ export function FoldPicker({
     <div
       ref={rootRef}
       tabIndex={-1}
-      className='pt-3 focus:outline-none'
+      className='@container pt-3 focus:outline-none'
       data-fold-picker={geom.name}
       onKeyDown={(event) => {
         if (event.key !== 'Escape') return;
@@ -443,9 +443,9 @@ export function FoldPicker({
         else onClose();
       }}
     >
-      <div className='flex min-w-0 flex-col items-start gap-4.5 md:flex-row'>
-        <div className='grid min-w-0 grid-cols-2 gap-2.5 md:w-1/2 md:max-w-130 md:shrink-0'>
-          <div className='h-50 min-w-0 overflow-hidden border border-borderColor bg-bgColor sm:h-80'>
+      <div className='flex min-w-0 flex-col items-start gap-4.5 @2xl:flex-row'>
+        <div className='grid min-w-0 grid-cols-2 gap-2.5 w-full @2xl:w-1/2 @2xl:max-w-130 @2xl:shrink-0'>
+          <div className='h-50 min-w-0 overflow-hidden border border-borderColor bg-bgColor @2xl:h-80'>
             <svg
               ref={svgRef}
               viewBox={`0 0 ${PICTURE_W} ${PICTURE_H}`}
@@ -529,7 +529,7 @@ export function FoldPicker({
               )}
             </svg>
           </div>
-          <div className='h-50 min-w-0 overflow-hidden border border-borderColor bg-bgColor sm:h-80'>
+          <div className='h-50 min-w-0 overflow-hidden border border-borderColor bg-bgColor @2xl:h-80'>
             <svg
               viewBox={`0 0 ${PICTURE_W} ${PICTURE_H}`}
               preserveAspectRatio='xMidYMid meet'
