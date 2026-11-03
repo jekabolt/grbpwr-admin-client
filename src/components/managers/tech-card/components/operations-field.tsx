@@ -1819,10 +1819,12 @@ function ProducesBlock({
   if (usable.length < 2 && !outputKey) return null;
 
   return (
-    <>
-      <GroupLabel>unit</GroupLabel>
+    <div className='col-span-2 space-y-px sm:col-span-1'>
+      <Text size='micro' variant='label' tracking='label' className='leading-none uppercase'>
+        unit
+      </Text>
       {!outputKey ? (
-        <div className='mb-2 max-w-60'>
+        <div>
           <Input
             value={draftName}
             aria-label='unit name'
@@ -1842,7 +1844,7 @@ function ProducesBlock({
         </div>
       ) : (
         <>
-          <div className='mb-2 max-w-60'>
+          <div>
             {/* Имя живёт на первом производителе. Поглощающий шаг показывает то же поле, но пишет
                 в канонический адрес: сервер очищает outputUnitName на всех поглощениях, потому
                 что второе имя одного узла было бы вторым мнением о факте. */}
@@ -1857,7 +1859,7 @@ function ProducesBlock({
           <BootstrapEatenRefs index={index} outputKey={outputKey} assembly={assembly} />
         </>
       )}
-    </>
+    </div>
   );
 }
 
@@ -4520,17 +4522,16 @@ function OperationEditor({
         </div>
       </div>
 
-      <ProducesBlock
-        index={index}
-        inputKeys={selectedPieceKeys}
-        pieces={pieces}
-        assembly={assembly}
-        onEdit={onEdit}
-      />
-
-      <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
+      <div className='grid grid-cols-2 gap-2'>
+        <ProducesBlock
+          index={index}
+          inputKeys={selectedPieceKeys}
+          pieces={pieces}
+          assembly={assembly}
+          onEdit={onEdit}
+        />
         <div
-          className='col-span-2 space-y-px'
+          className='col-span-2 space-y-px sm:col-span-1'
           data-kind-picker={index}
           data-step-work={workValue || undefined}
         >
@@ -4548,7 +4549,7 @@ function OperationEditor({
           />
         </div>
         <div
-          className='space-y-px'
+          className='col-start-1 space-y-px'
           onFocusCapture={() => {
             zoneTouchedRef.current = true;
           }}
