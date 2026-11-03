@@ -2044,13 +2044,7 @@ export function StepPictureSvg({
         // An owned piece shows a line only where no piece above covers it.
         const owned = ownedStyle?.pieces.get(p.key)?.lines[k];
         const d = owned
-          ? owned
-              .map((run) =>
-                pathOf(
-                  run.map((point) => toPx(fit, point)),
-                ),
-              )
-              .join('')
+          ? owned.map((run) => pathOf(run.map((point) => toPx(fit, point)))).join('')
           : pathOf(l.map((q) => toPx(fit, apply(T, q))));
         if (d) out.push({ id: innerId(p.key, k), d });
       });
