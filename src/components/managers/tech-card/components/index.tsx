@@ -40,6 +40,7 @@ import {
   revealField,
   transportRefusal,
 } from 'utils/field-errors';
+import { foldRefusalOf } from './assembly-folds/fold-step';
 import { notify, updateNotify } from 'lib/stores/store';
 import type { NotifyInput, NotifySev } from 'lib/stores/store-types';
 import { firstMarkedOperation, type CardOperation } from 'lib/dxf-reconcile';
@@ -1308,8 +1309,7 @@ export function TechCardForm({
     lockOverride.current = null;
     needsRead.current = false;
     ownBodyVersion.current = null;
-    if (lastBody.current)
-      lastBody.current = { ...lastBody.current, lock: card.lockVersion ?? 0 };
+    if (lastBody.current) lastBody.current = { ...lastBody.current, lock: card.lockVersion ?? 0 };
   };
   // G1: the approval door's own question — did a body write that CARRIED the requested approval
   // land? Marked inside writeTechCard, so a concurrent autosave that did not carry it cannot answer.
@@ -2210,6 +2210,8 @@ export function TechCardForm({
       // owning tab so the error dot + focus land where the user can act (Q1/S24).
       const { applied, unmapped, contradictions } = applyServerFieldErrors(error, form.setError, {
         stripPrefixes: ['tech_card'],
+        // A step's fold link has no input to pin on: its refusal is said in words below.
+        allow: (path) => !/\.foldKeys(\.|$)/.test(path),
         // ОТКАЗ, ПРОТИВОРЕЧАЩИЙ ЭКРАНУ. `required` / `unknown_value` про поле, которое форма
         // держит ЗАПОЛНЕННЫМ, означает не «человек не заполнил», а «сервер не узнал значения» —
         // бэкенд старше приложения и выбросил незнакомый член словаря по дороге. Предикат тот же
@@ -2245,15 +2247,19 @@ export function TechCardForm({
       // D-63′: over a 409 the decision is the conflict modal's (opened above), and this sentence is what
       // the chip's popover and the line at the top of the form print — not the list's «Reload to get
       // the latest version» (techCardErrorMessage), which names a door this page does not have.
+      const foldRefusal = foldRefusalOf(error);
       const base =
-        transport || contradictions.length > 0
+        foldRefusal ??
+        (transport || contradictions.length > 0
           ? 'the backend did not recognise part of this card — see the banner on the card'
           : status === 409
             ? 'another editor saved this card meanwhile'
-            : techCardErrorMessage(error, 'Failed to submit tech card');
-      const message = unmapped.length
-        ? `${base} — ${unmapped.map((u) => u.description).join('; ')}`
-        : base;
+            : techCardErrorMessage(error, 'Failed to submit tech card'));
+      const message = foldRefusal
+        ? foldRefusal
+        : unmapped.length
+          ? `${base} — ${unmapped.map((u) => u.description).join('; ')}`
+          : base;
       if (!silent) {
         const cls = failureClassOfError(error);
         const banner = !!transport || contradictions.length > 0;

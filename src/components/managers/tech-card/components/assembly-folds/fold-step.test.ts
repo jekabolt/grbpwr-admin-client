@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { assignFold, foldsClosingOn, foldStepBlocked, stepOfFold, suggestStep } from './fold-step';
+import {
+  assignFold,
+  FOLD_STEP_REFUSAL,
+  foldRefusalOf,
+  foldsClosingOn,
+  foldStepBlocked,
+  stepOfFold,
+  suggestStep,
+} from './fold-step';
 
 const ops = [
   {
@@ -64,5 +72,21 @@ describe('fold steps', () => {
     ];
     expect(foldStepBlocked(ops, rows, 'fold-2', 1)).toBe(false);
     expect(foldStepBlocked(sparse, rows, 'fold-1', 0)).toBe(false);
+  });
+});
+
+describe('foldRefusalOf', () => {
+  const refused = (description: string) => ({
+    status: 400,
+    details: [{ fieldViolations: [{ field: 'operations[3].fold_keys[0]', description }] }],
+  });
+
+  it('names the fold refusals and leaves the rest alone', () => {
+    expect(foldRefusalOf(refused('fold_order (used by operations[1]); keep the order'))).toBe(
+      'ПОРЯДОК СГИБОВ',
+    );
+    expect(foldRefusalOf(refused('fold_step_gone; move the fold'))).toBe(FOLD_STEP_REFUSAL);
+    expect(foldRefusalOf(refused('required'))).toBeNull();
+    expect(foldRefusalOf(new Error('boom'))).toBeNull();
   });
 });

@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
-import { useFormContext, useWatch, type UseFormReturn } from 'react-hook-form';
+import { useFormContext, useWatch } from 'react-hook-form';
+import { extractFieldViolations, violationReason } from 'utils/field-errors';
 import { useTechCardAutosave } from '../design/autosave-contract';
 import type { TechCardFormData } from '../schema';
 
@@ -60,6 +61,23 @@ export function foldStepBlocked(
   });
 }
 
+export const FOLD_STEP_REFUSAL = 'СНАЧАЛА ПЕРЕНЕСИТЕ СГИБ';
+
+const REFUSAL_WORDS: Record<string, string> = {
+  fold_order: 'ПОРЯДОК СГИБОВ',
+  fold_on_two_steps: 'СГИБ НА ДВУХ ШАГАХ',
+  fold_step_gone: FOLD_STEP_REFUSAL,
+};
+
+/** The words for a save the server refused over a step's fold link; null for any other refusal. */
+export function foldRefusalOf(error: unknown): string | null {
+  for (const violation of extractFieldViolations(error)) {
+    const words = REFUSAL_WORDS[violationReason(violation.description)];
+    if (words) return words;
+  }
+  return null;
+}
+
 export function foldsClosingOn(ops: readonly FoldStepOperation[], index: number): string[] {
   return ops[index] ? ownKeys(ops[index]) : [];
 }
@@ -69,14 +87,12 @@ const sameKeys = (a: readonly string[] | undefined, b: readonly string[]) =>
 
 export function useFoldStep() {
   const form = useFormContext<TechCardFormData>();
-  // foldKeys: typed once the T19 client lands
-  const foldForm = form as unknown as UseFormReturn<FoldStepForm>;
   const autosave = useTechCardAutosave();
-  const operations = useWatch({ control: foldForm.control, name: 'operations' }) ?? [];
+  const operations = useWatch({ control: form.control, name: 'operations' }) ?? [];
 
   const assign = useCallback(
     (foldKeys: readonly string[], stepIndex: number | null) => {
-      const current = foldForm.getValues('operations') ?? [];
+      const current = form.getValues('operations') ?? [];
       let next = current.map((operation) => ({ ...operation, foldKeys: ownKeys(operation) }));
       for (const foldKey of new Set(foldKeys)) {
         const assigned = assignFold(next, foldKey, stepIndex);
@@ -86,13 +102,13 @@ export function useFoldStep() {
       next.forEach((operation, index) => {
         if (sameKeys(current[index]?.foldKeys, operation.foldKeys ?? [])) return;
         changed = true;
-        foldForm.setValue(`operations.${index}.foldKeys`, operation.foldKeys ?? [], {
+        form.setValue(`operations.${index}.foldKeys`, operation.foldKeys ?? [], {
           shouldDirty: true,
         });
       });
       if (changed) autosave.request('fold-step');
     },
-    [autosave, foldForm],
+    [autosave, form],
   );
 
   return { operations, assign };
