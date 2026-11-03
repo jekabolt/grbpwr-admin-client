@@ -14,6 +14,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -254,6 +255,7 @@ import {
   removeRestoreIndex,
   removeUndoRefusal,
 } from './last-mutation';
+import { followOpenStep, useActiveStepStore } from './assembly-map/active-step';
 import { AssemblyFullscreen, FROZEN_REFUSAL, restoreScreenFocus } from './assembly-fullscreen';
 import { SeamWalk } from './seam-walk';
 import { StepTimeField } from './step-time-field';
@@ -5688,8 +5690,50 @@ export function OperationsField({
 
   // Which step the editor is showing. Clamped rather than reset, so deleting the last step keeps
   // the editor on a real row instead of blanking.
-  const [selected, setSelected] = useState(0);
+  //
+  // Новый объект на каждый выбор: так отличается жест, выбравший шаг, от списка, сменившегося сам.
+  const [selection, setSelection] = useState({ index: 0 });
+  const selected = selection.index;
+  const setSelected = useCallback((next: number | ((current: number) => number)) => {
+    setSelection((cur) => ({ index: typeof next === 'function' ? next(cur.index) : next }));
+  }, []);
   const selectedIndex = fields.length === 0 ? -1 : Math.min(selected, fields.length - 1);
+
+  // СПИСОК СМЕНИЛСЯ БЕЗ ЖЕСТА (сервер вставил шаг при записи): редактор остаётся на той же строке.
+  // Сверка по historyKey, номер строки к этому моменту уже чужой.
+  const seenRows = useRef({ keys: [] as string[], open: -1, selection });
+  useLayoutEffect(() => {
+    const seen = seenRows.current;
+    const keys = ((getValues('operations') ?? []) as Array<{ historyKey?: string }>).map(
+      (op) => op?.historyKey ?? '',
+    );
+    const at = seen.selection === selection ? followOpenStep(seen.keys, seen.open, keys) : null;
+    seenRows.current = { keys, open: at ?? selectedIndex, selection };
+    if (at != null && at !== selectedIndex) setSelection({ index: at });
+  }, [fields, selection, selectedIndex, getValues]);
+
+  // КАРТА СБОРКИ ПОКАЗЫВАЕТ ОТКРЫТЫЙ ШАГ, какими бы путями он ни открылся.
+  const stepStore = useActiveStepStore();
+  useLayoutEffect(() => {
+    stepStore?.setOpen(selectedIndex >= 0 ? selectedIndex : null);
+  }, [stepStore, selectedIndex]);
+  useEffect(() => {
+    if (!stepStore) return;
+    stepStore.setOpener((index) => {
+      setSelected(index);
+      requestAnimationFrame(() =>
+        document.querySelector(`[data-rail-step="${index}"]`)?.scrollIntoView({ block: 'nearest' }),
+      );
+    });
+    return () => {
+      stepStore.setOpener(null);
+      stepStore.setOpen(null);
+    };
+  }, [stepStore, setSelected]);
+  // Строка под мышью могла уехать или размонтироваться, а mouseleave в этом случае не приходит.
+  useEffect(() => {
+    stepStore?.hover(null);
+  }, [stepStore, fields]);
 
   // Operation numbers are POSITIONAL — the mapper re-stamps (i+1)*10 on every save — so any edit
   // that moves a row renumbers the ones after it. issues[].operationNumber references operations BY

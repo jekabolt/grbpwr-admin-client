@@ -19,7 +19,6 @@ import {
   type KeyboardEvent,
 } from 'react';
 import { Button, Placeholder, Text } from 'ui';
-import { useActiveStepStore } from './assembly-map/active-step';
 import { mapStepPictureOf, StepView } from './assembly-map/step-view';
 import { useMapModel, type FormOp, type MapModel } from './assembly-map/use-map-model';
 import { useTechCardAutosave } from './design/autosave-contract';
@@ -80,7 +79,6 @@ export function SeamWalk({
   const ctx = useStepSeams();
   const model = useMapModel();
   const autosave = useTechCardAutosave();
-  const store = useActiveStepStore();
   const pieceKeys = useCardPieceKeys();
   const { geoms } = useCardGeoms();
   const { catalog } = useOperationWorkCatalog();
@@ -145,7 +143,6 @@ export function SeamWalk({
   const close = () => {
     autosave.request('seams');
     writeMemory(cardId, null);
-    if (index >= 0) store?.select(index, 'rail');
     onExit(index);
   };
 

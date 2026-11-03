@@ -19,7 +19,7 @@ import {
 import { common_TechCardMachineType } from 'api/proto-http/admin';
 import { unitDisplayName } from 'lib/assembly-unit-name';
 import { cn } from 'lib/utility';
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Text } from 'ui';
 import { parseDecimalNumber } from 'utils/decimal';
@@ -34,7 +34,7 @@ import { PieceSilhouette, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
 import { StepIconCell } from './step-icon-tiles';
 import { UnitBlockHeader } from './unit-block';
-import { useActiveStepStore, useIsActiveStep, useMapPickNonce } from './assembly-map/active-step';
+import { useActiveStepStore, useIsActiveStep } from './assembly-map/active-step';
 import type { PieceShapeMap } from './use-piece-shapes';
 
 // РЕЛЬС ПОСЛЕДОВАТЕЛЬНОСТИ — ОДИН МОДУЛЬ НА ДВА ВИДА.
@@ -211,18 +211,10 @@ function RailStep({
 
   const [over, setOver] = useState(false);
   const opNumber = (index + 1) * 10;
-  // КАРТА СБОРКИ (assembly-map/active-step): строка ставит наведение и липкий выбор, светится, когда
-  // карта показывает её шаг, и открывает себя, когда шаг выбрали на карте. Без провайдера — молчит.
+  // КАРТА СБОРКИ (assembly-map/active-step): строка ставит наведение и светится, когда карта
+  // показывает её шаг. Без провайдера — молчит.
   const mapStore = useActiveStepStore();
   const mapLit = useIsActiveStep(index);
-  const mapPick = useMapPickNonce(index);
-  const rowRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!mapPick) return;
-    onSelect();
-    rowRef.current?.scrollIntoView({ block: 'nearest' });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapPick]);
   const smvMin = parseDecimalNumber(smv);
   // THE HEADING IS COMPOSED. This is the whole replacement for the removed «УЗЕЛ / ЧТО *»: the step
   // is named by what it does, where, and on which pieces — three controls the operator has already
@@ -259,10 +251,7 @@ function RailStep({
     <SortableEntity uid={uid}>
       {({ setNodeRef, style, dragHandleProps }) => (
         <div
-          ref={(el) => {
-            setNodeRef(el);
-            rowRef.current = el;
-          }}
+          ref={setNodeRef}
           style={style}
           data-map-lit={mapLit ? '1' : undefined}
           onMouseEnter={() => {
@@ -315,10 +304,7 @@ function RailStep({
           <span
             role='button'
             tabIndex={0}
-            onClick={() => {
-              onSelect();
-              mapStore?.select(index);
-            }}
+            onClick={onSelect}
             onKeyDown={(e) => {
               if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                 e.preventDefault();
@@ -327,17 +313,13 @@ function RailStep({
                 const rail = e.currentTarget.closest('[data-sequence-rail]');
                 requestAnimationFrame(() => {
                   const row = rail?.querySelector<HTMLElement>(`[data-rail-step="${next}"]`);
-                  if (row) {
-                    row.focus();
-                    mapStore?.select(next);
-                  }
+                  row?.focus();
                 });
                 return;
               }
               if (e.key !== 'Enter' && e.key !== ' ') return;
               e.preventDefault();
               onSelect();
-              mapStore?.select(index);
             }}
             aria-current={selected}
             data-rail-step={index}

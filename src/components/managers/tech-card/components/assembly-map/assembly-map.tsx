@@ -1,7 +1,7 @@
 import { useEffect, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useParams } from 'react-router-dom';
 import { Button, HeaderNote, Section, ViewSwitch, type ViewSwitchOption } from 'ui';
-import { activeOf, useActiveStep, useActiveStepStore } from './active-step';
+import { shownStep, useActiveStep, useActiveStepStore } from './active-step';
 import { StepView } from './step-view';
 import { useMapModel } from './use-map-model';
 import { DollDoor } from '../assembly-doll/doll-column';
@@ -58,8 +58,7 @@ export function AssemblyMap({
   const shownView = view === 'sketch' && !hasSketch ? 'step' : view;
 
   const count = model.ops.length;
-  const chosen = activeOf(snap);
-  const index = chosen != null && chosen < count ? chosen : model.firstMachine;
+  const index = shownStep(snap, count, model.firstMachine);
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.defaultPrevented || shownView === 'sketch' || count === 0) return;
     const t = e.target as HTMLElement;
@@ -67,8 +66,8 @@ export function AssemblyMap({
     const step = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0;
     if (!step) return;
     e.preventDefault();
-    const from = index ?? -1;
-    store?.select(Math.max(0, Math.min(count - 1, from + step)), 'rail');
+    const from = snap.open ?? index ?? -1;
+    store?.pick(Math.max(0, Math.min(count - 1, from + step)));
   };
   const views: readonly ViewSwitchOption<MapView>[] = hasSketch
     ? [...CORE_VIEWS, SKETCH_VIEW]
