@@ -46,6 +46,72 @@ const backwards = (f: Frame) => (BITS[f][0] ^ BITS[f][1]) === 1;
 
 export type EdgeMap = { map: Map<EdgeId, EdgeId>; frame: Frame; cost: number };
 
+type EdgeMapChoice = { frame: Frame; shift: number; cost: number };
+
+const mappingOf = (choice: EdgeMapChoice, base: PieceGeom, target: PieceGeom): EdgeMap => {
+  const n = base.edges.length;
+  const back = backwards(choice.frame);
+  const map = new Map<EdgeId, EdgeId>();
+  base.edges.forEach((edge, index) => {
+    const targetIndex = back ? (((choice.shift - index) % n) + n) % n : (index + choice.shift) % n;
+    map.set(edge.id, target.edges[targetIndex].id);
+  });
+  return {
+    map,
+    frame: choice.frame,
+    cost: Math.round(choice.cost * 10000) / 10000,
+  };
+};
+
+function edgeMapInFrames(
+  base: PieceGeom,
+  target: PieceGeom,
+  frames: readonly Frame[],
+  degBase: number,
+  degTarget: number,
+  preferAsis: boolean,
+  distinctMappings: boolean,
+): EdgeMap | null {
+  const n = base.edges.length;
+  if (n === 0 || target.edges.length !== n) return null;
+  const fb = frameOf(base, degBase);
+  const ft = frameOf(target, degTarget);
+  const sb = base.edges.map((edge) => runSamples(fb, edge));
+  const st = target.edges.map((edge) => runSamples(ft, edge));
+  const shareB = base.edges.map((edge) => edge.lenMm / (base.perimMm || 1));
+  const shareT = target.edges.map((edge) => edge.lenMm / (target.perimMm || 1));
+  const tried: EdgeMapChoice[] = [];
+  for (const frame of frames) {
+    const back = backwards(frame);
+    for (let shift = 0; shift < n; shift++) {
+      let cost = 0;
+      for (let index = 0; index < n; index++) {
+        const targetIndex = back ? (((shift - index) % n) + n) % n : (index + shift) % n;
+        cost +=
+          rmsFit(inFrame(st[targetIndex], frame), sb[index]) +
+          Math.abs(shareT[targetIndex] - shareB[index]) +
+          (target.edges[targetIndex].notchesMm.length !== base.edges[index].notchesMm.length
+            ? TRANSFER.notchPenalty
+            : 0);
+      }
+      tried.push({ frame, shift, cost: cost / n });
+    }
+  }
+  tried.sort((left, right) => left.cost - right.cost);
+  const bestAsis = preferAsis ? tried.find((choice) => choice.frame === 'asis') : undefined;
+  const pick = bestAsis && bestAsis.cost <= tried[0].cost + TRANSFER.margin ? bestAsis : tried[0];
+  if (!pick || pick.cost > TRANSFER.costMax) return null;
+  const pickedMap = mappingOf(pick, base, target);
+  const pickedSig = [...pickedMap.map.values()].join('|');
+  const rival = tried.find((choice) => {
+    if (choice === pick) return false;
+    if (!distinctMappings) return choice.frame === pick.frame;
+    return [...mappingOf(choice, base, target).map.values()].join('|') !== pickedSig;
+  });
+  if (rival && rival.cost - pick.cost < TRANSFER.margin) return null;
+  return pickedMap;
+}
+
 /**
  * Edge i of `base` → edge of `target` at the same place in the piece's edge sequence, or null when
  * the sequences differ (edge count) or no single offset fits clearly. Both pieces keep their own
@@ -57,46 +123,22 @@ export function edgeMapOf(
   degBase = 0,
   degTarget = 0,
 ): EdgeMap | null {
-  const n = base.edges.length;
-  if (n === 0 || target.edges.length !== n) return null;
-  const fb = frameOf(base, degBase);
-  const ft = frameOf(target, degTarget);
-  const sb = base.edges.map((e) => runSamples(fb, e));
-  const st = target.edges.map((e) => runSamples(ft, e));
-  const shareB = base.edges.map((e) => e.lenMm / (base.perimMm || 1));
-  const shareT = target.edges.map((e) => e.lenMm / (target.perimMm || 1));
-  const tried: { frame: Frame; shift: number; cost: number }[] = [];
-  for (const frame of FRAMES) {
-    const back = backwards(frame);
-    for (let shift = 0; shift < n; shift++) {
-      let cost = 0;
-      for (let i = 0; i < n; i++) {
-        const j = back ? (((shift - i) % n) + n) % n : (i + shift) % n;
-        cost +=
-          rmsFit(inFrame(st[j], frame), sb[i]) +
-          Math.abs(shareT[j] - shareB[i]) +
-          (target.edges[j].notchesMm.length !== base.edges[i].notchesMm.length
-            ? TRANSFER.notchPenalty
-            : 0);
-      }
-      tried.push({ frame, shift, cost: cost / n });
-    }
-  }
-  tried.sort((x, y) => x.cost - y.cost);
   // Sizes of one file sit in one frame: as is wins unless another frame is clearly better (a
   // symmetric piece fits mirrored as well — that is not a reason to flip it).
-  const bestAsis = tried.find((t) => t.frame === 'asis');
-  const pick = bestAsis && bestAsis.cost <= tried[0].cost + TRANSFER.margin ? bestAsis : tried[0];
-  if (pick.cost > TRANSFER.costMax) return null;
-  const rival = tried.find((t) => t !== pick && t.frame === pick.frame);
-  if (rival && rival.cost - pick.cost < TRANSFER.margin) return null;
-  const back = backwards(pick.frame);
-  const map = new Map<EdgeId, EdgeId>();
-  base.edges.forEach((e, i) => {
-    const j = back ? (((pick.shift - i) % n) + n) % n : (i + pick.shift) % n;
-    map.set(e.id, target.edges[j].id);
-  });
-  return { map, frame: pick.frame, cost: Math.round(pick.cost * 10000) / 10000 };
+  return edgeMapInFrames(base, target, FRAMES, degBase, degTarget, true, false);
+}
+
+/**
+ * The topology map of an explicitly mirrored twin. Only mirrored frames are legal, and two
+ * equally plausible, genuinely different edge correspondences are refused instead of guessed.
+ */
+export function mirrorEdgeMapOf(
+  base: PieceGeom,
+  target: PieceGeom,
+  degBase = 0,
+  degTarget = 0,
+): EdgeMap | null {
+  return edgeMapInFrames(base, target, ['mirrorU', 'mirrorV'], degBase, degTarget, false, true);
 }
 
 /** A base-size hit carried to the target piece through its edge map, or undefined. */

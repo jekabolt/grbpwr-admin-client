@@ -13,31 +13,17 @@
 
 import * as Dialog from '@radix-ui/react-dialog';
 import { activeFoldRows, type FoldStep } from 'lib/folds';
-import {
-  anchorOfRunId,
-  newSeamKey,
-  poseRow,
-  type EdgeAnchor,
-  type SidePart,
-  type StoredSeam,
-} from 'lib/seams';
+import { anchorOfRunId, type EdgeAnchor, type SidePart, type StoredSeam } from 'lib/seams';
 import { cn } from 'lib/utility';
 import { useCallback, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { Button, Chip, ChipRow, Close, Placeholder, Text } from 'ui';
+import { Button, Chip, ChipRow, Close, ConfirmationModal, Placeholder, Text } from 'ui';
 import { runsOfSide } from '../assembly-seams/seam-actions';
-import { rowPairSig, useSeamsStore } from '../assembly-seams/seams-store';
+import { useSeamsStore } from '../assembly-seams/seams-store';
 import { useFoldRows } from '../assembly-folds/folds-store';
 import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { PairNo } from './pair-no';
 import { recordSeamDecision } from './seam-decisions';
-import {
-  isGuess,
-  mirrorLeftPoses,
-  mirrorLeftRows,
-  pickTarget,
-  seamSideName,
-  sideForClick,
-} from './seam-focus';
+import { isGuess, pickTarget, seamSideName, sideForClick } from './seam-focus';
 import { usePictureZoom } from './picture-zoom';
 import { snapAtDuringDrag } from './pose-picking';
 import { PoseOverlay } from './pose-overlay';
@@ -68,6 +54,7 @@ import {
 import { edgeRowFromPick, initialPickerPick, orderedPickSides } from './step-rows';
 import { fitSourceOf } from './step-pose';
 import { stepPictureOf } from './surface-picture';
+import { useMirrorStep } from './use-mirror-step';
 import { usePoseEdit } from './use-pose-edit';
 
 type Side = 'a' | 'b';
@@ -174,9 +161,9 @@ export function SeamPickerBody({
   const [hover, setHover] = useState<TargetId | null>(null);
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState('');
+  const [replaceMirrorOpen, setReplaceMirrorOpen] = useState(false);
   // A tile preloads its proposal; GUESS does the same from the manual + seam entry.
   const [filled, setFilled] = useState<Sel | null>(() => initialPick);
-  const [mirroredPick, setMirroredPick] = useState<StoredSeam | null>(null);
   const fitSource = useMemo(() => fitSourceOf({ a: sel.a, b: sel.b }), [sel]);
   const poses = scene.poses;
   const stepRows = useMemo(
@@ -227,6 +214,15 @@ export function SeamPickerBody({
     attach,
     attachPose,
     fitSource,
+  });
+  const mirror = useMirrorStep({
+    index,
+    step: op ?? {},
+    cardOps: scene.ops,
+    rows: byKey,
+    poses,
+    geoms,
+    grainDeg: geo?.grainDeg,
   });
 
   const pieces = geo?.pieces;
@@ -303,7 +299,6 @@ export function SeamPickerBody({
     setSel(EMPTY);
     setRefused('');
     setFilled(null);
-    setMirroredPick(null);
   };
 
   const draftRow = useMemo(
@@ -311,69 +306,18 @@ export function SeamPickerBody({
     [buildRow, pick, surface],
   );
 
-  const mirrorTargets = useMemo(() => {
-    const rows = [...stepRows];
-    if (draftRow && !rows.some((row) => rowPairSig(row) === rowPairSig(draftRow)))
-      rows.push(draftRow);
-    return mirrorLeftRows(rows, [...byKey.values()], geoms);
-  }, [stepRows, draftRow, byKey, geoms]);
-  const mirrorPoses = useMemo(
-    () =>
-      mirrorLeftPoses(
-        groups.flatMap((group) => group.pieces),
-        poses.values(),
-        geoms,
-      ),
-    [groups, poses, geoms],
-  );
-
   const mirrorLeft = async () => {
-    if ((!mirrorTargets.length && !mirrorPoses.length) || busy) return;
-    const pending = draftRow
-      ? mirrorTargets.find((update) => update.row.seamKey === draftRow.seamKey)
-      : undefined;
-    if (pending) setMirroredPick(pending.row);
-    const storedUpdates = mirrorTargets.filter(
-      (update) => !draftRow || update.row.seamKey !== draftRow.seamKey,
-    );
-    const poseRows = mirrorPoses.flatMap((pose) => {
-      const pg = geoms.get(pose.piece);
-      const hg = geoms.get(pose.host);
-      if (!pg || !hg) return [];
-      return [
-        poseRow({
-          seamKey: ownPoseRows.get(pose.piece)?.seamKey ?? newSeamKey(),
-          piece: pg,
-          host: hg,
-          placement: pose.placement,
-          grainDeg: geo?.grainDeg,
-          layer: pose.layer,
-        }),
-      ];
-    });
-    if (!storedUpdates.length && !poseRows.length) return;
+    if ((mirror.plan.kind !== 'create' && mirror.plan.kind !== 'replace') || busy) return;
     setBusy(true);
     setRefused('');
-    for (const update of storedUpdates) {
-      if (await attach(update.row)) continue;
-      setBusy(false);
-      setRefused(useSeamsStore.getState().errors[update.row.seamKey] ?? 'not saved');
-      return;
-    }
-    if (poseRows.length && !(await attachPose(poseRows))) {
-      setBusy(false);
-      setRefused(useSeamsStore.getState().errors[poseRows[0].seamKey] ?? 'not saved');
-      return;
-    }
+    const result = await mirror.write();
     setBusy(false);
+    if (!result.ok) setRefused(result.error);
   };
 
   const commit = async () => {
     if (!canAccept) return;
-    const row =
-      mirroredPick && draftRow && rowPairSig(mirroredPick) === rowPairSig(draftRow)
-        ? mirroredPick
-        : draftRow;
+    const row = draftRow;
     if (!row) {
       setRefused('cannot pair');
       return;
@@ -410,7 +354,6 @@ export function SeamPickerBody({
       const side = sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget);
       setRefused('');
       setSel(pickTarget(sel, side, id, (t) => !!parseInner(t), pieceOfTarget));
-      setMirroredPick(null);
     },
     [frozen, posing, groups, sel],
   );
@@ -476,7 +419,6 @@ export function SeamPickerBody({
     setRefused('');
     setSel(next);
     setFilled(next);
-    setMirroredPick(null);
   };
 
   const onKeyDown = (e: KeyboardEvent) => {
@@ -518,7 +460,6 @@ export function SeamPickerBody({
   const clearSide = (side: Side) => {
     setSel((current) => ({ ...current, [side]: [] }));
     setFilled(null);
-    setMirroredPick(null);
     setRefused('');
   };
   // The step's words as its row shows them («join / seam · armhole»), else the unit it makes.
@@ -868,13 +809,27 @@ export function SeamPickerBody({
                   guess
                 </Button>
               )}
-              {!frozen && (mirrorTargets.length > 0 || mirrorPoses.length > 0) && (
+              {!frozen && mirror.visible && mirror.plan.kind === 'no-twin' && (
+                <Chip tone='error'>NO TWIN</Chip>
+              )}
+              {!frozen && mirror.visible && mirror.plan.kind === 'edge-mismatch' && (
+                <Chip tone='error'>EDGE MISMATCH</Chip>
+              )}
+              {!frozen && mirror.visible && (
                 <Button
                   type='button'
                   variant='underline'
                   size='xs'
-                  onClick={() => void mirrorLeft()}
-                  disabled={busy}
+                  onClick={() => {
+                    if (mirror.plan.kind === 'replace') setReplaceMirrorOpen(true);
+                    else void mirrorLeft();
+                  }}
+                  disabled={
+                    busy ||
+                    mirror.plan.kind === 'same' ||
+                    mirror.plan.kind === 'no-twin' ||
+                    mirror.plan.kind === 'edge-mismatch'
+                  }
                   data-seam-mirror-left=''
                 >
                   mirror left
@@ -921,6 +876,15 @@ export function SeamPickerBody({
           )}
         </div>
       </div>
+      <ConfirmationModal
+        open={replaceMirrorOpen}
+        onOpenChange={setReplaceMirrorOpen}
+        onConfirm={() => void mirrorLeft()}
+        title='REPLACE RIGHT?'
+        confirmLabel='REPLACE'
+      >
+        {null}
+      </ConfirmationModal>
     </>
   );
 

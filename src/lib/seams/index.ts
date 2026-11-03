@@ -47,6 +47,7 @@ export {
 export {
   TRANSFER,
   edgeMapOf,
+  mirrorEdgeMapOf,
   resolveAcrossSizes,
   type EdgeMap,
   type SizePieces,

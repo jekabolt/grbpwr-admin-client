@@ -132,6 +132,16 @@ export function rowPairSig(r: StoredSeam): string {
   return `${r.kind}|${[side(r.sideA), side(r.sideB)].sort().join('~')}`;
 }
 
+/** A pair plus its sewn windows: two partial rows on one pair remain two independent rows. */
+export function rowPairRangeSig(r: StoredSeam): string {
+  const side = (xs: StoredSeam['sideA']) =>
+    xs
+      .map((anchor) => `${anchor.edgeHint}@${anchor.range[0]}-${anchor.range[1]}`)
+      .sort()
+      .join('+');
+  return `${r.kind}|${[side(r.sideA), side(r.sideB)].sort().join('~')}`;
+}
+
 /**
  * New rows onto the key of a row already stored for the same pair (another client confirmed it a
  * moment ago, or a write of this tab is still in flight): one pair, one row — never two keys.
@@ -139,10 +149,11 @@ export function rowPairSig(r: StoredSeam): string {
 export function reuseKeys(rows: readonly StoredSeam[], have: readonly StoredSeam[]): StoredSeam[] {
   const keys = new Set(have.map((r) => r.seamKey));
   const bySig = new Map<string, string>();
-  for (const r of have) if (!bySig.has(rowPairSig(r))) bySig.set(rowPairSig(r), r.seamKey);
+  for (const r of have)
+    if (!bySig.has(rowPairRangeSig(r))) bySig.set(rowPairRangeSig(r), r.seamKey);
   return rows.map((r) => {
     if (keys.has(r.seamKey)) return r;
-    const k = bySig.get(rowPairSig(r));
+    const k = bySig.get(rowPairRangeSig(r));
     return k ? { ...r, seamKey: k } : r;
   });
 }

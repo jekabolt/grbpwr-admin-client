@@ -90,9 +90,9 @@ let refreshing: Promise<void> | null = null;
 
 export type SeamWrites = {
   /** Insert or replace these rows (by seam key); resolves true when the server took them. */
-  upsert: (rows: StoredSeam[], errorAt?: string) => Promise<boolean>;
+  upsert: (rows: StoredRow[], errorAt?: string) => Promise<boolean>;
   /** Delete these rows; resolves true when the server took it. */
-  remove: (rows: StoredSeam[]) => Promise<boolean>;
+  remove: (rows: StoredRow[]) => Promise<boolean>;
   /** Insert or replace these pose rows (P8, by seam key); true when the server took them. */
   upsertPoses: (rows: StoredPose[]) => Promise<boolean>;
   /** Delete these pose rows; true when the server took it. */
@@ -209,32 +209,42 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
   }, [cardId, frozen, qc]);
 
   const upsert = useCallback(
-    async (rows0: StoredSeam[], errorAt?: string) => {
+    async (rows0: StoredRow[], errorAt?: string) => {
       await fresh();
       // A new row of a pair already stored (server or in flight) goes onto that row's key.
       const s = useSeamsStore.getState();
-      const rows = reuseKeys(rows0, rowsOf(s));
+      const seams = reuseKeys(
+        rows0.filter((row): row is StoredSeam => row.kind !== 'pose'),
+        rowsOf(s),
+      );
+      const poses = rows0.filter((row): row is StoredPose => row.kind === 'pose');
+      const rows: StoredRow[] = [...seams, ...poses];
       return run(
-        Object.fromEntries(rows.map((row) => [row.seamKey, { kind: 'upsert' as const, row }])),
+        Object.fromEntries(seams.map((row) => [row.seamKey, { kind: 'upsert' as const, row }])),
         () => adminService.UpsertTechCardSeams({ techCardId: cardId, seams: rows.map(wireOut) }),
         rows.length > 1 ? `decisions (${rows.length})` : 'decision',
         errorAt,
+        Object.fromEntries(poses.map((row) => [row.seamKey, { kind: 'upsert' as const, row }])),
       );
     },
     [cardId, fresh, run],
   );
 
   const remove = useCallback(
-    async (rows: StoredSeam[]) => {
+    async (rows: StoredRow[]) => {
       undoHistory.cut('seam-delete');
+      const seams = rows.filter((row): row is StoredSeam => row.kind !== 'pose');
+      const poses = rows.filter((row): row is StoredPose => row.kind === 'pose');
       return run(
-        Object.fromEntries(rows.map((row) => [row.seamKey, { kind: 'delete' as const, row }])),
+        Object.fromEntries(seams.map((row) => [row.seamKey, { kind: 'delete' as const, row }])),
         () =>
           adminService.DeleteTechCardSeams({
             techCardId: cardId,
             seamKeys: rows.map((r) => r.seamKey),
           }),
         'removal',
+        undefined,
+        Object.fromEntries(poses.map((row) => [row.seamKey, { kind: 'delete' as const, row }])),
       );
     },
     [cardId, run, undoHistory],
