@@ -57,6 +57,8 @@ export type FormOpLike = {
   seamKeys?: readonly string[];
   /** The step's pose rows (P8, a piece placed by hand) — card seam keys that are not seams. */
   poseKeys?: readonly string[];
+  /** The fold rows this step closes. */
+  foldKeys?: readonly string[];
   operationNumber?: number;
   assemblyBlockDetached?: boolean;
   fullnessRatio?: string | number;

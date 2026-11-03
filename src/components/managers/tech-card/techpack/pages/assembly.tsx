@@ -32,10 +32,7 @@ import {
   type SceneOp,
   type StepPicture,
 } from 'components/managers/tech-card/components/step-seams/step-picture-view';
-import {
-  cardFoldsOf,
-  foldStepsOf,
-} from 'components/managers/tech-card/components/step-seams/step-folds';
+import { cardFoldsOf } from 'components/managers/tech-card/components/step-seams/step-folds';
 import { inputGroups } from 'components/managers/tech-card/components/step-seams/step-seams-model';
 import {
   boxOf,
@@ -2946,7 +2943,6 @@ const sceneOperations = (techCard: common_TechCard): SceneOp[] => {
   return (techCard.techCard?.operations ?? []).map((operation) => {
     const keys = operation.seamKeys ?? [];
     const posed = keys.filter((key) => poseKeys.has(key));
-    const foldKeys = foldStepsOf([operation])[0]?.foldKeys;
     return {
       operationNumber: operation.operationNumber,
       operationType: operation.operationType,
@@ -2956,7 +2952,7 @@ const sceneOperations = (techCard: common_TechCard): SceneOp[] => {
       outputUnitName: operation.outputUnitName,
       seamKeys: posed.length ? keys.filter((key) => !poseKeys.has(key)) : keys,
       ...(posed.length ? { poseKeys: posed } : {}),
-      ...(foldKeys?.length ? { foldKeys } : {}),
+      ...(operation.foldKeys?.length ? { foldKeys: operation.foldKeys } : {}),
       fullnessRatio: operation.stitching?.fullnessRatio?.value,
     };
   });

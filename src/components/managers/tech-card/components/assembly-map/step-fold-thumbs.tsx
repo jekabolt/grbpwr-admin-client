@@ -1,12 +1,13 @@
 // THE STEP THAT CLOSES A FOLD — the piece flat, then folded. Reads the same thumbnails as the fold
 // picker; a step that names no fold draws nothing.
+import type { FoldStep } from 'lib/folds';
 import { foldGroupsOf } from '../assembly-folds/fold-model';
 import { FlatThumb, FoldedThumb } from '../assembly-folds/fold-picture';
 import { useFoldRows } from '../assembly-folds/folds-store';
 import { useCardGeoms } from '../step-seams/step-picture-view';
 import { closingFoldsOf } from '../step-seams/step-folds';
 
-export function StepFoldThumbs({ ops, index }: { ops: readonly unknown[]; index: number }) {
+export function StepFoldThumbs({ ops, index }: { ops: readonly FoldStep[]; index: number }) {
   const rows = useFoldRows();
   const { geoms, innerLines, geo } = useCardGeoms();
   const closing = closingFoldsOf(ops, index, rows).flatMap((hit) => {

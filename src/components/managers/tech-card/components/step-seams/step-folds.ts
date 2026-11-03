@@ -18,19 +18,14 @@ import { frameOf, fromUV } from 'lib/folds/geom';
 import { pickTarget } from './seam-focus';
 import type { SidePick, SpanRange, SpanSide } from './span-pick';
 
-/** The one read of `operations[].foldKeys`. No key on any op: flat everywhere. */
-export const foldStepsOf = (ops: readonly unknown[]): readonly FoldStep[] =>
-  ops as readonly FoldStep[]; // foldKeys: typed once the T19 client lands
-
 const sameKey = (a: string, b: string) => a.toUpperCase() === b.toUpperCase();
 
 /** The pieces whose fold closes on this very step, each with every fold it holds by then. */
 export function closingFoldsOf(
-  ops: readonly unknown[],
+  steps: readonly FoldStep[],
   index: number,
   rows: readonly StoredFold[],
 ): { pieceKey: string; rows: StoredFold[] }[] {
-  const steps = foldStepsOf(ops);
   const closing = new Set(steps[index]?.foldKeys ?? []);
   if (!closing.size) return [];
   const active = activeFoldRows(steps, index, rows);
@@ -113,11 +108,10 @@ function layFolds(
  * one `flat`, so the drawing is folded once per fold set.
  */
 export function cardFoldsOf(
-  ops: readonly unknown[],
+  steps: readonly FoldStep[],
   card: CardFolds | undefined,
   geoms: ReadonlyMap<string, PieceGeom>,
 ): ((index: number) => StepFolds | null) | null {
-  const steps = foldStepsOf(ops);
   if (!card?.rows.length || !steps.some((step) => step.foldKeys?.length)) return null;
   const laid = layFolds(card.rows, geoms, card.grainDeg);
   const shared = new Map<string, FlatFolds>();

@@ -6,27 +6,24 @@ import { useFormContext, useWatch } from 'react-hook-form';
 
 import { foldRowsOf, useFoldRowsSig, useFoldsStore } from '../assembly-folds/folds-store';
 import type { TechCardFormData } from '../schema';
-import { foldStepsOf } from './step-folds';
 import { useCardGeoms, useCardPieceKeys, usePoseRows, useSeamRows } from './step-picture-view';
 import { OWNER_FIT, stepResults, type StepResult, type StepResultsInput } from './step-result';
 import type { FormOpLike } from './step-seams-model';
 
 const StepResultsContext = createContext<readonly StepResult[] | null>(null);
 
-const operationsSignature = (ops: readonly FormOpLike[]) => {
-  const foldSteps = foldStepsOf(ops);
-  return JSON.stringify(
-    ops.map((op, index) => ({
+const operationsSignature = (ops: readonly FormOpLike[]) =>
+  JSON.stringify(
+    ops.map((op) => ({
       inputKeys: op.inputKeys,
       outputUnitKey: op.outputUnitKey,
       seamKeys: op.seamKeys,
       poseKeys: op.poseKeys,
       operationNumber: op.operationNumber,
       assemblyBlockDetached: op.assemblyBlockDetached,
-      ...(foldSteps[index]?.foldKeys?.length ? { foldKeys: foldSteps[index].foldKeys } : {}),
+      ...(op.foldKeys?.length ? { foldKeys: op.foldKeys } : {}),
     })),
   );
-};
 
 function ResultsValueProvider({
   input,

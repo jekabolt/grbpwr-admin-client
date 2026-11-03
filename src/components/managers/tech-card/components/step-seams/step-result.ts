@@ -6,7 +6,7 @@ import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { compose, IDENTITY } from 'lib/assembly-skeleton/union/affine';
 import { poseOf, type SeamLayer, type StoredPose, type StoredSeam } from 'lib/seams';
 
-import { cardFoldsOf, foldOnceOf, foldStepsOf, type CardFolds, type StepFolds } from './step-folds';
+import { cardFoldsOf, foldOnceOf, type CardFolds, type StepFolds } from './step-folds';
 import { handsFromSeams } from './step-hand';
 import { inputGroups, type FormOpLike, type InputGroup } from './step-seams-model';
 import { invert, stepLayout, type StepLayout } from './step-picture';
@@ -518,16 +518,15 @@ export function stepResultsSignature(
   input: StepResultsInput,
   opts: StepResultsOptions = {},
 ): string {
-  const foldSteps = foldStepsOf(input.ops);
   return JSON.stringify({
-    ops: input.ops.map((op, index) => ({
+    ops: input.ops.map((op) => ({
       inputKeys: op.inputKeys,
       outputUnitKey: op.outputUnitKey,
       seamKeys: op.seamKeys,
       poseKeys: op.poseKeys,
       operationNumber: op.operationNumber,
       assemblyBlockDetached: op.assemblyBlockDetached,
-      ...(foldSteps[index]?.foldKeys?.length ? { foldKeys: foldSteps[index].foldKeys } : {}),
+      ...(op.foldKeys?.length ? { foldKeys: op.foldKeys } : {}),
     })),
     rows: sortedEntries(input.byKey),
     poses: sortedEntries(input.poses ?? new Map()),
