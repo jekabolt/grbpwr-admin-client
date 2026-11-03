@@ -493,9 +493,15 @@ export function TaskDetail() {
       {attachmentIntake.dragging && (
         <div
           aria-hidden
-          className='pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-textColor bg-bgColor/95'
+          className='pointer-events-none absolute inset-0 z-10 flex items-start justify-center border-2 border-dashed border-textColor bg-bgColor/95'
         >
-          <Text size='micro' variant='uppercase' tracking='section' component='span'>
+          <Text
+            size='micro'
+            variant='uppercase'
+            tracking='section'
+            component='span'
+            className='sticky top-[50vh]'
+          >
             drop files
           </Text>
         </div>
