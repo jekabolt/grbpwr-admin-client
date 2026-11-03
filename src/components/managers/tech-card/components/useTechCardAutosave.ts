@@ -825,7 +825,7 @@ const causeOf = (e: unknown) => (e as { cause?: unknown } | null | undefined)?.c
  *               of the page life): a resend earns the same answer, now or with the next change;
  *   conflict  — 409: someone else moved what this write read — the conflict door;
  *   transient — no status (the network), 408, 429 (the rate limit passes), 5xx: the ladder 5 / 15 / 45 s,
- *               then every 30 s;
+ *               then stopped until an edit, the retry door or the network coming back (L16);
  *   refused   — every other 4xx (400, 404, 412, 422 …): the server refused THIS body. Held: «not saved»
  *               with its words, sent again with the next change, never on a timer (D-66).
  * Every other reading of a failure on this page goes through here.
