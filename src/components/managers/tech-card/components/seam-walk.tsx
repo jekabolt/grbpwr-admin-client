@@ -2,6 +2,9 @@
 //
 // It owns no seam logic. The canvas is the real `SeamPickerBody`, the result is the map's `StepView`
 // and the position drives the tab's active step, so the rail and the map follow after CLOSE too.
+// A move answers at once: rail and head take the new op, the heavy canvas and result follow deferred,
+// and the next join's scene is computed in idle time, so NEXT lands on a warm cache. The map behind
+// the window hears about the position only on CLOSE: it is covered, and redrawing it was half the pause.
 // Nothing structural is reachable here: the inline editor stays unmounted under the walk (one writer
 // per field) and keys stop at the root, or ⌘Z would undo a reorder nobody can see.
 import * as Dialog from '@radix-ui/react-dialog';
@@ -9,6 +12,7 @@ import {
   lazy,
   Suspense,
   useCallback,
+  useDeferredValue,
   useEffect,
   useRef,
   useState,
@@ -26,6 +30,7 @@ import {
   useBoxSize,
   useCardGeoms,
   useCardPieceKeys,
+  useStepScene,
 } from './step-seams/step-picture-view';
 import { useStepResults } from './step-seams/step-result-context';
 import { useStepSeams } from './step-seams/step-seams-context';
@@ -94,19 +99,31 @@ export function SeamWalk({
   const op = ops[index];
   const operationNumber = op?.operationNumber ?? null;
   const readOnly = frozen || !cardId || !!ctx?.frozen;
-  const join =
-    index >= 0 &&
-    ((op?.seamKeys?.length ?? 0) > 0 || hasMultipleStepPieces(ops, index, pieceKeys, geoms));
+  const isJoin = (at: number) =>
+    at >= 0 &&
+    ((ops[at]?.seamKeys?.length ?? 0) > 0 || hasMultipleStepPieces(ops, at, pieceKeys, geoms));
+  const join = isJoin(index);
+  // The canvas and the result: a step behind the rail while they catch up.
+  const shown = useDeferredValue(index);
+  const shownJoin = isJoin(shown);
+  const settled = shown === index;
 
+  const [warm, setWarm] = useState<number | null>(null);
   useEffect(() => {
     void loadPicker();
   }, []);
+  useEffect(() => {
+    if (!settled) return;
+    const nextJoin = ops.findIndex((_, at) => at > index && isJoin(at));
+    if (nextJoin < 0) return;
+    const task = window.setTimeout(() => setWarm(nextJoin), 150);
+    return () => window.clearTimeout(task);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [index, settled]);
 
   useEffect(() => {
-    if (index < 0) return;
-    store?.select(index, 'rail');
-    writeMemory(cardId, operationNumber);
-  }, [cardId, index, operationNumber, store]);
+    if (index >= 0) writeMemory(cardId, operationNumber);
+  }, [cardId, index, operationNumber]);
 
   const go = useCallback(
     (to: number) => {
@@ -128,6 +145,7 @@ export function SeamWalk({
   const close = () => {
     autosave.request('seams');
     writeMemory(cardId, null);
+    if (index >= 0) store?.select(index, 'rail');
     onExit(index);
   };
 
@@ -183,18 +201,18 @@ export function SeamWalk({
           <div className='flex min-h-0 flex-col overflow-y-auto md:flex-row md:overflow-hidden'>
             <WalkRail ops={ops} current={index} catalog={catalog} onPick={go} />
             <main className='h-120 min-w-0 flex-none p-3 md:h-auto md:min-h-0 md:flex-1'>
-              {join ? (
+              {shownJoin ? (
                 <Suspense fallback={<Placeholder label='loading' />}>
                   <SeamPickerBody
-                    key={fields[index]?.id}
-                    index={index}
+                    key={fields[shown]?.id}
+                    index={shown}
                     readOnly={readOnly}
                     walk
                     onAccepted={() => autosave.request('seams')}
                   />
                 </Suspense>
               ) : (
-                <WalkSinglePicture key={fields[index]?.id} index={index} model={model} />
+                <WalkSinglePicture key={fields[shown]?.id} index={shown} model={model} />
               )}
             </main>
             <aside
@@ -204,7 +222,8 @@ export function SeamWalk({
               <Text size='micro' tracking='label' className='mb-2 block uppercase'>
                 result
               </Text>
-              {index >= 0 && <StepView model={model} index={index} />}
+              {shown >= 0 && <StepView model={model} index={shown} />}
+              {warm !== null && <WarmScene key={warm} index={warm} />}
             </aside>
           </div>
 
@@ -248,6 +267,12 @@ export function SeamWalk({
   );
 }
 
+/** Computes a scene for its cache and draws nothing: the picker's own call then returns at once. */
+function WarmScene({ index }: { index: number }) {
+  useStepScene(index);
+  return null;
+}
+
 function WalkRail({
   ops,
   current,
@@ -287,7 +312,7 @@ function WalkRail({
           >
             <span className='flex min-h-8 items-center gap-1.5'>
               <span className='w-8 shrink-0'>{op?.operationNumber ?? ''}</span>
-              <span className='min-w-0 flex-1 truncate max-md:hidden'>{type}</span>
+              <span className='shrink-0 max-md:hidden'>{type}</span>
               <span className='min-w-0 flex-1 truncate opacity-70 max-md:hidden'>
                 {op?.outputUnitName?.trim() ?? ''}
               </span>

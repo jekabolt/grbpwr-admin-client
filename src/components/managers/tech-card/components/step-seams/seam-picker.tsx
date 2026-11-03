@@ -810,7 +810,7 @@ export function SeamPickerBody({
         </div>
 
         <div
-          className='sticky bottom-0 box-content flex h-21 flex-none items-center gap-3 border-t border-hairline bg-bgColor px-3 pb-[env(safe-area-inset-bottom)] md:gap-4.5 md:px-5'
+          className='sticky bottom-0 box-content flex h-21 flex-none flex-wrap content-center items-center gap-x-3 border-t border-hairline bg-bgColor px-3 pb-[env(safe-area-inset-bottom)] md:gap-4.5 md:px-5'
           data-seam-bar=''
         >
           {posing ? (
