@@ -139,6 +139,7 @@ export function SeamPickerBody({
   onAccepted,
   footerActions,
   readOnly = false,
+  walk = false,
 }: {
   index: number;
   /** Which of the step's proposals is selected first. */
@@ -150,6 +151,8 @@ export function SeamPickerBody({
   onAccepted?: () => void;
   footerActions?: ReactNode;
   readOnly?: boolean;
+  /** Inside the seam walk: the window names the op, the canvas fills it, ACCEPT reads back SAVED. */
+  walk?: boolean;
 }) {
   const scene = useStepScene(index);
   const stepResults = useStepResults();
@@ -207,6 +210,7 @@ export function SeamPickerBody({
       ),
     [sel, shownParts],
   );
+  const [saved, setSaved] = useState(false);
   const poses = scene.poses;
   const stepRows = useMemo(
     () => (op?.seamKeys ?? []).flatMap((key) => byKey.get(key) ?? []),
@@ -400,6 +404,7 @@ export function SeamPickerBody({
     });
     // One ACCEPT, one seam: the picker is done — back to the step card (the quiz moves on).
     reset();
+    setSaved(true);
     onAccepted?.();
     onClose?.();
   };
@@ -414,6 +419,7 @@ export function SeamPickerBody({
     (id: TargetId, atMm?: number) => {
       if (frozen || posing) return;
       const side = sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget);
+      setSaved(false);
       const length = resolveEdge(id, geoms)?.len ?? 0;
       const picked = (side: Side) =>
         sel[side].includes(id) &&
@@ -662,21 +668,23 @@ export function SeamPickerBody({
         </>
       )}
 
-      <div className='flex h-13 flex-none items-center gap-3'>
-        <Text size='small' tracking='section' className='uppercase'>
-          {`op #${op?.operationNumber ?? ''}`}
-        </Text>
-        {stepName && (
-          <Text size='small' variant='label' className='min-w-0 truncate'>
-            {stepName}
+      {!walk && (
+        <div className='flex h-13 flex-none items-center gap-3'>
+          <Text size='small' tracking='section' className='uppercase'>
+            {`op #${op?.operationNumber ?? ''}`}
           </Text>
-        )}
-        {onClose && (
-          <div className='ml-auto'>
-            <Close onClick={onClose} aria-label='close' />
-          </div>
-        )}
-      </div>
+          {stepName && (
+            <Text size='small' variant='label' className='min-w-0 truncate'>
+              {stepName}
+            </Text>
+          )}
+          {onClose && (
+            <div className='ml-auto'>
+              <Close onClick={onClose} aria-label='close' />
+            </div>
+          )}
+        </div>
+      )}
 
       <div className='flex min-h-0 flex-1 flex-col border border-borderColor bg-bgColor'>
         <div className='flex min-h-0 flex-1'>
@@ -1086,6 +1094,12 @@ export function SeamPickerBody({
                   onClick={() => void commit()}
                   disabled={!canAccept}
                   loading={busy}
+                  done={walk ? saved && !canAccept : undefined}
+                  className={
+                    walk && saved && !canAccept
+                      ? 'border-2 border-success text-success disabled:border-success disabled:text-success'
+                      : undefined
+                  }
                   data-seam-accept=''
                 >
                   accept
@@ -1140,7 +1154,8 @@ export function SeamPickerBody({
     <div
       data-seam-picker='inline'
       className={cn(
-        'flex h-120 min-h-0 flex-col bg-bgColor text-textColor',
+        'flex min-h-0 flex-col bg-bgColor text-textColor',
+        walk ? 'h-full' : 'h-120',
         'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
       )}
       tabIndex={0}

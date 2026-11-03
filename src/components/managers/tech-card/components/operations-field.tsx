@@ -250,6 +250,7 @@ import {
   type RenameOutputSite,
 } from './last-mutation';
 import { AssemblyFullscreen, FROZEN_REFUSAL, restoreScreenFocus } from './assembly-fullscreen';
+import { SeamWalk } from './seam-walk';
 import { AssemblySchematic } from './assembly-schematic';
 import { SequenceRail } from './sequence-rail';
 import {
@@ -7599,6 +7600,27 @@ export function OperationsField({
     [setParams],
   );
 
+  // The seam walk lives in the URL too: a reload returns to it, Back leaves the page.
+  const walkOpen = params.get('walk') === '1' && !fsOpen && !!techCardId;
+  const setWalk = useCallback(
+    (on: boolean) => {
+      setParams(
+        (prev) => {
+          const p = new URLSearchParams(prev);
+          if (on) {
+            p.set('walk', '1');
+            p.set('tab', 'construction');
+          } else {
+            p.delete('walk');
+          }
+          return p;
+        },
+        { replace: true },
+      );
+    },
+    [setParams],
+  );
+
   // ЧЕРНОВИК СИЛЬНЕЕ АДРЕСА. Восстановленный черновик объявляет себя коллаутом в корне карточки —
   // под оверлеем его не видно, а «restore», нажатый после выхода, затёр бы всю работу, сделанную в
   // фулскрине. Поэтому автооткрытие по адресу подавляется; ручной вход позже работает как обычно.
@@ -7796,7 +7818,20 @@ export function OperationsField({
           писателей; а `AssemblyCreateDialog` и корневой `StepNumberDrift` живут СНАРУЖИ этого
           блока и остаются смонтированными всегда: диалог создания нужен фулскрину так же, как
           инлайну. */}
-      {fsOpen ? null : fields.length === 0 &&
+      {walkOpen && (
+        <SeamWalk
+          fields={fields}
+          cardId={techCardId}
+          frozen={frozen}
+          selectedIndex={selectedIndex}
+          onExit={(index) => {
+            setSelected(index);
+            setWalk(false);
+          }}
+        />
+      )}
+
+      {fsOpen || walkOpen ? null : fields.length === 0 &&
         unplacedReuploadedKeys.length === 0 &&
         effectiveMode !== 'schematic' ? (
         <div className='flex flex-col items-center gap-2 border border-dashed border-borderColor px-3 py-8 text-center'>
@@ -7866,6 +7901,11 @@ export function OperationsField({
                 {/* ПЕЧАТЬ — СОХРАНЁННОЙ карточки, в новой вкладке: лист берёт GetTechCard, а не
                     черновик формы, поэтому у несохранённой карточки кнопки нет — печатать было бы
                     нечего, и кнопка, печатающая «не то, что на экране», хуже отсутствующей. */}
+                {techCardId ? (
+                  <Chip nonForm quiet onClick={() => setWalk(true)} data-seam-walk-door=''>
+                    seams
+                  </Chip>
+                ) : null}
                 {techCardId ? (
                   <Chip
                     nonForm
