@@ -9,7 +9,7 @@
 //   (C) состав: переопределение одного колорвея оставляет другие выведенными из BOM; галочка
 //       «also the other N» пишет его всем; пустой набор = снова выведено;
 //   (D) страна: выбор ставит в очередь ОДНО сохранение на колорвей (порядок после тела карточки);
-//       коммит шлёт UpdateColorway { updateMask: 'country_code', countryCode } с версией, прочитанной
+//       коммит шлёт UpdateColorway { updateMask: 'countryCode', countryCode } с версией, прочитанной
 //       В МОМЕНТ КОММИТА (fetch подменён: версия при рендере 5, к коммиту — 9, затем 10); снятый
 //       выбор уходит из очереди;
 //   (E) переопределения доходят до ленты: подпись QR, адрес, проза ухода, своё SVG-лого (кривые, в
@@ -594,7 +594,7 @@ async function run(M, B, sh) {
     ok(
       'D · UpdateColorway masks exactly country_code',
       server.updates.length === 2 &&
-        server.updates.every((u) => u.updateMask === 'country_code' && u.countryCode === 'PL'),
+        server.updates.every((u) => u.updateMask === 'countryCode' && u.countryCode === 'PL'),
     );
     ok(
       'D · the version is read at commit time, not at render (9, then 10)',
