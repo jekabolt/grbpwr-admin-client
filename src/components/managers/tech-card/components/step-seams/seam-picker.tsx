@@ -251,7 +251,6 @@ export function SeamPickerBody({
     poseShown,
     shownPoseLayers,
     shownPoseStacked,
-    shownPoseOrdered,
     clearPose,
     pickupOf,
     dropPose,
@@ -777,7 +776,6 @@ export function SeamPickerBody({
       layout={poseShown}
       layers={posePending ? shownPoseLayers : stepPicture?.layers}
       stacked={posePending ? shownPoseStacked : undefined}
-      ordered={posePending ? shownPoseOrdered : undefined}
       onPainted={movable ? onPainted : undefined}
       geoms={geoms}
       innerLines={innerLines}

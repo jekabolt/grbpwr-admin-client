@@ -13,7 +13,6 @@ import {
 } from 'lib/assembly-skeleton/union/layer-cover';
 
 import type { PictureActionGlyph } from './step-picture-view';
-import { orderedLayers, type LayerRelation } from './step-result';
 
 export type PieceLayerStyle = {
   key: string;
@@ -131,26 +130,4 @@ export function layerStyle(input: LayerStyleInput): LayerStyle {
     marks,
     lower: ordered.filter((_, index) => covers[index].length > 0).map((piece) => piece.key),
   };
-}
-
-/**
- * The order the fills are painted in, bottom to top; the outlines read `order` itself. With no
- * owner's order the level alone decides: the highest level is painted last, whatever the order is.
- * With one, its pairs come first and a level between two stacked pieces gives way when it contradicts
- * them; a piece no pair names keeps its level's place. The colour stays the level's in both.
- */
-export function paintedOrder(
-  order: readonly string[],
-  styles: ReadonlyMap<string, Pick<PieceLayerStyle, 'level' | 'coveredBy'>>,
-  ordered?: readonly LayerRelation[],
-): string[] {
-  const levelOf = (key: string) => styles.get(key)?.level ?? 0;
-  const byLevel = [...order].sort((a, b) => levelOf(a) - levelOf(b));
-  if (!ordered?.length) return byLevel;
-  const levels = byLevel.flatMap((key) =>
-    (styles.get(key)?.coveredBy ?? []).map(
-      (cover): LayerRelation => (levelOf(key) <= levelOf(cover) ? [key, cover] : [cover, key]),
-    ),
-  );
-  return orderedLayers(byLevel, [...ordered, ...levels]);
 }

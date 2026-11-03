@@ -402,7 +402,6 @@ export function usePoseEdit({
   );
   const shownPoseLayers = shownPoseStacking.layers;
   const shownPoseStacked = shownPoseStacking.stacked;
-  const shownPoseOrdered = 'ordered' in shownPoseStacking ? shownPoseStacking.ordered : undefined;
 
   const resetPose = async () => {
     if (busy) return;
@@ -523,7 +522,6 @@ export function usePoseEdit({
     poseShown,
     shownPoseLayers,
     shownPoseStacked,
-    shownPoseOrdered,
     clearPose,
     pickupOf,
     dropPose,
