@@ -4,6 +4,7 @@ import {
   priceNeedsConfirmation,
   removeGate,
   removePrice,
+  savedSeamsOnStep,
   type AssemblyPrice,
 } from './assembly-cause';
 import type { AssemblyPiece, AssemblyStep } from './assembly-frontier';
@@ -14,6 +15,7 @@ const emptyPrice = (patch: Partial<AssemblyPrice> = {}): AssemblyPrice => ({
   unitsLost: [],
   piecesDropped: [],
   heals: [],
+  seamsLost: 0,
   summary: 'unused',
   ...patch,
 });
@@ -41,6 +43,7 @@ describe('priceNeedsConfirmation', () => {
     expect(priceNeedsConfirmation(emptyPrice({ breaks: [1] }))).toBe(true);
     expect(priceNeedsConfirmation(emptyPrice({ unitsLost: ['BODY'] }))).toBe(true);
     expect(priceNeedsConfirmation(emptyPrice({ piecesDropped: ['FRONT'] }))).toBe(true);
+    expect(priceNeedsConfirmation(emptyPrice({ seamsLost: 1 }))).toBe(true);
   });
 });
 
@@ -123,6 +126,42 @@ describe('removePrice', () => {
 
   it('has nothing to say about a step that does not exist', () => {
     expect(removePrice(pieces, chain, 9)).toBeNull();
+  });
+});
+
+describe('saved seams on REMOVE', () => {
+  const rows = [
+    { seamKey: 'a', status: 'confirmed' },
+    { seamKey: 'b', status: 'confirmed' },
+    { seamKey: 'no', status: 'rejected' },
+  ];
+  const lonely = [step(['FRONT', 'BACK'], 'SHELL'), step(['SHELL'])];
+
+  it('counts only keys of this step that resolve to a confirmed row', () => {
+    expect(savedSeamsOnStep(undefined, rows)).toBe(0);
+    expect(savedSeamsOnStep([], rows)).toBe(0);
+    expect(savedSeamsOnStep(['', '  ', 'no', 'ghost'], rows)).toBe(0);
+    expect(savedSeamsOnStep(['a', 'a', ' b ', 'no', 'ghost'], rows)).toBe(2);
+  });
+
+  it('asks for a step with seams even when no other step depends on it', () => {
+    const price = removePrice(pieces, lonely, 1, 2);
+
+    expect(price?.breaks).toEqual([]);
+    expect(price?.seamsLost).toBe(2);
+    expect(price?.summary).toContain('2 saved seams lose the step');
+    expect(removeGate([], price)).toBe('ask');
+  });
+
+  it('removes a step without seams at once', () => {
+    const price = removePrice(pieces, lonely, 1, 0);
+
+    expect(price?.seamsLost).toBe(0);
+    expect(removeGate([], price)).toBe('remove');
+  });
+
+  it('refuses on a closing fold before the seams are mentioned', () => {
+    expect(removeGate(['fold'], removePrice(pieces, lonely, 1, 2))).toBe('refuse');
   });
 });
 

@@ -208,7 +208,7 @@ import {
 } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
 import { assemblySweep, classifyAssemblyInputs, type AssemblyResult } from './assembly-frontier';
-import { removeGate, removePrice, type AssemblyPrice } from './assembly-cause';
+import { removeGate, removePrice, savedSeamsOnStep, type AssemblyPrice } from './assembly-cause';
 import { assemblyBlocks, type AssemblyBlock } from './assembly-blocks';
 import { drawnTailSteps, processedPieceOf } from './assembly-layout';
 import type { AssemblyStep as AssemblyStepShape } from './assembly-frontier';
@@ -7080,8 +7080,10 @@ export function OperationsField({
    */
   const requestRemoveOperation = (stepIndex: number) => {
     if (frozen) return;
-    const closing = foldsClosingOn(getValues('operations') ?? [], stepIndex);
-    const price = removePrice(pieces, grouping.schematicSteps, stepIndex);
+    const ops = getValues('operations') ?? [];
+    const closing = foldsClosingOn(ops, stepIndex);
+    const seamsLost = savedSeamsOnStep(ops[stepIndex]?.seamKeys, rowsOf(useSeamsStore.getState()));
+    const price = removePrice(pieces, grouping.schematicSteps, stepIndex, seamsLost);
     const fieldId = fields[stepIndex]?.id;
     if (removeGate(closing, price) !== 'ask' || !price || !fieldId) {
       removeOperation(stepIndex);
@@ -8225,6 +8227,12 @@ export function OperationsField({
               <Chip tone='error'>
                 breaks {removeWarning.price.breaks.length}{' '}
                 {removeWarning.price.breaks.length === 1 ? 'op' : 'ops'}
+              </Chip>
+            )}
+            {removeWarning.price.seamsLost > 0 && (
+              <Chip tone='error'>
+                {removeWarning.price.seamsLost}{' '}
+                {removeWarning.price.seamsLost === 1 ? 'seam' : 'seams'}
               </Chip>
             )}
             {removeWarning.price.unitsLost.map((key) => {

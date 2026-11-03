@@ -304,6 +304,8 @@ export type AssemblyPrice = {
   piecesDropped: string[];
   /** Шаги, чей изъян жест СНИМАЕТ. Цена честна только вместе с этой половиной. */
   heals: number[];
+  /** Сохранённые швы, которые жест отвяжет от шага. Считает только `removePrice`. */
+  seamsLost: number;
   /** Одна строка человеку. Пустой не бывает: «ничего не сломается» тоже цена. */
   summary: string;
 };
@@ -312,7 +314,10 @@ export type AssemblyPrice = {
 export function priceNeedsConfirmation(price: AssemblyPrice | null): price is AssemblyPrice {
   return (
     !!price &&
-    (price.breaks.length > 0 || price.unitsLost.length > 0 || price.piecesDropped.length > 0)
+    (price.breaks.length > 0 ||
+      price.unitsLost.length > 0 ||
+      price.piecesDropped.length > 0 ||
+      price.seamsLost > 0)
   );
 }
 
@@ -425,7 +430,24 @@ export function assemblyPrice(
     parts.push(`and ${stepList(heals)} stop${heals.length > 1 ? '' : 's'} being broken`);
   }
 
-  return { breaks, orphans, unitsLost, piecesDropped, heals, summary: parts.join(', ') };
+  return {
+    breaks,
+    orphans,
+    unitsLost,
+    piecesDropped,
+    heals,
+    seamsLost: 0,
+    summary: parts.join(', '),
+  };
+}
+
+/** Seams really kept on a step: its own keys that resolve to a confirmed row of the card. */
+export function savedSeamsOnStep(
+  seamKeys: readonly string[] | undefined,
+  rows: readonly { seamKey: string; status: string }[],
+): number {
+  const confirmed = new Set(rows.filter((r) => r.status === 'confirmed').map((r) => r.seamKey));
+  return new Set((seamKeys ?? []).map((k) => k.trim()).filter((k) => k && confirmed.has(k))).size;
 }
 
 /**
@@ -434,20 +456,25 @@ export function assemblyPrice(
  * КАРТОЧКА-ПОСЛЕ СТРОИТСЯ РОВНО ТАК, КАК ПИШЕТ МУТАТОР `removeOperation`: строка уходит из массива,
  * входы потребителей не трогаются. Их висячие ссылки — не упущение расчёта, а то самое, что человеку
  * и надо сказать заранее. Сгибы лежат на самой строке (`foldKeys`), их разбирает `removeGate`.
+ * Швы — тоже на строке, движок сборки их не видит: `seamsLost` приходит от `savedSeamsOnStep`.
  */
 export function removePrice(
   pieces: AssemblyPiece[],
   steps: AssemblyStep[],
   stepIndex: number,
+  seamsLost = 0,
 ): AssemblyPrice | null {
   if (!steps[stepIndex]) return null;
-  return assemblyPrice(
+  const price = assemblyPrice(
     pieces,
     steps,
     steps.filter((_, i) => i !== stepIndex),
     `removing step ${stepNo(stepIndex)}`,
     (i) => (i < stepIndex ? i : i + 1),
   );
+  if (seamsLost === 0) return price;
+  const seams = `${seamsLost} saved ${seamsLost === 1 ? 'seam loses' : 'seams lose'} the step`;
+  return { ...price, seamsLost, summary: `${price.summary}, and ${seams}` };
 }
 
 /** What REMOVE does: a closing fold refuses before any price is shown, then the price may ask. */
