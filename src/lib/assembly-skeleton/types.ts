@@ -113,6 +113,27 @@ export type Edge = {
   kind: 'edge' | 'chain';
 };
 
+/**
+ * A strip of a material cut to length (BOM «cut to length»): not a pattern piece, never a row of the
+ * card's pieces. It gets a rectangle so a step can draw it and a seam can hold it; these are the
+ * facts of that rectangle at the drawn size, which the picture and the length check read.
+ */
+export type CutStripMark = {
+  /** The BOM line's name. */
+  label: string;
+  mode: 'from_seam' | 'per_size' | 'one_length';
+  fitPct: number;
+  overlapMm: number;
+  widthMm: number;
+  sewnMm: number;
+  /** The seam the strip is taken from, at the drawn size. from_seam only. */
+  seamMm?: number;
+  /** The drawn size's name; absent when one length serves all sizes. */
+  sizeName?: string;
+  /** The drawn size's cut was typed by hand: the formula does not stand behind it. */
+  manual?: boolean;
+};
+
 export type PieceGeom = {
   pieceKey: string;
   name: string;
@@ -134,6 +155,8 @@ export type PieceGeom = {
   twinOf: { key: string; kind: 'mirror' | 'identical' }[];
   /** Internal marks of the piece, classified (geometry/marks.ts); seam-line copies left out. */
   marks?: PieceMark[];
+  /** Set on a cut strip's rectangle only. */
+  cutStrip?: CutStripMark;
 };
 
 // ── Internal marks (P2 step 0, 03-P2-DESIGN §2) ─────────────────────────────────────────────

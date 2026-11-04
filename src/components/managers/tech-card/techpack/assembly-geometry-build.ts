@@ -2,7 +2,7 @@ import type { common_TechCard } from 'api/proto-http/admin';
 import type { FoundPiece } from 'components/managers/tech-card/components/nesting/dxf-geometry';
 import { seamPieceOf, segmentPiece, twins } from 'lib/assembly-skeleton/geometry';
 import { readablePieceName } from 'lib/assembly-skeleton/names';
-import type { ClothState } from 'lib/assembly-skeleton/types';
+import type { ClothState, CutStripMark, PieceGeom } from 'lib/assembly-skeleton/types';
 import type { PieceDTO } from 'lib/nesting/types';
 import { grainRotation } from 'lib/pom/upright';
 
@@ -15,6 +15,8 @@ type AssemblyCardPiece = {
   piecesPerGarment?: number;
   cutSymmetry?: string;
   materials: Array<{ bomLineKey?: string }>;
+  /** Set on a cut strip's virtual row: the facts of its rectangle at the drawn size. */
+  cutStrip?: CutStripMark;
 };
 
 export type AssemblyCardInput = {
@@ -193,6 +195,7 @@ export function buildAssemblyPiecesFromInput(
   const pieces = new Map<string, AsmPiece>();
   const grainDeg = new Map<string, number>();
   const geoms = [];
+  const stripGeoms: PieceGeom[] = [];
   const drawn = new Map<string, Omit<AsmPiece, 'geom'>>();
   for (const piece of input.pieces ?? []) {
     const key = piece.lineKey ?? '';
@@ -201,17 +204,17 @@ export function buildAssemblyPiecesFromInput(
     const dto: PieceDTO = seamPieceOf(hit.layers?.length ? hit.layers : [hit.piece]) ?? hit.piece;
     const name = readablePieceName(piece.name ?? '') || piece.name || key;
     const pieceCloth = cloth(input, piece);
-    geoms.push(
-      segmentPiece({
-        pieceKey: key,
-        name,
-        piece: dto,
-        piecesPerGarment: piece.piecesPerGarment || 1,
-        cutSymmetry: piece.cutSymmetry ?? null,
-        cloth: pieceCloth,
-        fused: false,
-      }),
-    );
+    const geom = segmentPiece({
+      pieceKey: key,
+      name,
+      piece: dto,
+      piecesPerGarment: piece.piecesPerGarment || 1,
+      cutSymmetry: piece.cutSymmetry ?? null,
+      cloth: pieceCloth,
+      fused: false,
+    });
+    if (piece.cutStrip) stripGeoms.push({ ...geom, cutStrip: piece.cutStrip });
+    else geoms.push(geom);
     grainDeg.set(key, grainRotation(hit.piece));
     const loops = [
       draw(dto.poly),
@@ -253,7 +256,8 @@ export function buildAssemblyPiecesFromInput(
       area: cutArea,
     });
   }
-  for (const geom of twins(geoms)) {
+  // Strips stay out of the twin search: a rectangle is never a real piece's mirror.
+  for (const geom of [...twins(geoms), ...stripGeoms]) {
     const drawing = drawn.get(geom.pieceKey);
     if (drawing) pieces.set(geom.pieceKey, { ...drawing, geom });
   }

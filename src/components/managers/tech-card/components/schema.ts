@@ -3291,9 +3291,16 @@ export function operationWriteOrder(
   data: Pick<TechCardFormData, 'operations' | 'pieces'>,
 ): number[] {
   const sourceOperations = data.operations ?? [];
-  const sequencePieces = (data.pieces ?? [])
-    .filter((piece) => !isBlankPiece(piece) && !!piece.lineKey?.trim())
-    .map((piece) => ({ lineKey: piece.lineKey!.trim(), name: piece.name?.trim() || '' }));
+  const cutStrips = (data as { cutStrips?: readonly { lineKey?: string }[] }).cutStrips ?? [];
+  const sequencePieces = [
+    ...(data.pieces ?? [])
+      .filter((piece) => !isBlankPiece(piece) && !!piece.lineKey?.trim())
+      .map((piece) => ({ lineKey: piece.lineKey!.trim(), name: piece.name?.trim() || '' })),
+    // A step takes a strip like a piece; without it the sweep reads a dangling unit.
+    ...cutStrips.flatMap((strip) =>
+      strip.lineKey?.trim() ? [{ lineKey: strip.lineKey.trim(), name: '' }] : [],
+    ),
+  ];
   const sequencePieceKeys = new Set(sequencePieces.map((piece) => piece.lineKey));
   const sequenceSteps = sourceOperations.map((operation) => ({
     inputs: classifyAssemblyInputs(

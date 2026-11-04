@@ -9,6 +9,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
 import type { common_TechCard } from 'api/proto-http/admin';
+import { useSizeNames } from 'components/managers/model/components/use-size-systems';
 import { depStatus, type PrintDep } from 'components/managers/print/use-print-ready';
 import {
   bindingScopes,
@@ -21,6 +22,12 @@ import {
   useDxfIndex,
   type FoundPiece,
 } from 'components/managers/tech-card/components/nesting/dxf-geometry';
+import {
+  cutStripsOfCard,
+  drawnSizeToken,
+  stripDrawingsOf,
+  withStripPieces,
+} from 'components/managers/tech-card/components/cut-strips/strip-pieces';
 import { patternSheetName } from 'components/managers/tech-card/components/nesting/sheet-name';
 import {
   pieceBlockRefs,
@@ -115,6 +122,7 @@ function inputSignature(
       piece.piecesPerGarment,
       piece.cutSymmetry,
       piece.materials?.[0]?.bomLineKey,
+      piece.cutStrip,
     ]),
     (input.bomItems ?? []).map((item) => [item.lineKey, item.purpose]),
     [...refs].map(([key, pieceRefs]) => [key, pieceRefs.map((ref) => [ref.scopeKey, ref.block])]),
@@ -169,15 +177,44 @@ export function useAssemblyGeometry(techCard: common_TechCard, enabled = true): 
     }
     return { found, shapes: { shapeByKey, grainLayer: index?.grainLayer ?? '' } };
   }, [ins?.pieces, index, refs]);
-  const input = useMemo(() => assemblyCardInput(techCard), [ins?.pieces, ins?.bomItems]);
-  const signature = useMemo(
+  // A strip joins the drawing here, after the match: `shapes` feeds the cut sheet and stays as it
+  // was, and the strip is drawn at the size the pattern pieces were read at.
+  const sizeNames = useSizeNames();
+  const strips = cutStripsOfCard(techCard);
+  const drawings = useMemo(
     () =>
-      inputSignature(filesSignature(files), input, refs, matched.found, index?.grainLayer ?? ''),
-    [files, input, refs, matched.found, index?.grainLayer],
+      stripDrawingsOf(strips, ins?.bomItems ?? [], {
+        sizeToken: drawnSizeToken(matched.found.values()),
+        sizeNames,
+        baseSizeId: ins?.baseSampleSizeId,
+      }),
+    [strips, ins?.bomItems, ins?.baseSampleSizeId, matched.found, sizeNames],
+  );
+  const found = useMemo(() => {
+    if (drawings.length === 0) return matched.found;
+    const all = new Map(matched.found);
+    for (const drawing of drawings) all.set(drawing.key, drawing.found);
+    return all;
+  }, [matched.found, drawings]);
+  const input = useMemo(() => {
+    const read = assemblyCardInput(withStripPieces(techCard));
+    if (drawings.length === 0) return read;
+    const marks = new Map(drawings.map((drawing) => [drawing.key, drawing.mark]));
+    return {
+      ...read,
+      pieces: read.pieces.map((piece) => {
+        const cutStrip = marks.get(piece.lineKey ?? '');
+        return cutStrip ? { ...piece, cutStrip } : piece;
+      }),
+    };
+  }, [ins?.pieces, ins?.bomItems, strips, drawings]);
+  const signature = useMemo(
+    () => inputSignature(filesSignature(files), input, refs, found, index?.grainLayer ?? ''),
+    [files, input, refs, found, index?.grainLayer],
   );
   const built = useQuery<BuiltAssemblyPieces, Error>({
     queryKey: ['techpack-assembly-geometry', signature],
-    queryFn: ({ signal }) => buildInWorker(input, matched.found, index?.grainLayer ?? '', signal),
+    queryFn: ({ signal }) => buildInWorker(input, found, index?.grainLayer ?? '', signal),
     enabled: enabled && files.length > 0 && !!index,
     staleTime: Infinity,
     gcTime: 5 * 60_000,
