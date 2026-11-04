@@ -462,11 +462,11 @@ export function MaterialSlots({
           <DataTable className='min-w-[1110px] table-fixed [&_td]:py-2.5'>
             <colgroup>
               <col />
-              <col className='w-[230px]' />
-              <col className='w-[24%]' />
+              <col className='w-[200px]' />
+              <col className='w-[18%]' />
               <col className='w-[150px]' />
-              <col className='w-24' />
-              <col className='w-40' />
+              <col className='w-16' />
+              <col className='w-[150px]' />
               <col className='w-[90px]' />
               <col className='w-[110px]' />
             </colgroup>
