@@ -1266,8 +1266,9 @@ export function rangedPicturePoints(
         : sum + Math.hypot(point[0] - points[index - 1][0], point[1] - points[index - 1][1]),
     0,
   );
-  const start = (Math.max(0, Math.min(targetLength, range[0])) / targetLength) * total;
-  const end = (Math.max(start, Math.min(targetLength, range[1])) / targetLength) * total;
+  const fromMm = Math.max(0, Math.min(targetLength, range[0]));
+  const start = (fromMm / targetLength) * total;
+  const end = (Math.max(fromMm, Math.min(targetLength, range[1])) / targetLength) * total;
   const out: Pt2[] = [];
   let at = 0;
   for (let index = 1; index < points.length; index++) {

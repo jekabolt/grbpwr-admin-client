@@ -11,9 +11,9 @@ import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { MaterialModal } from 'components/managers/materials/components/material-modal';
 import { materialImageUrl } from 'components/managers/materials/components/material-thumb';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
+import { useMaterialStock } from 'components/managers/materials/components/useWarehouse';
 import { useCareLabelSource } from 'components/managers/tech-card/care-labels/adapter';
 import { labelMediaOf } from 'components/managers/tech-card/care-labels/label-media';
-import { Swatch as TechpackSwatch } from 'components/managers/tech-card/techpack/pages/bits';
 import { useEffect, useMemo, useState, type ChangeEvent, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import {
@@ -22,7 +22,6 @@ import {
   ChipRow,
   Close,
   ConfirmationModal,
-  EmptyCell,
   GroupLabel,
   Input,
   InputField,
@@ -31,13 +30,17 @@ import {
   Placeholder,
   Select,
   Text,
-  Textarea,
   Tile,
   Tiles,
 } from 'ui';
 
 import { packagingItemKind } from './bom-kind';
-import { removePackagingItem, upsertPackagingItem, type PackagingItemOpts } from './form-writers';
+import {
+  movePackagingItem,
+  removePackagingItem,
+  upsertPackagingItem,
+  type PackagingItemOpts,
+} from './form-writers';
 import {
   auxCardThumbUrl,
   auxOutputStock,
@@ -48,12 +51,8 @@ import {
 } from './labels-pkg-shared';
 import type { FormPackagingItem } from './labels-schema';
 import type { TechCardFormData } from './schema';
-import {
-  foldingMethodOptions,
-  kindLabel,
-  packagingItemKinds,
-  packagingPackingOptions,
-} from './tech-card-options';
+import { kindLabel, packagingItemKinds } from './tech-card-options';
+import { decimalToInput } from 'utils/decimal';
 import { wireInt } from './wire-int';
 
 type Pick =
@@ -66,7 +65,7 @@ type Pick =
     }
   | { type: 'aux'; id: number; name: string; url?: string; card: common_TechCardListItem };
 
-type Colourway = { id: number; name: string; hex: string };
+type Colourway = { id: number; name: string };
 
 const perOrderKinds = new Set(['box', 'mailer', 'tote_bag']);
 const notPackagingAux = new Set([
@@ -93,18 +92,39 @@ const mediaFromUrl = (url?: string): common_MediaFull | undefined =>
       } as common_MediaFull)
     : undefined;
 
-const kindWord = (key?: string): string =>
-  kindLabel(packagingItemKinds, key).replaceAll('_', ' ');
+const kindWord = (key?: string): string => kindLabel(packagingItemKinds, key).replaceAll('_', ' ');
 
-const colourHex = (ref?: common_AdminColorwayRef): string =>
-  ref?.devHex || ref?.colours?.[0]?.hex || '';
+const ON_HANGER = 'on a hanger';
+const FOLDED = 'folded';
+const FOLDS = [
+  { value: 'folded in half', label: 'in half' },
+  { value: 'folded in three', label: 'in thirds' },
+  { value: 'tri-fold, sleeves in', label: 'tri-fold, sleeves in' },
+  { value: 'rolled', label: 'rolled' },
+];
 
-function Swatch({ hex }: { hex: string }) {
-  return hex ? (
-    <TechpackSwatch colour={hex} size={10} />
-  ) : (
-    <span aria-hidden='true' className='size-2.5 shrink-0 border border-borderColor bg-pageBg' />
-  );
+type PickerMode = 'pack' | 'hanger' | 'box';
+
+const sameKind = (item: FormPackagingItem, kind: string) =>
+  (item.key ?? '').trim().toLowerCase() === kind;
+
+/** `! N` of the block header: what the shelf still needs before it is a complete pack. */
+export function packagingGaps(
+  folding: string,
+  items: readonly FormPackagingItem[],
+  unitsPerBox: number,
+): number {
+  const hanger = items.find((item) => sameKind(item, 'hanger'));
+  const box = items.find((item) => sameKind(item, 'box'));
+  const picked = (item?: FormPackagingItem) =>
+    !!item && (wireInt(item.materialId) > 0 || wireInt(item.auxTechCardId) > 0);
+  let gaps = 0;
+  if (!folding) gaps += 1;
+  if (folding === ON_HANGER && !picked(hanger)) gaps += 1;
+  if (folding === FOLDED) gaps += 1;
+  if (!picked(box)) gaps += 1;
+  else if (!unitsPerBox) gaps += 1;
+  return gaps;
 }
 
 function PackedPhoto({
@@ -132,48 +152,37 @@ function PackedPhoto({
   });
   const thumb = <Thumb url={url} alt='packed photo' className='size-6.5' />;
 
-  if (disabled)
-    return (
-      <Field label='packed photo'>
-        {url ? thumb : <EmptyCell />}
-      </Field>
-    );
+  if (disabled) return url ? thumb : null;
   return (
-    <Field label='packed photo'>
-      <div {...intake.regionHandlers} className='flex items-center gap-1'>
-        <MediaSelector
-          label='+ photo'
-          purpose='packed photo'
-          aspectRatio={['Custom']}
-          allowMultiple={false}
-          showVideos={false}
-          saveSelectedMedia={save}
-          trigger={
-            url ? (
-              <Button type='button' variant='default' className='p-0' aria-label='packed photo'>
-                {thumb}
-              </Button>
-            ) : (
-              <Chip dashed className='h-6.5'>
-                {intake.dragging ? 'drop photo' : '+ photo'}
-              </Chip>
-            )
-          }
+    <div {...intake.regionHandlers} className='flex items-center gap-1'>
+      <MediaSelector
+        label='+ photo'
+        purpose='packed photo'
+        aspectRatio={['Custom']}
+        allowMultiple={false}
+        showVideos={false}
+        saveSelectedMedia={save}
+        trigger={
+          url ? (
+            <Button type='button' variant='default' className='p-0' aria-label='packed photo'>
+              {thumb}
+            </Button>
+          ) : (
+            <Button type='button' variant='underline' size='xs'>
+              {intake.dragging ? 'drop photo' : '+ photo'}
+            </Button>
+          )
+        }
+      />
+      {!!packedMediaId && (
+        <Close
+          size='sm'
+          aria-label='remove packed photo'
+          onClick={() => setValue('packaging.packedMediaId', 0, { shouldDirty: true })}
         />
-        {!!packedMediaId && (
-          <Close
-            size='sm'
-            aria-label='remove packed photo'
-            onClick={() =>
-              setValue('packaging.packedMediaId', 0, {
-                shouldDirty: true,
-              })
-            }
-          />
-        )}
-        {intake.dialog}
-      </div>
-    </Field>
+      )}
+      {intake.dialog}
+    </div>
   );
 }
 
@@ -200,12 +209,26 @@ function ItemMedia({
   );
 }
 
+/** The stock figure of a tile: a number, or a red `0 on hand`. Unknown stays silent. */
+function OnHand({ value }: { value?: string }) {
+  if (value == null || value === '') return null;
+  return Number(value) > 0 ? (
+    <>{value}</>
+  ) : (
+    <Text size='micro' variant='errorLabel' component='span'>
+      0 on hand
+    </Text>
+  );
+}
+
 function ItemDetail({
   index,
   item,
   colourways,
   disabled,
-  onClose,
+  canMoveEarlier,
+  canMoveLater,
+  onMove,
   onRemove,
   onPatch,
 }: {
@@ -213,125 +236,78 @@ function ItemDetail({
   item: FormPackagingItem;
   colourways: Colourway[];
   disabled: boolean;
-  onClose: () => void;
+  canMoveEarlier: boolean;
+  canMoveLater: boolean;
+  onMove: (direction: -1 | 1) => void;
   onRemove: () => void;
   onPatch: (patch: Partial<Omit<FormPackagingItem, 'key'>>, opts?: PackagingItemOpts) => void;
 }) {
-  const ids = item.colorwayIds ?? [];
-  const toggleColour = (id: number) => {
-    const next = ids.includes(id) ? ids.filter((value) => value !== id) : [...ids, id];
-    onPatch({ colorwayIds: next }, { index, keepBare: true });
-  };
+  const colour = item.colorwayIds?.[0];
   return (
     <div className='mt-4 border-t border-hairline pt-4'>
-      <div className='flex items-center gap-2'>
-        <Text size='control' tracking='label' className='truncate uppercase'>
-          {item.pickedName || kindWord(item.key) || 'item'}
-        </Text>
-        <Close
-          className='ml-auto'
-          size='sm'
-          aria-label={disabled ? 'close item' : 'remove item'}
-          onClick={disabled ? onClose : onRemove}
-        />
-      </div>
-      <div className='mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3'>
+      <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4'>
         <Field label='quantity'>
-          <div className='flex min-w-0 gap-1'>
-            <Input
-              className='h-7 min-h-7 w-20'
-              type='number'
-              min={1}
-              value={item.qtyPerGarment ?? 1}
-              disabled={disabled}
-              onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                onPatch(
-                  { qtyPerGarment: Math.max(1, Number(event.target.value) || 1) },
-                  { index, keepBare: true },
-                )
-              }
-            />
-            <Chip
-              className='h-7'
-              selected={!item.perOrder}
-              pressed={!item.perOrder}
-              disabled={disabled}
-              onClick={() => onPatch({ perOrder: false }, { index, keepBare: true })}
-            >
-              garment
-            </Chip>
-            <Chip
-              className='h-7'
-              selected={!!item.perOrder}
-              pressed={!!item.perOrder}
-              disabled={disabled}
-              onClick={() => onPatch({ perOrder: true }, { index, keepBare: true })}
-            >
-              order
-            </Chip>
-          </div>
-        </Field>
-        <Field label='size'>
           <Input
-            value={item.size ?? ''}
+            type='number'
+            min={1}
+            value={item.qtyPerGarment ?? 1}
             disabled={disabled}
             onChange={(event: ChangeEvent<HTMLInputElement>) =>
-              onPatch({ size: event.target.value }, { index, keepBare: true })
-            }
-          />
-        </Field>
-        <Field label='how'>
-          <Input
-            list={`packaging-how-${index}`}
-            value={item.packing ?? ''}
-            disabled={disabled}
-            onChange={(event: ChangeEvent<HTMLInputElement>) =>
-              onPatch({ packing: event.target.value }, { index, keepBare: true })
-            }
-          />
-          <datalist id={`packaging-how-${index}`}>
-            {packagingPackingOptions.map((option) => (
-              <option key={option} value={option} />
-            ))}
-          </datalist>
-        </Field>
-        <Field label='note' className='sm:col-span-2'>
-          <Textarea
-            name={`packagingItems.${index}.note`}
-            value={item.note ?? ''}
-            disabled={disabled}
-            onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
-              onPatch({ note: event.target.value }, { index, keepBare: true })
+              onPatch(
+                { qtyPerGarment: Math.max(1, Number(event.target.value) || 1) },
+                { index, keepBare: true },
+              )
             }
           />
         </Field>
         {colourways.length > 1 && (
-          <Field label='colourways' className='sm:col-span-2 lg:col-span-3'>
-            <ChipRow>
-              <Chip
-                selected={ids.length === 0}
-                pressed={ids.length === 0}
-                disabled={disabled}
-                onClick={() => onPatch({ colorwayIds: [] }, { index, keepBare: true })}
-              >
-                all
-              </Chip>
-              {colourways.map((colourway) => (
-                <Chip
-                  key={colourway.id}
-                  selected={ids.includes(colourway.id)}
-                  pressed={ids.includes(colourway.id)}
-                  disabled={disabled}
-                  onClick={() => toggleColour(colourway.id)}
-                >
-                  <Swatch hex={colourway.hex} />
-                  {colourway.name}
-                </Chip>
-              ))}
-            </ChipRow>
+          <Field label='colours'>
+            <Select
+              name={`packagingItems.${index}.colour`}
+              value={colour ? String(colour) : 'all'}
+              disabled={disabled}
+              items={[
+                { value: 'all', label: 'all colours' },
+                ...colourways.map((colourway) => ({
+                  value: String(colourway.id),
+                  label: colourway.name,
+                })),
+              ]}
+              onValueChange={(value: string | undefined) =>
+                onPatch(
+                  { colorwayIds: !value || value === 'all' ? [] : [Number(value)] },
+                  { index, keepBare: true },
+                )
+              }
+            />
           </Field>
         )}
       </div>
+      {!disabled && (
+        <div className='mt-3 flex justify-end gap-3'>
+          <Button
+            type='button'
+            variant='underline'
+            size='xs'
+            disabled={!canMoveEarlier}
+            onClick={() => onMove(-1)}
+          >
+            earlier
+          </Button>
+          <Button
+            type='button'
+            variant='underline'
+            size='xs'
+            disabled={!canMoveLater}
+            onClick={() => onMove(1)}
+          >
+            later
+          </Button>
+          <Button type='button' variant='underline' size='xs' onClick={onRemove}>
+            remove
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -349,32 +325,31 @@ function PickMedia({ pick }: { pick: Pick }) {
 }
 
 function PackagingPicker({
-  open,
-  onOpenChange,
+  mode,
+  onClose,
   items,
-  activeColourway,
   bomItems,
-  onAdd,
+  stock,
+  onTake,
 }: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  mode: PickerMode | null;
+  onClose: () => void;
   items: FormPackagingItem[];
-  activeColourway: number | 'all';
   bomItems: NonNullable<TechCardFormData['bomItems']>;
-  onAdd: (key: string, patch: Partial<Omit<FormPackagingItem, 'key'>>) => void;
+  stock: Map<number, string>;
+  onTake: (mode: PickerMode, kind: string, pick: Pick) => void;
 }) {
+  const open = mode != null;
   const materials = useMaterials('TECH_CARD_BOM_SECTION_PACKAGING', false, open);
   const aux = useAuxTechCards();
   const [query, setQuery] = useState('');
   const [kind, setKind] = useState('all');
-  const [selected, setSelected] = useState<Pick | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setQuery('');
     setKind('all');
-    setSelected(null);
   }, [open]);
 
   const picks = useMemo<Pick[]>(() => {
@@ -405,35 +380,27 @@ function PackagingPicker({
     const bomKind = bomItems.find((line) => wireInt(line.materialId) === pick.id)?.kind;
     return packagingItemKind(bomKind, pick.name);
   };
+  const fixedKind = mode === 'hanger' ? 'hanger' : mode === 'box' ? 'box' : '';
   const filtered = picks.filter((pick) => {
     const words = `${pick.name} ${pick.type}`.toLowerCase();
-    return (
-      (!query.trim() || words.includes(query.trim().toLowerCase())) &&
-      (kind === 'all' || !kindOf(pick) || kindOf(pick) === kind)
-    );
+    const picked = kindOf(pick);
+    const kindFits = fixedKind
+      ? !picked || picked === fixedKind
+      : picked !== 'hanger' && picked !== 'box' && (kind === 'all' || !picked || picked === kind);
+    return (!query.trim() || words.includes(query.trim().toLowerCase())) && kindFits;
   });
-  const canCreate = !filtered.length || (kind !== 'all' && !filtered.some((pick) => kindOf(pick)));
   const isAdded = (pick: Pick) =>
+    mode === 'pack' &&
     items.some(
       (item) =>
         (pick.type === 'material'
           ? wireInt(item.materialId) === pick.id
           : wireInt(item.auxTechCardId) === pick.id) && (item.colorwayIds?.length ?? 0) === 0,
     );
-  const usePick = (pick: Pick) => {
-    const guessed = kind === 'all' ? kindOf(pick) : kind;
-    const key = guessed || 'packaging_item';
-    onAdd(key, {
-      materialId: pick.type === 'material' ? pick.id : 0,
-      auxTechCardId: pick.type === 'aux' ? pick.id : 0,
-      perOrder: perOrderKinds.has(key),
-      qtyPerGarment: 1,
-      pickedName: pick.name,
-      pickedThumbnail: pick.type === 'material' ? pick.image : mediaFromUrl(pick.url),
-      colorwayIds: activeColourway === 'all' ? [] : [activeColourway],
-    });
-    setSelected(null);
-    onOpenChange(false);
+  const take = (pick: Pick) => {
+    if (!mode) return;
+    onTake(mode, fixedKind || (kind === 'all' ? kindOf(pick) : kind) || 'packaging_item', pick);
+    onClose();
   };
 
   return (
@@ -441,57 +408,72 @@ function PackagingPicker({
       <ConfirmationModal
         open={open}
         onOpenChange={(next) => {
-          onOpenChange(next);
-          if (!next) setSelected(null);
+          if (!next) onClose();
         }}
-        onConfirm={() => selected && usePick(selected)}
-        title='add packaging'
-        confirmLabel='use item'
-        confirmDisabled={!selected}
+        onConfirm={onClose}
+        title={mode === 'hanger' ? 'pick hanger' : mode === 'box' ? 'pick box' : 'add item'}
+        hideActions
         width='lg'
       >
         <div className='flex flex-col gap-3'>
-          <Input
-            value={query}
-            placeholder='search'
-            aria-label='search'
-            onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)}
-          />
-          <ChipRow>
-            <Chip selected={kind === 'all'} pressed={kind === 'all'} onClick={() => setKind('all')}>
-              all
-            </Chip>
-            {packagingItemKinds.map((option) => (
-              <Chip
-                key={option.key}
-                selected={kind === option.key}
-                pressed={kind === option.key}
-                onClick={() => setKind(option.key)}
-              >
-                {option.label}
-              </Chip>
-            ))}
-          </ChipRow>
+          <div className='flex gap-2'>
+            <Input
+              className='min-w-0 flex-1'
+              value={query}
+              placeholder='search stock'
+              aria-label='search stock'
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)}
+            />
+            {mode === 'pack' && (
+              <Select
+                name='packaging-picker-kind'
+                className='w-auto whitespace-nowrap'
+                value={kind}
+                items={[
+                  { value: 'all', label: 'all types' },
+                  ...packagingItemKinds
+                    .filter((option) => option.key !== 'hanger' && option.key !== 'box')
+                    .map((option) => ({ value: option.key, label: option.label })),
+                ]}
+                onValueChange={(value: string | undefined) => setKind(value || 'all')}
+              />
+            )}
+          </div>
           {!!filtered.length && (
             <Tiles min={132}>
               {filtered.map((pick) => {
                 const added = isAdded(pick);
                 const noOutput = pick.type === 'aux' && auxOutputStock(pick.card).state === 'none';
+                const auxStock = pick.type === 'aux' ? auxOutputStock(pick.card) : undefined;
+                const onHand =
+                  pick.type === 'material'
+                    ? stock.get(pick.id) ?? '0'
+                    : auxStock && 'onHand' in auxStock
+                      ? auxStock.onHand
+                      : undefined;
                 return (
                   <Tile
                     key={`${pick.type}-${pick.id}`}
                     media={<PickMedia pick={pick} />}
                     name={pick.name}
-                    sub={kindLabel(packagingItemKinds, kindOf(pick)) || pick.type}
-                    selected={selected?.type === pick.type && selected.id === pick.id}
-                    onClick={added ? undefined : () => setSelected(pick)}
+                    sub={
+                      pick.type === 'material'
+                        ? pick.material.packagingAttrs?.dimensions ||
+                          kindLabel(packagingItemKinds, kindOf(pick))
+                        : kindLabel(packagingItemKinds, kindOf(pick)) || pick.type
+                    }
+                    onClick={added ? undefined : () => take(pick)}
                     className={added ? 'opacity-50' : undefined}
                     title={pick.name}
                   >
-                    {(added || noOutput) && (
+                    <Text size='micro' variant='label' component='span'>
+                      <OnHand value={onHand} />
+                      {onHand != null && Number(onHand) > 0 ? ' on hand' : ''}
+                    </Text>
+                    {noOutput && (
                       <div className='mt-1'>
-                        <Pill tone={noOutput ? 'warn' : 'mut'} className='h-auto whitespace-normal'>
-                          {noOutput ? 'no output material' : 'added'}
+                        <Pill tone='warn' className='h-auto whitespace-normal'>
+                          no output material
                         </Pill>
                       </div>
                     )}
@@ -500,13 +482,11 @@ function PackagingPicker({
               })}
             </Tiles>
           )}
-          {canCreate && (
+          {!filtered.length && (
             <div className='flex items-center gap-2 py-6'>
-              {!filtered.length && (
-                <Text size='small' variant='label'>
-                  nothing in the catalog
-                </Text>
-              )}
+              <Text size='small' variant='label'>
+                nothing in stock
+              </Text>
               <Button
                 type='button'
                 variant='underline'
@@ -525,7 +505,7 @@ function PackagingPicker({
         defaultSection='TECH_CARD_BOM_SECTION_PACKAGING'
         onCreated={(_id, material) => {
           setCreateOpen(false);
-          usePick({
+          take({
             type: 'material',
             id: wireInt(material.id),
             name: material.name || material.code || 'material',
@@ -555,12 +535,26 @@ export function PackagingShelf({
   const bomItems = (useWatch<TechCardFormData>({ name: 'bomItems' }) ?? []) as NonNullable<
     TechCardFormData['bomItems']
   >;
-  const folding = useWatch<TechCardFormData>({ name: 'packaging.foldingMethod' }) ?? '';
+  const folding = (useWatch<TechCardFormData>({ name: 'packaging.foldingMethod' }) ?? '') as string;
+  const units = wireInt(useWatch<TechCardFormData>({ name: 'packaging.unitsPerBox' }));
+  const gross = wireInt(useWatch<TechCardFormData>({ name: 'packaging.weightGrossGrams' }));
+  const marking = (useWatch<TechCardFormData>({ name: 'packaging.boxMarking' }) ?? '') as string;
+  const boxNote = (useWatch<TechCardFormData>({ name: 'packaging.notes' }) ?? '') as string;
+  const styleNumber = (useWatch<TechCardFormData>({ name: 'styleNumber' }) ?? '') as string;
   const care = useCareLabelSource(techCardId);
   const auxCards = useAuxTechCards();
-  const [activeColourway, setActiveColourway] = useState<number | 'all'>('all');
+  const stockQuery = useMaterialStock({ section: 'TECH_CARD_BOM_SECTION_PACKAGING' });
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [picker, setPicker] = useState<PickerMode | null>(null);
+  const [noteOpen, setNoteOpen] = useState(false);
+
+  const stock = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const row of stockQuery.data?.rows ?? []) {
+      map.set(wireInt(row.material?.id), decimalToInput(row.onHand) || '0');
+    }
+    return map;
+  }, [stockQuery.data]);
 
   const colourways = useMemo<Colourway[]>(
     () =>
@@ -569,54 +563,117 @@ export function PackagingShelf({
         return {
           id: colourway.id,
           name: colourway.colourName || ref?.devName || ref?.colorCode || 'colour',
-          hex: colourHex(ref),
         };
       }),
     [care.data?.colorways, colorwayRefs],
   );
-  const visible = items
-    .map((item, index) => ({ item, index }))
-    .filter(({ item }) =>
-      activeColourway === 'all'
-        ? true
-        : (item.colorwayIds?.length ?? 0) === 0 || item.colorwayIds?.includes(activeColourway),
-    );
-  const patch = (
-    index: number,
-    item: FormPackagingItem,
-    value: Partial<Omit<FormPackagingItem, 'key'>>,
-    opts?: PackagingItemOpts,
-  ) => upsertPackagingItem(getValues, setValue, item.key || '', value, { ...opts, index });
-  const shipsOnHanger = folding === 'on a hanger';
+
+  const shipsOnHanger = folding === ON_HANGER;
   const shipsFolded = !!folding && !shipsOnHanger;
-  const setShips = (hanger: boolean) =>
-    setValue('packaging.foldingMethod', hanger ? 'on a hanger' : 'folded in half', {
-      shouldDirty: true,
-    });
+  const hangerIndex = shipsOnHanger ? items.findIndex((item) => sameKind(item, 'hanger')) : -1;
+  const boxIndex = items.findIndex((item) => sameKind(item, 'box'));
+  const hanger = hangerIndex >= 0 ? items[hangerIndex] : undefined;
+  const box = boxIndex >= 0 ? items[boxIndex] : undefined;
+  const tiles = items
+    .map((item, index) => ({ item, index }))
+    .filter(({ index }) => index !== hangerIndex && index !== boxIndex);
+
+  const onHandOf = (item: FormPackagingItem): string | undefined => {
+    const material = wireInt(item.materialId);
+    if (material) return stock.get(material) ?? '0';
+    const card = auxCards.data?.techCards?.find(
+      (entry) => wireInt(entry.id) === wireInt(item.auxTechCardId),
+    );
+    const output = card && auxOutputStock(card);
+    return output && 'onHand' in output ? output.onHand : undefined;
+  };
+
+  const setShips = (next: 'hanger' | 'folded') => {
+    if (next === 'hanger') {
+      setValue('packaging.foldingMethod', ON_HANGER, { shouldDirty: true });
+      return;
+    }
+    if (!shipsFolded) setValue('packaging.foldingMethod', FOLDED, { shouldDirty: true });
+    setValue(
+      'packagingItems',
+      ((getValues('packagingItems') ?? []) as FormPackagingItem[]).filter(
+        (item) => !sameKind(item, 'hanger'),
+      ) as never,
+      { shouldDirty: true },
+    );
+    setSelectedIndex(null);
+  };
+
+  const take = (mode: PickerMode, kind: string, pick: Pick) => {
+    const value: Partial<Omit<FormPackagingItem, 'key'>> = {
+      materialId: pick.type === 'material' ? pick.id : 0,
+      auxTechCardId: pick.type === 'aux' ? pick.id : 0,
+      pickedName: pick.name,
+      pickedThumbnail: pick.type === 'material' ? pick.image : mediaFromUrl(pick.url),
+    };
+    if (mode === 'pack') {
+      const index = upsertPackagingItem(
+        getValues,
+        setValue,
+        kind,
+        { ...value, perOrder: perOrderKinds.has(kind), qtyPerGarment: 1, colorwayIds: [] },
+        { forceNew: true, keepBare: true },
+      );
+      setSelectedIndex(index);
+      return;
+    }
+    upsertPackagingItem(
+      getValues,
+      setValue,
+      kind,
+      { ...value, perOrder: mode === 'box', qtyPerGarment: 1 },
+      { keepBare: true },
+    );
+    const dimensions = pick.type === 'material' ? pick.material.packagingAttrs?.dimensions : '';
+    if (mode === 'box' && dimensions)
+      setValue('packaging.boxDimensions', dimensions, { shouldDirty: true });
+  };
+
+  const selectedTile = tiles.findIndex(({ index }) => index === selectedIndex);
+  const move = (direction: -1 | 1) => {
+    const target = tiles[selectedTile + direction];
+    if (selectedIndex == null || !target) return;
+    movePackagingItem(getValues, setValue, selectedIndex, target.index);
+    setSelectedIndex(target.index);
+  };
+
+  const fullBox = units > 0 && gross > 0 ? `${((units * gross) / 1000).toFixed(1)} kg` : '';
+  const shownMarking = marking || (units > 0 ? `${styleNumber} · ${units} PCS`.trim() : '');
+  const foldItems =
+    folding && folding !== FOLDED && !FOLDS.some((option) => option.value === folding)
+      ? [...FOLDS, { value: folding, label: folding }]
+      : FOLDS;
 
   return (
     <>
-      <GroupLabel flush>packed</GroupLabel>
-      <div className='mt-3 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3'>
+      <GroupLabel flush action={<PackedPhoto resolvedMedia={resolvedMedia} disabled={!canEdit} />}>
+        pack
+      </GroupLabel>
+      <div className='mt-3 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-4'>
         <Field label='ships'>
           <ChipRow>
-            <Chip
-              className='h-6.5'
-              selected={shipsOnHanger}
-              pressed={shipsOnHanger}
-              disabled={!canEdit}
-              onClick={() => setShips(true)}
-            >
-              on hanger
-            </Chip>
             <Chip
               className='h-6.5'
               selected={shipsFolded}
               pressed={shipsFolded}
               disabled={!canEdit}
-              onClick={() => setShips(false)}
+              onClick={() => setShips('folded')}
             >
               folded
+            </Chip>
+            <Chip
+              className='h-6.5'
+              selected={shipsOnHanger}
+              pressed={shipsOnHanger}
+              disabled={!canEdit}
+              onClick={() => setShips('hanger')}
+            >
+              on hanger
             </Chip>
           </ChipRow>
         </Field>
@@ -625,35 +682,24 @@ export function PackagingShelf({
             <Select
               name='packaging.foldingMethod'
               className='whitespace-nowrap'
-              value={folding}
+              value={folding === FOLDED ? '' : folding}
+              placeholder='how it is folded'
               disabled={!canEdit}
-              items={foldingMethodOptions
-                .filter((option) => option !== 'on a hanger')
-                .map((option) => ({ value: option, label: option }))}
+              items={foldItems}
               onValueChange={(value: string | undefined) =>
-                setValue('packaging.foldingMethod', value ?? '', { shouldDirty: true })
+                setValue('packaging.foldingMethod', value || FOLDED, { shouldDirty: true })
               }
             />
           </Field>
         )}
-        <InputField name='packaging.packedSize' label='packed size' disabled={!canEdit} />
-        <InputField
-          name='packaging.weightNetGrams'
-          label='net weight (g)'
-          type='number'
-          valueAsNumber
-          keyboardRestriction={/[0-9]/}
-          disabled={!canEdit}
-        />
-        <InputField
-          name='packaging.weightGrossGrams'
-          label='gross weight (g)'
-          type='number'
-          valueAsNumber
-          keyboardRestriction={/[0-9]/}
-          disabled={!canEdit}
-        />
-        <PackedPhoto resolvedMedia={resolvedMedia} disabled={!canEdit} />
+        {shipsFolded && (
+          <InputField
+            name='packaging.packedSize'
+            label='folded size, cm'
+            placeholder='width × height'
+            disabled={!canEdit}
+          />
+        )}
       </div>
 
       <div className='pt-6'>
@@ -661,62 +707,54 @@ export function PackagingShelf({
           flush
           action={
             <Text size='micro' variant='label'>
-              {items.length}
+              {tiles.length + (hanger ? 1 : 0)}
             </Text>
           }
         >
-          items
+          in the pack
         </GroupLabel>
-        {colourways.length > 1 && (
-          <ChipRow className='mt-3'>
-            <Chip
-              selected={activeColourway === 'all'}
-              pressed={activeColourway === 'all'}
-              onClick={() => setActiveColourway('all')}
-            >
-              all
-            </Chip>
-            {colourways.map((colourway) => (
-              <Chip
-                key={colourway.id}
-                selected={activeColourway === colourway.id}
-                pressed={activeColourway === colourway.id}
-                onClick={() => setActiveColourway(colourway.id)}
-              >
-                <Swatch hex={colourway.hex} />
-                {colourway.name}
-              </Chip>
-            ))}
-          </ChipRow>
-        )}
         <Tiles min={140} className='mt-3'>
-          {visible.map(({ item, index }) => {
-            const limited = (item.colorwayIds ?? [])
-              .map((id) => colourways.find((colourway) => colourway.id === id)?.name)
-              .filter(Boolean)
-              .join(', ');
+          {shipsOnHanger &&
+            (hanger && (wireInt(hanger.materialId) || wireInt(hanger.auxTechCardId)) ? (
+              <Tile
+                media={<ItemMedia item={hanger} resolvedMedia={resolvedMedia} />}
+                name={hanger.pickedName || 'hanger'}
+                onClick={canEdit ? () => setPicker('hanger') : undefined}
+                title={hanger.pickedName || 'hanger'}
+              >
+                <Text size='micro' variant='label' component='span'>
+                  1 / pc · <OnHand value={onHandOf(hanger)} />
+                </Text>
+              </Tile>
+            ) : (
+              <Tile
+                dashed
+                tone='error'
+                name='pick hanger'
+                onClick={canEdit ? () => setPicker('hanger') : undefined}
+                className='min-h-24 items-center justify-center'
+              />
+            ))}
+          {tiles.map(({ item, index }) => {
             const auxCard = auxCards.data?.techCards?.find(
               (card) => wireInt(card.id) === wireInt(item.auxTechCardId),
             );
             const noOutput = !!auxCard && auxOutputStock(auxCard).state === 'none';
+            const onHand = onHandOf(item);
             return (
               <Tile
                 key={`${index}-${item.key}-${item.materialId ?? 0}-${item.auxTechCardId ?? 0}`}
                 media={<ItemMedia item={item} resolvedMedia={resolvedMedia} />}
                 name={item.pickedName || kindWord(item.key) || 'item'}
-                sub={kindWord(item.key) || 'item'}
                 selected={selectedIndex === index}
                 onClick={() => setSelectedIndex(selectedIndex === index ? null : index)}
                 title={item.pickedName || kindWord(item.key)}
               >
-                <Text size='micro' variant='label'>
-                  {item.qtyPerGarment ?? 1} / {item.perOrder ? 'order' : 'garment'}
+                <Text size='micro' variant='label' component='span'>
+                  {item.qtyPerGarment ?? 1} / {item.perOrder ? 'order' : 'pc'}
+                  {onHand != null && ' · '}
+                  <OnHand value={onHand} />
                 </Text>
-                {limited && (
-                  <Text size='micro' variant='label' className='mt-1 truncate'>
-                    {limited}
-                  </Text>
-                )}
                 {noOutput && (
                   <div className='mt-1'>
                     <Pill tone='warn' className='h-auto whitespace-normal'>
@@ -731,18 +769,20 @@ export function PackagingShelf({
             <Tile
               dashed
               name='+ item'
-              onClick={() => setPickerOpen(true)}
+              onClick={() => setPicker('pack')}
               className='min-h-24 items-center justify-center'
             />
           )}
         </Tiles>
-        {selectedIndex != null && visible.some(({ index }) => index === selectedIndex) && (
+        {selectedIndex != null && selectedTile >= 0 && (
           <ItemDetail
             index={selectedIndex}
             item={items[selectedIndex]}
             colourways={colourways}
             disabled={!canEdit}
-            onClose={() => setSelectedIndex(null)}
+            canMoveEarlier={selectedTile > 0}
+            canMoveLater={selectedTile < tiles.length - 1}
+            onMove={move}
             onRemove={() => {
               removePackagingItem(
                 getValues,
@@ -752,23 +792,105 @@ export function PackagingShelf({
               );
               setSelectedIndex(null);
             }}
-            onPatch={(value, opts) => patch(selectedIndex, items[selectedIndex], value, opts)}
+            onPatch={(value, opts) =>
+              upsertPackagingItem(getValues, setValue, items[selectedIndex].key || '', value, {
+                ...opts,
+                index: selectedIndex,
+              })
+            }
           />
         )}
       </div>
+
+      <div className='pt-6'>
+        <GroupLabel flush>shipping box</GroupLabel>
+        <div className='mt-3 flex flex-col gap-4'>
+          <Tiles min={140}>
+            {box && (wireInt(box.materialId) || wireInt(box.auxTechCardId)) ? (
+              <Tile
+                media={<ItemMedia item={box} resolvedMedia={resolvedMedia} />}
+                name={box.pickedName || 'box'}
+                onClick={canEdit ? () => setPicker('box') : undefined}
+                title={box.pickedName || 'box'}
+              >
+                <Text size='micro' variant='label' component='span'>
+                  <OnHand value={onHandOf(box)} />
+                </Text>
+              </Tile>
+            ) : (
+              <Tile
+                dashed
+                tone='error'
+                name='pick box'
+                onClick={canEdit ? () => setPicker('box') : undefined}
+                className='min-h-24 items-center justify-center'
+              />
+            )}
+          </Tiles>
+          {box && (wireInt(box.materialId) || wireInt(box.auxTechCardId)) ? (
+            <>
+              <div className='grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-4'>
+                <InputField
+                  name='packaging.unitsPerBox'
+                  label='pieces in box'
+                  placeholder='how many'
+                  type='number'
+                  valueAsNumber
+                  keyboardRestriction={/[0-9]/}
+                  disabled={!canEdit}
+                />
+                <InputField
+                  name='packaging.weightGrossGrams'
+                  label='packed piece, g'
+                  placeholder='with packaging'
+                  type='number'
+                  valueAsNumber
+                  keyboardRestriction={/[0-9]/}
+                  disabled={!canEdit}
+                />
+                {fullBox && (
+                  <Field label='full box'>
+                    <Text size='small'>{fullBox}</Text>
+                  </Field>
+                )}
+                {shownMarking && (
+                  <Field label='marking'>
+                    <Text size='small'>{shownMarking}</Text>
+                  </Field>
+                )}
+              </div>
+              {noteOpen || boxNote ? (
+                <InputField
+                  name='packaging.notes'
+                  label='note'
+                  placeholder='for the factory'
+                  disabled={!canEdit}
+                />
+              ) : (
+                canEdit && (
+                  <div className='flex justify-end'>
+                    <Button
+                      type='button'
+                      variant='underline'
+                      size='xs'
+                      onClick={() => setNoteOpen(true)}
+                    >
+                      + note
+                    </Button>
+                  </div>
+                )
+              )}
+            </>
+          ) : null}
+        </div>
+      </div>
       <PackagingPicker
-        open={pickerOpen}
-        onOpenChange={setPickerOpen}
+        mode={picker}
+        onClose={() => setPicker(null)}
         items={items}
-        activeColourway={activeColourway}
         bomItems={bomItems}
-        onAdd={(key, value) => {
-          const index = upsertPackagingItem(getValues, setValue, key, value, {
-            forceNew: true,
-            keepBare: true,
-          });
-          setSelectedIndex(index);
-        }}
+        stock={stock}
+        onTake={take}
       />
     </>
   );

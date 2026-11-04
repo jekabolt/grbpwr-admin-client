@@ -5,11 +5,11 @@ import {
 } from 'api/proto-http/admin';
 import { useState, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { AddDoor, Chip, ChipRow, GroupLabel, Section, InputField, Text } from 'ui';
+import { AddDoor, Chip, ChipRow, Section, Text } from 'ui';
 import { upsertGarmentLabel } from './form-writers';
-import { type FormGarmentLabel } from './labels-schema';
+import { type FormGarmentLabel, type FormPackagingItem } from './labels-schema';
 import type { TechCardFormData } from './schema';
-import { PackagingShelf } from './packaging-shelf';
+import { PackagingShelf, packagingGaps } from './packaging-shelf';
 import { isCompositionLabel } from './sewn-label-model';
 import { bornLabelFacts, labelGaps, SewnLabelRow } from './sewn-label-row';
 import { useLabelAxes } from './use-label-axes';
@@ -110,11 +110,7 @@ export function LabelsBlock({
   );
 }
 
-/**
- * PACKAGING — the carton facts (kept: shipping reads the gross weight and the box dimensions, F3),
- * then the packaging items, same grammar as labels (R-09). The deprecated polybag / bag sticker /
- * inserts text fields are not shown; the form still round-trips what it read.
- */
+/** PACKAGING — pack, the items in it and the shipping box; `! N` counts what is still missing. */
 export function PackagingBlock({
   techCardId,
   colorwayRefs,
@@ -126,8 +122,22 @@ export function PackagingBlock({
   resolvedMedia?: readonly common_TechCardMediaFull[];
   canEdit?: boolean;
 }): JSX.Element {
+  const { control } = useFormContext<TechCardFormData>();
+  const items = (useWatch({ control, name: 'packagingItems' }) ?? []) as FormPackagingItem[];
+  const folding = useWatch({ control, name: 'packaging.foldingMethod' }) ?? '';
+  const units = Number(useWatch({ control, name: 'packaging.unitsPerBox' })) || 0;
+  const gaps = packagingGaps(folding, items, units);
   return (
-    <Section title='packaging'>
+    <Section
+      title='packaging'
+      action={
+        gaps > 0 ? (
+          <Text size='micro' variant='errorLabel' component='span'>
+            ! {gaps}
+          </Text>
+        ) : undefined
+      }
+    >
       <div id='packaging-spec'>
         <PackagingShelf
           techCardId={techCardId}
@@ -135,27 +145,6 @@ export function PackagingBlock({
           resolvedMedia={resolvedMedia}
           canEdit={canEdit}
         />
-      </div>
-      <div className='pt-6'>
-        <GroupLabel flush>carton</GroupLabel>
-        <div className='mt-3 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3'>
-          <InputField
-            name='packaging.unitsPerBox'
-            type='number'
-            valueAsNumber
-            keyboardRestriction={/[0-9]/}
-            label='units per box'
-          />
-          <InputField
-            name='packaging.boxDimensions'
-            label='box L×W×H'
-            placeholder='e.g. 60×40×30'
-          />
-          <InputField name='packaging.boxMarking' label='box marking' placeholder='style + qty' />
-          <div className='sm:col-span-2 lg:col-span-3'>
-            <InputField name='packaging.notes' label='carton note' />
-          </div>
-        </div>
       </div>
     </Section>
   );

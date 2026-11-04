@@ -403,6 +403,19 @@ export function upsertPackagingItem(
   return inserted.index;
 }
 
+/** Swaps two rows of the list: earlier / later on the shelf, the saved order follows the list. */
+export function movePackagingItem(
+  getValues: UseFormGetValues<TechCardFormData>,
+  setValue: UseFormSetValue<TechCardFormData>,
+  from: number,
+  to: number,
+): void {
+  const cur = ((getValues('packagingItems') ?? []) as FormPackagingItem[]).slice();
+  if (!cur[from] || !cur[to]) return;
+  [cur[from], cur[to]] = [cur[to], cur[from]];
+  setValue('packagingItems', cur as never, { shouldDirty: true });
+}
+
 export function removePackagingItem(
   getValues: UseFormGetValues<TechCardFormData>,
   setValue: UseFormSetValue<TechCardFormData>,

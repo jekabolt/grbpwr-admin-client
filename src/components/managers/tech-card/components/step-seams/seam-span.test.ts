@@ -237,6 +237,29 @@ describe('real span rows', () => {
     ).toBeCloseTo(30, 0);
   });
 
+  it('draws a window away from the edge start at any picture scale', () => {
+    // 100 mm drawn as 300 picture units, with a bend so the walk crosses a vertex.
+    const edge: [number, number][] = [
+      [0, 0],
+      [150, 0],
+      [150, 150],
+    ];
+    expect(rangedPicturePoints(edge, [30, 60], 100)).toEqual([
+      [90, 0],
+      [150, 0],
+      [150, 30],
+    ]);
+    expect(rangedPicturePoints(edge, [70, 100], 100)).toEqual([
+      [150, 60],
+      [150, 150],
+    ]);
+    expect(rangedPicturePoints(edge, [0, 70], 100)).toEqual([
+      [0, 0],
+      [150, 0],
+      [150, 60],
+    ]);
+  });
+
   it('rejects two windows of the same edge in one side', () => {
     expect(
       rowFromHand(

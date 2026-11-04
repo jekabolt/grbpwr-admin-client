@@ -87,11 +87,6 @@ export function MyProfile() {
           // Своё — всегда: этого права как раз и не требует SetAccountSpecialties.
           editable={!!username}
         />
-        <Text variant='label' size='micro' className='max-w-[70ch]'>
-          this is the caption people find you by when a file owner is assigned or somebody is
-          mentioned in a discussion. several specialties are normal: in a small team the same person
-          both shoots and edits.
-        </Text>
       </Section>
 
       <Section

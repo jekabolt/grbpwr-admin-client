@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
-import { Button, Chip, ChipRow, Input, Text, EmptyCell } from 'ui';
+import { Button, Chip, ChipRow, Input, EmptyCell } from 'ui';
 import { useSetAccountSpecialties } from '../utils/hooks';
 
 /**
@@ -184,12 +184,6 @@ export function SpecialtiesField({
         )}
       </ChipRow>
       <div className='flex flex-wrap items-center gap-2'>
-        <Text size='micro' variant='label' component='span' className='max-w-[70ch]'>
-          a new specialty joins the shared list and becomes available to the other accounts — that
-          way the vocabulary grows by itself without turning into free text. a specialty grants no
-          rights: it is how people are found when a file owner is assigned or somebody is mentioned
-          in a discussion.
-        </Text>
         {/* Отдельной кнопки «сохранить» нет намеренно: каждый клик по чипу уже сохранён,
             «готово» только сворачивает список обратно. */}
         <Button size='xs' variant='secondary' className='ml-auto' onClick={() => setOpen(false)}>
