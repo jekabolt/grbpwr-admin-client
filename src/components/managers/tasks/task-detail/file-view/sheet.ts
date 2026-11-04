@@ -4,7 +4,14 @@ import { bytesFromBase64, MAX_TABLE_ROWS, type TableCell } from './file-view';
 /** Столбцов больше не показываем: диапазон листа бывает раздут форматированием до XFD. */
 const MAX_COLUMNS = 256;
 
-export type Sheet = { name: string; rows: TableCell[][]; totalRows: number };
+/** `originRow` / `originCol`: где начинается диапазон листа, чтобы подпись D12 была правдой. */
+export type Sheet = {
+  name: string;
+  rows: TableCell[][];
+  totalRows: number;
+  originRow?: number;
+  originCol?: number;
+};
 
 /** Цвет текста по заливке. SheetJS не отдаёт шрифт, и белая шапка стала бы чёрной на тёмном. */
 export function inkOn(fill: string): string {
@@ -27,7 +34,7 @@ function fillOf(style: unknown): string | undefined {
 export function sheetRows(
   ws: WorkSheet,
   utils: typeof import('xlsx').utils,
-): { rows: TableCell[][]; totalRows: number } {
+): { rows: TableCell[][]; totalRows: number; originRow?: number; originCol?: number } {
   const ref = ws['!ref'];
   if (!ref) return { rows: [], totalRows: 0 };
   const range = utils.decode_range(ref);
@@ -47,7 +54,7 @@ export function sheetRows(
     }
     rows.push(row);
   }
-  return { rows, totalRows };
+  return { rows, totalRows, originRow: range.s.r, originCol: range.s.c };
 }
 
 /** Библиотека большая, поэтому только динамический импорт: её грузит лишь открытие таблицы. */

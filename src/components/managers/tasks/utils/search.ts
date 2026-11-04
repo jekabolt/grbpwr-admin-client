@@ -1,4 +1,5 @@
 import type { Task, TaskMatch } from '../api/types';
+import { stripTaskTokens } from './sheet-token';
 
 /**
  * TASK SEARCH — matching, snippet and highlight helpers (pure, no React).
@@ -33,12 +34,8 @@ export function normalizeQuery(q: string): string {
   return q.trim().replace(/\s+/g, ' ');
 }
 
-// `[[media:12]]` is the description's attachment token — noise in a one-line snippet.
-const flat = (s: string) =>
-  s
-    .replace(/\[\[media:\d+\]\]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+// `[[media:12]]` and `[[sheet:12]]` are attachment tokens — noise in a one-line snippet.
+const flat = (s: string) => stripTaskTokens(s).replace(/\s+/g, ' ').trim();
 
 /** Digits-only query (optionally `#`-prefixed) also matches the task id by prefix. */
 export function idQuery(q: string): string | null {

@@ -7,6 +7,8 @@ import {
 import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { mediaFromClipboard } from 'components/managers/media/utils/usePasteFiles';
 import { useSnackBarStore } from 'lib/stores/store';
+import type { LibraryFile } from 'api/proto-http/admin';
+import { sheetTokenEdit } from 'components/managers/tasks/utils/sheet-token';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
@@ -106,6 +108,7 @@ export function FormatBar({
   compact,
   onTogglePreview,
   phone,
+  attachTable,
 }: {
   areaRef: RefObject<HTMLTextAreaElement | null>;
   value: string;
@@ -131,6 +134,8 @@ export function FormatBar({
   compact?: boolean;
   /** Компактная полоса держит у себя и переключатель показа разметки (одно «preview»). */
   onTogglePreview?: () => void;
+  /** Вставка «как таблица»: сначала файл садится в задачу, токен только после успеха. */
+  attachTable?: (file: LibraryFile) => Promise<boolean>;
 }) {
   const [moreTools, setMoreTools] = useState(false);
   // Какое окно открыто и, значит, чем станет выбранный файл. `null` — закрыто.
@@ -896,6 +901,15 @@ export function FormatBar({
         <FilePicker
           insert={picker}
           onPick={(f) => apply((t, s, e) => fileEdit(t, s, e, f, picker))}
+          onPickTable={
+            picker === 'link' && attachTable
+              ? async (f) => {
+                  if (await attachTable(f)) {
+                    apply((t, s, e) => sheetTokenEdit(t, s, e, Number(f.id)));
+                  }
+                }
+              : undefined
+          }
           onClose={() => setPicker(null)}
         />
       )}

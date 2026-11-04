@@ -1,8 +1,10 @@
 import { FormatBar } from 'components/managers/files/note/format-bar';
 import { cn } from 'lib/utility';
-import { useEffect, useRef, useState } from 'react';
+import type { LibraryFile } from 'api/proto-http/admin';
+import { useContext, useEffect, useRef, useState } from 'react';
 import { Button, Text, Textarea } from 'ui';
 import type { TaskMedia } from '../api/types';
+import { SheetEmbedsContext } from '../task-detail/file-view/sheet-context';
 import { TaskDescriptionView } from './task-description';
 
 /**
@@ -40,6 +42,7 @@ export function DescriptionEditor({
   className,
   onKeyDown,
   autoFocus,
+  attachTable,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -56,10 +59,18 @@ export function DescriptionEditor({
    * (двойной щелчок, кнопка «edit») — после него печатают, а не ищут поле второй раз.
    */
   autoFocus?: boolean;
+  /**
+   * Вставка таблицы из формы: файл садится в набор формы. Без пропа — дверью страницы задачи.
+   * Предпросмотр формы показывает таблицу словом: её файлов на странице ещё нет.
+   */
+  attachTable?: (file: LibraryFile) => Promise<boolean>;
 }) {
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const [preview, setPreview] = useState(false);
   const [toolsShown, setToolsShown] = useState(false);
+  const embeds = useContext(SheetEmbedsContext);
+  const attach =
+    attachTable ?? (embeds ? (file: LibraryFile) => embeds.attachFile(Number(file.id)) : undefined);
 
   /** Фокус ставится ОДИН раз за открытие — но именно поставится, а не «попытается». */
   const focusedRef = useRef(false);
@@ -95,7 +106,13 @@ export function DescriptionEditor({
       {preview ? (
         <div className={cn('min-h-24 px-3 py-2', className)}>
           {value.trim() ? (
-            <TaskDescriptionView text={value} media={media} />
+            attachTable ? (
+              <SheetEmbedsContext.Provider value={null}>
+                <TaskDescriptionView text={value} media={media} />
+              </SheetEmbedsContext.Provider>
+            ) : (
+              <TaskDescriptionView text={value} media={media} />
+            )
           ) : (
             <Text size='micro' variant='label' component='span'>
               nothing yet
@@ -137,6 +154,7 @@ export function DescriptionEditor({
             value={value}
             onChange={onChange}
             onTogglePreview={() => setPreview(true)}
+            attachTable={attach}
           />
         ))}
     </div>

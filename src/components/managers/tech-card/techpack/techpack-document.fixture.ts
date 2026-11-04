@@ -195,6 +195,45 @@ export const techpackFixture = {
       },
     ],
     careLabel: {},
+    packaging: {
+      foldingMethod: 'folded in half',
+      packedSize: '32 × 24 × 4 cm',
+      packedMediaId: 203,
+      weightNetGrams: 780,
+      weightGrossGrams: 920,
+      unitsPerBox: 20,
+      boxDimensions: '60 × 40 × 30 cm',
+      boxMarking: 'WJ-042 · 20 pcs',
+    },
+    packagingItems: [
+      {
+        key: 'hanger',
+        qtyPerGarment: 1,
+        pickedName: 'Recycled hanger',
+        pickedThumbnail: media(201, 'https://assets.example/hanger.png'),
+        materialId: 41,
+        size: '42 cm',
+        packing: 'shoulders aligned',
+      },
+      {
+        key: 'tissue',
+        qtyPerGarment: 2,
+        pickedName: 'Black tissue paper',
+        pickedThumbnail: media(202, 'https://assets.example/tissue.png'),
+        materialId: 42,
+        colorwayIds: [5],
+        size: '50 × 70 cm',
+        packing: 'folded around garment',
+        note: 'logo face up',
+      },
+      {
+        key: 'box',
+        qtyPerGarment: 1,
+        perOrder: true,
+        pickedName: 'Shipping box M',
+        materialId: 43,
+      },
+    ],
     issues: [
       {
         status: 'TECH_CARD_ISSUE_STATUS_OPEN',
@@ -258,6 +297,12 @@ export const techpackFixture = {
   resolvedTechnicalMedia: [
     { kind: 'TECH_CARD_MEDIA_KIND_FRONT', media: media(101, 'https://assets.example/front.png') },
     { kind: 'TECH_CARD_MEDIA_KIND_BACK', media: media(102, 'https://assets.example/back.png') },
+  ],
+  resolvedLabelMedia: [
+    {
+      kind: 'TECH_CARD_MEDIA_KIND_UNKNOWN',
+      media: media(203, 'https://assets.example/packed.png'),
+    },
   ],
   sectionDigests: [{ section: 'TECH_CARD_SIGNOFF_SECTION_TECHNICAL', digest: 'live-digest' }],
   revisions: [

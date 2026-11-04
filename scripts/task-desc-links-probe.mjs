@@ -237,7 +237,9 @@ if (flag('--mutate-dblclick-readonly'))
 if (flag('--mutate-no-dblclick-guard'))
   mutate(
     'двойной щелчок по ссылке/чипу открывает правку',
-    `if (e2.target.closest('a, button, [role="button"], img, video, input, textarea, select'))`,
+    `if (e2.target.closest(
+      'a, button, [role="button"], img, video, input, textarea, select, [data-sheet-embed]'
+    ))`,
     'if (false)',
   );
 if (flag('--mutate-no-autofocus'))

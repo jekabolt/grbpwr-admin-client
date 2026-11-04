@@ -8,6 +8,7 @@ import {
 } from '@tanstack/react-query';
 import type { LibraryFilePersonRole, LibraryFileSort } from 'api/proto-http/admin';
 import { tasksKeys } from 'components/managers/tasks/hooks/useTasks';
+import { fileTasksService } from '../api/fileTasksService';
 import { filesService } from '../api/filesService';
 import { topicsService } from '../api/topicsService';
 
@@ -58,7 +59,7 @@ export const PERSON_ROLE_CHIP: Record<PersonRoleFilter, string> = {
  */
 export const PERSON_ROLE_HINT: Record<PersonRoleFilter, string> = {
   any: 'both what they uploaded and what they own',
-  uploaded: "only what they brought in — nothing ever takes that fact off a file",
+  uploaded: 'only what they brought in — nothing ever takes that fact off a file',
   owner: 'only what they are answerable for now',
 };
 
@@ -181,7 +182,7 @@ export type FilesFilter = {
 function normalizePerson(f: FilesFilter): { id: number; role: PersonRoleFilter } {
   const raw = Number(f.personId ?? 0);
   const id = Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : 0;
-  return { id, role: id > 0 ? (f.personRole ?? 'any') : 'any' };
+  return { id, role: id > 0 ? f.personRole ?? 'any' : 'any' };
 }
 
 /**
@@ -294,6 +295,8 @@ export const filesKeys = {
    */
   section: (f: FilesFilter) => [...filesKeys.all, 'section', ...keyParts(f), f.sort] as const,
   file: (id: number) => [...filesKeys.all, 'file', id] as const,
+  content: (id: number) => [...filesKeys.file(id), 'content'] as const,
+  tasks: (id: number) => [...filesKeys.file(id), 'tasks'] as const,
   /**
    * АРХИВ ВХОДИТ В КЛЮЧ, И ЭТО НЕ УКРАШЕНИЕ. Один и тот же хук зовут пять экранов, и они
    * спрашивают РАЗНОЕ: холст, полоса загрузки, пикер заметки и вложения задачи — «чем сузить
@@ -547,8 +550,7 @@ export function useProjectSections(
       const f: FilesFilter = { ...base, roleId: s.roleId, withoutRole: s.withoutRole };
       return {
         queryKey: filesKeys.section(f),
-        queryFn: () =>
-          filesService.listFiles({ ...toRequest(f), limit: SECTION_TILES, offset: 0 }),
+        queryFn: () => filesService.listFiles({ ...toRequest(f), limit: SECTION_TILES, offset: 0 }),
         enabled,
         staleTime: URL_SAFE_STALE_TIME,
       };
@@ -562,6 +564,28 @@ export function useLibraryFile(id: number | undefined) {
     queryFn: () => filesService.getFile(id as number),
     enabled: !!id,
     staleTime: URL_SAFE_STALE_TIME,
+  });
+}
+
+/** Bytes are held only while the inline preview is mounted. */
+export function useLibraryFileContent(id: number, enabled: boolean) {
+  return useQuery({
+    queryKey: filesKeys.content(id),
+    queryFn: () => filesService.getContent(id),
+    enabled: enabled && id > 0,
+    gcTime: 0,
+    retry: false,
+  });
+}
+
+/** Task holders are read only when the caller has the tasks:read right. */
+export function useFileTasks(fileId: number, enabled = true) {
+  return useQuery({
+    queryKey: filesKeys.tasks(fileId),
+    queryFn: () => fileTasksService.list(fileId),
+    enabled: enabled && fileId > 0,
+    retry: false,
+    staleTime: 60 * 1000,
   });
 }
 

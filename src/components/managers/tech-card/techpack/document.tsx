@@ -30,6 +30,7 @@ import { AssemblyPage } from './pages/assembly';
 import { ColourwaysContent, ColourwaysPage } from './pages/colourways';
 import { CoverPage, type TechpackTocItem } from './pages/cover';
 import { LabelsPage } from './pages/labels';
+import { PackagingPage } from './pages/packaging';
 import { MaterialsPage } from './pages/materials';
 import { MeasurementsPage } from './pages/measurements';
 import { PatternsMarkerContent, PatternsMarkerPage } from './pages/patterns-marker';
@@ -302,7 +303,14 @@ export function TechpackDocument({
             </div>
           </TechpackSheet>
         )}
-        <LabelsPage {...page} n='05' sampleSizeName={sampleSizeName} />
+        <LabelsPage
+          {...page}
+          n='05'
+          sampleSizeName={sampleSizeName}
+          sizeNames={sizing.sizeNames}
+          orderSizes={sizing.orderSizes}
+        />
+        <PackagingPage {...page} n='05b' />
         <AssemblyPage {...page} n='06' model={model} pdfGaps={pdfGaps} onLaidOut={setLaidOut} />
         <MeasurementsPage
           {...page}

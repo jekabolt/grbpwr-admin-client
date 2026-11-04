@@ -115,6 +115,7 @@ import {
   packagingItemSchema,
   packagingItemsOut,
   packagingItemsToForm,
+  type FormGarmentLabel,
 } from './labels-schema';
 // ТОКЕН РАБОТЫ «ПРОРЕЗЬ» — ИЗ ОБЩЕГО МОДУЛЯ ОСИ, а не строкой здесь: то же правило проверяет
 // редактор шага, решая, ПОКАЗАТЬ ли контрол, и две копии строки разъехались бы молча — отказ
@@ -1238,16 +1239,40 @@ export function isBlankCallout(
   return true;
 }
 
-// Номера выносок, на которые уже кто-то ссылается. Три ссылающихся списка — те же, по которым
+// A label's material link to a BOM line since taken off the card: the server refuses a link it
+// cannot resolve, and a label must never stop a save. The row just reads «no material» then.
+function liveLabelBomLinks(
+  labels: FormGarmentLabel[] | undefined,
+  bomItems: { id?: number; lineKey?: string | null }[] | undefined,
+): FormGarmentLabel[] {
+  const keys = new Set((bomItems ?? []).map((b) => (b.lineKey ?? '').trim()).filter(Boolean));
+  const ids = new Set((bomItems ?? []).map((b) => wireInt(b.id)).filter((id) => id > 0));
+  return (labels ?? []).map((l) => {
+    const key = (l.bomLineKey ?? '').trim();
+    return {
+      ...l,
+      bomLineKey: keys.has(key) ? key : '',
+      bomItemId: ids.has(wireInt(l.bomItemId)) ? wireInt(l.bomItemId) : 0,
+    };
+  });
+}
+
+// Номера выносок, на которые уже кто-то ссылается. Четыре ссылающихся списка — те же, по которым
 // считается следующий свободный номер (см. `nextNumber` на вкладке эскиза): номер, который
 // занят ссылкой, не свободен, и выноска под ним не пуста.
 export function referencedCalloutNumbers(data: {
   pieces?: { calloutNumber?: number }[];
   operations?: { calloutNumber?: number }[];
   issues?: { calloutNumber?: number }[];
+  garmentLabels?: { calloutNumber?: number }[];
 }): Set<number> {
   const out = new Set<number>();
-  for (const row of [...(data.pieces ?? []), ...(data.operations ?? []), ...(data.issues ?? [])]) {
+  for (const row of [
+    ...(data.pieces ?? []),
+    ...(data.operations ?? []),
+    ...(data.issues ?? []),
+    ...(data.garmentLabels ?? []),
+  ]) {
     const n = row.calloutNumber ?? 0;
     if (Number.isFinite(n) && n > 0) out.add(n);
   }
@@ -2095,6 +2120,8 @@ const labelSchema = z.object({
 
 const packagingSchema = z.object({
   foldingMethod: z.string().optional().default(''),
+  packedSize: z.string().optional().default(''),
+  packedMediaId: z.number().optional().default(0),
   polybag: z.string().optional().default(''),
   bagSticker: z.string().optional().default(''),
   inserts: z.string().optional().default(''),
@@ -2132,6 +2159,8 @@ export const emptyConstruction: z.input<typeof constructionSchema> = {
 
 export const emptyPackaging: z.input<typeof packagingSchema> = {
   foldingMethod: '',
+  packedSize: '',
+  packedMediaId: 0,
   polybag: '',
   bagSticker: '',
   inserts: '',
@@ -2323,7 +2352,7 @@ const techCardObject = z.object({
   // labels and the packaging items. Written ONLY through the writers in form-writers.ts.
   careLabel: careLabelSchema.default(newCareLabel),
   garmentLabels: keyedList(garmentLabelSchema, 'labels'),
-  packagingItems: keyedList(packagingItemSchema, 'packaging items'),
+  packagingItems: keyedList(packagingItemSchema, 'packaging items', false),
   costing: costingSchema,
   issues: z.array(issueSchema).default([]),
   signoffs: z.array(signoffSchema).default([]),
@@ -2983,6 +3012,8 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     packaging: insert?.packaging
       ? {
           foldingMethod: insert.packaging.foldingMethod || '',
+          packedSize: insert.packaging.packedSize || '',
+          packedMediaId: wireInt(insert.packaging.packedMediaId),
           polybag: insert.packaging.polybag || '',
           bagSticker: insert.packaging.bagSticker || '',
           inserts: insert.packaging.inserts || '',
@@ -3152,6 +3183,8 @@ function mapPackagingOut(p?: TechCardFormData['packaging']): common_TechCardPack
   if (
     !hasContent([
       p?.foldingMethod,
+      p?.packedSize,
+      p?.packedMediaId,
       p?.polybag,
       p?.bagSticker,
       p?.inserts,
@@ -3167,6 +3200,8 @@ function mapPackagingOut(p?: TechCardFormData['packaging']): common_TechCardPack
   }
   return {
     foldingMethod: p?.foldingMethod?.trim() || '',
+    packedSize: p?.packedSize?.trim() || '',
+    packedMediaId: p?.packedMediaId || 0,
     polybag: p?.polybag?.trim() || '',
     bagSticker: p?.bagSticker?.trim() || '',
     inserts: p?.inserts?.trim() || '',
@@ -4128,9 +4163,10 @@ export function mapFormToTechCardInsert(
     // indistinguishable from «deleted all») and refuses LABELS / PACKAGING approval. Transport, not
     // content — not hashed. `careLabel` is always present (null would mean «keep the stored one»).
     careLabel: careLabelOut(data.careLabel),
-    garmentLabels: garmentLabelsOut(data.garmentLabels),
+    garmentLabels: garmentLabelsOut(liveLabelBomLinks(data.garmentLabels, data.bomItems)),
     packagingItems: packagingItemsOut(data.packagingItems),
     labelsAware: true,
+    packagingPicksAware: true,
     // Only a costing:write editor may change costing; everyone else preserves what was loaded.
     costing: canWriteCosting ? mapCostingOut(data.costing) : original?.costing,
     issues: (data.issues ?? []).map((i) => ({

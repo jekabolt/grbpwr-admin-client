@@ -1,6 +1,7 @@
 import { adminService } from 'api/api';
 import type { common_TechCard, common_TechCardMarker } from 'api/proto-http/admin';
 import { useQueries, useQuery } from '@tanstack/react-query';
+import { useSizeOrdering } from 'components/managers/model/components/use-size-systems';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useMeasurements } from 'components/managers/product/utility/useMeasurements';
 import { useDictionary } from 'lib/providers/dictionary-provider';
@@ -27,10 +28,12 @@ export function useTechpackMeasurements(techCard: common_TechCard) {
     }
     return names;
   }, [dictionary?.sizes]);
+  const orderSizes = useSizeOrdering();
   return {
     measurements,
     sizeChart: chart.data?.chart,
     sizeNames,
+    orderSizes,
     isLoading: dictionaryLoading || chart.isLoading,
     isError: !!dictionaryError || chart.isError,
   };

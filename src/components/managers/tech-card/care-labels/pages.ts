@@ -322,6 +322,66 @@ export function filePdf(set: PrintSet, file: PlannedFile): Uint8Array {
   return writePdf({ pageWmm: L.W, pageHmm: L.H, sides: primsOf(set), pages: file.pages });
 }
 
+// ---------- один вариант: колорвей × размер ----------
+
+/**
+ * Стороны одного варианта для файла за QR: лента A этого размера и все ленты B колорвея, в порядке
+ * плана. Пусто — размера нет в плане.
+ */
+export function variantPages(set: PrintSet, sizeId: number): string[] {
+  if (!set.files.some((f) => f.label === 'A' && f.sizeId === sizeId)) return [];
+  const out: string[] = [];
+  for (const f of set.files) {
+    if (f.label === 'A' && f.sizeId !== sizeId) continue;
+    for (const page of f.pages) if (!out.includes(page)) out.push(page);
+  }
+  return out;
+}
+
+/** PDF одного варианта: только его стороны, каждая — один раз. */
+export function variantPdf(set: PrintSet, sizeId: number): Uint8Array {
+  const pages = variantPages(set, sizeId);
+  const all = primsOf(set);
+  const sides = new Map(pages.map((k) => [k, all.get(k) ?? []] as const));
+  return writePdf({ pageWmm: L.W, pageHmm: L.H, sides, pages });
+}
+
+// Вёрстка меряется заново на каждую правку, а сторон — колорвеи × размеры: хеш стороны помнится на
+// её документе, и новая раскладка считает только то, что родилось заново.
+const sideHashes = new WeakMap<object, string>();
+
+/** 64 бита cyrb53-образного хеша: не защита, а сверка «вход файла изменился». */
+function hashText(text: string): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  const hex = (n: number) => (n >>> 0).toString(16).padStart(8, '0');
+  return hex(h2) + hex(h1);
+}
+
+/** Отпечаток входа файла варианта; '' — варианта нет в плане. */
+export function variantHash(set: PrintSet, sizeId: number): string {
+  const pages = variantPages(set, sizeId);
+  if (!pages.length) return '';
+  const parts = pages.map((k) => {
+    const doc = set.sides.get(k)?.side.doc;
+    if (!doc) return '';
+    let hash = sideHashes.get(doc);
+    if (hash === undefined) {
+      hash = hashText(JSON.stringify(doc.prims));
+      sideHashes.set(doc, hash);
+    }
+    return hash;
+  });
+  return hashText(parts.join('|'));
+}
+
 /** SVG уникальной стороны для `svg/` архива (припуск — как в режиме набора). */
 export function sideSvg(set: PrintSet, key: string): string {
   const s = set.sides.get(key);

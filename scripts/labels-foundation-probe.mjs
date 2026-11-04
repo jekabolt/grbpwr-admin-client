@@ -148,6 +148,17 @@ const quiet = async (fn) => {
 };
 
 const deepEqual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+// A round trip keeps every stored field; a field newer than this fixture may only ride at its default.
+const emptyDefault = (v) =>
+  v === undefined || v === null || v === '' || v === 0 || v === false || (Array.isArray(v) && !v.length);
+const roundTrips = (rows, stored) =>
+  Array.isArray(rows) &&
+  rows.length === stored.length &&
+  rows.every(
+    (row, i) =>
+      Object.keys(stored[i]).every((k) => deepEqual(row[k], stored[i][k])) &&
+      Object.keys(row).every((k) => k in stored[i] || emptyDefault(row[k])),
+  );
 
 // ─── данные: карточка, как её отдаёт GetTechCard ─────────────────────────────────────────────
 const LABELS = [
@@ -245,8 +256,12 @@ async function run(m) {
     const insert = JSON.parse(
       JSON.stringify(m.mapFormToTechCardInsert(parsed.success ? parsed.data : form, CARD.techCard)),
     );
-    out['2 · garment labels round-trip unchanged (fields + order)'] = deepEqual(insert.garmentLabels, LABELS);
-    out['2 · packaging items round-trip unchanged'] = deepEqual(insert.packagingItems, ITEMS);
+    out['2 · garment labels round-trip unchanged (fields + order)'] = roundTrips(
+      insert.garmentLabels,
+      // the fixture card has no BOM: liveLabelBomLinks clears a link to a line that is not on the card
+      LABELS.map((label) => ({ ...label, bomItemId: 0 })),
+    );
+    out['2 · packaging items round-trip unchanged'] = roundTrips(insert.packagingItems, ITEMS);
     out['2 · care label round-trips unchanged'] = deepEqual(insert.careLabel, CARE);
   }
   // (3) writers on a REAL react-hook-form

@@ -3563,6 +3563,8 @@ export type TechCardPackaging = {
   weightNetGrams: number | undefined;
   weightGrossGrams: number | undefined;
   notes: string | undefined;
+  packedSize: string | undefined;
+  packedMediaId: number | undefined;
 };
 
 // TechCardCareLabelFiber is one fibre row of a colourway's composition OVERRIDE on the composition
@@ -3606,6 +3608,33 @@ export type TechCardGarmentLabel = {
   bomItemId: number | undefined;
   note: string | undefined;
   mediaIds: number[] | undefined;
+  // The BOM line this label is bought as, by its stable line key: lets a row link a line born in the
+  // same save (no id yet). Non-empty wins over bom_item_id on write; the read path returns it too.
+  // A key that names no line of the payload BOM is cleared, it never breaks a save.
+  bomLineKey: string | undefined;
+  // The pin: number of a TechCardCallout on a flat of this card; 0 = no pin. The label holds no
+  // geometry. A number no callout carries any more is cleared on write, it never breaks a save.
+  calloutNumber: number | undefined;
+  // Artwork per size (true) or one for all sizes (false). PRESENCE BIT: a client that knows this block
+  // always sends it; absent means an older client, whose save keeps the stored pin, modes and files.
+  artworkPerSize?: boolean;
+  // Artwork files of this label, one per (colorway, size). The key `composition` holds the
+  // composition label's own row: one file per colourway x size.
+  files: TechCardGarmentLabelFile[] | undefined;
+  // Artwork per colourway (true) or one for all colourways (false). Independent of artwork_per_size;
+  // both off = one file for the whole style. Carried with artwork_per_size when that is absent.
+  artworkPerColorway: boolean | undefined;
+};
+
+// TechCardGarmentLabelFile is one artwork file of a garment label, printed as a QR on the tech pack.
+export type TechCardGarmentLabelFile = {
+  colorwayId: number | undefined;
+  sizeId: number | undefined;
+  libraryFileId: number | undefined;
+  sourceHash: string | undefined;
+  // OUTPUT-ONLY: the public link of the library file, filled when the card is read for a response.
+  // Empty when the file has no live link (revoked, expired, access changed): no QR may be printed.
+  publicUrl: string | undefined;
 };
 
 // TechCardPackagingItem is one packaging item (labels rework, 0386): the label card with two words
@@ -3619,6 +3648,22 @@ export type TechCardPackagingItem = {
   bomItemId: number | undefined;
   note: string | undefined;
   mediaIds: number[] | undefined;
+  // The BOM line this item is bought as, by its stable line key (see TechCardGarmentLabel.bom_line_key).
+  bomLineKey: string | undefined;
+  // The thing this item IS, picked from the catalog: a packaging material or an auxiliary tech card.
+  // At most one of the two; both set is a field violation. A pick needs no mockup of its own.
+  materialId: number | undefined;
+  auxTechCardId: number | undefined;
+  perOrder: boolean | undefined;
+  pickedName: string | undefined;
+  // OUTPUT-ONLY, ignored on write: the material's image, or the auxiliary card's list thumbnail
+  // (the same media TechCardListItem.preview_url resolves from). Absent when it has none.
+  pickedThumbnail: MediaFull | undefined;
+  // 15-19 stay reserved for the lane that took 14 (bom_line_key).
+  // The colourways of this card the item applies to, ascending; empty = all colourways. An id that is
+  // not a colourway of this card is a field violation. The same pick may appear on two items with
+  // different colourways and quantities.
+  colorwayIds: number[] | undefined;
 };
 
 // TechCardCostLine is one currency bucket of the materials rollup.
@@ -4286,6 +4331,11 @@ export type TechCardInsert = {
   // write that carries the field, or that would replace a card whose steps state it, is refused
   // (FailedPrecondition) instead of silently returning them to the default. Transport, not content.
   operationSeamToleranceAware: boolean | undefined;
+  // Declares support for the packaging picks (TechCardPackagingItem.material_id, aux_tech_card_id,
+  // per_order; TechCardPackaging.packed_size, packed_media_id). Without it a write that carries none of
+  // them, but would replace a card that has them, is refused (FailedPrecondition) instead of silently
+  // wiping them. Transport, not content.
+  packagingPicksAware: boolean | undefined;
 };
 
 // TechCard is a stored tech card with resolved sketch media.

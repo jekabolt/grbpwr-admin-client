@@ -8,13 +8,15 @@
 // записи на колорвей, и версия каждой читается В МОМЕНТ КОММИТА (`readColorwayVersion`), а не при
 // рендере — к этому месту тело карточки её уже сдвинуло.
 //
-// Маска ровно `country_code`: сервер (I-06) пишет страну одну и не трогает мерчендайзинг.
+// Маска ровно эта страна: сервер (I-06) пишет её одну и не трогает мерчендайзинг. В JSON путь
+// маски только lowerCamelCase: шлюз (protojson) отвергает `_` с 400 ещё до UpdateColorway и сам
+// переводит `countryCode` в поле country_code.
 import { adminService } from 'api/api';
 import type { UpdateColorwayRequest } from 'api/proto-http/admin';
 import { readColorwayVersion } from '../colorway-version';
 import { COMMIT_ORDER, type StagedChange } from '../useTechCardStaging';
 
-export const COUNTRY_MASK = 'country_code';
+export const COUNTRY_MASK = 'countryCode';
 
 export const countryStagingKey = (colorwayId: number) => `colourway:${colorwayId}:country`;
 

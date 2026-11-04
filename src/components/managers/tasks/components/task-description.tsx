@@ -1,7 +1,10 @@
 import { MarkdownView } from 'components/managers/files/note/markdown-view';
 import { cn } from 'lib/utility';
-import { useMemo } from 'react';
+import { useContext, useMemo } from 'react';
+import { Chip } from 'ui';
+import { SheetEmbedsContext } from '../task-detail/file-view/sheet-context';
 import type { TaskMedia } from '../api/types';
+import { SHEET_TOKEN_SOURCE } from '../utils/sheet-token';
 import { TaskText, type MediaRef } from './task-text';
 
 /**
@@ -40,7 +43,12 @@ import { TaskText, type MediaRef } from './task-text';
 /** Есть ли в строке ссылка на вложение. Тот же источник формы, что у `parseTaskText`. */
 const MEDIA_REF_LINE = /\[\[media:\d+(?:#\d+)?\]\]/;
 
-export type DescriptionSegment = { kind: 'md'; text: string } | { kind: 'refs'; text: string };
+const SHEET_TOKEN = new RegExp(SHEET_TOKEN_SOURCE);
+
+export type DescriptionSegment =
+  | { kind: 'md'; text: string }
+  | { kind: 'refs'; text: string }
+  | { kind: 'sheet'; fileId: number };
 
 /**
  * Режет описание на куски. ЧИСТАЯ ФУНКЦИЯ, потому что это и есть всё решение: где проходит шов,
@@ -50,7 +58,7 @@ export type DescriptionSegment = { kind: 'md'; text: string } | { kind: 'refs'; 
  */
 export function splitDescription(text: string): DescriptionSegment[] {
   if (!text) return [];
-  if (!MEDIA_REF_LINE.test(text)) return [{ kind: 'md', text }];
+  if (!MEDIA_REF_LINE.test(text) && !SHEET_TOKEN.test(text)) return [{ kind: 'md', text }];
 
   const out: DescriptionSegment[] = [];
   let buffer: string[] = [];
@@ -60,13 +68,29 @@ export function splitDescription(text: string): DescriptionSegment[] {
       buffer = [];
     }
   };
-  for (const line of text.replace(/\r\n?/g, '\n').split('\n')) {
+  const addLine = (line: string) => {
     if (MEDIA_REF_LINE.test(line)) {
       flush();
       out.push({ kind: 'refs', text: line });
     } else {
       buffer.push(line);
     }
+  };
+  // Таблица не умещается внутри строки: текст вокруг токена становится своими строками.
+  const sheetTokens = new RegExp(SHEET_TOKEN_SOURCE, 'g');
+  for (const line of text.replace(/\r\n?/g, '\n').split('\n')) {
+    let last = 0;
+    let found = false;
+    for (const m of line.matchAll(sheetTokens)) {
+      found = true;
+      const before = line.slice(last, m.index);
+      if (before.trim()) addLine(before);
+      flush();
+      out.push({ kind: 'sheet', fileId: Number(m[1]) });
+      last = m.index + m[0].length;
+    }
+    if (!found) addLine(line);
+    else if (line.slice(last).trim()) addLine(line.slice(last));
   }
   flush();
   return out;
@@ -84,12 +108,19 @@ export function TaskDescriptionView({
   onOpen?: (ref: MediaRef) => void;
   className?: string;
 }) {
+  const embeds = useContext(SheetEmbedsContext);
   const segments = useMemo(() => splitDescription(text), [text]);
 
   return (
     <div className={cn('flex flex-col', className)}>
       {segments.map((s, i) =>
-        s.kind === 'md' ? (
+        s.kind === 'sheet' ? (
+          embeds ? (
+            <embeds.Embed key={i} fileId={s.fileId} />
+          ) : (
+            <Chip key={i}>table</Chip>
+          )
+        ) : s.kind === 'md' ? (
           <MarkdownView key={i} source={s.text} linksInNewTab />
         ) : (
           <TaskText key={i} text={s.text} media={media} onOpen={onOpen} />

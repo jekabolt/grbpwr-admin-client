@@ -5432,6 +5432,35 @@ export type GetTaskFileContentResponse = {
   // The file is over the viewing ceiling, content is empty. Data rather than an
   // error: it is an ordinary state of an ordinary file, and it ends in a download.
   tooLarge: boolean | undefined;
+  // sha256 is the base for SaveTaskFileContent. These three come from the row and are
+  // filled on too_large as well.
+  sha256: string | undefined;
+  // Empty and null for a file that was never edited in place.
+  lastEditedBy: string | undefined;
+  lastEditedAt: wellKnownTimestamp | undefined;
+};
+
+export type SaveTaskFileContentRequest = {
+  taskId: number | undefined;
+  fileId: number | undefined;
+  content: string | undefined;
+  // base_sha256 is the sha256 this edit started from. A mismatch means somebody else
+  // saved in the meantime.
+  baseSha256: string | undefined;
+  // force writes over that other version deliberately.
+  force: boolean | undefined;
+};
+
+export type SaveTaskFileContentResponse = {
+  // conflict = true means NOTHING WAS WRITTEN and the fields below describe the stored
+  // version. It does not carry the other bytes: the client re-reads them through
+  // GetTaskFileContent.
+  conflict: boolean | undefined;
+  // current_sha256 is what is stored now, and the base for this editor's next save.
+  currentSha256: string | undefined;
+  lastEditedBy: string | undefined;
+  lastEditedAt: wellKnownTimestamp | undefined;
+  sizeBytes: number | undefined;
 };
 
 export type GetTaskResponse = {
@@ -5712,6 +5741,17 @@ export type GetLibraryFileRequest = {
 
 export type GetLibraryFileResponse = {
   file: LibraryFile | undefined;
+};
+
+export type GetLibraryFileContentRequest = {
+  id: number | undefined;
+};
+
+export type GetLibraryFileContentResponse = {
+  content: string | undefined;
+  // The file is over the viewing ceiling, content is empty. Data rather than an
+  // error: it is an ordinary state of an ordinary file, and it ends in a download.
+  tooLarge: boolean | undefined;
 };
 
 export type ListLibraryFilesRequest = {
@@ -8463,6 +8503,11 @@ export type common_TechCardInsert = {
   // write that carries the field, or that would replace a card whose steps state it, is refused
   // (FailedPrecondition) instead of silently returning them to the default. Transport, not content.
   operationSeamToleranceAware: boolean | undefined;
+  // Declares support for the packaging picks (TechCardPackagingItem.material_id, aux_tech_card_id,
+  // per_order; TechCardPackaging.packed_size, packed_media_id). Without it a write that carries none of
+  // them, but would replace a card that has them, is refused (FailedPrecondition) instead of silently
+  // wiping them. Transport, not content.
+  packagingPicksAware: boolean | undefined;
 };
 
 // StyleNumberSource records how a tech card's style_number was set (PLM-rework Q1): GENERATED = the
@@ -10019,6 +10064,8 @@ export type common_TechCardPackaging = {
   weightNetGrams: number | undefined;
   weightGrossGrams: number | undefined;
   notes: string | undefined;
+  packedSize: string | undefined;
+  packedMediaId: number | undefined;
 };
 
 // TechCardCosting holds the manually-entered per-unit cost articles (Sheet «Калькуляция»).
@@ -10564,6 +10611,33 @@ export type common_TechCardGarmentLabel = {
   bomItemId: number | undefined;
   note: string | undefined;
   mediaIds: number[] | undefined;
+  // The BOM line this label is bought as, by its stable line key: lets a row link a line born in the
+  // same save (no id yet). Non-empty wins over bom_item_id on write; the read path returns it too.
+  // A key that names no line of the payload BOM is cleared, it never breaks a save.
+  bomLineKey: string | undefined;
+  // The pin: number of a TechCardCallout on a flat of this card; 0 = no pin. The label holds no
+  // geometry. A number no callout carries any more is cleared on write, it never breaks a save.
+  calloutNumber: number | undefined;
+  // Artwork per size (true) or one for all sizes (false). PRESENCE BIT: a client that knows this block
+  // always sends it; absent means an older client, whose save keeps the stored pin, modes and files.
+  artworkPerSize?: boolean;
+  // Artwork files of this label, one per (colorway, size). The key `composition` holds the
+  // composition label's own row: one file per colourway x size.
+  files: common_TechCardGarmentLabelFile[] | undefined;
+  // Artwork per colourway (true) or one for all colourways (false). Independent of artwork_per_size;
+  // both off = one file for the whole style. Carried with artwork_per_size when that is absent.
+  artworkPerColorway: boolean | undefined;
+};
+
+// TechCardGarmentLabelFile is one artwork file of a garment label, printed as a QR on the tech pack.
+export type common_TechCardGarmentLabelFile = {
+  colorwayId: number | undefined;
+  sizeId: number | undefined;
+  libraryFileId: number | undefined;
+  sourceHash: string | undefined;
+  // OUTPUT-ONLY: the public link of the library file, filled when the card is read for a response.
+  // Empty when the file has no live link (revoked, expired, access changed): no QR may be printed.
+  publicUrl: string | undefined;
 };
 
 // TechCardPackagingItem is one packaging item (labels rework, 0386): the label card with two words
@@ -10577,6 +10651,22 @@ export type common_TechCardPackagingItem = {
   bomItemId: number | undefined;
   note: string | undefined;
   mediaIds: number[] | undefined;
+  // The BOM line this item is bought as, by its stable line key (see TechCardGarmentLabel.bom_line_key).
+  bomLineKey: string | undefined;
+  // The thing this item IS, picked from the catalog: a packaging material or an auxiliary tech card.
+  // At most one of the two; both set is a field violation. A pick needs no mockup of its own.
+  materialId: number | undefined;
+  auxTechCardId: number | undefined;
+  perOrder: boolean | undefined;
+  pickedName: string | undefined;
+  // OUTPUT-ONLY, ignored on write: the material's image, or the auxiliary card's list thumbnail
+  // (the same media TechCardListItem.preview_url resolves from). Absent when it has none.
+  pickedThumbnail: common_MediaFull | undefined;
+  // 15-19 stay reserved for the lane that took 14 (bom_line_key).
+  // The colourways of this card the item applies to, ascending; empty = all colourways. An id that is
+  // not a colourway of this card is a field violation. The same pick may appear on two items with
+  // different colourways and quantities.
+  colorwayIds: number[] | undefined;
 };
 
 export type CreateTechCardResponse = {
@@ -20077,6 +20167,12 @@ export interface AdminService {
   // the attachment list in GetTask; a file that is not attached to this task, or
   // that the caller may not see, is NotFound.
   GetTaskFileContent(request: GetTaskFileContentRequest): Promise<GetTaskFileContentResponse>;
+  // SaveTaskFileContent replaces the bytes of an .xlsx or .csv attached to this task,
+  // under a compare-and-set on sha256. It changes the library file itself: every task
+  // with this file and the library see the new bytes at once, and no old version is
+  // kept. Gated on tasks:write plus the attachment, files:write is not needed. A file
+  // that is not attached to this task, or that the caller may not see, is NotFound.
+  SaveTaskFileContent(request: SaveTaskFileContentRequest): Promise<SaveTaskFileContentResponse>;
   // UpdateTask replaces a task's content (title, description, assignee, priority,
   // due_date, labels, media, entity links). Placement — board, column (status),
   // ordering — is NOT touched here; it changes only through MoveTask.
@@ -20144,6 +20240,12 @@ export interface AdminService {
   DeleteTaskComment(request: DeleteTaskCommentRequest): Promise<DeleteTaskCommentResponse>;
   // GetLibraryFile returns one file with its topics and freshly minted urls.
   GetLibraryFile(request: GetLibraryFileRequest): Promise<GetLibraryFileResponse>;
+  // GetLibraryFileContent returns the BYTES of a library file, so its card can show
+  // a preview of a file attached to no task. They travel over the RPC because JS
+  // cannot read a presigned url: the bucket has no CORS for the panel. Gated on
+  // files:read, and it refuses exactly what GetLibraryFile refuses: a file the caller
+  // may not see, like an unknown id, is NotFound.
+  GetLibraryFileContent(request: GetLibraryFileContentRequest): Promise<GetLibraryFileContentResponse>;
   // ListLibraryFiles is the grid: a page of files filtered by topic, by "no topic
   // at all", or by a search that matches file names AND topic names.
   // Declared AFTER GET /files/{id} on purpose — same reason as the task routes:
@@ -24612,6 +24714,23 @@ export function createAdminServiceClient(
         method: "GetTaskFileContent",
       }) as Promise<GetTaskFileContentResponse>;
     },
+    SaveTaskFileContent(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/task/file/content/save`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SaveTaskFileContent",
+      }) as Promise<SaveTaskFileContentResponse>;
+    },
     UpdateTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/update`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
@@ -25049,6 +25168,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetLibraryFile",
       }) as Promise<GetLibraryFileResponse>;
+    },
+    GetLibraryFileContent(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/files/${request.id}/content`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetLibraryFileContent",
+      }) as Promise<GetLibraryFileContentResponse>;
     },
     ListLibraryFiles(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/list`; // eslint-disable-line quotes

@@ -26,6 +26,7 @@ import type {
 } from './labels-schema';
 import { patternSheetName } from './nesting/sheet-name';
 import type { TechCardFormData } from './schema';
+import { packagingItemRank } from './tech-card-options';
 
 /**
  * ДВА ПИСАТЕЛЯ ФОРМЫ, КОТОРЫХ ТЕПЕРЬ РОВНО ПО ОДНОМУ.
@@ -216,8 +217,13 @@ const blankGarmentLabel = (key: string): FormGarmentLabel => ({
   size: '',
   qtyPerGarment: 1,
   bomItemId: 0,
+  bomLineKey: '',
   note: '',
   mediaIds: [],
+  calloutNumber: 0,
+  artworkPerSize: false,
+  artworkPerColorway: false,
+  files: [],
 });
 const blankPackagingItem = (key: string): FormPackagingItem => ({
   key,
@@ -225,7 +231,14 @@ const blankPackagingItem = (key: string): FormPackagingItem => ({
   packing: '',
   size: '',
   qtyPerGarment: 1,
+  perOrder: false,
+  materialId: 0,
+  auxTechCardId: 0,
+  pickedName: '',
+  pickedThumbnail: undefined,
+  colorwayIds: [],
   bomItemId: 0,
+  bomLineKey: '',
   note: '',
   mediaIds: [],
 });
@@ -314,23 +327,90 @@ export function removeGarmentLabel(
   removeKeyed(getValues, setValue, 'garmentLabels', key);
 }
 
-/** Same contract as `upsertGarmentLabel`, for `packagingItems`. */
+/** Insert after the same/lower ranked kinds and before the first higher ranked kind. */
+export function insertPackagingItemByRank<T extends { key?: string }>(
+  rows: readonly T[],
+  item: T,
+): { rows: T[]; index: number } {
+  const rank = packagingItemRank(item.key);
+  const index = rows.findIndex((row) => packagingItemRank(row.key) > rank);
+  const at = index < 0 ? rows.length : index;
+  return { rows: [...rows.slice(0, at), item, ...rows.slice(at)], index: at };
+}
+
+export type PackagingItemOpts = KeyedOpts & { index?: number; forceNew?: boolean };
+
+/** Patch one packaging row, or insert a duplicate in the known-kind shelf order. */
 export function upsertPackagingItem(
   getValues: UseFormGetValues<TechCardFormData>,
   setValue: UseFormSetValue<TechCardFormData>,
   key: string,
   patch: Partial<Omit<FormPackagingItem, 'key'>>,
-  opts?: KeyedOpts,
+  opts?: PackagingItemOpts,
+): number {
+  const cleanKey = key.trim();
+  if (!cleanKey) return -1;
+  const cur = ((getValues('packagingItems') ?? []) as FormPackagingItem[]).slice();
+  const exact = opts?.index;
+  const found =
+    exact != null && exact >= 0 && exact < cur.length
+      ? exact
+      : opts?.forceNew
+        ? -1
+        : cur.findIndex((row) => sameKey(row.key, cleanKey));
+  const before =
+    found >= 0 ? { ...blankPackagingItem(cleanKey), ...cur[found] } : blankPackagingItem(cleanKey);
+  const merged = { ...before, ...patch, key: before.key } as FormPackagingItem;
+  const lostLastFact =
+    !opts?.keepBare &&
+    found >= 0 &&
+    hasFacts(before as Record<string, unknown>) &&
+    !hasFacts(merged as Record<string, unknown>);
+
+  if (lostLastFact) {
+    setValue('packagingItems', cur.filter((_, index) => index !== found) as never, {
+      shouldDirty: true,
+    });
+    return -1;
+  }
+  if (found >= 0) {
+    setValue(`packagingItems.${found}`, merged as never, { shouldDirty: true });
+    return found;
+  }
+  const inserted = insertPackagingItemByRank(cur, merged);
+  setValue('packagingItems', inserted.rows as never, { shouldDirty: true });
+  return inserted.index;
+}
+
+/** Swaps two rows of the list: earlier / later on the shelf, the saved order follows the list. */
+export function movePackagingItem(
+  getValues: UseFormGetValues<TechCardFormData>,
+  setValue: UseFormSetValue<TechCardFormData>,
+  from: number,
+  to: number,
 ): void {
-  upsertKeyed(getValues, setValue, 'packagingItems', blankPackagingItem, key, patch, opts);
+  const cur = ((getValues('packagingItems') ?? []) as FormPackagingItem[]).slice();
+  if (!cur[from] || !cur[to]) return;
+  [cur[from], cur[to]] = [cur[to], cur[from]];
+  setValue('packagingItems', cur as never, { shouldDirty: true });
 }
 
 export function removePackagingItem(
   getValues: UseFormGetValues<TechCardFormData>,
   setValue: UseFormSetValue<TechCardFormData>,
   key: string,
+  index?: number,
 ): void {
-  removeKeyed(getValues, setValue, 'packagingItems', key);
+  const cur = ((getValues('packagingItems') ?? []) as FormPackagingItem[]).slice();
+  const found =
+    index != null && index >= 0 && index < cur.length
+      ? index
+      : cur.findIndex((row) => sameKey(row.key, key));
+  if (found >= 0) {
+    setValue('packagingItems', cur.filter((_, rowIndex) => rowIndex !== found) as never, {
+      shouldDirty: true,
+    });
+  }
 }
 
 /**

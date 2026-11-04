@@ -1,8 +1,26 @@
-import { useMemo, type ReactNode } from 'react';
-import { GrbpwrMark, HeaderNote, SectionHeader } from 'ui';
-import { deriveLabels, type LabelsDeriveOptions } from '../derive-labels';
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { PatternQR } from 'components/managers/tech-card/patterns/pattern-qr';
+import { DataTable, GrbpwrMark, HeaderNote, SectionHeader } from 'ui';
+import {
+  deriveLabels,
+  type LabelsDeriveOptions,
+  type LabelsModel,
+  type SewnTableRow,
+} from '../derive-labels';
+import {
+  LABEL_BLOCK_GAP_PX,
+  LABEL_FLAT_PX,
+  LABEL_QR_PX,
+  LABEL_TABLE_COLS,
+  planLabelSheets,
+  QR_COL_GAP_PX,
+  qrColumns,
+  QR_ROW_GAP_PX,
+  QR_TITLE_PX,
+  type QrGridRow,
+} from '../labels-sheets';
 import { Missing, TechpackDrawing } from './bits';
-import { TechpackSheet, type TechpackPageProps } from '../sheet';
+import { continuedTitle, TechpackSheet, type TechpackPageProps } from '../sheet';
 import { englishT, own, useT } from '../i18n';
 
 type LabelsPageProps = TechpackPageProps & LabelsDeriveOptions;
@@ -46,16 +64,165 @@ function PhysicalTape({
   );
 }
 
-export function LabelsPage({ techCard, orient, docline, n, sampleSizeName }: LabelsPageProps) {
+function SewnTable({
+  rows,
+  model,
+  orient,
+}: {
+  rows: readonly SewnTableRow[];
+  model: LabelsModel;
+  orient: LabelsPageProps['orient'];
+}) {
+  const { t } = useT();
+  const cols = LABEL_TABLE_COLS[orient];
+  return (
+    <div className='min-w-0 flex-1' data-label-table=''>
+      <DataTable className='table-fixed'>
+        <colgroup>
+          {cols.map((width, index) => (
+            <col key={index} style={{ width }} />
+          ))}
+        </colgroup>
+        <thead>
+          <tr>
+            <th data-align='left'>#</th>
+            <th data-align='left'>{t('labels.item')}</th>
+            <th data-align='left'>{t('labels.location')}</th>
+            <th data-align='left'>{t('labels.attachment')}</th>
+            <th data-align='left'>{t('labels.fold')}</th>
+            <th data-align='left'>{t('labels.sizeMm')}</th>
+            <th data-align='left'>{t('common.material')}</th>
+            <th>{t('common.quantity')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.key} data-label-row={row.key}>
+              <td data-align='left'>{row.number}</td>
+              <td data-align='left'>{own(row.item)}</td>
+              <td data-align='left'>
+                {own(row.location) ||
+                  (model.gaps.placement && <Missing gap={model.gaps.placement} />)}
+              </td>
+              <td data-align='left'>{own(row.attachment)}</td>
+              <td data-align='left'>{own(row.fold)}</td>
+              <td data-align='left'>{own(row.size)}</td>
+              <td data-align='left'>{own(row.material)}</td>
+              <td>{row.qty}</td>
+            </tr>
+          ))}
+        </tbody>
+      </DataTable>
+    </div>
+  );
+}
+
+function QrGrid({ rows, columns }: { rows: readonly QrGridRow[]; columns: number }) {
+  const { t } = useT();
+  return (
+    <div data-label-qr=''>
+      <div className='mb-2 border-b border-textColor pb-1 font-bold uppercase tracking-label'>
+        {t('labels.artworkQr')}
+      </div>
+      <div
+        className='grid items-center text-micro'
+        style={{
+          gridTemplateColumns: `${QR_TITLE_PX}px repeat(${columns}, ${LABEL_QR_PX}px)`,
+          columnGap: QR_COL_GAP_PX,
+          rowGap: QR_ROW_GAP_PX,
+        }}
+      >
+        {rows.map((row) =>
+          row.kind === 'sizes' ? (
+            row.labels.map((label, index) => (
+              <span
+                key={`${row.key}-${index}`}
+                className='text-center'
+                style={index === 0 ? { gridColumnStart: 2 } : undefined}
+              >
+                {label}
+              </span>
+            ))
+          ) : (
+            <QrLine key={row.key} title={row.title} cells={row.cells} noFile={t('labels.noFile')} />
+          ),
+        )}
+      </div>
+    </div>
+  );
+}
+
+function QrLine({
+  title,
+  cells,
+  noFile,
+}: {
+  title: string;
+  cells: Extract<QrGridRow, { kind: 'qr' }>['cells'];
+  noFile: string;
+}) {
+  return (
+    <>
+      <span translate='no' style={{ gridColumnStart: 1 }}>
+        {title}
+      </span>
+      {cells.map((cell) =>
+        cell.url ? (
+          <div
+            key={cell.key}
+            data-label-qr-cell={cell.key}
+            style={{ width: LABEL_QR_PX, height: LABEL_QR_PX }}
+          >
+            <PatternQR value={cell.url} size={LABEL_QR_PX} />
+          </div>
+        ) : (
+          <div
+            key={cell.key}
+            data-label-no-file={cell.key}
+            className='flex items-center justify-center border border-dashed border-error text-center uppercase text-textColor'
+            style={{ width: LABEL_QR_PX, height: LABEL_QR_PX }}
+          >
+            {noFile}
+          </div>
+        ),
+      )}
+    </>
+  );
+}
+
+/** The sheet's box clips, so an estimate that fell short has to be seen, not printed. */
+function OverflowWatch({ onOverflow }: { onOverflow: () => void }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const body = ref.current?.closest<HTMLElement>('.tp-body');
+    if (body && body.scrollHeight > body.clientHeight + 1) onOverflow();
+  });
+  return <span ref={ref} hidden />;
+}
+
+export function LabelsPage({
+  techCard,
+  orient,
+  docline,
+  n,
+  sampleSizeName,
+  sizeNames,
+  orderSizes,
+}: LabelsPageProps) {
   const { t } = useT();
   const model = useMemo(
-    () => deriveLabels(techCard, { sampleSizeName }, undefined, t),
-    [techCard, sampleSizeName, t],
+    () => deriveLabels(techCard, { sampleSizeName, sizeNames, orderSizes }, undefined, t),
+    [techCard, sampleSizeName, sizeNames, orderSizes, t],
+  );
+  const [tight, setTight] = useState(0);
+  const sheets = useMemo(
+    () => planLabelSheets(model.sewn, orient, tight),
+    [model.sewn, orient, tight],
   );
   const land = orient === 'land';
-  const scale = land ? 5.2 : 5.4;
+  const scale = land ? (model.hasSewn ? 4.8 : 5.2) : 5.4;
   const tapes = (
-    <div className='flex flex-col gap-5'>
+    <div className={land && model.hasSewn ? 'flex gap-8' : 'flex flex-col gap-5'}>
       <PhysicalTape caption={t('labels.identity')} scale={scale}>
         <div className='flex h-full items-center gap-3'>
           <div className='h-full shrink-0' style={{ width: 22 * scale }}>
@@ -133,6 +300,52 @@ export function LabelsPage({ techCard, orient, docline, n, sampleSizeName }: Lab
       </div>
     </div>
   );
+
+  if (model.hasSewn) {
+    const flat = (
+      <div
+        className='relative flex flex-none items-center justify-center border border-hairline'
+        style={{ width: LABEL_FLAT_PX.w, height: LABEL_FLAT_PX.h }}
+        data-label-flat=''
+      >
+        <TechpackDrawing
+          media={model.sewn.flat}
+          name={t('common.back')}
+          height={LABEL_FLAT_PX.h - 2}
+          pins={model.sewn.pins}
+          caption=''
+          missingGap={model.gaps.back}
+        />
+      </div>
+    );
+    return (
+      <>
+        {sheets.map((sheet, index) => (
+          <TechpackSheet key={index} orient={orient} docline={docline}>
+            <OverflowWatch onOverflow={() => setTight((value) => Math.min(value + 1, 4))} />
+            <SectionHeader title={continuedTitle(n, t('labels.title'), index > 0, t)} />
+            <div className='flex flex-col' style={{ gap: LABEL_BLOCK_GAP_PX }}>
+              {sheet.flat && land ? (
+                <div className='flex items-start gap-6'>
+                  {flat}
+                  <SewnTable rows={sheet.rows} model={model} orient={orient} />
+                </div>
+              ) : (
+                <>
+                  {sheet.flat && flat}
+                  {sheet.rows.length > 0 && (
+                    <SewnTable rows={sheet.rows} model={model} orient={orient} />
+                  )}
+                </>
+              )}
+              {sheet.qr.length > 0 && <QrGrid rows={sheet.qr} columns={qrColumns(orient)} />}
+              {sheet.tapes && tapes}
+            </div>
+          </TechpackSheet>
+        ))}
+      </>
+    );
+  }
 
   return (
     <TechpackSheet orient={orient} docline={docline}>

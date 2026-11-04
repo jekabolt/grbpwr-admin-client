@@ -1,7 +1,7 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { differenceInCalendarDays, format } from 'date-fns';
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { cn } from 'lib/utility';
 import {
@@ -42,6 +42,7 @@ import {
   type InlinePatch,
 } from '../hooks/useTasks';
 import { AttachmentTiles } from './attachment-tiles';
+import { SheetEmbedsProvider } from './file-view/sheet-embeds';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { mergePickedMedia } from '../components/media-attachments';
 import { DueField, InlineDescription, InlineTitle } from './inline-fields';
@@ -186,7 +187,13 @@ export function TaskDetail() {
     // рисования или по счётчику кадров доходил бы сюда, открывал правку и размонтировал
     // просмотрщик вместе с ненарисованным.
     if (!(e.target instanceof Element) || !e.currentTarget.contains(e.target)) return;
-    if (e.target.closest('a, button, [role="button"], img, video, input, textarea, select')) return;
+    if (
+      e.target.closest(
+        'a, button, [role="button"], img, video, input, textarea, select, [data-sheet-embed]',
+      )
+    ) {
+      return;
+    }
     // Протянутое выделение — это чтение (копируют кусок), а не просьба править.
     if (window.getSelection()?.toString()) return;
     setEditingDescription(true);
@@ -218,6 +225,20 @@ export function TaskDetail() {
     }
   }
 
+  // Через ref: таблицы в описании не должны перерисовываться с каждой перерисовкой страницы.
+  const attachFileRef = useRef<(id: number) => Promise<boolean>>(async () => false);
+  attachFileRef.current = async (id) => {
+    const current = taskRef.current;
+    if (!current) return false;
+    if (current.task.fileIds.includes(id)) return true;
+    const seen = current.task.fileIds;
+    const next = [...seen, id];
+    if (!(await patchInline({ fileIds: next }, { fileIds: seen }))) return false;
+    taskRef.current = { ...current, task: { ...current.task, fileIds: next } };
+    return true;
+  };
+  const attachFile = useCallback((id: number) => attachFileRef.current(id), []);
+
   const attachmentIntake = useTaskAttachmentIntake({
     enabled: canWrite,
     onMedia: async (id) => {
@@ -231,14 +252,8 @@ export function TaskDetail() {
       taskRef.current = { ...current, task: { ...current.task, mediaIds: next } };
     },
     onFile: async (id) => {
-      const current = taskRef.current;
-      if (!current || current.task.fileIds.includes(id)) return;
-      const seen = current.task.fileIds;
-      const next = [...seen, id];
-      if (!(await patchInline({ fileIds: next }, { fileIds: seen }))) {
-        throw new Error('not attached');
-      }
-      taskRef.current = { ...current, task: { ...current.task, fileIds: next } };
+      if (!taskRef.current) return;
+      if (!(await attachFileRef.current(id))) throw new Error('not attached');
     },
   });
 
@@ -485,7 +500,7 @@ export function TaskDetail() {
     </Button>
   );
 
-  return (
+  const page = (
     <div
       {...attachmentIntake.dropProps}
       className='relative isolate mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-5 overflow-x-clip pb-10'
@@ -960,5 +975,11 @@ export function TaskDetail() {
         </Text>
       </ConfirmationModal>
     </div>
+  );
+
+  return (
+    <SheetEmbedsProvider taskId={task.id} files={task.files} attachFile={attachFile}>
+      {page}
+    </SheetEmbedsProvider>
   );
 }

@@ -3,6 +3,7 @@ import type {
   common_TechCardCareLabel,
   common_TechCardGarmentLabel,
   common_TechCardPackagingItem,
+  common_MediaFull,
 } from 'api/proto-http/admin';
 import { z } from 'zod';
 import { wireInt } from './wire-int';
@@ -92,6 +93,16 @@ const qtyPerGarment = z
   .default(1)
   .refine((q) => Number.isInteger(q) && q >= 1, { message: 'one or more per garment' });
 
+// One artwork file of a sewn-in label (0447). 0 on an axis = «any colour» / «all sizes». `publicUrl`
+// is read-only: the server fills it from the file's live link, and an empty one reads as «no file».
+export const garmentLabelFileSchema = z.object({
+  colorwayId: z.number().optional().default(0),
+  sizeId: z.number().optional().default(0),
+  libraryFileId: z.number().optional().default(0),
+  sourceHash: z.string().optional().default(''),
+  publicUrl: z.string().optional().default(''),
+});
+
 export const garmentLabelSchema = z.object({
   key: labelKey,
   placement: text(LABEL_TEXT_MAX, 'placement'),
@@ -101,8 +112,15 @@ export const garmentLabelSchema = z.object({
   qtyPerGarment,
   // FK to the label material's BOM line; 0 = none.
   bomItemId: z.number().optional().default(0),
+  // The same link by line key: it can name a line born in this very edit.
+  bomLineKey: z.string().optional().default(''),
   note: text(LABEL_NOTE_MAX, 'note'),
   mediaIds,
+  // The pin: the number of a callout on a flat; 0 = no pin.
+  calloutNumber: z.number().optional().default(0),
+  artworkPerSize: z.boolean().optional().default(false),
+  artworkPerColorway: z.boolean().optional().default(false),
+  files: z.array(garmentLabelFileSchema).default([]),
 });
 
 export const packagingItemSchema = z.object({
@@ -111,7 +129,14 @@ export const packagingItemSchema = z.object({
   packing: text(LABEL_TEXT_MAX, 'packing'),
   size: text(LABEL_SIZE_MAX, 'size'),
   qtyPerGarment,
+  perOrder: z.boolean().optional().default(false),
+  materialId: z.number().optional().default(0),
+  auxTechCardId: z.number().optional().default(0),
+  pickedName: text(LABEL_TEXT_MAX, 'name'),
+  pickedThumbnail: z.custom<common_MediaFull>().optional(),
+  colorwayIds: z.array(z.number()).default([]),
   bomItemId: z.number().optional().default(0),
+  bomLineKey: z.string().optional().default(''),
   note: text(LABEL_NOTE_MAX, 'note'),
   mediaIds,
 });
@@ -218,8 +243,8 @@ export const careLabelSchema = z
     });
   });
 
-/** A list keyed by `key`: bounded, and one row per key (the writers upsert by it). */
-export function keyedList<T extends z.ZodTypeAny>(row: T, what: string) {
+/** A bounded keyed list. Some lists also require unique keys; packaging explicitly allows repeats. */
+export function keyedList<T extends z.ZodTypeAny>(row: T, what: string, unique = true) {
   return z
     .array(row)
     .default([])
@@ -230,6 +255,7 @@ export function keyedList<T extends z.ZodTypeAny>(row: T, what: string) {
           code: z.ZodIssueCode.custom,
           message: `at most ${LABEL_ENTRIES_MAX} ${what}`,
         });
+      if (!unique) return;
       const seen = new Set<string>();
       rows.forEach((r, i) => {
         const k = (r.key ?? '').trim().toLowerCase();
@@ -302,8 +328,19 @@ export function garmentLabelsToForm(ls?: common_TechCardGarmentLabel[]): FormGar
     size: l.size || '',
     qtyPerGarment: wireInt(l.qtyPerGarment) || 1,
     bomItemId: wireInt(l.bomItemId),
+    bomLineKey: l.bomLineKey || '',
     note: l.note || '',
     mediaIds: (l.mediaIds ?? []).map(wireInt),
+    calloutNumber: wireInt(l.calloutNumber),
+    artworkPerSize: !!l.artworkPerSize,
+    artworkPerColorway: !!l.artworkPerColorway,
+    files: (l.files ?? []).map((f) => ({
+      colorwayId: wireInt(f.colorwayId),
+      sizeId: wireInt(f.sizeId),
+      libraryFileId: wireInt(f.libraryFileId),
+      sourceHash: f.sourceHash || '',
+      publicUrl: f.publicUrl || '',
+    })),
   }));
 }
 
@@ -314,7 +351,14 @@ export function packagingItemsToForm(ls?: common_TechCardPackagingItem[]): FormP
     packing: l.packing || '',
     size: l.size || '',
     qtyPerGarment: wireInt(l.qtyPerGarment) || 1,
+    perOrder: !!l.perOrder,
+    materialId: wireInt(l.materialId),
+    auxTechCardId: wireInt(l.auxTechCardId),
+    pickedName: l.pickedName || '',
+    pickedThumbnail: l.pickedThumbnail,
+    colorwayIds: (l.colorwayIds ?? []).map(wireInt).filter((id) => id > 0),
     bomItemId: wireInt(l.bomItemId),
+    bomLineKey: l.bomLineKey || '',
     note: l.note || '',
     mediaIds: (l.mediaIds ?? []).map(wireInt),
   }));
@@ -362,20 +406,43 @@ export function garmentLabelsOut(ls?: FormGarmentLabel[]): common_TechCardGarmen
     size: l.size?.trim() || '',
     qtyPerGarment: l.qtyPerGarment || 1,
     bomItemId: wireInt(l.bomItemId),
+    bomLineKey: l.bomLineKey?.trim() || '',
     note: l.note?.trim() || '',
     mediaIds: [...(l.mediaIds ?? [])],
+    calloutNumber: wireInt(l.calloutNumber),
+    // ALWAYS sent: this bit says «this client knows the artwork block», so a save that sends no
+    // files means «no files», while a bundle older than 0447 stays silent and the server carries.
+    artworkPerSize: !!l.artworkPerSize,
+    artworkPerColorway: !!l.artworkPerColorway,
+    files: (l.files ?? []).map((f) => ({
+      colorwayId: wireInt(f.colorwayId),
+      sizeId: wireInt(f.sizeId),
+      libraryFileId: wireInt(f.libraryFileId),
+      sourceHash: f.sourceHash ?? '',
+      publicUrl: f.publicUrl ?? '',
+    })),
   }));
 }
 
 export function packagingItemsOut(ls?: FormPackagingItem[]): common_TechCardPackagingItem[] {
-  return (ls ?? []).map((l) => ({
-    key: l.key?.trim() || '',
-    usage: l.usage?.trim() || '',
-    packing: l.packing?.trim() || '',
-    size: l.size?.trim() || '',
-    qtyPerGarment: l.qtyPerGarment || 1,
-    bomItemId: wireInt(l.bomItemId),
-    note: l.note?.trim() || '',
-    mediaIds: [...(l.mediaIds ?? [])],
-  }));
+  return (ls ?? []).map(
+    (l) =>
+      ({
+        key: l.key?.trim() || '',
+        usage: l.usage?.trim() || '',
+        packing: l.packing?.trim() || '',
+        size: l.size?.trim() || '',
+        qtyPerGarment: l.qtyPerGarment || 1,
+        materialId: wireInt(l.materialId),
+        auxTechCardId: wireInt(l.auxTechCardId),
+        perOrder: !!l.perOrder,
+        pickedName: undefined,
+        pickedThumbnail: undefined,
+        colorwayIds: [...(l.colorwayIds ?? [])].filter((id) => id > 0),
+        bomItemId: wireInt(l.bomItemId),
+        bomLineKey: l.bomLineKey?.trim() || '',
+        note: l.note?.trim() || '',
+        mediaIds: [...(l.mediaIds ?? [])],
+      }) as common_TechCardPackagingItem,
+  );
 }

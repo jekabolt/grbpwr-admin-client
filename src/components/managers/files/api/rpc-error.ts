@@ -147,6 +147,16 @@ const RULES: Rule[] = [
     },
   },
   {
+    // entity.NewErrLibraryFileLabelArtwork → «library file is label artwork on a tech card: #1, #2»
+    when: 'library file is label artwork on a tech card',
+    say: (raw) => {
+      const ids = raw.match(/#\d+/g) ?? [];
+      return ids.length
+        ? `the file is label artwork on ${plural(ids.length, 'tech card')} ${ids.join(', ')} — replace it there first, then delete`
+        : 'the file is label artwork on a tech card — replace it there first, then delete';
+    },
+  },
+  {
     // entity.NewErrFileTopicInUse → «topic still has files: 1»
     when: 'topic still has files',
     say: (raw) => {

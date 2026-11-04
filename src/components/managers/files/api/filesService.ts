@@ -117,6 +117,11 @@ export const filesService = {
       withoutRole: req.withoutRole ?? false,
     }),
   getFile: (id: number) => adminService.GetLibraryFile({ id }),
+  getContent: (id: number) =>
+    adminService.GetLibraryFileContent({ id }).then((response) => ({
+      content: response.content ?? '',
+      tooLarge: !!response.tooLarge,
+    })),
   updateFile: (args: { id: number; fileName: string; topicIds: number[]; newTopics: string[] }) =>
     adminService.UpdateLibraryFile(args),
   deleteFile: (id: number) => adminService.DeleteLibraryFile({ id }),
@@ -128,16 +133,6 @@ export const filesService = {
    */
   assignTopics: (args: { fileIds: number[]; topicIds: number[]; newTopics: string[] }) =>
     adminService.AssignLibraryFileTopics(args),
-  /**
-   * ЗАМЕНЯЕТ набор владельцев файла целиком — это не «добавить владельца».
-   *
-   * Отправлять сюда пересечение текущих владельцев со списком `ListAdmins` НЕЛЬЗЯ: список
-   * людей больше не содержит отключённых аккаунтов, и такое «очищение» молча сняло бы
-   * владение с человека, который просто отключён. Набор берётся из самого файла
-   * (`LibraryFile.owners`) и меняется только теми кликами, которые человек сделал.
-   */
-  setOwners: (fileId: number, adminIds: number[]) =>
-    adminService.SetLibraryFileOwners({ fileId, adminIds }),
   // Архивные проекты копятся, роли нет: без архива ряд чипов растёт монотонно и со временем
   // делает холст хуже. Холст архив НЕ просит, экран словаря — просит.
   listTopics: (includeArchived = false) => adminService.ListFileTopics({ includeArchived }),

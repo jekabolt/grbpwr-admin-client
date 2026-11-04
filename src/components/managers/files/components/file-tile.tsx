@@ -1,4 +1,5 @@
 import type { LibraryFile } from 'api/proto-http/admin';
+import type { ReactNode } from 'react';
 import { cn } from 'lib/utility';
 import { Avatar, Pill, Text } from 'ui';
 import { ACCESS_LEVEL_BADGE, asAccessLevel } from '../api/accessService';
@@ -89,7 +90,7 @@ export function FileTile({
    */
   onPreviewError?: (url: string) => void;
   /** Досыл под подвал плитки — кнопка «построить заново» у состояния «превью не вышло». */
-  children?: React.ReactNode;
+  children?: ReactNode;
 }) {
   const name = file.fileName ?? '';
   const ext = extensionOf(name);
@@ -101,16 +102,9 @@ export function FileTile({
   // превью у такого типа — сбой отрисовки; у .zip первой страницы не существует, и подпись
   // «не вышло» на нём была бы обещанием, которое никто не сможет выполнить.
   const failed = !file.previewUrl && previewExpected(file.contentType ?? undefined, name);
-  /**
-   * Уровень доступа и число реплик — то, ради чего иначе пришлось бы открыть карточку.
-   *
-   * Уровень не секрет от того, кто файл ВИДИТ: ограниченный файл до чужой сетки просто не
-   * доезжает, поэтому бейдж здесь ничего не выдаёт — он объясняет, почему файла не видит сосед.
-   * `team` не помечается: обычное состояние не бейджат, иначе бейдж перестаёт что-либо значить.
-   */
+  /** Access is visible because restricted files never reach an unauthorized grid. */
   const level = asAccessLevel(file.accessLevel ?? undefined);
   const badge = level ? ACCESS_LEVEL_BADGE[level] : undefined;
-  const comments = Number(file.commentsCount ?? 0);
   /**
    * Выдержка заметки вместо кадра. Пустая у `.md`, залитого ФАЙЛОМ, а не набранного в
    * редакторе: сервер не читает содержимое на пути загрузки, и колонка дозаполнится первым
@@ -304,29 +298,8 @@ export function FileTile({
             {frameWord}
           </span>
         )}
-        {/* ОДНА ПОЛОСА НА ДВЕ ПЛАШКИ, а не две абсолютные метки в противоположных углах: на
-            узкой плитке (сетка вложений задачи начинается со 130px) «обсуждение · 128» и
-            шестибуквенное расширение наезжали бы друг на друга двумя чёрными прямоугольниками.
-            Расширение неприкосновенно и стоит справа, счётчик слева жмётся и обрезается.
-
-            Счётчик — НАД КАДРОМ, а не в подвале плитки: подвал у плитки в одну строку, и
-            четвёртый элемент в нём переносил бы её ровно у тех файлов, которые обсуждают, то
-            есть у самых нужных. Ноль не печатается: «0 replies» это не факт, а шум.
-            «discussion · N», а не «N replies»: склонение при числе живёт в модуле очереди
-            загрузки, и тащить её машину в плитку ради одного слова — плохой обмен. */}
         <span className='pointer-events-none absolute inset-x-1 bottom-1 flex items-end justify-between gap-1'>
-          {comments > 0 ? (
-            <Text
-              size='nano'
-              component='span'
-              title={`replies in the discussion: ${comments}`}
-              className='min-w-0 truncate bg-textColor px-1 uppercase text-bgColor tabular-nums'
-            >
-              discussion · {comments}
-            </Text>
-          ) : (
-            <span />
-          )}
+          <span />
           {/* Бейдж расширения поверх кадра: у картинки и pdf превью показывает содержимое, а
               чем файл открывать — нет. На плашке он избыточен, но снимать его там значило бы
               держать две разные плитки. */}
