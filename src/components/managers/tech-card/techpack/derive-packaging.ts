@@ -1,4 +1,8 @@
 import type { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
+import {
+  kindLabel,
+  packagingItemKinds,
+} from 'components/managers/tech-card/components/tech-card-options';
 import { wireInt } from 'components/managers/tech-card/components/wire-int';
 
 import { clean, colorwayName, mediaFromResolved, type ResolvedTechMedia } from './derive-shared';
@@ -36,12 +40,13 @@ export function derivePackaging(techCard: common_TechCard, sink?: GapSink, t: Pd
     mediaFromResolved(resolved.find((media) => wireInt(media.media?.id) === wireInt(id)));
   const items = (card?.packagingItems ?? []).map((item, index) => {
     const colorwayIds = (item.colorwayIds ?? []).map(wireInt).filter((id) => id > 0);
+    const kind = kindLabel(packagingItemKinds, clean(item.key)).replaceAll('_', ' ');
     return {
       key: `${index}-${clean(item.key)}-${wireInt(item.materialId)}-${wireInt(item.auxTechCardId)}`,
       number: index + 1,
       picture: mediaFull(item.pickedThumbnail) ?? storedMockup(item.mediaIds?.[0]),
-      item: clean(item.key).replaceAll('_', ' '),
-      what: clean(item.pickedName) || clean(item.key),
+      item: kind,
+      what: clean(item.pickedName) || kind,
       quantity: item.qtyPerGarment || 1,
       perOrder: !!item.perOrder,
       size: clean(item.size),
