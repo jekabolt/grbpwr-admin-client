@@ -304,6 +304,15 @@ export const kr = {
     hiddenSeam: '숨은 솔기',
     pairNumber: '페어 번호',
   },
+  cutStrips: {
+    title: '길이 재단',
+    step: '공정',
+    cutAt: '재단 길이 · {size}',
+    cutMmOf: '{name}, 재단 길이 mm',
+    allSizes: '전 사이즈',
+    unused: '공정에 미사용',
+    staleSeam: '봉제 길이 변경됨',
+  },
   measurements: {
     title: '치수',
     point: '측정점',

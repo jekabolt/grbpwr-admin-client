@@ -1,6 +1,19 @@
 import { accessService } from 'components/managers/files/api/accessService';
 import { browserUploadTransport } from 'components/managers/files/upload/transport';
 
+/** Give an existing library file the same non-expiring public link as a fresh label upload. */
+export async function sharePublicFile(
+  libraryFileId: number,
+): Promise<{ libraryFileId: number; publicUrl: string }> {
+  const res = await accessService.set({
+    fileId: libraryFileId,
+    level: 'link',
+    adminIds: [],
+    linkTtl: 0,
+  });
+  return { libraryFileId, publicUrl: res.access?.link?.url ?? '' };
+}
+
 /**
  * A file for a label's QR: into the library through the ordinary upload, then open by a secret link
  * with no expiry. An upload the link step failed on stays in the library, like any other upload.
@@ -25,6 +38,18 @@ export async function uploadPublicFile(
     onProgress: (fraction) => onProgress?.(fraction),
     signal: new AbortController().signal,
   });
+  return sharePublicFile(fileId);
+}
+
+/**
+ * The link of a file already in the library. A restricted file is refused: opening it would show it
+ * past the people it was closed to, and that is not this button's call.
+ */
+export async function publicLinkOf(fileId: number): Promise<string> {
+  const { access } = await accessService.get(fileId);
+  if (access?.level === 'people') throw new Error('restricted file');
+  const link = access?.link;
+  if (access?.level === 'link' && link?.url && !link.expiresAt && !link.expired) return link.url;
   const res = await accessService.set({ fileId, level: 'link', adminIds: [], linkTtl: 0 });
-  return { libraryFileId: fileId, publicUrl: res.access?.link?.url ?? '' };
+  return res.access?.link?.url ?? '';
 }

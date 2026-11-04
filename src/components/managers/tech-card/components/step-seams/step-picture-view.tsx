@@ -41,9 +41,16 @@ import { useFormContext, useWatch } from 'react-hook-form';
 import { plainEdges } from '../assembly-seams/words';
 import { posesOf, rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import { useCardSeamGraph } from '../card-unit-pictures';
+import { stripKeysOfCard } from '../cut-strips/strip-pieces';
+import {
+  ownStripKeys,
+  StripOverlay,
+  stripPadPx,
+  type StripWords,
+} from '../cut-strips/strip-picture';
 import type { TechCardFormData } from '../schema';
 import { nameSpot } from './name-spot';
-import { mmOnPoints } from './span-pick';
+import { mmOnPoints, repeatClickTarget } from './span-pick';
 import { fmtMm } from './step-seams-model';
 import { placementPictureGlyphsForStep, type ButtonholeOperation } from './buttonhole-glyph';
 import { PAIR_INK, pairNo } from './palette';
@@ -303,8 +310,9 @@ export function useCardPieceKeys(): ReadonlySet<string> {
   return useMemo(() => {
     const s = new Set<string>(geo?.pieces.keys() ?? []);
     for (const p of ctx?.techCard?.techCard?.pieces ?? []) if (p.lineKey) s.add(p.lineKey);
+    for (const key of stripKeysOfCard(ctx?.techCard)) s.add(key);
     return s;
-  }, [geo?.pieces, ctx?.techCard?.techCard?.pieces]);
+  }, [geo?.pieces, ctx?.techCard]);
 }
 
 /** The card's stored seam rows by key, server and pending alike. */
@@ -1258,8 +1266,9 @@ export function rangedPicturePoints(
         : sum + Math.hypot(point[0] - points[index - 1][0], point[1] - points[index - 1][1]),
     0,
   );
-  const start = (Math.max(0, Math.min(targetLength, range[0])) / targetLength) * total;
-  const end = (Math.max(start, Math.min(targetLength, range[1])) / targetLength) * total;
+  const fromMm = Math.max(0, Math.min(targetLength, range[0]));
+  const start = (fromMm / targetLength) * total;
+  const end = (Math.max(fromMm, Math.min(targetLength, range[1])) / targetLength) * total;
   const out: Pt2[] = [];
   let at = 0;
   for (let index = 1; index < points.length; index++) {
@@ -1644,8 +1653,9 @@ export function StepPictureSvg({
   actionLines = NO_ACTION_LINES,
   actionGlyphs = NO_ACTION_GLYPHS,
   noSeamText,
+  stripWords,
   nos = NO_NOS,
-  names,
+  names: givenNames,
   namesBelow,
   ghostName,
   hover,
@@ -1685,6 +1695,7 @@ export function StepPictureSvg({
   actionGlyphs?: readonly PictureActionGlyph[];
   /** Localized print wording. Screen pictures reuse the existing editor status. */
   noSeamText?: string;
+  stripWords?: StripWords;
   nos?: readonly NoMark[];
   names?: readonly string[];
   namesBelow?: boolean;
@@ -1836,7 +1847,30 @@ export function StepPictureSvg({
         : ownFit),
     [bounds, ghostPoints, ownFit],
   );
-  const fitPad = drawnActionGlyphs.length ? Math.max(pad, 7) : pad;
+  // A strip that is this step's own input carries its words itself, its host's name among them, so
+  // neither input's name is written twice, and the frame leaves room for those words.
+  const ownStrips = useMemo(() => ownStripKeys(layout.input, flatGeoms), [layout.input, flatGeoms]);
+  const names = useMemo(
+    () =>
+      ownStrips.size === 0 || !givenNames
+        ? givenNames
+        : givenNames.map((text, index) =>
+            [...ownStrips].some((key) => {
+              if (layout.input.get(key) === index) return true;
+              const host = layout.stripHosts?.get(key);
+              return (
+                !!host &&
+                layout.input.get(host) === index &&
+                flatGeoms.get(host)?.name.trim() === text.trim()
+              );
+            })
+              ? ''
+              : text,
+          ),
+    [flatGeoms, givenNames, layout.input, layout.stripHosts, ownStrips],
+  );
+  const stripRoom = ownStrips.size > 0 && look !== 'tile' ? stripPadPx(LOOK[look].font) : 0;
+  const fitPad = Math.max(drawnActionGlyphs.length ? Math.max(pad, 7) : pad, stripRoom);
   const vk = view?.k ?? 1;
   const vx = view?.x ?? 0;
   const vy = view?.y ?? 0;
@@ -2115,6 +2149,9 @@ export function StepPictureSvg({
   ]);
   // A second click on the same spot takes the edge of the layer below (owned pictures only).
   const lastPick = useRef<{ x: number; y: number; id: TargetId } | null>(null);
+  // A ref: the hit layer stays put while the hand changes.
+  const inHand = useRef<ReadonlySet<TargetId>>(new Set());
+  inHand.current = new Set(marks.filter((mark) => isPick(mark.tone)).map((mark) => mark.id));
   const pickAt = useCallback(
     (event: ReactMouseEvent<SVGPathElement>, id: TargetId): TargetId => {
       const { clientX: x, clientY: y } = event;
@@ -2142,9 +2179,7 @@ export function StepPictureSvg({
         .elementsFromPoint(x, y)
         .map((el) => el.getAttribute('data-seam-target'))
         .filter((hit): hit is TargetId => !!hit);
-      const last = lastPick.current;
-      const again = last && Math.hypot(last.x - x, last.y - y) <= 4 ? hits.indexOf(last.id) : -1;
-      const chosen = again >= 0 && hits.length > 1 ? hits[(again + 1) % hits.length] : id;
+      const chosen = repeatClickTarget(hits, id, lastPick.current, [x, y], inHand.current);
       lastPick.current = { x, y, id: chosen };
       return chosen;
     },
@@ -2691,6 +2726,17 @@ export function StepPictureSvg({
           {innerDoorPaths}
         </g>
       )}
+      <StripOverlay
+        pieces={pieces}
+        geoms={flatGeoms}
+        hosts={layout.stripHosts}
+        own={ownStrips}
+        font={L.font}
+        hair={L.hair}
+        height={h}
+        words={stripWords}
+        plain={look === 'tile'}
+      />
       {hover && (hoverRange || !marks.some((m) => m.id === hover)) && ptsOf(hover) && (
         <path
           d={pathOf(

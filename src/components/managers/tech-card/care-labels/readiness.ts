@@ -9,7 +9,6 @@
 //
 // Исключённый колорвей не несёт своих дыр в отчёт: его ленты не печатаются, и блок в нём ничего не
 // портит. Он оставляет одно предупреждение `colorway-excluded` — в README видно, что его нет.
-import { ROUTES } from 'constants/routes';
 import type { CareLabelData } from './adapter';
 import { variantSku } from './adapter';
 import { labelComposition } from './composition-override';
@@ -160,54 +159,4 @@ export function collectReadiness(input: ReadinessInput): Readiness {
     warnings: shown.filter((h) => h.level === 'warn'),
     canExport: blockers.length === 0,
   };
-}
-
-// ---------- двери ----------
-
-export type HoleDoor = { label: string; href: string };
-
-const DICTIONARY: ReadonlySet<string> = new Set([
-  'fibre-no-translation',
-  'fibre-unknown',
-  'fibre-by-name',
-  'en-fallback-name',
-]);
-const BOM: ReadonlySet<string> = new Set([
-  'part-no-composition',
-  'composition-empty',
-  'fibre-blend-code',
-  'pinned-material-no-composition',
-  'part-not-100',
-  'no-usage',
-  'equal-weight',
-  'mixed-units',
-  'legacy-free-text-composition',
-  'part-too-wide',
-]);
-const COLORWAYS: ReadonlySet<string> = new Set([
-  'piece-pin-differs',
-  'no-sku',
-  'country-unknown',
-  'colorway-not-active',
-]);
-const LABELS: ReadonlySet<string> = new Set([
-  'logo-svg-unsupported',
-  'logo-unavailable',
-  // Страна и имя цвета ставятся прямо на составнике (R-03, D-12).
-  'no-country',
-  'no-colour-name',
-  'care-empty',
-  'care-overflow',
-  'care-too-many-symbols',
-  'artwork-missing',
-]);
-
-/** Куда идти чинить дыру: словарь волокон, BOM, колорвеи или этикетки карточки. */
-export function holeDoor(h: Hole, techCardId: number): HoleDoor | null {
-  const card = `/tech-cards/${techCardId}`;
-  if (DICTIONARY.has(h.code)) return { label: 'open dictionary', href: ROUTES.dictionaries };
-  if (BOM.has(h.code)) return { label: 'open BOM', href: `${card}?tab=bom` };
-  if (COLORWAYS.has(h.code)) return { label: 'open colourways', href: `${card}?tab=colorways` };
-  if (LABELS.has(h.code)) return { label: 'open labels', href: `${card}?tab=labels` };
-  return null;
 }

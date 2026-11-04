@@ -40,3 +40,49 @@ test('environment allowlist replaces defaults and remains exact-host only', () =
   assert.equal(validateMediaUrl('https://files.grbpwr.com/a.webp', allowedHosts), null);
   assert.equal(validateMediaUrl('https://sub.media.example.com/a.webp', allowedHosts), null);
 });
+
+const PATH_STYLE = 'https://fra1.digitaloceanspaces.com';
+
+test('a path-style link passes as the bucket already on the list, with its signature intact', () => {
+  const signed = `${PATH_STYLE}/grbpwr/grbpwr-com-beta/files-library/a.png?X-Amz-Signature=a%2Fb&response-content-disposition=attachment%3B%20filename%2A%3DUTF-8%27%27a.png`;
+  assert.equal(validateMediaUrl(signed)?.href, signed);
+});
+
+test('a path-style link to anything else stays out', () => {
+  const rejected = [
+    `${PATH_STYLE}/other-bucket/a.png`,
+    `${PATH_STYLE}/grbpwr`,
+    `${PATH_STYLE}/grbpwr/`,
+    `${PATH_STYLE}/grbpwr/?list-type=2`,
+    `${PATH_STYLE}/`,
+    `${PATH_STYLE}//grbpwr/a.png`,
+    `${PATH_STYLE}/GRBPWR/a.png`,
+    `${PATH_STYLE}/gr%62pwr/a.png`,
+    `${PATH_STYLE}/grbpwr/../other-bucket/a.png`,
+    `${PATH_STYLE}/grbpwr/%2e%2e/other-bucket/a.png`,
+    `${PATH_STYLE}/grbpwr.evil.example/a.png`,
+    `${PATH_STYLE}:444/grbpwr/a.png`,
+    'http://fra1.digitaloceanspaces.com/grbpwr/a.png',
+    'https://user:pass@fra1.digitaloceanspaces.com/grbpwr/a.png',
+    'https://evil.fra1.digitaloceanspaces.com/grbpwr/a.png',
+    'https://nyc3.digitaloceanspaces.com/grbpwr/a.png',
+    'https://files.grbpwr.com.fra1.digitaloceanspaces.com/a.png',
+  ];
+
+  for (const rawUrl of rejected) assert.equal(validateMediaUrl(rawUrl), null, rawUrl);
+});
+
+test('the bucket a path-style link names must be on the list in force', () => {
+  const custom = mediaProxyAllowedHosts('media.example.com');
+  assert.equal(validateMediaUrl(`${PATH_STYLE}/grbpwr/a.png`, custom), null);
+
+  const other = mediaProxyAllowedHosts('other-bucket.fra1.digitaloceanspaces.com');
+  assert.ok(validateMediaUrl(`${PATH_STYLE}/other-bucket/a.png`, other));
+  assert.equal(validateMediaUrl(`${PATH_STYLE}/grbpwr/a.png`, other), null);
+});
+
+test('the region host itself never joins the list by a path', () => {
+  const hosts = mediaProxyAllowedHosts();
+  assert.equal(hosts.has('fra1.digitaloceanspaces.com'), false);
+  assert.equal(validateMediaUrl(`${PATH_STYLE}/a.png`), null);
+});

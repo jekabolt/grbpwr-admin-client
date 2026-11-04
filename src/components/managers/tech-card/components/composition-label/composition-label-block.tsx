@@ -5,21 +5,26 @@
 // правки открывается прямо под стороной, открыта всегда одна, сброс «↺ use derived» живёт только в
 // ней. Дыра рисуется рамкой на том месте ленты, которое она касается. Составник, не влезший на одну
 // ленту, показан всеми своими лентами (B, B2 …) — ровно столько, сколько уйдёт в ZIP.
-// Единственная кнопка шапки — «print labels ⎙»: страница ZIP. Страна без колорвея ставится прямо
-// здесь (в одно сохранение карточки, made-in.ts).
+// Единственная кнопка шапки — `print composition`: модалка печати. Лента живёт в модалке `Edit text`,
+// блок показывает строку этикетки и её artwork. Страна без колорвея ставится прямо в редакторе (в
+// одно сохранение карточки, made-in.ts); запись страны и выбор колорвея принадлежат блоку, чтобы
+// закрытие модалки не снимало их из очереди.
 import { useQueryClient } from '@tanstack/react-query';
 import type { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 import { SECTION } from 'constants/routes';
+import { notify } from 'lib/stores/store';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Link } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import {
   Button,
   Chip,
   ChipRow,
+  ConfirmationModal,
   GroupLabel,
   HeaderWarnings,
   Section,
@@ -34,12 +39,25 @@ import { isBlocking, type Hole } from '../../care-labels/holes';
 import { LABEL_PART_NAME } from '../../care-labels/label-parts';
 import { COMPANY_ADDRESS, L, QR_CAPTION, textWidth } from '../../care-labels/layout';
 import { previewASides, type PlannedSide } from '../../care-labels/pages';
+import { PrintCompositionModal } from '../../care-labels/print-modal';
 import { useLabelDictionary } from '../../care-labels/use-label-dictionary';
-import { setCareLabel, setCareLabelColorway } from '../form-writers';
-import type { FormCareLabel } from '../labels-schema';
+import { setCareLabel, setCareLabelColorway, upsertGarmentLabel } from '../form-writers';
+import type { FormCareLabel, FormGarmentLabel } from '../labels-schema';
 import type { TechCardFormData } from '../schema';
+import { COMPOSITION_LABEL_KEY, isCompositionLabel, type ArtworkFile } from '../sewn-label-model';
+import { bornLabelFacts } from '../sewn-label-row';
+import { useUndoHistory } from '../undo-history';
 import { useTechCardStaging } from '../useTechCardStaging';
 import { wireInt } from '../wire-int';
+import { ChooseFileModal } from './choose-file-modal';
+import type { ArtworkCellRef } from './composition-artwork';
+import {
+  artworkChoice,
+  filesAfterChoice,
+  filesWithOwn,
+  filesWithoutOwn,
+  type ArtworkChoice,
+} from './composition-artwork-model';
 import { CompositionLabelRow } from './composition-label-row';
 import { CareSymbolsEditor, LogoEditor, QrEditor } from './doors';
 import { DraftInput, DraftLines } from './editable';
@@ -107,6 +125,37 @@ const NAME: Record<LineKey, string> = {
 
 const sideName = (key: string) => key.replace('-', ' ');
 
+type TextEditorProps = {
+  techCardId: number | undefined;
+  canEdit: boolean;
+  model: ReturnType<typeof useCompositionLabel>;
+  picks: ReadonlyMap<number, string>;
+  setPicks: React.Dispatch<React.SetStateAction<ReadonlyMap<number, string>>>;
+  setLogoHint: (url: string) => void;
+};
+
+function useLabelCountries() {
+  const { dictionary } = useLabelDictionary();
+  return useMemo(
+    () =>
+      (dictionary?.countries ?? [])
+        .filter((c) => !!c.code)
+        .map((c) => ({
+          code: c.code!.toUpperCase(),
+          name: c.name || c.code!,
+          active: c.active !== false,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [dictionary?.countries],
+  );
+}
+
+type TextSnapshot = {
+  careLabel: TechCardFormData['careLabel'];
+  careInstructions: TechCardFormData['careInstructions'];
+  picks: ReadonlyMap<number, string>;
+};
+
 export function CompositionLabelBlock({
   techCard,
   techCardId,
@@ -119,52 +168,17 @@ export function CompositionLabelBlock({
   canEdit: boolean;
 }) {
   const { getValues, setValue, control } = useFormContext<TechCardFormData>();
-  const careLabel = useWatch({ control, name: 'careLabel' }) as FormCareLabel | undefined;
-  const { canWrite } = usePermissions();
-  const canStyle = canWrite(SECTION.products);
-  const { dictionary } = useLabelDictionary();
   const qc = useQueryClient();
   const staging = useTechCardStaging();
-  const { shaper } = useShaper();
+  const countries = useLabelCountries();
+  const undoHistory = useUndoHistory();
 
   // ── страна: выбор оператора до сохранения карточки ────────────────────────────────────────
   const [picks, setPicks] = useState<ReadonlyMap<number, string>>(EMPTY_PICKS);
   const [logoHint, setLogoHint] = useState<string>('');
   const model = useCompositionLabel({ techCard, countryPicks: picks, logoUrlHint: logoHint });
-  const { data, plan, readiness } = model;
-
-  // ── выбор колорвея / размера (только показ) ──────────────────────────────────────────────
-  const [cwId, setCwId] = useState<number | null>(null);
-  const [sizeId, setSizeId] = useState<number | null>(null);
-  const colorways = data?.colorways ?? [];
-  const sizes = data?.sizes ?? [];
-  const cw = colorways.find((c) => c.id === cwId) ?? colorways[0];
-  const size = sizes.find((s) => s.id === sizeId) ?? sizes[0];
-
-  const countries = useMemo(
-    () =>
-      (dictionary?.countries ?? [])
-        .filter((c) => !!c.code)
-        .map((c) => ({
-          code: c.code!.toUpperCase(),
-          name: c.name || c.code!,
-          active: c.active !== false,
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [dictionary?.countries],
-  );
-  // The picker offers active countries only; a stored code still resolves to its name when inactive.
-  const pickableCountries = useMemo(() => countries.filter((c) => c.active), [countries]);
+  const colorways = model.data?.colorways ?? [];
   const countryName = (code: string) => countries.find((c) => c.code === code)?.name ?? code;
-  // WORKSHOP COUNTRY OF ORIGIN (0414) — a SUGGESTION for a colourway with no country, never a pick.
-  // «Made in» is legal text: the suggestion is shown on the ribbon and in the strip, but it only
-  // becomes a staged write when a person confirms it, so the `no-country` hole keeps counting the
-  // colourway as needing someone until then. An inactive / unknown code suggests nothing.
-  const { data: workshopData } = useWorkshopSettings();
-  const workshopCountryCode = (workshopData?.settings?.countryOfOrigin ?? '').trim().toUpperCase();
-  const workshopCountry = workshopCountryCode
-    ? pickableCountries.find((c) => c.code === workshopCountryCode)
-    : undefined;
   const titleOf = (id: number) => {
     const c = colorways.find((x) => x.id === id);
     return c?.baseSku || c?.colourName || `#${id}`;
@@ -206,6 +220,209 @@ export function CompositionLabelBlock({
     },
     [staging],
   );
+
+  // ── artwork: режим читается из файлов строки, чип без файла живёт до перезагрузки ─────────
+  const garmentLabels = useWatch({ control, name: 'garmentLabels' }) as
+    | FormGarmentLabel[]
+    | undefined;
+  const files = useMemo(
+    () => garmentLabels?.find((r) => isCompositionLabel(r.key))?.files ?? [],
+    [garmentLabels],
+  );
+  const [pending, setPending] = useState<ArtworkChoice | null>(null);
+  const choice = artworkChoice(files, pending);
+  const writeFiles = (edit: (files: readonly ArtworkFile[]) => ArtworkFile[]) => {
+    const live = ((getValues('garmentLabels') ?? []) as FormGarmentLabel[]).find((r) =>
+      isCompositionLabel(r.key),
+    );
+    const next = edit(live?.files ?? []) as NonNullable<FormGarmentLabel['files']>;
+    undoHistory.cut('label-upload');
+    upsertGarmentLabel(
+      getValues,
+      setValue,
+      COMPOSITION_LABEL_KEY,
+      live ? { files: next } : { ...bornLabelFacts(COMPOSITION_LABEL_KEY), files: next },
+      { keepBare: true },
+    );
+  };
+  const pickChoice = (next: ArtworkChoice) => {
+    setPending(next);
+    // A chip only ever takes files away: the same length is the same row, nothing to save.
+    if (filesAfterChoice(files, next).length === files.length) return;
+    writeFiles((cur) => filesAfterChoice(cur, next));
+  };
+  // The last own file leaving does not change the mode: the row waits for the next one.
+  const clearFile = ({ colorwayId, sizeId }: ArtworkCellRef) => {
+    setPending(choice);
+    writeFiles((cur) => filesWithoutOwn(cur, colorwayId, sizeId));
+  };
+  const { canWrite } = usePermissions();
+  const [choosing, setChoosing] = useState<ArtworkCellRef | null>(null);
+  const openChooser = (cell: ArtworkCellRef) => {
+    if (!canWrite(SECTION.files)) {
+      notify({ sev: 'error', subject: '', text: '', bad: 'no files access' });
+      return;
+    }
+    setChoosing(cell);
+  };
+
+  // ── правка текста: всё пишется в форму сразу, отмена возвращает снимок ─────────────────────
+  const [editing, setEditing] = useState(false);
+  const snapshot = useRef<TextSnapshot | null>(null);
+  const openEditor = () => {
+    snapshot.current = {
+      careLabel: getValues('careLabel'),
+      careInstructions: getValues('careInstructions'),
+      picks,
+    };
+    setEditing(true);
+  };
+  const cancelEditor = () => {
+    // Поля черновика дописывают себя при снятии, поэтому возврат идёт после него.
+    flushSync(() => setEditing(false));
+    const was = snapshot.current;
+    if (!was) return;
+    setValue('careLabel', was.careLabel, { shouldDirty: true });
+    setValue('careInstructions', was.careInstructions, { shouldDirty: true });
+    setPicks(was.picks);
+  };
+
+  // ── печать: модалка, в том числе со старого адреса `/care-labels` (`print=1`) ─────────────
+  const [printing, setPrinting] = useState(false);
+  const [params, setParams] = useSearchParams();
+  const askedToPrint = params.get('print') === '1';
+  useEffect(() => {
+    if (!askedToPrint) return;
+    setPrinting(true);
+    setParams(
+      (cur) => {
+        const next = new URLSearchParams(cur);
+        next.delete('print');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [askedToPrint, setParams]);
+
+  return (
+    <Section
+      title='composition label'
+      question={<LegendHelp />}
+      action={
+        <Button
+          type='button'
+          variant='underline'
+          size='xs'
+          className='text-labelColor hover:text-textColor'
+          disabled={!techCardId}
+          data-composition-print=''
+          onClick={() => setPrinting(true)}
+        >
+          print composition
+        </Button>
+      }
+      className='w-full'
+    >
+      <div className='flex flex-col gap-6' data-composition-label=''>
+        <CompositionLabelRow
+          techCard={techCard}
+          plan={model.plan}
+          readiness={model.readiness}
+          skuOf={(id) => model.data?.colorways.find((c) => c.id === id)?.baseSku ?? ''}
+          canEdit={canEdit}
+          files={files}
+          choice={choice}
+          onChoice={pickChoice}
+          onChooseFile={openChooser}
+          onClearFile={clearFile}
+          onEditText={openEditor}
+        />
+      </div>
+      {editing ? (
+        <ConfirmationModal
+          open
+          onOpenChange={(next) => {
+            if (!next) setEditing(false);
+          }}
+          onConfirm={() => setEditing(false)}
+          onCancel={cancelEditor}
+          title='Edit text'
+          width='lg'
+          confirmLabel='save'
+        >
+          <CompositionTextEditor
+            techCardId={techCardId}
+            canEdit={canEdit}
+            model={model}
+            picks={picks}
+            setPicks={setPicks}
+            setLogoHint={setLogoHint}
+          />
+        </ConfirmationModal>
+      ) : null}
+      {choosing ? (
+        <ChooseFileModal
+          onClose={() => setChoosing(null)}
+          onChosen={(file) => writeFiles((cur) => filesWithOwn(cur, { ...choosing, ...file }))}
+        />
+      ) : null}
+      {printing && techCardId ? (
+        <PrintCompositionModal
+          techCardId={techCardId}
+          data={model.data}
+          files={files}
+          choice={choice}
+          onClose={() => setPrinting(false)}
+          onChooseFile={() => {
+            setPrinting(false);
+            openChooser({ colorwayId: 0, sizeId: 0 });
+          }}
+          onEditText={() => {
+            setPrinting(false);
+            openEditor();
+          }}
+        />
+      ) : null}
+    </Section>
+  );
+}
+
+/** Ленты выбранного варианта с дверями правки: само тело модалки `Edit text`. */
+function CompositionTextEditor({
+  techCardId,
+  canEdit,
+  model,
+  picks,
+  setPicks,
+  setLogoHint,
+}: TextEditorProps) {
+  const { getValues, setValue, control } = useFormContext<TechCardFormData>();
+  const careLabel = useWatch({ control, name: 'careLabel' }) as FormCareLabel | undefined;
+  const { canWrite } = usePermissions();
+  const canStyle = canWrite(SECTION.products);
+  const { shaper } = useShaper();
+  const { data, plan, readiness } = model;
+  const countries = useLabelCountries();
+
+  // ── выбор колорвея / размера (только показ) ──────────────────────────────────────────────
+  const [cwId, setCwId] = useState<number | null>(null);
+  const [sizeId, setSizeId] = useState<number | null>(null);
+  const colorways = data?.colorways ?? [];
+  const sizes = data?.sizes ?? [];
+  const cw = colorways.find((c) => c.id === cwId) ?? colorways[0];
+  const size = sizes.find((s) => s.id === sizeId) ?? sizes[0];
+
+  // The picker offers active countries only; a stored code still resolves to its name when inactive.
+  const pickableCountries = useMemo(() => countries.filter((c) => c.active), [countries]);
+  // WORKSHOP COUNTRY OF ORIGIN (0414) — a SUGGESTION for a colourway with no country, never a pick.
+  // «Made in» is legal text: the suggestion is shown on the ribbon and in the strip, but it only
+  // becomes a staged write when a person confirms it, so the `no-country` hole keeps counting the
+  // colourway as needing someone until then. An inactive / unknown code suggests nothing.
+  const { data: workshopData } = useWorkshopSettings();
+  const workshopCountryCode = (workshopData?.settings?.countryOfOrigin ?? '').trim().toUpperCase();
+  const workshopCountry = workshopCountryCode
+    ? pickableCountries.find((c) => c.code === workshopCountryCode)
+    : undefined;
 
   const isUnavailable = (c: { holes: readonly Hole[] }) =>
     c.holes.some((h) => h.code === 'colorway-unavailable');
@@ -602,7 +819,6 @@ export function CompositionLabelBlock({
             {...common}
             resetTitle={cw.colourNameDerived || 'the colourway name'}
             onReset={() => setCareLabelColorway(g, s, cw.id, { colourName: '' })}
-            foot='SKU and size are facts of the colourway and the size list · Enter saves · Esc cancels'
           >
             <div className='flex flex-wrap items-center gap-x-3 gap-y-2 uppercase'>
               <span className='text-labelColor'>{sku || 'no SKU'}</span>
@@ -641,15 +857,13 @@ export function CompositionLabelBlock({
             {...common}
             resetTitle='the dictionary prose'
             onReset={() => setCareLabel(g, s, { careProseLines: [] })}
-            foot='Esc cancels · leaving the field saves'
           >
             <div className='max-w-[560px]'>
               <DraftLines
                 ariaLabel='care text on the label'
                 lines={data?.care.prose ?? []}
                 rows={3}
-                placeholder='pick care symbols: the text follows them'
-                hint='one sentence per line · printed in capitals, three lines at most'
+                placeholder='care text'
                 onCommit={(t) =>
                   setCareLabel(g, s, {
                     careProseLines: linesOverride(t, data?.care.derivedProse ?? []),
@@ -666,15 +880,7 @@ export function CompositionLabelBlock({
           <EditorStrip
             key={key}
             {...common}
-            source={
-              picked
-                ? 'staged · saves with the card'
-                : cw.countryName
-                  ? 'from the colourway · a new pick saves with the card'
-                  : suggested
-                    ? 'missing · workshop suggests one'
-                    : 'missing · set it here'
-            }
+            source={picked ? 'staged' : cw.countryName ? 'from colourway' : 'missing'}
           >
             <MadeInValue
               countryName={cw.countryName}
@@ -750,14 +956,12 @@ export function CompositionLabelBlock({
             {...common}
             resetTitle={QR_CAPTION.join(' / ')}
             onReset={() => setCareLabel(g, s, { backCaptionLines: [] })}
-            foot='Esc cancels · leaving the field saves'
           >
             <div className='max-w-[420px]'>
               <DraftLines
                 ariaLabel='QR caption on the label back'
                 lines={caption}
                 rows={2}
-                hint='first line above the QR code, second line under it'
                 onCommit={(t) =>
                   setCareLabel(g, s, { backCaptionLines: linesOverride(t, QR_CAPTION) })
                 }
@@ -773,7 +977,6 @@ export function CompositionLabelBlock({
             {...common}
             resetTitle='the company address'
             onReset={() => setCareLabel(g, s, { addressLines: [] })}
-            foot='Esc cancels · leaving the field saves'
           >
             <div className='max-w-[420px]'>
               <DraftLines
@@ -809,32 +1012,6 @@ export function CompositionLabelBlock({
       doors.current.get(`${side.key}|${region.key}`)?.focus({ preventScroll: false }),
     );
   };
-
-  const printDoor = techCardId ? (
-    <Button asChild variant='underline' size='xs' className='text-labelColor hover:text-textColor'>
-      <Link
-        to={`/tech-cards/${techCardId}/care-labels`}
-        target='_blank'
-        rel='noopener'
-        data-composition-print=''
-        title='open the print page: it builds the ZIP from the saved card'
-      >
-        print labels ⎙
-      </Link>
-    </Button>
-  ) : (
-    <Button
-      type='button'
-      variant='underline'
-      size='xs'
-      className='text-labelColor hover:text-textColor'
-      disabled
-      data-composition-print=''
-      title='save the card first: the print page reads the saved card'
-    >
-      print labels ⎙
-    </Button>
-  );
 
   // ── вёрстка ───────────────────────────────────────────────────────────────────────────────
   const onStripKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -895,173 +1072,157 @@ export function CompositionLabelBlock({
   const shownRow = rows.find((r) => r.sides.some((sd) => sd.key === shown));
 
   return (
-    <Section
-      title='composition label'
-      question={<LegendHelp />}
-      action={printDoor}
-      className='w-full'
-    >
-      <div className='flex flex-col gap-6' data-composition-label=''>
-        {/* колорвей · размер · дыры */}
-        {colorways.length > 0 && (
-          <div className='flex flex-col gap-3'>
-            <div className='flex flex-wrap items-center gap-x-8 gap-y-3'>
-              <label className='flex items-center gap-3' data-colorway-select=''>
+    <div className='flex flex-col gap-6' data-composition-editor=''>
+      {/* колорвей · размер · дыры */}
+      {colorways.length > 0 && (
+        <div className='flex flex-col gap-3'>
+          <div className='flex flex-wrap items-center gap-x-8 gap-y-3'>
+            <label className='flex items-center gap-3' data-colorway-select=''>
+              <Text
+                size='micro'
+                variant='label'
+                component='span'
+                className='uppercase tracking-label'
+              >
+                colourway
+              </Text>
+              <Select
+                name='composition-colourway'
+                className='min-w-[200px]'
+                value={String(cw?.id ?? '')}
+                items={colorways.map((c) => ({
+                  value: String(c.id),
+                  label: `${c.colourName || c.baseSku || `#${c.id}`}${blockedCw(c.id) ? ' · ! blocks' : ''}`,
+                }))}
+                onValueChange={(v: string) => switchTo(() => setCwId(Number(v)))}
+              />
+            </label>
+            {sizes.length > 1 ? (
+              <label className='flex items-center gap-3' data-size-select=''>
                 <Text
                   size='micro'
                   variant='label'
                   component='span'
                   className='uppercase tracking-label'
                 >
-                  colourway
+                  size
                 </Text>
                 <Select
-                  name='composition-colourway'
-                  className='min-w-[200px]'
-                  value={String(cw?.id ?? '')}
-                  items={colorways.map((c) => ({
-                    value: String(c.id),
-                    label: `${c.colourName || c.baseSku || `#${c.id}`}${blockedCw(c.id) ? ' · ! blocks' : ''}`,
-                  }))}
-                  onValueChange={(v: string) => switchTo(() => setCwId(Number(v)))}
+                  name='composition-size'
+                  className='min-w-[96px]'
+                  value={String(size?.id ?? '')}
+                  items={sizes.map((z) => ({ value: String(z.id), label: z.label }))}
+                  onValueChange={(v: string) => switchTo(() => setSizeId(Number(v)))}
                 />
               </label>
-              {sizes.length > 1 ? (
-                <label className='flex items-center gap-3' data-size-select=''>
-                  <Text
-                    size='micro'
-                    variant='label'
-                    component='span'
-                    className='uppercase tracking-label'
-                  >
-                    size
-                  </Text>
-                  <Select
-                    name='composition-size'
-                    className='min-w-[96px]'
-                    value={String(size?.id ?? '')}
-                    items={sizes.map((z) => ({ value: String(z.id), label: z.label }))}
-                    onValueChange={(v: string) => switchTo(() => setSizeId(Number(v)))}
-                  />
-                </label>
-              ) : size ? (
-                <Text size='micro' variant='label' className='uppercase tracking-label'>
-                  size {size.label}
+            ) : size ? (
+              <Text size='micro' variant='label' className='uppercase tracking-label'>
+                size {size.label}
+              </Text>
+            ) : null}
+            <div className='ml-auto'>
+              {!readiness ? (
+                <Text size='micro' variant='label' data-hole-count=''>
+                  checking…
                 </Text>
-              ) : null}
-              <div className='ml-auto'>
-                {!readiness ? (
-                  <Text size='micro' variant='label' data-hole-count=''>
-                    checking…
-                  </Text>
-                ) : holes.length === 0 ? (
-                  <Text
-                    size='micro'
-                    variant='label'
-                    className='uppercase tracking-label'
-                    data-hole-count=''
-                  >
-                    no holes · prints as shown
-                  </Text>
-                ) : (
-                  // Дыры — дверь `! N` (HeaderWarnings): блокирующие красным и первыми, клик по
-                  // дыре с адресом ведёт к её строке на ленте.
-                  <span data-hole-count=''>
-                    <HeaderWarnings
-                      items={holes.map((h) => ({
-                        text: h.message,
-                        error: isBlocking(h),
-                        action: holeLine(h)
-                          ? { label: 'go to the line', onClick: () => goToHole(h) }
-                          : undefined,
-                      }))}
-                    />
-                  </span>
-                )}
-              </div>
+              ) : holes.length === 0 ? (
+                <Text
+                  size='micro'
+                  variant='label'
+                  className='uppercase tracking-label'
+                  data-hole-count=''
+                >
+                  no holes · prints as shown
+                </Text>
+              ) : (
+                // Дыры — дверь `! N` (HeaderWarnings): блокирующие красным и первыми, клик по
+                // дыре с адресом ведёт к её строке на ленте.
+                <span data-hole-count=''>
+                  <HeaderWarnings
+                    items={holes.map((h) => ({
+                      text: h.message,
+                      error: isBlocking(h),
+                      action: holeLine(h)
+                        ? { label: 'go to the line', onClick: () => goToHole(h) }
+                        : undefined,
+                    }))}
+                  />
+                </span>
+              )}
             </div>
           </div>
-        )}
-
-        {/* ленты */}
-        <div ref={workRef} className='flex min-w-0 flex-col gap-6' data-composition-preview=''>
-          {!cw ? (
-            <Text size='micro' variant='label'>
-              {techCardId
-                ? 'no colourways yet: the label draws once the style has one'
-                : 'save the card and add a colourway: the label draws from them'}
-            </Text>
-          ) : model.shaperFailed ? (
-            <Text size='micro' variant='errorLabel'>
-              the label fonts did not load: reload the page
-            </Text>
-          ) : rows.length === 0 || width === 0 ? (
-            <Text size='micro' variant='label' className='animate-pulse'>
-              typesetting the label…
-            </Text>
-          ) : twoUp ? (
-            <>
-              {aRow ? (
-                <div className='flex flex-col'>
-                  <GroupLabel flush>ribbon A · main label · 100 × 30 mm</GroupLabel>
-                  <div className='pt-2'>{bench(aRow)}</div>
-                </div>
-              ) : null}
-              <div className='flex flex-col'>
-                <GroupLabel
-                  flush
-                  action={
-                    <LabelNote>
-                      {bRows.some((r) => r.sides.some((sd) => sd.role === 'back' && !sd.blank))
-                        ? 'runs on: face → back → next label'
-                        : 'back prints blank'}
-                    </LabelNote>
-                  }
-                >
-                  <span data-b-count={bLabels.length}>ribbon B · composition · {bCountText}</span>
-                </GroupLabel>
-                <div className='flex flex-col gap-4 pt-2'>{bRows.map((r) => bench(r))}</div>
-              </div>
-            </>
-          ) : (
-            <div className='flex flex-col gap-3'>
-              <ChipRow>
-                {allSides.map((sd) => (
-                  <Chip
-                    key={sd.key}
-                    nonForm
-                    pressed={sd.key === shown}
-                    selected={sd.key === shown}
-                    data-side-chip={sd.key}
-                    onClick={() => switchTo(() => setShownSide(sd.key))}
-                  >
-                    {sideName(sd.key)}
-                  </Chip>
-                ))}
-              </ChipRow>
-              <Text
-                size='micro'
-                variant='label'
-                className='uppercase tracking-label'
-                data-b-count={bLabels.length}
-              >
-                {shownRow?.label === 'A'
-                  ? 'ribbon A · main label'
-                  : `ribbon B · composition · ${bCountText}`}
-              </Text>
-              {shownRow && shown ? bench(shownRow, shown) : null}
-            </div>
-          )}
         </div>
-        <CompositionLabelRow
-          techCard={techCard}
-          plan={model.plan}
-          readiness={model.readiness}
-          skuOf={(id) => model.data?.colorways.find((c) => c.id === id)?.baseSku ?? ''}
-          canEdit={canEdit}
-        />
+      )}
+
+      {/* ленты */}
+      <div ref={workRef} className='flex min-w-0 flex-col gap-6' data-composition-preview=''>
+        {!cw ? (
+          <Text size='micro' variant='label'>
+            no colourways
+          </Text>
+        ) : model.shaperFailed ? (
+          <Text size='micro' variant='errorLabel'>
+            label fonts failed: reload page
+          </Text>
+        ) : rows.length === 0 || width === 0 ? (
+          <Text size='micro' variant='label' className='animate-pulse'>
+            typesetting the label…
+          </Text>
+        ) : twoUp ? (
+          <>
+            {aRow ? (
+              <div className='flex flex-col'>
+                <GroupLabel flush>ribbon A · main label · 100 × 30 mm</GroupLabel>
+                <div className='pt-2'>{bench(aRow)}</div>
+              </div>
+            ) : null}
+            <div className='flex flex-col'>
+              <GroupLabel
+                flush
+                action={
+                  <LabelNote>
+                    {bRows.some((r) => r.sides.some((sd) => sd.role === 'back' && !sd.blank))
+                      ? 'runs on: face → back → next'
+                      : 'back prints blank'}
+                  </LabelNote>
+                }
+              >
+                <span data-b-count={bLabels.length}>ribbon B · composition · {bCountText}</span>
+              </GroupLabel>
+              <div className='flex flex-col gap-4 pt-2'>{bRows.map((r) => bench(r))}</div>
+            </div>
+          </>
+        ) : (
+          <div className='flex flex-col gap-3'>
+            <ChipRow>
+              {allSides.map((sd) => (
+                <Chip
+                  key={sd.key}
+                  nonForm
+                  pressed={sd.key === shown}
+                  selected={sd.key === shown}
+                  data-side-chip={sd.key}
+                  onClick={() => switchTo(() => setShownSide(sd.key))}
+                >
+                  {sideName(sd.key)}
+                </Chip>
+              ))}
+            </ChipRow>
+            <Text
+              size='micro'
+              variant='label'
+              className='uppercase tracking-label'
+              data-b-count={bLabels.length}
+            >
+              {shownRow?.label === 'A'
+                ? 'ribbon A · main label'
+                : `ribbon B · composition · ${bCountText}`}
+            </Text>
+            {shownRow && shown ? bench(shownRow, shown) : null}
+          </div>
+        )}
       </div>
-    </Section>
+    </div>
   );
 }
 

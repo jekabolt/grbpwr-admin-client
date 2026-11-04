@@ -201,6 +201,12 @@ export function resolveSeamDecisions(
     const c = ctxOf(a.piece);
     const f = frameOfPiece.get(a.piece) ?? 'asis';
     if (!c) return { ok: false, why: `${name(a.piece)} is not on the card` };
+    // A cut strip's rectangle is redrawn from its length, so its outline is no evidence of a moved
+    // pattern: the edge named stays the edge meant. Whether the length is right is the length check's.
+    if (c.piece.cutStrip) {
+      const run = c.runs.find((candidate) => candidate.id === a.edgeHint);
+      if (run) return { ok: true, hit: hitOf(a, run, 'hint', 'asis', 0) };
+    }
     const opts2 = optionsIn(c, a, f);
     const best = opts2[0];
     if (!best || best.fit > T.fitMax)
@@ -359,7 +365,8 @@ export function resolveSeamDecisions(
       s.kind === 'partial' &&
       Math.abs(moved) <= SKELETON.lenRelEased &&
       Math.min(lenA, lenB) <= Math.max(lenA, lenB);
-    if (Math.abs(moved) > T.ratioDrift && !partialHolds) {
+    const onStrip = [...s.sideA, ...s.sideB].some((anchor) => byKey.get(anchor.piece)?.cutStrip);
+    if (Math.abs(moved) > T.ratioDrift && !partialHolds && !onStrip) {
       const longer = moved > 0 ? s.sideA : s.sideB;
       const w = `${label(s)}: stale · ${[...new Set(longer.map((a) => name(a.piece)))].join(' + ')} is now ${Math.abs(moved * 100).toFixed(1)} % longer against its partner than when ${s.status} — re-confirm`;
       stale.push({ seam: s, reason: 'drift', stillFits: false, words: w });

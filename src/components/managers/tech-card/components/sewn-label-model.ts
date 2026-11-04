@@ -50,15 +50,23 @@ const axisId = (v: unknown) => wireInt(v as number | undefined);
 const sameCell = (f: ArtworkFile, colorwayId: number, sizeId: number) =>
   axisId(f.colorwayId) === colorwayId && axisId(f.sizeId) === sizeId;
 
+/** A file a person chose: the generator always writes a source hash, a person never does. */
+export const isOwnArtworkFile = (f: ArtworkFile): boolean =>
+  !f.sourceHash && axisId(f.libraryFileId) > 0;
+
 /**
- * The composition label is always per colour and size. Any other row splits only along an axis the
- * card actually has: a stored `per colour` on a card left with one colour reads as «one for all».
+ * The composition label is per colour and size, unless one own file stands for everything. Any other
+ * row splits only along an axis the card actually has: a stored `per colour` on a card left with one
+ * colour reads as «one for all».
  */
 export function artworkMode(
   row: ArtworkRow,
   axes: LabelAxes,
 ): { perColour: boolean; perSize: boolean } {
-  if (isCompositionLabel(row.key)) return { perColour: true, perSize: true };
+  if (isCompositionLabel(row.key)) {
+    const oneFile = (row.files ?? []).some((f) => isOwnArtworkFile(f) && sameCell(f, 0, 0));
+    return { perColour: !oneFile, perSize: !oneFile };
+  }
   return {
     perColour: !!row.artworkPerColorway && axes.colorways.length >= 2,
     perSize: !!row.artworkPerSize && axes.sizes.length > 0,

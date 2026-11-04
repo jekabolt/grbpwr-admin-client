@@ -27,6 +27,7 @@ import { derivePieces } from './derive-pieces';
 import { collectPdfGaps, type Gap } from './gaps';
 import type { QcSeamDelta } from './derive-qc';
 import { AssemblyPage } from './pages/assembly';
+import { CutStripsPage } from './pages/cut-strips';
 import { ColourwaysContent, ColourwaysPage } from './pages/colourways';
 import { CoverPage, type TechpackTocItem } from './pages/cover';
 import { LabelsPage } from './pages/labels';
@@ -312,6 +313,13 @@ export function TechpackDocument({
         />
         <PackagingPage {...page} n='05b' />
         <AssemblyPage {...page} n='06' model={model} pdfGaps={pdfGaps} onLaidOut={setLaidOut} />
+        <CutStripsPage
+          {...page}
+          n='06b'
+          assembly={model}
+          sizeNames={sizing.sizeNames}
+          orderSizes={sizing.orderSizes}
+        />
         <MeasurementsPage
           {...page}
           n='08'

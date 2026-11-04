@@ -351,6 +351,15 @@ export const en = {
     hiddenSeam: 'hidden seam',
     pairNumber: 'pair no.',
   },
+  cutStrips: {
+    title: 'cut to length',
+    step: 'step',
+    cutAt: 'cut · {size}',
+    cutMmOf: '{name}, cut mm',
+    allSizes: 'all sizes',
+    unused: 'strip in no step',
+    staleSeam: 'seam length stale',
+  },
   measurements: {
     title: 'measurements',
     point: 'point',

@@ -77,7 +77,6 @@ import { DetailsEditor } from './details-editor';
 import { IssuesField } from './issues-field';
 import { AssemblyField } from './assembly-field';
 import { LabelsBlock, PackagingBlock } from './labels-blocks';
-import { PackagingRecipeField } from './packaging-recipe-field';
 import { StyleProjects } from './style-projects';
 import { TechCardTasksPanel } from './tech-card-tasks-panel';
 import {
@@ -314,6 +313,7 @@ const ERROR_TAB: Record<string, TabId> = {
   // The size range moved to its own SIZES tab (spec band), with the measurement chart.
   sizeIds: 'sizes',
   bomItems: 'bom',
+  cutStrips: 'studio',
   // Cut pieces (and their DXF block aliases) render on PATTERNS. A `pieces.N.*` violation routed
   // anywhere else raises a toast naming a field nobody can see.
   pieces: 'patterns',
@@ -4300,21 +4300,15 @@ export function TechCardForm({
                   canEdit={canWrite(SECTION.techCards) && !frozen}
                 />
               </div>
-              {/* Assembly bill + packaging recipe are per-style, managed via their own RPCs — they
-                need a saved card id. For a brand-new card, prompt to Save (which lands back here)
-                instead of silently hiding them, so the user is never left wondering. */}
+              {/* Assembly bill is per-style, managed via its own RPC — it
+                needs a saved card id. For a brand-new card, prompt to Save (which lands back here)
+                instead of silently hiding it, so the user is never left wondering. */}
               {isEditMode && numId ? (
                 <>
                   <Section title='assembly — on-garment items (labels / tags)'>
                     <AssemblyField
                       styleId={numId}
                       sizeIds={(sizeIdsW as number[] | undefined) ?? []}
-                      canEdit={canWrite(SECTION.techCards) && !frozen}
-                    />
-                  </Section>
-                  <Section title='packaging recipe'>
-                    <PackagingRecipeField
-                      techCardId={numId}
                       canEdit={canWrite(SECTION.techCards) && !frozen}
                     />
                   </Section>

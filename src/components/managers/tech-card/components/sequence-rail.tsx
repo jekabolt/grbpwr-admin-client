@@ -29,7 +29,7 @@ import { type FoundPiece } from './nesting/dxf-geometry';
 import { operationHeading, seamClassInherits, seamClassLabel } from './operation-options';
 import type { WorkCatalog } from './operation-work';
 import { pieceRefKey } from './piece-block-refs';
-import { PieceRef, useFormPieces } from './piece-picker';
+import { PieceRef, useFormAssemblyPieces } from './piece-picker';
 import { PieceSilhouette, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
 import { StepIconCell } from './step-icon-tiles';
@@ -196,7 +196,7 @@ function RailStep({
   // PlacementSync was trying to achieve by writing the names into the row.
   const pieceKeys = (useWatch({ control, name: `operations.${index}.inputKeys` }) ??
     []) as string[];
-  const allPieces = useFormPieces();
+  const allPieces = useFormAssemblyPieces();
   const linkedPieces = pieceKeys
     .map((k) => allPieces.find((pc) => pc.lineKey === k))
     .filter((p): p is PieceRef => !!p);

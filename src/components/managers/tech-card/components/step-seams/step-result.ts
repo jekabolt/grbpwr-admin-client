@@ -6,6 +6,7 @@ import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { compose, IDENTITY } from 'lib/assembly-skeleton/union/affine';
 import { poseAnchorOf, poseOf, type SeamLayer, type StoredPose, type StoredSeam } from 'lib/seams';
 
+import { anchorsNameStrip, stripHostUnder } from '../cut-strips/strip-place';
 import { cardFoldsOf, foldOnceOf, type CardFolds, type StepFolds } from './step-folds';
 import { handsFromSeams } from './step-hand';
 import { inputGroups, type FormOpLike, type InputGroup } from './step-seams-model';
@@ -220,6 +221,11 @@ function applyCurrentPoses(
   pinPoses(layout.T, pins, geoms, [], {
     groupOf: (piece, host) => poseBlockGroup(piece, host, { blocks: inputs, hung: layout.hung }),
   });
+  // A strip put on a piece by hand reads like one sewn to it: the host's name, the host's dimension.
+  for (const piece of pins.keys()) {
+    const host = geoms.get(piece)?.cutStrip ? stripHostUnder(piece, layout.T, geoms) : null;
+    if (host) layout.stripHosts = new Map(layout.stripHosts ?? []).set(piece, host);
+  }
   before.forEach((snapshot, groupIndex) => {
     if (!snapshot) return;
     const after = layout.T.get(snapshot.first);
@@ -410,7 +416,11 @@ function collidingOfStep(
   const laid = new Set<string>();
   const notLaid = new Map<string, [number, number]>();
   for (const { row } of stored) {
-    const lies = seamIsLaid(row, transforms, geoms);
+    // A strip lies inside its host, not edge to edge, and that is where its row wants it.
+    const lies =
+      anchorsNameStrip(row.sideA, geoms) ||
+      anchorsNameStrip(row.sideB, geoms) ||
+      seamIsLaid(row, transforms, geoms);
     for (const a of blocksOf(row.sideA))
       for (const b of blocksOf(row.sideB)) {
         if (a === b) continue;

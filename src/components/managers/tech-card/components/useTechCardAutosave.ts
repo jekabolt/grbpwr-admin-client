@@ -954,6 +954,7 @@ function pinRowKeys(card: common_TechCard): common_TechCard {
     techCard: {
       ...tc,
       bomItems: pin(tc.bomItems, 'lineKey', 'bom#'),
+      cutStrips: pin(tc.cutStrips, 'lineKey', 'strip#'),
       pieces: pin(tc.pieces, 'lineKey', 'piece#'),
       ...(tc.construction && eq
         ? {

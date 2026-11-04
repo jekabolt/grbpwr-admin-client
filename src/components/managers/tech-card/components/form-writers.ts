@@ -29,14 +29,15 @@ import type { TechCardFormData } from './schema';
 import { packagingItemRank } from './tech-card-options';
 
 /**
- * ДВА ПИСАТЕЛЯ ФОРМЫ, КОТОРЫХ ТЕПЕРЬ РОВНО ПО ОДНОМУ.
+ * ПИСАТЕЛИ СТРОК ФОРМЫ, КОТОРЫХ ТЕПЕРЬ РОВНО ПО ОДНОМУ.
  *
- * Здесь не заведено ни одного нового правила — сюда ПЕРЕЕХАЛИ два уже работавших: upsert строки
+ * Первые два правила сюда ПЕРЕЕХАЛИ: upsert строки
  * `details[]` по ключу (жил дважды: в `construction-general-info.tsx` и в `details-editor.tsx`) и
  * болванка строки `bomItems[]` (жила в `bom-field.tsx` как `emptyBomItem` + `lineKey: ulid()`
- * на месте вызова).
+ * на месте вызова). Болванка `cutStrips[]` живёт здесь по тому же закону: отметка материала и
+ * будущие потребители должны рождать одну и ту же полную строку, с одним клиентским ключом.
  *
- * ⚠ ТРЕТЬИМ ЗДЕСЬ ЖИЛО РОЖДЕНИЕ СТРОКИ `callouts[]`, И ЕГО БОЛЬШЕ НЕТ. Конструктор пережил снос
+ * ⚠ РАНЬШЕ ЗДЕСЬ ЖИЛО РОЖДЕНИЕ СТРОКИ `callouts[]`, И ЕГО БОЛЬШЕ НЕТ. Конструктор пережил снос
  * своей таблицы (B-11) ровно потому, что им же рождал строки черновик construction; B-13 снял и
  * это — «DRAFT OF THE CONSTRUCTION не должен добавлять коллауты», — и последний вызывающий ушёл
  * вместе с веткой записи. Писатель без вызывающего — не запас, а обещание: он молча расходится со
@@ -167,6 +168,26 @@ export function bornBomLine(
   return { ...emptyBomItem, ...(values ?? {}), lineKey: ulid() };
 }
 
+type FormCutStrip = NonNullable<TechCardFormData['cutStrips']>[number];
+
+export const emptyCutStrip: FormCutStrip = {
+  lineKey: '',
+  bomLineKey: '',
+  lengthMode: 'per_size' as const,
+  seamKey: '',
+  fitPct: '100',
+  overlapMm: '0',
+  widthMm: '',
+  oneLengthMm: '',
+  qty: 1,
+  sizes: [],
+};
+
+/** Its identity is available to other rows in the same unsaved card. */
+export function bornCutStrip(bomLineKey: string): FormCutStrip {
+  return { ...emptyCutStrip, lineKey: ulid(), bomLineKey: bomLineKey.trim() };
+}
+
 /**
  * Patch ONE BOM line, found by its `lineKey`, in the LIVE form (`getValues`, not a render snapshot).
  * The row keeps every field the patch does not name — `id` and `lineKey` included, so a line still
@@ -211,6 +232,11 @@ export type {
 
 const blankGarmentLabel = (key: string): FormGarmentLabel => ({
   key,
+  source: '',
+  kind: '',
+  madeBy: '',
+  printMethod: '',
+  lengthCm: '',
   placement: '',
   attachment: '',
   folding: '',
@@ -380,6 +406,19 @@ export function upsertPackagingItem(
   const inserted = insertPackagingItemByRank(cur, merged);
   setValue('packagingItems', inserted.rows as never, { shouldDirty: true });
   return inserted.index;
+}
+
+/** Swaps two rows of the list: earlier / later on the shelf, the saved order follows the list. */
+export function movePackagingItem(
+  getValues: UseFormGetValues<TechCardFormData>,
+  setValue: UseFormSetValue<TechCardFormData>,
+  from: number,
+  to: number,
+): void {
+  const cur = ((getValues('packagingItems') ?? []) as FormPackagingItem[]).slice();
+  if (!cur[from] || !cur[to]) return;
+  [cur[from], cur[to]] = [cur[to], cur[from]];
+  setValue('packagingItems', cur as never, { shouldDirty: true });
 }
 
 export function removePackagingItem(

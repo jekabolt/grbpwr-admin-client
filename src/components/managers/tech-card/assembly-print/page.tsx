@@ -13,6 +13,10 @@
 // `size` — свой размер файла по одной стороне (вторая из пропорции), без него файл размером с лист.
 import { PrintDegradedNotice } from 'components/managers/print/degraded-notice';
 import { depStatus, usePrintReady, type PrintDep } from 'components/managers/print/use-print-ready';
+import {
+  cutStripsOfCard,
+  stripRefsOf,
+} from 'components/managers/tech-card/components/cut-strips/strip-pieces';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES } from 'constants/routes';
 import type { common_TechCard, common_TechCardInsert } from 'api/proto-http/admin';
@@ -215,7 +219,11 @@ function Document({
   }, [wantShapes, hasDxf, isLoading, error, onDeps, form, settling]);
 
   const M = useMemo(
-    () => assemblyPrintModel(printInput(techCard.techCard, workCatalog)),
+    () =>
+      assemblyPrintModel({
+        ...printInput(techCard.techCard, workCatalog),
+        strips: stripRefsOf(cutStripsOfCard(techCard), techCard.techCard?.bomItems ?? []),
+      }),
     [techCard, workCatalog],
   );
   const shapeOf = useMemo<ShapeLookup>(() => {

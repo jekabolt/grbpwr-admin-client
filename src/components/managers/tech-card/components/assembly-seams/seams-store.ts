@@ -27,6 +27,10 @@ import {
 import { useEffect } from 'react';
 import { create } from 'zustand';
 
+import { rowTouchesStrip } from '../cut-strips/strip-pieces';
+
+const NO_STRIPS: ReadonlySet<string> = new Set();
+
 export type PendingOp = { kind: 'upsert'; row: StoredSeam } | { kind: 'delete'; row?: StoredSeam };
 export type PosePendingOp =
   | { kind: 'upsert'; row: StoredPose }
@@ -214,10 +218,12 @@ export function useHydrateSeams(
  */
 export function cardSeamDecisions(
   facts: SkeletonFacts,
+  stripKeys?: ReadonlySet<string>,
 ): ((pieces: readonly PieceGeom[]) => SeamDecisions) | undefined {
   const s = useSeamsStore.getState();
   useSeamsStore.setState({ facts, grainDeg: grainDegOf(facts) });
-  const rows = rowsOf(s);
+  // A strip's seam is not the garment's: its piece is out of this read, so it would come back orphan.
+  const rows = rowsOf(s).filter((row) => !rowTouchesStrip(row, stripKeys ?? NO_STRIPS));
   const d = decisionsFor(rows, facts, (resolved) => useSeamsStore.setState({ resolved }));
   if (!d) useSeamsStore.setState({ resolved: null });
   return d;
