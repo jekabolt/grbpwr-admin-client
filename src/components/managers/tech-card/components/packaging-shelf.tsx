@@ -33,8 +33,6 @@ import {
   Textarea,
   Tile,
   Tiles,
-  PLACEHOLDER_SURFACE,
-  placeholderClass,
 } from 'ui';
 
 import { packagingItemKind } from './bom-kind';
@@ -121,56 +119,56 @@ function PackedPhoto({
     purpose: 'packed photo',
     onMedia: save,
   });
-  const face = url ? (
-    <div className='overflow-hidden border border-borderColor bg-bgColor'>
-      <Media src={url} alt='packed photo' aspectRatio='4/3' fit='contain' />
-    </div>
-  ) : (
-    <div
-      style={PLACEHOLDER_SURFACE}
-      className={`${placeholderClass({ dashed: true })} aspect-[4/3] w-full`}
-    >
-      <Text size='micro' variant='label'>
-        {intake.dragging ? 'drop photo' : '+ photo'}
-      </Text>
-    </div>
-  );
+  const thumb = <Thumb url={url} alt='packed photo' className='size-6.5' />;
 
-  if (disabled) return face;
+  if (disabled)
+    return (
+      <Field label='packed photo'>
+        {url ? (
+          thumb
+        ) : (
+          <Text size='micro' variant='label'>
+            —
+          </Text>
+        )}
+      </Field>
+    );
   return (
-    <div {...intake.regionHandlers} className='relative'>
-      <MediaSelector
-        label='+ photo'
-        purpose='packed photo'
-        aspectRatio={['Custom']}
-        allowMultiple={false}
-        showVideos={false}
-        saveSelectedMedia={save}
-        trigger={
-          <Button
-            type='button'
-            variant='default'
-            className='block w-full p-0 text-left'
-            aria-label='packed photo'
-          >
-            {face}
-          </Button>
-        }
-      />
-      {!!packedMediaId && (
-        <Close
-          size='sm'
-          aria-label='remove packed photo'
-          className='absolute right-1 top-1 bg-bgColor'
-          onClick={() =>
-            setValue('packaging.packedMediaId', 0, {
-              shouldDirty: true,
-            })
+    <Field label='packed photo'>
+      <div {...intake.regionHandlers} className='flex items-center gap-1'>
+        <MediaSelector
+          label='+ photo'
+          purpose='packed photo'
+          aspectRatio={['Custom']}
+          allowMultiple={false}
+          showVideos={false}
+          saveSelectedMedia={save}
+          trigger={
+            url ? (
+              <Button type='button' variant='default' className='p-0' aria-label='packed photo'>
+                {thumb}
+              </Button>
+            ) : (
+              <Chip dashed className='h-6.5'>
+                {intake.dragging ? 'drop photo' : '+ photo'}
+              </Chip>
+            )
           }
         />
-      )}
-      {intake.dialog}
-    </div>
+        {!!packedMediaId && (
+          <Close
+            size='sm'
+            aria-label='remove packed photo'
+            onClick={() =>
+              setValue('packaging.packedMediaId', 0, {
+                shouldDirty: true,
+              })
+            }
+          />
+        )}
+        {intake.dialog}
+      </div>
+    </Field>
   );
 }
 
@@ -571,61 +569,62 @@ export function PackagingShelf({
   return (
     <>
       <GroupLabel flush>packed</GroupLabel>
-      <div className='mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2'>
-        <div className='grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3'>
-          <Field label='ships'>
-            <ChipRow>
-              <Chip
-                selected={shipsOnHanger}
-                pressed={shipsOnHanger}
-                disabled={!canEdit}
-                onClick={() => setShips(true)}
-              >
-                on hanger
-              </Chip>
-              <Chip
-                selected={!shipsOnHanger}
-                pressed={!shipsOnHanger}
-                disabled={!canEdit}
-                onClick={() => setShips(false)}
-              >
-                folded
-              </Chip>
-            </ChipRow>
+      <div className='mt-3 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3'>
+        <Field label='ships'>
+          <ChipRow>
+            <Chip
+              className='h-6.5'
+              selected={shipsOnHanger}
+              pressed={shipsOnHanger}
+              disabled={!canEdit}
+              onClick={() => setShips(true)}
+            >
+              on hanger
+            </Chip>
+            <Chip
+              className='h-6.5'
+              selected={!shipsOnHanger}
+              pressed={!shipsOnHanger}
+              disabled={!canEdit}
+              onClick={() => setShips(false)}
+            >
+              folded
+            </Chip>
+          </ChipRow>
+        </Field>
+        {!shipsOnHanger && (
+          <Field label='fold'>
+            <Select
+              name='packaging.foldingMethod'
+              className='whitespace-nowrap'
+              value={folding || 'folded in half'}
+              disabled={!canEdit}
+              items={foldingMethodOptions
+                .filter((option) => option !== 'on a hanger')
+                .map((option) => ({ value: option, label: option }))}
+              onValueChange={(value: string | undefined) =>
+                setValue('packaging.foldingMethod', value ?? '', { shouldDirty: true })
+              }
+            />
           </Field>
-          {!shipsOnHanger && (
-            <Field label='fold'>
-              <Select
-                name='packaging.foldingMethod'
-                value={folding || 'folded in half'}
-                disabled={!canEdit}
-                items={foldingMethodOptions
-                  .filter((option) => option !== 'on a hanger')
-                  .map((option) => ({ value: option, label: option }))}
-                onValueChange={(value: string | undefined) =>
-                  setValue('packaging.foldingMethod', value ?? '', { shouldDirty: true })
-                }
-              />
-            </Field>
-          )}
-          <InputField name='packaging.packedSize' label='packed size' disabled={!canEdit} />
-          <InputField
-            name='packaging.weightNetGrams'
-            label='net weight (g)'
-            type='number'
-            valueAsNumber
-            keyboardRestriction={/[0-9]/}
-            disabled={!canEdit}
-          />
-          <InputField
-            name='packaging.weightGrossGrams'
-            label='gross weight (g)'
-            type='number'
-            valueAsNumber
-            keyboardRestriction={/[0-9]/}
-            disabled={!canEdit}
-          />
-        </div>
+        )}
+        <InputField name='packaging.packedSize' label='packed size' disabled={!canEdit} />
+        <InputField
+          name='packaging.weightNetGrams'
+          label='net weight (g)'
+          type='number'
+          valueAsNumber
+          keyboardRestriction={/[0-9]/}
+          disabled={!canEdit}
+        />
+        <InputField
+          name='packaging.weightGrossGrams'
+          label='gross weight (g)'
+          type='number'
+          valueAsNumber
+          keyboardRestriction={/[0-9]/}
+          disabled={!canEdit}
+        />
         <PackedPhoto resolvedMedia={resolvedMedia} disabled={!canEdit} />
       </div>
 
