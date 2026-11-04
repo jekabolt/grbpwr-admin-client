@@ -1,9 +1,9 @@
-import { useMemo, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { DataTable, EmptyCell, GroupLabel, SectionHeader } from 'ui';
 
 import { derivePackaging, type PackagingModel } from '../derive-packaging';
 import { own, useT, type PdfT } from '../i18n';
-import { TechpackSheet, type TechpackPageProps } from '../sheet';
+import { continuedTitle, TechpackSheet, type TechpackPageProps } from '../sheet';
 import { Missing } from './bits';
 
 function Fact({ label, value }: { label: string; value: ReactNode }) {
@@ -39,7 +39,7 @@ function ItemsTable({
             {t('packaging.what')}
           </th>
           <th className='w-8'>{t('common.quantity')}</th>
-          <th className='w-24'>{t('packaging.per')}</th>
+          <th className='w-28'>{t('packaging.per')}</th>
           {model.showSize && <th data-align='left'>{t('packaging.size')}</th>}
           {model.showHow && <th data-align='left'>{t('packaging.how')}</th>}
           {model.showNote && <th data-align='left'>{t('common.note')}</th>}
@@ -151,25 +151,75 @@ export function PackagingPage({ techCard, orient, docline, n }: TechpackPageProp
   const { t } = useT();
   const model = useMemo(() => derivePackaging(techCard, undefined, t), [techCard, t]);
   const land = orient === 'land';
+  const key = `${techCard.id ?? 0}:${orient}:${model.items.length}`;
+  const [fit, setFit] = useState<{ key: string; ends: number[] }>({ key: '', ends: [] });
+  const ends = useMemo(() => (fit.key === key ? fit.ends : []), [fit, key]);
+  const pages = [0, ...ends].map((from, index) => model.items.slice(from, ends[index]));
+  const marks = useRef<(HTMLElement | null)[]>([]);
+
+  // Row heights depend on the text, so sheets are cut where the rows really stop fitting.
+  useLayoutEffect(() => {
+    for (let page = 0; page < ends.length + 1; page += 1) {
+      const body = marks.current[page]?.closest<HTMLElement>('.tp-body');
+      const over = body ? body.scrollHeight - body.clientHeight : 0;
+      if (!body || over <= 1) continue;
+      const rows = Array.from(body.querySelectorAll('tbody tr'));
+      let keep = rows.length;
+      for (let freed = 0; keep > 1 && freed < over; ) {
+        keep -= 1;
+        freed += rows[keep].getBoundingClientRect().height;
+      }
+      if (keep === rows.length) continue;
+      setFit({ key, ends: [...ends.slice(0, page), (ends[page - 1] ?? 0) + keep] });
+      return;
+    }
+  });
+  useEffect(() => {
+    let live = true;
+    void document.fonts?.ready.then(() => {
+      if (live) setFit({ key: '', ends: [] });
+    });
+    return () => {
+      live = false;
+    };
+  }, [key]);
 
   return (
-    <TechpackSheet orient={orient} docline={docline}>
-      <SectionHeader title={`${t('common.generated', { text: n })} ${t('packaging.title')}`} />
-      <div
-        className={
-          land
-            ? 'grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_190px] gap-5'
-            : 'flex min-h-0 flex-1 flex-col gap-5'
-        }
-      >
-        <div className='min-w-0'>
-          <ItemsTable model={model} items={model.items} t={t} />
-        </div>
-        <PackedFacts model={model} land={land} t={t} />
-      </div>
-      <div className='mt-auto flex justify-end border-t border-textColor pt-1 text-micro uppercase tracking-label text-labelColor'>
-        {t('packaging.insideFirst')}
-      </div>
-    </TechpackSheet>
+    <>
+      {pages.map((items, page) => (
+        <TechpackSheet key={page} orient={orient} docline={docline}>
+          <div
+            ref={(el) => {
+              marks.current[page] = el;
+            }}
+            className='contents'
+          >
+            <SectionHeader
+              title={continuedTitle(
+                t('common.generated', { text: n }),
+                t('packaging.title'),
+                page > 0,
+                t,
+              )}
+            />
+            <div
+              className={
+                land && page === 0
+                  ? 'grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_190px] gap-5'
+                  : 'flex min-h-0 flex-1 flex-col gap-5'
+              }
+            >
+              <div className='min-w-0'>
+                <ItemsTable model={model} items={items} t={t} />
+              </div>
+              {page === 0 && <PackedFacts model={model} land={land} t={t} />}
+            </div>
+            <div className='mt-auto flex justify-end border-t border-textColor pt-1 text-micro uppercase tracking-label text-labelColor'>
+              {t('packaging.insideFirst')}
+            </div>
+          </div>
+        </TechpackSheet>
+      ))}
+    </>
   );
 }
