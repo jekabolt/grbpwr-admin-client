@@ -137,6 +137,7 @@ import { decimalToInput } from 'utils/decimal';
 import { viewerOrigin } from 'utils/viewer-origin';
 import { PatternQR } from 'components/managers/tech-card/patterns/pattern-qr';
 import { GrbpwrMark } from 'ui';
+import { cutStripsOfCard, stripRefsOf } from './cut-strips/strip-pieces';
 import { detailKeyLabel } from './tech-card-options';
 import { techCardMarkerViewerPath } from 'constants/routes';
 import { TechPackLabelSheets, useTechPackCompositionLabel } from './tech-pack-labels';
@@ -733,10 +734,13 @@ export function TechPackDocument({
   const assemblyGroups = useMemo(() => {
     const ops = tc?.operations ?? [];
     if (!ops.some((o) => (o.outputUnitKey ?? '').trim())) return null; // карточка не размечена
-    const pieces = (tc?.pieces ?? []).map((pc) => ({
-      lineKey: pc.lineKey ?? '',
-      name: pc.name ?? '',
-    }));
+    const pieces = [
+      ...(tc?.pieces ?? []).map((pc) => ({
+        lineKey: pc.lineKey ?? '',
+        name: pc.name ?? '',
+      })),
+      ...stripRefsOf(cutStripsOfCard(techCard), tc?.bomItems ?? []),
+    ];
     const pieceKeys = new Set(pieces.map((pc) => pc.lineKey));
     const steps = ops.map((o) => ({
       inputs: classifyAssemblyInputs(
@@ -786,7 +790,7 @@ export function TechPackDocument({
     // Без страховки `out.length > 0`: после гейта выше блок гарантированно есть, и мнимый
     // фолбэк, который никогда не срабатывает, читался бы как защита, которой нет.
     return out;
-  }, [tc?.operations, tc?.pieces]);
+  }, [techCard, tc?.operations, tc?.pieces, tc?.bomItems]);
 
   const operationGroups = useMemo(() => {
     const indexed = (tc?.operations ?? []).map((op, index) => ({ op, index }));

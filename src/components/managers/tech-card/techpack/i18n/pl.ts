@@ -349,6 +349,15 @@ export const pl = {
     hiddenSeam: 'szew ukryty',
     pairNumber: 'nr pary',
   },
+  cutStrips: {
+    title: 'cięcie na długość',
+    step: 'krok',
+    cutAt: 'cięcie, {size}',
+    cutMmOf: '{name}, cięcie mm',
+    allSizes: 'wszystkie rozmiary',
+    unused: 'cięcie bez kroku',
+    staleSeam: 'długość szwu nieaktualna',
+  },
   measurements: {
     title: 'pomiary',
     point: 'punkt pomiarowy',

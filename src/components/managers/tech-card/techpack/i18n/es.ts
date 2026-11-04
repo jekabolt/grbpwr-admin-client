@@ -308,6 +308,15 @@ export const es = {
     hiddenSeam: 'costura oculta',
     pairNumber: 'n.º par',
   },
+  cutStrips: {
+    title: 'corte a medida',
+    step: 'paso',
+    cutAt: 'corte, {size}',
+    cutMmOf: '{name}, corte mm',
+    allSizes: 'todas las tallas',
+    unused: 'corte sin paso',
+    staleSeam: 'largo de costura obsoleto',
+  },
   measurements: {
     title: 'medidas',
     point: 'punto medida',

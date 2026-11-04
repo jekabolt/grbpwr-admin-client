@@ -349,6 +349,15 @@ export const ru = {
     hiddenSeam: 'потайной шов',
     pairNumber: '№ пары',
   },
+  cutStrips: {
+    title: 'материалы отрезом',
+    step: 'шаг',
+    cutAt: 'отрез, {size}',
+    cutMmOf: '{name}, отрез мм',
+    allSizes: 'все размеры',
+    unused: 'отрез не в шаге',
+    staleSeam: 'длина шва устарела',
+  },
   measurements: {
     title: 'измерения',
     point: 'точка измерения',

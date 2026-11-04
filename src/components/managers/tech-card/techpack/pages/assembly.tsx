@@ -4461,6 +4461,8 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
   const picture = pictureDimensions(orient);
   const drawing = r.pic ?? r.sil;
   const measureOnly = useContext(MeasureOnly);
+  const { t } = useT();
+  const stripWords = useMemo(() => ({ allSizes: t('cutStrips.allSizes'), name: own }), [t]);
   return (
     <div className='asm-picture-box' style={{ width: d.joinW, height: d.joinH }}>
       {measureOnly ? null : r.editorPic && r.print ? (
@@ -4478,6 +4480,7 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
           stepParts={r.editorPic.stepParts}
           actionLines={r.print.action.lines}
           actionGlyphs={r.print.action.glyphs}
+          stripWords={stripWords}
           className='asm-editor-picture'
         />
       ) : drawing ? (

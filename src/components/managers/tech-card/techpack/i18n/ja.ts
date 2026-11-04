@@ -304,6 +304,15 @@ export const ja = {
     hiddenSeam: '隠し縫い',
     pairNumber: 'ペア番号',
   },
+  cutStrips: {
+    title: '定尺カット',
+    step: '工程',
+    cutAt: 'カット長、{size}',
+    cutMmOf: '{name}、カット長 mm',
+    allSizes: '全サイズ',
+    unused: '工程で未使用',
+    staleSeam: '縫い長さが古い',
+  },
   measurements: {
     title: '寸法',
     point: '採寸箇所',

@@ -307,6 +307,15 @@ export const de = {
     hiddenSeam: 'verdeckte Naht',
     pairNumber: 'Paarnr.',
   },
+  cutStrips: {
+    title: 'Zuschnitt nach Länge',
+    step: 'Schritt',
+    cutAt: 'Zuschnitt, {size}',
+    cutMmOf: '{name}, Zuschnitt mm',
+    allSizes: 'alle Größen',
+    unused: 'Zuschnitt ohne Schritt',
+    staleSeam: 'Nahtlänge veraltet',
+  },
   measurements: {
     title: 'Maße',
     point: 'Messpunkt',
