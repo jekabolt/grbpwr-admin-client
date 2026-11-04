@@ -23,6 +23,7 @@ import {
   skeletonCategoryRead,
   skeletonLined,
 } from './assembly-skeleton-source';
+import { stripKeysOfCard, withoutStripPieces } from './cut-strips/strip-pieces';
 import { pieceRefKey } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
 import { toPurposeEnum } from './schema';
@@ -42,7 +43,10 @@ export type CardSeamGeometry = ReadonlyMap<string, GeomValue> | FormCardGeometry
 
 export type SeamGraphOfCardOptions = {
   /** Editor adapter: updates/reads its seam store. Print omits this and reads techCard.seams. */
-  decisions?: (facts: SkeletonFacts) => SeamDecisionsInput | undefined;
+  decisions?: (
+    facts: SkeletonFacts,
+    stripKeys: ReadonlySet<string>,
+  ) => SeamDecisionsInput | undefined;
 };
 
 const isFormGeometry = (source: CardSeamGeometry): source is FormCardGeometry => 'shapes' in source;
@@ -207,12 +211,16 @@ export function garmentAssemblyOfCard(
   geometry: CardSeamGeometry,
   options: SeamGraphOfCardOptions = {},
 ): GarmentAssembly {
+  // The garment is read without its strips; `stepSeamsOfOp` draws a strip's seam from its stored
+  // row, and the PDF resolves that row on its own (locateSeams).
+  const stripKeys = stripKeysOfCard(techCard);
+  const card = stripKeys.size ? withoutStripPieces(techCard) : techCard;
   const built = isFormGeometry(geometry)
-    ? factsOfFormCard(techCard, geometry)
-    : factsOfSegmentedCard(techCard, geometry);
-  const rows = [...seamRowsOfCard(techCard).values()];
-  const decisions = options.decisions?.(built.facts) ?? decisionsFor(rows, built.facts);
-  const operations = techCard.techCard?.operations ?? [];
+    ? factsOfFormCard(card, geometry)
+    : factsOfSegmentedCard(card, geometry);
+  const rows = [...seamRowsOfCard(card).values()];
+  const decisions = options.decisions?.(built.facts, stripKeys) ?? decisionsFor(rows, built.facts);
+  const operations = card.techCard?.operations ?? [];
   const graph = readSeamGraph(
     built.facts,
     undefined,
@@ -222,7 +230,7 @@ export function garmentAssemblyOfCard(
     seamAssignmentInputOf(operations, new Set(built.facts.pieces.map((piece) => piece.pieceKey))),
     built.segmented,
   );
-  return assembleGarment({ techCard, graph, category: built.facts.category });
+  return assembleGarment({ techCard: card, graph, category: built.facts.category });
 }
 
 export function seamGraphOfCard(

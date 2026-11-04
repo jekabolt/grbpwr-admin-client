@@ -278,7 +278,9 @@ import {
 import { UnitNameField, unitNameProducerIndex } from './unit-block';
 import { OperationMediaStrip } from './operation-media-strip';
 import { type SchematicMode, useSchematicPrefs } from './use-schematic-prefs';
-import { PieceAddChip, PieceRef, useFormPieces } from './piece-picker';
+import { stripKeysOf, stripKeysOfCard } from './cut-strips/strip-pieces';
+import { StripTileFace } from './cut-strips/strip-tile';
+import { PieceAddChip, PieceRef, useFormAssemblyPieces, useFormPieces } from './piece-picker';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
 import { posesOf, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
@@ -1302,8 +1304,9 @@ function OperationsHeaderWarnings({
     for (const piece of seams?.techCard?.techCard?.pieces ?? []) {
       if (piece.lineKey) set.add(piece.lineKey);
     }
+    for (const key of stripKeysOfCard(seams?.techCard)) set.add(key);
     return set;
-  }, [seams?.techCard?.techCard?.pieces, seamGeometry?.pieces]);
+  }, [seams?.techCard, seamGeometry?.pieces]);
   const missingSeamSteps = useMemo(() => {
     if (!seams || seamGeometry?.dep.status === 'pending') return [];
     // The card's hints ride on the steps they name (SignalOp.hints); none → the same array.
@@ -1349,7 +1352,9 @@ function OperationsHeaderWarnings({
   }>;
   const garmentLabels = (useWatch({ control, name: 'garmentLabels' }) ?? []) as Array<{
     key?: string;
+    kind?: string;
     bomItemId?: number;
+    bomLineKey?: string;
   }>;
   const total = operations.length;
   // An empty `work` is the only «not named»: the wire and the schema already carry it as a string.
@@ -1369,17 +1374,24 @@ function OperationsHeaderWarnings({
       : [];
   // A label line no step sews on: that work is in neither the route nor the SAM. Not part of offStep
   // because a tag or a sticker sits in the same section and is never sewn.
-  const notSewnBomIds = new Set(
-    garmentLabels
-      .filter((l) => NOT_SEWN_GARMENT_LABELS.has(l.key ?? ''))
-      .map((l) => l.bomItemId ?? 0),
+  const notSewnLabels = garmentLabels.filter((label) =>
+    NOT_SEWN_GARMENT_LABELS.has(label.kind?.trim() || label.key?.trim() || ''),
+  );
+  const notSewnBomIds = new Set(notSewnLabels.map((label) => label.bomItemId ?? 0));
+  const notSewnBomKeys = new Set(
+    notSewnLabels.map((label) => label.bomLineKey?.trim() || '').filter(Boolean),
   );
   const labelsOffRoute =
     total > 0
       ? bomItems.filter((b) => {
           if ((b.section ?? '') !== LABEL_SECTION) return false;
-          if (NOT_SEWN_LABEL_KINDS.has(b.kind ?? '') || notSewnBomIds.has(b.id ?? 0)) return false;
           const key = b.lineKey?.trim();
+          if (
+            NOT_SEWN_LABEL_KINDS.has(b.kind ?? '') ||
+            notSewnBomIds.has(b.id ?? 0) ||
+            (!!key && notSewnBomKeys.has(key))
+          )
+            return false;
           return !key || !attachedKeys.has(key);
         })
       : [];
@@ -1733,13 +1745,23 @@ function TrayChip({
         aria-label={`add piece ${piece.name} to the open step`}
         {...dragProps}
         className={cn(
-          'cursor-grab border border-borderColor bg-bgColor transition-colors active:cursor-grabbing',
+          'cursor-grab border bg-bgColor transition-colors active:cursor-grabbing',
+          piece.strip ? 'border-textColor' : 'border-borderColor',
           TILE_PRESS,
           'hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
           highlighted && 'motion-safe:animate-pulse border-textColor',
         )}
       >
-        <PieceTile found={shape} name={piece.name} cloth={cloth} />
+        {piece.strip ? (
+          <StripTileFace
+            name={piece.name}
+            qty={piece.strip.qty}
+            found={shape}
+            className='size-14'
+          />
+        ) : (
+          <PieceTile found={shape} name={piece.name} cloth={cloth} />
+        )}
       </button>
     );
   }
@@ -1752,6 +1774,7 @@ function TrayChip({
       {...dragProps}
       className={cn(
         'cursor-grab active:cursor-grabbing',
+        piece.strip && 'border-textColor font-bold',
         // flashed by the editor's «＋ piece» — pull the eye to the chips now clickable. The border
         // and fill carry the state on their own, so the pulse is pure decoration and is dropped for
         // anyone who asked for less motion.
@@ -1759,6 +1782,7 @@ function TrayChip({
       )}
     >
       {piece.name}
+      {piece.strip ? ` ×${piece.strip.qty}` : ''}
     </Chip>
   );
 }
@@ -5970,7 +5994,10 @@ export function OperationsField({
   const cardKeysNow = () => {
     const seams = useSeamsStore.getState();
     return {
-      pieceKeys: new Set((getValues('pieces') ?? []).map((piece) => piece.lineKey ?? '')),
+      pieceKeys: new Set([
+        ...(getValues('pieces') ?? []).map((piece) => piece.lineKey ?? ''),
+        ...stripKeysOf(((getValues as (name: string) => unknown)('cutStrips') ?? []) as []),
+      ]),
       seamKeys: new Set([...rowsOf(seams), ...posesOf(seams)].map((row) => row.seamKey)),
       bomLineKeys: new Set((getValues('bomItems') ?? []).map((item) => item.lineKey ?? '')),
     };
@@ -6375,7 +6402,10 @@ export function OperationsField({
   // Only DECLARED pieces reach the tray. Inventing a piece from inside an operation is what
   // produced dangling codes in the first place, so that path is gone: «+ new piece» walks to the
   // PATTERNS tab, where a piece also gets its cut data instead of just a name.
-  const pieces = useFormPieces();
+  // `pieces` is what a step can take, strips included; `cutPieces` is what the pattern and the
+  // recipe answer for. A strip has no block to re-link and no cloth to assign.
+  const pieces = useFormAssemblyPieces();
+  const cutPieces = useFormPieces();
 
   // Чем именно заканчивается «+ new piece», решает наличие чертежа: пока его нет, деталь заводят
   // руками на вкладке деталей; как только к карточке привязан первый DXF, единственным автором
@@ -6412,7 +6442,7 @@ export function OperationsField({
     reuploadBaseline.current = {
       patterns: copyPatternRows(patternRows),
       aliases: copyAliases(aliases),
-      pieceKeys: new Set(pieces.map((piece) => piece.lineKey)),
+      pieceKeys: new Set(cutPieces.map((piece) => piece.lineKey)),
     };
   }
   useEffect(() => {
@@ -6429,13 +6459,13 @@ export function OperationsField({
       reuploadBaseline.current = {
         patterns: copyPatternRows(patternRows),
         aliases: copyAliases(aliases),
-        pieceKeys: new Set(pieces.map((piece) => piece.lineKey)),
+        pieceKeys: new Set(cutPieces.map((piece) => piece.lineKey)),
       };
     };
     if (replaced) {
       setSessionPreviousPatterns(copyPatternRows(baseline.patterns));
       setSessionPreviousAliases(copyAliases(baseline.aliases));
-      const added = pieces
+      const added = cutPieces
         .map((piece) => piece.lineKey)
         .filter((key) => key && !baseline.pieceKeys.has(key));
       if (added.length > 0) {
@@ -6447,7 +6477,7 @@ export function OperationsField({
     // RHF writes pieces/aliases before it swaps the sheet URL. Defer the baseline one task so all
     // writes of that re-upload are observed as one change; an ordinary edit settles here.
     baselineTimer.current = window.setTimeout(settle, 0);
-  }, [patternRows, aliases, pieces]);
+  }, [patternRows, aliases, cutPieces]);
   useEffect(
     () => () => {
       if (baselineTimer.current) window.clearTimeout(baselineTimer.current);
@@ -6472,11 +6502,11 @@ export function OperationsField({
     () =>
       new Set(
         unaliasedPieceKeys(
-          pieces.map((piece) => ({ lineKey: piece.lineKey })),
+          cutPieces.map((piece) => ({ lineKey: piece.lineKey })),
           aliases,
         ),
       ),
-    [pieces, aliases],
+    [cutPieces, aliases],
   );
   const previousPieceShapes = useMemo<PieceShapeMap>(() => {
     if (!previousIndex) return null;
@@ -6488,7 +6518,7 @@ export function OperationsField({
     // его блок): контур в прежнем листе ищется по имени детали — сопоставление и сверка называют
     // новую деталь именем её блока. Без этого у призрака пропадали и контур, и замены.
     const priorScopes = [...previousIndex.filesOfScope.keys()];
-    for (const piece of pieces) {
+    for (const piece of cutPieces) {
       const key = pieceRefKey(piece.lineKey);
       if (refs.has(key) || !ghostKeys.has(piece.lineKey.trim())) continue;
       refs.set(
@@ -6499,7 +6529,7 @@ export function OperationsField({
     const found = new Map<string, FoundPiece | null>();
     for (const [key, pieceRefs] of refs) found.set(key, findPiece(previousIndex, pieceRefs));
     return found;
-  }, [previousIndex, sessionPreviousAliases, savedAliases, aliases, scopes, pieces, ghostKeys]);
+  }, [previousIndex, sessionPreviousAliases, savedAliases, aliases, scopes, cutPieces, ghostKeys]);
 
   const operationsByPiece = useMemo(() => {
     const counts = new Map<string, number>();
@@ -6511,7 +6541,7 @@ export function OperationsField({
   const orphanPieces = useMemo(() => {
     const out = new Map<string, OrphanPieceInfo>();
     if (!pieceShapes) return out;
-    for (const piece of pieces) {
+    for (const piece of cutPieces) {
       if (pieceShapes.get(pieceRefKey(piece.lineKey))) continue;
       const operations = operationsByPiece.get(piece.lineKey) ?? 0;
       const previous = previousPieceShapes?.get(pieceRefKey(piece.lineKey))?.piece;
@@ -6522,7 +6552,7 @@ export function OperationsField({
       });
     }
     return out;
-  }, [pieceShapes, pieces, operationsByPiece, previousPieceShapes, orphanBlocks]);
+  }, [pieceShapes, cutPieces, operationsByPiece, previousPieceShapes, orphanBlocks]);
   const orphanKeys = useMemo(() => new Set(orphanPieces.keys()), [orphanPieces]);
   const hiddenOrphanKeys = useMemo(
     () =>
@@ -6649,10 +6679,10 @@ export function OperationsField({
   // door to the colourways tab where they are assigned. Silent when there is nothing to say, and
   // silent on a card with no colourway at all: there is no recipe to count against yet.
   const clothWarning = useMemo<HeaderWarning | null>(() => {
-    if (pieces.length === 0 || !inlineCloth) return null;
+    if (cutPieces.length === 0 || !inlineCloth) return null;
     let unbound = 0;
     let unsorted = 0;
-    for (const p of pieces) {
+    for (const p of cutPieces) {
       const state = inlineCloth.map.get(p.lineKey)?.state ?? 'unbound';
       if (state === 'unbound') unbound += 1;
       else if (state === 'unsorted') unsorted += 1;
@@ -6676,7 +6706,7 @@ export function OperationsField({
           ),
       },
     };
-  }, [pieces, inlineCloth, setParams]);
+  }, [cutPieces, inlineCloth, setParams]);
 
   const pinOptions = useMemo<PickerOption[]>(
     () => [

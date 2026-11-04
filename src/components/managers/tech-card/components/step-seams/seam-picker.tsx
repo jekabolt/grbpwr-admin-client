@@ -33,6 +33,7 @@ import { runsOfSide } from '../assembly-seams/seam-actions';
 import { useSeamsStore } from '../assembly-seams/seams-store';
 import { useFoldRows } from '../assembly-folds/folds-store';
 import { useTechCardAutosave } from '../design/autosave-contract';
+import { fittedSideMm } from '../cut-strips/length-check';
 import type { TechCardFormData } from '../schema';
 import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { moveRow, orderOfRows, windowRows, type LayerMove } from './layers-window';
@@ -581,16 +582,19 @@ export function SeamPickerBody({
   // Edge to edge on both sides (a part on its host's line has no Δ).
   const edgeToEdge = (s: { a: readonly TargetId[]; b: readonly TargetId[] }) =>
     s.a.length > 0 && s.b.length > 0 && [...s.a, ...s.b].every((id) => !parseInner(id));
+  // A strip's side reads through its fit: elastic is short of its seam on purpose.
+  const fitted = (parts: readonly SidePart[], other: readonly SidePart[]) =>
+    fittedSideMm(
+      sideLen(parts, other),
+      [...new Set(parts.map((part) => pieceOfTarget(part.target)))],
+      geoms,
+    );
   const delta = pair
-    ? deltaMm(
-        sideLen(pickParts('a'), pickParts('b')),
-        sideLen(pickParts('b'), pickParts('a')),
-        ease,
-      )
+    ? deltaMm(fitted(pickParts('a'), pickParts('b')), fitted(pickParts('b'), pickParts('a')), ease)
     : shownSeam && edgeToEdge(shownSeam.sides)
       ? deltaMm(
-          sideLen(shownSeam.parts.a, shownSeam.parts.b),
-          sideLen(shownSeam.parts.b, shownSeam.parts.a),
+          fitted(shownSeam.parts.a, shownSeam.parts.b),
+          fitted(shownSeam.parts.b, shownSeam.parts.a),
           ease,
         )
       : null;

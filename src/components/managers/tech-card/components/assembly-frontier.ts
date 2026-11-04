@@ -32,6 +32,8 @@ export type OperationInput = {
 export type AssemblyPiece = {
   lineKey: string;
   name: string;
+  /** A cut strip: a step may take it, but a garment is finished without one. */
+  strip?: unknown;
 };
 
 export type AssemblyStep = {
@@ -414,7 +416,7 @@ export function assemblyReleaseCheck(
 
   const reached = new Set(res.units.get(terminals[0])?.leaves ?? []);
   const orphans = pieces
-    .filter((p) => p.lineKey && !reached.has(p.lineKey))
+    .filter((p) => p.lineKey && !p.strip && !reached.has(p.lineKey))
     .map((p) => p.name || p.lineKey);
   if (orphans.length > 0) {
     out.push({

@@ -191,6 +191,7 @@ const GOLDEN = base({
       qtyPerGarment: 1,
       calloutNumber: 3,
       bomLineKey: 'B',
+      note: 'keep the woven edge clear of the seam',
       files: each('brand', [0], [0]),
     },
     {
@@ -214,6 +215,7 @@ const STRESS = base({
     placement: 'under the back yoke, on the left side, a long way from the collar seam',
     attachment: 'zigzag along every side with a tiny bar tack at each corner and one more',
     material: 'x',
+    note: 'keep the woven edge clear of the seam allowance and press it before the bar tack goes on',
     artworkPerSize: true,
     files: each(`o${i}`, [0], [1, 2, 3, 4, 5, 6, 7]),
   })),
@@ -257,6 +259,9 @@ const facts = (page) =>
     clipped: [...document.querySelectorAll('.tp-body')].map((b) => b.scrollHeight - b.clientHeight),
     wide: [...document.querySelectorAll('.tp-body')].map((b) => b.scrollWidth - b.clientWidth),
     tableRows: document.querySelectorAll('[data-label-row]').length,
+    noted: [...document.querySelectorAll('[data-label-row]')].filter((r) =>
+      /keep the woven edge/.test(r.textContent ?? ''),
+    ).length,
     cells: document.querySelectorAll('[data-label-qr-cell]').length,
     noFile: document.querySelectorAll('[data-label-no-file]').length,
     qrPx: [
@@ -316,6 +321,7 @@ for (const orient of ['land', 'port']) {
     f.tableOverflow.join(','),
   );
   ck(f.tableRows === 4, `A ${orient}: 4 table rows`, String(f.tableRows));
+  ck(f.noted === 1, `A ${orient}: the label note prints`, String(f.noted));
   ck(
     f.cells === expectedGolden.length,
     `A ${orient}: ${expectedGolden.length} QR`,
@@ -357,6 +363,7 @@ for (const orient of ['land', 'port']) {
     f.wide.join(','),
   );
   ck(f.tableRows === 12, `B ${orient}: 12 table rows`, String(f.tableRows));
+  ck(f.noted === 12, `B ${orient}: every label note prints`, String(f.noted));
   ck(f.cells === 84, `B ${orient}: 84 QR`, String(f.cells));
   ck(f.noFile === 84, `B ${orient}: 84 no file`, String(f.noFile));
   await page.screenshot({ path: join(OUT, `stress-${orient}.png`), fullPage: true });

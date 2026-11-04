@@ -1,5 +1,10 @@
 import type { common_TechCard } from 'api/proto-http/admin';
 import { wireInt } from 'components/managers/tech-card/components/wire-int';
+import {
+  bomLinesOfStep,
+  cutStripsOfCard,
+  stripQtyInStep,
+} from 'components/managers/tech-card/components/cut-strips/strip-pieces';
 import { formatCompositionCell } from 'components/managers/materials/components/material-code';
 import {
   alphaKey,
@@ -53,6 +58,7 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink, t: Pd
   const primary = techCard.colorways?.[0];
   const pieces = card?.pieces ?? [];
   const operations = card?.operations ?? [];
+  const cutStrips = cutStripsOfCard(techCard);
   const callouts = card?.callouts ?? [];
   const front = technicalMedia(techCard, 'TECH_CARD_MEDIA_KIND_FRONT');
   const add = (
@@ -149,7 +155,7 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink, t: Pd
     .filter((ref) => TRIM_SECTIONS.has(ref.item.section ?? ''))
     .map((ref) => {
       const linkedOperations = operations.filter((operation) =>
-        (operation.bomLineKeys ?? []).includes(clean(ref.item.lineKey)),
+        bomLinesOfStep(operation, cutStrips).includes(clean(ref.item.lineKey)),
       );
       // one row per place: ops that put this line on the same pin and zone share it
       const spots: Spot[] = [];
@@ -159,10 +165,11 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink, t: Pd
         const where = operation.zone
           ? t('common.generated', { text: enumLabel(operation.zone) })
           : own(clean(callout?.part));
-        const quantity = decimal(
-          operation.bomQuantities?.find((item) => clean(item.lineKey) === clean(ref.item.lineKey))
-            ?.qtyPerGarment,
-        );
+        const quantity =
+          decimal(
+            operation.bomQuantities?.find((item) => clean(item.lineKey) === clean(ref.item.lineKey))
+              ?.qtyPerGarment,
+          ) ?? stripQtyInStep(operation, cutStrips, clean(ref.item.lineKey));
         const same = spots.find((spot) => spot.pin === pin && spot.where === where);
         if (same) {
           if (operation.operationNumber != null)

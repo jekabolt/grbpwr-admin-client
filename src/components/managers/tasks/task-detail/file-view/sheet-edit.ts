@@ -344,6 +344,16 @@ function tidy(value: number): number {
   return Number(value.toPrecision(15));
 }
 
+/**
+ * Итог `SUM`, `null` при переполнении: в файл нельзя записать `Infinity`, Excel показал бы `#NUM!`.
+ * Сумма в пределах накопленной ошибки округления и есть ноль.
+ */
+function settledSum(total: number, magnitude: number, count: number): number | null {
+  const bound = magnitude * count;
+  if (!Number.isFinite(bound)) return null;
+  return Math.abs(total) <= (bound * Number.EPSILON) / 2 ? 0 : tidy(total);
+}
+
 function closeEnough(a: number, b: number): boolean {
   return Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
 }
@@ -361,6 +371,7 @@ type XlsxSheet = {
   locked: Set<string>;
   /** Индекс стиля столбца для новой ячейки. */
   colStyles: { min: number; max: number; style: string }[];
+  dates: boolean[];
 };
 
 const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
@@ -440,13 +451,11 @@ const BUILTIN_DATE = (id: number) =>
   (id >= 45 && id <= 47) ||
   (id >= 50 && id <= 58);
 
-/** Формат с датой или временем: кавычки, `[Red]`, `_x`, `*x`, `\x` не считаются. */
+/** Формат с датой или временем: кавычки, `[Red]`, `_x`, `*x`, `\x` не считаются, `[h]` считается. */
 export function isDateFormat(code: string): boolean {
-  const bare = code
-    .replace(/"[^"]*"/g, '')
-    .replace(/\[[^\]]*\]/g, '')
-    .replace(/[\\_*]./g, '');
-  return /[ymdhs]/i.test(bare);
+  const bare = code.replace(/"[^"]*"/g, '').replace(/[\\_*]./g, '');
+  if (/\[(?:h+|m+|s+)\]/i.test(bare)) return true;
+  return /[ymdhs]/i.test(bare.replace(/\[[^\]]*\]/g, ''));
 }
 
 /** Для каждого индекса стиля: дата ли это. */
@@ -522,6 +531,7 @@ function readSheet(
     formulas: new Map(),
     locked: new Set(),
     colStyles: [],
+    dates,
   };
   if (!rel || !rel.type.endsWith('/worksheet')) return sheet;
   const xml = partText(parts[part]);
@@ -614,6 +624,13 @@ function computeAll(sheet: XlsxSheet, edits: SheetEdits): Map<string, number> | 
     if (visiting.has(addr)) return 'bad';
     visiting.add(addr);
     let total = 0;
+    let magnitude = 0;
+    let count = 0;
+    const add = (v: number) => {
+      total += v;
+      magnitude += Math.abs(v);
+      count += 1;
+    };
     for (const range of sheet.formulas.get(addr) ?? []) {
       // По существующим ячейкам, а не по адресам: `A:XFD` на миллион строк не повод зависнуть.
       for (let i = firstRowAt(scan.rows, range.r1); i < scan.rows.length; i++) {
@@ -623,7 +640,7 @@ function computeAll(sheet: XlsxSheet, edits: SheetEdits): Map<string, number> | 
           if (cell.c < range.c1 || cell.c > range.c2) continue;
           const v = valueOf(cell.addr);
           if (v === 'bad') return 'bad';
-          if (v !== null) total += v;
+          if (v !== null) add(v);
         }
       }
       // Правка ячейки, которой в файле ещё нет.
@@ -633,11 +650,12 @@ function computeAll(sheet: XlsxSheet, edits: SheetEdits): Map<string, number> | 
         if (!at || at.r < range.r1 || at.r > range.r2 || at.c < range.c1 || at.c > range.c2)
           continue;
         const v = numberValue(text);
-        if (v !== null) total += v;
+        if (v !== null) add(v);
       }
     }
     visiting.delete(addr);
-    const value = tidy(total);
+    const value = settledSum(total, magnitude, count);
+    if (value === null) return 'bad';
     done.set(addr, value);
     return value;
   };
@@ -681,6 +699,17 @@ function newCellStyle(sheet: XlsxSheet, row: RawRow | undefined, c: number): str
     if (a.s !== undefined && a.customFormat !== undefined && a.customFormat !== '0') return a.s;
   }
   return sheet.colStyles.find((col) => c >= col.min && c <= col.max)?.style;
+}
+
+/** Новая ячейка с датой от столбца или строки: число в ней Excel прочитал бы датой. */
+function isLocked(sheet: XlsxSheet, addr: string): boolean {
+  if (sheet.locked.has(addr)) return true;
+  if (sheet.byAddr.has(addr) || !sheet.scan) return false;
+  const at = parseAddress(addr);
+  if (!at) return false;
+  const row = sheet.scan.rows[firstRowAt(sheet.scan.rows, at.r)];
+  const style = newCellStyle(sheet, row?.r === at.r ? row : undefined, at.c);
+  return style !== undefined && !!sheet.dates[Number(style)];
 }
 
 function newCellAttrs(sheet: XlsxSheet, row: RawRow | undefined, at: CellAddress): string {
@@ -760,7 +789,7 @@ function sheetAfter(sheet: XlsxSheet, edits: SheetEdits): string {
     .map(([addr, text]) => {
       const at = parseAddress(addr);
       if (!at) throw new SheetEditError('bad address');
-      if (sheet.locked.has(addr)) throw new SheetEditError('locked cell');
+      if (isLocked(sheet, addr)) throw new SheetEditError('locked cell');
       return { addr, at, typed: classifyInput(text) };
     })
     .sort((a, b) => a.at.r - b.at.r || a.at.c - b.at.c);
@@ -869,7 +898,7 @@ function sanitized(text: string): string {
 function xlsxBook(sheets: XlsxSheet[], parts: Unzipped): SheetBook {
   const cellOf = (sheet: XlsxSheet, addr: string): BookCell => {
     const raw = sheet.byAddr.get(addr);
-    const locked = !sheet.editable || sheet.locked.has(addr);
+    const locked = !sheet.editable || isLocked(sheet, addr);
     if (!raw) return { input: '', locked };
     if (raw.formula) {
       return {

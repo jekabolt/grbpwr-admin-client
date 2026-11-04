@@ -2,6 +2,7 @@
 // Числа считаются по плану печати, а не по сетке экрана: в README ровно то, что лежит в ZIP
 // (симплекс без пустой изнанки B, третья этикетка B2 — всё уже в `set.files`).
 import type { Hole } from './holes';
+import type { OwnZipFile } from './own-files';
 import type { PrintSet } from './pages';
 
 export type ArchiveCounts = {
@@ -25,7 +26,7 @@ export function archiveCounts(set: PrintSet): ArchiveCounts {
     colourways: new Set(set.files.map((f) => f.colorwayId)).size,
     labelsA,
     labelsB,
-    pdfFiles: set.files.length + (set.mode === 'duplex' ? 1 : 0),
+    pdfFiles: set.files.length + (set.mode === 'duplex' && set.files.length > 0 ? 1 : 0),
     svgFiles: set.sides.size,
   };
 }
@@ -40,6 +41,8 @@ export type ReadmeInput = {
   generatedAt: Date;
   adminUrl: string;
   warnings: readonly Hole[];
+  /** Own files: printed as supplied, so their copies are counted here and not inside the file. */
+  own?: readonly Pick<OwnZipFile, 'path' | 'copies' | 'size' | 'warning'>[];
 };
 
 const stamp = (d: Date) => d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
@@ -47,6 +50,8 @@ const stamp = (d: Date) => d.toISOString().replace('T', ' ').slice(0, 16) + ' UT
 export function readmeText(r: ReadmeInput): string {
   const duplex = r.mode === 'duplex';
   const c = r.counts;
+  const own = r.own ?? [];
+  const ownWarnings = own.flatMap((f) => (f.warning ? [f.warning] : []));
   const lines = [
     `CARE LABELS - ${[r.style, r.styleName].filter(Boolean).join(' ')}`,
     'One PDF page = one side of one label, 100 x 30 mm. Text is in outlines (no fonts needed).',
@@ -74,8 +79,18 @@ export function readmeText(r: ReadmeInput): string {
     `generated at ${stamp(r.generatedAt)}`,
     `admin ${r.adminUrl}`,
     '',
+    ...(own.length
+      ? [
+          'OWN FILES',
+          'Each is the whole label for its sizes, printed as supplied. Its copies are NOT inside the file: print the number below. See manifest.csv for the sizes. An image has no size of its own: print it at 100 x 30 mm.',
+          ...own.map((f) => `${f.path} - ${f.copies} copies - ${f.size}`),
+          '',
+        ]
+      : []),
     'WARNINGS',
-    ...(r.warnings.length ? r.warnings.map((h) => `- ${h.message}`) : ['- none']),
+    ...(r.warnings.length || ownWarnings.length
+      ? [...r.warnings.map((h) => `- ${h.message}`), ...ownWarnings.map((w) => `- ${w}`)]
+      : ['- none']),
   ];
   return lines.join('\r\n') + '\r\n';
 }

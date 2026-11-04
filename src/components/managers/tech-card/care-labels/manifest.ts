@@ -2,6 +2,7 @@
 // duplex: файл несёт лицо и изнанку → две строки с одним файлом; simplex: `-face`/`-back` — по одной.
 // `variant_sku` — SKU варианта у строк A (base + номер размера: подпись размера не уникальна, SKU —
 // да), пусто у B: состав общий на колорвей.
+import type { OwnZipFile } from './own-files';
 import type { PlannedFile, PrintSet } from './pages';
 
 export const MANIFEST_HEADER = [
@@ -49,12 +50,31 @@ export function manifestRows(
   return rows;
 }
 
+/** Own files: as supplied, one row per colour × size they stand for. */
+export function ownManifestRows(
+  own: readonly Pick<OwnZipFile, 'path' | 'rows'>[],
+): (string | number)[][] {
+  return own.flatMap((f) =>
+    f.rows.map((r) => [
+      r.colorwaySku,
+      r.variantSku,
+      r.colour,
+      r.size,
+      'own',
+      'as supplied',
+      r.copies,
+      f.path,
+    ]),
+  );
+}
+
 export function manifestCsv(
   set: PrintSet,
   colorways: ReadonlyMap<number, ManifestColorway>,
+  own: readonly Pick<OwnZipFile, 'path' | 'rows'>[] = [],
 ): string {
   return (
-    [MANIFEST_HEADER, ...manifestRows(set, colorways)]
+    [MANIFEST_HEADER, ...manifestRows(set, colorways), ...ownManifestRows(own)]
       .map((r) => r.map(cell).join(','))
       .join('\r\n') + '\r\n'
   );

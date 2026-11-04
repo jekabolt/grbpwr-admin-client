@@ -1,36 +1,243 @@
-import {
-  type common_AdminColorwayRef,
-  type common_TechCard,
-  type common_TechCardMediaFull,
+import type {
+  common_AdminColorwayRef,
+  common_Material,
+  common_TechCard,
+  common_TechCardMediaFull,
 } from 'api/proto-http/admin';
-import { useState, type JSX } from 'react';
+import { MaterialThumb } from 'components/managers/materials/components/material-thumb';
+import { useEffect, useMemo, useState, type ChangeEvent, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { AddDoor, Chip, ChipRow, Section, Text } from 'ui';
+import { AddDoor, ConfirmationModal, Input, Select, Section, Text, Tile, Tiles } from 'ui';
+
+import { pickLabelMaterial } from './label-bom';
+import { labelKindOfMaterial } from './label-material-kind';
 import { upsertGarmentLabel } from './form-writers';
 import { type FormGarmentLabel, type FormPackagingItem } from './labels-schema';
 import type { TechCardFormData } from './schema';
 import { PackagingShelf, packagingGaps } from './packaging-shelf';
-import { isCompositionLabel } from './sewn-label-model';
-import { bornLabelFacts, labelGaps, SewnLabelRow } from './sewn-label-row';
-import { useLabelAxes } from './use-label-axes';
-import { garmentLabelKindNames, garmentLabelKinds, kindLabel } from './tech-card-options';
+import { isCompositionLabel, labelBomLine } from './sewn-label-model';
+import {
+  bornLabelFacts,
+  labelMiss,
+  LabelRowsHead,
+  madeIntent,
+  SewnLabelRow,
+} from './sewn-label-row';
+import {
+  garmentLabelKindNames,
+  garmentLabelKinds,
+  kindLabel,
+  labelStockKinds,
+} from './tech-card-options';
+import { useLabelStock } from './use-label-stock';
+import { wireInt } from './wire-int';
 
-/**
- * LABELS and PACKAGING — two blocks of the «labels & pkg» tab (02-DESIGN §2.1, §2.3–2.6; I-11).
- * Labels are rows of `SewnLabelRow`; packaging is the tile shelf of `PackagingShelf`.
- *
- * Every write goes through the keyed writers in `form-writers.ts` (live `getValues`, one row by
- * key, case-blind). The card passes `keepBare`: a row leaves only by its ✕.
- */
-
-/** The next free key of a kind: `other` is the one kind a garment may carry many of. */
-function freeKindKey(key: string, taken: string[]): string {
-  const has = (k: string) => taken.some((t) => t.trim().toLowerCase() === k);
-  if (!has(key)) return key;
-  for (let n = 2; ; n += 1) if (!has(`${key} ${n}`)) return `${key} ${n}`;
+/** A label key is the material or typed name; duplicates get a stable numeric suffix. */
+function freeLabelKey(raw: string, taken: readonly string[]): string {
+  const key = raw.trim() || 'label';
+  const used = new Set(taken.map((value) => value.trim().toLowerCase()));
+  if (!used.has(key.toLowerCase())) return key;
+  for (let suffix = 2; ; suffix += 1) {
+    const candidate = `${key} ${suffix}`;
+    if (!used.has(candidate.toLowerCase())) return candidate;
+  }
 }
 
-/** LABELS — every label on the garment but the composition one, which has its own block. */
+type StockMap = Map<number, string>;
+
+function LabelStockPicker({
+  open,
+  onOpenChange,
+  materials,
+  stock,
+  stockKnown,
+  onPick,
+  onMake,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  materials: readonly common_Material[];
+  stock: StockMap;
+  stockKnown: boolean;
+  onPick: (material: common_Material, kind: string) => void;
+  onMake?: () => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [kind, setKind] = useState('all');
+
+  useEffect(() => {
+    if (!open) return;
+    setSearch('');
+    setKind('all');
+  }, [open]);
+
+  const filtered = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return materials.filter((material) => {
+      if (material.archived) return false;
+      if (kind !== 'all' && labelKindOfMaterial(material) !== kind) return false;
+      if (!query) return true;
+      return `${material.name ?? ''} ${material.code ?? ''}`.toLowerCase().includes(query);
+    });
+  }, [kind, materials, search]);
+
+  return (
+    <ConfirmationModal
+      open={open}
+      onOpenChange={onOpenChange}
+      onConfirm={() => onOpenChange(false)}
+      title={onMake ? 'add label' : 'pick material'}
+      width='lg'
+      hideActions
+    >
+      <div className='flex flex-col gap-3'>
+        <div className='flex flex-col gap-2 sm:flex-row'>
+          <Input
+            className='min-w-0 flex-1'
+            value={search}
+            placeholder='search stock'
+            aria-label='search stock'
+            onChange={(event: ChangeEvent<HTMLInputElement>) => setSearch(event.target.value)}
+          />
+          <Select
+            name='label-stock-kind'
+            className='w-full whitespace-nowrap sm:w-auto'
+            value={kind}
+            items={[
+              { value: 'all', label: 'all types' },
+              ...labelStockKinds.map((option) => ({
+                value: option.key,
+                label: option.label,
+              })),
+            ]}
+            onValueChange={(value: string | undefined) => setKind(value || 'all')}
+          />
+        </div>
+        <Tiles min={132}>
+          {filtered.map((material) => {
+            const id = wireInt(material.id);
+            const materialKind = labelKindOfMaterial(material);
+            const onHand = stock.get(id) ?? (stockKnown ? '0' : undefined);
+            return (
+              <Tile
+                key={id}
+                media={
+                  <MaterialThumb
+                    material={material}
+                    size='lg'
+                    className='aspect-square h-auto w-full'
+                  />
+                }
+                name={material.name || material.code || `material ${id}`}
+                sub={kindLabel(labelStockKinds, materialKind)}
+                title={material.name || material.code || undefined}
+                onClick={() => {
+                  onPick(material, materialKind);
+                  onOpenChange(false);
+                }}
+              >
+                {onHand == null ? null : (
+                  <Text
+                    size='micro'
+                    variant={Number(onHand) > 0 ? 'label' : 'errorLabel'}
+                    component='span'
+                  >
+                    {onHand} on hand
+                  </Text>
+                )}
+              </Tile>
+            );
+          })}
+          {onMake ? (
+            <Tile
+              dashed
+              name='+ make new'
+              className='min-h-24 items-center justify-center'
+              onClick={() => {
+                onOpenChange(false);
+                onMake();
+              }}
+            />
+          ) : null}
+        </Tiles>
+        {filtered.length === 0 && !onMake ? (
+          <Text size='micro' variant='label'>
+            nothing in stock
+          </Text>
+        ) : null}
+      </div>
+    </ConfirmationModal>
+  );
+}
+
+function MakeLabelDialog({
+  open,
+  onOpenChange,
+  onAdd,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onAdd: (name: string, kind: string) => void;
+}) {
+  const [name, setName] = useState('');
+  const [kind, setKind] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setName('');
+    setKind('');
+  }, [open]);
+
+  return (
+    <ConfirmationModal
+      open={open}
+      onOpenChange={onOpenChange}
+      onConfirm={() => {
+        if (!name.trim() || !kind) return;
+        onAdd(name.trim(), kind);
+      }}
+      title='new label'
+      confirmLabel='add'
+      confirmDisabled={!name.trim() || !kind}
+    >
+      <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
+        <div className='flex min-w-0 flex-col gap-0.5'>
+          <Text size='micro' variant='label' tracking='label' className='uppercase'>
+            name
+          </Text>
+          <Input
+            value={name}
+            autoFocus
+            onChange={(event: ChangeEvent<HTMLInputElement>) => setName(event.target.value)}
+          />
+        </div>
+        <div className='flex min-w-0 flex-col gap-0.5'>
+          <Text size='micro' variant='label' tracking='label' className='uppercase'>
+            type
+          </Text>
+          <Select
+            name='made-label-kind'
+            value={kind}
+            placeholder='pick type'
+            items={garmentLabelKinds.map((option) => ({
+              value: option.key,
+              label: option.label,
+            }))}
+            onValueChange={(value: string | undefined) => setKind(value || '')}
+          />
+        </div>
+      </div>
+    </ConfirmationModal>
+  );
+}
+
+const displayLabelName = (row: FormGarmentLabel): string => {
+  const key = row.key?.trim() || 'label';
+  const legacy = !row.source && !madeIntent(row);
+  return legacy ? kindLabel(garmentLabelKindNames, key) || key : key;
+};
+
+/** LABELS: compact stock-aware rows. The composition label remains in its dedicated block. */
 export function LabelsBlock({
   techCard,
   canEdit = true,
@@ -43,74 +250,117 @@ export function LabelsBlock({
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as NonNullable<
     TechCardFormData['bomItems']
   >;
-  const axes = useLabelAxes(techCard);
-  const [adding, setAdding] = useState(false);
+  const rows = all.filter((row) => !isCompositionLabel(row.key));
+  const { materials, materialById, stock, stockKnown, plannedQty, onHandOf } =
+    useLabelStock(techCard);
 
-  const rows = all.filter((r) => !isCompositionLabel(r.key));
-  const keys = rows.map((r) => r.key ?? '');
-  const free = garmentLabelKinds.filter(
-    (k) => k.key === 'other' || !keys.some((t) => t.trim().toLowerCase() === k.key),
-  );
-  const issues = rows.reduce((n, r) => {
-    const gap = labelGaps(r, axes, bomItems);
-    return n + (gap.material ? 1 : 0) + (gap.location ? 1 : 0) + gap.files;
-  }, 0);
+  const [adding, setAdding] = useState(false);
+  const [making, setMaking] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [materialTarget, setMaterialTarget] = useState<string | null>(null);
+
+  const issues = rows.reduce((total, row) => total + labelMiss(row, bomItems), 0);
+  const keys = rows.map((row) => row.key ?? '');
+  const targetRow = rows.find((row) => row.key === materialTarget);
+
+  const addStock = (material: common_Material, kind: string) => {
+    const baseName = material.name?.trim() || material.code?.trim() || `material ${material.id}`;
+    const key = freeLabelKey(baseName, keys);
+    upsertGarmentLabel(getValues, setValue, key, bornLabelFacts(kind), { keepBare: true });
+    pickLabelMaterial(getValues, setValue, key, material, { source: 'stock', kind });
+    setExpanded(key);
+    setAdding(false);
+  };
 
   return (
-    <Section
-      title='labels'
-      action={
-        issues > 0 ? (
-          <Text size='micro' variant='errorLabel' component='span'>
-            ! {issues}
-          </Text>
-        ) : undefined
-      }
-    >
-      <div data-labels-rows=''>
-        {rows.map((r, i) => {
-          const key = r.key ?? '';
-          return (
-            <SewnLabelRow
-              key={key.toLowerCase() || i}
-              labelKey={key}
-              title={kindLabel(garmentLabelKindNames, key)}
-              removable
-              techCard={techCard}
-              axes={axes}
-              canEdit={canEdit}
-              last={i === rows.length - 1}
-            />
-          );
-        })}
-        {!canEdit ? null : adding ? (
-          <ChipRow className='pt-2'>
-            {free.map((k) => (
-              <Chip
-                key={k.key}
-                nonForm
-                data-label-kind={k.key}
-                onClick={() => {
-                  const key = freeKindKey(k.key, keys);
-                  upsertGarmentLabel(getValues, setValue, key, bornLabelFacts(key), {
-                    keepBare: true,
-                  });
-                  setAdding(false);
-                }}
-              >
-                {k.label}
-              </Chip>
-            ))}
-          </ChipRow>
-        ) : (
-          <AddDoor onClick={() => setAdding(true)}>label</AddDoor>
-        )}
-      </div>
-    </Section>
+    <>
+      <Section
+        title='labels'
+        action={
+          issues > 0 ? (
+            <Text size='micro' variant='errorLabel' component='span'>
+              ! {issues}
+            </Text>
+          ) : undefined
+        }
+      >
+        <div data-labels-rows=''>
+          {rows.length > 0 ? <LabelRowsHead /> : null}
+          {rows.map((row, index) => {
+            const key = row.key?.trim() || `label ${index + 1}`;
+            const line = labelBomLine(row, bomItems);
+            const material = materialById.get(wireInt(line?.materialId));
+            const onHand = onHandOf(material);
+            return (
+              <SewnLabelRow
+                key={`${key.toLowerCase()}-${index}`}
+                labelKey={key}
+                title={displayLabelName(row)}
+                material={material}
+                onHand={onHand}
+                plannedQty={plannedQty}
+                open={expanded === key}
+                onOpenChange={(next) => setExpanded(next ? key : null)}
+                onPickMaterial={() => setMaterialTarget(key)}
+                canEdit={canEdit}
+                last={index === rows.length - 1}
+              />
+            );
+          })}
+          {canEdit ? (
+            <AddDoor afterRows={rows.length > 0} onClick={() => setAdding(true)}>
+              label
+            </AddDoor>
+          ) : null}
+        </div>
+      </Section>
+
+      <LabelStockPicker
+        open={adding || !!materialTarget}
+        onOpenChange={(next) => {
+          if (!next) {
+            setAdding(false);
+            setMaterialTarget(null);
+          }
+        }}
+        materials={materials}
+        stock={stock}
+        stockKnown={stockKnown}
+        onPick={(material, kind) => {
+          if (materialTarget) {
+            pickLabelMaterial(getValues, setValue, materialTarget, material, {
+              source: 'make',
+              kind: targetRow?.kind?.trim() || kind,
+            });
+            setMaterialTarget(null);
+          } else {
+            addStock(material, kind);
+          }
+        }}
+        onMake={
+          materialTarget
+            ? undefined
+            : () => {
+                setAdding(false);
+                setMaking(true);
+              }
+        }
+      />
+      <MakeLabelDialog
+        open={making}
+        onOpenChange={setMaking}
+        onAdd={(name, kind) => {
+          const key = freeLabelKey(name, keys);
+          upsertGarmentLabel(getValues, setValue, key, bornLabelFacts(kind), { keepBare: true });
+          setMaking(false);
+          setExpanded(key);
+        }}
+      />
+    </>
   );
 }
 
-/** PACKAGING — pack, the items in it and the shipping box; `! N` counts what is still missing. */
+/** PACKAGING: pack, its items, and the shipping box. */
 export function PackagingBlock({
   techCardId,
   colorwayRefs,

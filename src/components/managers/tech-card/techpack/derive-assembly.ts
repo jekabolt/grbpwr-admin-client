@@ -35,6 +35,11 @@ import {
   zoneLabel,
   type StepFacts,
 } from 'components/managers/tech-card/components/operation-options';
+import { seamLengthCheck } from 'components/managers/tech-card/components/cut-strips/length-check';
+import {
+  stripKeysOfCard,
+  withStripPieces,
+} from 'components/managers/tech-card/components/cut-strips/strip-pieces';
 import { BUNDLED_WORK_CATALOG } from 'components/managers/tech-card/components/operation-work';
 import {
   opIcon,
@@ -191,7 +196,11 @@ export function operationPieceAliases(
       ...(operation.pieceLineKeys ?? []),
     ]),
   );
-  const unresolved = [...referenced].filter((key) => key && !pieces.has(key) && rowByKey.has(key));
+  // A strip with no length yet has no shape; its key is not a stale piece to re-home by name.
+  const stripKeys = stripKeysOfCard(techCard);
+  const unresolved = [...referenced].filter(
+    (key) => key && !pieces.has(key) && rowByKey.has(key) && !stripKeys.has(key),
+  );
   if (!unresolved.length) return new Map();
 
   const aliasNames = new Map<string, string[]>();
@@ -2230,6 +2239,7 @@ function buildCards(
   sink?: GapSink,
   t: PdfT = englishT,
   inferMissing = true,
+  stripKeys: ReadonlySet<string> = new Set(),
 ): Built {
   const cards = new Map<number, JoinCard>();
   const units = new Map<string, Item[]>();
@@ -2483,8 +2493,17 @@ function buildCards(
       const left = metricLength(s.a, s.b.length ? rightPlain : null, activeFolds);
       if (!s.b.length) return { letter: String(i + 1), left, bad: false };
       const right = metricLength(s.b, leftPlain, activeFolds);
-      const delta = left - right;
-      const bad = Math.abs(delta) > STOP_DELTA_MM;
+      // A strip's side reads through its fit, and a strip typed by hand states no seam length at all.
+      const lengths = seamLengthCheck(
+        left,
+        right,
+        [...new Set(s.a.map((part) => part.piece))],
+        [...new Set(s.b.map((part) => part.piece))],
+        metricGeoms,
+      );
+      const rawDelta = lengths.exempt ? 0 : lengths.a - lengths.b;
+      const delta = Math.abs(rawDelta) <= lengths.allowanceMm ? 0 : rawDelta;
+      const bad = Math.abs(delta) > STOP_DELTA_MM + lengths.allowanceMm;
       const terms = opTerms(op);
       const leftSide = seamSideName(s.a, s.b, pieces, terms, t, roles);
       const rightSide = seamSideName(s.b, s.a, pieces, terms, t, roles);
@@ -2523,7 +2542,12 @@ function buildCards(
       };
     });
     const pieceIns = op.ins.filter((x) => x.kind === 'piece');
-    const pieceNumbers = new Map(pieceIns.map((input, index) => [input.key, index + 1]));
+    // A number before a strip reads as a count: `2 rubber` would be two lengths on the floor.
+    const pieceNumbers = new Map(
+      pieceIns
+        .filter((input) => !stripKeys.has(input.key))
+        .map((input, index) => [input.key, index + 1]),
+    );
     const baseInput = inputs.reduce(
       (best, entry, index) =>
         areaOf(pieces, entry.items) > areaOf(pieces, inputs[best]?.items ?? []) ? index : best,
@@ -3224,7 +3248,8 @@ export function deriveAssembly(
 ): AssemblyModel {
   const t = input.t ?? englishT;
   const gapSink = sink ?? new GapSink();
-  const techCard = withResolvedOperationPieces(input.techCard, input.pieces);
+  // The strips join here and not in the caller: `input.techCard` is what the cut sheet reads too.
+  const techCard = withResolvedOperationPieces(withStripPieces(input.techCard), input.pieces);
   const resolvedInput = { ...input, techCard };
   const ops = readOps(resolvedInput);
   const completeGeometry = [...input.pieces.values()].every(
@@ -3287,6 +3312,7 @@ export function deriveAssembly(
     gapSink,
     t,
     !garment,
+    stripKeysOfCard(techCard),
   );
   const actions = buildActions(
     ops,

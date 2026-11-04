@@ -139,12 +139,10 @@ function PackedFacts({ model, land, t }: { model: PackagingModel; land: boolean;
       </div>
       <div className='min-w-0'>
         <GroupLabel flush={!land}>{t('packaging.carton')}</GroupLabel>
-        <Fact
-          label={t('packaging.units')}
-          value={model.carton.units ? model.carton.units : null}
-        />
+        <Fact label={t('packaging.units')} value={model.carton.units ? model.carton.units : null} />
         <Fact label={t('packaging.box')} value={own(model.carton.box)} />
         <Fact label={t('packaging.marking')} value={own(model.carton.marking)} />
+        {model.carton.note && <Fact label={t('common.note')} value={own(model.carton.note)} />}
       </div>
     </aside>
   );

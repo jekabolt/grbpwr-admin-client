@@ -27,6 +27,7 @@ import { useWatch } from 'react-hook-form';
 import type { common_TechCard } from 'api/proto-http/admin';
 
 import { cardSeamDecisions, useCardSeamsSig } from './assembly-seams/seams-store';
+import type { CutStripLike } from './cut-strips/strip-pieces';
 import { seamGraphOfCard } from './card-seam-graph';
 import { pieceRefKey } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
@@ -108,6 +109,7 @@ export function CardUnitPicturesProvider({
     []) as TechCardFormData['patterns'];
   // A card with no category is read from its piece names; an auxiliary item stays generic.
   const purpose = useWatch<TechCardFormData>({ name: 'purpose' }) as string | undefined;
+  const cutStrips = useWatch({ name: 'cutStrips' }) as readonly CutStripLike[] | undefined;
 
   // (а) Нет ни одного шага, который что-то соединяет или объявляет узел, — граф не нужен никому:
   // ни пиктограммам (им нужны узлы), ни карте сборки (ей нужны входы шагов).
@@ -166,6 +168,7 @@ export function CardUnitPicturesProvider({
     aliases,
     patterns,
     purpose,
+    cutStrips,
   });
   useEffect(() => {
     if (!factsSig) {
@@ -189,6 +192,7 @@ export function CardUnitPicturesProvider({
                 pieceDxfAliases: { items: v.aliases ?? [] },
                 patterns: v.patterns,
                 purpose: toPurposeEnum(v.purpose),
+                cutStrips: v.cutStrips,
               },
             } as unknown as common_TechCard;
             g = seamGraphOfCard(

@@ -900,7 +900,10 @@ export type common_TechCardColorwayUsage = {
   // cannot contain because it is measured on a clean lay of nominal width. `optional` is
   // load-bearing like material_id: a stale client omits the field on the full-replace recipe
   // write and the store PRESERVES the stored provenance triple; a present value is written as
-  // sent ("" normalises to manual and clears the pcts).
+  // sent ("" normalises to manual and clears the pcts). "cut_length" — OUTPUT ONLY: the line has cut
+  // strips (TechCard.cut_strips) and this number is computed from them on every read. It is never
+  // stored, the slot's wastage_percent grosses it up like a manual norm, and a number sent on such a
+  // row is ignored, because the norm of a strip line is not typed.
   consumptionSource?: string;
   // Display decomposition of a marker-sourced norm's waste (кромка / межлекальные выпады), in
   // percent of the piece area. NEVER multiplied into any cost — the marker length already pays
@@ -8508,6 +8511,11 @@ export type common_TechCardInsert = {
   // them, but would replace a card that has them, is refused (FailedPrecondition) instead of silently
   // wiping them. Transport, not content.
   packagingPicksAware: boolean | undefined;
+  // Cut-to-length strips of this card's BOM lines (0449). Read back on TechCard.cut_strips. Only
+  // meaningful with cut_strips_aware: without the flag the stored strips stay exactly as they are,
+  // so a client that has never heard of strips loses nothing.
+  cutStrips: common_TechCardCutStrip[] | undefined;
+  cutStripsAware: boolean | undefined;
 };
 
 // StyleNumberSource records how a tech card's style_number was set (PLM-rework Q1): GENERATED = the
@@ -10627,6 +10635,15 @@ export type common_TechCardGarmentLabel = {
   // Artwork per colourway (true) or one for all colourways (false). Independent of artwork_per_size;
   // both off = one file for the whole style. Carried with artwork_per_size when that is absent.
   artworkPerColorway: boolean | undefined;
+  // How the label was chosen: stock or make; "" = an older row. PRESENCE BIT: absent means an older
+  // client, whose save keeps the stored source, kind, made_by, print_method and length_cm. A row with
+  // a source owns its BOM line: the save writes the line's per-garment count and its recipe rows.
+  source?: string;
+  kind: string | undefined;
+  madeBy: string | undefined;
+  printMethod: string | undefined;
+  // Per garment length in cm, for goods sold by the metre; unset or 0 = counted in qty_per_garment.
+  lengthCm: googletype_Decimal | undefined;
 };
 
 // TechCardGarmentLabelFile is one artwork file of a garment label, printed as a QR on the tech pack.
@@ -10667,6 +10684,51 @@ export type common_TechCardPackagingItem = {
   // not a colourway of this card is a field violation. The same pick may appear on two items with
   // different colourways and quantities.
   colorwayIds: number[] | undefined;
+};
+
+// A strip: how long the piece of a metre-bought BOM line is, cut for one garment. It is not a pattern
+// piece, never a row of TechCardInsert.pieces. Its line_key shares the key space of the pieces, so it
+// fits TechCardOperation.input_keys and TechCardSeamAnchor.piece_line_key as they are.
+export type common_TechCardCutStrip = {
+  // 26-character ULID, minted by the client like a BOM line key so that a step in the same save can
+  // name the strip. Unique per card. An empty key is minted by the server.
+  lineKey: string | undefined;
+  // The BOM line the strip is cut from. Required.
+  bomLineKey: string | undefined;
+  // from_seam: cut = round(seam_mm * fit_pct / 100 + overlap_mm), half-up, whole mm.
+  // per_size: every size typed by hand in manual_cut_mm.
+  // one_length: one_length_mm for every size, one norm.
+  lengthMode: string | undefined;
+  // The seam the length was taken from. A soft reference, used only by the client.
+  seamKey: string | undefined;
+  // Absent reads as 100.
+  fitPct: googletype_Decimal | undefined;
+  // Absent reads as 0.
+  overlapMm: googletype_Decimal | undefined;
+  // Required, above zero.
+  widthMm: googletype_Decimal | undefined;
+  // Required when length_mode is one_length.
+  oneLengthMm?: number;
+  // Strips of this length per garment. 0 reads as 1.
+  qty: number | undefined;
+  // On read, one row per size of the card range, with the computed fields. On write, a row with
+  // neither seam_mm nor manual_cut_mm is dropped.
+  sizes: common_TechCardCutStripSize[] | undefined;
+};
+
+// One size of a cut-to-length strip.
+export type common_TechCardCutStripSize = {
+  sizeId: number | undefined;
+  // Seam length at this size in mm. Geometry is parsed on the client, which sends the number here.
+  seamMm: googletype_Decimal | undefined;
+  // Cut length typed by hand in whole mm. Wins over the formula and survives pattern and fit changes.
+  // Absent returns the size to the formula.
+  manualCutMm?: number;
+  // OUTPUT-ONLY: the cut length in whole mm, overlap included, from the one length function of the
+  // server. Absent means unknown, never 0.
+  cutMm?: number;
+  // OUTPUT-ONLY: cut_mm minus overlap_mm. Absent when cut_mm is.
+  sewnMm: googletype_Decimal | undefined;
 };
 
 export type CreateTechCardResponse = {
@@ -10886,6 +10948,12 @@ export type common_TechCard = {
   // full card save cannot erase them; those RPCs never bump lock_version and the rows enter no
   // section digest (the seams doctrine, seams = 32). Ignored on write.
   pieceFolds: common_TechCardPieceFold[] | undefined;
+  // The cut-to-length strips of the card (0449), with the computed lengths resolved on this read.
+  // Written through TechCardInsert.cut_strips.
+  cutStrips: common_TechCardCutStrip[] | undefined;
+  // OUTPUT-ONLY: the norm each strip line gets from its strips, one row per BOM line. Present even on
+  // a card with no colourways, which has no recipe row to read a norm from. Ignored on write.
+  cutStripNorms: common_TechCardCutStripNorm[] | undefined;
 };
 
 // TechCardRevision is one entry in the spec-document changelog (what changed in
@@ -11619,6 +11687,18 @@ export type common_TechCardPieceFoldSource =
   | "TECH_CARD_PIECE_FOLD_SOURCE_OWNER"
   // A suggestion (a fold mark parallel to an edge) the owner accepted unchanged.
   | "TECH_CARD_PIECE_FOLD_SOURCE_ACCEPTED_HINT";
+// The norm of one strip line in metres per garment: the sum over its strips of cut * qty / 1000,
+// wastage not included. consumption_source cut_length on the recipe row carries the same numbers.
+export type common_TechCardCutStripNorm = {
+  bomLineKey: string | undefined;
+  // Set when every strip of the line is one_length: one norm for all sizes.
+  norm: googletype_Decimal | undefined;
+  // Otherwise one row per size whose length is known on every strip of the line.
+  sizeNorms: common_TechCardBomSizeConsumption[] | undefined;
+  // False when a size has no known length, or the line is not bought in metres. Unknown is not zero.
+  complete: boolean | undefined;
+};
+
 export type UpdateTechCardRequest = {
   id: number | undefined;
   techCard: common_TechCardInsert | undefined;
@@ -12429,6 +12509,8 @@ export type common_Material = {
   // * field PRESENT, value ""    → CLEAR it (store NULL).
   // * field PRESENT with a value → set it.
   fabricThicknessMm: googletype_Decimal | undefined;
+  // The type of a label in stock, section LABEL only (0451). The label picker filters on it.
+  labelType: common_MaterialLabelType | undefined;
 };
 
 // MaterialPrice is one point in a material's append-only price history. Prices are in the
@@ -12494,14 +12576,27 @@ export type common_MaterialPackagingAttrs = {
   printMethod: string | undefined;
 };
 
-// MaterialPurpose (#40) marks whether a catalog material is used for samples, production, or both,
-// so the admin can mark and filter materials. Mirrors entity.ValidMaterialPurposes and the DB CHECK
-// chk_material_purpose. UNKNOWN defaults to BOTH on write.
 export type common_MaterialPurpose =
   | "MATERIAL_PURPOSE_UNKNOWN"
   | "MATERIAL_PURPOSE_SAMPLE"
   | "MATERIAL_PURPOSE_PRODUCTION"
   | "MATERIAL_PURPOSE_BOTH";
+// MaterialPurpose (#40) marks whether a catalog material is used for samples, production, or both,
+// so the admin can mark and filter materials. Mirrors entity.ValidMaterialPurposes and the DB CHECK
+// chk_material_purpose. UNKNOWN defaults to BOTH on write.
+// MaterialLabelType is the type of a label in stock (0451), stored on the material and never derived
+// from its name. UNKNOWN means no type on create and keep the stored one on update.
+export type common_MaterialLabelType =
+  | "MATERIAL_LABEL_TYPE_UNKNOWN"
+  | "MATERIAL_LABEL_TYPE_BRAND"
+  | "MATERIAL_LABEL_TYPE_SIZE"
+  | "MATERIAL_LABEL_TYPE_FLAG"
+  | "MATERIAL_LABEL_TYPE_PATCH"
+  | "MATERIAL_LABEL_TYPE_TAPE"
+  | "MATERIAL_LABEL_TYPE_LOOP"
+  | "MATERIAL_LABEL_TYPE_HANGTAG"
+  | "MATERIAL_LABEL_TYPE_BARCODE"
+  | "MATERIAL_LABEL_TYPE_COMPOSITION";
 export type CreateMaterialResponse = {
   id: number | undefined;
 };

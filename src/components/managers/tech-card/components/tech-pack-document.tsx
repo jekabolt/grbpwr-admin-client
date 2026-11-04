@@ -26,12 +26,12 @@ import {
   common_TechCardReleaseMeta,
   common_TechCardSizePattern,
   googletype_Decimal,
-  PackagingRecipeLine,
   StyleAssemblyLine,
 } from 'api/proto-http/admin';
 import { PageFurniture, furnitureLine } from 'components/managers/print/page-furniture';
 import { cutPlanAuthoritative } from 'components/managers/print/labels';
 import { PackagingSheet } from 'components/managers/print/sheets/packaging';
+import { packagingItemInScope } from 'components/managers/print/sheets/packaging-items';
 import {
   PRINT_CUT_SYMMETRY_LEGEND,
   printCutSymmetryCaption,
@@ -137,9 +137,14 @@ import { decimalToInput } from 'utils/decimal';
 import { viewerOrigin } from 'utils/viewer-origin';
 import { PatternQR } from 'components/managers/tech-card/patterns/pattern-qr';
 import { GrbpwrMark } from 'ui';
+import { cutStripsOfCard, stripRefsOf } from './cut-strips/strip-pieces';
 import { detailKeyLabel } from './tech-card-options';
 import { techCardMarkerViewerPath } from 'constants/routes';
-import { TechPackLabelSheets, useTechPackCompositionLabel } from './tech-pack-labels';
+import { artworkScope, labelArtworkTiles } from 'components/managers/print/sheets/label-facts';
+import { useSizeOrdering } from 'components/managers/model/components/use-size-systems';
+import { cardLabelAxes } from './card-label-axes';
+import { isCompositionLabel } from './sewn-label-model';
+import { TechPackLabelSheets, useCareArt, useTechPackCompositionLabel } from './tech-pack-labels';
 import { labelMediaOf } from '../care-labels/label-media';
 // cutSymmetryUnanswered — предикат, а не текст: он одинаков для экрана и бумаги, и дублировать
 // его в печатном слое значило бы завести второе определение «вопрос цеху не отвечен».
@@ -669,12 +674,11 @@ const num = (s?: string): number => {
 // Full printable tech-pack document for one tech card. Pure presentational — reads the
 // loaded card (server truth, so save before exporting). Self-contained black-on-white so
 // it prints/PDFs identically regardless of the app theme. See print-page for the @media
-// print isolation that hides app chrome. `assembly` (on-garment items) and `packagingRecipe`
-// are fetched by the caller (print-page) — separate per-style RPCs, not part of GetTechCard.
+// print isolation that hides app chrome. `assembly` (on-garment items) is fetched by the
+// caller (print-page) — a separate per-style RPC, not part of GetTechCard.
 export function TechPackDocument({
   techCard,
   assembly = [],
-  packagingRecipe = [],
   patternViewerToken = '',
   onDataStatus,
   scope,
@@ -682,7 +686,6 @@ export function TechPackDocument({
 }: {
   techCard: common_TechCard;
   assembly?: StyleAssemblyLine[];
-  packagingRecipe?: PackagingRecipeLine[];
   /** Статусы запросов, которые документ делает сам, — для гейта готовности печатной страницы. */
   onDataStatus?: (deps: PrintDep[]) => void;
   // Card-level capability token from GetTechCardResponse (never on common_TechCard — a token
@@ -733,10 +736,13 @@ export function TechPackDocument({
   const assemblyGroups = useMemo(() => {
     const ops = tc?.operations ?? [];
     if (!ops.some((o) => (o.outputUnitKey ?? '').trim())) return null; // карточка не размечена
-    const pieces = (tc?.pieces ?? []).map((pc) => ({
-      lineKey: pc.lineKey ?? '',
-      name: pc.name ?? '',
-    }));
+    const pieces = [
+      ...(tc?.pieces ?? []).map((pc) => ({
+        lineKey: pc.lineKey ?? '',
+        name: pc.name ?? '',
+      })),
+      ...stripRefsOf(cutStripsOfCard(techCard), tc?.bomItems ?? []),
+    ];
     const pieceKeys = new Set(pieces.map((pc) => pc.lineKey));
     const steps = ops.map((o) => ({
       inputs: classifyAssemblyInputs(
@@ -786,7 +792,7 @@ export function TechPackDocument({
     // Без страховки `out.length > 0`: после гейта выше блок гарантированно есть, и мнимый
     // фолбэк, который никогда не срабатывает, читался бы как защита, которой нет.
     return out;
-  }, [tc?.operations, tc?.pieces]);
+  }, [techCard, tc?.operations, tc?.pieces, tc?.bomItems]);
 
   const operationGroups = useMemo(() => {
     const indexed = (tc?.operations ?? []).map((op, index) => ({ op, index }));
@@ -850,6 +856,12 @@ export function TechPackDocument({
   }, [techCard.careEntries, dictionary?.careSymbols]);
 
   const careVocabulary = useCareVocabulary();
+  const careArt = useCareArt();
+  const orderSizes = useSizeOrdering();
+  const labelAxes = useMemo(
+    () => cardLabelAxes(techCard, dictionary, orderSizes),
+    [techCard, dictionary, orderSizes],
+  );
   const { data: models, isLoading: modelsLoading, isError: modelsError } = useAllModels();
   // Rev.N (task: header proof-of-version) — techCard.id === styleId (R1), same call ReleasesField
   // already makes; free once the constructor tab warmed the cache.
@@ -1670,15 +1682,6 @@ export function TechPackDocument({
   const activeAssembly = assembly.filter(
     (a) => a.active !== false && (!wireInt(a.sizeId) || sizeIds.includes(wireInt(a.sizeId))),
   );
-  const activePackaging = packagingRecipe.filter((p) => p.active !== false);
-  // Mirrors PackagingRecipeField's own resolution: this style's active lines if it has any,
-  // else the global fallback it would inherit at order time.
-  const stylePackaging = activePackaging.filter(
-    (p) => p.scope === 'style' && p.techCardId === techCard.id,
-  );
-  const globalPackaging = activePackaging.filter((p) => p.scope === 'global');
-  const packagingRows = stylePackaging.length > 0 ? stylePackaging : globalPackaging;
-  const packagingIsFallback = stylePackaging.length === 0 && globalPackaging.length > 0;
 
   // ── PATTERNS (Ф4): fold the sheets into DISPLAY fabric scopes — one QR per scope. ──
   // A row with no file is not a sheet yet; skipped exactly as before, and as the server
@@ -1821,9 +1824,9 @@ export function TechPackDocument({
       {printScope.revision.source === 'release' && (
         <p className='mb-3 break-inside-avoid border-2 border-black px-2 py-1 text-control uppercase'>
           frozen: card spec, pieces, operations, BOM (incl. prices), colourway recipes, markers,
-          care, the pattern sheet list. live (not frozen): size chart, on-garment assembly,
-          packaging recipe, article colours from the material catalog, the pattern files behind the
-          QR — the viewer says so if they changed since this revision
+          care, the pattern sheet list. live (not frozen): size chart, on-garment assembly, article
+          colours from the material catalog, the pattern files behind the QR — the viewer says so if
+          they changed since this revision
         </p>
       )}
       {printScope.revision.source === 'live' && latestRelease && (
@@ -3205,15 +3208,39 @@ export function TechPackDocument({
         summary={labelSummary}
         hasColorway={labelColorwayId > 0}
         labels={tc.garmentLabels ?? []}
-        items={tc.packagingItems ?? []}
+        bomItems={tc.bomItems ?? []}
+        artwork={labelArtworkTiles({
+          rows: (tc.garmentLabels ?? []).filter((label) => !isCompositionLabel(label.key)),
+          axes: labelAxes,
+          ...artworkScope(
+            // A paper printed for a run is about that run's colours, even with none picked.
+            printScope.colorway
+              ? [wireInt(printScope.colorway.colorwayId)]
+              : [
+                  ...new Set(
+                    (printScope.run?.run?.lines ?? [])
+                      .map((line) => wireInt(line.productId))
+                      .filter((id) => id > 0),
+                  ),
+                ],
+            scopedSizeIds(printScope),
+          ),
+        })}
+        items={(tc.packagingItems ?? []).filter((item) =>
+          packagingItemInScope(
+            item,
+            printScope.colorway ? [wireInt(printScope.colorway.colorwayId)] : [],
+          ),
+        )}
+        colourName={(id) => {
+          const colorway = techCard.colorways?.find((cw) => wireInt(cw.colorwayId) === id);
+          return colorway?.devName?.trim() || colorwayLabel(colorway);
+        }}
         urlOf={(id) => {
           const m = labelMediaOf(id, techCard.resolvedLabelMedia, libraryMap)?.media;
           return m?.compressed?.mediaUrl || m?.fullSize?.mediaUrl || m?.thumbnail?.mediaUrl || '';
         }}
-        careArt={(code) => {
-          const voc = careVocabulary.byCode[code];
-          return { img: voc?.img ?? CARE_ARTWORK[code], name: voc?.name ?? code };
-        }}
+        careArt={careArt}
         showLabels={b('sew') || b('qc')}
         showItems={b('qc')}
       />
@@ -3273,23 +3300,11 @@ export function TechPackDocument({
         </Sheet>
       )}
 
-      {/* PACKAGING RECIPE — materials consumed on ship (ListPackagingRecipe): once per shipment
-          (qty/order, e.g. a branded box) plus once per unit (qty/item, e.g. a dust bag). Same
-          missing-RPC root cause as assembly, one tab over. */}
       {/* УПАКОВКА — один лист на обе бумаги (print/sheets/packaging.tsx). Раньше описательная
           половина печаталась здесь, а считаемая от тиража — в наряде, двумя вёрстками одного
           предмета. Считаемая часть появляется только при скоупе на партию. */}
-      {b('qc') && (tc.packaging || packagingRows.length > 0) && (
-        <PackagingSheet
-          title='packaging'
-          packaging={tc.packaging}
-          recipeRows={packagingRows}
-          recipeIsGlobalFallback={packagingIsFallback}
-          // Рецепт (в отличие от описательной половины из tc.packaging) в снапшот релиза не
-          // входит — на релизной бумаге его таблица помечается сегодняшней.
-          recipeIsLive={printScope.revision.source === 'release'}
-          plannedTotal={batchTotal}
-        />
+      {b('qc') && tc.packaging && (
+        <PackagingSheet title='packaging' packaging={tc.packaging} plannedTotal={batchTotal} />
       )}
 
       {/* COSTING — только внутренний профиль. Бумага профиля `factory` уезжает внешнему

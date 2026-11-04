@@ -70,6 +70,16 @@ export function qrExample(
   });
 }
 
+/** The card keeps sizes in the order they were clicked; paper reads them in grade order. */
+export function sizesInOrder(
+  data: CareLabelData,
+  orderSizes: (ids: number[]) => number[],
+): CareLabelData {
+  const byId = new Map(data.sizes.map((size) => [size.id, size]));
+  const sizes = orderSizes(data.sizes.map((size) => size.id)).flatMap((id) => byId.get(id) ?? []);
+  return { ...data, sizes };
+}
+
 export type SummaryLine = {
   line: LineKey;
   name: string;

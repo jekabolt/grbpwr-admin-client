@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { FileTopic } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
-import { Button, Drawer, SideRailItem, Text } from 'ui';
+import { Button, GenericPopover, SideRailItem, Text } from 'ui';
 import { ARCHIVED_WORD, projectDates } from './topic-chips';
 
 /**
@@ -75,12 +75,11 @@ export function ProjectList({
 }
 
 /**
- * ЗАГОЛОВОК СТРАНИЦЫ = ПРОЕКТ. На телефоне это кнопка «all files ▾», которая открывает нижний
- * лист со списком проектов и «+ new project»; на десктопе — просто заголовок: переключатель там
- * стоит в рейле слева.
+ * ЗАГОЛОВОК СТРАНИЦЫ = ПРОЕКТ. На любой ширине это кнопка «all files ▾», которая открывает
+ * один и тот же список проектов со счётчиками.
  *
- * ЗАВЕДЕНИЕ ПРОЕКТА — ТАМ, ГДЕ ПРОЕКТ ВЫБИРАЮТ: «ещё никакой, заведи новый» — ответ на тот же
- * вопрос. Сам диалог живёт у страницы, а не здесь: лист закрывается, а диалог должен остаться.
+ * ЗАВЕДЕНИЕ ПРОЕКТА — ТАМ, ГДЕ ПРОЕКТ ВЫБИРАЮТ. Сам диалог живёт у страницы, а не здесь:
+ * поповер закрывается, а диалог должен остаться.
  */
 export function ProjectSwitch({
   projects,
@@ -102,55 +101,55 @@ export function ProjectSwitch({
   const [open, setOpen] = useState(false);
   const name = projectId > 0 ? activeProject?.name ?? `#${projectId}` : 'all files';
   return (
-    <>
-      <Button
-        aria-haspopup='dialog'
-        className='flex min-w-0 items-center gap-1.5 self-start text-left lg:hidden'
-        onClick={() => setOpen(true)}
+    <Text component='h1' size='large' className='min-w-0 flex-1 font-bold'>
+      <GenericPopover
+        open={open}
+        onOpenChange={setOpen}
+        title='project'
+        noTail
+        triggerProps={{ asChild: true }}
+        openElement={
+          <Button className='flex max-w-full min-w-0 items-center gap-1.5 text-left text-lg font-bold lg:max-w-xs'>
+            <span className='truncate'>{name}</span>
+            <Text component='span' size='control' variant='label' aria-hidden>
+              ▾
+            </Text>
+          </Button>
+        }
       >
-        <Text component='span' size='large' className='truncate font-bold'>
-          {name}
-        </Text>
-        <Text component='span' size='control' variant='label' aria-hidden>
-          ▾
-        </Text>
-      </Button>
-      <Text
-        component='h1'
-        size='large'
-        className='hidden max-w-xs shrink-0 truncate font-bold lg:block'
-      >
-        {name}
-      </Text>
-      <Drawer side='bottom' open={open} onOpenChange={setOpen} title='project'>
-        <div className='flex flex-col gap-3'>
+        <div className='flex flex-col'>
           <ProjectList
             projects={projects}
             activeProject={activeProject}
             projectId={projectId}
             totalFiles={totalFiles}
-            itemClassName='py-2.5 text-textBaseSize'
+            itemClassName='py-1.5 text-textBaseSize'
             onPick={(id) => {
               setOpen(false);
               onPick(id);
             }}
           />
-          <Button
-            variant='secondary'
-            className='h-10 w-full'
-            disabled={!writable}
-            onClick={() => {
-              setOpen(false);
-              onNew();
-            }}
-          >
-            + new project
-          </Button>
-          <Button asChild variant='underline' className='self-start text-labelColor'>
-            <Link to={ROUTES.filesProjects}>all projects</Link>
-          </Button>
+          <div className='mt-1.5 flex items-center gap-3 border-t border-hairline pt-1.5'>
+            <Button
+              variant='underline'
+              className='text-labelColor'
+              disabled={!writable}
+              onClick={() => {
+                setOpen(false);
+                onNew();
+              }}
+            >
+              + project
+            </Button>
+            <Button asChild variant='underline' className='text-labelColor'>
+              <Link to={ROUTES.filesProjects}>all</Link>
+            </Button>
+            <Button asChild variant='underline' className='ml-auto text-labelColor'>
+              <Link to={ROUTES.filesShared}>shared</Link>
+            </Button>
+          </div>
         </div>
-      </Drawer>
-    </>
+      </GenericPopover>
+    </Text>
   );
 }

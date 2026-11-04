@@ -200,3 +200,81 @@ describe('bounded foldMap', () => {
     expect(mapped.rings[0]).toEqual(foldedOutline(piece, [twoEnds]).outline);
   });
 });
+
+describe('foldedOutline — a pleat of lines meeting at one point', () => {
+  const back: Pt2[] = [
+    [0, 0],
+    [570, 0],
+    [570, 690],
+    [0, 690],
+  ];
+  const centre: FlatFold = { a: [285, 690], b: [285, 14], flipAt: [280, 350], kind: 'inward' };
+  const side: FlatFold = { a: [320, 690], b: [285, 14], flipAt: [320, 350], kind: 'outward' };
+
+  it('moves each part only across its own line, in any order', () => {
+    for (const folds of [
+      [centre, side],
+      [side, centre],
+    ]) {
+      const { plies } = foldedOutline(back, folds);
+      const large = plies.filter((ply) => Math.max(...ply.poly.map(([, y]) => y)) > 100);
+      expect(large).toHaveLength(3);
+      // The left part lands on the right, over the centre line; the right part lands on the
+      // left, over the side line; neither is moved a second time by the other line.
+      const leftLanded = large.find((ply) => ply.poly.some(([x, y]) => x === 570 && y === 0));
+      const rightLanded = large.find((ply) => ply.poly.some(([x]) => x < 1));
+      expect(leftLanded?.flipped).toBe(true);
+      expect(rightLanded?.flipped).toBe(true);
+      expect(large.find((ply) => !ply.flipped)?.poly).toHaveLength(3);
+      const xs = large.flatMap((ply) => ply.poly.map(([x]) => x));
+      expect(Math.min(...xs)).toBeGreaterThan(-1);
+      expect(Math.max(...xs)).toBeLessThan(571);
+    }
+  });
+
+  it('gives the same plies whichever line was made first', () => {
+    const area = (plies: { poly: Pt2[] }[]) =>
+      plies
+        .map((ply) =>
+          Math.round(
+            ply.poly.reduce((sum, [x, y], i) => {
+              const [nx, ny] = ply.poly[(i + 1) % ply.poly.length];
+              return sum + x * ny - nx * y;
+            }, 0),
+          ),
+        )
+        .map(Math.abs)
+        .sort();
+    expect(area(foldedOutline(back, [centre, side]).plies)).toEqual(
+      area(foldedOutline(back, [side, centre]).plies),
+    );
+  });
+
+  it('still lays a double turn over itself', () => {
+    const outer: FlatFold = { a: [0, 15], b: [570, 15], flipAt: [285, 5], kind: 'inward' };
+    const inner: FlatFold = { a: [0, 30], b: [570, 30], flipAt: [285, 25], kind: 'inward' };
+    const { plies } = foldedOutline(back, [outer, inner]);
+    const ys = plies.flatMap((ply) => ply.poly.map(([, y]) => y));
+    expect(Math.min(...ys)).toBeCloseTo(30, 6);
+    expect(Math.max(...plies.at(-1)!.poly.map(([, y]) => y))).toBeGreaterThan(30);
+  });
+});
+
+describe('foldMap — a pleat of lines meeting at one point', () => {
+  it('moves a mark on the left part across the centre line only', () => {
+    const back: Pt2[] = [
+      [0, 0],
+      [570, 0],
+      [570, 690],
+      [0, 690],
+    ];
+    const centre: FlatFold = { a: [285, 690], b: [285, 14], flipAt: [280, 350], kind: 'inward' };
+    const side: FlatFold = { a: [320, 690], b: [285, 14], flipAt: [320, 350], kind: 'outward' };
+    const mapped = foldMap({ rings: [back], edges: [], marks: [[100, 350]], innerLines: [] }, [
+      centre,
+      side,
+    ]);
+    expect(mapped.marks[0][0]).toBeCloseTo(470, 6);
+    expect(mapped.marks[0][1]).toBeCloseTo(350, 6);
+  });
+});

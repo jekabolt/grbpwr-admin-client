@@ -22,6 +22,7 @@ describe('derivePackaging', () => {
           unitsPerBox: 12,
           boxDimensions: '60 × 40 × 30 cm',
           boxMarking: 'style + qty',
+          notes: 'tape twice',
         },
         packagingItems: [
           {
@@ -72,7 +73,12 @@ describe('derivePackaging', () => {
       grossGrams: 360,
     });
     expect(model.packed.photo?.url).toBe('https://assets.example/packed.png');
-    expect(model.carton).toEqual({ units: 12, box: '60 × 40 × 30 cm', marking: 'style + qty' });
+    expect(model.carton).toEqual({
+      units: 12,
+      box: '60 × 40 × 30 cm',
+      marking: 'style + qty',
+      note: 'tape twice',
+    });
     expect(model.missing).toBeUndefined();
   });
 

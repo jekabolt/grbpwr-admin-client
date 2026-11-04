@@ -9,6 +9,7 @@ import type {
 import { deriveAssembly, type AsmPiece, type AssemblyModel } from './derive-assembly';
 import { deriveColourways } from './derive-colourways';
 import { deriveCover } from './derive-cover';
+import { deriveCutStrips } from './derive-cut-strips';
 import { deriveLabels } from './derive-labels';
 import { derivePackaging } from './derive-packaging';
 import { deriveMaterials } from './derive-materials';
@@ -124,6 +125,16 @@ export function collectPdfGaps(input: CollectPdfGapsInput): Gap[] {
     const grainDeg = input.grainDeg ?? new Map<string, number>();
     assembly = deriveAssembly({ techCard: input.techCard, pieces, grainDeg, t }, sink);
   }
+  deriveCutStrips(
+    input.techCard,
+    {
+      sizeNames: input.sizeNames,
+      pieces: assembly.pieces,
+      grainDeg: assembly.grainDeg ?? input.grainDeg,
+      t,
+    },
+    sink,
+  );
   deriveCover(
     input.techCard,
     { sampleSizeName: input.sampleSizeName, revisionLabel: input.revisionLabel },

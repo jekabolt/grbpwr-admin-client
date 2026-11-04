@@ -1,8 +1,10 @@
 import type { common_ProductionRun, common_TechCard } from 'api/proto-http/admin';
 import { TechPackDocument } from 'components/managers/tech-card/components/tech-pack-document';
 import { RunPackDocument } from 'components/managers/production-runs/components/run-pack-document';
+import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
+import { useQueryClient } from '@tanstack/react-query';
 import { buildPrintScope, parsePrintQuery } from './scope';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 // СТЕНД ПЕЧАТИ — единственный способ увидеть обе бумаги без бэкенда и без логина.
@@ -112,6 +114,40 @@ const techCard = {
       { number: 1, part: 'collar', description: 'top stitch 2 mm', mediaId: 0 },
       { number: 2, part: 'cuff', description: 'button placement' },
     ],
+    // Лейблы всех четырёх форм: цвет × размер, размер, один файл, ни одного файла.
+    garmentLabels: [
+      {
+        key: 'size',
+        calloutNumber: 2,
+        artworkPerSize: true,
+        placement: 'back neck',
+        qtyPerGarment: 1,
+        note: 'smoke note',
+        files: [1, 2, 3].map((sizeId) => ({
+          sizeId,
+          publicUrl: `https://cdn.smoke.test/size-${sizeId}.pdf`,
+        })),
+      },
+      {
+        key: 'composition',
+        calloutNumber: 1,
+        bomLineKey: 'B1',
+        placement: 'left side seam',
+        qtyPerGarment: 1,
+        files: [
+          { colorwayId: 10, sizeId: 1, publicUrl: 'https://cdn.smoke.test/comp-10-1.pdf' },
+          { colorwayId: 10, sizeId: 2, publicUrl: 'https://cdn.smoke.test/comp-10-2.pdf' },
+          { colorwayId: 11, sizeId: 2, publicUrl: 'https://cdn.smoke.test/comp-11-2.pdf' },
+        ],
+      },
+      {
+        key: 'brand',
+        placement: 'back neck',
+        qtyPerGarment: 1,
+        files: [{ publicUrl: 'https://cdn.smoke.test/brand.pdf' }],
+      },
+      { key: 'hangtag', placement: 'waist', qtyPerGarment: 1, files: [] },
+    ],
     pieces: [
       {
         lineKey: 'P1',
@@ -126,7 +162,13 @@ const techCard = {
       { lineKey: 'P2', name: 'collar', piecesPerGarment: 1, detached: true, calloutNumber: 0 },
     ],
     bomItems: [
-      { id: 100, lineKey: 'B1', name: 'shell fabric', section: 'TECH_CARD_BOM_SECTION_FABRIC', unit: 'm' },
+      {
+        id: 100,
+        lineKey: 'B1',
+        name: 'shell fabric',
+        section: 'TECH_CARD_BOM_SECTION_FABRIC',
+        unit: 'm',
+      },
       { id: 101, lineKey: 'B2', name: 'main zip', kind: 'TECH_CARD_BOM_KIND_ZIPPER', unit: 'pcs' },
       // ДВА ВИДА BOM ИЗ ВОЛНЫ. Их подписи живут в Partial-картах с фолбэком «?? kind», то есть tsc
       // о пропуске молчит, а на бумагу для цеха уходит сырой токен. Обе строки здесь ровно затем,
@@ -435,16 +477,50 @@ const techCard = {
       unitsPerBox: 20,
       weightNetGrams: 800,
       weightGrossGrams: 900,
+      packedSize: '30 x 20 x 5 cm',
+      notes: 'tape twice',
     },
+    // Items keep to the colour they were picked for, and the one from an auxiliary card has no BOM.
+    packagingItems: [
+      { key: 'hanger', materialId: 1, pickedName: 'Hanger - wood', qtyPerGarment: 1 },
+      { key: 'hang_tag', auxTechCardId: 7, pickedName: 'Octagon S', note: 'tie at the neck' },
+      { key: 'box', materialId: 2, pickedName: 'Box M', perOrder: true, colorwayIds: [10] },
+      { key: 'box', materialId: 3, pickedName: 'Box OTHER', perOrder: true, colorwayIds: [999] },
+    ],
     issues: [
-      { severity: 'TECH_CARD_ISSUE_SEVERITY_HIGH', status: 'TECH_CARD_ISSUE_STATUS_OPEN', operationNumber: 10, description: 'open issue' },
+      {
+        severity: 'TECH_CARD_ISSUE_SEVERITY_HIGH',
+        status: 'TECH_CARD_ISSUE_STATUS_OPEN',
+        operationNumber: 10,
+        description: 'open issue',
+      },
       // Ссылка на несуществующий шаг — должна быть названа «link lost», а не отправлять искать.
-      { severity: 'TECH_CARD_ISSUE_SEVERITY_LOW', status: 'TECH_CARD_ISSUE_STATUS_OPEN', operationNumber: 999, description: 'dangling ref' },
-      { severity: 'TECH_CARD_ISSUE_SEVERITY_LOW', status: 'TECH_CARD_ISSUE_STATUS_RESOLVED', description: 'closed issue', resolutionNote: 'fixed' },
+      {
+        severity: 'TECH_CARD_ISSUE_SEVERITY_LOW',
+        status: 'TECH_CARD_ISSUE_STATUS_OPEN',
+        operationNumber: 999,
+        description: 'dangling ref',
+      },
+      {
+        severity: 'TECH_CARD_ISSUE_SEVERITY_LOW',
+        status: 'TECH_CARD_ISSUE_STATUS_RESOLVED',
+        description: 'closed issue',
+        resolutionNote: 'fixed',
+      },
     ],
     signoffs: [
-      { section: 'TECH_CARD_SIGNOFF_SECTION_CONSTRUCTION', state: 'TECH_CARD_SIGNOFF_STATE_APPROVED', signedBy: 'tech', signedDigest: 'STALE' },
-      { section: 'TECH_CARD_SIGNOFF_SECTION_MATERIALS', state: 'TECH_CARD_SIGNOFF_STATE_APPROVED', signedBy: 'tech', signedDigest: 'MATCH' },
+      {
+        section: 'TECH_CARD_SIGNOFF_SECTION_CONSTRUCTION',
+        state: 'TECH_CARD_SIGNOFF_STATE_APPROVED',
+        signedBy: 'tech',
+        signedDigest: 'STALE',
+      },
+      {
+        section: 'TECH_CARD_SIGNOFF_SECTION_MATERIALS',
+        state: 'TECH_CARD_SIGNOFF_STATE_APPROVED',
+        signedBy: 'tech',
+        signedDigest: 'MATCH',
+      },
     ],
     costing: { unitCost: dec('42.50'), materialsPerUnit: dec('18.00'), cmtCost: dec('12.00') },
   },
@@ -463,11 +539,34 @@ const techCard = {
     { colorwayId: 11, colorCode: 'OLV', usages: [] },
   ],
   markers: [
-    { id: 1, name: 'norm M', colorwayId: 0, sizeId: 2, bomItemName: 'shell fabric', fabricWidthCm: dec('150'), usedLengthCm: dec('180'), efficiencyPct: dec('82'), consumptionPerUnitCm: dec('180') },
+    {
+      id: 1,
+      name: 'norm M',
+      colorwayId: 0,
+      sizeId: 2,
+      bomItemName: 'shell fabric',
+      fabricWidthCm: dec('150'),
+      usedLengthCm: dec('180'),
+      efficiencyPct: dec('82'),
+      consumptionPerUnitCm: dec('180'),
+    },
     // Смешанная раскладка: скаляра нет намеренно, норма живёт per-size.
-    { id: 2, name: 'mixed', colorwayId: 10, sizeId: 0, bomItemName: 'shell fabric', composition: [{ sizeId: 1, consumptionPerUnitCm: dec('170') }, { sizeId: 3, consumptionPerUnitCm: dec('195') }] },
+    {
+      id: 2,
+      name: 'mixed',
+      colorwayId: 10,
+      sizeId: 0,
+      bomItemName: 'shell fabric',
+      composition: [
+        { sizeId: 1, consumptionPerUnitCm: dec('170') },
+        { sizeId: 3, consumptionPerUnitCm: dec('195') },
+      ],
+    },
   ],
-  careEntries: [{ code: 'M30', name: 'machine wash 30' }, { code: 'F', name: 'do not tumble dry' }],
+  careEntries: [
+    { code: 'M30', name: 'machine wash 30' },
+    { code: 'F', name: 'do not tumble dry' },
+  ],
 } as unknown as common_TechCard;
 
 const run = {
@@ -490,6 +589,12 @@ const run = {
 export function PrintSmokePage() {
   const [searchParams] = useSearchParams();
   const query = useMemo(() => parsePrintQuery(searchParams), [searchParams.toString()]);
+  // By default the run pack's own read of the card fails: that is the check above. `?card=1` answers
+  // it, to see the sheets that read the card (run packaging).
+  const client = useQueryClient();
+  useState(() => {
+    if (searchParams.get('card')) client.setQueryData(techCardKeys.detail(1), techCard);
+  });
   const scope = useMemo(
     () => buildPrintScope({ techCard, query, run: query.runId ? run : undefined }),
     [query],

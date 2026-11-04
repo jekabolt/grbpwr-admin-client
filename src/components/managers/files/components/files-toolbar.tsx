@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, type ChangeEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import type { FileTopic } from 'api/proto-http/admin';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { ROUTES } from 'constants/routes';
 import { Avatar, Button, Chip, GenericPopover, Input, Select, Text, ViewSwitch } from 'ui';
@@ -10,6 +11,7 @@ import {
   type FilesSort,
   type PersonRoleFilter,
 } from '../hooks/useFiles';
+import { MAX_TOPIC_FILTERS, toggleTopic, type TopicSelection } from './topic-chips';
 
 const ROLES: PersonRoleFilter[] = ['any', 'uploaded', 'owner'];
 
@@ -27,7 +29,7 @@ const SORT_SHORT: Record<FilesSort, string> = {
   name: 'by name',
   size: 'by size',
 };
-/** Телефон: строка статуса обязана влезть в одну строку на 390px — порядок короче. */
+/** Телефон: строка фильтров обязана влезть в одну прокрутку — порядок короче. */
 const SORT_TINY: Record<FilesSort, string> = {
   new: 'new ↓',
   name: 'a–z',
@@ -52,8 +54,8 @@ const SORT_CYCLE: FilesSort[] = ['new', 'name', 'size'];
  * ПЕРЕКЛЮЧАТЕЛЬ РОЛИ СПРЯТАН, ПОКА ЧЕЛОВЕК НЕ ВЫБРАН: роль бессмысленна, пока вопрос не задан, и
  * задаётся он соседним органом в одном движении. Разница ролей — в подсказке чипа, а не строкой.
  *
- * МЕСТО — РЕЙЛ на десктопе и переполнение ряда тем на телефоне, а не полоса во всю ширину над
- * файлами: это уточнение выдачи, которым пользуются редко.
+ * МЕСТО — ПОПОВЕР В СТРОКЕ ФИЛЬТРОВ: это уточнение выдачи, которым пользуются редко, поэтому
+ * список ролей появляется только после выбора человека.
  */
 export function PersonFilter({
   personId,
@@ -123,6 +125,198 @@ export function PersonFilter({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function Count({ children }: { children: number }) {
+  return <span className='text-control tabular-nums opacity-70'>{children}</span>;
+}
+
+/**
+ * ЕДИНСТВЕННАЯ СТРОКА ФИЛЬТРОВ НАД ВЫДАЧЕЙ: темы, человек, «разобрать», выбранные темы,
+ * затем порядок и вид. На узком экране строка прокручивается целиком, а не раскладывает один
+ * набор органов на несколько этажей.
+ *
+ * ПОПОВЕР ТЕМ ПОКАЗЫВАЕТ ТОЛЬКО НЕПУСТЫЕ ТЕМЫ. Пустая тема из старой ссылки остаётся снаружи
+ * выбранным чипом: сетка по-прежнему сужена её id, и снять фильтр можно независимо от словаря.
+ */
+export function FilesFilters({
+  topics,
+  selected,
+  untopiced,
+  untopicedCount,
+  onTopics,
+  personId,
+  personLabel,
+  personRole,
+  onPerson,
+  onPersonRole,
+  sort,
+  onSort,
+  view,
+  onView,
+}: {
+  topics: FileTopic[];
+  selected: number[];
+  untopiced: boolean;
+  untopicedCount: number;
+  onTopics: (next: TopicSelection) => void;
+  personId: number;
+  personLabel: string;
+  personRole: PersonRoleFilter;
+  onPerson: (id: number) => void;
+  onPersonRole: (role: PersonRoleFilter) => void;
+  sort: FilesSort;
+  onSort: (sort: FilesSort) => void;
+  view: FilesView;
+  onView: (view: FilesView) => void;
+}) {
+  const [topicQuery, setTopicQuery] = useState('');
+  const query = topicQuery.trim().toLocaleLowerCase();
+  const availableTopics = topics.filter(
+    (topic) =>
+      Number(topic.filesCount ?? 0) > 0 &&
+      (!query || (topic.name ?? '').toLocaleLowerCase().includes(query)),
+  );
+  const atLimit = selected.length >= MAX_TOPIC_FILTERS;
+  const toggle = (id: number) => onTopics(toggleTopic(selected, id));
+  const nextSort = SORT_CYCLE[(SORT_CYCLE.indexOf(sort) + 1) % SORT_CYCLE.length];
+  const menuItem =
+    'flex w-full items-center gap-2 border-b border-hairline px-1 py-1.5 text-left last:border-b-0';
+
+  return (
+    <div
+      role='toolbar'
+      aria-label='file filters'
+      className='flex flex-wrap items-center gap-1.5 border-t border-hairline px-block py-2.5'
+    >
+      <div className='flex w-full min-w-0 items-center sm:w-auto sm:flex-1 gap-1.5 overflow-x-auto overscroll-x-contain pr-1.5'>
+        <GenericPopover
+          title='topics'
+          noTail
+          triggerProps={{ asChild: true }}
+          openElement={
+            <Chip
+              selected={selected.length > 0}
+              pressed={selected.length > 0}
+              onClick={() => undefined}
+            >
+              topics
+              {selected.length > 0 && <Count>{selected.length}</Count>}
+            </Chip>
+          }
+        >
+          <Input
+            name='topic-find'
+            value={topicQuery}
+            onChange={(event: ChangeEvent<HTMLInputElement>) => setTopicQuery(event.target.value)}
+            placeholder='find'
+            aria-label='find topic'
+            className='w-full'
+          />
+          <div role='group' aria-label='topics' className='mt-1 flex flex-col'>
+            {availableTopics.map((topic) => {
+              const id = Number(topic.id);
+              const on = selected.includes(id);
+              const disabled = atLimit && !on;
+              return (
+                <Button
+                  key={id}
+                  aria-pressed={on}
+                  disabled={disabled}
+                  title={disabled ? `max ${MAX_TOPIC_FILTERS} topics` : topic.name ?? undefined}
+                  className={menuItem}
+                  onClick={() => toggle(id)}
+                >
+                  <span aria-hidden className='w-3 shrink-0 text-textColor'>
+                    {on ? '✓' : ''}
+                  </span>
+                  <span className='min-w-0 flex-1 truncate'>{topic.name ?? `#${id}`}</span>
+                  <Count>{Number(topic.filesCount ?? 0)}</Count>
+                </Button>
+              );
+            })}
+          </div>
+          <div className='mt-1.5 flex items-center gap-3 border-t border-hairline pt-1.5'>
+            <Button asChild variant='underline' className='text-labelColor'>
+              <Link to={ROUTES.fileTopics}>manage</Link>
+            </Button>
+            {selected.length > 0 && (
+              <Button
+                variant='underline'
+                className='ml-auto text-labelColor'
+                onClick={() => onTopics({ topicIds: [], untopiced: false })}
+              >
+                clear
+              </Button>
+            )}
+          </div>
+        </GenericPopover>
+
+        <GenericPopover
+          title='person'
+          noTail
+          triggerProps={{ asChild: true }}
+          openElement={
+            <Chip
+              selected={personId > 0}
+              pressed={personId > 0}
+              title={personLabel || 'person'}
+              onClick={() => undefined}
+            >
+              <span className='max-w-[16ch] truncate'>{personLabel || 'person'}</span>
+            </Chip>
+          }
+        >
+          <div className='p-2.5'>
+            <PersonFilter
+              personId={personId}
+              personRole={personRole}
+              onPerson={onPerson}
+              onPersonRole={onPersonRole}
+            />
+          </div>
+        </GenericPopover>
+
+        <Chip
+          tone='error'
+          selected={untopiced}
+          pressed={untopiced}
+          onClick={() => onTopics({ topicIds: [], untopiced: !untopiced })}
+        >
+          unsorted
+          <Count>{untopicedCount}</Count>
+        </Chip>
+
+        {selected.map((id) => {
+          const name = topics.find((topic) => Number(topic.id) === id)?.name ?? `#${id}`;
+          return (
+            <Chip
+              key={id}
+              selected
+              pressed
+              title={name}
+              onClick={() => toggle(id)}
+              onRemove={() => toggle(id)}
+            >
+              <span className='max-w-[24ch] truncate'>{name}</span>
+            </Chip>
+          );
+        })}
+      </div>
+
+      <span className='ml-auto flex shrink-0 items-center gap-2.5'>
+        <Button
+          className='whitespace-nowrap text-labelColor hover:text-textColor'
+          title={`${SORT_LABEL[sort]} · next: ${SORT_LABEL[nextSort]}`}
+          onClick={() => onSort(nextSort)}
+        >
+          <span className='sm:hidden'>{SORT_TINY[sort]}</span>
+          <span className='hidden sm:inline'>{SORT_SHORT[sort]}</span>
+        </Button>
+        <ViewSwitch value={view} options={VIEWS} onChange={onView} label='view' />
+      </span>
     </div>
   );
 }
@@ -201,10 +395,6 @@ export function StatusLine({
   untopiced,
   filtered,
   onReset,
-  sort,
-  onSort,
-  view,
-  onView,
   selecting,
   selectedCount = 0,
   onToggleSelecting,
@@ -217,10 +407,6 @@ export function StatusLine({
   /** Есть ли что сбрасывать. Без этого «reset» не рисуется вовсе. */
   filtered: boolean;
   onReset: () => void;
-  sort: FilesSort;
-  onSort: (v: FilesSort) => void;
-  view: FilesView;
-  onView: (v: FilesView) => void;
   /**
    * ТЕЛЕФОННЫЙ ВХОД В ВЫБОР — САМО ЧИСЛО. «6 files» подчёркнуто и включает выбор; в режиме
    * то же место говорит «N selected · done». Отдельного слова «select» нет: оно стояло рядом с
@@ -230,7 +416,6 @@ export function StatusLine({
   selectedCount?: number;
   onToggleSelecting?: () => void;
 }) {
-  const next = SORT_CYCLE[(SORT_CYCLE.indexOf(sort) + 1) % SORT_CYCLE.length];
   return (
     <div
       role='status'
@@ -287,17 +472,6 @@ export function StatusLine({
           </Button>
         )}
       </span>
-      <span className='ml-auto flex shrink-0 items-center gap-2.5'>
-        <Button
-          className='whitespace-nowrap text-labelColor hover:text-textColor'
-          title={`${SORT_LABEL[sort]} · next: ${SORT_LABEL[next]}`}
-          onClick={() => onSort(next)}
-        >
-          <span className='sm:hidden'>{SORT_TINY[sort]}</span>
-          <span className='hidden sm:inline'>{SORT_SHORT[sort]}</span>
-        </Button>
-        <ViewSwitch value={view} options={VIEWS} onChange={onView} label='view' />
-      </span>
     </div>
   );
 }
@@ -305,45 +479,43 @@ export function StatusLine({
 /**
  * ШАПКА ХОЛСТА — содержимое первым.
  *
- * Телефон: заголовок-проект, под ним поиск и «+», под ними один ряд тем. Десктоп: заголовок,
- * поиск и «+ add» в одну строку, темы уходят в рейл. Строка статуса и описание темы — внутри
- * того же блока, под волосяной линией.
+ * Проект и добавление стоят в заголовке на любой ширине; поиск лежит под ними, затем единая
+ * строка фильтров. Строка статуса и описание темы остаются внутри того же блока.
  */
 export function FilesHeader({
   title,
   search,
   onSearch,
   actions,
-  chips,
+  filters,
   children,
 }: {
-  title: React.ReactNode;
+  title: ReactNode;
   search: string;
   onSearch: (v: string) => void;
-  actions: React.ReactNode;
-  /** Ряд тем телефона; на десктопе спрятан — там рейл. */
-  chips: React.ReactNode;
+  actions: ReactNode;
+  filters: ReactNode;
   /** Строка статуса и всё, что ниже линии. */
-  children?: React.ReactNode;
+  children?: ReactNode;
 }) {
   return (
     <div className='border border-borderColor bg-bgColor'>
-      <div className='flex flex-col gap-stack p-block lg:flex-row lg:items-center lg:gap-3'>
-        {title}
-        <div className='flex min-w-0 items-center gap-2 lg:flex-1'>
-          <Input
-            name='search'
-            type='text'
-            value={search}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => onSearch(e.target.value)}
-            placeholder='name, topic, person'
-            aria-label='search'
-            className='h-10 min-w-0 flex-1 px-3 lg:max-w-md'
-          />
-          <div className='flex shrink-0 items-center gap-2 lg:ml-auto'>{actions}</div>
+      <div className='flex flex-col gap-stack p-block'>
+        <div className='flex min-w-0 items-center gap-2'>
+          {title}
+          <div className='ml-auto flex shrink-0 items-center gap-2'>{actions}</div>
         </div>
-        <div className='lg:hidden'>{chips}</div>
+        <Input
+          name='search'
+          type='text'
+          value={search}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => onSearch(e.target.value)}
+          placeholder='name, topic, person'
+          aria-label='search'
+          className='h-10 w-full px-3 lg:max-w-md'
+        />
       </div>
+      {filters}
       {children}
     </div>
   );

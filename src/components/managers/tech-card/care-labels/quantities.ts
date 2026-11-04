@@ -91,6 +91,9 @@ const STALE: ReadonlySet<common_ProductionRunStatus> = new Set<common_Production
   'PRODUCTION_RUN_STATUS_CANCELLED',
 ]);
 
+export const isRunStale = (run: Pick<CareLabelRun, 'status'>): boolean =>
+  !!run.status && STALE.has(run.status);
+
 export type Quantities = {
   /** Итоговые копии (с запасом) по включённым колорвеям; у исключённых чекбоксом — нули. */
   cells: QtyGrid;

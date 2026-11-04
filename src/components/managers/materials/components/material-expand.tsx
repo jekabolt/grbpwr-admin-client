@@ -2,6 +2,7 @@ import {
   common_CompositionEntry,
   common_Material,
   common_MaterialClass,
+  common_MaterialLabelType,
   common_MaterialMovement,
   common_MediaFull,
   common_TechCardBomSection,
@@ -38,6 +39,7 @@ import {
   classForSection,
   derivedSection,
   materialClassOptions,
+  materialLabelTypeOptions,
   resolveMaterialClass,
   saveErrorMessage,
 } from './material-modal';
@@ -62,6 +64,7 @@ type Draft = {
   name: string;
   supplier: string;
   section: common_TechCardBomSection;
+  labelType: common_MaterialLabelType;
   materialClass: common_MaterialClass;
   width: string;
   weight: string;
@@ -76,6 +79,7 @@ type TextKey = 'name' | 'supplier' | 'width' | 'weight';
 type Move = 'receive' | 'issue' | 'adjust';
 
 const FABRIC: common_MaterialClass = 'MATERIAL_CLASS_FABRIC';
+const LABEL_SECTION: common_TechCardBomSection = 'TECH_CARD_BOM_SECTION_LABEL';
 const HARDWARE: common_MaterialClass = 'MATERIAL_CLASS_HARDWARE';
 const THREAD: common_MaterialClass = 'MATERIAL_CLASS_THREAD';
 const PACKAGING: common_MaterialClass = 'MATERIAL_CLASS_PACKAGING';
@@ -135,6 +139,7 @@ function draftOf(m: common_Material): Draft {
     name: m.name ?? '',
     supplier: m.supplier ?? '',
     section: m.section ?? 'TECH_CARD_BOM_SECTION_FABRIC',
+    labelType: m.labelType ?? 'MATERIAL_LABEL_TYPE_UNKNOWN',
     materialClass: cls,
     width: widthOf(m, cls),
     weight: weightOf(m, cls),
@@ -158,6 +163,7 @@ const materialChanged = (d: Draft, b: Draft) =>
   d.name !== b.name ||
   d.supplier !== b.supplier ||
   d.section !== b.section ||
+  d.labelType !== b.labelType ||
   d.materialClass !== b.materialClass ||
   d.width !== b.width ||
   d.weight !== b.weight ||
@@ -197,6 +203,11 @@ function payloadOf(m: common_Material, d: Draft): common_Material {
     ...m,
     name: d.name.trim(),
     section: derivedSection(cls) ?? d.section,
+    // The server keeps a stored type when this is UNKNOWN and clears it on a move out of the section.
+    labelType:
+      (derivedSection(cls) ?? d.section) === LABEL_SECTION
+        ? d.labelType
+        : 'MATERIAL_LABEL_TYPE_UNKNOWN',
     supplier: d.supplier.trim(),
     supplierRef: m.supplierRef ?? '',
     supplierId: m.supplierId ?? 0,
@@ -718,8 +729,30 @@ export function MaterialExpand({
     </Cell>
   );
 
+  const labelTypeCell =
+    (derivedSection(cls) ?? d.section) === LABEL_SECTION ? (
+      <Cell label='type' phone={phone}>
+        {/* A stored type cannot be cleared: the server reads UNKNOWN as keep. */}
+        <Select
+          name={`label-type-${material.id}`}
+          items={[
+            ...(d.labelType === 'MATERIAL_LABEL_TYPE_UNKNOWN'
+              ? [{ value: 'MATERIAL_LABEL_TYPE_UNKNOWN', label: 'pick type' }]
+              : []),
+            ...materialLabelTypeOptions,
+          ]}
+          value={d.labelType}
+          readOnly={!canEdit}
+          className={cn(control, lower)}
+          itemClassName={lower}
+          fullWidth
+          onValueChange={(v: string) => patch({ labelType: v as common_MaterialLabelType })}
+        />
+      </Cell>
+    ) : null;
+
   const compositionCell = (
-    <Cell label='composition' phone={phone} className='col-span-2'>
+    <Cell label='composition' phone={phone} className={labelTypeCell ? undefined : 'col-span-2'}>
       <div className={frame}>
         {canEdit ? (
           <>
@@ -756,6 +789,7 @@ export function MaterialExpand({
     </Cell>,
     sectionCell,
     classCell,
+    labelTypeCell,
     <Cell key='width' label='width' phone={phone}>
       {measure('width', WIDTH[cls])}
     </Cell>,

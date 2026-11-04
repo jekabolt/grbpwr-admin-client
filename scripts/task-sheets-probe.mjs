@@ -68,7 +68,7 @@ const table = {
       .map((f) => ({ ...f, downloadUrl: 'https://files.example/' + f.id + '?v=' + state.calls.GetTask }));
     return { task: wrap(), files };
   },
-  UpdateTask: ({ task }) => { state.updates.push(JSON.parse(JSON.stringify(task))); state.task = { ...task }; return {}; },
+  UpdateTask: async ({ task }) => { if (state.hold) await state.hold; state.updates.push(JSON.parse(JSON.stringify(task))); state.task = { ...task }; return {}; },
   ListTaskComments: () => ({ comments: state.comments }),
   ListTasks: () => ({ tasks: [], total: 0 }),
   ListAdmins: () => ({ admins: [{ id: 1, username: 'nina' }] }),
@@ -480,8 +480,29 @@ await mount({
   await pause();
   ck((await word(picker, 'as table').count()) === 1, 'table file offers as table');
   await shot('8-picker-table');
+  // Медленное прикрепление: окно держит описание закрытым, метка встанет туда, где был курсор.
+  const textBefore = await area.inputValue();
+  await server((s) => {
+    s.hold = new Promise((done) => (s.release = done));
+  });
   await word(picker, 'as table').click();
+  await pause(300);
+  await page.keyboard.press('Escape');
+  await pause(300);
+  ck((await picker.count()) === 1, 'picker stays open while attaching');
+  ck((await word(picker, 'as table').isDisabled()) === true, 'as table waits');
+  ck((await area.inputValue()) === textBefore, 'no token before attached');
+  await server((s) => {
+    s.release();
+    s.hold = null;
+  });
   await pause(500);
+  ck((await picker.count()) === 0, 'picker closes once attached');
+  ck(
+    (await area.inputValue()).startsWith(textBefore.slice(0, 6)),
+    'text before the cursor kept',
+    await area.inputValue(),
+  );
   ck(
     (await area.inputValue()).includes('[[sheet:9]]'),
     'token in the text',

@@ -3,6 +3,7 @@
 // кнопки его не тянет); PDF внутри уже сжаты FlateDecode — кладутся `level 0`, текст — `level 6`.
 import type { Hole } from './holes';
 import { manifestCsv, filePath, type ManifestColorway } from './manifest';
+import type { OwnZipFile } from './own-files';
 import { alignmentTestPdf, filePdf, sideSvg, type PrintSet } from './pages';
 import { archiveCounts, readmeText, type ArchiveCounts } from './readme';
 import type { Shaper } from './text-outline';
@@ -28,6 +29,8 @@ export type CareLabelZipInput = {
   qrTemplate: string;
   adminUrl: string;
   warnings: readonly Hole[];
+  /** Own files of the archive: laid in as they are, see `own-files.ts`. */
+  own?: readonly OwnZipFile[];
   at?: Date;
 };
 
@@ -44,6 +47,7 @@ export async function buildCareLabelZip(input: CareLabelZipInput): Promise<CareL
   const { zipSync, strToU8 } = await import('fflate');
   const at = input.at ?? new Date();
   const { set } = input;
+  const own = input.own ?? [];
   const counts = archiveCounts(set);
   const readme = readmeText({
     style: input.style,
@@ -54,6 +58,7 @@ export async function buildCareLabelZip(input: CareLabelZipInput): Promise<CareL
     generatedAt: at,
     adminUrl: input.adminUrl,
     warnings: input.warnings,
+    own,
   });
 
   type Entry = [Uint8Array, { level: 0 | 6 }];
@@ -61,8 +66,10 @@ export async function buildCareLabelZip(input: CareLabelZipInput): Promise<CareL
   const pdf = (b: Uint8Array): Entry => [b, { level: 0 }];
   const files: Record<string, Entry> = {};
   files['README.txt'] = text(readme);
-  if (set.mode === 'duplex') files['00-alignment-test.pdf'] = pdf(alignmentTestPdf(input.shaper));
-  files['manifest.csv'] = text(manifestCsv(set, input.colorways));
+  // Nothing generated, nothing to align: own files are printed as supplied.
+  if (set.mode === 'duplex' && set.files.length > 0)
+    files['00-alignment-test.pdf'] = pdf(alignmentTestPdf(input.shaper));
+  files['manifest.csv'] = text(manifestCsv(set, input.colorways, own));
   for (const f of set.files) {
     const path = filePath(f);
     if (files[path]) throw new Error(`care-labels zip: duplicate path ${path}`);
@@ -72,6 +79,10 @@ export async function buildCareLabelZip(input: CareLabelZipInput): Promise<CareL
     const path = `svg/${s.svgStem}.svg`;
     if (files[path]) throw new Error(`care-labels zip: duplicate path ${path}`);
     files[path] = text(sideSvg(set, key));
+  }
+  for (const f of own) {
+    if (files[f.path]) throw new Error(`care-labels zip: duplicate path ${f.path}`);
+    files[f.path] = pdf(f.bytes);
   }
 
   const bytes = zipSync(files, { mtime: at });

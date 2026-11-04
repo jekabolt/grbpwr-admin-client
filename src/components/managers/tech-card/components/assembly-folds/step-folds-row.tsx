@@ -206,6 +206,7 @@ export function StepFoldsGroup({
           cardId={cardId}
           frozen={frozen}
           size={size}
+          stepIndex={typeof stepKey === 'number' ? stepKey : undefined}
           onClose={() => setOpen(null)}
         />
       )}

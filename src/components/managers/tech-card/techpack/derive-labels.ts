@@ -52,6 +52,7 @@ export type SewnTableRow = {
   size: string;
   material: string;
   qty: number | null;
+  note: string;
 };
 
 /** One line of the QR grid. An empty `url` prints `no file`: never a QR to nothing. */
@@ -112,6 +113,7 @@ function deriveSewn(techCard: common_TechCard, options: LabelsDeriveOptions, t: 
       resolveBomRef(refs, { bomLineKey: row.bomLineKey, bomItemId: row.bomItemId })?.item.name,
     ),
     qty: row.qtyPerGarment ?? null,
+    note: clean(row.note),
   }));
 
   const lines: SewnQrLine[] = rows.flatMap((row, index) => {

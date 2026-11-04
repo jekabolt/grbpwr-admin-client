@@ -112,6 +112,10 @@ export function foldHints(
     }
     const through = clipThrough(geom.rs, mid, sub(b, a));
     if (!through) continue;
+    // One drawn line is read twice when it is both a classified mark and an inner line. It stays one
+    // hint: the mark when it only falls short of the contour, the line itself when it stops well inside.
+    if (r.origin !== 'mark' ? twinMark(r, raws, through, th) : twinInner(r, raws, through, th))
+      continue;
     let lineMm: [Pt2, Pt2] = through;
     if (r.origin === 'inner') {
       const d = unit(sub(b, a));
@@ -149,6 +153,32 @@ export function foldHints(
     });
   }
   return out;
+}
+
+/** How far the contour-to-contour line runs past the drawn ends. */
+function extension(pts: readonly Pt2[], through: readonly [Pt2, Pt2]): number {
+  const gap = (end: Pt2) => Math.min(len(sub(end, through[0])), len(sub(end, through[1])));
+  return Math.max(gap(pts[0]), gap(pts[pts.length - 1]));
+}
+
+const sameDrawn = (p: Raw, q: Raw, th: typeof FOLDS) =>
+  sameLine([p.pts[0], p.pts[p.pts.length - 1]], [q.pts[0], q.pts[q.pts.length - 1]], th);
+
+/** A mark that stops well inside the piece gives way to the inner line it was classified from. */
+function twinInner(mark: Raw, raws: readonly Raw[], through: [Pt2, Pt2], th: typeof FOLDS) {
+  return (
+    extension(mark.pts, through) > th.markReachMm &&
+    raws.some((raw) => raw.origin === 'inner' && sameDrawn(raw, mark, th))
+  );
+}
+
+/** An inner line gives way to the mark of the same line when that mark only falls short of the contour. */
+function twinMark(line: Raw, raws: readonly Raw[], through: [Pt2, Pt2], th: typeof FOLDS) {
+  return (
+    line.origin === 'inner' &&
+    extension(line.pts, through) <= th.markReachMm &&
+    raws.some((raw) => raw.origin === 'mark' && sameDrawn(raw, line, th))
+  );
 }
 
 function sameLine(p: readonly [Pt2, Pt2], q: readonly [Pt2, Pt2], th: typeof FOLDS): boolean {

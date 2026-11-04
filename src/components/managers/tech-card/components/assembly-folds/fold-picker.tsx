@@ -17,7 +17,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { Button, Chip, ChipRow, Close, Select } from 'ui';
+import { Button, Chip, ChipRow } from 'ui';
 import { pieceRefKey } from '../piece-block-refs';
 import type { FoundPiece } from '../nesting/dxf-geometry';
 import {
@@ -32,7 +32,7 @@ import {
   type PickKind,
 } from './fold-model';
 import { FAINT, GREY, HatchDef, INK, PAPER, PICK, PliesSvg } from './fold-picture';
-import { foldStepBlocked, stepOfFold, suggestStep, useFoldStep } from './fold-step';
+import { foldStepBlocked, stepOfFold, useFoldStep } from './fold-step';
 import { useFoldRows } from './folds-store';
 import { useFoldWrites } from './use-fold-writes';
 
@@ -124,14 +124,18 @@ export function FoldPicker({
   cardId,
   frozen,
   size,
+  stepIndex,
   onClose,
 }: {
   read: PieceRead;
   cardId: number | undefined;
   frozen: boolean;
   size: string;
+  /** The step this picker is open on. */
+  stepIndex?: number;
   onClose: () => void;
 }) {
+  const choosing = useRef(false);
   const writes = useFoldWrites(cardId, frozen);
   const foldStep = useFoldStep();
   const { geom, deg, inner, groups, hints, rows } = read;
@@ -139,7 +143,6 @@ export function FoldPicker({
   const [pending, setPending] = useState<{ line: [Pt2, Pt2]; source: FoldSource } | null>(null);
   const [hovered, setHovered] = useState<string | null>(null);
   const [live, setLive] = useState<Pt2 | null>(null);
-  const [noStep, setNoStep] = useState<Set<string>>(() => new Set());
   const svgRef = useRef<SVGSVGElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -257,8 +260,29 @@ export function FoldPicker({
     if (drawing) setLive(svgPoint(event));
   };
 
+  /** A fold belongs to the step it was picked on, unless that breaks the piece's fold order. */
+  const linkToStep = (saved: readonly StoredFold[], target: number | null | undefined) => {
+    if (target === null || target === undefined) return;
+    const foldKeys = saved.map((row) => row.foldKey);
+    const others = rows.filter((row) => !foldKeys.includes(row.foldKey));
+    const blocked = saved.some((row) =>
+      foldStepBlocked(foldStep.operations, [...others, row], row.foldKey, target),
+    );
+    if (!blocked) foldStep.assign(foldKeys, target);
+  };
+
   const choose = async (line: PickerLine, kind: PickKind) => {
-    if (frozen) return;
+    // A second click before the first write lands would save the same line twice.
+    if (frozen || choosing.current) return;
+    choosing.current = true;
+    try {
+      await applyChoice(line, kind);
+    } finally {
+      choosing.current = false;
+    }
+  };
+
+  const applyChoice = async (line: PickerLine, kind: PickKind) => {
     if (!line.group) {
       const saved = rowsOfChoice(
         geom,
@@ -268,12 +292,17 @@ export function FoldPicker({
       setPending(null);
       setDrawing(null);
       setLive(null);
-      if (saved?.length) await writes.upsert(saved);
+      if (saved?.length && (await writes.upsert(saved))) linkToStep(saved, stepIndex);
       return;
     }
 
     const group = line.group;
-    if (group.kind === kind) return;
+    if (group.kind === kind) {
+      // A fold saved before folds linked by themselves stays flat on the print until it has a step.
+      if (group.rows.every((row) => stepOfFold(foldStep.operations, row.foldKey) === null))
+        linkToStep(group.rows, stepIndex);
+      return;
+    }
     const sameCount = (kind === 'double') === (group.kind === 'double');
     const saved = rowsOfChoice(
       geom,
@@ -287,7 +316,10 @@ export function FoldPicker({
     );
     if (!saved?.length) return;
     if (sameCount) {
-      await writes.upsert(saved);
+      if (await writes.upsert(saved)) {
+        if (saved.every((row) => stepOfFold(foldStep.operations, row.foldKey) === null))
+          linkToStep(saved, stepIndex);
+      }
       return;
     }
     const oldKeys = group.rows.map((row) => row.foldKey);
@@ -302,6 +334,7 @@ export function FoldPicker({
           saved.map((row) => row.foldKey),
           oldStep,
         );
+      else linkToStep(saved, stepIndex);
     }
   };
 
@@ -331,101 +364,6 @@ export function FoldPicker({
     const foldKeys = line.group.rows.map((row) => row.foldKey);
     if (!(await writes.remove(line.group.rows))) return;
     foldStep.assign(foldKeys, null);
-  };
-
-  const firstPieceStep = foldStep.operations.findIndex((operation) =>
-    operation.inputKeys?.some(
-      (pieceKey) => pieceKey.trim().toUpperCase() === geom.pieceKey.trim().toUpperCase(),
-    ),
-  );
-
-  const operationLabel = (index: number) => {
-    const operation = foldStep.operations[index];
-    const number = operation?.operationNumber || (index + 1) * 10;
-    const type = (operation?.operationType ?? 'STEP')
-      .replace(/^TECH_CARD_OPERATION_TYPE_/, '')
-      .replaceAll('_', ' ');
-    return `${number} ${type}`;
-  };
-
-  const blocked = (group: FoldGroup, stepIndex: number) => {
-    const keys = new Set(group.rows.map((row) => row.foldKey));
-    const otherRows = rows.filter((row) => !keys.has(row.foldKey));
-    return group.rows.some((row) =>
-      foldStepBlocked(foldStep.operations, [...otherRows, row], row.foldKey, stepIndex),
-    );
-  };
-
-  const stepControls = (group: FoldGroup, rowNumber: number) => {
-    const foldKeys = group.rows.map((row) => row.foldKey);
-    const current = foldKeys
-      .map((foldKey) => stepOfFold(foldStep.operations, foldKey))
-      .find((step) => step !== null);
-    const suggested = suggestStep(foldStep.operations, geom.pieceKey);
-    const explicitlyFlat = foldKeys.every((foldKey) => noStep.has(foldKey));
-    const choices = foldStep.operations
-      .map((_, index) => index)
-      .filter(
-        (index) =>
-          (firstPieceStep >= 0 && index >= firstPieceStep && !blocked(group, index)) ||
-          index === current,
-      );
-    const items = [
-      { value: 'none', label: '—' },
-      ...choices.map((index) => ({ value: String(index), label: operationLabel(index) })),
-    ];
-    const canSuggest =
-      current === undefined && !explicitlyFlat && suggested !== null && !blocked(group, suggested);
-
-    const assignStep = (stepIndex: number | null) => {
-      foldStep.assign(foldKeys, stepIndex);
-      setNoStep((currentKeys) => {
-        const next = new Set(currentKeys);
-        for (const foldKey of foldKeys) {
-          if (stepIndex === null) next.add(foldKey);
-          else next.delete(foldKey);
-        }
-        return next;
-      });
-    };
-
-    return (
-      <div className='ml-6.5 mt-1.5 flex flex-wrap items-center gap-1.5'>
-        {canSuggest ? (
-          <Chip
-            tone='attention'
-            disabled={frozen}
-            onClick={() => assignStep(suggested)}
-            className='active:translate-y-px'
-            data-fold-step-suggestion={rowNumber}
-          >
-            STEP [{operationLabel(suggested)}]
-          </Chip>
-        ) : (
-          <Select
-            name={`fold-step-${rowNumber}`}
-            items={items}
-            placeholder='STEP'
-            value={current === undefined ? 'none' : String(current)}
-            readOnly={frozen}
-            size='sm'
-            className='w-40 hover:border-textColor active:translate-y-px'
-            itemClassName='data-[state=checked]:bg-textColor data-[state=checked]:text-bgColor'
-            renderValue={(_, item) => <span>STEP {item?.label}</span>}
-            onValueChange={(value) => assignStep(value === 'none' ? null : Number(value))}
-          />
-        )}
-        <Button
-          variant='underline'
-          size='xs'
-          disabled={frozen}
-          onClick={() => assignStep(null)}
-          className='hover:text-textColor active:translate-y-px'
-        >
-          NO STEP
-        </Button>
-      </div>
-    );
   };
 
   const liveSnap = drawing && live ? snapAt(live) : null;
@@ -568,7 +506,6 @@ export function FoldPicker({
           <div className='divide-y divide-hairline'>
             {lines.map((line, index) => {
               const kind = line.group?.kind ?? null;
-              const value = line.group ? foldValue(geom, line.group) : null;
               return (
                 <div
                   key={line.id}
@@ -596,11 +533,6 @@ export function FoldPicker({
                         </Chip>
                       ))}
                     </ChipRow>
-                    {value !== null && (
-                      <span className='whitespace-nowrap text-nano uppercase tabular-nums text-labelColor'>
-                        {value} mm
-                      </span>
-                    )}
                     {line.group && (
                       <span className='pointer-events-none ml-auto flex basis-full justify-end gap-2 opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 sm:basis-auto [@media(pointer:coarse)]:pointer-events-auto [@media(pointer:coarse)]:opacity-100'>
                         <Button
@@ -613,17 +545,19 @@ export function FoldPicker({
                         >
                           swap
                         </Button>
-                        <Close
-                          size='sm'
+                        <Button
+                          variant='underline'
+                          size='xs'
                           disabled={frozen}
-                          aria-label='remove fold'
                           onClick={() => void remove(line)}
-                          className='pointer-events-auto active:translate-y-px'
-                        />
+                          className='hover:text-textColor active:translate-y-px'
+                          data-fold-remove=''
+                        >
+                          remove
+                        </Button>
                       </span>
                     )}
                   </div>
-                  {line.group && stepControls(line.group, index + 1)}
                 </div>
               );
             })}
@@ -732,11 +666,6 @@ function PieceName({
       {piece.name}
     </text>
   );
-}
-
-function foldValue(piece: PieceGeom, group: FoldGroup): number {
-  const shape = foldedOutline(piece.rs, group.flat);
-  return Math.max(0, Math.round(shape.cutWidthMm - shape.finishedWidthMm));
 }
 
 function sortPickerLines(lines: PickerLine[]): PickerLine[] {

@@ -23,6 +23,7 @@ import { pieceClothMap, type ClothSlot, type PieceCloth } from './piece-cloth';
 import { PieceLegend } from './piece-legend';
 import { TechCardFormData, wireInt } from './schema';
 import { useCrossHighlight } from './useCrossHighlight';
+import { useShapesWithStrips } from './cut-strips/use-strip-shapes';
 import { usePieceShapes, type PieceShapes } from './use-piece-shapes';
 import { useSkeletonDoor } from './assembly-skeleton-panel';
 import {
@@ -425,6 +426,7 @@ export function ConstructionTab({
   // опция, и спрашивать разрешения показать то, ради чего на экран пришли, незачем. Но и качать
   // мегабайты за того, кто вкладку не открывал, тоже: вкладки смонтированы все сразу.
   const pieceShapes = usePieceShapes(active);
+  const assemblyShapes = useShapesWithStrips(pieceShapes.shapeByKey);
 
   // Which concrete article each colourway takes for the slots an operation consumes. Assembled here
   // because the two halves come from different places: the recipe (usages + their pins) rides the
@@ -696,7 +698,7 @@ export function ConstructionTab({
                         onActiveBomChange={bom.setActive}
                         colorwayArticles={colorwayArticles}
                         pieceClothByColorway={pieceClothByColorway}
-                        pieceShapes={pieceShapes.shapeByKey}
+                        pieceShapes={assemblyShapes}
                         orphanBlocks={pieceShapes.unlinkedBlocks ?? []}
                         // Размечена ли СОХРАНЁННАЯ карточка. Предикат тот же, что у маппера: сервер
                         // принимает намерение «снять разметку» только против карточки, которая её несёт,

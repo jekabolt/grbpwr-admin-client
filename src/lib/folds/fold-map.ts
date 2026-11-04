@@ -1,7 +1,17 @@
 import { Clipper, FillRule, Path64, Paths64, Point64 } from 'clipper2-js';
 import type { Pt2 } from 'lib/assembly-skeleton/types';
 import { add, inside, mul, sideDist, sub } from './geom';
-import { foldedOutline, inFoldBand, isFoldBounded, reflect, sideOf, type FlatFold } from './folded';
+import {
+  foldedOutline,
+  foldsCross,
+  inFoldBand,
+  insertCrease,
+  isFoldBounded,
+  reflect,
+  sideOf,
+  throughCreases,
+  type FlatFold,
+} from './folded';
 import type { StoredFold } from './types';
 
 export type FoldMapGeometry = {
@@ -111,18 +121,86 @@ function splitBoundedPolyline(line: readonly Pt2[], fold: FlatFold): Pt2[][] {
   return parts;
 }
 
+/** Where a flat point lands: only the folds it lies beyond on the flat piece move it. */
+const landed = (point: Pt2, folds: readonly FlatFold[], bounded: readonly boolean[]): Pt2 =>
+  throughCreases(
+    point,
+    folds.reduce<FlatFold[]>(
+      (chain, fold, i) => (pointMoves(point, fold, bounded[i]) ? insertCrease(chain, fold) : chain),
+      [],
+    ),
+  );
+
+/** Cut a flat polyline at a fold's line and, when bounded, its end planes. Nothing moves yet. */
+function cutFlat(line: readonly Pt2[], fold: FlatFold, bounded: boolean): Pt2[][] {
+  if (line.length < 2) return [[...line]];
+  const d = sub(fold.b, fold.a);
+  const l2 = d[0] ** 2 + d[1] ** 2 || 1;
+  const projection = (p: Pt2) => (sub(p, fold.a)[0] * d[0] + sub(p, fold.a)[1] * d[1]) / l2;
+  const values = (p: Pt2) =>
+    bounded
+      ? [sideDist(fold.a, fold.b, p), projection(p), projection(p) - 1]
+      : [sideDist(fold.a, fold.b, p)];
+  const parts: Pt2[][] = [];
+  let part: Pt2[] = [line[0]];
+  let partMoves: boolean | null = null;
+  for (let i = 1; i < line.length; i++) {
+    const p = line[i - 1];
+    const q = line[i];
+    const pv = values(p);
+    const qv = values(q);
+    const cuts = [0, 1];
+    for (let j = 0; j < pv.length; j++) {
+      const den = pv[j] - qv[j];
+      if (Math.abs(den) <= EPS) continue;
+      const t = pv[j] / den;
+      if (t > EPS && t < 1 - EPS) cuts.push(t);
+    }
+    cuts.sort((x, y) => x - y);
+    for (let j = 1; j < cuts.length; j++) {
+      if (cuts[j] - cuts[j - 1] <= EPS) continue;
+      const a = add(p, mul(sub(q, p), cuts[j - 1]));
+      const b = add(p, mul(sub(q, p), cuts[j]));
+      const moves = pointMoves(mul(add(a, b), 0.5), fold, bounded);
+      if (partMoves !== null && partMoves !== moves) {
+        parts.push(part);
+        part = [a];
+      }
+      part.push(b);
+      partMoves = moves;
+    }
+  }
+  parts.push(part);
+  return parts;
+}
+
 const mapPolylines = (
   lines: readonly (readonly Pt2[])[],
   folds: readonly FlatFold[],
   bounded: readonly boolean[],
 ) =>
-  folds.reduce<Pt2[][]>(
-    (mapped, fold, i) =>
-      mapped.flatMap((line) =>
-        bounded[i] ? splitBoundedPolyline(line, fold) : splitFullPolyline(line, fold),
-      ),
-    lines.map((line) => [...line]),
-  );
+  !foldsCross(folds)
+    ? folds
+        .reduce<Pt2[][]>(
+          (cut, fold, i) => cut.flatMap((line) => cutFlat(line, fold, bounded[i])),
+          lines.map((line) => [...line]),
+        )
+        .map((line) => {
+          // A whole part lies on one side of every fold: its middle says how all of it moves.
+          const mid: Pt2 = line.length < 2 ? line[0] : mul(add(line[0], line[1]), 0.5);
+          const chain = folds.reduce<FlatFold[]>(
+            (acc, fold, i) => (pointMoves(mid, fold, bounded[i]) ? insertCrease(acc, fold) : acc),
+            [],
+          );
+          return line.map((point) => throughCreases(point, chain));
+        })
+    : folds.reduce<Pt2[][]>(
+        (mapped, fold, i) =>
+          mapped.flatMap((line) =>
+            bounded[i] ? splitBoundedPolyline(line, fold) : splitFullPolyline(line, fold),
+          ),
+        lines.map((line) => [...line]),
+      );
 
 const area = (ring: readonly Pt2[]) =>
   Math.abs(
@@ -183,7 +261,9 @@ export function foldMap(geometry: FoldMapGeometry, folds: readonly FlatFold[]): 
     rings: geometry.rings.map((ring) => mapRing(ring, folds)),
     edges: mapPolylines(geometry.edges, folds, bounded),
     marks: geometry.marks.map((mark) =>
-      folds.reduce((point, fold, i) => mapPoint(point, fold, bounded[i]), mark),
+      foldsCross(folds)
+        ? folds.reduce((point, fold, i) => mapPoint(point, fold, bounded[i]), mark)
+        : landed(mark, folds, bounded),
     ),
     innerLines: mapPolylines(geometry.innerLines, folds, bounded),
   };
