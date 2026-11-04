@@ -6,6 +6,7 @@ import { formatCompositionCell } from 'components/managers/materials/components/
 import { parseComposition } from 'components/managers/product/components/composition/composition-picker';
 import { CompositionModal } from 'components/managers/product/components/composition/composition-modal/composition-modal';
 import { compositionToValue } from 'components/managers/product/components/composition/composition-modal/utils';
+import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -1108,7 +1109,7 @@ function CutStripEditor({
   };
   const sizesById = new Map((strip.sizes ?? []).map((row, index) => [wireInt(row.sizeId), index]));
   const sizeName = new Map(
-    (dictionary?.sizes ?? []).map((size) => [wireInt(size.id), size.name ?? `#${size.id}`]),
+    (dictionary?.sizes ?? []).map((size) => [wireInt(size.id), formatSizeName(size.name ?? `#${size.id}`)]),
   );
 
   return (

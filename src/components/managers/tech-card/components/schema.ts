@@ -2856,7 +2856,8 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       seamKey: strip.seamKey?.trim() || '',
       fitPct: decimalToInput(strip.fitPct) || '100',
       overlapMm: decimalToInput(strip.overlapMm) || '0',
-      widthMm: decimalToInput(strip.widthMm),
+      // The server stores a width nobody typed as 0; the field shows it empty.
+      widthMm: Number(decimalToInput(strip.widthMm)) > 0 ? decimalToInput(strip.widthMm) : '',
       oneLengthMm: strip.oneLengthMm == null ? '' : String(strip.oneLengthMm),
       qty: strip.qty || 1,
       sizes: (strip.sizes ?? []).map((size) => ({
