@@ -444,7 +444,7 @@ export function RunPackDocument({
   }, [tc?.packagingItems, lines, colorwayLabel]);
 
   const labelRows = useMemo(() => labelFacts(techCard), [techCard]);
-  // Слово цвета — то же, что в QR-сетке тех-пака: подпись листа и подпись клетки называют цвет одинаково.
+  // Оси те же, что в QR-сетке тех-пака: клетка партии называет цвет и размер так же.
   const labelAxes = useMemo(
     () => cardLabelAxes(techCard, dictionary, orderSizes),
     [techCard, dictionary, orderSizes],
@@ -473,10 +473,12 @@ export function RunPackDocument({
       }),
     [tc?.garmentLabels, tc?.callouts, labelAxes, runColourIds, runSizeIds, lines],
   );
+  // Заголовок называет цвет словом листа состава: у карты без перевода в осях остаётся код цвета.
   const artworkTitle = [
     'artwork qr',
     runColourIds.length === 1
-      ? labelAxes.colorways.find((c) => c.id === runColourIds[0])?.name
+      ? compositionSummaries.find((s) => s.colorway.id === runColourIds[0])?.colorway.colourName ||
+        labelAxes.colorways.find((c) => c.id === runColourIds[0])?.name
       : '',
     runSizeIds.length === 1 ? labelAxes.sizes.find((s) => s.id === runSizeIds[0])?.label : '',
   ]

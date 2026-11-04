@@ -3232,9 +3232,10 @@ export function TechPackDocument({
             printScope.colorway ? [wireInt(printScope.colorway.colorwayId)] : [],
           ),
         )}
-        colourName={(id) =>
-          colorwayLabel(techCard.colorways?.find((cw) => wireInt(cw.colorwayId) === id))
-        }
+        colourName={(id) => {
+          const colorway = techCard.colorways?.find((cw) => wireInt(cw.colorwayId) === id);
+          return colorway?.devName?.trim() || colorwayLabel(colorway);
+        }}
         urlOf={(id) => {
           const m = labelMediaOf(id, techCard.resolvedLabelMedia, libraryMap)?.media;
           return m?.compressed?.mediaUrl || m?.fullSize?.mediaUrl || m?.thumbnail?.mediaUrl || '';
