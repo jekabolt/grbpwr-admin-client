@@ -778,6 +778,28 @@ describe('surfaceSeam', () => {
     expect((e[1][1] - e[0][1]) / (e[1][0] - e[0][0])).toBeCloseTo(0.75);
   });
 
+  it('a rectangle with marks keeps its own way up along the line, whichever way the line runs', () => {
+    // Holes off the strip's middle: without a way up its half turn ties with no turn at all.
+    const hole = { kind: 'drill', pts: [], bbox: { w: 3, h: 12, cx: 10, cy: 20 } };
+    const strip = { ...geoms.get('P')!, rect: true, marks: [hole] } as unknown as PieceGeom;
+    const marked = new Map(geoms).set('P', strip);
+    const lines: Pt2[][] = [
+      [
+        [100, 300],
+        [300, 300],
+      ],
+      [
+        [300, 300],
+        [100, 300],
+      ],
+    ];
+    for (const line of lines) {
+      const T = surfaceSeam('H', 'P', line, marked, undefined, 'P#0')!.surface!.T;
+      expect(T[0]).toBeCloseTo(1);
+      expect(T[3]).toBeCloseTo(1);
+    }
+  });
+
   it('a surface seam between two inputs lays the part on its host', () => {
     const c = surfaceSeam('H', 'P', [], geoms, { xMm: 50, yMm: 60, rotDeg: 0, flip: false })!;
     const L = stepLayout([['H'], ['P']], [c], geoms);

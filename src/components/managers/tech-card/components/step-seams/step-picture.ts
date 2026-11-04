@@ -254,8 +254,10 @@ function alongLine(
         for (let k = 1; k < lineIn.length; k++)
           if (segCross(laid[i - 1], laid[i], lineIn[k - 1], lineIn[k])) crosses++;
       const gap = laid.reduce((s, p) => s + toLine(p, line), 0) / (laid.length || 1);
-      const score =
-        (crosses > 0 ? 1e6 : 0) + (pieceTilt(pg, M) > UPRIGHT ? 1e4 : 0) + (mir ? 1e3 : 0) + gap;
+      // A bare rectangle reads the same both ways up; marks on it (a placket's holes, off its
+      // middle) say which way is up, so a half turn is no longer a tie settled by edge order.
+      const tilt = pg.marks?.length ? tiltOf(M) : pieceTilt(pg, M);
+      const score = (crosses > 0 ? 1e6 : 0) + (tilt > UPRIGHT ? 1e4 : 0) + (mir ? 1e3 : 0) + gap;
       if (!best || score < best.score) best = { M, score };
     }
   return best?.M ?? null;
