@@ -1828,7 +1828,9 @@ export type TechCardPieceFoldKind =
   // The flap lands on the piece's inside face (toward the body).
   | "TECH_CARD_PIECE_FOLD_KIND_INWARD"
   // The flap lands on the piece's outside face.
-  | "TECH_CARD_PIECE_FOLD_KIND_OUTWARD";
+  | "TECH_CARD_PIECE_FOLD_KIND_OUTWARD"
+  // Three rows close a wedge, halves stay face up, fabric stays inside.
+  | "TECH_CARD_PIECE_FOLD_KIND_PLEAT";
 // TechCardPieceFoldSource is where the fold line came from.
 export type TechCardPieceFoldSource =
   | "TECH_CARD_PIECE_FOLD_SOURCE_UNKNOWN"
@@ -3723,6 +3725,10 @@ export type TechCardColorwayCost = {
   // заполненной спецификации), но подписывать им каталожную себестоимость — нельзя: сервер сам не
   // сеет cost_price с этим флагом, и клиент обязан показывать цифру как ОЦЕНКУ, а не как цену.
   hasEstimate: boolean | undefined;
+  // OUTPUT-ONLY: a colourway with no recipe of its own: the primary's materials, THIS colourway's
+  // packaging, the shared manual articles. unit_cost beside it stays the colourway's own recipe; a frozen
+  // release reads this one for such a colourway. Unset on the primary and on a release frozen before it.
+  inheritedUnitCost: googletype_Decimal | undefined;
 };
 
 // TechCardCosting holds the manually-entered per-unit cost articles (Sheet «Калькуляция»).
