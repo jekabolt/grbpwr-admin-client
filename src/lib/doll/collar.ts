@@ -59,7 +59,7 @@ export type NeckPath = {
 /** Index (in `verts`) of the centre back: on the back half of the run above the armholes (z
  *  below the run's own mid depth — a neck pulled forward still has a back), nearest x = 0,
  *  highest. */
-function cbIndex(c: CollarCtx, verts: number[], vArm: number): number {
+export function cbIndex(c: CollarCtx, verts: number[], vArm: number): number {
   let z0 = Infinity;
   let z1 = -Infinity;
   for (const v of verts) {

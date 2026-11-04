@@ -30,6 +30,15 @@ import {
 } from './buttons';
 import { buildChart, toChart, type Chart, type ChartSeam } from './chart';
 import {
+  finishedAnchors,
+  finishedArc,
+  finishedRows,
+  openWalkAt,
+  readFinishedNeck,
+  type NeckRows,
+  type NeckWalk,
+} from './finished-neck';
+import {
   carry,
   foldPlies,
   type FoldStep,
@@ -40,6 +49,7 @@ import {
 } from './fold-outline';
 import {
   baseCurve,
+  cbIndex,
   closedNeckPath,
   findNeckPath,
   makeMap,
@@ -1548,6 +1558,8 @@ export function solveDoll(input: DollInput): DollReport {
   const foldReports: DollFoldReport[] = [];
   /** Folded pieces: the polygons of their plies, for the chart's overlap test. */
   const footprints = new Map<string, Pt2[][]>();
+  /** Pleat rows of a piece as lines as cut, mm: the mesh leaves them flat, the neck reads them. */
+  const neckPleatLines = new Map<string, NeckRows['pleatLines']>();
   for (const p of G.pieces) {
     const g = p.geom;
     const keep = [...g.edges.flatMap((e) => [e.s, e.e]), ...g.notchIdx, ...g.corners];
@@ -1558,6 +1570,18 @@ export function solveDoll(input: DollInput): DollReport {
       : meshPiece(g.rs, keep, h);
     const fold = frame ? foldPanel(g, mesh, folds, frame, h, warnings, foldReports) : undefined;
     if (fold) footprints.set(p.key, fold.plies);
+    if (frame)
+      neckPleatLines.set(
+        p.key,
+        folds
+          .filter((f) => f.kind !== 'inward' && f.kind !== 'outward')
+          .map((f) => ({
+            a: fromUV(frame, f.a),
+            b: fromUV(frame, f.b),
+            kind: f.kind,
+            flipAt: fromUV(frame, f.flipAt),
+          })),
+      );
     const ringPos = new Map<number, number>();
     mesh.bRs.forEach((r, i) => ringPos.set(r, i));
     panels.push({
@@ -2472,6 +2496,8 @@ export function solveDoll(input: DollInput): DollReport {
   const bodyChart = charts.get('BODY');
   let vArm = 0;
   let vSh = 0;
+  /** The neck cylinder once a finished neck is read: never wider than that neck's own girth. */
+  let neckGirthR = Infinity;
   let vLo = 0;
   const torso: { y: number; a: number; b: number; tab: Float64Array }[] = [];
   const ellPerimFactor = (() => {
@@ -3470,7 +3496,7 @@ export function solveDoll(input: DollInput): DollReport {
           const x = p[3 * i];
           const z = p[3 * i + 2];
           const d = Math.hypot(x, z);
-          const R = rNeck + CLEAR - 1;
+          const R = Math.min(rNeck, neckGirthR) + CLEAR - 1;
           if (d < R && d > 1e-6) {
             p[3 * i] = (x / d) * R;
             p[3 * i + 2] = (z / d) * R;
@@ -6482,12 +6508,12 @@ export function solveDoll(input: DollInput): DollReport {
     );
   // Ring proxy of units standing on the neck path: never inside the neck path's radius.
   const neckBase = neck ? baseOf(F, [...neck.path.v]) : null;
-  const ringProxyAt = (layer: number) =>
+  const ringProxyAt = (layer: number, finished = 1) =>
     proxies.push({
       push(p, i) {
         if (!neckBase) return;
         const q = inFrame(F, [p[3 * i], p[3 * i + 1], p[3 * i + 2]]);
-        const R = (neckBase.r(q.th) + layer) * PROXY_K;
+        const R = (neckBase.r(q.th) * finished + layer) * PROXY_K;
         if (q.r >= R || q.r < 1e-6) return;
         const np = fromFrame(F, q.th, q.h, R);
         p[3 * i] = np[0];
@@ -6596,6 +6622,67 @@ export function solveDoll(input: DollInput): DollReport {
       tried,
     };
   };
+  /**
+   * The neck as finished at the unit's step, from the rows themselves (stored folds applied, pleat
+   * rows). A stored row wins over the notches: `null` only when no row touches the neck, and then
+   * `foldedPlan` reads it as ever. A mismatch stays a mismatch, with the real numbers.
+   */
+  const finishedPlan = (U: Unit, cn: NonNullable<typeof confNeck>) => {
+    const rowsOf = (pn: number): NeckRows | undefined => {
+      const P = panels[pn];
+      return {
+        turns: (P.fold?.creases ?? []).map((c) => ({ a: c.a, b: c.b })),
+        pleatLines: neckPleatLines.get(P.key) ?? [],
+      };
+    };
+    const walkOf = (P: Path): NeckWalk => {
+      const verts = [...P.v];
+      return {
+        panel: verts.map((v) => panelOf[v]),
+        cut: verts.map((v) => {
+          const Q = panels[panelOf[v]];
+          return (Q.fold?.flat ?? Q.mesh.pts)[v - Q.offset];
+        }),
+        s: [...P.s],
+      };
+    };
+    const verts = [...cn.N0.path.v];
+    const back = cbIndex(cctx, verts, vArm);
+    const open = openWalkAt(walkOf(cn.N0.path), rowsOf, back >= 0 ? cn.N0.path.s[back] : NaN);
+    const N = open
+      ? neckFromRun(
+          cctx,
+          [...verts.slice(open), ...verts.slice(0, open)],
+          vArm,
+          false,
+          `${cn.N0.how}; opened where the stored folds meet`,
+        )
+      : cn.N0;
+    const r = readFinishedNeck(walkOf(N.path), rowsOf);
+    if (!r) return null;
+    const m = runMarks(cctx, U.attach);
+    const folds = r.cutMm - r.finishedMm;
+    const read = `stored folds and pleats ${r.cutMm.toFixed(0)} − ${folds.toFixed(0)} folded = ${r.finishedMm.toFixed(0)}${r.unread.length ? `, ${r.unread.length} crease${r.unread.length > 1 ? 's' : ''} with no end of the neck beyond ${r.unread.length > 1 ? 'them' : 'it'}` : ''}`;
+    const ratio = m.path.len / Math.max(1, r.finishedMm);
+    if (ratio < 0.9 || ratio > 1.15) return { m, tried: [read], ok: false as const };
+    const anchors = finishedAnchors(r, { len: m.path.len, cb: m.cb }, N.cb);
+    return {
+      ok: true as const,
+      m,
+      N,
+      anchors,
+      sewn: [0, m.path.len] as [number, number],
+      Le: r.finishedMm,
+      folds: [
+        ...(r.from > 1 ? [Math.round(r.from)] : []),
+        ...r.closed.map((f) => Math.round(f[1] - f[0])),
+        ...(N.path.len - r.to > 1 ? [Math.round(N.path.len - r.to)] : []),
+      ],
+      words: `${read} · the unit sewn whole, ${m.path.len.toFixed(0)} mm · CB ${m.cbByNotch ? 'notch' : 'middle'} ↔ CB at ${finishedArc(r, N.cb).toFixed(0)} of the finished neck`,
+      tried: [read],
+      finished: r,
+    };
+  };
   const placeOnNeck = (units: Unit[], role: 'stand' | 'collar', label: string) => {
     if (!neck) return;
     const N0n = neck;
@@ -6609,14 +6696,18 @@ export function solveDoll(input: DollInput): DollReport {
         confNeck && U.keys.has(pk((confNeck.unit === 'a' ? confNeck.g.a : confNeck.g.b)[0]))
           ? confNeck
           : null;
-      const fp = cn ? foldedPlan(U, cn) : null;
+      const fin = cn ? finishedPlan(U, cn) : null;
+      const fp = cn ? fin ?? foldedPlan(U, cn) : null;
       const N = fp && fp.ok ? fp.N : N0n;
       const base = baseCurve(cctx, N.path);
       const plan =
         fp && fp.ok
           ? { m: fp.m, anchors: fp.anchors, sewn: fp.sewn, words: fp.words }
           : neckAnchors(U, N);
-      const pi = ringProxyAt(layer);
+      // The stored rows take length off the neck; both body guides stand at what is left of it,
+      // or the seam can only close by stretching. The collar itself is never touched.
+      if (fin?.ok) neckGirthR = fin.finished.finishedMm / (2 * Math.PI);
+      const pi = ringProxyAt(layer, fin?.ok ? fin.finished.finishedMm / fin.finished.cutMm : 1);
       const sewnMm = plan.sewn[1] - plan.sewn[0];
       const ext = plan.m.path.len - sewnMm;
       // A base far off the unit's length (a neck path that is not a neckline): placed at its own
@@ -6698,6 +6789,17 @@ export function solveDoll(input: DollInput): DollReport {
           );
           confWork.origin = 'graph';
           confWork.confirmed = true;
+          if (fin?.ok) {
+            const r = fin.finished;
+            confWork.rows = finishedRows(plan.m.path, N.path, r, plan.anchors);
+            confWork.solver.rows = confWork.rows;
+            if (r.closed.length)
+              formFolds(N.path, {
+                folds: r.closed,
+                kinds: r.closed.map(() => 'pleat'),
+                Le: r.finishedMm,
+              });
+          }
         }
       }
       const work = cn
