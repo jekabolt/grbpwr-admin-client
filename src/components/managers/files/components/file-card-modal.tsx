@@ -1,71 +1,48 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import type { FileTopic, LibraryFile } from 'api/proto-http/admin';
+import { useEffect, useMemo, useState, type ChangeEvent, type KeyboardEvent } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import type { FileTopic } from 'api/proto-http/admin';
+import { publicFilePageUrl } from 'components/file-share-viewer/link';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { MediaViewer, useMediaViewer } from 'components/shared/media-viewer/media-viewer';
 import { PHONE_QUERY, useMediaQuery } from 'components/managers/tasks/hooks/useMediaQuery';
+import { FileContentViewer } from 'components/managers/tasks/task-detail/file-view/file-content-viewer';
+import { taskFileViewOf } from 'components/managers/tasks/task-detail/file-view/file-view';
+import { MediaViewer, useMediaViewer } from 'components/shared/media-viewer/media-viewer';
 import { notePath, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
+import { Button, Chip, ChipRow, Close, ConfirmationModal, Drawer, Input, Row, Text } from 'ui';
+import { ACCESS_LEVEL_TITLE, accessService, asAccessLevel } from '../api/accessService';
 import {
-  Button,
-  Chip,
-  ChipRow,
-  Close,
-  ConfirmationModal,
-  Drawer,
-  GroupLabel,
-  Input,
-  Text,
-} from 'ui';
-import { ACCESS_LEVEL_TITLE, asAccessLevel } from '../api/accessService';
-import { isProjectTopic, useFileRoles, useFilesMutations, useLibraryFile } from '../hooks/useFiles';
-import { extensionOf, formatBytes, formatDay, kindWord } from '../utils/format';
+  isProjectTopic,
+  useFileRoles,
+  useFileTasks,
+  useFilesMutations,
+  useLibraryFile,
+  useLibraryFileContent,
+} from '../hooks/useFiles';
+import { extensionOf, formatBytes, formatDay } from '../utils/format';
 import { isMarkdownNote, isReadablePdf } from '../utils/reader-find';
 import { FailureText } from './failure-text';
 import { FileAccessSection } from './file-access-section';
-import { FileComments } from './file-comments';
-import { FileOwnersSection } from './file-owners-section';
 import { FileReaderModal } from './file-reader';
-import { FileTasksSection, useFileTasks } from './file-tasks-section';
-import { ProjectArchiveMark, projectHint } from './topic-chips';
+import { ProjectArchiveMark } from './topic-chips';
 
-/** Что из карточки свёрнуто в строку. Ключи — те же четыре, что и строк. */
-type CardLineKey = 'own' | 'acc' | 'task' | 'talk';
-type PhoneSheet = 'projects' | 'topics' | 'more' | 'details' | null;
-
-/** Одна строка «в каком проекте — с какой ролью». */
+type PhoneSheet = 'projects' | 'topics' | null;
 type ProjectRole = { id: number; name: string; role?: { roleId: number; roleName: string } };
 
-/**
- * СТРОКА РОЛИ — СВОЙ СЛОВАРЬ НА КАЖДЫЙ ПРОЕКТ (0323), а не один общий на карточку.
- *
- * Файл лежит в трёх проектах — значит и словарей три, РАЗНЫХ: с тех пор как у роли появился
- * владелец, «исходники» съёмки и «исходники» лукбука это две строки, и предложить слово одного
- * проекта в другом значит предложить жест, на который сервер отвечает
- * `role belongs to another project`.
- *
- * Отдельный компонент, а не `useQueries` в карточке: число строк меняется от ответа сервера, и
- * хук на строку живёт в самой строке — она монтируется и размонтируется вместе со своим
- * запросом. Цена названа вслух: файл в трёх проектах стоит трёх `ListFileRoles`, по одному на
- * строку. Дешевле было бы одним «индексом всех ролей», но им нельзя ПРЕДЛАГАТЬ — он отдаёт и
- * чужие слова, и отличить их в нём можно только тем же самым проектом.
- */
 function ProjectRoleRow({
   row,
-  writable,
   saving,
+  phone,
   onPick,
-  compact,
 }: {
   row: ProjectRole;
-  writable: boolean;
   saving: boolean;
+  phone: boolean;
   onPick: (projectTopicId: number, roleId: number) => void;
-  compact?: boolean;
 }) {
   const rolesQuery = useFileRoles(row.id, false, row.id > 0);
   const roles = rolesQuery.data?.roles ?? [];
-  const known = roles.some((r) => Number(r.id) === row.role?.roleId);
+  const known = roles.some((role) => Number(role.id) === row.role?.roleId);
 
   return (
     <div className='flex flex-wrap items-center gap-1.5'>
@@ -76,193 +53,49 @@ function ProjectRoleRow({
         <Chip
           selected={!row.role?.roleId}
           pressed={!row.role?.roleId}
-          disabled={!writable || saving}
+          disabled={saving}
+          className={phone ? 'min-h-11' : undefined}
           onClick={() => onPick(row.id, 0)}
         >
-          without a role
+          without role
         </Chip>
-        {roles.map((r) => {
-          const rid = Number(r.id);
-          const on = row.role?.roleId === rid;
+        {roles.map((role) => {
+          const roleId = Number(role.id);
+          const selected = row.role?.roleId === roleId;
           return (
             <Chip
-              key={rid}
-              selected={on}
-              pressed={on}
-              disabled={!writable || saving}
-              title={writable ? undefined : "read-only — the role can't be changed"}
-              onClick={() => onPick(row.id, on ? 0 : rid)}
+              key={roleId}
+              selected={selected}
+              pressed={selected}
+              disabled={saving}
+              className={phone ? 'min-h-11' : undefined}
+              onClick={() => onPick(row.id, selected ? 0 : roleId)}
             >
-              {r.name}
+              {role.name}
             </Chip>
           );
         })}
-        {/* Роль, которой нет в словаре этого проекта, — заархивированная (словарь просят без
-            архива). Показать её обязательно: она стоит на файле, и без чипа человек видел бы
-            «без роли» там, где роль есть. Снять её можно, назначить заново — нет.
-
-            Пока словарь в пути, чипа НЕТ: иначе живая роль на полсекунды объявлялась бы
-            архивной — утверждение, которого никто не проверял. */}
         {!!row.role?.roleId && rolesQuery.isFetched && !known && (
-          <Chip selected pressed title='archived role'>
-            {row.role?.roleName || `#${row.role?.roleId}`}
+          <Chip
+            selected
+            pressed
+            title='archived role'
+            className={phone ? 'min-h-11' : undefined}
+            onClick={() => onPick(row.id, 0)}
+          >
+            {row.role.roleName || `#${row.role.roleId}`}
           </Chip>
         )}
+        {rolesQuery.isFetched && roles.length === 0 && !row.role?.roleId && (
+          <Text size='micro' variant='label' component='span'>
+            no roles
+          </Text>
+        )}
       </ChipRow>
-      {/* У ПРОЕКТА МОЖЕТ НЕ БЫТЬ НИ ОДНОГО СВОЕГО СЛОВА — и это состояние, а не сбой пикера. */}
-      {!compact && rolesQuery.isFetched && roles.length === 0 && !row.role?.roleId && (
-        <Text size='micro' variant='label' component='span'>
-          no roles in this project yet
-        </Text>
-      )}
     </div>
   );
 }
 
-/**
- * СТРОКА-СВОД: ярлык, значение и тело под ними.
- *
- * Карточка держала восемь вещей развёрнутыми сразу, и «что это за файл» приходилось искать
- * прокруткой между лентой обсуждения и списком людей. Четыре нижних блока — владельцы, доступ,
- * задачи, обсуждение — свёрнуты в строки: ЗНАЧЕНИЕ каждой видно и свёрнутой («nobody»,
- * «the whole team», «#141», число реплик), поэтому разворачивают их ради правки, а не ради
- * ответа на вопрос.
- *
- * Тела строк — те же самые секции, что стояли здесь раньше, целиком и без переделки: у каждой
- * своя мутация и свой заголовок с действием, и переписывать их ради складывания было бы
- * заменой работающего на новое в самом чувствительном месте.
- *
- * Значок ▸/▾ — `aria-hidden`: доступное имя кнопки обязано остаться словом («kept by»), иначе
- * скринридер читает название юникодного треугольника. Состояние сказано `aria-expanded`.
- */
-function CardLine({
-  label,
-  value,
-  open,
-  onToggle,
-  children,
-}: {
-  label: string;
-  value: React.ReactNode;
-  open: boolean;
-  onToggle: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className='border-b border-hairline'>
-      <div className='flex min-w-0 items-center gap-1.5 py-1'>
-        <Button
-          size='xs'
-          variant='secondary'
-          aria-expanded={open}
-          onClick={onToggle}
-          className='min-w-[92px] max-w-full text-left'
-        >
-          <span aria-hidden>{open ? '▾ ' : '▸ '}</span>
-          {label}
-        </Button>
-        <Text size='micro' variant='label' component='span' className='min-w-0 flex-1 truncate'>
-          {value}
-        </Text>
-      </div>
-      {open && <div className='pb-2 pl-3'>{children}</div>}
-    </div>
-  );
-}
-
-/** Нижние сведения карточки: на компьютере стоят в теле, на телефоне живут в листе details. */
-function FileDetailsLines({
-  file,
-  writable,
-  lines,
-  onToggle,
-  canReadTasks,
-  tasksLoading,
-  tasksFailed,
-  heldByTasks,
-  taskLabels,
-}: {
-  file: LibraryFile;
-  writable: boolean;
-  lines: Record<CardLineKey, boolean>;
-  onToggle: (key: CardLineKey) => void;
-  canReadTasks: boolean;
-  tasksLoading: boolean;
-  tasksFailed: boolean;
-  heldByTasks: number;
-  taskLabels: string[];
-}) {
-  return (
-    <div className='mt-0.5 flex flex-col border-t border-borderColor'>
-      <CardLine
-        label='kept by'
-        value={
-          (file.owners ?? []).length
-            ? (file.owners ?? []).map((o) => o.username || `#${o.id}`).join(', ')
-            : 'nobody'
-        }
-        open={lines.own}
-        onToggle={() => onToggle('own')}
-      >
-        <FileOwnersSection file={file} writable={writable} />
-      </CardLine>
-
-      <CardLine
-        label='access'
-        value={(() => {
-          const lvl = asAccessLevel(file.accessLevel ?? undefined);
-          return lvl ? ACCESS_LEVEL_TITLE[lvl] : 'not said';
-        })()}
-        open={lines.acc}
-        onToggle={() => onToggle('acc')}
-      >
-        <FileAccessSection file={file} writable={writable} />
-      </CardLine>
-
-      <CardLine
-        label='tasks'
-        value={
-          !canReadTasks
-            ? 'no access to tasks'
-            : tasksLoading
-              ? '…'
-              : tasksFailed
-                ? 'unknown'
-                : heldByTasks
-                  ? taskLabels.join(', ')
-                  : 'none'
-        }
-        open={lines.task}
-        onToggle={() => onToggle('task')}
-      >
-        <FileTasksSection file={file} writable={writable} />
-      </CardLine>
-
-      <CardLine
-        label='discussion'
-        value={
-          Number(file.commentsCount ?? 0) > 0 ? `${Number(file.commentsCount ?? 0)}` : 'nothing yet'
-        }
-        open={lines.talk}
-        onToggle={() => onToggle('talk')}
-      >
-        <FileComments file={file} writable={writable} />
-      </CardLine>
-    </div>
-  );
-}
-
-/**
- * Карточка файла — МОДАЛКА ПОВЕРХ СЕТКИ, а не отдельная страница.
- *
- * Каркас строится здесь один раз: шапка с именем и подвал с действиями закреплены, тело
- * скроллит. Секции следующих фаз (ответственность, задачи, обсуждение, доступ) дописываются
- * в это тело — своей модалки никто из них не заводит, иначе «сохранить» в одном месте начнёт
- * отличаться от «сохранить» в другом.
- *
- * Адрес /files/:id остаётся: ссылку на файл кидают в чат вместо самого файла, и на неё же
- * ссылаются очередь загрузки («показать тот файл») и заметки.
- */
 export function FileCardModal({
   id,
   topics,
@@ -271,10 +104,8 @@ export function FileCardModal({
   onClose,
 }: {
   id: number;
-  /** Только обычные темы: проекты приезжают отдельно и рисуются своей группой. */
   topics: FileTopic[];
   projects: FileTopic[];
-  /** Уже с учётом и права files:write, и тумблера режима: карточка не решает это сама. */
   writable: boolean;
   onClose: () => void;
 }) {
@@ -283,203 +114,140 @@ export function FileCardModal({
   const { updateFile, deleteFile, setRoles } = useFilesMutations();
   const { showMessage } = useSnackBarStore();
   const { canRead } = usePermissions();
-
-  /**
-   * ЗАДАЧИ СПРАШИВАЕТ И ПОДВАЛ — тот же ключ, что у секции ниже, поэтому запрос один на двоих.
-   *
-   * Нужно это ради одной кнопки: сервер откажется удалять файл, который держит хотя бы одна
-   * задача, и сказать это ДО нажатия честнее, чем показать отказ после. Гейт `tasks:read`
-   * повторён здесь буква в букву — иначе секция гасила бы запрос, а подвал его включал, и на
-   * аккаунте без права он всё равно уходил бы за заведомым отказом.
-   */
-  const {
-    data: fileTasks,
-    isLoading: tasksLoading,
-    isError: tasksFailed,
-  } = useFileTasks(id, canRead(SECTION.tasks));
-  const heldByTasks = (fileTasks?.tasks ?? []).length;
-
   const file = data?.file;
-  const viewer = useMediaViewer();
-  const viewerItems = useMemo(() => {
-    const preview = file?.previewUrl;
-    if (!preview) return [];
-    const inPlace = !!file?.url && !!file.contentType?.startsWith('image/');
-    return [{ src: inPlace ? file.url! : preview, thumbnail: preview, alt: file?.fileName ?? '' }];
-  }, [file?.previewUrl, file?.url, file?.contentType, file?.fileName]);
   const navigate = useNavigate();
+  const viewer = useMediaViewer();
+
   const [name, setName] = useState('');
   const [selected, setSelected] = useState<number[]>([]);
-  const [newTopic, setNewTopic] = useState('');
   const [newTopics, setNewTopics] = useState<string[]>([]);
+  const [topicSearch, setTopicSearch] = useState('');
+  const [projectsOpen, setProjectsOpen] = useState(false);
+  const [topicsOpen, setTopicsOpen] = useState(false);
+  const [accessOpen, setAccessOpen] = useState(false);
+  const [accessUrl, setAccessUrl] = useState<string>();
+  const [phoneSheet, setPhoneSheet] = useState<PhoneSheet>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
-  const [phoneSheet, setPhoneSheet] = useState<PhoneSheet>(null);
-  const [topicSearch, setTopicSearch] = useState('');
-  const deleteAfterMoreCloses = useRef(false);
-  const deleteConfirmFrame = useRef<number | undefined>(undefined);
-  // Отказ хранится ОШИБКОЙ, а не строкой: разбор (`rpc-error`) один на раздел и живёт на
-  // отрисовке, а запасная фраза у сохранения и у удаления разная — поэтому она едет рядом.
-  const [failure, setFailure] = useState<{ e: unknown; fallback: string } | undefined>(undefined);
-  const [reading, setReading] = useState(false);
-  /**
-   * СВЁРНУТО ПО УМОЛЧАНИЮ — И ЭТО НЕ ТОЛЬКО ПРО МЕСТО НА ЭКРАНЕ. Доступ и обсуждение спрашивают
-   * сервер каждый своим запросом на монтировании; свёрнутая строка их не монтирует, и открытие
-   * карточки перестало стоить три запроса там, где смотрели имя файла.
-   */
-  const [lines, setLines] = useState<Record<CardLineKey, boolean>>({
-    own: false,
-    acc: false,
-    task: false,
-    talk: false,
-  });
-  const toggleLine = (k: CardLineKey) => setLines((p) => ({ ...p, [k]: !p[k] }));
-  // Куда вести после вопроса «закрыть без сохранения». Вопрос один на оба выхода, потому что
-  // цена у них одна: набранное имя пропадает и там и там. Хранить намерение строкой, а не
-  // функцией: setState с функцией React принимает за обновляющую и зовёт её вместо записи.
   const [closeIntent, setCloseIntent] = useState<'close' | 'note'>('close');
-  const readable = isReadablePdf(file?.fileName ?? '', file?.contentType ?? undefined);
+  const [failure, setFailure] = useState<{ e: unknown; fallback: string }>();
+  const [reading, setReading] = useState(false);
+
   const note = isMarkdownNote(file?.fileName ?? '', file?.contentType ?? undefined);
+  const readable = isReadablePdf(file?.fileName ?? '', file?.contentType ?? undefined);
+  const fileView = taskFileViewOf(file?.fileName, file?.contentType);
+  const previewable =
+    !!file &&
+    !note &&
+    (fileView === 'sheet' ||
+      fileView === 'delimited' ||
+      fileView === 'html' ||
+      fileView === 'text');
+  const contentQuery = useLibraryFileContent(id, previewable);
 
-  // ЧТО РИСОВАТЬ ЧИПАМИ — СЛОВАРЬ ПЛЮС ТО, ЧТО ФАЙЛ УЖЕ НЕСЁТ.
-  //
-  // Холст просит словарь БЕЗ архива, и заархивированная тема на файле осталась бы невидимой:
-  // чипа нет, а id сидит в `selected` и уезжает обратно при каждом сохранении. Снять её было
-  // бы нечем — членство есть, а органа нет. Поэтому набор чипов — объединение: словарь и то,
-  // что на файле уже стоит.
+  const fileExtension = extensionOf(file?.fileName ?? '').toLowerCase();
+  const imagePreview =
+    !!file?.previewUrl &&
+    (!!file.contentType?.startsWith('image/') ||
+      ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'svg'].includes(fileExtension));
+  const viewerItems = useMemo(() => {
+    if (!file || !imagePreview || !file.previewUrl) return [];
+    const original = !!file.url && !!file.contentType?.startsWith('image/');
+    return [
+      {
+        src: original ? file.url! : file.previewUrl,
+        thumbnail: file.previewUrl,
+        alt: file.fileName ?? '',
+      },
+    ];
+  }, [file, imagePreview]);
+
+  const { data: fileTasks } = useFileTasks(id, canRead(SECTION.tasks));
+  const tasks = fileTasks?.tasks ?? [];
+  const heldByTasks = tasks.length;
+  const firstTaskId = Number(tasks[0]?.taskId ?? 0);
+
   const carried = useMemo(() => (file?.topics ?? []) as FileTopic[], [file]);
-  const merge = (dict: FileTopic[], want: (t: FileTopic) => boolean) => {
-    const out = dict.slice();
-    for (const t of carried) {
-      if (out.some((x) => Number(x.id) === Number(t.id))) continue;
-      if (want(t)) out.push(t);
-    }
-    return out;
+  const merge = (dictionary: FileTopic[], want: (topic: FileTopic) => boolean) => {
+    const merged = dictionary.slice();
+    carried.forEach((topic) => {
+      if (!merged.some((entry) => Number(entry.id) === Number(topic.id)) && want(topic)) {
+        merged.push(topic);
+      }
+    });
+    return merged;
   };
-  // Что проект, знает СЛОВАРЬ: `LibraryFile.topics` поле `kind` может и не нести, а вот
-  // `LibraryFile.roles` называет id проектов прямо — из двух источников и собирается признак.
   const projectIds = useMemo(() => {
-    const set = new Set<number>(projects.map((p) => Number(p.id)));
-    for (const r of file?.roles ?? []) set.add(Number(r.projectTopicId));
-    for (const t of carried) if (isProjectTopic(t)) set.add(Number(t.id));
-    return set;
-  }, [projects, carried, file]);
-  const projectChips = merge(projects, (t) => projectIds.has(Number(t.id)));
-  const topicChips = merge(topics, (t) => !projectIds.has(Number(t.id)));
+    const ids = new Set(projects.map((project) => Number(project.id)));
+    (file?.roles ?? []).forEach((role) => ids.add(Number(role.projectTopicId)));
+    carried.forEach((topic) => {
+      if (isProjectTopic(topic)) ids.add(Number(topic.id));
+    });
+    return ids;
+  }, [carried, file, projects]);
+  const projectChips = merge(projects, (topic) => projectIds.has(Number(topic.id)));
+  const topicChips = merge(topics, (topic) => !projectIds.has(Number(topic.id)));
+  const selectedProjects = projectChips.filter((topic) => selected.includes(Number(topic.id)));
+  const selectedTopics = topicChips.filter((topic) => selected.includes(Number(topic.id)));
 
-  /**
-   * РОЛЬ ПРАВИТСЯ СВОИМ ВЫЗОВОМ, а не общей кнопкой «сохранить», — тот же довод, что у блока
-   * владельцев: у неё свой RPC и замещающая семантика, и складывать её в «грязную» форму
-   * значило бы обещать откат правки, которого у замены нет.
-   *
-   * ИСТОЧНИК СПИСКА — СЕРВЕР, А НЕ ФОРМА. Проект, только что отмеченный чипом и ещё не
-   * сохранённый, строки связи не имеет — ставить на неё роль некуда, и предложить это значило
-   * бы предложить жест, который отвечает отказом.
-   */
   const inProjects = useMemo(() => {
     const roleOf = new Map<number, { roleId: number; roleName: string }>();
-    for (const r of file?.roles ?? []) {
-      roleOf.set(Number(r.projectTopicId), {
-        roleId: Number(r.roleId ?? 0),
-        roleName: r.roleName ?? '',
+    (file?.roles ?? []).forEach((role) => {
+      roleOf.set(Number(role.projectTopicId), {
+        roleId: Number(role.roleId ?? 0),
+        roleName: role.roleName ?? '',
       });
-    }
+    });
     return carried
-      .filter((t) => projectIds.has(Number(t.id)))
-      .map((t) => ({
-        id: Number(t.id),
-        name: t.name ?? '',
-        role: roleOf.get(Number(t.id)),
+      .filter((topic) => projectIds.has(Number(topic.id)))
+      .map((topic) => ({
+        id: Number(topic.id),
+        name: topic.name ?? '',
+        role: roleOf.get(Number(topic.id)),
       }));
-  }, [carried, projectIds, file]);
+  }, [carried, file, projectIds]);
 
-  const selectedProjects = projectChips.filter((t) => selected.includes(Number(t.id)));
-  const selectedTopics = topicChips.filter((t) => selected.includes(Number(t.id)));
-  const roleByProject = new Map(inProjects.map((p) => [p.id, p.role]));
   const normalizedTopicSearch = topicSearch.trim().toLowerCase();
   const shownTopics = normalizedTopicSearch
-    ? topicChips.filter((t) => (t.name ?? '').toLowerCase().includes(normalizedTopicSearch))
+    ? topicChips.filter((topic) => (topic.name ?? '').toLowerCase().includes(normalizedTopicSearch))
     : topicChips;
   const shownNewTopics = normalizedTopicSearch
-    ? newTopics.filter((t) => t.toLowerCase().includes(normalizedTopicSearch))
+    ? newTopics.filter((topic) => topic.toLowerCase().includes(normalizedTopicSearch))
     : newTopics;
   const canCreateTopic =
     writable &&
     !!normalizedTopicSearch &&
-    !topicChips.some((t) => (t.name ?? '').trim().toLowerCase() === normalizedTopicSearch) &&
-    !newTopics.some((t) => t.toLowerCase() === normalizedTopicSearch);
-
-  const applyRole = async (projectTopicId: number, roleId: number) => {
-    setFailure(undefined);
-    try {
-      await setRoles.mutateAsync({ fileIds: [id], projectTopicId, roleId });
-      await refetch();
-    } catch (e) {
-      setFailure({ e, fallback: "couldn't change the role" });
-    }
-  };
-
-  const addSearchedTopic = () => {
-    const value = topicSearch.trim();
-    if (!canCreateTopic || !value) return;
-    setNewTopics((current) => [...current, value]);
-    setTopicSearch('');
-  };
-
-  // ЗАКРЫТИЕ ЛИСТА — ТОТ ЖЕ ENTER. На телефоне слово могло остаться только в поле, и крестик,
-  // свайп или done стирали его молча. Сначала превращаем слово в новый чип, потом чистим поле:
-  // форма становится грязной и в подвале появляется save, как на компьютере.
-  const closeTopicsSheet = () => {
-    if (canCreateTopic) addSearchedTopic();
-    setTopicSearch('');
-    setPhoneSheet(null);
-  };
-
-  // ДВА МОДАЛЬНЫХ СЛОЯ НЕ МЕНЯЮТСЯ В ОДНОМ ТАКТЕ. На iOS Radix успевал открыть вопрос раньше,
-  // чем лист ••• снимал свою ловушку указателя, и оставлял body с pointer-events:none. Вопрос
-  // открывается только из close-autofocus закрытого листа и ещё через кадр — после его cleanup.
-  const openDeleteAfterMoreCloses = (event: Event) => {
-    if (!deleteAfterMoreCloses.current) return;
-    event.preventDefault();
-    deleteAfterMoreCloses.current = false;
-    deleteConfirmFrame.current = window.requestAnimationFrame(() => {
-      deleteConfirmFrame.current = undefined;
-      setConfirmDelete(true);
-    });
-  };
-
-  // НАБРАННОЕ, НО НЕ ЗАЭНТЕРЕННОЕ ИМЯ ТЕМЫ — ТОЖЕ ПРАВКА. Поле с текстом и мёртвая кнопка
-  // рядом — тупик: человек видит заполненное поле и не понимает, чего от него ещё хотят.
+    !topicChips.some(
+      (topic) => (topic.name ?? '').trim().toLowerCase() === normalizedTopicSearch,
+    ) &&
+    !newTopics.some((topic) => topic.toLowerCase() === normalizedTopicSearch);
   const pendingTopics = useMemo(() => {
-    const typed = newTopic.trim();
-    if (!typed || newTopics.some((x) => x.toLowerCase() === typed.toLowerCase())) return newTopics;
-    return [...newTopics, typed];
-  }, [newTopic, newTopics]);
+    const typed = topicSearch.trim();
+    return canCreateTopic && typed ? [...newTopics, typed] : newTopics;
+  }, [canCreateTopic, newTopics, topicSearch]);
 
-  // Зависимость — id файла, а НЕ объект `file`. По объекту форма пересобиралась на каждый ответ
-  // сервера, а ответ приходит не только при открытии: «обновить» в читалке (просроченная ссылка)
-  // бьёт в тот же ключ запроса. Переименовал файл, ушёл читать, вернулся — правка стёрта молча.
   useEffect(() => {
     if (!file) return;
     setName(file.fileName ?? '');
-    setSelected((file.topics ?? []).map((t) => Number(t.id)));
+    setSelected((file.topics ?? []).map((topic) => Number(topic.id)));
     setNewTopics([]);
+    setTopicSearch('');
+    setProjectsOpen(false);
+    setTopicsOpen(false);
+    setAccessOpen(false);
+    setAccessUrl(undefined);
+    setPhoneSheet(null);
+    // The form resets only when another file opens, not on background revalidation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file?.id]);
 
   useEffect(() => {
     setPhoneSheet(null);
-    setTopicSearch('');
   }, [id, phone]);
 
   useEffect(() => {
     return () => {
-      if (deleteConfirmFrame.current !== undefined) {
-        window.cancelAnimationFrame(deleteConfirmFrame.current);
-      }
       if (!phone) return;
-      // Страховка ПОСЛЕ размонтирования телефонной карточки. Пока жив хоть один диалог,
-      // `none` законен и принадлежит Radix; без диалогов это уже утечка, замораживающая страницу.
       window.requestAnimationFrame(() => {
         if (
           document.body.style.pointerEvents === 'none' &&
@@ -493,11 +261,35 @@ export function FileCardModal({
 
   const dirty = useMemo(() => {
     if (!file) return false;
-    const was = new Set((file.topics ?? []).map((t) => Number(t.id)));
-    const now = new Set(selected);
-    const sameTopics = was.size === now.size && [...was].every((x) => now.has(x));
+    const before = new Set((file.topics ?? []).map((topic) => Number(topic.id)));
+    const after = new Set(selected);
+    const sameTopics =
+      before.size === after.size && [...before].every((topicId) => after.has(topicId));
     return name !== (file.fileName ?? '') || !sameTopics || pendingTopics.length > 0;
-  }, [file, name, selected, pendingTopics]);
+  }, [file, name, pendingTopics, selected]);
+
+  const addSearchedTopic = () => {
+    const value = topicSearch.trim();
+    if (!canCreateTopic || !value) return;
+    setNewTopics((current) => [...current, value]);
+    setTopicSearch('');
+  };
+  const closeTopics = () => {
+    if (canCreateTopic) addSearchedTopic();
+    setTopicSearch('');
+    setTopicsOpen(false);
+    setPhoneSheet(null);
+  };
+
+  const applyRole = async (projectTopicId: number, roleId: number) => {
+    setFailure(undefined);
+    try {
+      await setRoles.mutateAsync({ fileIds: [id], projectTopicId, roleId });
+      await refetch();
+    } catch (roleError) {
+      setFailure({ e: roleError, fallback: "couldn't change role" });
+    }
+  };
 
   const requestClose = () => {
     if (dirty) {
@@ -507,9 +299,6 @@ export function FileCardModal({
     }
     onClose();
   };
-
-  // Уход на экран заметки — это уход СО СТРАНИЦЫ, а не модалка поверх: карточка размонтируется
-  // вместе с несохранённым именем. Поэтому тот же вопрос, что и на закрытии.
   const openNote = () => {
     if (dirty) {
       setCloseIntent('note');
@@ -528,25 +317,19 @@ export function FileCardModal({
         topicIds: selected,
         newTopics: pendingTopics,
       });
-      // ПЕРЕСИНХРОН РОВНО ЗДЕСЬ, а не в эффекте по объекту файла. Названные на лету темы
-      // существуют только после сохранения, и их id знает лишь сервер: без явного
-      // перечитывания чип остался бы «новым» навсегда, а форма — вечно грязной, и второе
-      // «сохранить» СНЯЛО бы только что созданную тему (её id не попал в `selected`).
       const fresh = await refetch();
-      const f = fresh.data?.file;
-      if (f) {
-        setName(f.fileName ?? '');
-        setSelected((f.topics ?? []).map((t) => Number(t.id)));
+      const saved = fresh.data?.file;
+      if (saved) {
+        setName(saved.fileName ?? '');
+        setSelected((saved.topics ?? []).map((topic) => Number(topic.id)));
         setNewTopics([]);
-        setNewTopic('');
+        setTopicSearch('');
         showMessage('saved', 'success');
       } else {
-        // Сохранить вышло, перечитать — нет. Гасить чипы новых тем в этом месте нельзя: они
-        // исчезли бы с экрана, хотя на сервере уже стоят, и файл выглядел бы непроставленным.
-        showMessage("saved, but the topic list didn't re-read — refresh the page", 'success');
+        showMessage('refresh needed', 'error');
       }
-    } catch (e) {
-      setFailure({ e, fallback: "couldn't save" });
+    } catch (saveError) {
+      setFailure({ e: saveError, fallback: "couldn't save" });
     }
   };
 
@@ -556,227 +339,466 @@ export function FileCardModal({
       await deleteFile.mutateAsync(id);
       setConfirmDelete(false);
       onClose();
-    } catch (e) {
-      // Отказ ОСТАЁТСЯ НА ЭКРАНЕ: сервер называет задачи, которые держат файл, и это
-      // единственный способ узнать, почему удаление не прошло. Тост уносит эти имена через
-      // шесть секунд вместе с ответом на вопрос.
-      setFailure({ e, fallback: "couldn't delete" });
+    } catch (deleteError) {
+      setFailure({ e: deleteError, fallback: "couldn't delete" });
       setConfirmDelete(false);
     }
   };
 
+  const copyKnownLink = async () => {
+    try {
+      const url =
+        accessUrl ||
+        publicFilePageUrl((await accessService.get(id)).access?.link?.url) ||
+        undefined;
+      if (!url) {
+        showMessage('link unavailable', 'error');
+        return;
+      }
+      setAccessUrl(url);
+      await navigator.clipboard.writeText(url);
+      showMessage('link copied', 'success');
+    } catch {
+      showMessage('copy failed', 'error');
+    }
+  };
+
+  const rowClass = `${phone ? 'min-h-11' : ''} items-start py-2 [&>span:first-child]:min-w-0 [&>span:first-child]:flex-1`;
+  const actionClass = phone ? 'min-h-11 -my-2 px-2' : '';
+  const roleByProject = new Map(inProjects.map((project) => [project.id, project.role]));
+  const losingRoles = inProjects.filter(
+    (project) => !selected.includes(project.id) && project.role && project.role.roleId > 0,
+  );
+
+  const projectsEditor = (
+    <div className='flex flex-col gap-2'>
+      <ChipRow>
+        {projectChips.map((project) => {
+          const projectId = Number(project.id);
+          const selectedProject = selected.includes(projectId);
+          return (
+            <Chip
+              key={projectId}
+              selected={selectedProject}
+              pressed={selectedProject}
+              disabled={!writable}
+              className={phone ? 'min-h-11' : undefined}
+              onClick={() =>
+                setSelected((current) =>
+                  current.includes(projectId)
+                    ? current.filter((value) => value !== projectId)
+                    : [...current, projectId],
+                )
+              }
+            >
+              {project.name}
+              <ProjectArchiveMark project={project} />
+            </Chip>
+          );
+        })}
+        {!projectChips.length && (
+          <Text size='micro' variant='label' component='span'>
+            none
+          </Text>
+        )}
+      </ChipRow>
+      {!!losingRoles.length && (
+        <Text size='micro' variant='error'>
+          role drops
+        </Text>
+      )}
+      {inProjects
+        .filter((project) => selected.includes(project.id))
+        .map((project) => (
+          <ProjectRoleRow
+            key={project.id}
+            row={project}
+            saving={setRoles.isPending}
+            phone={phone}
+            onPick={applyRole}
+          />
+        ))}
+    </div>
+  );
+
+  const topicsEditor = (
+    <div className='flex flex-col gap-2'>
+      <Input
+        name='topicSearch'
+        value={topicSearch}
+        disabled={!writable}
+        placeholder='find or add'
+        aria-label='find or add topic'
+        className={phone ? 'min-h-11' : undefined}
+        onChange={(event: ChangeEvent<HTMLInputElement>) => setTopicSearch(event.target.value)}
+        onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+          if (event.key !== 'Enter' || !canCreateTopic) return;
+          event.preventDefault();
+          addSearchedTopic();
+        }}
+      />
+      <ChipRow>
+        {shownTopics.map((topic) => {
+          const topicId = Number(topic.id);
+          const selectedTopic = selected.includes(topicId);
+          return (
+            <Chip
+              key={topicId}
+              selected={selectedTopic}
+              pressed={selectedTopic}
+              disabled={!writable}
+              className={phone ? 'min-h-11' : undefined}
+              onClick={() =>
+                setSelected((current) =>
+                  current.includes(topicId)
+                    ? current.filter((value) => value !== topicId)
+                    : [...current, topicId],
+                )
+              }
+            >
+              {topic.name}
+            </Chip>
+          );
+        })}
+        {shownNewTopics.map((topic) => (
+          <Chip
+            key={topic}
+            selected
+            disabled={!writable}
+            className={phone ? 'min-h-11' : undefined}
+            onClick={() => setNewTopics((current) => current.filter((value) => value !== topic))}
+          >
+            {topic}
+          </Chip>
+        ))}
+        {canCreateTopic && (
+          <Chip dashed className={phone ? 'min-h-11' : undefined} onClick={addSearchedTopic}>
+            + {topicSearch.trim()}
+          </Chip>
+        )}
+      </ChipRow>
+    </div>
+  );
+
+  const extension = extensionOf(name || file?.fileName || '').toLowerCase();
+  const meta = file
+    ? [
+        extension,
+        formatBytes(Number(file.sizeBytes ?? 0)),
+        file.uploadedBy || '',
+        formatDay(file.createdAt ?? undefined),
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : '';
+
   return (
     <ConfirmationModal
       open
-      onOpenChange={(o) => {
-        if (o) return;
-        requestClose();
+      onOpenChange={(open) => {
+        if (!open) requestClose();
       }}
       onConfirm={onClose}
       title={file?.fileName || 'file'}
       width='lg'
       hideActions
+      hideHeader
       fullScreen={phone}
-      hideHeader={phone && !!file}
     >
       {isLoading ? (
-        <Text size='micro' variant='label'>
-          loading…
-        </Text>
-      ) : !file ? (
-        /* УПАВШИЙ ЗАПРОС — НЕ ЗАГРУЗКА. У react-query у ошибки `isLoading` уже false, и без
-           этой ветки карточка файла, удалённого после того, как ссылку кинули в чат, вечно
-           показывала бы «loading…». Сюда же приходит /files/abc, где id вовсе не число. */
-        <div className='flex flex-col items-start gap-2'>
-          <Text className='uppercase'>the file didn't open</Text>
+        <div className='flex items-center justify-between gap-2'>
           <Text size='micro' variant='label'>
+            loading…
+          </Text>
+          <Close className={phone ? 'size-11 p-3.5' : undefined} onClick={onClose} />
+        </div>
+      ) : !file ? (
+        <div className='flex items-center gap-2'>
+          <Text size='micro' variant='error'>
             {Number.isFinite(id) && id > 0 ? (
-              <FailureText
-                e={error}
-                fallback="the server didn't answer about this file. it may have been deleted."
-              />
+              <FailureText e={error} fallback='file unavailable' />
             ) : (
-              'the address holds no file number — the link is broken.'
+              'broken link'
             )}
           </Text>
-          <div className='flex items-center gap-1.5'>
-            <Button size='sm' variant='secondary' onClick={() => refetch()}>
-              retry
-            </Button>
-            <Button size='sm' variant='secondary' onClick={onClose}>
-              to the list
-            </Button>
-          </div>
+          <Button size='sm' variant='secondary' onClick={() => refetch()}>
+            retry
+          </Button>
+          <Button size='sm' variant='secondary' onClick={onClose}>
+            close
+          </Button>
         </div>
-      ) : phone ? (
-        <div className='flex h-full min-h-0 flex-col bg-pageBg pt-[env(safe-area-inset-top)]'>
-          <div className='grid shrink-0 grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center border-b border-borderColor bg-bgColor'>
-            <span aria-hidden />
-            <div className='min-w-0 py-1.5'>
-              <Input
-                name='fileNamePhone'
-                value={name}
-                disabled={!writable}
-                aria-label='file name'
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
-                className='min-h-0 border-0 border-b border-transparent bg-transparent px-0 py-0 text-lg font-bold focus:border-textColor disabled:bg-transparent'
-              />
-              <Text
-                size='micro'
-                variant='label'
-                component='span'
-                className='block truncate uppercase'
-              >
-                {formatBytes(Number(file.sizeBytes ?? 0))} ·{' '}
-                {kindWord(file.contentType ?? undefined, file.fileName ?? '')}
-                {formatDay(file.createdAt ?? undefined)
-                  ? ` · ${formatDay(file.createdAt ?? undefined)}`
-                  : ''}
-              </Text>
-            </div>
-            <Close className='size-11 p-3.5' onClick={requestClose} />
+      ) : (
+        <div className={`${phone ? 'h-full' : '-m-2.5'} flex min-h-0 flex-col bg-bgColor`}>
+          <div
+            className={`sticky top-0 z-[1] grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 border-b border-borderColor bg-bgColor px-3 ${
+              phone
+                ? 'pt-[env(safe-area-inset-top)] pb-1.5'
+                : 'py-2 md:grid-cols-[minmax(0,1fr)_auto_auto]'
+            }`}
+          >
+            <Input
+              name='fileName'
+              value={name}
+              readOnly={!writable}
+              aria-label='file name'
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setName(event.target.value)}
+              className={`${phone ? 'min-h-11' : 'min-h-0'} border-0 border-b border-transparent bg-transparent px-0 py-0 font-bold focus:border-textColor read-only:text-labelColor`}
+            />
+            <Text
+              size='micro'
+              variant='label'
+              component='span'
+              className={`truncate ${phone ? 'col-span-2 row-start-2' : 'md:col-auto'}`}
+            >
+              {meta}
+            </Text>
+            <Close
+              className={`${phone ? 'col-start-2 row-start-1 size-11 p-3.5' : ''} ml-auto`}
+              onClick={requestClose}
+            />
           </div>
 
-          <div className='flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto overscroll-contain p-3'>
-            {file.previewUrl ? (
-              <Button
-                type='button'
-                variant='default'
-                aria-label='open the picture'
-                onClick={() => viewer.openAt(0)}
-                className='flex max-h-[45dvh] min-h-40 w-full justify-center border border-borderColor bg-bgColor'
+          <div className={`${phone ? 'min-h-0 flex-1 overflow-y-auto overscroll-contain' : ''}`}>
+            {previewable ? (
+              <div
+                className={`${phone ? 'h-80' : 'h-96'} flex flex-col border-b border-borderColor`}
               >
-                <img
-                  src={file.previewUrl}
-                  alt=''
-                  className='max-h-full max-w-full object-contain'
+                <FileContentViewer
+                  file={file}
+                  content={contentQuery.data?.content}
+                  tooLarge={contentQuery.data?.tooLarge}
+                  isLoading={contentQuery.isLoading}
+                  isError={contentQuery.isError}
+                  isFetching={contentQuery.isFetching}
+                  onRetry={() => contentQuery.refetch()}
+                  bodyClassName='min-h-0 flex-1 overflow-auto bg-bgColor'
+                  renderControls={({ tabs, activeTab, onTabChange, note: rowsNote }) =>
+                    tabs.length > 1 || rowsNote ? (
+                      <div className='flex min-h-8 flex-wrap items-center gap-1 border-b border-hairline px-3 py-1'>
+                        <ChipRow>
+                          {tabs.length > 1 &&
+                            tabs.map((tab) => (
+                              <Chip
+                                key={tab.name}
+                                selected={tab.index === activeTab}
+                                pressed={tab.index === activeTab}
+                                className={phone ? 'min-h-11' : undefined}
+                                onClick={() => onTabChange(tab.index)}
+                              >
+                                {tab.name}
+                              </Chip>
+                            ))}
+                        </ChipRow>
+                        {rowsNote && (
+                          <Text size='micro' variant='label' component='span' className='ml-auto'>
+                            {rowsNote}
+                          </Text>
+                        )}
+                      </div>
+                    ) : null
+                  }
                 />
-              </Button>
-            ) : note ? (
+              </div>
+            ) : imagePreview ? (
               <Button
                 type='button'
                 variant='default'
-                className='w-full border border-borderColor bg-bgColor p-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-                onClick={openNote}
-                aria-label='open note'
+                aria-label='open picture'
+                onClick={() => viewer.openAt(0)}
+                className={`${phone ? 'h-80' : 'h-96'} flex w-full shrink-0 cursor-zoom-in justify-center border-b border-borderColor bg-pageBg`}
               >
-                {(file.contentExcerpt ?? '').trim() ? (
-                  <Text
-                    size='control'
-                    component='span'
-                    className='line-clamp-5 whitespace-pre-wrap break-words'
-                  >
-                    {file.contentExcerpt}
-                  </Text>
-                ) : (
-                  <span className='flex items-center gap-2'>
-                    <Text component='span' className='font-bold uppercase'>
-                      {extensionOf(file.fileName ?? '')}
-                    </Text>
-                    <Text size='micro' variant='label' component='span' className='uppercase'>
-                      {kindWord(file.contentType ?? undefined, file.fileName ?? '')}
-                    </Text>
-                  </span>
-                )}
+                <img src={file.previewUrl} alt='' className='size-full object-contain' />
               </Button>
-            ) : null}
-
-            <div>
-              <GroupLabel
-                flush
-                action={
-                  <Button
-                    size='xs'
-                    variant='underline'
-                    className='min-h-11 px-2'
-                    disabled={!writable}
-                    onClick={() => setPhoneSheet('projects')}
-                  >
-                    edit
-                  </Button>
-                }
+            ) : (
+              <div
+                className={`${phone ? 'h-80' : 'h-96'} flex shrink-0 flex-col items-center justify-center gap-0.5 border-b border-borderColor bg-pageBg`}
               >
-                projects
-              </GroupLabel>
-              <div className='flex flex-col items-start gap-1.5'>
-                {selectedProjects.map((project) => {
-                  const pid = Number(project.id);
-                  const role = roleByProject.get(pid);
-                  return (
-                    <div key={pid} className='flex flex-wrap items-center gap-1.5'>
-                      <Chip
-                        selected
-                        pressed
-                        onClick={writable ? () => setPhoneSheet('projects') : undefined}
-                        className='min-h-8'
-                      >
-                        {project.name}
-                        <ProjectArchiveMark project={project} />
-                      </Chip>
-                      <Text size='micro' variant='label' component='span'>
-                        {role?.roleId ? role.roleName || `#${role.roleId}` : 'without a role'}
-                      </Text>
-                    </div>
-                  );
-                })}
+                <Text component='span' className='font-bold uppercase'>
+                  {extensionOf(name || file.fileName || '')}
+                </Text>
+                <Text size='micro' variant='label' component='span'>
+                  {formatBytes(Number(file.sizeBytes ?? 0))}
+                </Text>
               </div>
-            </div>
+            )}
 
-            <div>
-              <GroupLabel
-                flush
-                action={
-                  selectedTopics.length + newTopics.length > 0 ? (
+            <div className='bg-bgColor px-3'>
+              <Row
+                className={rowClass}
+                label={
+                  <div className='grid min-w-0 grid-cols-1 gap-1 md:flex md:gap-2'>
+                    <Text
+                      size='micro'
+                      variant='label'
+                      tracking='label'
+                      component='span'
+                      className='uppercase md:w-16 md:flex-none'
+                    >
+                      projects
+                    </Text>
+                    <div className='min-w-0 md:flex-1'>
+                      {projectsOpen && !phone ? (
+                        projectsEditor
+                      ) : (
+                        <ChipRow>
+                          {selectedProjects.map((project) => {
+                            const projectId = Number(project.id);
+                            const role = roleByProject.get(projectId);
+                            return (
+                              <Chip key={projectId} selected>
+                                {project.name}
+                                {role?.roleId ? ` · ${role.roleName || `#${role.roleId}`}` : ''}
+                                <ProjectArchiveMark project={project} />
+                              </Chip>
+                            );
+                          })}
+                          {!selectedProjects.length && (
+                            <Text size='micro' variant='label' component='span'>
+                              none
+                            </Text>
+                          )}
+                        </ChipRow>
+                      )}
+                    </div>
+                  </div>
+                }
+                value={
+                  writable ? (
                     <Button
                       size='xs'
                       variant='underline'
-                      className='min-h-11 px-2'
-                      disabled={!writable}
-                      onClick={() => setPhoneSheet('topics')}
+                      className={actionClass}
+                      onClick={() =>
+                        phone ? setPhoneSheet('projects') : setProjectsOpen((open) => !open)
+                      }
                     >
-                      edit
+                      {!phone && projectsOpen ? 'done' : 'edit'}
                     </Button>
                   ) : undefined
                 }
-              >
-                topics
-              </GroupLabel>
-              <ChipRow>
-                {selectedTopics.map((topic) => (
-                  <Chip
-                    key={topic.id}
-                    selected
-                    pressed
-                    onClick={writable ? () => setPhoneSheet('topics') : undefined}
-                    className='min-h-8'
-                  >
-                    {topic.name}
-                  </Chip>
-                ))}
-                {newTopics.map((topic) => (
-                  <Chip
-                    key={topic}
-                    selected
-                    onClick={writable ? () => setPhoneSheet('topics') : undefined}
-                    className='min-h-8'
-                  >
-                    {topic}
-                  </Chip>
-                ))}
-                {selectedTopics.length + newTopics.length === 0 && (
-                  <Chip
-                    disabled={!writable}
-                    onClick={() => setPhoneSheet('topics')}
-                    className='min-h-8'
-                  >
-                    + add topic
-                  </Chip>
-                )}
-              </ChipRow>
+              />
+
+              <Row
+                className={rowClass}
+                label={
+                  <div className='grid min-w-0 grid-cols-1 gap-1 md:flex md:gap-2'>
+                    <Text
+                      size='micro'
+                      variant='label'
+                      tracking='label'
+                      component='span'
+                      className='uppercase md:w-16 md:flex-none'
+                    >
+                      topics
+                    </Text>
+                    <div className='min-w-0 md:flex-1'>
+                      {topicsOpen && !phone ? (
+                        topicsEditor
+                      ) : (
+                        <ChipRow>
+                          {selectedTopics.map((topic) => (
+                            <Chip key={topic.id} selected>
+                              {topic.name}
+                            </Chip>
+                          ))}
+                          {newTopics.map((topic) => (
+                            <Chip key={topic} selected>
+                              {topic}
+                            </Chip>
+                          ))}
+                          {!selectedTopics.length && !newTopics.length && (
+                            <Text size='micro' variant='label' component='span'>
+                              none
+                            </Text>
+                          )}
+                        </ChipRow>
+                      )}
+                    </div>
+                  </div>
+                }
+                value={
+                  writable ? (
+                    <Button
+                      size='xs'
+                      variant='underline'
+                      className={actionClass}
+                      onClick={() => {
+                        if (phone) {
+                          setPhoneSheet('topics');
+                        } else if (topicsOpen) {
+                          closeTopics();
+                        } else {
+                          setTopicsOpen(true);
+                        }
+                      }}
+                    >
+                      {!phone && topicsOpen ? 'done' : 'edit'}
+                    </Button>
+                  ) : undefined
+                }
+              />
+
+              <Row
+                className={rowClass}
+                label={
+                  <div className='grid min-w-0 grid-cols-1 gap-1 md:flex md:gap-2'>
+                    <Text
+                      size='micro'
+                      variant='label'
+                      tracking='label'
+                      component='span'
+                      className='uppercase md:w-16 md:flex-none'
+                    >
+                      access
+                    </Text>
+                    <div className='min-w-0 md:flex-1'>
+                      {accessOpen ? (
+                        <FileAccessSection
+                          file={file}
+                          writable={writable}
+                          phone={phone}
+                          onLinkChange={setAccessUrl}
+                        />
+                      ) : (
+                        <Text size='micro' component='span'>
+                          {ACCESS_LEVEL_TITLE[asAccessLevel(file.accessLevel) ?? 'team']}
+                        </Text>
+                      )}
+                    </div>
+                  </div>
+                }
+                value={
+                  writable || asAccessLevel(file.accessLevel) === 'link' ? (
+                    <div className='flex items-center gap-2'>
+                      {asAccessLevel(file.accessLevel) === 'link' && (
+                        <Button
+                          size='xs'
+                          variant='underline'
+                          className={actionClass}
+                          onClick={copyKnownLink}
+                        >
+                          copy link
+                        </Button>
+                      )}
+                      {writable && (
+                        <Button
+                          size='xs'
+                          variant='underline'
+                          className={actionClass}
+                          onClick={() => setAccessOpen((open) => !open)}
+                        >
+                          {accessOpen ? 'done' : 'edit'}
+                        </Button>
+                      )}
+                    </div>
+                  ) : undefined
+                }
+              />
             </div>
 
             {failure && (
-              <div className='border border-error px-2.5 py-2'>
+              <div className='mx-3 mb-3 border border-error px-2.5 py-2'>
                 <Text size='micro'>
                   <FailureText e={failure.e} fallback={failure.fallback} />
                 </Text>
@@ -784,303 +806,53 @@ export function FileCardModal({
             )}
           </div>
 
-          <div className='flex shrink-0 items-center gap-2 border-t border-borderColor bg-bgColor px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]'>
-            {note ? (
-              <Button variant='main' className='min-h-11 flex-1' onClick={openNote}>
-                open
+          <div
+            className={`sticky bottom-0 flex shrink-0 flex-wrap items-center gap-1.5 border-t border-borderColor bg-bgColor px-3 pt-2 ${
+              phone ? 'pb-[max(0.5rem,env(safe-area-inset-bottom))]' : 'pb-2'
+            }`}
+          >
+            {file.downloadUrl ? (
+              <Button asChild variant='main' className={phone ? 'min-h-11' : undefined}>
+                <a href={file.downloadUrl}>download</a>
               </Button>
-            ) : readable ? (
-              <Button variant='main' className='min-h-11 flex-1' onClick={() => setReading(true)}>
-                open
+            ) : (
+              <Button variant='main' disabled className={phone ? 'min-h-11' : undefined}>
+                download
               </Button>
-            ) : file.url ? (
-              <Button asChild variant='main' className='min-h-11 flex-1'>
+            )}
+            {readable && (
+              <Button
+                variant='secondary'
+                className={phone ? 'min-h-11' : undefined}
+                onClick={() => setReading(true)}
+              >
+                read
+              </Button>
+            )}
+            {note && (
+              <Button
+                variant='secondary'
+                className={phone ? 'min-h-11' : undefined}
+                onClick={openNote}
+              >
+                open the note
+              </Button>
+            )}
+            {file.url && (
+              <Button asChild variant='secondary' className={phone ? 'min-h-11' : undefined}>
                 <a href={file.url} target='_blank' rel='noopener noreferrer'>
                   open
                 </a>
-              </Button>
-            ) : file.downloadUrl ? (
-              <Button asChild variant='main' className='min-h-11 flex-1'>
-                <a href={file.downloadUrl}>open</a>
-              </Button>
-            ) : (
-              <Button variant='main' className='min-h-11 flex-1' disabled>
-                open
               </Button>
             )}
             {writable && dirty && (
               <Button
                 variant='secondary'
-                className='min-h-11'
+                className={phone ? 'min-h-11' : undefined}
                 disabled={updateFile.isPending}
                 onClick={save}
               >
                 {updateFile.isPending ? 'saving…' : 'save'}
-              </Button>
-            )}
-            <Button
-              variant='secondary'
-              className='min-h-11 w-11 px-0'
-              aria-label='more'
-              onClick={() => setPhoneSheet('more')}
-            >
-              •••
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <div className='flex flex-col gap-2.5'>
-          <div className='flex flex-wrap gap-2.5'>
-            <div className='flex size-40 flex-none items-center justify-center border border-borderColor bg-pageBg'>
-              {file.previewUrl ? (
-                <Button
-                  type='button'
-                  variant='default'
-                  aria-label='open the picture'
-                  onClick={() => viewer.openAt(0)}
-                  className='size-full cursor-zoom-in'
-                >
-                  <img src={file.previewUrl} alt='' className='size-full object-contain' />
-                </Button>
-              ) : (
-                <div className='flex flex-col items-center gap-0.5'>
-                  {/* 12px, а не `size='stat'`: stat — это КЕГЛЬ СТАТ-ЯЧЕЙКИ (16px), и за
-                      пределами stat-ячейки он пробивает потолок в 12px, объявленный
-                      DESIGN.md. Вес держит жирность, а не размер. */}
-                  <Text component='span' className='font-bold uppercase'>
-                    {extensionOf(file.fileName ?? '')}
-                  </Text>
-                  <Text size='micro' variant='label' component='span' className='uppercase'>
-                    {kindWord(file.contentType ?? undefined, file.fileName ?? '')}
-                  </Text>
-                </div>
-              )}
-            </div>
-
-            <div className='flex min-w-[260px] flex-1 flex-col gap-2.5'>
-              <div className='flex flex-col gap-1'>
-                <GroupLabel flush>name</GroupLabel>
-                <Input
-                  name='fileName'
-                  value={name}
-                  disabled={!writable}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <GroupLabel>what this is</GroupLabel>
-                <Text size='micro' variant='label'>
-                  {formatBytes(Number(file.sizeBytes ?? 0))} ·{' '}
-                  {kindWord(file.contentType ?? undefined, file.fileName ?? '')} ·{' '}
-                  {file.contentType || 'type unknown'}
-                </Text>
-                {/* Кто загрузил и когда — в блоке «responsibility» ниже: там же живут
-                    владельцы, и печатать загрузившего дважды значит показать одну роль как
-                    две. */}
-              </div>
-            </div>
-          </div>
-
-          {/* ПРОЕКТЫ — ОТДЕЛЬНАЯ ГРУППА, И ЭТО НЕ КОСМЕТИКА. Чип проекта и чип темы выглядят
-              одинаково, а значат разное: тема — ярлык, проект — контейнер, у которого внутри
-              ещё и роль. Пока они лежали в одном ряду, снятие «съёмки» читалось как снятие
-              ярлыка, а стоило роли. */}
-          <div className='flex flex-col gap-1'>
-            <GroupLabel>projects</GroupLabel>
-            <ChipRow>
-              {projectChips.map((t) => {
-                const pid = Number(t.id);
-                const on = selected.includes(pid);
-                const d = projectHint(t);
-                return (
-                  <Chip
-                    key={pid}
-                    selected={on}
-                    pressed={on}
-                    disabled={!writable}
-                    title={writable ? d || undefined : 'read-only'}
-                    onClick={() =>
-                      setSelected((p) =>
-                        p.includes(pid) ? p.filter((x) => x !== pid) : [...p, pid],
-                      )
-                    }
-                  >
-                    {t.name}
-                    <ProjectArchiveMark project={t} />
-                  </Chip>
-                );
-              })}
-              {!projectChips.length && (
-                <Text size='micro' variant='label' component='span'>
-                  no projects yet
-                </Text>
-              )}
-            </ChipRow>
-            {/* ПРЕДУПРЕЖДЕНИЕ ИМЕНЕМ, а не общей фразой: оно печатается ровно тогда, когда
-                снятый проект действительно нёс роль, и называет, какую именно. */}
-            {(() => {
-              const losing = inProjects.filter(
-                (p) => !selected.includes(p.id) && p.role && p.role.roleId > 0,
-              );
-              if (!losing.length) return null;
-              return (
-                <Text size='micro'>
-                  role drops: {losing.map((p) => `${p.name} — ${p.role?.roleName}`).join(', ')}
-                </Text>
-              );
-            })()}
-          </div>
-
-          {/* РОЛЬ ФАЙЛА В ПРОЕКТЕ — тем же жестом, что и всё остальное в карточке, но своим
-              вызовом: она применяется сразу, кнопки «сохранить» не ждёт. */}
-          {inProjects.length > 0 && (
-            <div className='flex flex-col gap-1'>
-              <GroupLabel>role in the project</GroupLabel>
-              {inProjects.map((p) => (
-                <ProjectRoleRow
-                  key={p.id}
-                  row={p}
-                  writable={writable}
-                  saving={setRoles.isPending}
-                  onPick={applyRole}
-                />
-              ))}
-            </div>
-          )}
-
-          <div className='flex flex-col gap-1'>
-            <GroupLabel>topics</GroupLabel>
-            <ChipRow>
-              {topicChips.map((t) => (
-                // В ЧТЕНИИ ЧИП ВЫКЛЮЧЕН, А НЕ ПРОСТО МЁРТВ. Раньше он оставался кликабельным
-                // на вид (та же рамка, тот же курсор) и молчал на нажатие — а молчащий на
-                // нажатие элемент читается как поломка, а не как запрет.
-                <Chip
-                  key={t.id}
-                  selected={selected.includes(Number(t.id))}
-                  pressed={selected.includes(Number(t.id))}
-                  disabled={!writable}
-                  title={writable ? undefined : "read-only — the topics can't be moved"}
-                  onClick={() =>
-                    setSelected((p) =>
-                      p.includes(Number(t.id))
-                        ? p.filter((x) => x !== Number(t.id))
-                        : [...p, Number(t.id)],
-                    )
-                  }
-                >
-                  {t.name}
-                </Chip>
-              ))}
-              {newTopics.map((n) => (
-                <Chip
-                  key={n}
-                  selected
-                  onRemove={() => setNewTopics((p) => p.filter((x) => x !== n))}
-                >
-                  {n}
-                </Chip>
-              ))}
-              {!topicChips.length && !newTopics.length && (
-                <Text size='micro' variant='label' component='span'>
-                  no topics yet
-                </Text>
-              )}
-            </ChipRow>
-            {/* ВЫКЛЮЧЕНО, А НЕ СПРЯТАНО — то же правило, что объявлено на холсте: спрятанного
-                не попросишь, а выключенное поле рядом с чипами показывает, что тему тут
-                вообще заводят, и объясняет, почему сейчас нельзя. */}
-            <Input
-              name='newTopic'
-              value={newTopic}
-              disabled={!writable}
-              placeholder={writable ? 'new topic' : 'read-only'}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewTopic(e.target.value)}
-              onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-                if (e.key !== 'Enter') return;
-                e.preventDefault();
-                const v = newTopic.trim();
-                if (v && !newTopics.some((x) => x.toLowerCase() === v.toLowerCase())) {
-                  setNewTopics((p) => [...p, v]);
-                }
-                setNewTopic('');
-              }}
-              className='max-w-[220px]'
-            />
-            <Text size='micro' variant='label'>
-              a topic is a label, not a folder: a file carries several at once or none at all
-            </Text>
-          </div>
-
-          {/* ЧЕТЫРЕ СТРОКИ ВМЕСТО ЧЕТЫРЁХ РАЗВЁРНУТЫХ БЛОКОВ.
-              Порядок держится на том же доводе, что и раньше: лента обсуждения идёт последней —
-              она единственная растёт без предела. Задачи стоят выше подвала, потому что
-              объясняют выключенное «удалить», а объяснение обязано быть выше того, что
-              объясняет.
-
-              ЗНАЧЕНИЯ — ИЗ ТОГО ЖЕ ОТВЕТА, КОТОРЫМ НАРИСОВАНА КАРТОЧКА (`GetLibraryFile`) и из
-              уже спрошенного подвалом списка задач. Второго счёта тем же вопросом здесь не
-              заводится: строка «discussion · 3» ради выдержки последней реплики стоила бы
-              запроса ленты на каждое открытие карточки — ровно того, от чего сворачивание и
-              избавляет. */}
-          <FileDetailsLines
-            file={file}
-            writable={writable}
-            lines={lines}
-            onToggle={toggleLine}
-            canReadTasks={canRead(SECTION.tasks)}
-            tasksLoading={tasksLoading}
-            tasksFailed={tasksFailed}
-            heldByTasks={heldByTasks}
-            taskLabels={(fileTasks?.tasks ?? []).map((t) => `#${t.taskId}`)}
-          />
-
-          {failure && (
-            <div className='border border-error px-2.5 py-2'>
-              <Text size='micro'>
-                <FailureText e={failure.e} fallback={failure.fallback} />
-              </Text>
-            </div>
-          )}
-
-          {/* ПОДВАЛ ЗАКРЕПЛЁН. Тело карточки к Ф7 упрётся в 90vh, и действия, уехавшие вниз
-              вместе с лентой обсуждения, пришлось бы искать прокруткой. Отрицательные поля —
-              чтобы полоса шла от края до края тела, у которого свой p-2.5. */}
-          <div className='sticky bottom-0 -mx-2.5 -mb-2.5 flex flex-wrap items-center gap-1.5 border-t border-borderColor bg-bgColor px-2.5 py-1.5'>
-            {writable && (
-              <Button size='sm' onClick={save} disabled={!dirty || updateFile.isPending}>
-                {updateFile.isPending ? 'saving…' : 'save'}
-              </Button>
-            )}
-            {/* «read» — только у pdf. Остальным читалка отвечает «this file is not readable in
-                a browser», и
-                приводить туда из карточки нечестно: кнопка обещала бы чтение. */}
-            {readable && (
-              <Button size='sm' variant='secondary' onClick={() => setReading(true)}>
-                read
-              </Button>
-            )}
-            {/* У ЗАМЕТКИ ЭТО ЕДИНСТВЕННАЯ КНОПКА ОТКРЫТИЯ. `text/markdown` в inline-аллоулист
-                сервер сознательно не берёт, поэтому `file.url` у неё пуст и кнопка «open»
-                ниже не рисуется вовсе; «download» отдаёт .md файлом, а не показывает текст. */}
-            {note && (
-              <Button size='sm' onClick={openNote}>
-                open the note
-              </Button>
-            )}
-            {/* url пуст у типов, которым inline запрещён (svg, html): сервер его не выдаёт —
-                клиент не прячет кнопку, кнопки просто нет. */}
-            {file.url && (
-              <Button asChild size='sm' variant='secondary'>
-                <a href={file.url} target='_blank' rel='noopener noreferrer'>
-                  open
-                </a>
-              </Button>
-            )}
-            {file.downloadUrl && (
-              <Button asChild size='sm' variant='secondary'>
-                <a href={file.downloadUrl}>download</a>
               </Button>
             )}
             <div className='ml-auto flex items-center gap-1.5'>
@@ -1089,26 +861,25 @@ export function FileCardModal({
                   read-only
                 </Text>
               )}
-              {/* ПРИЧИНА СТОИТ РЯДОМ С ВЫКЛЮЧЕННОЙ КНОПКОЙ, а не только в подсказке при
-                  наведении: подсказку не увидит тот, кто вообще не понял, почему кнопка серая. */}
-              {writable && heldByTasks > 0 && (
-                <Text size='micro' variant='label' component='span'>
-                  open the “tasks” row above and detach it there
-                </Text>
+              {writable && heldByTasks > 0 && firstTaskId > 0 && (
+                <Button asChild size='xs' variant='underline' className={actionClass}>
+                  <Link to={`/tasks/${firstTaskId}`} target='_blank' rel='noopener noreferrer'>
+                    in task #{firstTaskId}
+                    {heldByTasks > 1 ? ` +${heldByTasks - 1}` : ''}
+                  </Link>
+                </Button>
               )}
-              <Button
-                size='sm'
-                variant='secondary'
-                disabled={!writable || deleteFile.isPending || heldByTasks > 0}
-                title={
-                  heldByTasks > 0
-                    ? 'tasks hold the file — the server will refuse the deletion while it is listed in them'
-                    : undefined
-                }
-                onClick={() => setConfirmDelete(true)}
-              >
-                delete
-              </Button>
+              {writable && (
+                <Button
+                  variant='secondary'
+                  className={phone ? 'min-h-11' : undefined}
+                  disabled={deleteFile.isPending || heldByTasks > 0}
+                  title={heldByTasks > 0 ? 'file in task' : undefined}
+                  onClick={() => setConfirmDelete(true)}
+                >
+                  delete
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -1131,196 +902,27 @@ export function FileCardModal({
               </Button>
             }
           >
-            <div className='flex flex-col gap-2.5'>
-              <ChipRow>
-                {projectChips.map((project) => {
-                  const pid = Number(project.id);
-                  const on = selected.includes(pid);
-                  return (
-                    <Chip
-                      key={pid}
-                      selected={on}
-                      pressed={on}
-                      disabled={!writable}
-                      className='min-h-9'
-                      onClick={() =>
-                        setSelected((current) =>
-                          current.includes(pid)
-                            ? current.filter((value) => value !== pid)
-                            : [...current, pid],
-                        )
-                      }
-                    >
-                      {project.name}
-                      <ProjectArchiveMark project={project} />
-                    </Chip>
-                  );
-                })}
-              </ChipRow>
-              {inProjects.some(
-                (project) => !!project.role?.roleId && !selected.includes(project.id),
-              ) && (
-                <Text size='micro' variant='error' component='span' className='self-start'>
-                  role drops
-                </Text>
-              )}
-              {inProjects.some((project) => selected.includes(project.id)) && (
-                <div>
-                  <GroupLabel flush>roles</GroupLabel>
-                  <div className='flex flex-col gap-2'>
-                    {inProjects
-                      .filter((project) => selected.includes(project.id))
-                      .map((project) => (
-                        <ProjectRoleRow
-                          key={project.id}
-                          row={project}
-                          writable={writable}
-                          saving={setRoles.isPending}
-                          onPick={applyRole}
-                          compact
-                        />
-                      ))}
-                  </div>
-                </div>
-              )}
-            </div>
+            {projectsEditor}
           </Drawer>
-
           <Drawer
             side='bottom'
             open={phoneSheet === 'topics'}
             onOpenChange={(open) => {
-              if (open) return;
-              closeTopicsSheet();
+              if (!open) closeTopics();
             }}
             title='topics'
             footer={
-              <Button variant='main' className='min-h-11 flex-1' onClick={closeTopicsSheet}>
+              <Button variant='main' className='min-h-11 flex-1' onClick={closeTopics}>
                 done
               </Button>
             }
           >
-            <div className='flex flex-col gap-2.5'>
-              <Input
-                name='topicSearch'
-                value={topicSearch}
-                disabled={!writable}
-                placeholder={writable ? 'find or add' : 'read-only'}
-                aria-label='find or add topic'
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  setTopicSearch(e.target.value)
-                }
-                onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-                  if (e.key !== 'Enter' || !canCreateTopic) return;
-                  e.preventDefault();
-                  addSearchedTopic();
-                }}
-              />
-              <ChipRow>
-                {shownTopics.map((topic) => {
-                  const tid = Number(topic.id);
-                  const on = selected.includes(tid);
-                  return (
-                    <Chip
-                      key={tid}
-                      selected={on}
-                      pressed={on}
-                      disabled={!writable}
-                      className='min-h-9'
-                      onClick={() =>
-                        setSelected((current) =>
-                          current.includes(tid)
-                            ? current.filter((value) => value !== tid)
-                            : [...current, tid],
-                        )
-                      }
-                    >
-                      {topic.name}
-                    </Chip>
-                  );
-                })}
-                {shownNewTopics.map((topic) => (
-                  <Chip
-                    key={topic}
-                    selected
-                    className='min-h-9'
-                    disabled={!writable}
-                    onClick={() =>
-                      setNewTopics((current) => current.filter((value) => value !== topic))
-                    }
-                  >
-                    {topic}
-                  </Chip>
-                ))}
-                {canCreateTopic && (
-                  <Chip dashed className='min-h-9' onClick={addSearchedTopic}>
-                    + {topicSearch.trim()}
-                  </Chip>
-                )}
-              </ChipRow>
-            </div>
-          </Drawer>
-
-          <Drawer
-            side='bottom'
-            open={phoneSheet === 'more'}
-            onOpenChange={(open) => !open && setPhoneSheet(null)}
-            onCloseAutoFocus={openDeleteAfterMoreCloses}
-            title='more'
-          >
-            <div className='flex flex-col divide-y divide-hairline'>
-              {file.downloadUrl && (
-                <Button asChild variant='default' className='min-h-12 px-4 text-left uppercase'>
-                  <a href={file.downloadUrl}>download</a>
-                </Button>
-              )}
-              <Button
-                variant='default'
-                className='min-h-12 px-4 text-left uppercase'
-                onClick={() => setPhoneSheet('details')}
-              >
-                details
-              </Button>
-              <Button
-                variant='default'
-                className='min-h-12 px-4 text-left uppercase text-error disabled:text-borderColor'
-                disabled={!writable || deleteFile.isPending || heldByTasks > 0}
-                title={heldByTasks > 0 ? 'tasks hold this file' : undefined}
-                onClick={() => {
-                  deleteAfterMoreCloses.current = true;
-                  setPhoneSheet(null);
-                }}
-              >
-                delete
-              </Button>
-            </div>
-          </Drawer>
-
-          <Drawer
-            side='bottom'
-            open={phoneSheet === 'details'}
-            onOpenChange={(open) => !open && setPhoneSheet(null)}
-            title='details'
-          >
-            <FileDetailsLines
-              file={file}
-              writable={writable}
-              lines={lines}
-              onToggle={toggleLine}
-              canReadTasks={canRead(SECTION.tasks)}
-              tasksLoading={tasksLoading}
-              tasksFailed={tasksFailed}
-              heldByTasks={heldByTasks}
-              taskLabels={(fileTasks?.tasks ?? []).map((task) => `#${task.taskId}`)}
-            />
+            {topicsEditor}
           </Drawer>
         </>
       )}
 
       {reading && <FileReaderModal id={id} onClose={() => setReading(false)} />}
-      {/* ТАП ПО КАРТИНКЕ — ОБЩИЙ ПРОСМОТРЩИК (viewer-unify V4): тот же зум, коррекция и `more`, что у
-          любого снимка. Крупный файл — сам файл, если он картинка и смотрится на месте; иначе
-          превью, которое браузер уже отрисовал (у pdf, видео и макетов другого нет). */}
       {viewerItems.length > 0 && (
         <MediaViewer
           items={viewerItems}
@@ -1340,27 +942,20 @@ export function FileCardModal({
         cancelLabel='stay'
         width='sm'
       >
-        <Text>
-          the name or the set of topics is changed and not saved. close it and the edit is gone,
-          with nowhere to bring it back from.
-        </Text>
+        <Text>Unsaved changes will be lost.</Text>
       </ConfirmationModal>
 
       <ConfirmationModal
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
         onConfirm={remove}
-        title='delete the file'
+        title='delete file'
         confirmLabel={deleteFile.isPending ? 'deleting…' : 'delete'}
         confirmDisabled={deleteFile.isPending}
         closeOnConfirm={false}
         width='sm'
       >
-        <Text>
-          the file and its bytes are deleted irreversibly — there will be nowhere to bring them back
-          from. if the file is attached to tasks, the deletion won't go through and the message will
-          name the cards.
-        </Text>
+        <Text>File and bytes disappear.</Text>
       </ConfirmationModal>
     </ConfirmationModal>
   );
