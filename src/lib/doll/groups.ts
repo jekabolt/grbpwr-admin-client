@@ -47,6 +47,10 @@ export type Grouping = {
 };
 
 const BODY_ROLES = new Set(['front', 'back', 'side', 'yoke', 'placket', 'facing', 'fly', 'skirt']);
+/** Strips attached to a panel: without a shell seam, an owner's surface row places them on it. */
+const TRIM_ROLES = new Set(['placket', 'facing', 'fly']);
+const shellPanelRole = (r: string | null | undefined) =>
+  !!r && BODY_ROLES.has(r) && !TRIM_ROLES.has(r);
 const RING_GROUPS = new Set<DollGroupId>([
   'COLLAR',
   'STAND',
@@ -164,7 +168,7 @@ export function groupPieces(
       return host &&
         part &&
         !sewnAsShell.has(seam.surface.part) &&
-        !BODY_ROLES.has(readName(partName).role ?? '') &&
+        !shellPanelRole(readName(partName).role) &&
         areaOf(part) <= areaOf(host)
         ? [seam.surface.part]
         : [];
@@ -206,7 +210,7 @@ export function groupPieces(
       skipped.push({ pieceKey: g.pieceKey, reason: 'no contour' });
       continue;
     }
-    if (ownerSurfaceParts.has(g.pieceKey) && !(r && BODY_ROLES.has(r))) {
+    if (ownerSurfaceParts.has(g.pieceKey) && !shellPanelRole(r)) {
       skipped.push({
         pieceKey: g.pieceKey,
         reason: 'surface piece — placed by its owner row',

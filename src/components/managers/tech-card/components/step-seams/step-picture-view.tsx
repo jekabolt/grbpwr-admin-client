@@ -852,11 +852,11 @@ const offsetTowardPiece = (
 /** Action geometry for screen tiles that do not receive the PDF action model. */
 export function stepActionMarks(
   op: SceneOp | undefined,
-  targets: readonly TargetId[],
+  stepParts: readonly SidePart[],
   geoms: ReadonlyMap<string, PieceGeom>,
   innerLines: ReadonlyMap<string, Pt2[][]>,
 ): { lines: PictureActionLine[]; glyphs: PictureActionGlyph[] } {
-  if (!op || !targets.length) return { lines: [], glyphs: [] };
+  if (!op || !stepParts.length) return { lines: [], glyphs: [] };
   const pressRaw = {
     operationType: op.operationType,
     work: op.work,
@@ -866,8 +866,12 @@ export function stepActionMarks(
   const topstitch = /topstitch/i.test(`${op.work ?? ''} ${op.operationType ?? ''}`);
   if (!press && !topstitch) return { lines: [], glyphs: [] };
 
-  const parts = targets.flatMap((target) => {
-    const points = targetPoints(target, geoms, innerLines);
+  const parts = stepParts.flatMap(({ target, range }) => {
+    const points = rangedPicturePoints(
+      targetPoints(target, geoms, innerLines),
+      range,
+      resolveEdge(target, geoms)?.len ?? 0,
+    );
     const piece = pieceOfTarget(target);
     return points.length > 1 && geoms.has(piece) ? [{ target, piece, points }] : [];
   });
@@ -1769,10 +1773,13 @@ export function StepPictureSvg({
     suppliedStepParts ??
     automaticHighlight?.parts ??
     stepEdges?.map((target): SidePart => ({ target }));
-  const stepEdgeSet = useMemo(() => new Set(stepEdges ?? []), [stepEdges]);
+  const stepEdgeSet = useMemo(
+    () => new Set([...(stepEdges ?? []), ...(stepParts ?? []).map((part) => part.target)]),
+    [stepEdges, stepParts],
+  );
   const automaticActions = useMemo(
-    () => stepActionMarks(operation, stepEdges ?? [], flatGeoms, flatInnerLines ?? new Map()),
-    [operation, stepEdges, flatGeoms, flatInnerLines],
+    () => stepActionMarks(operation, stepParts ?? [], flatGeoms, flatInnerLines ?? new Map()),
+    [operation, stepParts, flatGeoms, flatInnerLines],
   );
   const drawnActionLines = foldedActionLines(
     actionLines.length ? actionLines : automaticActions.lines,

@@ -12,6 +12,7 @@ import {
   buttonHostChord,
   buttonRadiusPx,
   drawnRing,
+  stepActionMarks,
   StepPictureSvg,
   withoutCoveredDoors,
   type EdgeMark,
@@ -1029,6 +1030,30 @@ describe('StepPictureSvg step highlight', () => {
     expect(markup).not.toMatch(/>[^<]*\bmm\b/i);
     expect(print).toContain('data-step-no-seams=""');
     expect(print).toContain('>no seam</text>');
+  });
+});
+
+describe('stepActionMarks stored span', () => {
+  const tall = {
+    ...rectangle('tall', 'tall', 100, 200),
+    edges: [{ id: 'tall#0', k: 0, pts: [[0, 0] as Pt2, [0, 200] as Pt2], len: 200 }],
+  } as unknown as PieceGeom;
+  const geoms = new Map([['tall', tall]]);
+  const span = { target: 'tall#0', range: [0, 50] as const };
+  const reach = (points: readonly Pt2[]) => {
+    const ys = points.map((point) => point[1]);
+    return Math.max(...ys) - Math.min(...ys);
+  };
+
+  it.each([
+    ['topstitch', { operationType: 'topstitch', work: 'Topstitch' }],
+    ['press', { work: 'press_open' }],
+  ])('%s line stops where the stored span stops', (_kind, op) => {
+    const ranged = stepActionMarks(op as never, [span], geoms, new Map());
+    const whole = stepActionMarks(op as never, [{ target: 'tall#0' }], geoms, new Map());
+
+    expect(reach(ranged.lines[0].points)).toBeLessThan(55);
+    expect(reach(whole.lines[0].points)).toBeGreaterThan(190);
   });
 });
 
