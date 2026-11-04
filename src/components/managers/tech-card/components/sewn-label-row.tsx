@@ -322,10 +322,13 @@ function ArtworkTile({
   );
 }
 
-/** Generated artwork: the composition label's tiles come from `rebuild`, not from an upload. */
+/** Generated artwork: the composition label draws its own artwork under the row's fields. */
 export type GeneratedArtwork = {
   pills?: ReactNode;
   action: ReactNode;
+  body?: ReactNode;
+  /** The row's own count of empty cells is no use when the label says what is missing itself. */
+  hideMissing?: boolean;
 };
 
 export function SewnLabelRow({
@@ -602,7 +605,7 @@ export function SewnLabelRow({
           {title}
         </Text>
         {!line ? <Pill tone='warn'>! no material</Pill> : null}
-        {missing > 0 ? (
+        {missing > 0 && !generated?.hideMissing ? (
           <Pill tone='warn'>
             ! {missing} {missing === 1 ? 'file' : 'files'}
           </Pill>
@@ -790,7 +793,8 @@ export function SewnLabelRow({
             </ChipRow>
           )}
         </div>
-        {lines.map((l) => (
+        {generated?.body}
+        {(generated ? [] : lines).map((l) => (
           <div key={l.colorwayId} className='flex flex-wrap items-center gap-1.5'>
             {perColour ? (
               <Text
