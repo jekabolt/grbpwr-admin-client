@@ -108,6 +108,10 @@ export const FOLDS = {
   dedupeMm: 5,
   /** A line end this close to the contour is «on» it. */
   onContourMm: 3,
+  /** A drawn line this close to the contour along its own direction is read as reaching it. */
+  markReachMm: 30,
+  /** The same reach, as a share of the fold's length: a short line can still stop on purpose. */
+  reachShare: 0.05,
 } as const;
 
 export type FoldResolveOptions = {

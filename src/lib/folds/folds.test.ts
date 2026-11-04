@@ -319,6 +319,54 @@ describe('foldHints', () => {
     expect(Math.abs(h.lineMm[1][1] - h.lineMm[0][1])).toBeCloseTo(300, 0);
   });
 
+  it('keeps one hint for a hem line that stops in the middle, with its own ends', () => {
+    const line: Inner[number] = {
+      layer: '8',
+      closed: false,
+      pts: [
+        { x: 0, y: 2 },
+        { x: 20, y: 2 },
+      ],
+    };
+    const piece = dto(40, 30, [line], false);
+    const geom = segmentPiece(input(piece));
+    expect(geom.marks?.some((mark) => mark.kind === 'fold')).toBe(true);
+    const hints = foldHints(input(piece), geom, {
+      innerLines: [
+        [
+          [0, 20],
+          [200, 20],
+        ],
+      ],
+    });
+    expect(hints).toHaveLength(1);
+    expect(hints[0].origin).toBe('inner');
+    expect(hints[0].lineMm[1][0]).toBeCloseTo(200, 0);
+  });
+
+  it('keeps one hint across the piece for a hem line just short of the contour', () => {
+    const line: Inner[number] = {
+      layer: '8',
+      closed: false,
+      pts: [
+        { x: 1, y: 2 },
+        { x: 39, y: 2 },
+      ],
+    };
+    const piece = dto(40, 30, [line], false);
+    const hints = foldHints(input(piece), segmentPiece(input(piece)), {
+      innerLines: [
+        [
+          [10, 20],
+          [390, 20],
+        ],
+      ],
+    });
+    expect(hints).toHaveLength(1);
+    expect(hints[0].origin).toBe('mark');
+    expect(Math.abs(hints[0].lineMm[1][0] - hints[0].lineMm[0][0])).toBeCloseTo(400, 0);
+  });
+
   it('ignores layer 8 on a piece that was not unfolded unless the manifest says so', () => {
     const piece = dto(40, 30, [vertical8], false);
     expect(foldHints(input(piece), segmentPiece(input(piece)))).toEqual([]);

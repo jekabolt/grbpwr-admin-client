@@ -49,14 +49,13 @@ const DOT_EPS = 1e-9;
  * past the contour does too when its two perpendicular end planes already enclose the whole piece.
  */
 export function isFoldBounded(poly: readonly Pt2[], fold: FlatFold): boolean {
-  if (
-    distToPoly(poly, fold.a) <= FOLDS.onContourMm &&
-    distToPoly(poly, fold.b) <= FOLDS.onContourMm
-  ) {
-    return false;
-  }
   const d = sub(fold.b, fold.a);
   const l2 = d[0] ** 2 + d[1] ** 2;
+  const reach = Math.max(
+    FOLDS.onContourMm,
+    Math.min(FOLDS.markReachMm, FOLDS.reachShare * Math.sqrt(l2)),
+  );
+  if (distToPoly(poly, fold.a) <= reach && distToPoly(poly, fold.b) <= reach) return false;
   if (l2 <= DOT_EPS) return false;
   return poly.some((q) => {
     const t = (sub(q, fold.a)[0] * d[0] + sub(q, fold.a)[1] * d[1]) / l2;
@@ -234,12 +233,49 @@ export type FoldedOptions = {
   progress?: { index: number; t: number };
 };
 
+/** Two fold segments cross inside both of them (a shared end, as in a pleat fan, is no crossing). */
+export function foldsCross(folds: readonly FlatFold[]): boolean {
+  const END = 1e-3;
+  for (let i = 0; i < folds.length; i++)
+    for (let j = i + 1; j < folds.length; j++) {
+      const p = folds[i];
+      const q = folds[j];
+      const r = sub(p.b, p.a);
+      const e = sub(q.b, q.a);
+      const den = cross(r, e);
+      if (Math.abs(den) <= DOT_EPS) continue;
+      const w = sub(q.a, p.a);
+      const t = cross(w, e) / den;
+      const u = cross(w, r) / den;
+      if (t > END && t < 1 - END && u > END && u < 1 - END) return true;
+    }
+  return false;
+}
+
+/**
+ * The creases a flat point crosses from the part that stays, nearest first. A crease farther out
+ * goes after the crease it lies beyond, whatever order the two were made in.
+ */
+export function insertCrease(chain: readonly FlatFold[], fold: FlatFold): FlatFold[] {
+  const s = sideOf(fold.a, fold.b, fold.flipAt);
+  const at = chain.findIndex((c) => sideOf(fold.a, fold.b, mul(add(c.a, c.b), 0.5)) === s);
+  return at < 0 ? [...chain, fold] : [...chain.slice(0, at), fold, ...chain.slice(at)];
+}
+
+export const throughCreases = (p: Pt2, chain: readonly FlatFold[]): Pt2 =>
+  chain.reduceRight((q, c) => reflect(q, c.a, c.b), p);
+
 export function foldedOutline(
   poly: readonly Pt2[],
   folds: readonly FlatFold[],
   opts: FoldedOptions = {},
 ): FoldedShape {
-  let plies: FoldPly[] = [{ poly: [...poly], flipped: false, by: 0, t: 1 }];
+  // Each ply is cut on the flat piece, so a fold moves only what lies beyond its own line on the
+  // flat piece, not what an earlier fold happened to lay there. Crossing lines have no such order.
+  const byFlat = !foldsCross(folds);
+  let plies: (FoldPly & { flat: Pt2[]; chain: FlatFold[] })[] = [
+    { poly: [...poly], flat: [...poly], chain: [], flipped: false, by: 0, t: 1 },
+  ];
   const creases: [Pt2, Pt2][] = [];
   let hasBoundedFold = false;
   folds.forEach((f, i) => {
@@ -250,23 +286,42 @@ export function foldedOutline(
     const s = sideOf(f.a, f.b, f.flipAt);
     const bounded = isFoldBounded(poly, f);
     hasBoundedFold ||= bounded;
-    const near: FoldPly[] = [];
-    const far: FoldPly[] = [];
+    const near: typeof plies = [];
+    const far: typeof plies = [];
     for (const y of plies) {
-      const { fixed, moving } = splitFoldPly(y.poly, f, s, bounded);
-      near.push(...fixed.map((fixedPoly) => ({ ...y, poly: fixedPoly })));
-      if (useful(moving))
-        far.push({
-          poly: moving.map((q) => lerp(q, reflect(q, f.a, f.b), t)),
-          flipped: !y.flipped,
-          by: i + 1,
-          t,
-        });
+      const { fixed, moving } = splitFoldPly(byFlat ? y.flat : y.poly, f, s, bounded);
+      near.push(
+        ...fixed.map((part) =>
+          byFlat
+            ? { ...y, flat: part, poly: part.map((q) => throughCreases(q, y.chain)) }
+            : { ...y, poly: part },
+        ),
+      );
+      if (!useful(moving)) continue;
+      const chain = byFlat ? insertCrease(y.chain, f) : [];
+      far.push({
+        poly: byFlat
+          ? moving.map((q) => lerp(throughCreases(q, y.chain), throughCreases(q, chain), t))
+          : moving.map((q) => lerp(q, reflect(q, f.a, f.b), t)),
+        flat: moving,
+        chain,
+        flipped: !y.flipped,
+        by: i + 1,
+        t,
+      });
     }
     // A turned stack lands in reverse order: its top ply ends up at the bottom.
     far.reverse();
     plies = f.kind === 'outward' ? [...near, ...far] : [...far, ...near];
   });
+  if (byFlat && !opts.progress) {
+    // A crease lies where the ply on its edge landed.
+    creases.forEach(([a, b], i) => {
+      const mid = mul(add(a, b), 0.5);
+      const owner = plies.find((y) => distToPoly(y.flat, mid) <= 1e-6);
+      if (owner) creases[i] = [throughCreases(a, owner.chain), throughCreases(b, owner.chain)];
+    });
+  }
 
   const still = plies.filter((y) => y.by === 0);
   const outline = still.length
@@ -289,7 +344,7 @@ export function foldedOutline(
   const n = last ? perp(unit(sub(last.b, last.a))) : ([1, 0] as Pt2);
   return {
     outline,
-    plies,
+    plies: plies.map(({ poly: ply, flipped, by, t }) => ({ poly: ply, flipped, by, t })),
     finishedWidthMm: span(
       plies.map((y) => y.poly),
       n,
