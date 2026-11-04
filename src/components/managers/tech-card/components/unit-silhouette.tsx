@@ -31,6 +31,19 @@ export function useUnitPictures(): ReadonlyMap<string, UnionPicture> | null {
   return useContext(UnitPicturesContext);
 }
 
+const UnitPieceNamesContext = createContext<ReadonlyMap<string, string> | null>(null);
+
+/** Коды деталей карточки для подсказки глифа: глиф стоит глубже всех, кто их знает. */
+export function UnitPieceNamesProvider({
+  names,
+  children,
+}: {
+  names: ReadonlyMap<string, string> | null;
+  children: ReactNode;
+}) {
+  return <UnitPieceNamesContext.Provider value={names}>{children}</UnitPieceNamesContext.Provider>;
+}
+
 export function useUnitPicture(unitKey: string | null | undefined): UnionPicture | null {
   const map = useContext(UnitPicturesContext);
   if (!map || !unitKey) return null;
@@ -207,8 +220,11 @@ function UnitPictureShape(props: ComponentProps<typeof UnitShape>) {
   );
 }
 
+// The key is an internal id: a piece without a name is said in words, never by its key.
+const pieceWord = (k: string, nameOf?: (k: string) => string) => nameOf?.(k) || 'unnamed piece';
+
 const names = (keys: readonly string[], nameOf?: (k: string) => string) =>
-  keys.map((k) => nameOf?.(k) || k).join(' + ');
+  keys.map((k) => pieceWord(k, nameOf)).join(' + ');
 
 /**
  * Подпись пиктограммы: узел · число деталей · габарит, и словами всё, что знаки только намечают —
@@ -225,7 +241,7 @@ export function unitShapeTitle(
   ];
   for (const s of p.shapes)
     if (s.count > 1)
-      lines.push(`×${s.count} layers drawn as one: ${nameOf?.(s.pieceKey) || s.pieceKey}`);
+      lines.push(`×${s.count} layers drawn as one: ${pieceWord(s.pieceKey, nameOf)}`);
   const hung = p.shapes.filter((s) => s.hung).map((s) => s.pieceKey);
   if (hung.length) lines.push(`~ hung on a 3D seam, drawn beside it: ${names(hung, nameOf)}`);
   const top = p.shapes.filter((s) => s.surface).map((s) => s.pieceKey);
@@ -296,8 +312,9 @@ export function UnitGlyph({
   name: string;
   boxClassName?: string;
 }) {
+  const pieceNames = useContext(UnitPieceNamesContext);
   if (!picture) return null;
-  const title = unitShapeTitle(name, picture);
+  const title = unitShapeTitle(name, picture, (k) => pieceNames?.get(k) ?? '');
   return (
     <span title={title} className={cn('mr-1.5 inline-flex h-7 w-10 shrink-0', boxClassName)}>
       <UnitPictureShape picture={picture} plain label={title} />

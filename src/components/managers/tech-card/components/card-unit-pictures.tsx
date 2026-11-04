@@ -19,6 +19,7 @@
 // в простое браузера, вне кадра набора; (4) больше CAP_PIECES деталей — пиктограмм нет, молча.
 // Правка шагов пересчитывает одни раскладки узлов, граф не трогает.
 import { assignmentMode } from 'lib/assembly-skeleton/assignment';
+import { readablePieceName } from 'lib/assembly-skeleton/names';
 import type { SeamGraph, SkeletonProposal } from 'lib/assembly-skeleton/types';
 import { unionPictureOfLayout, unitPictures, type UnionPicture } from 'lib/assembly-skeleton/union';
 import type { PieceDTO } from 'lib/nesting/types';
@@ -27,7 +28,7 @@ import { useWatch } from 'react-hook-form';
 import type { common_TechCard } from 'api/proto-http/admin';
 
 import { cardSeamDecisions, useCardSeamsSig } from './assembly-seams/seams-store';
-import type { CutStripLike } from './cut-strips/strip-pieces';
+import { stripRefsOf, type CutStripLike } from './cut-strips/strip-pieces';
 import { seamGraphOfCard } from './card-seam-graph';
 import { pieceRefKey } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
@@ -35,7 +36,12 @@ import { toPurposeEnum, type TechCardFormData } from './schema';
 import { drawsStepResult } from './step-seams/draws-result';
 import { useStepResults } from './step-seams/step-result-context';
 import { useStepSeams } from './step-seams/step-seams-context';
-import { UnitPicturesProvider, UnitTile, useUnitPictures } from './unit-silhouette';
+import {
+  UnitPieceNamesProvider,
+  UnitPicturesProvider,
+  UnitTile,
+  useUnitPictures,
+} from './unit-silhouette';
 import type { PieceShapeMap } from './use-piece-shapes';
 
 const cache = new WeakMap<SkeletonProposal, Map<string, UnionPicture>>();
@@ -68,7 +74,9 @@ export function renderProposalUnit(
   const picture = proposalUnitPictures(proposal).get(unitKey);
   if (!picture) return null;
   const names = new Map(proposal.graph?.pieces.map((p) => [p.pieceKey, p.name]) ?? []);
-  return <UnitTile picture={picture} name={name} nameOf={(k) => names.get(k) ?? k} />;
+  // The graph names a nameless piece by its key: that is no name to show.
+  const nameOf = (k: string) => (names.get(k) === k ? '' : names.get(k) ?? '');
+  return <UnitTile picture={picture} name={name} nameOf={nameOf} />;
 }
 
 type FormPiece = TechCardFormData['pieces'][number];
@@ -253,9 +261,22 @@ export function CardUnitPicturesProvider({
     () => ({ graph: current, settling: !!factsSig && graph?.sig !== factsSig }),
     [current, factsSig, graph?.sig],
   );
+  // The form rebuilds its arrays on every keystroke: the map changes only with the names themselves.
+  const pieceRows: readonly (readonly [string, string])[] = [
+    ...pieces.map((p) => [p.lineKey ?? '', readablePieceName((p.name ?? '').trim())] as const),
+    ...stripRefsOf(cutStrips ?? [], bomItems ?? []).map((s) => [s.lineKey, s.name] as const),
+  ];
+  const pieceRowsSig = JSON.stringify(pieceRows);
+  const pieceNames = useMemo(
+    () => new Map(pieceRows),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pieceRowsSig],
+  );
   return (
     <SeamGraphContext.Provider value={seam}>
-      <UnitPicturesProvider pictures={pictures}>{children}</UnitPicturesProvider>
+      <UnitPieceNamesProvider names={pieceNames}>
+        <UnitPicturesProvider pictures={pictures}>{children}</UnitPicturesProvider>
+      </UnitPieceNamesProvider>
     </SeamGraphContext.Provider>
   );
 }
