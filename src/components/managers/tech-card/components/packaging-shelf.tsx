@@ -561,6 +561,7 @@ export function PackagingShelf({
     opts?: PackagingItemOpts,
   ) => upsertPackagingItem(getValues, setValue, item.key || '', value, { ...opts, index });
   const shipsOnHanger = folding === 'on a hanger';
+  const shipsFolded = !!folding && !shipsOnHanger;
   const setShips = (hanger: boolean) =>
     setValue('packaging.foldingMethod', hanger ? 'on a hanger' : 'folded in half', {
       shouldDirty: true,
@@ -583,8 +584,8 @@ export function PackagingShelf({
             </Chip>
             <Chip
               className='h-6.5'
-              selected={!shipsOnHanger}
-              pressed={!shipsOnHanger}
+              selected={shipsFolded}
+              pressed={shipsFolded}
               disabled={!canEdit}
               onClick={() => setShips(false)}
             >
@@ -592,12 +593,12 @@ export function PackagingShelf({
             </Chip>
           </ChipRow>
         </Field>
-        {!shipsOnHanger && (
+        {shipsFolded && (
           <Field label='fold'>
             <Select
               name='packaging.foldingMethod'
               className='whitespace-nowrap'
-              value={folding || 'folded in half'}
+              value={folding}
               disabled={!canEdit}
               items={foldingMethodOptions
                 .filter((option) => option !== 'on a hanger')
