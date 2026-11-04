@@ -466,7 +466,7 @@ export function MaterialSlots({
               <col className='w-[18%]' />
               <col className='w-[150px]' />
               <col className='w-16' />
-              <col className='w-[150px]' />
+              <col className='w-36' />
               <col className='w-[90px]' />
               <col className='w-[110px]' />
             </colgroup>
