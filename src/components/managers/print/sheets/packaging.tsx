@@ -1,5 +1,6 @@
 import type { common_TechCardPackaging } from 'api/proto-http/admin';
-import { KV, Nothing, Sheet } from 'components/managers/print/sheet';
+import { KV, Nothing, Sheet, TD, TH } from 'components/managers/print/sheet';
+import type { PackagingItemFacts } from './packaging-items';
 
 // ЛИСТ УПАКОВКИ — один на обе бумаги.
 //
@@ -21,10 +22,52 @@ export function runWeightGrams(planned: number, grossG: number, netG: number): n
   return planned * (grossG > 0 ? grossG : netG);
 }
 
+export type PackagingSheetItem = PackagingItemFacts & { colours: string };
+
+function ItemsTable({ items }: { items: readonly PackagingSheetItem[] }) {
+  const showSize = items.some((item) => item.size);
+  const showHow = items.some((item) => item.how);
+  const showNote = items.some((item) => item.note);
+  const showColour = items.some((item) => item.colours);
+  return (
+    <table className='mb-3 w-full border-collapse text-micro' data-run-items=''>
+      <thead>
+        <tr>
+          <th className={TH}>#</th>
+          <th className={TH}>item</th>
+          <th className={TH}>what</th>
+          <th className={`${TH} text-right`}>qty</th>
+          <th className={TH}>per</th>
+          {showSize && <th className={TH}>size</th>}
+          {showHow && <th className={TH}>packing</th>}
+          {showNote && <th className={TH}>note</th>}
+          {showColour && <th className={TH}>colour</th>}
+        </tr>
+      </thead>
+      <tbody>
+        {items.map((item, index) => (
+          <tr key={index} className='break-inside-avoid'>
+            <td className={TD}>{index + 1}</td>
+            <td className={`${TD} font-semibold`}>{item.item}</td>
+            <td className={TD}>{item.what}</td>
+            <td className={`${TD} text-right`}>{item.quantity}</td>
+            <td className={TD}>{item.perOrder ? 'order' : 'garment'}</td>
+            {showSize && <td className={TD}>{item.size || '—'}</td>}
+            {showHow && <td className={TD}>{item.how || '—'}</td>}
+            {showNote && <td className={`${TD} whitespace-pre-wrap`}>{item.note || '—'}</td>}
+            {showColour && <td className={TD}>{item.colours || 'all'}</td>}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 export function PackagingSheet({
   title,
   packaging,
   plannedTotal = 0,
+  items = [],
 }: {
   title: string;
   packaging?: common_TechCardPackaging;
@@ -37,6 +80,8 @@ export function PackagingSheet({
    * коробов, а грузчик поверит тому, который у него в руках.
    */
   plannedTotal?: number;
+  /** What goes in the box, for a paper that has no packaging items sheet of its own. */
+  items?: readonly PackagingSheetItem[];
 }) {
   const perBox = Number(packaging?.unitsPerBox ?? 0) || 0;
   const netG = Number(packaging?.weightNetGrams ?? 0) || 0;
@@ -45,9 +90,20 @@ export function PackagingSheet({
   // означал бы «отгружать нечего», а не «посчитать не из чего».
   const cartons = perBox > 0 && plannedTotal > 0 ? Math.ceil(plannedTotal / perBox) : 0;
   const batchWeightG = runWeightGrams(plannedTotal, grossG, netG);
+  const packedSize = packaging?.packedSize?.trim();
+  const cartonNote = packaging?.notes?.trim();
+
+  // The items already say what goes in the box: the sentence below would contradict them.
+  if (!packaging && items.length > 0)
+    return (
+      <Sheet title={title}>
+        <ItemsTable items={items} />
+      </Sheet>
+    );
 
   return (
     <Sheet title={title}>
+      {items.length > 0 && <ItemsTable items={items} />}
       {!packaging ? (
         <Nothing>
           packaging is not described in the tech card — no folding, no carton, no weight.
@@ -56,11 +112,13 @@ export function PackagingSheet({
         <div className='grid grid-cols-2 gap-x-8'>
           <div>
             <KV k='folding' v={packaging.foldingMethod} />
+            {packedSize && <KV k='packed size' v={packedSize} />}
             <KV k='polybag' v={packaging.polybag} />
             <KV k='bag sticker' v={packaging.bagSticker} />
             <KV k='insert card' v={packaging.inserts} />
             <KV k='carton marking' v={packaging.boxMarking} />
             <KV k='carton dimensions' v={packaging.boxDimensions} />
+            {cartonNote && <KV k='carton note' v={cartonNote} />}
           </div>
           <div>
             <KV k='pcs per carton' v={packaging.unitsPerBox || ''} />

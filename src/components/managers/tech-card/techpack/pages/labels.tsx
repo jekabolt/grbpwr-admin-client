@@ -12,6 +12,7 @@ import {
   LABEL_FLAT_PX,
   LABEL_QR_PX,
   LABEL_TABLE_COLS,
+  labelTableCols,
   planLabelSheets,
   QR_COL_GAP_PX,
   qrColumns,
@@ -74,7 +75,8 @@ function SewnTable({
   orient: LabelsPageProps['orient'];
 }) {
   const { t } = useT();
-  const cols = LABEL_TABLE_COLS[orient];
+  const cols = labelTableCols(orient, model.sewn.table);
+  const showNote = cols.length > LABEL_TABLE_COLS[orient].length;
   return (
     <div className='min-w-0 flex-1' data-label-table=''>
       <DataTable className='table-fixed'>
@@ -93,6 +95,7 @@ function SewnTable({
             <th data-align='left'>{t('labels.sizeMm')}</th>
             <th data-align='left'>{t('common.material')}</th>
             <th>{t('common.quantity')}</th>
+            {showNote && <th data-align='left'>{t('common.note')}</th>}
           </tr>
         </thead>
         <tbody>
@@ -109,6 +112,11 @@ function SewnTable({
               <td data-align='left'>{own(row.size)}</td>
               <td data-align='left'>{own(row.material)}</td>
               <td>{row.qty}</td>
+              {showNote && (
+                <td data-align='left' translate='no'>
+                  {own(row.note)}
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

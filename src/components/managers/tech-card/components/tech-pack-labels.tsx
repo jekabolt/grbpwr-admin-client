@@ -12,6 +12,7 @@ import type {
 } from 'api/proto-http/admin';
 import { depStatus, type PrintDepStatus } from 'components/managers/print/use-print-ready';
 import { Nothing, Sheet, TD, TH } from 'components/managers/print/sheet';
+import { packagingItemFacts } from 'components/managers/print/sheets/packaging-items';
 import { useMemo, type JSX } from 'react';
 import { adaptCareLabels, useColorwayFull } from '../care-labels/adapter';
 import {
@@ -19,7 +20,7 @@ import {
   type CompositionLabelSummary,
 } from './composition-label/label-summary';
 import { isCompositionLabel } from './sewn-label-model';
-import { garmentLabelKindNames, kindLabel, packagingItemKinds } from './tech-card-options';
+import { garmentLabelKindNames, kindLabel } from './tech-card-options';
 import { wireInt } from './wire-int';
 import { useLabelDictionary } from '../care-labels/use-label-dictionary';
 import { EmptyCell } from 'ui';
@@ -66,18 +67,40 @@ export type CareArt = (code: string) => { img?: string; name: string };
 const qty = (n: number | undefined) => (wireInt(n) > 0 ? String(wireInt(n)) : '—');
 const txt = (s: string | undefined) => (s ?? '').trim() || '—';
 
+const pickedUrl = (item: common_TechCardPackagingItem): string | undefined => {
+  const media = item.pickedThumbnail?.media;
+  return media?.compressed?.mediaUrl || media?.fullSize?.mediaUrl || media?.thumbnail?.mediaUrl;
+};
+
 /** Мокапы строки: все картинки, каждая квадратом 18 мм; нет ни одной — «no mockup». */
-function MockupCell({ ids, urlOf }: { ids: number[]; urlOf: (id: number) => string }) {
+function MockupCell({
+  ids,
+  urlOf,
+  picked,
+}: {
+  ids: number[];
+  urlOf: (id: number) => string;
+  /** The picture of the picked item, for a row with no mockup of its own. */
+  picked?: string;
+}) {
   const shown = ids.filter((id) => id > 0);
   return (
     <td className={`${TD} w-[20mm]`}>
       {shown.length === 0 ? (
-        <div
-          className='flex size-[18mm] items-center justify-center border border-dashed border-black text-center text-nano uppercase leading-tight'
-          data-no-mockup=''
-        >
-          no mockup
-        </div>
+        picked ? (
+          <img
+            src={picked}
+            alt='mockup'
+            className='size-[18mm] border border-textColor object-contain'
+          />
+        ) : (
+          <div
+            className='flex size-[18mm] items-center justify-center border border-dashed border-black text-center text-nano uppercase leading-tight'
+            data-no-mockup=''
+          >
+            no mockup
+          </div>
+        )
       ) : (
         <div className='flex flex-col gap-1'>
           {shown.map((id) => {
@@ -112,6 +135,7 @@ export function TechPackLabelSheets({
   labels,
   items,
   urlOf,
+  colourName,
   careArt,
   showLabels,
   showItems,
@@ -122,6 +146,7 @@ export function TechPackLabelSheets({
   labels: readonly common_TechCardGarmentLabel[];
   items: readonly common_TechCardPackagingItem[];
   urlOf: (id: number) => string;
+  colourName: (colorwayId: number) => string;
   careArt: CareArt;
   /** Тетради пошива / ОТК: составник и этикетки. */
   showLabels: boolean;
@@ -259,19 +284,31 @@ export function TechPackLabelSheets({
               </tr>
             </thead>
             <tbody>
-              {items.map((it, i) => (
-                <tr key={it.key || i} className='break-inside-avoid' data-tp-item={it.key ?? ''}>
-                  <MockupCell ids={(it.mediaIds ?? []).map(wireInt)} urlOf={urlOf} />
-                  <td className={`${TD} font-semibold`}>
-                    {txt(kindLabel(packagingItemKinds, it.key))}
-                  </td>
-                  <td className={TD}>{txt(it.usage)}</td>
-                  <td className={TD}>{txt(it.packing)}</td>
-                  <td className={TD}>{txt(it.size)}</td>
-                  <td className={`${TD} text-right`}>{qty(it.qtyPerGarment)}</td>
-                  <td className={`${TD} whitespace-pre-wrap`}>{txt(it.note)}</td>
-                </tr>
-              ))}
+              {items.map((it, i) => {
+                const facts = packagingItemFacts(it);
+                const usedFor = [it.usage?.trim(), ...facts.colorwayIds.map(colourName)];
+                return (
+                  <tr key={it.key || i} className='break-inside-avoid' data-tp-item={it.key ?? ''}>
+                    <MockupCell
+                      ids={(it.mediaIds ?? []).map(wireInt)}
+                      urlOf={urlOf}
+                      picked={pickedUrl(it)}
+                    />
+                    <td className={TD}>
+                      <div className='font-semibold'>{txt(facts.item)}</div>
+                      {facts.what !== facts.item && <div>{facts.what}</div>}
+                    </td>
+                    <td className={TD}>{txt(usedFor.filter(Boolean).join(', '))}</td>
+                    <td className={TD}>{txt(it.packing)}</td>
+                    <td className={TD}>{txt(it.size)}</td>
+                    <td className={`${TD} text-right`}>
+                      {facts.quantity}
+                      {facts.perOrder && ' / order'}
+                    </td>
+                    <td className={`${TD} whitespace-pre-wrap`}>{txt(it.note)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </Sheet>

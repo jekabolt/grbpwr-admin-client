@@ -4,7 +4,12 @@ import { describe, expect, it } from 'vitest';
 
 import type { common_TechCard } from 'api/proto-http/admin';
 import { deriveLabels } from './derive-labels';
-import { LABEL_TABLE_COLS, planLabelSheets, qrColumns } from './labels-sheets';
+import {
+  LABEL_TABLE_COLS,
+  LABEL_TABLE_NOTE_COLS,
+  planLabelSheets,
+  qrColumns,
+} from './labels-sheets';
 import { LabelsPage } from './pages/labels';
 
 const url = (token: string) => `https://backend-beta.grbpwr.com/api/f/${token}`;
@@ -150,9 +155,65 @@ describe('page 05 sewn-in labels', () => {
   it('keeps a three digit pin number on one line in the # column', () => {
     const cellPaddingPx = 12;
     const monoCharPx = 7.3;
-    for (const cols of Object.values(LABEL_TABLE_COLS)) {
+    for (const cols of [
+      ...Object.values(LABEL_TABLE_COLS),
+      ...Object.values(LABEL_TABLE_NOTE_COLS),
+    ]) {
       expect(cols[0] - cellPaddingPx).toBeGreaterThanOrEqual(3 * monoCharPx);
     }
+  });
+
+  it('a note column does not widen the table', () => {
+    const sum = (cols: readonly number[]) => cols.reduce((total, width) => total + width, 0);
+    expect(sum(LABEL_TABLE_NOTE_COLS.land)).toBe(sum(LABEL_TABLE_COLS.land));
+    expect(sum(LABEL_TABLE_NOTE_COLS.port)).toBe(sum(LABEL_TABLE_COLS.port));
+  });
+
+  it('prints a label note, and no note column for a card without notes', () => {
+    const page = (c: common_TechCard) =>
+      renderToStaticMarkup(
+        createElement(LabelsPage, {
+          techCard: c,
+          orient: 'land',
+          docline: 'd',
+          n: '05',
+          sizeNames: names,
+        }),
+      );
+    const noted = card({
+      garmentLabels: [
+        { key: 'brand', placement: 'neck', qtyPerGarment: 1, note: 'keep the woven edge' },
+        { key: 'size', placement: 'neck', qtyPerGarment: 1 },
+      ],
+    });
+    const html = page(noted);
+    expect(html).toContain('keep the woven edge');
+    expect((html.match(/<col /g) ?? []).length).toBe(LABEL_TABLE_NOTE_COLS.land.length);
+
+    const plain = page(
+      card({ garmentLabels: [{ key: 'brand', placement: 'neck', qtyPerGarment: 1 }] }),
+    );
+    expect((plain.match(/<col /g) ?? []).length).toBe(LABEL_TABLE_COLS.land.length);
+    expect(plain).not.toContain('>note<');
+  });
+
+  it('counts the lines of a long note when it splits the sheet', () => {
+    const rows = Array.from({ length: 6 }, (_, index) => ({
+      key: `row-${index}`,
+      number: index + 1,
+      item: 'brand',
+      location: 'neck',
+      attachment: 'sewn',
+      fold: 'flat',
+      size: '',
+      material: '',
+      qty: 1,
+    }));
+    const long = 'keep the woven edge clear of the seam allowance '.repeat(6);
+    const plan = (note: string) =>
+      planLabelSheets({ table: rows.map((row) => ({ ...row, note })), qr: [] }, 'land').length;
+    expect(plan('')).toBe(1);
+    expect(plan(long)).toBeGreaterThan(1);
   });
 
   it('renders QR, no file, and the old layout when the card has no rows', () => {

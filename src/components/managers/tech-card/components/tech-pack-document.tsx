@@ -31,6 +31,7 @@ import {
 import { PageFurniture, furnitureLine } from 'components/managers/print/page-furniture';
 import { cutPlanAuthoritative } from 'components/managers/print/labels';
 import { PackagingSheet } from 'components/managers/print/sheets/packaging';
+import { packagingItemInScope } from 'components/managers/print/sheets/packaging-items';
 import {
   PRINT_CUT_SYMMETRY_LEGEND,
   printCutSymmetryCaption,
@@ -3197,7 +3198,15 @@ export function TechPackDocument({
         summary={labelSummary}
         hasColorway={labelColorwayId > 0}
         labels={tc.garmentLabels ?? []}
-        items={tc.packagingItems ?? []}
+        items={(tc.packagingItems ?? []).filter((item) =>
+          packagingItemInScope(
+            item,
+            printScope.colorway ? [wireInt(printScope.colorway.colorwayId)] : [],
+          ),
+        )}
+        colourName={(id) =>
+          colorwayLabel(techCard.colorways?.find((cw) => wireInt(cw.colorwayId) === id))
+        }
         urlOf={(id) => {
           const m = labelMediaOf(id, techCard.resolvedLabelMedia, libraryMap)?.media;
           return m?.compressed?.mediaUrl || m?.fullSize?.mediaUrl || m?.thumbnail?.mediaUrl || '';

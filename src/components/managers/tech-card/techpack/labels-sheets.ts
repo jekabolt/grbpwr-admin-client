@@ -21,6 +21,19 @@ export const LABEL_TABLE_COLS: Record<PrintOrient, readonly number[]> = {
   port: [36, 98, 123, 123, 74, 64, 146, 40],
 };
 
+// The same table with a note last. The note takes its room from the words, the sheet stays as wide.
+export const LABEL_TABLE_NOTE_COLS: Record<PrintOrient, readonly number[]> = {
+  land: [36, 96, 116, 116, 66, 60, 130, 40, 139],
+  port: [36, 80, 98, 98, 56, 60, 114, 40, 122],
+};
+
+/** A note column only when a row has a note: a card without notes prints the table it always did. */
+export const labelTableCols = (
+  orient: PrintOrient,
+  table: readonly SewnTableRow[],
+): readonly number[] =>
+  (table.some((row) => row.note) ? LABEL_TABLE_NOTE_COLS : LABEL_TABLE_COLS)[orient];
+
 const HEADER_PX = 42;
 const TABLE_HEAD_PX = 26;
 const QR_HEAD_PX = 30;
@@ -71,8 +84,18 @@ function linesIn(text: string, columnPx: number): number {
 }
 
 function rowPx(row: SewnTableRow, cols: readonly number[]): number {
-  const cells = ['', row.item, row.location, row.attachment, row.fold, row.size, row.material];
-  return CELL_Y_PX + LINE_PX * Math.max(...cells.map((text, i) => linesIn(text, cols[i])));
+  const cells = [
+    '',
+    row.item,
+    row.location,
+    row.attachment,
+    row.fold,
+    row.size,
+    row.material,
+    '',
+    row.note,
+  ];
+  return CELL_Y_PX + LINE_PX * Math.max(...cols.map((width, i) => linesIn(cells[i], width)));
 }
 
 /** The grid in rows: a long size run breaks into segments, each under its own row of sizes. */
@@ -102,7 +125,7 @@ export function planLabelSheets(
   tight = 0,
 ): LabelSheetPlan[] {
   const land = orient === 'land';
-  const cols = LABEL_TABLE_COLS[orient];
+  const cols = labelTableCols(orient, sewn.table);
   const full = (BODY_PX[orient].h - HEADER_PX) * (1 - tight * 0.08);
   let sheet: LabelSheetPlan = { flat: true, rows: [], qr: [], tapes: false };
   const sheets = [sheet];

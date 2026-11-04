@@ -20,6 +20,10 @@ import { KV, Nothing, Sheet, TD, TH } from 'components/managers/print/sheet';
 import { cutPlanAuthoritative } from 'components/managers/print/labels';
 import { PackagingSheet } from 'components/managers/print/sheets/packaging';
 import {
+  packagingItemFacts,
+  packagingItemInScope,
+} from 'components/managers/print/sheets/packaging-items';
+import {
   fusingPrintCaption,
   grainlineArrow,
 } from 'components/managers/tech-card/components/piece-codes';
@@ -389,6 +393,16 @@ export function RunPackDocument({
   const materialCaveats = materialPlan?.caveats ?? [];
 
   const packaging = tc?.packaging;
+  // Лист цеха о ЭТОЙ партии: предмет только для белого не кладут в короб чёрного тиража.
+  const packagingItems = useMemo(() => {
+    const scope = [...new Set(lines.map((l) => wireInt(l.productId)).filter((id) => id > 0))];
+    return (tc?.packagingItems ?? [])
+      .filter((item) => packagingItemInScope(item, scope))
+      .map((item) => {
+        const facts = packagingItemFacts(item);
+        return { ...facts, colours: facts.colorwayIds.map(colorwayLabel).join(', ') };
+      });
+  }, [tc?.packagingItems, lines, colorwayLabel]);
 
   return (
     <div className='mx-auto max-w-[210mm] bg-white px-8 py-6 text-black'>
@@ -521,9 +535,9 @@ export function RunPackDocument({
             верно, — но резать по его числам нельзя, и сказать это надо там, где читают первым. */}
         {revisionDrift && (
           <div className='mt-1 border-2 border-black px-2 py-1 text-control font-bold uppercase'>
-            the run plan changed after the cut list was computed (run lock_version{' '}
-            {runLockVersion}, cut list computed for {planLockVersion}) — quantities below are stale.
-            Reprint the run pack before cutting.
+            the run plan changed after the cut list was computed (run lock_version {runLockVersion},
+            cut list computed for {planLockVersion}) — quantities below are stale. Reprint the run
+            pack before cutting.
           </div>
         )}
       </header>
@@ -1070,7 +1084,12 @@ export function RunPackDocument({
       {/* УПАКОВКА — общий лист (print/sheets/packaging.tsx). Считаемая половина живёт в нём же:
           тираж передаётся пропом, а формулы (короб вверх, пусто вместо нуля) переехали туда
           дословно вместе с их обоснованием. */}
-      <PackagingSheet title='run packaging' packaging={packaging} plannedTotal={plannedTotal} />
+      <PackagingSheet
+        title='run packaging'
+        packaging={packaging}
+        plannedTotal={plannedTotal}
+        items={packagingItems}
+      />
     </div>
   );
 }
