@@ -307,7 +307,7 @@ export const kr = {
   cutStrips: {
     title: '길이 재단',
     step: '공정',
-    cutAt: '재단 길이, {size}',
+    cutAt: '재단 길이 · {size}',
     cutMmOf: '{name}, 재단 길이 mm',
     allSizes: '전 사이즈',
     unused: '공정에 미사용',

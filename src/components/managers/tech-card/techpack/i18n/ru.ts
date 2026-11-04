@@ -352,7 +352,7 @@ export const ru = {
   cutStrips: {
     title: 'материалы отрезом',
     step: 'шаг',
-    cutAt: 'отрез, {size}',
+    cutAt: 'отрез · {size}',
     cutMmOf: '{name}, отрез мм',
     allSizes: 'все размеры',
     unused: 'отрез не в шаге',

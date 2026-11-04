@@ -307,7 +307,7 @@ export const ja = {
   cutStrips: {
     title: '定尺カット',
     step: '工程',
-    cutAt: 'カット長、{size}',
+    cutAt: 'カット長 · {size}',
     cutMmOf: '{name}、カット長 mm',
     allSizes: '全サイズ',
     unused: '工程で未使用',

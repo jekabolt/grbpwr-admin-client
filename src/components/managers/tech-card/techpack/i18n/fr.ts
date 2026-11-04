@@ -311,7 +311,7 @@ export const fr = {
   cutStrips: {
     title: 'coupe à longueur',
     step: 'étape',
-    cutAt: 'coupe, {size}',
+    cutAt: 'coupe · {size}',
     cutMmOf: '{name}, coupe mm',
     allSizes: 'toutes tailles',
     unused: 'coupe sans étape',

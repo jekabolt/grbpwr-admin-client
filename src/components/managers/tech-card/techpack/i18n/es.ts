@@ -311,7 +311,7 @@ export const es = {
   cutStrips: {
     title: 'corte a medida',
     step: 'paso',
-    cutAt: 'corte, {size}',
+    cutAt: 'corte · {size}',
     cutMmOf: '{name}, corte mm',
     allSizes: 'todas las tallas',
     unused: 'corte sin paso',

@@ -62,6 +62,7 @@ import {
 import { unitOptions } from '../tech-card-options';
 import { wireInt, type TechCardFormData } from '../schema';
 import { stripCutMm, stripSewnMm } from '../cut-strips/lengths';
+import { useSeamLengthsMm } from '../cut-strips/seam-lengths';
 
 /**
  * ═══ MATERIAL SLOTS — СЛОТЫ МАТЕРИАЛОВ ВМЕСТО СПЕЦИФИКАЦИИ (B-16 / B-19 / B-20 круга 20) ═══════
@@ -197,13 +198,11 @@ export function MaterialSlots({
   techCardId,
   readOnly,
   onGoTab,
-  seamLengthsMm,
 }: {
   techCardId?: number;
   readOnly?: boolean;
   /** Дверь на вкладку BOM: `?tab=bom&bom=<line_key>` — существующий диплинк редактора строки. */
   onGoTab?: (tab: string, extra?: Record<string, string>) => void;
-  seamLengthsMm?: SeamLengthsMm;
 }) {
   const { control, getValues, setValue, setFocus } = useFormContext<TechCardFormData>();
   const lines = (useWatch({ control, name: 'bomItems' }) ?? []) as Line[];
@@ -216,6 +215,7 @@ export function MaterialSlots({
   // это попадание в кэш, а не второй сетевой вызов.
   const { data: card } = useTechCard(techCardId);
   const colorways = card?.colorways;
+  const seamLengthsMm = useSeamLengthsMm(card?.seams);
   const [openStripKey, setOpenStripKey] = useState('');
 
   const stripIndexFor = (bomLineKey?: string) =>

@@ -307,7 +307,7 @@ export const cn = {
   cutStrips: {
     title: '定长裁剪',
     step: '步骤',
-    cutAt: '裁长，{size}',
+    cutAt: '裁长 · {size}',
     cutMmOf: '{name}，裁长 mm',
     allSizes: '所有尺码',
     unused: '未用于任何步骤',

@@ -310,7 +310,7 @@ export const de = {
   cutStrips: {
     title: 'Zuschnitt nach Länge',
     step: 'Schritt',
-    cutAt: 'Zuschnitt, {size}',
+    cutAt: 'Zuschnitt · {size}',
     cutMmOf: '{name}, Zuschnitt mm',
     allSizes: 'alle Größen',
     unused: 'Zuschnitt ohne Schritt',

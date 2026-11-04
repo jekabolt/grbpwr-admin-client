@@ -354,7 +354,7 @@ export const en = {
   cutStrips: {
     title: 'cut to length',
     step: 'step',
-    cutAt: 'cut, {size}',
+    cutAt: 'cut · {size}',
     cutMmOf: '{name}, cut mm',
     allSizes: 'all sizes',
     unused: 'strip in no step',

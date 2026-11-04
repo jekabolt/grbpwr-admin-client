@@ -59,7 +59,7 @@ describe('the cut-to-length sheet', () => {
     const tables = tablesOf(page(waistbandCard(fromSeamStrip())));
     expect(tables).toHaveLength(2);
     const [head, row] = tables[0];
-    expect(head.slice(1)).toEqual(['step', BAND, 'cut, M']);
+    expect(head.slice(1)).toEqual(['step', BAND, 'cut · M']);
     expect(row[0]).toBe('230');
     expect(row[2]).toBe('40 mm');
     expect(row[3]).toBe('702 mm');

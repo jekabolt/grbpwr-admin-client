@@ -352,7 +352,7 @@ export const pl = {
   cutStrips: {
     title: 'cięcie na długość',
     step: 'krok',
-    cutAt: 'cięcie, {size}',
+    cutAt: 'cięcie · {size}',
     cutMmOf: '{name}, cięcie mm',
     allSizes: 'wszystkie rozmiary',
     unused: 'cięcie bez kroku',
