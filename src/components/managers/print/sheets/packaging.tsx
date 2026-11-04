@@ -1,11 +1,11 @@
-import type { PackagingRecipeLine, common_TechCardPackaging } from 'api/proto-http/admin';
-import { KV, Nothing, Sheet, TD, TH } from 'components/managers/print/sheet';
+import type { common_TechCardPackaging } from 'api/proto-http/admin';
+import { KV, Nothing, Sheet } from 'components/managers/print/sheet';
 
 // ЛИСТ УПАКОВКИ — один на обе бумаги.
 //
 // До этого он был раздвоен, и не дословно: тех-пак печатал статичную часть (укладка, полибэг,
-// стикер, вкладыш, маркировка, габариты, вес нетто/брутто) плюс отдельно packaging recipe;
-// наряд — считаемую от тиража половину (изделий, коробов, вес партии), без стикера и рецепта.
+// стикер, вкладыш, маркировка, габариты, вес нетто/брутто);
+// наряд — считаемую от тиража половину (изделий, коробов, вес партии), без стикера.
 // Две вёрстки одного предмета расходятся молча: поле, добавленное в одну, не появляется в другой,
 // и цех получает разные инструкции по укладке из двух листов одной партии. Здесь ОБЪЕДИНЕНИЕ
 // полей, а не пересечение.
@@ -15,26 +15,19 @@ import { KV, Nothing, Sheet, TD, TH } from 'components/managers/print/sheet';
 // описанной» целиком — цех потерял бы инструкцию по укладке из-за отсутствия числа, к укладке
 // отношения не имеющего. Не считается ровно то, чего не из чего посчитать.
 
+// Брутто — вес ОДНОЙ упакованной вещи, тот же смысл, что у посылки (shipping_label.go, deriveParcel)
+// и у «full box» на экране упаковки. Вес партии от коробов не зависит: штук в коробе может не быть.
+export function runWeightGrams(planned: number, grossG: number, netG: number): number {
+  return planned * (grossG > 0 ? grossG : netG);
+}
+
 export function PackagingSheet({
   title,
   packaging,
-  recipeRows = [],
-  recipeIsGlobalFallback = false,
-  recipeIsLive = false,
   plannedTotal = 0,
 }: {
   title: string;
   packaging?: common_TechCardPackaging;
-  recipeRows?: PackagingRecipeLine[];
-  /** Рецепт стиля не заведён, печатается глобальный — это надо назвать, а не выдать за стилевой. */
-  recipeIsGlobalFallback?: boolean;
-  /**
-   * Бумага печатается по снапшоту релиза, но РЕЦЕПТ упаковки в снапшот не входит (он живёт в
-   * ListPackagingRecipe, снапшот — common.TechCard) и печатается сегодняшним. Описательная
-   * половина (`packaging`) при этом ИЗ снапшота — пометить надо ровно таблицу рецепта, а не лист
-   * целиком, иначе пометка врала бы про замороженную половину.
-   */
-  recipeIsLive?: boolean;
   /**
    * Тираж партии ЦЕЛИКОМ (по выбранному колорвею, но по ВСЕМ его размерам). 0 — печать без
    * прогона: считаемая половина отсутствует, а не обнуляется.
@@ -51,7 +44,7 @@ export function PackagingSheet({
   // Нецелый короб округляется вверх — половину короба не отгружают. Пусто, а не «0»: ноль коробов
   // означал бы «отгружать нечего», а не «посчитать не из чего».
   const cartons = perBox > 0 && plannedTotal > 0 ? Math.ceil(plannedTotal / perBox) : 0;
-  const batchWeightG = cartons > 0 && grossG > 0 ? cartons * grossG : plannedTotal * netG;
+  const batchWeightG = runWeightGrams(plannedTotal, grossG, netG);
 
   return (
     <Sheet title={title}>
@@ -88,57 +81,12 @@ export function PackagingSheet({
                   }
                 />
                 {perBox === 0 && (
-                  <p className='mt-1 text-nano uppercase text-labelColor'>
-                    &quot;pcs per carton&quot; is not set on the card — nothing to compute cartons
-                    and batch weight from.
-                  </p>
+                  <p className='mt-1 text-nano uppercase text-labelColor'>pcs per carton not set</p>
                 )}
               </>
             )}
           </div>
         </div>
-      )}
-
-      {recipeRows.length > 0 && (
-        <>
-          {recipeIsGlobalFallback && (
-            <p className='mt-3 text-nano uppercase text-labelColor'>
-              no style-specific packaging recipe — the global one is printed
-            </p>
-          )}
-          {recipeIsLive && (
-            <p className='mt-3 text-nano uppercase text-labelColor'>
-              live data — the packaging recipe below is not part of the revision snapshot and is
-              printed as of today
-            </p>
-          )}
-          <table className='mt-1 w-full border-collapse text-micro'>
-            <thead>
-              <tr>
-                <th className={TH}>material</th>
-                <th className={TH}>unit</th>
-                <th className={`${TH} text-right`}>qty / order</th>
-                <th className={`${TH} text-right`}>qty / item</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recipeRows.map((p, i) => (
-                <tr key={p.id ?? i} className='break-inside-avoid'>
-                  <td className={TD}>{p.materialName || `#${p.materialId}`}</td>
-                  {/* Единица обязана стоять рядом с числом: «1.5» без «m» — не количество, а
-                      загадка. Она печаталась в старом тех-паке и чуть не потерялась при слиянии. */}
-                  <td className={TD}>{p.materialUnit || '—'}</td>
-                  <td className={`${TD} whitespace-nowrap text-right`}>
-                    {p.qtyPerOrder?.value?.trim() || '—'}
-                  </td>
-                  <td className={`${TD} whitespace-nowrap text-right`}>
-                    {p.qtyPerItem?.value?.trim() || '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
       )}
     </Sheet>
   );

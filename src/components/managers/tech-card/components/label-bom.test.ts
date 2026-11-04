@@ -3,7 +3,15 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { FormGarmentLabel } from './labels-schema';
 import type { TechCardFormData } from './schema';
-import { pickLabelMaterial, removeLabelWithLine, uniqueLineName } from './label-bom';
+import {
+  dropPackagingRowLine,
+  packagingLineForPick,
+  pickLabelMaterial,
+  removeLabelWithLine,
+  removePackagingItemWithLine,
+  takeLabelMaterialOff,
+  uniqueLineName,
+} from './label-bom';
 
 type FormState = Partial<TechCardFormData> & Record<string, unknown>;
 
@@ -204,6 +212,84 @@ describe('label BOM writers', () => {
   });
 });
 
+describe('takeLabelMaterialOff', () => {
+  const LABEL = 'TECH_CARD_BOM_SECTION_LABEL';
+  const file = { colorwayId: 0, sizeId: 0, libraryFileId: 7, sourceHash: '', publicUrl: 'u' };
+  const composition = (over: Partial<FormGarmentLabel> = {}): FormGarmentLabel => ({
+    ...bareLabel('composition'),
+    kind: 'composition',
+    source: 'stock',
+    bomLineKey: 'L1',
+    bomItemId: 9,
+    files: [file],
+    ...over,
+  });
+  const line = (section = LABEL) => ({ lineKey: 'L1', id: 9, section, name: 'tape' });
+  const seed = (over: FormState = {}): FormState => ({
+    garmentLabels: [composition()],
+    packagingItems: [],
+    bomItems: [line()],
+    operations: [],
+    pieces: [],
+    labels: [],
+    ...over,
+  });
+  const take = (h: ReturnType<typeof formHarness>) =>
+    takeLabelMaterialOff(h.getValues, h.setValue, 'composition');
+  const row = (h: ReturnType<typeof formHarness>) =>
+    (h.state.garmentLabels as FormGarmentLabel[])[0];
+
+  it('drops the line and keeps the row, its kind and its files', () => {
+    const h = formHarness(
+      seed({ operations: [{ bomLineKeys: ['L1', 'L2'] }] } as unknown as FormState),
+    );
+    take(h);
+    expect(h.state.bomItems).toEqual([]);
+    expect((h.state.operations as { bomLineKeys: string[] }[])[0].bomLineKeys).toEqual(['L2']);
+    expect(h.state.garmentLabels).toHaveLength(1);
+    expect(row(h)).toMatchObject({
+      bomLineKey: '',
+      bomItemId: 0,
+      source: '',
+      kind: 'composition',
+      files: [file],
+    });
+  });
+
+  it('a row with no source only lets go of its line', () => {
+    const h = formHarness(seed({ garmentLabels: [composition({ source: '' })] }));
+    take(h);
+    expect(h.state.bomItems).toHaveLength(1);
+    expect(row(h)).toMatchObject({ bomLineKey: '', bomItemId: 0, source: '' });
+  });
+
+  it('a line another label names stays', () => {
+    const brand = { ...bareLabel('brand'), source: 'stock', bomLineKey: 'L1' } as FormGarmentLabel;
+    const h = formHarness(seed({ garmentLabels: [composition(), brand] }));
+    take(h);
+    expect(h.state.bomItems).toHaveLength(1);
+    expect(row(h)).toMatchObject({ bomLineKey: '', source: '' });
+    expect((h.state.garmentLabels as FormGarmentLabel[])[1]).toMatchObject({
+      bomLineKey: 'L1',
+      source: 'stock',
+    });
+  });
+
+  it('a line moved out of the label section stays', () => {
+    const h = formHarness(seed({ bomItems: [line('TECH_CARD_BOM_SECTION_TRIM')] } as FormState));
+    take(h);
+    expect(h.state.bomItems).toHaveLength(1);
+    expect(row(h)).toMatchObject({ bomLineKey: '', source: '' });
+  });
+
+  it('a row that is not there changes nothing', () => {
+    const h = formHarness(seed({ garmentLabels: [] }));
+    take(h);
+    expect(h.state.bomItems).toHaveLength(1);
+    expect(h.state.garmentLabels).toEqual([]);
+  });
+});
+
 describe('uniqueLineName', () => {
   it('ignores the line being repointed', () => {
     expect(
@@ -216,5 +302,78 @@ describe('uniqueLineName', () => {
         'a',
       ),
     ).toBe('Label');
+  });
+});
+
+describe('packaging BOM lines', () => {
+  const PACKAGING = 'TECH_CARD_BOM_SECTION_PACKAGING';
+  const line = (lineKey: string, materialId: number, name: string) => ({
+    lineKey,
+    materialId,
+    name,
+    section: PACKAGING,
+  });
+  const row = (key: string, bomLineKey: string) => ({ key, bomLineKey, bomItemId: 0 });
+  const form = (bomItems: unknown[], packagingItems: unknown[]) =>
+    formHarness({ bomItems, packagingItems, garmentLabels: [] } as never);
+
+  it('a new pick mints a packaging line', () => {
+    const h = form([], []);
+    const key = packagingLineForPick(h.getValues, h.setValue, material(7, 'Dust bag'));
+    const lines = h.state.bomItems as ReturnType<typeof line>[];
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ section: PACKAGING, materialId: 7, name: 'Dust bag' });
+    expect(key).toBe(lines[0].lineKey);
+  });
+
+  it('a second row of the material takes the same line', () => {
+    const h = form([line('L1', 7, 'Dust bag')], [row('dust_bag', 'L1')]);
+    expect(packagingLineForPick(h.getValues, h.setValue, material(7, 'Dust bag'))).toBe('L1');
+    expect(h.state.bomItems).toHaveLength(1);
+  });
+
+  it('a row alone on its line repoints it to the new material', () => {
+    const h = form([line('L1', 7, 'Box S')], [row('box', 'L1')]);
+    expect(packagingLineForPick(h.getValues, h.setValue, material(8, 'Box L'), 0)).toBe('L1');
+    expect(h.state.bomItems).toEqual([
+      expect.objectContaining({ lineKey: 'L1', materialId: 8, name: 'Box L', section: PACKAGING }),
+    ]);
+  });
+
+  it('a row sharing its line leaves it and mints another', () => {
+    const h = form([line('L1', 7, 'Bag')], [row('dust_bag', 'L1'), row('other', 'L1')]);
+    const key = packagingLineForPick(h.getValues, h.setValue, material(8, 'Tissue'), 0);
+    const lines = h.state.bomItems as ReturnType<typeof line>[];
+    expect(lines.map((l) => l.materialId)).toEqual([7, 8]);
+    expect(key).toBe(lines[1].lineKey);
+  });
+
+  it('moving onto a material that has a line drops the old lone line', () => {
+    const h = form(
+      [line('L1', 7, 'Box S'), line('L2', 8, 'Box L')],
+      [row('box', 'L1'), row('other', 'L2')],
+    );
+    expect(packagingLineForPick(h.getValues, h.setValue, material(8, 'Box L'), 0)).toBe('L2');
+    expect((h.state.bomItems as ReturnType<typeof line>[]).map((l) => l.lineKey)).toEqual(['L2']);
+  });
+
+  it('removing a row takes its line, and a shared line stays', () => {
+    const h = form(
+      [line('L1', 7, 'Bag'), line('L2', 8, 'Tissue')],
+      [row('dust_bag', 'L1'), row('other', 'L1'), row('tissue', 'L2')],
+    );
+    removePackagingItemWithLine(h.getValues, h.setValue, 'tissue', 2);
+    removePackagingItemWithLine(h.getValues, h.setValue, 'other', 1);
+    expect((h.state.bomItems as ReturnType<typeof line>[]).map((l) => l.lineKey)).toEqual(['L1']);
+    expect(h.state.packagingItems).toEqual([row('dust_bag', 'L1')]);
+    removePackagingItemWithLine(h.getValues, h.setValue, 'dust_bag', 0);
+    expect(h.state.bomItems).toEqual([]);
+  });
+
+  it('a line outside the packaging section is not the row to take', () => {
+    const fabric = { ...line('L1', 7, 'Canvas'), section: 'TECH_CARD_BOM_SECTION_FABRIC' };
+    const h = form([fabric], [row('other', 'L1')]);
+    dropPackagingRowLine(h.getValues, h.setValue, 0);
+    expect(h.state.bomItems).toEqual([fabric]);
   });
 });

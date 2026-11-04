@@ -9,7 +9,7 @@ import { failureText } from 'components/managers/files/api/rpc-error';
 import { SECTION } from 'constants/routes';
 import { notify } from 'lib/stores/store';
 import { useMemo, useRef, useState, type JSX } from 'react';
-import { useFormContext } from 'react-hook-form';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { Button, Pill, Progress, Text } from 'ui';
 import type { FullPlan } from '../../care-labels/print-job';
 import { fileSlug, variantHash, variantPdf } from '../../care-labels/pages';
@@ -22,11 +22,13 @@ import {
   COMPOSITION_LABEL_KEY,
   isCompositionLabel,
   isOwnArtworkFile,
+  labelBomLine,
   type LabelAxes,
 } from '../sewn-label-model';
 import { bornLabelFacts, SewnLabelRow } from '../sewn-label-row';
 import { useUndoHistory } from '../undo-history';
 import { useLabelAxes } from '../use-label-axes';
+import { useLabelStock } from '../use-label-stock';
 import { wireInt } from '../wire-int';
 import { ArtworkChoiceChips, CompositionArtwork, type ArtworkCellRef } from './composition-artwork';
 import { oneFileOf, type ArtworkChoice } from './composition-artwork-model';
@@ -77,10 +79,17 @@ export function CompositionLabelRow({
   onClearFile: (cell: ArtworkCellRef) => void;
   onEditText: () => void;
 }): JSX.Element {
-  const { getValues, setValue } = useFormContext<TechCardFormData>();
+  const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { canWrite } = usePermissions();
   const undoHistory = useUndoHistory();
   const axes = useLabelAxes(techCard);
+  const labelRows = (useWatch({ control, name: 'garmentLabels' }) ?? []) as FormGarmentLabel[];
+  const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as NonNullable<
+    TechCardFormData['bomItems']
+  >;
+  const { materialById, plannedQty, onHandOf } = useLabelStock(techCard);
+  const row = labelRows.find((r) => isCompositionLabel(r.key));
+  const material = materialById.get(wireInt(row && labelBomLine(row, bomItems)?.materialId));
   const hashes = useVariantHashes(plan, axes);
 
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -201,6 +210,9 @@ export function CompositionLabelRow({
     <SewnLabelRow
       labelKey={COMPOSITION_LABEL_KEY}
       title='composition label'
+      material={material}
+      onHand={onHandOf(material)}
+      plannedQty={plannedQty}
       removable={false}
       techCard={techCard}
       axes={axes}

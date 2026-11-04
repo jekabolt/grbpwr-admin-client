@@ -35,12 +35,13 @@ import {
 } from 'ui';
 
 import { packagingItemKind } from './bom-kind';
+import { movePackagingItem, upsertPackagingItem, type PackagingItemOpts } from './form-writers';
 import {
-  movePackagingItem,
-  removePackagingItem,
-  upsertPackagingItem,
-  type PackagingItemOpts,
-} from './form-writers';
+  dropPackagingRowLine,
+  packagingLineForPick,
+  removePackagingItemWithLine,
+} from './label-bom';
+import { useOpenRunPlanned } from './use-label-stock';
 import {
   auxCardThumbUrl,
   auxOutputStock,
@@ -209,14 +210,14 @@ function ItemMedia({
   );
 }
 
-/** The stock figure of a tile: a number, or a red `0 on hand`. Unknown stays silent. */
-function OnHand({ value }: { value?: string }) {
+/** The stock figure of a tile, red when it runs short of the open run. Unknown stays silent. */
+function OnHand({ value, need }: { value?: string; need?: number }) {
   if (value == null || value === '') return null;
-  return Number(value) > 0 ? (
-    <>{value}</>
-  ) : (
+  const short = Number(value) <= 0 || (!!need && Number(value) < need);
+  if (!short) return <>{value}</>;
+  return (
     <Text size='micro' variant='errorLabel' component='span'>
-      0 on hand
+      {Number(value) <= 0 ? '0 on hand' : `${value} · need ${need}`}
     </Text>
   );
 }
@@ -538,6 +539,10 @@ export function PackagingShelf({
   const folding = (useWatch<TechCardFormData>({ name: 'packaging.foldingMethod' }) ?? '') as string;
   const units = wireInt(useWatch<TechCardFormData>({ name: 'packaging.unitsPerBox' }));
   const gross = wireInt(useWatch<TechCardFormData>({ name: 'packaging.weightGrossGrams' }));
+  const boxDimensions = useWatch<TechCardFormData>({ name: 'packaging.boxDimensions' }) as
+    | string
+    | undefined;
+  const planned = useOpenRunPlanned(wireInt(techCardId));
   const marking = (useWatch<TechCardFormData>({ name: 'packaging.boxMarking' }) ?? '') as string;
   const boxNote = (useWatch<TechCardFormData>({ name: 'packaging.notes' }) ?? '') as string;
   const styleNumber = (useWatch<TechCardFormData>({ name: 'styleNumber' }) ?? '') as string;
@@ -605,7 +610,17 @@ export function PackagingShelf({
   };
 
   const take = (mode: PickerMode, kind: string, pick: Pick) => {
+    const rowIndex = mode === 'pack' ? -1 : items.findIndex((item) => item.key === kind);
+    const row = rowIndex >= 0 ? rowIndex : undefined;
+    let bomLineKey = '';
+    if (pick.type === 'material') {
+      bomLineKey = packagingLineForPick(getValues, setValue, pick.material, row);
+    } else if (row != null) {
+      dropPackagingRowLine(getValues, setValue, row);
+    }
     const value: Partial<Omit<FormPackagingItem, 'key'>> = {
+      bomLineKey,
+      bomItemId: 0,
       materialId: pick.type === 'material' ? pick.id : 0,
       auxTechCardId: pick.type === 'aux' ? pick.id : 0,
       pickedName: pick.name,
@@ -723,7 +738,7 @@ export function PackagingShelf({
                 title={hanger.pickedName || 'hanger'}
               >
                 <Text size='micro' variant='label' component='span'>
-                  1 / pc · <OnHand value={onHandOf(hanger)} />
+                  1 / pc · <OnHand value={onHandOf(hanger)} need={planned} />
                 </Text>
               </Tile>
             ) : (
@@ -753,7 +768,14 @@ export function PackagingShelf({
                 <Text size='micro' variant='label' component='span'>
                   {item.qtyPerGarment ?? 1} / {item.perOrder ? 'order' : 'pc'}
                   {onHand != null && ' · '}
-                  <OnHand value={onHand} />
+                  <OnHand
+                    value={onHand}
+                    need={
+                      item.perOrder || planned == null
+                        ? undefined
+                        : planned * (item.qtyPerGarment ?? 1)
+                    }
+                  />
                 </Text>
                 {noOutput && (
                   <div className='mt-1'>
@@ -784,7 +806,7 @@ export function PackagingShelf({
             canMoveLater={selectedTile < tiles.length - 1}
             onMove={move}
             onRemove={() => {
-              removePackagingItem(
+              removePackagingItemWithLine(
                 getValues,
                 setValue,
                 items[selectedIndex].key || '',
@@ -814,6 +836,7 @@ export function PackagingShelf({
                 title={box.pickedName || 'box'}
               >
                 <Text size='micro' variant='label' component='span'>
+                  {boxDimensions && `${boxDimensions} · `}
                   <OnHand value={onHandOf(box)} />
                 </Text>
               </Tile>

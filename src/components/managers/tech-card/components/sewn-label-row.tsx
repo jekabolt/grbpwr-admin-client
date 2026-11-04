@@ -30,7 +30,12 @@ import {
 
 import { LabelIcon, type LabelKind as PictogramKind } from './design/hardware-icons';
 import { upsertGarmentLabel } from './form-writers';
-import { LABEL_BOM_SECTION, pickLabelMaterial, removeLabelWithLine } from './label-bom';
+import {
+  LABEL_BOM_SECTION,
+  pickLabelMaterial,
+  removeLabelWithLine,
+  takeLabelMaterialOff,
+} from './label-bom';
 import { LabelFilePicker } from './label-file-picker';
 import type { FormGarmentLabel } from './labels-schema';
 import type { TechCardFormData } from './schema';
@@ -744,15 +749,19 @@ export function SewnLabelRow({
           section={LABEL_BOM_SECTION}
           value={wireInt(line?.materialId)}
           includeArchived
-          clearable={false}
           title='material'
           onPick={(picked) => {
             setMaterialPicker(false);
-            if (picked)
-              pickLabelMaterial(getValues, setValue, labelKey, picked, {
-                source: 'stock',
-                kind,
-              });
+            if (!picked) {
+              takeLabelMaterialOff(getValues, setValue, labelKey);
+              return;
+            }
+            // The row may still be virtual: its born facts land first, then the line and the source.
+            patch({});
+            pickLabelMaterial(getValues, setValue, labelKey, picked, {
+              source: 'stock',
+              kind,
+            });
           }}
           onClose={() => setMaterialPicker(false)}
         />

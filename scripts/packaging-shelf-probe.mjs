@@ -7,7 +7,7 @@
 //   C shelf filter, new item takes the filter's colourway, remove
 //   D packed: ships on hanger / folded, fold select, packed size
 //   E the form value and the card write payload (mapFormToTechCardInsert, the one the save sends)
-//   F packaging recipe block still renders, 375 px has no horizontal scroll
+//   F packaging recipe block is gone, 375 px has no horizontal scroll
 //   G PDF 05b: order, colour column only when something differs, red missing mark, both orientations
 //     fit, stress card flows, printed page count
 //
@@ -757,7 +757,7 @@ if (exitSetup) {
 
   await step(page, 'F', async () => {
     const recipe = page.locator('[data-recipe-block]');
-    ck((await recipe.count()) === 1 && (await recipe.locator('*').count()) > 0, 'F recipe block renders');
+    ck((await recipe.count()) === 0, 'F recipe block is gone');
     await page.mouse.move(0, 0);
     await page.screenshot({ path: join(OUT, 'shelf-desktop.png'), fullPage: true });
     const d = await noHScroll(page);

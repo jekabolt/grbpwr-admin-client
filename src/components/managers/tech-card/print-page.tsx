@@ -20,7 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { BackLink, Button, Pill, Select, Text, ViewSwitch, type ViewSwitchOption } from 'ui';
 import { TechPackDocument } from './components/tech-pack-document';
-import { usePackagingRecipe, useStyleAssembly } from './components/useAssemblyPacking';
+import { useStyleAssembly } from './components/useAssemblyPacking';
 import { TechpackDocument } from './techpack/document';
 import { gapsToClientFindings } from './techpack/gap-findings';
 import type { Gap } from './techpack/gaps';
@@ -108,20 +108,15 @@ export function TechCardPrint() {
   // (the per-scope QR codes of the patterns section), which the editor's hook deliberately drops.
   const { data: printData, isLoading, isError } = useTechCardPrint(numId);
   const techCard = printData?.techCard;
-  // #71 root cause: the on-garment assembly bill (labels/tags) and the packaging recipe each
-  // live behind their own per-style RPC — GetTechCard alone (above) never returns them, so the
-  // printed pack had nothing to render for either section no matter what TechPackDocument did
-  // with the data. Fetch both here, alongside the tech card, and hand them down.
+  // #71 root cause: the on-garment assembly bill (labels/tags) lives behind its own per-style
+  // RPC — GetTechCard alone (above) never returns it, so the printed pack had nothing to render for
+  // that section no matter what TechPackDocument did with the data. Fetch it here, alongside the
+  // tech card, and hand it down.
   const {
     data: assemblyData,
     isLoading: assemblyLoading,
     isError: assemblyError,
   } = useStyleAssembly(numId ?? 0);
-  const {
-    data: packagingRecipeData,
-    isLoading: recipeLoading,
-    isError: recipeError,
-  } = usePackagingRecipe();
 
   // Прогон — только когда он запрошен. Скоуп на партию даёт документу тираж, размеры и
   // (в Ф5) ревизию, по которой партия кроится.
@@ -199,7 +194,6 @@ export function TechCardPrint() {
   const { ready, degraded } = usePrintReady([
     { label: 'tech card', status: depStatus(isLoading, isError) },
     { label: 'on-garment assembly', status: depStatus(assemblyLoading, assemblyError) },
-    { label: 'packaging recipe', status: depStatus(recipeLoading, recipeError) },
     ...(!releaseId
       ? [{ label: 'construction audit', status: depStatus(audit.isLoading, audit.isError) }]
       : []),
@@ -411,7 +405,6 @@ export function TechCardPrint() {
               techCard={snapshot ?? techCard}
               scope={scope}
               assembly={assemblyData?.items ?? []}
-              packagingRecipe={packagingRecipeData?.items ?? []}
               patternViewerToken={printData?.patternViewerToken ?? ''}
               onDataStatus={setDocDeps}
               cutPlan={cutPlanError ? undefined : cutPlan}
