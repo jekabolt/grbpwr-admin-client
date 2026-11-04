@@ -1095,7 +1095,7 @@ function CutStripEditor({
     })
     .filter((item) => !!item.value);
   if (strip.seamKey && !seamItems.some((item) => item.value === strip.seamKey)) {
-    seamItems.push({ value: strip.seamKey, label: strip.seamKey });
+    seamItems.push({ value: strip.seamKey, label: 'seam missing' });
   }
 
   const effectiveStrip: CutStrip = {
