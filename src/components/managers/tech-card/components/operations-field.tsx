@@ -1352,7 +1352,9 @@ function OperationsHeaderWarnings({
   }>;
   const garmentLabels = (useWatch({ control, name: 'garmentLabels' }) ?? []) as Array<{
     key?: string;
+    kind?: string;
     bomItemId?: number;
+    bomLineKey?: string;
   }>;
   const total = operations.length;
   // An empty `work` is the only «not named»: the wire and the schema already carry it as a string.
@@ -1372,17 +1374,24 @@ function OperationsHeaderWarnings({
       : [];
   // A label line no step sews on: that work is in neither the route nor the SAM. Not part of offStep
   // because a tag or a sticker sits in the same section and is never sewn.
-  const notSewnBomIds = new Set(
-    garmentLabels
-      .filter((l) => NOT_SEWN_GARMENT_LABELS.has(l.key ?? ''))
-      .map((l) => l.bomItemId ?? 0),
+  const notSewnLabels = garmentLabels.filter((label) =>
+    NOT_SEWN_GARMENT_LABELS.has(label.kind?.trim() || label.key?.trim() || ''),
+  );
+  const notSewnBomIds = new Set(notSewnLabels.map((label) => label.bomItemId ?? 0));
+  const notSewnBomKeys = new Set(
+    notSewnLabels.map((label) => label.bomLineKey?.trim() || '').filter(Boolean),
   );
   const labelsOffRoute =
     total > 0
       ? bomItems.filter((b) => {
           if ((b.section ?? '') !== LABEL_SECTION) return false;
-          if (NOT_SEWN_LABEL_KINDS.has(b.kind ?? '') || notSewnBomIds.has(b.id ?? 0)) return false;
           const key = b.lineKey?.trim();
+          if (
+            NOT_SEWN_LABEL_KINDS.has(b.kind ?? '') ||
+            notSewnBomIds.has(b.id ?? 0) ||
+            (!!key && notSewnBomKeys.has(key))
+          )
+            return false;
           return !key || !attachedKeys.has(key);
         })
       : [];
