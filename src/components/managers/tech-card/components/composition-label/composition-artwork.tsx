@@ -268,7 +268,10 @@ export function CompositionArtwork({
   const sizeName = axes.sizes.find((s) => s.id === cell?.sizeId)?.label ?? '';
 
   return (
-    <div className='flex flex-wrap items-start gap-x-8 gap-y-4' data-artwork-cells=''>
+    <div
+      className='grid grid-cols-[minmax(0,1fr)] items-start gap-4 md:grid-cols-[auto_minmax(0,1fr)] md:gap-8'
+      data-artwork-cells=''
+    >
       <div className='overflow-x-auto'>
         <table className='border-separate border-spacing-1 text-micro tabular-nums'>
           <thead>
@@ -319,7 +322,7 @@ export function CompositionArtwork({
       </div>
       {cell ? (
         <div
-          className='flex min-w-0 flex-1 flex-col gap-1.5 border-l border-hairline pl-8'
+          className='flex min-w-0 flex-col gap-1.5 border-t border-hairline pt-4 md:border-t-0 md:border-l md:pt-0 md:pl-8'
           data-artwork-panel={`${cell.colorwayId}:${cell.sizeId}`}
         >
           <Text size='micro' className='uppercase'>

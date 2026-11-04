@@ -363,7 +363,7 @@ export function PrintCompositionModal({
                               name={`print-qty-${c.id}-${s.id}`}
                               type='number'
                               min={0}
-                              className='w-14 text-right'
+                              className='ml-auto w-14 text-right'
                               aria-label={`${c.colourName} ${s.label}`}
                               placeholder='0'
                               value={toQty(base[c.id]?.[s.id]) || ''}
