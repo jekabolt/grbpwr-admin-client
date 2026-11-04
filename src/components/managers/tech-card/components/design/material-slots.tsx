@@ -1200,7 +1200,7 @@ function CutStripEditor({
                         srLabel
                         maxDecimals={0}
                         placeholder={cut == null ? '' : String(cut)}
-                        value={mode === 'one_length' ? cut ?? '' : undefined}
+                        {...(mode === 'one_length' ? { value: cut ?? '' } : {})}
                         disabled={readOnly || mode === 'one_length'}
                         /* Approved mockup: bold means this size is a manual override. */
                         className={cn(
