@@ -92,6 +92,9 @@ const mediaFromUrl = (url?: string): common_MediaFull | undefined =>
       } as common_MediaFull)
     : undefined;
 
+const kindWord = (key?: string): string =>
+  kindLabel(packagingItemKinds, key).replaceAll('_', ' ');
+
 const colourHex = (ref?: common_AdminColorwayRef): string =>
   ref?.devHex || ref?.colours?.[0]?.hex || '';
 
@@ -219,7 +222,7 @@ function ItemDetail({
     <div className='mt-4 border-t border-hairline pt-4'>
       <div className='flex items-center gap-2'>
         <Text size='control' tracking='label' className='truncate uppercase'>
-          {item.pickedName || kindLabel(packagingItemKinds, item.key) || 'item'}
+          {item.pickedName || kindWord(item.key) || 'item'}
         </Text>
         <Close
           className='ml-auto'
@@ -689,12 +692,15 @@ export function PackagingShelf({
               <Tile
                 key={`${index}-${item.key}-${item.materialId ?? 0}-${item.auxTechCardId ?? 0}`}
                 media={<ItemMedia item={item} />}
-                name={item.pickedName || kindLabel(packagingItemKinds, item.key) || 'item'}
-                sub={`${kindLabel(packagingItemKinds, item.key) || item.key || 'item'} · ${item.qtyPerGarment ?? 1}/${item.perOrder ? 'order' : 'garment'}`}
+                name={item.pickedName || kindWord(item.key) || 'item'}
+                sub={kindWord(item.key) || 'item'}
                 selected={selectedIndex === index}
                 onClick={() => setSelectedIndex(selectedIndex === index ? null : index)}
-                title={item.pickedName || item.key}
+                title={item.pickedName || kindWord(item.key)}
               >
+                <Text size='micro' variant='label'>
+                  {item.qtyPerGarment ?? 1} / {item.perOrder ? 'order' : 'garment'}
+                </Text>
                 {limited && (
                   <Text size='micro' variant='label' className='mt-1 truncate'>
                     {limited}
@@ -713,7 +719,7 @@ export function PackagingShelf({
               dashed
               name='+ item'
               onClick={() => setPickerOpen(true)}
-              className='min-h-24 justify-center'
+              className='min-h-24 items-center justify-center'
             />
           )}
         </Tiles>
