@@ -82,6 +82,9 @@ export function derivePackaging(techCard: common_TechCard, sink?: GapSink, t: Pd
   return {
     items,
     showColour: items.some((item) => !item.allColours),
+    showSize: items.some((item) => item.size),
+    showHow: items.some((item) => item.how),
+    showNote: items.some((item) => item.note),
     missing,
     packed: {
       ships: clean(packaging?.foldingMethod),
