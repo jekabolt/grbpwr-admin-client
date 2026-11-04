@@ -31,6 +31,7 @@ import { unitDisplayName } from 'lib/assembly-unit-name';
 import { Chip, ChipRow, Text, ViewSwitch, FoldCaret } from 'ui';
 
 import { ClothSwatch } from './cloth-hatch';
+import { StripTileFace } from './cut-strips/strip-tile';
 import type { FoundPiece } from './nesting/dxf-geometry';
 import { pieceRefKey } from './piece-block-refs';
 import {
@@ -153,6 +154,8 @@ function activate(fn: () => void) {
 type ShelfPiece = {
   lineKey: string;
   name: string;
+  /** Отрезной материал: плитка без контура и без ткани. */
+  strip?: { qty: number };
   cloth: PieceCloth;
   /** Ключ узла, съевшего деталь; `null` — деталь на столе. */
   into: string | null;
@@ -162,6 +165,8 @@ type ShelfPiece = {
 type ShelfGroup = {
   key: string;
   pieces: ShelfPiece[];
+  /** Группа отрезных материалов в режиме cloth: у них нет ткани, и под `no cloth` им не место. */
+  strips?: boolean;
   state?: PieceClothState;
   article?: PieceClothArticle;
   /** `null` = ведущая группа `on the table`. */
@@ -194,7 +199,7 @@ export function AssemblyShelf({
   onTilePointerDown,
   frozen,
 }: {
-  pieces: { lineKey: string; name: string }[];
+  pieces: { lineKey: string; name: string; strip?: { qty: number } }[];
   pieceShapes: PieceShapeMap | undefined;
   pieceClothByColorway: { label: string; map: Map<string, PieceCloth> }[];
   colorwayIndex: number;
@@ -240,6 +245,7 @@ export function AssemblyShelf({
       pieces.map((p) => ({
         lineKey: p.lineKey,
         name: p.name,
+        ...(p.strip ? { strip: p.strip } : {}),
         // ДВА ПРОСТРАНСТВА КЛЮЧЕЙ, и путать их нельзя: ткань ключуется СЫРЫМ `lineKey`, контур
         // чертежа — `pieceRefKey(lineKey)`. Перепутанные, они дают пустую штриховку при живом
         // рецепте, ничего не сломав на глаз.
@@ -256,7 +262,8 @@ export function AssemblyShelf({
   // `unsorted` — те, у кого строка есть, секция рулонная, а назначение не поставлено. Слить их
   // значило бы заставить аудит врать в обе стороны сразу.
   const onTable = rows.filter((r) => r.into === null).length;
-  const withoutCloth = rows.filter((r) => r.cloth.state === 'unbound').length;
+  const cutCount = rows.filter((r) => !r.strip).length;
+  const withoutCloth = rows.filter((r) => !r.strip && r.cloth.state === 'unbound').length;
   const unsorted = rows.filter((r) => r.cloth.state === 'unsorted').length;
 
   /**
@@ -273,6 +280,7 @@ export function AssemblyShelf({
     const sign = (cw: { map: Map<string, PieceCloth> }, lineKey: string) =>
       clothGroupKey(cw.map.get(lineKey) ?? NO_CLOTH);
     return pieces.filter((p) => {
+      if (p.strip) return false;
       const first = sign(pieceClothByColorway[0], p.lineKey);
       return pieceClothByColorway.some((cw) => sign(cw, p.lineKey) !== first);
     }).length;
@@ -353,7 +361,9 @@ export function AssemblyShelf({
     // заголовок различает их именем. Свернуть группу по слоту без пина значило бы подписать её
     // чужим артикулом.
     const byKey = new Map<string, ShelfGroup>();
+    const stripped = visible.filter((r) => r.strip);
     for (const r of visible) {
+      if (r.strip) continue;
       const key = clothGroupKey(r.cloth);
       const bucket = byKey.get(key);
       if (bucket) bucket.pieces.push(r);
@@ -361,7 +371,10 @@ export function AssemblyShelf({
     }
     // Внутри одного состояния группы идут в порядке первого появления — тем же правилом, что узлы.
     const seen = [...byKey.values()];
-    return CLOTH_GROUP_ORDER.flatMap((s) => seen.filter((g) => g.state === s));
+    return [
+      ...CLOTH_GROUP_ORDER.flatMap((s) => seen.filter((g) => g.state === s)),
+      ...(stripped.length ? [{ key: 'strips', strips: true, pieces: stripped }] : []),
+    ];
   }, [visible, axis, unitOrder]);
 
   // --- органы шапки -----------------------------------------------------------------------------
@@ -440,7 +453,7 @@ export function AssemblyShelf({
               className='min-w-0 shrink truncate tabular-nums'
               title='what the shelf holds: how many pieces the card declares, how many are still on the table, and the two kinds of unanswered cloth'
             >
-              — {pieces.length} total · {onTable} on the table · {withoutCloth} without cloth ·{' '}
+              — {cutCount} total · {onTable} on the table · {withoutCloth} without cloth ·{' '}
               {unsorted} unsorted
               {differByColourway > 0 ? ` · ${differByColourway} differ by colourway` : ''}
             </Text>
@@ -653,6 +666,14 @@ function GroupHead({
 }) {
   const count = `${group.pieces.length} ${group.pieces.length === 1 ? 'piece' : 'pieces'}`;
 
+  if (group.strips) {
+    return (
+      <Head title='cut to length'>
+        <span className='uppercase'>cut to length</span>
+      </Head>
+    );
+  }
+
   if (group.unitKey !== undefined) {
     if (group.unitKey === null) {
       return (
@@ -750,11 +771,13 @@ function ShelfTile({
   const intoName = piece.into
     ? unitNameOf(piece.into).trim() || unitDisplayName({ key: piece.into })
     : '';
-  const second =
-    axis === 'unit' ? tileClothWord(piece.cloth.state) : intoName ? `▣ ${intoName}` : 'free';
+  const clothWord = piece.strip ? '\u00a0' : tileClothWord(piece.cloth.state);
+  const second = axis === 'unit' ? clothWord : intoName ? `▣ ${intoName}` : 'free';
   const where = intoName ? `in ▣ ${intoName}` : 'on the table';
   const title = eligible
-    ? `${piece.name} — ${clothPhrase(piece.cloth)} — ${where}`
+    ? piece.strip
+      ? `${piece.name} — ${where}`
+      : `${piece.name} — ${clothPhrase(piece.cloth)} — ${where}`
     : `${piece.name} — not on the frontier of step ${addMode?.stepLabel ?? ''}: it has already gone into a unit`;
 
   return (
@@ -782,18 +805,23 @@ function ShelfTile({
       <div
         className={cn(
           'flex items-center justify-center overflow-hidden border border-borderColor transition-colors',
+          piece.strip && 'border-textColor',
           picked && 'border-textColor outline outline-2 outline-offset-2 outline-textColor',
           eligible && !picked && 'hover:border-textColor',
         )}
         style={{ width: SHELF_BOX.w, height: SHELF_BOX.h }}
       >
-        <PieceTile
-          found={found}
-          name={piece.name}
-          cloth={piece.cloth}
-          pxBox={SHELF_BOX}
-          className='size-full'
-        />
+        {piece.strip ? (
+          <StripTileFace name={piece.name} qty={piece.strip.qty} className='size-full' />
+        ) : (
+          <PieceTile
+            found={found}
+            name={piece.name}
+            cloth={piece.cloth}
+            pxBox={SHELF_BOX}
+            className='size-full'
+          />
+        )}
       </div>
       <span className='block truncate text-nano uppercase leading-[1.35] tracking-pill text-labelColor'>
         {second}

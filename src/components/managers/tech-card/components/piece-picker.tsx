@@ -2,6 +2,7 @@ import { cn } from 'lib/utility';
 import { useMemo, useState } from 'react';
 import { useWatch } from 'react-hook-form';
 import { Chip, ChipRow, GenericPopover, Text } from 'ui';
+import { stripRefsOf, type CutStripLike } from './cut-strips/strip-pieces';
 import { PieceShape, type FoundPiece } from './nesting/dxf-geometry';
 
 // A cut piece a norm or an operation can point at. `lineKey` is the stable client-minted ULID the
@@ -11,7 +12,12 @@ import { PieceShape, type FoundPiece } from './nesting/dxf-geometry';
 // Кратности «×N на изделие» здесь нет НАМЕРЕННО: число считается по чертежу (модалка сопоставления
 // DXF), спрашивать о нём человека не о чем — а показанное в списке ВЫБОРА оно только приглашает
 // спорить с чертежом. На бумаге (тех-пак, наряд, кат-лист) число остаётся: по нему кроят.
-export type PieceRef = { lineKey: string; name: string };
+export type PieceRef = {
+  lineKey: string;
+  name: string;
+  /** Set on a cut strip, which a step takes like a piece but which nothing cuts from cloth. */
+  strip?: { qty: number };
+};
 
 export const normalizePieceName = (name: string) => name.trim().toLowerCase();
 
@@ -33,6 +39,21 @@ export function useFormPieces(): PieceRef[] {
           name: p.name?.trim() || 'unnamed',
         })),
     [raw],
+  );
+}
+
+// What a step can take: the pieces, then the cut strips. Only the assembly surfaces read this; the
+// colourway recipe, the issues and the sketch keep `useFormPieces`, since a strip has no cloth to
+// assign and no pattern to mark up.
+export function useFormAssemblyPieces(): PieceRef[] {
+  const pieces = useFormPieces();
+  const strips = useWatch({ name: 'cutStrips' }) as readonly CutStripLike[] | undefined;
+  const bomItems = useWatch({ name: 'bomItems' }) as
+    | readonly { lineKey?: string | null; name?: string | null }[]
+    | undefined;
+  return useMemo(
+    () => (strips?.length ? [...pieces, ...stripRefsOf(strips, bomItems ?? [])] : pieces),
+    [pieces, strips, bomItems],
   );
 }
 

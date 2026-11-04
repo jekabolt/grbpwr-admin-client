@@ -13,7 +13,7 @@ import { operationHeading } from './operation-options';
 import type { WorkCatalog } from './operation-work';
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
 import { pieceRefKey } from './piece-block-refs';
-import { PieceRef, useFormPieces } from './piece-picker';
+import { PieceRef, useFormAssemblyPieces } from './piece-picker';
 import { PieceSilhouette, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
 import { unitDisplayName } from 'lib/assembly-unit-name';
@@ -361,7 +361,7 @@ function UnitStepRow({
   const inputKeys = (useWatch({ control, name: `operations.${index}.inputKeys` }) ??
     []) as string[];
 
-  const allPieces = useFormPieces();
+  const allPieces = useFormAssemblyPieces();
   const linkedPieces = inputKeys
     .map((k) => allPieces.find((pc) => pc.lineKey === k))
     .filter((p): p is PieceRef => !!p);

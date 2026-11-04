@@ -116,6 +116,7 @@ type PanelResult = SkeletonApplyResult & {
 };
 import { pieceRefKey } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
+import { stripRefsOf, type CutStripLike } from './cut-strips/strip-pieces';
 import { PieceTile } from './piece-silhouette';
 import { toPurposeEnum, type TechCardFormData } from './schema';
 import type { PieceShapes } from './use-piece-shapes';
@@ -584,6 +585,7 @@ function AssemblySkeletonPanel({
   const operations = (useWatch<TechCardFormData>({ name: 'operations' }) ?? []) as NonNullable<
     TechCardFormData['operations']
   >;
+  const cutStrips = useWatch({ name: 'cutStrips' }) as readonly CutStripLike[] | undefined;
   const aliases = (useWatch<TechCardFormData>({ name: 'pieceDxfAliases' }) ??
     []) as InferenceAlias[];
   const park = useWatch<TechCardFormData>({ name: 'construction.equipmentDefaults' }) as
@@ -631,8 +633,11 @@ function AssemblySkeletonPanel({
     const m = new Map<string, string>();
     for (const p of formPieces ?? [])
       if (p.lineKey) m.set(p.lineKey, readablePieceName(p.name?.trim() ?? '') || p.lineKey);
+    // Known to the sweep and by name: an existing step may take a strip.
+    for (const strip of stripRefsOf(cutStrips ?? [], bomItems ?? []))
+      m.set(strip.lineKey, strip.name);
     return m;
-  }, [formPieces]);
+  }, [formPieces, cutStrips, bomItems]);
   const pieceKeys = useMemo(() => new Set(pieceName.keys()), [pieceName]);
   const sweepPieces = useMemo(
     () => [...pieceName].map(([lineKey, name]) => ({ lineKey, name })),
