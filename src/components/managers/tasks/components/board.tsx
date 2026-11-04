@@ -27,6 +27,9 @@ const PHONE_STATUS_KEY = 'grbpwr.kanban.phoneStatus';
 const LAND_MS = 180;
 const LAND_EASE = 'cubic-bezier(.2,.8,.2,1)';
 const MEASURING = { droppable: { strategy: MeasuringStrategy.Always } };
+// The default starts at a fifth of the board's width, which slides the board under a card still
+// held over a middle lane. Only the edge itself should scroll.
+const AUTO_SCROLL = { threshold: { x: 0.08, y: 0.1 } };
 const PHONE_STATUS_LABEL: Record<TaskStatus, string> = {
   TASK_STATUS_UNKNOWN: 'unknown',
   TASK_STATUS_BACKLOG: 'backlog',
@@ -329,6 +332,7 @@ export function Board({
       sensors={sensors}
       collisionDetection={cursorThenNearest}
       measuring={MEASURING}
+      autoScroll={AUTO_SCROLL}
       onDragStart={handleDragStart}
       onDragMove={followCursor}
       onDragOver={followCursor}
