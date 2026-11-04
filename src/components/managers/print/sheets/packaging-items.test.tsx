@@ -116,6 +116,8 @@ describe('classic packaging items sheet', () => {
         summary={null}
         hasColorway
         labels={[]}
+        bomItems={[]}
+        artwork={[]}
         items={items}
         urlOf={() => ''}
         colourName={(id) => (id === 2 ? 'white' : '')}

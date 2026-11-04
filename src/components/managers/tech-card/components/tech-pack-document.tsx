@@ -140,7 +140,11 @@ import { GrbpwrMark } from 'ui';
 import { cutStripsOfCard, stripRefsOf } from './cut-strips/strip-pieces';
 import { detailKeyLabel } from './tech-card-options';
 import { techCardMarkerViewerPath } from 'constants/routes';
-import { TechPackLabelSheets, useTechPackCompositionLabel } from './tech-pack-labels';
+import { artworkScope, labelArtworkTiles } from 'components/managers/print/sheets/label-facts';
+import { useSizeOrdering } from 'components/managers/model/components/use-size-systems';
+import { cardLabelAxes } from './card-label-axes';
+import { isCompositionLabel } from './sewn-label-model';
+import { TechPackLabelSheets, useCareArt, useTechPackCompositionLabel } from './tech-pack-labels';
 import { labelMediaOf } from '../care-labels/label-media';
 // cutSymmetryUnanswered — предикат, а не текст: он одинаков для экрана и бумаги, и дублировать
 // его в печатном слое значило бы завести второе определение «вопрос цеху не отвечен».
@@ -852,6 +856,12 @@ export function TechPackDocument({
   }, [techCard.careEntries, dictionary?.careSymbols]);
 
   const careVocabulary = useCareVocabulary();
+  const careArt = useCareArt();
+  const orderSizes = useSizeOrdering();
+  const labelAxes = useMemo(
+    () => cardLabelAxes(techCard, dictionary, orderSizes),
+    [techCard, dictionary, orderSizes],
+  );
   const { data: models, isLoading: modelsLoading, isError: modelsError } = useAllModels();
   // Rev.N (task: header proof-of-version) — techCard.id === styleId (R1), same call ReleasesField
   // already makes; free once the constructor tab warmed the cache.
@@ -3198,6 +3208,24 @@ export function TechPackDocument({
         summary={labelSummary}
         hasColorway={labelColorwayId > 0}
         labels={tc.garmentLabels ?? []}
+        bomItems={tc.bomItems ?? []}
+        artwork={labelArtworkTiles({
+          rows: (tc.garmentLabels ?? []).filter((label) => !isCompositionLabel(label.key)),
+          axes: labelAxes,
+          ...artworkScope(
+            // A paper printed for a run is about that run's colours, even with none picked.
+            printScope.colorway
+              ? [wireInt(printScope.colorway.colorwayId)]
+              : [
+                  ...new Set(
+                    (printScope.run?.run?.lines ?? [])
+                      .map((line) => wireInt(line.productId))
+                      .filter((id) => id > 0),
+                  ),
+                ],
+            scopedSizeIds(printScope),
+          ),
+        })}
         items={(tc.packagingItems ?? []).filter((item) =>
           packagingItemInScope(
             item,
@@ -3211,10 +3239,7 @@ export function TechPackDocument({
           const m = labelMediaOf(id, techCard.resolvedLabelMedia, libraryMap)?.media;
           return m?.compressed?.mediaUrl || m?.fullSize?.mediaUrl || m?.thumbnail?.mediaUrl || '';
         }}
-        careArt={(code) => {
-          const voc = careVocabulary.byCode[code];
-          return { img: voc?.img ?? CARE_ARTWORK[code], name: voc?.name ?? code };
-        }}
+        careArt={careArt}
         showLabels={b('sew') || b('qc')}
         showItems={b('qc')}
       />

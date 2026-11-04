@@ -114,6 +114,40 @@ const techCard = {
       { number: 1, part: 'collar', description: 'top stitch 2 mm', mediaId: 0 },
       { number: 2, part: 'cuff', description: 'button placement' },
     ],
+    // Лейблы всех четырёх форм: цвет × размер, размер, один файл, ни одного файла.
+    garmentLabels: [
+      {
+        key: 'size',
+        calloutNumber: 2,
+        artworkPerSize: true,
+        placement: 'back neck',
+        qtyPerGarment: 1,
+        note: 'smoke note',
+        files: [1, 2, 3].map((sizeId) => ({
+          sizeId,
+          publicUrl: `https://cdn.smoke.test/size-${sizeId}.pdf`,
+        })),
+      },
+      {
+        key: 'composition',
+        calloutNumber: 1,
+        bomLineKey: 'B1',
+        placement: 'left side seam',
+        qtyPerGarment: 1,
+        files: [
+          { colorwayId: 10, sizeId: 1, publicUrl: 'https://cdn.smoke.test/comp-10-1.pdf' },
+          { colorwayId: 10, sizeId: 2, publicUrl: 'https://cdn.smoke.test/comp-10-2.pdf' },
+          { colorwayId: 11, sizeId: 2, publicUrl: 'https://cdn.smoke.test/comp-11-2.pdf' },
+        ],
+      },
+      {
+        key: 'brand',
+        placement: 'back neck',
+        qtyPerGarment: 1,
+        files: [{ publicUrl: 'https://cdn.smoke.test/brand.pdf' }],
+      },
+      { key: 'hangtag', placement: 'waist', qtyPerGarment: 1, files: [] },
+    ],
     pieces: [
       {
         lineKey: 'P1',

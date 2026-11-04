@@ -18,16 +18,31 @@ import {
 } from 'components/managers/print/labels';
 import { KV, Nothing, Sheet, TD, TH } from 'components/managers/print/sheet';
 import { cutPlanAuthoritative } from 'components/managers/print/labels';
+import {
+  artworkScope,
+  labelArtworkTiles,
+  labelFacts,
+} from 'components/managers/print/sheets/label-facts';
+import { RunLabelsSheet } from 'components/managers/print/sheets/labels';
 import { PackagingSheet } from 'components/managers/print/sheets/packaging';
 import {
   packagingItemFacts,
   packagingItemInScope,
 } from 'components/managers/print/sheets/packaging-items';
+import { useMaterials } from 'components/managers/materials/components/useMaterials';
+import { useSizeOrdering } from 'components/managers/model/components/use-size-systems';
+import { cardLabelAxes } from 'components/managers/tech-card/components/card-label-axes';
 import {
   fusingPrintCaption,
   grainlineArrow,
 } from 'components/managers/tech-card/components/piece-codes';
 import { wireInt } from 'components/managers/tech-card/components/schema';
+import { isCompositionLabel } from 'components/managers/tech-card/components/sewn-label-model';
+import {
+  CompositionLabelSheet,
+  useCareArt,
+  useCompositionLabels,
+} from 'components/managers/tech-card/components/tech-pack-labels';
 import { useTechCardReleases } from 'components/managers/tech-card/components/useSamples';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { findInDictionary } from 'lib/features/findInDictionary';
@@ -150,23 +165,6 @@ export function RunPackDocument({
   // карты, десять секунд держал бы кнопку печати заблокированной, а потом печатал плашку «тех-карта
   // не пришла» про запрос, который никто не посылал. Собственным плашкам документа, наоборот,
   // нужен именно isPending: там вопрос «есть ли данные», а не «едут ли они».
-  const depsKey = [
-    techCardLoading,
-    techCardError,
-    laysLoading,
-    laysError,
-    materialLoading,
-    materialError,
-  ].join(',');
-  useEffect(() => {
-    onDataStatus?.([
-      { label: 'tech card', status: depStatus(techCardLoading, techCardError) },
-      { label: 'lays', status: depStatus(laysLoading, laysError) },
-      { label: 'material plan', status: depStatus(materialLoading, materialError) },
-    ]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [depsKey]);
-
   const tc = techCard?.techCard;
 
   // ФИЛЬТР КОЛОРВЕЯ. Применяется к ИСТОЧНИКАМ (линии, кат-лист, настилы, покрытие), а не к
@@ -183,6 +181,47 @@ export function RunPackDocument({
     () => (ins?.lines ?? []).filter((l) => inScope(l.productId, l.outputVariantId)),
     [ins?.lines, scopeColorwayId],
   );
+
+  // Составник на каждый цвет партии. Каталог материалов и полный ответ колорвея — тоже в гейте печати.
+  const runColourIds = useMemo(
+    () => [...new Set(lines.map((l) => wireInt(l.productId)).filter((id) => id > 0))],
+    [lines],
+  );
+  const {
+    data: materialsData,
+    isLoading: materialsLoading,
+    isError: materialsError,
+  } = useMaterials('', true);
+  const { summaries: compositionSummaries, status: compositionStatus } = useCompositionLabels({
+    techCard,
+    colorwayIds: runColourIds,
+    materials: materialsData ? materialsData.materials ?? [] : null,
+    dictionary: dictionary ?? undefined,
+  });
+  const careArt = useCareArt();
+  const orderSizes = useSizeOrdering();
+
+  const depsKey = [
+    techCardLoading,
+    techCardError,
+    laysLoading,
+    laysError,
+    materialLoading,
+    materialError,
+    materialsLoading,
+    materialsError,
+    compositionStatus,
+  ].join(',');
+  useEffect(() => {
+    onDataStatus?.([
+      { label: 'tech card', status: depStatus(techCardLoading, techCardError) },
+      { label: 'lays', status: depStatus(laysLoading, laysError) },
+      { label: 'material plan', status: depStatus(materialLoading, materialError) },
+      { label: 'materials', status: depStatus(materialsLoading, materialsError) },
+      { label: 'colourway', status: compositionStatus },
+    ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [depsKey]);
 
   // Градация карточки, приведённая к числам ОДИН РАЗ. Ниже она трижды сравнивается со множествами
   // размеров, собранными через wireInt (линии прогона, клетки покрытия, кат-лист): сравни строку с
@@ -403,6 +442,46 @@ export function RunPackDocument({
         return { ...facts, colours: facts.colorwayIds.map(colorwayLabel).join(', ') };
       });
   }, [tc?.packagingItems, lines, colorwayLabel]);
+
+  const labelRows = useMemo(() => labelFacts(techCard), [techCard]);
+  // Слово цвета — то же, что в QR-сетке тех-пака: подпись листа и подпись клетки называют цвет одинаково.
+  const labelAxes = useMemo(
+    () => cardLabelAxes(techCard, dictionary, orderSizes),
+    [techCard, dictionary, orderSizes],
+  );
+  const runSizeIds = useMemo(
+    () => [...new Set(lines.map((l) => wireInt(l.sizeId)).filter((id) => id > 0))],
+    [lines],
+  );
+  const artwork = useMemo(
+    () =>
+      labelArtworkTiles({
+        rows: [
+          ...(tc?.garmentLabels ?? []).filter((row) => isCompositionLabel(row.key)),
+          ...(tc?.garmentLabels ?? []).filter((row) => !isCompositionLabel(row.key)),
+        ],
+        axes: labelAxes,
+        callouts: tc?.callouts ?? [],
+        ...artworkScope(runColourIds, runSizeIds),
+        // Строка партии — пара «цвет × размер»: чужая клетка той же партии на этот лист не идёт.
+        inScope: (colorwayId, sizeId) =>
+          lines.some(
+            (l) =>
+              (!colorwayId || wireInt(l.productId) === colorwayId) &&
+              (!sizeId || wireInt(l.sizeId) === sizeId),
+          ),
+      }),
+    [tc?.garmentLabels, tc?.callouts, labelAxes, runColourIds, runSizeIds, lines],
+  );
+  const artworkTitle = [
+    'artwork qr',
+    runColourIds.length === 1
+      ? labelAxes.colorways.find((c) => c.id === runColourIds[0])?.name
+      : '',
+    runSizeIds.length === 1 ? labelAxes.sizes.find((s) => s.id === runSizeIds[0])?.label : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   return (
     <div className='mx-auto max-w-[210mm] bg-white px-8 py-6 text-black'>
@@ -1079,6 +1158,17 @@ export function RunPackDocument({
           </p>
         ))}
       </Sheet>
+
+      {/* ЛЕЙБЛЫ И СОСТАВНИК ПАРТИИ: то, что вшивают именно в этот тираж. QR — только цвета и размеры
+          этой партии. Партия без колорвея (вспомогательная карта) составника не шьёт. */}
+      <RunLabelsSheet rows={labelRows} qrTitle={artworkTitle} tiles={artwork} />
+      {runColourIds.map((id) => (
+        <CompositionLabelSheet
+          key={id}
+          summary={compositionSummaries.find((s) => s.colorway.id === id) ?? null}
+          careArt={careArt}
+        />
+      ))}
 
       {/* УПАКОВКА ПАРТИИ */}
       {/* УПАКОВКА — общий лист (print/sheets/packaging.tsx). Считаемая половина живёт в нём же:
