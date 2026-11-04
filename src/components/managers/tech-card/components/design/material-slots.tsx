@@ -254,9 +254,12 @@ export function MaterialSlots({
     if (!norm) return '';
     const scalar = decimalToInput(norm.norm);
     if (scalar) return scalar;
-    const base = (norm.sizeNorms ?? []).find(
-      (candidate) => wireInt(candidate.sizeId) === wireInt(card?.techCard?.baseSampleSizeId),
-    );
+    // A card with no base size reads the first one, the same size the PDF's step table prints.
+    const sizes = norm.sizeNorms ?? [];
+    const base =
+      sizes.find(
+        (candidate) => wireInt(candidate.sizeId) === wireInt(card?.techCard?.baseSampleSizeId),
+      ) ?? sizes[0];
     return decimalToInput(base?.consumption);
   };
 
@@ -1200,7 +1203,10 @@ function CutStripEditor({
                         value={mode === 'one_length' ? cut ?? '' : undefined}
                         disabled={readOnly || mode === 'one_length'}
                         /* Approved mockup: bold means this size is a manual override. */
-                        className={cn('text-right placeholder:text-textColor', !!manual && 'font-bold')}
+                        className={cn(
+                          'text-right placeholder:text-textColor!',
+                          !!manual && mode !== 'one_length' && 'font-bold',
+                        )}
                       />
                     )}
                   </td>
