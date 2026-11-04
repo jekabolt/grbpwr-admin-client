@@ -15,6 +15,9 @@ function Fact({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
+/** The name gets the room the optional columns leave, by the table's column count. */
+const WHAT_WIDTH: Record<number, string> = { 7: 'w-1/3', 8: 'w-1/4', 9: 'w-1/5', 10: 'w-1/6' };
+
 function ItemsTable({
   model,
   items,
@@ -35,7 +38,7 @@ function ItemsTable({
           <th data-align='left' className='w-24'>
             {t('packaging.item')}
           </th>
-          <th data-align='left' className='w-1/5'>
+          <th data-align='left' className={WHAT_WIDTH[span]}>
             {t('packaging.what')}
           </th>
           <th className='w-8'>{t('common.quantity')}</th>
