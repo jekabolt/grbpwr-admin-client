@@ -1813,9 +1813,9 @@ export function TechPackDocument({
       {printScope.revision.source === 'release' && (
         <p className='mb-3 break-inside-avoid border-2 border-black px-2 py-1 text-control uppercase'>
           frozen: card spec, pieces, operations, BOM (incl. prices), colourway recipes, markers,
-          care, the pattern sheet list. live (not frozen): size chart, on-garment assembly,
-          packaging recipe, article colours from the material catalog, the pattern files behind the
-          QR — the viewer says so if they changed since this revision
+          care, the pattern sheet list. live (not frozen): size chart, on-garment assembly, article
+          colours from the material catalog, the pattern files behind the QR — the viewer says so if
+          they changed since this revision
         </p>
       )}
       {printScope.revision.source === 'live' && latestRelease && (
@@ -3269,11 +3269,7 @@ export function TechPackDocument({
           половина печаталась здесь, а считаемая от тиража — в наряде, двумя вёрстками одного
           предмета. Считаемая часть появляется только при скоупе на партию. */}
       {b('qc') && tc.packaging && (
-        <PackagingSheet
-          title='packaging'
-          packaging={tc.packaging}
-          plannedTotal={batchTotal}
-        />
+        <PackagingSheet title='packaging' packaging={tc.packaging} plannedTotal={batchTotal} />
       )}
 
       {/* COSTING — только внутренний профиль. Бумага профиля `factory` уезжает внешнему
