@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { FileRole, LibraryFile } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
@@ -8,15 +8,14 @@ import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useUploadQueueStore } from 'lib/stores/upload-queue';
 import { notePath, ROUTES, SECTION } from 'constants/routes';
-import { Button, Chip, GenericPopover, Text, Tiles } from 'ui';
+import { Button, Text, Tiles } from 'ui';
 import { FilesDropOverlay } from './components/drop-overlay';
 import { FileCardModal } from './components/file-card-modal';
 import { FileRow, FileRows, FileRowsHeader } from './components/file-row';
-import { FilesRail } from './components/files-rail';
 import {
   AddMenu,
+  FilesFilters,
   FilesHeader,
-  PersonFilter,
   StatusLine,
   type FilesView,
 } from './components/files-toolbar';
@@ -52,13 +51,7 @@ import {
 import { AddFilesToProjectModal } from './components/add-files-modal';
 import { AddFilesTile } from './components/add-files-tile';
 import { FilesSelectionBar } from './components/selection-bar';
-import {
-  MAX_TOPIC_FILTERS,
-  TAP_CHIP,
-  TAP_CHIP_ON,
-  TopicChips,
-  type TopicSelection,
-} from './components/topic-chips';
+import { MAX_TOPIC_FILTERS, type TopicSelection } from './components/topic-chips';
 import { FilesUploadBar } from './components/upload-bar';
 import { NewProjectModal } from './projects/new-project-modal';
 import { useFileSelection } from './hooks/useFileSelection';
@@ -329,9 +322,8 @@ export default function FilesPage() {
   const [addingFiles, setAddingFiles] = useState(false);
   const [rolesDialog, setRolesDialog] = useState(false);
   /**
-   * ДИАЛОГ НОВОГО ПРОЕКТА — У СТРАНИЦЫ. Открывают его из листа проектов (телефон) и из рейла
-   * (десктоп); лист закрывается тем же нажатием, и диалог, смонтированный в нём, умер бы вместе
-   * с ним.
+   * ДИАЛОГ НОВОГО ПРОЕКТА — У СТРАНИЦЫ. Поповер проекта закрывается тем же нажатием, а диалог,
+   * смонтированный внутри него, умер бы вместе с ним.
    */
   const [creatingProject, setCreatingProject] = useState(false);
 
@@ -1078,7 +1070,7 @@ export default function FilesPage() {
   };
 
   return (
-    <div className='flex flex-col gap-gutter lg:flex-row lg:items-start'>
+    <div className='flex flex-col gap-gutter'>
       {/* Диалога выбора файлов у раздела больше нет: кнопка открывает системный выбор, а очередь
           показывает полоса снизу. Поле скрытое — свой вид у него нестилизуемый. */}
       <input
@@ -1086,7 +1078,7 @@ export default function FilesPage() {
         type='file'
         multiple
         hidden
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+        onChange={(e: ChangeEvent<HTMLInputElement>) => {
           const list = Array.from(e.target.files ?? []);
           // Сброс значения — иначе повторный выбор ТОГО ЖЕ файла не поднимет `change`.
           e.target.value = '';
@@ -1094,31 +1086,8 @@ export default function FilesPage() {
         }}
       />
 
-      {/* РЕЙЛ ДЕСКТОПА: проект, темы и человек слева, файлы справа. На телефоне его нет —
-          там проект в заголовке, темы одним рядом, человек в хвосте ряда. */}
-      <FilesRail
-        projects={projects}
-        activeProject={activeProject}
-        projectId={projectId}
-        totalFiles={totalFiles}
-        writable={writable}
-        onProject={onProject}
-        onNewProject={() => setCreatingProject(true)}
-        topics={topics}
-        selected={topicIds}
-        untopiced={untopiced}
-        untopicedCount={untopicedCount}
-        onTopics={onTopics}
-        personId={personId}
-        personRole={personRole}
-        onPerson={(pid) => patch({ personId: pid })}
-        onPersonRole={(r) => patch({ personRole: r })}
-      />
-
       <div className='flex min-w-0 flex-1 flex-col gap-gutter'>
-        {/* ШАПКА — ОДИН БЛОК: заголовок-проект, поиск, «+», ряд тем и строка статуса под
-            волосяной линией. Объяснительных строк больше нет: что выбрано и сколько найдено,
-            говорит строка статуса. */}
+        {/* ШАПКА — ОДИН БЛОК: проект, добавление, поиск, строка фильтров и статус. */}
         <FilesHeader
           title={
             <ProjectSwitch
@@ -1149,43 +1118,22 @@ export default function FilesPage() {
               />
             </>
           }
-          chips={
-            <TopicChips
+          filters={
+            <FilesFilters
               topics={topics}
               selected={topicIds}
               untopiced={untopiced}
               untopicedCount={untopicedCount}
-              onChange={onTopics}
-              lead={
-                personId > 0 && (
-                  <Chip
-                    selected
-                    pressed
-                    className={TAP_CHIP_ON}
-                    onClick={() => patch({ personId: 0 })}
-                    onRemove={() => patch({ personId: 0 })}
-                  >
-                    {personLabel}
-                  </Chip>
-                )
-              }
-              tail={
-                <GenericPopover
-                  title='person'
-                  noTail
-                  triggerProps={{ asChild: true }}
-                  openElement={<Chip className={TAP_CHIP}>person ▾</Chip>}
-                >
-                  <div className='p-2.5'>
-                    <PersonFilter
-                      personId={personId}
-                      personRole={personRole}
-                      onPerson={(pid) => patch({ personId: pid })}
-                      onPersonRole={(r) => patch({ personRole: r })}
-                    />
-                  </div>
-                </GenericPopover>
-              }
+              onTopics={onTopics}
+              personId={personId}
+              personLabel={personLabel}
+              personRole={personRole}
+              onPerson={(pid) => patch({ personId: pid })}
+              onPersonRole={(role) => patch({ personRole: role })}
+              sort={sort}
+              onSort={(next) => patch({ sort: next })}
+              view={view}
+              onView={(next) => patch({ view: next })}
             />
           }
         >
@@ -1195,10 +1143,6 @@ export default function FilesPage() {
             untopiced={untopiced}
             filtered={filtered}
             onReset={resetFilters}
-            sort={sort}
-            onSort={(v) => patch({ sort: v })}
-            view={view}
-            onView={(v) => patch({ view: v })}
             selecting={phone ? selection.selecting : undefined}
             selectedCount={selection.selected.length}
             onToggleSelecting={
