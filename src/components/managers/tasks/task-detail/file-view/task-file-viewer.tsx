@@ -2,13 +2,13 @@ import * as Dialog from '@radix-ui/react-dialog';
 import type { LibraryFile } from 'api/proto-http/admin';
 import { formatBytes } from 'components/managers/files/utils/format';
 import { usePasteFiles } from 'components/managers/media/utils/usePasteFiles';
-import { useMemo, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { Button, Text, Toolbar, ToolbarSpacer } from 'ui';
 import { useTaskFileContent } from '../../hooks/useTasks';
-import { bytesFromBase64, decodeText, sandboxedHtml, taskFileViewOf } from './file-view';
+import { FileContentViewer } from './file-content-viewer';
+import { taskFileViewOf } from './file-view';
+import { sheetSessionKey, useSheetSessions } from './sheet-session';
 import { SheetView } from './sheet-view';
-import { useSheetSessions, sheetSessionKey } from './sheet-session';
-import { Centered } from './sheet-table';
 import { useSheetEditor } from './use-sheet-editor';
 
 /** Просмотр вложения прямо в задаче, на весь экран. Оформление как у читалки PDF в файлах. */
@@ -107,75 +107,39 @@ function PlainViewer({
     file.id ?? 0,
   );
 
-  const parsed = useMemo(() => {
-    if (!data || data.tooLarge) return null;
-    try {
-      return renderable(file, decodeText(bytesFromBase64(data.content)));
-    } catch {
-      return null;
-    }
-  }, [data, file]);
-
-  let body: ReactNode;
-  if (isLoading) {
-    body = <Centered label='loading…' />;
-  } else if (data?.tooLarge) {
-    body = <Centered label='too large' />;
-  } else if (isError) {
-    body = (
-      <Centered label='not opened'>
-        <Button size='xs' variant='secondary' disabled={isFetching} onClick={() => refetch()}>
-          retry
-        </Button>
-      </Centered>
-    );
-  } else {
-    body = parsed ?? <Centered label='not opened' />;
-  }
-
   return (
     <ViewerShell name={name} onClose={onClose}>
-      <Toolbar sticky>
-        <b className='max-w-[34ch] truncate'>{name}</b>
-        <Text size='micro' variant='label' component='span'>
-          {formatBytes(Number(file.sizeBytes ?? 0))}
-        </Text>
-        <ToolbarSpacer />
-        {file.downloadUrl && (
-          <Button asChild size='xs' variant='secondary'>
-            <a href={file.downloadUrl} target='_blank' rel='noopener noreferrer'>
-              download
-            </a>
-          </Button>
+      <FileContentViewer
+        file={file}
+        content={data?.content}
+        tooLarge={data?.tooLarge}
+        isLoading={isLoading}
+        isError={isError}
+        isFetching={isFetching}
+        onRetry={() => refetch()}
+        bodyClassName='min-h-0 flex-1 overflow-auto border border-borderColor bg-bgColor'
+        renderControls={() => (
+          <Toolbar sticky>
+            <b className='max-w-[34ch] truncate'>{name}</b>
+            <Text size='micro' variant='label' component='span'>
+              {formatBytes(Number(file.sizeBytes ?? 0))}
+            </Text>
+            <ToolbarSpacer />
+            {file.downloadUrl && (
+              <Button asChild size='xs' variant='secondary'>
+                <a href={file.downloadUrl} target='_blank' rel='noopener noreferrer'>
+                  download
+                </a>
+              </Button>
+            )}
+            <Dialog.Close asChild>
+              <Button size='xs' variant='secondary'>
+                close
+              </Button>
+            </Dialog.Close>
+          </Toolbar>
         )}
-        <Dialog.Close asChild>
-          <Button size='xs' variant='secondary'>
-            close
-          </Button>
-        </Dialog.Close>
-      </Toolbar>
-      <div className='min-h-0 flex-1 overflow-auto border border-borderColor bg-bgColor'>
-        {body}
-      </div>
-    </ViewerShell>
-  );
-}
-
-function renderable(file: LibraryFile, text: string): ReactNode {
-  if (taskFileViewOf(file.fileName, file.contentType) === 'html') {
-    return (
-      <iframe
-        title={file.fileName ?? 'file'}
-        sandbox=''
-        referrerPolicy='no-referrer'
-        srcDoc={sandboxedHtml(text)}
-        className='block h-full w-full border-0 bg-bgColor'
       />
-    );
-  }
-  return (
-    <pre className='m-0 max-w-[90ch] whitespace-pre-wrap p-3 font-mono text-textBaseSize [overflow-wrap:anywhere]'>
-      {text}
-    </pre>
+    </ViewerShell>
   );
 }

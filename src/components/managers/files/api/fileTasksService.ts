@@ -13,8 +13,4 @@ import { adminService } from 'api/api';
  */
 export const fileTasksService = {
   list: (fileId: number) => adminService.ListLibraryFileTasks({ id: fileId }),
-  attach: (fileId: number, taskId: number) =>
-    adminService.AttachLibraryFileToTask({ fileId, taskId }),
-  detach: (fileId: number, taskId: number) =>
-    adminService.DetachLibraryFileFromTask({ fileId, taskId }),
 };

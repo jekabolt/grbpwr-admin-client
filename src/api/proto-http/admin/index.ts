@@ -5743,6 +5743,17 @@ export type GetLibraryFileResponse = {
   file: LibraryFile | undefined;
 };
 
+export type GetLibraryFileContentRequest = {
+  id: number | undefined;
+};
+
+export type GetLibraryFileContentResponse = {
+  content: string | undefined;
+  // The file is over the viewing ceiling, content is empty. Data rather than an
+  // error: it is an ordinary state of an ordinary file, and it ends in a download.
+  tooLarge: boolean | undefined;
+};
+
 export type ListLibraryFilesRequest = {
   // topic_id filters to one topic; 0 means no topic filter.
   topicId: number | undefined;
@@ -20229,6 +20240,12 @@ export interface AdminService {
   DeleteTaskComment(request: DeleteTaskCommentRequest): Promise<DeleteTaskCommentResponse>;
   // GetLibraryFile returns one file with its topics and freshly minted urls.
   GetLibraryFile(request: GetLibraryFileRequest): Promise<GetLibraryFileResponse>;
+  // GetLibraryFileContent returns the BYTES of a library file, so its card can show
+  // a preview of a file attached to no task. They travel over the RPC because JS
+  // cannot read a presigned url: the bucket has no CORS for the panel. Gated on
+  // files:read, and it refuses exactly what GetLibraryFile refuses: a file the caller
+  // may not see, like an unknown id, is NotFound.
+  GetLibraryFileContent(request: GetLibraryFileContentRequest): Promise<GetLibraryFileContentResponse>;
   // ListLibraryFiles is the grid: a page of files filtered by topic, by "no topic
   // at all", or by a search that matches file names AND topic names.
   // Declared AFTER GET /files/{id} on purpose — same reason as the task routes:
@@ -25151,6 +25168,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetLibraryFile",
       }) as Promise<GetLibraryFileResponse>;
+    },
+    GetLibraryFileContent(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/files/${request.id}/content`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetLibraryFileContent",
+      }) as Promise<GetLibraryFileContentResponse>;
     },
     ListLibraryFiles(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/list`; // eslint-disable-line quotes

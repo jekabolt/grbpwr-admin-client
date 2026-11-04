@@ -17,16 +17,9 @@ export const ACCESS_LEVELS: AccessLevel[] = ['team', 'people', 'link'];
  * остальных отовсюду — из сетки, из поиска, из счётчиков тем и из чужой задачи.
  */
 export const ACCESS_LEVEL_TITLE: Record<AccessLevel, string> = {
-  team: 'the whole team',
-  people: 'only these people',
+  team: 'whole team',
+  people: 'these people',
   link: 'by link',
-};
-
-export const ACCESS_LEVEL_HINT: Record<AccessLevel, string> = {
-  team: 'everyone who has access to the “files” section. this is how a file is open by default.',
-  people:
-    "the rest won't see the file anywhere: not in a topic, not in search, not in the counters, not in the task it is attached to.",
-  link: 'anyone with the link, without signing in to the admin. the link can be forwarded on — and it will be.',
 };
 
 /**
