@@ -2,16 +2,14 @@ import { useSearchParams } from 'react-router-dom';
 import { Text } from 'ui';
 import { cn } from 'lib/utility';
 import { CatalogTab } from './components/catalog-tab';
-import { PackagingBomTab } from './components/packaging-bom-tab';
 import { StockTab } from './components/stock-tab';
 import { MovementsTab } from './components/movements-tab';
 
-type Tab = 'catalog' | 'stock' | 'movements' | 'packaging';
+type Tab = 'catalog' | 'stock' | 'movements';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'catalog', label: 'catalog' },
   { id: 'stock', label: 'stock' },
   { id: 'movements', label: 'movements' },
-  { id: 'packaging', label: 'packaging' },
 ];
 
 // /materials is three views of one nomenclature: the catalog (articles + prices), the warehouse
@@ -68,8 +66,6 @@ export function Materials() {
         <StockTab />
       ) : tab === 'movements' ? (
         <MovementsTab />
-      ) : tab === 'packaging' ? (
-        <PackagingBomTab />
       ) : (
         <CatalogTab />
       )}

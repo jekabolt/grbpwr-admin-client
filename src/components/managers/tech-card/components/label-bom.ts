@@ -2,13 +2,19 @@ import type { common_Material } from 'api/proto-http/admin';
 import type { UseFormGetValues, UseFormSetValue } from 'react-hook-form';
 
 import { bornMaterialBomLine, materialLineFields } from './bom-material-line';
-import { releaseBomLineRefs, removeGarmentLabel, upsertGarmentLabel } from './form-writers';
+import {
+  releaseBomLineRefs,
+  removeGarmentLabel,
+  removePackagingItem,
+  upsertGarmentLabel,
+} from './form-writers';
 import type { FormGarmentLabel, FormPackagingItem } from './labels-schema';
 import type { TechCardFormData } from './schema';
 import { labelBomLine } from './sewn-label-model';
 import { wireInt } from './wire-int';
 
 export const LABEL_BOM_SECTION = 'TECH_CARD_BOM_SECTION_LABEL' as const;
+const PACKAGING_BOM_SECTION = 'TECH_CARD_BOM_SECTION_PACKAGING' as const;
 
 type BomItems = NonNullable<TechCardFormData['bomItems']>;
 type BomLine = BomItems[number];
@@ -58,13 +64,16 @@ function lineHasAnotherOwner(
   labels: readonly FormGarmentLabel[],
   packaging: readonly FormPackagingItem[],
   bomItems: readonly BomLine[],
+  exceptPackagingIndex?: number,
 ): boolean {
   const labelsShare = labels.some((row) => {
     if (sameKey(row.key, labelKey)) return false;
     return sameLine(labelBomLine(row, bomItems), line);
   });
   if (labelsShare) return true;
-  return packaging.some((row) => sameLine(labelBomLine(row, bomItems), line));
+  return packaging.some(
+    (row, index) => index !== exceptPackagingIndex && sameLine(labelBomLine(row, bomItems), line),
+  );
 }
 
 /**
@@ -192,4 +201,99 @@ export function removeLabelWithLine(
   setValue('bomItems', current.filter((candidate) => !sameLine(candidate, line)) as never, {
     shouldDirty: true,
   });
+}
+
+const packagingFacts = (getValues: UseFormGetValues<TechCardFormData>) => ({
+  bomItems: ((getValues('bomItems') ?? []) as BomItems).slice(),
+  labels: (getValues('garmentLabels') ?? []) as FormGarmentLabel[],
+  packaging: (getValues('packagingItems') ?? []) as FormPackagingItem[],
+});
+
+/** Takes off the line of one packaging row, unless it is not the row's alone. */
+export function dropPackagingRowLine(
+  getValues: UseFormGetValues<TechCardFormData>,
+  setValue: UseFormSetValue<TechCardFormData>,
+  index: number,
+): void {
+  const { bomItems, labels, packaging } = packagingFacts(getValues);
+  const row = packaging[index];
+  const line = row ? labelBomLine(row, bomItems) : undefined;
+  if (!line || line.section !== PACKAGING_BOM_SECTION) return;
+  if (lineHasAnotherOwner(line, '', labels, packaging, bomItems, index)) return;
+  releaseBomLineRefs(getValues, setValue, line);
+  const current = ((getValues('bomItems') ?? []) as BomItems).slice();
+  setValue('bomItems', current.filter((candidate) => !sameLine(candidate, line)) as never, {
+    shouldDirty: true,
+  });
+}
+
+/**
+ * The BOM line of a packaging pick, written before the row names it. One material has one packaging
+ * line however many rows take it; a row changing material takes its own line along when it is alone.
+ * `index` is the row being re-picked, none for a new row.
+ */
+export function packagingLineForPick(
+  getValues: UseFormGetValues<TechCardFormData>,
+  setValue: UseFormSetValue<TechCardFormData>,
+  material: common_Material,
+  index?: number,
+): string {
+  const materialId = wireInt(material.id);
+  if (materialId <= 0) return '';
+  const { bomItems, labels, packaging } = packagingFacts(getValues);
+  const row = index != null ? packaging[index] : undefined;
+  const current = row ? labelBomLine(row, bomItems) : undefined;
+  const existing =
+    (current?.section === PACKAGING_BOM_SECTION && wireInt(current.materialId) === materialId
+      ? current
+      : undefined) ??
+    bomItems.find(
+      (line) =>
+        line.section === PACKAGING_BOM_SECTION &&
+        wireInt(line.materialId) === materialId &&
+        !!line.lineKey?.trim(),
+    );
+  if (existing?.lineKey?.trim()) {
+    if (index != null && !sameLine(current, existing))
+      dropPackagingRowLine(getValues, setValue, index);
+    return existing.lineKey.trim();
+  }
+
+  const materialName = material.name?.trim() || material.code?.trim() || `material #${materialId}`;
+  const currentKey = current?.lineKey?.trim() ?? '';
+  const alone =
+    !!current &&
+    !!currentKey &&
+    current.section === PACKAGING_BOM_SECTION &&
+    !lineHasAnotherOwner(current, '', labels, packaging, bomItems, index);
+  if (alone) {
+    const at = bomItems.findIndex((line) => line.lineKey?.trim() === currentKey);
+    const next = {
+      ...current,
+      ...materialLineFields(material),
+      section: PACKAGING_BOM_SECTION,
+      name: uniqueLineName(bomItems, materialName, currentKey),
+      materialId,
+    } as BomLine;
+    setValue(`bomItems.${at}`, next as never, { shouldDirty: true });
+    return currentKey;
+  }
+
+  const born = bornMaterialBomLine(material, {
+    section: PACKAGING_BOM_SECTION,
+    name: uniqueLineName(bomItems, materialName),
+  }) as BomLine;
+  setValue('bomItems', [...bomItems, born] as never, { shouldDirty: true });
+  return born.lineKey?.trim() ?? '';
+}
+
+/** Remove the packaging row and, when it is not shared, its BOM line. */
+export function removePackagingItemWithLine(
+  getValues: UseFormGetValues<TechCardFormData>,
+  setValue: UseFormSetValue<TechCardFormData>,
+  key: string,
+  index: number,
+): void {
+  dropPackagingRowLine(getValues, setValue, index);
+  removePackagingItem(getValues, setValue, key, index);
 }

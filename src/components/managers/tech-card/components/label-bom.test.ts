@@ -4,8 +4,11 @@ import { describe, expect, it, vi } from 'vitest';
 import type { FormGarmentLabel } from './labels-schema';
 import type { TechCardFormData } from './schema';
 import {
+  dropPackagingRowLine,
+  packagingLineForPick,
   pickLabelMaterial,
   removeLabelWithLine,
+  removePackagingItemWithLine,
   takeLabelMaterialOff,
   uniqueLineName,
 } from './label-bom';
@@ -299,5 +302,78 @@ describe('uniqueLineName', () => {
         'a',
       ),
     ).toBe('Label');
+  });
+});
+
+describe('packaging BOM lines', () => {
+  const PACKAGING = 'TECH_CARD_BOM_SECTION_PACKAGING';
+  const line = (lineKey: string, materialId: number, name: string) => ({
+    lineKey,
+    materialId,
+    name,
+    section: PACKAGING,
+  });
+  const row = (key: string, bomLineKey: string) => ({ key, bomLineKey, bomItemId: 0 });
+  const form = (bomItems: unknown[], packagingItems: unknown[]) =>
+    formHarness({ bomItems, packagingItems, garmentLabels: [] } as never);
+
+  it('a new pick mints a packaging line', () => {
+    const h = form([], []);
+    const key = packagingLineForPick(h.getValues, h.setValue, material(7, 'Dust bag'));
+    const lines = h.state.bomItems as ReturnType<typeof line>[];
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ section: PACKAGING, materialId: 7, name: 'Dust bag' });
+    expect(key).toBe(lines[0].lineKey);
+  });
+
+  it('a second row of the material takes the same line', () => {
+    const h = form([line('L1', 7, 'Dust bag')], [row('dust_bag', 'L1')]);
+    expect(packagingLineForPick(h.getValues, h.setValue, material(7, 'Dust bag'))).toBe('L1');
+    expect(h.state.bomItems).toHaveLength(1);
+  });
+
+  it('a row alone on its line repoints it to the new material', () => {
+    const h = form([line('L1', 7, 'Box S')], [row('box', 'L1')]);
+    expect(packagingLineForPick(h.getValues, h.setValue, material(8, 'Box L'), 0)).toBe('L1');
+    expect(h.state.bomItems).toEqual([
+      expect.objectContaining({ lineKey: 'L1', materialId: 8, name: 'Box L', section: PACKAGING }),
+    ]);
+  });
+
+  it('a row sharing its line leaves it and mints another', () => {
+    const h = form([line('L1', 7, 'Bag')], [row('dust_bag', 'L1'), row('other', 'L1')]);
+    const key = packagingLineForPick(h.getValues, h.setValue, material(8, 'Tissue'), 0);
+    const lines = h.state.bomItems as ReturnType<typeof line>[];
+    expect(lines.map((l) => l.materialId)).toEqual([7, 8]);
+    expect(key).toBe(lines[1].lineKey);
+  });
+
+  it('moving onto a material that has a line drops the old lone line', () => {
+    const h = form(
+      [line('L1', 7, 'Box S'), line('L2', 8, 'Box L')],
+      [row('box', 'L1'), row('other', 'L2')],
+    );
+    expect(packagingLineForPick(h.getValues, h.setValue, material(8, 'Box L'), 0)).toBe('L2');
+    expect((h.state.bomItems as ReturnType<typeof line>[]).map((l) => l.lineKey)).toEqual(['L2']);
+  });
+
+  it('removing a row takes its line, and a shared line stays', () => {
+    const h = form(
+      [line('L1', 7, 'Bag'), line('L2', 8, 'Tissue')],
+      [row('dust_bag', 'L1'), row('other', 'L1'), row('tissue', 'L2')],
+    );
+    removePackagingItemWithLine(h.getValues, h.setValue, 'tissue', 2);
+    removePackagingItemWithLine(h.getValues, h.setValue, 'other', 1);
+    expect((h.state.bomItems as ReturnType<typeof line>[]).map((l) => l.lineKey)).toEqual(['L1']);
+    expect(h.state.packagingItems).toEqual([row('dust_bag', 'L1')]);
+    removePackagingItemWithLine(h.getValues, h.setValue, 'dust_bag', 0);
+    expect(h.state.bomItems).toEqual([]);
+  });
+
+  it('a line outside the packaging section is not the row to take', () => {
+    const fabric = { ...line('L1', 7, 'Canvas'), section: 'TECH_CARD_BOM_SECTION_FABRIC' };
+    const h = form([fabric], [row('other', 'L1')]);
+    dropPackagingRowLine(h.getValues, h.setValue, 0);
+    expect(h.state.bomItems).toEqual([fabric]);
   });
 });

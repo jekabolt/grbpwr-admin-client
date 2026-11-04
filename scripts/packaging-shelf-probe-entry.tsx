@@ -1,4 +1,4 @@
-// Stand of the packaging shelf and of PDF sheet 05b: the REAL PackagingBlock and PackagingRecipeField
+// Stand of the packaging shelf and of PDF sheet 05b: the REAL PackagingBlock
 // under a real react-hook-form seeded by the card's own mapper, and the REAL PackagingPage under the
 // real sheet CSS. Provider stack as in src/index.tsx. Every RPC is answered by the runner
 // (packaging-shelf-probe.mjs), which drives the DOM.
@@ -15,7 +15,6 @@ import { TooltipProvider } from 'ui';
 import { PageFurniture } from 'components/managers/print/page-furniture';
 import type { PrintOrient } from 'components/managers/print/scope';
 import { PackagingBlock } from 'components/managers/tech-card/components/labels-blocks';
-import { PackagingRecipeField } from 'components/managers/tech-card/components/packaging-recipe-field';
 import {
   mapFormToTechCardInsert,
   mapTechCardToForm,
@@ -70,9 +69,6 @@ function Harness({ card, canEdit }: { card: common_TechCard; canEdit: boolean })
           resolvedMedia={card.resolvedLabelMedia}
           canEdit={canEdit}
         />
-        <div data-recipe-block=''>
-          <PackagingRecipeField techCardId={card.id ?? 0} canEdit={canEdit} />
-        </div>
       </div>
     </FormProvider>
   );

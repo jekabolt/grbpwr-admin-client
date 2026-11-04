@@ -12,11 +12,17 @@ import { decimalToInput } from 'utils/decimal';
 import { LABEL_BOM_SECTION } from './label-bom';
 import { wireInt } from './wire-int';
 
+/** How many garments the open run of the card plans; unknown when no run is open. */
+export function useOpenRunPlanned(techCardId: number): number | undefined {
+  const runsQuery = useProductionRuns(techCardId, '', 0, false, techCardId > 0);
+  const currentRun = (runsQuery.data?.runs ?? []).find((run) => isRunOpen(run.run?.status));
+  return currentRun ? runQty(currentRun).planned : undefined;
+}
+
 export function useLabelStock(techCard?: common_TechCard) {
   const materialsQuery = useMaterials(LABEL_BOM_SECTION, true);
   const stockQuery = useMaterialStock({ section: LABEL_BOM_SECTION });
-  const techCardId = wireInt(techCard?.id);
-  const runsQuery = useProductionRuns(techCardId, '', 0, false, techCardId > 0);
+  const plannedQty = useOpenRunPlanned(wireInt(techCard?.id));
 
   const materials = useMemo(() => materialsQuery.data?.materials ?? [], [materialsQuery.data]);
   const materialById = useMemo(
@@ -32,8 +38,6 @@ export function useLabelStock(techCard?: common_TechCard) {
   }, [stockQuery.data]);
 
   const stockKnown = stockQuery.isSuccess;
-  const currentRun = (runsQuery.data?.runs ?? []).find((run) => isRunOpen(run.run?.status));
-  const plannedQty = currentRun ? runQty(currentRun).planned : undefined;
 
   /** A material no stock row names has none on hand, once the stock is known. */
   const onHandOf = (material?: common_Material): string | undefined =>

@@ -26,7 +26,6 @@ import {
   common_TechCardReleaseMeta,
   common_TechCardSizePattern,
   googletype_Decimal,
-  PackagingRecipeLine,
   StyleAssemblyLine,
 } from 'api/proto-http/admin';
 import { PageFurniture, furnitureLine } from 'components/managers/print/page-furniture';
@@ -670,12 +669,11 @@ const num = (s?: string): number => {
 // Full printable tech-pack document for one tech card. Pure presentational — reads the
 // loaded card (server truth, so save before exporting). Self-contained black-on-white so
 // it prints/PDFs identically regardless of the app theme. See print-page for the @media
-// print isolation that hides app chrome. `assembly` (on-garment items) and `packagingRecipe`
-// are fetched by the caller (print-page) — separate per-style RPCs, not part of GetTechCard.
+// print isolation that hides app chrome. `assembly` (on-garment items) is fetched by the
+// caller (print-page) — a separate per-style RPC, not part of GetTechCard.
 export function TechPackDocument({
   techCard,
   assembly = [],
-  packagingRecipe = [],
   patternViewerToken = '',
   onDataStatus,
   scope,
@@ -683,7 +681,6 @@ export function TechPackDocument({
 }: {
   techCard: common_TechCard;
   assembly?: StyleAssemblyLine[];
-  packagingRecipe?: PackagingRecipeLine[];
   /** Статусы запросов, которые документ делает сам, — для гейта готовности печатной страницы. */
   onDataStatus?: (deps: PrintDep[]) => void;
   // Card-level capability token from GetTechCardResponse (never on common_TechCard — a token
@@ -1674,15 +1671,6 @@ export function TechPackDocument({
   const activeAssembly = assembly.filter(
     (a) => a.active !== false && (!wireInt(a.sizeId) || sizeIds.includes(wireInt(a.sizeId))),
   );
-  const activePackaging = packagingRecipe.filter((p) => p.active !== false);
-  // Mirrors PackagingRecipeField's own resolution: this style's active lines if it has any,
-  // else the global fallback it would inherit at order time.
-  const stylePackaging = activePackaging.filter(
-    (p) => p.scope === 'style' && p.techCardId === techCard.id,
-  );
-  const globalPackaging = activePackaging.filter((p) => p.scope === 'global');
-  const packagingRows = stylePackaging.length > 0 ? stylePackaging : globalPackaging;
-  const packagingIsFallback = stylePackaging.length === 0 && globalPackaging.length > 0;
 
   // ── PATTERNS (Ф4): fold the sheets into DISPLAY fabric scopes — one QR per scope. ──
   // A row with no file is not a sheet yet; skipped exactly as before, and as the server
@@ -3277,21 +3265,13 @@ export function TechPackDocument({
         </Sheet>
       )}
 
-      {/* PACKAGING RECIPE — materials consumed on ship (ListPackagingRecipe): once per shipment
-          (qty/order, e.g. a branded box) plus once per unit (qty/item, e.g. a dust bag). Same
-          missing-RPC root cause as assembly, one tab over. */}
       {/* УПАКОВКА — один лист на обе бумаги (print/sheets/packaging.tsx). Раньше описательная
           половина печаталась здесь, а считаемая от тиража — в наряде, двумя вёрстками одного
           предмета. Считаемая часть появляется только при скоупе на партию. */}
-      {b('qc') && (tc.packaging || packagingRows.length > 0) && (
+      {b('qc') && tc.packaging && (
         <PackagingSheet
           title='packaging'
           packaging={tc.packaging}
-          recipeRows={packagingRows}
-          recipeIsGlobalFallback={packagingIsFallback}
-          // Рецепт (в отличие от описательной половины из tc.packaging) в снапшот релиза не
-          // входит — на релизной бумаге его таблица помечается сегодняшней.
-          recipeIsLive={printScope.revision.source === 'release'}
           plannedTotal={batchTotal}
         />
       )}
