@@ -11682,7 +11682,11 @@ export type common_TechCardPieceFoldKind =
   // The flap lands on the piece's outside face.
   | "TECH_CARD_PIECE_FOLD_KIND_OUTWARD"
   // Three rows close a wedge, halves stay face up, fabric stays inside.
-  | "TECH_CARD_PIECE_FOLD_KIND_PLEAT";
+  | "TECH_CARD_PIECE_FOLD_KIND_PLEAT"
+  // Pleat with all hidden fabric pressed so the fold edge faces left.
+  | "TECH_CARD_PIECE_FOLD_KIND_PLEAT_LEFT"
+  // Pleat with all hidden fabric pressed so the fold edge faces right.
+  | "TECH_CARD_PIECE_FOLD_KIND_PLEAT_RIGHT";
 // TechCardPieceFoldSource is where the fold line came from.
 export type common_TechCardPieceFoldSource =
   | "TECH_CARD_PIECE_FOLD_SOURCE_UNKNOWN"
