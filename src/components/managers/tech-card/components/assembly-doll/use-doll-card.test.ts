@@ -110,6 +110,7 @@ function cardOf(facts: ReadonlyMap<string, SkeletonFacts>, rows = sleeveRows): D
     foldRowsSig: foldRowsSig(rows),
     joins: [],
     hardware: [],
+    fastenings: [],
     gender: null,
     readId: 1,
     inputSig: 'fixture',

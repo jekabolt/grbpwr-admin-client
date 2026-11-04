@@ -34,6 +34,7 @@ import {
   type DeclaredHardware,
   type DeclaredJoin,
 } from 'lib/doll/joins';
+import { fasteningsFromOps, type DeclaredFastening } from 'lib/doll/buttons';
 import type { DollLayerRelation, DollOwnerCandidate } from 'lib/doll/types';
 import { resolveFolds, type StoredFold } from 'lib/folds';
 import { hemFoldsOf, hemSigOf, isHemStep, type HemStepLike } from 'lib/hem/hem-folds';
@@ -106,6 +107,8 @@ export type DollCard = {
   joins: DeclaredJoin[];
   /** The order's hardware (HARDWARE_SET: elastic, tape): listed, never sewn. */
   hardware: DeclaredHardware[];
+  /** The steps that make buttonholes and set buttons: their marks close the two parts. */
+  fastenings: DeclaredFastening[];
   gender: 'MALE' | 'FEMALE' | null;
   /** Identity of the provider's read: a decision or a pattern edit makes a new one. */
   readId: number;
@@ -391,16 +394,27 @@ export function useDollCard(): DollCard | null {
     return { bySize, base, sizes, oneSize };
   }, [facts, index, refs, sizeById, cardSizes]);
 
-  const [joins, hardware] = useMemo((): [DeclaredJoin[], DeclaredHardware[]] => {
-    if (!facts) return [[], []];
+  const [joins, hardware, fastenings] = useMemo((): [
+    DeclaredJoin[],
+    DeclaredHardware[],
+    DeclaredFastening[],
+  ] => {
+    if (!facts) return [[], [], []];
     const keys = new Set(facts.pieces.map((p) => p.pieceKey));
     const ops = operations.map((o) => ({
       inputs: (o.inputKeys ?? []).filter((key) => key && !stripKeys.has(key)),
       output: (o.outputUnitKey ?? '').trim(),
       type: (o.operationType ?? '').replace('TECH_CARD_OPERATION_TYPE_', ''),
+      work: o.work ?? '',
+      count: o.placementCount ?? 0,
+      step: o.operationNumber ?? 0,
     }));
     const pieceOf = (k: string) => (keys.has(k) ? k : null);
-    return [joinsFromOps(ops, pieceOf), hardwareFromOps(ops, pieceOf)];
+    return [
+      joinsFromOps(ops, pieceOf),
+      hardwareFromOps(ops, pieceOf),
+      fasteningsFromOps(ops, pieceOf),
+    ];
   }, [facts, operations, stripKeys]);
 
   return useMemo(() => {
@@ -471,10 +485,11 @@ export function useDollCard(): DollCard | null {
       ...(hemOps.some(isHemStep) ? { hem: { ops: hemOps, standardMm } } : {}),
       joins,
       hardware,
+      fastenings,
       gender:
         gender === 'GENDER_ENUM_FEMALE' ? 'FEMALE' : gender === 'GENDER_ENUM_MALE' ? 'MALE' : null,
       readId: idOf(facts),
-      inputSig: `${gender ?? ''}|${joins.map((j) => `${j.label}:${j.parts.map((x) => x.join('+')).join('/')}`).join(',')}|${hardware.map((h) => `${h.label}:${h.pieces.join('+')}`).join(',')}${hemSigOf(hemOps, standardMm)}`,
+      inputSig: `${gender ?? ''}|${joins.map((j) => `${j.label}:${j.parts.map((x) => x.join('+')).join('/')}`).join(',')}|${hardware.map((h) => `${h.label}:${h.pieces.join('+')}`).join(',')}|${fastenings.map((f) => `${f.side}:${f.step}:${f.count}:${f.pieces.join('+')}`).join(',')}${hemSigOf(hemOps, standardMm)}`,
     };
   }, [
     facts,
@@ -490,6 +505,7 @@ export function useDollCard(): DollCard | null {
     standardMm,
     joins,
     hardware,
+    fastenings,
     gender,
     cardSizes,
   ]);
@@ -548,6 +564,7 @@ export function dollRequest(c: DollCard, size: string, lining: boolean) {
       oneSize: c.sizes.length === 1,
       ...(!c.owner ? { joins: c.joins } : {}),
       ...(c.hardware.length ? { hardware: c.hardware } : {}),
+      ...(c.fastenings.length ? { fastenings: c.fastenings } : {}),
       gender: c.gender,
       ...(folds ? { folds } : {}),
       ...(hem?.words.length ? { hemWords: hem.words } : {}),
