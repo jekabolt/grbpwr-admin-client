@@ -14,7 +14,7 @@ import { useMaterials } from 'components/managers/materials/components/useMateri
 import { useCareLabelSource } from 'components/managers/tech-card/care-labels/adapter';
 import { labelMediaOf } from 'components/managers/tech-card/care-labels/label-media';
 import { Swatch as TechpackSwatch } from 'components/managers/tech-card/techpack/pages/bits';
-import { useMemo, useState, type ChangeEvent, type JSX } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import {
   Button,
@@ -374,6 +374,13 @@ function PackagingPicker({
   const [kind, setKind] = useState('all');
   const [selected, setSelected] = useState<Pick | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setQuery('');
+    setKind('all');
+    setSelected(null);
+  }, [open]);
 
   const picks = useMemo<Pick[]>(() => {
     const materialPicks = (materials.data?.materials ?? [])
