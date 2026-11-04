@@ -58,6 +58,8 @@ export type StepFolds = {
   rows: readonly StoredFold[];
   /** Pieces whose fold closes on this very step. */
   closing: readonly string[];
+  /** Per piece, the 1-based places in its `flat` list of the rows this very step closes. */
+  closingAt?: ReadonlyMap<string, ReadonlySet<number>>;
 };
 
 type RunPart = { id: string; piece: string; pts: readonly Pt2[]; lenMm: number };
@@ -148,7 +150,16 @@ export function cardFoldsOf(
     const closing = [
       ...new Set(rows.filter((row) => closes.has(row.foldKey)).map((row) => row.pieceKey)),
     ];
-    return { flat, rows, closing };
+    const closingAt = new Map(
+      closing.map((piece) => {
+        const own = rows.filter((row) => row.pieceKey === piece).sort((a, b) => a.seq - b.seq);
+        return [
+          piece,
+          new Set(own.flatMap((row, place) => (closes.has(row.foldKey) ? [place + 1] : []))),
+        ];
+      }),
+    );
+    return { flat, rows, closing, closingAt };
   };
 }
 

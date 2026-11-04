@@ -18,6 +18,7 @@ export {
   pleatFanGeometry,
   rotateAround,
   type PleatFanGeometry,
+  type PleatHiddenSide,
   type PleatLineLike,
 } from './pleat';
 export { foldFromWire, foldsFromWire, foldToWire } from './wire';

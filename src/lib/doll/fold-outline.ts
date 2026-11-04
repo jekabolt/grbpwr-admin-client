@@ -99,7 +99,7 @@ export function foldPlies(poly: readonly Pt[], folds: readonly FoldMm[]): Folded
   for (const fold of [...folds].sort((x, y) => x.seq - y.seq)) {
     // The 3D doll has no rigid two-half pleat primitive yet. Leaving these rows flat is the safe
     // fallback: treating every non-inward kind as outward would turn all three halves face down.
-    if (fold.kind === 'pleat') {
+    if (fold.kind !== 'inward' && fold.kind !== 'outward') {
       skipped.push(fold.seq);
       continue;
     }

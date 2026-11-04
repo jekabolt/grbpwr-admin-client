@@ -5,6 +5,7 @@ import {
   foldHints,
   type FoldHint,
   type FoldSource,
+  type PleatKind,
   type StoredFold,
 } from 'lib/folds';
 import { grainRotation } from 'lib/pom/upright';
@@ -27,6 +28,7 @@ import {
   openHints,
   pieceView,
   PICK_KINDS,
+  pleatDirectionRows,
   ptsAttr,
   rowsOfChoice,
   rowsOfPleat,
@@ -34,7 +36,7 @@ import {
   type PickKind,
   type PleatFan,
 } from './fold-model';
-import { FAINT, GREY, HatchDef, INK, PAPER, PICK, PliesSvg } from './fold-picture';
+import { FAINT, GREY, HatchDef, INK, PAPER, PICK, PliesSvg, SectionSvg } from './fold-picture';
 import { foldStepBlocked, stepOfFold, useFoldStep } from './fold-step';
 import { useFoldRows } from './folds-store';
 import { useFoldWrites } from './use-fold-writes';
@@ -45,6 +47,11 @@ const PICTURE_W = 240;
 const PICTURE_H = 320;
 const PICTURE_PAD = 16;
 const r1 = (value: number) => value.toFixed(1);
+const PLEAT_DIRECTIONS: readonly { kind: PleatKind; glyph: string; label: string }[] = [
+  { kind: 'pleat_l', glyph: '←', label: 'pleat left' },
+  { kind: 'pleat', glyph: '·', label: 'pleat even' },
+  { kind: 'pleat_r', glyph: '→', label: 'pleat right' },
+];
 
 export type PieceRead = {
   geom: PieceGeom;
@@ -146,6 +153,7 @@ export function FoldPicker({
   const [drawing, setDrawing] = useState<{ p1: Pt2 | null } | null>(null);
   const [pending, setPending] = useState<{ line: [Pt2, Pt2]; source: FoldSource } | null>(null);
   const [hovered, setHovered] = useState<string[]>([]);
+  const [chosenPleat, setChosenPleat] = useState<string | null>(null);
   const [live, setLive] = useState<Pt2 | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -426,6 +434,7 @@ export function FoldPicker({
     try {
       const active = activePleat(fan);
       if (active) {
+        setChosenPleat(active.rows[0]?.foldKey ?? null);
         if (active.rows.every((row) => stepOfFold(foldStep.operations, row.foldKey) === null))
           linkToStep(active.rows, stepIndex);
         return;
@@ -478,6 +487,7 @@ export function FoldPicker({
         );
       }
       if (!(await writes.upsert([...saved, ...shifted]))) return;
+      setChosenPleat(saved[0].foldKey);
       if (oldStep !== undefined && oldStep !== null)
         foldStep.assign(
           saved.map((row) => row.foldKey),
@@ -488,6 +498,26 @@ export function FoldPicker({
       choosing.current = false;
     }
   };
+
+  const choosePleatKind = async (group: FoldGroup, kind: PleatKind) => {
+    if (frozen || choosing.current) return;
+    setChosenPleat(group.rows[0]?.foldKey ?? null);
+    if (group.pleatKind === kind) return;
+    choosing.current = true;
+    try {
+      await writes.upsert(pleatDirectionRows(group, kind));
+    } finally {
+      choosing.current = false;
+    }
+  };
+
+  const hoveredPleat = pleatFans
+    .filter((fan) => fan.lines.some((line) => hovered.includes(line.id)))
+    .map(activePleat)
+    .find((group) => group);
+  const sectionPleat =
+    hoveredPleat ??
+    groups.find((group) => group.complete && group.rows.some((row) => row.foldKey === chosenPleat));
 
   const liveSnap = drawing && live ? snapAt(live) : null;
 
@@ -628,6 +658,11 @@ export function FoldPicker({
               />
             </svg>
           </div>
+          {sectionPleat && (
+            <div className='col-start-2 min-w-0' data-fold-pleat-section=''>
+              <SectionSvg piece={geom} groups={[sectionPleat]} big />
+            </div>
+          )}
         </div>
 
         <div className='w-full min-w-0 flex-1'>
@@ -678,6 +713,21 @@ export function FoldPicker({
                       <PleatFanIcon />
                       pleat
                     </Chip>
+                    {group &&
+                      PLEAT_DIRECTIONS.map(({ kind, glyph, label }) => (
+                        <Chip
+                          key={kind}
+                          selected={group.pleatKind === kind}
+                          pressed={group.pleatKind === kind}
+                          disabled={frozen}
+                          aria-label={label}
+                          onClick={() => void choosePleatKind(group, kind)}
+                          className='border-textColor px-2.5 py-1.5 active:translate-y-px'
+                          data-fold-pleat-dir={kind}
+                        >
+                          {glyph}
+                        </Chip>
+                      ))}
                     {(group || partialGroups.length > 0) && (
                       <Button
                         variant='underline'

@@ -3,7 +3,7 @@ import type { PieceFrame } from 'lib/seams/frame';
 import { reflect } from './folded';
 import { fromUV, sideDist } from './geom';
 import { pleatFanGeometry, type PleatFanGeometry } from './pleat';
-import type { StoredFold } from './types';
+import { isPleatKind, type StoredFold } from './types';
 
 type SidePart = {
   id: string;
@@ -70,7 +70,7 @@ export function coincidentGroups(
   const frames = new Map<string, PieceFrame | null>();
   const linesByPiece = new Map<string, [Pt2, Pt2][]>();
   for (const fold of activeFolds) {
-    if (fold.kind === 'pleat') continue;
+    if (isPleatKind(fold.kind)) continue;
     if (!frames.has(fold.pieceKey)) frames.set(fold.pieceKey, frameOf(fold.pieceKey));
     const frame = frames.get(fold.pieceKey);
     if (!frame) continue;
@@ -124,7 +124,7 @@ function pleatsByPiece(
   const out = new Map<string, PleatFanGeometry<LocatedPleatLine>[]>();
   const byPiece = new Map<string, StoredFold[]>();
   for (const row of activeFolds) {
-    if (row.kind !== 'pleat') continue;
+    if (!isPleatKind(row.kind)) continue;
     byPiece.set(row.pieceKey, [...(byPiece.get(row.pieceKey) ?? []), row]);
   }
   for (const [piece, rows] of byPiece) {

@@ -156,6 +156,8 @@ type Row = AsmRow & {
   print?: { marks: StepPicture['marks']; action: ReturnType<typeof editorActionMarks> };
   sil?: SvgMarkup | null;
   photoCount: number;
+  /** The size this sheet's pleat openings are measured on. */
+  drawnSize: string;
 };
 
 type Photo = {
@@ -4481,6 +4483,7 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
           actionLines={r.print.action.lines}
           actionGlyphs={r.print.action.glyphs}
           stripWords={stripWords}
+          pleatNote={r.drawnSize}
           className='asm-editor-picture'
         />
       ) : drawing ? (
@@ -4537,6 +4540,13 @@ const OpRow = memo(function OpRow({ r, orient }: { r: Row; orient: PrintOrient }
           <div className='asm-seams'>
             {w.seams.map((seam) => (
               <div key={seam}>{seam}</div>
+            ))}
+          </div>
+        )}
+        {w.folds && (
+          <div className='asm-seams' data-asm-folds=''>
+            {w.folds.map((line) => (
+              <div key={line}>{line}</div>
             ))}
           </div>
         )}
@@ -4786,6 +4796,7 @@ export function AssemblyPage({
               ? null
               : silhouetteSvg(model!, r.target, picture.silhouette, r.action),
           photoCount: photoCountByOp.get(r.n) ?? 0,
+          drawnSize: model?.drawnSize ?? '',
         };
       }),
     [model, editorPictures, photoCountByOp, picture.join, picture.silhouette],

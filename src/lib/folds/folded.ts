@@ -21,8 +21,15 @@ import {
   sub,
   unit,
 } from './geom';
-import { mapPleatPoint, pleatFanGeometry, rotateAround, type PleatFanGeometry } from './pleat';
-import { FOLDS, type FoldKind } from './types';
+import {
+  mapPleatPoint,
+  pleatFanGeometry,
+  pleatSideOf,
+  rotateAround,
+  type PleatFanGeometry,
+  type PleatHiddenSide,
+} from './pleat';
+import { FOLDS, isPleatKind, type FoldKind, type PleatKind } from './types';
 
 /** One fold in the same frame as the polygon. */
 export type FlatFold = { a: Pt2; b: Pt2; flipAt: Pt2; kind: FoldKind };
@@ -44,11 +51,15 @@ export type FoldPly = {
 };
 
 export type FoldPleat = {
+  kind: PleatKind;
   apex: Pt2;
-  /** The grey plan-view convention for the intake, half the opening on either side. */
+  /** The grey plan-view intake: half the opening on either side, or all of it on the hidden side. */
   wedge: [Pt2, Pt2, Pt2];
-  /** Both hidden edges are dashed. */
-  edges: [[Pt2, Pt2], [Pt2, Pt2]];
+  /** The hidden edges, dashed: two on an even pleat, the outer one on a directional pleat. */
+  edges: [Pt2, Pt2][];
+  /** The flat far ends of both legs: what the opening measures across. */
+  opening: [Pt2, Pt2];
+  openingMm: number;
   /** The centre crease stays solid on top. */
   centre: [Pt2, Pt2];
   by: number;
@@ -267,7 +278,7 @@ export type FoldedOptions = {
 type FanLine = { line: [Pt2, Pt2]; fold: FlatFold; index: number };
 type FoldProgramOp =
   | { kind: 'ordinary'; fold: FlatFold; bounded: boolean; index: number }
-  | { kind: 'pleat'; fan: PleatFanGeometry<FanLine>; index: number };
+  | { kind: 'pleat'; fan: PleatFanGeometry<FanLine>; hidden: PleatHiddenSide; index: number };
 
 const currentPointMoves = (point: Pt2, probe: Pt2, fold: FlatFold, bounded: boolean) => {
   const side = sideDist(fold.a, fold.b, point);
@@ -285,9 +296,9 @@ function foldProgram(poly: readonly Pt2[], folds: readonly FlatFold[]): FoldProg
   let mapper: (point: Pt2, probe?: Pt2) => Pt2 = (point) => point;
   let mappedPoly = [...poly];
   for (let i = 0; i < folds.length; ) {
-    if (folds[i].kind === 'pleat') {
+    if (isPleatKind(folds[i].kind)) {
       const triple = folds.slice(i, i + 3);
-      if (triple.length === 3 && triple.every((fold) => fold.kind === 'pleat')) {
+      if (triple.length === 3 && triple.every((fold) => isPleatKind(fold.kind))) {
         const inputs = triple.map(
           (fold, offset): FanLine => ({
             fold,
@@ -297,11 +308,15 @@ function foldProgram(poly: readonly Pt2[], folds: readonly FlatFold[]): FoldProg
         ) as [FanLine, FanLine, FanLine];
         const fan = pleatFanGeometry(inputs);
         if (fan) {
-          ops.push({ kind: 'pleat', fan, index: i });
+          // The kind of a set is its centre row's: the word on the row and the picture read one row.
+          const centre = fan.centre.fold;
+          const hidden: PleatHiddenSide =
+            centre.kind === 'pleat' ? 0 : pleatSideOf(fan, mapper(centre.flipAt));
+          ops.push({ kind: 'pleat', fan, hidden, index: i });
           const before = mapper;
           mapper = (point, probe = point) => {
             const mappedProbe = before(probe, probe);
-            return mapPleatPoint(before(point, probe), fan, mappedProbe);
+            return mapPleatPoint(before(point, probe), fan, mappedProbe, hidden);
           };
           mappedPoly = poly.map((point) => mapper(point));
           i += 3;
@@ -343,8 +358,8 @@ export function foldedPoint(
   let q: Pt2 = probe;
   for (const op of foldProgram(poly, folds)) {
     if (op.kind === 'pleat') {
-      p = mapPleatPoint(p, op.fan, q);
-      q = mapPleatPoint(q, op.fan, q);
+      p = mapPleatPoint(p, op.fan, q, op.hidden);
+      q = mapPleatPoint(q, op.fan, q, op.hidden);
     } else {
       if (currentPointMoves(p, q, op.fold, op.bounded)) p = reflect(p, op.fold.a, op.fold.b);
       if (currentPointMoves(q, q, op.fold, op.bounded)) q = reflect(q, op.fold.a, op.fold.b);
@@ -367,13 +382,12 @@ const mapPleatByOrdinary = (pleat: FoldPleat, fold: FlatFold, bounded: boolean):
   const probe = mul(wedgeProbe, 1 / 3);
   const wedge = pleat.wedge.map((point) => map(point, probe)) as [Pt2, Pt2, Pt2];
   const centre = mapLineByOrdinary(pleat.centre, fold, bounded);
+  const carry = (line: [Pt2, Pt2]) => line.map((point) => map(point, probe)) as [Pt2, Pt2];
   return {
     ...pleat,
     wedge,
-    edges: [
-      [wedge[0], wedge[1]],
-      [wedge[0], wedge[2]],
-    ],
+    edges: pleat.edges.map(carry),
+    opening: carry(pleat.opening),
     centre,
   };
 };
@@ -428,9 +442,15 @@ function foldedPleatOutline(poly: readonly Pt2[], folds: readonly FlatFold[]): F
       splitOutside(fan.negative, fan.negativeGapRad);
       splitOutside(fan.positive, -fan.positiveGapRad);
     }
-    const left = rotateAround(fan.far.get(fan.negative)!, fan.apex, fan.negativeGapRad / 2);
-    const right = rotateAround(fan.far.get(fan.positive)!, fan.apex, -fan.positiveGapRad / 2);
-    const wedge: [Pt2, Pt2, Pt2] = [[...fan.apex], left, right];
+    const negativeFar = fan.far.get(fan.negative)!;
+    const positiveFar = fan.far.get(fan.positive)!;
+    const left = rotateAround(negativeFar, fan.apex, fan.negativeGapRad / 2);
+    const right = rotateAround(positiveFar, fan.apex, -fan.positiveGapRad / 2);
+    // A directional pleat keeps the hidden leg's flat end: half the opening, on one side only.
+    const hiddenFar = op.hidden > 0 ? positiveFar : negativeFar;
+    const wedge: [Pt2, Pt2, Pt2] = op.hidden
+      ? [[...fan.apex], [...hiddenFar], [...centreFar]]
+      : [[...fan.apex], left, right];
     const hidden: FoldPly = {
       poly: wedge,
       flipped: false,
@@ -441,20 +461,24 @@ function foldedPleatOutline(poly: readonly Pt2[], folds: readonly FlatFold[]): F
     plies = [...visible, hidden];
     creases = creases.map(
       (line) =>
-        line.map((point) => mapPleatPoint(point, fan, mul(add(line[0], line[1]), 0.5))) as [
-          Pt2,
-          Pt2,
-        ],
+        line.map((point) =>
+          mapPleatPoint(point, fan, mul(add(line[0], line[1]), 0.5), op.hidden),
+        ) as [Pt2, Pt2],
     );
     const centre: [Pt2, Pt2] = [[...fan.apex], [...centreFar]];
     creases.push(centre);
     pleats.push({
+      kind: fan.centre.fold.kind as PleatKind,
       apex: [...fan.apex],
       wedge,
-      edges: [
-        [wedge[0], wedge[1]],
-        [wedge[0], wedge[2]],
-      ],
+      edges: op.hidden
+        ? [[wedge[0], wedge[1]]]
+        : [
+            [wedge[0], wedge[1]],
+            [wedge[0], wedge[2]],
+          ],
+      opening: [[...negativeFar], [...positiveFar]],
+      openingMm: Math.hypot(negativeFar[0] - positiveFar[0], negativeFar[1] - positiveFar[1]),
       centre,
       by: op.index + 1,
     });
@@ -528,7 +552,7 @@ export function foldedOutline(
   folds: readonly FlatFold[],
   opts: FoldedOptions = {},
 ): FoldedShape {
-  if (folds.some((fold) => fold.kind === 'pleat')) return foldedPleatOutline(poly, folds);
+  if (folds.some((fold) => isPleatKind(fold.kind))) return foldedPleatOutline(poly, folds);
   // Each ply is cut on the flat piece, so a fold moves only what lies beyond its own line on the
   // flat piece, not what an earlier fold happened to lay there. Crossing lines have no such order.
   const byFlat = !foldsCross(folds);
@@ -625,6 +649,8 @@ export type FoldSection = {
   joins: SectionJoin[];
   cut: { lo: number; hi: number };
   fin: { lo: number; hi: number };
+  /** Set when the slice runs across a closed pleat. */
+  pleat?: { kind: PleatKind; openingMm: number };
 };
 
 /**
@@ -633,9 +659,10 @@ export type FoldSection = {
  */
 export function foldSection(poly: readonly Pt2[], folds: readonly FlatFold[]): FoldSection | null {
   if (!folds.length) return null;
-  if (folds.some((fold) => fold.kind === 'pleat')) {
+  if (folds.some((fold) => isPleatKind(fold.kind))) {
     const shape = foldedOutline(poly, folds);
-    const centre = shape.pleats[0]?.centre;
+    const pleat = shape.pleats[0];
+    const centre = pleat?.centre;
     if (!centre) return null;
     const n = perp(unit(sub(centre[1], centre[0])));
     const dot = (point: Pt2) => point[0] * n[0] + point[1] * n[1];
@@ -651,7 +678,13 @@ export function foldSection(poly: readonly Pt2[], folds: readonly FlatFold[]): F
       (out, ply) => ({ lo: Math.min(out.lo, ply.lo), hi: Math.max(out.hi, ply.hi) }),
       { lo: Infinity, hi: -Infinity },
     );
-    return { plies: sectionPlies, joins: [], cut, fin };
+    return {
+      plies: sectionPlies,
+      joins: [],
+      cut,
+      fin,
+      pleat: { kind: pleat.kind, openingMm: pleat.openingMm },
+    };
   }
   const n = perp(unit(sub(folds[0].b, folds[0].a)));
   const dot = (p: Pt2) => p[0] * n[0] + p[1] * n[1];

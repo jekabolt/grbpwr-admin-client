@@ -135,14 +135,29 @@ export function rotateAround(point: Pt2, centre: Pt2, angle: number): Pt2 {
   return [centre[0] + x * c - y * s, centre[1] + x * s + y * c];
 }
 
+/** Where a pleat's intake lies around the centre ray: 0 both sides, ±1 that signed side only. */
+export type PleatHiddenSide = -1 | 0 | 1;
+
+/** The side of the centre ray a stored flip point is on. */
+export function pleatSideOf<T extends PleatLineLike>(
+  fan: PleatFanGeometry<T>,
+  flipAt: Pt2,
+): -1 | 1 {
+  const angle = signedAngle(sub(fan.far.get(fan.centre)!, fan.apex), sub(flipAt, fan.apex));
+  return angle < 0 ? -1 : 1;
+}
+
 /**
  * Plan view of a closed pleat. The two face-up halves rotate rigidly until each leg reaches the
- * centre. Points in the hidden intake stay on their own side and occupy half its opening.
+ * centre, the same for every kind. Points in the hidden intake of an even pleat stay on their own
+ * side and occupy half its opening. With a `hidden` side the intake lies as a Z on that side: from
+ * each leg, on the centre line, out to the old centre crease a whole leg's width away.
  */
 export function mapPleatPoint<T extends PleatLineLike>(
   point: Pt2,
   fan: PleatFanGeometry<T>,
   probe: Pt2 = point,
+  hidden: PleatHiddenSide = 0,
 ): Pt2 {
   const centreRay = sub(fan.far.get(fan.centre)!, fan.apex);
   const probeRay = sub(probe, fan.apex);
@@ -152,5 +167,11 @@ export function mapPleatPoint<T extends PleatLineLike>(
   if (angle <= -fan.negativeGapRad + EPS) return rotateAround(point, fan.apex, fan.negativeGapRad);
   if (angle >= fan.positiveGapRad - EPS) return rotateAround(point, fan.apex, -fan.positiveGapRad);
   const ownAngle = signedAngle(centreRay, pointRay);
-  return rotateAround(point, fan.apex, -ownAngle / 2);
+  if (!hidden) return rotateAround(point, fan.apex, -ownAngle / 2);
+  const gap = hidden > 0 ? fan.positiveGapRad : fan.negativeGapRad;
+  const otherGap = hidden > 0 ? fan.negativeGapRad : fan.positiveGapRad;
+  const towardHidden = ownAngle * hidden;
+  const laid = towardHidden >= 0 ? gap - towardHidden : gap * (1 + towardHidden / otherGap);
+  const target = Math.max(0, Math.min(gap, laid));
+  return rotateAround(point, fan.apex, target * hidden - ownAngle);
 }

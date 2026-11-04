@@ -10,7 +10,11 @@ import type { EdgeId, Pt2 } from 'lib/assembly-skeleton/types';
 /** A point in the piece's unit square (the seam frame). */
 export type UV = Pt2;
 
-export type FoldKind = 'inward' | 'outward' | 'pleat';
+/** A pleat's three rows: even (`pleat`), or all hidden fabric right / left of the centre line. */
+export type PleatKind = 'pleat' | 'pleat_l' | 'pleat_r';
+export type FoldKind = 'inward' | 'outward' | PleatKind;
+export const isPleatKind = (kind: FoldKind | undefined): kind is PleatKind =>
+  kind === 'pleat' || kind === 'pleat_l' || kind === 'pleat_r';
 export type FoldSource = 'dxf' | 'owner' | 'accepted_hint';
 
 /** What the doll applies (SPEC-T3 contract): per piece key, ordered by seq. */

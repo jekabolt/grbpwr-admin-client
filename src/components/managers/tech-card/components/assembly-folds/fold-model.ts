@@ -10,6 +10,7 @@ import {
   doubleTurn,
   findPleatFans,
   foldFromLine,
+  isPleatKind,
   pleatFanGeometry,
   pointOnSide,
   resolveFolds,
@@ -19,6 +20,7 @@ import {
   type FoldHint,
   type FoldSource,
   type PleatFanGeometry,
+  type PleatKind,
   type StoredFold,
 } from 'lib/folds';
 import { frameOf, fromUV } from 'lib/folds/geom';
@@ -40,6 +42,8 @@ export type FoldGroup = {
   source: FoldSource;
   /** Only PLEAT uses this: false is a broken saved set kept visible for removal. */
   complete?: boolean;
+  /** Only PLEAT: the stored direction, read off the centre row. */
+  pleatKind?: PleatKind;
 };
 
 export type PleatLine = {
@@ -109,11 +113,11 @@ export function foldGroupsOf(
     const two = items[i + 1];
     const l1: [Pt2, Pt2] = [one.flat.a, one.flat.b];
     const s1 = sideOf(one.flat.a, one.flat.b, one.flat.flipAt);
-    if (one.row.kind === 'pleat') {
+    if (isPleatKind(one.row.kind)) {
       const three = items[i + 2];
       const consecutive =
-        two?.row.kind === 'pleat' &&
-        three?.row.kind === 'pleat' &&
+        isPleatKind(two?.row.kind) &&
+        isPleatKind(three?.row.kind) &&
         two.row.seq === one.row.seq + 1 &&
         three.row.seq === one.row.seq + 2;
       const fan = consecutive
@@ -134,12 +138,13 @@ export function foldGroupsOf(
           flat: ordered.map((item) => item.flat),
           source: centre.row.source,
           complete: true,
+          pleatKind: centre.row.kind as PleatKind,
         });
         i += 2;
         continue;
       }
       if (
-        two?.row.kind === 'pleat' &&
+        isPleatKind(two?.row.kind) &&
         two.row.seq <= one.row.seq + 2 &&
         sharesApex(one.flat, two.flat)
       ) {
@@ -151,6 +156,7 @@ export function foldGroupsOf(
           flat: [one.flat, two.flat],
           source: one.row.source,
           complete: false,
+          pleatKind: one.row.kind,
         });
         i++;
         continue;
@@ -163,6 +169,7 @@ export function foldGroupsOf(
         flat: [one.flat],
         source: one.row.source,
         complete: false,
+        pleatKind: one.row.kind,
       });
       continue;
     }
@@ -281,6 +288,10 @@ export function rowsOfPleat(
   }
   return out;
 }
+
+/** A direction change: the same rows, keys, lines and places in the order; only the kind moves. */
+export const pleatDirectionRows = (group: FoldGroup, kind: PleatKind): StoredFold[] =>
+  group.rows.map((row) => ({ ...row, kind }));
 
 export const defaultSide = (piece: PieceGeom, line: [Pt2, Pt2]) =>
   smallerSide(piece.rs, line[0], line[1]);

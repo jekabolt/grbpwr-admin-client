@@ -4,7 +4,14 @@
 
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import type { FoldHint } from 'lib/folds';
-import { foldedOutline, foldSection, type FlatFold, type FoldPleat, type FoldPly } from 'lib/folds';
+import {
+  foldedOutline,
+  foldSection,
+  type FlatFold,
+  type FoldPleat,
+  type FoldPly,
+  type PleatKind,
+} from 'lib/folds';
 import { pieceView, ptsAttr, type FoldGroup, type PickKind, type PieceView } from './fold-model';
 
 export const INK = 'var(--color-textColor)';
@@ -280,6 +287,66 @@ export function FoldedThumb({
   );
 }
 
+/** The approved section of a closed pleat: visible fabric black, hidden layers grey. */
+const PLEAT_SECTION: Record<PleatKind, { h: number; cloth: string[]; hidden: string }> = {
+  pleat: {
+    h: 56,
+    cloth: ['M10 16 L167 16', 'M173 16 L330 16'],
+    hidden:
+      'M167 16 C160 16 158 26 150 26 L112 26 C102 26 102 40 112 40 L170 40 L228 40 C238 40 238 26 228 26 L190 26 C182 26 180 16 173 16',
+  },
+  pleat_r: {
+    h: 50,
+    cloth: ['M10 12 L170 12', 'M170 36 L330 36'],
+    hidden: 'M170 12 C180 12 180 24 170 24 L95 24 C85 24 85 36 95 36 L170 36',
+  },
+  pleat_l: {
+    h: 50,
+    cloth: ['M330 12 L170 12', 'M170 36 L10 36'],
+    hidden: 'M170 12 C160 12 160 24 170 24 L245 24 C255 24 255 36 245 36 L170 36',
+  },
+};
+const PLEAT_SECTION_W = 340;
+
+/** The section's height at a given drawn width. */
+export const pleatSectionHeight = (kind: PleatKind, width: number) =>
+  (width * PLEAT_SECTION[kind].h) / PLEAT_SECTION_W;
+
+/** Nests in a bigger drawing with `x`/`y`/`width`; on its own it fills its box by the class. */
+export function PleatSectionSvg({
+  kind,
+  x,
+  y,
+  width,
+  className,
+}: {
+  kind: PleatKind;
+  x?: number;
+  y?: number;
+  width?: number;
+  className?: string;
+}) {
+  const section = PLEAT_SECTION[kind];
+  return (
+    <svg
+      x={x}
+      y={y}
+      width={width}
+      height={width === undefined ? undefined : pleatSectionHeight(kind, width)}
+      viewBox={`0 0 ${PLEAT_SECTION_W} ${section.h}`}
+      aria-hidden='true'
+      className={className}
+      data-fold-section='pleat'
+      data-fold-section-kind={kind}
+    >
+      <path d={section.hidden} fill='none' stroke={GREY} strokeWidth={3} data-section-hidden='' />
+      {section.cloth.map((d) => (
+        <path key={d} d={d} fill='none' stroke={INK} strokeWidth={3} data-section-cloth='' />
+      ))}
+    </svg>
+  );
+}
+
 /** The cross-section of the folds: one bar per ply, face black on top of wrong grey, turns as arcs. */
 export function SectionSvg({
   piece,
@@ -292,6 +359,8 @@ export function SectionSvg({
 }) {
   const sp = foldSection(piece.rs, allFlat(groups));
   if (!sp) return null;
+  if (sp.pleat)
+    return <PleatSectionSvg kind={sp.pleat.kind} className={big ? 'block w-full' : 'shrink-0'} />;
   const o = big
     ? { W: 420, pad: 56, gap: 24, th: 12, ticks: true, fixedH: 0 }
     : { W: 56, pad: 6, gap: 6, th: 3, ticks: false, fixedH: THUMB };

@@ -13,7 +13,7 @@ import {
   throughCreases,
   type FlatFold,
 } from './folded';
-import type { StoredFold } from './types';
+import { isPleatKind, type StoredFold } from './types';
 
 export type FoldMapGeometry = {
   readonly rings: readonly (readonly Pt2[])[];
@@ -296,7 +296,7 @@ const mapRing = (ring: readonly Pt2[], folds: readonly FlatFold[]): readonly Pt2
 /** Fold drawing geometry without changing its piece-local frame. */
 export function foldMap(geometry: FoldMapGeometry, folds: readonly FlatFold[]): FoldMapGeometry {
   if (!folds.length) return geometry;
-  if (folds.some((fold) => fold.kind === 'pleat')) {
+  if (folds.some((fold) => isPleatKind(fold.kind))) {
     const ring = geometry.rings[0] ?? [];
     return {
       rings: geometry.rings.map((item) => mapRing(item, folds)),

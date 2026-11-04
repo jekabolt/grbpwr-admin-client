@@ -38,6 +38,7 @@ import { PatternsMarkerContent, PatternsMarkerPage } from './pages/patterns-mark
 import { PiecesPage } from './pages/pieces';
 import { QcSignoffPage } from './pages/qc-signoff';
 import { TECHPACK_SHEET_CSS, TechpackSheet } from './sheet';
+import { sizeOf } from '../components/assembly-folds/fold-model';
 import { useAssemblyGeometry } from './use-assembly-geometry';
 import { useTechpackMarkerLayouts, useTechpackMeasurements } from './use-l3-data';
 import { useT } from './i18n';
@@ -158,12 +159,18 @@ export function TechpackDocument({
   const model = useMemo<AssemblyModel | null>(() => {
     if (geometry.dep.status === 'pending') return null;
     try {
-      return deriveAssembly({ techCard, pieces: geometry.pieces, grainDeg: geometry.grainDeg, t });
+      return deriveAssembly({
+        techCard,
+        pieces: geometry.pieces,
+        grainDeg: geometry.grainDeg,
+        drawnSize: sizeOf(geometry.shapes.shapeByKey),
+        t,
+      });
     } catch {
       // a pattern the engine cannot read still prints the operations, without drawings
       return deriveAssembly({ techCard, pieces: new Map(), grainDeg: new Map(), t });
     }
-  }, [techCard, geometry.dep.status, geometry.pieces, geometry.grainDeg, t]);
+  }, [techCard, geometry.dep.status, geometry.pieces, geometry.grainDeg, geometry.shapes, t]);
 
   const seamDeltas = useMemo<QcSeamDelta[] | undefined>(() => {
     if (!model) return undefined;
