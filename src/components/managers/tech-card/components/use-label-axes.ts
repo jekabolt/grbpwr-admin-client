@@ -28,7 +28,7 @@ export function useLabelAxes(techCard?: common_TechCard): LabelAxes {
         .map((c) => {
           const id = wireInt(c.colorwayId);
           const i18n = enId != null ? c.nameI18n?.[String(enId)] : '';
-          return { id, name: (i18n || c.devName || c.baseSku || `#${id}`).trim() };
+          return { id, name: (i18n || c.devName || c.colorCode || c.baseSku || `#${id}`).trim() };
         }),
     };
   }, [dictionary, sizeIds, techCard]);
