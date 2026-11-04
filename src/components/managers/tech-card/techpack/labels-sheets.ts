@@ -17,8 +17,8 @@ export const LABEL_BLOCK_GAP_PX = 14;
 
 // # item location attachment fold size material qty
 export const LABEL_TABLE_COLS: Record<PrintOrient, readonly number[]> = {
-  land: [26, 116, 150, 150, 84, 70, 163, 40],
-  port: [26, 98, 128, 128, 74, 64, 146, 40],
+  land: [36, 116, 145, 145, 84, 70, 163, 40],
+  port: [36, 98, 123, 123, 74, 64, 146, 40],
 };
 
 const HEADER_PX = 42;

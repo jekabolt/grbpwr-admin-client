@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { common_TechCard } from 'api/proto-http/admin';
 import { deriveLabels } from './derive-labels';
-import { planLabelSheets, qrColumns } from './labels-sheets';
+import { LABEL_TABLE_COLS, planLabelSheets, qrColumns } from './labels-sheets';
 import { LabelsPage } from './pages/labels';
 
 const url = (token: string) => `https://backend-beta.grbpwr.com/api/f/${token}`;
@@ -128,6 +128,14 @@ describe('page 05 sewn-in labels', () => {
       }
       expect(sheets[0].flat).toBe(true);
       expect(sheets.slice(1).some((s) => s.flat)).toBe(false);
+    }
+  });
+
+  it('keeps a three digit pin number on one line in the # column', () => {
+    const cellPaddingPx = 12;
+    const monoCharPx = 7.3;
+    for (const cols of Object.values(LABEL_TABLE_COLS)) {
+      expect(cols[0] - cellPaddingPx).toBeGreaterThanOrEqual(3 * monoCharPx);
     }
   });
 
