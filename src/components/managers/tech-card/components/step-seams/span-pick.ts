@@ -155,6 +155,23 @@ export function sideParts(
   });
 }
 
+/**
+ * Which of the edges stacked under a click takes it. A repeat at the same spot walks down the stack,
+ * except while the edge it last took is in hand: that click is that edge's, to shrink or to drop.
+ */
+export function repeatClickTarget(
+  hits: readonly string[],
+  id: string,
+  last: { x: number; y: number; id: string } | null,
+  at: Pt2,
+  inHand: ReadonlySet<string>,
+): string {
+  const again =
+    last && Math.hypot(last.x - at[0], last.y - at[1]) <= 4 ? hits.indexOf(last.id) : -1;
+  if (again < 0 || hits.length < 2) return id;
+  return inHand.has(hits[again]) ? hits[again] : hits[(again + 1) % hits.length];
+}
+
 /** Where a pointer falls along an edge drawn as `points`, in the edge's own mm. */
 export function mmOnPoints(points: readonly Pt2[], at: Pt2, targetLength: number): number {
   let total = 0;
