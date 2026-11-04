@@ -602,7 +602,6 @@ export function CompositionLabelBlock({
             {...common}
             resetTitle={cw.colourNameDerived || 'the colourway name'}
             onReset={() => setCareLabelColorway(g, s, cw.id, { colourName: '' })}
-            foot='SKU and size are facts of the colourway and the size list · Enter saves · Esc cancels'
           >
             <div className='flex flex-wrap items-center gap-x-3 gap-y-2 uppercase'>
               <span className='text-labelColor'>{sku || 'no SKU'}</span>
@@ -641,15 +640,13 @@ export function CompositionLabelBlock({
             {...common}
             resetTitle='the dictionary prose'
             onReset={() => setCareLabel(g, s, { careProseLines: [] })}
-            foot='Esc cancels · leaving the field saves'
           >
             <div className='max-w-[560px]'>
               <DraftLines
                 ariaLabel='care text on the label'
                 lines={data?.care.prose ?? []}
                 rows={3}
-                placeholder='pick care symbols: the text follows them'
-                hint='one sentence per line · printed in capitals, three lines at most'
+                placeholder='care text'
                 onCommit={(t) =>
                   setCareLabel(g, s, {
                     careProseLines: linesOverride(t, data?.care.derivedProse ?? []),
@@ -666,15 +663,7 @@ export function CompositionLabelBlock({
           <EditorStrip
             key={key}
             {...common}
-            source={
-              picked
-                ? 'staged · saves with the card'
-                : cw.countryName
-                  ? 'from the colourway · a new pick saves with the card'
-                  : suggested
-                    ? 'missing · workshop suggests one'
-                    : 'missing · set it here'
-            }
+            source={picked ? 'staged' : cw.countryName ? 'from colourway' : 'missing'}
           >
             <MadeInValue
               countryName={cw.countryName}
@@ -750,14 +739,12 @@ export function CompositionLabelBlock({
             {...common}
             resetTitle={QR_CAPTION.join(' / ')}
             onReset={() => setCareLabel(g, s, { backCaptionLines: [] })}
-            foot='Esc cancels · leaving the field saves'
           >
             <div className='max-w-[420px]'>
               <DraftLines
                 ariaLabel='QR caption on the label back'
                 lines={caption}
                 rows={2}
-                hint='first line above the QR code, second line under it'
                 onCommit={(t) =>
                   setCareLabel(g, s, { backCaptionLines: linesOverride(t, QR_CAPTION) })
                 }
@@ -773,7 +760,6 @@ export function CompositionLabelBlock({
             {...common}
             resetTitle='the company address'
             onReset={() => setCareLabel(g, s, { addressLines: [] })}
-            foot='Esc cancels · leaving the field saves'
           >
             <div className='max-w-[420px]'>
               <DraftLines
@@ -987,9 +973,7 @@ export function CompositionLabelBlock({
         <div ref={workRef} className='flex min-w-0 flex-col gap-6' data-composition-preview=''>
           {!cw ? (
             <Text size='micro' variant='label'>
-              {techCardId
-                ? 'no colourways yet: the label draws once the style has one'
-                : 'save the card and add a colourway: the label draws from them'}
+              no colourways
             </Text>
           ) : model.shaperFailed ? (
             <Text size='micro' variant='errorLabel'>
