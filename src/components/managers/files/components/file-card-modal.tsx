@@ -4,6 +4,7 @@ import type { FileTopic } from 'api/proto-http/admin';
 import { publicFilePageUrl } from 'components/file-share-viewer/link';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { PHONE_QUERY, useMediaQuery } from 'components/managers/tasks/hooks/useMediaQuery';
+import { FilePdfPreview } from './file-pdf-preview';
 import { FileContentViewer } from 'components/managers/tasks/task-detail/file-view/file-content-viewer';
 import { taskFileViewOf } from 'components/managers/tasks/task-detail/file-view/file-view';
 import { MediaViewer, useMediaViewer } from 'components/shared/media-viewer/media-viewer';
@@ -363,6 +364,19 @@ export function FileCardModal({
     }
   };
 
+  const filePlate = file ? (
+    <div
+      className={`${phone ? 'h-80' : 'h-96'} flex shrink-0 flex-col items-center justify-center gap-0.5 border-b border-borderColor bg-pageBg`}
+    >
+      <Text component='span' className='font-bold uppercase'>
+        {extensionOf(name || file.fileName || '')}
+      </Text>
+      <Text size='micro' variant='label' component='span'>
+        {formatBytes(Number(file.sizeBytes ?? 0))}
+      </Text>
+    </div>
+  ) : null;
+
   const rowClass = `${phone ? 'min-h-11' : ''} items-start py-2 [&>span:first-child]:min-w-0 [&>span:first-child]:flex-1`;
   const actionClass = phone ? 'min-h-11 -my-2 px-2' : '';
   const roleByProject = new Map(inProjects.map((project) => [project.id, project.role]));
@@ -600,6 +614,14 @@ export function FileCardModal({
                   }
                 />
               </div>
+            ) : readable && file.url ? (
+              <FilePdfPreview
+                url={file.url}
+                urlsExpireAt={file.urlsExpireAt ?? null}
+                fallback={filePlate}
+                className={phone ? 'h-80' : 'h-96'}
+                onOpen={() => setReading(true)}
+              />
             ) : imagePreview ? (
               <Button
                 type='button'
@@ -611,16 +633,7 @@ export function FileCardModal({
                 <img src={file.previewUrl} alt='' className='size-full object-contain' />
               </Button>
             ) : (
-              <div
-                className={`${phone ? 'h-80' : 'h-96'} flex shrink-0 flex-col items-center justify-center gap-0.5 border-b border-borderColor bg-pageBg`}
-              >
-                <Text component='span' className='font-bold uppercase'>
-                  {extensionOf(name || file.fileName || '')}
-                </Text>
-                <Text size='micro' variant='label' component='span'>
-                  {formatBytes(Number(file.sizeBytes ?? 0))}
-                </Text>
-              </div>
+              filePlate
             )}
 
             <div className='bg-bgColor px-3'>
@@ -812,16 +825,17 @@ export function FileCardModal({
             }`}
           >
             {file.downloadUrl ? (
-              <Button asChild variant='main' className={phone ? 'min-h-11' : undefined}>
+              <Button asChild size='sm' variant='main' className={phone ? 'min-h-11' : undefined}>
                 <a href={file.downloadUrl}>download</a>
               </Button>
             ) : (
-              <Button variant='main' disabled className={phone ? 'min-h-11' : undefined}>
+              <Button size='sm' variant='main' disabled className={phone ? 'min-h-11' : undefined}>
                 download
               </Button>
             )}
             {readable && (
               <Button
+                size='sm'
                 variant='secondary'
                 className={phone ? 'min-h-11' : undefined}
                 onClick={() => setReading(true)}
@@ -831,6 +845,7 @@ export function FileCardModal({
             )}
             {note && (
               <Button
+                size='sm'
                 variant='secondary'
                 className={phone ? 'min-h-11' : undefined}
                 onClick={openNote}
@@ -839,7 +854,12 @@ export function FileCardModal({
               </Button>
             )}
             {file.url && (
-              <Button asChild variant='secondary' className={phone ? 'min-h-11' : undefined}>
+              <Button
+                asChild
+                size='sm'
+                variant='secondary'
+                className={phone ? 'min-h-11' : undefined}
+              >
                 <a href={file.url} target='_blank' rel='noopener noreferrer'>
                   open
                 </a>
@@ -847,6 +867,7 @@ export function FileCardModal({
             )}
             {writable && dirty && (
               <Button
+                size='sm'
                 variant='secondary'
                 className={phone ? 'min-h-11' : undefined}
                 disabled={updateFile.isPending}
@@ -871,6 +892,7 @@ export function FileCardModal({
               )}
               {writable && (
                 <Button
+                  size='sm'
                   variant='secondary'
                   className={phone ? 'min-h-11' : undefined}
                   disabled={deleteFile.isPending || heldByTasks > 0}

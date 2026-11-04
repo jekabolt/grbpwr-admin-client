@@ -1,14 +1,15 @@
 // The composition label as a row of its own block: location, pin, material like any sewn-in, but the
 // artwork comes from `rebuild`: ONE pdf per colourway × size, made by the same generator as the ZIP,
-// put in the library behind a secret link. The set changes in one write once every file has arrived,
-// so a failure halfway leaves the printed QR codes pointing where they did.
+// put in the library behind a secret link, or from a file a person chose (see
+// composition-artwork-model.ts). The set changes in one write once every file has arrived, so a
+// failure halfway leaves the printed QR codes pointing where they did.
 import type { common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { failureText } from 'components/managers/files/api/rpc-error';
 import { SECTION } from 'constants/routes';
 import { notify } from 'lib/stores/store';
 import { useMemo, useRef, useState, type JSX } from 'react';
-import { useFormContext, useWatch } from 'react-hook-form';
+import { useFormContext } from 'react-hook-form';
 import { Button, Pill, Progress, Text } from 'ui';
 import type { FullPlan } from '../../care-labels/print-job';
 import { fileSlug, variantHash, variantPdf } from '../../care-labels/pages';
@@ -17,11 +18,18 @@ import { upsertGarmentLabel } from '../form-writers';
 import { uploadPublicFile } from '../label-artwork-upload';
 import type { FormGarmentLabel } from '../labels-schema';
 import type { TechCardFormData } from '../schema';
-import { COMPOSITION_LABEL_KEY, isCompositionLabel, type LabelAxes } from '../sewn-label-model';
+import {
+  COMPOSITION_LABEL_KEY,
+  isCompositionLabel,
+  isOwnArtworkFile,
+  type LabelAxes,
+} from '../sewn-label-model';
 import { bornLabelFacts, SewnLabelRow } from '../sewn-label-row';
 import { useUndoHistory } from '../undo-history';
 import { useLabelAxes } from '../use-label-axes';
 import { wireInt } from '../wire-int';
+import { ArtworkChoiceChips, CompositionArtwork, type ArtworkCellRef } from './composition-artwork';
+import { oneFileOf, type ArtworkChoice } from './composition-artwork-model';
 
 type StoredFile = NonNullable<FormGarmentLabel['files']>[number];
 
@@ -50,26 +58,37 @@ export function CompositionLabelRow({
   readiness,
   skuOf,
   canEdit,
+  files,
+  choice,
+  onChoice,
+  onChooseFile,
+  onClearFile,
+  onEditText,
 }: {
   techCard?: common_TechCard;
   plan: FullPlan | null;
   readiness: Readiness | null;
   skuOf: (colorwayId: number) => string;
   canEdit: boolean;
+  files: readonly StoredFile[];
+  choice: ArtworkChoice;
+  onChoice: (choice: ArtworkChoice) => void;
+  onChooseFile: (cell: ArtworkCellRef) => void;
+  onClearFile: (cell: ArtworkCellRef) => void;
+  onEditText: () => void;
 }): JSX.Element {
-  const { control, getValues, setValue } = useFormContext<TechCardFormData>();
+  const { getValues, setValue } = useFormContext<TechCardFormData>();
   const { canWrite } = usePermissions();
   const undoHistory = useUndoHistory();
   const axes = useLabelAxes(techCard);
-  const rows = (useWatch({ control, name: 'garmentLabels' }) ?? []) as FormGarmentLabel[];
-  const row = rows.find((r) => isCompositionLabel(r.key));
   const hashes = useVariantHashes(plan, axes);
 
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   // Files that already arrived this session, by input: a retry after a failure re-uploads nothing.
   const arrived = useRef(new Map<string, { libraryFileId: number; publicUrl: string }>());
 
-  const stale = (row?.files ?? []).some((f) => {
+  const stale = files.some((f) => {
+    if (isOwnArtworkFile(f)) return false;
     const want = hashes.get(cellOf(wireInt(f.colorwayId), wireInt(f.sizeId)));
     return !!want && f.sourceHash !== want;
   });
@@ -99,13 +118,15 @@ export function CompositionLabelRow({
       return;
     }
 
-    const next: StoredFile[] = [];
+    // Own files are not this button's to touch: they pass through, and their cells are not built.
+    const next: StoredFile[] = old.filter(isOwnArtworkFile);
     const queue: { colorwayId: number; sizeId: number; hash: string; name: string }[] = [];
     for (const c of usable) {
       for (const s of axes.sizes) {
         const hash = hashes.get(cellOf(c.id, s.id));
         if (!hash) continue;
         const have = oldCell(c.id, s.id);
+        if (have && isOwnArtworkFile(have)) continue;
         if (have?.publicUrl?.trim() && have.sourceHash === hash) {
           next.push(have);
           continue;
@@ -121,7 +142,7 @@ export function CompositionLabelRow({
     }
     // A colourway that cannot be laid out now keeps the files it had.
     for (const c of skipped) {
-      next.push(...old.filter((f) => wireInt(f.colorwayId) === c.id));
+      next.push(...old.filter((f) => wireInt(f.colorwayId) === c.id && !isOwnArtworkFile(f)));
     }
 
     undoHistory.cut('label-upload');
@@ -172,6 +193,7 @@ export function CompositionLabelRow({
     }
   };
 
+  const one = choice === 'one';
   const nothingToBuild =
     !plan || axes.colorways.length === 0 || axes.sizes.length === 0 || !canEdit;
 
@@ -185,19 +207,44 @@ export function CompositionLabelRow({
       canEdit={canEdit}
       last
       generated={{
-        pills: stale ? <Pill tone='warn'>! rebuild</Pill> : null,
+        pills: one ? (
+          oneFileOf(files) ? null : (
+            <Pill tone='warn'>! no file</Pill>
+          )
+        ) : stale ? (
+          <Pill tone='warn'>! rebuild</Pill>
+        ) : null,
+        hideMissing: one,
         action: (
-          <span className='flex items-center gap-2'>
-            <Button
-              type='button'
-              variant='underline'
-              size='xs'
-              disabled={nothingToBuild || !!progress}
-              onClick={() => void rebuild()}
-              data-composition-rebuild=''
-            >
-              rebuild
-            </Button>
+          <span className='flex flex-wrap items-center gap-x-3 gap-y-1'>
+            <ArtworkChoiceChips
+              choice={choice}
+              disabled={!canEdit || !!progress}
+              onChoose={onChoice}
+            />
+            {one ? null : (
+              <>
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  data-composition-edit-text=''
+                  onClick={onEditText}
+                >
+                  edit text
+                </Button>
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  disabled={nothingToBuild || !!progress}
+                  onClick={() => void rebuild()}
+                  data-composition-rebuild=''
+                >
+                  rebuild
+                </Button>
+              </>
+            )}
             {progress ? (
               <span className='flex w-32 items-center gap-2' data-composition-progress=''>
                 <Progress
@@ -210,6 +257,18 @@ export function CompositionLabelRow({
               </span>
             ) : null}
           </span>
+        ),
+        body: (
+          <CompositionArtwork
+            choice={choice}
+            files={files}
+            axes={axes}
+            plan={plan}
+            blocked={blockedIds}
+            canEdit={canEdit}
+            onChoose={onChooseFile}
+            onClear={onClearFile}
+          />
         ),
       }}
     />

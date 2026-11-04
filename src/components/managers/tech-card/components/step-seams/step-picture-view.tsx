@@ -50,7 +50,7 @@ import {
 } from '../cut-strips/strip-picture';
 import type { TechCardFormData } from '../schema';
 import { nameSpot } from './name-spot';
-import { mmOnPoints } from './span-pick';
+import { mmOnPoints, repeatClickTarget } from './span-pick';
 import { fmtMm } from './step-seams-model';
 import { placementPictureGlyphsForStep, type ButtonholeOperation } from './buttonhole-glyph';
 import { PAIR_INK, pairNo } from './palette';
@@ -2149,6 +2149,9 @@ export function StepPictureSvg({
   ]);
   // A second click on the same spot takes the edge of the layer below (owned pictures only).
   const lastPick = useRef<{ x: number; y: number; id: TargetId } | null>(null);
+  // A ref: the hit layer stays put while the hand changes.
+  const inHand = useRef<ReadonlySet<TargetId>>(new Set());
+  inHand.current = new Set(marks.filter((mark) => isPick(mark.tone)).map((mark) => mark.id));
   const pickAt = useCallback(
     (event: ReactMouseEvent<SVGPathElement>, id: TargetId): TargetId => {
       const { clientX: x, clientY: y } = event;
@@ -2176,9 +2179,7 @@ export function StepPictureSvg({
         .elementsFromPoint(x, y)
         .map((el) => el.getAttribute('data-seam-target'))
         .filter((hit): hit is TargetId => !!hit);
-      const last = lastPick.current;
-      const again = last && Math.hypot(last.x - x, last.y - y) <= 4 ? hits.indexOf(last.id) : -1;
-      const chosen = again >= 0 && hits.length > 1 ? hits[(again + 1) % hits.length] : id;
+      const chosen = repeatClickTarget(hits, id, lastPick.current, [x, y], inHand.current);
       lastPick.current = { x, y, id: chosen };
       return chosen;
     },
