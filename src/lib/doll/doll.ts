@@ -20,7 +20,15 @@ import { frameOf, grainDegOf, type PieceFrame } from 'lib/seams/frame';
 import { resolveAcrossSizes, type SizeResolved } from 'lib/seams/transfer';
 
 import { buildChart, toChart, type Chart, type ChartSeam } from './chart';
-import { foldPlies } from './fold-outline';
+import {
+  carry,
+  foldPlies,
+  type FoldStep,
+  type FoldStretch,
+  movedBy,
+  reflectTo,
+  stretchFor,
+} from './fold-outline';
 import {
   baseCurve,
   closedNeckPath,
@@ -265,14 +273,27 @@ function creaseEndsOf(rs: readonly Pt2[], f: PieceFrame, fold: DollFold): MeshCr
   return { s: lo.i, e: hi.i };
 }
 
+/** The fold rows of a piece as the mesh takes them. By kind alone: a pleat row is not folded yet. */
+export const foldCreases = (
+  rs: readonly Pt2[],
+  f: PieceFrame,
+  folds: readonly DollFold[],
+): MeshCrease[] =>
+  folds.map((fold) => ({
+    ...(creaseEndsOf(rs, f, fold) ?? { s: 0, e: 0 }),
+    passive: fold.kind !== 'inward' && fold.kind !== 'outward',
+  }));
+
 /**
  * Fold a meshed piece on itself: every fold in seq order turns the side holding `flipAt` (as cut)
  * over the crease's current line — a plain reflection of the vertices on that side, so a second
- * fold over a turned part rolls or zigzags it as paper would. `mesh.pts` becomes the folded
- * footprint; the piece as cut stays in `flat`. Stack ranks: the turned package goes under
+ * fold over a turned part rolls or zigzags it as paper would. A crease that crosses an earlier one
+ * has one current line per stretch, and each ply turns over the image of its own stretch (the rule
+ * and its helpers are shared with fold-outline.ts, so 2D and 3D agree). `mesh.pts` becomes the
+ * folded footprint; the piece as cut stays in `flat`. Stack ranks: the turned package goes under
  * (inward) or over (outward) the rest, its own order reversed as a flipped stack is.
  */
-function foldPanel(
+export function foldPanel(
   g: PieceGeom,
   mesh: PieceMesh,
   folds: readonly DollFold[],
@@ -286,14 +307,9 @@ function foldPanel(
   const cur = mesh.pts;
   const plyOf = new Int8Array(count);
   const creases: PanelFold['creases'] = [];
-  const chain: { sideOf: (q: Pt2) => number; sF: number; a1: Pt2; b1: Pt2 }[] = [];
-  const reflectTo = (p: Pt2, a1: Pt2, b1: Pt2): Pt2 => {
-    const L = Math.hypot(b1[0] - a1[0], b1[1] - a1[1]) || 1;
-    const nx = -(b1[1] - a1[1]) / L;
-    const ny = (b1[0] - a1[0]) / L;
-    const d = (p[0] - a1[0]) * nx + (p[1] - a1[1]) * ny;
-    return [p[0] - 2 * d * nx, p[1] - 2 * d * ny];
-  };
+  const chain: FoldStep[] = [];
+  /** Per applied fold, the vertices it moved: a crease vertex stays with the ply it did not leave. */
+  const moves: Uint8Array[] = [];
   const blank = (fold: DollFold, note: string): DollFoldReport => ({
     pieceKey: g.pieceKey,
     seq: fold.seq,
@@ -313,6 +329,23 @@ function foldPanel(
     const r = blank(fold, `${why} — not folded`);
     reports.push(r);
     warnings.push(`${g.pieceKey} fold ${fold.seq}: ${r.note}`);
+  };
+  /** The crease's line now, one stretch per run between its crossings with the folds applied. */
+  const stretchesOf = (verts: readonly number[], a: Pt2, b: Pt2): FoldStretch[] => {
+    const earlier = new Set(creases.flatMap((c) => c.verts));
+    const runs: number[][] = [[verts[0]]];
+    verts.slice(1).forEach((v, n) => {
+      runs[runs.length - 1].push(v);
+      if (n + 2 < verts.length && earlier.has(v)) runs.push([v]);
+    });
+    return runs.map((run) => {
+      const p = flat[run[0]];
+      const q = flat[run[run.length - 1]];
+      const moved = movedBy([(p[0] + q[0]) / 2, (p[1] + q[1]) / 2], chain);
+      if (runs.length > 1) return { moved, a1: carry(a, moved, chain), b1: carry(b, moved, chain) };
+      const [s, e] = [cur[verts[0]], cur[verts[verts.length - 1]]];
+      return { moved, a1: [s[0], s[1]], b1: [e[0], e[1]] };
+    });
   };
   folds.forEach((fold, k) => {
     // PLEAT stays flat in the doll until its mesh has a rigid two-half operation. It must never
@@ -343,11 +376,14 @@ function foldPanel(
       refuse(fold, 'nothing of the piece lies on the side to turn');
       return;
     }
-    const a1: Pt2 = [cur[verts[0]][0], cur[verts[0]][1]];
-    const b1: Pt2 = [cur[verts[verts.length - 1]][0], cur[verts[verts.length - 1]][1]];
+    const stretches = stretchesOf(verts, a, b);
     const mv = new Uint8Array(count);
     for (const i of moving) {
-      cur[i] = reflectTo(cur[i], a1, b1);
+      const s = stretchFor(
+        stretches,
+        moves.map((m) => m[i] === 1),
+      );
+      cur[i] = reflectTo(cur[i], s.a1, s.b1);
       mv[i] = 1;
     }
     let lo = Infinity;
@@ -365,7 +401,8 @@ function foldPanel(
     }
     for (const i of moving)
       plyOf[i] = fold.kind === 'inward' ? lo - 1 - (plyOf[i] - minM) : hi + 1 + (maxM - plyOf[i]);
-    chain.push({ sideOf, sF, a1, b1 });
+    chain.push({ sideOf, sF, stretches });
+    moves.push(mv);
     const report = blank(
       fold,
       `${fold.kind} fold creased along ${verts.length - 1} mesh edges · ${moving.length} of ${count} vertices turned ${fold.kind === 'inward' ? 'under' : 'over'} the rest`,
@@ -375,11 +412,7 @@ function foldPanel(
     creases.push({ seq: fold.seq, kind: fold.kind, verts, a, b, flipAt, report });
   });
   if (!creases.length) return undefined;
-  const foldPt = (q: Pt2): Pt2 => {
-    let p: Pt2 = [q[0], q[1]];
-    for (const c of chain) if (c.sideOf(q) === c.sF) p = reflectTo(p, c.a1, c.b1);
-    return p;
-  };
+  const foldPt = (q: Pt2): Pt2 => carry(q, movedBy(q, chain), chain);
   const creaseD = new Float64Array(count);
   const off = new Float64Array(count);
   for (let i = 0; i < count; i++) {
@@ -400,10 +433,23 @@ function foldPanel(
     triFlip[t / 3] = f;
   }
   const triPly = new Int8Array(T.length / 3);
+  // Beside a crossing a triangle can lie on creases with all three vertices, none of them telling
+  // its ply: its centroid does, through the rank of a vertex off the creases moved the same way.
+  const crossed = chain.some((c) => c.stretches.length > 1);
+  const rankOf = new Map<string, number>();
+  if (crossed)
+    for (let i = 0; i < count; i++)
+      if (creaseD[i] > 1e-6) rankOf.set(moves.map((m) => m[i]).join(), plyOf[i]);
   for (let t = 0; t < T.length; t += 3) {
     let far = T[t];
     for (const v of [T[t + 1], T[t + 2]]) if (creaseD[v] > creaseD[far]) far = v;
     triPly[t / 3] = plyOf[far];
+    if (crossed && creaseD[far] <= 1e-6) {
+      const [A, B, C] = [flat[T[t]], flat[T[t + 1]], flat[T[t + 2]]];
+      const cen: Pt2 = [(A[0] + B[0] + C[0]) / 3, (A[1] + B[1] + C[1]) / 3];
+      const rank = rankOf.get(movedBy(cen, chain).map(Number).join());
+      if (rank !== undefined) triPly[t / 3] = rank;
+    }
   }
   const creaseEdge = new Set<number>();
   const key = (a: number, b: number) => (a < b ? a * 1e6 + b : b * 1e6 + a);
@@ -1470,12 +1516,7 @@ export function solveDoll(input: DollInput): DollReport {
     const folds = grainFold ? foldsOf(p.key) : [];
     const frame = folds.length ? frameOf(g, grainFold!.get(g.pieceKey) ?? 0) : null;
     const mesh = frame
-      ? meshPiece(
-          g.rs,
-          keep,
-          h,
-          folds.map((f) => creaseEndsOf(g.rs, frame, f) ?? { s: 0, e: 0 }),
-        )
+      ? meshPiece(g.rs, keep, h, foldCreases(g.rs, frame, folds))
       : meshPiece(g.rs, keep, h);
     const fold = frame ? foldPanel(g, mesh, folds, frame, h, warnings, foldReports) : undefined;
     if (fold) footprints.set(p.key, fold.plies);
@@ -7843,6 +7884,8 @@ export function solveDoll(input: DollInput): DollReport {
         // follows the body's curve stays near 0; a wrinkled or wandering one does not.
         let dev = 0;
         for (let k = 1; k + 1 < c.verts.length; k++) {
+          // A crossing is where the other fold turns this crease over: a corner, not a wrinkle.
+          if (F.creases.some((o) => o !== c && o.verts.includes(c.verts[k]))) continue;
           const A = getPos(P.offset + c.verts[k - 1]);
           const B = getPos(P.offset + c.verts[k + 1]);
           const q = sub3(getPos(P.offset + c.verts[k]), A);
