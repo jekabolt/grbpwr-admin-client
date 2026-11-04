@@ -76,4 +76,11 @@ describe('foldedOutline', () => {
     expect(out.skipped).toEqual([1, 2]);
     expect(out.plies).toHaveLength(1);
   });
+
+  it('leaves PLEAT rows flat instead of treating them as outward folds', () => {
+    const out = foldedOutline(strip, [along(1 / 3, 0, 1, 'pleat')], frame);
+    expect(out.outline).toEqual(strip);
+    expect(out.plies).toEqual([{ poly: strip, layer: 0 }]);
+    expect(out.skipped).toEqual([1]);
+  });
 });

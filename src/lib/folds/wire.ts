@@ -15,6 +15,7 @@ import type {
 const KIND: Record<FoldKind, TechCardPieceFoldKindWire> = {
   inward: 'TECH_CARD_PIECE_FOLD_KIND_INWARD',
   outward: 'TECH_CARD_PIECE_FOLD_KIND_OUTWARD',
+  pleat: 'TECH_CARD_PIECE_FOLD_KIND_PLEAT',
 };
 const SOURCE: Record<FoldSource, TechCardPieceFoldSourceWire> = {
   dxf: 'TECH_CARD_PIECE_FOLD_SOURCE_DXF',

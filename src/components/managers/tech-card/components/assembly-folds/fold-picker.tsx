@@ -22,14 +22,17 @@ import { pieceRefKey } from '../piece-block-refs';
 import type { FoundPiece } from '../nesting/dxf-geometry';
 import {
   defaultSide,
+  detectPleatFans,
   foldGroupsOf,
   openHints,
   pieceView,
   PICK_KINDS,
   ptsAttr,
   rowsOfChoice,
+  rowsOfPleat,
   type FoldGroup,
   type PickKind,
+  type PleatFan,
 } from './fold-model';
 import { FAINT, GREY, HatchDef, INK, PAPER, PICK, PliesSvg } from './fold-picture';
 import { foldStepBlocked, stepOfFold, useFoldStep } from './fold-step';
@@ -58,6 +61,7 @@ type PickerLine = {
   line: [Pt2, Pt2];
   source: FoldSource;
   group?: FoldGroup;
+  pleatGroup?: FoldGroup;
   pending?: boolean;
 };
 
@@ -141,7 +145,7 @@ export function FoldPicker({
   const { geom, deg, inner, groups, hints, rows } = read;
   const [drawing, setDrawing] = useState<{ p1: Pt2 | null } | null>(null);
   const [pending, setPending] = useState<{ line: [Pt2, Pt2]; source: FoldSource } | null>(null);
-  const [hovered, setHovered] = useState<string | null>(null);
+  const [hovered, setHovered] = useState<string[]>([]);
   const [live, setLive] = useState<Pt2 | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -153,12 +157,23 @@ export function FoldPicker({
   const lines = useMemo<PickerLine[]>(
     () =>
       sortPickerLines([
-        ...groups.map((group) => ({
-          id: `saved:${group.rows.map((row) => row.foldKey).join(':')}`,
-          line: group.line,
-          source: group.source,
-          group,
-        })),
+        ...groups.flatMap((group): PickerLine[] =>
+          group.kind === 'pleat'
+            ? group.flat.map((fold, index) => ({
+                id: `saved:${group.rows.map((row) => row.foldKey).join(':')}:${index}`,
+                line: [fold.a, fold.b] as [Pt2, Pt2],
+                source: group.rows[index]?.source ?? group.source,
+                pleatGroup: group,
+              }))
+            : [
+                {
+                  id: `saved:${group.rows.map((row) => row.foldKey).join(':')}`,
+                  line: group.line,
+                  source: group.source,
+                  group,
+                },
+              ],
+        ),
         ...hints.map((hint) => ({
           id: `hint:${hint.id}`,
           line: hint.lineMm,
@@ -169,6 +184,17 @@ export function FoldPicker({
           : []),
       ]),
     [groups, hints, pending],
+  );
+  const pleatFans = useMemo(() => detectPleatFans(lines), [lines]);
+  const brokenPleats = useMemo(
+    () =>
+      groups.filter(
+        (group) =>
+          group.kind === 'pleat' &&
+          !group.complete &&
+          !pleatFans.some((fan) => fan.lines.some((line) => line.pleatGroup === group)),
+      ),
+    [groups, pleatFans],
   );
 
   const view = useMemo(
@@ -261,10 +287,14 @@ export function FoldPicker({
   };
 
   /** A fold belongs to the step it was picked on, unless that breaks the piece's fold order. */
-  const linkToStep = (saved: readonly StoredFold[], target: number | null | undefined) => {
+  const linkToStep = (
+    saved: readonly StoredFold[],
+    target: number | null | undefined,
+    currentRows: readonly StoredFold[] = rows,
+  ) => {
     if (target === null || target === undefined) return;
     const foldKeys = saved.map((row) => row.foldKey);
-    const others = rows.filter((row) => !foldKeys.includes(row.foldKey));
+    const others = currentRows.filter((row) => !foldKeys.includes(row.foldKey));
     const blocked = saved.some((row) =>
       foldStepBlocked(foldStep.operations, [...others, row], row.foldKey, target),
     );
@@ -297,6 +327,7 @@ export function FoldPicker({
     }
 
     const group = line.group;
+    if (group.kind === 'pleat') return;
     if (group.kind === kind) {
       // A fold saved before folds linked by themselves stays flat on the print until it has a step.
       if (group.rows.every((row) => stepOfFold(foldStep.operations, row.foldKey) === null))
@@ -340,7 +371,7 @@ export function FoldPicker({
 
   const swap = async (line: PickerLine) => {
     const group = line.group;
-    if (!group || frozen) return;
+    if (!group || group.kind === 'pleat' || frozen) return;
     const saved = rowsOfChoice(
       geom,
       {
@@ -364,6 +395,98 @@ export function FoldPicker({
     const foldKeys = line.group.rows.map((row) => row.foldKey);
     if (!(await writes.remove(line.group.rows))) return;
     foldStep.assign(foldKeys, null);
+  };
+
+  const removeGroup = async (group: FoldGroup) => {
+    if (frozen) return;
+    const foldKeys = group.rows.map((row) => row.foldKey);
+    if (!(await writes.remove(group.rows))) return;
+    foldStep.assign(foldKeys, null);
+  };
+
+  const removeGroups = async (removed: readonly FoldGroup[]) => {
+    const ownRows = [
+      ...new Map(removed.flatMap((group) => group.rows).map((row) => [row.foldKey, row])).values(),
+    ];
+    if (!ownRows.length || frozen || !(await writes.remove(ownRows))) return;
+    foldStep.assign(
+      ownRows.map((row) => row.foldKey),
+      null,
+    );
+  };
+
+  const activePleat = (fan: PleatFan): FoldGroup | null => {
+    const group = fan.lines[0].pleatGroup;
+    return group?.complete && fan.lines.every((line) => line.pleatGroup === group) ? group : null;
+  };
+
+  const choosePleat = async (fan: PleatFan) => {
+    if (frozen || choosing.current) return;
+    choosing.current = true;
+    try {
+      const active = activePleat(fan);
+      if (active) {
+        if (active.rows.every((row) => stepOfFold(foldStep.operations, row.foldKey) === null))
+          linkToStep(active.rows, stepIndex);
+        return;
+      }
+      const replacedGroups = [
+        ...new Set(
+          fan.lines.flatMap((line) =>
+            line.group && line.group.kind !== 'pleat'
+              ? [line.group]
+              : line.pleatGroup
+                ? [line.pleatGroup]
+                : [],
+          ),
+        ),
+      ];
+      const replaced = replacedGroups.flatMap((group) => group.rows);
+      const replacedKeys = new Set(replaced.map((row) => row.foldKey));
+      const oldStep = replaced
+        .map((row) => stepOfFold(foldStep.operations, row.foldKey))
+        .find((step) => step !== null);
+      const insertSeq = replaced.length
+        ? Math.min(...replaced.map((row) => row.seq))
+        : read.maxSeq + 1;
+      const saved = rowsOfPleat(geom, fan, {
+        seq: insertSeq,
+        grainDeg: deg,
+        anchoredSize: size,
+      });
+      if (!saved?.length) return;
+      const shifted = replaced.length
+        ? rows.flatMap((row) => {
+            if (replacedKeys.has(row.foldKey) || row.seq < insertSeq) return [];
+            const removedBefore = replaced.filter((old) => old.seq <= row.seq).length;
+            const seq = row.seq + 3 - removedBefore;
+            return seq === row.seq ? [] : [{ ...row, seq }];
+          })
+        : [];
+      const shiftedByKey = new Map(shifted.map((row) => [row.foldKey, row]));
+      const effectiveRows = [
+        ...rows
+          .filter((row) => !replacedKeys.has(row.foldKey))
+          .map((row) => shiftedByKey.get(row.foldKey) ?? row),
+        ...saved,
+      ];
+      if (replaced.length) {
+        if (!(await writes.remove(replaced))) return;
+        foldStep.assign(
+          replaced.map((row) => row.foldKey),
+          null,
+        );
+      }
+      if (!(await writes.upsert([...saved, ...shifted]))) return;
+      if (oldStep !== undefined && oldStep !== null)
+        foldStep.assign(
+          saved.map((row) => row.foldKey),
+          oldStep,
+        );
+      else linkToStep(saved, stepIndex, effectiveRows);
+    } finally {
+      choosing.current = false;
+    }
   };
 
   const liveSnap = drawing && live ? snapAt(live) : null;
@@ -420,7 +543,7 @@ export function FoldPicker({
                   key={line.id}
                   line={line}
                   number={index + 1}
-                  hovered={hovered === line.id}
+                  hovered={hovered.includes(line.id)}
                   view={view}
                 />
               ))}
@@ -476,7 +599,12 @@ export function FoldPicker({
               className='block size-full'
             >
               <HatchDef />
-              <PliesSvg v={folded.view} piece={geom} plies={folded.shape.plies} />
+              <PliesSvg
+                v={folded.view}
+                piece={geom}
+                plies={folded.shape.plies}
+                pleats={folded.shape.pleats}
+              />
               {folded.shape.creases.map((crease, index) => {
                 const a = folded.view.toPx(crease[0]);
                 const b = folded.view.toPx(crease[1]);
@@ -504,15 +632,137 @@ export function FoldPicker({
 
         <div className='w-full min-w-0 flex-1'>
           <div className='divide-y divide-hairline'>
+            {pleatFans.map((fan) => {
+              const group = activePleat(fan);
+              const partialGroups = [
+                ...new Set(
+                  fan.lines.flatMap((line) =>
+                    line.pleatGroup && line.pleatGroup !== group ? [line.pleatGroup] : [],
+                  ),
+                ),
+              ];
+              const numbers = fan.lines
+                .map((line) => lines.indexOf(line) + 1)
+                .filter((number) => number > 0)
+                .sort((a, b) => a - b);
+              const ids = fan.lines.map((line) => line.id);
+              return (
+                <div
+                  key={`pleat:${ids.join(':')}`}
+                  className='group border-b border-textColor py-2 hover:bg-pageBg focus-within:bg-pageBg'
+                  data-fold-pleat={numbers.join('-')}
+                  onPointerEnter={() => setHovered(ids)}
+                  onPointerLeave={() => setHovered([])}
+                  onFocus={() => setHovered(ids)}
+                  onBlur={() => setHovered([])}
+                >
+                  <div className='flex min-h-7 flex-wrap items-center gap-1.5'>
+                    <span className='flex gap-0.5'>
+                      {numbers.map((number) => (
+                        <span
+                          key={number}
+                          className='grid size-4.5 place-items-center border border-textColor text-nano tabular-nums'
+                        >
+                          {number}
+                        </span>
+                      ))}
+                    </span>
+                    <Chip
+                      selected={!!group}
+                      pressed={!!group}
+                      disabled={frozen}
+                      onClick={() => void choosePleat(fan)}
+                      className='gap-1.5 border-textColor px-2.5 py-1.5 active:translate-y-px'
+                      data-fold-kind='pleat'
+                    >
+                      <PleatFanIcon />
+                      pleat
+                    </Chip>
+                    {(group || partialGroups.length > 0) && (
+                      <Button
+                        variant='underline'
+                        size='xs'
+                        disabled={frozen}
+                        onClick={() =>
+                          void (group ? removeGroup(group) : removeGroups(partialGroups))
+                        }
+                        className='ml-auto hover:text-textColor active:translate-y-px'
+                        data-fold-remove=''
+                      >
+                        remove
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            {brokenPleats.map((group) => {
+              const numbers = group.flat
+                .map((fold) =>
+                  lines.findIndex(
+                    (line) =>
+                      line.pleatGroup === group &&
+                      line.line[0] === fold.a &&
+                      line.line[1] === fold.b,
+                  ),
+                )
+                .map((index) => index + 1)
+                .filter((number) => number > 0);
+              const ids = lines.filter((line) => line.pleatGroup === group).map((line) => line.id);
+              return (
+                <div
+                  key={`broken:${group.rows.map((row) => row.foldKey).join(':')}`}
+                  className='group border-b border-textColor py-2 hover:bg-pageBg focus-within:bg-pageBg'
+                  data-fold-pleat='broken'
+                  onPointerEnter={() => setHovered(ids)}
+                  onPointerLeave={() => setHovered([])}
+                  onFocus={() => setHovered(ids)}
+                  onBlur={() => setHovered([])}
+                >
+                  <div className='flex min-h-7 flex-wrap items-center gap-1.5'>
+                    {numbers.map((number) => (
+                      <span
+                        key={number}
+                        className='grid size-4.5 place-items-center border border-textColor text-nano tabular-nums'
+                      >
+                        {number}
+                      </span>
+                    ))}
+                    <Chip
+                      selected
+                      pressed
+                      disabled
+                      className='gap-1.5 border-textColor px-2.5 py-1.5'
+                    >
+                      <PleatFanIcon />
+                      pleat
+                    </Chip>
+                    <Button
+                      variant='underline'
+                      size='xs'
+                      disabled={frozen}
+                      onClick={() => void removeGroup(group)}
+                      className='ml-auto hover:text-textColor active:translate-y-px'
+                      data-fold-remove=''
+                    >
+                      remove
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
             {lines.map((line, index) => {
+              if (line.pleatGroup) return null;
               const kind = line.group?.kind ?? null;
               return (
                 <div
                   key={line.id}
                   className='group py-2 hover:bg-pageBg'
                   data-fold-row={index + 1}
-                  onPointerEnter={() => setHovered(line.id)}
-                  onPointerLeave={() => setHovered(null)}
+                  onPointerEnter={() => setHovered([line.id])}
+                  onPointerLeave={() => setHovered([])}
+                  onFocus={() => setHovered([line.id])}
+                  onBlur={() => setHovered([])}
                 >
                   <div className='flex min-h-7 flex-wrap items-center gap-1.5'>
                     <span className='grid size-4.5 place-items-center border border-textColor text-nano tabular-nums'>
@@ -588,6 +838,20 @@ export function FoldPicker({
         </div>
       </div>
     </div>
+  );
+}
+
+function PleatFanIcon() {
+  return (
+    <svg
+      width={14}
+      height={14}
+      viewBox='0 0 14 14'
+      aria-hidden='true'
+      className='shrink-0 fill-none stroke-current'
+    >
+      <path d='M7 13 2 1M7 13V1M7 13l5-12' strokeWidth={1.5} />
+    </svg>
   );
 }
 

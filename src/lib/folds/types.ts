@@ -10,7 +10,7 @@ import type { EdgeId, Pt2 } from 'lib/assembly-skeleton/types';
 /** A point in the piece's unit square (the seam frame). */
 export type UV = Pt2;
 
-export type FoldKind = 'inward' | 'outward';
+export type FoldKind = 'inward' | 'outward' | 'pleat';
 export type FoldSource = 'dxf' | 'owner' | 'accepted_hint';
 
 /** What the doll applies (SPEC-T3 contract): per piece key, ordered by seq. */
@@ -129,7 +129,10 @@ export type FoldResolveOptions = {
 export type TechCardPieceFoldKindWire =
   | 'TECH_CARD_PIECE_FOLD_KIND_UNKNOWN'
   | 'TECH_CARD_PIECE_FOLD_KIND_INWARD'
-  | 'TECH_CARD_PIECE_FOLD_KIND_OUTWARD';
+  | 'TECH_CARD_PIECE_FOLD_KIND_OUTWARD'
+  | 'TECH_CARD_PIECE_FOLD_KIND_PLEAT'
+  | 'TECH_CARD_PIECE_FOLD_KIND_PLEAT_LEFT'
+  | 'TECH_CARD_PIECE_FOLD_KIND_PLEAT_RIGHT';
 export type TechCardPieceFoldSourceWire =
   | 'TECH_CARD_PIECE_FOLD_SOURCE_UNKNOWN'
   | 'TECH_CARD_PIECE_FOLD_SOURCE_DXF'

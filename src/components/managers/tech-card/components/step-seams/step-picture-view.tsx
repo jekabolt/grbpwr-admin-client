@@ -1727,7 +1727,7 @@ export function StepPictureSvg({
   // `geoms` and `innerLines` below are what is drawn (`T ∘ foldMap`); action marks are read on the
   // flat pieces and carried across. With no fold these are the very maps the caller gave.
   const stepFolds = layout.folds?.flat;
-  const { geoms, innerLines, turned } = useMemo(
+  const { geoms, innerLines, turned, pleats } = useMemo(
     () => foldedDrawing(flatGeoms, flatInnerLines, stepFolds),
     [flatGeoms, flatInnerLines, stepFolds],
   );
@@ -1890,6 +1890,7 @@ export function StepPictureSvg({
       input: number;
       centre: Pt2;
       plies?: { d: string; under: boolean }[];
+      pleats?: { wedge: string; edges: string[]; centre: string }[];
       flatGhost?: string;
     }[] = [];
     const ghostKeys = foldGhost ? layout.folds?.closing : undefined;
@@ -1907,6 +1908,7 @@ export function StepPictureSvg({
       const ring = g.rs.map(px);
       const drawn = drawnRing(g.rs).map(px);
       const plies = turned.get(key);
+      const piecePleats = pleats.get(key);
       const flat = ghostKeys?.includes(key) ? flatGeoms.get(key) : undefined;
       out.push({
         key,
@@ -1917,11 +1919,31 @@ export function StepPictureSvg({
         ...(plies?.length
           ? { plies: plies.map((ply) => ({ d: pathOf(ply.ring.map(px), true), under: ply.under })) }
           : {}),
+        ...(piecePleats?.length
+          ? {
+              pleats: piecePleats.map((pleat) => ({
+                wedge: pathOf(pleat.wedge.map(px), true),
+                edges: pleat.edges.map((edge) => pathOf(edge.map(px))),
+                centre: pathOf(pleat.centre.map(px)),
+              })),
+            }
+          : {}),
         ...(flat ? { flatGhost: pathOf(drawnRing(flat.rs).map(px), true) } : {}),
       });
     }
     return out;
-  }, [claimedStackedKeys, layout, geoms, flatGeoms, turned, foldGhost, fit, layers, twinNumbers]);
+  }, [
+    claimedStackedKeys,
+    layout,
+    geoms,
+    flatGeoms,
+    turned,
+    pleats,
+    foldGhost,
+    fit,
+    layers,
+    twinNumbers,
+  ]);
   const ownedOrder = useMemo(
     () =>
       layers
@@ -2625,6 +2647,37 @@ export function StepPictureSvg({
       )}
     </g>
   ) : null;
+  const foldPleats = pieces.some((piece) => piece.pleats) ? (
+    <g pointerEvents='none' data-fold-pleats=''>
+      {pieces.flatMap((piece) =>
+        (piece.pleats ?? []).map((pleat, index) => (
+          <g key={`${piece.key}:${index}`} data-fold-pleat={piece.key}>
+            <path d={pleat.wedge} fill={FAINT} stroke='none' />
+            {pleat.edges.map((edge, edgeIndex) => (
+              <path
+                key={edgeIndex}
+                d={edge}
+                fill='none'
+                stroke={GREY}
+                strokeWidth={L.hair * 1.5}
+                strokeDasharray={L.dash}
+                strokeLinejoin='round'
+                data-fold-pleat-edge={piece.key}
+              />
+            ))}
+            <path
+              d={pleat.centre}
+              fill='none'
+              stroke={INK}
+              strokeWidth={L.outline}
+              strokeLinejoin='round'
+              data-fold-pleat-centre={piece.key}
+            />
+          </g>
+        )),
+      )}
+    </g>
+  ) : null;
 
   if (w < 2 || h < 2) return null;
   return (
@@ -2692,6 +2745,7 @@ export function StepPictureSvg({
         </>
       )}
       {look === 'canvas' && foldPlies}
+      {foldPleats}
       {look === 'canvas' && ghosts.length > 0 && (
         <g
           fill={FILL}

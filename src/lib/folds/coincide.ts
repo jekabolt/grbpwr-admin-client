@@ -2,6 +2,7 @@ import type { Pt2 } from 'lib/assembly-skeleton/types';
 import type { PieceFrame } from 'lib/seams/frame';
 import { reflect } from './folded';
 import { fromUV, sideDist } from './geom';
+import { pleatFanGeometry, type PleatFanGeometry } from './pleat';
 import type { StoredFold } from './types';
 
 type SidePart = {
@@ -69,6 +70,7 @@ export function coincidentGroups(
   const frames = new Map<string, PieceFrame | null>();
   const linesByPiece = new Map<string, [Pt2, Pt2][]>();
   for (const fold of activeFolds) {
+    if (fold.kind === 'pleat') continue;
     if (!frames.has(fold.pieceKey)) frames.set(fold.pieceKey, frameOf(fold.pieceKey));
     const frame = frames.get(fold.pieceKey);
     if (!frame) continue;
@@ -113,6 +115,93 @@ export function coincidentGroups(
   return [...groups.values()];
 }
 
+type LocatedPleatLine = { row: StoredFold; line: [Pt2, Pt2] };
+
+function pleatsByPiece(
+  activeFolds: readonly StoredFold[],
+  frameOf: (piece: string) => PieceFrame | null,
+): Map<string, PleatFanGeometry<LocatedPleatLine>[]> {
+  const out = new Map<string, PleatFanGeometry<LocatedPleatLine>[]>();
+  const byPiece = new Map<string, StoredFold[]>();
+  for (const row of activeFolds) {
+    if (row.kind !== 'pleat') continue;
+    byPiece.set(row.pieceKey, [...(byPiece.get(row.pieceKey) ?? []), row]);
+  }
+  for (const [piece, rows] of byPiece) {
+    const frame = frameOf(piece);
+    if (!frame) continue;
+    const sorted = [...rows].sort((a, b) => a.seq - b.seq || a.foldKey.localeCompare(b.foldKey));
+    for (let index = 0; index + 2 < sorted.length; ) {
+      const triple = sorted.slice(index, index + 3);
+      if (triple[1].seq !== triple[0].seq + 1 || triple[2].seq !== triple[0].seq + 2) {
+        index++;
+        continue;
+      }
+      const located = triple.map((row) => ({
+        row,
+        line: [fromUV(frame, row.line[0]), fromUV(frame, row.line[1])] as [Pt2, Pt2],
+      })) as [LocatedPleatLine, LocatedPleatLine, LocatedPleatLine];
+      const fan = pleatFanGeometry(located);
+      if (fan) {
+        out.set(piece, [...(out.get(piece) ?? []), fan]);
+        index += 3;
+      } else index++;
+    }
+  }
+  return out;
+}
+
+const polylineLength = (points: readonly Pt2[]) =>
+  points
+    .slice(1)
+    .reduce(
+      (sum, point, index) =>
+        sum + Math.hypot(point[0] - points[index][0], point[1] - points[index][1]),
+      0,
+    );
+
+const inPleatIntake = (point: Pt2, fan: PleatFanGeometry<LocatedPleatLine>) => {
+  const centreFar = fan.far.get(fan.centre)!;
+  const ray = [centreFar[0] - fan.apex[0], centreFar[1] - fan.apex[1]] as Pt2;
+  const at = [point[0] - fan.apex[0], point[1] - fan.apex[1]] as Pt2;
+  if (ray[0] * at[0] + ray[1] * at[1] <= 0) return false;
+  return [fan.negative, fan.positive].every((leg) => {
+    const centreSide = Math.sign(sideDist(leg.line[0], leg.line[1], centreFar));
+    const pointSide = Math.sign(sideDist(leg.line[0], leg.line[1], point));
+    return !pointSide || pointSide === centreSide;
+  });
+};
+
+/** Length left on the closed contour: the flat stretch between both PLEAT legs is internal. */
+function visiblePleatLength(
+  points: readonly Pt2[],
+  fans: readonly PleatFanGeometry<LocatedPleatLine>[],
+): number {
+  let total = 0;
+  for (let index = 1; index < points.length; index++) {
+    const a = points[index - 1];
+    const b = points[index];
+    const cuts = [0, 1];
+    for (const fan of fans)
+      for (const leg of [fan.negative, fan.positive]) {
+        const da = sideDist(leg.line[0], leg.line[1], a);
+        const db = sideDist(leg.line[0], leg.line[1], b);
+        if (da * db < -SIDE_EPS_MM) cuts.push(da / (da - db));
+      }
+    cuts.sort((left, right) => left - right);
+    for (let cut = 1; cut < cuts.length; cut++) {
+      const t0 = cuts[cut - 1];
+      const t1 = cuts[cut];
+      if (t1 - t0 <= SIDE_EPS_MM) continue;
+      const mid = (t0 + t1) / 2;
+      const point: Pt2 = [a[0] + (b[0] - a[0]) * mid, a[1] + (b[1] - a[1]) * mid];
+      if (fans.some((fan) => inPleatIntake(point, fan))) continue;
+      total += Math.hypot(b[0] - a[0], b[1] - a[1]) * (t1 - t0);
+    }
+  }
+  return total;
+}
+
 /** The guard: count once only if the other side matches the single length better than the sum. */
 export function foldedSideLengthMm(
   parts: readonly SidePart[],
@@ -121,10 +210,25 @@ export function foldedSideLengthMm(
   frameOf: (piece: string) => PieceFrame | null,
 ): number {
   const plain = parts.reduce((sum, part) => sum + part.lenMm, 0);
-  if (otherSideMm === null || activeFolds.length === 0) return plain;
+  if (activeFolds.length === 0) return plain;
 
-  const partById = new Map(parts.map((part) => [part.id, part]));
-  const once = coincidentGroups(parts, activeFolds, frameOf).reduce((total, group) => {
+  const pleats = pleatsByPiece(activeFolds, frameOf);
+  const adjusted = parts.map((part) => {
+    const fans = pleats.get(part.piece);
+    if (!fans?.length) return part;
+    const sampled = polylineLength(part.pts);
+    const visible = visiblePleatLength(part.pts, fans);
+    return {
+      ...part,
+      lenMm: sampled > SIDE_EPS_MM ? (part.lenMm * visible) / sampled : part.lenMm,
+    };
+  });
+  const pleatLength = adjusted.reduce((sum, part) => sum + part.lenMm, 0);
+  const hasPleatIntake = pleatLength < plain - SIDE_EPS_MM;
+  if (otherSideMm === null) return hasPleatIntake ? pleatLength : plain;
+
+  const partById = new Map(adjusted.map((part) => [part.id, part]));
+  const once = coincidentGroups(adjusted, activeFolds, frameOf).reduce((total, group) => {
     const lengths = group.map((id) => partById.get(id)!.lenMm);
     return total + lengths.reduce((sum, length) => sum + length, 0) / lengths.length;
   }, 0);

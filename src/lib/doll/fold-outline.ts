@@ -97,6 +97,12 @@ export function foldPlies(poly: readonly Pt[], folds: readonly FoldMm[]): Folded
   const skipped: number[] = [];
   let across: FoldedPlies['across'] = null;
   for (const fold of [...folds].sort((x, y) => x.seq - y.seq)) {
+    // The 3D doll has no rigid two-half pleat primitive yet. Leaving these rows flat is the safe
+    // fallback: treating every non-inward kind as outward would turn all three halves face down.
+    if (fold.kind === 'pleat') {
+      skipped.push(fold.seq);
+      continue;
+    }
     const { a, b } = fold;
     const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
     if (L < 1e-9) {

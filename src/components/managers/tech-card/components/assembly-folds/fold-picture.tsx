@@ -4,7 +4,7 @@
 
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import type { FoldHint } from 'lib/folds';
-import { foldedOutline, foldSection, type FlatFold, type FoldPly } from 'lib/folds';
+import { foldedOutline, foldSection, type FlatFold, type FoldPleat, type FoldPly } from 'lib/folds';
 import { pieceView, ptsAttr, type FoldGroup, type PickKind, type PieceView } from './fold-model';
 
 export const INK = 'var(--color-textColor)';
@@ -138,11 +138,13 @@ export function PliesSvg({
   v,
   piece,
   plies,
+  pleats = [],
   thin = false,
 }: {
   v: PieceView;
   piece: PieceGeom;
   plies: readonly FoldPly[];
+  pleats?: readonly FoldPleat[];
   thin?: boolean;
 }) {
   const w = thin ? 1 : 2.4;
@@ -155,34 +157,36 @@ export function PliesSvg({
         strokeWidth={thin ? 0.8 : 1.6}
         strokeLinejoin='round'
       />
-      {plies.map((y, i) => {
-        const mid = y.t < 1;
-        const back = mid && y.t >= 0.5;
-        return (
-          <g key={i}>
-            <polygon
-              points={ptsAttr(v, y.poly)}
-              fill={back ? RULE : PAPER}
-              stroke={INK}
-              strokeWidth={y.by ? w * 0.6 : w}
-              strokeLinejoin='round'
-            />
-            {mid ? (
+      {plies
+        .filter((ply) => !ply.hidden)
+        .map((y, i) => {
+          const mid = y.t < 1;
+          const back = mid && y.t >= 0.5;
+          return (
+            <g key={i}>
               <polygon
                 points={ptsAttr(v, y.poly)}
-                fill={INK}
-                fillOpacity={0.18 * Math.sin(Math.PI * y.t)}
-                stroke='none'
+                fill={back ? RULE : PAPER}
+                stroke={INK}
+                strokeWidth={y.by ? w * 0.6 : w}
+                strokeLinejoin='round'
               />
-            ) : y.by ? (
-              <polygon points={ptsAttr(v, y.poly)} fill='url(#fold-hatch)' stroke='none' />
-            ) : null}
-          </g>
-        );
-      })}
+              {mid ? (
+                <polygon
+                  points={ptsAttr(v, y.poly)}
+                  fill={INK}
+                  fillOpacity={0.18 * Math.sin(Math.PI * y.t)}
+                  stroke='none'
+                />
+              ) : y.by && y.flipped ? (
+                <polygon points={ptsAttr(v, y.poly)} fill='url(#fold-hatch)' stroke='none' />
+              ) : null}
+            </g>
+          );
+        })}
       {/* A ply turned UNDER (in) is hidden by the face: its outline shows through, dashed. */}
       {plies.map((y, i) =>
-        y.by && y.t >= 1 && i < plies.findIndex((q) => !q.by) ? (
+        !y.hidden && y.by && y.t >= 1 && i < plies.findIndex((q) => !q.by) ? (
           <polygon
             key={`u${i}`}
             points={ptsAttr(v, y.poly)}
@@ -194,6 +198,37 @@ export function PliesSvg({
           />
         ) : null,
       )}
+      <PleatSvg v={v} pleats={pleats} thin={thin} />
+    </>
+  );
+}
+
+function PleatSvg({
+  v,
+  pleats,
+  thin,
+}: {
+  v: PieceView;
+  pleats: readonly FoldPleat[];
+  thin: boolean;
+}) {
+  return (
+    <>
+      {pleats.map((pleat, index) => (
+        <g key={index} pointerEvents='none' data-fold-pleat=''>
+          <polygon points={ptsAttr(v, pleat.wedge)} fill={FAINT} stroke='none' />
+          {pleat.edges.map((edge, edgeIndex) => (
+            <g key={edgeIndex}>
+              {line(v, edge, {
+                stroke: GREY,
+                strokeWidth: thin ? 0.7 : 1.2,
+                strokeDasharray: thin ? '2 1.5' : '4 3',
+              })}
+            </g>
+          ))}
+          {line(v, pleat.centre, { stroke: INK, strokeWidth: thin ? 1.2 : 2.4 })}
+        </g>
+      ))}
     </>
   );
 }
@@ -237,11 +272,10 @@ export function FoldedThumb({
       className='shrink-0'
     >
       <HatchDef />
-      <PliesSvg v={v} piece={piece} plies={shape.plies} thin />
-      {groups.map((g, i) => {
-        const l = shape.creases[allFlat(groups.slice(0, i + 1)).length - 1];
-        return l ? <g key={i}>{line(v, l, { stroke: INK, strokeWidth: 1.8 })}</g> : null;
-      })}
+      <PliesSvg v={v} piece={piece} plies={shape.plies} pleats={shape.pleats} thin />
+      {shape.creases.map((crease, index) => (
+        <g key={index}>{line(v, crease, { stroke: INK, strokeWidth: 1.8 })}</g>
+      ))}
     </svg>
   );
 }

@@ -3,6 +3,7 @@ import type { Pt2 } from 'lib/assembly-skeleton/types';
 import { add, inside, mul, sideDist, sub } from './geom';
 import {
   foldedOutline,
+  foldedPoint,
   foldsCross,
   inFoldBand,
   insertCrease,
@@ -202,6 +203,45 @@ const mapPolylines = (
         lines.map((line) => [...line]),
       );
 
+/** Source polylines need a break at every pleat leg: the two sides land in different layers. */
+const cutAtFoldLines = (line: readonly Pt2[], folds: readonly FlatFold[]): Pt2[][] => {
+  let parts = [[...line]];
+  for (const fold of folds) {
+    parts = parts.flatMap((part) => {
+      if (part.length < 2) return [part];
+      const out: Pt2[][] = [];
+      let current: Pt2[] = [part[0]];
+      for (let i = 1; i < part.length; i++) {
+        const a = part[i - 1];
+        const b = part[i];
+        const da = sideDist(fold.a, fold.b, a);
+        const db = sideDist(fold.a, fold.b, b);
+        if (da * db < -EPS) {
+          const at = add(a, mul(sub(b, a), da / (da - db)));
+          current.push(at);
+          out.push(current);
+          current = [at, b];
+        } else current.push(b);
+      }
+      if (current.length > 1) out.push(current);
+      return out;
+    });
+  }
+  return parts;
+};
+
+const mapPleatPolylines = (
+  lines: readonly (readonly Pt2[])[],
+  ring: readonly Pt2[],
+  folds: readonly FlatFold[],
+): Pt2[][] =>
+  lines.flatMap((line) =>
+    cutAtFoldLines(line, folds).map((part) => {
+      const probe = part.length < 2 ? part[0] : mul(add(part[0], part[part.length - 1]), 0.5);
+      return part.map((point) => foldedPoint(ring, folds, point, probe));
+    }),
+  );
+
 const area = (ring: readonly Pt2[]) =>
   Math.abs(
     ring.reduce((sum, [x, y], i) => {
@@ -256,6 +296,15 @@ const mapRing = (ring: readonly Pt2[], folds: readonly FlatFold[]): readonly Pt2
 /** Fold drawing geometry without changing its piece-local frame. */
 export function foldMap(geometry: FoldMapGeometry, folds: readonly FlatFold[]): FoldMapGeometry {
   if (!folds.length) return geometry;
+  if (folds.some((fold) => fold.kind === 'pleat')) {
+    const ring = geometry.rings[0] ?? [];
+    return {
+      rings: geometry.rings.map((item) => mapRing(item, folds)),
+      edges: mapPleatPolylines(geometry.edges, ring, folds),
+      marks: geometry.marks.map((mark) => foldedPoint(ring, folds, mark)),
+      innerLines: mapPleatPolylines(geometry.innerLines, ring, folds),
+    };
+  }
   const bounded = folds.map((fold) => geometry.rings.every((ring) => isFoldBounded(ring, fold)));
   return {
     rings: geometry.rings.map((ring) => mapRing(ring, folds)),
