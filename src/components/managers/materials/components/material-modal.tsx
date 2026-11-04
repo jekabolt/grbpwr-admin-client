@@ -77,7 +77,7 @@ export const materialClassOptions: Array<{ value: common_MaterialClass; label: s
   { value: 'MATERIAL_CLASS_OTHER', label: 'other' },
 ];
 
-const materialLabelTypeOptions: Array<{ value: common_MaterialLabelType; label: string }> = [
+export const materialLabelTypeOptions: Array<{ value: common_MaterialLabelType; label: string }> = [
   { value: 'MATERIAL_LABEL_TYPE_BRAND', label: 'brand' },
   { value: 'MATERIAL_LABEL_TYPE_SIZE', label: 'size' },
   { value: 'MATERIAL_LABEL_TYPE_FLAG', label: 'flag' },
