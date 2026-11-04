@@ -3627,6 +3627,15 @@ export type TechCardGarmentLabel = {
   // Artwork per colourway (true) or one for all colourways (false). Independent of artwork_per_size;
   // both off = one file for the whole style. Carried with artwork_per_size when that is absent.
   artworkPerColorway: boolean | undefined;
+  // How the label was chosen: stock or make; "" = an older row. PRESENCE BIT: absent means an older
+  // client, whose save keeps the stored source, kind, made_by, print_method and length_cm. A row with
+  // a source owns its BOM line: the save writes the line's per-garment count and its recipe rows.
+  source?: string;
+  kind: string | undefined;
+  madeBy: string | undefined;
+  printMethod: string | undefined;
+  // Per garment length in cm, for goods sold by the metre; unset or 0 = counted in qty_per_garment.
+  lengthCm: googletype_Decimal | undefined;
 };
 
 // TechCardGarmentLabelFile is one artwork file of a garment label, printed as a QR on the tech pack.
