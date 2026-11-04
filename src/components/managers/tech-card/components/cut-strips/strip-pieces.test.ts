@@ -334,3 +334,11 @@ describe('a step that sews a strip consumes its BOM line', () => {
     expect(stripQtyInStep({ inputKeys: ['BLT'] }, [strip], 'RUBBER')).toBeNull();
   });
 });
+
+describe('the size on a strip mark', () => {
+  it('reads as the rest of the screen writes it, not as the dictionary stores it', () => {
+    const sizeNames = new Map([[2, 'm_32bo_m']]);
+    const mark = stripMarkOf(fromSeamStrip(), BOM, { sizeNames, baseSizeId: 2 });
+    expect(mark?.sizeName).toBe('m [32]');
+  });
+});

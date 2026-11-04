@@ -1753,7 +1753,12 @@ function TrayChip({
         )}
       >
         {piece.strip ? (
-          <StripTileFace name={piece.name} qty={piece.strip.qty} className='size-14' />
+          <StripTileFace
+            name={piece.name}
+            qty={piece.strip.qty}
+            found={shape}
+            className='size-14'
+          />
         ) : (
           <PieceTile found={shape} name={piece.name} cloth={cloth} />
         )}

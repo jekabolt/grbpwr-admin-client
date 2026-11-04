@@ -7,6 +7,7 @@
 // form's `pieces` (the mapper would save them) nor the raw card that the cut sheet, the marker and
 // the fabric norm read. This file is pure: the assembly worker imports it.
 import type { common_TechCard } from 'api/proto-http/admin';
+import { formatSizeName } from 'components/managers/product/utility/sizes';
 import type { CutStripMark } from 'lib/assembly-skeleton/types';
 import type { PieceDTO } from 'lib/nesting/types';
 
@@ -25,7 +26,7 @@ export type CutStripLike = StripLengths & {
   qty?: number | null;
 };
 
-type BomLineLike = { lineKey?: string | null; name?: string | null };
+export type BomLineLike = { lineKey?: string | null; name?: string | null };
 
 const decimal = (value: CutStripLike['widthMm'], fallback: number): number => {
   const text = (typeof value === 'object' && value !== null ? value.value ?? '' : value ?? '')
@@ -254,7 +255,7 @@ export function stripMarkOf(
   const row = strip.sizes?.find((size) => Number(size.sizeId) === sizeId);
   const manual = !one && String(row?.manualCutMm ?? '').trim() !== '';
   const seamMm = mode === 'from_seam' ? seamMmAt(strip, sizeId) : undefined;
-  const sizeName = one ? undefined : o.sizeNames?.get(sizeId);
+  const sizeName = one ? undefined : formatSizeName(o.sizeNames?.get(sizeId));
   return {
     label: stripName(strip, bomLines),
     mode,

@@ -135,6 +135,39 @@ export function placeStripsOnHosts(
   return hosts;
 }
 
+/**
+ * The piece a hand-placed strip lies on: the topmost cloth under its middle (Map order is paint
+ * order). `null` when it was put down beside the cloth.
+ */
+export function stripHostUnder(
+  key: string,
+  T: ReadonlyMap<string, Affine>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): string | null {
+  const strip = geoms.get(key);
+  const own = T.get(key);
+  if (!strip?.rs.length || !own) return null;
+  const middle = apply(
+    own,
+    strip.rs.reduce<Pt2>(
+      (sum, point) => [sum[0] + point[0] / strip.rs.length, sum[1] + point[1] / strip.rs.length],
+      [0, 0],
+    ),
+  );
+  for (const [piece, transform] of [...T].reverse()) {
+    const geom = geoms.get(piece);
+    if (piece === key || geom?.cutStrip || (geom?.rs.length ?? 0) < 3) continue;
+    if (
+      insideRing(
+        middle,
+        geom!.rs.map((point) => apply(transform, point)),
+      )
+    )
+      return piece;
+  }
+  return null;
+}
+
 /** A row or seam with a strip on a side is not edge to edge on the picture, by design. */
 export function anchorsNameStrip(
   anchors: readonly { piece: string }[],

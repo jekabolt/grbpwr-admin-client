@@ -812,7 +812,13 @@ function ShelfTile({
         style={{ width: SHELF_BOX.w, height: SHELF_BOX.h }}
       >
         {piece.strip ? (
-          <StripTileFace name={piece.name} qty={piece.strip.qty} className='size-full' />
+          <StripTileFace
+            name={piece.name}
+            qty={piece.strip.qty}
+            found={found}
+            pxBox={SHELF_BOX}
+            className='size-full'
+          />
         ) : (
           <PieceTile
             found={found}
