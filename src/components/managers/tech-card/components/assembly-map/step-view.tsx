@@ -6,6 +6,7 @@ import type { SeamCandidate } from 'lib/assembly-skeleton/types';
 import { activeFoldRows, type StoredFold } from 'lib/folds';
 import { candidateSideParts } from 'lib/seams';
 import { Text } from 'ui';
+import { sizeOf } from '../assembly-folds/fold-model';
 import { useFoldRows } from '../assembly-folds/folds-store';
 import { seamLengthsDiffer } from '../cut-strips/length-check';
 import { stepHighlightOf } from '../step-seams/step-highlight';
@@ -138,7 +139,13 @@ export function StepView({ model, index }: { model: MapModel; index: number }) {
     ? [
         ...new Set(
           (read.seams[index] ?? []).flatMap((seam) =>
-            mismatchFacts(read, seam, activeFolds, geo?.grainDeg, seamToleranceOf(op.seamToleranceMm)),
+            mismatchFacts(
+              read,
+              seam,
+              activeFolds,
+              geo?.grainDeg,
+              seamToleranceOf(op.seamToleranceMm),
+            ),
           ),
         ),
       ]
@@ -182,6 +189,7 @@ export function StepView({ model, index }: { model: MapModel; index: number }) {
             stepParts={highlight.parts}
             names={inputNames}
             foldGhost
+            pleatNote={sizeOf(geo?.shapes.shapeByKey)}
           />
         ) : (
           <div className='flex flex-wrap items-center justify-center gap-2 p-2' data-map-names=''>

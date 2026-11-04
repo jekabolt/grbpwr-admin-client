@@ -55,7 +55,7 @@ export type DollFold = {
   a: UV;
   b: UV;
   flipAt: UV;
-  kind: 'inward' | 'outward';
+  kind: 'inward' | 'outward' | 'pleat' | 'pleat_l' | 'pleat_r';
 };
 
 /** One fold as drawn: the numbers the proof asks for, per fold, in mm and degrees. */

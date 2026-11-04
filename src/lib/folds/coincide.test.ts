@@ -250,4 +250,51 @@ describe('coincidentGroups', () => {
     ]);
     expect(foldedSideLengthMm(parts, 200, [stored], () => realFrame)).toBe(200);
   });
+
+  it('removes the 70 mm BP neck intake across a PLEAT', () => {
+    const pieceKey = '01BACKPIECE000000000000001';
+    const frame: PieceFrame = {
+      pieceKey,
+      deg: 0,
+      c: [284.5, 346],
+      x0: 0,
+      y0: 0,
+      w: 569,
+      h: 692,
+    };
+    const mmLines: [Pt2, Pt2][] = [
+      [
+        [285, 14],
+        [250, 662],
+      ],
+      [
+        [285, 14],
+        [285, 663],
+      ],
+      [
+        [285, 14],
+        [320, 662],
+      ],
+    ];
+    const rows: StoredFold[] = mmLines.map((line, index) => ({
+      ...fold(pieceKey, [toUV(frame, line[0]), toUV(frame, line[1])]),
+      foldKey: `pleat-${index + 1}`,
+      seq: index + 1,
+      kind: 'pleat',
+    }));
+    const neck: Part = {
+      id: `${pieceKey}#neck`,
+      piece: pieceKey,
+      pts: [
+        [200, 662],
+        [250, 662],
+        [285, 663],
+        [320, 662],
+        [370, 662],
+      ],
+      lenMm: 170,
+    };
+
+    expect(foldedSideLengthMm([neck], 100, rows, () => frame)).toBeCloseTo(100, 0);
+  });
 });

@@ -1,7 +1,7 @@
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { breakPoints } from 'lib/assembly-skeleton/geometry';
 import { apply, IDENTITY, translate } from 'lib/assembly-skeleton/union/affine';
-import type { StoredFold } from 'lib/folds';
+import type { FlatFold, StoredFold } from 'lib/folds';
 import { describe, expect, it } from 'vitest';
 import {
   cardFoldsOf,
@@ -192,6 +192,33 @@ describe('foldedDrawing', () => {
     expect(boxX(drawing.geoms.get('WIDE')!.rs)).toEqual([70, 140]);
     const kept = drawing.turned.get('WIDE')?.find((ply) => !ply.under && boxX(ply.ring)[1] === 100);
     expect(kept && boxX(kept.ring)).toEqual([70, 100]);
+  });
+
+  it('keeps the closed PLEAT convention separate from turned plies', () => {
+    const bp = new Map([['BP', flap('BP', 569, 692)]]);
+    const pleat: FlatFold[] = [
+      { a: [285, 14], b: [250, 662], flipAt: [240, 600], kind: 'pleat' },
+      { a: [285, 14], b: [285, 663], flipAt: [270, 600], kind: 'pleat' },
+      { a: [285, 14], b: [320, 662], flipAt: [330, 600], kind: 'pleat' },
+    ];
+    const drawing = foldedDrawing(bp, undefined, new Map([['BP', pleat]]));
+
+    expect(drawing.pleats.get('BP')).toHaveLength(1);
+    expect(drawing.pleats.get('BP')?.[0].edges).toHaveLength(2);
+    expect(drawing.turned.get('BP')).toEqual([]);
+  });
+
+  it('draws an IN made after PLEAT as turned-under', () => {
+    const bp = new Map([['BP', flap('BP', 569, 692)]]);
+    const folds: FlatFold[] = [
+      { a: [285, 14], b: [250, 662], flipAt: [240, 600], kind: 'pleat' },
+      { a: [285, 14], b: [285, 663], flipAt: [270, 600], kind: 'pleat' },
+      { a: [285, 14], b: [320, 662], flipAt: [330, 600], kind: 'pleat' },
+      { a: [0, 32], b: [285, 14], flipAt: [40, 18], kind: 'inward' },
+    ];
+    const drawing = foldedDrawing(bp, undefined, new Map([['BP', folds]]));
+
+    expect(drawing.turned.get('BP')?.some((ply) => ply.under)).toBe(true);
   });
 });
 

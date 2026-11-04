@@ -278,3 +278,101 @@ describe('foldMap — a pleat of lines meeting at one point', () => {
     expect(mapped.marks[0][1]).toBeCloseTo(350, 6);
   });
 });
+
+describe('PLEAT rigid fold — BP size M', () => {
+  const back: Pt2[] = [
+    [0, 0],
+    [569, 0],
+    [569, 692],
+    [0, 692],
+  ];
+  const apex: Pt2 = [285, 14];
+  const pleat: FlatFold[] = [
+    { a: apex, b: [250, 662], flipAt: [230, 340], kind: 'pleat' },
+    { a: apex, b: [285, 663], flipAt: [270, 340], kind: 'pleat' },
+    { a: apex, b: [320, 662], flipAt: [340, 340], kind: 'pleat' },
+  ];
+
+  it('closes 70 mm at the neck without flipping either back half', () => {
+    const shape = foldedOutline(back, pleat);
+    const mapped = foldMap(
+      {
+        rings: [back],
+        edges: [],
+        marks: [
+          [0, 662],
+          [569, 662],
+          [0, 14],
+          [569, 14],
+          [0, 0],
+          [569, 0],
+          [250, 662],
+          [320, 662],
+        ],
+        innerLines: [],
+      },
+      pleat,
+    );
+
+    const neckReduction = 569 - (mapped.marks[1][0] - mapped.marks[0][0]);
+    expect(neckReduction).toBeGreaterThan(69);
+    expect(neckReduction).toBeLessThan(72);
+    const apexWidth = mapped.marks[3][0] - mapped.marks[2][0];
+    expect(apexWidth).toBeGreaterThan(568);
+    expect(apexWidth).toBeLessThan(570);
+    expect(Math.abs(mapped.marks[5][1] - mapped.marks[4][1])).toBeLessThan(1);
+    expect(mapped.marks[6][0]).toBeCloseTo(285, 6);
+    expect(mapped.marks[7][0]).toBeCloseTo(285, 6);
+    expect(shape.outline.length).toBeGreaterThan(3);
+    expect(shape.creases).toHaveLength(1);
+    expect(shape.pleats).toHaveLength(1);
+    expect(shape.plies.filter((ply) => !ply.hidden).every((ply) => !ply.flipped)).toBe(true);
+    expect(shape.plies.filter((ply) => ply.hidden)).toEqual([
+      expect.objectContaining({ flipped: false }),
+    ]);
+    const wedgeTop = shape.pleats[0].wedge.slice(1);
+    expect(Math.abs(wedgeTop[1][0] - wedgeTop[0][0])).toBeCloseTo(35, 0);
+    expect((wedgeTop[0][0] + wedgeTop[1][0]) / 2).toBeCloseTo(285, 0);
+  });
+
+  it('keeps points inside the hidden wedge on their own half', () => {
+    const mapped = foldMap(
+      {
+        rings: [back],
+        edges: [],
+        marks: [
+          [267.5, 662],
+          [302.5, 662],
+        ],
+        innerLines: [],
+      },
+      pleat,
+    );
+    expect(mapped.marks[0][0]).toBeLessThan(285);
+    expect(mapped.marks[1][0]).toBeGreaterThan(285);
+  });
+
+  it('maps a later IN crease through the pleat before applying it', () => {
+    const line4: FlatFold = {
+      a: [0, 32],
+      b: apex,
+      flipAt: [40, 18],
+      kind: 'inward',
+    };
+    const before = foldMap(
+      {
+        rings: [back],
+        edges: [],
+        marks: [line4.a, line4.b],
+        innerLines: [],
+      },
+      pleat,
+    ).marks;
+    const shape = foldedOutline(back, [...pleat, line4]);
+
+    expect(shape.creases.at(-1)?.[0]).toEqual(before[0]);
+    expect(shape.creases.at(-1)?.[1]).toEqual(before[1]);
+    expect(shape.creases.at(-1)?.[0]).not.toEqual(line4.a);
+    expect(shape.plies.some((ply) => ply.under && ply.flipped && !ply.pleatFace)).toBe(true);
+  });
+});

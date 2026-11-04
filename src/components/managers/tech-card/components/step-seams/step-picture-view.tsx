@@ -55,6 +55,8 @@ import { fmtMm } from './step-seams-model';
 import { placementPictureGlyphsForStep, type ButtonholeOperation } from './buttonhole-glyph';
 import { PAIR_INK, pairNo } from './palette';
 import { layerStyle } from './layer-style';
+import { foldSection, type FoldPleat } from 'lib/folds';
+import { PleatSectionSvg, pleatSectionHeight } from '../assembly-folds/fold-picture';
 import { foldedActionGlyphs, foldedActionLines, foldedDrawing } from './step-folds';
 import { NO_SEAM_TEXT, stepHighlightOf } from './step-highlight';
 import { stepHandsOf, type StepHands } from './step-hand';
@@ -1636,6 +1638,15 @@ export function pictureBounds(
  * the input's centre, or under it with `namesBelow`. With `onPick` every visible plain edge and
  * inner line is a door; active hidden targets project onto the contour that represents them.
  */
+const PLEAT_NOTE_GAP = 4;
+const PLEAT_NOTE_MAX_SHARE = 0.3;
+
+/** The kind as it reads in this drawing: the hidden wedge on screen, not the piece's own view. */
+const screenPleatKind = (pleat: FoldPleat, px: (p: Pt2) => Pt2): FoldPleat['kind'] => {
+  if (pleat.kind === 'pleat') return 'pleat';
+  return px(pleat.wedge[1])[0] < px(pleat.wedge[2])[0] ? 'pleat_r' : 'pleat_l';
+};
+
 export function StepPictureSvg({
   w,
   h,
@@ -1671,6 +1682,7 @@ export function StepPictureSvg({
   view,
   bounds,
   foldGhost,
+  pleatNote,
   className,
 }: {
   w: number;
@@ -1721,13 +1733,15 @@ export function StepPictureSvg({
   bounds?: Box;
   /** A piece whose fold closes on this step also shows flat, dashed (the assembly map). */
   foldGhost?: boolean;
+  /** Print and map: the size the sheet is on. Set, a pleat shows its section and opening on the step that closes it. */
+  pleatNote?: string;
   className?: string;
 }) {
   const L = LOOK[look];
   // `geoms` and `innerLines` below are what is drawn (`T ∘ foldMap`); action marks are read on the
   // flat pieces and carried across. With no fold these are the very maps the caller gave.
   const stepFolds = layout.folds?.flat;
-  const { geoms, innerLines, turned } = useMemo(
+  const { geoms, innerLines, turned, pleats } = useMemo(
     () => foldedDrawing(flatGeoms, flatInnerLines, stepFolds),
     [flatGeoms, flatInnerLines, stepFolds],
   );
@@ -1877,10 +1891,39 @@ export function StepPictureSvg({
   const vk = view?.k ?? 1;
   const vx = view?.x ?? 0;
   const vy = view?.y ?? 0;
+  // The pleats this very step closes, for the section and the opening above the piece.
+  const closingPleats = useMemo(() => {
+    if (pleatNote === undefined) return [];
+    return [...(layout.folds?.closingAt ?? [])].flatMap(([key, places]) =>
+      (pleats.get(key) ?? [])
+        .filter((pleat) => [0, 1, 2].some((offset) => places.has(pleat.by + offset)))
+        .map((pleat) => ({ key, pleat })),
+    );
+  }, [layout.folds, pleatNote, pleats]);
+  const pleatRoom = useMemo(() => {
+    if (!closingPleats.length) return 0;
+    const provisional = fitBox(fitBounds, w, h, fitPad).s;
+    const widest = Math.max(
+      ...closingPleats.map(({ key, pleat }) => {
+        const T = layout.T.get(key);
+        const ring = (flatGeoms.get(key)?.rs ?? []).map((p) => (T ? apply(T, p) : p));
+        const xs = ring.map((p) => p[0]);
+        return (
+          pleatSectionHeight(
+            pleat.kind,
+            Math.min(w - 2 * pad, (Math.max(...xs) - Math.min(...xs)) * provisional),
+          ) +
+          LOOK[look].font +
+          PLEAT_NOTE_GAP * 3
+        );
+      }),
+    );
+    return Math.min(widest, h * PLEAT_NOTE_MAX_SHARE);
+  }, [closingPleats, fitBounds, fitPad, flatGeoms, h, layout.T, look, pad, w]);
   const fit = useMemo(() => {
-    const f = fitBox(fitBounds, w, h, fitPad);
-    return { s: f.s * vk, tx: f.tx * vk + vx, ty: f.ty * vk + vy };
-  }, [fitBounds, w, h, fitPad, vk, vx, vy]);
+    const f = fitBox(fitBounds, w, Math.max(h - pleatRoom, 1), fitPad);
+    return { s: f.s * vk, tx: f.tx * vk + vx, ty: (f.ty + pleatRoom) * vk + vy };
+  }, [fitBounds, w, h, fitPad, pleatRoom, vk, vx, vy]);
 
   const pieces = useMemo(() => {
     const out: {
@@ -1890,6 +1933,7 @@ export function StepPictureSvg({
       input: number;
       centre: Pt2;
       plies?: { d: string; under: boolean }[];
+      pleats?: { wedge: string; edges: string[]; centre: string }[];
       flatGhost?: string;
     }[] = [];
     const ghostKeys = foldGhost ? layout.folds?.closing : undefined;
@@ -1907,6 +1951,7 @@ export function StepPictureSvg({
       const ring = g.rs.map(px);
       const drawn = drawnRing(g.rs).map(px);
       const plies = turned.get(key);
+      const piecePleats = pleats.get(key);
       const flat = ghostKeys?.includes(key) ? flatGeoms.get(key) : undefined;
       out.push({
         key,
@@ -1917,11 +1962,31 @@ export function StepPictureSvg({
         ...(plies?.length
           ? { plies: plies.map((ply) => ({ d: pathOf(ply.ring.map(px), true), under: ply.under })) }
           : {}),
+        ...(piecePleats?.length
+          ? {
+              pleats: piecePleats.map((pleat) => ({
+                wedge: pathOf(pleat.wedge.map(px), true),
+                edges: pleat.edges.map((edge) => pathOf(edge.map(px))),
+                centre: pathOf(pleat.centre.map(px)),
+              })),
+            }
+          : {}),
         ...(flat ? { flatGhost: pathOf(drawnRing(flat.rs).map(px), true) } : {}),
       });
     }
     return out;
-  }, [claimedStackedKeys, layout, geoms, flatGeoms, turned, foldGhost, fit, layers, twinNumbers]);
+  }, [
+    claimedStackedKeys,
+    layout,
+    geoms,
+    flatGeoms,
+    turned,
+    pleats,
+    foldGhost,
+    fit,
+    layers,
+    twinNumbers,
+  ]);
   const ownedOrder = useMemo(
     () =>
       layers
@@ -2625,6 +2690,93 @@ export function StepPictureSvg({
       )}
     </g>
   ) : null;
+  const foldPleats = pieces.some((piece) => piece.pleats) ? (
+    <g pointerEvents='none' data-fold-pleats=''>
+      {pieces.flatMap((piece) =>
+        (piece.pleats ?? []).map((pleat, index) => (
+          <g key={`${piece.key}:${index}`} data-fold-pleat={piece.key}>
+            <path d={pleat.wedge} fill={FAINT} stroke='none' />
+            {pleat.edges.map((edge, edgeIndex) => (
+              <path
+                key={edgeIndex}
+                d={edge}
+                fill='none'
+                stroke={GREY}
+                strokeWidth={L.hair * 1.5}
+                strokeDasharray={L.dash}
+                strokeLinejoin='round'
+                data-fold-pleat-edge={piece.key}
+              />
+            ))}
+            <path
+              d={pleat.centre}
+              fill='none'
+              stroke={INK}
+              strokeWidth={L.outline}
+              strokeLinejoin='round'
+              data-fold-pleat-centre={piece.key}
+            />
+          </g>
+        )),
+      )}
+    </g>
+  ) : null;
+
+  const pleatNotes = closingPleats.length ? (
+    <g pointerEvents='none' data-fold-pleat-notes=''>
+      {closingPleats.map(({ key, pleat }) => {
+        const T = layout.T.get(key);
+        const flatPiece = flatGeoms.get(key);
+        const folds = stepFolds?.get(key);
+        if (!T || !flatPiece || !folds) return null;
+        const section = foldSection(flatPiece.rs, folds.slice(pleat.by - 1, pleat.by + 2));
+        if (!section?.pleat) return null;
+        const px = (p: Pt2): Pt2 => toPx(fit, apply(T, p));
+        const flatPx = flatPiece.rs.map(px);
+        const xs = flatPx.map((p) => p[0]);
+        const top = Math.min(
+          ...flatPx.map((p) => p[1]),
+          ...(geoms.get(key)?.rs ?? []).map((p) => px(p)[1]),
+        );
+        const [fromX, fromY] = px(pleat.opening[0]);
+        const [toX, toY] = px(pleat.opening[1]);
+        const middle = (fromX + toX) / 2;
+        const half = Math.hypot(toX - fromX, toY - fromY) / 2;
+        const lineY = top - PLEAT_NOTE_GAP;
+        const textY = lineY - PLEAT_NOTE_GAP;
+        const width = Math.min(w - 2 * pad, Math.max(...xs) - Math.min(...xs));
+        // Upright, a → pleat hides to the left. The picture may lay the piece any way: the section
+        // goes with what is drawn beside it, the word on the sheet stays with the piece.
+        const kind = screenPleatKind(pleat, px);
+        const sectionY = textY - L.font - pleatSectionHeight(kind, width);
+        const sectionX = Math.max(pad, Math.min(w - pad - width, middle - width / 2));
+        return (
+          <g key={`${key}:${pleat.by}`} data-fold-pleat-note={key}>
+            <PleatSectionSvg kind={kind} x={sectionX} y={sectionY} width={width} />
+            <line
+              x1={middle - half}
+              y1={lineY}
+              x2={middle + half}
+              y2={lineY}
+              stroke={GREY}
+              strokeWidth={L.hair}
+              data-fold-pleat-opening={key}
+            />
+            <text
+              x={middle}
+              y={textY}
+              textAnchor='middle'
+              fill={GREY}
+              fontSize={L.font}
+              className='tabular-nums'
+            >
+              {[pleatNote, Math.round(section.pleat.openingMm)].filter(Boolean).join(' · ')}
+            </text>
+          </g>
+        );
+      })}
+    </g>
+  ) : null;
 
   if (w < 2 || h < 2) return null;
   return (
@@ -2692,6 +2844,7 @@ export function StepPictureSvg({
         </>
       )}
       {look === 'canvas' && foldPlies}
+      {foldPleats}
       {look === 'canvas' && ghosts.length > 0 && (
         <g
           fill={FILL}
@@ -2962,6 +3115,7 @@ export function StepPictureSvg({
           />
         );
       })}
+      {pleatNotes}
       {noStepSeams && noStepSeamLabel && (
         <text
           x={w / 2}

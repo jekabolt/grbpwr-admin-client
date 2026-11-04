@@ -315,6 +315,9 @@ function foldPanel(
     warnings.push(`${g.pieceKey} fold ${fold.seq}: ${r.note}`);
   };
   folds.forEach((fold, k) => {
+    // PLEAT stays flat in the doll until its mesh has a rigid two-half operation. It must never
+    // fall through the inward/outward ternary below and be reflected as an outward fold.
+    if (fold.kind !== 'inward' && fold.kind !== 'outward') return;
     const verts = mesh.creases?.[k] ?? [];
     if (verts.length < 2) {
       refuse(

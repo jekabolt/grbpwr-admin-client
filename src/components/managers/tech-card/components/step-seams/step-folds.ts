@@ -11,6 +11,7 @@ import {
   foldMap,
   resolveFolds,
   type FlatFold,
+  type FoldPleat,
   type FoldStep,
   type StoredFold,
 } from 'lib/folds';
@@ -57,6 +58,8 @@ export type StepFolds = {
   rows: readonly StoredFold[];
   /** Pieces whose fold closes on this very step. */
   closing: readonly string[];
+  /** Per piece, the 1-based places in its `flat` list of the rows this very step closes. */
+  closingAt?: ReadonlyMap<string, ReadonlySet<number>>;
 };
 
 type RunPart = { id: string; piece: string; pts: readonly Pt2[]; lenMm: number };
@@ -147,7 +150,16 @@ export function cardFoldsOf(
     const closing = [
       ...new Set(rows.filter((row) => closes.has(row.foldKey)).map((row) => row.pieceKey)),
     ];
-    return { flat, rows, closing };
+    const closingAt = new Map(
+      closing.map((piece) => {
+        const own = rows.filter((row) => row.pieceKey === piece).sort((a, b) => a.seq - b.seq);
+        return [
+          piece,
+          new Set(own.flatMap((row, place) => (closes.has(row.foldKey) ? [place + 1] : []))),
+        ];
+      }),
+    );
+    return { flat, rows, closing, closingAt };
   };
 }
 
@@ -185,9 +197,12 @@ export type FoldedDrawing = {
   geoms: ReadonlyMap<string, PieceGeom>;
   innerLines: ReadonlyMap<string, Pt2[][]> | undefined;
   turned: ReadonlyMap<string, readonly TurnedPly[]>;
+  /** Closed PLEAT convention marks in the folded piece frame. */
+  pleats: ReadonlyMap<string, readonly FoldPleat[]>;
 };
 
 const NO_TURNED: ReadonlyMap<string, readonly TurnedPly[]> = new Map();
+const NO_PLEATS: ReadonlyMap<string, readonly FoldPleat[]> = new Map();
 const drawings = new WeakMap<
   object,
   {
@@ -207,13 +222,14 @@ export function foldedDrawing(
   innerLines: ReadonlyMap<string, Pt2[][]> | undefined,
   flat: FlatFolds | undefined,
 ): FoldedDrawing {
-  if (!flat?.size) return { geoms, innerLines, turned: NO_TURNED };
+  if (!flat?.size) return { geoms, innerLines, turned: NO_TURNED, pleats: NO_PLEATS };
   const hit = drawings.get(flat);
   if (hit?.geoms === geoms && hit.innerLines === innerLines) return hit.drawing;
 
   const foldedGeoms = new Map(geoms);
   const foldedInner = innerLines ? new Map(innerLines) : undefined;
   const turned = new Map<string, readonly TurnedPly[]>();
+  const pleats = new Map<string, readonly FoldPleat[]>();
   for (const [key, folds] of flat) {
     const geom = geoms.get(key);
     if (!geom) continue;
@@ -237,19 +253,22 @@ export function foldedDrawing(
         lines.map((line) => foldedLine(line, geom.rs, folds)),
       );
 
-    const { outline, plies } = foldedOutline(geom.rs, folds);
+    const { outline, plies, pleats: piecePleats } = foldedOutline(geom.rs, folds);
     const firstKept = plies.findIndex((ply) => !ply.by);
     turned.set(key, [
       ...plies.flatMap((ply, index): TurnedPly[] =>
-        ply.by ? [{ ring: ply.poly, under: index < firstKept }] : [],
+        ply.by && !ply.hidden && !ply.pleatFace
+          ? [{ ring: ply.poly, under: ply.under ?? index < firstKept }]
+          : [],
       ),
       // The ring is a silhouette (the larger part turned): the kept part's own edge still shows.
       ...(outline.length && Math.abs(ringArea(ring) - ringArea(outline)) > 1
         ? [{ ring: outline, under: false }]
         : []),
     ]);
+    if (piecePleats.length) pleats.set(key, piecePleats);
   }
-  const drawing: FoldedDrawing = { geoms: foldedGeoms, innerLines: foldedInner, turned };
+  const drawing: FoldedDrawing = { geoms: foldedGeoms, innerLines: foldedInner, turned, pleats };
   drawings.set(flat, { geoms, innerLines, drawing });
   return drawing;
 }

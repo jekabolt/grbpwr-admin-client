@@ -8,7 +8,10 @@
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import {
   doubleTurn,
+  findPleatFans,
   foldFromLine,
+  isPleatKind,
+  pleatFanGeometry,
   pointOnSide,
   resolveFolds,
   sideOf,
@@ -16,6 +19,8 @@ import {
   type FlatFold,
   type FoldHint,
   type FoldSource,
+  type PleatFanGeometry,
+  type PleatKind,
   type StoredFold,
 } from 'lib/folds';
 import { frameOf, fromUV } from 'lib/folds/geom';
@@ -23,10 +28,11 @@ import { rotatePt } from 'lib/pom/upright';
 
 export type PickKind = 'in' | 'out' | 'double';
 export const PICK_KINDS: readonly PickKind[] = ['in', 'out', 'double'];
+export type FoldGroupKind = PickKind | 'pleat';
 
 /** One fold as the owner sees it: one line, one kind, one flipping side. */
 export type FoldGroup = {
-  kind: PickKind;
+  kind: FoldGroupKind;
   /** The line the owner drew or accepted (for a double, the second — outer — turn). */
   line: [Pt2, Pt2];
   side: 1 | -1;
@@ -34,7 +40,23 @@ export type FoldGroup = {
   /** The folds to apply, in order (two for a double). */
   flat: FlatFold[];
   source: FoldSource;
+  /** Only PLEAT uses this: false is a broken saved set kept visible for removal. */
+  complete?: boolean;
+  /** Only PLEAT: the stored direction, read off the centre row. */
+  pleatKind?: PleatKind;
 };
+
+export type PleatLine = {
+  id: string;
+  line: [Pt2, Pt2];
+  source: FoldSource;
+  group?: FoldGroup;
+  pleatGroup?: FoldGroup;
+};
+
+export type PleatFan = PleatFanGeometry<PleatLine>;
+
+export const detectPleatFans = (lines: readonly PleatLine[]): PleatFan[] => findPleatFans(lines);
 
 const angle = (p: [Pt2, Pt2], q: [Pt2, Pt2]) => {
   const d1 = [p[1][0] - p[0][0], p[1][1] - p[0][1]];
@@ -46,6 +68,11 @@ const angle = (p: [Pt2, Pt2], q: [Pt2, Pt2]) => {
 };
 
 const mid = (l: [Pt2, Pt2]): Pt2 => [(l[0][0] + l[1][0]) / 2, (l[0][1] + l[1][1]) / 2];
+
+const sharesApex = (left: FlatFold, right: FlatFold) =>
+  [left.a, left.b].some((a) =>
+    [right.a, right.b].some((b) => Math.hypot(a[0] - b[0], a[1] - b[1]) < 5),
+  );
 
 /** The rows of one piece, laid on today's geometry and grouped as the picker speaks. */
 export function foldGroupsOf(
@@ -86,6 +113,66 @@ export function foldGroupsOf(
     const two = items[i + 1];
     const l1: [Pt2, Pt2] = [one.flat.a, one.flat.b];
     const s1 = sideOf(one.flat.a, one.flat.b, one.flat.flipAt);
+    if (isPleatKind(one.row.kind)) {
+      const three = items[i + 2];
+      const consecutive =
+        isPleatKind(two?.row.kind) &&
+        isPleatKind(three?.row.kind) &&
+        two.row.seq === one.row.seq + 1 &&
+        three.row.seq === one.row.seq + 2;
+      const fan = consecutive
+        ? pleatFanGeometry([
+            { line: l1, item: one },
+            { line: [two.flat.a, two.flat.b], item: two },
+            { line: [three.flat.a, three.flat.b], item: three },
+          ])
+        : null;
+      if (fan) {
+        const ordered = fan.lines.map((line) => line.item);
+        const centre = fan.centre.item;
+        groups.push({
+          kind: 'pleat',
+          line: [centre.flat.a, centre.flat.b],
+          side: sideOf(centre.flat.a, centre.flat.b, centre.flat.flipAt),
+          rows: ordered.map((item) => item.row),
+          flat: ordered.map((item) => item.flat),
+          source: centre.row.source,
+          complete: true,
+          pleatKind: centre.row.kind as PleatKind,
+        });
+        i += 2;
+        continue;
+      }
+      if (
+        isPleatKind(two?.row.kind) &&
+        two.row.seq <= one.row.seq + 2 &&
+        sharesApex(one.flat, two.flat)
+      ) {
+        groups.push({
+          kind: 'pleat',
+          line: l1,
+          side: s1,
+          rows: [one.row, two.row],
+          flat: [one.flat, two.flat],
+          source: one.row.source,
+          complete: false,
+          pleatKind: one.row.kind,
+        });
+        i++;
+        continue;
+      }
+      groups.push({
+        kind: 'pleat',
+        line: l1,
+        side: s1,
+        rows: [one.row],
+        flat: [one.flat],
+        source: one.row.source,
+        complete: false,
+        pleatKind: one.row.kind,
+      });
+      continue;
+    }
     if (two && one.flat.kind === 'inward' && two.flat.kind === 'inward') {
       const l2: [Pt2, Pt2] = [two.flat.a, two.flat.b];
       const s2 = sideOf(two.flat.a, two.flat.b, two.flat.flipAt);
@@ -156,6 +243,56 @@ export function rowsOfChoice(
   );
 }
 
+/** The three storage rows behind one PLEAT offer: leg, centre, leg, all in one sequence run. */
+export function rowsOfPleat(
+  piece: PieceGeom,
+  fan: PleatFan,
+  ctx: {
+    seq: number;
+    grainDeg: number;
+    keys?: string[];
+    anchoredSize?: string;
+  },
+): StoredFold[] | null {
+  const centreFar = fan.far.get(fan.centre)!;
+  const out: StoredFold[] = [];
+  for (let index = 0; index < fan.lines.length; index++) {
+    const candidate = fan.lines[index];
+    let flipAt: Pt2 | null;
+    if (candidate === fan.centre) {
+      const firstFar = fan.far.get(fan.lines[0])!;
+      flipAt = pointOnSide(
+        piece.rs,
+        candidate.line[0],
+        candidate.line[1],
+        sideOf(candidate.line[0], candidate.line[1], firstFar),
+      );
+      flipAt ??= pointOnSide(piece.rs, candidate.line[0], candidate.line[1], 1);
+      flipAt ??= pointOnSide(piece.rs, candidate.line[0], candidate.line[1], -1);
+    } else {
+      const wedgeSide = sideOf(candidate.line[0], candidate.line[1], centreFar);
+      flipAt = pointOnSide(piece.rs, candidate.line[0], candidate.line[1], -wedgeSide);
+    }
+    if (!flipAt) return null;
+    out.push(
+      foldFromLine(piece, candidate.line, flipAt, {
+        seq: ctx.seq + index,
+        kind: 'pleat',
+        source: candidate.source,
+        foldKey: ctx.keys?.[index],
+        grainDeg: ctx.grainDeg,
+        anchoredSize: ctx.anchoredSize,
+        edge: null,
+      }),
+    );
+  }
+  return out;
+}
+
+/** A direction change: the same rows, keys, lines and places in the order; only the kind moves. */
+export const pleatDirectionRows = (group: FoldGroup, kind: PleatKind): StoredFold[] =>
+  group.rows.map((row) => ({ ...row, kind }));
+
 export const defaultSide = (piece: PieceGeom, line: [Pt2, Pt2]) =>
   smallerSide(piece.rs, line[0], line[1]);
 
@@ -164,7 +301,10 @@ export function openHints(hints: readonly FoldHint[], groups: readonly FoldGroup
   const near = (p: Pt2, q: Pt2) => Math.hypot(p[0] - q[0], p[1] - q[1]) < 5;
   const same = (a: [Pt2, Pt2], b: [Pt2, Pt2]) =>
     (near(a[0], b[0]) && near(a[1], b[1])) || (near(a[0], b[1]) && near(a[1], b[0]));
-  return hints.filter((h) => !groups.some((g) => same(g.line, h.lineMm)));
+  return hints.filter(
+    (hint) =>
+      !groups.some((group) => group.flat.some((fold) => same([fold.a, fold.b], hint.lineMm))),
+  );
 }
 
 // ── view: the piece upright by its grain, y up → screen y down, long pieces lying ──────────────

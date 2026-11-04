@@ -12,6 +12,15 @@ export { defaultFlipMm, foldFromHint, foldFromLine, type FoldMeta } from './anch
 export { coincidentGroups, foldedSideLengthMm } from './coincide';
 export { foldHints, type FoldHintOptions } from './hints';
 export { resolveFolds } from './resolve';
+export {
+  findPleatFans,
+  mapPleatPoint,
+  pleatFanGeometry,
+  rotateAround,
+  type PleatFanGeometry,
+  type PleatHiddenSide,
+  type PleatLineLike,
+} from './pleat';
 export { foldFromWire, foldsFromWire, foldToWire } from './wire';
 export {
   activeFoldKeys,
@@ -30,6 +39,7 @@ export {
   sideOf,
   smallerSide,
   type FlatFold,
+  type FoldPleat,
   type FoldedShape,
   type FoldPly,
   type FoldSection,

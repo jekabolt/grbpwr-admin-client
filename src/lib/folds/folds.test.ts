@@ -124,6 +124,14 @@ describe('foldFromLine', () => {
   });
 });
 
+describe('PLEAT wire kind', () => {
+  it('round trips the generated enum value', () => {
+    const row = { ...hemS(), kind: 'pleat' as const };
+    expect(foldToWire(row).kind).toBe('TECH_CARD_PIECE_FOLD_KIND_PLEAT');
+    expect(foldFromWire(foldToWire(row))?.kind).toBe('pleat');
+  });
+});
+
 describe('resolveFolds — grading keeps offset_mm', () => {
   it('lays the hem 30 mm from its edge on S, L and XS', () => {
     const row = hemS();

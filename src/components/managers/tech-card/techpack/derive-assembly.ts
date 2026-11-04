@@ -88,6 +88,7 @@ import { GapSink, type Gap } from './gaps';
 import { assemblyPieceCode } from './assembly-piece-code';
 import { pressMode, type PressPiece } from './press-arrows';
 import { asmProtoFlags } from './asm-proto-flags';
+import { foldLinesOf } from './fold-lines';
 import { englishT, own, type PdfT } from './i18n';
 import { partNoun, type PartNounId } from './i18n/part-nouns';
 import { machineText, operationVerb, pressEquipmentText } from './i18n/vocabulary';
@@ -126,6 +127,8 @@ export type AssemblyInput = {
   /** Grain turn per piece lineKey (lib/pom grainRotation), the frame anchors are written in. */
   grainDeg: ReadonlyMap<string, number>;
   t?: PdfT;
+  /** The size the pattern pieces were read at: what this sheet's lengths measure. */
+  drawnSize?: string;
 };
 
 type PieceSemantic = {
@@ -352,6 +355,8 @@ export type OpWords = {
   /** Filled press settings, printed below the equipment name. */
   machineParams: string[];
   draft: boolean;
+  /** One printed line per fold or pleat this very step closes; absent when it closes none. */
+  folds?: string[];
 };
 
 type Input = { kind: 'piece' | 'unit' | 'other'; key: string };
@@ -546,6 +551,8 @@ export type AssemblyModel = {
   techCard: common_TechCard;
   /** The pieces' grain rotation; the fold lines are stored in that frame. */
   grainDeg?: ReadonlyMap<string, number>;
+  /** The size the drawings and their lengths are on. */
+  drawnSize?: string;
 };
 
 export type DeriveAssemblyOptions = {
@@ -3347,17 +3354,16 @@ export function deriveAssembly(
       );
       if (twin) twinNote = { n: twin.n, note: (twin.raw.note ?? '').trim() };
     }
-    words.set(
-      op.n,
-      wordsOf(op, {
-        input: resolvedInput,
-        unitName,
-        unitStep,
-        card: cards.get(op.n),
-        twinNote,
-        sink: gapSink,
-      }),
-    );
+    const opWords = wordsOf(op, {
+      input: resolvedInput,
+      unitName,
+      unitStep,
+      card: cards.get(op.n),
+      twinNote,
+      sink: gapSink,
+    });
+    const foldLines = foldLinesOf(op.raw.foldKeys, foldRows, input.pieces, input.grainDeg, t);
+    words.set(op.n, foldLines.length ? { ...opWords, folds: foldLines } : opWords);
   }
 
   const rows: AsmRow[] = ops.map((op) => {
@@ -3395,6 +3401,7 @@ export function deriveAssembly(
     garment,
     techCard,
     grainDeg: input.grainDeg,
+    drawnSize: input.drawnSize,
   };
 }
 

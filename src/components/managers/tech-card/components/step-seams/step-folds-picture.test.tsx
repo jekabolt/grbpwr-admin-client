@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
-import type { StoredFold } from 'lib/folds';
+import type { FlatFold, StoredFold } from 'lib/folds';
 
 import { cardFoldsOf } from './step-folds';
 import { stepLayout, type StepLayout } from './step-picture';
@@ -53,6 +53,20 @@ const steps = [{ foldKeys: ['fold'] }, {}];
 const foldsAt = cardFoldsOf(steps, { rows: [fold], grainDeg: new Map() }, geoms)!;
 const closing: StepLayout = { ...flat, folds: foldsAt(0)! };
 const later: StepLayout = { ...flat, folds: foldsAt(1)! };
+const pleatFolds: ReadonlyMap<string, readonly FlatFold[]> = new Map([
+  [
+    'FLAP',
+    [
+      { a: [40, 0], b: [25, 200], flipAt: [15, 150], kind: 'pleat' },
+      { a: [40, 0], b: [40, 200], flipAt: [30, 150], kind: 'pleat' },
+      { a: [40, 0], b: [55, 200], flipAt: [65, 150], kind: 'pleat' },
+    ],
+  ],
+]);
+const pleated: StepLayout = {
+  ...flat,
+  folds: { flat: pleatFolds, rows: [], closing: ['FLAP'] },
+};
 
 const svgOf = (
   layout: StepLayout,
@@ -112,6 +126,15 @@ describe('StepPictureSvg through the folds', () => {
       const svg = svgOf(flat, look);
       expect(svg).not.toContain('data-fold-');
       expect(svgOf(flat, look, true)).toBe(svg);
+    }
+  });
+
+  it('draws PLEAT as a grey wedge, two dashed edges and a solid centre', () => {
+    for (const look of ['canvas', 'tile', 'print'] as const) {
+      const svg = svgOf(pleated, look);
+      expect(svg.match(/data-fold-pleat-edge="FLAP"/g)).toHaveLength(2);
+      expect(svg).toContain('data-fold-pleat-centre="FLAP"');
+      expect(svg).not.toContain('data-fold-under="FLAP"');
     }
   });
 });

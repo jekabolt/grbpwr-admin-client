@@ -173,11 +173,34 @@ function resolveOne(
       seq: row.seq,
       a: clampUV(toUV(f, line[0])),
       b: clampUV(toUV(f, line[1])),
-      flipAt: clampUV(toUV(f, flip)),
+      flipAt:
+        row.kind === 'pleat_l' || row.kind === 'pleat_r'
+          ? clampUV(pleatHiddenSide(f, line, row.kind))
+          : clampUV(toUV(f, flip)),
       kind: row.kind,
     },
     via,
   };
+}
+
+const PLEAT_SIDE_MM = 5;
+/** |n.x| under this: the line lies about 1° from level, so left and right no longer tell the sides. */
+const PLEAT_LEVEL = Math.sin(Math.PI / 180);
+
+/**
+ * A directional pleat's hidden side is the stored kind read in today's upright frame, never the
+ * stored `flipAt`: a re-export found mirrored or turned, or a changed grain, must not swap the word
+ * on the row against the drawing. `pleat_r` hides toward smaller u (screen left), `pleat_l` larger u.
+ */
+function pleatHiddenSide(f: PieceFrame, line: [Pt2, Pt2], kind: 'pleat_l' | 'pleat_r'): Pt2 {
+  const a = toUV(f, line[0]);
+  const b = toUV(f, line[1]);
+  const d = unit([(b[0] - a[0]) * f.w, (b[1] - a[1]) * f.h]);
+  const n: Pt2 = [-d[1], d[0]];
+  const right = kind === 'pleat_r';
+  const flip = Math.abs(n[0]) > PLEAT_LEVEL ? n[0] < 0 !== right : n[1] > 0 !== right;
+  const s = flip ? -PLEAT_SIDE_MM : PLEAT_SIDE_MM;
+  return [(a[0] + b[0]) / 2 + (n[0] * s) / f.w, (a[1] + b[1]) / 2 + (n[1] * s) / f.h];
 }
 
 type InnerMatch = { line: [Pt2, Pt2]; frame: Frame };
