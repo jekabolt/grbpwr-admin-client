@@ -21,6 +21,20 @@ export function mediaProxyAllowedHosts(override) {
   return new Set(source.map((host) => host.trim().toLowerCase()).filter(Boolean));
 }
 
+const SPACES_REGION_HOST = 'fra1.digitaloceanspaces.com';
+
+/**
+ * The library's signed links name the bucket in the path, and SigV4 binds the host, so they cannot
+ * be rewritten to the virtual-hosted form. `<region>/<bucket>/<key>` is that same object: it counts
+ * as `<bucket>.<region>` and passes only when that exact name is on the list, so it reaches nothing
+ * new. No key, no pass: the bare bucket is a listing, not a media object.
+ */
+function pathStyleHostOf(url) {
+  if (url.hostname.toLowerCase() !== SPACES_REGION_HOST) return '';
+  const [, bucket, ...key] = url.pathname.split('/');
+  return bucket && key.join('') ? `${bucket}.${SPACES_REGION_HOST}` : '';
+}
+
 /**
  * Parse and validate a media URL without I/O or environment access. Returns the parsed URL when
  * accepted and null otherwise.
@@ -44,7 +58,7 @@ export function validateMediaUrl(rawUrl, allowedHosts = mediaProxyAllowedHosts()
     url.protocol !== 'https:' ||
     hasUserinfo ||
     url.port !== '' ||
-    !allowedHosts.has(url.hostname.toLowerCase())
+    !(allowedHosts.has(url.hostname.toLowerCase()) || allowedHosts.has(pathStyleHostOf(url)))
   ) {
     return null;
   }

@@ -1,6 +1,7 @@
 // PRINT COMPOSITION: quantities, extra, duplex or simplex, which colours, and the zip. It prints the
 // card as it stands on the screen behind it, including what autosave has not sent yet. What holds it
 // is one word in the head with the action next to it; the detail lives in the editor.
+import { useSizeOrdering } from 'components/managers/model/components/use-size-systems';
 import { useProductionRuns } from 'components/managers/production-runs/components/useProductionRuns';
 import { notify } from 'lib/stores/store';
 import { useMemo, useState, type JSX } from 'react';
@@ -71,7 +72,11 @@ export function PrintCompositionModal({
 
   const mode = prefs.mode;
   const colorways = useMemo(() => data?.colorways ?? [], [data]);
-  const sizes = useMemo(() => data?.sizes ?? [], [data]);
+  const orderSizes = useSizeOrdering();
+  const sizes = useMemo(() => {
+    const all = data?.sizes ?? [];
+    return orderSizes(all.map((s) => s.id)).map((id) => all.find((s) => s.id === id)!);
+  }, [data, orderSizes]);
   const colorwayIds = useMemo(() => colorways.map((c) => c.id), [colorways]);
   const sizeIds = useMemo(() => sizes.map((s) => s.id), [sizes]);
 

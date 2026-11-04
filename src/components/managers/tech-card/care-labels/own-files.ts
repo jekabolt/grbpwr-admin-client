@@ -4,6 +4,7 @@
 // refused: the person chose it, and only the printer can judge it.
 import { filesService } from 'components/managers/files/api/filesService';
 import { loadPdfjs } from 'components/managers/files/hooks/usePdfDocument';
+import { fetchMediaBlob } from 'lib/features/media-blob';
 import { oneFileOf, ownCellOf } from '../components/composition-label/composition-artwork-model';
 import type { ArtworkFile } from '../components/sewn-label-model';
 import { wireInt } from '../components/wire-int';
@@ -151,9 +152,12 @@ export async function loadOwnFiles(planned: readonly OwnPlanned[]): Promise<OwnZ
         const { file } = await filesService.getFile(id);
         const url = file?.downloadUrl;
         if (!url) throw new Error(`own file ${file?.fileName ?? id}: no download link`);
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`own file ${file?.fileName ?? id}: ${res.status}`);
-        const bytes = new Uint8Array(await res.arrayBuffer());
+        // The bucket gives a signed link to no page: without the proxy the zip never builds.
+        const blob = await fetchMediaBlob(url).catch((e: unknown) => {
+          const why = e instanceof Error ? e.message : String(e);
+          throw new Error(`own file ${file?.fileName ?? id}: ${why}`);
+        });
+        const bytes = new Uint8Array(await blob.arrayBuffer());
         const contentType = file?.contentType ?? '';
         const extension = ownExtension(file?.fileName ?? '', contentType);
         const pdf = extension === 'pdf' || contentType.toLowerCase() === 'application/pdf';
