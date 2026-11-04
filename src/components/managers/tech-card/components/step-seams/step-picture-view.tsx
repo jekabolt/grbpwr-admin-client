@@ -804,6 +804,14 @@ export type PictureActionLine = {
   dashed?: boolean;
   kind: string;
 };
+/** A number beside a worked edge, inside the piece (a hem's depth). */
+export type PictureActionDim = {
+  id: string;
+  piece: string;
+  /** Piece geometry frame (mm, y up), before the picture layout affine. */
+  points: readonly Pt2[];
+  text: string;
+};
 export type PictureActionGlyph = {
   id: string;
   piece: string;
@@ -1042,6 +1050,7 @@ const TICK_NOTCH_PX = 5;
 const TICK_POINT_R_PX = 2.5;
 const NO_ACTION_LINES: readonly PictureActionLine[] = [];
 const NO_ACTION_GLYPHS: readonly PictureActionGlyph[] = [];
+const NO_ACTION_DIMS: readonly PictureActionDim[] = [];
 const NO_NOS: readonly NoMark[] = [];
 const NO_STACKED: readonly (readonly [string, string])[] = [];
 
@@ -1667,6 +1676,7 @@ export function StepPictureSvg({
   stepParts: suppliedStepParts,
   actionLines = NO_ACTION_LINES,
   actionGlyphs = NO_ACTION_GLYPHS,
+  actionDims = NO_ACTION_DIMS,
   noSeamText,
   stripWords,
   nos = NO_NOS,
@@ -1709,6 +1719,7 @@ export function StepPictureSvg({
   stepParts?: readonly SidePart[];
   actionLines?: readonly PictureActionLine[];
   actionGlyphs?: readonly PictureActionGlyph[];
+  actionDims?: readonly PictureActionDim[];
   /** Localized print wording. Screen pictures reuse the existing editor status. */
   noSeamText?: string;
   stripWords?: StripWords;
@@ -2374,6 +2385,29 @@ export function StepPictureSvg({
     const points = pointsOnDrawnPiece(line.piece, raw);
     return points?.length ? [{ line, points }] : [];
   });
+  const actionDimSpots = foldedActionLines(actionDims, stepFolds, flatGeoms).flatMap((dim) => {
+    const T = layout.T.get(dim.piece);
+    const host = actionHost(dim.piece);
+    const raw = T && dim.points.length ? dim.points.map((point) => toPx(fit, apply(T, point))) : [];
+    const points = pointsOnDrawnPiece(dim.piece, raw);
+    if (!host || !points || points.length < 2) return [];
+    // Halfway along the run, one text height into the piece.
+    const lengths = points
+      .slice(1)
+      .map((point, i) => Math.hypot(point[0] - points[i][0], point[1] - points[i][1]));
+    let left = lengths.reduce((sum, value) => sum + value, 0) / 2;
+    const i = lengths.findIndex((value) => (left -= value) <= 0);
+    const segment = Math.max(i, 0);
+    const [a, b] = [points[segment], points[segment + 1]];
+    const span = lengths[segment] || 1;
+    const along = (span + left) / span;
+    const mid: Pt2 = [a[0] + (b[0] - a[0]) * along, a[1] + (b[1] - a[1]) * along];
+    const normal: Pt2 = [(a[1] - b[1]) / span, (b[0] - a[0]) / span];
+    const lift = L.font * 1.1;
+    const up: Pt2 = [mid[0] + normal[0] * lift, mid[1] + normal[1] * lift];
+    const down: Pt2 = [mid[0] - normal[0] * lift, mid[1] - normal[1] * lift];
+    return [{ dim, at: insideRing(up, host.ring) ? up : down }];
+  });
   const pictureCentre = useMemo((): Pt2 => {
     if (!pieces.length) return [w / 2, h / 2];
     const box = boxOf(pieces.flatMap((piece) => piece.ring));
@@ -2987,6 +3021,24 @@ export function StepPictureSvg({
           data-asm-piece={line.piece}
           data-step-seam-edge={line.target}
         />
+      ))}
+      {actionDimSpots.map(({ dim, at }) => (
+        <text
+          key={`action-dim:${dim.id}`}
+          x={at[0]}
+          y={at[1]}
+          textAnchor='middle'
+          dominantBaseline='central'
+          fontSize={L.font}
+          fill={stepColor}
+          stroke={FILL}
+          strokeWidth={3}
+          paintOrder='stroke'
+          pointerEvents='none'
+          data-asm-dim={dim.piece}
+        >
+          {dim.text}
+        </text>
       ))}
       {marksDrawn.length > 0 && (
         <g

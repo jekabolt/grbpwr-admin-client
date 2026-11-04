@@ -380,6 +380,7 @@ export const de = {
     article: 'Artikel',
     pin: 'Marke',
     placement: 'Position',
+    hemEdge: 'Saumkante unbekannt',
     tooFewPatternMarks: 'zu wenige Schnittmarkierungen',
     marksOutsideOperationZone: 'Markierungen außerhalb des Arbeitsbereichs',
     operation: 'Arbeitsgang',

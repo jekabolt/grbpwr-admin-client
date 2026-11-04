@@ -66,6 +66,7 @@ import type { Edge, PieceGeom, PieceMark, SeamCandidate } from 'lib/assembly-ske
 import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { unitDisplayName } from 'lib/assembly-unit-name';
 import { activeFoldRows, foldsFromWire, type StoredFold } from 'lib/folds';
+import { hemEdgeOf, type HemEdge } from 'lib/hem/hem-edge';
 import {
   contourSig,
   candidateSideParts,
@@ -88,6 +89,7 @@ import { GapSink, type Gap } from './gaps';
 import { assemblyPieceCode } from './assembly-piece-code';
 import { pressMode, type PressPiece } from './press-arrows';
 import { asmProtoFlags } from './asm-proto-flags';
+import { hemFinishWords, isHemClass, isHemStep } from './hem-step';
 import { foldLinesOf } from './fold-lines';
 import { englishT, own, type PdfT } from './i18n';
 import { partNoun, type PartNounId } from './i18n/part-nouns';
@@ -342,6 +344,8 @@ export type OpWords = {
   verb: string;
   ins: string[];
   out?: string;
+  /** A hem step's finish and depth: `Turned twice, closed edge · 35 mm`. */
+  hem?: string;
   /** Instruction line: edge · partner · note · hardware (red = missing). */
   line: Seg[];
   /** Numbered seam relationships, in the same order as the drawing. */
@@ -501,6 +505,8 @@ export type AsmAction = {
   /** Name and code of each piece of the owner seams (press arrows read the named side). */
   partPieces?: PressPiece[];
   missing?: 'seam' | 'position';
+  /** A hem step: where its edge came from, and the depth printed beside the line (mm). */
+  hem?: { status: HemEdge['status']; depth?: string };
 };
 
 /** One join operation (sew / overlock) with its drawing. */
@@ -2774,10 +2780,16 @@ function buildActions(
   pieces: ReadonlyMap<string, AsmPiece>,
   targets: ReadonlyMap<number, Item[]>,
   rows: ReadonlyMap<string, StoredSeam>,
+  hemCard: {
+    folds: readonly StoredFold[];
+    grainDeg?: ReadonlyMap<string, number>;
+    saMm: number | null;
+  },
   sink?: GapSink,
   t: PdfT = englishT,
 ): Map<number, AsmAction> {
   const actions = new Map<number, AsmAction>();
+  const hemPieces = [...pieces.values()].flatMap((piece) => (piece.geom ? [piece.geom] : []));
   const placementSelections = walkPlacementMarks(
     ops.map((op) => ({
       operation: op.raw,
@@ -2811,8 +2823,9 @@ function buildActions(
         'position',
       );
     const placementOp = op.tech === 'button' || op.tech === 'buttonhole' || op.tech === 'label';
-    const edgeOp = ['topstitch', 'pressSide', 'bind', 'hem'].includes(op.tech);
-    const finishingEdgeOp = ['topstitch', 'bind', 'hem'].includes(op.tech);
+    const hemStep = isHemStep(op.raw);
+    const edgeOp = hemStep || ['topstitch', 'pressSide', 'bind'].includes(op.tech);
+    const finishingEdgeOp = hemStep || ['topstitch', 'bind'].includes(op.tech);
     // A flat press draws its seam only where an owner row names it; without one it stays bare
     // (no «missing seam» — it never needed one).
     const flatPress = op.tech === 'press' && pressMode(op.raw) !== null;
@@ -2824,9 +2837,26 @@ function buildActions(
           rows,
         ).parts
       : [];
+    // A hem's edge is never inherited from the step that sewed its unit: its own row, else geometry.
+    const hemEdge = hemStep
+      ? hemEdgeOf({
+          pieces: hemPieces,
+          inputKeys: [...op.leaves],
+          seams: [...rows.values()],
+          ownSeamKeys: op.raw.seamKeys ?? [],
+          folds: hemCard.folds.filter((fold) => !op.raw.foldKeys?.includes(fold.foldKey)),
+          grainDeg: hemCard.grainDeg,
+        })
+      : undefined;
+    if (hemEdge?.status === 'unknown')
+      assemblyGap(sink, 'asm_hem_edge_unknown', t('gaps.hemEdge'), op.n, 'edge');
     const edgeParts = finishingEdgeOp
-      ? actionPartsOfTargets(highlighted, pieces)
+      ? actionPartsOfTargets(
+          hemEdge && hemEdge.status !== 'owner' ? hemEdge.parts : highlighted,
+          pieces,
+        )
       : actionPartsOfRows(ownerRows, pieces);
+    const hemDepth = num(op.raw.seamAllowanceMm) ?? hemCard.saMm;
     // Both sides of the owner seams, so «to back» can find the back across the drawn run.
     const seamPieces = ownerRows.flatMap((row) => {
       const sides = storedSeamSides(row);
@@ -2848,6 +2878,14 @@ function buildActions(
       edgeParts,
       placements,
       partPieces,
+      ...(hemEdge
+        ? {
+            hem: {
+              status: hemEdge.status,
+              ...(hemDepth != null && edgeParts.length ? { depth: mm(hemDepth) } : {}),
+            },
+          }
+        : {}),
       missing:
         placementOp && !placements.length
           ? 'position'
@@ -2979,11 +3017,16 @@ function wordsOf(
     assemblyGap(ctx.sink, 'pdf_label_missing', t('gaps.label'), op.n, 'label');
 
   const tool: Seg[] = [];
-  if (op.join) {
-    const sa = num(o.seamAllowanceMm) ?? num(ins?.requiredSeamAllowanceMm);
-    if (sa != null) tool.push({ t: `SA ${mm(sa)} mm` });
-    else assemblyGap(ctx.sink, 'pdf_sa_missing', 'SA', op.n, 'SA');
-  }
+  const hemStep = isHemStep(o);
+  // A stored 0 is a depth, not an empty field: `num` keeps it.
+  const stepSa =
+    op.join || hemStep ? num(o.seamAllowanceMm) ?? num(ins?.requiredSeamAllowanceMm) : null;
+  if ((op.join || hemStep) && stepSa == null)
+    assemblyGap(ctx.sink, 'pdf_sa_missing', 'SA', op.n, 'SA');
+  if (op.join && !hemStep && stepSa != null) tool.push({ t: `SA ${mm(stepSa)} mm` });
+  const hemLine = hemStep
+    ? [own(hemFinishWords(o)), stepSa != null ? `${mm(stepSa)} mm` : ''].filter(Boolean).join(' · ')
+    : '';
   if (tech === 'topstitch') {
     const phrase = topstitchLine(o.topstitch?.mode, o.topstitch?.widthMm?.value, o.topstitch?.rows);
     if (!phrase) assemblyGap(ctx.sink, 'pdf_ts_missing', t('gaps.topstitch'), op.n, 'TS');
@@ -3102,7 +3145,8 @@ function wordsOf(
     // cannot be encoded by the bars, arrow, chip, or exact pictogram beside this line.
     topstitchParam,
     iconCarriesPress ? '' : stepPressText(facts) || pressTowardLabel(o.press?.toward),
-    icon.derived ? '' : seamClassLabel(o.seamClass),
+    // The hem line above already says a hem class; a class that contradicts it stays on paper.
+    icon.derived || (hemStep && isHemClass(o.seamClass)) ? '' : seamClassLabel(o.seamClass),
     ...seamFacts,
     ...toolParams,
     stepPlacementText(facts).replace(/^×\s+/, '×'),
@@ -3171,6 +3215,7 @@ function wordsOf(
     verb,
     ins: compactInputNames(op.ins.map(inputOf)),
     out: op.out ? ctx.unitName.get(op.out) ?? unitDisplayName({ key: op.out }) : undefined,
+    ...(hemLine ? { hem: hemLine } : {}),
     line,
     seams: [...new Set(seamNotes.filter(Boolean))],
     tool,
@@ -3326,6 +3371,11 @@ export function deriveAssembly(
     input.pieces,
     targets,
     seamRowsOfCard(resolvedInput.techCard),
+    {
+      folds: foldRows,
+      grainDeg: input.grainDeg,
+      saMm: num(techCard.techCard?.requiredSeamAllowanceMm),
+    },
     gapSink,
     t,
   );
@@ -3657,6 +3707,14 @@ export function silhouetteSvg(
       continue;
     }
     body += `<path d="${pathData(path.points)}" class="tpa-s tpa-fn" stroke-width="${f2(heavy)}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  }
+
+  if (action?.hem?.depth && worldEdgePaths.length) {
+    const longest = worldEdgePaths.reduce((a, b) => (b.part.lenMm > a.part.lenMm ? b : a));
+    const at = longest.points[Math.floor(longest.points.length / 2)];
+    const toward = sub(centerOf(pieces, [longest.item]), at);
+    const lift = (PRINT_CODE_MIN_PX * 1.1) / fit / (Math.hypot(toward[0], toward[1]) || 1);
+    body += `<text x="${f2(at[0] + toward[0] * lift)}" y="${f2(at[1] + toward[1] * lift)}" class="tpa-asm-code" font-size="${f2(PRINT_CODE_MIN_PX / fit)}" text-anchor="middle" dominant-baseline="central" data-asm-dim="hem">${xml(action.hem.depth)}</text>`;
   }
 
   for (const placement of worldPlacements) {

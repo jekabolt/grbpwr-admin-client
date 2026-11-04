@@ -28,6 +28,7 @@ import {
   STEP_TILE_RASTER_MM,
   stepPictureOfOp,
   type PictureActionGlyph,
+  type PictureActionDim,
   type PictureActionLine,
   type SceneOp,
   type StepPicture,
@@ -60,7 +61,7 @@ import { apply, compose, rigid, translate } from 'lib/assembly-skeleton/union/af
 import { nameTokens, readName } from 'lib/assembly-skeleton/skeleton/model';
 import { ROLE_BOOK } from 'lib/assembly-skeleton/skeleton/template';
 import { foldsFromWire } from 'lib/folds';
-import { isPoseWire, poseKeysOfWire } from 'lib/seams';
+import { isPoseWire, poseKeysOfWire, type SidePart } from 'lib/seams';
 import { viewerOrigin } from 'utils/viewer-origin';
 import {
   annotationFromWire,
@@ -4209,6 +4210,19 @@ export function editorOperationPictures(
         if (picture && folds && !picture.layout.folds)
           pictures.set(number, { ...picture, layout: { ...picture.layout, folds } });
       });
+    // A hem without its own row: the computed edge replaces what the scene inherited from a producer.
+    for (const [number, picture] of pictures) {
+      const action = rowByNumber.get(number)?.action;
+      if (!action?.hem || action.hem.status === 'owner') continue;
+      const parts = action.edgeParts.flatMap((part): SidePart[] =>
+        part.edgeId ? [{ target: part.edgeId, ...(part.range ? { range: part.range } : {}) }] : [],
+      );
+      pictures.set(number, {
+        ...picture,
+        stepEdges: parts.map((part) => part.target),
+        stepParts: parts.some((part) => part.range) ? parts : undefined,
+      });
+    }
     return pictures;
   } catch {
     // A malformed pattern still prints through the legacy drawings.
@@ -4225,7 +4239,7 @@ const decimal = (value: { value?: string } | undefined, fallback: number) => {
 export function editorActionMarks(
   action: AsmAction | undefined,
   geoms: ReadonlyMap<string, { rs: Pt2[] }>,
-): { lines: PictureActionLine[]; glyphs: PictureActionGlyph[] } {
+): { lines: PictureActionLine[]; glyphs: PictureActionGlyph[]; dims?: PictureActionDim[] } {
   if (!action) return { lines: [], glyphs: [] };
   const lines: PictureActionLine[] = [];
   const press =
@@ -4274,9 +4288,29 @@ export function editorActionMarks(
       target: part.edgeId,
       points,
       weight: 'heavy',
-      kind: action.tech,
+      kind: action.hem ? 'hem-line' : action.tech,
     });
   });
+  // One depth per hemmed piece, on its longest run.
+  const hemDepth = action.hem?.depth;
+  const longestRuns = hemDepth
+    ? [
+        ...action.edgeParts
+          .reduce((runs, part) => {
+            const best = runs.get(part.piece);
+            return !best || part.lenMm > best.lenMm ? runs.set(part.piece, part) : runs;
+          }, new Map<string, AsmAction['edgeParts'][number]>())
+          .values(),
+      ]
+    : [];
+  const dims = longestRuns.map(
+    (part, index): PictureActionDim => ({
+      id: `${action.n}:${index}:hem-depth`,
+      piece: part.piece,
+      points: part.pts.map(([x, y]) => [x, -y] as Pt2),
+      text: hemDepth ?? '',
+    }),
+  );
   const buttonPattern = (value: string | undefined): PictureActionGlyph['pattern'] => {
     if (value?.endsWith('CROSS_X')) return 'cross_x';
     if (value?.endsWith('PARALLEL')) return 'parallel';
@@ -4308,7 +4342,7 @@ export function editorActionMarks(
         : {}),
     });
   });
-  return { lines, glyphs };
+  return { lines, glyphs, ...(dims.length ? { dims } : {}) };
 }
 
 /**
@@ -4482,6 +4516,7 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
           stepParts={r.editorPic.stepParts}
           actionLines={r.print.action.lines}
           actionGlyphs={r.print.action.glyphs}
+          actionDims={r.print.action.dims}
           stripWords={stripWords}
           pleatNote={r.drawnSize}
           className='asm-editor-picture'
@@ -4534,6 +4569,7 @@ const OpRow = memo(function OpRow({ r, orient }: { r: Row; orient: PrintOrient }
             </span>
           ))}
         </div>
+        {w.hem && <div data-asm-hem=''>{w.hem}</div>}
         <Line segs={w.line.filter((segment) => !segment.gap)} />
         {w.params.length > 0 && <div className='asm-params'>{w.params.join(' · ')}</div>}
         {w.seams.length > 0 && (
