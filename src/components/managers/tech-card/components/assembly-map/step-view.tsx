@@ -7,13 +7,13 @@ import { activeFoldRows, type StoredFold } from 'lib/folds';
 import { candidateSideParts } from 'lib/seams';
 import { Text } from 'ui';
 import { useFoldRows } from '../assembly-folds/folds-store';
+import { seamLengthsDiffer } from '../cut-strips/length-check';
 import { stepHighlightOf } from '../step-seams/step-highlight';
 import { useStepResults } from '../step-seams/step-result-context';
 import type { StepResult } from '../step-seams/step-result';
 import { StepPictureSvg, useCardGeoms, useSeamRows } from '../step-seams/step-picture-view';
 import {
   DEFAULT_SEAM_TOLERANCE_MM,
-  lengthsDiffer,
   seamToleranceOf,
   sideLengthMm,
 } from '../step-seams/seam-length';
@@ -65,7 +65,14 @@ export function mismatchFacts(
   const a = aFolded ?? seam.evidence?.aLenMm ?? aPlain;
   const b = bFolded ?? seam.evidence?.bLenMm ?? bPlain;
   const facts: string[] = [];
-  if (a != null && b != null && lengthsDiffer(a, b, toleranceMm)) {
+  const piecesOf = (parts: typeof aParts) => [
+    ...new Set(parts.map((part) => pieceKeyOf(part.target))),
+  ];
+  if (
+    a != null &&
+    b != null &&
+    seamLengthsDiffer(a, b, piecesOf(aParts), piecesOf(bParts), read.geoms, toleranceMm)
+  ) {
     facts.push(`length ${Math.round(a)} / ${Math.round(b)} mm`);
   }
 
