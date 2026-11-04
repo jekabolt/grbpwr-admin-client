@@ -1499,6 +1499,7 @@ export function solveDoll(input: DollInput): DollReport {
   let N = 0;
   // Folds (options.folds), per piece key (a second instance `key@n` takes its piece's folds).
   const foldsIn = opt.folds ?? {};
+  warnings.push(...(opt.hemWords ?? []));
   const grainFold = Object.values(foldsIn).some((list) => list?.length)
     ? grainDegOf(input.facts)
     : null;

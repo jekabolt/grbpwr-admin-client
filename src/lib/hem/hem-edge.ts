@@ -135,7 +135,7 @@ function ownerParts(
 }
 
 /** The edges of these pieces a stored fold runs along: turned already, so nothing left to hem. */
-function foldedEdges(
+export function foldedEdges(
   folds: readonly StoredFold[],
   pieces: readonly PieceGeom[],
   grainDeg: ReadonlyMap<string, number> | undefined,

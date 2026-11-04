@@ -36,6 +36,7 @@ import {
 } from 'lib/doll/joins';
 import type { DollLayerRelation, DollOwnerCandidate } from 'lib/doll/types';
 import { resolveFolds, type StoredFold } from 'lib/folds';
+import { hemFoldsOf, hemSigOf, isHemStep, type HemStepLike } from 'lib/hem/hem-folds';
 import { grainDegOf } from 'lib/seams/frame';
 import type { StoredPose, StoredSeam } from 'lib/seams/types';
 import { useMemo } from 'react';
@@ -100,6 +101,8 @@ export type DollCard = {
   foldRows: StoredFold[];
   /** Fold inputs in the solve identity: a saved fold always builds a new doll. */
   foldRowsSig: string;
+  /** The steps the hems are read from, present only when a step is a hem: folds per size, not saved. */
+  hem?: { ops: readonly HemStepLike[]; standardMm?: string };
   joins: DeclaredJoin[];
   /** The order's hardware (HARDWARE_SET: elastic, tape): listed, never sewn. */
   hardware: DeclaredHardware[];
@@ -253,6 +256,9 @@ export function useDollCard(): DollCard | null {
     []) as TechCardFormData['bomItems'];
   const operations = (useWatch<TechCardFormData>({ name: 'operations' }) ?? []) as FormOp[];
   const gender = useWatch<TechCardFormData>({ name: 'targetGender' }) as string | undefined;
+  const standardMm = useWatch<TechCardFormData>({ name: 'requiredSeamAllowanceMm' }) as
+    | string
+    | undefined;
   const sizeIds = (useWatch<TechCardFormData>({ name: 'sizeIds' }) ?? []) as number[];
   const sizeById = useSizeNames();
   const cardSizes = useMemo(
@@ -270,6 +276,7 @@ export function useDollCard(): DollCard | null {
   const pieceKeys = useCardPieceKeys();
   const cutStrips = useWatch({ name: 'cutStrips' }) as readonly CutStripLike[] | undefined;
   const stripKeys = useMemo(() => stripKeysOf(cutStrips ?? []), [cutStrips]);
+  const hemOps = useMemo(() => withoutStripInputs(operations, stripKeys), [operations, stripKeys]);
   const ownerSeams = useMemo(
     () =>
       dollOwnerSeamsOf({
@@ -461,12 +468,13 @@ export function useDollCard(): DollCard | null {
       rowsSig: sig,
       foldRows,
       foldRowsSig: foldRowsSignature,
+      ...(hemOps.some(isHemStep) ? { hem: { ops: hemOps, standardMm } } : {}),
       joins,
       hardware,
       gender:
         gender === 'GENDER_ENUM_FEMALE' ? 'FEMALE' : gender === 'GENDER_ENUM_MALE' ? 'MALE' : null,
       readId: idOf(facts),
-      inputSig: `${gender ?? ''}|${joins.map((j) => `${j.label}:${j.parts.map((x) => x.join('+')).join('/')}`).join(',')}|${hardware.map((h) => `${h.label}:${h.pieces.join('+')}`).join(',')}`,
+      inputSig: `${gender ?? ''}|${joins.map((j) => `${j.label}:${j.parts.map((x) => x.join('+')).join('/')}`).join(',')}|${hardware.map((h) => `${h.label}:${h.pieces.join('+')}`).join(',')}${hemSigOf(hemOps, standardMm)}`,
     };
   }, [
     facts,
@@ -478,6 +486,8 @@ export function useDollCard(): DollCard | null {
     sig,
     foldRows,
     foldRowsSignature,
+    hemOps,
+    standardMm,
     joins,
     hardware,
     gender,
@@ -503,12 +513,24 @@ export function dollRequest(c: DollCard, size: string, lining: boolean) {
         .map((line) => line.pts.map(({ x, y }) => [x * 10, y * 10] as Pt2)),
     ]),
   );
-  const folds = c.foldRows.length
+  const laid = c.foldRows.length
     ? resolveFolds(c.foldRows, segmentAll(facts), {
         grainDeg: grainDegOf(facts),
         innerLines,
       }).folds
     : null;
+  const hem = c.hem
+    ? hemFoldsOf({
+        ops: c.hem.ops,
+        standardMm: c.hem.standardMm,
+        pieces: segmentAll(facts),
+        seams: c.rows,
+        storedFolds: c.foldRows,
+        laid: laid ?? undefined,
+        grainDeg: grainDegOf(facts),
+      })
+    : null;
+  const folds = hem ? (Object.keys(hem.folds).length ? hem.folds : laid) : laid;
   const anchorSizes = [...new Set(c.rows.map((r) => r.anchoredSize).filter(Boolean))].filter(
     (s) => s !== size,
   );
@@ -528,6 +550,7 @@ export function dollRequest(c: DollCard, size: string, lining: boolean) {
       ...(c.hardware.length ? { hardware: c.hardware } : {}),
       gender: c.gender,
       ...(folds ? { folds } : {}),
+      ...(hem?.words.length ? { hemWords: hem.words } : {}),
       ...(c.owner
         ? {
             proposeComposite: false,

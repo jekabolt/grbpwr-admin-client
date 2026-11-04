@@ -112,6 +112,8 @@ export type DollOptions = {
    * stacked ~1 mm apart and kept from passing through each other. No folds → the doll as before.
    */
   folds?: Record<string, DollFold[]>;
+  /** What the hem steps could not fold, in words (lib/hem/hem-folds): goes to `warnings`. */
+  hemWords?: string[];
   /**
    * Declared joins (the technologist's order, or the skeleton's units): which pieces must be sewn
    * together. A join the graph has no seam for is searched for between those pieces only and
