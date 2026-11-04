@@ -1,5 +1,4 @@
-import { useSortable } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
+import { useDraggable } from '@dnd-kit/core';
 import { cn } from 'lib/utility';
 import { useRef, useState } from 'react';
 import { Button, Chip, ClockIcon, EmptyCell, Media, Pill, Text } from 'ui';
@@ -236,16 +235,19 @@ export function TaskCardBody({
 
 // Draggable (mouse / keyboard) + clickable card inside a column. Touch never drags, so the
 // card carries no `touch-none`: a finger that lands on it scrolls the page.
-export function SortableTask({
+export function DraggableTask({
   task,
   onOpen,
   onMove,
   disabled,
+  held,
 }: {
   task: Task;
   onOpen: (task: Task) => void;
   onMove: (task: Task, status: TaskStatus) => void;
   disabled?: boolean;
+  /** Lifted off the board: `hold` keeps its room for the first measure, `gone` gives it up. */
+  held?: 'hold' | 'gone';
 }) {
   const [swipeX, setSwipeX] = useState(0);
   const [trackingSwipe, setTrackingSwipe] = useState(false);
@@ -257,10 +259,7 @@ export function SortableTask({
     axis: 'pending' | 'x' | 'y';
   } | null>(null);
   const suppressClickUntil = useRef(0);
-  const { setNodeRef, transform, transition, isDragging, attributes, listeners } = useSortable({
-    id: task.id,
-    disabled,
-  });
+  const { setNodeRef, attributes, listeners } = useDraggable({ id: task.id, disabled });
 
   const adjacentStatus = (direction: -1 | 1) => {
     const index = STATUSES.indexOf(task.status);
@@ -285,7 +284,7 @@ export function SortableTask({
   return (
     <div
       ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
+      data-task-card={held ? undefined : task.id}
       {...attributes}
       {...listeners}
       onClick={(event) => {
@@ -301,7 +300,8 @@ export function SortableTask({
       className={cn(
         'outline-none focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
         disabled ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing',
-        isDragging && 'opacity-40',
+        held && 'invisible',
+        held === 'gone' && '-mb-1.5 h-0 shrink-0 overflow-hidden',
       )}
     >
       <div className='relative overflow-hidden'>
