@@ -314,6 +314,7 @@ const ERROR_TAB: Record<string, TabId> = {
   // The size range moved to its own SIZES tab (spec band), with the measurement chart.
   sizeIds: 'sizes',
   bomItems: 'bom',
+  cutStrips: 'studio',
   // Cut pieces (and their DXF block aliases) render on PATTERNS. A `pieces.N.*` violation routed
   // anywhere else raises a toast naming a field nobody can see.
   pieces: 'patterns',

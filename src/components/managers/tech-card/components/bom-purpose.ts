@@ -63,6 +63,10 @@ export function isOtherPurpose(purpose?: string): boolean {
   return purpose === 'TECH_CARD_BOM_PURPOSE_OTHER';
 }
 
+export function isMainFabricLine(line: { purpose?: string }): boolean {
+  return line.purpose === 'TECH_CARD_BOM_PURPOSE_MAIN';
+}
+
 // The four families cloth is measured by the metre and laid out on a marker. They are the only ones
 // a purpose describes: a purpose on a thread or a button would be data no screen renders. Mirrors
 // rollGoodsSectionList in the backend's internal/store/techcard — the same four the раскладка and

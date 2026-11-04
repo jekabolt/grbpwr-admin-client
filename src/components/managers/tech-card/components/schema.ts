@@ -103,6 +103,7 @@ import {
 } from './operation-options';
 import { isMachineStepType, isWeldMachineType } from './equipment-options';
 import { wireInt } from './wire-int';
+import { CUT_STRIP_MODES } from './cut-strips/lengths';
 import {
   careLabelOut,
   careLabelSchema,
@@ -634,6 +635,27 @@ const bomItemSchema = z
       });
     }
   });
+
+const cutStripSchema = z.object({
+  lineKey: z.string().optional().default(''),
+  bomLineKey: z.string().optional().default(''),
+  lengthMode: z.enum(CUT_STRIP_MODES).default('per_size'),
+  seamKey: z.string().optional().default(''),
+  fitPct: z.string().optional().default('100'),
+  overlapMm: z.string().optional().default('0'),
+  widthMm: z.string().optional().default(''),
+  oneLengthMm: z.string().optional().default(''),
+  qty: z.number().optional().default(1),
+  sizes: z
+    .array(
+      z.object({
+        sizeId: z.number().optional().default(0),
+        seamMm: z.string().optional().default(''),
+        manualCutMm: z.string().optional().default(''),
+      }),
+    )
+    .default([]),
+});
 
 // One construction-description aspect (Sheet «Титул», lower block): freeform text + optional
 // reference images. key is silhouette/collar/fastening/… or a custom aspect.
@@ -2330,6 +2352,7 @@ const techCardObject = z.object({
   technicalMedia: z.array(mediaItemSchema).default([]),
   callouts: z.array(calloutSchema).default([]),
   bomItems: z.array(bomItemSchema).default([]),
+  cutStrips: z.array(cutStripSchema).default([]),
   details: z.array(detailSchema).default([]), // construction-description aspects (text + images)
   construction: constructionSchema,
   operations: z.array(operationSchema).default([]),
@@ -2487,6 +2510,7 @@ export const techCardDefaultData: TechCardFormData = {
   technicalMedia: [],
   callouts: [],
   bomItems: [],
+  cutStrips: [],
   details: [],
   construction: { ...emptyConstruction },
   operations: [],
@@ -2823,6 +2847,24 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       };
     }),
     bomItems: bomItemsForm,
+    cutStrips: (techCard.cutStrips ?? []).map((strip) => ({
+      lineKey: strip.lineKey?.trim() || ulid(),
+      bomLineKey: strip.bomLineKey?.trim() || '',
+      lengthMode: CUT_STRIP_MODES.includes(strip.lengthMode as (typeof CUT_STRIP_MODES)[number])
+        ? (strip.lengthMode as (typeof CUT_STRIP_MODES)[number])
+        : 'per_size',
+      seamKey: strip.seamKey?.trim() || '',
+      fitPct: decimalToInput(strip.fitPct) || '100',
+      overlapMm: decimalToInput(strip.overlapMm) || '0',
+      widthMm: decimalToInput(strip.widthMm),
+      oneLengthMm: strip.oneLengthMm == null ? '' : String(strip.oneLengthMm),
+      qty: strip.qty || 1,
+      sizes: (strip.sizes ?? []).map((size) => ({
+        sizeId: wireInt(size.sizeId),
+        seamMm: decimalToInput(size.seamMm),
+        manualCutMm: size.manualCutMm == null ? '' : String(size.manualCutMm),
+      })),
+    })),
     details: (insert?.details ?? []).map((d) => ({
       key: d.key || '',
       text: d.text || '',
@@ -3759,6 +3801,32 @@ export function mapFormToTechCardInsert(
       id: b.id || 0,
       lineKey: b.lineKey,
     })),
+    cutStrips: (data.cutStrips ?? [])
+      .filter((strip) => !!liveBomKey(strip.bomLineKey))
+      .map((strip) => ({
+        lineKey: strip.lineKey?.trim() || ulid(),
+        bomLineKey: liveBomKey(strip.bomLineKey),
+        lengthMode: strip.lengthMode || 'per_size',
+        seamKey: strip.seamKey?.trim() || '',
+        fitPct: inputToDecimal(strip.fitPct) ?? { value: '100' },
+        overlapMm: inputToDecimal(strip.overlapMm) ?? { value: '0' },
+        widthMm: inputToDecimal(strip.widthMm),
+        oneLengthMm:
+          strip.lengthMode === 'one_length' && strip.oneLengthMm?.trim()
+            ? Math.round(Number(strip.oneLengthMm))
+            : undefined,
+        qty: strip.qty || 1,
+        sizes: (strip.sizes ?? [])
+          .filter((size) => !!size.seamMm?.trim() || !!size.manualCutMm?.trim())
+          .map((size) => ({
+            sizeId: wireInt(size.sizeId),
+            seamMm: inputToDecimal(size.seamMm),
+            manualCutMm: size.manualCutMm?.trim()
+              ? Math.round(Number(size.manualCutMm))
+              : undefined,
+          })),
+      })),
+    cutStripsAware: true,
     details: (data.details ?? [])
       .map((d) => ({
         key: d.key?.trim() || '',
