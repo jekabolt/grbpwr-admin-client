@@ -182,8 +182,17 @@ function PackedPhoto({
   );
 }
 
-function ItemMedia({ item }: { item: FormPackagingItem }) {
-  const url = mediaUrl(item.pickedThumbnail);
+function ItemMedia({
+  item,
+  resolvedMedia,
+}: {
+  item: FormPackagingItem;
+  resolvedMedia?: readonly common_TechCardMediaFull[];
+}) {
+  const library = useMediaMap();
+  const url =
+    mediaUrl(item.pickedThumbnail) ||
+    mediaUrl(labelMediaOf(wireInt(item.mediaIds?.[0]), resolvedMedia, library));
   return url ? (
     <Media
       src={url}
@@ -691,7 +700,7 @@ export function PackagingShelf({
             return (
               <Tile
                 key={`${index}-${item.key}-${item.materialId ?? 0}-${item.auxTechCardId ?? 0}`}
-                media={<ItemMedia item={item} />}
+                media={<ItemMedia item={item} resolvedMedia={resolvedMedia} />}
                 name={item.pickedName || kindWord(item.key) || 'item'}
                 sub={kindWord(item.key) || 'item'}
                 selected={selectedIndex === index}

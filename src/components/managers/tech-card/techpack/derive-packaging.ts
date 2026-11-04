@@ -31,12 +31,15 @@ export function derivePackaging(techCard: common_TechCard, sink?: GapSink, t: Pd
       colorwayName(colourway, index, t),
     ]),
   );
+  const resolved = techCard.resolvedLabelMedia ?? [];
+  const storedMockup = (id?: number) =>
+    mediaFromResolved(resolved.find((media) => wireInt(media.media?.id) === wireInt(id)));
   const items = (card?.packagingItems ?? []).map((item, index) => {
     const colorwayIds = (item.colorwayIds ?? []).map(wireInt).filter((id) => id > 0);
     return {
       key: `${index}-${clean(item.key)}-${wireInt(item.materialId)}-${wireInt(item.auxTechCardId)}`,
       number: index + 1,
-      picture: mediaFull(item.pickedThumbnail),
+      picture: mediaFull(item.pickedThumbnail) ?? storedMockup(item.mediaIds?.[0]),
       item: clean(item.key).replaceAll('_', ' '),
       what: clean(item.pickedName) || clean(item.key),
       quantity: item.qtyPerGarment || 1,
