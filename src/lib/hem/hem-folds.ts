@@ -48,12 +48,17 @@ export type HemStepLike = {
 
 const HEM_WORKS = new Set(['hem_turned', 'moscow_hem']);
 
-/** The signs disagree on real data, so any one of them makes the step a hem. */
+/**
+ * The signs disagree on real data, so any one of them makes the step a hem. One exception: a serged
+ * edge carries the raw-hem class on real cards, yet nothing is turned, so the class alone is not
+ * enough there. A raw-edge hem is still a turned hem, only the serging work rules it out.
+ */
 export function isHemStep(op: HemStepLike): boolean {
+  const work = (op.work ?? '').trim();
   return (
-    HEM_WORKS.has((op.work ?? '').trim()) ||
+    HEM_WORKS.has(work) ||
     /hem/i.test(op.seamKind ?? '') ||
-    /(^|_)ef_hem_/i.test(op.seamClass ?? '')
+    (work !== 'overlock_serge' && /(^|_)ef_hem_/i.test(op.seamClass ?? ''))
   );
 }
 

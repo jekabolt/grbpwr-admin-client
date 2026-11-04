@@ -115,6 +115,11 @@ describe('isHemStep', () => {
       false,
     );
   });
+  it('a serged edge is not turned, a raw-edge hem is', () => {
+    expect(isHemStep({ work: 'overlock_serge', seamClass: 'ef_hem_raw' })).toBe(false);
+    expect(isHemStep({ work: 'coverstitch', seamClass: 'ef_hem_raw' })).toBe(true);
+    expect(isHemStep({ work: 'overlock_serge', seamKind: 'hem_raw' })).toBe(true);
+  });
   it.each([
     [{ work: 'hem_turned' }],
     [{ seamKind: 'blind_hem' }],
