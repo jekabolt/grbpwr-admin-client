@@ -37,6 +37,8 @@ import { englishT, own, type PdfT } from './i18n';
 export type LabelsDeriveOptions = {
   sampleSizeName?: string;
   sizeNames?: Readonly<Record<number, string>>;
+  /** Grade order from the dictionary; without it, ascending size ids. */
+  orderSizes?: (ids: number[]) => number[];
 };
 export type LabelsModel = ReturnType<typeof deriveLabels>;
 
@@ -67,6 +69,9 @@ const printedUrl = (url?: string): string => {
 };
 
 function labelAxes(techCard: common_TechCard, options: LabelsDeriveOptions, t: PdfT): LabelAxes {
+  // The card keeps sizes in the order they were clicked; paper reads them in grade order.
+  const sizeIds = (techCard.techCard?.sizeIds ?? []).map((raw) => wireInt(raw));
+  const ordered = options.orderSizes?.(sizeIds) ?? [...sizeIds].sort((a, b) => a - b);
   return {
     colorways: (techCard.colorways ?? [])
       .map((colorway, index) => ({
@@ -74,10 +79,10 @@ function labelAxes(techCard: common_TechCard, options: LabelsDeriveOptions, t: P
         name: colorwayName(colorway, index, t),
       }))
       .filter((colorway) => colorway.id > 0),
-    sizes: (techCard.techCard?.sizeIds ?? []).map((raw) => {
-      const id = wireInt(raw);
-      return { id, label: clean(options.sizeNames?.[id]).toUpperCase() || `#${id}` };
-    }),
+    sizes: ordered.map((id) => ({
+      id,
+      label: clean(options.sizeNames?.[id]).toUpperCase() || `#${id}`,
+    })),
   };
 }
 

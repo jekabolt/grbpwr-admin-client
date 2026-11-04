@@ -131,6 +131,22 @@ describe('page 05 sewn-in labels', () => {
     }
   });
 
+  it('lays sizes out in grade order, whatever order the card stored them in', () => {
+    const clicked = card({ sizeIds: [2, 1] });
+    const sizesOf = (options: Parameters<typeof deriveLabels>[1]) =>
+      deriveLabels(clicked, options)
+        .sewn.qr.find((l) => l.title.includes('composition'))
+        ?.cells.map((c) => c.sizeLabel);
+
+    expect(sizesOf({ sizeNames: names })).toEqual(['S', 'M']);
+    expect(sizesOf({ sizeNames: names, orderSizes: (ids) => [...ids].reverse() })).toEqual([
+      'S',
+      'M',
+    ]);
+    expect(sizesOf({ sizeNames: names, orderSizes: (ids) => [...ids] })).toEqual(['M', 'S']);
+    expect(clicked.techCard?.sizeIds).toEqual([2, 1]);
+  });
+
   it('keeps a three digit pin number on one line in the # column', () => {
     const cellPaddingPx = 12;
     const monoCharPx = 7.3;

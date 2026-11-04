@@ -207,11 +207,12 @@ export function LabelsPage({
   n,
   sampleSizeName,
   sizeNames,
+  orderSizes,
 }: LabelsPageProps) {
   const { t } = useT();
   const model = useMemo(
-    () => deriveLabels(techCard, { sampleSizeName, sizeNames }, undefined, t),
-    [techCard, sampleSizeName, sizeNames, t],
+    () => deriveLabels(techCard, { sampleSizeName, sizeNames, orderSizes }, undefined, t),
+    [techCard, sampleSizeName, sizeNames, orderSizes, t],
   );
   const [tight, setTight] = useState(0);
   const sheets = useMemo(
