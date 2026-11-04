@@ -14,12 +14,14 @@ import { garmentAssemblyOfCard, seamGraphOfCard, seamRowsOfCard } from '../card-
 import type { SceneOp } from '../step-seams/step-picture-view';
 import { suggestStepPairs } from '../step-seams/step-seams-model';
 import {
+  bomLinesOfStep,
   cutStripsOfCard,
   drawnSizeToken,
   rowTouchesStrip,
   stripDrawingsOf,
   stripFoundPiece,
   stripMarkOf,
+  stripQtyInStep,
   stripRefsOf,
   withoutStripPieces,
   withStripPieces,
@@ -310,5 +312,25 @@ describe('a strip that cannot be drawn yet', () => {
   it('survives the operation aliases: the top-level strips stay on the read view', () => {
     const model = deriveAssembly(waistbandCard());
     expect(cutStripsOfCard(model.techCard)).toHaveLength(1);
+  });
+});
+
+describe('a step that sews a strip consumes its BOM line', () => {
+  const strip = { lineKey: 'S1', bomLineKey: 'RUBBER', qty: 2 };
+
+  it('adds the line to the ones linked by hand', () => {
+    expect(bomLinesOfStep({ bomLineKeys: ['THREAD'], inputKeys: ['BLT', 'S1'] }, [strip])).toEqual([
+      'THREAD',
+      'RUBBER',
+    ]);
+  });
+  it('leaves a step without the strip alone', () => {
+    expect(bomLinesOfStep({ bomLineKeys: ['THREAD'], inputKeys: ['BLT'] }, [strip])).toEqual([
+      'THREAD',
+    ]);
+  });
+  it('takes the quantity from the strip', () => {
+    expect(stripQtyInStep({ inputKeys: ['S1'] }, [strip], 'RUBBER')).toBe(2);
+    expect(stripQtyInStep({ inputKeys: ['BLT'] }, [strip], 'RUBBER')).toBeNull();
   });
 });

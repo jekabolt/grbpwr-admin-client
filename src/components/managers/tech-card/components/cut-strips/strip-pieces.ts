@@ -59,6 +59,39 @@ export function stripKeysOfCard(card: common_TechCard | undefined): ReadonlySet<
   return stripKeysOf(cutStripsOfCard(card));
 }
 
+/**
+ * The BOM lines a step consumes: the ones linked to it, and the line of each strip it sews. A strip in
+ * a step is the trim in that step, nobody should have to link the line a second time.
+ */
+export function bomLinesOfStep(
+  op: {
+    bomLineKeys?: readonly string[] | null;
+    inputKeys?: readonly string[] | null;
+    pieceLineKeys?: readonly string[] | null;
+  },
+  strips: readonly CutStripLike[],
+): string[] {
+  const inputs = op.inputKeys?.length ? op.inputKeys : op.pieceLineKeys ?? [];
+  const sewn = strips
+    .filter((strip) => inputs.includes(keyOf(strip)))
+    .map((strip) => (strip.bomLineKey ?? '').trim())
+    .filter(Boolean);
+  return [...new Set([...(op.bomLineKeys ?? []).map((key) => key.trim()), ...sewn])];
+}
+
+/** Strips of a BOM line one step sews: the trim's quantity there when nobody typed one. */
+export function stripQtyInStep(
+  op: { inputKeys?: readonly string[] | null; pieceLineKeys?: readonly string[] | null },
+  strips: readonly CutStripLike[],
+  bomLineKey: string,
+): number | null {
+  const inputs = op.inputKeys?.length ? op.inputKeys : op.pieceLineKeys ?? [];
+  const sewn = strips.filter(
+    (strip) => (strip.bomLineKey ?? '').trim() === bomLineKey && inputs.includes(keyOf(strip)),
+  );
+  return sewn.length ? sewn.reduce((sum, strip) => sum + (strip.qty || 1), 0) : null;
+}
+
 /** The tile's and the picture's name: the BOM line's, never the strip's key. */
 export function stripName(strip: CutStripLike, bomLines: readonly BomLineLike[] = []): string {
   const key = (strip.bomLineKey ?? '').trim();

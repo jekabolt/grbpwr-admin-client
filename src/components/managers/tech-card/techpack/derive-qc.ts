@@ -1,4 +1,8 @@
 import type { common_TechCard, common_TechCardBomItem } from 'api/proto-http/admin';
+import {
+  bomLinesOfStep,
+  cutStripsOfCard,
+} from 'components/managers/tech-card/components/cut-strips/strip-pieces';
 import { fmtDelta } from './derive-assembly';
 import type { MeasurementRow } from './derive-measurements';
 import { bomRefs, clean, decimalNumber, enumLabel, shortDate, type BomRef } from './derive-shared';
@@ -110,9 +114,10 @@ export function deriveQcSignoffPage(input: QcInput, sink?: GapSink): QcSignoffMo
     return sink?.add(gap) ?? gap;
   };
   const ops = (tc?.operations ?? []).filter((op) => op.operationNumber);
+  const strips = cutStripsOfCard(techCard);
   const opsUsing = (ref: BomRef) =>
     ops
-      .filter((op) => (op.bomLineKeys ?? []).some((key) => clean(key) === ref.key))
+      .filter((op) => bomLinesOfStep(op, strips).includes(ref.key))
       .map((op) => op.operationNumber ?? 0);
   const opsOf = (machine: string, work: string) =>
     ops

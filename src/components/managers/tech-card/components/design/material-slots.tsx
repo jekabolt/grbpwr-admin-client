@@ -1200,7 +1200,7 @@ function CutStripEditor({
                         value={mode === 'one_length' ? cut ?? '' : undefined}
                         disabled={readOnly || mode === 'one_length'}
                         /* Approved mockup: bold means this size is a manual override. */
-                        className={cn('text-right', !!manual && 'font-bold')}
+                        className={cn('text-right placeholder:text-textColor', !!manual && 'font-bold')}
                       />
                     )}
                   </td>
