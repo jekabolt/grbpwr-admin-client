@@ -495,7 +495,7 @@ function PackagingPicker({
                   >
                     {(added || noOutput) && (
                       <div className='mt-1'>
-                        <Pill tone={noOutput ? 'warn' : 'mut'}>
+                        <Pill tone={noOutput ? 'warn' : 'mut'} className='h-auto whitespace-normal'>
                           {noOutput ? 'no output material' : 'added'}
                         </Pill>
                       </div>
@@ -724,7 +724,9 @@ export function PackagingShelf({
                 )}
                 {noOutput && (
                   <div className='mt-1'>
-                    <Pill tone='warn'>no output material</Pill>
+                    <Pill tone='warn' className='h-auto whitespace-normal'>
+                      no output material
+                    </Pill>
                   </div>
                 )}
               </Tile>
