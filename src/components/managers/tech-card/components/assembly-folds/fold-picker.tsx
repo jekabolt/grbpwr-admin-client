@@ -297,7 +297,12 @@ export function FoldPicker({
     }
 
     const group = line.group;
-    if (group.kind === kind) return;
+    if (group.kind === kind) {
+      // A fold saved before folds linked by themselves stays flat on the print until it has a step.
+      if (group.rows.every((row) => stepOfFold(foldStep.operations, row.foldKey) === null))
+        linkToStep(group.rows, stepIndex);
+      return;
+    }
     const sameCount = (kind === 'double') === (group.kind === 'double');
     const saved = rowsOfChoice(
       geom,
