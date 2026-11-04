@@ -137,10 +137,7 @@ export function FileRow({
         )}
 
         <div
-          className={cn(
-            'relative z-10 grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] items-center gap-3 md:grid-cols-[2.5rem_minmax(0,1fr)]',
-            selectOnClick && 'pointer-events-none',
-          )}
+          className='pointer-events-none relative z-10 grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] items-center gap-3 md:grid-cols-[2.5rem_minmax(0,1fr)]'
         >
           {onView ? (
             <Button
