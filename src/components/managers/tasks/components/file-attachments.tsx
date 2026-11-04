@@ -44,7 +44,7 @@ type NotePickerProps = {
   insert?: NoteFileInsert;
   onPick: (file: LibraryFile) => void;
   /** Есть — щелчок только выбирает файл, а ряд внизу предлагает `as table` и `as link`. */
-  onPickTable?: (file: LibraryFile) => void;
+  onPickTable?: (file: LibraryFile) => Promise<void>;
   onClose: () => void;
   selected?: never;
   onDone?: never;
@@ -298,6 +298,8 @@ export function FilePicker(props: FilePickerProps) {
   // Вставка в описание: щелчок выбирает файл, а чем он станет, решает ряд внизу окна.
   const [chosen, setChosen] = useState<LibraryFile | null>(null);
   const asTable = notePicker ? props.onPickTable : undefined;
+  // Окно держит описание закрытым, пока файл прикрепляется: метка встанет там, где был курсор.
+  const [attaching, setAttaching] = useState(false);
   const [previewId, setPreviewId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   // Строка запроса отстаёт от поля: иначе каждое нажатие создаёт отдельный ключ и отдельный
@@ -387,9 +389,13 @@ export function FilePicker(props: FilePickerProps) {
           size='sm'
           variant='main'
           className='min-h-11 md:min-h-0'
+          disabled={attaching}
           onClick={() => {
-            void asTable(chosen);
-            onClose();
+            setAttaching(true);
+            void asTable(chosen).finally(() => {
+              setAttaching(false);
+              onClose();
+            });
           }}
         >
           as table
@@ -401,6 +407,7 @@ export function FilePicker(props: FilePickerProps) {
           size='sm'
           variant='secondary'
           className='min-h-11 md:min-h-0'
+          disabled={attaching}
           onClick={() => {
             props.onPick?.(chosen);
             onClose();
@@ -414,6 +421,7 @@ export function FilePicker(props: FilePickerProps) {
         size='sm'
         variant='secondary'
         className='min-h-11 md:min-h-0'
+        disabled={attaching}
         onClick={onClose}
       >
         close
@@ -632,7 +640,7 @@ export function FilePicker(props: FilePickerProps) {
     <ConfirmationModal
       open
       onOpenChange={(o) => {
-        if (!o) onClose();
+        if (!o && !attaching) onClose();
       }}
       onConfirm={onClose}
       title={

@@ -389,9 +389,78 @@ describe('read-only fallback', () => {
     expect(openSheetBook('a.xlsx', zipSync({ 'a.txt': strToU8('a') }))).toBeNull();
   });
 
+  it('a total that overflows is never written as Infinity', () => {
+    const sheet = `<sheetData><row r="1"><c r="A1"><v>1e308</v></c><c r="B1"><f>SUM(A1:A2)</f></c></row><row r="2"><c r="A2"><v>1e308</v></c></row></sheetData>`;
+    const bytes = makeBook([sheet]);
+    expect(editable(bytes)).toBe(false);
+    expect(() => edit(open(bytes), { C1: '1' })).toThrow();
+  });
+
   it('never saves a formula it cannot count', () => {
     const book = open(makeBook([row('<c r="A1"><v>1</v></c><c r="B1"><f>NOW()</f><v>1</v></c>')]));
     expect(() => edit(book, { A1: '2' })).toThrow();
+  });
+});
+
+describe('date styles and rounding', () => {
+  const styles = (code: string) =>
+    `<styleSheet xmlns="${NS}"><numFmts><numFmt numFmtId="170" formatCode="${code}"/></numFmts>` +
+    '<cellXfs><xf numFmtId="0"/><xf numFmtId="170"/></cellXfs></styleSheet>';
+
+  it.each(['[h]', '[s]', '[mm]:ss'])('elapsed format %s is locked', (code) => {
+    const sheet = '<sheetData><row r="1"><c r="A1" s="1"><v>2</v></c></row></sheetData>';
+    const book = open(makeBook([sheet], { styles: styles(code) }));
+    expect(book.cell(0, 'A1').locked).toBe(true);
+    expect(() => edit(book, { A1: '49' })).toThrow();
+  });
+
+  it('a blank cell with a date from its column is locked', () => {
+    const sheet =
+      '<dimension ref="A1:B1"/><cols><col min="2" max="2" style="1"/></cols>' +
+      '<sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData>';
+    const book = open(makeBook([sheet], { styles: styles('dd.mm.yy') }));
+    expect(book.cell(0, 'B1').locked).toBe(true);
+    expect(book.cell(0, 'B5').locked).toBe(true);
+    expect(book.cell(0, 'C1').locked).toBe(false);
+    expect(() => edit(book, { B1: '7' })).toThrow();
+  });
+
+  it('a blank cell with a date from its row is locked', () => {
+    const sheet =
+      '<sheetData><row r="1" s="1" customFormat="1"><c r="A1"><v>1</v></c></row></sheetData>';
+    const book = open(makeBook([sheet], { styles: styles('dd.mm.yy') }));
+    expect(book.cell(0, 'B1').locked).toBe(true);
+    expect(book.cell(0, 'B2').locked).toBe(false);
+    expect(() => edit(book, { B1: '7' })).toThrow();
+  });
+
+  it('a blank cell with a plain style stays editable', () => {
+    const sheet =
+      '<cols><col min="2" max="2" style="1"/></cols>' +
+      '<sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData>';
+    const book = open(makeBook([sheet], { styles: styles('0.00') }));
+    expect(book.cell(0, 'B1').locked).toBe(false);
+    expect(sheetXml(edit(book, { B1: '7' }))).toContain('<c r="B1" s="1"><v>7</v></c>');
+  });
+
+  it('an unrelated edit leaves an exact zero total alone', () => {
+    const sheet =
+      '<sheetData>' +
+      '<row r="1"><c r="A1"><v>1.333</v></c><c r="B1"><f>SUM(A1:A4)</f><v>0</v></c></row>' +
+      '<row r="2"><c r="A2"><v>1.225</v></c></row>' +
+      '<row r="3"><c r="A3"><v>-1.333</v></c></row>' +
+      '<row r="4"><c r="A4"><v>-1.225</v></c></row>' +
+      '</sheetData>';
+    const after = sheetXml(edit(open(makeBook([sheet])), { C1: '1' }));
+    expect(after).toContain('<c r="B1"><f>SUM(A1:A4)</f><v>0</v></c>');
+  });
+
+  it('a real small total is not mistaken for rounding noise', () => {
+    const sheet =
+      '<sheetData><row r="1"><c r="A1"><v>1000000000000000</v></c><c r="B1"><f>SUM(A1:A3)</f><v>1</v></c></row>' +
+      '<row r="2"><c r="A2"><v>1</v></c></row>' +
+      '<row r="3"><c r="A3"><v>-1000000000000000</v></c></row></sheetData>';
+    expect(open(makeBook([sheet])).sheets[0].editable).toBe(true);
   });
 });
 
@@ -492,5 +561,8 @@ describe('helpers', () => {
     expect(isDateFormat('General')).toBe(false);
     expect(isDateFormat('"шт" 0;[Red]0')).toBe(false);
     expect(isDateFormat('#,##0_d')).toBe(false);
+    expect(isDateFormat('[h]')).toBe(true);
+    expect(isDateFormat('[ss]')).toBe(true);
+    expect(isDateFormat('"[h]" 0')).toBe(false);
   });
 });
