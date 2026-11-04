@@ -732,7 +732,7 @@ export function PackagingShelf({
             />
           )}
         </Tiles>
-        {selectedIndex != null && items[selectedIndex] && (
+        {selectedIndex != null && visible.some(({ index }) => index === selectedIndex) && (
           <ItemDetail
             index={selectedIndex}
             item={items[selectedIndex]}
