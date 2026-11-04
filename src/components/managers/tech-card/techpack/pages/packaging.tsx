@@ -106,7 +106,7 @@ function ItemsTable({
 
 function PackedFacts({ model, land, t }: { model: PackagingModel; land: boolean; t: PdfT }) {
   return (
-    <aside className={land ? 'min-w-0' : 'grid min-w-0 grid-cols-3 gap-5'}>
+    <aside className={land ? 'w-48 shrink-0' : 'grid min-w-0 grid-cols-3 gap-5'}>
       <div className='min-w-0'>
         <GroupLabel flush>{t('packaging.packed')}</GroupLabel>
         <Fact label={t('packaging.ships')} value={own(model.packed.ships)} />
@@ -208,11 +208,11 @@ export function PackagingPage({ techCard, orient, docline, n }: TechpackPageProp
             <div
               className={
                 land && page === 0
-                  ? 'grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_190px] gap-5'
+                  ? 'flex min-h-0 flex-1 gap-5'
                   : 'flex min-h-0 flex-1 flex-col gap-5'
               }
             >
-              <div className='min-w-0'>
+              <div className={land && page === 0 ? 'min-w-0 flex-1' : 'min-w-0'}>
                 <ItemsTable model={model} items={items} t={t} />
               </div>
               {page === 0 && <PackedFacts model={model} land={land} t={t} />}

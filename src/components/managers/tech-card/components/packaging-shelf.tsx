@@ -22,6 +22,7 @@ import {
   ChipRow,
   Close,
   ConfirmationModal,
+  EmptyCell,
   GroupLabel,
   Input,
   InputField,
@@ -134,13 +135,7 @@ function PackedPhoto({
   if (disabled)
     return (
       <Field label='packed photo'>
-        {url ? (
-          thumb
-        ) : (
-          <Text size='micro' variant='label'>
-            —
-          </Text>
-        )}
+        {url ? thumb : <EmptyCell />}
       </Field>
     );
   return (
