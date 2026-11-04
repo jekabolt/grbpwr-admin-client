@@ -49,7 +49,7 @@ describe('derivePackaging', () => {
 
     expect(model.showColour).toBe(true);
     expect(model.items[0]).toMatchObject({
-      item: 'tissue',
+      item: 'tissue paper',
       what: 'Black tissue',
       quantity: 2,
       perOrder: false,
