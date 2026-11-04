@@ -332,6 +332,7 @@ const ECHO_AWARE = {
   operationLayerOrderAware: true,
   bomQtyAware: true,
   labelsAware: true,
+  packagingPicksAware: true,
 } satisfies Partial<common_TechCardInsert>;
 
 /**
