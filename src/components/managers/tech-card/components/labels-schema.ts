@@ -6,6 +6,7 @@ import type {
   common_MediaFull,
 } from 'api/proto-http/admin';
 import { z } from 'zod';
+import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import { wireInt } from './wire-int';
 
 /**
@@ -93,6 +94,17 @@ const qtyPerGarment = z
   .default(1)
   .refine((q) => Number.isInteger(q) && q >= 1, { message: 'one or more per garment' });
 
+// Label roll goods are authored in centimetres per garment. The backend accepts a decimal with at
+// most one fractional digit; keeping the form value as text preserves an empty field and the
+// operator's in-progress decimal while they type.
+const labelLengthCm = z
+  .string()
+  .optional()
+  .default('')
+  .refine((value) => !value || /^\d+(?:\.\d)?$/.test(value), {
+    message: 'whole or one decimal',
+  });
+
 // One artwork file of a sewn-in label (0447). 0 on an axis = «any colour» / «all sizes». `publicUrl`
 // is read-only: the server fills it from the file's live link, and an empty one reads as «no file».
 export const garmentLabelFileSchema = z.object({
@@ -105,6 +117,11 @@ export const garmentLabelFileSchema = z.object({
 
 export const garmentLabelSchema = z.object({
   key: labelKey,
+  source: z.enum(['', 'stock', 'make']).optional().default(''),
+  kind: text(LABEL_KEY_MAX, 'type'),
+  madeBy: text(LABEL_KEY_MAX, 'made by'),
+  printMethod: text(LABEL_KEY_MAX, 'print'),
+  lengthCm: labelLengthCm,
   placement: text(LABEL_TEXT_MAX, 'placement'),
   attachment: text(LABEL_TEXT_MAX, 'attachment'),
   folding: text(LABEL_TEXT_MAX, 'folding'),
@@ -322,6 +339,11 @@ export function careLabelToForm(c?: common_TechCardCareLabel): FormCareLabel {
 export function garmentLabelsToForm(ls?: common_TechCardGarmentLabel[]): FormGarmentLabel[] {
   return (ls ?? []).map((l) => ({
     key: l.key || '',
+    source: l.source === 'stock' || l.source === 'make' ? l.source : '',
+    kind: l.kind || '',
+    madeBy: l.madeBy || '',
+    printMethod: l.printMethod || '',
+    lengthCm: decimalToInput(l.lengthCm),
     placement: l.placement || '',
     attachment: l.attachment || '',
     folding: l.folding || '',
@@ -400,6 +422,13 @@ export function careLabelOut(c?: FormCareLabel): common_TechCardCareLabel {
 export function garmentLabelsOut(ls?: FormGarmentLabel[]): common_TechCardGarmentLabel[] {
   return (ls ?? []).map((l) => ({
     key: l.key?.trim() || '',
+    // Presence is the compatibility bit for the stock/make contract. Every row written by this
+    // screen sends it, including '' for a legacy row or an explicitly cleared source.
+    source: l.source || '',
+    kind: l.kind?.trim() || '',
+    madeBy: l.madeBy?.trim() || '',
+    printMethod: l.printMethod?.trim() || '',
+    lengthCm: inputToDecimal(l.lengthCm),
     placement: l.placement?.trim() || '',
     attachment: l.attachment?.trim() || '',
     folding: l.folding?.trim() || '',

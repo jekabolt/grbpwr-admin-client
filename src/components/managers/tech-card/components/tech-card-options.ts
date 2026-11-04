@@ -79,8 +79,25 @@ export const detailKeyLabel = (key?: string): string =>
 
 export type LabelKind = { key: string; label: string };
 
-// The picker's list: sewn-ins only. Hangtag and barcode left for packaging (owner, 03.11.26).
+// The made-label dialog, in the mockup's words. The stock filter adds composition.
 export const garmentLabelKinds: LabelKind[] = [
+  { key: 'brand', label: 'brand' },
+  { key: 'size', label: 'size' },
+  { key: 'flag', label: 'flag' },
+  { key: 'patch', label: 'patch' },
+  { key: 'neck_tape', label: 'neck tape' },
+  { key: 'hanger_loop', label: 'hanger loop' },
+  { key: 'hangtag', label: 'hangtag' },
+  { key: 'barcode', label: 'barcode' },
+];
+
+export const labelStockKinds: LabelKind[] = [
+  ...garmentLabelKinds,
+  { key: 'composition', label: 'composition' },
+];
+
+// The names a stored row may carry, offered or not: rows with the old keys still read and save.
+export const garmentLabelKindNames: LabelKind[] = [
   { key: 'brand', label: 'brand label' },
   { key: 'size', label: 'size tag' },
   { key: 'flag', label: 'flag label' },
@@ -88,11 +105,6 @@ export const garmentLabelKinds: LabelKind[] = [
   { key: 'patch', label: 'patch' },
   { key: 'neck_tape', label: 'neck tape' },
   { key: 'other', label: 'other' },
-];
-
-// The names a stored row may carry, offered or not: rows with the old keys still read and save.
-export const garmentLabelKindNames: LabelKind[] = [
-  ...garmentLabelKinds,
   { key: 'composition', label: 'composition label' },
   { key: 'hangtag', label: 'hangtag' },
   { key: 'barcode', label: 'barcode / price sticker' },
@@ -132,26 +144,41 @@ export function kindLabel(kinds: LabelKind[], key?: string): string {
 }
 
 export const labelPlacementOptions = [
-  'neckline, centre back',
-  'left side seam',
-  'right side seam',
-  'waistband, inside',
-  'lining',
-  'pocket',
+  'centre back neck',
+  'side seam, left',
+  'side seam, right',
+  'inside waistband',
+  'back yoke',
   'hem',
-  'sleeve',
 ];
 
 export const labelAttachmentOptions = [
   'sewn into the seam',
-  'topstitched, four sides',
-  'topstitched, top edge',
-  'heat transfer',
-  'hung on a string through the brand label',
-  'inserted in the polybag',
+  'sewn 2 sides',
+  'sewn 4 sides',
+  'heat press',
+  'swift tack',
+  'hung',
+  'stuck on',
 ];
 
-export const labelFoldingOptions = ['flat', 'end fold', 'centre fold', 'mitre fold', 'loop fold'];
+export const labelFoldingOptions = ['flat', 'centre fold', 'end fold', 'mitre'];
+
+export const labelMadeByOptions = ['woven', 'printed', 'embroidered', 'heat transfer'];
+
+export const labelPrintMethodOptions = ['screen', 'digital', 'flexo', 'foil'];
+
+export const labelDefaults: Record<string, { attachment: string; folding: string }> = {
+  brand: { attachment: 'sewn 4 sides', folding: 'flat' },
+  size: { attachment: 'sewn into the seam', folding: 'centre fold' },
+  flag: { attachment: 'sewn into the seam', folding: 'centre fold' },
+  patch: { attachment: 'sewn 4 sides', folding: 'flat' },
+  neck_tape: { attachment: 'sewn 2 sides', folding: 'flat' },
+  hanger_loop: { attachment: 'sewn into the seam', folding: 'end fold' },
+  hangtag: { attachment: 'hung', folding: 'flat' },
+  barcode: { attachment: 'stuck on', folding: 'flat' },
+  composition: { attachment: 'sewn into the seam', folding: 'end fold' },
+};
 
 export const packagingUsageOptions = [
   'one per garment',
