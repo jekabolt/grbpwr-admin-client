@@ -5,17 +5,11 @@ import type {
   common_TechCardMediaFull,
 } from 'api/proto-http/admin';
 import { MaterialThumb } from 'components/managers/materials/components/material-thumb';
-import { useMaterials } from 'components/managers/materials/components/useMaterials';
-import { useMaterialStock } from 'components/managers/materials/components/useWarehouse';
-import { isRunOpen } from 'components/managers/production-runs/components/options';
-import { runQty } from 'components/managers/production-runs/components/run-rows';
-import { useProductionRuns } from 'components/managers/production-runs/components/useProductionRuns';
 import { useEffect, useMemo, useState, type ChangeEvent, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { AddDoor, ConfirmationModal, Input, Select, Section, Text, Tile, Tiles } from 'ui';
-import { decimalToInput } from 'utils/decimal';
 
-import { pickLabelMaterial, LABEL_BOM_SECTION } from './label-bom';
+import { pickLabelMaterial } from './label-bom';
 import { labelKindOfMaterial } from './label-material-kind';
 import { upsertGarmentLabel } from './form-writers';
 import { type FormGarmentLabel, type FormPackagingItem } from './labels-schema';
@@ -35,6 +29,7 @@ import {
   kindLabel,
   labelStockKinds,
 } from './tech-card-options';
+import { useLabelStock } from './use-label-stock';
 import { wireInt } from './wire-int';
 
 /** A label key is the material or typed name; duplicates get a stable numeric suffix. */
@@ -256,31 +251,14 @@ export function LabelsBlock({
     TechCardFormData['bomItems']
   >;
   const rows = all.filter((row) => !isCompositionLabel(row.key));
-  const materialsQuery = useMaterials(LABEL_BOM_SECTION, true);
-  const stockQuery = useMaterialStock({ section: LABEL_BOM_SECTION });
-  const techCardId = wireInt(techCard?.id);
-  const runsQuery = useProductionRuns(techCardId, '', 0, false, techCardId > 0);
+  const { materials, materialById, stock, stockKnown, plannedQty, onHandOf } =
+    useLabelStock(techCard);
 
   const [adding, setAdding] = useState(false);
   const [making, setMaking] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [materialTarget, setMaterialTarget] = useState<string | null>(null);
 
-  const materials = materialsQuery.data?.materials ?? [];
-  const materialById = useMemo(
-    () => new Map(materials.map((material) => [wireInt(material.id), material])),
-    [materials],
-  );
-  const stock = useMemo(() => {
-    const map = new Map<number, string>();
-    for (const stockRow of stockQuery.data?.rows ?? []) {
-      map.set(wireInt(stockRow.material?.id), decimalToInput(stockRow.onHand) || '0');
-    }
-    return map;
-  }, [stockQuery.data]);
-
-  const currentRun = (runsQuery.data?.runs ?? []).find((run) => isRunOpen(run.run?.status));
-  const plannedQty = currentRun ? runQty(currentRun).planned : undefined;
   const issues = rows.reduce((total, row) => total + labelMiss(row, bomItems), 0);
   const keys = rows.map((row) => row.key ?? '');
   const targetRow = rows.find((row) => row.key === materialTarget);
@@ -312,9 +290,7 @@ export function LabelsBlock({
             const key = row.key?.trim() || `label ${index + 1}`;
             const line = labelBomLine(row, bomItems);
             const material = materialById.get(wireInt(line?.materialId));
-            const onHand = material
-              ? stock.get(wireInt(material.id)) ?? (stockQuery.isSuccess ? '0' : undefined)
-              : undefined;
+            const onHand = onHandOf(material);
             return (
               <SewnLabelRow
                 key={`${key.toLowerCase()}-${index}`}
@@ -349,7 +325,7 @@ export function LabelsBlock({
         }}
         materials={materials}
         stock={stock}
-        stockKnown={stockQuery.isSuccess}
+        stockKnown={stockKnown}
         onPick={(material, kind) => {
           if (materialTarget) {
             pickLabelMaterial(getValues, setValue, materialTarget, material, {

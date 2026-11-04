@@ -130,6 +130,45 @@ export function pickLabelMaterial(
   );
 }
 
+/**
+ * Take the material off a label that stays, as the composition row does with its text and files. A
+ * row with a source owns its line, so the line leaves in the same save. A row picked before sources
+ * existed only lets go: its line never reached a recipe, and a person may have written one on it.
+ */
+export function takeLabelMaterialOff(
+  getValues: UseFormGetValues<TechCardFormData>,
+  setValue: UseFormSetValue<TechCardFormData>,
+  labelKey: string,
+): void {
+  const labels = (getValues('garmentLabels') ?? []) as FormGarmentLabel[];
+  const row = labels.find((candidate) => sameKey(candidate.key, labelKey));
+  if (!row) return;
+
+  const bomItems = ((getValues('bomItems') ?? []) as BomItems).slice();
+  const line = labelBomLine(row, bomItems);
+  const packaging = (getValues('packagingItems') ?? []) as FormPackagingItem[];
+  const owned =
+    !!line &&
+    !!row.source &&
+    line.section === LABEL_BOM_SECTION &&
+    !lineHasAnotherOwner(line, labelKey, labels, packaging, bomItems);
+
+  upsertGarmentLabel(
+    getValues,
+    setValue,
+    labelKey,
+    { bomLineKey: '', bomItemId: 0, source: '' },
+    { keepBare: true },
+  );
+  if (!line || !owned) return;
+
+  releaseBomLineRefs(getValues, setValue, line);
+  const current = ((getValues('bomItems') ?? []) as BomItems).slice();
+  setValue('bomItems', current.filter((candidate) => !sameLine(candidate, line)) as never, {
+    shouldDirty: true,
+  });
+}
+
 /** Remove the label and, when it is not shared, the BOM line it owns. */
 export function removeLabelWithLine(
   getValues: UseFormGetValues<TechCardFormData>,
