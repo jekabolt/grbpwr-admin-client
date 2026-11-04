@@ -189,9 +189,9 @@ export function FilesFilters({
     <div
       role='toolbar'
       aria-label='file filters'
-      className='flex items-center gap-1.5 border-t border-hairline px-block py-2.5'
+      className='flex flex-wrap items-center gap-1.5 border-t border-hairline px-block py-2.5'
     >
-      <div className='flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overscroll-x-contain pr-1.5'>
+      <div className='flex w-full min-w-0 items-center sm:w-auto sm:flex-1 gap-1.5 overflow-x-auto overscroll-x-contain pr-1.5'>
         <GenericPopover
           title='topics'
           noTail
@@ -306,7 +306,7 @@ export function FilesFilters({
         })}
       </div>
 
-      <span className='flex shrink-0 items-center gap-2.5'>
+      <span className='ml-auto flex shrink-0 items-center gap-2.5'>
         <Button
           className='whitespace-nowrap text-labelColor hover:text-textColor'
           title={`${SORT_LABEL[sort]} · next: ${SORT_LABEL[nextSort]}`}
