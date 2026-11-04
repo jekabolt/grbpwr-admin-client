@@ -40,6 +40,7 @@ import { removePackagingItem, upsertPackagingItem, type PackagingItemOpts } from
 import {
   auxCardThumbUrl,
   auxOutputStock,
+  auxSubtypeLabel,
   Thumb,
   useAuxTechCards,
   Field,
@@ -67,6 +68,12 @@ type Pick =
 type Colourway = { id: number; name: string; hex: string };
 
 const perOrderKinds = new Set(['box', 'mailer', 'tote_bag']);
+const notPackagingAux = new Set([
+  'TECH_CARD_AUX_SUBTYPE_BRAND_LABEL',
+  'TECH_CARD_AUX_SUBTYPE_CARE_LABEL',
+  'TECH_CARD_AUX_SUBTYPE_SIZE_LABEL',
+  'TECH_CARD_AUX_SUBTYPE_HANGTAG',
+]);
 const mediaUrl = (media?: common_MediaFull): string =>
   media?.media?.thumbnail?.mediaUrl ||
   media?.media?.compressed?.mediaUrl ||
@@ -366,19 +373,21 @@ function PackagingPicker({
         image: material.image,
         material,
       }));
-    const auxPicks = (aux.data?.techCards ?? []).map((card) => ({
-      type: 'aux' as const,
-      id: wireInt(card.id),
-      name: card.name || card.styleNumber || 'aux card',
-      url: auxCardThumbUrl(card),
-      card,
-    }));
+    const auxPicks = (aux.data?.techCards ?? [])
+      .filter((card) => !notPackagingAux.has(card.auxSubtype ?? ''))
+      .map((card) => ({
+        type: 'aux' as const,
+        id: wireInt(card.id),
+        name: card.name || card.styleNumber || 'aux card',
+        url: auxCardThumbUrl(card),
+        card,
+      }));
     return [...materialPicks, ...auxPicks].filter((pick) => pick.id > 0);
   }, [materials.data, aux.data]);
 
   const kindOf = (pick: Pick): string => {
     if (pick.type === 'aux')
-      return packagingItemKind(undefined, `${pick.name} ${pick.card.auxSubtype ?? ''}`);
+      return packagingItemKind(undefined, `${pick.name} ${auxSubtypeLabel(pick.card.auxSubtype)}`);
     const bomKind = bomItems.find((line) => wireInt(line.materialId) === pick.id)?.kind;
     return packagingItemKind(bomKind, pick.name);
   };
@@ -386,9 +395,10 @@ function PackagingPicker({
     const words = `${pick.name} ${pick.type}`.toLowerCase();
     return (
       (!query.trim() || words.includes(query.trim().toLowerCase())) &&
-      (kind === 'all' || kindOf(pick) === kind)
+      (kind === 'all' || !kindOf(pick) || kindOf(pick) === kind)
     );
   });
+  const canCreate = !filtered.length || (kind !== 'all' && !filtered.some((pick) => kindOf(pick)));
   const isAdded = (pick: Pick) =>
     items.some(
       (item) =>
@@ -448,7 +458,7 @@ function PackagingPicker({
               </Chip>
             ))}
           </ChipRow>
-          {filtered.length ? (
+          {!!filtered.length && (
             <Tiles min={132}>
               {filtered.map((pick) => {
                 const added = isAdded(pick);
@@ -475,11 +485,14 @@ function PackagingPicker({
                 );
               })}
             </Tiles>
-          ) : (
+          )}
+          {canCreate && (
             <div className='flex items-center gap-2 py-6'>
-              <Text size='small' variant='label'>
-                nothing in the catalog
-              </Text>
+              {!filtered.length && (
+                <Text size='small' variant='label'>
+                  nothing in the catalog
+                </Text>
+              )}
               <Button
                 type='button'
                 variant='underline'
