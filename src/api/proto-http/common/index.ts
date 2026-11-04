@@ -1033,6 +1033,19 @@ export type MaterialClass =
 // MaterialPurpose (#40) marks whether a catalog material is used for samples, production, or both,
 // so the admin can mark and filter materials. Mirrors entity.ValidMaterialPurposes and the DB CHECK
 // chk_material_purpose. UNKNOWN defaults to BOTH on write.
+// MaterialLabelType is the type of a label in stock (0451), stored on the material and never derived
+// from its name. UNKNOWN means no type on create and keep the stored one on update.
+export type MaterialLabelType =
+  | "MATERIAL_LABEL_TYPE_UNKNOWN"
+  | "MATERIAL_LABEL_TYPE_BRAND"
+  | "MATERIAL_LABEL_TYPE_SIZE"
+  | "MATERIAL_LABEL_TYPE_FLAG"
+  | "MATERIAL_LABEL_TYPE_PATCH"
+  | "MATERIAL_LABEL_TYPE_TAPE"
+  | "MATERIAL_LABEL_TYPE_LOOP"
+  | "MATERIAL_LABEL_TYPE_HANGTAG"
+  | "MATERIAL_LABEL_TYPE_BARCODE"
+  | "MATERIAL_LABEL_TYPE_COMPOSITION";
 export type MaterialPurpose =
   | "MATERIAL_PURPOSE_UNKNOWN"
   | "MATERIAL_PURPOSE_SAMPLE"
@@ -2790,6 +2803,8 @@ export type Material = {
   // * field PRESENT, value ""    → CLEAR it (store NULL).
   // * field PRESENT with a value → set it.
   fabricThicknessMm: googletype_Decimal | undefined;
+  // The type of a label in stock, section LABEL only (0451). The label picker filters on it.
+  labelType: MaterialLabelType | undefined;
 };
 
 // MaterialPrice is one point in a material's append-only price history. Prices are in the

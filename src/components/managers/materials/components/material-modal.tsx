@@ -2,6 +2,7 @@ import {
   common_CompositionEntry,
   common_Material,
   common_MaterialClass,
+  common_MaterialLabelType,
   common_MaterialPurpose,
   common_MediaFull,
   common_TechCardBomSection,
@@ -16,7 +17,7 @@ import {
   notifyFailure,
 } from 'components/managers/production-runs/components/feedback';
 import { useEffect, useMemo, useState } from 'react';
-import { Button, ConfirmationModal, GroupLabel, Pill, Text, EmptyCell, Close } from 'ui';
+import { Button, ConfirmationModal, GroupLabel, Pill, Select, Text, EmptyCell, Close } from 'ui';
 import {
   decimalToInput,
   inputToDecimal,
@@ -74,6 +75,18 @@ export const materialClassOptions: Array<{ value: common_MaterialClass; label: s
   { value: 'MATERIAL_CLASS_THREAD', label: 'thread' },
   { value: 'MATERIAL_CLASS_PACKAGING', label: 'packaging' },
   { value: 'MATERIAL_CLASS_OTHER', label: 'other' },
+];
+
+const materialLabelTypeOptions: Array<{ value: common_MaterialLabelType; label: string }> = [
+  { value: 'MATERIAL_LABEL_TYPE_BRAND', label: 'brand' },
+  { value: 'MATERIAL_LABEL_TYPE_SIZE', label: 'size' },
+  { value: 'MATERIAL_LABEL_TYPE_FLAG', label: 'flag' },
+  { value: 'MATERIAL_LABEL_TYPE_PATCH', label: 'patch' },
+  { value: 'MATERIAL_LABEL_TYPE_TAPE', label: 'neck tape' },
+  { value: 'MATERIAL_LABEL_TYPE_LOOP', label: 'hanger loop' },
+  { value: 'MATERIAL_LABEL_TYPE_HANGTAG', label: 'hangtag' },
+  { value: 'MATERIAL_LABEL_TYPE_BARCODE', label: 'barcode' },
+  { value: 'MATERIAL_LABEL_TYPE_COMPOSITION', label: 'composition' },
 ];
 
 const fabricDirectionOptions: Array<{ value: string; label: string }> = [
@@ -164,6 +177,7 @@ type KV = { key: string; value: string };
 type Draft = {
   name: string;
   section: common_TechCardBomSection;
+  labelType: common_MaterialLabelType;
   supplier: string;
   supplierRef: string;
   unit: string;
@@ -215,6 +229,7 @@ const emptyPackaging: PackagingDraft = { substrate: '', dimensions: '', gsm: '',
 const empty: Draft = {
   name: '',
   section: 'TECH_CARD_BOM_SECTION_FABRIC',
+  labelType: 'MATERIAL_LABEL_TYPE_UNKNOWN',
   supplier: '',
   supplierRef: '',
   unit: '',
@@ -270,6 +285,7 @@ function parseOtherAttrs(
 const draftFromMaterial = (material: common_Material): Draft => ({
   name: material.name ?? '',
   section: material.section ?? 'TECH_CARD_BOM_SECTION_FABRIC',
+  labelType: material.labelType ?? 'MATERIAL_LABEL_TYPE_UNKNOWN',
   supplier: material.supplier ?? '',
   supplierRef: material.supplierRef ?? '',
   unit: material.unit ?? '',
@@ -512,6 +528,9 @@ export function MaterialModal({
       return next;
     });
 
+  const effectiveSection = derivedSection(d.materialClass) ?? d.section;
+  const isLabelSection = effectiveSection === 'TECH_CARD_BOM_SECTION_LABEL';
+
   const submit = () => {
     setFail(null);
     if (!d.name.trim()) {
@@ -554,7 +573,9 @@ export function MaterialModal({
       name: d.name.trim(),
       // section stays persisted — derived from the class for the 1:1 classes (its select is hidden,
       // so a stale/legacy mis-set section is never written back), else the operator-chosen section.
-      section: derivedSection(d.materialClass) ?? d.section,
+      section: effectiveSection,
+      // The server keeps a stored type when this is UNKNOWN and clears it on a move out of the section.
+      labelType: isLabelSection ? d.labelType : 'MATERIAL_LABEL_TYPE_UNKNOWN',
       supplier: d.supplier.trim(),
       supplierRef: d.supplierRef.trim(),
       // Supplier-catalog linkage + lead time (Phase 9) are contract fields without an editor yet —
@@ -781,6 +802,27 @@ export function MaterialModal({
                     </option>
                   ))}
                 </select>
+              </label>
+            )}
+            {isLabelSection && (
+              <label className='flex flex-col gap-1'>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  type
+                </Text>
+                {/* A stored type cannot be cleared: the server reads UNKNOWN as keep. */}
+                <Select
+                  name='material-label-type'
+                  size='sm'
+                  fullWidth
+                  value={d.labelType}
+                  items={[
+                    ...(d.labelType === 'MATERIAL_LABEL_TYPE_UNKNOWN'
+                      ? [{ value: 'MATERIAL_LABEL_TYPE_UNKNOWN', label: 'pick type' }]
+                      : []),
+                    ...materialLabelTypeOptions,
+                  ]}
+                  onValueChange={(v) => set({ labelType: v as common_MaterialLabelType })}
+                />
               </label>
             )}
             <label className='flex flex-col gap-1'>
