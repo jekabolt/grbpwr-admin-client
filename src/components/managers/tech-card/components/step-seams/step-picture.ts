@@ -39,6 +39,7 @@ import {
   type LaidHand,
 } from './step-hand';
 import { GUESS_OK, parseInner, pieceOfTarget, type SewnPair } from './step-seams-model';
+import { placeStripsOnHosts } from '../cut-strips/strip-place';
 import { pinPoses, placementT, type PosePin } from './step-pose';
 
 export type Box = { x0: number; y0: number; x1: number; y1: number };
@@ -431,6 +432,8 @@ export type StepLayout = {
   hung?: [string, string][];
   /** The pieces a pose (P8) pinned, where their rows say. */
   posed?: string[];
+  /** The cut strips this step sews, each with the piece it lies on. */
+  stripHosts?: ReadonlyMap<string, string>;
   /**
    * Pieces that only collide in this picture: a seam joins their blocks but does not lie where it is
    * drawn. Neither covers the other, on later steps too.
@@ -837,6 +840,8 @@ const NO_HAND: ReadonlyMap<string, HandOn> = new Map();
  * no placement of its own takes its twin's, mirrored (`twinHand`: the card's placements anywhere;
  * default `hand`) when it is sewn to the twin of the twin's partner.
  */
+const NO_STRIP_HOSTS: ReadonlyMap<string, string> = new Map();
+
 export function stepLayout(
   leaves: readonly (readonly string[])[],
   seams: readonly SeamCandidate[],
@@ -1791,6 +1796,10 @@ export function stepLayout(
     }
   }
 
+  // A strip lies inside the piece it is sewn to. Apart (explode), its edges stay open to pick.
+  const stripHosts =
+    explode === 0 ? placeStripsOnHosts(T, seams, geoms, new Set(hands.keys())) : NO_STRIP_HOSTS;
+
   const stacksOut = [...stacked, ...crossStacks];
   if (opts.garmentLayout) {
     // A seeded earlier output can contain more than one disconnected body even when this step has a
@@ -2279,6 +2288,7 @@ export function stepLayout(
     hand: hands,
     hung,
     ...(posed.length ? { posed } : {}),
+    ...(stripHosts.size ? { stripHosts } : {}),
     bbox,
   };
 }

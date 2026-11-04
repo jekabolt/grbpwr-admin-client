@@ -43,7 +43,12 @@ export type PrintStep = {
   assemblyBlockDetached?: boolean;
 };
 
-export type PrintCardInput = { pieces: PrintPiece[]; steps: PrintStep[] };
+export type PrintCardInput = {
+  pieces: PrintPiece[];
+  steps: PrintStep[];
+  /** Cut strips: known to the sweep, since a step takes them, but never on the cut list. */
+  strips?: { lineKey: string; name: string }[];
+};
 
 export type RowKind = 'makes' | 'adds' | 'process';
 
@@ -130,8 +135,11 @@ export function assemblyPrintModel(input: PrintCardInput): PrintModel {
       return true;
     }),
   };
-  const pieceKeys = new Set(card.pieces.map((p) => p.lineKey));
-  const sweepPieces = card.pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
+  const sweepPieces = [
+    ...card.pieces.map((p) => ({ lineKey: p.lineKey, name: p.name })),
+    ...(input.strips ?? []).map((p) => ({ lineKey: p.lineKey, name: p.name, strip: true })),
+  ];
+  const pieceKeys = new Set(sweepPieces.map((p) => p.lineKey));
   const steps: AssemblyStep[] = card.steps.map((s) => ({
     inputs: classifyAssemblyInputs(pieceKeys, s.inputKeys),
     outputUnitKey: s.outputUnitKey,
@@ -198,6 +206,7 @@ export function assemblyPrintModel(input: PrintCardInput): PrintModel {
       pieceLabel.set(p.lineKey, `${n} · ${k}`);
     } else pieceLabel.set(p.lineKey, n);
   }
+  for (const strip of input.strips ?? []) pieceLabel.set(strip.lineKey, upper(strip.name));
   const pieceName = (key: string): string => pieceLabel.get(key) ?? 'UNNAMED PIECE';
 
   const parentOf = new Map<string, { key: string; step: number }>();

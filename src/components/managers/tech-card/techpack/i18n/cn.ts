@@ -304,6 +304,15 @@ export const cn = {
     hiddenSeam: '暗缝',
     pairNumber: '配对编号',
   },
+  cutStrips: {
+    title: '定长裁剪',
+    step: '步骤',
+    cutAt: '裁长，{size}',
+    cutMmOf: '{name}，裁长 mm',
+    allSizes: '所有尺码',
+    unused: '未用于任何步骤',
+    staleSeam: '缝长已过期',
+  },
   measurements: {
     title: '尺寸',
     point: '测量点',

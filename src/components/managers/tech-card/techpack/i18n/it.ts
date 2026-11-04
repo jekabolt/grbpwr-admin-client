@@ -308,6 +308,15 @@ export const it = {
     hiddenSeam: 'cucitura nascosta',
     pairNumber: 'n. coppia',
   },
+  cutStrips: {
+    title: 'taglio a misura',
+    step: 'passaggio',
+    cutAt: 'taglio, {size}',
+    cutMmOf: '{name}, taglio mm',
+    allSizes: 'tutte le taglie',
+    unused: 'taglio senza passaggio',
+    staleSeam: 'lunghezza cucitura superata',
+  },
   measurements: {
     title: 'misure',
     point: 'punto misura',

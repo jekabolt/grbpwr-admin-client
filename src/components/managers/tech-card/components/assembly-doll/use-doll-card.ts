@@ -44,6 +44,12 @@ import { useWatch } from 'react-hook-form';
 import { useFoldRows, useFoldRowsSig, useFoldsStore } from '../assembly-folds/folds-store';
 import { rowsOf, rowsSig, useSeamsStore } from '../assembly-seams/seams-store';
 import { useCardSeamGraph } from '../card-unit-pictures';
+import {
+  rowTouchesStrip,
+  stripKeysOf,
+  withoutStripInputs,
+  type CutStripLike,
+} from '../cut-strips/strip-pieces';
 import { useCardDxfPack } from '../nesting/card-dxf-pack';
 import { findPiece, useDxfGeometry, useDxfIndex } from '../nesting/dxf-geometry';
 import { sizeTokensOf } from '../nesting/block-code';
@@ -117,6 +123,8 @@ const idOf = (o: object) => {
 
 type FormOp = NonNullable<TechCardFormData['operations']>[number];
 
+const NO_STRIPS: ReadonlySet<string> = new Set();
+
 export type DollOwnerSelection = NonNullable<DollCard['owner']> & { rows: StoredSeam[] };
 
 /** The seam graph's pairs the doll could double-sew: a pair by its two sides, either way round. */
@@ -146,15 +154,21 @@ export function dollOwnerSeamsOf(args: {
   graph?: { chosen: readonly SeamCandidate[] } | null;
   /** Every piece the card knows (the step pictures' input groups are cut by it). */
   pieceKeys?: ReadonlySet<string>;
+  /** The card's strips: the doll sews cloth, so a strip and its seams stay out of the solve. */
+  stripKeys?: ReadonlySet<string>;
 }): DollOwnerSelection | null {
-  const byKey = new Map(args.rows.map((row) => [row.seamKey, row]));
+  const strips = args.stripKeys ?? NO_STRIPS;
+  const allRows = strips.size
+    ? args.rows.filter((row) => !rowTouchesStrip(row, strips))
+    : args.rows;
+  const byKey = new Map(allRows.map((row) => [row.seamKey, row]));
   const pieceKeys = args.pieceKeys ?? new Set(args.geoms.keys());
-  const ops = args.operations;
+  const ops = strips.size ? withoutStripInputs(args.operations, strips) : args.operations;
   let boundPose = false;
   for (const op of ops)
     for (const key of op.poseKeys ?? []) if (args.poses.has(key)) boundPose = true;
-  if (!args.rows.length && !boundPose) return null;
-  const confirmedRows = args.rows.filter((row) => row.status === 'confirmed');
+  if (!allRows.length && !boundPose) return null;
+  const confirmedRows = allRows.filter((row) => row.status === 'confirmed');
   // Pass 1 — the rows the steps name, in step order; a row named twice is sewn once.
   const inStepKeys: string[] = [];
   const bound = new Set<string>();
@@ -204,6 +218,7 @@ export function dollOwnerSeamsOf(args: {
   const seen = new Set<string>();
   const layers = (args.stepResults ?? []).flatMap((result) =>
     result.stacked.filter(([under, over]) => {
+      if (strips.has(under) || strips.has(over)) return false;
       const key = `${under}\u0000${over}`;
       if (seen.has(key)) return false;
       seen.add(key);
@@ -211,13 +226,13 @@ export function dollOwnerSeamsOf(args: {
     }),
   );
   return {
-    rows: [...args.rows],
+    rows: [...allRows],
     candidates,
     layers,
     inStepKeys,
     confirmed: confirmedRows.length,
     inSteps: inStepKeys.length,
-    rejected: args.rows.filter((row) => row.status === 'rejected').length,
+    rejected: allRows.filter((row) => row.status === 'rejected').length,
     guessed,
   };
 }
@@ -253,6 +268,8 @@ export function useDollCard(): DollCard | null {
   const stepResults = useStepResults();
   const { graph } = useCardSeamGraph();
   const pieceKeys = useCardPieceKeys();
+  const cutStrips = useWatch({ name: 'cutStrips' }) as readonly CutStripLike[] | undefined;
+  const stripKeys = useMemo(() => stripKeysOf(cutStrips ?? []), [cutStrips]);
   const ownerSeams = useMemo(
     () =>
       dollOwnerSeamsOf({
@@ -264,8 +281,19 @@ export function useDollCard(): DollCard | null {
         stepResults,
         graph,
         pieceKeys,
+        stripKeys,
       }),
-    [allRows, operations, cardGeoms, innerLines, poseRows, stepResults, graph, pieceKeys],
+    [
+      allRows,
+      operations,
+      cardGeoms,
+      innerLines,
+      poseRows,
+      stepResults,
+      graph,
+      pieceKeys,
+      stripKeys,
+    ],
   );
   const rows = ownerSeams?.rows ?? [];
   // The selection is part of the solve's identity: binding a row to a step, or a step's guess
@@ -360,13 +388,13 @@ export function useDollCard(): DollCard | null {
     if (!facts) return [[], []];
     const keys = new Set(facts.pieces.map((p) => p.pieceKey));
     const ops = operations.map((o) => ({
-      inputs: (o.inputKeys ?? []).filter(Boolean),
+      inputs: (o.inputKeys ?? []).filter((key) => key && !stripKeys.has(key)),
       output: (o.outputUnitKey ?? '').trim(),
       type: (o.operationType ?? '').replace('TECH_CARD_OPERATION_TYPE_', ''),
     }));
     const pieceOf = (k: string) => (keys.has(k) ? k : null);
     return [joinsFromOps(ops, pieceOf), hardwareFromOps(ops, pieceOf)];
-  }, [facts, operations]);
+  }, [facts, operations, stripKeys]);
 
   return useMemo(() => {
     // FoldsHydrate mounts before the step-result/map subtree, but hydration is a passive effect.

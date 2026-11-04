@@ -308,6 +308,15 @@ export const fr = {
     hiddenSeam: 'couture cachée',
     pairNumber: 'n° paire',
   },
+  cutStrips: {
+    title: 'coupe à longueur',
+    step: 'étape',
+    cutAt: 'coupe, {size}',
+    cutMmOf: '{name}, coupe mm',
+    allSizes: 'toutes tailles',
+    unused: 'coupe sans étape',
+    staleSeam: 'longueur de couture périmée',
+  },
   measurements: {
     title: 'mesures',
     point: 'point',

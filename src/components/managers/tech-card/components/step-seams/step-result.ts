@@ -6,6 +6,7 @@ import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { compose, IDENTITY } from 'lib/assembly-skeleton/union/affine';
 import { poseAnchorOf, poseOf, type SeamLayer, type StoredPose, type StoredSeam } from 'lib/seams';
 
+import { anchorsNameStrip } from '../cut-strips/strip-place';
 import { cardFoldsOf, foldOnceOf, type CardFolds, type StepFolds } from './step-folds';
 import { handsFromSeams } from './step-hand';
 import { inputGroups, type FormOpLike, type InputGroup } from './step-seams-model';
@@ -410,7 +411,11 @@ function collidingOfStep(
   const laid = new Set<string>();
   const notLaid = new Map<string, [number, number]>();
   for (const { row } of stored) {
-    const lies = seamIsLaid(row, transforms, geoms);
+    // A strip lies inside its host, not edge to edge, and that is where its row wants it.
+    const lies =
+      anchorsNameStrip(row.sideA, geoms) ||
+      anchorsNameStrip(row.sideB, geoms) ||
+      seamIsLaid(row, transforms, geoms);
     for (const a of blocksOf(row.sideA))
       for (const b of blocksOf(row.sideB)) {
         if (a === b) continue;
