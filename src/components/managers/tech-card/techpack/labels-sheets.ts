@@ -24,7 +24,7 @@ export const LABEL_TABLE_COLS: Record<PrintOrient, readonly number[]> = {
 // The same table with a note last. The note takes its room from the words, the sheet stays as wide.
 export const LABEL_TABLE_NOTE_COLS: Record<PrintOrient, readonly number[]> = {
   land: [36, 96, 116, 116, 66, 60, 130, 40, 139],
-  port: [36, 80, 98, 98, 56, 60, 114, 40, 122],
+  port: [36, 96, 92, 92, 56, 60, 110, 40, 122],
 };
 
 /** A note column only when a row has a note: a card without notes prints the table it always did. */
