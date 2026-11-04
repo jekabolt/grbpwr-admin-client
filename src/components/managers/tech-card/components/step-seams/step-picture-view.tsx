@@ -1869,7 +1869,10 @@ export function StepPictureSvg({
           ),
     [flatGeoms, givenNames, layout.input, layout.stripHosts, ownStrips],
   );
-  const stripRoom = ownStrips.size > 0 && look !== 'tile' ? stripPadPx(LOOK[look].font) : 0;
+  // A third piece keeps its name under the cloth: the strip's dimension goes one line lower.
+  const stripNameRoom = ownStrips.size > 0 && names?.some(Boolean) ? LOOK[look].font + 2 : 0;
+  const stripRoom =
+    ownStrips.size > 0 && look !== 'tile' ? stripPadPx(LOOK[look].font) + stripNameRoom : 0;
   const fitPad = Math.max(drawnActionGlyphs.length ? Math.max(pad, 7) : pad, stripRoom);
   const vk = view?.k ?? 1;
   const vx = view?.x ?? 0;
@@ -2736,6 +2739,7 @@ export function StepPictureSvg({
         height={h}
         words={stripWords}
         plain={look === 'tile'}
+        nameRoom={stripNameRoom}
       />
       {hover && (hoverRange || !marks.some((m) => m.id === hover)) && ptsOf(hover) && (
         <path

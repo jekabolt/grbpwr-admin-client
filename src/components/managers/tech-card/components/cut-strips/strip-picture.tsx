@@ -87,6 +87,7 @@ export function StripOverlay({
   height,
   words = STRIP_WORDS,
   plain = false,
+  nameRoom = 0,
 }: {
   pieces: readonly DrawnPiece[];
   geoms: ReadonlyMap<string, PieceGeom>;
@@ -98,6 +99,8 @@ export function StripOverlay({
   words?: StripWords;
   /** A row tile: grey only, nothing to read at that size. */
   plain?: boolean;
+  /** Px kept under the host for a piece name the picture still writes there. */
+  nameRoom?: number;
 }) {
   const strips = pieces.filter((piece) => geoms.get(piece.key)?.cutStrip);
   if (strips.length === 0) return null;
@@ -157,8 +160,9 @@ export function StripOverlay({
           : sideBySide
             ? at(h1, hostS)
             : at(h0, hostName ? hostS - font - 2 : hostS);
-        const fitsBelow = at(0, v1 + LINE_GAP_PX + TICK_PX + font)[1] <= height;
-        const lineS = fitsBelow ? v1 + LINE_GAP_PX : v0 - LINE_GAP_PX;
+        const gap = LINE_GAP_PX + nameRoom;
+        const fitsBelow = at(0, v1 + gap + TICK_PX + font)[1] <= height;
+        const lineS = fitsBelow ? v1 + gap : v0 - LINE_GAP_PX;
         const textS = fitsBelow ? lineS + TICK_PX + font / 2 + 2 : lineS - TICK_PX - font / 2 - 2;
         const lineA = at(h0, lineS);
         const lineB = at(h1, lineS);

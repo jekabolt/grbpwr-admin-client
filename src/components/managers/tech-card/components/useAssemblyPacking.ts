@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { StyleAssemblyItem } from 'api/proto-http/admin';
 
-// Assembly + packaging-recipe + order packing-spec (WS7/WS2, PLM rework §2.8):
+// Assembly + order packing-spec (WS7/WS2, PLM rework §2.8):
 // - StyleAssembly: a garment style's on-body auxiliary bill (labels/tags), one style at a time.
 // - OrderPackingSpec: read-only packer/QC-facing composition of one order.
 
