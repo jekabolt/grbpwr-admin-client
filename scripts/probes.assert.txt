@@ -43,6 +43,7 @@ scripts/operation-ratify-probe.mjs
 scripts/operation-work-apply-probe.mjs
 scripts/opkinds-review-probe.mjs
 scripts/opkinds-tails-probe.mjs
+scripts/packaging-shelf-probe.mjs
 scripts/picker-coverage-probe.mjs
 scripts/picture-tile-click-probe.mjs
 scripts/piece-shape-selection-probe.mjs

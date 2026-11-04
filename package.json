@@ -59,6 +59,7 @@
     "ai:enhance": "node scripts/ai-enhance-probe.mjs",
     "labels:foundation": "node scripts/labels-foundation-probe.mjs",
     "labels:blocks": "node scripts/labels-blocks-probe.mjs",
+    "labels:shelf": "node scripts/packaging-shelf-probe.mjs",
     "labels:composition": "node scripts/composition-label-probe.mjs",
     "labels:techpack": "node scripts/tech-pack-labels-probe.mjs",
     "nest:chirality": "node scripts/marker-chirality-probe.mjs",
