@@ -38,6 +38,21 @@ import {
   TaskStatus,
 } from './types';
 
+export type TaskFileContent = {
+  content: string;
+  tooLarge: boolean;
+  sha256: string;
+  lastEditedBy: string;
+  lastEditedAt: string;
+};
+
+export type TaskFileSave = {
+  conflict: boolean;
+  currentSha256: string;
+  lastEditedBy: string;
+  lastEditedAt: string;
+};
+
 // tasksService is the single seam between the kanban UI and the backend. Its
 // method signatures mirror the AdminService TASK MANAGER RPCs 1:1 (proto
 // 26a19e8, "split placement from content"), so the whole feature (hooks +
@@ -58,7 +73,15 @@ export interface TasksService {
   ): Promise<{ tasks: Task[]; total: number; closed: TaskClosed[] }>;
   getTask(id: number): Promise<Task | undefined>;
   /** Bytes of an attachment, base64. `tooLarge` is a state of the file, not a failure. */
-  getTaskFileContent(taskId: number, fileId: number): Promise<{ content: string; tooLarge: boolean }>;
+  getTaskFileContent(taskId: number, fileId: number): Promise<TaskFileContent>;
+  /** A conflict is data: nothing was written, and the other bytes are read again separately. */
+  saveTaskFileContent(input: {
+    taskId: number;
+    fileId: number;
+    content: string;
+    baseSha256: string;
+    force: boolean;
+  }): Promise<TaskFileSave>;
   /**
    * `parentTaskId` — РОДИТЕЛЬ СОЗДАВАЕМОЙ карточки; 0 = верхний уровень. Единственное место, где
    * родитель едет не отдельным `SetTaskParent`: «создать сабтаску» обязано быть ОДНИМ вызовом,
@@ -430,6 +453,17 @@ export const tasksService: TasksService = {
     adminService.GetTaskFileContent({ taskId, fileId }).then((r) => ({
       content: r.content ?? '',
       tooLarge: !!r.tooLarge,
+      sha256: r.sha256 ?? '',
+      lastEditedBy: r.lastEditedBy ?? '',
+      lastEditedAt: r.lastEditedAt ?? '',
+    })),
+
+  saveTaskFileContent: (input) =>
+    adminService.SaveTaskFileContent(input).then((r) => ({
+      conflict: !!r.conflict,
+      currentSha256: r.currentSha256 ?? '',
+      lastEditedBy: r.lastEditedBy ?? '',
+      lastEditedAt: r.lastEditedAt ?? '',
     })),
 
   getTask: (id) =>

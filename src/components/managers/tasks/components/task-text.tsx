@@ -3,6 +3,7 @@ import { Fragment, useMemo } from 'react';
 import { Chip, Text } from 'ui';
 import { autolinkNodes } from 'components/shared/markdown/autolink';
 import type { TaskMedia } from '../api/types';
+import { SHEET_TOKEN_SOURCE } from '../utils/sheet-token';
 
 /**
  * ССЫЛКА НА ВЛОЖЕНИЕ ЖИВЁТ В САМОМ ТЕКСТЕ.
@@ -38,7 +39,10 @@ export interface MediaRef {
   note?: number;
 }
 
-export type TaskTextPart = { text: string; ref?: undefined } | { text?: undefined; ref: MediaRef };
+export type TaskTextPart =
+  | { text: string; ref?: undefined; sheet?: undefined }
+  | { text?: undefined; ref: MediaRef; sheet?: undefined }
+  | { text?: undefined; ref?: undefined; sheet: number };
 
 /** Единственное место, где токен собирается. Разбирает его `parseTaskText`. */
 export function mediaRefToken(mediaId: number, note?: number): string {
@@ -47,13 +51,14 @@ export function mediaRefToken(mediaId: number, note?: number): string {
 
 /** Режет строку на куски текста и ссылки, сохраняя порядок и все пробелы между ними. */
 export function parseTaskText(text: string): TaskTextPart[] {
-  const re = new RegExp(MEDIA_REF_SOURCE, 'g');
+  const re = new RegExp(`${MEDIA_REF_SOURCE}|${SHEET_TOKEN_SOURCE}`, 'g');
   const parts: TaskTextPart[] = [];
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     if (m.index > last) parts.push({ text: text.slice(last, m.index) });
-    parts.push({ ref: { mediaId: Number(m[1]), note: m[2] ? Number(m[2]) : undefined } });
+    if (m[3]) parts.push({ sheet: Number(m[3]) });
+    else parts.push({ ref: { mediaId: Number(m[1]), note: m[2] ? Number(m[2]) : undefined } });
     last = m.index + m[0].length;
   }
   if (last < text.length) parts.push({ text: text.slice(last) });
@@ -133,10 +138,13 @@ export function TaskText({
       className={cn('whitespace-pre-wrap break-words', className)}
     >
       {parts.map((p, i) =>
-        p.ref ? (
+        p.sheet ? (
+          // Таблица рисуется только в описании; в комментарии от токена остаётся слово.
+          <Chip key={i}>table</Chip>
+        ) : p.ref ? (
           <MediaRefChip key={i} refr={p.ref} media={media} onOpen={onOpen} />
         ) : (
-          <Fragment key={i}>{autolinkNodes(p.text, String(i))}</Fragment>
+          <Fragment key={i}>{autolinkNodes(p.text ?? '', String(i))}</Fragment>
         ),
       )}
     </Text>

@@ -120,6 +120,16 @@ function waitForLibraryUpload(
   });
 }
 
+/** A ready file through the library upload queue, for those who may upload. */
+export async function uploadLibraryFile(file: File): Promise<number> {
+  const [rowId] = useUploadQueueStore.getState().enqueue([file], { topicIds: [], newTopics: [] });
+  if (!rowId) throw new Error('upload failed');
+  const outcome = await waitForLibraryUpload(rowId, new AbortController().signal, () => {});
+  if ('aborted' in outcome) throw new Error('upload stopped');
+  if (!outcome.ok) throw new Error(outcome.reason);
+  return outcome.fileId;
+}
+
 /**
  * One intake path for task detail and task forms.
  *

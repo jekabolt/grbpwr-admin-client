@@ -303,6 +303,12 @@ export function TaskFormModal({
             media={attachments}
             value={field.value}
             onChange={(next) => field.onChange(next)}
+            attachTable={async (file) => {
+              const id = Number(file.id);
+              const ids = getValues('fileIds') ?? [];
+              if (!ids.includes(id)) setValue('fileIds', [...ids, id], { shouldDirty: true });
+              return true;
+            }}
           />
         )}
       />

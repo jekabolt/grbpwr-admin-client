@@ -5432,6 +5432,35 @@ export type GetTaskFileContentResponse = {
   // The file is over the viewing ceiling, content is empty. Data rather than an
   // error: it is an ordinary state of an ordinary file, and it ends in a download.
   tooLarge: boolean | undefined;
+  // sha256 is the base for SaveTaskFileContent. These three come from the row and are
+  // filled on too_large as well.
+  sha256: string | undefined;
+  // Empty and null for a file that was never edited in place.
+  lastEditedBy: string | undefined;
+  lastEditedAt: wellKnownTimestamp | undefined;
+};
+
+export type SaveTaskFileContentRequest = {
+  taskId: number | undefined;
+  fileId: number | undefined;
+  content: string | undefined;
+  // base_sha256 is the sha256 this edit started from. A mismatch means somebody else
+  // saved in the meantime.
+  baseSha256: string | undefined;
+  // force writes over that other version deliberately.
+  force: boolean | undefined;
+};
+
+export type SaveTaskFileContentResponse = {
+  // conflict = true means NOTHING WAS WRITTEN and the fields below describe the stored
+  // version. It does not carry the other bytes: the client re-reads them through
+  // GetTaskFileContent.
+  conflict: boolean | undefined;
+  // current_sha256 is what is stored now, and the base for this editor's next save.
+  currentSha256: string | undefined;
+  lastEditedBy: string | undefined;
+  lastEditedAt: wellKnownTimestamp | undefined;
+  sizeBytes: number | undefined;
 };
 
 export type GetTaskResponse = {
@@ -20127,6 +20156,12 @@ export interface AdminService {
   // the attachment list in GetTask; a file that is not attached to this task, or
   // that the caller may not see, is NotFound.
   GetTaskFileContent(request: GetTaskFileContentRequest): Promise<GetTaskFileContentResponse>;
+  // SaveTaskFileContent replaces the bytes of an .xlsx or .csv attached to this task,
+  // under a compare-and-set on sha256. It changes the library file itself: every task
+  // with this file and the library see the new bytes at once, and no old version is
+  // kept. Gated on tasks:write plus the attachment, files:write is not needed. A file
+  // that is not attached to this task, or that the caller may not see, is NotFound.
+  SaveTaskFileContent(request: SaveTaskFileContentRequest): Promise<SaveTaskFileContentResponse>;
   // UpdateTask replaces a task's content (title, description, assignee, priority,
   // due_date, labels, media, entity links). Placement — board, column (status),
   // ordering — is NOT touched here; it changes only through MoveTask.
@@ -24661,6 +24696,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetTaskFileContent",
       }) as Promise<GetTaskFileContentResponse>;
+    },
+    SaveTaskFileContent(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/task/file/content/save`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SaveTaskFileContent",
+      }) as Promise<SaveTaskFileContentResponse>;
     },
     UpdateTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/update`; // eslint-disable-line quotes

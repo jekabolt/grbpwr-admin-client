@@ -86,14 +86,16 @@ export function AttachmentTiles({
     [qc, taskId],
   );
 
-  const [viewing, setViewing] = useState<LibraryFile | null>(null);
+  // Номер, а не файл: после записи таблицы подписанная ссылка старого объекта мертва.
+  const [viewingId, setViewingId] = useState<number | null>(null);
+  const viewing = viewingId === null ? undefined : files.find((f) => f.id === viewingId);
 
   const openFile = (f: LibraryFile) => {
     // Таблицу и текст смотрят прямо в задаче: право здесь tasks:read, карточка файла не нужна.
     // То, что браузеру показать нечем, сразу скачивается.
     const view = taskFileViewOf(f.fileName, f.contentType);
     if (view !== 'as-is' && view !== 'download') {
-      setViewing(f);
+      setViewingId(f.id ?? null);
       return;
     }
     if (view === 'download' && f.downloadUrl) {
@@ -242,7 +244,7 @@ export function AttachmentTiles({
         )}
       </Tiles>
       {viewing && (
-        <TaskFileViewer taskId={taskId} file={viewing} onClose={() => setViewing(null)} />
+        <TaskFileViewer taskId={taskId} file={viewing} onClose={() => setViewingId(null)} />
       )}
     </div>
   );

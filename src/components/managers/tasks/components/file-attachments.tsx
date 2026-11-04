@@ -25,6 +25,7 @@ import {
   Tiles,
 } from 'ui';
 import { PHONE_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
+import { isTableFileName } from '../utils/sheet-token';
 import { PickerSheet, TaskPageShell } from './task-form-shell';
 
 /** How a file chosen from the note format bar is inserted into its markdown. */
@@ -36,11 +37,14 @@ type AttachmentPickerProps = {
   onClose: () => void;
   insert?: never;
   onPick?: never;
+  onPickTable?: never;
 };
 
 type NotePickerProps = {
   insert?: NoteFileInsert;
   onPick: (file: LibraryFile) => void;
+  /** Есть — щелчок только выбирает файл, а ряд внизу предлагает `as table` и `as link`. */
+  onPickTable?: (file: LibraryFile) => void;
   onClose: () => void;
   selected?: never;
   onDone?: never;
@@ -291,6 +295,9 @@ export function FilePicker(props: FilePickerProps) {
   const { onClose } = props;
   const phone = useMediaQuery(PHONE_QUERY);
   const [draft, setDraft] = useState<number[]>(() => [...selected]);
+  // Вставка в описание: щелчок выбирает файл, а чем он станет, решает ряд внизу окна.
+  const [chosen, setChosen] = useState<LibraryFile | null>(null);
+  const asTable = notePicker ? props.onPickTable : undefined;
   const [previewId, setPreviewId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   // Строка запроса отстаёт от поля: иначе каждое нажатие создаёт отдельный ключ и отдельный
@@ -334,6 +341,10 @@ export function FilePicker(props: FilePickerProps) {
       current.includes(id) ? current.filter((fileId) => fileId !== id) : [...current, id],
     );
   const choose = (file: LibraryFile) => {
+    if (asTable) {
+      setChosen(file);
+      return;
+    }
     if (props.onPick) {
       props.onPick(file);
       onClose();
@@ -369,7 +380,35 @@ export function FilePicker(props: FilePickerProps) {
   };
 
   const footer = notePicker ? (
-    <div className='flex justify-end'>
+    <div className='flex flex-wrap justify-end gap-2'>
+      {chosen && asTable && isTableFileName(chosen.fileName ?? '') && (
+        <Button
+          type='button'
+          size='sm'
+          variant='main'
+          className='min-h-11 md:min-h-0'
+          onClick={() => {
+            void asTable(chosen);
+            onClose();
+          }}
+        >
+          as table
+        </Button>
+      )}
+      {chosen && (
+        <Button
+          type='button'
+          size='sm'
+          variant='secondary'
+          className='min-h-11 md:min-h-0'
+          onClick={() => {
+            props.onPick?.(chosen);
+            onClose();
+          }}
+        >
+          as link
+        </Button>
+      )}
       <Button
         type='button'
         size='sm'
@@ -488,8 +527,10 @@ export function FilePicker(props: FilePickerProps) {
                             name,
                           )} · ${formatBytes(Number(file.sizeBytes ?? 0))}`
                     }
-                    selected={order > 0}
-                    pressed={notePicker ? undefined : order > 0}
+                    selected={order > 0 || chosen?.id === file.id}
+                    pressed={
+                      notePicker ? (asTable ? chosen?.id === file.id : undefined) : order > 0
+                    }
                     onClick={() => choose(file)}
                     media={
                       <div className='relative aspect-square w-full bg-pageBg'>

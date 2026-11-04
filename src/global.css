@@ -51,6 +51,7 @@
   --color-error: #ff0000;
   --color-highlightColor: #311eee;
   --color-success: #0f7a34; /* green, ~4.6:1 on white */
+  --color-changed: #fff6a8; /* правленая ячейка таблицы до записи */
   /* Blue, deliberately — do not "fix" this to orange. Mid-flight states (in review,
      round 2, unsaved, changed-after-approval, stale) read blue in this system.
      See tmp/ui-redesign/00-design-system.md → "Colour semantics". */
@@ -710,4 +711,14 @@ body[data-dock-bottom] .sticky.bottom-0:not([role='dialog'] *) {
   .callout-breathe-box::after {
     display: none;
   }
+}
+
+/* Ячейка с формулой в правке таблицы: штриховка вместо подписи. */
+.sheet-locked {
+  cursor: not-allowed;
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0 5px,
+    rgba(0, 0, 0, 0.05) 5px 6px
+  );
 }

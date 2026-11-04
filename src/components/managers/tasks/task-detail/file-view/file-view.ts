@@ -67,6 +67,15 @@ export function bytesFromBase64(b64: string): Uint8Array {
   return out;
 }
 
+export function base64FromBytes(bytes: Uint8Array): string {
+  let bin = '';
+  // Кусками: `fromCharCode` с миллионом аргументов падает на переполнении стека.
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(bin);
+}
+
 /** UTF-8, а что им не является — windows-1251: так csv сохраняет русский Excel. */
 export function decodeText(bytes: Uint8Array): string {
   if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder('utf-16le').decode(bytes);
@@ -79,7 +88,7 @@ export function decodeText(bytes: Uint8Array): string {
 }
 
 /** Разделитель первой строки, кавычки не считаются: русский Excel пишет `;`. */
-function detectDelimiter(text: string): string {
+export function detectDelimiter(text: string): string {
   const counts = new Map<string, number>([
     [',', 0],
     [';', 0],
