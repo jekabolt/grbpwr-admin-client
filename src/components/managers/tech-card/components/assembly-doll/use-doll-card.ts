@@ -39,6 +39,7 @@ import type { DollLayerRelation, DollOwnerCandidate } from 'lib/doll/types';
 import { resolveFolds, type StoredFold } from 'lib/folds';
 import { hemFoldsOf, hemSigOf, isHemStep, type HemStepLike } from 'lib/hem/hem-folds';
 import { grainDegOf } from 'lib/seams/frame';
+import { candidatesOnSize } from 'lib/seams/transfer';
 import type { StoredPose, StoredSeam } from 'lib/seams/types';
 import { useMemo } from 'react';
 import { useWatch } from 'react-hook-form';
@@ -553,6 +554,16 @@ export function dollRequest(c: DollCard, size: string, lining: boolean) {
   const anchors = anchorSizes
     .map((s) => ({ size: s, facts: c.factsOf(s) }))
     .filter((a): a is { size: string; facts: SkeletonFacts } => !!a.facts);
+  // The owner's candidates name the edges of the size the card was read at.
+  const baseFacts = size === c.baseSize ? null : c.factsOf(c.baseSize);
+  const ownerCandidates =
+    c.owner && baseFacts
+      ? candidatesOnSize(
+          c.owner.candidates,
+          { size: c.baseSize, pieces: segmentAll(baseFacts), grainDeg: grainDegOf(baseFacts) },
+          { size, pieces: segmentAll(facts), grainDeg: grainDegOf(facts) },
+        )
+      : c.owner?.candidates;
   // An accessory (no garment category, drawn in one size) keeps the greedy reading: the bag rings
   // are read from it (12.10 score: the garment bag 11/11 greedy, 9/11 global).
   const accessory = facts.category === 'generic' && c.sizes.length === 1;
@@ -575,7 +586,7 @@ export function dollRequest(c: DollCard, size: string, lining: boolean) {
               mode: 'owner' as const,
               rows: c.rows,
               size,
-              candidates: c.owner.candidates,
+              candidates: ownerCandidates,
               inStepKeys: c.owner.inStepKeys,
               layers: c.owner.layers,
               selection: {
