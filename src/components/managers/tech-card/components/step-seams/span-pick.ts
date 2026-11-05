@@ -74,7 +74,7 @@ export function snapToBreak(breaks: readonly EdgeBreakPoint[], atMm: number): nu
 
 /**
  * A click on one more segment of a picked edge: the spans it leaves, none when the last one went.
- * The very span drops, a segment at a span's end shrinks it and one inside it narrows it to that
+ * The very span drops, a segment at a span's end shrinks it and one inside it splits it around that
  * segment; off every span the segment joins what it touches, or stands as a span of its own.
  */
 export function clickSegment(current: readonly SpanRange[], segment: SpanRange): SpanRange[] {
@@ -87,13 +87,10 @@ export function clickSegment(current: readonly SpanRange[], segment: SpanRange):
   const around = current.find(([from, to]) => segFrom >= from - SAME_MM && segTo <= to + SAME_MM);
   if (around) {
     const [from, to] = around;
-    const left: SpanRange =
-      Math.abs(segTo - to) < SAME_MM
-        ? [from, segFrom]
-        : Math.abs(segFrom - from) < SAME_MM
-          ? [segTo, to]
-          : segment;
-    return [...others(around), left].sort((x, y) => x[0] - y[0]);
+    const left: SpanRange[] = [];
+    if (segFrom - from >= SAME_MM) left.push([from, segFrom]);
+    if (to - segTo >= SAME_MM) left.push([segTo, to]);
+    return [...others(around), ...left].sort((x, y) => x[0] - y[0]);
   }
   return [...mergedSpans([...current, segment])];
 }
@@ -140,10 +137,18 @@ export function pickSegment(
   rules: PickRules,
 ): SidePick {
   if (pick[side].includes(id)) {
-    const current = pick.spans[side][id] ?? [[0, length]];
-    const next = clickSegment(current, segment).filter(([from, to]) => to - from > SAME_MM);
+    const own = pick.spans[side][id];
+    const current = own ?? [[0, length]];
+    // An edge offered whole (a guess) narrows to the segment; spans picked by hand split around it.
+    const inside = !own && segment[0] > SAME_MM && segment[1] < length - SAME_MM;
+    const next = inside
+      ? [segment]
+      : clickSegment(current, segment).filter(([from, to]) => to - from > SAME_MM);
     if (next.length > current.length && sideIsFull(pick, side)) return pick;
-    if (next.length) return withSpans(pick, side, id, next, length);
+    if (next.length)
+      return own
+        ? { ...pick, spans: { ...pick.spans, [side]: { ...pick.spans[side], [id]: next } } }
+        : withSpans(pick, side, id, next, length);
     const dropped = pickTarget(pick, side, id, rules.isInner, rules.pieceOf);
     return { ...dropped, spans: withoutDropped(dropped) };
   }

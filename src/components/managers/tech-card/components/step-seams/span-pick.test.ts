@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { PieceGeom } from 'lib/assembly-skeleton/types';
 import { resolveEdge } from 'lib/assembly-skeleton/union';
-import { SEAMS, type StoredSeam } from 'lib/seams';
+import { normalizeParts, SEAMS, type StoredSeam } from 'lib/seams';
 
 import { rowPairSig, rowsSig } from '../assembly-seams/seams-store';
 
@@ -47,7 +47,7 @@ describe('span hand', () => {
     expect(clickSegment([[0, 150]], [100, 150])).toEqual([[0, 100]]);
   });
 
-  it('a click off every span adds a span; a segment inside a span narrows only that span', () => {
+  it('a click off every span adds a span; a segment inside a span splits only that span', () => {
     expect(clickSegment([[0, 100]], [200, 300])).toEqual([
       [0, 100],
       [200, 300],
@@ -65,7 +65,8 @@ describe('span hand', () => {
         [100, 150],
       ),
     ).toEqual([
-      [100, 150],
+      [0, 100],
+      [150, 300],
       [400, 500],
     ]);
   });
@@ -138,8 +139,30 @@ describe('span hand', () => {
       at = segment[1];
     }
     expect(pick.a).toEqual([id]);
-    expect(pick.spans.a).toEqual({});
-    expect(sideParts(pick.a, pick.spans.a)).toEqual([{ target: id }]);
+    expect(normalizeParts(sideParts(pick.a, pick.spans.a), geoms)).toEqual([{ target: id }]);
+  });
+
+  it('the owner: a click on the middle of an edge taken by hand frees it, the rest stays', () => {
+    let pick = empty;
+    for (const segment of [
+      [0, 200],
+      [320, length],
+      [200, 320],
+    ] as const)
+      pick = pickSegment(pick, 'a', id, segment, length, rules);
+    expect(pick.spans.a[id]).toEqual([[0, length]]);
+    pick = pickSegment(pick, 'a', id, [200, 320], length, rules);
+    expect(pick.spans.a[id]).toEqual([
+      [0, 200],
+      [320, length],
+    ]);
+  });
+
+  it('an edge offered whole narrows to the segment clicked inside it', () => {
+    const whole: SidePick = { a: [id], b: [], spans: NO_SPANS };
+    expect(pickSegment(whole, 'a', id, [200, 320], length, rules).spans.a[id]).toEqual([
+      [200, 320],
+    ]);
   });
 
   it('a free drag keeps its exact range; a break point near its end catches it', () => {
@@ -173,8 +196,30 @@ describe('span hand', () => {
     let pick = pickFreeSpan(empty, 'a', id, [0, 300], length, rules);
     pick = pickFreeSpan(pick, 'a', id, [500, length], length, rules);
     pick = pickFreeSpan(pick, 'a', id, [250, 600], length, rules);
-    expect(pick.spans.a).toEqual({});
-    expect(sideParts(pick.a, pick.spans.a)).toEqual([{ target: id }]);
+    expect(normalizeParts(sideParts(pick.a, pick.spans.a), geoms)).toEqual([{ target: id }]);
+  });
+
+  it('the owner: a click on the middle of an edge taken by hand frees it, the rest stays', () => {
+    let pick = empty;
+    for (const segment of [
+      [0, 200],
+      [320, length],
+      [200, 320],
+    ] as const)
+      pick = pickSegment(pick, 'a', id, segment, length, rules);
+    expect(pick.spans.a[id]).toEqual([[0, length]]);
+    pick = pickSegment(pick, 'a', id, [200, 320], length, rules);
+    expect(pick.spans.a[id]).toEqual([
+      [0, 200],
+      [320, length],
+    ]);
+  });
+
+  it('an edge offered whole narrows to the segment clicked inside it', () => {
+    const whole: SidePick = { a: [id], b: [], spans: NO_SPANS };
+    expect(pickSegment(whole, 'a', id, [200, 320], length, rules).spans.a[id]).toEqual([
+      [200, 320],
+    ]);
   });
 
   it('a side at the anchor limit takes no further span; a click that merges still works', () => {
