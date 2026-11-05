@@ -337,8 +337,11 @@ export function pairFastenings(
 
 // ── Where a mark is on a piece's mesh ─────────────────────────────────────────────────────────
 
-/** Three local vertices and their weights (affine: a weight is negative past the triangle). */
-export type Located = { i: [number, number, number]; w: [number, number, number] };
+/**
+ * A point as local vertices and their weights (affine, summing to 1): a triangle's three, a weight
+ * negative past the triangle, or the spread of a footprint's vertices a point past it reads.
+ */
+export type Located = { i: number[]; w: number[] };
 
 /**
  * The triangle under `q`, or the nearest one with the point clamped onto it; `out` is how far past
@@ -434,11 +437,72 @@ export function stencilPast(pts: readonly Pt2[], on: ArrayLike<number>, q: Pt2):
   return { i: [v0, v1, v2], w: [l1, l2, 1 - l1 - l2] };
 }
 
+/** How far round it a point past a footprint reads the footprint, mm: the weights' σ. */
+export const PAST_SIGMA_MM = 30;
+
+/**
+ * A point past a footprint (a placket overhanging its host's folded edge): the footprint's
+ * vertices round it fitted as a plane (weighted least squares, weights falling off smoothly with
+ * distance) and carried straight on. The weights are linear in the vertices' positions, so the
+ * solver holds the very point the drawing lays; and neighbouring points ride one smooth surface,
+ * not a three-vertex lever each that jumps as its nearest vertex changes. `on` marks the vertices
+ * it may use. Null when the fit is degenerate (the vertices in a line).
+ */
+export function spreadPast(
+  pts: readonly Pt2[],
+  on: ArrayLike<number>,
+  q: Pt2,
+  sigma = PAST_SIGMA_MM,
+): Located | null {
+  const s2 = 2 * sigma * sigma;
+  let near = Infinity;
+  for (let v = 0; v < pts.length; v++)
+    if (on[v]) near = Math.min(near, (pts[v][0] - q[0]) ** 2 + (pts[v][1] - q[1]) ** 2);
+  if (!Number.isFinite(near)) return null;
+  // Far past the footprint every weight is small: they are taken against the nearest one.
+  const reach = near + s2 * Math.log(1e3);
+  const vs: number[] = [];
+  const ws: number[] = [];
+  let [m00, m01, m02, m11, m12, m22] = [0, 0, 0, 0, 0, 0];
+  for (let v = 0; v < pts.length; v++) {
+    if (!on[v]) continue;
+    const x = pts[v][0] - q[0];
+    const y = pts[v][1] - q[1];
+    const d2 = x * x + y * y;
+    if (d2 > reach) continue;
+    const w = Math.exp(-(d2 - near) / s2);
+    vs.push(v);
+    ws.push(w);
+    m00 += w * x * x;
+    m01 += w * x * y;
+    m02 += w * x;
+    m11 += w * y * y;
+    m12 += w * y;
+    m22 += w;
+  }
+  // The plane's value at q (the origin) by the adjugate of the symmetric 3×3 normal matrix.
+  const c00 = m11 * m22 - m12 * m12;
+  const c01 = m02 * m12 - m01 * m22;
+  const c02 = m01 * m12 - m02 * m11;
+  const D = m00 * c00 + m01 * c01 + m02 * c02;
+  if (!(Math.abs(D) > 1e-6 * Math.max(1, m22) * sigma ** 4)) return null;
+  const c12 = m01 * m02 - m00 * m12;
+  const c22 = m00 * m11 - m01 * m01;
+  const w = vs.map(
+    (v, k) => (ws[k] * (c02 * (pts[v][0] - q[0]) + c12 * (pts[v][1] - q[1]) + c22)) / D,
+  );
+  return w.every(Number.isFinite) ? { i: vs, w } : null;
+}
+
 /** A located point read in another position set of the same mesh (as cut → folded footprint). */
-export const readAt = (pts: readonly Pt2[], L: Located): Pt2 => [
-  L.w[0] * pts[L.i[0]][0] + L.w[1] * pts[L.i[1]][0] + L.w[2] * pts[L.i[2]][0],
-  L.w[0] * pts[L.i[0]][1] + L.w[1] * pts[L.i[1]][1] + L.w[2] * pts[L.i[2]][1],
-];
+export const readAt = (pts: readonly Pt2[], L: Located): Pt2 => {
+  const out: Pt2 = [0, 0];
+  L.i.forEach((v, j) => {
+    out[0] += L.w[j] * pts[v][0];
+    out[1] += L.w[j] * pts[v][1];
+  });
+  return out;
+};
 
 /**
  * The side of a column its free edge is on: the side the cloth ends sooner. `n` is that way, unit;

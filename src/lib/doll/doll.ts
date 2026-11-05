@@ -23,7 +23,9 @@ import {
   freeSideOf,
   locateIn,
   pairFastenings,
+  PAST_SIGMA_MM,
   readAt,
+  spreadPast,
   stencilPast,
   type FasteningSide,
   type Located,
@@ -124,12 +126,16 @@ const EPS_WRAP = 0.04; // paper needs slack to wrap (design §3.3)
 const ASPECT = 1.3; // chest wider than deep
 const ARM_DEG = 42; // A-pose: arms 42° off vertical
 const PROXY_K = 0.93; // proxies push to 93 % of the cloth's own girth: a guide, never a stretcher
-// One-piece collar (no separate stand): where it rolls over, as a share of its depth from the
-// neck edge. The pattern carries no roll-line mark; a shirt collar stands ~40 % and falls ~60 %.
+// One-piece collar (no separate stand): where it rolls over, as a share of its depth at the CB.
+// The pattern carries no roll-line mark. Half: the fall covers the stand down to the neck seam and
+// no further — below the seam the body widens far faster than a collar's outer edge is longer than
+// its neck edge, so a deeper fall cannot lie down and its free ends would stand off as wings.
 // TODO(doll-folds, step «collar»): the roll becomes an outward DollFold along the roll line once
 // the collar step lands (options.folds on the collar piece); ROLL_FRAC and the stand / fall split
 // below stay until then.
-const ROLL_FRAC = 0.4;
+const ROLL_FRAC = 0.5;
+// A standing collar part leans in toward the neck by this much off vertical.
+const STAND_LEAN = (8 * Math.PI) / 180;
 // Folds (options.folds): the plies of a folded piece lie this far apart, mm, ramped to 0 at the crease.
 const PLY = 1.0;
 /** The ply offset ramps from 0 at the crease to PLY over this length, mm: the two plies meet at
@@ -231,10 +237,15 @@ type PanelFold = {
   flat: Pt2[];
   /** Stack rank per vertex: 0 the base ply, −1 one ply under (toward the body), +1 one over. */
   ply: Int8Array;
-  /** Ply offset along the outward normal, mm: ply · PLY, ramped to 0 over RAMP from a crease. */
+  /** Ply offset along the outward normal, mm: ply · PLY, ramped over RAMP to the crease's ply. */
   off: Float64Array;
   /** Distance of each vertex from the nearest crease, mm, as cut. */
   creaseD: Float64Array;
+  /**
+   * Distance from the nearest crease lying at another ply than the vertex, mm, as cut: where its
+   * offset ramps. A crease carried inside a turned package is no ramp for that package.
+   */
+  rampD: Float64Array;
   /** Per triangle: 1 when the folds turned it face down (an odd number of reflections). */
   triFlip: Uint8Array;
   /**
@@ -278,6 +289,15 @@ const fromUV = (f: PieceFrame, p: readonly [number, number]): Pt2 => {
   return f.deg ? rotatePt(q, -f.deg, f.c) : q;
 };
 
+/** The inverse of an affine map (SVG order, affine.ts), or null for a degenerate one. */
+const invertAffine = (T: Parameters<typeof det>[0]): Parameters<typeof det>[0] | null => {
+  const [a, b, c, d, e, f] = T;
+  const D = a * d - b * c;
+  if (Math.abs(D) < 1e-12) return null;
+  const [ia, ib, ic, id] = [d / D, -b / D, -c / D, a / D];
+  return [ia, ib, ic, id, -(ia * e + ic * f), -(ib * e + id * f)];
+};
+
 const segDist2D = (p: Pt2, a: Pt2, b: Pt2): number => {
   const dx = b[0] - a[0];
   const dy = b[1] - a[1];
@@ -296,18 +316,16 @@ function creaseEndsOf(rs: readonly Pt2[], f: PieceFrame, fold: DollFold): MeshCr
   return creaseEndsMm(rs, fromUV(f, fold.a), fromUV(f, fold.b));
 }
 
-/** The same for a line in the piece's mm. */
-function creaseEndsMm(rs: readonly Pt2[], A: Pt2, B: Pt2): MeshCrease | null {
+/** Where the line A–B, extended, crosses the contour: mm along it from A, and the nearest `rs` index. */
+function lineCrossings(rs: readonly Pt2[], A: Pt2, B: Pt2): { t: number; i: number }[] {
   const L = Math.hypot(B[0] - A[0], B[1] - A[1]);
-  if (L < 1e-6) return null;
+  if (L < 1e-6) return [];
   const dx = (B[0] - A[0]) / L;
   const dy = (B[1] - A[1]) / L;
   const n = rs.length;
   const side = (p: Pt2) => (p[0] - A[0]) * -dy + (p[1] - A[1]) * dx;
   const along = (p: Pt2) => (p[0] - A[0]) * dx + (p[1] - A[1]) * dy;
-  const tMid = L / 2;
-  let lo: { t: number; i: number } | null = null;
-  let hi: { t: number; i: number } | null = null;
+  const out: { t: number; i: number }[] = [];
   for (let i = 0; i < n; i++) {
     const p = rs[i];
     const q = rs[(i + 1) % n];
@@ -316,13 +334,29 @@ function creaseEndsMm(rs: readonly Pt2[], A: Pt2, B: Pt2): MeshCrease | null {
     if (sp > 0 === sq > 0) continue;
     const fr = sp / (sp - sq);
     const x: Pt2 = [p[0] + (q[0] - p[0]) * fr, p[1] + (q[1] - p[1]) * fr];
-    const t = along(x);
-    const idx = fr < 0.5 ? i : (i + 1) % n;
-    if (t <= tMid && (!lo || t > lo.t)) lo = { t, i: idx };
-    if (t > tMid && (!hi || t < hi.t)) hi = { t, i: idx };
+    out.push({ t: along(x), i: fr < 0.5 ? i : (i + 1) % n });
+  }
+  return out;
+}
+
+/** The same for a line in the piece's mm. */
+function creaseEndsMm(rs: readonly Pt2[], A: Pt2, B: Pt2): MeshCrease | null {
+  const tMid = Math.hypot(B[0] - A[0], B[1] - A[1]) / 2;
+  let lo: { t: number; i: number } | null = null;
+  let hi: { t: number; i: number } | null = null;
+  for (const x of lineCrossings(rs, A, B)) {
+    if (x.t <= tMid && (!lo || x.t > lo.t)) lo = x;
+    if (x.t > tMid && (!hi || x.t < hi.t)) hi = x;
   }
   if (!lo || !hi || lo.i === hi.i) return null;
   return { s: lo.i, e: hi.i };
+}
+
+/** A line through a piece wherever it crosses it: its first and last crossing of the contour. */
+function chordMm(rs: readonly Pt2[], A: Pt2, B: Pt2): MeshCrease | null {
+  const xs = lineCrossings(rs, A, B).sort((p, q) => p.t - q.t);
+  if (xs.length < 2 || xs[0].i === xs[xs.length - 1].i) return null;
+  return { s: xs[0].i, e: xs[xs.length - 1].i };
 }
 
 /**
@@ -699,11 +733,29 @@ export function foldPanel(
   const foldPt = (q: Pt2): Pt2 => carry(q, movedBy(q, chain), chain);
   const creaseD = new Float64Array(count);
   const off = new Float64Array(count);
+  const rampD = new Float64Array(count);
   for (let i = 0; i < count; i++) {
     let d = Infinity;
-    for (const c of creases) d = Math.min(d, segDist2D(flat[i], c.a, c.b));
+    // The ramp runs from the nearest crease lying at another ply than the vertex, down to that
+    // crease's ply: the face for a first turn, the turned package for a crease a later fold
+    // carried along (a placket edge inside a turned-up hem lies with the hem, not at the face).
+    let r = Infinity;
+    let base = 0;
+    for (const c of creases) {
+      const dc = segDist2D(flat[i], c.a, c.b);
+      d = Math.min(d, dc);
+      if (dc >= r) continue;
+      let best = Infinity;
+      let at = 0;
+      for (const v of c.verts) {
+        const e = (flat[v][0] - flat[i][0]) ** 2 + (flat[v][1] - flat[i][1]) ** 2;
+        if (e < best) [best, at] = [e, plyOf[v]];
+      }
+      if (at !== plyOf[i]) [r, base] = [dc, at];
+    }
     creaseD[i] = d;
-    off[i] = plyOf[i] * PLY * Math.min(1, d / RAMP);
+    rampD[i] = r;
+    off[i] = PLY * (r < Infinity ? base + (plyOf[i] - base) * Math.min(1, r / RAMP) : plyOf[i]);
   }
   const T = mesh.tris;
   const triFlip = new Uint8Array(T.length / 3);
@@ -752,6 +804,7 @@ export function foldPanel(
     ply: plyOf,
     off,
     creaseD,
+    rampD,
     triFlip,
     triPly,
     creaseEdge,
@@ -4463,12 +4516,15 @@ export function solveDoll(input: DollInput): DollReport {
       const { cv, ca, cb, cc, w0, w1, w2, sg, gp } = F.creaseD[i] >= band ? held : probed;
       const p = P.mesh.pts[i];
       const k = `${Math.floor(p[0] / cell)},${Math.floor(p[1] / cell)}`;
+      // Every other ply over the vertex holds it, each on its own side: where three or four plies
+      // stack (a placket in a turned-up hem) one pair would leave the vertex free of the face.
+      const by = new Set<number>();
       for (const t of cellT.get(k) ?? []) {
         const a = T[t];
         const b = T[t + 1];
         const c = T[t + 2];
         const dp = F.ply[i] - F.triPly[t / 3];
-        if (!dp) continue;
+        if (!dp || by.has(F.triPly[t / 3]) || a === i || b === i || c === i) continue;
         const A = P.mesh.pts[a];
         const B = P.mesh.pts[b];
         const C = P.mesh.pts[c];
@@ -4488,7 +4544,7 @@ export function solveDoll(input: DollInput): DollReport {
         w2.push(w);
         sg.push(Math.sign(dp) * sgn);
         gp.push(0.6 * PLY * Math.abs(dp));
-        break; // one triangle holds the vertex
+        by.add(F.triPly[t / 3]); // one triangle per ply holds the vertex
       }
     }
     for (const [list, into] of [
@@ -5136,7 +5192,9 @@ export function solveDoll(input: DollInput): DollReport {
       p,
       fold ? (t: number) => fold.triPly[t] === 0 : undefined,
     );
-    return L && L.out < 1e-9 ? L : stencilPast(P.mesh.pts, basePlyOf(P), p);
+    if (L && L.out < 1e-9) return L;
+    const on = basePlyOf(P);
+    return spreadPast(P.mesh.pts, on, p) ?? stencilPast(P.mesh.pts, on, p);
   };
   /**
    * Past the footprint across the closure (a placket over the host's folded edge) is carried on.
@@ -5154,8 +5212,9 @@ export function solveDoll(input: DollInput): DollReport {
   };
   const atNow = (P: Panel, L: Located): Vec3 => {
     const X: Vec3 = [0, 0, 0];
-    for (let j = 0; j < 3; j++)
-      for (let d = 0; d < 3; d++) X[d] += L.w[j] * pos[3 * (P.offset + L.i[j]) + d];
+    L.i.forEach((v, j) => {
+      for (let d = 0; d < 3; d++) X[d] += L.w[j] * pos[3 * (P.offset + v) + d];
+    });
     return X;
   };
   const surfaceOfPart = (part: string) =>
@@ -5236,14 +5295,18 @@ export function solveDoll(input: DollInput): DollReport {
       const wa: number[] = [];
       const ib: number[] = [];
       const wb: number[] = [];
+      // Each point by as many vertices as the widest reads (a point past a footprint reads a
+      // spread of them), the rest padded with weight 0.
+      const stride = Math.max(3, ...rows.flatMap(([L, M]) => [L.i.length, M.i.length]));
       for (const [L, M] of rows)
-        for (let j = 0; j < 3; j++) {
-          ia.push(top.P.offset + L.i[j]);
-          wa.push(L.w[j]);
-          ib.push(under.P.offset + M.i[j]);
-          wb.push(M.w[j]);
+        for (let j = 0; j < stride; j++) {
+          ia.push(top.P.offset + L.i[Math.min(j, L.i.length - 1)]);
+          wa.push(j < L.i.length ? L.w[j] : 0);
+          ib.push(under.P.offset + M.i[Math.min(j, M.i.length - 1)]);
+          wb.push(j < M.i.length ? M.w[j] : 0);
         }
       return {
+        ...(stride !== 3 ? { stride } : {}),
         ia: Int32Array.from(ia),
         wa: Float64Array.from(wa),
         ib: Int32Array.from(ib),
@@ -5325,7 +5388,7 @@ export function solveDoll(input: DollInput): DollReport {
           const p = apply(placement.T, q);
           const inHost = locateIn(top.P.mesh.pts, top.P.mesh.tris, p);
           if ((inHost && inHost.out < 1e-9) || !pastAcross(top.P, top.free, p)) continue;
-          const L = stencilPast(top.P.mesh.pts, base, p);
+          const L = spreadPast(top.P.mesh.pts, base, p) ?? stencilPast(top.P.mesh.pts, base, p);
           const M = locateIn(
             under.P.mesh.pts,
             under.P.mesh.tris,
@@ -6514,24 +6577,10 @@ export function solveDoll(input: DollInput): DollReport {
     layer: number,
     alpha: number,
     proxyIdx: number,
-    /** One-piece collar: fold at this fraction of the local depth, the part above turned down. */
-    roll?: { frac: number; alpha: number },
+    /** One-piece collar: folded this high over its neck edge, mm, the part above turned down. */
+    roll?: { height: number; alpha: number },
   ) => {
     const A = restPath(cctx, U.attach);
-    // Local depth (attach run → opposite run, chart v) by u, for the roll line.
-    const otab = U.other
-      .map((v) => [cuv[2 * v], cuv[2 * v + 1]] as const)
-      .sort((x, y) => x[0] - y[0]);
-    const vOther = (u: number) => {
-      if (!otab.length) return 0;
-      if (u <= otab[0][0]) return otab[0][1];
-      for (let k = 1; k < otab.length; k++)
-        if (otab[k][0] >= u) {
-          const w = (u - otab[k - 1][0]) / Math.max(1e-9, otab[k][0] - otab[k - 1][0]);
-          return otab[k - 1][1] + (otab[k][1] - otab[k - 1][1]) * w;
-        }
-      return otab[otab.length - 1][1];
-    };
     const fold = { stand: [] as number[], fall: [] as number[], line: [] as number[] };
     const tab = U.attach
       .map((v, k) => [cuv[2 * v], A.s[k], cuv[2 * v + 1]] as const)
@@ -6556,7 +6605,7 @@ export function solveDoll(input: DollInput): DollReport {
         v: tab[lo][2] + (tab[hi][2] - tab[lo][2]) * w,
       };
     };
-    const lean = (8 * Math.PI) / 180;
+    const lean = STAND_LEAN;
     // The sewn edge itself by its own arc (u need not run monotonically along a curved edge).
     const onEdge = new Map<number, number>(U.attach.map((v, k) => [v, A.s[k]]));
     for (const P of U.list) {
@@ -6573,7 +6622,9 @@ export function solveDoll(input: DollInput): DollReport {
         const B = base.at(map(q.s));
         const n = outward(B);
         const extra = q.s < sewn[0] - 1 ? 4 : q.s > sewn[1] + 1 ? 2 : 0;
-        const hr = roll ? roll.frac * Math.abs(vOther(cuv[2 * v]) - q.v) : Infinity;
+        // The roll line runs at one height over the neck edge, as a pressed collar turns: a part
+        // lower than that (a band's end past the fall) stands whole.
+        const hr = roll ? roll.height : Infinity;
         let p: Vec3;
         if (mode === 'up' && h > hr) {
           // Above the roll line: turned down and out over the standing part.
@@ -6982,10 +7033,11 @@ export function solveDoll(input: DollInput): DollReport {
         warnings.push(
           `${label}: not proposed — ${sewnMm.toFixed(0)} mm between the marks vs a neck path of ${N.path.len.toFixed(0)} mm (${((100 * sewnMm) / N.path.len).toFixed(0)} %); placed at its own length, centred at the CB`,
         );
-      // A one-piece collar (no stand) rolls over: ROLL_FRAC of its depth stands, the rest turns
-      // down and out, leaning out enough for its longer outer edge (no roll-line mark in the
-      // pattern — a stated prior).
-      let roll: { frac: number; alpha: number } | undefined;
+      // A one-piece collar (no stand) rolls over: ROLL_FRAC of its depth at the CB stands, the
+      // rest turns down and out, leaning out enough for its longer outer edge and no less than
+      // just past the stand's own lean, so the ends lie down on the chest rather than standing
+      // off it (no roll-line mark in the pattern — a stated prior).
+      let roll: { height: number; alpha: number } | undefined;
       if (role === 'collar') {
         const La = plan.m.path.len;
         const Lo = restPath(cctx, U.other).len;
@@ -7004,9 +7056,9 @@ export function solveDoll(input: DollInput): DollReport {
         const H = (1 - ROLL_FRAC) * depth;
         const dR = rN * Math.max(0, Lo / Math.max(1, La) - 1) + 3 + layer;
         roll = {
-          frac: ROLL_FRAC,
+          height: ROLL_FRAC * depth,
           alpha: Math.max(
-            (20 * Math.PI) / 180,
+            STAND_LEAN + (2 * Math.PI) / 180,
             Math.min((70 * Math.PI) / 180, Math.asin(Math.min(1, dR / H))),
           ),
         };
@@ -7735,7 +7787,9 @@ export function solveDoll(input: DollInput): DollReport {
     const ti = (w as Work & { tieIdx?: number }).tieIdx ?? -1;
     const T = ties[ti];
     const gaps: number[] = [];
-    if (T) for (let q = 0; q < T.ia.length / 3; q++) gaps.push(Math.hypot(...tieGap(pos, T, q)));
+    if (T)
+      for (let q = 0; q < T.ia.length / (T.stride ?? 3); q++)
+        gaps.push(Math.hypot(...tieGap(pos, T, q)));
     gaps.sort((x, y) => x - y);
     ov.cfGapP95Mm = gaps.length ? gaps[Math.floor(0.95 * (gaps.length - 1))] : NaN;
     // The two closure edges: mean distance between paired points (≈ offTop + offUnder).
@@ -8207,7 +8261,6 @@ export function solveDoll(input: DollInput): DollReport {
         });
         continue;
       }
-      const mesh = meshPiece(S.rs, [...S.edges.flatMap((e) => [e.s, e.e]), ...S.corners], gridH);
       const flipH = H.mirrored !== faceFlip.has(H.idx);
       // Host vertex normals, out of the garment (the report's winding, a folded part turned).
       const nrm = new Float64Array(3 * H.count);
@@ -8230,51 +8283,166 @@ export function solveDoll(input: DollInput): DollReport {
         [f.top, f.under].filter((x) => x.part === k && x.P === H),
       );
       const baseOfHost = carried.length ? basePlyOf(H) : null;
-      const lay = (p: Pt2, liftQ: number): Vec3 => {
-        // The host triangle under p (or the nearest one, the point clamped onto it).
+      const onBase = (t: number) => !H.fold || H.fold.triPly[t / 3] === 0;
+      const ON_EDGE = 0.05; // past a triangle by its own weights: about a millimetre
+      /**
+       * The host triangle under p, on the base ply where there is one (a ply turned under or over
+       * it would lift the part by a ply here and there), or the nearest, the point clamped onto it.
+       * A point a hair past the base ply's edge (a part laid along the host's folded edge) stays on
+       * the base ply: the plies turned under that edge lie deeper, not on the face.
+       */
+      const locate = (p: Pt2) => {
         let bt = 0;
         let bw: [number, number, number] = [1, 0, 0];
         let bd = Infinity;
-        for (let t = 0; t < T.length; t += 3) {
-          const A = hp[T[t]];
-          const B = hp[T[t + 1]];
-          const C = hp[T[t + 2]];
-          const det = (B[1] - C[1]) * (A[0] - C[0]) + (C[0] - B[0]) * (A[1] - C[1]);
-          if (Math.abs(det) < 1e-9) continue;
-          let u = ((B[1] - C[1]) * (p[0] - C[0]) + (C[0] - B[0]) * (p[1] - C[1])) / det;
-          let v = ((C[1] - A[1]) * (p[0] - C[0]) + (A[0] - C[0]) * (p[1] - C[1])) / det;
-          let w = 1 - u - v;
-          const out = Math.max(0, -u) + Math.max(0, -v) + Math.max(0, -w);
-          if (out < bd) {
-            u = Math.max(0, u);
-            v = Math.max(0, v);
-            w = Math.max(0, w);
-            const sw = u + v + w || 1;
-            bd = out;
-            bt = t;
-            bw = [u / sw, v / sw, w / sw];
-            if (out === 0) break;
+        for (const anyPly of [false, true]) {
+          for (let t = 0; t < T.length; t += 3) {
+            if (!anyPly && !onBase(t)) continue;
+            const A = hp[T[t]];
+            const B = hp[T[t + 1]];
+            const C = hp[T[t + 2]];
+            const det = (B[1] - C[1]) * (A[0] - C[0]) + (C[0] - B[0]) * (A[1] - C[1]);
+            if (Math.abs(det) < 1e-9) continue;
+            let u = ((B[1] - C[1]) * (p[0] - C[0]) + (C[0] - B[0]) * (p[1] - C[1])) / det;
+            let v = ((C[1] - A[1]) * (p[0] - C[0]) + (A[0] - C[0]) * (p[1] - C[1])) / det;
+            let w = 1 - u - v;
+            const out = Math.max(0, -u) + Math.max(0, -v) + Math.max(0, -w);
+            if (out < bd) {
+              u = Math.max(0, u);
+              v = Math.max(0, v);
+              w = Math.max(0, w);
+              const sw = u + v + w || 1;
+              bd = out;
+              bt = t;
+              bw = [u / sw, v / sw, w / sw];
+              if (out === 0) break;
+            }
+          }
+          if (bd < ON_EDGE) break;
+        }
+        return { bt, bw, bd };
+      };
+      const across = (p: Pt2) => !!baseOfHost && carried.some((x) => pastAcross(H, x.free, p));
+      // The host's turns as cut, the last made first. A part past the host's footprint over a
+      // region the host turned away (a placket's end over the hem allowance: sewn on after the hem,
+      // its end is turned under at the finished edge) turns under on the same crease.
+      const turns = (H.fold?.creases ?? []).flatMap((c) => {
+        const L = Math.hypot(c.b[0] - c.a[0], c.b[1] - c.a[1]);
+        if (L < 1e-6) return [];
+        const n: Pt2 = [-(c.b[1] - c.a[1]) / L, (c.b[0] - c.a[0]) / L];
+        const s = (c.flipAt[0] - c.a[0]) * n[0] + (c.flipAt[1] - c.a[1]) * n[1];
+        return Math.abs(s) > 1e-6 ? [{ a: c.a, b: c.b, n, s: Math.sign(s) }] : [];
+      });
+      turns.reverse();
+      // Past the footprint across the closure, looked for along the crease (beside it the
+      // footprint's end runs with the crease, not square to the closure's free side).
+      const acrossAlong = (q: Pt2, c: (typeof turns)[number]) =>
+        !!baseOfHost &&
+        carried.some(({ free }) => {
+          if (!free) return false;
+          const L = Math.hypot(c.b[0] - c.a[0], c.b[1] - c.a[1]);
+          const k = -((c.b[0] - c.a[0]) * free.n[0] + (c.b[1] - c.a[1]) * free.n[1]) / L;
+          if (Math.abs(k) < 0.5) return false;
+          const tx = (Math.sign(k) * (c.b[0] - c.a[0])) / L;
+          const ty = (Math.sign(k) * (c.b[1] - c.a[1])) / L;
+          const reach = (2 * Math.max(free.off, 1)) / Math.abs(k);
+          for (let d = 2; d <= reach; d += 2)
+            if (locate([q[0] + tx * d, q[1] + ty * d]).bd <= 1e-9) return true;
+          return false;
+        });
+      // A part carrying a closure turns its end up along its own column: its edges along the
+      // closure stay over each other, as a strip's are when its end is pressed up, where a mirror
+      // in a crease sloping across the strip would swing the turned edge out past the face.
+      const column = carried.find((x) => x.free)?.free?.n;
+      const turnUnder = (p: Pt2) => {
+        for (const c of turns) {
+          // How far p lies on the turned side (a point on the crease belongs to both).
+          const dd = ((p[0] - c.a[0]) * c.n[0] + (p[1] - c.a[1]) * c.n[1]) * c.s;
+          if (dd < -0.5) continue;
+          const k = column ? (-column[1] * c.n[0] + column[0] * c.n[1]) * c.s : 0;
+          const r = 2 * Math.max(dd, 0);
+          const q: Pt2 =
+            column && Math.abs(k) > 0.5
+              ? [p[0] + (r / k) * column[1], p[1] - (r / k) * column[0]]
+              : [p[0] - r * c.s * c.n[0], p[1] - r * c.s * c.n[1]];
+          // Tested half a millimetre in from the crease: on it lies the footprint's own end.
+          const qt: Pt2 = [q[0] - 0.5 * c.s * c.n[0], q[1] - 0.5 * c.s * c.n[1]];
+          const L = locate(q);
+          const inside = L.bd <= 1e-9 || locate(qt).bd <= 1e-9;
+          if (inside || across(qt) || acrossAlong(qt, c)) return { q, L, turn: c, past: !inside };
+        }
+        return null;
+      };
+      // A crease the part turns under on is a line of its mesh: the turned end is cut clean.
+      const Tinv = ownerPlacement ? invertAffine(ownerPlacement.T) : null;
+      const turnedOn = new Set<(typeof turns)[number]>();
+      if (Tinv && turns.length)
+        for (let i = 0; i < S.rs.length; i += 2) {
+          const p = fit.map(S.rs[i]);
+          if (locate(p).bd <= 1e-9 || across(p)) continue;
+          const u = turnUnder(p);
+          if (u) turnedOn.add(u.turn);
+        }
+      const meshCreases = Tinv
+        ? [...turnedOn].flatMap((c) => chordMm(S.rs, apply(Tinv, c.a), apply(Tinv, c.b)) ?? [])
+        : [];
+      const mesh = meshPiece(
+        S.rs,
+        [...S.edges.flatMap((e) => [e.s, e.e]), ...S.corners],
+        gridH,
+        meshCreases,
+      );
+      /** Where on the host a point of the part lies: its own place, or turned under. */
+      const placeOf = (p0: Pt2) => {
+        let p = p0;
+        let { bt, bw, bd } = locate(p);
+        let isPast = bd > 1e-9 && across(p);
+        let turned = false;
+        if (bd > 1e-9 && !isPast) {
+          const u = turnUnder(p);
+          if (u) {
+            p = u.q;
+            ({ bt, bw, bd } = u.L);
+            isPast = bd > 1e-9 && u.past;
+            turned = true;
           }
         }
+        return { p, bt, bw, bd, isPast, turned };
+      };
+      const lay = (p0: Pt2, liftQ: number): Vec3 => {
+        const { p, bt, bw, isPast, turned } = placeOf(p0);
+        // Out of the garment, mm, a part over its host out of it, one under it in. Turned under:
+        // a layer on the part's wrong side, toward the body whichever side of the host the part
+        // lies (over it: between the two; under it: deeper in).
+        const shift = layerDirection * liftQ - (turned ? 2 : 0);
         const X: Vec3 = [0, 0, 0];
         const Nn: Vec3 = [0, 0, 0];
+        // Past the footprint: the host's surface carried on as the solver holds it (spreadPast);
+        // its way out is the host's normals round the point, nearest the most.
         const past =
-          baseOfHost && bd > 1e-9 && carried.some((x) => pastAcross(H, x.free, p))
-            ? stencilPast(hp, baseOfHost, p)
+          baseOfHost && isPast
+            ? spreadPast(hp, baseOfHost, p) ?? stencilPast(hp, baseOfHost, p)
             : null;
-        for (let j = 0; j < 3; j++) {
-          const v = past ? past.i[j] : T[bt + j];
+        const L = past ?? { i: [T[bt], T[bt + 1], T[bt + 2]], w: bw };
+        const g = L.i.map((v, j) =>
+          past
+            ? Math.exp(
+                -((hp[v][0] - p[0]) ** 2 + (hp[v][1] - p[1]) ** 2) / (2 * PAST_SIGMA_MM ** 2),
+              )
+            : L.w[j],
+        );
+        L.i.forEach((v, j) => {
           const P3 = getPos(H.offset + v);
           for (let d = 0; d < 3; d++) {
-            X[d] += (past ? past.w[j] : bw[j]) * P3[d];
-            Nn[d] += (past ? 1 : bw[j]) * nrm[3 * v + d];
+            X[d] += L.w[j] * P3[d];
+            Nn[d] += g[j] * nrm[3 * v + d];
           }
-        }
+        });
         const nl = Math.hypot(Nn[0], Nn[1], Nn[2]) || 1;
         // Inside the panel: a fly shield, a pocket bag, a facing lie under the face they are sewn
         // to (a patch pocket would lie over it — the drawing does not tell which).
         const out: Vec3 = [0, 0, 0];
-        for (let d = 0; d < 3; d++) out[d] = X[d] + (layerDirection * liftQ * Nn[d]) / nl;
+        for (let d = 0; d < 3; d++) out[d] = X[d] + (shift * Nn[d]) / nl;
         return out;
       };
       for (const q of mesh.pts) {
@@ -8283,9 +8451,18 @@ export function solveDoll(input: DollInput): DollReport {
         surfacePos.push(...lay(p, fit.under?.(q) ? lift + 2 : lift));
       }
       for (const x of carried) x.laid = x.foot.map((p) => lay(p, lift));
-      const flip = flipH !== fit.flip;
       const tris = new Uint32Array(mesh.tris.length);
       for (let t = 0; t < tris.length; t += 3) {
+        const [A, B, C] = [
+          mesh.pts[mesh.tris[t]],
+          mesh.pts[mesh.tris[t + 1]],
+          mesh.pts[mesh.tris[t + 2]],
+        ];
+        // An end turned under is wound the other way, as a host's turned ply is.
+        const turned = placeOf(
+          fit.map([(A[0] + B[0] + C[0]) / 3, (A[1] + B[1] + C[1]) / 3]),
+        ).turned;
+        const flip = (flipH !== fit.flip) !== turned;
         tris[t] = mesh.tris[t];
         tris[t + 1] = flip ? mesh.tris[t + 2] : mesh.tris[t + 1];
         tris[t + 2] = flip ? mesh.tris[t + 1] : mesh.tris[t + 2];
