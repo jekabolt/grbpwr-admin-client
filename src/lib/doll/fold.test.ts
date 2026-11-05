@@ -316,7 +316,6 @@ const PINS = {
   oneFold: 2703701573,
   parallelMesh: 1528128353,
   parallelFold: 4223140791,
-  pleats: 214770988,
 };
 function fingerprint(pts: readonly Pt2[], ...lists: readonly ArrayLike<number>[]): number {
   let hash = 2166136261;
@@ -690,14 +689,93 @@ describe('fold rows without a crossing', () => {
     expect(fingerprint(mesh.pts, fold.ply, fold.triPly, fold.triFlip)).toBe(PINS.parallelFold);
   });
 
-  it('pleat rows only: the mesh as it was', () => {
-    const pleats = [
-      at(1, [80, 0], [100, 300], [85, 150], 'pleat_r'),
-      at(2, [100, 0], [100, 300], [95, 150], 'pleat_r'),
-      at(3, [120, 0], [100, 300], [115, 150], 'pleat_r'),
+  // A knife pleat (pleat_r: three rows meeting at one point) is no longer left flat: its rows
+  // crease the mesh, the legs sampled outward from their shared point (07.11 spinka 98).
+  const pleatFan = [
+    at(1, [80, 0], [100, 300], [85, 150], 'pleat_r'),
+    at(2, [100, 0], [100, 300], [95, 150], 'pleat_r'),
+    at(3, [120, 0], [100, 300], [115, 150], 'pleat_r'),
+  ];
+  const onLine = (p: Pt2, a: Pt2, b: Pt2) =>
+    Math.abs((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])) /
+    Math.hypot(b[0] - a[0], b[1] - a[1]);
+
+  it('a knife pleat: its three rows crease the mesh and share its point', () => {
+    const flat = meshPiece(rs, keep, 12, foldCreases(rs, frameOf(geomOf(rs, w, h)), pleatFan));
+    const lines = flat.creases!.slice(0, 3);
+    expect(lines.every((ids) => ids.length >= 2)).toBe(true);
+    const ends = lines.map((ids) => {
+      const [p, q] = [flat.pts[ids[0]], flat.pts[ids[ids.length - 1]]];
+      return Math.hypot(p[0] - 100, p[1] - 300) < Math.hypot(q[0] - 100, q[1] - 300)
+        ? ids[0]
+        : ids[ids.length - 1];
+    });
+    expect(new Set(ends).size).toBe(1);
+  });
+
+  it('a knife pleat closes in the mesh: the legs meet, the intake lies under its hidden half', () => {
+    const { mesh, fold, reports } = foldRectangle(w, h, pleatFan);
+    expect(reports.map((r) => [r.seq, r.applied])).toEqual([
+      [3, true],
+      [2, true],
+      [1, true],
+    ]);
+    const bySeq = (seq: number) => fold.creases.find((c) => c.seq === seq)!.verts;
+    // flipAt (95, 150) names the side of the 80 mm leg: that leg folds, the 120 mm one is where
+    // its fold lands. Closed, both legs lie on the centre line; the centre crease a leg away.
+    for (const v of [...bySeq(1), ...bySeq(3)])
+      expect(Math.abs(mesh.pts[v][0] - 100)).toBeLessThan(1e-6);
+    for (const v of bySeq(2)) expect(onLine(mesh.pts[v], [100, 300], [80, 0])).toBeLessThan(1e-6);
+    let hiddenIntake = 0;
+    let openIntake = 0;
+    for (let i = 0; i < fold.flat.length; i++) {
+      if (fold.creaseD[i] < 1) continue;
+      const [x, y] = fold.flat[i];
+      const t = (300 - y) / 300;
+      if (x > 100 - 20 * t && x < 100) {
+        expect(fold.ply[i]).toBe(-1);
+        hiddenIntake++;
+      } else if (x > 100 && x < 100 + 20 * t) {
+        expect(fold.ply[i]).toBe(-2);
+        openIntake++;
+      } else expect(fold.ply[i]).toBe(0);
+    }
+    expect(hiddenIntake).toBeGreaterThan(0);
+    expect(openIntake).toBeGreaterThan(0);
+  });
+
+  it('a hem across a knife pleat turns on one straight line once the pleat is closed', () => {
+    // The pleat runs out at the hem (its point on the bottom edge), the hem crosses it 35 mm up.
+    const fan = [
+      at(1, [80, 300], [100, 0], [85, 150], 'pleat_r'),
+      at(2, [100, 300], [100, 0], [95, 150], 'pleat_r'),
+      at(3, [120, 300], [100, 0], [115, 150], 'pleat_r'),
     ];
-    const flat = meshPiece(rs, keep, 12, foldCreases(rs, frameOf(geomOf(rs, w, h)), pleats));
-    expect(meshPrint(flat)).toBe(PINS.pleats);
+    const hem = at(4, [0, 35], [200, 35], [100, 10]);
+    const { mesh, fold, reports } = foldRectangle(w, h, [...fan, hem]);
+    const r = reports.find((x) => x.seq === 4)!;
+    expect(r.applied).toBe(true);
+    expect(r.note).toContain('one straight line with the pleat closed');
+    const verts = [...new Set(fold.creases.filter((c) => c.seq === 4).flatMap((c) => c.verts))];
+    expect(verts.length).toBeGreaterThan(10);
+    const [a, b] = [mesh.pts[verts[0]], mesh.pts[verts[verts.length - 1]]];
+    // As cut the line bends where it crosses the pleat; closed, it is straight.
+    expect(
+      Math.max(
+        ...verts.map((v) =>
+          onLine(fold.flat[v], fold.flat[verts[0]], fold.flat[verts[verts.length - 1]]),
+        ),
+      ),
+    ).toBeGreaterThan(5);
+    // (to half a mm: each mesh line runs between contour points sampled every mm)
+    for (const v of verts) expect(onLine(mesh.pts[v], a, b)).toBeLessThan(0.5);
+  });
+
+  it('an even pleat stays flat', () => {
+    const even = pleatFan.map((f) => ({ ...f, kind: 'pleat' as const }));
+    const { reports, warnings } = foldRectangle(w, h, even);
+    expect(reports.every((r) => !r.applied)).toBe(true);
+    expect(warnings.some((x) => x.includes('an even pleat stays flat'))).toBe(true);
   });
 });
 

@@ -48,11 +48,18 @@ export type FoldedPlies = {
  */
 export type FoldStretch = { moved: readonly boolean[]; a1: Pt; b1: Pt };
 
-/** An applied fold: the side test as cut, the side that turned, its line's stretches in order. */
+/**
+ * An applied fold: the side test as cut, the side that turned, its line's stretches in order.
+ * `stretchOf` picks the stretch by the point as cut (a fold bent across a pleat: one line per
+ * region). `map` = a step that moves every point, not a reflection (a pleat closed: the halves turn
+ * about its apex) — given the point now and as cut; its side test only says which plies it flipped.
+ */
 export type FoldStep = {
   sideOf: (q: Pt) => number;
   sF: number;
   stretches: readonly FoldStretch[];
+  stretchOf?: (q: Pt) => FoldStretch;
+  map?: (p: Pt, q: Pt) => Pt;
 };
 
 /** `p` mirrored over the line through `a1` and `b1`. */
@@ -92,8 +99,12 @@ export const movedBy = (q: Pt, chain: readonly FoldStep[]): boolean[] =>
 export function carry(q: Pt, moved: readonly boolean[], chain: readonly FoldStep[]): Pt {
   let p: Pt = [q[0], q[1]];
   chain.forEach((c, i) => {
+    if (c.map) {
+      p = c.map(p, q);
+      return;
+    }
     if (!moved[i]) return;
-    const s = stretchFor(c.stretches, moved);
+    const s = c.stretchOf ? c.stretchOf(q) : stretchFor(c.stretches, moved);
     p = reflectTo(p, s.a1, s.b1);
   });
   return p;

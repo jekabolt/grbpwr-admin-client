@@ -82,6 +82,7 @@ import { liningByName } from 'lib/assembly-skeleton/names';
 import { readName } from 'lib/assembly-skeleton/skeleton';
 import { findLoops, loopPath, type RawLoop } from './loops';
 import { meshPiece, pointInPolygon, type MeshCrease, type PieceMesh } from './mesh';
+import { planPleats, sideOfLine, type MeshPleat, type PleatPlan } from './pleat-mesh';
 import { type Ring, ringsFromJoins } from './rings';
 import { surfaceFit, surfaceHosts } from './surface';
 import {
@@ -292,8 +293,11 @@ const segDist2D = (p: Pt2, a: Pt2, b: Pt2): number => {
  * line does not cross the contour on both sides of its middle.
  */
 function creaseEndsOf(rs: readonly Pt2[], f: PieceFrame, fold: DollFold): MeshCrease | null {
-  const A = fromUV(f, fold.a);
-  const B = fromUV(f, fold.b);
+  return creaseEndsMm(rs, fromUV(f, fold.a), fromUV(f, fold.b));
+}
+
+/** The same for a line in the piece's mm. */
+function creaseEndsMm(rs: readonly Pt2[], A: Pt2, B: Pt2): MeshCrease | null {
   const L = Math.hypot(B[0] - A[0], B[1] - A[1]);
   if (L < 1e-6) return null;
   const dx = (B[0] - A[0]) / L;
@@ -321,16 +325,57 @@ function creaseEndsOf(rs: readonly Pt2[], f: PieceFrame, fold: DollFold): MeshCr
   return { s: lo.i, e: hi.i };
 }
 
-/** The fold rows of a piece as the mesh takes them. By kind alone: a pleat row is not folded yet. */
+/**
+ * The knife pleats of a piece that close in its mesh, and the fold rows across them (pleat-mesh.ts).
+ * Deterministic: the mesh (foldCreases) and the fold (foldPanel) read the same plan.
+ */
+function pleatPlanOf(rs: readonly Pt2[], f: PieceFrame, folds: readonly DollFold[]): PleatPlan {
+  return planPleats(
+    folds.map((fold, k) => ({
+      k,
+      kind: fold.kind,
+      a: fromUV(f, fold.a),
+      b: fromUV(f, fold.b),
+      flipAt: fromUV(f, fold.flipAt),
+    })),
+    (a, b) => {
+      const c = creaseEndsMm(rs, a, b);
+      return c ? [rs[c.s], rs[c.e]] : null;
+    },
+    (q) => pointInPolygon(q, rs),
+  );
+}
+
+/** The mesh crease index of the hidden-side line of a fold row bent across a pleat. */
+const bentExtraIndex = (plan: PleatPlan, folds: readonly DollFold[], k: number) =>
+  folds.length + [...plan.bent.keys()].sort((x, y) => x - y).indexOf(k);
+
+/**
+ * The fold rows of a piece as the mesh takes them. A pleat row folds when its fan closes in the
+ * mesh (a knife pleat, pleat-mesh.ts) and is passive otherwise; a fold row across a closed pleat
+ * is creased as two lines, its open-side line in its own place and its hidden-side line appended.
+ */
 export const foldCreases = (
   rs: readonly Pt2[],
   f: PieceFrame,
   folds: readonly DollFold[],
-): MeshCrease[] =>
-  folds.map((fold) => ({
-    ...(creaseEndsOf(rs, f, fold) ?? { s: 0, e: 0 }),
-    passive: fold.kind !== 'inward' && fold.kind !== 'outward',
-  }));
+): MeshCrease[] => {
+  const plan = pleatPlanOf(rs, f, folds);
+  const out: MeshCrease[] = folds.map((fold, k) => {
+    const bent = plan.bent.get(k);
+    if (bent)
+      return { ...(creaseEndsMm(rs, bent.meshOpen[0], bent.meshOpen[1]) ?? { s: 0, e: 0 }) };
+    return {
+      ...(creaseEndsOf(rs, f, fold) ?? { s: 0, e: 0 }),
+      passive: fold.kind !== 'inward' && fold.kind !== 'outward' && !plan.rows.has(k),
+    };
+  });
+  for (const k of [...plan.bent.keys()].sort((x, y) => x - y)) {
+    const bent = plan.bent.get(k)!;
+    out.push({ ...(creaseEndsMm(rs, bent.meshHidden[0], bent.meshHidden[1]) ?? { s: 0, e: 0 }) });
+  }
+  return out;
+};
 
 /**
  * Fold a meshed piece on itself: every fold in seq order turns the side holding `flipAt` (as cut)
@@ -395,10 +440,213 @@ export function foldPanel(
       return { moved, a1: [s[0], s[1]], b1: [e[0], e[1]] };
     });
   };
+  /** The turned package goes under (inward) or over (outward) the rest, its order reversed. */
+  const stack = (mv: Uint8Array, moving: readonly number[], kind: DollFold['kind']) => {
+    let lo = Infinity;
+    let hi = -Infinity;
+    let minM = Infinity;
+    let maxM = -Infinity;
+    for (let i = 0; i < count; i++) {
+      if (mv[i]) {
+        minM = Math.min(minM, plyOf[i]);
+        maxM = Math.max(maxM, plyOf[i]);
+      } else {
+        lo = Math.min(lo, plyOf[i]);
+        hi = Math.max(hi, plyOf[i]);
+      }
+    }
+    for (const i of moving)
+      plyOf[i] = kind === 'inward' ? lo - 1 - (plyOf[i] - minM) : hi + 1 + (maxM - plyOf[i]);
+  };
+  /** The rows foldPlies reads for the footprint (a bent row as its straight line as cut). */
+  const plyRows: { seq: number; a: Pt2; b: Pt2; flipAt: Pt2; kind: DollFold['kind'] }[] = [];
+
+  // A knife pleat closes first, before any turn: the halves turn about its apex, the intake lies
+  // as a Z under the half its flip point names (pleat-mesh.ts). Its plies are kept apart from the
+  // turns' stack and added at the end: the turns stack as if the pleat lay flat, the pleat's own
+  // two plies sit under its hidden half.
+  const plan = pleatPlanOf(g.rs, frame, folds);
+  for (const w of plan.words) warnings.push(`${g.pieceKey}: ${w}`);
+  const pleatPly = new Int8Array(count);
+  const closedPleats: MeshPleat[] = [];
+  const closedIdx = new Set<number>();
+  plan.pleats.forEach((pl, pi) => {
+    if (closedPleats.length) {
+      warnings.push(
+        `${g.pieceKey}: pleat at rows ${[pl.openLeg, pl.centre, pl.hiddenLeg].map((k) => folds[k].seq).join(', ')} stays flat — one pleat per piece closes in the doll`,
+      );
+      return;
+    }
+    const rowsK = [pl.openLeg, pl.centre, pl.hiddenLeg];
+    const vs = rowsK.map((k) => mesh.creases?.[k] ?? []);
+    if (vs.some((v) => v.length < 2)) {
+      warnings.push(
+        `${g.pieceKey}: pleat at rows ${rowsK.map((k) => folds[k].seq).join(', ')} stays flat — its lines do not crease the mesh from contour to contour`,
+      );
+      return;
+    }
+    const mv = new Uint8Array(count);
+    for (let i = 0; i < count; i++) {
+      const q = flat[i];
+      cur[i] = pl.map(q);
+      const r = pl.regionOf(q);
+      if (r === 'hiddenIntake') {
+        pleatPly[i] = -1;
+        mv[i] = 1;
+      } else if (r === 'openIntake') pleatPly[i] = -2;
+    }
+    chain.push({
+      sideOf: (q) => (pl.regionOf(q) === 'hiddenIntake' ? 1 : -1),
+      sF: 1,
+      stretches: [],
+      map: (p, q) => pl.map(p, q),
+    });
+    moves.push(mv);
+    closedPleats.push(pl);
+    closedIdx.add(pi);
+    rowsK.forEach((k, j) => {
+      const fold = folds[k];
+      const verts = vs[j];
+      const report = blank(
+        fold,
+        j === 1
+          ? `pleat closed in the mesh: the halves turned about its point, the intake laid under as a Z`
+          : `pleat ${j === 0 ? 'placement' : 'fold'} line, closed with its centre row`,
+      );
+      report.applied = true;
+      reports.push(report);
+      creases.push({
+        seq: fold.seq,
+        kind: fold.kind,
+        verts,
+        a: flat[verts[0]],
+        b: flat[verts[verts.length - 1]],
+        flipAt: fromUV(frame, fold.flipAt),
+        report,
+      });
+    });
+  });
+
+  /** A fold row across a pleat: below its bent line it turns, over one line once the pleat closed. */
+  const foldBent = (fold: DollFold, k: number) => {
+    const B = plan.bent.get(k)!;
+    const pl = plan.pleats[B.pleat];
+    const vO = mesh.creases?.[k] ?? [];
+    const vH = mesh.creases?.[bentExtraIndex(plan, folds, k)] ?? [];
+    if (vO.length < 2 || vH.length < 2) {
+      refuse(
+        fold,
+        'the fold line, bent at the pleat, does not crease the piece from contour to contour',
+      );
+      return;
+    }
+    const near = (ids: readonly number[], p: Pt2) => {
+      let best = 0;
+      for (let j = 1; j < ids.length; j++)
+        if (
+          Math.hypot(flat[ids[j]][0] - p[0], flat[ids[j]][1] - p[1]) <
+          Math.hypot(flat[ids[best]][0] - p[0], flat[ids[best]][1] - p[1])
+        )
+          best = j;
+      return best;
+    };
+    // Each line from its end on the contour (in its own half) to where the bend leaves it.
+    const fromEnd = (ids: number[], end: Pt2) =>
+      near([ids[0], ids[ids.length - 1]], end) === 0 ? ids : [...ids].reverse();
+    const lo = fromEnd([...vO], B.endOpen);
+    const lh = fromEnd([...vH], B.endHidden);
+    const centreV = new Set(mesh.creases?.[pl.centre] ?? []);
+    const legV = new Set(mesh.creases?.[pl.hiddenLeg] ?? []);
+    let iC = lo.findIndex((v) => centreV.has(v));
+    if (iC < 0) iC = near(lo, B.atCentre);
+    let iL = lh.findIndex((v) => legV.has(v));
+    if (iL < 0) iL = near(lh, B.atLeg);
+    const openPart = lo.slice(0, iC + 1);
+    const hiddenPart = lh.slice(0, iL + 1).reverse();
+    const xC = lo[iC];
+    const xL = lh[iL];
+    let joined = xC === xL;
+    if (!joined)
+      for (let t = 0; t < mesh.tris.length && !joined; t += 3) {
+        const tri = [mesh.tris[t], mesh.tris[t + 1], mesh.tris[t + 2]];
+        joined = tri.includes(xC) && tri.includes(xL);
+      }
+    // The side that turns, per region: the one the row's flip point is on, read at each line.
+    const A0 = fromUV(frame, fold.a);
+    const B0 = fromUV(frame, fold.b);
+    const flipAt = fromUV(frame, fold.flipAt);
+    const sFlip = sideOfLine(flipAt, [A0, B0]);
+    if (!sFlip) {
+      refuse(fold, 'the side to turn (flipAt) lies on the fold line');
+      return;
+    }
+    const dl = Math.hypot(B0[0] - A0[0], B0[1] - A0[1]) || 1;
+    const nrm: Pt2 = [(-(B0[1] - A0[1]) / dl) * sFlip, ((B0[0] - A0[0]) / dl) * sFlip];
+    const toward = (p: Pt2): Pt2 => [p[0] + 5 * nrm[0], p[1] + 5 * nrm[1]];
+    const sO = sideOfLine(toward(B.endOpen), B.open);
+    const sI = sideOfLine(toward(B.atCentre), B.intake);
+    const sH = sideOfLine(toward(B.endHidden), B.hidden);
+    const lineAt = (q: Pt2): [readonly [Pt2, Pt2], number] => {
+      const r = pl.regionOf(q);
+      return r === 'hidden' ? [B.hidden, sH] : r === 'hiddenIntake' ? [B.intake, sI] : [B.open, sO];
+    };
+    const turns = (q: Pt2) => {
+      const [L, sd] = lineAt(q);
+      return sideOfLine(q, L) === sd;
+    };
+    const onCrease = new Set([...openPart, ...hiddenPart]);
+    const moving: number[] = [];
+    for (let i = 0; i < count; i++) if (!onCrease.has(i) && turns(flat[i])) moving.push(i);
+    if (!moving.length) {
+      refuse(fold, 'nothing of the piece lies on the side to turn');
+      return;
+    }
+    // The pleat closed: one line through the two ends as they lie now. Flat: each region's own.
+    const closedHere = closedIdx.has(B.pleat);
+    const one: FoldStretch = { moved: [], a1: cur[lo[0]], b1: cur[lh[0]] };
+    const stretchOf = (q: Pt2): FoldStretch => {
+      if (closedHere) return one;
+      const [L] = lineAt(q);
+      return { moved: [], a1: L[0], b1: L[1] };
+    };
+    const mv = new Uint8Array(count);
+    for (const i of moving) {
+      const st = stretchOf(flat[i]);
+      cur[i] = reflectTo(cur[i], st.a1, st.b1);
+      mv[i] = 1;
+    }
+    stack(mv, moving, fold.kind);
+    chain.push({ sideOf: (q) => (turns(q) ? 1 : -1), sF: 1, stretches: [one], stretchOf });
+    moves.push(mv);
+    const report = blank(
+      fold,
+      `${fold.kind} fold creased along ${openPart.length + hiddenPart.length - 2 + (xC === xL ? 0 : 1)} mesh edges, bent where it crosses the pleat${closedHere ? ' — one straight line with the pleat closed' : ''} · ${moving.length} of ${count} vertices turned ${fold.kind === 'inward' ? 'under' : 'over'} the rest`,
+    );
+    report.applied = true;
+    reports.push(report);
+    const part = (verts: number[]) => ({
+      seq: fold.seq,
+      kind: fold.kind,
+      verts,
+      a: flat[verts[0]],
+      b: flat[verts[verts.length - 1]],
+      flipAt,
+      report,
+    });
+    creases.push(part(openPart));
+    if (xC !== xL && joined) creases.push(part([xC, xL]));
+    creases.push(part(hiddenPart));
+    plyRows.push({ seq: fold.seq, a: A0, b: B0, flipAt, kind: fold.kind });
+  };
+
   folds.forEach((fold, k) => {
-    // PLEAT stays flat in the doll until its mesh has a rigid two-half operation. It must never
-    // fall through the inward/outward ternary below and be reflected as an outward fold.
+    // An even pleat, or a pleat the plan left flat, stays flat. It must never fall through the
+    // inward/outward ternary below and be reflected as an outward fold.
     if (fold.kind !== 'inward' && fold.kind !== 'outward') return;
+    if (plan.bent.has(k)) {
+      foldBent(fold, k);
+      return;
+    }
     const verts = mesh.creases?.[k] ?? [];
     if (verts.length < 2) {
       refuse(
@@ -434,21 +682,7 @@ export function foldPanel(
       cur[i] = reflectTo(cur[i], s.a1, s.b1);
       mv[i] = 1;
     }
-    let lo = Infinity;
-    let hi = -Infinity;
-    let minM = Infinity;
-    let maxM = -Infinity;
-    for (let i = 0; i < count; i++) {
-      if (mv[i]) {
-        minM = Math.min(minM, plyOf[i]);
-        maxM = Math.max(maxM, plyOf[i]);
-      } else {
-        lo = Math.min(lo, plyOf[i]);
-        hi = Math.max(hi, plyOf[i]);
-      }
-    }
-    for (const i of moving)
-      plyOf[i] = fold.kind === 'inward' ? lo - 1 - (plyOf[i] - minM) : hi + 1 + (maxM - plyOf[i]);
+    stack(mv, moving, fold.kind);
     chain.push({ sideOf, sF, stretches });
     moves.push(mv);
     const report = blank(
@@ -458,7 +692,9 @@ export function foldPanel(
     report.applied = true;
     reports.push(report);
     creases.push({ seq: fold.seq, kind: fold.kind, verts, a, b, flipAt, report });
+    plyRows.push({ seq: fold.seq, a, b, flipAt, kind: fold.kind });
   });
+  for (let i = 0; i < count; i++) plyOf[i] += pleatPly[i];
   if (!creases.length) return undefined;
   const foldPt = (q: Pt2): Pt2 => carry(q, movedBy(q, chain), chain);
   const creaseD = new Float64Array(count);
@@ -509,10 +745,7 @@ export function foldPanel(
     edges: g.edges.map((e) => ({ ...e, pts: e.pts.map(foldPt) })),
     ...(g.marks ? { marks: g.marks.map((m) => ({ ...m, pts: m.pts.map(foldPt) })) } : {}),
   };
-  const plies = foldPlies(
-    g.rs,
-    creases.map((c) => ({ seq: c.seq, a: c.a, b: c.b, flipAt: c.flipAt, kind: c.kind })),
-  ).plies.map((ply) => ply.poly);
+  const plies = foldPlies(g.rs, plyRows).plies.map((ply) => ply.poly);
   return {
     geom,
     flat,
@@ -6657,7 +6890,9 @@ export function solveDoll(input: DollInput): DollReport {
     const rowsOf = (pn: number): NeckRows | undefined => {
       const P = panels[pn];
       return {
-        turns: (P.fold?.creases ?? []).map((c) => ({ a: c.a, b: c.b })),
+        turns: (P.fold?.creases ?? [])
+          .filter((c) => c.kind === 'inward' || c.kind === 'outward')
+          .map((c) => ({ a: c.a, b: c.b })),
         pleatLines: neckPleatLines.get(P.key) ?? [],
       };
     };
