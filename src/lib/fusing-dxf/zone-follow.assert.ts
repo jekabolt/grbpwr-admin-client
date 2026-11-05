@@ -5,14 +5,21 @@ import {
   addZoneHole,
   addZoneIsland,
   createZoneBus,
+  deleteMainZoneRing,
   deleteZoneRing,
+  drawZoneRing,
   insertZonePoint,
+  isFullZoneRing,
+  rebuildZoneRing,
   removeZonePoint,
   seedZone,
   splineZone,
   storedZone,
+  zoneDrawKind,
   zonePoints,
   zoneRingOutline,
+  zoneRingPoints,
+  zoneShapePoints,
   ZONE_HOLE_SEED_RATIO,
   ZONE_PART_GAP_MM,
   ZONE_PART_MIN_RING_AREA_MM2,
@@ -527,4 +534,69 @@ export function main() {
   assert.ok(Math.abs(Math.abs(signedArea(zoneRingMm(sevenZone, inset))) - 160 * 80) < 1e-6);
 
   console.log('fusing-dxf zone follow: assertions passed');
+}
+
+// A ring drawn on the piece: variant C of the zone start.
+{
+  const contour = [
+    { x: 0, y: 0 },
+    { x: 400, y: 0 },
+    { x: 400, y: 600 },
+    { x: 0, y: 600 },
+  ];
+  const hem = { x0: 50, y0: -30, x1: 350, y1: 40 };
+
+  const square = zoneShapePoints('sharp', 4, hem, contour);
+  assert.equal(square.length, 4);
+  assert.ok(square.every((p) => p.corner));
+  assert.ok(
+    square.every((p) => p.y >= 0),
+    'a box drawn across the hem lands on the contour',
+  );
+  const six = zoneShapePoints('sharp', 6, { x0: 50, y0: 10, x1: 350, y1: 40 }, contour);
+  assert.deepEqual(
+    six.map((p) => [p.x, p.y]),
+    [
+      [50, 10],
+      [200, 10],
+      [350, 10],
+      [350, 40],
+      [200, 40],
+      [50, 40],
+    ],
+    'extra points split the long sides',
+  );
+  assert.ok(
+    zoneShapePoints('round', 8, { x0: 50, y0: 10, x1: 350, y1: 40 }).every((p) => !p.corner),
+  );
+
+  const main = drawZoneRing(null, 'sharp', { x0: 50, y0: 10, x1: 350, y1: 40 }, contour);
+  assert.equal(main.ref, 'main');
+  assert.equal(zonePoints(main.zone).length, 4);
+  assert.equal(isFullZoneRing(main.zone, 'main', contour), false);
+
+  const second = drawZoneRing(main.zone, 'round', { x0: 50, y0: 300, x1: 350, y1: 340 }, contour);
+  assert.equal(second.ref, 'island:0');
+  assert.equal(zoneRingPoints(second.zone, 'island:0').length, 8);
+  assert.equal(zonePoints(second.zone).length, 4, 'a part leaves the main ring alone');
+
+  const rebuilt = rebuildZoneRing(main.zone, 'main', 6, contour);
+  assert.equal(zonePoints(rebuilt).length, 6);
+  assert.ok(zonePoints(rebuilt).every((p) => p.corner));
+
+  const promoted = deleteMainZoneRing(second.zone);
+  assert.ok(promoted);
+  assert.equal(zonePoints(promoted).length, 8, 'the next part takes over');
+  assert.equal(promoted.islands.length, 0);
+  assert.equal(deleteMainZoneRing(main.zone), null, 'the last ring leaves the zone empty');
+
+  assert.equal(isFullZoneRing(seedZone(contour), 'main', contour), true);
+
+  const bus = createZoneBus();
+  assert.equal(zoneDrawKind(bus, 'a', null), 'sharp', 'an empty zone waits to be drawn');
+  assert.equal(zoneDrawKind(bus, 'a', main.zone), null);
+  bus.setDrawing('a', 'round');
+  assert.equal(zoneDrawKind(bus, 'a', main.zone), 'round');
+  bus.commit('a', main.zone);
+  assert.equal(zoneDrawKind(bus, 'a', main.zone), null, 'a committed ring ends the drawing');
 }

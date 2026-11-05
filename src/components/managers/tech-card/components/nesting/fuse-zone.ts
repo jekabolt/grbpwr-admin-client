@@ -1,6 +1,6 @@
-// The drawn fusing zone: ordered control points, piece-local mm, Y up. New zones start as a small
-// set of sharp vertices on the inset contour, so all of their sides follow that contour and cover
-// the whole piece. Legacy rectangles still open as 4 corners + 4 straight mids, then become a
+// The drawn fusing zone: ordered control points, piece-local mm, Y up. A new zone is empty until a
+// ring is drawn on the piece; `full` is a small set of sharp vertices on the inset contour, so all
+// of its sides follow that contour and cover the whole piece. Legacy rectangles still open as 4 corners + 4 straight mids, then become a
 // spline on their first canvas edit. Plus the per-dialog bus the canvas and the panel share: the
 // clipped area and undo stack.
 import {
@@ -842,6 +842,163 @@ export function addZoneIsland(
   return splitZoneOuter(z, selectedOuter, contourMm);
 }
 
+// ---------- a ring drawn on the piece ----------
+export type ZoneDrawKind = 'sharp' | 'round';
+export type ZoneBox = { x0: number; y0: number; x1: number; y1: number };
+/** A freshly drawn ring: a square of four, or an oval that already reads as a curve. */
+export const ZONE_DRAW_POINTS: Record<ZoneDrawKind, number> = { sharp: 4, round: 8 };
+export const ZONE_POINT_PRESETS = [4, 5, 6, 8, 10, 12];
+/** A rectangle's corners need four points, whatever the shape. */
+export const ZONE_MIN_DRAWN_POINTS = 4;
+/** The share of the inset contour that makes a main ring «full». */
+const ZONE_FULL_AREA_RATIO = 0.98;
+
+const ringArea = (ring: readonly XY[]) => {
+  let twice = 0;
+  for (let index = 0; index < ring.length; index++) {
+    const point = ring[index];
+    const next = ring[(index + 1) % ring.length];
+    twice += point.x * next.y - next.x * point.y;
+  }
+  return Math.abs(twice / 2);
+};
+
+/** A point off the inset contour lands on it: a box drawn across a hem still follows that hem. */
+function ontoContour(point: XY, contour: readonly XY[]): XY {
+  if (contour.length < SPLINE_MIN_POINTS || pointInOrOnRing(point, contour)) return point;
+  let best = point;
+  let bestDistance = Infinity;
+  for (let index = 0; index < contour.length; index++) {
+    const a = contour[index];
+    const b = contour[(index + 1) % contour.length];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const t = Math.max(
+      0,
+      Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / (dx * dx + dy * dy || 1)),
+    );
+    const on = { x: a.x + dx * t, y: a.y + dy * t };
+    const distance = Math.hypot(point.x - on.x, point.y - on.y);
+    if (distance < bestDistance) {
+      best = on;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
+/**
+ * The points of a ring inside a box. Sharp: the four corners, extra points split the longest side,
+ * so six points on a hem box sit in the middle of its two long sides. Round: an even oval.
+ */
+export function zoneShapePoints(
+  kind: ZoneDrawKind,
+  count: number,
+  box: ZoneBox,
+  contour: readonly XY[] = [],
+): ZonePoint[] {
+  const n = Math.max(ZONE_MIN_DRAWN_POINTS, Math.min(SPLINE_MAX_POINTS, Math.round(count)));
+  const x0 = Math.min(box.x0, box.x1);
+  const x1 = Math.max(box.x0, box.x1);
+  const y0 = Math.min(box.y0, box.y1);
+  const y1 = Math.max(box.y0, box.y1);
+  let points: XY[];
+  if (kind === 'round') {
+    points = Array.from({ length: n }, (_, index) => {
+      const angle = (index / n) * Math.PI * 2;
+      return {
+        x: (x0 + x1) / 2 + (Math.cos(angle) * (x1 - x0)) / 2,
+        y: (y0 + y1) / 2 + (Math.sin(angle) * (y1 - y0)) / 2,
+      };
+    });
+  } else {
+    points = [
+      { x: x0, y: y0 },
+      { x: x1, y: y0 },
+      { x: x1, y: y1 },
+      { x: x0, y: y1 },
+    ];
+    while (points.length < n) {
+      let longest = 0;
+      let length = -1;
+      points.forEach((point, index) => {
+        const next = points[(index + 1) % points.length];
+        const side = Math.hypot(next.x - point.x, next.y - point.y);
+        if (side > length + RING_EPSILON) {
+          length = side;
+          longest = index;
+        }
+      });
+      const a = points[longest];
+      const b = points[(longest + 1) % points.length];
+      points.splice(longest + 1, 0, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+    }
+  }
+  return points.map((point) => ({ ...ontoContour(point, contour), corner: kind === 'sharp' }));
+}
+
+/** No drawn zone: the box becomes the main ring. Otherwise it is one more part. */
+export function drawZoneRing(
+  z: FuseZone | null | undefined,
+  kind: ZoneDrawKind,
+  box: ZoneBox,
+  contourMm: readonly XY[],
+): { zone: SplineZone; ref: ZoneRingRef } {
+  const points = zoneShapePoints(kind, ZONE_DRAW_POINTS[kind], box, contourMm);
+  if (!isDrawnZone(z)) return { zone: splineZone(points), ref: 'main' };
+  const base = isSplineZone(z) ? z : splineZone(zonePoints(z));
+  const islands = [...base.islands, splineOfPoints(points)];
+  return { zone: { ...base, islands }, ref: `island:${islands.length - 1}` };
+}
+
+/** The ring rebuilt in its own bounds with `count` points; hand edits go, undo brings them back. */
+export function rebuildZoneRing(
+  z: FuseZone | null | undefined,
+  ref: ZoneRingRef,
+  count: number,
+  contourMm: readonly XY[],
+): DrawnZone | null {
+  const points = zoneRingPoints(z, ref);
+  if (!points.length) return null;
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  return withZoneRingPoints(
+    z,
+    ref,
+    zoneShapePoints(
+      points.every((point) => point.corner) ? 'sharp' : 'round',
+      count,
+      { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) },
+      // A cut-out stays strictly inside its outer, so it never follows the contour.
+      ref.startsWith('hole:') ? [] : contourMm,
+    ),
+  );
+}
+
+export function isFullZoneRing(
+  z: FuseZone | null | undefined,
+  ref: ZoneRingRef,
+  contourMm: readonly XY[],
+): boolean {
+  if (ref !== 'main' || contourMm.length < SPLINE_MIN_POINTS || !isDrawnZone(z)) return false;
+  const ring = zoneRingOutline(z, 'main', contourMm).ring;
+  return ringArea(ring) >= ringArea(contourMm) * ZONE_FULL_AREA_RATIO;
+}
+
+/** Without its main ring the next part takes over; with no parts left the zone is empty. */
+export function deleteMainZoneRing(z: FuseZone | null | undefined): SplineZone | null {
+  if (!isSplineZone(z) || !z.islands.length) return null;
+  const removed = zoneRingOutline(z, 'main').ring;
+  return {
+    spline: z.islands[0],
+    islands: z.islands.slice(1),
+    holes: z.holes.filter((_, index) => {
+      const hole = zoneRingOutline(z, `hole:${index}`).ring;
+      return !hole.length || !pointInOrOnRing(hole[0], removed);
+    }),
+  };
+}
+
 // ---------- the per-dialog bus: canvas ↔ panel ----------
 export type ZoneBus = {
   /** cm² of the clipped zone; null = the zone is invalid; undefined = not measured (not on canvas). */
@@ -856,6 +1013,9 @@ export type ZoneBus = {
   setContour: (ci: string, contour: readonly PtMm[] | undefined) => void;
   selected: (ci: string) => ZoneRingRef;
   select: (ci: string, ref: ZoneRingRef) => void;
+  /** The ring waiting to be drawn on the piece; a committed zone change clears it. */
+  drawing: (ci: string) => ZoneDrawKind | null;
+  setDrawing: (ci: string, kind: ZoneDrawKind | null) => void;
   /** Records one complete zone mutation and changes ring selection in the same history event. */
   commit: (
     ci: string,
@@ -875,6 +1035,7 @@ export function createZoneBus(): ZoneBus {
   const ringAreaMap = new Map<string, Partial<Record<ZoneRingRef, number | null>>>();
   const contours = new Map<string, readonly PtMm[]>();
   const selections = new Map<string, ZoneRingRef>();
+  const drawings = new Map<string, ZoneDrawKind>();
   const hist = new Map<string, { zone: FuseZone | null; selected: ZoneRingRef }[]>();
   const subs = new Set<() => void>();
   let v = 0;
@@ -933,7 +1094,15 @@ export function createZoneBus(): ZoneBus {
       selections.set(ci, ref);
       bump();
     },
+    drawing: (ci) => drawings.get(ci) ?? null,
+    setDrawing: (ci, kind) => {
+      if ((drawings.get(ci) ?? null) === kind) return;
+      if (kind) drawings.set(ci, kind);
+      else drawings.delete(ci);
+      bump();
+    },
     commit: (ci, zone, selected, nextSelected) => {
+      drawings.delete(ci);
       const previousSelected = selected ?? selections.get(ci) ?? 'main';
       hist.set(ci, [...(hist.get(ci) ?? []), { zone, selected: previousSelected }].slice(-50));
       selections.set(ci, nextSelected ?? previousSelected);
@@ -942,6 +1111,7 @@ export function createZoneBus(): ZoneBus {
     undo: (ci) => {
       const st = hist.get(ci) ?? [];
       if (!st.length) return undefined;
+      drawings.delete(ci);
       hist.set(ci, st.slice(0, -1));
       selections.set(ci, st[st.length - 1].selected);
       bump();
@@ -955,3 +1125,10 @@ export function createZoneBus(): ZoneBus {
     version: () => v,
   };
 }
+
+/** What the next drag on the piece draws: asked for by the panel, or a zone that has no shape yet. */
+export const zoneDrawKind = (
+  bus: ZoneBus | undefined,
+  ci: string,
+  zone: FuseZone | null | undefined,
+): ZoneDrawKind | null => bus?.drawing(ci) ?? (zone ? null : 'sharp');

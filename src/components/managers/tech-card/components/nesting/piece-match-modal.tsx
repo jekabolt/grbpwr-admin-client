@@ -93,7 +93,7 @@ import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { CanvasSegments, PieceSheet, type PieceMark } from './piece-sheet';
 import { FuseFields, type InterliningLine } from './fuse-fields';
 import { FuseOverlay } from './fuse-overlay';
-import { createZoneBus, isDrawnZone, seedZone } from './fuse-zone';
+import { createZoneBus, isDrawnZone } from './fuse-zone';
 import { fusingSheetsChange, fusingSignature, hasFusedPiece } from './fusing-sheets-stage';
 import {
   blankFuse,
@@ -2665,21 +2665,6 @@ export function PieceMatchModal({
           true,
         );
         resolved = { ...next, bomLineKey: placeholder.lineKey!.trim() };
-      }
-    }
-    if (resolved.mode === 'zone' && !resolved.zone) {
-      const piece = sheetPieces.find((candidate) => ciOf(candidate) === ci);
-      if (piece) {
-        try {
-          const inset = fuseInsetRingMm(
-            piece.poly.map((point) => ({ x: point.x * 10, y: point.y * 10 })),
-            resolved,
-            requiredSeamAllowanceMm,
-          );
-          resolved = { ...resolved, zone: seedZone(inset) };
-        } catch {
-          // The normal incomplete/error state remains visible if this piece cannot produce an inset.
-        }
       }
     }
     const previousLineKey = prev.bomLineKey.trim();

@@ -1,8 +1,9 @@
-// Pen editor for the drawn fusing zone. Drag a point to carve the full-fill seed inward; near the
-// inset contour it snaps back and adjacent snapped sides follow the contour. A tap toggles sharp /
-// round, a double tap on a side inserts a point, and a double tap on a point (or Backspace / Delete
-// on the last touched one) removes it, min 3. Empty piece/zone drags are deliberately inert so the
-// sheet does not pan or create a rectangle. ⌘Z undoes. Finger-size handles on touch.
+// Pen editor for the drawn fusing zone. A zone with no shape yet, or a `+ part`, draws its ring: drag
+// across the piece and the box becomes that ring. Drag a point to reshape; near the inset contour it
+// snaps back and adjacent snapped sides follow the contour. A tap toggles sharp / round, a double tap
+// on a side inserts a point, and a double tap on a point (or Backspace / Delete on the last touched
+// one) removes it, min 3. Outside drawing, empty piece/zone drags are deliberately inert so the sheet
+// does not pan. ⌘Z undoes. Finger-size handles on touch.
 // Coordinates: the sheet's SVG space (cm, Y down); the zone itself is piece-local mm, Y up.
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ZONE_ON_CONTOUR_MM } from 'lib/fusing-dxf/spline';
@@ -11,6 +12,7 @@ import type { PieceDTO, Pt } from 'lib/nesting/types';
 import type { FuseZone } from 'lib/fusing-dxf/types';
 import type { PieceFuseSpec } from './fuse-spec';
 import {
+  drawZoneRing,
   insertZonePoint,
   isDrawnZone,
   removeZonePoint,
@@ -18,6 +20,7 @@ import {
   zoneRingOutline,
   zoneRingPoints,
   zoneRingRefs,
+  zoneDrawKind,
   type ZoneBus,
   type ZonePoint,
   type ZoneRingRef,
@@ -27,6 +30,8 @@ const INK = 'var(--color-warning)';
 const PAPER = 'var(--color-bgColor)';
 /** Two taps on the same handle / side within this many ms are a double tap. */
 const DOUBLE_TAP_MS = 350;
+/** A shorter drag is a slip, not a ring. */
+const MIN_DRAW_PX = 6;
 
 const sub = (a: Pt, b: Pt) => ({ x: a.x - b.x, y: a.y - b.y });
 const add = (a: Pt, b: Pt, k = 1) => ({ x: a.x + b.x * k, y: a.y + b.y * k });
@@ -110,6 +115,8 @@ export function FuseZoneEditor({
   const outlineMm = drawn ? zoneRingOutline(zone, selected, contourMm) : null;
   const ring = outlineMm ? outlineMm.ring.map(W) : [];
   const drag = useRef<Drag | null>(null);
+  const drawKind = zoneDrawKind(bus, ci, zone);
+  const [box, setBox] = useState<{ from: Pt; to: Pt } | null>(null);
   /** The last touched point (Backspace / Delete removes it). */
   const [picked, setPicked] = useState<number | null>(null);
   /** The last tap without a drag, for double-tap detection. */
@@ -255,8 +262,81 @@ export function FuseZoneEditor({
   };
   const svgAt = useRef<Pt | null>(null);
   const onPad = (e: React.PointerEvent) => e.stopPropagation();
+  const finishBox = () => {
+    if (!box || !drawKind) return setBox(null);
+    setBox(null);
+    if (
+      Math.abs(box.to.x - box.from.x) < MIN_DRAW_PX * px ||
+      Math.abs(box.to.y - box.from.y) < MIN_DRAW_PX * px
+    )
+      return;
+    const from = L(box.from);
+    const to = L(box.to);
+    const next = drawZoneRing(
+      zone,
+      drawKind,
+      { x0: from.x, y0: from.y, x1: to.x, y1: to.y },
+      contourMm,
+    );
+    try {
+      zoneRingsMm(next.zone, contourMm);
+    } catch {
+      return;
+    }
+    bus?.commit(ci, zone, selected, next.ref);
+    onChange({ ...spec, zone: next.zone });
+  };
 
   const d = drag.current;
+
+  if (drawKind)
+    return (
+      <g data-zone-editor='' data-zone-drawing={drawKind}>
+        <polygon
+          points={str(outline)}
+          data-fuse-pad=''
+          fill='transparent'
+          style={{ cursor: 'crosshair', touchAction: 'none' }}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            (e.currentTarget as Element).setPointerCapture(e.pointerId);
+            const q = svgPoint(e);
+            setBox({ from: q, to: q });
+          }}
+          onPointerMove={(e) => {
+            if (box) setBox({ from: box.from, to: svgPoint(e) });
+          }}
+          onPointerUp={finishBox}
+          onPointerCancel={() => setBox(null)}
+        />
+        {box &&
+          (drawKind === 'sharp' ? (
+            <rect
+              x={Math.min(box.from.x, box.to.x)}
+              y={Math.min(box.from.y, box.to.y)}
+              width={Math.abs(box.to.x - box.from.x)}
+              height={Math.abs(box.to.y - box.from.y)}
+              fill='none'
+              stroke={INK}
+              strokeDasharray='4 3'
+              vectorEffect='non-scaling-stroke'
+              pointerEvents='none'
+            />
+          ) : (
+            <ellipse
+              cx={(box.from.x + box.to.x) / 2}
+              cy={(box.from.y + box.to.y) / 2}
+              rx={Math.abs(box.to.x - box.from.x) / 2}
+              ry={Math.abs(box.to.y - box.from.y) / 2}
+              fill='none'
+              stroke={INK}
+              strokeDasharray='4 3'
+              vectorEffect='non-scaling-stroke'
+              pointerEvents='none'
+            />
+          ))}
+      </g>
+    );
 
   return (
     <g onPointerMove={move} onPointerUp={up} onPointerCancel={up} data-zone-editor=''>
