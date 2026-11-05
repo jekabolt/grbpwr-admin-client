@@ -454,20 +454,28 @@ export function withFoldPartners(
   const partners = foldPartnersOf(id, step, geoms, grainDeg).slice(1);
   if (!step || !partners.length) return pick;
   const on = pick[side].includes(id);
-  const range = pick.spans[side][id];
+  const spans = pick.spans[side][id];
   const drawn = foldedDrawing(geoms, undefined, step.flat).geoms;
   return partners.reduce<SidePick>((next, partner) => {
     const turned =
       next[side].includes(partner) === on
         ? next
         : pickTarget(next, side, partner, rules.isInner, rules.pieceOf);
-    const span = on && range ? partnerRange(id, partner, range, geoms, drawn) : null;
+    const onPartner =
+      on && spans
+        ? spans
+            .flatMap((range) => {
+              const span = partnerRange(id, partner, range, geoms, drawn);
+              return span ? [span] : [];
+            })
+            .sort((x, y) => x[0] - y[0])
+        : [];
     const own = Object.entries(turned.spans[side]).filter(([key]) => key !== partner);
     return {
       ...turned,
       spans: {
         ...turned.spans,
-        [side]: Object.fromEntries(span ? [...own, [partner, span]] : own),
+        [side]: Object.fromEntries(onPartner.length ? [...own, [partner, onPartner]] : own),
       },
     };
   }, pick);

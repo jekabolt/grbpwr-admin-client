@@ -24,6 +24,7 @@ import {
   type EdgeId,
   type PieceGeom,
   type SeamCandidate,
+  type SeamStretch,
   type SeamEvidence,
 } from '../types';
 import { boundaryRuns, OPENING_KINK_DEG, SOFT_CORNER_DEG, type BoundaryPart } from './boundary';
@@ -457,6 +458,12 @@ export function compositeSeams(
     if (!A.moved && !B.moved) return c;
     const lenOf = (id: EdgeId) => geom.get(pkOf(id))?.edges.find((e) => e.id === id)?.lenMm ?? 0;
     const longest = (ids: EdgeId[]) => ids.reduce((m, x) => (lenOf(x) > lenOf(m) ? x : m));
+    const movedId = (id: EdgeId) => {
+      const i = [...A.ids, ...B.ids].indexOf(id);
+      return i >= 0 ? [...A.mapped, ...B.mapped][i] : id;
+    };
+    const walkOn = (parts: readonly SeamStretch[]) =>
+      parts.map((part) => ({ ...part, target: movedId(part.target) }));
     return {
       ...c,
       a: A.moved ? longest(A.mapped) : c.a,
@@ -466,11 +473,16 @@ export function compositeSeams(
       ...(c.partRange
         ? {
             partRange: Object.fromEntries(
-              Object.entries(c.partRange).map(([id, r]) => {
-                const i = [...A.ids, ...B.ids].indexOf(id);
-                return [i >= 0 ? [...A.mapped, ...B.mapped][i] : id, r];
-              }),
+              Object.entries(c.partRange).map(([id, r]) => [movedId(id), r]),
             ),
+          }
+        : {}),
+      ...(c.walk
+        ? {
+            walk: {
+              ...(c.walk.a ? { a: walkOn(c.walk.a) } : {}),
+              ...(c.walk.b ? { b: walkOn(c.walk.b) } : {}),
+            },
           }
         : {}),
     };

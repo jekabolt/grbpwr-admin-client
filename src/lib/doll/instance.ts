@@ -146,6 +146,7 @@ export function instanceMirrored(graph: SeamGraph, facts: SkeletonFacts): Instan
         b: mapSide(s.b, true)!,
         aParts: undefined,
         bParts: undefined,
+        walk: undefined,
       });
       continue;
     }
@@ -157,7 +158,7 @@ export function instanceMirrored(graph: SeamGraph, facts: SkeletonFacts): Instan
       );
       continue;
     }
-    added.push({ ...s, a, b, aParts: undefined, bParts: undefined });
+    added.push({ ...s, a, b, aParts: undefined, bParts: undefined, walk: undefined });
   }
   for (const g of blocks)
     notes.push(

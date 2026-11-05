@@ -62,6 +62,7 @@ import {
   type NeckPath,
 } from './collar';
 import {
+  gapStretchesOf,
   groupPieces,
   roleOfPiece,
   unitSkipKeys,
@@ -1475,6 +1476,12 @@ export function solveDoll(input: DollInput): DollReport {
     const lenOfEdge = new Map<string, number>();
     for (const P of G.pieces) for (const e of P.geom.edges) lenOfEdge.set(e.id, e.lenMm);
     const sideLen = (g: GroupedSeam, side: 'a' | 'b') => {
+      const gapped = gapStretchesOf(g, side);
+      if (gapped)
+        return gapped.reduce(
+          (t, { id, range }) => t + (range ? range[1] - range[0] : lenOfEdge.get(id) ?? 0),
+          0,
+        );
       const ids = side === 'a' ? g.a : g.b;
       const pr = g.seam.partRange ?? {};
       const rg = g.seam.range && ids.length === 1 ? g.seam.range[side] : null;
@@ -1502,9 +1509,18 @@ export function solveDoll(input: DollInput): DollReport {
           g.seam.partRange?.[e] ?? (g.seam.range && ids.length === 1 ? g.seam.range[side] : null);
         return r ?? [0, lenOfEdge.get(e) ?? 0];
       };
-      for (const side of ['a', 'b'] as const)
-        for (const e of side === 'a' ? g.a : g.b)
-          usedBy.set(e, [...(usedBy.get(e) ?? []), `${id}|${span(e, side).join(',')}`]);
+      for (const side of ['a', 'b'] as const) {
+        const gapped = gapStretchesOf(g, side);
+        if (gapped)
+          for (const { id: e, range } of gapped)
+            usedBy.set(e, [
+              ...(usedBy.get(e) ?? []),
+              `${id}|${(range ?? [0, lenOfEdge.get(e) ?? 0]).join(',')}`,
+            ]);
+        else
+          for (const e of side === 'a' ? g.a : g.b)
+            usedBy.set(e, [...(usedBy.get(e) ?? []), `${id}|${span(e, side).join(',')}`]);
+      }
     }
     const ringish = new Set<DollGroupId>(['COLLAR', 'STAND']);
     const groupOfKey = new Map(G.pieces.map((P) => [P.key, P.group]));
@@ -1696,14 +1712,16 @@ export function solveDoll(input: DollInput): DollReport {
       side === 'a' ? g.seam.aParts ?? edgeIdsOf(g.seam.a) : g.seam.bParts ?? edgeIdsOf(g.seam.b)
     ).flatMap((x) => edgeIdsOf(x));
     const pr = g.seam.partRange ?? {};
-    const multi = new Set(ids.map(pk)).size > 1 || Object.keys(pr).length > 0;
+    const gapped = gapStretchesOf(g, side);
+    const multi = !!gapped || new Set(ids.map(pk)).size > 1 || Object.keys(pr).length > 0;
     if (!multi) return pathOf(ids);
     const parts: Path[] = [];
-    for (let i = 0; i < ids.length; i++) {
-      const P = pathOf([ids[i]]);
+    const stretches =
+      gapped ?? ids.map((id, i) => ({ id, range: pr[orig[i]] ?? pr[id], reversed: undefined }));
+    for (const { id, range } of stretches) {
+      const P = pathOf([id]);
       if (!P) return null;
-      const r = pr[orig[i]] ?? pr[ids[i]];
-      parts.push(r ? cropPath(P, r) : P);
+      parts.push(range ? cropPath(P, range) : P);
     }
     const d3 = (a: number, b: number) =>
       Math.hypot(
@@ -1723,6 +1741,13 @@ export function solveDoll(input: DollInput): DollReport {
       let bestCost = Infinity;
       let bestRev = Infinity;
       for (let mask = 0; mask < 1 << n; mask++) {
+        // Stretches of one edge go the way the edge runs between them: nothing to choose there.
+        if (
+          stretches.some(
+            ({ reversed }, i) => reversed !== undefined && !!((mask >> i) & 1) !== reversed,
+          )
+        )
+          continue;
         let cost = 0;
         let rev = 0;
         for (let i = 0; i < n; i++) {
@@ -1780,6 +1805,8 @@ export function solveDoll(input: DollInput): DollReport {
   }
   const charts = new Map<DollGroupId, Chart>();
   const chartSeamOf = (s: GroupedSeam): ChartSeam | null => {
+    // A side sewn with a gap has no whole edge to lay: its stretches are laid below, one by one.
+    if (s.seam.walk) return null;
     const a = s.a.map((id) => edgeById.get(id)).filter((e): e is Edge => !!e);
     const b = s.b.map((id) => edgeById.get(id)).filter((e): e is Edge => !!e);
     if (!a.length || !b.length || a.length !== s.a.length || b.length !== s.b.length) return null;
@@ -1810,21 +1837,20 @@ export function solveDoll(input: DollInput): DollReport {
           [g.a, g.b, true],
           [g.b, g.a, false],
         ] as const) {
-          if (one.length !== 1 || new Set(many.map(pk)).size < 2) continue;
+          const gapped = gapStretchesOf(g, oneIsA ? 'b' : 'a');
+          if (one.length !== 1 || gapStretchesOf(g, oneIsA ? 'a' : 'b')) continue;
+          if (gapped ? gapped.length < 2 : new Set(many.map(pk)).size < 2) continue;
           if (![...one, ...many].every((id) => keys.has(pk(id)))) continue;
           const e1 = edgeById.get(one[0]);
-          const parts = many.map((id) => edgeById.get(id));
-          if (!e1 || parts.some((e) => !e)) continue;
           const pr = g.seam.partRange ?? {};
-          const lens = many.map((id, i) => {
-            const r = pr[id];
-            return r ? r[1] - r[0] : parts[i]!.lenMm;
-          });
+          const stretches = gapped ?? many.map((id) => ({ id, range: pr[id] }));
+          const parts = stretches.map(({ id }) => edgeById.get(id));
+          if (!e1 || parts.some((e) => !e)) continue;
+          const lens = stretches.map(({ range: r }, i) => (r ? r[1] - r[0] : parts[i]!.lenMm));
           const L = lens.reduce((t, x) => t + x, 0) || 1;
           const mk = (against: boolean) => {
             let c = 0;
-            return many.map((id, i): ChartSeam => {
-              const r = pr[id];
+            return stretches.map(({ range: r }, i): ChartSeam => {
               const e = parts[i]!;
               const f0 = against ? 1 - (c + lens[i]) / L : c / L;
               const f1 = against ? 1 - c / L : (c + lens[i]) / L;
@@ -1844,7 +1870,7 @@ export function solveDoll(input: DollInput): DollReport {
           // lies below it on its own piece. Along a level edge the chart's fit decides.
           let fixed: boolean | null = unitLeg(g) ? true : null;
           const k0 = pk(many[0]);
-          const k1 = pk(many[1]);
+          const k1 = pk(many[1] ?? many[0]);
           const joins = (sm: { a: readonly string[]; b: readonly string[] }) =>
             (sm.a.some((id) => pk(id) === k0) && sm.b.some((id) => pk(id) === k1)) ||
             (sm.a.some((id) => pk(id) === k1) && sm.b.some((id) => pk(id) === k0));
@@ -1855,7 +1881,7 @@ export function solveDoll(input: DollInput): DollReport {
               .find(joins);
           const my = (pts: readonly Pt2[]) =>
             pts.reduce((t, q) => t + q[1], 0) / Math.max(1, pts.length);
-          if (join && fixed === null) {
+          if (join && fixed === null && !gapped) {
             const jIds = [...join.a, ...join.b].filter((id) => pk(id) === k0);
             const jy = my(jIds.flatMap((id) => edgeById.get(id)?.pts ?? []));
             const py = my(parts[0]!.pts);

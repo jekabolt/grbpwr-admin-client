@@ -1,12 +1,13 @@
 // THE SPAN HAND, PURE (asm-fixes T6, T7). Segments are virtual: neighbouring break points over the
-// unchanged edges. A click takes a segment, a click on the next one extends it, a drag takes a free
-// span. A side holds one range per edge; a second span of one edge is a second seam row. A click on a
+// unchanged edges. A click takes a segment, a click on the next one extends it, a click further along
+// adds a span, a drag takes a free span. A side holds any number of spans per edge, ascending and
+// disjoint: a long edge broken by a pocket is sewn above it and below it in one row. A click on a
 // stored part selects that row and starts no pick.
 
 import { breakPoints, type EdgeBreakPoint } from 'lib/assembly-skeleton/geometry';
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { resolveEdge } from 'lib/assembly-skeleton/union';
-import { expandSidePart, sidePartEdges, type SidePart } from 'lib/seams';
+import { expandSidePart, mergedSpans, SEAMS, sidePartEdges, type SidePart } from 'lib/seams';
 
 import { pickTarget } from './seam-focus';
 
@@ -15,9 +16,10 @@ export type SpanSide = 'a' | 'b';
 export type SidePick = {
   a: string[];
   b: string[];
-  /** Mm from the edge's start; an edge with no entry is whole. */
-  spans: { a: Readonly<Record<string, SpanRange>>; b: Readonly<Record<string, SpanRange>> };
+  /** Mm from the edge's start, ascending and disjoint; an edge with no entry is whole. */
+  spans: { a: SideSpans; b: SideSpans };
 };
+export type SideSpans = Readonly<Record<string, readonly SpanRange[]>>;
 
 export const NO_SPANS: SidePick['spans'] = { a: {}, b: {} };
 
@@ -70,18 +72,30 @@ export function snapToBreak(breaks: readonly EdgeBreakPoint[], atMm: number): nu
   return best;
 }
 
-/** A click on one more segment of a picked edge: extend, shrink back, or null when none is left. */
-export function clickSegment(current: SpanRange, segment: SpanRange): SpanRange | null {
-  const [from, to] = current;
+/**
+ * A click on one more segment of a picked edge: the spans it leaves, none when the last one went.
+ * The very span drops, a segment at a span's end shrinks it and one inside it narrows it to that
+ * segment; off every span the segment joins what it touches, or stands as a span of its own.
+ */
+export function clickSegment(current: readonly SpanRange[], segment: SpanRange): SpanRange[] {
   const [segFrom, segTo] = segment;
-  if (Math.abs(from - segFrom) < SAME_MM && Math.abs(to - segTo) < SAME_MM) return null;
-  if (Math.abs(to - segFrom) < TOUCH_MM) return [from, segTo];
-  if (Math.abs(segTo - from) < TOUCH_MM) return [segFrom, to];
-  if (segFrom >= from - SAME_MM && segTo <= to + SAME_MM) {
-    if (Math.abs(segTo - to) < SAME_MM) return [from, segFrom];
-    if (Math.abs(segFrom - from) < SAME_MM) return [segTo, to];
+  const others = (range: SpanRange) => current.filter((span) => span !== range);
+  const same = current.find(
+    ([from, to]) => Math.abs(from - segFrom) < SAME_MM && Math.abs(to - segTo) < SAME_MM,
+  );
+  if (same) return others(same);
+  const around = current.find(([from, to]) => segFrom >= from - SAME_MM && segTo <= to + SAME_MM);
+  if (around) {
+    const [from, to] = around;
+    const left: SpanRange =
+      Math.abs(segTo - to) < SAME_MM
+        ? [from, segFrom]
+        : Math.abs(segFrom - from) < SAME_MM
+          ? [segTo, to]
+          : segment;
+    return [...others(around), left].sort((x, y) => x[0] - y[0]);
   }
-  return segment;
+  return [...mergedSpans([...current, segment])];
 }
 
 const withoutDropped = (pick: SidePick): SidePick['spans'] => {
@@ -90,19 +104,26 @@ const withoutDropped = (pick: SidePick): SidePick['spans'] => {
   return { a: keep('a'), b: keep('b') };
 };
 
-const withRange = (
+const withSpans = (
   pick: SidePick,
   side: SpanSide,
   id: string,
-  range: SpanRange,
+  spans: readonly SpanRange[],
   length: number,
 ): SidePick => {
   const own = Object.fromEntries(Object.entries(pick.spans[side]).filter(([key]) => key !== id));
   return {
     ...pick,
-    spans: { ...pick.spans, [side]: isWhole(range, length) ? own : { ...own, [id]: range } },
+    spans: {
+      ...pick.spans,
+      [side]: spans.length === 1 && isWhole(spans[0], length) ? own : { ...own, [id]: spans },
+    },
   };
 };
+
+/** Whether one more span would pass what a row can hold on this side. */
+const sideIsFull = (pick: SidePick, side: SpanSide) =>
+  sideParts(pick[side], pick.spans[side]).length >= SEAMS.maxAnchorsPerSide;
 
 type PickRules = {
   isInner: (id: string) => boolean;
@@ -119,16 +140,21 @@ export function pickSegment(
   rules: PickRules,
 ): SidePick {
   if (pick[side].includes(id)) {
-    const next = clickSegment(pick.spans[side][id] ?? [0, length], segment);
-    if (next && next[1] - next[0] > SAME_MM) return withRange(pick, side, id, next, length);
+    const current = pick.spans[side][id] ?? [[0, length]];
+    const next = clickSegment(current, segment).filter(([from, to]) => to - from > SAME_MM);
+    if (next.length > current.length && sideIsFull(pick, side)) return pick;
+    if (next.length) return withSpans(pick, side, id, next, length);
     const dropped = pickTarget(pick, side, id, rules.isInner, rules.pieceOf);
     return { ...dropped, spans: withoutDropped(dropped) };
   }
   const added = pickTarget(pick, side, id, rules.isInner, rules.pieceOf);
-  return withRange({ ...added, spans: withoutDropped(added) }, side, id, segment, length);
+  return withSpans({ ...added, spans: withoutDropped(added) }, side, id, [segment], length);
 }
 
-/** A finished drag: the edge's range on this side becomes exactly this one. */
+/**
+ * A finished drag: one more span of the edge, joining what it overlaps. An edge in hand whole has no
+ * free part to add to, so there the drag narrows it to exactly this range.
+ */
 export function pickFreeSpan(
   pick: SidePick,
   side: SpanSide,
@@ -139,19 +165,21 @@ export function pickFreeSpan(
 ): SidePick {
   const ordered: SpanRange = [Math.min(range[0], range[1]), Math.max(range[0], range[1])];
   if (ordered[1] - ordered[0] < MIN_SPAN_MM) return pick;
-  if (pick[side].includes(id)) return withRange(pick, side, id, ordered, length);
+  if (pick[side].includes(id)) {
+    const current = pick.spans[side][id] ?? [];
+    const next = mergedSpans([...current, ordered]);
+    if (next.length > current.length && current.length && sideIsFull(pick, side)) return pick;
+    return withSpans(pick, side, id, next, length);
+  }
   const added = pickTarget(pick, side, id, rules.isInner, rules.pieceOf);
-  return withRange({ ...added, spans: withoutDropped(added) }, side, id, ordered, length);
+  return withSpans({ ...added, spans: withoutDropped(added) }, side, id, [ordered], length);
 }
 
-/** One side as parts; an edge with no span stays a bare target. */
-export function sideParts(
-  ids: readonly string[],
-  spans: Readonly<Record<string, SpanRange>>,
-): SidePart[] {
-  return ids.map((target) => {
-    const range = spans[target];
-    return range ? { target, range } : { target };
+/** One side as parts: one per span; an edge with no span stays a bare target. */
+export function sideParts(ids: readonly string[], spans: SideSpans): SidePart[] {
+  return ids.flatMap((target): SidePart[] => {
+    const own = spans[target];
+    return own?.length ? own.map((range) => ({ target, range })) : [{ target }];
   });
 }
 

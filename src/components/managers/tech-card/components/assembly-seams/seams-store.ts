@@ -105,7 +105,8 @@ export function posesOf(s: Pick<SeamsState, 'poses' | 'posePending'>): StoredPos
 
 /**
  * What a re-read of the graph depends on: identity, status, kind, direction, the anchors' hints and
- * its hand placement and the server's verdict. A note is not in it — words do not move a seam.
+ * real ranges, its hand placement and the server's verdict. A note is not in it — words do not move
+ * a seam. A whole anchor adds nothing, so a row without a real range signs as it always did.
  */
 export function rowsSig(rows: readonly StoredSeam[]): string {
   return rows
@@ -118,7 +119,9 @@ export function rowsSig(rows: readonly StoredSeam[]): string {
           .map((a) => {
             const p = a.placement;
             const placement = p ? `@${p.xMm},${p.yMm},${p.rotDeg},${p.flip ? 1 : 0}` : '';
-            return `${a.edgeHint}@${a.contourSig}${placement}`;
+            const span =
+              a.range[0] > 0.0001 || a.range[1] < 0.9999 ? `~${a.range[0]}-${a.range[1]}` : '';
+            return `${a.edgeHint}@${a.contourSig}${placement}${span}`;
           })
           .join('/')}`,
     )

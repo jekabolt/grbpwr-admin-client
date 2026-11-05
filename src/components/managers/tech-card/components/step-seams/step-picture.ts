@@ -27,7 +27,7 @@ import {
 } from 'lib/assembly-skeleton/union';
 import { apply, compose, IDENTITY, rigid, translate } from 'lib/assembly-skeleton/union/affine';
 import { unitDisplayName } from 'lib/assembly-unit-name';
-import { expandSidePart, type SeamPlacement, type SidePart } from 'lib/seams';
+import { candidateSideOf, expandSidePart, type SeamPlacement, type SidePart } from 'lib/seams';
 import { isLayerCloth } from './seam-signals';
 import type { StepFolds } from './step-folds';
 import {
@@ -154,20 +154,19 @@ export function candidateOf(
   const hasRange = [...aParts, ...bParts].some((part) => !!part.range);
   const multiple = aParts.length > 1 || bParts.length > 1;
   const kind = storedKind ?? (hasRange ? (multiple ? 'composite' : 'partial') : 'edge');
-  const partRange: Record<EdgeId, [number, number]> = {};
-  if (kind === 'composite')
-    for (const part of [...aParts, ...bParts])
-      if (part.range) partRange[part.target] = [part.range[0], part.range[1]];
+  const sa = candidateSideOf(aParts);
+  const sb = candidateSideOf(bParts);
+  const partRange: Record<EdgeId, [number, number]> =
+    kind === 'composite' ? { ...sa.hull, ...sb.hull } : {};
   const edgeLen = (id: EdgeId) => resolveEdge(id, geoms)?.len ?? 0;
   // A side of several edges (an armhole of front + back) is laid along as one run.
   return {
     a,
     b,
-    ...(aParts.length > 1 || kind === 'composite'
-      ? { aParts: aParts.map((part) => part.target) }
-      : {}),
-    ...(bParts.length > 1 || kind === 'composite'
-      ? { bParts: bParts.map((part) => part.target) }
+    ...(aParts.length > 1 || kind === 'composite' ? { aParts: sa.ids } : {}),
+    ...(bParts.length > 1 || kind === 'composite' ? { bParts: sb.ids } : {}),
+    ...(sa.walk || sb.walk
+      ? { walk: { ...(sa.walk ? { a: sa.walk } : {}), ...(sb.walk ? { b: sb.walk } : {}) } }
       : {}),
     score: 1,
     evidence: EVIDENCE,
@@ -1192,27 +1191,30 @@ export function stepLayout(
           return !onKept;
         });
       };
+      // The stretches a run walks: an edge sewn with a gap counts each of them, never the gap.
+      const stretchesOf = (side: 'a' | 'b', ids: readonly EdgeId[]): RunPart[] =>
+        (
+          c.walk?.[side]?.filter((part) => ids.includes(part.target)) ??
+          ids.map((target) => ({ target, range: rangeOf(target) }))
+        ).flatMap(({ target, range }): RunPart[] => {
+          const e = resolveEdge(target, geoms);
+          if (!e) return [];
+          return [
+            {
+              key: e.pieceKey,
+              pts: rangedLine(e.pts, range),
+              len: range ? Math.max(0, range[1] - range[0]) : e.len,
+            },
+          ];
+        });
       const theirParts = oneLayer(
         ((theirs === c.a ? c.aParts : c.bParts) ?? []).filter((id) => !gone(id)),
         (k) => (local.has(k) ? compose(Ht, local.get(k)!) : undefined),
       );
+      const theirStretches = stretchesOf(theirs === c.a ? 'a' : 'b', theirParts);
       const run =
-        theirParts.length > 1 && theirParts.every((id) => inOf(id) === i)
-          ? runOf(
-              theirParts.flatMap((id): RunPart[] => {
-                const e = resolveEdge(id, geoms);
-                if (!e) return [];
-                const range = rangeOf(id);
-                return [
-                  {
-                    key: e.pieceKey,
-                    pts: rangedLine(e.pts, range),
-                    len: range ? Math.max(0, range[1] - range[0]) : e.len,
-                  },
-                ];
-              }),
-              (k) => (local.has(k) ? compose(Ht, local.get(k)!) : undefined),
-            )
+        theirStretches.length > 1 && theirParts.every((id) => inOf(id) === i)
+          ? runOf(theirStretches, (k) => (local.has(k) ? compose(Ht, local.get(k)!) : undefined))
           : null;
       const A = run ?? rangedLine(ea.pts, rangeOf(theirs)).map((p) => apply(Tt, p));
       const B = rangedLine(eb.pts, rangeOf(mine)).map((p) => apply(local.get(ka)!, p));
@@ -1220,23 +1222,10 @@ export function stepLayout(
         ((mine === c.a ? c.aParts : c.bParts) ?? []).filter((id) => !gone(id)),
         (k) => local.get(k),
       );
+      const myStretches = stretchesOf(mine === c.a ? 'a' : 'b', myParts);
       const myRun =
-        myParts.length > 1 && myParts.every((id) => inOf(id) === j)
-          ? runOf(
-              myParts.flatMap((id): RunPart[] => {
-                const e = resolveEdge(id, geoms);
-                if (!e) return [];
-                const range = rangeOf(id);
-                return [
-                  {
-                    key: e.pieceKey,
-                    pts: rangedLine(e.pts, range),
-                    len: range ? Math.max(0, range[1] - range[0]) : e.len,
-                  },
-                ];
-              }),
-              (k) => local.get(k),
-            )
+        myStretches.length > 1 && myParts.every((id) => inOf(id) === j)
+          ? runOf(myStretches, (k) => local.get(k))
           : null;
       if (opts.manualFit) {
         // A run folded onto itself is taken once, by its never-moved edge: the middle of the two

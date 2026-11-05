@@ -7,6 +7,7 @@ import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { apply, compose } from 'lib/assembly-skeleton/union/affine';
 import {
   anchorOfRunId,
+  candidateSideParts,
   contourSig,
   frameOf,
   fromWire,
@@ -14,15 +15,18 @@ import {
   poseOf,
   poseRow,
   resolveSeamDecisions,
+  SEAMS,
   seamFromCandidate,
   splitWire,
   toWire,
+  type AnchorHit,
+  type EdgeAnchor,
   type SidePart,
   type StoredSeam,
 } from 'lib/seams';
 
 import { mismatchFacts } from '../assembly-map/step-view';
-import { rowFromHand } from '../assembly-seams/seam-actions';
+import { reconfirmRow, rowFromHand } from '../assembly-seams/seam-actions';
 import {
   deriveAssembly,
   seamOfCandidate,
@@ -46,7 +50,8 @@ import {
   type SpanFitPlan,
 } from './step-pose';
 import { OWNER_FIT, stepResults } from './step-result';
-import { candidateOfStoredSeam } from './step-rows';
+import { candidateOfStoredSeam, edgeRowFromPick, storedSeamSides } from './step-rows';
+import { NO_SPANS, pickSegment, repeatsStoredSeam, sideParts, type SidePick } from './span-pick';
 import { fullyUsedEdges, usedEdgesBeforeStep } from './step-seams-model';
 import { seamTileSideLines } from './step-seams-row';
 
@@ -260,16 +265,309 @@ describe('real span rows', () => {
     ]);
   });
 
-  it('rejects two windows of the same edge in one side', () => {
+  it('refuses a chain and its own member on one side: the same line named twice', () => {
     expect(
       rowFromHand(
-        [range('PCK_L', 0, 20, 50), range('PCK_L', 0, 80, 110)],
-        [range('FRONT_L', 4, 200, 260)],
+        [{ target: `${piece('Back_L').key}#0+1`, range: [0, 100] }, range('Back_L', 1, 100, 200)],
+        [range('FRONT_L', 4, 200, 500)],
         pantsGeoms,
         anchorCtx,
         { direction: 'reversed', seamKey: 'duplicate' },
       ),
     ).toBeNull();
+  });
+});
+
+describe('one edge sewn with a gap: a long edge broken by a pocket', () => {
+  const edge = id('FRONT_L', 4);
+  const length = pantsGeoms.get(piece('FRONT_L').key)!.edges[4].lenMm;
+  const top: SidePart = range('FRONT_L', 4, 0, 300);
+  const bottom: SidePart = range('FRONT_L', 4, 500, 1000);
+  const pocket: SidePart = { target: id('PCK_L', 0) };
+  const pocketLen = pantsGeoms.get(piece('PCK_L').key)!.edges[0].lenMm;
+  const other: SidePart = { target: id('Back_L', 2) };
+  const rules = { isInner: () => false, pieceOf: (t: string) => t.slice(0, t.lastIndexOf('#')) };
+  const closeParts = (parts: readonly SidePart[]) =>
+    parts.map((part) =>
+      part.range
+        ? {
+            target: part.target,
+            range: [expect.closeTo(part.range[0], 0), expect.closeTo(part.range[1], 0)],
+          }
+        : part,
+    );
+  const gapRow = (key = 'gap') => {
+    const stored = row(key, [top, bottom, pocket], [other]);
+    return stored;
+  };
+
+  it('the owner, end to end: pick top, pick bottom, both stay, through the wire, parts identical', () => {
+    let pick: SidePick = { a: [], b: [], spans: NO_SPANS };
+    pick = pickSegment(pick, 'a', edge, [0, 300], length, rules);
+    pick = pickSegment(pick, 'a', edge, [500, 1000], length, rules);
+    pick = pickSegment(pick, 'a', pocket.target, [0, pocketLen], pocketLen, rules);
+    pick = pickSegment(pick, 'b', other.target, [0, 1003.5], 1003.5, rules);
+    expect(pick.spans.a[edge]).toEqual([
+      [0, 300],
+      [500, 1000],
+    ]);
+    const picked = { a: sideParts(pick.a, pick.spans.a), b: sideParts(pick.b, pick.spans.b) };
+    expect(repeatsStoredSeam(picked.a, picked.b, [], pantsGeoms)).toBe(false);
+
+    const stored = edgeRowFromPick(pick, pantsGeoms, anchorCtx, picked);
+    if (!stored) throw new Error('the gap row did not build');
+    expect(stored.kind).toBe('composite');
+    expect(stored.sideA.map((anchor) => anchor.edgeHint)).toEqual([edge, pocket.target, edge]);
+    expect(stored.sideA[0].range[0]).toBe(0);
+    expect(stored.sideA[0].range[1]).toBeCloseTo(300 / length, 3);
+    expect(stored.sideA[2].range[0]).toBeCloseTo(500 / length, 3);
+    expect(stored.sideA[2].range[1]).toBeCloseTo(1000 / length, 3);
+
+    const wire = toWire(stored);
+    expect(wire.sideA?.parts).toHaveLength(3);
+    const back = fromWire(wire);
+    if (!back) throw new Error('the gap row did not come back');
+    expect(toWire(back)).toEqual(wire);
+    expect(storedSeamSides(back, pantsGeoms).parts.a).toEqual(closeParts([top, pocket, bottom]));
+    expect(storedSeamSides(back, pantsGeoms).a).toEqual([edge, pocket.target]);
+
+    const read = candidate(back);
+    expect(read.kind).toBe('composite');
+    expect(read.aParts).toEqual([edge, pocket.target]);
+    expect(candidateSideParts(read, 'a', pantsGeoms)).toEqual(closeParts([top, pocket, bottom]));
+    expect(lengthOf(candidateSideParts(read, 'a', pantsGeoms))).toBeCloseTo(800 + pocketLen, 0);
+  });
+
+  it('whichever order it was clicked, the side walks top, pocket, bottom', () => {
+    for (const clicked of [
+      [top, bottom, pocket],
+      [bottom, top, pocket],
+      [pocket, bottom, top],
+      [top, pocket, bottom],
+    ])
+      expect(normalizeParts(clicked, pantsGeoms)).toEqual([top, pocket, bottom]);
+  });
+
+  it('several pieces in one gap keep the order they were clicked; with two gaps each takes the one it fits', () => {
+    const second: SidePart = { target: id('PCK_L_1', 0) };
+    expect(normalizeParts([top, bottom, second, pocket], pantsGeoms)).toEqual([
+      top,
+      second,
+      pocket,
+      bottom,
+    ]);
+    const low = range('FRONT_L', 4, 0, 100);
+    const mid = range('FRONT_L', 4, 400, 500);
+    const high = range('FRONT_L', 4, 1000, 1084);
+    const short: SidePart = { target: id('FLAP_R', 3) };
+    const long: SidePart = range('Back_L', 2, 0, 600);
+    expect(normalizeParts([low, mid, high, short, long], pantsGeoms)).toEqual([
+      low,
+      short,
+      mid,
+      long,
+      high,
+    ]);
+  });
+
+  it('a read row is a fixed point: rewritten byte for byte, the walk kept', () => {
+    const stored = gapRow();
+    const read = candidate(stored);
+    const rewritten = seamFromCandidate(read, pantsPieces, {
+      seamKey: stored.seamKey,
+      status: stored.status,
+      source: stored.source,
+      direction: stored.direction,
+      anchoredSize: stored.anchoredSize,
+      note: stored.note,
+    });
+    expect(JSON.stringify(rewritten)).toBe(JSON.stringify(stored));
+  });
+
+  it('partRange holds the hull, the walk the stretches; other edges of the side as before', () => {
+    const read = candidate(gapRow());
+    expect(read.partRange).toEqual({
+      [edge]: [0, expect.closeTo(1000, 0)],
+    });
+    expect(read.aParts).toEqual([edge, pocket.target]);
+    expect(read.walk?.a).toEqual(closeParts([top, pocket, bottom]));
+    expect(read.walk).not.toHaveProperty('b');
+    expect(read.bParts).toBeUndefined();
+  });
+
+  it('a side of two stretches of one edge alone: one id, one hull, both anchors', () => {
+    const stored = row('alone', [top, bottom], [other]);
+    expect(stored.sideA.map((anchor) => anchor.edgeHint)).toEqual([edge, edge]);
+    const read = candidate(stored);
+    expect(read.a).toBe(edge);
+    expect(read.aParts).toBeUndefined();
+    expect(candidateSideParts(read, 'a', pantsGeoms)).toEqual(closeParts([top, bottom]));
+    const again = rowFromHand(
+      candidateSideParts(read, 'a', pantsGeoms),
+      candidateSideParts(read, 'b', pantsGeoms),
+      pantsGeoms,
+      anchorCtx,
+      { direction: 'reversed', seamKey: 'again' },
+    );
+    expect(again?.sideA.map((anchor) => anchor.range)).toEqual(
+      stored.sideA.map((anchor) => anchor.range),
+    );
+  });
+
+  it('never sends overlapping spans: they merge, and a whole part takes them all', () => {
+    const merged = row(
+      'merged',
+      [range('FRONT_L', 4, 0, 300), range('FRONT_L', 4, 250, 400), pocket],
+      [other],
+    );
+    expect(merged.sideA.filter((anchor) => anchor.edgeHint === edge)).toHaveLength(1);
+    expect(merged.sideA[0].range[1]).toBeCloseTo(400 / length, 3);
+    expect(merged.sideA.map((anchor) => anchor.edgeHint)).toEqual([edge, pocket.target]);
+    const touching = normalizeParts(
+      [range('FRONT_L', 4, 0, 300), range('FRONT_L', 4, 300.2, 400)],
+      pantsGeoms,
+    );
+    expect(touching).toEqual([range('FRONT_L', 4, 0, 400)]);
+    expect(normalizeParts([{ target: edge }, top], pantsGeoms)).toEqual([{ target: edge }]);
+    expect(
+      normalizeParts([range('FRONT_L', 4, 0, 600), range('FRONT_L', 4, 500, length)], pantsGeoms),
+    ).toEqual([{ target: edge }]);
+    for (const part of [...merged.sideA, ...merged.sideB])
+      expect(part.range[1]).toBeGreaterThan(part.range[0]);
+  });
+
+  it('holds to the limit of anchors per side: eight build, nine do not', () => {
+    const spans = (count: number) =>
+      Array.from({ length: count }, (_, at) => range('FRONT_L', 4, at * 100, at * 100 + 50));
+    const eight = rowFromHand(spans(SEAMS.maxAnchorsPerSide), [other], pantsGeoms, anchorCtx, {
+      direction: 'reversed',
+    });
+    expect(eight?.sideA).toHaveLength(SEAMS.maxAnchorsPerSide);
+    expect(
+      rowFromHand(spans(SEAMS.maxAnchorsPerSide + 1), [other], pantsGeoms, anchorCtx, {
+        direction: 'reversed',
+      }),
+    ).toBeNull();
+  });
+
+  it('length, highlight and used stretches see the spans, never the gap', () => {
+    const stored = gapRow();
+    expect(lengthOf([top, bottom, pocket])).toBeCloseTo(800 + pocketLen, 3);
+    const highlighted = highlightPartsOfRows([stored]).filter((part) => part.target === edge);
+    expect(highlighted.map((part) => part.range)).toEqual([
+      [0, expect.closeTo(300, 0)],
+      [expect.closeTo(500, 0), expect.closeTo(1000, 0)],
+    ]);
+    const used = usedEdgesBeforeStep(
+      [{ seamKeys: [stored.seamKey] }, {}],
+      1,
+      new Map([[stored.seamKey, stored]]),
+      pantsGeoms,
+    );
+    expect(used.get(edge)).toEqual([
+      [0, expect.closeTo(300, 0)],
+      [expect.closeTo(500, 0), expect.closeTo(1000, 0)],
+    ]);
+    expect(fullyUsedEdges(used, pantsGeoms)).not.toContain(edge);
+    const lines = seamTileSideLines(
+      { a: [top, pocket, bottom], b: [other] },
+      pantsGeoms,
+      new Map(),
+    );
+    expect(lines[0]).toBe(`FRONT_L + PCK_L ${Math.round(800 + pocketLen)}`);
+  });
+
+  it('the step picture reads the walk, and a new span is a new picture', () => {
+    const picture = candidateOf({ a: [top, bottom, pocket], b: [other] }, pantsGeoms)!;
+    expect(picture.kind).toBe('composite');
+    expect(picture.aParts).toEqual([edge, pocket.target]);
+    expect(picture.partRange?.[edge]).toEqual([0, 1000]);
+    expect(picture.walk?.a).toEqual([top, bottom, pocket]);
+    const moved = candidateOf(
+      { a: [top, range('FRONT_L', 4, 600, 1000), pocket], b: [other] },
+      pantsGeoms,
+    )!;
+    expect(seamSig([picture])).not.toBe(seamSig([moved]));
+  });
+
+  it('the document takes the same spans: the metric adds them up, the gap left out', () => {
+    const stored = gapRow();
+    const model = deriveAssembly(
+      assemblyInputFor(stored, 180, ['FRONT_L', 'PCK_L', 'Back_L']),
+      undefined,
+      { globalAssembly: false },
+    );
+    const metric = model.cards.get(180)!.metrics[0];
+    expect(metric.left).toBeCloseTo(800 + pocketLen, 0);
+    expect(metric.right).toBeCloseTo(1003, 0);
+
+    const seam = seamOfCandidate(candidate(stored), 180, 0, pantsGeoms)!;
+    expect(seam.kind).toBe('composite');
+    expect(seam.a.map((part) => part.piece)).toEqual([
+      piece('FRONT_L').key,
+      piece('PCK_L').key,
+      piece('FRONT_L').key,
+    ]);
+    expect(seam.a.map((part) => part.range)).toEqual([
+      [0, expect.closeTo(300, 0)],
+      undefined,
+      [expect.closeTo(500, 0), expect.closeTo(1000, 0)],
+    ]);
+    expect(seam.pieces).toEqual(
+      expect.arrayContaining([piece('FRONT_L').key, piece('PCK_L').key, piece('Back_L').key]),
+    );
+  });
+
+  it('a stale gap row re-confirmed keeps both stretches and their order', () => {
+    const stored = gapRow();
+    const again = reconfirmRow(
+      { row: stored } as unknown as Parameters<typeof reconfirmRow>[0],
+      anchorCtx,
+    );
+    expect(again?.sideA.map((anchor) => anchor.edgeHint)).toEqual([edge, pocket.target, edge]);
+    expect(again?.sideA.map((anchor) => anchor.range)).toEqual(
+      stored.sideA.map((anchor) => anchor.range),
+    );
+  });
+
+  it('read on a mirrored frame the order stays physical and the stretches flip', () => {
+    const stored = gapRow();
+    const hitOn = (anchor: EdgeAnchor): AnchorHit | undefined =>
+      anchor.edgeHint === edge
+        ? {
+            anchor,
+            run: edge,
+            edges: [edge],
+            edgeLens: [length],
+            lenMm: length,
+            how: 'shape',
+            frame: 'mirrorU',
+            fit: 0,
+          }
+        : undefined;
+    const read = resolveSeamDecisions([stored], pantsPieces, { preHit: hitOn }).applied[0];
+    const walk = read?.candidate?.walk?.a;
+    if (!walk) throw new Error('the mirrored gap row did not read');
+    expect(walk.map((part) => part.target)).toEqual([edge, pocket.target, edge]);
+    expect(walk[0].range?.[0]).toBeCloseTo(length - 300, 0);
+    expect(walk[0].range?.[1]).toBeCloseTo(length, 0);
+    expect(walk[2].range?.[0]).toBeCloseTo(length - 1000, 0);
+    expect(walk[2].range?.[1]).toBeCloseTo(length - 500, 0);
+    expect(read.candidate?.partRange?.[edge]?.[0]).toBeCloseTo(length - 1000, 0);
+    expect(read.candidate?.partRange?.[edge]?.[1]).toBeCloseTo(length, 0);
+  });
+
+  it('rows of today carry no walk at all', () => {
+    for (const stored of [
+      row('w-whole', [{ target: id('PCK_L', 0) }], [{ target: id('FRONT_L', 4) }]),
+      row('w-partial', [PCK], [FRONT]),
+      row(
+        'w-composite',
+        [range('PCK_L_1', 0, 72, 224)],
+        [range('Back_L', 1, 0, 80), range('Back_Top_L_R', 1, 0, 72)],
+      ),
+    ])
+      expect(candidate(stored)).not.toHaveProperty('walk');
   });
 });
 

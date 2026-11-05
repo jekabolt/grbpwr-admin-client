@@ -95,6 +95,9 @@ export type SkeletonFacts = {
 
 export type EdgeId = string; // `${pieceKey}#${k}`
 
+/** One sewn stretch of a seam side: mm along the edge from its start; no range = the whole edge. */
+export type SeamStretch = { target: EdgeId; range?: readonly [Mm, Mm] };
+
 export type Edge = {
   id: EdgeId;
   pieceKey: string;
@@ -266,6 +269,13 @@ export type SeamCandidate = {
    * id. Edges not named are sewn whole. Absent on the engine's own readings.
    */
   partRange?: Record<EdgeId, [Mm, Mm]>;
+  /**
+   * A side where one edge is sewn in several stretches with a gap between them (a long edge broken
+   * by a pocket): every stretch, in the side's sewing order. `aParts` / `bParts` still name each edge
+   * once and `partRange` holds the hull, so only a reader that lays or measures the side reads this.
+   * Absent on every other side.
+   */
+  walk?: { a?: readonly SeamStretch[]; b?: readonly SeamStretch[] };
   /**
    * Operation-driven assignment (assignment/): the operation of the technologist's order this seam
    * was assigned in (`op:<index>`; `op:whole` when the card has no order, `op:residual` for pieces

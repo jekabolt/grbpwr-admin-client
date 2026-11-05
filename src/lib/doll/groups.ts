@@ -34,6 +34,34 @@ export type GroupedSeam = {
   b: EdgeId[];
 };
 
+/**
+ * A side's sewn stretches when one edge is sewn with a gap (`SeamCandidate.walk`): lead-ply edge ids
+ * in the side's sewing order. Null on every other side. An edge whose stretches run up its length is
+ * walked forward, one whose stretches run down it (a mirrored frame) backward; other edges are free.
+ */
+export function gapStretchesOf(
+  g: GroupedSeam,
+  side: 'a' | 'b',
+): { id: EdgeId; range?: [number, number]; reversed?: boolean }[] | null {
+  const walk = g.seam.walk?.[side];
+  if (!walk) return null;
+  const orig = (
+    side === 'a' ? g.seam.aParts ?? edgeIdsOf(g.seam.a) : g.seam.bParts ?? edgeIdsOf(g.seam.b)
+  ).flatMap((id) => edgeIdsOf(id));
+  const ids = side === 'a' ? g.a : g.b;
+  return walk.map(({ target, range }, index) => {
+    const at = orig.indexOf(target);
+    const twin = walk.findIndex((other, j) => j !== index && other.target === target);
+    const twinRange = walk[twin]?.range;
+    const down = twinRange && range ? twin > index === twinRange[0] < range[0] : undefined;
+    return {
+      id: at >= 0 ? ids[at] ?? target : target,
+      ...(range ? { range: [range[0], range[1]] as [number, number] } : {}),
+      ...(down === undefined ? {} : { reversed: down }),
+    };
+  });
+}
+
 export type Grouping = {
   pieces: GroupedPiece[];
   /** Seams between drawn pieces (layer seams and duplicates removed). */
