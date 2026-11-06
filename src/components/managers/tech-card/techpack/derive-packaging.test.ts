@@ -16,7 +16,8 @@ describe('derivePackaging', () => {
         packaging: {
           foldingMethod: 'folded in three',
           packedSize: '30 × 20 × 5 cm',
-          packedMediaId: 9,
+          packedMediaId: 10,
+          packedMediaIds: [9, 10],
           weightNetGrams: 300,
           weightGrossGrams: 360,
           unitsPerBox: 12,
@@ -80,6 +81,17 @@ describe('derivePackaging', () => {
       note: 'tape twice',
     });
     expect(model.missing).toBeUndefined();
+  });
+
+  it('falls back to the legacy packed cover', () => {
+    const card = {
+      techCard: { packaging: { packedMediaId: 9, packedMediaIds: [] } },
+      resolvedLabelMedia: [{ media: media(9, 'https://assets.example/legacy-packed.png') }],
+    } as unknown as common_TechCard;
+
+    expect(derivePackaging(card).packed.photo?.url).toBe(
+      'https://assets.example/legacy-packed.png',
+    );
   });
 
   it('registers the 05b gap when no packaging is chosen', () => {

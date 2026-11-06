@@ -240,6 +240,7 @@ export const careLabelSchema = z
     backCaptionLines: lines,
     addressLines: lines,
     colorways: z.array(careLabelColorwaySchema).default([]),
+    orientation: z.enum(['vertical', 'horizontal']).optional().default('vertical'),
   })
   .superRefine((c, ctx) => {
     if (!(CARE_LABEL_QR_PRESETS as readonly string[]).includes(c.qrPreset))
@@ -301,6 +302,7 @@ export const emptyCareLabel: z.output<typeof careLabelSchema> = {
   backCaptionLines: [],
   addressLines: [],
   colorways: [],
+  orientation: 'vertical',
 };
 
 /** A fresh empty record — never share the constant's arrays with a live form. */
@@ -324,6 +326,7 @@ export function careLabelToForm(c?: common_TechCardCareLabel): FormCareLabel {
     qrTemplate: c.qrTemplate || '',
     backCaptionLines: [...(c.backCaptionLines ?? [])],
     addressLines: [...(c.addressLines ?? [])],
+    orientation: c.orientation === 'horizontal' ? 'horizontal' : 'vertical',
     colorways: (c.colorways ?? []).map((cw) => ({
       colorwayId: wireInt(cw.colorwayId),
       colourName: cw.colourName || '',
@@ -416,6 +419,7 @@ export function careLabelOut(c?: FormCareLabel): common_TechCardCareLabel {
     backCaptionLines: [...(src.backCaptionLines ?? [])],
     addressLines: [...(src.addressLines ?? [])],
     colorways,
+    orientation: src.orientation === 'horizontal' ? 'horizontal' : 'vertical',
   };
 }
 

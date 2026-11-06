@@ -380,8 +380,12 @@ export function CompositionLabelBlock({
   const [sizeId, setSizeId] = useState<number | null>(null);
   const colorway = colorways.find((entry) => entry.id === colorwayId) ?? colorways[0];
   const size = sizes.find((entry) => entry.id === sizeId) ?? sizes[0];
-  // TODO(orientation): read and write TechCardCareLabel.orientation when lane C regenerates it.
-  const [orientation, setOrientation] = useState<LabelOrientation>('vertical');
+  const orientation: LabelOrientation =
+    useWatch({ control, name: 'careLabel.orientation' }) === 'horizontal'
+      ? 'horizontal'
+      : 'vertical';
+  const setOrientation = (next: LabelOrientation) =>
+    setCareLabel(getValues, setValue, { orientation: next });
   const countryNodes = useRef(new Map<number, HTMLSpanElement>());
   const firstField = useRef<HTMLDivElement>(null);
 

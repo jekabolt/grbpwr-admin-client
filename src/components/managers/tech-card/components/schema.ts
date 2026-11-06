@@ -2158,6 +2158,7 @@ const packagingSchema = z.object({
   foldingMethod: z.string().optional().default(''),
   packedSize: z.string().optional().default(''),
   packedMediaId: z.number().optional().default(0),
+  packedMediaIds: z.array(z.number()).optional().default([]),
   polybag: z.string().optional().default(''),
   bagSticker: z.string().optional().default(''),
   inserts: z.string().optional().default(''),
@@ -2197,6 +2198,7 @@ export const emptyPackaging: z.input<typeof packagingSchema> = {
   foldingMethod: '',
   packedSize: '',
   packedMediaId: 0,
+  packedMediaIds: [],
   polybag: '',
   bagSticker: '',
   inserts: '',
@@ -3067,20 +3069,32 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       bomItemId: wireInt(l.bomItemId),
     })),
     packaging: insert?.packaging
-      ? {
-          foldingMethod: insert.packaging.foldingMethod || '',
-          packedSize: insert.packaging.packedSize || '',
-          packedMediaId: wireInt(insert.packaging.packedMediaId),
-          polybag: insert.packaging.polybag || '',
-          bagSticker: insert.packaging.bagSticker || '',
-          inserts: insert.packaging.inserts || '',
-          unitsPerBox: insert.packaging.unitsPerBox || 0,
-          boxMarking: insert.packaging.boxMarking || '',
-          boxDimensions: insert.packaging.boxDimensions || '',
-          weightNetGrams: insert.packaging.weightNetGrams || 0,
-          weightGrossGrams: insert.packaging.weightGrossGrams || 0,
-          notes: insert.packaging.notes || '',
-        }
+      ? (() => {
+          const listedIds = (insert.packaging.packedMediaIds ?? [])
+            .map(wireInt)
+            .filter((id) => id > 0);
+          const legacyCover = wireInt(insert.packaging.packedMediaId);
+          const packedMediaIds = insert.packaging.packedMediaIds?.length
+            ? listedIds
+            : legacyCover
+              ? [legacyCover]
+              : [];
+          return {
+            foldingMethod: insert.packaging.foldingMethod || '',
+            packedSize: insert.packaging.packedSize || '',
+            packedMediaId: packedMediaIds[0] ?? 0,
+            packedMediaIds,
+            polybag: insert.packaging.polybag || '',
+            bagSticker: insert.packaging.bagSticker || '',
+            inserts: insert.packaging.inserts || '',
+            unitsPerBox: insert.packaging.unitsPerBox || 0,
+            boxMarking: insert.packaging.boxMarking || '',
+            boxDimensions: insert.packaging.boxDimensions || '',
+            weightNetGrams: insert.packaging.weightNetGrams || 0,
+            weightGrossGrams: insert.packaging.weightGrossGrams || 0,
+            notes: insert.packaging.notes || '',
+          };
+        })()
       : { ...emptyPackaging },
     careLabel: careLabelToForm(insert?.careLabel),
     garmentLabels: garmentLabelsToForm(insert?.garmentLabels),
@@ -3237,11 +3251,12 @@ function mapConstructionOut(
 }
 
 function mapPackagingOut(p?: TechCardFormData['packaging']): common_TechCardPackaging | undefined {
+  const packedMediaIds = (p?.packedMediaIds ?? []).map(wireInt).filter((id) => id > 0);
   if (
     !hasContent([
       p?.foldingMethod,
       p?.packedSize,
-      p?.packedMediaId,
+      packedMediaIds.length,
       p?.polybag,
       p?.bagSticker,
       p?.inserts,
@@ -3258,7 +3273,8 @@ function mapPackagingOut(p?: TechCardFormData['packaging']): common_TechCardPack
   return {
     foldingMethod: p?.foldingMethod?.trim() || '',
     packedSize: p?.packedSize?.trim() || '',
-    packedMediaId: p?.packedMediaId || 0,
+    packedMediaId: packedMediaIds[0] ?? 0,
+    packedMediaIds,
     polybag: p?.polybag?.trim() || '',
     bagSticker: p?.bagSticker?.trim() || '',
     inserts: p?.inserts?.trim() || '',

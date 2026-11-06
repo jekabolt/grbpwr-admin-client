@@ -14,7 +14,12 @@ import { useMaterialStock } from 'components/managers/materials/components/useWa
 import { labelMediaOf } from 'components/managers/tech-card/care-labels/label-media';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useState, type ChangeEvent, type JSX, type ReactNode } from 'react';
-import { useFormContext, useWatch } from 'react-hook-form';
+import {
+  useFormContext,
+  useWatch,
+  type UseFormGetValues,
+  type UseFormSetValue,
+} from 'react-hook-form';
 import {
   AddDoor,
   Button,
@@ -75,6 +80,11 @@ type RemovedItem = {
   bomItems: NonNullable<TechCardFormData['bomItems']>;
 };
 
+type RemovedPhoto = {
+  id: number;
+  index: number;
+};
+
 const ON_HANGER = 'on a hanger';
 const FOLDED = 'folded';
 const FOLDS = [
@@ -116,6 +126,26 @@ const mediaFromUrl = (url?: string): common_MediaFull | undefined =>
         media: { thumbnail: { mediaUrl: url } },
       } as common_MediaFull)
     : undefined;
+
+const packedPhotoIds = (ids?: readonly number[]): number[] =>
+  (ids ?? []).map(wireInt).filter((id) => id > 0);
+
+function writePackedPhotoIds(
+  getValues: UseFormGetValues<TechCardFormData>,
+  setValue: UseFormSetValue<TechCardFormData>,
+  ids: readonly number[],
+) {
+  const packedMediaIds = packedPhotoIds(ids);
+  setValue(
+    'packaging',
+    {
+      ...getValues('packaging'),
+      packedMediaId: packedMediaIds[0] ?? 0,
+      packedMediaIds,
+    },
+    { shouldDirty: true },
+  );
+}
 
 const dimensionParts = (value?: string): [string, string] => {
   const parts = value?.match(/\d+(?:[.,]\d+)?/g) ?? [];
@@ -314,82 +344,105 @@ function PackedPhotos({
 }: {
   resolvedMedia?: readonly common_TechCardMediaFull[];
   disabled: boolean;
-  onRemove: (id: number) => void;
+  onRemove: (id: number, index: number) => void;
 }) {
-  const { setValue } = useFormContext<TechCardFormData>();
-  const packedMediaId = wireInt(useWatch<TechCardFormData>({ name: 'packaging.packedMediaId' }));
+  const { getValues, setValue } = useFormContext<TechCardFormData>();
+  const packedMediaIds = packedPhotoIds(
+    useWatch<TechCardFormData>({ name: 'packaging.packedMediaIds' }) as number[] | undefined,
+  );
   const library = useMediaMap();
-  const media = labelMediaOf(packedMediaId, resolvedMedia, library);
-  const url = mediaUrl(media);
-  const save = (selected: common_MediaFull[]) => {
+  const currentIds = () => packedPhotoIds(getValues('packaging.packedMediaIds'));
+  const append = (selected: common_MediaFull[]) => {
+    const next = currentIds();
+    for (const media of selected) {
+      const id = wireInt(media.id);
+      if (id > 0 && !next.includes(id)) next.push(id);
+    }
+    writePackedPhotoIds(getValues, setValue, next);
+  };
+  const replace = (index: number) => (selected: common_MediaFull[]) => {
     const id = wireInt(selected[0]?.id);
-    if (id) setValue('packaging.packedMediaId', id, { shouldDirty: true });
+    if (!(id > 0)) return;
+    const next = currentIds();
+    if (index >= next.length) return;
+    next[index] = id;
+    writePackedPhotoIds(getValues, setValue, next);
   };
   const intake = useMediaIntake({
     enabled: !disabled,
     accept: 'image',
-    limit: 1,
-    purpose: 'packed photo',
-    onMedia: save,
+    purpose: 'packed photos',
+    onMedia: append,
   });
 
-  // TODO(packed-media-ids): replace this single slot with the generated repeated field.
   return (
     <div {...intake.regionHandlers} className='flex min-w-0 flex-wrap items-start gap-2.5'>
-      {url ? (
-        <div className='flex h-42.5 w-28 flex-col border border-borderColor max-sm:h-37 max-sm:w-24'>
-          {disabled ? (
-            <div className='h-35 min-h-0 w-full flex-1 bg-pageBg'>
-              <Media src={url} alt='packed photo' aspectRatio='auto' fit='cover' />
-            </div>
-          ) : (
-            <MediaSelector
-              label='replace photo'
-              purpose='packed photo'
-              aspectRatio={['Custom']}
-              allowMultiple={false}
-              showVideos={false}
-              saveSelectedMedia={save}
-              trigger={
-                <Button
-                  type='button'
-                  variant='default'
-                  className='h-35 min-h-0 w-full flex-1 overflow-hidden p-0'
-                  aria-label='replace photo'
-                >
-                  <Media src={url} alt='packed photo' aspectRatio='auto' fit='cover' />
-                </Button>
-              }
-            />
-          )}
-          <div className='flex h-7 shrink-0 items-center border-t border-borderColor pl-2'>
-            <Text size='micro' variant='label' tracking='label' className='flex-1 uppercase'>
-              cover
-            </Text>
-            {!disabled ? (
-              <Close
-                size='sm'
-                className='size-7 border-l border-borderColor'
-                aria-label='remove photo'
-                onClick={() => onRemove(packedMediaId)}
+      {packedMediaIds.map((id, index) => {
+        const url = mediaUrl(labelMediaOf(id, resolvedMedia, library));
+        const picture = url ? (
+          <Media src={url} alt={`packed photo ${index + 1}`} aspectRatio='auto' fit='cover' />
+        ) : (
+          <Placeholder label='photo' className='h-full w-full border-0' />
+        );
+        return (
+          <div
+            key={`${id}-${index}`}
+            className='flex w-28 flex-col border border-borderColor max-sm:w-24'
+          >
+            {disabled ? (
+              <div className='h-35 w-full bg-pageBg max-sm:h-30'>{picture}</div>
+            ) : (
+              <MediaSelector
+                label='replace photo'
+                purpose='packed photo'
+                aspectRatio={['Custom']}
+                allowMultiple={false}
+                showVideos={false}
+                saveSelectedMedia={replace(index)}
+                trigger={
+                  <Button
+                    type='button'
+                    variant='default'
+                    className='h-35 w-full overflow-hidden p-0 max-sm:h-30'
+                    aria-label={`replace photo ${index + 1}`}
+                  >
+                    {picture}
+                  </Button>
+                }
               />
-            ) : null}
+            )}
+            <div className='flex h-7 shrink-0 items-center border-t border-borderColor pl-2'>
+              <Text size='micro' variant='label' tracking='label' className='flex-1 uppercase'>
+                {index === 0 ? 'cover' : index + 1}
+              </Text>
+              {!disabled ? (
+                <Close
+                  size='sm'
+                  className='size-7 border-l border-borderColor'
+                  aria-label={`remove photo ${index + 1}`}
+                  onClick={() => onRemove(id, index)}
+                />
+              ) : null}
+            </div>
           </div>
-        </div>
-      ) : null}
+        );
+      })}
       {!disabled ? (
         <MediaSelector
           label='add photo'
           purpose='packed photo'
           aspectRatio={['Custom']}
-          allowMultiple={false}
+          allowMultiple
           showVideos={false}
-          saveSelectedMedia={save}
+          saveSelectedMedia={append}
           trigger={
             <Button
               type='button'
               variant='default'
-              className={cn(addDoorClass({ shape: 'tile' }), 'h-42.5 w-28 max-sm:h-37 max-sm:w-24')}
+              className={cn(
+                addDoorClass({ shape: 'tile' }),
+                'h-42.5 w-28 max-sm:h-37.5 max-sm:w-24',
+              )}
             >
               + {intake.dragging ? 'drop photo' : 'photo'}
             </Button>
@@ -568,7 +621,7 @@ export function PackagingShelf({
   const stockQuery = useMaterialStock({ section: 'TECH_CARD_BOM_SECTION_PACKAGING' });
   const [picker, setPicker] = useState<PickerMode | null>(null);
   const [removedItem, setRemovedItem] = useState<RemovedItem | null>(null);
-  const [removedPhoto, setRemovedPhoto] = useState(0);
+  const [removedPhoto, setRemovedPhoto] = useState<RemovedPhoto | null>(null);
   const [foldedMethod, setFoldedMethod] = useState(
     folding && folding !== ON_HANGER ? folding : FOLDED,
   );
@@ -778,9 +831,15 @@ export function PackagingShelf({
           <PackedPhotos
             resolvedMedia={resolvedMedia}
             disabled={!canEdit}
-            onRemove={(id) => {
-              setRemovedPhoto(id);
-              setValue('packaging.packedMediaId', 0, { shouldDirty: true });
+            onRemove={(id, index) => {
+              const current = packedPhotoIds(getValues('packaging.packedMediaIds'));
+              if (current[index] !== id) return;
+              setRemovedPhoto({ id, index });
+              writePackedPhotoIds(
+                getValues,
+                setValue,
+                current.filter((_, photoIndex) => photoIndex !== index),
+              );
             }}
           />
         </ShelfRow>
@@ -788,10 +847,16 @@ export function PackagingShelf({
           <UndoRow
             name='photo'
             onUndo={() => {
-              setValue('packaging.packedMediaId', removedPhoto, { shouldDirty: true });
-              setRemovedPhoto(0);
+              const current = packedPhotoIds(getValues('packaging.packedMediaIds'));
+              const index = Math.min(removedPhoto.index, current.length);
+              writePackedPhotoIds(getValues, setValue, [
+                ...current.slice(0, index),
+                removedPhoto.id,
+                ...current.slice(index),
+              ]);
+              setRemovedPhoto(null);
             }}
-            onCommit={() => setRemovedPhoto(0)}
+            onCommit={() => setRemovedPhoto(null)}
           />
         ) : null}
       </div>
