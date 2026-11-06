@@ -9467,6 +9467,39 @@ export function solveDoll(input: DollInput): DollReport {
       if (!ownerSurface.has(part)) hosts.set(part, { host: l.host, join: `owner row ${l.row}` });
     /** Footprints already laid on each host (host frame), for the layer a new one lies in. */
     const footprints = new Map<string, Pt2[][]>();
+    // A partial row must end on vertices of the laid part just as it does on a solved panel.
+    // Otherwise the later surface-to-shell pin rounds each end to the coarse boundary mesh and
+    // leaves a visible gap even though the stored stretches coincide in the pattern.
+    const surfaceRangeKeep = new Map<string, number[]>();
+    const keepSurfaceRangeEnd = (part: { id: EdgeId; piece: string }, mm: number) => {
+      const S = geomOfKey.get(part.piece);
+      const edge = S?.edges.find((candidate) => candidate.id === part.id);
+      if (!S || !edge) return;
+      const ring = S.rs;
+      const n = ring.length;
+      let q = ((edge.s % n) + n) % n;
+      const end = ((edge.e % n) + n) % n;
+      const target = Math.max(0, Math.min(edge.lenMm, mm));
+      let walked = 0;
+      let best = q;
+      let bestError = target;
+      for (let guard = 0; q !== end && guard <= n; guard++) {
+        const next = (q + 1) % n;
+        walked += Math.hypot(ring[next][0] - ring[q][0], ring[next][1] - ring[q][1]);
+        q = next;
+        const error = Math.abs(walked - target);
+        if (error < bestError) [best, bestError] = [q, error];
+      }
+      surfaceRangeKeep.set(part.piece, [...(surfaceRangeKeep.get(part.piece) ?? []), best]);
+    };
+    if (legsCat0)
+      for (const row of laidRows)
+        for (const side of ['a', 'b'] as const)
+          for (const part of rowParts(row, side))
+            if (part.range) {
+              keepSurfaceRangeEnd(part, part.range[0]);
+              keepSurfaceRangeEnd(part, part.range[1]);
+            }
     let M = N;
     for (const k of surf) {
       const S = geomOfKey.get(k);
@@ -9662,7 +9695,7 @@ export function solveDoll(input: DollInput): DollReport {
       }
       const mesh = meshPiece(
         S.rs,
-        [...S.edges.flatMap((e) => [e.s, e.e]), ...S.corners],
+        [...S.edges.flatMap((e) => [e.s, e.e]), ...S.corners, ...(surfaceRangeKeep.get(k) ?? [])],
         gridH,
         meshCreases,
       );
@@ -9827,27 +9860,80 @@ export function solveDoll(input: DollInput): DollReport {
       if (L) {
         const e = geomOfKey.get(p.piece)?.edges.find((x) => x.id === p.id);
         if (!e || e.pts.length < 2) return null;
-        const q = resample(arcCrop(e.pts, p.range), 24);
-        const v: number[] = [];
-        for (const x of q) {
-          let bi = L.mesh.bVert[0];
-          let bd = Infinity;
-          for (const b of L.mesh.bVert) {
-            const d = Math.hypot(L.mesh.pts[b][0] - x[0], L.mesh.pts[b][1] - x[1]);
-            if (d < bd) [bi, bd] = [b, d];
+        if (!legsCat0) {
+          const q = resample(arcCrop(e.pts, p.range), 24);
+          const v: number[] = [];
+          for (const x of q) {
+            let bi = L.mesh.bVert[0];
+            let bd = Infinity;
+            for (const b of L.mesh.bVert) {
+              const d = Math.hypot(L.mesh.pts[b][0] - x[0], L.mesh.pts[b][1] - x[1]);
+              if (d < bd) [bi, bd] = [b, d];
+            }
+            v.push(L.offset + bi);
           }
-          v.push(L.offset + bi);
+          let len = 0;
+          for (let i = 1; i < q.length; i++)
+            len += Math.hypot(q[i][0] - q[i - 1][0], q[i][1] - q[i - 1][1]);
+          return {
+            pts: v.map((vertex) => {
+              const index = 3 * (vertex - N);
+              return [surfacePos[index], surfacePos[index + 1], surfacePos[index + 2]] as Vec3;
+            }),
+            v,
+            s: q.map((_, index) => (index / (q.length - 1)) * len),
+            len,
+          };
         }
-        let len = 0;
-        for (let i = 1; i < q.length; i++)
-          len += Math.hypot(q[i][0] - q[i - 1][0], q[i][1] - q[i - 1][1]);
+        const S = geomOfKey.get(p.piece)!;
+        const n = S.rs.length;
+        const ps = L.mesh.bRs.indexOf(((e.s % n) + n) % n);
+        const pe = L.mesh.bRs.indexOf(((e.e % n) + n) % n);
+        if (ps < 0 || pe < 0) return null;
+        const wholeV: number[] = [];
+        const wholeS: number[] = [];
+        let q = ps;
+        for (let guard = 0; guard <= L.mesh.bVert.length; guard++) {
+          const local = L.mesh.bVert[q];
+          const previous = wholeV.length ? wholeV[wholeV.length - 1] - L.offset : -1;
+          const step =
+            previous >= 0
+              ? Math.hypot(
+                  L.mesh.pts[local][0] - L.mesh.pts[previous][0],
+                  L.mesh.pts[local][1] - L.mesh.pts[previous][1],
+                )
+              : 0;
+          wholeV.push(L.offset + local);
+          wholeS.push((wholeS.length ? wholeS[wholeS.length - 1] : 0) + step);
+          if (q === pe) break;
+          q = (q + 1) % L.mesh.bVert.length;
+        }
+        if (wholeV.length < 2) return null;
+        let keep = wholeV.map((_, index) => index);
+        if (p.range) {
+          keep = keep.filter(
+            (index) => wholeS[index] >= p.range![0] - 1 && wholeS[index] <= p.range![1] + 1,
+          );
+          if (keep.length < 2) {
+            let nearest = 0;
+            const middle = (p.range[0] + p.range[1]) / 2;
+            for (let index = 1; index < wholeS.length; index++)
+              if (Math.abs(wholeS[index] - middle) < Math.abs(wholeS[nearest] - middle))
+                nearest = index;
+            keep = [Math.max(0, nearest - 1), Math.min(wholeV.length - 1, nearest + 1)];
+          }
+        }
+        const v = keep.map((index) => wholeV[index]);
+        const s0 = wholeS[keep[0]];
+        const s = keep.map((index) => wholeS[index] - s0);
+        const len = s[s.length - 1];
         return {
           pts: v.map((vertex) => {
             const index = 3 * (vertex - N);
             return [surfacePos[index], surfacePos[index + 1], surfacePos[index + 2]] as Vec3;
           }),
           v,
-          s: q.map((_, index) => (index / (q.length - 1)) * len),
+          s,
           len,
         };
       }
@@ -9958,12 +10044,44 @@ export function solveDoll(input: DollInput): DollReport {
       parts: Array<{ piece: string }>,
       reverse: boolean,
     ): OrderedPart[] => {
-      const entries = runs.map((run, index) => ({ run, piece: parts[index].piece }));
-      if (reverse) entries.reverse();
+      const raw = runs.map((run, index) => ({ run, piece: parts[index].piece }));
+      if (!legsCat0) {
+        if (reverse) raw.reverse();
+        const total = runs.reduce((sum, run) => sum + run.len, 0) || 1;
+        let cursor = 0;
+        return raw.map(({ run: run0, piece }) => {
+          const run = reverse ? reverseRun(run0) : run0;
+          const from = cursor / total;
+          cursor += run.len;
+          return { run, piece, from, to: cursor / total };
+        });
+      }
+      // A composite row stores its pieces in walk order, but each edge keeps its own contour
+      // direction. Orient the parts so their solved ends meet before treating the side as one walk;
+      // reversing every edge together leaves one backward edge and pins their shared surface
+      // vertex halfway across the resulting gap.
+      let bestMask = 0;
+      let bestGap = Infinity;
+      for (let mask = 0; mask < 1 << raw.length; mask++) {
+        let gap = 0;
+        for (let index = 1; index < raw.length; index++) {
+          const before = raw[index - 1].run;
+          const after = raw[index].run;
+          const a = mask & (1 << (index - 1)) ? before.pts[0] : before.pts[before.pts.length - 1];
+          const b = mask & (1 << index) ? after.pts[after.pts.length - 1] : after.pts[0];
+          gap += Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+        }
+        if (gap < bestGap) [bestMask, bestGap] = [mask, gap];
+      }
+      let entries = raw.map(({ run, piece }, index) => ({
+        run: bestMask & (1 << index) ? reverseRun(run) : run,
+        piece,
+      }));
+      if (reverse)
+        entries = entries.reverse().map(({ run, piece }) => ({ run: reverseRun(run), piece }));
       const total = runs.reduce((sum, run) => sum + run.len, 0) || 1;
       let cursor = 0;
-      return entries.map(({ run: run0, piece }) => {
-        const run = reverse ? reverseRun(run0) : run0;
+      return entries.map(({ run, piece }) => {
         const from = cursor / total;
         cursor += run.len;
         return { run, piece, from, to: cursor / total };
@@ -10022,23 +10140,52 @@ export function solveDoll(input: DollInput): DollReport {
       const mean = gaps.reduce((sum, gap) => sum + gap, 0) / Math.max(1, gaps.length);
       return p95 + 0.01 * mean;
     };
-    const paired = options.reduce((best, option) => (score(option) < score(best) ? option : best));
+    const foldedPiece = (parts: Array<{ piece: string }>) => {
+      const pieces = new Set(parts.map((part) => part.piece));
+      if (pieces.size !== 1) return false;
+      return !!rowLays.get([...pieces][0])?.fold;
+    };
+    const foldedSide = legsCat0 && (foldedPiece(rowParts(c, 'a')) || foldedPiece(rowParts(c, 'b')));
+    // Both edges of a folded surface part can be sewn onto the same opposite edge. They overlap;
+    // they are alternatives against the full run, not consecutive halves of a 2×-long walk.
+    const paired = foldedSide
+      ? runsA.flatMap((a, ai) =>
+          runsB.map((b, bi) => ({
+            a,
+            b,
+            aSurface: layAt.has(rowParts(c, 'a')[ai].piece),
+            bSurface: layAt.has(rowParts(c, 'b')[bi].piece),
+            throughShell:
+              panelByKey.has(rowParts(c, 'a')[ai].piece) ||
+              panelByKey.has(rowParts(c, 'b')[bi].piece),
+          })),
+        )
+      : options.reduce((best, option) => (score(option) < score(best) ? option : best));
 
-    // One laid pocket edge sewn to an ordered composite is not one flat run. Pin its shell stretch
-    // to the stored row part by part; a continuation onto another laid piece stays measured below.
-    // The rest-length mismatch remains in lenA/lenB and the report; only the geometry is given the
-    // same constraint the stitch gives the cloth.
+    // A laid pocket edge is the same sewn boundary as the shell edge that carries it. Pin it to the
+    // shell part by part, including a one-to-one row: leaving a pocket bag at its inside-layer
+    // offset hides the closed mouth behind the panel. A continuation onto another laid piece stays
+    // measured below. The rest-length mismatch remains in lenA/lenB and the report; only the
+    // geometry is given the same constraint the stitch gives the cloth.
     const sidePartsA = rowParts(c, 'a').map(drawnPart);
     const sidePartsB = rowParts(c, 'b').map(drawnPart);
     const oneLaidSide = (parts: typeof sidePartsA) =>
       new Set(parts.map((part) => part.piece)).size === 1 &&
       parts.every((part) => layAt.has(part.piece));
+    const hasShell = (parts: typeof sidePartsA) => parts.some((part) => panelByKey.has(part.piece));
     const compositePin =
       oneLaidSide(sidePartsA) && sidePartsB.length > 1
         ? ('a' as const)
         : oneLaidSide(sidePartsB) && sidePartsA.length > 1
           ? ('b' as const)
           : null;
+    const shellPin = legsCat0
+      ? oneLaidSide(sidePartsA) && hasShell(sidePartsB)
+        ? ('a' as const)
+        : oneLaidSide(sidePartsB) && hasShell(sidePartsA)
+          ? ('b' as const)
+          : null
+      : compositePin;
     // Two bags laid from different shell rows meet round their remaining equal edge. Move the bag
     // placed by the composite row (or the deeper nested piece) to that edge after both hosts have
     // been drawn. A folded card row is deliberately left measured, not forced.
@@ -10050,7 +10197,7 @@ export function solveDoll(input: DollInput): DollReport {
     const depthOf = (piece: string) => rowLays.get(piece)?.depth ?? 0;
     const surfacePin = (() => {
       if (
-        compositePin ||
+        shellPin ||
         !pieceA ||
         !pieceB ||
         !layAt.has(pieceA) ||
@@ -10066,7 +10213,7 @@ export function solveDoll(input: DollInput): DollReport {
         return depthOf(pieceA) > depthOf(pieceB) ? ('a' as const) : ('b' as const);
       return null;
     })();
-    const pin = compositePin ?? surfacePin;
+    const pin = shellPin ?? surfacePin;
     if (pin) {
       const atRun = (run: Run, want: number): Vec3 => {
         let index = 1;
@@ -10081,7 +10228,7 @@ export function solveDoll(input: DollInput): DollReport {
         // A surface-to-surface continuation is still measured and reported below, but it is not
         // a drawable shell seam and may be discontinuous in the host frames. Do not invent a
         // connector by pulling either laid piece through that gap.
-        if (compositePin && !pair.throughShell) continue;
+        if (shellPin && !pair.throughShell) continue;
         const moving = pin === 'a' ? pair.a : pair.b;
         const target = pin === 'a' ? pair.b : pair.a;
         if (!(pin === 'a' ? pair.aSurface : pair.bSurface)) continue;
