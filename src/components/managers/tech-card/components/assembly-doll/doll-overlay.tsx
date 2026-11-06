@@ -2,37 +2,36 @@
 // pieces wrapped round a proxy and pulled shut along the seam graph, for two questions only: does
 // the graph close into a garment, and where do the card's measures sit on it.
 //
-// Three blocks on the grey ground: the header (size, state, the honesty line), the DOLL beside the
-// MEASURES rail, and the ASSEMBLY CHECK strip. Nothing here writes to the card; the doll is rebuilt
-// from decisions made in the assembly order after the provider's re-read.
+// Three blocks on the grey ground: the header in one line (title, sizes, close), the DOLL beside
+// the MEASURES rail. The doll's state is a corner word over the canvas while it closes or fails;
+// the full line stays for screen readers (and the probe) in `data-doll-state`. Nothing here
+// writes to the card; the doll is rebuilt from decisions made in the assembly order after the
+// provider's re-read.
 //
 // Lazy-loaded (three.js stays out of the card's bundle until the view is opened).
 
 import * as Dialog from '@radix-ui/react-dialog';
 import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import type { EdgeId } from 'lib/assembly-skeleton/types';
 import { liftMeasureLine } from 'lib/doll/lift';
-import { compareToSizeChart, POM, type ChartCell } from 'lib/pom';
+import { compareToSizeChart, type ChartCell } from 'lib/pom';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useWatch } from 'react-hook-form';
 import { Chip, ChipRow, GroupLabel, Section, Text, ViewSwitch, type ViewSwitchOption } from 'ui';
 
-import { useHeldSeamGraph } from '../assembly-seams/use-seam-decisions';
 import type { TechCardFormData } from '../schema';
 import { DollCanvas, type CameraPreset, type PomLine } from './doll-canvas';
-import { DollReportRows } from './doll-report';
 import { requestDoll, requestPoms, THUMB, useDollStore } from './doll-store';
 import { PomRail } from './pom-rail';
 import { dollKey, dollRequest, pomKey, pomRequest, useDollCard } from './use-doll-card';
-import { cm, reportRows, stateLine } from './words';
+import { cm, stateLine } from './words';
 
 const CAMERAS = [
-  { value: 'front', label: 'front', hint: 'the doll from the front' },
-  { value: 'back', label: 'back', hint: 'the doll from the back' },
-  { value: 'left', label: 'left', hint: 'the doll’s left side' },
-  { value: 'right', label: 'right', hint: 'the doll’s right side' },
+  { value: 'front', label: 'front', hint: '1' },
+  { value: 'back', label: 'back', hint: '2' },
+  { value: 'left', label: 'left', hint: '3' },
+  { value: 'right', label: 'right', hint: '4' },
 ] as const satisfies readonly ViewSwitchOption<CameraPreset>[];
 
 /**
@@ -58,7 +57,6 @@ const secs = (ms: number | undefined) => (ms == null ? '' : `${(ms / 1000).toFix
 
 export default function DollOverlay({ open, onClose }: { open: boolean; onClose: () => void }) {
   const card = useDollCard();
-  const { graph } = useHeldSeamGraph();
   const styleNumber = (useWatch<TechCardFormData>({ name: 'styleNumber' }) ?? '') as string;
   const name = (useWatch<TechCardFormData>({ name: 'name' }) ?? '') as string;
   const unit = (useWatch<TechCardFormData>({ name: 'measurementUnit' }) ?? 'mm') as string;
@@ -69,6 +67,7 @@ export default function DollOverlay({ open, onClose }: { open: boolean; onClose:
   const [showPom, setShowPom] = useState(false);
   const [camera, setCamera] = useState<CameraPreset | null>('front');
   const [fitSignal, setFitSignal] = useState(0);
+  const [showSeams, setShowSeams] = useState(false);
   const at = size && card?.sizes.includes(size) ? size : card?.baseSize ?? '';
   const hasLining = !!card?.factsOf(card.baseSize)?.pieces.some((p) => p.cloth === 'lining');
 
@@ -145,33 +144,26 @@ export default function DollOverlay({ open, onClose }: { open: boolean; onClose:
   }, [report, values]);
   const drawn = useMemo(() => new Set(pomLines.map((l) => l.code)), [pomLines]);
 
-  // ── the report in words ──
-  const geoms = useMemo(() => new Map((graph?.pieces ?? []).map((p) => [p.pieceKey, p])), [graph]);
-  const roles = useMemo(() => {
-    const out = new Map<EdgeId, string>();
-    for (const [id, r] of Object.entries(pom?.report?.roles ?? {}))
-      if (r.confidence >= POM.roleAccept && r.role !== 'unknown')
-        out.set(id, r.role.replace(/-/g, ' '));
-    return out;
-  }, [pom]);
   const names = useMemo(
     () => new Map((card?.factsOf(card.baseSize)?.pieces ?? []).map((p) => [p.pieceKey, p.name])),
     [card],
   );
   const missing = card && at ? card.missingOf(at) : [];
-  const onBase = !!card && at === card.baseSize;
-  // Edge words come from the read size's graph and roles: on another size an edge id may be
-  // another run (grading moved a corner), so its rows name pieces and edge numbers only.
-  const rows = useMemo(
-    () =>
-      report
-        ? onBase
-          ? reportRows(report, geoms, roles, names)
-          : reportRows(report, new Map(), new Map(), names)
-        : [],
-    [report, geoms, roles, names, onBase],
-  );
 
+  // The probe reads the report as data (the strip that listed it is gone).
+  useEffect(() => {
+    (window as Window & { __dollReport?: unknown }).__dollReport = report;
+  }, [report]);
+
+  // The size on screen stays in view inside its scrolling row.
+  const sizesRow = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    sizesRow.current
+      ?.querySelector('[aria-checked="true"]')
+      ?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+  }, [at, open]);
+
+  const busy = !card || !solve || solve.status === 'solving';
   const state = !card
     ? 'reading the pattern…'
     : !solve || solve.status === 'solving'
@@ -218,63 +210,106 @@ export default function DollOverlay({ open, onClose }: { open: boolean; onClose:
         >
           <Dialog.Title className='sr-only'>paper doll</Dialog.Title>
           <Dialog.Description className='sr-only'>
-            the pattern's pieces closed along the seams
+            the pattern closed along its seams
           </Dialog.Description>
 
           <Section
             title='paper doll'
             question={title}
             action={
-              <Chip quiet onClick={onClose} data-doll-door='close'>
-                close · esc
-              </Chip>
+              <div className='flex min-w-0 items-center gap-4'>
+                {card && card.sizes.length > 0 && (
+                  <div
+                    ref={sizesRow}
+                    className='min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
+                  >
+                    <ViewSwitch<string>
+                      quiet
+                      label='size'
+                      value={at}
+                      onChange={(s) => {
+                        setSize(s);
+                        setCamera((c) => c ?? 'front');
+                      }}
+                      options={card.sizes.map((s) => ({
+                        value: s,
+                        label: card.sizeLabel(s),
+                        hint: s === card.baseSize ? 'read size' : undefined,
+                      }))}
+                      className='whitespace-nowrap'
+                    />
+                  </div>
+                )}
+                <Chip quiet onClick={onClose} data-doll-door='close'>
+                  close
+                </Chip>
+              </div>
             }
           >
-            <div className='flex flex-wrap items-center gap-x-4 gap-y-2'>
-              {card && card.sizes.length > 0 && (
-                <ViewSwitch<string>
-                  label='size'
-                  value={at}
-                  onChange={(s) => {
-                    setSize(s);
-                    setCamera((c) => c ?? 'front');
-                  }}
-                  options={card.sizes.map((s) => ({
-                    value: s,
-                    label: card.sizeLabel(s),
-                    hint:
-                      s === card.baseSize
-                        ? `size ${card.sizeLabel(s)}, the size the pattern is read on`
-                        : `size ${card.sizeLabel(s)}`,
-                  }))}
-                />
-              )}
-              <Text component='span' className='tabular-nums' data-doll-state=''>
-                {state}
-              </Text>
-            </div>
             {missing.length > 0 && (
-              <Text size='micro' variant='label' component='p'>
-                no contour in size {card ? card.sizeLabel(at) : at}: {missing.join(', ')}
+              <Text size='micro' variant='label' component='p' className='truncate'>
+                no contour: {missing.join(', ')}
               </Text>
             )}
+            <span className='sr-only' data-doll-state='' aria-live='polite'>
+              {state}
+            </span>
           </Section>
 
           <div className='grid shrink-0 grid-cols-1 gap-gutter lg:min-h-0 lg:flex-1 lg:shrink lg:grid-cols-[minmax(0,1fr)_360px]'>
             <Section
               title='doll'
               action={
-                <ViewSwitch<CameraPreset>
-                  quiet
-                  label='camera'
-                  value={camera ?? ('' as CameraPreset)}
-                  onChange={setCamera}
-                  options={CAMERAS}
-                />
+                <div className='flex flex-wrap items-center justify-end gap-x-2'>
+                  <ViewSwitch<CameraPreset>
+                    quiet
+                    label='camera'
+                    value={camera ?? ('' as CameraPreset)}
+                    onChange={setCamera}
+                    options={CAMERAS}
+                  />
+                  <ChipRow>
+                    <Chip
+                      quiet
+                      onClick={() => setFitSignal((n) => n + 1)}
+                      data-doll-fit=''
+                      title='F'
+                    >
+                      fit
+                    </Chip>
+                    <Chip
+                      quiet
+                      selected={showSeams}
+                      pressed={showSeams}
+                      onClick={() => setShowSeams((v) => !v)}
+                      data-doll-toggle='seams'
+                      title='closed and proposed'
+                    >
+                      seams
+                    </Chip>
+                    {hasLining && report?.liningAsShell && (
+                      <Chip quiet selected data-doll-lining-shell='' title='every piece is lining'>
+                        lining
+                      </Chip>
+                    )}
+                    {hasLining && !report?.liningAsShell && (
+                      <Chip
+                        quiet
+                        selected={lining}
+                        pressed={lining}
+                        onClick={() => setLining((v) => !v)}
+                        data-doll-toggle='lining'
+                        title='solved on demand'
+                      >
+                        lining
+                      </Chip>
+                    )}
+                  </ChipRow>
+                </div>
               }
               className='flex h-[60vh] min-h-[360px] flex-col overflow-hidden lg:h-auto lg:min-h-0'
             >
-              <div className='min-h-0 flex-1'>
+              <div className='relative min-h-0 flex-1'>
                 <DollCanvas
                   solveKey={key}
                   report={report}
@@ -283,16 +318,50 @@ export default function DollOverlay({ open, onClose }: { open: boolean; onClose:
                   hoverPom={hoverPom}
                   camera={camera}
                   fitSignal={fitSignal}
+                  showSeams={showSeams}
                   onCameraLeft={() => setCamera(null)}
                   onFrame={() => {
                     const w = window as Window & { __dollFrames?: number };
                     w.__dollFrames = (w.__dollFrames ?? 0) + 1;
                   }}
                 />
+                {busy && (
+                  <Text
+                    size='micro'
+                    variant='label'
+                    component='span'
+                    className='pointer-events-none absolute left-2 top-2'
+                  >
+                    {card ? 'closing…' : 'reading…'}
+                  </Text>
+                )}
+                {solve?.status === 'error' && (
+                  <Text
+                    size='micro'
+                    variant='error'
+                    component='span'
+                    className='absolute left-2 top-2'
+                    title={solve.error}
+                  >
+                    doll failed
+                  </Text>
+                )}
               </div>
             </Section>
             <Section
               title='measures'
+              action={
+                <Chip
+                  quiet
+                  selected={showPom}
+                  pressed={showPom}
+                  onClick={() => setShowPom((v) => !v)}
+                  data-doll-toggle='pom'
+                  title='every measure line'
+                >
+                  lines
+                </Chip>
+              }
               question={`— size ${card ? card.sizeLabel(at) : at}, from the pattern laid flat`}
               className='flex max-h-[70vh] min-h-0 flex-col overflow-hidden lg:max-h-none'
             >
@@ -345,49 +414,6 @@ export default function DollOverlay({ open, onClose }: { open: boolean; onClose:
               </div>
             </Section>
           </div>
-
-          <Section
-            title='assembly check'
-            question='— what the doll could not close as drawn'
-            action={
-              <ChipRow>
-                <Chip
-                  selected={showPom}
-                  pressed={showPom}
-                  onClick={() => setShowPom((v) => !v)}
-                  data-doll-toggle='pom'
-                  title='draw every measure line on the doll'
-                >
-                  pom lines
-                </Chip>
-                {hasLining && report?.liningAsShell && (
-                  <Text component='span' size='micro' variant='label' data-doll-lining-shell=''>
-                    every piece is cut from the lining — drawn as the shell
-                  </Text>
-                )}
-                {hasLining && !report?.liningAsShell && (
-                  <Chip
-                    selected={lining}
-                    pressed={lining}
-                    onClick={() => setLining((v) => !v)}
-                    data-doll-toggle='lining'
-                    title='lining is not solved until asked: it doubles the work on a lined jacket'
-                  >
-                    lining {lining ? 'solved' : 'not solved'}
-                  </Chip>
-                )}
-              </ChipRow>
-            }
-            className='max-h-[30vh] overflow-y-auto'
-          >
-            {report ? (
-              <DollReportRows rows={rows} />
-            ) : (
-              <Text size='micro' variant='label' component='p'>
-                {solve?.status === 'error' ? state : 'the report comes when the doll settles'}
-              </Text>
-            )}
-          </Section>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
