@@ -134,6 +134,7 @@ const CLEAR = 0; // the proxy is already EPS_WRAP smaller than the cloth: no ext
 const EPS_WRAP = 0.04; // paper needs slack to wrap (design §3.3)
 const ASPECT = 1.3; // chest wider than deep
 const ARM_DEG = 42; // A-pose: arms 42° off vertical
+const FREE_CAP_TURN = (25 * Math.PI) / 180; // a free cap's registration turns the arm at most this much
 const PROXY_K = 0.93; // proxies push to 93 % of the cloth's own girth: a guide, never a stretcher
 const LAYERED_BODY_ANCHOR_K = 0.0045; // a two-ply shell keeps weak memory of its placed shape
 // One-piece collar (no separate stand): where it rolls over, as a share of its depth at the CB.
@@ -6509,11 +6510,19 @@ export function solveDoll(input: DollInput): DollReport {
   // `arm`: the sleeve's direction down the arm as placed — its x says which side of the doll the
   // sleeve hangs on. A cap and an armhole are both near-flat rings, so a turn through the body
   // registers them as well as the true one; a fit that swings the arm to the other side is refused.
+  // `turnMax` (a free cap, no row): a cap and its armhole are near-round rings, and turned about
+  // the armhole's own axis they register about as well at any phase — that turn swings the arm
+  // forward or up (102's left sleeve stood out level, 86° off vertical). With no row to say which
+  // point of the cap meets which of the armhole, the arm keeps hanging as placed: a fit that turns
+  // it further than `turnMax` is set aside, and if every fit does, the one that turns it least
+  // stands.
   const fitPaths = (
     pairs: { sleeve: Path; body: Path; bodyClosed?: boolean }[],
     arm?: Vec3,
+    turnMax?: number,
   ): RigidFit | null => {
     let best: RigidFit | null = null;
+    let least: { fit: RigidFit; turn: number } | null = null;
     const phases = pairs.some((p) => p.bodyClosed)
       ? Array.from({ length: 24 }, (_, k) => k / 24)
       : [0];
@@ -6529,10 +6538,18 @@ export function solveDoll(input: DollInput): DollReport {
             to.push(samplePath(pair.body, bt));
           }
         const fit = rigidFit(from, to);
-        if (arm && fit && fit.vector(arm)[0] * Math.sign(arm[0]) <= 0) continue;
-        if (fit && (!best || fit.score < best.score)) best = fit;
+        if (!fit) continue;
+        if (arm && fit.vector(arm)[0] * Math.sign(arm[0]) <= 0) continue;
+        if (arm && turnMax != null) {
+          const after = fit.vector(arm);
+          const c = dot(after, arm) / (Math.hypot(...after) * Math.hypot(...arm) || 1);
+          const turn = Math.acos(Math.max(-1, Math.min(1, c)));
+          if (!least || turn < least.turn) least = { fit, turn };
+          if (turn > turnMax) continue;
+        }
+        if (!best || fit.score < best.score) best = fit;
       }
-    return best;
+    return best ?? least?.fit ?? null;
   };
   const applySleeveFit = (gid: DollGroupId, list: Panel[], F: Frame, fit: RigidFit | null) => {
     if (!fit) return;
@@ -6682,23 +6699,6 @@ export function solveDoll(input: DollInput): DollReport {
       }
     }
   }
-  // Which armhole a sleeve goes to: its hand, unless the graph sews it to body edges that sit on
-  // the other side of the doll (sleeve hands swapped, or a back drawn as seen from the front) —
-  // then the seams win and the swap is reported.
-  const armSide: Record<'L' | 'R', 'L' | 'R'> = { L: 'L', R: 'R' };
-  {
-    const vote: Record<'L' | 'R', number> = { L: 0, R: 0 };
-    for (const s of ['L', 'R'] as const) {
-      const gid: DollGroupId = s === 'L' ? 'SLEEVE_L' : 'SLEEVE_R';
-      for (const sm of G.seams) {
-        const ga = panelByKey.get(pk(sm.a[0]))?.group;
-        const gb = panelByKey.get(pk(sm.b[0]))?.group;
-        const bodySide =
-          ga === gid && gb === 'BODY' ? sm.b : gb === gid && ga === 'BODY' ? sm.a : null;
-        if (!bodySide) continue;
-        const B = pathOf(bodySide);
-        if (!B) continue;
-        const x = [...B.v].reduce((t, v) => t + pos[3 * v], 0) / B.v.length;
   // A STEP GUESS SETS A SLEEVE IN AN ARMHOLE OR NOT AT ALL. A step that sets the sleeves and names
   // no row is sewn by its picture's guess, a pairing by lengths: card 102's left cap edge (165 mm)
   // onto a back neckline end and a front neckline (52 + 92 mm), the neck point between them. Sewn,
@@ -6728,6 +6728,24 @@ export function solveDoll(input: DollInput): DollReport {
       );
     }
   }
+  // Which armhole a sleeve goes to: its hand, unless the graph sews it to body edges that sit on
+  // the other side of the doll (sleeve hands swapped, or a back drawn as seen from the front) —
+  // then the seams win and the swap is reported.
+  const armSide: Record<'L' | 'R', 'L' | 'R'> = { L: 'L', R: 'R' };
+  {
+    const vote: Record<'L' | 'R', number> = { L: 0, R: 0 };
+    for (const s of ['L', 'R'] as const) {
+      const gid: DollGroupId = s === 'L' ? 'SLEEVE_L' : 'SLEEVE_R';
+      for (const sm of G.seams) {
+        if (guessYield.has(`${sm.seam.a}~${sm.seam.b}`)) continue;
+        const ga = panelByKey.get(pk(sm.a[0]))?.group;
+        const gb = panelByKey.get(pk(sm.b[0]))?.group;
+        const bodySide =
+          ga === gid && gb === 'BODY' ? sm.b : gb === gid && ga === 'BODY' ? sm.a : null;
+        if (!bodySide) continue;
+        const B = pathOf(bodySide);
+        if (!B) continue;
+        const x = [...B.v].reduce((t, v) => t + pos[3 * v], 0) / B.v.length;
         vote[s] += Math.sign(x) * B.len;
       }
     }
@@ -6737,7 +6755,6 @@ export function solveDoll(input: DollInput): DollReport {
       warnings.push(
         "the graph sews the left sleeve to the doll's right armhole and the right sleeve to the left — sleeve hands swapped, or the back is drawn as seen from the front; the sleeves are put where the seams say",
       );
-        if (guessYield.has(`${sm.seam.a}~${sm.seam.b}`)) continue;
     }
   }
   for (const s of ['L', 'R'] as const) {
@@ -6771,6 +6788,7 @@ export function solveDoll(input: DollInput): DollReport {
     // sleeve onto body pieces say where the opening is — the sleeve is set on their body side and
     // the seam judged after, instead of a guess 290 mm away that the far-apart rule then refuses.
     const graphSeams = G.seams.flatMap((sm) => {
+      if (guessYield.has(`${sm.seam.a}~${sm.seam.b}`)) return [];
       // A stored composite armhole can start with a surface piece and then continue around body
       // panels. The cap side must be wholly this sleeve; the target need only contain body edges.
       const touchesBody = (ids: EdgeId[]) =>
@@ -6788,7 +6806,6 @@ export function solveDoll(input: DollInput): DollReport {
       const targetIds = bodySide === 'a' ? sm.a : sm.b;
       const bodyIds = targetIds.filter((id) => panelByKey.get(pk(id))?.group === 'BODY');
       // Owner surface placement happens after the solve. If such a piece starts the stored
-      if (guessYield.has(`${sm.seam.a}~${sm.seam.b}`)) return [];
       // composite, its edge is not drawable yet; the remaining body run is still the armhole cue.
       const body = sewnSide(sm, bodySide) ?? pathOf(bodyIds);
       if (!sleeve || !body) return [];
@@ -6802,6 +6819,7 @@ export function solveDoll(input: DollInput): DollReport {
     // doll claiming that the operation sewed it.
     const cuesOf = (candidates: readonly SeamCandidate[]) =>
       candidates.flatMap((candidate) => {
+        if (guessYield.has(`${candidate.a}~${candidate.b}`)) return [];
         const ids = (side: 'a' | 'b') =>
           (side === 'a'
             ? candidate.aParts ?? edgeIdsOf(candidate.a)
@@ -6819,7 +6837,6 @@ export function solveDoll(input: DollInput): DollReport {
         const sleeve = pathOf(sleeveIds);
         const body = pathOf(targetIds);
         return sleeve && body ? [{ sleeve, body }] : [];
-        if (guessYield.has(`${candidate.a}~${candidate.b}`)) return [];
       });
     const selectedCues = cuesOf(resolvedRows?.forced ?? []);
     const confirmedCues = cuesOf(joinsNotSewn);
@@ -6965,17 +6982,27 @@ export function solveDoll(input: DollInput): DollReport {
       );
     // With no drawable stored cap row, use the free cap and armhole arcs as placement topology.
     // Owner mode deliberately gets this registration too, but still gets no proposed seam below.
+    // An armhole loop left open by a hair (its ends 8 mm apart on 102's right: a slit elsewhere
+    // on the back breaks the walk) is a ring all the same.
     if (!sleeveRegistered.has(gid) && cap && armLoop[armSide[s]]) {
+      const loop = armLoop[armSide[s]]!;
+      const lv = loop.verts;
+      const ring =
+        loop.closed ||
+        (lv.length > 2 &&
+          Math.hypot(...sub(getPos(lv[0]), getPos(lv[lv.length - 1]))) <=
+            Math.max(15, 0.03 * loop.len));
       const sleeve = pathOfVerts(capArc, false);
-      const body = pathOfVerts(armLoop[armSide[s]]!.verts, armLoop[armSide[s]]!.closed);
+      const body = pathOfVerts(lv, ring);
       if (sleeve && body)
         applySleeveFit(
           gid,
           groups.get(gid)!,
           F,
           fitPaths(
-            [{ sleeve, body, bodyClosed: armLoop[armSide[s]]!.closed }],
+            [{ sleeve, body, bodyClosed: ring }],
             [-F.up[0], -F.up[1], -F.up[2]],
+            FREE_CAP_TURN,
           ),
         );
     }
