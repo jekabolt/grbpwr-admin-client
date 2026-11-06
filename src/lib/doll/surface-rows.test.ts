@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Edge, PieceGeom, SeamCandidate } from 'lib/assembly-skeleton/types';
 
-import { planSurfaceByRows } from './surface-rows';
+import { planSurfaceByRows, shellSeamsUnderSurfaceRows, type RowLay } from './surface-rows';
 
 const edge = (pieceKey: string, k: number, a: [number, number], b: [number, number]): Edge => ({
   id: `${pieceKey}#${k}`,
@@ -74,5 +74,42 @@ describe('surface rows', () => {
     });
 
     expect(lays.get('bag')).toMatchObject({ host: 'back', on: 'back', depth: 0 });
+  });
+
+  it('sews shell edges together under a shared pocket edge', () => {
+    const host = row('front#1', 'pocket#0');
+    const caught = row('yoke#4', 'pocket#0');
+    const lays = new Map<string, RowLay>([
+      [
+        'pocket',
+        {
+          host: 'front',
+          T: [1, 0, 0, 1, 0, 0],
+          cover: 1,
+          row: 'front#1~pocket#0',
+          on: 'front',
+          depth: 0,
+          how: '',
+        },
+      ],
+    ]);
+
+    expect(
+      shellSeamsUnderSurfaceRows({
+        rows: [host, caught],
+        lays,
+        drawn: new Set(['front', 'yoke']),
+      }),
+    ).toEqual([
+      {
+        row: caught,
+        a: ['yoke#4'],
+        b: ['front#1'],
+        originalA: ['yoke#4'],
+        originalB: ['pocket#0'],
+        off: ['pocket'],
+        over: ['front#1'],
+      },
+    ]);
   });
 });

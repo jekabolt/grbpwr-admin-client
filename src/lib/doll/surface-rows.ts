@@ -33,6 +33,20 @@ export type RowLay = {
   how: string;
 };
 
+export type ShellSeamUnderSurface = {
+  /** The stored row whose surface stretch is replaced for the structural solve. */
+  row: SeamCandidate;
+  /** Drawn shell sides in the stored row's A/B order. */
+  a: EdgeId[];
+  b: EdgeId[];
+  /** The stored row's sides, kept for its report after the surface piece is laid. */
+  originalA: EdgeId[];
+  originalB: EdgeId[];
+  /** Surface pieces skipped by the solve, and the shell stretch used under them. */
+  off: string[];
+  over: EdgeId[];
+};
+
 /** A row's side as its stretches, in the stored walk order. */
 export function rowParts(c: SeamCandidate, side: 'a' | 'b'): RowPart[] {
   const ids = (side === 'a' ? c.aParts ?? edgeIdsOf(c.a) : c.bParts ?? edgeIdsOf(c.b)).flatMap(
@@ -42,6 +56,109 @@ export function rowParts(c: SeamCandidate, side: 'a' | 'b'): RowPart[] {
     const r = ids.length === 1 && c.range ? c.range[side] : c.partRange?.[id];
     return { id, piece: pk(id), ...(r ? { range: [r[0], r[1]] as [number, number] } : {}) };
   });
+}
+
+/**
+ * Structural seams hidden by a surface piece. Two stored rows can name the same pocket edge: one
+ * lays that edge on a shell panel, while the other sews the next shell panel to it. The pocket is
+ * placed only after the solve, so the latter row must sew the two drawn shell stretches under it.
+ */
+export function shellSeamsUnderSurfaceRows(args: {
+  rows: readonly SeamCandidate[];
+  lays: ReadonlyMap<string, RowLay>;
+  drawn: ReadonlySet<string>;
+  leadEdge?: (id: EdgeId) => EdgeId;
+}): ShellSeamUnderSurface[] {
+  type Entry = {
+    row: SeamCandidate;
+    id: string;
+    surfaceSide: 'a' | 'b';
+    surface: RowPart;
+    shell: RowPart[];
+  };
+  const mapped = (part: RowPart): RowPart => {
+    const id = args.leadEdge?.(part.id) ?? part.id;
+    return id === part.id ? part : { ...part, id, piece: pk(id) };
+  };
+  const entries: Entry[] = [];
+  for (const row of args.rows) {
+    const id = `${row.a}~${row.b}`;
+    for (const [surfaceSide, shellSide] of [
+      ['a', 'b'],
+      ['b', 'a'],
+    ] as const) {
+      const surface = rowParts(row, surfaceSide);
+      const shell = rowParts(row, shellSide).map(mapped);
+      if (
+        surface.length !== 1 ||
+        !args.lays.has(surface[0].piece) ||
+        !shell.length ||
+        !shell.every((part) => args.drawn.has(part.piece))
+      )
+        continue;
+      entries.push({ row, id, surfaceSide, surface: surface[0], shell });
+    }
+  }
+  const sameRange = (a?: [number, number], b?: [number, number]) =>
+    (!a && !b) || (!!a && !!b && Math.abs(a[0] - b[0]) <= 1 && Math.abs(a[1] - b[1]) <= 1);
+  const sameStretch = (a: RowPart, b: RowPart) => a.id === b.id && sameRange(a.range, b.range);
+  const sideSig = (ids: readonly EdgeId[]) => [...ids].sort().join('+');
+  const seamSig = (a: readonly EdgeId[], b: readonly EdgeId[]) =>
+    [sideSig(a), sideSig(b)].sort().join('~');
+  const existing = new Set(
+    args.rows.flatMap((row) => {
+      const a = rowParts(row, 'a').map(mapped);
+      const b = rowParts(row, 'b').map(mapped);
+      return a.length &&
+        b.length &&
+        a.every((part) => args.drawn.has(part.piece)) &&
+        b.every((part) => args.drawn.has(part.piece))
+        ? [
+            seamSig(
+              a.map((part) => part.id),
+              b.map((part) => part.id),
+            ),
+          ]
+        : [];
+    }),
+  );
+  const seen = new Set<string>();
+  const out: ShellSeamUnderSurface[] = [];
+  for (const [piece, lay] of args.lays) {
+    const host = entries.find(
+      (entry) =>
+        entry.id === lay.row &&
+        entry.surface.piece === piece &&
+        entry.shell.some((part) => part.piece === lay.on),
+    );
+    if (!host) continue;
+    for (const caught of entries) {
+      if (
+        caught === host ||
+        caught.surface.piece !== piece ||
+        !sameStretch(caught.surface, host.surface)
+      )
+        continue;
+      const caughtIds = caught.shell.map((part) => part.id);
+      const hostIds = host.shell.map((part) => part.id);
+      const a = caught.surfaceSide === 'a' ? hostIds : caughtIds;
+      const b = caught.surfaceSide === 'b' ? hostIds : caughtIds;
+      const sig = seamSig(a, b);
+      const key = `${caught.id}|${sig}`;
+      if (existing.has(sig) || seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        row: caught.row,
+        a,
+        b,
+        originalA: rowParts(caught.row, 'a').map((part) => part.id),
+        originalB: rowParts(caught.row, 'b').map((part) => part.id),
+        off: [piece],
+        over: hostIds,
+      });
+    }
+  }
+  return out;
 }
 
 /** A polyline cut to [r0, r1] mm of its arc. */

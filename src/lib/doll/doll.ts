@@ -94,6 +94,7 @@ import {
   planSurfaceByRows,
   resample,
   rowParts,
+  shellSeamsUnderSurfaceRows,
   type RowLay,
 } from './surface-rows';
 import {
@@ -875,8 +876,8 @@ type Work = {
   /**
    * A confirmed row whose walk starts or ends on a laid piece: sewn over its drawn parts, reported
    * once the piece is laid, measured over the whole row (the laid stretch included). Its whole
-   * sides and the laid pieces its walk runs onto; `over`: the shell edges an armhole run is sewn
-   * over in place of its parts on laid pieces.
+   * sides and the laid pieces its walk runs onto; `over`: the shell edges the row is sewn over in
+   * place of its parts on laid pieces.
    */
   laidEnds?: { a: EdgeId[]; b: EdgeId[]; off: string[]; over?: EdgeId[] };
 };
@@ -1489,6 +1490,75 @@ export function solveDoll(input: DollInput): DollReport {
     ...(owner ? { layers: layerRelations, owner: true } : {}),
   });
   warnings.push(...G.warnings);
+  // Plan owner surface pieces before the structural solve. Besides placing them later, this tells
+  // which of two rows on one pocket edge is its host seam and which is a shell seam caught under
+  // the pocket. The latter must join the drawn shell now; the pocket itself is laid only afterward.
+  const ownerSurface = new Map(
+    graph.chosen.flatMap((candidate) =>
+      owner && candidate.kind === 'surface' && candidate.surface
+        ? [[candidate.surface.part, candidate.surface] as const]
+        : [],
+    ),
+  );
+  const geomOfKey = new Map(graph.pieces.map((g) => [g.pieceKey, g]));
+  const shellHosts = new Set(
+    G.pieces
+      .filter((P) => P.group === 'LEG_L' || P.group === 'LEG_R' || P.group === 'BODY')
+      .map((P) => P.key),
+  );
+  const rowLays: Map<string, RowLay> = owner
+    ? planSurfaceByRows({
+        parts: G.skipped.filter((x) => x.surface).map((x) => x.pieceKey),
+        fixed: new Map(
+          [...ownerSurface].flatMap(([part, s]) =>
+            shellHosts.has(s.host) ? [[part, { host: s.host, T: s.T }] as const] : [],
+          ),
+        ),
+        hosts: shellHosts,
+        geoms: geomOfKey,
+        rows: graphIn.chosen.filter(
+          (c) => isConf(c) && c.kind !== 'surface' && c.kind !== 'closure-not-seam',
+        ),
+      })
+    : new Map();
+  /** Rows solved over drawn shell edges in place of a stretch on a surface piece. */
+  const laidOverShell = new Map<
+    GroupedSeam,
+    { a: EdgeId[]; b: EdgeId[]; off: string[]; over: EdgeId[] }
+  >();
+  const surfaceShellSeams: GroupedSeam[] = [];
+  /** Confirmed direct shell rows with no step whose join is supplied by the two surface rows. */
+  const shellCoveredSeamKeys = new Set<string>();
+  if (owner) {
+    const bridges = shellSeamsUnderSurfaceRows({
+      rows: graphIn.chosen.filter(
+        (c) => isConf(c) && c.kind !== 'surface' && c.kind !== 'closure-not-seam',
+      ),
+      lays: rowLays,
+      drawn: shellHosts,
+      leadEdge: G.leadEdge,
+    });
+    for (const bridge of bridges) {
+      const grouped: GroupedSeam = { seam: bridge.row, a: bridge.a, b: bridge.b };
+      surfaceShellSeams.push(grouped);
+      laidOverShell.set(grouped, {
+        a: bridge.originalA,
+        b: bridge.originalB,
+        off: bridge.off,
+        over: bridge.over,
+      });
+    }
+    const sideSig = (ids: readonly EdgeId[]) => [...ids].sort().join('+');
+    const seamSig = (a: readonly EdgeId[], b: readonly EdgeId[]) =>
+      [sideSig(a), sideSig(b)].sort().join('~');
+    const bridgeSigs = new Set(surfaceShellSeams.map((seam) => seamSig(seam.a, seam.b)));
+    for (const candidate of joinsNotSewn) {
+      const side = (which: 'a' | 'b') =>
+        rowParts(candidate, which).map((part) => G.leadEdge?.(part.id) ?? part.id);
+      if (bridgeSigs.has(seamSig(side('a'), side('b'))))
+        shellCoveredSeamKeys.add(candidate.provenance?.seamKey ?? '');
+    }
+  }
   // A step picture's guess onto an edge a person's row already sews whole (the collar's neck edge,
   // sewn to the stand by a row, guessed onto the body by the step that attaches the collar): an
   // edge takes one seam — the row stands, the guess is not sewn.
@@ -2111,8 +2181,7 @@ export function solveDoll(input: DollInput): DollReport {
     const first = drawnAt.indexOf(true);
     const last = drawnAt.lastIndexOf(true);
     if (first < 0) return null;
-    if (drawnAt.every(Boolean))
-      return { drawn: all, share: null as [number, number] | null };
+    if (drawnAt.every(Boolean)) return { drawn: all, share: null as [number, number] | null };
     for (let i = 0; i < all.length; i++)
       if (!drawnAt[i] && (i > first && i < last ? true : !laidKeys.has(pk(all[i].id)))) return null;
     const len = all.map(({ id, range }) => (range ? range[1] - range[0] : restLenOf.get(id) ?? 0));
@@ -4869,14 +4938,6 @@ export function solveDoll(input: DollInput): DollReport {
    *  take their direction by the gap, not the mirrored flags. */
   const graphPlaced = new Set<DollGroupId>();
   const sleeveCapSeams = new Set<GroupedSeam>();
-  /**
-   * Armhole runs that named a part on a laid piece (a pocket caught in the seam), sewn over the
-   * shell edge under it instead: the row as stored, its laid pieces and the shell edges used.
-   */
-  const capOverShell = new Map<
-    GroupedSeam,
-    { a: EdgeId[]; b: EdgeId[]; off: string[]; over: EdgeId[] }
-  >();
   /** Panels laid turned down over their base (a fall on its stand top: rotated 180°). */
   const turnedDown = new Set<number>();
   const graphWork = (s: GroupedSeam, born: number, closure = false) => {
@@ -4935,6 +4996,7 @@ export function solveDoll(input: DollInput): DollReport {
             : { same, aR: same ? share : flip(share), bR: [0, 1] as [number, number] },
         )
       : undefined;
+    const shell = laidOverShell.get(s);
     const w0 = addWork(
       {
         id: `${s.seam.a}~${s.seam.b}`,
@@ -4960,7 +5022,7 @@ export function solveDoll(input: DollInput): DollReport {
         gap: closure ? 4 : 0,
         // A composite side spans pieces laid either way round: its direction by the smaller gap.
         forceSame:
-          multi || turned
+          shell || multi || turned
             ? undefined
             : (panelByKey.get(pk(sa[0]))?.mirrored ?? false) !==
               (panelByKey.get(pk(sb[0]))?.mirrored ?? false),
@@ -4983,7 +5045,6 @@ export function solveDoll(input: DollInput): DollReport {
         b: s.b,
         off: [...new Set([...s.a, ...s.b].map(pk).filter((k) => !panelByKey.has(k)))],
       };
-    const shell = capOverShell.get(s);
     if (shell) w0.laidEnds = shell;
     if (owner && conf) w0.inStep = ownerInStepKeys.has(s.seam.provenance?.seamKey ?? '');
     if (owner && isGuess(s.seam))
@@ -5252,6 +5313,9 @@ export function solveDoll(input: DollInput): DollReport {
     (w as Work & { contactIdx?: number }).contactIdx = ci.length ? contacts.length - 1 : -1;
   };
 
+  // The derived shell join is sewing work, not a placement cue: charts were already laid from the
+  // card's own rows. Add it only now so it closes the seam without re-laying either shell panel.
+  G.seams.push(...surfaceShellSeams);
   for (const P of panels) if (bodyLike.has(P.group)) buildPanel(P);
   const crossing: { s: GroupedSeam; xa: number; xb: number; w: Work }[] = [];
   const refusedMirror: NonNullable<DollReport['notSewn']> = [];
@@ -6693,7 +6757,7 @@ export function solveDoll(input: DollInput): DollReport {
         const cut = low > 0 && J[0].y - J[low].y >= 30;
         if (!cut && !over.length) continue;
         if (over.length)
-          capOverShell.set(sm, {
+          laidOverShell.set(sm, {
             a: [...sm.a],
             b: [...sm.b],
             off: [...new Set(listed.filter((_, i) => !onBody[i]).map(pk))],
@@ -8205,9 +8269,7 @@ export function solveDoll(input: DollInput): DollReport {
           // Past the run's ends the arc runs on (the band's end beyond its sewn run).
           const l = Math.sqrt(l2);
           const tt =
-            k === 1 || k === run.length - 1
-              ? ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / l2
-              : t;
+            k === 1 || k === run.length - 1 ? ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / l2 : t;
           const ext = k === 1 ? Math.min(tt, t) : k === run.length - 1 ? Math.max(tt, t) : t;
           best = {
             d,
@@ -8901,34 +8963,6 @@ export function solveDoll(input: DollInput): DollReport {
   // ── SURFACE PIECES BY ROWS (owner): the panel and the place each one is laid on come from the
   // confirmed row that sews it (surface-rows.ts), never from its name. Rows that touch a laid piece
   // are measured once the pieces are laid (below), not called undrawable.
-  const ownerSurface = new Map(
-    graph.chosen.flatMap((candidate) =>
-      owner && candidate.kind === 'surface' && candidate.surface
-        ? [[candidate.surface.part, candidate.surface] as const]
-        : [],
-    ),
-  );
-  const geomOfKey = new Map(graph.pieces.map((g) => [g.pieceKey, g]));
-  const shellHosts = new Set(
-    panels
-      .filter((P) => P.group === 'LEG_L' || P.group === 'LEG_R' || P.group === 'BODY')
-      .map((P) => P.key),
-  );
-  const rowLays: Map<string, RowLay> = owner
-    ? planSurfaceByRows({
-        parts: G.skipped.filter((x) => x.surface).map((x) => x.pieceKey),
-        fixed: new Map(
-          [...ownerSurface].flatMap(([part, s]) =>
-            shellHosts.has(s.host) ? [[part, { host: s.host, T: s.T }] as const] : [],
-          ),
-        ),
-        hosts: shellHosts,
-        geoms: geomOfKey,
-        rows: graphIn.chosen.filter(
-          (c) => isConf(c) && c.kind !== 'surface' && c.kind !== 'closure-not-seam',
-        ),
-      })
-    : new Map();
   /** Rows measured on the laid pieces: every stretch on a drawn panel or a laid piece. */
   const laidRows: SeamCandidate[] = [];
   const leadPart = <T extends { id: EdgeId; piece: string }>(p: T): T => {
@@ -10137,15 +10171,27 @@ export function solveDoll(input: DollInput): DollReport {
               return `${nameOfPiece.get(anchor.piece) ?? anchor.piece} ${edge}`.trim();
             })
             .join(' + ');
-        const unbound = (opt.seams?.inStepKeys ? opt.seams.rows : [])
-          .filter((row) => row.status === 'confirmed' && !ownerInStepKeys.has(row.seamKey))
+        const noStep = (opt.seams?.inStepKeys ? opt.seams.rows : []).filter(
+          (row) => row.status === 'confirmed' && !ownerInStepKeys.has(row.seamKey),
+        );
+        const unbound = noStep
+          .filter((row) => !shellCoveredSeamKeys.has(row.seamKey))
           .map(
             (row) =>
               `not sewn, no step names it: ${sideWords(row.sideA)} ↔ ${sideWords(row.sideB)}${row.kind === 'closure' ? ' (closure)' : ''}`,
           );
+        const covered = noStep
+          .filter((row) => shellCoveredSeamKeys.has(row.seamKey))
+          .map(
+            (row) => `sewn under a surface row: ${sideWords(row.sideA)} ↔ ${sideWords(row.sideB)}`,
+          );
+        const noStepWords = covered.length
+          ? `no step ${noStep.length} (${unbound.length} not sewn · ${covered.length} sewn under surface)`
+          : `no step ${noStep.length} (not sewn)`;
         return [
-          `rows: confirmed ${confirmed} · sewn by steps ${inSteps} · no step ${Math.max(0, confirmed - inSteps)} (not sewn) · rejected ${rejected} (not sewn) · guessed ${guessed} (steps without a row, dashed)`,
+          `rows: confirmed ${confirmed} · sewn by steps ${inSteps} · ${noStepWords} · rejected ${rejected} (not sewn) · guessed ${guessed} (steps without a row, dashed)`,
           ...unbound,
+          ...covered,
           ...input.facts.pieces
             .filter((piece) => !ownerSeamPieces?.has(piece.pieceKey))
             .map((piece) => `no seam: ${piece.name.trim() || '(unnamed piece)'}`),
