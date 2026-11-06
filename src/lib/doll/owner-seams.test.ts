@@ -570,8 +570,10 @@ describe('paper doll owner seams', () => {
       expect(report.contradictions).toEqual([]);
       const sewn = report.seams.find((candidate) => candidate.id === 'A#1~B#3');
       expect(sewn?.a).toEqual(['A#1']);
-      expect(sewn?.state).not.toBe('open');
+      expect(sewn?.state).toBe('closed');
       expect(sewn?.lenA).toBeLessThan(195);
+      expect(sewn?.lenB).toBeCloseTo(sewn?.lenA ?? 0, 0);
+      expect(sewn?.lenB).toBeLessThan(195);
     });
   });
 

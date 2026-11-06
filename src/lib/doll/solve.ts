@@ -10,6 +10,8 @@ export type Path = {
   /** Cumulative rest length at each vertex, mm. */
   s: Float64Array;
   len: number;
+  /** Disjoint sewn stretches represented by this concatenated path. */
+  runs?: Path[];
 };
 
 /** Point-on-polyline rows of one seam: vertex `v` → (1-w)·b0 + w·b1 (+ optional gap). */

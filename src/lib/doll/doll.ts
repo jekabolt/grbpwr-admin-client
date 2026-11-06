@@ -1922,13 +1922,55 @@ export function solveDoll(input: DollInput): DollReport {
       }
   }
 
+  const lenOfEdge = new Map<string, number>();
+  for (const P of G.pieces) for (const e of P.geom.edges) lenOfEdge.set(e.id, e.lenMm);
+  /**
+   * Exact stretches of a side, including the matching gap on its partner. A row can name two
+   * separate stretches of one edge against one continuous stretch of another equal-span edge (the
+   * picker stores the latter as its hull). Sewing the hull to the concatenated stretches gathers a
+   * panel that the card did not shorten. Preserve the gap at the same place on the equal-span edge.
+   */
+  const sewnStretchesOf = (g: GroupedSeam, side: 'a' | 'b') => {
+    const direct = gapStretchesOf(g, side);
+    if (direct) return direct;
+    const otherSide = side === 'a' ? 'b' : 'a';
+    const other = gapStretchesOf(g, otherSide);
+    const ids = side === 'a' ? g.a : g.b;
+    if (!other || ids.length !== 1 || other.length < 2) return null;
+    const otherIds = new Set(other.map(({ id }) => id));
+    if (otherIds.size !== 1 || other.some(({ range }) => !range)) return null;
+    const id = ids[0];
+    const otherId = other[0].id;
+    const ownHull = g.seam.partRange?.[id] ?? ([0, lenOfEdge.get(id) ?? 0] as [number, number]);
+    const otherHull =
+      g.seam.partRange?.[otherId] ??
+      ([
+        Math.min(...other.map(({ range }) => range![0])),
+        Math.max(...other.map(({ range }) => range![1])),
+      ] as [number, number]);
+    const ownLen = ownHull[1] - ownHull[0];
+    const otherLen = otherHull[1] - otherHull[0];
+    if (
+      ownLen <= 0 ||
+      otherLen <= 0 ||
+      Math.abs(ownLen - otherLen) > Math.max(5, 0.03 * Math.max(ownLen, otherLen))
+    )
+      return null;
+    return other.map(({ range, reversed }) => ({
+      id,
+      range: [
+        ownHull[0] + ((range![0] - otherHull[0]) * ownLen) / otherLen,
+        ownHull[0] + ((range![1] - otherHull[0]) * ownLen) / otherLen,
+      ] as [number, number],
+      ...(reversed === undefined ? {} : { reversed }),
+    }));
+  };
+
   // L4: confirmed rows that cannot be what they say, before solving (lengths, an edge sewn twice).
   const preContradictions: string[] = [];
   if (l4) {
-    const lenOfEdge = new Map<string, number>();
-    for (const P of G.pieces) for (const e of P.geom.edges) lenOfEdge.set(e.id, e.lenMm);
     const sideLen = (g: GroupedSeam, side: 'a' | 'b') => {
-      const gapped = gapStretchesOf(g, side);
+      const gapped = sewnStretchesOf(g, side);
       if (gapped)
         return gapped.reduce(
           (t, { id, range }) => t + (range ? range[1] - range[0] : lenOfEdge.get(id) ?? 0),
@@ -1962,7 +2004,7 @@ export function solveDoll(input: DollInput): DollReport {
         return r ?? [0, lenOfEdge.get(e) ?? 0];
       };
       for (const side of ['a', 'b'] as const) {
-        const gapped = gapStretchesOf(g, side);
+        const gapped = sewnStretchesOf(g, side);
         if (gapped)
           for (const { id: e, range } of gapped)
             usedBy.set(e, [
@@ -2028,9 +2070,52 @@ export function solveDoll(input: DollInput): DollReport {
   const footprints = new Map<string, Pt2[][]>();
   /** Pleat rows of a piece as lines as cut, mm: the mesh leaves them flat, the neck reads them. */
   const neckPleatLines = new Map<string, NeckRows['pleatLines']>();
+  // A gapped seam is constrained one run at a time. Keep every run end as a mesh vertex so
+  // cropPath does not round four ends independently to the coarse (~0.6 h) boundary sampling and
+  // manufacture a length mismatch between otherwise matching stretches.
+  const seamRangeKeep = new Map<string, number[]>();
+  const pieceByEdge = new Map(
+    G.pieces.flatMap((piece) => piece.geom.edges.map((edge) => [edge.id, piece] as const)),
+  );
+  const keepRangeEnd = (id: string, mm: number) => {
+    const piece = pieceByEdge.get(id);
+    const edge = piece?.geom.edges.find((candidate) => candidate.id === id);
+    if (!piece || !edge) return;
+    const ring = piece.geom.rs;
+    const n = ring.length;
+    let q = ((edge.s % n) + n) % n;
+    const end = ((edge.e % n) + n) % n;
+    const target = Math.max(0, Math.min(edge.lenMm, mm));
+    let walked = 0;
+    let best = q;
+    let bestError = target;
+    for (let guard = 0; q !== end && guard <= n; guard++) {
+      const next = (q + 1) % n;
+      walked += Math.hypot(ring[next][0] - ring[q][0], ring[next][1] - ring[q][1]);
+      q = next;
+      const error = Math.abs(walked - target);
+      if (error < bestError) [best, bestError] = [q, error];
+    }
+    seamRangeKeep.set(piece.key, [...(seamRangeKeep.get(piece.key) ?? []), best]);
+  };
+  for (const seam of G.seams) {
+    if (!gapStretchesOf(seam, 'a') && !gapStretchesOf(seam, 'b')) continue;
+    const sides = [sewnStretchesOf(seam, 'a'), sewnStretchesOf(seam, 'b')];
+    if (sides.some((stretches) => !stretches?.length || stretches.some((x) => !x.range))) continue;
+    for (const stretches of sides)
+      for (const stretch of stretches!) {
+        keepRangeEnd(stretch.id, stretch.range![0]);
+        keepRangeEnd(stretch.id, stretch.range![1]);
+      }
+  }
   for (const p of G.pieces) {
     const g = p.geom;
-    const keep = [...g.edges.flatMap((e) => [e.s, e.e]), ...g.notchIdx, ...g.corners];
+    const keep = [
+      ...g.edges.flatMap((e) => [e.s, e.e]),
+      ...g.notchIdx,
+      ...g.corners,
+      ...(seamRangeKeep.get(p.key) ?? []),
+    ];
     const folds = grainFold ? foldsOf(p.key) : [];
     const frame = folds.length ? frameOf(g, grainFold!.get(g.pieceKey) ?? 0) : null;
     const mesh = frame
@@ -2155,6 +2240,7 @@ export function solveDoll(input: DollInput): DollReport {
     v: Int32Array.from([...P.v].reverse()),
     s: Float64Array.from([...P.s].reverse().map((x) => P.len - x)),
     len: P.len,
+    ...(P.runs ? { runs: [...P.runs].reverse().map(revPath) } : {}),
   });
   /** Pieces laid on a panel's face after the solve (pockets, a fly's flap): never in the mesh. */
   const laidKeys = new Set(G.skipped.filter((x) => x.surface).map((x) => x.pieceKey));
@@ -2175,7 +2261,7 @@ export function solveDoll(input: DollInput): DollReport {
     ).flatMap((x) => edgeIdsOf(x));
     const pr = g.seam.partRange ?? {};
     const all =
-      gapStretchesOf(g, side) ??
+      sewnStretchesOf(g, side) ??
       ids.map((id, i) => ({ id, range: pr[orig[i]] ?? pr[id], reversed: undefined }));
     const drawnAt = all.map(({ id }) => panelByKey.has(pk(id)));
     const first = drawnAt.indexOf(true);
@@ -2202,7 +2288,7 @@ export function solveDoll(input: DollInput): DollReport {
   const sidePath = (g: GroupedSeam, side: 'a' | 'b'): Path | null => {
     const ids = side === 'a' ? g.a : g.b;
     const pr = g.seam.partRange ?? {};
-    const gapped = gapStretchesOf(g, side);
+    const gapped = sewnStretchesOf(g, side);
     const multi = !!gapped || new Set(ids.map(pk)).size > 1 || Object.keys(pr).length > 0;
     if (!multi) return pathOf(ids);
     const parts: Path[] = [];
@@ -2266,7 +2352,12 @@ export function solveDoll(input: DollInput): DollReport {
       }
       base += P.len;
     }
-    return { v: Int32Array.from(v), s: Float64Array.from(sv), len: base };
+    return {
+      v: Int32Array.from(v),
+      s: Float64Array.from(sv),
+      len: base,
+      ...(gapped ? { runs: out } : {}),
+    };
   };
   /**
    * A seam's side AS SEWN — the one path every reading of a seam goes by (12.10 review: the
@@ -2328,13 +2419,16 @@ export function solveDoll(input: DollInput): DollReport {
           [g.a, g.b, true],
           [g.b, g.a, false],
         ] as const) {
-          const gapped = gapStretchesOf(g, oneIsA ? 'b' : 'a');
+          const oneSide = oneIsA ? 'a' : 'b';
+          const manySide = oneIsA ? 'b' : 'a';
+          const gapped = gapStretchesOf(g, manySide);
           if (one.length !== 1 || gapStretchesOf(g, oneIsA ? 'a' : 'b')) continue;
           if (gapped ? gapped.length < 2 : new Set(many.map(pk)).size < 2) continue;
           if (![...one, ...many].every((id) => keys.has(pk(id)))) continue;
           const e1 = edgeById.get(one[0]);
           const pr = g.seam.partRange ?? {};
           const stretches = gapped ?? many.map((id) => ({ id, range: pr[id] }));
+          const balanced = gapped ? sewnStretchesOf(g, oneSide) : null;
           const parts = stretches.map(({ id }) => edgeById.get(id));
           if (!e1 || parts.some((e) => !e)) continue;
           const lens = stretches.map(({ range: r }, i) => (r ? r[1] - r[0] : parts[i]!.lenMm));
@@ -2343,8 +2437,12 @@ export function solveDoll(input: DollInput): DollReport {
             let c = 0;
             return stretches.map(({ range: r }, i): ChartSeam => {
               const e = parts[i]!;
-              const f0 = against ? 1 - (c + lens[i]) / L : c / L;
-              const f1 = against ? 1 - c / L : (c + lens[i]) / L;
+              const matched = balanced?.[i]?.range;
+              const along: [number, number] = matched
+                ? [matched[0] / e1.lenMm, matched[1] / e1.lenMm]
+                : [c / L, (c + lens[i]) / L];
+              const f0 = against ? 1 - along[1] : along[0];
+              const f1 = against ? 1 - along[0] : along[1];
               c += lens[i];
               const own: [number, number] = r ? [r[0] / e.lenMm, r[1] / e.lenMm] : [0, 1];
               return {
@@ -2700,6 +2798,34 @@ export function solveDoll(input: DollInput): DollReport {
 
   // ── seams as work items ──────────────────────────────────────────────────────────────────
   const works: Work[] = [];
+  const rowsOfPaths = (
+    A: Path,
+    B: Path,
+    same: boolean,
+    aR: [number, number],
+    bR: [number, number],
+  ) => {
+    if (
+      !A.runs ||
+      !B.runs ||
+      A.runs.length !== B.runs.length ||
+      aR[0] > 1e-6 ||
+      aR[1] < 1 - 1e-6 ||
+      bR[0] > 1e-6 ||
+      bR[1] < 1 - 1e-6
+    )
+      return seamRows(A, B, same, aR, bR);
+    const out: SeamRows = { v: [], b0: [], b1: [], w: [] };
+    for (let i = 0; i < A.runs.length; i++) {
+      const j = same ? i : B.runs.length - 1 - i;
+      const rows = seamRows(A.runs[i], B.runs[j], same);
+      out.v.push(...rows.v);
+      out.b0.push(...rows.b0);
+      out.b1.push(...rows.b1);
+      out.w.push(...rows.w);
+    }
+    return out;
+  };
   const meanDist = (
     A: Path,
     B: Path,
@@ -2707,7 +2833,7 @@ export function solveDoll(input: DollInput): DollReport {
     aR: [number, number],
     bR: [number, number],
   ) => {
-    const r = seamRows(A, B, same, aR, bR);
+    const r = rowsOfPaths(A, B, same, aR, bR);
     const g = rowGaps(pos, r);
     return g.reduce((x, y) => x + y, 0) / Math.max(1, g.length);
   };
@@ -2749,7 +2875,7 @@ export function solveDoll(input: DollInput): DollReport {
       const d = meanDist(w.A, w.B, o.same, o.aR, o.bR);
       if (d < bd - 1e-6) [best, bd] = [o, d];
     }
-    const rows = seamRows(w.A, w.B, best.same, best.aR, best.bR);
+    const rows = rowsOfPaths(w.A, w.B, best.same, best.aR, best.bR);
     const solver: SolverSeam = { rows, k: 0, active: true, gap: w.gap ?? 0 };
     const item: Work = {
       ...w,
@@ -8848,7 +8974,7 @@ export function solveDoll(input: DollInput): DollReport {
       );
     }
     // Twist: the other direction would fit the solved shape much better.
-    const alt = seamRows(w.A, w.B, !w.same, w.aRange, w.bRange);
+    const alt = rowsOfPaths(w.A, w.B, !w.same, w.aRange, w.bRange);
     const ag = rowGaps(pos, alt);
     const altMean = ag.reduce((x, y) => x + y, 0) / Math.max(1, ag.length);
     const twisted = w.origin === 'graph' && !w.closure && m.mean > 5 && altMean < 0.5 * m.mean;
