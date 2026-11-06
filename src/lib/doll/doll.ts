@@ -54,6 +54,7 @@ import {
   cbIndex,
   closedNeckPath,
   findNeckPath,
+  fitNeckPath,
   makeMap,
   neckFromRun,
   restPath,
@@ -7367,6 +7368,22 @@ export function solveDoll(input: DollInput): DollReport {
    *  holds the collar (placed at its own length), but nothing is sewn along it. */
   let neckPlaceOnly = false;
   const neckGroups = (['STAND', 'COLLAR'] as DollGroupId[]).filter((g) => groups.has(g));
+  // The base-facing run of the first neck unit is the ruler for choosing the finished neckline
+  // span. This is the same bottom/top + notch reading `unitsOf` uses below for the actual unit.
+  const neckTargetMm = (() => {
+    const gid: DollGroupId | null = groups.has('STAND')
+      ? 'STAND'
+      : groups.has('COLLAR')
+        ? 'COLLAR'
+        : null;
+    const list = gid ? groups.get(gid) : null;
+    if (!list?.length) return 0;
+    const runs = stripRuns(list);
+    if (!runs) return 0;
+    const nb = runs.bottom.filter(cctx.isNotch).length;
+    const nt = runs.top.filter(cctx.isNotch).length;
+    return restPath(cctx, smoothest(cctx, nt >= nb + 2 ? runs.top : runs.bottom)).len;
+  })();
   // L4: a CONFIRMED seam between a collar unit and the body says where the neckline is: its body
   // side IS the neck path (no walk along free loops).
   const handled = new Set<GroupedSeam>();
@@ -7390,8 +7407,8 @@ export function solveDoll(input: DollInput): DollReport {
       const bp = sidePath(g, unit === 'a' ? 'b' : 'a');
       if (!bp || bp.v.length < 4) continue;
       const how = `the body side of the confirmed seam ${g.seam.a} ↔ ${g.seam.b}`;
-      const N0 = neckFromRun(cctx, [...bp.v], vArm, false, how);
-      const N1 = neckFromRun(cctx, [...bp.v], vArm, true, how);
+      const N0 = fitNeckPath(cctx, neckFromRun(cctx, [...bp.v], vArm, false, how), neckTargetMm);
+      const N1 = fitNeckPath(cctx, neckFromRun(cctx, [...bp.v], vArm, true, how), neckTargetMm);
       confNeck = { g, unit, N0, N1 };
       break;
     }
@@ -7434,6 +7451,7 @@ export function solveDoll(input: DollInput): DollReport {
     (proposalsAllowed || neckStep != null)
   ) {
     const r = findNeckPath(cctx, neckLoop ? [neckLoop] : bodyLoops, vArm);
+    if (r.neck) r.neck = fitNeckPath(cctx, r.neck, neckTargetMm);
     if (opt.debug) warnings.push(`debug: neck walk ${r.debug}`);
     const ratioOf = (x: NeckPath) => (chestMm > 0 ? x.path.len / chestMm : NaN);
     let ok = false;
