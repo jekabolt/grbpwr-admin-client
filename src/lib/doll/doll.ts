@@ -4877,6 +4877,8 @@ export function solveDoll(input: DollInput): DollReport {
     GroupedSeam,
     { a: EdgeId[]; b: EdgeId[]; off: string[]; over: EdgeId[] }
   >();
+  /** Panels laid turned down over their base (a fall on its stand top: rotated 180°). */
+  const turnedDown = new Set<number>();
   const graphWork = (s: GroupedSeam, born: number, closure = false) => {
     if (guessYield.has(`${s.seam.a}~${s.seam.b}`)) return null;
     const conf = isConf(s.seam);
@@ -4919,6 +4921,11 @@ export function solveDoll(input: DollInput): DollReport {
         graphPlaced.has(panelByKey.get(pk(sa[0]))?.group as DollGroupId) ||
         graphPlaced.has(panelByKey.get(pk(sb[0]))?.group as DollGroupId)) &&
       (s.a.length > 1 || s.b.length > 1);
+    // A fall turned down onto its stand lies rotated 180°, the stand does not: the face-up flags
+    // say nothing about which end meets which — the ends pair as the placement laid them.
+    const turned =
+      turnedDown.has(panelByKey.get(pk(sa[0]))?.idx ?? -1) !==
+      turnedDown.has(panelByKey.get(pk(sb[0]))?.idx ?? -1);
     const share = shareA ?? shareB;
     const flip = (r: [number, number]): [number, number] => [1 - r[1], 1 - r[0]];
     const rangeOptions = share
@@ -4952,10 +4959,11 @@ export function solveDoll(input: DollInput): DollReport {
           : s.seam.kind === 'partial' || Math.min(lenA, lenB) / Math.max(lenA, lenB) < 0.9,
         gap: closure ? 4 : 0,
         // A composite side spans pieces laid either way round: its direction by the smaller gap.
-        forceSame: multi
-          ? undefined
-          : (panelByKey.get(pk(sa[0]))?.mirrored ?? false) !==
-            (panelByKey.get(pk(sb[0]))?.mirrored ?? false),
+        forceSame:
+          multi || turned
+            ? undefined
+            : (panelByKey.get(pk(sa[0]))?.mirrored ?? false) !==
+              (panelByKey.get(pk(sb[0]))?.mirrored ?? false),
         ...(ranges ? { ranges } : {}),
         ...(rangeOptions ? { rangeOptions } : {}),
       },
@@ -8020,7 +8028,10 @@ export function solveDoll(input: DollInput): DollReport {
         // cylinder, wider than a collar, would hold it off the stand top).
         const pi = proxies.push({ push() {}, pull() {} }) - 1;
         placeUnit(U, base, makeMap(plan.anchors), [0, plan.mf.path.len], 'down', layer, alpha, pi);
-        for (const P of U.list) buildPanel(P);
+        for (const P of U.list) {
+          buildPanel(P);
+          turnedDown.add(P.idx);
+        }
         // One-sided contact: every vertex of the fall but its sewn neck edge stays outside the
         // stand point nearest to it at placement (dynamic — it follows the stand as both move).
         {
