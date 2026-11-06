@@ -328,8 +328,10 @@ export function meshPiece(
         lines[j] = null;
         return;
       }
+      // Crossings closer than a twentieth of a step are one vertex: a sliver of a crease between
+      // them would be a sliver triangle (a fold through a closed pleat crosses each line twice).
       let id = pts.findIndex(
-        (p, v) => v >= bRs.length && Math.hypot(p[0] - x.at[0], p[1] - x.at[1]) < 1e-3,
+        (p, v) => v >= bRs.length && Math.hypot(p[0] - x.at[0], p[1] - x.at[1]) < 0.05 * step,
       );
       if (id < 0) {
         id = pts.length;
@@ -339,6 +341,13 @@ export function meshPiece(
       stopAt(j, x.u, id);
     });
   });
+  // Lines that fold and end on one contour vertex (a pleat's legs at its point): sampled outward
+  // from it at the same step on every arm, as from a crossing.
+  const endUse = new Map<number, number>();
+  for (const line of lines)
+    if (line && !line.passive)
+      for (const i of [line.i0, line.i1]) endUse.set(i, (endUse.get(i) ?? 0) + 1);
+  const sharedEnd = (i: number) => (endUse.get(i) ?? 0) > 1;
   const creaseIds: number[][] = [];
   const creaseSegs: [Pt2, Pt2][] = [];
   lines.forEach((line, k) => {
@@ -349,7 +358,9 @@ export function meshPiece(
     const { A, B, i0, i1, parts } = line;
     const ids = [i0];
     const along = (t: number): Pt2 => [A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t];
-    const cross = stops.get(k)?.sort((p, q) => p.t - q.t);
+    const fromA = !line.passive && sharedEnd(i0);
+    const fromB = !line.passive && sharedEnd(i1);
+    const cross = stops.get(k)?.sort((p, q) => p.t - q.t) ?? (fromA || fromB ? [] : undefined);
     if (!cross) {
       for (let j = 1; j < parts; j++) {
         ids.push(pts.length);
@@ -359,9 +370,11 @@ export function meshPiece(
       // Between stops: every `step` outward from each crossing, the slack left away from it.
       const len = Math.hypot(B[0] - A[0], B[1] - A[1]);
       const unit = step / len;
-      const run = (t0: number, t1: number, from0: boolean, from1: boolean) => {
+      // `atEnd`: t1 is a shared contour end, the odd point goes to it (every arm's first point
+      // then lies exactly one step from the shared end, whatever its crossings).
+      const run = (t0: number, t1: number, from0: boolean, from1: boolean, atEnd = false) => {
         const inner = Math.max(1, Math.round((t1 - t0) / unit)) - 1;
-        const lead = from0 ? (from1 ? Math.ceil(inner / 2) : inner) : 0;
+        const lead = from0 ? (from1 ? (atEnd ? Math.floor : Math.ceil)(inner / 2) : inner) : 0;
         for (let j = 1; j <= inner; j++) {
           ids.push(pts.length);
           pts.push(along(j <= lead ? t0 + j * unit : t1 - (inner + 1 - j) * unit));
@@ -369,11 +382,11 @@ export function meshPiece(
       };
       let t0 = 0;
       for (const x of cross) {
-        run(t0, x.t, t0 > 0, true);
+        run(t0, x.t, t0 > 0 || fromA, true);
         ids.push(x.id);
         t0 = x.t;
       }
-      run(t0, 1, true, false);
+      run(t0, 1, t0 > 0 || fromA, fromB, fromB);
     }
     ids.push(i1);
     creaseIds.push(ids);

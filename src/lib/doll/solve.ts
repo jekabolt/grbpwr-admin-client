@@ -102,6 +102,8 @@ export type Tie = {
   active: boolean;
   /** A stays at least `lift` outside B and is otherwise free: the two lie over each other. */
   oneSided?: boolean;
+  /** Vertices per point on each side (3 when absent): a point past a footprint reads more. */
+  stride?: number;
 };
 
 /** Rows of a seam: every vertex of A onto B's polyline and every vertex of B onto A's. */
@@ -468,20 +470,21 @@ export function strains(S: SolverState): Float64Array {
 
 /** Current A − B − lift·n of tie q, and the outward unit n at B. */
 export function tieGap(p: Float64Array, T: Tie, q: number): [number, number, number] {
+  const k = T.stride ?? 3;
   let ax = 0;
   let ay = 0;
   let az = 0;
   let bx = 0;
   let by = 0;
   let bz = 0;
-  for (let m = 0; m < 3; m++) {
-    const i = T.ia[3 * q + m] * 3;
-    const w = T.wa[3 * q + m];
+  for (let m = 0; m < k; m++) {
+    const i = T.ia[k * q + m] * 3;
+    const w = T.wa[k * q + m];
     ax += p[i] * w;
     ay += p[i + 1] * w;
     az += p[i + 2] * w;
-    const j = T.ib[3 * q + m] * 3;
-    const u = T.wb[3 * q + m];
+    const j = T.ib[k * q + m] * 3;
+    const u = T.wb[k * q + m];
     bx += p[j] * u;
     by += p[j + 1] * u;
     bz += p[j + 2] * u;
@@ -498,16 +501,17 @@ function tiePass(S: SolverState, T: Tie): void {
   if (!T.active || T.k <= 0) return;
   const p = S.pos;
   const mv = S.moving;
-  const n = T.ia.length / 3;
+  const k = T.stride ?? 3;
+  const n = T.ia.length / k;
   for (let q = 0; q < n; q++) {
     let [cx, cy, cz] = tieGap(p, T, q);
     if (T.oneSided) {
       // The residual along the outward direction only, and only when A lies too deep.
       let bx = 0;
       let bz = 0;
-      for (let m = 0; m < 3; m++) {
-        bx += p[T.ib[3 * q + m] * 3] * T.wb[3 * q + m];
-        bz += p[T.ib[3 * q + m] * 3 + 2] * T.wb[3 * q + m];
+      for (let m = 0; m < k; m++) {
+        bx += p[T.ib[k * q + m] * 3] * T.wb[k * q + m];
+        bz += p[T.ib[k * q + m] * 3 + 2] * T.wb[k * q + m];
       }
       const nl = Math.hypot(bx - T.ax, bz - T.az) || 1;
       const nx = (bx - T.ax) / nl;
@@ -519,23 +523,23 @@ function tiePass(S: SolverState, T: Tie): void {
       cz = out * nz;
     }
     let den = 0;
-    for (let m = 0; m < 3; m++) {
-      den += mv[T.ia[3 * q + m]] * T.wa[3 * q + m] ** 2;
-      den += mv[T.ib[3 * q + m]] * T.wb[3 * q + m] ** 2;
+    for (let m = 0; m < k; m++) {
+      den += mv[T.ia[k * q + m]] * T.wa[k * q + m] ** 2;
+      den += mv[T.ib[k * q + m]] * T.wb[k * q + m] ** 2;
     }
     if (den <= 1e-12) continue;
     const f = T.k / den;
-    for (let m = 0; m < 3; m++) {
-      const i = T.ia[3 * q + m];
+    for (let m = 0; m < k; m++) {
+      const i = T.ia[k * q + m];
       if (mv[i]) {
-        const g = f * T.wa[3 * q + m];
+        const g = f * T.wa[k * q + m];
         p[3 * i] -= cx * g;
         p[3 * i + 1] -= cy * g;
         p[3 * i + 2] -= cz * g;
       }
-      const j = T.ib[3 * q + m];
+      const j = T.ib[k * q + m];
       if (mv[j]) {
-        const g = f * T.wb[3 * q + m];
+        const g = f * T.wb[k * q + m];
         p[3 * j] += cx * g;
         p[3 * j + 1] += cy * g;
         p[3 * j + 2] += cz * g;

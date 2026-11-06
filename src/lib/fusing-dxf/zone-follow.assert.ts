@@ -480,6 +480,41 @@ export function main() {
   assert.equal(sheets.skippedSizes.length, 0, JSON.stringify(sheets.skippedSizes));
   assert.equal(sheets.sheets.length, 1);
 
+  // A placket band keeps its width on a wider size: the inner edge holds its mm off the front edge,
+  // it does not scale with the piece (card 16, XL: the band slid off the placket).
+  {
+    const box = (w: number, h: number): PtMm[] => [
+      { x: 0, y: 0 },
+      { x: w, y: 0 },
+      { x: w, y: h },
+      { x: 0, y: h },
+    ];
+    const baseBox = box(300, 600);
+    const bigBox = box(360, 640);
+    const baseIn = fuseInsetRingMm(baseBox, s0, null);
+    const bigIn = fuseInsetRingMm(bigBox, s0, null);
+    const right = Math.max(...baseIn.map((p) => p.x));
+    const lo = Math.min(...baseIn.map((p) => p.y));
+    const hi = Math.max(...baseIn.map((p) => p.y));
+    const band = storedZone([
+      { x: right, y: lo, corner: true },
+      { x: right, y: hi, corner: true },
+      { x: right - 78, y: hi, corner: true },
+      { x: right - 78, y: lo, corner: true },
+    ]);
+    const mapped = mapFuseSpecToSize(spec(band), baseBox, bigBox, null);
+    assert.ok(mapped.zone && 'spline' in mapped.zone);
+    const bigRight = Math.max(...bigIn.map((p) => p.x));
+    const bp = mapped.zone.spline.points;
+    for (const k of [0, 1])
+      assert.ok(Math.abs(bp[k].x - bigRight) < 1e-6, `band edge ${k} on front`);
+    for (const k of [2, 3])
+      assert.ok(
+        Math.abs(bigRight - bp[k].x - 78) < 1e-6,
+        `band inner ${k} keeps 78 mm (${bp[k].x})`,
+      );
+  }
+
   // 2. Insert / remove keep a valid closed zone.
   const inserted = insertZonePoint(pts, 0, flat.ring[3]);
   assert.ok(inserted);

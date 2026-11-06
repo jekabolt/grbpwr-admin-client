@@ -23,6 +23,7 @@ import {
   locateIn,
   pairFastenings,
   readAt,
+  spreadPast,
   stencilPast,
 } from './buttons';
 import { solveDoll } from './doll';
@@ -314,6 +315,21 @@ describe('where a mark is', () => {
     expect(x).toBeCloseTo(112, 6);
     expect(y).toBeCloseTo(60, 6);
     expect(Math.min(...S.w)).toBeLessThan(0);
+  });
+
+  it('a point past the footprint rides one plane fitted round it, linear in the vertices', () => {
+    const on = new Uint8Array(square.length).fill(1);
+    const q: Pt2 = [112, 60];
+    const S = spreadPast(square, on, q)!;
+    const [x, y] = readAt(square, S);
+    expect(x).toBeCloseTo(112, 6);
+    expect(y).toBeCloseTo(60, 6);
+    // The same weights carry any affine move of the footprint, so the solver holds what is drawn.
+    const moved = square.map(([a, b]): Pt2 => [2 * a - b + 5, a + 3 * b - 7]);
+    const [mx, my] = readAt(moved, S);
+    expect(mx).toBeCloseTo(2 * 112 - 60 + 5, 6);
+    expect(my).toBeCloseTo(112 + 3 * 60 - 7, 6);
+    expect(spreadPast(square, new Uint8Array(square.length), q)).toBeNull();
   });
 
   it('the free side of a column is where the cloth ends sooner', () => {
