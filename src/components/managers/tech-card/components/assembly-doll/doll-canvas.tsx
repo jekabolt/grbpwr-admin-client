@@ -534,7 +534,7 @@ export function DollCanvas({
 
   const lineMat = (
     owner: THREE.Group,
-    o: { width: number; color: number; dashed?: boolean; opacity?: number },
+    o: { width: number; color: number; dashed?: boolean; opacity?: number; xray?: boolean },
   ) => {
     const a = api.current!;
     const m = new LineMaterial({
@@ -545,7 +545,8 @@ export function DollCanvas({
       gapSize: 6,
       transparent: o.opacity !== undefined,
       opacity: o.opacity ?? 1,
-      depthTest: true,
+      depthTest: !o.xray,
+      depthWrite: !o.xray,
     });
     // A line lies ON the cloth: pulled towards the camera in depth so the surface does not eat it.
     m.polygonOffset = true;
@@ -738,14 +739,26 @@ export function DollCanvas({
       const dim = hover != null || showPom;
       const open = lineMat(a.seams, { width: 3, color: dim ? GREY : openColor });
       const hot = lineMat(a.seams, { width: 4, color: openColor });
+      // An open seam often runs along the silhouette (a side seam seen from the front), half
+      // behind the cloth. Its hidden part shows through faintly so the gap still reads.
+      const behind = lineMat(a.seams, {
+        width: 3,
+        color: dim ? GREY : openColor,
+        opacity: 0.3,
+        xray: true,
+      });
       const closed = showSeams ? lineMat(a.seams, { width: 1, color: GREY }) : null;
       const dashed = showSeams ? lineMat(a.seams, { width: 1, color: GREY, dashed: true }) : null;
       for (const s of report.seams as DollSeamReport[]) {
         if (s.origin === 'layer') continue;
         if (s.state === 'open' || s.state === 'twisted') {
           const paths = [s.pathA, s.pathB].filter((p) => p.length >= 2);
-          for (const path of paths)
-            a.seams.add(line(pathPoints(P, path), s.id === hover ? hot : open));
+          for (const path of paths) {
+            const pts = pathPoints(P, path);
+            const under = line(pts, behind);
+            under.renderOrder = 1;
+            a.seams.add(under, line(pts, s.id === hover ? hot : open));
+          }
           const at = midOf(P, s.pathA);
           if (!at) continue;
           const o: OpenSeam = {

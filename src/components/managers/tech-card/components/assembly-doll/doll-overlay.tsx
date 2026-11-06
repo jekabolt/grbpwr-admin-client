@@ -215,8 +215,8 @@ export default function DollOverlay({ open, onClose }: { open: boolean; onClose:
           <Section
             title='paper doll'
             question={title}
-            className='shrink-0'
-            headerClassName='mb-0'
+            className='shrink-0 !pb-2'
+            headerClassName='!mb-0'
             action={
               <div className='flex min-w-0 items-center gap-4'>
                 {card && card.sizes.length > 0 && (
