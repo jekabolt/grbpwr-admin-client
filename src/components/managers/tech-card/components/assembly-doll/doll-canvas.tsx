@@ -4,8 +4,13 @@
 // the flat pattern (grey 2 px all, the hovered one 4 px ink with «chest · 54.0 cm»). A faint floor
 // grid and axis only — no mannequin (design §8 q1).
 //
+// Navigation (doll-nav.ts holds the numbers): left drag orbits, middle/right drag pans, the wheel
+// and the pinch zoom to the cursor, a two-finger swipe orbits (with shift it pans), a double click
+// on the cloth orbits round that point and on the void fits. Every fit leashes the camera (zoom
+// 0.25–3 × the fit, the target near the doll) so the doll cannot be lost.
+//
 // Rendering is ON DEMAND: a frame is drawn when the camera moves, a solve frame arrives or a hover
-// changes — an idle doll costs nothing. While the worker solves, its frames stream in through the
+// changes, and while the damping settles; an idle doll costs nothing. While the worker solves, its frames stream in through the
 // store's `live` slot and are laid on the mesh topology it posted first (the doll closing).
 
 import type { DollMesh, DollReport, DollSeamReport, Vec3 } from 'lib/doll/types';
@@ -16,6 +21,22 @@ import { Line2 } from 'three/examples/jsm/lines/Line2.js';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 
+import {
+  easeOut,
+  fitOf,
+  isDoubleTap,
+  limitsOf,
+  MAX_POLAR,
+  MIN_POLAR,
+  padOrbit,
+  PIVOT_MS,
+  PRESET_PHI,
+  PRESET_THETA,
+  presetPath,
+  VIEW_MS,
+  wheelKind,
+  type Sph,
+} from './doll-nav';
 import { useDollStore } from './doll-store';
 
 export type CameraPreset = 'front' | 'back' | 'left' | 'right';
@@ -27,14 +48,6 @@ type Pin = { id: string; text: string; at: Vec3 };
 
 const INK = 0x000000;
 const GREY = 0x666666;
-
-/** Direction from the target to the camera for each preset: the doll faces +z, its left is +x. */
-const PRESET_DIR: Record<CameraPreset, [number, number, number]> = {
-  front: [0, 0.08, 1],
-  back: [0, 0.08, -1],
-  left: [1, 0.08, 0],
-  right: [-1, 0.08, 0],
-};
 
 type Topology = { panels: { offset: number; count: number; tris: Uint32Array; float: boolean }[] };
 
@@ -66,6 +79,7 @@ export function DollCanvas({
   showPom,
   hoverPom,
   camera,
+  fitSignal = 0,
   onCameraLeft,
   onFrame,
 }: {
@@ -77,6 +91,8 @@ export function DollCanvas({
   hoverPom: string | null;
   /** A preset to move to; null = wherever the orbit left it. */
   camera: CameraPreset | null;
+  /** Bumped to fit the doll again (the `fit` chip, the F key). */
+  fitSignal?: number;
   /** The person orbited away from the preset. */
   onCameraLeft: () => void;
   /** Every drawn frame (the stand counts them for the fps budget). */
@@ -94,6 +110,10 @@ export function DollCanvas({
     poms: THREE.Group;
     pins: Pin[];
     request: () => void;
+    /** Frame the doll (`ms` 0 = at once); a view turns to that preset on the way. */
+    refit: (ms: number, view?: CameraPreset) => void;
+    /** The doll's box (floating pieces left out); null until a solve's first frame. */
+    box: THREE.Box3 | null;
     fitted: string | null;
     /** The person turned the doll since the last fit: the settled doll does not move the camera. */
     moved: boolean;
@@ -106,6 +126,8 @@ export function DollCanvas({
   leftRef.current = onCameraLeft;
   const frameRef = useRef(onFrame);
   frameRef.current = onFrame;
+  const cameraRef = useRef(camera);
+  cameraRef.current = camera;
 
   // ── the scene, once ──
   useEffect(() => {
@@ -130,9 +152,76 @@ export function DollCanvas({
     const cam = new THREE.PerspectiveCamera(28, 1, 10, 20000);
     cam.position.set(0, 400, 3000);
     const controls = new OrbitControls(cam, renderer.domElement);
-    controls.enableDamping = false;
-    controls.rotateSpeed = 0.7;
-    controls.zoomSpeed = 0.8;
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.1;
+    controls.rotateSpeed = 1;
+    controls.zoomSpeed = 1;
+    controls.zoomToCursor = true;
+    controls.minPolarAngle = MIN_POLAR;
+    controls.maxPolarAngle = MAX_POLAR;
+    controls.mouseButtons = {
+      LEFT: THREE.MOUSE.ROTATE,
+      MIDDLE: THREE.MOUSE.PAN,
+      RIGHT: THREE.MOUSE.PAN,
+    };
+    const gl = renderer.domElement;
+
+    // ── the camera on its sphere round the target ──
+    const sph = new THREE.Spherical();
+    const off = new THREE.Vector3();
+    const current = (): Sph => {
+      sph.setFromVector3(off.copy(cam.position).sub(controls.target));
+      return { r: sph.radius, phi: sph.phi, theta: sph.theta };
+    };
+    const place = (target: THREE.Vector3, s: Sph) => {
+      controls.target.copy(target);
+      sph.set(s.r, s.phi, s.theta);
+      cam.position.setFromSpherical(sph).add(target);
+      cam.lookAt(target);
+    };
+    /**
+     * The damping's leftover turn is spent at once and the camera put back: an animation or a
+     * swipe that writes the camera must not be fought by a decaying drag.
+     */
+    const flushDamping = () => {
+      const p = cam.position.clone();
+      const t = controls.target.clone();
+      controls.enableDamping = false;
+      controls.update();
+      controls.enableDamping = true;
+      cam.position.copy(p);
+      controls.target.copy(t);
+      cam.lookAt(t);
+    };
+    let anim: {
+      t0: number;
+      ms: number;
+      from: THREE.Vector3;
+      to: THREE.Vector3;
+      path: (t: number) => Sph;
+    } | null = null;
+    const reduced = () => !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const animateTo = (target: THREE.Vector3, s: Sph, ms: number) => {
+      flushDamping();
+      if (ms <= 0 || reduced()) {
+        anim = null;
+        place(target, s);
+      } else
+        anim = {
+          t0: performance.now(),
+          ms,
+          from: controls.target.clone(),
+          to: target.clone(),
+          path: presetPath(current(), s),
+        };
+      request();
+    };
+    const stepAnim = (now: number) => {
+      if (!anim) return;
+      const t = Math.min(1, Math.max(0, (now - anim.t0) / anim.ms));
+      place(anim.from.clone().lerp(anim.to, easeOut(t)), anim.path(t));
+      if (t >= 1) anim = null;
+    };
 
     const cloth = new THREE.Group();
     const seams = new THREE.Group();
@@ -140,8 +229,14 @@ export function DollCanvas({
     scene.add(cloth, seams, poms);
 
     let queued = false;
+    let raf = 0;
     const draw = () => {
       queued = false;
+      // An animation steps every frame; the damping asks for the next frame until it settles
+      // (`update()` is true while the camera still moves); at rest no frame is drawn.
+      const animating = !!anim;
+      stepAnim(performance.now());
+      const changed = controls.update();
       renderer.render(scene, cam);
       // Pins follow their points; behind the doll's centre they fade to the label grey.
       const ph = pinsHost.current;
@@ -178,17 +273,122 @@ export function DollCanvas({
         }
       }
       frameRef.current?.();
+      if (animating || changed) request();
     };
-    const request = () => {
+    function request() {
       if (queued) return;
       queued = true;
-      requestAnimationFrame(draw);
+      raf = requestAnimationFrame(draw);
+    }
+    const leave = () => {
+      if (api.current) api.current.moved = true;
+      leftRef.current();
     };
     controls.addEventListener('change', request);
     controls.addEventListener('start', () => {
-      if (api.current) api.current.moved = true;
-      leftRef.current();
+      anim = null;
+      leave();
     });
+
+    // ── fit: the doll at 85 % of the canvas, the leash round it ──
+    const refit = (ms: number, view?: CameraPreset) => {
+      const a = api.current;
+      if (!a?.box) return;
+      const b = a.box;
+      const box = { min: b.min.toArray(), max: b.max.toArray() };
+      const f = fitOf(box, cam.fov, cam.aspect);
+      const lim = limitsOf(box, f.dist);
+      controls.minDistance = lim.minDistance;
+      controls.maxDistance = lim.maxDistance;
+      controls.maxTargetRadius = lim.maxTargetRadius;
+      controls.cursor.set(...f.target);
+      cam.near = f.dist / 50;
+      cam.far = f.dist * 20;
+      cam.updateProjectionMatrix();
+      const s = current();
+      animateTo(
+        new THREE.Vector3(...f.target),
+        {
+          r: f.dist,
+          phi: view ? PRESET_PHI : s.phi,
+          theta: view ? PRESET_THETA[view] : s.theta,
+        },
+        ms,
+      );
+      a.moved = false;
+    };
+
+    // ── the trackpad: a pinch zooms (OrbitControls), a two-finger swipe orbits, with shift pans;
+    // a mouse wheel zooms (OrbitControls). Heard before OrbitControls, on the way down. ──
+    let lastPad = -Infinity;
+    const onWheel = (e: WheelEvent) => {
+      const now = performance.now();
+      if (wheelKind(e, now, lastPad) !== 'pad') return;
+      lastPad = now;
+      e.preventDefault();
+      e.stopPropagation();
+      anim = null;
+      flushDamping();
+      if (!api.current?.moved) leave();
+      const h = gl.clientHeight || 1;
+      const s = current();
+      if (e.shiftKey) {
+        // One pixel of swipe is one pixel of the screen at the target's depth.
+        const k = (2 * s.r * Math.tan(THREE.MathUtils.degToRad(cam.fov / 2))) / h;
+        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+        const d = right.multiplyScalar(e.deltaX * k).add(up.multiplyScalar(-e.deltaY * k));
+        controls.target.add(d);
+        cam.position.add(d);
+      } else place(controls.target.clone(), padOrbit(s, e.deltaX, e.deltaY, h));
+      controls.update();
+      request();
+    };
+    el.addEventListener('wheel', onWheel, { capture: true, passive: false });
+
+    // ── double click / double tap: on the cloth the target moves to that point, on the void the
+    // doll is fitted. The double tap is counted by hand: `dblclick` under touch-action:none is
+    // unreliable on iOS. ──
+    const ray = new THREE.Raycaster();
+    const ndc = new THREE.Vector2();
+    const pivotOrFit = (x: number, y: number) => {
+      const r = gl.getBoundingClientRect();
+      ndc.set(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1);
+      ray.setFromCamera(ndc, cam);
+      const hit = ray.intersectObjects(cloth.children, false)[0];
+      if (!hit) return refit(VIEW_MS);
+      flushDamping();
+      sph.setFromVector3(off.copy(cam.position).sub(hit.point));
+      animateTo(hit.point.clone(), { r: sph.radius, phi: sph.phi, theta: sph.theta }, PIVOT_MS);
+      leave();
+    };
+    let pointerType = 'mouse';
+    let down: { x: number; y: number } | null = null;
+    let lastTap: { t: number; x: number; y: number } | null = null;
+    const onDown = (e: PointerEvent) => {
+      pointerType = e.pointerType;
+      down = { x: e.clientX, y: e.clientY };
+    };
+    const onUp = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch' || !down) return;
+      const tap = { t: performance.now(), x: e.clientX, y: e.clientY };
+      const still = Math.hypot(tap.x - down.x, tap.y - down.y) < 10;
+      down = null;
+      if (!still) {
+        lastTap = null;
+        return;
+      }
+      if (isDoubleTap(lastTap, tap)) {
+        lastTap = null;
+        pivotOrFit(tap.x, tap.y);
+      } else lastTap = tap;
+    };
+    const onDbl = (e: MouseEvent) => {
+      if (pointerType !== 'touch') pivotOrFit(e.clientX, e.clientY);
+    };
+    gl.addEventListener('pointerdown', onDown);
+    gl.addEventListener('pointerup', onUp);
+    gl.addEventListener('dblclick', onDbl);
 
     const resize = () => {
       const w = el.clientWidth;
@@ -200,6 +400,8 @@ export function DollCanvas({
       cam.aspect = w / h;
       cam.updateProjectionMatrix();
       for (const m of api.current?.materials.keys() ?? []) m.resolution.set(w, h);
+      // Untouched, the doll stays fitted when the canvas turns or changes height.
+      if (api.current && !api.current.moved && !anim) refit(0);
       request();
     };
     const ro = new ResizeObserver(resize);
@@ -220,6 +422,8 @@ export function DollCanvas({
       poms,
       pins: [],
       request,
+      refit,
+      box: null,
       fitted: null,
       moved: false,
       materials: new Map(),
@@ -229,6 +433,11 @@ export function DollCanvas({
     resize();
     return () => {
       ro.disconnect();
+      cancelAnimationFrame(raf);
+      el.removeEventListener('wheel', onWheel, { capture: true });
+      gl.removeEventListener('pointerdown', onDown);
+      gl.removeEventListener('pointerup', onUp);
+      gl.removeEventListener('dblclick', onDbl);
       for (const g of [cloth, seams, poms]) clear(g);
       controls.dispose();
       renderer.dispose();
@@ -358,22 +567,15 @@ export function DollCanvas({
       if (b.isEmpty()) a.geom.computeBoundingBox();
       if (b.isEmpty() && a.geom.boundingBox) b.copy(a.geom.boundingBox);
       const c = b.getCenter(new THREE.Vector3());
-      const size = b.getSize(new THREE.Vector3());
       const floor = a.scene.getObjectByName('floor');
       if (floor) floor.position.set(c.x, b.min.y - 40, c.z);
-      a.controls.target.copy(c);
-      // Fit height and width alike: the view is wider than tall, the doll's sleeves are wide.
-      const r = Math.max(size.y * 1.1, (size.x * 1.1) / Math.max(0.3, a.cam.aspect), 300);
-      const dist = r / 2 / Math.tan(THREE.MathUtils.degToRad(a.cam.fov / 2)) + size.z;
-      a.cam.near = dist / 50;
-      a.cam.far = dist * 20;
-      a.cam.updateProjectionMatrix();
-      const d = PRESET_DIR[camera ?? 'front'];
-      a.cam.position.copy(c).add(new THREE.Vector3(...d).normalize().multiplyScalar(dist * 1.08));
-      a.controls.update();
+      a.box = b;
+      // A new solve opens on its preset; the settled frame keeps the untouched view's angle.
+      a.refit(0, sameSolve ? cameraRef.current ?? undefined : cameraRef.current ?? 'front');
       a.fitted = fitKey;
-      a.moved = false;
     }
+    // The raycasts (double click, the label's view) read the cloth where it is now.
+    for (const m of a.cloth.children) (m as THREE.Mesh).geometry.computeBoundingSphere();
     a.request();
   };
 
@@ -387,6 +589,7 @@ export function DollCanvas({
     clear(a.poms);
     a.geom = null;
     a.topoKey = null;
+    a.box = null;
     a.request();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [solveKey]);
@@ -528,39 +731,17 @@ export function DollCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pomLines, showPom, hoverPom]);
 
-  // ── preset cameras ──
+  // ── preset cameras: refit, turning to the preset by the shortest way round the side ──
   useEffect(() => {
     const a = api.current;
-    if (!a || !camera || !a.geom) return;
-    const target = a.controls.target.clone();
-    const dist = a.cam.position.distanceTo(target);
-    const to = target
-      .clone()
-      .add(new THREE.Vector3(...PRESET_DIR[camera]).normalize().multiplyScalar(dist));
-    const from = a.cam.position.clone();
-    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    if (reduce) {
-      a.cam.position.copy(to);
-      a.controls.update();
-      return;
-    }
-    // 220 ms ease-out-quart along the sphere around the target.
-    const t0 = performance.now();
-    const fromDir = from.clone().sub(target).normalize();
-    const toDir = to.clone().sub(target).normalize();
-    let raf = 0;
-    const step = () => {
-      const t = Math.min(1, (performance.now() - t0) / 220);
-      const k = 1 - Math.pow(1 - t, 4);
-      const dir = fromDir.clone().lerp(toDir, k);
-      if (dir.lengthSq() < 1e-6) dir.copy(toDir);
-      a.cam.position.copy(target).add(dir.normalize().multiplyScalar(dist));
-      a.controls.update();
-      if (t < 1) raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
+    if (!a || !camera || !a.box) return;
+    a.refit(VIEW_MS, camera);
   }, [camera]);
+
+  // ── fit on demand (the `fit` chip, the F key) ──
+  useEffect(() => {
+    if (fitSignal) api.current?.refit(VIEW_MS);
+  }, [fitSignal]);
 
   const pins = [...seamPins, ...pomPins];
   return (

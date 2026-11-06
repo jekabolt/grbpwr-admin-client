@@ -15,7 +15,7 @@ import type { EdgeId } from 'lib/assembly-skeleton/types';
 import { liftMeasureLine } from 'lib/doll/lift';
 import { compareToSizeChart, POM, type ChartCell } from 'lib/pom';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import { useWatch } from 'react-hook-form';
 import { Chip, ChipRow, GroupLabel, Section, Text, ViewSwitch, type ViewSwitchOption } from 'ui';
 
@@ -68,6 +68,7 @@ export default function DollOverlay({ open, onClose }: { open: boolean; onClose:
   const [lining, setLining] = useState(false);
   const [showPom, setShowPom] = useState(false);
   const [camera, setCamera] = useState<CameraPreset | null>('front');
+  const [fitSignal, setFitSignal] = useState(0);
   const at = size && card?.sizes.includes(size) ? size : card?.baseSize ?? '';
   const hasLining = !!card?.factsOf(card.baseSize)?.pieces.some((p) => p.cloth === 'lining');
 
@@ -179,6 +180,23 @@ export default function DollOverlay({ open, onClose }: { open: boolean; onClose:
         ? `the doll could not be built: ${solve.error}`
         : `${stateLine(report!)} · solved in ${secs(solve.doneMs)}`;
 
+  // F fits the doll, 1–4 turn it to a view; not while typing, not under cmd/ctrl/alt.
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+    const t = e.target as HTMLElement;
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable) return;
+    if (e.key === 'f' || e.key === 'F') {
+      e.preventDefault();
+      setFitSignal((n) => n + 1);
+      return;
+    }
+    const view = CAMERAS[Number(e.key) - 1]?.value;
+    if (view && /^[1-4]$/.test(e.key)) {
+      e.preventDefault();
+      setCamera(view);
+    }
+  };
+
   return (
     <Dialog.Root
       open={open}
@@ -195,6 +213,7 @@ export default function DollOverlay({ open, onClose }: { open: boolean; onClose:
           data-doll-first-frame-ms={solve?.firstFrameMs?.toFixed(0) ?? ''}
           data-doll-done-ms={solve?.doneMs?.toFixed(0) ?? ''}
           data-doll-vertices={report?.stats.vertices ?? ''}
+          onKeyDown={onKeyDown}
           className='fixed inset-0 z-[var(--z-modal)] flex flex-col gap-gutter overflow-y-auto bg-pageBg p-4 text-textColor focus:outline-none lg:overflow-hidden'
         >
           <Dialog.Title className='sr-only'>paper doll</Dialog.Title>
@@ -263,6 +282,7 @@ export default function DollOverlay({ open, onClose }: { open: boolean; onClose:
                   showPom={showPom}
                   hoverPom={hoverPom}
                   camera={camera}
+                  fitSignal={fitSignal}
                   onCameraLeft={() => setCamera(null)}
                   onFrame={() => {
                     const w = window as Window & { __dollFrames?: number };
