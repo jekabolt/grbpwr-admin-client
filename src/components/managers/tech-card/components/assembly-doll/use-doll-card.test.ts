@@ -7,7 +7,7 @@ import type { StoredFold } from 'lib/folds';
 
 import { card77Facts } from '../step-seams/card77.fixture';
 import { foldRowsSig } from '../assembly-folds/folds-store';
-import { dollKey, dollRequest, type DollCard } from './use-doll-card';
+import { dollKey, dollRequest, dollSizeLabels, type DollCard } from './use-doll-card';
 
 // Beta card 85, SLV_L: the two stored inward rows of its double hem (02.11.2026). Card 85 is a
 // copy of card 77's real DXF outlines, remapped from the readable piece name to this line key.
@@ -101,6 +101,7 @@ function cardOf(facts: ReadonlyMap<string, SkeletonFacts>, rows = sleeveRows): D
     baseSize: sizes[0],
     sizes,
     sizeLabel: (size) => size,
+    cardSizeOf: (s: string) => s,
     factsOf: (size) => facts.get(size) ?? null,
     missingOf: () => [],
     rows: [],
@@ -172,4 +173,34 @@ describe('dollRequest folds', () => {
       { seq: 2, applied: true },
     ]);
   }, 60_000);
+});
+
+describe('dollSizeLabels', () => {
+  const trousers = ['xs_28bo_m', 's_30bo_m', 'm_32bo_m', 'l_34bo_m', 'xl_36bo_m'];
+  const label = (dxf: string[], card: string[]) =>
+    Object.fromEntries([...dollSizeLabels(dxf, card)].map(([k, v]) => [k, v.label]));
+
+  it('a code in the DXF shows the code of the card size it stands for', () => {
+    const m = dollSizeLabels(['xs', 's', 'm', 'l', 'xl'], trousers);
+    expect([...m.values()].map((v) => v.label)).toEqual(['XS', 'S', 'M', 'L', 'XL']);
+    expect(m.get('m')?.cardSize).toBe('m_32bo_m');
+  });
+
+  it('a whole dictionary name in the DXF is split into tokens', () => {
+    expect(label(['m_32bo_m', 'xs_28bo_m', 'M32BOM'], trousers)).toEqual({
+      m_32bo_m: 'M',
+      xs_28bo_m: 'XS',
+      M32BOM: 'M',
+    });
+  });
+
+  it('the trailing system letter does not pick another size', () => {
+    // «_m» of xs_28bo_m names the size m too; the leading code decides.
+    expect(label(['xs_28bo_m'], ['xs', 'm'])).toEqual({ xs_28bo_m: 'XS' });
+  });
+
+  it('bare card sizes get capitals; nothing or two matches keep the DXF name', () => {
+    expect(label(['m', 'xxxl', ''], ['s', 'm', 'l'])).toEqual({ m: 'M' });
+    expect(label(['x_a'], ['x_1', 'x_2'])).toEqual({});
+  });
 });

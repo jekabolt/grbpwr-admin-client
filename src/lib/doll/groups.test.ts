@@ -50,6 +50,54 @@ describe('owner surface rows', () => {
   it('never take a shell panel out of the solve', () => {
     expect(placedByOwner(grouped('BACK', [surface('part', 'front')]))).toBe(false);
   });
+
+  it('keeps a shell composite whose first target is a surface piece', () => {
+    const geom = (pieceKey: string, name: string, areaMm2 = 100000) => ({
+      ...piece(pieceKey, name, areaMm2),
+      edges: [
+        {
+          id: `${pieceKey}#0`,
+          k: 0,
+          lenMm: 10,
+          s: 0,
+          e: 1,
+          pts: [
+            [0, 0],
+            [10, 0],
+          ],
+        },
+      ],
+    });
+    const cap: SeamCandidate = {
+      a: 'sleeve#0',
+      b: 'pocket#0',
+      bParts: ['pocket#0', 'front#0'],
+      kind: 'edge',
+      score: 1,
+      evidence: {} as SeamCandidate['evidence'],
+    };
+    const result = groupPieces(
+      {
+        pieces: [
+          geom('sleeve', 'SLV_L'),
+          geom('pocket', 'PCK_L_MAIN', 10000),
+          geom('front', 'P_L_MAIN'),
+        ],
+        chosen: [cap],
+        rejected: [],
+        components: [['sleeve', 'pocket', 'front']],
+      } as unknown as Parameters<typeof groupPieces>[0],
+      { pieces: [], category: 'shirt' } as unknown as Parameters<typeof groupPieces>[1],
+      { owner: true },
+    );
+
+    expect(result.skipped).toEqual(
+      expect.arrayContaining([expect.objectContaining({ pieceKey: 'pocket', surface: true })]),
+    );
+    expect(result.seams).toHaveLength(1);
+    expect(result.seams[0].a).toEqual(['sleeve#0']);
+    expect(result.seams[0].b).toEqual(['pocket#0', 'front#0']);
+  });
 });
 
 describe('gapStretchesOf: one edge sewn with a gap', () => {

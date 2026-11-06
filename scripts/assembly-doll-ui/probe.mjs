@@ -303,6 +303,27 @@ const open3d = async () => {
   await page.getByRole('button', { name: '3d', exact: true }).click();
   await page.locator('[data-doll-overlay]').waitFor();
 };
+// The report, as the rows the old ASSEMBLY CHECK strip listed (kind + the engine's words): the
+// strip is gone from the screen, the overlay leaves the report on `window.__dollReport`.
+const dollRows = () =>
+  page.evaluate(() => {
+    const r = window.__dollReport;
+    if (!r) return [];
+    const rows = [];
+    if (r.notGarment) rows.push({ kind: 'not a garment', text: r.notGarment });
+    for (const w of r.contradictions ?? []) rows.push({ kind: 'contradiction', text: w });
+    for (const x of r.seams ?? [])
+      if (x.origin !== 'layer' && !['closed', 'eased'].includes(x.state))
+        rows.push({ kind: x.state, text: `${Math.round(x.residualMaxMm)} mm · ${x.note ?? ''}` });
+    for (const x of r.notSewn ?? []) rows.push({ kind: 'not sewn', text: x.note });
+    for (const x of r.surface ?? [])
+      rows.push({ kind: x.placed ? 'on a panel' : 'not placed', text: x.note });
+    if (!r.notGarment)
+      for (const f of r.floating ?? [])
+        rows.push({ kind: 'floating', text: `${f.pieceKey} · ${f.reason}` });
+    for (const w of r.rows?.words ?? []) rows.push({ kind: 'stored rows', text: w });
+    return rows;
+  });
 const timings = [];
 const timing = async (label) => {
   const t = await page.evaluate(() => {
@@ -383,14 +404,8 @@ if (!ONLY) {
     `${tSS.first.toFixed(0)} ms`,
   );
   ck(tSS.verts <= 20000, '≤ 20k vertices', `${tSS.verts}`);
-  const honesty = await page.locator('[data-doll-honesty]').innerText();
-  ck(
-    /paper doll — shape approximate, no fabric or body · measures from the pattern laid flat \(seam lines\) · size M/i.test(
-      honesty,
-    ),
-    'header honesty line verbatim',
-    honesty,
-  );
+  const sizeOn = await page.locator('[aria-label="size"] [aria-checked="true"]').innerText();
+  ck(/^M$/i.test(sizeOn.trim()), 'header: size M is the one on', sizeOn);
   const stateSS = await page.locator('[data-doll-state]').innerText();
   console.log(`  state: ${stateSS}`);
   ck(/seams? closed/.test(stateSS), 'state line in words');
@@ -403,13 +418,20 @@ if (!ONLY) {
   console.log(
     `  exactness: ${JSON.stringify(exWords.reduce((a, w) => ((a[w] = (a[w] ?? 0) + 1), a), {}))}`,
   );
+  // A measure off its spec carries one red «Δ +1.2» on its row; spec rows live in the title.
   const specs = await page.locator('[data-pom-spec]').allInnerTexts();
-  console.log(`  spec rows: ${specs.join(' | ')}`);
-  ck(specs.length >= 3, 'spec + Δ shown where the (stand) chart has a value');
+  console.log(`  off spec: ${specs.join(' | ') || 'none'}`);
   ck(
-    specs.some((t) => /±1\.0 default/.test(t)),
-    'tolerance said as «±1.0 default»',
+    specs.every((t) => /^Δ [+−]\d+\.\d$/i.test(t.trim())),
+    'an off-spec measure reads «Δ ±N.N» on its row',
+    specs.join(' | '),
   );
+  const specTitles = await page
+    .locator('[data-pom-row]')
+    .evaluateAll((els) =>
+      els.map((e) => e.getAttribute('title') ?? '').filter((t) => /spec/.test(t)),
+    );
+  ck(specTitles.length >= 3, 'spec + Δ said in the row titles where the (stand) chart has a value');
   await page.locator('[data-doll-toggle="pom"]').click();
   await wait(400);
   await shot('02-overlay-ss26-front-pom-lines');
@@ -433,10 +455,8 @@ if (!ONLY) {
     'orbit holds 60 fps: rAF ≥ 55/s, no long task during the drag',
     `${fpsSS.raf.toFixed(1)}/s · ${fpsSS.long} long`,
   );
-  // the report strip
-  const reportRowsSS = await page
-    .locator('[data-doll-row]')
-    .evaluateAll((els) => els.map((e) => e.getAttribute('data-doll-row')));
+  // the report (no strip on screen: read as data)
+  const reportRowsSS = (await dollRows()).map((r) => r.kind);
   console.log(
     `  report rows: ${JSON.stringify(reportRowsSS.reduce((a, w) => ((a[w] = (a[w] ?? 0) + 1), a), {}))}`,
   );
@@ -452,8 +472,10 @@ if (!ONLY) {
   const tS = await timing('SS26-005 S (engine)');
   ck(tS.first <= 1500, 'size S: first frame ≤ 1.5 s', `${tS.first.toFixed(0)} ms`);
   ck(
-    /size S/.test(await page.locator('[data-doll-honesty]').innerText()),
-    'honesty line follows the size',
+    /^S$/.test(
+      (await page.locator('[aria-label="size"] [aria-checked="true"]').innerText()).trim(),
+    ),
+    'the header follows the size',
   );
   await wait(300);
   await shot('05-size-switch-S');
@@ -576,13 +598,6 @@ const card49 = {
     },
   },
 };
-const dollRows = () =>
-  page.locator('[data-doll-row]').evaluateAll((els) =>
-    els.map((e) => ({
-      kind: e.getAttribute('data-doll-row'),
-      text: e.innerText.replace(/\n+/g, ' · '),
-    })),
-  );
 const floatingOf = (rows) => rows.filter((r) => r.kind === 'floating');
 
 head('beta card 49 (double yoke) — engine and the order only, no stored rows');
@@ -727,8 +742,8 @@ ck(await overlayDone(), 'solved');
 rr49 = await dollRows();
 const said = rr49.filter((r) => r.kind === 'stored rows');
 ck(
-  said.some((r) => /no longer on the card/.test(r.text) && !/01M4J/.test(r.text)),
-  'the wrongly keyed row is a visible «stored rows» line in ASSEMBLY CHECK (pieces by name)',
+  said.some((r) => /no longer on the card/.test(r.text)),
+  'the wrongly keyed row is a «stored rows» line of the report',
   said.map((r) => r.text.slice(0, 160)).join(' | '),
 );
 await page.keyboard.press('Escape');
@@ -752,11 +767,9 @@ if (!ONLY) {
     const t = await timing(label);
     ck(t.first <= 1500, 'first frame ≤ 1.5 s', `${t.first.toFixed(0)} ms`);
     console.log(`  state: ${await page.locator('[data-doll-state]').innerText()}`);
-    const rr = await page.locator('[data-doll-row]').allInnerTexts();
-    rr.slice(0, 6).forEach((x) => console.log(`  row: ${x.replace(/\n+/g, ' | ')}`));
+    const rr = await dollRows();
+    rr.slice(0, 6).forEach((x) => console.log(`  row: ${x.kind} · ${x.text.slice(0, 160)}`));
     await shot(name);
-    if (rr.some((x) => /^open/i.test(x)))
-      await shot(`${name}-report-open-seam`, '[data-doll-report]');
     const f = await orbitFps();
     console.log(
       `  orbit: ${f.fps.toFixed(1)} frames drawn/s · rAF ${f.raf.toFixed(1)}/s · ${f.long} long tasks`,

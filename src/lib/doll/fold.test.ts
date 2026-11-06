@@ -235,6 +235,7 @@ describe('solveDoll folds', () => {
     const { facts, graph, options } = fixture(false);
     const report = solveDoll({ graph, facts, options: { ...options, folds: { P: [middle()] } } });
     expect(report.floating.some((f) => f.pieceKey === 'P')).toBe(true);
+    expect(report.panels.some((p) => p.pieceKey === 'P')).toBe(false);
     const f = report.folds![0];
     expect(f.applied).toBe(true);
     expect(f.finishedWidthMm).toBeCloseTo(20, 0);
@@ -249,9 +250,10 @@ describe('solveDoll folds', () => {
     const { facts, graph, options } = fixture(true, true);
     const report = solveDoll({ graph, facts, options: { ...options, folds: { P: [middle()] } } });
     expect(report.stats.nan).toBe(0);
-    // Both drift from the body as one lot, laid as the chart laid them — the front says so.
+    // Both remain one reported lot, but neither is emitted in the garment mesh.
     expect(report.floating.map((f) => f.pieceKey).sort()).toEqual(['F', 'P']);
     expect(report.floating.find((f) => f.pieceKey === 'F')!.reason).toContain('drawn apart with P');
+    expect(report.panels.some((p) => p.pieceKey === 'F' || p.pieceKey === 'P')).toBe(false);
     // The seam inside the lot is a seam, drawn closed — not a row that "cannot be drawn".
     const fp = report.seams.find((s) => s.id === 'F#1~P#3');
     expect(fp).toBeDefined();

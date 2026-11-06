@@ -1,14 +1,13 @@
 // THE MEASURES RAIL (01-DESIGN-L0 §5.5, §6): every standard POM of the selected size read off the
-// pattern laid flat, with its exactness in words and — when the card's size chart has a value for
-// the dictionary name it maps to — the spec and Δ within the display tolerance (±1 cm, «default»
-// until the card stores one). Hovering a row lights its line on the doll (one shared hover).
+// pattern laid flat, one line each: name · half · value cm, and a red «Δ +1.2» when the card's size
+// chart has a spec the pattern misses beyond the tolerance. The exactness, its reason and the
+// spec rows live in the row's title. Hovering a row lights its line on the doll (one shared hover).
 //
-// Monochrome: the value is ink, an approximate value is said so in words, a missing one is «—»;
-// a Δ beyond the tolerance takes the blue `check` pill (DESIGN.md, the Monochrome Rule).
+// Monochrome: an exact value is ink, an approximate one grey, a missing one «—».
 
 import { DICTIONARY_POM, type ChartComparison, type GarmentKind, type PomValue } from 'lib/pom';
 import { cn } from 'lib/utility';
-import { Pill, Text } from 'ui';
+import { Text } from 'ui';
 
 import { setHoverPom } from './doll-store';
 import { cm, exactnessWords, namedKeys, specWords } from './words';
@@ -51,7 +50,22 @@ export function PomRail({
       {values.map((v) => {
         const ex = exactnessWords(v, names);
         const comps = comparisonsOf(v.code, garment, comparisons);
-        const off = comps.some((c) => c.within === false);
+        // The first spec the pattern misses beyond the tolerance: «Δ +1.2» in red on the row.
+        const miss = comps.find((c) => c.within === false && c.deltaMm != null);
+        const offBy =
+          miss?.deltaMm == null
+            ? null
+            : `${miss.deltaMm > 0 ? '+' : '−'}${cm(Math.abs(miss.deltaMm))}`;
+        // Everything else about the measure is said on hover, not on the row.
+        const said = [
+          v.name,
+          [ex.word, ex.why].filter(Boolean).join(' · '),
+          ...(v.detail ?? []).map((d) => namedKeys(d, names)),
+          v.valueMm != null && !drawn.has(v.code) ? 'line not on this doll' : '',
+          ...comps.map((c) => `${c.name} · ${specWords(c)}`),
+        ]
+          .filter(Boolean)
+          .join('\n');
         const hot = hover === v.code;
         const value = v.valueMm == null ? '—' : cm(v.valueMm);
         const girth = v.halfMm !== undefined;
@@ -62,6 +76,7 @@ export function PomRail({
             data-pom-exactness={v.exactness}
             tabIndex={0}
             aria-label={`${v.name}: ${value === '—' ? 'not found' : `${value} cm`}, ${ex.word}`}
+            title={said}
             onMouseEnter={() => setHoverPom(v.code)}
             onFocus={() => setHoverPom(v.code)}
             onBlur={() => setHoverPom(null)}
@@ -71,11 +86,7 @@ export function PomRail({
             )}
           >
             <div className='flex items-baseline gap-2'>
-              <Text
-                component='span'
-                className={cn('min-w-0 flex-1 truncate', hot && 'font-bold')}
-                title={v.name}
-              >
+              <Text component='span' className={cn('min-w-0 flex-1 truncate', hot && 'font-bold')}>
                 {v.name.toLowerCase()}
               </Text>
               {girth && v.valueMm != null && (
@@ -98,42 +109,18 @@ export function PomRail({
                   </Text>
                 )}
               </Text>
-            </div>
-            <div className='flex items-baseline gap-2'>
-              <Text
-                component='span'
-                size='micro'
-                variant='label'
-                className='min-w-0 flex-1 truncate'
-                title={[ex.word, ex.why, ...(v.detail ?? []).map((d) => namedKeys(d, names))]
-                  .filter(Boolean)
-                  .join(' · ')}
-              >
-                <span className={cn(v.exactness === 'exact' && 'text-textColor')}>{ex.word}</span>
-                {ex.why ? ` · ${ex.why}` : ''}
-                {v.valueMm != null && !drawn.has(v.code) ? ' · line not on this doll' : ''}
-              </Text>
-              {off && (
-                <Pill
-                  tone='attention'
-                  title='the pattern is off its spec by more than the tolerance'
+              {offBy != null && (
+                <Text
+                  component='span'
+                  size='micro'
+                  variant='error'
+                  className='tabular-nums'
+                  data-pom-spec='off'
                 >
-                  check
-                </Pill>
+                  Δ {offBy}
+                </Text>
               )}
             </div>
-            {comps.map((c) => (
-              <Text
-                key={`${c.name}`}
-                component='p'
-                size='micro'
-                variant='label'
-                className='tabular-nums'
-                data-pom-spec={c.within === false ? 'off' : 'within'}
-              >
-                {c.name} · {specWords(c)}
-              </Text>
-            ))}
           </li>
         );
       })}

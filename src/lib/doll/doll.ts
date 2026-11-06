@@ -94,6 +94,7 @@ import {
   planSurfaceByRows,
   resample,
   rowParts,
+  shellSeamsUnderSurfaceRows,
   type RowLay,
 } from './surface-rows';
 import {
@@ -134,7 +135,12 @@ const CLEAR = 0; // the proxy is already EPS_WRAP smaller than the cloth: no ext
 const EPS_WRAP = 0.04; // paper needs slack to wrap (design §3.3)
 const ASPECT = 1.3; // chest wider than deep
 const ARM_DEG = 42; // A-pose: arms 42° off vertical
+const FREE_CAP_TURN = (25 * Math.PI) / 180; // a free cap's registration turns the arm at most this much
 const PROXY_K = 0.93; // proxies push to 93 % of the cloth's own girth: a guide, never a stretcher
+const LAYERED_BODY_ANCHOR_K = 0.0045; // a two-ply shell keeps weak memory of its placed shape
+const LOOSE_BEND_K = 0.03;
+const BODY_BEND_K = 0.1;
+const LAYERED_BODY_BEND_K = 0.3;
 // One-piece collar (no separate stand): where it rolls over, as a share of its depth at the CB.
 // The pattern carries no roll-line mark. Half: the fall covers the stand down to the neck seam and
 // no further — below the seam the body widens far faster than a collar's outer edge is longer than
@@ -850,6 +856,8 @@ type Work = {
   foldedMm?: number;
   /** Found from the technologist's order (a declared join the graph had no seam for). */
   fromOrder?: boolean;
+  /** Exact sleeve-cap row used to register a sleeve on the body; keep the attachment structural. */
+  sleeveCap?: boolean;
   /** L4: a seam a person confirmed (stored row) — never released; open at the end = contradiction. */
   confirmed?: boolean;
   /** Owner mode: whether an operation names this confirmed row. */
@@ -868,6 +876,13 @@ type Work = {
    * crotch is never released as «tearing the paper», and never read as crossing the doll.
    */
   crotch?: boolean;
+  /**
+   * A confirmed row whose walk starts or ends on a laid piece: sewn over its drawn parts, reported
+   * once the piece is laid, measured over the whole row (the laid stretch included). Its whole
+   * sides and the laid pieces its walk runs onto; `over`: the shell edges the row is sewn over in
+   * place of its parts on laid pieces.
+   */
+  laidEnds?: { a: EdgeId[]; b: EdgeId[]; off: string[]; over?: EdgeId[] };
 };
 
 /**
@@ -1478,6 +1493,142 @@ export function solveDoll(input: DollInput): DollReport {
     ...(owner ? { layers: layerRelations, owner: true } : {}),
   });
   warnings.push(...G.warnings);
+  // Plan owner surface pieces before the structural solve. Besides placing them later, this tells
+  // which row lays a pocket on its host, so a step row/guess that catches the pocket over an exact
+  // shell row can join the drawn shell now; the pocket itself is laid only afterward.
+  const ownerSurface = new Map(
+    graph.chosen.flatMap((candidate) =>
+      owner && candidate.kind === 'surface' && candidate.surface
+        ? [[candidate.surface.part, candidate.surface] as const]
+        : [],
+    ),
+  );
+  const geomOfKey = new Map(graph.pieces.map((g) => [g.pieceKey, g]));
+  const shellHosts = new Set(
+    G.pieces
+      .filter((P) => P.group === 'LEG_L' || P.group === 'LEG_R' || P.group === 'BODY')
+      .map((P) => P.key),
+  );
+  const rowLays: Map<string, RowLay> = owner
+    ? planSurfaceByRows({
+        parts: G.skipped.filter((x) => x.surface).map((x) => x.pieceKey),
+        fixed: new Map(
+          [...ownerSurface].flatMap(([part, s]) =>
+            shellHosts.has(s.host) ? [[part, { host: s.host, T: s.T }] as const] : [],
+          ),
+        ),
+        hosts: shellHosts,
+        geoms: geomOfKey,
+        rows: graphIn.chosen.filter(
+          (c) => isConf(c) && c.kind !== 'surface' && c.kind !== 'closure-not-seam',
+        ),
+      })
+    : new Map();
+  /** Rows solved over drawn shell edges in place of a stretch on a surface piece. */
+  const laidOverShell = new Map<
+    GroupedSeam,
+    { a: EdgeId[]; b: EdgeId[]; off: string[]; over: EdgeId[] }
+  >();
+  const surfaceShellSeams: GroupedSeam[] = [];
+  /** Confirmed direct shell rows with no step whose join is supplied by the two surface rows. */
+  const shellCoveredSeamKeys = new Set<string>();
+  if (owner) {
+    const bridges = shellSeamsUnderSurfaceRows({
+      rows: graphIn.chosen.filter(
+        (c) => (isConf(c) || isGuess(c)) && c.kind !== 'surface' && c.kind !== 'closure-not-seam',
+      ),
+      shellRows: joinsNotSewn,
+      lays: rowLays,
+      drawn: shellHosts,
+      leadEdge: G.leadEdge,
+    });
+    for (const bridge of bridges) {
+      const grouped: GroupedSeam = { seam: bridge.row, a: bridge.a, b: bridge.b };
+      surfaceShellSeams.push(grouped);
+      laidOverShell.set(grouped, {
+        a: bridge.originalA,
+        b: bridge.originalB,
+        off: bridge.off,
+        over: bridge.over,
+      });
+    }
+    const sideSig = (ids: readonly EdgeId[]) => [...ids].sort().join('+');
+    const seamSig = (a: readonly EdgeId[], b: readonly EdgeId[]) =>
+      [sideSig(a), sideSig(b)].sort().join('~');
+    const bridgeSigs = new Set(surfaceShellSeams.map((seam) => seamSig(seam.a, seam.b)));
+    for (const candidate of joinsNotSewn) {
+      const side = (which: 'a' | 'b') =>
+        rowParts(candidate, which).map((part) => G.leadEdge?.(part.id) ?? part.id);
+      if (bridgeSigs.has(seamSig(side('a'), side('b'))))
+        shellCoveredSeamKeys.add(candidate.provenance?.seamKey ?? '');
+    }
+  }
+  // A step picture's guess onto an edge a person's row already sews whole (the collar's neck edge,
+  // sewn to the stand by a row, guessed onto the body by the step that attaches the collar): an
+  // edge takes one seam — the row stands, the guess is not sewn.
+  const guessYield = new Map<string, string>();
+  if (owner) {
+    const lenOfEdge = (id: EdgeId) =>
+      G.pieces.find((P) => P.key === pk(id))?.geom.edges.find((e) => e.id === id)?.lenMm ?? 0;
+    const wholeOn = (c: GroupedSeam, E: EdgeId) => {
+      const r =
+        c.seam.partRange?.[E] ??
+        (c.seam.range && c.a.length === 1 && c.b.length === 1
+          ? c.a[0] === E
+            ? c.seam.range.a
+            : c.seam.range.b
+          : null);
+      return !r || r[1] - r[0] >= 0.9 * lenOfEdge(E);
+    };
+    for (const g of G.seams) {
+      if (!isGuess(g.seam)) continue;
+      for (const side of [g.a, g.b]) {
+        if (side.length !== 1) continue;
+        const E = side[0];
+        const row = G.seams.find(
+          (c) => c !== g && isConf(c.seam) && (c.a.includes(E) || c.b.includes(E)) && wholeOn(c, E),
+        );
+        if (!row) continue;
+        guessYield.set(
+          `${g.seam.a}~${g.seam.b}`,
+          `step ${guessStepOf.get(g.seam.provenance?.seamKey ?? '')} names no row — the step picture's guess puts ${E} where the person's row ${row.seam.a}~${row.seam.b} already sews it; an edge takes one seam, the row stands`,
+        );
+        break;
+      }
+    }
+    // Two step guesses on one edge: one sews it alone onto an edge of about its length, the other
+    // sews it as a part of a run whose parts add up to their partner (a sleeve cap onto the four
+    // parts of its armhole, 541 = 541 mm). Two single edges of a shirt match in length by chance
+    // (a yoke's armhole end onto a front's neckline, 106 ≈ 107 mm); several parts adding up to
+    // their partner do not. The run stands; the single-edge guess is not sewn.
+    const sideLen = (c: GroupedSeam, w: 'a' | 'b') =>
+      [...new Set(c[w])].reduce((t, id) => {
+        const r = c.seam.partRange?.[id];
+        return t + (r ? r[1] - r[0] : lenOfEdge(id));
+      }, 0);
+    const runs = G.seams.filter((c) => {
+      if (!isGuess(c.seam) || guessYield.has(`${c.seam.a}~${c.seam.b}`)) return false;
+      if (new Set(c.a).size < 2 && new Set(c.b).size < 2) return false;
+      const la = sideLen(c, 'a');
+      const lb = sideLen(c, 'b');
+      return Math.abs(la - lb) <= 0.03 * Math.max(la, lb);
+    });
+    for (const g of G.seams) {
+      const id = `${g.seam.a}~${g.seam.b}`;
+      if (!isGuess(g.seam) || guessYield.has(id) || g.a.length !== 1 || g.b.length !== 1) continue;
+      for (const E of [g.a[0], g.b[0]]) {
+        const whole = runs.find(
+          (c) => c !== g && [c.a, c.b].some((side) => new Set(side).size > 1 && side.includes(E)),
+        );
+        if (!whole) continue;
+        guessYield.set(
+          id,
+          `step ${guessStepOf.get(g.seam.provenance?.seamKey ?? '')} names no row — the step picture's guess sews ${E} alone onto ${E === g.a[0] ? g.b[0] : g.a[0]}, but step ${guessStepOf.get(whole.seam.provenance?.seamKey ?? '')}'s guess sews it as a part of ${whole.a.join('+')} ↔ ${whole.b.join('+')} (${sideLen(whole, 'a').toFixed(0)} ≈ ${sideLen(whole, 'b').toFixed(0)} mm); an edge takes one seam — the run that adds up stands`,
+        );
+        break;
+      }
+    }
+  }
   // LEGS FROM THE DRAWING (trousers). A leg is the front and the back sewn by their inseam /
   // outseam, with whatever is sewn on top of them (a yoke unit, a pocket bag): the pieces joined by
   // seams that are not the crotch (left ↔ right panel) and not between mirror twins. Which leg is
@@ -1775,13 +1926,55 @@ export function solveDoll(input: DollInput): DollReport {
       }
   }
 
+  const lenOfEdge = new Map<string, number>();
+  for (const P of G.pieces) for (const e of P.geom.edges) lenOfEdge.set(e.id, e.lenMm);
+  /**
+   * Exact stretches of a side, including the matching gap on its partner. A row can name two
+   * separate stretches of one edge against one continuous stretch of another equal-span edge (the
+   * picker stores the latter as its hull). Sewing the hull to the concatenated stretches gathers a
+   * panel that the card did not shorten. Preserve the gap at the same place on the equal-span edge.
+   */
+  const sewnStretchesOf = (g: GroupedSeam, side: 'a' | 'b') => {
+    const direct = gapStretchesOf(g, side);
+    if (direct) return direct;
+    const otherSide = side === 'a' ? 'b' : 'a';
+    const other = gapStretchesOf(g, otherSide);
+    const ids = side === 'a' ? g.a : g.b;
+    if (!other || ids.length !== 1 || other.length < 2) return null;
+    const otherIds = new Set(other.map(({ id }) => id));
+    if (otherIds.size !== 1 || other.some(({ range }) => !range)) return null;
+    const id = ids[0];
+    const otherId = other[0].id;
+    const ownHull = g.seam.partRange?.[id] ?? ([0, lenOfEdge.get(id) ?? 0] as [number, number]);
+    const otherHull =
+      g.seam.partRange?.[otherId] ??
+      ([
+        Math.min(...other.map(({ range }) => range![0])),
+        Math.max(...other.map(({ range }) => range![1])),
+      ] as [number, number]);
+    const ownLen = ownHull[1] - ownHull[0];
+    const otherLen = otherHull[1] - otherHull[0];
+    if (
+      ownLen <= 0 ||
+      otherLen <= 0 ||
+      Math.abs(ownLen - otherLen) > Math.max(5, 0.03 * Math.max(ownLen, otherLen))
+    )
+      return null;
+    return other.map(({ range, reversed }) => ({
+      id,
+      range: [
+        ownHull[0] + ((range![0] - otherHull[0]) * ownLen) / otherLen,
+        ownHull[0] + ((range![1] - otherHull[0]) * ownLen) / otherLen,
+      ] as [number, number],
+      ...(reversed === undefined ? {} : { reversed }),
+    }));
+  };
+
   // L4: confirmed rows that cannot be what they say, before solving (lengths, an edge sewn twice).
   const preContradictions: string[] = [];
   if (l4) {
-    const lenOfEdge = new Map<string, number>();
-    for (const P of G.pieces) for (const e of P.geom.edges) lenOfEdge.set(e.id, e.lenMm);
     const sideLen = (g: GroupedSeam, side: 'a' | 'b') => {
-      const gapped = gapStretchesOf(g, side);
+      const gapped = sewnStretchesOf(g, side);
       if (gapped)
         return gapped.reduce(
           (t, { id, range }) => t + (range ? range[1] - range[0] : lenOfEdge.get(id) ?? 0),
@@ -1815,7 +2008,7 @@ export function solveDoll(input: DollInput): DollReport {
         return r ?? [0, lenOfEdge.get(e) ?? 0];
       };
       for (const side of ['a', 'b'] as const) {
-        const gapped = gapStretchesOf(g, side);
+        const gapped = sewnStretchesOf(g, side);
         if (gapped)
           for (const { id: e, range } of gapped)
             usedBy.set(e, [
@@ -1881,9 +2074,52 @@ export function solveDoll(input: DollInput): DollReport {
   const footprints = new Map<string, Pt2[][]>();
   /** Pleat rows of a piece as lines as cut, mm: the mesh leaves them flat, the neck reads them. */
   const neckPleatLines = new Map<string, NeckRows['pleatLines']>();
+  // A gapped seam is constrained one run at a time. Keep every run end as a mesh vertex so
+  // cropPath does not round four ends independently to the coarse (~0.6 h) boundary sampling and
+  // manufacture a length mismatch between otherwise matching stretches.
+  const seamRangeKeep = new Map<string, number[]>();
+  const pieceByEdge = new Map(
+    G.pieces.flatMap((piece) => piece.geom.edges.map((edge) => [edge.id, piece] as const)),
+  );
+  const keepRangeEnd = (id: string, mm: number) => {
+    const piece = pieceByEdge.get(id);
+    const edge = piece?.geom.edges.find((candidate) => candidate.id === id);
+    if (!piece || !edge) return;
+    const ring = piece.geom.rs;
+    const n = ring.length;
+    let q = ((edge.s % n) + n) % n;
+    const end = ((edge.e % n) + n) % n;
+    const target = Math.max(0, Math.min(edge.lenMm, mm));
+    let walked = 0;
+    let best = q;
+    let bestError = target;
+    for (let guard = 0; q !== end && guard <= n; guard++) {
+      const next = (q + 1) % n;
+      walked += Math.hypot(ring[next][0] - ring[q][0], ring[next][1] - ring[q][1]);
+      q = next;
+      const error = Math.abs(walked - target);
+      if (error < bestError) [best, bestError] = [q, error];
+    }
+    seamRangeKeep.set(piece.key, [...(seamRangeKeep.get(piece.key) ?? []), best]);
+  };
+  for (const seam of G.seams) {
+    if (!gapStretchesOf(seam, 'a') && !gapStretchesOf(seam, 'b')) continue;
+    const sides = [sewnStretchesOf(seam, 'a'), sewnStretchesOf(seam, 'b')];
+    if (sides.some((stretches) => !stretches?.length || stretches.some((x) => !x.range))) continue;
+    for (const stretches of sides)
+      for (const stretch of stretches!) {
+        keepRangeEnd(stretch.id, stretch.range![0]);
+        keepRangeEnd(stretch.id, stretch.range![1]);
+      }
+  }
   for (const p of G.pieces) {
     const g = p.geom;
-    const keep = [...g.edges.flatMap((e) => [e.s, e.e]), ...g.notchIdx, ...g.corners];
+    const keep = [
+      ...g.edges.flatMap((e) => [e.s, e.e]),
+      ...g.notchIdx,
+      ...g.corners,
+      ...(seamRangeKeep.get(p.key) ?? []),
+    ];
     const folds = grainFold ? foldsOf(p.key) : [];
     const frame = folds.length ? frameOf(g, grainFold!.get(g.pieceKey) ?? 0) : null;
     const mesh = frame
@@ -2001,11 +2237,53 @@ export function solveDoll(input: DollInput): DollReport {
       len: P.s[keep[keep.length - 1]] - s0,
     };
   };
+  /** A path's vertices over the share `r` (0..1) of its length it is sewn over. */
+  const sewnStretch = (P: Path, r?: [number, number]) =>
+    r && (r[0] > 1e-3 || r[1] < 1 - 1e-3) ? cropPath(P, [r[0] * P.len, r[1] * P.len]).v : P.v;
   const revPath = (P: Path): Path => ({
     v: Int32Array.from([...P.v].reverse()),
     s: Float64Array.from([...P.s].reverse().map((x) => P.len - x)),
     len: P.len,
+    ...(P.runs ? { runs: [...P.runs].reverse().map(revPath) } : {}),
   });
+  /** Pieces laid on a panel's face after the solve (pockets, a fly's flap): never in the mesh. */
+  const laidKeys = new Set(G.skipped.filter((x) => x.surface).map((x) => x.pieceKey));
+  const restLenOf = new Map(
+    graph.pieces.flatMap((p) => p.edges.map((e) => [e.id, e.lenMm] as const)),
+  );
+  /**
+   * A side's stretches in walk order, and the ones the solve can sew: a row whose walk starts or
+   * ends on a piece laid on a panel (a waist run ending on the fly's flap, an armhole run starting
+   * on a pocket) is sewn over its drawn parts; `share` is the part of the side's rest length they
+   * take (null when the whole side is drawn). A laid piece inside the walk, or a part on a piece
+   * neither drawn nor laid, leaves the side unsewable (null).
+   */
+  const laidEndsOf = (g: GroupedSeam, side: 'a' | 'b') => {
+    const ids = side === 'a' ? g.a : g.b;
+    const orig = (
+      side === 'a' ? g.seam.aParts ?? edgeIdsOf(g.seam.a) : g.seam.bParts ?? edgeIdsOf(g.seam.b)
+    ).flatMap((x) => edgeIdsOf(x));
+    const pr = g.seam.partRange ?? {};
+    const all =
+      sewnStretchesOf(g, side) ??
+      ids.map((id, i) => ({ id, range: pr[orig[i]] ?? pr[id], reversed: undefined }));
+    const drawnAt = all.map(({ id }) => panelByKey.has(pk(id)));
+    const first = drawnAt.indexOf(true);
+    const last = drawnAt.lastIndexOf(true);
+    if (first < 0) return null;
+    if (drawnAt.every(Boolean)) return { drawn: all, share: null as [number, number] | null };
+    for (let i = 0; i < all.length; i++)
+      if (!drawnAt[i] && (i > first && i < last ? true : !laidKeys.has(pk(all[i].id)))) return null;
+    const len = all.map(({ id, range }) => (range ? range[1] - range[0] : restLenOf.get(id) ?? 0));
+    const total = len.reduce((x, y) => x + y, 0);
+    if (total <= 0) return null;
+    const before = len.slice(0, first).reduce((x, y) => x + y, 0);
+    const through = len.slice(0, last + 1).reduce((x, y) => x + y, 0);
+    return {
+      drawn: all.slice(first, last + 1),
+      share: [before / total, through / total] as [number, number],
+    };
+  };
   /**
    * L4: a CONFIRMED side as one path — its parts in the stored walk order, each oriented to meet the
    * previous one where they lie now (parts on different pieces meet through other seams), each cut
@@ -2013,16 +2291,14 @@ export function solveDoll(input: DollInput): DollReport {
    */
   const sidePath = (g: GroupedSeam, side: 'a' | 'b'): Path | null => {
     const ids = side === 'a' ? g.a : g.b;
-    const orig = (
-      side === 'a' ? g.seam.aParts ?? edgeIdsOf(g.seam.a) : g.seam.bParts ?? edgeIdsOf(g.seam.b)
-    ).flatMap((x) => edgeIdsOf(x));
     const pr = g.seam.partRange ?? {};
-    const gapped = gapStretchesOf(g, side);
+    const gapped = sewnStretchesOf(g, side);
     const multi = !!gapped || new Set(ids.map(pk)).size > 1 || Object.keys(pr).length > 0;
     if (!multi) return pathOf(ids);
     const parts: Path[] = [];
-    const stretches =
-      gapped ?? ids.map((id, i) => ({ id, range: pr[orig[i]] ?? pr[id], reversed: undefined }));
+    const ends = laidEndsOf(g, side);
+    if (ends === null) return null;
+    const stretches = ends.drawn;
     for (const { id, range } of stretches) {
       const P = pathOf([id]);
       if (!P) return null;
@@ -2080,7 +2356,12 @@ export function solveDoll(input: DollInput): DollReport {
       }
       base += P.len;
     }
-    return { v: Int32Array.from(v), s: Float64Array.from(sv), len: base };
+    return {
+      v: Int32Array.from(v),
+      s: Float64Array.from(sv),
+      len: base,
+      ...(gapped ? { runs: out } : {}),
+    };
   };
   /**
    * A seam's side AS SEWN — the one path every reading of a seam goes by (12.10 review: the
@@ -2142,13 +2423,16 @@ export function solveDoll(input: DollInput): DollReport {
           [g.a, g.b, true],
           [g.b, g.a, false],
         ] as const) {
-          const gapped = gapStretchesOf(g, oneIsA ? 'b' : 'a');
+          const oneSide = oneIsA ? 'a' : 'b';
+          const manySide = oneIsA ? 'b' : 'a';
+          const gapped = gapStretchesOf(g, manySide);
           if (one.length !== 1 || gapStretchesOf(g, oneIsA ? 'a' : 'b')) continue;
           if (gapped ? gapped.length < 2 : new Set(many.map(pk)).size < 2) continue;
           if (![...one, ...many].every((id) => keys.has(pk(id)))) continue;
           const e1 = edgeById.get(one[0]);
           const pr = g.seam.partRange ?? {};
           const stretches = gapped ?? many.map((id) => ({ id, range: pr[id] }));
+          const balanced = gapped ? sewnStretchesOf(g, oneSide) : null;
           const parts = stretches.map(({ id }) => edgeById.get(id));
           if (!e1 || parts.some((e) => !e)) continue;
           const lens = stretches.map(({ range: r }, i) => (r ? r[1] - r[0] : parts[i]!.lenMm));
@@ -2157,8 +2441,12 @@ export function solveDoll(input: DollInput): DollReport {
             let c = 0;
             return stretches.map(({ range: r }, i): ChartSeam => {
               const e = parts[i]!;
-              const f0 = against ? 1 - (c + lens[i]) / L : c / L;
-              const f1 = against ? 1 - c / L : (c + lens[i]) / L;
+              const matched = balanced?.[i]?.range;
+              const along: [number, number] = matched
+                ? [matched[0] / e1.lenMm, matched[1] / e1.lenMm]
+                : [c / L, (c + lens[i]) / L];
+              const f0 = against ? 1 - along[1] : along[0];
+              const f1 = against ? 1 - along[0] : along[1];
               c += lens[i];
               const own: [number, number] = r ? [r[0] / e.lenMm, r[1] / e.lenMm] : [0, 1];
               return {
@@ -2507,9 +2795,41 @@ export function solveDoll(input: DollInput): DollReport {
   const proxyOf = new Int32Array(N).fill(-1);
   const proxyReport: DollProxy[] = [];
   const placed = new Uint8Array(N);
+  /** Panels omitted from garment frames/reports while their diagnostic geometry is still solved. */
+  const hiddenFromView = new Uint8Array(N);
+  for (const P of panels)
+    if (P.group === 'FLOAT') for (let i = 0; i < P.count; i++) hiddenFromView[P.offset + i] = 1;
 
   // ── seams as work items ──────────────────────────────────────────────────────────────────
   const works: Work[] = [];
+  const rowsOfPaths = (
+    A: Path,
+    B: Path,
+    same: boolean,
+    aR: [number, number],
+    bR: [number, number],
+  ) => {
+    if (
+      !A.runs ||
+      !B.runs ||
+      A.runs.length !== B.runs.length ||
+      aR[0] > 1e-6 ||
+      aR[1] < 1 - 1e-6 ||
+      bR[0] > 1e-6 ||
+      bR[1] < 1 - 1e-6
+    )
+      return seamRows(A, B, same, aR, bR);
+    const out: SeamRows = { v: [], b0: [], b1: [], w: [] };
+    for (let i = 0; i < A.runs.length; i++) {
+      const j = same ? i : B.runs.length - 1 - i;
+      const rows = seamRows(A.runs[i], B.runs[j], same);
+      out.v.push(...rows.v);
+      out.b0.push(...rows.b0);
+      out.b1.push(...rows.b1);
+      out.w.push(...rows.w);
+    }
+    return out;
+  };
   const meanDist = (
     A: Path,
     B: Path,
@@ -2517,7 +2837,7 @@ export function solveDoll(input: DollInput): DollReport {
     aR: [number, number],
     bR: [number, number],
   ) => {
-    const r = seamRows(A, B, same, aR, bR);
+    const r = rowsOfPaths(A, B, same, aR, bR);
     const g = rowGaps(pos, r);
     return g.reduce((x, y) => x + y, 0) / Math.max(1, g.length);
   };
@@ -2529,18 +2849,22 @@ export function solveDoll(input: DollInput): DollReport {
       forceSame?: boolean;
       /** L4: the sewn stretch of each side, shares of its path (a stored partial). */
       ranges?: { aR: [number, number]; bR: [number, number] };
+      /** The stretches to choose from, each with its direction (a side sewn over a share). */
+      rangeOptions?: { same: boolean; aR: [number, number]; bR: [number, number] }[];
     },
     passNow: number,
     ramp: number,
   ) => {
-    const options: { same: boolean; aR: [number, number]; bR: [number, number] }[] = [];
+    const options: { same: boolean; aR: [number, number]; bR: [number, number] }[] = [
+      ...(w.rangeOptions ?? []),
+    ];
     if (w.ranges)
       for (const same of w.forceSame === undefined ? [false, true] : [w.forceSame])
         options.push({ same, aR: w.ranges.aR, bR: w.ranges.bR });
     const ratio = Math.min(w.A.len, w.B.len) / Math.max(w.A.len, w.B.len, 1e-9);
     const sames = w.forceSame === undefined ? [false, true] : [w.forceSame];
     // (graph seams pass forceSame: face-up pieces are sewn with their edges running opposite ways)
-    for (const same of w.ranges ? [] : sames) {
+    for (const same of w.ranges || w.rangeOptions ? [] : sames) {
       if (w.partial && ratio < 0.97) {
         const aShort = w.A.len < w.B.len;
         for (const anchor of [0, 1]) {
@@ -2555,7 +2879,7 @@ export function solveDoll(input: DollInput): DollReport {
       const d = meanDist(w.A, w.B, o.same, o.aR, o.bR);
       if (d < bd - 1e-6) [best, bd] = [o, d];
     }
-    const rows = seamRows(w.A, w.B, best.same, best.aR, best.bR);
+    const rows = rowsOfPaths(w.A, w.B, best.same, best.aR, best.bR);
     const solver: SolverSeam = { rows, k: 0, active: true, gap: w.gap ?? 0 };
     const item: Work = {
       ...w,
@@ -3757,6 +4081,59 @@ export function solveDoll(input: DollInput): DollReport {
     }
     vSh = over.length ? over.reduce((x, y) => x + y, 0) / over.length : hi - 0.03 * H;
     vSh = Math.max(vSh, vArm + 60);
+    // A ring the card buttons shut is worn lapped: past the hole column its part runs on to its free
+    // edge, past the button column the other part to its own. Its girth is the strip's less that lap;
+    // sized end to end, the whole lap would have to slide in at the buttoning and the parts that
+    // carry it (the plackets) crumple on the way.
+    const lapMm = (() => {
+      if (!l4 || !opt.fastenings?.length) return 0;
+      const sewnEdges = new Set<string>();
+      for (const s of [...G.seams, ...G.closures])
+        for (const id of [...s.a, ...s.b]) for (const e of edgeIdsOf(id)) sewnEdges.add(e);
+      // The column's distance to its part's free edge: the one long side no seam holds.
+      const toFreeEdge = (s: FasteningSide): number | null => {
+        const P = panelByKey.get(s.piece);
+        if (!P || P.group !== 'BODY' || !aligned.has(P.key) || P.fold || s.marks.length < 2)
+          return null;
+        const a = s.marks[0];
+        const b = s.marks[s.marks.length - 1];
+        const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (len < 50) return null;
+        const across = (q: Pt2) =>
+          ((q[0] - a[0]) * (a[1] - b[1]) + (q[1] - a[1]) * (b[0] - a[0])) / len;
+        const along = (q: Pt2) =>
+          ((q[0] - a[0]) * (b[0] - a[0]) + (q[1] - a[1]) * (b[1] - a[1])) / len;
+        let free: number | null = null;
+        for (const sg of [1, -1]) {
+          let off = 0;
+          for (const e of P.geom.edges) for (const q of e.pts) off = Math.max(off, sg * across(q));
+          let freeLen = 0;
+          let sewnLen = 0;
+          for (const e of P.geom.edges) {
+            if (e.pts.some((q) => sg * across(q) < off - 10)) continue;
+            const t = e.pts.map(along);
+            const run = Math.max(...t) - Math.min(...t);
+            if (sewnEdges.has(e.id)) sewnLen += run;
+            else freeLen += run;
+          }
+          if (freeLen >= 0.3 * len && freeLen > 2 * sewnLen) {
+            if (free !== null) return null;
+            free = off;
+          } else if (!(sewnLen >= 0.3 * len && sewnLen > 2 * freeLen)) return null;
+        }
+        return free;
+      };
+      let lap = 0;
+      for (const pair of pairFastenings(opt.fastenings, (key) =>
+        graph.pieces.find((g) => g.pieceKey === key),
+      ).pairs) {
+        const t = toFreeEdge(pair.holes);
+        const u = toFreeEdge(pair.buttons);
+        if (t !== null && u !== null && pair.holes.piece !== pair.buttons.piece)
+          lap = Math.max(lap, t + u);
+      }
+      return lap;
+    })();
     // Girth per level: every aligned component's extent; above the armhole the armhole girth.
     const levels: number[] = [];
     for (let v = mlo - 30; v <= vSh + 20; v += 10) levels.push(v);
@@ -3793,7 +4170,8 @@ export function solveDoll(input: DollInput): DollReport {
         s += girth[j];
         n++;
       }
-      return s / n;
+      // Buttoned: less the lap (a lap past a quarter of the girth is a misread, not a garment).
+      return s / n - Math.min(lapMm, 0.25 * (s / n));
     });
     const iArm = Math.max(
       0,
@@ -4418,7 +4796,17 @@ export function solveDoll(input: DollInput): DollReport {
           bi.push(A);
           bj.push(B);
           br.push(Math.hypot(fp[c][0] - fp[o][0], fp[c][1] - fp[o][1]));
-          bk.push(0.03);
+          // A body panel is held around the torso by several seams, so single-ply loose-cloth
+          // bending lets their pull collapse one mesh diagonal into a sharp accordion fold. A
+          // stacked panel represents all its plies in this one mesh and is stiffer again; its weak
+          // anchor below remembers which side is out, but must not substitute for bending.
+          bk.push(
+            P.group === 'BODY'
+              ? P.layers.length
+                ? LAYERED_BODY_BEND_K
+                : BODY_BEND_K
+              : LOOSE_BEND_K,
+          );
         }
       }
     }
@@ -4635,7 +5023,15 @@ export function solveDoll(input: DollInput): DollReport {
       }
       pass(S, 1);
       passes++;
-      if (opt.onFrame && passes % 20 === 0) opt.onFrame(Float32Array.from(pos), passes);
+      if (opt.onFrame && passes % 20 === 0) {
+        const frame = Float32Array.from(pos);
+        // Unplaced panels have solver coordinates for diagnostics only. Collapse them to a point in
+        // live frames so the canvas never shows a side pile while the final report is being built.
+        for (let v = 0; v < N; v++)
+          if (!placed[v] || hiddenFromView[v])
+            frame[3 * v] = frame[3 * v + 1] = frame[3 * v + 2] = 0;
+        opt.onFrame(frame, passes);
+      }
     }
   };
 
@@ -4682,6 +5078,7 @@ export function solveDoll(input: DollInput): DollReport {
           w.released ||
           w.origin !== 'graph' ||
           w.closure ||
+          w.sleeveCap ||
           !w.solver.active ||
           w.confirmed ||
           w.crotch
@@ -4709,10 +5106,12 @@ export function solveDoll(input: DollInput): DollReport {
 
   // ── phase 1: body (+ legs) with its own seams and the CF closure ────────────────────────
   const bodyLike = new Set<DollGroupId>(['BODY', 'LEG_L', 'LEG_R']);
+  /** Every drawn part of a side lies in these groups (parts on laid pieces are not the solve's). */
   const inGroups = (ids: EdgeId[], set: Set<DollGroupId>) =>
+    ids.some((id) => panelByKey.has(pk(id))) &&
     ids.every((id) => {
       const P = panelByKey.get(pk(id));
-      return !!P && set.has(P.group);
+      return P ? set.has(P.group) : laidKeys.has(pk(id));
     });
   const edgeUsed = (id: EdgeId) =>
     works.some((w) => !w.released && (w.a.includes(id) || w.b.includes(id)));
@@ -4732,7 +5131,11 @@ export function solveDoll(input: DollInput): DollReport {
   /** Tube groups set onto the body by the graph's own seams (no free loop): their composite seams
    *  take their direction by the gap, not the mirrored flags. */
   const graphPlaced = new Set<DollGroupId>();
+  const sleeveCapSeams = new Set<GroupedSeam>();
+  /** Panels laid turned down over their base (a fall on its stand top: rotated 180°). */
+  const turnedDown = new Set<number>();
   const graphWork = (s: GroupedSeam, born: number, closure = false) => {
+    if (guessYield.has(`${s.seam.a}~${s.seam.b}`)) return null;
     const conf = isConf(s.seam);
     const proposedByDoll = !owner && dollNote.has(`${s.seam.a}~${s.seam.b}`);
     const completedFromOrder = !owner && orderNote.has(`${s.seam.a}~${s.seam.b}`);
@@ -4743,6 +5146,15 @@ export function solveDoll(input: DollInput): DollReport {
     if (!A || !B) return null;
     const lenA = A.len;
     const lenB = B.len;
+    // A side whose walk starts or ends on a laid piece is sewn over its drawn parts, onto the
+    // share of the other side they take (which end, by the direction): the laid stretch is
+    // measured once its piece is laid (below), never pulled.
+    const shareA = conf ? laidEndsOf(s, 'a')?.share ?? null : null;
+    const shareB = conf ? laidEndsOf(s, 'b')?.share ?? null : null;
+    if (shareA && shareB) return null;
+    const drawnOnly = (ids: EdgeId[]) => ids.filter((id) => panelByKey.has(pk(id)));
+    const sa = drawnOnly(s.a);
+    const sb = drawnOnly(s.b);
     // A partial that carries its sewn stretch (mm along each run — a stored row, or the engine's
     // own reading since assignment phase 4) is pulled together over that stretch only: no guessing
     // the aligned end.
@@ -4761,14 +5173,29 @@ export function solveDoll(input: DollInput): DollReport {
     // placed) has no direction of its own: by the smaller gap, not the mirrored flags.
     const multi =
       (conf ||
-        graphPlaced.has(panelByKey.get(pk(s.a[0]))?.group as DollGroupId) ||
-        graphPlaced.has(panelByKey.get(pk(s.b[0]))?.group as DollGroupId)) &&
+        graphPlaced.has(panelByKey.get(pk(sa[0]))?.group as DollGroupId) ||
+        graphPlaced.has(panelByKey.get(pk(sb[0]))?.group as DollGroupId)) &&
       (s.a.length > 1 || s.b.length > 1);
+    // A fall turned down onto its stand lies rotated 180°, the stand does not: the face-up flags
+    // say nothing about which end meets which — the ends pair as the placement laid them.
+    const turned =
+      turnedDown.has(panelByKey.get(pk(sa[0]))?.idx ?? -1) !==
+      turnedDown.has(panelByKey.get(pk(sb[0]))?.idx ?? -1);
+    const share = shareA ?? shareB;
+    const flip = (r: [number, number]): [number, number] => [1 - r[1], 1 - r[0]];
+    const rangeOptions = share
+      ? [false, true].map((same) =>
+          shareA
+            ? { same, aR: [0, 1] as [number, number], bR: same ? share : flip(share) }
+            : { same, aR: same ? share : flip(share), bR: [0, 1] as [number, number] },
+        )
+      : undefined;
+    const shell = laidOverShell.get(s);
     const w0 = addWork(
       {
         id: `${s.seam.a}~${s.seam.b}`,
-        a: s.a,
-        b: s.b,
+        a: sa,
+        b: sb,
         kind: proposedByDoll ? 'proposed-composite' : s.seam.kind,
         origin: proposedByDoll ? 'doll-proposed' : 'graph',
         A,
@@ -4788,21 +5215,31 @@ export function solveDoll(input: DollInput): DollReport {
           : s.seam.kind === 'partial' || Math.min(lenA, lenB) / Math.max(lenA, lenB) < 0.9,
         gap: closure ? 4 : 0,
         // A composite side spans pieces laid either way round: its direction by the smaller gap.
-        forceSame: multi
-          ? undefined
-          : (panelByKey.get(pk(s.a[0]))?.mirrored ?? false) !==
-            (panelByKey.get(pk(s.b[0]))?.mirrored ?? false),
+        forceSame:
+          shell || multi || turned
+            ? undefined
+            : (panelByKey.get(pk(sa[0]))?.mirrored ?? false) !==
+              (panelByKey.get(pk(sb[0]))?.mirrored ?? false),
         ...(ranges ? { ranges } : {}),
+        ...(rangeOptions ? { rangeOptions } : {}),
       },
       born,
       closure
         ? 60
-        : charts.get(panelByKey.get(pk(s.a[0]))!.group)?.used.has(`${s.seam.a}~${s.seam.b}`) ||
+        : charts.get(panelByKey.get(pk(sa[0]))!.group)?.used.has(`${s.seam.a}~${s.seam.b}`) ||
             crotchOf(s)
           ? 40
           : 380,
     );
     if (conf) w0.confirmed = true;
+    if (sleeveCapSeams.has(s)) w0.sleeveCap = true;
+    if (share)
+      w0.laidEnds = {
+        a: s.a,
+        b: s.b,
+        off: [...new Set([...s.a, ...s.b].map(pk).filter((k) => !panelByKey.has(k)))],
+      };
+    if (shell) w0.laidEnds = shell;
     if (owner && conf) w0.inStep = ownerInStepKeys.has(s.seam.provenance?.seamKey ?? '');
     if (owner && isGuess(s.seam))
       w0.guess = { step: guessStepOf.get(s.seam.provenance!.seamKey) ?? 0 };
@@ -5070,6 +5507,9 @@ export function solveDoll(input: DollInput): DollReport {
     (w as Work & { contactIdx?: number }).contactIdx = ci.length ? contacts.length - 1 : -1;
   };
 
+  // The derived shell join is sewing work, not a placement cue: charts were already laid from the
+  // card's own rows. Add it only now so it closes the seam without re-laying either shell panel.
+  G.seams.push(...surfaceShellSeams);
   for (const P of panels) if (bodyLike.has(P.group)) buildPanel(P);
   const crossing: { s: GroupedSeam; xa: number; xb: number; w: Work }[] = [];
   const refusedMirror: NonNullable<DollReport['notSewn']> = [];
@@ -5292,7 +5732,13 @@ export function solveDoll(input: DollInput): DollReport {
       free: freeSideOf([...H.mesh.pts, ...(geom?.rs ?? []).map((q) => apply(surface.T, q))], foot),
     };
   };
-  const fasten = (holes: FastenedSide, buttons: FastenedSide, id: string, unused: number) => {
+  const fasten = (
+    holes: FastenedSide,
+    buttons: FastenedSide,
+    id: string,
+    unused: number,
+    apart: string[] = [],
+  ) => {
     // A step's own layer order is how a card can say which part lies over the other.
     const holeKeys = new Set([holes.P.key, holes.part]);
     const buttonKeys = new Set([buttons.P.key, buttons.part]);
@@ -5431,6 +5877,7 @@ export function solveDoll(input: DollInput): DollReport {
           ? "button side over hole side: the card's layer order says so"
           : 'hole side over button side: the card does not say otherwise',
         ...(unused ? [`${unused} marks of the column left out, the step does not count them`] : []),
+        ...apart,
       ].join(' · '),
     });
   };
@@ -5456,7 +5903,14 @@ export function solveDoll(input: DollInput): DollReport {
       else if (!l4) notFastened.push(`${id}: the card has no seam rows yet`);
       else if (G.closures.some((c) => asOne(pk(c.a[0]), pk(c.b[0]))))
         notFastened.push(`${id}: a stored closure row already joins these two parts`);
-      else fasten(holes, buttons, id, pair.holes.unused + pair.buttons.unused);
+      else
+        fasten(
+          holes,
+          buttons,
+          id,
+          pair.holes.unused + pair.buttons.unused,
+          [pair.holes.apart, pair.buttons.apart].flatMap((x) => (x ? [x] : [])),
+        );
     }
     for (const line of notFastened) warnings.push(`not fastened: ${line}`);
   }
@@ -5731,6 +6185,79 @@ export function solveDoll(input: DollInput): DollReport {
     w.solver.active = false;
   }
 
+  // A stacked body panel is a shell plus its facing, not one freely draping sheet. Keep a weak
+  // memory of its placed shape while its several surrounding seams settle; otherwise the unsigned
+  // bending distances can let the package pop through itself without stretching any edge.
+  const layeredBodyPanels = new Set(
+    panels.filter((P) => P.layers.length && bodyLike.has(P.group)).map((P) => P.idx),
+  );
+  // A chart seam guessed from a rowless step is only a placement hypothesis. Let the real seam
+  // constraints settle a layered panel before its placed-side memory starts pulling: holding the
+  // hypothesis from pass one can keep the yoke where the guess laid it and tear the connected
+  // placket away. Confirmed chart seams keep the immediate prior (a double yoke otherwise has no
+  // signed constraint preventing it from popping through the body).
+  const guessPlacedPanels = new Set<number>();
+  for (const s of G.seams) {
+    if (!isGuess(s.seam)) continue;
+    const id = `${s.seam.a}~${s.seam.b}`;
+    const gids = new Set([...s.a, ...s.b].map((edge) => panelByKey.get(pk(edge))?.group));
+    if (![...gids].some((gid) => gid && charts.get(gid)?.used.has(id))) continue;
+    for (const edge of [...s.a, ...s.b]) {
+      const P = panelByKey.get(pk(edge));
+      if (P) guessPlacedPanels.add(P.idx);
+    }
+  }
+  const delayedLayeredBodyPanels = new Set(
+    [...layeredBodyPanels].filter((pi) => guessPlacedPanels.has(pi)),
+  );
+  for (const pi of layeredBodyPanels) {
+    const P = panels[pi];
+    for (let i = P.nb; i < P.count; i++) {
+      const v = P.offset + i;
+      anchor[3 * v] = pos[3 * v];
+      anchor[3 * v + 1] = pos[3 * v + 1];
+      anchor[3 * v + 2] = pos[3 * v + 2];
+      anchorK[v] = delayedLayeredBodyPanels.has(pi) ? 0 : LAYERED_BODY_ANCHOR_K;
+    }
+  }
+  // The neck cylinder is a guide like every proxy: never wider than the garment's own neckline.
+  // Sized by the chest alone it is as wide as a loose body, and a neckline cut narrower is stretched
+  // over it (the yoke under it crumples). The neckline is read here as K1 reads it below (the body
+  // side of a confirmed collar seam, else the walk from the CB), by its rest length — before phase 1,
+  // so the shoulders settle round the neck they were cut for.
+  if (torso.length && groups.has('BODY')) {
+    const chest = (Math.max(...torso.map((L) => L.a)) * ellPerimFactor) / (1 - EPS_WRAP);
+    let lenMm = 0;
+    if (l4)
+      for (const g of G.seams) {
+        if (!isConf(g.seam)) continue;
+        const grp = (ids: EdgeId[]) => new Set(ids.map((id) => panelByKey.get(pk(id))?.group));
+        const ring = (x: Set<DollGroupId | undefined>) =>
+          [...x].every((y) => y === 'STAND' || y === 'COLLAR');
+        const ga = grp(g.a);
+        const gb = grp(g.b);
+        const side =
+          ring(ga) && gb.size === 1 && gb.has('BODY')
+            ? 'b'
+            : ring(gb) && ga.size === 1 && ga.has('BODY')
+              ? 'a'
+              : null;
+        const bp = side ? sidePath(g, side) : null;
+        if (!bp || bp.v.length < 4) continue;
+        lenMm = neckFromRun(cctx, [...bp.v], vArm, false, '').path.len;
+        break;
+      }
+    if (!lenMm) {
+      const set = new Set(panels.filter((P) => P.group === 'BODY').map((P) => P.idx));
+      const seams = works
+        .filter((w) => !w.released)
+        .map((w) => ({ A: w.A, B: w.B, same: w.same, aRange: w.aRange, bRange: w.bRange }));
+      const r = findNeckPath(cctx, findLoops({ panels, panelOf, ringOf, uv, seams }, set), vArm);
+      lenMm = r.neck?.path.len ?? 0;
+    }
+    if (chest > 0 && lenMm / chest >= 0.3 && lenMm / chest <= 0.55)
+      neckGirthR = Math.max(45, (PROXY_K * lenMm) / TAU);
+  }
   for (let v = 0; v < N; v++) moving[v] = bodyLike.has(groupOfV[v]) && placed[v] ? 1 : 0;
   run(Math.min(450, maxPasses));
   releaseRounds(3, 100, 30, 15);
@@ -6147,6 +6674,7 @@ export function solveDoll(input: DollInput): DollReport {
   // Graph seams between the body and another group (rare: the graph found a composite).
   const graphTouches = (g1: DollGroupId, g2: Set<DollGroupId>) =>
     G.seams.some((s) => {
+      if (guessYield.has(`${s.seam.a}~${s.seam.b}`)) return false;
       const ga = panelByKey.get(pk(s.a[0]))?.group;
       const gb = panelByKey.get(pk(s.b[0]))?.group;
       return (ga === g1 && gb && g2.has(gb)) || (gb === g1 && ga && g2.has(ga));
@@ -6175,6 +6703,335 @@ export function solveDoll(input: DollInput): DollReport {
     });
   const a = (Math.PI / 180) * ARM_DEG;
   const sleeveFrames: Partial<Record<'L' | 'R', Frame>> = {};
+  const sleeveRegistered = new Set<DollGroupId>();
+  const sleeveProxyReport = new Map<DollGroupId, DollProxy>();
+  const sleeveCapFloor = new Map<DollGroupId, number>();
+  type RigidFit = {
+    score: number;
+    point: (p: Vec3) => Vec3;
+    vector: (v: Vec3) => Vec3;
+  };
+  /** Least-squares rigid registration (Horn quaternion fit): no scale and no cloth deformation. */
+  const rigidFit = (from: Vec3[], to: Vec3[]): RigidFit | null => {
+    if (from.length !== to.length || from.length < 3) return null;
+    const mean = (pts: Vec3[]): Vec3 => {
+      const c: Vec3 = [0, 0, 0];
+      for (const p of pts) for (let q = 0; q < 3; q++) c[q] += p[q];
+      return [c[0] / pts.length, c[1] / pts.length, c[2] / pts.length];
+    };
+    const ca = mean(from);
+    const cb = mean(to);
+    const S = Array.from({ length: 3 }, () => [0, 0, 0]);
+    for (let i = 0; i < from.length; i++) {
+      const x = sub(from[i], ca);
+      const y = sub(to[i], cb);
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) S[r][c] += x[r] * y[c];
+    }
+    const [xx, xy, xz] = S[0];
+    const [yx, yy, yz] = S[1];
+    const [zx, zy, zz] = S[2];
+    const N = [
+      [xx + yy + zz, yz - zy, zx - xz, xy - yx],
+      [yz - zy, xx - yy - zz, xy + yx, zx + xz],
+      [zx - xz, xy + yx, -xx + yy - zz, yz + zy],
+      [xy - yx, zx + xz, yz + zy, -xx - yy + zz],
+    ];
+    // Shift the symmetric matrix so power iteration finds its largest algebraic eigenvalue.
+    const shift = Math.max(...N.map((row) => row.reduce((t, x) => t + Math.abs(x), 0))) + 1;
+    let q = [1, 0.5, -0.25, 0.75];
+    for (let k = 0; k < 40; k++) {
+      const z = N.map((row, r) => row.reduce((t, x, c) => t + x * q[c], shift * q[r]));
+      const l = Math.hypot(...z) || 1;
+      q = z.map((x) => x / l);
+    }
+    const [qw, qx, qy, qz] = q;
+    const vector = (v: Vec3): Vec3 => [
+      (1 - 2 * (qy * qy + qz * qz)) * v[0] +
+        2 * (qx * qy - qw * qz) * v[1] +
+        2 * (qx * qz + qw * qy) * v[2],
+      2 * (qx * qy + qw * qz) * v[0] +
+        (1 - 2 * (qx * qx + qz * qz)) * v[1] +
+        2 * (qy * qz - qw * qx) * v[2],
+      2 * (qx * qz - qw * qy) * v[0] +
+        2 * (qy * qz + qw * qx) * v[1] +
+        (1 - 2 * (qx * qx + qy * qy)) * v[2],
+    ];
+    const rca = vector(ca);
+    const move = sub(cb, rca);
+    const point = (p: Vec3): Vec3 => add(vector(p), move);
+    const score = Math.sqrt(
+      from.reduce((t, p, i) => {
+        const d = sub(point(p), to[i]);
+        return t + dot(d, d);
+      }, 0) / from.length,
+    );
+    return { score, point, vector };
+  };
+  const samplePath = (P: Path, t: number): Vec3 => {
+    const s = Math.max(0, Math.min(P.len, t * P.len));
+    let lo = 0;
+    let hi = P.s.length - 1;
+    while (hi - lo > 1) {
+      const m = (lo + hi) >> 1;
+      if (P.s[m] <= s) lo = m;
+      else hi = m;
+    }
+    const d = P.s[hi] - P.s[lo];
+    const w = d > 1e-9 ? (s - P.s[lo]) / d : 0;
+    const a0 = getPos(P.v[lo]);
+    const a1 = getPos(P.v[hi]);
+    return add(a0, sub(a1, a0), w);
+  };
+  const pathGap = (A: Path, B: Path) => {
+    const toPath = (p: Vec3, Q: Path) => {
+      let best = Infinity;
+      for (let i = 1; i < Q.v.length; i++) {
+        const a0 = getPos(Q.v[i - 1]);
+        const d = sub(getPos(Q.v[i]), a0);
+        const l2 = dot(d, d);
+        const t = l2 > 0 ? Math.max(0, Math.min(1, dot(sub(p, a0), d) / l2)) : 0;
+        best = Math.min(best, Math.hypot(...sub(p, add(a0, d, t))));
+      }
+      return best;
+    };
+    const gaps: number[] = [];
+    for (let k = 0; k < 32; k++) {
+      const t = k / 31;
+      gaps.push(toPath(samplePath(A, t), B), toPath(samplePath(B, t), A));
+    }
+    gaps.sort((x, y) => x - y);
+    return gaps[Math.floor(0.95 * (gaps.length - 1))] ?? Infinity;
+  };
+  const pathOfVerts = (verts: number[], closed: boolean): Path | null => {
+    const v = [...verts];
+    if (closed && v.length > 2 && v[0] !== v[v.length - 1]) v.push(v[0]);
+    if (v.length < 2) return null;
+    const s = [0];
+    for (let i = 1; i < v.length; i++)
+      s.push(s[i - 1] + Math.hypot(...sub(getPos(v[i]), getPos(v[i - 1]))));
+    return { v: Int32Array.from(v), s: Float64Array.from(s), len: s[s.length - 1] };
+  };
+  // `arm`: the sleeve's direction down the arm as placed — its x says which side of the doll the
+  // sleeve hangs on. A cap and an armhole are both near-flat rings, so a turn through the body
+  // registers them as well as the true one; a fit that swings the arm to the other side is refused.
+  // `turnMax` (a free cap, no row): a cap and its armhole are near-round rings, and turned about
+  // the armhole's own axis they register about as well at any phase — that turn swings the arm
+  // forward or up (102's left sleeve stood out level, 86° off vertical). With no row to say which
+  // point of the cap meets which of the armhole, the arm keeps hanging as placed: a fit that turns
+  // it further than `turnMax` is set aside, and if every fit does, the one that turns it least
+  // stands.
+  const fitPaths = (
+    pairs: { sleeve: Path; body: Path; bodyClosed?: boolean }[],
+    arm?: Vec3,
+    turnMax?: number,
+  ): RigidFit | null => {
+    let best: RigidFit | null = null;
+    let least: { fit: RigidFit; turn: number } | null = null;
+    const phases = pairs.some((p) => p.bodyClosed)
+      ? Array.from({ length: 24 }, (_, k) => k / 24)
+      : [0];
+    for (const reverse of [false, true])
+      for (const phase of phases) {
+        const from: Vec3[] = [];
+        const to: Vec3[] = [];
+        for (const pair of pairs)
+          for (let k = 0; k < 32; k++) {
+            const t = k / 31;
+            const bt = pair.bodyClosed ? ((reverse ? -t : t) + phase + 2) % 1 : reverse ? 1 - t : t;
+            from.push(samplePath(pair.sleeve, t));
+            to.push(samplePath(pair.body, bt));
+          }
+        const fit = rigidFit(from, to);
+        if (!fit) continue;
+        if (arm && fit.vector(arm)[0] * Math.sign(arm[0]) <= 0) continue;
+        if (arm && turnMax != null) {
+          const after = fit.vector(arm);
+          const c = dot(after, arm) / (Math.hypot(...after) * Math.hypot(...arm) || 1);
+          const turn = Math.acos(Math.max(-1, Math.min(1, c)));
+          if (!least || turn < least.turn) least = { fit, turn };
+          if (turn > turnMax) continue;
+        }
+        if (!best || fit.score < best.score) best = fit;
+      }
+    return best ?? least?.fit ?? null;
+  };
+  const applySleeveFit = (gid: DollGroupId, list: Panel[], F: Frame, fit: RigidFit | null) => {
+    if (!fit) return;
+    for (const P of list)
+      for (let i = 0; i < P.count; i++) {
+        const v = P.offset + i;
+        setPos(v, fit.point(getPos(v)));
+      }
+    F.c = fit.point(F.c);
+    F.up = fit.vector(F.up);
+    F.e0 = fit.vector(F.e0);
+    F.e90 = fit.vector(F.e90);
+    const rep = sleeveProxyReport.get(gid);
+    if (rep) {
+      rep.origin = F.c;
+      rep.axis = [-F.up[0], -F.up[1], -F.up[2]];
+    }
+    sleeveRegistered.add(gid);
+  };
+  // AN ARMHOLE RUN STARTS AT THE UNDERARM. A cap is one edge whose two ends are the underarm; the
+  // run of body edges it is sewn onto names the armhole's parts round the loop, but where that run
+  // starts is whoever listed it — a step picture's guess, or the order a person picked the parts in
+  // (card 85's left armhole starts at the shoulder, 87's both, 96's right one at the back yoke
+  // seam, 102's left — a back and a front — at the shoulder). Sewn as listed, the cap's underarm
+  // lands on the shoulder: the sleeve hangs upside down, pointing up, and twists the yoke and the
+  // front with it. A run that closes round is cut where its parts meet lowest on the body after the
+  // first solve — the side seam, the underarm.
+  // A part on a piece laid on the shell (a chest pocket caught in the armhole seam: 87, 96) is not
+  // in the mesh, and the run cannot be cut with a hole in it: it is sewn over the shell edge under
+  // that part — the free body edge about as long that bridges its two neighbours where they lie.
+  // The row is still reported as stored, its stretch on the laid piece measured where that lies.
+  {
+    const d3v = (a: number, b: number) => Math.hypot(...sub(getPos(a), getPos(b)));
+    const drawnSides = (g: GroupedSeam) => [...g.a, ...g.b].every((id) => panelByKey.has(pk(id)));
+    const bodyEdges = panels
+      .filter((P) => P.group === 'BODY')
+      .flatMap((P) => P.geom.edges.map((e) => e.id));
+    /** Each part's way round the loop (null: a part not in the mesh): the directions whose
+     *  neighbours meet best, ties to the listed one. */
+    const roundLoop = (parts: (Path | null)[]) => {
+      const m = parts.length;
+      const endOf = (k: number, mask: number, out: boolean) => {
+        const P = parts[k]!;
+        return !!((mask >> k) & 1) !== out ? P.v[P.v.length - 1] : P.v[0];
+      };
+      let best = { mask: 0, cost: Infinity, rev: Infinity };
+      for (let mask = 0; mask < 1 << m; mask++) {
+        if (parts.some((P, k) => !P && (mask >> k) & 1)) continue;
+        let cost = 0;
+        let rev = 0;
+        for (let k = 0; k < m; k++) {
+          const q = (k - 1 + m) % m;
+          if (!parts[k]) continue;
+          rev += (mask >> k) & 1;
+          if (parts[q]) cost += d3v(endOf(q, mask, true), endOf(k, mask, false));
+        }
+        if (cost < best.cost - 2 || (Math.abs(cost - best.cost) <= 2 && rev < best.rev))
+          best = { mask, cost, rev };
+      }
+      return parts.map((P, k) =>
+        P ? { in: endOf(k, best.mask, false), out: endOf(k, best.mask, true) } : null,
+      );
+    };
+    for (const sm of G.seams) {
+      if (sm.seam.partRange || gapStretchesOf(sm, 'a') || gapStretchesOf(sm, 'b')) continue;
+      for (const [capSide, bodySide] of [
+        ['a', 'b'],
+        ['b', 'a'],
+      ] as const) {
+        const cap = sm[capSide];
+        if (new Set(cap).size !== 1) continue;
+        if (!panelByKey.get(pk(cap[0]))?.group.startsWith('SLEEVE')) continue;
+        const listed = sm[bodySide];
+        const n = listed.length;
+        if (n < 2 || n > 8 || new Set(listed).size !== n || new Set(listed.map(pk)).size < 2)
+          continue;
+        const onBody = listed.map((id) => panelByKey.get(pk(id))?.group === 'BODY');
+        if (listed.some((id, i) => !onBody[i] && (panelByKey.has(pk(id)) || !laidKeys.has(pk(id)))))
+          continue;
+        // Parts on laid pieces: the shell edge under each.
+        const run = [...listed];
+        const over: EdgeId[] = [];
+        if (onBody.some((x) => !x)) {
+          const ends = roundLoop(listed.map((id, i) => (onBody[i] ? pathOf([id]) : null)));
+          const taken = new Set(
+            G.seams.filter((g) => g !== sm && drawnSides(g)).flatMap((g) => [...g.a, ...g.b]),
+          );
+          for (let i = 0; i < n && run.length; i++) {
+            if (onBody[i]) continue;
+            const prev = ends[(i - 1 + n) % n];
+            const next = ends[(i + 1) % n];
+            const want = restLenOf.get(listed[i]) ?? 0;
+            let host: { id: EdgeId; d: number } | null = null;
+            if (prev && next && want > 0) {
+              const tol = Math.max(40, 0.2 * want);
+              for (const id of bodyEdges) {
+                if (taken.has(id) || run.includes(id)) continue;
+                const len = restLenOf.get(id) ?? 0;
+                const H = Math.abs(len - want) <= 0.3 * want ? pathOf([id]) : null;
+                if (!H) continue;
+                for (const [x, y] of [
+                  [H.v[0], H.v[H.v.length - 1]],
+                  [H.v[H.v.length - 1], H.v[0]],
+                ]) {
+                  const dx = d3v(prev.out, x);
+                  const dy = d3v(y, next.in);
+                  if (dx <= tol && dy <= tol && (!host || dx + dy < host.d))
+                    host = { id, d: dx + dy };
+                }
+              }
+            }
+            if (!host) {
+              run.length = 0;
+              break;
+            }
+            run[i] = host.id;
+            over.push(host.id);
+          }
+          if (!run.length) continue;
+        }
+        const parts = run.map((id) => pathOf([id]));
+        if (parts.some((P) => !P)) continue;
+        const ends = roundLoop(parts) as { in: number; out: number }[];
+        const total = (parts as Path[]).reduce((t, P) => t + P.len, 0);
+        // Where part k - 1 meets part k (k = 0: the last part back onto the first).
+        const J = ends.map((e, k) => {
+          const p = ends[(k - 1 + n) % n].out;
+          return { gap: d3v(p, e.in), y: (pos[3 * p + 1] + pos[3 * e.in + 1]) / 2 };
+        });
+        if (J[0].gap > Math.max(30, 0.08 * total)) continue;
+        let low = 0;
+        for (let k = 1; k < n; k++) if (J[k].y < J[low].y) low = k;
+        const cut = low > 0 && J[0].y - J[low].y >= 30;
+        if (!cut && !over.length) continue;
+        if (over.length)
+          laidOverShell.set(sm, {
+            a: [...sm.a],
+            b: [...sm.b],
+            off: [...new Set(listed.filter((_, i) => !onBody[i]).map(pk))],
+            over,
+          });
+        sm[bodySide] = cut ? [...run.slice(low), ...run.slice(0, low)] : run;
+        if (opt.debug)
+          warnings.push(
+            `debug: armhole run ${listed.join('+')}${over.length ? ` sewn over the shell edges ${over.join('+')}` : ''}${cut ? `, cut at its lowest meeting, ${(J[0].y - J[low].y).toFixed(0)} mm under where it was listed to start` : ''}`,
+          );
+      }
+    }
+  }
+  // A STEP GUESS SETS A SLEEVE IN AN ARMHOLE OR NOT AT ALL. A step that sets the sleeves and names
+  // no row is sewn by its picture's guess, a pairing by lengths: card 102's left cap edge (165 mm)
+  // onto a back neckline end and a front neckline (52 + 92 mm), the neck point between them. Sewn,
+  // the sleeve stands up off the neck. The body's free loops after the first solve say where the
+  // armholes are; a guess whose body run is not on one is left out, and the sleeve is registered
+  // by its free cap in its armhole like a sleeve the card names no row for. (Only when both
+  // armholes are found: a guess onto an armhole the walk missed is no evidence either way.)
+  if (armLoop.L && armLoop.R) {
+    const onArm = new Set([...armLoop.L.verts, ...armLoop.R.verts]);
+    for (const sm of G.seams) {
+      const id = `${sm.seam.a}~${sm.seam.b}`;
+      if (!isGuess(sm.seam) || guessYield.has(id)) continue;
+      const sleeveSide = (['a', 'b'] as const).find((w) => {
+        const g = panelByKey.get(pk(sm[w][0]))?.group;
+        return !!g?.startsWith('SLEEVE') && inGroups(sm[w], new Set([g]));
+      });
+      if (!sleeveSide) continue;
+      const body = sm[sleeveSide === 'a' ? 'b' : 'a'];
+      if (!inGroups(body, new Set(['BODY']))) continue;
+      const B = pathOf(body);
+      if (!B || B.v.length < 2) continue;
+      const share = B.v.filter((v) => onArm.has(v)).length / B.v.length;
+      if (share >= 0.5) continue;
+      guessYield.set(
+        id,
+        `step ${guessStepOf.get(sm.seam.provenance?.seamKey ?? '')} names no row — the step picture's guess sews the sleeve's ${sm[sleeveSide].join('+')} onto ${body.join('+')}, which ${share > 0 ? `lie ${(100 * share).toFixed(0)} % on` : 'are not on'} an armhole of the body${neckLoop && B.v.some((v) => neckLoop!.verts.includes(v)) ? ' but on its neckline' : ''}; the sleeve is set in its armhole by its cap and this guess is left out`,
+      );
+    }
+  }
   // Which armhole a sleeve goes to: its hand, unless the graph sews it to body edges that sit on
   // the other side of the doll (sleeve hands swapped, or a back drawn as seen from the front) —
   // then the seams win and the swap is reported.
@@ -6184,6 +7041,7 @@ export function solveDoll(input: DollInput): DollReport {
     for (const s of ['L', 'R'] as const) {
       const gid: DollGroupId = s === 'L' ? 'SLEEVE_L' : 'SLEEVE_R';
       for (const sm of G.seams) {
+        if (guessYield.has(`${sm.seam.a}~${sm.seam.b}`)) continue;
         const ga = panelByKey.get(pk(sm.a[0]))?.group;
         const gb = panelByKey.get(pk(sm.b[0]))?.group;
         const bodySide =
@@ -6220,6 +7078,7 @@ export function solveDoll(input: DollInput): DollReport {
       if (w > wMax) [vW, wMax] = [v, w];
     }
     const capH = Math.max(40, hi - vW);
+    sleeveCapFloor.set(gid, vW);
     // Cap apex: the top-most chart point.
     let uApex = 0;
     let best = -Infinity;
@@ -6232,19 +7091,65 @@ export function solveDoll(input: DollInput): DollReport {
     // the front and back armholes never join into a loop) the graph's own seams from this
     // sleeve onto body pieces say where the opening is — the sleeve is set on their body side and
     // the seam judged after, instead of a guess 290 mm away that the far-apart rule then refuses.
-    const graphArm: number[] = [];
-    if (!armLoop[side])
-      for (const sm of G.seams) {
-        const bodySide = inGroups(sm.a, new Set([gid]))
-          ? inGroups(sm.b, new Set(['BODY']))
-            ? ('b' as const)
-            : null
-          : inGroups(sm.b, new Set([gid])) && inGroups(sm.a, new Set(['BODY']))
-            ? ('a' as const)
-            : null;
-        const B = bodySide ? sewnSide(sm, bodySide) : null;
-        if (B) graphArm.push(...B.v);
-      }
+    const graphSeams = G.seams.flatMap((sm) => {
+      if (guessYield.has(`${sm.seam.a}~${sm.seam.b}`)) return [];
+      // A stored composite armhole can start with a surface piece and then continue around body
+      // panels. The cap side must be wholly this sleeve; the target need only contain body edges.
+      const touchesBody = (ids: EdgeId[]) =>
+        ids.some((id) => panelByKey.get(pk(id))?.group === 'BODY');
+      const sleeveSide = inGroups(sm.a, new Set([gid]))
+        ? touchesBody(sm.b)
+          ? ('a' as const)
+          : null
+        : inGroups(sm.b, new Set([gid])) && touchesBody(sm.a)
+          ? ('b' as const)
+          : null;
+      if (!sleeveSide) return [];
+      const sleeve = sewnSide(sm, sleeveSide);
+      const bodySide = sleeveSide === 'a' ? 'b' : 'a';
+      const targetIds = bodySide === 'a' ? sm.a : sm.b;
+      const bodyIds = targetIds.filter((id) => panelByKey.get(pk(id))?.group === 'BODY');
+      // Owner surface placement happens after the solve. If such a piece starts the stored
+      // composite, its edge is not drawable yet; the remaining body run is still the armhole cue.
+      const body = sewnSide(sm, bodySide) ?? pathOf(bodyIds);
+      if (!sleeve || !body) return [];
+      // A multi-part body run is the composite armhole. A lone cross-group pairing may instead be
+      // the bad underarm-to-yoke reading that the far/release checks below must still be free to drop.
+      if (targetIds.length > 1) sleeveCapSeams.add(sm);
+      return [{ sleeve, body }];
+    });
+    // Confirmed rows that no operation names are not sewing work in owner mode, but they remain
+    // exact placement topology. This is how an omitted cap row can register a sleeve without the
+    // doll claiming that the operation sewed it.
+    const cuesOf = (candidates: readonly SeamCandidate[]) =>
+      candidates.flatMap((candidate) => {
+        if (guessYield.has(`${candidate.a}~${candidate.b}`)) return [];
+        const ids = (side: 'a' | 'b') =>
+          (side === 'a'
+            ? candidate.aParts ?? edgeIdsOf(candidate.a)
+            : candidate.bParts ?? edgeIdsOf(candidate.b)
+          ).flatMap(edgeIdsOf);
+        const aIds = ids('a');
+        const bIds = ids('b');
+        const allSleeve = (xs: EdgeId[]) =>
+          xs.length > 0 && xs.every((id) => panelByKey.get(pk(id))?.group === gid);
+        const bodyIds = (xs: EdgeId[]) =>
+          xs.filter((id) => panelByKey.get(pk(id))?.group === 'BODY');
+        const sleeveIds = allSleeve(aIds) ? aIds : allSleeve(bIds) ? bIds : [];
+        const targetIds =
+          sleeveIds === aIds ? bodyIds(bIds) : sleeveIds === bIds ? bodyIds(aIds) : [];
+        const sleeve = pathOf(sleeveIds);
+        const body = pathOf(targetIds);
+        return sleeve && body ? [{ sleeve, body }] : [];
+      });
+    const selectedCues = cuesOf(resolvedRows?.forced ?? []);
+    const confirmedCues = cuesOf(joinsNotSewn);
+    const placementSeams = graphSeams.length
+      ? graphSeams
+      : selectedCues.length
+        ? selectedCues
+        : confirmedCues;
+    const graphArm = placementSeams.flatMap(({ body }) => [...body.v]);
     if (!armLoop[side] && graphArm.length)
       warnings.push(
         `${s === 'L' ? 'left' : 'right'} sleeve: the body has no ${side === 'L' ? 'left' : 'right'} armhole loop — set on the body edges the graph sews it to`,
@@ -6287,7 +7192,15 @@ export function solveDoll(input: DollInput): DollReport {
       },
     };
     const pi = proxies.push(armProxy) - 1;
-    proxyReport.push({ group: gid, kind: 'capsule', profile: [[0, Rw, Rw]], origin: F.c, axis: d });
+    const proxyRep: DollProxy = {
+      group: gid,
+      kind: 'capsule',
+      profile: [[0, Rw, Rw]],
+      origin: F.c,
+      axis: d,
+    };
+    proxyReport.push(proxyRep);
+    sleeveProxyReport.set(gid, proxyRep);
     for (const P of list) buildPanelLater.push(P);
     const placeAt = (th0: number) => {
       for (const P of list) {
@@ -6304,39 +7217,16 @@ export function solveDoll(input: DollInput): DollReport {
       }
     };
     placeAt(0);
-    // Set by the graph's seams: turned about its axis to where those seams' two sides lie nearest
-    // (the cap's apex has no landmark of its own on the body side), then moved so the two sides'
-    // centroids coincide (the cap ring's centre is not the apex).
-    if (!armLoop[side] && graphArm.length) {
-      const comps = G.seams.filter(
-        (sm) =>
-          (inGroups(sm.a, new Set([gid])) && inGroups(sm.b, new Set(['BODY']))) ||
-          (inGroups(sm.b, new Set([gid])) && inGroups(sm.a, new Set(['BODY']))),
-      );
+    // Register the existing cap seam onto its armhole path before solving. This is a rigid
+    // placement cue only: it neither creates a seam nor changes either path's length. Stored owner
+    // rows work here too, and a detected free armhole no longer suppresses the registration.
+    if (placementSeams.length) {
       graphPlaced.add(gid);
-      let bestTh = 0;
-      let bestD = comps.reduce((t, sm) => t + gapOf(sm), 0);
-      for (let k = 1; k < 24; k++) {
-        placeAt((TAU * k) / 24);
-        const d = comps.reduce((t, sm) => t + gapOf(sm), 0);
-        if (d < bestD - 1e-6) [bestTh, bestD] = [(TAU * k) / 24, d];
-      }
-      placeAt(bestTh);
-      const shift: Vec3 = [0, 0, 0];
-      let n = 0;
-      for (const sm of comps) {
-        const sleeveSide = inGroups(sm.a, new Set([gid])) ? 'a' : 'b';
-        const A = sewnSide(sm, sleeveSide);
-        const B = sewnSide(sm, sleeveSide === 'a' ? 'b' : 'a');
-        if (!A || !B) continue;
-        const d = sub(centroid([...B.v]), centroid([...A.v]));
-        for (let q = 0; q < 3; q++) shift[q] += d[q];
-        n++;
-      }
-      if (n) {
-        F.c = add(F.c, [shift[0] / n, shift[1] / n, shift[2] / n]);
-        placeAt(bestTh);
-      }
+      const gap = Math.max(...placementSeams.map(({ sleeve, body }) => pathGap(sleeve, body)));
+      if (gap > 15) {
+        const fit = fitPaths(placementSeams, [-F.up[0], -F.up[1], -F.up[2]]);
+        applySleeveFit(gid, list, F, fit);
+      } else sleeveRegistered.add(gid);
     }
   }
   // Sleeve tube closures, then cap ↔ armhole.
@@ -6352,6 +7242,74 @@ export function solveDoll(input: DollInput): DollReport {
       'proposed-composite',
       passes,
     );
+    const loops = loopsOf(new Set([gid]));
+    const F = sleeveFrames[s]!;
+    const cap = loops
+      .filter((l) => l.len > 150)
+      .sort(
+        (x, y) =>
+          Math.max(...y.verts.map((v) => cuv[2 * v + 1])) -
+          Math.max(...x.verts.map((v) => cuv[2 * v + 1])),
+      )[0];
+    const capArc = (() => {
+      if (!cap) return [];
+      const vs = cap.verts;
+      const floor = sleeveCapFloor.get(gid) ?? -Infinity;
+      let apex = 0;
+      for (let i = 1; i < vs.length; i++) if (cuv[2 * vs[i] + 1] > cuv[2 * vs[apex] + 1]) apex = i;
+      let start = apex;
+      let end = apex;
+      for (let n = 0; n < vs.length - 1; n++) {
+        const prev = (start - 1 + vs.length) % vs.length;
+        if (cuv[2 * vs[prev] + 1] < floor) break;
+        start = prev;
+      }
+      for (let n = 0; n < vs.length - 1; n++) {
+        const next = (end + 1) % vs.length;
+        if (cuv[2 * vs[next] + 1] < floor) break;
+        end = next;
+      }
+      // Include the crossing vertices immediately below the widest level: these are the two
+      // underarm ends, while the highest point between them is the shoulder landmark.
+      start = (start - 1 + vs.length) % vs.length;
+      end = (end + 1) % vs.length;
+      const out: number[] = [];
+      for (let i = start, guard = 0; guard < vs.length; i = (i + 1) % vs.length, guard++) {
+        out.push(vs[i]);
+        if (i === end) break;
+      }
+      return out.length >= 3 ? out : [...vs];
+    })();
+    if (opt.debug)
+      warnings.push(
+        `debug: ${gid} loops ${loops.map((l) => `${l.len.toFixed(0)}${l.closed ? '' : '(open)'}`).join(' ')}`,
+      );
+    // With no drawable stored cap row, use the free cap and armhole arcs as placement topology.
+    // Owner mode deliberately gets this registration too, but still gets no proposed seam below.
+    // An armhole loop left open by a hair (its ends 8 mm apart on 102's right: a slit elsewhere
+    // on the back breaks the walk) is a ring all the same.
+    if (!sleeveRegistered.has(gid) && cap && armLoop[armSide[s]]) {
+      const loop = armLoop[armSide[s]]!;
+      const lv = loop.verts;
+      const ring =
+        loop.closed ||
+        (lv.length > 2 &&
+          Math.hypot(...sub(getPos(lv[0]), getPos(lv[lv.length - 1]))) <=
+            Math.max(15, 0.03 * loop.len));
+      const sleeve = pathOfVerts(capArc, false);
+      const body = pathOfVerts(lv, ring);
+      if (sleeve && body)
+        applySleeveFit(
+          gid,
+          groups.get(gid)!,
+          F,
+          fitPaths(
+            [{ sleeve, body, bodyClosed: ring }],
+            [-F.up[0], -F.up[1], -F.up[2]],
+            FREE_CAP_TURN,
+          ),
+        );
+    }
     if (sewnNear(gid, 'BODY') || !proposalsAllowed) continue;
     // L4: a sleeve a person sewed to the body by a confirmed seam is not proposed again.
     if (
@@ -6364,16 +7322,6 @@ export function solveDoll(input: DollInput): DollReport {
       )
     )
       continue;
-    const loops = loopsOf(new Set([gid]));
-    const F = sleeveFrames[s]!;
-    const capTop = fromFrame(F, 0, 0, 0);
-    const big = loops.filter((l) => l.len > 150).map((l) => ({ l, c: centroid(l.verts) }));
-    big.sort((x, y) => Math.hypot(...sub(x.c, capTop)) - Math.hypot(...sub(y.c, capTop)));
-    const cap = big[0]?.l;
-    if (opt.debug)
-      warnings.push(
-        `debug: ${gid} loops ${loops.map((l) => `${l.len.toFixed(0)}${l.closed ? '' : '(open)'}`).join(' ')}`,
-      );
     if (!cap) continue;
     if (!armLoop[armSide[s]]) {
       warnings.push(
@@ -6383,7 +7331,7 @@ export function solveDoll(input: DollInput): DollReport {
     }
     propose(
       `${s === 'L' ? 'left' : 'right'} sleeve cap ↔ armhole`,
-      cap,
+      { ...cap, verts: capArc, closed: false },
       armLoop[armSide[s]]!,
       'lowest',
       gid,
@@ -6415,6 +7363,9 @@ export function solveDoll(input: DollInput): DollReport {
     ? (Math.max(...torso.map((L) => L.a)) * ellPerimFactor) / (1 - EPS_WRAP)
     : 0;
   let neck: NeckPath | null = null;
+  /** The walked neck is off the neckline window and no closed loop stands in for it: its CB still
+   *  holds the collar (placed at its own length), but nothing is sewn along it. */
+  let neckPlaceOnly = false;
   const neckGroups = (['STAND', 'COLLAR'] as DollGroupId[]).filter((g) => groups.has(g));
   // L4: a CONFIRMED seam between a collar unit and the body says where the neckline is: its body
   // side IS the neck path (no walk along free loops).
@@ -6457,7 +7408,31 @@ export function solveDoll(input: DollInput): DollReport {
       };
     }
   }
-  if (!confNeck && neckGroups.length && groups.has('BODY') && proposalsAllowed) {
+  // Owner mode: a step joins the collar to the body (its picture's guess), but no row names the
+  // seam onto the neckline — the doll walks the neck as with no rows; what it sews there is its own
+  // proposal (dashed), never the person's, and the card gap is said.
+  const ringOnBody = (sm: GroupedSeam) => {
+    const grp = (ids: EdgeId[]) => new Set(ids.map((id) => panelByKey.get(pk(id))?.group));
+    const ring = (x: Set<DollGroupId | undefined>) =>
+      [...x].every((y) => y === 'STAND' || y === 'COLLAR');
+    const body = (x: Set<DollGroupId | undefined>) => x.size === 1 && x.has('BODY');
+    return (ring(grp(sm.a)) && body(grp(sm.b))) || (ring(grp(sm.b)) && body(grp(sm.a)));
+  };
+  const neckStep = (() => {
+    if (!owner || confNeck || !neckGroups.length || !groups.has('BODY')) return null;
+    const g = G.seams.find((sm) => isGuess(sm.seam) && ringOnBody(sm));
+    return g ? guessStepOf.get(g.seam.provenance?.seamKey ?? '') ?? null : null;
+  })();
+  if (neckStep != null)
+    warnings.push(
+      `collar: step ${neckStep} sews the collar to the body, but the card names no row of it onto the neckline — the doll walks the neck and proposes that seam (dashed)`,
+    );
+  if (
+    !confNeck &&
+    neckGroups.length &&
+    groups.has('BODY') &&
+    (proposalsAllowed || neckStep != null)
+  ) {
     const r = findNeckPath(cctx, neckLoop ? [neckLoop] : bodyLoops, vArm);
     if (opt.debug) warnings.push(`debug: neck walk ${r.debug}`);
     const ratioOf = (x: NeckPath) => (chestMm > 0 ? x.path.len / chestMm : NaN);
@@ -6465,14 +7440,37 @@ export function solveDoll(input: DollInput): DollReport {
     if (r.neck && ratioOf(r.neck) >= 0.3 && ratioOf(r.neck) <= 0.55) {
       neck = r.neck;
       ok = true;
+      // The walk found the neckline: the collar goes on by its stand, along that path. The step
+      // picture's own pairing of a collar edge onto body edges (a guess by lengths, often the
+      // fall's neck edge the stand already holds) is not sewn next to it.
+      if (neckStep != null)
+        for (const sm of G.seams) {
+          const id = `${sm.seam.a}~${sm.seam.b}`;
+          if (!isGuess(sm.seam) || !ringOnBody(sm) || guessYield.has(id)) continue;
+          guessYield.set(
+            id,
+            `step ${guessStepOf.get(sm.seam.provenance?.seamKey ?? '')} names no row — the step picture's guess puts ${sm.a.join('+')} onto ${sm.b.join('+')}; the doll sews the collar on by its stand, walked along the neckline (dashed), and leaves this guess out`,
+          );
+        }
     } else {
+      const instead = neckLoop
+        ? 'the closed neck loop is used instead'
+        : r.neck
+          ? 'no closed neck loop either: the collar goes on it at its own length, from the CB'
+          : 'no closed neck loop either';
       warnings.push(
         r.neck
-          ? `neck path ${r.neck.path.len.toFixed(0)} mm is ${(ratioOf(r.neck) * 100).toFixed(0)} % of the girth ${chestMm.toFixed(0)} mm (a neckline is 30–55 %) — ${r.note}; the closed neck loop is used instead`
-          : `neck path not found (${r.note}) — the closed neck loop is used instead`,
+          ? `neck path ${r.neck.path.len.toFixed(0)} mm is ${(ratioOf(r.neck) * 100).toFixed(0)} % of the girth ${chestMm.toFixed(0)} mm (a neckline is 30–55 %) — ${r.note}; ${instead}`
+          : `neck path not found (${r.note}) — ${instead}`,
       );
       if (neckLoop)
         neck = closedNeckPath(cctx, neckLoop.verts, vArm, 'closed neck loop (fallback)');
+      // An open front has no closed loop to fall back on; the walk still found the centre back,
+      // and a collar left off the doll says less than one standing there unsewn.
+      else if (r.neck) {
+        neck = r.neck;
+        neckPlaceOnly = true;
+      }
     }
     if (neck)
       collarRep.neck = {
@@ -7037,20 +8035,22 @@ export function solveDoll(input: DollInput): DollReport {
           : neckAnchors(U, N);
       // The stored rows take length off the neck; both body guides stand at what is left of it,
       // or the seam can only close by stretching. The collar itself is never touched.
-      if (fin?.ok) neckGirthR = fin.finished.finishedMm / (2 * Math.PI);
+      if (fin?.ok) neckGirthR = Math.min(neckGirthR, fin.finished.finishedMm / (2 * Math.PI));
       const pi = ringProxyAt(layer, fin?.ok ? fin.finished.finishedMm / fin.finished.cutMm : 1);
       const sewnMm = plan.sewn[1] - plan.sewn[0];
       const ext = plan.m.path.len - sewnMm;
       // A base far off the unit's length (a neck path that is not a neckline): placed at its own
       // length centred on the CB, not sewn — never crammed.
-      const off = fp ? !fp.ok : sewnMm / N.path.len < 0.6 || sewnMm / N.path.len > 1.4;
+      const off = fp
+        ? !fp.ok
+        : neckPlaceOnly || sewnMm / N.path.len < 0.6 || sewnMm / N.path.len > 1.4;
       if (fp && !fp.ok) {
-        const wds = `${cn!.g.seam.a}~${cn!.g.seam.b}: confirmed by a person, but the unit (${fp.m.path.len.toFixed(0)} mm) does not fit its neck path with any reading of the tucks / CF notches (${fp.tried.join('; ')}) — the intake is not identified: placed at its own length, not crammed`;
+        const wds = `${cn!.g.seam.a}~${cn!.g.seam.b}: confirmed by a person, but the unit (${fp.m.path.len.toFixed(0)} mm) does not fit its neck path with any reading of the tucks / CF notches (${fp.tried.join('; ')}) — the intake is not identified: sewn at its own length from the CB (dashed), the neckline past its ends left open, not crammed`;
         preContradictions.push(wds);
         warnings.push(`contradiction: ${wds}`);
       } else if (off)
         warnings.push(
-          `${label}: not proposed — ${sewnMm.toFixed(0)} mm between the marks vs a neck path of ${N.path.len.toFixed(0)} mm (${((100 * sewnMm) / N.path.len).toFixed(0)} %); placed at its own length, centred at the CB`,
+          `${label}: ${sewnMm.toFixed(0)} mm between the marks vs a neck path of ${N.path.len.toFixed(0)} mm (${((100 * sewnMm) / N.path.len).toFixed(0)} %) — sewn at its own length from the CB (dashed), the neckline past its ends left open`,
         );
       // A one-piece collar (no stand) rolls over: ROLL_FRAC of its depth at the CB stands, the
       // rest turns down and out, leaning out enough for its longer outer edge and no less than
@@ -7134,18 +8134,43 @@ export function solveDoll(input: DollInput): DollReport {
           }
         }
       }
+      // A unit that does not fit its neck path is still sewn where it lies: at its own length,
+      // centre back on centre back, the neckline past its ends left open. Left unsewn it has
+      // nothing to hold it and crumples over the neck.
+      const ownLength = (): Work | null => {
+        if (!off || (!cn && (graphSewn || (owner && neckStep == null)))) return null;
+        const Lu = plan.m.path.len;
+        const a0 = Math.max(0, plan.m.cb - N.cb);
+        const a1 = Math.min(Lu, plan.m.cb + (N.path.len - N.cb));
+        if (a1 - a0 < 50) return null;
+        const at = (s: number) => s - plan.m.cb + N.cb;
+        const w = anchoredWork(
+          cn ? `${cn.g.seam.a}~${cn.g.seam.b}` : id,
+          plan.m.path,
+          N.path,
+          [
+            [a0, at(a0)],
+            [a1, at(a1)],
+          ],
+          `proposed by the doll · ${label} · the unit ${Lu.toFixed(0)} mm does not fit the neck path ${N.path.len.toFixed(0)} mm: ${(a1 - a0).toFixed(0)} mm of it sewn at its own length, CB on CB, ${(N.path.len - (a1 - a0)).toFixed(0)} mm of the neckline left open · not in the pattern`,
+          0.8,
+        );
+        return w;
+      };
       const work = cn
-        ? confWork
-        : graphSewn || off || owner
+        ? confWork ?? ownLength()
+        : graphSewn || (owner && neckStep == null)
           ? null
-          : anchoredWork(
-              id,
-              plan.m.path,
-              N.path,
-              plan.anchors,
-              `proposed by the doll · ${label} · ${sewnMm.toFixed(0)} mm between the marks onto the ${N.closed ? 'closed' : 'open'} neck path ${N.path.len.toFixed(0)} mm (${sewnMm / N.path.len < 0.985 || sewnMm / N.path.len > 1.015 ? `eased ${(Math.abs(1 - sewnMm / N.path.len) * 100).toFixed(0)} %` : 'equal'})${ext > 2 ? ` · ${ext.toFixed(0)} mm beyond the CF marks left free (extensions, overlapping)` : ''} · ${plan.words} · not in the pattern`,
-              0.8,
-            );
+          : off
+            ? ownLength()
+            : anchoredWork(
+                id,
+                plan.m.path,
+                N.path,
+                plan.anchors,
+                `proposed by the doll · ${label} · ${sewnMm.toFixed(0)} mm between the marks onto the ${N.closed ? 'closed' : 'open'} neck path ${N.path.len.toFixed(0)} mm (${sewnMm / N.path.len < 0.985 || sewnMm / N.path.len > 1.015 ? `eased ${(Math.abs(1 - sewnMm / N.path.len) * 100).toFixed(0)} %` : 'equal'})${ext > 2 ? ` · ${ext.toFixed(0)} mm beyond the CF marks left free (extensions, overlapping)` : ''} · ${plan.words} · not in the pattern`,
+                0.8,
+              );
       collarPlans.push({
         rep: {
           keys: U.list.map((P) => P.key),
@@ -7154,7 +8179,9 @@ export function solveDoll(input: DollInput): DollReport {
           seam: work?.id ?? null,
           attached: cn
             ? work
-              ? 'confirmed'
+              ? work.confirmed
+                ? 'confirmed'
+                : 'proposed'
               : 'not sewn'
             : work
               ? 'proposed'
@@ -7297,7 +8324,10 @@ export function solveDoll(input: DollInput): DollReport {
         // cylinder, wider than a collar, would hold it off the stand top).
         const pi = proxies.push({ push() {}, pull() {} }) - 1;
         placeUnit(U, base, makeMap(plan.anchors), [0, plan.mf.path.len], 'down', layer, alpha, pi);
-        for (const P of U.list) buildPanel(P);
+        for (const P of U.list) {
+          buildPanel(P);
+          turnedDown.add(P.idx);
+        }
         // One-sided contact: every vertex of the fall but its sewn neck edge stays outside the
         // stand point nearest to it at placement (dynamic — it follows the stand as both move).
         {
@@ -7345,7 +8375,7 @@ export function solveDoll(input: DollInput): DollReport {
         }
         const work = confFall
           ? confW
-          : graphSewn || owner
+          : graphSewn || (owner && neckStep == null)
             ? null
             : anchoredWork(
                 label,
@@ -7429,6 +8459,127 @@ export function solveDoll(input: DollInput): DollReport {
         0.3,
       );
   }
+  /**
+   * L4: a band piece laid along the stretch of the body its confirmed seam names — its sewn run on
+   * that path (over the share the row's drawn parts take; a run carried on to a laid piece goes on
+   * past the path's end), the piece standing `dir` (+1 up, −1 down) from it, its face out. Halves
+   * of a band that are not sewn to each other share no ring order: each goes where its own row
+   * says. Null when the band side is not one piece or a path cannot be drawn.
+   */
+  const layAlongRow = (
+    sm: GroupedSeam,
+    bandSide: 'a' | 'b',
+    dir: 1 | -1,
+    axis: Vec3,
+  ): Panel | null => {
+    const bodySide = bandSide === 'a' ? 'b' : 'a';
+    const bandIds = bandSide === 'a' ? sm.a : sm.b;
+    if (new Set(bandIds.map(pk)).size !== 1) return null;
+    const P = panelByKey.get(pk(bandIds[0]));
+    const Pb = sidePath(sm, bandSide);
+    const Bp = sidePath(sm, bodySide);
+    if (!P || !Pb || !Bp || Pb.v.length < 2 || Bp.v.length < 2 || Pb.len < 1 || Bp.len < 1)
+      return null;
+    if ([...Pb.v].some((v) => panelOf[v] !== P.idx)) return null;
+    const share = laidEndsOf(sm, bodySide)?.share ?? [0, 1];
+    const run = [...Pb.v].map((v) => [uv[2 * v], uv[2 * v + 1]] as Pt2);
+    // Each vertex of the piece: where along its sewn run it lies (rest arc) and how far off it.
+    const footOf = (q: Pt2) => {
+      let best = { d: Infinity, s: 0, h: 0 };
+      for (let k = 1; k < run.length; k++) {
+        const a = run[k - 1];
+        const b = run[k];
+        const dx = b[0] - a[0];
+        const dy = b[1] - a[1];
+        const l2 = dx * dx + dy * dy;
+        if (l2 < 1e-12) continue;
+        const t = Math.max(0, Math.min(1, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / l2));
+        const fx = a[0] + t * dx;
+        const fy = a[1] + t * dy;
+        const d = Math.hypot(q[0] - fx, q[1] - fy);
+        if (d < best.d) {
+          // Past the run's ends the arc runs on (the band's end beyond its sewn run).
+          const l = Math.sqrt(l2);
+          const tt =
+            k === 1 || k === run.length - 1 ? ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / l2 : t;
+          const ext = k === 1 ? Math.min(tt, t) : k === run.length - 1 ? Math.max(tt, t) : t;
+          best = {
+            d,
+            s: Pb.s[k - 1] + ext * l,
+            h: (dx * (q[1] - a[1]) - dy * (q[0] - a[0])) / l,
+          };
+        }
+      }
+      return best;
+    };
+    const vs: number[] = [];
+    for (let i = 0; i < P.count; i++) vs.push(P.offset + i);
+    const feet = vs.map((v) => footOf([uv[2 * v], uv[2 * v + 1]]));
+    // The piece lies on one side of its run: that side stands off the body.
+    const side = feet.reduce((t, f) => t + f.h, 0) >= 0 ? 1 : -1;
+    const B3 = [...Bp.v].map(getPos);
+    const unitOf = (d: Vec3): Vec3 => {
+      const l = Math.hypot(d[0], d[1], d[2]);
+      return l > 1e-9 ? [d[0] / l, d[1] / l, d[2] / l] : [0, 0, 0];
+    };
+    const bodyAt = (t: number): Vec3 => {
+      const s = t * Bp.len;
+      const n = B3.length;
+      // Past the path's end the run goes on round the body, at the end's height and radius.
+      const roundOn = (E: Vec3, D: Vec3, e: number): Vec3 => {
+        const rx = E[0] - axis[0];
+        const rz = E[2] - axis[2];
+        const r = Math.hypot(rx, rz);
+        if (r < 1) return add(E, unitOf(D), e);
+        const turn = rx * D[2] - rz * D[0] >= 0 ? 1 : -1;
+        const th = Math.atan2(rz, rx) + (turn * e) / r;
+        return [axis[0] + r * Math.cos(th), E[1], axis[2] + r * Math.sin(th)];
+      };
+      if (s <= 0) return roundOn(B3[0], sub(B3[0], B3[1]), -s);
+      if (s >= Bp.len) return roundOn(B3[n - 1], sub(B3[n - 1], B3[n - 2]), s - Bp.len);
+      let lo = 0;
+      let hi = n - 1;
+      while (hi - lo > 1) {
+        const m = (lo + hi) >> 1;
+        if (Bp.s[m] <= s) lo = m;
+        else hi = m;
+      }
+      const w = Bp.s[hi] > Bp.s[lo] ? (s - Bp.s[lo]) / (Bp.s[hi] - Bp.s[lo]) : 0;
+      return add(B3[lo], sub(B3[hi], B3[lo]), w);
+    };
+    const span = Math.max(1e-6, share[1] - share[0]);
+    const layOut = (same: boolean) =>
+      feet.map((f) => {
+        const r = f.s / Pb.len;
+        const B = bodyAt(((same ? r : 1 - r) - share[0]) / span);
+        const out = unitOf([B[0] - axis[0], 0, B[2] - axis[2]]);
+        return add(add(B, [0, dir, 0], side * f.h), out, 2);
+      });
+    const outShare = (ps: Vec3[]) => {
+      let good = 0;
+      let all = 0;
+      const t = P.mesh.tris;
+      for (let k = 0; k + 2 < t.length; k += 3) {
+        const A = ps[t[k]];
+        const nrm = cross(sub(ps[t[k + 1]], A), sub(ps[t[k + 2]], A));
+        const c = A;
+        const out: Vec3 = [c[0] - axis[0], 0, c[2] - axis[2]];
+        const d = dot(nrm, out);
+        if (Math.abs(d) < 1e-9) continue;
+        all++;
+        if (d > 0) good++;
+      }
+      return all ? good / all : 0;
+    };
+    const lo = layOut(false);
+    const hi = layOut(true);
+    const ps = outShare(hi) > outShare(lo) ? hi : lo;
+    vs.forEach((v, i) => {
+      setPos(v, ps[i]);
+      placed[v] = 1;
+    });
+    return P;
+  };
   // Waistband / hem band.
   for (const gid of ['WAISTBAND', 'HEMBAND'] as DollGroupId[]) {
     if (!groups.has(gid)) continue;
@@ -7466,11 +8617,25 @@ export function solveDoll(input: DollInput): DollReport {
           e90: [1, 0, 0],
         };
         placeRing(gid, F, baseV, ringLen(gid) / TAU, onTop ? 'top' : 'bottom', Math.PI, 2, onTop);
+        // A band in pieces each sewn by a row of its own: each piece on its own stretch.
+        const own = new Map<string, number>();
+        for (const { sm, bandSide } of conf) {
+          const k = pk((bandSide === 'a' ? sm.a : sm.b)[0]);
+          own.set(k, (own.get(k) ?? 0) + 1);
+        }
+        const alongRow: string[] = [];
+        if (conf.length > 1 || groups.get(gid)!.length > 1)
+          for (const { sm, bandSide } of conf) {
+            const k = pk((bandSide === 'a' ? sm.a : sm.b)[0]);
+            if (own.get(k) !== 1) continue;
+            const P = layAlongRow(sm, bandSide, gid === 'HEMBAND' ? -1 : 1, F.c);
+            if (P) alongRow.push(P.key);
+          }
         for (const P of groups.get(gid)!) buildPanel(P);
         for (const sm of G.seams)
           if (inGroups(sm.a, band) && inGroups(sm.b, band)) graphWork(sm, passes);
         warnings.push(
-          `${gid === 'WAISTBAND' ? 'waistband' : 'hem band'}: on the path its confirmed seam${conf.length > 1 ? 's' : ''} name${conf.length > 1 ? '' : 's'} (${conf.map((x) => `${x.sm.seam.a}~${x.sm.seam.b}`).join(', ')}), by its ${onTop ? 'top' : 'bottom'} run`,
+          `${gid === 'WAISTBAND' ? 'waistband' : 'hem band'}: on the path its confirmed seam${conf.length > 1 ? 's' : ''} name${conf.length > 1 ? '' : 's'} (${conf.map((x) => `${x.sm.seam.a}~${x.sm.seam.b}`).join(', ')}), by its ${onTop ? 'top' : 'bottom'} run${alongRow.length ? ` · ${alongRow.join(', ')} each along its own row` : ''}`,
         );
         continue;
       }
@@ -7563,13 +8728,14 @@ export function solveDoll(input: DollInput): DollReport {
   // Graph seams between groups (whatever the graph found across them).
   for (const sm of G.seams) {
     if (handled.has(sm)) continue;
-    const ga = panelByKey.get(pk(sm.a[0]))?.group;
-    const gb = panelByKey.get(pk(sm.b[0]))?.group;
+    const drawnOf = (ids: EdgeId[]) => ids.find((id) => panelByKey.has(pk(id))) ?? ids[0];
+    const ga = panelByKey.get(pk(drawnOf(sm.a)))?.group;
+    const gb = panelByKey.get(pk(drawnOf(sm.b)))?.group;
     if (!ga || !gb || ga === gb || ga === 'FLOAT' || gb === 'FLOAT') continue;
     if (bodyLike.has(ga) && bodyLike.has(gb)) continue;
     const far = gapOf(sm);
     const w = graphWork(sm, passes);
-    if (w && far >= FAR && !w.confirmed) {
+    if (w && far >= FAR && !w.confirmed && !w.sleeveCap) {
       w.released = true;
       w.solver.active = false;
       w.note = `its two edges are ${far.toFixed(0)} mm apart once the pieces are placed (${ga} ↔ ${gb}) — a wrong pairing? not sewn`;
@@ -7588,7 +8754,8 @@ export function solveDoll(input: DollInput): DollReport {
     return `layer pair ${[P.key, ...P.layers].join(' + ')} — the plies are sewn to each other, but the pair is not attached to the rest yet (${others.length ? `no seam to ${others.join(', ')}${want.size > others.length ? ', …' : ''}` : 'no seam to any other piece'}) — drawn apart`;
   };
 
-  // Floating pieces stand beside the doll (or beside the bag), flat, facing front.
+  // Unplaceable pieces retain flat diagnostic geometry, but are omitted from garment frames and
+  // from the final mesh. Their `floating` rows below remain the report of what was not placed.
   let xMax = 0;
   let yLow = Infinity;
   for (let v = 0; v < N; v++)
@@ -7644,6 +8811,7 @@ export function solveDoll(input: DollInput): DollReport {
           P.fold ? P.fold.off[i] : 0,
         ]);
         placed[v] = 1;
+        hiddenFromView[v] = 1;
       }
       // Laid as cut, it is face up whatever the chart decided: its fold's plies are measured by it.
       if (!asChart) P.mirrored = false;
@@ -7676,11 +8844,22 @@ export function solveDoll(input: DollInput): DollReport {
 
   // ── phase 2: everything ─────────────────────────────────────────────────────────────────
   for (let v = 0; v < N; v++) {
-    anchor[3 * v] = pos[3 * v];
-    anchor[3 * v + 1] = pos[3 * v + 1];
-    anchor[3 * v + 2] = pos[3 * v + 2];
+    const layeredInterior = layeredBodyPanels.has(panelOf[v]) && ringOf[v] < 0;
+    // A guess-laid layered panel now starts remembering its original placed side. Other anchors
+    // remember the phase-1 result, as before.
+    if (!layeredInterior || !delayedLayeredBodyPanels.has(panelOf[v])) {
+      anchor[3 * v] = pos[3 * v];
+      anchor[3 * v + 1] = pos[3 * v + 1];
+      anchor[3 * v + 2] = pos[3 * v + 2];
+    }
     // (a bag has nothing to hold it upright but a whisper of its placement)
-    anchorK[v] = bag ? 0.001 : bodyLike.has(groupOfV[v]) || groupOfV[v] === 'FLOAT' ? 0 : 0.002;
+    anchorK[v] = bag
+      ? 0.001
+      : layeredInterior
+        ? LAYERED_BODY_ANCHOR_K
+        : bodyLike.has(groupOfV[v]) || groupOfV[v] === 'FLOAT'
+          ? 0
+          : 0.002;
   }
   for (const P of buildPanelLater) buildPanel(P);
   // A folded piece drawn apart never moves, but its fold contacts are paired all the same: the
@@ -7863,7 +9042,7 @@ export function solveDoll(input: DollInput): DollReport {
       );
     }
     // Twist: the other direction would fit the solved shape much better.
-    const alt = seamRows(w.A, w.B, !w.same, w.aRange, w.bRange);
+    const alt = rowsOfPaths(w.A, w.B, !w.same, w.aRange, w.bRange);
     const ag = rowGaps(pos, alt);
     const altMean = ag.reduce((x, y) => x + y, 0) / Math.max(1, ag.length);
     const twisted = w.origin === 'graph' && !w.closure && m.mean > 5 && altMean < 0.5 * m.mean;
@@ -7919,10 +9098,16 @@ export function solveDoll(input: DollInput): DollReport {
     } else if (w.confirmed && w.overlap) note = `confirmed by a person · ${note}`;
     else if (w.guess)
       note = `step ${w.guess.step} names no row — the step picture's guess · ${note}`;
+    // Sewn over its drawn stretch only: the stretch on a piece not drawn is said, never dropped
+    // (measured below where that piece is laid; unchecked where it is not).
+    if (w.laidEnds?.over)
+      note += ` · its stretch on ${w.laidEnds.off.join(', ')} (not drawn) is sewn over the shell edge under it, ${w.laidEnds.over.join(', ')}`;
+    else if (w.laidEnds)
+      note += ` · measured over its stretch on drawn pieces only — its stretch on ${w.laidEnds.off.join(', ')} (not drawn) is not checked here`;
     seams.push({
       id: w.id,
-      a: w.a,
-      b: w.b,
+      a: w.laidEnds?.a ?? w.a,
+      b: w.laidEnds?.b ?? w.b,
       kind: w.fromOrder ? 'from-order' : w.kind,
       origin: w.fromOrder ? 'doll-proposed' : w.origin,
       lenA,
@@ -7935,8 +9120,9 @@ export function solveDoll(input: DollInput): DollReport {
       state,
       released: w.released,
       note,
-      pathA: Uint32Array.from(w.A.v),
-      pathB: Uint32Array.from(w.B.v),
+      // As sewn: a side pulled together over a stretch of its edge is drawn over that stretch.
+      pathA: Uint32Array.from(sewnStretch(w.A, w.aRange)),
+      pathB: Uint32Array.from(sewnStretch(w.B, w.bRange)),
       ...(w.partRange ? { partRange: w.partRange } : {}),
       ...(w.foldedMm ? { foldedMm: w.foldedMm } : {}),
       ...(l4
@@ -8009,43 +9195,23 @@ export function solveDoll(input: DollInput): DollReport {
   // ── SURFACE PIECES BY ROWS (owner): the panel and the place each one is laid on come from the
   // confirmed row that sews it (surface-rows.ts), never from its name. Rows that touch a laid piece
   // are measured once the pieces are laid (below), not called undrawable.
-  const ownerSurface = new Map(
-    graph.chosen.flatMap((candidate) =>
-      owner && candidate.kind === 'surface' && candidate.surface
-        ? [[candidate.surface.part, candidate.surface] as const]
-        : [],
-    ),
-  );
-  const geomOfKey = new Map(graph.pieces.map((g) => [g.pieceKey, g]));
-  const shellHosts = new Set(
-    panels
-      .filter((P) => P.group === 'LEG_L' || P.group === 'LEG_R' || P.group === 'BODY')
-      .map((P) => P.key),
-  );
-  const rowLays: Map<string, RowLay> = owner
-    ? planSurfaceByRows({
-        parts: G.skipped.filter((x) => x.surface).map((x) => x.pieceKey),
-        fixed: new Map(
-          [...ownerSurface].flatMap(([part, s]) =>
-            shellHosts.has(s.host) ? [[part, { host: s.host, T: s.T }] as const] : [],
-          ),
-        ),
-        hosts: shellHosts,
-        geoms: geomOfKey,
-        rows: graphIn.chosen.filter(
-          (c) => isConf(c) && c.kind !== 'surface' && c.kind !== 'closure-not-seam',
-        ),
-      })
-    : new Map();
   /** Rows measured on the laid pieces: every stretch on a drawn panel or a laid piece. */
   const laidRows: SeamCandidate[] = [];
+  const leadPart = <T extends { id: EdgeId; piece: string }>(p: T): T => {
+    const id = G.leadEdge?.(p.id) ?? p.id;
+    return id === p.id ? p : { ...p, id, piece: pk(id) };
+  };
   if (owner && (rowLays.size || ownerSurface.size)) {
     const reported = new Set(seams.map((seam) => seam.id));
+    // (a row sewn over its drawn parts is reported over the whole row once its laid end is laid)
+    const sewnShort = new Set(
+      works.filter((w) => w.laidEnds && !w.hidden && !w.rejectedByPerson).map((w) => w.id),
+    );
     const laid = (k: string) => rowLays.has(k) || ownerSurface.has(k);
     for (const c of graphIn.chosen) {
       if (!isConf(c) || c.kind === 'surface' || c.kind === 'closure-not-seam') continue;
-      if (reported.has(`${c.a}~${c.b}`)) continue;
-      const parts = [...rowParts(c, 'a'), ...rowParts(c, 'b')];
+      if (reported.has(`${c.a}~${c.b}`) && !sewnShort.has(`${c.a}~${c.b}`)) continue;
+      const parts = [...rowParts(c, 'a'), ...rowParts(c, 'b')].map(leadPart);
       if (
         parts.some((p) => laid(p.piece)) &&
         parts.every((p) => laid(p.piece) || panelByKey.has(p.piece))
@@ -8071,7 +9237,9 @@ export function solveDoll(input: DollInput): DollReport {
           id,
           a: (candidate.aParts ?? edgeIdsOf(candidate.a)).flatMap(edgeIdsOf),
           b: (candidate.bParts ?? edgeIdsOf(candidate.b)).flatMap(edgeIdsOf),
-          note: `step ${guessStepOf.get(candidate.provenance.seamKey)} names no row — the step picture's guess could not be drawn on the current pieces`,
+          note:
+            guessYield.get(id) ??
+            `step ${guessStepOf.get(candidate.provenance.seamKey)} names no row — the step picture's guess could not be drawn on the current pieces`,
         });
         reported.add(id);
         continue;
@@ -8604,9 +9772,56 @@ export function solveDoll(input: DollInput): DollReport {
   }
   // Rows on laid pieces, measured where the pieces lie — on the host's face, the drawing's layer
   // offset left out: closed when the stretches meet, a contradiction when they stay apart.
+  const rowById = new Map(
+    graphIn.chosen.map((candidate) => [`${candidate.a}~${candidate.b}`, candidate]),
+  );
+  const compositePlaced = new Set(
+    [...rowLays].flatMap(([piece, lay]) => {
+      const candidate = rowById.get(lay.row);
+      return candidate &&
+        (rowParts(candidate, 'a').length > 1 || rowParts(candidate, 'b').length > 1)
+        ? [piece]
+        : [];
+    }),
+  );
   for (const c of laidRows) {
     const id = `${c.a}~${c.b}`;
-    type Run = { pts: Vec3[]; v: number[]; len: number };
+    // Surface pieces are drawn separately even when grouping mapped an identical sewn ply to its
+    // leader. Use that piece's own laid vertices here; `leadPart` is only for an omitted ply.
+    const drawnPart = <T extends { id: EdgeId; piece: string }>(part: T): T =>
+      layAt.has(part.piece) ? part : leadPart(part);
+    const shellWork = works.find(
+      (w) => w.id === id && w.laidEnds && !w.hidden && !w.rejectedByPerson,
+    );
+    // A row the solve sewed over its drawn parts: its report is this one, over the whole row.
+    const sewnPart = seams.findIndex((x) => x.id === id);
+    // A waistband is already placed and sewn on the row's shell path. Its terminal flap stretch
+    // describes the continuation of that path on a laid piece; measuring the closed seam again as
+    // waistband-to-flap judges it in the flap's frame and reports a false open end at the hip.
+    const waistbandShell = [...rowParts(c, 'a'), ...rowParts(c, 'b')].some(
+      (part) => panelByKey.get(part.piece)?.group === 'WAISTBAND',
+    );
+    if (shellWork && sewnPart >= 0 && waistbandShell) {
+      const shell = seams[sewnPart];
+      const unchecked = ` · measured over its stretch on drawn pieces only — its stretch on ${shellWork.laidEnds!.off.join(', ')} (not drawn) is not checked here`;
+      const shellNote = shell.note.endsWith(unchecked)
+        ? shell.note.slice(0, -unchecked.length)
+        : shell.note;
+      shell.note = `${shellNote} · laid continuation ${shellWork.laidEnds!.off.join(', ')} stays on its host; the seam is judged on the waistband and drawn shell path`;
+      continue;
+    }
+    // A composite that begins or ends on a laid surface piece has two honest readings: the
+    // drawable shell stretch is the structural seam, while the surface stretch is checked where
+    // that piece is laid. Keep the shell path for geometry; replacing it with one polyline through
+    // disconnected surface runs draws an invented jump between them.
+    if (sewnPart >= 0 && !shellWork) {
+      seams.splice(sewnPart, 1);
+      const said = contradictions.findIndex((x) =>
+        x.startsWith(`${id}: confirmed by a person but it does not close — `),
+      );
+      if (said >= 0) contradictions.splice(said, 1);
+    }
+    type Run = { pts: Vec3[]; v: number[]; s: number[]; len: number };
     const runOf = (p: { id: string; piece: string; range?: [number, number] }): Run | null => {
       const L = layAt.get(p.piece);
       if (L) {
@@ -8621,20 +9836,29 @@ export function solveDoll(input: DollInput): DollReport {
             const d = Math.hypot(L.mesh.pts[b][0] - x[0], L.mesh.pts[b][1] - x[1]);
             if (d < bd) [bi, bd] = [b, d];
           }
-          if (v[v.length - 1] !== L.offset + bi) v.push(L.offset + bi);
+          v.push(L.offset + bi);
         }
         let len = 0;
         for (let i = 1; i < q.length; i++)
           len += Math.hypot(q[i][0] - q[i - 1][0], q[i][1] - q[i - 1][1]);
-        return { pts: q.map((x) => L.at(x, 0)), v, len };
+        return {
+          pts: v.map((vertex) => {
+            const index = 3 * (vertex - N);
+            return [surfacePos[index], surfacePos[index + 1], surfacePos[index + 2]] as Vec3;
+          }),
+          v,
+          s: q.map((_, index) => (index / (q.length - 1)) * len),
+          len,
+        };
       }
       const P0 = pathOf([p.id]);
       if (!P0) return null;
       const P = p.range ? cropPath(P0, p.range) : P0;
-      return { pts: [...P.v].map((v) => getPos(v)), v: [...P.v], len: P.len };
+      return { pts: [...P.v].map((v) => getPos(v)), v: [...P.v], s: [...P.s], len: P.len };
     };
-    const sideA = rowParts(c, 'a').map(runOf);
-    const sideB = rowParts(c, 'b').map(runOf);
+    // A ply drawn as a layer of another: its stretch is the drawn ply's.
+    const sideA = rowParts(c, 'a').map(drawnPart).map(runOf);
+    const sideB = rowParts(c, 'b').map(drawnPart).map(runOf);
     const inStep = ownerInStepKeys.has(c.provenance?.seamKey ?? '');
     const partsA = rowParts(c, 'a').map((p) => p.id);
     const partsB = rowParts(c, 'b').map((p) => p.id);
@@ -8689,13 +9913,214 @@ export function solveDoll(input: DollInput): DollReport {
           best = Math.min(best, segD(p, r.pts[i - 1], r.pts[i]));
       return best;
     };
-    const gaps = [
-      ...runsA.flatMap((r) => r.pts.map((p) => toRuns(p, runsB))),
-      ...runsB.flatMap((r) => r.pts.map((p) => toRuns(p, runsA))),
-    ].sort((x, y) => x - y);
+    /** A run cut to a rest-arc interval; endpoints are interpolated for honest measurement. */
+    const cropRun = (run: Run, from: number, to: number): Run => {
+      const at = (want: number) => {
+        let index = 1;
+        while (index < run.s.length - 1 && run.s[index] < want) index++;
+        const s0 = run.s[index - 1];
+        const s1 = run.s[index];
+        const t = Math.max(0, Math.min(1, (want - s0) / (s1 - s0 || 1)));
+        const a = run.pts[index - 1];
+        const b = run.pts[index];
+        return {
+          point: [
+            a[0] + t * (b[0] - a[0]),
+            a[1] + t * (b[1] - a[1]),
+            a[2] + t * (b[2] - a[2]),
+          ] as Vec3,
+          vertex: t < 0.5 ? run.v[index - 1] : run.v[index],
+        };
+      };
+      const first = at(from);
+      const last = at(to);
+      const inside = run.s
+        .map((s, index) => ({ s, index }))
+        .filter(({ s }) => s >= from - 1e-6 && s <= to + 1e-6);
+      return {
+        pts: [first.point, ...inside.map(({ index }) => run.pts[index]), last.point],
+        // Keep these parallel to `pts`/`s`: a laid boundary vertex can occur more than once in
+        // the resampling, and each occurrence carries the point it is sewn to below.
+        v: [first.vertex, ...inside.map(({ index }) => run.v[index]), last.vertex],
+        s: [0, ...inside.map(({ s }) => s - from), to - from],
+        len: to - from,
+      };
+    };
+    type OrderedPart = { run: Run; piece: string; from: number; to: number };
+    const reverseRun = (run: Run): Run => ({
+      pts: [...run.pts].reverse(),
+      v: [...run.v].reverse(),
+      s: [...run.s].reverse().map((value) => run.len - value),
+      len: run.len,
+    });
+    const ordered = (
+      runs: Run[],
+      parts: Array<{ piece: string }>,
+      reverse: boolean,
+    ): OrderedPart[] => {
+      const entries = runs.map((run, index) => ({ run, piece: parts[index].piece }));
+      if (reverse) entries.reverse();
+      const total = runs.reduce((sum, run) => sum + run.len, 0) || 1;
+      let cursor = 0;
+      return entries.map(({ run: run0, piece }) => {
+        const run = reverse ? reverseRun(run0) : run0;
+        const from = cursor / total;
+        cursor += run.len;
+        return { run, piece, from, to: cursor / total };
+      });
+    };
+    type OrderedPair = {
+      a: Run;
+      b: Run;
+      aSurface: boolean;
+      bSurface: boolean;
+      throughShell: boolean;
+    };
+    const pairedOf = (reverseA: boolean, reverseB: boolean): OrderedPair[] => {
+      const orderedA = ordered(runsA, rowParts(c, 'a').map(drawnPart), reverseA);
+      const orderedB = ordered(runsB, rowParts(c, 'b').map(drawnPart), reverseB);
+      const pairs: OrderedPair[] = [];
+      for (const a of orderedA)
+        for (const b of orderedB) {
+          const from = Math.max(a.from, b.from);
+          const to = Math.min(a.to, b.to);
+          if (to - from <= 1e-6) continue;
+          pairs.push({
+            a: cropRun(
+              a.run,
+              ((from - a.from) / (a.to - a.from)) * a.run.len,
+              ((to - a.from) / (a.to - a.from)) * a.run.len,
+            ),
+            b: cropRun(
+              b.run,
+              ((from - b.from) / (b.to - b.from)) * b.run.len,
+              ((to - b.from) / (b.to - b.from)) * b.run.len,
+            ),
+            aSurface: layAt.has(a.piece),
+            bSurface: layAt.has(b.piece),
+            throughShell: panelByKey.has(a.piece) || panelByKey.has(b.piece),
+          });
+        }
+      return pairs;
+    };
+    const gapsOf = (pairs: OrderedPair[]) =>
+      pairs
+        .flatMap(({ a, b }) => [
+          ...a.pts.map((point) => toRuns(point, [b])),
+          ...b.pts.map((point) => toRuns(point, [a])),
+        ])
+        .sort((x, y) => x - y);
+    const options = [
+      pairedOf(false, false),
+      pairedOf(true, false),
+      pairedOf(false, true),
+      pairedOf(true, true),
+    ];
+    const score = (pairs: OrderedPair[]) => {
+      const gaps = gapsOf(pairs.filter((pair) => pair.throughShell));
+      const p95 = gaps[Math.min(gaps.length - 1, Math.floor(0.95 * gaps.length))] ?? Infinity;
+      const mean = gaps.reduce((sum, gap) => sum + gap, 0) / Math.max(1, gaps.length);
+      return p95 + 0.01 * mean;
+    };
+    const paired = options.reduce((best, option) => (score(option) < score(best) ? option : best));
+
+    // One laid pocket edge sewn to an ordered composite is not one flat run. Pin its shell stretch
+    // to the stored row part by part; a continuation onto another laid piece stays measured below.
+    // The rest-length mismatch remains in lenA/lenB and the report; only the geometry is given the
+    // same constraint the stitch gives the cloth.
+    const sidePartsA = rowParts(c, 'a').map(drawnPart);
+    const sidePartsB = rowParts(c, 'b').map(drawnPart);
+    const oneLaidSide = (parts: typeof sidePartsA) =>
+      new Set(parts.map((part) => part.piece)).size === 1 &&
+      parts.every((part) => layAt.has(part.piece));
+    const compositePin =
+      oneLaidSide(sidePartsA) && sidePartsB.length > 1
+        ? ('a' as const)
+        : oneLaidSide(sidePartsB) && sidePartsA.length > 1
+          ? ('b' as const)
+          : null;
+    // Two bags laid from different shell rows meet round their remaining equal edge. Move the bag
+    // placed by the composite row (or the deeper nested piece) to that edge after both hosts have
+    // been drawn. A folded card row is deliberately left measured, not forced.
+    const pieceA = sidePartsA.length === 1 ? sidePartsA[0].piece : null;
+    const pieceB = sidePartsB.length === 1 ? sidePartsB[0].piece : null;
+    const lenA0 = runsA.reduce((sum, run) => sum + run.len, 0);
+    const lenB0 = runsB.reduce((sum, run) => sum + run.len, 0);
+    const comparable = Math.min(lenA0, lenB0) / Math.max(lenA0, lenB0, 1e-9) >= 0.85;
+    const depthOf = (piece: string) => rowLays.get(piece)?.depth ?? 0;
+    const surfacePin = (() => {
+      if (
+        compositePin ||
+        !pieceA ||
+        !pieceB ||
+        !layAt.has(pieceA) ||
+        !layAt.has(pieceB) ||
+        !comparable ||
+        rowLays.get(pieceA)?.fold ||
+        rowLays.get(pieceB)?.fold
+      )
+        return null;
+      if (compositePlaced.has(pieceA) !== compositePlaced.has(pieceB))
+        return compositePlaced.has(pieceA) ? ('a' as const) : ('b' as const);
+      if (depthOf(pieceA) !== depthOf(pieceB))
+        return depthOf(pieceA) > depthOf(pieceB) ? ('a' as const) : ('b' as const);
+      return null;
+    })();
+    const pin = compositePin ?? surfacePin;
+    if (pin) {
+      const atRun = (run: Run, want: number): Vec3 => {
+        let index = 1;
+        while (index < run.s.length - 1 && run.s[index] < want) index++;
+        const s0 = run.s[index - 1];
+        const s1 = run.s[index];
+        const t = Math.max(0, Math.min(1, (want - s0) / (s1 - s0 || 1)));
+        return add(run.pts[index - 1], sub(run.pts[index], run.pts[index - 1]), t);
+      };
+      const constraints = new Map<number, Vec3[]>();
+      for (const pair of paired) {
+        // A surface-to-surface continuation is still measured and reported below, but it is not
+        // a drawable shell seam and may be discontinuous in the host frames. Do not invent a
+        // connector by pulling either laid piece through that gap.
+        if (compositePin && !pair.throughShell) continue;
+        const moving = pin === 'a' ? pair.a : pair.b;
+        const target = pin === 'a' ? pair.b : pair.a;
+        if (!(pin === 'a' ? pair.aSurface : pair.bSurface)) continue;
+        moving.v.forEach((vertex, index) => {
+          const point = atRun(target, (moving.s[index] / Math.max(moving.len, 1e-9)) * target.len);
+          constraints.set(vertex, [...(constraints.get(vertex) ?? []), point]);
+        });
+      }
+      for (const [vertex, targets] of constraints) {
+        const point = targets
+          .reduce((sum, target) => add(sum, target), [0, 0, 0] as Vec3)
+          .map((value) => value / targets.length) as Vec3;
+        const index = 3 * (vertex - N);
+        surfacePos[index] = point[0];
+        surfacePos[index + 1] = point[1];
+        surfacePos[index + 2] = point[2];
+      }
+      for (const pair of paired) {
+        const moving = pin === 'a' ? pair.a : pair.b;
+        moving.pts = moving.v.map((vertex) => {
+          const index = 3 * (vertex - N);
+          return [surfacePos[index], surfacePos[index + 1], surfacePos[index + 2]] as Vec3;
+        });
+      }
+    }
+    // A composite's surface continuation is reported separately below. Its structural judgement
+    // is the stretch against the shell; otherwise a correctly shell-placed pocket is called open
+    // only because the stored row carries on over another surface piece.
+    const shellPairs = paired.filter((pair) => pair.throughShell);
+    const gaps = gapsOf(shellPairs.length ? shellPairs : paired);
     const mean = gaps.reduce((x, y) => x + y, 0) / Math.max(1, gaps.length);
     const p95 = gaps[Math.min(gaps.length - 1, Math.floor(0.95 * gaps.length))] ?? 0;
     const max = gaps[gaps.length - 1] ?? 0;
+    const surfaceOnlyGaps = gapsOf(paired.filter((pair) => !pair.throughShell));
+    const surfaceOnlyP95 =
+      surfaceOnlyGaps[
+        Math.min(surfaceOnlyGaps.length - 1, Math.floor(0.95 * surfaceOnlyGaps.length))
+      ];
+    const surfaceOnlyMax = surfaceOnlyGaps[surfaceOnlyGaps.length - 1];
     const lenA = runsA.reduce((x, r) => x + r.len, 0);
     const lenB = runsB.reduce((x, r) => x + r.len, 0);
     const closed = p95 <= 4 && max <= 15;
@@ -8709,6 +10134,17 @@ export function solveDoll(input: DollInput): DollReport {
       const words = `${id}: confirmed by a person but it does not close where ${laidHere} lies on its panel — gap p95 ${p95.toFixed(0)} / max ${max.toFixed(0)} mm, lengths ${lenA.toFixed(0)} vs ${lenB.toFixed(0)} mm: the row contradicts the pattern (or the rows that lay the piece)`;
       contradictions.push(words);
       note = `CONTRADICTION — ${words}`;
+    }
+    if (surfaceOnlyGaps.length)
+      note += ` · surface-only stretch measured separately: gap p95 ${surfaceOnlyP95.toFixed(1)} / max ${surfaceOnlyMax.toFixed(1)} mm`;
+    if (shellWork && sewnPart >= 0) {
+      const shell = seams[sewnPart];
+      const unchecked = ` · measured over its stretch on drawn pieces only — its stretch on ${shellWork!.laidEnds!.off.join(', ')} (not drawn) is not checked here`;
+      const shellNote = shell.note.endsWith(unchecked)
+        ? shell.note.slice(0, -unchecked.length)
+        : shell.note;
+      shell.note = `${shellNote} · surface stretch on ${laidHere} measured where laid: gap p95 ${p95.toFixed(1)} / max ${max.toFixed(1)} mm${closed ? '' : ' — does not close'}`;
+      continue;
     }
     seams.push({
       id,
@@ -8727,8 +10163,12 @@ export function solveDoll(input: DollInput): DollReport {
       decidedBy: 'person',
       inStep,
       note,
-      pathA: Uint32Array.from(runsA.flatMap((r) => r.v)),
-      pathB: Uint32Array.from(runsB.flatMap((r) => r.v)),
+      pathA: Uint32Array.from(
+        paired.filter((pair) => pair.throughShell).flatMap((pair) => pair.a.v),
+      ),
+      pathB: Uint32Array.from(
+        paired.filter((pair) => pair.throughShell).flatMap((pair) => pair.b.v),
+      ),
     });
   }
   // Closures by marks, measured now that their surface parts are laid: hole to button, as drawn.
@@ -8798,36 +10238,38 @@ export function solveDoll(input: DollInput): DollReport {
   for (let i = 0; i < 3 * N; i++) positions[i] = Number.isFinite(pos[i]) ? pos[i] : 0;
   for (let i = 0; i < surfacePos.length; i++)
     positions[3 * N + i] = Number.isFinite(surfacePos[i]) ? surfacePos[i] : 0;
-  const outPanels: DollReport['panels'] = panels.map((P) => {
-    const tris = new Uint32Array(P.mesh.tris.length);
-    const flipP = P.mirrored !== faceFlip.has(P.idx);
-    for (let t = 0; t < tris.length; t += 3) {
-      tris[t] = P.mesh.tris[t];
-      // A part a fold turned over is wound the other way (its face now looks in).
-      const flip = flipP !== (P.fold?.triFlip[t / 3] === 1);
-      tris[t + 1] = flip ? P.mesh.tris[t + 2] : P.mesh.tris[t + 1];
-      tris[t + 2] = flip ? P.mesh.tris[t + 1] : P.mesh.tris[t + 2];
-    }
-    const uvf = new Float32Array(2 * P.count);
-    if (P.fold)
-      for (let i = 0; i < P.count; i++) {
-        uvf[2 * i] = P.fold.flat[i][0];
-        uvf[2 * i + 1] = P.fold.flat[i][1];
+  const outPanels: DollReport['panels'] = panels
+    .filter((P) => !hiddenFromView[P.offset])
+    .map((P) => {
+      const tris = new Uint32Array(P.mesh.tris.length);
+      const flipP = P.mirrored !== faceFlip.has(P.idx);
+      for (let t = 0; t < tris.length; t += 3) {
+        tris[t] = P.mesh.tris[t];
+        // A part a fold turned over is wound the other way (its face now looks in).
+        const flip = flipP !== (P.fold?.triFlip[t / 3] === 1);
+        tris[t + 1] = flip ? P.mesh.tris[t + 2] : P.mesh.tris[t + 1];
+        tris[t + 2] = flip ? P.mesh.tris[t + 1] : P.mesh.tris[t + 2];
       }
-    else for (let i = 0; i < 2 * P.count; i++) uvf[i] = uv[2 * P.offset + i];
-    return {
-      pieceKey: P.key,
-      instance: 0 as const,
-      mirrored: P.mirrored,
-      group: P.group,
-      offset: P.offset,
-      count: P.count,
-      tris,
-      uv: uvf,
-      boundary: Uint32Array.from(P.mesh.bVert),
-      layers: P.layers,
-    };
-  });
+      const uvf = new Float32Array(2 * P.count);
+      if (P.fold)
+        for (let i = 0; i < P.count; i++) {
+          uvf[2 * i] = P.fold.flat[i][0];
+          uvf[2 * i + 1] = P.fold.flat[i][1];
+        }
+      else for (let i = 0; i < 2 * P.count; i++) uvf[i] = uv[2 * P.offset + i];
+      return {
+        pieceKey: P.key,
+        instance: 0 as const,
+        mirrored: P.mirrored,
+        group: P.group,
+        offset: P.offset,
+        count: P.count,
+        tris,
+        uv: uvf,
+        boundary: Uint32Array.from(P.mesh.bVert),
+        layers: P.layers,
+      };
+    });
   outPanels.push(...surfacePanels);
   // Pieces that end up in no closed/proposed seam at all are floating too (a bag's strap laid on
   // its panel by a reading of the order is said as a surface row instead).
@@ -8846,6 +10288,13 @@ export function solveDoll(input: DollInput): DollReport {
         reason: plyWords(P) ?? 'in its group but no seam of it closed or was proposed',
       });
   }
+  // Seams stay in the written report, including their measured state and words, but a seam that
+  // touches an omitted panel has no drawable path in the garment view.
+  for (const seam of seams)
+    if ([...seam.pathA, ...seam.pathB].some((v) => hiddenFromView[v])) {
+      seam.pathA = new Uint32Array(0);
+      seam.pathB = new Uint32Array(0);
+    }
   // Collar units: gaps after solving; a fall's outer edge vs the stand top it hangs from, and how
   // much of it stays outside the stand's surface.
   if (opt.debug)
@@ -8954,15 +10403,27 @@ export function solveDoll(input: DollInput): DollReport {
               return `${nameOfPiece.get(anchor.piece) ?? anchor.piece} ${edge}`.trim();
             })
             .join(' + ');
-        const unbound = (opt.seams?.inStepKeys ? opt.seams.rows : [])
-          .filter((row) => row.status === 'confirmed' && !ownerInStepKeys.has(row.seamKey))
+        const noStep = (opt.seams?.inStepKeys ? opt.seams.rows : []).filter(
+          (row) => row.status === 'confirmed' && !ownerInStepKeys.has(row.seamKey),
+        );
+        const unbound = noStep
+          .filter((row) => !shellCoveredSeamKeys.has(row.seamKey))
           .map(
             (row) =>
               `not sewn, no step names it: ${sideWords(row.sideA)} ↔ ${sideWords(row.sideB)}${row.kind === 'closure' ? ' (closure)' : ''}`,
           );
+        const covered = noStep
+          .filter((row) => shellCoveredSeamKeys.has(row.seamKey))
+          .map(
+            (row) => `sewn under a surface row: ${sideWords(row.sideA)} ↔ ${sideWords(row.sideB)}`,
+          );
+        const noStepWords = covered.length
+          ? `no step ${noStep.length} (${unbound.length} not sewn · ${covered.length} sewn under surface)`
+          : `no step ${noStep.length} (not sewn)`;
         return [
-          `rows: confirmed ${confirmed} · sewn by steps ${inSteps} · no step ${Math.max(0, confirmed - inSteps)} (not sewn) · rejected ${rejected} (not sewn) · guessed ${guessed} (steps without a row, dashed)`,
+          `rows: confirmed ${confirmed} · sewn by steps ${inSteps} · ${noStepWords} · rejected ${rejected} (not sewn) · guessed ${guessed} (steps without a row, dashed)`,
           ...unbound,
+          ...covered,
           ...input.facts.pieces
             .filter((piece) => !ownerSeamPieces?.has(piece.pieceKey))
             .map((piece) => `no seam: ${piece.name.trim() || '(unnamed piece)'}`),

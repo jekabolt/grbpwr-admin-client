@@ -55,7 +55,7 @@ import {
 } from '../cut-strips/strip-pieces';
 import { useCardDxfPack } from '../nesting/card-dxf-pack';
 import { findPiece, useDxfGeometry, useDxfIndex } from '../nesting/dxf-geometry';
-import { sizeTokensOf } from '../nesting/block-code';
+import { bareToken, sizeTokensOf } from '../nesting/block-code';
 import { pieceBlockRefs, pieceRefKey, rollGoodsScopes } from '../piece-block-refs';
 import { useSizeNames } from 'components/managers/model/components/use-size-systems';
 import type { TechCardFormData } from '../schema';
@@ -77,8 +77,10 @@ export type DollCard = {
   baseSize: string;
   /** Sizes the doll can be built on, grade order (DXF size tokens; '' read as `oneSize`). */
   sizes: string[];
-  /** The card's size a doll size stands for, else the size as the DXF writes it. */
+  /** The short code of the card's size a doll size stands for («M»), else the DXF's own name. */
   sizeLabel: (size: string) => string;
+  /** The card's size name a doll size stands for («m_32bo_m»), else the DXF's own name. */
+  cardSizeOf: (size: string) => string;
   /** Facts of a size; null when no piece has a contour in it. */
   factsOf: (size: string) => SkeletonFacts | null;
   /** Pieces without a contour in that size (left out of its doll, said so). */
@@ -453,19 +455,14 @@ export function useDollCard(): DollCard | null {
     };
     // A DXF size → the card's size it stands for: the card size whose first token it is (the
     // tokens the rest of the app reads block tails by), when exactly one is.
-    const labelOf = new Map<string, string>();
-    for (const s of sized.sizes) {
-      if (s === '') continue;
-      const t = s.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase();
-      const hits = cardSizes.filter((n) => n.toLowerCase() === t || sizeTokensOf(n).includes(t));
-      if (hits.length === 1 && hits[0].toLowerCase() !== t) labelOf.set(s, hits[0]);
-    }
+    const labelOf = dollSizeLabels(sized.sizes, cardSizes);
     const sizes = sized.sizes.map(keyOf);
     return {
       cardId,
       baseSize: base,
       sizes: sizes.length ? sizes : [base],
-      sizeLabel: (s: string) => labelOf.get(s) ?? s,
+      sizeLabel: (s: string) => labelOf.get(s)?.label ?? s,
+      cardSizeOf: (s: string) => labelOf.get(s)?.cardSize ?? s,
       factsOf,
       missingOf,
       rows,
@@ -510,6 +507,39 @@ export function useDollCard(): DollCard | null {
     gender,
     cardSizes,
   ]);
+}
+
+/**
+ * A DXF size → the card's size it stands for, and the short code to show for it. The DXF writes a
+ * size as the code («M»), the number, or the whole dictionary name («m_32bo_m»); the card's sizes are
+ * dictionary names («m_32bo_m», or a bare «m»). The DXF name is split into tokens; the card size whose
+ * whole name or code (first token, as block tails are read) matches is taken when exactly one does.
+ * The label is that size's code in capitals. No single match: no entry, the DXF name is shown.
+ */
+export function dollSizeLabels(
+  dxfSizes: readonly string[],
+  cardSizes: readonly string[],
+): Map<string, { label: string; cardSize: string }> {
+  const out = new Map<string, { label: string; cardSize: string }>();
+  for (const s of dxfSizes) {
+    if (s === '') continue;
+    const whole = bareToken(s);
+    const exact = cardSizes.filter((n) => bareToken(n) === whole);
+    const tokens = s
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter(Boolean);
+    // The code leads the name («m» of «m_32bo_m»): a later token («m» of the system «_m») only
+    // decides when the leading one names nothing.
+    const byToken = (t: string | undefined) =>
+      t ? cardSizes.filter((n) => sizeTokensOf(n).includes(t)) : [];
+    let hits = exact.length ? exact : byToken(tokens[0]);
+    if (!hits.length) hits = [...new Set(tokens.slice(1).flatMap((t) => byToken(t)))];
+    if (hits.length !== 1) continue;
+    const code = sizeTokensOf(hits[0])[0] ?? hits[0];
+    out.set(s, { label: code.toUpperCase(), cardSize: hits[0] });
+  }
+  return out;
 }
 
 /** The key a solve is cached under: the read, the size, seam/fold rows, lining. */

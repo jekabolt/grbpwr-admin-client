@@ -270,8 +270,9 @@ function rectangle(key: string, name: string, index: number, w: number, h: numbe
 const NAMES = { fl: 'FRONT LEFT', fr: 'FRONT RIGHT', back: 'BACK', collar: 'COLLAR' };
 const RENAMED = { fl: 'FL', fr: 'FR', back: 'BP', collar: 'CLR' };
 
-/** Fronts 250 mm and a back 500 mm wide across their top edges, a collar of `collarMm`. */
-function body(collarMm: number, names = NAMES) {
+/** Fronts 250 mm and a back 500 mm wide across their top edges, a collar of `collarMm`; the
+ *  collar row lists the neck's parts in `neck` order. */
+function body(collarMm: number, names = NAMES, neck = ['L#2', 'B#2', 'R#2']) {
   const facts: SkeletonFacts = {
     pieces: [
       rectangle('L', names.fl, 1, 25, 70),
@@ -293,9 +294,9 @@ function body(collarMm: number, names = NAMES) {
   });
   const collar: SeamCandidate = {
     a: 'C#0',
-    b: 'L#2+B#2+R#2',
+    b: neck.join('+'),
     aParts: ['C#0'],
-    bParts: ['L#2', 'B#2', 'R#2'],
+    bParts: neck,
     score: 1,
     kind: 'composite',
     evidence: { ...evidence, aLenMm: collarMm, bLenMm: 1000 },
@@ -398,6 +399,26 @@ describe('the collar on the finished neck', () => {
     const report = solveDoll({ graph, facts, options: { ...options, folds: storedRows(uv) } });
     expect(neckContradiction(report)).toContain('stored folds and pleats 1000 − 140 folded = 860');
     expect(neckContradiction(report)).toContain('the unit (1000 mm)');
+  }, 120_000);
+
+  it('centres a collar on the centre back whatever order its row lists the neck in', () => {
+    // Front, front, back: chained in that order the parts run from a shoulder round to the same
+    // shoulder. The collar, too short for the neck, goes on at its own length from the CB.
+    const centreX = (r: DollReport) => {
+      const P = r.panels.find((p) => p.pieceKey === 'C')!;
+      let x = 0;
+      for (let v = P.offset; v < P.offset + P.count; v++) x += r.positions[3 * v];
+      return x / P.count;
+    };
+    const a = body(700);
+    const b = body(700, NAMES, ['R#2', 'L#2', 'B#2']);
+    const ra = solveDoll({ ...a });
+    const rb = solveDoll({ ...b });
+    expect(rb.stats.nan).toBe(0);
+    const words = (r: DollReport) => neckContradiction(r)?.replace(/^\S+: /, '');
+    expect(words(rb)).toEqual(words(ra));
+    expect(Math.abs(centreX(ra))).toBeLessThan(15);
+    expect(Math.abs(centreX(rb))).toBeLessThan(15);
   }, 120_000);
 
   it('behaves the same under other names for the same pieces', () => {

@@ -33,6 +33,20 @@ export type RowLay = {
   how: string;
 };
 
+export type ShellSeamUnderSurface = {
+  /** The stored row whose surface stretch is replaced for the structural solve. */
+  row: SeamCandidate;
+  /** Drawn shell sides in the stored row's A/B order. */
+  a: EdgeId[];
+  b: EdgeId[];
+  /** The stored row's sides, kept for its report after the surface piece is laid. */
+  originalA: EdgeId[];
+  originalB: EdgeId[];
+  /** Surface pieces skipped by the solve, and the shell stretch used under them. */
+  off: string[];
+  over: EdgeId[];
+};
+
 /** A row's side as its stretches, in the stored walk order. */
 export function rowParts(c: SeamCandidate, side: 'a' | 'b'): RowPart[] {
   const ids = (side === 'a' ? c.aParts ?? edgeIdsOf(c.a) : c.bParts ?? edgeIdsOf(c.b)).flatMap(
@@ -42,6 +56,141 @@ export function rowParts(c: SeamCandidate, side: 'a' | 'b'): RowPart[] {
     const r = ids.length === 1 && c.range ? c.range[side] : c.partRange?.[id];
     return { id, piece: pk(id), ...(r ? { range: [r[0], r[1]] as [number, number] } : {}) };
   });
+}
+
+/**
+ * Structural seams hidden by a surface piece. Two stored rows can name the same pocket edge: one
+ * lays that edge on a shell panel, while the other sews the next shell panel to it. A step can
+ * instead name another edge of that pocket; then an existing direct shell row supplies the exact
+ * seam under it. The pocket is placed only after the solve, so the step's row/guess must sew the
+ * two drawn shell stretches under it.
+ */
+export function shellSeamsUnderSurfaceRows(args: {
+  /** Rows/guesses actually named by steps. */
+  rows: readonly SeamCandidate[];
+  /** Confirmed direct shell rows not named by a step. */
+  shellRows?: readonly SeamCandidate[];
+  lays: ReadonlyMap<string, RowLay>;
+  drawn: ReadonlySet<string>;
+  leadEdge?: (id: EdgeId) => EdgeId;
+}): ShellSeamUnderSurface[] {
+  type Entry = {
+    row: SeamCandidate;
+    id: string;
+    surfaceSide: 'a' | 'b';
+    surface: RowPart;
+    shell: RowPart[];
+  };
+  const mapped = (part: RowPart): RowPart => {
+    const id = args.leadEdge?.(part.id) ?? part.id;
+    return id === part.id ? part : { ...part, id, piece: pk(id) };
+  };
+  const entries: Entry[] = [];
+  for (const row of args.rows) {
+    const id = `${row.a}~${row.b}`;
+    for (const [surfaceSide, shellSide] of [
+      ['a', 'b'],
+      ['b', 'a'],
+    ] as const) {
+      const surface = rowParts(row, surfaceSide);
+      const shell = rowParts(row, shellSide).map(mapped);
+      if (
+        surface.length !== 1 ||
+        !args.lays.has(surface[0].piece) ||
+        !shell.length ||
+        !shell.every((part) => args.drawn.has(part.piece))
+      )
+        continue;
+      entries.push({ row, id, surfaceSide, surface: surface[0], shell });
+    }
+  }
+  const sameRange = (a?: [number, number], b?: [number, number]) =>
+    (!a && !b) || (!!a && !!b && Math.abs(a[0] - b[0]) <= 1 && Math.abs(a[1] - b[1]) <= 1);
+  const sameStretch = (a: RowPart, b: RowPart) => a.id === b.id && sameRange(a.range, b.range);
+  const sameSide = (a: readonly RowPart[], b: readonly RowPart[]) =>
+    a.length === b.length && a.every((part, i) => sameStretch(part, b[i]));
+  const sideSig = (ids: readonly EdgeId[]) => [...ids].sort().join('+');
+  const seamSig = (a: readonly EdgeId[], b: readonly EdgeId[]) =>
+    [sideSig(a), sideSig(b)].sort().join('~');
+  const existing = new Set(
+    args.rows.flatMap((row) => {
+      const a = rowParts(row, 'a').map(mapped);
+      const b = rowParts(row, 'b').map(mapped);
+      return a.length &&
+        b.length &&
+        a.every((part) => args.drawn.has(part.piece)) &&
+        b.every((part) => args.drawn.has(part.piece))
+        ? [
+            seamSig(
+              a.map((part) => part.id),
+              b.map((part) => part.id),
+            ),
+          ]
+        : [];
+    }),
+  );
+  const seen = new Set<string>();
+  const out: ShellSeamUnderSurface[] = [];
+  for (const [piece, lay] of args.lays) {
+    const host = entries.find(
+      (entry) =>
+        entry.id === lay.row &&
+        entry.surface.piece === piece &&
+        entry.shell.some((part) => part.piece === lay.on),
+    );
+    if (!host) continue;
+    const caughtEntries = entries
+      .filter((entry) => entry !== host && entry.surface.piece === piece)
+      // A row on the pocket's actual host edge is the direct evidence. A step guess on another
+      // pocket edge is only the fallback when no such row already supplies this shell seam.
+      .sort(
+        (a, b) =>
+          Number(!sameStretch(a.surface, host.surface)) -
+          Number(!sameStretch(b.surface, host.surface)),
+      );
+    for (const caught of caughtEntries) {
+      let caughtShell = caught.shell;
+      let hostShell = host.shell;
+      if (!sameStretch(caught.surface, host.surface)) {
+        // The step names another edge of the laid piece. It authorises only a direct shell row
+        // already confirmed between the named shell piece and the exact host stretch; the piece
+        // names alone never invent a join.
+        const caughtPieces = new Set(caught.shell.map((part) => part.piece));
+        const direct = (args.shellRows ?? []).flatMap((row) => {
+          const a = rowParts(row, 'a').map(mapped);
+          const b = rowParts(row, 'b').map(mapped);
+          if (!a.length || !b.length || ![...a, ...b].every((part) => args.drawn.has(part.piece)))
+            return [];
+          if (sameSide(a, host.shell) && b.every((part) => caughtPieces.has(part.piece)))
+            return [{ caught: b, host: a }];
+          if (sameSide(b, host.shell) && a.every((part) => caughtPieces.has(part.piece)))
+            return [{ caught: a, host: b }];
+          return [];
+        })[0];
+        if (!direct) continue;
+        caughtShell = direct.caught;
+        hostShell = direct.host;
+      }
+      const caughtIds = caughtShell.map((part) => part.id);
+      const hostIds = hostShell.map((part) => part.id);
+      const a = caught.surfaceSide === 'a' ? hostIds : caughtIds;
+      const b = caught.surfaceSide === 'b' ? hostIds : caughtIds;
+      const sig = seamSig(a, b);
+      const key = sig;
+      if (existing.has(sig) || seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        row: caught.row,
+        a,
+        b,
+        originalA: rowParts(caught.row, 'a').map((part) => part.id),
+        originalB: rowParts(caught.row, 'b').map((part) => part.id),
+        off: [piece],
+        over: hostIds,
+      });
+    }
+  }
+  return out;
 }
 
 /** A polyline cut to [r0, r1] mm of its arc. */
@@ -262,67 +411,95 @@ export function planSurfaceByRows(args: {
           [s.b, s.a],
         ] as const) {
           if (!mine.length || mine.some((p) => p.piece !== k)) continue;
-          if (other.length !== 1 || !known.has(other[0].piece) || other[0].piece === k) continue;
-          const on = other[0].piece;
-          const F = frameOf(on);
-          const Q = stretch(other[0]);
-          const G = geoms.get(on);
-          if (!F || !Q || !G) continue;
-          const lenQ = arcLen(Q);
-          // The part's stretch nearest the other side's length; two of them that long: a fold.
-          const ms = mine
-            .map((m) => ({ m, P: stretch(m) }))
-            .filter((x): x is { m: RowPart; P: Pt2[] } => !!x.P)
-            .sort((x, y) => Math.abs(arcLen(x.P) - lenQ) - Math.abs(arcLen(y.P) - lenQ));
-          if (!ms.length) continue;
-          const P = ms[0].P;
-          let fold: RowFold | undefined;
-          if (
-            ms.length >= 2 &&
-            Math.abs(arcLen(ms[1].P) - lenQ) <= 0.1 * lenQ &&
-            Math.abs(arcLen(P) - lenQ) <= 0.1 * lenQ
-          )
-            fold = foldOf(P, ms[1].P) ?? undefined;
-          const lenP = arcLen(P);
-          if (Math.min(lenP, lenQ) < 20) continue;
-          const Ys = resample(Q, N_FIT);
-          const ring = ringSample(S).map((p) => foldPt(fold, p));
-          for (const same of [true, false])
-            for (const mirror of [false, true]) {
-              const Xs = resample(same ? P : [...P].reverse(), N_FIT);
-              const { T: t, err } = procrustes(Xs, Ys, mirror);
-              if (err > Math.max(4, 0.03 * Math.min(lenP, lenQ))) continue;
-              const onCover = coverOf(
-                ring.map((p) => apply(t, p)),
-                G.rs,
-              );
-              const cont = continuity(k, on, t, fold);
-              const len = Math.min(lenP, lenQ);
-              const T = compose(F.T, t);
-              const o: Opt = {
-                host: F.host,
-                T,
-                ...(fold ? { fold } : {}),
-                cover: 0,
-                row: s.id,
-                on,
-                depth: F.depth + 1,
-                how: '',
-                cont,
-                len,
-                err,
-                onCover,
-              };
-              const better =
-                !best ||
-                o.cont > best.cont ||
-                (o.cont === best.cont &&
-                  (Math.round(10 * o.onCover) > Math.round(10 * best.onCover) ||
-                    (Math.round(10 * o.onCover) === Math.round(10 * best.onCover) &&
-                      (o.len > best.len + 5 ||
-                        (Math.abs(o.len - best.len) <= 5 && o.err < best.err)))));
-              if (better) best = o;
+          // A stored composite may continue from the shell onto a piece already laid there. The
+          // surface part belongs in the shell's frame; resolving the whole side to the nested piece
+          // instead puts a pocket bag on an unrelated panel. Try every drawable stretch and, when
+          // the row gives equally continuous readings, prefer the shallowest (shell-first) frame.
+          const targets = other.filter((p) => known.has(p.piece) && p.piece !== k);
+          for (const target of targets) {
+            const on = target.piece;
+            const F = frameOf(on);
+            const Q = stretch(target);
+            const G = geoms.get(on);
+            if (!F || !Q || !G) continue;
+            const lenQ = arcLen(Q);
+            // The part's stretch nearest the other side's length; two of them that long: a fold.
+            // Against one stretch of a composite, fit the matching share of a one-edge side. The
+            // whole pocket edge spans the shell and its laid continuation; fitting all of it to
+            // either stretch makes the nested piece's exact duplicate win instead.
+            const ms = mine
+              .map((m) => ({ m, P: stretch(m) }))
+              .filter((x): x is { m: RowPart; P: Pt2[] } => !!x.P)
+              .sort((x, y) => Math.abs(arcLen(x.P) - lenQ) - Math.abs(arcLen(y.P) - lenQ));
+            if (!ms.length) continue;
+            let fold: RowFold | undefined;
+            if (
+              ms.length >= 2 &&
+              Math.abs(arcLen(ms[1].P) - lenQ) <= 0.1 * lenQ &&
+              Math.abs(arcLen(ms[0].P) - lenQ) <= 0.1 * lenQ
+            )
+              fold = foldOf(ms[0].P, ms[1].P) ?? undefined;
+            const targetRuns = other.map(stretch);
+            const targetLens = targetRuns.map((run) => (run ? arcLen(run) : 0));
+            const targetTotal = targetLens.reduce((sum, len) => sum + len, 0);
+            const targetAt = other.indexOf(target);
+            const before = targetLens.slice(0, targetAt).reduce((sum, len) => sum + len, 0);
+            const from = targetTotal > 0 ? before / targetTotal : 0;
+            const to = targetTotal > 0 ? (before + lenQ) / targetTotal : 1;
+            const wholeP = ms[0].P;
+            const wholeLen = arcLen(wholeP);
+            const fitRuns =
+              other.length > 1 && ms.length === 1
+                ? [
+                    arcCrop(wholeP, [from * wholeLen, to * wholeLen]),
+                    arcCrop(wholeP, [(1 - to) * wholeLen, (1 - from) * wholeLen]),
+                  ]
+                : [wholeP];
+            const Ys = resample(Q, N_FIT);
+            const ring = ringSample(S).map((p) => foldPt(fold, p));
+            for (const P of fitRuns) {
+              const lenP = arcLen(P);
+              if (Math.min(lenP, lenQ) < 20) continue;
+              for (const same of [true, false])
+                for (const mirror of [false, true]) {
+                  const Xs = resample(same ? P : [...P].reverse(), N_FIT);
+                  const { T: t, err } = procrustes(Xs, Ys, mirror);
+                  if (err > Math.max(4, 0.03 * Math.min(lenP, lenQ))) continue;
+                  const onCover = coverOf(
+                    ring.map((p) => apply(t, p)),
+                    G.rs,
+                  );
+                  const cont = continuity(k, on, t, fold);
+                  const len = Math.min(lenP, lenQ);
+                  const T = compose(F.T, t);
+                  const o: Opt = {
+                    host: F.host,
+                    T,
+                    ...(fold ? { fold } : {}),
+                    cover: 0,
+                    row: s.id,
+                    on,
+                    depth: F.depth + 1,
+                    how: '',
+                    cont,
+                    len,
+                    err,
+                    onCover,
+                  };
+                  const better =
+                    !best ||
+                    o.cont > best.cont ||
+                    (o.cont === best.cont &&
+                      (o.depth < best.depth ||
+                        (o.depth === best.depth &&
+                          (Math.round(10 * o.onCover) > Math.round(10 * best.onCover) ||
+                            (Math.round(10 * o.onCover) === Math.round(10 * best.onCover) &&
+                              (o.len > best.len + 5 ||
+                                (Math.abs(o.len - best.len) <= 5 && o.err < best.err)))))));
+                  if (better) best = o;
+                }
             }
+          }
         }
       if (!best) continue;
       const H = geoms.get(best.host)!;
