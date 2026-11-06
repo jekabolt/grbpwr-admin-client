@@ -199,6 +199,31 @@ function finishPath(
  * collar is sewn to, walked as stored (`verts`, any direction). Left end first, CB on it; cut at the
  * CF notches near its ends (`cut`) or whole.
  */
+/**
+ * A row may list its body parts in any order (#98: FR#1+FL#3+BP#2, front, front, back). Chained in
+ * that order they run round the neck from one shoulder back to the same shoulder: the run closes
+ * on itself away from the front, and the centre back, looked for half way along it, lands on the
+ * other shoulder. Such a run opens where a neckline opens: at the junction of its parts that lies
+ * furthest to the front (the fronts' edges, parted over the overlap or edge to edge). A run whose
+ * ends part (an open front walked in order) or meet at the front is kept as it is.
+ */
+function openRing(c: CollarCtx, verts0: readonly number[]): number[] {
+  const n0 = verts0.length;
+  const vs = n0 > 1 && verts0[0] === verts0[n0 - 1] ? verts0.slice(0, -1) : [...verts0];
+  const n = vs.length;
+  if (n < 4) return vs;
+  const p0 = p3(c, vs[0]);
+  const p1 = p3(c, vs[n - 1]);
+  if (Math.hypot(p0[0] - p1[0], p0[1] - p1[1], p0[2] - p1[2]) > 10) return vs;
+  // Step i joins vs[i] to vs[i + 1]; step n − 1 is the closing one, where the run is cut now.
+  const zOf = (i: number) => (p3(c, vs[i])[2] + p3(c, vs[(i + 1) % n])[2]) / 2;
+  let best = n - 1;
+  let bz = zOf(best) + 20;
+  for (let i = 0; i + 1 < n; i++)
+    if (c.panelOf[vs[i]] !== c.panelOf[vs[i + 1]] && zOf(i) > bz) [best, bz] = [i, zOf(i)];
+  return best === n - 1 ? vs : [...vs.slice(best + 1), ...vs.slice(0, best + 1)];
+}
+
 export function neckFromRun(
   c: CollarCtx,
   verts0: number[],
@@ -206,7 +231,7 @@ export function neckFromRun(
   cut: boolean,
   how: string,
 ): NeckPath {
-  let verts = verts0;
+  let verts = openRing(c, verts0);
   // Left end first: the first third of the walk runs round the doll's left (+x) — the ends
   // themselves sit near x = 0 at the centre front and cannot tell.
   const n3 = Math.max(1, Math.floor(verts.length / 3));
