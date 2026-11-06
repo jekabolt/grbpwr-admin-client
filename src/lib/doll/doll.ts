@@ -8516,6 +8516,10 @@ export function solveDoll(input: DollInput): DollReport {
     : new Map();
   /** Rows measured on the laid pieces: every stretch on a drawn panel or a laid piece. */
   const laidRows: SeamCandidate[] = [];
+  const leadPart = <T extends { id: EdgeId; piece: string }>(p: T): T => {
+    const id = G.leadEdge?.(p.id) ?? p.id;
+    return id === p.id ? p : { ...p, id, piece: pk(id) };
+  };
   if (owner && (rowLays.size || ownerSurface.size)) {
     const reported = new Set(seams.map((seam) => seam.id));
     // (a row sewn over its drawn parts is reported over the whole row once its laid end is laid)
@@ -8526,7 +8530,7 @@ export function solveDoll(input: DollInput): DollReport {
     for (const c of graphIn.chosen) {
       if (!isConf(c) || c.kind === 'surface' || c.kind === 'closure-not-seam') continue;
       if (reported.has(`${c.a}~${c.b}`) && !sewnShort.has(`${c.a}~${c.b}`)) continue;
-      const parts = [...rowParts(c, 'a'), ...rowParts(c, 'b')];
+      const parts = [...rowParts(c, 'a'), ...rowParts(c, 'b')].map(leadPart);
       if (
         parts.some((p) => laid(p.piece)) &&
         parts.every((p) => laid(p.piece) || panelByKey.has(p.piece))
@@ -9131,8 +9135,9 @@ export function solveDoll(input: DollInput): DollReport {
       const P = p.range ? cropPath(P0, p.range) : P0;
       return { pts: [...P.v].map((v) => getPos(v)), v: [...P.v], len: P.len };
     };
-    const sideA = rowParts(c, 'a').map(runOf);
-    const sideB = rowParts(c, 'b').map(runOf);
+    // A ply drawn as a layer of another: its stretch is the drawn ply's.
+    const sideA = rowParts(c, 'a').map(leadPart).map(runOf);
+    const sideB = rowParts(c, 'b').map(leadPart).map(runOf);
     const inStep = ownerInStepKeys.has(c.provenance?.seamKey ?? '');
     const partsA = rowParts(c, 'a').map((p) => p.id);
     const partsB = rowParts(c, 'b').map((p) => p.id);

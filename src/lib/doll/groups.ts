@@ -72,6 +72,8 @@ export type Grouping = {
   /** `surface`: a pocket / loop sewn onto a panel's face — the doll may lay it on its host. */
   skipped: { pieceKey: string; reason: string; surface?: true }[];
   warnings: string[];
+  /** An edge of a ply drawn as a layer → the drawn ply's edge at the same place (else itself). */
+  leadEdge?: (id: EdgeId) => EdgeId;
 };
 
 const BODY_ROLES = new Set(['front', 'back', 'side', 'yoke', 'placket', 'facing', 'fly', 'skirt']);
@@ -417,6 +419,52 @@ export function groupPieces(
         stackPair(a, b);
     }
 
+  // The plies of a sandwich (a yoke's outer and inner ply both on the back's top edge): two pieces
+  // of one group, one shape, each sewn by the same edge of it onto one edge of a third piece — one
+  // ply over the other, drawn as one (×n) with every row of either on the drawn ply.
+  {
+    const onEdge = new Map<EdgeId, { key: string; k: number }[]>();
+    for (const s of live) {
+      const a = (s.aParts ?? edgeIdsOf(s.a)).flatMap((id) => edgeIdsOf(id));
+      const b = (s.bParts ?? edgeIdsOf(s.b)).flatMap((id) => edgeIdsOf(id));
+      if (a.length !== 1 || b.length !== 1) continue;
+      for (const [mine, theirs] of [
+        [a[0], b[0]],
+        [b[0], a[0]],
+      ]) {
+        const key = pk(mine);
+        const e = geomOf.get(key)?.edges?.find((x) => x.id === mine);
+        if (!e || key === pk(theirs)) continue;
+        onEdge.set(theirs, [...(onEdge.get(theirs) ?? []), { key, k: e.k }]);
+      }
+    }
+    const sameShape = (x: string, y: string) => {
+      const gx = geomOf.get(x);
+      const gy = geomOf.get(y);
+      if (!gx?.edges || !gy?.edges || gx.edges.length !== gy.edges.length) return false;
+      const [wx, hx] = dims(gx);
+      const [wy, hy] = dims(gy);
+      if (
+        Math.abs(wx - wy) > 0.02 * Math.max(wx, wy) ||
+        Math.abs(hx - hy) > 0.02 * Math.max(hx, hy)
+      )
+        return false;
+      return gx.edges.every((e) => {
+        const f = gy.edges.find((z) => z.k === e.k);
+        return !!f && Math.abs(f.lenMm - e.lenMm) <= Math.max(3, 0.02 * e.lenMm);
+      });
+    };
+    for (const list of onEdge.values())
+      for (let i = 0; i < list.length; i++)
+        for (let j = i + 1; j < list.length; j++) {
+          const [x, y] = [list[i], list[j]];
+          if (x.key === y.key || x.k !== y.k || !group.has(x.key)) continue;
+          if (group.get(x.key) !== group.get(y.key) || noStack.has(x.key) || noStack.has(y.key))
+            continue;
+          if (sameShape(x.key, y.key)) stackPair(x.key, y.key);
+        }
+  }
+
   // Edge of a follower → the leader's edge at the same place (index if lengths agree, else nearest length).
   const mapEdge = (id: EdgeId): EdgeId => {
     const k = pk(id);
@@ -492,5 +540,5 @@ export function groupPieces(
       layers: [...leaderOf.keys()].filter((f) => lead(f) === g.pieceKey),
     });
   }
-  return { pieces, seams, closures, layerSeams, skipped, warnings };
+  return { pieces, seams, closures, layerSeams, skipped, warnings, leadEdge: mapEdge };
 }
