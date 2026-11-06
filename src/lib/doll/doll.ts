@@ -6699,6 +6699,35 @@ export function solveDoll(input: DollInput): DollReport {
         const B = pathOf(bodySide);
         if (!B) continue;
         const x = [...B.v].reduce((t, v) => t + pos[3 * v], 0) / B.v.length;
+  // A STEP GUESS SETS A SLEEVE IN AN ARMHOLE OR NOT AT ALL. A step that sets the sleeves and names
+  // no row is sewn by its picture's guess, a pairing by lengths: card 102's left cap edge (165 mm)
+  // onto a back neckline end and a front neckline (52 + 92 mm), the neck point between them. Sewn,
+  // the sleeve stands up off the neck. The body's free loops after the first solve say where the
+  // armholes are; a guess whose body run is not on one is left out, and the sleeve is registered
+  // by its free cap in its armhole like a sleeve the card names no row for. (Only when both
+  // armholes are found: a guess onto an armhole the walk missed is no evidence either way.)
+  if (armLoop.L && armLoop.R) {
+    const onArm = new Set([...armLoop.L.verts, ...armLoop.R.verts]);
+    for (const sm of G.seams) {
+      const id = `${sm.seam.a}~${sm.seam.b}`;
+      if (!isGuess(sm.seam) || guessYield.has(id)) continue;
+      const sleeveSide = (['a', 'b'] as const).find((w) => {
+        const g = panelByKey.get(pk(sm[w][0]))?.group;
+        return !!g?.startsWith('SLEEVE') && inGroups(sm[w], new Set([g]));
+      });
+      if (!sleeveSide) continue;
+      const body = sm[sleeveSide === 'a' ? 'b' : 'a'];
+      if (!inGroups(body, new Set(['BODY']))) continue;
+      const B = pathOf(body);
+      if (!B || B.v.length < 2) continue;
+      const share = B.v.filter((v) => onArm.has(v)).length / B.v.length;
+      if (share >= 0.5) continue;
+      guessYield.set(
+        id,
+        `step ${guessStepOf.get(sm.seam.provenance?.seamKey ?? '')} names no row — the step picture's guess sews the sleeve's ${sm[sleeveSide].join('+')} onto ${body.join('+')}, which ${share > 0 ? `lie ${(100 * share).toFixed(0)} % on` : 'are not on'} an armhole of the body${neckLoop && B.v.some((v) => neckLoop!.verts.includes(v)) ? ' but on its neckline' : ''}; the sleeve is set in its armhole by its cap and this guess is left out`,
+      );
+    }
+  }
         vote[s] += Math.sign(x) * B.len;
       }
     }
@@ -6708,6 +6737,7 @@ export function solveDoll(input: DollInput): DollReport {
       warnings.push(
         "the graph sews the left sleeve to the doll's right armhole and the right sleeve to the left — sleeve hands swapped, or the back is drawn as seen from the front; the sleeves are put where the seams say",
       );
+        if (guessYield.has(`${sm.seam.a}~${sm.seam.b}`)) continue;
     }
   }
   for (const s of ['L', 'R'] as const) {
@@ -6758,6 +6788,7 @@ export function solveDoll(input: DollInput): DollReport {
       const targetIds = bodySide === 'a' ? sm.a : sm.b;
       const bodyIds = targetIds.filter((id) => panelByKey.get(pk(id))?.group === 'BODY');
       // Owner surface placement happens after the solve. If such a piece starts the stored
+      if (guessYield.has(`${sm.seam.a}~${sm.seam.b}`)) return [];
       // composite, its edge is not drawable yet; the remaining body run is still the armhole cue.
       const body = sewnSide(sm, bodySide) ?? pathOf(bodyIds);
       if (!sleeve || !body) return [];
@@ -6788,6 +6819,7 @@ export function solveDoll(input: DollInput): DollReport {
         const sleeve = pathOf(sleeveIds);
         const body = pathOf(targetIds);
         return sleeve && body ? [{ sleeve, body }] : [];
+        if (guessYield.has(`${candidate.a}~${candidate.b}`)) return [];
       });
     const selectedCues = cuesOf(resolvedRows?.forced ?? []);
     const confirmedCues = cuesOf(joinsNotSewn);
