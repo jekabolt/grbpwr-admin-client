@@ -125,7 +125,6 @@ export default function DollOverlay({ open, onClose }: { open: boolean; onClose:
     const mapped = cells.map((c) => ({ ...c, size: keyOf.get(norm(c.size)) ?? c.size }));
     return compareToSizeChart(pom.report, mapped, unit).filter((c) => norm(c.size) === norm(at));
   }, [pom, chart.data, dictionary, unit, at, card]);
-  const chartCells = chart.data?.chart?.cells?.length ?? 0;
 
   // ── POM lines lifted onto the doll on screen ──
   const pomLines = useMemo<PomLine[]>(() => {
@@ -362,35 +361,40 @@ export default function DollOverlay({ open, onClose }: { open: boolean; onClose:
                   lines
                 </Chip>
               }
-              question={`— size ${card ? card.sizeLabel(at) : at}, from the pattern laid flat`}
               className='flex max-h-[70vh] min-h-0 flex-col overflow-hidden lg:max-h-none'
             >
               <div className='min-h-0 flex-1 overflow-y-auto pr-1'>
-                {/* Not a garment (a bag, a cover): the standard POMs are a garment's — a bag has no
-                    chest, no inseam. Said in words; the rail is not shown. */}
+                {/* Not a garment (a bag, a cover): the standard POMs are a garment's; the rail is
+                    not shown, the engine's reason sits in the title. */}
                 {report?.notGarment ? (
                   <Text
                     size='micro'
                     variant='label'
                     component='p'
                     className='py-2'
+                    title={report.notGarment}
                     data-doll-no-measures=''
                   >
-                    no garment measures for this item — the card names no garment and the pieces
-                    read as none; the standard measures (a chest, an inseam) do not apply
+                    no measures
                   </Text>
                 ) : (
                   <>
                     <GroupLabel flush>
-                      {`${pom?.report?.convention === 'full' ? 'full' : 'half'} girths · ±1.0 cm ${pom?.report?.conventionSource ?? 'default'}`}
+                      {pom?.report?.convention === 'full' ? 'full girths' : 'half girths'}
                     </GroupLabel>
                     {!pom || pom.status === 'reading' ? (
                       <Text size='micro' variant='label' component='p' className='py-2'>
-                        measuring the pattern…
+                        measuring…
                       </Text>
                     ) : pom.status === 'error' ? (
-                      <Text size='micro' variant='label' component='p' className='py-2'>
-                        the measures could not be read: {pom.error}
+                      <Text
+                        size='micro'
+                        variant='label'
+                        component='p'
+                        className='py-2'
+                        title={pom.error}
+                      >
+                        no measures
                       </Text>
                     ) : (
                       <PomRail
@@ -402,13 +406,6 @@ export default function DollOverlay({ open, onClose }: { open: boolean; onClose:
                         names={names}
                       />
                     )}
-                    <Text size='micro' variant='label' component='p' className='pt-2'>
-                      {chart.isLoading
-                        ? 'reading the size chart…'
-                        : chartCells === 0
-                          ? 'the size chart is empty: no spec to compare against'
-                          : 'spec from the size chart · Δ = pattern − spec'}
-                    </Text>
                   </>
                 )}
               </div>

@@ -418,13 +418,20 @@ if (!ONLY) {
   console.log(
     `  exactness: ${JSON.stringify(exWords.reduce((a, w) => ((a[w] = (a[w] ?? 0) + 1), a), {}))}`,
   );
+  // A measure off its spec carries one red «Δ +1.2» on its row; spec rows live in the title.
   const specs = await page.locator('[data-pom-spec]').allInnerTexts();
-  console.log(`  spec rows: ${specs.join(' | ')}`);
-  ck(specs.length >= 3, 'spec + Δ shown where the (stand) chart has a value');
+  console.log(`  off spec: ${specs.join(' | ') || 'none'}`);
   ck(
-    specs.some((t) => /±1\.0 default/.test(t)),
-    'tolerance said as «±1.0 default»',
+    specs.every((t) => /^Δ [+−]\d+\.\d$/i.test(t.trim())),
+    'an off-spec measure reads «Δ ±N.N» on its row',
+    specs.join(' | '),
   );
+  const specTitles = await page
+    .locator('[data-pom-row]')
+    .evaluateAll((els) =>
+      els.map((e) => e.getAttribute('title') ?? '').filter((t) => /spec/.test(t)),
+    );
+  ck(specTitles.length >= 3, 'spec + Δ said in the row titles where the (stand) chart has a value');
   await page.locator('[data-doll-toggle="pom"]').click();
   await wait(400);
   await shot('02-overlay-ss26-front-pom-lines');
