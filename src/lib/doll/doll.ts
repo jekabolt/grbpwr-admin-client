@@ -4077,6 +4077,59 @@ export function solveDoll(input: DollInput): DollReport {
     }
     vSh = over.length ? over.reduce((x, y) => x + y, 0) / over.length : hi - 0.03 * H;
     vSh = Math.max(vSh, vArm + 60);
+    // A ring the card buttons shut is worn lapped: past the hole column its part runs on to its free
+    // edge, past the button column the other part to its own. Its girth is the strip's less that lap;
+    // sized end to end, the whole lap would have to slide in at the buttoning and the parts that
+    // carry it (the plackets) crumple on the way.
+    const lapMm = (() => {
+      if (!l4 || !opt.fastenings?.length) return 0;
+      const sewnEdges = new Set<string>();
+      for (const s of [...G.seams, ...G.closures])
+        for (const id of [...s.a, ...s.b]) for (const e of edgeIdsOf(id)) sewnEdges.add(e);
+      // The column's distance to its part's free edge: the one long side no seam holds.
+      const toFreeEdge = (s: FasteningSide): number | null => {
+        const P = panelByKey.get(s.piece);
+        if (!P || P.group !== 'BODY' || !aligned.has(P.key) || P.fold || s.marks.length < 2)
+          return null;
+        const a = s.marks[0];
+        const b = s.marks[s.marks.length - 1];
+        const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (len < 50) return null;
+        const across = (q: Pt2) =>
+          ((q[0] - a[0]) * (a[1] - b[1]) + (q[1] - a[1]) * (b[0] - a[0])) / len;
+        const along = (q: Pt2) =>
+          ((q[0] - a[0]) * (b[0] - a[0]) + (q[1] - a[1]) * (b[1] - a[1])) / len;
+        let free: number | null = null;
+        for (const sg of [1, -1]) {
+          let off = 0;
+          for (const e of P.geom.edges) for (const q of e.pts) off = Math.max(off, sg * across(q));
+          let freeLen = 0;
+          let sewnLen = 0;
+          for (const e of P.geom.edges) {
+            if (e.pts.some((q) => sg * across(q) < off - 10)) continue;
+            const t = e.pts.map(along);
+            const run = Math.max(...t) - Math.min(...t);
+            if (sewnEdges.has(e.id)) sewnLen += run;
+            else freeLen += run;
+          }
+          if (freeLen >= 0.3 * len && freeLen > 2 * sewnLen) {
+            if (free !== null) return null;
+            free = off;
+          } else if (!(sewnLen >= 0.3 * len && sewnLen > 2 * freeLen)) return null;
+        }
+        return free;
+      };
+      let lap = 0;
+      for (const pair of pairFastenings(opt.fastenings, (key) =>
+        graph.pieces.find((g) => g.pieceKey === key),
+      ).pairs) {
+        const t = toFreeEdge(pair.holes);
+        const u = toFreeEdge(pair.buttons);
+        if (t !== null && u !== null && pair.holes.piece !== pair.buttons.piece)
+          lap = Math.max(lap, t + u);
+      }
+      return lap;
+    })();
     // Girth per level: every aligned component's extent; above the armhole the armhole girth.
     const levels: number[] = [];
     for (let v = mlo - 30; v <= vSh + 20; v += 10) levels.push(v);
@@ -4113,7 +4166,8 @@ export function solveDoll(input: DollInput): DollReport {
         s += girth[j];
         n++;
       }
-      return s / n;
+      // Buttoned: less the lap (a lap past a quarter of the girth is a misread, not a garment).
+      return s / n - Math.min(lapMm, 0.25 * (s / n));
     });
     const iArm = Math.max(
       0,

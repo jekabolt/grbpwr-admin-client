@@ -755,4 +755,22 @@ describe('solveDoll fastens a hole step to a button step', () => {
     );
     expect(Array.from(report.positions)).toEqual(Array.from(base.positions));
   }, 120_000);
+
+  it('the body is the buttoned girth: the strip less the lap past both columns', () => {
+    const { facts, graph, options } = shirt({ L: HOLES_L, R: BUTTONS_R });
+    const torsoA = (report: DollReport) => {
+      const t = report.proxies.find((p) => p.group === 'BODY' && p.kind === 'torso');
+      if (!t) throw new Error('no torso');
+      return t.profile[Math.floor(t.profile.length / 2)][1];
+    };
+    const open = torsoA(solveDoll({ graph, facts, options }));
+    const report = solveDoll({ graph, facts, options: { ...options, fastenings: FASTEN } });
+    // 1160 mm of strip, 30 mm past the holes to L's free edge and 30 past the buttons to R's.
+    expect(1 - torsoA(report) / open).toBeCloseTo(60 / 1160, 2);
+    const c = fastened(report);
+    if (!c) throw new Error('no closure');
+    const hole = HOLES_L.map((q) => placed(report, 'L', q));
+    const button = BUTTONS_R.map((q) => placed(report, 'R', q));
+    hole.forEach((h, k) => expect(apart(h, button[k])).toBeLessThan(8));
+  }, 120_000);
 });
