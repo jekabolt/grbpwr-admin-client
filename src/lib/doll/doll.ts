@@ -874,9 +874,10 @@ type Work = {
   /**
    * A confirmed row whose walk starts or ends on a laid piece: sewn over its drawn parts, reported
    * once the piece is laid, measured over the whole row (the laid stretch included). Its whole
-   * sides and the laid pieces its walk runs onto.
+   * sides and the laid pieces its walk runs onto; `over`: the shell edges an armhole run is sewn
+   * over in place of its parts on laid pieces.
    */
-  laidEnds?: { a: EdgeId[]; b: EdgeId[]; off: string[] };
+  laidEnds?: { a: EdgeId[]; b: EdgeId[]; off: string[]; over?: EdgeId[] };
 };
 
 /**
@@ -4867,6 +4868,14 @@ export function solveDoll(input: DollInput): DollReport {
    *  take their direction by the gap, not the mirrored flags. */
   const graphPlaced = new Set<DollGroupId>();
   const sleeveCapSeams = new Set<GroupedSeam>();
+  /**
+   * Armhole runs that named a part on a laid piece (a pocket caught in the seam), sewn over the
+   * shell edge under it instead: the row as stored, its laid pieces and the shell edges used.
+   */
+  const capOverShell = new Map<
+    GroupedSeam,
+    { a: EdgeId[]; b: EdgeId[]; off: string[]; over: EdgeId[] }
+  >();
   const graphWork = (s: GroupedSeam, born: number, closure = false) => {
     if (guessYield.has(`${s.seam.a}~${s.seam.b}`)) return null;
     const conf = isConf(s.seam);
@@ -4965,6 +4974,8 @@ export function solveDoll(input: DollInput): DollReport {
         b: s.b,
         off: [...new Set([...s.a, ...s.b].map(pk).filter((k) => !panelByKey.has(k)))],
       };
+    const shell = capOverShell.get(s);
+    if (shell) w0.laidEnds = shell;
     if (owner && conf) w0.inStep = ownerInStepKeys.has(s.seam.provenance?.seamKey ?? '');
     if (owner && isGuess(s.seam))
       w0.guess = { step: guessStepOf.get(s.seam.provenance!.seamKey) ?? 0 };
@@ -6545,55 +6556,130 @@ export function solveDoll(input: DollInput): DollReport {
   // run of body edges it is sewn onto names the armhole's parts round the loop, but where that run
   // starts is whoever listed it — a step picture's guess, or the order a person picked the parts in
   // (card 85's left armhole starts at the shoulder, 87's both, 96's right one at the back yoke
-  // seam). Sewn as listed, the cap's underarm lands on the shoulder: the sleeve hangs upside down,
-  // pointing up, and twists the yoke and the front with it. A run that closes round is cut where
-  // its parts meet lowest on the body after the first solve — the side seam, the underarm.
-  for (const sm of G.seams) {
-    if (sm.seam.partRange || gapStretchesOf(sm, 'a') || gapStretchesOf(sm, 'b')) continue;
-    const groupsOf = (ids: EdgeId[]) =>
-      new Set(ids.map((id) => panelByKey.get(pk(id))?.group ?? ''));
-    for (const [capSide, bodySide] of [
-      ['a', 'b'],
-      ['b', 'a'],
-    ] as const) {
-      const capGroups = [...groupsOf(sm[capSide])];
-      const run = sm[bodySide];
-      if (new Set(sm[capSide]).size !== 1 || capGroups.length !== 1) continue;
-      if (!capGroups[0].startsWith('SLEEVE')) continue;
-      if (run.length < 3 || new Set(run).size !== run.length || new Set(run.map(pk)).size < 2)
-        continue;
-      const runGroups = groupsOf(run);
-      if (runGroups.size !== 1 || !runGroups.has('BODY')) continue;
-      const parts = run.map((id) => pathOf([id]));
-      if (parts.some((P) => !P)) continue;
-      const ends = (parts as Path[]).map((P) => [P.v[0], P.v[P.v.length - 1]] as const);
-      const n = ends.length;
-      const total = (parts as Path[]).reduce((t, P) => t + P.len, 0);
-      // Where part k - 1 meets part k (k = 0: the last part back onto the first), either way round.
-      const meet = (k: number) => {
-        const p = ends[(k - 1 + n) % n];
-        const q = ends[k];
-        let best = { gap: Infinity, i: 0, j: 0, y: 0 };
-        for (let i = 0; i < 2; i++)
-          for (let j = 0; j < 2; j++) {
-            const gap = Math.hypot(...sub(getPos(p[i]), getPos(q[j])));
-            if (gap < best.gap)
-              best = { gap, i, j, y: (pos[3 * p[i] + 1] + pos[3 * q[j] + 1]) / 2 };
-          }
-        return best;
+  // seam, 102's left — a back and a front — at the shoulder). Sewn as listed, the cap's underarm
+  // lands on the shoulder: the sleeve hangs upside down, pointing up, and twists the yoke and the
+  // front with it. A run that closes round is cut where its parts meet lowest on the body after the
+  // first solve — the side seam, the underarm.
+  // A part on a piece laid on the shell (a chest pocket caught in the armhole seam: 87, 96) is not
+  // in the mesh, and the run cannot be cut with a hole in it: it is sewn over the shell edge under
+  // that part — the free body edge about as long that bridges its two neighbours where they lie.
+  // The row is still reported as stored, its stretch on the laid piece measured where that lies.
+  {
+    const d3v = (a: number, b: number) => Math.hypot(...sub(getPos(a), getPos(b)));
+    const drawnSides = (g: GroupedSeam) => [...g.a, ...g.b].every((id) => panelByKey.has(pk(id)));
+    const bodyEdges = panels
+      .filter((P) => P.group === 'BODY')
+      .flatMap((P) => P.geom.edges.map((e) => e.id));
+    /** Each part's way round the loop (null: a part not in the mesh): the directions whose
+     *  neighbours meet best, ties to the listed one. */
+    const roundLoop = (parts: (Path | null)[]) => {
+      const m = parts.length;
+      const endOf = (k: number, mask: number, out: boolean) => {
+        const P = parts[k]!;
+        return !!((mask >> k) & 1) !== out ? P.v[P.v.length - 1] : P.v[0];
       };
-      const J = ends.map((_, k) => meet(k));
-      // A walk round the loop enters each part at one end and leaves it at the other.
-      if (J.some((m, k) => m.j === J[(k + 1) % n].i)) continue;
-      if (J[0].gap > Math.max(30, 0.08 * total)) continue;
-      let low = 0;
-      for (let k = 1; k < n; k++) if (J[k].y < J[low].y) low = k;
-      if (low === 0 || J[0].y - J[low].y < 30) continue;
-      sm[bodySide] = [...run.slice(low), ...run.slice(0, low)];
-      if (opt.debug)
-        warnings.push(
-          `debug: armhole run ${run.join('+')} cut at its lowest meeting, ${(J[0].y - J[low].y).toFixed(0)} mm under where it was listed to start`,
-        );
+      let best = { mask: 0, cost: Infinity, rev: Infinity };
+      for (let mask = 0; mask < 1 << m; mask++) {
+        if (parts.some((P, k) => !P && (mask >> k) & 1)) continue;
+        let cost = 0;
+        let rev = 0;
+        for (let k = 0; k < m; k++) {
+          const q = (k - 1 + m) % m;
+          if (!parts[k]) continue;
+          rev += (mask >> k) & 1;
+          if (parts[q]) cost += d3v(endOf(q, mask, true), endOf(k, mask, false));
+        }
+        if (cost < best.cost - 2 || (Math.abs(cost - best.cost) <= 2 && rev < best.rev))
+          best = { mask, cost, rev };
+      }
+      return parts.map((P, k) =>
+        P ? { in: endOf(k, best.mask, false), out: endOf(k, best.mask, true) } : null,
+      );
+    };
+    for (const sm of G.seams) {
+      if (sm.seam.partRange || gapStretchesOf(sm, 'a') || gapStretchesOf(sm, 'b')) continue;
+      for (const [capSide, bodySide] of [
+        ['a', 'b'],
+        ['b', 'a'],
+      ] as const) {
+        const cap = sm[capSide];
+        if (new Set(cap).size !== 1) continue;
+        if (!panelByKey.get(pk(cap[0]))?.group.startsWith('SLEEVE')) continue;
+        const listed = sm[bodySide];
+        const n = listed.length;
+        if (n < 2 || n > 8 || new Set(listed).size !== n || new Set(listed.map(pk)).size < 2)
+          continue;
+        const onBody = listed.map((id) => panelByKey.get(pk(id))?.group === 'BODY');
+        if (listed.some((id, i) => !onBody[i] && (panelByKey.has(pk(id)) || !laidKeys.has(pk(id)))))
+          continue;
+        // Parts on laid pieces: the shell edge under each.
+        const run = [...listed];
+        const over: EdgeId[] = [];
+        if (onBody.some((x) => !x)) {
+          const ends = roundLoop(listed.map((id, i) => (onBody[i] ? pathOf([id]) : null)));
+          const taken = new Set(
+            G.seams.filter((g) => g !== sm && drawnSides(g)).flatMap((g) => [...g.a, ...g.b]),
+          );
+          for (let i = 0; i < n && run.length; i++) {
+            if (onBody[i]) continue;
+            const prev = ends[(i - 1 + n) % n];
+            const next = ends[(i + 1) % n];
+            const want = restLenOf.get(listed[i]) ?? 0;
+            let host: { id: EdgeId; d: number } | null = null;
+            if (prev && next && want > 0) {
+              const tol = Math.max(40, 0.2 * want);
+              for (const id of bodyEdges) {
+                if (taken.has(id) || run.includes(id)) continue;
+                const len = restLenOf.get(id) ?? 0;
+                const H = Math.abs(len - want) <= 0.3 * want ? pathOf([id]) : null;
+                if (!H) continue;
+                for (const [x, y] of [
+                  [H.v[0], H.v[H.v.length - 1]],
+                  [H.v[H.v.length - 1], H.v[0]],
+                ]) {
+                  const dx = d3v(prev.out, x);
+                  const dy = d3v(y, next.in);
+                  if (dx <= tol && dy <= tol && (!host || dx + dy < host.d))
+                    host = { id, d: dx + dy };
+                }
+              }
+            }
+            if (!host) {
+              run.length = 0;
+              break;
+            }
+            run[i] = host.id;
+            over.push(host.id);
+          }
+          if (!run.length) continue;
+        }
+        const parts = run.map((id) => pathOf([id]));
+        if (parts.some((P) => !P)) continue;
+        const ends = roundLoop(parts) as { in: number; out: number }[];
+        const total = (parts as Path[]).reduce((t, P) => t + P.len, 0);
+        // Where part k - 1 meets part k (k = 0: the last part back onto the first).
+        const J = ends.map((e, k) => {
+          const p = ends[(k - 1 + n) % n].out;
+          return { gap: d3v(p, e.in), y: (pos[3 * p + 1] + pos[3 * e.in + 1]) / 2 };
+        });
+        if (J[0].gap > Math.max(30, 0.08 * total)) continue;
+        let low = 0;
+        for (let k = 1; k < n; k++) if (J[k].y < J[low].y) low = k;
+        const cut = low > 0 && J[0].y - J[low].y >= 30;
+        if (!cut && !over.length) continue;
+        if (over.length)
+          capOverShell.set(sm, {
+            a: [...sm.a],
+            b: [...sm.b],
+            off: [...new Set(listed.filter((_, i) => !onBody[i]).map(pk))],
+            over,
+          });
+        sm[bodySide] = cut ? [...run.slice(low), ...run.slice(0, low)] : run;
+        if (opt.debug)
+          warnings.push(
+            `debug: armhole run ${listed.join('+')}${over.length ? ` sewn over the shell edges ${over.join('+')}` : ''}${cut ? `, cut at its lowest meeting, ${(J[0].y - J[low].y).toFixed(0)} mm under where it was listed to start` : ''}`,
+          );
+      }
     }
   }
   // Which armhole a sleeve goes to: its hand, unless the graph sews it to body edges that sit on
@@ -8650,7 +8736,9 @@ export function solveDoll(input: DollInput): DollReport {
       note = `step ${w.guess.step} names no row — the step picture's guess · ${note}`;
     // Sewn over its drawn stretch only: the stretch on a piece not drawn is said, never dropped
     // (measured below where that piece is laid; unchecked where it is not).
-    if (w.laidEnds)
+    if (w.laidEnds?.over)
+      note += ` · its stretch on ${w.laidEnds.off.join(', ')} (not drawn) is sewn over the shell edge under it, ${w.laidEnds.over.join(', ')}`;
+    else if (w.laidEnds)
       note += ` · measured over its stretch on drawn pieces only — its stretch on ${w.laidEnds.off.join(', ')} (not drawn) is not checked here`;
     seams.push({
       id: w.id,
