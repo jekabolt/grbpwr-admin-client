@@ -205,7 +205,7 @@ export default function DollOverlay({ open, onClose }: { open: boolean; onClose:
           data-doll-done-ms={solve?.doneMs?.toFixed(0) ?? ''}
           data-doll-vertices={report?.stats.vertices ?? ''}
           onKeyDown={onKeyDown}
-          className='fixed inset-0 z-[var(--z-modal)] flex flex-col gap-gutter overflow-y-auto bg-pageBg p-4 text-textColor focus:outline-none lg:overflow-hidden'
+          className='fixed inset-0 z-[var(--z-modal)] flex h-[100dvh] flex-col gap-2 overflow-hidden bg-pageBg p-2 text-textColor focus:outline-none lg:gap-gutter lg:p-4'
         >
           <Dialog.Title className='sr-only'>paper doll</Dialog.Title>
           <Dialog.Description className='sr-only'>
@@ -215,6 +215,7 @@ export default function DollOverlay({ open, onClose }: { open: boolean; onClose:
           <Section
             title='paper doll'
             question={title}
+            className='shrink-0'
             action={
               <div className='flex min-w-0 items-center gap-4'>
                 {card && card.sizes.length > 0 && (
@@ -255,7 +256,9 @@ export default function DollOverlay({ open, onClose }: { open: boolean; onClose:
             </span>
           </Section>
 
-          <div className='grid shrink-0 grid-cols-1 gap-gutter lg:min-h-0 lg:flex-1 lg:shrink lg:grid-cols-[minmax(0,1fr)_360px]'>
+          {/* The modal never scrolls: on a phone the doll keeps 55 % of the screen and the
+              measures scroll inside their own block below it. */}
+          <div className='flex min-h-0 flex-1 flex-col gap-2 lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:grid-rows-[minmax(0,1fr)] lg:gap-gutter'>
             <Section
               title='doll'
               action={
@@ -306,7 +309,7 @@ export default function DollOverlay({ open, onClose }: { open: boolean; onClose:
                   </ChipRow>
                 </div>
               }
-              className='flex h-[60vh] min-h-[360px] flex-col overflow-hidden lg:h-auto lg:min-h-0'
+              className='flex h-[55dvh] shrink-0 flex-col overflow-hidden lg:h-auto lg:min-h-0'
             >
               <div className='relative min-h-0 flex-1'>
                 <DollCanvas
@@ -361,9 +364,9 @@ export default function DollOverlay({ open, onClose }: { open: boolean; onClose:
                   lines
                 </Chip>
               }
-              className='flex max-h-[70vh] min-h-0 flex-col overflow-hidden lg:max-h-none'
+              className='flex min-h-0 flex-1 flex-col overflow-hidden'
             >
-              <div className='min-h-0 flex-1 overflow-y-auto pr-1'>
+              <div className='min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1'>
                 {/* Not a garment (a bag, a cover): the standard POMs are a garment's; the rail is
                     not shown, the engine's reason sits in the title. */}
                 {report?.notGarment ? (
