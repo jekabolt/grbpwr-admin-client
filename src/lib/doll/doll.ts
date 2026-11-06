@@ -135,6 +135,7 @@ const EPS_WRAP = 0.04; // paper needs slack to wrap (design §3.3)
 const ASPECT = 1.3; // chest wider than deep
 const ARM_DEG = 42; // A-pose: arms 42° off vertical
 const PROXY_K = 0.93; // proxies push to 93 % of the cloth's own girth: a guide, never a stretcher
+const LAYERED_BODY_ANCHOR_K = 0.0045; // a two-ply shell keeps weak memory of its placed shape
 // One-piece collar (no separate stand): where it rolls over, as a share of its depth at the CB.
 // The pattern carries no roll-line mark. Half: the fall covers the stand down to the neck seam and
 // no further — below the seam the body widens far faster than a collar's outer edge is longer than
@@ -5874,6 +5875,22 @@ export function solveDoll(input: DollInput): DollReport {
     w.solver.active = false;
   }
 
+  // A stacked body panel is a shell plus its facing, not one freely draping sheet. Keep a weak
+  // memory of its placed shape while its several surrounding seams settle; otherwise the unsigned
+  // bending distances can let the package pop through itself without stretching any edge.
+  const layeredBodyPanels = new Set(
+    panels.filter((P) => P.layers.length && bodyLike.has(P.group)).map((P) => P.idx),
+  );
+  for (const pi of layeredBodyPanels) {
+    const P = panels[pi];
+    for (let i = P.nb; i < P.count; i++) {
+      const v = P.offset + i;
+      anchor[3 * v] = pos[3 * v];
+      anchor[3 * v + 1] = pos[3 * v + 1];
+      anchor[3 * v + 2] = pos[3 * v + 2];
+      anchorK[v] = LAYERED_BODY_ANCHOR_K;
+    }
+  }
   for (let v = 0; v < N; v++) moving[v] = bodyLike.has(groupOfV[v]) && placed[v] ? 1 : 0;
   run(Math.min(450, maxPasses));
   releaseRounds(3, 100, 30, 15);
@@ -8220,7 +8237,13 @@ export function solveDoll(input: DollInput): DollReport {
     anchor[3 * v + 1] = pos[3 * v + 1];
     anchor[3 * v + 2] = pos[3 * v + 2];
     // (a bag has nothing to hold it upright but a whisper of its placement)
-    anchorK[v] = bag ? 0.001 : bodyLike.has(groupOfV[v]) || groupOfV[v] === 'FLOAT' ? 0 : 0.002;
+    anchorK[v] = bag
+      ? 0.001
+      : layeredBodyPanels.has(panelOf[v]) && ringOf[v] < 0
+        ? LAYERED_BODY_ANCHOR_K
+        : bodyLike.has(groupOfV[v]) || groupOfV[v] === 'FLOAT'
+          ? 0
+          : 0.002;
   }
   for (const P of buildPanelLater) buildPanel(P);
   // A folded piece drawn apart never moves, but its fold contacts are paired all the same: the
