@@ -187,12 +187,45 @@ function mapPointBetweenOutlines(
   };
 }
 
+/** Index of the target vertex that carries base vertex i (see mapFuseSpecToSize). */
+function vertexMatch(
+  base: readonly PtMm[],
+  target: readonly PtMm[],
+  from: ReturnType<typeof bbox>,
+  to: ReturnType<typeof bbox>,
+): (i: number) => number {
+  const n = base.length;
+  const scaled = base.map((p) => mapPointBetweenOutlines(p, from, to));
+  if (n > 0 && target.length === n) {
+    let best = { shift: 0, dir: 1, cost: Infinity };
+    for (const dir of [1, -1])
+      for (let shift = 0; shift < n; shift++) {
+        let cost = 0;
+        for (let i = 0; i < n && cost < best.cost; i++) {
+          const t = target[(((shift + dir * i) % n) + n) % n];
+          cost += Math.hypot(t.x - scaled[i].x, t.y - scaled[i].y);
+        }
+        if (cost < best.cost) best = { shift, dir, cost };
+      }
+    return (i) => (((best.shift + best.dir * i) % n) + n) % n;
+  }
+  return (i) => {
+    let best = 0;
+    let bestD = Infinity;
+    for (let j = 0; j < target.length; j++) {
+      const d = Math.hypot(target[j].x - scaled[i].x, target[j].y - scaled[i].y);
+      if (d < bestD) [best, bestD] = [j, d];
+    }
+    return best;
+  };
+}
+
 /**
  * Maps base-size markup onto one graded outline. Widths and insets remain physical millimetres;
  * positions follow the grade. Drawn zones use the two outlines' local frames, while strip trims
- * keep the same fraction of their selected edge run. A spline point on the base size's inset
- * contour lands on the target size's inset contour (nearest point to its proportional position), so
- * a contour-following side keeps following the contour in every size.
+ * keep the same fraction of their selected edge run. A drawn zone's point keeps its offset in mm from
+ * its nearest cut-contour vertex, which the grade carries to the target. A point on the inset
+ * contour stays on it, so a contour-following side keeps following the contour in every size.
  */
 export function mapFuseSpecToSize(
   source: PieceFuseSpec,
@@ -203,40 +236,46 @@ export function mapFuseSpecToSize(
   if (source.mode === 'zone' && source.zone && !('dxfPieceKey' in source.zone)) {
     const from = bbox(baseOutline);
     const to = bbox(targetOutline);
-    if ('rect' in source.zone) {
-      const a = mapPointBetweenOutlines(
-        { x: source.zone.rect[0], y: source.zone.rect[1] },
-        from,
-        to,
-      );
-      const b = mapPointBetweenOutlines(
-        { x: source.zone.rect[2], y: source.zone.rect[3] },
-        from,
-        to,
-      );
-      return { ...source, zone: { rect: [a.x, a.y, b.x, b.y] } };
-    }
     let baseInset: PtMm[] | null = null;
     let targetInset: PtMm[] | null = null;
     try {
       baseInset = fuseInsetRingMm(baseOutline, source, seamAllowanceMm);
       targetInset = fuseInsetRingMm(targetOutline, source, seamAllowanceMm);
     } catch {
-      // generateFuseGeometry owns the inset refusal; the points then map proportionally only.
+      // generateFuseGeometry owns the inset refusal; the cut contour stands in for it here.
+    }
+    // Grade rules live on the cut contour's vertices, so a zone point is carried by its nearest
+    // base vertex: the matching target vertex plus the same offset in mm. A placket band then keeps
+    // its width while the side seam grows. Vertices match by index (best cyclic shift) when both
+    // contours have as many; otherwise by the nearest vertex to the proportional position.
+    const targetVertexOf = vertexMatch(baseOutline, targetOutline, from, to);
+    const mapPoint = (point: PtMm, followContour: boolean): PtMm => {
+      let best = 0;
+      let bestD = Infinity;
+      for (let i = 0; i < baseOutline.length; i++) {
+        const d = Math.hypot(point.x - baseOutline[i].x, point.y - baseOutline[i].y);
+        if (d < bestD) [best, bestD] = [i, d];
+      }
+      const v = baseOutline[best];
+      const w = targetOutline[targetVertexOf(best)];
+      const moved = baseOutline.length
+        ? { x: w.x + point.x - v.x, y: w.y + point.y - v.y }
+        : mapPointBetweenOutlines(point, from, to);
+      const onContour =
+        followContour &&
+        baseInset &&
+        targetInset &&
+        projectOnRing(point, baseInset).d <= ZONE_ON_CONTOUR_MM;
+      return onContour ? projectOnRing(moved, targetInset!).p : moved;
+    };
+    if ('rect' in source.zone) {
+      const [ax, ay, bx, by] = source.zone.rect;
+      const a = mapPoint({ x: ax, y: ay }, false);
+      const b = mapPoint({ x: bx, y: by }, false);
+      return { ...source, zone: { rect: [a.x, a.y, b.x, b.y] } };
     }
     const mapSpline = (spline: FuseSpline, followContour: boolean): FuseSpline => ({
-      points: spline.points.map((point) => {
-        const mapped = mapPointBetweenOutlines(point, from, to);
-        const onContour =
-          followContour &&
-          baseInset &&
-          targetInset &&
-          projectOnRing(point, baseInset).d <= ZONE_ON_CONTOUR_MM;
-        return {
-          ...point,
-          ...(onContour ? projectOnRing(mapped, targetInset!).p : mapped),
-        };
-      }),
+      points: spline.points.map((point) => ({ ...point, ...mapPoint(point, followContour) })),
     });
     return {
       ...source,
