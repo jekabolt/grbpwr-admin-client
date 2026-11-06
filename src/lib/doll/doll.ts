@@ -6895,6 +6895,9 @@ export function solveDoll(input: DollInput): DollReport {
     ? (Math.max(...torso.map((L) => L.a)) * ellPerimFactor) / (1 - EPS_WRAP)
     : 0;
   let neck: NeckPath | null = null;
+  /** The walked neck is off the neckline window and no closed loop stands in for it: its CB still
+   *  holds the collar (placed at its own length), but nothing is sewn along it. */
+  let neckPlaceOnly = false;
   const neckGroups = (['STAND', 'COLLAR'] as DollGroupId[]).filter((g) => groups.has(g));
   // L4: a CONFIRMED seam between a collar unit and the body says where the neckline is: its body
   // side IS the neck path (no walk along free loops).
@@ -6982,13 +6985,24 @@ export function solveDoll(input: DollInput): DollReport {
           );
         }
     } else {
+      const instead = neckLoop
+        ? 'the closed neck loop is used instead'
+        : r.neck
+          ? 'no closed neck loop either: the collar goes on it at its own length, from the CB'
+          : 'no closed neck loop either';
       warnings.push(
         r.neck
-          ? `neck path ${r.neck.path.len.toFixed(0)} mm is ${(ratioOf(r.neck) * 100).toFixed(0)} % of the girth ${chestMm.toFixed(0)} mm (a neckline is 30–55 %) — ${r.note}; the closed neck loop is used instead`
-          : `neck path not found (${r.note}) — the closed neck loop is used instead`,
+          ? `neck path ${r.neck.path.len.toFixed(0)} mm is ${(ratioOf(r.neck) * 100).toFixed(0)} % of the girth ${chestMm.toFixed(0)} mm (a neckline is 30–55 %) — ${r.note}; ${instead}`
+          : `neck path not found (${r.note}) — ${instead}`,
       );
       if (neckLoop)
         neck = closedNeckPath(cctx, neckLoop.verts, vArm, 'closed neck loop (fallback)');
+      // An open front has no closed loop to fall back on; the walk still found the centre back,
+      // and a collar left off the doll says less than one standing there unsewn.
+      else if (r.neck) {
+        neck = r.neck;
+        neckPlaceOnly = true;
+      }
     }
     if (neck)
       collarRep.neck = {
@@ -7559,14 +7573,16 @@ export function solveDoll(input: DollInput): DollReport {
       const ext = plan.m.path.len - sewnMm;
       // A base far off the unit's length (a neck path that is not a neckline): placed at its own
       // length centred on the CB, not sewn — never crammed.
-      const off = fp ? !fp.ok : sewnMm / N.path.len < 0.6 || sewnMm / N.path.len > 1.4;
+      const off = fp
+        ? !fp.ok
+        : neckPlaceOnly || sewnMm / N.path.len < 0.6 || sewnMm / N.path.len > 1.4;
       if (fp && !fp.ok) {
-        const wds = `${cn!.g.seam.a}~${cn!.g.seam.b}: confirmed by a person, but the unit (${fp.m.path.len.toFixed(0)} mm) does not fit its neck path with any reading of the tucks / CF notches (${fp.tried.join('; ')}) — the intake is not identified: placed at its own length, not crammed`;
+        const wds = `${cn!.g.seam.a}~${cn!.g.seam.b}: confirmed by a person, but the unit (${fp.m.path.len.toFixed(0)} mm) does not fit its neck path with any reading of the tucks / CF notches (${fp.tried.join('; ')}) — the intake is not identified: sewn at its own length from the CB (dashed), the neckline past its ends left open, not crammed`;
         preContradictions.push(wds);
         warnings.push(`contradiction: ${wds}`);
       } else if (off)
         warnings.push(
-          `${label}: not proposed — ${sewnMm.toFixed(0)} mm between the marks vs a neck path of ${N.path.len.toFixed(0)} mm (${((100 * sewnMm) / N.path.len).toFixed(0)} %); placed at its own length, centred at the CB`,
+          `${label}: ${sewnMm.toFixed(0)} mm between the marks vs a neck path of ${N.path.len.toFixed(0)} mm (${((100 * sewnMm) / N.path.len).toFixed(0)} %) — sewn at its own length from the CB (dashed), the neckline past its ends left open`,
         );
       // A one-piece collar (no stand) rolls over: ROLL_FRAC of its depth at the CB stands, the
       // rest turns down and out, leaning out enough for its longer outer edge and no less than
@@ -7650,18 +7666,43 @@ export function solveDoll(input: DollInput): DollReport {
           }
         }
       }
+      // A unit that does not fit its neck path is still sewn where it lies: at its own length,
+      // centre back on centre back, the neckline past its ends left open. Left unsewn it has
+      // nothing to hold it and crumples over the neck.
+      const ownLength = (): Work | null => {
+        if (!off || (!cn && (graphSewn || (owner && neckStep == null)))) return null;
+        const Lu = plan.m.path.len;
+        const a0 = Math.max(0, plan.m.cb - N.cb);
+        const a1 = Math.min(Lu, plan.m.cb + (N.path.len - N.cb));
+        if (a1 - a0 < 50) return null;
+        const at = (s: number) => s - plan.m.cb + N.cb;
+        const w = anchoredWork(
+          cn ? `${cn.g.seam.a}~${cn.g.seam.b}` : id,
+          plan.m.path,
+          N.path,
+          [
+            [a0, at(a0)],
+            [a1, at(a1)],
+          ],
+          `proposed by the doll · ${label} · the unit ${Lu.toFixed(0)} mm does not fit the neck path ${N.path.len.toFixed(0)} mm: ${(a1 - a0).toFixed(0)} mm of it sewn at its own length, CB on CB, ${(N.path.len - (a1 - a0)).toFixed(0)} mm of the neckline left open · not in the pattern`,
+          0.8,
+        );
+        return w;
+      };
       const work = cn
-        ? confWork
-        : graphSewn || off || (owner && neckStep == null)
+        ? confWork ?? ownLength()
+        : graphSewn || (owner && neckStep == null)
           ? null
-          : anchoredWork(
-              id,
-              plan.m.path,
-              N.path,
-              plan.anchors,
-              `proposed by the doll · ${label} · ${sewnMm.toFixed(0)} mm between the marks onto the ${N.closed ? 'closed' : 'open'} neck path ${N.path.len.toFixed(0)} mm (${sewnMm / N.path.len < 0.985 || sewnMm / N.path.len > 1.015 ? `eased ${(Math.abs(1 - sewnMm / N.path.len) * 100).toFixed(0)} %` : 'equal'})${ext > 2 ? ` · ${ext.toFixed(0)} mm beyond the CF marks left free (extensions, overlapping)` : ''} · ${plan.words} · not in the pattern`,
-              0.8,
-            );
+          : off
+            ? ownLength()
+            : anchoredWork(
+                id,
+                plan.m.path,
+                N.path,
+                plan.anchors,
+                `proposed by the doll · ${label} · ${sewnMm.toFixed(0)} mm between the marks onto the ${N.closed ? 'closed' : 'open'} neck path ${N.path.len.toFixed(0)} mm (${sewnMm / N.path.len < 0.985 || sewnMm / N.path.len > 1.015 ? `eased ${(Math.abs(1 - sewnMm / N.path.len) * 100).toFixed(0)} %` : 'equal'})${ext > 2 ? ` · ${ext.toFixed(0)} mm beyond the CF marks left free (extensions, overlapping)` : ''} · ${plan.words} · not in the pattern`,
+                0.8,
+              );
       collarPlans.push({
         rep: {
           keys: U.list.map((P) => P.key),
@@ -7670,7 +7711,9 @@ export function solveDoll(input: DollInput): DollReport {
           seam: work?.id ?? null,
           attached: cn
             ? work
-              ? 'confirmed'
+              ? work.confirmed
+                ? 'confirmed'
+                : 'proposed'
               : 'not sewn'
             : work
               ? 'proposed'
