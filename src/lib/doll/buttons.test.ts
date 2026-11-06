@@ -107,6 +107,42 @@ describe('pairFastenings', () => {
     expect(read.pairs.map((p) => [p.holes.piece, p.buttons.piece])).toEqual([['a', 'b']]);
   });
 
+  it('a count spread over a placket and its pocket fastens the placket column and says the rest', () => {
+    // «8 buttonholes» on the front with its pocket: 7 down the placket, the 8th on the pocket flap.
+    const read = pairFastenings(
+      [holes(750, 8, 'pl', 'pk', 'fl'), buttons(860, 8, 'pr', 'qk', 'fr')],
+      geoms({
+        pl: { name: 'PLCK_L', marks: column(20, EVEN) },
+        pk: { name: 'PCK_L', marks: [[300, 250]] },
+        fl: { marks: [] },
+        pr: { name: 'PLCK_R', marks: column(50, EVEN) },
+        qk: { name: 'PCK_R', marks: [[300, 250]] },
+        fr: { marks: [] },
+      }),
+    );
+    expect(read.refused).toEqual([]);
+    expect(read.pairs).toHaveLength(1);
+    const [pair] = read.pairs;
+    expect([pair.holes.piece, pair.buttons.piece, pair.count]).toEqual(['pl', 'pr', 7]);
+    expect(pair.holes.marks).toEqual(column(20, EVEN));
+    expect(pair.holes.apart).toBe('the step says 8: 7 on PLCK_L, 1 on PCK_L');
+    expect(pair.buttons.apart).toBe('the step says 8: 7 on PLCK_R, 1 on PCK_R');
+  });
+
+  it('a count spread evenly over two parts stays refused: no column holds most of it', () => {
+    const read = pairFastenings(
+      [holes(1, 8, 'a', 'c'), buttons(2, 8, 'b', 'd')],
+      geoms({
+        a: { marks: column(20, [100, 200, 300, 400]) },
+        c: { marks: column(20, [500, 600, 700, 800]) },
+        b: { marks: column(50, EVEN.concat(800)) },
+        d: { marks: [] },
+      }),
+    );
+    expect(read.pairs).toEqual([]);
+    expect(read.refused[0]).toBe('step 1 (8 buttonholes on a, c): a has 4 marks, c has 4 marks');
+  });
+
   it('refuses counts that differ, and says both', () => {
     const read = pairFastenings(
       [holes(120, 7, 'a'), buttons(200, 6, 'b')],

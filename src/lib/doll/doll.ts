@@ -5292,7 +5292,13 @@ export function solveDoll(input: DollInput): DollReport {
       free: freeSideOf([...H.mesh.pts, ...(geom?.rs ?? []).map((q) => apply(surface.T, q))], foot),
     };
   };
-  const fasten = (holes: FastenedSide, buttons: FastenedSide, id: string, unused: number) => {
+  const fasten = (
+    holes: FastenedSide,
+    buttons: FastenedSide,
+    id: string,
+    unused: number,
+    apart: string[] = [],
+  ) => {
     // A step's own layer order is how a card can say which part lies over the other.
     const holeKeys = new Set([holes.P.key, holes.part]);
     const buttonKeys = new Set([buttons.P.key, buttons.part]);
@@ -5431,6 +5437,7 @@ export function solveDoll(input: DollInput): DollReport {
           ? "button side over hole side: the card's layer order says so"
           : 'hole side over button side: the card does not say otherwise',
         ...(unused ? [`${unused} marks of the column left out, the step does not count them`] : []),
+        ...apart,
       ].join(' · '),
     });
   };
@@ -5456,7 +5463,14 @@ export function solveDoll(input: DollInput): DollReport {
       else if (!l4) notFastened.push(`${id}: the card has no seam rows yet`);
       else if (G.closures.some((c) => asOne(pk(c.a[0]), pk(c.b[0]))))
         notFastened.push(`${id}: a stored closure row already joins these two parts`);
-      else fasten(holes, buttons, id, pair.holes.unused + pair.buttons.unused);
+      else
+        fasten(
+          holes,
+          buttons,
+          id,
+          pair.holes.unused + pair.buttons.unused,
+          [pair.holes.apart, pair.buttons.apart].flatMap((x) => (x ? [x] : [])),
+        );
     }
     for (const line of notFastened) warnings.push(`not fastened: ${line}`);
   }

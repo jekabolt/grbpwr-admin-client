@@ -128,11 +128,13 @@ export type FasteningSide = {
   marks: Pt2[];
   /** Marks of the column left over, when the drawing has more than the step says. */
   unused: number;
+  /** The step's count runs past this part: where the rest of its marks are, in words. */
+  apart?: string;
 };
 export type FasteningPair = { count: number; holes: FasteningSide; buttons: FasteningSide };
 export type FasteningRead = { pairs: FasteningPair[]; refused: string[] };
 
-type StepColumn = { piece: string; column: Pt2[] } | { why: string };
+type StepColumn = { piece: string; column: Pt2[]; apart?: string } | { why: string };
 
 const wordOf = (s: DeclaredFastening) =>
   `${s.side === 'holes' ? 'buttonhole' : 'button'}${s.count === 1 ? '' : 's'}`;
@@ -179,26 +181,67 @@ function columnOfStep(
       why: `${here}: ${fits.map((f) => nameOf(f.piece)).join(' and ')} both carry them, the step does not say which`,
     };
   if (!anyMarks) return { why: `${here}: no marks on the pattern` };
-  return { why: `${here}: ${reasons.join(', ')}` };
+  return spreadOver(s, geomOf, nameOf) ?? { why: `${here}: ${reasons.join(', ')}` };
+}
+
+/**
+ * A step whose count runs over two parts of its input (a placket's column and a pocket's one
+ * mark: «8 buttonholes» on a front with its pocket): the one column that carries most of them, the
+ * rest said where they are. Null unless the input's marks reach the count and one part's column
+ * holds more than half of it, longer than any other part's.
+ */
+function spreadOver(
+  s: DeclaredFastening,
+  geomOf: (key: string) => PieceGeom | undefined,
+  nameOf: (key: string) => string,
+): { piece: string; column: Pt2[]; apart: string } | null {
+  const parts: { piece: string; marks: number; column: Pt2[] }[] = [];
+  for (const key of s.pieces) {
+    const g = geomOf(key);
+    const marks = g ? closureDrills(g) : [];
+    if (!marks.length) continue;
+    const columns = marks.length < 2 ? [marks] : largestColumns(marks);
+    parts.push({ piece: key, marks: marks.length, column: columns.length === 1 ? columns[0] : [] });
+  }
+  if (parts.reduce((sum, p) => sum + p.marks, 0) < s.count) return null;
+  parts.sort((a, b) => b.column.length - a.column.length);
+  const [best, next] = parts;
+  if (!best || best.column.length < 2 || 2 * best.column.length <= s.count) return null;
+  if (next && next.column.length >= best.column.length) return null;
+  const rest = parts
+    .slice(1)
+    .map((p) => `${p.marks} on ${nameOf(p.piece)}`)
+    .join(', ');
+  return {
+    piece: best.piece,
+    column: best.column,
+    apart: `the step says ${s.count}: ${best.column.length} on ${nameOf(best.piece)}, ${rest}`,
+  };
 }
 
 /** Do these two steps fasten to each other? The two columns of exactly `count` marks, or why not. */
 function fit(
   h: DeclaredFastening,
-  hc: { piece: string; column: Pt2[] },
+  hc: { piece: string; column: Pt2[]; apart?: string },
   b: DeclaredFastening,
-  bc: { piece: string; column: Pt2[] },
+  bc: { piece: string; column: Pt2[]; apart?: string },
   nameOf: (key: string) => string,
 ): FasteningPair | { why: string } {
   const here = `steps ${h.step} and ${b.step}`;
   if (hc.piece === bc.piece)
     return { why: `${here}: holes and buttons on the same part (${nameOf(hc.piece)})` };
-  const n = h.count;
-  const side = (s: DeclaredFastening, piece: string, marks: Pt2[], all: Pt2[]): FasteningSide => ({
+  // A count spread over two parts fastens what its main column holds (never more than the step says).
+  const n = Math.min(h.count, hc.column.length, bc.column.length);
+  const side = (
+    s: DeclaredFastening,
+    c: { piece: string; column: Pt2[]; apart?: string },
+    marks: Pt2[],
+  ): FasteningSide => ({
     step: s.step,
-    piece,
+    piece: c.piece,
     marks,
-    unused: all.length - marks.length,
+    unused: c.apart ? 0 : c.column.length - marks.length,
+    ...(c.apart ? { apart: c.apart } : {}),
   });
   let holes = hc.column;
   let buttons = bc.column;
@@ -229,8 +272,8 @@ function fit(
   }
   return {
     count: n,
-    holes: side(h, hc.piece, holes, hc.column),
-    buttons: side(b, bc.piece, buttons, bc.column),
+    holes: side(h, hc, holes),
+    buttons: side(b, bc, buttons),
   };
 }
 
@@ -302,7 +345,7 @@ export function pairFastenings(
       refused.push(...missing);
       continue;
     }
-    const got = (c: StepColumn) => c as { piece: string; column: Pt2[] };
+    const got = (c: StepColumn) => c as { piece: string; column: Pt2[]; apart?: string };
     const ways: FasteningPair[][] = [];
     let why: string[] = [];
     for (const way of permutations(holes.length)) {
