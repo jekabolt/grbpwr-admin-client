@@ -9326,24 +9326,27 @@ export function solveDoll(input: DollInput): DollReport {
   // offset left out: closed when the stretches meet, a contradiction when they stay apart.
   for (const c of laidRows) {
     const id = `${c.a}~${c.b}`;
+    // Surface pieces are drawn separately even when grouping mapped an identical sewn ply to its
+    // leader. Use that piece's own laid vertices here; `leadPart` is only for an omitted ply.
+    const drawnPart = <T extends { id: EdgeId; piece: string }>(part: T): T =>
+      layAt.has(part.piece) ? part : leadPart(part);
     const shellWork = works.find(
       (w) => w.id === id && w.laidEnds && !w.hidden && !w.rejectedByPerson,
     );
-    const sleeveShell = shellWork?.sleeveCap === true;
     // A row the solve sewed over its drawn parts: its report is this one, over the whole row.
     const sewnPart = seams.findIndex((x) => x.id === id);
-    // A sleeve-cap composite that begins or ends on a laid surface piece has two honest readings:
-    // the drawable shell stretch is the armhole seam, while the surface stretch is checked where
-    // that piece is laid. Keep the shell path for geometry instead of turning the pocket into the
-    // armhole; the laid reading is appended to that same owner row below.
-    if (sewnPart >= 0 && !sleeveShell) {
+    // A composite that begins or ends on a laid surface piece has two honest readings: the
+    // drawable shell stretch is the structural seam, while the surface stretch is checked where
+    // that piece is laid. Keep the shell path for geometry; replacing it with one polyline through
+    // disconnected surface runs draws an invented jump between them.
+    if (sewnPart >= 0 && !shellWork) {
       seams.splice(sewnPart, 1);
       const said = contradictions.findIndex((x) =>
         x.startsWith(`${id}: confirmed by a person but it does not close — `),
       );
       if (said >= 0) contradictions.splice(said, 1);
     }
-    type Run = { pts: Vec3[]; v: number[]; len: number };
+    type Run = { pts: Vec3[]; v: number[]; s: number[]; len: number };
     const runOf = (p: { id: string; piece: string; range?: [number, number] }): Run | null => {
       const L = layAt.get(p.piece);
       if (L) {
@@ -9358,21 +9361,29 @@ export function solveDoll(input: DollInput): DollReport {
             const d = Math.hypot(L.mesh.pts[b][0] - x[0], L.mesh.pts[b][1] - x[1]);
             if (d < bd) [bi, bd] = [b, d];
           }
-          if (v[v.length - 1] !== L.offset + bi) v.push(L.offset + bi);
+          v.push(L.offset + bi);
         }
         let len = 0;
         for (let i = 1; i < q.length; i++)
           len += Math.hypot(q[i][0] - q[i - 1][0], q[i][1] - q[i - 1][1]);
-        return { pts: q.map((x) => L.at(x, 0)), v, len };
+        return {
+          pts: v.map((vertex) => {
+            const index = 3 * (vertex - N);
+            return [surfacePos[index], surfacePos[index + 1], surfacePos[index + 2]] as Vec3;
+          }),
+          v,
+          s: q.map((_, index) => (index / (q.length - 1)) * len),
+          len,
+        };
       }
       const P0 = pathOf([p.id]);
       if (!P0) return null;
       const P = p.range ? cropPath(P0, p.range) : P0;
-      return { pts: [...P.v].map((v) => getPos(v)), v: [...P.v], len: P.len };
+      return { pts: [...P.v].map((v) => getPos(v)), v: [...P.v], s: [...P.s], len: P.len };
     };
     // A ply drawn as a layer of another: its stretch is the drawn ply's.
-    const sideA = rowParts(c, 'a').map(leadPart).map(runOf);
-    const sideB = rowParts(c, 'b').map(leadPart).map(runOf);
+    const sideA = rowParts(c, 'a').map(drawnPart).map(runOf);
+    const sideB = rowParts(c, 'b').map(drawnPart).map(runOf);
     const inStep = ownerInStepKeys.has(c.provenance?.seamKey ?? '');
     const partsA = rowParts(c, 'a').map((p) => p.id);
     const partsB = rowParts(c, 'b').map((p) => p.id);
@@ -9427,13 +9438,182 @@ export function solveDoll(input: DollInput): DollReport {
           best = Math.min(best, segD(p, r.pts[i - 1], r.pts[i]));
       return best;
     };
-    const gaps = [
-      ...runsA.flatMap((r) => r.pts.map((p) => toRuns(p, runsB))),
-      ...runsB.flatMap((r) => r.pts.map((p) => toRuns(p, runsA))),
-    ].sort((x, y) => x - y);
+    /** A run cut to a rest-arc interval; endpoints are interpolated for honest measurement. */
+    const cropRun = (run: Run, from: number, to: number): Run => {
+      const at = (want: number) => {
+        let index = 1;
+        while (index < run.s.length - 1 && run.s[index] < want) index++;
+        const s0 = run.s[index - 1];
+        const s1 = run.s[index];
+        const t = Math.max(0, Math.min(1, (want - s0) / (s1 - s0 || 1)));
+        const a = run.pts[index - 1];
+        const b = run.pts[index];
+        return {
+          point: [
+            a[0] + t * (b[0] - a[0]),
+            a[1] + t * (b[1] - a[1]),
+            a[2] + t * (b[2] - a[2]),
+          ] as Vec3,
+          vertex: t < 0.5 ? run.v[index - 1] : run.v[index],
+        };
+      };
+      const first = at(from);
+      const last = at(to);
+      const inside = run.s
+        .map((s, index) => ({ s, index }))
+        .filter(({ s }) => s >= from - 1e-6 && s <= to + 1e-6);
+      return {
+        pts: [first.point, ...inside.map(({ index }) => run.pts[index]), last.point],
+        // Keep these parallel to `pts`/`s`: a laid boundary vertex can occur more than once in
+        // the resampling, and each occurrence carries the point it is sewn to below.
+        v: [first.vertex, ...inside.map(({ index }) => run.v[index]), last.vertex],
+        s: [0, ...inside.map(({ s }) => s - from), to - from],
+        len: to - from,
+      };
+    };
+    type OrderedPart = { run: Run; piece: string; from: number; to: number };
+    const reverseRun = (run: Run): Run => ({
+      pts: [...run.pts].reverse(),
+      v: [...run.v].reverse(),
+      s: [...run.s].reverse().map((value) => run.len - value),
+      len: run.len,
+    });
+    const ordered = (
+      runs: Run[],
+      parts: Array<{ piece: string }>,
+      reverse: boolean,
+    ): OrderedPart[] => {
+      const entries = runs.map((run, index) => ({ run, piece: parts[index].piece }));
+      if (reverse) entries.reverse();
+      const total = runs.reduce((sum, run) => sum + run.len, 0) || 1;
+      let cursor = 0;
+      return entries.map(({ run: run0, piece }) => {
+        const run = reverse ? reverseRun(run0) : run0;
+        const from = cursor / total;
+        cursor += run.len;
+        return { run, piece, from, to: cursor / total };
+      });
+    };
+    type OrderedPair = {
+      a: Run;
+      b: Run;
+      aSurface: boolean;
+      bSurface: boolean;
+      throughShell: boolean;
+    };
+    const pairedOf = (reverseA: boolean, reverseB: boolean): OrderedPair[] => {
+      const orderedA = ordered(runsA, rowParts(c, 'a').map(drawnPart), reverseA);
+      const orderedB = ordered(runsB, rowParts(c, 'b').map(drawnPart), reverseB);
+      const pairs: OrderedPair[] = [];
+      for (const a of orderedA)
+        for (const b of orderedB) {
+          const from = Math.max(a.from, b.from);
+          const to = Math.min(a.to, b.to);
+          if (to - from <= 1e-6) continue;
+          pairs.push({
+            a: cropRun(
+              a.run,
+              ((from - a.from) / (a.to - a.from)) * a.run.len,
+              ((to - a.from) / (a.to - a.from)) * a.run.len,
+            ),
+            b: cropRun(
+              b.run,
+              ((from - b.from) / (b.to - b.from)) * b.run.len,
+              ((to - b.from) / (b.to - b.from)) * b.run.len,
+            ),
+            aSurface: layAt.has(a.piece),
+            bSurface: layAt.has(b.piece),
+            throughShell: panelByKey.has(a.piece) || panelByKey.has(b.piece),
+          });
+        }
+      return pairs;
+    };
+    const gapsOf = (pairs: OrderedPair[]) =>
+      pairs
+        .flatMap(({ a, b }) => [
+          ...a.pts.map((point) => toRuns(point, [b])),
+          ...b.pts.map((point) => toRuns(point, [a])),
+        ])
+        .sort((x, y) => x - y);
+    const options = [
+      pairedOf(false, false),
+      pairedOf(true, false),
+      pairedOf(false, true),
+      pairedOf(true, true),
+    ];
+    const score = (pairs: OrderedPair[]) => {
+      const gaps = gapsOf(pairs.filter((pair) => pair.throughShell));
+      const p95 = gaps[Math.min(gaps.length - 1, Math.floor(0.95 * gaps.length))] ?? Infinity;
+      const mean = gaps.reduce((sum, gap) => sum + gap, 0) / Math.max(1, gaps.length);
+      return p95 + 0.01 * mean;
+    };
+    const paired = options.reduce((best, option) => (score(option) < score(best) ? option : best));
+
+    // One laid pocket edge sewn to an ordered composite is not one flat run. Pin its shell stretch
+    // to the stored row part by part; a continuation onto another laid piece stays measured below.
+    // The rest-length mismatch remains in lenA/lenB and the report; only the geometry is given the
+    // same constraint the stitch gives the cloth.
+    const sidePartsA = rowParts(c, 'a').map(drawnPart);
+    const sidePartsB = rowParts(c, 'b').map(drawnPart);
+    const oneLaidSide = (parts: typeof sidePartsA) =>
+      new Set(parts.map((part) => part.piece)).size === 1 &&
+      parts.every((part) => layAt.has(part.piece));
+    const pin =
+      oneLaidSide(sidePartsA) && sidePartsB.length > 1
+        ? ('a' as const)
+        : oneLaidSide(sidePartsB) && sidePartsA.length > 1
+          ? ('b' as const)
+          : null;
+    if (pin) {
+      const atRun = (run: Run, want: number): Vec3 => {
+        let index = 1;
+        while (index < run.s.length - 1 && run.s[index] < want) index++;
+        const s0 = run.s[index - 1];
+        const s1 = run.s[index];
+        const t = Math.max(0, Math.min(1, (want - s0) / (s1 - s0 || 1)));
+        return add(run.pts[index - 1], sub(run.pts[index], run.pts[index - 1]), t);
+      };
+      const constraints = new Map<number, Vec3[]>();
+      for (const pair of paired) {
+        // A surface-to-surface continuation is still measured and reported below, but it is not
+        // a drawable shell seam and may be discontinuous in the host frames. Do not invent a
+        // connector by pulling either laid piece through that gap.
+        if (!pair.throughShell) continue;
+        const moving = pin === 'a' ? pair.a : pair.b;
+        const target = pin === 'a' ? pair.b : pair.a;
+        if (!(pin === 'a' ? pair.aSurface : pair.bSurface)) continue;
+        moving.v.forEach((vertex, index) => {
+          const point = atRun(target, (moving.s[index] / Math.max(moving.len, 1e-9)) * target.len);
+          constraints.set(vertex, [...(constraints.get(vertex) ?? []), point]);
+        });
+      }
+      for (const [vertex, targets] of constraints) {
+        const point = targets
+          .reduce((sum, target) => add(sum, target), [0, 0, 0] as Vec3)
+          .map((value) => value / targets.length) as Vec3;
+        const index = 3 * (vertex - N);
+        surfacePos[index] = point[0];
+        surfacePos[index + 1] = point[1];
+        surfacePos[index + 2] = point[2];
+      }
+      for (const pair of paired) {
+        const moving = pin === 'a' ? pair.a : pair.b;
+        moving.pts = moving.v.map((vertex) => {
+          const index = 3 * (vertex - N);
+          return [surfacePos[index], surfacePos[index + 1], surfacePos[index + 2]] as Vec3;
+        });
+      }
+    }
+    const gaps = gapsOf(paired);
     const mean = gaps.reduce((x, y) => x + y, 0) / Math.max(1, gaps.length);
     const p95 = gaps[Math.min(gaps.length - 1, Math.floor(0.95 * gaps.length))] ?? 0;
     const max = gaps[gaps.length - 1] ?? 0;
+    const surfaceOnlyGaps = gapsOf(paired.filter((pair) => !pair.throughShell));
+    const surfaceOnlyP95 =
+      surfaceOnlyGaps[
+        Math.min(surfaceOnlyGaps.length - 1, Math.floor(0.95 * surfaceOnlyGaps.length))
+      ];
+    const surfaceOnlyMax = surfaceOnlyGaps[surfaceOnlyGaps.length - 1];
     const lenA = runsA.reduce((x, r) => x + r.len, 0);
     const lenB = runsB.reduce((x, r) => x + r.len, 0);
     const closed = p95 <= 4 && max <= 15;
@@ -9448,7 +9628,9 @@ export function solveDoll(input: DollInput): DollReport {
       contradictions.push(words);
       note = `CONTRADICTION — ${words}`;
     }
-    if (sleeveShell && sewnPart >= 0) {
+    if (surfaceOnlyGaps.length)
+      note += ` · surface-only stretch measured separately: gap p95 ${surfaceOnlyP95.toFixed(1)} / max ${surfaceOnlyMax.toFixed(1)} mm`;
+    if (shellWork && sewnPart >= 0) {
       const shell = seams[sewnPart];
       const unchecked = ` · measured over its stretch on drawn pieces only — its stretch on ${shellWork!.laidEnds!.off.join(', ')} (not drawn) is not checked here`;
       const shellNote = shell.note.endsWith(unchecked)
@@ -9474,8 +9656,12 @@ export function solveDoll(input: DollInput): DollReport {
       decidedBy: 'person',
       inStep,
       note,
-      pathA: Uint32Array.from(runsA.flatMap((r) => r.v)),
-      pathB: Uint32Array.from(runsB.flatMap((r) => r.v)),
+      pathA: Uint32Array.from(
+        paired.filter((pair) => pair.throughShell).flatMap((pair) => pair.a.v),
+      ),
+      pathB: Uint32Array.from(
+        paired.filter((pair) => pair.throughShell).flatMap((pair) => pair.b.v),
+      ),
     });
   }
   // Closures by marks, measured now that their surface parts are laid: hole to button, as drawn.
