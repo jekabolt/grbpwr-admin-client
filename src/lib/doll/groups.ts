@@ -439,6 +439,11 @@ export function groupPieces(
       .map(mapEdge);
 
   const drawn = new Set([...group.keys()].filter((k) => lead(k) === k));
+  const surface = new Set(skipped.filter((piece) => piece.surface).map((piece) => piece.pieceKey));
+  /** A composite may run onto a pocket laid after the solve; its remaining shell still draws. */
+  const drawableSide = (ids: EdgeId[]) =>
+    ids.some((id) => drawn.has(pk(id))) &&
+    ids.every((id) => drawn.has(pk(id)) || surface.has(pk(id)));
   const seams: GroupedSeam[] = [];
   const layerSeams: SeamCandidate[] = [];
   const seen = new Set<string>();
@@ -446,9 +451,7 @@ export function groupPieces(
     const a = sideOf(s, 'a');
     const b = sideOf(s, 'b');
     if (!a.length || !b.length) continue;
-    const ka = pk(a[0]);
-    const kb = pk(b[0]);
-    if (!drawn.has(ka) || !drawn.has(kb)) continue;
+    if (!drawableSide(a) || !drawableSide(b)) continue;
     if (lead(pk(s.a)) === lead(pk(s.b)) && (pk(s.a) !== pk(s.b) || leaderOf.has(pk(s.a)))) {
       layerSeams.push(s);
       continue;

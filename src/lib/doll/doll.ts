@@ -850,6 +850,8 @@ type Work = {
   foldedMm?: number;
   /** Found from the technologist's order (a declared join the graph had no seam for). */
   fromOrder?: boolean;
+  /** Exact sleeve-cap row used to register a sleeve on the body; keep the attachment structural. */
+  sleeveCap?: boolean;
   /** L4: a seam a person confirmed (stored row) — never released; open at the end = contradiction. */
   confirmed?: boolean;
   /** Owner mode: whether an operation names this confirmed row. */
@@ -4744,6 +4746,7 @@ export function solveDoll(input: DollInput): DollReport {
           w.released ||
           w.origin !== 'graph' ||
           w.closure ||
+          w.sleeveCap ||
           !w.solver.active ||
           w.confirmed ||
           w.crotch
@@ -4796,6 +4799,7 @@ export function solveDoll(input: DollInput): DollReport {
   /** Tube groups set onto the body by the graph's own seams (no free loop): their composite seams
    *  take their direction by the gap, not the mirrored flags. */
   const graphPlaced = new Set<DollGroupId>();
+  const sleeveCapSeams = new Set<GroupedSeam>();
   const graphWork = (s: GroupedSeam, born: number, closure = false) => {
     const conf = isConf(s.seam);
     const proposedByDoll = !owner && dollNote.has(`${s.seam.a}~${s.seam.b}`);
@@ -4886,6 +4890,7 @@ export function solveDoll(input: DollInput): DollReport {
           : 380,
     );
     if (conf) w0.confirmed = true;
+    if (sleeveCapSeams.has(s)) w0.sleeveCap = true;
     if (share)
       w0.laidEnds = {
         a: s.a,
@@ -6500,13 +6505,16 @@ export function solveDoll(input: DollInput): DollReport {
       if (!sleeveSide) return [];
       const sleeve = sewnSide(sm, sleeveSide);
       const bodySide = sleeveSide === 'a' ? 'b' : 'a';
-      const bodyIds = (bodySide === 'a' ? sm.a : sm.b).filter(
-        (id) => panelByKey.get(pk(id))?.group === 'BODY',
-      );
+      const targetIds = bodySide === 'a' ? sm.a : sm.b;
+      const bodyIds = targetIds.filter((id) => panelByKey.get(pk(id))?.group === 'BODY');
       // Owner surface placement happens after the solve. If such a piece starts the stored
       // composite, its edge is not drawable yet; the remaining body run is still the armhole cue.
       const body = sewnSide(sm, bodySide) ?? pathOf(bodyIds);
-      return sleeve && body ? [{ sleeve, body }] : [];
+      if (!sleeve || !body) return [];
+      // A multi-part body run is the composite armhole. A lone cross-group pairing may instead be
+      // the bad underarm-to-yoke reading that the far/release checks below must still be free to drop.
+      if (targetIds.length > 1) sleeveCapSeams.add(sm);
+      return [{ sleeve, body }];
     });
     // Confirmed rows that no operation names are not sewing work in owner mode, but they remain
     // exact placement topology. This is how an omitted cap row can register a sleeve without the
@@ -8031,7 +8039,7 @@ export function solveDoll(input: DollInput): DollReport {
     if (bodyLike.has(ga) && bodyLike.has(gb)) continue;
     const far = gapOf(sm);
     const w = graphWork(sm, passes);
-    if (w && far >= FAR && !w.confirmed) {
+    if (w && far >= FAR && !w.confirmed && !w.sleeveCap) {
       w.released = true;
       w.solver.active = false;
       w.note = `its two edges are ${far.toFixed(0)} mm apart once the pieces are placed (${ga} ↔ ${gb}) — a wrong pairing? not sewn`;
@@ -9079,9 +9087,17 @@ export function solveDoll(input: DollInput): DollReport {
   // offset left out: closed when the stretches meet, a contradiction when they stay apart.
   for (const c of laidRows) {
     const id = `${c.a}~${c.b}`;
+    const shellWork = works.find(
+      (w) => w.id === id && w.laidEnds && !w.hidden && !w.rejectedByPerson,
+    );
+    const sleeveShell = shellWork?.sleeveCap === true;
     // A row the solve sewed over its drawn parts: its report is this one, over the whole row.
     const sewnPart = seams.findIndex((x) => x.id === id);
-    if (sewnPart >= 0) {
+    // A sleeve-cap composite that begins or ends on a laid surface piece has two honest readings:
+    // the drawable shell stretch is the armhole seam, while the surface stretch is checked where
+    // that piece is laid. Keep the shell path for geometry instead of turning the pocket into the
+    // armhole; the laid reading is appended to that same owner row below.
+    if (sewnPart >= 0 && !sleeveShell) {
       seams.splice(sewnPart, 1);
       const said = contradictions.findIndex((x) =>
         x.startsWith(`${id}: confirmed by a person but it does not close — `),
@@ -9191,6 +9207,15 @@ export function solveDoll(input: DollInput): DollReport {
       const words = `${id}: confirmed by a person but it does not close where ${laidHere} lies on its panel — gap p95 ${p95.toFixed(0)} / max ${max.toFixed(0)} mm, lengths ${lenA.toFixed(0)} vs ${lenB.toFixed(0)} mm: the row contradicts the pattern (or the rows that lay the piece)`;
       contradictions.push(words);
       note = `CONTRADICTION — ${words}`;
+    }
+    if (sleeveShell && sewnPart >= 0) {
+      const shell = seams[sewnPart];
+      const unchecked = ` · measured over its stretch on drawn pieces only — its stretch on ${shellWork!.laidEnds!.off.join(', ')} (not drawn) is not checked here`;
+      const shellNote = shell.note.endsWith(unchecked)
+        ? shell.note.slice(0, -unchecked.length)
+        : shell.note;
+      shell.note = `${shellNote} · surface stretch on ${laidHere} measured where laid: gap p95 ${p95.toFixed(1)} / max ${max.toFixed(1)} mm${closed ? '' : ' — does not close'}`;
+      continue;
     }
     seams.push({
       id,
