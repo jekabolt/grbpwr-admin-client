@@ -6026,6 +6026,44 @@ export function solveDoll(input: DollInput): DollReport {
       anchorK[v] = delayedLayeredBodyPanels.has(pi) ? 0 : LAYERED_BODY_ANCHOR_K;
     }
   }
+  // The neck cylinder is a guide like every proxy: never wider than the garment's own neckline.
+  // Sized by the chest alone it is as wide as a loose body, and a neckline cut narrower is stretched
+  // over it (the yoke under it crumples). The neckline is read here as K1 reads it below (the body
+  // side of a confirmed collar seam, else the walk from the CB), by its rest length — before phase 1,
+  // so the shoulders settle round the neck they were cut for.
+  if (torso.length && groups.has('BODY')) {
+    const chest = (Math.max(...torso.map((L) => L.a)) * ellPerimFactor) / (1 - EPS_WRAP);
+    let lenMm = 0;
+    if (l4)
+      for (const g of G.seams) {
+        if (!isConf(g.seam)) continue;
+        const grp = (ids: EdgeId[]) => new Set(ids.map((id) => panelByKey.get(pk(id))?.group));
+        const ring = (x: Set<DollGroupId | undefined>) =>
+          [...x].every((y) => y === 'STAND' || y === 'COLLAR');
+        const ga = grp(g.a);
+        const gb = grp(g.b);
+        const side =
+          ring(ga) && gb.size === 1 && gb.has('BODY')
+            ? 'b'
+            : ring(gb) && ga.size === 1 && ga.has('BODY')
+              ? 'a'
+              : null;
+        const bp = side ? sidePath(g, side) : null;
+        if (!bp || bp.v.length < 4) continue;
+        lenMm = neckFromRun(cctx, [...bp.v], vArm, false, '').path.len;
+        break;
+      }
+    if (!lenMm) {
+      const set = new Set(panels.filter((P) => P.group === 'BODY').map((P) => P.idx));
+      const seams = works
+        .filter((w) => !w.released)
+        .map((w) => ({ A: w.A, B: w.B, same: w.same, aRange: w.aRange, bRange: w.bRange }));
+      const r = findNeckPath(cctx, findLoops({ panels, panelOf, ringOf, uv, seams }, set), vArm);
+      lenMm = r.neck?.path.len ?? 0;
+    }
+    if (chest > 0 && lenMm / chest >= 0.3 && lenMm / chest <= 0.55)
+      neckGirthR = Math.max(45, (PROXY_K * lenMm) / TAU);
+  }
   for (let v = 0; v < N; v++) moving[v] = bodyLike.has(groupOfV[v]) && placed[v] ? 1 : 0;
   run(Math.min(450, maxPasses));
   releaseRounds(3, 100, 30, 15);
@@ -7803,7 +7841,7 @@ export function solveDoll(input: DollInput): DollReport {
           : neckAnchors(U, N);
       // The stored rows take length off the neck; both body guides stand at what is left of it,
       // or the seam can only close by stretching. The collar itself is never touched.
-      if (fin?.ok) neckGirthR = fin.finished.finishedMm / (2 * Math.PI);
+      if (fin?.ok) neckGirthR = Math.min(neckGirthR, fin.finished.finishedMm / (2 * Math.PI));
       const pi = ringProxyAt(layer, fin?.ok ? fin.finished.finishedMm / fin.finished.cutMm : 1);
       const sewnMm = plan.sewn[1] - plan.sewn[0];
       const ext = plan.m.path.len - sewnMm;
