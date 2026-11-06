@@ -506,7 +506,12 @@ function ZoneRow({
   const chooseShape = (kind: ZoneDrawKind) => {
     if (drawKind) return bus.setDrawing(ci, kind);
     if (!drawn) return bus.setDrawing(ci, kind);
-    if (!full) return write(withCorners(spec.zone, kind === 'sharp', selected));
+    if (!full) {
+      // Round keeps the ring inside its own bounds; sharp only sets the corners of what is there.
+      if (kind === 'round')
+        return write(rebuildZoneRing(spec.zone, selected, count, contour, kind));
+      return write(withCorners(spec.zone, true, selected));
+    }
     clear();
     bus.setDrawing(ci, kind);
   };

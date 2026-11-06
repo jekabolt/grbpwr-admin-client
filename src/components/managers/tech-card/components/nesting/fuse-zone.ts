@@ -951,12 +951,17 @@ export function drawZoneRing(
   return { zone: { ...base, islands }, ref: `island:${islands.length - 1}` };
 }
 
-/** The ring rebuilt in its own bounds with `count` points; hand edits go, undo brings them back. */
+/**
+ * The ring rebuilt in its own bounds with `count` points; hand edits go, undo brings them back.
+ * `kind` switches the shape: round becomes an even oval inside those bounds (a spline through the
+ * old corners would bulge out of them), sharp the box.
+ */
 export function rebuildZoneRing(
   z: FuseZone | null | undefined,
   ref: ZoneRingRef,
   count: number,
   contourMm: readonly XY[],
+  kind?: ZoneDrawKind,
 ): DrawnZone | null {
   const points = zoneRingPoints(z, ref);
   if (!points.length) return null;
@@ -966,7 +971,7 @@ export function rebuildZoneRing(
     z,
     ref,
     zoneShapePoints(
-      points.every((point) => point.corner) ? 'sharp' : 'round',
+      kind ?? (points.every((point) => point.corner) ? 'sharp' : 'round'),
       count,
       { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) },
       // A cut-out stays strictly inside its outer, so it never follows the contour.

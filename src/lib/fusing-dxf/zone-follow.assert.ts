@@ -613,6 +613,19 @@ export function main() {
   const second = drawZoneRing(main.zone, 'round', { x0: 50, y0: 300, x1: 350, y1: 340 }, contour);
   assert.equal(second.ref, 'island:0');
   assert.equal(zoneRingPoints(second.zone, 'island:0').length, 8);
+
+  // ROUND on a drawn box stays inside that box (a spline through its corners bulged out, 90→137 cm²).
+  const box = drawZoneRing(null, 'sharp', { x0: 100, y0: 200, x1: 300, y1: 300 }, contour).zone;
+  const rounded = rebuildZoneRing(box, 'main', 4, contour, 'round');
+  assert.ok(rounded);
+  const roundRing = zoneRingOutline(rounded, 'main', contour).ring;
+  assert.ok(
+    roundRing.every(
+      (p) => p.x >= 100 - 0.01 && p.x <= 300 + 0.01 && p.y >= 200 - 0.01 && p.y <= 300 + 0.01,
+    ),
+    'round stays inside the drawn box',
+  );
+  assert.ok(Math.abs(signedArea(roundRing)) < 200 * 100, 'round is smaller than its box');
   assert.equal(zonePoints(second.zone).length, 4, 'a part leaves the main ring alone');
 
   const rebuilt = rebuildZoneRing(main.zone, 'main', 6, contour);
