@@ -7,11 +7,29 @@
 // piece is then lifted onto the solved panel (barycentric, a couple of mm under its face — inside the garment): it is
 // drawn where it is sewn, not solved, and its place is a reading, said in words.
 
-import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
+import { readName } from 'lib/assembly-skeleton/skeleton';
+import { apply, rigid } from 'lib/assembly-skeleton/union/affine';
+import type { Affine, Edge, EdgeId, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 
 import type { DeclaredJoin } from './joins';
 
 export type SurfaceHost = { host: string; join: string };
+
+type FlapRow = {
+  status: 'confirmed' | 'rejected';
+  sideA: readonly { piece: string }[];
+  sideB: readonly { piece: string }[];
+};
+
+export type InferredFlapPlacement = {
+  part: string;
+  host: string;
+  pocket: string;
+  T: Affine;
+  attach: EdgeId;
+  mouth: EdgeId;
+  how: string;
+};
 
 /**
  * The panel each surface piece is sewn onto, from the order: the first join (in the order's
@@ -253,6 +271,166 @@ function cornersOf(ring: readonly Pt2[], idx: readonly number[]): Corner[] {
       y: p[1],
     };
   });
+}
+
+const straight = (e: Edge) => e.lenMm >= 40 && e.chordMm >= 0.97 * e.lenMm;
+const rel = (a: number, b: number) => Math.abs(a - b) / Math.max(a, b, 1);
+
+/**
+ * Rejected-only small paired pieces can still be read as a pocket flap: both plies share one width,
+ * that width matches a same-hand pocket mouth, and a same-hand front has the matching mouth edge.
+ * They are placed as proposals only; no rejected row becomes a seam.
+ */
+export function inferFlapPlacements(
+  pieces: readonly PieceGeom[],
+  rows: readonly FlapRow[],
+): InferredFlapPlacement[] {
+  if (!rows.length || !pieces.length) return [];
+  const byKey = new Map(pieces.map((piece) => [piece.pieceKey, piece]));
+  const live = new Set(
+    rows
+      .filter((row) => row.status !== 'rejected')
+      .flatMap((row) => [...row.sideA, ...row.sideB].map((anchor) => anchor.piece)),
+  );
+  const maxArea = Math.max(...pieces.map((piece) => Math.abs(piece.areaMm2)), 1);
+  const small = (piece: PieceGeom) => {
+    const role = readName(piece.name).role;
+    return (
+      !live.has(piece.pieceKey) &&
+      Math.abs(piece.areaMm2) <= 0.2 * maxArea &&
+      (!role || role === 'pocket')
+    );
+  };
+  type Pair = { parts: [PieceGeom, PieceGeom]; width: number; score: number };
+  const pairs: Pair[] = [];
+  const seenPair = new Set<string>();
+  for (const row of rows) {
+    if (row.status !== 'rejected') continue;
+    const A = [...new Set(row.sideA.map((anchor) => anchor.piece))];
+    const B = [...new Set(row.sideB.map((anchor) => anchor.piece))];
+    if (A.length !== 1 || B.length !== 1 || A[0] === B[0]) continue;
+    const a = byKey.get(A[0]);
+    const b = byKey.get(B[0]);
+    if (!a || !b || !small(a) || !small(b) || a.hand !== b.hand) continue;
+    const ae = a.edges.filter(straight);
+    const be = b.edges.filter(straight);
+    let best: { a: Edge; b: Edge; score: number } | null = null;
+    for (const ea of ae)
+      for (const eb of be) {
+        const score = rel(ea.lenMm, eb.lenMm);
+        if (score <= 0.12 && (!best || score < best.score)) best = { a: ea, b: eb, score };
+      }
+    if (!best) continue;
+    const key = [a.pieceKey, b.pieceKey].sort().join('~');
+    if (seenPair.has(key)) continue;
+    seenPair.add(key);
+    pairs.push({
+      parts: [a, b],
+      width: (best.a.lenMm + best.b.lenMm) / 2,
+      score: best.score,
+    });
+  }
+
+  type Mouth = { pocket: PieceGeom; len: number; mark: boolean };
+  const mouths: Mouth[] = [];
+  for (const pocket of pieces) {
+    if (readName(pocket.name).role !== 'pocket') continue;
+    for (const mark of pocket.marks ?? []) {
+      if (mark.pts.length < 2 || mark.lenMm < 50) continue;
+      const a = mark.pts[0];
+      const b = mark.pts[mark.pts.length - 1];
+      if (Math.hypot(b[0] - a[0], b[1] - a[1]) >= 0.97 * mark.lenMm)
+        mouths.push({ pocket, len: mark.lenMm, mark: true });
+    }
+    if (!(pocket.marks ?? []).some((mark) => mark.lenMm >= 50))
+      for (const edge of pocket.edges.filter(straight))
+        mouths.push({ pocket, len: edge.lenMm, mark: false });
+  }
+
+  const used = new Set<string>();
+  const out: InferredFlapPlacement[] = [];
+  for (const pair of pairs.sort((a, b) => a.score - b.score)) {
+    if (pair.parts.some((part) => used.has(part.pieceKey))) continue;
+    const hand = pair.parts[0].hand;
+    const mouth = mouths
+      .filter(
+        (candidate) =>
+          candidate.pocket.hand === hand &&
+          !pair.parts.includes(candidate.pocket) &&
+          rel(candidate.len, pair.width) <= 0.25,
+      )
+      .sort(
+        (a, b) =>
+          Number(!a.mark) - Number(!b.mark) || rel(a.len, pair.width) - rel(b.len, pair.width),
+      )[0];
+    if (!mouth) continue;
+    const targets = pieces.flatMap((host) => {
+      const role = readName(host.name).role;
+      if (
+        (role !== 'front' && role !== null) ||
+        host.hand !== hand ||
+        Math.abs(host.areaMm2) < 2 * Math.max(...pair.parts.map((part) => Math.abs(part.areaMm2)))
+      )
+        return [];
+      return host.edges
+        .filter((edge) => straight(edge) && rel(edge.lenMm, mouth.len) <= 0.15)
+        .map((edge) => ({ host, edge }));
+    });
+    targets.sort(
+      (a, b) =>
+        rel(a.edge.lenMm, mouth.len) - rel(b.edge.lenMm, mouth.len) ||
+        Math.abs(b.host.areaMm2) - Math.abs(a.host.areaMm2),
+    );
+    const target = targets[0];
+    if (!target) continue;
+    const tb = target.edge.pts;
+    const ta = tb[0];
+    const tz = tb[tb.length - 1];
+    const tl = Math.hypot(tz[0] - ta[0], tz[1] - ta[1]);
+    if (tl < 1) continue;
+    const ux = (tz[0] - ta[0]) / tl;
+    const uy = (tz[1] - ta[1]) / tl;
+    const mid: Pt2 = [(ta[0] + tz[0]) / 2, (ta[1] + tz[1]) / 2];
+    const H = new PolyIndex(target.host.rs);
+    const placed: InferredFlapPlacement[] = [];
+    for (const part of [...pair.parts].sort((a, b) => Math.abs(a.areaMm2) - Math.abs(b.areaMm2))) {
+      let best: { T: Affine; edge: Edge; cover: number } | null = null;
+      for (const edge of part.edges.filter(
+        (candidate) => straight(candidate) && rel(candidate.lenMm, pair.width) <= 0.15,
+      )) {
+        const q0 = edge.pts[0];
+        const q1 = edge.pts[edge.pts.length - 1];
+        const half = edge.chordMm / 2;
+        for (const direction of [1, -1]) {
+          const p0: Pt2 = [mid[0] - direction * ux * half, mid[1] - direction * uy * half];
+          const p1: Pt2 = [mid[0] + direction * ux * half, mid[1] + direction * uy * half];
+          const T = rigid(p0, p1, q0, q1, false);
+          const cover = coverOf(
+            part.rs.map((point) => apply(T, point)),
+            H,
+          );
+          if (!best || cover > best.cover) best = { T, edge, cover };
+        }
+      }
+      if (!best || best.cover < 0.7) {
+        placed.splice(0);
+        break;
+      }
+      placed.push({
+        part: part.pieceKey,
+        host: target.host.pieceKey,
+        pocket: mouth.pocket.pieceKey,
+        T: best.T,
+        attach: best.edge.id,
+        mouth: target.edge.id,
+        how: `doll proposal: rejected-only paired piece, ${Math.round(best.edge.lenMm)} mm wide against the same-side pocket mouth ${Math.round(mouth.len)} mm`,
+      });
+    }
+    if (placed.length !== 2) continue;
+    for (const placement of placed) used.add(placement.part);
+    out.push(...placed);
+  }
+  return out;
 }
 
 /**

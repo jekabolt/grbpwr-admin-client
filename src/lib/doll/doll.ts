@@ -21,6 +21,7 @@ import { resolveAcrossSizes, type SizeResolved } from 'lib/seams/transfer';
 
 import {
   freeSideOf,
+  inferredPlacketFolds,
   locateIn,
   pairFastenings,
   PAST_SIGMA_MM,
@@ -87,7 +88,7 @@ import { findLoops, loopPath, type RawLoop } from './loops';
 import { meshPiece, pointInPolygon, type MeshCrease, type PieceMesh } from './mesh';
 import { planPleats, sideOfLine, type MeshPleat, type PleatPlan } from './pleat-mesh';
 import { type Ring, ringsFromJoins } from './rings';
-import { surfaceFit, surfaceHosts } from './surface';
+import { inferFlapPlacements, surfaceFit, surfaceHosts } from './surface';
 import {
   arcCrop,
   foldPt,
@@ -1486,6 +1487,9 @@ export function solveDoll(input: DollInput): DollReport {
         `technologist's order «${x.join}»: ${x.part.join('+')} is sewn onto a panel's face (a flap / welt / patch), not edge to edge — not drawn as a seam`,
       );
   }
+  const inferredFlaps = owner ? inferFlapPlacements(graph.pieces, opt.seams?.rows ?? []) : [];
+  const inferredFlapByPart = new Map(inferredFlaps.map((placement) => [placement.part, placement]));
+  const inferredFlapParts = new Set(inferredFlapByPart.keys());
   const G = groupPieces(graph, facts, {
     lining,
     dropSeams: opt.dropSeams,
@@ -1493,6 +1497,21 @@ export function solveDoll(input: DollInput): DollReport {
     panels: ringsR?.panels,
     ...(owner ? { layers: layerRelations, owner: true } : {}),
   });
+  if (inferredFlapParts.size) {
+    G.pieces = G.pieces.filter((piece) => !inferredFlapParts.has(piece.key));
+    const onFlap = (ids: readonly EdgeId[]) => ids.some((id) => inferredFlapParts.has(pk(id)));
+    G.seams = G.seams.filter((seam) => !onFlap(seam.a) && !onFlap(seam.b));
+    G.closures = G.closures.filter((seam) => !onFlap(seam.a) && !onFlap(seam.b));
+    G.layerSeams = G.layerSeams.filter(
+      (seam) => !inferredFlapParts.has(pk(seam.a)) && !inferredFlapParts.has(pk(seam.b)),
+    );
+    for (const placement of inferredFlaps)
+      G.skipped.push({
+        pieceKey: placement.part,
+        reason: 'flap — placed above its same-side pocket by a doll proposal',
+        surface: true,
+      });
+  }
   warnings.push(...G.warnings);
   // Plan owner surface pieces before the structural solve. Besides placing them later, this tells
   // which row lays a pocket on its host, so a step row/guess that catches the pocket over an exact
@@ -2060,7 +2079,21 @@ export function solveDoll(input: DollInput): DollReport {
   const panels: Panel[] = [];
   let N = 0;
   // Folds (options.folds), per piece key (a second instance `key@n` takes its piece's folds).
-  const foldsIn = opt.folds ?? {};
+  // A buttoned separate placket with no stored fold still has enough evidence: its cut width gives
+  // the midline, and its button column says which half stays face up.
+  const foldsIn: Record<string, DollFold[]> = { ...(opt.folds ?? {}) };
+  const geomForFold = new Map(graph.pieces.map((piece) => [piece.pieceKey, piece]));
+  const laidParts = new Set(
+    graph.chosen.flatMap((candidate) => (candidate.surface ? [candidate.surface.part] : [])),
+  );
+  for (const inferred of inferredPlacketFolds(
+    opt.fastenings ?? [],
+    (key) => geomForFold.get(key),
+    (key) => !!foldsIn[key]?.length || laidParts.has(key),
+  )) {
+    foldsIn[inferred.piece] = [inferred.fold];
+    warnings.push(`${inferred.piece}: ${inferred.how}`);
+  }
   warnings.push(...(opt.hemWords ?? []));
   const grainFold = Object.values(foldsIn).some((list) => list?.length)
     ? grainDegOf(input.facts)
@@ -9465,6 +9498,7 @@ export function solveDoll(input: DollInput): DollReport {
         (x) =>
           x.surface &&
           (ownerSurface.has(x.pieceKey) ||
+            inferredFlapByPart.has(x.pieceKey) ||
             rowLays.has(x.pieceKey) ||
             legsCat0 ||
             bagPieces.has(x.pieceKey)),
@@ -9481,6 +9515,8 @@ export function solveDoll(input: DollInput): DollReport {
     const hosts = surfaceHosts(surf, declaredJoins ?? [], drawnArea);
     for (const [part, surface] of ownerSurface)
       hosts.set(part, { host: surface.host, join: 'owner row' });
+    for (const [part, placement] of inferredFlapByPart)
+      hosts.set(part, { host: placement.host, join: 'doll flap proposal' });
     for (const [part, l] of rowLays)
       if (!ownerSurface.has(part)) hosts.set(part, { host: l.host, join: `owner row ${l.row}` });
     /** Footprints already laid on each host (host frame), for the layer a new one lies in. */
@@ -9536,26 +9572,35 @@ export function solveDoll(input: DollInput): DollReport {
         continue;
       }
       const ownerPlacement = ownerSurface.get(k);
-      const rowLay = ownerPlacement ? undefined : rowLays.get(k);
-      const fit = ownerPlacement
+      const inferredFlap = inferredFlapByPart.get(k);
+      const rowLay = ownerPlacement || inferredFlap ? undefined : rowLays.get(k);
+      const fit = inferredFlap
         ? {
-            map: (point: Pt2) => apply(ownerPlacement.T, point),
-            flip: det(ownerPlacement.T) < 0,
+            map: (point: Pt2) => apply(inferredFlap.T, point),
+            flip: det(inferredFlap.T) < 0,
             cover: 1,
             past: 0,
-            how: 'owner placement',
+            how: inferredFlap.how,
           }
-        : rowLay
+        : ownerPlacement
           ? {
-              map: (point: Pt2) => apply(rowLay.T, foldPt(rowLay.fold, point)),
-              flip: det(rowLay.T) < 0,
-              cover: rowLay.cover,
+              map: (point: Pt2) => apply(ownerPlacement.T, point),
+              flip: det(ownerPlacement.T) < 0,
+              cover: 1,
               past: 0,
-              // The half turned over lies a layer further from the face.
-              ...(rowLay.fold ? { under: (point: Pt2) => foldedUnder(rowLay.fold, point) } : {}),
-              how: rowLay.how,
+              how: 'owner placement',
             }
-          : surfaceFit(S, H.geom);
+          : rowLay
+            ? {
+                map: (point: Pt2) => apply(rowLay.T, foldPt(rowLay.fold, point)),
+                flip: det(rowLay.T) < 0,
+                cover: rowLay.cover,
+                past: 0,
+                // The half turned over lies a layer further from the face.
+                ...(rowLay.fold ? { under: (point: Pt2) => foldedUnder(rowLay.fold, point) } : {}),
+                how: rowLay.how,
+              }
+            : surfaceFit(S, H.geom);
       if (!fit) {
         surfaceRep.push({
           pieceKey: k,
@@ -9587,7 +9632,7 @@ export function solveDoll(input: DollInput): DollReport {
       ).length;
       const lift = 2 + 2 * overlaps;
       footprints.set(H.key, [...below, foot]);
-      const layerDirection = isUnder([H.key], [k]) ? 1 : -1;
+      const layerDirection = inferredFlap ? 1 : isUnder([H.key], [k]) ? 1 : -1;
       const hp = H.mesh.pts;
       // A part that carries a closure's marks keeps what overhangs the host: its holes are there.
       const carried = fastened.flatMap((f) =>
@@ -9804,12 +9849,51 @@ export function solveDoll(input: DollInput): DollReport {
         boundary: Uint32Array.from(mesh.bVert),
         layers: [],
       });
+      if (inferredFlap) {
+        const edge = S.edges.find((candidate) => candidate.id === inferredFlap.attach);
+        const mouth = H.geom.edges.find((candidate) => candidate.id === inferredFlap.mouth);
+        if (edge && mouth) {
+          const n = S.rs.length;
+          const start = mesh.bRs.indexOf(((edge.s % n) + n) % n);
+          const end = mesh.bRs.indexOf(((edge.e % n) + n) % n);
+          const path: number[] = [];
+          if (start >= 0 && end >= 0)
+            for (let q = start, guard = 0; guard <= mesh.bRs.length; guard++) {
+              path.push(M + q);
+              if (q === end) break;
+              q = (q + 1) % mesh.bRs.length;
+            }
+          if (path.length >= 2) {
+            seams.push({
+              id: `${inferredFlap.attach}~${inferredFlap.mouth}`,
+              a: [inferredFlap.attach],
+              b: [inferredFlap.mouth],
+              kind: 'surface',
+              origin: 'doll-proposed',
+              lenA: edge.lenMm,
+              lenB: mouth.lenMm,
+              residualMeanMm: 0,
+              residualMaxMm: 0,
+              residualP95Mm: 0,
+              stretchPct: 0,
+              twisted: false,
+              state: 'proposed',
+              decidedBy: 'doll',
+              note: `${inferredFlap.how}; laid above ${inferredFlap.pocket}, never a confirmed seam`,
+              pathA: Uint32Array.from(path),
+              pathB: Uint32Array.from(pathOf([inferredFlap.mouth])?.v ?? []),
+            });
+          }
+        }
+      }
       layAt.set(k, { at: (q, liftQ) => lay(fit.map(q), liftQ), offset: M, mesh });
       M += mesh.pts.length;
       const side = layerDirection > 0 ? 'over' : 'under';
-      const note = owner
-        ? `sewn onto ${H.key} (${hk.join}) — ${fit.how}; drawn ${lift} mm ${side} its face, not solved`
-        : `sewn onto ${H.key} (order «${hk.join}») — ${fit.how}; drawn ${lift} mm under its face (inside the garment), not solved`;
+      const note = inferredFlap
+        ? `${fit.how}; drawn ${lift} mm over ${H.key}, not solved or confirmed`
+        : owner
+          ? `sewn onto ${H.key} (${hk.join}) — ${fit.how}; drawn ${lift} mm ${side} its face, not solved`
+          : `sewn onto ${H.key} (order «${hk.join}») — ${fit.how}; drawn ${lift} mm under its face (inside the garment), not solved`;
       surfaceRep.push({
         pieceKey: k,
         host: H.key,
