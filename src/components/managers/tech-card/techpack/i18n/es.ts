@@ -381,6 +381,7 @@ export const es = {
     article: 'artículo',
     pin: 'marca',
     placement: 'ubicación',
+    hemEdge: 'borde del dobladillo desconocido',
     tooFewPatternMarks: 'pocas marcas de patrón',
     marksOutsideOperationZone: 'marcas fuera de zona operativa',
     operation: 'operación',

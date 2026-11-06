@@ -547,7 +547,7 @@ function candidateOf(
   const sideOf = (hs: AnchorHit[]) => {
     if (hs.length === 1 && s.kind !== 'composite') return { id: hs[0].run, parts: undefined };
     const windows = hs.flatMap(edgeWindows);
-    const parts = windows.map((window) => window.id);
+    const parts = [...new Set(windows.map((window) => window.id))];
     // The longest part names the side (the composite convention `unionPicture` hangs on).
     let longest = parts[0];
     let best = -1;
@@ -556,7 +556,15 @@ function candidateOf(
         best = window.len;
         longest = window.id;
       }
-    return { id: longest, parts: parts.length > 1 ? parts : undefined };
+    return {
+      id: longest,
+      parts: parts.length > 1 ? parts : undefined,
+      // One edge in several stretches: the anchors' order is the side's sewing order.
+      walk:
+        parts.length < windows.length
+          ? windows.map(({ id, range }) => (range ? { target: id, range } : { target: id }))
+          : undefined,
+    };
   };
   const A = sideOf(ha);
   const B = sideOf(hb);
@@ -575,7 +583,10 @@ function candidateOf(
     for (const h of [...ha, ...hb]) {
       for (const window of edgeWindows(h)) {
         if (!window.range) continue;
-        (partRange ??= {})[window.id] = [window.range[0], window.range[1]];
+        const held = partRange?.[window.id];
+        (partRange ??= {})[window.id] = held
+          ? [Math.min(held[0], window.range[0]), Math.max(held[1], window.range[1])]
+          : [window.range[0], window.range[1]];
       }
     }
   return {
@@ -594,6 +605,9 @@ function candidateOf(
       ? { range: partialRange }
       : {}),
     ...(partRange ? { partRange } : {}),
+    ...(A.walk || B.walk
+      ? { walk: { ...(A.walk ? { a: A.walk } : {}), ...(B.walk ? { b: B.walk } : {}) } }
+      : {}),
     provenance,
   };
 }

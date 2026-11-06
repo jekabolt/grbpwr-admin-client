@@ -422,6 +422,7 @@ export const ru = {
     article: 'артикул',
     pin: 'метка',
     placement: 'расположение',
+    hemEdge: 'край подгибки неизвестен',
     tooFewPatternMarks: 'мало меток на лекале',
     marksOutsideOperationZone: 'метки вне зоны операции',
     operation: 'операция',

@@ -449,7 +449,7 @@ export function SeamPickerBody({
         sel[side].includes(id) &&
         (atMm == null ||
           !sel.spans[side][id] ||
-          (atMm >= sel.spans[side][id][0] && atMm <= sel.spans[side][id][1]));
+          sel.spans[side][id].some(([from, to]) => atMm >= from && atMm <= to));
       setRefused('');
       // A stored seam's part is that seam, not a new pick; what is in hand comes off first.
       if (!picked('a') && !picked('b')) {
@@ -530,10 +530,9 @@ export function SeamPickerBody({
       if (first) nos.push({ id: first.target, i, ...(first.range ? { range: first.range } : {}) });
     });
     const sideMarks = (side: Side, tone: EdgeMark['tone']) =>
-      sel[side].forEach((id) => {
-        const range = sel.spans[side][id];
-        marks.push({ id, tone, ...(range ? { range } : {}) });
-      });
+      sideParts(sel[side], sel.spans[side]).forEach(({ target, range }) =>
+        marks.push({ id: target, tone, ...(range ? { range } : {}) }),
+      );
     sideMarks('a', 'pickFirst');
     sideMarks('b', 'pick');
     if (spanDrag)

@@ -381,6 +381,7 @@ export const it = {
     article: 'articolo',
     pin: 'riferimento',
     placement: 'posizione',
+    hemEdge: 'bordo dell’orlo sconosciuto',
     tooFewPatternMarks: 'pochi riferimenti sul cartamodello',
     marksOutsideOperationZone: 'riferimenti fuori zona operativa',
     operation: 'operazione',

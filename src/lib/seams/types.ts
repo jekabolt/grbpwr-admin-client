@@ -234,6 +234,8 @@ export const SEAMS = {
   ratioDrift: 0.03,
   /** Candidate runs: chains of up to this many neighbouring edges. */
   maxChain: 3,
+  /** Anchors of one side of a row: the server refuses more. */
+  maxAnchorsPerSide: 8,
 } as const;
 
 export type ResolveOptions = {

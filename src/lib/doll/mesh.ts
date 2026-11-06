@@ -14,16 +14,35 @@ export type PieceMesh = {
   /**
    * Fold lines creased into the mesh, one per `creases` input, as local vertex ids from the first
    * end to the second: every consecutive pair is an edge of the triangulation, so no triangle
-   * straddles a crease. Empty for a line that could not be creased (the caller says so in words).
+   * straddles a crease. Two lines that cross share the vertex at their crossing. Empty for a line
+   * that could not be creased (the caller says so in words).
    */
   creases?: number[][];
 };
 
-/** A fold line to crease into the mesh: the `rs` indices of its two ends on the contour. */
-export type MeshCrease = { s: number; e: number };
+/**
+ * A fold line to crease into the mesh: the `rs` indices of its two ends on the contour. `passive` =
+ * a line the mesh carries but nothing folds on (a pleat row): it never splits, and it gives way to
+ * a line that folds and crosses it.
+ */
+export type MeshCrease = { s: number; e: number; passive?: boolean };
 
 const orient = (a: Pt2, b: Pt2, c: Pt2) =>
   (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+
+/** Where the open segments A–B and C–D cross, or null (parallel, or meeting at or past an end). */
+function crossingOf(A: Pt2, B: Pt2, C: Pt2, D: Pt2): { t: number; u: number; at: Pt2 } | null {
+  const rx = B[0] - A[0];
+  const ry = B[1] - A[1];
+  const sx = D[0] - C[0];
+  const sy = D[1] - C[1];
+  const den = rx * sy - ry * sx;
+  if (Math.abs(den) <= 1e-9 * Math.hypot(rx, ry) * Math.hypot(sx, sy)) return null;
+  const t = ((C[0] - A[0]) * sy - (C[1] - A[1]) * sx) / den;
+  const u = ((C[0] - A[0]) * ry - (C[1] - A[1]) * rx) / den;
+  if (t <= 1e-9 || t >= 1 - 1e-9 || u <= 1e-9 || u >= 1 - 1e-9) return null;
+  return { t, u, at: [A[0] + rx * t, A[1] + ry * t] };
+}
 
 export function pointInPolygon(p: Pt2, ring: readonly Pt2[]): boolean {
   let inside = false;
@@ -248,7 +267,10 @@ export function delaunay(input: readonly Pt2[]): number[] {
  * `creases` = fold lines (contour index to contour index) creased into the mesh: sampled every
  * boundary step, the lattice kept clear of them exactly as of the contour, so every crease segment
  * is a Gabriel edge of the point set and therefore an edge of the Delaunay triangulation — no
- * triangle straddles a fold. Without creases the mesh is exactly what it was.
+ * triangle straddles a fold. Lines that cross are split at the crossing, one shared vertex, and
+ * sampled outward from it at the same step on every arm: points at equal distances from the crossing
+ * never fall inside each other's segment circles, whatever the angle, so the Gabriel argument holds
+ * there too. Without creases, or without a crossing, the mesh is exactly what it was.
  */
 export function meshPiece(
   rs: readonly Pt2[],
@@ -273,37 +295,90 @@ export function meshPiece(
   const pts: Pt2[] = bRs.map((i) => [rs[i][0], rs[i][1]]);
   const ring: Pt2[] = pts.slice();
   // Crease points: the ends are boundary vertices (forced), the inside sampled every `step`.
-  const creaseIds: number[][] = [];
-  const creaseSegs: [Pt2, Pt2][] = [];
-  for (const c of creases) {
+  type Line = { A: Pt2; B: Pt2; i0: number; i1: number; parts: number; passive: boolean };
+  const lines = creases.map((c): Line | null => {
     const s = wrap(c.s);
     const e = wrap(c.e);
     const i0 = bRs.indexOf(s);
     const i1 = bRs.indexOf(e);
-    if (s === e || i0 < 0 || i1 < 0) {
-      creaseIds.push([]);
-      continue;
-    }
+    if (s === e || i0 < 0 || i1 < 0) return null;
     const A = rs[s];
     const B = rs[e];
     const parts = Math.max(1, Math.round(Math.hypot(B[0] - A[0], B[1] - A[1]) / step));
-    const ids = [i0];
-    let inside = true;
     for (let j = 1; j < parts; j++) {
       const q: Pt2 = [A[0] + ((B[0] - A[0]) * j) / parts, A[1] + ((B[1] - A[1]) * j) / parts];
-      if (!pointInPolygon(q, ring)) inside = false;
-      ids.push(pts.length);
-      pts.push(q);
+      if (!pointInPolygon(q, ring)) return null; // the line leaves the piece: not a crease of it
+    }
+    return { A, B, i0, i1, parts, passive: !!c.passive };
+  });
+  // The crossings of the lines that fold: one vertex each, however many lines run through it.
+  const stops = new Map<number, { t: number; id: number }[]>();
+  const stopAt = (line: number, t: number, id: number) => {
+    const list = stops.get(line) ?? [];
+    if (!list.some((x) => x.id === id)) list.push({ t, id });
+    stops.set(line, list);
+  };
+  lines.forEach((a, i) => {
+    if (!a || a.passive) return;
+    lines.forEach((b, j) => {
+      if (!b || b === a || (!b.passive && j < i)) return;
+      const x = crossingOf(a.A, a.B, b.A, b.B);
+      if (!x) return;
+      if (b.passive) {
+        lines[j] = null;
+        return;
+      }
+      let id = pts.findIndex(
+        (p, v) => v >= bRs.length && Math.hypot(p[0] - x.at[0], p[1] - x.at[1]) < 1e-3,
+      );
+      if (id < 0) {
+        id = pts.length;
+        pts.push(x.at);
+      }
+      stopAt(i, x.t, id);
+      stopAt(j, x.u, id);
+    });
+  });
+  const creaseIds: number[][] = [];
+  const creaseSegs: [Pt2, Pt2][] = [];
+  lines.forEach((line, k) => {
+    if (!line) {
+      creaseIds.push([]);
+      return;
+    }
+    const { A, B, i0, i1, parts } = line;
+    const ids = [i0];
+    const along = (t: number): Pt2 => [A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t];
+    const cross = stops.get(k)?.sort((p, q) => p.t - q.t);
+    if (!cross) {
+      for (let j = 1; j < parts; j++) {
+        ids.push(pts.length);
+        pts.push([A[0] + ((B[0] - A[0]) * j) / parts, A[1] + ((B[1] - A[1]) * j) / parts]);
+      }
+    } else {
+      // Between stops: every `step` outward from each crossing, the slack left away from it.
+      const len = Math.hypot(B[0] - A[0], B[1] - A[1]);
+      const unit = step / len;
+      const run = (t0: number, t1: number, from0: boolean, from1: boolean) => {
+        const inner = Math.max(1, Math.round((t1 - t0) / unit)) - 1;
+        const lead = from0 ? (from1 ? Math.ceil(inner / 2) : inner) : 0;
+        for (let j = 1; j <= inner; j++) {
+          ids.push(pts.length);
+          pts.push(along(j <= lead ? t0 + j * unit : t1 - (inner + 1 - j) * unit));
+        }
+      };
+      let t0 = 0;
+      for (const x of cross) {
+        run(t0, x.t, t0 > 0, true);
+        ids.push(x.id);
+        t0 = x.t;
+      }
+      run(t0, 1, true, false);
     }
     ids.push(i1);
-    if (!inside) {
-      pts.length -= parts - 1; // the line leaves the piece: not a crease of it
-      creaseIds.push([]);
-      continue;
-    }
     creaseIds.push(ids);
     creaseSegs.push([A, B]);
-  }
+  });
 
   let x0 = Infinity;
   let y0 = Infinity;
@@ -345,34 +420,67 @@ export function meshPiece(
     }
   }
 
-  const raw = delaunay(pts);
   const nb = bRs.length;
-  const tris: number[] = [];
-  for (let t = 0; t < raw.length; t += 3) {
-    const a = raw[t];
-    const b = raw[t + 1];
-    const c = raw[t + 2];
-    const onB = (a < nb ? 1 : 0) + (b < nb ? 1 : 0) + (c < nb ? 1 : 0);
-    if (onB >= 2) {
-      const pa = pts[a];
-      const pb = pts[b];
-      const pc = pts[c];
-      const g: Pt2 = [(pa[0] + pb[0] + pc[0]) / 3, (pa[1] + pb[1] + pc[1]) / 3];
-      if (!pointInPolygon(g, ring)) continue;
-      const mids: Pt2[] = [
-        [(pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2],
-        [(pb[0] + pc[0]) / 2, (pb[1] + pc[1]) / 2],
-        [(pc[0] + pa[0]) / 2, (pc[1] + pa[1]) / 2],
-      ];
-      // A boundary–boundary edge is fine when it is a contour step; otherwise its midpoint must be in.
-      const isStep = (i: number, j: number) =>
-        i < nb && j < nb && (Math.abs(i - j) === 1 || Math.abs(i - j) === nb - 1);
-      if (!isStep(a, b) && !pointInPolygon(mids[0], ring)) continue;
-      if (!isStep(b, c) && !pointInPolygon(mids[1], ring)) continue;
-      if (!isStep(c, a) && !pointInPolygon(mids[2], ring)) continue;
-      if (Math.abs(orient(pa, pb, pc)) < 1e-6) continue;
+  const triangulate = (): number[] => {
+    const raw = delaunay(pts);
+    const tris: number[] = [];
+    for (let t = 0; t < raw.length; t += 3) {
+      const a = raw[t];
+      const b = raw[t + 1];
+      const c = raw[t + 2];
+      const onB = (a < nb ? 1 : 0) + (b < nb ? 1 : 0) + (c < nb ? 1 : 0);
+      if (onB >= 2) {
+        const pa = pts[a];
+        const pb = pts[b];
+        const pc = pts[c];
+        const g: Pt2 = [(pa[0] + pb[0] + pc[0]) / 3, (pa[1] + pb[1] + pc[1]) / 3];
+        if (!pointInPolygon(g, ring)) continue;
+        const mids: Pt2[] = [
+          [(pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2],
+          [(pb[0] + pc[0]) / 2, (pb[1] + pc[1]) / 2],
+          [(pc[0] + pa[0]) / 2, (pc[1] + pa[1]) / 2],
+        ];
+        // A boundary–boundary edge is fine when it is a contour step; otherwise its midpoint must be in.
+        const isStep = (i: number, j: number) =>
+          i < nb && j < nb && (Math.abs(i - j) === 1 || Math.abs(i - j) === nb - 1);
+        if (!isStep(a, b) && !pointInPolygon(mids[0], ring)) continue;
+        if (!isStep(b, c) && !pointInPolygon(mids[1], ring)) continue;
+        if (!isStep(c, a) && !pointInPolygon(mids[2], ring)) continue;
+        if (Math.abs(orient(pa, pb, pc)) < 1e-6) continue;
+      }
+      tris.push(a, b, c);
     }
-    tris.push(a, b, c);
+    return tris;
+  };
+  const key = (a: number, b: number) => (a < b ? a * 1e6 + b : b * 1e6 + a);
+  const edgesOf = (list: readonly number[]) => {
+    const edges = new Set<number>();
+    for (let t = 0; t < list.length; t += 3) {
+      edges.add(key(list[t], list[t + 1]));
+      edges.add(key(list[t + 1], list[t + 2]));
+      edges.add(key(list[t + 2], list[t]));
+    }
+    return edges;
+  };
+  let tris = triangulate();
+  // Only where lines cross: at a shallow angle near the contour an arm's last, longer segment can
+  // still be crowded out. Halve what did not come out as an edge until it does.
+  for (let pass = 0; stops.size && pass < 8; pass++) {
+    const edges = edgesOf(tris);
+    let split = false;
+    creaseIds.forEach((ids, line) => {
+      if (lines[line]?.passive) return;
+      for (let k = ids.length - 2; k >= 0; k--) {
+        if (edges.has(key(ids[k], ids[k + 1]))) continue;
+        const p = pts[ids[k]];
+        const q = pts[ids[k + 1]];
+        ids.splice(k + 1, 0, pts.length);
+        pts.push([(p[0] + q[0]) / 2, (p[1] + q[1]) / 2]);
+        split = true;
+      }
+    });
+    if (!split) break;
+    tris = triangulate();
   }
   // Make every triangle CCW in the pattern plane.
   for (let t = 0; t < tris.length; t += 3) {
@@ -385,13 +493,7 @@ export function meshPiece(
   const mesh: PieceMesh = { pts, tris: Uint32Array.from(tris), bVert: bRs.map((_, i) => i), bRs };
   if (creases.length) {
     // A crease holds only when every one of its segments came out as a triangle edge.
-    const edges = new Set<number>();
-    const key = (a: number, b: number) => (a < b ? a * 1e6 + b : b * 1e6 + a);
-    for (let t = 0; t < tris.length; t += 3) {
-      edges.add(key(tris[t], tris[t + 1]));
-      edges.add(key(tris[t + 1], tris[t + 2]));
-      edges.add(key(tris[t + 2], tris[t]));
-    }
+    const edges = edgesOf(tris);
     mesh.creases = creaseIds.map((ids) => {
       for (let k = 0; k + 1 < ids.length; k++) if (!edges.has(key(ids[k], ids[k + 1]))) return [];
       return ids.length >= 2 ? ids : [];

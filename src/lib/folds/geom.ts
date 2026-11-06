@@ -136,7 +136,7 @@ export function offsetFromRun(piece: PieceGeom, run: SeamRun, lineMm: readonly [
 }
 
 /** +1 when the inside of the piece is on the left of the run's chord, −1 when on the right. */
-export function inwardSign(piece: PieceGeom, run: SeamRun): number {
+export function inwardSign(piece: PieceGeom, run: Pick<SeamRun, 'pts'>): number {
   const a = run.pts[0];
   const b = run.pts[run.pts.length - 1];
   const n = perp(unit(sub(b, a)));

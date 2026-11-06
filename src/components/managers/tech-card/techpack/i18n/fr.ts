@@ -381,6 +381,7 @@ export const fr = {
     article: 'article',
     pin: 'repère',
     placement: 'emplacement',
+    hemEdge: 'bord d’ourlet inconnu',
     tooFewPatternMarks: 'repères de patron insuffisants',
     marksOutsideOperationZone: 'repères hors zone d’opération',
     operation: 'opération',

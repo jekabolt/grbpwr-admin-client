@@ -100,6 +100,8 @@ export type Tie = {
   ax: number;
   az: number;
   active: boolean;
+  /** A stays at least `lift` outside B and is otherwise free: the two lie over each other. */
+  oneSided?: boolean;
 };
 
 /** Rows of a seam: every vertex of A onto B's polyline and every vertex of B onto A's. */
@@ -498,7 +500,24 @@ function tiePass(S: SolverState, T: Tie): void {
   const mv = S.moving;
   const n = T.ia.length / 3;
   for (let q = 0; q < n; q++) {
-    const [cx, cy, cz] = tieGap(p, T, q);
+    let [cx, cy, cz] = tieGap(p, T, q);
+    if (T.oneSided) {
+      // The residual along the outward direction only, and only when A lies too deep.
+      let bx = 0;
+      let bz = 0;
+      for (let m = 0; m < 3; m++) {
+        bx += p[T.ib[3 * q + m] * 3] * T.wb[3 * q + m];
+        bz += p[T.ib[3 * q + m] * 3 + 2] * T.wb[3 * q + m];
+      }
+      const nl = Math.hypot(bx - T.ax, bz - T.az) || 1;
+      const nx = (bx - T.ax) / nl;
+      const nz = (bz - T.az) / nl;
+      const out = cx * nx + cz * nz;
+      if (out >= 0) continue;
+      cx = out * nx;
+      cy = 0;
+      cz = out * nz;
+    }
     let den = 0;
     for (let m = 0; m < 3; m++) {
       den += mv[T.ia[3 * q + m]] * T.wa[3 * q + m] ** 2;

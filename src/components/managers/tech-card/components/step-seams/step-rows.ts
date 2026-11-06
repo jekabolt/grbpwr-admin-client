@@ -92,9 +92,13 @@ export function storedSeamSides(
       return [{ target: anchor.edgeHint, range: [from, to] }];
     });
   const parts = { a: sideParts(row.sideA), b: sideParts(row.sideB) };
+  // Two stretches of one edge name it once: `parts` holds them both.
+  const targets = (anchors: readonly EdgeAnchor[]) => [
+    ...new Set(anchors.flatMap(rowTargetsOfAnchor)),
+  ];
   return {
-    a: row.sideA.flatMap(rowTargetsOfAnchor),
-    b: row.sideB.flatMap(rowTargetsOfAnchor),
+    a: targets(row.sideA),
+    b: targets(row.sideB),
     parts,
     placement: [...row.sideA, ...row.sideB].find((anchor) => anchor.placement)?.placement,
   };

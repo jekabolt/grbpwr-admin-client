@@ -318,8 +318,11 @@ function storedSidesOf(
       seam.kind === 'closure'
     )
       continue;
-    const ids = (side: readonly EdgeAnchor[]) =>
-      side.flatMap((anchor) => (anchor.edgeHint.includes('#') ? edgeIdsOf(anchor.edgeHint) : []));
+    const ids = (side: readonly EdgeAnchor[]) => [
+      ...new Set(
+        side.flatMap((anchor) => (anchor.edgeHint.includes('#') ? edgeIdsOf(anchor.edgeHint) : [])),
+      ),
+    ];
     const a = ids(seam.sideA);
     const b = ids(seam.sideB);
     if (a.length || b.length) out.push({ a, b, direction: seam.direction });

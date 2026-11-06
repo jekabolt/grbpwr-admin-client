@@ -422,6 +422,7 @@ export const pl = {
     article: 'artykuł',
     pin: 'znacznik',
     placement: 'umiejscowienie',
+    hemEdge: 'nieznana krawędź podwinięcia',
     tooFewPatternMarks: 'za mało oznaczeń szablonu',
     marksOutsideOperationZone: 'oznaczenia poza strefą operacji',
     operation: 'operacja',

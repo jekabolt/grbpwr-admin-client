@@ -5,6 +5,7 @@ import type {
   SeamCandidate,
   SeamEvidence,
   SeamGraph,
+  SeamStretch,
   SkeletonFacts,
   SkeletonPieceInput,
 } from 'lib/assembly-skeleton/types';
@@ -429,6 +430,149 @@ describe('paper doll owner seams', () => {
     expect(report.contradictions).toEqual(
       expect.arrayContaining([expect.stringContaining('confirmed by a person')]),
     );
+  });
+
+  describe('one edge sewn with a gap', () => {
+    // A long edge, a piece sewn into the gap of it, the far side as long as the real stretches.
+    const gapSeam = (walk: readonly SeamStretch[], b: string, parts: string[]): SeamCandidate => ({
+      ...seam(parts[0], b),
+      kind: 'composite',
+      ...(parts.length > 1 ? { aParts: parts } : {}),
+      partRange: { 'A#1': [walk[0].range?.[0] ?? 0, walk[walk.length - 1].range?.[1] ?? 200] },
+      walk: { a: walk },
+      evidence: { ...evidence, twin: 'none' },
+    });
+    const solved = (seams: SeamCandidate[], extra: Partial<DollOptions> = {}) => {
+      const facts: SkeletonFacts = {
+        ...fixture().facts,
+        pieces: [rectangle('A', 'front', 1), rectangle('B', 'back', 2), rectangle('C', 'side', 3)],
+      };
+      const graph: SeamGraph = {
+        ...readSeamGraph(facts),
+        chosen: seams,
+        rejected: [],
+        components: [['A', 'B', 'C']],
+      };
+      const rows = seams.map((candidate, index) => {
+        const stored = seamFromCandidate(candidate, graph.pieces, {
+          seamKey: `gap-row-${index}`,
+          status: 'confirmed',
+          source: 'manual',
+          anchoredSize: 'M',
+        });
+        if (!stored) throw new Error('gap row fixture did not resolve');
+        return stored;
+      });
+      return solveDoll({
+        graph,
+        facts,
+        options: {
+          ...fast,
+          ...extra,
+          seams: {
+            mode: 'owner',
+            rows,
+            size: 'M',
+            candidates: rows.map((stored, index) => ({
+              seamKey: stored.seamKey,
+              candidate: seams[index],
+              inStep: true,
+            })),
+            inStepKeys: rows.map((stored) => stored.seamKey),
+          },
+        },
+      });
+    };
+    const top = { target: 'A#1', range: [0, 20] as const };
+    const pocket = { target: 'C#0' };
+    const bottom = { target: 'A#1', range: [180, 200] as const };
+    const gap = gapSeam([top, pocket, bottom], 'B#0', ['A#1', 'C#0']);
+
+    it('reads the length of the real stretches, not of the whole edge: no contradiction', () => {
+      const report = solved([gap]);
+      expect(report.contradictions?.filter((words) => words.includes('apart'))).toEqual([]);
+      expect(report.seams[0]?.decidedBy).toBe('person');
+    });
+
+    it('a real length mismatch is still a contradiction', () => {
+      const wide = gapSeam(
+        [{ target: 'A#1', range: [0, 90] }, pocket, { target: 'A#1', range: [110, 200] }],
+        'B#0',
+        ['A#1', 'C#0'],
+      );
+      expect(solved([wide]).contradictions).toEqual(
+        expect.arrayContaining([expect.stringContaining('apart')]),
+      );
+    });
+
+    it('another seam in the gap is no clash; one on a stretch is', () => {
+      const clashes = (report: DollReport) =>
+        report.contradictions?.filter((words) => words.includes('over the same stretch'));
+      const inGap: SeamCandidate = {
+        ...seam('A#1', 'B#2'),
+        kind: 'partial',
+        range: { a: [50, 150], b: [0, 100] },
+        evidence: { ...evidence, twin: 'none' },
+      };
+      expect(clashes(solved([gap, inGap]))).toEqual([]);
+      const onTop: SeamCandidate = { ...inGap, range: { a: [0, 100], b: [0, 100] } };
+      expect(clashes(solved([gap, onTop]))).toHaveLength(1);
+    });
+
+    it('sews through the solver: only the real stretches, the piece in the gap with them', () => {
+      const tie = { ...seam('B#1', 'C#3'), evidence: { ...evidence, twin: 'none' as const } };
+      const run = (row: SeamCandidate) => {
+        const report = solved([row, tie], { maxPasses: 40, settlePasses: 20 });
+        const sewn = report.seams.find((candidate) => candidate.id === 'A#1~B#3');
+        if (!sewn) throw new Error('the row was not sewn');
+        return { report, sewn };
+      };
+      const hull: SeamCandidate = {
+        ...seam('A#1', 'B#3'),
+        kind: 'composite',
+        aParts: ['A#1', 'C#0'],
+        evidence: { ...evidence, twin: 'none' },
+      };
+      const even = run(
+        gapSeam(
+          [{ target: 'A#1', range: [0, 50] }, pocket, { target: 'A#1', range: [150, 200] }],
+          'B#3',
+          ['A#1', 'C#0'],
+        ),
+      );
+      expect(even.report.contradictions).toEqual([]);
+      expect(even.report.floating).toEqual([]);
+      expect(even.sewn.a).toEqual(['A#1', 'C#0']);
+      expect(even.sewn.state).not.toBe('open');
+      expect(even.sewn.lenA).toBeGreaterThan(170);
+      expect(even.sewn.lenA).toBeLessThan(230);
+      const whole = run(hull);
+      expect(whole.sewn.lenA).toBeCloseTo(300, 0);
+      expect(even.sewn.pathA.length).toBeLessThan(whole.sewn.pathA.length);
+    });
+
+    it('sews a gap of one edge alone, no other piece on the side', () => {
+      const tie = { ...seam('B#1', 'C#3'), evidence: { ...evidence, twin: 'none' as const } };
+      const report = solved(
+        [
+          gapSeam(
+            [
+              { target: 'A#1', range: [0, 90] },
+              { target: 'A#1', range: [110, 200] },
+            ],
+            'B#3',
+            ['A#1'],
+          ),
+          tie,
+        ],
+        { maxPasses: 40, settlePasses: 20 },
+      );
+      expect(report.contradictions).toEqual([]);
+      const sewn = report.seams.find((candidate) => candidate.id === 'A#1~B#3');
+      expect(sewn?.a).toEqual(['A#1']);
+      expect(sewn?.state).not.toBe('open');
+      expect(sewn?.lenA).toBeLessThan(195);
+    });
   });
 
   it('uses the same under/over claim as step-result', () => {

@@ -19,6 +19,7 @@ import type {
 import type { SizePieces } from 'lib/seams/transfer';
 import type { StoredSeam } from 'lib/seams/types';
 
+import type { DeclaredFastening } from './buttons';
 import type { DeclaredJoin } from './joins';
 
 export type Vec3 = [number, number, number];
@@ -112,12 +113,19 @@ export type DollOptions = {
    * stacked ~1 mm apart and kept from passing through each other. No folds → the doll as before.
    */
   folds?: Record<string, DollFold[]>;
+  /** What the hem steps could not fold, in words (lib/hem/hem-folds): goes to `warnings`. */
+  hemWords?: string[];
   /**
    * Declared joins (the technologist's order, or the skeleton's units): which pieces must be sewn
    * together. A join the graph has no seam for is searched for between those pieces only and
    * proposed «from the technologist's order». See joins.ts (joinsFromOps).
    */
   joins?: DeclaredJoin[];
+  /**
+   * The steps that make buttonholes and set buttons (buttons.ts fasteningsFromOps). Marks of a
+   * pair of such steps close the two parts, no row asked. Needs rows (L4), as any closure does.
+   */
+  fastenings?: DeclaredFastening[];
   /**
    * Pieces the order sets as hardware (HARDWARE_SET: an elastic, a tape — joins.ts
    * hardwareFromOps): listed, never drawn as a panel or sewn as a seam.
@@ -345,6 +353,8 @@ export type DollReport = {
   contradictions?: string[];
   /** L4 only: closures drawn overlapped at the button line. */
   closures?: DollClosureReport[];
+  /** Hole and button steps the doll did not fasten: each with the reason, in plain words. */
+  notFastened?: string[];
   /** L4 only: the stored rows as resolved for this size (stale / orphan in words). */
   rows?: {
     applied: number;
@@ -372,6 +382,11 @@ export type DollClosureReport = {
   /** Share of the top's overlap zone lying outside the under piece, %. */
   outsidePct: number;
   ok: boolean;
+  /**
+   * Fastened by its steps' marks: each hole and its button, in column order. `distMm` is hole to
+   * button as drawn (a layer apart, ideally); `gapMm` is what the tie left of that layer's place.
+   */
+  buttons?: { k: number; distMm: number; gapMm: number }[];
 };
 
 export type DollCollarUnit = {

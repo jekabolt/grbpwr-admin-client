@@ -45,6 +45,7 @@ import {
   type PieceShapeReference,
 } from 'lib/dxf-reconcile';
 import { fusingDartPolygons } from 'lib/fusing-dxf/darts';
+import { mapFuseSpecToSize } from 'lib/fusing-dxf/dxf';
 import { fuseAreaMm2, fuseInsetRingMm, generateFuseGeometry } from 'lib/fusing-dxf/geometry';
 import {
   interliningBlockCodes,
@@ -93,7 +94,7 @@ import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { CanvasSegments, PieceSheet, type PieceMark } from './piece-sheet';
 import { FuseFields, type InterliningLine } from './fuse-fields';
 import { FuseOverlay } from './fuse-overlay';
-import { createZoneBus, isDrawnZone, seedZone } from './fuse-zone';
+import { createZoneBus, isDrawnZone } from './fuse-zone';
 import { fusingSheetsChange, fusingSignature, hasFusedPiece } from './fusing-sheets-stage';
 import {
   blankFuse,
@@ -1707,6 +1708,45 @@ export function PieceMatchModal({
   // piece in another size is the same thing to click.
   const ciOf = (p: PieceDTO) => normBlock(identityOfPiece(p)).toLowerCase();
 
+  // Stored fusing markup is base-size markup: the DXF builder maps it onto every graded contour
+  // (mapFuseSpecToSize). The sheet shows one size, so what it draws and edits goes through that
+  // same mapping — there, and back on write. The base is the builder's: the card's sample size,
+  // else the smallest size of the grade.
+  const baseShapeSize = (() => {
+    const preferred = new Set((preferredShapeSizeTokens ?? []).map((t) => t.toLowerCase()));
+    const sized = sizeOptions.filter((o) => o.size);
+    return (sized.find((o) => preferred.has(o.size.toLowerCase())) ?? sized[0])?.size ?? null;
+  })();
+  const outlineMmOf = (ci: string, size: string) =>
+    contourPieces
+      .find((p) => sizeOfPiece(p) === size && ciOf(p) === ci)
+      ?.poly.map((q) => ({ x: q.x * 10, y: q.y * 10 }));
+  const sizeMapOf = (ci: string, size: string) => {
+    if (!ci || baseShapeSize == null || size === baseShapeSize) return null;
+    const base = outlineMmOf(ci, baseShapeSize);
+    const shown = outlineMmOf(ci, size);
+    return base && shown ? { base, shown } : null;
+  };
+  const fuseOnSize = (ci: string, size: string, spec: PieceFuseSpec): PieceFuseSpec => {
+    const m = sizeMapOf(ci, size);
+    return m ? mapFuseSpecToSize(spec, m.base, m.shown, requiredSeamAllowanceMm) : spec;
+  };
+  /** A spec edited on `size` → base-size markup. Untouched markup keeps its stored points exactly. */
+  const fuseFromSize = (
+    ci: string,
+    size: string,
+    next: PieceFuseSpec,
+    stored: PieceFuseSpec,
+  ): PieceFuseSpec => {
+    const m = sizeMapOf(ci, size);
+    if (!m) return next;
+    const shown = mapFuseSpecToSize(stored, m.base, m.shown, requiredSeamAllowanceMm);
+    const same = (a: PieceFuseSpec, b: PieceFuseSpec) =>
+      a.mode === b.mode && JSON.stringify([a.zone, a.edges]) === JSON.stringify([b.zone, b.edges]);
+    if (same(next, shown)) return { ...next, zone: stored.zone, edges: stored.edges };
+    return mapFuseSpecToSize(next, m.shown, m.base, requiredSeamAllowanceMm);
+  };
+
   // The display name of an existing piece, with a buffered rename applied.
   const pieceName = (lineKey: string): string => {
     const k = lineKey.toLowerCase();
@@ -1785,7 +1825,7 @@ export function PieceMatchModal({
     try {
       const polygons = generateFuseGeometry({
         outline: piece.poly.map((point) => ({ x: point.x * 10, y: point.y * 10 })),
-        spec: fuse,
+        spec: fuseOnSize(ciOf(piece), sizeOfPiece(piece), fuse),
         seamAllowanceMm: requiredSeamAllowanceMm,
         darts: fusingDartPolygons(piece),
       });
@@ -2667,21 +2707,6 @@ export function PieceMatchModal({
         resolved = { ...next, bomLineKey: placeholder.lineKey!.trim() };
       }
     }
-    if (resolved.mode === 'zone' && !resolved.zone) {
-      const piece = sheetPieces.find((candidate) => ciOf(candidate) === ci);
-      if (piece) {
-        try {
-          const inset = fuseInsetRingMm(
-            piece.poly.map((point) => ({ x: point.x * 10, y: point.y * 10 })),
-            resolved,
-            requiredSeamAllowanceMm,
-          );
-          resolved = { ...resolved, zone: seedZone(inset) };
-        } catch {
-          // The normal incomplete/error state remains visible if this piece cannot produce an inset.
-        }
-      }
-    }
     const previousLineKey = prev.bomLineKey.trim();
     if (previousLineKey && previousLineKey !== resolved.bomLineKey.trim()) {
       const references = [...Object.values(pieceEdits), ...Object.values(newEdits)].filter(
@@ -2693,6 +2718,15 @@ export function PieceMatchModal({
     }
     if (resolved.mode !== prev.mode) setZoomOut(null);
     patch({ fuse: resolved, ...writeFuseFields(resolved) });
+  };
+  // The same spec as drawn and edited on the sheet's size (see fuseOnSize / fuseFromSize).
+  const shownFuseOfCi = (ci: string): PieceFuseSpec | undefined => {
+    const spec = fuseOfCi(ci);
+    return spec && fuseOnSize(ci, shownSize, spec);
+  };
+  const setShownFuse = (ci: string, next: PieceFuseSpec) => {
+    const { vals } = ioOf(ci);
+    setFuse(ci, fuseFromSize(ci, shownSize, next, vals.fuse ?? readFuseSpec(vals)));
   };
   const addFuseSlot = (ci: string) => {
     const spec = fuseOfCi(ci);
@@ -2847,12 +2881,12 @@ export function PieceMatchModal({
     const fuseFields = interlining ? null : (
       <FuseFields
         key={ci}
-        spec={fuse}
+        spec={fuseOnSize(ci, shownSize, fuse)}
         fused={!!vals.fused}
         lines={interlinings}
         readOnly={readOnly}
         toggleBox={TOGGLE_BOX}
-        onChange={(next) => setFuse(ci, next)}
+        onChange={(next) => setShownFuse(ci, next)}
         onAddSlot={() => addFuseSlot(ci)}
         onAddFileSlot={addFileSlot}
         onUploadFile={uploadInterliningFile}
@@ -3038,8 +3072,8 @@ export function PieceMatchModal({
                           pieces={sheetPieces}
                           ciOf={ciOf}
                           sel={zoomed}
-                          fuseOf={fuseOfCi}
-                          onChange={setFuse}
+                          fuseOf={shownFuseOfCi}
+                          onChange={setShownFuse}
                           zoneBus={zoneBus}
                           requiredSeamAllowanceMm={requiredSeamAllowanceMm}
                         />

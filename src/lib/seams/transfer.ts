@@ -7,7 +7,8 @@
 // fallback only where the topology differs (a corner appeared or vanished) or is ambiguous; what
 // still does not fit is stale, the words naming the size.
 
-import type { EdgeId, PieceGeom } from 'lib/assembly-skeleton/types';
+import { edgeIdsOf } from 'lib/assembly-skeleton/geometry/match';
+import type { EdgeId, Mm, PieceGeom, SeamCandidate } from 'lib/assembly-skeleton/types';
 import { FRAMES, frameOf, inFrame, rmsFit, runSamples, runsOfPiece, type SeamRun } from './frame';
 import { hitOf, resolveSeamDecisions } from './resolve';
 import {
@@ -157,6 +158,91 @@ export type SizePieces = {
   pieces: readonly PieceGeom[];
   grainDeg?: ReadonlyMap<string, number>;
 };
+
+/**
+ * Owner-mode candidates are built once, on the size the card was read at, and name its edges
+ * literally. A graded contour may start at another corner, so the same number is another edge there:
+ * each side moves through its piece's edge map, its millimetres scaled by the run's length (and
+ * walked the other way when the frame does). A piece with no map keeps its numbers.
+ */
+export function candidatesOnSize<T extends { candidate: SeamCandidate }>(
+  owned: readonly T[],
+  base: SizePieces,
+  target: SizePieces,
+): T[] {
+  const pieceB = new Map(base.pieces.map((p) => [p.pieceKey, p]));
+  const pieceT = new Map(target.pieces.map((p) => [p.pieceKey, p]));
+  const maps = new Map<string, EdgeMap | null>();
+  const pieceOf = (id: EdgeId) => id.slice(0, id.lastIndexOf('#'));
+  const mapOf = (id: EdgeId) => {
+    const key = pieceOf(id);
+    if (!maps.has(key)) {
+      const pb = pieceB.get(key);
+      const pt = pieceT.get(key);
+      maps.set(
+        key,
+        pb && pt ? edgeMapOf(pb, pt, base.grainDeg?.get(key), target.grainDeg?.get(key)) : null,
+      );
+    }
+    return maps.get(key) ?? null;
+  };
+  const isBack = (id: EdgeId) => {
+    const m = mapOf(id);
+    return !!m && backwards(m.frame);
+  };
+  /** A side's id (`P#1+2`): its edges moved, in the target's walk order; an inner line stays. */
+  const movedRun = (id: EdgeId): EdgeId => {
+    if (!id.includes('#')) return id;
+    const edges = edgeIdsOf(id);
+    const moved = edges.map((edge) => mapOf(edge)?.map.get(edge));
+    if (moved.some((edge) => !edge)) return id;
+    const walk = isBack(id) ? [...moved].reverse() : moved;
+    return `${pieceOf(id)}#${(walk as EdgeId[]).map((e) => e.slice(e.lastIndexOf('#') + 1)).join('+')}`;
+  };
+  const movedParts = (parts: EdgeId[]) =>
+    (isBack(parts[0]) ? [...parts].reverse() : parts).map(movedRun);
+  const runLen = (pieces: ReadonlyMap<string, PieceGeom>, id: EdgeId) =>
+    edgeIdsOf(id).reduce(
+      (sum, edge) =>
+        sum + (pieces.get(pieceOf(edge))?.edges.find((e) => e.id === edge)?.lenMm ?? 0),
+      0,
+    );
+  const movedRange = (id: EdgeId, to: EdgeId, [lo, hi]: [Mm, Mm]): [Mm, Mm] => {
+    const lb = runLen(pieceB, id);
+    const lt = runLen(pieceT, to);
+    if (!lb || !lt) return [lo, hi];
+    const k = lt / lb;
+    return isBack(id) ? [lt - hi * k, lt - lo * k] : [lo * k, hi * k];
+  };
+  return owned.map((item) => {
+    const c = item.candidate;
+    const a = movedRun(c.a);
+    const b = movedRun(c.b);
+    return {
+      ...item,
+      candidate: {
+        ...c,
+        a,
+        b,
+        ...(c.aParts ? { aParts: movedParts(c.aParts) } : {}),
+        ...(c.bParts ? { bParts: movedParts(c.bParts) } : {}),
+        ...(c.range
+          ? { range: { a: movedRange(c.a, a, c.range.a), b: movedRange(c.b, b, c.range.b) } }
+          : {}),
+        ...(c.partRange
+          ? {
+              partRange: Object.fromEntries(
+                Object.entries(c.partRange).map(([id, range]) => {
+                  const to = movedRun(id);
+                  return [to, movedRange(id, to, range)];
+                }),
+              ),
+            }
+          : {}),
+      },
+    };
+  });
+}
 
 export type SizeResolved = Resolved & {
   size: string;

@@ -424,6 +424,7 @@ export const en = {
     article: 'article',
     pin: 'pin',
     placement: 'placement',
+    hemEdge: 'hem edge unknown',
     tooFewPatternMarks: 'too few pattern marks',
     marksOutsideOperationZone: 'marks outside operation zone',
     operation: 'operation',

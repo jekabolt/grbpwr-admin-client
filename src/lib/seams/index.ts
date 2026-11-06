@@ -29,8 +29,10 @@ export {
 export { contourSig, frameOf, grainDegOf, runsOfPiece } from './frame';
 export { resolveSeamDecisions, sideEdges } from './resolve';
 export {
+  candidateSideOf,
   candidateSideParts,
   expandSidePart,
+  mergedSpans,
   normalizeParts,
   sidePartEdges,
   type SidePart,

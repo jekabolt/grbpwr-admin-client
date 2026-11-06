@@ -5,6 +5,7 @@
 
 import type { EdgeId, PieceGeom, SeamCandidate } from 'lib/assembly-skeleton/types';
 import {
+  candidateSideOf,
   newSeamKey,
   resolveSeamDecisions,
   seamFromCandidate,
@@ -96,12 +97,14 @@ export function rowFromHand(
     );
   const pa = partsOf(a);
   const pb = partsOf(b);
+  // Spans of one target are stretches with a gap between them; an edge reached by two different
+  // targets (a chain and its member) is the same line named twice.
   const repeatsEdge = (parts: readonly SidePart[]) => {
-    const seen = new Set<EdgeId>();
+    const seen = new Map<EdgeId, string>();
     for (const part of parts)
       for (const edge of sidePartEdges(part)) {
-        if (seen.has(edge)) return true;
-        seen.add(edge);
+        if (seen.has(edge) && seen.get(edge) !== part.target) return true;
+        seen.set(edge, part.target);
       }
     return false;
   };
@@ -122,18 +125,15 @@ export function rowFromHand(
   const aLen = sideLengthMm(pa, geoms, () => 0);
   const bLen = sideLengthMm(pb, geoms, () => 0);
   const d = Math.abs(aLen - bLen);
-  const partRange: Record<EdgeId, [number, number]> = {};
-  if (composite)
-    for (const part of [...ra, ...rb])
-      if (part.range) partRange[part.target] = [part.range[0], part.range[1]];
+  const sa = candidateSideOf(ra);
+  const sb = candidateSideOf(rb);
+  const partRange: Record<EdgeId, [number, number]> = composite ? { ...sa.hull, ...sb.hull } : {};
   const c: SeamCandidate = {
     a: ra[0].target,
     b: rb[0].target,
-    ...(composite
-      ? {
-          aParts: ra.map((part) => part.target),
-          bParts: rb.map((part) => part.target),
-        }
+    ...(composite ? { aParts: sa.ids, bParts: sb.ids } : {}),
+    ...(sa.walk || sb.walk
+      ? { walk: { ...(sa.walk ? { a: sa.walk } : {}), ...(sb.walk ? { b: sb.walk } : {}) } }
       : {}),
     score: 1,
     kind: composite ? 'composite' : partial ? 'partial' : 'edge',
@@ -159,7 +159,7 @@ export function rowFromHand(
       bLenMm: bLen,
     },
   };
-  return seamFromCandidate(c, ctx.pieces, {
+  const row = seamFromCandidate(c, ctx.pieces, {
     seamKey: o.seamKey ?? newSeamKey(),
     status: 'confirmed',
     source: 'manual',
@@ -167,6 +167,7 @@ export function rowFromHand(
     note: (o.note ?? '').trim().slice(0, 255),
     ...opts(ctx),
   });
+  return row && Math.max(row.sideA.length, row.sideB.length) > SEAMS.maxAnchorsPerSide ? null : row;
 }
 
 /**
@@ -182,7 +183,7 @@ export function reconfirmRow(item: ReviewItem, ctx: AnchorCtx): StoredSeam | nul
   });
   const applied = r.applied[0];
   if (!applied) return null;
-  const parts = (hs: typeof applied.a) => hs.map((h) => h.run);
+  const parts = (hs: typeof applied.a) => [...new Set(hs.map((h) => h.run))];
   const kind: SeamCandidate['kind'] = row.kind === 'closure' ? 'closure-not-seam' : row.kind;
   const cand: SeamCandidate = applied.candidate ?? {
     a: applied.a[0].run,

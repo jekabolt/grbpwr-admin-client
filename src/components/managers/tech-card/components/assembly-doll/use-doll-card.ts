@@ -34,9 +34,12 @@ import {
   type DeclaredHardware,
   type DeclaredJoin,
 } from 'lib/doll/joins';
+import { fasteningsFromOps, type DeclaredFastening } from 'lib/doll/buttons';
 import type { DollLayerRelation, DollOwnerCandidate } from 'lib/doll/types';
 import { resolveFolds, type StoredFold } from 'lib/folds';
+import { hemFoldsOf, hemSigOf, isHemStep, type HemStepLike } from 'lib/hem/hem-folds';
 import { grainDegOf } from 'lib/seams/frame';
+import { candidatesOnSize } from 'lib/seams/transfer';
 import type { StoredPose, StoredSeam } from 'lib/seams/types';
 import { useMemo } from 'react';
 import { useWatch } from 'react-hook-form';
@@ -100,9 +103,13 @@ export type DollCard = {
   foldRows: StoredFold[];
   /** Fold inputs in the solve identity: a saved fold always builds a new doll. */
   foldRowsSig: string;
+  /** The steps the hems are read from, present only when a step is a hem: folds per size, not saved. */
+  hem?: { ops: readonly HemStepLike[]; standardMm?: string };
   joins: DeclaredJoin[];
   /** The order's hardware (HARDWARE_SET: elastic, tape): listed, never sewn. */
   hardware: DeclaredHardware[];
+  /** The steps that make buttonholes and set buttons: their marks close the two parts. */
+  fastenings: DeclaredFastening[];
   gender: 'MALE' | 'FEMALE' | null;
   /** Identity of the provider's read: a decision or a pattern edit makes a new one. */
   readId: number;
@@ -253,6 +260,9 @@ export function useDollCard(): DollCard | null {
     []) as TechCardFormData['bomItems'];
   const operations = (useWatch<TechCardFormData>({ name: 'operations' }) ?? []) as FormOp[];
   const gender = useWatch<TechCardFormData>({ name: 'targetGender' }) as string | undefined;
+  const standardMm = useWatch<TechCardFormData>({ name: 'requiredSeamAllowanceMm' }) as
+    | string
+    | undefined;
   const sizeIds = (useWatch<TechCardFormData>({ name: 'sizeIds' }) ?? []) as number[];
   const sizeById = useSizeNames();
   const cardSizes = useMemo(
@@ -270,6 +280,7 @@ export function useDollCard(): DollCard | null {
   const pieceKeys = useCardPieceKeys();
   const cutStrips = useWatch({ name: 'cutStrips' }) as readonly CutStripLike[] | undefined;
   const stripKeys = useMemo(() => stripKeysOf(cutStrips ?? []), [cutStrips]);
+  const hemOps = useMemo(() => withoutStripInputs(operations, stripKeys), [operations, stripKeys]);
   const ownerSeams = useMemo(
     () =>
       dollOwnerSeamsOf({
@@ -384,16 +395,27 @@ export function useDollCard(): DollCard | null {
     return { bySize, base, sizes, oneSize };
   }, [facts, index, refs, sizeById, cardSizes]);
 
-  const [joins, hardware] = useMemo((): [DeclaredJoin[], DeclaredHardware[]] => {
-    if (!facts) return [[], []];
+  const [joins, hardware, fastenings] = useMemo((): [
+    DeclaredJoin[],
+    DeclaredHardware[],
+    DeclaredFastening[],
+  ] => {
+    if (!facts) return [[], [], []];
     const keys = new Set(facts.pieces.map((p) => p.pieceKey));
     const ops = operations.map((o) => ({
       inputs: (o.inputKeys ?? []).filter((key) => key && !stripKeys.has(key)),
       output: (o.outputUnitKey ?? '').trim(),
       type: (o.operationType ?? '').replace('TECH_CARD_OPERATION_TYPE_', ''),
+      work: o.work ?? '',
+      count: o.placementCount ?? 0,
+      step: o.operationNumber ?? 0,
     }));
     const pieceOf = (k: string) => (keys.has(k) ? k : null);
-    return [joinsFromOps(ops, pieceOf), hardwareFromOps(ops, pieceOf)];
+    return [
+      joinsFromOps(ops, pieceOf),
+      hardwareFromOps(ops, pieceOf),
+      fasteningsFromOps(ops, pieceOf),
+    ];
   }, [facts, operations, stripKeys]);
 
   return useMemo(() => {
@@ -461,12 +483,14 @@ export function useDollCard(): DollCard | null {
       rowsSig: sig,
       foldRows,
       foldRowsSig: foldRowsSignature,
+      ...(hemOps.some(isHemStep) ? { hem: { ops: hemOps, standardMm } } : {}),
       joins,
       hardware,
+      fastenings,
       gender:
         gender === 'GENDER_ENUM_FEMALE' ? 'FEMALE' : gender === 'GENDER_ENUM_MALE' ? 'MALE' : null,
       readId: idOf(facts),
-      inputSig: `${gender ?? ''}|${joins.map((j) => `${j.label}:${j.parts.map((x) => x.join('+')).join('/')}`).join(',')}|${hardware.map((h) => `${h.label}:${h.pieces.join('+')}`).join(',')}`,
+      inputSig: `${gender ?? ''}|${joins.map((j) => `${j.label}:${j.parts.map((x) => x.join('+')).join('/')}`).join(',')}|${hardware.map((h) => `${h.label}:${h.pieces.join('+')}`).join(',')}|${fastenings.map((f) => `${f.side}:${f.step}:${f.count}:${f.pieces.join('+')}`).join(',')}${hemSigOf(hemOps, standardMm)}`,
     };
   }, [
     facts,
@@ -478,8 +502,11 @@ export function useDollCard(): DollCard | null {
     sig,
     foldRows,
     foldRowsSignature,
+    hemOps,
+    standardMm,
     joins,
     hardware,
+    fastenings,
     gender,
     cardSizes,
   ]);
@@ -503,18 +530,40 @@ export function dollRequest(c: DollCard, size: string, lining: boolean) {
         .map((line) => line.pts.map(({ x, y }) => [x * 10, y * 10] as Pt2)),
     ]),
   );
-  const folds = c.foldRows.length
+  const laid = c.foldRows.length
     ? resolveFolds(c.foldRows, segmentAll(facts), {
         grainDeg: grainDegOf(facts),
         innerLines,
       }).folds
     : null;
+  const hem = c.hem
+    ? hemFoldsOf({
+        ops: c.hem.ops,
+        standardMm: c.hem.standardMm,
+        pieces: segmentAll(facts),
+        seams: c.rows,
+        storedFolds: c.foldRows,
+        laid: laid ?? undefined,
+        grainDeg: grainDegOf(facts),
+      })
+    : null;
+  const folds = hem ? (Object.keys(hem.folds).length ? hem.folds : laid) : laid;
   const anchorSizes = [...new Set(c.rows.map((r) => r.anchoredSize).filter(Boolean))].filter(
     (s) => s !== size,
   );
   const anchors = anchorSizes
     .map((s) => ({ size: s, facts: c.factsOf(s) }))
     .filter((a): a is { size: string; facts: SkeletonFacts } => !!a.facts);
+  // The owner's candidates name the edges of the size the card was read at.
+  const baseFacts = size === c.baseSize ? null : c.factsOf(c.baseSize);
+  const ownerCandidates =
+    c.owner && baseFacts
+      ? candidatesOnSize(
+          c.owner.candidates,
+          { size: c.baseSize, pieces: segmentAll(baseFacts), grainDeg: grainDegOf(baseFacts) },
+          { size, pieces: segmentAll(facts), grainDeg: grainDegOf(facts) },
+        )
+      : c.owner?.candidates;
   // An accessory (no garment category, drawn in one size) keeps the greedy reading: the bag rings
   // are read from it (12.10 score: the garment bag 11/11 greedy, 9/11 global).
   const accessory = facts.category === 'generic' && c.sizes.length === 1;
@@ -526,8 +575,10 @@ export function dollRequest(c: DollCard, size: string, lining: boolean) {
       oneSize: c.sizes.length === 1,
       ...(!c.owner ? { joins: c.joins } : {}),
       ...(c.hardware.length ? { hardware: c.hardware } : {}),
+      ...(c.fastenings.length ? { fastenings: c.fastenings } : {}),
       gender: c.gender,
       ...(folds ? { folds } : {}),
+      ...(hem?.words.length ? { hemWords: hem.words } : {}),
       ...(c.owner
         ? {
             proposeComposite: false,
@@ -535,7 +586,7 @@ export function dollRequest(c: DollCard, size: string, lining: boolean) {
               mode: 'owner' as const,
               rows: c.rows,
               size,
-              candidates: c.owner.candidates,
+              candidates: ownerCandidates,
               inStepKeys: c.owner.inStepKeys,
               layers: c.owner.layers,
               selection: {

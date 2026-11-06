@@ -19,10 +19,37 @@ import { rotatePt } from 'lib/pom/upright';
 import { frameOf, grainDegOf, type PieceFrame } from 'lib/seams/frame';
 import { resolveAcrossSizes, type SizeResolved } from 'lib/seams/transfer';
 
+import {
+  freeSideOf,
+  locateIn,
+  pairFastenings,
+  readAt,
+  stencilPast,
+  type FasteningSide,
+  type Located,
+} from './buttons';
 import { buildChart, toChart, type Chart, type ChartSeam } from './chart';
-import { foldPlies } from './fold-outline';
+import {
+  finishedAnchors,
+  finishedArc,
+  finishedRows,
+  openWalkAt,
+  readFinishedNeck,
+  type NeckRows,
+  type NeckWalk,
+} from './finished-neck';
+import {
+  carry,
+  foldPlies,
+  type FoldStep,
+  type FoldStretch,
+  movedBy,
+  reflectTo,
+  stretchFor,
+} from './fold-outline';
 import {
   baseCurve,
+  cbIndex,
   closedNeckPath,
   findNeckPath,
   makeMap,
@@ -35,6 +62,7 @@ import {
   type NeckPath,
 } from './collar';
 import {
+  gapStretchesOf,
   groupPieces,
   roleOfPiece,
   unitSkipKeys,
@@ -166,6 +194,34 @@ type Panel = GroupedPiece & {
   fold?: PanelFold;
 };
 
+/** One side of a closure by marks: where its holes or buttons are on the doll. */
+type FastenedSide = {
+  /** The solved panel that carries them: the piece itself, or the host of a surface part. */
+  P: Panel;
+  part: string;
+  /** Each mark on P's mesh (local vertices), carried straight on when past its footprint. */
+  at: Located[];
+  /** The marks in P's folded footprint. */
+  foot: Pt2[];
+  /** How far outside P's face the marks' layer lies, mm (a surface part's lift, signed). */
+  shift: number;
+  /** Which way the free edge lies from the column in that footprint, and how far. */
+  free: { n: Pt2; off: number } | null;
+  /** Each mark as drawn on a surface part, once it is laid. */
+  laid?: Vec3[];
+};
+
+/** A closure by marks: `pairs[k]` joins top mark k with under mark pairs[k]. */
+type Fastened = {
+  id: string;
+  top: FastenedSide;
+  under: FastenedSide;
+  pairs: number[];
+  tieIdx: number;
+  contactIdx: number;
+  how: string;
+};
+
 /** A piece folded on itself (options.folds): what the mesh, the placement and the solve need. */
 type PanelFold = {
   /** The piece's geometry folded (rs, edge points, marks): what charts and placement lay out. */
@@ -265,14 +321,27 @@ function creaseEndsOf(rs: readonly Pt2[], f: PieceFrame, fold: DollFold): MeshCr
   return { s: lo.i, e: hi.i };
 }
 
+/** The fold rows of a piece as the mesh takes them. By kind alone: a pleat row is not folded yet. */
+export const foldCreases = (
+  rs: readonly Pt2[],
+  f: PieceFrame,
+  folds: readonly DollFold[],
+): MeshCrease[] =>
+  folds.map((fold) => ({
+    ...(creaseEndsOf(rs, f, fold) ?? { s: 0, e: 0 }),
+    passive: fold.kind !== 'inward' && fold.kind !== 'outward',
+  }));
+
 /**
  * Fold a meshed piece on itself: every fold in seq order turns the side holding `flipAt` (as cut)
  * over the crease's current line — a plain reflection of the vertices on that side, so a second
- * fold over a turned part rolls or zigzags it as paper would. `mesh.pts` becomes the folded
- * footprint; the piece as cut stays in `flat`. Stack ranks: the turned package goes under
+ * fold over a turned part rolls or zigzags it as paper would. A crease that crosses an earlier one
+ * has one current line per stretch, and each ply turns over the image of its own stretch (the rule
+ * and its helpers are shared with fold-outline.ts, so 2D and 3D agree). `mesh.pts` becomes the
+ * folded footprint; the piece as cut stays in `flat`. Stack ranks: the turned package goes under
  * (inward) or over (outward) the rest, its own order reversed as a flipped stack is.
  */
-function foldPanel(
+export function foldPanel(
   g: PieceGeom,
   mesh: PieceMesh,
   folds: readonly DollFold[],
@@ -286,14 +355,9 @@ function foldPanel(
   const cur = mesh.pts;
   const plyOf = new Int8Array(count);
   const creases: PanelFold['creases'] = [];
-  const chain: { sideOf: (q: Pt2) => number; sF: number; a1: Pt2; b1: Pt2 }[] = [];
-  const reflectTo = (p: Pt2, a1: Pt2, b1: Pt2): Pt2 => {
-    const L = Math.hypot(b1[0] - a1[0], b1[1] - a1[1]) || 1;
-    const nx = -(b1[1] - a1[1]) / L;
-    const ny = (b1[0] - a1[0]) / L;
-    const d = (p[0] - a1[0]) * nx + (p[1] - a1[1]) * ny;
-    return [p[0] - 2 * d * nx, p[1] - 2 * d * ny];
-  };
+  const chain: FoldStep[] = [];
+  /** Per applied fold, the vertices it moved: a crease vertex stays with the ply it did not leave. */
+  const moves: Uint8Array[] = [];
   const blank = (fold: DollFold, note: string): DollFoldReport => ({
     pieceKey: g.pieceKey,
     seq: fold.seq,
@@ -313,6 +377,23 @@ function foldPanel(
     const r = blank(fold, `${why} — not folded`);
     reports.push(r);
     warnings.push(`${g.pieceKey} fold ${fold.seq}: ${r.note}`);
+  };
+  /** The crease's line now, one stretch per run between its crossings with the folds applied. */
+  const stretchesOf = (verts: readonly number[], a: Pt2, b: Pt2): FoldStretch[] => {
+    const earlier = new Set(creases.flatMap((c) => c.verts));
+    const runs: number[][] = [[verts[0]]];
+    verts.slice(1).forEach((v, n) => {
+      runs[runs.length - 1].push(v);
+      if (n + 2 < verts.length && earlier.has(v)) runs.push([v]);
+    });
+    return runs.map((run) => {
+      const p = flat[run[0]];
+      const q = flat[run[run.length - 1]];
+      const moved = movedBy([(p[0] + q[0]) / 2, (p[1] + q[1]) / 2], chain);
+      if (runs.length > 1) return { moved, a1: carry(a, moved, chain), b1: carry(b, moved, chain) };
+      const [s, e] = [cur[verts[0]], cur[verts[verts.length - 1]]];
+      return { moved, a1: [s[0], s[1]], b1: [e[0], e[1]] };
+    });
   };
   folds.forEach((fold, k) => {
     // PLEAT stays flat in the doll until its mesh has a rigid two-half operation. It must never
@@ -343,11 +424,14 @@ function foldPanel(
       refuse(fold, 'nothing of the piece lies on the side to turn');
       return;
     }
-    const a1: Pt2 = [cur[verts[0]][0], cur[verts[0]][1]];
-    const b1: Pt2 = [cur[verts[verts.length - 1]][0], cur[verts[verts.length - 1]][1]];
+    const stretches = stretchesOf(verts, a, b);
     const mv = new Uint8Array(count);
     for (const i of moving) {
-      cur[i] = reflectTo(cur[i], a1, b1);
+      const s = stretchFor(
+        stretches,
+        moves.map((m) => m[i] === 1),
+      );
+      cur[i] = reflectTo(cur[i], s.a1, s.b1);
       mv[i] = 1;
     }
     let lo = Infinity;
@@ -365,7 +449,8 @@ function foldPanel(
     }
     for (const i of moving)
       plyOf[i] = fold.kind === 'inward' ? lo - 1 - (plyOf[i] - minM) : hi + 1 + (maxM - plyOf[i]);
-    chain.push({ sideOf, sF, a1, b1 });
+    chain.push({ sideOf, sF, stretches });
+    moves.push(mv);
     const report = blank(
       fold,
       `${fold.kind} fold creased along ${verts.length - 1} mesh edges · ${moving.length} of ${count} vertices turned ${fold.kind === 'inward' ? 'under' : 'over'} the rest`,
@@ -375,11 +460,7 @@ function foldPanel(
     creases.push({ seq: fold.seq, kind: fold.kind, verts, a, b, flipAt, report });
   });
   if (!creases.length) return undefined;
-  const foldPt = (q: Pt2): Pt2 => {
-    let p: Pt2 = [q[0], q[1]];
-    for (const c of chain) if (c.sideOf(q) === c.sF) p = reflectTo(p, c.a1, c.b1);
-    return p;
-  };
+  const foldPt = (q: Pt2): Pt2 => carry(q, movedBy(q, chain), chain);
   const creaseD = new Float64Array(count);
   const off = new Float64Array(count);
   for (let i = 0; i < count; i++) {
@@ -400,10 +481,23 @@ function foldPanel(
     triFlip[t / 3] = f;
   }
   const triPly = new Int8Array(T.length / 3);
+  // Beside a crossing a triangle can lie on creases with all three vertices, none of them telling
+  // its ply: its centroid does, through the rank of a vertex off the creases moved the same way.
+  const crossed = chain.some((c) => c.stretches.length > 1);
+  const rankOf = new Map<string, number>();
+  if (crossed)
+    for (let i = 0; i < count; i++)
+      if (creaseD[i] > 1e-6) rankOf.set(moves.map((m) => m[i]).join(), plyOf[i]);
   for (let t = 0; t < T.length; t += 3) {
     let far = T[t];
     for (const v of [T[t + 1], T[t + 2]]) if (creaseD[v] > creaseD[far]) far = v;
     triPly[t / 3] = plyOf[far];
+    if (crossed && creaseD[far] <= 1e-6) {
+      const [A, B, C] = [flat[T[t]], flat[T[t + 1]], flat[T[t + 2]]];
+      const cen: Pt2 = [(A[0] + B[0] + C[0]) / 3, (A[1] + B[1] + C[1]) / 3];
+      const rank = rankOf.get(movedBy(cen, chain).map(Number).join());
+      if (rank !== undefined) triPly[t / 3] = rank;
+    }
   }
   const creaseEdge = new Set<number>();
   const key = (a: number, b: number) => (a < b ? a * 1e6 + b : b * 1e6 + a);
@@ -1382,6 +1476,12 @@ export function solveDoll(input: DollInput): DollReport {
     const lenOfEdge = new Map<string, number>();
     for (const P of G.pieces) for (const e of P.geom.edges) lenOfEdge.set(e.id, e.lenMm);
     const sideLen = (g: GroupedSeam, side: 'a' | 'b') => {
+      const gapped = gapStretchesOf(g, side);
+      if (gapped)
+        return gapped.reduce(
+          (t, { id, range }) => t + (range ? range[1] - range[0] : lenOfEdge.get(id) ?? 0),
+          0,
+        );
       const ids = side === 'a' ? g.a : g.b;
       const pr = g.seam.partRange ?? {};
       const rg = g.seam.range && ids.length === 1 ? g.seam.range[side] : null;
@@ -1409,9 +1509,18 @@ export function solveDoll(input: DollInput): DollReport {
           g.seam.partRange?.[e] ?? (g.seam.range && ids.length === 1 ? g.seam.range[side] : null);
         return r ?? [0, lenOfEdge.get(e) ?? 0];
       };
-      for (const side of ['a', 'b'] as const)
-        for (const e of side === 'a' ? g.a : g.b)
-          usedBy.set(e, [...(usedBy.get(e) ?? []), `${id}|${span(e, side).join(',')}`]);
+      for (const side of ['a', 'b'] as const) {
+        const gapped = gapStretchesOf(g, side);
+        if (gapped)
+          for (const { id: e, range } of gapped)
+            usedBy.set(e, [
+              ...(usedBy.get(e) ?? []),
+              `${id}|${(range ?? [0, lenOfEdge.get(e) ?? 0]).join(',')}`,
+            ]);
+        else
+          for (const e of side === 'a' ? g.a : g.b)
+            usedBy.set(e, [...(usedBy.get(e) ?? []), `${id}|${span(e, side).join(',')}`]);
+      }
     }
     const ringish = new Set<DollGroupId>(['COLLAR', 'STAND']);
     const groupOfKey = new Map(G.pieces.map((P) => [P.key, P.group]));
@@ -1453,6 +1562,7 @@ export function solveDoll(input: DollInput): DollReport {
   let N = 0;
   // Folds (options.folds), per piece key (a second instance `key@n` takes its piece's folds).
   const foldsIn = opt.folds ?? {};
+  warnings.push(...(opt.hemWords ?? []));
   const grainFold = Object.values(foldsIn).some((list) => list?.length)
     ? grainDegOf(input.facts)
     : null;
@@ -1464,21 +1574,30 @@ export function solveDoll(input: DollInput): DollReport {
   const foldReports: DollFoldReport[] = [];
   /** Folded pieces: the polygons of their plies, for the chart's overlap test. */
   const footprints = new Map<string, Pt2[][]>();
+  /** Pleat rows of a piece as lines as cut, mm: the mesh leaves them flat, the neck reads them. */
+  const neckPleatLines = new Map<string, NeckRows['pleatLines']>();
   for (const p of G.pieces) {
     const g = p.geom;
     const keep = [...g.edges.flatMap((e) => [e.s, e.e]), ...g.notchIdx, ...g.corners];
     const folds = grainFold ? foldsOf(p.key) : [];
     const frame = folds.length ? frameOf(g, grainFold!.get(g.pieceKey) ?? 0) : null;
     const mesh = frame
-      ? meshPiece(
-          g.rs,
-          keep,
-          h,
-          folds.map((f) => creaseEndsOf(g.rs, frame, f) ?? { s: 0, e: 0 }),
-        )
+      ? meshPiece(g.rs, keep, h, foldCreases(g.rs, frame, folds))
       : meshPiece(g.rs, keep, h);
     const fold = frame ? foldPanel(g, mesh, folds, frame, h, warnings, foldReports) : undefined;
     if (fold) footprints.set(p.key, fold.plies);
+    if (frame)
+      neckPleatLines.set(
+        p.key,
+        folds
+          .filter((f) => f.kind !== 'inward' && f.kind !== 'outward')
+          .map((f) => ({
+            a: fromUV(frame, f.a),
+            b: fromUV(frame, f.b),
+            kind: f.kind,
+            flipAt: fromUV(frame, f.flipAt),
+          })),
+      );
     const ringPos = new Map<number, number>();
     mesh.bRs.forEach((r, i) => ringPos.set(r, i));
     panels.push({
@@ -1593,14 +1712,16 @@ export function solveDoll(input: DollInput): DollReport {
       side === 'a' ? g.seam.aParts ?? edgeIdsOf(g.seam.a) : g.seam.bParts ?? edgeIdsOf(g.seam.b)
     ).flatMap((x) => edgeIdsOf(x));
     const pr = g.seam.partRange ?? {};
-    const multi = new Set(ids.map(pk)).size > 1 || Object.keys(pr).length > 0;
+    const gapped = gapStretchesOf(g, side);
+    const multi = !!gapped || new Set(ids.map(pk)).size > 1 || Object.keys(pr).length > 0;
     if (!multi) return pathOf(ids);
     const parts: Path[] = [];
-    for (let i = 0; i < ids.length; i++) {
-      const P = pathOf([ids[i]]);
+    const stretches =
+      gapped ?? ids.map((id, i) => ({ id, range: pr[orig[i]] ?? pr[id], reversed: undefined }));
+    for (const { id, range } of stretches) {
+      const P = pathOf([id]);
       if (!P) return null;
-      const r = pr[orig[i]] ?? pr[ids[i]];
-      parts.push(r ? cropPath(P, r) : P);
+      parts.push(range ? cropPath(P, range) : P);
     }
     const d3 = (a: number, b: number) =>
       Math.hypot(
@@ -1620,6 +1741,13 @@ export function solveDoll(input: DollInput): DollReport {
       let bestCost = Infinity;
       let bestRev = Infinity;
       for (let mask = 0; mask < 1 << n; mask++) {
+        // Stretches of one edge go the way the edge runs between them: nothing to choose there.
+        if (
+          stretches.some(
+            ({ reversed }, i) => reversed !== undefined && !!((mask >> i) & 1) !== reversed,
+          )
+        )
+          continue;
         let cost = 0;
         let rev = 0;
         for (let i = 0; i < n; i++) {
@@ -1677,6 +1805,8 @@ export function solveDoll(input: DollInput): DollReport {
   }
   const charts = new Map<DollGroupId, Chart>();
   const chartSeamOf = (s: GroupedSeam): ChartSeam | null => {
+    // A side sewn with a gap has no whole edge to lay: its stretches are laid below, one by one.
+    if (s.seam.walk) return null;
     const a = s.a.map((id) => edgeById.get(id)).filter((e): e is Edge => !!e);
     const b = s.b.map((id) => edgeById.get(id)).filter((e): e is Edge => !!e);
     if (!a.length || !b.length || a.length !== s.a.length || b.length !== s.b.length) return null;
@@ -1707,21 +1837,20 @@ export function solveDoll(input: DollInput): DollReport {
           [g.a, g.b, true],
           [g.b, g.a, false],
         ] as const) {
-          if (one.length !== 1 || new Set(many.map(pk)).size < 2) continue;
+          const gapped = gapStretchesOf(g, oneIsA ? 'b' : 'a');
+          if (one.length !== 1 || gapStretchesOf(g, oneIsA ? 'a' : 'b')) continue;
+          if (gapped ? gapped.length < 2 : new Set(many.map(pk)).size < 2) continue;
           if (![...one, ...many].every((id) => keys.has(pk(id)))) continue;
           const e1 = edgeById.get(one[0]);
-          const parts = many.map((id) => edgeById.get(id));
-          if (!e1 || parts.some((e) => !e)) continue;
           const pr = g.seam.partRange ?? {};
-          const lens = many.map((id, i) => {
-            const r = pr[id];
-            return r ? r[1] - r[0] : parts[i]!.lenMm;
-          });
+          const stretches = gapped ?? many.map((id) => ({ id, range: pr[id] }));
+          const parts = stretches.map(({ id }) => edgeById.get(id));
+          if (!e1 || parts.some((e) => !e)) continue;
+          const lens = stretches.map(({ range: r }, i) => (r ? r[1] - r[0] : parts[i]!.lenMm));
           const L = lens.reduce((t, x) => t + x, 0) || 1;
           const mk = (against: boolean) => {
             let c = 0;
-            return many.map((id, i): ChartSeam => {
-              const r = pr[id];
+            return stretches.map(({ range: r }, i): ChartSeam => {
               const e = parts[i]!;
               const f0 = against ? 1 - (c + lens[i]) / L : c / L;
               const f1 = against ? 1 - c / L : (c + lens[i]) / L;
@@ -1741,7 +1870,7 @@ export function solveDoll(input: DollInput): DollReport {
           // lies below it on its own piece. Along a level edge the chart's fit decides.
           let fixed: boolean | null = unitLeg(g) ? true : null;
           const k0 = pk(many[0]);
-          const k1 = pk(many[1]);
+          const k1 = pk(many[1] ?? many[0]);
           const joins = (sm: { a: readonly string[]; b: readonly string[] }) =>
             (sm.a.some((id) => pk(id) === k0) && sm.b.some((id) => pk(id) === k1)) ||
             (sm.a.some((id) => pk(id) === k1) && sm.b.some((id) => pk(id) === k0));
@@ -1752,7 +1881,7 @@ export function solveDoll(input: DollInput): DollReport {
               .find(joins);
           const my = (pts: readonly Pt2[]) =>
             pts.reduce((t, q) => t + q[1], 0) / Math.max(1, pts.length);
-          if (join && fixed === null) {
+          if (join && fixed === null && !gapped) {
             const jIds = [...join.a, ...join.b].filter((id) => pk(id) === k0);
             const jy = my(jIds.flatMap((id) => edgeById.get(id)?.pts ?? []));
             const py = my(parts[0]!.pts);
@@ -2393,6 +2522,8 @@ export function solveDoll(input: DollInput): DollReport {
   const bodyChart = charts.get('BODY');
   let vArm = 0;
   let vSh = 0;
+  /** The neck cylinder once a finished neck is read: never wider than that neck's own girth. */
+  let neckGirthR = Infinity;
   let vLo = 0;
   const torso: { y: number; a: number; b: number; tab: Float64Array }[] = [];
   const ellPerimFactor = (() => {
@@ -3391,7 +3522,7 @@ export function solveDoll(input: DollInput): DollReport {
           const x = p[3 * i];
           const z = p[3 * i + 2];
           const d = Math.hypot(x, z);
-          const R = rNeck + CLEAR - 1;
+          const R = Math.min(rNeck, neckGirthR) + CLEAR - 1;
           if (d < R && d > 1e-6) {
             p[3 * i] = (x / d) * R;
             p[3 * i + 2] = (z / d) * R;
@@ -4751,6 +4882,269 @@ export function solveDoll(input: DollInput): DollReport {
       const w = graphWork(s, 0, true);
       if (w && l4) overlapClosure(s, w);
     }
+
+  // ── Buttons on their holes (buttons.ts): the closure a card's two steps declare, no row asked ──
+  const fastened: Fastened[] = [];
+  const notFastened: string[] = [];
+  const pieceWord = (key: string) => graph.pieces.find((g) => g.pieceKey === key)?.name || key;
+  const basePlyOf = (P: Panel) => {
+    const on = new Uint8Array(P.count);
+    const T = P.mesh.tris;
+    for (let t = 0; t < T.length; t += 3)
+      if (!P.fold || P.fold.triPly[t / 3] === 0) for (let j = 0; j < 3; j++) on[T[t + j]] = 1;
+    return on;
+  };
+  /** A point of P's footprint on its base ply, or carried straight on past the footprint's edge. */
+  const onFootprint = (P: Panel, p: Pt2): Located | null => {
+    const fold = P.fold;
+    const L = locateIn(
+      P.mesh.pts,
+      P.mesh.tris,
+      p,
+      fold ? (t: number) => fold.triPly[t] === 0 : undefined,
+    );
+    return L && L.out < 1e-9 ? L : stencilPast(P.mesh.pts, basePlyOf(P), p);
+  };
+  /**
+   * Past the footprint across the closure (a placket over the host's folded edge) is carried on.
+   * Past its end along the column (a hem turned under the placket, the neck) is not: nothing holds
+   * that end there, it stays on the host's end as any surface part does.
+   */
+  const pastAcross = (P: Panel, free: { n: Pt2; off: number } | null, p: Pt2) => {
+    if (!free) return false;
+    const reach = 2 * Math.max(free.off, 1);
+    for (let d = 2; d <= reach; d += 2) {
+      const L = locateIn(P.mesh.pts, P.mesh.tris, [p[0] - free.n[0] * d, p[1] - free.n[1] * d]);
+      if (L && L.out < 1e-9) return true;
+    }
+    return false;
+  };
+  const atNow = (P: Panel, L: Located): Vec3 => {
+    const X: Vec3 = [0, 0, 0];
+    for (let j = 0; j < 3; j++)
+      for (let d = 0; d < 3; d++) X[d] += L.w[j] * pos[3 * (P.offset + L.i[j]) + d];
+    return X;
+  };
+  const surfaceOfPart = (part: string) =>
+    owner
+      ? graph.chosen.find((c) => c.kind === 'surface' && c.surface?.part === part)?.surface
+      : undefined;
+  const fastenedSide = (s: FasteningSide): FastenedSide | string => {
+    const name = pieceWord(s.piece);
+    const own = panelByKey.get(s.piece);
+    if (own) {
+      if (!bodyLike.has(own.group)) return `${name} is not on the body`;
+      const at: Located[] = [];
+      for (const q of s.marks) {
+        const L = locateIn(own.fold?.flat ?? own.mesh.pts, own.mesh.tris, q);
+        if (!L) return `${name}: a mark is off the piece`;
+        at.push(L);
+      }
+      // Located as cut: the same vertices are where the mark is on the finished, folded piece.
+      const foot = at.map((L) => readAt(own.mesh.pts, L));
+      return {
+        P: own,
+        part: s.piece,
+        at,
+        foot,
+        shift: 0,
+        free: freeSideOf(own.mesh.pts, foot),
+      };
+    }
+    const surface = surfaceOfPart(s.piece);
+    const H = surface && panelByKey.get(surface.host);
+    if (!surface || !H || !G.skipped.some((x) => x.surface && x.pieceKey === s.piece))
+      return `${name} is not one panel on the doll`;
+    if (!bodyLike.has(H.group)) return `${name} lies on ${pieceWord(H.key)}, not on the body`;
+    if (foldsOf(s.piece).length) return `${name} is folded itself, its marks are not mapped`;
+    const geom = graph.pieces.find((g) => g.pieceKey === s.piece);
+    const foot = s.marks.map((q) => apply(surface.T, q));
+    const at: Located[] = [];
+    for (const p of foot) {
+      const L = onFootprint(H, p);
+      if (!L) return `${name}: a mark is off ${pieceWord(H.key)}`;
+      at.push(L);
+    }
+    // The drawn part lies this far from the host's face (the stack below, in the same order).
+    let before = 0;
+    for (const x of G.skipped) {
+      if (!x.surface) continue;
+      if (x.pieceKey === s.piece) break;
+      if (surfaceOfPart(x.pieceKey)?.host === H.key) before++;
+    }
+    return {
+      P: H,
+      part: s.piece,
+      at,
+      foot,
+      shift: (isUnder([H.key], [s.piece]) ? 1 : -1) * (2 + 2 * before),
+      free: freeSideOf([...H.mesh.pts, ...(geom?.rs ?? []).map((q) => apply(surface.T, q))], foot),
+    };
+  };
+  const fasten = (holes: FastenedSide, buttons: FastenedSide, id: string, unused: number) => {
+    // A step's own layer order is how a card can say which part lies over the other.
+    const holeKeys = new Set([holes.P.key, holes.part]);
+    const buttonKeys = new Set([buttons.P.key, buttons.part]);
+    const says = (under: Set<string>, over: Set<string>) =>
+      layerRelations.some(([a, b]) => under.has(a) && over.has(b));
+    const buttonsOver = says(holeKeys, buttonKeys) && !says(buttonKeys, holeKeys);
+    const [top, under] = buttonsOver ? [buttons, holes] : [holes, buttons];
+    const n = top.at.length;
+    // Ends meet ends: the order along the columns whose ends lie nearer now.
+    const dist = (a: Vec3, b: Vec3) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+    const T = (k: number) => atNow(top.P, top.at[k]);
+    const U = (k: number) => atNow(under.P, under.at[k]);
+    const same =
+      dist(T(0), U(0)) + dist(T(n - 1), U(n - 1)) <= dist(T(0), U(n - 1)) + dist(T(n - 1), U(0));
+    const pairs = top.at.map((_, k) => (same ? k : n - 1 - k));
+    const lift = Math.max(0.5, 2.5 + under.shift - top.shift);
+    const tieOf = (rows: [Located, Located][], oneSided: boolean): Tie => {
+      const ia: number[] = [];
+      const wa: number[] = [];
+      const ib: number[] = [];
+      const wb: number[] = [];
+      for (const [L, M] of rows)
+        for (let j = 0; j < 3; j++) {
+          ia.push(top.P.offset + L.i[j]);
+          wa.push(L.w[j]);
+          ib.push(under.P.offset + M.i[j]);
+          wb.push(M.w[j]);
+        }
+      return {
+        ia: Int32Array.from(ia),
+        wa: Float64Array.from(wa),
+        ib: Int32Array.from(ib),
+        wb: Float64Array.from(wb),
+        k: 0.5,
+        lift: oneSided ? Math.max(0.5, lift - 0.5) : lift,
+        ax: 0,
+        az: 0,
+        active: true,
+        ...(oneSided ? { oneSided } : {}),
+      };
+    };
+    const tieIdx = ties.length;
+    ties.push(
+      tieOf(
+        top.at.map((L, k): [Located, Located] => [L, under.at[pairs[k]]]),
+        false,
+      ),
+    );
+    // Where the two pieces lie over each other the top stays outside: paired through the columns,
+    // along with along, the top's way out with the under's way in.
+    const ci: number[] = [];
+    const cj: number[] = [];
+    if (top.free && under.free && n >= 2) {
+      const t0 = top.foot[0];
+      const t1 = top.foot[n - 1];
+      const u0 = under.foot[pairs[0]];
+      const u1 = under.foot[pairs[n - 1]];
+      const lt = Math.hypot(t1[0] - t0[0], t1[1] - t0[1]) || 1;
+      const lu = Math.hypot(u1[0] - u0[0], u1[1] - u0[1]) || 1;
+      const along: Pt2 = [(t1[0] - t0[0]) / lt, (t1[1] - t0[1]) / lt];
+      const alongU: Pt2 = [(u1[0] - u0[0]) / lu, (u1[1] - u0[1]) / lu];
+      const underOf = (p: Pt2): Pt2 => {
+        const dx = p[0] - t0[0];
+        const dy = p[1] - t0[1];
+        const a = dx * along[0] + dy * along[1];
+        const b = dx * top.free!.n[0] + dy * top.free!.n[1];
+        return [
+          u0[0] + alongU[0] * a - under.free!.n[0] * b,
+          u0[1] + alongU[1] * a - under.free!.n[1] * b,
+        ];
+      };
+      for (let i = 0; i < top.P.count; i++) {
+        const v = top.P.offset + i;
+        const q: Pt2 = [uv[2 * v], uv[2 * v + 1]];
+        const b = (q[0] - t0[0]) * top.free.n[0] + (q[1] - t0[1]) * top.free.n[1];
+        if (-b > under.free.off + h / 2) continue;
+        const target = underOf(q);
+        let j = -1;
+        let bj = Infinity;
+        for (let m = 0; m < under.P.count; m++) {
+          const u = under.P.offset + m;
+          const dd = Math.hypot(uv[2 * u] - target[0], uv[2 * u + 1] - target[1]);
+          if (dd < bj) [bj, j] = [dd, u];
+        }
+        if (j >= 0 && bj < 2 * h) {
+          ci.push(v);
+          cj.push(j);
+        }
+      }
+      if (ci.length)
+        contacts.push({
+          i: Int32Array.from(ci),
+          j: Int32Array.from(cj),
+          gap: Math.max(2, lift - 0.5),
+          ax: 0,
+          az: 0,
+        });
+      // A surface part overhanging its host is drawn, not solved: what holds it off the under
+      // piece is the host, through the same vertices the drawing uses.
+      const S = top.part === top.P.key ? null : graph.pieces.find((g) => g.pieceKey === top.part);
+      const placement = S ? surfaceOfPart(S.pieceKey) : undefined;
+      if (S && placement) {
+        const rows: [Located, Located][] = [];
+        const keep = [...S.edges.flatMap((e) => [e.s, e.e]), ...S.corners];
+        const base = basePlyOf(top.P);
+        const baseU = under.P.fold;
+        for (const q of meshPiece(S.rs, keep, gridH).pts) {
+          const p = apply(placement.T, q);
+          const inHost = locateIn(top.P.mesh.pts, top.P.mesh.tris, p);
+          if ((inHost && inHost.out < 1e-9) || !pastAcross(top.P, top.free, p)) continue;
+          const L = stencilPast(top.P.mesh.pts, base, p);
+          const M = locateIn(
+            under.P.mesh.pts,
+            under.P.mesh.tris,
+            underOf(p),
+            baseU ? (t: number) => baseU.triPly[t] === 0 : undefined,
+          );
+          if (L && M && M.out < 1e-9) rows.push([L, M]);
+        }
+        if (rows.length) ties.push(tieOf(rows, true));
+      }
+    }
+    fastened.push({
+      id,
+      top,
+      under,
+      pairs,
+      tieIdx,
+      contactIdx: ci.length ? contacts.length - 1 : -1,
+      how: [
+        buttonsOver
+          ? "button side over hole side: the card's layer order says so"
+          : 'hole side over button side: the card does not say otherwise',
+        ...(unused ? [`${unused} marks of the column left out, the step does not count them`] : []),
+      ].join(' · '),
+    });
+  };
+  if (opt.fastenings?.length) {
+    const read = pairFastenings(opt.fastenings, (key) =>
+      graph.pieces.find((g) => g.pieceKey === key),
+    );
+    notFastened.push(...read.refused);
+    for (const pair of read.pairs) {
+      const id = `buttons: steps ${pair.holes.step} and ${pair.buttons.step}`;
+      const holes = fastenedSide(pair.holes);
+      const buttons = fastenedSide(pair.buttons);
+      if (typeof holes === 'string' || typeof buttons === 'string') {
+        notFastened.push(
+          ...[holes, buttons].flatMap((x) => (typeof x === 'string' ? [`${id}: ${x}`] : [])),
+        );
+        continue;
+      }
+      const asOne = (a: string, b: string) =>
+        (a === holes.P.key && b === buttons.P.key) || (a === buttons.P.key && b === holes.P.key);
+      if (holes.P === buttons.P)
+        notFastened.push(`${id}: both sides are one part (${pieceWord(holes.P.key)})`);
+      else if (!l4) notFastened.push(`${id}: the card has no seam rows yet`);
+      else if (G.closures.some((c) => asOne(pk(c.a[0]), pk(c.b[0]))))
+        notFastened.push(`${id}: a stored closure row already joins these two parts`);
+      else fasten(holes, buttons, id, pair.holes.unused + pair.buttons.unused);
+    }
+    for (const line of notFastened) warnings.push(`not fastened: ${line}`);
+  }
 
   const freeEdges = (P: Panel) => P.geom.edges.filter((e) => !edgeUsed(e.id));
   // Proposed closures of open strips (CF of the body, underarm of a one-piece sleeve, outseam of a leg).
@@ -6140,12 +6534,12 @@ export function solveDoll(input: DollInput): DollReport {
     );
   // Ring proxy of units standing on the neck path: never inside the neck path's radius.
   const neckBase = neck ? baseOf(F, [...neck.path.v]) : null;
-  const ringProxyAt = (layer: number) =>
+  const ringProxyAt = (layer: number, finished = 1) =>
     proxies.push({
       push(p, i) {
         if (!neckBase) return;
         const q = inFrame(F, [p[3 * i], p[3 * i + 1], p[3 * i + 2]]);
-        const R = (neckBase.r(q.th) + layer) * PROXY_K;
+        const R = (neckBase.r(q.th) * finished + layer) * PROXY_K;
         if (q.r >= R || q.r < 1e-6) return;
         const np = fromFrame(F, q.th, q.h, R);
         p[3 * i] = np[0];
@@ -6254,6 +6648,67 @@ export function solveDoll(input: DollInput): DollReport {
       tried,
     };
   };
+  /**
+   * The neck as finished at the unit's step, from the rows themselves (stored folds applied, pleat
+   * rows). A stored row wins over the notches: `null` only when no row touches the neck, and then
+   * `foldedPlan` reads it as ever. A mismatch stays a mismatch, with the real numbers.
+   */
+  const finishedPlan = (U: Unit, cn: NonNullable<typeof confNeck>) => {
+    const rowsOf = (pn: number): NeckRows | undefined => {
+      const P = panels[pn];
+      return {
+        turns: (P.fold?.creases ?? []).map((c) => ({ a: c.a, b: c.b })),
+        pleatLines: neckPleatLines.get(P.key) ?? [],
+      };
+    };
+    const walkOf = (P: Path): NeckWalk => {
+      const verts = [...P.v];
+      return {
+        panel: verts.map((v) => panelOf[v]),
+        cut: verts.map((v) => {
+          const Q = panels[panelOf[v]];
+          return (Q.fold?.flat ?? Q.mesh.pts)[v - Q.offset];
+        }),
+        s: [...P.s],
+      };
+    };
+    const verts = [...cn.N0.path.v];
+    const back = cbIndex(cctx, verts, vArm);
+    const open = openWalkAt(walkOf(cn.N0.path), rowsOf, back >= 0 ? cn.N0.path.s[back] : NaN);
+    const N = open
+      ? neckFromRun(
+          cctx,
+          [...verts.slice(open), ...verts.slice(0, open)],
+          vArm,
+          false,
+          `${cn.N0.how}; opened where the stored folds meet`,
+        )
+      : cn.N0;
+    const r = readFinishedNeck(walkOf(N.path), rowsOf);
+    if (!r) return null;
+    const m = runMarks(cctx, U.attach);
+    const folds = r.cutMm - r.finishedMm;
+    const read = `stored folds and pleats ${r.cutMm.toFixed(0)} − ${folds.toFixed(0)} folded = ${r.finishedMm.toFixed(0)}${r.unread.length ? `, ${r.unread.length} crease${r.unread.length > 1 ? 's' : ''} with no end of the neck beyond ${r.unread.length > 1 ? 'them' : 'it'}` : ''}`;
+    const ratio = m.path.len / Math.max(1, r.finishedMm);
+    if (ratio < 0.9 || ratio > 1.15) return { m, tried: [read], ok: false as const };
+    const anchors = finishedAnchors(r, { len: m.path.len, cb: m.cb }, N.cb);
+    return {
+      ok: true as const,
+      m,
+      N,
+      anchors,
+      sewn: [0, m.path.len] as [number, number],
+      Le: r.finishedMm,
+      folds: [
+        ...(r.from > 1 ? [Math.round(r.from)] : []),
+        ...r.closed.map((f) => Math.round(f[1] - f[0])),
+        ...(N.path.len - r.to > 1 ? [Math.round(N.path.len - r.to)] : []),
+      ],
+      words: `${read} · the unit sewn whole, ${m.path.len.toFixed(0)} mm · CB ${m.cbByNotch ? 'notch' : 'middle'} ↔ CB at ${finishedArc(r, N.cb).toFixed(0)} of the finished neck`,
+      tried: [read],
+      finished: r,
+    };
+  };
   const placeOnNeck = (units: Unit[], role: 'stand' | 'collar', label: string) => {
     if (!neck) return;
     const N0n = neck;
@@ -6267,14 +6722,18 @@ export function solveDoll(input: DollInput): DollReport {
         confNeck && U.keys.has(pk((confNeck.unit === 'a' ? confNeck.g.a : confNeck.g.b)[0]))
           ? confNeck
           : null;
-      const fp = cn ? foldedPlan(U, cn) : null;
+      const fin = cn ? finishedPlan(U, cn) : null;
+      const fp = cn ? fin ?? foldedPlan(U, cn) : null;
       const N = fp && fp.ok ? fp.N : N0n;
       const base = baseCurve(cctx, N.path);
       const plan =
         fp && fp.ok
           ? { m: fp.m, anchors: fp.anchors, sewn: fp.sewn, words: fp.words }
           : neckAnchors(U, N);
-      const pi = ringProxyAt(layer);
+      // The stored rows take length off the neck; both body guides stand at what is left of it,
+      // or the seam can only close by stretching. The collar itself is never touched.
+      if (fin?.ok) neckGirthR = fin.finished.finishedMm / (2 * Math.PI);
+      const pi = ringProxyAt(layer, fin?.ok ? fin.finished.finishedMm / fin.finished.cutMm : 1);
       const sewnMm = plan.sewn[1] - plan.sewn[0];
       const ext = plan.m.path.len - sewnMm;
       // A base far off the unit's length (a neck path that is not a neckline): placed at its own
@@ -6356,6 +6815,17 @@ export function solveDoll(input: DollInput): DollReport {
           );
           confWork.origin = 'graph';
           confWork.confirmed = true;
+          if (fin?.ok) {
+            const r = fin.finished;
+            confWork.rows = finishedRows(plan.m.path, N.path, r, plan.anchors);
+            confWork.solver.rows = confWork.rows;
+            if (r.closed.length)
+              formFolds(N.path, {
+                folds: r.closed,
+                kinds: r.closed.map(() => 'pleat'),
+                Le: r.finishedMm,
+              });
+          }
         }
       }
       const work = cn
@@ -7008,6 +7478,21 @@ export function solveDoll(input: DollInput): DollReport {
   const seams: DollSeamReport[] = [];
   const contradictions: string[] = [];
   const closureReps: DollClosureReport[] = [];
+  /** Share of a closure's contact pairs with the top piece outside the under piece, %. */
+  const closureOutsidePct = (C: { i: Int32Array; j: Int32Array }) => {
+    let out = 0;
+    for (let q = 0; q < C.i.length; q++) {
+      const i = C.i[q];
+      const j = C.j[q];
+      let nx = pos[3 * j];
+      let nz = pos[3 * j + 2];
+      const nl = Math.hypot(nx, nz) || 1;
+      nx /= nl;
+      nz /= nl;
+      if ((pos[3 * i] - pos[3 * j]) * nx + (pos[3 * i + 2] - pos[3 * j + 2]) * nz >= -1) out++;
+    }
+    return (100 * out) / Math.max(1, C.i.length);
+  };
   // L4 closures drawn overlapped: how close the centre-front lines are, how far the edges cross.
   for (const w of works) {
     const ov = w.overlap;
@@ -7041,20 +7526,7 @@ export function solveDoll(input: DollInput): DollReport {
     ov.overlapMm = dd.length ? dd.reduce((x, y) => x + y, 0) / dd.length : NaN;
     const ci = (w as Work & { contactIdx?: number }).contactIdx ?? -1;
     const C = ci >= 0 ? contacts[ci] : undefined;
-    if (C) {
-      let out = 0;
-      for (let q = 0; q < C.i.length; q++) {
-        const i = C.i[q];
-        const j = C.j[q];
-        let nx = pos[3 * j];
-        let nz = pos[3 * j + 2];
-        const nl = Math.hypot(nx, nz) || 1;
-        nx /= nl;
-        nz /= nl;
-        if ((pos[3 * i] - pos[3 * j]) * nx + (pos[3 * i + 2] - pos[3 * j + 2]) * nz >= -1) out++;
-      }
-      ov.outsidePct = (100 * out) / Math.max(1, C.i.length);
-    }
+    if (C) ov.outsidePct = closureOutsidePct(C);
     const expect = ov.offTopMm + ov.offUnderMm;
     ov.ok =
       ov.cfGapP95Mm <= 4 &&
@@ -7518,10 +7990,12 @@ export function solveDoll(input: DollInput): DollReport {
       stack.set(H.key, (stack.get(H.key) ?? 0) + 1);
       const layerDirection = isUnder([H.key], [k]) ? 1 : -1;
       const hp = H.mesh.pts;
-      for (const q of mesh.pts) {
-        const p = fit.map(q);
-        // The part folded under the host's edge lies a layer deeper than the rest.
-        const liftQ = fit.under?.(q) ? lift + 2 : lift;
+      // A part that carries a closure's marks keeps what overhangs the host: its holes are there.
+      const carried = fastened.flatMap((f) =>
+        [f.top, f.under].filter((x) => x.part === k && x.P === H),
+      );
+      const baseOfHost = carried.length ? basePlyOf(H) : null;
+      const lay = (p: Pt2, liftQ: number): Vec3 => {
         // The host triangle under p (or the nearest one, the point clamped onto it).
         let bt = 0;
         let bw: [number, number, number] = [1, 0, 0];
@@ -7549,19 +8023,31 @@ export function solveDoll(input: DollInput): DollReport {
         }
         const X: Vec3 = [0, 0, 0];
         const Nn: Vec3 = [0, 0, 0];
+        const past =
+          baseOfHost && bd > 1e-9 && carried.some((x) => pastAcross(H, x.free, p))
+            ? stencilPast(hp, baseOfHost, p)
+            : null;
         for (let j = 0; j < 3; j++) {
-          const v = T[bt + j];
+          const v = past ? past.i[j] : T[bt + j];
           const P3 = getPos(H.offset + v);
           for (let d = 0; d < 3; d++) {
-            X[d] += bw[j] * P3[d];
-            Nn[d] += bw[j] * nrm[3 * v + d];
+            X[d] += (past ? past.w[j] : bw[j]) * P3[d];
+            Nn[d] += (past ? 1 : bw[j]) * nrm[3 * v + d];
           }
         }
         const nl = Math.hypot(Nn[0], Nn[1], Nn[2]) || 1;
         // Inside the panel: a fly shield, a pocket bag, a facing lie under the face they are sewn
         // to (a patch pocket would lie over it — the drawing does not tell which).
-        for (let d = 0; d < 3; d++) surfacePos.push(X[d] + (layerDirection * liftQ * Nn[d]) / nl);
+        const out: Vec3 = [0, 0, 0];
+        for (let d = 0; d < 3; d++) out[d] = X[d] + (layerDirection * liftQ * Nn[d]) / nl;
+        return out;
+      };
+      for (const q of mesh.pts) {
+        const p = fit.map(q);
+        // The part folded under the host's edge lies a layer deeper than the rest.
+        surfacePos.push(...lay(p, fit.under?.(q) ? lift + 2 : lift));
       }
+      for (const x of carried) x.laid = x.foot.map((p) => lay(p, lift));
       const flip = flipH !== fit.flip;
       const tris = new Uint32Array(mesh.tris.length);
       for (let t = 0; t < tris.length; t += 3) {
@@ -7596,6 +8082,67 @@ export function solveDoll(input: DollInput): DollReport {
       });
       warnings.push(`surface piece ${k}: ${note}`);
     }
+  }
+  // Closures by marks, measured now that their surface parts are laid: hole to button, as drawn.
+  for (const F of fastened) {
+    const { top, under, pairs } = F;
+    const tie = ties[F.tieIdx];
+    const placedAt = (x: FastenedSide, k: number) => x.laid?.[k] ?? atNow(x.P, x.at[k]);
+    const gaps = pairs.map((_, q) => Math.hypot(...tieGap(pos, tie, q)));
+    const buttons = pairs.map((m, k) => {
+      const a = placedAt(top, k);
+      const b = placedAt(under, m);
+      return {
+        k: k + 1,
+        distMm: Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]),
+        gapMm: gaps[k],
+      };
+    });
+    const sorted = [...gaps].sort((x, y) => x - y);
+    const gapP95 = sorted[Math.floor(0.95 * (sorted.length - 1))];
+    // The two free edges at the tied rows: how far they cross, against what the marks leave.
+    const edgeAt = (x: FastenedSide, k: number) => {
+      if (!x.free) return null;
+      const L = onFootprint(x.P, [
+        x.foot[k][0] + x.free.n[0] * x.free.off,
+        x.foot[k][1] + x.free.n[1] * x.free.off,
+      ]);
+      return L ? atNow(x.P, L) : null;
+    };
+    const crossed = pairs.flatMap((m, k) => {
+      const a = edgeAt(top, k);
+      const b = edgeAt(under, m);
+      return a && b ? [Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])] : [];
+    });
+    const overlapMm = crossed.length
+      ? crossed.reduce((x, y) => x + y, 0) / crossed.length
+      : Number.NaN;
+    const offTopMm = top.free?.off ?? Number.NaN;
+    const offUnderMm = under.free?.off ?? Number.NaN;
+    const expect = offTopMm + offUnderMm;
+    const C = F.contactIdx >= 0 ? contacts[F.contactIdx] : undefined;
+    const outsidePct = C ? closureOutsidePct(C) : Number.NaN;
+    const ok =
+      gapP95 <= 4 &&
+      (Number.isNaN(overlapMm) || Math.abs(overlapMm - expect) <= Math.max(8, 0.35 * expect)) &&
+      (Number.isNaN(outsidePct) || outsidePct >= 90);
+    closureReps.push({
+      id: F.id,
+      top: top.part,
+      under: under.part,
+      offTopMm,
+      offUnderMm,
+      how: F.how,
+      cfGapP95Mm: gapP95,
+      overlapMm,
+      outsidePct,
+      ok,
+      buttons,
+    });
+    const worst = Math.max(...buttons.map((x) => x.distMm));
+    warnings.push(
+      `${F.id}: ${pieceWord(top.part)} over ${pieceWord(under.part)} · ${pairs.length} fastened, the farthest ${worst.toFixed(1)} mm from its hole · the edges cross ${overlapMm.toFixed(0)} mm (the marks leave ${expect.toFixed(0)}) · ${F.how}`,
+    );
   }
   const placedSurface = new Set(surfaceRep.filter((x) => x.placed).map((x) => x.pieceKey));
   const NV = N + surfacePos.length / 3;
@@ -7843,6 +8390,8 @@ export function solveDoll(input: DollInput): DollReport {
         // follows the body's curve stays near 0; a wrinkled or wandering one does not.
         let dev = 0;
         for (let k = 1; k + 1 < c.verts.length; k++) {
+          // A crossing is where the other fold turns this crease over: a corner, not a wrinkle.
+          if (F.creases.some((o) => o !== c && o.verts.includes(c.verts[k]))) continue;
           const A = getPos(P.offset + c.verts[k - 1]);
           const B = getPos(P.offset + c.verts[k + 1]);
           const q = sub3(getPos(P.offset + c.verts[k]), A);
@@ -7936,6 +8485,7 @@ export function solveDoll(input: DollInput): DollReport {
     orderSurface,
     honesty: HONESTY,
     ...(notSewn.length ? { notSewn } : {}),
+    ...(notFastened.length ? { notFastened } : {}),
     ...(notGarment ? { notGarment } : {}),
     ...(allLining ? { liningAsShell: true } : {}),
     ...(l4

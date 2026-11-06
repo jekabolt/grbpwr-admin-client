@@ -446,12 +446,35 @@ describe('the span hand on a folded edge', () => {
 
   it('a span lands on the same stretch of the other edge, the other way along it', () => {
     const on = hand(
-      { ...empty, a: ['FLAP#3'], spans: { a: { 'FLAP#3': [20, 60] }, b: {} } },
+      { ...empty, a: ['FLAP#3'], spans: { a: { 'FLAP#3': [[20, 60]] }, b: {} } },
       'FLAP#3',
     );
     expect(on.a).toEqual(['FLAP#3', 'FLAP#1']);
-    expect(on.spans.a['FLAP#3']).toEqual([20, 60]);
-    expect(on.spans.a['FLAP#1']).toEqual([140, 180]);
+    expect(on.spans.a['FLAP#3']).toEqual([[20, 60]]);
+    expect(on.spans.a['FLAP#1']).toEqual([[140, 180]]);
+  });
+
+  it('every span of a broken edge lands on the other edge, ascending there too', () => {
+    const on = hand(
+      {
+        ...empty,
+        a: ['FLAP#3'],
+        spans: {
+          a: {
+            'FLAP#3': [
+              [20, 60],
+              [100, 120],
+            ],
+          },
+          b: {},
+        },
+      },
+      'FLAP#3',
+    );
+    expect(on.spans.a['FLAP#1']).toEqual([
+      [80, 100],
+      [140, 180],
+    ]);
   });
 
   it('an edge nothing lies on, or a card with no fold, keeps the pick as it is', () => {

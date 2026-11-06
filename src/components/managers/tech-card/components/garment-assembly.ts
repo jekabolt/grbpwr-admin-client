@@ -405,6 +405,7 @@ function plyComplements(
               b,
               aParts: undefined,
               bParts: undefined,
+              walk: undefined,
               kind: candidate.kind === 'edge' ? 'edge' : 'composite',
               evidence: {
                 ...candidate.evidence,

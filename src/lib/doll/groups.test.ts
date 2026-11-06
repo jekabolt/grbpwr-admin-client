@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { groupPieces } from './groups';
+import type { SeamCandidate } from 'lib/assembly-skeleton/types';
+
+import { gapStretchesOf, groupPieces, type GroupedSeam } from './groups';
 
 const piece = (pieceKey: string, name: string, areaMm2: number) => ({
   pieceKey,
@@ -47,5 +49,55 @@ describe('owner surface rows', () => {
 
   it('never take a shell panel out of the solve', () => {
     expect(placedByOwner(grouped('BACK', [surface('part', 'front')]))).toBe(false);
+  });
+});
+
+describe('gapStretchesOf: one edge sewn with a gap', () => {
+  const candidate = (walk?: SeamCandidate['walk']): SeamCandidate => ({
+    a: 'front#1',
+    b: 'back#3',
+    aParts: ['front#1', 'pocket#0'],
+    kind: 'composite',
+    score: 1,
+    partRange: { 'front#1': [0, 200] },
+    evidence: {} as SeamCandidate['evidence'],
+    ...(walk ? { walk } : {}),
+  });
+  const grouped = (walk?: SeamCandidate['walk'], a = ['front#1', 'pocket#0']): GroupedSeam => ({
+    seam: candidate(walk),
+    a,
+    b: ['back#3'],
+  });
+  const top = { target: 'front#1', range: [0, 50] as const };
+  const pocket = { target: 'pocket#0' };
+  const bottom = { target: 'front#1', range: [150, 200] as const };
+
+  it('is null on a side with no gap, as on every row of today', () => {
+    expect(gapStretchesOf(grouped(), 'a')).toBeNull();
+    expect(gapStretchesOf(grouped({ a: [top, pocket, bottom] }), 'b')).toBeNull();
+  });
+
+  it('gives the stretches in walk order, the edge pinned forward when they run up it', () => {
+    expect(gapStretchesOf(grouped({ a: [top, pocket, bottom] }), 'a')).toEqual([
+      { id: 'front#1', range: [0, 50], reversed: false },
+      { id: 'pocket#0' },
+      { id: 'front#1', range: [150, 200], reversed: false },
+    ]);
+  });
+
+  it('pins the edge backward when the stretches run down it: a mirrored frame', () => {
+    expect(gapStretchesOf(grouped({ a: [bottom, pocket, top] }), 'a')).toEqual([
+      { id: 'front#1', range: [150, 200], reversed: true },
+      { id: 'pocket#0' },
+      { id: 'front#1', range: [0, 50], reversed: true },
+    ]);
+  });
+
+  it('names the lead ply when a follower was mapped onto it', () => {
+    expect(
+      gapStretchesOf(grouped({ a: [top, pocket, bottom] }, ['lead#1', 'pocket#0']), 'a')?.map(
+        ({ id }) => id,
+      ),
+    ).toEqual(['lead#1', 'pocket#0', 'lead#1']);
   });
 });
