@@ -1,8 +1,10 @@
 // THE DOLL ON SCREEN (01-DESIGN-L0 §5.4, §6): one WebGL canvas, orbit + four preset cameras, the
-// paper in two greys (outside light, inside darker), seams by state in WEIGHT (closed thin ink,
-// confirmed outside an operation dashed, open heavy ink and named in words), POM lines lifted from
-// the flat pattern (grey 2 px all, the hovered one 4 px ink with «chest · 54.0 cm»). A faint floor
-// grid and axis only — no mannequin (design §8 q1).
+// paper in two greys (outside light, inside darker). By default the only lines are the seams the
+// doll could not close (open, twisted: both sides, 3 px); `showSeams` adds the closed ones thin
+// grey and the proposed or guessed ones grey dashed. Hovering an open seam draws it 4 px, greys the
+// rest and pins one word at its middle («258 mm»), only while that point is in view (one ray past
+// the cloth). POM lines are lifted from the flat pattern (grey 2 px all, the hovered one 4 px ink
+// with «chest · 54.0 cm»). No floor, no mannequin (design §8 q1).
 //
 // Navigation (doll-nav.ts holds the numbers): left drag orbits, middle/right drag pans, the wheel
 // and the pinch zoom to the cursor, a two-finger swipe orbits (with shift it pans), a double click
@@ -10,8 +12,9 @@
 // 0.25–3 × the fit, the target near the doll) so the doll cannot be lost.
 //
 // Rendering is ON DEMAND: a frame is drawn when the camera moves, a solve frame arrives or a hover
-// changes, and while the damping settles; an idle doll costs nothing. While the worker solves, its frames stream in through the
-// store's `live` slot and are laid on the mesh topology it posted first (the doll closing).
+// changes, and while the damping settles; an idle doll costs nothing. While the worker solves,
+// its frames stream in through the store's `live` slot and are laid on the mesh topology it
+// posted first (the doll closing).
 
 import type { DollMesh, DollReport, DollSeamReport, Vec3 } from 'lib/doll/types';
 import { useEffect, useRef, useState } from 'react';
@@ -26,6 +29,7 @@ import {
   fitOf,
   isDoubleTap,
   limitsOf,
+  pickPolyline,
   MAX_POLAR,
   MIN_POLAR,
   padOrbit,
@@ -43,8 +47,11 @@ export type CameraPreset = 'front' | 'back' | 'left' | 'right';
 
 export type PomLine = { code: string; label: string; paths: Vec3[][] };
 
-/** A word pinned to a point of the doll (an open seam, the hovered measure). */
+/** A word pinned to a point of the doll (the hovered open seam, the hovered measure). */
 type Pin = { id: string; text: string; at: Vec3 };
+
+/** An open seam on screen: its id, its word, the point the word sits at, both sides' points. */
+type OpenSeam = { id: string; text: string; at: Vec3; paths: THREE.Vector3[][] };
 
 const INK = 0x000000;
 const GREY = 0x666666;
@@ -80,6 +87,10 @@ export function DollCanvas({
   hoverPom,
   camera,
   fitSignal = 0,
+  showSeams = false,
+  openColor = INK,
+  hoverSeam: hoverSeamProp,
+  onHoverSeam,
   onCameraLeft,
   onFrame,
 }: {
@@ -93,6 +104,13 @@ export function DollCanvas({
   camera: CameraPreset | null;
   /** Bumped to fit the doll again (the `fit` chip, the F key). */
   fitSignal?: number;
+  /** Draw the closed seams too (thin grey) and the proposed or guessed ones (grey dashed). */
+  showSeams?: boolean;
+  /** The colour of an open seam's line. */
+  openColor?: number;
+  /** The hovered open seam's id when a list beside the doll owns it; omitted, the canvas does. */
+  hoverSeam?: string | null;
+  onHoverSeam?: (id: string | null) => void;
   /** The person orbited away from the preset. */
   onCameraLeft: () => void;
   /** Every drawn frame (the stand counts them for the fps budget). */
@@ -109,6 +127,8 @@ export function DollCanvas({
     seams: THREE.Group;
     poms: THREE.Group;
     pins: Pin[];
+    /** Open seams of the report on screen, for the pointer to find. */
+    open: OpenSeam[];
     request: () => void;
     /** Frame the doll (`ms` 0 = at once); a view turns to that preset on the way. */
     refit: (ms: number, view?: CameraPreset) => void;
@@ -128,6 +148,14 @@ export function DollCanvas({
   frameRef.current = onFrame;
   const cameraRef = useRef(camera);
   cameraRef.current = camera;
+  const [hoverOwn, setHoverOwn] = useState<string | null>(null);
+  const hover = hoverSeamProp !== undefined ? hoverSeamProp : hoverOwn;
+  const hoverRef = useRef<(id: string | null) => void>(() => {});
+  hoverRef.current = (id) => {
+    if (id === hover) return;
+    setHoverOwn(id);
+    onHoverSeam?.(id);
+  };
 
   // ── the scene, once ──
   useEffect(() => {
@@ -172,6 +200,20 @@ export function DollCanvas({
     const current = (): Sph => {
       sph.setFromVector3(off.copy(cam.position).sub(controls.target));
       return { r: sph.radius, phi: sph.phi, theta: sph.theta };
+    };
+    /**
+     * The point is in view: in the frame and not behind the cloth (one ray from the camera; the
+     * normals are not asked, a mirrored panel has them turned inside out).
+     */
+    const seenRay = new THREE.Raycaster();
+    const seen = (p: THREE.Vector3) => {
+      const v = p.clone().project(cam);
+      if (v.z >= 1 || Math.abs(v.x) > 1.05 || Math.abs(v.y) > 1.05) return false;
+      const d = cam.position.distanceTo(p);
+      seenRay.set(cam.position, p.clone().sub(cam.position).normalize());
+      seenRay.near = 0;
+      seenRay.far = Math.max(0, d - (5 + d * 0.004));
+      return seenRay.intersectObjects(cloth.children, false).length === 0;
     };
     const place = (target: THREE.Vector3, s: Sph) => {
       controls.target.copy(target);
@@ -238,7 +280,7 @@ export function DollCanvas({
       stepAnim(performance.now());
       const changed = controls.update();
       renderer.render(scene, cam);
-      // Pins follow their points; behind the doll's centre they fade to the label grey.
+      // Pins follow their points and hide behind the cloth.
       const ph = pinsHost.current;
       const a = api.current;
       if (ph && a) {
@@ -253,8 +295,9 @@ export function DollCanvas({
         for (const p of order) {
           const node = ph.querySelector<HTMLElement>(`[data-pin="${CSS.escape(p.id)}"]`);
           if (!node) continue;
-          const v = new THREE.Vector3(...p.at).project(cam);
-          const vis = v.z < 1 && Math.abs(v.x) <= 1.05 && Math.abs(v.y) <= 1.05;
+          const at = new THREE.Vector3(...p.at);
+          const vis = seen(at);
+          const v = at.project(cam);
           node.style.display = vis ? '' : 'none';
           if (!vis) continue;
           const bw = node.offsetWidth;
@@ -362,6 +405,46 @@ export function DollCanvas({
       animateTo(hit.point.clone(), { r: sph.radius, phi: sph.phi, theta: sph.theta }, PIVOT_MS);
       leave();
     };
+    // ── hover: the open seam nearest the pointer (≤ 10 px, ≤ 18 px for a finger) that is in view ──
+    const hoverAt = (x: number, y: number, touch: boolean) => {
+      const a = api.current;
+      if (!a) return;
+      const r = gl.getBoundingClientRect();
+      const p = { x: x - r.left, y: y - r.top };
+      const v = new THREE.Vector3();
+      // Every side of every open seam, on screen, with the seam and the 3D points it came from.
+      const lines: { x: number; y: number }[][] = [];
+      const from: { seam: OpenSeam; pts: THREE.Vector3[] }[] = [];
+      for (const seam of a.open)
+        for (const pts of seam.paths) {
+          lines.push(
+            pts.map((q) => {
+              v.copy(q).project(cam);
+              return { x: ((v.x + 1) / 2) * r.width, y: ((1 - v.y) / 2) * r.height };
+            }),
+          );
+          from.push({ seam, pts });
+        }
+      // The nearest few by distance; the first whose nearest point is in view wins.
+      for (const h of pickPolyline(lines, p, touch ? 18 : 10).slice(0, 4)) {
+        const scr = lines[h.index];
+        let k = 0;
+        for (let i = 1; i < scr.length; i++)
+          if (
+            Math.hypot(scr[i].x - p.x, scr[i].y - p.y) < Math.hypot(scr[k].x - p.x, scr[k].y - p.y)
+          )
+            k = i;
+        if (seen(from[h.index].pts[k])) return hoverRef.current(from[h.index].seam.id);
+      }
+      hoverRef.current(null);
+    };
+    const onMove = (e: PointerEvent) => {
+      if (e.buttons || e.pointerType === 'touch') return;
+      hoverAt(e.clientX, e.clientY, false);
+    };
+    const onLeaveGl = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch') hoverRef.current(null);
+    };
     let pointerType = 'mouse';
     let down: { x: number; y: number } | null = null;
     let lastTap: { t: number; x: number; y: number } | null = null;
@@ -381,7 +464,10 @@ export function DollCanvas({
       if (isDoubleTap(lastTap, tap)) {
         lastTap = null;
         pivotOrFit(tap.x, tap.y);
-      } else lastTap = tap;
+      } else {
+        lastTap = tap;
+        hoverAt(tap.x, tap.y, true);
+      }
     };
     const onDbl = (e: MouseEvent) => {
       if (pointerType !== 'touch') pivotOrFit(e.clientX, e.clientY);
@@ -389,6 +475,8 @@ export function DollCanvas({
     gl.addEventListener('pointerdown', onDown);
     gl.addEventListener('pointerup', onUp);
     gl.addEventListener('dblclick', onDbl);
+    gl.addEventListener('pointermove', onMove);
+    gl.addEventListener('pointerleave', onLeaveGl);
 
     const resize = () => {
       const w = el.clientWidth;
@@ -407,11 +495,6 @@ export function DollCanvas({
     const ro = new ResizeObserver(resize);
     ro.observe(el);
 
-    // A faint floor grid and the vertical axis — orientation only (§8 q1).
-    const grid = new THREE.GridHelper(2000, 20, 0xe6e6e6, 0xf0f0f0);
-    grid.name = 'floor';
-    scene.add(grid);
-
     api.current = {
       renderer,
       scene,
@@ -421,6 +504,7 @@ export function DollCanvas({
       seams,
       poms,
       pins: [],
+      open: [],
       request,
       refit,
       box: null,
@@ -438,6 +522,8 @@ export function DollCanvas({
       gl.removeEventListener('pointerdown', onDown);
       gl.removeEventListener('pointerup', onUp);
       gl.removeEventListener('dblclick', onDbl);
+      gl.removeEventListener('pointermove', onMove);
+      gl.removeEventListener('pointerleave', onLeaveGl);
       for (const g of [cloth, seams, poms]) clear(g);
       controls.dispose();
       renderer.dispose();
@@ -551,7 +637,7 @@ export function DollCanvas({
     }
     a.geom.computeVertexNormals();
     // Fit once per solve: the camera frames the doll (pieces drawn apart — floating — are not the
-    // doll and do not shrink it), the floor sits under its hem.
+    // doll and do not shrink it).
     // The first frame frames the doll; the settled one reframes it unless the person has turned it.
     const sameSolve = a.fitted?.slice(2) === fitKey.slice(2);
     if (a.fitted !== fitKey && !(sameSolve && a.moved)) {
@@ -566,9 +652,6 @@ export function DollCanvas({
       }
       if (b.isEmpty()) a.geom.computeBoundingBox();
       if (b.isEmpty() && a.geom.boundingBox) b.copy(a.geom.boundingBox);
-      const c = b.getCenter(new THREE.Vector3());
-      const floor = a.scene.getObjectByName('floor');
-      if (floor) floor.position.set(c.x, b.min.y - 40, c.z);
       a.box = b;
       // A new solve opens on its preset; the settled frame keeps the untouched view's angle.
       a.refit(0, sameSolve ? cameraRef.current ?? undefined : cameraRef.current ?? 'front');
@@ -634,7 +717,7 @@ export function DollCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report, solveKey]);
 
-  // ── seams by state, and the words pinned to the open ones ──
+  // ── seams: the open ones always, the rest on `showSeams`; the hovered open one named ──
   const [seamPins, setSeamPins] = useState<Pin[]>([]);
   const [pomPins, setPomPins] = useState<Pin[]>([]);
   useEffect(() => {
@@ -647,34 +730,44 @@ export function DollCanvas({
     const a = api.current;
     if (!a) return;
     clear(a.seams);
+    a.open = [];
     const pins: Pin[] = [];
     if (report) {
       const P = report.positions;
-      const closed = lineMat(a.seams, { width: 1.2, color: INK });
-      const dashed = lineMat(a.seams, { width: 1.4, color: INK, dashed: true });
-      const heavy = lineMat(a.seams, { width: 3, color: INK });
+      // A hovered seam or the measure lines on: every other seam line steps back to grey.
+      const dim = hover != null || showPom;
+      const open = lineMat(a.seams, { width: 3, color: dim ? GREY : openColor });
+      const hot = lineMat(a.seams, { width: 4, color: openColor });
+      const closed = showSeams ? lineMat(a.seams, { width: 1, color: GREY }) : null;
+      const dashed = showSeams ? lineMat(a.seams, { width: 1, color: GREY, dashed: true }) : null;
       for (const s of report.seams as DollSeamReport[]) {
         if (s.origin === 'layer') continue;
-        const open = s.state === 'open' || s.state === 'twisted';
-        // A step's guess (no row) is dashed whatever its state; an open seam heavy.
-        const m = s.guessed ? dashed : open ? heavy : s.state === 'proposed' ? dashed : closed;
-        for (const path of open ? [s.pathA, s.pathB] : [s.pathA])
-          if (path.length >= 2) a.seams.add(line(pathPoints(P, path), m));
-        if (open) {
+        if (s.state === 'open' || s.state === 'twisted') {
+          const paths = [s.pathA, s.pathB].filter((p) => p.length >= 2);
+          for (const path of paths)
+            a.seams.add(line(pathPoints(P, path), s.id === hover ? hot : open));
           const at = midOf(P, s.pathA);
-          if (at)
-            pins.push({
-              id: `seam:${s.id}`,
-              text: `${s.state} · ${Math.round(s.residualMaxMm)} mm`,
-              at,
-            });
+          if (!at) continue;
+          const o: OpenSeam = {
+            id: s.id,
+            text: `${Math.round(s.residualMaxMm)} mm`,
+            at,
+            paths: paths.map((path) =>
+              Array.from(path, (v) => new THREE.Vector3(P[3 * v], P[3 * v + 1], P[3 * v + 2])),
+            ),
+          };
+          a.open.push(o);
+          if (s.id === hover) pins.push({ id: `seam:${s.id}`, text: o.text, at });
+          continue;
         }
+        const m = s.guessed || s.state === 'proposed' ? dashed : closed;
+        if (m && s.pathA.length >= 2) a.seams.add(line(pathPoints(P, s.pathA), m));
       }
     }
     setSeamPins(pins);
     a.request();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [report]);
+  }, [report, hover, showSeams, showPom, openColor]);
 
   /**
    * A lifted line lies exactly on the cloth; it is drawn 2 mm off it along the nearest vertex's
