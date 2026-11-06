@@ -6522,6 +6522,61 @@ export function solveDoll(input: DollInput): DollReport {
     }
     sleeveRegistered.add(gid);
   };
+  // AN ARMHOLE RUN STARTS AT THE UNDERARM. A cap is one edge whose two ends are the underarm; the
+  // run of body edges it is sewn onto names the armhole's parts round the loop, but where that run
+  // starts is whoever listed it — a step picture's guess, or the order a person picked the parts in
+  // (card 85's left armhole starts at the shoulder, 87's both, 96's right one at the back yoke
+  // seam). Sewn as listed, the cap's underarm lands on the shoulder: the sleeve hangs upside down,
+  // pointing up, and twists the yoke and the front with it. A run that closes round is cut where
+  // its parts meet lowest on the body after the first solve — the side seam, the underarm.
+  for (const sm of G.seams) {
+    if (sm.seam.partRange || gapStretchesOf(sm, 'a') || gapStretchesOf(sm, 'b')) continue;
+    const groupsOf = (ids: EdgeId[]) =>
+      new Set(ids.map((id) => panelByKey.get(pk(id))?.group ?? ''));
+    for (const [capSide, bodySide] of [
+      ['a', 'b'],
+      ['b', 'a'],
+    ] as const) {
+      const capGroups = [...groupsOf(sm[capSide])];
+      const run = sm[bodySide];
+      if (new Set(sm[capSide]).size !== 1 || capGroups.length !== 1) continue;
+      if (!capGroups[0].startsWith('SLEEVE')) continue;
+      if (run.length < 3 || new Set(run).size !== run.length || new Set(run.map(pk)).size < 2)
+        continue;
+      const runGroups = groupsOf(run);
+      if (runGroups.size !== 1 || !runGroups.has('BODY')) continue;
+      const parts = run.map((id) => pathOf([id]));
+      if (parts.some((P) => !P)) continue;
+      const ends = (parts as Path[]).map((P) => [P.v[0], P.v[P.v.length - 1]] as const);
+      const n = ends.length;
+      const total = (parts as Path[]).reduce((t, P) => t + P.len, 0);
+      // Where part k - 1 meets part k (k = 0: the last part back onto the first), either way round.
+      const meet = (k: number) => {
+        const p = ends[(k - 1 + n) % n];
+        const q = ends[k];
+        let best = { gap: Infinity, i: 0, j: 0, y: 0 };
+        for (let i = 0; i < 2; i++)
+          for (let j = 0; j < 2; j++) {
+            const gap = Math.hypot(...sub(getPos(p[i]), getPos(q[j])));
+            if (gap < best.gap)
+              best = { gap, i, j, y: (pos[3 * p[i] + 1] + pos[3 * q[j] + 1]) / 2 };
+          }
+        return best;
+      };
+      const J = ends.map((_, k) => meet(k));
+      // A walk round the loop enters each part at one end and leaves it at the other.
+      if (J.some((m, k) => m.j === J[(k + 1) % n].i)) continue;
+      if (J[0].gap > Math.max(30, 0.08 * total)) continue;
+      let low = 0;
+      for (let k = 1; k < n; k++) if (J[k].y < J[low].y) low = k;
+      if (low === 0 || J[0].y - J[low].y < 30) continue;
+      sm[bodySide] = [...run.slice(low), ...run.slice(0, low)];
+      if (opt.debug)
+        warnings.push(
+          `debug: armhole run ${run.join('+')} cut at its lowest meeting, ${(J[0].y - J[low].y).toFixed(0)} mm under where it was listed to start`,
+        );
+    }
+  }
   // Which armhole a sleeve goes to: its hand, unless the graph sews it to body edges that sit on
   // the other side of the doll (sleeve hands swapped, or a back drawn as seen from the front) —
   // then the seams win and the swap is reported.
