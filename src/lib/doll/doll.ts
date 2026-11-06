@@ -5913,6 +5913,25 @@ export function solveDoll(input: DollInput): DollReport {
   const layeredBodyPanels = new Set(
     panels.filter((P) => P.layers.length && bodyLike.has(P.group)).map((P) => P.idx),
   );
+  // A chart seam guessed from a rowless step is only a placement hypothesis. Let the real seam
+  // constraints settle a layered panel before its placed-side memory starts pulling: holding the
+  // hypothesis from pass one can keep the yoke where the guess laid it and tear the connected
+  // placket away. Confirmed chart seams keep the immediate prior (a double yoke otherwise has no
+  // signed constraint preventing it from popping through the body).
+  const guessPlacedPanels = new Set<number>();
+  for (const s of G.seams) {
+    if (!isGuess(s.seam)) continue;
+    const id = `${s.seam.a}~${s.seam.b}`;
+    const gids = new Set([...s.a, ...s.b].map((edge) => panelByKey.get(pk(edge))?.group));
+    if (![...gids].some((gid) => gid && charts.get(gid)?.used.has(id))) continue;
+    for (const edge of [...s.a, ...s.b]) {
+      const P = panelByKey.get(pk(edge));
+      if (P) guessPlacedPanels.add(P.idx);
+    }
+  }
+  const delayedLayeredBodyPanels = new Set(
+    [...layeredBodyPanels].filter((pi) => guessPlacedPanels.has(pi)),
+  );
   for (const pi of layeredBodyPanels) {
     const P = panels[pi];
     for (let i = P.nb; i < P.count; i++) {
@@ -5920,7 +5939,7 @@ export function solveDoll(input: DollInput): DollReport {
       anchor[3 * v] = pos[3 * v];
       anchor[3 * v + 1] = pos[3 * v + 1];
       anchor[3 * v + 2] = pos[3 * v + 2];
-      anchorK[v] = LAYERED_BODY_ANCHOR_K;
+      anchorK[v] = delayedLayeredBodyPanels.has(pi) ? 0 : LAYERED_BODY_ANCHOR_K;
     }
   }
   for (let v = 0; v < N; v++) moving[v] = bodyLike.has(groupOfV[v]) && placed[v] ? 1 : 0;
@@ -8375,13 +8394,18 @@ export function solveDoll(input: DollInput): DollReport {
 
   // ── phase 2: everything ─────────────────────────────────────────────────────────────────
   for (let v = 0; v < N; v++) {
-    anchor[3 * v] = pos[3 * v];
-    anchor[3 * v + 1] = pos[3 * v + 1];
-    anchor[3 * v + 2] = pos[3 * v + 2];
+    const layeredInterior = layeredBodyPanels.has(panelOf[v]) && ringOf[v] < 0;
+    // A guess-laid layered panel now starts remembering its original placed side. Other anchors
+    // remember the phase-1 result, as before.
+    if (!layeredInterior || !delayedLayeredBodyPanels.has(panelOf[v])) {
+      anchor[3 * v] = pos[3 * v];
+      anchor[3 * v + 1] = pos[3 * v + 1];
+      anchor[3 * v + 2] = pos[3 * v + 2];
+    }
     // (a bag has nothing to hold it upright but a whisper of its placement)
     anchorK[v] = bag
       ? 0.001
-      : layeredBodyPanels.has(panelOf[v]) && ringOf[v] < 0
+      : layeredInterior
         ? LAYERED_BODY_ANCHOR_K
         : bodyLike.has(groupOfV[v]) || groupOfV[v] === 'FLOAT'
           ? 0
