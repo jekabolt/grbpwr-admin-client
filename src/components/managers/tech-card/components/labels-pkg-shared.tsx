@@ -3,8 +3,9 @@ import { adminService } from 'api/api';
 import { common_TechCardListItem } from 'api/proto-http/admin';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { cn } from 'lib/utility';
-import { ReactNode, useEffect, useMemo, useState } from 'react';
+import { type ChangeEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
 import {
+  Button,
   Chip,
   ChipRow,
   ConfirmationModal,
@@ -163,6 +164,149 @@ export function Field({
   );
 }
 
+export type StockPickerOption = {
+  key: string;
+  name: string;
+  tab: string;
+  media?: ReactNode;
+  sub?: ReactNode;
+  status?: ReactNode;
+  disabled?: boolean;
+};
+
+/** Shared searchable tile picker for label and packaging stock. */
+export function StockPickerModal({
+  open,
+  onOpenChange,
+  title,
+  options,
+  tabs,
+  selectedKeys = [],
+  multiple = false,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  options: readonly StockPickerOption[];
+  tabs: readonly { value: string; label: string }[];
+  selectedKeys?: readonly string[];
+  multiple?: boolean;
+  onConfirm: (keys: string[]) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [tab, setTab] = useState('all');
+  const [pending, setPending] = useState<Set<string>>(new Set());
+  const selectedKey = selectedKeys.join('\u0000');
+
+  useEffect(() => {
+    if (!open) return;
+    setQuery('');
+    setTab('all');
+    setPending(new Set(selectedKeys));
+    // selectedKey is the stable value of selectedKeys for one opening.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, selectedKey]);
+
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return options.filter(
+      (option) =>
+        (tab === 'all' || option.tab === tab) &&
+        (!needle || option.name.toLowerCase().includes(needle)),
+    );
+  }, [options, query, tab]);
+
+  const toggle = (key: string) =>
+    setPending((current) => {
+      const next = new Set(multiple ? current : []);
+      if (current.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  return (
+    <ConfirmationModal
+      open={open}
+      onOpenChange={onOpenChange}
+      onConfirm={() => undefined}
+      title={title}
+      width='lg'
+      hideActions
+      footerActions={
+        <>
+          <Button
+            type='button'
+            variant='secondary'
+            size='sm'
+            className='h-7'
+            onClick={() => onOpenChange(false)}
+          >
+            cancel
+          </Button>
+          <Button
+            type='button'
+            variant='main'
+            size='sm'
+            className='h-7'
+            onClick={() => onConfirm([...pending])}
+          >
+            done
+          </Button>
+        </>
+      }
+    >
+      <div className='flex flex-col gap-stack'>
+        <div className='flex flex-col gap-2 sm:flex-row sm:items-center'>
+          <Input
+            name='stock-search'
+            value={query}
+            placeholder='search'
+            aria-label='search'
+            className='h-7 min-w-0 flex-1'
+            onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)}
+          />
+          <ChipRow>
+            {[{ value: 'all', label: 'all' }, ...tabs].map((item) => (
+              <Chip
+                key={item.value}
+                nonForm
+                selected={tab === item.value}
+                pressed={tab === item.value}
+                className='h-7'
+                onClick={() => setTab(item.value)}
+              >
+                {item.label}
+              </Chip>
+            ))}
+          </ChipRow>
+        </div>
+        {filtered.length ? (
+          <Tiles min={140} className='max-h-[52vh] overflow-y-auto'>
+            {filtered.map((option) => (
+              <Tile
+                key={option.key}
+                media={option.media}
+                name={option.name}
+                sub={option.sub}
+                selected={pending.has(option.key)}
+                pressed={option.disabled ? undefined : pending.has(option.key)}
+                onClick={option.disabled ? undefined : () => toggle(option.key)}
+                className={option.disabled ? 'opacity-50' : undefined}
+                title={option.name}
+              >
+                {option.status}
+              </Tile>
+            ))}
+          </Tiles>
+        ) : (
+          <Placeholder className='h-16' label='no items' />
+        )}
+      </div>
+    </ConfirmationModal>
+  );
+}
+
 // The stock line under a tile: the whole point of promoting the picker to a dialog is that you see
 // what you are about to commit to BEFORE you commit. Zero (and "no output material at all") are
 // blocking facts, so they read red; everything else is quiet grey.
@@ -293,7 +437,7 @@ export function AuxCardPickerModal({
             placeholder='search style № / name'
             value={q}
             autoComplete='off'
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQ(e.target.value)}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => setQ(e.target.value)}
             className='min-w-40 flex-1'
           />
           <ChipRow>
@@ -440,7 +584,7 @@ export function AuxCardMultiPickerModal({
             placeholder='search style № / name'
             value={q}
             autoComplete='off'
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQ(e.target.value)}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => setQ(e.target.value)}
             className='min-w-40 flex-1'
           />
           <ChipRow>
