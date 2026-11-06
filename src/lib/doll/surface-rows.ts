@@ -262,67 +262,95 @@ export function planSurfaceByRows(args: {
           [s.b, s.a],
         ] as const) {
           if (!mine.length || mine.some((p) => p.piece !== k)) continue;
-          if (other.length !== 1 || !known.has(other[0].piece) || other[0].piece === k) continue;
-          const on = other[0].piece;
-          const F = frameOf(on);
-          const Q = stretch(other[0]);
-          const G = geoms.get(on);
-          if (!F || !Q || !G) continue;
-          const lenQ = arcLen(Q);
-          // The part's stretch nearest the other side's length; two of them that long: a fold.
-          const ms = mine
-            .map((m) => ({ m, P: stretch(m) }))
-            .filter((x): x is { m: RowPart; P: Pt2[] } => !!x.P)
-            .sort((x, y) => Math.abs(arcLen(x.P) - lenQ) - Math.abs(arcLen(y.P) - lenQ));
-          if (!ms.length) continue;
-          const P = ms[0].P;
-          let fold: RowFold | undefined;
-          if (
-            ms.length >= 2 &&
-            Math.abs(arcLen(ms[1].P) - lenQ) <= 0.1 * lenQ &&
-            Math.abs(arcLen(P) - lenQ) <= 0.1 * lenQ
-          )
-            fold = foldOf(P, ms[1].P) ?? undefined;
-          const lenP = arcLen(P);
-          if (Math.min(lenP, lenQ) < 20) continue;
-          const Ys = resample(Q, N_FIT);
-          const ring = ringSample(S).map((p) => foldPt(fold, p));
-          for (const same of [true, false])
-            for (const mirror of [false, true]) {
-              const Xs = resample(same ? P : [...P].reverse(), N_FIT);
-              const { T: t, err } = procrustes(Xs, Ys, mirror);
-              if (err > Math.max(4, 0.03 * Math.min(lenP, lenQ))) continue;
-              const onCover = coverOf(
-                ring.map((p) => apply(t, p)),
-                G.rs,
-              );
-              const cont = continuity(k, on, t, fold);
-              const len = Math.min(lenP, lenQ);
-              const T = compose(F.T, t);
-              const o: Opt = {
-                host: F.host,
-                T,
-                ...(fold ? { fold } : {}),
-                cover: 0,
-                row: s.id,
-                on,
-                depth: F.depth + 1,
-                how: '',
-                cont,
-                len,
-                err,
-                onCover,
-              };
-              const better =
-                !best ||
-                o.cont > best.cont ||
-                (o.cont === best.cont &&
-                  (Math.round(10 * o.onCover) > Math.round(10 * best.onCover) ||
-                    (Math.round(10 * o.onCover) === Math.round(10 * best.onCover) &&
-                      (o.len > best.len + 5 ||
-                        (Math.abs(o.len - best.len) <= 5 && o.err < best.err)))));
-              if (better) best = o;
+          // A stored composite may continue from the shell onto a piece already laid there. The
+          // surface part belongs in the shell's frame; resolving the whole side to the nested piece
+          // instead puts a pocket bag on an unrelated panel. Try every drawable stretch and, when
+          // the row gives equally continuous readings, prefer the shallowest (shell-first) frame.
+          const targets = other.filter((p) => known.has(p.piece) && p.piece !== k);
+          for (const target of targets) {
+            const on = target.piece;
+            const F = frameOf(on);
+            const Q = stretch(target);
+            const G = geoms.get(on);
+            if (!F || !Q || !G) continue;
+            const lenQ = arcLen(Q);
+            // The part's stretch nearest the other side's length; two of them that long: a fold.
+            // Against one stretch of a composite, fit the matching share of a one-edge side. The
+            // whole pocket edge spans the shell and its laid continuation; fitting all of it to
+            // either stretch makes the nested piece's exact duplicate win instead.
+            const ms = mine
+              .map((m) => ({ m, P: stretch(m) }))
+              .filter((x): x is { m: RowPart; P: Pt2[] } => !!x.P)
+              .sort((x, y) => Math.abs(arcLen(x.P) - lenQ) - Math.abs(arcLen(y.P) - lenQ));
+            if (!ms.length) continue;
+            let fold: RowFold | undefined;
+            if (
+              ms.length >= 2 &&
+              Math.abs(arcLen(ms[1].P) - lenQ) <= 0.1 * lenQ &&
+              Math.abs(arcLen(ms[0].P) - lenQ) <= 0.1 * lenQ
+            )
+              fold = foldOf(ms[0].P, ms[1].P) ?? undefined;
+            const targetRuns = other.map(stretch);
+            const targetLens = targetRuns.map((run) => (run ? arcLen(run) : 0));
+            const targetTotal = targetLens.reduce((sum, len) => sum + len, 0);
+            const targetAt = other.indexOf(target);
+            const before = targetLens.slice(0, targetAt).reduce((sum, len) => sum + len, 0);
+            const from = targetTotal > 0 ? before / targetTotal : 0;
+            const to = targetTotal > 0 ? (before + lenQ) / targetTotal : 1;
+            const wholeP = ms[0].P;
+            const wholeLen = arcLen(wholeP);
+            const fitRuns =
+              other.length > 1 && ms.length === 1
+                ? [
+                    arcCrop(wholeP, [from * wholeLen, to * wholeLen]),
+                    arcCrop(wholeP, [(1 - to) * wholeLen, (1 - from) * wholeLen]),
+                  ]
+                : [wholeP];
+            const Ys = resample(Q, N_FIT);
+            const ring = ringSample(S).map((p) => foldPt(fold, p));
+            for (const P of fitRuns) {
+              const lenP = arcLen(P);
+              if (Math.min(lenP, lenQ) < 20) continue;
+              for (const same of [true, false])
+                for (const mirror of [false, true]) {
+                  const Xs = resample(same ? P : [...P].reverse(), N_FIT);
+                  const { T: t, err } = procrustes(Xs, Ys, mirror);
+                  if (err > Math.max(4, 0.03 * Math.min(lenP, lenQ))) continue;
+                  const onCover = coverOf(
+                    ring.map((p) => apply(t, p)),
+                    G.rs,
+                  );
+                  const cont = continuity(k, on, t, fold);
+                  const len = Math.min(lenP, lenQ);
+                  const T = compose(F.T, t);
+                  const o: Opt = {
+                    host: F.host,
+                    T,
+                    ...(fold ? { fold } : {}),
+                    cover: 0,
+                    row: s.id,
+                    on,
+                    depth: F.depth + 1,
+                    how: '',
+                    cont,
+                    len,
+                    err,
+                    onCover,
+                  };
+                  const better =
+                    !best ||
+                    o.cont > best.cont ||
+                    (o.cont === best.cont &&
+                      (o.depth < best.depth ||
+                        (o.depth === best.depth &&
+                          (Math.round(10 * o.onCover) > Math.round(10 * best.onCover) ||
+                            (Math.round(10 * o.onCover) === Math.round(10 * best.onCover) &&
+                              (o.len > best.len + 5 ||
+                                (Math.abs(o.len - best.len) <= 5 && o.err < best.err)))))));
+                  if (better) best = o;
+                }
             }
+          }
         }
       if (!best) continue;
       const H = geoms.get(best.host)!;

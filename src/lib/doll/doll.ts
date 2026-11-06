@@ -9495,6 +9495,18 @@ export function solveDoll(input: DollInput): DollReport {
   }
   // Rows on laid pieces, measured where the pieces lie — on the host's face, the drawing's layer
   // offset left out: closed when the stretches meet, a contradiction when they stay apart.
+  const rowById = new Map(
+    graphIn.chosen.map((candidate) => [`${candidate.a}~${candidate.b}`, candidate]),
+  );
+  const compositePlaced = new Set(
+    [...rowLays].flatMap(([piece, lay]) => {
+      const candidate = rowById.get(lay.row);
+      return candidate &&
+        (rowParts(candidate, 'a').length > 1 || rowParts(candidate, 'b').length > 1)
+        ? [piece]
+        : [];
+    }),
+  );
   for (const c of laidRows) {
     const id = `${c.a}~${c.b}`;
     // Surface pieces are drawn separately even when grouping mapped an identical sewn ply to its
@@ -9506,6 +9518,21 @@ export function solveDoll(input: DollInput): DollReport {
     );
     // A row the solve sewed over its drawn parts: its report is this one, over the whole row.
     const sewnPart = seams.findIndex((x) => x.id === id);
+    // A waistband is already placed and sewn on the row's shell path. Its terminal flap stretch
+    // describes the continuation of that path on a laid piece; measuring the closed seam again as
+    // waistband-to-flap judges it in the flap's frame and reports a false open end at the hip.
+    const waistbandShell = [...rowParts(c, 'a'), ...rowParts(c, 'b')].some(
+      (part) => panelByKey.get(part.piece)?.group === 'WAISTBAND',
+    );
+    if (shellWork && sewnPart >= 0 && waistbandShell) {
+      const shell = seams[sewnPart];
+      const unchecked = ` · measured over its stretch on drawn pieces only — its stretch on ${shellWork.laidEnds!.off.join(', ')} (not drawn) is not checked here`;
+      const shellNote = shell.note.endsWith(unchecked)
+        ? shell.note.slice(0, -unchecked.length)
+        : shell.note;
+      shell.note = `${shellNote} · laid continuation ${shellWork.laidEnds!.off.join(', ')} stays on its host; the seam is judged on the waistband and drawn shell path`;
+      continue;
+    }
     // A composite that begins or ends on a laid surface piece has two honest readings: the
     // drawable shell stretch is the structural seam, while the surface stretch is checked where
     // that piece is laid. Keep the shell path for geometry; replacing it with one polyline through
@@ -9729,12 +9756,40 @@ export function solveDoll(input: DollInput): DollReport {
     const oneLaidSide = (parts: typeof sidePartsA) =>
       new Set(parts.map((part) => part.piece)).size === 1 &&
       parts.every((part) => layAt.has(part.piece));
-    const pin =
+    const compositePin =
       oneLaidSide(sidePartsA) && sidePartsB.length > 1
         ? ('a' as const)
         : oneLaidSide(sidePartsB) && sidePartsA.length > 1
           ? ('b' as const)
           : null;
+    // Two bags laid from different shell rows meet round their remaining equal edge. Move the bag
+    // placed by the composite row (or the deeper nested piece) to that edge after both hosts have
+    // been drawn. A folded card row is deliberately left measured, not forced.
+    const pieceA = sidePartsA.length === 1 ? sidePartsA[0].piece : null;
+    const pieceB = sidePartsB.length === 1 ? sidePartsB[0].piece : null;
+    const lenA0 = runsA.reduce((sum, run) => sum + run.len, 0);
+    const lenB0 = runsB.reduce((sum, run) => sum + run.len, 0);
+    const comparable = Math.min(lenA0, lenB0) / Math.max(lenA0, lenB0, 1e-9) >= 0.85;
+    const depthOf = (piece: string) => rowLays.get(piece)?.depth ?? 0;
+    const surfacePin = (() => {
+      if (
+        compositePin ||
+        !pieceA ||
+        !pieceB ||
+        !layAt.has(pieceA) ||
+        !layAt.has(pieceB) ||
+        !comparable ||
+        rowLays.get(pieceA)?.fold ||
+        rowLays.get(pieceB)?.fold
+      )
+        return null;
+      if (compositePlaced.has(pieceA) !== compositePlaced.has(pieceB))
+        return compositePlaced.has(pieceA) ? ('a' as const) : ('b' as const);
+      if (depthOf(pieceA) !== depthOf(pieceB))
+        return depthOf(pieceA) > depthOf(pieceB) ? ('a' as const) : ('b' as const);
+      return null;
+    })();
+    const pin = compositePin ?? surfacePin;
     if (pin) {
       const atRun = (run: Run, want: number): Vec3 => {
         let index = 1;
@@ -9749,7 +9804,7 @@ export function solveDoll(input: DollInput): DollReport {
         // A surface-to-surface continuation is still measured and reported below, but it is not
         // a drawable shell seam and may be discontinuous in the host frames. Do not invent a
         // connector by pulling either laid piece through that gap.
-        if (!pair.throughShell) continue;
+        if (compositePin && !pair.throughShell) continue;
         const moving = pin === 'a' ? pair.a : pair.b;
         const target = pin === 'a' ? pair.b : pair.a;
         if (!(pin === 'a' ? pair.aSurface : pair.bSurface)) continue;
@@ -9775,7 +9830,11 @@ export function solveDoll(input: DollInput): DollReport {
         });
       }
     }
-    const gaps = gapsOf(paired);
+    // A composite's surface continuation is reported separately below. Its structural judgement
+    // is the stretch against the shell; otherwise a correctly shell-placed pocket is called open
+    // only because the stored row carries on over another surface piece.
+    const shellPairs = paired.filter((pair) => pair.throughShell);
+    const gaps = gapsOf(shellPairs.length ? shellPairs : paired);
     const mean = gaps.reduce((x, y) => x + y, 0) / Math.max(1, gaps.length);
     const p95 = gaps[Math.min(gaps.length - 1, Math.floor(0.95 * gaps.length))] ?? 0;
     const max = gaps[gaps.length - 1] ?? 0;
