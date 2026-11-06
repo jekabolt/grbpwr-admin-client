@@ -2001,6 +2001,9 @@ export function solveDoll(input: DollInput): DollReport {
       len: P.s[keep[keep.length - 1]] - s0,
     };
   };
+  /** A path's vertices over the share `r` (0..1) of its length it is sewn over. */
+  const sewnStretch = (P: Path, r?: [number, number]) =>
+    r && (r[0] > 1e-3 || r[1] < 1 - 1e-3) ? cropPath(P, [r[0] * P.len, r[1] * P.len]).v : P.v;
   const revPath = (P: Path): Path => ({
     v: Int32Array.from([...P.v].reverse()),
     s: Float64Array.from([...P.s].reverse().map((x) => P.len - x)),
@@ -7949,8 +7952,9 @@ export function solveDoll(input: DollInput): DollReport {
       state,
       released: w.released,
       note,
-      pathA: Uint32Array.from(w.A.v),
-      pathB: Uint32Array.from(w.B.v),
+      // As sewn: a side pulled together over a stretch of its edge is drawn over that stretch.
+      pathA: Uint32Array.from(sewnStretch(w.A, w.aRange)),
+      pathB: Uint32Array.from(sewnStretch(w.B, w.bRange)),
       ...(w.partRange ? { partRange: w.partRange } : {}),
       ...(w.foldedMm ? { foldedMm: w.foldedMm } : {}),
       ...(l4
