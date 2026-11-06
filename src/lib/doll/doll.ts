@@ -1486,6 +1486,40 @@ export function solveDoll(input: DollInput): DollReport {
     ...(owner ? { layers: layerRelations, owner: true } : {}),
   });
   warnings.push(...G.warnings);
+  // A step picture's guess onto an edge a person's row already sews whole (the collar's neck edge,
+  // sewn to the stand by a row, guessed onto the body by the step that attaches the collar): an
+  // edge takes one seam — the row stands, the guess is not sewn.
+  const guessYield = new Map<string, string>();
+  if (owner) {
+    const lenOfEdge = (id: EdgeId) =>
+      G.pieces.find((P) => P.key === pk(id))?.geom.edges.find((e) => e.id === id)?.lenMm ?? 0;
+    const wholeOn = (c: GroupedSeam, E: EdgeId) => {
+      const r =
+        c.seam.partRange?.[E] ??
+        (c.seam.range && c.a.length === 1 && c.b.length === 1
+          ? c.a[0] === E
+            ? c.seam.range.a
+            : c.seam.range.b
+          : null);
+      return !r || r[1] - r[0] >= 0.9 * lenOfEdge(E);
+    };
+    for (const g of G.seams) {
+      if (!isGuess(g.seam)) continue;
+      for (const side of [g.a, g.b]) {
+        if (side.length !== 1) continue;
+        const E = side[0];
+        const row = G.seams.find(
+          (c) => c !== g && isConf(c.seam) && (c.a.includes(E) || c.b.includes(E)) && wholeOn(c, E),
+        );
+        if (!row) continue;
+        guessYield.set(
+          `${g.seam.a}~${g.seam.b}`,
+          `step ${guessStepOf.get(g.seam.provenance?.seamKey ?? '')} names no row — the step picture's guess puts ${E} where the person's row ${row.seam.a}~${row.seam.b} already sews it; an edge takes one seam, the row stands`,
+        );
+        break;
+      }
+    }
+  }
   // LEGS FROM THE DRAWING (trousers). A leg is the front and the back sewn by their inseam /
   // outseam, with whatever is sewn on top of them (a yoke unit, a pocket bag): the pieces joined by
   // seams that are not the crotch (left ↔ right panel) and not between mirror twins. Which leg is
@@ -4801,6 +4835,7 @@ export function solveDoll(input: DollInput): DollReport {
   const graphPlaced = new Set<DollGroupId>();
   const sleeveCapSeams = new Set<GroupedSeam>();
   const graphWork = (s: GroupedSeam, born: number, closure = false) => {
+    if (guessYield.has(`${s.seam.a}~${s.seam.b}`)) return null;
     const conf = isConf(s.seam);
     const proposedByDoll = !owner && dollNote.has(`${s.seam.a}~${s.seam.b}`);
     const completedFromOrder = !owner && orderNote.has(`${s.seam.a}~${s.seam.b}`);
@@ -6797,7 +6832,32 @@ export function solveDoll(input: DollInput): DollReport {
       };
     }
   }
-  if (!confNeck && neckGroups.length && groups.has('BODY') && proposalsAllowed) {
+  // Owner mode: a step joins the collar to the body (its picture's guess), but no row names the
+  // seam onto the neckline — the doll walks the neck as with no rows; what it sews there is its own
+  // proposal (dashed), never the person's, and the card gap is said.
+  const neckStep = (() => {
+    if (!owner || confNeck || !neckGroups.length || !groups.has('BODY')) return null;
+    const grp = (ids: EdgeId[]) => new Set(ids.map((id) => panelByKey.get(pk(id))?.group));
+    const ring = (x: Set<DollGroupId | undefined>) =>
+      [...x].every((y) => y === 'STAND' || y === 'COLLAR');
+    const body = (x: Set<DollGroupId | undefined>) => x.size === 1 && x.has('BODY');
+    const g = G.seams.find(
+      (sm) =>
+        isGuess(sm.seam) &&
+        ((ring(grp(sm.a)) && body(grp(sm.b))) || (ring(grp(sm.b)) && body(grp(sm.a)))),
+    );
+    return g ? guessStepOf.get(g.seam.provenance?.seamKey ?? '') ?? null : null;
+  })();
+  if (neckStep != null)
+    warnings.push(
+      `collar: step ${neckStep} sews the collar to the body, but the card names no row of it onto the neckline — the doll walks the neck and proposes that seam (dashed)`,
+    );
+  if (
+    !confNeck &&
+    neckGroups.length &&
+    groups.has('BODY') &&
+    (proposalsAllowed || neckStep != null)
+  ) {
     const r = findNeckPath(cctx, neckLoop ? [neckLoop] : bodyLoops, vArm);
     if (opt.debug) warnings.push(`debug: neck walk ${r.debug}`);
     const ratioOf = (x: NeckPath) => (chestMm > 0 ? x.path.len / chestMm : NaN);
@@ -7476,7 +7536,7 @@ export function solveDoll(input: DollInput): DollReport {
       }
       const work = cn
         ? confWork
-        : graphSewn || off || owner
+        : graphSewn || off || (owner && neckStep == null)
           ? null
           : anchoredWork(
               id,
@@ -7685,7 +7745,7 @@ export function solveDoll(input: DollInput): DollReport {
         }
         const work = confFall
           ? confW
-          : graphSewn || owner
+          : graphSewn || (owner && neckStep == null)
             ? null
             : anchoredWork(
                 label,
@@ -8564,7 +8624,9 @@ export function solveDoll(input: DollInput): DollReport {
           id,
           a: (candidate.aParts ?? edgeIdsOf(candidate.a)).flatMap(edgeIdsOf),
           b: (candidate.bParts ?? edgeIdsOf(candidate.b)).flatMap(edgeIdsOf),
-          note: `step ${guessStepOf.get(candidate.provenance.seamKey)} names no row — the step picture's guess could not be drawn on the current pieces`,
+          note:
+            guessYield.get(id) ??
+            `step ${guessStepOf.get(candidate.provenance.seamKey)} names no row — the step picture's guess could not be drawn on the current pieces`,
         });
         reported.add(id);
         continue;
