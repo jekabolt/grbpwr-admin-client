@@ -138,6 +138,9 @@ const ARM_DEG = 42; // A-pose: arms 42° off vertical
 const FREE_CAP_TURN = (25 * Math.PI) / 180; // a free cap's registration turns the arm at most this much
 const PROXY_K = 0.93; // proxies push to 93 % of the cloth's own girth: a guide, never a stretcher
 const LAYERED_BODY_ANCHOR_K = 0.0045; // a two-ply shell keeps weak memory of its placed shape
+const LOOSE_BEND_K = 0.03;
+const BODY_BEND_K = 0.1;
+const LAYERED_BODY_BEND_K = 0.3;
 // One-piece collar (no separate stand): where it rolls over, as a share of its depth at the CB.
 // The pattern carries no roll-line mark. Half: the fall covers the stand down to the neck seam and
 // no further — below the seam the body widens far faster than a collar's outer edge is longer than
@@ -4793,7 +4796,17 @@ export function solveDoll(input: DollInput): DollReport {
           bi.push(A);
           bj.push(B);
           br.push(Math.hypot(fp[c][0] - fp[o][0], fp[c][1] - fp[o][1]));
-          bk.push(0.03);
+          // A body panel is held around the torso by several seams, so single-ply loose-cloth
+          // bending lets their pull collapse one mesh diagonal into a sharp accordion fold. A
+          // stacked panel represents all its plies in this one mesh and is stiffer again; its weak
+          // anchor below remembers which side is out, but must not substitute for bending.
+          bk.push(
+            P.group === 'BODY'
+              ? P.layers.length
+                ? LAYERED_BODY_BEND_K
+                : BODY_BEND_K
+              : LOOSE_BEND_K,
+          );
         }
       }
     }
