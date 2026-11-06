@@ -10074,6 +10074,11 @@ export type common_TechCardPackaging = {
   notes: string | undefined;
   packedSize: string | undefined;
   packedMediaId: number | undefined;
+  // The photos of the finished pack in display order; the first is the cover. Read always fills both:
+  // packed_media_id = packed_media_ids[0] (0 when empty). Write: non-empty wins over packed_media_id;
+  // empty with packed_media_id set is an older client: a one-photo list, except that a cover equal to
+  // the stored one keeps the stored further photos (that client never saw them).
+  packedMediaIds: number[] | undefined;
 };
 
 // TechCardCosting holds the manually-entered per-unit cost articles (Sheet «Калькуляция»).
@@ -10593,6 +10598,7 @@ export type common_TechCardCareLabel = {
   backCaptionLines: string[] | undefined;
   addressLines: string[] | undefined;
   colorways: common_TechCardCareLabelColorway[] | undefined;
+  orientation: string | undefined;
 };
 
 // TechCardCareLabelColorway holds the per-colourway overrides of the composition label.
