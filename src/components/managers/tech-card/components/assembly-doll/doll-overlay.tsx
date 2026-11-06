@@ -121,7 +121,7 @@ export default function DollOverlay({ open, onClose }: { open: boolean; onClose:
     }
     const norm = (s: string) => s.replace(/[<>\s]/g, '').toLowerCase();
     // The chart is in the card's sizes; the doll's sizes are the DXF's («M» for «m_32bo_m»).
-    const keyOf = new Map((card?.sizes ?? []).map((s) => [norm(card!.sizeLabel(s)), s]));
+    const keyOf = new Map((card?.sizes ?? []).map((s) => [norm(card!.cardSizeOf(s)), s]));
     const mapped = cells.map((c) => ({ ...c, size: keyOf.get(norm(c.size)) ?? c.size }));
     return compareToSizeChart(pom.report, mapped, unit).filter((c) => norm(c.size) === norm(at));
   }, [pom, chart.data, dictionary, unit, at, card]);
