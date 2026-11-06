@@ -6885,17 +6885,16 @@ export function solveDoll(input: DollInput): DollReport {
   // Owner mode: a step joins the collar to the body (its picture's guess), but no row names the
   // seam onto the neckline — the doll walks the neck as with no rows; what it sews there is its own
   // proposal (dashed), never the person's, and the card gap is said.
-  const neckStep = (() => {
-    if (!owner || confNeck || !neckGroups.length || !groups.has('BODY')) return null;
+  const ringOnBody = (sm: GroupedSeam) => {
     const grp = (ids: EdgeId[]) => new Set(ids.map((id) => panelByKey.get(pk(id))?.group));
     const ring = (x: Set<DollGroupId | undefined>) =>
       [...x].every((y) => y === 'STAND' || y === 'COLLAR');
     const body = (x: Set<DollGroupId | undefined>) => x.size === 1 && x.has('BODY');
-    const g = G.seams.find(
-      (sm) =>
-        isGuess(sm.seam) &&
-        ((ring(grp(sm.a)) && body(grp(sm.b))) || (ring(grp(sm.b)) && body(grp(sm.a)))),
-    );
+    return (ring(grp(sm.a)) && body(grp(sm.b))) || (ring(grp(sm.b)) && body(grp(sm.a)));
+  };
+  const neckStep = (() => {
+    if (!owner || confNeck || !neckGroups.length || !groups.has('BODY')) return null;
+    const g = G.seams.find((sm) => isGuess(sm.seam) && ringOnBody(sm));
     return g ? guessStepOf.get(g.seam.provenance?.seamKey ?? '') ?? null : null;
   })();
   if (neckStep != null)
@@ -6915,6 +6914,18 @@ export function solveDoll(input: DollInput): DollReport {
     if (r.neck && ratioOf(r.neck) >= 0.3 && ratioOf(r.neck) <= 0.55) {
       neck = r.neck;
       ok = true;
+      // The walk found the neckline: the collar goes on by its stand, along that path. The step
+      // picture's own pairing of a collar edge onto body edges (a guess by lengths, often the
+      // fall's neck edge the stand already holds) is not sewn next to it.
+      if (neckStep != null)
+        for (const sm of G.seams) {
+          const id = `${sm.seam.a}~${sm.seam.b}`;
+          if (!isGuess(sm.seam) || !ringOnBody(sm) || guessYield.has(id)) continue;
+          guessYield.set(
+            id,
+            `step ${guessStepOf.get(sm.seam.provenance?.seamKey ?? '')} names no row — the step picture's guess puts ${sm.a.join('+')} onto ${sm.b.join('+')}; the doll sews the collar on by its stand, walked along the neckline (dashed), and leaves this guess out`,
+          );
+        }
     } else {
       warnings.push(
         r.neck
