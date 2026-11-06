@@ -2553,6 +2553,10 @@ export function solveDoll(input: DollInput): DollReport {
   const proxyOf = new Int32Array(N).fill(-1);
   const proxyReport: DollProxy[] = [];
   const placed = new Uint8Array(N);
+  /** Panels omitted from garment frames/reports while their diagnostic geometry is still solved. */
+  const hiddenFromView = new Uint8Array(N);
+  for (const P of panels)
+    if (P.group === 'FLOAT') for (let i = 0; i < P.count; i++) hiddenFromView[P.offset + i] = 1;
 
   // ── seams as work items ──────────────────────────────────────────────────────────────────
   const works: Work[] = [];
@@ -4685,7 +4689,15 @@ export function solveDoll(input: DollInput): DollReport {
       }
       pass(S, 1);
       passes++;
-      if (opt.onFrame && passes % 20 === 0) opt.onFrame(Float32Array.from(pos), passes);
+      if (opt.onFrame && passes % 20 === 0) {
+        const frame = Float32Array.from(pos);
+        // Unplaced panels have solver coordinates for diagnostics only. Collapse them to a point in
+        // live frames so the canvas never shows a side pile while the final report is being built.
+        for (let v = 0; v < N; v++)
+          if (!placed[v] || hiddenFromView[v])
+            frame[3 * v] = frame[3 * v + 1] = frame[3 * v + 2] = 0;
+        opt.onFrame(frame, passes);
+      }
     }
   };
 
@@ -6266,6 +6278,155 @@ export function solveDoll(input: DollInput): DollReport {
     });
   const a = (Math.PI / 180) * ARM_DEG;
   const sleeveFrames: Partial<Record<'L' | 'R', Frame>> = {};
+  const sleeveRegistered = new Set<DollGroupId>();
+  const sleeveProxyReport = new Map<DollGroupId, DollProxy>();
+  const sleeveCapFloor = new Map<DollGroupId, number>();
+  type RigidFit = {
+    score: number;
+    point: (p: Vec3) => Vec3;
+    vector: (v: Vec3) => Vec3;
+  };
+  /** Least-squares rigid registration (Horn quaternion fit): no scale and no cloth deformation. */
+  const rigidFit = (from: Vec3[], to: Vec3[]): RigidFit | null => {
+    if (from.length !== to.length || from.length < 3) return null;
+    const mean = (pts: Vec3[]): Vec3 => {
+      const c: Vec3 = [0, 0, 0];
+      for (const p of pts) for (let q = 0; q < 3; q++) c[q] += p[q];
+      return [c[0] / pts.length, c[1] / pts.length, c[2] / pts.length];
+    };
+    const ca = mean(from);
+    const cb = mean(to);
+    const S = Array.from({ length: 3 }, () => [0, 0, 0]);
+    for (let i = 0; i < from.length; i++) {
+      const x = sub(from[i], ca);
+      const y = sub(to[i], cb);
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) S[r][c] += x[r] * y[c];
+    }
+    const [xx, xy, xz] = S[0];
+    const [yx, yy, yz] = S[1];
+    const [zx, zy, zz] = S[2];
+    const N = [
+      [xx + yy + zz, yz - zy, zx - xz, xy - yx],
+      [yz - zy, xx - yy - zz, xy + yx, zx + xz],
+      [zx - xz, xy + yx, -xx + yy - zz, yz + zy],
+      [xy - yx, zx + xz, yz + zy, -xx - yy + zz],
+    ];
+    // Shift the symmetric matrix so power iteration finds its largest algebraic eigenvalue.
+    const shift = Math.max(...N.map((row) => row.reduce((t, x) => t + Math.abs(x), 0))) + 1;
+    let q = [1, 0.5, -0.25, 0.75];
+    for (let k = 0; k < 40; k++) {
+      const z = N.map((row, r) => row.reduce((t, x, c) => t + x * q[c], shift * q[r]));
+      const l = Math.hypot(...z) || 1;
+      q = z.map((x) => x / l);
+    }
+    const [qw, qx, qy, qz] = q;
+    const vector = (v: Vec3): Vec3 => [
+      (1 - 2 * (qy * qy + qz * qz)) * v[0] +
+        2 * (qx * qy - qw * qz) * v[1] +
+        2 * (qx * qz + qw * qy) * v[2],
+      2 * (qx * qy + qw * qz) * v[0] +
+        (1 - 2 * (qx * qx + qz * qz)) * v[1] +
+        2 * (qy * qz - qw * qx) * v[2],
+      2 * (qx * qz - qw * qy) * v[0] +
+        2 * (qy * qz + qw * qx) * v[1] +
+        (1 - 2 * (qx * qx + qy * qy)) * v[2],
+    ];
+    const rca = vector(ca);
+    const move = sub(cb, rca);
+    const point = (p: Vec3): Vec3 => add(vector(p), move);
+    const score = Math.sqrt(
+      from.reduce((t, p, i) => {
+        const d = sub(point(p), to[i]);
+        return t + dot(d, d);
+      }, 0) / from.length,
+    );
+    return { score, point, vector };
+  };
+  const samplePath = (P: Path, t: number): Vec3 => {
+    const s = Math.max(0, Math.min(P.len, t * P.len));
+    let lo = 0;
+    let hi = P.s.length - 1;
+    while (hi - lo > 1) {
+      const m = (lo + hi) >> 1;
+      if (P.s[m] <= s) lo = m;
+      else hi = m;
+    }
+    const d = P.s[hi] - P.s[lo];
+    const w = d > 1e-9 ? (s - P.s[lo]) / d : 0;
+    const a0 = getPos(P.v[lo]);
+    const a1 = getPos(P.v[hi]);
+    return add(a0, sub(a1, a0), w);
+  };
+  const pathGap = (A: Path, B: Path) => {
+    const toPath = (p: Vec3, Q: Path) => {
+      let best = Infinity;
+      for (let i = 1; i < Q.v.length; i++) {
+        const a0 = getPos(Q.v[i - 1]);
+        const d = sub(getPos(Q.v[i]), a0);
+        const l2 = dot(d, d);
+        const t = l2 > 0 ? Math.max(0, Math.min(1, dot(sub(p, a0), d) / l2)) : 0;
+        best = Math.min(best, Math.hypot(...sub(p, add(a0, d, t))));
+      }
+      return best;
+    };
+    const gaps: number[] = [];
+    for (let k = 0; k < 32; k++) {
+      const t = k / 31;
+      gaps.push(toPath(samplePath(A, t), B), toPath(samplePath(B, t), A));
+    }
+    gaps.sort((x, y) => x - y);
+    return gaps[Math.floor(0.95 * (gaps.length - 1))] ?? Infinity;
+  };
+  const pathOfVerts = (verts: number[], closed: boolean): Path | null => {
+    const v = [...verts];
+    if (closed && v.length > 2 && v[0] !== v[v.length - 1]) v.push(v[0]);
+    if (v.length < 2) return null;
+    const s = [0];
+    for (let i = 1; i < v.length; i++)
+      s.push(s[i - 1] + Math.hypot(...sub(getPos(v[i]), getPos(v[i - 1]))));
+    return { v: Int32Array.from(v), s: Float64Array.from(s), len: s[s.length - 1] };
+  };
+  const fitPaths = (
+    pairs: { sleeve: Path; body: Path; bodyClosed?: boolean }[],
+  ): RigidFit | null => {
+    let best: RigidFit | null = null;
+    const phases = pairs.some((p) => p.bodyClosed)
+      ? Array.from({ length: 24 }, (_, k) => k / 24)
+      : [0];
+    for (const reverse of [false, true])
+      for (const phase of phases) {
+        const from: Vec3[] = [];
+        const to: Vec3[] = [];
+        for (const pair of pairs)
+          for (let k = 0; k < 32; k++) {
+            const t = k / 31;
+            const bt = pair.bodyClosed ? ((reverse ? -t : t) + phase + 2) % 1 : reverse ? 1 - t : t;
+            from.push(samplePath(pair.sleeve, t));
+            to.push(samplePath(pair.body, bt));
+          }
+        const fit = rigidFit(from, to);
+        if (fit && (!best || fit.score < best.score)) best = fit;
+      }
+    return best;
+  };
+  const applySleeveFit = (gid: DollGroupId, list: Panel[], F: Frame, fit: RigidFit | null) => {
+    if (!fit) return;
+    for (const P of list)
+      for (let i = 0; i < P.count; i++) {
+        const v = P.offset + i;
+        setPos(v, fit.point(getPos(v)));
+      }
+    F.c = fit.point(F.c);
+    F.up = fit.vector(F.up);
+    F.e0 = fit.vector(F.e0);
+    F.e90 = fit.vector(F.e90);
+    const rep = sleeveProxyReport.get(gid);
+    if (rep) {
+      rep.origin = F.c;
+      rep.axis = [-F.up[0], -F.up[1], -F.up[2]];
+    }
+    sleeveRegistered.add(gid);
+  };
   // Which armhole a sleeve goes to: its hand, unless the graph sews it to body edges that sit on
   // the other side of the doll (sleeve hands swapped, or a back drawn as seen from the front) —
   // then the seams win and the swap is reported.
@@ -6311,6 +6472,7 @@ export function solveDoll(input: DollInput): DollReport {
       if (w > wMax) [vW, wMax] = [v, w];
     }
     const capH = Math.max(40, hi - vW);
+    sleeveCapFloor.set(gid, vW);
     // Cap apex: the top-most chart point.
     let uApex = 0;
     let best = -Infinity;
@@ -6323,19 +6485,60 @@ export function solveDoll(input: DollInput): DollReport {
     // the front and back armholes never join into a loop) the graph's own seams from this
     // sleeve onto body pieces say where the opening is — the sleeve is set on their body side and
     // the seam judged after, instead of a guess 290 mm away that the far-apart rule then refuses.
-    const graphArm: number[] = [];
-    if (!armLoop[side])
-      for (const sm of G.seams) {
-        const bodySide = inGroups(sm.a, new Set([gid]))
-          ? inGroups(sm.b, new Set(['BODY']))
-            ? ('b' as const)
-            : null
-          : inGroups(sm.b, new Set([gid])) && inGroups(sm.a, new Set(['BODY']))
-            ? ('a' as const)
-            : null;
-        const B = bodySide ? sewnSide(sm, bodySide) : null;
-        if (B) graphArm.push(...B.v);
-      }
+    const graphSeams = G.seams.flatMap((sm) => {
+      // A stored composite armhole can start with a surface piece and then continue around body
+      // panels. The cap side must be wholly this sleeve; the target need only contain body edges.
+      const touchesBody = (ids: EdgeId[]) =>
+        ids.some((id) => panelByKey.get(pk(id))?.group === 'BODY');
+      const sleeveSide = inGroups(sm.a, new Set([gid]))
+        ? touchesBody(sm.b)
+          ? ('a' as const)
+          : null
+        : inGroups(sm.b, new Set([gid])) && touchesBody(sm.a)
+          ? ('b' as const)
+          : null;
+      if (!sleeveSide) return [];
+      const sleeve = sewnSide(sm, sleeveSide);
+      const bodySide = sleeveSide === 'a' ? 'b' : 'a';
+      const bodyIds = (bodySide === 'a' ? sm.a : sm.b).filter(
+        (id) => panelByKey.get(pk(id))?.group === 'BODY',
+      );
+      // Owner surface placement happens after the solve. If such a piece starts the stored
+      // composite, its edge is not drawable yet; the remaining body run is still the armhole cue.
+      const body = sewnSide(sm, bodySide) ?? pathOf(bodyIds);
+      return sleeve && body ? [{ sleeve, body }] : [];
+    });
+    // Confirmed rows that no operation names are not sewing work in owner mode, but they remain
+    // exact placement topology. This is how an omitted cap row can register a sleeve without the
+    // doll claiming that the operation sewed it.
+    const cuesOf = (candidates: readonly SeamCandidate[]) =>
+      candidates.flatMap((candidate) => {
+        const ids = (side: 'a' | 'b') =>
+          (side === 'a'
+            ? candidate.aParts ?? edgeIdsOf(candidate.a)
+            : candidate.bParts ?? edgeIdsOf(candidate.b)
+          ).flatMap(edgeIdsOf);
+        const aIds = ids('a');
+        const bIds = ids('b');
+        const allSleeve = (xs: EdgeId[]) =>
+          xs.length > 0 && xs.every((id) => panelByKey.get(pk(id))?.group === gid);
+        const bodyIds = (xs: EdgeId[]) =>
+          xs.filter((id) => panelByKey.get(pk(id))?.group === 'BODY');
+        const sleeveIds = allSleeve(aIds) ? aIds : allSleeve(bIds) ? bIds : [];
+        const targetIds =
+          sleeveIds === aIds ? bodyIds(bIds) : sleeveIds === bIds ? bodyIds(aIds) : [];
+        const sleeve = pathOf(sleeveIds);
+        const body = pathOf(targetIds);
+        return sleeve && body ? [{ sleeve, body }] : [];
+      });
+    const selectedCues = cuesOf(resolvedRows?.forced ?? []);
+    const confirmedCues = cuesOf(joinsNotSewn);
+    const placementSeams = graphSeams.length
+      ? graphSeams
+      : selectedCues.length
+        ? selectedCues
+        : confirmedCues;
+    const graphArm = placementSeams.flatMap(({ body }) => [...body.v]);
     if (!armLoop[side] && graphArm.length)
       warnings.push(
         `${s === 'L' ? 'left' : 'right'} sleeve: the body has no ${side === 'L' ? 'left' : 'right'} armhole loop — set on the body edges the graph sews it to`,
@@ -6378,7 +6581,15 @@ export function solveDoll(input: DollInput): DollReport {
       },
     };
     const pi = proxies.push(armProxy) - 1;
-    proxyReport.push({ group: gid, kind: 'capsule', profile: [[0, Rw, Rw]], origin: F.c, axis: d });
+    const proxyRep: DollProxy = {
+      group: gid,
+      kind: 'capsule',
+      profile: [[0, Rw, Rw]],
+      origin: F.c,
+      axis: d,
+    };
+    proxyReport.push(proxyRep);
+    sleeveProxyReport.set(gid, proxyRep);
     for (const P of list) buildPanelLater.push(P);
     const placeAt = (th0: number) => {
       for (const P of list) {
@@ -6395,39 +6606,16 @@ export function solveDoll(input: DollInput): DollReport {
       }
     };
     placeAt(0);
-    // Set by the graph's seams: turned about its axis to where those seams' two sides lie nearest
-    // (the cap's apex has no landmark of its own on the body side), then moved so the two sides'
-    // centroids coincide (the cap ring's centre is not the apex).
-    if (!armLoop[side] && graphArm.length) {
-      const comps = G.seams.filter(
-        (sm) =>
-          (inGroups(sm.a, new Set([gid])) && inGroups(sm.b, new Set(['BODY']))) ||
-          (inGroups(sm.b, new Set([gid])) && inGroups(sm.a, new Set(['BODY']))),
-      );
+    // Register the existing cap seam onto its armhole path before solving. This is a rigid
+    // placement cue only: it neither creates a seam nor changes either path's length. Stored owner
+    // rows work here too, and a detected free armhole no longer suppresses the registration.
+    if (placementSeams.length) {
       graphPlaced.add(gid);
-      let bestTh = 0;
-      let bestD = comps.reduce((t, sm) => t + gapOf(sm), 0);
-      for (let k = 1; k < 24; k++) {
-        placeAt((TAU * k) / 24);
-        const d = comps.reduce((t, sm) => t + gapOf(sm), 0);
-        if (d < bestD - 1e-6) [bestTh, bestD] = [(TAU * k) / 24, d];
-      }
-      placeAt(bestTh);
-      const shift: Vec3 = [0, 0, 0];
-      let n = 0;
-      for (const sm of comps) {
-        const sleeveSide = inGroups(sm.a, new Set([gid])) ? 'a' : 'b';
-        const A = sewnSide(sm, sleeveSide);
-        const B = sewnSide(sm, sleeveSide === 'a' ? 'b' : 'a');
-        if (!A || !B) continue;
-        const d = sub(centroid([...B.v]), centroid([...A.v]));
-        for (let q = 0; q < 3; q++) shift[q] += d[q];
-        n++;
-      }
-      if (n) {
-        F.c = add(F.c, [shift[0] / n, shift[1] / n, shift[2] / n]);
-        placeAt(bestTh);
-      }
+      const gap = Math.max(...placementSeams.map(({ sleeve, body }) => pathGap(sleeve, body)));
+      if (gap > 15) {
+        const fit = fitPaths(placementSeams);
+        applySleeveFit(gid, list, F, fit);
+      } else sleeveRegistered.add(gid);
     }
   }
   // Sleeve tube closures, then cap ↔ armhole.
@@ -6443,6 +6631,61 @@ export function solveDoll(input: DollInput): DollReport {
       'proposed-composite',
       passes,
     );
+    const loops = loopsOf(new Set([gid]));
+    const F = sleeveFrames[s]!;
+    const cap = loops
+      .filter((l) => l.len > 150)
+      .sort(
+        (x, y) =>
+          Math.max(...y.verts.map((v) => cuv[2 * v + 1])) -
+          Math.max(...x.verts.map((v) => cuv[2 * v + 1])),
+      )[0];
+    const capArc = (() => {
+      if (!cap) return [];
+      const vs = cap.verts;
+      const floor = sleeveCapFloor.get(gid) ?? -Infinity;
+      let apex = 0;
+      for (let i = 1; i < vs.length; i++) if (cuv[2 * vs[i] + 1] > cuv[2 * vs[apex] + 1]) apex = i;
+      let start = apex;
+      let end = apex;
+      for (let n = 0; n < vs.length - 1; n++) {
+        const prev = (start - 1 + vs.length) % vs.length;
+        if (cuv[2 * vs[prev] + 1] < floor) break;
+        start = prev;
+      }
+      for (let n = 0; n < vs.length - 1; n++) {
+        const next = (end + 1) % vs.length;
+        if (cuv[2 * vs[next] + 1] < floor) break;
+        end = next;
+      }
+      // Include the crossing vertices immediately below the widest level: these are the two
+      // underarm ends, while the highest point between them is the shoulder landmark.
+      start = (start - 1 + vs.length) % vs.length;
+      end = (end + 1) % vs.length;
+      const out: number[] = [];
+      for (let i = start, guard = 0; guard < vs.length; i = (i + 1) % vs.length, guard++) {
+        out.push(vs[i]);
+        if (i === end) break;
+      }
+      return out.length >= 3 ? out : [...vs];
+    })();
+    if (opt.debug)
+      warnings.push(
+        `debug: ${gid} loops ${loops.map((l) => `${l.len.toFixed(0)}${l.closed ? '' : '(open)'}`).join(' ')}`,
+      );
+    // With no drawable stored cap row, use the free cap and armhole arcs as placement topology.
+    // Owner mode deliberately gets this registration too, but still gets no proposed seam below.
+    if (!sleeveRegistered.has(gid) && cap && armLoop[armSide[s]]) {
+      const sleeve = pathOfVerts(capArc, false);
+      const body = pathOfVerts(armLoop[armSide[s]]!.verts, armLoop[armSide[s]]!.closed);
+      if (sleeve && body)
+        applySleeveFit(
+          gid,
+          groups.get(gid)!,
+          F,
+          fitPaths([{ sleeve, body, bodyClosed: armLoop[armSide[s]]!.closed }]),
+        );
+    }
     if (sewnNear(gid, 'BODY') || !proposalsAllowed) continue;
     // L4: a sleeve a person sewed to the body by a confirmed seam is not proposed again.
     if (
@@ -6455,16 +6698,6 @@ export function solveDoll(input: DollInput): DollReport {
       )
     )
       continue;
-    const loops = loopsOf(new Set([gid]));
-    const F = sleeveFrames[s]!;
-    const capTop = fromFrame(F, 0, 0, 0);
-    const big = loops.filter((l) => l.len > 150).map((l) => ({ l, c: centroid(l.verts) }));
-    big.sort((x, y) => Math.hypot(...sub(x.c, capTop)) - Math.hypot(...sub(y.c, capTop)));
-    const cap = big[0]?.l;
-    if (opt.debug)
-      warnings.push(
-        `debug: ${gid} loops ${loops.map((l) => `${l.len.toFixed(0)}${l.closed ? '' : '(open)'}`).join(' ')}`,
-      );
     if (!cap) continue;
     if (!armLoop[armSide[s]]) {
       warnings.push(
@@ -6474,7 +6707,7 @@ export function solveDoll(input: DollInput): DollReport {
     }
     propose(
       `${s === 'L' ? 'left' : 'right'} sleeve cap ↔ armhole`,
-      cap,
+      { ...cap, verts: capArc, closed: false },
       armLoop[armSide[s]]!,
       'lowest',
       gid,
@@ -7817,7 +8050,8 @@ export function solveDoll(input: DollInput): DollReport {
     return `layer pair ${[P.key, ...P.layers].join(' + ')} — the plies are sewn to each other, but the pair is not attached to the rest yet (${others.length ? `no seam to ${others.join(', ')}${want.size > others.length ? ', …' : ''}` : 'no seam to any other piece'}) — drawn apart`;
   };
 
-  // Floating pieces stand beside the doll (or beside the bag), flat, facing front.
+  // Unplaceable pieces retain flat diagnostic geometry, but are omitted from garment frames and
+  // from the final mesh. Their `floating` rows below remain the report of what was not placed.
   let xMax = 0;
   let yLow = Infinity;
   for (let v = 0; v < N; v++)
@@ -7873,6 +8107,7 @@ export function solveDoll(input: DollInput): DollReport {
           P.fold ? P.fold.off[i] : 0,
         ]);
         placed[v] = 1;
+        hiddenFromView[v] = 1;
       }
       // Laid as cut, it is face up whatever the chart decided: its fold's plies are measured by it.
       if (!asChart) P.mirrored = false;
@@ -9045,36 +9280,38 @@ export function solveDoll(input: DollInput): DollReport {
   for (let i = 0; i < 3 * N; i++) positions[i] = Number.isFinite(pos[i]) ? pos[i] : 0;
   for (let i = 0; i < surfacePos.length; i++)
     positions[3 * N + i] = Number.isFinite(surfacePos[i]) ? surfacePos[i] : 0;
-  const outPanels: DollReport['panels'] = panels.map((P) => {
-    const tris = new Uint32Array(P.mesh.tris.length);
-    const flipP = P.mirrored !== faceFlip.has(P.idx);
-    for (let t = 0; t < tris.length; t += 3) {
-      tris[t] = P.mesh.tris[t];
-      // A part a fold turned over is wound the other way (its face now looks in).
-      const flip = flipP !== (P.fold?.triFlip[t / 3] === 1);
-      tris[t + 1] = flip ? P.mesh.tris[t + 2] : P.mesh.tris[t + 1];
-      tris[t + 2] = flip ? P.mesh.tris[t + 1] : P.mesh.tris[t + 2];
-    }
-    const uvf = new Float32Array(2 * P.count);
-    if (P.fold)
-      for (let i = 0; i < P.count; i++) {
-        uvf[2 * i] = P.fold.flat[i][0];
-        uvf[2 * i + 1] = P.fold.flat[i][1];
+  const outPanels: DollReport['panels'] = panels
+    .filter((P) => !hiddenFromView[P.offset])
+    .map((P) => {
+      const tris = new Uint32Array(P.mesh.tris.length);
+      const flipP = P.mirrored !== faceFlip.has(P.idx);
+      for (let t = 0; t < tris.length; t += 3) {
+        tris[t] = P.mesh.tris[t];
+        // A part a fold turned over is wound the other way (its face now looks in).
+        const flip = flipP !== (P.fold?.triFlip[t / 3] === 1);
+        tris[t + 1] = flip ? P.mesh.tris[t + 2] : P.mesh.tris[t + 1];
+        tris[t + 2] = flip ? P.mesh.tris[t + 1] : P.mesh.tris[t + 2];
       }
-    else for (let i = 0; i < 2 * P.count; i++) uvf[i] = uv[2 * P.offset + i];
-    return {
-      pieceKey: P.key,
-      instance: 0 as const,
-      mirrored: P.mirrored,
-      group: P.group,
-      offset: P.offset,
-      count: P.count,
-      tris,
-      uv: uvf,
-      boundary: Uint32Array.from(P.mesh.bVert),
-      layers: P.layers,
-    };
-  });
+      const uvf = new Float32Array(2 * P.count);
+      if (P.fold)
+        for (let i = 0; i < P.count; i++) {
+          uvf[2 * i] = P.fold.flat[i][0];
+          uvf[2 * i + 1] = P.fold.flat[i][1];
+        }
+      else for (let i = 0; i < 2 * P.count; i++) uvf[i] = uv[2 * P.offset + i];
+      return {
+        pieceKey: P.key,
+        instance: 0 as const,
+        mirrored: P.mirrored,
+        group: P.group,
+        offset: P.offset,
+        count: P.count,
+        tris,
+        uv: uvf,
+        boundary: Uint32Array.from(P.mesh.bVert),
+        layers: P.layers,
+      };
+    });
   outPanels.push(...surfacePanels);
   // Pieces that end up in no closed/proposed seam at all are floating too (a bag's strap laid on
   // its panel by a reading of the order is said as a surface row instead).
@@ -9093,6 +9330,13 @@ export function solveDoll(input: DollInput): DollReport {
         reason: plyWords(P) ?? 'in its group but no seam of it closed or was proposed',
       });
   }
+  // Seams stay in the written report, including their measured state and words, but a seam that
+  // touches an omitted panel has no drawable path in the garment view.
+  for (const seam of seams)
+    if ([...seam.pathA, ...seam.pathB].some((v) => hiddenFromView[v])) {
+      seam.pathA = new Uint32Array(0);
+      seam.pathB = new Uint32Array(0);
+    }
   // Collar units: gaps after solving; a fall's outer edge vs the stand top it hangs from, and how
   // much of it stays outside the stand's surface.
   if (opt.debug)
