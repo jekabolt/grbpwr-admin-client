@@ -6391,8 +6391,12 @@ export function solveDoll(input: DollInput): DollReport {
       s.push(s[i - 1] + Math.hypot(...sub(getPos(v[i]), getPos(v[i - 1]))));
     return { v: Int32Array.from(v), s: Float64Array.from(s), len: s[s.length - 1] };
   };
+  // `arm`: the sleeve's direction down the arm as placed — its x says which side of the doll the
+  // sleeve hangs on. A cap and an armhole are both near-flat rings, so a turn through the body
+  // registers them as well as the true one; a fit that swings the arm to the other side is refused.
   const fitPaths = (
     pairs: { sleeve: Path; body: Path; bodyClosed?: boolean }[],
+    arm?: Vec3,
   ): RigidFit | null => {
     let best: RigidFit | null = null;
     const phases = pairs.some((p) => p.bodyClosed)
@@ -6410,6 +6414,7 @@ export function solveDoll(input: DollInput): DollReport {
             to.push(samplePath(pair.body, bt));
           }
         const fit = rigidFit(from, to);
+        if (arm && fit && fit.vector(arm)[0] * Math.sign(arm[0]) <= 0) continue;
         if (fit && (!best || fit.score < best.score)) best = fit;
       }
     return best;
@@ -6621,7 +6626,7 @@ export function solveDoll(input: DollInput): DollReport {
       graphPlaced.add(gid);
       const gap = Math.max(...placementSeams.map(({ sleeve, body }) => pathGap(sleeve, body)));
       if (gap > 15) {
-        const fit = fitPaths(placementSeams);
+        const fit = fitPaths(placementSeams, [-F.up[0], -F.up[1], -F.up[2]]);
         applySleeveFit(gid, list, F, fit);
       } else sleeveRegistered.add(gid);
     }
@@ -6691,7 +6696,10 @@ export function solveDoll(input: DollInput): DollReport {
           gid,
           groups.get(gid)!,
           F,
-          fitPaths([{ sleeve, body, bodyClosed: armLoop[armSide[s]]!.closed }]),
+          fitPaths(
+            [{ sleeve, body, bodyClosed: armLoop[armSide[s]]!.closed }],
+            [-F.up[0], -F.up[1], -F.up[2]],
+          ),
         );
     }
     if (sewnNear(gid, 'BODY') || !proposalsAllowed) continue;
