@@ -1520,6 +1520,38 @@ export function solveDoll(input: DollInput): DollReport {
         break;
       }
     }
+    // Two step guesses on one edge: one sews it alone onto an edge of about its length, the other
+    // sews it as a part of a run whose parts add up to their partner (a sleeve cap onto the four
+    // parts of its armhole, 541 = 541 mm). Two single edges of a shirt match in length by chance
+    // (a yoke's armhole end onto a front's neckline, 106 ≈ 107 mm); several parts adding up to
+    // their partner do not. The run stands; the single-edge guess is not sewn.
+    const sideLen = (c: GroupedSeam, w: 'a' | 'b') =>
+      [...new Set(c[w])].reduce((t, id) => {
+        const r = c.seam.partRange?.[id];
+        return t + (r ? r[1] - r[0] : lenOfEdge(id));
+      }, 0);
+    const runs = G.seams.filter((c) => {
+      if (!isGuess(c.seam) || guessYield.has(`${c.seam.a}~${c.seam.b}`)) return false;
+      if (new Set(c.a).size < 2 && new Set(c.b).size < 2) return false;
+      const la = sideLen(c, 'a');
+      const lb = sideLen(c, 'b');
+      return Math.abs(la - lb) <= 0.03 * Math.max(la, lb);
+    });
+    for (const g of G.seams) {
+      const id = `${g.seam.a}~${g.seam.b}`;
+      if (!isGuess(g.seam) || guessYield.has(id) || g.a.length !== 1 || g.b.length !== 1) continue;
+      for (const E of [g.a[0], g.b[0]]) {
+        const whole = runs.find(
+          (c) => c !== g && [c.a, c.b].some((side) => new Set(side).size > 1 && side.includes(E)),
+        );
+        if (!whole) continue;
+        guessYield.set(
+          id,
+          `step ${guessStepOf.get(g.seam.provenance?.seamKey ?? '')} names no row — the step picture's guess sews ${E} alone onto ${E === g.a[0] ? g.b[0] : g.a[0]}, but step ${guessStepOf.get(whole.seam.provenance?.seamKey ?? '')}'s guess sews it as a part of ${whole.a.join('+')} ↔ ${whole.b.join('+')} (${sideLen(whole, 'a').toFixed(0)} ≈ ${sideLen(whole, 'b').toFixed(0)} mm); an edge takes one seam — the run that adds up stands`,
+        );
+        break;
+      }
+    }
   }
   // LEGS FROM THE DRAWING (trousers). A leg is the front and the back sewn by their inseam /
   // outseam, with whatever is sewn on top of them (a yoke unit, a pocket bag): the pieces joined by
@@ -6307,6 +6339,7 @@ export function solveDoll(input: DollInput): DollReport {
   // Graph seams between the body and another group (rare: the graph found a composite).
   const graphTouches = (g1: DollGroupId, g2: Set<DollGroupId>) =>
     G.seams.some((s) => {
+      if (guessYield.has(`${s.seam.a}~${s.seam.b}`)) return false;
       const ga = panelByKey.get(pk(s.a[0]))?.group;
       const gb = panelByKey.get(pk(s.b[0]))?.group;
       return (ga === g1 && gb && g2.has(gb)) || (gb === g1 && ga && g2.has(ga));
