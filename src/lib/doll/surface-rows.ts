@@ -60,11 +60,16 @@ export function rowParts(c: SeamCandidate, side: 'a' | 'b'): RowPart[] {
 
 /**
  * Structural seams hidden by a surface piece. Two stored rows can name the same pocket edge: one
- * lays that edge on a shell panel, while the other sews the next shell panel to it. The pocket is
- * placed only after the solve, so the latter row must sew the two drawn shell stretches under it.
+ * lays that edge on a shell panel, while the other sews the next shell panel to it. A step can
+ * instead name another edge of that pocket; then an existing direct shell row supplies the exact
+ * seam under it. The pocket is placed only after the solve, so the step's row/guess must sew the
+ * two drawn shell stretches under it.
  */
 export function shellSeamsUnderSurfaceRows(args: {
+  /** Rows/guesses actually named by steps. */
   rows: readonly SeamCandidate[];
+  /** Confirmed direct shell rows not named by a step. */
+  shellRows?: readonly SeamCandidate[];
   lays: ReadonlyMap<string, RowLay>;
   drawn: ReadonlySet<string>;
   leadEdge?: (id: EdgeId) => EdgeId;
@@ -102,6 +107,8 @@ export function shellSeamsUnderSurfaceRows(args: {
   const sameRange = (a?: [number, number], b?: [number, number]) =>
     (!a && !b) || (!!a && !!b && Math.abs(a[0] - b[0]) <= 1 && Math.abs(a[1] - b[1]) <= 1);
   const sameStretch = (a: RowPart, b: RowPart) => a.id === b.id && sameRange(a.range, b.range);
+  const sameSide = (a: readonly RowPart[], b: readonly RowPart[]) =>
+    a.length === b.length && a.every((part, i) => sameStretch(part, b[i]));
   const sideSig = (ids: readonly EdgeId[]) => [...ids].sort().join('+');
   const seamSig = (a: readonly EdgeId[], b: readonly EdgeId[]) =>
     [sideSig(a), sideSig(b)].sort().join('~');
@@ -132,19 +139,44 @@ export function shellSeamsUnderSurfaceRows(args: {
         entry.shell.some((part) => part.piece === lay.on),
     );
     if (!host) continue;
-    for (const caught of entries) {
-      if (
-        caught === host ||
-        caught.surface.piece !== piece ||
-        !sameStretch(caught.surface, host.surface)
-      )
-        continue;
-      const caughtIds = caught.shell.map((part) => part.id);
-      const hostIds = host.shell.map((part) => part.id);
+    const caughtEntries = entries
+      .filter((entry) => entry !== host && entry.surface.piece === piece)
+      // A row on the pocket's actual host edge is the direct evidence. A step guess on another
+      // pocket edge is only the fallback when no such row already supplies this shell seam.
+      .sort(
+        (a, b) =>
+          Number(!sameStretch(a.surface, host.surface)) -
+          Number(!sameStretch(b.surface, host.surface)),
+      );
+    for (const caught of caughtEntries) {
+      let caughtShell = caught.shell;
+      let hostShell = host.shell;
+      if (!sameStretch(caught.surface, host.surface)) {
+        // The step names another edge of the laid piece. It authorises only a direct shell row
+        // already confirmed between the named shell piece and the exact host stretch; the piece
+        // names alone never invent a join.
+        const caughtPieces = new Set(caught.shell.map((part) => part.piece));
+        const direct = (args.shellRows ?? []).flatMap((row) => {
+          const a = rowParts(row, 'a').map(mapped);
+          const b = rowParts(row, 'b').map(mapped);
+          if (!a.length || !b.length || ![...a, ...b].every((part) => args.drawn.has(part.piece)))
+            return [];
+          if (sameSide(a, host.shell) && b.every((part) => caughtPieces.has(part.piece)))
+            return [{ caught: b, host: a }];
+          if (sameSide(b, host.shell) && a.every((part) => caughtPieces.has(part.piece)))
+            return [{ caught: a, host: b }];
+          return [];
+        })[0];
+        if (!direct) continue;
+        caughtShell = direct.caught;
+        hostShell = direct.host;
+      }
+      const caughtIds = caughtShell.map((part) => part.id);
+      const hostIds = hostShell.map((part) => part.id);
       const a = caught.surfaceSide === 'a' ? hostIds : caughtIds;
       const b = caught.surfaceSide === 'b' ? hostIds : caughtIds;
       const sig = seamSig(a, b);
-      const key = `${caught.id}|${sig}`;
+      const key = sig;
       if (existing.has(sig) || seen.has(key)) continue;
       seen.add(key);
       out.push({

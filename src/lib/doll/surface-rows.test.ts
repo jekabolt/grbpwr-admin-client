@@ -112,4 +112,110 @@ describe('surface rows', () => {
       },
     ]);
   });
+
+  it('uses a confirmed shell row when a step guess names another pocket edge', () => {
+    const host = row('front#1', 'pocket#1');
+    const guess = row('yoke#4', 'pocket#2');
+    const shell = row('yoke#3', 'front#1');
+    const lays = new Map<string, RowLay>([
+      [
+        'pocket',
+        {
+          host: 'front',
+          T: [1, 0, 0, 1, 0, 0],
+          cover: 1,
+          row: 'front#1~pocket#1',
+          on: 'front',
+          depth: 0,
+          how: '',
+        },
+      ],
+    ]);
+
+    expect(
+      shellSeamsUnderSurfaceRows({
+        rows: [host, guess],
+        shellRows: [shell],
+        lays,
+        drawn: new Set(['front', 'yoke']),
+      }),
+    ).toEqual([
+      {
+        row: guess,
+        a: ['yoke#3'],
+        b: ['front#1'],
+        originalA: ['yoke#4'],
+        originalB: ['pocket#2'],
+        off: ['pocket'],
+        over: ['front#1'],
+      },
+    ]);
+  });
+
+  it('does not infer a shell seam from a guess on another pocket edge alone', () => {
+    const host = row('front#1', 'pocket#1');
+    const guess = row('yoke#4', 'pocket#2');
+    const lays = new Map<string, RowLay>([
+      [
+        'pocket',
+        {
+          host: 'front',
+          T: [1, 0, 0, 1, 0, 0],
+          cover: 1,
+          row: 'front#1~pocket#1',
+          on: 'front',
+          depth: 0,
+          how: '',
+        },
+      ],
+    ]);
+
+    expect(
+      shellSeamsUnderSurfaceRows({
+        rows: [host, guess],
+        lays,
+        drawn: new Set(['front', 'yoke']),
+      }),
+    ).toEqual([]);
+  });
+
+  it('does not duplicate a shared-edge shell seam for a fallback guess', () => {
+    const host = row('front#1', 'pocket#0');
+    const caught = row('yoke#4', 'pocket#0');
+    const guess = row('yoke#3', 'pocket#2');
+    const shell = row('yoke#4', 'front#1');
+    const lays = new Map<string, RowLay>([
+      [
+        'pocket',
+        {
+          host: 'front',
+          T: [1, 0, 0, 1, 0, 0],
+          cover: 1,
+          row: 'front#1~pocket#0',
+          on: 'front',
+          depth: 0,
+          how: '',
+        },
+      ],
+    ]);
+
+    expect(
+      shellSeamsUnderSurfaceRows({
+        rows: [host, guess, caught],
+        shellRows: [shell],
+        lays,
+        drawn: new Set(['front', 'yoke']),
+      }),
+    ).toEqual([
+      {
+        row: caught,
+        a: ['yoke#4'],
+        b: ['front#1'],
+        originalA: ['yoke#4'],
+        originalB: ['pocket#0'],
+        off: ['pocket'],
+        over: ['front#1'],
+      },
+    ]);
+  });
 });

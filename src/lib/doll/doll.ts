@@ -1491,8 +1491,8 @@ export function solveDoll(input: DollInput): DollReport {
   });
   warnings.push(...G.warnings);
   // Plan owner surface pieces before the structural solve. Besides placing them later, this tells
-  // which of two rows on one pocket edge is its host seam and which is a shell seam caught under
-  // the pocket. The latter must join the drawn shell now; the pocket itself is laid only afterward.
+  // which row lays a pocket on its host, so a step row/guess that catches the pocket over an exact
+  // shell row can join the drawn shell now; the pocket itself is laid only afterward.
   const ownerSurface = new Map(
     graph.chosen.flatMap((candidate) =>
       owner && candidate.kind === 'surface' && candidate.surface
@@ -1532,8 +1532,9 @@ export function solveDoll(input: DollInput): DollReport {
   if (owner) {
     const bridges = shellSeamsUnderSurfaceRows({
       rows: graphIn.chosen.filter(
-        (c) => isConf(c) && c.kind !== 'surface' && c.kind !== 'closure-not-seam',
+        (c) => (isConf(c) || isGuess(c)) && c.kind !== 'surface' && c.kind !== 'closure-not-seam',
       ),
+      shellRows: joinsNotSewn,
       lays: rowLays,
       drawn: shellHosts,
       leadEdge: G.leadEdge,
