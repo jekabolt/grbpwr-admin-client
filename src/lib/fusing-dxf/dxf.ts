@@ -187,45 +187,191 @@ function mapPointBetweenOutlines(
   };
 }
 
-/** Index of the target vertex that carries base vertex i (see mapFuseSpecToSize). */
-function vertexMatch(
-  base: readonly PtMm[],
-  target: readonly PtMm[],
+/** Vertices where the contour turns by more than this count as its corners. */
+const CONTOUR_CORNER_DEG = 35;
+
+type ContourRuns = { ring: PtMm[]; cum: number[]; corners: number[] };
+
+function contourRuns(outline: readonly PtMm[]): ContourRuns {
+  const ring = outline.filter(
+    (p, i) =>
+      Math.hypot(
+        p.x - outline[(i + 1) % outline.length].x,
+        p.y - outline[(i + 1) % outline.length].y,
+      ) > 1e-6,
+  );
+  const n = ring.length;
+  const cum = [0];
+  for (let i = 1; i <= n; i++)
+    cum.push(cum[i - 1] + Math.hypot(ring[i % n].x - ring[i - 1].x, ring[i % n].y - ring[i - 1].y));
+  const corners: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = ring[(i - 1 + n) % n];
+    const b = ring[i];
+    const c = ring[(i + 1) % n];
+    const t1 = Math.atan2(b.y - a.y, b.x - a.x);
+    const t2 = Math.atan2(c.y - b.y, c.x - b.x);
+    let turn = Math.abs(t2 - t1);
+    if (turn > Math.PI) turn = 2 * Math.PI - turn;
+    if ((turn * 180) / Math.PI > CONTOUR_CORNER_DEG) corners.push(i);
+  }
+  return { ring, cum, corners };
+}
+
+function pointAtArc(c: ContourRuns, s: number): { p: PtMm; dir: number } {
+  const total = c.cum[c.ring.length];
+  const t = ((s % total) + total) % total;
+  let i = 0;
+  while (i < c.ring.length - 1 && c.cum[i + 1] < t) i++;
+  const a = c.ring[i];
+  const b = c.ring[(i + 1) % c.ring.length];
+  const len = c.cum[i + 1] - c.cum[i];
+  const f = len > 0 ? (t - c.cum[i]) / len : 0;
+  return {
+    p: { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f },
+    dir: Math.atan2(b.y - a.y, b.x - a.x),
+  };
+}
+
+/** Nearest point of the ring stretch [s0, s1] (arc, cyclic), with its tangent direction. */
+function projectOnRun(
+  c: ContourRuns,
+  q: PtMm,
+  s0: number,
+  s1: number,
+): { p: PtMm; d: number; s: number; tx: number; ty: number } {
+  const n = c.ring.length;
+  const total = c.cum[n];
+  const len = (((s1 - s0) % total) + total) % total || total;
+  let best = { p: q, d: Infinity, s: s0, tx: 1, ty: 0 };
+  for (let i = 0; i < n; i++) {
+    const startArc = (((c.cum[i] - s0) % total) + total) % total;
+    if (startArc >= len - 1e-9) continue;
+    const a = c.ring[i];
+    const b = c.ring[(i + 1) % n];
+    const abx = b.x - a.x;
+    const aby = b.y - a.y;
+    const ll = abx * abx + aby * aby;
+    if (ll <= 0) continue;
+    const t = Math.max(0, Math.min(1, ((q.x - a.x) * abx + (q.y - a.y) * aby) / ll));
+    const p = { x: a.x + abx * t, y: a.y + aby * t };
+    const d = Math.hypot(q.x - p.x, q.y - p.y);
+    if (d < best.d) {
+      const l = Math.sqrt(ll);
+      best = { p, d, s: c.cum[i] + l * t, tx: abx / l, ty: aby / l };
+    }
+  }
+  return best;
+}
+
+/** Stretches this close to parallel cannot pin a point between them (one of them is used). */
+const MIN_PIN_ANGLE_DEG = 30;
+
+/**
+ * Carries a point of the base contour's plane onto the target contour. The contour is cut into
+ * stretches at its corners (corners matched across sizes by the grade's proportional position). A
+ * point keeps its signed mm from its two nearest non-parallel stretches — a placket band keeps its
+ * width off the front edge and its depth below the neck while the side seam grows. With one usable
+ * stretch it keeps its mm off it at the same arc fraction. null when the corners do not match up.
+ */
+function contourCarrier(
+  baseOutline: readonly PtMm[],
+  targetOutline: readonly PtMm[],
   from: ReturnType<typeof bbox>,
   to: ReturnType<typeof bbox>,
-): (i: number) => number {
-  const n = base.length;
-  const scaled = base.map((p) => mapPointBetweenOutlines(p, from, to));
-  if (n > 0 && target.length === n) {
-    let best = { shift: 0, dir: 1, cost: Infinity };
-    for (const dir of [1, -1])
-      for (let shift = 0; shift < n; shift++) {
-        let cost = 0;
-        for (let i = 0; i < n && cost < best.cost; i++) {
-          const t = target[(((shift + dir * i) % n) + n) % n];
-          cost += Math.hypot(t.x - scaled[i].x, t.y - scaled[i].y);
-        }
-        if (cost < best.cost) best = { shift, dir, cost };
-      }
-    return (i) => (((best.shift + best.dir * i) % n) + n) % n;
-  }
-  return (i) => {
-    let best = 0;
+): ((point: PtMm) => PtMm) | null {
+  const base = contourRuns(baseOutline);
+  const target = contourRuns(targetOutline);
+  if (base.ring.length < 3 || target.ring.length < 3 || base.corners.length < 2) return null;
+  const matched = base.corners.map((i) => {
+    const want = mapPointBetweenOutlines(base.ring[i], from, to);
+    let best = -1;
     let bestD = Infinity;
-    for (let j = 0; j < target.length; j++) {
-      const d = Math.hypot(target[j].x - scaled[i].x, target[j].y - scaled[i].y);
+    for (const j of target.corners) {
+      const d = Math.hypot(target.ring[j].x - want.x, target.ring[j].y - want.y);
       if (d < bestD) [best, bestD] = [j, d];
     }
     return best;
+  });
+  // One-to-one, in the same cyclic order: otherwise the corners are not the same corners.
+  if (new Set(matched).size !== matched.length || matched.some((j) => j < 0)) return null;
+  const start = matched.indexOf(Math.min(...matched));
+  for (let k = 1; k < matched.length; k++)
+    if (matched[(start + k) % matched.length] <= matched[(start + k - 1) % matched.length])
+      return null;
+  const m = base.corners.length;
+  const baseTotal = base.cum[base.ring.length];
+  const targetTotal = target.cum[target.ring.length];
+  const runs = base.corners.map((i, k) => ({
+    b0: base.cum[i],
+    b1: base.cum[base.corners[(k + 1) % m]],
+    t0: target.cum[matched[k]],
+    t1: target.cum[matched[(k + 1) % m]],
+  }));
+  const span = (s0: number, s1: number, total: number) =>
+    (((s1 - s0) % total) + total) % total || total;
+  return (point) => {
+    const near = runs
+      .map((run, k) => ({ k, run, pr: projectOnRun(base, point, run.b0, run.b1) }))
+      .sort((x, y) => x.pr.d - y.pr.d);
+    const first = near[0];
+    const second = near
+      .slice(1)
+      .find(
+        (x) =>
+          Math.abs(first.pr.tx * x.pr.ty - first.pr.ty * x.pr.tx) >
+          Math.sin((MIN_PIN_ANGLE_DEG * Math.PI) / 180),
+      );
+    const pins = [first, ...(second ? [second] : [])].map(({ run, pr }) => {
+      const signed = pr.tx * (point.y - pr.p.y) - pr.ty * (point.x - pr.p.x);
+      const along = (((pr.s - run.b0) % baseTotal) + baseTotal) % baseTotal;
+      const frac = along / span(run.b0, run.b1, baseTotal);
+      const arc = run.t0 + frac * span(run.t0, run.t1, targetTotal);
+      const at = pointAtArc(target, arc);
+      return {
+        run,
+        signed,
+        p: at.p,
+        tx: Math.cos(at.dir),
+        ty: Math.sin(at.dir),
+      };
+    });
+    const offsetOf = (pin: (typeof pins)[number]) => ({
+      x: pin.p.x - pin.ty * pin.signed,
+      y: pin.p.y + pin.tx * pin.signed,
+    });
+    if (pins.length < 2) return offsetOf(pins[0]);
+    let x = offsetOf(pins[0]);
+    for (let iter = 0; iter < 4; iter++) {
+      // tx·(X−P).y − ty·(X−P).x = signed, for both pins: a 2×2 linear system in X.
+      const [a, b] = pins;
+      const a11 = -a.ty;
+      const a12 = a.tx;
+      const c1 = a.signed + (-a.ty * a.p.x + a.tx * a.p.y);
+      const a21 = -b.ty;
+      const a22 = b.tx;
+      const c2 = b.signed + (-b.ty * b.p.x + b.tx * b.p.y);
+      const det = a11 * a22 - a12 * a21;
+      if (Math.abs(det) < 1e-9) break;
+      x = { x: (c1 * a22 - a12 * c2) / det, y: (a11 * c2 - c1 * a21) / det };
+      // Re-anchor each pin at X's nearest point of its target stretch (curved stretches).
+      for (const pin of pins) {
+        const pr = projectOnRun(target, x, pin.run.t0, pin.run.t1);
+        pin.p = pr.p;
+        pin.tx = pr.tx;
+        pin.ty = pr.ty;
+      }
+    }
+    return x;
   };
 }
 
 /**
  * Maps base-size markup onto one graded outline. Widths and insets remain physical millimetres;
  * positions follow the grade. Drawn zones use the two outlines' local frames, while strip trims
- * keep the same fraction of their selected edge run. A drawn zone's point keeps its offset in mm from
- * its nearest cut-contour vertex, which the grade carries to the target. A point on the inset
- * contour stays on it, so a contour-following side keeps following the contour in every size.
+ * keep the same fraction of their selected edge run. A drawn zone's point keeps its mm from the cut
+ * contour and, along it, from the nearer corner of that stretch (contourCarrier). A point on the
+ * inset contour stays on it, so a contour-following side keeps following the contour in every size.
  */
 export function mapFuseSpecToSize(
   source: PieceFuseSpec,
@@ -244,23 +390,12 @@ export function mapFuseSpecToSize(
     } catch {
       // generateFuseGeometry owns the inset refusal; the cut contour stands in for it here.
     }
-    // Grade rules live on the cut contour's vertices, so a zone point is carried by its nearest
-    // base vertex: the matching target vertex plus the same offset in mm. A placket band then keeps
-    // its width while the side seam grows. Vertices match by index (best cyclic shift) when both
-    // contours have as many; otherwise by the nearest vertex to the proportional position.
-    const targetVertexOf = vertexMatch(baseOutline, targetOutline, from, to);
+    // A zone point rides the cut contour: its nearest contour point keeps its mm from the nearer
+    // corner of that run, and the point keeps its mm off the contour. A placket band so keeps its
+    // width and its distance from the neck and the hem while the grade grows the piece around it.
+    const carry = contourCarrier(baseOutline, targetOutline, from, to);
     const mapPoint = (point: PtMm, followContour: boolean): PtMm => {
-      let best = 0;
-      let bestD = Infinity;
-      for (let i = 0; i < baseOutline.length; i++) {
-        const d = Math.hypot(point.x - baseOutline[i].x, point.y - baseOutline[i].y);
-        if (d < bestD) [best, bestD] = [i, d];
-      }
-      const v = baseOutline[best];
-      const w = targetOutline[targetVertexOf(best)];
-      const moved = baseOutline.length
-        ? { x: w.x + point.x - v.x, y: w.y + point.y - v.y }
-        : mapPointBetweenOutlines(point, from, to);
+      const moved = carry ? carry(point) : mapPointBetweenOutlines(point, from, to);
       const onContour =
         followContour &&
         baseInset &&
