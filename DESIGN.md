@@ -467,6 +467,27 @@ hand-rolled list uses `divide-y divide-hairline` or `last:border-b-0`.
 The final ordinary row has no bottom rule. `Row` / `RowTotal` and `DataTable` / `TotalRow`
 implement this. Feature-local row helpers follow the same rule but are not primitives.
 
+**Owner bans (06.11.26, labels & packaging review).** *(rules, not linted)*
+
+- **Never two ruled headings in a row.** A `SectionHeader` must not sit straight on a `GroupLabel`
+  (PACKAGING → PACK). Drop the sub-group label or put content between them.
+- **No floating actions.** An action never hangs alone at the right edge of a header, a rule or
+  under a form (`+ PHOTO` on a group rule, `+ NOTE · REMOVE` dangling below fields). It sits beside
+  the thing it acts on, inside that thing's frame.
+- **No ink-filled rows.** An open or selected list row is never filled with `textColor`. Ink fill
+  is for a selected `Chip` and a `main` button only; an open row shows its expanded body and
+  `FoldCaret`.
+- **Numbers get numeric inputs.** Sizes and `width × height` are numeric inputs with a unit, one per
+  dimension — never one free-text field.
+- **File slots are placeholders.** Picking a file is the dashed `Placeholder` / `AddDoor` tile with
+  its own drop target, never a bare underlined `CHOOSE FILE` link.
+- **Badges stay inside their tile.** A warning on a tile fits the tile; it never overflows the
+  frame.
+- **The output is visible.** If a block builds something that gets printed or sent to a factory
+  (a label, a sheet), its live preview sits on the block, not behind a modal or an `EDIT` button.
+- **Every choice can be undone.** Anything picked (stock item, hanger, box, photo, file, option)
+  has a visible way to unpick it in the same place.
+
 ### Buttons
 
 Variant and size are independent.
