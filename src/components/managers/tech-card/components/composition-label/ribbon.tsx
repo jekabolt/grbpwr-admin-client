@@ -1,13 +1,14 @@
-// ОДНА СТОРОНА ЛЕНТЫ КАК ПРЕДМЕТ (R-11). Белая лента в настоящих пропорциях 100 × 30 мм с линией
-// реза, припуск шва 10 мм заштрихован (у лица справа, у изнанки слева — видно, что после переворота
-// по короткой стороне они ложатся друг на друга), пунктир сгиба — тот, что рисует сам движок.
+// ОДНА СТОРОНА ЛЕНТЫ КАК ПРЕДМЕТ (R-11). Белая лента в настоящих пропорциях (100 × 30 мм или
+// вертикальная 30 × 100 — `labelSize` движка) с линией реза, припуск шва 10 мм заштрихован (у
+// горизонтальной лица справа, изнанки слева — после переворота по короткой стороне они ложатся друг
+// на друга; у вертикальной лица сверху, изнанки снизу), пунктир сгиба — тот, что рисует сам движок.
 // Поверх — двери: каждая напечатанная величина есть кнопка ровно на своём месте. Всё, что здесь
 // сверх `PaperSvg`, — только экран: в файл не идёт ни штрих.
 import { cn } from 'lib/utility';
-import { forwardRef, useId } from 'react';
+import { forwardRef, useId, type CSSProperties } from 'react';
 import type { PaperDoc } from '../../assembly-print/paper';
 import { PaperSvg } from '../../assembly-print/paper-svg';
-import { L, type Seam } from '../../care-labels/layout';
+import { labelSize, type LabelOrientation, type Seam } from '../../care-labels/layout';
 import { pxOf, PX_PER_MM, seamRect, type Region } from './regions';
 
 export type RegionView = Region & {
@@ -41,15 +42,18 @@ export function Ribbon({
   regions,
   onOpen,
   refFor,
+  orientation = 'horizontal',
 }: {
   side: RibbonSide;
   zoom: number;
   regions: RegionView[];
   onOpen: (r: RegionView) => void;
   refFor?: (key: string) => (el: HTMLButtonElement | null) => void;
+  orientation?: LabelOrientation;
 }) {
-  const w = L.W * PX_PER_MM * zoom;
-  const h = L.H * PX_PER_MM * zoom;
+  const size = labelSize(orientation);
+  const w = size.W * PX_PER_MM * zoom;
+  const h = size.H * PX_PER_MM * zoom;
   const seam = pxOf(seamRect(side.seam), zoom);
   const hatch = useId().replace(/:/g, '');
   return (
@@ -66,7 +70,11 @@ export function Ribbon({
           <div
             aria-hidden
             className='pointer-events-none'
-            style={{ width: `${L.W}mm`, transform: `scale(${zoom})`, transformOrigin: 'top left' }}
+            style={{
+              width: `${size.W}mm`,
+              transform: `scale(${zoom})`,
+              transformOrigin: 'top left',
+            }}
           >
             <PaperSvg doc={side.doc} />
           </div>
@@ -74,8 +82,8 @@ export function Ribbon({
         <svg
           aria-hidden
           data-seam={side.seam}
-          className='pointer-events-none absolute top-0'
-          style={{ left: seam.left, width: seam.width, height: h }}
+          className='pointer-events-none absolute'
+          style={seam}
         >
           <defs>
             <pattern
@@ -92,10 +100,8 @@ export function Ribbon({
         </svg>
         {side.blank ? (
           <span
-            className='pointer-events-none absolute inset-y-0 flex items-center justify-center text-micro uppercase tracking-label text-labelColor'
-            style={
-              side.seam === 'left' ? { left: seam.width, right: 0 } : { left: 0, right: seam.width }
-            }
+            className='pointer-events-none absolute flex items-center justify-center text-micro uppercase tracking-label text-labelColor'
+            style={blankInset(side.seam, seam)}
           >
             printed blank
           </span>
@@ -111,6 +117,15 @@ export function Ribbon({
       ) : null}
     </figure>
   );
+}
+
+/** Поле «printed blank» — вся сторона без припуска. */
+function blankInset(seam: Seam, box: ReturnType<typeof pxOf>): CSSProperties {
+  if (seam === 'top') return { left: 0, right: 0, top: box.height, bottom: 0 };
+  if (seam === 'bottom') return { left: 0, right: 0, top: 0, bottom: box.height };
+  return seam === 'left'
+    ? { top: 0, bottom: 0, left: box.width, right: 0 }
+    : { top: 0, bottom: 0, left: 0, right: box.width };
 }
 
 /**

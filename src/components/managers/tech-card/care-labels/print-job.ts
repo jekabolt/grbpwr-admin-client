@@ -11,7 +11,7 @@ import { variantSku, type CareLabelData } from './adapter';
 import { labelComposition } from './composition-override';
 import type { PartComposition } from './composition-resolver';
 import { hole, isGlobalHole, type Hole } from './holes';
-import type { PrintMode } from './layout';
+import type { LabelOrientation, PrintMode } from './layout';
 import { fileSlug, planPrint, type PrintJob, type PrintSet } from './pages';
 import type { Shaper } from './text-outline';
 import { qrLink, type CareLabelPrefs } from './use-care-label-prefs';
@@ -47,6 +47,7 @@ export type PrintJobInput = {
   data: CareLabelData;
   compositions: ReadonlyMap<number, PartComposition[]>;
   mode: PrintMode;
+  orientation?: LabelOrientation;
   qr: QrPrefs;
   /** Колорвеи задания в порядке карточки. */
   colorwayIds: readonly number[];
@@ -62,6 +63,7 @@ export function buildPrintJob(input: PrintJobInput): PrintJob {
   const { logo, caption, address } = data.label ?? {};
   return {
     mode,
+    ...(input.orientation ? { orientation: input.orientation } : {}),
     care: { codes: data.care.codes, prose: data.care.prose },
     ...(logo ? { logo } : {}),
     ...(caption?.length ? { caption } : {}),
@@ -110,6 +112,7 @@ export function planAll(
   compositions: ReadonlyMap<number, PartComposition[]>,
   mode: PrintMode,
   qr: QrPrefs,
+  orientation?: LabelOrientation,
 ): FullPlan {
   const sets = new Map<number, PrintSet>();
   const layoutHoles = new Map<number, Hole[]>();
@@ -118,6 +121,7 @@ export function planAll(
       data,
       compositions,
       mode,
+      ...(orientation ? { orientation } : {}),
       qr,
       colorwayIds: [cw.id],
       copies: () => 1,

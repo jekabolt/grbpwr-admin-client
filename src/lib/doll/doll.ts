@@ -10236,8 +10236,30 @@ export function solveDoll(input: DollInput): DollReport {
       pairedOf(false, true),
       pairedOf(true, true),
     ];
+    const atRun = (run: Run, want: number): Vec3 => {
+      let index = 1;
+      while (index < run.s.length - 1 && run.s[index] < want) index++;
+      const s0 = run.s[index - 1];
+      const s1 = run.s[index];
+      const t = Math.max(0, Math.min(1, (want - s0) / (s1 - s0 || 1)));
+      return add(run.pts[index - 1], sub(run.pts[index], run.pts[index - 1]), t);
+    };
     const score = (pairs: OrderedPair[]) => {
-      const gaps = gapsOf(pairs.filter((pair) => pair.throughShell));
+      const shell = pairs.filter((pair) => pair.throughShell);
+      const judged = shell.length ? shell : pairs;
+      // Nearest-run distance says whether two seam paths meet, but not which ends correspond: it
+      // gives a path and its reversal the same score. Pins need the sewn walk direction too, or a
+      // mouth can be attached backwards and pull its boundary across the whole inside piece.
+      const gaps = judged
+        .flatMap(({ a, b }) => [
+          ...a.pts.map((point, index) =>
+            Math.hypot(...sub(point, atRun(b, (a.s[index] / Math.max(a.len, 1e-9)) * b.len))),
+          ),
+          ...b.pts.map((point, index) =>
+            Math.hypot(...sub(point, atRun(a, (b.s[index] / Math.max(b.len, 1e-9)) * a.len))),
+          ),
+        ])
+        .sort((x, y) => x - y);
       const p95 = gaps[Math.min(gaps.length - 1, Math.floor(0.95 * gaps.length))] ?? Infinity;
       const mean = gaps.reduce((sum, gap) => sum + gap, 0) / Math.max(1, gaps.length);
       return p95 + 0.01 * mean;
@@ -10317,14 +10339,6 @@ export function solveDoll(input: DollInput): DollReport {
     })();
     const pin = shellPin ?? surfacePin;
     if (pin) {
-      const atRun = (run: Run, want: number): Vec3 => {
-        let index = 1;
-        while (index < run.s.length - 1 && run.s[index] < want) index++;
-        const s0 = run.s[index - 1];
-        const s1 = run.s[index];
-        const t = Math.max(0, Math.min(1, (want - s0) / (s1 - s0 || 1)));
-        return add(run.pts[index - 1], sub(run.pts[index], run.pts[index - 1]), t);
-      };
       const constraints = new Map<number, Vec3[]>();
       for (const pair of paired) {
         // A surface-to-surface continuation is still measured and reported below, but it is not
@@ -10339,21 +10353,32 @@ export function solveDoll(input: DollInput): DollReport {
           constraints.set(vertex, [...(constraints.get(vertex) ?? []), point]);
         });
       }
-      for (const [vertex, targets] of constraints) {
-        const point = targets
+      const targets = [...constraints].map(([vertex, points]) => {
+        const point = points
           .reduce((sum, target) => add(sum, target), [0, 0, 0] as Vec3)
-          .map((value) => value / targets.length) as Vec3;
+          .map((value) => value / points.length) as Vec3;
         const index = 3 * (vertex - N);
-        surfacePos[index] = point[0];
-        surfacePos[index + 1] = point[1];
-        surfacePos[index + 2] = point[2];
-      }
-      for (const pair of paired) {
-        const moving = pin === 'a' ? pair.a : pair.b;
-        moving.pts = moving.v.map((vertex) => {
+        const before = surfacePos.slice(index, index + 3) as Vec3;
+        return { vertex, point, move: Math.hypot(...sub(point, before)) };
+      });
+      // Pinning changes boundary vertices only. If a row asks that boundary to cross more than two
+      // mesh cells, leave the whole inside piece on its shell and report the gap below; forcing just
+      // the edge would stretch its adjacent triangles into the flat sheets seen down a trouser leg.
+      const safePin = targets.every(({ move }) => move <= 2 * gridH);
+      if (safePin) {
+        for (const { vertex, point } of targets) {
           const index = 3 * (vertex - N);
-          return [surfacePos[index], surfacePos[index + 1], surfacePos[index + 2]] as Vec3;
-        });
+          surfacePos[index] = point[0];
+          surfacePos[index + 1] = point[1];
+          surfacePos[index + 2] = point[2];
+        }
+        for (const pair of paired) {
+          const moving = pin === 'a' ? pair.a : pair.b;
+          moving.pts = moving.v.map((vertex) => {
+            const index = 3 * (vertex - N);
+            return [surfacePos[index], surfacePos[index + 1], surfacePos[index + 2]] as Vec3;
+          });
+        }
       }
     }
     // A composite's surface continuation is reported separately below. Its structural judgement
