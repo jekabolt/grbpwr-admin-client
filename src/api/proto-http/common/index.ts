@@ -1021,12 +1021,16 @@ export type TechCardAuxSubtype =
   | "TECH_CARD_AUX_SUBTYPE_SPARE_KIT_BAG";
 // AuxMadeBy says who makes an AUXILIARY card's item (0456). US: made from the card's BOM, whose norms
 // (consumption_per_unit, qty_per_garment + spare_qty) are costed and planned. SUPPLIER: bought
-// finished; the supplier's price is the cost and no material is reserved or issued. UNSPECIFIED on
+// finished; the supplier's price is the cost and no material is reserved or issued. UNKNOWN on
 // write = keep the stored value (an aux card with none reads US). Only for purpose=auxiliary.
 export type AuxMadeBy =
-  | "AUX_MADE_BY_UNSPECIFIED"
+  | "AUX_MADE_BY_UNKNOWN"
   | "AUX_MADE_BY_US"
   | "AUX_MADE_BY_SUPPLIER";
+export type StyleSizeChartCellSource =
+  | "STYLE_SIZE_CHART_CELL_SOURCE_UNKNOWN"
+  | "STYLE_SIZE_CHART_CELL_SOURCE_MANUAL"
+  | "STYLE_SIZE_CHART_CELL_SOURCE_PATTERN";
 // Material is a catalog material — shared nomenclature a tech-card BOM line can optionally link
 // to. Descriptive fields only; price lives in the append-only MaterialPrice history.
 // MaterialClass is the class-table-inheritance discriminant (S15): it selects which typed
@@ -2201,11 +2205,13 @@ export type ColorwayDevelopment = {
 };
 
 // StyleSizeChart is the style-owned size chart (R5). Written full-replace under the shared
-// tech_card.lock_version; there is no separate chart version.
+// tech_card.lock_version; there is no separate chart version. A cell value is the finished-garment
+// value in centimetres; a girth is the half (flat) value.
 export type StyleSizeChartCell = {
   sizeId: number | undefined;
   measurementNameId: number | undefined;
   value: googletype_Decimal | undefined;
+  source: StyleSizeChartCellSource | undefined;
 };
 
 // StyleSizeChartGradeStep is one measurement's grade increment — the per-size-position step the
@@ -2213,6 +2219,17 @@ export type StyleSizeChartCell = {
 export type StyleSizeChartGradeStep = {
   measurementNameId: number | undefined;
   step: googletype_Decimal | undefined;
+};
+
+export type StyleSizeChartPoint = {
+  measurementNameId: number | undefined;
+  pomCode: string | undefined;
+  position: number | undefined;
+  tolMinusCm: googletype_Decimal | undefined;
+  tolPlusCm: googletype_Decimal | undefined;
+  inShop: boolean | undefined;
+  basisPieceLineKeys: string[] | undefined;
+  stale: boolean | undefined;
 };
 
 export type StyleSizeChart = {
@@ -2228,6 +2245,8 @@ export type StyleSizeChart = {
   // empty steps) means the chart was typed cell by cell, which is what every pre-existing chart is.
   gradeBaseSizeId: number | undefined;
   gradeSteps: StyleSizeChartGradeStep[] | undefined;
+  points: StyleSizeChartPoint[] | undefined;
+  shrinkagePct: googletype_Decimal | undefined;
 };
 
 // AdminColorwayRef is a derived, output-only reference to a colourway from its style (R1: GetStyle may

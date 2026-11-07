@@ -1568,21 +1568,40 @@ export type common_StyleSizeChart = {
   // empty steps) means the chart was typed cell by cell, which is what every pre-existing chart is.
   gradeBaseSizeId: number | undefined;
   gradeSteps: common_StyleSizeChartGradeStep[] | undefined;
+  points: common_StyleSizeChartPoint[] | undefined;
+  shrinkagePct: googletype_Decimal | undefined;
 };
 
 // StyleSizeChart is the style-owned size chart (R5). Written full-replace under the shared
-// tech_card.lock_version; there is no separate chart version.
+// tech_card.lock_version; there is no separate chart version. A cell value is the finished-garment
+// value in centimetres; a girth is the half (flat) value.
 export type common_StyleSizeChartCell = {
   sizeId: number | undefined;
   measurementNameId: number | undefined;
   value: googletype_Decimal | undefined;
+  source: common_StyleSizeChartCellSource | undefined;
 };
 
+export type common_StyleSizeChartCellSource =
+  | "STYLE_SIZE_CHART_CELL_SOURCE_UNKNOWN"
+  | "STYLE_SIZE_CHART_CELL_SOURCE_MANUAL"
+  | "STYLE_SIZE_CHART_CELL_SOURCE_PATTERN";
 // StyleSizeChartGradeStep is one measurement's grade increment — the per-size-position step the
 // expanded chart was authored from (PLM gap 4). See StyleSizeChart.grade_steps.
 export type common_StyleSizeChartGradeStep = {
   measurementNameId: number | undefined;
   step: googletype_Decimal | undefined;
+};
+
+export type common_StyleSizeChartPoint = {
+  measurementNameId: number | undefined;
+  pomCode: string | undefined;
+  position: number | undefined;
+  tolMinusCm: googletype_Decimal | undefined;
+  tolPlusCm: googletype_Decimal | undefined;
+  inShop: boolean | undefined;
+  basisPieceLineKeys: string[] | undefined;
+  stale: boolean | undefined;
 };
 
 export type UpdateStyleSizeChartRequest = {
@@ -1595,6 +1614,9 @@ export type UpdateStyleSizeChartRequest = {
   // appear in `cells` (a step for a measurement the chart does not carry is meaningless).
   gradeBaseSizeId: number | undefined;
   gradeSteps: common_StyleSizeChartGradeStep[] | undefined;
+  points: common_StyleSizeChartPoint[] | undefined;
+  pointsSet: boolean | undefined;
+  shrinkagePct: googletype_Decimal | undefined;
 };
 
 export type UpdateStyleSizeChartResponse = {
@@ -10567,10 +10589,10 @@ export type common_TechCardAuxSubtype =
   | "TECH_CARD_AUX_SUBTYPE_SPARE_KIT_BAG";
 // AuxMadeBy says who makes an AUXILIARY card's item (0456). US: made from the card's BOM, whose norms
 // (consumption_per_unit, qty_per_garment + spare_qty) are costed and planned. SUPPLIER: bought
-// finished; the supplier's price is the cost and no material is reserved or issued. UNSPECIFIED on
+// finished; the supplier's price is the cost and no material is reserved or issued. UNKNOWN on
 // write = keep the stored value (an aux card with none reads US). Only for purpose=auxiliary.
 export type common_AuxMadeBy =
-  | "AUX_MADE_BY_UNSPECIFIED"
+  | "AUX_MADE_BY_UNKNOWN"
   | "AUX_MADE_BY_US"
   | "AUX_MADE_BY_SUPPLIER";
 // TechCardPieceDxfAliasSet is a presence wrapper: proto3 cannot distinguish an EMPTY repeated field
