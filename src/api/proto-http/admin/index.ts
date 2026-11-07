@@ -9569,6 +9569,9 @@ export type common_TechCardOperation = {
   // rounded lengths pass. Display only: it fits nothing and changes no PDF. Written only with
   // operation_seam_tolerance_aware (132). Enters no section digest.
   seamToleranceMm: googletype_Decimal | undefined;
+  // The labels this step attaches or hangs, by TechCardGarmentLabel.line_key. Not an assembly input. A key
+  // that names no label of the saved card is a field violation.
+  labelKeys: string[] | undefined;
 };
 
 // TechCardGarmentZone says WHERE ON THE GARMENT a step works — and it is one of the two fields a
@@ -10633,8 +10636,8 @@ export type common_TechCardGarmentLabel = {
   // same save (no id yet). Non-empty wins over bom_item_id on write; the read path returns it too.
   // A key that names no line of the payload BOM is cleared, it never breaks a save.
   bomLineKey: string | undefined;
-  // The pin: number of a TechCardCallout on a flat of this card; 0 = no pin. The label holds no
-  // geometry. A number no callout carries any more is cleared on write, it never breaks a save.
+  // The pin: number of a TechCardCallout on a flat of this card; 0 = no pin. A number no callout
+  // carries any more is cleared on write, it never breaks a save.
   calloutNumber: number | undefined;
   // Artwork per size (true) or one for all sizes (false). PRESENCE BIT: a client that knows this block
   // always sends it; absent means an older client, whose save keeps the stored pin, modes and files.
@@ -10654,6 +10657,15 @@ export type common_TechCardGarmentLabel = {
   printMethod: string | undefined;
   // Per garment length in cm, for goods sold by the metre; unset or 0 = counted in qty_per_garment.
   lengthCm: googletype_Decimal | undefined;
+  // Stable key, 26-character ULID minted by the client like a BOM line key; empty is minted by the server.
+  // Unique per card. Shares the key space of the pieces and the cut strips: a pose row of the seam table may
+  // name it, which is how a step's picture keeps the label where it was dragged.
+  lineKey: string | undefined;
+  widthMm: googletype_Decimal | undefined;
+  heightMm: googletype_Decimal | undefined;
+  // flat | half | ends | mitre | loop; "" = not set. THE fold. `folding` (4) is a legacy free note kept for
+  // display only: migration 0454 moved every unambiguous text into this field and cleared it.
+  fold: string | undefined;
 };
 
 // TechCardGarmentLabelFile is one artwork file of a garment label, printed as a QR on the tech pack.
