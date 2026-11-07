@@ -6,7 +6,7 @@ import type {
 
 export type AuxKind = 'product' | 'own' | 'bought';
 
-export const AUX_MADE_BY_UNSPECIFIED: common_AuxMadeBy = 'AUX_MADE_BY_UNKNOWN';
+export const AUX_MADE_BY_UNKNOWN: common_AuxMadeBy = 'AUX_MADE_BY_UNKNOWN';
 export const AUX_MADE_BY_US: common_AuxMadeBy = 'AUX_MADE_BY_US';
 export const AUX_MADE_BY_SUPPLIER: common_AuxMadeBy = 'AUX_MADE_BY_SUPPLIER';
 
@@ -18,7 +18,7 @@ export function auxKind(purpose?: string, madeBy?: common_AuxMadeBy): AuxKind {
 export function madeByForKind(kind: AuxKind): common_AuxMadeBy {
   if (kind === 'own') return AUX_MADE_BY_US;
   if (kind === 'bought') return AUX_MADE_BY_SUPPLIER;
-  return AUX_MADE_BY_UNSPECIFIED;
+  return AUX_MADE_BY_UNKNOWN;
 }
 
 export function isBoughtAux(purpose?: string, madeBy?: common_AuxMadeBy): boolean {

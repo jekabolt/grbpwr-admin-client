@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   AUX_MADE_BY_SUPPLIER,
-  AUX_MADE_BY_UNSPECIFIED,
+  AUX_MADE_BY_UNKNOWN,
   AUX_MADE_BY_US,
   auxKind,
   latestSupplierPrice,
@@ -37,9 +37,9 @@ const formWithNorm = (value: string | undefined): TechCardFormData => ({
 
 describe('auxiliary maker', () => {
   it('reads unspecified as own and persists every kind explicitly', () => {
-    expect(auxKind('TECH_CARD_PURPOSE_AUXILIARY', AUX_MADE_BY_UNSPECIFIED)).toBe('own');
+    expect(auxKind('TECH_CARD_PURPOSE_AUXILIARY', AUX_MADE_BY_UNKNOWN)).toBe('own');
     expect(auxKind('TECH_CARD_PURPOSE_AUXILIARY', AUX_MADE_BY_SUPPLIER)).toBe('bought');
-    expect(madeByForKind('product')).toBe(AUX_MADE_BY_UNSPECIFIED);
+    expect(madeByForKind('product')).toBe(AUX_MADE_BY_UNKNOWN);
     expect(madeByForKind('own')).toBe(AUX_MADE_BY_US);
     expect(madeByForKind('bought')).toBe(AUX_MADE_BY_SUPPLIER);
   });
@@ -49,7 +49,7 @@ describe('auxiliary maker', () => {
     form.purpose = 'TECH_CARD_PURPOSE_SELLABLE';
     form.auxMadeBy = AUX_MADE_BY_SUPPLIER;
     const out = mapFormToTechCardInsert(form);
-    expect(out.auxMadeBy).toBe(AUX_MADE_BY_UNSPECIFIED);
+    expect(out.auxMadeBy).toBe(AUX_MADE_BY_UNKNOWN);
     expect(out.bomItems?.[0]?.consumptionPerUnit).toBeUndefined();
   });
 

@@ -105,7 +105,7 @@ import {
 import { isMachineStepType, isWeldMachineType } from './equipment-options';
 import { wireInt } from './wire-int';
 import { CUT_STRIP_MODES } from './cut-strips/lengths';
-import { isOwnAux, AUX_MADE_BY_UNSPECIFIED } from './aux-card';
+import { isOwnAux, AUX_MADE_BY_UNKNOWN } from './aux-card';
 import { measured } from './use-colourway-auto';
 import {
   careLabelOut,
@@ -2361,7 +2361,7 @@ const techCardObject = z.object({
   // material, not a product). An auxiliary card links no products and its run output receipts into
   // outputMaterialId (required before its first run; 0 = unset).
   purpose: z.string().optional().default('TECH_CARD_PURPOSE_SELLABLE'),
-  auxMadeBy: z.string().optional().default(AUX_MADE_BY_UNSPECIFIED),
+  auxMadeBy: z.string().optional().default(AUX_MADE_BY_UNKNOWN),
   // WS7: which KIND of auxiliary item an auxiliary card produces (brand label, care label, dust
   // bag, box…). Only meaningful with purpose=auxiliary — the backend validates the pairing, so the
   // save mapper forces it back to UNSET whenever the card is sellable.
@@ -2547,7 +2547,7 @@ export const techCardDefaultData: TechCardFormData = {
   patterns: [],
   pieceDxfAliases: [],
   purpose: 'TECH_CARD_PURPOSE_SELLABLE',
-  auxMadeBy: AUX_MADE_BY_UNSPECIFIED,
+  auxMadeBy: AUX_MADE_BY_UNKNOWN,
   auxSubtype: UNSET_AUX_SUBTYPE,
   outputMaterialId: 0,
   pieces: [],
@@ -2813,7 +2813,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
         pieceLineKey: a.pieceLineKey ?? '',
       })),
     purpose: toPurposeEnum(insert?.purpose),
-    auxMadeBy: insert?.auxMadeBy || AUX_MADE_BY_UNSPECIFIED,
+    auxMadeBy: insert?.auxMadeBy || AUX_MADE_BY_UNKNOWN,
     auxSubtype: insert?.auxSubtype || UNSET_AUX_SUBTYPE,
     outputMaterialId: insert?.outputMaterialId || 0,
     ...splitSketchMedia(insert),
@@ -3613,8 +3613,8 @@ export function mapFormToTechCardInsert(
     purpose: toPurposeEnum(data.purpose),
     // Sellable writes must never carry an auxiliary maker. On an auxiliary card the form owns it.
     auxMadeBy: (toPurposeEnum(data.purpose) === 'TECH_CARD_PURPOSE_AUXILIARY'
-      ? data.auxMadeBy || AUX_MADE_BY_UNSPECIFIED
-      : AUX_MADE_BY_UNSPECIFIED) as common_AuxMadeBy,
+      ? data.auxMadeBy || AUX_MADE_BY_UNKNOWN
+      : AUX_MADE_BY_UNKNOWN) as common_AuxMadeBy,
     outputMaterialId:
       toPurposeEnum(data.purpose) === 'TECH_CARD_PURPOSE_AUXILIARY'
         ? data.outputMaterialId || 0
