@@ -333,6 +333,7 @@ export function TechpackDocument({
           measurements={sizing.measurements}
           sizeChart={sizing.sizeChart}
           sizeNames={sizing.sizeNames}
+          fabricShrinkage={sizing.fabricShrinkage}
           release={release}
         />
         <QcSignoffPage

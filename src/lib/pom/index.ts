@@ -211,6 +211,9 @@ export function measurePattern(input: PomInput): PomReport {
 
 export { classifyEdges } from './roles';
 export { measureModel, POM_DEFS } from './poms';
+export * from './chart-points';
+export * from './chart-values';
+export * from './schematic';
 export { layoutUnion, fitSeam } from './union';
 export { transferModel } from './sizes';
 export { readPieces } from './pieces';

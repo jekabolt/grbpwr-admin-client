@@ -1072,6 +1072,7 @@ export function TechCardForm({
   // The measurement chart lives outside react-hook-form (its own Get/UpdateStyleSizeChart), so the
   // SIZES glyph hears about it from the grid itself: true once any cell of the range holds a value.
   const [sizeChartFilled, setSizeChartFilled] = useState(false);
+  const [sizeChartHeaderEl, setSizeChartHeaderEl] = useState<HTMLSpanElement | null>(null);
   // Watched for the patterns glyph only. Cheap in practice: a rename commits on blur/Enter and a
   // rebind on select, so this re-renders the form on an upload or a deliberate edit — not per
   // keystroke (the inline rename holds its draft in the panel's own state).
@@ -4144,10 +4145,16 @@ export function TechCardForm({
               <Section title='base model & sample size'>
                 <BaseModelFields />
               </Section>
-              <Section title='size chart measurements'>
+              <Section
+                title='size chart measurements'
+                action={<span ref={setSizeChartHeaderEl} className='flex items-center gap-1.5' />}
+              >
                 <SizeChartField
                   styleId={numId}
+                  techCard={techCard}
+                  active={activeTab === 'sizes'}
                   canEdit={canWrite(SECTION.techCards) && !frozen}
+                  headerEl={sizeChartHeaderEl}
                   onFilledChange={setSizeChartFilled}
                 />
               </Section>

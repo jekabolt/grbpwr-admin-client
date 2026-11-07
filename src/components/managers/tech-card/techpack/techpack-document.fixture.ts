@@ -16,9 +16,50 @@ export const techpackMeasurements = [
 
 export const techpackSizeChart = {
   cells: [
-    { sizeId: 1, measurementNameId: 101, value: decimal('54') },
-    { sizeId: 1, measurementNameId: 102, value: decimal('72') },
+    {
+      sizeId: 1,
+      measurementNameId: 101,
+      value: decimal('54'),
+      source: 'STYLE_SIZE_CHART_CELL_SOURCE_PATTERN',
+    },
+    {
+      sizeId: 2,
+      measurementNameId: 101,
+      value: decimal('56.5'),
+      source: 'STYLE_SIZE_CHART_CELL_SOURCE_PATTERN',
+    },
+    {
+      sizeId: 1,
+      measurementNameId: 102,
+      value: decimal('72'),
+      source: 'STYLE_SIZE_CHART_CELL_SOURCE_PATTERN',
+    },
+    {
+      sizeId: 2,
+      measurementNameId: 102,
+      value: decimal('74'),
+      source: 'STYLE_SIZE_CHART_CELL_SOURCE_PATTERN',
+    },
   ],
+  points: [
+    {
+      measurementNameId: 101,
+      pomCode: 'chest',
+      position: 1,
+      tolMinusCm: decimal('1'),
+      tolPlusCm: decimal('1'),
+      inShop: true,
+    },
+    {
+      measurementNameId: 102,
+      pomCode: 'length-hps',
+      position: 2,
+      tolMinusCm: decimal('0.5'),
+      tolPlusCm: decimal('0.5'),
+      inShop: true,
+    },
+  ],
+  shrinkagePct: decimal('3'),
 };
 
 export const techpackMarkerLayouts = [];

@@ -6,6 +6,7 @@ import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useMeasurements } from 'components/managers/product/utility/useMeasurements';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo, useRef } from 'react';
+import { useChartFabricShrinkage } from './pages/use-chart-shrinkage';
 
 export function useTechpackMeasurements(techCard: common_TechCard) {
   const { dictionary, loading: dictionaryLoading, error: dictionaryError } = useDictionary();
@@ -29,8 +30,10 @@ export function useTechpackMeasurements(techCard: common_TechCard) {
     return names;
   }, [dictionary?.sizes]);
   const orderSizes = useSizeOrdering();
+  const fabricShrinkage = useChartFabricShrinkage(techCard);
   return {
     measurements,
+    fabricShrinkage,
     sizeChart: chart.data?.chart,
     sizeNames,
     orderSizes,
