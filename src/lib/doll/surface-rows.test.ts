@@ -76,6 +76,24 @@ describe('surface rows', () => {
     expect(lays.get('bag')).toMatchObject({ host: 'back', on: 'back', depth: 0 });
   });
 
+  it('keeps paired inside pieces on the directly anchored panel', () => {
+    const geoms = new Map([
+      ['back', piece('back', 70)],
+      ['front', piece('front')],
+      ['under', piece('under', 30)],
+      ['bag', piece('bag')],
+    ]);
+    const lays = planSurfaceByRows({
+      parts: ['bag'],
+      fixed: new Map([['under', { host: 'front', T: [1, 0, 0, 1, 0, 0] as const }]]),
+      hosts: new Set(['back', 'front']),
+      geoms,
+      rows: [row('bag#0', 'back#0', ['back#0', 'under#0']), row('bag#1', 'under#1')],
+    });
+
+    expect(lays.get('bag')).toMatchObject({ host: 'front', on: 'under', depth: 1 });
+  });
+
   it('sews shell edges together under a shared pocket edge', () => {
     const host = row('front#1', 'pocket#0');
     const caught = row('yoke#4', 'pocket#0');
