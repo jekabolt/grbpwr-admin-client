@@ -277,6 +277,7 @@ export function SizeChartField({
   // Seed once after the server answer. Pattern values may arrive later and merge in the next effect.
   useEffect(() => {
     if (!chartLoaded || prepared) return;
+    if (!points.length && !pattern.settled) return;
     const seeded = seedChart(pattern.kind, points, cells, nameIds);
     const merged = mergePatternIntoCells(seeded.cells, seeded.points, pattern.patternValues);
     setPoints(seeded.points);
@@ -285,7 +286,7 @@ export function SizeChartField({
     if (seeded.seeded || merged.changed) markDirty(seeded.seeded ? 'seed' : 'pattern');
     // This is deliberately one preparation pass for one server answer.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chartLoaded, prepared]);
+  }, [chartLoaded, prepared, pattern.settled]);
 
   // A report or shrinkage change refreshes only empty/pattern-owned cells and its hidden evidence.
   useEffect(() => {

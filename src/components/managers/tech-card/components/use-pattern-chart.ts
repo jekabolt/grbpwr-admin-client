@@ -7,7 +7,7 @@ import type { GarmentKind, PomReport } from 'lib/pom/types';
 import type { TechCardPieceFoldWire } from 'lib/folds';
 import type { TechCardSeamWire } from 'lib/seams';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useWatch } from 'react-hook-form';
 
 import { pomKey, pomRequest, useDollCard } from './assembly-doll/use-doll-card';
@@ -102,6 +102,17 @@ export function usePatternChart({
   const read = useDollStore((state) => (pkey ? state.poms[pkey] : undefined));
   const report: PomReport | null = read?.status === 'done' ? read.report ?? null : null;
 
+  // The garment kind comes from the pattern reading; seeding before it ends picks the fallback
+  // kind and the wrong point set sticks. Wait for the reading, with a timeout as a safety net.
+  const [waitedOut, setWaitedOut] = useState(false);
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setTimeout(() => setWaitedOut(true), 8000);
+    return () => window.clearTimeout(timer);
+  }, [active]);
+  const readEnded = read?.status === 'done' || read?.status === 'error';
+  const settled = readEnded || (!shapes.isLoading && !shapes.hasDxf) || waitedOut;
+
   const { data: materials } = useMaterials('', true, active);
   const mainFabric =
     bomItems.find((line) => line.purpose === 'TECH_CARD_BOM_PURPOSE_MAIN') ??
@@ -163,5 +174,6 @@ export function usePatternChart({
     mainShrinkagePct,
     patternValues,
     report,
+    settled,
   };
 }
