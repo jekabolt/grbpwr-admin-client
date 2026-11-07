@@ -46,6 +46,14 @@ import { statusText } from './i18n/vocabulary';
 
 const SECTION_START = /^(\d\d)\s/;
 
+const hasValue = (value: unknown): boolean => {
+  if (Array.isArray(value)) return value.some(hasValue);
+  if (value && typeof value === 'object') return Object.values(value).some(hasValue);
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (typeof value === 'number') return value !== 0;
+  return value === true;
+};
+
 function text(el: Element, value: string) {
   if (el.textContent !== value) el.textContent = value;
 }
@@ -99,6 +107,27 @@ export function TechpackDocument({
 }) {
   const { t } = useT();
   const ins = techCard.techCard;
+  const isAux = ins?.purpose === 'TECH_CARD_PURPOSE_AUXILIARY';
+  const printMaterials = !isAux || (ins?.bomItems ?? []).some((item) => hasValue(item));
+  const printPieces = !isAux || (ins?.pieces ?? []).some((piece) => hasValue(piece));
+  const printPatterns =
+    !isAux ||
+    (ins?.patterns ?? []).some((pattern) => hasValue(pattern)) ||
+    (techCard.markers ?? []).some((marker) => hasValue(marker));
+  const printLabels =
+    !isAux ||
+    (ins?.garmentLabels ?? []).some((label) => hasValue(label)) ||
+    hasValue(ins?.careLabel);
+  const printPackaging =
+    !isAux ||
+    (ins?.packagingItems ?? []).some((item) => hasValue(item)) ||
+    hasValue(ins?.packaging);
+  const printAssembly = !isAux || (ins?.operations ?? []).some((operation) => hasValue(operation));
+  const printCutStrips = !isAux || (ins?.cutStrips ?? []).some((strip) => hasValue(strip));
+  const printQc =
+    !isAux ||
+    (ins?.issues ?? []).some((issue) => hasValue(issue)) ||
+    (ins?.signoffs ?? []).some((signoff) => hasValue(signoff));
   const { dictionary } = useDictionary();
   const sampleSize = (dictionary?.sizes ?? []).find(
     (s) => s.id != null && s.id === ins?.baseSampleSizeId,
@@ -127,7 +156,10 @@ export function TechpackDocument({
   const sizing = useTechpackMeasurements(techCard);
   // Detail layouts are live RPC data and expensive to turn into SVG. Fetch them only after the
   // section has actually moved to its own sheet, and never mix them into a frozen release pack.
-  const markers = useTechpackMarkerLayouts(techCard, split && !release);
+  const markers = useTechpackMarkerLayouts(
+    techCard,
+    (split || (isAux && printPatterns)) && !release,
+  );
   const measurementRows = useMemo(
     () =>
       deriveMeasurementsPage({
@@ -139,6 +171,7 @@ export function TechpackDocument({
       }).rows,
     [techCard, sizing.measurements, sizing.sizeChart, sizing.sizeNames, t],
   );
+  const printMeasurements = !isAux || measurementRows.length > 0;
 
   const labelPlacement = useMemo(
     () => deriveLabels(techCard, { sampleSizeName }, undefined, t).placement.name,
@@ -183,28 +216,31 @@ export function TechpackDocument({
   // section 06 is derived once (`model`); it rides along so the gaps pass does not derive it again
   const pdfGaps = useMemo(
     () =>
-      model
-        ? collectPdfGaps({
-            techCard,
-            sampleSizeName,
-            revisionLabel,
-            assembly: model,
-            pieceGeometry: geometry.shapes,
-            measurements: sizing.measurements,
-            sizeChart: sizing.sizeChart,
-            sizeNames: sizing.sizeNames,
-            markerLayouts: markers.markerLayouts,
-            patternViewerToken,
-            patternOrigin: publicOrigin,
-            markerOrigin: publicOrigin,
-            netM2ByLine,
-            includeMarkerLayouts: split && !release,
-            labelPlacement,
-            t,
-          })
-        : [],
+      isAux
+        ? []
+        : model
+          ? collectPdfGaps({
+              techCard,
+              sampleSizeName,
+              revisionLabel,
+              assembly: model,
+              pieceGeometry: geometry.shapes,
+              measurements: sizing.measurements,
+              sizeChart: sizing.sizeChart,
+              sizeNames: sizing.sizeNames,
+              markerLayouts: markers.markerLayouts,
+              patternViewerToken,
+              patternOrigin: publicOrigin,
+              markerOrigin: publicOrigin,
+              netM2ByLine,
+              includeMarkerLayouts: split && !release,
+              labelPlacement,
+              t,
+            })
+          : [],
     [
       model,
+      isAux,
       techCard,
       sampleSizeName,
       revisionLabel,
@@ -227,10 +263,15 @@ export function TechpackDocument({
   }, [pdfGaps, onGaps]);
 
   const [laidOut, setLaidOut] = useState(false);
-  const { label: geoLabel, status: geoStatus } = geometry.dep;
-  const layoutStatus = model && laidOut ? 'ok' : 'pending';
-  const sizingStatus = depStatus(sizing.isLoading, sizing.isError);
-  const markerStatus = depStatus(markers.isLoading, markers.isError);
+  const { label: geoLabel, status: rawGeoStatus } = geometry.dep;
+  const needsGeometry = printPieces || printAssembly || printCutStrips;
+  const geoStatus = needsGeometry ? rawGeoStatus : 'ok';
+  const layoutStatus = !printAssembly || (model && laidOut) ? 'ok' : 'pending';
+  const sizingStatus =
+    printMeasurements || printLabels || printCutStrips
+      ? depStatus(sizing.isLoading, sizing.isError)
+      : 'ok';
+  const markerStatus = printPatterns ? depStatus(markers.isLoading, markers.isError) : 'ok';
   useEffect(() => {
     onDataStatus?.([
       { label: geoLabel, status: geoStatus },
@@ -265,15 +306,15 @@ export function TechpackDocument({
 
   const page = { techCard, orient, docline };
   const toc: TechpackTocItem[] = [
-    { n: '01', title: t('cover.titleMaterials') },
-    { n: '02', title: t('cover.titlePieces') },
-    { n: '03', title: t('cover.titleColourways') },
-    { n: '04', title: t('cover.titlePatterns') },
-    { n: '05', title: t('cover.titleLabels') },
-    { n: '06', title: t('cover.titleAssembly') },
-    { n: '08', title: t('cover.titleMeasurements') },
-    { n: '09', title: t('cover.titleQc') },
-  ];
+    printMaterials && { n: '01', title: t('cover.titleMaterials') },
+    printPieces && { n: '02', title: t('cover.titlePieces') },
+    !isAux && { n: '03', title: t('cover.titleColourways') },
+    printPatterns && { n: '04', title: t('cover.titlePatterns') },
+    printLabels && { n: '05', title: t('cover.titleLabels') },
+    printAssembly && { n: '06', title: t('cover.titleAssembly') },
+    printMeasurements && { n: '08', title: t('cover.titleMeasurements') },
+    printQc && { n: '09', title: t('cover.titleQc') },
+  ].filter((item): item is TechpackTocItem => Boolean(item));
   const patterns = {
     techCard,
     orient,
@@ -287,7 +328,8 @@ export function TechpackDocument({
     <>
       <PageFurniture line={docline} orient={orient} />
       <style>{TECHPACK_SHEET_CSS}</style>
-      <div ref={root} className='tp-doc'>
+      {isAux && <style>{'[data-aux-techpack] [data-missing] { display: none !important; }'}</style>}
+      <div ref={root} className='tp-doc' data-aux-techpack={isAux ? '' : undefined}>
         <CoverPage
           {...page}
           n='00'
@@ -295,56 +337,71 @@ export function TechpackDocument({
           sampleSizeName={sampleSizeName}
           revisionLabel={revisionLabel}
           pdfGaps={pdfGaps}
+          auxiliary={isAux}
         />
-        <MaterialsPage {...page} n='01' />
-        <PiecesPage {...page} n='02' geometry={geometry.shapes} />
-        {split ? (
-          <>
-            <ColourwaysPage {...page} n='03' />
-            <PatternsMarkerPage {...patterns} docline={docline} layouts={!release} />
-          </>
-        ) : (
-          <TechpackSheet orient={orient} docline={docline}>
-            <div data-shared-sheet='' className='flex flex-col gap-6'>
-              <ColourwaysContent techCard={techCard} n='03' />
-              <PatternsMarkerContent {...patterns} layouts={false} />
-            </div>
-          </TechpackSheet>
+        {printMaterials && <MaterialsPage {...page} n='01' />}
+        {printPieces && <PiecesPage {...page} n='02' geometry={geometry.shapes} />}
+        {!isAux &&
+          (split ? (
+            <>
+              <ColourwaysPage {...page} n='03' />
+              <PatternsMarkerPage {...patterns} docline={docline} layouts={!release} />
+            </>
+          ) : (
+            <TechpackSheet orient={orient} docline={docline}>
+              <div data-shared-sheet='' className='flex flex-col gap-6'>
+                <ColourwaysContent techCard={techCard} n='03' />
+                <PatternsMarkerContent {...patterns} layouts={false} />
+              </div>
+            </TechpackSheet>
+          ))}
+        {isAux && printPatterns && (
+          <PatternsMarkerPage {...patterns} docline={docline} layouts={!release} />
         )}
-        <LabelsPage
-          {...page}
-          n='05'
-          sampleSizeName={sampleSizeName}
-          sizeNames={sizing.sizeNames}
-          orderSizes={sizing.orderSizes}
-        />
-        <PackagingPage {...page} n='05b' />
-        <AssemblyPage {...page} n='06' model={model} pdfGaps={pdfGaps} onLaidOut={setLaidOut} />
-        <CutStripsPage
-          {...page}
-          n='06b'
-          assembly={model}
-          sizeNames={sizing.sizeNames}
-          orderSizes={sizing.orderSizes}
-        />
-        <MeasurementsPage
-          {...page}
-          n='08'
-          measurements={sizing.measurements}
-          sizeChart={sizing.sizeChart}
-          sizeNames={sizing.sizeNames}
-          fabricShrinkage={sizing.fabricShrinkage}
-          release={release}
-        />
-        <QcSignoffPage
-          {...page}
-          n='09'
-          measurementRows={measurementRows}
-          sizeNames={sizing.sizeNames}
-          seamDeltas={seamDeltas}
-          labelPlacement={labelPlacement}
-          revisionLabel={revisionLabel}
-        />
+        {printLabels && (
+          <LabelsPage
+            {...page}
+            n='05'
+            sampleSizeName={sampleSizeName}
+            sizeNames={sizing.sizeNames}
+            orderSizes={sizing.orderSizes}
+          />
+        )}
+        {printPackaging && <PackagingPage {...page} n='05b' />}
+        {printAssembly && (
+          <AssemblyPage {...page} n='06' model={model} pdfGaps={pdfGaps} onLaidOut={setLaidOut} />
+        )}
+        {printCutStrips && (
+          <CutStripsPage
+            {...page}
+            n='06b'
+            assembly={model}
+            sizeNames={sizing.sizeNames}
+            orderSizes={sizing.orderSizes}
+          />
+        )}
+        {printMeasurements && (
+          <MeasurementsPage
+            {...page}
+            n='08'
+            measurements={sizing.measurements}
+            sizeChart={sizing.sizeChart}
+            sizeNames={sizing.sizeNames}
+            fabricShrinkage={sizing.fabricShrinkage}
+            release={release}
+          />
+        )}
+        {printQc && (
+          <QcSignoffPage
+            {...page}
+            n='09'
+            measurementRows={measurementRows}
+            sizeNames={sizing.sizeNames}
+            seamDeltas={seamDeltas}
+            labelPlacement={labelPlacement}
+            revisionLabel={revisionLabel}
+          />
+        )}
       </div>
     </>
   );

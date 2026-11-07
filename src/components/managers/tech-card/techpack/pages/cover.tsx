@@ -6,6 +6,7 @@ import type { Gap } from '../gaps';
 import { Missing, statusTone, TechpackDrawing } from './bits';
 import { TechpackSheet, type TechpackPageProps } from '../sheet';
 import { own, useT, type PdfT } from '../i18n';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 
 /** A section in the contents; its page number is filled in from the laid-out sheets. */
 export type TechpackTocItem = { n: string; title: string };
@@ -14,6 +15,7 @@ type CoverPageProps = TechpackPageProps &
   CoverDeriveOptions & {
     toc: TechpackTocItem[];
     pdfGaps?: readonly Gap[];
+    auxiliary?: boolean;
   };
 
 const glossary = (t: PdfT): Array<[string, string]> => [
@@ -47,6 +49,7 @@ export function CoverPage({
   sampleSizeName,
   revisionLabel,
   pdfGaps = [],
+  auxiliary = false,
 }: CoverPageProps) {
   const { t } = useT();
   const model = useMemo(
@@ -67,6 +70,33 @@ export function CoverPage({
     )
     .filter(Boolean)
     .join(' · ');
+  const { dictionary } = useDictionary();
+  const colourByCode = new Map(
+    (dictionary?.colors ?? []).map((colour) => [colour.code ?? '', colour]),
+  );
+  const legacyMaterial = (techCard.techCard?.bomItems ?? []).find(
+    (item) => item.materialId === techCard.techCard?.outputMaterialId,
+  );
+  const legacyColour =
+    colourByCode.get(legacyMaterial?.color ?? '') ??
+    (dictionary?.colors ?? []).find((colour) => colour.name === legacyMaterial?.color);
+  const makes = (techCard.outputVariants ?? []).length
+    ? (techCard.outputVariants ?? []).map((variant) => ({
+        key: variant.id ?? variant.colorCode,
+        colour: variant.colorName || variant.colorCode || 'colour',
+        hex: colourByCode.get(variant.colorCode ?? '')?.hex,
+        material: variant.materialName || `#${variant.materialId ?? 0}`,
+      }))
+    : techCard.techCard?.outputMaterialId
+      ? [
+          {
+            key: 'legacy',
+            colour: legacyColour?.name || legacyMaterial?.color || 'colour',
+            hex: legacyColour?.hex,
+            material: legacyMaterial?.name || `material #${techCard.techCard.outputMaterialId}`,
+          },
+        ]
+      : [];
   const summary = (
     <div>
       <KV
@@ -186,6 +216,52 @@ export function CoverPage({
       </div>
     </div>
   );
+
+  if (auxiliary) {
+    return (
+      <TechpackSheet orient={orient} docline={docline}>
+        <header className='mb-4 border-b-2 border-textColor pb-3'>
+          <div className='flex min-w-0 items-start gap-3'>
+            <GrbpwrMark className='mt-0.5 h-10 w-10 shrink-0 text-textColor' />
+            <div className='min-w-0'>
+              <div className='text-micro uppercase tracking-section text-labelColor'>
+                {model.brand} · {t('common.techPack')}
+              </div>
+              <h1 className='text-statBig font-bold uppercase leading-tight'>{model.name}</h1>
+              <div className='text-control'>{uniqueLine([model.collection, model.season])}</div>
+              {model.styleNumber && (
+                <div className='text-micro uppercase tracking-label text-labelColor'>
+                  {model.styleNumber}
+                </div>
+              )}
+            </div>
+          </div>
+        </header>
+        <div className='grid min-h-0 flex-1 grid-cols-2 gap-8'>
+          <div>
+            <GroupLabel flush>makes</GroupLabel>
+            {makes.map((row) => (
+              <Row
+                key={row.key}
+                label={
+                  <span className='flex items-center gap-2'>
+                    <span
+                      aria-hidden
+                      className='size-5 border border-textColor'
+                      style={row.hex ? { backgroundColor: row.hex } : undefined}
+                    />
+                    {row.colour}
+                  </span>
+                }
+                value={row.material}
+              />
+            ))}
+          </div>
+          {contents}
+        </div>
+      </TechpackSheet>
+    );
+  }
 
   return (
     <TechpackSheet orient={orient} docline={docline}>
