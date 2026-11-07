@@ -16,6 +16,7 @@ import type { PartComposition } from './composition-resolver';
 import { withColorway, type Hole } from './holes';
 import {
   L,
+  labelSize,
   seamDash,
   seamFor,
   textRun,
@@ -23,6 +24,7 @@ import {
   typesetAFace,
   typesetB,
   type CareSide,
+  type LabelOrientation,
   type PrintMode,
   type Seam,
   type SideRole,
@@ -59,6 +61,8 @@ export type ColorwayPrintJob = {
 
 export type PrintJob = {
   mode: PrintMode;
+  /** Missing/empty stays horizontal so legacy engine callers are byte-compatible. */
+  orientation?: LabelOrientation;
   care: { codes: readonly string[]; prose: readonly string[] };
   colorways: readonly ColorwayPrintJob[];
   /** Переопределения составника (labels rework): нет — лента как была, байт-в-байт. */
@@ -105,6 +109,8 @@ export type PlannedFile = {
 
 export type PrintSet = {
   mode: PrintMode;
+  /** Omitted for legacy horizontal jobs; consumers default it to horizontal. */
+  orientation?: LabelOrientation;
   sides: Map<string, PlannedSide>;
   files: PlannedFile[];
   /** Дыры вёрстки (глифы, перелив, QR …) с адресом колорвея. */
@@ -154,6 +160,7 @@ export function previewASides(
 
 export function planPrint(sh: Shaper, job: PrintJob): PrintSet {
   const { mode } = job;
+  const orientation = job.orientation === 'vertical' ? 'vertical' : 'horizontal';
   const sides = new Map<string, PlannedSide>();
   const files: PlannedFile[] = [];
   const holes: Hole[] = [];
@@ -205,7 +212,8 @@ export function planPrint(sh: Shaper, job: PrintJob): PrintSet {
           country: cw.country,
           logo: job.logo,
         },
-        seamFor(mode, 'face'),
+        seamFor(mode, 'face', orientation),
+        orientation,
       );
       const faceKey = addSide(
         {
@@ -225,7 +233,8 @@ export function planPrint(sh: Shaper, job: PrintJob): PrintSet {
         const back = typesetABack(
           sh,
           { url: s.qrUrl, caption: job.caption, address: job.address },
-          seamFor(mode, 'back'),
+          seamFor(mode, 'back', orientation),
+          orientation,
         );
         addSide(
           {
@@ -262,7 +271,7 @@ export function planPrint(sh: Shaper, job: PrintJob): PrintSet {
 
     // Состав — одна этикетка B на изделие: копий = Σ копий размеров колорвея.
     const copies = printed.reduce((a, s) => a + s.copies, 0);
-    const b = typesetB(sh, cw.parts, mode);
+    const b = typesetB(sh, cw.parts, mode, orientation);
     cwHoles.push(...b.holes);
     b.labels.forEach((lab, i) => {
       const label: LabelName = i === 0 ? 'B' : `B${i + 1}`;
@@ -301,7 +310,13 @@ export function planPrint(sh: Shaper, job: PrintJob): PrintSet {
   const referenced = new Set(files.flatMap((f) => f.pages));
   for (const k of [...sides.keys()]) if (!referenced.has(k)) sides.delete(k);
 
-  return { mode, sides, files, holes: dedupe(holes) };
+  return {
+    mode,
+    ...(job.orientation ? { orientation } : {}),
+    sides,
+    files,
+    holes: dedupe(holes),
+  };
 }
 
 function dedupe(hs: Hole[]): Hole[] {
@@ -319,7 +334,8 @@ const primsOf = (set: PrintSet) =>
 
 /** PDF файла плана: каждая уникальная сторона — один Form XObject, страницы — ссылки. */
 export function filePdf(set: PrintSet, file: PlannedFile): Uint8Array {
-  return writePdf({ pageWmm: L.W, pageHmm: L.H, sides: primsOf(set), pages: file.pages });
+  const size = labelSize(set.orientation);
+  return writePdf({ pageWmm: size.W, pageHmm: size.H, sides: primsOf(set), pages: file.pages });
 }
 
 // ---------- один вариант: колорвей × размер ----------
@@ -343,7 +359,8 @@ export function variantPdf(set: PrintSet, sizeId: number): Uint8Array {
   const pages = variantPages(set, sizeId);
   const all = primsOf(set);
   const sides = new Map(pages.map((k) => [k, all.get(k) ?? []] as const));
-  return writePdf({ pageWmm: L.W, pageHmm: L.H, sides, pages });
+  const size = labelSize(set.orientation);
+  return writePdf({ pageWmm: size.W, pageHmm: size.H, sides, pages });
 }
 
 // Вёрстка меряется заново на каждую правку, а сторон — колорвеи × размеры: хеш стороны помнится на

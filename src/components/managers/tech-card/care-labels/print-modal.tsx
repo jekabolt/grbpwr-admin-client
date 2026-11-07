@@ -101,9 +101,9 @@ export function PrintCompositionModal({
   const plan = useMemo(
     () =>
       shaper && data && compositions
-        ? planAll(shaper, data, compositions, prefs.mode, data.label.qr)
+        ? planAll(shaper, data, compositions, prefs.mode, data.label.qr, orientation)
         : null,
-    [shaper, data, compositions, prefs.mode],
+    [shaper, data, compositions, prefs.mode, orientation],
   );
   const wholeCard = useMemo(
     () =>
@@ -209,6 +209,7 @@ export function PrintCompositionModal({
           data,
           compositions,
           mode: prefs.mode,
+          orientation,
           qr: data.label.qr,
           colorwayIds: generated,
           copies,
