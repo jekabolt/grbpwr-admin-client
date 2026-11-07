@@ -150,6 +150,21 @@ const dims = (g: PieceGeom) => {
   return [x1 - x0, y1 - y0];
 };
 
+/** The strict shape match used for ply layers and the derived turned-seam rule. */
+export function sameShape(x: string, y: string, geomOf: ReadonlyMap<string, PieceGeom>): boolean {
+  const gx = geomOf.get(x);
+  const gy = geomOf.get(y);
+  if (!gx?.edges || !gy?.edges || gx.edges.length !== gy.edges.length) return false;
+  const [wx, hx] = dims(gx);
+  const [wy, hy] = dims(gy);
+  if (Math.abs(wx - wy) > 0.02 * Math.max(wx, wy) || Math.abs(hx - hy) > 0.02 * Math.max(hx, hy))
+    return false;
+  return gx.edges.every((e) => {
+    const f = gy.edges.find((z) => z.k === e.k);
+    return !!f && Math.abs(f.lenMm - e.lenMm) <= Math.max(3, 0.02 * e.lenMm);
+  });
+}
+
 export function groupPieces(
   graph: SeamGraph,
   facts: SkeletonFacts,
@@ -438,22 +453,6 @@ export function groupPieces(
         onEdge.set(theirs, [...(onEdge.get(theirs) ?? []), { key, k: e.k }]);
       }
     }
-    const sameShape = (x: string, y: string) => {
-      const gx = geomOf.get(x);
-      const gy = geomOf.get(y);
-      if (!gx?.edges || !gy?.edges || gx.edges.length !== gy.edges.length) return false;
-      const [wx, hx] = dims(gx);
-      const [wy, hy] = dims(gy);
-      if (
-        Math.abs(wx - wy) > 0.02 * Math.max(wx, wy) ||
-        Math.abs(hx - hy) > 0.02 * Math.max(hx, hy)
-      )
-        return false;
-      return gx.edges.every((e) => {
-        const f = gy.edges.find((z) => z.k === e.k);
-        return !!f && Math.abs(f.lenMm - e.lenMm) <= Math.max(3, 0.02 * e.lenMm);
-      });
-    };
     for (const list of onEdge.values())
       for (let i = 0; i < list.length; i++)
         for (let j = i + 1; j < list.length; j++) {
@@ -461,7 +460,7 @@ export function groupPieces(
           if (x.key === y.key || x.k !== y.k || !group.has(x.key)) continue;
           if (group.get(x.key) !== group.get(y.key) || noStack.has(x.key) || noStack.has(y.key))
             continue;
-          if (sameShape(x.key, y.key)) stackPair(x.key, y.key);
+          if (sameShape(x.key, y.key, geomOf)) stackPair(x.key, y.key);
         }
   }
 

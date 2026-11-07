@@ -40,6 +40,14 @@ export type DollOwnerCandidate = {
   inStep: boolean;
   /** Set on a guess: the operation (its number in the order) it was guessed for. */
   guess?: { step: number };
+  /** A congruent two-ply unit turned inward on this row after the solve. */
+  turned?: {
+    step: number;
+    /** Individual contour edges of the drawn (leader) ply, in row order. */
+    run: EdgeId[];
+    by: 'kind' | 'structure';
+    heldBy?: { step: number; topstitch: boolean };
+  };
 };
 
 /** A point in the piece's seam (u, v) frame (lib/seams/frame.ts `toUV`): the unit square. */
@@ -217,6 +225,8 @@ export type DollPanel = {
   boundary: Uint32Array;
   /** Other pieces drawn as layers of this one (identical collar / yoke layers): «×n». */
   layers: string[];
+  /** Post-solve display geometry: never part of seams, loops, proxies, POM or checks. */
+  drawnOnly?: true;
 };
 
 export type DollSeamState = 'closed' | 'eased' | 'stretched' | 'open' | 'twisted' | 'proposed';
@@ -329,6 +339,18 @@ export type DollReport = {
     note: string;
     /** Share of the piece lying past its host panel's edge as drawn, % (0 when wholly on it). */
     pastEdgePct?: number;
+  }[];
+  /** Congruent inner plies copied from their solved leader and turned inward after the solve. */
+  turned?: {
+    piece: string;
+    onto: string;
+    run: EdgeId[];
+    /** Join step that made the two-ply turned unit. */
+    step: number;
+    by: 'kind' | 'structure';
+    heldBy?: { step: number; topstitch: boolean };
+    /** A holding topstitch, 2 mm inside the turned rim; absent when attachment alone holds it. */
+    stitch?: Vec3[];
   }[];
   /** The neck path and the units sewn onto it (stand, fall, one-piece collar) — 04-COLLAR.md. */
   collar?: DollCollarReport;

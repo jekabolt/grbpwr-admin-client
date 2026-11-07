@@ -165,11 +165,17 @@ export type SizePieces = {
  * each side moves through its piece's edge map, its millimetres scaled by the run's length (and
  * walked the other way when the frame does). A piece with no map keeps its numbers.
  */
-export function candidatesOnSize<T extends { candidate: SeamCandidate }>(
-  owned: readonly T[],
-  base: SizePieces,
-  target: SizePieces,
-): T[] {
+export function candidatesOnSize<
+  T extends {
+    candidate: SeamCandidate;
+    turned?: {
+      step: number;
+      run: EdgeId[];
+      by: string;
+      heldBy?: { step: number; topstitch: boolean };
+    };
+  },
+>(owned: readonly T[], base: SizePieces, target: SizePieces): T[] {
   const pieceB = new Map(base.pieces.map((p) => [p.pieceKey, p]));
   const pieceT = new Map(target.pieces.map((p) => [p.pieceKey, p]));
   const maps = new Map<string, EdgeMap | null>();
@@ -220,6 +226,7 @@ export function candidatesOnSize<T extends { candidate: SeamCandidate }>(
     const b = movedRun(c.b);
     return {
       ...item,
+      ...(item.turned ? { turned: { ...item.turned, run: movedParts(item.turned.run) } } : {}),
       candidate: {
         ...c,
         a,

@@ -10,6 +10,7 @@ type Scene = {
   lines: string[];
   panels: { key: string; group: string; pos: number[]; tris: number[]; boundary: number[] }[];
   seams: { state: string; kind: string; a: number[]; b: number[] }[];
+  stitches?: number[][];
 };
 const S = (window as unknown as { __DOLL__: Scene }).__DOLL__;
 const view = new URLSearchParams(location.search).get('view') ?? 'all';
@@ -127,6 +128,12 @@ for (const s of S.seams) {
     scene.add(line);
   }
 }
+for (const points of S.stitches ?? []) {
+  if (points.length < 6) continue;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+  scene.add(new THREE.Line(g, ink));
+}
 
 // Light: soft sky + key from front-left-top + fill + rim.
 scene.add(new THREE.HemisphereLight(0xffffff, 0xb8b4ae, 1.6));
@@ -150,6 +157,7 @@ const views: Record<string, [number, number, string]> = {
   back: [180, 0, 'back'],
   tq: [35, 12, 'three-quarter'],
   side: [90, 0, 'side (left)'],
+  top: [35, 75, 'top · looking in'],
   // Close-ups on the neck: three-quarter front and three-quarter back, from a little above.
   ctq: [35, 22, 'collar · three-quarter front'],
   cbk: [150, 22, 'collar · three-quarter back'],

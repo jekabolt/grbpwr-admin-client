@@ -749,6 +749,7 @@ export function DollCanvas({
       });
       const closed = showSeams ? lineMat(a.seams, { width: 1, color: GREY }) : null;
       const dashed = showSeams ? lineMat(a.seams, { width: 1, color: GREY, dashed: true }) : null;
+      const stitch = lineMat(a.seams, { width: 1, color: INK });
       for (const s of report.seams as DollSeamReport[]) {
         if (s.origin === 'layer') continue;
         if (s.state === 'open' || s.state === 'twisted') {
@@ -776,6 +777,9 @@ export function DollCanvas({
         const m = s.guessed || s.state === 'proposed' ? dashed : closed;
         if (m && s.pathA.length >= 2) a.seams.add(line(pathPoints(P, s.pathA), m));
       }
+      for (const turned of report.turned ?? [])
+        if (turned.stitch && turned.stitch.length >= 2)
+          a.seams.add(line(turned.stitch.flat(), stitch));
     }
     setSeamPins(pins);
     a.request();

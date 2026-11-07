@@ -92,4 +92,27 @@ describe('candidatesOnSize', () => {
     const cut = { size: 'S', pieces: [pieceOf('BP', BACK.slice(0, 4), 1)] };
     expect(candidatesOnSize([seam('FL#0', 'BP#2')], base, cut)[0].candidate.b).toBe('BP#2');
   });
+
+  it('carries a turned leader run through the same edge map', () => {
+    const target = {
+      size: 'S',
+      pieces: [pieceOf('BP', scaled(BACK, 0.96), 4), pieceOf('FL', scaled(FRONT, 0.96))],
+    };
+    const owned = {
+      ...seam('FL#0', 'BP#2'),
+      turned: {
+        step: 170,
+        run: ['BP#2'] as EdgeId[],
+        by: 'structure' as const,
+        heldBy: { step: 660, topstitch: false },
+      },
+    };
+    const [moved] = candidatesOnSize([owned], base, target);
+    expect(moved.turned).toEqual({
+      step: 170,
+      run: ['BP#3'],
+      by: 'structure',
+      heldBy: { step: 660, topstitch: false },
+    });
+  });
 });

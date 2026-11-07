@@ -36,6 +36,7 @@ import {
 } from 'lib/doll/joins';
 import { fasteningsFromOps, type DeclaredFastening } from 'lib/doll/buttons';
 import type { DollLayerRelation, DollOwnerCandidate } from 'lib/doll/types';
+import { turnedSeamsOf } from 'lib/doll/turned';
 import { resolveFolds, type StoredFold } from 'lib/folds';
 import { hemFoldsOf, hemSigOf, isHemStep, type HemStepLike } from 'lib/hem/hem-folds';
 import { grainDegOf } from 'lib/seams/frame';
@@ -223,7 +224,7 @@ export function dollOwnerSeamsOf(args: {
       guessed++;
     }
   });
-  const candidates = perStep.flat();
+  const candidates0 = perStep.flat();
   const seen = new Set<string>();
   const layers = (args.stepResults ?? []).flatMap((result) =>
     result.stacked.filter(([under, over]) => {
@@ -234,6 +235,12 @@ export function dollOwnerSeamsOf(args: {
       return true;
     }),
   );
+  const candidates = turnedSeamsOf({
+    operations: ops,
+    candidates: candidates0,
+    geoms: args.geoms,
+    layers,
+  });
   return {
     rows: [...allRows],
     candidates,
