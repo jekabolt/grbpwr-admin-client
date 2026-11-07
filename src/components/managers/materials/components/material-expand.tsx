@@ -19,6 +19,7 @@ import { PHONE_QUERY, useMediaQuery } from 'components/managers/tasks/hooks/useM
 import { techCardBomSectionOptions } from 'constants/filter';
 import { SECTION } from 'constants/routes';
 import { format } from 'date-fns';
+import { Link } from 'react-router-dom';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import {
@@ -45,7 +46,8 @@ import {
 } from './material-modal';
 import { isPurchasePrice } from './material-price';
 import { materialPriceLabel } from './material-picker';
-import { mediaThumbUrl } from './material-thumb';
+import { MaterialThumb, mediaThumbUrl } from './material-thumb';
+import { useMaterials } from './useMaterials';
 import {
   AdjustStockModal,
   IssueStockModal,
@@ -366,6 +368,14 @@ export function MaterialExpand({
   const saveMaterial = useSaveMaterial();
   const archive = useArchiveMaterial();
   const busy = saveMaterial.isPending;
+
+  // Lineage (E2): the material a dyed fabric or own label was converted from. Read-only.
+  const sourceId = Number(material.sourceMaterialId ?? 0);
+  const { data: sourceList } = useMaterials('', true, sourceId > 0);
+  const source = useMemo(
+    () => (sourceList?.materials ?? []).find((m) => Number(m.id) === sourceId),
+    [sourceList, sourceId],
+  );
 
   const base = useMemo(() => draftOf(material), [material]);
   // null = pristine: the card follows the loaded material (and its refetches) as is.
@@ -777,6 +787,18 @@ export function MaterialExpand({
     </Cell>
   );
 
+  const fromCell =
+    sourceId > 0 ? (
+      <Cell key='from' label='from' phone={phone}>
+        <div className='flex h-full min-w-0 items-center gap-1.5 px-2'>
+          <MaterialThumb material={source} size='sm' className='size-4' />
+          <Link to={`?material=${sourceId}`} className='min-w-0 truncate underline'>
+            {material.sourceMaterialName || source?.name || 'material'}
+          </Link>
+        </div>
+      </Cell>
+    ) : null;
+
   const cells = [
     stockCell,
     priceCell,
@@ -787,6 +809,7 @@ export function MaterialExpand({
     <Cell key='supplier' label='supplier' phone={phone}>
       {textInput('supplier')}
     </Cell>,
+    fromCell,
     sectionCell,
     classCell,
     labelTypeCell,
