@@ -18,6 +18,7 @@ import { fieldErrorSummary } from 'utils/field-errors';
 import { permittedSizeSystems } from 'utils/size-systems';
 
 import { createReady } from '../create-ready';
+import { madeByForKind } from '../aux-card';
 import { sampleRunOf, useCategoryWriter } from '../header-meta-fields';
 import type { TechCardFormData } from '../schema';
 import { SeasonChips } from '../season-field';
@@ -162,6 +163,7 @@ export function CreateQuiz({
               next === 'product' ? 'TECH_CARD_PURPOSE_SELLABLE' : 'TECH_CARD_PURPOSE_AUXILIARY',
               { shouldDirty: true },
             );
+            setValue('auxMadeBy', madeByForKind(next), { shouldDirty: true });
             setMaking(next);
           }}
         />
@@ -845,6 +847,7 @@ function AuxCreateQuiz({
   const create = () => {
     if (!ready.ok || !colour || subtype === 'TECH_CARD_AUX_SUBTYPE_UNKNOWN') return;
     setValue('purpose', 'TECH_CARD_PURPOSE_AUXILIARY', { shouldDirty: true });
+    setValue('auxMadeBy', madeByForKind(madeBy), { shouldDirty: true });
     setValue('auxSubtype', subtype, { shouldDirty: true });
     setValue('name', name.trim(), { shouldDirty: true });
     setValue('season', season, { shouldDirty: true });
@@ -852,8 +855,6 @@ function AuxCreateQuiz({
     setValue('styleNumberSource', styleSource as TechCardFormData['styleNumberSource'], {
       shouldDirty: true,
     });
-    // Phase 1 deliberately stores both choices as auxiliary. `madeBy` becomes aux_made_by later.
-    void madeBy;
     onAuxColour?.(colour);
     const form = rootRef.current?.closest('form');
     onDone();

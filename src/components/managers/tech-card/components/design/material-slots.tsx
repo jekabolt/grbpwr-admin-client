@@ -65,6 +65,7 @@ import { wireInt, type TechCardFormData } from '../schema';
 import { useSeamLengthsMm } from '../cut-strips/seam-lengths';
 import { CutStripModal } from '../cut-strip-editor/cut-strip-fields';
 import { useCutStrip } from '../cut-strip-editor/use-cut-strip';
+import { measured } from '../use-colourway-auto';
 
 /**
  * ═══ MATERIAL SLOTS — СЛОТЫ МАТЕРИАЛОВ ВМЕСТО СПЕЦИФИКАЦИИ (B-16 / B-19 / B-20 круга 20) ═══════
@@ -184,10 +185,12 @@ const blockerWord = (blockers: Blocker[]): string => {
 export function MaterialSlots({
   techCardId,
   readOnly,
+  auxMode = null,
   onGoTab,
 }: {
   techCardId?: number;
   readOnly?: boolean;
+  auxMode?: 'own' | 'bought' | null;
   /** Дверь на вкладку BOM: `?tab=bom&bom=<line_key>` — существующий диплинк редактора строки. */
   onGoTab?: (tab: string, extra?: Record<string, string>) => void;
 }) {
@@ -416,18 +419,18 @@ export function MaterialSlots({
              ячеек, поэтому ни длина имени, ни пилюля семейства, ни выбранное назначение не двигают
              соседние колонки. Ширина колонки оси — по самому длинному известному ярлыку
              («mesh / second layer»), остальное режется многоточием с полным текстом в `title`.
-             `min-w` — чтобы фиксированная раскладка не сжимала строку в кашу на узком окне
-             (DataTable прокручивается по горизонтали сам). */
-          <DataTable className='min-w-[1110px] table-fixed [&_td]:py-2.5'>
+             `min-w` включается с `sm`; на телефоне вторичные composition / estimate / cut / from
+             сняты, и четыре рабочих колонки помещаются без горизонтальной прокрутки. */
+          <DataTable className='min-w-0 table-fixed [&_td]:py-2.5 sm:min-w-[1110px]'>
             <colgroup>
               <col />
-              <col className='w-[200px]' />
-              <col className='w-[18%]' />
-              <col className='w-[150px]' />
-              <col className='w-16' />
-              <col className='w-36' />
-              <col className='w-[90px]' />
-              <col className='w-[110px]' />
+              <col className='w-20 sm:w-[200px]' />
+              <col className='hidden sm:table-column sm:w-[18%]' />
+              <col className='hidden sm:table-column sm:w-[150px]' />
+              {auxMode !== 'bought' && <col className='w-20 sm:w-16' />}
+              <col className='hidden sm:table-column sm:w-36' />
+              <col className='hidden sm:table-column sm:w-[90px]' />
+              <col className='w-16 sm:w-[110px]' />
             </colgroup>
             <thead>
               <tr>
@@ -436,11 +439,17 @@ export function MaterialSlots({
                     рулонного товара, вид — только вне его (и не у лейблов), поэтому в ячейке
                     всегда ровно один контрол или прочерк, и двух тут не бывает по построению. */}
                 <th data-align='left'>purpose / kind</th>
-                <th data-align='left'>composition</th>
-                <th>est usage</th>
-                <th>norm</th>
-                <th data-align='left'>cut</th>
-                <th data-align='left'>from</th>
+                <th data-align='left' className='hidden sm:table-cell'>
+                  composition
+                </th>
+                <th className='hidden sm:table-cell'>est usage</th>
+                {auxMode !== 'bought' && <th>{auxMode === 'own' ? 'norm / pc' : 'norm'}</th>}
+                <th data-align='left' className='hidden sm:table-cell'>
+                  cut
+                </th>
+                <th data-align='left' className='hidden sm:table-cell'>
+                  from
+                </th>
                 <th>
                   <span className='sr-only'>row actions</span>
                 </th>
@@ -465,6 +474,7 @@ export function MaterialSlots({
                     onRemove={askRemove}
                     blockersOf={blockersOf}
                     norm={stripNorm(lines[index])}
+                    auxMode={auxMode}
                     sizeIds={sizeIds}
                     seams={card?.seams ?? []}
                     material={materials.find(
@@ -531,6 +541,7 @@ function SlotRow({
   onRemove,
   blockersOf,
   norm,
+  auxMode,
   sizeIds,
   seams,
   material,
@@ -548,6 +559,7 @@ function SlotRow({
   onRemove: (index: number) => void;
   blockersOf: (line: Line) => Blocker[];
   norm: string;
+  auxMode: 'own' | 'bought' | null;
   sizeIds: number[];
   seams: common_TechCardSeam[];
   material?: common_Material;
@@ -646,12 +658,22 @@ function SlotRow({
 
   const blockers = blockersOf(line);
   const blocked = blockers.length > 0;
+  const ownNormEligible = auxMode === 'own' && measured(section) && !cutStrip.checked;
+  const ownNorm = (line.consumptionPerUnit ?? '').trim();
 
   /* ПРАВКА ЯЧЕЙКИ = ПРОСМОТР (D-07). Строка спецификации — вещь, а не текст: её живость меряется
      существованием, и правка имени рамку сама не гасит. Поэтому строка сравнивает свои поля на
      входе фокуса в неё и на выходе из неё; разошлись — строка принята. Переход фокуса между
      ячейками ОДНОЙ строки — не выход (`relatedTarget` внутри). */
-  const rowSig = [line.name, line.composition, line.estUsage, line.unit, line.purpose, line.kind]
+  const rowSig = [
+    line.name,
+    line.composition,
+    line.estUsage,
+    line.consumptionPerUnit,
+    line.unit,
+    line.purpose,
+    line.kind,
+  ]
     .map((v) => String(v ?? ''))
     .join('\u0001');
   const sigAtFocus = useRef<string | null>(null);
@@ -710,7 +732,7 @@ function SlotRow({
           <Pill
             tone={family === 'cloth' ? 'ink' : 'mut'}
             data-b16-kind={family}
-            className='w-[76px] shrink-0 justify-center self-stretch'
+            className='hidden w-[76px] shrink-0 justify-center self-stretch sm:flex'
           >
             {FAMILY_TITLE[family]}
           </Pill>
@@ -826,7 +848,7 @@ function SlotRow({
           ячейки вместе с полным текстом состава; сам состав в одну линию, лишнее — многоточием. */}
       <td
         data-align='left'
-        className='align-top'
+        className='hidden align-top sm:table-cell'
         data-b16-fiber-cell={index}
         title={
           linked && !readOnly && !noFibre
@@ -849,7 +871,7 @@ function SlotRow({
           <FibreField index={index} raw={rawFiber} readable={readableFiber} />
         )}
       </td>
-      <td className='align-top' data-b16-est-cell={index}>
+      <td className='hidden align-top sm:table-cell' data-b16-est-cell={index}>
         {readOnly ? (
           est ? (
             <Text component='span' data-b16-est={index}>
@@ -915,8 +937,43 @@ function SlotRow({
           </div>
         )}
       </td>
-      <td className='align-top text-right'>{norm || <EmptyCell />}</td>
-      <td data-align='left' className='align-top'>
+      {auxMode !== 'bought' && (
+        <td className='align-top text-right'>
+          {auxMode === 'own' ? (
+            cutStrip.checked ? (
+              norm || <EmptyCell />
+            ) : ownNormEligible ? (
+              readOnly ? (
+                ownNorm ? (
+                  <Text component='span'>
+                    {ownNorm} {unit}
+                  </Text>
+                ) : (
+                  <Text component='span' className='text-error'>
+                    no norm
+                  </Text>
+                )
+              ) : (
+                <div className='flex min-w-0 items-center gap-1'>
+                  <DecimalField
+                    name={`bomItems.${index}.consumptionPerUnit`}
+                    label='norm'
+                    srLabel
+                    placeholder='no norm'
+                    className='min-w-0 text-right placeholder:text-error'
+                  />
+                  {unit ? <Text component='span'>{unit}</Text> : null}
+                </div>
+              )
+            ) : (
+              <EmptyCell />
+            )
+          ) : (
+            norm || <EmptyCell />
+          )}
+        </td>
+      )}
+      <td data-align='left' className='hidden align-top sm:table-cell'>
         {cutStrip.eligible ? (
           <div className='flex items-center gap-2'>
             <CheckboxField
@@ -924,6 +981,11 @@ function SlotRow({
               label='cut to length'
               checked={cutStrip.checked}
               onCheckedChange={(checked: boolean) => {
+                if (checked && auxMode === 'own') {
+                  setValue(`bomItems.${index}.consumptionPerUnit`, '' as never, {
+                    shouldDirty: true,
+                  });
+                }
                 const strip = cutStrip.toggle(checked);
                 if (checked && strip?.lineKey) onOpenStrip(strip.lineKey);
               }}
@@ -943,7 +1005,7 @@ function SlotRow({
           <EmptyCell />
         )}
       </td>
-      <td data-align='left' className='align-top' data-b16-from={index}>
+      <td data-align='left' className='hidden align-top sm:table-cell' data-b16-from={index}>
         {/* ОТКУДА СТРОКА — синяя `drafted`, пока строка черновика не просмотрена; пусто иначе.
             Пилюля — и есть «принять» этой строки (фиксап M3). */}
         <DraftedPill

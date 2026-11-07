@@ -313,13 +313,20 @@ export function MaterialPlan({
           </Link>
         </Text>
       ) : rows.length === 0 ? null : isAux ? (
-        <DataTable>
+        <DataTable className='table-fixed'>
+          <colgroup>
+            <col />
+            <col className='w-14 sm:w-auto' />
+            <col className='w-14 sm:w-auto' />
+            <col className='hidden sm:table-column' />
+            {canIssue ? <col className='w-16 sm:w-auto' /> : null}
+          </colgroup>
           <thead>
             <tr>
               <th data-align='left'>material</th>
               <th>need</th>
               <th>issued</th>
-              <th>sum</th>
+              <th className='hidden sm:table-cell'>sum</th>
               {canIssue ? <th /> : null}
             </tr>
           </thead>
@@ -344,7 +351,7 @@ export function MaterialPlan({
                   <tr key={`${group.key}-${materialId}-${index}`}>
                     <td data-align='left'>
                       <span className='flex min-w-0 items-center gap-2'>
-                        <span className='size-8 shrink-0 overflow-hidden border border-textColor bg-pageBg'>
+                        <span className='hidden size-8 shrink-0 overflow-hidden border border-textColor bg-pageBg sm:block'>
                           {image ? (
                             <img src={image} alt='' className='size-full object-cover' />
                           ) : (
@@ -371,12 +378,13 @@ export function MaterialPlan({
                     <td>
                       {num(planRow?.issued)} {planRow?.unit}
                     </td>
-                    <td>{sum}</td>
+                    <td className='hidden sm:table-cell'>{sum}</td>
                     {canIssue ? (
                       <td>
                         <Button
                           type='button'
                           variant='secondary'
+                          size='xs'
                           className='uppercase'
                           onClick={() =>
                             setIssue({

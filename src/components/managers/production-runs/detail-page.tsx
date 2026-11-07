@@ -8,6 +8,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { MovementsList } from 'components/managers/materials/components/movements-tab';
 import { activeVariantCount } from 'components/managers/tech-card/components/output-variants-field';
+import { isBoughtAux as isBoughtAuxCard } from 'components/managers/tech-card/components/aux-card';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES, SECTION } from 'constants/routes';
 import { findInDictionary } from 'lib/features/findInDictionary';
@@ -101,6 +102,7 @@ export function ProductionRunDetail() {
   // product-less quantity received into output_material_id, so it swaps the colour-model grid for
   // a plain quantity plan and the receive posts into the material warehouse.
   const isAux = techCard?.techCard?.purpose === 'TECH_CARD_PURPOSE_AUXILIARY';
+  const boughtAux = isBoughtAuxCard(techCard?.techCard?.purpose, techCard?.techCard?.auxMadeBy);
   const outputMaterialId = techCard?.techCard?.outputMaterialId ?? 0;
   // 0252: an aux card may instead produce one bucket PER COLOUR. Then the run is planned and
   // received per colour and the single output material is not the destination at all.
@@ -181,7 +183,7 @@ export function ProductionRunDetail() {
   // hook, so React Query serves both from one request and the band can never quote a figure the
   // panel disagrees with — and it is not an extra call: the panel was mounted unconditionally on
   // every open of this page before, so the plan was always fetched here anyway.
-  const materialPlan = useMaterialPlan(runId, runId > 0);
+  const materialPlan = useMaterialPlan(runId, runId > 0 && !!techCard?.techCard && !boughtAux);
   const mpRows = materialPlan.data?.rows ?? [];
   const materialsFact = materialPlan.data
     ? {
@@ -851,31 +853,35 @@ export function ProductionRunDetail() {
               onDirtyChange={onPlanDirty}
             />
           </Section>
-          <Section
-            title='2 · materials'
-            action={
-              auxMaterialWarningCount > 0 ? (
-                <Text size='micro' className='text-error'>
-                  ! {auxMaterialWarningCount}
-                </Text>
-              ) : undefined
-            }
-          >
-            <MaterialPlan run={run} canEdit={canEdit} locked={locked} isAux />
-          </Section>
-          <Section title='3 · costs'>
+          {!boughtAux && (
+            <Section
+              title='2 · materials'
+              action={
+                auxMaterialWarningCount > 0 ? (
+                  <Text size='micro' className='text-error'>
+                    ! {auxMaterialWarningCount}
+                  </Text>
+                ) : undefined
+              }
+            >
+              <MaterialPlan run={run} canEdit={canEdit} locked={locked} isAux />
+            </Section>
+          )}
+          <Section title={`${boughtAux ? '2' : '3'} · costs`}>
             {canReadCosting ? (
               <>
-                <Row
-                  label='materials issued'
-                  value={
-                    actuals?.materialsFromStockBase?.value ? (
-                      `${decimalToInput(actuals.materialsFromStockBase)} ${actuals.baseCurrency || ''}`
-                    ) : (
-                      <EmptyCell />
-                    )
-                  }
-                />
+                {!boughtAux && (
+                  <Row
+                    label='materials issued'
+                    value={
+                      actuals?.materialsFromStockBase?.value ? (
+                        `${decimalToInput(actuals.materialsFromStockBase)} ${actuals.baseCurrency || ''}`
+                      ) : (
+                        <EmptyCell />
+                      )
+                    }
+                  />
+                )}
                 <RunCosts
                   run={run}
                   canEdit={canEdit}
@@ -896,7 +902,7 @@ export function ProductionRunDetail() {
               </>
             ) : null}
           </Section>
-          <Section title='4 · receive'>
+          <Section title={`${boughtAux ? '3' : '4'} · receive`}>
             <AuxReceive
               run={run}
               outputMaterialId={outputMaterialId}

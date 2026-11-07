@@ -13,6 +13,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import {
   common_AdminColorwayRef,
+  common_AuxMadeBy,
   common_TechCard,
   common_TechCardInsert,
 } from 'api/proto-http/admin';
@@ -78,6 +79,7 @@ import { LabelsBlock, PackagingBlock } from './labels-blocks';
 import { StyleProjects } from './style-projects';
 import { TechCardTasksPanel } from './tech-card-tasks-panel';
 import { activeVariantCount, Makes, seedColourVariants } from './output-variants-field';
+import { isBoughtAux, makesMaterialId } from './aux-card';
 import { PatternsField } from './patterns-field';
 import { MarkersSection } from './nesting/markers-section';
 import { DevExpensesField } from './dev-expenses-field';
@@ -708,6 +710,10 @@ export function TechCardForm({
     useWatch({ control: form.control, name: 'purpose' }) as string | undefined,
   );
   const isAux = purpose === 'TECH_CARD_PURPOSE_AUXILIARY';
+  const auxMadeBy = useWatch({ control: form.control, name: 'auxMadeBy' }) as
+    | common_AuxMadeBy
+    | undefined;
+  const boughtAux = isBoughtAux(purpose, auxMadeBy);
 
   // Switching tabs drops a stale ?sample= / ?fits=; extra params (a sample to open, a fittings
   // filter) can be set in the same navigation (spine deep links).
@@ -1019,6 +1025,7 @@ export function TechCardForm({
   // (a variant owns warehouse stock, so the full-replace save must not be able to re-mint or drop
   // one), which also means they are already saved — there is nothing here for Save to carry.
   const outputVariants = techCard?.outputVariants ?? [];
+  const primaryMakesMaterialId = makesMaterialId(outputVariants, outputMaterialId);
   // ═══ NO LOCAL DRAFTS (27.09 · O-64, D-63) ═══════════════════════════════════════════════════════
   // The owner: «оно просто должно автосохранять все и все если сохранение не прошло просто на этом
   // месте должна быть ошибка». The card keeps no draft journal — no localStorage copy, no «unsaved work
@@ -1148,6 +1155,7 @@ export function TechCardForm({
     // No error escape here, unlike the IDEA rule below: no ERROR_TAB row points at `colorways` any
     // more, so nothing can be filed against this tab while it is invisible.
     if (t === 'colorways' && isAux) return false;
+    if (boughtAux && (t === 'sizes' || t === 'labels' || t === 'signoff')) return false;
     if (isIdea && !IDEA_TABS.includes(t)) return errorTabs.has(t);
     if (t === 'costing' && !canReadCosting) return false;
     if (t === 'samples' && !isEditMode) return false;
@@ -1242,7 +1250,7 @@ export function TechCardForm({
   useEffect(() => {
     if (!isTabVisible(activeTab)) navTo('studio');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, isIdea, canReadCosting, isEditMode, isAux]);
+  }, [activeTab, isIdea, canReadCosting, isEditMode, isAux, boughtAux]);
   // Фулскрин сборки (`?fs=1`) — вид вкладки CONSTRUCTION. Там, где эта вкладка невидима (IDEA
   // без поданных на неё ошибок), параметр снимается ЗДЕСЬ и первым: иначе энфорсер
   // `tab=construction` в OperationsField и фолбэк `navTo('studio')` выше зациклились бы,
@@ -1250,7 +1258,7 @@ export function TechCardForm({
   useEffect(() => {
     if (params.get('fs') === '1' && !isTabVisible('construction')) leaveFullscreen();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params, isIdea, canReadCosting, isEditMode, isAux]);
+  }, [params, isIdea, canReadCosting, isEditMode, isAux, boughtAux]);
 
   // Walk the user to the field a failed save flagged. This has to run AFTER the tab switch commits
   // (it's a router param update) and after any collapsed container that owns the field expands
@@ -3459,6 +3467,7 @@ export function TechCardForm({
         isAux={isAux}
         canEdit={canWrite(SECTION.techCards) && !frozen}
         outputMaterialId={outputMaterialId}
+        makesMaterialId={primaryMakesMaterialId}
         roleAssignments={techCard?.roleAssignments}
         colorways={techCard?.colorways}
         /* K-19 · the consequence of changing the season, spoken on «pick» — the field's one writer.

@@ -1,12 +1,17 @@
 import { adminService } from 'api/api';
 import {
   common_AdminColorwayRef,
+  common_AuxMadeBy,
   common_Colorway,
   common_SkuSeason,
   common_TechCardRoleAssignment,
 } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useProductsByIds } from 'components/managers/fittings/components/useResolvers';
+import {
+  useMaterialPrices,
+  useMaterials,
+} from 'components/managers/materials/components/useMaterials';
 import {
   techCardAuxSubtypeFormOptions,
   techCardGenderOptions,
@@ -40,7 +45,15 @@ import {
   SelectField,
 } from 'ui';
 import { fieldErrorSummary } from 'utils/field-errors';
+import { decimalToInput } from 'utils/decimal';
 
+import {
+  AUX_MADE_BY_SUPPLIER,
+  auxKind,
+  latestSupplierPrice,
+  madeByForKind,
+  type AuxKind,
+} from '../aux-card';
 import { CollectionField } from '../collection-field';
 import { BaseModelFields, CategoryBrowser } from '../header-meta-fields';
 import { RolesField } from '../roles-field';
@@ -383,22 +396,15 @@ function StyleLockNote({ locked }: { locked: boolean }) {
   );
 }
 
-type AuxMadeBy = 'own' | 'bought';
-
-// Phase 1 has no aux_made_by field on the wire. Keep the hook typed so the select can start writing
-// it without another UI rewrite when the backend field lands.
-const persistAuxMadeBy = (_madeBy: AuxMadeBy): void => {
-  // TODO(proto): write TechCardInsert.aux_made_by when generated types expose it.
-};
-
 function KindField() {
-  const { control } = useFormContext<TechCardFormData>();
+  const { control, setValue } = useFormContext<TechCardFormData>();
+  const madeBy = useWatch({ control, name: 'auxMadeBy' }) as common_AuxMadeBy | undefined;
   return (
     <FormField
       control={control}
       name='purpose'
       render={({ field }) => {
-        const auxiliary = field.value === 'TECH_CARD_PURPOSE_AUXILIARY';
+        const value = auxKind(field.value, madeBy);
         return (
           <FormItem>
             <FormLabel>kind</FormLabel>
@@ -409,15 +415,14 @@ function KindField() {
                 { value: 'own', label: 'own item' },
                 { value: 'bought', label: 'bought item' },
               ]}
-              value={auxiliary ? 'own' : 'product'}
+              value={value}
               onBlur={field.onBlur}
               onValueChange={(value: string) => {
-                if (value === 'product') {
-                  field.onChange('TECH_CARD_PURPOSE_SELLABLE');
-                  return;
-                }
-                persistAuxMadeBy(value as AuxMadeBy);
-                field.onChange('TECH_CARD_PURPOSE_AUXILIARY');
+                const next = value as AuxKind;
+                setValue('auxMadeBy', madeByForKind(next), { shouldDirty: true });
+                field.onChange(
+                  next === 'product' ? 'TECH_CARD_PURPOSE_SELLABLE' : 'TECH_CARD_PURPOSE_AUXILIARY',
+                );
               }}
             />
             <FormMessage />
@@ -425,6 +430,15 @@ function KindField() {
         );
       }}
     />
+  );
+}
+
+function ReadOnlyField({ label, value }: { label: string; value?: string }) {
+  return (
+    <FormItem>
+      <FormLabel>{label}</FormLabel>
+      <Input value={value || '—'} readOnly />
+    </FormItem>
   );
 }
 
@@ -590,6 +604,7 @@ export function CardDetails({
   isAux,
   canEdit,
   outputMaterialId,
+  makesMaterialId,
   roleAssignments,
   colorways,
   seasonPickHint,
@@ -609,6 +624,8 @@ export function CardDetails({
   canEdit: boolean;
   /** The form's `outputMaterialId`, for the «saving as sellable clears it» warning. */
   outputMaterialId: number;
+  /** Material represented by the first live MAKES row. */
+  makesMaterialId: number;
   /** The card read's own `roleAssignments` — seeds the roles cache so mount costs no RPC. */
   roleAssignments?: common_TechCardRoleAssignment[];
   colorways?: common_AdminColorwayRef[];
@@ -624,7 +641,7 @@ export function CardDetails({
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const { dictionary } = useDictionary();
-  const { canWrite } = usePermissions();
+  const { canWrite, canReadCosting } = usePermissions();
   // SUGGEST without a season opens the season picker and suggests with the season it commits (П1).
   // The picker's open state lives here so SUGGEST can open it; `pendingSuggest` remembers who did,
   // so a season picked through the field's own `pick` writes the season and nothing more.
@@ -633,6 +650,20 @@ export function CardDetails({
   const pendingSuggest = useRef(false);
   const meta = useWatch({ control, name: [...META_FIELDS] }) as unknown[];
   const auxSubtype = (useWatch({ control, name: 'auxSubtype' }) as string | undefined) ?? '';
+  const auxMadeBy = useWatch({ control, name: 'auxMadeBy' }) as common_AuxMadeBy | undefined;
+  const bought = isAux && auxMadeBy === AUX_MADE_BY_SUPPLIER;
+  const { data: materialsData } = useMaterials('', true, bought && makesMaterialId > 0);
+  const makesMaterial = (materialsData?.materials ?? []).find(
+    (material) => (material.id ?? 0) === makesMaterialId,
+  );
+  const { data: priceData } = useMaterialPrices(
+    makesMaterialId,
+    bought && canReadCosting && makesMaterialId > 0,
+  );
+  const supplierPrice = latestSupplierPrice(priceData?.prices ?? []);
+  const priceValue = supplierPrice?.price?.value
+    ? `${decimalToInput(supplierPrice.price)} ${supplierPrice.currency || ''}`.trim()
+    : undefined;
   const categoryId = (useWatch({ control, name: 'categoryId' }) as number | undefined) ?? 0;
   const concept = (useWatch({ control, name: 'concept' }) as string | undefined) ?? '';
   const fit = (useWatch({ control, name: 'fit' }) as string | undefined) ?? '';
@@ -759,29 +790,47 @@ export function CardDetails({
               }}
             />
           </div>
-          <div className={W3}>
-            <InputField name='brand' label='brand' placeholder='GRBPWR' disabled={seededLocked} />
-            <StyleLockNote locked={seededLocked} />
-          </div>
-          <div className={W3}>
-            <fieldset disabled={seededLocked} className='m-0 min-w-0 border-0 p-0'>
-              <SeasonField
-                key={seededLocked ? 'locked' : 'open'}
-                pickHint={seasonPickHint}
-                open={seasonOpen && !seededLocked}
-                onOpenChange={(open) => {
-                  setSeasonOpen(open);
-                  if (!open) pendingSuggest.current = false;
-                }}
-                onPicked={(sku) => {
-                  if (!pendingSuggest.current) return;
-                  pendingSuggest.current = false;
-                  void suggest(sku);
-                }}
-              />
-            </fieldset>
-            <StyleLockNote locked={seededLocked} />
-          </div>
+          {bought ? (
+            <>
+              <div className={W3}>
+                <ReadOnlyField label='supplier' value={makesMaterial?.supplier} />
+              </div>
+              <div className={W3}>
+                <ReadOnlyField label='price / pc' value={priceValue} />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className={W3}>
+                <InputField
+                  name='brand'
+                  label='brand'
+                  placeholder='GRBPWR'
+                  disabled={seededLocked}
+                />
+                <StyleLockNote locked={seededLocked} />
+              </div>
+              <div className={W3}>
+                <fieldset disabled={seededLocked} className='m-0 min-w-0 border-0 p-0'>
+                  <SeasonField
+                    key={seededLocked ? 'locked' : 'open'}
+                    pickHint={seasonPickHint}
+                    open={seasonOpen && !seededLocked}
+                    onOpenChange={(open) => {
+                      setSeasonOpen(open);
+                      if (!open) pendingSuggest.current = false;
+                    }}
+                    onPicked={(sku) => {
+                      if (!pendingSuggest.current) return;
+                      pendingSuggest.current = false;
+                      void suggest(sku);
+                    }}
+                  />
+                </fieldset>
+                <StyleLockNote locked={seededLocked} />
+              </div>
+            </>
+          )}
           <div className={W3}>
             <KindField />
           </div>

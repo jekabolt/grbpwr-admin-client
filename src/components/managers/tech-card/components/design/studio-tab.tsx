@@ -1,4 +1,4 @@
-import type { common_TechCard } from 'api/proto-http/admin';
+import type { common_AuxMadeBy, common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useCallback, useEffect, useRef, type ReactNode } from 'react';
@@ -9,6 +9,7 @@ import type { EditHistory } from 'components/managers/tech-card/annotation/histo
 import { Button, Text, Section, SectionStack } from 'ui';
 import { ConstructionGeneralInfo } from '../construction-general-info';
 import type { TechCardFormData } from '../schema';
+import { auxKind } from '../aux-card';
 import { createReady } from '../create-ready';
 import { ArtifactsPanel, type SheetCallout } from './artifacts-panel';
 import { Bench } from './bench';
@@ -206,6 +207,9 @@ export function StudioTab({
   const { control } = useFormContext<TechCardFormData>();
   const purpose = useWatch({ control, name: 'purpose' }) as string | undefined;
   const isAux = purpose === 'TECH_CARD_PURPOSE_AUXILIARY';
+  const madeBy = useWatch({ control, name: 'auxMadeBy' }) as common_AuxMadeBy | undefined;
+  const cardKind = auxKind(purpose, madeBy);
+  const auxMode = cardKind === 'product' ? null : cardKind;
   /* ═══ СЛОТЫ ТКАНИ — ОДНО ЧТЕНИЕ `bomItems` НА ВСЮ СТУДИЮ (STEP 3) ══════════════════════════════
      Шаг PATTERN рисует ряд на каждую пару (колорвей, слот ткани), а FABRIC RENDER засевает ткани
      колорвея из тех же пар — значит оба экрана обязаны читать ОДИН список слотов, и читает его
@@ -712,6 +716,7 @@ export function StudioTab({
                     <MaterialSlots
                       techCardId={techCardId}
                       readOnly={readOnly || !canWriteCard}
+                      auxMode={auxMode}
                       onGoTab={navTo}
                     />
                     {/* КОЛОРВЕИ, ПРЕДЛОЖЕННЫЕ ЧЕРНОВИКОМ (B-25, D5) — продуктовый блок, которого в
