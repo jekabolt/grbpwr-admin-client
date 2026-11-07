@@ -1,54 +1,59 @@
-// COMPOSITION LABEL — отдельный, всегда присутствующий блок вкладки «labels & pkg» (R-01..R-04).
-// Редизайн R-11 (tmp/plans/labels-rework/redesign/13-SYNTHESIS.md): «лента и есть форма». Каждая
-// этикетка нарисована предметом в настоящих пропорциях (линия реза, пунктир сгиба, штриховка
-// припуска 10 мм), лицо и изнанка рядом; напечатанное значение само есть дверь в свою правку, полоса
-// правки открывается прямо под стороной, открыта всегда одна, сброс «↺ use derived» живёт только в
-// ней. Дыра рисуется рамкой на том месте ленты, которое она касается. Составник, не влезший на одну
-// ленту, показан всеми своими лентами (B, B2 …) — ровно столько, сколько уйдёт в ZIP.
-// Единственная кнопка шапки — `print composition`: модалка печати. Лента живёт в модалке `Edit text`,
-// блок показывает строку этикетки и её artwork. Страна без колорвея ставится прямо в редакторе (в
-// одно сохранение карточки, made-in.ts); запись страны и выбор колорвея принадлежат блоку, чтобы
-// закрытие модалки не снимало их из очереди.
 import { useQueryClient } from '@tanstack/react-query';
-import type { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
+import type { common_AdminColorwayRef, common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { useSizeOrdering } from 'components/managers/model/components/use-size-systems';
+import { useProductionRuns } from 'components/managers/production-runs/components/useProductionRuns';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
-import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 import { SECTION } from 'constants/routes';
 import { notify } from 'lib/stores/store';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { flushSync } from 'react-dom';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type JSX,
+  type ReactNode,
+} from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
 import {
   Button,
-  Chip,
-  ChipRow,
-  ConfirmationModal,
-  GroupLabel,
+  Close,
   HeaderWarnings,
+  Input,
+  Row,
+  RowTotal,
   Section,
   Select,
   Text,
-  Tooltip,
-  EmptyCell,
+  UndoRow,
+  ViewSwitch,
 } from 'ui';
-import { colorwayFullKey } from '../../care-labels/adapter';
-import { overrideRowsOf } from '../../care-labels/composition-override';
-import { isBlocking, type Hole } from '../../care-labels/holes';
-import { LABEL_PART_NAME } from '../../care-labels/label-parts';
-import { COMPANY_ADDRESS, L, QR_CAPTION, textWidth } from '../../care-labels/layout';
-import { previewASides, type PlannedSide } from '../../care-labels/pages';
+import {
+  adaptRuns,
+  colorwayFullKey,
+  type CareLabelColorway,
+  type CareLabelData,
+} from '../../care-labels/adapter';
+import { overrideRowsOf, type OverrideFiber } from '../../care-labels/composition-override';
+import type { PartComposition } from '../../care-labels/composition-resolver';
+import { LABEL_PART_NAME, LABEL_PARTS, type PrintedPart } from '../../care-labels/label-parts';
+import { COMPANY_ADDRESS } from '../../care-labels/layout';
 import { PrintCompositionModal } from '../../care-labels/print-modal';
+import { printGate, printSource } from '../../care-labels/print-gate';
+import { computeQuantities, emptyGrid, fromRun } from '../../care-labels/quantities';
+import { useCareLabelPrefs } from '../../care-labels/use-care-label-prefs';
 import { useLabelDictionary } from '../../care-labels/use-label-dictionary';
 import { setCareLabel, setCareLabelColorway, upsertGarmentLabel } from '../form-writers';
-import type { FormCareLabel, FormGarmentLabel } from '../labels-schema';
+import type { FormGarmentLabel } from '../labels-schema';
 import type { TechCardFormData } from '../schema';
 import { COMPOSITION_LABEL_KEY, isCompositionLabel, type ArtworkFile } from '../sewn-label-model';
 import { bornLabelFacts } from '../sewn-label-row';
 import { useUndoHistory } from '../undo-history';
 import { useTechCardStaging } from '../useTechCardStaging';
 import { wireInt } from '../wire-int';
+import { CareSymbolsRow } from './care-symbols-row';
 import { ChooseFileModal } from './choose-file-modal';
 import type { ArtworkCellRef } from './composition-artwork';
 import {
@@ -56,114 +61,307 @@ import {
   filesAfterChoice,
   filesWithOwn,
   filesWithoutOwn,
+  oneFileOf,
+  ownFileFor,
   type ArtworkChoice,
 } from './composition-artwork-model';
-import { CompositionLabelRow } from './composition-label-row';
-import { CareSymbolsEditor, LogoEditor, QrEditor } from './doors';
-import { DraftInput, DraftLines } from './editable';
-import { EditorStrip } from './editor-strip';
-import { FibreEditor } from './fibre-editor';
 import {
-  colourNameOverride,
-  fibersFromForm,
-  holeLine,
-  linesOverride,
-  writeComposition,
-  type LineKey,
-} from './label-lines';
-import { addressLines, captionLines, labelSku, qrExample } from './label-summary';
+  CompositionLabelPreview,
+  type CompositionPreviewData,
+  type LabelOrientation,
+} from './composition-label-preview';
+import { colourNameOverride, fibersToForm, linesOverride } from './label-lines';
+import { addressLines } from './label-summary';
 import { stageCountryWrites } from './made-in';
-import { MadeInValue } from './made-in-value';
-import {
-  aBackRegions,
-  aFaceRegions,
-  bEmptyRegions,
-  bRegions,
-  PX_PER_MM,
-  type Region,
-} from './regions';
-import { Ribbon, type RegionView, type RibbonSide } from './ribbon';
-import { useCompositionLabel, useShaper } from './use-composition-label';
+import { useCompositionLabel } from './use-composition-label';
 
 const EMPTY_PICKS: ReadonlyMap<number, string> = new Map();
-
-/** Ширина ленты 100 мм при зуме 1. */
-const RIBBON_PX = L.W * PX_PER_MM;
-/** Просвет между лицом и изнанкой, поля скамьи. */
-const GAP = 24;
-const BENCH_PAD = 16;
-/** Уже этого сторона на двух колонках становится мельче натуральной величины — одна сторона за раз. */
-const TWO_UP_MIN = 2 * RIBBON_PX + GAP + 2 * BENCH_PAD;
-
-type SideModel = RibbonSide & { role: 'face' | 'back'; row: string; regions: Region[] };
-type RowModel = { label: string; sides: SideModel[] };
-type Open = { side: string; key: string } | null;
-
-/** Имя, откуда значение, пока его не правили. */
-const SOURCE: Record<LineKey, string> = {
-  logo: 'from the brand',
-  product: 'from the colourway',
-  'care-symbols': 'style care · all colourways',
-  'care-text': 'from the dictionary',
-  'made-in': 'from the colourway',
-  composition: 'from the BOM',
-  qr: 'storefront link',
-  caption: 'from the brand',
-  address: 'from the company',
-};
-const NAME: Record<LineKey, string> = {
-  logo: 'logo',
-  product: 'colour name',
-  'care-symbols': 'care symbols',
-  'care-text': 'care text',
-  'made-in': 'made in',
-  composition: 'composition',
-  qr: 'qr link',
-  caption: 'back caption',
-  address: 'address',
-};
-
-const sideName = (key: string) => key.replace('-', ' ');
-
-type TextEditorProps = {
-  techCardId: number | undefined;
-  canEdit: boolean;
-  model: ReturnType<typeof useCompositionLabel>;
-  picks: ReadonlyMap<number, string>;
-  setPicks: React.Dispatch<React.SetStateAction<ReadonlyMap<number, string>>>;
-  setLogoHint: (url: string) => void;
-};
+const ALL_FILE: ArtworkCellRef = { colorwayId: 0, sizeId: 0 };
+type EditablePart = Exclude<PrintedPart, 'NOTE'>;
 
 function useLabelCountries() {
   const { dictionary } = useLabelDictionary();
   return useMemo(
     () =>
       (dictionary?.countries ?? [])
-        .filter((c) => !!c.code)
-        .map((c) => ({
-          code: c.code!.toUpperCase(),
-          name: c.name || c.code!,
-          active: c.active !== false,
+        .filter((country) => !!country.code)
+        .map((country) => ({
+          code: country.code!.toUpperCase(),
+          name: country.name || country.code!,
+          active: country.active !== false,
         }))
         .sort((a, b) => a.name.localeCompare(b.name)),
     [dictionary?.countries],
   );
 }
 
-type TextSnapshot = {
-  careLabel: TechCardFormData['careLabel'];
-  careInstructions: TechCardFormData['careInstructions'];
-  picks: ReadonlyMap<number, string>;
-};
+function swatchHex(ref: common_AdminColorwayRef | undefined): string | undefined {
+  const value = (ref?.devHex || ref?.colours?.[0]?.hex || '').trim();
+  if (!/^#?[0-9a-f]{6}$/i.test(value)) return undefined;
+  return value.startsWith('#') ? value : `#${value}`;
+}
+
+function FieldRow({ label, children, top }: { label: string; children: ReactNode; top?: boolean }) {
+  return (
+    <Row
+      label={
+        <Text
+          component='span'
+          size='control'
+          variant='label'
+          tracking='label'
+          className='uppercase'
+        >
+          {label}
+        </Text>
+      }
+      value={<span className='flex min-w-0 flex-1 flex-wrap items-center gap-1.5'>{children}</span>}
+      className={
+        top
+          ? 'min-h-11 flex-col items-stretch gap-1.5 py-2 sm:grid sm:grid-cols-[120px_minmax(0,1fr)] sm:items-start [&>span:last-child]:shrink'
+          : 'min-h-11 flex-col items-stretch gap-1.5 py-2 sm:grid sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center [&>span:last-child]:shrink'
+      }
+    />
+  );
+}
+
+function partsFor(
+  data: CareLabelData | null,
+  colorway: CareLabelColorway | undefined,
+  resolved: readonly PartComposition[],
+): OverrideFiber[] {
+  if (!data || !colorway) return [];
+  return colorway.fiberOverride?.length ? [...colorway.fiberOverride] : overrideRowsOf(resolved);
+}
+
+function fibreText(
+  rows: readonly OverrideFiber[],
+  part: EditablePart,
+  data: CareLabelData,
+): string {
+  return rows
+    .filter((row) => row.part === part)
+    .map((row) => {
+      const fiber = data.fibers.get(row.fiberCode);
+      const name = fiber?.translations.en || fiber?.name || row.fiberCode;
+      return `${row.pct}% ${name}`;
+    })
+    .join(' · ');
+}
+
+function parseFibres(
+  text: string,
+  part: EditablePart,
+  data: CareLabelData,
+): OverrideFiber[] | null {
+  const pieces = text
+    .split(/\s*(?:,|·)\s*/)
+    .map((piece) => piece.trim())
+    .filter(Boolean);
+  if (pieces.length === 0) return [];
+  const rows: OverrideFiber[] = [];
+  for (const piece of pieces) {
+    const match = piece.match(/^(\d{1,3})\s*%\s+(.+)$/);
+    if (!match) return null;
+    const pct = Number(match[1]);
+    if (!Number.isInteger(pct) || pct < 1 || pct > 100) return null;
+    const wanted = match[2].trim().toLowerCase();
+    const fiber = [...data.fibers.values()].find(
+      (candidate) =>
+        candidate.code.toLowerCase() === wanted ||
+        candidate.name.toLowerCase() === wanted ||
+        candidate.translations.en?.toLowerCase() === wanted,
+    );
+    if (!fiber) return null;
+    rows.push({ part, fiberCode: fiber.code, pct });
+  }
+  return rows;
+}
+
+type PartDraft = { part: EditablePart; text: string; invalid?: boolean };
+
+function CompositionFields({
+  data,
+  colorway,
+  parts,
+  disabled,
+}: {
+  data: CareLabelData | null;
+  colorway: CareLabelColorway | undefined;
+  parts: readonly PartComposition[];
+  disabled: boolean;
+}): JSX.Element {
+  const { getValues, setValue } = useFormContext<TechCardFormData>();
+  const source = useMemo(() => partsFor(data, colorway, parts), [data, colorway, parts]);
+  const sourceKey = source.map((row) => `${row.part}:${row.fiberCode}:${row.pct}`).join('|');
+  const [rows, setRows] = useState<PartDraft[]>([]);
+  const [removed, setRemoved] = useState<{ row: PartDraft; index: number } | null>(null);
+
+  useEffect(() => {
+    if (!data) return;
+    const shown = LABEL_PARTS.filter(
+      (part): part is EditablePart => part !== 'NOTE' && source.some((row) => row.part === part),
+    ).map((part) => ({ part, text: fibreText(source, part, data) }));
+    setRows(shown);
+    setRemoved(null);
+    // The serialized source is the reset boundary; object identities change while data loads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [colorway?.id, sourceKey]);
+
+  const write = (next: PartDraft[]): boolean => {
+    if (!data || !colorway) return false;
+    const parsed: OverrideFiber[] = [];
+    let valid = true;
+    const marked = next.map((row) => {
+      const fibers = parseFibres(row.text, row.part, data);
+      if (fibers === null) {
+        valid = false;
+        return { ...row, invalid: true };
+      }
+      parsed.push(...fibers);
+      return { ...row, invalid: false };
+    });
+    setRows(marked);
+    if (!valid) return false;
+    setCareLabelColorway(getValues, setValue, colorway.id, { fibers: fibersToForm(parsed) });
+    return true;
+  };
+
+  const unused = LABEL_PARTS.filter(
+    (part): part is EditablePart => part !== 'NOTE' && !rows.some((row) => row.part === part),
+  );
+
+  if (!data || !colorway) {
+    return (
+      <Text size='micro' variant='label'>
+        No composition
+      </Text>
+    );
+  }
+
+  return (
+    <span className='flex w-full flex-col items-start gap-1.5'>
+      {rows.map((row, index) => {
+        const partOptions = LABEL_PARTS.filter(
+          (part): part is EditablePart =>
+            part !== 'NOTE' && (part === row.part || !rows.some((entry) => entry.part === part)),
+        );
+        return (
+          <span
+            key={row.part}
+            className='grid w-full grid-cols-[minmax(0,120px)_minmax(0,220px)_28px] items-center gap-1.5 max-[480px]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_28px]'
+          >
+            <Select
+              name={`composition-part-${index}`}
+              value={row.part}
+              disabled={disabled}
+              className='h-7'
+              items={partOptions.map((part) => ({ value: part, label: LABEL_PART_NAME[part] }))}
+              onValueChange={(value: string) => {
+                const next = rows.map((entry, rowIndex) =>
+                  rowIndex === index ? { ...entry, part: value as EditablePart } : entry,
+                );
+                setRows(next);
+                write(next);
+              }}
+            />
+            <Input
+              name={`composition-fibre-${index}`}
+              value={row.text}
+              disabled={disabled}
+              aria-label={`${LABEL_PART_NAME[row.part]} fibre`}
+              aria-invalid={row.invalid || undefined}
+              placeholder='100% fibre'
+              className='h-7'
+              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                setRows((current) =>
+                  current.map((entry, rowIndex) =>
+                    rowIndex === index
+                      ? { ...entry, text: event.target.value, invalid: false }
+                      : entry,
+                  ),
+                )
+              }
+              onBlur={() => write(rows)}
+            />
+            {rows.length > 1 ? (
+              <Close
+                size='sm'
+                disabled={disabled}
+                aria-label={`remove ${LABEL_PART_NAME[row.part]}`}
+                className='h-7 w-7'
+                onClick={() => {
+                  const next = rows.filter((_, rowIndex) => rowIndex !== index);
+                  setRemoved({ row, index });
+                  write(next);
+                }}
+              />
+            ) : (
+              <span className='h-7 w-7' />
+            )}
+          </span>
+        );
+      })}
+      {removed ? (
+        <UndoRow
+          name={LABEL_PART_NAME[removed.row.part]}
+          className='min-h-7 w-full [&_button]:h-7'
+          onUndo={() => {
+            const next = [...rows];
+            next.splice(removed.index, 0, removed.row);
+            setRemoved(null);
+            write(next);
+          }}
+          onCommit={() => setRemoved(null)}
+        />
+      ) : null}
+      {unused.length > 0 ? (
+        <Button
+          type='button'
+          variant='secondary'
+          size='xs'
+          disabled={disabled}
+          className='h-7'
+          onClick={() => setRows([...rows, { part: unused[0], text: '' }])}
+        >
+          + Part
+        </Button>
+      ) : null}
+    </span>
+  );
+}
+
+function AddressField({ data, disabled }: { data: CareLabelData | null; disabled: boolean }) {
+  const { getValues, setValue } = useFormContext<TechCardFormData>();
+  const shown = addressLines(data).join(' · ');
+  const [draft, setDraft] = useState(shown);
+  useEffect(() => setDraft(shown), [shown]);
+  const commit = () => {
+    const next = draft.trim();
+    if (next === shown) return;
+    setCareLabel(getValues, setValue, {
+      addressLines: linesOverride(next.replaceAll(' · ', '\n'), COMPANY_ADDRESS),
+    });
+  };
+  return (
+    <Input
+      name='composition-address'
+      value={draft}
+      disabled={disabled}
+      aria-label='Address'
+      className='h-7 max-w-sm'
+      onChange={(event: ChangeEvent<HTMLInputElement>) => setDraft(event.target.value)}
+      onBlur={commit}
+    />
+  );
+}
 
 export function CompositionLabelBlock({
   techCard,
   techCardId,
   canEdit,
 }: {
-  /** Сохранённая карточка (колорвеи, BOM); новая — undefined. */
   techCard: common_TechCard | undefined;
-  /** Только у сохранённой карточки есть дверь печати и запись страны. */
   techCardId: number | undefined;
   canEdit: boolean;
 }) {
@@ -172,19 +370,31 @@ export function CompositionLabelBlock({
   const staging = useTechCardStaging();
   const countries = useLabelCountries();
   const undoHistory = useUndoHistory();
-
-  // ── страна: выбор оператора до сохранения карточки ────────────────────────────────────────
+  const { canWrite } = usePermissions();
+  const canStyle = canWrite(SECTION.products);
   const [picks, setPicks] = useState<ReadonlyMap<number, string>>(EMPTY_PICKS);
-  const [logoHint, setLogoHint] = useState<string>('');
-  const model = useCompositionLabel({ techCard, countryPicks: picks, logoUrlHint: logoHint });
+  const model = useCompositionLabel({ techCard, countryPicks: picks });
   const colorways = model.data?.colorways ?? [];
-  const countryName = (code: string) => countries.find((c) => c.code === code)?.name ?? code;
-  const titleOf = (id: number) => {
-    const c = colorways.find((x) => x.id === id);
-    return c?.baseSku || c?.colourName || `#${id}`;
-  };
+  const sizes = model.data?.sizes ?? [];
+  const [colorwayId, setColorwayId] = useState<number | null>(null);
+  const [sizeId, setSizeId] = useState<number | null>(null);
+  const colorway = colorways.find((entry) => entry.id === colorwayId) ?? colorways[0];
+  const size = sizes.find((entry) => entry.id === sizeId) ?? sizes[0];
+  const orientation: LabelOrientation =
+    useWatch({ control, name: 'careLabel.orientation' }) === 'horizontal'
+      ? 'horizontal'
+      : 'vertical';
+  const setOrientation = (next: LabelOrientation) =>
+    setCareLabel(getValues, setValue, { orientation: next });
+  const countryNodes = useRef(new Map<number, HTMLSpanElement>());
+  const firstField = useRef<HTMLDivElement>(null);
 
-  // Одна запись в одно сохранение карточки на каждый колорвей с выбранной страной (M-01).
+  const countryName = (code: string) =>
+    countries.find((country) => country.code === code)?.name ?? code;
+  const titleOf = (id: number) => {
+    const entry = colorways.find((candidate) => candidate.id === id);
+    return entry?.baseSku || entry?.colourName || `#${id}`;
+  };
   const stagedRef = useRef<number[]>([]);
   const lockVersion = wireInt(techCard?.lockVersion);
   useEffect(() => {
@@ -203,17 +413,16 @@ export function CompositionLabelBlock({
           qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) }),
         ]),
       settle: (id) =>
-        setPicks((cur) => {
-          if (!cur.has(id)) return cur;
-          const next = new Map(cur);
+        setPicks((current) => {
+          if (!current.has(id)) return current;
+          const next = new Map(current);
           next.delete(id);
           return next;
         }),
     });
-    // titleOf / countryName read the same render's data; the picks are what move the queue.
+    // The labels are render data; picks and the lock move the queue.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [staging, picks, techCardId, lockVersion]);
-  // Снятый блок не оставляет в очереди записей, которых никто не видит.
   useEffect(
     () => () => {
       for (const id of stagedRef.current) staging?.unstage(`colourway:${id}:country`);
@@ -221,19 +430,18 @@ export function CompositionLabelBlock({
     [staging],
   );
 
-  // ── artwork: режим читается из файлов строки, чип без файла живёт до перезагрузки ─────────
   const garmentLabels = useWatch({ control, name: 'garmentLabels' }) as
     | FormGarmentLabel[]
     | undefined;
   const files = useMemo(
-    () => garmentLabels?.find((r) => isCompositionLabel(r.key))?.files ?? [],
+    () => garmentLabels?.find((row) => isCompositionLabel(row.key))?.files ?? [],
     [garmentLabels],
   );
   const [pending, setPending] = useState<ArtworkChoice | null>(null);
   const choice = artworkChoice(files, pending);
-  const writeFiles = (edit: (files: readonly ArtworkFile[]) => ArtworkFile[]) => {
-    const live = ((getValues('garmentLabels') ?? []) as FormGarmentLabel[]).find((r) =>
-      isCompositionLabel(r.key),
+  const writeFiles = (edit: (current: readonly ArtworkFile[]) => ArtworkFile[]) => {
+    const live = ((getValues('garmentLabels') ?? []) as FormGarmentLabel[]).find((row) =>
+      isCompositionLabel(row.key),
     );
     const next = edit(live?.files ?? []) as NonNullable<FormGarmentLabel['files']>;
     undoHistory.cut('label-upload');
@@ -247,16 +455,13 @@ export function CompositionLabelBlock({
   };
   const pickChoice = (next: ArtworkChoice) => {
     setPending(next);
-    // A chip only ever takes files away: the same length is the same row, nothing to save.
     if (filesAfterChoice(files, next).length === files.length) return;
-    writeFiles((cur) => filesAfterChoice(cur, next));
+    writeFiles((current) => filesAfterChoice(current, next));
   };
-  // The last own file leaving does not change the mode: the row waits for the next one.
-  const clearFile = ({ colorwayId, sizeId }: ArtworkCellRef) => {
+  const clearFile = ({ colorwayId: clearColorwayId, sizeId: clearSizeId }: ArtworkCellRef) => {
     setPending(choice);
-    writeFiles((cur) => filesWithoutOwn(cur, colorwayId, sizeId));
+    writeFiles((current) => filesWithoutOwn(current, clearColorwayId, clearSizeId));
   };
-  const { canWrite } = usePermissions();
   const [choosing, setChoosing] = useState<ArtworkCellRef | null>(null);
   const openChooser = (cell: ArtworkCellRef) => {
     if (!canWrite(SECTION.files)) {
@@ -266,28 +471,81 @@ export function CompositionLabelBlock({
     setChoosing(cell);
   };
 
-  // ── правка текста: всё пишется в форму сразу, отмена возвращает снимок ─────────────────────
-  const [editing, setEditing] = useState(false);
-  const snapshot = useRef<TextSnapshot | null>(null);
-  const openEditor = () => {
-    snapshot.current = {
-      careLabel: getValues('careLabel'),
-      careInstructions: getValues('careInstructions'),
-      picks,
-    };
-    setEditing(true);
-  };
-  const cancelEditor = () => {
-    // Поля черновика дописывают себя при снятии, поэтому возврат идёт после него.
-    flushSync(() => setEditing(false));
-    const was = snapshot.current;
-    if (!was) return;
-    setValue('careLabel', was.careLabel, { shouldDirty: true });
-    setValue('careInstructions', was.careInstructions, { shouldDirty: true });
-    setPicks(was.picks);
+  const parts =
+    model.readiness?.colorways.find((entry) => entry.colorwayId === colorway?.id)?.composition
+      .parts ?? [];
+  const preview: CompositionPreviewData = { colorway, size, parts };
+  const fileCell =
+    choice === 'one' ? ALL_FILE : { colorwayId: colorway?.id ?? 0, sizeId: size?.id ?? 0 };
+  const previewFile =
+    choice === 'one'
+      ? oneFileOf(files)
+      : colorway && size
+        ? ownFileFor(files, colorway.id, size.id)
+        : undefined;
+
+  const nameValue = colorway?.colourName ?? '';
+  const setName = (value: string) => {
+    if (!colorway) return;
+    setCareLabelColorway(getValues, setValue, colorway.id, {
+      colourName: colourNameOverride(value, colorway.colourNameDerived),
+    });
   };
 
-  // ── печать: модалка, в том числе со старого адреса `/care-labels` (`print=1`) ─────────────
+  const missingCountries = colorways.filter((entry) => !entry.countryCode);
+  const focusCountry = (id: number) => {
+    setColorwayId(id);
+    requestAnimationFrame(() => {
+      const node = countryNodes.current.get(id);
+      node?.scrollIntoView({ block: 'center' });
+      node?.querySelector<HTMLElement>('[role=combobox]')?.focus();
+    });
+  };
+
+  const gate = model.readiness
+    ? printGate({
+        choice,
+        files,
+        readiness: model.readiness,
+        colorwayIds: colorways.map((entry) => entry.id),
+        sizeIds: sizes.map((entry) => entry.id),
+      })
+    : null;
+  const ready = colorways.filter((entry) => !gate?.blocked.has(entry.id)).length;
+
+  const { prefs } = useCareLabelPrefs(techCardId);
+  const runsQuery = useProductionRuns(techCardId ?? 0, '', 0, false, !!techCardId);
+  const runs = useMemo(() => adaptRuns(runsQuery.data?.runs ?? []), [runsQuery.data]);
+  const source = printSource(prefs.source, runs, false);
+  const run = source === 'manual' ? null : source;
+  const orderSizes = useSizeOrdering();
+  const orderedSizeIds = orderSizes(sizes.map((entry) => entry.id));
+  const base = run
+    ? fromRun(
+        run,
+        colorways.map((entry) => entry.id),
+        orderedSizeIds,
+      )
+    : emptyGrid(
+        colorways.map((entry) => entry.id),
+        orderedSizeIds,
+      );
+  const summary = computeQuantities({
+    base,
+    colorways: colorways.map((entry) => ({
+      id: entry.id,
+      label: entry.baseSku || entry.colourName,
+    })),
+    sizeIds: orderedSizeIds,
+    overagePct: prefs.overagePct,
+    mode: prefs.mode,
+    excluded: gate ? [...gate.blocked] : [],
+    run,
+    plans: model.plan?.sets ?? null,
+  });
+  const calculatedTotal = summary.labelsA + (summary.labelsB ?? 0);
+  const [modalTotal, setModalTotal] = useState<number | null>(null);
+
   const [printing, setPrinting] = useState(false);
   const [params, setParams] = useSearchParams();
   const askedToPrint = params.get('print') === '1';
@@ -295,8 +553,8 @@ export function CompositionLabelBlock({
     if (!askedToPrint) return;
     setPrinting(true);
     setParams(
-      (cur) => {
-        const next = new URLSearchParams(cur);
+      (current) => {
+        const next = new URLSearchParams(current);
         next.delete('print');
         return next;
       },
@@ -307,63 +565,215 @@ export function CompositionLabelBlock({
   return (
     <Section
       title='composition label'
-      question={<LegendHelp />}
       action={
-        <Button
-          type='button'
-          variant='underline'
-          size='xs'
-          className='text-labelColor hover:text-textColor'
-          disabled={!techCardId}
-          data-composition-print=''
-          onClick={() => setPrinting(true)}
-        >
-          print composition
-        </Button>
+        <HeaderWarnings
+          items={missingCountries.map((entry) => ({
+            text: `${entry.colourName || entry.baseSku}: no country ›`,
+            error: true,
+            action: { label: 'Choose country', onClick: () => focusCountry(entry.id) },
+          }))}
+        />
       }
       className='w-full'
     >
-      <div className='flex flex-col gap-6' data-composition-label=''>
-        <CompositionLabelRow
-          techCard={techCard}
-          plan={model.plan}
-          readiness={model.readiness}
-          skuOf={(id) => model.data?.colorways.find((c) => c.id === id)?.baseSku ?? ''}
-          canEdit={canEdit}
-          files={files}
-          choice={choice}
-          onChoice={pickChoice}
-          onChooseFile={openChooser}
-          onClearFile={clearFile}
-          onEditText={openEditor}
-        />
-      </div>
-      {editing ? (
-        <ConfirmationModal
-          open
-          onOpenChange={(next) => {
-            if (!next) setEditing(false);
-          }}
-          onConfirm={() => setEditing(false)}
-          onCancel={cancelEditor}
-          title='Edit text'
-          width='lg'
-          confirmLabel='save'
-        >
-          <CompositionTextEditor
-            techCardId={techCardId}
+      <div className='grid min-w-0 gap-gutter lg:grid-cols-[minmax(0,1fr)_minmax(300px,auto)]'>
+        <div ref={firstField} className='min-w-0'>
+          <FieldRow label='Artwork'>
+            <ViewSwitch
+              value={choice === 'built' ? 'built' : 'own'}
+              label='Artwork'
+              disabled={!canEdit}
+              className='[&_[role=radio]]:h-7'
+              options={[
+                { value: 'built', label: 'Built' },
+                { value: 'own', label: 'Own file' },
+              ]}
+              onChange={(value) =>
+                pickChoice(value === 'built' ? 'built' : choice === 'one' ? 'one' : 'cell')
+              }
+            />
+          </FieldRow>
+          <FieldRow label='Format'>
+            <ViewSwitch
+              value={orientation}
+              label='Format'
+              disabled={!canEdit}
+              className='[&_[role=radio]]:h-7'
+              options={[
+                { value: 'vertical', label: 'Vertical' },
+                { value: 'horizontal', label: 'Horizontal' },
+              ]}
+              onChange={setOrientation}
+            />
+          </FieldRow>
+          {choice === 'built' ? (
+            <>
+              <FieldRow label='Product'>
+                <Input
+                  name='composition-product'
+                  value={nameValue}
+                  disabled={!canEdit || !colorway}
+                  aria-label='Product name'
+                  className='h-7 min-w-0 flex-1 sm:max-w-60'
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setName(event.target.value)}
+                />
+                <Input
+                  name='composition-code'
+                  value={colorway?.baseSku ?? ''}
+                  readOnly
+                  aria-label='Product code'
+                  className='h-7 w-full sm:w-28'
+                />
+              </FieldRow>
+              <FieldRow label='Composition' top>
+                <CompositionFields
+                  data={model.data}
+                  colorway={colorway}
+                  parts={parts}
+                  disabled={!canEdit}
+                />
+              </FieldRow>
+              <FieldRow label='Care'>
+                <CareSymbolsRow disabled={!canEdit || !canStyle} />
+              </FieldRow>
+              <FieldRow label='Made in' top>
+                <span className='grid w-full max-w-md grid-cols-[minmax(0,150px)_minmax(0,200px)] items-center gap-x-2.5 gap-y-1.5 max-[480px]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]'>
+                  {colorways.map((entry) => {
+                    const ref = techCard?.colorways?.find(
+                      (candidate) => wireInt(candidate.colorwayId) === entry.id,
+                    );
+                    const hex = swatchHex(ref);
+                    const value = picks.has(entry.id) ? picks.get(entry.id)! : entry.countryCode;
+                    const pickable = countries.filter(
+                      (country) => country.active || country.code === entry.countryCode,
+                    );
+                    return (
+                      <span key={entry.id} className='contents'>
+                        <span className='flex min-w-0 items-center gap-1.5'>
+                          <span
+                            aria-hidden
+                            className={
+                              hex
+                                ? 'h-3 w-3 shrink-0 border border-textColor'
+                                : 'h-3 w-3 shrink-0 border border-dashed border-borderColor'
+                            }
+                            style={hex ? { backgroundColor: hex } : undefined}
+                          />
+                          <Text component='span' className='truncate'>
+                            {entry.colourName || entry.baseSku}
+                          </Text>
+                        </span>
+                        <span
+                          ref={(node) => {
+                            if (node) countryNodes.current.set(entry.id, node);
+                            else countryNodes.current.delete(entry.id);
+                          }}
+                        >
+                          <Select
+                            name={`composition-country-${entry.id}`}
+                            value={value}
+                            disabled={!canEdit || !techCardId}
+                            invalid={!value}
+                            placeholder='Pick country'
+                            className='h-7'
+                            items={[
+                              { value: '', label: 'Pick country' },
+                              ...pickable.map((country) => ({
+                                value: country.code,
+                                label: country.name,
+                              })),
+                            ]}
+                            onValueChange={(code: string) =>
+                              setPicks((current) => {
+                                const next = new Map(current);
+                                if (code === entry.countryCode) next.delete(entry.id);
+                                else next.set(entry.id, code);
+                                return next;
+                              })
+                            }
+                          />
+                        </span>
+                      </span>
+                    );
+                  })}
+                </span>
+              </FieldRow>
+              <FieldRow label='Address'>
+                <AddressField data={model.data} disabled={!canEdit} />
+              </FieldRow>
+            </>
+          ) : null}
+        </div>
+
+        <div className='flex min-w-0 flex-col items-start gap-2.5'>
+          {choice === 'built' ? (
+            <span className='flex max-w-full flex-wrap gap-1.5'>
+              <ViewSwitch
+                value={String(colorway?.id ?? '')}
+                label='Colourway'
+                className='max-w-full flex-wrap [&_[role=radio]]:h-7'
+                options={colorways.map((entry) => ({
+                  value: String(entry.id),
+                  label: `${entry.colourName || entry.baseSku}${entry.countryCode ? '' : ' !'}`,
+                }))}
+                onChange={(value) => setColorwayId(Number(value))}
+              />
+              <ViewSwitch
+                value={String(size?.id ?? '')}
+                label='Size'
+                className='max-w-full flex-wrap [&_[role=radio]]:h-7'
+                options={sizes.map((entry) => ({ value: String(entry.id), label: entry.label }))}
+                onChange={(value) => setSizeId(Number(value))}
+              />
+            </span>
+          ) : null}
+          <CompositionLabelPreview
+            data={model.data}
+            preview={preview}
+            logoUrl={model.logoUrl}
+            choice={choice}
+            file={previewFile}
+            orientation={orientation}
             canEdit={canEdit}
-            model={model}
-            picks={picks}
-            setPicks={setPicks}
-            setLogoHint={setLogoHint}
+            onChooseFile={() => openChooser(fileCell)}
+            onClearFile={() => clearFile(fileCell)}
           />
-        </ConfirmationModal>
-      ) : null}
+        </div>
+      </div>
+
+      <RowTotal
+        label={
+          <Text
+            component='span'
+            size='micro'
+            variant='label'
+            tracking='label'
+            className='uppercase'
+          >
+            {ready} of {colorways.length} colours ready · {modalTotal ?? calculatedTotal} labels
+          </Text>
+        }
+        value={
+          <Button
+            type='button'
+            variant='main'
+            size='sm'
+            className='h-7'
+            disabled={!techCardId}
+            onClick={() => setPrinting(true)}
+          >
+            Print labels
+          </Button>
+        }
+        className='items-center pt-2'
+      />
+
       {choosing ? (
         <ChooseFileModal
           onClose={() => setChoosing(null)}
-          onChosen={(file) => writeFiles((cur) => filesWithOwn(cur, { ...choosing, ...file }))}
+          onChosen={(file) =>
+            writeFiles((current) => filesWithOwn(current, { ...choosing, ...file }))
+          }
         />
       ) : null}
       {printing && techCardId ? (
@@ -372,932 +782,26 @@ export function CompositionLabelBlock({
           data={model.data}
           files={files}
           choice={choice}
+          orientation={orientation}
+          logoUrl={model.logoUrl}
+          initialColorwayId={colorway?.id}
+          initialSizeId={size?.id}
+          onTotalChange={setModalTotal}
           onClose={() => setPrinting(false)}
-          onChooseFile={() => {
+          onChooseFile={(cell) => {
             setPrinting(false);
-            openChooser({ colorwayId: 0, sizeId: 0 });
+            openChooser(cell);
           }}
-          onEditText={() => {
+          onFixText={() => {
             setPrinting(false);
-            openEditor();
+            requestAnimationFrame(() =>
+              firstField.current
+                ?.querySelector<HTMLElement>('input, button, [role=radio]')
+                ?.focus(),
+            );
           }}
         />
       ) : null}
     </Section>
   );
-}
-
-/** Ленты выбранного варианта с дверями правки: само тело модалки `Edit text`. */
-function CompositionTextEditor({
-  techCardId,
-  canEdit,
-  model,
-  picks,
-  setPicks,
-  setLogoHint,
-}: TextEditorProps) {
-  const { getValues, setValue, control } = useFormContext<TechCardFormData>();
-  const careLabel = useWatch({ control, name: 'careLabel' }) as FormCareLabel | undefined;
-  const { canWrite } = usePermissions();
-  const canStyle = canWrite(SECTION.products);
-  const { shaper } = useShaper();
-  const { data, plan, readiness } = model;
-  const countries = useLabelCountries();
-
-  // ── выбор колорвея / размера (только показ) ──────────────────────────────────────────────
-  const [cwId, setCwId] = useState<number | null>(null);
-  const [sizeId, setSizeId] = useState<number | null>(null);
-  const colorways = data?.colorways ?? [];
-  const sizes = data?.sizes ?? [];
-  const cw = colorways.find((c) => c.id === cwId) ?? colorways[0];
-  const size = sizes.find((s) => s.id === sizeId) ?? sizes[0];
-
-  // The picker offers active countries only; a stored code still resolves to its name when inactive.
-  const pickableCountries = useMemo(() => countries.filter((c) => c.active), [countries]);
-  // WORKSHOP COUNTRY OF ORIGIN (0414) — a SUGGESTION for a colourway with no country, never a pick.
-  // «Made in» is legal text: the suggestion is shown on the ribbon and in the strip, but it only
-  // becomes a staged write when a person confirms it, so the `no-country` hole keeps counting the
-  // colourway as needing someone until then. An inactive / unknown code suggests nothing.
-  const { data: workshopData } = useWorkshopSettings();
-  const workshopCountryCode = (workshopData?.settings?.countryOfOrigin ?? '').trim().toUpperCase();
-  const workshopCountry = workshopCountryCode
-    ? pickableCountries.find((c) => c.code === workshopCountryCode)
-    : undefined;
-
-  const isUnavailable = (c: { holes: readonly Hole[] }) =>
-    c.holes.some((h) => h.code === 'colorway-unavailable');
-  const othersWithout = cw
-    ? colorways.filter(
-        (c) => c.id !== cw.id && !c.countryCode && !picks.has(c.id) && !isUnavailable(c),
-      ).length
-    : 0;
-  const pickCountry = (code: string, alsoOthers: boolean) => {
-    if (!cw) return;
-    setPicks((cur) => {
-      const next = new Map(cur);
-      next.set(cw.id, code);
-      if (alsoOthers)
-        for (const c of colorways)
-          if (c.id !== cw.id && !c.countryCode && !next.has(c.id) && !isUnavailable(c))
-            next.set(c.id, code);
-      return next;
-    });
-  };
-
-  // ── дыры выбранного колорвея: блокирующие первыми ─────────────────────────────────────────
-  const holes = useMemo<Hole[]>(() => {
-    if (!readiness) return [];
-    const mine = cw ? readiness.colorways.find((r) => r.colorwayId === cw.id)?.holes ?? [] : [];
-    const seen = new Set<string>();
-    return [...readiness.global, ...mine]
-      .filter((h) => h.level !== 'info')
-      .filter((h) => (seen.has(h.message) ? false : (seen.add(h.message), true)))
-      .sort((a, b) => Number(isBlocking(b)) - Number(isBlocking(a)));
-  }, [readiness, cw]);
-  const blockedCw = (id: number) =>
-    !!readiness?.colorways.find((r) => r.colorwayId === id)?.blocked;
-
-  // ── ленты выбранного варианта ────────────────────────────────────────────────────────────
-  const sku = cw ? labelSku(cw, size) : '';
-  const set = cw ? plan?.sets.get(cw.id) : undefined;
-  const madeW = useMemo(() => {
-    const country = cw?.countryName?.trim().toUpperCase();
-    if (!country || !shaper) return null;
-    try {
-      return textWidth(shaper, `MADE IN ${country}`, 'en', L.PT);
-    } catch {
-      return null;
-    }
-  }, [shaper, cw?.countryName]);
-  const address = addressLines(data);
-  const caption = captionLines(data);
-
-  const rows = useMemo<RowModel[]>(() => {
-    if (!set || !size) return [];
-    const out: RowModel[] = [];
-    const { face, back } = previewASides(set, size.id);
-    const a: SideModel[] = [];
-    if (face)
-      a.push({
-        key: 'A-face',
-        row: 'A',
-        role: 'face',
-        caption: 'A face',
-        doc: face.side.doc,
-        seam: face.side.report.seam,
-        regions: aFaceRegions(face.side.report.seam, madeW),
-        text: [
-          `${sku} / ${cw?.colourName.toUpperCase()} / [${size.label}]`,
-          cw?.countryName ? `MADE IN ${cw.countryName.toUpperCase()}` : '',
-        ]
-          .filter(Boolean)
-          .join(' · '),
-      });
-    if (back)
-      a.push({
-        key: 'A-back',
-        row: 'A',
-        role: 'back',
-        caption: 'A back',
-        doc: back.side.doc,
-        seam: back.side.report.seam,
-        regions: aBackRegions(back.side.report.seam, address.length),
-        text: [...caption, ...address].join(' · '),
-      });
-    if (a.length) out.push({ label: 'A', sides: a });
-
-    // Ленты состава: столько, сколько сверстал движок (B, B2 …), лицо и изнанка каждой.
-    const byLabel = new Map<string, PlannedSide[]>();
-    for (const p of set.sides.values()) {
-      if (p.label === 'A') continue;
-      byLabel.set(p.label, [...(byLabel.get(p.label) ?? []), p]);
-    }
-    const labels = [...byLabel.keys()].sort(
-      (x, y) => Number(x.slice(1) || 1) - Number(y.slice(1) || 1),
-    );
-    for (const label of labels) {
-      const sides = byLabel
-        .get(label)!
-        .sort((x, y) => (x.role === y.role ? 0 : x.role === 'face' ? -1 : 1))
-        .map<SideModel>((p) => ({
-          key: `${label}-${p.role}`,
-          row: label,
-          role: p.role,
-          caption: `${label} ${p.role}${p.side.report.empty ? ' · printed blank' : ''}`,
-          doc: p.side.doc,
-          seam: p.side.report.seam,
-          blank: p.side.report.empty,
-          regions: bRegions(p.side.report),
-          text: p.side.report.columns.map((c) => LABEL_PART_NAME[c.part]).join(' · '),
-        }));
-      out.push({ label, sides });
-    }
-    if (!labels.length)
-      out.push({
-        label: 'B',
-        sides: [
-          {
-            key: 'B-face',
-            row: 'B',
-            role: 'face',
-            caption: 'B face · nothing to print yet',
-            doc: null,
-            seam: 'right',
-            regions: bEmptyRegions('right'),
-          },
-          {
-            key: 'B-back',
-            row: 'B',
-            role: 'back',
-            caption: 'B back · printed blank',
-            doc: null,
-            seam: 'left',
-            blank: true,
-            regions: [],
-          },
-        ],
-      });
-    return out;
-    // sku / cw / address / caption read the same render's selection as `set`.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [set, size, madeW, cw?.colourName, cw?.countryName, address.length, caption.join('|')]);
-  const bLabels = rows.filter((r) => r.label !== 'A' && r.sides.some((s) => s.doc));
-  const allSides = rows.flatMap((r) => r.sides);
-
-  // ── ширина: две стороны рядом или одна за раз ─────────────────────────────────────────────
-  const workRef = useRef<HTMLDivElement | null>(null);
-  const [width, setWidth] = useState(0);
-  useLayoutEffect(() => {
-    const el = workRef.current;
-    if (!el) return;
-    const measure = () => setWidth(el.clientWidth);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  const twoUp = width >= TWO_UP_MIN;
-  const pad = twoUp ? BENCH_PAD : 8;
-  const sidePx = twoUp ? (width - GAP - 2 * pad) / 2 : width - 2 * pad;
-  const zoom = Math.max(0.5, Math.min(2, sidePx / RIBBON_PX));
-  const [shownSide, setShownSide] = useState('A-face');
-  const shown = allSides.some((s) => s.key === shownSide) ? shownSide : allSides[0]?.key;
-
-  // ── одна открытая правка ──────────────────────────────────────────────────────────────────
-  const [open, setOpen] = useState<Open>(null);
-  const doors = useRef(new Map<string, HTMLButtonElement>());
-  const refFor = (side: string) => (key: string) => (el: HTMLButtonElement | null) => {
-    if (el) doors.current.set(`${side}|${key}`, el);
-    else doors.current.delete(`${side}|${key}`);
-  };
-  const close = () => {
-    const was = open;
-    setOpen(null);
-    if (was)
-      requestAnimationFrame(() =>
-        doors.current.get(`${was.side}|${was.key}`)?.focus({ preventScroll: true }),
-      );
-  };
-  // Смена колорвея / размера / стороны закрывает полосу в ТОМ ЖЕ рендере: снимаясь, она пишет
-  // недописанное в тот колорвей, в котором его начали.
-  const switchTo = (fn: () => void) => {
-    setOpen(null);
-    fn();
-  };
-  const bCountAtOpen = useRef(0);
-  const openRegion = (side: string, key: string) => {
-    if (open?.side === side && open.key === key) return close();
-    if (key.startsWith('composition')) bCountAtOpen.current = bLabels.length;
-    setOpen({ side, key });
-  };
-  // Открытая дверь исчезла: колонка ушла на другую сторону или ленту (правка состава поменяла
-  // перелив), либо её часть удалили. Правка состава при этом остаётся открытой — у той же части,
-  // где бы она теперь ни стояла, иначе у первой колонки состава; прочие полосы закрываются.
-  const openSide = open ? allSides.find((s) => s.key === open.side) : undefined;
-  const openRegionModel = open ? openSide?.regions.find((r) => r.key === open.key) : undefined;
-  useEffect(() => {
-    if (!open || !rows.length || openRegionModel) return;
-    if (!open.key.startsWith('composition')) return setOpen(null);
-    const same = allSides.find((sd) => sd.regions.some((r) => r.key === open.key));
-    const any = allSides.find((sd) => sd.regions.some((r) => r.line === 'composition'));
-    const key = same ? open.key : any?.regions.find((r) => r.line === 'composition')?.key;
-    const side = same ?? any;
-    setOpen(side && key ? { side: side.key, key } : null);
-  }, [open?.key, open?.side, openRegionModel, rows]);
-
-  // ── дыры → двери ──────────────────────────────────────────────────────────────────────────
-  // Дыра состава без части садится на одну колонку, а не на все: «вторая лента» — на первую
-  // колонку последней ленты (B2 …), прочие — на первую колонку состава.
-  const compositionDoors = allSides.flatMap((sd) =>
-    sd.regions.filter((r) => r.line === 'composition'),
-  );
-  const lastB = bLabels
-    .at(-1)
-    ?.sides.flatMap((sd) => sd.regions.filter((r) => r.line === 'composition'));
-  const anchorOf = (h: Hole) =>
-    (h.code === 'third-label' ? lastB?.[0] : undefined) ?? compositionDoors[0];
-  const holesOf = (r: Region): Hole[] =>
-    holes.filter((h) => {
-      if (holeLine(h) !== r.line) return false;
-      if (r.line !== 'composition') return true;
-      if (h.ref.part && r.part) return h.ref.part === r.part;
-      return anchorOf(h)?.key === r.key;
-    });
-  const levelOf = (hs: Hole[]): 'block' | 'warn' | null =>
-    hs.some(isBlocking) ? 'block' : hs.length ? 'warn' : null;
-
-  const cwOverride = careLabel?.colorways?.find((c) => c.colorwayId === cw?.id);
-  const derivedParts = useMemo(() => {
-    if (!cw || !readiness) return [];
-    return readiness.colorways.find((r) => r.colorwayId === cw.id)?.composition.parts ?? [];
-  }, [cw, readiness]);
-  const qr = data?.label.qr ?? { qrPreset: 'storefront' as const, qrTemplate: '' };
-  const qrExampleUrl = data && cw ? qrExample(data, cw, size) : '';
-  const logoCustom = wireInt(careLabel?.logoMediaId) > 0;
-  const g = getValues;
-  const s = setValue;
-  const edit = canEdit;
-  const picked = cw ? picks.get(cw.id) : undefined;
-  // По КОДУ, не по имени: код, которого нет в словаре, даёт пустое имя, но страна на этикетке задана —
-  // предложение мастерской затёрло бы юридическое происхождение.
-  const suggested = cw && !cw.countryCode && !picked ? workshopCountry : undefined;
-
-  const overriddenOf = (line: LineKey): boolean => {
-    switch (line) {
-      case 'logo':
-        return logoCustom;
-      case 'product':
-        return !!cw?.colourNameOverridden;
-      case 'care-text':
-        return !!data?.care.proseOverridden;
-      case 'composition':
-        return !!cw?.fiberOverride;
-      case 'qr':
-        return qr.qrPreset !== 'storefront';
-      case 'caption':
-        return (data?.label.caption.length ?? 0) > 0;
-      case 'address':
-        return (data?.label.address.length ?? 0) > 0;
-      default:
-        return false;
-    }
-  };
-
-  const viewOf = (side: SideModel, r: Region): RegionView => {
-    const hs = holesOf(r);
-    const selected = open?.side === side.key && open.key === r.key;
-    const base = { ...r, overridden: overriddenOf(r.line), hole: levelOf(hs), selected };
-    const partName = r.part ? LABEL_PART_NAME[r.part] : '';
-    const readOnly = !edit ? 'read only' : undefined;
-    switch (r.line) {
-      case 'logo':
-        return {
-          ...base,
-          label: `logo: ${logoCustom ? 'your SVG' : 'the GRBPWR mark'}, click to change`,
-          disabled: !edit,
-          title: readOnly,
-        };
-      case 'product':
-        return {
-          ...base,
-          label: `colour name: ${cw?.colourName || 'empty'}, click to change`,
-          disabled: !edit || !cw,
-          title: readOnly,
-        };
-      case 'care-text':
-        return {
-          ...base,
-          label: `care text: ${(data?.care.prose ?? []).join(' ') || 'empty'}, click to change`,
-          disabled: !edit,
-          title: readOnly,
-        };
-      case 'care-symbols':
-        return {
-          ...base,
-          label: 'care symbols, click to change',
-          disabled: !edit,
-          title: readOnly,
-        };
-      case 'made-in': {
-        const unavailable = !!cw && isUnavailable(cw);
-        const title = unavailable
-          ? 'loading the colourway…'
-          : !techCardId
-            ? 'save the card first'
-            : readOnly;
-        return {
-          ...base,
-          label: cw?.countryName
-            ? `made in ${cw.countryName}`
-            : suggested
-              ? `made in: country missing, the workshop suggests ${suggested.name}, click to confirm`
-              : 'made in: country missing, click to set it',
-          disabled: !edit || !techCardId || unavailable,
-          title,
-          placeholder: !cw?.countryName ? (
-            <span className='flex h-full items-center justify-end whitespace-nowrap px-1 text-nano uppercase leading-none text-error'>
-              {suggested ? `! confirm ${suggested.code}` : '! set country'}
-            </span>
-          ) : null,
-        };
-      }
-      case 'composition':
-        return {
-          ...base,
-          label: partName
-            ? `composition, ${partName}: click to change`
-            : 'composition: click to write it',
-          disabled: !edit || !cw,
-          title: readOnly,
-          placeholder: !r.part ? (
-            <span className='flex h-full items-center justify-center text-nano uppercase text-labelColor'>
-              no composition yet · click to write it
-            </span>
-          ) : null,
-        };
-      case 'qr':
-        return {
-          ...base,
-          label: `QR link: ${qrExampleUrl || 'empty'}, click to change`,
-          disabled: !edit,
-          title: readOnly,
-        };
-      case 'caption':
-        return {
-          ...base,
-          label: `back caption: ${caption.join(' / ')}, click to change`,
-          disabled: !edit,
-          title: readOnly,
-        };
-      case 'address':
-        return {
-          ...base,
-          label: `address: ${address.join(', ')}, click to change`,
-          disabled: !edit,
-          title: readOnly,
-        };
-    }
-  };
-
-  // ── полоса правки открытой двери ──────────────────────────────────────────────────────────
-  const editorFor = (side: SideModel, r: Region): React.ReactNode => {
-    const common = {
-      line: r.line,
-      name: NAME[r.line],
-      where: sideName(side.key),
-      source: SOURCE[r.line],
-      overridden: overriddenOf(r.line),
-      holes: holesOf(r),
-    };
-    const key = `${cw?.id}|${side.key}|${r.key}`;
-    switch (r.line) {
-      case 'logo':
-        return (
-          <EditorStrip
-            key={key}
-            {...common}
-            resetTitle='the GRBPWR mark'
-            onReset={() => setCareLabel(g, s, { logoMediaId: 0 })}
-          >
-            <LogoEditor
-              url={model.logoUrl}
-              custom={logoCustom}
-              disabled={!edit}
-              onPick={(m: common_MediaFull) => {
-                if (!m.id) return;
-                setLogoHint(m.media?.fullSize?.mediaUrl || '');
-                setCareLabel(g, s, { logoMediaId: m.id });
-              }}
-            />
-          </EditorStrip>
-        );
-      case 'product':
-        if (!cw) return null;
-        return (
-          <EditorStrip
-            key={key}
-            {...common}
-            resetTitle={cw.colourNameDerived || 'the colourway name'}
-            onReset={() => setCareLabelColorway(g, s, cw.id, { colourName: '' })}
-          >
-            <div className='flex flex-wrap items-center gap-x-3 gap-y-2 uppercase'>
-              <span className='text-labelColor'>{sku || 'no SKU'}</span>
-              <span className='text-labelColor'>/</span>
-              <div className='w-[240px] max-w-full'>
-                <DraftInput
-                  ariaLabel='colour name on the label'
-                  value={cw.colourName}
-                  placeholder={cw.colourNameDerived || 'colour name'}
-                  maxLength={64}
-                  onCommit={(t) =>
-                    setCareLabelColorway(g, s, cw.id, {
-                      colourName: colourNameOverride(t, cw.colourNameDerived),
-                    })
-                  }
-                  onClose={close}
-                />
-              </div>
-              <span className='text-labelColor'>/ [{size?.label ?? <EmptyCell />}]</span>
-            </div>
-          </EditorStrip>
-        );
-      case 'care-symbols':
-        return (
-          <EditorStrip key={key} {...common}>
-            <CareSymbolsEditor
-              disabled={!edit || !canStyle}
-              reason={!canStyle ? 'care is a style fact: needs products:write' : undefined}
-            />
-          </EditorStrip>
-        );
-      case 'care-text':
-        return (
-          <EditorStrip
-            key={key}
-            {...common}
-            resetTitle='the dictionary prose'
-            onReset={() => setCareLabel(g, s, { careProseLines: [] })}
-          >
-            <div className='max-w-[560px]'>
-              <DraftLines
-                ariaLabel='care text on the label'
-                lines={data?.care.prose ?? []}
-                rows={3}
-                placeholder='care text'
-                onCommit={(t) =>
-                  setCareLabel(g, s, {
-                    careProseLines: linesOverride(t, data?.care.derivedProse ?? []),
-                  })
-                }
-                onClose={close}
-              />
-            </div>
-          </EditorStrip>
-        );
-      case 'made-in':
-        if (!cw) return null;
-        return (
-          <EditorStrip
-            key={key}
-            {...common}
-            source={picked ? 'staged' : cw.countryName ? 'from colourway' : 'missing'}
-          >
-            <MadeInValue
-              countryName={cw.countryName}
-              pickedCode={picked}
-              unavailable={isUnavailable(cw)}
-              countries={pickableCountries}
-              othersWithout={othersWithout}
-              suggested={suggested}
-              disabled={!edit || !techCardId}
-              onPick={pickCountry}
-            />
-          </EditorStrip>
-        );
-      case 'composition': {
-        if (!cw) return null;
-        const now = bLabels.length;
-        return (
-          <EditorStrip
-            key={`${cw.id}|composition`}
-            {...common}
-            resetTitle='the composition from the BOM'
-            onReset={() => {
-              setOpen(null);
-              setCareLabelColorway(g, s, cw.id, { fibers: [] });
-            }}
-          >
-            {now !== bCountAtOpen.current ? (
-              <Text size='micro' variant='label' data-b-count-note=''>
-                now {now} composition {now === 1 ? 'label' : 'labels'} per garment
-              </Text>
-            ) : null}
-            <FocusPart part={r.part} />
-            <div className='max-w-[640px]'>
-              <FibreEditor
-                initial={
-                  cwOverride?.fibers?.length
-                    ? fibersFromForm(cwOverride.fibers)
-                    : overrideRowsOf(derivedParts)
-                }
-                fibers={data?.fibers ?? new Map()}
-                otherCount={colorways.length - 1}
-                onChange={(rows, all) =>
-                  writeComposition(g, s, all ? colorways.map((c) => c.id) : [cw.id], rows)
-                }
-                onDone={close}
-              />
-            </div>
-          </EditorStrip>
-        );
-      }
-      case 'qr':
-        return (
-          <EditorStrip
-            key={key}
-            {...common}
-            resetTitle='the storefront link'
-            onReset={() => setCareLabel(g, s, { qrPreset: '', qrTemplate: '' })}
-          >
-            <QrEditor
-              preset={qr.qrPreset}
-              template={careLabel?.qrTemplate ?? ''}
-              example={qrExampleUrl}
-              disabled={!edit}
-              onChange={(p) => setCareLabel(g, s, p)}
-              onDone={close}
-            />
-          </EditorStrip>
-        );
-      case 'caption':
-        return (
-          <EditorStrip
-            key={key}
-            {...common}
-            resetTitle={QR_CAPTION.join(' / ')}
-            onReset={() => setCareLabel(g, s, { backCaptionLines: [] })}
-          >
-            <div className='max-w-[420px]'>
-              <DraftLines
-                ariaLabel='QR caption on the label back'
-                lines={caption}
-                rows={2}
-                onCommit={(t) =>
-                  setCareLabel(g, s, { backCaptionLines: linesOverride(t, QR_CAPTION) })
-                }
-                onClose={close}
-              />
-            </div>
-          </EditorStrip>
-        );
-      case 'address':
-        return (
-          <EditorStrip
-            key={key}
-            {...common}
-            resetTitle='the company address'
-            onReset={() => setCareLabel(g, s, { addressLines: [] })}
-          >
-            <div className='max-w-[420px]'>
-              <DraftLines
-                ariaLabel='address on the label back'
-                lines={address}
-                rows={3}
-                onCommit={(t) =>
-                  setCareLabel(g, s, { addressLines: linesOverride(t, COMPANY_ADDRESS) })
-                }
-                onClose={close}
-              />
-            </div>
-          </EditorStrip>
-        );
-    }
-  };
-
-  // ── список дыр (за счётчиком) ─────────────────────────────────────────────────────────────
-  const goToHole = (h: Hole) => {
-    const line = holeLine(h);
-    if (!line) return;
-    const side = allSides.find((sd) =>
-      sd.regions.some((r) => r.line === line && (!h.ref.part || !r.part || r.part === h.ref.part)),
-    );
-    const region = side?.regions.find(
-      (r) => r.line === line && (!h.ref.part || !r.part || r.part === h.ref.part),
-    );
-    if (!side || !region) return;
-    setShownSide(side.key);
-    const view = viewOf(side, region);
-    if (!view.disabled) setOpen({ side: side.key, key: region.key });
-    requestAnimationFrame(() =>
-      doors.current.get(`${side.key}|${region.key}`)?.focus({ preventScroll: false }),
-    );
-  };
-
-  // ── вёрстка ───────────────────────────────────────────────────────────────────────────────
-  const onStripKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Escape' && e.currentTarget.contains(e.target as Node)) {
-      e.preventDefault();
-      close();
-    }
-  };
-
-  /** Скамья одной ленты: стороны рядом (или одна), под ней — полоса правки её стороны. */
-  const bench = (row: RowModel, only?: string) => {
-    const sides = only ? row.sides.filter((sd) => sd.key === only) : row.sides;
-    if (!sides.length) return null;
-    const cols = only ? 1 : sides.length;
-    const w = RIBBON_PX * zoom;
-    const grid = { gridTemplateColumns: `repeat(${cols}, ${w}px)`, columnGap: GAP };
-    const openHere = sides.find((sd) => sd.key === open?.side);
-    const region = openHere?.regions.find((r) => r.key === open?.key);
-    return (
-      <div key={row.label} className='flex flex-col' data-ribbon-row={row.label}>
-        <div className='group/bench bg-pageBg' style={{ padding: pad }} data-bench={row.label}>
-          <div className='grid' style={grid}>
-            {sides.map((sd) => (
-              <Ribbon
-                key={sd.key}
-                side={sd}
-                zoom={zoom}
-                regions={sd.regions.map((r) => viewOf(sd, r))}
-                onOpen={(r) => openRegion(sd.key, r.key)}
-                refFor={refFor(sd.key)}
-              />
-            ))}
-          </div>
-        </div>
-        {openHere && region ? (
-          <div className='grid' style={{ ...grid, paddingLeft: pad }} onKeyDown={onStripKey}>
-            <div
-              style={{
-                gridColumn: only ? '1 / -1' : sides.indexOf(openHere) + 1,
-                minWidth: 0,
-              }}
-            >
-              {editorFor(openHere, region)}
-            </div>
-          </div>
-        ) : null}
-      </div>
-    );
-  };
-
-  const aRow = rows.find((r) => r.label === 'A');
-  const bRows = rows.filter((r) => r.label !== 'A');
-  const bCountText = bLabels.length
-    ? `${bLabels.length} ${bLabels.length === 1 ? 'label' : 'labels'}${
-        bLabels.length > 1 ? ` (${bLabels.map((r) => r.label).join(', ')})` : ''
-      }`
-    : 'nothing to print yet';
-  const shownRow = rows.find((r) => r.sides.some((sd) => sd.key === shown));
-
-  return (
-    <div className='flex flex-col gap-6' data-composition-editor=''>
-      {/* колорвей · размер · дыры */}
-      {colorways.length > 0 && (
-        <div className='flex flex-col gap-3'>
-          <div className='flex flex-wrap items-center gap-x-8 gap-y-3'>
-            <label className='flex items-center gap-3' data-colorway-select=''>
-              <Text
-                size='micro'
-                variant='label'
-                component='span'
-                className='uppercase tracking-label'
-              >
-                colourway
-              </Text>
-              <Select
-                name='composition-colourway'
-                className='min-w-[200px]'
-                value={String(cw?.id ?? '')}
-                items={colorways.map((c) => ({
-                  value: String(c.id),
-                  label: `${c.colourName || c.baseSku || `#${c.id}`}${blockedCw(c.id) ? ' · ! blocks' : ''}`,
-                }))}
-                onValueChange={(v: string) => switchTo(() => setCwId(Number(v)))}
-              />
-            </label>
-            {sizes.length > 1 ? (
-              <label className='flex items-center gap-3' data-size-select=''>
-                <Text
-                  size='micro'
-                  variant='label'
-                  component='span'
-                  className='uppercase tracking-label'
-                >
-                  size
-                </Text>
-                <Select
-                  name='composition-size'
-                  className='min-w-[96px]'
-                  value={String(size?.id ?? '')}
-                  items={sizes.map((z) => ({ value: String(z.id), label: z.label }))}
-                  onValueChange={(v: string) => switchTo(() => setSizeId(Number(v)))}
-                />
-              </label>
-            ) : size ? (
-              <Text size='micro' variant='label' className='uppercase tracking-label'>
-                size {size.label}
-              </Text>
-            ) : null}
-            <div className='ml-auto'>
-              {!readiness ? (
-                <Text size='micro' variant='label' data-hole-count=''>
-                  checking…
-                </Text>
-              ) : holes.length === 0 ? (
-                <Text
-                  size='micro'
-                  variant='label'
-                  className='uppercase tracking-label'
-                  data-hole-count=''
-                >
-                  no holes · prints as shown
-                </Text>
-              ) : (
-                // Дыры — дверь `! N` (HeaderWarnings): блокирующие красным и первыми, клик по
-                // дыре с адресом ведёт к её строке на ленте.
-                <span data-hole-count=''>
-                  <HeaderWarnings
-                    items={holes.map((h) => ({
-                      text: h.message,
-                      error: isBlocking(h),
-                      action: holeLine(h)
-                        ? { label: 'go to the line', onClick: () => goToHole(h) }
-                        : undefined,
-                    }))}
-                  />
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ленты */}
-      <div ref={workRef} className='flex min-w-0 flex-col gap-6' data-composition-preview=''>
-        {!cw ? (
-          <Text size='micro' variant='label'>
-            no colourways
-          </Text>
-        ) : model.shaperFailed ? (
-          <Text size='micro' variant='errorLabel'>
-            label fonts failed: reload page
-          </Text>
-        ) : rows.length === 0 || width === 0 ? (
-          <Text size='micro' variant='label' className='animate-pulse'>
-            typesetting the label…
-          </Text>
-        ) : twoUp ? (
-          <>
-            {aRow ? (
-              <div className='flex flex-col'>
-                <GroupLabel flush>ribbon A · main label · 100 × 30 mm</GroupLabel>
-                <div className='pt-2'>{bench(aRow)}</div>
-              </div>
-            ) : null}
-            <div className='flex flex-col'>
-              <GroupLabel
-                flush
-                action={
-                  <LabelNote>
-                    {bRows.some((r) => r.sides.some((sd) => sd.role === 'back' && !sd.blank))
-                      ? 'runs on: face → back → next'
-                      : 'back prints blank'}
-                  </LabelNote>
-                }
-              >
-                <span data-b-count={bLabels.length}>ribbon B · composition · {bCountText}</span>
-              </GroupLabel>
-              <div className='flex flex-col gap-4 pt-2'>{bRows.map((r) => bench(r))}</div>
-            </div>
-          </>
-        ) : (
-          <div className='flex flex-col gap-3'>
-            <ChipRow>
-              {allSides.map((sd) => (
-                <Chip
-                  key={sd.key}
-                  nonForm
-                  pressed={sd.key === shown}
-                  selected={sd.key === shown}
-                  data-side-chip={sd.key}
-                  onClick={() => switchTo(() => setShownSide(sd.key))}
-                >
-                  {sideName(sd.key)}
-                </Chip>
-              ))}
-            </ChipRow>
-            <Text
-              size='micro'
-              variant='label'
-              className='uppercase tracking-label'
-              data-b-count={bLabels.length}
-            >
-              {shownRow?.label === 'A'
-                ? 'ribbon A · main label'
-                : `ribbon B · composition · ${bCountText}`}
-            </Text>
-            {shownRow && shown ? bench(shownRow, shown) : null}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function LabelNote({ children }: { children: React.ReactNode }) {
-  return (
-    <Text size='micro' variant='label' component='span' className='uppercase tracking-label'>
-      {children}
-    </Text>
-  );
-}
-
-/** `?` у заголовка: что это за лента и что значат линии — по наведению, не строкой на экране. */
-function LegendHelp() {
-  const item = (glyph: React.ReactNode, text: string) => (
-    <span className='flex items-center gap-2'>
-      <svg aria-hidden width={18} height={10} className='shrink-0'>
-        {glyph}
-      </svg>
-      {text}
-    </span>
-  );
-  return (
-    <Tooltip
-      side='bottom'
-      align='start'
-      trigger={
-        <button type='button' aria-label='about the label' className='text-labelColor'>
-          ?
-        </button>
-      }
-    >
-      <div className='flex flex-col gap-1 uppercase' data-composition-legend=''>
-        <span>sewn into every garment; click a printed value to change it</span>
-        {item(
-          <rect
-            x={0.5}
-            y={0.5}
-            width={17}
-            height={9}
-            fill='#fff'
-            stroke='var(--color-labelColor)'
-          />,
-          'solid · cut edge',
-        )}
-        {item(
-          <line x1={9} y1={0} x2={9} y2={10} stroke='#000' strokeDasharray='2 2' />,
-          'dash · fold / sew',
-        )}
-        {item(
-          <g stroke='var(--color-borderColor)'>
-            {[0, 5, 10, 15, 20].map((x) => (
-              <line key={x} x1={x - 6} y1={10} x2={x + 4} y2={0} />
-            ))}
-          </g>,
-          'hatch · 10 mm seam, sewn in',
-        )}
-        <span>ribbon A: duplex, flip on the short edge</span>
-      </div>
-    </Tooltip>
-  );
-}
-
-/** Правка состава открывается с частью, по колонке которой щёлкнули, в фокусе. */
-function FocusPart({ part }: { part?: string }) {
-  const ref = useRef<HTMLSpanElement | null>(null);
-  useEffect(() => {
-    if (!part) return;
-    const strip = ref.current?.closest('[data-region-editor]');
-    const t = requestAnimationFrame(() => {
-      const box = strip?.querySelector<HTMLElement>(`[data-fibre-part='${part}']`);
-      const target = box?.querySelector<HTMLElement>('button, input');
-      box?.scrollIntoView({ block: 'nearest' });
-      target?.focus({ preventScroll: true });
-    });
-    return () => cancelAnimationFrame(t);
-  }, [part]);
-  return <span ref={ref} hidden data-focus-part={part ?? ''} />;
 }

@@ -94,6 +94,7 @@ export function LabelFilePicker({
           placeholder='search files'
           aria-label='search files'
           disabled={busy}
+          className='h-7'
           onChange={(event: ChangeEvent<HTMLInputElement>) => setSearch(event.target.value)}
         />
         <Tiles min={132}>

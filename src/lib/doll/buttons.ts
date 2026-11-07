@@ -4,9 +4,12 @@
 // garment with these two steps. Whatever the data does not settle is refused in words.
 
 import { closureDrills } from 'lib/assembly-skeleton/geometry/closures';
+import { readName } from 'lib/assembly-skeleton/skeleton';
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
+import { frameOf, toUV } from 'lib/seams/frame';
 
 import type { DeclaredOp } from './joins';
+import type { DollFold } from './types';
 
 /** A step that makes the holes or sets the buttons, its input read down to pieces. */
 export type DeclaredFastening = {
@@ -133,6 +136,7 @@ export type FasteningSide = {
 };
 export type FasteningPair = { count: number; holes: FasteningSide; buttons: FasteningSide };
 export type FasteningRead = { pairs: FasteningPair[]; refused: string[] };
+export type InferredPlacketFold = { piece: string; fold: DollFold; how: string };
 
 type StepColumn = { piece: string; column: Pt2[]; apart?: string } | { why: string };
 
@@ -376,6 +380,63 @@ export function pairFastenings(
         `step ${s.step} (${s.count} ${wordOf(s)}): no ${s.side === 'holes' ? 'button' : 'buttonhole'} step says ${s.count}`,
       );
   return { pairs, refused };
+}
+
+/**
+ * A separate placket whose button line sits in one half of a long narrow strip is the finished
+ * half; the other half turns under on the strip's midline. This is a doll proposal used only when
+ * the card has no fold for the piece. Names decide only that the strip is a placket; the fold side
+ * and direction come from its geometry and fastening marks.
+ */
+export function inferredPlacketFolds(
+  steps: readonly DeclaredFastening[],
+  geomOf: (key: string) => PieceGeom | undefined,
+  hasFold: (key: string) => boolean = () => false,
+): InferredPlacketFold[] {
+  const out = new Map<string, InferredPlacketFold>();
+  for (const pair of pairFastenings(steps, geomOf).pairs)
+    for (const side of [pair.holes, pair.buttons]) {
+      if (out.has(side.piece) || hasFold(side.piece) || side.marks.length < 2) continue;
+      const g = geomOf(side.piece);
+      if (!g || readName(g.name).role !== 'placket') continue;
+      const frame = frameOf(g);
+      const longV = frame.h >= frame.w;
+      const short = longV ? frame.w : frame.h;
+      const long = longV ? frame.h : frame.w;
+      if (short < 20 || short > 160 || long < 300 || long < 4 * short) continue;
+      const across = side.marks.map((mark) => {
+        const uv = toUV(frame, mark);
+        return longV ? uv[0] : uv[1];
+      });
+      const lo = Math.min(...across);
+      const hi = Math.max(...across);
+      if (hi - lo > 0.08) continue;
+      const column = across.reduce((sum, value) => sum + value, 0) / across.length;
+      // A line on the midline does not say which half is the face. A line too near an outer edge is
+      // not centred on a plausible finished half either.
+      if (Math.abs(column - 0.5) < 0.06 || column < 0.12 || column > 0.88) continue;
+      const fold: DollFold = longV
+        ? {
+            seq: 0,
+            a: [0.5, 0],
+            b: [0.5, 1],
+            flipAt: [column < 0.5 ? 0.9 : 0.1, 0.5],
+            kind: 'inward',
+          }
+        : {
+            seq: 0,
+            a: [0, 0.5],
+            b: [1, 0.5],
+            flipAt: [0.5, column < 0.5 ? 0.9 : 0.1],
+            kind: 'inward',
+          };
+      out.set(side.piece, {
+        piece: side.piece,
+        fold,
+        how: `placket fold proposed from its ${Math.round(short)} mm cut width and button line at ${Math.round(column * short)} mm`,
+      });
+    }
+  return [...out.values()];
 }
 
 // ── Where a mark is on a piece's mesh ─────────────────────────────────────────────────────────

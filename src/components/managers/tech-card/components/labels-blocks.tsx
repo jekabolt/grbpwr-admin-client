@@ -5,24 +5,38 @@ import type {
   common_TechCardMediaFull,
 } from 'api/proto-http/admin';
 import { MaterialThumb } from 'components/managers/materials/components/material-thumb';
+import { useCareLabelSource } from 'components/managers/tech-card/care-labels/adapter';
 import { useEffect, useMemo, useState, type ChangeEvent, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { AddDoor, ConfirmationModal, Input, Select, Section, Text, Tile, Tiles } from 'ui';
+import {
+  AddDoor,
+  Button,
+  ConfirmationModal,
+  HeaderWarnings,
+  Input,
+  Placeholder,
+  Select,
+  Section,
+  Text,
+  Tiles,
+  UndoRow,
+} from 'ui';
 
-import { pickLabelMaterial } from './label-bom';
+import { pickLabelMaterial, removeLabelWithLine, takeLabelMaterialOff } from './label-bom';
 import { labelKindOfMaterial } from './label-material-kind';
 import { upsertGarmentLabel } from './form-writers';
 import { type FormGarmentLabel, type FormPackagingItem } from './labels-schema';
 import type { TechCardFormData } from './schema';
-import { PackagingShelf, packagingGaps } from './packaging-shelf';
+import { PackagingShelf, packagingIssues } from './packaging-shelf';
 import { isCompositionLabel, labelBomLine } from './sewn-label-model';
 import {
   bornLabelFacts,
-  labelMiss,
-  LabelRowsHead,
+  labelIssue,
   madeIntent,
-  SewnLabelRow,
+  SewnLabelModal,
+  SewnLabelTile,
 } from './sewn-label-row';
+import { StockPickerModal, type StockPickerOption } from './labels-pkg-shared';
 import {
   garmentLabelKindNames,
   garmentLabelKinds,
@@ -53,6 +67,8 @@ function LabelStockPicker({
   stockKnown,
   onPick,
   onMake,
+  selectedMaterialId,
+  onUnpick,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -61,112 +77,77 @@ function LabelStockPicker({
   stockKnown: boolean;
   onPick: (material: common_Material, kind: string) => void;
   onMake?: () => void;
+  selectedMaterialId?: number;
+  onUnpick?: () => void;
 }) {
-  const [search, setSearch] = useState('');
-  const [kind, setKind] = useState('all');
+  const filtered = useMemo(() => materials.filter((material) => !material.archived), [materials]);
 
-  useEffect(() => {
-    if (!open) return;
-    setSearch('');
-    setKind('all');
-  }, [open]);
-
-  const filtered = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    return materials.filter((material) => {
-      if (material.archived) return false;
-      if (kind !== 'all' && labelKindOfMaterial(material) !== kind) return false;
-      if (!query) return true;
-      return `${material.name ?? ''} ${material.code ?? ''}`.toLowerCase().includes(query);
+  const options = useMemo<StockPickerOption[]>(() => {
+    const stockOptions = filtered.map((material) => {
+      const id = wireInt(material.id);
+      const materialKind = labelKindOfMaterial(material);
+      const onHand = stock.get(id) ?? (stockKnown ? '0' : undefined);
+      return {
+        key: String(id),
+        name: material.name || material.code || `material ${id}`,
+        tab: materialKind || 'other',
+        media: (
+          <MaterialThumb material={material} size='lg' className='aspect-square h-auto w-full' />
+        ),
+        sub: kindLabel(labelStockKinds, materialKind),
+        status:
+          onHand == null ? null : (
+            <Text
+              size='micro'
+              variant={Number(onHand) > 0 ? 'label' : 'errorLabel'}
+              component='span'
+            >
+              {onHand} in stock
+            </Text>
+          ),
+      };
     });
-  }, [kind, materials, search]);
+    if (!onMake) return stockOptions;
+    return [
+      ...stockOptions,
+      {
+        key: 'artwork',
+        name: 'new artwork',
+        tab: 'artwork',
+        media: <Placeholder label='artwork' className='aspect-square w-full' />,
+        sub: 'artwork',
+      },
+    ];
+  }, [filtered, onMake, stock, stockKnown]);
 
   return (
-    <ConfirmationModal
+    <StockPickerModal
       open={open}
       onOpenChange={onOpenChange}
-      onConfirm={() => onOpenChange(false)}
-      title={onMake ? 'add label' : 'pick material'}
-      width='lg'
-      hideActions
-    >
-      <div className='flex flex-col gap-3'>
-        <div className='flex flex-col gap-2 sm:flex-row'>
-          <Input
-            className='min-w-0 flex-1'
-            value={search}
-            placeholder='search stock'
-            aria-label='search stock'
-            onChange={(event: ChangeEvent<HTMLInputElement>) => setSearch(event.target.value)}
-          />
-          <Select
-            name='label-stock-kind'
-            className='w-full whitespace-nowrap sm:w-auto'
-            value={kind}
-            items={[
-              { value: 'all', label: 'all types' },
-              ...labelStockKinds.map((option) => ({
-                value: option.key,
-                label: option.label,
-              })),
-            ]}
-            onValueChange={(value: string | undefined) => setKind(value || 'all')}
-          />
-        </div>
-        <Tiles min={132}>
-          {filtered.map((material) => {
-            const id = wireInt(material.id);
-            const materialKind = labelKindOfMaterial(material);
-            const onHand = stock.get(id) ?? (stockKnown ? '0' : undefined);
-            return (
-              <Tile
-                key={id}
-                media={
-                  <MaterialThumb
-                    material={material}
-                    size='lg'
-                    className='aspect-square h-auto w-full'
-                  />
-                }
-                name={material.name || material.code || `material ${id}`}
-                sub={kindLabel(labelStockKinds, materialKind)}
-                title={material.name || material.code || undefined}
-                onClick={() => {
-                  onPick(material, materialKind);
-                  onOpenChange(false);
-                }}
-              >
-                {onHand == null ? null : (
-                  <Text
-                    size='micro'
-                    variant={Number(onHand) > 0 ? 'label' : 'errorLabel'}
-                    component='span'
-                  >
-                    {onHand} on hand
-                  </Text>
-                )}
-              </Tile>
-            );
-          })}
-          {onMake ? (
-            <Tile
-              dashed
-              name='+ make new'
-              className='min-h-24 items-center justify-center'
-              onClick={() => {
-                onOpenChange(false);
-                onMake();
-              }}
-            />
-          ) : null}
-        </Tiles>
-        {filtered.length === 0 && !onMake ? (
-          <Text size='micro' variant='label'>
-            nothing in stock
-          </Text>
-        ) : null}
-      </div>
-    </ConfirmationModal>
+      title={onMake ? 'add label' : 'stock item'}
+      options={options}
+      tabs={[
+        ...labelStockKinds.map((option) => ({ value: option.key, label: option.label })),
+        ...(onMake ? [{ value: 'artwork', label: 'artwork' }] : []),
+      ]}
+      selectedKeys={selectedMaterialId ? [String(selectedMaterialId)] : []}
+      onConfirm={(keys) => {
+        const key = keys[0];
+        if (!key) {
+          onUnpick?.();
+          onOpenChange(false);
+          return;
+        }
+        if (key === 'artwork') {
+          onOpenChange(false);
+          onMake?.();
+          return;
+        }
+        const material = materials.find((candidate) => wireInt(candidate.id) === Number(key));
+        if (material) onPick(material, labelKindOfMaterial(material));
+        onOpenChange(false);
+      }}
+    />
   );
 }
 
@@ -197,8 +178,30 @@ function MakeLabelDialog({
         onAdd(name.trim(), kind);
       }}
       title='new label'
-      confirmLabel='add'
-      confirmDisabled={!name.trim() || !kind}
+      hideActions
+      footerActions={
+        <>
+          <Button
+            type='button'
+            variant='secondary'
+            size='sm'
+            className='h-7'
+            onClick={() => onOpenChange(false)}
+          >
+            cancel
+          </Button>
+          <Button
+            type='button'
+            variant='main'
+            size='sm'
+            className='h-7'
+            disabled={!name.trim() || !kind}
+            onClick={() => onAdd(name.trim(), kind)}
+          >
+            add
+          </Button>
+        </>
+      }
     >
       <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
         <div className='flex min-w-0 flex-col gap-0.5'>
@@ -208,6 +211,7 @@ function MakeLabelDialog({
           <Input
             value={name}
             autoFocus
+            className='h-7'
             onChange={(event: ChangeEvent<HTMLInputElement>) => setName(event.target.value)}
           />
         </div>
@@ -219,6 +223,7 @@ function MakeLabelDialog({
             name='made-label-kind'
             value={kind}
             placeholder='pick type'
+            className='h-7'
             items={garmentLabelKinds.map((option) => ({
               value: option.key,
               label: option.label,
@@ -233,11 +238,18 @@ function MakeLabelDialog({
 
 const displayLabelName = (row: FormGarmentLabel): string => {
   const key = row.key?.trim() || 'label';
+  if (isCompositionLabel(key)) return kindLabel(garmentLabelKindNames, key) || key;
   const legacy = !row.source && !madeIntent(row);
   return legacy ? kindLabel(garmentLabelKindNames, key) || key : key;
 };
 
-/** LABELS: compact stock-aware rows. The composition label remains in its dedicated block. */
+type RemovedLabel = {
+  name: string;
+  labels: FormGarmentLabel[];
+  bomItems: NonNullable<TechCardFormData['bomItems']>;
+};
+
+/** LABELS: stock-aware visual tiles with one compact editor. */
 export function LabelsBlock({
   techCard,
   canEdit = true,
@@ -250,18 +262,53 @@ export function LabelsBlock({
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as NonNullable<
     TechCardFormData['bomItems']
   >;
-  const rows = all.filter((row) => !isCompositionLabel(row.key));
-  const { materials, materialById, stock, stockKnown, plannedQty, onHandOf } =
-    useLabelStock(techCard);
+  const rows = useMemo(
+    () =>
+      all.some((row) => isCompositionLabel(row.key))
+        ? all
+        : ([
+            {
+              key: 'composition',
+              ...bornLabelFacts('composition'),
+            } as FormGarmentLabel,
+            ...all,
+          ] as FormGarmentLabel[]),
+    [all],
+  );
+  const { materials, materialById, stock, stockKnown, onHandOf } = useLabelStock(techCard);
+  const care = useCareLabelSource(wireInt(techCard?.id));
+  const compositionMissingCountry = !!care.data?.colorways.some(
+    (colourway) => !colourway.countryCode,
+  );
 
   const [adding, setAdding] = useState(false);
   const [making, setMaking] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [materialTarget, setMaterialTarget] = useState<string | null>(null);
+  const [removed, setRemoved] = useState<RemovedLabel | null>(null);
 
-  const issues = rows.reduce((total, row) => total + labelMiss(row, bomItems), 0);
   const keys = rows.map((row) => row.key ?? '');
   const targetRow = rows.find((row) => row.key === materialTarget);
+  const openRow = rows.find((row) => row.key === expanded);
+  const openLine = openRow ? labelBomLine(openRow, bomItems) : undefined;
+  const openMaterial = materialById.get(wireInt(openLine?.materialId));
+  const selectedLine = targetRow ? labelBomLine(targetRow, bomItems) : undefined;
+  const warnings = rows
+    .map((row, index) => {
+      const issue = labelIssue(
+        row,
+        bomItems,
+        isCompositionLabel(row.key) && compositionMissingCountry,
+      );
+      if (!issue) return null;
+      const key = row.key?.trim() || `label ${index + 1}`;
+      return {
+        text: `${displayLabelName(row)}: ${issue}`,
+        error: true,
+        action: { label: 'open label', onClick: () => setExpanded(key) },
+      };
+    })
+    .filter(Boolean);
 
   const addStock = (material: common_Material, kind: string) => {
     const baseName = material.name?.trim() || material.code?.trim() || `material ${material.id}`;
@@ -274,46 +321,70 @@ export function LabelsBlock({
 
   return (
     <>
-      <Section
-        title='labels'
-        action={
-          issues > 0 ? (
-            <Text size='micro' variant='errorLabel' component='span'>
-              ! {issues}
-            </Text>
-          ) : undefined
-        }
-      >
-        <div data-labels-rows=''>
-          {rows.length > 0 ? <LabelRowsHead /> : null}
+      <Section title='labels' action={<HeaderWarnings items={warnings} />}>
+        <Tiles min={200} className='gap-2.5'>
           {rows.map((row, index) => {
             const key = row.key?.trim() || `label ${index + 1}`;
             const line = labelBomLine(row, bomItems);
             const material = materialById.get(wireInt(line?.materialId));
             const onHand = onHandOf(material);
             return (
-              <SewnLabelRow
+              <SewnLabelTile
                 key={`${key.toLowerCase()}-${index}`}
-                labelKey={key}
+                row={row}
                 title={displayLabelName(row)}
                 material={material}
                 onHand={onHand}
-                plannedQty={plannedQty}
-                open={expanded === key}
-                onOpenChange={(next) => setExpanded(next ? key : null)}
-                onPickMaterial={() => setMaterialTarget(key)}
-                canEdit={canEdit}
-                last={index === rows.length - 1}
+                compositionMissingCountry={isCompositionLabel(row.key) && compositionMissingCountry}
+                onOpen={() => setExpanded(key)}
               />
             );
           })}
           {canEdit ? (
-            <AddDoor afterRows={rows.length > 0} onClick={() => setAdding(true)}>
+            <AddDoor shape='tile' className='min-h-50 w-full' onClick={() => setAdding(true)}>
               label
             </AddDoor>
           ) : null}
-        </div>
+        </Tiles>
+        {removed ? (
+          <UndoRow
+            name={removed.name}
+            onUndo={() => {
+              setValue('garmentLabels', removed.labels as never, { shouldDirty: true });
+              setValue('bomItems', removed.bomItems as never, { shouldDirty: true });
+              setRemoved(null);
+            }}
+            onCommit={() => setRemoved(null)}
+          />
+        ) : null}
       </Section>
+
+      {openRow ? (
+        <SewnLabelModal
+          open
+          onOpenChange={(next) => {
+            if (!next) setExpanded(null);
+          }}
+          labelKey={openRow.key?.trim() || ''}
+          title={displayLabelName(openRow)}
+          material={openMaterial}
+          onHand={onHandOf(openMaterial)}
+          onPickMaterial={() => setMaterialTarget(openRow.key?.trim() || '')}
+          onRemove={() => {
+            const labelKey = openRow.key?.trim() || '';
+            setRemoved({
+              name: displayLabelName(openRow),
+              labels: ((getValues('garmentLabels') ?? []) as FormGarmentLabel[]).slice(),
+              bomItems: (
+                (getValues('bomItems') ?? []) as NonNullable<TechCardFormData['bomItems']>
+              ).slice(),
+            });
+            removeLabelWithLine(getValues, setValue, labelKey);
+            setExpanded(null);
+          }}
+          canEdit={canEdit}
+        />
+      ) : null}
 
       <LabelStockPicker
         open={adding || !!materialTarget}
@@ -326,10 +397,25 @@ export function LabelsBlock({
         materials={materials}
         stock={stock}
         stockKnown={stockKnown}
+        selectedMaterialId={wireInt(selectedLine?.materialId)}
+        onUnpick={
+          materialTarget
+            ? () => {
+                takeLabelMaterialOff(getValues, setValue, materialTarget);
+                const current = ((getValues('garmentLabels') ?? []) as FormGarmentLabel[]).slice();
+                const index = current.findIndex(
+                  (row) =>
+                    (row.key ?? '').trim().toLowerCase() === materialTarget.trim().toLowerCase(),
+                );
+                if (index >= 0)
+                  setValue(`garmentLabels.${index}.source`, 'stock', { shouldDirty: true });
+              }
+            : undefined
+        }
         onPick={(material, kind) => {
           if (materialTarget) {
             pickLabelMaterial(getValues, setValue, materialTarget, material, {
-              source: 'make',
+              source: 'stock',
               kind: targetRow?.kind?.trim() || kind,
             });
             setMaterialTarget(null);
@@ -351,7 +437,13 @@ export function LabelsBlock({
         onOpenChange={setMaking}
         onAdd={(name, kind) => {
           const key = freeLabelKey(name, keys);
-          upsertGarmentLabel(getValues, setValue, key, bornLabelFacts(kind), { keepBare: true });
+          upsertGarmentLabel(
+            getValues,
+            setValue,
+            key,
+            { ...bornLabelFacts(kind), source: 'make' },
+            { keepBare: true },
+          );
           setMaking(false);
           setExpanded(key);
         }}
@@ -375,18 +467,13 @@ export function PackagingBlock({
   const { control } = useFormContext<TechCardFormData>();
   const items = (useWatch({ control, name: 'packagingItems' }) ?? []) as FormPackagingItem[];
   const folding = useWatch({ control, name: 'packaging.foldingMethod' }) ?? '';
+  const packedSize = useWatch({ control, name: 'packaging.packedSize' }) ?? '';
   const units = Number(useWatch({ control, name: 'packaging.unitsPerBox' })) || 0;
-  const gaps = packagingGaps(folding, items, units);
+  const issues = packagingIssues(folding, packedSize, items, units);
   return (
     <Section
       title='packaging'
-      action={
-        gaps > 0 ? (
-          <Text size='micro' variant='errorLabel' component='span'>
-            ! {gaps}
-          </Text>
-        ) : undefined
-      }
+      action={<HeaderWarnings items={issues.map((text) => ({ text, error: true }))} />}
     >
       <div id='packaging-spec'>
         <PackagingShelf

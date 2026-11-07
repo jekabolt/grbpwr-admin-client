@@ -53,6 +53,43 @@ function form(overrides = {}) {
   };
 }
 
+test('care format and packed photo order round-trip through the form', () => {
+  const legacy = schema.mapTechCardToForm({
+    techCard: {
+      careLabel: { orientation: '' },
+      packaging: { packedMediaId: 9, packedMediaIds: [] },
+    },
+  });
+
+  assert.equal(legacy.careLabel.orientation, 'vertical');
+  assert.deepEqual(legacy.packaging.packedMediaIds, [9]);
+  assert.equal(legacy.packaging.packedMediaId, 9);
+
+  const ordered = schema.mapTechCardToForm({
+    techCard: {
+      careLabel: { orientation: 'horizontal' },
+      packaging: { packedMediaId: 9, packedMediaIds: [12, 11] },
+    },
+  });
+  const payload = schema.mapFormToTechCardInsert(ordered);
+
+  assert.equal(payload.careLabel.orientation, 'horizontal');
+  assert.deepEqual(payload.packaging.packedMediaIds, [12, 11]);
+  assert.equal(payload.packaging.packedMediaId, 12);
+
+  const cleared = schema.mapFormToTechCardInsert({
+    ...ordered,
+    packaging: {
+      ...ordered.packaging,
+      foldingMethod: 'folded',
+      packedMediaId: 99,
+      packedMediaIds: [],
+    },
+  });
+  assert.deepEqual(cleared.packaging.packedMediaIds, []);
+  assert.equal(cleared.packaging.packedMediaId, 0);
+});
+
 test('write mapper preserves an alias whose material scope is no longer live', () => {
   const payload = schema.mapFormToTechCardInsert(
     form({

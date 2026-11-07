@@ -241,6 +241,74 @@ export function neckFromRun(
   return finishPath(c, verts, false, k >= 0 ? verts[k] : -1, how, !cut);
 }
 
+/**
+ * A neckline row / free-boundary walk can include a finished front extension or continue past the
+ * neck over the shoulder. When the stand/collar supplies the expected sewn length, trim the walk
+ * only at a symmetric pair of pattern landmarks: two notches or two panel junctions. A merely
+ * convenient point along an edge is never invented, and a fit outside 5 % is left unchanged for
+ * the contradiction report.
+ */
+export function fitNeckPath(c: CollarCtx, neck: NeckPath, targetMm: number): NeckPath {
+  const L = neck.path.len;
+  if (
+    !Number.isFinite(targetMm) ||
+    targetMm <= 0 ||
+    L <= targetMm ||
+    Math.abs(L / targetMm - 1) <= 0.05
+  )
+    return neck;
+  const n = neck.verts.length;
+  if (n < 5) return neck;
+  let kcb = 0;
+  for (let k = 1; k < n; k++)
+    if (Math.abs(neck.path.s[k] - neck.cb) < Math.abs(neck.path.s[kcb] - neck.cb)) kcb = k;
+
+  type Choice = { i: number; j: number; kind: 'CF notches' | 'panel junctions'; error: number };
+  let best: Choice | null = null;
+  const consider = (marks: readonly number[], kind: Choice['kind']) => {
+    const left = marks.filter((k) => k > 0 && k < kcb);
+    const right = marks.filter((k) => k > kcb && k < n - 1);
+    for (const i of left)
+      for (const j of right) {
+        const s0 = neck.path.s[i];
+        const s1 = neck.path.s[j];
+        const span = s1 - s0;
+        const error = Math.abs(span / targetMm - 1);
+        const imbalance = Math.abs(neck.cb - s0 - (s1 - neck.cb));
+        if (error > 0.05 || imbalance > Math.max(30, 0.15 * targetMm)) continue;
+        if (!best || error < best.error - 1e-9) best = { i, j, kind, error };
+      }
+  };
+  consider(
+    neck.verts.map((v, k) => (c.isNotch(v) ? k : -1)).filter((k) => k >= 0),
+    'CF notches',
+  );
+  const junctions: number[] = [];
+  for (let k = 1; k < n; k++)
+    if (c.panelOf[neck.verts[k - 1]] !== c.panelOf[neck.verts[k]]) junctions.push(k - 1, k);
+  consider([...new Set(junctions)], 'panel junctions');
+  if (!best) return neck;
+
+  const picked = best as Choice;
+  const cut0 = neck.path.s[picked.i];
+  const cut1 = neck.path.s[picked.j];
+  const verts = neck.verts.slice(picked.i, picked.j + 1);
+  const path = restPath(c, verts);
+  const snp =
+    neck.snp && neck.snp[0] >= cut0 && neck.snp[1] <= cut1
+      ? ([neck.snp[0] - cut0, neck.snp[1] - cut0] as [number, number])
+      : null;
+  return {
+    verts,
+    path,
+    closed: false,
+    cb: neck.cb - cut0,
+    snp,
+    ext: [neck.ext[0] + cut0, neck.ext[1] + (L - cut1)],
+    how: `${neck.how}; sewn span chosen at the ${picked.kind} to fit the ${targetMm.toFixed(0)} mm stand / collar edge (${path.len.toFixed(0)} mm)`,
+  };
+}
+
 /** The neck as a closed loop cut at the centre front (pullovers; the fallback of K1). */
 export function closedNeckPath(
   c: CollarCtx,

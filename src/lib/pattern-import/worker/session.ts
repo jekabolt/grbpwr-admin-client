@@ -20,7 +20,6 @@ import type {
   ExtractOpts,
   FileId,
   GateReport,
-  IRPage,
   IRText,
   ManifestSource,
   PageClassification,
@@ -79,7 +78,8 @@ import {
   type DxfRead,
   type DxfSegmentation,
 } from '../adapters/dxf';
-import { extractRasterImageDetailed, extractRasterPdfDetailed } from '../adapters/raster';
+import { extractRasterImageDetailed } from '../adapters/raster';
+import { pdfHasNoCurves } from '../etalon/junk';
 import { extractHpgl } from '../adapters/hpgl';
 import { extractSvg } from '../adapters/svg';
 import {
@@ -226,18 +226,6 @@ export type StageCtx = {
 type Calib = { file: FileId; page: PageIndex; calibration: RasterCalibration };
 
 const DEFAULT_OPTS: ExtractOpts = { sagittaMm: PATIMPORT.sagittaMm, keepFills: true };
-
-/**
- * A page whose drawing IS an image (a scan): one raster covering at least half the page, and next
- * to nothing drawn as vectors (a frame, a few marks). The contract's "pageCover ≥ 0.9" is too
- * strict for real files: leonie's scans sit inside print margins at 0.56–0.86 of the page.
- */
-export const SCAN_MIN_COVER = 0.5;
-function isScanPage(p: IRPage): boolean {
-  if (!p.rasters.some((r) => r.pageCover >= SCAN_MIN_COVER)) return false;
-  const stroked = p.paths.filter((q) => !p.styles[q.style]?.fill).length;
-  return stroked <= 3 && p.paths.length <= 20;
-}
 
 /** Points the masked lines of the sheet view may carry (the live lines keep the full budget). */
 const PREVIEW_MASK_BUDGET = 60_000;
@@ -645,28 +633,26 @@ export class Session {
           calibs.push({ file, page: p.page, calibration: p.calibration ?? cs[k] }),
         );
       const reg: ExtractorRegistry = {
-        // A PDF is read as vector first; when its pages are scans (an image over the whole page
-        // and nothing drawn) it is re-read by the raster adapter (F11), which traces every page.
-        // RASTER: a PDF whose only content is images over the pixel limit (pdf.js drops them, the
-        // vector read refuses it) is a scan too — the raster adapter reads them in rows.
+        // docs/pattern-pdf-etalon.md: a PDF with no curves is junk (a page that is only a
+        // picture, like Skirt-Pocket.pdf). It is refused here, not traced into pieces. A page
+        // that has both curves and a picture is not an etalon and is not decided in this branch.
         pdf: async (f, o, p) => {
-          let doc: SourceDoc | null = null;
+          let doc: SourceDoc;
           try {
             doc = await extractPdfWith(f, o, p);
           } catch (e) {
             if (!isOversizedScan(e)) throw e;
+            throw new ImportError(
+              'unsupported-format',
+              `${f.name}: ${new UnsupportedFormat('pdf-no-curves').message}`,
+            );
           }
-          const scans = doc ? doc.pages.filter(isScanPage).length : 1;
-          if (doc && (!scans || scans < Math.ceil(doc.pages.length / 2))) return doc;
-          ctx.checkCancel();
-          const r = await extractRasterPdfDetailed(f, o, {
-            progress: (d, t, note) => {
-              ctx.checkCancel();
-              p?.(d, t, `tracing scan · ${note ?? ''}`);
-            },
-          });
-          keepCalibs(f.id, r.calibrations, r.doc);
-          return r.doc;
+          if (pdfHasNoCurves(doc.pages))
+            throw new ImportError(
+              'unsupported-format',
+              `${f.name}: ${new UnsupportedFormat('pdf-no-curves').message}`,
+            );
+          return doc;
         },
         dxf: async (f, o, p) => {
           const graded = this.rul ? await this.gradeByRul(f) : null;

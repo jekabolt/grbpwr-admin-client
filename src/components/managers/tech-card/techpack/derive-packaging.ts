@@ -64,7 +64,9 @@ export function derivePackaging(techCard: common_TechCard, sink?: GapSink, t: Pd
         target: { tab: 'labels', field: 'packagingItems' },
       };
   const packaging = card?.packaging;
-  const packedMediaId = wireInt(packaging?.packedMediaId);
+  const packedMediaId = packaging?.packedMediaIds?.length
+    ? wireInt(packaging.packedMediaIds[0])
+    : wireInt(packaging?.packedMediaId);
   const packedPhoto = packedMediaId
     ? mediaFromResolved(
         techCard.resolvedLabelMedia?.find((media) => wireInt(media.media?.id) === packedMediaId),

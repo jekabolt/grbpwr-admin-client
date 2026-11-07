@@ -26,6 +26,7 @@ export type UnsupportedCode =
   | 'valentina-pattern' // Valentina / Seamly2D parametric pattern (.val .sm2d)
   | 'valentina-measurements' // Valentina / Seamly2D measurements (.vit .vst .smis .smms)
   | 'pdf-password' // PDF that needs a password to open
+  | 'pdf-no-curves' // PDF whose pages are pictures — no vector drawing (docs/pattern-pdf-etalon.md)
   | 'office-document' // Word / Excel / PowerPoint / OpenDocument
   | 'image-unsupported' // an image container the raster adapter does not decode (HEIC, PSD…)
   | 'zip-archive' // any other ZIP — the importer does not open archives
@@ -107,6 +108,10 @@ const REFUSALS: Record<UnsupportedCode, Refusal> = {
   'pdf-password': {
     what: 'This PDF is password-protected, so its drawing cannot be read.',
     hint: 'Open it with the password and save or print it to a new PDF without security (or ask the sender for an unprotected copy), then drop that here.',
+  },
+  'pdf-no-curves': {
+    what: 'This PDF has no vector drawing — its pages are pictures, not cut lines.',
+    hint: 'Export the pattern as a vector PDF (or DXF/SVG) and drop that here. A scan of a pattern is not imported.',
   },
   'office-document': {
     what: 'This is an office document (Word, Excel, PowerPoint or OpenDocument), not a pattern drawing.',

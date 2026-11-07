@@ -19,6 +19,7 @@ import {
   fasteningsFromOps,
   freeSideOf,
   inColumnOrder,
+  inferredPlacketFolds,
   largestColumns,
   locateIn,
   pairFastenings,
@@ -68,6 +69,39 @@ describe('pairFastenings', () => {
     step,
     count,
     pieces,
+  });
+
+  it('proposes a midline placket fold and turns the half without the button line under', () => {
+    const strip = (pieceKey: string, name: string, width: number, x: number): PieceGeom =>
+      ({
+        pieceKey,
+        name,
+        rs: [
+          [0, 0],
+          [width, 0],
+          [width, 700],
+          [0, 700],
+        ],
+        marks: column(x, [100, 250, 400, 550]).map((mark, i) => toMark(pieceKey, i, mark)),
+      }) as unknown as PieceGeom;
+    const byKey = new Map([
+      ['left', strip('left', 'PLCK_L', 100, 62)],
+      ['right', strip('right', 'PLCK_R', 50, 12.5)],
+    ]);
+    const folds = inferredPlacketFolds([holes(1, 4, 'left'), buttons(2, 4, 'right')], (key) =>
+      byKey.get(key),
+    );
+    expect(folds.map(({ piece, fold }) => [piece, fold.a, fold.b, fold.flipAt])).toEqual([
+      ['left', [0.5, 0], [0.5, 1], [0.1, 0.5]],
+      ['right', [0.5, 0], [0.5, 1], [0.9, 0.5]],
+    ]);
+    expect(
+      inferredPlacketFolds(
+        [holes(1, 4, 'left'), buttons(2, 4, 'right')],
+        (key) => byKey.get(key),
+        (key) => key === 'left',
+      ).map((fold) => fold.piece),
+    ).toEqual(['right']);
   });
 
   it('pairs by the steps and their marks: a name that says the opposite changes nothing', () => {

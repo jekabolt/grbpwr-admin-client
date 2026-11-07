@@ -1,25 +1,32 @@
-// PRINT COMPOSITION: quantities, extra, duplex or simplex, which colours, and the zip. It prints the
-// card as it stands on the screen behind it, including what autosave has not sent yet. What holds it
-// is one word in the head with the action next to it; the detail lives in the editor.
 import { useSizeOrdering } from 'components/managers/model/components/use-size-systems';
 import { useProductionRuns } from 'components/managers/production-runs/components/useProductionRuns';
 import { notify } from 'lib/stores/store';
-import { useMemo, useState, type JSX } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent, type JSX } from 'react';
 import {
   Button,
   CheckboxCommon,
-  Chip,
-  ChipRow,
   ConfirmationModal,
+  DataTable,
   EmptyCell,
+  HeaderWarnings,
   Input,
+  Placeholder,
+  Row,
   Select,
   Text,
+  TotalRow,
+  ViewSwitch,
 } from 'ui';
+import type { ArtworkCellRef } from '../components/composition-label/composition-artwork';
 import {
+  oneFileOf,
   ownFileFor,
   type ArtworkChoice,
 } from '../components/composition-label/composition-artwork-model';
+import {
+  CompositionLabelPreview,
+  type LabelOrientation,
+} from '../components/composition-label/composition-label-preview';
 import { useShaper } from '../components/composition-label/use-composition-label';
 import type { ArtworkFile } from '../components/sewn-label-model';
 import { adaptRuns, type CareLabelData } from './adapter';
@@ -34,12 +41,28 @@ import { collectReadiness } from './readiness';
 import { clampOverage, effectiveQrTemplate, useCareLabelPrefs } from './use-care-label-prefs';
 
 const MANUAL = 'manual';
+const ALL_FILE: ArtworkCellRef = { colorwayId: 0, sizeId: 0 };
 
-const FIX_WORD: Record<PrintReason, string> = {
-  'no file': 'choose file',
-  'no text': 'edit text',
-  'no data': 'reload',
-  'no fonts': 'reload',
+const FIX_LABEL: Record<PrintReason, string> = {
+  'no file': 'Choose file',
+  'no text': 'Edit fields',
+  'no data': 'Reload',
+  'no fonts': 'Reload',
+};
+
+type PrintCompositionModalProps = {
+  techCardId: number;
+  data: CareLabelData | null;
+  files: readonly ArtworkFile[];
+  choice: ArtworkChoice;
+  orientation: LabelOrientation;
+  logoUrl: string;
+  initialColorwayId?: number;
+  initialSizeId?: number;
+  onTotalChange: (total: number) => void;
+  onClose: () => void;
+  onChooseFile: (cell: ArtworkCellRef) => void;
+  onFixText: () => void;
 };
 
 export function PrintCompositionModal({
@@ -47,48 +70,41 @@ export function PrintCompositionModal({
   data,
   files,
   choice,
+  orientation,
+  logoUrl,
+  initialColorwayId,
+  initialSizeId,
+  onTotalChange,
   onClose,
   onChooseFile,
-  onEditText,
-}: {
-  techCardId: number;
-  data: CareLabelData | null;
-  files: readonly ArtworkFile[];
-  choice: ArtworkChoice;
-  onClose: () => void;
-  onChooseFile: () => void;
-  onEditText: () => void;
-}): JSX.Element {
+  onFixText,
+}: PrintCompositionModalProps): JSX.Element {
   const { shaper, failed } = useShaper();
   const { prefs, update } = useCareLabelPrefs(techCardId);
   const runsQuery = useProductionRuns(techCardId, '', 0, false, true);
   const runs = useMemo(() => adaptRuns(runsQuery.data?.runs ?? []), [runsQuery.data]);
-
-  const [manualOn, setManualOn] = useState(false);
-  const [manual, setManual] = useState<QtyGrid>({});
-  const [unticked, setUnticked] = useState<ReadonlySet<number>>(new Set());
-  const [building, setBuilding] = useState(false);
-  const [saved, setSaved] = useState('');
-
-  const mode = prefs.mode;
-  const colorways = useMemo(() => data?.colorways ?? [], [data]);
   const orderSizes = useSizeOrdering();
+
+  const colorways = useMemo(() => data?.colorways ?? [], [data]);
   const sizes = useMemo(() => {
     const all = data?.sizes ?? [];
-    return orderSizes(all.map((s) => s.id)).map((id) => all.find((s) => s.id === id)!);
+    return orderSizes(all.map((size) => size.id)).map((id) => all.find((size) => size.id === id)!);
   }, [data, orderSizes]);
-  const colorwayIds = useMemo(() => colorways.map((c) => c.id), [colorways]);
-  const sizeIds = useMemo(() => sizes.map((s) => s.id), [sizes]);
+  const colorwayIds = useMemo(() => colorways.map((colorway) => colorway.id), [colorways]);
+  const sizeIds = useMemo(() => sizes.map((size) => size.id), [sizes]);
+  const [colorwayId, setColorwayId] = useState(initialColorwayId ?? colorwayIds[0] ?? 0);
+  const [sizeId, setSizeId] = useState(initialSizeId ?? sizeIds[0] ?? 0);
+  const colorway = colorways.find((entry) => entry.id === colorwayId) ?? colorways[0];
+  const size = sizes.find((entry) => entry.id === sizeId) ?? sizes[0];
 
   const compositions = useMemo(() => (data ? compositionsOf(data) : null), [data]);
   const plan = useMemo(
     () =>
       shaper && data && compositions
-        ? planAll(shaper, data, compositions, mode, data.label.qr)
+        ? planAll(shaper, data, compositions, prefs.mode, data.label.qr)
         : null,
-    [shaper, data, compositions, mode],
+    [shaper, data, compositions, prefs.mode],
   );
-
   const wholeCard = useMemo(
     () =>
       data
@@ -109,22 +125,30 @@ export function PrintCompositionModal({
         : { reason: null, blocked: new Set<number>() },
     [choice, files, wholeCard, colorwayIds, sizeIds],
   );
+
+  const [manualOn, setManualOn] = useState(false);
+  const [manual, setManual] = useState<QtyGrid>({});
+  const [unticked, setUnticked] = useState<ReadonlySet<number>>(new Set());
+  const [building, setBuilding] = useState(false);
+  const [saved, setSaved] = useState('');
   const excluded = useMemo(
     () => colorwayIds.filter((id) => unticked.has(id) || gate.blocked.has(id)),
     [colorwayIds, unticked, gate.blocked],
   );
-
   const source = printSource(prefs.source, runs, manualOn);
-  const run = source === 'manual' ? null : source;
+  const run = source === MANUAL ? null : source;
   const base = useMemo<QtyGrid>(() => {
     if (run) return fromRun(run, colorwayIds, sizeIds);
-    return source === 'manual' ? manual : emptyGrid(colorwayIds, sizeIds);
+    return source === MANUAL ? manual : emptyGrid(colorwayIds, sizeIds);
   }, [run, source, manual, colorwayIds, sizeIds]);
   const quantities = useMemo(
     () =>
       computeQuantities({
         base,
-        colorways: colorways.map((c) => ({ id: c.id, label: c.baseSku || c.colourName })),
+        colorways: colorways.map((entry) => ({
+          id: entry.id,
+          label: entry.baseSku || entry.colourName,
+        })),
         sizeIds,
         overagePct: prefs.overagePct,
         mode: prefs.mode,
@@ -132,52 +156,87 @@ export function PrintCompositionModal({
         run,
         plans: plan?.sets ?? null,
       }),
-    [base, colorways, sizeIds, prefs, excluded, run, plan],
+    [base, colorways, sizeIds, prefs.overagePct, prefs.mode, excluded, run, plan?.sets],
   );
-  const total = Object.values(quantities.rowTotals).reduce((sum, n) => sum + n, 0);
+  const sheetTotal = Object.values(quantities.rowTotals).reduce((sum, value) => sum + value, 0);
+  const outputTotal = quantities.labelsA + (quantities.labelsB ?? 0);
+  useEffect(() => onTotalChange(outputTotal), [onTotalChange, outputTotal]);
+
   const isOff = (id: number) => excluded.includes(id);
-  const rowBase = (id: number) => sizeIds.reduce((sum, s) => sum + toQty(base[id]?.[s]), 0);
+  const previewCell =
+    choice === 'one' ? ALL_FILE : { colorwayId: colorway?.id ?? 0, sizeId: size?.id ?? 0 };
+  const previewFile =
+    choice === 'one'
+      ? oneFileOf(files)
+      : colorway && size
+        ? ownFileFor(files, colorway.id, size.id)
+        : undefined;
+  const preview = {
+    colorway,
+    size,
+    parts: (colorway && compositions?.get(colorway.id)) ?? [],
+  };
+
+  const setCell = (colorwayId: number, cellSizeId: number, value: string) =>
+    setManual((grid) => ({
+      ...grid,
+      [colorwayId]: {
+        ...(grid[colorwayId] ?? {}),
+        [cellSizeId]: toQty(value),
+      },
+    }));
+
+  const fix = () => {
+    if (gate.reason === 'no file') onChooseFile(previewCell);
+    else if (gate.reason === 'no text') onFixText();
+    else window.location.reload();
+  };
 
   const download = async (): Promise<void> => {
     if (!data || !shaper || !compositions || building) return;
     setBuilding(true);
     try {
-      const copies = (cw: number, size: number) =>
-        ownFileFor(files, cw, size) ? 0 : quantities.cells[cw]?.[size] ?? 0;
-      const made = colorwayIds.filter((c) => sizeIds.some((s) => copies(c, s) > 0));
+      const copies = (colorwayId: number, cellSizeId: number) =>
+        ownFileFor(files, colorwayId, cellSizeId)
+          ? 0
+          : quantities.cells[colorwayId]?.[cellSizeId] ?? 0;
+      const generated = colorwayIds.filter((id) =>
+        sizeIds.some((idSize) => copies(id, idSize) > 0),
+      );
       const set = planPrint(
         shaper,
         buildPrintJob({
           data,
           compositions,
-          mode,
+          mode: prefs.mode,
           qr: data.label.qr,
-          colorwayIds: made,
+          colorwayIds: generated,
           copies,
         }),
       );
       const block = set.holes.find(isBlocking);
       if (block) throw new Error(block.message);
       const planned = planOwnFiles({ files, data, cells: quantities.cells });
-      if (set.files.length === 0 && planned.length === 0) {
-        throw new Error('nothing to put into the zip');
-      }
-      // Warnings are about what the generator makes: a colour of own files only has none.
-      const ownOnly = new Set(colorwayIds.filter((c) => !made.includes(c) && !isOff(c)));
+      if (set.files.length === 0 && planned.length === 0) throw new Error('empty export');
+
+      const ownOnly = new Set(colorwayIds.filter((id) => !generated.includes(id) && !isOff(id)));
       const final = collectReadiness({
         data,
         excluded: [...excluded, ...ownOnly],
         prefs: data.label.qr,
         layoutHoles: plan?.layoutHoles,
-        quantityHoles: quantities.holes.filter((h) => h.code !== 'nothing-to-export'),
+        quantityHoles: quantities.holes.filter((hole) => hole.code !== 'nothing-to-export'),
         zeroColorways: quantities.zeroColorways,
         fontsFailed: failed,
       });
-      const warnings = [...final.warnings, ...set.holes.filter((h) => h.level === 'warn')]
-        .filter((h) => !(h.ref.colorwayId !== undefined && ownOnly.has(h.ref.colorwayId)))
-        .filter((h, i, all) => all.findIndex((x) => x.message === h.message) === i);
-      const manifestCws = new Map<number, ManifestColorway>(
-        colorways.map((c) => [c.id, { baseSku: c.baseSku, colour: c.colourName }]),
+      const warnings = [...final.warnings, ...set.holes.filter((hole) => hole.level === 'warn')]
+        .filter((hole) => !(hole.ref.colorwayId !== undefined && ownOnly.has(hole.ref.colorwayId)))
+        .filter(
+          (hole, index, all) =>
+            all.findIndex((candidate) => candidate.message === hole.message) === index,
+        );
+      const manifestColorways = new Map<number, ManifestColorway>(
+        colorways.map((entry) => [entry.id, { baseSku: entry.baseSku, colour: entry.colourName }]),
       );
       const [own, { buildCareLabelZip, saveBlob }] = await Promise.all([
         loadOwnFiles(planned),
@@ -188,7 +247,7 @@ export function PrintCompositionModal({
         set,
         style: data.styleNumber,
         styleName: data.styleName,
-        colorways: manifestCws,
+        colorways: manifestColorways,
         qrTemplate: effectiveQrTemplate(data.label.qr),
         adminUrl: `${window.location.origin}/tech-cards/${techCardId}`,
         warnings,
@@ -196,12 +255,12 @@ export function PrintCompositionModal({
       });
       saveBlob(zip.bytes, zip.name);
       setSaved(zip.name);
-    } catch (e) {
+    } catch (error) {
       notify({
         sev: 'error',
         subject: 'CARE LABELS',
-        text: 'zip not built',
-        detail: e instanceof Error ? e.message : String(e),
+        text: 'download failed',
+        detail: error instanceof Error ? error.message : String(error),
         action: { label: 'retry', onClick: () => void download() },
       });
     } finally {
@@ -209,196 +268,238 @@ export function PrintCompositionModal({
     }
   };
 
-  const fix = () => {
-    if (gate.reason === 'no file') onChooseFile();
-    else if (gate.reason === 'no text') onEditText();
-    else window.location.reload();
-  };
-
-  const setCell = (colorway: number, size: number, value: string) =>
-    setManual((grid) => ({
-      ...grid,
-      [colorway]: { ...(grid[colorway] ?? {}), [size]: toQty(value) },
-    }));
-
   return (
     <ConfirmationModal
       open
+      width='lg'
+      title='Print labels'
       onOpenChange={(next) => {
         if (!next) onClose();
       }}
-      onConfirm={() => void download()}
-      title='Print composition'
+      onConfirm={() => undefined}
+      hideActions
+      footerHint={saved || undefined}
       headerActions={
         gate.reason ? (
-          <>
-            <Text
-              size='micro'
-              variant='errorLabel'
-              component='span'
-              className='whitespace-nowrap uppercase'
-              data-print-reason={gate.reason}
-            >
-              ! {gate.reason}
-            </Text>
-            <Button type='button' variant='underline' size='xs' data-print-fix='' onClick={fix}>
-              {FIX_WORD[gate.reason]}
-            </Button>
-          </>
+          <HeaderWarnings
+            countOnly
+            items={[
+              {
+                text: gate.reason,
+                error: true,
+                action: { label: FIX_LABEL[gate.reason], onClick: fix },
+              },
+            ]}
+          />
         ) : null
       }
-      confirmLabel={building ? 'building…' : 'download zip'}
-      confirmDisabled={total === 0 || building || !shaper}
-      closeOnConfirm={false}
-      footerHint={saved || undefined}
+      footerActions={
+        <>
+          <Button type='button' variant='secondary' size='sm' className='h-7' onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type='button'
+            variant='main'
+            size='sm'
+            className='h-7'
+            loading={building}
+            disabled={sheetTotal === 0 || !shaper}
+            onClick={() => void download()}
+          >
+            {outputTotal > 0 ? `Download · ${outputTotal}` : 'Download'}
+          </Button>
+        </>
+      }
     >
-      <div className='flex flex-col gap-3' data-print-composition=''>
-        <div className='flex flex-wrap items-end gap-x-6 gap-y-2'>
-          <label className='flex flex-col gap-1'>
-            <Text size='micro' variant='label' component='span' className='uppercase'>
-              quantities
-            </Text>
-            <Select
-              name='print-quantities'
-              className='min-w-44'
-              value={run ? String(run.id) : MANUAL}
-              items={[
-                ...runs.map((r) => ({ value: String(r.id), label: runCaption(r) })),
-                { value: MANUAL, label: MANUAL },
-              ]}
-              onValueChange={(v: string) => {
-                setManualOn(v === MANUAL);
-                if (v !== MANUAL) update({ source: { runId: Number(v) } });
-              }}
+      <div
+        className='grid min-w-0 gap-gutter lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]'
+        data-print-composition=''
+      >
+        <div className='flex min-w-0 flex-col items-start gap-2.5'>
+          <span className='flex max-w-full flex-wrap gap-1.5'>
+            <ViewSwitch
+              value={String(colorway?.id ?? '')}
+              label='Colourway'
+              className='max-w-full flex-wrap [&_[role=radio]]:h-7'
+              options={colorways.map((entry) => ({
+                value: String(entry.id),
+                label: `${entry.colourName || entry.baseSku}${entry.countryCode ? '' : ' !'}`,
+              }))}
+              onChange={(value) => setColorwayId(Number(value))}
             />
-          </label>
-          <label className='flex flex-col gap-1'>
-            <Text size='micro' variant='label' component='span' className='uppercase'>
-              extra, %
-            </Text>
-            <Input
-              name='print-extra'
-              type='number'
-              min={0}
-              max={100}
-              className='w-16'
-              placeholder='5'
-              data-print-extra=''
-              value={prefs.overagePct}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                update({ overagePct: clampOverage(Number(e.target.value)) })
-              }
+            <ViewSwitch
+              value={String(size?.id ?? '')}
+              label='Size'
+              className='max-w-full flex-wrap [&_[role=radio]]:h-7'
+              options={sizes.map((entry) => ({ value: String(entry.id), label: entry.label }))}
+              onChange={(value) => setSizeId(Number(value))}
             />
-          </label>
-          <div className='flex flex-col gap-1'>
-            <Text size='micro' variant='label' component='span' className='uppercase'>
-              print
-            </Text>
-            <ChipRow>
-              {(['duplex', 'simplex'] as const).map((m) => (
-                <Chip
-                  key={m}
-                  nonForm
-                  pressed={mode === m}
-                  selected={mode === m}
-                  data-print-mode={m}
-                  onClick={() => update({ mode: m })}
-                >
-                  {m}
-                </Chip>
-              ))}
-            </ChipRow>
-          </div>
+          </span>
+          <CompositionLabelPreview
+            data={data}
+            preview={preview}
+            logoUrl={logoUrl}
+            choice={choice}
+            file={previewFile}
+            orientation={orientation}
+            canEdit={false}
+            showFileActions={false}
+            onChooseFile={() => onChooseFile(previewCell)}
+            onClearFile={() => undefined}
+          />
         </div>
 
-        {!data ? (
-          <Text size='micro' variant='label' className='animate-pulse'>
-            loading…
-          </Text>
-        ) : (
-          <div className='overflow-x-auto'>
-            <table className='w-full border-collapse text-micro tabular-nums'>
+        <div className='min-w-0'>
+          <Row
+            label={
+              <Text size='control' variant='label' tracking='label' className='uppercase'>
+                Quantities
+              </Text>
+            }
+            value={
+              <Select
+                name='print-quantities'
+                className='h-7 min-w-44'
+                value={run ? String(run.id) : MANUAL}
+                items={[
+                  ...runs.map((entry) => ({ value: String(entry.id), label: runCaption(entry) })),
+                  { value: MANUAL, label: 'Manual' },
+                ]}
+                onValueChange={(value: string) => {
+                  setManualOn(value === MANUAL);
+                  if (value !== MANUAL) update({ source: { runId: Number(value) } });
+                }}
+              />
+            }
+            className='min-h-11 flex-col items-stretch py-2 sm:flex-row sm:items-center [&>span:last-child]:shrink'
+          />
+          <Row
+            label={
+              <Text size='control' variant='label' tracking='label' className='uppercase'>
+                Print
+              </Text>
+            }
+            value={
+              <ViewSwitch
+                value={prefs.mode}
+                label='Print'
+                className='[&_[role=radio]]:h-7'
+                options={[
+                  { value: 'duplex', label: 'Duplex' },
+                  { value: 'simplex', label: 'Simplex' },
+                ]}
+                onChange={(mode) => update({ mode })}
+              />
+            }
+            className='min-h-11 items-center py-2'
+          />
+
+          {data ? (
+            <DataTable variant='grid' className='[&_td]:align-middle'>
               <thead>
-                <tr className='border-b border-textColor text-labelColor uppercase'>
-                  <th className='py-1 pr-2 text-left font-normal'>colour</th>
-                  {sizes.map((s) => (
-                    <th key={s.id} className='px-1 py-1 text-right font-normal'>
-                      {s.label}
-                    </th>
+                <tr>
+                  <th data-align='left'>Colour</th>
+                  {sizes.map((entry) => (
+                    <th key={entry.id}>{entry.label}</th>
                   ))}
-                  <th className='py-1 pl-2 text-right font-normal'>Σ</th>
+                  <th>Qty</th>
                 </tr>
               </thead>
               <tbody>
-                {colorways.map((c) => {
-                  const off = isOff(c.id);
+                {colorways.map((entry) => {
+                  const off = isOff(entry.id);
+                  const blocked = gate.blocked.has(entry.id);
                   return (
-                    <tr key={c.id} className='border-b border-hairline' data-print-row={c.id}>
-                      <td className='py-1 pr-2 whitespace-nowrap'>
-                        <label className='flex items-center gap-2 uppercase'>
+                    <tr key={entry.id} data-print-row={entry.id}>
+                      <td data-align='left'>
+                        <label className='flex min-h-7 items-center gap-1.5'>
                           <CheckboxCommon
-                            name={`print-colour-${c.id}`}
+                            name={`print-colour-${entry.id}`}
                             checked={!off}
-                            disabled={gate.blocked.has(c.id)}
-                            aria-label={c.colourName || c.baseSku}
-                            onChange={(on: boolean) =>
-                              setUnticked((cur) => {
-                                const next = new Set(cur);
-                                if (on) next.delete(c.id);
-                                else next.add(c.id);
+                            disabled={blocked}
+                            className='h-7 w-7'
+                            aria-label={entry.colourName || entry.baseSku}
+                            onChange={(checked: boolean) =>
+                              setUnticked((current) => {
+                                const next = new Set(current);
+                                if (checked) next.delete(entry.id);
+                                else next.add(entry.id);
                                 return next;
                               })
                             }
                           />
-                          {c.colourName || c.baseSku}
+                          <span className='whitespace-nowrap'>
+                            {entry.colourName || entry.baseSku}
+                          </span>
                         </label>
                       </td>
-                      {sizes.map((s) => (
-                        <td
-                          key={s.id}
-                          className='px-1 py-1 text-right'
-                          data-print-cell={`${c.id}:${s.id}`}
-                        >
+                      {sizes.map((entrySize) => (
+                        <td key={entrySize.id} data-print-cell={`${entry.id}:${entrySize.id}`}>
                           {off ? (
                             <EmptyCell />
                           ) : run ? (
-                            toQty(base[c.id]?.[s.id])
+                            toQty(base[entry.id]?.[entrySize.id])
                           ) : (
                             <Input
-                              name={`print-qty-${c.id}-${s.id}`}
+                              name={`print-qty-${entry.id}-${entrySize.id}`}
                               type='number'
                               min={0}
-                              className='ml-auto w-14 text-right'
-                              aria-label={`${c.colourName} ${s.label}`}
+                              className='ml-auto h-7 w-14 text-right'
+                              aria-label={`${entry.colourName} ${entrySize.label}`}
                               placeholder='0'
-                              value={toQty(base[c.id]?.[s.id]) || ''}
-                              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                                setCell(c.id, s.id, e.target.value)
+                              value={toQty(base[entry.id]?.[entrySize.id]) || ''}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                setCell(entry.id, entrySize.id, event.target.value)
                               }
                             />
                           )}
                         </td>
                       ))}
-                      <td className='py-1 pl-2 text-right'>
-                        {off ? <EmptyCell /> : rowBase(c.id)}
-                      </td>
+                      <td>{off ? <EmptyCell /> : quantities.rowTotals[entry.id]}</td>
                     </tr>
                   );
                 })}
+                <TotalRow>
+                  <td data-align='left'>Total</td>
+                  {sizes.map((entry) => (
+                    <td key={entry.id}>{quantities.colTotals[entry.id]}</td>
+                  ))}
+                  <td>{sheetTotal}</td>
+                </TotalRow>
               </tbody>
-              <tfoot>
-                <tr className='border-t border-textColor'>
-                  <td className='py-1 pr-2' colSpan={sizes.length + 1}>
-                    with extra
-                  </td>
-                  <td className='py-1 pl-2 text-right' data-print-total={total}>
-                    {total}
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        )}
+            </DataTable>
+          ) : (
+            <Placeholder label='Loading' className='h-36 w-full' />
+          )}
+
+          <Row
+            label={
+              <Text size='control' variant='label' tracking='label' className='uppercase'>
+                Extra
+              </Text>
+            }
+            value={
+              <span className='flex items-center gap-1.5'>
+                <Input
+                  name='print-extra'
+                  type='number'
+                  min={0}
+                  max={100}
+                  className='h-7 w-16 text-right'
+                  value={prefs.overagePct}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    update({ overagePct: clampOverage(Number(event.target.value)) })
+                  }
+                />
+                <Text component='span' size='micro' variant='label'>
+                  %
+                </Text>
+              </span>
+            }
+            className='min-h-11 items-center py-2'
+          />
+        </div>
       </div>
     </ConfirmationModal>
   );

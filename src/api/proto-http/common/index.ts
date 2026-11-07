@@ -3589,6 +3589,11 @@ export type TechCardPackaging = {
   notes: string | undefined;
   packedSize: string | undefined;
   packedMediaId: number | undefined;
+  // The photos of the finished pack in display order; the first is the cover. Read always fills both:
+  // packed_media_id = packed_media_ids[0] (0 when empty). Write: non-empty wins over packed_media_id;
+  // empty with packed_media_id set is an older client: a one-photo list, except that a cover equal to
+  // the stored one keeps the stored further photos (that client never saw them).
+  packedMediaIds: number[] | undefined;
 };
 
 // TechCardCareLabelFiber is one fibre row of a colourway's composition OVERRIDE on the composition
@@ -3617,6 +3622,7 @@ export type TechCardCareLabel = {
   backCaptionLines: string[] | undefined;
   addressLines: string[] | undefined;
   colorways: TechCardCareLabelColorway[] | undefined;
+  orientation: string | undefined;
 };
 
 // TechCardGarmentLabel is one label on the garment other than the composition label (labels rework,
