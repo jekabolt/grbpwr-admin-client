@@ -244,16 +244,18 @@ export function CoverPage({
               <Row
                 key={row.key}
                 label={
-                  <span className='flex items-center gap-2'>
+                  <span className='flex items-start gap-2'>
                     <span
                       aria-hidden
-                      className='size-5 border border-textColor'
+                      className='size-5 shrink-0 border border-textColor'
                       style={row.hex ? { backgroundColor: row.hex } : undefined}
                     />
-                    {row.colour}
+                    <span className='min-w-0'>
+                      <span className='block'>{row.colour}</span>
+                      <span className='block break-words text-labelColor'>{row.material}</span>
+                    </span>
                   </span>
                 }
-                value={row.material}
               />
             ))}
           </div>
