@@ -91,6 +91,7 @@ import {
 import { bareToken, normBlock } from './block-code';
 import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './contour-layer';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
+import { separateForDisplay } from './sheet-separate';
 import { CanvasSegments, PieceSheet, type PieceMark } from './piece-sheet';
 import { FuseFields, type InterliningLine } from './fuse-fields';
 import { FuseOverlay } from './fuse-overlay';
@@ -1693,8 +1694,11 @@ export function PieceMatchModal({
         (best, o) => (!best || o.count > best.count ? o : best),
         null,
       )?.size ?? '';
+  // Shown without overlaps (owner, w1107 В4): a piece the exporter laid over its neighbour is
+  // moved off it ON SCREEN only — the file and everything measured from it keep their coordinates.
   const sheetPieces = useMemo(
-    () => (sheet ? sheet.pieces.filter((p) => sizeOfPiece(p) === shownSize) : []),
+    () =>
+      sheet ? separateForDisplay(sheet.pieces.filter((p) => sizeOfPiece(p) === shownSize)) : [],
     [sheet, split, interliningCodes, shownSize],
   );
 
@@ -3088,7 +3092,12 @@ export function PieceMatchModal({
                     <CanvasSegments
                       label='size on screen'
                       value={shownSize}
-                      onChange={setActiveSize}
+                      onChange={(size) => {
+                        // A size switch shows the whole new sheet (owner, w1107 A5): the fused
+                        // piece's zoom is left, as if «whole sheet» was pressed.
+                        if (size !== shownSize && zoomed) setZoomOut(zoomed);
+                        setActiveSize(size);
+                      }}
                       options={sizeOptions.map((o) => ({
                         key: o.size,
                         label:
