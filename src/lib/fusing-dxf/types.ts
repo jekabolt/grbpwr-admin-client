@@ -40,7 +40,7 @@ export type PieceFuseSpec = {
   widthMm: number | null;
   edges: FuseEdge[];
   zone: FuseZone | null;
-  /** null = the 3 mm default inset. */
+  /** null = the default inset (0 mm: the fuse runs to the cut line, owner w1107 В1–В2). */
   insetMm: number | null;
   /** The inset is the piece's seam allowance («net»). */
   insetNet: boolean;
@@ -48,7 +48,7 @@ export type PieceFuseSpec = {
   darts: FuseDarts;
 };
 
-export const DEFAULT_INSET_MM = 3;
+export const DEFAULT_INSET_MM = 0;
 
 export const blankFuse = (mode: FuseMode = ''): PieceFuseSpec => ({
   mode,

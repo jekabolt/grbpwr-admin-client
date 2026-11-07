@@ -474,10 +474,18 @@ export async function main() {
   assert.deepEqual(cleared.fusingEdges, { items: [] });
   assert.deepEqual(cleared.fusingZone, { holes: [], islands: [] });
 
+  // Default inset is 0 (owner w1107 В1–В2): a fresh WHOLE fuse IS the cut line, every vertex.
   const whole = generateFuseGeometry({ outline, spec: spec() });
   assert.equal(whole.length, 1);
-  near(fuseAreaMm2(whole), 94 * 74);
+  near(fuseAreaMm2(whole), 100 * 80);
   assert.ok(signedArea(whole[0].outer) > 0, 'outer loop is CCW');
+  for (const corner of outline)
+    assert.ok(
+      whole[0].outer.some((p) => Math.hypot(p.x - corner.x, p.y - corner.y) < 1e-6),
+      `default whole fuse keeps the cut corner ${corner.x},${corner.y}`,
+    );
+  const wholeThree = generateFuseGeometry({ outline, spec: spec({ insetMm: 3 }) });
+  near(fuseAreaMm2(wholeThree), 94 * 74);
 
   const net = generateFuseGeometry({
     outline,
@@ -628,6 +636,8 @@ export async function main() {
   const dartStripSpec = spec({
     mode: 'strip',
     widthMm: 20,
+    // 3 mm in: the band (57–77) reaches the dart's tip at 58.
+    insetMm: 3,
     edges: [{ edge: 2, startMm: 0, endMm: 0 }],
   });
   const dartStripCut = generateFuseGeometry({
@@ -649,7 +659,8 @@ export async function main() {
     outline,
     spec: spec({ mode: 'zone', zone: { rect: [50, -10, 120, 40] } }),
   });
-  near(fuseAreaMm2(zone), 47 * 37);
+  // Clipped to the cut line itself (default inset 0).
+  near(fuseAreaMm2(zone), 50 * 40);
 
   // L13 freeform zone. A rect is the 4-corner spline, and the editor's 4 corners + 4 straight mids.
   const corners = (x0: number, y0: number, x1: number, y1: number) => [
@@ -715,9 +726,12 @@ export async function main() {
   const mappedRings = mapFuseSpecToSize(ringsSpec, outline, rectangle(200, 160));
   assert.ok(mappedRings.zone && 'spline' in mappedRings.zone);
   if (mappedRings.zone && 'spline' in mappedRings.zone) {
-    near(mappedRings.zone.spline.points[1].x, 60);
-    near(mappedRings.zone.islands[0].points[0].x, 100);
-    near(mappedRings.zone.holes[0].points[0].x, 104);
+    // A point keeps its mm off its two nearest contour stretches (4b0af47c6): the main ring sits
+    // by the bottom-left corner and stays put; the island and its hole sit nearer the right side
+    // and keep their mm from it on the doubled piece.
+    near(mappedRings.zone.spline.points[1].x, 30);
+    near(mappedRings.zone.islands[0].points[0].x, 150);
+    near(mappedRings.zone.holes[0].points[0].x, 152);
   }
   const ringsDxf = buildFusingSheets({
     techCardId: 7,
@@ -853,7 +867,8 @@ export async function main() {
       withMids(corners(80, 20, 120, 50)).map((p, i) => (i === 3 ? { ...p, x: 130 } : p)),
     ),
   });
-  near(fuseAreaMm2(overhang), (97 - 80) * 30);
+  // Clipped at the cut line (x = 100, default inset 0).
+  near(fuseAreaMm2(overhang), (100 - 80) * 30);
   assert.throws(
     () => generateFuseGeometry({ outline, spec: splineZone(corners(200, 200, 240, 240)) }),
     /zone geometry is empty/,
@@ -1019,10 +1034,12 @@ export async function main() {
     gradedOutlines[0].outline,
     gradedOutlines[4].outline,
   );
+  // Each corner keeps its mm off its nearest stretches (4b0af47c6): (8,6) off the left/bottom,
+  // (40,30) — equidistant, resolved to the right/bottom — keeps 40 mm from the right edge.
   assert.deepEqual(
     mappedZone.zone,
-    { rect: [12, 8, 60, 40] },
-    'a drawn zone keeps its proportional position in the target-size outline',
+    { rect: [8, 6, 80, 30] },
+    'a drawn zone keeps its mm from its nearest contour stretches in the target-size outline',
   );
   const mappedStrip = mapFuseSpecToSize(
     spec({ mode: 'strip', widthMm: 12, edges: [{ edge: 0, startMm: 8, endMm: 16 }] }),
@@ -1270,12 +1287,19 @@ export async function main() {
     /bound differently/,
   );
   assert.match(pieceAreaSheetsRefusal([sheet(legacyFelt, 'P1')], 'S-1') ?? '', /bound to a BOM/);
-  assert.match(
+  // A main sheet bound to a line that is sorted into «main» resolves to «main» (f7db2d968): with
+  // the card's scopes it publishes; only the raw guard (no scopes) still refuses it.
+  assert.equal(
     pieceAreaSheetsRefusal(
       [sheet({ fabricPurpose: UNSET, bomLineKey: 'M-1' }, 'P4')],
       'main',
       scopes,
-    ) ?? '',
+    ),
+    null,
+  );
+  assert.match(
+    pieceAreaSheetsRefusal([sheet({ fabricPurpose: UNSET, bomLineKey: 'M-1' }, 'P4')], 'main') ??
+      '',
     /bound to a BOM line/,
   );
   assert.equal(

@@ -10,7 +10,14 @@ import {
   ringStrictlyInside,
   ringsOverlap,
 } from './spline';
-import type { FuseGeometryInput, FusePolygon, FuseSpline, FuseZone, PieceFuseSpec } from './types';
+import {
+  DEFAULT_INSET_MM,
+  type FuseGeometryInput,
+  type FusePolygon,
+  type FuseSpline,
+  type FuseZone,
+  type PieceFuseSpec,
+} from './types';
 
 const EPS = 1e-7;
 export const ZONE_MAX_OUTER_RINGS = 16;
@@ -104,7 +111,7 @@ function effectiveInset(spec: PieceFuseSpec, seamAllowanceMm: number | null | un
       throw new FuseGeometryError('net inset requires a seam allowance');
     return Math.max(0, seamAllowanceMm ?? 0);
   }
-  return Math.max(0, spec.insetMm ?? 3);
+  return Math.max(0, spec.insetMm ?? DEFAULT_INSET_MM);
 }
 
 function insetOutline(outline: readonly PtMm[], insetMm: number): PtMm[] {
