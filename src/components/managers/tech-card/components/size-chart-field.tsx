@@ -176,6 +176,7 @@ export function SizeChartField({
   const [activePointId, setActivePointId] = useState<number | null>(null);
   const [mobileSize, setMobileSize] = useState('');
   const lastRule = useRef<Map<number, Rule>>(new Map());
+  const legacyRows = useRef<ChartPointDraft[] | null>(null);
   const dirtyRef = useRef(false);
   const staging = useTechCardStaging();
 
@@ -246,6 +247,7 @@ export function SizeChartField({
     setRuleBaseId(loadedBase);
     setShrinkagePct(chart?.shrinkagePct?.value ?? '');
     setPrepared(false);
+    legacyRows.current = null;
     setChartLoaded(true);
     setDirty(false);
     setTouched(new Set());
@@ -277,8 +279,17 @@ export function SizeChartField({
   // Seed once after the server answer. Pattern values may arrive later and merge in the next effect.
   useEffect(() => {
     if (!chartLoaded || prepared) return;
-    if (!points.length && !pattern.settled) return;
-    const seeded = seedChart(pattern.kind, points, cells, nameIds);
+    const legacyOnly = !!legacyRows.current && points === legacyRows.current;
+    if (!pattern.seedKind && (!points.length || legacyOnly)) {
+      // The garment is not known yet: show the old cells' rows, save nothing.
+      if (!legacyOnly && cells.length) {
+        const shown = seedChart(null, [], cells, nameIds).points;
+        legacyRows.current = shown;
+        setPoints(shown);
+      }
+      return;
+    }
+    const seeded = seedChart(pattern.seedKind, legacyOnly ? [] : points, cells, nameIds);
     const merged = mergePatternIntoCells(seeded.cells, seeded.points, pattern.patternValues);
     setPoints(seeded.points);
     setCells(merged.cells);
@@ -286,7 +297,7 @@ export function SizeChartField({
     if (seeded.seeded || merged.changed) markDirty(seeded.seeded ? 'seed' : 'pattern');
     // This is deliberately one preparation pass for one server answer.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chartLoaded, prepared, pattern.settled]);
+  }, [chartLoaded, prepared, pattern.seedKind]);
 
   // A report or shrinkage change refreshes only empty/pattern-owned cells and its hidden evidence.
   useEffect(() => {

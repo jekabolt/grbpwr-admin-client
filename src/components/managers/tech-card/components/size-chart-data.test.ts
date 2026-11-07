@@ -100,3 +100,15 @@ describe('size chart data rules', () => {
     });
   });
 });
+
+describe('seedChart without a known garment', () => {
+  it('adds no default points, only the rows old cells carry', () => {
+    const names = new Map<string, number>([
+      ['waist', 1],
+      ['chest', 7],
+    ]);
+    const cells = [{ sizeId: 56, measurementNameId: 99, value: '10', source: 'manual' as const }];
+    const seeded = seedChart(null, [], cells as never, names as never);
+    expect(seeded.points.map((point) => point.measurementNameId)).toEqual([99]);
+  });
+});

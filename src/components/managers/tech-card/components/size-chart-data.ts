@@ -58,9 +58,12 @@ export function normalizePoints(points: readonly ChartPointDraft[]): ChartPointD
     .map((point, index) => ({ ...point, position: index + 1 }));
 }
 
-/** Seed an empty points list while retaining every legacy measurement carried by a cell. */
+/**
+ * Seed an empty points list while retaining every legacy measurement carried by a cell.
+ * A null kind (garment not known yet) adds no default points, only the legacy rows.
+ */
 export function seedChart(
-  kind: GarmentKind,
+  kind: GarmentKind | null,
   points: readonly ChartPointDraft[],
   cells: readonly ChartCellDraft[],
   nameIds: ReadonlyMap<ChartMeasurementName | string, number>,
@@ -69,7 +72,7 @@ export function seedChart(
 
   const seeded: ChartPointDraft[] = [];
   const used = new Set<number>();
-  for (const pomCode of DEFAULT_POINTS[kind]) {
+  for (const pomCode of kind ? DEFAULT_POINTS[kind] : []) {
     const measurementNameId = nameIds.get(POM_CHART_NAME[pomCode]);
     if (!measurementNameId || used.has(measurementNameId)) continue;
     used.add(measurementNameId);
