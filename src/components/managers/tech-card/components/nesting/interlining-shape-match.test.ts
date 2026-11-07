@@ -41,6 +41,40 @@ const rect = (w: number, h: number): Pt[] => [
 ];
 
 describe('interlining shape matching', () => {
+  it('pairs a full-size copy (no notches, float jitter) and a named strip that fits its piece', () => {
+    // The real card-110 file: a generated sheet is the piece contour itself, 0.002 cm² off, and it
+    // carries no notches; the placket interlining is a narrow strip drawn for the front panel.
+    const collar = piece(1, 'CLR', [
+      { x: 0, y: 0 },
+      { x: 45, y: 0 },
+      { x: 43, y: 15 },
+      { x: 2, y: 15 },
+    ]);
+    const front = piece(2, 'FL', rect(35, 69));
+    const shapes = [
+      piece(
+        10,
+        'CLR',
+        collar.poly.map((q) => ({ x: q.x * 1.00002, y: q.y })),
+      ),
+      piece(11, 'FL', rect(7.9, 63)),
+    ];
+    const matches = matchInterliningShapes({
+      shapes,
+      mainBlocks: [collar, front],
+      mainAliases: [],
+      pieces: [
+        { lineKey: 'CLR', name: 'CLR' },
+        { lineKey: 'FL', name: 'FL' },
+      ],
+      sizeTokens: [],
+    });
+    const by = Object.fromEntries(
+      matches.map((m) => [m.identity, m.pairs.map((p) => p.pieceName)]),
+    );
+    expect(by).toEqual({ CLR: ['CLR'], FL: ['FL'] });
+  });
+
   it('matches by shape, fans one cuff shape to mirrored pieces, and leaves an odd shape open', () => {
     const collar = piece(1, 'CLR', [
       { x: 0, y: 0 },

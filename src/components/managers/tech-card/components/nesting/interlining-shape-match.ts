@@ -1,3 +1,4 @@
+import { Clipper, FillRule, Path64, Paths64, Point64 } from 'clipper2-js';
 import { bareToken } from 'components/managers/tech-card/components/nesting/block-code';
 import { pieceShapeReferences } from 'lib/dxf-reconcile';
 import { byName, indexSheet, sideOf, type SheetEntry } from 'lib/dxf-reconcile/match';
@@ -26,8 +27,12 @@ export type InterliningShapeMatch = {
 const EPS = 1e-7;
 const FORM_MAX = 0.055;
 const ASPECT_MAX = 0.08;
-const COST_MAX = 0.14;
 const LEAD_MIN = 0.015;
+/** A contour may stick out of the piece by this share of its own area (drawing jitter). */
+const FIT_SPILL = 0.005;
+/** Bbox jitter allowed, cm. */
+const FIT_TOL_CM = 0.05;
+const CLIP_SCALE = 1000;
 
 const representative = (entry: SheetEntry, preferred: ReadonlySet<string>): PieceDTO => {
   const preferredSize = entry.sizes.find((size) => preferred.has(size));
@@ -114,27 +119,33 @@ export function centredInterliningShape(shape: PieceDTO, piece: PieceDTO): Pt[] 
   return shape.poly.map((point) => ({ x: point.x + dx, y: point.y + dy }));
 }
 
-/** Inclusive fit: a same-size contour may share the cut line, but no edge may cross it. */
+const clipPath = (ring: readonly Pt[]): Paths64 => {
+  const path = new Path64();
+  for (const q of ring)
+    path.push(new Point64(Math.round(q.x * CLIP_SCALE), Math.round(q.y * CLIP_SCALE)));
+  const out = new Paths64();
+  out.push(path);
+  return out;
+};
+const clipArea = (paths: Paths64) => Math.abs(Clipper.areaPaths(paths)) / (CLIP_SCALE * CLIP_SCALE);
+
+/**
+ * Inclusive fit: a same-size contour may share the cut line. Measured as the area of the contour
+ * outside the piece, so float jitter of a contour drawn ON the cut line does not read as crossing.
+ */
 export function interliningShapeFits(shape: PieceDTO, piece: PieceDTO): boolean {
   if (
     shape.poly.length < 3 ||
     piece.poly.length < 3 ||
-    shape.areaCm2 > piece.areaCm2 * (1 + EPS) ||
-    shape.bboxW > piece.bboxW + EPS ||
-    shape.bboxH > piece.bboxH + EPS
+    shape.bboxW > piece.bboxW + FIT_TOL_CM ||
+    shape.bboxH > piece.bboxH + FIT_TOL_CM
   )
     return false;
-  const placed = centredInterliningShape(shape, piece);
-  if (!placed.every((point) => pointInOrOnRing(point, piece.poly))) return false;
-  for (let i = 0; i < placed.length; i++) {
-    const a = placed[i];
-    const b = placed[(i + 1) % placed.length];
-    for (let j = 0; j < piece.poly.length; j++) {
-      if (properlyCrosses(a, b, piece.poly[j], piece.poly[(j + 1) % piece.poly.length]))
-        return false;
-    }
-  }
-  return true;
+  const placed = clipPath(centredInterliningShape(shape, piece));
+  const own = clipArea(placed);
+  if (own <= 0) return false;
+  const spill = clipArea(Clipper.Difference(placed, clipPath(piece.poly), FillRule.NonZero));
+  return spill <= own * FIT_SPILL;
 }
 
 const nameKeys = (value: string) => {
@@ -143,6 +154,14 @@ const nameKeys = (value: string) => {
   if (side) keys.add(interliningIdentityKey(side.stem));
   keys.delete('');
   return keys;
+};
+
+const exactName = (shape: string, entry: SheetEntry, pieces: readonly InterliningShapePair[]) => {
+  const key = shape.trim().toLowerCase();
+  return (
+    entry.identity.trim().toLowerCase() === key ||
+    pieces.some((piece) => piece.pieceName.trim().toLowerCase() === key)
+  );
 };
 
 const sameName = (shape: string, entry: SheetEntry, pieces: readonly InterliningShapePair[]) => {
@@ -229,34 +248,54 @@ export function matchInterliningShapes(args: {
       const candidates = [...targets.values()].flatMap((target) => {
         const fitting = target.pairs.filter((pair) => interliningShapeFits(shape, pair.piece));
         if (fitting.length === 0) return [];
+        // Form and proportion only: an interlining file carries no notches and is often a scaled-down
+        // copy, so the contour cost (area, perimeter, notches) would reject the very shapes it is for.
         const compared = compareSigsRotationTolerant(shapeSigOf(target.piece), shapeSigOf(shape));
         const { cmp, aspect } = compared;
-        if (cmp.form > FORM_MAX || aspect > ASPECT_MAX || cmp.cost > COST_MAX) return [];
         const named = sameName(entry.identity, target.entry, fitting);
-        return [{ target, fitting, named, score: cmp.cost + 0.1 * aspect }];
+        const exact = exactName(entry.identity, target.entry, fitting);
+        const shaped = cmp.form <= FORM_MAX && aspect <= ASPECT_MAX;
+        if (!shaped && !named) return [];
+        return [{ target, fitting, named, exact, shaped, score: cmp.form + 0.1 * aspect }];
       });
-      candidates.sort((left, right) => {
+      const shapedOnes = candidates.filter((candidate) => candidate.shaped);
+      // No shape pair: a contour that fits inside the piece of its own name (a placket strip on a
+      // front panel) still pairs by that name.
+      const pool = shapedOnes.length
+        ? shapedOnes
+        : candidates.filter((candidate) => candidate.exact).length === 1
+          ? candidates.filter((candidate) => candidate.exact)
+          : candidates.filter((candidate) => candidate.named).length === 1
+            ? candidates.filter((candidate) => candidate.named)
+            : [];
+      pool.sort((left, right) => {
         const score = left.score - right.score;
         if (Math.abs(score) >= LEAD_MIN) return score;
         return (
+          Number(right.exact) - Number(left.exact) ||
           Number(right.named) - Number(left.named) ||
           score ||
           byName(left.target.entry.key, right.target.entry.key)
         );
       });
-      const best = candidates[0];
+      const best = pool[0];
       if (!best) return { identity: entry.identity, shape, pairs: [], by: 'no pair' };
       const selected = [
         best,
-        ...candidates.filter(
+        ...pool.filter(
           (candidate) =>
             candidate !== best &&
             mirroredTargets(best, candidate) &&
             Math.abs(candidate.score - best.score) < LEAD_MIN,
         ),
       ];
-      const rival = candidates.find((candidate) => !selected.includes(candidate));
-      if (rival && Math.abs(rival.score - best.score) < LEAD_MIN && rival.named === best.named) {
+      const rival = pool.find((candidate) => !selected.includes(candidate));
+      if (
+        rival &&
+        Math.abs(rival.score - best.score) < LEAD_MIN &&
+        rival.named === best.named &&
+        rival.exact === best.exact
+      ) {
         return { identity: entry.identity, shape, pairs: [], by: 'no pair' };
       }
       const pairs = new Map<string, InterliningShapePair>();
