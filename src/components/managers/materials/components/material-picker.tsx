@@ -517,6 +517,7 @@ export function MaterialPickerDialog({
   onClose,
   onCreate,
   preferredIds,
+  excludedIds,
 }: {
   open: boolean;
   // HARD scope: the catalog query itself is narrowed to this section and no section chips render.
@@ -539,13 +540,17 @@ export function MaterialPickerDialog({
   onCreate?: (query?: string) => void;
   // Suggested articles, best first: sorted to the front of the grid and marked `suggested`.
   preferredIds?: readonly number[];
+  // Articles that cannot be picked in this context (for example, a conversion into itself).
+  excludedIds?: readonly number[];
 }) {
   // Only fetched while open — the caller mounts this permanently next to its button.
   const { data, isLoading } = useMaterials(section, includeArchived, open);
   if (!open) return null;
   return (
     <MaterialGridDialog
-      materials={data?.materials ?? []}
+      materials={(data?.materials ?? []).filter(
+        (material) => !excludedIds?.includes(numId(material.id)),
+      )}
       loading={isLoading}
       value={value}
       section={section}

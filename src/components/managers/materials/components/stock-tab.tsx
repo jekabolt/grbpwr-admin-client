@@ -26,9 +26,15 @@ import {
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { materialSpec } from './material-code';
 import { MaterialThumb } from './material-thumb';
-import { IssueStockModal, MovementTarget } from './movement-modals';
+import {
+  ConvertStockModal,
+  IssueStockModal,
+  MovementTarget,
+  ShrinkLotModal,
+} from './movement-modals';
 import { useMaterials, useSaveMaterial } from './useMaterials';
 import {
+  useMaterialLots,
   useMaterialMovements,
   useMaterialStock,
   useReceiveMaterialStock,
@@ -76,7 +82,9 @@ const movementQuantity = (movement: common_MaterialMovement): string => {
   const subtracts =
     movement.movementType === 'MATERIAL_MOVEMENT_TYPE_ISSUE_PRODUCTION' ||
     movement.movementType === 'MATERIAL_MOVEMENT_TYPE_ISSUE_SAMPLE' ||
-    movement.movementType === 'MATERIAL_MOVEMENT_TYPE_WRITEOFF';
+    movement.movementType === 'MATERIAL_MOVEMENT_TYPE_WRITEOFF' ||
+    movement.movementType === 'MATERIAL_MOVEMENT_TYPE_CONVERT_OUT' ||
+    movement.movementType === 'MATERIAL_MOVEMENT_TYPE_SHRINKAGE';
   return `${subtracts ? '−' : '+'}${amount}`;
 };
 
@@ -84,11 +92,11 @@ const targetOf = (row: common_MaterialStockRow): MovementTarget => {
   const material = row.material;
   return {
     materialId: Number(material?.id) || 0,
-    materialLabel: `${material?.code ? `${material.code} · ` : ''}${
-      material?.name ?? `#${material?.id}`
-    }`,
+    materialLabel: `${material?.code ? `${material.code} · ` : ''}${material?.name ?? 'material'}`,
     unit: material?.unit ?? '',
     onHand: decimalToInput(row.onHand) || '0',
+    avgUnitCostBase: decimalToInput(row.avgUnitCostBase),
+    baseCurrency: row.baseCurrency ?? '',
   };
 };
 
@@ -238,6 +246,8 @@ function ExpandedDetails({
   onSaveMin,
   onCancelMin,
   onIssue,
+  onConvert,
+  onShrink,
 }: {
   row: common_MaterialStockRow;
   amount: string;
@@ -251,12 +261,22 @@ function ExpandedDetails({
   onSaveMin: () => Promise<boolean>;
   onCancelMin: () => void;
   onIssue: () => void;
+  onConvert: () => void;
+  onShrink: () => void;
 }) {
   const material = row.material;
   const materialId = Number(material?.id) || 0;
   const unit = material?.unit ?? '';
   const quantityInput = useRef<HTMLInputElement>(null);
   const receive = useReceiveMaterialStock();
+  const shrinkEligible =
+    material?.materialClass === 'MATERIAL_CLASS_FABRIC' && unit.trim().toLowerCase() === 'm';
+  const lotsQuery = useMaterialLots(materialId, false, shrinkEligible && materialId > 0);
+  const canShrink =
+    shrinkEligible &&
+    (lotsQuery.data?.lots ?? []).some(
+      (lot) => !lot.archived && parseDecimalNumber(decimalToInput(lot.remainingQty)) > 0,
+    );
 
   const focusIfEmpty = (): boolean => {
     const parsed = parseDecimalNumber(amount);
@@ -302,8 +322,8 @@ function ExpandedDetails({
   return (
     <div className='ml-11 min-w-0 py-3' data-testid={`expanded-${materialId}`}>
       {canEdit ? (
-        <div className='flex w-full items-stretch gap-1 md:gap-1.5'>
-          <div className='relative min-w-0 flex-1 md:w-40 md:flex-none'>
+        <div className='flex w-full flex-wrap items-stretch gap-1 md:flex-nowrap md:gap-1.5'>
+          <div className='relative w-full min-w-0 basis-full md:w-40 md:basis-auto'>
             <Input
               ref={quantityInput}
               type='text'
@@ -329,7 +349,7 @@ function ExpandedDetails({
             size='xs'
             variant='secondary'
             loading={receive.isPending}
-            className='flex h-11 min-h-11 shrink-0 items-center justify-center md:h-9 md:min-h-9'
+            className='flex h-11 min-h-11 flex-1 items-center justify-center md:h-9 md:min-h-9 md:flex-none'
             onClick={applyReceive}
           >
             in
@@ -337,11 +357,29 @@ function ExpandedDetails({
           <Button
             size='xs'
             variant='secondary'
-            className='flex h-11 min-h-11 shrink-0 items-center justify-center md:h-9 md:min-h-9'
+            className='flex h-11 min-h-11 flex-1 items-center justify-center md:h-9 md:min-h-9 md:flex-none'
             onClick={applyIssue}
           >
             out
           </Button>
+          <Button
+            size='xs'
+            variant='secondary'
+            className='flex h-11 min-h-11 flex-1 items-center justify-center md:h-9 md:min-h-9 md:flex-none'
+            onClick={onConvert}
+          >
+            convert
+          </Button>
+          {canShrink ? (
+            <Button
+              size='xs'
+              variant='secondary'
+              className='flex h-11 min-h-11 flex-1 items-center justify-center md:h-9 md:min-h-9 md:flex-none'
+              onClick={onShrink}
+            >
+              shrink
+            </Button>
+          ) : null}
         </div>
       ) : null}
 
@@ -493,6 +531,11 @@ export function StockTab() {
   const [minEdit, setMinEdit] = useState<MinEdit | null>(null);
   const [savingMinId, setSavingMinId] = useState<number | null>(null);
   const [issue, setIssue] = useState<{ target: MovementTarget; quantity: string } | null>(null);
+  const [conversion, setConversion] = useState<{
+    target: MovementTarget;
+    quantity: string;
+  } | null>(null);
+  const [shrink, setShrink] = useState<MovementTarget | null>(null);
 
   useEffect(() => {
     if (!expandedId) return;
@@ -730,6 +773,10 @@ export function StockTab() {
                             onIssue={() =>
                               setIssue({ target: targetOf(row), quantity: movementAmount })
                             }
+                            onConvert={() =>
+                              setConversion({ target: targetOf(row), quantity: movementAmount })
+                            }
+                            onShrink={() => setShrink(targetOf(row))}
                           />
                         </td>
                       </tr>
@@ -759,6 +806,27 @@ export function StockTab() {
             if (open) return;
             setIssue(null);
             setMovementAmount('');
+          }}
+        />
+      ) : null}
+      {conversion ? (
+        <ConvertStockModal
+          open
+          target={conversion.target}
+          defaultOut={conversion.quantity}
+          onOpenChange={(open) => {
+            if (open) return;
+            setConversion(null);
+            setMovementAmount('');
+          }}
+        />
+      ) : null}
+      {shrink ? (
+        <ShrinkLotModal
+          open
+          target={shrink}
+          onOpenChange={(open) => {
+            if (!open) setShrink(null);
           }}
         />
       ) : null}
