@@ -19,18 +19,14 @@ import {
 } from 'ui';
 import type { ArtworkCellRef } from '../components/composition-label/composition-artwork';
 import {
-  oneFileOf,
   ownFileFor,
   type ArtworkChoice,
 } from '../components/composition-label/composition-artwork-model';
-import {
-  CompositionLabelPreview,
-  type LabelOrientation,
-} from '../components/composition-label/composition-label-preview';
 import { useShaper } from '../components/composition-label/use-composition-label';
 import type { ArtworkFile } from '../components/sewn-label-model';
 import { adaptRuns, type CareLabelData } from './adapter';
 import { isBlocking } from './holes';
+import type { LabelOrientation } from './layout';
 import type { ManifestColorway } from './manifest';
 import { loadOwnFiles, planOwnFiles } from './own-files';
 import { planPrint } from './pages';
@@ -45,7 +41,7 @@ const ALL_FILE: ArtworkCellRef = { colorwayId: 0, sizeId: 0 };
 
 const FIX_LABEL: Record<PrintReason, string> = {
   'no file': 'Choose file',
-  'no text': 'Edit fields',
+  'no text': 'Fix text',
   'no data': 'Reload',
   'no fonts': 'Reload',
 };
@@ -56,9 +52,6 @@ type PrintCompositionModalProps = {
   files: readonly ArtworkFile[];
   choice: ArtworkChoice;
   orientation: LabelOrientation;
-  logoUrl: string;
-  initialColorwayId?: number;
-  initialSizeId?: number;
   onTotalChange: (total: number) => void;
   onClose: () => void;
   onChooseFile: (cell: ArtworkCellRef) => void;
@@ -71,9 +64,6 @@ export function PrintCompositionModal({
   files,
   choice,
   orientation,
-  logoUrl,
-  initialColorwayId,
-  initialSizeId,
   onTotalChange,
   onClose,
   onChooseFile,
@@ -92,10 +82,6 @@ export function PrintCompositionModal({
   }, [data, orderSizes]);
   const colorwayIds = useMemo(() => colorways.map((colorway) => colorway.id), [colorways]);
   const sizeIds = useMemo(() => sizes.map((size) => size.id), [sizes]);
-  const [colorwayId, setColorwayId] = useState(initialColorwayId ?? colorwayIds[0] ?? 0);
-  const [sizeId, setSizeId] = useState(initialSizeId ?? sizeIds[0] ?? 0);
-  const colorway = colorways.find((entry) => entry.id === colorwayId) ?? colorways[0];
-  const size = sizes.find((entry) => entry.id === sizeId) ?? sizes[0];
 
   const compositions = useMemo(() => (data ? compositionsOf(data) : null), [data]);
   const plan = useMemo(
@@ -163,19 +149,6 @@ export function PrintCompositionModal({
   useEffect(() => onTotalChange(outputTotal), [onTotalChange, outputTotal]);
 
   const isOff = (id: number) => excluded.includes(id);
-  const previewCell =
-    choice === 'one' ? ALL_FILE : { colorwayId: colorway?.id ?? 0, sizeId: size?.id ?? 0 };
-  const previewFile =
-    choice === 'one'
-      ? oneFileOf(files)
-      : colorway && size
-        ? ownFileFor(files, colorway.id, size.id)
-        : undefined;
-  const preview = {
-    colorway,
-    size,
-    parts: (colorway && compositions?.get(colorway.id)) ?? [],
-  };
 
   const setCell = (colorwayId: number, cellSizeId: number, value: string) =>
     setManual((grid) => ({
@@ -187,7 +160,8 @@ export function PrintCompositionModal({
     }));
 
   const fix = () => {
-    if (gate.reason === 'no file') onChooseFile(previewCell);
+    // «Нет файла» бывает только у одного файла на всё (print-gate): дверь ведёт к нему.
+    if (gate.reason === 'no file') onChooseFile(ALL_FILE);
     else if (gate.reason === 'no text') onFixText();
     else window.location.reload();
   };
@@ -313,194 +287,155 @@ export function PrintCompositionModal({
         </>
       }
     >
-      <div
-        className='grid min-w-0 gap-gutter lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]'
-        data-print-composition=''
-      >
-        <div className='flex min-w-0 flex-col items-start gap-2.5'>
-          <span className='flex max-w-full flex-wrap gap-1.5'>
-            <ViewSwitch
-              value={String(colorway?.id ?? '')}
-              label='Colourway'
-              className='max-w-full flex-wrap [&_[role=radio]]:h-7'
-              options={colorways.map((entry) => ({
-                value: String(entry.id),
-                label: `${entry.colourName || entry.baseSku}${entry.countryCode ? '' : ' !'}`,
-              }))}
-              onChange={(value) => setColorwayId(Number(value))}
+      <div className='min-w-0' data-print-composition=''>
+        <Row
+          label={
+            <Text size='control' variant='label' tracking='label' className='uppercase'>
+              Quantities
+            </Text>
+          }
+          value={
+            <Select
+              name='print-quantities'
+              className='h-7 min-w-44'
+              value={run ? String(run.id) : MANUAL}
+              items={[
+                ...runs.map((entry) => ({ value: String(entry.id), label: runCaption(entry) })),
+                { value: MANUAL, label: 'Manual' },
+              ]}
+              onValueChange={(value: string) => {
+                setManualOn(value === MANUAL);
+                if (value !== MANUAL) update({ source: { runId: Number(value) } });
+              }}
             />
+          }
+          className='min-h-11 flex-col items-stretch py-2 sm:flex-row sm:items-center [&>span:last-child]:shrink'
+        />
+        <Row
+          label={
+            <Text size='control' variant='label' tracking='label' className='uppercase'>
+              Print
+            </Text>
+          }
+          value={
             <ViewSwitch
-              value={String(size?.id ?? '')}
-              label='Size'
-              className='max-w-full flex-wrap [&_[role=radio]]:h-7'
-              options={sizes.map((entry) => ({ value: String(entry.id), label: entry.label }))}
-              onChange={(value) => setSizeId(Number(value))}
+              value={prefs.mode}
+              label='Print'
+              className='[&_[role=radio]]:h-7'
+              options={[
+                { value: 'duplex', label: 'Duplex' },
+                { value: 'simplex', label: 'Simplex' },
+              ]}
+              onChange={(mode) => update({ mode })}
             />
-          </span>
-          <CompositionLabelPreview
-            data={data}
-            preview={preview}
-            logoUrl={logoUrl}
-            choice={choice}
-            file={previewFile}
-            orientation={orientation}
-            canEdit={false}
-            showFileActions={false}
-            onChooseFile={() => onChooseFile(previewCell)}
-            onClearFile={() => undefined}
-          />
-        </div>
+          }
+          className='min-h-11 items-center py-2'
+        />
 
-        <div className='min-w-0'>
-          <Row
-            label={
-              <Text size='control' variant='label' tracking='label' className='uppercase'>
-                Quantities
-              </Text>
-            }
-            value={
-              <Select
-                name='print-quantities'
-                className='h-7 min-w-44'
-                value={run ? String(run.id) : MANUAL}
-                items={[
-                  ...runs.map((entry) => ({ value: String(entry.id), label: runCaption(entry) })),
-                  { value: MANUAL, label: 'Manual' },
-                ]}
-                onValueChange={(value: string) => {
-                  setManualOn(value === MANUAL);
-                  if (value !== MANUAL) update({ source: { runId: Number(value) } });
-                }}
-              />
-            }
-            className='min-h-11 flex-col items-stretch py-2 sm:flex-row sm:items-center [&>span:last-child]:shrink'
-          />
-          <Row
-            label={
-              <Text size='control' variant='label' tracking='label' className='uppercase'>
-                Print
-              </Text>
-            }
-            value={
-              <ViewSwitch
-                value={prefs.mode}
-                label='Print'
-                className='[&_[role=radio]]:h-7'
-                options={[
-                  { value: 'duplex', label: 'Duplex' },
-                  { value: 'simplex', label: 'Simplex' },
-                ]}
-                onChange={(mode) => update({ mode })}
-              />
-            }
-            className='min-h-11 items-center py-2'
-          />
-
-          {data ? (
-            <DataTable variant='grid' className='[&_td]:align-middle'>
-              <thead>
-                <tr>
-                  <th data-align='left'>Colour</th>
-                  {sizes.map((entry) => (
-                    <th key={entry.id}>{entry.label}</th>
-                  ))}
-                  <th>Qty</th>
-                </tr>
-              </thead>
-              <tbody>
-                {colorways.map((entry) => {
-                  const off = isOff(entry.id);
-                  const blocked = gate.blocked.has(entry.id);
-                  return (
-                    <tr key={entry.id} data-print-row={entry.id}>
-                      <td data-align='left'>
-                        <label className='flex min-h-7 items-center gap-1.5'>
-                          <CheckboxCommon
-                            name={`print-colour-${entry.id}`}
-                            checked={!off}
-                            disabled={blocked}
-                            className='h-7 w-7'
-                            aria-label={entry.colourName || entry.baseSku}
-                            onChange={(checked: boolean) =>
-                              setUnticked((current) => {
-                                const next = new Set(current);
-                                if (checked) next.delete(entry.id);
-                                else next.add(entry.id);
-                                return next;
-                              })
+        {data ? (
+          <DataTable variant='grid' className='[&_td]:align-middle'>
+            <thead>
+              <tr>
+                <th data-align='left'>Colour</th>
+                {sizes.map((entry) => (
+                  <th key={entry.id}>{entry.label}</th>
+                ))}
+                <th>Qty</th>
+              </tr>
+            </thead>
+            <tbody>
+              {colorways.map((entry) => {
+                const off = isOff(entry.id);
+                const blocked = gate.blocked.has(entry.id);
+                return (
+                  <tr key={entry.id} data-print-row={entry.id}>
+                    <td data-align='left'>
+                      <label className='flex min-h-7 items-center gap-1.5'>
+                        <CheckboxCommon
+                          name={`print-colour-${entry.id}`}
+                          checked={!off}
+                          disabled={blocked}
+                          className='h-7 w-7'
+                          aria-label={entry.colourName || entry.baseSku}
+                          onChange={(checked: boolean) =>
+                            setUnticked((current) => {
+                              const next = new Set(current);
+                              if (checked) next.delete(entry.id);
+                              else next.add(entry.id);
+                              return next;
+                            })
+                          }
+                        />
+                        <span className='whitespace-nowrap'>
+                          {entry.colourName || entry.baseSku}
+                        </span>
+                      </label>
+                    </td>
+                    {sizes.map((entrySize) => (
+                      <td key={entrySize.id} data-print-cell={`${entry.id}:${entrySize.id}`}>
+                        {off ? (
+                          <EmptyCell />
+                        ) : run ? (
+                          toQty(base[entry.id]?.[entrySize.id])
+                        ) : (
+                          <Input
+                            name={`print-qty-${entry.id}-${entrySize.id}`}
+                            type='number'
+                            min={0}
+                            className='ml-auto h-7 w-14 text-right'
+                            aria-label={`${entry.colourName} ${entrySize.label}`}
+                            placeholder='0'
+                            value={toQty(base[entry.id]?.[entrySize.id]) || ''}
+                            onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                              setCell(entry.id, entrySize.id, event.target.value)
                             }
                           />
-                          <span className='whitespace-nowrap'>
-                            {entry.colourName || entry.baseSku}
-                          </span>
-                        </label>
+                        )}
                       </td>
-                      {sizes.map((entrySize) => (
-                        <td key={entrySize.id} data-print-cell={`${entry.id}:${entrySize.id}`}>
-                          {off ? (
-                            <EmptyCell />
-                          ) : run ? (
-                            toQty(base[entry.id]?.[entrySize.id])
-                          ) : (
-                            <Input
-                              name={`print-qty-${entry.id}-${entrySize.id}`}
-                              type='number'
-                              min={0}
-                              className='ml-auto h-7 w-14 text-right'
-                              aria-label={`${entry.colourName} ${entrySize.label}`}
-                              placeholder='0'
-                              value={toQty(base[entry.id]?.[entrySize.id]) || ''}
-                              onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                                setCell(entry.id, entrySize.id, event.target.value)
-                              }
-                            />
-                          )}
-                        </td>
-                      ))}
-                      <td>{off ? <EmptyCell /> : quantities.rowTotals[entry.id]}</td>
-                    </tr>
-                  );
-                })}
-                <TotalRow>
-                  <td data-align='left'>Total</td>
-                  {sizes.map((entry) => (
-                    <td key={entry.id}>{quantities.colTotals[entry.id]}</td>
-                  ))}
-                  <td>{sheetTotal}</td>
-                </TotalRow>
-              </tbody>
-            </DataTable>
-          ) : (
-            <Placeholder label='Loading' className='h-36 w-full' />
-          )}
+                    ))}
+                    <td>{off ? <EmptyCell /> : quantities.rowTotals[entry.id]}</td>
+                  </tr>
+                );
+              })}
+              <TotalRow>
+                <td data-align='left'>Total</td>
+                {sizes.map((entry) => (
+                  <td key={entry.id}>{quantities.colTotals[entry.id]}</td>
+                ))}
+                <td>{sheetTotal}</td>
+              </TotalRow>
+            </tbody>
+          </DataTable>
+        ) : (
+          <Placeholder label='Loading' className='h-36 w-full' />
+        )}
 
-          <Row
-            label={
-              <Text size='control' variant='label' tracking='label' className='uppercase'>
-                Extra
+        <Row
+          label={
+            <Text size='control' variant='label' tracking='label' className='uppercase'>
+              Extra
+            </Text>
+          }
+          value={
+            <span className='flex items-center gap-1.5'>
+              <Input
+                name='print-extra'
+                type='number'
+                min={0}
+                max={100}
+                className='h-7 w-16 text-right'
+                value={prefs.overagePct}
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  update({ overagePct: clampOverage(Number(event.target.value)) })
+                }
+              />
+              <Text component='span' size='micro' variant='label'>
+                %
               </Text>
-            }
-            value={
-              <span className='flex items-center gap-1.5'>
-                <Input
-                  name='print-extra'
-                  type='number'
-                  min={0}
-                  max={100}
-                  className='h-7 w-16 text-right'
-                  value={prefs.overagePct}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                    update({ overagePct: clampOverage(Number(event.target.value)) })
-                  }
-                />
-                <Text component='span' size='micro' variant='label'>
-                  %
-                </Text>
-              </span>
-            }
-            className='min-h-11 items-center py-2'
-          />
-        </div>
+            </span>
+          }
+          className='min-h-11 items-center py-2'
+        />
       </div>
     </ConfirmationModal>
   );

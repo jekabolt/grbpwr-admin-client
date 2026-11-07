@@ -13,6 +13,7 @@ import {
   useLogoSvg,
   type CareLabelData,
 } from '../../care-labels/adapter';
+import type { LabelOrientation } from '../../care-labels/layout';
 import { compositionsOf, planAll, type FullPlan } from '../../care-labels/print-job';
 import { collectReadiness, type Readiness } from '../../care-labels/readiness';
 import { createShaper, type Shaper } from '../../care-labels/text-outline';
@@ -70,6 +71,8 @@ export type CompositionLabelModel = {
   /** Колорвеи, чьи полные данные ещё едут (страна неизвестна). */
   loadingColorways: boolean;
   logoUrl: string;
+  /** Ориентация, в которой свёрстан `plan` (пустая в карте = вертикальная). */
+  orientation: LabelOrientation;
 };
 
 export function useCompositionLabel({
@@ -145,10 +148,20 @@ export function useCompositionLabel({
   const { shaper, failed } = useShaper();
   // Вёрстка всех колорвеев × размеров — за отложенным значением: правка строки не ждёт раскладки.
   const deferred = useDeferredValue(data);
+  // Пустая ориентация карты — вертикальная лента (как в печати).
+  const orientation: LabelOrientation =
+    careLabel?.orientation === 'horizontal' ? 'horizontal' : 'vertical';
   const plan = useMemo(() => {
     if (!shaper || !deferred) return null;
-    return planAll(shaper, deferred, compositionsOf(deferred), 'duplex', deferred.label.qr);
-  }, [shaper, deferred]);
+    return planAll(
+      shaper,
+      deferred,
+      compositionsOf(deferred),
+      'duplex',
+      deferred.label.qr,
+      orientation,
+    );
+  }, [shaper, deferred, orientation]);
   const readiness = useMemo(
     () =>
       deferred
@@ -170,5 +183,6 @@ export function useCompositionLabel({
     shaperFailed: failed,
     loadingColorways: full.loading,
     logoUrl: logo.url,
+    orientation,
   };
 }
