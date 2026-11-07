@@ -1,5 +1,6 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import type { common_MediaFull } from 'api/proto-http/admin';
+import getCroppedImg, { urlToDataUrl } from 'lib/features/getCropped';
 import { isVideo } from 'lib/features/filterContentType';
 import { useUploadMedia } from 'components/managers/media/utils/useUploadMedia';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -33,6 +34,7 @@ import {
   InfoCircledIcon,
   Pencil1Icon,
   PlusIcon,
+  RotateCounterClockwiseIcon,
 } from 'ui';
 import type { FrameEditorKind } from './frame-editor';
 import { FrameMode } from './media-viewer-frame';
@@ -419,7 +421,33 @@ interface MediaViewerProps {
  * В режиме кадр не листается и не закрывается смахиванием: переход на соседа снял бы правку
  * молча, а штрих пером слишком похож на смахивание.
  */
-export type ViewerMode = 'adjust' | 'frame' | 'draw' | 'callouts';
+export type ViewerMode = 'adjust' | 'frame' | 'draw' | 'rotate' | 'callouts';
+
+/** Clockwise, by 90° a tap. */
+const ROTATE_STEP = 90;
+
+/**
+ * Снимок, повёрнутый по часовой на `rotation`, целиком (без обрезки). Формат — исходника.
+ */
+async function bakeRotation(src: string, rotation: number): Promise<string | null> {
+  if (!rotation) return null;
+  const dataUrl = await urlToDataUrl(src);
+  const image = new Image();
+  image.src = dataUrl;
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error('the image did not decode'));
+  });
+  const turned = rotation === 90 || rotation === 270;
+  const width = turned ? image.naturalHeight : image.naturalWidth;
+  const height = turned ? image.naturalWidth : image.naturalHeight;
+  return getCroppedImg(dataUrl, { x: 0, y: 0, width, height }, undefined, undefined, rotation);
+}
+
+/** Clockwise arrow: Radix has only the counter-clockwise one, mirrored. */
+function RotateGlyph() {
+  return <RotateCounterClockwiseIcon className='size-4 -scale-x-100' />;
+}
 
 /**
  * ═══ УКАЗАНИЯ — РЕЖИМ ТОГО ЖЕ ПРОСМОТРЩИКА (viewer-unify V4) ══════════════════════════════════
@@ -474,6 +502,9 @@ export function MediaViewer({
   const [frameKind, setFrameKind] = useState<FrameEditorKind>('crop');
   const [knob, setKnob] = useState<AdjustKnob>('brightness');
   const [saving, setSaving] = useState(false);
+  /** `rotate` mode: the turn so far (0/90/180/270) and the picture's natural size. */
+  const [rotation, setRotation] = useState(0);
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const { showMessage } = useSnackBarStore();
   const tapTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
@@ -530,6 +561,8 @@ export function MediaViewer({
   useEffect(() => {
     setMode(home);
     setSaving(false);
+    setRotation(0);
+    setNatural(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetKey]);
 
@@ -570,7 +603,7 @@ export function MediaViewer({
   // Phone: a vertical swipe (up or down) closes — but never inside a mode (a stroke is not a swipe).
   const swipeClose = useCallback(() => onOpenChange(false), [onOpenChange]);
   const gestures = useMediaStageGestures({
-    active: stageLive && mode !== 'frame' && mode !== 'callouts',
+    active: stageLive && mode !== 'frame' && mode !== 'rotate' && mode !== 'callouts',
     resetKey,
     hasMany: hasMany && !mode,
     onSwipe: go,
@@ -633,9 +666,17 @@ export function MediaViewer({
     adjust.setOpen(false);
     annotate.clear();
     annotate.setDrawMode(false);
+    setRotation(0);
     setMode(home);
     setSaving(false);
   }, [adjust, annotate, home]);
+
+  /** ↻: the first tap opens `rotate` already turned; each next tap turns 90° more. */
+  const rotateStep = useCallback(() => {
+    if (!stageLive) return;
+    if (mode !== 'rotate') enterMode('rotate');
+    setRotation((r) => (r + ROTATE_STEP) % 360);
+  }, [stageLive, mode, enterMode]);
 
   /**
    * ═══ КУДА УХОДЯТ ЗАПЕЧЁННЫЕ БАЙТЫ (viewer-unify V3) ═══════════════════════════════════════════
@@ -711,13 +752,17 @@ export function MediaViewer({
   const saveStage = useCallback(() => {
     const item = items[safeIndex];
     if (!item) return;
+    if (mode === 'rotate') {
+      void runSave(() => bakeRotation(item.src, rotation));
+      return;
+    }
     void runSave(() =>
       annotate.bakeDataUrl(item.src, {
         params: adjust.values,
         source: adjust.sourceRef.current,
       }),
     );
-  }, [items, safeIndex, runSave, annotate, adjust.values, adjust.sourceRef]);
+  }, [items, safeIndex, runSave, annotate, adjust.values, adjust.sourceRef, mode, rotation]);
 
   // Close only when the click lands on the empty ground (not the media or a control),
   // and not as the tail of a swipe. Inside a mode the ground does nothing.
@@ -764,7 +809,24 @@ export function MediaViewer({
   const layout: ViewerLayout = isMobile ? 'phone' : 'desk';
   const modeTitle = mode === 'frame' ? frameKind : mode;
   const stageSaveDisabled =
-    mode === 'adjust' ? adjust.isZero : mode === 'draw' ? !annotate.hasStrokes : true;
+    mode === 'adjust'
+      ? adjust.isZero
+      : mode === 'draw'
+        ? !annotate.hasStrokes
+        : mode === 'rotate'
+          ? rotation === 0
+          : true;
+  /** `rotate` stage: the picture fitted to the box AS TURNED, drawn turned inside it. */
+  const turned = rotation === 90 || rotation === 270;
+  const rotateFit =
+    natural && box.w && box.h
+      ? (() => {
+          const rw = turned ? natural.h : natural.w;
+          const rh = turned ? natural.w : natural.h;
+          const k = Math.min(box.w / rw, box.h / rh, 1);
+          return { w: rw * k, h: rh * k, iw: natural.w * k, ih: natural.h * k };
+        })()
+      : null;
 
   /**
    * `more`: the viewer's own rare doors, then the screen's. On the phone the screen's `bar` tools
@@ -782,6 +844,17 @@ export function MediaViewer({
           showMessage('could not download the file', 'error'),
         ),
     },
+    ...(isMobile
+      ? [
+          {
+            key: 'rotate',
+            label: 'rotate',
+            icon: <RotateGlyph />,
+            disabled: !stageLive,
+            onClick: rotateStep,
+          } satisfies MoreRow,
+        ]
+      : []),
     {
       key: 'copy-url',
       label: 'copy url',
@@ -909,6 +982,17 @@ export function MediaViewer({
               />
             )}
             <span className='ml-auto flex flex-wrap items-center gap-2'>
+              <ViewerAction
+                aria-label='rotate 90°'
+                title='rotate 90°'
+                aria-pressed={mode === 'rotate'}
+                selected={mode === 'rotate'}
+                data-probe='viewer-mode-rotate'
+                disabled={!stageLive || (editing && mode !== 'rotate')}
+                onClick={rotateStep}
+              >
+                <RotateGlyph />
+              </ViewerAction>
               {modeButton('adjust', 'adjust', mode === 'adjust', () =>
                 mode === 'adjust' ? leaveMode() : enterMode('adjust'),
               )}
@@ -1057,6 +1141,33 @@ export function MediaViewer({
                       >
                         {FILE_MISSING_WORDS}
                       </div>
+                    ) : mode === 'rotate' ? (
+                      <div
+                        data-probe='viewer-rotate-stage'
+                        className='relative'
+                        style={rotateFit ? { width: rotateFit.w, height: rotateFit.h } : undefined}
+                      >
+                        <img
+                          src={current.src}
+                          alt={current.alt || ''}
+                          draggable={false}
+                          onLoad={(e) =>
+                            setNatural({
+                              w: e.currentTarget.naturalWidth,
+                              h: e.currentTarget.naturalHeight,
+                            })
+                          }
+                          className={cn(
+                            'absolute left-1/2 top-1/2 max-w-none select-none bg-bgColor transition-transform',
+                            !rotateFit && 'invisible',
+                          )}
+                          style={{
+                            width: rotateFit?.iw,
+                            height: rotateFit?.ih,
+                            transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+                          }}
+                        />
+                      </div>
                     ) : (
                       <>
                         <BlurhashImage
@@ -1147,7 +1258,7 @@ export function MediaViewer({
                     saveDisabled={stageSaveDisabled}
                     saving={saving}
                   >
-                    {mode === 'adjust' ? (
+                    {mode === 'rotate' ? null : mode === 'adjust' ? (
                       <AdjustTools
                         layout='desk'
                         values={adjust.values}
@@ -1188,7 +1299,11 @@ export function MediaViewer({
                   saveDisabled={stageSaveDisabled}
                   saving={saving}
                 >
-                  {mode === 'adjust' ? (
+                  {mode === 'rotate' ? (
+                    <ViewerWord probe='rotate-again' onClick={rotateStep}>
+                      ↻ rotate
+                    </ViewerWord>
+                  ) : mode === 'adjust' ? (
                     <AdjustTools
                       layout='phone'
                       values={adjust.values}
