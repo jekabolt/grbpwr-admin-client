@@ -401,9 +401,15 @@ export function planSurfaceByRows(args: {
     const known = new Set([...args.hosts, ...args.fixed.keys(), ...out.keys()]);
     let moved = false;
     for (const k of todo) {
-      if (out.has(k)) continue;
       const S = geoms.get(k)!;
-      type Opt = RowLay & { cont: number; len: number; err: number; onCover: number };
+      type Opt = RowLay & {
+        cont: number;
+        len: number;
+        err: number;
+        onCover: number;
+        /** Direct shell row > direct inside-piece row > one stretch of a composite catch row. */
+        placement: number;
+      };
       let best: Opt | null = null;
       for (const s of sides)
         for (const [mine, other] of [
@@ -412,9 +418,10 @@ export function planSurfaceByRows(args: {
         ] as const) {
           if (!mine.length || mine.some((p) => p.piece !== k)) continue;
           // A stored composite may continue from the shell onto a piece already laid there. The
-          // surface part belongs in the shell's frame; resolving the whole side to the nested piece
-          // instead puts a pocket bag on an unrelated panel. Try every drawable stretch and, when
-          // the row gives equally continuous readings, prefer the shallowest (shell-first) frame.
+          // surface part belongs in the shell's frame. Try every drawable stretch. On one host the
+          // shallow shell-first frame wins; across different hosts a direct row to an already laid
+          // inside piece outranks one stretch of a composite catch row, so paired pocket bags stay
+          // on their directly anchored panel.
           const targets = other.filter((p) => known.has(p.piece) && p.piece !== k);
           for (const target of targets) {
             const on = target.piece;
@@ -485,23 +492,37 @@ export function planSurfaceByRows(args: {
                     len,
                     err,
                     onCover,
+                    placement: args.hosts.has(on) ? (other.length === 1 ? 3 : 1) : 2,
                   };
+                  const sameHost = !!best && o.host === best.host;
                   const better =
                     !best ||
                     o.cont > best.cont ||
                     (o.cont === best.cont &&
-                      (o.depth < best.depth ||
-                        (o.depth === best.depth &&
-                          (Math.round(10 * o.onCover) > Math.round(10 * best.onCover) ||
-                            (Math.round(10 * o.onCover) === Math.round(10 * best.onCover) &&
-                              (o.len > best.len + 5 ||
-                                (Math.abs(o.len - best.len) <= 5 && o.err < best.err)))))));
+                      ((!sameHost && o.placement > best.placement) ||
+                        (sameHost || o.placement === best.placement
+                          ? o.depth < best.depth ||
+                            (o.depth === best.depth &&
+                              (Math.round(10 * o.onCover) > Math.round(10 * best.onCover) ||
+                                (Math.round(10 * o.onCover) === Math.round(10 * best.onCover) &&
+                                  (o.len > best.len + 5 ||
+                                    (Math.abs(o.len - best.len) <= 5 && o.err < best.err)))))
+                          : false)));
                   if (better) best = o;
                 }
             }
           }
         }
       if (!best) continue;
+      const previous = out.get(k);
+      if (
+        previous &&
+        previous.host === best.host &&
+        previous.on === best.on &&
+        previous.row === best.row &&
+        previous.T.every((value, index) => Math.abs(value - best!.T[index]) < 1e-6)
+      )
+        continue;
       const H = geoms.get(best.host)!;
       const ring = ringSample(S).map((p) => apply(best!.T, foldPt(best!.fold, p)));
       const cover = coverOf(ring, H.rs);

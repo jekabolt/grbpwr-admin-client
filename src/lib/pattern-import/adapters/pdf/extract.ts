@@ -252,9 +252,10 @@ export async function extractPdfWith(
 }
 
 /**
- * RASTER: the refusal of a file whose only content is images over the pixel limit — the session
- * hands such a file to the raster adapter, which reads them in rows (raster/big-image.ts); a
- * caller without that path keeps the refusal (`too-large`).
+ * A PDF whose only content is images over the pixel limit. pdf.js drops those images and the
+ * page then has no paths. The session refuses it as junk (`pdf-no-curves`,
+ * docs/pattern-pdf-etalon.md) instead of tracing the scan. A caller that does not catch this
+ * keeps the refusal (`too-large`).
  */
 function oversizedScan(message: string): Error {
   const e = inputTooLarge(message) as Error & { oversizedScan?: true };
