@@ -124,6 +124,8 @@ const ASM_CSS = String.raw`
 .asm-labels { width: 100%; margin-top: 5px; border-collapse: collapse; font-size: 9px; line-height: 1.25; }
 .asm-labels th { color: var(--color-labelColor); font-weight: 400; text-align: left; text-transform: uppercase; }
 .asm-labels th, .asm-labels td { padding: 2px 4px 2px 0; border-bottom: 1px solid var(--color-hairline); vertical-align: top; }
+.asm-labels th, .asm-labels td { word-break: normal; overflow-wrap: normal; hyphens: none; }
+.asm-labels td:nth-child(2), .asm-labels td:nth-child(3) { white-space: nowrap; }
 .asm-measure { position: fixed; left: -30000px; top: 0; visibility: hidden; pointer-events: none; }
 .asm-measure .asm-col { overflow: visible; }
 .asm-photos { display: grid; min-height: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 24px; }

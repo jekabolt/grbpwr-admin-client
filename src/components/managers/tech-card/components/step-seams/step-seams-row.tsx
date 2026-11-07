@@ -139,7 +139,7 @@ export function StepSeamsRow({
   const setOpen = (next: boolean) => onPicker(next ? PLAIN_PICK : null);
 
   const hasMultiplePieces = useMemo(
-    () => hasMultipleStepPieces(ops, index, pieceKeys, geoms),
+    () => hasMultipleStepPieces(ops, index, pieceKeys, geoms) || posesLabels(ops, index, pieceKeys),
     [ops, index, pieceKeys, geoms],
   );
   // A deep link from the audit's PDF gaps: open on this step, then drop the param.
