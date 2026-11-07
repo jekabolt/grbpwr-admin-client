@@ -659,6 +659,8 @@ export function MaterialModal({
       compositionEntries,
       // #40: sample vs production vs both, from the segmented control below.
       purpose,
+      sourceMaterialId: undefined,
+      sourceMaterialName: undefined,
       // Ф4.8 — толщина полотна в ОДИН слой. Артикул без толщины обязан остаться без неё: ноль
       // означал бы стопку 0 см, то есть «влезает всегда», — вердикт, собранный из отсутствующих
       // данных. Поэтому здесь ровно presenceDecimal и никаких `?? 0`.

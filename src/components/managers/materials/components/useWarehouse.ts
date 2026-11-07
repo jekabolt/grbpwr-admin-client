@@ -68,6 +68,7 @@ export function useMaterialMovements(filter: MovementFilter = {}, limit = 50) {
         movementType: filter.movementType ?? 'MATERIAL_MOVEMENT_TYPE_UNKNOWN',
         occurredFrom: filter.occurredFrom ?? '',
         occurredTo: filter.occurredTo ?? '',
+        conversionId: 0,
       });
       const movements = res.movements ?? [];
       const total = res.total ?? 0;

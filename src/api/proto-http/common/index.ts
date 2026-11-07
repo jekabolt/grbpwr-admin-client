@@ -1019,6 +1019,14 @@ export type TechCardAuxSubtype =
   // kind=SPARE_KIT_BAG, а этот подтип отвечает на другой вопрос — что производит вспомогательная
   // карточка. Без него свой пакетик уезжает в ..._OTHER, где перестаёт отличаться от чего угодно.
   | "TECH_CARD_AUX_SUBTYPE_SPARE_KIT_BAG";
+// AuxMadeBy says who makes an AUXILIARY card's item (0456). US: made from the card's BOM, whose norms
+// (consumption_per_unit, qty_per_garment + spare_qty) are costed and planned. SUPPLIER: bought
+// finished; the supplier's price is the cost and no material is reserved or issued. UNSPECIFIED on
+// write = keep the stored value (an aux card with none reads US). Only for purpose=auxiliary.
+export type AuxMadeBy =
+  | "AUX_MADE_BY_UNSPECIFIED"
+  | "AUX_MADE_BY_US"
+  | "AUX_MADE_BY_SUPPLIER";
 // Material is a catalog material — shared nomenclature a tech-card BOM line can optionally link
 // to. Descriptive fields only; price lives in the append-only MaterialPrice history.
 // MaterialClass is the class-table-inheritance discriminant (S15): it selects which typed
@@ -2638,6 +2646,12 @@ export type TechCardBomItem = {
   // proto3-дефолт UNSPECIFIED и стёрла бы выбор части у ВСЕХ строк карточки. Явно присланный
   // UNSPECIFIED (поле присутствует) очищает в NULL.
   labelPart?: TechCardBomLabelPart;
+  // AUX CARD NORM (0456): the measured norm of this line per ONE output unit of an auxiliary card, in
+  // this line's `unit`, net of wastage. Only on auxiliary cards and measured sections, never on a line
+  // cut to length (its strips give the norm); counted sections keep qty_per_garment/spare_qty.
+  // Absent = keep the stored value; explicit Decimal{value:""} clears it (the est_usage protocol).
+  // Unset = no norm: the line is unpriced and blocks the run plan, never zero.
+  consumptionPerUnit: googletype_Decimal | undefined;
 };
 
 // MaterialFabricAttrs are the typed attributes of a fabric-class material (material_fabric_attr).
@@ -2811,6 +2825,8 @@ export type Material = {
   fabricThicknessMm: googletype_Decimal | undefined;
   // The type of a label in stock, section LABEL only (0451). The label picker filters on it.
   labelType: MaterialLabelType | undefined;
+  sourceMaterialId: number | undefined;
+  sourceMaterialName: string | undefined;
 };
 
 // MaterialPrice is one point in a material's append-only price history. Prices are in the
@@ -4163,6 +4179,9 @@ export type TechCardInsert = {
   skuSeason: SkuSeason | undefined;
   // WS7: sub-classifies an auxiliary card (UNKNOWN=unset). Ignored / must be UNKNOWN for a sellable card.
   auxSubtype: TechCardAuxSubtype | undefined;
+  // 0456: who makes an auxiliary card's item. UNSPECIFIED = keep stored (aux default US); refused on
+  // a sellable card.
+  auxMadeBy: AuxMadeBy | undefined;
   // Planning date for the overdue view (production cockpit): the calendar day this style is planned
   // to drop, the anchor a run's promised_at is judged against ("до дропа N дней / просрочен"). Owner-
   // set intent, not a workflow stamp like approved_at/released_at — unset means no drop planned.
@@ -8556,7 +8575,10 @@ export type MaterialMovementType =
   | "MATERIAL_MOVEMENT_TYPE_RETURN_PRODUCTION"
   | "MATERIAL_MOVEMENT_TYPE_RETURN_SAMPLE"
   | "MATERIAL_MOVEMENT_TYPE_ADJUSTMENT"
-  | "MATERIAL_MOVEMENT_TYPE_WRITEOFF";
+  | "MATERIAL_MOVEMENT_TYPE_WRITEOFF"
+  | "MATERIAL_MOVEMENT_TYPE_CONVERT_OUT"
+  | "MATERIAL_MOVEMENT_TYPE_CONVERT_IN"
+  | "MATERIAL_MOVEMENT_TYPE_SHRINKAGE";
 // MaterialStock is a material's maintained on-hand balance and moving-average unit cost. The cost
 // fields are confidential (stripped for accounts without costing:read).
 export type MaterialStock = {
@@ -8595,6 +8617,8 @@ export type MaterialMovement = {
   expectedAt: wellKnownTimestamp | undefined;
   invoiceFileId: number | undefined;
   invoiceFileName: string | undefined;
+  conversionId: number | undefined;
+  lossQty: googletype_Decimal | undefined;
 };
 
 // MaterialLot is a received batch (roll / dye-lot) of a material (gap-07 v2 D): a supplier lot code
@@ -8622,6 +8646,46 @@ export type MaterialLot = {
   // unrecorded. The shade also drifts WITHIN one batch, which is why pieces of one garment come
   // from adjacent layers — that is a note on the lay screen, not another field here.
   shadeCode: string | undefined;
+  shrunkQty: googletype_Decimal | undefined;
+  washedWidthCm: googletype_Decimal | undefined;
+  shrinkagePct: googletype_Decimal | undefined;
+};
+
+export type MaterialConversionInput = {
+  materialId: number | undefined;
+  quantity: googletype_Decimal | undefined;
+  lossQty: googletype_Decimal | undefined;
+  lotId: number | undefined;
+};
+
+export type MaterialConversionOutput = {
+  materialId: number | undefined;
+  quantity: googletype_Decimal | undefined;
+  lotCode: string | undefined;
+  measuredWidthCm: googletype_Decimal | undefined;
+  shadeCode: string | undefined;
+};
+
+export type MaterialConversionLine = {
+  movement: MaterialMovement | undefined;
+  materialName: string | undefined;
+  unit: string | undefined;
+};
+
+export type MaterialConversion = {
+  id: number | undefined;
+  lines: MaterialConversionLine[] | undefined;
+  workCost: googletype_Decimal | undefined;
+  workCurrency: string | undefined;
+  workCostBase: googletype_Decimal | undefined;
+  outputUnitCostBase: googletype_Decimal | undefined;
+  totalCostBase: googletype_Decimal | undefined;
+  supplierId: number | undefined;
+  supplierDoc: string | undefined;
+  comment: string | undefined;
+  adminUsername: string | undefined;
+  occurredAt: wellKnownTimestamp | undefined;
+  createdAt: wellKnownTimestamp | undefined;
 };
 
 // MaterialReservationClaim is ONE still-open claim on a material — a soft hold that depresses
