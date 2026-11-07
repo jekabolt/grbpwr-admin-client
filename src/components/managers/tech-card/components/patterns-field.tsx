@@ -2412,7 +2412,8 @@ export function PatternsField({
         mainBlocks: mainPatternBlocks,
         mainAliases: mainPatternAliases,
         pieces: cardPieces,
-        sizeTokens: dictTokens.keys(),
+        // An array, not keys(): the iterator would be spent by the first of the two calls below.
+        sizeTokens: [...dictTokens.keys()],
         preferredSizeTokens: preferredShapeSizeTokens,
       };
       setInterliningAsk({
