@@ -228,6 +228,15 @@ export function isJoinStep(
   );
 }
 
+/** A step that attaches or hangs a garment label the card knows: its picture poses the label. */
+export function posesLabels(
+  ops: readonly FormOpLike[],
+  index: number,
+  pieceKeys: ReadonlySet<string>,
+): boolean {
+  return (ops[index]?.labelKeys ?? []).some((key) => pieceKeys.has(key));
+}
+
 /** Kept for the picker API; eligibility includes the leaf pieces of one resolved input unit. */
 export function hasMultipleStepPieces(
   ops: readonly FormOpLike[],

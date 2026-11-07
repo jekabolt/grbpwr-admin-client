@@ -20,6 +20,7 @@ import { NO_SEAM_TEXT } from './step-highlight';
 import { useStepResults } from './step-result-context';
 import {
   hasMultipleStepPieces,
+  posesLabels,
   pieceOfTarget,
   targetsLen,
   type TargetId,
@@ -96,7 +97,7 @@ export function StepSeamsDoor({
 }) {
   const { ctx, ops, geoms, pieceKeys, stored } = useStepScene(index);
   const hasMultiplePieces = useMemo(
-    () => hasMultipleStepPieces(ops, index, pieceKeys, geoms),
+    () => hasMultipleStepPieces(ops, index, pieceKeys, geoms) || posesLabels(ops, index, pieceKeys),
     [ops, index, pieceKeys, geoms],
   );
   if (!ctx || !hasMultiplePieces) return null;

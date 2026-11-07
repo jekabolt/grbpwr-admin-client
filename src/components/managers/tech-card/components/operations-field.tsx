@@ -2513,6 +2513,7 @@ function OperationLabelPicker({ index, frozen }: { index: number; frozen: boolea
                 key={key}
                 name={name}
                 sub={size ? `${size} mm` : ''}
+                selected={selected.includes(key)}
                 pressed={selected.includes(key)}
                 media={
                   <span className='flex h-16 items-center justify-center border-b border-hairline bg-pageBg'>
