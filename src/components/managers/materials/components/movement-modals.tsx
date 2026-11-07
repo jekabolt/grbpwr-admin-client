@@ -634,10 +634,13 @@ export function ConvertStockModal({
   const convert = useConvertMaterialStock();
   const materialsQuery = useMaterials('', false, open);
   const movementsQuery = useMaterialMovements({ materialId: target.materialId }, 50);
+  const lotsQuery = useMaterialLots(target.materialId, false, open && target.materialId > 0);
   const { data: suppliersData } = useSuppliers();
   const suppliers = suppliersData?.suppliers ?? [];
 
   const [fail, setFail] = useState<string | null>(null);
+  const [lotId, setLotId] = useState(0);
+  const lotTouched = useRef(false);
   const [picking, setPicking] = useState(false);
   const [creating, setCreating] = useState(false);
   const [intoId, setIntoId] = useState(0);
@@ -736,6 +739,8 @@ export function ConvertStockModal({
     setCurrency('EUR');
     setSupplierId(0);
     setOccurredAt(todayISO());
+    setLotId(0);
+    lotTouched.current = false;
     requestId.current = newClientRequestId();
     defaultChecked.current = false;
     supplierTouched.current = false;
@@ -784,6 +789,32 @@ export function ConvertStockModal({
     Number.isFinite(lossNumber) && Number.isFinite(outNumber) && lossNumber > outNumber;
   const wholeUnits = countableMaterial(into);
 
+  // A lot-less convert leaves the roll's remaining untouched (the server refuses it while a lot
+  // covers the quantity), so the fullest lot is picked by default and «none» shows only when no
+  // lot can cover what goes out.
+  const lots = useMemo(
+    () =>
+      (lotsQuery.data?.lots ?? [])
+        .filter((lot) => !lot.archived && parseDecimalNumber(decimalToInput(lot.remainingQty)) > 0)
+        .sort(
+          (a, b) =>
+            parseDecimalNumber(decimalToInput(b.remainingQty)) -
+            parseDecimalNumber(decimalToInput(a.remainingQty)),
+        ),
+    [lotsQuery.data],
+  );
+  const lotRemaining = (lot?: common_MaterialLot) =>
+    parseDecimalNumber(decimalToInput(lot?.remainingQty));
+  const wantOut = Number.isFinite(outNumber) && outNumber > 0 ? outNumber : 0;
+  const lotCovers = lots.some((lot) => lotRemaining(lot) >= wantOut);
+  const selectedLot = lots.find((lot) => numId(lot.id) === lotId);
+  const overLot = !!selectedLot && wantOut > lotRemaining(selectedLot);
+
+  useEffect(() => {
+    if (!open || lotTouched.current) return;
+    setLotId(lots.length ? numId(lots[0].id) : 0);
+  }, [lots, open]);
+
   const costPreview = useMemo(() => {
     if (!canReadCosting || currency !== 'EUR' || target.baseCurrency !== 'EUR') return null;
     const average = parseDecimalNumber(target.avgUnitCostBase);
@@ -818,6 +849,8 @@ export function ConvertStockModal({
     if (wholeUnits && !Number.isInteger(inNumber)) return setFail('whole units only');
     if (!Number.isFinite(lossNumber) || lossNumber < 0) return setFail('invalid loss');
     if (overLoss) return setFail('loss over out');
+    if (!selectedLot && lotCovers) return setFail('choose lot');
+    if (overLot) return setFail('over lot');
     try {
       const res = await convert.mutateAsync({
         inputs: [
@@ -825,7 +858,7 @@ export function ConvertStockModal({
             materialId: target.materialId,
             quantity: inputToDecimal(outQty),
             lossQty: inputToDecimal(lossQty),
-            lotId: 0,
+            lotId: selectedLot ? numId(selectedLot.id) : 0,
           },
         ],
         output: {
@@ -916,6 +949,50 @@ export function ConvertStockModal({
         {overStock ? (
           <Text size='micro' variant='error'>
             ! over {target.onHand} {target.unit}
+          </Text>
+        ) : null}
+
+        {lots.length ? (
+          <Field label='lot'>
+            <ChipRow>
+              {lots.map((lot) => {
+                const id = numId(lot.id);
+                const selected = id === lotId;
+                return (
+                  <Chip
+                    key={id}
+                    selected={selected}
+                    pressed={selected}
+                    onClick={() => {
+                      lotTouched.current = true;
+                      setLotId(id);
+                      setFail(null);
+                    }}
+                  >
+                    {lot.lotCode || lotDay(lot.receivedAt) || 'lot'} ·{' '}
+                    {decimalToInput(lot.remainingQty)} {target.unit}
+                  </Chip>
+                );
+              })}
+              {!lotCovers ? (
+                <Chip
+                  selected={!selectedLot}
+                  pressed={!selectedLot}
+                  onClick={() => {
+                    lotTouched.current = true;
+                    setLotId(0);
+                    setFail(null);
+                  }}
+                >
+                  none
+                </Chip>
+              ) : null}
+            </ChipRow>
+          </Field>
+        ) : null}
+        {overLot ? (
+          <Text size='micro' variant='error'>
+            ! over lot {decimalToInput(selectedLot?.remainingQty)} {target.unit}
           </Text>
         ) : null}
 
