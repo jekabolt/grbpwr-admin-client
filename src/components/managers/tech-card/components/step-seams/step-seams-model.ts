@@ -53,6 +53,8 @@ export const pieceOfTarget = (id: TargetId) => parseInner(id)?.piece ?? pieceOf(
 
 export type FormOpLike = {
   inputKeys?: readonly string[];
+  /** Garment labels shown and posed by this step, never structural assembly inputs. */
+  labelKeys?: readonly string[];
   outputUnitKey?: string;
   seamKeys?: readonly string[];
   /** The step's pose rows (P8, a piece placed by hand) — card seam keys that are not seams. */

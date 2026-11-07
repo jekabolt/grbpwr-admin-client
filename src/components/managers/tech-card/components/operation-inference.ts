@@ -87,6 +87,7 @@ export type InferenceStep = {
   attachMethod?: string;
   coverageMode?: string;
   labelAttachStitch?: string;
+  work?: string;
   pressAction?: string;
   pressEquipment?: string;
   pressProfileKey?: string;
@@ -464,6 +465,7 @@ export function stepKindId(step: InferenceStep, bomByKey: Map<string, InferenceB
       attachMethod: step.attachMethod,
       coverageMode: step.coverageMode,
       labelAttachStitch: step.labelAttachStitch,
+      work: step.work,
       pressAction: step.pressAction,
       bomKinds: stepBomKinds(step, bomByKey),
     })?.id ?? ''

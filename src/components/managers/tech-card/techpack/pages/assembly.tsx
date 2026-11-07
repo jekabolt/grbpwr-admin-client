@@ -19,6 +19,10 @@ import type { common_TechCard, common_TechCardOperationMedia } from 'api/proto-h
 import type { PrintOrient } from 'components/managers/print/scope';
 import { AnnotationCanvas } from 'components/managers/tech-card/components/annotation-canvas';
 import {
+  garmentLabelName,
+  type GarmentLabelLike,
+} from 'components/managers/tech-card/components/garment-label-pieces';
+import {
   poseRowsOfCard,
   seamGraphOfCard,
   seamRowsOfCard,
@@ -117,6 +121,9 @@ const ASM_CSS = String.raw`
 .asm-params, .asm-machine-params { margin-top: 2px; color: var(--color-labelColor); font-size: 10px; line-height: 1.25; }
 .asm-marker { display: inline-block; margin-left: 5px; border: 1px solid var(--color-textColor); padding: 0 3px; color: var(--color-textColor); font-size: 9px; line-height: 1.35; text-transform: lowercase; vertical-align: 1px; }
 .asm-turn { display: inline-flex; align-items: center; gap: 4px; margin-top: 3px; }
+.asm-labels { width: 100%; margin-top: 5px; border-collapse: collapse; font-size: 9px; line-height: 1.25; }
+.asm-labels th { color: var(--color-labelColor); font-weight: 400; text-align: left; text-transform: uppercase; }
+.asm-labels th, .asm-labels td { padding: 2px 4px 2px 0; border-bottom: 1px solid var(--color-hairline); vertical-align: top; }
 .asm-measure { position: fixed; left: -30000px; top: 0; visibility: hidden; pointer-events: none; }
 .asm-measure .asm-col { overflow: visible; }
 .asm-photos { display: grid; min-height: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 24px; }
@@ -159,7 +166,39 @@ type Row = AsmRow & {
   photoCount: number;
   /** The size this sheet's pleat openings are measured on. */
   drawnSize: string;
+  labels: Array<{ key: string; name: string; size: string; fold: string; attachment: string }>;
 };
+
+const wireDecimal = (value: GarmentLabelLike['widthMm']): string =>
+  (typeof value === 'object' && value !== null ? value.value ?? '' : value ?? '').toString().trim();
+
+function labelsAtStep(techCard: common_TechCard, operationNumber: number): Row['labels'] {
+  const insert = techCard.techCard;
+  const operation = insert?.operations?.find(
+    (candidate) => candidate.operationNumber === operationNumber,
+  );
+  if (!operation?.labelKeys?.length) return [];
+  const labels = new Map(
+    (insert?.garmentLabels ?? []).flatMap((label) =>
+      label.lineKey?.trim() ? [[label.lineKey.trim(), label] as const] : [],
+    ),
+  );
+  return operation.labelKeys.flatMap((key) => {
+    const label = labels.get(key);
+    if (!label) return [];
+    const width = wireDecimal(label.widthMm);
+    const height = wireDecimal(label.heightMm);
+    return [
+      {
+        key,
+        name: garmentLabelName(label),
+        size: width || height ? `${width || '—'} × ${height || '—'}` : '',
+        fold: label.fold?.trim() || '',
+        attachment: label.attachment?.trim() || '',
+      },
+    ];
+  });
+}
 
 type Photo = {
   op: number;
@@ -4586,6 +4625,28 @@ const OpRow = memo(function OpRow({ r, orient }: { r: Row; orient: PrintOrient }
             ))}
           </div>
         )}
+        {r.labels.length > 0 && (
+          <table className='asm-labels' data-assembly-labels=''>
+            <thead>
+              <tr>
+                <th>label</th>
+                <th>size mm</th>
+                <th>fold</th>
+                <th>attachment</th>
+              </tr>
+            </thead>
+            <tbody>
+              {r.labels.map((label) => (
+                <tr key={label.key}>
+                  <td>{label.name}</td>
+                  <td>{label.size}</td>
+                  <td>{label.fold}</td>
+                  <td>{label.attachment}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
         {r.card?.turn && (
           <div className='asm-turn'>
             <KeyArt icon={TURN_KEY} w={24} h={18} />
@@ -4833,9 +4894,10 @@ export function AssemblyPage({
               : silhouetteSvg(model!, r.target, picture.silhouette, r.action),
           photoCount: photoCountByOp.get(r.n) ?? 0,
           drawnSize: model?.drawnSize ?? '',
+          labels: labelsAtStep(techCard, r.n),
         };
       }),
-    [model, editorPictures, photoCountByOp, picture.join, picture.silhouette],
+    [model, editorPictures, photoCountByOp, picture.join, picture.silhouette, techCard],
   );
   const [laid, setLaid] = useState<{ rows: Row[]; cols: Col[] } | null>(null);
   const cols = laid?.rows === rows ? laid.cols : null;

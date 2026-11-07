@@ -36,7 +36,7 @@ export function labelFacts(techCard: common_TechCard | undefined) {
     item: kindLabel(garmentLabelKindNames, row.key),
     placement: clean(row.placement),
     attachment: clean(row.attachment),
-    folding: clean(row.folding),
+    folding: clean(row.fold),
     size: clean(row.size),
     material: clean(labelBomLine(row, card?.bomItems ?? [])?.name),
     quantity: wireInt(row.qtyPerGarment),

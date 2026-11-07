@@ -105,6 +105,14 @@ const labelLengthCm = z
     message: 'whole or one decimal',
   });
 
+const labelMillimetres = z
+  .string()
+  .optional()
+  .default('')
+  .refine((value) => !value || (/^\d+(?:\.\d{1,2})?$/.test(value) && Number(value) > 0), {
+    message: 'positive millimetres',
+  });
+
 // One artwork file of a sewn-in label (0447). 0 on an axis = «any colour» / «all sizes». `publicUrl`
 // is read-only: the server fills it from the file's live link, and an empty one reads as «no file».
 export const garmentLabelFileSchema = z.object({
@@ -117,6 +125,7 @@ export const garmentLabelFileSchema = z.object({
 
 export const garmentLabelSchema = z.object({
   key: labelKey,
+  lineKey: z.string().optional().default(''),
   source: z.enum(['', 'stock', 'make']).optional().default(''),
   kind: text(LABEL_KEY_MAX, 'type'),
   madeBy: text(LABEL_KEY_MAX, 'made by'),
@@ -126,6 +135,9 @@ export const garmentLabelSchema = z.object({
   attachment: text(LABEL_TEXT_MAX, 'attachment'),
   folding: text(LABEL_TEXT_MAX, 'folding'),
   size: text(LABEL_SIZE_MAX, 'size'),
+  widthMm: labelMillimetres,
+  heightMm: labelMillimetres,
+  fold: z.enum(['', 'flat', 'half', 'ends', 'mitre', 'loop']).optional().default(''),
   qtyPerGarment,
   // FK to the label material's BOM line; 0 = none.
   bomItemId: z.number().optional().default(0),
@@ -342,6 +354,7 @@ export function careLabelToForm(c?: common_TechCardCareLabel): FormCareLabel {
 export function garmentLabelsToForm(ls?: common_TechCardGarmentLabel[]): FormGarmentLabel[] {
   return (ls ?? []).map((l) => ({
     key: l.key || '',
+    lineKey: l.lineKey || '',
     source: l.source === 'stock' || l.source === 'make' ? l.source : '',
     kind: l.kind || '',
     madeBy: l.madeBy || '',
@@ -351,6 +364,16 @@ export function garmentLabelsToForm(ls?: common_TechCardGarmentLabel[]): FormGar
     attachment: l.attachment || '',
     folding: l.folding || '',
     size: l.size || '',
+    widthMm: decimalToInput(l.widthMm),
+    heightMm: decimalToInput(l.heightMm),
+    fold:
+      l.fold === 'flat' ||
+      l.fold === 'half' ||
+      l.fold === 'ends' ||
+      l.fold === 'mitre' ||
+      l.fold === 'loop'
+        ? l.fold
+        : '',
     qtyPerGarment: wireInt(l.qtyPerGarment) || 1,
     bomItemId: wireInt(l.bomItemId),
     bomLineKey: l.bomLineKey || '',
@@ -426,6 +449,7 @@ export function careLabelOut(c?: FormCareLabel): common_TechCardCareLabel {
 export function garmentLabelsOut(ls?: FormGarmentLabel[]): common_TechCardGarmentLabel[] {
   return (ls ?? []).map((l) => ({
     key: l.key?.trim() || '',
+    lineKey: l.lineKey?.trim() || '',
     // Presence is the compatibility bit for the stock/make contract. Every row written by this
     // screen sends it, including '' for a legacy row or an explicitly cleared source.
     source: l.source || '',
@@ -437,6 +461,9 @@ export function garmentLabelsOut(ls?: FormGarmentLabel[]): common_TechCardGarmen
     attachment: l.attachment?.trim() || '',
     folding: l.folding?.trim() || '',
     size: l.size?.trim() || '',
+    widthMm: inputToDecimal(l.widthMm),
+    heightMm: inputToDecimal(l.heightMm),
+    fold: l.fold || '',
     qtyPerGarment: l.qtyPerGarment || 1,
     bomItemId: wireInt(l.bomItemId),
     bomLineKey: l.bomLineKey?.trim() || '',

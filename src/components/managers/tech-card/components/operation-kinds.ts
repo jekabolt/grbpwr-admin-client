@@ -725,6 +725,13 @@ export const OPERATION_KINDS: readonly OperationKind[] = [
     featured: [],
   },
   {
+    id: 'J3',
+    family: 'J',
+    label: 'Hang tag',
+    verb: 'TECH_CARD_OPERATION_TYPE_HANDWORK',
+    featured: [],
+  },
+  {
     id: 'J2',
     family: 'J',
     label: 'Other (see note)',
@@ -816,6 +823,7 @@ export const KIND_WORK_TOKEN: Readonly<Record<string, string>> = {
   I7: 'pack',
   I8: 'wet_process',
   J1: 'hand_work',
+  J3: 'hang_tag',
   J2: 'other',
 };
 
@@ -996,6 +1004,7 @@ export type OperationKindStep = {
   attachMethod?: string;
   coverageMode?: string;
   labelAttachStitch?: string;
+  work?: string;
   /** ВТО-подглагол — токен `TechCardPressAction` (0325). Пусто = строка записана до него. */
   pressAction?: string;
   /** Виды строк BOM, привязанных к шагу, — ТОЛЬКО для уточнения F1 / F2 / F3. */
@@ -1153,6 +1162,7 @@ const byId = (id: string): OperationKind | undefined => OPERATION_KIND_BY_ID.get
 export function kindOf(step: OperationKindStep): OperationKind | undefined {
   const verb = (step.operationType ?? '') as common_TechCardOperationType;
   if (NONE(verb)) return undefined;
+  if (verb === 'TECH_CARD_OPERATION_TYPE_HANDWORK' && step.work === 'hang_tag') return byId('J3');
   if (isTopstitchStep(step)) return byId('A2');
 
   // 1. Глаголы, у которых пункты разводит ДИСКРИМИНАТОР.

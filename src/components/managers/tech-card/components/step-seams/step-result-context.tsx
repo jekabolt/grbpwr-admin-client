@@ -16,6 +16,7 @@ const operationsSignature = (ops: readonly FormOpLike[]) =>
   JSON.stringify(
     ops.map((op) => ({
       inputKeys: op.inputKeys,
+      labelKeys: op.labelKeys,
       outputUnitKey: op.outputUnitKey,
       seamKeys: op.seamKeys,
       poseKeys: op.poseKeys,

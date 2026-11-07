@@ -134,6 +134,10 @@ function resolvedInputs(
   const op = input.ops[index];
   const rawInputs = unique((op?.inputKeys ?? []).map((key) => key.trim()).filter(Boolean));
   const modelGroups = inputGroups(input.ops, index, input.pieceKeys);
+  const modelPieces = new Set(modelGroups.flatMap((group) => group.pieces));
+  const labelGroups: InputGroup[] = [...new Set(op?.labelKeys ?? [])].flatMap((key) =>
+    input.geoms.get(key)?.garmentLabel && !modelPieces.has(key) ? [{ key, pieces: [key] }] : [],
+  );
   const used = new Set<string>();
   const groups: ResolvedInput[] = [];
 
@@ -162,7 +166,7 @@ function resolvedInputs(
     });
   };
 
-  for (const group of modelGroups) {
+  for (const group of [...modelGroups, ...labelGroups]) {
     const rawKeys = rawInputs.filter((key) => key === group.key || group.pieces.includes(key));
     add(group, rawKeys);
   }
@@ -511,7 +515,12 @@ function computeStep(
       key: group.key,
       pieces: group.pieces.filter((piece) => transforms.has(piece)),
       ...(group.seed
-        ? { layers: group.seed.result.layers, stacked: group.seed.result.stacked }
+        ? {
+            layers: group.seed.result.layers.filter((piece) => group.pieces.includes(piece)),
+            stacked: group.seed.result.stacked.filter(
+              ([under, over]) => group.pieces.includes(under) && group.pieces.includes(over),
+            ),
+          }
         : {}),
     })),
     ...(op?.layerOrder?.length ? { order: op.layerOrder } : {}),
@@ -576,6 +585,7 @@ export function stepResultsSignature(
   return JSON.stringify({
     ops: input.ops.map((op) => ({
       inputKeys: op.inputKeys,
+      labelKeys: op.labelKeys,
       outputUnitKey: op.outputUnitKey,
       seamKeys: op.seamKeys,
       poseKeys: op.poseKeys,

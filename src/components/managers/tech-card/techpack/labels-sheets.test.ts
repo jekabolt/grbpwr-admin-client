@@ -208,6 +208,7 @@ describe('page 05 sewn-in labels', () => {
       size: '',
       material: '',
       qty: 1,
+      step: '',
     }));
     const long = 'keep the woven edge clear of the seam allowance '.repeat(6);
     const plan = (note: string) =>

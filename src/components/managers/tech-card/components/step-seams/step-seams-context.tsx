@@ -280,8 +280,11 @@ export function StepSeamsProvider({
     const m = new Map<string, string>();
     for (const p of techCard?.techCard?.pieces ?? [])
       if (p.lineKey) m.set(p.lineKey, (p.name ?? '').trim() || p.lineKey);
+    for (const label of techCard?.techCard?.garmentLabels ?? [])
+      if (label.lineKey)
+        m.set(label.lineKey, (label.key ?? '').trim() || (label.kind ?? '').trim() || 'label');
     return m;
-  }, [techCard?.techCard?.pieces]);
+  }, [techCard?.techCard?.pieces, techCard?.techCard?.garmentLabels]);
 
   const value = useMemo<StepSeamsCtx>(
     () => ({

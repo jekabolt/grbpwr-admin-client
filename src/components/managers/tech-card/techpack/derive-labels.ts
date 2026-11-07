@@ -18,6 +18,8 @@ import {
   kindLabel,
 } from 'components/managers/tech-card/components/tech-card-options';
 import { wireInt } from 'components/managers/tech-card/components/wire-int';
+import { operationHeading } from 'components/managers/tech-card/components/operation-options';
+import { BUNDLED_WORK_CATALOG } from 'components/managers/tech-card/components/operation-work';
 import { publicFilePageUrl } from 'components/file-share-viewer/link';
 import { formatCompositionCell } from 'components/managers/materials/components/material-code';
 import {
@@ -52,6 +54,7 @@ export type SewnTableRow = {
   size: string;
   material: string;
   qty: number | null;
+  step: string;
   note: string;
 };
 
@@ -100,6 +103,27 @@ function deriveSewn(techCard: common_TechCard, options: LabelsDeriveOptions, t: 
   const flatItem = labelFlat(techCard.resolvedTechnicalMedia ?? []);
   const flat = mediaFromResolved(flatItem);
   const pinned = rows.map((row) => labelPin(row, callouts));
+  const stepByLabel = new Map<string, string>();
+  for (const [index, operation] of (card?.operations ?? []).entries()) {
+    const number = operation.operationNumber || (index + 1) * 10;
+    const heading = operationHeading({
+      operationType: operation.operationType,
+      machineType: operation.machineType,
+      zone: operation.zone,
+      seamClass: operation.seamClass,
+      topstitchMode: operation.topstitch?.mode,
+      work: operation.work,
+      workCatalog: BUNDLED_WORK_CATALOG,
+      pieceNames: [],
+      note: operation.note,
+    }).split(' · ')[0];
+    for (const key of operation.labelKeys ?? [])
+      if (key?.trim()) stepByLabel.set(key.trim(), [number, heading].filter(Boolean).join(' '));
+  }
+  const labelMm = (value: Parameters<typeof decimal>[0]) => {
+    const number = decimal(value);
+    return number == null ? '' : String(number);
+  };
 
   const table: SewnTableRow[] = rows.map((row, index) => ({
     key: clean(row.key) || `label-${index}`,
@@ -107,12 +131,13 @@ function deriveSewn(techCard: common_TechCard, options: LabelsDeriveOptions, t: 
     item: kindLabel(garmentLabelKindNames, row.key),
     location: clean(row.placement),
     attachment: clean(row.attachment),
-    fold: clean(row.folding),
-    size: clean(row.size),
+    fold: clean(row.fold),
+    size: [labelMm(row.widthMm), labelMm(row.heightMm)].filter(Boolean).join(' × '),
     material: clean(
       resolveBomRef(refs, { bomLineKey: row.bomLineKey, bomItemId: row.bomItemId })?.item.name,
     ),
     qty: row.qtyPerGarment ?? null,
+    step: stepByLabel.get(clean(row.lineKey)) ?? '',
     note: clean(row.note),
   }));
 
@@ -275,7 +300,7 @@ export function deriveLabels(
     placement: {
       name: clean(placementLabel?.placement),
       attachment: clean(placementLabel?.attachment),
-      folding: clean(placementLabel?.folding),
+      folding: clean(placementLabel?.fold),
       size: clean(placementLabel?.size),
       qty: placementLabel?.qtyPerGarment ?? null,
     },

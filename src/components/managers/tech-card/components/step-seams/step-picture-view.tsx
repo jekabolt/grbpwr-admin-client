@@ -42,6 +42,7 @@ import { plainEdges } from '../assembly-seams/words';
 import { posesOf, rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import { useCardSeamGraph } from '../card-unit-pictures';
 import { stripKeysOfCard } from '../cut-strips/strip-pieces';
+import { GarmentLabelOverlay } from '../garment-label-picture';
 import {
   ownStripKeys,
   StripOverlay,
@@ -126,6 +127,7 @@ function sceneOpsSignature(ops: readonly SceneOp[], index: number): string {
   return JSON.stringify(
     ops.slice(0, index + 1).map((op) => ({
       inputKeys: op?.inputKeys,
+      labelKeys: op?.labelKeys,
       outputUnitKey: op?.outputUnitKey,
       seamKeys: op?.seamKeys,
       poseKeys: op?.poseKeys,
@@ -313,6 +315,8 @@ export function useCardPieceKeys(): ReadonlySet<string> {
     const s = new Set<string>(geo?.pieces.keys() ?? []);
     for (const p of ctx?.techCard?.techCard?.pieces ?? []) if (p.lineKey) s.add(p.lineKey);
     for (const key of stripKeysOfCard(ctx?.techCard)) s.add(key);
+    for (const label of ctx?.techCard?.techCard?.garmentLabels ?? [])
+      if (label.lineKey) s.add(label.lineKey);
     return s;
   }, [geo?.pieces, ctx?.techCard]);
 }
@@ -407,10 +411,16 @@ export function stepSeamsOfOp(
     ready = true,
   } = options;
   const active = op ?? ops[index];
-  const groups = inputGroups(ops, index, pieceKeys).map((group) => ({
+  const structuralGroups = inputGroups(ops, index, pieceKeys).map((group) => ({
     ...group,
     name: inputName(group.key, index, ops, (key) => pieceKeys.has(key), nameOf),
   }));
+  const structuralPieces = new Set(structuralGroups.flatMap((group) => group.pieces));
+  const labelGroups = [...new Set(active?.labelKeys ?? [])].flatMap((key) => {
+    const mark = geoms.get(key)?.garmentLabel;
+    return mark && !structuralPieces.has(key) ? [{ key, pieces: [key], name: mark.label }] : [];
+  });
+  const groups = [...structuralGroups, ...labelGroups];
   const leaves = groups.map((group) => group.pieces);
   const keys = [...(active?.seamKeys ?? [])];
   // Hand placements stored on this step's seams and the earlier ones', and the pieces placed by
@@ -2935,6 +2945,7 @@ export function StepPictureSvg({
         plain={look === 'tile'}
         nameRoom={stripNameRoom}
       />
+      <GarmentLabelOverlay pieces={pieces} geoms={flatGeoms} hair={L.hair} />
       {hover && (hoverRange || !marks.some((m) => m.id === hover)) && ptsOf(hover) && (
         <path
           d={pathOf(

@@ -331,7 +331,7 @@ export function TechPackLabelSheets({
                   </td>
                   <td className={TD}>{txt(l.placement)}</td>
                   <td className={TD}>{txt(l.attachment)}</td>
-                  <td className={TD}>{txt(l.folding)}</td>
+                  <td className={TD}>{txt(l.fold)}</td>
                   <td className={TD}>{txt(l.size)}</td>
                   <td className={TD}>{txt(labelBomLine(l, bomItems)?.name)}</td>
                   <td className={`${TD} text-right`}>{qty(l.qtyPerGarment)}</td>

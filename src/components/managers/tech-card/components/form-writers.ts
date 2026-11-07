@@ -232,6 +232,7 @@ export type {
 
 const blankGarmentLabel = (key: string): FormGarmentLabel => ({
   key,
+  lineKey: ulid(),
   source: '',
   kind: '',
   madeBy: '',
@@ -241,6 +242,9 @@ const blankGarmentLabel = (key: string): FormGarmentLabel => ({
   attachment: '',
   folding: '',
   size: '',
+  widthMm: '',
+  heightMm: '',
+  fold: '',
   qtyPerGarment: 1,
   bomItemId: 0,
   bomLineKey: '',

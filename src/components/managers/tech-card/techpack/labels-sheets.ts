@@ -15,16 +15,16 @@ export const QR_COL_GAP_PX = 10;
 export const QR_ROW_GAP_PX = 6;
 export const LABEL_BLOCK_GAP_PX = 14;
 
-// # item location attachment fold size material qty
+// # item location attachment fold size material qty step
 export const LABEL_TABLE_COLS: Record<PrintOrient, readonly number[]> = {
-  land: [36, 116, 145, 145, 84, 70, 163, 40],
-  port: [36, 98, 123, 123, 74, 64, 146, 40],
+  land: [30, 95, 115, 115, 65, 60, 120, 35, 130],
+  port: [28, 78, 85, 85, 50, 52, 90, 34, 100],
 };
 
 // The same table with a note last. The note takes its room from the words, the sheet stays as wide.
 export const LABEL_TABLE_NOTE_COLS: Record<PrintOrient, readonly number[]> = {
-  land: [36, 96, 116, 116, 66, 60, 130, 40, 139],
-  port: [36, 96, 92, 92, 56, 60, 110, 40, 122],
+  land: [28, 80, 96, 96, 56, 56, 105, 32, 110, 105],
+  port: [26, 65, 72, 72, 46, 48, 76, 30, 82, 85],
 };
 
 /** A note column only when a row has a note: a card without notes prints the table it always did. */
@@ -93,6 +93,7 @@ function rowPx(row: SewnTableRow, cols: readonly number[]): number {
     row.size,
     row.material,
     '',
+    row.step,
     row.note,
   ];
   return CELL_Y_PX + LINE_PX * Math.max(...cols.map((width, i) => linesIn(cells[i], width)));

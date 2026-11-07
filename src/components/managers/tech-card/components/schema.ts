@@ -1566,6 +1566,9 @@ const operationSchema = z
     // деталей карточки — той же функцией, что на сервере (assembly-frontier). Хранить её значило
     // бы завести второй источник истины, который разъедется с первым при удалении детали.
     inputKeys: z.array(z.string()).default([]),
+    // Labels attached or hung by this step. Keys share the piece/cut-strip identity space, but
+    // labels remain picture inputs rather than structural assembly inputs.
+    labelKeys: z.array(z.string()).default([]),
     // Код узла, который производит шаг («SHELL»). Пусто = шаг ничего не собирает: это обработка,
     // её входы остаются доступными следующим шагам.
     outputUnitKey: z.string().optional().default(''),
@@ -2943,6 +2946,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       // Объединение (46) — источник; легаси-проекция (21) остаётся фолбэком для архивных
       // снапшотов, отданных ровно так, как были записаны: у них поля 46 нет вовсе.
       inputKeys: (o.inputKeys?.length ? o.inputKeys : o.pieceLineKeys ?? []).filter(Boolean),
+      labelKeys: (o.labelKeys ?? []).filter(Boolean),
       outputUnitKey: o.outputUnitKey ?? '',
       outputUnitName: o.outputUnitName ?? '',
       seamKeys: (o.seamKeys ?? []).filter((k) => !!k && !poseKeySet.has(k)),
@@ -4113,6 +4117,7 @@ export function mapFormToTechCardInsert(
         // Осведомлённая запись живёт по объединению; поле 21 сервер в ней игнорирует, поэтому
         // отправлять его не нужно и вредно — оно стало бы вторым мнением о тех же входах.
         inputKeys: (o.inputKeys ?? []).map((k) => k.trim()).filter(Boolean),
+        labelKeys: [...new Set((o.labelKeys ?? []).map((k) => k.trim()).filter(Boolean))],
         outputUnitKey: (o.outputUnitKey ?? '').trim(),
         outputUnitName: (o.outputUnitName ?? '').trim(),
         // Carried through unchanged (dedup only): the server refuses a key the card does not hold.

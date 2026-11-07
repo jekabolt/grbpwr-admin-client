@@ -61,6 +61,7 @@ import {
   TILE_QUIET,
 } from 'ui';
 import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-textarea-field';
+import { LabelIcon } from './design/hardware-icons';
 import { decimalToInput, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { revealField } from 'utils/field-errors';
 import { isDxfUrl } from 'utils/pattern';
@@ -174,6 +175,9 @@ import {
   threadTensionOptions,
 } from './equipment-options';
 import { kindLabel, preferredBomKinds } from './bom-kind';
+import type { FormGarmentLabel } from './labels-schema';
+import { labelPictogram, labelSizeText } from './sewn-label-row';
+import { garmentLabelKindNames, kindLabel as garmentLabelName } from './tech-card-options';
 // ВЫВОДИМОСТЬ — ЧИСТЫЕ ФУНКЦИИ ЖИВУТ ОТДЕЛЬНО, И ЭТО НЕ СТИЛЬ. Правило «ровно один кандидат или
 // молчим» проверяется пробой на фикстурах, а не глазами по редактору на семь тысяч строк;
 // подстановка же — жест интерфейса, и она вся здесь: значение в поле + видимая метка.
@@ -773,18 +777,7 @@ const OPERATION_TYPE_EXPECTS: Partial<Record<common_TechCardOperationType, Expec
     what: 'fusing',
   },
 };
-// Labels are keyed on the WORK: the same lockstitch sews seams too, so the machine says nothing here.
-const ATTACH_LABEL_WORK = 'attach_label';
 const LABEL_SECTION = 'TECH_CARD_BOM_SECTION_LABEL';
-const WORK_EXPECTS: Record<string, ExpectedMaterial> = {
-  [ATTACH_LABEL_WORK]: { section: LABEL_SECTION, what: 'label' },
-};
-// A label line of these kinds is tied or stuck on after sewing, so no step owes it a stitch.
-const NOT_SEWN_LABEL_KINDS = new Set([
-  'TECH_CARD_BOM_KIND_HANGTAG_STRING',
-  'TECH_CARD_BOM_KIND_STICKER',
-]);
-const NOT_SEWN_GARMENT_LABELS = new Set(['hangtag', 'barcode']);
 const MACHINE_TYPE_EXPECTS: Partial<Record<common_TechCardMachineType, ExpectedMaterial>> = {
   TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH: {
     section: 'TECH_CARD_BOM_SECTION_HARDWARE',
@@ -902,6 +895,7 @@ export const emptyOperation = {
   labelAttachStitch: NONE_LABEL_ATTACH,
   note: '',
   inputKeys: [] as string[],
+  labelKeys: [] as string[],
   outputUnitKey: '',
   outputUnitName: '',
   bomLineKeys: [] as string[],
@@ -1353,6 +1347,7 @@ function OperationsHeaderWarnings({
   const garmentLabels = (useWatch({ control, name: 'garmentLabels' }) ?? []) as Array<{
     key?: string;
     kind?: string;
+    lineKey?: string;
     bomItemId?: number;
     bomLineKey?: string;
   }>;
@@ -1372,27 +1367,12 @@ function OperationsHeaderWarnings({
           return !key || !attachedKeys.has(key);
         })
       : [];
-  // A label line no step sews on: that work is in neither the route nor the SAM. Not part of offStep
-  // because a tag or a sticker sits in the same section and is never sewn.
-  const notSewnLabels = garmentLabels.filter((label) =>
-    NOT_SEWN_GARMENT_LABELS.has(label.kind?.trim() || label.key?.trim() || ''),
-  );
-  const notSewnBomIds = new Set(notSewnLabels.map((label) => label.bomItemId ?? 0));
-  const notSewnBomKeys = new Set(
-    notSewnLabels.map((label) => label.bomLineKey?.trim() || '').filter(Boolean),
-  );
+  const ownedLabelKeys = new Set(operations.flatMap((operation) => operation.labelKeys ?? []));
   const labelsOffRoute =
     total > 0
-      ? bomItems.filter((b) => {
-          if ((b.section ?? '') !== LABEL_SECTION) return false;
-          const key = b.lineKey?.trim();
-          if (
-            NOT_SEWN_LABEL_KINDS.has(b.kind ?? '') ||
-            notSewnBomIds.has(b.id ?? 0) ||
-            (!!key && notSewnBomKeys.has(key))
-          )
-            return false;
-          return !key || !attachedKeys.has(key);
+      ? garmentLabels.filter((label) => {
+          const key = label.lineKey?.trim() || '';
+          return key && !ownedLabelKeys.has(key);
         })
       : [];
   // Steps with no sketch pin — counted only once the sketch carries pins at all; on a card without
@@ -1429,7 +1409,7 @@ function OperationsHeaderWarnings({
   }
   if (labelsOffRoute.length > 0) {
     items.push(
-      `no step sews on: ${labelsOffRoute.map((b) => b.name?.trim() || 'unnamed').join(' · ')}`,
+      `on no step: ${labelsOffRoute.map((label) => label.key?.trim() || 'label').join(' · ')}`,
     );
   }
   if (unpinned > 0)
@@ -2495,6 +2475,79 @@ function useStepInference(
 }
 
 // ── the step editor ──────────────────────────────────────────────────────────────────────────
+function OperationLabelPicker({ index, frozen }: { index: number; frozen: boolean }) {
+  const { control, setValue } = useFormContext<TechCardFormData>();
+  const labels = (useWatch({ control, name: 'garmentLabels' }) ?? []) as FormGarmentLabel[];
+  const operations = useWatch({ control, name: 'operations' }) ?? [];
+  const selected = (operations[index]?.labelKeys ?? []).filter(Boolean);
+  const ownedElsewhere = new Set(
+    operations.flatMap((operation, operationIndex) =>
+      operationIndex === index ? [] : operation.labelKeys ?? [],
+    ),
+  );
+  const available = labels.filter((label) => {
+    const key = label.lineKey?.trim() || '';
+    return key && (selected.includes(key) || !ownedElsewhere.has(key));
+  });
+  const [, setParams] = useSearchParams();
+  const toggle = (key: string) =>
+    setValue(
+      `operations.${index}.labelKeys`,
+      selected.includes(key) ? selected.filter((value) => value !== key) : [...selected, key],
+      { shouldDirty: true },
+    );
+
+  return (
+    <>
+      <GroupLabel>labels</GroupLabel>
+      {available.length ? (
+        <div className='flex flex-wrap gap-2'>
+          {available.map((label) => {
+            const key = label.lineKey!.trim();
+            const kind = label.kind?.trim() || label.key?.trim() || '';
+            const name =
+              label.key?.trim() || garmentLabelName(garmentLabelKindNames, kind) || 'label';
+            const size = labelSizeText(label);
+            return (
+              <Tile
+                key={key}
+                name={name}
+                sub={size ? `${size} mm` : ''}
+                pressed={selected.includes(key)}
+                media={
+                  <span className='flex h-16 items-center justify-center border-b border-hairline bg-pageBg'>
+                    <LabelIcon kind={labelPictogram(kind)} size={40} />
+                  </span>
+                }
+                className='w-32 p-0 [&>p]:mx-2'
+                onClick={frozen ? undefined : () => toggle(key)}
+              />
+            );
+          })}
+        </div>
+      ) : (
+        <Button
+          type='button'
+          variant='underline'
+          size='xs'
+          onClick={() =>
+            setParams(
+              (previous) => {
+                const next = new URLSearchParams(previous);
+                next.set('tab', 'labels');
+                return next;
+              },
+              { replace: true },
+            )
+          }
+        >
+          add labels
+        </Button>
+      )}
+    </>
+  );
+}
+
 // The whole sewing spec for ONE step. Remounted (keyed on the field id) whenever the selection
 // moves, so the "skip the first run" guards below start clean and selecting a step never dirties
 // the form.
@@ -3424,6 +3477,7 @@ function OperationEditor({
     attachMethod,
     coverageMode,
     labelAttachStitch,
+    work: workValue,
     // ПОД-ГЛАГОЛ ВТО — ЧАСТЬ ЗАПИСИ, ПО КОТОРОЙ ОПОЗНАЁТСЯ ПУНКТ (0325). Без него семь ВТО-пунктов
     // читались бы одним «Press flat»: выбрал «Steam» — заголовок сказал бы «приутюжить».
     pressAction,
@@ -3506,6 +3560,7 @@ function OperationEditor({
       : undefined;
   const kindHowKind = operationHowKind(activeKind?.id, workValue);
   const howKind = showBindingStyle ? 'bind' : kindHowKind;
+  const isLabelStep = activeKind?.id === 'B5' || activeKind?.id === 'J3';
   const showIdentityOperation = !activeKind || activeKind.verb !== opType;
   const showIdentityMachine =
     isMachineStep &&
@@ -3730,6 +3785,7 @@ function OperationEditor({
         attachMethod: r.attachMethod as string,
         coverageMode: r.coverageMode as string,
         labelAttachStitch: r.labelAttachStitch as string,
+        work: r.work as string,
         pressAction: r.pressAction as string,
         bomKinds: bomKeys
           .map((key) => bomLines.find((b) => b.lineKey === key)?.kind ?? '')
@@ -4281,9 +4337,7 @@ function OperationEditor({
     ...preferredBomKinds(opType, machineType),
     ...(activeKind?.bomKinds ?? []),
   ]);
-  const isPreferred = (b: BomLine) =>
-    (!!b.kind && preferredKinds.has(b.kind)) ||
-    (workValue === ATTACH_LABEL_WORK && b.section === LABEL_SECTION);
+  const isPreferred = (b: BomLine) => !!b.kind && preferredKinds.has(b.kind);
   const unlinkedBySection = (() => {
     const groups = new Map<string, BomLine[]>();
     for (const b of unlinkedBoms) {
@@ -4312,7 +4366,6 @@ function OperationEditor({
   // it clears the moment the operator picks one. Both axes have an opinion: the step type answers
   // for fusing, the machine for the button-attach automat.
   const expects =
-    WORK_EXPECTS[workValue] ??
     OPERATION_TYPE_EXPECTS[opType as common_TechCardOperationType] ??
     (isMachineStep ? MACHINE_TYPE_EXPECTS[machineType as common_TechCardMachineType] : undefined);
   const expectsMaterial =
@@ -4706,7 +4759,27 @@ function OperationEditor({
         )}
       </div>
 
-      {(howKind !== 'none' || showPressToward) && (
+      {isLabelStep && <OperationLabelPicker index={index} frozen={frozen} />}
+
+      {howKind === 'label' && (
+        <>
+          <GroupLabel>stitch</GroupLabel>
+          <div className='grid grid-cols-2 gap-2'>
+            <SelectField
+              name={`operations.${index}.labelAttachStitch`}
+              label=''
+              items={stepEnumOptions(
+                LABEL_ATTACH_STITCH_LABELS,
+                '— not stated —',
+                labelAttachStitch,
+              )}
+              className={selectNoGrow}
+            />
+          </div>
+        </>
+      )}
+
+      {((howKind !== 'none' && howKind !== 'label') || showPressToward) && (
         <>
           <GroupLabel>how</GroupLabel>
           {howKind === 'fuse' && <WorkVariantTiles index={index} label='' />}
@@ -4815,20 +4888,6 @@ function OperationEditor({
                 name={`operations.${index}.bartackLengthMm`}
                 label='length, mm'
                 maxDecimals={1}
-              />
-            </div>
-          )}
-          {howKind === 'label' && (
-            <div className='grid grid-cols-2 gap-2'>
-              <SelectField
-                name={`operations.${index}.labelAttachStitch`}
-                label='stitch'
-                items={stepEnumOptions(
-                  LABEL_ATTACH_STITCH_LABELS,
-                  '— not stated —',
-                  labelAttachStitch,
-                )}
-                className={selectNoGrow}
               />
             </div>
           )}

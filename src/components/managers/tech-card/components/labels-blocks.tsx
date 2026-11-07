@@ -5,7 +5,6 @@ import type {
   common_TechCardMediaFull,
 } from 'api/proto-http/admin';
 import { MaterialThumb } from 'components/managers/materials/components/material-thumb';
-import { useCareLabelSource } from 'components/managers/tech-card/care-labels/adapter';
 import { useEffect, useMemo, useState, type ChangeEvent, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import {
@@ -18,7 +17,6 @@ import {
   Select,
   Section,
   Text,
-  Tiles,
   UndoRow,
 } from 'ui';
 
@@ -29,13 +27,7 @@ import { type FormGarmentLabel, type FormPackagingItem } from './labels-schema';
 import type { TechCardFormData } from './schema';
 import { PackagingShelf, packagingIssues } from './packaging-shelf';
 import { isCompositionLabel, labelBomLine } from './sewn-label-model';
-import {
-  bornLabelFacts,
-  labelIssue,
-  madeIntent,
-  SewnLabelModal,
-  SewnLabelTile,
-} from './sewn-label-row';
+import { bornLabelFacts, labelIssue, madeIntent, SewnLabelRow } from './sewn-label-row';
 import { StockPickerModal, type StockPickerOption } from './labels-pkg-shared';
 import {
   garmentLabelKindNames,
@@ -247,9 +239,10 @@ type RemovedLabel = {
   name: string;
   labels: FormGarmentLabel[];
   bomItems: NonNullable<TechCardFormData['bomItems']>;
+  operations: NonNullable<TechCardFormData['operations']>;
 };
 
-/** LABELS: stock-aware visual tiles with one compact editor. */
+/** LABELS: stock-aware rows, expanded in place. */
 export function LabelsBlock({
   techCard,
   canEdit = true,
@@ -262,24 +255,8 @@ export function LabelsBlock({
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as NonNullable<
     TechCardFormData['bomItems']
   >;
-  const rows = useMemo(
-    () =>
-      all.some((row) => isCompositionLabel(row.key))
-        ? all
-        : ([
-            {
-              key: 'composition',
-              ...bornLabelFacts('composition'),
-            } as FormGarmentLabel,
-            ...all,
-          ] as FormGarmentLabel[]),
-    [all],
-  );
+  const rows = useMemo(() => all.filter((row) => !isCompositionLabel(row.key)), [all]);
   const { materials, materialById, stock, stockKnown, onHandOf } = useLabelStock(techCard);
-  const care = useCareLabelSource(wireInt(techCard?.id));
-  const compositionMissingCountry = !!care.data?.colorways.some(
-    (colourway) => !colourway.countryCode,
-  );
 
   const [adding, setAdding] = useState(false);
   const [making, setMaking] = useState(false);
@@ -289,17 +266,10 @@ export function LabelsBlock({
 
   const keys = rows.map((row) => row.key ?? '');
   const targetRow = rows.find((row) => row.key === materialTarget);
-  const openRow = rows.find((row) => row.key === expanded);
-  const openLine = openRow ? labelBomLine(openRow, bomItems) : undefined;
-  const openMaterial = materialById.get(wireInt(openLine?.materialId));
   const selectedLine = targetRow ? labelBomLine(targetRow, bomItems) : undefined;
   const warnings = rows
     .map((row, index) => {
-      const issue = labelIssue(
-        row,
-        bomItems,
-        isCompositionLabel(row.key) && compositionMissingCountry,
-      );
+      const issue = labelIssue(row, bomItems);
       if (!issue) return null;
       const key = row.key?.trim() || `label ${index + 1}`;
       return {
@@ -322,69 +292,60 @@ export function LabelsBlock({
   return (
     <>
       <Section title='labels' action={<HeaderWarnings items={warnings} />}>
-        <Tiles min={200} className='gap-2.5'>
+        <div>
           {rows.map((row, index) => {
             const key = row.key?.trim() || `label ${index + 1}`;
             const line = labelBomLine(row, bomItems);
             const material = materialById.get(wireInt(line?.materialId));
             const onHand = onHandOf(material);
             return (
-              <SewnLabelTile
+              <SewnLabelRow
                 key={`${key.toLowerCase()}-${index}`}
-                row={row}
+                labelKey={key}
                 title={displayLabelName(row)}
                 material={material}
                 onHand={onHand}
-                compositionMissingCountry={isCompositionLabel(row.key) && compositionMissingCountry}
-                onOpen={() => setExpanded(key)}
+                canEdit={canEdit}
+                open={expanded === key}
+                onOpenChange={(open) => setExpanded(open ? key : null)}
+                onPickMaterial={() => setMaterialTarget(key)}
+                onRemove={() => {
+                  setRemoved({
+                    name: displayLabelName(row),
+                    labels: ((getValues('garmentLabels') ?? []) as FormGarmentLabel[]).slice(),
+                    bomItems: (
+                      (getValues('bomItems') ?? []) as NonNullable<TechCardFormData['bomItems']>
+                    ).slice(),
+                    operations: (
+                      (getValues('operations') ?? []) as NonNullable<TechCardFormData['operations']>
+                    ).slice(),
+                  });
+                  removeLabelWithLine(getValues, setValue, key);
+                  setExpanded(null);
+                }}
+                last={index === rows.length - 1}
               />
             );
           })}
           {canEdit ? (
-            <AddDoor shape='tile' className='min-h-50 w-full' onClick={() => setAdding(true)}>
+            <AddDoor shape='row' afterRows={rows.length > 0} onClick={() => setAdding(true)}>
               label
             </AddDoor>
           ) : null}
-        </Tiles>
+        </div>
         {removed ? (
           <UndoRow
             name={removed.name}
             onUndo={() => {
               setValue('garmentLabels', removed.labels as never, { shouldDirty: true });
               setValue('bomItems', removed.bomItems as never, { shouldDirty: true });
+              setValue('operations', removed.operations as never, { shouldDirty: true });
               setRemoved(null);
             }}
             onCommit={() => setRemoved(null)}
           />
         ) : null}
       </Section>
-
-      {openRow ? (
-        <SewnLabelModal
-          open
-          onOpenChange={(next) => {
-            if (!next) setExpanded(null);
-          }}
-          labelKey={openRow.key?.trim() || ''}
-          title={displayLabelName(openRow)}
-          material={openMaterial}
-          onHand={onHandOf(openMaterial)}
-          onPickMaterial={() => setMaterialTarget(openRow.key?.trim() || '')}
-          onRemove={() => {
-            const labelKey = openRow.key?.trim() || '';
-            setRemoved({
-              name: displayLabelName(openRow),
-              labels: ((getValues('garmentLabels') ?? []) as FormGarmentLabel[]).slice(),
-              bomItems: (
-                (getValues('bomItems') ?? []) as NonNullable<TechCardFormData['bomItems']>
-              ).slice(),
-            });
-            removeLabelWithLine(getValues, setValue, labelKey);
-            setExpanded(null);
-          }}
-          canEdit={canEdit}
-        />
-      ) : null}
 
       <LabelStockPicker
         open={adding || !!materialTarget}

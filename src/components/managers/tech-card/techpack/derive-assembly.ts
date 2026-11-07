@@ -40,6 +40,7 @@ import {
   stripKeysOfCard,
   withStripPieces,
 } from 'components/managers/tech-card/components/cut-strips/strip-pieces';
+import { withGarmentLabelPieces } from 'components/managers/tech-card/components/garment-label-pieces';
 import { BUNDLED_WORK_CATALOG } from 'components/managers/tech-card/components/operation-work';
 import {
   opIcon,
@@ -3301,7 +3302,10 @@ export function deriveAssembly(
   const t = input.t ?? englishT;
   const gapSink = sink ?? new GapSink();
   // The strips join here and not in the caller: `input.techCard` is what the cut sheet reads too.
-  const techCard = withResolvedOperationPieces(withStripPieces(input.techCard), input.pieces);
+  const techCard = withResolvedOperationPieces(
+    withGarmentLabelPieces(withStripPieces(input.techCard)),
+    input.pieces,
+  );
   const resolvedInput = { ...input, techCard };
   const ops = readOps(resolvedInput);
   const completeGeometry = [...input.pieces.values()].every(
