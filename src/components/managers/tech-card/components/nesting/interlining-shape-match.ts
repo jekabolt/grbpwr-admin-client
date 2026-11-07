@@ -79,39 +79,6 @@ export function interliningPieceShapeTargets(args: {
 
 const cross = (a: Pt, b: Pt, c: Pt) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
 
-const pointOnSegment = (point: Pt, a: Pt, b: Pt) => {
-  if (Math.abs(cross(a, b, point)) > EPS) return false;
-  return (
-    point.x >= Math.min(a.x, b.x) - EPS &&
-    point.x <= Math.max(a.x, b.x) + EPS &&
-    point.y >= Math.min(a.y, b.y) - EPS &&
-    point.y <= Math.max(a.y, b.y) + EPS
-  );
-};
-
-const pointInOrOnRing = (point: Pt, ring: readonly Pt[]) => {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const a = ring[j];
-    const b = ring[i];
-    if (pointOnSegment(point, a, b)) return true;
-    if (
-      a.y > point.y !== b.y > point.y &&
-      point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x
-    )
-      inside = !inside;
-  }
-  return inside;
-};
-
-const properlyCrosses = (a: Pt, b: Pt, c: Pt, d: Pt) => {
-  const abC = cross(a, b, c);
-  const abD = cross(a, b, d);
-  const cdA = cross(c, d, a);
-  const cdB = cross(c, d, b);
-  return abC * abD < -EPS && cdA * cdB < -EPS;
-};
-
 /** The file contour in the garment piece's local centimetre frame, using the canvas centring rule. */
 export function centredInterliningShape(shape: PieceDTO, piece: PieceDTO): Pt[] {
   const dx = piece.bboxW / 2 - shape.bboxW / 2;
@@ -241,9 +208,10 @@ export function matchInterliningShapes(args: {
     },
     dict,
   );
-  return [...file.entries.values()]
+  type Claim = { pair: InterliningShapePair; rank: [number, number, number] };
+  const drafts = [...file.entries.values()]
     .sort((left, right) => byName(left.key, right.key))
-    .map((entry): InterliningShapeMatch => {
+    .map((entry): InterliningShapeMatch & { claims: Claim[] } => {
       const shape = representative(entry, preferred);
       const candidates = [...targets.values()].flatMap((target) => {
         const fitting = target.pairs.filter((pair) => interliningShapeFits(shape, pair.piece));
@@ -279,7 +247,7 @@ export function matchInterliningShapes(args: {
         );
       });
       const best = pool[0];
-      if (!best) return { identity: entry.identity, shape, pairs: [], by: 'no pair' };
+      if (!best) return { identity: entry.identity, shape, pairs: [], by: 'no pair', claims: [] };
       const selected = [
         best,
         ...pool.filter(
@@ -296,8 +264,20 @@ export function matchInterliningShapes(args: {
         rival.named === best.named &&
         rival.exact === best.exact
       ) {
-        return { identity: entry.identity, shape, pairs: [], by: 'no pair' };
+        return { identity: entry.identity, shape, pairs: [], by: 'no pair', claims: [] };
       }
+      const claims: Claim[] = selected.flatMap((candidate) =>
+        candidate.fitting.map((pair) => ({
+          pair,
+          // Who keeps a piece two shapes both want: its own name first, then the shape's best
+          // target before a mirrored fan-out, then the closer form.
+          rank: [
+            candidate.exact ? 0 : candidate.named ? 1 : 2,
+            candidate === best ? 0 : 1,
+            candidate.score,
+          ] as [number, number, number],
+        })),
+      );
       const pairs = new Map<string, InterliningShapePair>();
       for (const candidate of selected)
         for (const pair of candidate.fitting)
@@ -307,8 +287,28 @@ export function matchInterliningShapes(args: {
         shape,
         pairs: [...pairs.values()].sort((left, right) => byName(left.pieceName, right.pieceName)),
         by: selected.some((candidate) => candidate.named) ? 'name + shape' : 'shape',
+        claims,
       };
     });
+
+  // One to one: a piece takes exactly one shape, so a cuff the file draws twice (SLV_M_L and
+  // SLV_M_R) never gets two zones; a mirrored fan-out only fills a piece no other shape claims.
+  const owner = new Map<string, { index: number; rank: [number, number, number] }>();
+  const keyOf = (pair: InterliningShapePair) => pair.pieceLineKey.trim().toLowerCase();
+  const before = (a: [number, number, number], b: [number, number, number]) =>
+    a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+  drafts.forEach((draft, index) => {
+    for (const claim of draft.claims) {
+      const held = owner.get(keyOf(claim.pair));
+      if (!held || before(claim.rank, held.rank) < 0)
+        owner.set(keyOf(claim.pair), { index, rank: claim.rank });
+    }
+  });
+  return drafts.map(({ claims, ...draft }, index): InterliningShapeMatch => {
+    void claims;
+    const pairs = draft.pairs.filter((pair) => owner.get(keyOf(pair))?.index === index);
+    return pairs.length ? { ...draft, pairs } : { ...draft, pairs, by: 'no pair' };
+  });
 }
 
 const triangleArea = (a: Pt, b: Pt, c: Pt) => Math.abs(cross(a, b, c));

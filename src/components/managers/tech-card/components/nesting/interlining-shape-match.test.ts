@@ -75,6 +75,25 @@ describe('interlining shape matching', () => {
     expect(by).toEqual({ CLR: ['CLR'], FL: ['FL'] });
   });
 
+  it('gives each piece one shape: mirrored cuffs drawn twice go one to one by name', () => {
+    const left = piece(1, 'SLV_M_L', rect(29, 16));
+    const right = piece(2, 'SLV_M_R', rect(29, 16));
+    const matches = matchInterliningShapes({
+      shapes: [piece(10, 'SLV_M_L', rect(29, 16)), piece(11, 'SLV_M_R', rect(29, 16))],
+      mainBlocks: [left, right],
+      mainAliases: [],
+      pieces: [
+        { lineKey: 'SLV_M_L', name: 'SLV_M_L' },
+        { lineKey: 'SLV_M_R', name: 'SLV_M_R' },
+      ],
+      sizeTokens: [],
+    });
+    const by = Object.fromEntries(
+      matches.map((m) => [m.identity, m.pairs.map((p) => p.pieceName)]),
+    );
+    expect(by).toEqual({ SLV_M_L: ['SLV_M_L'], SLV_M_R: ['SLV_M_R'] });
+  });
+
   it('matches by shape, fans one cuff shape to mirrored pieces, and leaves an odd shape open', () => {
     const collar = piece(1, 'CLR', [
       { x: 0, y: 0 },
