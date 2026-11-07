@@ -16,8 +16,18 @@ import {
   isRefusal,
   notifyFailure,
 } from 'components/managers/production-runs/components/feedback';
-import { useEffect, useMemo, useState } from 'react';
-import { Button, ConfirmationModal, GroupLabel, Pill, Select, Text, EmptyCell, Close } from 'ui';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Button,
+  Combobox,
+  ConfirmationModal,
+  GroupLabel,
+  Pill,
+  Select,
+  Text,
+  EmptyCell,
+  Close,
+} from 'ui';
 import {
   decimalToInput,
   inputToDecimal,
@@ -29,9 +39,10 @@ import { fieldErrorSummary } from 'utils/field-errors';
 import { CompositionWizard, type CompRow } from './composition-wizard';
 import { CuttingCoefficientSuggestion } from './cutting-coefficient-suggestion';
 import { composeArticle, type ArticleInput } from './material-code';
+import { suppliers as materialSuppliers } from './material-filters';
 import { mediaThumbUrl } from './material-thumb';
 import { materialPurposeOptions, resolveMaterialPurpose } from './purpose-options';
-import { useSaveMaterial } from './useMaterials';
+import { useMaterials, useSaveMaterial } from './useMaterials';
 
 // ───── ВРЕМЕННЫЙ МОСТ Ф4.8 — СНЯТЬ ПОСЛЕ ПЕРЕСБОРКИ ЗЕРКАЛА ПРОТО ─────────────────────────────
 // fabric_thickness_mm уже есть в proto бэкенда (common/techcard.proto: Material #33) и уже ходит по
@@ -116,6 +127,16 @@ export const classForSection = (section: common_TechCardBomSection): common_Mate
   }
 };
 
+export const unitForSection = (section: common_TechCardBomSection): string =>
+  [
+    'TECH_CARD_BOM_SECTION_FABRIC',
+    'TECH_CARD_BOM_SECTION_LINING',
+    'TECH_CARD_BOM_SECTION_INTERLINING',
+    'TECH_CARD_BOM_SECTION_INSULATION',
+  ].includes(section)
+    ? 'm'
+    : 'pcs';
+
 // Inverse of classForSection for the three classes that map 1:1 to a BOM section: the section is
 // derived from the class instead of being asked for a second time (killing the class-vs-section
 // contradiction). FABRIC and OTHER are intentionally absent — FABRIC fans out to
@@ -139,6 +160,13 @@ export const resolveMaterialClass = (m: common_Material): common_MaterialClass =
   const legacyHasData = !!(m.fabricWidth?.value || m.fabricWeightGsm?.value || m.composition);
   return legacyHasData ? 'MATERIAL_CLASS_FABRIC' : 'MATERIAL_CLASS_OTHER';
 };
+
+export const materialClassForEdit = (
+  material: common_Material | undefined,
+  section: common_TechCardBomSection,
+  sectionChanged: boolean,
+): common_MaterialClass =>
+  material && !sectionChanged ? resolveMaterialClass(material) : classForSection(section);
 
 type FabricDraft = {
   widthCm: string;
@@ -390,7 +418,14 @@ export function MaterialModal({
   const [fail, setFail] = useState<{ text: string; name?: boolean } | null>(null);
   const { dictionary } = useDictionary();
   const save = useSaveMaterial();
+  const { data: knownMaterials } = useMaterials('', true, open);
+  const supplierNames = useMemo(
+    () => materialSuppliers(knownMaterials?.materials ?? []),
+    [knownMaterials],
+  );
   const [d, setD] = useState<Draft>(empty);
+  const unitTouched = useRef(false);
+  const sectionTouched = useRef(false);
   // #68: the warehouse code is backend-generated; it opens locked (auto) and the operator opts into
   // a manual override rather than being asked to invent the value the system should assign.
   const [codeOverride, setCodeOverride] = useState(false);
@@ -419,13 +454,26 @@ export function MaterialModal({
     if (!open) return;
     setFail(null);
     const next = material
-      ? draftFromMaterial(material)
-      : {
-          ...empty,
-          section: defaultSection ?? empty.section,
-          materialClass: defaultSection ? classForSection(defaultSection) : 'MATERIAL_CLASS_FABRIC',
-        };
+      ? (() => {
+          const draft = draftFromMaterial(material);
+          return {
+            ...draft,
+            unit: draft.unit || unitForSection(draft.section),
+            materialClass: materialClassForEdit(material, draft.section, false),
+          };
+        })()
+      : (() => {
+          const section = defaultSection ?? empty.section;
+          return {
+            ...empty,
+            section,
+            unit: unitForSection(section),
+            materialClass: classForSection(section),
+          };
+        })();
     const resolvedPurpose = resolveMaterialPurpose(material?.purpose);
+    unitTouched.current = !!material?.unit?.trim();
+    sectionTouched.current = false;
     setD(next);
     setCodeOverride(false);
     setPurpose(resolvedPurpose);
@@ -450,22 +498,14 @@ export function MaterialModal({
   };
 
   const set = (patch: Partial<Draft>) => setD((prev) => ({ ...prev, ...patch }));
-  // Changing the class keeps the section consistent (kills the class-vs-section contradiction): the
-  // 1:1 classes derive their section (control hidden); FABRIC/OTHER keep the current section when it
-  // already belongs to the new class's family, else reset to that family's canonical section so the
-  // now-visible select never shows a mismatched value. Both fields stay persisted.
-  const changeClass = (materialClass: common_MaterialClass) => {
-    const derived = derivedSection(materialClass);
-    if (derived) {
-      set({ materialClass, section: derived });
-      return;
-    }
-    const keep = classForSection(d.section) === materialClass;
-    const fallback: common_TechCardBomSection =
-      materialClass === 'MATERIAL_CLASS_FABRIC'
-        ? 'TECH_CARD_BOM_SECTION_FABRIC'
-        : 'TECH_CARD_BOM_SECTION_TRIM';
-    set({ materialClass, section: keep ? d.section : fallback });
+  const changeSection = (section: common_TechCardBomSection) => {
+    sectionTouched.current = true;
+    setD((previous) => ({
+      ...previous,
+      section,
+      materialClass: materialClassForEdit(material, section, sectionTouched.current),
+      unit: unitTouched.current ? previous.unit : unitForSection(section),
+    }));
   };
   const setFabric = (patch: Partial<FabricDraft>) =>
     setD((prev) => ({ ...prev, fabric: { ...prev.fabric, ...patch } }));
@@ -528,7 +568,7 @@ export function MaterialModal({
       return next;
     });
 
-  const effectiveSection = derivedSection(d.materialClass) ?? d.section;
+  const effectiveSection = d.section;
   const isLabelSection = effectiveSection === 'TECH_CARD_BOM_SECTION_LABEL';
 
   const submit = () => {
@@ -758,7 +798,7 @@ export function MaterialModal({
           {/* ---- IDENTITY -------------------------------------------------------------------- */}
           <GroupLabel>identity</GroupLabel>
           <div className={grid}>
-            <label className='sm:col-span-2 flex flex-col gap-1'>
+            <label className='flex flex-col gap-1'>
               <Text variant='label' size='micro' tracking='label' className='uppercase'>
                 name *
               </Text>
@@ -771,47 +811,70 @@ export function MaterialModal({
             </label>
             <label className='flex flex-col gap-1'>
               <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                material class
+                section
               </Text>
-              <select
-                className={cell}
-                value={d.materialClass}
-                onChange={(e) => changeClass(e.target.value as common_MaterialClass)}
-              >
-                {materialClassOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
+              <Select
+                name='material-section'
+                value={d.section}
+                placeholder='section'
+                items={techCardBomSectionOptions}
+                onValueChange={(section) => changeSection(section as common_TechCardBomSection)}
+                fullWidth
+              />
             </label>
-            {/* section is only asked for when it's ambiguous: FABRIC (fabric/lining/interlining/
-              insulation) and OTHER (trim/label). For hardware/thread/packaging it's derived 1:1 from
-              the class (see changeClass + submit), so the control is hidden but the field persists. */}
-            {!derivedSection(d.materialClass) && (
-              <label className='flex flex-col gap-1'>
-                <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                  section
-                </Text>
-                <select
-                  className={cell}
-                  value={d.section}
-                  onChange={(e) => set({ section: e.target.value as common_TechCardBomSection })}
-                >
-                  {techCardBomSectionOptions.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
+            <div className='flex flex-col gap-1'>
+              <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                supplier
+              </Text>
+              <Combobox
+                name='material-supplier'
+                valueLabel={d.supplier}
+                placeholder='supplier'
+                searchPlaceholder='supplier'
+                filter={(query) => {
+                  const needle = query.trim().toLocaleLowerCase();
+                  const choices = supplierNames.filter((supplier) =>
+                    supplier.toLocaleLowerCase().includes(needle),
+                  );
+                  const typed = query.trim();
+                  if (
+                    typed &&
+                    !choices.some(
+                      (supplier) => supplier.toLocaleLowerCase() === typed.toLocaleLowerCase(),
+                    )
+                  ) {
+                    choices.unshift(typed);
+                  }
+                  return [
+                    {
+                      key: 'supplier',
+                      label: 'supplier',
+                      options: choices.map((supplier) => ({ value: supplier, label: supplier })),
+                    },
+                  ];
+                }}
+                onSelect={(supplier) => set({ supplier })}
+              />
+            </div>
+            <label className='flex flex-col gap-1'>
+              <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                unit
+              </Text>
+              <input
+                className={cell}
+                placeholder='m / pcs / kg'
+                value={d.unit}
+                onChange={(e) => {
+                  unitTouched.current = true;
+                  set({ unit: e.target.value });
+                }}
+              />
+            </label>
             {isLabelSection && (
               <label className='flex flex-col gap-1'>
                 <Text variant='label' size='micro' tracking='label' className='uppercase'>
                   type
                 </Text>
-                {/* A stored type cannot be cleared: the server reads UNKNOWN as keep. */}
                 <Select
                   name='material-label-type'
                   size='sm'
@@ -827,27 +890,6 @@ export function MaterialModal({
                 />
               </label>
             )}
-            <label className='flex flex-col gap-1'>
-              <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                unit
-              </Text>
-              <input
-                className={cell}
-                placeholder='m / pcs / kg'
-                value={d.unit}
-                onChange={(e) => set({ unit: e.target.value })}
-              />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                supplier
-              </Text>
-              <input
-                className={cell}
-                value={d.supplier}
-                onChange={(e) => set({ supplier: e.target.value })}
-              />
-            </label>
           </div>
 
           {/* ---- SOURCING (collapsible) — edge fields lifted out of the identity block -------- */}
