@@ -17,14 +17,16 @@ export type CreateReadyInput = {
   categoryId?: number | null;
   season?: string | null;
   styleNumber?: string | null;
+  purpose?: string | null;
 };
 
 export type CreateReady = { ok: true } | { ok: false; reason: string; missing: string[] };
 
 export function createReady(v: CreateReadyInput): CreateReady {
+  const auxiliary = v.purpose === 'TECH_CARD_PURPOSE_AUXILIARY';
   const missing = [
     !(v.name ?? '').trim() && 'name',
-    !(Number(v.categoryId ?? 0) > 0) && 'category',
+    !auxiliary && !(Number(v.categoryId ?? 0) > 0) && 'category',
     !parseSeasonToSku(v.season ?? '') && 'season',
     !(v.styleNumber ?? '').trim() && 'style number',
   ].filter((x): x is string => typeof x === 'string');

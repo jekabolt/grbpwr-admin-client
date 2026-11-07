@@ -28,8 +28,6 @@ import {
   formatTechCardDate,
   techCardErrorMessage,
 } from 'components/managers/tech-cards/components/utils';
-import { MaterialModal } from 'components/managers/materials/components/material-modal';
-import { MaterialPicker } from 'components/managers/materials/components/material-picker';
 import { techCardStageOptions } from 'constants/filter';
 import { ROUTES, SECTION } from 'constants/routes';
 import {
@@ -79,12 +77,7 @@ import { AssemblyField } from './assembly-field';
 import { LabelsBlock, PackagingBlock } from './labels-blocks';
 import { StyleProjects } from './style-projects';
 import { TechCardTasksPanel } from './tech-card-tasks-panel';
-import {
-  activeVariantCount,
-  AdoptLegacyOutputButton,
-  OutputVariantsPanel,
-  seedColourVariants,
-} from './output-variants-field';
+import { activeVariantCount, Makes, seedColourVariants } from './output-variants-field';
 import { PatternsField } from './patterns-field';
 import { MarkersSection } from './nesting/markers-section';
 import { DevExpensesField } from './dev-expenses-field';
@@ -1022,16 +1015,10 @@ export function TechCardForm({
   // `purpose` / `isAux` are read further up — the tab plumbing branches on them.
   const outputMaterialId = (useWatch({ control: form.control, name: 'outputMaterialId' }) ??
     0) as number;
-  const [materialModalOpen, setMaterialModalOpen] = useState(false);
   // 0252 colour variants. Read off the CARD, never the form: they are written by their own RPCs
   // (a variant owns warehouse stock, so the full-replace save must not be able to re-mint or drop
   // one), which also means they are already saved — there is nothing here for Save to carry.
   const outputVariants = techCard?.outputVariants ?? [];
-  // ANY variant — active or retired — pins the auxiliary purpose. Only the ACTIVE ones ENABLE a
-  // run: each owns the warehouse bucket its output is booked into, so a card whose colours are all
-  // retired is back to needing the single output material before anything can be planned.
-  const liveVariants = activeVariantCount(outputVariants);
-
   // ═══ NO LOCAL DRAFTS (27.09 · O-64, D-63) ═══════════════════════════════════════════════════════
   // The owner: «оно просто должно автосохранять все и все если сохранение не прошло просто на этом
   // месте должна быть ошибка». The card keeps no draft journal — no localStorage copy, no «unsaved work
@@ -1181,7 +1168,7 @@ export function TechCardForm({
         field: `bomItems.${firstUncoveredSlot}.materialId`,
       }
     : undefined;
-  const nextStep =
+  const serverNextStep =
     isEditMode && numId && !frozen
       ? resolveNextStep({
           readiness,
@@ -1191,6 +1178,28 @@ export function TechCardForm({
           visible: (t) => isTabVisible(t as TabId),
         })
       : null;
+  const nextStep =
+    isEditMode && numId && !frozen && isAux
+      ? activeVariantCount(outputVariants) === 0 && !outputMaterialId
+        ? { key: 'aux_colour', label: '+ colour', tab: 'studio', goal: 'proto' }
+        : firstUncoveredSlot >= 0
+          ? {
+              key: 'aux_bom',
+              label: 'link bom',
+              tab: 'bom',
+              goal: 'proto',
+              field: slotStep?.field,
+            }
+          : productionRunCount === 0
+            ? {
+                key: 'aux_run',
+                label: 'plan run',
+                tab: 'production',
+                goal: 'production',
+                action: 'run' as const,
+              }
+            : null
+      : serverNextStep;
   const goNext = () => {
     if (!nextStep) return;
     const { action, field } = nextStep;
@@ -1337,6 +1346,9 @@ export function TechCardForm({
   // StyleFactsField; a ref for the retry path, which must finish THIS card rather than mint another.
   const [createdId, setCreatedId] = useState<number | undefined>(undefined);
   const createdIdRef = useRef<number | undefined>(undefined);
+  // The aux quiz picks the first MAKES colour before the card has an id. It is consumed once, after
+  // CreateTechCard returns, by the dedicated output-variant RPC.
+  const pendingCreateColour = useRef('');
   // Auto-stage bookkeeping (see the effect under the autosave controller).
   const autoStageInFlight = useRef(false);
   const autoStageSteps = useRef(0);
@@ -2848,6 +2860,14 @@ export function TechCardForm({
     // against the new id before the queue is committed.
     const minted = newId;
     flushSync(() => setCreatedId(minted));
+    const firstColour = pendingCreateColour.current;
+    if (firstColour) {
+      const seeded = await seedColourVariants(newId, [firstColour]);
+      if (seeded.created.length > 0) pendingCreateColour.current = '';
+      if (seeded.failed.length > 0) {
+        setStagingError(`card created · colour not added: ${seeded.failed[0].message}`);
+      }
+    }
     const outcome = await staging.commitAll();
     // The card exists; what failed stays staged and the autosave carries it through the UPDATE path
     // once the card's address is open.
@@ -3411,6 +3431,18 @@ export function TechCardForm({
     /* `display: contents` — the blocks stay items of the studio's stack; the wrapper only hears a
        blur of name / style number, the commits that may create a guided card. */
     <div className='contents' onBlur={onCardFieldBlur}>
+      {isAux && (
+        <Section title='makes'>
+          <Makes
+            techCardId={isEditMode ? numId : undefined}
+            variants={outputVariants}
+            legacyMaterialId={outputMaterialId}
+            canEdit={canWrite(SECTION.techCards) && !frozen}
+            hasRuns={productionRunCount > 0}
+          />
+        </Section>
+      )}
+
       {/* ═══ ONE BLOCK, NOT FOUR (studio v3, step 0 «как в референсе») ════════════════════════════
         The prototype's `cardBlock()`: a single CARD DETAILS block with a `N of 10 fields` counter
         in its rule and the groups as rules inside it — IDENTIFICATION, CLASSIFICATION, BASE MODEL
@@ -3440,58 +3472,10 @@ export function TechCardForm({
         onGoColourways={() => navTo('colorways')}
         quizOpen={createQuizOpen}
         onQuizDone={() => setCreateQuizDone(true)}
+        onAuxColour={(code) => {
+          pendingCreateColour.current = code;
+        }}
       />
-
-      {isAux && (
-        <Section title='output material' question='needed before the first run'>
-          {/* 0252: once a colour is registered the card produces one bucket PER COLOUR, and
-            the single picker below stops being the answer — showing both would offer two
-            contradictory places to say where the goods land. The variants are their own
-            immediate RPC writes, so this branch needs a SAVED card; an unsaved one has no
-            id to write against and only ever sees the legacy picker. */}
-          {isEditMode && numId && outputVariants.length > 0 ? (
-            <OutputVariantsPanel
-              techCardId={numId}
-              variants={outputVariants}
-              canEdit={canWrite(SECTION.techCards)}
-            />
-          ) : (
-            <>
-              <div className='max-w-md'>
-                <MaterialPicker
-                  value={outputMaterialId}
-                  onChange={(mid) => form.setValue('outputMaterialId', mid, { shouldDirty: true })}
-                  section='TECH_CARD_BOM_SECTION_PACKAGING'
-                  disabled={!canWrite(SECTION.techCards)}
-                  placeholder='search packaging material'
-                />
-              </div>
-              {canWrite(SECTION.techCards) && (
-                <Button
-                  type='button'
-                  variant='secondary'
-                  size='lg'
-                  className='uppercase'
-                  onClick={() => setMaterialModalOpen(true)}
-                >
-                  + create material
-                </Button>
-              )}
-              {/* The way INTO per-colour mode without stranding the balance already on the
-                books: adopt this very material as the first colour rather than minting a
-                second bucket beside it. Hidden until there is something to adopt, and
-                until the card exists to hang it on. */}
-              {isEditMode && numId ? (
-                <AdoptLegacyOutputButton
-                  techCardId={numId}
-                  materialId={outputMaterialId}
-                  canEdit={canWrite(SECTION.techCards)}
-                />
-              ) : null}
-            </>
-          )}
-        </Section>
-      )}
     </div>
   );
 
@@ -3632,11 +3616,12 @@ export function TechCardForm({
             readinessPending={readinessPending}
             readinessError={readinessError}
             canEdit={canWrite(SECTION.techCards)}
+            isAux={isAux}
             // An auxiliary run needs somewhere to BOOK its output, and there are two ways to have
             // one: the single output material, or at least one live colour variant (each colour
             // owns its own bucket). Only a card with neither cannot be planned.
-            planRunDisabled={isAux && !outputMaterialId && liveVariants === 0}
-            planRunDisabledReason='set an output material or register a colour variant before planning an auxiliary run'
+            planRunDisabled={isAux && !outputMaterialId && activeVariantCount(outputVariants) === 0}
+            planRunDisabledReason='add colour'
             next={nextStep}
             onNext={goNext}
             canRelease={canRelease}
@@ -4064,6 +4049,7 @@ export function TechCardForm({
                   <DetailsEditor
                     techCard={techCard}
                     canEdit={canWrite(SECTION.techCards) && !frozen}
+                    isAux={isAux}
                   />
                 }
                 /* THE GUIDE (onboarding S4): the server's flag once the card exists, the address's
@@ -4435,7 +4421,7 @@ export function TechCardForm({
                 которого выехал весь блок. */}
               <fieldset disabled={frozen} className='m-0 min-w-0 border-0 p-0'>
                 {/* Hidden until a cost exists: without one every cell is `…`. */}
-                {isEditMode && numId && hasCost && (
+                {!isAux && isEditMode && numId && hasCost && (
                   <Section title='estimate by colourway' question='plan vs actual'>
                     {/* `active` gates the per-colourway fan-out. Every tab of this form is MOUNTED
                       at once and merely CSS-hidden, so without this the matrix would fire one
@@ -4502,33 +4488,6 @@ export function TechCardForm({
       {/* ЗДЕСЬ СТОЯЛА ЗАКРЕПЛЁННАЯ ПОЛОСА COST (`MoneyPanel`, вертикальный флажок у правого края на
           каждой вкладке). Владелец, 2026-09-26 (O-51): «убери флажок COST который сейчас есть на
           каждом экране он не нужен». Деньги остались там, где их считают, — на вкладке костинга. */}
-      {/* Create a packaging material inline for the aux output picker (prefilled section). The
-          created material is selected straight into the field the button sits under — without
-          onCreated the operator filled a whole material form and landed back on an empty picker,
-          then had to search for the thing they had just made. shouldDirty so Save lights up: the
-          selection is a change to the CARD, which the material's own create did not persist.
-          `defaultSection` is only a DEFAULT — the modal's class/section controls stay live, so the
-          operator can create a fabric here. Auto-selecting that would pin an id the picker beside it
-          (filtered to packaging) cannot even render, leaving the field looking empty while holding a
-          value; so the selection is gated on what was actually created, and says why when it isn't. */}
-      <MaterialModal
-        open={materialModalOpen}
-        onOpenChange={setMaterialModalOpen}
-        defaultSection='TECH_CARD_BOM_SECTION_PACKAGING'
-        onCreated={(newId, material) => {
-          if (material.section !== 'TECH_CARD_BOM_SECTION_PACKAGING') {
-            notify({
-              sev: 'warn',
-              subject: 'MATERIAL',
-              text: 'created',
-              bad: 'not selected',
-              detail: `«${material.name || 'material'}» is not packaging — an aux card outputs a packaging material`,
-            });
-            return;
-          }
-          form.setValue('outputMaterialId', newId, { shouldDirty: true });
-        }}
-      />
     </FormWithAutosave>
   );
 }

@@ -13,6 +13,7 @@ import {
   doneCount,
   moodMinimumGate,
   railSteps,
+  stepDone,
   stepState,
   type ChainCtx,
   type MoodMinimum,
@@ -304,11 +305,13 @@ export function ChainRail({
   ctx,
   onStepChange,
   onExitGuide,
+  isAux = false,
 }: {
   /** What the chain reads, `now` filled in — see `useChainCtx`. */
   ctx: ChainCtx;
   /** A cell was pressed. The composer holds the step (`S.step` of the prototype) and switches. */
   onStepChange: (id: StepId) => void;
+  isAux?: boolean;
   /**
    * The way out of the guide (onboarding S4, owner Q4): `show all blocks ›`, an underlined word beside
    * the counter — the one extra organ of this header, drawn only while the card walks the guide.
@@ -340,7 +343,8 @@ export function ChainRail({
 
   /* THE LINKS OF THIS SERVER'S RAIL (C-10): five, or six where STEP 5 is still the only way to a
      3D model (`railSteps`, core/chain.ts). The cells, the counter and the bar walk the same list. */
-  const steps = railSteps(ctx);
+  const steps = railSteps(ctx).filter((step) => !(isAux && step.id === 'threed'));
+  const completed = isAux ? steps.filter((step) => stepDone(step.id, ctx)).length : doneCount(ctx);
 
   return (
     <Section
@@ -349,7 +353,7 @@ export function ChainRail({
       action={
         ctx.guided && onExitGuide ? (
           <span className='flex items-center gap-3'>
-            <StepsCounter n={doneCount(ctx)} total={steps.length} />
+            <StepsCounter n={completed} total={steps.length} />
             <Button
               variant='underline'
               size='xs'
@@ -361,7 +365,7 @@ export function ChainRail({
             </Button>
           </span>
         ) : (
-          <StepsCounter n={doneCount(ctx)} total={steps.length} />
+          <StepsCounter n={completed} total={steps.length} />
         )
       }
     >
@@ -382,9 +386,11 @@ export function ChainRail({
                 A room rather than a link: a full-width row pressed to the first (`border-t-0`),
                 counted in neither «N of 5 steps» nor the queue. Unconditional — the screen, not
                 the rail, says which workflow this server cannot run. */}
-            <div className='flex items-stretch border border-t-0 border-borderColor'>
-              {ASIDES.map((s, i) => cell(s, i > 0 ? 'border-l border-hairline' : undefined))}
-            </div>
+            {!isAux && (
+              <div className='flex items-stretch border border-t-0 border-borderColor'>
+                {ASIDES.map((s, i) => cell(s, i > 0 ? 'border-l border-hairline' : undefined))}
+              </div>
+            )}
           </div>
         </div>
       </TooltipProvider>

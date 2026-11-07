@@ -105,6 +105,7 @@ import { TrimPictogramBackdrop } from './trim-pictograms';
 export type FabricsHardwareProps = {
   band: GetDesignBandResponse;
   techCardId: number;
+  isAux?: boolean;
   disabled?: boolean;
   colorways: common_AdminColorwayRef[];
   colorwayId: number;
@@ -133,6 +134,7 @@ const LAUNCH_EXPIRY_MS = 30_000;
 export function FabricsHardware({
   band,
   techCardId,
+  isAux = false,
   disabled,
   colorways,
   colorwayId,
@@ -150,17 +152,19 @@ export function FabricsHardware({
 
   return (
     <>
-      <Section id='design-colourways' title='colourways' question='· material packs'>
-        {/* V6: `+ new` deep-links to the moodboard's colourways block. */}
-        <ColourwayStrip
-          colorways={shown}
-          selectedId={colorwayId}
-          onSelect={onColorwayChange}
-          onCreate={() => openStepOf('colorways')}
-          disabled={disabled}
-          loading={loading}
-        />
-      </Section>
+      {!isAux && (
+        <Section id='design-colourways' title='colourways' question='· material packs'>
+          {/* V6: `+ new` deep-links to the moodboard's colourways block. */}
+          <ColourwayStrip
+            colorways={shown}
+            selectedId={colorwayId}
+            onSelect={onColorwayChange}
+            onCreate={() => openStepOf('colorways')}
+            disabled={disabled}
+            loading={loading}
+          />
+        </Section>
+      )}
 
       <MaterialBench
         band={band}

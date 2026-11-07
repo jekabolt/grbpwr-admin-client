@@ -383,6 +383,51 @@ function StyleLockNote({ locked }: { locked: boolean }) {
   );
 }
 
+type AuxMadeBy = 'own' | 'bought';
+
+// Phase 1 has no aux_made_by field on the wire. Keep the hook typed so the select can start writing
+// it without another UI rewrite when the backend field lands.
+const persistAuxMadeBy = (_madeBy: AuxMadeBy): void => {
+  // TODO(proto): write TechCardInsert.aux_made_by when generated types expose it.
+};
+
+function KindField() {
+  const { control } = useFormContext<TechCardFormData>();
+  return (
+    <FormField
+      control={control}
+      name='purpose'
+      render={({ field }) => {
+        const auxiliary = field.value === 'TECH_CARD_PURPOSE_AUXILIARY';
+        return (
+          <FormItem>
+            <FormLabel>kind</FormLabel>
+            <Select
+              name='kind'
+              items={[
+                { value: 'product', label: 'product' },
+                { value: 'own', label: 'own item' },
+                { value: 'bought', label: 'bought item' },
+              ]}
+              value={auxiliary ? 'own' : 'product'}
+              onBlur={field.onBlur}
+              onValueChange={(value: string) => {
+                if (value === 'product') {
+                  field.onChange('TECH_CARD_PURPOSE_SELLABLE');
+                  return;
+                }
+                persistAuxMadeBy(value as AuxMadeBy);
+                field.onChange('TECH_CARD_PURPOSE_AUXILIARY');
+              }}
+            />
+            <FormMessage />
+          </FormItem>
+        );
+      }}
+    />
+  );
+}
+
 const NOTE_MAX = 2000;
 
 /**
@@ -551,6 +596,7 @@ export function CardDetails({
   onGoColourways,
   quizOpen = false,
   onQuizDone,
+  onAuxColour,
 }: {
   /** The SAVED card's id — undefined on a card that does not exist yet. */
   techCardId?: number;
@@ -573,6 +619,8 @@ export function CardDetails({
   /** CREATE NEW (`?guided=1`) on a card not created yet: the chip quiz instead of the fields. */
   quizOpen?: boolean;
   onQuizDone?: () => void;
+  /** Colour picked by the aux create quiz; the page creates its first MAKES row after card mint. */
+  onAuxColour?: (code: string) => void;
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const { dictionary } = useDictionary();
@@ -681,7 +729,66 @@ export function CardDetails({
         id='card-details'
         className={cn('min-w-0', GROUP_SEAM)}
       >
-        <CreateQuiz isAux={isAux} fitLocked={factLocked} onDone={() => onQuizDone?.()} />
+        <CreateQuiz
+          isAux={isAux}
+          fitLocked={factLocked}
+          onDone={() => onQuizDone?.()}
+          onAuxColour={onAuxColour}
+        />
+      </Section>
+    );
+  }
+
+  if (isAux) {
+    return (
+      <Section title='card details' id='card-details' className={cn('min-w-0', GROUP_SEAM)}>
+        <div className={GRID}>
+          <div className={W3}>
+            <InputField name='name' label='name *' placeholder='item name' />
+          </div>
+          <div className={W3}>
+            <StyleNumberCell
+              isIdea={isIdea}
+              seasonLocked={seededLocked}
+              suggesting={suggesting}
+              suggestError={suggestError}
+              onSuggest={suggest}
+              onNeedSeason={() => {
+                pendingSuggest.current = true;
+                setSeasonOpen(true);
+              }}
+            />
+          </div>
+          <div className={W3}>
+            <InputField name='brand' label='brand' placeholder='GRBPWR' disabled={seededLocked} />
+            <StyleLockNote locked={seededLocked} />
+          </div>
+          <div className={W3}>
+            <fieldset disabled={seededLocked} className='m-0 min-w-0 border-0 p-0'>
+              <SeasonField
+                key={seededLocked ? 'locked' : 'open'}
+                pickHint={seasonPickHint}
+                open={seasonOpen && !seededLocked}
+                onOpenChange={(open) => {
+                  setSeasonOpen(open);
+                  if (!open) pendingSuggest.current = false;
+                }}
+                onPicked={(sku) => {
+                  if (!pendingSuggest.current) return;
+                  pendingSuggest.current = false;
+                  void suggest(sku);
+                }}
+              />
+            </fieldset>
+            <StyleLockNote locked={seededLocked} />
+          </div>
+          <div className={W3}>
+            <KindField />
+          </div>
+          <div className={W3}>
+            <SelectField name='auxSubtype' label='type' items={techCardAuxSubtypeFormOptions} />
+          </div>
+        </div>
       </Section>
     );
   }
