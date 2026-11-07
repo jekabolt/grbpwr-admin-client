@@ -2997,6 +2997,7 @@ const sceneOperations = (techCard: common_TechCard): SceneOp[] => {
       seamKeys: posed.length ? keys.filter((key) => !poseKeys.has(key)) : keys,
       ...(posed.length ? { poseKeys: posed } : {}),
       ...(operation.foldKeys?.length ? { foldKeys: operation.foldKeys } : {}),
+      ...(operation.labelKeys?.length ? { labelKeys: operation.labelKeys } : {}),
       ...(operation.layerOrder?.length ? { layerOrder: operation.layerOrder } : {}),
       fullnessRatio: operation.stitching?.fullnessRatio?.value,
     };
