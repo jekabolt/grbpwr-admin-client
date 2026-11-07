@@ -57,6 +57,13 @@ function todayISO(): string {
   ).padStart(2, '0')}`;
 }
 
+// ConvertMaterialStock takes a protobuf Timestamp, not the date-only string the older movement
+// RPCs accept. Local noon keeps the picked wall-clock day for any UTC offset under 12 h.
+function dayToTimestamp(day: string): string | undefined {
+  const d = new Date(`${day}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+}
+
 // The balance change straight from the posted ledger row. The dialog is gone by then and no screen
 // shows before → after, so it is the one receipt kept as an ok toast (never logged).
 function posted(target: MovementTarget, m?: common_MaterialMovement, detail?: string) {
@@ -833,7 +840,7 @@ export function ConvertStockModal({
         supplierId: supplierId || undefined,
         supplierDoc: '',
         comment: '',
-        occurredAt,
+        occurredAt: dayToTimestamp(occurredAt),
         clientRequestId: requestId.current,
       });
       const inputMovement = res.conversion?.lines?.find(
