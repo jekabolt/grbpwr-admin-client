@@ -171,8 +171,15 @@ function selectedEdges(spec: PieceFuseSpec, edgeCount: number) {
   return selected;
 }
 
-function stripPaths(outline: readonly PtMm[], spec: PieceFuseSpec, insetMm: number): Paths64 {
-  const width = spec.widthMm;
+function stripPaths(
+  outline: readonly PtMm[],
+  spec: PieceFuseSpec,
+  insetMm: number,
+  seamAllowanceMm: number | null | undefined,
+): Paths64 {
+  const width = spec.widthMm ?? seamAllowanceMm;
+  if (spec.widthMm == null && !(Number.isFinite(width) && (width ?? 0) > 0))
+    throw new FuseGeometryError('strip width needs the card seam allowance');
   if (!(width != null && Number.isFinite(width) && width > 0))
     throw new FuseGeometryError('strip width must be greater than zero');
   const runs = edgeRunsOf(outline);
@@ -291,6 +298,8 @@ export function zoneRingsMm(
 /** Pure fuse geometry in piece-local millimetres. */
 export function generateFuseGeometry(input: FuseGeometryInput): FusePolygon[] {
   const outline = cleanRing(input.outline);
+  const allowance =
+    input.spec.mode === 'strip' && input.spec.widthMm == null && input.spec.edges.length === 0;
   const edgeCount = edgeRunsOf(outline).length;
   if (
     input.expectedEdgeCount != null &&
@@ -301,7 +310,11 @@ export function generateFuseGeometry(input: FuseGeometryInput): FusePolygon[] {
       `outline has ${edgeCount} edge runs; base size has ${input.expectedEdgeCount}`,
     );
   }
-  const insetMm = effectiveInset(input.spec, input.seamAllowanceMm);
+  // ALLOWANCE starts at the physical cut line. A real sewing contour defines its inner boundary;
+  // without one, the card standard supplies a uniform inner boundary. Explicit strips keep their
+  // inset behavior.
+  const usesNetOutline = allowance && input.netOutline != null;
+  const insetMm = allowance ? 0 : effectiveInset(input.spec, input.seamAllowanceMm);
   const inset = insetOutline(outline, insetMm);
   let polygons: FusePolygon[];
 
@@ -310,8 +323,18 @@ export function generateFuseGeometry(input: FuseGeometryInput): FusePolygon[] {
       polygons = [{ outer: inset, holes: [] }];
       break;
     case 'strip': {
-      const strips = stripPaths(outline, input.spec, insetMm);
-      polygons = polygonsOf(Clipper.Intersect(strips, [toPath(inset)], FillRule.NonZero));
+      if (usesNetOutline) {
+        polygons = polygonsOf(
+          Clipper.Difference(
+            [toPath(outline)],
+            [toPath(cleanRing(input.netOutline!))],
+            FillRule.NonZero,
+          ),
+        );
+      } else {
+        const strips = stripPaths(outline, input.spec, insetMm, input.seamAllowanceMm);
+        polygons = polygonsOf(Clipper.Intersect(strips, [toPath(inset)], FillRule.NonZero));
+      }
       break;
     }
     case 'zone': {

@@ -21,6 +21,10 @@ import {
   layerOptions,
 } from 'components/managers/tech-card/components/nesting/contour-layer';
 import {
+  pieceNetOutline,
+  sewingLineLayer,
+} from 'components/managers/tech-card/components/nesting/net-outline';
+import {
   defaultGrainLayer,
   grainLayerOptions,
 } from 'components/managers/tech-card/components/nesting/grain';
@@ -196,6 +200,7 @@ function sourcePieces(
   const dictSet = new Set(tokens.keys());
   const split = splitPiecesBySize(parsed, dictSet);
   const contourLayer = defaultContourLayer(layerOptions(parsed, split.codeById));
+  const seamLayer = sewingLineLayer(parsed, split.codeById);
   const chosen = contourLayer
     ? parsed.filter((piece) => piece.layer === contourLayer)
     : [...parsed];
@@ -264,6 +269,11 @@ function sourcePieces(
         sizeId,
         rank,
         outline: row.poly.map((point) => ({ x: point.x * 10, y: point.y * 10 })),
+        netOutline:
+          pieceNetOutline(row, parsed, seamLayer)?.map((point) => ({
+            x: point.x * 10,
+            y: point.y * 10,
+          })) ?? undefined,
         darts: fusingDartPolygons(row),
         grain: sourceGrain(row, grainLayer),
       });

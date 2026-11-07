@@ -25,7 +25,7 @@ export {
   type PieceFuseSpec,
 } from 'lib/fusing-dxf/types';
 
-/** Preview only: the strip drawn for an empty width (the real one is the seam allowance). */
+/** Explicit width used when the operator switches to STRIP. */
 export const PREVIEW_STRIP_MM = 10;
 
 export const WIDTH_PRESETS = [10, 15, 20, 25];
@@ -52,15 +52,29 @@ export const fuseOffDefault = (s: PieceFuseSpec) =>
   s.grain !== 'as_piece' ||
   s.darts !== 'cut';
 
-/** Numbers the canvas draws with; a net inset stays unknown until the card standard is available. */
-export function resolveFuse(s: PieceFuseSpec, seamAllowanceMm?: number | null) {
+/** Numbers the canvas draws with; a net inset stays unknown until its source is available. */
+export function resolveFuse(
+  s: PieceFuseSpec,
+  seamAllowanceMm?: number | null,
+  allowanceUsesNetOutline = false,
+) {
+  const allowance = s.mode === 'strip' && s.widthMm == null && s.edges.length === 0;
   return {
-    widthMm: s.widthMm ?? PREVIEW_STRIP_MM,
-    insetMm: s.insetNet
-      ? Number.isFinite(seamAllowanceMm)
-        ? Math.max(0, seamAllowanceMm ?? 0)
-        : null
-      : Math.max(0, s.insetMm ?? DEFAULT_INSET_MM),
+    widthMm:
+      allowance && allowanceUsesNetOutline
+        ? null
+        : s.widthMm != null
+          ? s.widthMm
+          : s.mode === 'strip' && Number.isFinite(seamAllowanceMm) && (seamAllowanceMm ?? 0) > 0
+            ? seamAllowanceMm!
+            : null,
+    insetMm: allowance
+      ? 0
+      : s.insetNet
+        ? Number.isFinite(seamAllowanceMm)
+          ? Math.max(0, seamAllowanceMm ?? 0)
+          : null
+        : Math.max(0, s.insetMm ?? DEFAULT_INSET_MM),
     darts: s.darts,
   };
 }

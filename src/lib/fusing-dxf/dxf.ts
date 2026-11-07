@@ -25,6 +25,8 @@ export type FusingSourceSize = {
   sizeId: number;
   rank: number;
   outline: PtMm[];
+  /** The size's own sewing contour, in the same piece-local frame as outline. */
+  netOutline?: PtMm[];
   darts?: PtMm[][];
   grain?: { a: PtMm; b: PtMm } | null;
 };
@@ -494,11 +496,15 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
               : undefined;
           const polygons = generateFuseGeometry({
             outline: sourceSize.outline,
+            netOutline: sourceSize.netOutline,
             spec: sizedFuse,
             seamAllowanceMm: sourcePiece.seamAllowanceMm,
             darts: sourceSize.darts,
             zoneOutline: reference,
-            expectedEdgeCount: fuse.mode === 'strip' ? edgeRunsOf(base.outline).length : undefined,
+            expectedEdgeCount:
+              fuse.mode === 'strip' && !(fuse.widthMm == null && fuse.edges.length === 0)
+                ? edgeRunsOf(base.outline).length
+                : undefined,
           });
           const { cut, loops } = cutLoops(polygons);
           sizes.push({

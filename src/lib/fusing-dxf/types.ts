@@ -3,7 +3,8 @@ import type { PtMm } from 'lib/pattern-import/types';
 
 /** '' = not fused, or the legacy «fused, how not said» (a stored fused piece with no mode). */
 export type FuseMode = '' | 'whole' | 'strip' | 'zone';
-export type FusePanelMode = FuseMode | 'file';
+/** ALLOWANCE is a panel-only view of STRIP with inherited width and the whole outline selected. */
+export type FusePanelMode = FuseMode | 'allowance';
 export type FuseGrain = 'as_piece' | 'lengthwise' | 'crosswise' | 'bias' | 'any';
 export type FuseDarts = 'cut' | 'fuse';
 
@@ -62,41 +63,42 @@ export const blankFuse = (mode: FuseMode = ''): PieceFuseSpec => ({
   darts: 'cut',
 });
 
-/**
- * FILE is a view of stored FULL fusing, never a fifth wire value. The caller supplies the other
- * half of the fact: this piece is mapped to a block of the selected slot's owner drawing.
- */
+/** Panel-only modes are derived without widening the wire enum. */
 export function deriveFusePanelMode(
-  spec: Pick<PieceFuseSpec, 'mode'>,
+  spec: Pick<PieceFuseSpec, 'mode' | 'widthMm' | 'edges'>,
   mappedToOwnerFile: boolean,
 ): FusePanelMode {
-  return spec.mode === 'whole' && mappedToOwnerFile ? 'file' : spec.mode;
+  if (spec.mode === 'whole' && mappedToOwnerFile) return 'zone';
+  if (spec.mode === 'strip' && spec.widthMm == null && spec.edges.length === 0) return 'allowance';
+  return spec.mode;
 }
 
 /**
- * Moves the editor to one panel mode and removes geometry owned by every other mode. FILE is the
- * stored FULL mode plus an owner-file alias, so it also has no strip or zone draft of its own.
+ * Moves the editor to one panel mode and removes geometry owned by every other mode. ALLOWANCE is
+ * stored as STRIP with an inherited width and no picked edges.
  */
-export function fuseSpecForPanelMode(
-  spec: PieceFuseSpec,
-  mode: FusePanelMode,
-  fileBomLineKey = spec.bomLineKey,
-): PieceFuseSpec {
+export function fuseSpecForPanelMode(spec: PieceFuseSpec, mode: FusePanelMode): PieceFuseSpec {
   if (!mode) return blankFuse();
-  const nextMode: FuseMode = mode === 'file' ? 'whole' : mode;
-  const staying = mode !== 'file' && spec.mode === nextMode;
+  const nextMode: FuseMode = mode === 'allowance' ? 'strip' : mode;
+  const staying = deriveFusePanelMode(spec, false) === mode;
   return {
     ...spec,
     mode: nextMode,
-    bomLineKey: mode === 'file' ? fileBomLineKey.trim() : spec.bomLineKey,
-    widthMm: nextMode === 'strip' && staying ? spec.widthMm : null,
-    edges: nextMode === 'strip' && staying ? spec.edges.map((edge) => ({ ...edge })) : [],
+    widthMm: mode === 'allowance' ? null : nextMode === 'strip' && staying ? spec.widthMm : null,
+    edges:
+      mode === 'allowance'
+        ? []
+        : nextMode === 'strip' && staying
+          ? spec.edges.map((edge) => ({ ...edge }))
+          : [],
     zone: nextMode === 'zone' && staying ? spec.zone : null,
   };
 }
 
 export type FuseGeometryInput = {
   outline: PtMm[];
+  /** The piece's sewing contour in the same piece-local mm frame as outline. */
+  netOutline?: PtMm[];
   spec: PieceFuseSpec;
   seamAllowanceMm?: number | null;
   /** Closed dart polygons in the same piece-local frame as outline. */

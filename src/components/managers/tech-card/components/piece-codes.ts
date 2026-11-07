@@ -349,9 +349,9 @@ export function fusingPrintCaption(value: string | undefined, widthMm?: string):
   const v = (value ?? '').trim();
   if (v === FUSING_MODE_STRIP) {
     const w = (widthMm ?? '').trim();
-    // ПУСТО — ЭТО ОТВЕТ, А НЕ ПРОБЕЛ: полоса шириной в припуск. «width not specified» на бумаге
-    // отправляло бы раскройщика спрашивать число, которое карточка уже назвала за него.
-    return w ? `strip ${w} mm` : 'strip along the seam allowance';
+    // ПУСТО — ЭТО ОТВЕТ, А НЕ ПРОБЕЛ: клеевая закрывает собственный припуск детали.
+    // «width not specified» на бумаге отправляло бы раскройщика спрашивать лишнее число.
+    return w ? `strip ${w} mm` : 'allowance';
   }
   if (v === 'TECH_CARD_PIECE_FUSING_MODE_FULL') return 'the whole piece';
   if (v === 'TECH_CARD_PIECE_FUSING_MODE_ZONE') return 'a zone of the piece';
