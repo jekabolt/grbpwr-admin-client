@@ -328,14 +328,22 @@ function contourCarrier(
       const signed = pr.tx * (point.y - pr.p.y) - pr.ty * (point.x - pr.p.x);
       const along = (((pr.s - run.b0) % baseTotal) + baseTotal) % baseTotal;
       const frac = along / span(run.b0, run.b1, baseTotal);
-      const arc = run.t0 + frac * span(run.t0, run.t1, targetTotal);
-      const at = pointAtArc(target, arc);
+      const length = span(run.t0, run.t1, targetTotal);
+      const at = pointAtArc(target, run.t0 + frac * length);
+      // The tangent comes from inside the pin's own stretch, as the re-anchoring below reads it. At a
+      // stretch end the arc sits on a corner, and which side's segment it read there depended on
+      // where the ring happens to start: the wrong side threw the point off the piece.
+      const edge = Math.min(1e-3, length / 2);
+      const inside = pointAtArc(
+        target,
+        run.t0 + Math.min(Math.max(frac * length, edge), length - edge),
+      );
       return {
         run,
         signed,
         p: at.p,
-        tx: Math.cos(at.dir),
-        ty: Math.sin(at.dir),
+        tx: Math.cos(inside.dir),
+        ty: Math.sin(inside.dir),
       };
     });
     const offsetOf = (pin: (typeof pins)[number]) => ({
