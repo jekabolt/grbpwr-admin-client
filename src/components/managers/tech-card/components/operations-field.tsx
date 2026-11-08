@@ -1,5 +1,6 @@
 import { useMutation } from '@tanstack/react-query';
 import { adminService } from 'api/api';
+import { MaterialThumb } from 'components/managers/materials/components/material-thumb';
 import {
   common_TechCardButtonholeOrientation,
   common_TechCardButtonholeStyle,
@@ -177,6 +178,9 @@ import {
 import { kindLabel, preferredBomKinds } from './bom-kind';
 import type { FormGarmentLabel } from './labels-schema';
 import { ensureLabelLineKey, labelPictogram, labelSizeText } from './sewn-label-row';
+import { labelBomLine } from './sewn-label-model';
+import { useLabelStock } from './use-label-stock';
+import { wireInt as wireIntOf } from './wire-int';
 import { garmentLabelKindNames, kindLabel as garmentLabelName } from './tech-card-options';
 // ВЫВОДИМОСТЬ — ЧИСТЫЕ ФУНКЦИИ ЖИВУТ ОТДЕЛЬНО, И ЭТО НЕ СТИЛЬ. Правило «ровно один кандидат или
 // молчим» проверяется пробой на фикстурах, а не глазами по редактору на семь тысяч строк;
@@ -2479,6 +2483,10 @@ function OperationLabelPicker({ index, frozen }: { index: number; frozen: boolea
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const labels = (useWatch({ control, name: 'garmentLabels' }) ?? []) as FormGarmentLabel[];
   const operations = useWatch({ control, name: 'operations' }) ?? [];
+  const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as NonNullable<
+    TechCardFormData['bomItems']
+  >;
+  const { materialById } = useLabelStock();
   const selected = (operations[index]?.labelKeys ?? []).filter(Boolean);
   const ownedElsewhere = new Set(
     operations.flatMap((operation, operationIndex) =>
@@ -2511,6 +2519,7 @@ function OperationLabelPicker({ index, frozen }: { index: number; frozen: boolea
             const name =
               label.key?.trim() || garmentLabelName(garmentLabelKindNames, kind) || 'label';
             const size = labelSizeText(label);
+            const material = materialById.get(wireIntOf(labelBomLine(label, bomItems)?.materialId));
             return (
               <Tile
                 key={key || label.key}
@@ -2519,9 +2528,17 @@ function OperationLabelPicker({ index, frozen }: { index: number; frozen: boolea
                 selected={selected.includes(key)}
                 pressed={selected.includes(key)}
                 media={
-                  <span className='flex h-16 items-center justify-center border-b border-hairline bg-pageBg'>
-                    <LabelIcon kind={labelPictogram(kind)} size={40} />
-                  </span>
+                  material ? (
+                    <MaterialThumb
+                      material={material}
+                      size='lg'
+                      className='h-16 w-full border-b border-hairline'
+                    />
+                  ) : (
+                    <span className='flex h-16 items-center justify-center border-b border-hairline bg-pageBg'>
+                      <LabelIcon kind={labelPictogram(kind)} size={40} />
+                    </span>
+                  )
                 }
                 className='w-32 p-0 [&>p]:mx-2'
                 onClick={frozen ? undefined : () => toggle(label)}
