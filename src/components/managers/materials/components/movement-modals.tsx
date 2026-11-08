@@ -640,7 +640,7 @@ export function ConvertStockModal({
 
   const [fail, setFail] = useState<string | null>(null);
   const [lotId, setLotId] = useState(0);
-  const lotTouched = useRef(false);
+  const [lotTouched, setLotTouched] = useState(false);
   const [picking, setPicking] = useState(false);
   const [creating, setCreating] = useState(false);
   const [intoId, setIntoId] = useState(0);
@@ -740,7 +740,7 @@ export function ConvertStockModal({
     setSupplierId(0);
     setOccurredAt(todayISO());
     setLotId(0);
-    lotTouched.current = false;
+    setLotTouched(false);
     requestId.current = newClientRequestId();
     defaultChecked.current = false;
     supplierTouched.current = false;
@@ -789,9 +789,8 @@ export function ConvertStockModal({
     Number.isFinite(lossNumber) && Number.isFinite(outNumber) && lossNumber > outNumber;
   const wholeUnits = countableMaterial(into);
 
-  // A lot-less convert leaves the roll's remaining untouched (the server refuses it while a lot
-  // covers the quantity), so the fullest lot is picked by default and «none» shows only when no
-  // lot can cover what goes out.
+  // A named lot is drawn alone; «none» lets the server draw lots oldest first. Until the user picks,
+  // the fullest lot is chosen when it covers the out quantity, otherwise «none».
   const lots = useMemo(
     () =>
       (lotsQuery.data?.lots ?? [])
@@ -807,13 +806,10 @@ export function ConvertStockModal({
     parseDecimalNumber(decimalToInput(lot?.remainingQty));
   const wantOut = Number.isFinite(outNumber) && outNumber > 0 ? outNumber : 0;
   const lotCovers = lots.some((lot) => lotRemaining(lot) >= wantOut);
-  const selectedLot = lots.find((lot) => numId(lot.id) === lotId);
+  const selectedLot = lotTouched
+    ? lots.find((lot) => numId(lot.id) === lotId)
+    : lots.find((lot, index) => index === 0 && lotRemaining(lot) >= wantOut);
   const overLot = !!selectedLot && wantOut > lotRemaining(selectedLot);
-
-  useEffect(() => {
-    if (!open || lotTouched.current) return;
-    setLotId(lots.length ? numId(lots[0].id) : 0);
-  }, [lots, open]);
 
   const costPreview = useMemo(() => {
     if (!canReadCosting || currency !== 'EUR' || target.baseCurrency !== 'EUR') return null;
@@ -849,7 +845,6 @@ export function ConvertStockModal({
     if (wholeUnits && !Number.isInteger(inNumber)) return setFail('whole units only');
     if (!Number.isFinite(lossNumber) || lossNumber < 0) return setFail('invalid loss');
     if (overLoss) return setFail('loss over out');
-    if (!selectedLot && lotCovers) return setFail('choose lot');
     if (overLot) return setFail('over lot');
     try {
       const res = await convert.mutateAsync({
@@ -957,14 +952,14 @@ export function ConvertStockModal({
             <ChipRow>
               {lots.map((lot) => {
                 const id = numId(lot.id);
-                const selected = id === lotId;
+                const selected = id === numId(selectedLot?.id);
                 return (
                   <Chip
                     key={id}
                     selected={selected}
                     pressed={selected}
                     onClick={() => {
-                      lotTouched.current = true;
+                      setLotTouched(true);
                       setLotId(id);
                       setFail(null);
                     }}
@@ -979,7 +974,7 @@ export function ConvertStockModal({
                   selected={!selectedLot}
                   pressed={!selectedLot}
                   onClick={() => {
-                    lotTouched.current = true;
+                    setLotTouched(true);
                     setLotId(0);
                     setFail(null);
                   }}
