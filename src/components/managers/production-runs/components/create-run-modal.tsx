@@ -31,7 +31,6 @@ import {
   ReadinessCaveats,
   ReadinessVerdict,
   allFindings,
-  isAuxShortCircuit,
   isBlocker,
   isOk,
   isUnchecked,
@@ -233,7 +232,6 @@ export function CreateRunModal({
   // сменили карточку), вердикт обязан исчезнуть, а не остаться висеть вердиктом о том, чего больше
   // никто не спрашивал.
   const report = isAux ? survey.data : debounced ? verdict.data : undefined;
-  const auxShortCircuit = isAux && isAuxShortCircuit(survey.data);
   // Ответ относится к предыдущему составу запроса — держим его на экране, но подписываем.
   const recomputing = isAux
     ? survey.isFetching
@@ -447,29 +445,7 @@ export function CreateRunModal({
               </div>
             </div>
 
-            {/* ── AUX: гейт коротко замкнут СЕРВЕРОМ ──────────────────────────────────────── */}
-            {isAux ? (
-              <div className='flex flex-col gap-2'>
-                <GroupLabel flush>auxiliary card</GroupLabel>
-                <CalloutBox tone='note'>
-                  <Text size='small'>
-                    this card produces MATERIAL, not a garment: it has no colourways, and the fabric
-                    norm gate doesn't apply to it — the server short-circuits the gate rather than
-                    “passing” the checks. output colours and quantities are planned on the run page.
-                  </Text>
-                </CalloutBox>
-                {auxShortCircuit ? (
-                  <Text size='micro' variant='label'>
-                    the server confirmed the short circuit (card_auxiliary). not one of the fabric
-                    checks was run — and not one counts as passed.
-                  </Text>
-                ) : survey.isPending ? (
-                  <Text size='micro' variant='label'>
-                    asking the gate…
-                  </Text>
-                ) : null}
-              </div>
-            ) : (
+            {isAux ? null : (
               <>
                 {/* ── 3. колорвеи ───────────────────────────────────────────────────────── */}
                 <div className='flex flex-col gap-1'>
