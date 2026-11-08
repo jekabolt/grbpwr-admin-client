@@ -159,7 +159,6 @@ export const es = {
     fusingZone: 'zona',
     fusingStrip: 'tira {mm} mm',
     fusingAllowance: 'margen',
-    fusingAllowanceMm: 'margen {mm} mm',
     frontTrims: 'delantero · avíos',
     operationLink: 'enlace op.',
     interlining: 'entretela',

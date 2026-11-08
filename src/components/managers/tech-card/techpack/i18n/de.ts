@@ -159,7 +159,6 @@ export const de = {
     fusingZone: 'Zone',
     fusingStrip: 'Streifen {mm} mm',
     fusingAllowance: 'Nahtzugabe',
-    fusingAllowanceMm: 'Nahtzugabe {mm} mm',
     frontTrims: 'Vorderteil · Zutaten',
     operationLink: 'AG-Verweis',
     interlining: 'Einlage',

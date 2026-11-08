@@ -159,7 +159,6 @@ export const ja = {
     fusingZone: '部分',
     fusingStrip: 'テープ {mm} mm',
     fusingAllowance: '縫い代',
-    fusingAllowanceMm: '縫い代 {mm} mm',
     frontTrims: '前身頃 · 付属',
     operationLink: '工程リンク',
     interlining: '芯地',

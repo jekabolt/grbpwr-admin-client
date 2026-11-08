@@ -199,7 +199,6 @@ export const pl = {
     fusingZone: 'strefa',
     fusingStrip: 'pasek {mm} mm',
     fusingAllowance: 'zapas',
-    fusingAllowanceMm: 'zapas {mm} mm',
     frontTrims: 'przód · dodatki',
     operationLink: 'łącze op.',
     interlining: 'wkład klejowy',

@@ -203,7 +203,6 @@ export const en = {
     fusingZone: 'zone',
     fusingStrip: 'strip {mm} mm',
     fusingAllowance: 'allowance',
-    fusingAllowanceMm: 'allowance {mm} mm',
     frontTrims: 'front · trims',
     operationLink: 'op link',
     interlining: 'interlining',

@@ -82,7 +82,6 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink, t: Pd
   const interliningKeys = refs
     .filter((ref) => ref.item.section === INTERLINING)
     .map((ref) => clean(ref.item.lineKey));
-  const seamAllowanceMm = decimal(card?.requiredSeamAllowanceMm);
   const fusingOf = (lineKey: string): string =>
     [
       ...new Set(
@@ -98,10 +97,10 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink, t: Pd
             if (mode === 'TECH_CARD_PIECE_FUSING_MODE_ZONE') return t('materials.fusingZone');
             if (mode !== 'TECH_CARD_PIECE_FUSING_MODE_STRIP') return '';
             const width = decimal(piece.fusingWidthMm);
-            // An empty width is the allowance mode: the strip covers the piece's own seam allowance.
-            if (width != null) return t('materials.fusingStrip', { mm: width });
-            return seamAllowanceMm != null
-              ? t('materials.fusingAllowanceMm', { mm: seamAllowanceMm })
+            // An empty width is the allowance mode: the strip is the piece's own seam allowance, which
+            // can differ seam by seam (a wider hem), so no single number is printed.
+            return width != null
+              ? t('materials.fusingStrip', { mm: width })
               : t('materials.fusingAllowance');
           })
           .filter(Boolean),

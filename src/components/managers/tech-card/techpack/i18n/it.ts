@@ -159,7 +159,6 @@ export const it = {
     fusingZone: 'zona',
     fusingStrip: 'striscia {mm} mm',
     fusingAllowance: 'margine',
-    fusingAllowanceMm: 'margine {mm} mm',
     frontTrims: 'davanti · accessori',
     operationLink: 'collegamento op.',
     interlining: 'rinforzo termoadesivo',

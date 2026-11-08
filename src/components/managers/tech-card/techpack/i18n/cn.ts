@@ -159,7 +159,6 @@ export const cn = {
     fusingZone: '局部',
     fusingStrip: '条 {mm} 毫米',
     fusingAllowance: '缝份',
-    fusingAllowanceMm: '缝份 {mm} 毫米',
     frontTrims: '前片 · 辅料',
     operationLink: '工序链接',
     interlining: '衬布',

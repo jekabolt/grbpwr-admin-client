@@ -159,7 +159,6 @@ export const fr = {
     fusingZone: 'zone partielle',
     fusingStrip: 'bande {mm} mm',
     fusingAllowance: 'valeur de couture',
-    fusingAllowanceMm: 'valeur de couture {mm} mm',
     frontTrims: 'devant · fournitures',
     operationLink: 'lien op.',
     interlining: 'entoilage',

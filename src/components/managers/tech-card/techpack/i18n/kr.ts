@@ -159,7 +159,6 @@ export const kr = {
     fusingZone: '부분',
     fusingStrip: '테이프 {mm} mm',
     fusingAllowance: '시접',
-    fusingAllowanceMm: '시접 {mm} mm',
     frontTrims: '앞판 · 부자재',
     operationLink: '공정 연결',
     interlining: '심지',

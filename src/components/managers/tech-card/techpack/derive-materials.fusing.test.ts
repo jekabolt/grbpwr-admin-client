@@ -19,14 +19,14 @@ const fusingOf = (card: common_TechCard, lineKey = 'fuse') =>
   deriveMaterials(card).fabrics.find((fabric) => fabric.refKey === lineKey)?.fusing;
 
 describe('interlining row in the materials list', () => {
-  it('names the allowance mode with the card seam allowance, next to the other methods', () => {
+  it('names the allowance mode without one number (it follows each seam), next to the other methods', () => {
     const card = cardWith([
       { name: 'BP', fused: true, fusingMode: STRIP },
       { name: 'CLR', fused: true, fusingMode: STRIP, fusingWidthMm: { value: '30' } },
       { name: 'CF', fused: true, fusingMode: 'TECH_CARD_PIECE_FUSING_MODE_ZONE' },
       { name: 'SLV', fused: false, fusingMode: STRIP },
     ]);
-    expect(fusingOf(card)).toBe('allowance 10 mm · strip 30 mm · zone');
+    expect(fusingOf(card)).toBe('allowance · strip 30 mm · zone');
   });
 
   it('keeps each piece on the interlining line it chose', () => {

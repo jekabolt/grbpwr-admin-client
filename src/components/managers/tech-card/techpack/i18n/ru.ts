@@ -199,7 +199,6 @@ export const ru = {
     fusingZone: 'зона',
     fusingStrip: 'полоса {mm} мм',
     fusingAllowance: 'по припуску',
-    fusingAllowanceMm: 'по припуску {mm} мм',
     frontTrims: 'перед · фурнитура',
     operationLink: 'ссылка на оп.',
     interlining: 'клеевая прокладка',
