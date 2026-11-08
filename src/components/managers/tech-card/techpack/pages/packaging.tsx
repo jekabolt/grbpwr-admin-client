@@ -106,7 +106,7 @@ function ItemsTable({
 
 function PackedFacts({ model, land, t }: { model: PackagingModel; land: boolean; t: PdfT }) {
   return (
-    <aside className={land ? 'w-48 shrink-0' : 'grid min-w-0 grid-cols-3 gap-5'}>
+    <aside className={land ? 'w-48 shrink-0' : 'grid min-w-0 grid-cols-2 gap-5'}>
       <div className='min-w-0'>
         <GroupLabel flush>{t('packaging.packed')}</GroupLabel>
         <Fact label={t('packaging.ships')} value={own(model.packed.ships)} />
@@ -136,13 +136,6 @@ function PackedFacts({ model, land, t }: { model: PackagingModel; land: boolean;
             {t('packaging.packedPhoto')}
           </div>
         )}
-      </div>
-      <div className='min-w-0'>
-        <GroupLabel flush={!land}>{t('packaging.carton')}</GroupLabel>
-        <Fact label={t('packaging.units')} value={model.carton.units ? model.carton.units : null} />
-        <Fact label={t('packaging.box')} value={own(model.carton.box)} />
-        <Fact label={t('packaging.marking')} value={own(model.carton.marking)} />
-        {model.carton.note && <Fact label={t('common.note')} value={own(model.carton.note)} />}
       </div>
     </aside>
   );

@@ -95,7 +95,7 @@ function SewnTable({
             <th data-align='left'>{t('labels.sizeMm')}</th>
             <th data-align='left'>{t('common.material')}</th>
             <th>{t('common.quantity')}</th>
-            <th data-align='left'>step</th>
+            <th data-align='left'>{t('common.operation')}</th>
             {showNote && <th data-align='left'>{t('common.note')}</th>}
           </tr>
         </thead>

@@ -17,14 +17,14 @@ export const LABEL_BLOCK_GAP_PX = 14;
 
 // # item location attachment fold size material qty step
 export const LABEL_TABLE_COLS: Record<PrintOrient, readonly number[]> = {
-  land: [30, 95, 115, 115, 65, 60, 120, 35, 130],
-  port: [28, 78, 85, 85, 50, 52, 90, 34, 100],
+  land: [34, 95, 113, 113, 65, 60, 120, 35, 130],
+  port: [34, 78, 82, 82, 50, 52, 90, 34, 100],
 };
 
 // The same table with a note last. The note takes its room from the words, the sheet stays as wide.
 export const LABEL_TABLE_NOTE_COLS: Record<PrintOrient, readonly number[]> = {
-  land: [28, 80, 96, 96, 56, 56, 105, 32, 110, 105],
-  port: [26, 65, 72, 72, 46, 48, 76, 30, 82, 85],
+  land: [34, 80, 94, 94, 56, 56, 105, 32, 108, 106],
+  port: [34, 65, 69, 69, 46, 48, 74, 30, 82, 85],
 };
 
 /** A note column only when a row has a note: a card without notes prints the table it always did. */

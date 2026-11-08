@@ -58,6 +58,23 @@ const names = { 1: 'S', 2: 'M' };
 const model = (c = card()) => deriveLabels(c, { sizeNames: names });
 
 describe('page 05 sewn-in labels', () => {
+  it('keeps an old label without a key in the table, unlinked, and links a keyed one', () => {
+    const c = card({
+      garmentLabels: [
+        { key: 'brand', widthMm: { value: '40' }, heightMm: { value: '20' }, fold: 'half' },
+        { key: 'size', folding: 'end fold', size: '30 × 60 mm' },
+        { key: 'hangtag', lineKey: 'HT', widthMm: { value: '50' }, heightMm: { value: '90' } },
+      ],
+      operations: [{ operationNumber: 480, work: 'hang_tag', labelKeys: ['HT', ''] }],
+    });
+    const rows = model(c).sewn.table;
+    const old = rows.find((row) => row.item === 'brand label');
+    expect([old?.size, old?.fold, old?.step]).toEqual(['40 × 20', 'half', '']);
+    expect(rows.find((row) => row.item.startsWith('hang'))?.step).toMatch(/^480/);
+    const legacy = rows.find((row) => row.item.startsWith('size'));
+    expect([legacy?.size, legacy?.fold, legacy?.step]).toEqual(['30 × 60 mm', 'end fold', '']);
+  });
+
   it('puts composition first and takes the material from the BOM line', () => {
     const [first, second] = model().sewn.table;
     expect([first.item, first.number, first.material]).toEqual([

@@ -131,8 +131,10 @@ function deriveSewn(techCard: common_TechCard, options: LabelsDeriveOptions, t: 
     item: kindLabel(garmentLabelKindNames, row.key),
     location: clean(row.placement),
     attachment: clean(row.attachment),
-    fold: clean(row.fold),
-    size: [labelMm(row.widthMm), labelMm(row.heightMm)].filter(Boolean).join(' × '),
+    // A card not saved since the size/fold fields came keeps its old free text.
+    fold: clean(row.fold) || clean(row.folding),
+    size:
+      [labelMm(row.widthMm), labelMm(row.heightMm)].filter(Boolean).join(' × ') || clean(row.size),
     material: clean(
       resolveBomRef(refs, { bomLineKey: row.bomLineKey, bomItemId: row.bomItemId })?.item.name,
     ),

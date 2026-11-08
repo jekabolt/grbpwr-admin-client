@@ -37,6 +37,7 @@ describe('derivePackaging', () => {
             packing: 'face up',
             note: 'logo visible',
           },
+          { key: 'mailer', pickedName: 'Mailer L', qtyPerGarment: 1, perOrder: true },
           { key: 'box', auxTechCardId: 7, pickedName: 'Box M', qtyPerGarment: 1, perOrder: true },
         ],
       },
@@ -61,7 +62,9 @@ describe('derivePackaging', () => {
       note: 'logo visible',
     });
     expect(model.items[0].picture?.url).toBe('https://assets.example/tissue.png');
+    expect(model.items.map((item) => item.item)).not.toContain('mailer');
     expect(model.items[1]).toMatchObject({
+      number: 2,
       item: 'box',
       what: 'Box M',
       perOrder: true,
@@ -74,12 +77,7 @@ describe('derivePackaging', () => {
       grossGrams: 360,
     });
     expect(model.packed.photo?.url).toBe('https://assets.example/packed.png');
-    expect(model.carton).toEqual({
-      units: 12,
-      box: '60 × 40 × 30 cm',
-      marking: 'style + qty',
-      note: 'tape twice',
-    });
+    expect(model).not.toHaveProperty('carton');
     expect(model.missing).toBeUndefined();
   });
 
