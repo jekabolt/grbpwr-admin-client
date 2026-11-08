@@ -1190,7 +1190,7 @@ export function TechCardForm({
     isEditMode && numId && !frozen && isAux
       ? activeVariantCount(outputVariants) === 0 && !outputMaterialId
         ? { key: 'aux_colour', label: '+ colour', tab: 'studio', goal: 'proto' }
-        : firstUncoveredSlot >= 0
+        : !boughtAux && firstUncoveredSlot >= 0
           ? {
               key: 'aux_bom',
               label: 'link bom',

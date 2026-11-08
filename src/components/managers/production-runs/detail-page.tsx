@@ -81,6 +81,12 @@ import { PrintOptionsModal } from 'components/managers/print/options-modal';
 // and receiving: it cannot start before the fabric is issued and nothing can be received before it
 // is done. It owns its own Section, its own numbering in its own title, and its own applicability
 // gate — the band only decides WHEN it is the phase the operator is standing in.
+
+/** The run log speaks in words: «supplier_price_seeded» → «supplier price». */
+const RUN_EVENT_LABELS: Record<string, string> = { supplier_price_seeded: 'supplier price' };
+const runEventLabel = (type?: string) =>
+  type ? RUN_EVENT_LABELS[type] ?? type.replace(/_/g, ' ') : '';
+
 export function ProductionRunDetail() {
   const { id } = useParams<{ id: string }>();
   const runId = Number(id) || 0;
@@ -705,7 +711,7 @@ export function ProductionRunDetail() {
                       <Text size='small' variant='inactive'>
                         {runDate(e.createdAt) || <EmptyCell />}
                       </Text>
-                      <Text size='small'>{e.eventType}</Text>
+                      <Text size='small'>{runEventLabel(e.eventType)}</Text>
                       {e.actor ? (
                         <Text size='small' variant='inactive'>
                           {e.actor}
