@@ -137,6 +137,15 @@ export type CutStripMark = {
   manual?: boolean;
 };
 
+/** A garment label drawn as a virtual W × H rectangle in a step picture. */
+export type GarmentLabelMark = {
+  label: string;
+  widthMm: number;
+  heightMm: number;
+  fold: 'flat' | 'half' | 'ends' | 'mitre' | 'loop' | '';
+  attachment: string;
+};
+
 export type PieceGeom = {
   pieceKey: string;
   name: string;
@@ -160,6 +169,8 @@ export type PieceGeom = {
   marks?: PieceMark[];
   /** Set on a cut strip's rectangle only. */
   cutStrip?: CutStripMark;
+  /** Set on a garment label's virtual rectangle only. */
+  garmentLabel?: GarmentLabelMark;
 };
 
 // ── Internal marks (P2 step 0, 03-P2-DESIGN §2) ─────────────────────────────────────────────

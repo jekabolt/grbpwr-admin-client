@@ -1019,6 +1019,18 @@ export type TechCardAuxSubtype =
   // kind=SPARE_KIT_BAG, а этот подтип отвечает на другой вопрос — что производит вспомогательная
   // карточка. Без него свой пакетик уезжает в ..._OTHER, где перестаёт отличаться от чего угодно.
   | "TECH_CARD_AUX_SUBTYPE_SPARE_KIT_BAG";
+// AuxMadeBy says who makes an AUXILIARY card's item (0456). US: made from the card's BOM, whose norms
+// (consumption_per_unit, qty_per_garment + spare_qty) are costed and planned. SUPPLIER: bought
+// finished; the supplier's price is the cost and no material is reserved or issued. UNKNOWN on
+// write = keep the stored value (an aux card with none reads US). Only for purpose=auxiliary.
+export type AuxMadeBy =
+  | "AUX_MADE_BY_UNKNOWN"
+  | "AUX_MADE_BY_US"
+  | "AUX_MADE_BY_SUPPLIER";
+export type StyleSizeChartCellSource =
+  | "STYLE_SIZE_CHART_CELL_SOURCE_UNKNOWN"
+  | "STYLE_SIZE_CHART_CELL_SOURCE_MANUAL"
+  | "STYLE_SIZE_CHART_CELL_SOURCE_PATTERN";
 // Material is a catalog material — shared nomenclature a tech-card BOM line can optionally link
 // to. Descriptive fields only; price lives in the append-only MaterialPrice history.
 // MaterialClass is the class-table-inheritance discriminant (S15): it selects which typed
@@ -2193,11 +2205,13 @@ export type ColorwayDevelopment = {
 };
 
 // StyleSizeChart is the style-owned size chart (R5). Written full-replace under the shared
-// tech_card.lock_version; there is no separate chart version.
+// tech_card.lock_version; there is no separate chart version. A cell value is the finished-garment
+// value in centimetres; a girth is the half (flat) value.
 export type StyleSizeChartCell = {
   sizeId: number | undefined;
   measurementNameId: number | undefined;
   value: googletype_Decimal | undefined;
+  source: StyleSizeChartCellSource | undefined;
 };
 
 // StyleSizeChartGradeStep is one measurement's grade increment — the per-size-position step the
@@ -2205,6 +2219,17 @@ export type StyleSizeChartCell = {
 export type StyleSizeChartGradeStep = {
   measurementNameId: number | undefined;
   step: googletype_Decimal | undefined;
+};
+
+export type StyleSizeChartPoint = {
+  measurementNameId: number | undefined;
+  pomCode: string | undefined;
+  position: number | undefined;
+  tolMinusCm: googletype_Decimal | undefined;
+  tolPlusCm: googletype_Decimal | undefined;
+  inShop: boolean | undefined;
+  basisPieceLineKeys: string[] | undefined;
+  stale: boolean | undefined;
 };
 
 export type StyleSizeChart = {
@@ -2220,6 +2245,8 @@ export type StyleSizeChart = {
   // empty steps) means the chart was typed cell by cell, which is what every pre-existing chart is.
   gradeBaseSizeId: number | undefined;
   gradeSteps: StyleSizeChartGradeStep[] | undefined;
+  points: StyleSizeChartPoint[] | undefined;
+  shrinkagePct: googletype_Decimal | undefined;
 };
 
 // AdminColorwayRef is a derived, output-only reference to a colourway from its style (R1: GetStyle may
@@ -2638,6 +2665,12 @@ export type TechCardBomItem = {
   // proto3-дефолт UNSPECIFIED и стёрла бы выбор части у ВСЕХ строк карточки. Явно присланный
   // UNSPECIFIED (поле присутствует) очищает в NULL.
   labelPart?: TechCardBomLabelPart;
+  // AUX CARD NORM (0456): the measured norm of this line per ONE output unit of an auxiliary card, in
+  // this line's `unit`, net of wastage. Only on auxiliary cards and measured sections, never on a line
+  // cut to length (its strips give the norm); counted sections keep qty_per_garment/spare_qty.
+  // Absent = keep the stored value; explicit Decimal{value:""} clears it (the est_usage protocol).
+  // Unset = no norm: the line is unpriced and blocks the run plan, never zero.
+  consumptionPerUnit: googletype_Decimal | undefined;
 };
 
 // MaterialFabricAttrs are the typed attributes of a fabric-class material (material_fabric_attr).
@@ -2811,6 +2844,8 @@ export type Material = {
   fabricThicknessMm: googletype_Decimal | undefined;
   // The type of a label in stock, section LABEL only (0451). The label picker filters on it.
   labelType: MaterialLabelType | undefined;
+  sourceMaterialId: number | undefined;
+  sourceMaterialName: string | undefined;
 };
 
 // MaterialPrice is one point in a material's append-only price history. Prices are in the
@@ -3540,6 +3575,9 @@ export type TechCardOperation = {
   // rounded lengths pass. Display only: it fits nothing and changes no PDF. Written only with
   // operation_seam_tolerance_aware (132). Enters no section digest.
   seamToleranceMm: googletype_Decimal | undefined;
+  // The labels this step attaches or hangs, by TechCardGarmentLabel.line_key. Not an assembly input. A key
+  // that names no label of the saved card is a field violation.
+  labelKeys: string[] | undefined;
 };
 
 // TechCardIssue is a maker-flagged problem ("this seam is impossible") against an
@@ -3642,8 +3680,8 @@ export type TechCardGarmentLabel = {
   // same save (no id yet). Non-empty wins over bom_item_id on write; the read path returns it too.
   // A key that names no line of the payload BOM is cleared, it never breaks a save.
   bomLineKey: string | undefined;
-  // The pin: number of a TechCardCallout on a flat of this card; 0 = no pin. The label holds no
-  // geometry. A number no callout carries any more is cleared on write, it never breaks a save.
+  // The pin: number of a TechCardCallout on a flat of this card; 0 = no pin. A number no callout
+  // carries any more is cleared on write, it never breaks a save.
   calloutNumber: number | undefined;
   // Artwork per size (true) or one for all sizes (false). PRESENCE BIT: a client that knows this block
   // always sends it; absent means an older client, whose save keeps the stored pin, modes and files.
@@ -3663,6 +3701,15 @@ export type TechCardGarmentLabel = {
   printMethod: string | undefined;
   // Per garment length in cm, for goods sold by the metre; unset or 0 = counted in qty_per_garment.
   lengthCm: googletype_Decimal | undefined;
+  // Stable key, 26-character ULID minted by the client like a BOM line key; empty is minted by the server.
+  // Unique per card. Shares the key space of the pieces and the cut strips: a pose row of the seam table may
+  // name it, which is how a step's picture keeps the label where it was dragged.
+  lineKey: string | undefined;
+  widthMm: googletype_Decimal | undefined;
+  heightMm: googletype_Decimal | undefined;
+  // flat | half | ends | mitre | loop; "" = not set. THE fold. `folding` (4) is a legacy free note kept for
+  // display only: migration 0454 moved every unambiguous text into this field and cleared it.
+  fold: string | undefined;
 };
 
 // TechCardGarmentLabelFile is one artwork file of a garment label, printed as a QR on the tech pack.
@@ -4151,6 +4198,9 @@ export type TechCardInsert = {
   skuSeason: SkuSeason | undefined;
   // WS7: sub-classifies an auxiliary card (UNKNOWN=unset). Ignored / must be UNKNOWN for a sellable card.
   auxSubtype: TechCardAuxSubtype | undefined;
+  // 0456: who makes an auxiliary card's item. UNSPECIFIED = keep stored (aux default US); refused on
+  // a sellable card.
+  auxMadeBy: AuxMadeBy | undefined;
   // Planning date for the overdue view (production cockpit): the calendar day this style is planned
   // to drop, the anchor a run's promised_at is judged against ("до дропа N дней / просрочен"). Owner-
   // set intent, not a workflow stamp like approved_at/released_at — unset means no drop planned.
@@ -4551,6 +4601,10 @@ export type TechCard = {
   // OUTPUT-ONLY: the norm each strip line gets from its strips, one row per BOM line. Present even on
   // a card with no colourways, which has no recipe row to read a norm from. Ignored on write.
   cutStripNorms: TechCardCutStripNorm[] | undefined;
+  // OUTPUT-ONLY, RELEASE SNAPSHOTS ONLY: the style size chart frozen when the card was released
+  // (tech_card_release.snapshot), so every print of that revision carries the same numbers. Never
+  // set on a live card read. A release captured before this field existed has none. Ignored on write.
+  releaseSizeChart: StyleSizeChart | undefined;
 };
 
 // TechCardOutputVariant is one colour of an AUXILIARY card's warehouse output: "this card, in this
@@ -8544,7 +8598,10 @@ export type MaterialMovementType =
   | "MATERIAL_MOVEMENT_TYPE_RETURN_PRODUCTION"
   | "MATERIAL_MOVEMENT_TYPE_RETURN_SAMPLE"
   | "MATERIAL_MOVEMENT_TYPE_ADJUSTMENT"
-  | "MATERIAL_MOVEMENT_TYPE_WRITEOFF";
+  | "MATERIAL_MOVEMENT_TYPE_WRITEOFF"
+  | "MATERIAL_MOVEMENT_TYPE_CONVERT_OUT"
+  | "MATERIAL_MOVEMENT_TYPE_CONVERT_IN"
+  | "MATERIAL_MOVEMENT_TYPE_SHRINKAGE";
 // MaterialStock is a material's maintained on-hand balance and moving-average unit cost. The cost
 // fields are confidential (stripped for accounts without costing:read).
 export type MaterialStock = {
@@ -8583,6 +8640,8 @@ export type MaterialMovement = {
   expectedAt: wellKnownTimestamp | undefined;
   invoiceFileId: number | undefined;
   invoiceFileName: string | undefined;
+  conversionId: number | undefined;
+  lossQty: googletype_Decimal | undefined;
 };
 
 // MaterialLot is a received batch (roll / dye-lot) of a material (gap-07 v2 D): a supplier lot code
@@ -8610,6 +8669,46 @@ export type MaterialLot = {
   // unrecorded. The shade also drifts WITHIN one batch, which is why pieces of one garment come
   // from adjacent layers — that is a note on the lay screen, not another field here.
   shadeCode: string | undefined;
+  shrunkQty: googletype_Decimal | undefined;
+  washedWidthCm: googletype_Decimal | undefined;
+  shrinkagePct: googletype_Decimal | undefined;
+};
+
+export type MaterialConversionInput = {
+  materialId: number | undefined;
+  quantity: googletype_Decimal | undefined;
+  lossQty: googletype_Decimal | undefined;
+  lotId: number | undefined;
+};
+
+export type MaterialConversionOutput = {
+  materialId: number | undefined;
+  quantity: googletype_Decimal | undefined;
+  lotCode: string | undefined;
+  measuredWidthCm: googletype_Decimal | undefined;
+  shadeCode: string | undefined;
+};
+
+export type MaterialConversionLine = {
+  movement: MaterialMovement | undefined;
+  materialName: string | undefined;
+  unit: string | undefined;
+};
+
+export type MaterialConversion = {
+  id: number | undefined;
+  lines: MaterialConversionLine[] | undefined;
+  workCost: googletype_Decimal | undefined;
+  workCurrency: string | undefined;
+  workCostBase: googletype_Decimal | undefined;
+  outputUnitCostBase: googletype_Decimal | undefined;
+  totalCostBase: googletype_Decimal | undefined;
+  supplierId: number | undefined;
+  supplierDoc: string | undefined;
+  comment: string | undefined;
+  adminUsername: string | undefined;
+  occurredAt: wellKnownTimestamp | undefined;
+  createdAt: wellKnownTimestamp | undefined;
 };
 
 // MaterialReservationClaim is ONE still-open claim on a material — a soft hold that depresses

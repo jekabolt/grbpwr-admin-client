@@ -1,12 +1,17 @@
 import { adminService } from 'api/api';
 import {
   common_AdminColorwayRef,
+  common_AuxMadeBy,
   common_Colorway,
   common_SkuSeason,
   common_TechCardRoleAssignment,
 } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useProductsByIds } from 'components/managers/fittings/components/useResolvers';
+import {
+  useMaterialPrices,
+  useMaterials,
+} from 'components/managers/materials/components/useMaterials';
 import {
   techCardAuxSubtypeFormOptions,
   techCardGenderOptions,
@@ -40,7 +45,15 @@ import {
   SelectField,
 } from 'ui';
 import { fieldErrorSummary } from 'utils/field-errors';
+import { decimalToInput } from 'utils/decimal';
 
+import {
+  AUX_MADE_BY_SUPPLIER,
+  auxKind,
+  latestSupplierPrice,
+  madeByForKind,
+  type AuxKind,
+} from '../aux-card';
 import { CollectionField } from '../collection-field';
 import { BaseModelFields, CategoryBrowser } from '../header-meta-fields';
 import { RolesField } from '../roles-field';
@@ -383,6 +396,52 @@ function StyleLockNote({ locked }: { locked: boolean }) {
   );
 }
 
+function KindField() {
+  const { control, setValue } = useFormContext<TechCardFormData>();
+  const madeBy = useWatch({ control, name: 'auxMadeBy' }) as common_AuxMadeBy | undefined;
+  return (
+    <FormField
+      control={control}
+      name='purpose'
+      render={({ field }) => {
+        const value = auxKind(field.value, madeBy);
+        return (
+          <FormItem>
+            <FormLabel>kind</FormLabel>
+            <Select
+              name='kind'
+              items={[
+                { value: 'product', label: 'product' },
+                { value: 'own', label: 'own item' },
+                { value: 'bought', label: 'bought item' },
+              ]}
+              value={value}
+              onBlur={field.onBlur}
+              onValueChange={(value: string) => {
+                const next = value as AuxKind;
+                setValue('auxMadeBy', madeByForKind(next), { shouldDirty: true });
+                field.onChange(
+                  next === 'product' ? 'TECH_CARD_PURPOSE_SELLABLE' : 'TECH_CARD_PURPOSE_AUXILIARY',
+                );
+              }}
+            />
+            <FormMessage />
+          </FormItem>
+        );
+      }}
+    />
+  );
+}
+
+function ReadOnlyField({ label, value }: { label: string; value?: string }) {
+  return (
+    <FormItem>
+      <FormLabel>{label}</FormLabel>
+      <Input value={value || '—'} readOnly />
+    </FormItem>
+  );
+}
+
 const NOTE_MAX = 2000;
 
 /**
@@ -545,12 +604,14 @@ export function CardDetails({
   isAux,
   canEdit,
   outputMaterialId,
+  makesMaterialId,
   roleAssignments,
   colorways,
   seasonPickHint,
   onGoColourways,
   quizOpen = false,
   onQuizDone,
+  onAuxColour,
 }: {
   /** The SAVED card's id — undefined on a card that does not exist yet. */
   techCardId?: number;
@@ -563,6 +624,8 @@ export function CardDetails({
   canEdit: boolean;
   /** The form's `outputMaterialId`, for the «saving as sellable clears it» warning. */
   outputMaterialId: number;
+  /** Material represented by the first live MAKES row. */
+  makesMaterialId: number;
   /** The card read's own `roleAssignments` — seeds the roles cache so mount costs no RPC. */
   roleAssignments?: common_TechCardRoleAssignment[];
   colorways?: common_AdminColorwayRef[];
@@ -573,10 +636,12 @@ export function CardDetails({
   /** CREATE NEW (`?guided=1`) on a card not created yet: the chip quiz instead of the fields. */
   quizOpen?: boolean;
   onQuizDone?: () => void;
+  /** Colour picked by the aux create quiz; the page creates its first MAKES row after card mint. */
+  onAuxColour?: (code: string) => void;
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const { dictionary } = useDictionary();
-  const { canWrite } = usePermissions();
+  const { canWrite, canReadCosting } = usePermissions();
   // SUGGEST without a season opens the season picker and suggests with the season it commits (П1).
   // The picker's open state lives here so SUGGEST can open it; `pendingSuggest` remembers who did,
   // so a season picked through the field's own `pick` writes the season and nothing more.
@@ -585,6 +650,20 @@ export function CardDetails({
   const pendingSuggest = useRef(false);
   const meta = useWatch({ control, name: [...META_FIELDS] }) as unknown[];
   const auxSubtype = (useWatch({ control, name: 'auxSubtype' }) as string | undefined) ?? '';
+  const auxMadeBy = useWatch({ control, name: 'auxMadeBy' }) as common_AuxMadeBy | undefined;
+  const bought = isAux && auxMadeBy === AUX_MADE_BY_SUPPLIER;
+  const { data: materialsData } = useMaterials('', true, bought && makesMaterialId > 0);
+  const makesMaterial = (materialsData?.materials ?? []).find(
+    (material) => (material.id ?? 0) === makesMaterialId,
+  );
+  const { data: priceData } = useMaterialPrices(
+    makesMaterialId,
+    bought && canReadCosting && makesMaterialId > 0,
+  );
+  const supplierPrice = latestSupplierPrice(priceData?.prices ?? []);
+  const priceValue = supplierPrice?.price?.value
+    ? `${decimalToInput(supplierPrice.price)} ${supplierPrice.currency || ''}`.trim()
+    : undefined;
   const categoryId = (useWatch({ control, name: 'categoryId' }) as number | undefined) ?? 0;
   const concept = (useWatch({ control, name: 'concept' }) as string | undefined) ?? '';
   const fit = (useWatch({ control, name: 'fit' }) as string | undefined) ?? '';
@@ -681,7 +760,84 @@ export function CardDetails({
         id='card-details'
         className={cn('min-w-0', GROUP_SEAM)}
       >
-        <CreateQuiz isAux={isAux} fitLocked={factLocked} onDone={() => onQuizDone?.()} />
+        <CreateQuiz
+          isAux={isAux}
+          fitLocked={factLocked}
+          onDone={() => onQuizDone?.()}
+          onAuxColour={onAuxColour}
+        />
+      </Section>
+    );
+  }
+
+  if (isAux) {
+    return (
+      <Section title='card details' id='card-details' className={cn('min-w-0', GROUP_SEAM)}>
+        <div className={GRID}>
+          <div className={W3}>
+            <InputField name='name' label='name *' placeholder='item name' />
+          </div>
+          <div className={W3}>
+            <StyleNumberCell
+              isIdea={isIdea}
+              seasonLocked={seededLocked}
+              suggesting={suggesting}
+              suggestError={suggestError}
+              onSuggest={suggest}
+              onNeedSeason={() => {
+                pendingSuggest.current = true;
+                setSeasonOpen(true);
+              }}
+            />
+          </div>
+          {bought ? (
+            <>
+              <div className={W3}>
+                <ReadOnlyField label='supplier' value={makesMaterial?.supplier} />
+              </div>
+              <div className={W3}>
+                <ReadOnlyField label='price / pc' value={priceValue} />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className={W3}>
+                <InputField
+                  name='brand'
+                  label='brand'
+                  placeholder='GRBPWR'
+                  disabled={seededLocked}
+                />
+                <StyleLockNote locked={seededLocked} />
+              </div>
+              <div className={W3}>
+                <fieldset disabled={seededLocked} className='m-0 min-w-0 border-0 p-0'>
+                  <SeasonField
+                    key={seededLocked ? 'locked' : 'open'}
+                    pickHint={seasonPickHint}
+                    open={seasonOpen && !seededLocked}
+                    onOpenChange={(open) => {
+                      setSeasonOpen(open);
+                      if (!open) pendingSuggest.current = false;
+                    }}
+                    onPicked={(sku) => {
+                      if (!pendingSuggest.current) return;
+                      pendingSuggest.current = false;
+                      void suggest(sku);
+                    }}
+                  />
+                </fieldset>
+                <StyleLockNote locked={seededLocked} />
+              </div>
+            </>
+          )}
+          <div className={W3}>
+            <KindField />
+          </div>
+          <div className={W3}>
+            <SelectField name='auxSubtype' label='type' items={techCardAuxSubtypeFormOptions} />
+          </div>
+        </div>
       </Section>
     );
   }

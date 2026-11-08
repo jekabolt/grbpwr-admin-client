@@ -2,9 +2,12 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { adminService } from 'api/api';
 import {
   AdjustMaterialStockRequest,
+  ConvertMaterialStockRequest,
   IssueMaterialStockRequest,
   ReceiveMaterialStockBatchRequest,
   ReceiveMaterialStockRequest,
+  ShrinkMaterialLotRequest,
+  common_MaterialConversion,
   common_MaterialMovementType,
 } from 'api/proto-http/admin';
 import { productionRunKeys } from 'components/managers/production-runs/components/useProductionRuns';
@@ -12,8 +15,7 @@ import { sampleKeys } from 'components/managers/tech-card/components/useSamples'
 import { bomSectionToDbFilter } from './useMaterials';
 
 // Material warehouse (new-flow NF-01). The stock list and movement ledger sit alongside the
-// material catalog (useMaterials) but track balances, not nomenclature — a movement invalidates
-// stock + movements, never the catalog list.
+// material catalog (useMaterials) but track balances, not nomenclature.
 export const warehouseKeys = {
   all: ['warehouse'] as const,
   stock: (filter: MaterialStockFilter) => [...warehouseKeys.all, 'stock', filter] as const,
@@ -68,11 +70,18 @@ export function useMaterialMovements(filter: MovementFilter = {}, limit = 50) {
         movementType: filter.movementType ?? 'MATERIAL_MOVEMENT_TYPE_UNKNOWN',
         occurredFrom: filter.occurredFrom ?? '',
         occurredTo: filter.occurredTo ?? '',
+        conversionId: 0,
       });
       const movements = res.movements ?? [];
       const total = res.total ?? 0;
+      const conversions = new Map<number, common_MaterialConversion>();
+      (res.conversions ?? []).forEach((conversion) => {
+        const id = Number(conversion.id) || 0;
+        if (id) conversions.set(id, conversion);
+      });
       return {
         movements,
+        conversions,
         total,
         nextOffset: pageParam + limit < total ? pageParam + limit : undefined,
       };
@@ -83,8 +92,8 @@ export function useMaterialMovements(filter: MovementFilter = {}, limit = 50) {
 }
 
 // A stock movement changes balances (and possibly the moving average) — invalidate the whole
-// warehouse tree. The catalog (useMaterials) is untouched. Each mutation returns the posted
-// MaterialMovement so callers can report `on hand before → after`.
+// warehouse tree and the catalog data used by conversion pickers. Each mutation returns the
+// posted MaterialMovement so callers can report the resulting balance.
 // A movement targeting a run/sample also changes THAT entity's derived data (material plan
 // shortages, sample composed cost) — invalidate those trees too, or e.g. issuing to PR-5 from
 // the stock tab leaves /production-runs/5's plan stale for the whole 5-min staleTime.
@@ -94,6 +103,7 @@ function useMovementMutation<TReq, TRes>(fn: (req: TReq) => Promise<TRes>) {
     mutationFn: fn,
     onSuccess: (_res, req) => {
       qc.invalidateQueries({ queryKey: warehouseKeys.all });
+      qc.invalidateQueries({ queryKey: ['materials'] });
       const target = req as { productionRunId?: number; sampleId?: number };
       if (target.productionRunId) qc.invalidateQueries({ queryKey: productionRunKeys.all });
       if (target.sampleId) qc.invalidateQueries({ queryKey: sampleKeys.all });
@@ -136,5 +146,17 @@ export function useIssueMaterialStock() {
 export function useAdjustMaterialStock() {
   return useMovementMutation((req: AdjustMaterialStockRequest) =>
     adminService.AdjustMaterialStock(req),
+  );
+}
+
+export function useConvertMaterialStock() {
+  return useMovementMutation((req: ConvertMaterialStockRequest) =>
+    adminService.ConvertMaterialStock(req),
+  );
+}
+
+export function useShrinkMaterialLot() {
+  return useMovementMutation((req: ShrinkMaterialLotRequest) =>
+    adminService.ShrinkMaterialLot(req),
   );
 }

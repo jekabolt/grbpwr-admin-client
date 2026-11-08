@@ -8,6 +8,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { MovementsList } from 'components/managers/materials/components/movements-tab';
 import { activeVariantCount } from 'components/managers/tech-card/components/output-variants-field';
+import { isBoughtAux as isBoughtAuxCard } from 'components/managers/tech-card/components/aux-card';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES, SECTION } from 'constants/routes';
 import { findInDictionary } from 'lib/features/findInDictionary';
@@ -47,7 +48,7 @@ import {
   runStatusTone,
 } from './components/options';
 import { ProductionRunModal } from './components/production-run-modal';
-import { ReceiveModal } from './components/receive-modal';
+import { AuxReceive, ReceiveModal } from './components/receive-modal';
 import { RunConveyor, RunStepId, buildRunSteps } from './components/run-conveyor';
 import { RunCosts } from './components/run-costs';
 import { RunReceiptTable } from './components/run-receipt-table';
@@ -80,6 +81,12 @@ import { PrintOptionsModal } from 'components/managers/print/options-modal';
 // and receiving: it cannot start before the fabric is issued and nothing can be received before it
 // is done. It owns its own Section, its own numbering in its own title, and its own applicability
 // gate — the band only decides WHEN it is the phase the operator is standing in.
+
+/** The run log speaks in words: «supplier_price_seeded» → «supplier price». */
+const RUN_EVENT_LABELS: Record<string, string> = { supplier_price_seeded: 'supplier price' };
+const runEventLabel = (type?: string) =>
+  type ? RUN_EVENT_LABELS[type] ?? type.replace(/_/g, ' ') : '';
+
 export function ProductionRunDetail() {
   const { id } = useParams<{ id: string }>();
   const runId = Number(id) || 0;
@@ -101,6 +108,7 @@ export function ProductionRunDetail() {
   // product-less quantity received into output_material_id, so it swaps the colour-model grid for
   // a plain quantity plan and the receive posts into the material warehouse.
   const isAux = techCard?.techCard?.purpose === 'TECH_CARD_PURPOSE_AUXILIARY';
+  const boughtAux = isBoughtAuxCard(techCard?.techCard?.purpose, techCard?.techCard?.auxMadeBy);
   const outputMaterialId = techCard?.techCard?.outputMaterialId ?? 0;
   // 0252: an aux card may instead produce one bucket PER COLOUR. Then the run is planned and
   // received per colour and the single output material is not the destination at all.
@@ -181,7 +189,7 @@ export function ProductionRunDetail() {
   // hook, so React Query serves both from one request and the band can never quote a figure the
   // panel disagrees with — and it is not an extra call: the panel was mounted unconditionally on
   // every open of this page before, so the plan was always fetched here anyway.
-  const materialPlan = useMaterialPlan(runId, runId > 0);
+  const materialPlan = useMaterialPlan(runId, runId > 0 && !!techCard?.techCard && !boughtAux);
   const mpRows = materialPlan.data?.rows ?? [];
   const materialsFact = materialPlan.data
     ? {
@@ -291,11 +299,7 @@ export function ProductionRunDetail() {
   const runColourCount = new Set(lines.map((l) => l.outputVariantId ?? 0).filter((id) => id > 0))
     .size;
   const runTypeLabel = isAux
-    ? runColourCount > 0 || liveVariants > 0
-      ? `auxiliary run · produces ${runColourCount || liveVariants} colour${
-          (runColourCount || liveVariants) === 1 ? '' : 's'
-        } of a material for warehouse stock, each into its own bucket`
-      : 'auxiliary run · produces a material for warehouse stock, not a sellable product'
+    ? 'warehouse material'
     : colourModelCount > 0
       ? `produces ${colourModelCount} colour-model${colourModelCount === 1 ? '' : 's'} as sellable product${colourModelCount === 1 ? '' : 's'}`
       : 'no colour-models planned yet';
@@ -325,6 +329,10 @@ export function ProductionRunDetail() {
     );
 
   const receipts = run.receipts ?? [];
+  const auxMaterialWarningCount = isAux
+    ? (materialPlan.data?.blockers?.length ?? 0) ||
+      (mpRows.length === 0 ? techCard?.techCard?.bomItems?.length ?? 0 : 0)
+    : 0;
 
   // The band. Every figure on it is read from the same field the panel below reads.
   const steps = buildRunSteps({
@@ -703,7 +711,7 @@ export function ProductionRunDetail() {
                       <Text size='small' variant='inactive'>
                         {runDate(e.createdAt) || <EmptyCell />}
                       </Text>
-                      <Text size='small'>{e.eventType}</Text>
+                      <Text size='small'>{runEventLabel(e.eventType)}</Text>
                       {e.actor ? (
                         <Text size='small' variant='inactive'>
                           {e.actor}
@@ -808,7 +816,7 @@ export function ProductionRunDetail() {
           </Button>
           {canEdit && (
             <>
-              {receiveButton('lg', 'main')}
+              {!isAux && receiveButton('lg', 'main')}
               {/* A received/closed run rejects every update before the payload is examined
                   (ErrProductionRunReceivedImmutable), so the edit modal on it can only fail. */}
               {!locked && (
@@ -838,86 +846,167 @@ export function ProductionRunDetail() {
         </div>
       </div>
 
-      {/* The conveyor: six phases, and the way between them. The cell of the phase on screen is
-          ink-filled; the ▶ glyph still names the phase the run itself is in. */}
-      <RunConveyor steps={steps} active={activeStep} onSelect={setPickedStep} panelId={stepDomId} />
+      {isAux ? (
+        <SectionStack>
+          <Section title='1 · plan'>
+            <AuxRunPlan
+              run={run}
+              canEdit={canEdit}
+              locked={locked}
+              outputMaterialId={outputMaterialId}
+              outputMaterial={outputMaterial}
+              outputVariants={outputVariants}
+              onDirtyChange={onPlanDirty}
+            />
+          </Section>
+          {!boughtAux && (
+            <Section
+              title='2 · materials'
+              action={
+                auxMaterialWarningCount > 0 ? (
+                  <Text size='micro' className='text-error'>
+                    ! {auxMaterialWarningCount}
+                  </Text>
+                ) : undefined
+              }
+            >
+              <MaterialPlan run={run} canEdit={canEdit} locked={locked} isAux />
+            </Section>
+          )}
+          <Section title={`${boughtAux ? '2' : '3'} · costs`}>
+            {canReadCosting ? (
+              <>
+                {!boughtAux && (
+                  <Row
+                    label='materials issued'
+                    value={
+                      actuals?.materialsFromStockBase?.value ? (
+                        `${decimalToInput(actuals.materialsFromStockBase)} ${actuals.baseCurrency || ''}`
+                      ) : (
+                        <EmptyCell />
+                      )
+                    }
+                  />
+                )}
+                <RunCosts
+                  run={run}
+                  canEdit={canEdit}
+                  canReadCosting={canReadCosting}
+                  locked={locked}
+                  onDirtyChange={onCostsDirty}
+                />
+                <RowTotal
+                  label='total'
+                  value={
+                    actuals?.actualTotalBase?.value ? (
+                      `${decimalToInput(actuals.actualTotalBase)} ${actuals.baseCurrency || ''}`
+                    ) : (
+                      <EmptyCell />
+                    )
+                  }
+                />
+              </>
+            ) : null}
+          </Section>
+          <Section title={`${boughtAux ? '3' : '4'} · receive`}>
+            <AuxReceive
+              run={run}
+              outputMaterialId={outputMaterialId}
+              outputMaterial={outputMaterial}
+              outputVariants={outputVariants}
+              disabled={!canEdit || !receivable || !!receiveBlockedTitle}
+            />
+          </Section>
+        </SectionStack>
+      ) : (
+        <>
+          {/* The conveyor: six phases, and the way between them. The cell of the phase on screen is
+              ink-filled; the ▶ glyph still names the phase the run itself is in. */}
+          <RunConveyor
+            steps={steps}
+            active={activeStep}
+            onSelect={setPickedStep}
+            panelId={stepDomId}
+          />
 
-      {/* The work on the left, the batch's own numbers on the right. Two stat grids used to sit
+          {/* The work on the left, the batch's own numbers on the right. Two stat grids used to sit
           between the band and the first panel — thirty-odd cells of chrome that pushed the thing
           an operator came to do below the fold. They are one ledger column now, and it stays in
           view while the panel beside it scrolls. */}
-      <div className='grid gap-6 lg:grid-cols-[1fr_250px]'>
-        <div className='flex min-w-0 flex-col gap-6'>
-          {/* The phases' panels: ONE keyed list, active phase first, everything else hidden. See
+          <div className='grid gap-6 lg:grid-cols-[1fr_250px]'>
+            <div className='flex min-w-0 flex-col gap-6'>
+              {/* The phases' panels: ONE keyed list, active phase first, everything else hidden. See
               mountedPanels — the list is what keeps a draft alive across a phase change, so
               nothing here may move a panel to another place in the tree. */}
-          {mountedPanels.map((s) => (
-            <SectionStack key={s.id} hidden={s.id !== activeStep}>
-              {stepPanel(s.id)}
-            </SectionStack>
-          ))}
-        </div>
+              {mountedPanels.map((s) => (
+                <SectionStack key={s.id} hidden={s.id !== activeStep}>
+                  {stepPanel(s.id)}
+                </SectionStack>
+              ))}
+            </div>
 
-        {/* top-16, matching the tech card's section rail: the app nav is FIXED at the top of the
+            {/* top-16, matching the tech card's section rail: the app nav is FIXED at the top of the
             viewport, so a sticky column offset any less than that slides underneath it. The max
             height keeps a long ledger + guidance note scrollable inside its own column. */}
-        {/* order-first below `lg`: stacked, the totals and the "what to do next" sentence must
+            {/* order-first below `lg`: stacked, the totals and the "what to do next" sentence must
             stay under the band and above the panel, exactly where they were before this column
             existed — otherwise a blocked receive is explained below a screen-high lines grid. */}
-        <aside className='order-first flex flex-col gap-6 self-start lg:order-none lg:sticky lg:top-16 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto'>
-          <Section title='the whole run' question='— not one phase, but the run end to end'>
-            <Row label='plan' value={String(plannedQtyTotal)} />
-            {/* received = GOOD units — the count that is posted to stock. Defective units are a
+            <aside className='order-first flex flex-col gap-6 self-start lg:order-none lg:sticky lg:top-16 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto'>
+              <Section title='the whole run' question='— not one phase, but the run end to end'>
+                <Row label='plan' value={String(plannedQtyTotal)} />
+                {/* received = GOOD units — the count that is posted to stock. Defective units are a
                 separate count that never reaches the warehouse, so they are not inside this number
                 and the defect rate below is measured against received + defect, as the server
                 does. */}
-            <Row
-              label='received good'
-              value={
-                hasReceivedAny ? (
-                  `${receivedQtyTotal}${
-                    plannedQtyTotal > 0
-                      ? ` · ${Math.round((receivedQtyTotal / plannedQtyTotal) * 100)}%`
-                      : ''
-                  }`
-                ) : (
-                  <EmptyCell />
-                )
-              }
-            />
-            <Row
-              label='defect'
-              tone={defectQtyTotal > 0 ? 'error' : undefined}
-              value={
-                hasReceivedAny ? (
-                  `${defectQtyTotal}${defectQtyTotal > 0 ? ` · ${defectPct.toFixed(1)}%` : ''}`
-                ) : (
-                  <EmptyCell />
-                )
-              }
-            />
-            {canReadCosting ? <CostLedger run={run} actuals={actuals} /> : null}
-          </Section>
+                <Row
+                  label='received good'
+                  value={
+                    hasReceivedAny ? (
+                      `${receivedQtyTotal}${
+                        plannedQtyTotal > 0
+                          ? ` · ${Math.round((receivedQtyTotal / plannedQtyTotal) * 100)}%`
+                          : ''
+                      }`
+                    ) : (
+                      <EmptyCell />
+                    )
+                  }
+                />
+                <Row
+                  label='defect'
+                  tone={defectQtyTotal > 0 ? 'error' : undefined}
+                  value={
+                    hasReceivedAny ? (
+                      `${defectQtyTotal}${defectQtyTotal > 0 ? ` · ${defectPct.toFixed(1)}%` : ''}`
+                    ) : (
+                      <EmptyCell />
+                    )
+                  }
+                />
+                {canReadCosting ? <CostLedger run={run} actuals={actuals} /> : null}
+              </Section>
 
-          {/* What to do next — the single sentence the rest of the page exists to support. Visible
+              {/* What to do next — the single sentence the rest of the page exists to support. Visible
               text, not a hover-only tooltip, so a blocked receive is obvious before it's clicked. */}
-          {guidance ? (
-            <CalloutBox tone={GUIDANCE_TONE[guidance.tone]}>
-              <Text size='small'>
-                {guidance.text}
-                {guidance.href ? (
-                  <>
-                    {' '}
-                    <Link to={guidance.href} className='underline'>
-                      {guidance.linkLabel}
-                    </Link>
-                  </>
-                ) : null}
-              </Text>
-            </CalloutBox>
-          ) : null}
-        </aside>
-      </div>
+              {guidance ? (
+                <CalloutBox tone={GUIDANCE_TONE[guidance.tone]}>
+                  <Text size='small'>
+                    {guidance.text}
+                    {guidance.href ? (
+                      <>
+                        {' '}
+                        <Link to={guidance.href} className='underline'>
+                          {guidance.linkLabel}
+                        </Link>
+                      </>
+                    ) : null}
+                  </Text>
+                </CalloutBox>
+              ) : null}
+            </aside>
+          </div>
+        </>
+      )}
 
       {/* Phase 6: the reversal dialog. The reason is MANDATORY server-side (it lands on the
           reversal row, every stock-journal decrement and the run event), so the confirm stays
@@ -991,15 +1080,16 @@ export function ProductionRunDetail() {
       />
 
       <ProductionRunModal open={editOpen} onOpenChange={setEditOpen} run={run} />
-      <ReceiveModal
-        open={receiveOpen}
-        onOpenChange={setReceiveOpen}
-        run={run}
-        isAux={isAux}
-        outputMaterialId={outputMaterialId}
-        outputMaterial={outputMaterial}
-        outputVariants={outputVariants}
-      />
+      {!isAux && (
+        <ReceiveModal
+          open={receiveOpen}
+          onOpenChange={setReceiveOpen}
+          run={run}
+          outputMaterialId={outputMaterialId}
+          outputMaterial={outputMaterial}
+          outputVariants={outputVariants}
+        />
+      )}
       <ConfirmationModal
         open={deleteOpen}
         onOpenChange={setDeleteOpen}

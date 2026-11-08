@@ -37,6 +37,7 @@ async function outstandingOf(sampleId: number): Promise<Outstanding[]> {
       movementType: 'MATERIAL_MOVEMENT_TYPE_UNKNOWN',
       occurredFrom: '',
       occurredTo: '',
+      conversionId: 0,
     });
     for (const m of res.movements ?? []) {
       const materialId = wireInt(m.materialId);

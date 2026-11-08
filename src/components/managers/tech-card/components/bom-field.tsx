@@ -4,6 +4,7 @@ import {
   common_TechCardBomKind,
   common_TechCardBomSection,
   common_TechCardMarkerSummary,
+  common_TechCardSeam,
 } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { formatCompositionCell } from 'components/managers/materials/components/material-code';
@@ -16,6 +17,7 @@ import {
 } from 'components/managers/materials/components/material-picker';
 import { materialImageUrl } from 'components/managers/materials/components/material-thumb';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
+import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { techCardBomSectionOptions, techCardFabricDirectionOptions } from 'constants/filter';
 import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
@@ -40,6 +42,7 @@ import {
   Text,
   Tooltip,
   ComboField,
+  CheckboxField,
   InputField,
   SelectField,
 } from 'ui';
@@ -86,6 +89,9 @@ import {
 } from '../care-labels/label-parts';
 import { TechCardFormData, wireInt } from './schema';
 import { useBomWarnings, type BomLineTone } from './use-bom-warnings';
+import { CutStripFields } from './cut-strip-editor/cut-strip-fields';
+import { useSeamLengthsMm, type SeamLengthsMm } from './cut-strips/seam-lengths';
+import { useCutStrip } from './cut-strip-editor/use-cut-strip';
 
 // БОЛВАНКА НОВОЙ СТРОКИ ПЕРЕЕХАЛА В `form-writers.ts` (`emptyBomItem` + `bornBomLine`), И ЭТО
 // ПЕРЕНОС, А НЕ ВТОРОЙ АДРЕС. У строки BOM появилось второе место рождения — принятое
@@ -477,12 +483,21 @@ function BomLineEditor({
   index,
   highlight,
   markers,
+  material,
+  sizeIds,
+  seams,
+  seamLengthsMm,
 }: {
   index: number;
   highlight?: boolean;
   markers?: common_TechCardMarkerSummary[];
+  material?: common_Material;
+  sizeIds: number[];
+  seams: common_TechCardSeam[];
+  seamLengthsMm?: SeamLengthsMm;
 }) {
   const { control } = useFormContext<TechCardFormData>();
+  const line = useWatch({ control, name: `bomItems.${index}` });
   const materialId =
     (useWatch({ control, name: `bomItems.${index}.materialId` }) as number | undefined) || 0;
   const rowSection = useWatch({ control, name: `bomItems.${index}.section` }) as string | undefined;
@@ -490,6 +505,13 @@ function BomLineEditor({
   const composition = useWatch({ control, name: `bomItems.${index}.composition` }) as
     | string
     | undefined;
+  const cutStrip = useCutStrip({
+    line: line ?? {},
+    sizeIds,
+    seams,
+    material,
+    placement: line?.name,
+  });
   return (
     <div className='flex min-w-0 flex-col gap-3'>
       {/* Состав СТРОКИ (снимок, который читает вкладка labels), всегда: якорь её двери. */}
@@ -510,6 +532,24 @@ function BomLineEditor({
         />
       )}
       <SlotIdentityFields index={index} stacked markers={markers} />
+      {cutStrip.eligible ? (
+        <div className='flex flex-col gap-3'>
+          <CheckboxField
+            name='cutStrips'
+            label='cut to length'
+            checked={cutStrip.checked}
+            onCheckedChange={(checked: boolean) => cutStrip.toggle(checked)}
+          />
+          {cutStrip.checked ? (
+            <CutStripFields
+              stripIndex={cutStrip.stripIndex}
+              sizeIds={sizeIds}
+              seams={seams}
+              seamLengthsMm={seamLengthsMm}
+            />
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -616,6 +656,7 @@ export function BomField({
   colorways,
   markers,
   headerEl,
+  techCardId,
   canEdit = true,
 }: {
   highlightComposition?: number;
@@ -643,6 +684,7 @@ export function BomField({
   const [params, setParams] = useSearchParams();
   const { fields, append, remove } = useFieldArray({ control, name: 'bomItems' });
   const bomWatch = (useWatch({ control, name: 'bomItems' }) ?? []) as MatrixLine[];
+  const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []).map(wireInt);
   // Positions, never reordered rows: every cell, editor and delete addresses a line by its index in
   // the field array. Length comes from `fields` — the watch settles a render later after append.
   const lines = fields.map((_, i) => bomWatch[i] ?? {});
@@ -652,6 +694,9 @@ export function BomField({
   const materialById = (id: number) =>
     id > 0 ? materials.find((m) => wireInt(m.id) === id) : undefined;
   const stockFacts = useMaterialStockFacts(fields.length > 0);
+  const { data: card } = useTechCard(techCardId);
+  const seams = card?.seams ?? [];
+  const seamLengthsMm = useSeamLengthsMm(seams);
 
   // The line whose editor is open under its row. ONE editor for the whole list, keyed by index.
   const [selected, setSelected] = useState<number | null>(null);
@@ -805,9 +850,9 @@ export function BomField({
   const colorwayUsers = (lineKey: string, bomItemId: number): BlockingUser[] =>
     (colorways ?? [])
       .filter((c) => usagesOf(c, { id: bomItemId, lineKey }).length > 0)
-      .map((c) => ({
+      .map((c, index) => ({
         colorwayId: c.colorwayId ?? 0,
-        sku: c.baseSku?.trim() || c.colorCode?.trim() || `#${c.colorwayId ?? 0}`,
+        sku: c.baseSku?.trim() || c.colorCode?.trim() || `colourway ${index + 1}`,
       }));
 
   // Рецепт колорвея — на вкладке колорвеев; ?colorway= выбирает его карточку. Форма не теряется:
@@ -974,7 +1019,7 @@ export function BomField({
           <img src={url} alt={m?.name || role} className='size-full object-cover' />
         ) : !m ? (
           <span className='text-micro uppercase tracking-label text-labelColor'>
-            article #{materialId}
+            missing article
           </span>
         ) : null}
       </button>
@@ -1042,7 +1087,7 @@ export function BomField({
             ) : (
               <>
                 <span className='min-w-0 truncate text-labelColor' title={m?.name || undefined}>
-                  {m?.name?.trim() || `article #${materialId}`}
+                  {m?.name?.trim() || 'missing article'}
                 </span>
                 {canReadCosting && (
                   <span className='shrink-0 tabular-nums'>{price.label || 'no price'}</span>
@@ -1127,6 +1172,10 @@ export function BomField({
               index={selected}
               highlight={highlightActive}
               markers={markers}
+              material={materialById(wireInt(lines[selected]?.materialId))}
+              sizeIds={sizeIds}
+              seams={seams}
+              seamLengthsMm={seamLengthsMm}
             />
           </fieldset>
         )}

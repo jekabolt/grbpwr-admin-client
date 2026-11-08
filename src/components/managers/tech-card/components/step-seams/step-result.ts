@@ -124,6 +124,19 @@ const unique = <T>(items: readonly T[]) => [...new Set(items)];
 const operationLabel = (op: FormOpLike | undefined, index: number) =>
   op?.operationNumber == null ? String(index) : String(op.operationNumber);
 
+/** The output unit of the nearest earlier step that already has a computed result. */
+function latestUnitBefore(
+  ops: readonly FormOpLike[],
+  index: number,
+  latestByOutput: ReadonlyMap<string, ComputedStep>,
+): string | undefined {
+  for (let i = index - 1; i >= 0; i--) {
+    const key = (ops[i]?.outputUnitKey ?? '').trim();
+    if (key && !ops[i]?.assemblyBlockDetached && latestByOutput.has(key)) return key;
+  }
+  return undefined;
+}
+
 /** The groups visible at a step, plus unresolved future/self unit references for the audit. */
 function resolvedInputs(
   input: StepResultsInput,
@@ -134,6 +147,19 @@ function resolvedInputs(
   const op = input.ops[index];
   const rawInputs = unique((op?.inputKeys ?? []).map((key) => key.trim()).filter(Boolean));
   const modelGroups = inputGroups(input.ops, index, input.pieceKeys);
+  // A step that only takes labels (hang tag) is done ON the garment: it sees the latest unit.
+  if (!rawInputs.length && op?.labelKeys?.length) {
+    const carrier = latestUnitBefore(input.ops, index, latestByOutput);
+    if (carrier) {
+      const ops = input.ops.map((o, i) => (i === index ? { ...o, inputKeys: [carrier] } : o));
+      modelGroups.push(...inputGroups(ops, index, input.pieceKeys));
+      rawInputs.push(carrier);
+    }
+  }
+  const modelPieces = new Set(modelGroups.flatMap((group) => group.pieces));
+  const labelGroups: InputGroup[] = [...new Set(op?.labelKeys ?? [])].flatMap((key) =>
+    input.geoms.get(key)?.garmentLabel && !modelPieces.has(key) ? [{ key, pieces: [key] }] : [],
+  );
   const used = new Set<string>();
   const groups: ResolvedInput[] = [];
 
@@ -162,7 +188,7 @@ function resolvedInputs(
     });
   };
 
-  for (const group of modelGroups) {
+  for (const group of [...modelGroups, ...labelGroups]) {
     const rawKeys = rawInputs.filter((key) => key === group.key || group.pieces.includes(key));
     add(group, rawKeys);
   }
@@ -511,7 +537,12 @@ function computeStep(
       key: group.key,
       pieces: group.pieces.filter((piece) => transforms.has(piece)),
       ...(group.seed
-        ? { layers: group.seed.result.layers, stacked: group.seed.result.stacked }
+        ? {
+            layers: group.seed.result.layers.filter((piece) => group.pieces.includes(piece)),
+            stacked: group.seed.result.stacked.filter(
+              ([under, over]) => group.pieces.includes(under) && group.pieces.includes(over),
+            ),
+          }
         : {}),
     })),
     ...(op?.layerOrder?.length ? { order: op.layerOrder } : {}),
@@ -576,6 +607,7 @@ export function stepResultsSignature(
   return JSON.stringify({
     ops: input.ops.map((op) => ({
       inputKeys: op.inputKeys,
+      labelKeys: op.labelKeys,
       outputUnitKey: op.outputUnitKey,
       seamKeys: op.seamKeys,
       poseKeys: op.poseKeys,

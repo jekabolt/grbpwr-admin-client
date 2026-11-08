@@ -8,6 +8,9 @@ import { englishT, type PdfT } from './i18n';
 
 export type PackagingModel = ReturnType<typeof derivePackaging>;
 
+/** Shipping-only packaging stays on the card's tab and never reaches the tech pack (В14). */
+const OFF_TECHPACK = new Set(['mailer']);
+
 function mediaFull(media?: common_MediaFull): ResolvedTechMedia | null {
   const full = media?.media?.fullSize;
   const compressed = media?.media?.compressed;
@@ -35,19 +38,21 @@ export function derivePackaging(techCard: common_TechCard, sink?: GapSink, t: Pd
   const resolved = techCard.resolvedLabelMedia ?? [];
   const storedMockup = (id?: number) =>
     mediaFromResolved(resolved.find((media) => wireInt(media.media?.id) === wireInt(id)));
-  const items = (card?.packagingItems ?? []).map((item, index) => {
-    const facts = packagingItemFacts(item);
-    return {
-      ...facts,
-      key: `${index}-${clean(item.key)}-${wireInt(item.materialId)}-${wireInt(item.auxTechCardId)}`,
-      number: index + 1,
-      picture: mediaFull(item.pickedThumbnail) ?? storedMockup(item.mediaIds?.[0]),
-      allColours: facts.colorwayIds.length === 0,
-      colours: facts.colorwayIds
-        .map((id) => colourways.get(id))
-        .filter((name): name is string => !!name),
-    };
-  });
+  const items = (card?.packagingItems ?? [])
+    .filter((item) => !OFF_TECHPACK.has(clean(item.key).toLowerCase()))
+    .map((item, index) => {
+      const facts = packagingItemFacts(item);
+      return {
+        ...facts,
+        key: `${index}-${clean(item.key)}-${wireInt(item.materialId)}-${wireInt(item.auxTechCardId)}`,
+        number: index + 1,
+        picture: mediaFull(item.pickedThumbnail) ?? storedMockup(item.mediaIds?.[0]),
+        allColours: facts.colorwayIds.length === 0,
+        colours: facts.colorwayIds
+          .map((id) => colourways.get(id))
+          .filter((name): name is string => !!name),
+      };
+    });
   const missing: Gap | undefined = items.length
     ? undefined
     : sink?.add({
@@ -86,12 +91,6 @@ export function derivePackaging(techCard: common_TechCard, sink?: GapSink, t: Pd
       netGrams: packaging?.weightNetGrams || 0,
       grossGrams: packaging?.weightGrossGrams || 0,
       photo: packedPhoto,
-    },
-    carton: {
-      units: packaging?.unitsPerBox || 0,
-      box: clean(packaging?.boxDimensions),
-      marking: clean(packaging?.boxMarking),
-      note: clean(packaging?.notes),
     },
   };
 }

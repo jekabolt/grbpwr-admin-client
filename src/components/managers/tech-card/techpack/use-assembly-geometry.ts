@@ -28,6 +28,11 @@ import {
   stripDrawingsOf,
   withStripPieces,
 } from 'components/managers/tech-card/components/cut-strips/strip-pieces';
+import {
+  garmentLabelDrawingsOf,
+  garmentLabelsOfCard,
+  withGarmentLabelPieces,
+} from 'components/managers/tech-card/components/garment-label-pieces';
 import { patternSheetName } from 'components/managers/tech-card/components/nesting/sheet-name';
 import {
   pieceBlockRefs,
@@ -123,6 +128,7 @@ function inputSignature(
       piece.cutSymmetry,
       piece.materials?.[0]?.bomLineKey,
       piece.cutStrip,
+      piece.garmentLabel,
     ]),
     (input.bomItems ?? []).map((item) => [item.lineKey, item.purpose]),
     [...refs].map(([key, pieceRefs]) => [key, pieceRefs.map((ref) => [ref.scopeKey, ref.block])]),
@@ -190,24 +196,33 @@ export function useAssemblyGeometry(techCard: common_TechCard, enabled = true): 
       }),
     [strips, ins?.bomItems, ins?.baseSampleSizeId, matched.found, sizeNames],
   );
+  const labels = garmentLabelsOfCard(techCard);
+  const labelDrawings = useMemo(
+    () => garmentLabelDrawingsOf(labels, drawnSizeToken(matched.found.values())),
+    [labels, matched.found],
+  );
   const found = useMemo(() => {
-    if (drawings.length === 0) return matched.found;
+    if (drawings.length === 0 && labelDrawings.length === 0) return matched.found;
     const all = new Map(matched.found);
     for (const drawing of drawings) all.set(drawing.key, drawing.found);
+    for (const drawing of labelDrawings) all.set(drawing.key, drawing.found);
     return all;
-  }, [matched.found, drawings]);
+  }, [matched.found, drawings, labelDrawings]);
   const input = useMemo(() => {
-    const read = assemblyCardInput(withStripPieces(techCard));
-    if (drawings.length === 0) return read;
-    const marks = new Map(drawings.map((drawing) => [drawing.key, drawing.mark]));
+    const read = assemblyCardInput(withGarmentLabelPieces(withStripPieces(techCard)));
+    if (drawings.length === 0 && labelDrawings.length === 0) return read;
+    const stripMarks = new Map(drawings.map((drawing) => [drawing.key, drawing.mark]));
+    const labelMarks = new Map(labelDrawings.map((drawing) => [drawing.key, drawing.mark]));
     return {
       ...read,
       pieces: read.pieces.map((piece) => {
-        const cutStrip = marks.get(piece.lineKey ?? '');
-        return cutStrip ? { ...piece, cutStrip } : piece;
+        const key = piece.lineKey ?? '';
+        const cutStrip = stripMarks.get(key);
+        const garmentLabel = labelMarks.get(key);
+        return cutStrip || garmentLabel ? { ...piece, cutStrip, garmentLabel } : piece;
       }),
     };
-  }, [ins?.pieces, ins?.bomItems, strips, drawings]);
+  }, [ins?.pieces, ins?.bomItems, strips, labels, drawings, labelDrawings]);
   const signature = useMemo(
     () => inputSignature(filesSignature(files), input, refs, found, index?.grainLayer ?? ''),
     [files, input, refs, found, index?.grainLayer],

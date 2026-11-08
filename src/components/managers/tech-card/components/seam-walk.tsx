@@ -24,7 +24,7 @@ import { mapStepPictureOf, StepView } from './assembly-map/step-view';
 import { useMapModel, type FormOp, type MapModel } from './assembly-map/use-map-model';
 import { useTechCardAutosave } from './design/autosave-contract';
 import { recordSeamDecision } from './step-seams/seam-decisions';
-import { hasMultipleStepPieces } from './step-seams/step-seams-model';
+import { hasMultipleStepPieces, posesLabels } from './step-seams/step-seams-model';
 import {
   StepPictureSvg,
   useBoxSize,
@@ -100,7 +100,9 @@ export function SeamWalk({
   const readOnly = frozen || !cardId || !!ctx?.frozen;
   const isJoin = (at: number) =>
     at >= 0 &&
-    ((ops[at]?.seamKeys?.length ?? 0) > 0 || hasMultipleStepPieces(ops, at, pieceKeys, geoms));
+    ((ops[at]?.seamKeys?.length ?? 0) > 0 ||
+      hasMultipleStepPieces(ops, at, pieceKeys, geoms) ||
+      posesLabels(ops, at, pieceKeys));
   const join = isJoin(index);
   // The canvas and the result: a step behind the rail while they catch up.
   const shown = useDeferredValue(index);

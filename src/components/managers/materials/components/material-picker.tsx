@@ -9,20 +9,21 @@ import { createPortal } from 'react-dom';
 import {
   Arrow,
   Button,
-  Chip,
-  ChipRow,
   Close,
   ConfirmationModal,
+  EmptyCell,
   Input,
   Media,
   Placeholder,
   Select,
+  SideRail,
+  SideRailLayout,
   Text,
   Tile,
   Tiles,
+  Toolbar,
   Tooltip,
   TooltipProvider,
-  EmptyCell,
 } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import {
@@ -30,6 +31,18 @@ import {
   trimPictogramKind,
 } from 'components/managers/tech-card/components/design/pattern/trim-pictograms';
 import { materialCompositionText, materialSpec } from './material-code';
+import {
+  AppliedFilters,
+  DEFAULT_MATERIAL_FILTERS,
+  MaterialFilterPanel,
+  MaterialFilterSheet,
+  activeFilterCount,
+  applyMaterialFilters,
+  normalizeMaterialSort,
+  sectionCounts,
+  suppliers,
+  type MaterialFilterState,
+} from './material-filters';
 import { MaterialThumb, materialImageUrl } from './material-thumb';
 import { useMaterials } from './useMaterials';
 
@@ -48,7 +61,7 @@ const numId = (v: unknown): number => Number(v) || 0;
 
 // The picked material's one-line identity: "CODE · Name" (code dropped when absent).
 const materialLabel = (m: common_Material): string =>
-  `${m.code ? `${m.code} · ` : ''}${m.name ?? `#${m.id}`}`;
+  `${m.code ? `${m.code} · ` : ''}${m.name ?? 'unnamed'}`;
 
 /**
  * Складские факты одного материала — все из ОДНОЙ строки ledger'а и потому неразделимые.
@@ -180,15 +193,14 @@ export function MaterialPicker({
   // grid only: preselects this section's chip over the whole catalog (see MaterialPickerDialog).
   initialSection?: string;
 }) {
-  const { data, isLoading } = useMaterials(section, includeArchived);
+  const isGrid = variant === 'grid';
+  const { data, isLoading } = useMaterials(isGrid ? '' : section, isGrid ? true : includeArchived);
   const materials = useMemo(() => data?.materials ?? [], [data]);
   const isCurrent = useMemo(() => {
     const target = numId(value);
     return (m: common_Material) => target > 0 && numId(m.id) === target;
   }, [value]);
   const selected = useMemo(() => materials.find(isCurrent), [materials, isCurrent]);
-  const isGrid = variant === 'grid';
-
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
@@ -380,6 +392,7 @@ export function MaterialPicker({
           value={value}
           section={section}
           initialSection={initialSection}
+          includeArchived={includeArchived}
           clearable
           onPick={choose}
           onClose={() => closeMenu()}
@@ -472,7 +485,7 @@ export function MaterialPicker({
                       >
                         <MaterialThumb material={m} size='sm' className='h-6 w-6' />
                         <span className='min-w-0 flex-1'>
-                          <Text className='truncate'>{m.name || `#${m.id}`}</Text>
+                          <Text className='truncate'>{m.name || 'unnamed'}</Text>
                           {spec ? (
                             <Text variant='label' size='micro' className='truncate'>
                               {spec}
@@ -517,6 +530,7 @@ export function MaterialPickerDialog({
   onClose,
   onCreate,
   preferredIds,
+  excludedIds,
 }: {
   open: boolean;
   // HARD scope: the catalog query itself is narrowed to this section and no section chips render.
@@ -539,17 +553,22 @@ export function MaterialPickerDialog({
   onCreate?: (query?: string) => void;
   // Suggested articles, best first: sorted to the front of the grid and marked `suggested`.
   preferredIds?: readonly number[];
+  // Articles that cannot be picked in this context (for example, a conversion into itself).
+  excludedIds?: readonly number[];
 }) {
   // Only fetched while open — the caller mounts this permanently next to its button.
-  const { data, isLoading } = useMaterials(section, includeArchived, open);
+  const { data, isLoading } = useMaterials('', true, open);
   if (!open) return null;
   return (
     <MaterialGridDialog
-      materials={data?.materials ?? []}
+      materials={(data?.materials ?? []).filter(
+        (material) => !excludedIds?.includes(numId(material.id)),
+      )}
       loading={isLoading}
       value={value}
       section={section}
       initialSection={initialSection}
+      includeArchived={includeArchived}
       clearable={clearable}
       title={title}
       confirmLabel={confirmLabel}
@@ -654,6 +673,7 @@ function MaterialGridDialog({
   value,
   section,
   initialSection,
+  includeArchived,
   clearable,
   title,
   confirmLabel,
@@ -667,6 +687,7 @@ function MaterialGridDialog({
   value: number;
   section: string;
   initialSection?: string;
+  includeArchived?: boolean;
   clearable?: boolean;
   title?: string;
   confirmLabel?: string;
@@ -676,11 +697,13 @@ function MaterialGridDialog({
   preferredIds?: readonly number[];
 }) {
   const [q, setQ] = useState('');
-  const [inStockOnly, setInStockOnly] = useState(false);
-  const [supplier, setSupplier] = useState('');
-  const [sectionFilter, setSectionFilter] = useState(section ? '' : initialSection ?? '');
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterState, setFilterState] = useState<MaterialFilterState>({
+    ...DEFAULT_MATERIAL_FILTERS,
+    section: section || initialSection || '',
+    archived: !!includeArchived,
+  });
   const stockFacts = useMaterialStockFacts();
-  const hasStock = stockFacts.size > 0;
   const current = numId(value);
 
   const searchRef = useRef<HTMLInputElement>(null);
@@ -692,53 +715,27 @@ function MaterialGridDialog({
   };
 
   const onHand = (m: common_Material): number | undefined => {
-    if (!hasStock) return undefined;
+    if (!stockFacts.size) return undefined;
     const n = Number(stockFacts.get(numId(m.id))?.onHand);
     return Number.isFinite(n) ? n : 0;
   };
 
-  // Section chips only when the catalog was not already scoped by the caller, and only for
-  // sections that actually hold articles (plus the preselected one, so an empty preselect still
-  // reads as the reason the grid is empty).
-  const sectionChips = useMemo(() => {
-    if (section) return [];
-    const present = new Set<string>(materials.map((m) => m.section ?? ''));
-    if (initialSection) present.add(initialSection);
-    return techCardBomSectionOptions.filter((o) => present.has(o.value));
-  }, [materials, section, initialSection]);
-
-  const suppliers = useMemo(
-    () =>
-      Array.from(
-        new Set(materials.map((m) => m.supplier?.trim()).filter((s): s is string => !!s)),
-      ).sort(),
-    [materials],
-  );
-
   const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    const rows = materials.filter((m) => {
-      if (sectionFilter && m.section !== sectionFilter) return false;
-      if (supplier && (m.supplier ?? '').trim() !== supplier) return false;
-      if (inStockOnly && !((onHand(m) ?? 0) > 0)) return false;
-      if (!needle) return true;
-      return [m.name, m.code, m.supplierRef, m.supplier, m.color].some((s) =>
-        (s ?? '').toLowerCase().includes(needle),
-      );
-    });
-    // Suggested first (in their order), then in stock, then by name: what can be cut today is
-    // what is usually being looked for.
+    const rows = applyMaterialFilters(materials, filterState, { q, stockById: stockFacts });
+    // Suggestions remain at the front without changing the shared order of the other results.
     return rows.sort((a, b) => {
       const pa = preferredRank(numId(a.id));
       const pb = preferredRank(numId(b.id));
       if (pa !== pb) return pa - pb;
-      const sa = (onHand(a) ?? 0) > 0 ? 0 : 1;
-      const sb = (onHand(b) ?? 0) > 0 ? 0 : 1;
-      if (sa !== sb) return sa - sb;
-      return (a.name ?? '').localeCompare(b.name ?? '', undefined, { sensitivity: 'base' });
+      return 0;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [materials, q, sectionFilter, supplier, inStockOnly, stockFacts, preferredIds]);
+  }, [materials, q, filterState, stockFacts, preferredIds]);
+  const counts = useMemo(
+    () => sectionCounts(materials, filterState, { q, stockById: stockFacts }),
+    [materials, filterState, q, stockFacts],
+  );
+  const supplierNames = useMemo(() => suppliers(materials), [materials]);
 
   const pick = (m: common_Material) => onPick(m);
   const create = onCreate ? () => onCreate(q.trim() || undefined) : undefined;
@@ -807,116 +804,136 @@ function MaterialGridDialog({
       }}
     >
       <TooltipProvider delayDuration={450} skipDelayDuration={150}>
-        <div className='flex min-h-[50vh] flex-col gap-2.5'>
-          <div className='flex flex-wrap items-center gap-2'>
-            <div className='min-w-[12rem] flex-1'>
+        <SideRailLayout
+          className='min-h-[50vh]'
+          rail={
+            <SideRail width={180} className='hidden lg:block'>
+              <MaterialFilterPanel
+                state={filterState}
+                onChange={setFilterState}
+                counts={counts}
+                suppliers={supplierNames}
+              />
+            </SideRail>
+          }
+        >
+          <div className='flex flex-col gap-2.5'>
+            <Toolbar className='flex-nowrap'>
               <Input
                 ref={searchRef}
                 name='material-grid-q'
                 value={q}
                 autoComplete='off'
-                placeholder='search name / code / supplier'
+                placeholder='search'
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQ(e.target.value)}
                 onKeyDown={onSearchKeyDown}
+                className='min-w-0 flex-1'
               />
-            </div>
-            {suppliers.length > 1 ? (
-              <div className='w-[11rem]'>
+              <div className='hidden w-32 shrink-0 lg:block'>
                 <Select
-                  name='material-grid-supplier'
-                  value={supplier}
-                  onValueChange={setSupplier}
+                  name='material-grid-sort'
+                  value={filterState.sort}
+                  placeholder='sort'
                   items={[
-                    { value: '', label: 'all suppliers' },
-                    ...suppliers.map((s) => ({ value: s, label: s })),
+                    { value: 'name', label: 'name a–z' },
+                    { value: 'code', label: 'code a–z' },
+                    { value: 'stock', label: 'stock low' },
                   ]}
+                  onValueChange={(sort) =>
+                    setFilterState((currentState) => ({
+                      ...currentState,
+                      sort: normalizeMaterialSort(sort),
+                    }))
+                  }
                   fullWidth
                 />
               </div>
-            ) : null}
-            {clearable && current > 0 ? (
-              <Button type='button' size='xs' variant='secondary' onClick={() => onPick(undefined)}>
-                unlink
+              <Button
+                type='button'
+                size='xs'
+                variant='secondary'
+                className='shrink-0 normal-case lg:hidden'
+                onClick={() => setFilterOpen(true)}
+              >
+                filter{activeFilterCount(filterState) ? ` ${activeFilterCount(filterState)}` : ''}
               </Button>
-            ) : null}
-          </div>
-
-          {sectionChips.length > 1 || hasStock ? (
-            <ChipRow>
-              {sectionChips.length > 1
-                ? sectionChips.map((o) => (
-                    <Chip
-                      key={o.value}
-                      selected={sectionFilter === o.value}
-                      pressed={sectionFilter === o.value}
-                      onClick={() => setSectionFilter((cur) => (cur === o.value ? '' : o.value))}
-                    >
-                      {o.label}
-                    </Chip>
-                  ))
-                : null}
-              {hasStock ? (
-                <Chip
-                  dashed={!inStockOnly}
-                  selected={inStockOnly}
-                  pressed={inStockOnly}
-                  onClick={() => setInStockOnly((v) => !v)}
-                  className={sectionChips.length > 1 ? 'ml-2' : undefined}
+              {clearable && current > 0 ? (
+                <Button
+                  type='button'
+                  size='xs'
+                  variant='secondary'
+                  className='shrink-0 normal-case'
+                  onClick={() => onPick(undefined)}
                 >
-                  in stock
-                </Chip>
+                  unlink
+                </Button>
               ) : null}
-            </ChipRow>
-          ) : null}
+            </Toolbar>
 
-          {loading ? (
-            <Placeholder label='loading' className='h-20' />
-          ) : (
-            <div ref={gridRef} onKeyDown={onGridKeyDown} className='flex flex-col gap-2'>
-              {filtered.length === 0 ? (
-                <Placeholder
-                  label={query ? `no articles match “${query}”` : 'no articles'}
-                  className='h-16'
-                />
-              ) : null}
-              {filtered.length > 0 || create ? (
-                <Tiles min={132} className='mp-grid'>
-                  {filtered.map((m, i) => (
-                    <ArticleTile
-                      key={numId(m.id)}
-                      m={m}
-                      verb={verb}
-                      selected={numId(m.id) === current}
-                      armed={i === 0 && !!query}
-                      stock={onHand(m)}
-                      facts={stockFacts.get(numId(m.id))}
-                      suggested={preferredRank(numId(m.id)) !== Number.MAX_SAFE_INTEGER}
-                      onPick={() => pick(m)}
-                    />
-                  ))}
-                  {create ? (
-                    <div data-mp-tile>
-                      <Tile
-                        dashed
-                        onClick={create}
-                        className='min-h-[118px] items-center justify-center'
-                      >
-                        <Text
-                          component='span'
-                          size='micro'
-                          variant='label'
-                          className='text-center uppercase'
-                        >
-                          + create
-                        </Text>
-                      </Tile>
-                    </div>
-                  ) : null}
-                </Tiles>
-              ) : null}
+            <div className='lg:hidden'>
+              <AppliedFilters
+                state={filterState}
+                onChange={setFilterState}
+                resultCount={filtered.length}
+              />
             </div>
-          )}
-        </div>
+
+            {loading ? (
+              <Placeholder label='loading' className='h-20' />
+            ) : (
+              <div ref={gridRef} onKeyDown={onGridKeyDown} className='flex flex-col gap-2'>
+                {filtered.length === 0 ? (
+                  <Placeholder label={query ? 'no matches' : 'no articles'} className='h-16' />
+                ) : null}
+                {filtered.length > 0 || create ? (
+                  <Tiles min={132} className='mp-grid'>
+                    {filtered.map((m, i) => (
+                      <ArticleTile
+                        key={numId(m.id)}
+                        m={m}
+                        verb={verb}
+                        selected={numId(m.id) === current}
+                        armed={i === 0 && !!query}
+                        stock={onHand(m)}
+                        facts={stockFacts.get(numId(m.id))}
+                        suggested={preferredRank(numId(m.id)) !== Number.MAX_SAFE_INTEGER}
+                        onPick={() => pick(m)}
+                      />
+                    ))}
+                    {create ? (
+                      <div data-mp-tile>
+                        <Tile
+                          dashed
+                          onClick={create}
+                          className='min-h-[118px] items-center justify-center'
+                        >
+                          <Text
+                            component='span'
+                            size='micro'
+                            variant='label'
+                            className='text-center uppercase'
+                          >
+                            + create
+                          </Text>
+                        </Tile>
+                      </div>
+                    ) : null}
+                  </Tiles>
+                ) : null}
+              </div>
+            )}
+          </div>
+        </SideRailLayout>
+        <MaterialFilterSheet
+          open={filterOpen}
+          onOpenChange={setFilterOpen}
+          state={filterState}
+          onChange={setFilterState}
+          counts={counts}
+          suppliers={supplierNames}
+          resultCount={filtered.length}
+          onReset={() => setFilterState(DEFAULT_MATERIAL_FILTERS)}
+        />
       </TooltipProvider>
     </ConfirmationModal>
   );
@@ -944,7 +961,7 @@ function ArticleTile({
 }) {
   const url = materialImageUrl(m);
   const colour = materialSwatchColour(m);
-  const name = m.name || `#${numId(m.id)}`;
+  const name = m.name || 'unnamed';
   const line = keyFacts(m);
   const composition = materialCompositionText(m);
   const unit = m.unit?.trim() ?? '';
@@ -1078,7 +1095,7 @@ export function MaterialHoverCard({
       ) : null}
       <div className='flex flex-col gap-1 p-2'>
         <Text component='span' size='micro' className='font-bold uppercase'>
-          {m.name || `#${numId(m.id)}`}
+          {m.name || 'unnamed'}
           {m.archived ? ' · archived' : ''}
         </Text>
         <dl className='grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5'>

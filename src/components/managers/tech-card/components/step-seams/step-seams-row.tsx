@@ -20,6 +20,7 @@ import { NO_SEAM_TEXT } from './step-highlight';
 import { useStepResults } from './step-result-context';
 import {
   hasMultipleStepPieces,
+  posesLabels,
   pieceOfTarget,
   targetsLen,
   type TargetId,
@@ -96,7 +97,7 @@ export function StepSeamsDoor({
 }) {
   const { ctx, ops, geoms, pieceKeys, stored } = useStepScene(index);
   const hasMultiplePieces = useMemo(
-    () => hasMultipleStepPieces(ops, index, pieceKeys, geoms),
+    () => hasMultipleStepPieces(ops, index, pieceKeys, geoms) || posesLabels(ops, index, pieceKeys),
     [ops, index, pieceKeys, geoms],
   );
   if (!ctx || !hasMultiplePieces) return null;
@@ -138,7 +139,7 @@ export function StepSeamsRow({
   const setOpen = (next: boolean) => onPicker(next ? PLAIN_PICK : null);
 
   const hasMultiplePieces = useMemo(
-    () => hasMultipleStepPieces(ops, index, pieceKeys, geoms),
+    () => hasMultipleStepPieces(ops, index, pieceKeys, geoms) || posesLabels(ops, index, pieceKeys),
     [ops, index, pieceKeys, geoms],
   );
   // A deep link from the audit's PDF gaps: open on this step, then drop the param.

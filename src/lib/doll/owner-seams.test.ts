@@ -11,6 +11,7 @@ import type {
 } from 'lib/assembly-skeleton/types';
 import type { PieceDTO } from 'lib/nesting/types';
 import { seamFromCandidate, withSeamLayer, type StoredSeam } from 'lib/seams';
+import { candidatesOnSize } from 'lib/seams/transfer';
 import { dollOwnerSeamsOf } from 'components/managers/tech-card/components/assembly-doll/use-doll-card';
 import {
   OWNER_FIT,
@@ -615,6 +616,34 @@ describe('paper doll owner seams', () => {
     });
     const visible = report.panels.find((panel) => panel.layers.includes('A'));
     expect(visible?.pieceKey).toBe('B');
+  });
+
+  it('keeps the derived turned mark when owner candidates move to a size', () => {
+    const { graph, owner } = fixture();
+    const pieces = graph.pieces;
+    const [moved] = candidatesOnSize(
+      [
+        {
+          seamKey: 'owner-row',
+          candidate: owner,
+          inStep: true,
+          turned: {
+            step: 170,
+            run: [owner.a],
+            by: 'structure' as const,
+            heldBy: { step: 660, topstitch: false },
+          },
+        },
+      ],
+      { size: 'M', pieces },
+      { size: 'L', pieces },
+    );
+    expect(moved.turned).toEqual({
+      step: 170,
+      run: [owner.a],
+      by: 'structure',
+      heldBy: { step: 660, topstitch: false },
+    });
   });
 
   it('keeps the historical report when no owner rows are supplied', () => {

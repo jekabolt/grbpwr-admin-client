@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
-import type { common_TechCardBomKind, common_TechCardSeam } from 'api/proto-http/admin';
+import type {
+  common_Material,
+  common_TechCardBomKind,
+  common_TechCardSeam,
+} from 'api/proto-http/admin';
 import { formatCompositionCell } from 'components/managers/materials/components/material-code';
+import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { parseComposition } from 'components/managers/product/components/composition/composition-picker';
 import { CompositionModal } from 'components/managers/product/components/composition/composition-modal/composition-modal';
 import { compositionToValue } from 'components/managers/product/components/composition/composition-modal/utils';
-import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
-import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { decimalToInput } from 'utils/decimal';
@@ -27,7 +30,6 @@ import {
   DecimalField,
   InputField,
   SelectField,
-  ViewSwitch,
 } from 'ui';
 
 import { EmptyState, GROUP_SEAM } from './core';
@@ -45,7 +47,6 @@ import { sectionShort } from '../bom-line-picker';
 import {
   bomPurposeLabel,
   defaultRoleForPurpose,
-  isMainFabricLine,
   isRollGoodsSection,
   purposeEditorOptions,
   UNSET_PURPOSE,
@@ -53,7 +54,6 @@ import {
 import { defaultRoleFor, roleCollision } from '../bom-roles';
 import {
   bornBomLine,
-  bornCutStrip,
   changeLinePurpose,
   hasFusingDataForBomLine,
   holdNames,
@@ -62,8 +62,10 @@ import {
 } from '../form-writers';
 import { unitOptions } from '../tech-card-options';
 import { wireInt, type TechCardFormData } from '../schema';
-import { stripCutMm, stripSewnMm } from '../cut-strips/lengths';
 import { useSeamLengthsMm } from '../cut-strips/seam-lengths';
+import { CutStripModal } from '../cut-strip-editor/cut-strip-fields';
+import { useCutStrip } from '../cut-strip-editor/use-cut-strip';
+import { measured } from '../use-colourway-auto';
 
 /**
  * ═══ MATERIAL SLOTS — СЛОТЫ МАТЕРИАЛОВ ВМЕСТО СПЕЦИФИКАЦИИ (B-16 / B-19 / B-20 круга 20) ═══════
@@ -125,21 +127,6 @@ import { useSeamLengthsMm } from '../cut-strips/seam-lengths';
  */
 
 type Line = NonNullable<TechCardFormData['bomItems']>[number];
-type CutStrip = NonNullable<TechCardFormData['cutStrips']>[number];
-type SeamLengths =
-  | ReadonlyMap<number, number | undefined>
-  | Readonly<Record<number, number | undefined>>;
-
-export type SeamLengthsMm = (seamKey: string) => SeamLengths | undefined;
-
-const seamLengthAt = (source: SeamLengths | undefined, sizeId: number): number | undefined => {
-  if (!source) return undefined;
-  const map = source as ReadonlyMap<number, number | undefined>;
-  return typeof map.get === 'function'
-    ? map.get(sizeId)
-    : (source as Readonly<Record<number, number | undefined>>)[sizeId];
-};
-
 /**
  * ТРИ СЕМЕЙСТВА — ОДНА ТАБЛИЦА (B-19: «должно предлагать и нитки и фурнитуру если она есть»).
  * Три отдельных блока превратили бы секцию в лестницу из шести коробок, а «блок никогда не
@@ -198,17 +185,20 @@ const blockerWord = (blockers: Blocker[]): string => {
 export function MaterialSlots({
   techCardId,
   readOnly,
+  auxMode = null,
   onGoTab,
 }: {
   techCardId?: number;
   readOnly?: boolean;
+  auxMode?: 'own' | 'bought' | null;
   /** Дверь на вкладку BOM: `?tab=bom&bom=<line_key>` — существующий диплинк редактора строки. */
   onGoTab?: (tab: string, extra?: Record<string, string>) => void;
 }) {
   const { control, getValues, setValue, setFocus } = useFormContext<TechCardFormData>();
   const lines = (useWatch({ control, name: 'bomItems' }) ?? []) as Line[];
-  const cutStrips = (useWatch({ control, name: 'cutStrips' }) ?? []) as CutStrip[];
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []).map(wireInt);
+  const { data: materialsData } = useMaterials('', true);
+  const materials = useMemo(() => materialsData?.materials ?? [], [materialsData]);
 
   // Единственное, ради чего читается карточка: рецепты колорвеев пишутся СВОИМ RPC, эта форма их
   // не видит в своём состоянии и не может очистить своим сохранением — значит и удалять строку,
@@ -218,34 +208,6 @@ export function MaterialSlots({
   const colorways = card?.colorways;
   const seamLengthsMm = useSeamLengthsMm(card?.seams);
   const [openStripKey, setOpenStripKey] = useState('');
-
-  const stripIndexFor = (bomLineKey?: string) =>
-    cutStrips.findIndex((strip) => strip.bomLineKey?.trim() === bomLineKey?.trim());
-  const toggleStrip = (line: Line, checked: boolean) => {
-    const bomLineKey = line.lineKey?.trim() ?? '';
-    if (!bomLineKey) return;
-    const current = (getValues('cutStrips') ?? []) as CutStrip[];
-    const existing = current.find((strip) => strip.bomLineKey?.trim() === bomLineKey);
-    if (checked) {
-      if (!existing) {
-        const created = {
-          ...bornCutStrip(bomLineKey),
-          sizes: sizeIds.map((sizeId) => ({ sizeId, seamMm: '', manualCutMm: '' })),
-        };
-        setValue('cutStrips', [...current, created] as never, { shouldDirty: true });
-        setOpenStripKey(created.lineKey ?? '');
-      } else {
-        setOpenStripKey(existing.lineKey ?? '');
-      }
-      return;
-    }
-    setValue(
-      'cutStrips',
-      current.filter((strip) => strip.bomLineKey?.trim() !== bomLineKey) as never,
-      { shouldDirty: true },
-    );
-    if (existing?.lineKey === openStripKey) setOpenStripKey('');
-  };
 
   const stripNorm = (line: Line): string => {
     const norm = (card?.cutStripNorms ?? []).find(
@@ -280,8 +242,8 @@ export function MaterialSlots({
             (!!key && u.bomLineKey === key),
         ),
       )
-      .map((c) => ({
-        sku: c.baseSku?.trim() || c.colorCode?.trim() || `#${c.colorwayId ?? 0}`,
+      .map((c, index) => ({
+        sku: c.baseSku?.trim() || c.colorCode?.trim() || `colourway ${index + 1}`,
       }));
     // The last line of a fabric scope holds that scope's sheets, piece links and markers: gone, they
     // would sit «without a material». Named like the colourways, and cleared the same way — elsewhere.
@@ -457,18 +419,18 @@ export function MaterialSlots({
              ячеек, поэтому ни длина имени, ни пилюля семейства, ни выбранное назначение не двигают
              соседние колонки. Ширина колонки оси — по самому длинному известному ярлыку
              («mesh / second layer»), остальное режется многоточием с полным текстом в `title`.
-             `min-w` — чтобы фиксированная раскладка не сжимала строку в кашу на узком окне
-             (DataTable прокручивается по горизонтали сам). */
-          <DataTable className='min-w-[1110px] table-fixed [&_td]:py-2.5'>
+             `min-w` включается с `sm`; на телефоне вторичные composition / estimate / cut / from
+             сняты, и четыре рабочих колонки помещаются без горизонтальной прокрутки. */
+          <DataTable className='min-w-0 table-fixed [&_td]:py-2.5 sm:min-w-[1110px]'>
             <colgroup>
               <col />
-              <col className='w-[200px]' />
-              <col className='w-[18%]' />
-              <col className='w-[150px]' />
-              <col className='w-16' />
-              <col className='w-36' />
-              <col className='w-[90px]' />
-              <col className='w-[110px]' />
+              <col className='w-20 sm:w-[200px]' />
+              <col className='hidden sm:table-column sm:w-[18%]' />
+              <col className='hidden sm:table-column sm:w-[150px]' />
+              {auxMode !== 'bought' && <col className='w-20 sm:w-16' />}
+              <col className='hidden sm:table-column sm:w-36' />
+              <col className='hidden sm:table-column sm:w-[90px]' />
+              <col className='w-16 sm:w-[110px]' />
             </colgroup>
             <thead>
               <tr>
@@ -477,11 +439,17 @@ export function MaterialSlots({
                     рулонного товара, вид — только вне его (и не у лейблов), поэтому в ячейке
                     всегда ровно один контрол или прочерк, и двух тут не бывает по построению. */}
                 <th data-align='left'>purpose / kind</th>
-                <th data-align='left'>composition</th>
-                <th>est usage</th>
-                <th>norm</th>
-                <th data-align='left'>cut</th>
-                <th data-align='left'>from</th>
+                <th data-align='left' className='hidden sm:table-cell'>
+                  composition
+                </th>
+                <th className='hidden sm:table-cell'>est usage</th>
+                {auxMode !== 'bought' && <th>{auxMode === 'own' ? 'norm / pc' : 'norm'}</th>}
+                <th data-align='left' className='hidden sm:table-cell'>
+                  cut
+                </th>
+                <th data-align='left' className='hidden sm:table-cell'>
+                  from
+                </th>
                 <th>
                   <span className='sr-only'>row actions</span>
                 </th>
@@ -505,13 +473,14 @@ export function MaterialSlots({
                     onGo={onGoTab ? goToLine : undefined}
                     onRemove={askRemove}
                     blockersOf={blockersOf}
-                    stripIndex={stripIndexFor(lines[index].lineKey)}
                     norm={stripNorm(lines[index])}
-                    onToggleStrip={(checked) => toggleStrip(lines[index], checked)}
-                    onOpenStrip={() => {
-                      const strip = cutStrips[stripIndexFor(lines[index].lineKey)];
-                      if (strip?.lineKey) setOpenStripKey(strip.lineKey);
-                    }}
+                    auxMode={auxMode}
+                    sizeIds={sizeIds}
+                    seams={card?.seams ?? []}
+                    material={materials.find(
+                      (material) => wireInt(material.id) === wireInt(lines[index].materialId),
+                    )}
+                    onOpenStrip={setOpenStripKey}
                   />
                 )),
               )}
@@ -549,7 +518,7 @@ export function MaterialSlots({
           {confirmDeletesFusing ? 'fusing data deleted' : 'slot and links deleted'}
         </Text>
       </ConfirmationModal>
-      <CutStripEditor
+      <CutStripModal
         openKey={openStripKey}
         onClose={() => setOpenStripKey('')}
         sizeIds={sizeIds}
@@ -571,9 +540,11 @@ function SlotRow({
   onGo,
   onRemove,
   blockersOf,
-  stripIndex,
   norm,
-  onToggleStrip,
+  auxMode,
+  sizeIds,
+  seams,
+  material,
   onOpenStrip,
 }: {
   index: number;
@@ -587,13 +558,22 @@ function SlotRow({
   onGo?: (line: Line) => void;
   onRemove: (index: number) => void;
   blockersOf: (line: Line) => Blocker[];
-  stripIndex: number;
   norm: string;
-  onToggleStrip: (checked: boolean) => void;
-  onOpenStrip: () => void;
+  auxMode: 'own' | 'bought' | null;
+  sizeIds: number[];
+  seams: common_TechCardSeam[];
+  material?: common_Material;
+  onOpenStrip: (lineKey: string) => void;
 }) {
   const { getValues, setValue } = useFormContext<TechCardFormData>();
   const line = lines[index];
+  const cutStrip = useCutStrip({
+    line,
+    sizeIds,
+    seams,
+    material,
+    placement: line.name,
+  });
   const section = line.section;
   const rollGoods = isRollGoodsSection(section);
   const kindEligible = isKindEligibleSection(section);
@@ -678,13 +658,22 @@ function SlotRow({
 
   const blockers = blockersOf(line);
   const blocked = blockers.length > 0;
-  const cutEligible = line.unit?.trim().toLowerCase() === 'm' && !isMainFabricLine(line);
+  const ownNormEligible = auxMode === 'own' && measured(section) && !cutStrip.checked;
+  const ownNorm = (line.consumptionPerUnit ?? '').trim();
 
   /* ПРАВКА ЯЧЕЙКИ = ПРОСМОТР (D-07). Строка спецификации — вещь, а не текст: её живость меряется
      существованием, и правка имени рамку сама не гасит. Поэтому строка сравнивает свои поля на
      входе фокуса в неё и на выходе из неё; разошлись — строка принята. Переход фокуса между
      ячейками ОДНОЙ строки — не выход (`relatedTarget` внутри). */
-  const rowSig = [line.name, line.composition, line.estUsage, line.unit, line.purpose, line.kind]
+  const rowSig = [
+    line.name,
+    line.composition,
+    line.estUsage,
+    line.consumptionPerUnit,
+    line.unit,
+    line.purpose,
+    line.kind,
+  ]
     .map((v) => String(v ?? ''))
     .join('\u0001');
   const sigAtFocus = useRef<string | null>(null);
@@ -743,7 +732,7 @@ function SlotRow({
           <Pill
             tone={family === 'cloth' ? 'ink' : 'mut'}
             data-b16-kind={family}
-            className='w-[76px] shrink-0 justify-center self-stretch'
+            className='hidden w-[76px] shrink-0 justify-center self-stretch sm:flex'
           >
             {FAMILY_TITLE[family]}
           </Pill>
@@ -859,7 +848,7 @@ function SlotRow({
           ячейки вместе с полным текстом состава; сам состав в одну линию, лишнее — многоточием. */}
       <td
         data-align='left'
-        className='align-top'
+        className='hidden align-top sm:table-cell'
         data-b16-fiber-cell={index}
         title={
           linked && !readOnly && !noFibre
@@ -882,7 +871,7 @@ function SlotRow({
           <FibreField index={index} raw={rawFiber} readable={readableFiber} />
         )}
       </td>
-      <td className='align-top' data-b16-est-cell={index}>
+      <td className='hidden align-top sm:table-cell' data-b16-est-cell={index}>
         {readOnly ? (
           est ? (
             <Text component='span' data-b16-est={index}>
@@ -948,19 +937,66 @@ function SlotRow({
           </div>
         )}
       </td>
-      <td className='align-top text-right'>{norm || <EmptyCell />}</td>
-      <td data-align='left' className='align-top'>
-        {cutEligible ? (
+      {auxMode !== 'bought' && (
+        <td className='align-top text-right'>
+          {auxMode === 'own' ? (
+            cutStrip.checked ? (
+              norm || <EmptyCell />
+            ) : ownNormEligible ? (
+              readOnly ? (
+                ownNorm ? (
+                  <Text component='span'>
+                    {ownNorm} {unit}
+                  </Text>
+                ) : (
+                  <Text component='span' className='text-error'>
+                    no norm
+                  </Text>
+                )
+              ) : (
+                <div className='flex min-w-0 items-center gap-1'>
+                  <DecimalField
+                    name={`bomItems.${index}.consumptionPerUnit`}
+                    label='norm'
+                    srLabel
+                    placeholder='no norm'
+                    className='min-w-0 text-right placeholder:text-error'
+                  />
+                  {unit ? <Text component='span'>{unit}</Text> : null}
+                </div>
+              )
+            ) : (
+              <EmptyCell />
+            )
+          ) : (
+            norm || <EmptyCell />
+          )}
+        </td>
+      )}
+      <td data-align='left' className='hidden align-top sm:table-cell'>
+        {cutStrip.eligible ? (
           <div className='flex items-center gap-2'>
             <CheckboxField
               name='cutStrips'
               label='cut to length'
-              checked={stripIndex >= 0}
-              onCheckedChange={(checked: boolean) => onToggleStrip(checked)}
+              checked={cutStrip.checked}
+              onCheckedChange={(checked: boolean) => {
+                if (checked && auxMode === 'own') {
+                  setValue(`bomItems.${index}.consumptionPerUnit`, '' as never, {
+                    shouldDirty: true,
+                  });
+                }
+                const strip = cutStrip.toggle(checked);
+                if (checked && strip?.lineKey) onOpenStrip(strip.lineKey);
+              }}
               readOnly={readOnly}
             />
-            {stripIndex >= 0 && (
-              <Button variant='underline' size='xs' onClick={onOpenStrip}>
+            {cutStrip.checked && (
+              <Button
+                variant='underline'
+                size='xs'
+                onClick={() => onOpenStrip(cutStrip.strip?.lineKey ?? '')}
+              >
                 lengths
               </Button>
             )}
@@ -969,7 +1005,7 @@ function SlotRow({
           <EmptyCell />
         )}
       </td>
-      <td data-align='left' className='align-top' data-b16-from={index}>
+      <td data-align='left' className='hidden align-top sm:table-cell' data-b16-from={index}>
         {/* ОТКУДА СТРОКА — синяя `drafted`, пока строка черновика не просмотрена; пусто иначе.
             Пилюля — и есть «принять» этой строки (фиксап M3). */}
         <DraftedPill
@@ -1009,215 +1045,6 @@ function SlotRow({
         </div>
       </td>
     </tr>
-  );
-}
-
-const CUT_MODE_OPTIONS = [
-  { value: 'from_seam', label: 'from seam' },
-  { value: 'per_size', label: 'per size' },
-  { value: 'one_length', label: 'one length' },
-] as const;
-
-function CutStripEditor({
-  openKey,
-  onClose,
-  sizeIds,
-  seams,
-  readOnly,
-  seamLengthsMm,
-}: {
-  openKey: string;
-  onClose: () => void;
-  sizeIds: number[];
-  seams: common_TechCardSeam[];
-  readOnly: boolean;
-  seamLengthsMm?: SeamLengthsMm;
-}) {
-  const { control, setValue } = useFormContext<TechCardFormData>();
-  const strips = (useWatch({ control, name: 'cutStrips' }) ?? []) as CutStrip[];
-  const pieces = useWatch({ control, name: 'pieces' }) ?? [];
-  const stripIndex = strips.findIndex((candidate) => candidate.lineKey === openKey);
-  const strip = strips[stripIndex];
-  const { dictionary } = useDictionary();
-
-  useEffect(() => {
-    if (stripIndex < 0 || !strip) return;
-    const current = strip.sizes ?? [];
-    const rows = sizeIds.map((sizeId) => {
-      const stored = current.find((row) => wireInt(row.sizeId) === wireInt(sizeId));
-      return stored ?? { sizeId, seamMm: '', manualCutMm: '' };
-    });
-    if (
-      rows.length !== current.length ||
-      rows.some((row, index) => wireInt(row.sizeId) !== wireInt(current[index]?.sizeId))
-    ) {
-      setValue(`cutStrips.${stripIndex}.sizes`, rows, { shouldDirty: false });
-    }
-  }, [setValue, sizeIds, strip, stripIndex]);
-
-  const seamSource = useMemo(() => {
-    if (!strip?.seamKey || strip.lengthMode !== 'from_seam' || !seamLengthsMm) return undefined;
-    return seamLengthsMm(strip.seamKey);
-  }, [seamLengthsMm, strip?.lengthMode, strip?.seamKey]);
-  useEffect(() => {
-    if (stripIndex < 0 || !strip || !seamSource) return;
-    (strip.sizes ?? []).forEach((row, sizeIndex) => {
-      const value = seamLengthAt(seamSource, wireInt(row.sizeId));
-      const next = value == null ? '' : String(value);
-      if ((row.seamMm ?? '') !== next) {
-        setValue(`cutStrips.${stripIndex}.sizes.${sizeIndex}.seamMm`, next, {
-          // Stale geometry is carried by the next human edit; opening the card never autosaves it.
-          shouldDirty: false,
-        });
-      }
-    });
-  }, [seamSource, setValue, strip, stripIndex]);
-
-  if (!strip) {
-    return (
-      <ConfirmationModal open={false} onOpenChange={onClose} onConfirm={onClose} hideActions>
-        <span />
-      </ConfirmationModal>
-    );
-  }
-
-  const mode = strip.lengthMode ?? 'per_size';
-
-  const pieceName = new Map(
-    pieces.map((piece) => [piece.lineKey?.trim() ?? '', piece.name?.trim() ?? '']),
-  );
-  const seamItems = seams
-    .filter((seam) => seam.kind !== 'TECH_CARD_SEAM_KIND_POSE')
-    .map((seam, index) => {
-      const names = [seam.sideA?.parts?.[0]?.pieceLineKey, seam.sideB?.parts?.[0]?.pieceLineKey]
-        .map((key) => pieceName.get(key?.trim() ?? ''))
-        .filter(Boolean);
-      return {
-        value: seam.seamKey ?? '',
-        label: names.join(' · ') || seam.note?.trim() || `seam ${index + 1}`,
-      };
-    })
-    .filter((item) => !!item.value);
-  if (strip.seamKey && !seamItems.some((item) => item.value === strip.seamKey)) {
-    seamItems.push({ value: strip.seamKey, label: 'seam missing' });
-  }
-
-  const effectiveStrip: CutStrip = {
-    ...strip,
-    sizes: (strip.sizes ?? []).map((row) => ({
-      ...row,
-      seamMm:
-        mode === 'from_seam' ? seamLengthAt(seamSource, wireInt(row.sizeId))?.toString() ?? '' : '',
-    })),
-  };
-  const sizesById = new Map((strip.sizes ?? []).map((row, index) => [wireInt(row.sizeId), index]));
-  const sizeName = new Map(
-    (dictionary?.sizes ?? []).map((size) => [wireInt(size.id), formatSizeName(size.name ?? `#${size.id}`)]),
-  );
-
-  return (
-    <ConfirmationModal
-      open={!!openKey}
-      onOpenChange={(open) => !open && onClose()}
-      onConfirm={onClose}
-      title='cut lengths'
-      width='lg'
-      hideActions
-    >
-      <div className='space-y-4'>
-        <ViewSwitch
-          label='length mode'
-          value={mode}
-          options={CUT_MODE_OPTIONS}
-          disabled={readOnly}
-          onChange={(mode) =>
-            setValue(`cutStrips.${stripIndex}.lengthMode`, mode, { shouldDirty: true })
-          }
-        />
-        <div className='grid gap-2.5 sm:grid-cols-2 lg:grid-cols-5'>
-          {mode === 'from_seam' && (
-            <>
-              <SelectField
-                name={`cutStrips.${stripIndex}.seamKey`}
-                label='Seam'
-                items={seamItems}
-                disabled={readOnly}
-              />
-              <DecimalField
-                name={`cutStrips.${stripIndex}.fitPct`}
-                label='Fit %'
-                readOnly={readOnly}
-              />
-            </>
-          )}
-          {mode === 'one_length' && (
-            <DecimalField
-              name={`cutStrips.${stripIndex}.oneLengthMm`}
-              label='Length mm'
-              maxDecimals={0}
-              readOnly={readOnly}
-            />
-          )}
-          <DecimalField
-            name={`cutStrips.${stripIndex}.overlapMm`}
-            label='Overlap mm'
-            readOnly={readOnly}
-          />
-          <DecimalField
-            name={`cutStrips.${stripIndex}.widthMm`}
-            label='Width mm'
-            readOnly={readOnly}
-          />
-        </div>
-        <DataTable>
-          <thead>
-            <tr>
-              <th data-align='left'>Size</th>
-              <th>Seam mm</th>
-              <th>Cut mm</th>
-              <th>Sewn mm</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sizeIds.map((sizeId) => {
-              const sizeIndex = sizesById.get(wireInt(sizeId));
-              const manual =
-                sizeIndex == null ? '' : (strip.sizes?.[sizeIndex]?.manualCutMm ?? '').trim();
-              const seam = mode === 'from_seam' ? seamLengthAt(seamSource, sizeId) : undefined;
-              const cut = stripCutMm(effectiveStrip, sizeId);
-              const sewn = stripSewnMm(effectiveStrip, sizeId);
-              return (
-                <tr key={sizeId}>
-                  <td data-align='left'>{sizeName.get(sizeId) ?? `#${sizeId}`}</td>
-                  <td className='text-right'>{seam ?? <EmptyCell />}</td>
-                  <td>
-                    {sizeIndex == null ? (
-                      <EmptyCell />
-                    ) : (
-                      <DecimalField
-                        name={`cutStrips.${stripIndex}.sizes.${sizeIndex}.manualCutMm`}
-                        label={`Cut ${sizeName.get(sizeId) ?? sizeId}`}
-                        srLabel
-                        maxDecimals={0}
-                        placeholder={cut == null ? '' : String(cut)}
-                        {...(mode === 'one_length' ? { value: cut ?? '' } : {})}
-                        disabled={readOnly || mode === 'one_length'}
-                        /* Approved mockup: bold means this size is a manual override. */
-                        className={cn(
-                          'text-right placeholder:text-textColor!',
-                          !!manual && mode !== 'one_length' && 'font-bold',
-                        )}
-                      />
-                    )}
-                  </td>
-                  <td className='text-right'>{sewn ?? <EmptyCell />}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </DataTable>
-      </div>
-    </ConfirmationModal>
   );
 }
 

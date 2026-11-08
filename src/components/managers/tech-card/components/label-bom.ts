@@ -193,6 +193,20 @@ export function removeLabelWithLine(
   const packaging = (getValues('packagingItems') ?? []) as FormPackagingItem[];
   const shared = !!line && lineHasAnotherOwner(line, labelKey, labels, packaging, bomItems);
 
+  const labelLineKey = row.lineKey?.trim() || '';
+  if (labelLineKey) {
+    const operations = getValues('operations') ?? [];
+    operations.forEach((operation, index) => {
+      const labelKeys = operation.labelKeys ?? [];
+      if (!labelKeys.includes(labelLineKey)) return;
+      setValue(
+        `operations.${index}.labelKeys`,
+        labelKeys.filter((key) => key !== labelLineKey),
+        { shouldDirty: true },
+      );
+    });
+  }
+
   if (line && !shared) releaseBomLineRefs(getValues, setValue, line);
   removeGarmentLabel(getValues, setValue, labelKey);
   if (!line || shared) return;

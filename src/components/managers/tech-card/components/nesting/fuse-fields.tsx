@@ -1,5 +1,5 @@
 // The fuse fields of the piece panel, variant «Fold» (owner OK 2026-10-22): FUSING no / whole /
-// strip / zone / derived file with `⋯` in the door; INTERLINING (prefilled when the BOM has one);
+// allowance / strip / zone with `⋯` in the door; INTERLINING (prefilled when the BOM has one);
 // WIDTH MM for a strip; `⋯` opens INSET MM / FUSIBLE GRAIN / DARTS in place, and opens by itself
 // when any of them is off its default. ZONE (variant C, owner OK 2026-11-05): full / sharp / round
 // and the point count; a sharp or round ring is drawn by dragging across the piece.
@@ -31,9 +31,9 @@ import {
   fuseSpecForPanelMode,
   isMmText,
   mmOfText,
+  PREVIEW_STRIP_MM,
   type FuseDarts,
   type FuseGrain,
-  type FuseMode,
   type FusePanelMode,
   type PieceFuseSpec,
 } from './fuse-spec';
@@ -63,7 +63,6 @@ import {
   type ZoneDrawKind,
   type ZoneRingRef,
 } from './fuse-zone';
-import { PatternDropZone } from '../pattern-drop-zone';
 
 export type InterliningLine = {
   key: string;
@@ -76,9 +75,9 @@ export type InterliningLine = {
 const MODES: [FusePanelMode, string][] = [
   ['', 'no'],
   ['whole', 'whole'],
+  ['allowance', 'allowance'],
   ['strip', 'strip'],
   ['zone', 'zone'],
-  ['file', 'file'],
 ];
 const ADD_SLOT = '+slot';
 
@@ -147,11 +146,10 @@ export function FuseFields({
   toggleBox,
   onChange,
   onAddSlot,
-  onAddFileSlot,
-  onUploadFile,
-  onPickFile,
   onLeaveFile,
   fileMappedLineKeys = [],
+  seamAllowanceMm,
+  allowanceUsesNetOutline = false,
   ci,
   zoneBus,
 }: {
@@ -164,12 +162,12 @@ export function FuseFields({
   toggleBox: string;
   onChange: (next: PieceFuseSpec) => void;
   onAddSlot: () => void;
-  onAddFileSlot?: () => string | void;
-  onUploadFile?: (lineKey: string, files: FileList | File[]) => void;
-  onPickFile?: (lineKey: string) => void;
   onLeaveFile?: (lineKey: string) => void;
   /** Owner-file slots whose aliases currently point at this piece. */
   fileMappedLineKeys?: readonly string[];
+  seamAllowanceMm?: number | null;
+  /** The shown size has its own sewing contour. */
+  allowanceUsesNetOutline?: boolean;
   /** The piece's canvas id and the dialog's zone bus (area + undo), shared with the canvas. */
   ci?: string;
   zoneBus?: ZoneBus;
@@ -183,41 +181,24 @@ export function FuseFields({
     fileMappedLineKeys.includes(line) &&
     lines.some((candidate) => candidate.key === line && !!candidate.ownerFileName);
   const derivedMode = deriveFusePanelMode(spec, ownerMapped);
-  const [fileOpen, setFileOpen] = useState(() => derivedMode === 'file');
-  const [fileLineKey, setFileLineKey] = useState(() => line || lines[0]?.key || '');
-  const [fileDragging, setFileDragging] = useState(false);
-  useEffect(() => {
-    if (derivedMode !== 'file' || !line) return;
-    setFileOpen(true);
-    setFileLineKey(line);
-  }, [derivedMode, line]);
-  const shownLineKey = fileOpen ? fileLineKey : line;
-  const shownLine = lines.find((candidate) => candidate.key === shownLineKey);
-  const cur: FusePanelMode | null = fileOpen
-    ? 'file'
-    : !fused
-      ? ''
-      : derivedMode === 'file' && shownLineKey === line
-        ? 'file'
-        : spec.mode || null;
+  const cur: FusePanelMode | null = !fused ? '' : derivedMode || null;
   const set = (d: Partial<PieceFuseSpec>) => onChange({ ...spec, ...d });
-  const setMode = (m: FuseMode) => {
+  const setMode = (m: FusePanelMode) => {
     if (ci) zoneBus?.setDrawing(ci, null);
-    onChange(m ? fuseSpecForPanelMode(spec, m) : blankFuse());
+    if (!m) return onChange(blankFuse());
+    const next = fuseSpecForPanelMode(spec, m);
+    onChange(m === 'strip' ? { ...next, widthMm: PREVIEW_STRIP_MM } : next);
   };
   const chooseMode = (mode: FusePanelMode) => {
-    if (mode === 'file') {
-      setFileOpen(true);
-      const nextLineKey = fileLineKey || line || lines[0]?.key || '';
-      setFileLineKey(nextLineKey);
-      onChange(fuseSpecForPanelMode(spec, mode, nextLineKey));
-      return;
-    }
-    if (derivedMode === 'file' && line) onLeaveFile?.(line);
-    setFileOpen(false);
+    if (mode === derivedMode) return;
+    if (ownerMapped && line) onLeaveFile?.(line);
     setMode(mode);
   };
-  const fileReady = !!shownLine && !shownLine.uploading && !readOnly;
+  const allowanceWidth = allowanceUsesNetOutline
+    ? 'seam line'
+    : Number.isFinite(seamAllowanceMm) && (seamAllowanceMm ?? 0) > 0
+      ? `${seamAllowanceMm} mm · card`
+      : '—';
 
   return (
     <div className='space-y-2' data-fuse-fields=''>
@@ -225,8 +206,7 @@ export function FuseFields({
         label='fusing'
         error={fused && !on}
         door={
-          on &&
-          !fileOpen && (
+          on && (
             <Button
               type='button'
               aria-label='more'
@@ -255,10 +235,8 @@ export function FuseFields({
           ))}
         </div>
       </FuseField>
-      {(on || fileOpen) && (
-        <div
-          className={!fileOpen && spec.mode === 'strip' ? 'grid grid-cols-2 items-end gap-2' : ''}
-        >
+      {on && (
+        <div className={spec.mode === 'strip' ? 'grid grid-cols-2 items-end gap-2' : ''}>
           <FuseField label='interlining'>
             <Select
               name='interlining'
@@ -276,28 +254,23 @@ export function FuseFields({
                 })),
                 { value: ADD_SLOT, label: '+ slot' },
               ]}
-              value={shownLineKey}
+              value={line}
               readOnly={readOnly}
-              invalid={!shownLineKey}
+              invalid={!line}
               onValueChange={(x: string) => {
                 if (x === ADD_SLOT) {
-                  if (fileOpen) {
-                    const added = onAddFileSlot?.();
-                    if (added) {
-                      setFileLineKey(added);
-                      onChange(fuseSpecForPanelMode(spec, 'file', added));
-                    }
-                  } else onAddSlot();
+                  onAddSlot();
                   return;
                 }
-                if (fileOpen) {
-                  setFileLineKey(x);
-                  onChange(fuseSpecForPanelMode(spec, 'file', x));
-                } else set({ bomLineKey: x });
+                set({ bomLineKey: x });
               }}
             />
           </FuseField>
-          {!fileOpen && spec.mode === 'strip' && (
+          {derivedMode === 'allowance' ? (
+            <FuseField label='width'>
+              <Input readOnly aria-label='width' className='bg-pageBg' value={allowanceWidth} />
+            </FuseField>
+          ) : spec.mode === 'strip' ? (
             <FuseField label='width mm'>
               <Combobox
                 name='width'
@@ -310,63 +283,10 @@ export function FuseFields({
                 onSelect={(x) => set({ widthMm: mmOfText(x) })}
               />
             </FuseField>
-          )}
+          ) : null}
         </div>
       )}
-      {fileOpen && (
-        <FuseField
-          label='file'
-          door={
-            shownLine?.ownerFileName &&
-            !readOnly && (
-              <Button
-                type='button'
-                variant='underline'
-                size='xs'
-                disabled={shownLine.uploading}
-                onClick={() => onPickFile?.(shownLine.key)}
-              >
-                replace
-              </Button>
-            )
-          }
-        >
-          {shownLine?.ownerFileName ? (
-            <Input
-              readOnly
-              aria-label='owner file'
-              className='bg-pageBg text-micro'
-              title={shownLine.ownerFileName}
-              value={shownLine.uploading ? 'uploading…' : shownLine.ownerFileName}
-            />
-          ) : (
-            <PatternDropZone
-              interactive={fileReady}
-              active={fileDragging}
-              disabled={!fileReady}
-              className='h-14'
-              onClick={() => shownLine && onPickFile?.(shownLine.key)}
-              onDragOver={(event) => {
-                event.preventDefault();
-                if (!fileReady) return;
-                setFileDragging(true);
-              }}
-              onDragLeave={() => setFileDragging(false)}
-              onDrop={(event) => {
-                event.preventDefault();
-                setFileDragging(false);
-                if (!fileReady || !shownLine) return;
-                onUploadFile?.(shownLine.key, event.dataTransfer.files);
-              }}
-            >
-              <Text size='micro' component='span'>
-                {shownLine?.uploading ? 'uploading…' : shownLine ? 'drop dxf' : 'select slot'}
-              </Text>
-            </PatternDropZone>
-          )}
-        </FuseField>
-      )}
-      {!fileOpen && spec.mode === 'zone' && ci && zoneBus && (
+      {spec.mode === 'zone' && ci && zoneBus && (
         <ZoneRow
           spec={spec}
           ci={ci}
@@ -376,7 +296,7 @@ export function FuseFields({
           onChange={onChange}
         />
       )}
-      {on && !fileOpen && more && (
+      {on && more && (
         <div className='grid grid-cols-3 items-end gap-2'>
           <FuseField label='inset mm'>
             <Combobox

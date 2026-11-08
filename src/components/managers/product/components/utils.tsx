@@ -211,6 +211,7 @@ export function buildChartCells(
         sizeId: sm.productSize.sizeId,
         measurementNameId: m.measurementNameId,
         value: { value: m.measurementValue.value },
+        source: 'STYLE_SIZE_CHART_CELL_SOURCE_MANUAL' as const,
       })),
   );
 }

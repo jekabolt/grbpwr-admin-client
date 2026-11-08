@@ -7,6 +7,7 @@ import { MaterialThumb } from 'components/managers/materials/components/material
 import { SECTION } from 'constants/routes';
 import { notify } from 'lib/stores/store';
 import {
+  useEffect,
   useId,
   useState,
   type ChangeEvent,
@@ -15,6 +16,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
+import { useSearchParams } from 'react-router-dom';
 import {
   Button,
   Chip,
@@ -72,13 +74,14 @@ export function bornLabelFacts(kind: string): Partial<FormGarmentLabel> {
     printMethod: '',
     lengthCm: '',
     attachment: defaults?.attachment ?? '',
-    folding: defaults?.folding ?? '',
+    fold: (defaults?.folding ?? '') as FormGarmentLabel['fold'],
     qtyPerGarment: 1,
   };
 }
 
 const virtualRow = (key: string): FormGarmentLabel => ({
   key,
+  lineKey: '',
   source: '',
   kind: '',
   madeBy: '',
@@ -88,6 +91,9 @@ const virtualRow = (key: string): FormGarmentLabel => ({
   attachment: '',
   folding: '',
   size: '',
+  widthMm: '',
+  heightMm: '',
+  fold: '',
   qtyPerGarment: 1,
   bomItemId: 0,
   bomLineKey: '',
@@ -127,7 +133,7 @@ export function labelIssue(
   if (built && compositionMissingCountry) return 'no country';
   if (!row.placement?.trim()) return 'no location';
   if (!row.attachment?.trim()) return 'no attachment';
-  if (!row.size?.trim()) return 'no size';
+  if (!row.widthMm?.trim() || !row.heightMm?.trim()) return 'no size';
   if (!built && !row.madeBy?.trim()) return 'no maker';
   if (built) return null;
   if (artworkIntent(row))
@@ -160,7 +166,7 @@ function withStored(options: readonly string[], value?: string) {
   return values.map((option) => ({ value: option, label: option }));
 }
 
-function typePictogram(kind?: string): PictogramKind {
+export function labelPictogram(kind?: string): PictogramKind {
   switch (kind) {
     case 'size':
       return 'lbl_size';
@@ -212,13 +218,193 @@ function quantityFacts(
   };
 }
 
-const labelSizeParts = (value?: string): [string, string] => {
-  const parts = value?.match(/\d+(?:[.,]\d+)?/g) ?? [];
-  return [parts[0]?.replace(',', '.') ?? '', parts[1]?.replace(',', '.') ?? ''];
+const decimalText = (value: number): string =>
+  String(Math.round(value * 100) / 100).replace(/\.0+$/, '');
+
+export function labelMaterialSize(material?: common_Material): [string, string] {
+  if (!material) return ['', ''];
+  const dimensions =
+    material.hardwareAttrs?.dimensions?.trim() || material.packagingAttrs?.dimensions?.trim() || '';
+  const values = dimensions.match(/\d+(?:[.,]\d+)?/g)?.slice(0, 2) ?? [];
+  if (values.length) {
+    const scale = /\bcm\b/i.test(dimensions) && !/\bmm\b/i.test(dimensions) ? 10 : 1;
+    const parsed = values.map((value) => decimalText(Number(value.replace(',', '.')) * scale));
+    return [parsed[0] ?? '', parsed[1] ?? ''];
+  }
+  if (material.labelType === 'MATERIAL_LABEL_TYPE_TAPE') {
+    const widthCm = Number(
+      (material.fabricAttrs?.widthCm?.value || material.fabricWidth?.value || '').replace(',', '.'),
+    );
+    if (Number.isFinite(widthCm) && widthCm > 0) return [decimalText(widthCm * 10), ''];
+  }
+  return ['', ''];
+}
+
+const cleanMillimetres = (value: string): string | null => {
+  const next = value.replace(',', '.');
+  return /^\d*(?:\.\d{0,2})?$/.test(next) ? next : null;
 };
 
-const joinedLabelSize = (width: string, height: string): string =>
-  width || height ? `${width} × ${height}` : '';
+function LabelSizeFields({
+  row,
+  material,
+  canEdit,
+  patch,
+}: {
+  row: FormGarmentLabel;
+  material?: common_Material;
+  canEdit: boolean;
+  patch: (value: Partial<Omit<FormGarmentLabel, 'key'>>) => void;
+}) {
+  const stock = labelMaterialSize(material);
+  const edited =
+    (!!row.widthMm || !!row.heightMm) &&
+    (!!stock[0] || !!stock[1]) &&
+    (row.widthMm !== stock[0] || row.heightMm !== stock[1]);
+  return (
+    <span className='flex min-w-0 flex-wrap items-center gap-1.5'>
+      <Input
+        inputMode='decimal'
+        value={row.widthMm ?? ''}
+        disabled={!canEdit}
+        aria-label='width mm'
+        className='w-20'
+        onChange={(event: ChangeEvent<HTMLInputElement>) => {
+          const value = cleanMillimetres(event.target.value);
+          if (value != null) patch({ widthMm: value });
+        }}
+      />
+      <Text variant='label'>×</Text>
+      <Input
+        inputMode='decimal'
+        value={row.heightMm ?? ''}
+        disabled={!canEdit}
+        aria-label='height mm'
+        className='w-20'
+        onChange={(event: ChangeEvent<HTMLInputElement>) => {
+          const value = cleanMillimetres(event.target.value);
+          if (value != null) patch({ heightMm: value });
+        }}
+      />
+      <Text size='micro' variant='label'>
+        mm
+      </Text>
+      {canEdit && edited ? (
+        <Button
+          type='button'
+          variant='underline'
+          size='xs'
+          onClick={() => patch({ widthMm: stock[0], heightMm: stock[1] })}
+        >
+          reset
+        </Button>
+      ) : null}
+    </span>
+  );
+}
+
+function useLabelSizeAutofill(
+  row: FormGarmentLabel,
+  material: common_Material | undefined,
+  labelKey: string,
+) {
+  const { getValues, setValue } = useFormContext<TechCardFormData>();
+  const [stockWidth, stockHeight] = labelMaterialSize(material);
+  useEffect(() => {
+    if (row.source !== 'stock' || (!stockWidth && !stockHeight)) return;
+    if (row.widthMm && row.heightMm) return;
+    const current = ((getValues('garmentLabels') ?? []) as FormGarmentLabel[]).slice();
+    const index = current.findIndex((candidate) => sameKey(candidate.key, labelKey));
+    if (index < 0) return;
+    const next = {
+      ...current[index],
+      widthMm: current[index].widthMm || stockWidth,
+      heightMm: current[index].heightMm || stockHeight,
+    };
+    if (next.widthMm === current[index].widthMm && next.heightMm === current[index].heightMm)
+      return;
+    setValue(`garmentLabels.${index}`, next as never, { shouldDirty: true });
+  }, [
+    getValues,
+    labelKey,
+    row.heightMm,
+    row.source,
+    row.widthMm,
+    setValue,
+    stockHeight,
+    stockWidth,
+  ]);
+}
+
+export const labelSizeText = (row: Pick<FormGarmentLabel, 'widthMm' | 'heightMm'>): string =>
+  row.widthMm || row.heightMm ? `${row.widthMm || '—'} × ${row.heightMm || '—'}` : '';
+
+function LabelStepLink({ lineKey }: { lineKey?: string }) {
+  const { control } = useFormContext<TechCardFormData>();
+  const operations = useWatch({ control, name: 'operations' }) ?? [];
+  const [, setParams] = useSearchParams();
+  const index = lineKey
+    ? operations.findIndex((operation) => (operation.labelKeys ?? []).includes(lineKey))
+    : -1;
+  const operation = index >= 0 ? operations[index] : undefined;
+  if (!operation) return <EmptyCell />;
+  const number = operation.operationNumber || (index + 1) * 10;
+  const work = (operation.work ?? '').trim();
+  const name =
+    work === 'attach_label'
+      ? 'attach label'
+      : work === 'hang_tag'
+        ? 'hang tag'
+        : work.replaceAll('_', ' ') || 'step';
+  return (
+    <Button
+      type='button'
+      variant='underline'
+      size='xs'
+      onClick={() =>
+        setParams(
+          (previous) => {
+            const next = new URLSearchParams(previous);
+            next.set('tab', 'construction');
+            if (operation.operationNumber) next.set('op', String(operation.operationNumber));
+            else next.set('opi', String(index));
+            return next;
+          },
+          { replace: true },
+        )
+      }
+    >
+      {number} {name}
+    </Button>
+  );
+}
+
+function FoldChips({
+  value,
+  disabled,
+  onChange,
+}: {
+  value?: string;
+  disabled: boolean;
+  onChange: (value: FormGarmentLabel['fold']) => void;
+}) {
+  return (
+    <ChipRow>
+      {labelFoldingOptions.map((option) => (
+        <Chip
+          key={option}
+          nonForm
+          selected={value === option}
+          pressed={value === option}
+          disabled={disabled}
+          onClick={() => onChange(option as FormGarmentLabel['fold'])}
+        >
+          {option}
+        </Chip>
+      ))}
+    </ChipRow>
+  );
+}
 
 function ArtworkThumb({ row, title }: { row: FormGarmentLabel; title: string }) {
   const file = row.files?.[0];
@@ -306,7 +492,9 @@ export function SewnLabelTile({
         )
       }
       name={title}
-      sub={[source, madeBy, row.size ? `${row.size} mm` : ''].filter(Boolean).join(' · ')}
+      sub={[source, madeBy, labelSizeText(row) ? `${labelSizeText(row)} mm` : '']
+        .filter(Boolean)
+        .join(' · ')}
       onClick={onOpen}
       title={title}
       tone={status?.startsWith('!') ? 'error' : 'default'}
@@ -357,7 +545,7 @@ export function SewnLabelModal({
   const artwork = !built && artworkIntent(row);
   const source = built ? 'built' : artwork ? 'artwork' : 'stock';
   const [filePicker, setFilePicker] = useState(false);
-  const [width, height] = labelSizeParts(row.size);
+  useLabelSizeAutofill(row, material, labelKey);
   const file = row.files?.[0];
   const fileId = wireInt(file?.libraryFileId);
   const fileQuery = useLibraryFile(fileId || undefined);
@@ -551,36 +739,12 @@ export function SewnLabelModal({
             />
           </Field>
           <Field label='size, mm'>
-            <span className='grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto] items-center gap-1.5'>
-              <Input
-                type='number'
-                min={1}
-                inputMode='numeric'
-                value={width}
-                disabled={!canEdit || built}
-                aria-label='width mm'
-                className='h-7 min-w-0'
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  patch({ size: joinedLabelSize(event.target.value, height) })
-                }
-              />
-              <Text variant='label'>×</Text>
-              <Input
-                type='number'
-                min={1}
-                inputMode='numeric'
-                value={height}
-                disabled={!canEdit || built}
-                aria-label='height mm'
-                className='h-7 min-w-0'
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  patch({ size: joinedLabelSize(width, event.target.value) })
-                }
-              />
-              <Text size='micro' variant='label'>
-                mm
-              </Text>
-            </span>
+            <LabelSizeFields
+              row={row}
+              material={material}
+              canEdit={canEdit && !built}
+              patch={patch}
+            />
           </Field>
           <Field label='location'>
             <Select
@@ -602,6 +766,16 @@ export function SewnLabelModal({
               className='h-7'
               items={withStored(labelAttachmentOptions, row.attachment)}
               onValueChange={(value: string | undefined) => patch({ attachment: value || '' })}
+            />
+          </Field>
+          <Field label='step'>
+            <LabelStepLink lineKey={row.lineKey} />
+          </Field>
+          <Field label='fold' className='sm:col-span-2'>
+            <FoldChips
+              value={row.fold}
+              disabled={!canEdit || built}
+              onChange={(fold) => patch({ fold })}
             />
           </Field>
           <Field label='per garment'>
@@ -691,6 +865,7 @@ export function SewnLabelRow({
   onPickMaterial,
   open,
   onOpenChange,
+  onRemove,
   canEdit,
   last,
   removable = true,
@@ -705,6 +880,7 @@ export function SewnLabelRow({
   onPickMaterial?: () => void;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  onRemove?: () => void;
   canEdit: boolean;
   last?: boolean;
   removable?: boolean;
@@ -720,6 +896,7 @@ export function SewnLabelRow({
     TechCardFormData['bomItems']
   >;
   const row = rows.find((candidate) => sameKey(candidate.key, labelKey)) ?? virtualRow(labelKey);
+  useLabelSizeAutofill(row, material, labelKey);
   const line = labelBomLine(row, bomItems);
   const unit = material?.unit?.trim() || line?.unit?.trim() || '';
   const quantities = quantityFacts(row, unit, material ? onHand : undefined, plannedQty);
@@ -791,7 +968,7 @@ export function SewnLabelRow({
         onClick={() => setExpanded(!expanded)}
       >
         <span className='hidden size-12 items-center justify-center border border-borderColor bg-pageBg sm:flex'>
-          <LabelIcon kind={typePictogram(kind)} size={36} />
+          <LabelIcon kind={labelPictogram(kind)} size={36} />
         </span>
         <span className='min-w-0'>
           <Text
@@ -1013,15 +1190,11 @@ export function SewnLabelRow({
                 />
               </Field>
             ) : null}
-            <Field label='fold'>
-              <Select
-                name={`${uid}-fold`}
-                value={row.folding || ''}
-                readOnly={!canEdit}
-                placeholder='pick'
-                items={withStored(labelFoldingOptions, row.folding)}
-                onValueChange={(value: string | undefined) => patch({ folding: value || '' })}
-              />
+            <Field label='size, mm'>
+              <LabelSizeFields row={row} material={material} canEdit={canEdit} patch={patch} />
+            </Field>
+            <Field label='step'>
+              <LabelStepLink lineKey={row.lineKey} />
             </Field>
             {quantities.lengthGoods ? (
               <Field label='cm per garment'>
@@ -1051,6 +1224,16 @@ export function SewnLabelRow({
             )}
           </div>
 
+          <div className='mt-3'>
+            <Field label='fold'>
+              <FoldChips
+                value={row.fold}
+                disabled={!canEdit}
+                onChange={(fold) => patch({ fold })}
+              />
+            </Field>
+          </div>
+
           {made ? (
             <div className='mt-3'>
               <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4'>
@@ -1066,16 +1249,6 @@ export function SewnLabelRow({
                     onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
                       if (event.key === 'Enter') chooseMaterial();
                     }}
-                  />
-                </Field>
-                <Field label='size, mm'>
-                  <Input
-                    value={row.size ?? ''}
-                    disabled={!canEdit}
-                    placeholder='width × height'
-                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                      patch({ size: event.target.value })
-                    }
                   />
                 </Field>
                 {printedBy(row.madeBy) ? (
@@ -1163,7 +1336,7 @@ export function SewnLabelRow({
                 type='button'
                 variant='underline'
                 size='xs'
-                onClick={() => removeLabelWithLine(getValues, setValue, labelKey)}
+                onClick={onRemove ?? (() => removeLabelWithLine(getValues, setValue, labelKey))}
               >
                 remove
               </Button>

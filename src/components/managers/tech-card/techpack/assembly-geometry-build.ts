@@ -2,7 +2,12 @@ import type { common_TechCard } from 'api/proto-http/admin';
 import type { FoundPiece } from 'components/managers/tech-card/components/nesting/dxf-geometry';
 import { seamPieceOf, segmentPiece, twins } from 'lib/assembly-skeleton/geometry';
 import { readablePieceName } from 'lib/assembly-skeleton/names';
-import type { ClothState, CutStripMark, PieceGeom } from 'lib/assembly-skeleton/types';
+import type {
+  ClothState,
+  CutStripMark,
+  GarmentLabelMark,
+  PieceGeom,
+} from 'lib/assembly-skeleton/types';
 import type { PieceDTO } from 'lib/nesting/types';
 import { grainRotation } from 'lib/pom/upright';
 
@@ -17,6 +22,8 @@ type AssemblyCardPiece = {
   materials: Array<{ bomLineKey?: string }>;
   /** Set on a cut strip's virtual row: the facts of its rectangle at the drawn size. */
   cutStrip?: CutStripMark;
+  /** Set on a garment label's virtual row. */
+  garmentLabel?: GarmentLabelMark;
 };
 
 export type AssemblyCardInput = {
@@ -196,6 +203,7 @@ export function buildAssemblyPiecesFromInput(
   const grainDeg = new Map<string, number>();
   const geoms = [];
   const stripGeoms: PieceGeom[] = [];
+  const labelGeoms: PieceGeom[] = [];
   const drawn = new Map<string, Omit<AsmPiece, 'geom'>>();
   for (const piece of input.pieces ?? []) {
     const key = piece.lineKey ?? '';
@@ -214,6 +222,7 @@ export function buildAssemblyPiecesFromInput(
       fused: false,
     });
     if (piece.cutStrip) stripGeoms.push({ ...geom, cutStrip: piece.cutStrip });
+    else if (piece.garmentLabel) labelGeoms.push({ ...geom, garmentLabel: piece.garmentLabel });
     else geoms.push(geom);
     grainDeg.set(key, grainRotation(hit.piece));
     const loops = [
@@ -257,7 +266,7 @@ export function buildAssemblyPiecesFromInput(
     });
   }
   // Strips stay out of the twin search: a rectangle is never a real piece's mirror.
-  for (const geom of [...twins(geoms), ...stripGeoms]) {
+  for (const geom of [...twins(geoms), ...stripGeoms, ...labelGeoms]) {
     const drawing = drawn.get(geom.pieceKey);
     if (drawing) pieces.set(geom.pieceKey, { ...drawing, geom });
   }

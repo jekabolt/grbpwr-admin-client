@@ -95,6 +95,7 @@ function SewnTable({
             <th data-align='left'>{t('labels.sizeMm')}</th>
             <th data-align='left'>{t('common.material')}</th>
             <th>{t('common.quantity')}</th>
+            <th data-align='left'>{t('common.operation')}</th>
             {showNote && <th data-align='left'>{t('common.note')}</th>}
           </tr>
         </thead>
@@ -112,6 +113,7 @@ function SewnTable({
               <td data-align='left'>{own(row.size)}</td>
               <td data-align='left'>{own(row.material)}</td>
               <td>{row.qty}</td>
+              <td data-align='left'>{own(row.step)}</td>
               {showNote && (
                 <td data-align='left' translate='no'>
                   {own(row.note)}

@@ -1,6 +1,7 @@
 import { clampPatternName } from 'utils/pattern';
 import {
   common_GenderEnum,
+  common_AuxMadeBy,
   common_TechCard,
   common_TechCardApprovalState,
   common_TechCardAuxSubtype,
@@ -104,6 +105,8 @@ import {
 import { isMachineStepType, isWeldMachineType } from './equipment-options';
 import { wireInt } from './wire-int';
 import { CUT_STRIP_MODES } from './cut-strips/lengths';
+import { isOwnAux, AUX_MADE_BY_UNKNOWN } from './aux-card';
+import { measured } from './use-colourway-auto';
 import {
   careLabelOut,
   careLabelSchema,
@@ -535,6 +538,9 @@ const bomItemSchema = z
     // терял пантон строки. `undefined` = «эта форма не знает», `''` = «человек очистил ячейку»;
     // различие доезжает до провода (см. `estUsageOut` у маппера записи).
     estUsage: z.string().optional(),
+    // Own auxiliary cards use this as the production norm. Presence is three-state, like
+    // estUsage: undefined preserves, '' clears, and a decimal writes.
+    consumptionPerUnit: z.string().optional(),
     unitPrice: z.string().optional().default(''), // decimal as string
     currency: z.string().optional().default(''),
     comment: z.string().optional().default(''),
@@ -633,6 +639,24 @@ const bomItemSchema = z
         message: 'a note can be written only for the “other” kind',
         path: ['kindNote'],
       });
+    }
+    const consumption = normalizeDecimalInput(item.consumptionPerUnit);
+    if (consumption) {
+      const value = parseDecimalNumber(consumption);
+      if (!Number.isFinite(value) || value < 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'use 0 or more',
+          path: ['consumptionPerUnit'],
+        });
+      }
+      if ((consumption.split('.')[1] ?? '').length > 3) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'max 3 decimals',
+          path: ['consumptionPerUnit'],
+        });
+      }
     }
   });
 
@@ -1566,6 +1590,9 @@ const operationSchema = z
     // деталей карточки — той же функцией, что на сервере (assembly-frontier). Хранить её значило
     // бы завести второй источник истины, который разъедется с первым при удалении детали.
     inputKeys: z.array(z.string()).default([]),
+    // Labels attached or hung by this step. Keys share the piece/cut-strip identity space, but
+    // labels remain picture inputs rather than structural assembly inputs.
+    labelKeys: z.array(z.string()).default([]),
     // Код узла, который производит шаг («SHELL»). Пусто = шаг ничего не собирает: это обработка,
     // её входы остаются доступными следующим шагам.
     outputUnitKey: z.string().optional().default(''),
@@ -2334,6 +2361,7 @@ const techCardObject = z.object({
   // material, not a product). An auxiliary card links no products and its run output receipts into
   // outputMaterialId (required before its first run; 0 = unset).
   purpose: z.string().optional().default('TECH_CARD_PURPOSE_SELLABLE'),
+  auxMadeBy: z.string().optional().default(AUX_MADE_BY_UNKNOWN),
   // WS7: which KIND of auxiliary item an auxiliary card produces (brand label, care label, dust
   // bag, box…). Only meaningful with purpose=auxiliary — the backend validates the pairing, so the
   // save mapper forces it back to UNSET whenever the card is sellable.
@@ -2519,6 +2547,7 @@ export const techCardDefaultData: TechCardFormData = {
   patterns: [],
   pieceDxfAliases: [],
   purpose: 'TECH_CARD_PURPOSE_SELLABLE',
+  auxMadeBy: AUX_MADE_BY_UNKNOWN,
   auxSubtype: UNSET_AUX_SUBTYPE,
   outputMaterialId: 0,
   pieces: [],
@@ -2638,6 +2667,7 @@ function mapBomItemToForm(b: NonNullable<common_TechCardInsert['bomItems']>[numb
     // `undefined`, а не в пустую строку: пустая строка означала бы «человек очистил», и первое же
     // сохранение чужой карточки отправило бы команду «очисти» вместо молчания.
     estUsage: decimalToInput(b.estUsage) || undefined,
+    consumptionPerUnit: decimalToInput(b.consumptionPerUnit) || undefined,
     unitPrice: decimalToInput(b.unitPrice),
     currency: b.currency || '',
     comment: b.comment || '',
@@ -2783,6 +2813,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
         pieceLineKey: a.pieceLineKey ?? '',
       })),
     purpose: toPurposeEnum(insert?.purpose),
+    auxMadeBy: insert?.auxMadeBy || AUX_MADE_BY_UNKNOWN,
     auxSubtype: insert?.auxSubtype || UNSET_AUX_SUBTYPE,
     outputMaterialId: insert?.outputMaterialId || 0,
     ...splitSketchMedia(insert),
@@ -2943,6 +2974,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       // Объединение (46) — источник; легаси-проекция (21) остаётся фолбэком для архивных
       // снапшотов, отданных ровно так, как были записаны: у них поля 46 нет вовсе.
       inputKeys: (o.inputKeys?.length ? o.inputKeys : o.pieceLineKeys ?? []).filter(Boolean),
+      labelKeys: (o.labelKeys ?? []).filter(Boolean),
       outputUnitKey: o.outputUnitKey ?? '',
       outputUnitName: o.outputUnitName ?? '',
       seamKeys: (o.seamKeys ?? []).filter((k) => !!k && !poseKeySet.has(k)),
@@ -3415,6 +3447,10 @@ export function mapFormToTechCardInsert(
     // Keep, never re-mint: the key that came off the read IS the row's identity server-side.
     lineKey: b.lineKey?.trim() || ulid(),
   }));
+  const cutBomLineKeys = new Set(
+    (data.cutStrips ?? []).map((strip) => strip.bomLineKey?.trim()).filter(Boolean),
+  );
+  const ownAux = isOwnAux(toPurposeEnum(data.purpose), data.auxMadeBy as common_AuxMadeBy);
   const bomIndexByKey = new Map<string, number>();
   bomLines.forEach((b, i) => bomIndexByKey.set(b.lineKey, i));
   // Which cut-pieces this save actually persists — the set DXF aliases may reference. Blank rows
@@ -3575,6 +3611,10 @@ export function mapFormToTechCardInsert(
     // Auxiliary cards link no products and receipt into a material instead; sellable cards carry
     // no output material. Enforce the exclusivity here so a purpose flip can't leave stale data.
     purpose: toPurposeEnum(data.purpose),
+    // Sellable writes must never carry an auxiliary maker. On an auxiliary card the form owns it.
+    auxMadeBy: (toPurposeEnum(data.purpose) === 'TECH_CARD_PURPOSE_AUXILIARY'
+      ? data.auxMadeBy || AUX_MADE_BY_UNKNOWN
+      : AUX_MADE_BY_UNKNOWN) as common_AuxMadeBy,
     outputMaterialId:
       toPurposeEnum(data.purpose) === 'TECH_CARD_PURPOSE_AUXILIARY'
         ? data.outputMaterialId || 0
@@ -3798,6 +3838,16 @@ export function mapFormToTechCardInsert(
       unit: b.unit?.trim() || '',
       // Присутствие решается формой, а не пустотой значения, — довод целиком у `estUsageOut`.
       estUsage: estUsageOut(b.estUsage),
+      // Norms belong only to own, measured, non-strip lines. Hidden supplier/sellable values are
+      // omitted so changing kind does not erase them; a line that becomes countable/a strip clears
+      // a norm the form actually read.
+      consumptionPerUnit: ownAux
+        ? measured(b.section) && !cutBomLineKeys.has(b.lineKey)
+          ? estUsageOut(b.consumptionPerUnit)
+          : b.consumptionPerUnit === undefined
+            ? undefined
+            : { value: '' }
+        : undefined,
       // ДЕНЬГИ СТРОКИ — ТОЛЬКО ОТ РЕДАКТОРА С costing:write, тем же verbatim-протоколом
       // «поля нет = сохрани что было», что у пары провенанса ниже и у costing в конце файла.
       // Аккаунту без права сервер вырезает цены на чтении, форма держит пустоту — и отправка
@@ -4113,6 +4163,7 @@ export function mapFormToTechCardInsert(
         // Осведомлённая запись живёт по объединению; поле 21 сервер в ней игнорирует, поэтому
         // отправлять его не нужно и вредно — оно стало бы вторым мнением о тех же входах.
         inputKeys: (o.inputKeys ?? []).map((k) => k.trim()).filter(Boolean),
+        labelKeys: [...new Set((o.labelKeys ?? []).map((k) => k.trim()).filter(Boolean))],
         outputUnitKey: (o.outputUnitKey ?? '').trim(),
         outputUnitName: (o.outputUnitName ?? '').trim(),
         // Carried through unchanged (dedup only): the server refuses a key the card does not hold.

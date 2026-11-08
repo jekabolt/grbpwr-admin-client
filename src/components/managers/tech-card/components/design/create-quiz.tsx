@@ -3,11 +3,12 @@ import { adminService } from 'api/api';
 import type {
   common_Category,
   common_GenderEnum,
+  common_TechCardAuxSubtype,
   common_TechCardListItem,
 } from 'api/proto-http/admin';
 import { useSizeSystems } from 'components/managers/model/components/use-size-systems';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
-import { genderOptions } from 'constants/filter';
+import { genderOptions, techCardAuxSubtypeFormOptions } from 'constants/filter';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn, getCategoriesByParentId } from 'lib/utility';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type JSX } from 'react';
@@ -17,6 +18,7 @@ import { fieldErrorSummary } from 'utils/field-errors';
 import { permittedSizeSystems } from 'utils/size-systems';
 
 import { createReady } from '../create-ready';
+import { madeByForKind } from '../aux-card';
 import { sampleRunOf, useCategoryWriter } from '../header-meta-fields';
 import type { TechCardFormData } from '../schema';
 import { SeasonChips } from '../season-field';
@@ -129,11 +131,65 @@ export function CreateQuiz({
   isAux,
   fitLocked,
   onDone,
+  onAuxColour,
 }: {
   isAux: boolean;
   /** Fit reaches the style through UpdateStyle alone; an account that cannot write it is not asked. */
   fitLocked: boolean;
   /** The quiz folds away: after `create`, or `show fields`. */
+  onDone: () => void;
+  onAuxColour?: (code: string) => void;
+}): JSX.Element {
+  const { setValue } = useFormContext<TechCardFormData>();
+  const [making, setMaking] = useState<'product' | 'own' | 'bought' | null>(isAux ? 'own' : null);
+
+  if (!making) {
+    return (
+      <div className='min-w-0 space-y-2 py-1' data-create-quiz='making'>
+        <Text size='micro' variant='label' tracking='label' component='p' className='uppercase'>
+          kind · 1 / 1
+        </Text>
+        <Text component='p'>what are we making?</Text>
+        <OptionChips
+          options={[
+            { value: 'product', label: 'product' },
+            { value: 'own', label: 'own item' },
+            { value: 'bought', label: 'bought item' },
+          ]}
+          onPick={(value) => {
+            const next = value as 'product' | 'own' | 'bought';
+            setValue(
+              'purpose',
+              next === 'product' ? 'TECH_CARD_PURPOSE_SELLABLE' : 'TECH_CARD_PURPOSE_AUXILIARY',
+              { shouldDirty: true },
+            );
+            setValue('auxMadeBy', madeByForKind(next), { shouldDirty: true });
+            setMaking(next);
+          }}
+        />
+      </div>
+    );
+  }
+
+  if (making !== 'product') {
+    return (
+      <AuxCreateQuiz
+        madeBy={making}
+        onBack={() => setMaking(null)}
+        onDone={onDone}
+        onAuxColour={onAuxColour}
+      />
+    );
+  }
+
+  return <ProductCreateQuiz fitLocked={fitLocked} onDone={onDone} />;
+}
+
+function ProductCreateQuiz({
+  fitLocked,
+  onDone,
+}: {
+  fitLocked: boolean;
   onDone: () => void;
 }): JSX.Element {
   const { setValue, getValues } = useFormContext<TechCardFormData>();
@@ -178,7 +234,7 @@ export function CreateQuiz({
     familyFor({ top: name3(t), sub: name3(s), type: name3(ty) });
 
   // ── fit, gender, sizes ────────────────────────────────────────────────────────────────────────
-  const fitChoices = useMemo(() => fitChoicesFor(cats, leaf, isAux), [cats, leaf, isAux]);
+  const fitChoices = useMemo(() => fitChoicesFor(cats, leaf, false), [cats, leaf]);
   const askFit = !!fitChoices && fitChoices.length > 0 && !fitLocked;
   const recentSameTop = recent.filter((c) => top && c.topCategoryId === top);
   const recGender =
@@ -702,6 +758,282 @@ export function CreateQuiz({
             )}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+type AuxQuizStep = 'type' | 'colour' | 'season' | 'summary';
+
+function AuxCreateQuiz({
+  madeBy,
+  onBack,
+  onDone,
+  onAuxColour,
+}: {
+  madeBy: 'own' | 'bought';
+  onBack: () => void;
+  onDone: () => void;
+  onAuxColour?: (code: string) => void;
+}): JSX.Element {
+  const { setValue } = useFormContext<TechCardFormData>();
+  const { dictionary } = useDictionary();
+  const { data: recent = [] } = useRecentCards();
+  const [step, setStep] = useState<AuxQuizStep>('type');
+  const [subtype, setSubtype] = useState<common_TechCardAuxSubtype>(
+    'TECH_CARD_AUX_SUBTYPE_UNKNOWN',
+  );
+  const [colour, setColour] = useState('');
+  const [season, setSeason] = useState('');
+  const [otherSeason, setOtherSeason] = useState(false);
+  const [name, setName] = useState('');
+  const [nameTouched, setNameTouched] = useState(false);
+  const [styleNumber, setStyleNumber] = useState('');
+  const [styleSource, setStyleSource] = useState<string>(GENERATED);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState('');
+  const rootRef = useRef<HTMLDivElement>(null);
+  const nameId = useId();
+  const styleId = useId();
+  const recSeason = newestOpenSeason(recent);
+  const seasonOptions: Option<string>[] = [recSeason - 1, recSeason, recSeason + 1].map((i) => ({
+    value: seasonLabel(i),
+    label: seasonLabel(i),
+  }));
+  const colours = useMemo(
+    () => (dictionary?.colors ?? []).filter((c) => !c.archived && c.code),
+    [dictionary?.colors],
+  );
+  const subtypeOptions = techCardAuxSubtypeFormOptions.filter(
+    (option) => option.value !== 'TECH_CARD_AUX_SUBTYPE_UNKNOWN',
+  );
+  const subtypeLabel = subtypeOptions.find((option) => option.value === subtype)?.label ?? '';
+  const colourLabel = colours.find((item) => item.code === colour)?.name ?? colour;
+
+  useEffect(() => {
+    if (!nameTouched) setName([subtypeLabel, season].filter(Boolean).join(' '));
+  }, [nameTouched, season, subtypeLabel]);
+
+  const suggestFor = async (label: string) => {
+    const sku = parseSeasonToSku(label);
+    if (!sku || styleSource === MANUAL) return;
+    setSuggesting(true);
+    setSuggestError('');
+    try {
+      const proposed = (await adminService.SuggestStyleNumber({ skuSeason: sku })).styleNumber;
+      if (proposed?.trim()) {
+        setStyleNumber(proposed.trim());
+        setStyleSource(GENERATED);
+      } else setSuggestError('no style number suggested');
+    } catch (error) {
+      setSuggestError(fieldErrorSummary(error, 'could not suggest a style number'));
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
+  const pickSeason = (value: string) => {
+    setSeason(value);
+    setOtherSeason(false);
+    void suggestFor(value);
+    setStep('summary');
+  };
+  const ready = createReady({
+    name,
+    season,
+    styleNumber,
+    purpose: 'TECH_CARD_PURPOSE_AUXILIARY',
+  });
+  const create = () => {
+    if (!ready.ok || !colour || subtype === 'TECH_CARD_AUX_SUBTYPE_UNKNOWN') return;
+    setValue('purpose', 'TECH_CARD_PURPOSE_AUXILIARY', { shouldDirty: true });
+    setValue('auxMadeBy', madeByForKind(madeBy), { shouldDirty: true });
+    setValue('auxSubtype', subtype, { shouldDirty: true });
+    setValue('name', name.trim(), { shouldDirty: true });
+    setValue('season', season, { shouldDirty: true });
+    setValue('styleNumber', styleNumber.trim(), { shouldDirty: true });
+    setValue('styleNumberSource', styleSource as TechCardFormData['styleNumberSource'], {
+      shouldDirty: true,
+    });
+    onAuxColour?.(colour);
+    const form = rootRef.current?.closest('form');
+    onDone();
+    form?.requestSubmit();
+  };
+
+  const order: AuxQuizStep[] = ['type', 'colour', 'season'];
+  const index = step === 'summary' ? order.length : order.indexOf(step);
+  const back = () => {
+    if (step === 'type') return onBack();
+    if (step === 'summary') return setStep('season');
+    setStep(order[index - 1]);
+  };
+
+  return (
+    <div ref={rootRef} className='min-w-0 space-y-3 py-1' data-create-quiz={`aux-${step}`}>
+      <div className='relative flex items-baseline'>
+        <Button
+          type='button'
+          variant='default'
+          aria-label='back'
+          title='back'
+          onClick={back}
+          className={cn(
+            headDoor,
+            'absolute top-1/2 -left-5 size-6 -translate-y-1/2 text-textBaseSize leading-none',
+          )}
+        >
+          ‹
+        </Button>
+        <Text size='micro' variant='label' tracking='label' component='p' className='uppercase'>
+          {step === 'summary' ? 'details' : step} · {Math.min(index + 1, order.length)} /{' '}
+          {order.length}
+        </Text>
+      </div>
+
+      {step === 'type' && (
+        <>
+          <Text component='p'>type</Text>
+          <OptionChips
+            options={subtypeOptions}
+            selected={subtype}
+            onPick={(value) => {
+              setSubtype(value as common_TechCardAuxSubtype);
+              setStep('colour');
+            }}
+          />
+        </>
+      )}
+
+      {step === 'colour' && (
+        <>
+          <Text component='p'>colour</Text>
+          <ChipRow>
+            {colours.map((item) => (
+              <Chip
+                key={item.code}
+                selected={colour === item.code}
+                pressed={colour === item.code}
+                onClick={() => {
+                  setColour(item.code ?? '');
+                  setStep('season');
+                }}
+              >
+                <span
+                  aria-hidden
+                  className='size-3 shrink-0 border border-textColor'
+                  style={item.hex ? { backgroundColor: item.hex } : undefined}
+                />
+                {item.name || item.code}
+              </Chip>
+            ))}
+          </ChipRow>
+        </>
+      )}
+
+      {step === 'season' && (
+        <>
+          <Text component='p'>season</Text>
+          <OptionChips
+            options={seasonOptions}
+            selected={season || seasonLabel(recSeason)}
+            onPick={(value) => pickSeason(String(value))}
+          />
+          {!otherSeason ? (
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              onClick={() => setOtherSeason(true)}
+            >
+              other season…
+            </Button>
+          ) : (
+            <SeasonChips value={season} onPick={pickSeason} />
+          )}
+        </>
+      )}
+
+      {step === 'summary' && (
+        <>
+          <div>
+            <Button
+              type='button'
+              variant='default'
+              className='block w-full text-left hover:bg-pageBg'
+              onClick={() => setStep('type')}
+            >
+              <Row label='type' value={subtypeLabel} />
+            </Button>
+            <Button
+              type='button'
+              variant='default'
+              className='block w-full text-left hover:bg-pageBg'
+              onClick={() => setStep('colour')}
+            >
+              <Row label='colour' value={colourLabel || <EmptyCell />} />
+            </Button>
+            <Button
+              type='button'
+              variant='default'
+              className='block w-full text-left hover:bg-pageBg'
+              onClick={() => setStep('season')}
+            >
+              <Row label='season' value={season || <EmptyCell />} />
+            </Button>
+          </div>
+          <div className='grid grid-cols-1 gap-x-4 gap-y-2.5 sm:grid-cols-2'>
+            <label htmlFor={nameId} className='min-w-0 space-y-px'>
+              <Text
+                size='micro'
+                variant='label'
+                tracking='label'
+                component='span'
+                className='uppercase'
+              >
+                name *
+              </Text>
+              <Input
+                id={nameId}
+                value={name}
+                autoFocus
+                onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
+                  setNameTouched(true);
+                  setName(event.target.value);
+                }}
+              />
+            </label>
+            <label htmlFor={styleId} className='min-w-0 space-y-px'>
+              <Text
+                size='micro'
+                variant='label'
+                tracking='label'
+                component='span'
+                className='uppercase'
+              >
+                style no. *
+              </Text>
+              <Input
+                id={styleId}
+                value={styleNumber}
+                placeholder={suggesting ? 'suggesting…' : 'SS26-000'}
+                onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
+                  setStyleNumber(event.target.value);
+                  setStyleSource(MANUAL);
+                }}
+                onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => {
+                  if (event.key !== 'Enter') return;
+                  event.preventDefault();
+                  create();
+                }}
+              />
+              {suggestError && <Text variant='error'>{suggestError}</Text>}
+            </label>
+          </div>
+          <Button type='button' variant='main' size='sm' disabled={!ready.ok} onClick={create}>
+            create
+          </Button>
+        </>
       )}
     </div>
   );

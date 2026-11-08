@@ -9,7 +9,8 @@ import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { notify } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Close, Text } from 'ui';
+import { FormProvider, useForm, useWatch } from 'react-hook-form';
+import { Button, Close, DecimalField, EmptyCell, Row, Text } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
 import { isVariantRun, materialLabel } from './aux-run-plan';
@@ -17,6 +18,152 @@ import { FailNote, isRefusal, notifyFailure } from './feedback';
 import { receiptErrorMessage, usePostRunReceipt } from './useProductionRuns';
 
 const cell = 'w-full border border-borderColor bg-bgColor px-2 py-1.5 text-textBaseSize';
+
+type AuxReceiptDraft = {
+  lines: { lineKey: string; outputVariantId: number; good: string; defect: string }[];
+};
+
+export function AuxReceive({
+  run,
+  outputMaterialId = 0,
+  outputMaterial,
+  outputVariants = [],
+  disabled = false,
+}: {
+  run: common_ProductionRun;
+  outputMaterialId?: number;
+  outputMaterial?: common_Material;
+  outputVariants?: common_TechCardOutputVariant[];
+  disabled?: boolean;
+}) {
+  const { dictionary } = useDictionary();
+  const receive = usePostRunReceipt();
+  const [fail, setFail] = useState<string | null>(null);
+  const [idempotencyKey, setIdempotencyKey] = useState(ulid);
+  const form = useForm<AuxReceiptDraft>({ defaultValues: { lines: [] } });
+  const variants = useMemo(
+    () => new Map(outputVariants.map((variant) => [variant.id ?? 0, variant])),
+    [outputVariants],
+  );
+  const hex = useMemo(
+    () =>
+      new Map((dictionary?.colors ?? []).map((colour) => [colour.code ?? '', colour.hex ?? ''])),
+    [dictionary?.colors],
+  );
+
+  useEffect(() => {
+    form.reset({
+      lines: (run.run?.lines ?? []).map((line) => ({
+        lineKey: line.lineKey ?? '',
+        outputVariantId: line.outputVariantId ?? 0,
+        good: String(Math.max(0, (line.plannedQty ?? 0) - (line.receivedQty ?? 0))),
+        defect: '0',
+      })),
+    });
+    setIdempotencyKey(ulid());
+    setFail(null);
+  }, [form, run.id, run.lockVersion, run.run?.lines]);
+
+  const lines = useWatch({ control: form.control, name: 'lines' }) ?? [];
+  const good = lines.reduce((sum, line) => sum + (Number(line.good) || 0), 0);
+  const total = Number(run.actuals?.actualTotalBase?.value);
+  const currency = run.actuals?.baseCurrency || run.plannedCurrency || '';
+  const unitCost = good > 0 && Number.isFinite(total) ? total / good : NaN;
+
+  const submit = form.handleSubmit(async ({ lines: countedLines }) => {
+    setFail(null);
+    if (!outputMaterialId && countedLines.some((line) => line.outputVariantId === 0)) {
+      setFail('link output');
+      return;
+    }
+    const counted = countedLines
+      .filter((line) => (Number(line.good) || 0) > 0 || (Number(line.defect) || 0) > 0)
+      .map((line) => ({
+        lineKey: line.lineKey,
+        goodQty: Number(line.good) || 0,
+        defectQty: Number(line.defect) || 0,
+        defectDisposition: 'scrap',
+      }));
+    if (counted.length === 0) {
+      setFail('enter quantity');
+      return;
+    }
+    if (counted.some((line) => !line.lineKey)) {
+      setFail('refresh run');
+      return;
+    }
+    try {
+      await receive.mutateAsync({
+        runId: run.id ?? 0,
+        lines: counted,
+        idempotencyKey,
+        expectedLockVersion: run.lockVersion ?? 0,
+        updateCostPrice: false,
+        partial: false,
+        notifyWaitlist: false,
+      });
+      notify({ sev: 'ok', subject: `PR-${run.id}`, text: 'received' });
+    } catch (error) {
+      if (isRefusal(error)) setFail('receive refused');
+      else notifyFailure(`PR-${run.id}`, 'not received', error, receiptErrorMessage(error));
+    }
+  });
+
+  return (
+    <FormProvider {...form}>
+      <form className='flex min-w-0 flex-col gap-3' onSubmit={submit}>
+        {lines.map((line, index) => {
+          const variant = variants.get(line.outputVariantId);
+          const label =
+            variant?.colorName ||
+            variant?.colorCode ||
+            materialLabel(outputMaterial, outputMaterialId) ||
+            'output';
+          const swatch = hex.get(variant?.colorCode ?? '');
+          return (
+            <div
+              key={line.lineKey || `${line.outputVariantId}-${index}`}
+              className='grid min-w-0 grid-cols-1 items-end gap-2 border-b border-hairline pb-3 last:border-b-0 last:pb-0 sm:grid-cols-3'
+            >
+              <Text size='small' className='flex min-w-0 items-center gap-2'>
+                <span
+                  aria-hidden
+                  className='size-5 shrink-0 border border-textColor'
+                  style={swatch ? { backgroundColor: swatch } : undefined}
+                />
+                <span className='truncate'>{label}</span>
+              </Text>
+              <DecimalField name={`lines.${index}.good`} label='good' maxDecimals={0} />
+              <DecimalField name={`lines.${index}.defect`} label='defect' maxDecimals={0} />
+            </div>
+          );
+        })}
+        {Number.isFinite(total) ? (
+          <Row
+            label='unit cost'
+            value={
+              Number.isFinite(unitCost) ? (
+                `${unitCost.toFixed(2)} ${currency} · ${total.toFixed(2)} ÷ ${good}`
+              ) : (
+                <EmptyCell />
+              )
+            }
+          />
+        ) : null}
+        <FailNote verb='not received' text={fail} />
+        <Button
+          type='submit'
+          variant='main'
+          size='lg'
+          className='w-full uppercase'
+          disabled={disabled || receive.isPending || lines.length === 0}
+        >
+          {receive.isPending ? 'receiving…' : 'receive'}
+        </Button>
+      </form>
+    </FormProvider>
+  );
+}
 
 type Row = {
   lineKey: string;

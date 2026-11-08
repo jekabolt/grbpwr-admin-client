@@ -7,6 +7,7 @@ import {
   googletype_Decimal,
 } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import {
   IssueStockModal,
   MovementTarget,
@@ -18,7 +19,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { notify } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button, CalloutBox, DataTable, EmptyCell, GroupLabel, Text, useDoneFlash } from 'ui';
+import { Button, CalloutBox, DataTable, EmptyCell, GroupLabel, Row, Text, useDoneFlash } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import { productionRunKeys, useMaterialPlan } from './useProductionRuns';
 
@@ -63,9 +64,11 @@ export function MaterialPlan({
   run,
   canEdit,
   locked = false,
+  isAux = false,
 }: {
   run: common_ProductionRun;
   canEdit: boolean;
+  isAux?: boolean;
   // A material issue requires an OPEN run (planned/in_progress — checkRunOpen). On a received or
   // closed run the backend rejects every issue, so the button is withheld rather than offered and
   // then refused. The plan itself stays readable: it is still the record of what the run needed.
@@ -146,6 +149,12 @@ export function MaterialPlan({
   // same source lines-grid.tsx uses — name resolves from dictionary.colors by colour code.
   const techCardId = run.run?.techCardId ?? 0;
   const { data: techCard } = useTechCard(techCardId ? techCardId : undefined);
+  const { data: materialsData } = useMaterials('', true, isAux);
+  const materialById = useMemo(
+    () => new Map((materialsData?.materials ?? []).map((material) => [material.id ?? 0, material])),
+    [materialsData?.materials],
+  );
+  const noNormSlots = isAux && rows.length === 0 ? techCard?.techCard?.bomItems ?? [] : [];
   const colorways = useMemo(
     () =>
       (techCard?.colorways ?? [])
@@ -224,13 +233,15 @@ export function MaterialPlan({
             component='span'
             className='font-bold uppercase'
           >
-            not counted — the plan is incomplete
+            {isAux ? 'no norm' : 'not counted — the plan is incomplete'}
           </Text>
           {visibleBlockerGroups.map((group) => (
             <Text key={group.key} size='small'>
-              {group.slotName} — {group.colorwayCount}{' '}
-              {group.colorwayCount === 1 ? 'colourway' : 'colourways'}, {group.plannedQty} pcs:{' '}
-              {group.reasons.join('; ') || 'not counted'}
+              {isAux
+                ? `${group.slotName} — no norm`
+                : `${group.slotName} — ${group.colorwayCount} ${
+                    group.colorwayCount === 1 ? 'colourway' : 'colourways'
+                  }, ${group.plannedQty} pcs: ${group.reasons.join('; ') || 'not counted'}`}
             </Text>
           ))}
           {hiddenBlockerGroups > 0 ? (
@@ -238,12 +249,18 @@ export function MaterialPlan({
               +{hiddenBlockerGroups} more
             </Text>
           ) : null}
-          <Text variant='inactive' size='small'>
-            fix the recipe on the{' '}
-            <Link to={`${ROUTES.techCards}/${techCardId}`} className='underline'>
+          {isAux ? (
+            <Link to={`${ROUTES.techCards}/${techCardId}`} className='text-textBaseSize underline'>
               tech card ↗
             </Link>
-          </Text>
+          ) : (
+            <Text variant='inactive' size='small'>
+              fix the recipe on the{' '}
+              <Link to={`${ROUTES.techCards}/${techCardId}`} className='underline'>
+                tech card ↗
+              </Link>
+            </Text>
+          )}
         </CalloutBox>
       ) : null}
 
@@ -251,14 +268,148 @@ export function MaterialPlan({
         <Text size='small'>loading…</Text>
       ) : isError ? (
         <Text size='small'>Material plan is unavailable.</Text>
+      ) : noNormSlots.length > 0 ? (
+        <div className='flex flex-col'>
+          {noNormSlots.map((slot, index) => {
+            const material = materialById.get(wireInt(slot.materialId));
+            const materialImage =
+              material?.image?.media?.thumbnail?.mediaUrl ||
+              material?.image?.media?.compressed?.mediaUrl ||
+              material?.image?.media?.fullSize?.mediaUrl;
+            return (
+              <Row
+                key={slot.lineKey || slot.id || index}
+                tone='error'
+                label={
+                  <span className='flex min-w-0 items-center gap-2'>
+                    <span className='size-8 shrink-0 overflow-hidden border border-textColor bg-pageBg'>
+                      {materialImage ? (
+                        <img src={materialImage} alt='' className='size-full object-cover' />
+                      ) : (
+                        <span
+                          aria-hidden
+                          className='block size-full'
+                          style={material?.color ? { backgroundColor: material.color } : undefined}
+                        />
+                      )}
+                    </span>
+                    <span className='truncate'>
+                      {slot.name || material?.name || `slot ${index + 1}`}
+                    </span>
+                  </span>
+                }
+                value='no norm'
+              />
+            );
+          })}
+        </div>
       ) : rows.length === 0 && blockers.length === 0 ? (
         <Text variant='inactive' size='small'>
-          no material requirement — the card's colourways have no linked materials with norms ·{' '}
+          {isAux
+            ? 'no bom slots · '
+            : "no material requirement — the card's colourways have no linked materials with norms · "}
           <Link to={`${ROUTES.techCards}/${techCardId}`} className='underline'>
-            open tech card ↗
+            {isAux ? 'tech card ↗' : 'open tech card ↗'}
           </Link>
         </Text>
-      ) : rows.length === 0 ? null : (
+      ) : rows.length === 0 ? null : isAux ? (
+        <DataTable className='table-fixed'>
+          <colgroup>
+            <col />
+            <col className='w-14 sm:w-auto' />
+            <col className='w-14 sm:w-auto' />
+            <col className='hidden sm:table-column' />
+            {canIssue ? <col className='w-16 sm:w-auto' /> : null}
+          </colgroup>
+          <thead>
+            <tr>
+              <th data-align='left'>material</th>
+              <th>need</th>
+              <th>issued</th>
+              <th className='hidden sm:table-cell'>sum</th>
+              {canIssue ? <th /> : null}
+            </tr>
+          </thead>
+          <tbody>
+            {slotGroups.flatMap((group) =>
+              group.rows.map((contribution, index) => {
+                const materialId = wireInt(contribution.materialId);
+                const material = materialById.get(materialId);
+                const planRow = rows.find((row) => wireInt(row.materialId) === materialId);
+                const image =
+                  material?.image?.media?.thumbnail?.mediaUrl ||
+                  material?.image?.media?.compressed?.mediaUrl ||
+                  material?.image?.media?.fullSize?.mediaUrl;
+                const issued = Number(planRow?.issued?.value) || 0;
+                const price = Number(material?.latestPrice?.price?.value);
+                const sum = Number.isFinite(price) ? (
+                  `${Number((issued * price).toFixed(2))} ${material?.latestPrice?.currency || ''}`
+                ) : (
+                  <EmptyCell />
+                );
+                return (
+                  <tr key={`${group.key}-${materialId}-${index}`}>
+                    <td data-align='left'>
+                      <span className='flex min-w-0 items-center gap-2'>
+                        <span className='hidden size-8 shrink-0 overflow-hidden border border-textColor bg-pageBg sm:block'>
+                          {image ? (
+                            <img src={image} alt='' className='size-full object-cover' />
+                          ) : (
+                            <span
+                              aria-hidden
+                              className='block size-full'
+                              style={
+                                material?.color ? { backgroundColor: material.color } : undefined
+                              }
+                            />
+                          )}
+                        </span>
+                        <span className='min-w-0'>
+                          <span className='block truncate'>{group.slotName}</span>
+                          <span className='block truncate text-labelColor'>
+                            {contribution.materialName || material?.name || `#${materialId}`}
+                          </span>
+                        </span>
+                      </span>
+                    </td>
+                    <td>
+                      {num(contribution.required)} {contribution.unit}
+                    </td>
+                    <td>
+                      {num(planRow?.issued)} {planRow?.unit}
+                    </td>
+                    <td className='hidden sm:table-cell'>{sum}</td>
+                    {canIssue ? (
+                      <td>
+                        <Button
+                          type='button'
+                          variant='secondary'
+                          size='xs'
+                          className='uppercase'
+                          onClick={() =>
+                            setIssue({
+                              target: {
+                                materialId,
+                                materialLabel:
+                                  contribution.materialName || material?.name || `#${materialId}`,
+                                unit: contribution.unit ?? '',
+                                onHand: decimalToInput(planRow?.onHand) || '0',
+                              },
+                              qty: num(planRow?.shortage),
+                            })
+                          }
+                        >
+                          issue…
+                        </Button>
+                      </td>
+                    ) : null}
+                  </tr>
+                );
+              }),
+            )}
+          </tbody>
+        </DataTable>
+      ) : (
         <DataTable>
           <thead>
             <tr>
@@ -322,7 +473,7 @@ export function MaterialPlan({
         </DataTable>
       )}
 
-      {slotGroups.length > 0 ? (
+      {!isAux && slotGroups.length > 0 ? (
         <div className='flex flex-col'>
           <GroupLabel>by slot — the factory spec (no stock figures here)</GroupLabel>
           {slotGroups.map((g) => (

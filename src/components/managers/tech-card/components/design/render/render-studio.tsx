@@ -107,6 +107,7 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
 export function RenderStudio({
   band,
   techCardId,
+  isAux = false,
   disabled,
   onGoToKind,
   colorwayId: storedColorwayId = 0,
@@ -121,6 +122,7 @@ export function RenderStudio({
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
+  isAux?: boolean;
   disabled?: boolean;
   /**
    * ═══ ЦЕЛЬ ПРОГОНА ВЫБИРАЮТ ЗДЕСЬ, НО ВЛАДЕЕТ ЕЮ КОМПОЗИТОР (D2, G2-3) ════════════════════════
@@ -287,9 +289,9 @@ export function RenderStudio({
       colorways,
       cardColorways,
       adopts: band.benchAdoptsUnattributed === true,
-      onCreateColorway: openCreate,
+      onCreateColorway: isAux ? undefined : openCreate,
     }),
-    [colorways, cardColorways, band.benchAdoptsUnattributed, openCreate],
+    [colorways, cardColorways, band.benchAdoptsUnattributed, isAux, openCreate],
   );
 
   /**
@@ -665,7 +667,7 @@ export function RenderStudio({
            держит `GROUP_GAP` на самих линейках (`./palette`). */
         className={GROUP_SEAM}
       >
-        {onColorwayChange && (
+        {!isAux && onColorwayChange && (
           <div data-render-colourways=''>
             <GroupLabel flush>colourway</GroupLabel>
             <div className='pt-1.5'>
@@ -753,7 +755,7 @@ export function RenderStudio({
         cardColorways={cardColorways}
         targetColorwayId={colorwayId}
         onPickColorway={onColorwayChange ?? (() => {})}
-        onCreateColorway={() => openCreate()}
+        onCreateColorway={isAux ? undefined : () => openCreate()}
         onGoToKind={onGoToKind}
       />
 
@@ -773,18 +775,20 @@ export function RenderStudio({
       {/* ОДНО ОКНО РОЖДЕНИЯ НА ВЕСЬ ЭКРАН. Оно не носит `anchor`: двери держат `open` сами —
           плитка полосы, заголовок столбца, цель разреза. После успеха цель прогона переключается
           на новый колорвей, и продолжение жеста (если оно было) доигрывается уже в его столбце. */}
-      <ColourwayCreatePopover
-        techCardId={techCardId}
-        open={creating}
-        onOpenChange={setCreating}
-        readOnly={disabled}
-        onCreated={(id) => {
-          onColorwayChange?.(id);
-          const then = after.current;
-          after.current = null;
-          then?.(id);
-        }}
-      />
+      {!isAux && (
+        <ColourwayCreatePopover
+          techCardId={techCardId}
+          open={creating}
+          onOpenChange={setCreating}
+          readOnly={disabled}
+          onCreated={(id) => {
+            onColorwayChange?.(id);
+            const then = after.current;
+            after.current = null;
+            then?.(id);
+          }}
+        />
+      )}
     </RenderStepScope>
   );
 }

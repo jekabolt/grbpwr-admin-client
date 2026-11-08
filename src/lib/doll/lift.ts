@@ -85,7 +85,7 @@ export function liftPoint(report: DollReport, panel: DollPanel, x: number, y: nu
 /** A measure line (pieceKey + pattern polyline) → 3D polyline; points off the piece are dropped. */
 export function liftMeasureLine(report: DollReport, line: DollMeasureLine): Vec3[] {
   const panel = report.panels.find(
-    (p) => p.pieceKey === line.pieceKey && p.instance === (line.instance ?? 0),
+    (p) => !p.drawnOnly && p.pieceKey === line.pieceKey && p.instance === (line.instance ?? 0),
   );
   if (!panel) return [];
   const out: Vec3[] = [];

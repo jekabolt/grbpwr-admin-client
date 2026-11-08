@@ -662,7 +662,7 @@ export function SidesSection({
   targetColorwayId: number;
   onPickColorway: (colorwayId: number) => void;
   /** Открыть поповер рождения колорвея (`ColourwayCreatePopover`) — заголовок столбца `+ colourway`. */
-  onCreateColorway: () => void;
+  onCreateColorway?: () => void;
   disabled?: boolean;
   onGoToKind?: (kind: 'flat' | 'render' | 'threed') => void;
 }): JSX.Element {
@@ -1144,7 +1144,7 @@ export function SidesSection({
               нечем. Сама ЯЧЕЙКА рисуется всегда, а не пропускается: строки ниже занимают все
               `columns.length + 3` дорожки, и дыра в шапке сдвинула бы их авто-размещением. */}
           <div data-side-plus-head='' className='flex min-w-0 self-stretch'>
-            {canWrite ? (
+            {canWrite && onCreateColorway ? (
               <AddDoor
                 shape='inline'
                 data-side-add-colourway=''
@@ -1153,12 +1153,14 @@ export function SidesSection({
               >
                 colourway
               </AddDoor>
-            ) : (
+            ) : onCreateColorway ? (
               <div
                 data-side-add-colourway-inert=''
                 title='read-only — a new colourway is named by someone with write access'
                 className='border-l border-dashed border-borderColor'
               />
+            ) : (
+              <div />
             )}
           </div>
 

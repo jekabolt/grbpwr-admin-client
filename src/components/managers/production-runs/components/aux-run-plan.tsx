@@ -288,10 +288,6 @@ function VariantRunPlan({
       <Text variant='uppercase' size='small'>
         auxiliary output · by colour
       </Text>
-      <Text variant='inactive' size='small'>
-        each colour is produced into its own warehouse bucket — on receive the good units of every
-        line are booked into that colour's material, not into one shared output.
-      </Text>
 
       {legacyStamped ? (
         <Text size='small'>

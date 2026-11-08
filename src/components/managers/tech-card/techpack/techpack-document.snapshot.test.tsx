@@ -94,4 +94,48 @@ describe('v6 English paper', () => {
       setOwnState({ lang: 'en', table: new Map(), seen: new Set() });
     }
   });
+
+  it('prints an auxiliary cover with MAKES and no colourways page', () => {
+    Object.assign(globalThis, {
+      window: { location: { origin: 'https://admin.beta.grbpwr.com' } },
+    });
+    const aux = structuredClone(techpackFixture);
+    aux.techCard = {
+      ...aux.techCard!,
+      purpose: 'TECH_CARD_PURPOSE_AUXILIARY',
+      bomItems: [],
+      pieces: [],
+      patterns: [],
+      operations: [],
+      garmentLabels: [],
+      careLabel: undefined,
+      packagingItems: [],
+      packaging: undefined,
+      cutStrips: [],
+      issues: [],
+      signoffs: [],
+    };
+    aux.colorways = [];
+    aux.markers = [];
+    aux.outputVariants = [
+      {
+        id: 91,
+        techCardId: aux.id,
+        colorCode: 'BLACK',
+        colorName: 'Black',
+        materialId: 501,
+        materialName: 'Dust bag — Black',
+        onHand: { value: '12' },
+        unit: 'pcs',
+        active: true,
+      },
+    ];
+
+    const markup = renderToStaticMarkup(<TechpackDocument techCard={aux} orient='land' />);
+
+    expect(markup).toContain('makes');
+    expect(markup).toContain('Dust bag — Black');
+    expect(markup).not.toContain('03 colourways');
+    expect(markup).toContain('[data-aux-techpack] [data-missing]');
+  });
 });

@@ -15,7 +15,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import type { common_TechCard, common_TechCardPatternRevision } from 'api/proto-http/admin';
 import { adminService } from 'api/api';
-import type { PieceDTO } from 'lib/nesting/types';
+import { NEST_DEFAULTS, type PieceDTO } from 'lib/nesting/types';
 import { fetchMediaBlob } from 'lib/features/media-blob';
 import {
   INSUNITS_CODE,
@@ -126,7 +126,7 @@ import {
   withoutGenerated,
   writeBindings,
 } from './form-writers';
-import { normBlock, sizeTokensOf, splitBlockSize, uniOf } from './nesting/block-code';
+import { bareToken, normBlock, sizeTokensOf, splitBlockSize, uniOf } from './nesting/block-code';
 import { geometryFailureLabel, isFetchFailure } from './nesting/dxf-warnings';
 import { defaultContourLayer, layerOptions } from './nesting/contour-layer';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
@@ -228,8 +228,18 @@ import { PatternDropZone } from './pattern-drop-zone';
 import {
   getFusingSheetGenerationState,
   subscribeFusingSheetGeneration,
+  fusingSheetsChange,
 } from './nesting/fusing-sheets-stage';
 import type { PieceMatchApplyResult } from './nesting/piece-match-modal';
+import {
+  interliningPieceShapeTargets,
+  interliningShapeFits,
+  interliningShapeToZone,
+  matchInterliningShapes,
+  type InterliningShapeMatch,
+  type InterliningShapePair,
+} from './nesting/interlining-shape-match';
+import { blankFuse, writeFuseFields } from './nesting/fuse-spec';
 
 // The whole nesting feature (modal + worker + dxf/clipper deps) lives in a lazy chunk —
 // nothing loads until someone actually opens a раскладка.
@@ -239,6 +249,16 @@ const NestingModal = lazy(() =>
 // Same lazy neighbourhood: the matching dialog parses DXF through the same worker.
 const PieceMatchModal = lazy(() =>
   import('./nesting/piece-match-modal').then((m) => ({ default: m.PieceMatchModal })),
+);
+const InterliningMatchModal = lazy(() =>
+  import('./nesting/interlining-match-modal').then((m) => ({
+    default: m.InterliningMatchModal,
+  })),
+);
+const InterliningPlaceModal = lazy(() =>
+  import('./nesting/interlining-match-modal').then((m) => ({
+    default: m.InterliningPlaceModal,
+  })),
 );
 // Склейка по-размерных выгрузок — оттуда же: она разбирает файлы тем же воркером и показывает
 // результат тем же листом, что и просмотр.
@@ -438,6 +458,18 @@ type PieceSaveFeedback = {
     at?: number;
     fading?: boolean;
   };
+};
+
+type InterliningUploadAsk = {
+  scopeKey: string;
+  lineKey: string;
+  file: File;
+  target?: string;
+  matches: InterliningShapeMatch[];
+  targets: InterliningShapePair[];
+  phase: 'review' | 'place';
+  cursor: number;
+  decisions: Record<number, InterliningShapePair | undefined>;
 };
 
 type SlotState = { label: string; tone: 'attention' | 'ok' | 'warn'; fading?: boolean };
@@ -654,6 +686,7 @@ export function PatternsField({
   const [params, setParams] = useSearchParams();
   // The import wizard's apply ends in the card's own save (F7): the page has no save button.
   const autosave = useTechCardAutosave();
+  const staging = useTechCardStaging();
   const undoHistory = useUndoHistory();
   const subscribeGeneration = useCallback(
     (listener: () => void) => subscribeFusingSheetGeneration(techCardId, listener),
@@ -895,6 +928,7 @@ export function PatternsField({
   const [reuploadFeedback, setReuploadFeedback] = useState<Record<string, ReuploadFeedback>>({});
   // Every operation that would put a second active row in a slot stops at the same choice.
   const [occupiedAsk, setOccupiedAsk] = useState<OccupiedAsk | null>(null);
+  const [interliningAsk, setInterliningAsk] = useState<InterliningUploadAsk | null>(null);
   const occupiedCancelRef = useRef<HTMLButtonElement>(null);
   // Open the pieces viewer of this slot as soon as the form holds these sheet urls.
   const [pendingView, setPendingView] = useState<{ scopeKey: string; urls: string[] } | null>(null);
@@ -1283,6 +1317,55 @@ export function PatternsField({
       });
     });
   }, [bundle, cardPieces, scopeGroups, contourPiecesByScope, pieceDxfAliases, linkSet, dictTokens]);
+
+  const interliningOwnerShapes = useMemo(() => {
+    const out = new Map<string, PieceDTO>();
+    if (!bundle) return out;
+    const livePieces = cardPieces.flatMap((piece) => {
+      const lineKey = piece.lineKey?.trim() ?? '';
+      const name = piece.name?.trim() ?? '';
+      return lineKey && name ? [{ ...piece, lineKey, name }] : [];
+    });
+    const preferred = new Set(preferredShapeSizeTokens.map(bareToken).filter(Boolean));
+    for (const group of scopeGroups) {
+      const lineKeys = group.scope.lines.flatMap((line) =>
+        line.section === 'TECH_CARD_BOM_SECTION_INTERLINING' ? [line.lineKey] : [],
+      );
+      if (lineKeys.length === 0 || !group.entries.some((entry) => !isGeneratedFusingRow(entry.row)))
+        continue;
+      const scoped = contourPiecesByScope.get(group.scope.key) ?? [];
+      if (scoped.length === 0) continue;
+      const refs = pieceShapeReferences({
+        parse: {
+          pieces: scoped,
+          blockNames: scoped.flatMap((piece) => (piece.blockName?.trim() ? [piece.blockName] : [])),
+        },
+        bindings: pieceDxfAliases.filter((alias) => aliasInScope(alias, group.scope, linkSet)),
+        pieces: livePieces,
+        sizeTokens: [...dictTokens.keys()],
+      });
+      for (const ref of refs) {
+        const size =
+          ref.entry.sizes.find((candidate) => preferred.has(candidate)) ??
+          ref.entry.sizes[Math.floor((ref.entry.sizes.length - 1) / 2)];
+        const shape = ref.entry.bySize.get(size);
+        for (const lineKey of lineKeys) {
+          const key = `${lineKey.trim().toLowerCase()}|${ref.pieceLineKey.trim().toLowerCase()}`;
+          if (shape && !out.has(key)) out.set(key, shape);
+        }
+      }
+    }
+    return out;
+  }, [
+    bundle,
+    cardPieces,
+    preferredShapeSizeTokens,
+    scopeGroups,
+    contourPiecesByScope,
+    pieceDxfAliases,
+    linkSet,
+    dictTokens,
+  ]);
 
   const mainPatternScope = useMemo(
     () =>
@@ -2307,6 +2390,52 @@ export function PatternsField({
       (line) => line.section === 'TECH_CARD_BOM_SECTION_INTERLINING',
     ) ?? false;
 
+  async function askInterliningFile(scopeKey: string, file: File, target?: string) {
+    const lineKey =
+      scopeOfKey(scopeKey)?.lines.find(
+        (line) => line.section === 'TECH_CARD_BOM_SECTION_INTERLINING',
+      )?.lineKey ?? '';
+    if (!lineKey) return;
+    const client = new NestingWorkerClient();
+    bumpUploading(scopeKey, 1);
+    try {
+      const parsed = await client.parse([file], {
+        unit: 'auto',
+        tol: NEST_DEFAULTS.tol,
+        tolChain: NEST_DEFAULTS.tolChain,
+      });
+      if (parsed.failedFiles > 0 || parsed.skippedBlocks > 0 || parsed.pieces.length === 0) {
+        useSnackBarStore.getState().showMessage('unreadable file', 'error');
+        return;
+      }
+      const input = {
+        mainBlocks: mainPatternBlocks,
+        mainAliases: mainPatternAliases,
+        pieces: cardPieces,
+        // An array, not keys(): the iterator would be spent by the first of the two calls below.
+        sizeTokens: [...dictTokens.keys()],
+        preferredSizeTokens: preferredShapeSizeTokens,
+      };
+      setInterliningAsk({
+        scopeKey,
+        lineKey,
+        file,
+        target,
+        matches: matchInterliningShapes({ ...input, shapes: parsed.pieces }),
+        targets: interliningPieceShapeTargets(input),
+        phase: 'review',
+        cursor: 0,
+        decisions: {},
+      });
+    } catch (error) {
+      console.error('Interlining DXF parse failed', error);
+      useSnackBarStore.getState().showMessage('unreadable file', 'error');
+    } finally {
+      client.terminate();
+      bumpUploading(scopeKey, -1);
+    }
+  }
+
   // An owner interlining revision keeps the row and every scoped alias intact. The generic
   // re-upload reconciler is intentionally bypassed: it is allowed to create/delete cut pieces,
   // while an interlining drawing may only map onto pieces that the main sheet already owns.
@@ -2452,6 +2581,18 @@ export function PatternsField({
     if (good.length === 0) return handOff();
     setSelectedKey(scopeKey);
     if (good.every(isDxfFile)) {
+      if (good.length === 1 && isInterliningScopeKey(scopeKey)) {
+        void (async () => {
+          const ready = await withUnits(good, faults);
+          if (!ready?.[0]) {
+            settleFileBatch(null, files.length, faults);
+            return;
+          }
+          const occupant = slotOccupant(scopeKey, target);
+          await askInterliningFile(scopeKey, ready[0], occupant ? sheetRowId(occupant) : target);
+        })();
+        return;
+      }
       const occupant = slotOccupant(scopeKey, target);
       if (occupant) {
         handOff();
@@ -2814,6 +2955,110 @@ export function PatternsField({
       },
     };
   }, [matching, mainPatternBlocks, mainPatternAliases, techCardId]);
+
+  const keepInterliningFile = (ask: InterliningUploadAsk) => {
+    setInterliningAsk(null);
+    void directUpload(ask.scopeKey, ask.file, undefined, ask.target);
+  };
+
+  const interliningPlacementTargets = (ask: InterliningUploadAsk) => {
+    const used = new Set(
+      ask.matches.flatMap((match, index) => {
+        if (index === ask.cursor) return [];
+        if (match.pairs.length > 0)
+          return match.pairs.map((pair) => pair.pieceLineKey.trim().toLowerCase());
+        const decision = ask.decisions[index];
+        return decision ? [decision.pieceLineKey.trim().toLowerCase()] : [];
+      }),
+    );
+    const shape = ask.matches[ask.cursor]?.shape;
+    return shape
+      ? ask.targets.filter(
+          (target) =>
+            !used.has(target.pieceLineKey.trim().toLowerCase()) &&
+            interliningShapeFits(shape, target.piece),
+        )
+      : [];
+  };
+
+  const applyInterliningZones = (ask: InterliningUploadAsk) => {
+    const assignments = new Map<string, { shape: PieceDTO; target: InterliningShapePair }>();
+    ask.matches.forEach((match, index) => {
+      const pairs =
+        match.pairs.length > 0 ? match.pairs : ask.decisions[index] ? [ask.decisions[index]] : [];
+      for (const target of pairs) {
+        if (!target || assignments.has(target.pieceLineKey.toLowerCase())) continue;
+        if (!interliningShapeFits(match.shape, target.piece)) continue;
+        assignments.set(target.pieceLineKey.toLowerCase(), { shape: match.shape, target });
+      }
+    });
+    const currentPieces = (getValues('pieces') ?? []) as NonNullable<TechCardFormData['pieces']>;
+    const nextPieces = currentPieces.map((piece) => {
+      const assignment = assignments.get((piece.lineKey ?? '').trim().toLowerCase());
+      if (!assignment) return piece;
+      const fuse = {
+        ...blankFuse('zone'),
+        bomLineKey: ask.lineKey,
+        zone: interliningShapeToZone(assignment.shape, assignment.target.piece),
+      };
+      return { ...piece, ...writeFuseFields(fuse) };
+    });
+    if (assignments.size > 0) {
+      setValue('pieces', nextPieces, { shouldDirty: true });
+    }
+
+    const scope = scopeOfKey(ask.scopeKey);
+    const currentPatterns = (getValues('patterns') ?? []) as PatternRow[];
+    const nextPatterns = currentPatterns.filter(
+      (row) => liveScopeOf(row, 'sheet') !== ask.scopeKey || isGeneratedFusingRow(row),
+    );
+    if (nextPatterns.length !== currentPatterns.length) {
+      setValue('patterns', nextPatterns as TechCardFormData['patterns'], { shouldDirty: true });
+      setAreasArmed(true);
+    }
+    if (scope) {
+      const currentAliases = (getValues('pieceDxfAliases') ?? []) as NonNullable<
+        TechCardFormData['pieceDxfAliases']
+      >;
+      const nextAliases = currentAliases.filter((alias) => !aliasInScope(alias, scope, linkSet));
+      if (nextAliases.length !== currentAliases.length) {
+        setValue('pieceDxfAliases', nextAliases, { shouldDirty: true });
+      }
+    }
+
+    if (techCardId && staging) {
+      staging.stage(fusingSheetsChange(techCardId, undefined, saveSessionId));
+      setPieceSaveFeedback({
+        materialScopeKey: ask.scopeKey,
+        interliningLineKeys: [ask.lineKey],
+        baselineSavedAt: autosave.lastSavedAt,
+        generationBaselineRun: getFusingSheetGenerationState(techCardId).run,
+        save: { phase: 'saving' },
+        generation: { phase: 'generating' },
+      });
+    }
+    setInterliningAsk(null);
+    autosave.request('interlining-match');
+  };
+
+  const beginInterliningPlacement = (ask: InterliningUploadAsk) => {
+    const first = ask.matches.findIndex((match) => match.by === 'no pair');
+    if (first < 0) return applyInterliningZones(ask);
+    setInterliningAsk({ ...ask, phase: 'place', cursor: first });
+  };
+
+  const advanceInterliningPlacement = (
+    ask: InterliningUploadAsk,
+    decision?: InterliningShapePair,
+  ) => {
+    const decisions = decision ? { ...ask.decisions, [ask.cursor]: decision } : ask.decisions;
+    const next = ask.matches.findIndex(
+      (match, index) => index > ask.cursor && match.by === 'no pair',
+    );
+    const advanced = { ...ask, decisions };
+    if (next < 0) return applyInterliningZones(advanced);
+    setInterliningAsk({ ...advanced, cursor: next });
+  };
 
   // A sheet just landed: open the pieces viewer once the form rows carry its url, so the viewer
   // reads the new file together with the slot's other sheets.
@@ -4476,8 +4721,6 @@ export function PatternsField({
   const deepMarker = params.get('marker') ?? '';
   const deepAuto = params.get('auto') === '1';
   const deepColorway = Number(params.get('markerColorway') ?? 0) || 0;
-  // Identity-stable; `peek` reads the staged list without subscribing this panel to it.
-  const staging = useTechCardStaging();
   const deepHandled = useRef('');
   useEffect(() => {
     if (!deepMarker) {
@@ -4951,6 +5194,29 @@ export function PatternsField({
         onConfirm={(picks) => sizesAsk?.confirm(picks)}
       />
 
+      {interliningAsk?.phase === 'review' && (
+        <Suspense fallback={null}>
+          <InterliningMatchModal
+            fileName={interliningAsk.file.name}
+            matches={interliningAsk.matches}
+            onClose={() => setInterliningAsk(null)}
+            onKeep={() => keepInterliningFile(interliningAsk)}
+            onMatch={() => beginInterliningPlacement(interliningAsk)}
+          />
+        </Suspense>
+      )}
+
+      {interliningAsk?.phase === 'place' && interliningAsk.matches[interliningAsk.cursor] && (
+        <Suspense fallback={null}>
+          <InterliningPlaceModal
+            match={interliningAsk.matches[interliningAsk.cursor]}
+            pieces={interliningPlacementTargets(interliningAsk)}
+            onSkip={() => advanceInterliningPlacement(interliningAsk)}
+            onPlace={(piece) => advanceInterliningPlacement(interliningAsk, piece)}
+          />
+        </Suspense>
+      )}
+
       {/* Раскладка (nesting) — the whole feature is a lazy chunk; mounted only when open. */}
       {nesting && (
         <Suspense fallback={null}>
@@ -4994,12 +5260,9 @@ export function PatternsField({
             saveSessionId={saveSessionId}
             knownPieceShapes={knownPieceShapes}
             preferredShapeSizeTokens={preferredShapeSizeTokens}
+            interliningOwnerShapes={interliningOwnerShapes}
             interlining={matchingInterlining}
             interliningOwnerFiles={interliningOwnerFiles}
-            onUploadInterliningFile={(lineKey, files) =>
-              routeFiles(lineKey, files, undefined, true)
-            }
-            onPickInterliningFile={(lineKey) => openPicker(lineKey, true)}
             readOnly={!canEdit}
             onClose={closePieces}
           />

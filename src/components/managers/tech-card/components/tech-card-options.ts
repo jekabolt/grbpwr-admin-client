@@ -162,7 +162,7 @@ export const labelAttachmentOptions = [
   'stuck on',
 ];
 
-export const labelFoldingOptions = ['flat', 'centre fold', 'end fold', 'mitre'];
+export const labelFoldingOptions = ['flat', 'half', 'ends', 'mitre', 'loop'];
 
 export const labelMadeByOptions = ['woven', 'printed', 'embroidered', 'heat transfer'];
 
@@ -170,14 +170,14 @@ export const labelPrintMethodOptions = ['screen', 'digital', 'flexo', 'foil'];
 
 export const labelDefaults: Record<string, { attachment: string; folding: string }> = {
   brand: { attachment: 'sewn 4 sides', folding: 'flat' },
-  size: { attachment: 'sewn into the seam', folding: 'centre fold' },
-  flag: { attachment: 'sewn into the seam', folding: 'centre fold' },
+  size: { attachment: 'sewn into the seam', folding: 'half' },
+  flag: { attachment: 'sewn into the seam', folding: 'half' },
   patch: { attachment: 'sewn 4 sides', folding: 'flat' },
   neck_tape: { attachment: 'sewn 2 sides', folding: 'flat' },
-  hanger_loop: { attachment: 'sewn into the seam', folding: 'end fold' },
+  hanger_loop: { attachment: 'sewn into the seam', folding: 'loop' },
   hangtag: { attachment: 'hung', folding: 'flat' },
   barcode: { attachment: 'stuck on', folding: 'flat' },
-  composition: { attachment: 'sewn into the seam', folding: 'end fold' },
+  composition: { attachment: 'sewn into the seam', folding: 'ends' },
 };
 
 export const packagingUsageOptions = [

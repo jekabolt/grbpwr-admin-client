@@ -2,12 +2,16 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { common_Material, common_TechCardOutputVariant } from 'api/proto-http/admin';
 import { MaterialPickerDialog } from 'components/managers/materials/components/material-picker';
+import { useMaterials } from 'components/managers/materials/components/useMaterials';
+import { useMaterialStock } from 'components/managers/materials/components/useWarehouse';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { techCardErrorMessage } from 'components/managers/tech-cards/components/utils';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { ROUTES } from 'constants/routes';
 import {
   AddDoor,
   Button,
@@ -19,6 +23,9 @@ import {
   Text,
   EmptyCell,
   Close,
+  Chip,
+  ChipRow,
+  Select,
   UndoRow,
 } from 'ui';
 import { decimalToInput } from 'utils/decimal';
@@ -527,6 +534,261 @@ export function OutputVariantsPanel({
         title='register colour'
         confirmLabel='register'
       />
+    </div>
+  );
+}
+
+/** The single aux output block: one warehouse row per colour, plus one inline colour door. */
+export function Makes({
+  techCardId,
+  variants,
+  legacyMaterialId,
+  canEdit,
+  hasRuns,
+}: {
+  techCardId?: number;
+  variants: common_TechCardOutputVariant[];
+  legacyMaterialId: number;
+  canEdit: boolean;
+  hasRuns: boolean;
+}) {
+  const { dictionary } = useDictionary();
+  const { data: materialsData } = useMaterials('', true, true);
+  const { data: stockData } = useMaterialStock({});
+  const upsert = useUpsertOutputVariant(techCardId ?? 0);
+  const del = useDeleteOutputVariant(techCardId ?? 0);
+  const [adding, setAdding] = useState(false);
+  const [picked, setPicked] = useState('');
+  const [adopting, setAdopting] = useState(false);
+  const colors = useMemo(
+    () => (dictionary?.colors ?? []).filter((color) => !color.archived && color.code),
+    [dictionary?.colors],
+  );
+  const colorByCode = useMemo(
+    () => new Map(colors.map((color) => [color.code ?? '', color])),
+    [colors],
+  );
+  const materialById = useMemo(
+    () => new Map((materialsData?.materials ?? []).map((material) => [material.id ?? 0, material])),
+    [materialsData?.materials],
+  );
+  const stockById = useMemo(
+    () =>
+      new Map((stockData?.rows ?? []).map((row) => [row.material?.id ?? 0, row.onHand] as const)),
+    [stockData?.rows],
+  );
+  const usedCodes = useMemo(
+    () => new Set(variants.map((variant) => variant.colorCode ?? '').filter(Boolean)),
+    [variants],
+  );
+  const busy = upsert.isPending || del.isPending;
+  const addColour = () => {
+    if (!techCardId || !picked) return;
+    upsert.mutate(variantPayload({ techCardId, colorCode: picked, materialId: 0, active: true }), {
+      onSuccess: () => {
+        setPicked('');
+        setAdding(false);
+      },
+      onError: (error) => notifyColourFailure(picked, 'not added', error, () => addColour()),
+    });
+  };
+  const changeColour = (variant: common_TechCardOutputVariant, code: string) => {
+    if (!techCardId || !variant.id) return;
+    upsert.mutate(
+      variantPayload({
+        id: variant.id,
+        techCardId,
+        colorCode: code,
+        materialId: 0,
+        active: variant.active,
+      }),
+      {
+        onError: (error) =>
+          notifyColourFailure(code, 'not changed', error, () => changeColour(variant, code)),
+      },
+    );
+  };
+  const remove = (variant: common_TechCardOutputVariant) => {
+    if (!variant.id) return;
+    del.mutate(variant.id, {
+      onError: (error) =>
+        notifyColourFailure(variant.colorCode, 'not removed', error, () => remove(variant)),
+    });
+  };
+
+  const outputRows = variants.length
+    ? variants
+    : legacyMaterialId > 0
+      ? [
+          {
+            id: 0,
+            techCardId,
+            colorCode: undefined,
+            colorName: undefined,
+            materialId: legacyMaterialId,
+            materialName: materialById.get(legacyMaterialId)?.name,
+            onHand: stockById.get(legacyMaterialId),
+            unit: materialById.get(legacyMaterialId)?.unit,
+            active: true,
+          } satisfies common_TechCardOutputVariant,
+        ]
+      : [];
+
+  return (
+    <div className='flex min-w-0 flex-col gap-2'>
+      <div className='flex flex-col'>
+        {outputRows.map((variant) => {
+          const material = materialById.get(variant.materialId ?? 0);
+          const materialImage =
+            material?.image?.media?.thumbnail?.mediaUrl ||
+            material?.image?.media?.compressed?.mediaUrl ||
+            material?.image?.media?.fullSize?.mediaUrl;
+          const color = colorByCode.get(variant.colorCode ?? '');
+          const onHand = decimalToInput(variant.onHand);
+          const removable =
+            !!variant.id &&
+            !hasRuns &&
+            variant.onHand?.value !== undefined &&
+            Number(variant.onHand.value) === 0;
+          return (
+            <Row
+              key={variant.id || `legacy-${legacyMaterialId}`}
+              className='group flex-col items-stretch gap-2 py-2 sm:flex-row sm:items-center [&>span:last-child]:w-full [&>span:last-child]:shrink sm:[&>span:last-child]:w-auto'
+              label={
+                <span className='flex min-w-0 items-center gap-3'>
+                  <span className='flex size-10 shrink-0 items-center justify-center overflow-hidden border border-textColor bg-pageBg'>
+                    {materialImage ? (
+                      <img src={materialImage} alt='' className='size-full object-cover' />
+                    ) : (
+                      <span
+                        aria-hidden
+                        className='size-full'
+                        style={color?.hex ? { backgroundColor: color.hex } : undefined}
+                      />
+                    )}
+                  </span>
+                  <span className='min-w-0'>
+                    <Link
+                      to={`${ROUTES.materials}?material=${variant.materialId ?? 0}`}
+                      className='block truncate underline'
+                    >
+                      {variant.materialName || material?.name || `material #${variant.materialId}`}
+                    </Link>
+                    {!variant.active && <Pill tone='mut'>retired</Pill>}
+                  </span>
+                </span>
+              }
+              value={
+                <span className='flex w-full min-w-0 flex-wrap items-center justify-between gap-2 sm:w-auto sm:justify-end'>
+                  {variant.id ? (
+                    <Select
+                      name={`makes-colour-${variant.id}`}
+                      aria-label='colour'
+                      size='sm'
+                      items={colors.map((item) => ({
+                        value: item.code ?? '',
+                        label: item.name || item.code || '',
+                        disabled: usedCodes.has(item.code ?? '') && item.code !== variant.colorCode,
+                      }))}
+                      value={variant.colorCode ?? ''}
+                      disabled={!canEdit || busy}
+                      onValueChange={(code: string) => changeColour(variant, code)}
+                    />
+                  ) : (
+                    <Button
+                      type='button'
+                      variant='underline'
+                      size='xs'
+                      title='link existing'
+                      aria-label='link existing'
+                      disabled={!canEdit || !techCardId}
+                      onClick={() => setAdopting(true)}
+                    >
+                      ⋯
+                    </Button>
+                  )}
+                  <span className='whitespace-nowrap'>
+                    {onHand || <EmptyCell />} {variant.unit || material?.unit || ''}
+                  </span>
+                  {canEdit && removable && (
+                    <Close
+                      size='sm'
+                      aria-label={`remove ${variant.colorCode ?? 'output'}`}
+                      className='opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100'
+                      disabled={busy}
+                      onClick={() => remove(variant)}
+                    />
+                  )}
+                </span>
+              }
+            />
+          );
+        })}
+      </div>
+
+      {canEdit && techCardId && !adding && (
+        <AddDoor afterRows={outputRows.length > 0} disabled={busy} onClick={() => setAdding(true)}>
+          colour
+        </AddDoor>
+      )}
+      {canEdit && techCardId && adding && (
+        <div className='flex flex-col gap-2 pt-1'>
+          <ChipRow>
+            {colors
+              .filter((color) => !usedCodes.has(color.code ?? ''))
+              .map((color) => (
+                <Chip
+                  key={color.code}
+                  selected={picked === color.code}
+                  pressed={picked === color.code}
+                  onClick={() => setPicked(color.code ?? '')}
+                >
+                  <span
+                    aria-hidden
+                    className='size-3 shrink-0 border border-textColor'
+                    style={color.hex ? { backgroundColor: color.hex } : undefined}
+                  />
+                  {color.name || color.code}
+                </Chip>
+              ))}
+          </ChipRow>
+          <div className='flex flex-wrap items-center gap-3'>
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              disabled={busy}
+              onClick={() => {
+                setPicked('');
+                setAdding(false);
+              }}
+            >
+              cancel
+            </Button>
+            <Button
+              type='button'
+              variant='main'
+              size='sm'
+              disabled={!picked || busy}
+              onClick={addColour}
+            >
+              add colour
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {techCardId && legacyMaterialId > 0 && variants.length === 0 && (
+        <AddColourDialog
+          open={adopting}
+          onOpenChange={setAdopting}
+          techCardId={techCardId}
+          usedCodes={usedCodes}
+          seedMaterialId={legacyMaterialId}
+          title='link existing'
+          confirmLabel='link'
+        />
+      )}
     </div>
   );
 }

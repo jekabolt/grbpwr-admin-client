@@ -18,6 +18,8 @@ async function run(entry, tag) {
     outfile,
     logLevel: 'warning',
     absWorkingDir: root,
+    // Vite's import.meta.env does not exist under node (a transitive import reads Sentry's DSN).
+    define: { 'import.meta.env': '{}' },
     alias: {
       lib: resolve(root, 'src/lib'),
       components: resolve(root, 'src/components'),

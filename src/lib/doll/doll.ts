@@ -10506,12 +10506,209 @@ export function solveDoll(input: DollInput): DollReport {
       `${F.id}: ${pieceWord(top.part)} over ${pieceWord(under.part)} · ${pairs.length} fastened, the farthest ${worst.toFixed(1)} mm from its hole · the edges cross ${overlapMm.toFixed(0)} mm (the marks leave ${expect.toFixed(0)}) · ${F.how}`,
     );
   }
+  // ── TURNED INNER PLIES — copied from the solved leader, never part of the solve ────────────
+  const turnedRep: NonNullable<DollReport['turned']> = [];
+  const turnedPanels: DollReport['panels'] = [];
+  const turnedPos: number[] = [];
+  {
+    const marks = (opt.seams?.candidates ?? []).filter((candidate) => candidate.turned);
+    const surfaceKeys = new Set(
+      graph.pieces.filter((piece) => isSurfacePiece(piece, graph)).map((piece) => piece.pieceKey),
+    );
+    const made = new Set<string>();
+    const distToSegment = (q: Pt2, a: Pt2, b: Pt2) => {
+      const dx = b[0] - a[0];
+      const dy = b[1] - a[1];
+      const t = Math.max(
+        0,
+        Math.min(1, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / (dx * dx + dy * dy || 1)),
+      );
+      return Math.hypot(q[0] - a[0] - t * dx, q[1] - a[1] - t * dy);
+    };
+    for (const owned of marks) {
+      const mark = owned.turned!;
+      const onto = pk(mark.run[0]);
+      const sides = [
+        (owned.candidate.aParts ?? edgeIdsOf(owned.candidate.a)).flatMap(edgeIdsOf),
+        (owned.candidate.bParts ?? edgeIdsOf(owned.candidate.b)).flatMap(edgeIdsOf),
+      ];
+      const piece = sides.flatMap((side) => side.map(pk)).find((key) => key !== onto);
+      const P = panelByKey.get(onto);
+      if (
+        !piece ||
+        !P ||
+        hiddenFromView[P.offset] ||
+        !P.layers.includes(piece) ||
+        surfaceKeys.has(piece) ||
+        surfaceKeys.has(onto) ||
+        made.has(piece)
+      )
+        continue;
+      made.add(piece);
+
+      // Final leader normals, including mirrored faces, a rolled collar and triangles reflected by
+      // an ordinary fold. This is the same outward reading used by surface placement above.
+      const normals = new Float64Array(3 * P.count);
+      const flipP = P.mirrored !== faceFlip.has(P.idx);
+      const sourceTris = P.mesh.tris;
+      for (let t = 0; t < sourceTris.length; t += 3) {
+        const flip = flipP !== (P.fold?.triFlip[t / 3] === 1);
+        const a = sourceTris[t];
+        const b = flip ? sourceTris[t + 2] : sourceTris[t + 1];
+        const c = flip ? sourceTris[t + 1] : sourceTris[t + 2];
+        const A = getPos(P.offset + a);
+        const normal = cross(sub(getPos(P.offset + b), A), sub(getPos(P.offset + c), A));
+        for (const v of [a, b, c]) for (let d = 0; d < 3; d++) normals[3 * v + d] += normal[d];
+      }
+      for (let i = 0; i < P.count; i++) {
+        const length = Math.hypot(normals[3 * i], normals[3 * i + 1], normals[3 * i + 2]) || 1;
+        for (let d = 0; d < 3; d++) normals[3 * i + d] /= length;
+      }
+
+      // A ring's inward copy must point toward its axis. If final winding says otherwise, correct
+      // the direction locally and state it; the solved leader itself is never touched.
+      const ringProxy = [...proxyReport]
+        .reverse()
+        .find((proxy) => proxy.group === P.group && proxy.kind === 'ring');
+      if (ringProxy?.origin && ringProxy.axis) {
+        let inward = 0;
+        for (let i = 0; i < P.count; i++) {
+          const q = getPos(P.offset + i);
+          const rel = sub(q, ringProxy.origin);
+          const along = dot(rel, ringProxy.axis);
+          const onAxis: Vec3 = [
+            ringProxy.origin[0] + along * ringProxy.axis[0],
+            ringProxy.origin[1] + along * ringProxy.axis[1],
+            ringProxy.origin[2] + along * ringProxy.axis[2],
+          ];
+          const toAxis = sub(onAxis, q);
+          inward += -(
+            normals[3 * i] * toAxis[0] +
+            normals[3 * i + 1] * toAxis[1] +
+            normals[3 * i + 2] * toAxis[2]
+          );
+        }
+        if (inward <= 0) {
+          for (let i = 0; i < normals.length; i++) normals[i] *= -1;
+          warnings.push(`${piece}: turned-ply normal flipped inward on ${P.group.toLowerCase()}`);
+        }
+      }
+
+      const runEdges = mark.run.flatMap((id) => edgeIdsOf(id));
+      const flatGeom = graph.pieces.find((candidate) => candidate.pieceKey === onto) ?? P.geom;
+      const runSegments = runEdges.flatMap((id) => {
+        const edge = flatGeom.edges.find((candidate) => candidate.id === id);
+        if (!edge) return [];
+        const out: [Pt2, Pt2][] = [];
+        for (let i = 1; i < edge.pts.length; i++) out.push([edge.pts[i - 1], edge.pts[i]]);
+        return out;
+      });
+      const runPath = pathOf(runEdges);
+      const runLocal = new Set(
+        [...(runPath?.v ?? [])]
+          .filter((vertex) => panelOf[vertex] === P.idx)
+          .map((vertex) => vertex - P.offset),
+      );
+      // A rolled/turned collar already has a one-sided stand contact. Keep the inner copy within
+      // half that exact gap so it cannot cross the stand.
+      const contactGap = contacts
+        .filter((contact) => [...contact.i].some((vertex) => panelOf[vertex] === P.idx))
+        .reduce((gap, contact) => Math.min(gap, contact.gap), Infinity);
+      const depth =
+        P.group === 'COLLAR' &&
+        (turnedDown.has(P.idx) || faceFlip.has(P.idx)) &&
+        Number.isFinite(contactGap)
+          ? Math.min(2, 0.5 * contactGap)
+          : 2;
+      const offset = N + surfacePos.length / 3 + turnedPos.length / 3;
+      for (let i = 0; i < P.count; i++) {
+        const q = P.fold?.flat[i] ?? P.mesh.pts[i];
+        const distance = runLocal.has(i)
+          ? 0
+          : Math.min(...runSegments.map(([a, b]) => distToSegment(q, a, b)), 14);
+        const d = depth * (distance / 14);
+        const point = getPos(P.offset + i);
+        turnedPos.push(
+          point[0] - d * normals[3 * i],
+          point[1] - d * normals[3 * i + 1],
+          point[2] - d * normals[3 * i + 2],
+        );
+      }
+
+      // Start from the leader's final winding, then reverse it: this fabric face looks into the
+      // garment. It remains an ordinary cloth panel for the renderer.
+      const tris = new Uint32Array(sourceTris.length);
+      for (let t = 0; t < sourceTris.length; t += 3) {
+        const flip = flipP !== (P.fold?.triFlip[t / 3] === 1);
+        tris[t] = sourceTris[t];
+        tris[t + 1] = flip ? sourceTris[t + 1] : sourceTris[t + 2];
+        tris[t + 2] = flip ? sourceTris[t + 2] : sourceTris[t + 1];
+      }
+      const uvf = new Float32Array(2 * P.count);
+      if (P.fold)
+        for (let i = 0; i < P.count; i++) {
+          uvf[2 * i] = P.fold.flat[i][0];
+          uvf[2 * i + 1] = P.fold.flat[i][1];
+        }
+      else for (let i = 0; i < 2 * P.count; i++) uvf[i] = uv[2 * P.offset + i];
+      turnedPanels.push({
+        pieceKey: piece,
+        instance: 0,
+        mirrored: P.mirrored,
+        group: P.group,
+        offset,
+        count: P.count,
+        tris,
+        uv: uvf,
+        boundary: Uint32Array.from(P.mesh.bVert),
+        layers: [],
+        drawnOnly: true,
+      });
+
+      let stitch: Vec3[] | undefined;
+      if (mark.heldBy?.topstitch && runPath) {
+        const boundary = new Set(P.mesh.bVert);
+        stitch = [...runPath.v].flatMap((vertex) => {
+          const local = vertex - P.offset;
+          if (local < 0 || local >= P.count) return [];
+          const neighbours = new Set<number>();
+          for (let t = 0; t < sourceTris.length; t += 3) {
+            const tri = [sourceTris[t], sourceTris[t + 1], sourceTris[t + 2]];
+            if (!tri.includes(local)) continue;
+            for (const candidate of tri)
+              if (candidate !== local && !runLocal.has(candidate)) neighbours.add(candidate);
+          }
+          const next = [...neighbours].sort(
+            (a, b) => Number(boundary.has(a)) - Number(boundary.has(b)),
+          )[0];
+          if (next === undefined) return [];
+          const point = getPos(vertex);
+          const toward = sub(getPos(P.offset + next), point);
+          const length = Math.hypot(toward[0], toward[1], toward[2]);
+          return length > 1e-6 ? [add(point, toward, 2 / length)] : [];
+        });
+        if (stitch.length < 2) stitch = undefined;
+      }
+      turnedRep.push({
+        piece,
+        onto,
+        run: runEdges,
+        step: mark.step,
+        by: mark.by,
+        heldBy: mark.heldBy,
+        ...(stitch ? { stitch } : {}),
+      });
+    }
+  }
   const placedSurface = new Set(surfaceRep.filter((x) => x.placed).map((x) => x.pieceKey));
-  const NV = N + surfacePos.length / 3;
+  const turnedPieces = new Set(turnedRep.map((turned) => turned.piece));
+  const NV = N + surfacePos.length / 3 + turnedPos.length / 3;
   const positions = new Float32Array(3 * NV);
   for (let i = 0; i < 3 * N; i++) positions[i] = Number.isFinite(pos[i]) ? pos[i] : 0;
   for (let i = 0; i < surfacePos.length; i++)
     positions[3 * N + i] = Number.isFinite(surfacePos[i]) ? surfacePos[i] : 0;
+  for (let i = 0; i < turnedPos.length; i++)
+    positions[3 * N + surfacePos.length + i] = Number.isFinite(turnedPos[i]) ? turnedPos[i] : 0;
   const outPanels: DollReport['panels'] = panels
     .filter((P) => !hiddenFromView[P.offset])
     .map((P) => {
@@ -10545,6 +10742,7 @@ export function solveDoll(input: DollInput): DollReport {
       };
     });
   outPanels.push(...surfacePanels);
+  outPanels.push(...turnedPanels);
   // Pieces that end up in no closed/proposed seam at all are floating too (a bag's strap laid on
   // its panel by a reading of the order is said as a surface row instead).
   const onBag = new Set(bagSurfaceRows.filter((x) => x.placed).map((x) => x.pieceKey));
@@ -10843,12 +11041,13 @@ export function solveDoll(input: DollInput): DollReport {
     loops: loopsOut,
     floating,
     skipped: G.skipped
-      .filter((x) => !placedSurface.has(x.pieceKey))
+      .filter((x) => !placedSurface.has(x.pieceKey) && !turnedPieces.has(x.pieceKey))
       .map((x) => {
         const why = surfaceRep.find((r) => r.pieceKey === x.pieceKey);
         return { pieceKey: x.pieceKey, reason: why ? `${x.reason} · ${why.note}` : x.reason };
       }),
     ...(surfaceRep.length ? { surface: surfaceRep } : {}),
+    ...(turnedRep.length ? { turned: turnedRep } : {}),
     ...(foldReports.length ? { folds: foldReports } : {}),
     proxies: proxyReport,
     stats: {

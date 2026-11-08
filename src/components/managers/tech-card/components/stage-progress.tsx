@@ -269,6 +269,7 @@ export function StageProgress({
   readinessPending,
   readinessError,
   canEdit,
+  isAux = false,
   planRunDisabled,
   planRunDisabledReason,
   next,
@@ -290,6 +291,7 @@ export function StageProgress({
   readinessPending: boolean;
   readinessError: boolean;
   canEdit: boolean;
+  isAux?: boolean;
   planRunDisabled?: boolean;
   planRunDisabledReason?: string;
   /** The one step to press next (`resolveNextStep`); null when nothing is left before release. */
@@ -310,8 +312,20 @@ export function StageProgress({
 }) {
   const { pathname, search } = useLocation();
   const returnTo = pathname + search;
-  const idx = STAGE_ORDER.indexOf(stage);
-  const currentLabel = idx >= 0 ? SPINE_STAGES[idx].label : 'stage unset';
+  const stages = isAux
+    ? [SPINE_STAGES[0], SPINE_STAGES[1], SPINE_STAGES[SPINE_STAGES.length - 1]]
+    : SPINE_STAGES;
+  const stageIndex = STAGE_ORDER.indexOf(stage);
+  const idx = isAux
+    ? stageIndex < 0
+      ? -1
+      : stage === 'TECH_CARD_STAGE_IDEA'
+        ? 0
+        : stage === 'TECH_CARD_STAGE_PROD'
+          ? 2
+          : 1
+    : stageIndex;
+  const currentLabel = idx >= 0 ? stages[idx].label : 'stage unset';
 
   // A quick action is its own door (a sample opens the wizard, a fitting is another page); the
   // words stay the step's, so the line reads the same whichever door it carries.
@@ -378,7 +392,7 @@ export function StageProgress({
           and the current one as the step. */}
       <div className='flex min-w-0 items-center gap-2 sm:max-w-[640px] sm:flex-[1_1_480px]'>
         <ol aria-label='stage' className='flex min-w-0 flex-1 items-center gap-0.5'>
-          {SPINE_STAGES.map((s, i) => {
+          {stages.map((s, i) => {
             const state =
               idx < 0 ? 'future' : i < idx ? 'passed' : i === idx ? 'current' : 'future';
             return (

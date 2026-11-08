@@ -1,4 +1,4 @@
-import type { common_TechCard } from 'api/proto-http/admin';
+import type { common_AuxMadeBy, common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useCallback, useEffect, useRef, type ReactNode } from 'react';
@@ -9,6 +9,7 @@ import type { EditHistory } from 'components/managers/tech-card/annotation/histo
 import { Button, Text, Section, SectionStack } from 'ui';
 import { ConstructionGeneralInfo } from '../construction-general-info';
 import type { TechCardFormData } from '../schema';
+import { auxKind } from '../aux-card';
 import { createReady } from '../create-ready';
 import { ArtifactsPanel, type SheetCallout } from './artifacts-panel';
 import { Bench } from './bench';
@@ -206,6 +207,9 @@ export function StudioTab({
   const { control } = useFormContext<TechCardFormData>();
   const purpose = useWatch({ control, name: 'purpose' }) as string | undefined;
   const isAux = purpose === 'TECH_CARD_PURPOSE_AUXILIARY';
+  const madeBy = useWatch({ control, name: 'auxMadeBy' }) as common_AuxMadeBy | undefined;
+  const cardKind = auxKind(purpose, madeBy);
+  const auxMode = cardKind === 'product' ? null : cardKind;
   /* ═══ СЛОТЫ ТКАНИ — ОДНО ЧТЕНИЕ `bomItems` НА ВСЮ СТУДИЮ (STEP 3) ══════════════════════════════
      Шаг PATTERN рисует ряд на каждую пару (колорвей, слот ткани), а FABRIC RENDER засевает ткани
      колорвея из тех же пар — значит оба экрана обязаны читать ОДИН список слотов, и читает его
@@ -357,6 +361,9 @@ export function StudioTab({
      entry and Back leaves the card (G-01 r2). */
   const goStep = useStepAddress();
   useLegacyStepRewrite(legacy);
+  useEffect(() => {
+    if (isAux && (decided === 'threed' || decided === 'playground')) goStep('card');
+  }, [decided, goStep, isAux]);
 
   /* ═══ THE GENERATIVE KIND IS DERIVED FROM THE STEP, NEVER HELD BESIDE IT ═════════════════════════
      `kind` was the studio's state (`state.kind` of the old prototype); now the step is, and the
@@ -433,6 +440,7 @@ export function StudioTab({
         categoryId: newCategoryId,
         season: newSeason,
         styleNumber: newStyleNumber,
+        purpose,
       });
       footer = (
         <StepFooter
@@ -596,7 +604,12 @@ export function StudioTab({
      и FABRIC RENDER, селект в ряду GENERATE у 3D и чипы PAINT on-model. Состояние по-прежнему
      ОДНО (`useColorwayChoice` выше) и раздаётся вниз пропами. */
   const rail = (
-    <ChainRail ctx={ctx} onStepChange={goStep} onExitGuide={walking ? onExitGuide : undefined} />
+    <ChainRail
+      ctx={ctx}
+      isAux={isAux}
+      onStepChange={goStep}
+      onExitGuide={walking ? onExitGuide : undefined}
+    />
   );
 
   /* ═══ ONE RETURN, ONE STACK: `SectionStack > [rail, screen]` ═══════════════════════════════════
@@ -703,16 +716,19 @@ export function StudioTab({
                     <MaterialSlots
                       techCardId={techCardId}
                       readOnly={readOnly || !canWriteCard}
+                      auxMode={auxMode}
                       onGoTab={navTo}
                     />
                     {/* КОЛОРВЕИ, ПРЕДЛОЖЕННЫЕ ЧЕРНОВИКОМ (B-25, D5) — продуктовый блок, которого в
                       макете нет; стоит сразу под таблицей слотов и читается её продолжением: «вот
                       слоты; вот чем их красят». Блока НЕТ ВОВСЕ, пока черновик ничего не предложил —
                       условие знает только орган (модульный стор), поэтому обёртка у него своя. */}
-                    <ColourwayProposals
-                      techCardId={techCardId}
-                      readOnly={readOnly || !canWriteCard}
-                    />
+                    {!isAux && (
+                      <ColourwayProposals
+                        techCardId={techCardId}
+                        readOnly={readOnly || !canWriteCard}
+                      />
+                    )}
                   </div>
                 </>
               )}
@@ -762,6 +778,7 @@ export function StudioTab({
                       <FabricsHardware
                         band={band}
                         techCardId={techCardId}
+                        isAux={isAux}
                         disabled={readOnly || !canWriteCard}
                         colorways={colorway.cardColorways ?? colorway.colorways}
                         colorwayId={colorway.colorwayId}
@@ -789,6 +806,7 @@ export function StudioTab({
                         <RenderStudio
                           band={band}
                           techCardId={techCardId}
+                          isAux={isAux}
                           disabled={readOnly}
                           onGoToKind={goKind}
                           colorwayId={colorway.colorwayId}
@@ -826,7 +844,7 @@ export function StudioTab({
                         (presentation, model, body, size) is not a colour and must survive a change
                         of colourway; everything colour-dependent (`threedSides`, the gate, the run
                         body) is a selector over the band and follows the prop. */}
-                    {step === 'threed' && (
+                    {!isAux && step === 'threed' && (
                       <>
                         <ThreedStudio
                           band={band}
@@ -861,7 +879,7 @@ export function StudioTab({
                         history below shows the room's runs (playground + recolour); an open
                         workflow narrows it to its own (`playgroundHistoryMatch`, C-05 — a stable
                         matcher per workflow, the room's on the grid). */}
-                    {step === 'playground' && (
+                    {!isAux && step === 'playground' && (
                       <>
                         <PlaygroundStudio band={band} techCardId={techCardId} disabled={readOnly} />
                         <GenerationHistory

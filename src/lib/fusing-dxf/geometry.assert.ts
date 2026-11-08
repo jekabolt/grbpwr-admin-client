@@ -146,14 +146,15 @@ export async function main() {
   const outline = rectangle(100, 80);
 
   assert.equal(deriveFusePanelMode(spec(), false), 'whole');
-  assert.equal(deriveFusePanelMode(spec(), true), 'file');
-  assert.equal(deriveFusePanelMode(spec({ mode: 'strip' }), true), 'strip');
+  assert.equal(deriveFusePanelMode(spec(), true), 'zone');
+  assert.equal(deriveFusePanelMode(spec({ mode: 'strip' }), true), 'allowance');
+  assert.equal(deriveFusePanelMode(spec({ mode: 'strip', widthMm: 10 }), true), 'strip');
   assert.equal(deriveFusePanelMode(spec({ mode: '' }), true), '');
 
-  // Every cross-mode move drops the source mode's private draft. FILE persists as FULL plus its
-  // owner-file alias, so it is subject to the same clearing rule.
+  // Every cross-mode move drops the source mode's private draft. ALLOWANCE stays a wire STRIP with
+  // inherited width and the whole outline selected.
   const draftZone: NonNullable<PieceFuseSpec['zone']> = { rect: [10, 10, 40, 50] };
-  const panelModes: FusePanelMode[] = ['', 'whole', 'strip', 'zone', 'file'];
+  const panelModes: FusePanelMode[] = ['', 'whole', 'allowance', 'strip', 'zone'];
   const sourceByMode: Record<FusePanelMode, PieceFuseSpec> = {
     '': spec({
       mode: '',
@@ -162,24 +163,22 @@ export async function main() {
       zone: draftZone,
     }),
     whole: spec({ widthMm: 18, edges: [{ edge: 1, startMm: 2, endMm: 3 }], zone: draftZone }),
+    allowance: spec({ mode: 'strip', widthMm: null, edges: [] }),
     strip: spec({ mode: 'strip', widthMm: 18, edges: [{ edge: 1, startMm: 2, endMm: 3 }] }),
     zone: spec({ mode: 'zone', zone: draftZone }),
-    file: spec({
-      mode: 'whole',
-      widthMm: 18,
-      edges: [{ edge: 1, startMm: 2, endMm: 3 }],
-      zone: draftZone,
-    }),
   };
   for (const from of panelModes) {
     for (const to of panelModes) {
       if (from === to) continue;
-      const next = fuseSpecForPanelMode(sourceByMode[from], to, 'IL-FILE');
-      assert.equal(next.mode, to === 'file' ? 'whole' : to, `${from || 'no'} → ${to || 'no'} mode`);
+      const next = fuseSpecForPanelMode(sourceByMode[from], to);
+      assert.equal(
+        next.mode,
+        to === 'allowance' ? 'strip' : to,
+        `${from || 'no'} → ${to || 'no'} mode`,
+      );
       assert.equal(next.widthMm, null, `${from || 'no'} → ${to || 'no'} width`);
       assert.deepEqual(next.edges, [], `${from || 'no'} → ${to || 'no'} edges`);
       assert.equal(next.zone, null, `${from || 'no'} → ${to || 'no'} zone`);
-      if (to === 'file') assert.equal(next.bomLineKey, 'IL-FILE');
     }
   }
   assert.deepEqual(
@@ -469,15 +468,27 @@ export async function main() {
     readFuseSpec({ ...stripFields, ...fuseFieldsFromWire(fuseFieldsToWire(stripFields)) }),
     stripSpec,
   );
+  const allowanceFields = writeFuseFields(spec({ mode: 'strip', widthMm: null, edges: [] }));
+  assert.equal(allowanceFields.fusingMode, 'TECH_CARD_PIECE_FUSING_MODE_STRIP');
+  assert.equal(allowanceFields.fusingWidthMm, '');
+  assert.deepEqual(allowanceFields.fusingEdges, []);
   // Leaving strip clears edges on the wire as a PRESENT empty list (absent would keep them).
   const cleared = fuseFieldsToWire(writeFuseFields({ ...stripSpec, mode: 'whole' }));
   assert.deepEqual(cleared.fusingEdges, { items: [] });
   assert.deepEqual(cleared.fusingZone, { holes: [], islands: [] });
 
+  // Default inset is 0 (owner w1107 В1–В2): a fresh WHOLE fuse IS the cut line, every vertex.
   const whole = generateFuseGeometry({ outline, spec: spec() });
   assert.equal(whole.length, 1);
-  near(fuseAreaMm2(whole), 94 * 74);
+  near(fuseAreaMm2(whole), 100 * 80);
   assert.ok(signedArea(whole[0].outer) > 0, 'outer loop is CCW');
+  for (const corner of outline)
+    assert.ok(
+      whole[0].outer.some((p) => Math.hypot(p.x - corner.x, p.y - corner.y) < 1e-6),
+      `default whole fuse keeps the cut corner ${corner.x},${corner.y}`,
+    );
+  const wholeThree = generateFuseGeometry({ outline, spec: spec({ insetMm: 3 }) });
+  near(fuseAreaMm2(wholeThree), 94 * 74);
 
   const net = generateFuseGeometry({
     outline,
@@ -571,6 +582,62 @@ export async function main() {
   });
   near(fuseAreaMm2(strip), 75 * 20);
 
+  const allowanceStrip = generateFuseGeometry({
+    outline,
+    spec: spec({ mode: 'strip', widthMm: null, edges: [], insetMm: 0 }),
+    seamAllowanceMm: 10,
+  });
+  assert.equal(allowanceStrip.length, 1, 'allowance makes one continuous outline band');
+  assert.equal(allowanceStrip[0].holes.length, 1, 'allowance leaves the middle empty');
+  near(fuseAreaMm2(allowanceStrip), 100 * 80 - 80 * 60);
+  const variableAllowance = generateFuseGeometry({
+    outline,
+    netOutline: [
+      { x: 10, y: 30 },
+      { x: 90, y: 30 },
+      { x: 90, y: 70 },
+      { x: 10, y: 70 },
+    ],
+    spec: spec({ mode: 'strip', widthMm: null, edges: [], insetMm: 0 }),
+  });
+  near(fuseAreaMm2(variableAllowance), 100 * 80 - 80 * 40);
+  const pointInRing = (
+    point: { x: number; y: number },
+    ring: readonly { x: number; y: number }[],
+  ) => {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const a = ring[i];
+      const b = ring[j];
+      if (
+        a.y > point.y !== b.y > point.y &&
+        point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x
+      )
+        inside = !inside;
+    }
+    return inside;
+  };
+  const hemPoint = { x: 50, y: 20 };
+  assert.ok(
+    variableAllowance.some(
+      (polygon) =>
+        pointInRing(hemPoint, polygon.outer) &&
+        !polygon.holes.some((hole) => pointInRing(hemPoint, hole)),
+    ),
+    'a point 20 mm above the bottom cut edge is inside the 30 mm hem allowance',
+  );
+  assert.throws(
+    () =>
+      generateFuseGeometry({
+        outline,
+        spec: spec({ mode: 'strip', widthMm: null, edges: [], insetMm: 0 }),
+      }),
+    (error: unknown) =>
+      error instanceof FuseGeometryError &&
+      error.message === 'strip width needs the card seam allowance',
+    'allowance needs a positive card seam allowance',
+  );
+
   const allEdgeOutline = rectangle(300, 400);
   const allEdgeWidth = 25;
   const allEdgeStrip = generateFuseGeometry({
@@ -628,6 +695,8 @@ export async function main() {
   const dartStripSpec = spec({
     mode: 'strip',
     widthMm: 20,
+    // 3 mm in: the band (57–77) reaches the dart's tip at 58.
+    insetMm: 3,
     edges: [{ edge: 2, startMm: 0, endMm: 0 }],
   });
   const dartStripCut = generateFuseGeometry({
@@ -649,7 +718,8 @@ export async function main() {
     outline,
     spec: spec({ mode: 'zone', zone: { rect: [50, -10, 120, 40] } }),
   });
-  near(fuseAreaMm2(zone), 47 * 37);
+  // Clipped to the cut line itself (default inset 0).
+  near(fuseAreaMm2(zone), 50 * 40);
 
   // L13 freeform zone. A rect is the 4-corner spline, and the editor's 4 corners + 4 straight mids.
   const corners = (x0: number, y0: number, x1: number, y1: number) => [
@@ -715,9 +785,12 @@ export async function main() {
   const mappedRings = mapFuseSpecToSize(ringsSpec, outline, rectangle(200, 160));
   assert.ok(mappedRings.zone && 'spline' in mappedRings.zone);
   if (mappedRings.zone && 'spline' in mappedRings.zone) {
-    near(mappedRings.zone.spline.points[1].x, 60);
-    near(mappedRings.zone.islands[0].points[0].x, 100);
-    near(mappedRings.zone.holes[0].points[0].x, 104);
+    // A point keeps its mm off its two nearest contour stretches (4b0af47c6): the main ring sits
+    // by the bottom-left corner and stays put; the island and its hole sit nearer the right side
+    // and keep their mm from it on the doubled piece.
+    near(mappedRings.zone.spline.points[1].x, 30);
+    near(mappedRings.zone.islands[0].points[0].x, 150);
+    near(mappedRings.zone.holes[0].points[0].x, 152);
   }
   const ringsDxf = buildFusingSheets({
     techCardId: 7,
@@ -853,7 +926,8 @@ export async function main() {
       withMids(corners(80, 20, 120, 50)).map((p, i) => (i === 3 ? { ...p, x: 130 } : p)),
     ),
   });
-  near(fuseAreaMm2(overhang), (97 - 80) * 30);
+  // Clipped at the cut line (x = 100, default inset 0).
+  near(fuseAreaMm2(overhang), (100 - 80) * 30);
   assert.throws(
     () => generateFuseGeometry({ outline, spec: splineZone(corners(200, 200, 240, 240)) }),
     /zone geometry is empty/,
@@ -1019,10 +1093,12 @@ export async function main() {
     gradedOutlines[0].outline,
     gradedOutlines[4].outline,
   );
+  // Each corner keeps its mm off its nearest stretches (4b0af47c6): (8,6) off the left/bottom,
+  // (40,30) — equidistant, resolved to the right/bottom — keeps 40 mm from the right edge.
   assert.deepEqual(
     mappedZone.zone,
-    { rect: [12, 8, 60, 40] },
-    'a drawn zone keeps its proportional position in the target-size outline',
+    { rect: [8, 6, 80, 30] },
+    'a drawn zone keeps its mm from its nearest contour stretches in the target-size outline',
   );
   const mappedStrip = mapFuseSpecToSize(
     spec({ mode: 'strip', widthMm: 12, edges: [{ edge: 0, startMm: 8, endMm: 16 }] }),
@@ -1270,12 +1346,19 @@ export async function main() {
     /bound differently/,
   );
   assert.match(pieceAreaSheetsRefusal([sheet(legacyFelt, 'P1')], 'S-1') ?? '', /bound to a BOM/);
-  assert.match(
+  // A main sheet bound to a line that is sorted into «main» resolves to «main» (f7db2d968): with
+  // the card's scopes it publishes; only the raw guard (no scopes) still refuses it.
+  assert.equal(
     pieceAreaSheetsRefusal(
       [sheet({ fabricPurpose: UNSET, bomLineKey: 'M-1' }, 'P4')],
       'main',
       scopes,
-    ) ?? '',
+    ),
+    null,
+  );
+  assert.match(
+    pieceAreaSheetsRefusal([sheet({ fabricPurpose: UNSET, bomLineKey: 'M-1' }, 'P4')], 'main') ??
+      '',
     /bound to a BOM line/,
   );
   assert.equal(

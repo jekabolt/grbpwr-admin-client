@@ -1,392 +1,518 @@
 import { adminService } from 'api/api';
-import {
-  common_Category,
+import type {
+  common_StyleSizeChart,
   common_StyleSizeChartCell,
   common_StyleSizeChartGradeStep,
+  common_StyleSizeChartPoint,
+  common_TechCard,
 } from 'api/proto-http/admin';
 import {
   useSizeNames,
   useSizeOrdering,
 } from 'components/managers/model/components/use-size-systems';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
-import { useMeasurements } from 'components/managers/product/utility/useMeasurements';
+import {
+  POM_CHART_NAME,
+  POM_CODES_BY_GARMENT,
+  isGirth,
+  type ChartMeasurementName,
+} from 'lib/pom/chart-points';
+import type { PomCode } from 'lib/pom/types';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ReactNode,
+} from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
-import { Button, DataTable, Input, Pill, Placeholder } from 'ui';
-import { TechCardFormData } from './schema';
+import {
+  AddDoor,
+  Button,
+  CheckboxCommon,
+  Combobox,
+  DataTable,
+  EmptyCell,
+  Input,
+  Placeholder,
+  ViewSwitch,
+  type ComboboxGroup,
+  type ViewSwitchOption,
+} from 'ui';
+
+import {
+  addPoint,
+  keepSaved,
+  mergePatternIntoCells,
+  normalizePoints,
+  reviewCount,
+  reviewDiffs,
+  seedChart,
+  usePattern,
+  type ChartCellDraft,
+  type ChartPointDraft,
+} from './size-chart-data';
+import { SizeChartSchematic } from './size-chart-schematic';
+import { type TechCardFormData } from './schema';
 import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
+import { usePatternChart } from './use-pattern-chart';
 
-// One chart per style, so one staging key.
 const STAGING_KEY = 'sizeChart';
+const MEASURE = /^\d*\.?\d*$/;
+const STEP = /^-?\d*\.?\d*$/;
+const POM_CODES = new Set<PomCode>(Object.keys(POM_CHART_NAME) as PomCode[]);
 
-// What this grid holds, for the staging to compare by value (JSON — `sameSnapshot`). The Map goes
-// over as an entry array because a Map serializes to `{}`.
+type Rule = { baseId: number; base: string; step: string };
+
 type ChartSnapshot = {
-  cells: Array<[number, Array<[number, string]>]>;
+  cells: ChartCellDraft[];
+  points: ChartPointDraft[];
+  shrinkagePct: string;
   steps: Array<[number, string]>;
   touched: string[];
 };
 
-// A measurement is a plain non-negative number.
-const MEASURE = /^\d*\.?\d*$/;
-// A grade step may shrink a measurement as the sizes grow (rare, but a step is signed on the wire).
-const STEP = /^-?\d*\.?\d*$/;
+const cellKey = (sizeId: number, measurementNameId: number) => `${sizeId}:${measurementNameId}`;
 
-type Rule = { baseId: number; base: string; step: string };
+const numberOf = (value: string | undefined): number | null => {
+  if (!value?.trim()) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
 
-const cellKey = (sizeId: number, nameId: number) => `${sizeId}:${nameId}`;
+const wireNumber = (value: { value: string | undefined } | undefined, fallback = '1') =>
+  value?.value?.trim() || fallback;
 
-// A typed string as a number, or null when it is not one yet ('', '.', '-').
-function num(v: string | undefined): number | null {
-  if (v == null || v.trim() === '') return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
+const oneDecimal = (value: string | number | undefined): string => {
+  const parsed = typeof value === 'number' ? value : numberOf(value);
+  return parsed == null ? '' : parsed.toFixed(1);
+};
 
-// Two decimals is finer than any tape measure; trailing zeros dropped so «52» stays «52».
-function fmt(n: number): string {
-  return String(Math.round(n * 100) / 100);
-}
+const humanName = (value: string): string => {
+  const words = value.replace(/[-_]+/g, ' ').trim().toLowerCase();
+  return words ? `${words[0].toUpperCase()}${words.slice(1)}` : '';
+};
 
-// value(size) = base + step × (position(size) − position(base)), the rule the wire stores
-// (StyleSizeChart.grade_steps). Null when there is no rule for this row or it would go negative.
 function gradeValue(base: string | undefined, step: string | undefined, distance: number) {
-  const b = num(base);
-  const s = num(step);
+  const b = numberOf(base);
+  const s = numberOf(step);
   if (b == null || s == null || s === 0) return null;
-  const v = b + s * distance;
-  return v < 0 ? null : fmt(v);
+  const value = b + s * distance;
+  return value < 0 ? null : String(Math.round(value * 100) / 100);
 }
 
-// A cell follows the rule when it is empty or holds the computed value; anything else was typed
-// over it by hand and survives a re-grade.
 function follows(value: string | undefined, computed: string | null) {
   if (computed == null) return false;
-  const v = num(value);
-  return v == null || Math.abs(v - Number(computed)) < 0.005;
+  const parsed = numberOf(value);
+  return parsed == null || Math.abs(parsed - Number(computed)) < 0.005;
 }
 
-// SizeChartField — the style-owned size chart (R5), authored at the tech-card level.
-// Measurements belong to the STYLE (one pattern shared by every colourway of the style), so they
-// are edited here, in the constructor, and shown read-only on each colourway card — where editing
-// them would look colourway-scoped while silently rewriting the shared chart for all colourways.
-// Values load and save through GetStyleSizeChart / UpdateStyleSizeChart (full-replace) under the
-// shared tech_card.lock_version — the same version the main tech-card save uses.
-//
-// Grading: the base column (the card's sample size) is typed by hand; each row may carry one
-// `step` (cm per size step). The other sizes are computed client-side by run position and written
-// into the cells, so `cells` stays the source of truth the factory reads; the rule itself is saved
-// alongside (gradeBaseSizeId + gradeSteps) only so a reopened card can tell computed cells from
-// overtyped ones by recomputing. A cell typed over its computed value keeps the typed value on
-// every re-grade until the row's `reset`. A row without a step is a plain hand-typed row.
+function sameStrings(a: readonly string[], b: readonly string[]) {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
 export function SizeChartField({
   styleId,
+  techCard,
+  active,
   canEdit,
+  headerEl,
   onFilledChange,
 }: {
   styleId?: number;
+  techCard?: common_TechCard;
+  active: boolean;
   canEdit: boolean;
-  /** Whether any cell of the current range holds a measurement — the SIZES tab's ✓ reads it. */
+  headerEl?: HTMLElement | null;
   onFilledChange?: (filled: boolean) => void;
 }) {
   const { dictionary } = useDictionary();
   const { control } = useFormContext<TechCardFormData>();
-  // Subscribed here (getFieldState alone reads dirtyFields only if someone subscribed to them).
   const { dirtyFields } = useFormState({ control, name: 'sizeIds' });
-  // RHF marks an array field per index ([false, true, …]) or as a plain true.
   const runDirty = dirtyFields.sizeIds as unknown;
   const runEdited = Array.isArray(runDirty) ? runDirty.some(Boolean) : !!runDirty;
-
-  const categoryId = (useWatch({ control, name: 'categoryId' }) as number | undefined) ?? 0;
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
-
-  // Walk the stored leaf category up to its { top, sub, type } ids — the same derivation the
-  // header category cascade uses — so the measurement columns resolve exactly as the colourway
-  // card's grid did (useMeasurements takes the three levels).
-  const catPath = useMemo(() => {
-    const byId = new Map<number, common_Category>();
-    for (const c of dictionary?.categories ?? []) if (c.id != null) byId.set(c.id, c);
-    const out = { top: 0, sub: 0, type: 0 };
-    let cur = categoryId ? byId.get(categoryId) : undefined;
-    let guard = 0;
-    while (cur && guard++ < 8) {
-      if (cur.level === 'top_category') out.top = cur.id ?? 0;
-      else if (cur.level === 'sub_category') out.sub = cur.id ?? 0;
-      else out.type = cur.id ?? 0;
-      cur = cur.parentId ? byId.get(cur.parentId) : undefined;
-    }
-    return out;
-  }, [categoryId, dictionary?.categories]);
-
-  const { measurements } = useMeasurements(dictionary, catPath.top, catPath.sub, catPath.type);
+  const sampleSizeId = (useWatch({ control, name: 'baseSampleSizeId' }) as number | undefined) ?? 0;
 
   const sizeById = useSizeNames();
   const orderSizes = useSizeOrdering();
-  // Columns run in grade order (XS → XL), not insertion order.
   const ordered = useMemo(() => orderSizes(sizeIds), [orderSizes, sizeIds]);
+  const measurementById = useMemo(
+    () =>
+      new Map(
+        (dictionary?.measurements ?? []).flatMap((measurement) =>
+          measurement.id && measurement.name ? [[measurement.id, measurement.name] as const] : [],
+        ),
+      ),
+    [dictionary?.measurements],
+  );
+  const nameIds = useMemo(
+    () =>
+      new Map<ChartMeasurementName | string, number>(
+        [...measurementById].map(([id, name]) => [name.trim().toLowerCase(), id]),
+      ),
+    [measurementById],
+  );
 
-  // The base is the card's sample size; a rule saved from another base is the fallback while the
-  // sample size is unset or outside the run. Neither in the run = no grading, cells typed by hand.
-  const sampleSizeId = (useWatch({ control, name: 'baseSampleSizeId' }) as number | undefined) ?? 0;
+  const [cells, setCells] = useState<ChartCellDraft[]>([]);
+  const [savedCells, setSavedCells] = useState<ChartCellDraft[]>([]);
+  const [points, setPoints] = useState<ChartPointDraft[]>([]);
+  const [steps, setSteps] = useState<Map<number, string>>(new Map());
   const [ruleBaseId, setRuleBaseId] = useState(0);
+  const [shrinkagePct, setShrinkagePct] = useState('');
+  const [chartLoaded, setChartLoaded] = useState(false);
+  const [prepared, setPrepared] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [touched, setTouched] = useState<Set<string>>(new Set());
+  const [editing, setEditing] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [activePointId, setActivePointId] = useState<number | null>(null);
+  const [mobileSize, setMobileSize] = useState('');
+  const lastRule = useRef<Map<number, Rule>>(new Map());
+  const legacyRows = useRef<ChartPointDraft[] | null>(null);
+  const dirtyRef = useRef(false);
+  const staging = useTechCardStaging();
+
+  useEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
+
+  const markDirty = useCallback((key: string) => {
+    setDirty(true);
+    setTouched((previous) => (previous.has(key) ? previous : new Set(previous).add(key)));
+  }, []);
+
+  const hydrate = useCallback((chart: common_StyleSizeChart | undefined) => {
+    const nextCells: ChartCellDraft[] = [];
+    for (const cell of chart?.cells ?? []) {
+      if (cell.sizeId == null || cell.measurementNameId == null) continue;
+      nextCells.push({
+        sizeId: cell.sizeId,
+        measurementNameId: cell.measurementNameId,
+        value: cell.value?.value ?? '',
+        source:
+          cell.source === 'STYLE_SIZE_CHART_CELL_SOURCE_PATTERN'
+            ? 'STYLE_SIZE_CHART_CELL_SOURCE_PATTERN'
+            : 'STYLE_SIZE_CHART_CELL_SOURCE_MANUAL',
+      });
+    }
+    const nextPoints: ChartPointDraft[] = (chart?.points ?? []).flatMap((point) => {
+      if (point.measurementNameId == null) return [];
+      const pomCode =
+        point.pomCode && POM_CODES.has(point.pomCode as PomCode)
+          ? (point.pomCode as PomCode)
+          : undefined;
+      return [
+        {
+          measurementNameId: point.measurementNameId,
+          ...(pomCode ? { pomCode } : {}),
+          position: point.position ?? 0,
+          tolMinusCm: wireNumber(point.tolMinusCm),
+          tolPlusCm: wireNumber(point.tolPlusCm),
+          inShop: !!point.inShop,
+          basisPieceLineKeys: [...(point.basisPieceLineKeys ?? [])],
+          stale: !!point.stale,
+        },
+      ];
+    });
+    const nextSteps = new Map<number, string>();
+    for (const step of chart?.gradeSteps ?? []) {
+      if (step.measurementNameId == null || !step.step?.value) continue;
+      nextSteps.set(step.measurementNameId, step.step.value);
+    }
+    const loadedBase = chart?.gradeBaseSizeId ?? 0;
+    lastRule.current = new Map();
+    for (const [measurementNameId, step] of nextSteps) {
+      const base = nextCells.find(
+        (cell) => cell.sizeId === loadedBase && cell.measurementNameId === measurementNameId,
+      )?.value;
+      if (loadedBase && numberOf(base) != null)
+        lastRule.current.set(measurementNameId, {
+          baseId: loadedBase,
+          base: base ?? '',
+          step,
+        });
+    }
+    setCells(nextCells);
+    setSavedCells(nextCells);
+    setPoints(normalizePoints(nextPoints));
+    setSteps(nextSteps);
+    setRuleBaseId(loadedBase);
+    setShrinkagePct(chart?.shrinkagePct?.value ?? '');
+    setPrepared(false);
+    legacyRows.current = null;
+    setChartLoaded(true);
+    setDirty(false);
+    setTouched(new Set());
+  }, []);
+
+  const loadChart = useCallback(() => {
+    if (!styleId) return;
+    setChartLoaded(false);
+    adminService
+      .GetStyleSizeChart({ styleId })
+      .then((response) => {
+        if (!dirtyRef.current) hydrate(response.chart);
+      })
+      .catch(() => {
+        if (!dirtyRef.current) hydrate(undefined);
+      });
+  }, [hydrate, styleId]);
+
+  useEffect(() => {
+    loadChart();
+  }, [loadChart]);
+
+  const pattern = usePatternChart({
+    active: active && chartLoaded,
+    techCard,
+    shrinkageOverride: shrinkagePct,
+  });
+
+  // Seed once after the server answer. Pattern values may arrive later and merge in the next effect.
+  useEffect(() => {
+    if (!chartLoaded || prepared) return;
+    const legacyOnly = !!legacyRows.current && points === legacyRows.current;
+    if (!pattern.seedKind && (!points.length || legacyOnly)) {
+      // The garment is not known yet: show the old cells' rows, save nothing.
+      if (!legacyOnly && cells.length) {
+        const shown = seedChart(null, [], cells, nameIds).points;
+        legacyRows.current = shown;
+        setPoints(shown);
+      }
+      return;
+    }
+    const seeded = seedChart(pattern.seedKind, legacyOnly ? [] : points, cells, nameIds);
+    const merged = mergePatternIntoCells(seeded.cells, seeded.points, pattern.patternValues);
+    setPoints(seeded.points);
+    setCells(merged.cells);
+    setPrepared(true);
+    if (seeded.seeded || merged.changed) markDirty(seeded.seeded ? 'seed' : 'pattern');
+    // This is deliberately one preparation pass for one server answer.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chartLoaded, prepared, pattern.seedKind]);
+
+  // A report or shrinkage change refreshes only empty/pattern-owned cells and its hidden evidence.
+  useEffect(() => {
+    if (!prepared || !pattern.patternValues) return;
+    const merged = mergePatternIntoCells(cells, points, pattern.patternValues);
+    const nextPoints = points.map((point) => {
+      if (!point.pomCode) return point;
+      const basis = pattern.basis.get(point.pomCode) ?? [];
+      return sameStrings(point.basisPieceLineKeys, basis)
+        ? point
+        : { ...point, basisPieceLineKeys: basis };
+    });
+    const pointChanged = nextPoints.some((point, index) => point !== points[index]);
+    if (!merged.changed && !pointChanged) return;
+    if (merged.changed) setCells(merged.cells);
+    if (pointChanged) setPoints(nextPoints);
+    markDirty(merged.changed ? 'pattern' : 'basis');
+  }, [cells, markDirty, pattern.basis, pattern.patternValues, points, prepared]);
+
   const baseId = ordered.includes(sampleSizeId)
     ? sampleSizeId
     : ordered.includes(ruleBaseId)
       ? ruleBaseId
       : 0;
   const basePos = ordered.indexOf(baseId);
-  // measurementNameId -> step as typed.
-  const [steps, setSteps] = useState<Map<number, string>>(new Map());
-  // The last COMPLETE rule each row was graded by. Typing passes through non-rules («0» on the way
-  // to «0.5», a cleared base before the new one), so «which cells followed the rule» is judged
-  // against this, not against the keystroke before.
-  const lastRule = useRef<Map<number, Rule>>(new Map());
+  const stored = (list: readonly ChartCellDraft[], sizeId: number, measurementNameId: number) =>
+    list.find((cell) => cell.sizeId === sizeId && cell.measurementNameId === measurementNameId)
+      ?.value ?? '';
+  const computedOf = (
+    list: readonly ChartCellDraft[],
+    sizeId: number,
+    measurementNameId: number,
+  ) => {
+    if (basePos < 0 || sizeId === baseId) return null;
+    const position = ordered.indexOf(sizeId);
+    if (position < 0) return null;
+    return gradeValue(
+      stored(list, baseId, measurementNameId),
+      steps.get(measurementNameId),
+      position - basePos,
+    );
+  };
 
-  // cell values: sizeId -> measurementNameId -> string. Holds what was loaded plus what was typed.
-  const [cells, setCells] = useState<Map<number, Map<number, string>>>(new Map());
-  const [saving, setSaving] = useState(false);
-  const staging = useTechCardStaging();
-  // This grid lives outside react-hook-form, so the card's shared isDirty never sees these edits.
-  // Instead of owning a save button it STAGES into the card's one save — `touched` is what makes
-  // the header's "размерная таблица — 6 cells" a fact rather than a guess.
-  const [dirty, setDirty] = useState(false);
-  // Mirror of `dirty` readable inside async continuations: a server load that resolves
-  // AFTER the operator typed (restored draft, or a keystroke while commitChart's trailing
-  // refresh was in flight) must not overwrite the newer local grid or unstage it.
-  const dirtyRef = useRef(false);
-  useEffect(() => {
-    dirtyRef.current = dirty;
-  }, [dirty]);
-  const [touched, setTouched] = useState<Set<string>>(new Set());
-  const markTouched = (key: string) =>
-    setTouched((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
-
-  // The chart answered at least once: before that an empty grid is «not read yet», not «empty».
-  const [chartLoaded, setChartLoaded] = useState(false);
-
-  const loadChart = useCallback(() => {
-    if (!styleId) return;
-    adminService
-      .GetStyleSizeChart({ styleId })
-      .then((res) => {
-        if (dirtyRef.current) return;
-        const next = new Map<number, Map<number, string>>();
-        for (const c of res.chart?.cells ?? []) {
-          if (c.sizeId == null || c.measurementNameId == null) continue;
-          const row = next.get(c.sizeId) ?? new Map<number, string>();
-          row.set(c.measurementNameId, c.value?.value ?? '');
-          next.set(c.sizeId, row);
-        }
-        setCells(next);
-        const nextSteps = new Map<number, string>();
-        for (const g of res.chart?.gradeSteps ?? []) {
-          if (g.measurementNameId == null || !g.step?.value) continue;
-          nextSteps.set(g.measurementNameId, g.step.value);
-        }
-        setSteps(nextSteps);
-        const loadedBase = res.chart?.gradeBaseSizeId ?? 0;
-        setRuleBaseId(loadedBase);
-        lastRule.current = new Map();
-        nextSteps.forEach((step, nameId) => {
-          const base = next.get(loadedBase)?.get(nameId) ?? '';
-          if (loadedBase && num(base) != null)
-            lastRule.current.set(nameId, { baseId: loadedBase, base, step });
-        });
-        setDirty(false);
-        setChartLoaded(true);
-      })
-      .catch(() => {
-        /* no chart yet (draft) — leave the grid empty */
-        setChartLoaded(true);
-        if (dirtyRef.current) return;
-        setDirty(false);
+  const regrade = (
+    list: readonly ChartCellDraft[],
+    measurementNameId: number,
+    newBase: string,
+    newStep: string | undefined,
+  ): ChartCellDraft[] => {
+    if (basePos < 0) return [...list];
+    const old = lastRule.current.get(measurementNameId);
+    const oldPos = old ? ordered.indexOf(old.baseId) : -1;
+    const next = new Map(list.map((cell) => [cellKey(cell.sizeId, cell.measurementNameId), cell]));
+    ordered.forEach((sizeId, position) => {
+      if (sizeId === baseId) return;
+      const key = cellKey(sizeId, measurementNameId);
+      const current = next.get(key)?.value ?? '';
+      const previous =
+        old && oldPos >= 0 && sizeId !== old.baseId
+          ? gradeValue(old.base, old.step, position - oldPos)
+          : null;
+      const keep = previous == null ? numberOf(current) != null : !follows(current, previous);
+      if (keep) return;
+      const value = gradeValue(newBase, newStep, position - basePos);
+      if (value == null) return;
+      next.set(key, {
+        sizeId,
+        measurementNameId,
+        value,
+        source: 'STYLE_SIZE_CHART_CELL_SOURCE_MANUAL',
       });
-  }, [styleId]);
+    });
+    const numericStep = numberOf(newStep);
+    if (numberOf(newBase) != null && numericStep != null && numericStep !== 0)
+      lastRule.current.set(measurementNameId, {
+        baseId,
+        base: newBase,
+        step: newStep ?? '',
+      });
+    return [...next.values()];
+  };
 
+  const setCell = (sizeId: number, measurementNameId: number, value: string) => {
+    markDirty(cellKey(sizeId, measurementNameId));
+    setCells((previous) => {
+      const graded =
+        sizeId === baseId
+          ? regrade(previous, measurementNameId, value, steps.get(measurementNameId))
+          : [...previous];
+      const next = new Map(
+        graded.map((cell) => [cellKey(cell.sizeId, cell.measurementNameId), cell]),
+      );
+      next.set(cellKey(sizeId, measurementNameId), {
+        sizeId,
+        measurementNameId,
+        value,
+        source: 'STYLE_SIZE_CHART_CELL_SOURCE_MANUAL',
+      });
+      return [...next.values()];
+    });
+  };
+
+  const setStep = (measurementNameId: number, value: string) => {
+    markDirty(`step:${measurementNameId}`);
+    setCells((previous) =>
+      regrade(previous, measurementNameId, stored(previous, baseId, measurementNameId), value),
+    );
+    setSteps((previous) => new Map(previous).set(measurementNameId, value));
+  };
+
+  // A newly added run size inherits grade values on manual charts, preserving the old flow.
+  const seenRun = useRef<Set<number> | null>(null);
   useEffect(() => {
-    loadChart();
-  }, [loadChart]);
+    if (!prepared || ordered.length === 0) return;
+    const previous = seenRun.current;
+    seenRun.current = new Set(ordered);
+    if (!previous || !canEdit || basePos < 0 || !runEdited || pattern.hasPatterns) return;
+    const added = ordered.filter((sizeId) => !previous.has(sizeId));
+    if (!added.length) return;
+    const writes: ChartCellDraft[] = [];
+    for (const sizeId of added) {
+      for (const point of points) {
+        if (stored(cells, sizeId, point.measurementNameId)) continue;
+        const value = computedOf(cells, sizeId, point.measurementNameId);
+        if (value)
+          writes.push({
+            sizeId,
+            measurementNameId: point.measurementNameId,
+            value,
+            source: 'STYLE_SIZE_CHART_CELL_SOURCE_MANUAL',
+          });
+      }
+    }
+    if (!writes.length) return;
+    setCells((previousCells) => [...previousCells, ...writes]);
+    markDirty('run');
+    // The run is the trigger; the grid values are the render that observed it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ordered, prepared]);
 
-  const stored = (sizeId: number, nameId: number) => cells.get(sizeId)?.get(nameId) ?? '';
+  const reviews = useMemo(
+    () => reviewDiffs(points, savedCells, pattern.patternValues),
+    [points, savedCells, pattern.patternValues],
+  );
+  const reviewByPoint = useMemo(
+    () => new Map(reviews.map((review) => [review.point.measurementNameId, review])),
+    [reviews],
+  );
+  const warnings = reviewCount(reviews);
 
-  // Same rule as the save (`put`): an empty or zero cell is not a measurement. Only sizes still in
-  // the range count — a value parked under a removed size is not one the tab shows.
   const filled = ordered.some((sizeId) =>
-    [...(cells.get(sizeId)?.values() ?? [])].some((v) => !!v && v !== '0'),
+    points.some((point) => numberOf(stored(cells, sizeId, point.measurementNameId)) != null),
   );
   useEffect(() => {
     onFilledChange?.(filled);
   }, [filled, onFilledChange]);
 
-  // The computed value of one cell under the CURRENT base and step, or null (no rule / no base).
-  const computedOf = (sizeId: number, nameId: number) => {
-    if (basePos < 0 || sizeId === baseId) return null;
-    const pos = ordered.indexOf(sizeId);
-    if (pos < 0) return null;
-    return gradeValue(stored(baseId, nameId), steps.get(nameId), pos - basePos);
-  };
-
-  const writeCells = (writes: Array<[number, number, string]>) => {
-    if (writes.length === 0) return;
-    setCells((prev) => {
-      const next = new Map(prev);
-      for (const [sizeId, nameId, value] of writes) {
-        const row = new Map(next.get(sizeId) ?? []);
-        row.set(nameId, value);
-        next.set(sizeId, row);
-      }
-      return next;
-    });
-  };
-
-  // Re-grade one row after its base or step moved: every cell that followed the row's last rule
-  // takes the new computed value; overtyped cells stay. A row never graded before only fills its
-  // empty cells, so a step typed onto a hand-filled row never wipes what was typed (reset does).
-  const regrade = (nameId: number, newBase: string, newStep: string | undefined) => {
-    if (basePos < 0) return;
-    const old = lastRule.current.get(nameId);
-    const oldPos = old ? ordered.indexOf(old.baseId) : -1;
-    const writes: Array<[number, number, string]> = [];
-    ordered.forEach((sizeId, pos) => {
-      if (sizeId === baseId) return;
-      const cur = stored(sizeId, nameId);
-      const was =
-        old && oldPos >= 0 && sizeId !== old.baseId
-          ? gradeValue(old.base, old.step, pos - oldPos)
-          : null;
-      const keep = was == null ? num(cur) != null : !follows(cur, was);
-      if (keep) return;
-      const now = gradeValue(newBase, newStep, pos - basePos);
-      if (now != null && now !== cur) writes.push([sizeId, nameId, now]);
-    });
-    const s = num(newStep);
-    if (num(newBase) != null && s != null && s !== 0)
-      lastRule.current.set(nameId, { baseId, base: newBase, step: newStep ?? '' });
-    writeCells(writes);
-  };
-
-  const setCell = (sizeId: number, nameId: number, value: string) => {
-    setDirty(true);
-    markTouched(cellKey(sizeId, nameId));
-    if (sizeId === baseId) {
-      regrade(nameId, value, steps.get(nameId));
-    }
-    writeCells([[sizeId, nameId, value]]);
-  };
-
-  const setStep = (nameId: number, value: string) => {
-    setDirty(true);
-    markTouched(`step:${nameId}`);
-    regrade(nameId, stored(baseId, nameId), value);
-    setSteps((prev) => new Map(prev).set(nameId, value));
-  };
-
-  // Every non-base cell of the row back to its computed value.
-  const resetRow = (nameId: number) => {
-    const writes: Array<[number, number, string]> = [];
-    for (const sizeId of ordered) {
-      const c = computedOf(sizeId, nameId);
-      const v = stored(sizeId, nameId);
-      if (c != null && (v === '' || !follows(v, c))) writes.push([sizeId, nameId, c]);
-    }
-    const step = steps.get(nameId) ?? '';
-    lastRule.current.set(nameId, { baseId, base: stored(baseId, nameId), step });
-    if (writes.length === 0) return;
-    setDirty(true);
-    markTouched(`reset:${nameId}`);
-    writeCells(writes);
-  };
-
-  // A size ADDED to the run gets its computed values written into the graded rows, so the save
-  // carries them (a placeholder alone would leave the chart without that size). Only an operator's
-  // add counts: the run seen once the chart has loaded is the baseline, and a run that moves while
-  // `sizeIds` is not dirty (the card's own read / reset) only moves the baseline. Viewing writes
-  // nothing.
-  const seenRun = useRef<Set<number> | null>(null);
   useEffect(() => {
-    if (!chartLoaded || ordered.length === 0) return;
-    const prev = seenRun.current;
-    seenRun.current = new Set(ordered);
-    if (!prev || !canEdit || basePos < 0 || !runEdited) return;
-    const added = ordered.filter((id) => !prev.has(id));
-    if (added.length === 0) return;
-    const writes: Array<[number, number, string]> = [];
-    for (const sizeId of added) {
-      for (const m of measurements) {
-        if (stored(sizeId, m.id) !== '') continue;
-        const c = computedOf(sizeId, m.id);
-        if (c != null) writes.push([sizeId, m.id, c]);
-      }
-    }
-    if (writes.length === 0) return;
-    setDirty(true);
-    for (const [sizeId, nameId] of writes) markTouched(cellKey(sizeId, nameId));
-    writeCells(writes);
-    // Runs on a run change only; the cells, steps and base it reads are this render's.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ordered, chartLoaded]);
+    const initial = ordered.includes(baseId) ? baseId : ordered[0] ?? 0;
+    if (!ordered.includes(Number(mobileSize))) setMobileSize(initial ? String(initial) : '');
+  }, [baseId, mobileSize, ordered]);
 
-  // The panel's mutation, unwrapped: it THROWS on failure instead of toasting, because the header's
-  // one save is what reports the outcome now — it needs the rejection to name this panel in a
-  // partial-failure banner and keep everything after it staged.
   async function commitChart() {
     if (!styleId) return;
     setSaving(true);
     try {
-      // Read the freshest shared tech_card.lock_version right before the write: the chart shares it
-      // with the main tech-card save, so a version cached at mount could already be stale.
-      const cur = await adminService.GetStyleSizeChart({ styleId });
-      const expectedLockVersion = cur.chart?.lockVersion ?? 0;
-      const payload: common_StyleSizeChartCell[] = [];
-      const seen = new Set<string>();
-      const put = (sizeId: number, measurementNameId: number, value: string) => {
-        if (!value || value === '0') return;
-        payload.push({ sizeId, measurementNameId, value: { value } });
-      };
-      for (const sizeId of ordered) {
-        for (const m of measurements) {
-          seen.add(cellKey(sizeId, m.id));
-          put(sizeId, m.id, stored(sizeId, m.id));
-        }
-      }
-      // Anything stored outside the current range/columns is carried through untouched — this save
-      // is a full replace, so dropping it here would delete measurements the grid never showed.
-      cells.forEach((row, sizeId) => {
-        row.forEach((value, measurementNameId) => {
-          if (seen.has(cellKey(sizeId, measurementNameId))) return;
-          put(sizeId, measurementNameId, value);
-        });
+      const current = await adminService.GetStyleSizeChart({ styleId });
+      const expectedLockVersion = current.chart?.lockVersion ?? 0;
+      const payload: common_StyleSizeChartCell[] = cells.flatMap((cell) => {
+        const value = numberOf(cell.value);
+        return value != null && value > 0
+          ? [
+              {
+                sizeId: cell.sizeId,
+                measurementNameId: cell.measurementNameId,
+                value: { value: cell.value },
+                source: cell.source,
+              },
+            ]
+          : [];
       });
-      // The grade rule rides along. The server refuses a step for a measurement with no cell and a
-      // base outside the style's sizes, so a step goes only with a cell to back it and a base in
-      // the run; no step left = no rule (base 0), which is how a hand-typed chart is stored.
-      const withCells = new Set(payload.map((c) => c.measurementNameId));
+      const withCells = new Set(payload.map((cell) => cell.measurementNameId));
       const gradeSteps: common_StyleSizeChartGradeStep[] = [];
       if (baseId) {
-        steps.forEach((step, measurementNameId) => {
-          const n = num(step);
-          if (n == null || n === 0 || !withCells.has(measurementNameId)) return;
-          gradeSteps.push({ measurementNameId, step: { value: fmt(n) } });
-        });
+        for (const [measurementNameId, step] of steps) {
+          const value = numberOf(step);
+          if (value == null || value === 0 || !withCells.has(measurementNameId)) continue;
+          gradeSteps.push({ measurementNameId, step: { value: String(value) } });
+        }
       }
+      const pointPayload: common_StyleSizeChartPoint[] = normalizePoints(points).map((point) => ({
+        measurementNameId: point.measurementNameId,
+        pomCode: point.pomCode,
+        position: point.position,
+        tolMinusCm: { value: point.tolMinusCm || '1' },
+        tolPlusCm: { value: point.tolPlusCm || '1' },
+        inShop: point.inShop,
+        basisPieceLineKeys: point.basisPieceLineKeys,
+        stale: point.stale,
+      }));
       await adminService.UpdateStyleSizeChart({
         styleId,
         expectedLockVersion,
         cells: payload,
-        gradeBaseSizeId: gradeSteps.length > 0 ? baseId : 0,
+        gradeBaseSizeId: gradeSteps.length ? baseId : 0,
         gradeSteps,
+        points: pointPayload,
+        pointsSet: true,
+        shrinkagePct: shrinkagePct.trim() ? { value: shrinkagePct } : undefined,
       });
-      loadChart();
     } finally {
       setSaving(false);
     }
   }
 
-  // Hand the mutation to the card's one save. Re-staged on EVERY edit because `commit` closes over
-  // this render's cells — a stale closure would write the edit before last. Unstaged the moment the
-  // grid is pristine again, so the header count never claims work that is not there.
   useEffect(() => {
     if (!staging || !styleId || !canEdit) return;
     if (!dirty) {
@@ -396,152 +522,494 @@ export function SizeChartField({
     const edited = touched.size;
     staging.stage({
       key: STAGING_KEY,
-      label: `size chart — ${edited} ${edited === 1 ? 'edit' : 'edits'}`,
+      label: `size chart · ${edited} ${edited === 1 ? 'edit' : 'edits'}`,
       order: COMMIT_ORDER.sizeChart,
       commit: commitChart,
       settle: () => {
         setDirty(false);
         setTouched(new Set());
+        setSavedCells(cells);
       },
       snapshot: {
-        cells: [...cells].map(
-          ([sizeId, row]) => [sizeId, [...row]] as [number, Array<[number, string]>],
-        ),
+        cells,
+        points,
+        shrinkagePct,
         steps: [...steps],
         touched: [...touched],
       } satisfies ChartSnapshot,
     });
-    // commitChart is redefined every render by design (it reads current state); depending on it
-    // here would restage on every keystroke for no gain, so the state it reads is the dep list.
+    // commitChart intentionally closes over the exact state named here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [staging, styleId, canEdit, dirty, touched, cells, steps, ordered, baseId]);
+  }, [
+    staging,
+    styleId,
+    canEdit,
+    dirty,
+    touched,
+    cells,
+    points,
+    shrinkagePct,
+    steps,
+    ordered,
+    baseId,
+  ]);
+
+  const activePoint = points.find((point) => point.measurementNameId === activePointId);
+  const activeName = activePoint
+    ? humanName(measurementById.get(activePoint.measurementNameId) ?? '')
+    : '';
+  const activeBaseValue = activePoint
+    ? numberOf(stored(cells, Number(mobileSize) || baseId, activePoint.measurementNameId))
+    : null;
+  const activeTolerance = activePoint
+    ? Math.max(numberOf(activePoint.tolMinusCm) ?? 0, numberOf(activePoint.tolPlusCm) ?? 0)
+    : 0;
+
+  const sizeOptions = useMemo<readonly ViewSwitchOption<string>[]>(
+    () =>
+      ordered.map((sizeId) => ({
+        value: String(sizeId),
+        label: formatSizeName(sizeById.get(sizeId) ?? `#${sizeId}`),
+      })),
+    [ordered, sizeById],
+  );
+  const unusedPoms = POM_CODES_BY_GARMENT[pattern.kind].filter(
+    (code) =>
+      !points.some((point) => point.pomCode === code) && !!nameIds.get(POM_CHART_NAME[code]),
+  );
+  const filterPoints = useCallback(
+    (query: string): ComboboxGroup[] => {
+      const needle = query.trim().toLowerCase();
+      const options = unusedPoms.flatMap((code) => {
+        const label = humanName(POM_CHART_NAME[code]);
+        return !needle || label.toLowerCase().includes(needle) ? [{ value: code, label }] : [];
+      });
+      return options.length ? [{ key: 'points', label: 'points', options }] : [];
+    },
+    [unusedPoms],
+  );
+
+  const addPom = (value: string) => {
+    const code = value as PomCode;
+    const measurementNameId = nameIds.get(POM_CHART_NAME[code]);
+    if (!measurementNameId) return;
+    const added = addPoint(
+      points,
+      cells,
+      measurementNameId,
+      code,
+      pattern.patternValues,
+      pattern.basis.get(code),
+    );
+    setPoints(added.points);
+    setCells(added.cells);
+    setAddOpen(false);
+    setActivePointId(measurementNameId);
+    markDirty(`point:${measurementNameId}`);
+  };
+
+  const keepPoint = (measurementNameId: number) => {
+    const kept = keepSaved(points, savedCells, measurementNameId);
+    const keptCells = new Map(
+      cells
+        .filter((cell) => cell.measurementNameId !== measurementNameId)
+        .map((cell) => [cellKey(cell.sizeId, cell.measurementNameId), cell]),
+    );
+    for (const cell of kept.cells.filter(
+      (candidate) => candidate.measurementNameId === measurementNameId,
+    ))
+      keptCells.set(cellKey(cell.sizeId, cell.measurementNameId), cell);
+    setPoints(kept.points);
+    setCells([...keptCells.values()]);
+    setSavedCells((previous) =>
+      previous.map((cell) =>
+        cell.measurementNameId === measurementNameId
+          ? { ...cell, source: 'STYLE_SIZE_CHART_CELL_SOURCE_MANUAL' }
+          : cell,
+      ),
+    );
+    markDirty(`keep:${measurementNameId}`);
+  };
+
+  const takePoint = (measurementNameId: number) => {
+    const taken = usePattern(points, cells, measurementNameId, pattern.patternValues);
+    setPoints(taken.points);
+    setCells(taken.cells);
+    setSavedCells((previous) => {
+      const next = new Map(
+        previous.map((cell) => [cellKey(cell.sizeId, cell.measurementNameId), cell]),
+      );
+      for (const cell of taken.cells.filter(
+        (candidate) => candidate.measurementNameId === measurementNameId,
+      ))
+        next.set(cellKey(cell.sizeId, cell.measurementNameId), cell);
+      return [...next.values()];
+    });
+    markDirty(`pattern:${measurementNameId}`);
+  };
+
+  const header = headerEl
+    ? createPortal(
+        <>
+          {editing && (
+            <label className='flex items-center gap-1.5 whitespace-nowrap text-micro uppercase tracking-label text-labelColor'>
+              <span>shrink %</span>
+              <Input
+                name='size-chart-shrinkage'
+                inputMode='decimal'
+                value={shrinkagePct}
+                placeholder={oneDecimal(pattern.mainShrinkagePct)}
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  if (!MEASURE.test(event.target.value)) return;
+                  setShrinkagePct(event.target.value);
+                  markDirty('shrinkage');
+                }}
+                className='w-14 text-right'
+                disabled={!canEdit || saving}
+              />
+            </label>
+          )}
+          {warnings > 0 && (
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              className='text-error no-underline hover:underline'
+              aria-pressed={reviewOpen}
+              onClick={() => setReviewOpen((open) => !open)}
+            >
+              ! {warnings}
+            </Button>
+          )}
+          {canEdit && (
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              disabled={saving}
+              onClick={() => {
+                setEditing((value) => !value);
+                setAddOpen(false);
+              }}
+            >
+              {editing ? 'done' : 'edit'}
+            </Button>
+          )}
+        </>,
+        headerEl,
+      )
+    : null;
 
   if (!styleId) {
-    return <Placeholder className='h-12' label='save the card first' />;
+    return (
+      <>
+        {header}
+        <Placeholder className='h-12' label='save card first' />
+      </>
+    );
   }
   if (sizeIds.length === 0) {
-    return <Placeholder className='h-12' label='pick sizes first' />;
+    return (
+      <>
+        {header}
+        <Placeholder className='h-12' label='pick sizes first' />
+      </>
+    );
   }
-  if (measurements.length === 0) {
-    return <Placeholder className='h-12' label='no measurement columns' />;
-  }
+
+  const visibleColumns = 3 + ordered.length + (editing ? 2 + (pattern.hasPatterns ? 0 : 1) : 0);
 
   return (
-    <div className='space-y-2'>
-      <DataTable
-        variant='grid'
-        className={cn(
-          '[&_th:first-child]:sticky [&_th:first-child]:left-0 [&_th:first-child]:z-10',
-          '[&_td:first-child]:sticky [&_td:first-child]:left-0 [&_td:first-child]:z-10',
-        )}
+    <div className='@container flex min-w-0 flex-col gap-2.5'>
+      {header}
+      <div className='hidden @max-[31.25rem]:block'>
+        <ViewSwitch
+          value={mobileSize}
+          options={sizeOptions}
+          label='size view'
+          onChange={setMobileSize}
+        />
+      </div>
+      <div
+        className='grid grid-cols-[minmax(0,1fr)_12.5rem] items-start gap-gutter @max-[31.25rem]:grid-cols-1 @max-[31.25rem]:gap-2'
+        onMouseLeave={() => setActivePointId(null)}
       >
-        <thead>
-          <tr>
-            <th>measurement</th>
-            <th>step</th>
-            {ordered.map((id) => (
-              <th key={id}>
-                {formatSizeName(sizeById.get(id) ?? `#${id}`)}
-                {id === baseId && <span className='ml-1 text-labelColor'>base</span>}
-              </th>
-            ))}
-            {canEdit && <th aria-label='reset' />}
-          </tr>
-        </thead>
-        <tbody>
-          {measurements.map((m) => {
-            const graded = basePos >= 0 && num(steps.get(m.id)) != null;
-            // Cells off the rule: typed over, or empty (a size added to the run after grading).
-            // `reset` puts both back on it.
-            const offRule = graded
-              ? ordered.filter((sizeId) => {
-                  const c = computedOf(sizeId, m.id);
-                  const v = stored(sizeId, m.id);
-                  return c != null && (v === '' || !follows(v, c));
-                })
-              : [];
-            return (
-              // Подсветка строки — на ЯЧЕЙКАХ, не на <tr>: первая ячейка липкая и красит себя сама,
-              // фон строки ушёл бы под неё. focus-within держит строку, пока в ней печатают.
-              <tr
-                key={m.id}
-                className='[&>td]:transition-colors hover:[&>td]:bg-pageBg focus-within:[&>td]:bg-pageBg'
-              >
-                <td className='uppercase'>{m.name}</td>
-                <td className='w-20'>
-                  <Input
-                    name={`size-chart-step-${m.id}`}
-                    value={steps.get(m.id) ?? ''}
-                    placeholder={basePos >= 0 ? '±' : ''}
-                    title={basePos >= 0 ? 'cm per size step' : 'no base size in the run'}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                      if (STEP.test(e.target.value)) setStep(m.id, e.target.value);
-                    }}
-                    className='border-transparent bg-transparent text-center'
-                    disabled={!canEdit || basePos < 0}
-                  />
-                </td>
-                {ordered.map((sizeId) => {
-                  const value = stored(sizeId, m.id);
-                  const computed = graded ? computedOf(sizeId, m.id) : null;
-                  const isComputed = computed != null && !!value && follows(value, computed);
-                  const isOvertyped = computed != null && !follows(value, computed);
-                  return (
-                    <td key={sizeId} className='w-20'>
-                      <Input
-                        name={`size-chart-${sizeId}-${m.id}`}
-                        value={value}
-                        // An empty cell of a graded row is not saved; it shows what reset fills in.
-                        placeholder={computed ?? undefined}
-                        title={
-                          isOvertyped
-                            ? `typed by hand · computed ${computed}`
-                            : isComputed
-                              ? 'computed'
-                              : undefined
-                        }
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                          if (MEASURE.test(e.target.value)) setCell(sizeId, m.id, e.target.value);
-                        }}
-                        className={cn(
-                          'border-transparent bg-transparent text-center',
-                          isComputed && 'text-labelColor',
-                          isOvertyped && 'underline decoration-dotted underline-offset-2',
-                        )}
-                        disabled={!canEdit}
-                      />
-                    </td>
-                  );
-                })}
-                {canEdit && (
-                  <td className='w-14 text-center'>
-                    {offRule.length > 0 && (
-                      <Button
-                        type='button'
-                        variant='underline'
-                        size='xs'
-                        onClick={() => resetRow(m.id)}
-                        title={`${offRule.length} off the grade`}
-                      >
-                        reset
-                      </Button>
+        <DataTable className='[&_td]:h-8 [&_td]:align-middle'>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th data-align='left'>point</th>
+              {editing && <th>±</th>}
+              {ordered.map((sizeId) => (
+                <th
+                  key={sizeId}
+                  className={cn(String(sizeId) !== mobileSize && '@max-[31.25rem]:hidden')}
+                >
+                  {formatSizeName(sizeById.get(sizeId) ?? `#${sizeId}`)}
+                </th>
+              ))}
+              {editing && !pattern.hasPatterns && <th>step</th>}
+              <th data-align='left'>shop</th>
+              {editing && <th aria-label='remove' />}
+            </tr>
+          </thead>
+          <tbody>
+            {points.map((point) => {
+              const name = humanName(measurementById.get(point.measurementNameId) ?? '');
+              const review = reviewByPoint.get(point.measurementNameId);
+              const activeRow = activePointId === point.measurementNameId;
+              return (
+                <FragmentRows key={point.measurementNameId}>
+                  <tr
+                    data-row={point.position}
+                    className={cn(
+                      'cursor-default transition-colors [&>td]:transition-colors',
+                      activeRow && '[&>td]:bg-pageBg',
                     )}
-                  </td>
-                )}
-              </tr>
-            );
-          })}
-        </tbody>
-      </DataTable>
-      {canEdit && sizeIds.length > 1 && basePos < 0 && (
-        <p className='text-micro text-labelColor'>pick a sample size in the run to grade</p>
+                    onMouseEnter={() => setActivePointId(point.measurementNameId)}
+                    onClick={(event) => {
+                      if ((event.target as HTMLElement).closest('input,button')) return;
+                      setActivePointId(point.measurementNameId);
+                    }}
+                  >
+                    <td>{point.position}</td>
+                    <td data-align='left'>{name || <EmptyCell />}</td>
+                    {editing && (
+                      <td className='w-14'>
+                        <Input
+                          name={`size-chart-tolerance-${point.measurementNameId}`}
+                          inputMode='decimal'
+                          value={point.tolPlusCm}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                            if (!MEASURE.test(event.target.value)) return;
+                            setPoints((previous) =>
+                              previous.map((candidate) =>
+                                candidate.measurementNameId === point.measurementNameId
+                                  ? {
+                                      ...candidate,
+                                      tolMinusCm: event.target.value,
+                                      tolPlusCm: event.target.value,
+                                    }
+                                  : candidate,
+                              ),
+                            );
+                            markDirty(`tolerance:${point.measurementNameId}`);
+                          }}
+                          className='min-w-12 text-right'
+                          disabled={!canEdit}
+                        />
+                      </td>
+                    )}
+                    {ordered.map((sizeId) => {
+                      const value = stored(cells, sizeId, point.measurementNameId);
+                      const changed = !!review?.cells.some((cell) => cell.sizeId === sizeId);
+                      return (
+                        <td
+                          key={sizeId}
+                          className={cn(
+                            'min-w-16',
+                            String(sizeId) !== mobileSize && '@max-[31.25rem]:hidden',
+                            !editing && changed && 'text-error',
+                          )}
+                        >
+                          {editing ? (
+                            <Input
+                              name={`size-chart-${point.measurementNameId}-${sizeId}`}
+                              inputMode='decimal'
+                              value={value}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                                if (MEASURE.test(event.target.value))
+                                  setCell(sizeId, point.measurementNameId, event.target.value);
+                              }}
+                              className='min-w-14 text-right'
+                              disabled={!canEdit}
+                            />
+                          ) : value ? (
+                            oneDecimal(value)
+                          ) : (
+                            <EmptyCell />
+                          )}
+                        </td>
+                      );
+                    })}
+                    {editing && !pattern.hasPatterns && (
+                      <td className='w-14'>
+                        <Input
+                          name={`size-chart-step-${point.measurementNameId}`}
+                          inputMode='decimal'
+                          value={steps.get(point.measurementNameId) ?? ''}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                            if (STEP.test(event.target.value))
+                              setStep(point.measurementNameId, event.target.value);
+                          }}
+                          className='min-w-12 text-right'
+                          disabled={!canEdit || basePos < 0}
+                        />
+                      </td>
+                    )}
+                    <td data-align='left'>
+                      {editing ? (
+                        <CheckboxCommon
+                          name={`size-chart-shop-${point.measurementNameId}`}
+                          checked={point.inShop}
+                          onChange={(checked) => {
+                            setPoints((previous) =>
+                              previous.map((candidate) =>
+                                candidate.measurementNameId === point.measurementNameId
+                                  ? { ...candidate, inShop: checked }
+                                  : candidate,
+                              ),
+                            );
+                            markDirty(`shop:${point.measurementNameId}`);
+                          }}
+                          disabled={!canEdit}
+                        />
+                      ) : point.inShop ? (
+                        '✓'
+                      ) : null}
+                    </td>
+                    {editing && (
+                      <td data-align='left'>
+                        <Button
+                          type='button'
+                          variant='underline'
+                          size='xs'
+                          onClick={() => {
+                            setPoints((previous) =>
+                              normalizePoints(
+                                previous.filter(
+                                  (candidate) =>
+                                    candidate.measurementNameId !== point.measurementNameId,
+                                ),
+                              ),
+                            );
+                            setCells((previous) =>
+                              previous.filter(
+                                (cell) => cell.measurementNameId !== point.measurementNameId,
+                              ),
+                            );
+                            setActivePointId(null);
+                            markDirty(`remove:${point.measurementNameId}`);
+                          }}
+                          disabled={!canEdit}
+                        >
+                          remove
+                        </Button>
+                      </td>
+                    )}
+                  </tr>
+                  {reviewOpen && review && (
+                    <tr>
+                      <td />
+                      <td colSpan={visibleColumns - 1} data-align='left'>
+                        <div className='flex flex-col gap-1 py-1 text-control text-labelColor'>
+                          {review.cells.length ? (
+                            review.cells.map((change) => (
+                              <div
+                                key={change.sizeId}
+                                className='flex flex-wrap items-baseline gap-x-3'
+                              >
+                                <span>{formatSizeName(sizeById.get(change.sizeId) ?? '')}</span>
+                                <span>saved {oneDecimal(change.saved)}</span>
+                                <span className='text-error'>
+                                  pattern {oneDecimal(change.pattern)}
+                                </span>
+                              </div>
+                            ))
+                          ) : (
+                            <span className='text-error'>stale</span>
+                          )}
+                          <div className='flex items-center gap-3'>
+                            <Button
+                              type='button'
+                              variant='underline'
+                              size='xs'
+                              onClick={() => keepPoint(point.measurementNameId)}
+                            >
+                              keep saved
+                            </Button>
+                            {review.cells.length > 0 && (
+                              <Button
+                                type='button'
+                                variant='underline'
+                                size='xs'
+                                onClick={() => takePoint(point.measurementNameId)}
+                              >
+                                use pattern
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </FragmentRows>
+              );
+            })}
+          </tbody>
+        </DataTable>
+
+        <div className='sticky top-4 order-none flex flex-col gap-1.5 @max-[31.25rem]:static @max-[31.25rem]:order-first @max-[31.25rem]:flex-row @max-[31.25rem]:items-center @max-[31.25rem]:gap-3'>
+          <SizeChartSchematic
+            kind={pattern.kind}
+            points={points}
+            active={activePoint?.pomCode}
+            className='border border-borderColor @max-[31.25rem]:w-24 @max-[31.25rem]:shrink-0'
+          />
+          <div className='min-h-8 text-control text-labelColor'>
+            {activePoint && (
+              <>
+                <span className='text-textColor'>
+                  {activePoint.position} {activeName}
+                </span>
+                <br />± {oneDecimal(activeTolerance)}
+                {activePoint.pomCode && isGirth(activePoint.pomCode) && activeBaseValue != null
+                  ? ` · full ${oneDecimal(activeBaseValue * 2)}`
+                  : ''}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {canEdit && addOpen ? (
+        <div className='flex items-start gap-2'>
+          <Combobox
+            name='size-chart-add-point'
+            placeholder='point'
+            searchPlaceholder='find point'
+            filter={filterPoints}
+            onSelect={addPom}
+            className='w-full max-w-64'
+          />
+          <Button type='button' variant='underline' size='xs' onClick={() => setAddOpen(false)}>
+            cancel
+          </Button>
+        </div>
+      ) : (
+        canEdit &&
+        unusedPoms.length > 0 && (
+          <AddDoor afterRows={points.length > 0} onClick={() => setAddOpen(true)}>
+            point
+          </AddDoor>
+        )
       )}
 
-      {canEdit && dirty && (
-        <div className='flex flex-wrap items-center gap-2'>
-          <Pill tone='attention'>{saving ? 'saving…' : 'staged'}</Pill>
-        </div>
+      {editing && (
+        <Button
+          type='button'
+          variant='main'
+          size='lg'
+          className='hidden w-full @max-[31.25rem]:block'
+          onClick={() => setEditing(false)}
+        >
+          save chart
+        </Button>
       )}
     </div>
   );
+}
+
+function FragmentRows({ children }: { children: ReactNode }) {
+  return <>{children}</>;
 }

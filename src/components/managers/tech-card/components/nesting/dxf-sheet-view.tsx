@@ -14,6 +14,7 @@ import { useMemo, useState } from 'react';
 import { Button, CalloutBox, Text, HeaderWarnings } from 'ui';
 import { defaultContourLayer, layerOptions } from './contour-layer';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
+import { separateForDisplay } from './sheet-separate';
 import { PieceSheet } from './piece-sheet';
 import { dedupeUniPieces } from './piece-selection';
 import { splitPiecesBySize } from './split-pieces';
@@ -108,7 +109,8 @@ export function DxfSheetView({
         (best, o) => (!best || o.count > best.count ? o : best),
         null,
       )?.size ?? '';
-  const shown = useMemo(() => view.piecesOfSize(shownSize), [view, shownSize]);
+  // Shown without overlaps (owner, w1107 В4): the file is drawn as laid, minus pieces on pieces.
+  const shown = useMemo(() => separateForDisplay(view.piecesOfSize(shownSize)), [view, shownSize]);
 
   const grainLayer = useMemo(() => defaultGrainLayer(grainLayerOptions(allPieces)), [allPieces]);
   const innerNames = useMemo(() => {

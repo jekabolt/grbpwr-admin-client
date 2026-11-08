@@ -73,19 +73,23 @@ function fuseFillOf(
   p: PieceDTO,
   f: PieceFuseSpec,
   requiredSeamAllowanceMm: number | null,
+  netOutline: readonly Pt[] | null,
 ): FuseFill | null {
   if (!f.mode || (f.mode === 'zone' && !isDrawnZone(f.zone))) return null;
-  if (f.insetNet && !Number.isFinite(requiredSeamAllowanceMm))
+  const allowance = f.mode === 'strip' && f.widthMm == null && f.edges.length === 0;
+  if (!allowance && f.insetNet && !Number.isFinite(requiredSeamAllowanceMm))
+    return { polys: [], status: 'unknown' };
+  if (
+    allowance &&
+    !netOutline &&
+    !(Number.isFinite(requiredSeamAllowanceMm) && (requiredSeamAllowanceMm ?? 0) > 0)
+  )
     return { polys: [], status: 'unknown' };
   try {
-    // An empty width keeps the old 10 mm preview only until the operator chooses a real width.
-    // Once chosen, this is exactly the same spec and geometry function used by the DXF builder.
-    const resolved = resolveFuse(f, requiredSeamAllowanceMm);
-    const previewSpec =
-      f.mode === 'strip' && f.widthMm == null ? { ...f, widthMm: resolved.widthMm } : f;
     const polys = generateFuseGeometry({
       outline: p.poly.map(mm10),
-      spec: previewSpec,
+      netOutline: netOutline?.map(mm10),
+      spec: f,
       seamAllowanceMm: requiredSeamAllowanceMm,
       darts: fusingDartPolygons(p),
     });
@@ -103,6 +107,8 @@ export function FuseOverlay({
   fuseOf,
   onChange,
   zoneBus,
+  zoneOutlines,
+  netOutlineOf,
   requiredSeamAllowanceMm,
 }: {
   /** cm per screen pixel. */
@@ -116,6 +122,10 @@ export function FuseOverlay({
   onChange: (ci: string, next: PieceFuseSpec) => void;
   /** Shared with the panel: the zone's clipped area and its undo stack. */
   zoneBus?: ZoneBus;
+  /** Additional DXF zone outlines not present on the main-material sheet. */
+  zoneOutlines?: ReadonlyMap<string, PieceDTO>;
+  /** The piece's own sewing contour in its local cm frame. */
+  netOutlineOf?: (piece: PieceDTO) => readonly Pt[] | null;
   /** The card's live seam-allowance standard; null means no standard is available. */
   requiredSeamAllowanceMm: number | null;
 }) {
@@ -125,12 +135,13 @@ export function FuseOverlay({
   const fills = useRef(new WeakMap<PieceDTO, Map<string, FuseFill | null>>());
   const fillOf = (p: PieceDTO, f: PieceFuseSpec) => {
     if (!f.mode || (f.mode === 'zone' && !isDrawnZone(f.zone))) return null;
-    const key = JSON.stringify([f, requiredSeamAllowanceMm]);
+    const netOutline = netOutlineOf?.(p) ?? null;
+    const key = JSON.stringify([f, requiredSeamAllowanceMm, netOutline]);
     let m = fills.current.get(p);
     if (!m) fills.current.set(p, (m = new Map()));
     if (!m.has(key)) {
       if (m.size > 64) m.clear();
-      m.set(key, fuseFillOf(p, f, requiredSeamAllowanceMm));
+      m.set(key, fuseFillOf(p, f, requiredSeamAllowanceMm, netOutline));
     }
     return m.get(key) ?? null;
   };
@@ -167,7 +178,8 @@ export function FuseOverlay({
     y: -((p.originY ?? 0) + q.y),
   });
   const geo = (p: PieceDTO, f: PieceFuseSpec) => {
-    const r = resolveFuse(f, requiredSeamAllowanceMm);
+    const netOutline = netOutlineOf?.(p) ?? null;
+    const r = resolveFuse(f, requiredSeamAllowanceMm, netOutline != null);
     const pts = p.poly.map((q) => world(p, q));
     const sign: 1 | -1 = signedArea(pts) > 0 ? 1 : -1;
     const insetMm = r.insetMm;
@@ -223,7 +235,7 @@ export function FuseOverlay({
         : null;
     let dxf: string | null = null;
     if (f.mode === 'zone' && f.zone && 'dxfPieceKey' in f.zone) {
-      const src = byCi.get(f.zone.dxfPieceKey);
+      const src = zoneOutlines?.get(f.zone.dxfPieceKey) ?? byCi.get(f.zone.dxfPieceKey);
       if (src) {
         const sx = ox + p.bboxW / 2 - src.bboxW / 2;
         const sy = oy + p.bboxH / 2 - src.bboxH / 2;
@@ -405,7 +417,7 @@ export function FuseOverlay({
       zoneBus.setContour(sel, undefined);
     };
   }, [sel, selArea, selContourKey, selRingAreasKey, zoneBus]);
-  const edgesOn = !!g && sf!.mode === 'strip';
+  const edgesOn = !!g && sf!.mode === 'strip' && sf!.widthMm != null;
   const hs = 8 * px;
 
   return (

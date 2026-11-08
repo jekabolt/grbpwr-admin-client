@@ -92,7 +92,7 @@ describe('PackagingSheet', () => {
   });
 });
 
-describe('tech pack 05b carton', () => {
+describe('tech pack 05b without carton', () => {
   const render = (notes?: string) =>
     renderToStaticMarkup(
       <PackagingPage
@@ -103,9 +103,10 @@ describe('tech pack 05b carton', () => {
       />,
     );
 
-  it('prints the carton note only when there is one', () => {
-    expect(render('tape twice')).toContain('tape twice');
-    expect(render()).not.toContain('>note<');
+  it('keeps the carton off the tech pack (shipping only)', () => {
+    const page = render('tape twice');
+    expect(page).not.toContain('tape twice');
+    expect(page).not.toContain('>carton<');
   });
 });
 

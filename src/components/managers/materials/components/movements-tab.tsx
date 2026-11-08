@@ -1,5 +1,6 @@
 import {
   common_Material,
+  common_MaterialConversion,
   common_MaterialMovement,
   common_MaterialMovementType,
 } from 'api/proto-http/admin';
@@ -58,10 +59,70 @@ const sampleRef = (m: common_MaterialMovement) =>
     <>#{m.sampleId}</>
   );
 
+const shrinkPercent = (value?: string): string => {
+  const number = Number((value ?? '').replace('%', '').trim());
+  return Number.isFinite(number)
+    ? new Intl.NumberFormat('en-GB', { maximumFractionDigits: 2 }).format(number)
+    : '';
+};
+
 // REASON = `kind · ref`. Direction lives in Δ, so no arrows here.
-function Reason({ m }: { m: common_MaterialMovement }) {
+function Reason({
+  m,
+  conversions,
+  materials,
+}: {
+  m: common_MaterialMovement;
+  conversions: Map<number, common_MaterialConversion>;
+  materials: Map<number, common_Material>;
+}) {
   const kind = movementKind(m.movementType);
   if (!kind) return <EmptyCell />;
+
+  if (
+    m.movementType === 'MATERIAL_MOVEMENT_TYPE_CONVERT_OUT' ||
+    m.movementType === 'MATERIAL_MOVEMENT_TYPE_CONVERT_IN'
+  ) {
+    const opposite =
+      m.movementType === 'MATERIAL_MOVEMENT_TYPE_CONVERT_OUT'
+        ? 'MATERIAL_MOVEMENT_TYPE_CONVERT_IN'
+        : 'MATERIAL_MOVEMENT_TYPE_CONVERT_OUT';
+    const conversion = conversions.get(Number(m.conversionId) || 0);
+    const other = conversion?.lines?.find((line) => line.movement?.movementType === opposite);
+    const otherMovement = other?.movement;
+    if (!otherMovement) return <>convert</>;
+    const otherId = Number(otherMovement.materialId) || 0;
+    const otherMaterial = materials.get(otherId);
+    const otherName = other?.materialName || otherMaterial?.name || 'material';
+    const amount = decimalToInput(otherMovement.quantity);
+    const sign = opposite === 'MATERIAL_MOVEMENT_TYPE_CONVERT_IN' ? '+' : '−';
+    return (
+      <div className='inline-flex min-w-0 items-center gap-1.5'>
+        <span className='shrink-0'>
+          convert{amount ? ` · ${sign}${amount}${other?.unit ? ` ${other.unit}` : ''}` : ''}
+        </span>
+        <MaterialThumb material={otherMaterial} size='sm' className='size-4' />
+        {otherId ? (
+          <Link to={`?tab=movements&material=${otherId}`} className='min-w-0 truncate underline'>
+            {otherName}
+          </Link>
+        ) : (
+          <span className='min-w-0 truncate'>{otherName}</span>
+        )}
+      </div>
+    );
+  }
+
+  if (m.movementType === 'MATERIAL_MOVEMENT_TYPE_SHRINKAGE') {
+    const percent = shrinkPercent(m.reason);
+    return (
+      <>
+        shrink{m.lot ? ` · ${m.lot}` : ''}
+        {percent ? ` · ${percent} %` : ''}
+      </>
+    );
+  }
+
   let ref: React.ReactNode = null;
   switch (m.movementType) {
     case 'MATERIAL_MOVEMENT_TYPE_ISSUE_PRODUCTION':
@@ -124,14 +185,14 @@ function GroupRow({
         >
           {material ? (
             <>
-              {material.name || `#${id}`}
+              {material.name || material.code || 'material'}
               <span className='text-labelColor'>
                 {material.unit ? ` · ${material.unit}` : ''}
                 {material.code ? ` · ${material.code}` : ''}
               </span>
             </>
           ) : (
-            `#${id}`
+            material
           )}
         </GroupLabel>
       </td>
@@ -174,6 +235,13 @@ export function MovementsList({
         seen.add(id);
         return true;
       });
+  }, [q.data]);
+  const conversions = useMemo(() => {
+    const map = new Map<number, common_MaterialConversion>();
+    (q.data?.pages ?? []).forEach((page) => {
+      page.conversions.forEach((conversion, id) => map.set(id, conversion));
+    });
+    return map;
   }, [q.data]);
 
   // Grouped by material, groups in order of first appearance in the date-ordered list.
@@ -274,9 +342,9 @@ export function MovementsList({
                       <span className='w-12 shrink-0 text-labelColor'>
                         {shortDay(m.occurredAt)}
                       </span>
-                      <span className='min-w-0 flex-1 truncate'>
-                        <Reason m={m} />
-                      </span>
+                      <div className='min-w-0 flex-1 truncate'>
+                        <Reason m={m} conversions={conversions} materials={materials} />
+                      </div>
                       <span className='shrink-0 whitespace-nowrap'>{deltaOf(m)}</span>
                     </div>
                     <div className='text-right text-labelColor'>
@@ -290,7 +358,7 @@ export function MovementsList({
                     {shortDay(m.occurredAt) || <EmptyCell />}
                   </td>
                   <td data-align='left' className='truncate'>
-                    <Reason m={m} />
+                    <Reason m={m} conversions={conversions} materials={materials} />
                   </td>
                   <td className='whitespace-nowrap'>{deltaOf(m)}</td>
                   <td className='whitespace-nowrap text-labelColor'>

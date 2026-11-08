@@ -1,5 +1,10 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
-import { common_Material, common_MaterialMovement } from 'api/proto-http/admin';
+import {
+  common_Material,
+  common_MaterialConversion,
+  common_MaterialLot,
+  common_MaterialMovement,
+} from 'api/proto-http/admin';
 import { useSuppliers } from 'components/managers/accounting/utils/hooks';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { EntityPicker } from 'components/managers/tasks/components/entity-picker';
@@ -12,16 +17,22 @@ import {
 } from 'components/managers/production-runs/components/feedback';
 import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { ReactNode, useEffect, useState } from 'react';
-import { AddDoor, Button, Close, Text } from 'ui';
+import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { AddDoor, Arrow, Button, Chip, ChipRow, Close, Input, Select, Text } from 'ui';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { InvoiceDrop, useInvoiceUpload } from './invoice-drop';
+import { MaterialModal } from './material-modal';
 import { MaterialPickerDialog } from './material-picker';
+import { MaterialThumb } from './material-thumb';
+import { useMaterials } from './useMaterials';
 import {
   useAdjustMaterialStock,
+  useConvertMaterialStock,
   useIssueMaterialStock,
   useMaterialLots,
+  useMaterialMovements,
   useReceiveMaterialStockBatch,
+  useShrinkMaterialLot,
 } from './useWarehouse';
 
 const cell = 'w-full border border-borderColor bg-bgColor px-2 py-1.5 text-textBaseSize';
@@ -33,6 +44,8 @@ export type MovementTarget = {
   materialLabel: string;
   unit: string;
   onHand?: string;
+  avgUnitCostBase?: string;
+  baseCurrency?: string;
 };
 
 function todayISO(): string {
@@ -44,16 +57,21 @@ function todayISO(): string {
   ).padStart(2, '0')}`;
 }
 
+// ConvertMaterialStock takes a protobuf Timestamp, not the date-only string the older movement
+// RPCs accept. Local noon keeps the picked wall-clock day for any UTC offset under 12 h.
+function dayToTimestamp(day: string): string | undefined {
+  const d = new Date(`${day}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+}
+
 // The balance change straight from the posted ledger row. The dialog is gone by then and no screen
 // shows before → after, so it is the one receipt kept as an ok toast (never logged).
-function posted(target: MovementTarget, m?: common_MaterialMovement) {
+function posted(target: MovementTarget, m?: common_MaterialMovement, detail?: string) {
   notify({
     sev: 'ok',
     subject: target.materialLabel.toUpperCase(),
     text: 'posted',
-    detail: `on hand ${decimalToInput(m?.onHandBefore) || '0'} → ${
-      decimalToInput(m?.onHandAfter) || '0'
-    }`,
+    detail: detail ?? `on hand ${decimalToInput(m?.onHandAfter) || '0'}`,
   });
 }
 
@@ -172,13 +190,29 @@ const newLine = (materialId: number, label: string, unit: string): ReceiveLine =
 });
 
 const pickedLabel = (m: common_Material) =>
-  `${m.code ? `${m.code} · ` : ''}${m.name || `#${m.id}`}`;
+  `${m.code ? `${m.code} · ` : ''}${m.name || 'material'}`;
 
 // A positive finite number from a decimal input, else NaN.
 const positive = (v: string) => {
   const n = parseDecimalNumber(v);
   return Number.isFinite(n) && n > 0 ? n : NaN;
 };
+
+const numId = (value: unknown): number => Number(value) || 0;
+
+const newClientRequestId = (): string =>
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `convert-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+const countableMaterial = (material?: common_Material): boolean =>
+  [
+    'MATERIAL_UNIT_PCS',
+    'MATERIAL_UNIT_PAIR',
+    'MATERIAL_UNIT_SET',
+    'MATERIAL_UNIT_CONE',
+    'MATERIAL_UNIT_ROLL',
+  ].includes(material?.unitCode ?? '') || /^(pcs?|pieces?)$/i.test(material?.unit?.trim() ?? '');
 
 // One supplier invoice → several materials, posted in ONE transaction (ReceiveMaterialStockBatch,
 // even for a single line). Delivery and input VAT are invoice totals; the server allocates both
@@ -535,6 +569,729 @@ export function ReceiveStockModal({
         onPick={addMaterial}
         onClose={() => setPicking(false)}
       />
+    </MovementDialog>
+  );
+}
+
+// ---- Convert --------------------------------------------------------------------------------
+
+const quantityCell = 'h-9 min-h-9 pr-9 text-right';
+
+function QuantityField({
+  label,
+  value,
+  unit,
+  inputRef,
+  invalid,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  unit: string;
+  inputRef?: React.Ref<HTMLInputElement>;
+  invalid?: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <Field label={label}>
+      <span className='relative block'>
+        <Input
+          ref={inputRef}
+          inputMode='decimal'
+          value={value}
+          aria-label={label}
+          aria-invalid={invalid || undefined}
+          className={quantityCell}
+          onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+            onChange(sanitizeDecimal(event.target.value))
+          }
+        />
+        <Text
+          component='span'
+          size='micro'
+          variant='label'
+          className='pointer-events-none absolute right-2 top-1/2 -translate-y-1/2'
+        >
+          {unit}
+        </Text>
+      </span>
+    </Field>
+  );
+}
+
+export function ConvertStockModal({
+  open,
+  onOpenChange,
+  target,
+  defaultOut,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  target: MovementTarget;
+  defaultOut?: string;
+}) {
+  const { canReadCosting, canWriteCosting } = usePermissions();
+  const convert = useConvertMaterialStock();
+  const materialsQuery = useMaterials('', false, open);
+  const movementsQuery = useMaterialMovements({ materialId: target.materialId }, 50);
+  const lotsQuery = useMaterialLots(target.materialId, false, open && target.materialId > 0);
+  const { data: suppliersData } = useSuppliers();
+  const suppliers = suppliersData?.suppliers ?? [];
+
+  const [fail, setFail] = useState<string | null>(null);
+  const [lotId, setLotId] = useState(0);
+  const [lotTouched, setLotTouched] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [intoId, setIntoId] = useState(0);
+  const [createdInto, setCreatedInto] = useState<common_Material | undefined>();
+  const [outQty, setOutQty] = useState('');
+  const [inQty, setInQty] = useState('');
+  const [showLoss, setShowLoss] = useState(false);
+  const [lossQty, setLossQty] = useState('');
+  const [workCost, setWorkCost] = useState('');
+  const [currency, setCurrency] = useState('EUR');
+  const [supplierId, setSupplierId] = useState(0);
+  const [occurredAt, setOccurredAt] = useState(todayISO());
+  const requestId = useRef('');
+  const defaultChecked = useRef(false);
+  const supplierTouched = useRef(false);
+  const outRef = useRef<HTMLInputElement>(null);
+  const inRef = useRef<HTMLInputElement>(null);
+
+  const materials = useMemo(() => materialsQuery.data?.materials ?? [], [materialsQuery.data]);
+  const materialsById = useMemo(() => {
+    const map = new Map<number, common_Material>();
+    materials.forEach((material) => {
+      const id = numId(material.id);
+      if (id) map.set(id, material);
+    });
+    return map;
+  }, [materials]);
+  const movements = useMemo(
+    () => movementsQuery.data?.pages.flatMap((page) => page.movements) ?? [],
+    [movementsQuery.data],
+  );
+  const conversions = useMemo(() => {
+    const map = new Map<number, common_MaterialConversion>();
+    (movementsQuery.data?.pages ?? []).forEach((page) => {
+      page.conversions.forEach((conversion, id) => map.set(id, conversion));
+    });
+    return map;
+  }, [movementsQuery.data]);
+
+  const recentOutputIds = useMemo(() => {
+    const ids: number[] = [];
+    movements.forEach((movement) => {
+      if (movement.movementType !== 'MATERIAL_MOVEMENT_TYPE_CONVERT_OUT') return;
+      const conversion = conversions.get(numId(movement.conversionId));
+      const output = conversion?.lines?.find(
+        (line) => line.movement?.movementType === 'MATERIAL_MOVEMENT_TYPE_CONVERT_IN',
+      );
+      const id = numId(output?.movement?.materialId);
+      if (id && id !== target.materialId && materialsById.has(id) && !ids.includes(id))
+        ids.push(id);
+    });
+    return ids;
+  }, [conversions, materialsById, movements, target.materialId]);
+
+  const preferredIds = useMemo(() => {
+    const ids = materials
+      .filter((material) => numId(material.sourceMaterialId) === target.materialId)
+      .map((material) => numId(material.id))
+      .filter((id) => id > 0 && id !== target.materialId);
+    recentOutputIds.forEach((id) => {
+      if (!ids.includes(id)) ids.push(id);
+    });
+    return ids;
+  }, [materials, recentOutputIds, target.materialId]);
+
+  const into =
+    createdInto && numId(createdInto.id) === intoId ? createdInto : materialsById.get(intoId);
+
+  const defaultSupplierId = useMemo(() => {
+    if (!intoId) return 0;
+    for (const movement of movements) {
+      if (movement.movementType !== 'MATERIAL_MOVEMENT_TYPE_CONVERT_OUT') continue;
+      const conversion = conversions.get(numId(movement.conversionId));
+      const output = conversion?.lines?.find(
+        (line) =>
+          line.movement?.movementType === 'MATERIAL_MOVEMENT_TYPE_CONVERT_IN' &&
+          numId(line.movement.materialId) === intoId,
+      );
+      if (output) return numId(conversion?.supplierId);
+    }
+    return 0;
+  }, [conversions, intoId, movements]);
+
+  useEffect(() => {
+    if (!open) return;
+    setFail(null);
+    setPicking(false);
+    setCreating(false);
+    setIntoId(0);
+    setCreatedInto(undefined);
+    setOutQty(defaultOut ?? '');
+    setInQty('');
+    setShowLoss(false);
+    setLossQty('');
+    setWorkCost('');
+    setCurrency('EUR');
+    setSupplierId(0);
+    setOccurredAt(todayISO());
+    setLotId(0);
+    setLotTouched(false);
+    requestId.current = newClientRequestId();
+    defaultChecked.current = false;
+    supplierTouched.current = false;
+  }, [defaultOut, open]);
+
+  useEffect(() => {
+    if (!open || defaultChecked.current || !materialsQuery.isFetched || !movementsQuery.isFetched)
+      return;
+    defaultChecked.current = true;
+    if (preferredIds.length !== 1) return;
+    setIntoId(preferredIds[0]);
+    setCreatedInto(undefined);
+    supplierTouched.current = false;
+  }, [materialsQuery.isFetched, movementsQuery.isFetched, open, preferredIds]);
+
+  useEffect(() => {
+    if (!open || !movementsQuery.isFetched || supplierTouched.current) return;
+    setSupplierId(defaultSupplierId);
+  }, [defaultSupplierId, intoId, movementsQuery.isFetched, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const frame = requestAnimationFrame(() => {
+      if (intoId && Number.isFinite(positive(outQty))) inRef.current?.focus();
+      else outRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [intoId, open]);
+
+  const pickInto = (material?: common_Material) => {
+    setPicking(false);
+    const id = numId(material?.id);
+    if (!material || !id || id === target.materialId) return;
+    setIntoId(id);
+    setCreatedInto(material);
+    supplierTouched.current = false;
+    setFail(null);
+  };
+
+  const outNumber = parseDecimalNumber(outQty);
+  const inNumber = parseDecimalNumber(inQty);
+  const lossNumber = lossQty.trim() ? parseDecimalNumber(lossQty) : 0;
+  const onHand = parseDecimalNumber(target.onHand);
+  const overStock = Number.isFinite(outNumber) && Number.isFinite(onHand) && outNumber > onHand;
+  const overLoss =
+    Number.isFinite(lossNumber) && Number.isFinite(outNumber) && lossNumber > outNumber;
+  const wholeUnits = countableMaterial(into);
+
+  // A named lot is drawn alone; «none» lets the server draw lots oldest first. Until the user picks,
+  // the fullest lot is chosen when it covers the out quantity, otherwise «none».
+  const lots = useMemo(
+    () =>
+      (lotsQuery.data?.lots ?? [])
+        .filter((lot) => !lot.archived && parseDecimalNumber(decimalToInput(lot.remainingQty)) > 0)
+        .sort(
+          (a, b) =>
+            parseDecimalNumber(decimalToInput(b.remainingQty)) -
+            parseDecimalNumber(decimalToInput(a.remainingQty)),
+        ),
+    [lotsQuery.data],
+  );
+  const lotRemaining = (lot?: common_MaterialLot) =>
+    parseDecimalNumber(decimalToInput(lot?.remainingQty));
+  const wantOut = Number.isFinite(outNumber) && outNumber > 0 ? outNumber : 0;
+  const lotCovers = lots.some((lot) => lotRemaining(lot) >= wantOut);
+  const selectedLot = lotTouched
+    ? lots.find((lot) => numId(lot.id) === lotId)
+    : lots.find((lot, index) => index === 0 && lotRemaining(lot) >= wantOut);
+  const overLot = !!selectedLot && wantOut > lotRemaining(selectedLot);
+
+  const costPreview = useMemo(() => {
+    if (!canReadCosting || currency !== 'EUR' || target.baseCurrency !== 'EUR') return null;
+    const average = parseDecimalNumber(target.avgUnitCostBase);
+    const work = workCost.trim() ? parseDecimalNumber(workCost) : 0;
+    if (
+      !Number.isFinite(average) ||
+      !Number.isFinite(outNumber) ||
+      !Number.isFinite(inNumber) ||
+      !Number.isFinite(work) ||
+      outNumber <= 0 ||
+      inNumber <= 0 ||
+      work < 0
+    )
+      return null;
+    return ((outNumber * average + work) / inNumber).toFixed(2);
+  }, [
+    canReadCosting,
+    currency,
+    inNumber,
+    outNumber,
+    target.avgUnitCostBase,
+    target.baseCurrency,
+    workCost,
+  ]);
+
+  const submit = async () => {
+    setFail(null);
+    if (!into || !intoId) return setFail('choose into');
+    if (!Number.isFinite(outNumber) || outNumber <= 0) return setFail('out above zero');
+    if (overStock) return setFail(`over ${target.onHand} ${target.unit}`);
+    if (!Number.isFinite(inNumber) || inNumber <= 0) return setFail('in above zero');
+    if (wholeUnits && !Number.isInteger(inNumber)) return setFail('whole units only');
+    if (!Number.isFinite(lossNumber) || lossNumber < 0) return setFail('invalid loss');
+    if (overLoss) return setFail('loss over out');
+    if (overLot) return setFail('over lot');
+    try {
+      const res = await convert.mutateAsync({
+        inputs: [
+          {
+            materialId: target.materialId,
+            quantity: inputToDecimal(outQty),
+            lossQty: inputToDecimal(lossQty),
+            lotId: selectedLot ? numId(selectedLot.id) : 0,
+          },
+        ],
+        output: {
+          materialId: intoId,
+          quantity: inputToDecimal(inQty),
+          lotCode: '',
+          measuredWidthCm: undefined,
+          shadeCode: '',
+        },
+        workCost: canWriteCosting ? inputToDecimal(workCost) : undefined,
+        workCurrency: canWriteCosting && workCost.trim() ? currency : '',
+        supplierId: supplierId || undefined,
+        supplierDoc: '',
+        comment: '',
+        occurredAt: dayToTimestamp(occurredAt),
+        clientRequestId: requestId.current,
+      });
+      const inputMovement = res.conversion?.lines?.find(
+        (line) =>
+          line.movement?.movementType === 'MATERIAL_MOVEMENT_TYPE_CONVERT_OUT' &&
+          numId(line.movement.materialId) === target.materialId,
+      )?.movement;
+      const serverCost = decimalToInput(res.conversion?.outputUnitCostBase);
+      posted(
+        target,
+        inputMovement,
+        serverCost && into.unit
+          ? `cost ${Number(serverCost).toFixed(2)} € / ${into.unit}`
+          : undefined,
+      );
+      onOpenChange(false);
+    } catch (error) {
+      failed(target, 'not converted', error, setFail);
+    }
+  };
+
+  return (
+    <>
+      <MovementDialog
+        open={open}
+        onOpenChange={onOpenChange}
+        title={`convert · ${target.materialLabel}`}
+        busy={convert.isPending}
+        onSubmit={submit}
+        submitLabel='convert'
+        fail={fail}
+        failVerb='not converted'
+      >
+        <Field label='into'>
+          <Button
+            type='button'
+            variant='default'
+            className='flex h-9 min-h-9 w-full items-center gap-2 border border-borderColor bg-bgColor px-2 text-left text-textBaseSize focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+            onClick={() => setPicking(true)}
+          >
+            {into ? <MaterialThumb material={into} size='sm' className='size-4' /> : null}
+            <Text
+              component='span'
+              variant={into ? 'default' : 'label'}
+              className='min-w-0 flex-1 truncate'
+            >
+              {into ? pickedLabel(into) : 'choose'}
+            </Text>
+            <span aria-hidden className='shrink-0 rotate-180'>
+              <Arrow />
+            </span>
+          </Button>
+        </Field>
+
+        <div className='grid grid-cols-2 gap-2'>
+          <QuantityField
+            label='out'
+            value={outQty}
+            unit={target.unit}
+            inputRef={outRef}
+            invalid={overStock}
+            onChange={setOutQty}
+          />
+          <QuantityField
+            label='in'
+            value={inQty}
+            unit={into?.unit ?? ''}
+            inputRef={inRef}
+            invalid={wholeUnits && Number.isFinite(inNumber) && !Number.isInteger(inNumber)}
+            onChange={setInQty}
+          />
+        </div>
+        {overStock ? (
+          <Text size='micro' variant='error'>
+            ! over {target.onHand} {target.unit}
+          </Text>
+        ) : null}
+
+        {lots.length ? (
+          <Field label='lot'>
+            <ChipRow>
+              {lots.map((lot) => {
+                const id = numId(lot.id);
+                const selected = id === numId(selectedLot?.id);
+                return (
+                  <Chip
+                    key={id}
+                    selected={selected}
+                    pressed={selected}
+                    onClick={() => {
+                      setLotTouched(true);
+                      setLotId(id);
+                      setFail(null);
+                    }}
+                  >
+                    {lot.lotCode || lotDay(lot.receivedAt) || 'lot'} ·{' '}
+                    {decimalToInput(lot.remainingQty)} {target.unit}
+                  </Chip>
+                );
+              })}
+              {!lotCovers ? (
+                <Chip
+                  selected={!selectedLot}
+                  pressed={!selectedLot}
+                  onClick={() => {
+                    setLotTouched(true);
+                    setLotId(0);
+                    setFail(null);
+                  }}
+                >
+                  none
+                </Chip>
+              ) : null}
+            </ChipRow>
+          </Field>
+        ) : null}
+        {overLot ? (
+          <Text size='micro' variant='error'>
+            ! over lot {decimalToInput(selectedLot?.remainingQty)} {target.unit}
+          </Text>
+        ) : null}
+
+        {showLoss ? (
+          <div className='grid grid-cols-2 gap-2'>
+            <QuantityField
+              label='loss'
+              value={lossQty}
+              unit={target.unit}
+              invalid={overLoss}
+              onChange={setLossQty}
+            />
+          </div>
+        ) : (
+          <Button
+            type='button'
+            size='xs'
+            variant='underline'
+            className='self-start px-0'
+            onClick={() => setShowLoss(true)}
+          >
+            + loss
+          </Button>
+        )}
+        {overLoss ? (
+          <Text size='micro' variant='error'>
+            ! over {outQty || '0'} {target.unit}
+          </Text>
+        ) : null}
+
+        {canWriteCosting ? (
+          <div className='grid grid-cols-2 gap-2'>
+            <Field label='work'>
+              <Input
+                inputMode='decimal'
+                value={workCost}
+                aria-label='work'
+                className='h-9 min-h-9 text-right'
+                onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                  setWorkCost(sanitizeDecimal(event.target.value))
+                }
+              />
+            </Field>
+            <Field label='currency'>
+              <Select
+                name='convert-currency'
+                value={currency}
+                fullWidth
+                items={EXPENSE_CURRENCIES.map((item) => ({
+                  value: item.value,
+                  label: item.value,
+                }))}
+                onValueChange={setCurrency}
+              />
+            </Field>
+          </div>
+        ) : null}
+
+        <div className='grid grid-cols-2 gap-2'>
+          <Field label='supplier'>
+            <Select
+              name='convert-supplier'
+              value={supplierId}
+              fullWidth
+              items={[
+                { value: 0, label: 'none' },
+                ...suppliers.map((supplier) => ({
+                  value: numId(supplier.id),
+                  label: supplier.name || 'supplier',
+                })),
+              ]}
+              onValueChange={(value: string) => {
+                supplierTouched.current = true;
+                setSupplierId(Number(value) || 0);
+              }}
+            />
+          </Field>
+          <Field label='date'>
+            <Input
+              type='date'
+              value={occurredAt}
+              aria-label='date'
+              className='h-9 min-h-9'
+              onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                setOccurredAt(event.target.value)
+              }
+            />
+          </Field>
+        </div>
+
+        {costPreview && into?.unit ? (
+          <div className='flex items-baseline justify-between gap-2 border-t border-hairline pt-2.5'>
+            <Text component='span'>cost</Text>
+            <Text component='span'>
+              {costPreview} € / {into.unit}
+            </Text>
+          </div>
+        ) : null}
+
+        <MaterialPickerDialog
+          open={picking}
+          value={intoId}
+          clearable={false}
+          title='into'
+          confirmLabel='choose'
+          preferredIds={preferredIds}
+          excludedIds={[target.materialId]}
+          onPick={pickInto}
+          onClose={() => setPicking(false)}
+          onCreate={() => {
+            setPicking(false);
+            setCreating(true);
+          }}
+        />
+      </MovementDialog>
+      <MaterialModal
+        open={creating}
+        onOpenChange={setCreating}
+        onCreated={(_id, material) => pickInto(material)}
+      />
+    </>
+  );
+}
+
+// ---- Shrink ---------------------------------------------------------------------------------
+
+const lotDay = (at?: string): string => {
+  if (!at) return '';
+  const date = new Date(at);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short' })
+    .format(date)
+    .toLowerCase();
+};
+
+const lotWidth = (lot?: common_MaterialLot): string =>
+  decimalToInput(lot?.washedWidthCm) || decimalToInput(lot?.measuredWidthCm);
+
+export function ShrinkLotModal({
+  open,
+  onOpenChange,
+  target,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  target: MovementTarget;
+}) {
+  const { canReadCosting } = usePermissions();
+  const shrink = useShrinkMaterialLot();
+  const lotsQuery = useMaterialLots(target.materialId, false, open && target.materialId > 0);
+  const lots = useMemo(
+    () =>
+      (lotsQuery.data?.lots ?? []).filter(
+        (lot) => !lot.archived && parseDecimalNumber(decimalToInput(lot.remainingQty)) > 0,
+      ),
+    [lotsQuery.data],
+  );
+  const [fail, setFail] = useState<string | null>(null);
+  const [lotId, setLotId] = useState(0);
+  const [length, setLength] = useState('');
+  const [width, setWidth] = useState('');
+  const [occurredAt, setOccurredAt] = useState(todayISO());
+  const selectedLot = lots.find((lot) => numId(lot.id) === lotId);
+
+  useEffect(() => {
+    if (!open) return;
+    setFail(null);
+    setLotId(0);
+    setLength('');
+    setWidth('');
+    setOccurredAt(todayISO());
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (lots.length === 1) setLotId(numId(lots[0].id));
+    else if (lotId && !lots.some((lot) => numId(lot.id) === lotId)) setLotId(0);
+  }, [lotId, lots, open]);
+
+  useEffect(() => {
+    if (!selectedLot) return;
+    setLength(decimalToInput(selectedLot.remainingQty));
+    setWidth(lotWidth(selectedLot));
+    setFail(null);
+  }, [selectedLot]);
+
+  const beforeLength = parseDecimalNumber(decimalToInput(selectedLot?.remainingQty));
+  const afterLength = parseDecimalNumber(length);
+  const beforeWidthRaw = lotWidth(selectedLot);
+  const beforeWidth = parseDecimalNumber(beforeWidthRaw);
+  const afterWidth = parseDecimalNumber(width);
+  const lengthChanged =
+    Number.isFinite(beforeLength) && Number.isFinite(afterLength) && afterLength !== beforeLength;
+  const widthChanged =
+    width.trim() !== '' &&
+    Number.isFinite(afterWidth) &&
+    (!Number.isFinite(beforeWidth) || afterWidth !== beforeWidth);
+  const changed = lengthChanged || widthChanged;
+  const shrinkPct =
+    Number.isFinite(beforeLength) && Number.isFinite(afterLength) && beforeLength > 0
+      ? (((beforeLength - afterLength) / beforeLength) * 100).toFixed(1)
+      : '0.0';
+
+  const costPreview = useMemo(() => {
+    if (!canReadCosting || !selectedLot || !Number.isFinite(afterLength) || afterLength <= 0)
+      return null;
+    const lotCost = parseDecimalNumber(decimalToInput(selectedLot.unitCost));
+    const average = parseDecimalNumber(target.avgUnitCostBase);
+    const cost = Number.isFinite(lotCost) && lotCost > 0 ? lotCost : average;
+    const currency = selectedLot.currency || target.baseCurrency;
+    if (!Number.isFinite(cost) || cost <= 0 || currency !== 'EUR' || !Number.isFinite(beforeLength))
+      return null;
+    return ((beforeLength * cost) / afterLength).toFixed(2);
+  }, [
+    afterLength,
+    beforeLength,
+    canReadCosting,
+    selectedLot,
+    target.avgUnitCostBase,
+    target.baseCurrency,
+  ]);
+
+  const chooseLot = (lot: common_MaterialLot) => {
+    setLotId(numId(lot.id));
+    setFail(null);
+  };
+
+  const submit = async () => {
+    setFail(null);
+    if (!selectedLot) return setFail('choose lot');
+    if (!Number.isFinite(afterLength) || afterLength <= 0) return setFail('invalid length');
+    if (afterLength > beforeLength) return setFail('length over lot');
+    if (width.trim() && (!Number.isFinite(afterWidth) || afterWidth <= 0))
+      return setFail('invalid width');
+    if (!changed) return;
+    try {
+      const res = await shrink.mutateAsync({
+        lotId: numId(selectedLot.id),
+        lengthAfter: inputToDecimal(length),
+        widthAfter: width.trim() ? inputToDecimal(width) : undefined,
+        lengthBefore: inputToDecimal(decimalToInput(selectedLot.remainingQty)),
+        comment: '',
+      });
+      posted(target, res.movement);
+      onOpenChange(false);
+    } catch (error) {
+      if ((error as { status?: number } | undefined)?.status === 409) {
+        setFail('lot changed');
+        void lotsQuery.refetch();
+      } else {
+        failed(target, 'not shrunk', error, setFail);
+      }
+    }
+  };
+
+  return (
+    <MovementDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={`shrink · ${target.materialLabel}`}
+      busy={shrink.isPending}
+      blocked={!selectedLot || !changed}
+      onSubmit={submit}
+      submitLabel='shrink'
+      fail={fail}
+      failVerb='not shrunk'
+    >
+      <Field label='lot'>
+        <ChipRow>
+          {lots.map((lot) => {
+            const id = numId(lot.id);
+            const selected = id === lotId;
+            return (
+              <Chip key={id} selected={selected} pressed={selected} onClick={() => chooseLot(lot)}>
+                {lot.lotCode || lotDay(lot.receivedAt) || 'lot'} ·{' '}
+                {decimalToInput(lot.remainingQty)} {target.unit}
+              </Chip>
+            );
+          })}
+        </ChipRow>
+      </Field>
+
+      <div className='grid grid-cols-2 gap-2 sm:grid-cols-3'>
+        <QuantityField label='length' value={length} unit='m' onChange={setLength} />
+        <QuantityField label='width' value={width} unit='cm' onChange={setWidth} />
+        <div className='col-span-2 sm:col-span-1'>
+          <Field label='date'>
+            <Input
+              type='date'
+              value={occurredAt}
+              aria-label='date'
+              className='h-9 min-h-9'
+              onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                setOccurredAt(event.target.value)
+              }
+            />
+          </Field>
+        </div>
+      </div>
+
+      <div className='flex items-baseline justify-between gap-2 border-t border-hairline pt-2.5'>
+        <Text component='span'>shrink {shrinkPct} %</Text>
+        {costPreview ? <Text component='span'>{costPreview} € / m</Text> : null}
+      </div>
     </MovementDialog>
   );
 }

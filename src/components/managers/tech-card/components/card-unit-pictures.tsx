@@ -29,7 +29,7 @@ import type { common_TechCard } from 'api/proto-http/admin';
 
 import { cardSeamDecisions, useCardSeamsSig } from './assembly-seams/seams-store';
 import { stripRefsOf, type CutStripLike } from './cut-strips/strip-pieces';
-import { seamGraphOfCard } from './card-seam-graph';
+import { seamGraphOfCard, type FormCardGeometry } from './card-seam-graph';
 import { pieceRefKey } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
 import { toPurposeEnum, type TechCardFormData } from './schema';
@@ -81,6 +81,35 @@ export function renderProposalUnit(
 
 type FormPiece = TechCardFormData['pieces'][number];
 type FormOp = NonNullable<TechCardFormData['operations']>[number];
+
+export type LiveCardGraphInput = {
+  pieces: TechCardFormData['pieces'];
+  bomItems: TechCardFormData['bomItems'];
+  operations: TechCardFormData['operations'];
+  aliases: TechCardFormData['pieceDxfAliases'];
+  patterns: TechCardFormData['patterns'];
+  purpose?: string;
+  cutStrips?: readonly CutStripLike[];
+};
+
+/** The one live-form adapter used by both the assembly view and the size chart's active reader. */
+export function liveCardSeamGraph(
+  input: LiveCardGraphInput,
+  geometry: FormCardGeometry,
+): SeamGraph {
+  const card = {
+    techCard: {
+      pieces: input.pieces,
+      bomItems: input.bomItems,
+      operations: input.operations,
+      pieceDxfAliases: { items: input.aliases ?? [] },
+      patterns: input.patterns,
+      purpose: toPurposeEnum(input.purpose),
+      cutStrips: input.cutStrips,
+    },
+  } as unknown as common_TechCard;
+  return seamGraphOfCard(card, geometry, { decisions: cardSeamDecisions });
+}
 
 /** Above this many pieces with a contour the card draws no unit pictograms (and says nothing). */
 const CAP_PIECES = 80;
@@ -192,25 +221,21 @@ export function CardUnitPicturesProvider({
         let g: SeamGraph | null = null;
         if (v.pieces.length > 0) {
           try {
-            const card = {
-              techCard: {
+            g = liveCardSeamGraph(
+              {
                 pieces: v.pieces,
                 bomItems: v.bomItems,
                 operations: v.operations,
-                pieceDxfAliases: { items: v.aliases ?? [] },
+                aliases: v.aliases,
                 patterns: v.patterns,
-                purpose: toPurposeEnum(v.purpose),
+                purpose: v.purpose,
                 cutStrips: v.cutStrips,
               },
-            } as unknown as common_TechCard;
-            g = seamGraphOfCard(
-              card,
               {
                 shapes: v.shapes,
                 cloth: v.cloth,
                 categoryNames: v.categoryNames,
               },
-              { decisions: cardSeamDecisions },
             );
           } catch {
             // Пиктограмма — подсказка, не данные: сбой чтения выкройки не должен ронять вкладку.

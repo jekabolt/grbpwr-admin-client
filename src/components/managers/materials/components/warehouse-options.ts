@@ -19,6 +19,11 @@ export const movementKind = (t?: common_MaterialMovementType | string): string =
       return 'count';
     case 'MATERIAL_MOVEMENT_TYPE_WRITEOFF':
       return 'write-off';
+    case 'MATERIAL_MOVEMENT_TYPE_CONVERT_OUT':
+    case 'MATERIAL_MOVEMENT_TYPE_CONVERT_IN':
+      return 'convert';
+    case 'MATERIAL_MOVEMENT_TYPE_SHRINKAGE':
+      return 'shrink';
     default:
       return '';
   }
@@ -35,6 +40,9 @@ export const movementTypeFilterOptions: { value: common_MaterialMovementType; la
   { value: 'MATERIAL_MOVEMENT_TYPE_RETURN_SAMPLE', label: 'sample return' },
   { value: 'MATERIAL_MOVEMENT_TYPE_ADJUSTMENT', label: 'count' },
   { value: 'MATERIAL_MOVEMENT_TYPE_WRITEOFF', label: 'write-off' },
+  { value: 'MATERIAL_MOVEMENT_TYPE_CONVERT_OUT', label: 'convert out' },
+  { value: 'MATERIAL_MOVEMENT_TYPE_CONVERT_IN', label: 'convert in' },
+  { value: 'MATERIAL_MOVEMENT_TYPE_SHRINKAGE', label: 'shrink' },
 ];
 
 // Signed balance delta of a movement, straight from the ledger (after − before). Returns the

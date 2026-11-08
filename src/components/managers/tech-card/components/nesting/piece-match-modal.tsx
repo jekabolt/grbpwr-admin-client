@@ -38,7 +38,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import type { common_AdminColorwayRef, common_TechCardPieceAreaScope } from 'api/proto-http/admin';
-import type { PieceDTO } from 'lib/nesting/types';
+import type { PieceDTO, Pt } from 'lib/nesting/types';
 import {
   proposePieceShapes,
   type PieceShapeProposal,
@@ -91,10 +91,12 @@ import {
 import { bareToken, normBlock } from './block-code';
 import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './contour-layer';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
+import { separateForDisplay } from './sheet-separate';
 import { CanvasSegments, PieceSheet, type PieceMark } from './piece-sheet';
 import { FuseFields, type InterliningLine } from './fuse-fields';
 import { FuseOverlay } from './fuse-overlay';
 import { createZoneBus, isDrawnZone } from './fuse-zone';
+import { pieceNetOutline, sewingLineLayer } from './net-outline';
 import { fusingSheetsChange, fusingSignature, hasFusedPiece } from './fusing-sheets-stage';
 import {
   blankFuse,
@@ -760,10 +762,9 @@ export function PieceMatchModal({
   saveSessionId,
   knownPieceShapes,
   preferredShapeSizeTokens,
+  interliningOwnerShapes,
   interlining,
   interliningOwnerFiles,
-  onUploadInterliningFile,
-  onPickInterliningFile,
   readOnly: readOnlyProp,
   onClose,
 }: {
@@ -792,6 +793,8 @@ export function PieceMatchModal({
   knownPieceShapes?: readonly PieceShapeReference[];
   /** Dictionary tokens of the base/sample size, preferred when both blocks contain it. */
   preferredShapeSizeTokens?: readonly string[];
+  /** Shapes from owner-uploaded interlining files, keyed by slot and card piece. */
+  interliningOwnerShapes?: ReadonlyMap<string, PieceDTO>;
   interlining?: {
     slotLineKey: string;
     mainBlocks: readonly PieceDTO[];
@@ -800,8 +803,6 @@ export function PieceMatchModal({
     onReview: (skippedIdentities: ReadonlySet<string>) => void;
   };
   interliningOwnerFiles?: ReadonlyMap<string, { fileName?: string; uploading: boolean }>;
-  onUploadInterliningFile?: (lineKey: string, files: FileList | File[]) => void;
-  onPickInterliningFile?: (lineKey: string) => void;
   // Optional override: the caller may already know the card cannot be edited (no write right).
   // A RELEASED card is detected here on its own either way.
   readOnly?: boolean;
@@ -922,6 +923,15 @@ export function PieceMatchModal({
     () => allPieces.filter((p) => (p.layer ?? '') === contourLayer),
     [allPieces, contourLayer],
   );
+  const seamLayer = useMemo(() => sewingLineLayer(allPieces, split.codeById), [allPieces, split]);
+  const netOutlineByPieceId = useMemo(() => {
+    const outlines = new Map<number, Pt[]>();
+    for (const piece of contourPieces) {
+      const outline = pieceNetOutline(piece, allPieces, seamLayer);
+      if (outline) outlines.set(piece.id, outline);
+    }
+    return outlines;
+  }, [allPieces, contourPieces, seamLayer]);
   // Блоки, которых на выбранном слое нет вовсе: их не будет ни на листе, ни в списке.
   const missingOnLayer = useMemo(
     () => blocksMissingOnLayer(allPieces, contourLayer),
@@ -1693,8 +1703,11 @@ export function PieceMatchModal({
         (best, o) => (!best || o.count > best.count ? o : best),
         null,
       )?.size ?? '';
+  // Shown without overlaps (owner, w1107 В4): a piece the exporter laid over its neighbour is
+  // moved off it ON SCREEN only — the file and everything measured from it keep their coordinates.
   const sheetPieces = useMemo(
-    () => (sheet ? sheet.pieces.filter((p) => sizeOfPiece(p) === shownSize) : []),
+    () =>
+      sheet ? separateForDisplay(sheet.pieces.filter((p) => sizeOfPiece(p) === shownSize)) : [],
     [sheet, split, interliningCodes, shownSize],
   );
 
@@ -2674,7 +2687,11 @@ export function PieceMatchModal({
     );
     return interlinings.flatMap((line) => {
       if (!line.ownerFileName || dropped.has(line.key)) return [];
-      const lineScope = scopes.find((candidate) => candidate.key === line.key);
+      const lineScope = scopes.find(
+        (candidate) =>
+          candidate.key === line.key ||
+          candidate.lines.some((scopeLine) => scopeLine.lineKey === line.key),
+      );
       if (!lineScope) return [];
       return (aliases ?? []).some(
         (alias) =>
@@ -2685,6 +2702,16 @@ export function PieceMatchModal({
         : [];
     });
   };
+  const ownerZoneOutlines = useMemo(
+    () =>
+      new Map(
+        [...(interliningOwnerShapes?.entries() ?? [])].map(([key, piece]) => [
+          `owner:${key}`,
+          piece,
+        ]),
+      ),
+    [interliningOwnerShapes],
+  );
   const setFuse = (ci: string, next: PieceFuseSpec) => {
     const { vals, patch } = ioOf(ci);
     const prev = vals.fuse ?? readFuseSpec(vals);
@@ -2722,7 +2749,16 @@ export function PieceMatchModal({
   // The same spec as drawn and edited on the sheet's size (see fuseOnSize / fuseFromSize).
   const shownFuseOfCi = (ci: string): PieceFuseSpec | undefined => {
     const spec = fuseOfCi(ci);
-    return spec && fuseOnSize(ci, shownSize, spec);
+    if (!spec) return undefined;
+    const shown = fuseOnSize(ci, shownSize, spec);
+    const { st } = ioOf(ci);
+    if (shown.mode !== 'whole' || st.kind !== 'existing') return shown;
+    const lineKey = shown.bomLineKey.trim();
+    if (!ownerFileLinesOfPiece(st.key).includes(lineKey)) return shown;
+    const sourceKey = `${lineKey.toLowerCase()}|${st.key.trim().toLowerCase()}`;
+    return ownerZoneOutlines.has(`owner:${sourceKey}`)
+      ? { ...shown, mode: 'zone', zone: { dxfPieceKey: `owner:${sourceKey}` } }
+      : shown;
   };
   const setShownFuse = (ci: string, next: PieceFuseSpec) => {
     const { vals } = ioOf(ci);
@@ -2740,37 +2776,6 @@ export function PieceMatchModal({
       }) as BomLine,
     );
     setFuse(ci, { ...spec, bomLineKey: line.lineKey!.trim() });
-  };
-  const addFileSlot = (): string => {
-    const lines = currentInterliningBomItems();
-    const line = queueBomItem(
-      bornBomLine({
-        section: INTERLINING_SECTION,
-        purpose: INTERFACING_PURPOSE,
-        name: nextNumberedRole('interlining', lines),
-      }) as BomLine,
-    );
-    return line.lineKey!.trim();
-  };
-  const commitFileSlot = (lineKey: string): string => {
-    const key = lineKey.trim();
-    if (!key) return '';
-    const queued = pendingBomItemsRef.current.find((line) => line.lineKey?.trim() === key);
-    if (!queued) return key;
-    const current = (getValues('bomItems') ?? []) as NonNullable<TechCardFormData['bomItems']>;
-    if (!current.some((line) => line.lineKey?.trim() === key)) {
-      setValue('bomItems', [...current, queued], { shouldDirty: true });
-    }
-    dropQueuedBomItem(key);
-    return key;
-  };
-  const uploadInterliningFile = (lineKey: string, files: FileList | File[]) => {
-    const key = commitFileSlot(lineKey);
-    if (key) onUploadInterliningFile?.(key, files);
-  };
-  const pickInterliningFile = (lineKey: string) => {
-    const key = commitFileSlot(lineKey);
-    if (key) onPickInterliningFile?.(key);
   };
   const leaveOwnerFile = (ci: string, lineKey: string) => {
     const { vals, patch } = ioOf(ci);
@@ -2888,11 +2893,12 @@ export function PieceMatchModal({
         toggleBox={TOGGLE_BOX}
         onChange={(next) => setShownFuse(ci, next)}
         onAddSlot={() => addFuseSlot(ci)}
-        onAddFileSlot={addFileSlot}
-        onUploadFile={uploadInterliningFile}
-        onPickFile={pickInterliningFile}
         onLeaveFile={(lineKey) => leaveOwnerFile(ci, lineKey)}
         fileMappedLineKeys={st.kind === 'existing' ? ownerFileLinesOfPiece(st.key) : []}
+        seamAllowanceMm={requiredSeamAllowanceMm}
+        allowanceUsesNetOutline={sheetPieces.some(
+          (piece) => ciOf(piece) === ci && netOutlineByPieceId.has(piece.id),
+        )}
         ci={ci}
         zoneBus={zoneBus}
       />
@@ -3075,6 +3081,8 @@ export function PieceMatchModal({
                           fuseOf={shownFuseOfCi}
                           onChange={setShownFuse}
                           zoneBus={zoneBus}
+                          zoneOutlines={ownerZoneOutlines}
+                          netOutlineOf={(piece) => netOutlineByPieceId.get(piece.id) ?? null}
                           requiredSeamAllowanceMm={requiredSeamAllowanceMm}
                         />
                       )
@@ -3088,7 +3096,12 @@ export function PieceMatchModal({
                     <CanvasSegments
                       label='size on screen'
                       value={shownSize}
-                      onChange={setActiveSize}
+                      onChange={(size) => {
+                        // A size switch shows the whole new sheet (owner, w1107 A5): the fused
+                        // piece's zoom is left, as if «whole sheet» was pressed.
+                        if (size !== shownSize && zoomed) setZoomOut(zoomed);
+                        setActiveSize(size);
+                      }}
                       options={sizeOptions.map((o) => ({
                         key: o.size,
                         label:

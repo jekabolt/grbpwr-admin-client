@@ -80,6 +80,9 @@ function MaterialsBody({
                         {[own(fabric.name), own(fabric.colour)].filter(Boolean).join(' · ') ||
                           (fabric.gaps.material && <Missing gap={fabric.gaps.material} />)}
                         <div className='text-micro uppercase text-labelColor'>{fabric.role}</div>
+                        {fabric.fusing && (
+                          <div className='text-micro text-labelColor'>{fabric.fusing}</div>
+                        )}
                       </td>
                       <td data-align='left'>{own(fabric.composition)}</td>
                       <td className='whitespace-nowrap'>
