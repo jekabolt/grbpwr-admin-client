@@ -77,6 +77,36 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink, t: Pd
     };
     return sink?.add(gap) ?? gap;
   };
+  // How an interlining line is used: one caption per distinct method of the pieces fused with it.
+  // An empty piece choice means the card's sole interlining line.
+  const interliningKeys = refs
+    .filter((ref) => ref.item.section === INTERLINING)
+    .map((ref) => clean(ref.item.lineKey));
+  const seamAllowanceMm = decimal(card?.requiredSeamAllowanceMm);
+  const fusingOf = (lineKey: string): string =>
+    [
+      ...new Set(
+        pieces
+          .filter((piece) => {
+            if (!piece.fused) return false;
+            const chosen = clean(piece.fusingBomLineKey);
+            return chosen ? chosen === lineKey : interliningKeys.length === 1;
+          })
+          .map((piece) => {
+            const mode = clean(piece.fusingMode);
+            if (mode === 'TECH_CARD_PIECE_FUSING_MODE_FULL') return t('materials.fusingWhole');
+            if (mode === 'TECH_CARD_PIECE_FUSING_MODE_ZONE') return t('materials.fusingZone');
+            if (mode !== 'TECH_CARD_PIECE_FUSING_MODE_STRIP') return '';
+            const width = decimal(piece.fusingWidthMm);
+            // An empty width is the allowance mode: the strip covers the piece's own seam allowance.
+            if (width != null) return t('materials.fusingStrip', { mm: width });
+            return seamAllowanceMm != null
+              ? t('materials.fusingAllowanceMm', { mm: seamAllowanceMm })
+              : t('materials.fusingAllowance');
+          })
+          .filter(Boolean),
+      ),
+    ].join(' · ');
   const fabrics = refs.filter(rollGoods).map((ref, index) => {
     const marker = (techCard.markers ?? []).find(
       (item) =>
@@ -98,6 +128,7 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink, t: Pd
       refKey: ref.key,
       name,
       role: materialRoleText(ref.item, materialRole(ref), t),
+      fusing: ref.item.section === INTERLINING ? fusingOf(clean(ref.item.lineKey)) : '',
       colour: colour.name,
       swatch: colour.swatch,
       composition: formatCompositionCell(ref.item.composition),
