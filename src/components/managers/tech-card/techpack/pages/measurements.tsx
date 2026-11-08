@@ -26,7 +26,7 @@ type Props = {
   sizeNames?: Readonly<Record<number, string>>;
   /** Main-fabric shrinkage, used when the chart has no override of its own. */
   fabricShrinkage?: number;
-  /** The chart RPC is live because release snapshots do not contain it. */
+  /** A release print: `sizeChart` is the chart frozen with it, absent on an older release. */
   release?: boolean;
 };
 
@@ -229,7 +229,9 @@ export function MeasurementsPage({
   ]
     .filter(Boolean)
     .join(' · ');
-  const paginationKey = `${techCard.id ?? 0}:${orient}:${rows.length}:${sizeIds.join(',')}:${release}`;
+  // An older release froze no chart: its page stays empty rather than print today's numbers.
+  const notInRevision = release && !sizeChart;
+  const paginationKey = `${techCard.id ?? 0}:${orient}:${rows.length}:${sizeIds.join(',')}:${notInRevision}`;
   const { contentRef, overflow } = useTechpackOverflow(paginationKey);
 
   const sheet = (pageRows: readonly ChartRow[], continued: boolean, probe = false) => (
@@ -242,41 +244,43 @@ export function MeasurementsPage({
         <SectionHeader
           title={continuedTitle(n, title, continued, t)}
           action={
-            <div className='flex items-center gap-1'>
-              {model.gaps.measurements && <Missing gap={model.gaps.measurements} />}
-              {model.gaps.drawing && <Missing gap={model.gaps.drawing} />}
-              {rowGaps.map((gap) => (
-                <span key={`${gap.code}-${gap.refs.join('-')}`}>
-                  <Missing gap={gap} />
-                </span>
-              ))}
-              <ChartMetaText shrinkage={override ?? fabricShrinkage} />
-            </div>
+            notInRevision ? undefined : (
+              <div className='flex items-center gap-1'>
+                {model.gaps.measurements && <Missing gap={model.gaps.measurements} />}
+                {model.gaps.drawing && <Missing gap={model.gaps.drawing} />}
+                {rowGaps.map((gap) => (
+                  <span key={`${gap.code}-${gap.refs.join('-')}`}>
+                    <Missing gap={gap} />
+                  </span>
+                ))}
+                <ChartMetaText shrinkage={override ?? fabricShrinkage} />
+              </div>
+            )
           }
         />
-        {release && (
-          <p className='mb-1 text-nano uppercase text-labelColor'>
-            {t('common.liveNotInRevision')}
-          </p>
+        {notInRevision ? (
+          <p className='text-nano uppercase text-labelColor'>{t('common.notInRevision')}</p>
+        ) : (
+          <div className='grid grid-cols-[2fr_3fr] items-start gap-5'>
+            <SizeChartSchematic
+              kind={kind}
+              points={pageRows}
+              label={own('Size chart')}
+              className='max-h-[35rem]'
+            />
+            <ChartTable
+              rows={pageRows}
+              sizeIds={sizeIds}
+              sizeNames={sizeNames}
+              baseSizeId={techCard.techCard?.baseSampleSizeId ?? 0}
+            />
+          </div>
         )}
-        <div className='grid grid-cols-[2fr_3fr] items-start gap-5'>
-          <SizeChartSchematic
-            kind={kind}
-            points={pageRows}
-            label={own('Size chart')}
-            className='max-h-[35rem]'
-          />
-          <ChartTable
-            rows={pageRows}
-            sizeIds={sizeIds}
-            sizeNames={sizeNames}
-            baseSizeId={techCard.techCard?.baseSampleSizeId ?? 0}
-          />
-        </div>
       </div>
     </TechpackSheet>
   );
 
+  if (notInRevision) return sheet([], false);
   if (!overflow) return sheet(rows, false, true);
 
   const pages = chunksOf(rows, orient === 'land' ? 18 : 20);

@@ -4601,6 +4601,10 @@ export type TechCard = {
   // OUTPUT-ONLY: the norm each strip line gets from its strips, one row per BOM line. Present even on
   // a card with no colourways, which has no recipe row to read a norm from. Ignored on write.
   cutStripNorms: TechCardCutStripNorm[] | undefined;
+  // OUTPUT-ONLY, RELEASE SNAPSHOTS ONLY: the style size chart frozen when the card was released
+  // (tech_card_release.snapshot), so every print of that revision carries the same numbers. Never
+  // set on a live card read. A release captured before this field existed has none. Ignored on write.
+  releaseSizeChart: StyleSizeChart | undefined;
 };
 
 // TechCardOutputVariant is one colour of an AUXILIARY card's warehouse output: "this card, in this

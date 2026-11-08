@@ -49,7 +49,7 @@ export const fr = {
     by: 'par',
     section: 'section',
     action: 'action',
-    liveNotInRevision: 'actuel · hors rév.',
+    notInRevision: 'hors rév.',
     gaps: { one: '{count} manque', many: '{count} manques', other: '{count} manques' },
     operationsShort: { one: '{count} op.', many: '{count} op.', other: '{count} op.' },
     panels: { one: '{count} panneau', many: '{count} panneaux', other: '{count} panneaux' },

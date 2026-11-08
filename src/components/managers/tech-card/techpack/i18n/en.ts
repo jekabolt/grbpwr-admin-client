@@ -58,7 +58,7 @@ export const en = {
     by: 'by',
     section: 'section',
     action: 'action',
-    liveNotInRevision: 'live · not in rev',
+    notInRevision: 'not in revision',
     gaps: { one: '{count} gaps', few: '{count} gaps', many: '{count} gaps', other: '{count} gaps' },
     operationsShort: {
       one: '{count} ops',

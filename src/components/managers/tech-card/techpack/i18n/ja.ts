@@ -49,7 +49,7 @@ export const ja = {
     by: '担当',
     section: '項目',
     action: '操作',
-    liveNotInRevision: '現行 · 改訂外',
+    notInRevision: '改訂外',
     gaps: { other: '不備 {count}' },
     operationsShort: { other: '{count} 工程' },
     panels: { other: '{count} パネル' },

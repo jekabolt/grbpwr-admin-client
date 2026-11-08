@@ -49,7 +49,7 @@ export const es = {
     by: 'por',
     section: 'sección',
     action: 'acción',
-    liveNotInRevision: 'actual · fuera de rev.',
+    notInRevision: 'fuera de rev.',
     gaps: { one: '{count} falta', many: '{count} faltas', other: '{count} faltas' },
     operationsShort: { one: '{count} op.', many: '{count} op.', other: '{count} op.' },
     panels: { one: '{count} panel', many: '{count} paneles', other: '{count} paneles' },

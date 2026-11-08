@@ -153,7 +153,7 @@ export function TechpackDocument({
 
   // one-way: once the two sections outgrow one sheet they stay on two
   const [split, setSplit] = useState(false);
-  const sizing = useTechpackMeasurements(techCard);
+  const sizing = useTechpackMeasurements(techCard, release);
   // Detail layouts are live RPC data and expensive to turn into SVG. Fetch them only after the
   // section has actually moved to its own sheet, and never mix them into a frozen release pack.
   const markers = useTechpackMarkerLayouts(

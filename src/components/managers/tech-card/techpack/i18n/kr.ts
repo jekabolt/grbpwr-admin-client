@@ -49,7 +49,7 @@ export const kr = {
     by: '담당',
     section: '구분',
     action: '작업',
-    liveNotInRevision: '현행 · 개정 외',
+    notInRevision: '개정 외',
     gaps: { other: '누락 {count}건' },
     operationsShort: { other: '공정 {count}건' },
     panels: { other: '패널 {count}장' },

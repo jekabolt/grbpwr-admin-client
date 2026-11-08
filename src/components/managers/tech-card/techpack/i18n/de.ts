@@ -49,7 +49,7 @@ export const de = {
     by: 'von',
     section: 'Abschnitt',
     action: 'Aktion',
-    liveNotInRevision: 'aktuell · nicht in Änd.',
+    notInRevision: 'nicht in Änd.',
     gaps: { one: '{count} Fehlstelle', other: '{count} Fehlstellen' },
     operationsShort: { one: '{count} AG', other: '{count} AG' },
     panels: { one: '{count} Teil', other: '{count} Teile' },

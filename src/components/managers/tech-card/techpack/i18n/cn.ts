@@ -49,7 +49,7 @@ export const cn = {
     by: '操作人',
     section: '章节',
     action: '操作',
-    liveNotInRevision: '当前 · 非本版本',
+    notInRevision: '非本版本',
     gaps: { other: '缺项 {count}' },
     operationsShort: { other: '工序 {count}' },
     panels: { other: '衣片 {count}' },

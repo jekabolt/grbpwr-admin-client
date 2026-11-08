@@ -49,7 +49,7 @@ export const pl = {
     by: 'przez',
     section: 'sekcja',
     action: 'działanie',
-    liveNotInRevision: 'aktualne · poza wer.',
+    notInRevision: 'poza wer.',
     gaps: {
       one: '{count} brak',
       few: '{count} braki',

@@ -49,7 +49,7 @@ export const it = {
     by: 'da',
     section: 'sezione',
     action: 'azione',
-    liveNotInRevision: 'corrente · fuori rev.',
+    notInRevision: 'fuori rev.',
     gaps: { one: '{count} mancanza', many: '{count} mancanze', other: '{count} mancanze' },
     operationsShort: { one: '{count} op.', many: '{count} op.', other: '{count} op.' },
     panels: { one: '{count} pannello', many: '{count} pannelli', other: '{count} pannelli' },

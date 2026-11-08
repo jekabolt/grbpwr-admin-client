@@ -8,7 +8,12 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo, useRef } from 'react';
 import { useChartFabricShrinkage } from './pages/use-chart-shrinkage';
 
-export function useTechpackMeasurements(techCard: common_TechCard) {
+/**
+ * `release`: `techCard` is a frozen release snapshot. Its size chart is the one frozen with it
+ * (`releaseSizeChart`), never the live one, so every print of a revision carries the same numbers.
+ * A release frozen before the chart was captured has none, and the page says so.
+ */
+export function useTechpackMeasurements(techCard: common_TechCard, release = false) {
   const { dictionary, loading: dictionaryLoading, error: dictionaryError } = useDictionary();
   const { measurements } = useMeasurements(
     dictionary,
@@ -19,7 +24,7 @@ export function useTechpackMeasurements(techCard: common_TechCard) {
   const chart = useQuery({
     queryKey: ['styleSizeChart', techCard.id, 'techpack-v6'],
     queryFn: () => adminService.GetStyleSizeChart({ styleId: techCard.id ?? 0 }),
-    enabled: !!techCard.id,
+    enabled: !!techCard.id && !release,
     retry: false,
   });
   const sizeNames = useMemo(() => {
@@ -34,11 +39,11 @@ export function useTechpackMeasurements(techCard: common_TechCard) {
   return {
     measurements,
     fabricShrinkage,
-    sizeChart: chart.data?.chart,
+    sizeChart: release ? techCard.releaseSizeChart : chart.data?.chart,
     sizeNames,
     orderSizes,
-    isLoading: dictionaryLoading || chart.isLoading,
-    isError: !!dictionaryError || chart.isError,
+    isLoading: dictionaryLoading || (!release && chart.isLoading),
+    isError: !!dictionaryError || (!release && chart.isError),
   };
 }
 

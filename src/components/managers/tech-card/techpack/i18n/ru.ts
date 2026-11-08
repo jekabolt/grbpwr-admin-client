@@ -49,7 +49,7 @@ export const ru = {
     by: 'автор',
     section: 'раздел',
     action: 'действие',
-    liveNotInRevision: 'актуальная · вне версии',
+    notInRevision: 'вне версии',
     gaps: {
       one: '{count} пропуск',
       few: '{count} пропуска',
