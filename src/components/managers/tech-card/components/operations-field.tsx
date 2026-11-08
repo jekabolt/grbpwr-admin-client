@@ -176,7 +176,7 @@ import {
 } from './equipment-options';
 import { kindLabel, preferredBomKinds } from './bom-kind';
 import type { FormGarmentLabel } from './labels-schema';
-import { labelPictogram, labelSizeText } from './sewn-label-row';
+import { ensureLabelLineKey, labelPictogram, labelSizeText } from './sewn-label-row';
 import { garmentLabelKindNames, kindLabel as garmentLabelName } from './tech-card-options';
 // ВЫВОДИМОСТЬ — ЧИСТЫЕ ФУНКЦИИ ЖИВУТ ОТДЕЛЬНО, И ЭТО НЕ СТИЛЬ. Правило «ровно один кандидат или
 // молчим» проверяется пробой на фикстурах, а не глазами по редактору на семь тысяч строк;
@@ -2476,7 +2476,7 @@ function useStepInference(
 
 // ── the step editor ──────────────────────────────────────────────────────────────────────────
 function OperationLabelPicker({ index, frozen }: { index: number; frozen: boolean }) {
-  const { control, setValue } = useFormContext<TechCardFormData>();
+  const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const labels = (useWatch({ control, name: 'garmentLabels' }) ?? []) as FormGarmentLabel[];
   const operations = useWatch({ control, name: 'operations' }) ?? [];
   const selected = (operations[index]?.labelKeys ?? []).filter(Boolean);
@@ -2487,15 +2487,18 @@ function OperationLabelPicker({ index, frozen }: { index: number; frozen: boolea
   );
   const available = labels.filter((label) => {
     const key = label.lineKey?.trim() || '';
-    return key && (selected.includes(key) || !ownedElsewhere.has(key));
+    return !key || selected.includes(key) || !ownedElsewhere.has(key);
   });
   const [, setParams] = useSearchParams();
-  const toggle = (key: string) =>
+  const toggle = (label: FormGarmentLabel) => {
+    const key = ensureLabelLineKey(getValues, setValue, label.key?.trim() || '');
+    if (!key) return;
     setValue(
       `operations.${index}.labelKeys`,
       selected.includes(key) ? selected.filter((value) => value !== key) : [...selected, key],
       { shouldDirty: true },
     );
+  };
 
   return (
     <>
@@ -2503,14 +2506,14 @@ function OperationLabelPicker({ index, frozen }: { index: number; frozen: boolea
       {available.length ? (
         <div className='flex flex-wrap gap-2'>
           {available.map((label) => {
-            const key = label.lineKey!.trim();
+            const key = label.lineKey?.trim() || '';
             const kind = label.kind?.trim() || label.key?.trim() || '';
             const name =
               label.key?.trim() || garmentLabelName(garmentLabelKindNames, kind) || 'label';
             const size = labelSizeText(label);
             return (
               <Tile
-                key={key}
+                key={key || label.key}
                 name={name}
                 sub={size ? `${size} mm` : ''}
                 selected={selected.includes(key)}
@@ -2521,7 +2524,7 @@ function OperationLabelPicker({ index, frozen }: { index: number; frozen: boolea
                   </span>
                 }
                 className='w-32 p-0 [&>p]:mx-2'
-                onClick={frozen ? undefined : () => toggle(key)}
+                onClick={frozen ? undefined : () => toggle(label)}
               />
             );
           })}

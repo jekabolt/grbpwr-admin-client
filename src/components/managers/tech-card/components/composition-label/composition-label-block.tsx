@@ -584,13 +584,12 @@ export function CompositionLabelBlock({
         value={
           <Button
             type='button'
-            variant='main'
-            size='sm'
-            className='h-7'
+            variant='underline'
+            size='xs'
             disabled={!techCardId}
             onClick={() => setPrinting(true)}
           >
-            Print labels
+            print labels
           </Button>
         }
         className='items-center pt-2'
