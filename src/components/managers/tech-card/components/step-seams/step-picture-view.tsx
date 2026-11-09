@@ -802,6 +802,38 @@ export type EdgeMark = {
 };
 export type NoMark = { id: TargetId; i: number; range?: readonly [number, number] };
 /** A break point shown on an edge in hand: a notch is a square, an end or a turn a circle. */
+/** The width of an edge's hit stroke, in px. */
+const DOOR_HIT = 14;
+
+/**
+ * A narrow piece (a 30 mm label) is all edge at the full hit width: its body could not be taken to
+ * move it. Its edges get a hit stroke of a quarter of its short side, never under 4 px.
+ */
+export function doorHitWidths(
+  doors: readonly { id: TargetId; points: readonly Pt2[]; inner?: unknown }[],
+): Map<string, number> {
+  const boxes = new Map<string, { x0: number; y0: number; x1: number; y1: number }>();
+  for (const door of doors) {
+    if (door.inner) continue;
+    const piece = pieceOfTarget(door.id);
+    const box = boxes.get(piece) ?? { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+    for (const [x, y] of door.points) {
+      box.x0 = Math.min(box.x0, x);
+      box.y0 = Math.min(box.y0, y);
+      box.x1 = Math.max(box.x1, x);
+      box.y1 = Math.max(box.y1, y);
+    }
+    boxes.set(piece, box);
+  }
+  const widths = new Map<string, number>();
+  for (const [piece, box] of boxes) {
+    const short = Math.min(box.x1 - box.x0, box.y1 - box.y0);
+    if (Number.isFinite(short) && short < DOOR_HIT * 4)
+      widths.set(piece, Math.max(4, Math.min(DOOR_HIT, short / 4)));
+  }
+  return widths;
+}
+
 export type EdgeTick = { id: TargetId; atMm: number; notch: boolean };
 export type PictureActionLine = {
   id: string;
@@ -2644,6 +2676,7 @@ export function StepPictureSvg({
     () => doors.filter((x) => x.inner).map((x) => <path key={x.id} d={pathOf(x.points)} />),
     [doors],
   );
+  const hitWidths = useMemo(() => doorHitWidths(doors), [doors]);
   const doorHits = useMemo(
     () =>
       onPick
@@ -2654,7 +2687,7 @@ export function StepPictureSvg({
               d={pathOf(x.points)}
               fill='none'
               stroke='transparent'
-              strokeWidth={14}
+              strokeWidth={hitWidths.get(pieceOfTarget(x.id)) ?? DOOR_HIT}
               pointerEvents='stroke'
               className='cursor-pointer'
               onPointerEnter={() => onHover?.(x.id)}
@@ -2692,7 +2725,18 @@ export function StepPictureSvg({
             />
           ))
         : null,
-    [doors, onPick, onHover, onHoverAt, onSpanDrag, startSpanDrag, mmOfDoor, pointerAt, pickAt],
+    [
+      doors,
+      hitWidths,
+      onPick,
+      onHover,
+      onHoverAt,
+      onSpanDrag,
+      startSpanDrag,
+      mmOfDoor,
+      pointerAt,
+      pickAt,
+    ],
   );
 
   // The flat ghost of a closing step always lies under the folded outline.
