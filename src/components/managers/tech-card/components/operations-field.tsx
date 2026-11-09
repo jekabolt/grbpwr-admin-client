@@ -6,6 +6,7 @@ import {
   common_TechCardButtonholeStyle,
   common_TechCardMachineType,
   common_TechCardOperationType,
+  type common_Material,
 } from 'api/proto-http/admin';
 import { withSeamHints } from 'lib/seam-hints';
 import { notify } from 'lib/stores/store';
@@ -229,6 +230,8 @@ import {
 } from './assembly-create-dialog';
 import { suggestUnitCode } from './assembly-suggest';
 import { type UnitRenameNotice } from './assembly-rename';
+import { qtyStepFromFormOperation, stepQtyOfLine } from './button-qty';
+import { OperationButtonAttachChecks, OperationMaterialStepQty } from './operation-quantity-marks';
 import { targetAddPrefill } from './assembly-node-views';
 import {
   appendLabel,
@@ -1174,6 +1177,7 @@ export type ColorwayArticles = {
     pinsByLineKey: Map<string, number[]>;
   }[];
   materialNameById: Map<number, string>;
+  materialById: Map<number, common_Material>;
 };
 
 // Из чего кроится каждая деталь — по колорвеям, в порядке карточки.
@@ -2585,6 +2589,7 @@ function OperationEditor({
   previousPieceShapes,
   ghostKeys,
   cloth,
+  colorwayArticles,
   pinOptions,
   onInsertAfter,
   onRemove,
@@ -2625,6 +2630,8 @@ function OperationEditor({
    * плиткой состава шага и больше ничем: редактор пишет в форму шаг, а не рецепт.
    */
   cloth?: Map<string, PieceCloth> | null;
+  /** Concrete catalog articles used by each colourway for linked BOM lines. */
+  colorwayArticles?: ColorwayArticles;
   pinOptions: PickerOption[];
   onInsertAfter: () => void;
   onRemove: () => void;
@@ -4340,6 +4347,38 @@ function OperationEditor({
   const linkedMaterials = selectedBomKeys
     .map((k) => bomLines.find((b) => b.lineKey === k))
     .filter(Boolean) as BomLine[];
+  const quantityStep = qtyStepFromFormOperation({
+    operationNumber: storedOperationNumber,
+    operationType: opType,
+    machineType,
+    placementCount,
+    bomLineKeys: selectedBomKeys,
+  });
+  const buttonArticleIds = linkedMaterials
+    .filter((line) => line.kind === 'TECH_CARD_BOM_KIND_BUTTON')
+    .flatMap((line) => {
+      const defaultId = wireIntOf(line.materialId);
+      if (!colorwayArticles?.colorways.length) return defaultId > 0 ? [defaultId] : [];
+      return colorwayArticles.colorways.flatMap(({ pinsByLineKey }) => {
+        const pins = pinsByLineKey.get(line.lineKey?.trim() ?? '');
+        if (!pins) return [];
+        return pins
+          .map((pin) => (wireIntOf(pin) > 0 ? wireIntOf(pin) : defaultId))
+          .filter((id) => id > 0);
+      });
+    });
+  const articleHoleValues = [...new Set(buttonArticleIds)].map(
+    (id) => colorwayArticles?.materialById.get(id)?.hardwareAttrs?.buttonHoles,
+  );
+  const distinctArticleHoles = [
+    ...new Set(articleHoleValues.filter((holes): holes is number => holes != null && holes > 0)),
+  ];
+  const buttonArticleHoles =
+    articleHoleValues.length > 0 &&
+    articleHoleValues.every((holes) => holes != null && holes > 0) &&
+    distinctArticleHoles.length === 1
+      ? distinctArticleHoles[0]
+      : null;
   const bomOutOfRange = selectedBomKeys.length > linkedMaterials.length;
   const unlinkedBoms = linkableBoms.filter((b) => !selectedBomKeys.includes(b.lineKey ?? ''));
   // Grouped for the reveal: six sections in one flat pile would read as undifferentiated, and
@@ -5025,31 +5064,36 @@ function OperationEditor({
         <div className='size-18'>
           <Tile dashed name='+ piece' onClick={onFlashPieces} className='justify-center' />
         </div>
-        {linkedMaterials.map((material) => (
-          <span
-            key={material.lineKey}
-            className='group relative h-18 w-24'
-            onMouseEnter={() => onActiveBomChange?.(material.lineKey ?? null)}
-            onMouseLeave={() => onActiveBomChange?.(null)}
-          >
-            <Tile
-              title={kindLabel(material.kind) ?? LINKABLE_SECTION_LABEL[material.section ?? '']}
-              className='justify-center'
+        {linkedMaterials.map((material) => {
+          const lineKey = material.lineKey?.trim() ?? '';
+          const stepQty = lineKey ? stepQtyOfLine(quantityStep, lineKey) : null;
+          return (
+            <span
+              key={material.lineKey}
+              className='group relative h-18 w-24'
+              onMouseEnter={() => onActiveBomChange?.(material.lineKey ?? null)}
+              onMouseLeave={() => onActiveBomChange?.(null)}
             >
-              <Text size='micro' className='line-clamp-3 font-bold break-words uppercase'>
-                {material.name?.trim() || 'unnamed'}
-              </Text>
-            </Tile>
-            <Close
-              aria-label={`remove material ${material.name?.trim() || ''}`}
-              onClick={() => {
-                if (material.lineKey && material.lineKey === applied.thread) dismiss('thread');
-                toggleBom(material.lineKey ?? '');
-              }}
-              className={WITH_CLOSE}
-            />
-          </span>
-        ))}
+              <Tile
+                title={kindLabel(material.kind) ?? LINKABLE_SECTION_LABEL[material.section ?? '']}
+                className='justify-center'
+              >
+                <Text size='micro' className='line-clamp-3 font-bold break-words uppercase'>
+                  {material.name?.trim() || 'unnamed'}
+                </Text>
+              </Tile>
+              <OperationMaterialStepQty qty={stepQty} />
+              <Close
+                aria-label={`remove material ${material.name?.trim() || ''}`}
+                onClick={() => {
+                  if (material.lineKey && material.lineKey === applied.thread) dismiss('thread');
+                  toggleBom(material.lineKey ?? '');
+                }}
+                className={cn(WITH_CLOSE, 'left-px right-auto')}
+              />
+            </span>
+          );
+        })}
         {unlinkedBoms.length > 0 && (
           <div className='h-18 w-24'>
             <Tile
@@ -5077,6 +5121,7 @@ function OperationEditor({
           onEdit={onEdit}
         />
       </div>
+      <OperationButtonAttachChecks index={index} articleHoles={buttonArticleHoles} />
       <StepSeamsRow index={index} picker={seamPicker} onPicker={setSeamPicker} />
       <StepFoldsRow index={index} />
       {addingMaterial && unlinkedBySection.length > 0 && (
@@ -5734,6 +5779,7 @@ export function OperationsField({
   onActivePinChange,
   activeBom = null,
   onActiveBomChange,
+  colorwayArticles,
   pieceClothByColorway,
   pieceShapes = null,
   orphanBlocks = [],
@@ -8407,6 +8453,7 @@ export function OperationsField({
                   previousPieceShapes={previousPieceShapes}
                   ghostKeys={ghostKeys}
                   cloth={inlineCloth?.map ?? null}
+                  colorwayArticles={colorwayArticles}
                   pinOptions={pinOptions}
                   onInsertAfter={() => insertAfter(selectedIndex)}
                   onRemove={() => requestRemoveOperation(selectedIndex)}
@@ -8513,6 +8560,7 @@ export function OperationsField({
                 previousPieceShapes={previousPieceShapes}
                 ghostKeys={ghostKeys}
                 cloth={inlineCloth?.map ?? null}
+                colorwayArticles={colorwayArticles}
                 pinOptions={pinOptions}
                 onInsertAfter={() => insertAfter(selectedIndex)}
                 onRemove={() => requestRemoveOperation(selectedIndex)}

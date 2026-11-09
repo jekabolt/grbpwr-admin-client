@@ -22,6 +22,26 @@ export type QtyStep = {
   explicitQty?: (lineKey: string) => number | null | undefined;
 };
 
+type QtyValue = number | string | { value?: string } | null | undefined;
+
+type OperationQtySource = {
+  operationNumber?: number;
+  operationType?: string;
+  machineType?: string;
+  placementLayout?: { count?: number | null } | null;
+  bomLineKeys?: readonly (string | undefined)[];
+  bomQuantities?:
+    | readonly {
+        lineKey?: string;
+        qtyPerGarment?: QtyValue;
+      }[]
+    | null;
+};
+
+type FormOperationQtySource = Omit<OperationQtySource, 'placementLayout'> & {
+  placementCount?: number | null;
+};
+
 const ATTACH_VERBS = new Set([
   'TECH_CARD_OPERATION_TYPE_HARDWARE_SET',
   'TECH_CARD_OPERATION_TYPE_BUTTON_ATTACH',
@@ -37,6 +57,52 @@ export function isAttachStep(step: QtyStep): boolean {
 }
 
 const key = (value?: string) => (value ?? '').trim();
+
+const qtyNumber = (value: QtyValue): number | null => {
+  const raw =
+    typeof value === 'object' && value !== null
+      ? value.value
+      : typeof value === 'number'
+        ? value
+        : value;
+  if (raw == null || raw === '') return null;
+  const number = typeof raw === 'number' ? raw : Number(raw.replace(',', '.'));
+  return Number.isFinite(number) ? number : null;
+};
+
+const explicitQtyOf = (quantities: OperationQtySource['bomQuantities']): QtyStep['explicitQty'] => {
+  const byLine = new Map<string, number>();
+  for (const quantity of quantities ?? []) {
+    const lineKey = key(quantity.lineKey);
+    const qty = qtyNumber(quantity.qtyPerGarment);
+    if (lineKey && qty != null) byLine.set(lineKey, qty);
+  }
+  return (lineKey) => byLine.get(key(lineKey));
+};
+
+/** Wire operation → the one quantity-rule shape shared by editor and PDF. */
+export function qtyStepFromOperation(operation: OperationQtySource): QtyStep {
+  return {
+    operationNumber: operation.operationNumber,
+    operationType: operation.operationType,
+    machineType: operation.machineType,
+    placementCount: operation.placementLayout?.count,
+    bomLineKeys: operation.bomLineKeys,
+    explicitQty: explicitQtyOf(operation.bomQuantities),
+  };
+}
+
+/** Form operation → the same rule; the editor keeps REPEATS as a flat field. */
+export function qtyStepFromFormOperation(operation: FormOperationQtySource): QtyStep {
+  return {
+    operationNumber: operation.operationNumber,
+    operationType: operation.operationType,
+    machineType: operation.machineType,
+    placementCount: operation.placementCount,
+    bomLineKeys: operation.bomLineKeys,
+    explicitQty: explicitQtyOf(operation.bomQuantities),
+  };
+}
 
 /** Сколько штук строки `lineKey` ставит один шаг; null — шаг её не ставит или числа нет. */
 export function stepQtyOfLine(step: QtyStep, lineKey: string): number | null {

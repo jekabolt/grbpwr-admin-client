@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { isAttachStep, slotQtyFromSteps, stepQtyOfLine } from './button-qty';
+import {
+  isAttachStep,
+  qtyStepFromFormOperation,
+  qtyStepFromOperation,
+  slotQtyFromSteps,
+  stepQtyOfLine,
+} from './button-qty';
 
 const attach = (n: number, count: number | null, keys = ['BTN']) => ({
   operationNumber: n,
@@ -41,6 +47,27 @@ describe('button qty from steps', () => {
       explicitQty: () => 3,
     };
     expect(stepQtyOfLine(hole, 'BTN')).toBe(3);
+  });
+
+  it('adapts wire and form placement shapes without changing precedence', () => {
+    const wire = qtyStepFromOperation({
+      operationNumber: 20,
+      operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+      machineType: 'TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH',
+      placementLayout: { count: 6 },
+      bomLineKeys: ['BTN'],
+      bomQuantities: [{ lineKey: 'BTN', qtyPerGarment: { value: '4' } }],
+    });
+    const form = qtyStepFromFormOperation({
+      operationNumber: 20,
+      operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+      machineType: 'TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH',
+      placementCount: 6,
+      bomLineKeys: ['BTN'],
+    });
+
+    expect(stepQtyOfLine(wire, 'BTN')).toBe(4);
+    expect(stepQtyOfLine(form, 'BTN')).toBe(6);
   });
 
   it('hardware set counts per linked article', () => {

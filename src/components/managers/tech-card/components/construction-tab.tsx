@@ -1,4 +1,4 @@
-import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
+import { common_MediaFull, common_TechCard, type common_Material } from 'api/proto-http/admin';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { techCardMediaKindOptions } from 'constants/filter';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -447,6 +447,7 @@ export function ConstructionTab({
   // types and a colourway inheriting the default would read as diverging from one that pins it.
   const materialCatalog = useMemo(() => {
     const nameById = new Map<number, string>();
+    const materialById = new Map<number, common_Material>();
     // Артикул для штриховки везёт код и имя РАЗДЕЛЬНО и без фолбэков: подписью распоряжается
     // `pieceClothMap`, и подставленное здесь «#1234» вместо пустого имени заставило бы его
     // напечатать id там, где он рассчитывает напечатать имя.
@@ -454,10 +455,11 @@ export function ConstructionTab({
     for (const material of materialsData?.materials ?? []) {
       const id = wireInt(material.id);
       if (id <= 0) continue;
+      materialById.set(id, material);
       nameById.set(id, material.name?.trim() || `#${id}`);
       articleById.set(id, { code: material.code?.trim() ?? '', name: material.name?.trim() ?? '' });
     }
-    return { nameById, articleById };
+    return { nameById, articleById, materialById };
   }, [materialsData?.materials]);
 
   // Legacy usages carry no bom_line_key, only the resolved bom_item_id. Both come from the same
@@ -479,6 +481,7 @@ export function ConstructionTab({
 
   const colorwayArticles = useMemo<ColorwayArticles>(() => {
     const materialNameById = materialCatalog.nameById;
+    const materialById = materialCatalog.materialById;
     const colorways = (techCard?.colorways ?? []).map((cw) => {
       const pinsByLineKey = new Map<string, number[]>();
       for (const usage of cw.usages ?? []) {
@@ -496,7 +499,7 @@ export function ConstructionTab({
         pinsByLineKey,
       };
     });
-    return { colorways, materialNameById };
+    return { colorways, materialNameById, materialById };
   }, [techCard?.colorways, lineKeyByBomId, materialCatalog]);
 
   // ТКАНЬ ДЕТАЛЕЙ — ДВА ИСТОЧНИКА, И ЭТО НЕ НЕБРЕЖНОСТЬ (та же развилка, что у соседа сверху).
