@@ -67,6 +67,11 @@ import type { Readiness } from '../../care-labels/readiness';
 import { useCareLabelPrefs } from '../../care-labels/use-care-label-prefs';
 import { useLabelDictionary } from '../../care-labels/use-label-dictionary';
 import { setCareLabel, setCareLabelColorway, upsertGarmentLabel } from '../form-writers';
+import {
+  compositionLabelConfirmed,
+  compositionLabelSize,
+  confirmCompositionLabel,
+} from '../label-bom';
 import type { FormCareLabel, FormGarmentLabel } from '../labels-schema';
 import type { TechCardFormData } from '../schema';
 import { COMPOSITION_LABEL_KEY, isCompositionLabel, type ArtworkFile } from '../sewn-label-model';
@@ -301,8 +306,16 @@ export function CompositionLabelBlock({
   const colorway = colorways.find((entry) => entry.id === colorwayId) ?? colorways[0];
   const size = orderedSizes.find((entry) => entry.id === sizeId) ?? orderedSizes[0];
   const orientation = model.orientation;
-  const setOrientation = (next: LabelOrientation) =>
+  const setOrientation = (next: LabelOrientation) => {
     setCareLabel(getValues, setValue, { orientation: next });
+    const placed = ((getValues('garmentLabels') ?? []) as FormGarmentLabel[]).some((row) =>
+      isCompositionLabel(row.key),
+    );
+    if (placed)
+      upsertGarmentLabel(getValues, setValue, COMPOSITION_LABEL_KEY, compositionLabelSize(next), {
+        keepBare: true,
+      });
+  };
   const [jump, setJump] = useState<Jump | null>(null);
   const jumpTo = (line: LineKey | null, part?: PrintedPart) =>
     setJump((current) => ({ n: (current?.n ?? 0) + 1, line, part }));
@@ -354,6 +367,10 @@ export function CompositionLabelBlock({
   const garmentLabels = useWatch({ control, name: 'garmentLabels' }) as
     | FormGarmentLabel[]
     | undefined;
+  const bomItems = useWatch({ control, name: 'bomItems' }) as
+    | { id?: number; lineKey?: string | null }[]
+    | undefined;
+  const confirmed = compositionLabelConfirmed(garmentLabels ?? [], bomItems ?? []);
   const files = useMemo(
     () => garmentLabels?.find((row) => isCompositionLabel(row.key))?.files ?? [],
     [garmentLabels],
@@ -499,7 +516,21 @@ export function CompositionLabelBlock({
   return (
     <Section
       title='composition label'
-      action={<HeaderWarnings items={warnings} />}
+      action={
+        <div className='flex items-center gap-3'>
+          {canEdit && !confirmed ? (
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              onClick={() => confirmCompositionLabel(getValues, setValue)}
+            >
+              confirm
+            </Button>
+          ) : null}
+          <HeaderWarnings items={warnings} />
+        </div>
+      }
       className='w-full'
     >
       <div className='flex min-w-0 flex-col' data-composition-label=''>

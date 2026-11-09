@@ -3,6 +3,7 @@ import type { UseFormGetValues, UseFormSetValue } from 'react-hook-form';
 
 import { bornMaterialBomLine, materialLineFields } from './bom-material-line';
 import {
+  bornBomLine,
   releaseBomLineRefs,
   removeGarmentLabel,
   removePackagingItem,
@@ -10,7 +11,9 @@ import {
 } from './form-writers';
 import type { FormGarmentLabel, FormPackagingItem } from './labels-schema';
 import type { TechCardFormData } from './schema';
-import { labelBomLine } from './sewn-label-model';
+import { L, LV } from '../care-labels/layout';
+import { COMPOSITION_LABEL_KEY, isCompositionLabel, labelBomLine } from './sewn-label-model';
+import { labelDefaults } from './tech-card-options';
 import { wireInt } from './wire-int';
 
 export const LABEL_BOM_SECTION = 'TECH_CARD_BOM_SECTION_LABEL' as const;
@@ -310,4 +313,61 @@ export function removePackagingItemWithLine(
 ): void {
   dropPackagingRowLine(getValues, setValue, index);
   removePackagingItem(getValues, setValue, key, index);
+}
+
+/** The composition label's printed size: the ribbon of the chosen format, in mm. */
+export function compositionLabelSize(orientation?: string): { widthMm: string; heightMm: string } {
+  return orientation === 'horizontal'
+    ? { widthMm: String(L.W), heightMm: String(L.H) }
+    : { widthMm: String(LV.W), heightMm: String(LV.H) };
+}
+
+/** Confirmed = the composition label is a row of the garment with its own BOM line. */
+export function compositionLabelConfirmed(
+  labels: readonly FormGarmentLabel[],
+  bomItems: readonly { id?: number; lineKey?: string | null }[],
+): boolean {
+  const row = labels.find((candidate) => isCompositionLabel(candidate.key));
+  return !!row && !!labelBomLine(row, bomItems);
+}
+
+/**
+ * Put the composition label into the garment: its row in the labels list, a label BOM line when it
+ * has none yet, and the size of the chosen format. Running it again only refreshes the size.
+ */
+export function confirmCompositionLabel(
+  getValues: UseFormGetValues<TechCardFormData>,
+  setValue: UseFormSetValue<TechCardFormData>,
+): string {
+  const orientation = (getValues('careLabel') as { orientation?: string } | undefined)?.orientation;
+  const size = compositionLabelSize(orientation);
+  const labels = (getValues('garmentLabels') ?? []) as FormGarmentLabel[];
+  const row = labels.find((candidate) => isCompositionLabel(candidate.key));
+  const bomItems = (getValues('bomItems') ?? []) as BomItems;
+  let lineKey = row ? labelBomLine(row, bomItems)?.lineKey?.trim() ?? '' : '';
+  if (!lineKey) {
+    const born = bornBomLine({
+      section: LABEL_BOM_SECTION,
+      name: uniqueLineName(bomItems, 'composition label'),
+      unit: 'pcs',
+    }) as BomLine;
+    setValue('bomItems', [...bomItems, born] as never, { shouldDirty: true });
+    lineKey = born.lineKey?.trim() ?? '';
+  }
+  const facts = row
+    ? {}
+    : {
+        kind: COMPOSITION_LABEL_KEY,
+        attachment: labelDefaults[COMPOSITION_LABEL_KEY]?.attachment ?? '',
+        fold: (labelDefaults[COMPOSITION_LABEL_KEY]?.folding ?? '') as FormGarmentLabel['fold'],
+        qtyPerGarment: 1,
+      };
+  upsertGarmentLabel(
+    getValues,
+    setValue,
+    COMPOSITION_LABEL_KEY,
+    { ...facts, ...size, bomLineKey: lineKey, bomItemId: 0 },
+    { keepBare: true },
+  );
+  return lineKey;
 }

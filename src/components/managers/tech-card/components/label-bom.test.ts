@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { FormGarmentLabel } from './labels-schema';
 import type { TechCardFormData } from './schema';
 import {
+  compositionLabelConfirmed,
+  confirmCompositionLabel,
   dropPackagingRowLine,
   packagingLineForPick,
   pickLabelMaterial,
@@ -375,5 +377,42 @@ describe('packaging BOM lines', () => {
     const h = form([fabric], [row('other', 'L1')]);
     dropPackagingRowLine(h.getValues, h.setValue, 0);
     expect(h.state.bomItems).toEqual([fabric]);
+  });
+});
+
+describe('confirmCompositionLabel', () => {
+  it('adds the row, a label BOM line and the vertical size', () => {
+    const form = formHarness({ garmentLabels: [], bomItems: [], careLabel: {} as never });
+    const lineKey = confirmCompositionLabel(form.getValues, form.setValue);
+    const labels = form.state.garmentLabels as FormGarmentLabel[];
+    const bom = form.state.bomItems as { lineKey?: string; section?: string; name?: string }[];
+    expect(lineKey).toBeTruthy();
+    expect(bom).toHaveLength(1);
+    expect(bom[0]).toMatchObject({ lineKey, section: 'TECH_CARD_BOM_SECTION_LABEL' });
+    expect(labels).toHaveLength(1);
+    expect(labels[0]).toMatchObject({
+      key: 'composition',
+      bomLineKey: lineKey,
+      widthMm: '30',
+      heightMm: '100',
+    });
+    expect(compositionLabelConfirmed(labels, bom)).toBe(true);
+  });
+
+  it('keeps the existing line and refreshes the size on a second run', () => {
+    const form = formHarness({ garmentLabels: [], bomItems: [], careLabel: {} as never });
+    const first = confirmCompositionLabel(form.getValues, form.setValue);
+    (form.state.careLabel as { orientation?: string }).orientation = 'horizontal';
+    const second = confirmCompositionLabel(form.getValues, form.setValue);
+    expect(second).toBe(first);
+    expect(form.state.bomItems as unknown[]).toHaveLength(1);
+    expect((form.state.garmentLabels as FormGarmentLabel[])[0]).toMatchObject({
+      widthMm: '100',
+      heightMm: '30',
+    });
+  });
+
+  it('is not confirmed without a BOM line', () => {
+    expect(compositionLabelConfirmed([{ ...bareLabel('composition') }], [])).toBe(false);
   });
 });
