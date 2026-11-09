@@ -231,6 +231,7 @@ import {
 import { suggestUnitCode } from './assembly-suggest';
 import { type UnitRenameNotice } from './assembly-rename';
 import { qtyStepFromFormOperation, stepQtyOfLine } from './button-qty';
+import { MEASURED_SECTIONS } from './use-colourway-auto';
 import { OperationButtonAttachChecks, OperationMaterialStepQty } from './operation-quantity-marks';
 import { targetAddPrefill } from './assembly-node-views';
 import {
@@ -5066,7 +5067,8 @@ function OperationEditor({
         </div>
         {linkedMaterials.map((material) => {
           const lineKey = material.lineKey?.trim() ?? '';
-          const stepQty = lineKey ? stepQtyOfLine(quantityStep, lineKey) : null;
+          const counted = !MEASURED_SECTIONS.has(material.section ?? '');
+          const stepQty = lineKey && counted ? stepQtyOfLine(quantityStep, lineKey) : null;
           return (
             <span
               key={material.lineKey}
