@@ -32,19 +32,25 @@ const cutOf = (seam: number, fit: number, overlap: number) =>
 
 describe('the strip length rule', () => {
   it('a correct strip is never red, whatever the rounding, at no tolerance at all', () => {
+    // One expect per case made 231k matcher calls and ran into the 5 s timeout under load (#291):
+    // the misses are collected and asserted once, with a timeout of its own.
     let compared = 0;
+    const red: string[] = [];
     for (const fit of [50, 60, 75, 85, 90, 99, 100]) {
       for (const overlap of [0, 15, 30]) {
         for (let seam = 300; seam <= 1400; seam += 0.1) {
           const sewn = cutOf(seam, fit, overlap) - overlap;
           const geoms = geomsOf({ sewnMm: sewn, fitPct: fit, overlapMm: overlap });
           compared++;
-          expect(seamLengthsDiffer(seam, sewn, [BAND], [STRIP], geoms, 0)).toBe(false);
+          if (seamLengthsDiffer(seam, sewn, [BAND], [STRIP], geoms, 0)) {
+            red.push(`seam ${seam.toFixed(1)} fit ${fit} overlap ${overlap}`);
+          }
         }
       }
     }
+    expect(red.slice(0, 10)).toEqual([]);
     expect(compared).toBeGreaterThan(200_000);
-  });
+  }, 30_000);
 
   it('the allowance is what keeps it so: without it a correct strip goes red', () => {
     // seam 790.4, fit 85, overlap 30: cut 702, sewn 672, and 672 / .85 = 790.59, which rounds to 791.
