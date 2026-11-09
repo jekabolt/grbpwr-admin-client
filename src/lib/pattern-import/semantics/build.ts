@@ -2451,11 +2451,16 @@ export function buildPieceSpecsDetailed(
       const presegmentedIdentity = p.cands.every(
         ({ c }) => c.dxf?.sizeSource === 'label' || c.dxf?.identitySource === 'label',
       );
+      const cardPresegmentedIdentity = p.cands.every(({ c }) => {
+        const sourceIdentity = c.dxf?.identity?.trim().toUpperCase();
+        return !!sourceIdentity && cardIdentities.has(sourceIdentity);
+      });
       if (
         why &&
         !(
           (exactRulGrade ||
             presegmentedIdentity ||
+            cardPresegmentedIdentity ||
             cardIdentities.has(s.identity.trim().toUpperCase())) &&
           /reads as a size of the run/.test(why)
         )

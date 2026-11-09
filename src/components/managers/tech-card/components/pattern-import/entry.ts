@@ -136,6 +136,26 @@ export function buildCardContext(args: {
 }
 
 /**
+ * Source identities already proven by this card in the active fabric scope. A stored alias is
+ * itself an identity (not an `IDENTITY_SIZE` block), so a trailing `L` must remain intact. The
+ * worker maps these source names to the semantic identities written for the same piece seed.
+ */
+export function cardPresegmentedIdentities(card: CardContext, pinScopeKey?: string): string[] {
+  const inScope = (scopeKey: string) => !pinScopeKey || scopeKey === pinScopeKey;
+  const identities = new Set<string>();
+  for (const shape of card.existingShapes ?? [])
+    if (inScope(shape.scopeKey) && shape.identity.trim()) identities.add(shape.identity.trim());
+  for (const pattern of card.existingPatterns ?? []) {
+    if (!inScope(pattern.scopeKey)) continue;
+    for (const piece of pattern.manifest?.pieces ?? [])
+      if (piece.identity.trim()) identities.add(piece.identity.trim());
+  }
+  for (const alias of card.existingAliases ?? [])
+    if (inScope(alias.scopeKey) && alias.blockName.trim()) identities.add(alias.blockName.trim());
+  return [...identities].sort((a, b) => a.localeCompare(b));
+}
+
+/**
  * The card's piece outlines per scope and sheet (`pieceShapeReferences` of one sheet's contour
  * pieces) as the import draft reads them: mm, per bare size token. PieceDTO carries cm.
  */

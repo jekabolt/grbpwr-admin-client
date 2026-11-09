@@ -70,6 +70,7 @@ import {
 import {
   dxfFastPath,
   dxfPresegmentedIdentities,
+  dxfWrittenPresegmentedIdentities,
   dxfScaleCandidates,
   readDxf,
   settleSeamPair,
@@ -2023,6 +2024,11 @@ export class Session {
       ...new Set([
         ...dxfPresegmentedIdentities(this.fast?.families ?? []),
         ...this.presegmentedIdentities,
+        ...dxfWrittenPresegmentedIdentities(
+          this.fast?.families ?? [],
+          sem.pieces,
+          this.presegmentedIdentities,
+        ),
       ]),
     ];
     const source: ManifestSource = {

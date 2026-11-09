@@ -12,6 +12,7 @@ export { segmentDxf, layerKind, bareSize, chooseDxfSizeLabel } from './segment';
 export {
   dxfFastPath,
   dxfPresegmentedIdentities,
+  dxfWrittenPresegmentedIdentities,
   dxfScaleCandidates,
   settleSeamPair,
   type DxfFastPath,

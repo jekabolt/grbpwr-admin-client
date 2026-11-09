@@ -127,6 +127,7 @@ import {
   unansweredAtWrite,
   type AnswerCtx,
 } from './answers';
+import { cardPresegmentedIdentities } from './entry';
 
 export const STEPS: { id: WizardStep; label: string }[] = [
   { id: 'files', label: 'files' },
@@ -1000,35 +1001,6 @@ export function useImportSession(deps: {
       s.pieces?.families,
     );
 
-  /** Card-owned evidence that an apparent size suffix is actually part of an existing identity. */
-  const cardPresegmentedIdentities = (): string[] => {
-    const card = rc();
-    const inScope = (scopeKey: string) => !deps.pinScopeKey || scopeKey === deps.pinScopeKey;
-    const identities = new Set<string>();
-    for (const shape of card.existingShapes ?? [])
-      if (inScope(shape.scopeKey) && shape.identity.trim()) identities.add(shape.identity.trim());
-    for (const pattern of card.existingPatterns ?? []) {
-      if (!inScope(pattern.scopeKey)) continue;
-      for (const piece of pattern.manifest?.pieces ?? [])
-        if (piece.identity.trim()) identities.add(piece.identity.trim());
-    }
-    const sizeTokens = [
-      ...new Set(
-        card.sizes
-          .flatMap((size) => [size.token, ...(size.spellings ?? [])])
-          .map((token) => token.trim().toUpperCase())
-          .filter(Boolean),
-      ),
-    ].sort((a, b) => b.length - a.length);
-    for (const alias of card.existingAliases ?? []) {
-      if (!inScope(alias.scopeKey)) continue;
-      const block = alias.blockName.trim();
-      const upper = block.toUpperCase();
-      const size = sizeTokens.find((token) => upper.endsWith(`_${token}`));
-      if (size) identities.add(block.slice(0, -(size.length + 1)));
-    }
-    return [...identities].sort((a, b) => a.localeCompare(b));
-  };
   /** S3: after the pieces changed, drop the answers whose question moved and re-stamp the rest. */
   const settleToPieces = () => {
     const now = answersNow();
@@ -1049,7 +1021,7 @@ export function useImportSession(deps: {
       evidence: [],
     },
     pieceOverrides: i.overrides,
-    presegmentedIdentities: cardPresegmentedIdentities(),
+    presegmentedIdentities: cardPresegmentedIdentities(rc(), deps.pinScopeKey),
     operatorGrain: i.operatorGrain,
     aiQuantity: aiQuantityOf(sRef.current.names, i.editedNames),
     operatorFold: i.operatorFold,

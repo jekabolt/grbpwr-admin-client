@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ConversionManifest, DraftShapeRef } from 'lib/pattern-import/types';
 import type { CardContext } from './client';
+import { cardPresegmentedIdentities } from './entry';
 import { cardFingerprint, withCardParse } from './use-import-session';
 
 // Review T1 (a): a run that read the card while its sheets were still parsing drafts with the
@@ -43,5 +44,24 @@ describe('the run takes the card parse at the write', () => {
     expect(next.existingPatterns?.[0].manifest).toBe(manifest);
     expect(next.shapesPending).toBe(false);
     expect(cardFingerprint(next)).toBe(cardFingerprint(base));
+  });
+
+  it('keeps exact linked identities in the pinned scope', () => {
+    const card: CardContext = {
+      ...base,
+      existingAliases: [
+        { scopeKey: 'main', blockName: 'FLAP_L', pieceLineKey: 'flap' },
+        { scopeKey: 'pocketing', blockName: 'PCK_BACK_L', pieceLineKey: 'pocket' },
+      ],
+      existingShapes: [
+        {
+          scopeKey: 'main',
+          pieceLineKey: 'flap',
+          identity: 'SHAPE_L',
+          sizes: {},
+        },
+      ],
+    };
+    expect(cardPresegmentedIdentities(card, 'main')).toEqual(['FLAP_L', 'SHAPE_L']);
   });
 });

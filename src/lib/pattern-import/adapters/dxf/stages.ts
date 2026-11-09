@@ -24,6 +24,7 @@ import type {
   PathId,
   PathRange,
   PieceFamily,
+  PieceSpec,
   ScaleCandidate,
   SeamLineFeature,
   Seed,
@@ -71,6 +72,42 @@ export function dxfPresegmentedIdentities(families: readonly PieceFamily[]): str
     .filter(([, presegmented]) => presegmented)
     .map(([identity]) => identity)
     .sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Carry source-identity proof through semantic naming. Legacy cards may link `FLAP_L` while the
+ * naming pass writes `PCK_L`; the shared seed proves these are the same pre-segmented piece.
+ */
+export function dxfWrittenPresegmentedIdentities(
+  families: readonly PieceFamily[],
+  written: readonly Pick<PieceSpec, 'seed' | 'identity'>[],
+  cardIdentities: readonly string[],
+): string[] {
+  const provenSource = new Set(
+    [...dxfPresegmentedIdentities(families), ...cardIdentities]
+      .map((identity) => identity.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const provenSeeds = new Set(
+    families
+      .filter(
+        (family) =>
+          family.candidates.length > 0 &&
+          family.candidates.every((candidate) => {
+            const identity = (candidate as DxfPieceCandidate).dxf?.identity.trim().toLowerCase();
+            return !!identity && provenSource.has(identity);
+          }),
+      )
+      .map((family) => family.seed),
+  );
+  return [
+    ...new Set(
+      written
+        .filter((piece) => provenSeeds.has(piece.seed))
+        .map((piece) => piece.identity.trim())
+        .filter(Boolean),
+    ),
+  ].sort((a, b) => a.localeCompare(b));
 }
 
 const ROLE_OF: Record<PathRole, ChainRole> = {
