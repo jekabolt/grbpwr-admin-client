@@ -12,9 +12,9 @@ import { GENERATED_FUSING_DXF_MARKER } from 'lib/pattern-import/types';
 import { writeScopes } from 'lib/pattern-import/write';
 import { fitGrainInside } from 'lib/pattern-import/semantics/grain-inside';
 import { edgeRunsOf } from './edge-runs';
-import { fuseAreaMm2, fuseInsetRingMm, generateFuseGeometry, signedArea } from './geometry';
+import { fuseAreaMm2, fuseInsetRingMm, fuseParts, generateFuseGeometry } from './geometry';
 import { ZONE_ON_CONTOUR_MM, projectOnRing } from './spline';
-import type { FusePolygon, FuseSpline, PieceFuseSpec } from './types';
+import type { FuseSpline, PieceFuseSpec } from './types';
 
 export type FusingBomLine = {
   bomLineKey: string;
@@ -76,8 +76,10 @@ export type GeneratedFusingSheet = {
   dxfText: string;
   blocks: string[];
   /**
-   * How the card links this sheet's blocks to pieces: one row per source identity, spelled as the
-   * importer spells its own converted sheets (`aliasNames`: the identity, or the raw `_UNI` block).
+   * How the card links this sheet's blocks to pieces: one row per block identity, spelled as the
+   * importer spells its own converted sheets (`aliasNames`: the identity, or the raw `_UNI` block);
+   * `identity` is the SOURCE piece, so every separate part (`BP_PART1`) links to the piece it was
+   * cut from.
    */
   aliases: { identity: string; blockName: string }[];
 };
@@ -169,20 +171,6 @@ function grainOf(
     b: fitted[1],
     angleDeg,
     evidence: ['geometry'],
-  };
-}
-
-function cutLoops(polygons: readonly FusePolygon[]): { cut: PtMm[]; loops: PtMm[][] } {
-  const sorted = [...polygons].sort(
-    (a, b) => Math.abs(signedArea(b.outer)) - Math.abs(signedArea(a.outer)),
-  );
-  const primary = sorted[0];
-  return {
-    cut: primary.outer,
-    loops: sorted.flatMap((polygon, index) => [
-      ...(index === 0 ? [] : [polygon.outer]),
-      ...polygon.holes,
-    ]),
   };
 }
 
@@ -500,6 +488,9 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
     const sources = byLine.get(line.bomLineKey) ?? [];
     if (!sources.length) continue;
     const pieceSpecs: PieceSpec[] = [];
+    // A part's identity → the source piece it was cut from: the card links both blocks to it.
+    const sourceOfPart = new Map<string, string>();
+    let extraSeeds = 0;
     for (let pieceIndex = 0; pieceIndex < sources.length; pieceIndex++) {
       const sourcePiece = sources[pieceIndex];
       const fuse = sourcePiece.fuse!;
@@ -509,7 +500,10 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
         warnings.push(`${sourcePiece.identity}: no source sizes`);
         continue;
       }
-      const sizes: PieceSizeSpec[] = [];
+      // One list of sizes per separate part of the fuse: part 0 keeps the piece's own name, the
+      // others are pieces of their own (`BP_PART1`), never a loop drawn inside part 0's cut.
+      const partSizes: PieceSizeSpec[][] = [];
+      const partCounts = new Set<number>();
       for (const sourceSize of ordered) {
         try {
           const sizedFuse = mapFuseSpecToSize(
@@ -535,23 +529,27 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
                 ? edgeRunsOf(base.outline).length
                 : undefined,
           });
-          const { cut, loops } = cutLoops(polygons);
-          sizes.push({
-            rank: sourceSize.rank,
-            sizeToken: sourceSize.sizeToken,
-            sizeId: sourceSize.sizeId,
-            cut,
-            cutLoops: loops,
-            seam: null,
-            grain: grainOf(fuse, sourceSize, cut),
-            notches: [],
-            drills: [],
-            internal: [],
-            fold: null,
-            offset: null,
-            walls: [],
-            bbox: bbox(cut),
-            areaMm2: fuseAreaMm2(polygons),
+          const parts = fuseParts(polygons, sizedFuse.zone);
+          partCounts.add(parts.length);
+          parts.forEach((part, index) => {
+            const cut = part.outer;
+            (partSizes[index] ??= []).push({
+              rank: sourceSize.rank,
+              sizeToken: sourceSize.sizeToken,
+              sizeId: sourceSize.sizeId,
+              cut,
+              cutLoops: part.holes,
+              seam: null,
+              grain: grainOf(fuse, sourceSize, cut),
+              notches: [],
+              drills: [],
+              internal: [],
+              fold: null,
+              offset: null,
+              walls: [],
+              bbox: bbox(cut),
+              areaMm2: fuseAreaMm2([part]),
+            });
           });
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
@@ -559,28 +557,36 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
           warnings.push(`${sourcePiece.identity}_${sourceSize.sizeToken}: ${reason}`);
         }
       }
-      if (!sizes.length) continue;
-      pieceSpecs.push({
-        identity: sourcePiece.identity,
-        code: sourcePiece.identity,
-        mods: [],
-        displayName: sourcePiece.displayName,
-        nameOrigin: 'operator',
-        seed: pieceIndex,
-        variant: null,
-        pairHand: null,
-        pairOf: null,
-        unfoldedFold: false,
-        piecesPerGarment: sourcePiece.piecesPerGarment,
-        allowance: { meaning: 'cut', allowanceMm: 0, origin: 'operator', evidence: [] },
-        fabrics: [line.bomLineKey],
-        fused: true,
-        // A stale card checkbox must not collapse a real source grade to the base contour. The
-        // writer emits only one `_UNI` block for an ungraded spec, so five parsed garment outlines
-        // otherwise became the reported one-block / not-graded generated sheet. A genuinely
-        // ungraded source still has one outline and keeps its UNI contract.
-        ungraded: sourcePiece.ungraded && sizes.length === 1,
-        sizes,
+      if (partCounts.size > 1)
+        warnings.push(`${sourcePiece.identity}: fuse parts differ across sizes`);
+      partSizes.forEach((sizes, index) => {
+        if (!sizes?.length) return;
+        const identity =
+          index === 0 ? sourcePiece.identity : `${sourcePiece.identity}_PART${index}`;
+        sourceOfPart.set(normBlock(identity).toLowerCase(), sourcePiece.identity);
+        pieceSpecs.push({
+          identity,
+          code: identity,
+          mods: [],
+          displayName:
+            index === 0 ? sourcePiece.displayName : `${sourcePiece.displayName} part ${index}`,
+          nameOrigin: 'operator',
+          seed: index === 0 ? pieceIndex : sources.length + extraSeeds++,
+          variant: null,
+          pairHand: null,
+          pairOf: null,
+          unfoldedFold: false,
+          piecesPerGarment: sourcePiece.piecesPerGarment,
+          allowance: { meaning: 'cut', allowanceMm: 0, origin: 'operator', evidence: [] },
+          fabrics: [line.bomLineKey],
+          fused: true,
+          // A stale card checkbox must not collapse a real source grade to the base contour. The
+          // writer emits only one `_UNI` block for an ungraded spec, so five parsed garment outlines
+          // otherwise became the reported one-block / not-graded generated sheet. A genuinely
+          // ungraded source still has one outline and keeps its UNI contract.
+          ungraded: sourcePiece.ungraded && sizes.length === 1,
+          sizes,
+        });
       });
     }
     if (!pieceSpecs.length) continue;
@@ -630,7 +636,7 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
       dxfText: markGeneratedFusing(written.detail.bareText),
       blocks: written.detail.plan.blocks.map((block) => block.name),
       aliases: [...aliasNames(written.detail.manifest)].map(([identity, blockName]) => ({
-        identity,
+        identity: sourceOfPart.get(normBlock(identity).toLowerCase()) ?? identity,
         blockName,
       })),
     });
