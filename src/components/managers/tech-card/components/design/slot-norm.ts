@@ -1,8 +1,7 @@
 import type { common_TechCardOperation } from 'api/proto-http/admin';
 import { parseDecimalNumber } from 'utils/decimal';
 
-import { slotQtyFromSteps, type QtyStep } from '../button-qty';
-import { measured } from '../use-colourway-auto';
+import { isCountedLine, slotQtyFromSteps, type QtyStep } from '../button-qty';
 
 /**
  * СЧЁТНАЯ НОРМА СЛОТА НА ЭКРАНЕ (вариант A, 09.11). Чистые функции: слоты материала и матрица
@@ -53,14 +52,6 @@ export function formQtySteps(
   });
 }
 
-/** Счётная строка: не мерная секция и не режется в длину. */
-export function isCountedLine(
-  line: { section?: string; lineKey?: string },
-  cutKeys: ReadonlySet<string>,
-): boolean {
-  return !measured(line.section) && !cutKeys.has(clean(line.lineKey));
-}
-
 export type SlotNorm =
   | { kind: 'none' }
   | { kind: 'ops'; qty: number; ops: number; opNumbers: number[] }
@@ -75,7 +66,13 @@ export function slotNorm(
   steps: readonly QtyStep[],
   cutKeys: ReadonlySet<string>,
 ): SlotNorm {
-  if (!isCountedLine(line, cutKeys)) return { kind: 'none' };
+  if (
+    !isCountedLine({
+      section: line.section,
+      cutToLength: cutKeys.has(clean(line.lineKey)),
+    })
+  )
+    return { kind: 'none' };
   const fromSteps = slotQtyFromSteps(steps, clean(line.lineKey));
   if (fromSteps.qty == null) return { kind: 'manual' };
   return {
@@ -103,25 +100,18 @@ export function slotSpare(spareQty?: string): number {
 }
 
 export type CountedCell = {
-  used: number | null;
-  spare: number;
-  /** Σ явных quantity строк колорвея на этом слоте; null — явных нет. */
-  explicit: number | null;
+  toBuy: number | null;
   hasArticle: boolean;
 };
 
-/**
- * TO BUY колорвея: на каждом слоте явные quantity колорвея главнее used, запас прибавляется один
- * раз; слот без базиса ничего не покупает. Слоты без артикула — отдельно (`missing`).
- */
+/** Sum already-resolved colourway x slot purchases; missing articles stay a separate warning. */
 export function colourwayToBuy(cells: readonly CountedCell[]): { total: number; missing: number } {
   let total = 0;
   let missing = 0;
   for (const cell of cells) {
-    const qty = cell.explicit ?? cell.used;
-    if (qty == null) continue;
-    if (cell.hasArticle) total += qty + cell.spare;
-    else missing += qty + cell.spare;
+    if (cell.toBuy == null) continue;
+    if (cell.hasArticle) total += cell.toBuy;
+    else missing += cell.toBuy;
   }
   return { total, missing };
 }

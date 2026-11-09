@@ -92,7 +92,7 @@ export function usePieceReads(
             : null;
           const deg = grainDeg?.get(geom.pieceKey) ?? (dto ? grainRotation(dto) : 0);
           const inner = [...(innerLines?.get(geom.pieceKey) ?? [])];
-          const { groups } = foldGroupsOf(geom, rows, deg, inner);
+          const { groups } = foldGroupsOf(geom, rows, deg, inner, { staleToo: true });
           let hints: FoldHint[] = [];
           if (dto) {
             try {
@@ -337,6 +337,8 @@ export function FoldPicker({
     const group = line.group;
     if (group.kind === 'pleat') return;
     if (group.kind === kind) {
+      // The same kind on a stale fold confirms it on today's pattern (a fresh fingerprint).
+      if (group.stale && !(await writes.upsert(group.rows))) return;
       // A fold saved before folds linked by themselves stays flat on the print until it has a step.
       if (group.rows.every((row) => stepOfFold(foldStep.operations, row.foldKey) === null))
         linkToStep(group.rows, stepIndex);
@@ -435,6 +437,7 @@ export function FoldPicker({
       const active = activePleat(fan);
       if (active) {
         setChosenPleat(active.rows[0]?.foldKey ?? null);
+        if (active.stale && !(await writes.upsert(active.rows))) return;
         if (active.rows.every((row) => stepOfFold(foldStep.operations, row.foldKey) === null))
           linkToStep(active.rows, stepIndex);
         return;

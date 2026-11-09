@@ -228,6 +228,12 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
     graded: boolean;
     /** Деталь ЗАЯВЛЕНА неградуируемой: токен во всех её контурах либо галка на карточке. */
     explicit: boolean;
+    /**
+     * A separate part of the same piece's fuse (`BP_PART1` beside `BP`, lib/fusing-dxf fuseParts):
+     * another contour of the same piece, so its area is ADDED to the piece's, never a second piece.
+     * Holds the index of the piece's own entry in `resolved`.
+     */
+    partOf?: number;
   };
   const resolved: Resolved[] = [];
   const unmatched: string[] = [];
@@ -239,90 +245,102 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
   const gradedIdentities = new Set<string>();
   const declaredVsGraded: UniConflict[] = [];
   for (const piece of input.pieces) {
-    let bySize: Map<string, PieceDTO[]> | undefined;
+    // Тем же правилом, что findPiece: сохранённая связь может нести размер прямо в имени
+    // («BP_1_XS»), и сворачивать её к идентичности надо СПРАШИВАЯ ФАЙЛ — «FP_L» это левая
+    // полочка целиком, а не размер L.
+    const hits: { identity: string; bySize: Map<string, PieceDTO[]> }[] = [];
     for (const r of piece.refs) {
-      // Тем же правилом, что findPiece: сохранённая связь может нести размер прямо в имени
-      // («BP_1_XS»), и сворачивать её к идентичности надо СПРАШИВАЯ ФАЙЛ — «FP_L» это левая
-      // полочка целиком, а не размер L.
-      const identity = aliasIdentity(r.block, input.index.split);
-      const hit = input.index.byKey.get(`${r.scopeKey}|${identity.toLowerCase()}`);
-      if (hit && hit.size > 0) {
-        bySize = hit;
-        break;
-      }
+      const identity = aliasIdentity(r.block, input.index.split).toLowerCase();
+      const hit = input.index.byKey.get(`${r.scopeKey}|${identity}`);
+      if (hit && hit.size > 0 && !hits.some((h) => h.identity === identity))
+        hits.push({ identity, bySize: hit });
     }
-    if (!bySize) {
+    // The piece is the first hit that is nobody's part; its fuse parts (`<it>_PART<n>`) ride along.
+    const partOf = (identity: string, base: string) =>
+      identity.startsWith(`${base}_part`) && /^\d+$/.test(identity.slice(base.length + 5));
+    const main = hits.find((h) => !hits.some((o) => o !== h && partOf(h.identity, o.identity)));
+    if (!main) {
       unmatched.push(piece.name);
       continue;
     }
-    // РАЗМЕРНЫЙ ХВОСТ В ИНДЕКСЕ ЛЕЖИТ «КАК В ФАЙЛЕ» (BlockCode.size — сырой хвост), а размеры
-    // карточки приходят очищенными токенами. Реальный файл лекальщика пишет базовый размер в
-    // угловых скобках («BP_<S>»), поэтому прямое сравнение промахнулось бы на КАЖДОЙ такой детали —
-    // и промах читался бы как «деталь размера нет», то есть весь ряд остался бы без нормы. Ключи
-    // сводятся к тому же виду, что сравниваемые токены; две записи, схлопнувшиеся в один токен, —
-    // это один размер, и контуры складываются в один список (выберется первый на нужном слое).
-    const norm = new Map<string, PieceDTO[]>();
-    for (const [k, list] of bySize) {
-      const key = k === '' ? '' : bare(k);
-      norm.set(key, [...(norm.get(key) ?? []), ...list]);
-    }
-    const graded = [...norm.keys()].some((k) => k !== '');
-    // ДЕТАЛЬ, У КОТОРОЙ ЕСТЬ И РАЗМЕРНЫЕ, И БЕЗРАЗМЕРНЫЕ КОПИИ, — ОТКАЗ, а не выбор одной из них.
-    // Такой вход двусмыслен по существу: безразмерная копия — это либо справочный контур базового
-    // размера (тогда её нельзя складывать), либо деталь, которую кроят одинаково во всех размерах
-    // (тогда её нельзя выбрасывать). Разница между двумя чтениями — целая деталь в площади каждого
-    // размера, и угадать её нечем. Референсная реализация продолжения раскладки
-    // (size-areas-from-dxf.ts) отвергает ровно этот вход теми же словами.
-    if (graded && norm.has('')) {
-      return {
-        ok: false,
-        reason: `piece “${piece.name}” is drawn both with a size suffix and without one — there is nothing to tell whether this is a reference contour of the base size or a piece identical across all sizes. the difference is a whole piece in the area of every size`,
-      };
-    }
-    // ТОКЕН ЧИТАЕТСЯ У КАЖДОГО КОНТУРА, А НЕ У ПЕРВОГО. Деталь законно нарисована несколькими
-    // блоками (разные листы, разные ревизии), и пометка, стоящая лишь на одном из них, — это не
-    // заявление автора, а его недоделка: считать по ней весь скоуп «объявленным» значило бы снять
-    // отказ по половине улики.
-    const contours = [...norm.values()].flat();
-    const tokenSaysUngraded =
-      contours.length > 0 && contours.every((c) => uniOf(c.blockName ?? ''));
-    // Слагаемые этой суммы — вот они, и вердикт о столкновении строится по НИМ, а не по всему
-    // файлу: uni-блок, который к этой ткани не привязан, в норму не входит и спорить ему не с чем.
-    // (Настил спрашивает шире — он укладывает все контуры скоупа; каждый путь проверяет свою
-    // популяцию, и это одно и то же правило на разных множествах, а не два разных правила.)
-    // ГАЛКА ПРОТИВ ГЕОМЕТРИИ — ОТКАЗ, А НЕ ТИХИЙ ПРИОРИТЕТ.
-    //
-    // Оператор пометил деталь «не градуируется», а в выкройках у неё полный размерный ряд. Пометка
-    // геометрию не отменяет: `graded` выводится из имён блоков, `pieceRows` шлёт строку на КАЖДЫЙ
-    // размер, и сервер (0302) отвергает такой сейв площадей ЦЕЛИКОМ — `ungraded_piece_measured_by_
-    // _size`, — то есть оператор теряет весь замер и не понимает почему.
-    //
-    // Молча отдать победу галке (послать одну строку с sizeId 0) нельзя ровно по той же причине,
-    // по которой владелец просил блокировать «градуированную копию + uni»: у детали есть РАЗНАЯ
-    // геометрия по размерам, и объявить её одинаковой значит выкинуть измеренную разницу. Молча
-    // отдать победу геометрии — значит проигнорировать ответ оператора. Спрашивать здесь некого,
-    // поэтому отказ, и он называет деталь и оба выхода.
-    if (piece.ungraded === true && graded) {
-      const blocks = [
-        ...new Set(contours.map((c) => normBlock(c.blockName ?? '')).filter(Boolean)),
-      ].sort();
-      declaredVsGraded.push({ kind: 'declared-vs-graded', subject: piece.name, blocks });
-    }
-    if (graded) {
-      const identity = normBlock(codeById.get(contours[0]?.id ?? -1)?.identity ?? '');
-      if (identity) gradedIdentities.add(identity.toLowerCase());
-    } else if (tokenSaysUngraded) {
-      for (const c of contours) {
-        const code = codeById.get(c.id);
-        if (code?.uniBase) uniEntries.push({ raw: code.raw, uniBase: code.uniBase });
+    const mainIndex = resolved.length;
+    const entries = [
+      { bySize: main.bySize, part: false },
+      ...hits
+        .filter((h) => partOf(h.identity, main.identity))
+        .map((h) => ({ bySize: h.bySize, part: true })),
+    ];
+    for (const { bySize, part } of entries) {
+      // РАЗМЕРНЫЙ ХВОСТ В ИНДЕКСЕ ЛЕЖИТ «КАК В ФАЙЛЕ» (BlockCode.size — сырой хвост), а размеры
+      // карточки приходят очищенными токенами. Реальный файл лекальщика пишет базовый размер в
+      // угловых скобках («BP_<S>»), поэтому прямое сравнение промахнулось бы на КАЖДОЙ такой детали —
+      // и промах читался бы как «деталь размера нет», то есть весь ряд остался бы без нормы. Ключи
+      // сводятся к тому же виду, что сравниваемые токены; две записи, схлопнувшиеся в один токен, —
+      // это один размер, и контуры складываются в один список (выберется первый на нужном слое).
+      const norm = new Map<string, PieceDTO[]>();
+      for (const [k, list] of bySize) {
+        const key = k === '' ? '' : bare(k);
+        norm.set(key, [...(norm.get(key) ?? []), ...list]);
       }
+      const graded = [...norm.keys()].some((k) => k !== '');
+      // ДЕТАЛЬ, У КОТОРОЙ ЕСТЬ И РАЗМЕРНЫЕ, И БЕЗРАЗМЕРНЫЕ КОПИИ, — ОТКАЗ, а не выбор одной из них.
+      // Такой вход двусмыслен по существу: безразмерная копия — это либо справочный контур базового
+      // размера (тогда её нельзя складывать), либо деталь, которую кроят одинаково во всех размерах
+      // (тогда её нельзя выбрасывать). Разница между двумя чтениями — целая деталь в площади каждого
+      // размера, и угадать её нечем. Референсная реализация продолжения раскладки
+      // (size-areas-from-dxf.ts) отвергает ровно этот вход теми же словами.
+      if (graded && norm.has('')) {
+        return {
+          ok: false,
+          reason: `piece “${piece.name}” is drawn both with a size suffix and without one — there is nothing to tell whether this is a reference contour of the base size or a piece identical across all sizes. the difference is a whole piece in the area of every size`,
+        };
+      }
+      // ТОКЕН ЧИТАЕТСЯ У КАЖДОГО КОНТУРА, А НЕ У ПЕРВОГО. Деталь законно нарисована несколькими
+      // блоками (разные листы, разные ревизии), и пометка, стоящая лишь на одном из них, — это не
+      // заявление автора, а его недоделка: считать по ней весь скоуп «объявленным» значило бы снять
+      // отказ по половине улики.
+      const contours = [...norm.values()].flat();
+      const tokenSaysUngraded =
+        contours.length > 0 && contours.every((c) => uniOf(c.blockName ?? ''));
+      // Слагаемые этой суммы — вот они, и вердикт о столкновении строится по НИМ, а не по всему
+      // файлу: uni-блок, который к этой ткани не привязан, в норму не входит и спорить ему не с чем.
+      // (Настил спрашивает шире — он укладывает все контуры скоупа; каждый путь проверяет свою
+      // популяцию, и это одно и то же правило на разных множествах, а не два разных правила.)
+      // ГАЛКА ПРОТИВ ГЕОМЕТРИИ — ОТКАЗ, А НЕ ТИХИЙ ПРИОРИТЕТ.
+      //
+      // Оператор пометил деталь «не градуируется», а в выкройках у неё полный размерный ряд. Пометка
+      // геометрию не отменяет: `graded` выводится из имён блоков, `pieceRows` шлёт строку на КАЖДЫЙ
+      // размер, и сервер (0302) отвергает такой сейв площадей ЦЕЛИКОМ — `ungraded_piece_measured_by_
+      // _size`, — то есть оператор теряет весь замер и не понимает почему.
+      //
+      // Молча отдать победу галке (послать одну строку с sizeId 0) нельзя ровно по той же причине,
+      // по которой владелец просил блокировать «градуированную копию + uni»: у детали есть РАЗНАЯ
+      // геометрия по размерам, и объявить её одинаковой значит выкинуть измеренную разницу. Молча
+      // отдать победу геометрии — значит проигнорировать ответ оператора. Спрашивать здесь некого,
+      // поэтому отказ, и он называет деталь и оба выхода.
+      if (piece.ungraded === true && graded) {
+        const blocks = [
+          ...new Set(contours.map((c) => normBlock(c.blockName ?? '')).filter(Boolean)),
+        ].sort();
+        declaredVsGraded.push({ kind: 'declared-vs-graded', subject: piece.name, blocks });
+      }
+      if (graded) {
+        const identity = normBlock(codeById.get(contours[0]?.id ?? -1)?.identity ?? '');
+        if (identity) gradedIdentities.add(identity.toLowerCase());
+      } else if (tokenSaysUngraded) {
+        for (const c of contours) {
+          const code = codeById.get(c.id);
+          if (code?.uniBase) uniEntries.push({ raw: code.raw, uniBase: code.uniBase });
+        }
+      }
+      resolved.push({
+        piece,
+        bySize: norm,
+        graded,
+        explicit: piece.ungraded === true || tokenSaysUngraded,
+        ...(part ? { partOf: mainIndex } : {}),
+      });
     }
-    resolved.push({
-      piece,
-      bySize: norm,
-      graded,
-      explicit: piece.ungraded === true || tokenSaysUngraded,
-    });
   }
   if (unmatched.length > 0) {
     // Частичная площадь ЗАНИЖАЕТ норму, и молча: экран показал бы число, склад — недостачу.
@@ -536,6 +554,8 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
   const pieceRows: DxfPieceAreaRow[] = [];
   {
     const emitted = new Set<string>();
+    // A fuse part's contour adds to the row its own piece emitted for that size (#223).
+    const rowOf = new Map<string, DxfPieceAreaRow>(); // `${sizeId}|${resolvedIndex}`
     // Оболочку `applySeamAllowance` докладывает ИМЕНАМИ контуров, и это единственный её ответ:
     // сопоставляем по нему, ровно как отчётный список `hulled` ниже.
     const hulledNames = new Set(seam.hulled);
@@ -544,20 +564,34 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
       for (let i = 0; i < resolved.length; i++) {
         const contour = contourByKey.get(`${sizeId}|${i}`);
         if (!contour) continue;
+        const owner = resolved[i].partOf;
+        if (owner != null) {
+          const row = rowOf.get(`${sizeId}|${owner}`);
+          if (row) {
+            row.areaCm2 += areaOf.get(contour) ?? contour.areaCm2;
+            row.perimeterCm += perimeterOf.get(contour) ?? perimeter(contour.poly);
+            row.hulled = row.hulled || hulledNames.has(contour.name);
+            row.ambiguousPick = row.ambiguousPick || multiByKey.has(`${sizeId}|${i}`);
+          }
+          continue;
+        }
         const lineKey = (resolved[i].piece.lineKey ?? '').trim();
         if (!lineKey) continue;
         const outSize = resolved[i].graded ? sizeId : 0;
         const key = `${lineKey}|${outSize}`;
         if (emitted.has(key)) continue;
         emitted.add(key);
-        pieceRows.push({
+        const row: DxfPieceAreaRow = {
           pieceLineKey: lineKey,
           sizeId: outSize,
           areaCm2: areaOf.get(contour) ?? contour.areaCm2,
           perimeterCm: perimeterOf.get(contour) ?? perimeter(contour.poly),
           hulled: hulledNames.has(contour.name),
           ambiguousPick: multiByKey.has(`${sizeId}|${i}`),
-        });
+        };
+        pieceRows.push(row);
+        // An ungraded piece emits its one row (size 0) once, so only that size's parts add to it.
+        rowOf.set(`${sizeId}|${i}`, row);
       }
     }
   }

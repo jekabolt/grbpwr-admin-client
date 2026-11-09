@@ -65,6 +65,7 @@ import { useSeamLengthsMm } from '../cut-strips/seam-lengths';
 import { cutStripNorm } from '../cut-strips/norm';
 import { CutStripModal } from '../cut-strip-editor/cut-strip-fields';
 import { useCutStrip } from '../cut-strip-editor/use-cut-strip';
+import { useBindingStripTeardown } from '../use-binding-strip-teardown';
 import { measured } from '../use-colourway-auto';
 import { formQtySteps, slotNorm, type FormQtyOperation, type SlotNorm } from './slot-norm';
 
@@ -196,6 +197,7 @@ export function MaterialSlots({
   onGoTab?: (tab: string, extra?: Record<string, string>) => void;
 }) {
   const { control, getValues, setValue, setFocus } = useFormContext<TechCardFormData>();
+  const teardownBinding = useBindingStripTeardown();
   const lines = (useWatch({ control, name: 'bomItems' }) ?? []) as Line[];
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []).map(wireInt);
   // REPEATS-правки шагов видны в NORM сразу: шаги читаются из живой формы, не из прочитанной карты.
@@ -300,13 +302,16 @@ export function MaterialSlots({
     : false;
   const askRemove = (index: number) =>
     setConfirm({ index, key: lines[index]?.lineKey?.trim() ?? '' });
-  const removeSlot = (c: { index: number; key: string }) => {
+  const removeSlot = async (c: { index: number; key: string }): Promise<boolean> => {
     const cur = (getValues('bomItems') ?? []) as Line[];
     const at = slotIndex(c, cur);
     const line = cur[at];
-    if (!line || blockersOf(line).length > 0) return;
+    if (!line || blockersOf(line).length > 0) return false;
+    const lineKey = line.lineKey?.trim() ?? '';
+    if (lineKey && !(await teardownBinding({ bomLineKeys: [lineKey] }))) return false;
     releaseBomLineRefs(getValues, setValue, line);
     setValue('bomItems', cur.filter((_, j) => j !== at) as never, { shouldDirty: true });
+    return true;
   };
 
   const goToLine = (line: Line) =>
@@ -510,8 +515,10 @@ export function MaterialSlots({
           if (!o) setConfirm(null);
         }}
         onConfirm={() => {
-          if (confirm) removeSlot(confirm);
-          setConfirm(null);
+          if (!confirm) return;
+          void removeSlot(confirm).then((removed) => {
+            if (removed) setConfirm(null);
+          });
         }}
         title='delete slot?'
         confirmLabel='delete slot'
@@ -572,6 +579,7 @@ function SlotRow({
   onOpenStrip: (lineKey: string) => void;
 }) {
   const { getValues, setValue } = useFormContext<TechCardFormData>();
+  const teardownBinding = useBindingStripTeardown();
   const line = lines[index];
   const cutStrip = useCutStrip({
     line,
@@ -1046,13 +1054,17 @@ function SlotRow({
               label='cut to length'
               checked={cutStrip.checked}
               onCheckedChange={(checked: boolean) => {
-                if (checked && auxMode === 'own') {
-                  setValue(`bomItems.${index}.consumptionPerUnit`, '' as never, {
-                    shouldDirty: true,
-                  });
-                }
-                const strip = cutStrip.toggle(checked);
-                if (checked && strip?.lineKey) onOpenStrip(strip.lineKey);
+                void (async () => {
+                  const key = line.lineKey?.trim() ?? '';
+                  if (!checked && key && !(await teardownBinding({ bomLineKeys: [key] }))) return;
+                  if (checked && auxMode === 'own') {
+                    setValue(`bomItems.${index}.consumptionPerUnit`, '' as never, {
+                      shouldDirty: true,
+                    });
+                  }
+                  const strip = cutStrip.toggle(checked);
+                  if (checked && strip?.lineKey) onOpenStrip(strip.lineKey);
+                })();
               }}
               readOnly={readOnly}
             />

@@ -15,13 +15,13 @@ describe('operation material quantities', () => {
           operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
           machineType: 'TECH_CARD_MACHINE_TYPE_BUTTONHOLE',
           zone: 'TECH_CARD_GARMENT_ZONE_FRONT',
-          placementCount: 6,
+          placementCount: 8,
         },
         {
           operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
           machineType: 'TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH',
           zone: 'TECH_CARD_GARMENT_ZONE_FRONT',
-          placementCount: 6,
+          placementCount: 7,
           buttonHoles: 2,
         },
       ],
@@ -30,14 +30,14 @@ describe('operation material quantities', () => {
     );
     const markup = renderToStaticMarkup(
       <>
-        <OperationMaterialStepQty qty={6} />
+        <OperationMaterialStepQty qty={7} />
         <ButtonAttachCheckLine checks={checks} />
       </>,
     );
 
     expect(markup).toContain('bg-textColor');
-    expect(markup).toContain('×6');
-    expect(markup).toContain('buttonholes 6');
+    expect(markup).toContain('×7');
+    expect(markup).toContain('buttonholes 8');
     expect(markup).toContain('text-success');
     expect(markup).toContain('article holes 4');
     expect(markup).toContain('text-error');

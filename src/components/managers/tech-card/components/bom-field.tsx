@@ -92,6 +92,7 @@ import { useBomWarnings, type BomLineTone } from './use-bom-warnings';
 import { CutStripCollectionFields } from './cut-strip-editor/cut-strip-fields';
 import { useSeamLengthsMm, type SeamLengthsMm } from './cut-strips/seam-lengths';
 import { useCutStrip } from './cut-strip-editor/use-cut-strip';
+import { useBindingStripTeardown } from './use-binding-strip-teardown';
 
 // БОЛВАНКА НОВОЙ СТРОКИ ПЕРЕЕХАЛА В `form-writers.ts` (`emptyBomItem` + `bornBomLine`), И ЭТО
 // ПЕРЕНОС, А НЕ ВТОРОЙ АДРЕС. У строки BOM появилось второе место рождения — принятое
@@ -497,6 +498,7 @@ function BomLineEditor({
   seamLengthsMm?: SeamLengthsMm;
 }) {
   const { control } = useFormContext<TechCardFormData>();
+  const teardownBinding = useBindingStripTeardown();
   const line = useWatch({ control, name: `bomItems.${index}` });
   const materialId =
     (useWatch({ control, name: `bomItems.${index}.materialId` }) as number | undefined) || 0;
@@ -538,7 +540,13 @@ function BomLineEditor({
             name='cutStrips'
             label='cut to length'
             checked={cutStrip.checked}
-            onCheckedChange={(checked: boolean) => cutStrip.toggle(checked)}
+            onCheckedChange={(checked: boolean) => {
+              void (async () => {
+                const key = line?.lineKey?.trim() ?? '';
+                if (!checked && key && !(await teardownBinding({ bomLineKeys: [key] }))) return;
+                cutStrip.toggle(checked);
+              })();
+            }}
           />
           {cutStrip.checked ? (
             <CutStripCollectionFields
@@ -679,6 +687,7 @@ export function BomField({
   canEdit?: boolean;
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
+  const teardownBinding = useBindingStripTeardown();
   const warnNoPrice = useNoPriceWarning();
   const { canReadCosting } = usePermissions();
   const [params, setParams] = useSearchParams();
@@ -877,7 +886,7 @@ export function BomField({
     setConfirmRemove(bi);
   };
 
-  const removeArticle = (bi: number) => {
+  const removeArticle = async (bi: number) => {
     const line = getValues(`bomItems.${bi}`) as MatrixLine | undefined;
     if (!line) return;
     const removedKey = line.lineKey || '';
@@ -894,6 +903,7 @@ export function BomField({
       holdNames(lineExitHold(getValues, removedKey, markers)).length > 0
     )
       return;
+    if (removedKey && !(await teardownBinding({ bomLineKeys: [removedKey] }))) return;
     releaseBomLineRefs(getValues, setValue, line);
     // Indices shift under an open editor once a row above it is gone; close it rather than let it
     // repoint at whatever slid into that slot.
@@ -1187,7 +1197,7 @@ export function BomField({
           if (!o) setConfirmRemove(null);
         }}
         onConfirm={() => {
-          if (confirmRemove !== null) removeArticle(confirmRemove);
+          if (confirmRemove !== null) void removeArticle(confirmRemove);
           setConfirmRemove(null);
         }}
         title='delete slot?'

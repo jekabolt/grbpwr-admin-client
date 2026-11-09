@@ -16,6 +16,11 @@
 // Pure TS: no React. The hook in use-assembly-geometry.ts reads the DXF and hands the pieces in.
 import type { common_TechCard, common_TechCardOperation } from 'api/proto-http/admin';
 import { formatCompositionCell } from 'components/managers/materials/components/material-code';
+import {
+  isAttachStep,
+  isCountedLine,
+  qtyStepFromOperation,
+} from 'components/managers/tech-card/components/button-qty';
 import { Clipper, FillRule, Path64, Point64 } from 'clipper2-js';
 import {
   isPressStepType,
@@ -38,6 +43,8 @@ import {
 } from 'components/managers/tech-card/components/operation-options';
 import { seamLengthCheck } from 'components/managers/tech-card/components/cut-strips/length-check';
 import {
+  bomLinesOfStep,
+  cutStripsOfCard,
   stripKeysOfCard,
   withStripPieces,
 } from 'components/managers/tech-card/components/cut-strips/strip-pieces';
@@ -3159,7 +3166,25 @@ function wordsOf(
     icon.derived || (hemStep && isHemClass(o.seamClass)) ? '' : seamClassLabel(o.seamClass),
     ...seamFacts,
     ...toolParams,
-    stepPlacementText(facts).replace(/^×\s+/, '×'),
+    (() => {
+      const cutStrips = cutStripsOfCard(ctx.input.techCard);
+      const linkedBom = bomLinesOfStep(o, cutStrips)
+        .map((lineKey) => ins?.bomItems?.find((item) => item.lineKey === lineKey))
+        .filter((item): item is NonNullable<typeof item> => !!item);
+      const cutBomLines = new Set(
+        cutStrips.map((strip) => strip.bomLineKey?.trim() ?? '').filter(Boolean),
+      );
+      const attachCounted =
+        !isAttachStep(qtyStepFromOperation(o)) ||
+        !linkedBom.length ||
+        linkedBom.some((item) =>
+          isCountedLine({
+            section: item.section,
+            cutToLength: cutBomLines.has(item.lineKey?.trim() ?? ''),
+          }),
+        );
+      return attachCounted ? stepPlacementText(facts).replace(/^×\s+/, '×') : '';
+    })(),
   ]
     .filter(Boolean)
     .map((value) => own(value));

@@ -1,6 +1,6 @@
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 
-import { foldedSpans } from './label-fold-lines';
+import { labelAssembly } from './label-fold-lines';
 
 const INK = 'var(--color-textColor)';
 const PAPER = 'var(--color-bgColor)';
@@ -18,8 +18,9 @@ const mix = (a: Pt2, b: Pt2, at: number): Pt2 => [
 ];
 
 /**
- * The label outline, its fold lines and the folded-under parts shaded, over the ordinary posed piece geometry, in the colour of
- * the pieces it lies on (`stroke`), so a label reads as one more piece of the garment.
+ * The label as it lies on the garment — folded, cut at its stitch to the part that shows — over the ordinary posed piece
+ * geometry, in the colour of the pieces it lies on (`stroke`), so a label reads as one more piece of the garment. The sewn
+ * edge is dashed.
  */
 export function GarmentLabelOverlay({
   pieces,
@@ -43,14 +44,15 @@ export function GarmentLabelOverlay({
         const mark = geoms.get(piece.key)!.garmentLabel!;
         const [a, b, c, d] = piece.drawn;
         if (!a || !b || !c || !d) return null;
+        const fold = mark.foldLines ?? [];
+        const sewn = labelAssembly(fold, mark.stitchLines ?? [], mark.heightMm);
         const mitreInset = Math.min(mark.heightMm * 0.6, mark.widthMm * 0.2) / mark.widthMm;
         const outline =
-          mark.fold === 'mitre'
+          mark.fold === 'mitre' && !sewn.sewnTop
             ? [a, b, mix(c, d, mitreInset), mix(d, c, mitreInset)]
             : piece.drawn;
-        const lines = (mark.foldLines ?? []).filter((mm) => mm > 0 && mm < mark.heightMm);
         return (
-          <g key={piece.key} data-garment-label={piece.key}>
+          <g key={piece.key} data-garment-label={piece.key} data-label-layers={sewn.layers}>
             <path
               d={pathOf(outline, true)}
               fill={PAPER}
@@ -58,40 +60,25 @@ export function GarmentLabelOverlay({
               strokeWidth={outlineWidth ?? hair * 1.5}
               strokeLinejoin='round'
             />
-            {foldedSpans(lines, mark.heightMm).map(([from, to]) => (
-              <path
-                key={`${from}-${to}`}
-                d={pathOf(
-                  [
-                    mix(a, d, from / mark.heightMm),
-                    mix(b, c, from / mark.heightMm),
-                    mix(b, c, to / mark.heightMm),
-                    mix(a, d, to / mark.heightMm),
-                  ],
-                  true,
-                )}
-                fill={stroke}
-                stroke='none'
-                opacity={0.22}
-                data-label-folded=''
-              />
-            ))}
-            {lines.length ? (
-              <g
-                fill='none'
-                stroke={stroke}
-                strokeWidth={hair}
-                strokeDasharray={`${hair * 3} ${hair * 2}`}
-                data-label-fold-lines={lines.join(',')}
-              >
-                {lines.map((mm) => (
-                  <path
-                    key={mm}
-                    d={pathOf([mix(a, d, mm / mark.heightMm), mix(b, c, mm / mark.heightMm)])}
-                  />
-                ))}
-              </g>
-            ) : null}
+            {sewn.shownStitches.map((at) => {
+              // The picture is y-up: the label's top (its sewn edge) is the d–c side. A stitch on an
+              // edge is drawn just inside it, so it never hides under the outline.
+              const inset = Math.min(1.5, sewn.heightMm * 0.08);
+              const mm = Math.min(Math.max(at, inset), sewn.heightMm - inset);
+              const t = sewn.heightMm > 0 ? mm / sewn.heightMm : 0;
+              const width = outlineWidth ?? hair * 1.5;
+              return (
+                <path
+                  key={at}
+                  d={pathOf([mix(d, a, t), mix(c, b, t)])}
+                  fill='none'
+                  stroke={stroke}
+                  strokeWidth={width}
+                  strokeDasharray={`${width * 2.5} ${width * 1.5}`}
+                  data-label-stitch={at}
+                />
+              );
+            })}
           </g>
         );
       })}

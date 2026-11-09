@@ -7,6 +7,7 @@ import {
   common_TechCardMachineType,
   common_TechCardOperationType,
   type common_Material,
+  type common_TechCardOperation,
 } from 'api/proto-http/admin';
 import { withSeamHints } from 'lib/seam-hints';
 import { notify } from 'lib/stores/store';
@@ -178,6 +179,7 @@ import {
 } from './equipment-options';
 import { kindLabel, preferredBomKinds } from './bom-kind';
 import type { FormGarmentLabel } from './labels-schema';
+import { labelShownSizeText } from './garment-label-pieces';
 import { ensureLabelLineKey, labelSizeText } from './sewn-label-row';
 import { COMPOSITION_LABEL_KEY, isCompositionLabel, labelBomLine } from './sewn-label-model';
 import { useLabelStock } from './use-label-stock';
@@ -230,8 +232,7 @@ import {
 } from './assembly-create-dialog';
 import { suggestUnitCode } from './assembly-suggest';
 import { type UnitRenameNotice } from './assembly-rename';
-import { qtyStepFromFormOperation, stepQtyOfLine } from './button-qty';
-import { MEASURED_SECTIONS } from './use-colourway-auto';
+import { isCountedLine, qtyStepFromFormOperation, stepQtyOfLine } from './button-qty';
 import { OperationButtonAttachChecks, OperationMaterialStepQty } from './operation-quantity-marks';
 import { targetAddPrefill } from './assembly-node-views';
 import {
@@ -290,18 +291,19 @@ import {
 import { UnitNameField, unitNameProducerIndex } from './unit-block';
 import { OperationMediaStrip } from './operation-media-strip';
 import { type SchematicMode, useSchematicPrefs } from './use-schematic-prefs';
-import { rowTouchesStrip, stripKeysOf, stripKeysOfCard } from './cut-strips/strip-pieces';
+import { stripKeysOf, stripKeysOfCard } from './cut-strips/strip-pieces';
 import { StripTileFace } from './cut-strips/strip-tile';
 import { cutStripNorm } from './cut-strips/norm';
 import type { CutStrip } from './cut-strip-editor/use-cut-strip';
 import {
-  BINDING_BOM_KINDS,
   bindingBomLines,
   bindingLineSub,
   bindingStripsOfStep,
   freshBindingStrip,
-  unpickBindingLine,
+  isBindingLine,
+  isBindingOperation,
 } from './binding-step';
+import { useBindingStripTeardown } from './use-binding-strip-teardown';
 import { PieceAddChip, PieceRef, useFormAssemblyPieces, useFormPieces } from './piece-picker';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
@@ -1193,6 +1195,8 @@ export type ColorwayArticles = {
   }[];
   materialNameById: Map<number, string>;
   materialById: Map<number, common_Material>;
+  /** Purpose-binding roll goods already owned by cut pieces or a marker norm. */
+  bindingBlockedLineKeys: ReadonlySet<string>;
 };
 
 // Из чего кроится каждая деталь — по колорвеям, в порядке карточки.
@@ -2542,7 +2546,7 @@ function OperationLabelPicker({ index, frozen }: { index: number; frozen: boolea
             const kind = label.kind?.trim() || label.key?.trim() || '';
             const name =
               label.key?.trim() || garmentLabelName(garmentLabelKindNames, kind) || 'label';
-            const size = labelSizeText(label);
+            const size = labelShownSizeText(label) || labelSizeText(label);
             const material = materialById.get(wireIntOf(labelBomLine(label, bomItems)?.materialId));
             return (
               <Tile
@@ -2593,16 +2597,6 @@ function OperationLabelPicker({ index, frozen }: { index: number; frozen: boolea
   );
 }
 
-const bindingPickerLinks = new WeakMap<object, Set<string>>();
-
-const bindingPickerLinksFor = (control: object): Set<string> => {
-  const current = bindingPickerLinks.get(control);
-  if (current) return current;
-  const created = new Set<string>();
-  bindingPickerLinks.set(control, created);
-  return created;
-};
-
 function OperationBindingPicker({
   index,
   lines,
@@ -2617,9 +2611,24 @@ function OperationBindingPicker({
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const operation = useWatch({ control, name: `operations.${index}` });
   const strips = (useWatch({ control, name: 'cutStrips' }) ?? []) as CutStrip[];
+  const pieces = useWatch({ control, name: 'pieces' }) ?? [];
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
   const ctx = useStepSeams();
-  const options = useMemo(() => bindingBomLines(lines), [lines]);
+  const teardownBinding = useBindingStripTeardown();
+  const blockedPurposeLineKeys = useMemo(() => {
+    const keys = new Set(articles?.bindingBlockedLineKeys ?? []);
+    for (const piece of pieces) {
+      for (const material of piece.materials ?? []) {
+        const key = material.bomLineKey?.trim();
+        if (key) keys.add(key);
+      }
+    }
+    return keys;
+  }, [articles?.bindingBlockedLineKeys, pieces]);
+  const options = useMemo(
+    () => bindingBomLines(lines, blockedPurposeLineKeys),
+    [blockedPurposeLineKeys, lines],
+  );
 
   const toggle = async (line: BomLine) => {
     const bomLineKey = line.lineKey?.trim() ?? '';
@@ -2627,37 +2636,19 @@ function OperationBindingPicker({
     const currentOperation = getValues(`operations.${index}`);
     const currentStrips = (getValues('cutStrips') ?? []) as CutStrip[];
     const own = bindingStripsOfStep(currentOperation, currentStrips, bomLineKey);
-    const linkToken = `${currentOperation?.operationNumber ?? index}:${bomLineKey}`;
-    const pickerLinks = bindingPickerLinksFor(control);
 
     if (own.length) {
-      const plan = unpickBindingLine(
-        currentOperation,
-        currentStrips,
-        bomLineKey,
-        pickerLinks.has(linkToken),
-      );
-      const removedSeams = new Set(plan.seamKeysRemoved);
-      const removedStrips = new Set(plan.stripKeys);
-      const rows = rowsOf(useSeamsStore.getState()).filter(
-        (row) => removedSeams.has(row.seamKey) || rowTouchesStrip(row, removedStrips),
-      );
-      if (rows.length && (!ctx || !(await ctx.writes.remove(rows)))) return;
-      const removedRowKeys = new Set(rows.map((row) => row.seamKey));
-      setValue('cutStrips', plan.strips as never, { shouldDirty: true });
-      setValue(`operations.${index}.inputKeys`, plan.inputKeys, { shouldDirty: true });
+      // The tile is this step's link to the line: unpicking it unlinks the line too.
+      if (!(await teardownBinding({ stepIndexes: [index], bomLineKeys: [bomLineKey] }))) return;
       setValue(
-        `operations.${index}.seamKeys`,
-        plan.seamKeys.filter((key) => !removedRowKeys.has(key)),
+        `operations.${index}.bomLineKeys`,
+        (currentOperation?.bomLineKeys ?? []).filter((key) => key !== bomLineKey),
         { shouldDirty: true },
       );
-      setValue(`operations.${index}.bomLineKeys`, plan.bomLineKeys, { shouldDirty: true });
-      pickerLinks.delete(linkToken);
       return;
     }
 
     const bomLineKeys = (currentOperation?.bomLineKeys ?? []) as string[];
-    if (!bomLineKeys.includes(bomLineKey)) pickerLinks.add(linkToken);
     const material = articles?.materialById.get(wireIntOf(line.materialId));
     const strip = freshBindingStrip({ line, sizeIds, material });
     const lineKey = strip.lineKey?.trim() ?? '';
@@ -2692,7 +2683,7 @@ function OperationBindingPicker({
           );
           const amount = parseDecimalNumber(norm);
           const sub = selected
-            ? `${edges} ${edges === 1 ? 'edge' : 'edges'} · ${Number.isFinite(amount) ? `${amount.toFixed(2)} m` : 'no pattern'}`
+            ? `${edges} ${edges === 1 ? 'edge' : 'edges'} · ${!edges ? '—' : Number.isFinite(amount) ? `${amount.toFixed(2)} m` : 'no pattern'}`
             : bindingLineSub(line);
           const material = articles?.materialById.get(wireIntOf(line.materialId));
           return (
@@ -2748,6 +2739,7 @@ function OperationEditor({
   onReplaceGhost,
   onRemoveGhost,
   mediaUrls,
+  serverOperations,
   onEdit,
   frozen = false,
   noteSuggested,
@@ -2794,6 +2786,8 @@ function OperationEditor({
   /** Растворение — тот же мутатор, что зовут полотно и схема. */
   /** Адреса операционных снимков; форма возит только media_id. */
   mediaUrls?: Map<number, string>;
+  /** Saved read-only quantities; the form deliberately does not own or save them. */
+  serverOperations?: readonly common_TechCardOperation[];
   /**
    * Шаг ИЗМЕНЁН редактором. Сегодня зовут только писатели полосы снимков: их приёмная модалка и
    * холст выносок живут в порталах, и сброс записи отмены по `focusin` секции дока их не видит.
@@ -2806,6 +2800,11 @@ function OperationEditor({
 }) {
   const form = useFormContext<TechCardFormData>();
   const { control, getValues, setValue } = form;
+  const teardownBinding = useBindingStripTeardown();
+  const cutStrips = (useWatch({ control, name: 'cutStrips' }) ?? []) as CutStrip[];
+  const cutLineKeys = new Set(
+    cutStrips.map((strip) => strip.bomLineKey?.trim() ?? '').filter(Boolean),
+  );
   const opNumber = (index + 1) * 10;
   const storedOperationNumber = (useWatch({
     control,
@@ -3811,12 +3810,19 @@ function OperationEditor({
    * резолв, и пять пунктов не брались ВОВСЕ — то есть выбор человека стирался целиком ради поля,
    * которое человек не заполнял.
    */
-  const applyWork = (token: string) => {
+  const applyWork = async (token: string) => {
     const p = `operations.${index}` as const;
+    const currentOperation = getValues(p);
     // «СНЯТЬ ВИД» — ОДНА ЗАПИСЬ И БОЛЬШЕ НИЧЕГО. Ни глагол, ни машинка, ни одно свойство не
     // трогаются: человек сказал «эта работа названа неправильно», а не «этот шаг стал другим».
     // Строка немедленно возвращается на прежнюю деривацию — то самое двоекодье.
     if (!token) {
+      if (
+        isBindingOperation(currentOperation) &&
+        !isBindingOperation({ ...currentOperation, work: '' }) &&
+        !(await teardownBinding({ stepIndexes: [index] }))
+      )
+        return;
       setPickedKindId('');
       setValue(`${p}.work`, '', { shouldDirty: true });
       setValue(`${p}.workVariant`, variantAfterWork('', workVariant), { shouldDirty: true });
@@ -3825,12 +3831,6 @@ function OperationEditor({
     const item = workCatalog.byToken.get(token);
     if (!item) return;
     const k = KIND_BY_WORK_TOKEN.get(token);
-    setPickedKindId(k?.id ?? '');
-
-    // РАБОТА ПИШЕТСЯ ПЕРВОЙ И ВСЕГДА — даже когда пункта у неё нет вовсе (0331). Это идентичность
-    // шага, ради которой фаза и заведена: без неё сто lockstitch-строк снова становятся
-    // неотличимыми, а сервер снова не может повесить на работу ни одного правила.
-    setValue(`${p}.work`, token, { shouldDirty: true });
 
     // ЧТО ИМЕННО ЗАПИСАТЬ, РЕШАЕТ ЕДИНСТВЕННЫЙ ПИСАТЕЛЬ (`workApplication`), И ЭТА СТРОКА — ЛИШЬ
     // ОДИН ИЗ ДВУХ ЕГО ВЫЗЫВАТЕЛЕЙ. Раньше правила жили ОРКЕСТРОВКОЙ ПРЯМО ЗДЕСЬ — замкнутой на
@@ -3865,6 +3865,19 @@ function OperationEditor({
       },
       park: { machines: parkMachines, presses: parkPresses },
     });
+    const nextOperation = { ...currentOperation, work: token, ...written, ...clears };
+    if (
+      isBindingOperation(currentOperation) &&
+      !isBindingOperation(nextOperation) &&
+      !(await teardownBinding({ stepIndexes: [index] }))
+    )
+      return;
+    setPickedKindId(k?.id ?? '');
+
+    // РАБОТА ПИШЕТСЯ ПЕРВОЙ И ВСЕГДА — даже когда пункта у неё нет вовсе (0331). Это идентичность
+    // шага, ради которой фаза и заведена: без неё сто lockstitch-строк снова становятся
+    // неотличимыми, а сервер снова не может повесить на работу ни одного правила.
+    setValue(`${p}.work`, token, { shouldDirty: true });
     const writes = Object.entries(written) as Array<[OperationFormStringField, string]>;
     for (const [field, value] of writes) {
       // ИМЯ, КОТОРОГО В СТРОКЕ ФОРМЫ НЕТ, ПРОПУСКАЕТСЯ МОЛЧА. Так `press_action` и дождался
@@ -4495,15 +4508,18 @@ function OperationEditor({
     .map((k) => bomLines.find((b) => b.lineKey === k))
     .filter(Boolean) as BomLine[];
   const linkedMaterials = linkedMaterialLines.filter(
-    (line) => activeKind?.id !== 'B1' || !BINDING_BOM_KINDS.has(line.kind?.trim() ?? ''),
+    (line) => activeKind?.id !== 'B1' || !isBindingLine(line),
   );
-  const quantityStep = qtyStepFromFormOperation({
-    operationNumber: storedOperationNumber,
-    operationType: opType,
-    machineType,
-    placementCount,
-    bomLineKeys: selectedBomKeys,
-  });
+  const quantityStep = qtyStepFromFormOperation(
+    {
+      operationNumber: storedOperationNumber,
+      operationType: opType,
+      machineType,
+      placementCount,
+      bomLineKeys: selectedBomKeys,
+    },
+    serverOperations?.find((operation) => operation.operationNumber === storedOperationNumber),
+  );
   const buttonArticleIds = linkedMaterials
     .filter((line) => line.kind === 'TECH_CARD_BOM_KIND_BUTTON')
     .flatMap((line) => {
@@ -4533,7 +4549,7 @@ function OperationEditor({
   const unlinkedBoms = linkableBoms.filter(
     (line) =>
       !selectedBomKeys.includes(line.lineKey ?? '') &&
-      (activeKind?.id !== 'B1' || !BINDING_BOM_KINDS.has(line.kind?.trim() ?? '')),
+      (activeKind?.id !== 'B1' || !isBindingLine(line)),
   );
   // Grouped for the reveal: six sections in one flat pile would read as undifferentiated, and
   // «нитки основных швов» sitting next to «основная молния» invites the wrong pick. linkableBoms is
@@ -5229,7 +5245,10 @@ function OperationEditor({
         </div>
         {linkedMaterials.map((material) => {
           const lineKey = material.lineKey?.trim() ?? '';
-          const counted = !MEASURED_SECTIONS.has(material.section ?? '');
+          const counted = isCountedLine({
+            section: material.section,
+            cutToLength: cutLineKeys.has(lineKey),
+          });
           const stepQty = lineKey && counted ? stepQtyOfLine(quantityStep, lineKey) : null;
           return (
             <span
@@ -6043,6 +6062,7 @@ export function OperationsField({
   headerAction?: ReactNode;
 } = {}) {
   const { clearErrors, control, getValues, setValue, watch } = useFormContext<TechCardFormData>();
+  const teardownBinding = useBindingStripTeardown();
   const { fields, append, remove, insert, move, replace } = useFieldArray({
     control,
     name: 'operations',
@@ -6303,18 +6323,19 @@ export function OperationsField({
   // <button> под внешним `<fieldset disabled>`, а док фулскрина обёрнут своим fieldset. Но
   // прикрытие разметкой — не контракт: `moveOperation` уже уезжает пропом в портал (потребитель
   // Ф6в), и первый вызыватель вне формы дописал бы перенумерацию в выпущенную карточку молча.
-  const removeOperation = (index: number) => {
-    if (frozen) return;
+  const removeOperation = async (index: number): Promise<boolean> => {
+    if (frozen) return false;
     const operations = (getValues('operations') ?? []) as OperationFormValue[];
     if (foldsClosingOn(operations, index).length > 0) {
       refuseGesture('FOLDS', FOLD_STEP_REFUSAL, 'NO STEP');
-      return;
+      return false;
     }
     if (!applying.current && serverKeepsFusingStep(operations[index], getValues('pieces') ?? [])) {
       refuseGesture(`STEP ${operationStepNumber(index)}`, 'auto fuse', 'piece is fused');
-      return;
+      return false;
     }
     const undoRecord = applying.current ? null : removeRecord(index);
+    if (!(await teardownBinding({ stepIndexes: [index] }))) return false;
     const historyKey = getValues(`operations.${index}.historyKey`);
     if (historyKey) placeBlankOnFirstInput.current.delete(historyKey);
     clearFormHistory(); // (1/10) массив поехал — формовые записи протухли
@@ -6326,6 +6347,7 @@ export function OperationsField({
     // position that no longer exists and open the wrong step.
     const lastAfter = Math.max(0, fields.length - 2);
     setSelected((s) => Math.min(s > index ? s - 1 : s, lastAfter));
+    return true;
   };
 
   const insertAfter = (index: number) => {
@@ -6433,80 +6455,91 @@ export function OperationsField({
         refused: `replacing ${current.length} ${current.length === 1 ? 'step' : 'steps'} needs a confirmation`,
       });
     }
-    const park = getValues('construction.equipmentDefaults');
-    const defaultSeamClass = getValues('construction.defaultSeamClass') ?? '';
-    const rows = steps.map((s) =>
-      rowFromStep(s, {
-        machines: park?.machines ?? [],
-        presses: park?.presses ?? [],
-        defaultSeamClass,
-        bomLines: getValues('bomItems') ?? [],
-      }),
-    );
-    // ОТМЕНА ЗАПИСИ (03-P2 §6): снимок «до» берётся ДО записи, глубоко — строки с `media[].mediaId`,
-    // флаги карточки и номера шагов в дефектах. Формовые записи старше этой не гасятся: после
-    // replace их щит по `fieldId` откажет сам, словами; после append они и так целы.
-    // Подстановка открытого шага (без жеста человека) не должна попасть в снимок «до» голым
-    // значением: отозвать её сейчас — после отмены редактор предложит её снова, С МЕТКОЙ.
-    revokeSuggestions.current?.();
-    const settled = (getValues('operations') ?? []) as typeof current;
-    const before = {
-      rows: replacing ? structuredClone(settled) : [],
-      mediaCleared: !!getValues('mediaCleared'),
-      assemblyCleared: !!getValues('assemblyCleared'),
-      issues: structuredClone(getValues('issues') ?? []),
-    };
-    if (replacing) {
-      // Старые шаги уходят все: позиционные ссылки дефектов на них повисли бы на чужих шагах.
-      remapIssues(() => null);
-      replace(rows);
-    } else {
-      // Хвостом: номера стоящих шагов не двигаются, ремапить нечего.
-      append(rows);
-    }
-    // ЗАМЕНА СНИМАЕТ ТО, ЧТО НЕСЛИ СТАРЫЕ ШАГИ, — и обязана сказать это серверу. Строки каркаса
-    // приходят без снимков; без объявленного намерения щит сервера отвергает «осведомлённую
-    // пустоту» против карточки со снимками — и с ней КАЖДЫЙ следующий автосейв. Так же с узлами,
-    // когда ни одна новая строка узла не объявляет. Маппер всё равно сверит флаг с сохранённой
-    // карточкой, так что лишний флаг на карточке без снимков/узлов не уходит.
-    const hadMedia =
-      storedHasMedia || current.some((o) => ((o as { media?: unknown[] }).media?.length ?? 0) > 0);
-    const hadUnits = storedHasUnits || current.some((o) => (o?.outputUnitKey ?? '').trim() !== '');
-    if (replacing && hadMedia) setValue('mediaCleared', true, { shouldDirty: true });
-    if (rows.some((r) => r.outputUnitKey)) {
-      setValue('assemblyCleared', false, { shouldDirty: true });
-    } else if (replacing && hadUnits) {
-      setValue('assemblyCleared', true, { shouldDirty: true });
-    }
-    const from = replacing ? 0 : current.length;
-    pendingAppend.current = null;
-    snapshotPending.current = applyRequest.nonce;
-    setHistory(
-      record(history.current, {
-        kind: 'skeleton',
-        nonce: applyRequest.nonce,
-        mode: replacing ? 'replace' : 'append',
-        from,
-        count: rows.length,
-        before,
-        after: {
-          rows: structuredClone(rows),
-          // Чужие шаги — какими они стоят сейчас; пачка — как построена. Чужая часть уточняется
-          // первым проходом детектора после записи (`snapshotPending`): открытый до записи шаг
-          // мог нести живую подстановку редактора, которую его размонтирование тут же отзовёт.
-          all: structuredClone([...(replacing ? [] : settled), ...rows]),
-          mediaCleared: !!getValues('mediaCleared'),
-          assemblyCleared: !!getValues('assemblyCleared'),
-          issues: (getValues('issues') ?? []).map((iss) => iss.operationNumber ?? 0),
-        },
-        label: skeletonLabel(replacing ? 'replace' : 'append', rows.length),
-      }),
-    );
-    setSelected(from);
-    // Запись — правка без жеста клавиатуры: автосейв ждёт человека, и просьба говорит ему, что
-    // человек был (кнопка «apply»).
-    autosave.request('skeleton');
-    answer({ applied: rows.length });
+    void (async () => {
+      if (
+        replacing &&
+        !(await teardownBinding({ stepIndexes: current.map((_, index) => index) }))
+      ) {
+        answer({ applied: 0, refused: 'binding seams not removed' });
+        return;
+      }
+      const park = getValues('construction.equipmentDefaults');
+      const defaultSeamClass = getValues('construction.defaultSeamClass') ?? '';
+      const rows = steps.map((s) =>
+        rowFromStep(s, {
+          machines: park?.machines ?? [],
+          presses: park?.presses ?? [],
+          defaultSeamClass,
+          bomLines: getValues('bomItems') ?? [],
+        }),
+      );
+      // ОТМЕНА ЗАПИСИ (03-P2 §6): снимок «до» берётся ДО записи, глубоко — строки с `media[].mediaId`,
+      // флаги карточки и номера шагов в дефектах. Формовые записи старше этой не гасятся: после
+      // replace их щит по `fieldId` откажет сам, словами; после append они и так целы.
+      // Подстановка открытого шага (без жеста человека) не должна попасть в снимок «до» голым
+      // значением: отозвать её сейчас — после отмены редактор предложит её снова, С МЕТКОЙ.
+      revokeSuggestions.current?.();
+      const settled = (getValues('operations') ?? []) as typeof current;
+      const before = {
+        rows: replacing ? structuredClone(settled) : [],
+        mediaCleared: !!getValues('mediaCleared'),
+        assemblyCleared: !!getValues('assemblyCleared'),
+        issues: structuredClone(getValues('issues') ?? []),
+      };
+      if (replacing) {
+        // Старые шаги уходят все: позиционные ссылки дефектов на них повисли бы на чужих шагах.
+        remapIssues(() => null);
+        replace(rows);
+      } else {
+        // Хвостом: номера стоящих шагов не двигаются, ремапить нечего.
+        append(rows);
+      }
+      // ЗАМЕНА СНИМАЕТ ТО, ЧТО НЕСЛИ СТАРЫЕ ШАГИ, — и обязана сказать это серверу. Строки каркаса
+      // приходят без снимков; без объявленного намерения щит сервера отвергает «осведомлённую
+      // пустоту» против карточки со снимками — и с ней КАЖДЫЙ следующий автосейв. Так же с узлами,
+      // когда ни одна новая строка узла не объявляет. Маппер всё равно сверит флаг с сохранённой
+      // карточкой, так что лишний флаг на карточке без снимков/узлов не уходит.
+      const hadMedia =
+        storedHasMedia ||
+        current.some((o) => ((o as { media?: unknown[] }).media?.length ?? 0) > 0);
+      const hadUnits =
+        storedHasUnits || current.some((o) => (o?.outputUnitKey ?? '').trim() !== '');
+      if (replacing && hadMedia) setValue('mediaCleared', true, { shouldDirty: true });
+      if (rows.some((r) => r.outputUnitKey)) {
+        setValue('assemblyCleared', false, { shouldDirty: true });
+      } else if (replacing && hadUnits) {
+        setValue('assemblyCleared', true, { shouldDirty: true });
+      }
+      const from = replacing ? 0 : current.length;
+      pendingAppend.current = null;
+      snapshotPending.current = applyRequest.nonce;
+      setHistory(
+        record(history.current, {
+          kind: 'skeleton',
+          nonce: applyRequest.nonce,
+          mode: replacing ? 'replace' : 'append',
+          from,
+          count: rows.length,
+          before,
+          after: {
+            rows: structuredClone(rows),
+            // Чужие шаги — какими они стоят сейчас; пачка — как построена. Чужая часть уточняется
+            // первым проходом детектора после записи (`snapshotPending`): открытый до записи шаг
+            // мог нести живую подстановку редактора, которую его размонтирование тут же отзовёт.
+            all: structuredClone([...(replacing ? [] : settled), ...rows]),
+            mediaCleared: !!getValues('mediaCleared'),
+            assemblyCleared: !!getValues('assemblyCleared'),
+            issues: (getValues('issues') ?? []).map((iss) => iss.operationNumber ?? 0),
+          },
+          label: skeletonLabel(replacing ? 'replace' : 'append', rows.length),
+        }),
+      );
+      setSelected(from);
+      // Запись — правка без жеста клавиатуры: автосейв ждёт человека, и просьба говорит ему, что
+      // человек был (кнопка «apply»).
+      autosave.request('skeleton');
+      answer({ applied: rows.length });
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [applyRequest?.nonce]);
 
@@ -8630,6 +8663,7 @@ export function OperationsField({
                   onReplaceGhost={replaceStepGhost}
                   onRemoveGhost={removeStepGhost}
                   mediaUrls={operationMediaUrls}
+                  serverOperations={savedCard?.techCard?.operations}
                   frozen={frozen}
                 />
               </div>
@@ -8737,6 +8771,7 @@ export function OperationsField({
                 onReplaceGhost={replaceStepGhost}
                 onRemoveGhost={removeStepGhost}
                 mediaUrls={operationMediaUrls}
+                serverOperations={savedCard?.techCard?.operations}
                 frozen={frozen}
               />
             ) : null

@@ -262,6 +262,23 @@ export function storedSeamAt(
   );
 }
 
+/** The stored seam whose span overlaps this edge range, or -1. */
+export function storedSeamOverlapping(
+  stored: readonly StoredParts[],
+  id: string,
+  range: SpanRange | undefined,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): number {
+  const length = edgeLen(id, geoms);
+  const from = range ? Math.min(range[0], range[1]) : 0;
+  const to = range ? Math.max(range[0], range[1]) : length;
+  return stored.findIndex(({ parts }) =>
+    pieces([...parts.a, ...parts.b], geoms).some(
+      (part) => part.edge === id && Math.min(to, part.to) - Math.max(from, part.from) > OVERLAP_MM,
+    ),
+  );
+}
+
 const overlaps = (
   x: readonly SidePart[],
   y: readonly SidePart[],

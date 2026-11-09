@@ -35,7 +35,10 @@ import {
 } from './derive-shared';
 import type { Gap, GapSink } from './gaps';
 import { englishT, own, type PdfT } from './i18n';
-import { parseFoldLines } from 'components/managers/tech-card/components/label-fold-lines';
+import {
+  parseFoldLines,
+  parseStitchLines,
+} from 'components/managers/tech-card/components/label-fold-lines';
 
 export type LabelsDeriveOptions = {
   sampleSizeName?: string;
@@ -131,6 +134,11 @@ function deriveSewn(techCard: common_TechCard, options: LabelsDeriveOptions, t: 
     return lines.length ? `${lines.join(' / ')} mm` : '';
   };
 
+  const stitchLinesText = (csv: string | undefined, heightMm: number) => {
+    const lines = parseStitchLines(csv, heightMm);
+    return lines.length ? `stitch ${lines.join(' / ')} mm` : '';
+  };
+
   const table: SewnTableRow[] = rows.map((row, index) => ({
     key: clean(row.key) || `label-${index}`,
     number: pinned[index]?.number ?? null,
@@ -141,6 +149,7 @@ function deriveSewn(techCard: common_TechCard, options: LabelsDeriveOptions, t: 
     fold: [
       clean(row.fold) || clean(row.folding),
       foldLinesText(row.foldLinesMm, decimal(row.heightMm) ?? 0),
+      stitchLinesText(row.stitchLinesMm, decimal(row.heightMm) ?? 0),
     ]
       .filter(Boolean)
       .join(' · '),

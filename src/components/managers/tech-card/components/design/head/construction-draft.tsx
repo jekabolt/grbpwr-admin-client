@@ -39,6 +39,7 @@ import {
 } from '../../form-writers';
 import type { TechCardFormData } from '../../schema';
 import { useUndoHistory } from '../../undo-history';
+import { useBindingStripTeardown } from '../../use-binding-strip-teardown';
 import { anyDirty } from '../../useTechCardAutosave';
 import {
   flushAllowsRun,
@@ -408,6 +409,7 @@ export function ConstructionDraft({
   conceptMax: number;
 }): JSX.Element {
   const { control, getValues, setValue, trigger } = useFormContext<TechCardFormData>();
+  const teardownBinding = useBindingStripTeardown();
   const draftIdea = useDraftDesignIdea(techCardId);
   const [inspecting, setInspecting] = useState(false);
   /* ═══ АВТОСЕЙВ (волна 25.09, D-07 / ревью Codex B-05) ═══════════════════════════════════════
@@ -1019,7 +1021,7 @@ export function ConstructionDraft({
    * У строки слота — удаление ПО КЛЮЧУ, фильтр над СОБСТВЕННЫМИ объектами формы: это та же
    * операция, какой строку удаляет вкладка BOM, и ни один объект модели через неё не проходит.
    */
-  function undo(fill: Fill) {
+  async function undo(fill: Fill): Promise<void> {
     if (readOnly || fitBarred(fill)) return;
     const t = fill.target;
     if (t.kind === 'detail' || t.kind === 'fit' || t.kind === 'concept') {
@@ -1055,6 +1057,7 @@ export function ConstructionDraft({
       if (slotHold(t.lineKey).length > 0) return;
       // Те же ссылки, что чистит вкладка BOM при удалении строки: операции, детали, лейблы.
       const gone = cur.find((r) => r.lineKey === t.lineKey);
+      if (gone && !(await teardownBinding({ bomLineKeys: [t.lineKey] }))) return;
       if (gone) releaseBomLineRefs(getValues, setValue, gone);
       setValue('bomItems', cur.filter((r) => r.lineKey !== t.lineKey) as never, {
         shouldDirty: true,
@@ -1188,7 +1191,7 @@ export function ConstructionDraft({
     return line?.name?.trim() || 'unnamed';
   };
   const askUndo = (fill: Fill) =>
-    fill.target.kind === 'slot' ? setConfirmUndo({ fills: [fill], all: false }) : undo(fill);
+    fill.target.kind === 'slot' ? setConfirmUndo({ fills: [fill], all: false }) : void undo(fill);
   /**
    * Прежние слова, которые черновик переписал, а человек поправил поверх (BLK-1), — и слова, которые
    * запись несёт после новой записи поверх правки (M-A). По строке `restore previous ↶` на каждые.
@@ -2238,8 +2241,11 @@ export function ConstructionDraft({
                 if (!o) setConfirmUndo(null);
               }}
               onConfirm={() => {
-                for (const f of confirmUndo?.fills ?? []) undo(f);
-                setConfirmUndo(null);
+                const fills = confirmUndo?.fills ?? [];
+                void (async () => {
+                  for (const fill of fills) await undo(fill);
+                  setConfirmUndo(null);
+                })();
               }}
               title={
                 confirmUndo?.all

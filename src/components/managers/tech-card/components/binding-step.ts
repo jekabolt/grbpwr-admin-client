@@ -4,13 +4,14 @@ import type { PieceGeom } from 'lib/assembly-skeleton/types';
 import type { SidePart, StoredSeam } from 'lib/seams';
 
 import { rowFromHand, type AnchorCtx } from './assembly-seams/seam-actions';
+import { bomPurposeLabel, isRollGoodsSection } from './bom-purpose';
 import { bornCutStrip } from './form-writers';
 import { kindLabel } from './bom-kind';
 import { sectionShort } from './bom-line-picker';
-import { stripFoundPiece } from './cut-strips/strip-pieces';
+import { rowTouchesStrip, stripFoundPiece } from './cut-strips/strip-pieces';
 import { sideLengthMm } from './step-seams/seam-length';
 import type { CutStrip, CutStripLine } from './cut-strip-editor/use-cut-strip';
-import { freshCutStrip } from './cut-strip-editor/use-cut-strip';
+import { cutStripEligible, freshCutStrip } from './cut-strip-editor/use-cut-strip';
 
 export const BINDING_BOM_KINDS = new Set([
   'TECH_CARD_BOM_KIND_BINDING',
@@ -24,7 +25,7 @@ type BindingLine = CutStripLine & {
   materialId?: number;
 };
 
-type BindingOperation = {
+export type BindingOperation = {
   work?: string;
   machineType?: string;
   inputKeys?: readonly string[];
@@ -39,13 +40,64 @@ export function isBindingOperation(operation: BindingOperation | undefined): boo
   );
 }
 
-/** Binding articles are offered by kind, even when they live outside normal operation sections. */
-export function bindingBomLines<T extends BindingLine>(lines: readonly T[]): T[] {
-  return lines.filter((line) => BINDING_BOM_KINDS.has(line.kind?.trim() ?? ''));
+export function isBindingLine(line: BindingLine): boolean {
+  return (
+    BINDING_BOM_KINDS.has(line.kind?.trim() ?? '') ||
+    (isRollGoodsSection(line.section) &&
+      line.purpose === 'TECH_CARD_BOM_PURPOSE_BINDING' &&
+      cutStripEligible(line))
+  );
+}
+
+/** Kinds lead, then purpose-based roll goods; both groups keep their BOM order. */
+export function bindingBomLines<T extends BindingLine>(
+  lines: readonly T[],
+  blockedPurposeLineKeys: ReadonlySet<string> = new Set(),
+): T[] {
+  const kinds: T[] = [];
+  const purposes: T[] = [];
+  for (const line of lines) {
+    if (BINDING_BOM_KINDS.has(line.kind?.trim() ?? '')) {
+      kinds.push(line);
+    } else if (isBindingLine(line) && !blockedPurposeLineKeys.has(line.lineKey?.trim() ?? '')) {
+      purposes.push(line);
+    }
+  }
+  return [...kinds, ...purposes];
 }
 
 export function bindingLineSub(line: BindingLine): string {
-  return [sectionShort(line.section), kindLabel(line.kind)].filter(Boolean).join(' · ');
+  return [sectionShort(line.section), kindLabel(line.kind) || bomPurposeLabel(line.purpose)]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/** Only B1-created strips belong to the binding picker and its destructive gestures. */
+/**
+ * A strip the B1 tile owns. `placement` is client-only and gone after a reload, so the stored truth is
+ * the owner: a from_seam strip taken by a B1 step is that step's binding strip.
+ */
+export function isBindingStrip(
+  strip: Pick<CutStrip, 'placement' | 'lineKey' | 'lengthMode'>,
+  owner?: BindingOperation,
+): boolean {
+  if (strip.placement?.trim() === '__binding__') return true;
+  const key = strip.lineKey?.trim() ?? '';
+  return (
+    !!key &&
+    !!owner &&
+    isBindingOperation(owner) &&
+    strip.lengthMode === 'from_seam' &&
+    (owner.inputKeys ?? []).some((input) => input.trim() === key)
+  );
+}
+
+/** Binding strips of any step of the card. */
+export function isCardBindingStrip(
+  strip: Pick<CutStrip, 'placement' | 'lineKey' | 'lengthMode'>,
+  operations: readonly BindingOperation[],
+): boolean {
+  return isBindingStrip(strip) || operations.some((operation) => isBindingStrip(strip, operation));
 }
 
 export function bindingStripsOfStep(
@@ -57,7 +109,9 @@ export function bindingStripsOfStep(
   const wanted = bomLineKey?.trim() ?? '';
   return strips.filter(
     (strip) =>
-      inputs.has(strip.lineKey?.trim() ?? '') && (!wanted || strip.bomLineKey?.trim() === wanted),
+      isBindingStrip(strip, operation) &&
+      inputs.has(strip.lineKey?.trim() ?? '') &&
+      (!wanted || strip.bomLineKey?.trim() === wanted),
   );
 }
 
@@ -80,10 +134,12 @@ export function freshBindingStrip({
   });
   return {
     ...strip,
+    placement: '__binding__',
     lengthMode: 'from_seam',
     seamKey: '',
     fitPct: '100',
     overlapMm: '30',
+    widthMm: isRollGoodsSection(line.section) ? '' : strip.widthMm,
     qty: 1,
   };
 }
@@ -92,6 +148,7 @@ export function freshBindingStrip({
 export function nextBindingStrip(base: CutStrip, sizeIds: readonly number[]): CutStrip {
   return {
     ...bornCutStrip(base.bomLineKey?.trim() ?? ''),
+    placement: '__binding__',
     lengthMode: 'from_seam',
     seamKey: '',
     fitPct: '100',
@@ -184,7 +241,7 @@ export function linkBindingStripToSeam(
   const inputs = new Set(operation?.inputKeys ?? []);
   const stripKeys = new Set(
     strips
-      .filter((strip) => inputs.has(strip.lineKey?.trim() ?? ''))
+      .filter((strip) => isBindingStrip(strip, operation) && inputs.has(strip.lineKey?.trim() ?? ''))
       .map((strip) => strip.lineKey?.trim() ?? '')
       .filter(Boolean),
   );
@@ -209,7 +266,10 @@ export function removeBindingStripsForSeam(
   if (!isBindingOperation(operation)) return null;
   const inputs = new Set(operation?.inputKeys ?? []);
   const removed = strips.filter(
-    (strip) => inputs.has(strip.lineKey?.trim() ?? '') && strip.seamKey?.trim() === seamKey.trim(),
+    (strip) =>
+      isBindingStrip(strip, operation) &&
+      inputs.has(strip.lineKey?.trim() ?? '') &&
+      strip.seamKey?.trim() === seamKey.trim(),
   );
   if (!removed.length) return null;
   const removedLineKeys = removed.map((strip) => strip.lineKey?.trim() ?? '').filter(Boolean);
@@ -221,32 +281,74 @@ export function removeBindingStripsForSeam(
   };
 }
 
-export function unpickBindingLine(
-  operation: BindingOperation | undefined,
-  strips: readonly CutStrip[],
-  bomLineKey: string,
-  removeBomLink: boolean,
-): {
-  strips: CutStrip[];
+export type BindingStripTeardownPatch = {
+  index: number;
   inputKeys: string[];
   seamKeys: string[];
-  bomLineKeys: string[];
-  stripKeys: string[];
-  seamKeysRemoved: string[];
-} {
-  const own = bindingStripsOfStep(operation, strips, bomLineKey);
-  const stripKeys = own.map((strip) => strip.lineKey?.trim() ?? '').filter(Boolean);
-  const seamKeysRemoved = own.map((strip) => strip.seamKey?.trim() ?? '').filter(Boolean);
-  const goneStrips = new Set(stripKeys);
-  const goneSeams = new Set(seamKeysRemoved);
+};
+
+export type BindingStripTeardown = {
+  strips: CutStrip[];
+  operations: BindingStripTeardownPatch[];
+  seamRowsToRemove: string[];
+};
+
+/**
+ * Plan one binding-strip teardown without mutating form or seam state. Step ownership is the
+ * operation whose inputs contain the marked strip; a BOM teardown selects marked strips by line.
+ */
+export function teardownBindingStrips(
+  card: {
+    cutStrips?: readonly CutStrip[];
+    operations?: readonly BindingOperation[];
+    seamRows?: readonly StoredSeam[];
+  },
+  scope: { stepIndexes?: readonly number[]; bomLineKeys?: readonly string[] },
+): BindingStripTeardown {
+  const strips = card.cutStrips ?? [];
+  const operations = card.operations ?? [];
+  const stepIndexes = new Set(scope.stepIndexes ?? []);
+  const bomLineKeys = new Set((scope.bomLineKeys ?? []).map((key) => key.trim()).filter(Boolean));
+  const stepStripKeys = new Set<string>();
+  for (const index of stepIndexes) {
+    for (const key of operations[index]?.inputKeys ?? []) if (key.trim()) stepStripKeys.add(key);
+  }
+  const removed = strips.filter((strip) => {
+    if (!isCardBindingStrip(strip, operations)) return false;
+    const lineKey = strip.lineKey?.trim() ?? '';
+    if (!stepIndexes.size && !bomLineKeys.size) return false;
+    if (stepIndexes.size && (!lineKey || !stepStripKeys.has(lineKey))) return false;
+    if (bomLineKeys.size && !bomLineKeys.has(strip.bomLineKey?.trim() ?? '')) return false;
+    return true;
+  });
+  if (!removed.length) return { strips: [...strips], operations: [], seamRowsToRemove: [] };
+
+  const goneStrips = new Set(removed.map((strip) => strip.lineKey?.trim() ?? '').filter(Boolean));
+  const stripSeamKeys = new Set(
+    removed.map((strip) => strip.seamKey?.trim() ?? '').filter(Boolean),
+  );
+  const seamRowsToRemove = [
+    ...new Set(
+      (card.seamRows ?? [])
+        .filter((row) => stripSeamKeys.has(row.seamKey) || rowTouchesStrip(row, goneStrips))
+        .map((row) => row.seamKey),
+    ),
+  ];
+  const goneSeams = new Set([...stripSeamKeys, ...seamRowsToRemove]);
+  const patches: BindingStripTeardownPatch[] = [];
+  operations.forEach((operation, index) => {
+    const inputKeys = (operation.inputKeys ?? []).filter((key) => !goneStrips.has(key));
+    const seamKeys = (operation.seamKeys ?? []).filter((key) => !goneSeams.has(key));
+    if (
+      inputKeys.length !== (operation.inputKeys ?? []).length ||
+      seamKeys.length !== (operation.seamKeys ?? []).length
+    ) {
+      patches.push({ index, inputKeys, seamKeys });
+    }
+  });
   return {
     strips: strips.filter((strip) => !goneStrips.has(strip.lineKey?.trim() ?? '')),
-    inputKeys: (operation?.inputKeys ?? []).filter((key) => !goneStrips.has(key)),
-    seamKeys: (operation?.seamKeys ?? []).filter((key) => !goneSeams.has(key)),
-    bomLineKeys: removeBomLink
-      ? (operation?.bomLineKeys ?? []).filter((key) => key !== bomLineKey)
-      : [...(operation?.bomLineKeys ?? [])],
-    stripKeys,
-    seamKeysRemoved,
+    operations: patches,
+    seamRowsToRemove,
   };
 }

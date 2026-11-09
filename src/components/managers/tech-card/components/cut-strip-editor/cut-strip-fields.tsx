@@ -10,9 +10,11 @@ import {
   DecimalField,
   EmptyCell,
   GroupLabel,
+  InputField,
   SelectField,
   ViewSwitch,
 } from 'ui';
+import { isCardBindingStrip } from '../binding-step';
 import { stripCutMm, stripSewnMm } from '../cut-strips/lengths';
 import type { SeamLengthsMm } from '../cut-strips/seam-lengths';
 import { wireInt, type TechCardFormData } from '../schema';
@@ -59,10 +61,12 @@ export function CutStripFields({
   const { control, setValue } = useFormContext<TechCardFormData>();
   const strips = (useWatch({ control, name: 'cutStrips' }) ?? []) as CutStrip[];
   const pieces = useWatch({ control, name: 'pieces' }) ?? [];
+  const operations = useWatch({ control, name: 'operations' }) ?? [];
   const strip = strips[stripIndex];
   const { dictionary } = useDictionary();
 
   const mode = strip?.lengthMode ?? 'per_size';
+  const binding = !!strip && isCardBindingStrip(strip, operations);
   const seamSource = useMemo(() => {
     if (!strip?.seamKey || mode !== 'from_seam' || !seamLengthsMm) return undefined;
     return seamLengthsMm(strip.seamKey);
@@ -93,17 +97,19 @@ export function CutStripFields({
 
   return (
     <div className='flex flex-col gap-3'>
-      <ViewSwitch
-        label='length mode'
-        value={mode}
-        options={CUT_MODE_OPTIONS}
-        disabled={readOnly}
-        onChange={(nextMode) =>
-          setValue(`cutStrips.${stripIndex}.lengthMode`, nextMode, { shouldDirty: true })
-        }
-      />
+      {!binding ? (
+        <ViewSwitch
+          label='length mode'
+          value={mode}
+          options={CUT_MODE_OPTIONS}
+          disabled={readOnly}
+          onChange={(nextMode) =>
+            setValue(`cutStrips.${stripIndex}.lengthMode`, nextMode, { shouldDirty: true })
+          }
+        />
+      ) : null}
 
-      {mode === 'from_seam' ? (
+      {mode === 'from_seam' && !binding ? (
         <SelectField
           name={`cutStrips.${stripIndex}.seamKey`}
           label='seam'
@@ -132,6 +138,14 @@ export function CutStripFields({
         <DecimalField
           name={`cutStrips.${stripIndex}.widthMm`}
           label='width mm'
+          readOnly={readOnly}
+        />
+        <InputField
+          name={`cutStrips.${stripIndex}.qty`}
+          label='qty'
+          type='number'
+          min={1}
+          valueAsNumber
           readOnly={readOnly}
         />
       </div>
@@ -175,7 +189,7 @@ export function CutStripFields({
                       maxDecimals={0}
                       placeholder={cut == null ? '' : String(cut)}
                       {...(mode === 'one_length' ? { value: cut ?? '' } : {})}
-                      disabled={readOnly || mode === 'one_length'}
+                      disabled={readOnly || binding || mode === 'one_length'}
                       className={cn(
                         'text-right placeholder:text-textColor!',
                         !!manual && mode !== 'one_length' && 'font-bold',

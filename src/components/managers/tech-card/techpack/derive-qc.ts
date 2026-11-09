@@ -1,5 +1,11 @@
 import type { common_TechCard, common_TechCardBomItem } from 'api/proto-http/admin';
 import {
+  isCountedLine,
+  qtyStepFromOperation,
+  resolveCountedPair,
+  slotQtyFromSteps,
+} from 'components/managers/tech-card/components/button-qty';
+import {
   bomLinesOfStep,
   cutStripsOfCard,
 } from 'components/managers/tech-card/components/cut-strips/strip-pieces';
@@ -113,8 +119,28 @@ export function deriveQcSignoffPage(input: QcInput, sink?: GapSink): QcSignoffMo
     };
     return sink?.add(gap) ?? gap;
   };
-  const ops = (tc?.operations ?? []).filter((op) => op.operationNumber);
+  const allOps = tc?.operations ?? [];
+  const ops = allOps.filter((op) => op.operationNumber);
   const strips = cutStripsOfCard(techCard);
+  const cutLineKeys = new Set(
+    strips.map((strip) => strip.bomLineKey?.trim() ?? '').filter(Boolean),
+  );
+  const primary = techCard.colorways?.[0];
+  const quantitySteps = allOps.map(qtyStepFromOperation);
+  const countedQtyOf = (ref: BomRef): number | null => {
+    const lineKey = clean(ref.item.lineKey);
+    const cutToLength = cutLineKeys.has(lineKey);
+    if (!isCountedLine({ section: ref.item.section, cutToLength })) return null;
+    const stepQty = slotQtyFromSteps(quantitySteps, lineKey).qty;
+    if (!primary) return stepQty ?? decimalNumber(ref.item.qtyPerGarment) ?? null;
+    return resolveCountedPair({
+      line: ref.item,
+      lineIndex: ref.index,
+      usages: primary.usages ?? [],
+      stepQty,
+      cutToLength,
+    }).used;
+  };
   const opsUsing = (ref: BomRef) =>
     ops
       .filter((op) => bomLinesOfStep(op, strips).includes(ref.key))
@@ -162,7 +188,7 @@ export function deriveQcSignoffPage(input: QcInput, sink?: GapSink): QcSignoffMo
   const unlinked: BomRef[] = [];
   const buttons = refs.filter((ref) => ref.item.kind === BUTTON);
   if (buttons.length) {
-    const qty = buttons.map((ref) => decimalNumber(ref.item.qtyPerGarment) ?? 0);
+    const qty = buttons.map((ref) => countedQtyOf(ref) ?? 0);
     const total = qty.reduce((sum, value) => sum + value, 0);
     checks.push({
       key: 'buttons',
@@ -196,7 +222,7 @@ export function deriveQcSignoffPage(input: QcInput, sink?: GapSink): QcSignoffMo
       unlinked.push(ref);
       continue;
     }
-    const qty = decimalNumber(ref.item.qtyPerGarment);
+    const qty = countedQtyOf(ref);
     checks.push({
       key: `trim-${ref.key}`,
       what: qty ? `${itemName(ref.item, t)} · ${qty}` : itemName(ref.item, t),
@@ -204,7 +230,7 @@ export function deriveQcSignoffPage(input: QcInput, sink?: GapSink): QcSignoffMo
     });
   }
   for (const ref of unlinked) {
-    const qty = decimalNumber(ref.item.qtyPerGarment);
+    const qty = countedQtyOf(ref);
     checks.push({
       key: `unlinked-${ref.key}`,
       what: itemName(ref.item, t),

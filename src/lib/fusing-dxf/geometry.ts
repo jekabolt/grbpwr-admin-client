@@ -74,7 +74,7 @@ function fromPath(path: Path64): PtMm[] {
   return out;
 }
 
-function pointInRing(point: PtMm, ring: readonly PtMm[]): boolean {
+export function pointInRing(point: PtMm, ring: readonly PtMm[]): boolean {
   let inside = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
     const a = ring[i];
@@ -369,4 +369,81 @@ export function generateFuseGeometry(input: FuseGeometryInput): FusePolygon[] {
     input.spec.darts === 'cut' ? subtractDarts(polygons, input.darts ?? [], insetMm) : polygons;
   if (!result.length) throw new FuseGeometryError('dart subtraction removed all fuse geometry');
   return result;
+}
+
+function areaCentroid(ring: readonly PtMm[]): PtMm {
+  let a = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const cross = ring[j].x * ring[i].y - ring[i].x * ring[j].y;
+    a += cross;
+    cx += (ring[j].x + ring[i].x) * cross;
+    cy += (ring[j].y + ring[i].y) * cross;
+  }
+  if (Math.abs(a) < EPS) {
+    const n = Math.max(1, ring.length);
+    return {
+      x: ring.reduce((sum, p) => sum + p.x, 0) / n,
+      y: ring.reduce((sum, p) => sum + p.y, 0) / n,
+    };
+  }
+  return { x: cx / (3 * a), y: cy / (3 * a) };
+}
+
+function distanceToRing(point: PtMm, ring: readonly PtMm[]): number {
+  if (pointInRing(point, ring)) return 0;
+  let best = Infinity;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[j];
+    const b = ring[i];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    const t =
+      len2 > 0 ? Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / len2)) : 0;
+    best = Math.min(best, Math.hypot(point.x - (a.x + t * dx), point.y - (a.y + t * dy)));
+  }
+  return best;
+}
+
+/**
+ * THE SEPARATE PARTS OF ONE PIECE'S FUSE, EACH ITS OWN CUT. Disjoint polygons are separate pieces
+ * of interlining (two yoke patches on one back), never one cut with the other drawn inside it.
+ * Ordered by the zone ring each came from — the main ring, then its islands in stored order — so a
+ * part keeps its name in every size; parts of one ring (split by the contour or a dart) follow by
+ * size, largest first.
+ */
+export function fuseParts(polygons: readonly FusePolygon[], zone: FuseZone | null): FusePolygon[] {
+  if (polygons.length < 2) return [...polygons];
+  let rings: PtMm[][] = [];
+  if (zone && 'spline' in zone) {
+    try {
+      rings = [zone.spline, ...zone.islands].map((ring) => splineRingMm(ring));
+    } catch {
+      rings = [];
+    }
+  }
+  const ringOf = (polygon: FusePolygon) => {
+    if (!rings.length) return 0;
+    const c = areaCentroid(polygon.outer);
+    let best = 0;
+    let bestDistance = Infinity;
+    rings.forEach((ring, index) => {
+      const d = distanceToRing(c, ring);
+      if (d < bestDistance) {
+        bestDistance = d;
+        best = index;
+      }
+    });
+    return best;
+  };
+  return polygons
+    .map((polygon) => ({
+      polygon,
+      ring: ringOf(polygon),
+      area: Math.abs(signedArea(polygon.outer)),
+    }))
+    .sort((a, b) => a.ring - b.ring || b.area - a.area)
+    .map((part) => part.polygon);
 }

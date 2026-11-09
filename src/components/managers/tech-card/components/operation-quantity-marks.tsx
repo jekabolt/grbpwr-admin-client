@@ -55,7 +55,7 @@ export function buttonAttachChecks(
     );
     if (holeSteps.length) {
       const count = holeSteps.reduce((sum, candidate) => sum + repeats(candidate), 0);
-      checks.push({ label: 'buttonholes', value: count, ok: count === repeats(operation) });
+      checks.push({ label: 'buttonholes', value: count, ok: count >= repeats(operation) });
     }
   }
 

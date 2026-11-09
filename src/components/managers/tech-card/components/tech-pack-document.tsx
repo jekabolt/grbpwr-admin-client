@@ -139,7 +139,8 @@ import { viewerOrigin } from 'utils/viewer-origin';
 import { PatternQR } from 'components/managers/tech-card/patterns/pattern-qr';
 import { GrbpwrMark } from 'ui';
 import { SizeChartPictureGraphic } from './size-chart-picture';
-import { cutStripsOfCard, stripRefsOf } from './cut-strips/strip-pieces';
+import { bomLinesOfStep, cutStripsOfCard, stripRefsOf } from './cut-strips/strip-pieces';
+import { isAttachStep, isCountedLine, qtyStepFromOperation } from './button-qty';
 import { detailKeyLabel } from './tech-card-options';
 import { techCardMarkerViewerPath } from 'constants/routes';
 import { artworkScope, labelArtworkTiles } from 'components/managers/print/sheets/label-facts';
@@ -3096,7 +3097,23 @@ export function TechPackDocument({
                       // и «× 6 · pitch 90 mm» — один ответ на вопрос «где на изделии», а не два.
                       // Колонок на листе девять и они уже плотные; десятая, пустая у всех швейных
                       // шагов, отняла бы ширину у состава и материалов ради одного факта.
-                      const placement = stepPlacementText(facts);
+                      const cutStrips = cutStripsOfCard(techCard);
+                      const linkedBom = bomLinesOfStep(o, cutStrips)
+                        .map((lineKey) => tc.bomItems?.find((item) => item.lineKey === lineKey))
+                        .filter((item): item is NonNullable<typeof item> => !!item);
+                      const cutBomLines = new Set(
+                        cutStrips.map((strip) => strip.bomLineKey?.trim() ?? '').filter(Boolean),
+                      );
+                      const attachCounted =
+                        !isAttachStep(qtyStepFromOperation(o)) ||
+                        !linkedBom.length ||
+                        linkedBom.some((item) =>
+                          isCountedLine({
+                            section: item.section,
+                            cutToLength: cutBomLines.has(item.lineKey?.trim() ?? ''),
+                          }),
+                        );
+                      const placement = attachCounted ? stepPlacementText(facts) : '';
                       // ПРИПУСК ПЕЧАТАЕТСЯ ВЕЗДЕ, ГДЕ ОН ЕСТЬ ХОТЬ НА ОДНОЙ СТУПЕНИ. Раньше пустая
                       // клетка означала «наследует стандарт карты», но выглядела ровно как «не
                       // задано», и число приходилось помнить из строки над таблицей — стоя у

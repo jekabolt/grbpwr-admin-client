@@ -44,6 +44,8 @@ export type FoldGroup = {
   complete?: boolean;
   /** Only PLEAT: the stored direction, read off the centre row. */
   pleatKind?: PleatKind;
+  /** The pattern changed since a row was saved: laid anyway so the picker can confirm or remove it. */
+  stale?: boolean;
 };
 
 export type PleatLine = {
@@ -80,10 +82,14 @@ export function foldGroupsOf(
   rows: readonly StoredFold[],
   grainDeg: number,
   innerLines?: readonly (readonly Pt2[])[],
+  opts: { staleToo?: boolean } = {},
 ): { groups: FoldGroup[]; unresolved: string[] } {
   const own = rows.filter((r) => r.pieceKey.toUpperCase() === piece.pieceKey.toUpperCase());
   if (!own.length) return { groups: [], unresolved: [] };
-  const res = resolveFolds(own, [piece], {
+  // The doll and the print leave a stale row out. The picker lays it by its own locator instead:
+  // hidden there, it could be neither confirmed nor removed, and a hint drew itself in its place.
+  const laidRows = opts.staleToo ? own.map((r) => (r.stale ? { ...r, stale: false } : r)) : own;
+  const res = resolveFolds(laidRows, [piece], {
     grainDeg: new Map([[piece.pieceKey, grainDeg]]),
     nameOf: () => piece.name,
     ...(innerLines ? { innerLines: new Map([[piece.pieceKey, innerLines]]) } : {}),
@@ -203,6 +209,7 @@ export function foldGroupsOf(
       source: one.row.source,
     });
   }
+  for (const group of groups) if (group.rows.some((row) => row.stale)) group.stale = true;
   return { groups, unresolved: res.unresolved.map((u) => u.words) };
 }
 
