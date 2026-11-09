@@ -69,6 +69,9 @@ export function AuxReceive({
   const total = Number(run.actuals?.actualTotalBase?.value);
   const currency = run.actuals?.baseCurrency || run.plannedCurrency || '';
   const unitCost = good > 0 && Number.isFinite(total) ? total / good : NaN;
+  // The server books NO unit cost when an issue had no average cost or an article did not fold to
+  // base (ActualTotalCostBase trust rules); a number here would promise a cost that never lands.
+  const untrusted = !!run.actuals?.hasUncostedIssues || run.actuals?.hasBase === false;
 
   const submit = form.handleSubmit(async ({ lines: countedLines }) => {
     setFail(null);
@@ -141,8 +144,11 @@ export function AuxReceive({
         {Number.isFinite(total) ? (
           <Row
             label='unit cost'
+            tone={untrusted ? 'error' : undefined}
             value={
-              Number.isFinite(unitCost) ? (
+              untrusted ? (
+                'unpriced material'
+              ) : Number.isFinite(unitCost) ? (
                 `${unitCost.toFixed(2)} ${currency} · ${total.toFixed(2)} ÷ ${good}`
               ) : (
                 <EmptyCell />

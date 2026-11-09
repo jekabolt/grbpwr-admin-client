@@ -879,8 +879,11 @@ export function ProductionRunDetail() {
                 {!boughtAux && (
                   <Row
                     label='materials issued'
+                    tone={actuals?.hasUncostedIssues ? 'error' : undefined}
                     value={
-                      actuals?.materialsFromStockBase?.value ? (
+                      actuals?.hasUncostedIssues ? (
+                        'unpriced'
+                      ) : actuals?.materialsFromStockBase?.value ? (
                         `${decimalToInput(actuals.materialsFromStockBase)} ${actuals.baseCurrency || ''}`
                       ) : (
                         <EmptyCell />
