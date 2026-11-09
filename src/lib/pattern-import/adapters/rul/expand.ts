@@ -684,8 +684,9 @@ export function expandRul(input: ExpandInput): RulExpansion {
     .find((l) => l.key === 'gradeRuleTable')
     ?.value?.trim();
   const warnings: string[] = [];
-  // compared on their ASCII letters: the two files of one export may use different codepages
-  const ascii = (v: string) => v.replace(/[^\x21-\x7e]+/g, '').toUpperCase();
+  // compared on their ASCII letters and digits: the two files of one export may use different
+  // codepages, and CLO writes "Size Group 1" in the RUL but "Size_Group_1" in the DXF
+  const ascii = (v: string) => v.replace(/[^0-9A-Za-z]+/g, '').toUpperCase();
   const key = (v: string) => ascii(v) || v.trim().toUpperCase();
   const fileStem = (name: string) => (name.split(/[\\/]/).pop() ?? name).replace(/\.[^.]*$/, '');
   const cloFilenameTable =

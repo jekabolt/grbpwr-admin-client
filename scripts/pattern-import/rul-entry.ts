@@ -638,6 +638,23 @@ function sectionC(t: RulTable) {
     const r = refusal(f);
     check('C', `refused: ${what}`, r.startsWith('rul-invalid') && re.test(r), r.slice(0, 160));
   }
+  // one CLO export: "Size Group 1" in the RUL, "Size_Group_1" in the DXF — the same table
+  const cloTable = refusal(() =>
+    expandRul({
+      dxf: enc(baseDxf().replace('Grade Rule Table: B9000', 'Grade Rule Table: Size_Group_1')),
+      dxfName: 'f.dxf',
+      rul: parseRul(
+        enc(SPEC_RUL.replace('GRADE RULE TABLE: B9000', 'GRADE RULE TABLE: Size Group 1')),
+      ),
+      rulName: 'B9000.rul',
+    }),
+  );
+  check(
+    'C',
+    'accepted: table "Size_Group_1" in the DXF is "Size Group 1" in the RUL',
+    cloTable === '',
+    cloTable.slice(0, 160),
+  );
   // a DXF that already holds several sizes
   const two = baseDxf()
     .replace(
