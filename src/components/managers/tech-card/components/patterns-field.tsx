@@ -1342,7 +1342,9 @@ export function PatternsField({
     return shapeRefsOf(
       scopeGroups.flatMap((group) => {
         const bySheet = new Map<string, PieceDTO[]>();
-        for (const piece of contourPiecesByScope.get(group.scope.key) ?? []) {
+        for (const piece of bundle.pieces) {
+          const file = piece.fileIndex ?? -1;
+          if (bundle.scopeByFile.get(file) !== group.scope.key) continue;
           const url = bundle.urlByFile?.get(piece.fileIndex ?? -1) ?? '';
           bySheet.set(url, [...(bySheet.get(url) ?? []), piece]);
         }
@@ -1366,16 +1368,7 @@ export function PatternsField({
         }));
       }),
     );
-  }, [
-    bundle,
-    importing,
-    cardPieces,
-    scopeGroups,
-    contourPiecesByScope,
-    pieceDxfAliases,
-    linkSet,
-    dictTokens,
-  ]);
+  }, [bundle, importing, cardPieces, scopeGroups, pieceDxfAliases, linkSet, dictTokens]);
   // the card has sheets and their parse is not read yet: the import's write waits for it (T1 (a))
   const importShapesPending = allDxfFiles.length > 0 && !bundle && !geometry.isError;
 

@@ -138,6 +138,7 @@ export function shapeRefsOf(
       pieceLineKey: ref.pieceLineKey,
       identity: ref.identity,
       ...(url ? { url } : {}),
+      ...(ref.acceptedGate?.length ? { acceptedGate: [...ref.acceptedGate] } : {}),
       sizes: Object.fromEntries(
         [...ref.entry.bySize].map(([size, p]) => [
           size,

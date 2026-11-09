@@ -2262,6 +2262,8 @@ export type DraftShapeRef = {
   url?: string;
   /** Bare size token (`bareToken`, '' for a sizeless block) → outline facts, mm. */
   sizes: Record<string, { areaMm2: number; wMm: number; hMm: number }>;
+  /** Blocking gate findings already present on this card piece's current sheet. */
+  acceptedGate?: GateCheckId[];
 };
 
 /**

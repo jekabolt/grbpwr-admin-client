@@ -9,6 +9,8 @@ import type {
 } from 'api/proto-http/admin';
 import type { PieceDTO, PieceManifestFacts } from 'lib/nesting/types';
 import { parseSheets } from 'lib/nesting/worker/parse-files';
+import { readRawDxf } from 'lib/pattern-import/gate/reader';
+import { pointOnRings } from 'lib/pattern-import/semantics/grain-inside';
 import { buildFusingSheets } from './dxf';
 import { sourcePieces } from './regenerate';
 
@@ -119,6 +121,22 @@ describe('fusing regeneration contours', () => {
     expect(built.sheets).toHaveLength(1);
     expect(built.sheets[0].blocks).toHaveLength(expectedContours);
     expect(new Set(built.sheets[0].blocks)).toHaveLength(expectedContours);
+    const raw = readRawDxf(built.sheets[0].dxfText);
+    let grains = 0;
+    for (const entities of raw.blocks.values()) {
+      const cut = entities.find(
+        (entity) => entity.layer === '1' && entity.closed && entity.pts.length >= 3,
+      );
+      const grain = entities.find((entity) => entity.layer === '7' && entity.pts.length >= 2);
+      if (!cut || !grain) continue;
+      grains++;
+      const mid = {
+        x: (grain.pts[0].x + grain.pts[1].x) / 2,
+        y: (grain.pts[0].y + grain.pts[1].y) / 2,
+      };
+      expect(pointOnRings(mid, [cut.pts])).toBe(true);
+    }
+    expect(grains).toBeGreaterThan(0);
   });
 
   it('still warns for two distinct cut contours of one piece and size', () => {

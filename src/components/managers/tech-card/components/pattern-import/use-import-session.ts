@@ -87,6 +87,7 @@ import { driveTick, newDriveState, type DriveState, type DriveStopWhy } from './
 import { autopilotRecordOf, mergeAssumptions, type Assumption } from './autopilot/types';
 import { aiAsideAssumptions } from './autopilot/ai-pages';
 import { answerRecordOf } from './autopilot/replay-record';
+import { acceptCurrentFindings } from './steps/accepted-findings';
 import {
   before,
   cloneInput,
@@ -1420,7 +1421,8 @@ export function useImportSession(deps: {
             ...replayOf(),
           });
           const draft = buildDraft(out, { card: rc(), semantics: sem });
-          patch({ draft, gate: out.gate, step: 'check' });
+          const accepted = acceptCurrentFindings(out.gate, draft, rc().existingShapes ?? []);
+          patch({ draft: accepted.draft, gate: accepted.gate, step: 'check' });
           return;
         }
         case 'apply': {

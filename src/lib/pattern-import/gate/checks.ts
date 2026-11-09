@@ -761,11 +761,16 @@ export function g5(ctx: GateCtx): GateCheck {
     if (!b.mb.hasGrain) bad('manifest hasGrain = false');
     // drills / internal (layer 8)
     const l8 = onLayer(ents, LAYERS.internal).filter(isPoly);
-    const drills = l8.filter(isDrill);
+    const drillMarks = l8.filter(isDrill);
+    // A closed 10 mm internal loop is ambiguous in a foreign file: it can be a drill, or ordinary
+    // geometry (generated fusing sheets carry small zone loops). The semantic source and manifest
+    // agree on whether this block has drills; when both say zero, keep the loop internal. An added
+    // loop still changes the exact internal count below and blocks.
+    const drills = s.drills.length || b.mb.drills ? drillMarks : [];
     // W3 (R12): a half's fold line is the AAMA mirror line on layer 6 — still one of the piece's
     // internal lines for the manifest; every drill square has its AAMA drill POINT on layer 13
     const mirror = onLayer(ents, AAMA_MIRROR_LAYER).filter(isPoly);
-    const internal = [...l8.filter((e) => !isDrill(e)), ...mirror];
+    const internal = [...l8.filter((e) => !drills.includes(e)), ...mirror];
     if (r12) {
       const holes = onLayer(ents, AAMA_DRILL_LAYER).filter((e) => e.type === 'POINT');
       const unmatched = drills.filter((q) => {

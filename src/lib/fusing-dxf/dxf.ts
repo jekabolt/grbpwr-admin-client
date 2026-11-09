@@ -9,6 +9,7 @@ import type {
   PtMm,
 } from 'lib/pattern-import/types';
 import { writeScopes } from 'lib/pattern-import/write';
+import { fitGrainInside } from 'lib/pattern-import/semantics/grain-inside';
 import { edgeRunsOf } from './edge-runs';
 import { fuseAreaMm2, fuseInsetRingMm, generateFuseGeometry, signedArea } from './geometry';
 import { ZONE_ON_CONTOUR_MM, projectOnRing } from './spline';
@@ -138,14 +139,16 @@ function grainOf(
         ? sourceAngle + 45
         : sourceAngle;
   const line = spec.grain === 'as_piece' && source.grain ? source.grain : axisThrough(cut, angle);
+  const fitted = fitGrainInside(line.a, line.b, [cut], { minMm: 1 });
+  if (!fitted) return null;
   const angleDeg = (Math.atan2(line.b.y - line.a.y, line.b.x - line.a.x) * 180) / Math.PI;
   return {
     kind: 'grain',
     origin: 'derived',
     ranges: [],
     confidence: 1,
-    a: line.a,
-    b: line.b,
+    a: fitted[0],
+    b: fitted[1],
     angleDeg,
     evidence: ['geometry'],
   };

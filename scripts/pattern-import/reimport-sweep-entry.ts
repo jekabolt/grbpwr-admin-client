@@ -335,8 +335,10 @@ async function cardSide(snap: Snapshot, card: Card): Promise<CardSide> {
   // `shapeRefsOf` takes — the other shape throws on its first destructure.
   const perSheet = scopeGroups.flatMap((group) => {
     const bySheet = new Map<string, PieceDTO[]>();
-    for (const piece of contourPiecesByScope.get(group.scope.key) ?? []) {
-      const url = bundle.urlByFile.get(piece.fileIndex ?? -1) ?? '';
+    for (const piece of bundle.pieces) {
+      const file = piece.fileIndex ?? -1;
+      if (bundle.scopeByFile.get(file) !== group.scope.key) continue;
+      const url = bundle.urlByFile.get(file) ?? '';
       bySheet.set(url, [...(bySheet.get(url) ?? []), piece]);
     }
     return [...bySheet].map(([url, scoped]) => ({
