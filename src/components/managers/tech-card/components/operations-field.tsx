@@ -2593,16 +2593,6 @@ function OperationLabelPicker({ index, frozen }: { index: number; frozen: boolea
   );
 }
 
-const bindingPickerLinks = new WeakMap<object, Set<string>>();
-
-const bindingPickerLinksFor = (control: object): Set<string> => {
-  const current = bindingPickerLinks.get(control);
-  if (current) return current;
-  const created = new Set<string>();
-  bindingPickerLinks.set(control, created);
-  return created;
-};
-
 function OperationBindingPicker({
   index,
   lines,
@@ -2627,16 +2617,10 @@ function OperationBindingPicker({
     const currentOperation = getValues(`operations.${index}`);
     const currentStrips = (getValues('cutStrips') ?? []) as CutStrip[];
     const own = bindingStripsOfStep(currentOperation, currentStrips, bomLineKey);
-    const linkToken = `${currentOperation?.operationNumber ?? index}:${bomLineKey}`;
-    const pickerLinks = bindingPickerLinksFor(control);
 
     if (own.length) {
-      const plan = unpickBindingLine(
-        currentOperation,
-        currentStrips,
-        bomLineKey,
-        pickerLinks.has(linkToken),
-      );
+      // The tile is this step's link to the line: unpicking it unlinks the line too.
+      const plan = unpickBindingLine(currentOperation, currentStrips, bomLineKey, true);
       const removedSeams = new Set(plan.seamKeysRemoved);
       const removedStrips = new Set(plan.stripKeys);
       const rows = rowsOf(useSeamsStore.getState()).filter(
@@ -2652,12 +2636,10 @@ function OperationBindingPicker({
         { shouldDirty: true },
       );
       setValue(`operations.${index}.bomLineKeys`, plan.bomLineKeys, { shouldDirty: true });
-      pickerLinks.delete(linkToken);
       return;
     }
 
     const bomLineKeys = (currentOperation?.bomLineKeys ?? []) as string[];
-    if (!bomLineKeys.includes(bomLineKey)) pickerLinks.add(linkToken);
     const material = articles?.materialById.get(wireIntOf(line.materialId));
     const strip = freshBindingStrip({ line, sizeIds, material });
     const lineKey = strip.lineKey?.trim() ?? '';
