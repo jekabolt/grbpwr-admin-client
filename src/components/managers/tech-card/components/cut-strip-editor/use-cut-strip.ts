@@ -2,7 +2,7 @@ import type { common_Material, common_TechCardSeam } from 'api/proto-http/admin'
 import { useCallback } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { decimalToInput } from 'utils/decimal';
-import { isMainFabricLine } from '../bom-purpose';
+import { isMainFabricLine, isRollGoodsSection } from '../bom-purpose';
 import { bornCutStrip } from '../form-writers';
 import { wireInt, type TechCardFormData } from '../schema';
 
@@ -12,6 +12,7 @@ export type CutStripLine = {
   name?: string;
   unit?: string;
   purpose?: string;
+  section?: string;
   fabricWidth?: string;
   spec?: string;
 };
@@ -133,7 +134,8 @@ export function freshCutStrip({
     ...strip,
     lengthMode: seamKey ? 'from_seam' : 'per_size',
     seamKey,
-    widthMm: materialWidthMm(material, line),
+    // A roll line's width is the roll, not the strip: the strip width is typed by hand.
+    widthMm: isRollGoodsSection(line.section) ? '' : materialWidthMm(material, line),
     sizes: [...new Set(sizeIds.map(wireInt).filter((sizeId) => sizeId > 0))].map((sizeId) => ({
       sizeId,
       seamMm: '',
