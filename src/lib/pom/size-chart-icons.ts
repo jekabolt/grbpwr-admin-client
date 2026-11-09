@@ -98,6 +98,13 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
         yEnd: 72.925,
       },
       {
+        type: 'horizontal',
+        name: 'hood-width',
+        y: -32.075,
+        xStart: 197.82,
+        xEnd: 343.82,
+      },
+      {
         type: 'vertical',
         name: 'sleeve',
         x: 450,
@@ -606,6 +613,13 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
         yEnd: 72.925,
       },
       {
+        type: 'horizontal',
+        name: 'hood-width',
+        y: -32.075,
+        xStart: 197.82,
+        xEnd: 343.82,
+      },
+      {
         type: 'vertical',
         name: 'sleeve',
         x: 450,
@@ -689,6 +703,13 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
         x: 420,
         yStart: -87.075,
         yEnd: 72.925,
+      },
+      {
+        type: 'horizontal',
+        name: 'hood-width',
+        y: -32.075,
+        xStart: 197.82,
+        xEnd: 343.82,
       },
       {
         type: 'vertical',
@@ -900,6 +921,13 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
         yEnd: 18,
       },
       {
+        type: 'horizontal',
+        name: 'hood-width',
+        y: -87,
+        xStart: 142.35,
+        xEnd: 288.35,
+      },
+      {
         type: 'vertical',
         name: 'sleeve',
         x: 388,
@@ -1100,6 +1128,13 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
         x: 350,
         yStart: -142,
         yEnd: 18,
+      },
+      {
+        type: 'horizontal',
+        name: 'hood-width',
+        y: -87,
+        xStart: 142.35,
+        xEnd: 288.35,
       },
       {
         type: 'vertical',

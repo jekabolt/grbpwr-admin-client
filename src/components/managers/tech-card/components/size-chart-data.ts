@@ -61,12 +61,14 @@ export function normalizePoints(points: readonly ChartPointDraft[]): ChartPointD
 /**
  * Seed an empty points list while retaining every legacy measurement carried by a cell.
  * A null kind (garment not known yet) adds no default points, only the legacy rows.
+ * `extraNames` (the picture's hood lines) follow the defaults when the dictionary has them.
  */
 export function seedChart(
   kind: GarmentKind | null,
   points: readonly ChartPointDraft[],
   cells: readonly ChartCellDraft[],
   nameIds: ReadonlyMap<ChartMeasurementName | string, number>,
+  extraNames: readonly string[] = [],
 ): { points: ChartPointDraft[]; cells: ChartCellDraft[]; seeded: boolean } {
   if (points.length) return { points: normalizePoints(points), cells: [...cells], seeded: false };
 
@@ -79,6 +81,21 @@ export function seedChart(
     seeded.push({
       measurementNameId,
       pomCode,
+      position: seeded.length + 1,
+      tolMinusCm: '1',
+      tolPlusCm: '1',
+      inShop: false,
+      basisPieceLineKeys: [],
+      stale: false,
+    });
+  }
+
+  for (const name of kind ? extraNames : []) {
+    const measurementNameId = nameIds.get(name);
+    if (!measurementNameId || used.has(measurementNameId)) continue;
+    used.add(measurementNameId);
+    seeded.push({
+      measurementNameId,
       position: seeded.length + 1,
       tolMinusCm: '1',
       tolPlusCm: '1',

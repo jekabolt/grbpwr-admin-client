@@ -490,7 +490,12 @@ export function SizeChartField({
       }
       return;
     }
-    const seeded = seedChart(pattern.seedKind, legacyOnly ? [] : points, cells, nameIds);
+    // A hooded icon brings its hood rows into a new chart.
+    const iconKey = picture.iconKey || defaultSizeChartIcon(pattern.categoryNames) || '';
+    const hoodNames = (SIZE_CHART_ICONS[iconKey]?.lines ?? [])
+      .map((line) => line.name)
+      .filter((name) => name.startsWith('hood-'));
+    const seeded = seedChart(pattern.seedKind, legacyOnly ? [] : points, cells, nameIds, hoodNames);
     const merged = mergePatternIntoCells(seeded.cells, seeded.points, pattern.patternValues);
     setPoints(seeded.points);
     setCells(merged.cells);
