@@ -366,7 +366,6 @@ export function SizeChartField({
     if (iconKey) {
       rememberedPicture.current.iconKey = iconKey;
       setPicture({ ...EMPTY_PICTURE, source: 'icon', iconKey });
-      markDirty('picture');
     } else if (sketches[0]) {
       rememberedPicture.current.sketch = sketches[0];
       setPicture({
@@ -375,16 +374,21 @@ export function SizeChartField({
         mediaId: sketches[0].id,
         mediaUrl: sketches[0].url,
       });
-      markDirty('picture');
     } else {
       setPicture(EMPTY_PICTURE);
     }
     setPicturePrepared(true);
-  }, [chartLoaded, markDirty, pattern.categoryNames, picturePrepared, sketches]);
+  }, [chartLoaded, pattern.categoryNames, picturePrepared, sketches]);
 
   // Icon lines and loaded free lines name rows, but never replace values already in the grid.
   useEffect(() => {
-    if (!chartLoaded || !picturePrepared) return;
+    // Only after the user touched the picture: opening a card never writes.
+    if (
+      !chartLoaded ||
+      !picturePrepared ||
+      !['picture', 'icon', 'sketch', 'upload'].some((key) => touched.has(key))
+    )
+      return;
     const measurementIds = new Set(
       picture.lines.flatMap((line) => (line.measurementNameId > 0 ? [line.measurementNameId] : [])),
     );
@@ -448,6 +452,7 @@ export function SizeChartField({
     picture,
     picturePrepared,
     points,
+    touched,
   ]);
 
   // Seed once after the server answer. Pattern values may arrive later and merge in the next effect.
@@ -798,7 +803,7 @@ export function SizeChartField({
       const iconKey =
         rememberedPicture.current.iconKey ??
         defaultSizeChartIcon(pattern.categoryNames) ??
-        Object.keys(SIZE_CHART_ICONS)[0] ??
+        (pattern.kind === 'bottom' ? 'joggers' : 'shirt') ??
         '';
       setPicture((previous) => ({
         ...previous,
