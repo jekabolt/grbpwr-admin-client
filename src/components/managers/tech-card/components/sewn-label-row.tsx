@@ -1043,7 +1043,7 @@ export function SewnLabelRow({
       <Button
         type='button'
         variant='default'
-        className={`${ROW_GRID} px-0 py-2 text-left`}
+        className={`${ROW_GRID} px-0 py-2 text-left press:!bg-transparent press:!text-textColor`}
         aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
       >
