@@ -2989,7 +2989,13 @@ export function StepPictureSvg({
         plain={look === 'tile'}
         nameRoom={stripNameRoom}
       />
-      <GarmentLabelOverlay pieces={pieces} geoms={flatGeoms} hair={L.hair} />
+      <GarmentLabelOverlay
+        pieces={pieces}
+        geoms={flatGeoms}
+        hair={L.hair}
+        stroke={FAINT}
+        outlineWidth={L.outline}
+      />
       {hover && (hoverRange || !marks.some((m) => m.id === hover)) && ptsOf(hover) && (
         <path
           d={pathOf(
