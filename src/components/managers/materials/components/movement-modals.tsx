@@ -1507,15 +1507,12 @@ export function IssueStockModal({
               <option value={0}>— any / unspecified —</option>
               {lots.map((l) => (
                 <option key={l.id} value={l.id ?? 0}>
-                  {l.lotCode || `lot #${l.id}`} · rem {decimalToInput(l.remainingQty) || '0'}
+                  {l.lotCode || lotDay(l.receivedAt) || 'lot'} · rem {decimalToInput(l.remainingQty) || '0'}
                   {target.unit ? ` ${target.unit}` : ''}
                 </option>
               ))}
             </select>
           </Field>
-          <Text variant='inactive' size='small'>
-            Draw from one received batch for traceability — leave as "any" if you don't track lots.
-          </Text>
         </div>
       ) : null}
       <Field label='comment'>
