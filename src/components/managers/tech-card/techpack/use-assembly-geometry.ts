@@ -145,6 +145,8 @@ function inputSignature(
 export type AssemblyGeometry = {
   pieces: BuiltAssemblyPieces['pieces'];
   grainDeg: BuiltAssemblyPieces['grainDeg'];
+  /** Size token the current matched drawing was read on. */
+  size: string;
   /** Each card piece's DXF block, for the cut-pieces sheet (null while the DXF is unread). */
   shapes: TechpackPieceGeometry;
   dep: PrintDep;
@@ -183,6 +185,7 @@ export function useAssemblyGeometry(techCard: common_TechCard, enabled = true): 
     }
     return { found, shapes: { shapeByKey, grainLayer: index?.grainLayer ?? '' } };
   }, [ins?.pieces, index, refs]);
+  const drawnSize = useMemo(() => drawnSizeToken(matched.found.values()), [matched.found]);
   // A strip joins the drawing here, after the match: `shapes` feeds the cut sheet and stays as it
   // was, and the strip is drawn at the size the pattern pieces were read at.
   const sizeNames = useSizeNames();
@@ -190,16 +193,16 @@ export function useAssemblyGeometry(techCard: common_TechCard, enabled = true): 
   const drawings = useMemo(
     () =>
       stripDrawingsOf(strips, ins?.bomItems ?? [], {
-        sizeToken: drawnSizeToken(matched.found.values()),
+        sizeToken: drawnSize,
         sizeNames,
         baseSizeId: ins?.baseSampleSizeId,
       }),
-    [strips, ins?.bomItems, ins?.baseSampleSizeId, matched.found, sizeNames],
+    [strips, ins?.bomItems, ins?.baseSampleSizeId, drawnSize, sizeNames],
   );
   const labels = garmentLabelsOfCard(techCard);
   const labelDrawings = useMemo(
-    () => garmentLabelDrawingsOf(labels, drawnSizeToken(matched.found.values())),
-    [labels, matched.found],
+    () => garmentLabelDrawingsOf(labels, drawnSize),
+    [labels, drawnSize],
   );
   const found = useMemo(() => {
     if (drawings.length === 0 && labelDrawings.length === 0) return matched.found;
@@ -244,6 +247,7 @@ export function useAssemblyGeometry(techCard: common_TechCard, enabled = true): 
   const status = parseStatus === 'ok' ? buildStatus : parseStatus;
   return {
     ...(built.data ?? EMPTY_BUILT),
+    size: drawnSize,
     shapes: matched.shapes,
     dep: {
       label: 'pattern geometry',

@@ -93,6 +93,8 @@ import { CutStripCollectionFields } from './cut-strip-editor/cut-strip-fields';
 import { useSeamLengthsMm, type SeamLengthsMm } from './cut-strips/seam-lengths';
 import { useCutStrip } from './cut-strip-editor/use-cut-strip';
 import { useBindingStripTeardown } from './use-binding-strip-teardown';
+import { useTopstitchLineTeardown } from './use-topstitch-line-teardown';
+import { TopstitchThreadFields } from './topstitch-thread-fields';
 
 // БОЛВАНКА НОВОЙ СТРОКИ ПЕРЕЕХАЛА В `form-writers.ts` (`emptyBomItem` + `bornBomLine`), И ЭТО
 // ПЕРЕНОС, А НЕ ВТОРОЙ АДРЕС. У строки BOM появилось второе место рождения — принятое
@@ -488,6 +490,8 @@ function BomLineEditor({
   sizeIds,
   seams,
   seamLengthsMm,
+  norms,
+  baseSizeId,
 }: {
   index: number;
   highlight?: boolean;
@@ -496,6 +500,8 @@ function BomLineEditor({
   sizeIds: number[];
   seams: common_TechCardSeam[];
   seamLengthsMm?: SeamLengthsMm;
+  norms?: Parameters<typeof TopstitchThreadFields>[0]['norms'];
+  baseSizeId?: number;
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const teardownBinding = useBindingStripTeardown();
@@ -534,6 +540,7 @@ function BomLineEditor({
         />
       )}
       <SlotIdentityFields index={index} stacked markers={markers} />
+      <TopstitchThreadFields index={index} norms={norms} baseSizeId={baseSizeId} />
       {cutStrip.eligible ? (
         <div className='flex flex-col gap-3'>
           <CheckboxField
@@ -688,6 +695,7 @@ export function BomField({
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const teardownBinding = useBindingStripTeardown();
+  const teardownTopstitch = useTopstitchLineTeardown();
   const warnNoPrice = useNoPriceWarning();
   const { canReadCosting } = usePermissions();
   const [params, setParams] = useSearchParams();
@@ -904,6 +912,7 @@ export function BomField({
     )
       return;
     if (removedKey && !(await teardownBinding({ bomLineKeys: [removedKey] }))) return;
+    if (removedKey) teardownTopstitch({ bomLineKeys: [removedKey] });
     releaseBomLineRefs(getValues, setValue, line);
     // Indices shift under an open editor once a row above it is gone; close it rather than let it
     // repoint at whatever slid into that slot.
@@ -1186,6 +1195,8 @@ export function BomField({
               sizeIds={sizeIds}
               seams={seams}
               seamLengthsMm={seamLengthsMm}
+              norms={card?.cutStripNorms}
+              baseSizeId={card?.techCard?.baseSampleSizeId}
             />
           </fieldset>
         )}

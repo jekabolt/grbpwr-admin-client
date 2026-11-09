@@ -51,7 +51,7 @@ const KIND_IN = invert(KIND);
 const DIRECTION_IN = invert(DIRECTION);
 const SOURCE_IN = invert(SOURCE);
 
-const anchorToWire = (a: EdgeAnchor): TechCardSeamAnchorWire => {
+export const anchorToWire = (a: EdgeAnchor): TechCardSeamAnchorWire => {
   const whole = a.range[0] <= 0 && a.range[1] >= 1;
   return {
     pieceLineKey: a.piece,
@@ -71,7 +71,7 @@ const anchorToWire = (a: EdgeAnchor): TechCardSeamAnchorWire => {
   };
 };
 
-const anchorFromWire = (w: TechCardSeamAnchorWire): EdgeAnchor => {
+export const anchorFromWire = (w: TechCardSeamAnchorWire): EdgeAnchor => {
   const from = w.rangeFrom ?? 0;
   const to = w.rangeTo ?? 0;
   return {

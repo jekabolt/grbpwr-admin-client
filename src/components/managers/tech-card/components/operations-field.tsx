@@ -129,6 +129,7 @@ import {
   OPERATION_KIND_BY_ID,
   kindLabelOf,
   kindOf,
+  isTopstitchStep,
   operationHowKind,
   type OperationKind,
 } from './operation-kinds';
@@ -304,6 +305,8 @@ import {
   isBindingOperation,
 } from './binding-step';
 import { useBindingStripTeardown } from './use-binding-strip-teardown';
+import { useTopstitchLineTeardown } from './use-topstitch-line-teardown';
+import { isTopstitchThreadLine, type TopstitchLine } from './topstitch-lines';
 import { PieceAddChip, PieceRef, useFormAssemblyPieces, useFormPieces } from './piece-picker';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
@@ -1415,6 +1418,16 @@ function OperationsHeaderWarnings({
       text: `${operationStepNumber(index)} · ${status}`,
       error: true,
       action: { label: 'open step', onClick: () => onStepProblem(index) },
+    });
+  });
+  operations.forEach((operation, index) => {
+    (operation.topstitchLines ?? []).forEach((line) => {
+      if (!line.stale) return;
+      items.push({
+        text: `${operationStepNumber(index)} · stale line`,
+        error: true,
+        action: { label: 'open step', onClick: () => onStepProblem(index) },
+      });
     });
   });
   missingSeamSteps.forEach((index) => {
@@ -2716,6 +2729,100 @@ function OperationBindingPicker({
   );
 }
 
+function OperationTopstitchThreadPicker({
+  index,
+  lines,
+  frozen,
+  articles,
+}: {
+  index: number;
+  lines: BomLine[];
+  frozen: boolean;
+  articles?: ColorwayArticles;
+}) {
+  const { control, getValues, setValue } = useFormContext<TechCardFormData>();
+  const operation = useWatch({ control, name: `operations.${index}` });
+  const ctx = useStepSeams();
+  const teardownTopstitch = useTopstitchLineTeardown();
+  const options = lines.filter(isTopstitchThreadLine);
+  if (!options.length) return null;
+
+  const toggle = (line: BomLine) => {
+    const key = line.lineKey?.trim() ?? '';
+    if (!key) return;
+    const current = getValues(`operations.${index}`);
+    const currentKeys = current?.bomLineKeys ?? [];
+    const eligibleKeys = new Set(
+      options.map((candidate) => candidate.lineKey?.trim()).filter(Boolean),
+    );
+    if (currentKeys.includes(key)) {
+      teardownTopstitch({ stepIndexes: [index], bomLineKeys: [key] });
+      setValue(
+        `operations.${index}.bomLineKeys`,
+        currentKeys.filter((candidate) => candidate !== key),
+        { shouldDirty: true },
+      );
+      return;
+    }
+    const replaced = currentKeys.filter(
+      (candidate) => candidate !== key && eligibleKeys.has(candidate),
+    );
+    if (replaced.length) {
+      teardownTopstitch({ stepIndexes: [index], bomLineKeys: replaced });
+    }
+    setValue(
+      `operations.${index}.bomLineKeys`,
+      [...currentKeys.filter((candidate) => !eligibleKeys.has(candidate)), key],
+      { shouldDirty: true },
+    );
+  };
+
+  return (
+    <>
+      <GroupLabel>thread</GroupLabel>
+      <div className='flex flex-wrap gap-2'>
+        {options.map((line) => {
+          const key = line.lineKey?.trim() ?? '';
+          const selected = (operation?.bomLineKeys ?? []).includes(key);
+          const count = ((operation?.topstitchLines ?? []) as TopstitchLine[]).filter(
+            (topstitchLine) => topstitchLine.bomLineKey === key,
+          ).length;
+          const norm = cutStripNorm(
+            ctx?.techCard?.cutStripNorms,
+            key,
+            ctx?.techCard?.techCard?.baseSampleSizeId,
+          );
+          const amount = parseDecimalNumber(norm);
+          const sub = selected
+            ? `${count} ${count === 1 ? 'line' : 'lines'} · ${!count ? '—' : Number.isFinite(amount) ? `${amount.toFixed(2)} m` : 'no pattern'}`
+            : 'thread · topstitch';
+          const material = articles?.materialById.get(wireIntOf(line.materialId));
+          return (
+            <Tile
+              key={key}
+              name={line.name?.trim() || 'topstitch'}
+              sub={sub}
+              selected={selected}
+              pressed={selected}
+              media={
+                material ? (
+                  <MaterialThumb
+                    material={material}
+                    size='lg'
+                    className='h-16 w-full border-b border-hairline'
+                  />
+                ) : undefined
+              }
+              className='w-32 p-0 [&>p]:mx-2'
+              onClick={frozen ? undefined : () => toggle(line)}
+            />
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 // The whole sewing spec for ONE step. Remounted (keyed on the field id) whenever the selection
 // moves, so the "skip the first run" guards below start clean and selecting a step never dirties
 // the form.
@@ -2801,6 +2908,7 @@ function OperationEditor({
   const form = useFormContext<TechCardFormData>();
   const { control, getValues, setValue } = form;
   const teardownBinding = useBindingStripTeardown();
+  const teardownTopstitch = useTopstitchLineTeardown();
   const cutStrips = (useWatch({ control, name: 'cutStrips' }) ?? []) as CutStrip[];
   const cutLineKeys = new Set(
     cutStrips.map((strip) => strip.bomLineKey?.trim() ?? '').filter(Boolean),
@@ -3629,6 +3737,8 @@ function OperationEditor({
   // thread an operation consumes IS the material chip, and the combo was a second answer that the
   // printed sheet then had to subtract from the first.
   const toggleBom = (key: string) => {
+    if (selectedBomKeys.includes(key))
+      teardownTopstitch({ stepIndexes: [index], bomLineKeys: [key] });
     const next = selectedBomKeys.includes(key)
       ? selectedBomKeys.filter((k) => k !== key)
       : [...selectedBomKeys, key];
@@ -3823,6 +3933,10 @@ function OperationEditor({
         !(await teardownBinding({ stepIndexes: [index] }))
       )
         return;
+      const nextOperation = { ...currentOperation, work: '' };
+      if (isTopstitchStep(currentOperation) && !isTopstitchStep(nextOperation)) {
+        teardownTopstitch({ stepIndexes: [index] });
+      }
       setPickedKindId('');
       setValue(`${p}.work`, '', { shouldDirty: true });
       setValue(`${p}.workVariant`, variantAfterWork('', workVariant), { shouldDirty: true });
@@ -3872,6 +3986,9 @@ function OperationEditor({
       !(await teardownBinding({ stepIndexes: [index] }))
     )
       return;
+    if (isTopstitchStep(currentOperation) && !isTopstitchStep(nextOperation)) {
+      teardownTopstitch({ stepIndexes: [index] });
+    }
     setPickedKindId(k?.id ?? '');
 
     // РАБОТА ПИШЕТСЯ ПЕРВОЙ И ВСЕГДА — даже когда пункта у неё нет вовсе (0331). Это идентичность
@@ -4508,7 +4625,9 @@ function OperationEditor({
     .map((k) => bomLines.find((b) => b.lineKey === k))
     .filter(Boolean) as BomLine[];
   const linkedMaterials = linkedMaterialLines.filter(
-    (line) => activeKind?.id !== 'B1' || !isBindingLine(line),
+    (line) =>
+      (activeKind?.id !== 'B1' || !isBindingLine(line)) &&
+      (activeKind?.id !== 'A2' || !isTopstitchThreadLine(line)),
   );
   const quantityStep = qtyStepFromFormOperation(
     {
@@ -4995,6 +5114,15 @@ function OperationEditor({
       </div>
 
       {isLabelStep && <OperationLabelPicker index={index} frozen={frozen} />}
+
+      {activeKind?.id === 'A2' && (
+        <OperationTopstitchThreadPicker
+          index={index}
+          lines={bomLines}
+          frozen={frozen}
+          articles={colorwayArticles}
+        />
+      )}
 
       {activeKind?.id === 'B1' && (
         <OperationBindingPicker

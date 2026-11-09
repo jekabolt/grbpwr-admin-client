@@ -28,10 +28,13 @@ import { hydrateSeams, rowPairSig, rowsOf, useSeamsStore } from '../assembly-sea
 import { useSeamWrites, type SeamWrites } from '../assembly-seams/use-seam-decisions';
 import { linkBindingStripToSeam, removeBindingStripsForSeam } from '../binding-step';
 import type { CutStrip } from '../cut-strip-editor/use-cut-strip';
-import { useStoredSeamLengthsMm } from '../cut-strips/seam-lengths';
+import { useStoredSeamLengthsMm, useTopstitchLengthsMm } from '../cut-strips/seam-lengths';
 import { syncCutStripSeamMm } from '../cut-strips/seam-mm-sync';
 import { cutStripsOfCard, rowTouchesStrip, stripKeysOf } from '../cut-strips/strip-pieces';
 import type { TechCardFormData } from '../schema';
+import { syncTopstitchLineMm } from '../topstitch-line-mm-sync';
+import type { TopstitchOperation } from '../topstitch-lines';
+import { TopstitchThreadDefaults } from '../topstitch-thread-fields';
 import { planStepSeamRemoval } from './step-seam-actions';
 import { dropKeys } from './step-seams-model';
 
@@ -182,6 +185,26 @@ function CutStripSeamMmSync({ disabled }: { disabled: boolean }) {
     if (!synced.changed) return;
     setValue('cutStrips', synced.strips as never, { shouldDirty: synced.seamChanged });
   }, [disabled, seamLengthsMm, setValue, sizeIds, strips]);
+
+  return null;
+}
+
+/** Keep every A2 line's one-sided length current, whether or not its step is open. */
+function TopstitchLineMmSync({ disabled }: { disabled: boolean }) {
+  const { control, setValue } = useFormContext<TechCardFormData>();
+  const operations = (useWatch({ control, name: 'operations' }) ?? []) as TopstitchOperation[];
+  const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
+  const lengths = useTopstitchLengthsMm();
+
+  useEffect(() => {
+    if (disabled || !lengths.ready) return;
+    const synced = syncTopstitchLineMm(operations, sizeIds, lengths.read);
+    for (const index of synced.changed) {
+      setValue(`operations.${index}.topstitchLines`, synced.operations[index].topstitchLines, {
+        shouldDirty: true,
+      });
+    }
+  }, [disabled, lengths, operations, setValue, sizeIds]);
 
   return null;
 }
@@ -371,6 +394,8 @@ export function StepSeamsProvider({
   return (
     <Ctx.Provider value={value}>
       <CutStripSeamMmSync disabled={frozen} />
+      <TopstitchLineMmSync disabled={frozen} />
+      {!frozen && <TopstitchThreadDefaults />}
       {children}
     </Ctx.Provider>
   );
