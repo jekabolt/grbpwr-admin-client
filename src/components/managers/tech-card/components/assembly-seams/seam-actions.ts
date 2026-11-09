@@ -5,13 +5,17 @@
 
 import type { EdgeId, PieceGeom, SeamCandidate } from 'lib/assembly-skeleton/types';
 import {
+  anchorOfRunId,
   candidateSideOf,
   newSeamKey,
   resolveSeamDecisions,
+  sameRunLen,
   seamFromCandidate,
   SEAMS,
   normalizeParts,
   sidePartEdges,
+  type AnchorHit,
+  type EdgeAnchor,
   type SidePart,
   type StoredSeam,
   type StoredSeamDirection,
@@ -222,4 +226,55 @@ export function reconfirmRow(item: ReviewItem, ctx: AnchorCtx): StoredSeam | nul
     note: row.note,
     ...opts(ctx),
   });
+}
+
+/**
+ * After a re-upload (T6, owner 09.11): the stale rows whose edges did not change, re-anchored for
+ * one write. Each row is resolved as if the server had not flagged it and kept only when EVERY
+ * anchor lands on a run the resolver's own fast path would call the same edge: the piece sits as
+ * is (no turn, no mirror), the five samples fit within its `fitMax`, the notches match and the
+ * length is within `sameRunLen` (2.5 mm or 1.5 %). The run's number is not part of it: an edge the
+ * segmentation renumbered (a corner moved elsewhere on the piece) is still the same line in the same
+ * place. A row that still fits on an edge that grew, moved or turned stays stale for the review;
+ * one that no longer fits too. Each anchor is redrawn on today's run keeping its range, placement
+ * and layer: same key, same decision (a rejection included), same direction, same note. A surface
+ * row has no edge to compare and stays as it is.
+ */
+export function autoReconfirmable(rows: readonly StoredSeam[], ctx: AnchorCtx): StoredSeam[] {
+  const stale = rows.filter((row) => row.stale && row.kind !== 'surface');
+  if (stale.length === 0) return [];
+  const grainDeg = ctx.grainDeg ?? undefined;
+  const r = resolveSeamDecisions(
+    stale.map((row) => ({ ...row, stale: false })),
+    ctx.pieces,
+    { nameOf: ctx.nameOf, ...(grainDeg ? { grainDeg } : {}) },
+  );
+  const redraw = (hit: AnchorHit): EdgeAnchor | null => {
+    const was = hit.anchor;
+    if (hit.frame !== 'asis' || hit.fit > SEAMS.fitMax) return null;
+    const now = anchorOfRunId(ctx.pieces, hit.run, grainDeg, was.range);
+    if (!now || now.notches !== was.notches || !sameRunLen(now.lenMm, was.lenMm)) return null;
+    return {
+      ...now,
+      ...(was.placement ? { placement: was.placement } : {}),
+      ...(was.layer ? { layer: was.layer } : {}),
+    };
+  };
+  const out: StoredSeam[] = [];
+  for (const x of r.applied) {
+    const seam = x.seam;
+    if (x.a.length !== seam.sideA.length || x.b.length !== seam.sideB.length) continue;
+    const sideA = x.a.map(redraw);
+    const sideB = x.b.map(redraw);
+    if (sideA.length === 0 || sideB.length === 0 || [...sideA, ...sideB].some((a) => !a)) continue;
+    const row: StoredSeam = {
+      ...seam,
+      sideA: sideA as EdgeAnchor[],
+      sideB: sideB as EdgeAnchor[],
+      ...(ctx.size ? { anchoredSize: ctx.size } : {}),
+    };
+    delete row.stale;
+    out.push(row);
+  }
+  return out;
 }
