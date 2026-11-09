@@ -15,6 +15,13 @@ POM_BY_CHART_NAME.set('hips', 'hip');
 
 const BOTTOM_LENGTH_NAMES = new Set(['height', 'length', 'outseam']);
 const BODY_ACROSS: ReadonlySet<PomCode> = new Set(['chest', 'waist', 'hem', 'across-shoulder']);
+const SLEEVE_LINES: ReadonlySet<PomCode> = new Set([
+  'sleeve-length',
+  'bicep',
+  'sleeve-opening',
+  'underarm',
+  'armhole',
+]);
 const LEG_ACROSS: ReadonlySet<PomCode> = new Set(['thigh', 'knee', 'leg-opening']);
 
 function pomOf(icon: SizeChartIcon, name: string): PomCode | undefined {
@@ -28,19 +35,20 @@ function iconSegments(icon: SizeChartIcon): Map<PomCode, IconLineSegment> {
   for (const line of icon.lines) {
     const pom = pomOf(icon, line.name);
     if (!pom || segments.has(pom)) continue;
-    segments.set(
-      pom,
-      line.type === 'horizontal'
-        ? { x: line.xStart, y: line.y, x2: line.xEnd, y2: line.y }
-        : {
-            x: line.x,
-            y: line.yStart,
-            x2: line.view === 'diagonal' ? line.xEnd ?? line.x : line.x,
-            y2: line.yEnd,
-          },
-    );
+    segments.set(pom, segmentOf(line));
   }
   return segments;
+}
+
+function segmentOf(line: SizeChartIcon['lines'][number]): IconLineSegment {
+  return line.type === 'horizontal'
+    ? { x: line.xStart, y: line.y, x2: line.xEnd, y2: line.y }
+    : {
+        x: line.x,
+        y: line.yStart,
+        x2: line.view === 'diagonal' ? line.xEnd ?? line.x : line.x,
+        y2: line.yEnd,
+      };
 }
 
 const unitOf = (point: Point): Point => {
@@ -57,6 +65,11 @@ const unitOf = (point: Point): Point => {
 export function placeIconLine(iconKey: string, chartName: string): IconLineSegment | null {
   const icon = SIZE_CHART_ICONS[iconKey];
   if (!icon) return null;
+  // A line the icon draws under this very name (hood-height, head, brim…) needs no POM mapping.
+  const named = icon.lines.find(
+    (line) => line.name.trim().toLowerCase() === chartName.trim().toLowerCase(),
+  );
+  if (named && !pomOf(icon, chartName)) return segmentOf(named);
   const pom = pomOf(icon, chartName);
   if (!pom) return null;
   const own = iconSegments(icon);
@@ -74,15 +87,30 @@ function placeBottom(own: Map<PomCode, IconLineSegment>, pom: PomCode): IconLine
   const y = (value: number) => top + ((value - 108) / (655 - 108)) * (bottom - top);
   const x = (value: number) => waist.x + ((value - 118) / (376 - 118)) * (waist.x2 - waist.x);
 
-  if (pom === 'hip') {
-    const level = y(schematic.y1);
-    return { x: waist.x, y: level, x2: waist.x2, y2: level };
+  const hipLevel = y(GARMENT_SCHEMATIC.bottom.lines.hip?.y1 ?? 221);
+  const hip = own.get('hip') ?? { x: waist.x, y: hipLevel, x2: waist.x2, y2: hipLevel };
+  if (pom === 'hip') return { x: waist.x, y: hip.y, x2: waist.x2, y2: hip.y };
+  // A skirt or a one-piece the icon draws without legs: leg rows stay in the table only.
+  const legged = ['inseam', 'thigh', 'leg-opening', 'front-rise'].some((code) =>
+    own.has(code as PomCode),
+  );
+  if (
+    !legged &&
+    (LEG_ACROSS.has(pom) || pom === 'inseam' || pom === 'front-rise' || pom === 'back-rise')
+  ) {
+    return null;
   }
   if (LEG_ACROSS.has(pom)) {
-    // One leg, level, between the icon's own thigh and leg-opening widths when it has them.
+    // One leg, level, between the icon's own thigh (or the hip half over that leg) and its opening.
     const level = y(schematic.y1);
-    const thigh = own.get('thigh');
     const opening = own.get('leg-opening');
+    const half = opening && (opening.x + opening.x2) / 2 > (waist.x + waist.x2) / 2;
+    const middle = (hip.x + hip.x2) / 2;
+    const thigh =
+      own.get('thigh') ??
+      (opening
+        ? { x: half ? middle : hip.x, y: hip.y, x2: half ? hip.x2 : middle, y2: hip.y }
+        : undefined);
     if (thigh && opening) {
       const t = (level - thigh.y) / (opening.y - thigh.y || 1);
       const start = thigh.x + (opening.x - thigh.x) * t;
@@ -118,6 +146,8 @@ function placeTop(own: Map<PomCode, IconLineSegment>, pom: PomCode): IconLineSeg
   }
 
   const sleeve = own.get('sleeve-length');
+  // A sleeveless icon (cami, vest, swimsuit) draws no sleeve: those rows stay in the table only.
+  if (!sleeve && SLEEVE_LINES.has(pom)) return null;
   if (sleeve && (pom === 'bicep' || pom === 'sleeve-opening')) {
     // The icon draws the sleeve as an offset dimension line; its garment edge starts at the body's
     // shoulder corner on the same side. Across lines stand square to it, centred on the sleeve.

@@ -49,4 +49,31 @@ describe('placeIconLine', () => {
     expect(placeIconLine('joggers', 'no-such-point')).toBeNull();
     expect(placeIconLine('no-icon', 'chest')).toBeNull();
   });
+
+  it('draws no sleeve on a sleeveless icon', () => {
+    for (const icon of ['cami', 'puffer_vest', 'swimsuit']) {
+      for (const name of ['sleeve', 'bicep', 'sleeve-opening']) {
+        expect(placeIconLine(icon, name)).toBeNull();
+      }
+    }
+    expect(placeIconLine('cami', 'chest')).not.toBeNull();
+  });
+
+  it('keeps the hood line the icon draws', () => {
+    expect(placeIconLine('hoodie', 'hood-height')).toEqual({
+      x: 420,
+      y: -87.075,
+      x2: 420,
+      y2: 72.925,
+    });
+  });
+
+  it('draws no leg lines on a skirt or a one-piece without legs', () => {
+    for (const icon of ['skirt_mini', 'jumpsuit']) {
+      for (const name of ['rise', 'thigh', 'knee', 'leg-opening', 'inseam']) {
+        expect(placeIconLine(icon, name)).toBeNull();
+      }
+    }
+    expect(placeIconLine('skirt_mini', 'hip')).not.toBeNull();
+  });
 });
