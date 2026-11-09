@@ -251,7 +251,9 @@ export function ApplyStep({
                       title={
                         p.basis === 'alias'
                           ? 'already bound to these blocks on the card'
-                          : 'a card piece with this name exists'
+                          : p.basis === 'shape'
+                            ? 'same outline'
+                            : 'a card piece with this name exists'
                       }
                     >
                       reuses “{existingName(p.existingLineKey)}”

@@ -1,0 +1,306 @@
+import { describe, expect, it } from 'vitest';
+
+import type { CardDraft, ConversionManifest, DraftScope, DraftShapeRef } from '../types';
+import { planFormWrites, type LiveCard } from './apply';
+import { buildDraft, cardNameOf, shapeCost, tokenKey, type DraftCardContext } from './draft';
+import fixture from './__fixtures__/card6-reimport.json';
+
+// Golden G1 (owner 09.11, card 6): re-importing the CLO shirt onto the card keeps every piece.
+// The fixture is the card before the 11:01 re-import (pieces, links, the outlines of its old
+// sheets) and the manifests the re-import produced; keys are neutral (`k:<piece>`).
+
+const MAIN = 'TECH_CARD_BOM_PURPOSE_MAIN';
+const PCK = 'TECH_CARD_BOM_PURPOSE_POCKETING';
+
+type Fx = typeof fixture;
+const manifest = (k: keyof Fx['manifests']) =>
+  fixture.manifests[k] as unknown as ConversionManifest;
+
+function scopeOf(m: ConversionManifest, purpose: string, line: string): DraftScope {
+  return {
+    target: {
+      scopeKey: purpose,
+      fabricPurpose: purpose,
+      bomLineKey: line,
+      label: purpose === MAIN ? 'main' : 'pocketing',
+      isInterlining: false,
+    },
+    filename: '',
+    name: '',
+    dxfText: `0\nSECTION\n999\n${m.createdAt}\n0\nEOF\n`,
+    manifest: m,
+    identities: m.pieces.map((p) => p.identity),
+  };
+}
+const mainScope = (k: 'main1101' | 'main1107') => scopeOf(manifest(k), MAIN, 'line:main');
+const pckScope = () => scopeOf(manifest('pocketing'), PCK, 'line:pocketing');
+
+function card(over: Partial<DraftCardContext> = {}): DraftCardContext {
+  return {
+    techCardId: 6,
+    existingPieces: fixture.card.pieces,
+    existingAliases: fixture.card.aliases,
+    existingPatterns: fixture.card.patterns,
+    existingShapes: fixture.card.shapes as DraftShapeRef[],
+    styleLabel: 'SS26-006',
+    ...over,
+  };
+}
+
+let n = 0;
+const mintKey = () => `new:${++n}`;
+const nameOf = new Map(fixture.card.pieces.map((p) => [p.lineKey, p.name]));
+
+/** block → card piece name, as the draft links them. */
+function links(d: CardDraft, scopeKey: string): Record<string, string> {
+  const piece = new Map(d.pieces.map((p) => [p.lineKey, p.name]));
+  return Object.fromEntries(
+    d.aliases
+      .filter((a) => a.scopeKey === scopeKey)
+      .map((a) => [a.blockName, piece.get(a.pieceLineKey) ?? '?']),
+  );
+}
+/** The card's pieces linked in this scope before the re-import. */
+const onScope = (scopeKey: string) =>
+  [
+    ...new Set(
+      fixture.card.aliases.filter((a) => a.scopeKey === scopeKey).map((a) => a.pieceLineKey),
+    ),
+  ].sort();
+
+function live(): LiveCard {
+  return {
+    patterns: fixture.card.patterns.map((p) => ({
+      lineKey: p.lineKey,
+      url: p.url,
+      filename: p.filename,
+      name: p.name,
+      ...(p.scopeKey.startsWith('TECH_CARD_')
+        ? { fabricPurpose: p.scopeKey }
+        : { fabricPurpose: 'TECH_CARD_BOM_PURPOSE_UNSET', bomLineKey: p.scopeKey }),
+    })),
+    pieces: fixture.card.pieces.map((p) => ({ ...p })),
+    aliases: fixture.card.aliases.map((a) => ({
+      blockName: a.blockName,
+      pieceLineKey: a.pieceLineKey,
+      ...(a.scopeKey.startsWith('TECH_CARD_')
+        ? { fabricPurpose: a.scopeKey }
+        : { bomLineKey: a.scopeKey }),
+    })),
+  };
+}
+
+function apply(d: CardDraft) {
+  const uploaded = d.scopes.map((s) => ({
+    scopeKey: s.target.scopeKey,
+    url: `https://files.example/new-${s.filename}`,
+    filename: s.filename,
+    sizeBytes: 1,
+  }));
+  return planFormWrites(d, live(), uploaded, { storageSizeId: 2, mintKey });
+}
+
+const MAIN_1107: Record<string, string> = {
+  CLR_MAIN: 'clr_main',
+  CLR_MAIN_2: 'clr_main_2',
+  CLR_SECOND: 'CLR_SECOND',
+  CLR_SECOND_2: 'CLR_SECOND_2',
+  NCK: 'nck',
+  NCK_2: 'nck_2',
+  BP_MAIN: 'BP_MAIN',
+  BP_U: 'BP_U',
+  BP_U_1: 'BP_U_1',
+  PLCK_L: 'PLCK_L',
+  PLCK_R: 'PLCK_R',
+  SLV_L: 'SLV_L',
+  SLV_R: 'SLV_R',
+  FLP_L_UNI: 'FLP_L',
+  FLP_R_UNI: 'FLP_R',
+  FLP_MAIN_L_UNI: 'FLP_L_MAIN',
+  FLP_MAIN_R_UNI: 'FLP_R_MAIN',
+  // renamed by the importer: bound by outline
+  FP_L: 'P_L_MAIN',
+  FP_R: 'P_R_MAIN',
+  YK_L: 'P_L_U',
+  YK_R: 'P_R_U',
+};
+
+describe('re-import onto card 6 (golden G1)', () => {
+  it('main file: every block on its own card piece, no new piece, no hand swapped', () => {
+    const d = buildDraft({ scopes: [mainScope('main1107')] }, card(), { mintKey });
+    expect(links(d, MAIN)).toEqual(MAIN_1107);
+    expect(d.pieces.filter((p) => !p.existingLineKey)).toEqual([]);
+    expect(d.unresolved).toBeUndefined();
+    // no old piece of the scope is left without a block
+    expect([...new Set(d.aliases.map((a) => a.pieceLineKey))].sort()).toEqual(onScope(MAIN));
+    const shape = d.pieces.filter((p) => p.basis === 'shape').map((p) => p.name);
+    expect(shape.sort()).toEqual(['P_L_MAIN', 'P_L_U', 'P_R_MAIN', 'P_R_U']);
+  });
+
+  it('main file applied: no piece created, fused flags and piece ids untouched', () => {
+    const d = buildDraft({ scopes: [mainScope('main1107')] }, card(), { mintKey });
+    const plan = apply(d);
+    expect(plan.created).toBe(0);
+    expect(plan.writes.find((w) => w.path === 'pieces')).toBeUndefined();
+    expect(plan.writes.filter((w) => /\.fused(Mode)?$/.test(w.path))).toEqual([]);
+    expect(plan.writes.filter((w) => /\.cutSymmetry$/.test(w.path))).toEqual([]);
+    const next = plan.writes.find((w) => w.path === 'pieceDxfAliases')?.value as {
+      blockName: string;
+      pieceLineKey: string;
+      fabricPurpose?: string;
+    }[];
+    const main = (block: string) =>
+      next
+        .filter((a) => a.fabricPurpose === MAIN && a.blockName === block)
+        .map((a) => nameOf.get(a.pieceLineKey));
+    expect(main('SLV_L')).toEqual(['SLV_L']);
+    expect(main('FP_L')).toEqual(['P_L_MAIN']);
+    // the old links ride through: the card's assembly still sees every piece it knew
+    expect(next.length).toBe(fixture.card.aliases.length + 8);
+    for (const a of fixture.card.aliases)
+      expect(
+        next.some((x) => x.blockName === a.blockName && x.pieceLineKey === a.pieceLineKey),
+      ).toBe(true);
+  });
+
+  it('pockets file: hand-anywhere names bind to the per-hand card pieces', () => {
+    const d = buildDraft({ scopes: [pckScope()] }, card(), { mintKey });
+    expect(links(d, PCK)).toEqual({
+      PCK_BTTM_L: 'PCK_L_BTTM',
+      PCK_BTTM_R: 'PCK_R_BTTM',
+      PCK_MAIN_L: 'PCK_L_MAIN',
+      PCK_MAIN_R: 'PCK_R_MAIN',
+    });
+    expect(d.pieces.filter((p) => !p.existingLineKey)).toEqual([]);
+    expect(d.unresolved).toBeUndefined();
+    expect(apply(d).created).toBe(0);
+  });
+
+  it('the 11:01 main file (upper fronts renamed FP_*_2, pockets in it) binds the same way', () => {
+    const d = buildDraft({ scopes: [mainScope('main1101')] }, card(), { mintKey });
+    const l = links(d, MAIN);
+    expect(l.FP_L).toBe('P_L_MAIN');
+    expect(l.FP_L_2).toBe('P_L_U');
+    expect(l.FP_R_2).toBe('P_R_U');
+    expect(l.SLV_L).toBe('SLV_L');
+    expect(l.PCK_BTTM_L).toBe('PCK_L_BTTM');
+    expect(l.PCK_MAIN_R).toBe('PCK_R_MAIN');
+    expect(d.pieces.filter((p) => !p.existingLineKey)).toEqual([]);
+    expect(d.unresolved).toBeUndefined();
+  });
+
+  it('both files in one import: no new piece', () => {
+    const d = buildDraft({ scopes: [mainScope('main1107'), pckScope()] }, card(), { mintKey });
+    expect(d.pieces.filter((p) => !p.existingLineKey)).toEqual([]);
+    expect(apply(d).created).toBe(0);
+  });
+
+  it('outlines not loaded: a renamed block is left to the operator, never a new piece', () => {
+    const d = buildDraft({ scopes: [mainScope('main1107')] }, card({ existingShapes: [] }), {
+      mintKey,
+    });
+    expect(d.pieces.filter((p) => !p.existingLineKey)).toEqual([]);
+    const un = Object.fromEntries(
+      (d.unresolved ?? []).map((u) => [u.blockName, u.candidates.map((c) => c.pieceName)]),
+    );
+    expect(un).toEqual({
+      FP_L: ['P_L_MAIN', 'P_L_U'],
+      YK_L: ['P_L_MAIN', 'P_L_U'],
+      FP_R: ['P_R_MAIN', 'P_R_U'],
+      YK_R: ['P_R_MAIN', 'P_R_U'],
+    });
+    expect(links(d, MAIN).FP_L).toBeUndefined();
+    // the pieces the operator maps them to are offered in the scope's «no longer drawn» list
+    const vanished = d.scopes[0].vanished!.map((v) => v.pieceName);
+    expect([...new Set(vanished)].sort()).toEqual(['P_L_MAIN', 'P_L_U', 'P_R_MAIN', 'P_R_U']);
+  });
+
+  it('two card pieces of the same outline: unresolved, no guess', () => {
+    const twin = { ...fixture.card.pieces.find((p) => p.name === 'P_L_MAIN')!, name: 'Q_L_MAIN' };
+    twin.lineKey = 'k:Q_L_MAIN';
+    const shape = fixture.card.shapes.find((r) => r.pieceLineKey === 'k:P_L_MAIN')!;
+    const d = buildDraft(
+      { scopes: [mainScope('main1107')] },
+      card({
+        existingPieces: [...fixture.card.pieces, twin],
+        existingShapes: [
+          ...(fixture.card.shapes as DraftShapeRef[]),
+          { ...shape, pieceLineKey: twin.lineKey, identity: 'Q_L_MAIN' },
+        ],
+      }),
+      { mintKey },
+    );
+    const fp = d.unresolved?.find((u) => u.blockName === 'FP_L');
+    expect(fp?.candidates.map((c) => c.pieceName).sort()).toEqual(['P_L_MAIN', 'Q_L_MAIN']);
+    expect(d.pieces.filter((p) => !p.existingLineKey)).toEqual([]);
+    expect(links(d, MAIN).YK_L).toBe('P_L_U');
+  });
+
+  it('a link that swapped hands is not followed: SLV_L goes back to SLV_L', () => {
+    const swapped = fixture.card.aliases.map((a) =>
+      a.scopeKey === MAIN && a.blockName === 'SLV_L' ? { ...a, pieceLineKey: 'k:SLV_R' } : a,
+    );
+    const d = buildDraft({ scopes: [mainScope('main1107')] }, card({ existingAliases: swapped }), {
+      mintKey,
+    });
+    expect(links(d, MAIN).SLV_L).toBe('SLV_L');
+    expect(links(d, MAIN).SLV_R).toBe('SLV_R');
+  });
+});
+
+describe('a fresh card keeps pairing', () => {
+  it('both hands of a pair become one piece × 2', () => {
+    const m = manifest('main1107');
+    const d = buildDraft(
+      { scopes: [mainScope('main1107')] },
+      { techCardId: 1, existingPieces: [], styleLabel: 'SS26-006' },
+      { mintKey },
+    );
+    expect(d.unresolved).toBeUndefined();
+    const names = d.pieces.map((p) => p.name).sort();
+    expect(names).toEqual([...new Set(m.pieces.map((p) => cardNameOf(p)))].sort());
+    const fp = d.pieces.find((p) => p.name === 'FP')!;
+    expect(fp.piecesPerGarment).toBe(2);
+    expect(links(d, MAIN).FP_L).toBe('FP');
+    expect(links(d, MAIN).FP_R).toBe('FP');
+    expect(links(d, MAIN).SLV_L).toBe('SLV');
+    expect(d.pieces.every((p) => p.basis === 'new')).toBe(true);
+  });
+
+  it('a card with a hand-less pair piece takes both hands on it', () => {
+    const d = buildDraft(
+      { scopes: [pckScope()] },
+      {
+        techCardId: 1,
+        existingPieces: [
+          { lineKey: 'k:PCK_BTTM', name: 'PCK_BTTM', piecesPerGarment: 2 },
+          { lineKey: 'k:PCK_MAIN', name: 'PCK_MAIN', piecesPerGarment: 2 },
+        ],
+        styleLabel: 'SS26-006',
+      },
+      { mintKey },
+    );
+    expect(links(d, PCK)).toEqual({
+      PCK_BTTM_L: 'PCK_BTTM',
+      PCK_BTTM_R: 'PCK_BTTM',
+      PCK_MAIN_L: 'PCK_MAIN',
+      PCK_MAIN_R: 'PCK_MAIN',
+    });
+    expect(d.pieces.filter((p) => !p.existingLineKey)).toEqual([]);
+  });
+});
+
+describe('name and outline helpers', () => {
+  it('token key ignores order and UNI', () => {
+    expect(tokenKey('FLP_MAIN_L_UNI')).toBe(tokenKey('FLP_L_MAIN'));
+    expect(tokenKey('PCK_BTTM_L')).toBe(tokenKey('PCK_L_BTTM'));
+    expect(tokenKey('FLP_L')).not.toBe(tokenKey('FLP_L_MAIN'));
+  });
+
+  it('the same piece re-exported is within 1 %, another piece of the hand is not', () => {
+    const blocks = manifest('main1107').blocks.filter((b) => b.identity === 'FP_L');
+    const ref = (k: string) => fixture.card.shapes.find((r) => r.pieceLineKey === k)!.sizes;
+    expect(shapeCost(blocks, ref('k:P_L_MAIN'))!).toBeLessThan(0.01);
+    expect(shapeCost(blocks, ref('k:P_L_U'))!).toBeGreaterThan(0.1);
+  });
+});
