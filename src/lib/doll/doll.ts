@@ -2286,6 +2286,57 @@ export function solveDoll(input: DollInput): DollReport {
     graph.pieces.flatMap((p) => p.edges.map((e) => [e.id, e.lenMm] as const)),
   );
   /**
+   * A row's laid end sewn over the shell edge under it. A waist row runs along the left front's top
+   * onto the fly facing laid on that front: the row sews the front's top only up to where the
+   * facing starts (a part range) and the facing's top for the rest. The facing is laid after the
+   * solve, so that end of the band would be pulled by nothing and stand off the front at a corner.
+   * The facing lies on its host over the front's uncovered tail: the band is sewn over that tail.
+   * Only for a laid piece laid on the panel of the drawn part next to it, whose sewn stretch leaves
+   * one uncovered tail about the laid part's length.
+   */
+  for (const sm of G.seams) {
+    if (!isConf(sm.seam)) continue;
+    for (const side of ['a', 'b'] as const) {
+      const ids = sm[side];
+      if (ids.length < 2 || sewnStretchesOf(sm, side)) continue;
+      const orig = (
+        side === 'a'
+          ? sm.seam.aParts ?? edgeIdsOf(sm.seam.a)
+          : sm.seam.bParts ?? edgeIdsOf(sm.seam.b)
+      ).flatMap((x) => edgeIdsOf(x));
+      if (orig.length !== ids.length) continue;
+      for (const end of [ids.length - 1, 0]) {
+        const L = ids[end];
+        const nb = end === 0 ? 1 : end - 1;
+        const H = ids[nb];
+        if (panelByKey.has(pk(L)) || !panelByKey.has(pk(H)) || !laidKeys.has(pk(L))) continue;
+        if ((ownerSurface.get(pk(L))?.host ?? rowLays.get(pk(L))?.host) !== pk(H)) continue;
+        const pr = sm.seam.partRange ?? {};
+        const key = pr[orig[nb]] ? orig[nb] : H;
+        const r = pr[key];
+        const lenH = restLenOf.get(H) ?? 0;
+        const want = restLenOf.get(L) ?? 0;
+        if (!r || want <= 0) continue;
+        const tail = r[0] <= 5 ? lenH - r[1] : lenH - r[1] <= 5 ? r[0] : 0;
+        if (tail <= 5 || Math.abs(tail - want) > Math.max(10, 0.3 * want)) continue;
+        const keep = (_: unknown, i: number) => i !== end;
+        const rest = Object.fromEntries(Object.entries(pr).filter(([k]) => k !== key));
+        laidOverShell.set(sm, { a: [...sm.a], b: [...sm.b], off: [pk(L)], over: [H] });
+        sm[side] = ids.filter(keep);
+        sm.seam = {
+          ...sm.seam,
+          partRange: Object.keys(rest).length ? rest : undefined,
+          ...(side === 'a' ? { aParts: orig.filter(keep) } : { bParts: orig.filter(keep) }),
+        };
+        if (opt.debug)
+          warnings.push(
+            `debug: ${sm.seam.a}~${sm.seam.b}: its end on ${pk(L)} (laid on ${pk(H)}) sewn over ${H}'s uncovered ${tail.toFixed(0)} mm`,
+          );
+        break;
+      }
+    }
+  }
+  /**
    * A side's stretches in walk order, and the ones the solve can sew: a row whose walk starts or
    * ends on a piece laid on a panel (a waist run ending on the fly's flap, an armhole run starting
    * on a pocket) is sewn over its drawn parts; `share` is the part of the side's rest length they
@@ -8510,6 +8561,8 @@ export function solveDoll(input: DollInput): DollReport {
         0.3,
       );
   }
+  /** Band vertices past a row's laid end, by piece (an underlap on the fly shield): held under. */
+  const bandFree = new Map<string, number[]>();
   /**
    * L4: a band piece laid along the stretch of the body its confirmed seam names — its sewn run on
    * that path (over the share the row's drawn parts take; a run carried on to a laid piece goes on
@@ -8629,6 +8682,15 @@ export function solveDoll(input: DollInput): DollReport {
       setPos(v, ps[i]);
       placed[v] = 1;
     });
+    // Past a laid end of the row (the stretch sewn onto a piece laid after the solve) no seam pulls
+    // the band: those vertices are held under the band piece over them.
+    const past = 5 / Bp.len;
+    const free = vs.filter((_, i) => {
+      const r = feet[i].s / Pb.len;
+      const t = ((ps === hi ? r : 1 - r) - share[0]) / span;
+      return (share[0] > 1e-3 && t < -past) || (share[1] < 1 - 1e-3 && t > 1 + past);
+    });
+    if (free.length) bandFree.set(P.key, free);
     return P;
   };
   // Waistband / hem band.
@@ -8675,6 +8737,7 @@ export function solveDoll(input: DollInput): DollReport {
           own.set(k, (own.get(k) ?? 0) + 1);
         }
         const alongRow: string[] = [];
+        bandFree.clear();
         if (conf.length > 1 || groups.get(gid)!.length > 1)
           for (const { sm, bandSide } of conf) {
             const k = pk((bandSide === 'a' ? sm.a : sm.b)[0]);
@@ -8683,6 +8746,18 @@ export function solveDoll(input: DollInput): DollReport {
             if (P) alongRow.push(P.key);
           }
         for (const P of groups.get(gid)!) buildPanel(P);
+        // A band piece's free end (its underlap) lies under the band piece over it, never through
+        // it: one-sided contacts keep the piece over it outside. Two free ends are not ordered.
+        for (const [key, free] of bandFree)
+          for (const Q of groups.get(gid)!) {
+            if (Q.key === key || bandFree.has(Q.key)) continue;
+            const over: number[] = [];
+            for (let i = 0; i < Q.count; i++) {
+              const v = Q.offset + i;
+              if (free.some((f) => Math.hypot(...sub(getPos(f), getPos(v))) < 40)) over.push(v);
+            }
+            if (over.length) contactOf(over, free, 1.5);
+          }
         for (const sm of G.seams)
           if (inGroups(sm.a, band) && inGroups(sm.b, band)) graphWork(sm, passes);
         warnings.push(
