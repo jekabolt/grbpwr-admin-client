@@ -84,7 +84,17 @@ export function LabelShapeIcon({
       className={className}
     >
       <rect x={b.x} y={b.y} width={b.w} height={b.h} strokeWidth={1.25} />
-      {stitches(shape?.attachment ?? label.attachment ?? '', b)}
+      {shape?.stitchLines?.length ? (
+        <path
+          {...STITCH}
+          data-label-stitch-lines={shape.stitchLines.join(',')}
+          d={shape.stitchLines
+            .map((mm) => `M${b.x} ${b.y + (mm / heightMm) * b.h} H${b.x + b.w}`)
+            .join(' ')}
+        />
+      ) : (
+        stitches(shape?.attachment ?? label.attachment ?? '', b)
+      )}
       {foldLines(shape?.foldLines ?? [], heightMm, b)}
     </svg>
   );

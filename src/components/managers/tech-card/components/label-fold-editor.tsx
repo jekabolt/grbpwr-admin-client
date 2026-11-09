@@ -1,5 +1,6 @@
-// The label at its true proportions with its artwork on it: click to add a fold line, click a line
-// to remove it. What folds under is shaded grey. Preset chips fill the lines from a fold word.
+// The label at its true proportions with its artwork on it. Click to add a fold line; click a line
+// again to make it a stitch, a third time to remove it; click an edge to sew it. What folds under is
+// shaded grey. Beside it, the label folded, with its size and the stitch over its layers.
 import { useLibraryFile } from 'components/managers/files/hooks/useFiles';
 import type { MouseEvent } from 'react';
 import { Chip, ChipRow } from 'ui';
@@ -10,7 +11,10 @@ import {
   foldWordOf,
   foldedSpans,
   formatFoldLines,
+  formatStitchLines,
+  labelAssembly,
   labelFoldLines,
+  parseStitchLines,
   presetFoldLines,
 } from './label-fold-lines';
 import { labelFoldingOptions } from './tech-card-options';
@@ -30,6 +34,7 @@ export function LabelFoldEditor({
   heightMm,
   fold,
   foldLinesMm,
+  stitchLinesMm,
   libraryFileId,
   disabled,
   onChange,
@@ -38,15 +43,18 @@ export function LabelFoldEditor({
   heightMm: number;
   fold?: string;
   foldLinesMm?: string;
+  stitchLinesMm?: string;
   libraryFileId?: unknown;
   disabled: boolean;
-  onChange: (value: { fold: Fold; foldLinesMm: string }) => void;
+  onChange: (value: { fold: Fold; foldLinesMm: string; stitchLinesMm: string }) => void;
 }) {
   const fileId = wireInt(libraryFileId);
   const fileQuery = useLibraryFile(fileId || undefined);
   const preview = fileQuery.data?.file?.previewUrl || '';
 
   const lines = labelFoldLines({ fold, foldLinesMm }, heightMm);
+  const stitches = parseStitchLines(stitchLinesMm, heightMm);
+  const sewn = labelAssembly(lines, stitches, heightMm);
   const k = Math.min(BOX_H / heightMm, BOX_W / widthMm);
   const w = widthMm * k;
   const h = heightMm * k;
@@ -55,10 +63,14 @@ export function LabelFoldEditor({
   const viewW = x + w + GUTTER;
   const viewH = y + h + PAD_Y;
 
-  const setLines = (next: number[]) => {
-    const csv = formatFoldLines(next, heightMm);
+  const emit = (nextLines: number[], nextStitches: number[]) => {
+    const csv = formatFoldLines(nextLines, heightMm);
     const kept = csv ? csv.split(',').map(Number) : [];
-    onChange({ fold: foldWordOf(kept, heightMm) as Fold, foldLinesMm: csv });
+    onChange({
+      fold: foldWordOf(kept, heightMm) as Fold,
+      foldLinesMm: csv,
+      stitchLinesMm: formatStitchLines(nextStitches, heightMm),
+    });
   };
 
   const onClick = (event: MouseEvent<SVGSVGElement>) => {
@@ -67,24 +79,47 @@ export function LabelFoldEditor({
     if (!box.height) return;
     const py = ((event.clientY - box.top) * viewH) / box.height;
     const mm = Math.round(((py - y) / k) * 2) / 2;
-    const hit = lines.findIndex((line) => Math.abs(line - mm) * k <= HIT_PX);
-    if (hit >= 0) {
-      setLines(lines.filter((_, index) => index !== hit));
+    const near = (line: number) => Math.abs(line - mm) * k <= HIT_PX;
+    const edge = near(0) ? 0 : near(heightMm) ? heightMm : null;
+    if (edge !== null) {
+      const sewnEdge = stitches.includes(edge);
+      emit(lines, sewnEdge ? stitches.filter((line) => line !== edge) : [...stitches, edge]);
+      return;
+    }
+    const foldHit = lines.findIndex(near);
+    if (foldHit >= 0) {
+      emit(
+        lines.filter((_, index) => index !== foldHit),
+        [...stitches, lines[foldHit]!],
+      );
+      return;
+    }
+    const stitchHit = stitches.findIndex(near);
+    if (stitchHit >= 0) {
+      emit(
+        lines,
+        stitches.filter((_, index) => index !== stitchHit),
+      );
       return;
     }
     if (mm <= 0 || mm >= heightMm || lines.length >= MAX_FOLD_LINES) return;
-    setLines([...lines, mm]);
+    emit([...lines, mm], stitches);
   };
 
   const preset = (word: string) =>
     onChange({
       fold: word as Fold,
       foldLinesMm: formatFoldLines(presetFoldLines(word, heightMm), heightMm),
+      stitchLinesMm: formatStitchLines(stitches, heightMm),
     });
+
+  const fh = sewn.foldedMm * k;
+  const foldedW = x + w + GUTTER;
+  const foldedH = y + fh + PAD_Y;
 
   return (
     <div className='flex flex-col gap-2'>
-      <div className='flex justify-center bg-pageBg p-3'>
+      <div className='flex flex-wrap items-start justify-center gap-6 bg-pageBg p-3'>
         <svg
           viewBox={`0 0 ${viewW} ${viewH}`}
           width={viewW}
@@ -143,8 +178,66 @@ export function LabelFoldEditor({
               </text>
             </g>
           ))}
+          {stitches.map((line) => (
+            <g key={`s${line}`} data-label-stitch-line={line}>
+              <line
+                x1={x}
+                x2={x + w}
+                y1={y + line * k}
+                y2={y + line * k}
+                stroke='var(--color-error)'
+                strokeWidth={2}
+                strokeDasharray='5 3'
+              />
+              {line > 0 && line < heightMm ? (
+                <text x={x + w + 10} y={y + line * k + 3} fontSize={9} fill='var(--color-error)'>
+                  {line} mm
+                </text>
+              ) : null}
+            </g>
+          ))}
         </svg>
+        {lines.length || stitches.length ? (
+          <svg
+            viewBox={`0 0 ${foldedW} ${foldedH}`}
+            width={foldedW}
+            height={foldedH}
+            className='max-w-full'
+            data-label-folded-view=''
+            role='img'
+            aria-label='folded'
+          >
+            <rect
+              x={x}
+              y={y}
+              width={w}
+              height={fh}
+              fill='var(--color-bgColor)'
+              stroke='var(--color-textColor)'
+              strokeWidth={1.25}
+            />
+            {sewn.stitches.map((line) => (
+              <g key={line}>
+                <line
+                  x1={x}
+                  x2={x + w}
+                  y1={y + line * k}
+                  y2={y + line * k}
+                  stroke='var(--color-error)'
+                  strokeWidth={2}
+                  strokeDasharray='5 3'
+                />
+                <text x={x + w + 10} y={y + line * k + 3} fontSize={9} fill='var(--color-error)'>
+                  {line} · {sewn.layers}×
+                </text>
+              </g>
+            ))}
+          </svg>
+        ) : null}
       </div>
+      <p className='text-control tabular-nums text-textColor' data-label-folded-size=''>
+        {widthMm} × {sewn.foldedMm} mm
+      </p>
       <ChipRow>
         {labelFoldingOptions.map((option) => (
           <Chip

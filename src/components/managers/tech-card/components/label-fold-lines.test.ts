@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   foldedSpans,
+  labelAssembly,
+  parseStitchLines,
   formatFoldLines,
   labelFoldLines,
   parseFoldLines,
@@ -31,5 +33,29 @@ describe('label fold lines', () => {
       [88, 100],
     ]);
     expect(foldedSpans([], 100)).toEqual([]);
+  });
+});
+
+describe('label assembly', () => {
+  it('folds the owner photo label in half and sews both stitches as one', () => {
+    const a = labelAssembly([50], [40, 60], 100);
+    expect(a).toEqual({ foldedMm: 50, heightMm: 40, stitches: [40], sewnTop: true, layers: 2 });
+  });
+  it('sews a loop by both ends', () => {
+    expect(labelAssembly([50], [0, 100], 100)).toMatchObject({
+      heightMm: 50,
+      stitches: [0],
+      layers: 2,
+    });
+  });
+  it('keeps the folded size without a stitch', () => {
+    expect(labelAssembly([10, 90], [], 100)).toMatchObject({
+      foldedMm: 80,
+      heightMm: 80,
+      sewnTop: false,
+    });
+  });
+  it('reads edges as stitch positions', () => {
+    expect(parseStitchLines('0, 100, 120, -1, 40', 100)).toEqual([0, 40, 100]);
   });
 });

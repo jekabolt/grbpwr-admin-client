@@ -3745,6 +3745,11 @@ export type TechCardGarmentLabel = {
   // Bad items are dropped, never a save failure. PRESENCE BIT: absent means an older client, whose save
   // keeps the stored lines; "" = no lines (the client derives them from fold as before).
   foldLinesMm?: string;
+  // Stitch lines: CSV of positions in mm along the label's height from its top edge, ascending, no spaces.
+  // 0 = the top edge, height_mm = the bottom edge (both allowed: that edge is sewn). The server normalises
+  // on write like fold_lines_mm, but the range is 0 <= mm <= height_mm (mm >= 0 when the height is unset).
+  // PRESENCE BIT: absent = keep the stored lines; "" = none.
+  stitchLinesMm?: string;
 };
 
 // TechCardGarmentLabelFile is one artwork file of a garment label, printed as a QR on the tech pack.

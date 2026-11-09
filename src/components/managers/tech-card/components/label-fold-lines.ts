@@ -68,3 +68,87 @@ export function foldWordOf(lines: readonly number[], heightMm: number): string {
     return Math.abs(lines[0]! - heightMm / 2) <= heightMm * 0.05 ? 'half' : 'loop';
   return 'ends';
 }
+
+// Stitch lines: where the label is sewn, mm from the top; 0 and the height are its edges.
+export function parseStitchLines(csv: string | null | undefined, heightMm: number): number[] {
+  const seen = new Set<number>();
+  for (const part of (csv ?? '').split(',')) {
+    const text = part.trim().replace(/\s+/g, '');
+    if (!text) continue;
+    const value = Number(text);
+    if (!Number.isFinite(value) || value < 0) continue;
+    if (heightMm > 0 && value > heightMm) continue;
+    seen.add(round1(value));
+  }
+  return [...seen].sort((a, b) => a - b).slice(0, MAX_FOLD_LINES);
+}
+
+export function formatStitchLines(lines: readonly number[], heightMm: number): string {
+  return parseStitchLines(lines.join(','), heightMm).join(',');
+}
+
+/** The span that stays in front once folded: between the outer lines; one line keeps the longer side. */
+export function foldFront(lines: readonly number[], heightMm: number): [number, number] {
+  if (!lines.length || !(heightMm > 0)) return [0, heightMm];
+  const first = lines[0]!;
+  const last = lines[lines.length - 1]!;
+  if (lines.length === 1) return first >= heightMm - first ? [0, first] : [first, heightMm];
+  return [first, last];
+}
+
+/** Where a point of the flat label lands on the folded one, mm from the folded top. */
+export function foldedAt(mm: number, lines: readonly number[], heightMm: number): number {
+  const [a, b] = foldFront(lines, heightMm);
+  const at = mm < a ? 2 * a - mm : mm > b ? 2 * b - mm : mm;
+  return round1(Math.min(b - a, Math.max(0, at - a)));
+}
+
+/** How many layers lie at a point of the folded label. */
+export function layersAt(mm: number, lines: readonly number[], heightMm: number): number {
+  const [a, b] = foldFront(lines, heightMm);
+  const front = b - a;
+  let layers = 1;
+  if (a > 0 && mm <= a) layers += 1;
+  if (b < heightMm && front - mm <= heightMm - b) layers += 1;
+  return layers;
+}
+
+/**
+ * The label as it lies on the garment: folded, then cut at its stitch line to the part that shows.
+ * The sewn edge is the top edge of that part; without a stitch the whole folded label shows.
+ */
+export type LabelAssembly = {
+  /** Folded size along the height. */
+  foldedMm: number;
+  /** The part that shows, the piece drawn in the assembly. */
+  heightMm: number;
+  /** The stitch lines on the folded label, mm from its top. */
+  stitches: number[];
+  /** The top edge of the shown part is the stitch. */
+  sewnTop: boolean;
+  /** Layers under the stitch. */
+  layers: number;
+};
+
+export function labelAssembly(
+  foldLines: readonly number[],
+  stitchLines: readonly number[],
+  heightMm: number,
+): LabelAssembly {
+  const [a, b] = foldFront(foldLines, heightMm);
+  const foldedMm = round1(b - a);
+  const stitches = [...new Set(stitchLines.map((mm) => foldedAt(mm, foldLines, heightMm)))].sort(
+    (x, y) => x - y,
+  );
+  const first = stitches[0];
+  if (first === undefined)
+    return { foldedMm, heightMm: foldedMm, stitches, sewnTop: false, layers: 1 };
+  const shown = Math.max(first, foldedMm - first);
+  return {
+    foldedMm,
+    heightMm: round1(shown > 0 ? shown : foldedMm),
+    stitches,
+    sewnTop: shown > 0,
+    layers: layersAt(first, foldLines, heightMm),
+  };
+}

@@ -145,6 +145,8 @@ export type GarmentLabelMark = {
   fold: 'flat' | 'half' | 'ends' | 'mitre' | 'loop' | '';
   /** Fold lines, mm from the top along the height (stored, else implied by `fold`). */
   foldLines?: number[];
+  /** Stitch lines, mm from the top along the height; 0 and the height are the edges. */
+  stitchLines?: number[];
   attachment: string;
 };
 

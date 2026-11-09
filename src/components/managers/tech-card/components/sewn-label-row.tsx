@@ -474,7 +474,7 @@ function LabelFold({
 }: {
   row: FormGarmentLabel;
   disabled: boolean;
-  onChange: (value: Pick<FormGarmentLabel, 'fold' | 'foldLinesMm'>) => void;
+  onChange: (value: Pick<FormGarmentLabel, 'fold' | 'foldLinesMm' | 'stitchLinesMm'>) => void;
 }) {
   const shape = garmentLabelMark(row);
   return (
@@ -483,6 +483,7 @@ function LabelFold({
       heightMm={shape?.heightMm ?? 100}
       fold={row.fold}
       foldLinesMm={row.foldLinesMm}
+      stitchLinesMm={row.stitchLinesMm}
       libraryFileId={row.files?.[0]?.libraryFileId}
       disabled={disabled}
       onChange={onChange}

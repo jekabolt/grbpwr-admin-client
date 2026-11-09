@@ -5,7 +5,7 @@ import type { common_TechCard } from 'api/proto-http/admin';
 import type { GarmentLabelMark } from 'lib/assembly-skeleton/types';
 import type { PieceDTO } from 'lib/nesting/types';
 
-import { labelFoldLines } from './label-fold-lines';
+import { labelAssembly, labelFoldLines, parseStitchLines } from './label-fold-lines';
 import type { FoundPiece } from './nesting/dxf-geometry';
 import { garmentLabelKindNames, kindLabel } from './tech-card-options';
 
@@ -17,6 +17,7 @@ export type GarmentLabelLike = {
   heightMm?: string | number | { value?: string | null } | null;
   fold?: string | null;
   foldLinesMm?: string | null;
+  stitchLinesMm?: string | null;
   attachment?: string | null;
   qtyPerGarment?: number | null;
 };
@@ -82,6 +83,7 @@ export function garmentLabelMark(label: GarmentLabelLike): GarmentLabelMark | nu
     heightMm,
     fold,
     foldLines: labelFoldLines({ fold, foldLinesMm: label.foldLinesMm }, heightMm),
+    stitchLines: parseStitchLines(label.stitchLinesMm, heightMm),
     attachment: (label.attachment ?? '').trim(),
   };
 }
@@ -123,7 +125,7 @@ export function garmentLabelFoundPiece(
   sizeToken = '',
 ): FoundPiece {
   const widthCm = mark.widthMm / 10;
-  const heightCm = mark.heightMm / 10;
+  const heightCm = labelShownMm(mark) / 10;
   const piece: PieceDTO = {
     id: labelPieceId(key),
     name: mark.label,
@@ -158,4 +160,9 @@ export function garmentLabelDrawingsOf(
     const mark = key ? garmentLabelMark(label) : null;
     return key && mark ? [{ key, mark, found: garmentLabelFoundPiece(key, mark, sizeToken) }] : [];
   });
+}
+
+/** The label's height as it lies on the garment: folded, cut at its stitch to the part that shows. */
+export function labelShownMm(mark: GarmentLabelMark): number {
+  return labelAssembly(mark.foldLines ?? [], mark.stitchLines ?? [], mark.heightMm).heightMm;
 }
