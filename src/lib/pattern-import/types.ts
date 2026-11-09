@@ -3131,6 +3131,11 @@ export type StageIO = {
       card: CardSize[];
       operatorMap?: SizeMapEntry[];
       /**
+       * Size decisions embedded in existing sheets of the same card scope. A complete compatible
+       * map is reused before the wizard considers an automatic guess.
+       */
+      storedMaps?: ManifestSize[][];
+      /**
        * pieces/grade (H1): the operator's answer to "how many sizes are drawn on this sheet".
        * 0 = he took the count the sheet's evidences agree on (A6 AUTO) back: asked as without it.
        */

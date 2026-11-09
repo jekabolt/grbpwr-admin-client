@@ -128,6 +128,8 @@ import {
   createProposeSizeMap,
   defaultTokensOf,
   markNotDrawn,
+  sizeRunForCard,
+  storedSizeMap,
 } from '../sizes/map';
 import { fileSizeLabel } from '../sizes/recover';
 import {
@@ -1281,9 +1283,14 @@ export class Session {
     const label = this.countEv?.set === this.chains ? this.countEv.v.label : null;
     const named =
       expected?.n === 1 && expected.from !== 'source' ? labelSingleRun(read, label) : read;
-    const run = runForExpected(named, expected);
+    const run = sizeRunForCard(
+      runForExpected(named, expected),
+      input.card,
+      this.files.length === 1 ? this.files[0].id : null,
+    );
     let map = proposeCardSizeMap(run, input.card);
     if (this.dxfSet) map = reviewPlaceholderSizes(map, this.setSizes, input.card);
+    map = storedSizeMap(run, input.card, input.storedMaps ?? []) ?? map;
     if (input.operatorMap?.length) map = applyOperatorMap(map, input.operatorMap, input.card);
     // a size the sheet lists but draws no line of its own for is not drawn here: never written,
     // never filled from its neighbour (cause E, viola's 34)

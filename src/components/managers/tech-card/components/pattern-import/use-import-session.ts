@@ -705,10 +705,10 @@ export function useImportSession(deps: {
    * takes the parse: a card that has sheets is never drafted as one without outlines. A parse that
    * failed is not waited for — the draft then asks (`unresolved`).
    */
-  async function cardParsed(): Promise<void> {
+  async function cardParsed(stage: 'sizes' | 'write' = 'write'): Promise<void> {
     if (cardRef.current.shapesPending) {
       const gen = histGen.current;
-      patch({ busy: { stage: 'write', done: 0, total: 1 }, error: null });
+      patch({ busy: { stage, done: 0, total: 1 }, error: null });
       try {
         while (cardRef.current.shapesPending) {
           if (stopReq.current)
@@ -727,6 +727,16 @@ export function useImportSession(deps: {
     if (sRef.current.sessionId == null) throw new Error('no session — read the files first');
     // STOPFIX: a stop holds every stage after the one it stopped (a move, a drive)
     if (stopReq.current) throw new ImportWorkerError('cancelled', 'stopped by the operator', stage);
+    // A stored size decision arrives with the card parse, just like its outline references. Wait
+    // for that parse before resolving sizes so a re-upload can reuse the same-scope manifest.
+    if (stage === 'sizes') await cardParsed('sizes');
+    const actualInput =
+      stage === 'sizes'
+        ? ({
+            ...input,
+            storedMaps: storedSizeMaps(),
+          } as StageIO[S]['in'])
+        : input;
     // the stage that reads the card's run: what everything after it was built against
     patch({ busy: { stage, done: 0, total: 1 }, error: null });
     setErrorCode(null);
@@ -747,9 +757,9 @@ export function useImportSession(deps: {
       }
       id = workerId();
       if (id == null) throw new Error('no session — read the files first');
-      const kept = RESTORE_STAGES.has(stage) ? cloneInput(input) : null;
+      const kept = RESTORE_STAGES.has(stage) ? cloneInput(actualInput) : null;
       if (kept && move.current) move.current.touched = true;
-      const out = await client.run(id, stage, input, (p) => {
+      const out = await client.run(id, stage, actualInput, (p) => {
         if (live()) patch({ busy: { stage, done: p.done, total: p.total, note: p.note } });
       });
       if (!live()) throw new StaleRun();
@@ -785,6 +795,29 @@ export function useImportSession(deps: {
     } finally {
       if (live()) patch({ busy: null });
     }
+  }
+
+  /** Existing manifested sheet(s) that can carry this run's previous size decision. */
+  function storedSizeMaps(): NonNullable<StageIO['sizes']['in']['storedMaps']> {
+    const files = new Set(iRef.current.fileList.map((f) => f.name.trim().toLowerCase()));
+    const manifested = (rc().existingPatterns ?? []).filter(
+      (p): p is typeof p & { manifest: NonNullable<typeof p.manifest> } => !!p.manifest,
+    );
+    const scoped = deps.pinScopeKey
+      ? manifested.filter((p) => p.scopeKey === deps.pinScopeKey)
+      : manifested;
+    const matching = scoped.filter((p) => files.has(p.filename.trim().toLowerCase()));
+    const matchingScopes = new Set(matching.map((p) => p.scopeKey));
+    const chosen = deps.pinScopeKey
+      ? matching.length
+        ? matching
+        : scoped.length === 1
+          ? scoped
+          : []
+      : matchingScopes.size === 1
+        ? matching
+        : [];
+    return chosen.map((p) => p.manifest.sizes);
   }
 
   /**
