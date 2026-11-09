@@ -3,6 +3,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import { deriveMaterials } from './derive-materials';
+import { deriveCover } from './derive-cover';
+import { deriveQcSignoffPage } from './derive-qc';
 import { MaterialsPage } from './pages/materials';
 
 const decimal = (value: string) => ({ value });
@@ -103,5 +105,81 @@ describe('counted trims on the materials page', () => {
       },
     });
     expect(deriveMaterials(card).hardware[0].detail).toBe('');
+  });
+
+  it('uses the primary colourway pair on materials, cover, and QC', () => {
+    const card = cardWithButtons({ spare: '1' });
+    card.colorways = [
+      {
+        colorwayId: 1,
+        usages: [
+          { bomLineKey: 'BTN', quantity: decimal('2') },
+          { bomLineKey: 'BTN', quantity: decimal('3') },
+          { bomLineKey: 'BTN', pieceIndex: 0, quantity: decimal('100') },
+        ],
+      },
+    ] as common_TechCard['colorways'];
+
+    expect(deriveMaterials(card).hardware[0]).toMatchObject({ qty: 5, spareQty: 1, toBuy: 6 });
+    expect(deriveCover(card).buttons[0].qty).toBe(5);
+    expect(
+      deriveQcSignoffPage({ techCard: card }).checks.find((check) => check.key === 'buttons')?.what,
+    ).toContain('5');
+  });
+
+  it('falls back from a mentioned primary pair to steps, then the slot', () => {
+    const fromSteps = cardWithButtons();
+    fromSteps.colorways = [
+      { colorwayId: 1, usages: [{ bomLineKey: 'BTN' }] },
+    ] as common_TechCard['colorways'];
+    expect(deriveMaterials(fromSteps).hardware[0].qty).toBe(4);
+
+    const fromSlot = cardWithButtons();
+    fromSlot.colorways = [
+      { colorwayId: 1, usages: [{ bomLineKey: 'BTN' }] },
+    ] as common_TechCard['colorways'];
+    fromSlot.techCard!.operations = fromSlot.techCard!.operations!.filter(
+      (operation) => operation.machineType !== 'TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH',
+    );
+    expect(deriveMaterials(fromSlot).hardware[0].qty).toBe(99);
+    expect(deriveCover(fromSlot).buttons[0].qty).toBe(99);
+  });
+
+  it('buys nothing for a primary colourway that omits the slot', () => {
+    const card = cardWithButtons({ spare: '1' });
+    card.colorways = [{ colorwayId: 1, usages: [] }] as unknown as common_TechCard['colorways'];
+
+    expect(deriveMaterials(card).hardware[0]).toMatchObject({
+      qty: null,
+      spareQty: null,
+      toBuy: null,
+    });
+    expect(deriveCover(card).buttons[0].qty).toBeNull();
+  });
+
+  it('does not turn measured or cut-to-length attach links into counted quantities', () => {
+    const measured = cardWithButtons({ spare: '1' });
+    measured.techCard!.bomItems![0].section = 'TECH_CARD_BOM_SECTION_TRIM';
+    measured.colorways = [
+      { colorwayId: 1, usages: [{ bomLineKey: 'BTN' }] },
+    ] as common_TechCard['colorways'];
+    expect(deriveMaterials(measured).hardware[0]).toMatchObject({
+      qty: null,
+      spareQty: null,
+      toBuy: null,
+    });
+
+    const cut = cardWithButtons({ spare: '1' });
+    cut.techCard!.cutStrips = [{ lineKey: 'STRIP', bomLineKey: 'BTN', qty: 1 }] as NonNullable<
+      NonNullable<common_TechCard['techCard']>['cutStrips']
+    >;
+    cut.colorways = [
+      { colorwayId: 1, usages: [{ bomLineKey: 'BTN' }] },
+    ] as common_TechCard['colorways'];
+    expect(deriveMaterials(cut).hardware[0]).toMatchObject({
+      qty: null,
+      spareQty: null,
+      toBuy: null,
+    });
   });
 });

@@ -99,21 +99,14 @@ describe('to buy per colourway', () => {
   it('adds spare once per slot and keeps missing articles apart', () => {
     expect(
       colourwayToBuy([
-        { used: 12, spare: 1, explicit: null, hasArticle: true },
-        { used: 2, spare: 0, explicit: null, hasArticle: false },
+        { toBuy: 13, hasArticle: true },
+        { toBuy: 2, hasArticle: false },
       ]),
     ).toEqual({ total: 13, missing: 2 });
   });
 
-  it('lets an explicit colourway quantity override used', () => {
-    expect(colourwayToBuy([{ used: 12, spare: 1, explicit: 10, hasArticle: true }])).toEqual({
-      total: 11,
-      missing: 0,
-    });
-  });
-
-  it('buys nothing for spare without a basis', () => {
-    expect(colourwayToBuy([{ used: null, spare: 2, explicit: null, hasArticle: true }])).toEqual({
+  it('ignores an unresolved counted pair', () => {
+    expect(colourwayToBuy([{ toBuy: null, hasArticle: true }])).toEqual({
       total: 0,
       missing: 0,
     });

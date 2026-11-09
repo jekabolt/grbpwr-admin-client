@@ -7,6 +7,7 @@ import {
   common_TechCardMachineType,
   common_TechCardOperationType,
   type common_Material,
+  type common_TechCardOperation,
 } from 'api/proto-http/admin';
 import { withSeamHints } from 'lib/seam-hints';
 import { notify } from 'lib/stores/store';
@@ -231,8 +232,7 @@ import {
 } from './assembly-create-dialog';
 import { suggestUnitCode } from './assembly-suggest';
 import { type UnitRenameNotice } from './assembly-rename';
-import { qtyStepFromFormOperation, stepQtyOfLine } from './button-qty';
-import { MEASURED_SECTIONS } from './use-colourway-auto';
+import { isCountedLine, qtyStepFromFormOperation, stepQtyOfLine } from './button-qty';
 import { OperationButtonAttachChecks, OperationMaterialStepQty } from './operation-quantity-marks';
 import { targetAddPrefill } from './assembly-node-views';
 import {
@@ -2739,6 +2739,7 @@ function OperationEditor({
   onReplaceGhost,
   onRemoveGhost,
   mediaUrls,
+  serverOperations,
   onEdit,
   frozen = false,
   noteSuggested,
@@ -2785,6 +2786,8 @@ function OperationEditor({
   /** Растворение — тот же мутатор, что зовут полотно и схема. */
   /** Адреса операционных снимков; форма возит только media_id. */
   mediaUrls?: Map<number, string>;
+  /** Saved read-only quantities; the form deliberately does not own or save them. */
+  serverOperations?: readonly common_TechCardOperation[];
   /**
    * Шаг ИЗМЕНЁН редактором. Сегодня зовут только писатели полосы снимков: их приёмная модалка и
    * холст выносок живут в порталах, и сброс записи отмены по `focusin` секции дока их не видит.
@@ -2798,6 +2801,10 @@ function OperationEditor({
   const form = useFormContext<TechCardFormData>();
   const { control, getValues, setValue } = form;
   const teardownBinding = useBindingStripTeardown();
+  const cutStrips = (useWatch({ control, name: 'cutStrips' }) ?? []) as CutStrip[];
+  const cutLineKeys = new Set(
+    cutStrips.map((strip) => strip.bomLineKey?.trim() ?? '').filter(Boolean),
+  );
   const opNumber = (index + 1) * 10;
   const storedOperationNumber = (useWatch({
     control,
@@ -4503,13 +4510,16 @@ function OperationEditor({
   const linkedMaterials = linkedMaterialLines.filter(
     (line) => activeKind?.id !== 'B1' || !isBindingLine(line),
   );
-  const quantityStep = qtyStepFromFormOperation({
-    operationNumber: storedOperationNumber,
-    operationType: opType,
-    machineType,
-    placementCount,
-    bomLineKeys: selectedBomKeys,
-  });
+  const quantityStep = qtyStepFromFormOperation(
+    {
+      operationNumber: storedOperationNumber,
+      operationType: opType,
+      machineType,
+      placementCount,
+      bomLineKeys: selectedBomKeys,
+    },
+    serverOperations?.find((operation) => operation.operationNumber === storedOperationNumber),
+  );
   const buttonArticleIds = linkedMaterials
     .filter((line) => line.kind === 'TECH_CARD_BOM_KIND_BUTTON')
     .flatMap((line) => {
@@ -5235,7 +5245,10 @@ function OperationEditor({
         </div>
         {linkedMaterials.map((material) => {
           const lineKey = material.lineKey?.trim() ?? '';
-          const counted = !MEASURED_SECTIONS.has(material.section ?? '');
+          const counted = isCountedLine({
+            section: material.section,
+            cutToLength: cutLineKeys.has(lineKey),
+          });
           const stepQty = lineKey && counted ? stepQtyOfLine(quantityStep, lineKey) : null;
           return (
             <span
@@ -8650,6 +8663,7 @@ export function OperationsField({
                   onReplaceGhost={replaceStepGhost}
                   onRemoveGhost={removeStepGhost}
                   mediaUrls={operationMediaUrls}
+                  serverOperations={savedCard?.techCard?.operations}
                   frozen={frozen}
                 />
               </div>
@@ -8757,6 +8771,7 @@ export function OperationsField({
                 onReplaceGhost={replaceStepGhost}
                 onRemoveGhost={removeStepGhost}
                 mediaUrls={operationMediaUrls}
+                serverOperations={savedCard?.techCard?.operations}
                 frozen={frozen}
               />
             ) : null

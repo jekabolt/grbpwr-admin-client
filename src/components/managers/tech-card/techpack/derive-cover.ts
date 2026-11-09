@@ -1,8 +1,11 @@
 import type { common_TechCard } from 'api/proto-http/admin';
 import {
+  isCountedLine,
   qtyStepFromOperation,
+  resolveCountedPair,
   slotQtyFromSteps,
 } from 'components/managers/tech-card/components/button-qty';
+import { cutStripsOfCard } from 'components/managers/tech-card/components/cut-strips/strip-pieces';
 import { skuToSeasonLabel } from 'components/managers/tech-card/components/season-util';
 import { approvalStateLabel, stageLabel } from 'components/managers/tech-cards/components/utils';
 import {
@@ -62,12 +65,34 @@ export function deriveCover(
     (ref) => ref.item.kind === 'TECH_CARD_BOM_KIND_BUTTON' || /button/i.test(clean(ref.item.name)),
   );
   const quantitySteps = operations.map(qtyStepFromOperation);
+  const cutLineKeys = new Set(
+    cutStripsOfCard(techCard)
+      .map((strip) => strip.bomLineKey?.trim() ?? '')
+      .filter(Boolean),
+  );
   const buttonFacts = buttons.map((ref) => {
     const lineKey = clean(ref.item.lineKey);
-    const operationQty = slotQtyFromSteps(quantitySteps, lineKey).qty;
+    const counted = isCountedLine({
+      section: ref.item.section,
+      cutToLength: cutLineKeys.has(lineKey),
+    });
+    const operationQty = counted ? slotQtyFromSteps(quantitySteps, lineKey).qty : null;
+    const colourwayQty = primary
+      ? resolveCountedPair({
+          line: ref.item,
+          lineIndex: ref.index,
+          usages: primary.usages ?? [],
+          stepQty: operationQty,
+          cutToLength: cutLineKeys.has(lineKey),
+        }).used
+      : undefined;
     return {
       name: clean(ref.item.name) || t('assembly.button'),
-      qty: operationQty ?? decimal(ref.item.qtyPerGarment),
+      qty: counted
+        ? primary
+          ? colourwayQty
+          : operationQty ?? decimal(ref.item.qtyPerGarment)
+        : null,
       spec: clean(ref.item.spec),
     };
   });

@@ -68,4 +68,30 @@ describe('compactInputNames', () => {
       'Button · 100% Polyester',
     );
   });
+
+  it('prints attach repeats only for counted, non-cut material links', () => {
+    const card = (section: string, cut = false) =>
+      ({
+        techCard: {
+          bomItems: [{ lineKey: 'BTN', section, name: 'Button' }],
+          cutStrips: cut ? [{ lineKey: 'STRIP', bomLineKey: 'BTN', qty: 1 }] : [],
+          operations: [
+            {
+              operationNumber: 10,
+              operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+              machineType: 'TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH',
+              work: 'button_attach',
+              placementLayout: { count: 7 },
+              bomLineKeys: ['BTN'],
+            },
+          ],
+        },
+      }) as unknown as common_TechCard;
+    const params = (techCard: common_TechCard) =>
+      deriveAssembly({ techCard, pieces: new Map(), grainDeg: new Map() }).rows[0].words.params;
+
+    expect(params(card('TECH_CARD_BOM_SECTION_HARDWARE'))).toContain('×7');
+    expect(params(card('TECH_CARD_BOM_SECTION_TRIM'))).not.toContain('×7');
+    expect(params(card('TECH_CARD_BOM_SECTION_HARDWARE', true))).not.toContain('×7');
+  });
 });

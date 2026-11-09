@@ -27,6 +27,7 @@ import {
   toBomUnit,
 } from './nesting/marker-io';
 import type { Proposal } from './colourway-material-match';
+import { MEASURED_SECTIONS } from './button-qty';
 import type { PieceRef } from './piece-picker';
 import { wireInt } from './schema';
 
@@ -38,16 +39,7 @@ import { wireInt } from './schema';
 // списку строк (`applyPlanToUsages`); применяет их кнопка `auto · N` или рождение колорвея копией.
 // Просмотр не пишет ничего.
 
-// Measured sections cost by a rate (consumption, per metre/gram) and support per-size grading; the
-// rest are counted (quantity, per piece).
-export const MEASURED_SECTIONS = new Set([
-  'TECH_CARD_BOM_SECTION_FABRIC',
-  'TECH_CARD_BOM_SECTION_LINING',
-  'TECH_CARD_BOM_SECTION_INTERLINING',
-  'TECH_CARD_BOM_SECTION_INSULATION',
-  'TECH_CARD_BOM_SECTION_THREAD',
-  'TECH_CARD_BOM_SECTION_TRIM',
-]);
+export { MEASURED_SECTIONS } from './button-qty';
 
 // РУЛОННЫЕ секции: набор дословно совпадает с ROLL_GOODS_SECTIONS сервера (копии в bom-purpose.ts и
 // piece-layer-role.ts). Только у них бывают детали, раскладки и оценка по площади.

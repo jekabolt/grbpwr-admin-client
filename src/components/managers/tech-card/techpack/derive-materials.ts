@@ -1,7 +1,10 @@
 import type { common_TechCard } from 'api/proto-http/admin';
 import {
   isAttachStep,
+  isCountedLine,
   qtyStepFromOperation,
+  resolveCountedPair,
+  slotQtyFromSteps,
   stepQtyOfLine,
 } from 'components/managers/tech-card/components/button-qty';
 import { wireInt } from 'components/managers/tech-card/components/wire-int';
@@ -64,6 +67,10 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink, t: Pd
   const pieces = card?.pieces ?? [];
   const operations = card?.operations ?? [];
   const cutStrips = cutStripsOfCard(techCard);
+  const cutLineKeys = new Set(
+    cutStrips.map((strip) => strip.bomLineKey?.trim() ?? '').filter(Boolean),
+  );
+  const quantitySteps = operations.map(qtyStepFromOperation);
   const callouts = card?.callouts ?? [];
   const front = technicalMedia(techCard, 'TECH_CARD_MEDIA_KIND_FRONT');
   const add = (
@@ -190,15 +197,17 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink, t: Pd
   const hardware = refs
     .filter((ref) => TRIM_SECTIONS.has(ref.item.section ?? ''))
     .map((ref) => {
+      const lineKey = clean(ref.item.lineKey);
+      const cutToLength = cutLineKeys.has(lineKey);
+      const counted = isCountedLine({ section: ref.item.section, cutToLength });
       const linkedOperations = operations.filter((operation) =>
-        bomLinesOfStep(operation, cutStrips).includes(clean(ref.item.lineKey)),
+        bomLinesOfStep(operation, cutStrips).includes(lineKey),
       );
       // one row per place: ops that put this line on the same pin and zone share it
       const spots: Spot[] = [];
       for (const operation of linkedOperations) {
-        const lineKey = clean(ref.item.lineKey);
         const quantity =
-          stepQtyOfLine(qtyStepFromOperation(operation), lineKey) ??
+          (counted ? stepQtyOfLine(qtyStepFromOperation(operation), lineKey) : null) ??
           stripQtyInStep(operation, cutStrips, lineKey);
         if (quantity == null) continue;
         const callout = callouts.find((item) => item.number === operation.calloutNumber);
@@ -229,7 +238,6 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink, t: Pd
             !wireInt(callout?.mediaId) || !front?.id || wireInt(callout?.mediaId) === front.id,
         });
       }
-      const lineQty = decimal(ref.item.qtyPerGarment);
       for (const spot of spots) {
         const opRef = spot.operationNumbers[0] ? [`op:${spot.operationNumbers[0]}`] : [];
         spot.gaps = {
@@ -249,10 +257,27 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink, t: Pd
         };
       }
       const spotQty = spots.reduce((sum, spot) => sum + (spot.qty ?? 0), 0);
-      const qty = spots.length ? spotQty : lineQty;
-      const spareQty = decimal(ref.item.spareQty);
+      const operationQty = counted ? slotQtyFromSteps(quantitySteps, lineKey).qty : null;
+      const colourwayQty = primary
+        ? resolveCountedPair({
+            line: ref.item,
+            lineIndex: ref.index,
+            usages: primary.usages ?? [],
+            stepQty: operationQty,
+            cutToLength,
+          })
+        : null;
+      const qty = primary
+        ? colourwayQty?.used ?? null
+        : spots.length
+          ? spotQty
+          : counted
+            ? decimal(ref.item.qtyPerGarment)
+            : null;
+      const rawSpareQty = decimal(ref.item.spareQty);
+      const spareQty = primary ? colourwayQty?.spare ?? 0 : qty != null ? rawSpareQty ?? 0 : 0;
       const spareBagGap =
-        spareQty != null && spareQty > 0 && !hasSpareKitBag
+        spareQty > 0 && !hasSpareKitBag
           ? add('pdf_spare_bag_missing', t('gaps.spareBag'), 'spare kit bag', undefined, [
               `bom:${ref.key}`,
             ])
@@ -295,8 +320,8 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink, t: Pd
         ),
         spots,
         qty,
-        spareQty: spareQty != null && spareQty > 0 ? spareQty : null,
-        toBuy: spareQty != null && spareQty > 0 && qty != null ? qty + spareQty : null,
+        spareQty: spareQty > 0 ? spareQty : null,
+        toBuy: spareQty > 0 && qty != null ? qty + spareQty : null,
         spareSource: hasSpareKitBag ? t('materials.spareKitBag') : '',
         spareBagGap,
         emptyGaps: empty

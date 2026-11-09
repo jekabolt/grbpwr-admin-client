@@ -3,6 +3,7 @@ import {
   common_Color,
   common_Material,
   common_TechCard,
+  common_TechCardColorwayUsage,
   common_TechCardMarkerSummary,
 } from 'api/proto-http/admin';
 import {
@@ -34,6 +35,7 @@ import {
 } from 'ui';
 import { parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { ColorwayDeleteControl } from './colorway-delete';
+import { isCountedLine, resolveCountedPair } from './button-qty';
 import {
   fromRead,
   MANUAL_PROVENANCE,
@@ -48,7 +50,6 @@ import { ColourwayCreatePopover } from './design/colourway-create';
 import {
   colourwayToBuy,
   formQtySteps,
-  isCountedLine,
   slotNorm,
   slotSpare,
   slotUsed,
@@ -109,7 +110,7 @@ const LABEL = 'text-micro uppercase tracking-label text-labelColor';
 
 type Focus = { cwId: number; kind: 'picker' | 'norm'; key: string } | null;
 /** Счётный слот: сколько ставится на изделие (null — базиса нет) и запас. */
-type CountedSlot = { used: number | null; spare: number };
+type CountedSlot = { stepQty: number | null; used: number | null; spare: number };
 type RecipeSnapshot = { usages: UsageDraft[] };
 type GradingCache = { scalar: string; perSize: { sizeId: number; consumption: string }[] };
 
@@ -920,29 +921,49 @@ function MaterialCell({
 // TO BUY колорвея: Σ (used или явные quantity колорвея) + spare по счётным слотам с артикулом;
 // слоты без артикула — красным «+N» рядом.
 function ToBuyCell({
+  bomItems,
   cardSlots,
   countedSlots,
   rowsBySlot,
-  materials,
+  usages,
+  savedUsages,
 }: {
+  bomItems: BomLine[];
   cardSlots: BomLine[];
   countedSlots: ReadonlyMap<string, CountedSlot>;
   rowsBySlot: ReadonlyMap<string, SlotRows>;
-  materials: common_Material[];
+  usages: readonly UsageDraft[];
+  savedUsages: readonly common_TechCardColorwayUsage[];
 }) {
+  // The editable draft resolves direct refs to line keys. Positional legacy rows keep their index
+  // only on the saved wire shape, so append just those rows instead of duplicating the direct pair.
+  const legacyRows = savedUsages.filter(
+    (usage) => !wireInt(usage.bomItemId) && !(usage.bomLineKey ?? '').trim(),
+  );
   const cells = cardSlots.flatMap((slot) => {
     const key = slot.lineKey ?? '';
     const counted = countedSlots.get(key);
     if (!counted) return [];
     const rows = rowsBySlot.get(key);
-    const quantities = [...(rows?.garment ?? []), ...(rows?.pieces ?? [])]
-      .map((row) => parseDecimalNumber(row.draft.quantity))
-      .filter((n) => Number.isFinite(n));
-    const { materialId } = resolveSlotArticle(slotDraft(rows, key), slot, materials);
+    const lineIndex = bomItems.indexOf(slot);
+    const resolved = resolveCountedPair({
+      line: slot,
+      lineIndex,
+      usages: [...usages, ...legacyRows],
+      stepQty: counted.stepQty,
+    });
+    const legacyArticle = legacyRows.find(
+      (usage) =>
+        usage.bomItemIndex === lineIndex &&
+        !(usage.pieceLineKey ?? '').trim() &&
+        !wireInt(usage.pieceId) &&
+        usage.pieceIndex == null,
+    );
+    const materialId =
+      slotDraft(rows, key).materialId || wireInt(legacyArticle?.materialId) || slot.materialId || 0;
     return [
       {
-        ...counted,
-        explicit: quantities.length ? quantities.reduce((a, b) => a + b, 0) : null,
+        toBuy: resolved.toBuy,
         hasArticle: materialId > 0,
       },
     ];
@@ -1343,10 +1364,12 @@ function ColourwayColumn({
       })}
       {countedSlots.size > 0 && (
         <ToBuyCell
+          bomItems={bomItems}
           cardSlots={cardSlots}
           countedSlots={countedSlots}
           rowsBySlot={draft.rowsBySlot}
-          materials={materials}
+          usages={draft.usages}
+          savedUsages={colorway.usages ?? []}
         />
       )}
       {/* Каталог грузится только открытым диалогом; секция слота — жёсткий фильтр. Выбор артикула
@@ -1439,9 +1462,16 @@ export function ColourwaysMatrix({
     const steps = formQtySteps(operations, readOperations);
     const out = new Map<string, CountedSlot>();
     for (const slot of cardSlots) {
-      if (!isCountedLine(slot, cutKeys)) continue;
+      if (
+        !isCountedLine({
+          section: slot.section,
+          cutToLength: cutKeys.has(slot.lineKey?.trim() ?? ''),
+        })
+      )
+        continue;
       const norm = slotNorm(slot, steps, cutKeys);
       out.set(slot.lineKey ?? '', {
+        stepQty: norm.kind === 'ops' ? norm.qty : null,
         used: slotUsed(norm, slot.qtyPerGarment),
         spare: slotSpare(slot.spareQty),
       });
