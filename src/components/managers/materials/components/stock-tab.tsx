@@ -614,7 +614,7 @@ export function StockTab() {
   let content: React.ReactNode;
   if (stockQuery.isLoading) {
     content = (
-      <DataTable className='max-w-3xl table-auto md:table-fixed'>
+      <DataTable className='table-auto md:table-fixed'>
         <thead>
           <tr>
             <th data-align='left'>material</th>
@@ -651,7 +651,7 @@ export function StockTab() {
     content = (
       <DataTable
         hoverRows
-        className='max-w-3xl table-auto md:table-fixed [&_tbody>tr:has(+tr[data-group])>td]:border-b-0 [&_td]:px-2.5 [&_td]:py-2 [&_th]:px-2.5 max-md:[&_td:first-child]:pr-1 max-md:[&_th:first-child]:pr-1 max-md:[&_td:nth-child(2)]:w-[1%] max-md:[&_td:nth-child(2)]:whitespace-nowrap max-md:[&_td:nth-child(2)]:px-1 max-md:[&_td:nth-child(3)]:w-[1%] max-md:[&_td:nth-child(3)]:whitespace-nowrap max-md:[&_td:nth-child(3)]:px-1 max-md:[&_th:nth-child(2)]:w-[1%] max-md:[&_th:nth-child(2)]:whitespace-nowrap max-md:[&_th:nth-child(2)]:px-1 max-md:[&_th:nth-child(3)]:w-[1%] max-md:[&_th:nth-child(3)]:whitespace-nowrap max-md:[&_th:nth-child(3)]:px-1'
+        className='table-auto md:table-fixed [&_tbody>tr:has(+tr[data-group])>td]:border-b-0 [&_td]:px-2.5 [&_td]:py-2 [&_th]:px-2.5 max-md:[&_td:first-child]:pr-1 max-md:[&_th:first-child]:pr-1 max-md:[&_td:nth-child(2)]:w-[1%] max-md:[&_td:nth-child(2)]:whitespace-nowrap max-md:[&_td:nth-child(2)]:px-1 max-md:[&_td:nth-child(3)]:w-[1%] max-md:[&_td:nth-child(3)]:whitespace-nowrap max-md:[&_td:nth-child(3)]:px-1 max-md:[&_th:nth-child(2)]:w-[1%] max-md:[&_th:nth-child(2)]:whitespace-nowrap max-md:[&_th:nth-child(2)]:px-1 max-md:[&_th:nth-child(3)]:w-[1%] max-md:[&_th:nth-child(3)]:whitespace-nowrap max-md:[&_th:nth-child(3)]:px-1'
       >
         <colgroup>
           <col className='w-auto md:w-[56%]' />
@@ -793,7 +793,7 @@ export function StockTab() {
 
   return (
     <>
-      <Section title='stock' action={headerControls} headerClassName='max-w-3xl'>
+      <Section title='stock' action={headerControls}>
         {content}
       </Section>
 
