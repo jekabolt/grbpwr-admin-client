@@ -11,9 +11,8 @@
 //      since the wizard read it): `patterns` (a scope with an occupant puts its file into that row —
 //      same lineKey, name, size slot and binding,
 //      new url/filename/size, version 0 so the server numbers the new file) → `pieces` (append
-//      created) → point writes
-//      `pieces.N.*` (symmetry, × per garment, fused — never a root rewrite of existing pieces) →
-//      `pieceDxfAliases` (full set: other scopes' links preserved, ours keyed
+//      created; reused pieces keep every live setting) → `pieceDxfAliases` (full set: other scopes'
+//      links preserved, ours keyed
 //      `${scopeKey}|${normBlock(block).toLowerCase()}` as the piece-match modal keys them).
 //      A write that changes nothing is not made: re-applying the same import makes zero writes.
 //   3. The card's own save (autosave `flush`): only that save is a transaction (K1: BOM, pieces,
@@ -25,10 +24,7 @@
 
 import type { ApplyResult, ApplyUploaded, CardDraft, DraftPiece } from '../types';
 import { FUSING_FULL, FUSING_UNKNOWN, IDENTICAL, aliasKey, mintLineKey } from './draft';
-import {
-  FOLD_CUT_SYMMETRY,
-  importedCutSymmetry,
-} from 'components/managers/tech-card/components/piece-codes';
+import { FOLD_CUT_SYMMETRY } from 'components/managers/tech-card/components/piece-codes';
 
 /** 40 MiB — `MAX_PATTERN_BYTES` (utils/pattern.ts), the server's hard limit. */
 export const MAX_PATTERN_BYTES = 40 * 1024 * 1024;
@@ -307,7 +303,6 @@ export function planFormWrites(
   });
   const remap = new Map<string, string>(); // draft lineKey → the live piece it binds to
   const created: Record<string, unknown>[] = [];
-  const points: FormWrite[] = [];
   const taken = new Set<string>();
   const resolveExisting = (p: DraftPiece): number | null => {
     if (p.existingLineKey) {
@@ -346,25 +341,11 @@ export function planFormWrites(
       continue;
     }
     reusedPieces++;
-    const cur = live.pieces[i];
-    const key = (cur.lineKey ?? '').trim();
+    const key = (live.pieces[i].lineKey ?? '').trim();
     taken.add(key.toLowerCase());
     if (key !== p.lineKey) remap.set(p.lineKey, key);
-    // F14 MAJOR 2: the modal's rule on the LIVE value — an explicit MIRRORED/FOLD is rewritten only
-    // on the manifest's proof (pair / unfolded fold) or when the new count makes the pair impossible.
-    const symmetry = importedCutSymmetry(cur.cutSymmetry, p.piecesPerGarment, p.symmetryForce);
-    if (symmetry) points.push({ path: `pieces.${i}.cutSymmetry`, value: symmetry });
-    if ((cur.piecesPerGarment ?? 1) !== p.piecesPerGarment)
-      points.push({ path: `pieces.${i}.piecesPerGarment`, value: p.piecesPerGarment });
-    if (p.fused && !cur.fused) {
-      points.push({ path: `pieces.${i}.fused`, value: true });
-      const mode = (cur.fusingMode ?? '').trim();
-      if (!mode || mode === FUSING_UNKNOWN)
-        points.push({ path: `pieces.${i}.fusingMode`, value: p.fusingMode ?? FUSING_FULL });
-    }
   }
   if (created.length) writes.push({ path: 'pieces', value: [...live.pieces, ...created] });
-  writes.push(...points);
 
   // 4. aliases — full set, ours replace same-key rows in place, others ride through
   let next: LiveAlias[] = live.aliases.map((a) => ({ ...a }));
@@ -486,10 +467,8 @@ export async function applyDraft(
     // T3: the rows are the saved card's — the card saved; a later write is what is owed.
     const landed = fine
       ? null
-      : (deps.landed?.([
-          ...uploaded.map((u) => u.url),
-          ...plan.replaced.map((r) => r.newUrl),
-        ]) ?? null);
+      : deps.landed?.([...uploaded.map((u) => u.url), ...plan.replaced.map((r) => r.newUrl)]) ??
+        null;
     if (landed) {
       deps.unsaved?.set(false);
       return {

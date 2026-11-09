@@ -2334,6 +2334,15 @@ export type DraftPieceUpdate = {
   fusingMode?: string;
 };
 
+/** A reused card piece whose saved setting disagrees with the imported drawing. */
+export type DraftPieceDifference = {
+  pieceLineKey: string;
+  pieceName: string;
+  field: 'piecesPerGarment' | 'cutSymmetry' | 'fused';
+  cardValue: number | string | boolean;
+  drawingValue: number | string | boolean;
+};
+
 /** Everything the wizard hands the card — applied in ONE commit or not at all. */
 export type CardDraft = {
   techCardId: number;
@@ -2341,6 +2350,8 @@ export type CardDraft = {
   pieces: DraftPiece[];
   aliases: DraftAlias[];
   pieceUpdates: DraftPieceUpdate[];
+  /** Re-import review only: card settings win; a later UI may warn about these differences. */
+  pieceDifferences?: DraftPieceDifference[];
   /** Re-import: blocks bound to no piece because nothing proves which card piece they are. */
   unresolved?: DraftUnresolved[];
   /** Also offered as a download: the same texts. */
