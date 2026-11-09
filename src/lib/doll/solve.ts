@@ -106,6 +106,8 @@ export type Tie = {
   oneSided?: boolean;
   /** Vertices per point on each side (3 when absent): a point past a footprint reads more. */
   stride?: number;
+  /** A is not moved: B alone follows it (an underlap held under the piece over it). */
+  holdA?: boolean;
 };
 
 /** Rows of a seam: every vertex of A onto B's polyline and every vertex of B onto A's. */
@@ -526,14 +528,14 @@ function tiePass(S: SolverState, T: Tie): void {
     }
     let den = 0;
     for (let m = 0; m < k; m++) {
-      den += mv[T.ia[k * q + m]] * T.wa[k * q + m] ** 2;
+      if (!T.holdA) den += mv[T.ia[k * q + m]] * T.wa[k * q + m] ** 2;
       den += mv[T.ib[k * q + m]] * T.wb[k * q + m] ** 2;
     }
     if (den <= 1e-12) continue;
     const f = T.k / den;
     for (let m = 0; m < k; m++) {
       const i = T.ia[k * q + m];
-      if (mv[i]) {
+      if (mv[i] && !T.holdA) {
         const g = f * T.wa[k * q + m];
         p[3 * i] -= cx * g;
         p[3 * i + 1] -= cy * g;

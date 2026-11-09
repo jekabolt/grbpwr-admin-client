@@ -238,4 +238,95 @@ describe('a waist row ending on a fly facing laid on the front', () => {
     expect(covered.length).toBeGreaterThan(5);
     for (const { v, over } of covered) expect(radius(over) - radius(v)).toBeGreaterThan(-0.5);
   });
+
+  it('lays the underlap just under the left band, at its place along the band (B-180)', () => {
+    const report = solveRows(
+      [
+        piece('FL', 'FRONT_L', 1, 26, 30),
+        piece('FR', 'FRONT_R', 2, 26, 30),
+        piece('BL', 'WST_L_1', 3, 26, 4),
+        piece('BR', 'WST_R', 4, 34, 4),
+        piece('FAC', 'FLAP_1_L', 5, 4, 20),
+        piece('SH', 'FLAP_R', 6, 8, 20),
+      ],
+      [
+        [
+          'wl',
+          seam('BL#0', 'FL#0', {
+            kind: 'composite',
+            bParts: ['FL#0', 'FAC#0'],
+            partRange: { 'FL#0': [0, 220] },
+          }),
+        ],
+        ['wr', seam('BR#0', 'FR#0', { kind: 'composite', bParts: ['FR#0', 'SH#0'] })],
+        ['side', seam('FL#1', 'FR#3')],
+        ['back', seam('FL#3', 'FR#1')],
+        ['bands', seam('BL#1', 'BR#3')],
+        ['fac', laid('FAC', 'FL', 220)],
+        ['sh', laid('SH', 'FR', -80)],
+      ],
+    );
+    const shell = ['FL', 'FR', 'BL', 'BR'].flatMap((k) => panelOf(report, k).vs);
+    const cx = shell.reduce((t, v) => t + at(report, v)[0], 0) / shell.length;
+    const cz = shell.reduce((t, v) => t + at(report, v)[2], 0) / shell.length;
+    const left = report.panels.find((p) => p.pieceKey === 'BL')!;
+    const right = panelOf(report, 'BR');
+    const sub = (a: number[], b: number[]) => a.map((x, k) => x - b[k]);
+    const dot = (a: number[], b: number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    /** Nearest point of triangle abc to p (barycentric clamp by projection onto its edges). */
+    const nearestOn = (p: number[], a: number[], b: number[], c: number[]) => {
+      const ab = sub(b, a);
+      const ac = sub(c, a);
+      const n = [
+        ab[1] * ac[2] - ab[2] * ac[1],
+        ab[2] * ac[0] - ab[0] * ac[2],
+        ab[0] * ac[1] - ab[1] * ac[0],
+      ];
+      const nn = dot(n, n);
+      const q = sub(
+        p,
+        n.map((x) => (x * dot(sub(p, a), n)) / nn),
+      );
+      const w1 = dot(sub(q, a), [
+        ac[1] * n[2] - ac[2] * n[1],
+        ac[2] * n[0] - ac[0] * n[2],
+        ac[0] * n[1] - ac[1] * n[0],
+      ]);
+      const w2 = dot(sub(q, a), [
+        n[1] * ab[2] - n[2] * ab[1],
+        n[2] * ab[0] - n[0] * ab[2],
+        n[0] * ab[1] - n[1] * ab[0],
+      ]);
+      const u = -w1 / nn;
+      const v = w2 / nn;
+      if (u >= 0 && v >= 0 && u + v <= 1) return q;
+      const onSeg = (s: number[], e: number[]) => {
+        const d = sub(e, s);
+        const t = Math.max(0, Math.min(1, dot(sub(p, s), d) / dot(d, d)));
+        return s.map((x, k) => x + d[k] * t);
+      };
+      return [onSeg(a, b), onSeg(b, c), onSeg(c, a)].reduce((x, y) =>
+        Math.hypot(...sub(p, x)) <= Math.hypot(...sub(p, y)) ? x : y,
+      );
+    };
+    // How deep each underlap vertex lies under the left band's surface (radially from the axis).
+    const depths = right.vs
+      .filter((v) => right.uv(v)[0] > 275)
+      .map((v) => {
+        const p = at(report, v);
+        let best = p;
+        let bd = Infinity;
+        for (let t = 0; t < left.tris.length; t += 3) {
+          const [a, b, c] = [0, 1, 2].map((k) => at(report, left.offset + left.tris[t + k]));
+          const q = nearestOn(p, a, b, c);
+          const d = Math.hypot(...sub(p, q));
+          if (d < bd) [best, bd] = [q, d];
+        }
+        const out = [p[0] - cx, 0, p[2] - cz];
+        return -dot(sub(p, best), out) / Math.hypot(...out);
+      });
+    expect(depths.length).toBeGreaterThan(5);
+    expect(Math.min(...depths)).toBeGreaterThan(1);
+    expect(Math.max(...depths)).toBeLessThan(4.5);
+  });
 });
