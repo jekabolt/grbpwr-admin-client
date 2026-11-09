@@ -131,6 +131,7 @@ import { geometryFailureLabel, isFetchFailure } from './nesting/dxf-warnings';
 import { defaultContourLayer, layerOptions } from './nesting/contour-layer';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
 import { hydrateSeams, posesOf, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
+import { useBindingStripTeardown } from './use-binding-strip-teardown';
 import { toWire, type TechCardSeamWire } from 'lib/seams';
 import { dxfByScope, patternSheetName } from './nesting/dxf-by-scope';
 import {
@@ -686,6 +687,7 @@ export function PatternsField({
   savedSizeIds?: number[];
 }) {
   const { control, setValue, getValues, register, setFocus } = useFormContext<TechCardFormData>();
+  const teardownBinding = useBindingStripTeardown();
   const writeDirty = (path: string, value: unknown) =>
     setValue(path as Parameters<typeof setValue>[0], value as never, { shouldDirty: true });
   const [params, setParams] = useSearchParams();
@@ -1707,12 +1709,13 @@ export function PatternsField({
     });
   };
 
-  const removeMaterialScope = (scope: FabricScope<FabricLine>) => {
-    if (colourwayBlockers(scope).length > 0 || scopeHold(scope).length > 0) return;
+  const removeMaterialScope = async (scope: FabricScope<FabricLine>): Promise<boolean> => {
+    if (colourwayBlockers(scope).length > 0 || scopeHold(scope).length > 0) return false;
     const lineKeys = new Set(scope.lines.map((line) => line.lineKey));
     const current = (getValues('bomItems') ?? []) as BomLine[];
     const removed = current.filter((line) => lineKeys.has(line.lineKey?.trim() ?? ''));
-    if (removed.length === 0) return;
+    if (removed.length === 0) return false;
+    if (!(await teardownBinding({ bomLineKeys: [...lineKeys] }))) return false;
     removed.forEach((line) => releaseBomLineRefs(getValues, setValue, line));
     const rest = current.filter((line) => !lineKeys.has(line.lineKey?.trim() ?? ''));
     // The slot's bindings settle in one change; the fusing rebuild's generated sheets leave with it.
@@ -1720,6 +1723,7 @@ export function PatternsField({
     setValue('bomItems', rest as never, { shouldDirty: true, shouldValidate: true });
     setConfirmScopeKey(null);
     setSelectedKey(scopes.find((candidate) => candidate.key !== scope.key)?.key ?? null);
+    return true;
   };
 
   // Размерный токен из имён блоков → id размера карточки. Нужен раскладке: один DXF несёт весь
@@ -4477,7 +4481,7 @@ export function PatternsField({
                   variant='underline'
                   size='xs'
                   className='p-0 text-textColor'
-                  onClick={() => removeMaterialScope(g.scope)}
+                  onClick={() => void removeMaterialScope(g.scope)}
                 >
                   yes
                 </Button>

@@ -482,11 +482,19 @@ export function ConstructionTab({
   const colorwayArticles = useMemo<ColorwayArticles>(() => {
     const materialNameById = materialCatalog.nameById;
     const materialById = materialCatalog.materialById;
+    const bindingBlockedLineKeys = new Set<string>();
     const colorways = (techCard?.colorways ?? []).map((cw) => {
       const pinsByLineKey = new Map<string, number[]>();
       for (const usage of cw.usages ?? []) {
         const key = usage.bomLineKey?.trim() || lineKeyByBomId.get(wireInt(usage.bomItemId)) || '';
         if (!key) continue;
+        if (
+          usage.pieceLineKey?.trim() ||
+          usage.consumptionSource === 'marker' ||
+          wireInt(usage.normMarkerId) > 0
+        ) {
+          bindingBlockedLineKeys.add(key);
+        }
         const pin = wireInt(usage.materialId);
         const bucket = pinsByLineKey.get(key);
         if (bucket) bucket.push(pin);
@@ -499,7 +507,7 @@ export function ConstructionTab({
         pinsByLineKey,
       };
     });
-    return { colorways, materialNameById, materialById };
+    return { colorways, materialNameById, materialById, bindingBlockedLineKeys };
   }, [techCard?.colorways, lineKeyByBomId, materialCatalog]);
 
   // ТКАНЬ ДЕТАЛЕЙ — ДВА ИСТОЧНИКА, И ЭТО НЕ НЕБРЕЖНОСТЬ (та же развилка, что у соседа сверху).

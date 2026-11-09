@@ -145,15 +145,18 @@ export function useStepSeamActions(index: number) {
         ? ((getValues(field) ?? []) as string[]).filter((key) => key !== seamKey)
         : removal.seamKeys;
       setValue(field, seamKeys, { shouldDirty: true });
-      const operation = getValues(`operations.${index}`);
-      const stripped = removeBindingStripsForSeam(
-        operation,
-        (getValues('cutStrips') ?? []) as CutStrip[],
-        seamKey,
-      );
-      if (stripped) {
-        setValue('cutStrips', stripped.strips as never, { shouldDirty: true });
-        setValue(`operations.${index}.inputKeys`, stripped.inputKeys, { shouldDirty: true });
+      // A shared row still belongs to its other step; only its last detach owns the strip teardown.
+      if (removal.deleteRow) {
+        const operation = getValues(`operations.${index}`);
+        const stripped = removeBindingStripsForSeam(
+          operation,
+          (getValues('cutStrips') ?? []) as CutStrip[],
+          seamKey,
+        );
+        if (stripped) {
+          setValue('cutStrips', stripped.strips as never, { shouldDirty: true });
+          setValue(`operations.${index}.inputKeys`, stripped.inputKeys, { shouldDirty: true });
+        }
       }
       return true;
     },

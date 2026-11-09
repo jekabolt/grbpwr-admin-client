@@ -57,6 +57,7 @@ import {
   sideParts,
   snapToBreak,
   storedSeamAt,
+  storedSeamOverlapping,
   type SidePick,
   type SpanRange,
 } from './span-pick';
@@ -348,8 +349,14 @@ export function SeamPickerBody({
   const pair: SeamSides | null =
     !bindingMode && !inners.length && sel.a.length && sel.b.length ? { a: sel.a, b: sel.b } : null;
   const repeatsSeam = !!pair && repeatsStoredSeam(pickParts('a'), pickParts('b'), stored, geoms);
+  const repeatsBinding =
+    bindingReady &&
+    pickParts('a').some(
+      (part) => storedSeamOverlapping(stored, part.target, part.range, geoms) >= 0,
+    );
   const pickReady =
     !repeatsSeam &&
+    !repeatsBinding &&
     (bindingReady || (surface ? !!partKey && pick[hostSide!].length === 1 : !!pair));
   const canAccept = !frozen && !busy && !!cardId && (pickReady || posePending);
 
@@ -540,6 +547,10 @@ export function SeamPickerBody({
       if (!picked('a') && !picked('b')) {
         const at = storedSeamAt(stored, id, atMm, geoms);
         if (at >= 0) {
+          if (bindingMode) {
+            setRefused('already bound');
+            return;
+          }
           setSel(EMPTY);
           setFilled(null);
           setActiveSeam((current) => (current === stored[at].key ? null : stored[at].key));
@@ -549,6 +560,10 @@ export function SeamPickerBody({
       setActiveSeam(null);
       const base = bindingMode && !sel.a.includes(id) ? EMPTY : sel;
       if (atMm == null || parseInner(id) || !(length > 0)) {
+        if (bindingMode && storedSeamOverlapping(stored, id, undefined, geoms) >= 0) {
+          setRefused('already bound');
+          return;
+        }
         setSel(
           onFolded(pickTarget(base, side, id, pickRules.isInner, pickRules.pieceOf), side, id),
         );
@@ -556,6 +571,10 @@ export function SeamPickerBody({
       }
       const segment =
         labelSpanAt(id, side, length, atMm) ?? segmentAt(edgeBreaks(id, geoms), length, atMm);
+      if (bindingMode && storedSeamOverlapping(stored, id, segment, geoms) >= 0) {
+        setRefused('already bound');
+        return;
+      }
       setSel(onFolded(pickSegment(base, side, id, segment, length, pickRules), side, id));
     },
     [
@@ -609,6 +628,10 @@ export function SeamPickerBody({
       setPoseSel(null);
       setActiveSeam(null);
       if (bindingMode && bindingStripKeys.has(pieceOfTarget(id))) return;
+      if (bindingMode && storedSeamOverlapping(stored, id, range, geoms) >= 0) {
+        setRefused('already bound');
+        return;
+      }
       const side = bindingMode ? 'a' : sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget);
       const base = bindingMode && !sel.a.includes(id) ? EMPTY : sel;
       setSel(
@@ -619,7 +642,18 @@ export function SeamPickerBody({
         ),
       );
     },
-    [frozen, bindingMode, bindingStripKeys, groups, sel, geoms, pickRules, setPoseSel, onFolded],
+    [
+      frozen,
+      bindingMode,
+      bindingStripKeys,
+      groups,
+      sel,
+      geoms,
+      stored,
+      pickRules,
+      setPoseSel,
+      onFolded,
+    ],
   );
 
   // Edges only: no length is drawn on the canvas (the owner, №58); the footer keeps the lengths.

@@ -668,6 +668,8 @@ const bomItemSchema = z
 const cutStripSchema = z.object({
   lineKey: z.string().optional().default(''),
   bomLineKey: z.string().optional().default(''),
+  // Client-only ownership marker for strips created by the B1 binding tile.
+  placement: z.string().optional().default(''),
   lengthMode: z.enum(CUT_STRIP_MODES).default('per_size'),
   seamKey: z.string().optional().default(''),
   fitPct: z.string().optional().default('100'),
@@ -2904,6 +2906,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     cutStrips: (techCard.cutStrips ?? []).map((strip) => ({
       lineKey: strip.lineKey?.trim() || ulid(),
       bomLineKey: strip.bomLineKey?.trim() || '',
+      placement: '',
       lengthMode: CUT_STRIP_MODES.includes(strip.lengthMode as (typeof CUT_STRIP_MODES)[number])
         ? (strip.lengthMode as (typeof CUT_STRIP_MODES)[number])
         : 'per_size',

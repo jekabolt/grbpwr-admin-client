@@ -173,6 +173,7 @@ type FormCutStrip = NonNullable<TechCardFormData['cutStrips']>[number];
 export const emptyCutStrip: FormCutStrip = {
   lineKey: '',
   bomLineKey: '',
+  placement: '',
   lengthMode: 'per_size' as const,
   seamKey: '',
   fitPct: '100',

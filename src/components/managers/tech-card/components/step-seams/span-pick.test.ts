@@ -19,6 +19,7 @@ import {
   sideParts,
   snapToBreak,
   storedSeamAt,
+  storedSeamOverlapping,
   type SidePick,
 } from './span-pick';
 
@@ -251,6 +252,11 @@ describe('stored seams in the hand', () => {
   it('a click on a stored part finds its seam, a free part of the edge stays free', () => {
     expect(storedSeamAt(stored, id, 200, geoms)).toBe(0);
     expect(storedSeamAt(stored, id, 500, geoms)).toBe(-1);
+  });
+
+  it('a dragged span that crosses a stored part finds its seam', () => {
+    expect(storedSeamOverlapping(stored, id, [250, 400], geoms)).toBe(0);
+    expect(storedSeamOverlapping(stored, id, [400, 500], geoms)).toBe(-1);
   });
 
   it('a pick that repeats a stored seam is refused, another span of the edge is not', () => {
