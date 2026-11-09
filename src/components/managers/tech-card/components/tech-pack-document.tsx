@@ -130,6 +130,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { Fragment, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowMarkerDef, CalloutShape } from 'components/managers/tech-card/annotation/shapes';
 import { decimalToInput } from 'utils/decimal';
+import type { SizeChartPictureDraft } from 'lib/pom/size-chart-picture';
 // ORIGIN, КОТОРЫЙ УЕДЕТ НА БУМАГУ И ОСТАНЕТСЯ ТАМ НАВСЕГДА — жил здесь локальной функцией, пока
 // печатных документов с QR было ровно один. Наряд на партию (run-pack-document.tsx) печатает такой
 // же код на такой же публичный вьюер, и вторая копия этой функции означала бы вторую копию правила
@@ -137,6 +138,7 @@ import { decimalToInput } from 'utils/decimal';
 import { viewerOrigin } from 'utils/viewer-origin';
 import { PatternQR } from 'components/managers/tech-card/patterns/pattern-qr';
 import { GrbpwrMark } from 'ui';
+import { SizeChartPictureGraphic } from './size-chart-picture';
 import { cutStripsOfCard, stripRefsOf } from './cut-strips/strip-pieces';
 import { detailKeyLabel } from './tech-card-options';
 import { techCardMarkerViewerPath } from 'constants/routes';
@@ -991,6 +993,55 @@ export function TechPackDocument({
     }
     return m;
   }, [sizeChartData]);
+  const measurementNameById = useMemo(
+    () =>
+      new Map(
+        (dictionary?.measurements ?? []).flatMap((measurement) =>
+          measurement.id && measurement.name ? [[measurement.id, measurement.name] as const] : [],
+        ),
+      ),
+    [dictionary?.measurements],
+  );
+  const measurementIdByName = useMemo(
+    () =>
+      new Map(
+        [...measurementNameById].map(([id, name]) => [name.trim().toLowerCase(), id] as const),
+      ),
+    [measurementNameById],
+  );
+  const chartMeasurements = useMemo(() => {
+    const points = [...(sizeChartData?.chart?.points ?? [])]
+      .filter((point) => !!point.measurementNameId)
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+      .flatMap((point) => {
+        const id = point.measurementNameId ?? 0;
+        const name = measurementNameById.get(id);
+        return id && name ? [{ id, name }] : [];
+      });
+    return points.length ? points : measurements;
+  }, [measurementNameById, measurements, sizeChartData?.chart?.points]);
+  const chartPicture = useMemo<SizeChartPictureDraft | null>(() => {
+    const stored = sizeChartData?.chart?.picture;
+    if (
+      !stored ||
+      (stored.source !== 'icon' && stored.source !== 'sketch' && stored.source !== 'upload')
+    )
+      return null;
+    return {
+      source: stored.source,
+      iconKey: stored.iconKey ?? '',
+      mediaId: stored.mediaId ?? 0,
+      mediaUrl: stored.mediaUrl ?? '',
+      lines: (stored.lines ?? []).map((line, index) => ({
+        measurementNameId: line.measurementNameId ?? 0,
+        x1: line.x1 ?? 0,
+        y1: line.y1 ?? 0,
+        x2: line.x2 ?? 0,
+        y2: line.y2 ?? 0,
+        position: line.position ?? index + 1,
+      })),
+    };
+  }, [sizeChartData?.chart?.picture]);
 
   const colorByCode = useMemo(() => {
     const m = new Map<string, common_Color>();
@@ -1111,6 +1162,11 @@ export function TechPackDocument({
   const b = (id: BookletId) => bookletOn(printScope, id);
 
   const sizeIds = scopedSizeIds(printScope);
+  const pictureSizeId = sizeIds.includes(tc.baseSampleSizeId ?? 0)
+    ? tc.baseSampleSizeId ?? 0
+    : sizeIds[0] ?? 0;
+  const pictureValueFor = (measurementNameId: number) =>
+    chartCellByKey.get(`${pictureSizeId}:${measurementNameId}`) ?? '';
   // Скоуп только по размерам — тоже скоуп, и он тоже обязан быть назван на бумаге: лист с
   // урезанной градацией иначе читается как «у стиля такая градация».
   const sizesNarrowed = sizeIds.length !== (tc.sizeIds ?? []).length;
@@ -2237,7 +2293,7 @@ export function TechPackDocument({
 
       {/* MEASUREMENTS — point-of-measure grading chart (GetStyleSizeChart), the single most
           standard artifact of a garment tech pack; previously never fetched/printed. */}
-      {has(sizeIds) && measurements.length > 0 && chartHasAnyValue && b('qc') && (
+      {has(sizeIds) && chartMeasurements.length > 0 && chartHasAnyValue && b('qc') && (
         <Sheet title={`measurements (${unitAbbr})`}>
           {/* ЖИВАЯ ЧАСТЬ РЕЛИЗНОЙ БУМАГИ, помеченная НА СВОЁМ ЛИСТЕ, а не только сводкой на
               первой странице: размерная таблица живёт в GetStyleSizeChart и в снапшот релиза не
@@ -2255,30 +2311,51 @@ export function TechPackDocument({
               десятками POM таблица уезжала за правое поле A4 и печаталась обрезанной, причём
               обрезанной молча. Размеров же всегда единицы, и их число ограничено сверху
               градацией — по этой оси таблица не растёт. */}
-          <table className='w-full border-collapse text-micro'>
-            <thead>
-              <tr>
-                <th className={TH}>point of measure</th>
-                {sizeIds.map((sizeId) => (
-                  <th key={sizeId} className={`${TH} text-center`}>
-                    {sizeName(sizeId)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {measurements.map((m) => (
-                <tr key={m.id} className='break-inside-avoid'>
-                  <td className={`${TD} font-semibold`}>{m.name}</td>
+          <div
+            className={
+              chartPicture
+                ? 'grid grid-cols-[minmax(0,2fr)_minmax(180px,1fr)] items-start gap-4'
+                : undefined
+            }
+          >
+            <table className='w-full border-collapse text-micro'>
+              <thead>
+                <tr>
+                  <th className={TH}>point of measure</th>
                   {sizeIds.map((sizeId) => (
-                    <td key={sizeId} className={`${TD} text-center`}>
-                      {chartCellByKey.get(`${sizeId}:${m.id}`) || '—'}
-                    </td>
+                    <th key={sizeId} className={`${TH} text-center`}>
+                      {sizeName(sizeId)}
+                    </th>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {chartMeasurements.map((m) => (
+                  <tr key={m.id} className='break-inside-avoid'>
+                    <td className={`${TD} font-semibold`}>{m.name}</td>
+                    {sizeIds.map((sizeId) => (
+                      <td key={sizeId} className={`${TD} text-center`}>
+                        {chartCellByKey.get(`${sizeId}:${m.id}`) || '—'}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {chartPicture && (
+              <div className='break-inside-avoid'>
+                <SizeChartPictureGraphic
+                  picture={chartPicture}
+                  measurementNameById={measurementNameById}
+                  measurementNameIdOf={(name) =>
+                    measurementIdByName.get(name.trim().toLowerCase()) ?? 0
+                  }
+                  valueFor={pictureValueFor}
+                  className='max-h-[420px]'
+                />
+              </div>
+            )}
+          </div>
         </Sheet>
       )}
 

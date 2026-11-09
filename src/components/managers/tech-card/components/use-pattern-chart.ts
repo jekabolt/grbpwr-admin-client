@@ -166,6 +166,7 @@ export function usePatternChart({
 
   return {
     basis,
+    categoryNames,
     effectiveShrinkagePct,
     hasPatterns: shapes.hasDxf,
     kind,

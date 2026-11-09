@@ -1,4 +1,5 @@
 import { adminService } from 'api/api';
+import { uploadMediaInput } from 'components/managers/media/utils/useUploadMedia';
 import type {
   common_StyleSizeChart,
   common_StyleSizeChartCell,
@@ -14,11 +15,18 @@ import { formatSizeName } from 'components/managers/product/utility/sizes';
 import {
   POM_CHART_NAME,
   POM_CODES_BY_GARMENT,
-  isGirth,
   type ChartMeasurementName,
 } from 'lib/pom/chart-points';
+import { SIZE_CHART_ICONS } from 'lib/pom/size-chart-icons';
+import {
+  defaultSizeChartIcon,
+  type PicturePoint,
+  type SizeChartPictureDraft,
+  type SizeChartPictureSource,
+} from 'lib/pom/size-chart-picture';
 import type { PomCode } from 'lib/pom/types';
 import { useDictionary } from 'lib/providers/dictionary-provider';
+import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { createPortal } from 'react-dom';
 import {
@@ -32,16 +40,14 @@ import {
 } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import {
-  AddDoor,
   Button,
   CheckboxCommon,
-  Combobox,
+  Close,
   DataTable,
   EmptyCell,
   Input,
   Placeholder,
-  ViewSwitch,
-  type ComboboxGroup,
+  Select,
   type ViewSwitchOption,
 } from 'ui';
 
@@ -57,7 +63,7 @@ import {
   type ChartCellDraft,
   type ChartPointDraft,
 } from './size-chart-data';
-import { SizeChartSchematic } from './size-chart-schematic';
+import { SizeChartPictureEditor, type SizeChartSketch } from './size-chart-picture';
 import { type TechCardFormData } from './schema';
 import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
 import { usePatternChart } from './use-pattern-chart';
@@ -71,10 +77,19 @@ type Rule = { baseId: number; base: string; step: string };
 
 type ChartSnapshot = {
   cells: ChartCellDraft[];
+  picture: SizeChartPictureDraft;
   points: ChartPointDraft[];
   shrinkagePct: string;
   steps: Array<[number, string]>;
   touched: string[];
+};
+
+const EMPTY_PICTURE: SizeChartPictureDraft = {
+  source: 'upload',
+  iconKey: '',
+  mediaId: 0,
+  mediaUrl: '',
+  lines: [],
 };
 
 const cellKey = (sizeId: number, measurementNameId: number) => `${sizeId}:${measurementNameId}`;
@@ -158,6 +173,23 @@ export function SizeChartField({
       ),
     [measurementById],
   );
+  const sketches = useMemo<SizeChartSketch[]>(
+    () =>
+      (techCard?.resolvedTechnicalMedia ?? []).flatMap((item, index) => {
+        const id = item.media?.id ?? 0;
+        const url =
+          item.media?.media?.fullSize?.mediaUrl ||
+          item.media?.media?.compressed?.mediaUrl ||
+          item.media?.media?.thumbnail?.mediaUrl ||
+          '';
+        return id && url ? [{ id, url, label: `Sketch ${index + 1}` }] : [];
+      }),
+    [techCard?.resolvedTechnicalMedia],
+  );
+  const measurementNameIdOf = useCallback(
+    (name: string) => nameIds.get(name.trim().toLowerCase()) ?? 0,
+    [nameIds],
+  );
 
   const [cells, setCells] = useState<ChartCellDraft[]>([]);
   const [savedCells, setSavedCells] = useState<ChartCellDraft[]>([]);
@@ -172,13 +204,25 @@ export function SizeChartField({
   const [touched, setTouched] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
-  const [addOpen, setAddOpen] = useState(false);
   const [activePointId, setActivePointId] = useState<number | null>(null);
+  const [activeFreeLinePosition, setActiveFreeLinePosition] = useState<number | null>(null);
   const [mobileSize, setMobileSize] = useState('');
+  const [picture, setPicture] = useState<SizeChartPictureDraft>(EMPTY_PICTURE);
+  const [picturePrepared, setPicturePrepared] = useState(false);
+  const [pendingLineValues, setPendingLineValues] = useState<
+    Record<number, Record<number, string>>
+  >({});
+  const [uploading, setUploading] = useState(false);
   const lastRule = useRef<Map<number, Rule>>(new Map());
   const legacyRows = useRef<ChartPointDraft[] | null>(null);
   const dirtyRef = useRef(false);
+  const rememberedPicture = useRef<{
+    iconKey?: string;
+    sketch?: SizeChartSketch;
+    upload?: { id: number; url: string };
+  }>({});
   const staging = useTechCardStaging();
+  const showMessage = useSnackBarStore((state) => state.showMessage);
 
   useEffect(() => {
     dirtyRef.current = dirty;
@@ -189,69 +233,109 @@ export function SizeChartField({
     setTouched((previous) => (previous.has(key) ? previous : new Set(previous).add(key)));
   }, []);
 
-  const hydrate = useCallback((chart: common_StyleSizeChart | undefined) => {
-    const nextCells: ChartCellDraft[] = [];
-    for (const cell of chart?.cells ?? []) {
-      if (cell.sizeId == null || cell.measurementNameId == null) continue;
-      nextCells.push({
-        sizeId: cell.sizeId,
-        measurementNameId: cell.measurementNameId,
-        value: cell.value?.value ?? '',
-        source:
-          cell.source === 'STYLE_SIZE_CHART_CELL_SOURCE_PATTERN'
-            ? 'STYLE_SIZE_CHART_CELL_SOURCE_PATTERN'
-            : 'STYLE_SIZE_CHART_CELL_SOURCE_MANUAL',
-      });
-    }
-    const nextPoints: ChartPointDraft[] = (chart?.points ?? []).flatMap((point) => {
-      if (point.measurementNameId == null) return [];
-      const pomCode =
-        point.pomCode && POM_CODES.has(point.pomCode as PomCode)
-          ? (point.pomCode as PomCode)
-          : undefined;
-      return [
-        {
-          measurementNameId: point.measurementNameId,
-          ...(pomCode ? { pomCode } : {}),
-          position: point.position ?? 0,
-          tolMinusCm: wireNumber(point.tolMinusCm),
-          tolPlusCm: wireNumber(point.tolPlusCm),
-          inShop: !!point.inShop,
-          basisPieceLineKeys: [...(point.basisPieceLineKeys ?? [])],
-          stale: !!point.stale,
-        },
-      ];
-    });
-    const nextSteps = new Map<number, string>();
-    for (const step of chart?.gradeSteps ?? []) {
-      if (step.measurementNameId == null || !step.step?.value) continue;
-      nextSteps.set(step.measurementNameId, step.step.value);
-    }
-    const loadedBase = chart?.gradeBaseSizeId ?? 0;
-    lastRule.current = new Map();
-    for (const [measurementNameId, step] of nextSteps) {
-      const base = nextCells.find(
-        (cell) => cell.sizeId === loadedBase && cell.measurementNameId === measurementNameId,
-      )?.value;
-      if (loadedBase && numberOf(base) != null)
-        lastRule.current.set(measurementNameId, {
-          baseId: loadedBase,
-          base: base ?? '',
-          step,
+  const hydrate = useCallback(
+    (chart: common_StyleSizeChart | undefined) => {
+      const nextCells: ChartCellDraft[] = [];
+      for (const cell of chart?.cells ?? []) {
+        if (cell.sizeId == null || cell.measurementNameId == null) continue;
+        nextCells.push({
+          sizeId: cell.sizeId,
+          measurementNameId: cell.measurementNameId,
+          value: cell.value?.value ?? '',
+          source:
+            cell.source === 'STYLE_SIZE_CHART_CELL_SOURCE_PATTERN'
+              ? 'STYLE_SIZE_CHART_CELL_SOURCE_PATTERN'
+              : 'STYLE_SIZE_CHART_CELL_SOURCE_MANUAL',
         });
-    }
-    setCells(nextCells);
-    setSavedCells(nextCells);
-    setPoints(normalizePoints(nextPoints));
-    setSteps(nextSteps);
-    setRuleBaseId(loadedBase);
-    setShrinkagePct(chart?.shrinkagePct?.value ?? '');
-    setPrepared(false);
-    legacyRows.current = null;
-    setChartLoaded(true);
-    setDirty(false);
-    setTouched(new Set());
-  }, []);
+      }
+      const nextPoints: ChartPointDraft[] = (chart?.points ?? []).flatMap((point) => {
+        if (point.measurementNameId == null) return [];
+        const pomCode =
+          point.pomCode && POM_CODES.has(point.pomCode as PomCode)
+            ? (point.pomCode as PomCode)
+            : undefined;
+        return [
+          {
+            measurementNameId: point.measurementNameId,
+            ...(pomCode ? { pomCode } : {}),
+            position: point.position ?? 0,
+            tolMinusCm: wireNumber(point.tolMinusCm),
+            tolPlusCm: wireNumber(point.tolPlusCm),
+            inShop: !!point.inShop,
+            basisPieceLineKeys: [...(point.basisPieceLineKeys ?? [])],
+            stale: !!point.stale,
+          },
+        ];
+      });
+      const nextSteps = new Map<number, string>();
+      for (const step of chart?.gradeSteps ?? []) {
+        if (step.measurementNameId == null || !step.step?.value) continue;
+        nextSteps.set(step.measurementNameId, step.step.value);
+      }
+      const loadedBase = chart?.gradeBaseSizeId ?? 0;
+      lastRule.current = new Map();
+      for (const [measurementNameId, step] of nextSteps) {
+        const base = nextCells.find(
+          (cell) => cell.sizeId === loadedBase && cell.measurementNameId === measurementNameId,
+        )?.value;
+        if (loadedBase && numberOf(base) != null)
+          lastRule.current.set(measurementNameId, {
+            baseId: loadedBase,
+            base: base ?? '',
+            step,
+          });
+      }
+      const storedPicture = chart?.picture;
+      const source = storedPicture?.source;
+      const validSource = source === 'icon' || source === 'sketch' || source === 'upload';
+      const nextPicture: SizeChartPictureDraft = validSource
+        ? {
+            source,
+            iconKey: storedPicture?.iconKey ?? '',
+            mediaId: storedPicture?.mediaId ?? 0,
+            mediaUrl: storedPicture?.mediaUrl ?? '',
+            lines: (storedPicture?.lines ?? []).map((line, index) => ({
+              measurementNameId: line.measurementNameId ?? 0,
+              x1: line.x1 ?? 0,
+              y1: line.y1 ?? 0,
+              x2: line.x2 ?? 0,
+              y2: line.y2 ?? 0,
+              position: line.position ?? index + 1,
+            })),
+          }
+        : EMPTY_PICTURE;
+      rememberedPicture.current = {
+        ...(nextPicture.iconKey ? { iconKey: nextPicture.iconKey } : {}),
+        ...(nextPicture.source === 'sketch' && nextPicture.mediaId
+          ? {
+              sketch: sketches.find((sketch) => sketch.id === nextPicture.mediaId) ?? {
+                id: nextPicture.mediaId,
+                url: nextPicture.mediaUrl,
+                label: 'Sketch',
+              },
+            }
+          : {}),
+        ...(nextPicture.source === 'upload' && nextPicture.mediaId
+          ? { upload: { id: nextPicture.mediaId, url: nextPicture.mediaUrl } }
+          : {}),
+      };
+      setCells(nextCells);
+      setSavedCells(nextCells);
+      setPoints(normalizePoints(nextPoints));
+      setSteps(nextSteps);
+      setRuleBaseId(loadedBase);
+      setShrinkagePct(chart?.shrinkagePct?.value ?? '');
+      setPicture(nextPicture);
+      setPicturePrepared(validSource);
+      setPendingLineValues({});
+      setPrepared(false);
+      legacyRows.current = null;
+      setChartLoaded(true);
+      setDirty(false);
+      setTouched(new Set());
+    },
+    [sketches],
+  );
 
   const loadChart = useCallback(() => {
     if (!styleId) return;
@@ -275,6 +359,96 @@ export function SizeChartField({
     techCard,
     shrinkageOverride: shrinkagePct,
   });
+
+  useEffect(() => {
+    if (!chartLoaded || picturePrepared) return;
+    const iconKey = defaultSizeChartIcon(pattern.categoryNames);
+    if (iconKey) {
+      rememberedPicture.current.iconKey = iconKey;
+      setPicture({ ...EMPTY_PICTURE, source: 'icon', iconKey });
+      markDirty('picture');
+    } else if (sketches[0]) {
+      rememberedPicture.current.sketch = sketches[0];
+      setPicture({
+        ...EMPTY_PICTURE,
+        source: 'sketch',
+        mediaId: sketches[0].id,
+        mediaUrl: sketches[0].url,
+      });
+      markDirty('picture');
+    } else {
+      setPicture(EMPTY_PICTURE);
+    }
+    setPicturePrepared(true);
+  }, [chartLoaded, markDirty, pattern.categoryNames, picturePrepared, sketches]);
+
+  // Icon lines and loaded free lines name rows, but never replace values already in the grid.
+  useEffect(() => {
+    if (!chartLoaded || !picturePrepared) return;
+    const measurementIds = new Set(
+      picture.lines.flatMap((line) => (line.measurementNameId > 0 ? [line.measurementNameId] : [])),
+    );
+    if (picture.source === 'icon') {
+      for (const line of SIZE_CHART_ICONS[picture.iconKey]?.lines ?? []) {
+        const id = measurementNameIdOf(line.name);
+        if (id) measurementIds.add(id);
+      }
+    }
+    if (!measurementIds.size) return;
+
+    let nextPoints = points;
+    let nextCells = cells;
+    let changed = false;
+    for (const measurementNameId of measurementIds) {
+      if (nextPoints.some((point) => point.measurementNameId === measurementNameId)) continue;
+      const measurementName = measurementById.get(measurementNameId)?.trim().toLowerCase();
+      const pomCode = POM_CODES_BY_GARMENT[pattern.kind].find(
+        (code) => POM_CHART_NAME[code] === measurementName,
+      );
+      if (pomCode) {
+        const added = addPoint(
+          nextPoints,
+          nextCells,
+          measurementNameId,
+          pomCode,
+          pattern.patternValues,
+          pattern.basis.get(pomCode),
+        );
+        nextPoints = added.points;
+        nextCells = added.cells;
+      } else {
+        nextPoints = [
+          ...nextPoints,
+          {
+            measurementNameId,
+            position: nextPoints.length + 1,
+            tolMinusCm: '1',
+            tolPlusCm: '1',
+            inShop: false,
+            basisPieceLineKeys: [],
+            stale: false,
+          },
+        ];
+      }
+      changed = true;
+    }
+    if (!changed) return;
+    setPoints(normalizePoints(nextPoints));
+    setCells(nextCells);
+    markDirty('picture rows');
+  }, [
+    cells,
+    chartLoaded,
+    markDirty,
+    measurementById,
+    measurementNameIdOf,
+    pattern.basis,
+    pattern.kind,
+    pattern.patternValues,
+    picture,
+    picturePrepared,
+    points,
+  ]);
 
   // Seed once after the server answer. Pattern values may arrive later and merge in the next effect.
   useEffect(() => {
@@ -498,6 +672,25 @@ export function SizeChartField({
         basisPieceLineKeys: point.basisPieceLineKeys,
         stale: point.stale,
       }));
+      const pictureValid =
+        (picture.source === 'icon' && !!SIZE_CHART_ICONS[picture.iconKey]) ||
+        (picture.source !== 'icon' && picture.mediaId > 0);
+      const picturePayload = pictureValid
+        ? {
+            source: picture.source,
+            iconKey: picture.source === 'icon' ? picture.iconKey : '',
+            mediaId: picture.source === 'icon' ? 0 : picture.mediaId,
+            lines: picture.lines.map((line) => ({
+              measurementNameId: line.measurementNameId,
+              x1: line.x1,
+              y1: line.y1,
+              x2: line.x2,
+              y2: line.y2,
+              position: line.position,
+            })),
+            mediaUrl: undefined,
+          }
+        : undefined;
       await adminService.UpdateStyleSizeChart({
         styleId,
         expectedLockVersion,
@@ -506,6 +699,8 @@ export function SizeChartField({
         gradeSteps,
         points: pointPayload,
         pointsSet: true,
+        picture: picturePayload,
+        pictureSet: true,
         shrinkagePct: shrinkagePct.trim() ? { value: shrinkagePct } : undefined,
       });
     } finally {
@@ -532,6 +727,7 @@ export function SizeChartField({
       },
       snapshot: {
         cells,
+        picture,
         points,
         shrinkagePct,
         steps: [...steps],
@@ -547,23 +743,13 @@ export function SizeChartField({
     dirty,
     touched,
     cells,
+    picture,
     points,
     shrinkagePct,
     steps,
     ordered,
     baseId,
   ]);
-
-  const activePoint = points.find((point) => point.measurementNameId === activePointId);
-  const activeName = activePoint
-    ? humanName(measurementById.get(activePoint.measurementNameId) ?? '')
-    : '';
-  const activeBaseValue = activePoint
-    ? numberOf(stored(cells, Number(mobileSize) || baseId, activePoint.measurementNameId))
-    : null;
-  const activeTolerance = activePoint
-    ? Math.max(numberOf(activePoint.tolMinusCm) ?? 0, numberOf(activePoint.tolPlusCm) ?? 0)
-    : 0;
 
   const sizeOptions = useMemo<readonly ViewSwitchOption<string>[]>(
     () =>
@@ -573,39 +759,306 @@ export function SizeChartField({
       })),
     [ordered, sizeById],
   );
-  const unusedPoms = POM_CODES_BY_GARMENT[pattern.kind].filter(
-    (code) =>
-      !points.some((point) => point.pomCode === code) && !!nameIds.get(POM_CHART_NAME[code]),
+  const selectedSizeId = Number(mobileSize) || baseId || ordered[0] || 0;
+  const measurementOptions = useMemo(
+    () =>
+      [...measurementById]
+        .map(([value, name]) => ({ value, label: humanName(name) }))
+        .sort((a, b) => String(a.label).localeCompare(String(b.label))),
+    [measurementById],
   );
-  const filterPoints = useCallback(
-    (query: string): ComboboxGroup[] => {
-      const needle = query.trim().toLowerCase();
-      const options = unusedPoms.flatMap((code) => {
-        const label = humanName(POM_CHART_NAME[code]);
-        return !needle || label.toLowerCase().includes(needle) ? [{ value: code, label }] : [];
-      });
-      return options.length ? [{ key: 'points', label: 'points', options }] : [];
-    },
-    [unusedPoms],
+  const freeLineByMeasurementId = useMemo(
+    () =>
+      new Map(
+        picture.lines.flatMap((line) =>
+          line.measurementNameId > 0 ? [[line.measurementNameId, line] as const] : [],
+        ),
+      ),
+    [picture.lines],
   );
+  const unpickedFreeLines = picture.lines.filter((line) => line.measurementNameId === 0);
+  const valueForPicture = (measurementNameId: number) =>
+    oneDecimal(stored(cells, selectedSizeId, measurementNameId));
 
-  const addPom = (value: string) => {
-    const code = value as PomCode;
-    const measurementNameId = nameIds.get(POM_CHART_NAME[code]);
-    if (!measurementNameId) return;
-    const added = addPoint(
-      points,
-      cells,
-      measurementNameId,
-      code,
-      pattern.patternValues,
-      pattern.basis.get(code),
+  const rememberCurrentPicture = () => {
+    if (picture.source === 'icon' && picture.iconKey) {
+      rememberedPicture.current.iconKey = picture.iconKey;
+    } else if (picture.source === 'sketch' && picture.mediaId) {
+      rememberedPicture.current.sketch =
+        sketches.find((sketch) => sketch.id === picture.mediaId) ??
+        ({ id: picture.mediaId, url: picture.mediaUrl, label: 'Sketch' } satisfies SizeChartSketch);
+    } else if (picture.source === 'upload' && picture.mediaId) {
+      rememberedPicture.current.upload = { id: picture.mediaId, url: picture.mediaUrl };
+    }
+  };
+
+  const changePictureSource = (source: SizeChartPictureSource) => {
+    rememberCurrentPicture();
+    if (source === 'icon') {
+      const iconKey =
+        rememberedPicture.current.iconKey ??
+        defaultSizeChartIcon(pattern.categoryNames) ??
+        Object.keys(SIZE_CHART_ICONS)[0] ??
+        '';
+      setPicture((previous) => ({
+        ...previous,
+        source,
+        iconKey,
+        mediaId: 0,
+        mediaUrl: '',
+      }));
+    } else if (source === 'sketch') {
+      const sketch = rememberedPicture.current.sketch ?? sketches[0];
+      if (!sketch) return;
+      setPicture((previous) => ({
+        ...previous,
+        source,
+        iconKey: '',
+        mediaId: sketch.id,
+        mediaUrl: sketch.url,
+      }));
+    } else {
+      const upload = rememberedPicture.current.upload;
+      setPicture((previous) => ({
+        ...previous,
+        source,
+        iconKey: '',
+        mediaId: upload?.id ?? 0,
+        mediaUrl: upload?.url ?? '',
+      }));
+    }
+    markDirty('picture');
+  };
+
+  const changeIcon = (iconKey: string) => {
+    if (!SIZE_CHART_ICONS[iconKey]) return;
+    rememberedPicture.current.iconKey = iconKey;
+    setPicture((previous) => ({
+      ...previous,
+      source: 'icon',
+      iconKey,
+      mediaId: 0,
+      mediaUrl: '',
+    }));
+    markDirty('icon');
+  };
+
+  const changeSketch = (sketch: SizeChartSketch) => {
+    rememberedPicture.current.sketch = sketch;
+    setPicture((previous) => ({
+      ...previous,
+      source: 'sketch',
+      iconKey: '',
+      mediaId: sketch.id,
+      mediaUrl: sketch.url,
+    }));
+    markDirty('sketch');
+  };
+
+  const uploadPicture = async (file: File) => {
+    setUploading(true);
+    try {
+      const uploaded = await uploadMediaInput(file);
+      const id = uploaded.id ?? 0;
+      const url =
+        uploaded.media?.fullSize?.mediaUrl ||
+        uploaded.media?.compressed?.mediaUrl ||
+        uploaded.media?.thumbnail?.mediaUrl ||
+        '';
+      if (!id || !url) throw new Error('Upload failed');
+      rememberedPicture.current.upload = { id, url };
+      setPicture((previous) => ({
+        ...previous,
+        source: 'upload',
+        iconKey: '',
+        mediaId: id,
+        mediaUrl: url,
+      }));
+      markDirty('upload');
+    } catch {
+      showMessage('Upload failed', 'error');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const addFreeLine = (start: PicturePoint, end: PicturePoint) => {
+    const position = Math.max(0, ...picture.lines.map((line) => line.position)) + 1;
+    setPicture((previous) => ({
+      ...previous,
+      lines: [
+        ...previous.lines,
+        {
+          measurementNameId: 0,
+          x1: start.x,
+          y1: start.y,
+          x2: end.x,
+          y2: end.y,
+          position,
+        },
+      ],
+    }));
+    setActivePointId(null);
+    setActiveFreeLinePosition(position);
+    markDirty(`line:${position}`);
+  };
+
+  const assignFreeLine = (position: number, measurementNameId: number) => {
+    if (!measurementNameId || points.some((point) => point.measurementNameId === measurementNameId))
+      return;
+    const name = measurementById.get(measurementNameId)?.trim().toLowerCase();
+    const pomCode = POM_CODES_BY_GARMENT[pattern.kind].find(
+      (code) => POM_CHART_NAME[code] === name,
     );
-    setPoints(added.points);
-    setCells(added.cells);
-    setAddOpen(false);
+    let nextPoints = points;
+    let nextCells = cells;
+    if (pomCode) {
+      const added = addPoint(
+        points,
+        cells,
+        measurementNameId,
+        pomCode,
+        pattern.patternValues,
+        pattern.basis.get(pomCode),
+      );
+      nextPoints = added.points;
+      nextCells = added.cells;
+    } else {
+      nextPoints = [
+        ...points,
+        {
+          measurementNameId,
+          position: points.length + 1,
+          tolMinusCm: '1',
+          tolPlusCm: '1',
+          inShop: false,
+          basisPieceLineKeys: [],
+          stale: false,
+        },
+      ];
+    }
+    const cellMap = new Map(
+      nextCells.map((cell) => [cellKey(cell.sizeId, cell.measurementNameId), cell]),
+    );
+    for (const [sizeIdText, value] of Object.entries(pendingLineValues[position] ?? {})) {
+      if (!value.trim()) continue;
+      const sizeId = Number(sizeIdText);
+      cellMap.set(cellKey(sizeId, measurementNameId), {
+        sizeId,
+        measurementNameId,
+        value,
+        source: 'STYLE_SIZE_CHART_CELL_SOURCE_MANUAL',
+      });
+    }
+    setPoints(normalizePoints(nextPoints));
+    setCells([...cellMap.values()]);
+    setPicture((previous) => ({
+      ...previous,
+      lines: previous.lines.map((line) =>
+        line.position === position ? { ...line, measurementNameId } : line,
+      ),
+    }));
+    setPendingLineValues((previous) => {
+      const next = { ...previous };
+      delete next[position];
+      return next;
+    });
     setActivePointId(measurementNameId);
-    markDirty(`point:${measurementNameId}`);
+    setActiveFreeLinePosition(null);
+    markDirty(`line:${position}`);
+  };
+
+  const changeFreeLineMeasurement = (
+    position: number,
+    currentMeasurementNameId: number,
+    nextMeasurementNameId: number,
+  ) => {
+    if (!currentMeasurementNameId) {
+      assignFreeLine(position, nextMeasurementNameId);
+      return;
+    }
+    if (
+      !nextMeasurementNameId ||
+      nextMeasurementNameId === currentMeasurementNameId ||
+      points.some((point) => point.measurementNameId === nextMeasurementNameId)
+    )
+      return;
+    const name = measurementById.get(nextMeasurementNameId)?.trim().toLowerCase();
+    const pomCode = POM_CODES_BY_GARMENT[pattern.kind].find(
+      (code) => POM_CHART_NAME[code] === name,
+    );
+    setPoints((previous) =>
+      previous.map((point) =>
+        point.measurementNameId === currentMeasurementNameId
+          ? {
+              ...point,
+              measurementNameId: nextMeasurementNameId,
+              pomCode,
+              basisPieceLineKeys: pomCode ? [...(pattern.basis.get(pomCode) ?? [])] : [],
+              stale: false,
+            }
+          : point,
+      ),
+    );
+    setCells((previous) =>
+      previous.map((cell) =>
+        cell.measurementNameId === currentMeasurementNameId
+          ? { ...cell, measurementNameId: nextMeasurementNameId }
+          : cell,
+      ),
+    );
+    setSteps((previous) => {
+      const next = new Map(previous);
+      const step = next.get(currentMeasurementNameId);
+      next.delete(currentMeasurementNameId);
+      if (step != null) next.set(nextMeasurementNameId, step);
+      return next;
+    });
+    setPicture((previous) => ({
+      ...previous,
+      lines: previous.lines.map((line) =>
+        line.position === position ? { ...line, measurementNameId: nextMeasurementNameId } : line,
+      ),
+    }));
+    setActivePointId(nextMeasurementNameId);
+    setActiveFreeLinePosition(null);
+    markDirty(`line:${position}`);
+  };
+
+  const setPendingLineCell = (position: number, sizeId: number, value: string) => {
+    setPendingLineValues((previous) => ({
+      ...previous,
+      [position]: { ...previous[position], [sizeId]: value },
+    }));
+    markDirty(`line:${position}`);
+  };
+
+  const removeFreeLine = (position: number, measurementNameId: number) => {
+    setPicture((previous) => ({
+      ...previous,
+      lines: previous.lines.filter((line) => line.position !== position),
+    }));
+    if (measurementNameId) {
+      setPoints((previous) =>
+        normalizePoints(previous.filter((point) => point.measurementNameId !== measurementNameId)),
+      );
+      setCells((previous) =>
+        previous.filter((cell) => cell.measurementNameId !== measurementNameId),
+      );
+      setSteps((previous) => {
+        const next = new Map(previous);
+        next.delete(measurementNameId);
+        return next;
+      });
+    }
+    setPendingLineValues((previous) => {
+      const next = { ...previous };
+      delete next[position];
+      return next;
+    });
+    setActivePointId(null);
+    setActiveFreeLinePosition(null);
+    markDirty(`remove:${position}`);
   };
 
   const keepPoint = (measurementNameId: number) => {
@@ -689,7 +1142,6 @@ export function SizeChartField({
               disabled={saving}
               onClick={() => {
                 setEditing((value) => !value);
-                setAddOpen(false);
               }}
             >
               {editing ? 'done' : 'edit'}
@@ -722,17 +1174,12 @@ export function SizeChartField({
   return (
     <div className='@container flex min-w-0 flex-col gap-2.5'>
       {header}
-      <div className='hidden @max-[31.25rem]:block'>
-        <ViewSwitch
-          value={mobileSize}
-          options={sizeOptions}
-          label='size view'
-          onChange={setMobileSize}
-        />
-      </div>
       <div
-        className='grid grid-cols-[minmax(0,1fr)_12.5rem] items-start gap-gutter @max-[31.25rem]:grid-cols-1 @max-[31.25rem]:gap-2'
-        onMouseLeave={() => setActivePointId(null)}
+        className='grid grid-cols-[minmax(0,1fr)_minmax(18.75rem,27.5rem)] items-start gap-gutter @max-[50rem]:grid-cols-1 @max-[50rem]:gap-2'
+        onMouseLeave={() => {
+          setActivePointId(null);
+          setActiveFreeLinePosition(null);
+        }}
       >
         <DataTable className='[&_td]:h-8 [&_td]:align-middle'>
           <thead>
@@ -743,9 +1190,19 @@ export function SizeChartField({
               {ordered.map((sizeId) => (
                 <th
                   key={sizeId}
-                  className={cn(String(sizeId) !== mobileSize && '@max-[31.25rem]:hidden')}
+                  className={cn(String(sizeId) !== mobileSize && '@max-[50rem]:hidden')}
                 >
-                  {formatSizeName(sizeById.get(sizeId) ?? `#${sizeId}`)}
+                  <Button
+                    type='button'
+                    variant='underline'
+                    size='xs'
+                    className={cn(
+                      String(sizeId) === mobileSize && 'text-highlightColor no-underline',
+                    )}
+                    onClick={() => setMobileSize(String(sizeId))}
+                  >
+                    {formatSizeName(sizeById.get(sizeId) ?? `#${sizeId}`)}
+                  </Button>
                 </th>
               ))}
               {editing && !pattern.hasPatterns && <th>step</th>}
@@ -756,6 +1213,7 @@ export function SizeChartField({
           <tbody>
             {points.map((point) => {
               const name = humanName(measurementById.get(point.measurementNameId) ?? '');
+              const freeLine = freeLineByMeasurementId.get(point.measurementNameId);
               const review = reviewByPoint.get(point.measurementNameId);
               const activeRow = activePointId === point.measurementNameId;
               return (
@@ -766,14 +1224,46 @@ export function SizeChartField({
                       'cursor-default transition-colors [&>td]:transition-colors',
                       activeRow && '[&>td]:bg-pageBg',
                     )}
-                    onMouseEnter={() => setActivePointId(point.measurementNameId)}
+                    onMouseEnter={() => {
+                      setActivePointId(point.measurementNameId);
+                      setActiveFreeLinePosition(null);
+                    }}
                     onClick={(event) => {
                       if ((event.target as HTMLElement).closest('input,button')) return;
                       setActivePointId(point.measurementNameId);
+                      setActiveFreeLinePosition(null);
                     }}
                   >
                     <td>{point.position}</td>
-                    <td data-align='left'>{name || <EmptyCell />}</td>
+                    <td data-align='left'>
+                      {freeLine ? (
+                        <Select
+                          name={`size-chart-line-point-${freeLine.position}`}
+                          value={String(point.measurementNameId)}
+                          placeholder='Point'
+                          items={measurementOptions.map((option) => ({
+                            ...option,
+                            disabled:
+                              option.value !== point.measurementNameId &&
+                              points.some(
+                                (candidate) => candidate.measurementNameId === option.value,
+                              ),
+                          }))}
+                          onValueChange={(value) =>
+                            changeFreeLineMeasurement(
+                              freeLine.position,
+                              point.measurementNameId,
+                              Number(value),
+                            )
+                          }
+                          readOnly={!editing || !canEdit}
+                          size='sm'
+                          className='min-w-32'
+                        />
+                      ) : (
+                        name || <EmptyCell />
+                      )}
+                    </td>
                     {editing && (
                       <td className='w-14'>
                         <Input
@@ -808,7 +1298,7 @@ export function SizeChartField({
                           key={sizeId}
                           className={cn(
                             'min-w-16',
-                            String(sizeId) !== mobileSize && '@max-[31.25rem]:hidden',
+                            String(sizeId) !== mobileSize && '@max-[50rem]:hidden',
                             !editing && changed && 'text-error',
                           )}
                         >
@@ -870,31 +1360,16 @@ export function SizeChartField({
                     </td>
                     {editing && (
                       <td data-align='left'>
-                        <Button
-                          type='button'
-                          variant='underline'
-                          size='xs'
-                          onClick={() => {
-                            setPoints((previous) =>
-                              normalizePoints(
-                                previous.filter(
-                                  (candidate) =>
-                                    candidate.measurementNameId !== point.measurementNameId,
-                                ),
-                              ),
-                            );
-                            setCells((previous) =>
-                              previous.filter(
-                                (cell) => cell.measurementNameId !== point.measurementNameId,
-                              ),
-                            );
-                            setActivePointId(null);
-                            markDirty(`remove:${point.measurementNameId}`);
-                          }}
-                          disabled={!canEdit}
-                        >
-                          remove
-                        </Button>
+                        {freeLine && (
+                          <Close
+                            size='sm'
+                            aria-label='Remove line'
+                            onClick={() =>
+                              removeFreeLine(freeLine.position, point.measurementNameId)
+                            }
+                            disabled={!canEdit}
+                          />
+                        )}
                       </td>
                     )}
                   </tr>
@@ -946,61 +1421,130 @@ export function SizeChartField({
                 </FragmentRows>
               );
             })}
+            {unpickedFreeLines.map((line, lineIndex) => {
+              const activeRow = activeFreeLinePosition === line.position;
+              return (
+                <tr
+                  key={`free:${line.position}`}
+                  className={cn(
+                    'cursor-default transition-colors [&>td]:transition-colors',
+                    activeRow && '[&>td]:bg-pageBg',
+                  )}
+                  onMouseEnter={() => {
+                    setActivePointId(null);
+                    setActiveFreeLinePosition(line.position);
+                  }}
+                >
+                  <td>{points.length + lineIndex + 1}</td>
+                  <td data-align='left'>
+                    <Select
+                      name={`size-chart-line-point-${line.position}`}
+                      value={undefined}
+                      placeholder='Point'
+                      items={measurementOptions.map((option) => ({
+                        ...option,
+                        disabled: points.some((point) => point.measurementNameId === option.value),
+                      }))}
+                      onValueChange={(value) => assignFreeLine(line.position, Number(value))}
+                      readOnly={!editing || !canEdit}
+                      size='sm'
+                      className='min-w-32'
+                    />
+                  </td>
+                  {editing && (
+                    <td>
+                      <EmptyCell />
+                    </td>
+                  )}
+                  {ordered.map((sizeId) => {
+                    const value = pendingLineValues[line.position]?.[sizeId] ?? '';
+                    return (
+                      <td
+                        key={sizeId}
+                        className={cn(
+                          'min-w-16',
+                          String(sizeId) !== mobileSize && '@max-[50rem]:hidden',
+                        )}
+                      >
+                        {editing ? (
+                          <Input
+                            name={`size-chart-free-${line.position}-${sizeId}`}
+                            inputMode='decimal'
+                            value={value}
+                            onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                              if (MEASURE.test(event.target.value))
+                                setPendingLineCell(line.position, sizeId, event.target.value);
+                            }}
+                            className='min-w-14 text-right'
+                            disabled={!canEdit}
+                          />
+                        ) : (
+                          <EmptyCell />
+                        )}
+                      </td>
+                    );
+                  })}
+                  {editing && !pattern.hasPatterns && (
+                    <td>
+                      <EmptyCell />
+                    </td>
+                  )}
+                  <td data-align='left'>
+                    <EmptyCell />
+                  </td>
+                  {editing && (
+                    <td data-align='left'>
+                      <Close
+                        size='sm'
+                        aria-label='Remove line'
+                        onClick={() => removeFreeLine(line.position, 0)}
+                        disabled={!canEdit}
+                      />
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
           </tbody>
         </DataTable>
 
-        <div className='sticky top-4 order-none flex flex-col gap-1.5 @max-[31.25rem]:static @max-[31.25rem]:order-first @max-[31.25rem]:flex-row @max-[31.25rem]:items-center @max-[31.25rem]:gap-3'>
-          <SizeChartSchematic
-            kind={pattern.kind}
-            points={points}
-            active={activePoint?.pomCode}
-            className='border border-borderColor @max-[31.25rem]:w-24 @max-[31.25rem]:shrink-0'
+        <div className='sticky top-4 order-none @max-[50rem]:static @max-[50rem]:order-first'>
+          <SizeChartPictureEditor
+            picture={picture}
+            sketches={sketches}
+            size={mobileSize}
+            sizeOptions={sizeOptions}
+            disabled={!editing || !canEdit || saving}
+            uploading={uploading}
+            measurementNameById={measurementById}
+            measurementNameIdOf={measurementNameIdOf}
+            valueFor={valueForPicture}
+            activeMeasurementNameId={activePointId}
+            activeFreeLinePosition={activeFreeLinePosition}
+            onSizeChange={setMobileSize}
+            onSourceChange={changePictureSource}
+            onIconChange={changeIcon}
+            onSketchChange={changeSketch}
+            onUpload={uploadPicture}
+            onAddLine={addFreeLine}
+            onFocus={(focus) => {
+              setActivePointId(focus.measurementNameId || null);
+              setActiveFreeLinePosition(focus.measurementNameId ? null : focus.position || null);
+            }}
+            onBlur={() => {
+              setActivePointId(null);
+              setActiveFreeLinePosition(null);
+            }}
           />
-          <div className='min-h-8 text-control text-labelColor'>
-            {activePoint && (
-              <>
-                <span className='text-textColor'>
-                  {activePoint.position} {activeName}
-                </span>
-                <br />± {oneDecimal(activeTolerance)}
-                {activePoint.pomCode && isGirth(activePoint.pomCode) && activeBaseValue != null
-                  ? ` · full ${oneDecimal(activeBaseValue * 2)}`
-                  : ''}
-              </>
-            )}
-          </div>
         </div>
       </div>
-
-      {canEdit && addOpen ? (
-        <div className='flex items-start gap-2'>
-          <Combobox
-            name='size-chart-add-point'
-            placeholder='point'
-            searchPlaceholder='find point'
-            filter={filterPoints}
-            onSelect={addPom}
-            className='w-full max-w-64'
-          />
-          <Button type='button' variant='underline' size='xs' onClick={() => setAddOpen(false)}>
-            cancel
-          </Button>
-        </div>
-      ) : (
-        canEdit &&
-        unusedPoms.length > 0 && (
-          <AddDoor afterRows={points.length > 0} onClick={() => setAddOpen(true)}>
-            point
-          </AddDoor>
-        )
-      )}
 
       {editing && (
         <Button
           type='button'
           variant='main'
           size='lg'
-          className='hidden w-full @max-[31.25rem]:block'
+          className='hidden w-full @max-[50rem]:block'
           onClick={() => setEditing(false)}
         >
           save chart
