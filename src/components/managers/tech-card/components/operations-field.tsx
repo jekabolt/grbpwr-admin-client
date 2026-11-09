@@ -2692,7 +2692,7 @@ function OperationBindingPicker({
           );
           const amount = parseDecimalNumber(norm);
           const sub = selected
-            ? `${edges} ${edges === 1 ? 'edge' : 'edges'} · ${Number.isFinite(amount) ? `${amount.toFixed(2)} m` : 'no pattern'}`
+            ? `${edges} ${edges === 1 ? 'edge' : 'edges'} · ${!edges ? '—' : Number.isFinite(amount) ? `${amount.toFixed(2)} m` : 'no pattern'}`
             : bindingLineSub(line);
           const material = articles?.materialById.get(wireIntOf(line.materialId));
           return (

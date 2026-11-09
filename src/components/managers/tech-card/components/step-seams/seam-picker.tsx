@@ -36,7 +36,7 @@ import { useTechCardAutosave } from '../design/autosave-contract';
 import { bindingRowFromCloth, bindingStripTarget } from '../binding-step';
 import type { CutStrip } from '../cut-strip-editor/use-cut-strip';
 import { fittedSideMm } from '../cut-strips/length-check';
-import { stripKeysOf } from '../cut-strips/strip-pieces';
+import { stripKeysOf, stripName, type BomLineLike } from '../cut-strips/strip-pieces';
 import type { TechCardFormData } from '../schema';
 import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { moveRow, orderOfRows, windowRows, type LayerMove } from './layers-window';
@@ -196,7 +196,7 @@ export function SeamPickerBody({
     stored,
     suggestions,
     surfaceSuggestion,
-    pieceName: nameOf,
+    pieceName: sceneName,
   } = scene;
   const frozen = (scene.ctx?.frozen ?? true) || readOnly;
   const cardId = scene.ctx?.cardId;
@@ -215,6 +215,15 @@ export function SeamPickerBody({
     [op, cutStrips, sizeIds],
   );
   const bindingStripKeys = useMemo(() => stripKeysOf(cutStrips), [cutStrips]);
+  const bomItems = (useWatch({ control: form.control, name: 'bomItems' }) ?? []) as BomLineLike[];
+  // A strip the card has not stored yet has no name on the card: its BOM line names it.
+  const nameOf = useCallback(
+    (key: string) => {
+      const strip = cutStrips.find((row) => row.lineKey?.trim() === key);
+      return strip ? stripName(strip, bomItems) : sceneName(key);
+    },
+    [cutStrips, bomItems, sceneName],
+  );
   const bindingMode = !!bindingTarget;
 
   const suggestion = suggestions[initialProposal] ?? suggestions[0] ?? null;
