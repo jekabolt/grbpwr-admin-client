@@ -138,6 +138,8 @@ export const garmentLabelSchema = z.object({
   widthMm: labelMillimetres,
   heightMm: labelMillimetres,
   fold: z.enum(['', 'flat', 'half', 'ends', 'mitre', 'loop']).optional().default(''),
+  // Fold lines: mm from the top along the height, CSV ("12,88"); '' = derive from fold.
+  foldLinesMm: z.string().optional().default(''),
   qtyPerGarment,
   // FK to the label material's BOM line; 0 = none.
   bomItemId: z.number().optional().default(0),
@@ -374,6 +376,7 @@ export function garmentLabelsToForm(ls?: common_TechCardGarmentLabel[]): FormGar
       l.fold === 'loop'
         ? l.fold
         : '',
+    foldLinesMm: l.foldLinesMm || '',
     qtyPerGarment: wireInt(l.qtyPerGarment) || 1,
     bomItemId: wireInt(l.bomItemId),
     bomLineKey: l.bomLineKey || '',
@@ -464,6 +467,8 @@ export function garmentLabelsOut(ls?: FormGarmentLabel[]): common_TechCardGarmen
     widthMm: inputToDecimal(l.widthMm),
     heightMm: inputToDecimal(l.heightMm),
     fold: l.fold || '',
+    // ALWAYS sent: '' means «no lines»; an older bundle omits it and the server keeps the stored value.
+    foldLinesMm: l.foldLinesMm?.trim() || '',
     qtyPerGarment: l.qtyPerGarment || 1,
     bomItemId: wireInt(l.bomItemId),
     bomLineKey: l.bomLineKey?.trim() || '',

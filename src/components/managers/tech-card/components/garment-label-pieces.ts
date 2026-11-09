@@ -5,6 +5,7 @@ import type { common_TechCard } from 'api/proto-http/admin';
 import type { GarmentLabelMark } from 'lib/assembly-skeleton/types';
 import type { PieceDTO } from 'lib/nesting/types';
 
+import { labelFoldLines } from './label-fold-lines';
 import type { FoundPiece } from './nesting/dxf-geometry';
 import { garmentLabelKindNames, kindLabel } from './tech-card-options';
 
@@ -15,6 +16,7 @@ export type GarmentLabelLike = {
   widthMm?: string | number | { value?: string | null } | null;
   heightMm?: string | number | { value?: string | null } | null;
   fold?: string | null;
+  foldLinesMm?: string | null;
   attachment?: string | null;
   qtyPerGarment?: number | null;
 };
@@ -79,6 +81,7 @@ export function garmentLabelMark(label: GarmentLabelLike): GarmentLabelMark | nu
     widthMm,
     heightMm,
     fold,
+    foldLines: labelFoldLines({ fold, foldLinesMm: label.foldLinesMm }, heightMm),
     attachment: (label.attachment ?? '').trim(),
   };
 }

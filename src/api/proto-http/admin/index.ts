@@ -10738,6 +10738,12 @@ export type common_TechCardGarmentLabel = {
   // flat | half | ends | mitre | loop; "" = not set. THE fold. `folding` (4) is a legacy free note kept for
   // display only: migration 0454 moved every unambiguous text into this field and cleared it.
   fold: string | undefined;
+  // Fold lines: CSV of positions in mm along the label's height from its top edge, ascending, no spaces,
+  // e.g. "12,88" or "50". The server normalises on write: drops what is not a number or lies outside
+  // 0 < mm < height_mm (mm > 0 when the height is unset), rounds to 0.1 mm, dedupes, sorts, keeps 8.
+  // Bad items are dropped, never a save failure. PRESENCE BIT: absent means an older client, whose save
+  // keeps the stored lines; "" = no lines (the client derives them from fold as before).
+  foldLinesMm?: string;
 };
 
 // TechCardGarmentLabelFile is one artwork file of a garment label, printed as a QR on the tech pack.

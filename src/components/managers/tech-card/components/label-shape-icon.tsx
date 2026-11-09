@@ -1,8 +1,9 @@
 // A garment label's tile picture drawn from the label itself: its true proportions, a dashed stitch
-// where it is sewn and the fold line. Straight lines, sharp corners.
+// where it is sewn and its fold lines with the folded-under parts shaded. Straight lines, sharp corners.
 import type { JSX } from 'react';
 
 import { garmentLabelMark, type GarmentLabelLike } from './garment-label-pieces';
+import { foldedSpans } from './label-fold-lines';
 
 const VIEW = 64;
 const FIT = 56;
@@ -29,21 +30,26 @@ function stitches(attachment: string, b: Box): JSX.Element | null {
   return <path {...STITCH} d={`M${b.x} ${y} H${b.x + b.w}`} />;
 }
 
-function fold(kind: string, b: Box): JSX.Element | null {
-  if (kind === 'half') {
-    const y = b.y + b.h / 2;
-    return <path {...THIN} d={`M${b.x} ${y} H${b.x + b.w}`} />;
-  }
-  if (kind === 'ends' || kind === 'mitre') {
-    const d = Math.min(5, b.h / 5);
-    return (
-      <path
-        {...THIN}
-        d={`M${b.x} ${b.y + d} H${b.x + b.w} M${b.x} ${b.y + b.h - d} H${b.x + b.w}`}
-      />
-    );
-  }
-  return null;
+function foldLines(lines: readonly number[], heightMm: number, b: Box): JSX.Element | null {
+  if (!lines.length) return null;
+  const at = (mm: number) => b.y + (mm / heightMm) * b.h;
+  return (
+    <g data-label-fold-lines={lines.join(',')}>
+      {foldedSpans(lines, heightMm).map(([from, to]) => (
+        <rect
+          key={`${from}-${to}`}
+          x={b.x}
+          y={at(from)}
+          width={b.w}
+          height={at(to) - at(from)}
+          fill='currentColor'
+          stroke='none'
+          opacity={0.22}
+        />
+      ))}
+      <path {...THIN} d={lines.map((mm) => `M${b.x} ${at(mm)} H${b.x + b.w}`).join(' ')} />
+    </g>
+  );
 }
 
 export function LabelShapeIcon({
@@ -79,7 +85,7 @@ export function LabelShapeIcon({
     >
       <rect x={b.x} y={b.y} width={b.w} height={b.h} strokeWidth={1.25} />
       {stitches(shape?.attachment ?? label.attachment ?? '', b)}
-      {fold(shape?.fold ?? '', b)}
+      {foldLines(shape?.foldLines ?? [], heightMm, b)}
     </svg>
   );
 }

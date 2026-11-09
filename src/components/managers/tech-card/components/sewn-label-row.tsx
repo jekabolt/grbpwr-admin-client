@@ -57,7 +57,6 @@ import {
   kindLabel,
   labelAttachmentOptions,
   labelDefaults,
-  labelFoldingOptions,
   labelMadeByOptions,
   labelPlacementOptions,
   labelPrintMethodOptions,
@@ -65,6 +64,8 @@ import {
 } from './tech-card-options';
 import { bomUnitKind } from './nesting/marker-io';
 import { wireInt } from './wire-int';
+import { garmentLabelMark } from './garment-label-pieces';
+import { LabelFoldEditor } from './label-fold-editor';
 import { ulid } from 'utils/ulid';
 
 const OTHER = '__other';
@@ -466,30 +467,26 @@ function LabelStepLink({
   );
 }
 
-function FoldChips({
-  value,
+function LabelFold({
+  row,
   disabled,
   onChange,
 }: {
-  value?: string;
+  row: FormGarmentLabel;
   disabled: boolean;
-  onChange: (value: FormGarmentLabel['fold']) => void;
+  onChange: (value: Pick<FormGarmentLabel, 'fold' | 'foldLinesMm'>) => void;
 }) {
+  const shape = garmentLabelMark(row);
   return (
-    <ChipRow>
-      {labelFoldingOptions.map((option) => (
-        <Chip
-          key={option}
-          nonForm
-          selected={value === option}
-          pressed={value === option}
-          disabled={disabled}
-          onClick={() => onChange(option as FormGarmentLabel['fold'])}
-        >
-          {option}
-        </Chip>
-      ))}
-    </ChipRow>
+    <LabelFoldEditor
+      widthMm={shape?.widthMm ?? 30}
+      heightMm={shape?.heightMm ?? 100}
+      fold={row.fold}
+      foldLinesMm={row.foldLinesMm}
+      libraryFileId={row.files?.[0]?.libraryFileId}
+      disabled={disabled}
+      onChange={onChange}
+    />
   );
 }
 
@@ -859,11 +856,7 @@ export function SewnLabelModal({
             <LabelStepLink labelKey={labelKey} lineKey={row.lineKey} canEdit={canEdit} />
           </Field>
           <Field label='fold' className='sm:col-span-2'>
-            <FoldChips
-              value={row.fold}
-              disabled={!canEdit || built}
-              onChange={(fold) => patch({ fold })}
-            />
+            <LabelFold row={row} disabled={!canEdit} onChange={patch} />
           </Field>
           <Field label='per garment'>
             <Input
@@ -1317,11 +1310,7 @@ export function SewnLabelRow({
 
           <div className='mt-3'>
             <Field label='fold'>
-              <FoldChips
-                value={row.fold}
-                disabled={!canEdit}
-                onChange={(fold) => patch({ fold })}
-              />
+              <LabelFold row={row} disabled={!canEdit} onChange={patch} />
             </Field>
           </div>
 
