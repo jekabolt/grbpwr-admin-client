@@ -2,7 +2,7 @@ import type { common_StyleSizeChart, common_TechCard } from 'api/proto-http/admi
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import type { PrintOrient } from 'components/managers/print/scope';
 import { POM_CODES_BY_GARMENT, isGirth } from 'lib/pom/chart-points';
-import { iconLineMeasurementId, type SizeChartPictureDraft } from 'lib/pom/size-chart-picture';
+import { type SizeChartPictureDraft } from 'lib/pom/size-chart-picture';
 import type { GarmentKind, PomCode } from 'lib/pom/types';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo } from 'react';
@@ -242,13 +242,6 @@ export function MeasurementsPage({
     () => new Map(allMeasurements.map((measurement) => [measurement.id, measurement.name])),
     [allMeasurements],
   );
-  const measurementIdByName = useMemo(
-    () =>
-      new Map(
-        allMeasurements.map((measurement) => [measurement.name.toLowerCase(), measurement.id]),
-      ),
-    [allMeasurements],
-  );
   const picture = useMemo(() => pictureOf(sizeChart), [sizeChart]);
   const model = useMemo(
     () => deriveMeasurementsPage({ techCard, measurements, sizeChart, sizeNames, t }),
@@ -271,11 +264,7 @@ export function MeasurementsPage({
   const kind: GarmentKind = rows.some((row) => row.pomCode && !TOP_CODES.has(row.pomCode))
     ? 'bottom'
     : 'top';
-  const rowIds = new Set(rows.map((row) => row.id));
   const baseSizeId = techCard.techCard?.baseSampleSizeId ?? 0;
-  const pictureSizeId = sizeIds.includes(baseSizeId) ? baseSizeId : sizeIds[0] ?? 0;
-  const pictureValueFor = (measurementNameId: number) =>
-    oneDecimal(rows.find((row) => row.id === measurementNameId)?.values.get(pictureSizeId));
   const rowGaps = model.rows.flatMap((row) => (row.gap ? [row.gap] : []));
   const override = numberOf(sizeChart?.shrinkagePct?.value);
   const title = [
@@ -322,15 +311,7 @@ export function MeasurementsPage({
               <SizeChartPictureGraphic
                 picture={picture}
                 measurementNameById={measurementNameById}
-                measurementNameIdOf={(name) =>
-                  iconLineMeasurementId(
-                    picture.iconKey,
-                    name,
-                    (candidate) => measurementIdByName.get(candidate.trim().toLowerCase()) ?? 0,
-                    rowIds,
-                  )
-                }
-                valueFor={pictureValueFor}
+                rows={rows.map((row) => ({ measurementNameId: row.id, position: row.position }))}
                 className='max-h-[35rem]'
               />
             ) : (

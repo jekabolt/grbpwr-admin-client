@@ -792,7 +792,6 @@ export function SizeChartField({
       })),
     [ordered, sizeById],
   );
-  const selectedSizeId = Number(mobileSize) || baseId || ordered[0] || 0;
   const measurementOptions = useMemo(
     () =>
       [...measurementById]
@@ -810,8 +809,14 @@ export function SizeChartField({
     [picture.lines],
   );
   const unpickedFreeLines = picture.lines.filter((line) => line.measurementNameId === 0);
-  const valueForPicture = (measurementNameId: number) =>
-    oneDecimal(stored(cells, selectedSizeId, measurementNameId));
+  const pictureRows = useMemo(
+    () =>
+      points.map((point) => ({
+        measurementNameId: point.measurementNameId,
+        position: point.position,
+      })),
+    [points],
+  );
 
   const rememberCurrentPicture = () => {
     if (picture.source === 'icon' && picture.iconKey) {
@@ -1560,8 +1565,7 @@ export function SizeChartField({
             disabled={!editing || !canEdit || saving}
             uploading={uploading}
             measurementNameById={measurementById}
-            measurementNameIdOf={measurementNameIdOf}
-            valueFor={valueForPicture}
+            rows={pictureRows}
             activeMeasurementNameId={activePointId}
             activeFreeLinePosition={activeFreeLinePosition}
             onSizeChange={setMobileSize}

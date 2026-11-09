@@ -1002,13 +1002,6 @@ export function TechPackDocument({
       ),
     [dictionary?.measurements],
   );
-  const measurementIdByName = useMemo(
-    () =>
-      new Map(
-        [...measurementNameById].map(([id, name]) => [name.trim().toLowerCase(), id] as const),
-      ),
-    [measurementNameById],
-  );
   const chartMeasurements = useMemo(() => {
     const points = [...(sizeChartData?.chart?.points ?? [])]
       .filter((point) => !!point.measurementNameId)
@@ -1162,11 +1155,6 @@ export function TechPackDocument({
   const b = (id: BookletId) => bookletOn(printScope, id);
 
   const sizeIds = scopedSizeIds(printScope);
-  const pictureSizeId = sizeIds.includes(tc.baseSampleSizeId ?? 0)
-    ? tc.baseSampleSizeId ?? 0
-    : sizeIds[0] ?? 0;
-  const pictureValueFor = (measurementNameId: number) =>
-    chartCellByKey.get(`${pictureSizeId}:${measurementNameId}`) ?? '';
   // Скоуп только по размерам — тоже скоуп, и он тоже обязан быть назван на бумаге: лист с
   // урезанной градацией иначе читается как «у стиля такая градация».
   const sizesNarrowed = sizeIds.length !== (tc.sizeIds ?? []).length;
@@ -2321,6 +2309,7 @@ export function TechPackDocument({
             <table className='w-full border-collapse text-micro'>
               <thead>
                 <tr>
+                  <th className={TH}>#</th>
                   <th className={TH}>point of measure</th>
                   {sizeIds.map((sizeId) => (
                     <th key={sizeId} className={`${TH} text-center`}>
@@ -2330,8 +2319,9 @@ export function TechPackDocument({
                 </tr>
               </thead>
               <tbody>
-                {chartMeasurements.map((m) => (
+                {chartMeasurements.map((m, index) => (
                   <tr key={m.id} className='break-inside-avoid'>
+                    <td className={TD}>{index + 1}</td>
                     <td className={`${TD} font-semibold`}>{m.name}</td>
                     {sizeIds.map((sizeId) => (
                       <td key={sizeId} className={`${TD} text-center`}>
@@ -2347,10 +2337,10 @@ export function TechPackDocument({
                 <SizeChartPictureGraphic
                   picture={chartPicture}
                   measurementNameById={measurementNameById}
-                  measurementNameIdOf={(name) =>
-                    measurementIdByName.get(name.trim().toLowerCase()) ?? 0
-                  }
-                  valueFor={pictureValueFor}
+                  rows={chartMeasurements.map((m, index) => ({
+                    measurementNameId: m.id,
+                    position: index + 1,
+                  }))}
                   className='max-h-[420px]'
                 />
               </div>
