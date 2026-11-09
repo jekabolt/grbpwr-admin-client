@@ -429,6 +429,7 @@ export function SizeChartPictureEditor({
   sketches,
   size,
   sizeOptions,
+  editing,
   disabled,
   uploading,
   measurementNameById,
@@ -449,6 +450,7 @@ export function SizeChartPictureEditor({
   sketches: readonly SizeChartSketch[];
   size: string;
   sizeOptions: readonly ViewSwitchOption<string>[];
+  editing: boolean;
   disabled: boolean;
   uploading: boolean;
   measurementNameById: ReadonlyMap<number, string>;
@@ -496,50 +498,52 @@ export function SizeChartPictureEditor({
 
   return (
     <div className='flex min-w-0 flex-col gap-2'>
-      <div className='flex flex-wrap items-center gap-1'>
-        <Chip
-          selected={picture.source === 'icon'}
-          pressed={picture.source === 'icon'}
-          onClick={() => chooseSource('icon')}
-          disabled={disabled}
-        >
-          Icon
-        </Chip>
-        <Chip
-          selected={picture.source === 'sketch'}
-          pressed={picture.source === 'sketch'}
-          onClick={() => chooseSource('sketch')}
-          disabled={disabled || sketches.length === 0}
-        >
-          Sketch
-        </Chip>
-        <Chip
-          selected={picture.source === 'upload'}
-          pressed={picture.source === 'upload'}
-          onClick={() => chooseSource('upload')}
-          disabled={disabled}
-        >
-          Upload
-        </Chip>
-        <Button
-          type='button'
-          variant='secondary'
-          size='xs'
-          className='ml-auto'
-          aria-pressed={drawing}
-          disabled={disabled || !ready}
-          onClick={() => {
-            setDrawing((value) => !value);
-            setStart(null);
-            setCursor(null);
-          }}
-        >
-          + Line
-        </Button>
-      </div>
+      {editing && (
+        <div className='flex flex-wrap items-center gap-1'>
+          <Chip
+            selected={picture.source === 'icon'}
+            pressed={picture.source === 'icon'}
+            onClick={() => chooseSource('icon')}
+            disabled={disabled}
+          >
+            Icon
+          </Chip>
+          <Chip
+            selected={picture.source === 'sketch'}
+            pressed={picture.source === 'sketch'}
+            onClick={() => chooseSource('sketch')}
+            disabled={disabled || sketches.length === 0}
+          >
+            Sketch
+          </Chip>
+          <Chip
+            selected={picture.source === 'upload'}
+            pressed={picture.source === 'upload'}
+            onClick={() => chooseSource('upload')}
+            disabled={disabled}
+          >
+            Upload
+          </Chip>
+          <Button
+            type='button'
+            variant='secondary'
+            size='xs'
+            className='ml-auto'
+            aria-pressed={drawing}
+            disabled={disabled || !ready}
+            onClick={() => {
+              setDrawing((value) => !value);
+              setStart(null);
+              setCursor(null);
+            }}
+          >
+            + Line
+          </Button>
+        </div>
+      )}
 
       <div className='flex min-w-0 flex-wrap items-center gap-2'>
-        {picture.source === 'icon' && (
+        {editing && picture.source === 'icon' && (
           <Select
             name='size-chart-icon'
             value={picture.iconKey || undefined}
@@ -551,7 +555,7 @@ export function SizeChartPictureEditor({
             className='min-w-44 flex-1'
           />
         )}
-        {picture.source === 'upload' && picture.mediaUrl && (
+        {editing && picture.source === 'upload' && picture.mediaUrl && (
           <Button
             type='button'
             variant='underline'
@@ -573,7 +577,7 @@ export function SizeChartPictureEditor({
         )}
       </div>
 
-      {picture.source === 'sketch' && (
+      {editing && picture.source === 'sketch' && (
         <Tiles min={64} className='grid-cols-[repeat(auto-fill,minmax(4rem,1fr))]'>
           {sketches.map((sketch) => (
             <Tile

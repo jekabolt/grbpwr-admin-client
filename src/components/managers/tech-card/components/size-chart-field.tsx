@@ -200,6 +200,17 @@ export function SizeChartField({
   const [saving, setSaving] = useState(false);
   const [touched, setTouched] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState(false);
+  // A click on a value in the read table opens edit mode with that cell focused.
+  const [focusCell, setFocusCell] = useState('');
+  useEffect(() => {
+    if (!editing || !focusCell) return;
+    const input = document.getElementsByName(focusCell)[0];
+    if (input instanceof HTMLInputElement) {
+      input.focus();
+      input.select();
+    }
+    setFocusCell('');
+  }, [editing, focusCell]);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [activePointId, setActivePointId] = useState<number | null>(null);
   const [activeFreeLinePosition, setActiveFreeLinePosition] = useState<number | null>(null);
@@ -1322,7 +1333,16 @@ export function SizeChartField({
                             'min-w-16',
                             String(sizeId) !== mobileSize && '@max-[50rem]:hidden',
                             !editing && changed && 'text-error',
+                            !editing && canEdit && 'cursor-pointer',
                           )}
+                          onClick={
+                            !editing && canEdit && !saving
+                              ? () => {
+                                  setFocusCell(`size-chart-${point.measurementNameId}-${sizeId}`);
+                                  setEditing(true);
+                                }
+                              : undefined
+                          }
                         >
                           {editing ? (
                             <Input
@@ -1536,6 +1556,7 @@ export function SizeChartField({
             sketches={sketches}
             size={mobileSize}
             sizeOptions={sizeOptions}
+            editing={editing && canEdit}
             disabled={!editing || !canEdit || saving}
             uploading={uploading}
             measurementNameById={measurementById}
