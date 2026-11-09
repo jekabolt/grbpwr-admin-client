@@ -234,6 +234,7 @@ export function StepSeamsRow({
             marks={NO_MARKS}
             ownMarksOnly={unitStep}
             onOpen={cardId ? () => setOpen(true) : undefined}
+            quiet
             data-step-label-pose=''
           />
         )}
@@ -275,6 +276,7 @@ export function SeamTile({
   status,
   emptyLabel,
   caption,
+  quiet,
   ...rest
 }: {
   /** The seam's number on the step — the one the picker shows beside it. */
@@ -296,6 +298,8 @@ export function SeamTile({
   caption?: string;
   'data-step-seam'?: string;
   'data-step-label-pose'?: string;
+  /** «no seam» already stands beside the tile: not again inside the picture. */
+  quiet?: boolean;
 }) {
   return (
     <span
@@ -345,6 +349,7 @@ export function SeamTile({
           stepEdges={ownMarksOnly ? undefined : scene.stepEdges}
           seamless={scene.seamless}
           stepParts={ownMarksOnly ? undefined : scene.stepParts}
+          {...(quiet ? { noSeamText: '' } : {})}
         />
       ) : null}
       {no != null && (
