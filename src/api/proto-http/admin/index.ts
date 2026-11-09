@@ -1570,6 +1570,8 @@ export type common_StyleSizeChart = {
   gradeSteps: common_StyleSizeChartGradeStep[] | undefined;
   points: common_StyleSizeChartPoint[] | undefined;
   shrinkagePct: googletype_Decimal | undefined;
+  // The picture next to the table and the user's free lines on it; absent = no picture chosen.
+  picture: common_StyleSizeChartPicture | undefined;
 };
 
 // StyleSizeChart is the style-owned size chart (R5). Written full-replace under the shared
@@ -1604,6 +1606,33 @@ export type common_StyleSizeChartPoint = {
   stale: boolean | undefined;
 };
 
+// StyleSizeChartPicture is the drawing next to the size chart table. source is "icon" (icon_key names
+// a drawing in the client icon library), "sketch" (media_id is one of the card's technical images) or
+// "upload" (media_id is an uploaded image). Only the field of the chosen source is kept: icon_key is
+// cleared for sketch/upload, media_id for icon. media_url is output-only, the full-size url of
+// media_id ("" when the image was deleted from the library).
+export type common_StyleSizeChartPicture = {
+  source: string | undefined;
+  iconKey: string | undefined;
+  mediaId: number | undefined;
+  lines: common_StyleSizeChartLine[] | undefined;
+  mediaUrl: string | undefined;
+};
+
+// StyleSizeChartLine is one free line the user drew on the size chart picture: a straight segment in
+// coordinates normalised to the picture box (0..1, origin top-left), stored with 5 decimals. Lines
+// predrawn by an icon are not stored (they come from the icon library). A line with a picked point
+// names it by measurement_name_id; 0 = the point is not picked yet. Its values live in the chart's
+// cells and points under the same measurement_name_id.
+export type common_StyleSizeChartLine = {
+  measurementNameId: number | undefined;
+  x1: number | undefined;
+  y1: number | undefined;
+  x2: number | undefined;
+  y2: number | undefined;
+  position: number | undefined;
+};
+
 export type UpdateStyleSizeChartRequest = {
   styleId: number | undefined;
   expectedLockVersion: number | undefined;
@@ -1617,6 +1646,10 @@ export type UpdateStyleSizeChartRequest = {
   points: common_StyleSizeChartPoint[] | undefined;
   pointsSet: boolean | undefined;
   shrinkagePct: googletype_Decimal | undefined;
+  // The size chart picture with its free lines, full-replace when picture_set. picture_set = false
+  // (an older client) keeps the stored picture; picture_set with no picture removes it and its lines.
+  picture: common_StyleSizeChartPicture | undefined;
+  pictureSet: boolean | undefined;
 };
 
 export type UpdateStyleSizeChartResponse = {
