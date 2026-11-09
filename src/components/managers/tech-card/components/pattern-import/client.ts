@@ -79,6 +79,11 @@ export type CardContext = {
    * block the importer renamed to the piece of the same outline (`buildDraft`).
    */
   existingShapes?: DraftShapeRef[];
+  /**
+   * The card has sheets and its parse (the outlines above, the sheets' manifests) is not read yet.
+   * The write waits for it before the draft binds (`use-import-session`, review T1 (a)).
+   */
+  shapesPending?: boolean;
   /** Season + style number, for the file names the writer proposes. */
   styleLabel: string;
   /**

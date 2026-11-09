@@ -973,8 +973,9 @@ export function PatternsField({
   // заново), а вернувшись, оператор должен увидеть готовый ответ, а не второй разбор.
   const [armed, setArmed] = useState(active);
   useEffect(() => {
-    if (active) setArmed(true);
-  }, [active]);
+    // an import binds by the card's parse of its sheets: it is read while the import runs
+    if (active || importing) setArmed(true);
+  }, [active, importing]);
   // Выбранная плитка полки: ключ скоупа или PDF_KEY. null = экран ещё не трогали, и
   // выбор выводится из данных (первый материал с файлами, иначе первый вообще).
   const [pickedKey, setPickedKey] = useState<string | null>(null);
@@ -1328,8 +1329,54 @@ export function PatternsField({
     () => [...pieceShapesByScope.values()].flat(),
     [pieceShapesByScope],
   );
-  // re-import: a block the importer renamed binds to the card piece of the same outline
-  const importShapes = useMemo(() => shapeRefsOf(pieceShapesByScope), [pieceShapesByScope]);
+  // re-import: a block the importer renamed binds to the card piece of the same outline — read per
+  // sheet, so the other sheets of the scope are never taken for the one replaced (review T1 #3)
+  const importShapes = useMemo(() => {
+    if (!bundle || !importing) return [];
+    const livePieces = cardPieces.flatMap((piece) => {
+      const lineKey = piece.lineKey?.trim() ?? '';
+      const name = piece.name?.trim() ?? '';
+      return lineKey && name ? [{ ...piece, lineKey, name }] : [];
+    });
+    return shapeRefsOf(
+      scopeGroups.flatMap((group) => {
+        const bySheet = new Map<string, PieceDTO[]>();
+        for (const piece of contourPiecesByScope.get(group.scope.key) ?? []) {
+          const url = bundle.urlByFile?.get(piece.fileIndex ?? -1) ?? '';
+          bySheet.set(url, [...(bySheet.get(url) ?? []), piece]);
+        }
+        const bindings = pieceDxfAliases.filter((alias) =>
+          aliasInScope(alias, group.scope, linkSet),
+        );
+        return [...bySheet].map(([url, scoped]) => ({
+          scopeKey: group.scope.key,
+          url: url || undefined,
+          refs: pieceShapeReferences({
+            parse: {
+              pieces: scoped,
+              blockNames: scoped.flatMap((piece) =>
+                piece.blockName?.trim() ? [piece.blockName] : [],
+              ),
+            },
+            bindings,
+            pieces: livePieces,
+            sizeTokens: [...dictTokens.keys()],
+          }),
+        }));
+      }),
+    );
+  }, [
+    bundle,
+    importing,
+    cardPieces,
+    scopeGroups,
+    contourPiecesByScope,
+    pieceDxfAliases,
+    linkSet,
+    dictTokens,
+  ]);
+  // the card has sheets and their parse is not read yet: the import's write waits for it (T1 (a))
+  const importShapesPending = allDxfFiles.length > 0 && !bundle && !geometry.isError;
 
   const interliningOwnerShapes = useMemo(() => {
     const out = new Map<string, PieceDTO>();
@@ -4663,6 +4710,7 @@ export function PatternsField({
               manifest: (p.url && bundle?.manifestByUrl?.get(p.url)) || null,
             })),
             shapes: importShapes,
+            shapesPending: importShapesPending,
             styleLabel: [season, styleNumber].filter(Boolean).join(' · '),
             cardName,
             styleNumber,

@@ -2255,6 +2255,11 @@ export type DraftShapeRef = {
   pieceLineKey: string;
   /** The block identity the card reads for this piece (P_L_MAIN). */
   identity: string;
+  /**
+   * The sheet (pattern row url) the outline is drawn on. A re-import replaces one sheet of the
+   * scope: the outlines of its sibling sheets are never its candidates. Absent = unknown, any sheet.
+   */
+  url?: string;
   /** Bare size token (`bareToken`, '' for a sizeless block) → outline facts, mm. */
   sizes: Record<string, { areaMm2: number; wMm: number; hMm: number }>;
 };

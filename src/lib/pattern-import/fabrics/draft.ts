@@ -363,6 +363,54 @@ export function buildDraft(
     const k = liveKey(r.pieceLineKey);
     return k ? [{ ...r, pieceLineKey: k }] : [];
   });
+  // A re-import replaces ONE sheet of its scope: the outlines and the links of the scope's other
+  // sheets are neither its candidates nor pieces it leaves without a block. An outline of no known
+  // sheet counts for any.
+  const drawsOf = (m?: ConversionManifest | null): Set<string> | null =>
+    m && Array.isArray(m.blocks) && Array.isArray(m.pieces)
+      ? new Set([...aliasNames(m).values(), ...m.pieces.map((p) => p.identity)].map(lc))
+      : null;
+  const sheetOf = new Map<
+    string,
+    { url: string; draws: Set<string> | null; siblingDraws: Set<string>; siblings: number }
+  >();
+  for (const sc of scopes) {
+    const url = sc.replaces?.url;
+    if (!url) continue;
+    const others = (card.existingPatterns ?? []).filter(
+      (p) => p.scopeKey === sc.target.scopeKey && !!p.url && p.url !== url,
+    );
+    sheetOf.set(sc.target.scopeKey, {
+      url,
+      draws: drawsOf(
+        (card.existingPatterns ?? []).find(
+          (p) => p.scopeKey === sc.target.scopeKey && p.url === url,
+        )?.manifest,
+      ),
+      siblingDraws: new Set(others.flatMap((p) => [...(drawsOf(p.manifest) ?? [])])),
+      siblings: others.length,
+    });
+  }
+  const rowShapes = shapes.filter((r) => {
+    const sheet = sheetOf.get(r.scopeKey);
+    return !sheet || !r.url || r.url === sheet.url;
+  });
+  /** A link that may be the replaced sheet's: the scope's only sheet, or no proof of another. */
+  const linkOnSheet = (scopeKey: string, l: { blockName: string; lineKey: string }) => {
+    const sheet = sheetOf.get(scopeKey);
+    if (!sheet || !sheet.siblings) return true;
+    const b = lc(l.blockName);
+    const outlinedOn = (own: boolean) =>
+      shapes.some(
+        (r) =>
+          r.scopeKey === scopeKey &&
+          r.pieceLineKey === l.lineKey &&
+          !!r.url &&
+          (r.url === sheet.url) === own,
+      );
+    if (sheet.draws?.has(b) || outlinedOn(true)) return true;
+    return !sheet.siblingDraws.has(b) && !outlinedOn(false);
+  };
 
   // ── binding: every (scope, identity) on its own, each proof over all slots before the next ──
   const held = new Map<string, Slot[]>(); // `${scopeKey}|${lineKey}` → slots bound to it
@@ -383,11 +431,25 @@ export function buildDraft(
   };
   const open = () => slots.filter((s) => !s.bind && !s.unresolved);
 
-  // 1. the card's own link of this block in this scope — never across hands
+  // 1. the card's own link of this block in this scope. Not followed across hands only when it
+  //    provably swapped: both names carry a hand, the hands differ, and the card holds a piece of
+  //    the block's own hand to take instead — an L / R in a name alone proves no hand (R = rear)
+  const swapped = (s: Slot, owner: string) => {
+    const h = pieceHand(owner);
+    if (!s.hand || !h || h === s.hand) return false;
+    const parts = new Set([s.part, partKey(byKey.get(owner)?.name ?? '')].filter(Boolean));
+    const keys = new Set(s.names.map(tokenKey).filter(Boolean));
+    return live.some(
+      (p) =>
+        p.lineKey !== owner &&
+        handOf(p.name) === s.hand &&
+        (parts.has(partKey(p.name)) || keys.has(tokenKey(p.name))),
+    );
+  };
   for (const s of slots)
     for (const n of s.names) {
       const owner = aliasOwner.get(aliasKey(s.scopeKey, n));
-      if (owner && handsMeet(s.hand, pieceHand(owner))) {
+      if (owner && !swapped(s, owner)) {
         bind(s, owner, 'alias');
         break;
       }
@@ -420,9 +482,9 @@ export function buildDraft(
     const fit = [...new Set(s.names.flatMap((n) => pairPieces.get(partKey(n)) ?? []))];
     if (fit.length === 1 && free(s, fit[0])) bind(s, fit[0], 'name');
   }
-  // 5. the same outline as one card piece's current block of this scope (same hand)
+  // 5. the same outline as one card piece's current block of this sheet (same hand)
   const costOf = (s: Slot, k: string): number | null => {
-    const costs = shapes
+    const costs = rowShapes
       .filter(
         (r) =>
           r.scopeKey === s.scopeKey &&
@@ -436,7 +498,7 @@ export function buildDraft(
   const tentative = new Map<string, Slot[]>();
   for (const s of open()) {
     const pool = [
-      ...new Set(shapes.filter((r) => r.scopeKey === s.scopeKey).map((r) => r.pieceLineKey)),
+      ...new Set(rowShapes.filter((r) => r.scopeKey === s.scopeKey).map((r) => r.pieceLineKey)),
     ].filter((k) => handsMeet(s.hand, pieceHand(k)) && free(s, k));
     const near = pool
       .map((k) => ({ k, c: costOf(s, k) }))
@@ -461,13 +523,14 @@ export function buildDraft(
     }
   }
   // 6. a card piece this re-import leaves without a block (a link or a current outline in the
-  //    scope, no block bound to it) may be any open block of its hand: unresolved, unless the
-  //    outline rules every such piece out
+  //    replaced sheet, no block bound to it) may be any open block of its hand: unresolved, unless
+  //    the outline rules every such piece out
   const present = new Map<string, Set<string>>();
   const mark = (scopeKey: string, k: string) =>
     (present.get(scopeKey) ?? present.set(scopeKey, new Set()).get(scopeKey)!).add(k);
-  for (const [scopeKey, links] of linksOf) for (const l of links) mark(scopeKey, l.lineKey);
-  for (const r of shapes) mark(r.scopeKey, r.pieceLineKey);
+  for (const [scopeKey, links] of linksOf)
+    for (const l of links) if (linkOnSheet(scopeKey, l)) mark(scopeKey, l.lineKey);
+  for (const r of rowShapes) mark(r.scopeKey, r.pieceLineKey);
   const orphansOf = (sc: DraftScope) =>
     sc.replaces
       ? [...(present.get(sc.target.scopeKey) ?? [])].filter(
@@ -635,7 +698,7 @@ export function buildDraft(
     const drawn = new Set(
       [...aliasNames(sc.manifest).values(), ...sc.manifest.pieces.map((p) => p.identity)].map(lc),
     );
-    const outlined = new Set(shapes.filter((r) => r.scopeKey === sk).map((r) => r.pieceLineKey));
+    const outlined = new Set(rowShapes.filter((r) => r.scopeKey === sk).map((r) => r.pieceLineKey));
     const asked = new Set(
       unresolved
         .filter((u) => u.scopeKey === sk)
@@ -646,11 +709,11 @@ export function buildDraft(
     for (const k of orphansOf(sc)) {
       if (!outlined.has(k) && !asked.has(k)) continue;
       const links = (linksOf.get(sk) ?? []).filter(
-        (l) => l.lineKey === k && !drawn.has(lc(l.blockName)),
+        (l) => l.lineKey === k && !drawn.has(lc(l.blockName)) && linkOnSheet(sk, l),
       );
       const blocks = links.length
         ? links.map((l) => l.blockName)
-        : shapes.filter((r) => r.scopeKey === sk && r.pieceLineKey === k).map((r) => r.identity);
+        : rowShapes.filter((r) => r.scopeKey === sk && r.pieceLineKey === k).map((r) => r.identity);
       for (const b of blocks) {
         if (listed.has(lc(b))) continue;
         listed.add(lc(b));

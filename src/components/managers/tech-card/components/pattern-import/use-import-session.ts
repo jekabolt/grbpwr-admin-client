@@ -400,6 +400,27 @@ export function cardFingerprint(c: CardContext): string {
 }
 
 /**
+ * Review T1 (a): the run's card snapshot with the card's parse as the live card has it now — the
+ * piece outlines and the sheets' manifests, read late and asynchronously. Neither is in
+ * `cardFingerprint`, so taking them never makes the run stale.
+ */
+export function withCardParse(run: CardContext, live: CardContext): CardContext {
+  const manifests = new Map(
+    (live.existingPatterns ?? []).flatMap((p) =>
+      p.url && p.manifest ? [[p.url, p.manifest]] : [],
+    ),
+  );
+  return {
+    ...run,
+    existingShapes: live.existingShapes ?? run.existingShapes,
+    existingPatterns: run.existingPatterns?.map((p) =>
+      p.manifest || !manifests.has(p.url) ? p : { ...p, manifest: manifests.get(p.url) },
+    ),
+    shapesPending: !!live.shapesPending,
+  };
+}
+
+/**
  * A10 (Codex #5): what the card says it is — the strings the model / sheet choice is matched
  * against (autopilot/card-match.ts). A change means the choice was made against another card.
  */
@@ -676,6 +697,30 @@ export function useImportSession(deps: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [client],
   );
+
+  /**
+   * Review T1 (a): a re-import binds by the card's own parse of its sheets. A write that comes
+   * while the card is still parsing them waits (the write's busy state), then the run's snapshot
+   * takes the parse: a card that has sheets is never drafted as one without outlines. A parse that
+   * failed is not waited for — the draft then asks (`unresolved`).
+   */
+  async function cardParsed(): Promise<void> {
+    if (cardRef.current.shapesPending) {
+      const gen = histGen.current;
+      patch({ busy: { stage: 'write', done: 0, total: 1 }, error: null });
+      try {
+        while (cardRef.current.shapesPending) {
+          if (stopReq.current)
+            throw new ImportWorkerError('cancelled', 'stopped by the operator', 'write');
+          await new Promise((r) => setTimeout(r, 200));
+          if (gen !== histGen.current) throw new StaleRun();
+        }
+      } finally {
+        if (gen === histGen.current) patch({ busy: null });
+      }
+    }
+    if (runCard.current) runCard.current = withCardParse(runCard.current, cardRef.current);
+  }
 
   async function run<S extends StageName>(stage: S, input: StageIO[S]['in']) {
     if (sRef.current.sessionId == null) throw new Error('no session — read the files first');
@@ -1316,6 +1361,7 @@ export function useImportSession(deps: {
           const sizes = sRef.current.sizes;
           let sem = sRef.current.semantics;
           if (!a || !sizes || !sem) return;
+          await cardParsed();
           // `fused` is decided on the fabrics step (interlining not in BOM → the flag, decision 14)
           // but is a PieceSpec field: hand it to semantics as an override, so the manifest, the
           // draft and the card read the same flag.
