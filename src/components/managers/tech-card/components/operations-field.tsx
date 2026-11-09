@@ -178,6 +178,7 @@ import {
 } from './equipment-options';
 import { kindLabel, preferredBomKinds } from './bom-kind';
 import type { FormGarmentLabel } from './labels-schema';
+import { labelShownSizeText } from './garment-label-pieces';
 import { ensureLabelLineKey, labelSizeText } from './sewn-label-row';
 import { COMPOSITION_LABEL_KEY, isCompositionLabel, labelBomLine } from './sewn-label-model';
 import { useLabelStock } from './use-label-stock';
@@ -2542,7 +2543,7 @@ function OperationLabelPicker({ index, frozen }: { index: number; frozen: boolea
             const kind = label.kind?.trim() || label.key?.trim() || '';
             const name =
               label.key?.trim() || garmentLabelName(garmentLabelKindNames, kind) || 'label';
-            const size = labelSizeText(label);
+            const size = labelShownSizeText(label) || labelSizeText(label);
             const material = materialById.get(wireIntOf(labelBomLine(label, bomItems)?.materialId));
             return (
               <Tile

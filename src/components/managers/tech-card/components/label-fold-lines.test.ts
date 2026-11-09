@@ -95,3 +95,23 @@ describe('label assembly', () => {
     expect(parseStitchLines('0, 100, 120, -1, 40', 100)).toEqual([0, 40, 100]);
   });
 });
+
+describe('label shown size', () => {
+  it('reads the owner photo label as 30 × 40 on the garment', async () => {
+    const { labelShownSizeText } = await import('./garment-label-pieces');
+    expect(
+      labelShownSizeText({
+        kind: 'composition',
+        widthMm: '30',
+        heightMm: '100',
+        fold: 'half',
+        foldLinesMm: '50',
+        stitchLinesMm: '40,60',
+      }),
+    ).toBe('30 × 40');
+    expect(labelShownSizeText({ kind: 'composition', widthMm: '30', heightMm: '100' })).toBe(
+      '30 × 100',
+    );
+    expect(labelShownSizeText({ kind: 'composition' })).toBe('');
+  });
+});

@@ -166,3 +166,12 @@ export function garmentLabelDrawingsOf(
 export function labelShownMm(mark: GarmentLabelMark): number {
   return labelAssembly(mark.foldLines ?? [], mark.stitchLines ?? [], mark.heightMm).heightMm;
 }
+
+/** Width × the height that shows on the garment (folded, cut at its stitch); '' while unsized. */
+export function labelShownSizeText(label: GarmentLabelLike): string {
+  if (!(decimal(label.widthMm) > 0 && decimal(label.heightMm) > 0)) return '';
+  const mark = garmentLabelMark(label);
+  if (!mark) return '';
+  const mm = (value: number) => String(Math.round(value * 10) / 10);
+  return `${mm(mark.widthMm)} × ${mm(labelShownMm(mark))}`;
+}

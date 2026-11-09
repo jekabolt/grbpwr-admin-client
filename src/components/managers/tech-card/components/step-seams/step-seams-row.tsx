@@ -85,6 +85,7 @@ export function seamTileSideLines(
 
 /** The picker's state lives above both its doors: the panel head and the tiles of the group. */
 export type SeamPickerRequest = { proposal: number; preselect: boolean };
+const NO_MARKS: { id: TargetId; tone: EdgeMark['tone'] }[] = [];
 const PLAIN_PICK: SeamPickerRequest = { proposal: 0, preselect: false };
 
 /** The step's way into the seam window, with its seam count. A step of one piece has no door. */
@@ -160,6 +161,8 @@ export function StepSeamsRow({
 
   if (!ctx || !hasMultiplePieces) return null;
   const { cardId, frozen } = ctx;
+  // A step that only poses a label still shows where the label lies, before any seam exists.
+  const labelPose = posesLabels(ops, index, pieceKeys);
   const pending = geo?.dep.status === 'pending';
   const activeFolds = activeFoldRows(ops, index, foldRows);
 
@@ -224,6 +227,16 @@ export function StepSeamsRow({
               onOpen={cardId ? () => onPicker({ proposal: i, preselect: true }) : undefined}
             />
           ))}
+        {keys.length === 0 && suggestions.length === 0 && labelPose && (
+          <SeamTile
+            scene={scene}
+            picture={result}
+            marks={NO_MARKS}
+            ownMarksOnly={unitStep}
+            onOpen={cardId ? () => setOpen(true) : undefined}
+            data-step-label-pose=''
+          />
+        )}
         {keys.length === 0 && !pending && suggestions.length === 0 && !scene.seamless && (
           <Text size='micro' variant='error' tracking='label' data-step-seams-status=''>
             {NO_SEAM_TEXT}
@@ -282,6 +295,7 @@ export function SeamTile({
   /** A word under the pieces: «pick» on a step with no guess, chosen by hand. */
   caption?: string;
   'data-step-seam'?: string;
+  'data-step-label-pose'?: string;
 }) {
   return (
     <span
