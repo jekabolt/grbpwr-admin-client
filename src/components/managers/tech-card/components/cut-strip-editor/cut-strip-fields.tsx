@@ -1,10 +1,18 @@
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import type { common_TechCardSeam } from 'api/proto-http/admin';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
-import { ConfirmationModal, DataTable, DecimalField, EmptyCell, SelectField, ViewSwitch } from 'ui';
+import {
+  ConfirmationModal,
+  DataTable,
+  DecimalField,
+  EmptyCell,
+  GroupLabel,
+  SelectField,
+  ViewSwitch,
+} from 'ui';
 import { stripCutMm, stripSewnMm } from '../cut-strips/lengths';
 import type { SeamLengthsMm } from '../cut-strips/seam-lengths';
 import { wireInt, type TechCardFormData } from '../schema';
@@ -28,6 +36,13 @@ const seamLengthAt = (source: SeamLengths | undefined, sizeId: number): number |
     : (source as Readonly<Record<number, number | undefined>>)[sizeId];
 };
 
+const storedSeamMm = (value: string | undefined): number | undefined => {
+  const text = value?.trim() ?? '';
+  if (!text) return undefined;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+};
+
 export function CutStripFields({
   stripIndex,
   sizeIds,
@@ -47,39 +62,11 @@ export function CutStripFields({
   const strip = strips[stripIndex];
   const { dictionary } = useDictionary();
 
-  useEffect(() => {
-    if (stripIndex < 0 || !strip) return;
-    const current = strip.sizes ?? [];
-    const rows = sizeIds.map((sizeId) => {
-      const stored = current.find((row) => wireInt(row.sizeId) === wireInt(sizeId));
-      return stored ?? { sizeId, seamMm: '', manualCutMm: '' };
-    });
-    if (
-      rows.length !== current.length ||
-      rows.some((row, index) => wireInt(row.sizeId) !== wireInt(current[index]?.sizeId))
-    ) {
-      setValue(`cutStrips.${stripIndex}.sizes`, rows, { shouldDirty: false });
-    }
-  }, [setValue, sizeIds, strip, stripIndex]);
-
   const mode = strip?.lengthMode ?? 'per_size';
   const seamSource = useMemo(() => {
     if (!strip?.seamKey || mode !== 'from_seam' || !seamLengthsMm) return undefined;
     return seamLengthsMm(strip.seamKey);
   }, [mode, seamLengthsMm, strip?.seamKey]);
-
-  useEffect(() => {
-    if (stripIndex < 0 || !strip || !seamSource) return;
-    (strip.sizes ?? []).forEach((row, sizeIndex) => {
-      const value = seamLengthAt(seamSource, wireInt(row.sizeId));
-      const next = value == null ? '' : String(value);
-      if ((row.seamMm ?? '') !== next) {
-        setValue(`cutStrips.${stripIndex}.sizes.${sizeIndex}.seamMm`, next, {
-          shouldDirty: false,
-        });
-      }
-    });
-  }, [seamSource, setValue, strip, stripIndex]);
 
   if (!strip) return null;
 
@@ -93,7 +80,9 @@ export function CutStripFields({
     sizes: (strip.sizes ?? []).map((row) => ({
       ...row,
       seamMm:
-        mode === 'from_seam' ? seamLengthAt(seamSource, wireInt(row.sizeId))?.toString() ?? '' : '',
+        mode === 'from_seam'
+          ? seamLengthAt(seamSource, wireInt(row.sizeId))?.toString() ?? row.seamMm ?? ''
+          : '',
     })),
   };
   const sizesById = new Map((strip.sizes ?? []).map((row, index) => [wireInt(row.sizeId), index]));
@@ -161,7 +150,11 @@ export function CutStripFields({
             const sizeIndex = sizesById.get(wireInt(sizeId));
             const manual =
               sizeIndex == null ? '' : (strip.sizes?.[sizeIndex]?.manualCutMm ?? '').trim();
-            const seam = mode === 'from_seam' ? seamLengthAt(seamSource, sizeId) : undefined;
+            const seam =
+              mode === 'from_seam'
+                ? seamLengthAt(seamSource, sizeId) ??
+                  storedSeamMm(sizeIndex == null ? undefined : strip.sizes?.[sizeIndex]?.seamMm)
+                : undefined;
             const cut = stripCutMm(effectiveStrip, sizeId);
             const sewn = stripSewnMm(effectiveStrip, sizeId);
             const label = sizeName(sizeId, rowIndex);
@@ -200,6 +193,49 @@ export function CutStripFields({
   );
 }
 
+export function CutStripCollectionFields({
+  stripIndices,
+  sizeIds,
+  seams,
+  readOnly = false,
+  seamLengthsMm,
+}: {
+  stripIndices: number[];
+  sizeIds: number[];
+  seams: common_TechCardSeam[];
+  readOnly?: boolean;
+  seamLengthsMm?: SeamLengthsMm;
+}) {
+  const { control } = useFormContext<TechCardFormData>();
+  const strips = (useWatch({ control, name: 'cutStrips' }) ?? []) as CutStrip[];
+  const pieces = useWatch({ control, name: 'pieces' }) ?? [];
+  const seamNames = new Map(
+    cutStripSeamOptions(seams, pieces).map((option) => [option.value, option.label]),
+  );
+
+  return (
+    <div className='flex flex-col gap-6'>
+      {stripIndices.map((stripIndex, edgeIndex) => {
+        const strip = strips[stripIndex];
+        if (!strip) return null;
+        const edgeName = seamNames.get(strip.seamKey?.trim() ?? '') || `edge ${edgeIndex + 1}`;
+        return (
+          <div key={strip.lineKey || stripIndex}>
+            <GroupLabel flush={edgeIndex === 0}>{edgeName}</GroupLabel>
+            <CutStripFields
+              stripIndex={stripIndex}
+              sizeIds={sizeIds}
+              seams={seams}
+              readOnly={readOnly}
+              seamLengthsMm={seamLengthsMm}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function CutStripModal({
   openKey,
   onClose,
@@ -219,6 +255,10 @@ export function CutStripModal({
   const strips = (useWatch({ control, name: 'cutStrips' }) ?? []) as CutStrip[];
   const stripIndex = strips.findIndex((strip) => strip.lineKey === openKey);
   if (stripIndex < 0) return null;
+  const bomLineKey = strips[stripIndex]?.bomLineKey?.trim() ?? '';
+  const stripIndices = strips.flatMap((strip, index) =>
+    strip.bomLineKey?.trim() === bomLineKey ? [index] : [],
+  );
 
   return (
     <ConfirmationModal
@@ -229,8 +269,8 @@ export function CutStripModal({
       width='lg'
       hideActions
     >
-      <CutStripFields
-        stripIndex={stripIndex}
+      <CutStripCollectionFields
+        stripIndices={stripIndices}
         sizeIds={sizeIds}
         seams={seams}
         readOnly={readOnly}

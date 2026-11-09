@@ -27,13 +27,16 @@ import {
   type MouseEvent,
   type ReactNode,
 } from 'react';
-import { useFormContext } from 'react-hook-form';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { Button, Chip, ChipRow, Close, ConfirmationModal, Placeholder, Text } from 'ui';
 import { runsOfSide } from '../assembly-seams/seam-actions';
 import { useSeamsStore } from '../assembly-seams/seams-store';
 import { useFoldRows } from '../assembly-folds/folds-store';
 import { useTechCardAutosave } from '../design/autosave-contract';
+import { bindingRowFromCloth, bindingStripTarget } from '../binding-step';
+import type { CutStrip } from '../cut-strip-editor/use-cut-strip';
 import { fittedSideMm } from '../cut-strips/length-check';
+import { stripKeysOf } from '../cut-strips/strip-pieces';
 import type { TechCardFormData } from '../schema';
 import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { moveRow, orderOfRows, windowRows, type LayerMove } from './layers-window';
@@ -205,10 +208,20 @@ export function SeamPickerBody({
   const errors = useSeamsStore((s) => s.errors);
   const foldRows = useFoldRows();
   const { catalog: workCatalog } = useOperationWorkCatalog();
+  const cutStrips = (useWatch({ control: form.control, name: 'cutStrips' }) ?? []) as CutStrip[];
+  const sizeIds = (useWatch({ control: form.control, name: 'sizeIds' }) ?? []) as number[];
+  const bindingTarget = useMemo(
+    () => bindingStripTarget(op, cutStrips, sizeIds),
+    [op, cutStrips, sizeIds],
+  );
+  const bindingStripKeys = useMemo(() => stripKeysOf(cutStrips), [cutStrips]);
+  const bindingMode = !!bindingTarget;
 
   const suggestion = suggestions[initialProposal] ?? suggestions[0] ?? null;
   const unitStep = isUnitStep(groups);
-  const initialPick = initialPickerPick(suggestion, preselectProposal, unitStep);
+  const initialPick = bindingMode
+    ? null
+    : initialPickerPick(suggestion, preselectProposal, unitStep);
   const [sel, setSel] = useState<Sel>(() => (initialPick ? wholeSel(initialPick) : EMPTY));
   const [hover, setHover] = useState<SpanHover | null>(null);
   const [spanDrag, setSpanDrag] = useState<SpanHover | null>(null);
@@ -322,10 +335,13 @@ export function SeamPickerBody({
   }, [suggestion, surfaceSuggestion, geoms, groups]);
 
   /** The pair on the table: both sides picked by hand, edge to edge. */
+  const bindingReady = bindingMode && !inners.length && sel.a.length > 0 && sel.b.length === 0;
   const pair: SeamSides | null =
-    !inners.length && sel.a.length && sel.b.length ? { a: sel.a, b: sel.b } : null;
+    !bindingMode && !inners.length && sel.a.length && sel.b.length ? { a: sel.a, b: sel.b } : null;
   const repeatsSeam = !!pair && repeatsStoredSeam(pickParts('a'), pickParts('b'), stored, geoms);
-  const pickReady = !repeatsSeam && (surface ? !!partKey && pick[hostSide!].length === 1 : !!pair);
+  const pickReady =
+    !repeatsSeam &&
+    (bindingReady || (surface ? !!partKey && pick[hostSide!].length === 1 : !!pair));
   const canAccept = !frozen && !busy && !!cardId && (pickReady || posePending);
 
   const anchorCtx = useMemo(
@@ -375,8 +391,18 @@ export function SeamPickerBody({
   };
 
   const draftRow = useMemo(
-    () => (pair || surface ? buildRow(pick) : null),
-    [buildRow, pick, surface],
+    () =>
+      bindingReady && bindingTarget
+        ? bindingRowFromCloth(
+            sideParts(pick.a, pick.spans.a),
+            bindingTarget.strip,
+            geoms,
+            anchorCtx,
+          )
+        : pair || surface
+          ? buildRow(pick)
+          : null,
+    [anchorCtx, bindingReady, bindingTarget, buildRow, geoms, pair, pick, surface],
   );
 
   const mirrorLeft = async () => {
@@ -402,11 +428,42 @@ export function SeamPickerBody({
       onAccepted?.();
       return;
     }
+    let addedBindingKey = '';
+    if (bindingReady && bindingTarget?.fresh) {
+      const lineKey = bindingTarget.strip.lineKey?.trim() ?? '';
+      const currentStrips = (form.getValues('cutStrips') ?? []) as CutStrip[];
+      if (lineKey && !currentStrips.some((strip) => strip.lineKey?.trim() === lineKey)) {
+        form.setValue('cutStrips', [...currentStrips, bindingTarget.strip] as never, {
+          shouldDirty: true,
+        });
+        const currentInputs = (form.getValues(`operations.${index}.inputKeys`) ?? []) as string[];
+        form.setValue(
+          `operations.${index}.inputKeys`,
+          [...currentInputs.filter((key) => key !== lineKey), lineKey],
+          { shouldDirty: true },
+        );
+        addedBindingKey = lineKey;
+      }
+    }
     setBusy(true);
     setRefused('');
     const ok = await attach(row);
     setBusy(false);
     if (!ok) {
+      if (addedBindingKey) {
+        const currentStrips = (form.getValues('cutStrips') ?? []) as CutStrip[];
+        form.setValue(
+          'cutStrips',
+          currentStrips.filter((strip) => strip.lineKey?.trim() !== addedBindingKey) as never,
+          { shouldDirty: true },
+        );
+        const currentInputs = (form.getValues(`operations.${index}.inputKeys`) ?? []) as string[];
+        form.setValue(
+          `operations.${index}.inputKeys`,
+          currentInputs.filter((key) => key !== addedBindingKey),
+          { shouldDirty: true },
+        );
+      }
       setRefused(useSeamsStore.getState().errors[row.seamKey] ?? 'not saved');
       return;
     }
@@ -459,7 +516,8 @@ export function SeamPickerBody({
   const toggle = useCallback(
     (id: TargetId, atMm?: number) => {
       if (frozen) return;
-      const side = sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget);
+      if (bindingMode && bindingStripKeys.has(pieceOfTarget(id))) return;
+      const side = bindingMode ? 'a' : sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget);
       setSaved(false);
       setPoseSel(null);
       const length = resolveEdge(id, geoms)?.len ?? 0;
@@ -480,15 +538,30 @@ export function SeamPickerBody({
         }
       }
       setActiveSeam(null);
+      const base = bindingMode && !sel.a.includes(id) ? EMPTY : sel;
       if (atMm == null || parseInner(id) || !(length > 0)) {
-        setSel(onFolded(pickTarget(sel, side, id, pickRules.isInner, pickRules.pieceOf), side, id));
+        setSel(
+          onFolded(pickTarget(base, side, id, pickRules.isInner, pickRules.pieceOf), side, id),
+        );
         return;
       }
       const segment =
         labelSpanAt(id, side, length, atMm) ?? segmentAt(edgeBreaks(id, geoms), length, atMm);
-      setSel(onFolded(pickSegment(sel, side, id, segment, length, pickRules), side, id));
+      setSel(onFolded(pickSegment(base, side, id, segment, length, pickRules), side, id));
     },
-    [frozen, groups, sel, geoms, stored, pickRules, setPoseSel, onFolded, labelSpanAt],
+    [
+      frozen,
+      bindingMode,
+      bindingStripKeys,
+      groups,
+      sel,
+      geoms,
+      stored,
+      pickRules,
+      setPoseSel,
+      onFolded,
+      labelSpanAt,
+    ],
   );
   const onHoverAt = useCallback(
     (id: TargetId | null, atMm: number | null) => {
@@ -497,7 +570,7 @@ export function SeamPickerBody({
         id && atMm != null && length > 0 && storedSeamAt(stored, id, atMm, geoms) < 0
           ? labelSpanAt(
               id,
-              sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget),
+              bindingMode ? 'a' : sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget),
               length,
               atMm,
             ) ?? segmentAt(edgeBreaks(id, geoms), length, atMm)
@@ -510,7 +583,7 @@ export function SeamPickerBody({
             : null,
       );
     },
-    [geoms, stored, labelSpanAt, groups, sel],
+    [geoms, stored, labelSpanAt, groups, sel, bindingMode],
   );
   const onSpanDrag = useCallback(
     (id: TargetId, fromMm: number, toMm: number, done: boolean) => {
@@ -526,16 +599,18 @@ export function SeamPickerBody({
       setSaved(false);
       setPoseSel(null);
       setActiveSeam(null);
-      const side = sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget);
+      if (bindingMode && bindingStripKeys.has(pieceOfTarget(id))) return;
+      const side = bindingMode ? 'a' : sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget);
+      const base = bindingMode && !sel.a.includes(id) ? EMPTY : sel;
       setSel(
         onFolded(
-          pickFreeSpan(sel, side, id, range, resolveEdge(id, geoms)?.len ?? 0, pickRules),
+          pickFreeSpan(base, side, id, range, resolveEdge(id, geoms)?.len ?? 0, pickRules),
           side,
           id,
         ),
       );
     },
-    [frozen, groups, sel, geoms, pickRules, setPoseSel, onFolded],
+    [frozen, bindingMode, bindingStripKeys, groups, sel, geoms, pickRules, setPoseSel, onFolded],
   );
 
   // Edges only: no length is drawn on the canvas (the owner, №58); the footer keeps the lengths.
@@ -563,7 +638,9 @@ export function SeamPickerBody({
       marks.push({
         id: spanDrag.id,
         tone:
-          sideForClick(pieceOfTarget(spanDrag.id), groups, sel, pieceOfTarget) === 'a'
+          (bindingMode
+            ? 'a'
+            : sideForClick(pieceOfTarget(spanDrag.id), groups, sel, pieceOfTarget)) === 'a'
             ? 'pickFirst'
             : 'pick',
         range: [
@@ -572,7 +649,7 @@ export function SeamPickerBody({
         ],
       });
     return { marks, nos };
-  }, [stored, sel, activeSeam, spanDrag, groups]);
+  }, [stored, sel, activeSeam, spanDrag, groups, bindingMode]);
   // The break points of every edge in hand: what a segment or a drag can land on.
   const ticks = useMemo<EdgeTick[]>(() => {
     const ids = new Set([...sel.a, ...sel.b].filter((id) => !parseInner(id)));

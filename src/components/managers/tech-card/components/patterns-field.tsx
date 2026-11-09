@@ -275,6 +275,10 @@ const ImportWizard = lazy(() =>
 const ImportFollowUpRunner = lazy(() =>
   import('./pattern-import/follow-up').then((m) => ({ default: m.ImportFollowUpRunner })),
 );
+// T6: seams a re-upload staled on unchanged edges come back confirmed once the apply saved.
+const SeamsReconfirmRunner = lazy(() =>
+  import('./assembly-seams/auto-reconfirm').then((m) => ({ default: m.SeamsReconfirmRunner })),
+);
 
 /** «converted» badge tooltip: what the importer wrote into the sheet (MF-C, M10). */
 function convertedTitle(m: ConversionManifest): string {
@@ -3154,10 +3158,21 @@ export function PatternsField({
   /** The fusing rebuild run counter when the import's save started (T5). */
   const importSaveRun = useRef(0);
   importScopeRef.current = importing?.scopeKey ?? '';
+  const [seamsReconfirm, setSeamsReconfirm] = useState<{ at: number; owedAfter?: number } | null>(
+    null,
+  );
   function followUpApply(apply: ApplyDraftFn): ApplyDraftFn {
     return async (draft, onProgress) => {
       const result = await apply(draft, onProgress);
       const targets = followUpTargets(draft, result);
+      // T6: the stale stamps the server holds now (this re-upload's, or an earlier one's when the
+      // same file made zero writes) get the unchanged-edge re-confirm, once the card saved — after
+      // the fusing rebuild the save still owes (T5), when it closed before that.
+      if (result.ok && (!result.writes || result.save === 'ok'))
+        setSeamsReconfirm({
+          at: Date.now(),
+          ...(result.owed === 'fusing' ? { owedAfter: importSaveRun.current } : {}),
+        });
       if (result.ok) {
         // After an apply the pieces viewer of the slot opens by itself: the dropped-on slot when
         // the import wrote into it, else the first slot it wrote.
@@ -5075,6 +5090,16 @@ export function PatternsField({
         }}
       />
 
+      {seamsReconfirm && techCardId && (
+        <Suspense fallback={null}>
+          <SeamsReconfirmRunner
+            key={seamsReconfirm.at}
+            cardId={techCardId}
+            owedAfter={seamsReconfirm.owedAfter}
+            onDone={() => setSeamsReconfirm((job) => (job === seamsReconfirm ? null : job))}
+          />
+        </Suspense>
+      )}
       {followUp && techCardId && followUpPending(followUp.rows) && (
         <Suspense fallback={null}>
           <ImportFollowUpRunner

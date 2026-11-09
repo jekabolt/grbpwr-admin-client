@@ -49,6 +49,22 @@ export function subscribeFusingSheetGeneration(
   };
 }
 
+/**
+ * T6: where a job that must run after the fusing rebuild stands. `owedAfter` is the run counter the
+ * card's save started from when that save still owes its rebuild (an apply that closed with fusing
+ * owed, T5): the job waits for a later run to end and gives up when it failed. Without it the job
+ * only waits out a rebuild in flight.
+ */
+export function fusingRebuildGate(
+  state: FusingSheetGenerationState,
+  owedAfter?: number,
+): 'wait' | 'go' | 'failed' {
+  if (state.phase === 'generating') return 'wait';
+  if (owedAfter === undefined) return 'go';
+  if (state.run <= owedAfter) return 'wait';
+  return state.phase === 'error' ? 'failed' : 'go';
+}
+
 // A partial rebuild (skipped pieces or sizes) is a warning toast. A FAILED one is an inbox entry AND a
 // failure of the change: it stays staged and the next save retries it — swallowed, the queue called
 // the save complete and the form's baseline already held the new fuse inputs, so nothing would ever

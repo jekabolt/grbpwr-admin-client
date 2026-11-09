@@ -89,7 +89,7 @@ import {
 } from '../care-labels/label-parts';
 import { TechCardFormData, wireInt } from './schema';
 import { useBomWarnings, type BomLineTone } from './use-bom-warnings';
-import { CutStripFields } from './cut-strip-editor/cut-strip-fields';
+import { CutStripCollectionFields } from './cut-strip-editor/cut-strip-fields';
 import { useSeamLengthsMm, type SeamLengthsMm } from './cut-strips/seam-lengths';
 import { useCutStrip } from './cut-strip-editor/use-cut-strip';
 
@@ -541,8 +541,8 @@ function BomLineEditor({
             onCheckedChange={(checked: boolean) => cutStrip.toggle(checked)}
           />
           {cutStrip.checked ? (
-            <CutStripFields
-              stripIndex={cutStrip.stripIndex}
+            <CutStripCollectionFields
+              stripIndices={cutStrip.stripIndices}
               sizeIds={sizeIds}
               seams={seams}
               seamLengthsMm={seamLengthsMm}

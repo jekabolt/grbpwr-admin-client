@@ -146,32 +146,38 @@ export function toggleCutStrips(
   current: readonly CutStrip[],
   checked: boolean,
   context: Parameters<typeof freshCutStrip>[0],
-  stash: Map<string, CutStrip>,
-): { strips: CutStrip[]; strip?: CutStrip } {
+  stash: Map<string, CutStrip[]>,
+): { strips: CutStrip[]; strip?: CutStrip; lineStrips: CutStrip[] } {
   const bomLineKey = context.line.lineKey?.trim() ?? '';
-  if (!bomLineKey || !cutStripEligible(context.line)) return { strips: [...current] };
-  const existing = current.find((strip) => strip.bomLineKey?.trim() === bomLineKey);
+  if (!bomLineKey || !cutStripEligible(context.line))
+    return { strips: [...current], lineStrips: [] };
+  const existing = current.filter((strip) => strip.bomLineKey?.trim() === bomLineKey);
 
   if (!checked) {
-    if (existing) stash.set(bomLineKey, existing);
+    if (existing.length) stash.set(bomLineKey, existing);
     return {
       strips: current.filter((strip) => strip.bomLineKey?.trim() !== bomLineKey),
+      lineStrips: [],
     };
   }
 
-  if (existing) return { strips: [...current], strip: existing };
-  const restored = stash.get(bomLineKey);
-  const strip = restored ?? freshCutStrip(context);
+  if (existing.length) return { strips: [...current], strip: existing[0], lineStrips: existing };
+  const restored = stash.get(bomLineKey) ?? [];
+  const lineStrips = restored.length ? restored : [freshCutStrip(context)];
   stash.delete(bomLineKey);
-  return { strips: [...current, strip], strip };
+  return {
+    strips: [...current, ...lineStrips],
+    strip: lineStrips[0],
+    lineStrips,
+  };
 }
 
-const formStashes = new WeakMap<object, Map<string, CutStrip>>();
+const formStashes = new WeakMap<object, Map<string, CutStrip[]>>();
 
-const stashFor = (control: object): Map<string, CutStrip> => {
+const stashFor = (control: object): Map<string, CutStrip[]> => {
   const current = formStashes.get(control);
   if (current) return current;
-  const created = new Map<string, CutStrip>();
+  const created = new Map<string, CutStrip[]>();
   formStashes.set(control, created);
   return created;
 };
@@ -193,7 +199,10 @@ export function useCutStrip({
   const strips = (useWatch({ control, name: 'cutStrips' }) ?? []) as CutStrip[];
   const pieces = (useWatch({ control, name: 'pieces' }) ?? []) as CutStripPiece[];
   const bomLineKey = line.lineKey?.trim() ?? '';
-  const stripIndex = strips.findIndex((strip) => strip.bomLineKey?.trim() === bomLineKey);
+  const stripIndices = strips.flatMap((strip, index) =>
+    strip.bomLineKey?.trim() === bomLineKey ? [index] : [],
+  );
+  const stripIndex = stripIndices[0] ?? -1;
 
   const toggle = useCallback(
     (checked: boolean) => {
@@ -219,6 +228,8 @@ export function useCutStrip({
     eligible: cutStripEligible(line),
     checked: stripIndex >= 0,
     stripIndex,
+    stripIndices,
+    strips: stripIndices.map((stripAt) => strips[stripAt]),
     strip: stripIndex >= 0 ? strips[stripIndex] : undefined,
     toggle,
   };

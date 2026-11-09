@@ -69,6 +69,13 @@ type AnchorVerdict =
 
 const IDENTITY: Affine = [1, 0, 0, 1, 0, 0];
 
+/**
+ * The resolver's «same length» of a run against its anchor: the fast path's band (2.5 mm or 1.5 %),
+ * the tightest it has — the shape search's SEAMS.lenRatio is for finding a moved edge, not this.
+ */
+export const sameRunLen = (len: number, anchored: number) =>
+  Math.abs(len - anchored) <= Math.max(SKELETON.lenAbsMm, SKELETON.lenRel * len);
+
 export function resolveSeamDecisions(
   stored: readonly StoredSeam[],
   pieces: readonly PieceGeom[],
@@ -128,8 +135,7 @@ export function resolveSeamDecisions(
   }
 
   // ── 2. fast path candidates (trusted only where the piece sits as is — step 3) ──
-  const lenOk = (len: number, anchored: number) =>
-    Math.abs(len - anchored) <= Math.max(SKELETON.lenAbsMm, SKELETON.lenRel * len);
+  const lenOk = sameRunLen;
   const fastCand = new Map<EdgeAnchor, AnchorHit>();
   const anchorsOf = new Map<string, EdgeAnchor[]>();
   for (const s of live) {

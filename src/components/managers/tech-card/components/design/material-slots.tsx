@@ -14,7 +14,6 @@ import { compositionToValue } from 'components/managers/product/components/compo
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { decimalToInput } from 'utils/decimal';
 import {
   addDoorClass,
   Button,
@@ -63,6 +62,7 @@ import {
 import { unitOptions } from '../tech-card-options';
 import { wireInt, type TechCardFormData } from '../schema';
 import { useSeamLengthsMm } from '../cut-strips/seam-lengths';
+import { cutStripNorm } from '../cut-strips/norm';
 import { CutStripModal } from '../cut-strip-editor/cut-strip-fields';
 import { useCutStrip } from '../cut-strip-editor/use-cut-strip';
 import { measured } from '../use-colourway-auto';
@@ -222,21 +222,8 @@ export function MaterialSlots({
   );
   const [openStripKey, setOpenStripKey] = useState('');
 
-  const stripNorm = (line: Line): string => {
-    const norm = (card?.cutStripNorms ?? []).find(
-      (candidate) => candidate.bomLineKey?.trim() === line.lineKey?.trim(),
-    );
-    if (!norm) return '';
-    const scalar = decimalToInput(norm.norm);
-    if (scalar) return scalar;
-    // A card with no base size reads the first one, the same size the PDF's step table prints.
-    const sizes = norm.sizeNorms ?? [];
-    const base =
-      sizes.find(
-        (candidate) => wireInt(candidate.sizeId) === wireInt(card?.techCard?.baseSampleSizeId),
-      ) ?? sizes[0];
-    return decimalToInput(base?.consumption);
-  };
+  const stripNorm = (line: Line): string =>
+    cutStripNorm(card?.cutStripNorms, line.lineKey, card?.techCard?.baseSampleSizeId);
 
   // Сверка по `bom_item_id`, а `line_key` только запасным путём — ровно так же, как это делает
   // вкладка BOM: чтение не отдаёт `bom_line_key` на usage вовсе, и это тот же FK, на котором
@@ -990,7 +977,11 @@ function SlotRow({
             )
           ) : auxMode === 'own' ? (
             cutStrip.checked ? (
-              norm || <EmptyCell />
+              norm || (
+                <Text size='micro' variant='label'>
+                  no pattern
+                </Text>
+              )
             ) : ownNormEligible ? (
               readOnly ? (
                 ownNorm ? (
@@ -1018,7 +1009,14 @@ function SlotRow({
               <EmptyCell />
             )
           ) : (
-            norm || <EmptyCell />
+            norm ||
+            (cutStrip.checked ? (
+              <Text size='micro' variant='label'>
+                no pattern
+              </Text>
+            ) : (
+              <EmptyCell />
+            ))
           )}
         </td>
       )}
