@@ -93,6 +93,7 @@ import {
 } from './ui-bits';
 import { priorOf, replayDrive, type Prior, type ReplayMiss } from './autopilot/replay';
 import { isReplayed } from './autopilot/replay-record';
+import { applyRunningLabel } from './apply-label';
 
 /** Two frames: React has rendered what the last move changed (the autopilot reads it after). */
 const nextFrames = () =>
@@ -631,7 +632,7 @@ function WizardBody({
     void continueAnyway();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [goTick, session.busy, session.step]);
-  const primary = ((): PrimaryOverride & { loading?: boolean } => {
+  const primary = ((): PrimaryOverride & { loading?: boolean; overlay?: boolean } => {
     const nextStage = nextStep ? stageLabel(STAGE_OF_STEP[nextStep.id]) : '';
     const nextTitle = nextStep ? `next: ${nextStep.label}` : undefined;
     if (session.busy)
@@ -655,10 +656,11 @@ function WizardBody({
       if (impactOpen && !applyRunning)
         return { label: `answer ${impactOpen}`, onClick: onAsk, title: blocker ?? undefined };
       return {
-        label: `apply ${plural(created, 'piece')} to the card`,
+        label: applyRunningLabel(api.apply) ?? `apply ${plural(created, 'piece')} to the card`,
         onClick: blocked ? onAsk : () => void api.dispatch({ type: 'apply' }),
         disabled: !draft || applyRunning,
         loading: applyRunning,
+        overlay: true,
         title: draft
           ? `uploads ${plural(draft.scopes.filter((s) => !s.alreadyOnCard).length, 'file')}, then adds the pieces`
           : undefined,
@@ -1120,6 +1122,7 @@ function WizardBody({
                   data-coach={blocker && !footerError && !session.busy ? '' : undefined}
                   disabled={!!primary.disabled}
                   loading={!!primary.loading}
+                  loadingType={primary.overlay ? 'overlay' : 'default'}
                   title={primary.title}
                   onClick={primary.onClick}
                 >

@@ -50,7 +50,19 @@ export type BuildFusingSheetsInput = {
   baseSizeId?: number | null;
   bomLines: FusingBomLine[];
   pieces: FusingSourcePiece[];
+  /**
+   * T5 (09.11): the time the R12 header prints («Creation Date / Time»). The sheets the build reads
+   * fix it, never the clock: the same inputs give the same bytes, so a rebuild with nothing changed
+   * finds its sheet by sha256 and writes nothing. Absent or unreadable → the epoch.
+   */
+  createdAt?: string;
 };
+
+/** The header time of a generated sheet: the given one when readable, else the epoch. */
+export function fusingSheetStamp(createdAt: string | undefined): Date {
+  const at = createdAt ? new Date(createdAt) : new Date(0);
+  return Number.isNaN(at.getTime()) ? new Date(0) : at;
+}
 
 export type FusingSkippedSize = {
   piece: string;
@@ -605,7 +617,7 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
         generator: 'grbpwr/fusing-dxf',
         dialect: 'r12',
       },
-      { embed: null },
+      { embed: null, now: () => fusingSheetStamp(input.createdAt) },
     );
     warnings.push(
       ...written.detail.warnings.filter(

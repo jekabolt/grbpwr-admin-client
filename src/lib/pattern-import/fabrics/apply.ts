@@ -102,6 +102,13 @@ export type ApplyDeps = {
    * the card; answers null while the rows are not the saved card's, else what is still owed.
    */
   landed?: (urls: string[]) => { owed?: 'fusing' } | null;
+  /**
+   * T5 (09.11): the card's save is past its body and runs only what comes after it — the fusing
+   * rebuild (download, parse, upload, write: 20–50 s on beta). With `landed`, the apply does not wait
+   * for it: once the rows are the saved card's, it answers ok with the fusing sheets owed, and the
+   * card's own save finishes the rebuild in the background (its chip, its error line).
+   */
+  rebuilding?: () => boolean;
   mintKey?: () => string;
   /**
    * The card scope a live sheet or link belongs to (bom-purpose `scopeKeyOfBinding` over the card's
@@ -418,6 +425,44 @@ export function planFormWrites(
   return { writes, created: created.length, reusedPieces, replaced };
 }
 
+/** What `saveOrLanded` answers when the body landed and only the rebuild after it still runs. */
+export const SAVE_LANDED = 'landed';
+
+/**
+ * T5 (09.11): the card's save, or SAVE_LANDED as soon as `bodyLanded` holds — checked every `pollMs`
+ * while the save runs. The save is not cancelled: it goes on and settles the card itself.
+ */
+export function saveOrLanded(
+  save: Promise<string>,
+  bodyLanded: (() => boolean) | undefined,
+  pollMs = 250,
+): Promise<string> {
+  if (!bodyLanded) return save;
+  return new Promise<string>((resolve, reject) => {
+    const timer = setInterval(() => {
+      let done = false;
+      try {
+        done = bodyLanded();
+      } catch {
+        done = false;
+      }
+      if (!done) return;
+      clearInterval(timer);
+      resolve(SAVE_LANDED);
+    }, pollMs);
+    save.then(
+      (r) => {
+        clearInterval(timer);
+        resolve(r);
+      },
+      (e) => {
+        clearInterval(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
 export async function applyDraft(
   draft: CardDraft,
   deps: ApplyDeps,
@@ -500,15 +545,19 @@ export async function applyDraft(
 
   // 3. the card's own save (the only transaction) — this try's rows, or an earlier try's rows the
   //    save refused; success only on what the save answered
+  const urls = [...uploaded.map((u) => u.url), ...plan.replaced.map((r) => r.newUrl)];
+  const { rebuilding, landed: rowsLanded } = deps;
   const save =
-    (plan.writes.length || retry) && deps.save ? await deps.save('pattern-import') : undefined;
+    (plan.writes.length || retry) && deps.save
+      ? await saveOrLanded(
+          deps.save('pattern-import'),
+          rebuilding && rowsLanded ? () => rebuilding() && !!rowsLanded(urls) : undefined,
+        )
+      : undefined;
   if (save !== undefined) {
     const fine = retry ? save === 'ok' : save === 'ok' || save === 'nothing' || save === 'off';
     // T3: the rows are the saved card's — the card saved; a later write is what is owed.
-    const landed = fine
-      ? null
-      : deps.landed?.([...uploaded.map((u) => u.url), ...plan.replaced.map((r) => r.newUrl)]) ??
-        null;
+    const landed = fine ? null : deps.landed?.(urls) ?? null;
     if (landed) {
       deps.unsaved?.set(false);
       return {

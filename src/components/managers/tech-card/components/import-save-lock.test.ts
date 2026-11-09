@@ -4,11 +4,17 @@
 // body write now re-reads on a 409 and, when only the version moved, sends the same body once more
 // (index.tsx `versionOnlyMoved`); a moved body stays the conflict decision.
 import type { common_TechCard, common_TechCardInsert } from 'api/proto-http/admin';
-import { applyDraft, type LiveCard } from 'lib/pattern-import/fabrics/apply';
+import {
+  applyDraft,
+  SAVE_LANDED,
+  saveOrLanded,
+  type LiveCard,
+} from 'lib/pattern-import/fabrics/apply';
 import type { CardDraft } from 'lib/pattern-import/types';
-import { writeOverOnlyVersionMoved } from 'lib/fusing-dxf/regenerate';
-import { describe, expect, it } from 'vitest';
+import { REBUILD_WRITE_TRIES, writeOverOnlyVersionMoved } from 'lib/fusing-dxf/regenerate';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { rebuildReadOnlyVersionMoved } from './nesting/fusing-sheets-stage';
+import { applyRunningLabel } from './pattern-import/apply-label';
 import { importRowsLanded } from './pattern-import/card-apply';
 import { onlyVersionMoved, type CardBase } from './useTechCardAutosave';
 
@@ -20,6 +26,8 @@ const cardAt = (lockVersion: number, patterns: Row[], name = 'test shirt'): comm
     lockVersion,
     techCard: { name, patterns } as unknown as common_TechCardInsert,
   }) as unknown as common_TechCard;
+
+const noPause = async () => undefined;
 
 /** The server: one card, one optimistic lock. */
 function fakeServer(start: common_TechCard) {
@@ -210,8 +218,12 @@ describe('the fusing rebuild after an import (T3)', () => {
       ]);
       if (r === 409) throw Object.assign(new Error('lock version mismatch'), { status: 409 });
     };
-    return writeOverOnlyVersionMoved(read, put, rebuildReadOnlyVersionMoved, async () =>
-      server.get(),
+    return writeOverOnlyVersionMoved(
+      read,
+      put,
+      rebuildReadOnlyVersionMoved,
+      async () => server.get(),
+      { pause: noPause },
     );
   };
 
@@ -255,7 +267,58 @@ describe('the fusing rebuild after an import (T3)', () => {
     ]);
   });
 
-  it('a second 409 after the re-send is not retried again', async () => {
+  // T5 (09.11, beta card 124): the page measures each sheet's piece areas one after another — a bump
+  // per scope. The second one landed between the re-read and the re-send; the single retry turned
+  // the page's own measurement into «"fusing DXF" was changed by someone else meanwhile».
+  it('a bump after the re-read too: re-read again, saved on the third write (T5)', async () => {
+    const server = fakeServer(cardAt(4, []));
+    const read = server.get();
+    server.bump(); // the first scope's measurement while the sheets upload
+    let reads = 0;
+    const wroteOver = await writeOverOnlyVersionMoved(
+      read,
+      async (expected) => {
+        if (server.put(expected, [sheet as unknown as Row]) === 409)
+          throw Object.assign(new Error('lock version mismatch'), { status: 409 });
+      },
+      rebuildReadOnlyVersionMoved,
+      async () => {
+        reads++;
+        const fresh = server.get();
+        if (reads === 1) server.bump(); // the next scope's measurement, right after the re-read
+        return fresh;
+      },
+      { pause: noPause },
+    );
+    expect(reads).toBe(2);
+    expect(wroteOver).toBe(6);
+    expect(server.get().lockVersion).toBe(7);
+  });
+
+  it('a body edit seen on a later re-read: the 409 stands, judged against the first read (T5)', async () => {
+    const server = fakeServer(cardAt(4, []));
+    const read = server.get();
+    let reads = 0;
+    await expect(
+      writeOverOnlyVersionMoved(
+        read,
+        async () => {
+          throw Object.assign(new Error('lock version mismatch'), { status: 409 });
+        },
+        rebuildReadOnlyVersionMoved,
+        async () => {
+          reads++;
+          if (reads === 1) server.bump();
+          else server.edit([{ url: 'https://cdn.test/theirs.dxf' } as unknown as Row]);
+          return server.get();
+        },
+        { pause: noPause },
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(reads).toBe(2);
+  });
+
+  it('a bump before every write: the 409 stands after REBUILD_WRITE_TRIES writes', async () => {
     const server = fakeServer(cardAt(4, []));
     const read = server.get();
     let puts = 0;
@@ -265,9 +328,126 @@ describe('the fusing rebuild after an import (T3)', () => {
       throw Object.assign(new Error('lock version mismatch'), { status: 409 });
     };
     await expect(
-      writeOverOnlyVersionMoved(read, put, rebuildReadOnlyVersionMoved, async () => server.get()),
+      writeOverOnlyVersionMoved(read, put, rebuildReadOnlyVersionMoved, async () => server.get(), {
+        pause: noPause,
+      }),
     ).rejects.toMatchObject({ status: 409 });
-    expect(puts).toBe(2);
+    expect(puts).toBe(REBUILD_WRITE_TRIES);
+  });
+});
+
+// T5 (09.11, beta card 124): after APPLY the wizard's button stayed a bare spinner for ~60 s — the
+// import's save awaited the whole save chain, the fusing rebuild after the body included (download of
+// the new main sheet, parse, upload, a 9–13 s write, a 409 and its re-send, the re-read). The apply now
+// answers once the body landed and only the rebuild runs; the card's save finishes it on its own.
+describe('the import does not wait for the fusing rebuild (T5)', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('saveOrLanded: SAVE_LANDED once the body landed, the save left running', async () => {
+    vi.useFakeTimers();
+    let finish: (r: string) => void = () => undefined;
+    const save = new Promise<string>((resolve) => (finish = resolve));
+    let landed = false;
+    let answer: string | undefined;
+    void saveOrLanded(save, () => landed, 250).then((r) => (answer = r));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(answer).toBeUndefined();
+    landed = true;
+    await vi.advanceTimersByTimeAsync(250);
+    expect(answer).toBe(SAVE_LANDED);
+    finish('ok'); // the rebuild ends later; nobody waits on it here
+    await vi.advanceTimersByTimeAsync(0);
+    expect(answer).toBe(SAVE_LANDED);
+  });
+
+  it('saveOrLanded: the save answers first — its answer, the poll stopped', async () => {
+    vi.useFakeTimers();
+    const probe = vi.fn(() => false);
+    const r = saveOrLanded(Promise.resolve('conflict'), probe, 250);
+    await expect(r).resolves.toBe('conflict');
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(probe).not.toHaveBeenCalled();
+    await expect(saveOrLanded(Promise.resolve('ok'), undefined)).resolves.toBe('ok');
+  });
+
+  it('apply: the body landed, the rebuild still running → ok, fusing owed, rows saved', async () => {
+    const server = fakeServer(cardAt(4, []));
+    const page = fakePage(server);
+    let baseline: LiveCard = structuredClone(page.form);
+    let rebuilding = false;
+    let rebuildDone: (r: string) => void = () => undefined;
+    const unsaved = { v: false };
+    const r = await applyDraft(draftOf('main', 'main.dxf'), {
+      upload: async (f) => ({
+        url: `https://cdn.test/${f.filename}`,
+        filename: f.filename,
+        sizeBytes: 1,
+      }),
+      read: page.read,
+      write: page.write,
+      storageSizeId: 501,
+      scopeOf: (row) => row.fabricPurpose ?? '',
+      // the card's save: the body lands, then the rebuild runs and does not end in this test
+      save: async () => {
+        await page.save();
+        baseline = structuredClone(page.form);
+        rebuilding = true;
+        return new Promise<string>((resolve) => (rebuildDone = resolve));
+      },
+      rebuilding: () => rebuilding,
+      landed: (urls) =>
+        importRowsLanded(
+          { patterns: page.form.patterns, pieces: page.form.pieces },
+          { patterns: baseline.patterns, pieces: baseline.pieces },
+          urls,
+        )
+          ? { owed: 'fusing' as const }
+          : null,
+      unsaved: { get: () => unsaved.v, set: (v) => (unsaved.v = v) },
+      mintKey: () => 'K1',
+    });
+    expect(r).toMatchObject({ ok: true, save: 'ok', owed: 'fusing', writes: 1 });
+    expect(unsaved.v).toBe(false);
+    expect((server.get().techCard?.patterns ?? []).map((p) => p.url)).toEqual([
+      'https://cdn.test/main.dxf',
+    ]);
+    rebuildDone('ok');
+  });
+
+  it('apply: a rebuild running while the body has not landed is not taken for a saved card', async () => {
+    const server = fakeServer(cardAt(4, []));
+    const page = fakePage(server);
+    let finish: (r: string) => void = () => undefined;
+    const pending = applyDraft(draftOf('main', 'main.dxf'), {
+      upload: async (f) => ({
+        url: `https://cdn.test/${f.filename}`,
+        filename: f.filename,
+        sizeBytes: 1,
+      }),
+      read: page.read,
+      write: page.write,
+      storageSizeId: 501,
+      scopeOf: (row) => row.fabricPurpose ?? '',
+      save: () => new Promise<string>((resolve) => (finish = resolve)),
+      // an earlier pass's rebuild is running; the rows are not in the saved card
+      rebuilding: () => true,
+      landed: () => null,
+      mintKey: () => 'K1',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    finish('conflict');
+    expect((await pending).ok).toBe(false);
+  });
+
+  it('the button says what runs: uploading…, then saving…', () => {
+    expect(applyRunningLabel({ phase: 'idle' })).toBeNull();
+    expect(applyRunningLabel({ phase: 'running', progress: {} })).toBe('uploading…');
+    expect(
+      applyRunningLabel({ phase: 'running', progress: { main: 'uploaded', lining: 'uploading' } }),
+    ).toBe('uploading…');
+    expect(
+      applyRunningLabel({ phase: 'running', progress: { main: 'uploaded', lining: 'uploaded' } }),
+    ).toBe('saving…');
   });
 });
 

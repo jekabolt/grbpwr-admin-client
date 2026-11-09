@@ -3151,6 +3151,8 @@ export function PatternsField({
   // 'ok' и только если применение что-то записало: повторное применение того же импорта остаётся
   // нулевым (F7).
   const importScopeRef = useRef('');
+  /** The fusing rebuild run counter when the import's save started (T5). */
+  const importSaveRun = useRef(0);
   importScopeRef.current = importing?.scopeKey ?? '';
   function followUpApply(apply: ApplyDraftFn): ApplyDraftFn {
     return async (draft, onProgress) => {
@@ -4739,7 +4741,16 @@ export function PatternsField({
               storageSizeId,
               // read at commit time: the BOM may have been sorted while the wizard was open
               scopeOf: liveScopeOf,
-              save: (reason) => undoHistory.flushThenCut(reason),
+              save: (reason) => {
+                importSaveRun.current = getFusingSheetGenerationState(techCardId).run;
+                return undoHistory.flushThenCut(reason);
+              },
+              // T5: a rebuild this save started — the body before it has landed. The wizard closes
+              // then; the rebuild finishes under the card's own chip.
+              rebuilding: () => {
+                const g = getFusingSheetGenerationState(techCardId);
+                return g.phase === 'generating' && g.run > importSaveRun.current;
+              },
               // A sheet replaced in place: its save archives the old file with a card snapshot.
               onReplaced: (list) =>
                 list.forEach((r) => armReuploadSnapshot(techCardId, r.newUrl, r.oldUrl)),
