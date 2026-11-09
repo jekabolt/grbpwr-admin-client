@@ -1018,6 +1018,32 @@ export function bodyMoved(
   );
 }
 
+/** The card a page stands on (index.tsx `base`): its version, its card, or the body it sent under it. */
+export type CardBase = {
+  version: number;
+  card: common_TechCard | null;
+  sent?: { body: Record<string, unknown>; echo: common_TechCardInsert | undefined };
+};
+
+/**
+ * ONLY THE VERSION MOVED: `fresh` is newer than the card the page stands on, and its body is that
+ * card's body (or, with no card read, the body the page sent under it). A panel's lock bump, a piece-
+ * area measurement (SaveTechCardPieceAreas bumps tech_card.lock_version), a roll-up — nothing a body
+ * write carries. A body write built on `base` overwrites nobody's body edit when it goes out under
+ * `fresh`'s version (M-3 «adopted»; T3 09.11: the 409 such a bump gives a body write in flight).
+ */
+export function onlyVersionMoved(
+  base: CardBase,
+  fresh: common_TechCard,
+  canWriteCosting: boolean,
+): boolean {
+  if ((fresh.lockVersion ?? 0) <= base.version) return false;
+  return base.card
+    ? !bodyMoved(base.card, fresh, canWriteCosting)
+    : !!base.sent &&
+        deepEqual(bodyOnTheWire(fresh, base.sent.echo, canWriteCosting), base.sent.body);
+}
+
 const STYLE_FACTS: ReadonlySet<string> = new Set(STYLE_FACT_KEYS);
 
 /**

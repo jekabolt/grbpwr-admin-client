@@ -2991,12 +2991,14 @@ function wordsOf(
     line.push({ t: t('assembly.tape') });
     if (note) line.push({ t: cap(note) });
   } else if (tech === 'hand') {
+    // A label step: the step's label table already says how the label goes on.
+    const labelStep = (o.labelKeys ?? []).length > 0;
     if (note) line.push({ t: cap(note) });
     else if (ctx.twinNote)
       line.push({
         t: t('assembly.asOperation', { note: own(cap(ctx.twinNote.note)), op: ctx.twinNote.n }),
       });
-    else assemblyGap(ctx.sink, 'asm_edge_missing', t('gaps.edge'), op.n, 'edge');
+    else if (!labelStep) assemblyGap(ctx.sink, 'asm_edge_missing', t('gaps.edge'), op.n, 'edge');
   } else if (tech === 'pressSide') {
     const toward = pressTowardLabel(o.press?.toward).replace(/^toward (the )?/, '');
     if (!toward) assemblyGap(ctx.sink, 'pdf_side_missing', t('gaps.pressSide'), op.n, 'side');

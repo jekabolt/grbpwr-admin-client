@@ -48,7 +48,9 @@ import {
   pickFreeSpan,
   pickSegment,
   repeatsStoredSeam,
+  labelSideLength,
   segmentAt,
+  spanOfLength,
   sideParts,
   snapToBreak,
   storedSeamAt,
@@ -438,6 +440,22 @@ export function SeamPickerBody({
       withFoldPartners(pick, side, id, stepFolds, geoms, geo?.grainDeg, pickRules),
     [stepFolds, geoms, geo?.grainDeg, pickRules],
   );
+  // A garment edge picked against a label's edge takes the label's length, centred on the click.
+  const labelSpanAt = useCallback(
+    (id: TargetId, side: Side, length: number, atMm: number) => {
+      const isLabel = (target: string) =>
+        !!geoms.get(pieceOfTarget(target as TargetId))?.garmentLabel;
+      if (isLabel(id)) return null;
+      const want = labelSideLength(
+        sel,
+        side,
+        isLabel,
+        (target) => resolveEdge(target as TargetId, geoms)?.len ?? 0,
+      );
+      return want && want < length ? spanOfLength(want, length, atMm) : null;
+    },
+    [geoms, sel],
+  );
   const toggle = useCallback(
     (id: TargetId, atMm?: number) => {
       if (frozen) return;
@@ -466,17 +484,23 @@ export function SeamPickerBody({
         setSel(onFolded(pickTarget(sel, side, id, pickRules.isInner, pickRules.pieceOf), side, id));
         return;
       }
-      const segment = segmentAt(edgeBreaks(id, geoms), length, atMm);
+      const segment =
+        labelSpanAt(id, side, length, atMm) ?? segmentAt(edgeBreaks(id, geoms), length, atMm);
       setSel(onFolded(pickSegment(sel, side, id, segment, length, pickRules), side, id));
     },
-    [frozen, groups, sel, geoms, stored, pickRules, setPoseSel, onFolded],
+    [frozen, groups, sel, geoms, stored, pickRules, setPoseSel, onFolded, labelSpanAt],
   );
   const onHoverAt = useCallback(
     (id: TargetId | null, atMm: number | null) => {
       const length = id ? resolveEdge(id, geoms)?.len ?? 0 : 0;
       const free =
         id && atMm != null && length > 0 && storedSeamAt(stored, id, atMm, geoms) < 0
-          ? segmentAt(edgeBreaks(id, geoms), length, atMm)
+          ? labelSpanAt(
+              id,
+              sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget),
+              length,
+              atMm,
+            ) ?? segmentAt(edgeBreaks(id, geoms), length, atMm)
           : null;
       setHover((current) =>
         current?.id === id && current?.range[0] === free?.[0] && current?.range[1] === free?.[1]
@@ -486,7 +510,7 @@ export function SeamPickerBody({
             : null,
       );
     },
-    [geoms, stored],
+    [geoms, stored, labelSpanAt, groups, sel],
   );
   const onSpanDrag = useCallback(
     (id: TargetId, fromMm: number, toMm: number, done: boolean) => {

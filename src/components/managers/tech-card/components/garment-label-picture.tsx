@@ -17,15 +17,23 @@ const mix = (a: Pt2, b: Pt2, at: number): Pt2 => [
 
 const distance = (a: Pt2, b: Pt2): number => Math.hypot(b[0] - a[0], b[1] - a[1]);
 
-/** Ink-only label outline and its physical fold, over the ordinary posed piece geometry. */
+/**
+ * The label outline and its physical fold, over the ordinary posed piece geometry, in the colour of
+ * the pieces it lies on (`stroke`), so a label reads as one more piece of the garment.
+ */
 export function GarmentLabelOverlay({
   pieces,
   geoms,
   hair,
+  stroke = INK,
+  outlineWidth,
 }: {
   pieces: readonly DrawnPiece[];
   geoms: ReadonlyMap<string, PieceGeom>;
   hair: number;
+  stroke?: string;
+  /** The pieces' outline width; the label's own hairline when not given. */
+  outlineWidth?: number;
 }) {
   const labels = pieces.filter((piece) => geoms.get(piece.key)?.garmentLabel);
   if (!labels.length) return null;
@@ -61,15 +69,15 @@ export function GarmentLabelOverlay({
             <path
               d={pathOf(outline, true)}
               fill={PAPER}
-              stroke={INK}
-              strokeWidth={hair * 1.5}
+              stroke={stroke}
+              strokeWidth={outlineWidth ?? hair * 1.5}
               strokeLinejoin='round'
             />
             {mark.fold === 'half' && (
               <path
                 d={pathOf([d, c])}
                 fill='none'
-                stroke={INK}
+                stroke={stroke}
                 strokeWidth={hair * 3}
                 data-label-fold='half'
               />
@@ -77,7 +85,7 @@ export function GarmentLabelOverlay({
             {mark.fold === 'ends' && (
               <g
                 fill='none'
-                stroke={INK}
+                stroke={stroke}
                 strokeWidth={hair}
                 strokeDasharray={`${hair * 3} ${hair * 2}`}
                 data-label-fold='ends'
@@ -96,7 +104,7 @@ export function GarmentLabelOverlay({
                   2,
                 )} ${loopEnd[0].toFixed(2)} ${loopEnd[1].toFixed(2)}`}
                 fill='none'
-                stroke={INK}
+                stroke={stroke}
                 strokeWidth={hair * 1.5}
                 data-label-fold='loop'
               />

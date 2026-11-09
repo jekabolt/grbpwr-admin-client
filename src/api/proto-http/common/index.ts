@@ -2232,6 +2232,33 @@ export type StyleSizeChartPoint = {
   stale: boolean | undefined;
 };
 
+// StyleSizeChartLine is one free line the user drew on the size chart picture: a straight segment in
+// coordinates normalised to the picture box (0..1, origin top-left), stored with 5 decimals. Lines
+// predrawn by an icon are not stored (they come from the icon library). A line with a picked point
+// names it by measurement_name_id; 0 = the point is not picked yet. Its values live in the chart's
+// cells and points under the same measurement_name_id.
+export type StyleSizeChartLine = {
+  measurementNameId: number | undefined;
+  x1: number | undefined;
+  y1: number | undefined;
+  x2: number | undefined;
+  y2: number | undefined;
+  position: number | undefined;
+};
+
+// StyleSizeChartPicture is the drawing next to the size chart table. source is "icon" (icon_key names
+// a drawing in the client icon library), "sketch" (media_id is one of the card's technical images) or
+// "upload" (media_id is an uploaded image). Only the field of the chosen source is kept: icon_key is
+// cleared for sketch/upload, media_id for icon. media_url is output-only, the full-size url of
+// media_id ("" when the image was deleted from the library).
+export type StyleSizeChartPicture = {
+  source: string | undefined;
+  iconKey: string | undefined;
+  mediaId: number | undefined;
+  lines: StyleSizeChartLine[] | undefined;
+  mediaUrl: string | undefined;
+};
+
 export type StyleSizeChart = {
   styleId: number | undefined;
   lockVersion: number | undefined;
@@ -2247,6 +2274,8 @@ export type StyleSizeChart = {
   gradeSteps: StyleSizeChartGradeStep[] | undefined;
   points: StyleSizeChartPoint[] | undefined;
   shrinkagePct: googletype_Decimal | undefined;
+  // The picture next to the table and the user's free lines on it; absent = no picture chosen.
+  picture: StyleSizeChartPicture | undefined;
 };
 
 // AdminColorwayRef is a derived, output-only reference to a colourway from its style (R1: GetStyle may

@@ -2246,6 +2246,33 @@ export type DraftReplaceTarget = {
 
 export type DraftVanished = { blockName: string; pieceLineKey: string; pieceName: string };
 
+/**
+ * A card piece's outline as the card reads it now (the parse of its current sheets of one scope),
+ * per size. Re-import binds a renamed block to the piece by it (`buildDraft`, geometry step).
+ */
+export type DraftShapeRef = {
+  scopeKey: string;
+  pieceLineKey: string;
+  /** The block identity the card reads for this piece (P_L_MAIN). */
+  identity: string;
+  /** Bare size token (`bareToken`, '' for a sizeless block) → outline facts, mm. */
+  sizes: Record<string, { areaMm2: number; wMm: number; hMm: number }>;
+};
+
+/**
+ * A block of the new file that may be an existing card piece under another name, and nothing
+ * proves which: the draft binds it to no piece and creates none. The operator maps it in
+ * "↔ cut pieces"; its candidates are listed in the scope's `vanished`.
+ */
+export type DraftUnresolved = {
+  scopeKey: string;
+  /** The block as the card keys it (the alias spelling). */
+  blockName: string;
+  identity: string;
+  /** Card pieces of this scope it may be (same hand, no block in the new file), best first. */
+  candidates: { pieceLineKey: string; pieceName: string }[];
+};
+
 export type DraftPiece = {
   /** Client-minted ULID, same contract as pieces.N.lineKey. */
   lineKey: string;
@@ -2270,8 +2297,11 @@ export type DraftPiece = {
   ungraded?: boolean;
   /** F7: `TECH_CARD_PIECE_FUSING_MODE_*` — FULL when the whole piece is cut from interlining. */
   fusingMode?: string;
-  /** F7: why this existing piece was chosen ('alias' = already bound to this block; 'name'). */
-  basis?: 'alias' | 'name' | 'new';
+  /**
+   * F7: why this existing piece was chosen ('alias' = already bound to this block; 'name' = the
+   * same name or the same name tokens; 'shape' = the same outline as the card's current block).
+   */
+  basis?: 'alias' | 'name' | 'shape' | 'new';
   /** F7: the scope keys this piece is cut in (one alias set per scope). */
   scopeKeys?: string[];
 };
@@ -2304,6 +2334,8 @@ export type CardDraft = {
   pieces: DraftPiece[];
   aliases: DraftAlias[];
   pieceUpdates: DraftPieceUpdate[];
+  /** Re-import: blocks bound to no piece because nothing proves which card piece they are. */
+  unresolved?: DraftUnresolved[];
   /** Also offered as a download: the same texts. */
   downloads: { filename: string; dxfText: string }[];
 };

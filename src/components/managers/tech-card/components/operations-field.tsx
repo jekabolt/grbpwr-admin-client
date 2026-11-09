@@ -1,5 +1,6 @@
 import { useMutation } from '@tanstack/react-query';
 import { adminService } from 'api/api';
+import { MaterialThumb } from 'components/managers/materials/components/material-thumb';
 import {
   common_TechCardButtonholeOrientation,
   common_TechCardButtonholeStyle,
@@ -176,7 +177,10 @@ import {
 } from './equipment-options';
 import { kindLabel, preferredBomKinds } from './bom-kind';
 import type { FormGarmentLabel } from './labels-schema';
-import { labelPictogram, labelSizeText } from './sewn-label-row';
+import { ensureLabelLineKey, labelPictogram, labelSizeText } from './sewn-label-row';
+import { COMPOSITION_LABEL_KEY, isCompositionLabel, labelBomLine } from './sewn-label-model';
+import { useLabelStock } from './use-label-stock';
+import { wireInt as wireIntOf } from './wire-int';
 import { garmentLabelKindNames, kindLabel as garmentLabelName } from './tech-card-options';
 // ВЫВОДИМОСТЬ — ЧИСТЫЕ ФУНКЦИИ ЖИВУТ ОТДЕЛЬНО, И ЭТО НЕ СТИЛЬ. Правило «ровно один кандидат или
 // молчим» проверяется пробой на фикстурах, а не глазами по редактору на семь тысяч строк;
@@ -2476,26 +2480,38 @@ function useStepInference(
 
 // ── the step editor ──────────────────────────────────────────────────────────────────────────
 function OperationLabelPicker({ index, frozen }: { index: number; frozen: boolean }) {
-  const { control, setValue } = useFormContext<TechCardFormData>();
+  const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const labels = (useWatch({ control, name: 'garmentLabels' }) ?? []) as FormGarmentLabel[];
   const operations = useWatch({ control, name: 'operations' }) ?? [];
+  const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as NonNullable<
+    TechCardFormData['bomItems']
+  >;
+  const { materialById } = useLabelStock();
   const selected = (operations[index]?.labelKeys ?? []).filter(Boolean);
   const ownedElsewhere = new Set(
     operations.flatMap((operation, operationIndex) =>
       operationIndex === index ? [] : operation.labelKeys ?? [],
     ),
   );
-  const available = labels.filter((label) => {
+  // The composition label is drawn in its own block and joins the card on first use, so it is
+  // offered here even before its row exists.
+  const offered = labels.some((label) => isCompositionLabel(label.key))
+    ? labels
+    : [...labels, { key: COMPOSITION_LABEL_KEY, lineKey: '' } as FormGarmentLabel];
+  const available = offered.filter((label) => {
     const key = label.lineKey?.trim() || '';
-    return key && (selected.includes(key) || !ownedElsewhere.has(key));
+    return !key || selected.includes(key) || !ownedElsewhere.has(key);
   });
   const [, setParams] = useSearchParams();
-  const toggle = (key: string) =>
+  const toggle = (label: FormGarmentLabel) => {
+    const key = ensureLabelLineKey(getValues, setValue, label.key?.trim() || '');
+    if (!key) return;
     setValue(
       `operations.${index}.labelKeys`,
       selected.includes(key) ? selected.filter((value) => value !== key) : [...selected, key],
       { shouldDirty: true },
     );
+  };
 
   return (
     <>
@@ -2503,25 +2519,34 @@ function OperationLabelPicker({ index, frozen }: { index: number; frozen: boolea
       {available.length ? (
         <div className='flex flex-wrap gap-2'>
           {available.map((label) => {
-            const key = label.lineKey!.trim();
+            const key = label.lineKey?.trim() || '';
             const kind = label.kind?.trim() || label.key?.trim() || '';
             const name =
               label.key?.trim() || garmentLabelName(garmentLabelKindNames, kind) || 'label';
             const size = labelSizeText(label);
+            const material = materialById.get(wireIntOf(labelBomLine(label, bomItems)?.materialId));
             return (
               <Tile
-                key={key}
+                key={key || label.key}
                 name={name}
                 sub={size ? `${size} mm` : ''}
                 selected={selected.includes(key)}
                 pressed={selected.includes(key)}
                 media={
-                  <span className='flex h-16 items-center justify-center border-b border-hairline bg-pageBg'>
-                    <LabelIcon kind={labelPictogram(kind)} size={40} />
-                  </span>
+                  material ? (
+                    <MaterialThumb
+                      material={material}
+                      size='lg'
+                      className='h-16 w-full border-b border-hairline'
+                    />
+                  ) : (
+                    <span className='flex h-16 items-center justify-center border-b border-hairline bg-pageBg'>
+                      <LabelIcon kind={labelPictogram(kind)} size={40} />
+                    </span>
+                  )
                 }
                 className='w-32 p-0 [&>p]:mx-2'
-                onClick={frozen ? undefined : () => toggle(key)}
+                onClick={frozen ? undefined : () => toggle(label)}
               />
             );
           })}

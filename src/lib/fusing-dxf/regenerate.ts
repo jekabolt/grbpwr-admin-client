@@ -179,7 +179,64 @@ function aliasIsMain(
   return bom?.purpose === PURPOSE.main || bom?.section === SECTION.fabric;
 }
 
-function sourcePieces(
+const sameNumber = (left: number | undefined, right: number | undefined) =>
+  left === right || (left != null && right != null && Math.abs(left - right) <= 1e-9);
+
+const samePoints = (
+  left: readonly { x: number; y: number }[],
+  right: readonly { x: number; y: number }[],
+) =>
+  left.length === right.length &&
+  left.every(
+    (point, index) => sameNumber(point.x, right[index].x) && sameNumber(point.y, right[index].y),
+  );
+
+/** Parser-expanded `Quantity: N` copies are count, not additional source contours. */
+function sameContourCopy(left: PieceDTO, right: PieceDTO): boolean {
+  const sameFile =
+    left.fileIndex != null || right.fileIndex != null
+      ? left.fileIndex === right.fileIndex
+      : left.source === right.source;
+  if (
+    !sameFile ||
+    (left.blockName ?? '').trim().toLowerCase() !== (right.blockName ?? '').trim().toLowerCase() ||
+    left.layer !== right.layer ||
+    !sameNumber(left.originX, right.originX) ||
+    !sameNumber(left.originY, right.originY) ||
+    !samePoints(left.poly, right.poly)
+  )
+    return false;
+
+  const leftInner = left.inner ?? [];
+  const rightInner = right.inner ?? [];
+  if (
+    leftInner.length !== rightInner.length ||
+    !leftInner.every(
+      (path, index) =>
+        path.layer === rightInner[index].layer &&
+        path.closed === rightInner[index].closed &&
+        samePoints(path.pts, rightInner[index].pts),
+    )
+  )
+    return false;
+
+  const leftGrain = left.grain ?? [];
+  const rightGrain = right.grain ?? [];
+  return (
+    leftGrain.length === rightGrain.length &&
+    leftGrain.every((grain, index) => {
+      const other = rightGrain[index];
+      return (
+        grain.layer === other.layer &&
+        sameNumber(grain.angleDeg, other.angleDeg) &&
+        sameNumber(grain.lengthCm, other.lengthCm) &&
+        samePoints([grain.a, grain.b], [other.a, other.b])
+      );
+    })
+  );
+}
+
+export function sourcePieces(
   parsed: readonly PieceDTO[],
   cardPieces: readonly common_TechCardPiece[],
   aliases: readonly common_TechCardPieceDxfAlias[],
@@ -246,7 +303,9 @@ function sourcePieces(
       const code = split.codeById.get(row.id);
       const rawSize = row.manifest?.size || code?.size || '';
       const sizeKey = bareToken(rawSize);
-      if (bySize.has(sizeKey)) {
+      const previous = bySize.get(sizeKey);
+      if (previous) {
+        if (sameContourCopy(previous, row)) continue;
         warnings.push(`${group.spelling}_${rawSize || 'UNI'}: duplicate contour ignored`);
         continue;
       }

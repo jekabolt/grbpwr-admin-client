@@ -22,6 +22,7 @@ import { stepPictureOf, type SurfacePicture } from '../step-seams/surface-pictur
 import { SewnStrip } from './sewn-strip';
 import { StepFoldThumbs } from './step-fold-thumbs';
 import type { MapModel } from './use-map-model';
+import { seamlessLabelStep } from '../step-seams/step-seams-model';
 
 /** Inner width of the 320px column after the block padding and outline. */
 export const MAP_W = 286;
@@ -186,6 +187,7 @@ export function StepView({ model, index }: { model: MapModel; index: number }) {
             geoms={geoms}
             innerLines={innerLines}
             stepEdges={highlight.targets}
+            seamless={seamlessLabelStep(op, geoms)}
             stepParts={highlight.parts}
             names={inputNames}
             foldGhost

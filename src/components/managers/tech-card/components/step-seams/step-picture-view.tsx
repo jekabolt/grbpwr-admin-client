@@ -52,7 +52,7 @@ import {
 import type { TechCardFormData } from '../schema';
 import { nameSpot } from './name-spot';
 import { mmOnPoints, repeatClickTarget } from './span-pick';
-import { fmtMm } from './step-seams-model';
+import { fmtMm, seamlessLabelStep, unsewnLabel } from './step-seams-model';
 import { placementPictureGlyphsForStep, type ButtonholeOperation } from './buttonhole-glyph';
 import { PAIR_INK, pairNo } from './palette';
 import { layerStyle } from './layer-style';
@@ -471,14 +471,17 @@ export function stepSeamsOfOp(
       .map((part) => part.target),
     ...fullyUsedEdges(usedEdgesBeforeStep(ops, index + 1, byKey, geoms), geoms),
   ]);
-  const suggestions = ready
-    ? suggestStepPairs(ops, index, pieceKeys, geoms, used, ease, byKey)
-    : [];
+  // A hung or stuck-on label is placed by its pose: nothing to propose, nothing missing.
+  const seamless = seamlessLabelStep(active, geoms);
+  const suggestions =
+    ready && !seamless ? suggestStepPairs(ops, index, pieceKeys, geoms, used, ease, byKey) : [];
   const suggestion: Suggestion | null = suggestions[0] ?? null;
   // No pair to propose: a lone part may go into the slit its twin was sewn on (the second placket);
   // two lone plackets each get their own sleeve, and one accepted leaves the other standing.
   const surfaceSuggestions: StepSurface[] = (
-    ready && !suggestions.length ? suggestStepSurfaces(ops, index, pieceKeys, geoms, byKey) : []
+    ready && !seamless && !suggestions.length
+      ? suggestStepSurfaces(ops, index, pieceKeys, geoms, byKey)
+      : []
   ).filter(
     (surface) =>
       !stored.some((seam) =>
@@ -521,6 +524,7 @@ export function stepSeamsOfOp(
       ].filter((candidate): candidate is SeamCandidate => !!candidate);
   return {
     active,
+    seamless,
     innerLines,
     byKey,
     groups,
@@ -565,6 +569,7 @@ export function stepPictureOfOp(
   } = options;
   const {
     active,
+    seamless,
     innerLines,
     byKey,
     groups,
@@ -623,6 +628,7 @@ export function stepPictureOfOp(
   const highlight = stepHighlightOf(options.operations, options.index, byKey);
   return {
     op: active,
+    seamless,
     geoms,
     innerLines,
     groups,
@@ -802,6 +808,38 @@ export type EdgeMark = {
 };
 export type NoMark = { id: TargetId; i: number; range?: readonly [number, number] };
 /** A break point shown on an edge in hand: a notch is a square, an end or a turn a circle. */
+/** The width of an edge's hit stroke, in px. */
+const DOOR_HIT = 14;
+
+/**
+ * A narrow piece (a 30 mm label) is all edge at the full hit width: its body could not be taken to
+ * move it. Its edges get a hit stroke of a quarter of its short side, never under 4 px.
+ */
+export function doorHitWidths(
+  doors: readonly { id: TargetId; points: readonly Pt2[]; inner?: unknown }[],
+): Map<string, number> {
+  const boxes = new Map<string, { x0: number; y0: number; x1: number; y1: number }>();
+  for (const door of doors) {
+    if (door.inner) continue;
+    const piece = pieceOfTarget(door.id);
+    const box = boxes.get(piece) ?? { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+    for (const [x, y] of door.points) {
+      box.x0 = Math.min(box.x0, x);
+      box.y0 = Math.min(box.y0, y);
+      box.x1 = Math.max(box.x1, x);
+      box.y1 = Math.max(box.y1, y);
+    }
+    boxes.set(piece, box);
+  }
+  const widths = new Map<string, number>();
+  for (const [piece, box] of boxes) {
+    const short = Math.min(box.x1 - box.x0, box.y1 - box.y0);
+    if (Number.isFinite(short) && short < DOOR_HIT * 4)
+      widths.set(piece, Math.max(4, Math.min(DOOR_HIT, short / 4)));
+  }
+  return widths;
+}
+
 export type EdgeTick = { id: TargetId; atMm: number; notch: boolean };
 export type PictureActionLine = {
   id: string;
@@ -1688,6 +1726,7 @@ export function StepPictureSvg({
   actionGlyphs = NO_ACTION_GLYPHS,
   actionDims = NO_ACTION_DIMS,
   noSeamText,
+  seamless: suppliedSeamless,
   stripWords,
   nos = NO_NOS,
   names: givenNames,
@@ -1732,6 +1771,8 @@ export function StepPictureSvg({
   actionDims?: readonly PictureActionDim[];
   /** Localized print wording. Screen pictures reuse the existing editor status. */
   noSeamText?: string;
+  /** The step only poses labels that go on without a seam: no «no seam» for it. */
+  seamless?: boolean;
   stripWords?: StripWords;
   nos?: readonly NoMark[];
   names?: readonly string[];
@@ -2200,7 +2241,7 @@ export function StepPictureSvg({
     // a stacked twin's edges follow its drawn offset. An edge the caller names stays pickable even
     // under a piece of its own unit: a seam inside a unit joins exactly such an edge.
     const named = pickable && pickTargets ? new Set(pickTargets) : undefined;
-    const targets = picturePickTargets(
+    const doorTargets = picturePickTargets(
       layout,
       geoms,
       innerLines,
@@ -2220,6 +2261,10 @@ export function StepPictureSvg({
             hiddenTargets: named,
           },
     );
+    // A hung or stuck-on label takes no seam: no door on it, so its whole body drags.
+    const targets = doorTargets.filter(
+      (target) => !unsewnLabel(flatGeoms.get(pieceOfTarget(target.id))),
+    );
     return layers
       ? withoutCoveredDoors(
           targets,
@@ -2235,6 +2280,7 @@ export function StepPictureSvg({
     look,
     layout,
     geoms,
+    flatGeoms,
     innerLines,
     fit,
     layers,
@@ -2633,8 +2679,12 @@ export function StepPictureSvg({
     hideCrowdedLabels ? spots[i] : spots[nameSpots.length + labels.length + i];
   const stepColor = look === 'print' ? INK : 'var(--color-highlightColor)';
   const stepWidth = L.outline * 1.26;
+  const seamless = suppliedSeamless ?? seamlessLabelStep(operation, flatGeoms);
   const noStepSeams =
-    stepEdges !== undefined && stepEdges.length === 0 && !marks.some((m) => isPick(m.tone));
+    !seamless &&
+    stepEdges !== undefined &&
+    stepEdges.length === 0 &&
+    !marks.some((m) => isPick(m.tone));
   const noStepSeamLabel = noSeamText ?? (look === 'print' ? '' : NO_SEAM_TEXT);
 
   // The door strokes are the densest paths of the picture (every edge and inner line, twice: the
@@ -2644,6 +2694,7 @@ export function StepPictureSvg({
     () => doors.filter((x) => x.inner).map((x) => <path key={x.id} d={pathOf(x.points)} />),
     [doors],
   );
+  const hitWidths = useMemo(() => doorHitWidths(doors), [doors]);
   const doorHits = useMemo(
     () =>
       onPick
@@ -2654,7 +2705,7 @@ export function StepPictureSvg({
               d={pathOf(x.points)}
               fill='none'
               stroke='transparent'
-              strokeWidth={14}
+              strokeWidth={hitWidths.get(pieceOfTarget(x.id)) ?? DOOR_HIT}
               pointerEvents='stroke'
               className='cursor-pointer'
               onPointerEnter={() => onHover?.(x.id)}
@@ -2692,7 +2743,18 @@ export function StepPictureSvg({
             />
           ))
         : null,
-    [doors, onPick, onHover, onHoverAt, onSpanDrag, startSpanDrag, mmOfDoor, pointerAt, pickAt],
+    [
+      doors,
+      hitWidths,
+      onPick,
+      onHover,
+      onHoverAt,
+      onSpanDrag,
+      startSpanDrag,
+      mmOfDoor,
+      pointerAt,
+      pickAt,
+    ],
   );
 
   // The flat ghost of a closing step always lies under the folded outline.
@@ -2945,7 +3007,13 @@ export function StepPictureSvg({
         plain={look === 'tile'}
         nameRoom={stripNameRoom}
       />
-      <GarmentLabelOverlay pieces={pieces} geoms={flatGeoms} hair={L.hair} />
+      <GarmentLabelOverlay
+        pieces={pieces}
+        geoms={flatGeoms}
+        hair={L.hair}
+        stroke={FAINT}
+        outlineWidth={L.outline}
+      />
       {hover && (hoverRange || !marks.some((m) => m.id === hover)) && ptsOf(hover) && (
         <path
           d={pathOf(

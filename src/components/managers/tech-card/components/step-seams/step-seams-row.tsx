@@ -224,7 +224,7 @@ export function StepSeamsRow({
               onOpen={cardId ? () => onPicker({ proposal: i, preselect: true }) : undefined}
             />
           ))}
-        {keys.length === 0 && !pending && suggestions.length === 0 && (
+        {keys.length === 0 && !pending && suggestions.length === 0 && !scene.seamless && (
           <Text size='micro' variant='error' tracking='label' data-step-seams-status=''>
             {NO_SEAM_TEXT}
           </Text>
@@ -329,6 +329,7 @@ export function SeamTile({
           innerLines={scene.innerLines}
           marks={marks}
           stepEdges={ownMarksOnly ? undefined : scene.stepEdges}
+          seamless={scene.seamless}
           stepParts={ownMarksOnly ? undefined : scene.stepParts}
         />
       ) : null}

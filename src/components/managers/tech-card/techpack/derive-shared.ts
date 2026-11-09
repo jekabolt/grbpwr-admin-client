@@ -25,6 +25,12 @@ export type BomRef = { item: common_TechCardBomItem; index: number; key: string 
 
 export const clean = (value?: string | null): string => (value ?? '').trim();
 
+/** A step's REPEATS: how many of its linked article it sets on the garment (one per repeat). */
+export function repeatsQty(operation?: { placementLayout?: { count?: number } } | null): number | null {
+  const count = operation?.placementLayout?.count ?? 0;
+  return count > 0 ? count : null;
+}
+
 export function decimal(value?: { value?: string } | null): number | null {
   const raw = clean(value?.value);
   if (!raw) return null;

@@ -15,7 +15,12 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react';
-import { useFormContext, useWatch } from 'react-hook-form';
+import {
+  useFormContext,
+  useWatch,
+  type UseFormGetValues,
+  type UseFormSetValue,
+} from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
 import {
   Button,
@@ -58,6 +63,7 @@ import {
 } from './tech-card-options';
 import { bomUnitKind } from './nesting/marker-io';
 import { wireInt } from './wire-int';
+import { ulid } from 'utils/ulid';
 
 const OTHER = '__other';
 
@@ -339,43 +345,115 @@ function useLabelSizeAutofill(
 export const labelSizeText = (row: Pick<FormGarmentLabel, 'widthMm' | 'heightMm'>): string =>
   row.widthMm || row.heightMm ? `${row.widthMm || '—'} × ${row.heightMm || '—'}` : '';
 
-function LabelStepLink({ lineKey }: { lineKey?: string }) {
-  const { control } = useFormContext<TechCardFormData>();
+const LABEL_STEP_WORKS = new Set(['attach_label', 'hang_tag']);
+
+/** The label's step key; a row without one (generated, or saved before 0454) gets it on first use. */
+export function ensureLabelLineKey(
+  getValues: UseFormGetValues<TechCardFormData>,
+  setValue: UseFormSetValue<TechCardFormData>,
+  labelKey: string,
+): string {
+  const rows = (getValues('garmentLabels') ?? []) as FormGarmentLabel[];
+  const index = rows.findIndex((row) => sameKey(row.key, labelKey));
+  const current = index >= 0 ? rows[index]?.lineKey?.trim() : '';
+  if (current) return current;
+  const lineKey = ulid();
+  if (index >= 0)
+    setValue(`garmentLabels.${index}.lineKey`, lineKey as never, { shouldDirty: true });
+  else
+    upsertGarmentLabel(
+      getValues,
+      setValue,
+      labelKey,
+      { ...bornLabelFacts(labelKey), lineKey },
+      { keepBare: true },
+    );
+  return lineKey;
+}
+
+const stepName = (work: string): string =>
+  work === 'attach_label'
+    ? 'attach label'
+    : work === 'hang_tag'
+      ? 'hang tag'
+      : work.replaceAll('_', ' ') || 'step';
+
+function LabelStepLink({
+  labelKey,
+  lineKey,
+  canEdit,
+}: {
+  labelKey: string;
+  lineKey?: string;
+  canEdit: boolean;
+}) {
+  const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const operations = useWatch({ control, name: 'operations' }) ?? [];
   const [, setParams] = useSearchParams();
-  const index = lineKey
-    ? operations.findIndex((operation) => (operation.labelKeys ?? []).includes(lineKey))
+  const key = lineKey?.trim() ?? '';
+  const index = key
+    ? operations.findIndex((operation) => (operation.labelKeys ?? []).includes(key))
     : -1;
-  const operation = index >= 0 ? operations[index] : undefined;
-  if (!operation) return <EmptyCell />;
-  const number = operation.operationNumber || (index + 1) * 10;
-  const work = (operation.work ?? '').trim();
-  const name =
-    work === 'attach_label'
-      ? 'attach label'
-      : work === 'hang_tag'
-        ? 'hang tag'
-        : work.replaceAll('_', ' ') || 'step';
+  const steps = operations
+    .map((operation, at) => ({ operation, at }))
+    .filter(
+      ({ operation, at }) => at === index || LABEL_STEP_WORKS.has((operation.work ?? '').trim()),
+    );
+  const openSteps = () =>
+    setParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        next.set('tab', 'construction');
+        const operation = index >= 0 ? operations[index] : undefined;
+        if (operation?.operationNumber) next.set('op', String(operation.operationNumber));
+        else if (index >= 0) next.set('opi', String(index));
+        return next;
+      },
+      { replace: true },
+    );
+  if (!steps.length)
+    return (
+      <Button type='button' variant='underline' size='xs' onClick={openSteps}>
+        add step
+      </Button>
+    );
+  const choose = (value: string | undefined) => {
+    const target = value ? Number(value) : -1;
+    const key = ensureLabelLineKey(getValues, setValue, labelKey);
+    const current = getValues('operations') ?? [];
+    current.forEach((operation, at) => {
+      const keys = (operation.labelKeys ?? []).filter(Boolean);
+      const has = keys.includes(key);
+      if (at === target && !has)
+        setValue(`operations.${at}.labelKeys`, [...keys, key], { shouldDirty: true });
+      else if (at !== target && has)
+        setValue(
+          `operations.${at}.labelKeys`,
+          keys.filter((candidate) => candidate !== key),
+          { shouldDirty: true },
+        );
+    });
+  };
   return (
-    <Button
-      type='button'
-      variant='underline'
-      size='xs'
-      onClick={() =>
-        setParams(
-          (previous) => {
-            const next = new URLSearchParams(previous);
-            next.set('tab', 'construction');
-            if (operation.operationNumber) next.set('op', String(operation.operationNumber));
-            else next.set('opi', String(index));
-            return next;
-          },
-          { replace: true },
-        )
-      }
-    >
-      {number} {name}
-    </Button>
+    <span className='flex items-center gap-3'>
+      <Select
+        name={`${labelKey}-step`}
+        value={index >= 0 ? String(index) : ''}
+        placeholder='pick'
+        readOnly={!canEdit}
+        className='h-7 min-w-0 flex-1'
+        items={steps.map(({ operation, at }) => ({
+          value: String(at),
+          label: `${operation.operationNumber || (at + 1) * 10} ${stepName((operation.work ?? '').trim())}`,
+        }))}
+        onValueChange={choose}
+      />
+      {index >= 0 ? (
+        <Button type='button' variant='underline' size='xs' onClick={openSteps}>
+          open
+        </Button>
+      ) : null}
+    </span>
   );
 }
 
@@ -769,7 +847,7 @@ export function SewnLabelModal({
             />
           </Field>
           <Field label='step'>
-            <LabelStepLink lineKey={row.lineKey} />
+            <LabelStepLink labelKey={labelKey} lineKey={row.lineKey} canEdit={canEdit} />
           </Field>
           <Field label='fold' className='sm:col-span-2'>
             <FoldChips
@@ -967,9 +1045,13 @@ export function SewnLabelRow({
         aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
       >
-        <span className='hidden size-12 items-center justify-center border border-borderColor bg-pageBg sm:flex'>
-          <LabelIcon kind={labelPictogram(kind)} size={36} />
-        </span>
+        {material ? (
+          <MaterialThumb material={material} size='sm' className='hidden size-12 sm:block' />
+        ) : (
+          <span className='hidden size-12 items-center justify-center border border-borderColor bg-pageBg sm:flex'>
+            <LabelIcon kind={labelPictogram(kind)} size={36} />
+          </span>
+        )}
         <span className='min-w-0'>
           <Text
             size='control'
@@ -1194,7 +1276,7 @@ export function SewnLabelRow({
               <LabelSizeFields row={row} material={material} canEdit={canEdit} patch={patch} />
             </Field>
             <Field label='step'>
-              <LabelStepLink lineKey={row.lineKey} />
+              <LabelStepLink labelKey={labelKey} lineKey={row.lineKey} canEdit={canEdit} />
             </Field>
             {quantities.lengthGoods ? (
               <Field label='cm per garment'>

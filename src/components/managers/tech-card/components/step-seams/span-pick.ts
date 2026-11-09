@@ -290,3 +290,33 @@ export function repeatsStoredSeam(
       (overlaps(a, parts.b, geoms) && overlaps(b, parts.a, geoms)),
   );
 }
+
+/**
+ * When the other side holds only garment-label edges, how long they are together (mm): the edge of
+ * the garment the label goes onto is picked at that length by default. Null otherwise.
+ */
+export function labelSideLength(
+  pick: SidePick,
+  side: SpanSide,
+  isLabel: (id: string) => boolean,
+  edgeLength: (id: string) => number,
+): number | null {
+  const other: SpanSide = side === 'a' ? 'b' : 'a';
+  const ids = pick[other];
+  if (!ids.length || !ids.every(isLabel)) return null;
+  let total = 0;
+  for (const id of ids) {
+    const spans = pick.spans[other][id];
+    total += spans?.length
+      ? spans.reduce((sum, [from, to]) => sum + (to - from), 0)
+      : edgeLength(id);
+  }
+  return total > 0 ? total : null;
+}
+
+/** A span of `length` mm on an edge of `edgeLength`, centred on the click and kept on the edge. */
+export function spanOfLength(length: number, edgeLength: number, atMm: number): SpanRange {
+  const span = Math.min(length, edgeLength);
+  const from = Math.min(Math.max(atMm - span / 2, 0), edgeLength - span);
+  return [from, from + span];
+}

@@ -26,7 +26,7 @@ import { upsertGarmentLabel } from './form-writers';
 import { type FormGarmentLabel, type FormPackagingItem } from './labels-schema';
 import type { TechCardFormData } from './schema';
 import { PackagingShelf, packagingIssues } from './packaging-shelf';
-import { isCompositionLabel, labelBomLine } from './sewn-label-model';
+import { COMPOSITION_LABEL_KEY, isCompositionLabel, labelBomLine } from './sewn-label-model';
 import { bornLabelFacts, labelIssue, madeIntent, SewnLabelRow } from './sewn-label-row';
 import { StockPickerModal, type StockPickerOption } from './labels-pkg-shared';
 import {
@@ -256,6 +256,8 @@ export function LabelsBlock({
     TechCardFormData['bomItems']
   >;
   const rows = useMemo(() => all.filter((row) => !isCompositionLabel(row.key)), [all]);
+  const composition = all.find((row) => isCompositionLabel(row.key));
+  const compositionLine = composition ? labelBomLine(composition, bomItems) : undefined;
   const { materials, materialById, stock, stockKnown, onHandOf } = useLabelStock(techCard);
 
   const [adding, setAdding] = useState(false);
@@ -265,7 +267,7 @@ export function LabelsBlock({
   const [removed, setRemoved] = useState<RemovedLabel | null>(null);
 
   const keys = rows.map((row) => row.key ?? '');
-  const targetRow = rows.find((row) => row.key === materialTarget);
+  const targetRow = all.find((row) => row.key === materialTarget);
   const selectedLine = targetRow ? labelBomLine(targetRow, bomItems) : undefined;
   const warnings = rows
     .map((row, index) => {
@@ -293,6 +295,37 @@ export function LabelsBlock({
     <>
       <Section title='labels' action={<HeaderWarnings items={warnings} />}>
         <div>
+          {composition && compositionLine ? (
+            <SewnLabelRow
+              labelKey={COMPOSITION_LABEL_KEY}
+              title='composition label'
+              material={materialById.get(wireInt(compositionLine.materialId))}
+              onHand={onHandOf(materialById.get(wireInt(compositionLine.materialId)))}
+              canEdit={canEdit}
+              open={expanded === COMPOSITION_LABEL_KEY}
+              onOpenChange={(open) => setExpanded(open ? COMPOSITION_LABEL_KEY : null)}
+              onPickMaterial={() => setMaterialTarget(COMPOSITION_LABEL_KEY)}
+              removable={false}
+              generated={{
+                hideMissing: true,
+                action: (
+                  <Button
+                    type='button'
+                    variant='underline'
+                    size='xs'
+                    onClick={() =>
+                      document
+                        .querySelector('[data-composition-label]')
+                        ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                    }
+                  >
+                    open
+                  </Button>
+                ),
+              }}
+              last={rows.length === 0 && !canEdit}
+            />
+          ) : null}
           {rows.map((row, index) => {
             const key = row.key?.trim() || `label ${index + 1}`;
             const line = labelBomLine(row, bomItems);
@@ -328,7 +361,11 @@ export function LabelsBlock({
             );
           })}
           {canEdit ? (
-            <AddDoor shape='row' afterRows={rows.length > 0} onClick={() => setAdding(true)}>
+            <AddDoor
+              shape='row'
+              afterRows={rows.length > 0 || !!compositionLine}
+              onClick={() => setAdding(true)}
+            >
               label
             </AddDoor>
           ) : null}

@@ -220,6 +220,30 @@ export async function autopilotApply(
           '; ',
         )}${reuse.length > 3 ? ` (+${reuse.length - 3} more)` : ''} — nothing proves which card piece is which: confirm on the apply step`,
     };
+  // a block that may be a card piece under another name is the operator's call, never the autopilot's
+  const unresolved = get().session.draft?.unresolved ?? [];
+  const gone = new Set(
+    (get().session.draft?.scopes ?? []).flatMap((sc) =>
+      (sc.vanished ?? []).map((v) => `${sc.target.scopeKey}|${v.pieceLineKey}`),
+    ),
+  );
+  if (unresolved.length)
+    return {
+      ok: false,
+      step: 'check',
+      reason: `${unresolved
+        .slice(0, 3)
+        .map((u) => {
+          const shown = u.candidates.slice(0, 2);
+          const drawn = shown.some((c) => !gone.has(`${u.scopeKey}|${c.pieceLineKey}`));
+          return `block «${u.blockName}» may be the card's ${shown
+            .map((c) => `«${c.pieceName}»`)
+            .join(' or ')}${drawn ? '' : ', no longer drawn'}`;
+        })
+        .join(
+          '; ',
+        )}${unresolved.length > 3 ? ` (+${unresolved.length - 3} more)` : ''} — nothing proves which card piece is which: confirm on the apply step`,
+    };
   // the lock first (synchronous): an apply already running or done for this draft refuses this one
   const token = get().lockApply();
   if (token == null)

@@ -1,6 +1,12 @@
 // The door from the Patterns tab — kept tiny so patterns-field pulls nothing heavy: the wizard
 // itself is a lazy chunk.
-import type { CardSize, ConversionManifest, DraftScopeTarget } from 'lib/pattern-import/types';
+import type { PieceShapeReference } from 'lib/dxf-reconcile';
+import type {
+  CardSize,
+  ConversionManifest,
+  DraftScopeTarget,
+  DraftShapeRef,
+} from 'lib/pattern-import/types';
 import { sizeTokensOf } from '../nesting/block-code';
 import type { CardContext } from './client';
 
@@ -47,6 +53,8 @@ export function buildCardContext(args: {
     /** MF-C: the conversion manifest the card's parse read off this sheet (null = none / unread). */
     manifest?: ConversionManifest | null;
   }[];
+  /** Each card piece's current outline per scope and size (`shapeRefsOf`). */
+  shapes?: DraftShapeRef[];
   styleLabel: string;
   /** A10: the card's name and style number (the autopilot's model / sheet match). */
   cardName?: string;
@@ -107,8 +115,31 @@ export function buildCardContext(args: {
           ]
         : [],
     ),
+    existingShapes: args.shapes ?? [],
     styleLabel: args.styleLabel,
     cardName: args.cardName ?? '',
     styleNumber: args.styleNumber ?? '',
   };
+}
+
+/**
+ * The card's piece outlines per scope (`pieceShapeReferences` of each scope's contour pieces) as the
+ * import draft reads them: mm, per bare size token. PieceDTO carries cm.
+ */
+export function shapeRefsOf(
+  byScope: ReadonlyMap<string, readonly PieceShapeReference[]>,
+): DraftShapeRef[] {
+  return [...byScope].flatMap(([scopeKey, refs]) =>
+    refs.map((ref) => ({
+      scopeKey,
+      pieceLineKey: ref.pieceLineKey,
+      identity: ref.identity,
+      sizes: Object.fromEntries(
+        [...ref.entry.bySize].map(([size, p]) => [
+          size,
+          { areaMm2: p.areaCm2 * 100, wMm: p.bboxW * 10, hMm: p.bboxH * 10 },
+        ]),
+      ),
+    })),
+  );
 }

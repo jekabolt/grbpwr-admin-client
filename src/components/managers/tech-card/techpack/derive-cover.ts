@@ -11,6 +11,7 @@ import {
   materialColour,
   materialForPiece,
   materialRole,
+  repeatsQty,
   rollGoods,
   technicalMedia,
 } from './derive-shared';
@@ -58,10 +59,15 @@ export function deriveCover(
     (ref) => ref.item.kind === 'TECH_CARD_BOM_KIND_BUTTON' || /button/i.test(clean(ref.item.name)),
   );
   const buttonFacts = buttons.map((ref) => {
+    const lineKey = clean(ref.item.lineKey);
     const operationQty = operations
-      .flatMap((operation) => operation.bomQuantities ?? [])
-      .filter((qty) => clean(qty.lineKey) === clean(ref.item.lineKey))
-      .map((qty) => decimal(qty.qtyPerGarment))
+      .filter((operation) => (operation.bomLineKeys ?? []).map(clean).includes(lineKey))
+      .map(
+        (operation) =>
+          decimal(
+            operation.bomQuantities?.find((qty) => clean(qty.lineKey) === lineKey)?.qtyPerGarment,
+          ) ?? repeatsQty(operation),
+      )
       .filter((qty): qty is number => qty != null)
       .reduce((sum, qty) => sum + qty, 0);
     return {

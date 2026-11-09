@@ -12,6 +12,7 @@ import type {
   CardSize,
   ConversionManifest,
   DraftScopeTarget,
+  DraftShapeRef,
   NameDecision,
   SourceFileInfo,
   StageIO,
@@ -73,6 +74,11 @@ export type CardContext = {
     name?: string;
     manifest?: ConversionManifest | null;
   }[];
+  /**
+   * Each card piece's current outline per scope and size (the card's parse). Re-import binds a
+   * block the importer renamed to the piece of the same outline (`buildDraft`).
+   */
+  existingShapes?: DraftShapeRef[];
   /** Season + style number, for the file names the writer proposes. */
   styleLabel: string;
   /**

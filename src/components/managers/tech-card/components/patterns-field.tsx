@@ -155,7 +155,7 @@ import {
   useFileSizeRun,
 } from './nesting/use-block-sizes';
 import type { NestingFile } from './nesting/use-nesting';
-import { PATTERN_IMPORT_ENABLED, buildCardContext } from './pattern-import/entry';
+import { PATTERN_IMPORT_ENABLED, buildCardContext, shapeRefsOf } from './pattern-import/entry';
 import { createCardApply } from './pattern-import/card-apply';
 import type { ApplyDraftFn } from './pattern-import/client';
 import type { LiveCard } from 'lib/pattern-import/fabrics/apply';
@@ -1296,27 +1296,40 @@ export function PatternsField({
     return out;
   }, [bundle, scopeGroups, dictTokens]);
 
-  const knownPieceShapes = useMemo<PieceShapeReference[]>(() => {
-    if (!bundle) return [];
+  const pieceShapesByScope = useMemo(() => {
+    const out = new Map<string, PieceShapeReference[]>();
+    if (!bundle) return out;
     const livePieces = cardPieces.flatMap((piece) => {
       const lineKey = piece.lineKey?.trim() ?? '';
       const name = piece.name?.trim() ?? '';
       return lineKey && name ? [{ ...piece, lineKey, name }] : [];
     });
-    return scopeGroups.flatMap((group) => {
+    for (const group of scopeGroups) {
       const scoped = contourPiecesByScope.get(group.scope.key) ?? [];
-      if (scoped.length === 0) return [];
-      return pieceShapeReferences({
-        parse: {
-          pieces: scoped,
-          blockNames: scoped.flatMap((piece) => (piece.blockName?.trim() ? [piece.blockName] : [])),
-        },
-        bindings: pieceDxfAliases.filter((alias) => aliasInScope(alias, group.scope, linkSet)),
-        pieces: livePieces,
-        sizeTokens: [...dictTokens.keys()],
-      });
-    });
+      if (scoped.length === 0) continue;
+      out.set(
+        group.scope.key,
+        pieceShapeReferences({
+          parse: {
+            pieces: scoped,
+            blockNames: scoped.flatMap((piece) =>
+              piece.blockName?.trim() ? [piece.blockName] : [],
+            ),
+          },
+          bindings: pieceDxfAliases.filter((alias) => aliasInScope(alias, group.scope, linkSet)),
+          pieces: livePieces,
+          sizeTokens: [...dictTokens.keys()],
+        }),
+      );
+    }
+    return out;
   }, [bundle, cardPieces, scopeGroups, contourPiecesByScope, pieceDxfAliases, linkSet, dictTokens]);
+  const knownPieceShapes = useMemo<PieceShapeReference[]>(
+    () => [...pieceShapesByScope.values()].flat(),
+    [pieceShapesByScope],
+  );
+  // re-import: a block the importer renamed binds to the card piece of the same outline
+  const importShapes = useMemo(() => shapeRefsOf(pieceShapesByScope), [pieceShapesByScope]);
 
   const interliningOwnerShapes = useMemo(() => {
     const out = new Map<string, PieceDTO>();
@@ -4649,6 +4662,7 @@ export function PatternsField({
               name: p.name,
               manifest: (p.url && bundle?.manifestByUrl?.get(p.url)) || null,
             })),
+            shapes: importShapes,
             styleLabel: [season, styleNumber].filter(Boolean).join(' · '),
             cardName,
             styleNumber,

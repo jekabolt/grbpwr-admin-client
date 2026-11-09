@@ -15,6 +15,7 @@ import {
   materialColour,
   materialForPiece,
   materialRole,
+  repeatsQty,
   rollGoods,
   technicalMedia,
 } from './derive-shared';
@@ -199,7 +200,9 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink, t: Pd
           decimal(
             operation.bomQuantities?.find((item) => clean(item.lineKey) === clean(ref.item.lineKey))
               ?.qtyPerGarment,
-          ) ?? stripQtyInStep(operation, cutStrips, clean(ref.item.lineKey));
+          ) ??
+          stripQtyInStep(operation, cutStrips, clean(ref.item.lineKey)) ??
+          repeatsQty(operation);
         const same = spots.find((spot) => spot.pin === pin && spot.where === where);
         if (same) {
           if (operation.operationNumber != null)
