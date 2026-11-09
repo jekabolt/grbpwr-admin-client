@@ -1,5 +1,6 @@
 // The label at its true proportions with its artwork on it. Click to add a fold line; click a line
-// again to make it a stitch, a third time to remove it; click an edge to sew it. What folds under is
+// again to make it a stitch, again to sew through the fold, again to remove it; click an edge to
+// sew it. What folds under is
 // shaded grey. Beside it, the label folded, with its size and the stitch over its layers.
 import { useLibraryFile } from 'components/managers/files/hooks/useFiles';
 import type { MouseEvent } from 'react';
@@ -78,28 +79,42 @@ export function LabelFoldEditor({
     const box = event.currentTarget.getBoundingClientRect();
     if (!box.height) return;
     const py = ((event.clientY - box.top) * viewH) / box.height;
-    const mm = Math.round(((py - y) / k) * 2) / 2;
-    const near = (line: number) => Math.abs(line - mm) * k <= HIT_PX;
+    const raw = (py - y) / k;
+    // Whole millimetres; the middle snaps exactly, so a half fold reads as half.
+    const mm = Math.abs(raw - heightMm / 2) * k <= HIT_PX ? heightMm / 2 : Math.round(raw);
+    const near = (line: number) => Math.abs(line - raw) * k <= HIT_PX;
     const edge = near(0) ? 0 : near(heightMm) ? heightMm : null;
     if (edge !== null) {
       const sewnEdge = stitches.includes(edge);
       emit(lines, sewnEdge ? stitches.filter((line) => line !== edge) : [...stitches, edge]);
       return;
     }
-    const foldHit = lines.findIndex(near);
-    if (foldHit >= 0) {
+    // One line cycles fold → stitch → fold + stitch → off.
+    const foldHit = lines.find(near);
+    const stitchHit = stitches.find(near);
+    if (foldHit !== undefined && stitchHit !== undefined) {
       emit(
-        lines.filter((_, index) => index !== foldHit),
-        [...stitches, lines[foldHit]!],
+        lines.filter((line) => line !== foldHit),
+        stitches.filter((line) => line !== stitchHit),
       );
       return;
     }
-    const stitchHit = stitches.findIndex(near);
-    if (stitchHit >= 0) {
+    if (foldHit !== undefined) {
       emit(
-        lines,
-        stitches.filter((_, index) => index !== stitchHit),
+        lines.filter((line) => line !== foldHit),
+        [...stitches, foldHit],
       );
+      return;
+    }
+    if (stitchHit !== undefined) {
+      if (stitchHit <= 0 || stitchHit >= heightMm || lines.length >= MAX_FOLD_LINES) {
+        emit(
+          lines,
+          stitches.filter((line) => line !== stitchHit),
+        );
+        return;
+      }
+      emit([...lines, stitchHit], stitches);
       return;
     }
     if (mm <= 0 || mm >= heightMm || lines.length >= MAX_FOLD_LINES) return;
@@ -112,6 +127,10 @@ export function LabelFoldEditor({
       foldLinesMm: formatFoldLines(presetFoldLines(word, heightMm), heightMm),
       stitchLinesMm: formatStitchLines(stitches, heightMm),
     });
+
+  const isPreset = (word: string) =>
+    fold === word &&
+    formatFoldLines(lines, heightMm) === formatFoldLines(presetFoldLines(word, heightMm), heightMm);
 
   const fh = sewn.foldedMm * k;
   const foldedW = x + w + GUTTER;
@@ -243,8 +262,8 @@ export function LabelFoldEditor({
           <Chip
             key={option}
             nonForm
-            selected={fold === option}
-            pressed={fold === option}
+            selected={isPreset(option)}
+            pressed={isPreset(option)}
             disabled={disabled}
             onClick={() => preset(option)}
           >

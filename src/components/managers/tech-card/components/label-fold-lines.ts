@@ -124,11 +124,25 @@ export type LabelAssembly = {
   heightMm: number;
   /** The stitch lines on the folded label, mm from its top. */
   stitches: number[];
+  /** The stitch lines on the shown part, mm from its sewn (top) edge: the first is 0 when sewnTop. */
+  shownStitches: number[];
   /** The top edge of the shown part is the stitch. */
   sewnTop: boolean;
   /** Layers under the stitch. */
   layers: number;
 };
+
+/** Stitches closer than this are one seam (a click that missed by half a millimetre). */
+const SAME_SEAM_MM = 1;
+
+function mergeNear(values: readonly number[]): number[] {
+  const out: number[] = [];
+  for (const value of [...values].sort((x, y) => x - y)) {
+    const last = out[out.length - 1];
+    if (last === undefined || value - last >= SAME_SEAM_MM) out.push(value);
+  }
+  return out;
+}
 
 export function labelAssembly(
   foldLines: readonly number[],
@@ -137,18 +151,33 @@ export function labelAssembly(
 ): LabelAssembly {
   const [a, b] = foldFront(foldLines, heightMm);
   const foldedMm = round1(b - a);
-  const stitches = [...new Set(stitchLines.map((mm) => foldedAt(mm, foldLines, heightMm)))].sort(
-    (x, y) => x - y,
-  );
+  const stitches = mergeNear(stitchLines.map((mm) => foldedAt(mm, foldLines, heightMm)));
   const first = stitches[0];
-  if (first === undefined)
-    return { foldedMm, heightMm: foldedMm, stitches, sewnTop: false, layers: 1 };
-  const shown = Math.max(first, foldedMm - first);
+  if (first === undefined || !(foldedMm > 0))
+    return {
+      foldedMm,
+      heightMm: foldedMm,
+      stitches,
+      shownStitches: [],
+      sewnTop: false,
+      layers: 1,
+    };
+  // The stitch nearest an end is where the label is caught in the seam; what lies beyond it goes
+  // into the seam allowance and the rest shows.
+  const last = stitches[stitches.length - 1]!;
+  const keepBelow = foldedMm - first >= last;
+  const cut = keepBelow ? first : last;
+  const shown = round1(keepBelow ? foldedMm - cut : cut);
+  const shownStitches = stitches
+    .map((at) => round1(keepBelow ? at - cut : cut - at))
+    .filter((at) => at >= 0 && at <= shown)
+    .sort((x, y) => x - y);
   return {
     foldedMm,
-    heightMm: round1(shown > 0 ? shown : foldedMm),
+    heightMm: shown > 0 ? shown : foldedMm,
     stitches,
+    shownStitches: shown > 0 ? shownStitches : [],
     sewnTop: shown > 0,
-    layers: layersAt(first, foldLines, heightMm),
+    layers: layersAt(cut, foldLines, heightMm),
   };
 }

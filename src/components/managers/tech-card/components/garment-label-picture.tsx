@@ -60,16 +60,25 @@ export function GarmentLabelOverlay({
               strokeWidth={outlineWidth ?? hair * 1.5}
               strokeLinejoin='round'
             />
-            {sewn.sewnTop ? (
-              <path
-                d={pathOf([a, b])}
-                fill='none'
-                stroke={stroke}
-                strokeWidth={hair * 2}
-                strokeDasharray={`${hair * 4} ${hair * 2.5}`}
-                data-label-stitch=''
-              />
-            ) : null}
+            {sewn.shownStitches.map((at) => {
+              // The picture is y-up: the label's top (its sewn edge) is the d–c side. A stitch on an
+              // edge is drawn just inside it, so it never hides under the outline.
+              const inset = Math.min(1.5, sewn.heightMm * 0.08);
+              const mm = Math.min(Math.max(at, inset), sewn.heightMm - inset);
+              const t = sewn.heightMm > 0 ? mm / sewn.heightMm : 0;
+              const width = outlineWidth ?? hair * 1.5;
+              return (
+                <path
+                  key={at}
+                  d={pathOf([mix(d, a, t), mix(c, b, t)])}
+                  fill='none'
+                  stroke={stroke}
+                  strokeWidth={width}
+                  strokeDasharray={`${width * 2.5} ${width * 1.5}`}
+                  data-label-stitch={at}
+                />
+              );
+            })}
           </g>
         );
       })}
