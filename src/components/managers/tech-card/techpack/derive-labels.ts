@@ -35,6 +35,7 @@ import {
 } from './derive-shared';
 import type { Gap, GapSink } from './gaps';
 import { englishT, own, type PdfT } from './i18n';
+import { parseFoldLines } from 'components/managers/tech-card/components/label-fold-lines';
 
 export type LabelsDeriveOptions = {
   sampleSizeName?: string;
@@ -125,6 +126,11 @@ function deriveSewn(techCard: common_TechCard, options: LabelsDeriveOptions, t: 
     return number == null ? '' : String(number);
   };
 
+  const foldLinesText = (csv: string | undefined, heightMm: number) => {
+    const lines = parseFoldLines(csv, heightMm);
+    return lines.length ? `${lines.join(' / ')} mm` : '';
+  };
+
   const table: SewnTableRow[] = rows.map((row, index) => ({
     key: clean(row.key) || `label-${index}`,
     number: pinned[index]?.number ?? null,
@@ -132,7 +138,12 @@ function deriveSewn(techCard: common_TechCard, options: LabelsDeriveOptions, t: 
     location: clean(row.placement),
     attachment: clean(row.attachment),
     // A card not saved since the size/fold fields came keeps its old free text.
-    fold: clean(row.fold) || clean(row.folding),
+    fold: [
+      clean(row.fold) || clean(row.folding),
+      foldLinesText(row.foldLinesMm, decimal(row.heightMm) ?? 0),
+    ]
+      .filter(Boolean)
+      .join(' · '),
     size:
       [labelMm(row.widthMm), labelMm(row.heightMm)].filter(Boolean).join(' × ') || clean(row.size),
     material: clean(

@@ -8,7 +8,9 @@ import type {
   PieceSpec,
   PtMm,
 } from 'lib/pattern-import/types';
+import { GENERATED_FUSING_DXF_MARKER } from 'lib/pattern-import/types';
 import { writeScopes } from 'lib/pattern-import/write';
+import { fitGrainInside } from 'lib/pattern-import/semantics/grain-inside';
 import { edgeRunsOf } from './edge-runs';
 import { fuseAreaMm2, fuseInsetRingMm, generateFuseGeometry, signedArea } from './geometry';
 import { ZONE_ON_CONTOUR_MM, projectOnRing } from './spline';
@@ -48,7 +50,19 @@ export type BuildFusingSheetsInput = {
   baseSizeId?: number | null;
   bomLines: FusingBomLine[];
   pieces: FusingSourcePiece[];
+  /**
+   * T5 (09.11): the time the R12 header prints («Creation Date / Time»). The sheets the build reads
+   * fix it, never the clock: the same inputs give the same bytes, so a rebuild with nothing changed
+   * finds its sheet by sha256 and writes nothing. Absent or unreadable → the epoch.
+   */
+  createdAt?: string;
 };
+
+/** The header time of a generated sheet: the given one when readable, else the epoch. */
+export function fusingSheetStamp(createdAt: string | undefined): Date {
+  const at = createdAt ? new Date(createdAt) : new Date(0);
+  return Number.isNaN(at.getTime()) ? new Date(0) : at;
+}
 
 export type FusingSkippedSize = {
   piece: string;
@@ -95,6 +109,11 @@ export function fusingSheetFilename(style: string, bomCode: string): string {
   return `${slug(style, 'style')}-fusing-${slug(bomCode, 'interlining')}.dxf`;
 }
 
+function markGeneratedFusing(dxfText: string): string {
+  const eol = dxfText.includes('\r\n') ? '\r\n' : '\n';
+  return `999${eol}${GENERATED_FUSING_DXF_MARKER}${eol}${dxfText}`;
+}
+
 function bbox(points: readonly PtMm[]) {
   let minX = Infinity;
   let minY = Infinity;
@@ -138,14 +157,16 @@ function grainOf(
         ? sourceAngle + 45
         : sourceAngle;
   const line = spec.grain === 'as_piece' && source.grain ? source.grain : axisThrough(cut, angle);
+  const fitted = fitGrainInside(line.a, line.b, [cut], { minMm: 1 });
+  if (!fitted) return null;
   const angleDeg = (Math.atan2(line.b.y - line.a.y, line.b.x - line.a.x) * 180) / Math.PI;
   return {
     kind: 'grain',
     origin: 'derived',
     ranges: [],
     confidence: 1,
-    a: line.a,
-    b: line.b,
+    a: fitted[0],
+    b: fitted[1],
     angleDeg,
     evidence: ['geometry'],
   };
@@ -596,7 +617,7 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
         generator: 'grbpwr/fusing-dxf',
         dialect: 'r12',
       },
-      { embed: null },
+      { embed: null, now: () => fusingSheetStamp(input.createdAt) },
     );
     warnings.push(
       ...written.detail.warnings.filter(
@@ -606,7 +627,7 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
     sheets.push({
       bomLineKey: line.bomLineKey,
       filename: fusingSheetFilename(input.style, line.code),
-      dxfText: written.detail.bareText,
+      dxfText: markGeneratedFusing(written.detail.bareText),
       blocks: written.detail.plan.blocks.map((block) => block.name),
       aliases: [...aliasNames(written.detail.manifest)].map(([identity, blockName]) => ({
         identity,

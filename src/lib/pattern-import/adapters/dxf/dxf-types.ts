@@ -94,6 +94,8 @@ export type DxfMeta = {
   binary: 'r12' | 'r13+' | null;
   units: DxfUnits;
   manifest: boolean;
+  /** Proven by the generator's DXF marker or the system-owned card-row flag. */
+  generatedFusing: boolean;
   /** Model-space `KEY: value` texts (AAMA header: STYLE NAME, SAMPLE SIZE, UNITS, AUTHOR…). */
   modelLabels: DecodedLabel[];
   groups: DxfGroup[];
@@ -308,6 +310,12 @@ export type DxfPieceCandidate = PieceCandidate & {
     group: number;
     identity: string;
     size: string;
+    /** Whether the size came from an explicit label or the block-name tail. */
+    sizeSource?: DxfBlockPiece['sizeSource'];
+    /** Whether the identity came from PIECE NAME or only the block name. */
+    identitySource?: DxfBlockPiece['identitySource'];
+    /** Proven by the generator's DXF marker or the system-owned card-row flag. */
+    generatedFusing?: boolean;
     features: Feature[];
     /** The outer contour is L14 (mode A: the true graded line) — cut = outward offset. */
     outerIsSeam: boolean;

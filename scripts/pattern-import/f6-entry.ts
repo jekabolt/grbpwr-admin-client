@@ -1773,6 +1773,106 @@ export async function main(opts: { plans: string }): Promise<number> {
     );
   }
   {
+    const ownerSource: ManifestSource = {
+      ...SOURCE,
+      files: [{ ...SOURCE.files[0], name: 'x-fusing.dxf', kind: 'dxf' }],
+      sizeEncoding: 'dxf-block',
+    };
+    const fresh = slSpec('FP_XS');
+    fresh.code = 'FP';
+    fresh.mods = ['XS'];
+    const freshJob = job(MAIN, [fresh]);
+    freshJob.source = ownerSource;
+    await neg(
+      'fresh unsplit FP_XS in an owner DXF named fusing',
+      'G11-grammar',
+      (
+        await writeAndGate(
+          freshJob,
+          gateCtx([fresh], { sizeTokens: new Set([...CARD_TOKENS, 'XS']) }),
+        )
+      ).report,
+    );
+
+    const existing = slSpec('PLCK_L');
+    existing.code = 'PLCK';
+    existing.mods = ['L'];
+    const exactJob = job(MAIN, [existing]);
+    exactJob.source = { ...ownerSource, presegmentedIdentities: ['PLCK_L'] };
+    const exact = await writeAndGate(exactJob, gateCtx([existing]));
+    ck(
+      checkOf(exact.report, 'G11-grammar')[0]?.ok === true,
+      'an explicit piece/size label keeps pre-segmented identity PLCK_L',
+      summary(exact.report),
+    );
+  }
+  {
+    const cuts = [
+      ccw([
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+        { x: 100, y: 40 },
+        { x: 0, y: 40 },
+      ]),
+      ccw([
+        { x: 0, y: 0 },
+        { x: 70, y: 0 },
+        { x: 70, y: 40 },
+        { x: 0, y: 40 },
+      ]),
+      ccw([
+        { x: 0, y: 0 },
+        { x: 110, y: 0 },
+        { x: 110, y: 40 },
+        { x: 65, y: 40 },
+        { x: 65, y: 55 },
+        { x: 45, y: 55 },
+        { x: 45, y: 40 },
+        { x: 0, y: 40 },
+      ]),
+    ];
+    const band = piece('FUSE', 'FUSE', [], {
+      allowance: { meaning: 'cut', allowanceMm: 0, origin: 'text', evidence: [] },
+      sizes: SIZES.map((size, index) => {
+        const cut = cuts[index];
+        return sizeSpec(size, {
+          cut,
+          seam: cut,
+          offset: offsetReport(cut),
+          grain: grainF({ x: 20, y: 5 }, { x: 20, y: 35 }),
+        });
+      }),
+    });
+    const ownerSource: ManifestSource = {
+      ...SOURCE,
+      files: [{ ...SOURCE.files[0], name: 'x-fusing.dxf', kind: 'dxf' }],
+      sizeEncoding: 'dxf-block',
+    };
+    const ownerJob = job(MAIN, [band]);
+    ownerJob.source = ownerSource;
+    const owner = await writeAndGate(ownerJob, gateCtx([band]));
+    const ownerG5 = checkOf(owner.report, 'G5-features').find((check) => !check.ok);
+    const ownerG8 = checkOf(owner.report, 'G8-monotone')[0];
+    ck(
+      ownerG5?.severity === 'block' && ownerG8?.severity === 'block' && !owner.report.passed,
+      'owner x-fusing.dxf without generator provenance still blocks shape and area reversals',
+      summary(owner.report),
+    );
+
+    const generatedJob = job(MAIN, [band]);
+    generatedJob.source = { ...ownerSource, generatedFusing: true };
+    const generated = await writeAndGate(generatedJob, gateCtx([band]));
+    const generatedG5 = checkOf(generated.report, 'G5-features').find((check) => !check.ok);
+    const generatedG8 = checkOf(generated.report, 'G8-monotone')[0];
+    ck(
+      generatedG5?.severity === 'warn' &&
+        generatedG8?.severity === 'warn' &&
+        generated.report.passed,
+      'generator provenance alone downgrades exact fusing shape and area reversals',
+      summary(generated.report),
+    );
+  }
+  {
     const sl = slSpec();
     sl.sizes = sl.sizes.map((s) => (s.rank === 1 ? { ...s, grain: null } : s));
     await neg(

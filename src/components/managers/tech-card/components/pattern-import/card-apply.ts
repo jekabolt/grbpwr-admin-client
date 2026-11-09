@@ -64,6 +64,8 @@ export function createCardApply(deps: {
   unsaved?: { get: () => boolean; set: (v: boolean) => void };
   /** The rows landed though the save answered otherwise (a write after the body failed). */
   landed?: ApplyDeps['landed'];
+  /** The save is past the body: only the fusing rebuild after it still runs (T5). */
+  rebuilding?: ApplyDeps['rebuilding'];
 }): ApplyDraftFn {
   return (draft, onProgress) =>
     applyDraft(
@@ -93,6 +95,7 @@ export function createCardApply(deps: {
         onReplaced: deps.onReplaced,
         unsaved: deps.unsaved,
         landed: deps.landed,
+        rebuilding: deps.rebuilding,
       },
       onProgress,
     );

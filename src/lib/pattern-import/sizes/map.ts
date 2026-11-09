@@ -22,10 +22,36 @@
 // Each card size takes at most one source size. Whatever does not match is EXPLICITLY unmapped
 // (card null + why) — never dropped silently, never guessed onto a neighbour.
 
-import type { CardSize, ProposeSizeMapFn, SizeMap, SizeMapEntry, SizeRun } from '../types';
+import type {
+  CardSize,
+  FileId,
+  ManifestSize,
+  ProposeSizeMapFn,
+  SizeMap,
+  SizeMapEntry,
+  SizeRun,
+} from '../types';
 import { parseSizeToken } from './tokens';
 
 export type SizeTokensOf = (card: CardSize) => string[];
+
+/**
+ * A fast-path DXF with no size suffix has no source row at all. On a one-size card that absence is
+ * unambiguous: make the one drawn rank explicit so pieces, semantics and the writer all address
+ * the card's sole size. Multi-size cards keep the empty run and therefore keep asking.
+ */
+export function sizeRunForCard(
+  run: SizeRun,
+  card: readonly CardSize[],
+  file: FileId | null = null,
+): SizeRun {
+  if (card.length !== 1 || run.sizes.length !== 0) return run;
+  return {
+    ...run,
+    encoding: 'single',
+    sizes: [{ label: '', rank: 0, classId: null, file }],
+  };
+}
 
 // a separator BETWEEN TWO DIGITS is part of the size (marked while the rest is stripped)
 const DIGIT_SEP = /(\p{N})[^\p{L}\p{N}]+(?=\p{N})/gu;
@@ -184,6 +210,27 @@ export function createProposeSizeMap(opts: { tokensOf?: SizeTokensOf } = {}): Pr
   const tokensOf = opts.tokensOf ?? defaultTokensOf;
   return (run: SizeRun, card: CardSize[]): SizeMap => {
     const cards = [...card].sort((a, b) => a.rank - b.rank);
+    // Bags, covers and other OS cards have one destination by construction. A missing label or a
+    // single foreign label (M/S on an OS card) cannot make the mapping ambiguous.
+    if (cards.length === 1 && run.sizes.length === 1) {
+      const source = run.sizes[0];
+      return {
+        entries: [
+          {
+            source,
+            card: cards[0],
+            origin: 'auto',
+            confidence: 1,
+            evidence: [
+              source.label.trim()
+                ? `the one sheet size maps to the card's only size ${cards[0].token}`
+                : `the sheet has one unnamed size; the card's only size is ${cards[0].token}`,
+            ],
+          },
+        ],
+        unmapped: [],
+      };
+    }
     // US misses' sizes (00 … 32, or paired 0/2 · 00-0 …): their letter equivalents are not the
     // sheet's to say
     const usRun = run.sizes.some((s) => /^0{2,}$/.test(s.label.trim()) || paired(s.label));
@@ -261,6 +308,85 @@ export function createProposeSizeMap(opts: { tokensOf?: SizeTokensOf } = {}): Pr
 
 /** The default mapper (token + dictionary-name spellings). */
 export const proposeSizeMap: ProposeSizeMapFn = createProposeSizeMap();
+
+type StoredSize = Pick<ManifestSize, 'sourceLabel' | 'sizeId' | 'token' | 'rank'>;
+
+/**
+ * Reapply a size decision preserved by an existing sheet's manifest. The caller supplies only
+ * manifests from the same card scope. Every current source rank and every stored target must still
+ * resolve uniquely; otherwise the ordinary resolver stands and the wizard asks as before.
+ */
+export function storedSizeMap(
+  run: SizeRun,
+  card: readonly CardSize[],
+  stored: readonly (readonly StoredSize[])[],
+): SizeMap | null {
+  if (!run.sizes.length || !card.length || !stored.length) return null;
+  const cardById = new Map(card.map((c) => [c.sizeId, c]));
+  const cardsByToken = new Map<string, CardSize[]>();
+  for (const c of card) {
+    const key = sizeKey(c.token);
+    cardsByToken.set(key, [...(cardsByToken.get(key) ?? []), c]);
+  }
+
+  type Candidate = { map: SizeMap; exact: number; sameLength: boolean };
+  const candidates: Candidate[] = [];
+  for (const previous of stored) {
+    const byLabel = new Map<string, StoredSize[]>();
+    for (const p of previous) {
+      const key = sizeKey(p.sourceLabel);
+      if (key) byLabel.set(key, [...(byLabel.get(key) ?? []), p]);
+    }
+    let exact = 0;
+    const entries: SizeMapEntry[] = [];
+    const used = new Set<number>();
+    let valid = true;
+    for (const source of run.sizes) {
+      const key = sizeKey(source.label);
+      const labelled = key ? byLabel.get(key) ?? [] : [];
+      const hit =
+        labelled.length === 1 ? labelled[0] : previous.find((p) => p.rank === source.rank);
+      if (!hit) {
+        valid = false;
+        break;
+      }
+      if (labelled.length === 1 && hit === labelled[0]) exact++;
+      const byToken = cardsByToken.get(sizeKey(hit.token)) ?? [];
+      const target = cardById.get(hit.sizeId) ?? (byToken.length === 1 ? byToken[0] : null);
+      if (!target || used.has(target.sizeId)) {
+        valid = false;
+        break;
+      }
+      used.add(target.sizeId);
+      entries.push({
+        source,
+        card: target,
+        origin: 'operator',
+        confidence: 1,
+        evidence: ["reused from the card's existing sheet"],
+      });
+    }
+    if (!valid || entries.length !== run.sizes.length) continue;
+    candidates.push({
+      map: { entries, unmapped: card.filter((c) => !used.has(c.sizeId)) },
+      exact,
+      sameLength: previous.length === run.sizes.length,
+    });
+  }
+  candidates.sort((a, b) => b.exact - a.exact || Number(b.sameLength) - Number(a.sameLength));
+  const best = candidates[0];
+  const next = candidates[1];
+  // Two equally good sheets that preserve different decisions are not a reusable decision.
+  if (
+    best &&
+    next &&
+    best.exact === next.exact &&
+    best.sameLength === next.sameLength &&
+    best.map.entries.some((e, i) => e.card?.sizeId !== next.map.entries[i]?.card?.sizeId)
+  )
+    return null;
+  return best?.map ?? null;
+}
 
 /** Operator answers replace auto rows by source rank (origin 'operator', confidence 1). */
 export function applyOperatorMap(

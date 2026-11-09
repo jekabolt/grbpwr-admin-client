@@ -1,6 +1,8 @@
 import { aliasIdentity } from 'components/managers/tech-card/components/nesting/split-pieces';
 import { pieceNameMatches } from 'components/managers/tech-card/components/nesting/piece-name-match';
 import { bareToken } from 'components/managers/tech-card/components/nesting/block-code';
+import type { PieceDTO } from 'lib/nesting/types';
+import { acceptedGateFindings } from 'lib/pattern-import/gate/accepted';
 
 import { byName, comparePair, indexSheet, mirrorSidesConflict, type SheetEntry } from './match';
 import type { CardPiece, ParsedSheetLite } from './types';
@@ -20,6 +22,8 @@ export type PieceShapeReference = {
   /** Identity of the source DXF block; used by the L/R chirality guard. */
   identity: string;
   entry: SheetEntry;
+  /** Blocking checks this identity already fails on the current card sheet. */
+  acceptedGate?: import('lib/pattern-import/types').GateCheckId[];
 };
 
 export type PieceShapeProposal = {
@@ -48,6 +52,19 @@ export function pieceShapeReferences<P extends CardPiece>(args: {
 }): PieceShapeReference[] {
   const dict = new Set(args.sizeTokens.map(bareToken).filter(Boolean));
   const idx = indexSheet(args.parse, dict);
+  const piecesByIdentity = new Map<string, PieceDTO[]>();
+  for (const piece of args.parse.pieces) {
+    const identity = (idx.split.codeById.get(piece.id)?.identity ?? '').trim().toLowerCase();
+    if (!identity) continue;
+    piecesByIdentity.set(identity, [...(piecesByIdentity.get(identity) ?? []), piece]);
+  }
+  const accepted = acceptedGateFindings(
+    [...idx.entries.values()].map((entry) => ({
+      identity: entry.identity,
+      pieces: piecesByIdentity.get(entry.key) ?? [...entry.bySize.values()],
+      bySize: entry.bySize,
+    })),
+  );
   const liveByKey = new Map(
     args.pieces
       .filter((piece) => piece.lineKey.trim() && piece.name.trim())
@@ -78,6 +95,7 @@ export function pieceShapeReferences<P extends CardPiece>(args: {
         pieceName: piece.name.trim(),
         identity: entry.identity,
         entry,
+        ...(accepted.get(entry.key)?.length ? { acceptedGate: accepted.get(entry.key) } : {}),
       });
     }
   }

@@ -1,5 +1,7 @@
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 
+import { foldedSpans } from './label-fold-lines';
+
 const INK = 'var(--color-textColor)';
 const PAPER = 'var(--color-bgColor)';
 
@@ -15,10 +17,8 @@ const mix = (a: Pt2, b: Pt2, at: number): Pt2 => [
   a[1] + (b[1] - a[1]) * at,
 ];
 
-const distance = (a: Pt2, b: Pt2): number => Math.hypot(b[0] - a[0], b[1] - a[1]);
-
 /**
- * The label outline and its physical fold, over the ordinary posed piece geometry, in the colour of
+ * The label outline, its fold lines and the folded-under parts shaded, over the ordinary posed piece geometry, in the colour of
  * the pieces it lies on (`stroke`), so a label reads as one more piece of the garment.
  */
 export function GarmentLabelOverlay({
@@ -48,22 +48,7 @@ export function GarmentLabelOverlay({
           mark.fold === 'mitre'
             ? [a, b, mix(c, d, mitreInset), mix(d, c, mitreInset)]
             : piece.drawn;
-        const topLeft = mix(a, b, 0.15);
-        const topRight = mix(a, b, 0.85);
-        const bottomLeft = mix(d, c, 0.15);
-        const bottomRight = mix(d, c, 0.85);
-        const loopStart = mix(a, b, 0.28);
-        const loopEnd = mix(a, b, 0.72);
-        const topMiddle = mix(a, b, 0.5);
-        const centre = mix(topMiddle, mix(d, c, 0.5), 0.5);
-        const outwardLength = Math.max(distance(a, d) * 0.3, hair * 3);
-        const centreDistance = Math.max(distance(topMiddle, centre), hair);
-        const outward: Pt2 = [
-          ((topMiddle[0] - centre[0]) / centreDistance) * outwardLength,
-          ((topMiddle[1] - centre[1]) / centreDistance) * outwardLength,
-        ];
-        const loopControlA: Pt2 = [loopStart[0] + outward[0], loopStart[1] + outward[1]];
-        const loopControlB: Pt2 = [loopEnd[0] + outward[0], loopEnd[1] + outward[1]];
+        const lines = (mark.foldLines ?? []).filter((mm) => mm > 0 && mm < mark.heightMm);
         return (
           <g key={piece.key} data-garment-label={piece.key}>
             <path
@@ -73,42 +58,40 @@ export function GarmentLabelOverlay({
               strokeWidth={outlineWidth ?? hair * 1.5}
               strokeLinejoin='round'
             />
-            {mark.fold === 'half' && (
+            {foldedSpans(lines, mark.heightMm).map(([from, to]) => (
               <path
-                d={pathOf([d, c])}
-                fill='none'
-                stroke={stroke}
-                strokeWidth={hair * 3}
-                data-label-fold='half'
+                key={`${from}-${to}`}
+                d={pathOf(
+                  [
+                    mix(a, d, from / mark.heightMm),
+                    mix(b, c, from / mark.heightMm),
+                    mix(b, c, to / mark.heightMm),
+                    mix(a, d, to / mark.heightMm),
+                  ],
+                  true,
+                )}
+                fill={stroke}
+                stroke='none'
+                opacity={0.22}
+                data-label-folded=''
               />
-            )}
-            {mark.fold === 'ends' && (
+            ))}
+            {lines.length ? (
               <g
                 fill='none'
                 stroke={stroke}
                 strokeWidth={hair}
                 strokeDasharray={`${hair * 3} ${hair * 2}`}
-                data-label-fold='ends'
+                data-label-fold-lines={lines.join(',')}
               >
-                <path d={pathOf([topLeft, bottomLeft])} />
-                <path d={pathOf([topRight, bottomRight])} />
+                {lines.map((mm) => (
+                  <path
+                    key={mm}
+                    d={pathOf([mix(a, d, mm / mark.heightMm), mix(b, c, mm / mark.heightMm)])}
+                  />
+                ))}
               </g>
-            )}
-            {mark.fold === 'loop' && (
-              <path
-                d={`M${loopStart[0].toFixed(2)} ${loopStart[1].toFixed(
-                  2,
-                )} C${loopControlA[0].toFixed(2)} ${loopControlA[1].toFixed(
-                  2,
-                )} ${loopControlB[0].toFixed(2)} ${loopControlB[1].toFixed(
-                  2,
-                )} ${loopEnd[0].toFixed(2)} ${loopEnd[1].toFixed(2)}`}
-                fill='none'
-                stroke={stroke}
-                strokeWidth={hair * 1.5}
-                data-label-fold='loop'
-              />
-            )}
+            ) : null}
           </g>
         );
       })}

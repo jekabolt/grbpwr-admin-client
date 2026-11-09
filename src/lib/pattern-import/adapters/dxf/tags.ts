@@ -3,7 +3,7 @@
 // ATTRIB, MTEXT continuation, entity order and handles for provenance) — 05-CODEX-REVIEW item 8,
 // 10-CLO-DXF-FORMAT §2.4-2.
 
-import { MANIFEST_TAG, PATIMPORT } from '../../types';
+import { GENERATED_FUSING_DXF_MARKER, MANIFEST_TAG, PATIMPORT } from '../../types';
 import { inputTooLarge } from '../budget';
 import { dwgRelease, refusalHint } from '../sniff/errors';
 import { isBinaryDxf, readBinaryDxf, type BinaryDxfMode } from './binary';
@@ -79,6 +79,8 @@ export type LoadedDxf = {
   fallback: boolean;
   /** Our manifest leads the file (`isOurDxf`). */
   manifest: boolean;
+  /** Exact generator-owned marker in the leading DXF comments. */
+  generatedFusing: boolean;
   /** Text to sniff the producer in (the head of the ASCII file / the binary's string values). */
   probeText: string;
   /** null = ASCII DXF. */
@@ -95,17 +97,24 @@ export function loadDxf(bytes: ArrayBuffer): LoadedDxf {
       encoding: b.encoding,
       fallback: b.fallback,
       manifest: b.manifest,
+      generatedFusing: b.tok.leadingComments.some(
+        (comment) => comment.trim() === GENERATED_FUSING_DXF_MARKER,
+      ),
       probeText: b.probeText,
       binary: b.mode,
     };
   }
   refuseLongDxf(u8);
   const dec = decodeDxf(bytes);
+  const tok = tokenize(dec.text);
   return {
-    tok: tokenize(dec.text),
+    tok,
     encoding: dec.encoding,
     fallback: dec.fallback,
     manifest: isOurDxf(dec.text),
+    generatedFusing: tok.leadingComments.some(
+      (comment) => comment.trim() === GENERATED_FUSING_DXF_MARKER,
+    ),
     probeText: dec.text.slice(0, 200_000),
     binary: null,
   };

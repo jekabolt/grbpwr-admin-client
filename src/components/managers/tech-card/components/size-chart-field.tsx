@@ -200,6 +200,17 @@ export function SizeChartField({
   const [saving, setSaving] = useState(false);
   const [touched, setTouched] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState(false);
+  // A click on a value in the read table opens edit mode with that cell focused.
+  const [focusCell, setFocusCell] = useState('');
+  useEffect(() => {
+    if (!editing || !focusCell) return;
+    const input = document.getElementsByName(focusCell)[0];
+    if (input instanceof HTMLInputElement) {
+      input.focus();
+      input.select();
+    }
+    setFocusCell('');
+  }, [editing, focusCell]);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [activePointId, setActivePointId] = useState<number | null>(null);
   const [activeFreeLinePosition, setActiveFreeLinePosition] = useState<number | null>(null);
@@ -479,7 +490,12 @@ export function SizeChartField({
       }
       return;
     }
-    const seeded = seedChart(pattern.seedKind, legacyOnly ? [] : points, cells, nameIds);
+    // A hooded icon brings its hood rows into a new chart.
+    const iconKey = picture.iconKey || defaultSizeChartIcon(pattern.categoryNames) || '';
+    const hoodNames = (SIZE_CHART_ICONS[iconKey]?.lines ?? [])
+      .map((line) => line.name)
+      .filter((name) => name.startsWith('hood-'));
+    const seeded = seedChart(pattern.seedKind, legacyOnly ? [] : points, cells, nameIds, hoodNames);
     const merged = mergePatternIntoCells(seeded.cells, seeded.points, pattern.patternValues);
     setPoints(seeded.points);
     setCells(merged.cells);
@@ -781,7 +797,6 @@ export function SizeChartField({
       })),
     [ordered, sizeById],
   );
-  const selectedSizeId = Number(mobileSize) || baseId || ordered[0] || 0;
   const measurementOptions = useMemo(
     () =>
       [...measurementById]
@@ -799,8 +814,14 @@ export function SizeChartField({
     [picture.lines],
   );
   const unpickedFreeLines = picture.lines.filter((line) => line.measurementNameId === 0);
-  const valueForPicture = (measurementNameId: number) =>
-    oneDecimal(stored(cells, selectedSizeId, measurementNameId));
+  const pictureRows = useMemo(
+    () =>
+      points.map((point) => ({
+        measurementNameId: point.measurementNameId,
+        position: point.position,
+      })),
+    [points],
+  );
 
   const rememberCurrentPicture = () => {
     if (picture.source === 'icon' && picture.iconKey) {
@@ -1322,7 +1343,16 @@ export function SizeChartField({
                             'min-w-16',
                             String(sizeId) !== mobileSize && '@max-[50rem]:hidden',
                             !editing && changed && 'text-error',
+                            !editing && canEdit && 'cursor-pointer',
                           )}
+                          onClick={
+                            !editing && canEdit && !saving
+                              ? () => {
+                                  setFocusCell(`size-chart-${point.measurementNameId}-${sizeId}`);
+                                  setEditing(true);
+                                }
+                              : undefined
+                          }
                         >
                           {editing ? (
                             <Input
@@ -1536,11 +1566,11 @@ export function SizeChartField({
             sketches={sketches}
             size={mobileSize}
             sizeOptions={sizeOptions}
+            editing={editing && canEdit}
             disabled={!editing || !canEdit || saving}
             uploading={uploading}
             measurementNameById={measurementById}
-            measurementNameIdOf={measurementNameIdOf}
-            valueFor={valueForPicture}
+            rows={pictureRows}
             activeMeasurementNameId={activePointId}
             activeFreeLinePosition={activeFreeLinePosition}
             onSizeChange={setMobileSize}

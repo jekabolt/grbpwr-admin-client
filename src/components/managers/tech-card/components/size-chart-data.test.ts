@@ -121,3 +121,16 @@ describe('seedChart without a known garment', () => {
     expect(seeded.points.map((point) => point.measurementNameId)).toEqual([99]);
   });
 });
+
+describe('seedChart with a hooded picture', () => {
+  it('adds the hood rows after the defaults when the dictionary has them', () => {
+    const names = new Map<string, number>([
+      ['chest', 7],
+      ['hood-height', 38],
+      ['hood-width', 45],
+    ]);
+    const seeded = seedChart('top', [], [], names, ['hood-height', 'hood-width', 'hood-depth']);
+    expect(seeded.points.map((point) => point.measurementNameId)).toEqual([7, 38, 45]);
+    expect(seedChart(null, [], [], names, ['hood-height']).points).toEqual([]);
+  });
+});

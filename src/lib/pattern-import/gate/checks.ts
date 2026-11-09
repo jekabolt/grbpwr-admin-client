@@ -761,11 +761,16 @@ export function g5(ctx: GateCtx): GateCheck {
     if (!b.mb.hasGrain) bad('manifest hasGrain = false');
     // drills / internal (layer 8)
     const l8 = onLayer(ents, LAYERS.internal).filter(isPoly);
-    const drills = l8.filter(isDrill);
+    const drillMarks = l8.filter(isDrill);
+    // A closed 10 mm internal loop is ambiguous in a foreign file: it can be a drill, or ordinary
+    // geometry (generated fusing sheets carry small zone loops). The semantic source and manifest
+    // agree on whether this block has drills; when both say zero, keep the loop internal. An added
+    // loop still changes the exact internal count below and blocks.
+    const drills = s.drills.length || b.mb.drills ? drillMarks : [];
     // W3 (R12): a half's fold line is the AAMA mirror line on layer 6 — still one of the piece's
     // internal lines for the manifest; every drill square has its AAMA drill POINT on layer 13
     const mirror = onLayer(ents, AAMA_MIRROR_LAYER).filter(isPoly);
-    const internal = [...l8.filter((e) => !isDrill(e)), ...mirror];
+    const internal = [...l8.filter((e) => !drills.includes(e)), ...mirror];
     if (r12) {
       const holes = onLayer(ents, AAMA_DRILL_LAYER).filter((e) => e.type === 'POINT');
       const unmatched = drills.filter((q) => {
@@ -1052,9 +1057,12 @@ export function g8(ctx: GateCtx): GateCheck {
       .sort((x, y) => x.rank - y.rank);
     let bad = false;
     let silent = false;
+    let grossAreaLoss = false;
     for (let i = 1; i < rows.length; i++) {
       if (!(rows[i].area > rows[i - 1].area)) {
         bad = true;
+        if (rows[i].area < rows[i - 1].area * (1 - PATIMPORT.areaGrowthTolerance))
+          grossAreaLoss = true;
         // SILENT: a size under half its smaller neighbour is a sliver, whatever the run's length
         if (rows[i].area < 0.5 * rows[i - 1].area) silent = true;
         notes.push(
@@ -1087,7 +1095,10 @@ export function g8(ctx: GateCtx): GateCheck {
     if (bad) {
       failed.push(...rows.map((r) => r.b.block));
       // a two-size family's area order alone warns (as before); a SILENT problem holds at any length
-      worstSizes = Math.max(worstSizes, silent ? 3 : rows.length);
+      worstSizes = Math.max(
+        worstSizes,
+        silent ? 3 : grossAreaLoss ? rows.length : Math.min(2, rows.length),
+      );
     }
   }
   // SILENT (G26): the grade model's other disagreements — shown here, never held
@@ -1097,16 +1108,18 @@ export function g8(ctx: GateCtx): GateCheck {
   const grade = warns.length
     ? ` · grade model (warning only): ${warns.slice(0, 8).join('; ')}${warns.length > 8 ? ` … +${warns.length - 8}` : ''}`
     : '';
-  const exactRulGrade = ctx.m.source.files.some((file) => /\.rul$/i.test(file.name));
+  const exactSourceGeometry =
+    ctx.m.source.generatedFusing === true ||
+    ctx.m.source.files.some((file) => /\.rul$/i.test(file.name));
   return check(
     'G8-monotone',
     failed,
-    exactRulGrade ? 'warn' : worstSizes > 2 ? 'block' : failed.length ? 'warn' : 'block',
+    exactSourceGeometry ? 'warn' : worstSizes > 2 ? 'block' : failed.length ? 'warn' : 'block',
     (notes.join('; ') ||
       'area and outline length grow with size rank for every identity, no two sizes on one outline') +
       grade,
     null,
-    `on the drawn line: strictly increasing area (block when > 2 sizes); perimeter: no drop > ${SIZE_RUN.dropMm} mm / ${SIZE_RUN.dropShare * 100} %, no step > ${SIZE_RUN.spikeMul}× / +${SIZE_RUN.spikeAddMm} mm the run's median; no two sizes on one outline`,
+    `on the drawn line: increasing area (loss > ${PATIMPORT.areaGrowthTolerance * 100}% blocks when > 2 sizes); perimeter: no drop > ${SIZE_RUN.dropMm} mm / ${SIZE_RUN.dropShare * 100} %, no step > ${SIZE_RUN.spikeMul}× / +${SIZE_RUN.spikeAddMm} mm the run's median; no two sizes on one outline`,
   );
 }
 
@@ -1244,6 +1257,12 @@ export function g11(ctx: GateCtx): GateCheck {
   const seenBlocks = new Map<string, string>();
   const seenIds = new Map<string, string>();
   const exactRulGrade = ctx.m.source.files.some((file) => /\.rul$/i.test(file.name));
+  // A PIECE NAME or separate SIZE label proves the source identity was already segmented: PLCK_L
+  // is the identity while its size lives elsewhere. A bare block-name tail such as fresh FP_XS
+  // proves no such split and is deliberately absent from this set.
+  const presegmentedIdentities = new Set(
+    (ctx.m.source.presegmentedIdentities ?? []).map((identity) => ci(identity)),
+  );
   for (const p of ctx.m.pieces) {
     const k = ci(p.identity);
     if (seenIds.has(k)) {
@@ -1259,7 +1278,13 @@ export function g11(ctx: GateCtx): GateCheck {
       pair: { hand: p.pairHand, of: p.pairOf },
       isKnownCode: ctx.rules.isKnownCode,
     });
-    if (problem && !(exactRulGrade && /reads as a size of the run/.test(problem))) {
+    if (
+      problem &&
+      !(
+        (exactRulGrade || presegmentedIdentities.has(k)) &&
+        /reads as a size of the run/.test(problem)
+      )
+    ) {
       failed.push(p.identity);
       notes.push(`${p.identity}: ${problem}`);
     }

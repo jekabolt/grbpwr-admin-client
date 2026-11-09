@@ -2,6 +2,7 @@
 // itself is a lazy chunk.
 import type { PieceShapeReference } from 'lib/dxf-reconcile';
 import type {
+  AssemblyContext,
   CardSize,
   ConversionManifest,
   DraftScopeTarget,
@@ -52,6 +53,8 @@ export function buildCardContext(args: {
     name?: string;
     /** MF-C: the conversion manifest the card's parse read off this sheet (null = none / unread). */
     manifest?: ConversionManifest | null;
+    /** System-owned generated-sheet row, never inferred from its filename. */
+    generatedFusing?: boolean;
   }[];
   /** Each card piece's current outline per scope, sheet and size (`shapeRefsOf`). */
   shapes?: DraftShapeRef[];
@@ -61,6 +64,8 @@ export function buildCardContext(args: {
   /** A10: the card's name and style number (the autopilot's model / sheet match). */
   cardName?: string;
   styleNumber?: string;
+  /** T4: the card's ops and seams (apply step: what the re-import does to the assembly). */
+  assembly?: AssemblyContext | null;
 }): CardContext {
   const sizes: CardSize[] = args.orderedSizeIds.map((sizeId, rank) => {
     // The card's own reader of the dictionary name (xs_44ta_m → xs, 44): the worker's size map
@@ -113,16 +118,41 @@ export function buildCardContext(args: {
               lineKey: p.lineKey ?? '',
               name: p.name ?? '',
               manifest: p.manifest ?? null,
+              ...(p.generatedFusing ? { generatedFusing: true } : {}),
             },
           ]
         : [],
+    ),
+    generatedFusingSources: (args.patterns ?? []).flatMap((pattern) =>
+      pattern.generatedFusing && pattern.filename?.trim() ? [pattern.filename.trim()] : [],
     ),
     existingShapes: args.shapes ?? [],
     ...(args.shapesPending ? { shapesPending: true } : {}),
     styleLabel: args.styleLabel,
     cardName: args.cardName ?? '',
     styleNumber: args.styleNumber ?? '',
+    ...(args.assembly ? { assembly: args.assembly } : {}),
   };
+}
+
+/**
+ * Source identities already proven by this card in the active fabric scope. A stored alias is
+ * itself an identity (not an `IDENTITY_SIZE` block), so a trailing `L` must remain intact. The
+ * worker maps these source names to the semantic identities written for the same piece seed.
+ */
+export function cardPresegmentedIdentities(card: CardContext, pinScopeKey?: string): string[] {
+  const inScope = (scopeKey: string) => !pinScopeKey || scopeKey === pinScopeKey;
+  const identities = new Set<string>();
+  for (const shape of card.existingShapes ?? [])
+    if (inScope(shape.scopeKey) && shape.identity.trim()) identities.add(shape.identity.trim());
+  for (const pattern of card.existingPatterns ?? []) {
+    if (!inScope(pattern.scopeKey)) continue;
+    for (const piece of pattern.manifest?.pieces ?? [])
+      if (piece.identity.trim()) identities.add(piece.identity.trim());
+  }
+  for (const alias of card.existingAliases ?? [])
+    if (inScope(alias.scopeKey) && alias.blockName.trim()) identities.add(alias.blockName.trim());
+  return [...identities].sort((a, b) => a.localeCompare(b));
 }
 
 /**
@@ -138,12 +168,23 @@ export function shapeRefsOf(
       pieceLineKey: ref.pieceLineKey,
       identity: ref.identity,
       ...(url ? { url } : {}),
+      ...(ref.acceptedGate?.length ? { acceptedGate: [...ref.acceptedGate] } : {}),
       sizes: Object.fromEntries(
         [...ref.entry.bySize].map(([size, p]) => [
           size,
           { areaMm2: p.areaCm2 * 100, wMm: p.bboxW * 10, hMm: p.bboxH * 10 },
         ]),
       ),
+      ...outlineOf(ref.entry.sizes.flatMap((z) => ref.entry.bySize.get(z) ?? [])),
     })),
   );
+}
+
+/** T4: the middle size's contour, mm — the piece tile's picture at the apply step. */
+function outlineOf(bySize: readonly { poly?: { x: number; y: number }[] }[]) {
+  const mid = bySize[Math.floor(bySize.length / 2)];
+  const poly = mid?.poly ?? [];
+  return poly.length >= 3
+    ? { outline: poly.map((q) => [q.x * 10, q.y * 10] as [number, number]) }
+    : {};
 }

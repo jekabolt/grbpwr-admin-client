@@ -112,7 +112,7 @@ const cardOf = (c: Case, existing: CardContext['existingPatterns'] = []): CardCo
  * The stand-in operator of import #1: one answer to where the drive stopped, through the hook's
  * own controls (what the steps' buttons call). false = no answer (the case is not a replay case).
  */
-async function operate(
+export async function operate(
   c: Case,
   get: () => ImportSessionApi,
   t: DriveTick & { kind: 'stopped' },

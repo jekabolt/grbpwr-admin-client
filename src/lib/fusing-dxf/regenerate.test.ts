@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   common_Size,
   common_TechCardBomItem,
@@ -9,8 +9,11 @@ import type {
 } from 'api/proto-http/admin';
 import type { PieceDTO, PieceManifestFacts } from 'lib/nesting/types';
 import { parseSheets } from 'lib/nesting/worker/parse-files';
+import { readRawDxf } from 'lib/pattern-import/gate/reader';
+import { readDxf } from 'lib/pattern-import/adapters/dxf';
+import { pointOnRings } from 'lib/pattern-import/semantics/grain-inside';
 import { buildFusingSheets } from './dxf';
-import { sourcePieces } from './regenerate';
+import { newestUpload, sourcePieces } from './regenerate';
 
 const fullEvidence =
   '/Users/jekabolt/go/src/github.com/jekabolt/tmp/plans/reimport-keeps-card/evidence/card6-prod-main-v10.dxf';
@@ -119,6 +122,28 @@ describe('fusing regeneration contours', () => {
     expect(built.sheets).toHaveLength(1);
     expect(built.sheets[0].blocks).toHaveLength(expectedContours);
     expect(new Set(built.sheets[0].blocks)).toHaveLength(expectedContours);
+    const markedBytes = new TextEncoder().encode(built.sheets[0].dxfText).buffer as ArrayBuffer;
+    const marked = await readDxf(
+      { id: 'generated', name: 'neutral-name.dxf', bytes: markedBytes },
+      { sagittaMm: 0.05, keepFills: true },
+    );
+    expect(marked.meta.generatedFusing).toBe(true);
+    const raw = readRawDxf(built.sheets[0].dxfText);
+    let grains = 0;
+    for (const entities of raw.blocks.values()) {
+      const cut = entities.find(
+        (entity) => entity.layer === '1' && entity.closed && entity.pts.length >= 3,
+      );
+      const grain = entities.find((entity) => entity.layer === '7' && entity.pts.length >= 2);
+      if (!cut || !grain) continue;
+      grains++;
+      const mid = {
+        x: (grain.pts[0].x + grain.pts[1].x) / 2,
+        y: (grain.pts[0].y + grain.pts[1].y) / 2,
+      };
+      expect(pointOnRings(mid, [cut.pts])).toBe(true);
+    }
+    expect(grains).toBeGreaterThan(0);
   });
 
   it('still warns for two distinct cut contours of one piece and size', () => {
@@ -164,6 +189,53 @@ describe('fusing regeneration contours', () => {
     expect(prepared.unmatchedFused).toEqual([]);
     expect(prepared.pieces).toHaveLength(1);
     expect(prepared.pieces[0].sizes).toHaveLength(1);
+  });
+});
+
+// T5 (09.11, beta card 124): the generated sheet printed the wall clock in its R12 header («Creation
+// Time: 16:09»), so every rebuild was a new file — a new sha256, a new upload, a card write and a
+// version bump on every open that owed a rebuild, though nothing it is built from had changed.
+describe('the same inputs give the same sheet (T5)', () => {
+  afterEach(() => vi.useRealTimers());
+  const fixtureRows = () =>
+    aliasRows.filter((row) =>
+      new Set(['nck', 'clr_main', 'bp_u', 'clr_second_2']).has(row.blockName.toLowerCase()),
+    );
+
+  it("two builds minutes apart: byte-identical, the header time is the source sheet's", async () => {
+    const parsed = await parseDxf(fixture);
+    const prepared = prepare(parsed.pieces, fixtureRows());
+    const at = (createdAt?: string) =>
+      buildFusingSheets({
+        techCardId: 6,
+        style: 'card-6',
+        baseSizeId: dictionarySizes[0].id,
+        bomLines: [{ bomLineKey: 'interlining', code: 'FUSE', label: 'Fusing' }],
+        pieces: prepared.pieces,
+        createdAt,
+      }).sheets[0].dxfText;
+    vi.useFakeTimers({ now: new Date('2026-11-09T16:09:00Z') });
+    const first = at('2026-11-09T16:04:25Z');
+    vi.setSystemTime(new Date('2026-11-09T16:17:00Z'));
+    const second = at('2026-11-09T16:04:25Z');
+    expect(second).toBe(first);
+    expect(first).toContain('Creation Date: 09-11-2026');
+    expect(first).toContain('Creation Time: 16:04');
+    // without a source time: the epoch, still not the clock
+    expect(at()).toBe(at());
+    expect(at()).toContain('Creation Time: 00:00');
+  });
+
+  it('newestUpload: the newest readable upload time of the source sheets', () => {
+    expect(
+      newestUpload([
+        { uploadedAt: '2026-11-09T12:53:30Z' },
+        { uploadedAt: '2026-11-09T16:09:15Z' },
+        { uploadedAt: undefined },
+        { uploadedAt: 'not a time' },
+      ] as unknown as Parameters<typeof newestUpload>[0]),
+    ).toBe('2026-11-09T16:09:15Z');
+    expect(newestUpload([])).toBeUndefined();
   });
 });
 

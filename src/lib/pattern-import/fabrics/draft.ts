@@ -9,14 +9,13 @@
 //     own "revision" (two files in one scope count max, not sum: K1).
 //   · CARD PIECES: every (scope, identity) of the files is bound on its own, strongest proof first
 //     (re-import, owner 09.11: «чтобы мы могли всё загрузить и ничего не отвалилось»):
-//       1. a link this card already has in the scope (the block's spelling, its identity or the
-//          source name) — never to a piece of the opposite hand (SLV_L is not SLV_R);
-//       2. a card piece of the same name (case-free);
-//       3. the same name tokens in any order, `UNI` dropped (FLP_MAIN_L_UNI → FLP_L_MAIN);
-//       4. one hand of a pair → the card's hand-less pair piece of that part (FP_L + FP_R → FP ×2);
-//       5. the same outline as one card piece's current block of this scope, size by size (area
-//          and both sides of the box, same hand) — a block the importer renamed (P_L_MAIN → FP_L);
-//       6. still nothing, while a card piece of this scope and hand loses its blocks in this
+//       1. a link this card already has in the scope (exact spelling, token-equivalent spelling,
+//          or a damaged source name backed by the same outline);
+//       2. the same outline as one card piece's current block of this sheet, before a sibling name;
+//       3. a card piece of the same name or the same tokens (`UNI` dropped);
+//       4. one hand of a pair → the card's hand-less pair piece, or the counterpart of the other
+//          hand's existing binding;
+//       5. still nothing, while a card piece of this scope and hand loses its blocks in this
 //          re-import and the outline does not rule it out → UNRESOLVED: no piece, no link; the
 //          piece goes to `vanished` and the operator maps the block in "↔ cut pieces".
 //     The rest is new: a pair collapses into one card name (`FP_L` + `FP_R` → `FP`, ×2, the name
@@ -26,12 +25,9 @@
 //     × per garment = per scope the sum over its identities (both hands count 1), across scopes the
 //     max (the fused collar is the collar, not a second one). One piece takes two blocks of one
 //     file only through the card's own links or as both hands of a hand-less pair piece.
-//   · SYMMETRY: a new piece is IDENTICAL (D1'). An existing piece follows the modal's one rule
-//     (`importedCutSymmetry`): IDENTICAL only on the manifest's proof (pair / unfolded fold), when
-//     unmarked, or when the new count makes its MIRRORED impossible — an explicit MIRRORED/FOLD is
-//     kept otherwise (F14 MAJOR 2). A rewrite is a point write with the reason, never a root rewrite.
-//   · FUSED: any interlining copy (file or `fused` flag) → `fused` + fusing mode FULL on a new piece;
-//     an existing piece's own fusing mode is kept.
+//   · SETTINGS: drawing values initialise new pieces only. Reused pieces keep the card's quantity,
+//     cut symmetry, fused flag and fusing mode. A disagreement is exposed in `pieceDifferences` for
+//     a later warning UI; this draft never writes it back to the card.
 //   · RE-IMPORT (MF-C, M4): a scope that already holds any sheet gets `replaces` = that row: the new
 //     file takes its place instead of becoming a second active row. An importer manifest improves the
 //     match (source digest, file name, newest conversion), but is not required. `vanished` (review
@@ -45,7 +41,7 @@ import type {
   ConversionManifest,
   DraftAlias,
   DraftPiece,
-  DraftPieceUpdate,
+  DraftPieceDifference,
   DraftReplaceTarget,
   DraftScope,
   DraftShapeRef,
@@ -181,10 +177,18 @@ export function aliasNames(m: ConversionManifest): Map<string, string> {
   return out;
 }
 
+/** Source labels occasionally retain their DXF field prefix; it is evidence, not part of a name. */
+const sourceNameOf = (p: ManifestPiece): string => {
+  if (p.nameOrigin !== 'text' && p.nameOrigin !== 'operator') return '';
+  return normBlock(p.displayName ?? '').replace(/^piece\s+name\s*:\s*/i, '');
+};
+
 type Hand = 'L' | 'R';
 const HAND_TOKENS: Record<string, Hand> = { L: 'L', R: 'R', LEFT: 'L', RIGHT: 'R' };
 /** `UNI` marks an ungraded block (block-code.ts), not another piece: FLP_L_UNI is FLP_L. */
 const NOISE_TOKENS = new Set(['UNI']);
+/** Legacy one-size cards omit the lining prefix and append their size, sometimes more than once. */
+const ONE_SIZE_TOKENS = new Set(['LIN', 'LINING', 'S', 'M', 'OS']);
 
 /** A name as its tokens: upper case, split on anything not a letter or a digit, `UNI` dropped. */
 export function nameTokens(s: string): string[] {
@@ -193,8 +197,20 @@ export function nameTokens(s: string): string[] {
     .split(/[^\p{L}\p{N}]+/u)
     .filter((t) => t && !NOISE_TOKENS.has(t));
 }
+/** ASCII evidence that survives two different mojibake paths; only used beside an outline match. */
+const damagedNameKey = (s: string) =>
+  nameTokens([...s.normalize('NFKD')].map((c) => (c.charCodeAt(0) <= 0x7f ? c : ' ')).join(''))
+    .sort()
+    .join(' ');
+const hasNonAscii = (s: string) => [...s].some((c) => c.charCodeAt(0) > 0x7f);
 /** Order-free key of a name: FLP_MAIN_L_UNI and FLP_L_MAIN are one key. */
 export const tokenKey = (s: string) => nameTokens(s).sort().join(' ');
+/** Name key used only as secondary re-import evidence for the one-size bag cards. */
+const oneSizeTokenKey = (s: string) =>
+  nameTokens(s)
+    .filter((token) => !ONE_SIZE_TOKENS.has(token))
+    .sort()
+    .join(' ');
 /** The key without the hand — the part both hands of a pair share (FP_L, FP_R → FP). */
 const partKey = (s: string) =>
   nameTokens(s)
@@ -327,8 +343,7 @@ export function buildDraft(
     const interlining = isInterliningScope(sc.target);
     for (const mp of sc.manifest.pieces) {
       const spelling = names.get(mp.identity) ?? mp.identity;
-      const source =
-        mp.nameOrigin === 'text' || mp.nameOrigin === 'operator' ? mp.displayName ?? '' : '';
+      const source = sourceNameOf(mp);
       slots.push({
         scope: sc,
         scopeKey: sc.target.scopeKey,
@@ -430,6 +445,26 @@ export function buildDraft(
     push(held, heldKey(s.scopeKey, k), s);
   };
   const open = () => slots.filter((s) => !s.bind && !s.unresolved);
+  /** Outline cost against the card's parse of the sheet being replaced, not a sibling sheet. */
+  const costOf = (s: Slot, k: string): number | null => {
+    const costs = rowShapes
+      .filter(
+        (r) =>
+          r.scopeKey === s.scopeKey &&
+          r.pieceLineKey === k &&
+          handsMeet(s.hand, handOf(r.identity)),
+      )
+      .map((r) => shapeCost(s.blocks, r.sizes))
+      .filter((c): c is number => c != null);
+    return costs.length ? Math.min(...costs) : null;
+  };
+  const nearShapeOwners = (s: Slot, onlyFree: boolean): string[] =>
+    [
+      ...new Set(rowShapes.filter((r) => r.scopeKey === s.scopeKey).map((r) => r.pieceLineKey)),
+    ].filter((k) => {
+      const c = costOf(s, k);
+      return c != null && c <= SHAPE_SAME && (!onlyFree || free(s, k));
+    });
 
   // 1. the card's own link of this block in this scope. Not followed across hands only when it
   //    provably swapped: both names carry a hand, the hands differ, and the card holds a piece of
@@ -454,6 +489,74 @@ export function buildDraft(
         break;
       }
     }
+
+  // A token-equivalent existing link still outranks a same-named sibling piece. This is the
+  // ordinary CLO rename (`_UNI`, hand moved), and needs no geometry when the owner is unique.
+  for (const s of open()) {
+    const keys = new Set(s.names.map(tokenKey).filter(Boolean));
+    const owners = [
+      ...new Set(
+        (linksOf.get(s.scopeKey) ?? [])
+          .filter((l) => linkOnSheet(s.scopeKey, l) && keys.has(tokenKey(l.blockName)))
+          .map((l) => l.lineKey),
+      ),
+    ];
+    if (owners.length === 1 && !swapped(s, owners[0])) bind(s, owners[0], 'alias');
+  }
+
+  // The same damaged non-ASCII label can take different mojibake paths in the drawing and card.
+  // Its surviving ASCII suffix is accepted only when the replaced sheet's outline agrees.
+  for (const s of open()) {
+    const damaged = new Set(s.names.filter(hasNonAscii).map(damagedNameKey).filter(Boolean));
+    if (!damaged.size) continue;
+    const owners = [
+      ...new Set(
+        (linksOf.get(s.scopeKey) ?? [])
+          .filter(
+            (l) =>
+              linkOnSheet(s.scopeKey, l) &&
+              hasNonAscii(l.blockName) &&
+              damaged.has(damagedNameKey(l.blockName)) &&
+              (costOf(s, l.lineKey) ?? Infinity) <= SHAPE_SAME,
+          )
+          .map((l) => l.lineKey),
+      ),
+    ];
+    if (owners.length === 1) bind(s, owners[0], 'alias');
+  }
+
+  // A unique contour owner on the exact sheet wins before a same-named sibling card piece.
+  for (const s of open()) {
+    const owners = nearShapeOwners(s, true);
+    if (owners.length === 1) bind(s, owners[0], 'shape');
+  }
+
+  // One-size bag cards kept the size in their piece and alias names (BLT_S, LP_OS_M,
+  // BLT_L_OS_2_M) and omitted the writer's LIN_ / `· lining` scope labels. Treat those tokens as
+  // storage noise here, after exact aliases and contours. A collision is resolved only when the
+  // current outline and the card's previous link identify one owner together.
+  const byOneSizeTokens = new Map<string, string[]>();
+  for (const p of live) push(byOneSizeTokens, oneSizeTokenKey(p.name), p.lineKey);
+  for (const s of open()) {
+    const keys = new Set(s.names.map(oneSizeTokenKey).filter(Boolean));
+    const linked = new Set(
+      (linksOf.get(s.scopeKey) ?? [])
+        .filter((l) => linkOnSheet(s.scopeKey, l) && keys.has(oneSizeTokenKey(l.blockName)))
+        .map((l) => l.lineKey),
+    );
+    const hits = new Set([...keys].flatMap((key) => byOneSizeTokens.get(key) ?? []));
+    for (const k of linked) hits.add(k);
+    const fit = [...hits].filter((k) => handsMeet(s.hand, pieceHand(k)) && free(s, k));
+    if (fit.length === 1) {
+      bind(s, fit[0], linked.has(fit[0]) ? 'alias' : 'name');
+      continue;
+    }
+    const outlined = fit.filter((k) => (costOf(s, k) ?? Infinity) <= SHAPE_SAME);
+    const linkedOutlined = outlined.filter((k) => linked.has(k));
+    if (linkedOutlined.length === 1) bind(s, linkedOutlined[0], 'alias');
+    else if (outlined.length === 1) bind(s, outlined[0], 'shape');
+  }
+
   // 2. a card piece of the same name
   for (const s of open())
     for (const n of s.names) {
@@ -482,19 +585,36 @@ export function buildDraft(
     const fit = [...new Set(s.names.flatMap((n) => pairPieces.get(partKey(n)) ?? []))];
     if (fit.length === 1 && free(s, fit[0])) bind(s, fit[0], 'name');
   }
-  // 5. the same outline as one card piece's current block of this sheet (same hand)
-  const costOf = (s: Slot, k: string): number | null => {
-    const costs = rowShapes
-      .filter(
-        (r) =>
-          r.scopeKey === s.scopeKey &&
-          r.pieceLineKey === k &&
-          handsMeet(s.hand, handOf(r.identity)),
-      )
-      .map((r) => shapeCost(s.blocks, r.sizes))
-      .filter((c): c is number => c != null);
-    return costs.length ? Math.min(...costs) : null;
-  };
+
+  // If one hand kept its old link, its partner keeps the corresponding opposite-hand card piece.
+  // This is allowed to add a second block link to that piece: the card already chose the pieces;
+  // the drawing is only restoring their contours.
+  for (const s of open()) {
+    if (!s.hand || !s.mp.pairOf) continue;
+    const near = nearShapeOwners(s, false);
+    // A free same-outline piece is a real ambiguity. Counterpart recovery is only for an extra
+    // paired block after all matching pieces already kept another block link from this sheet.
+    if (!near.length || near.some((k) => free(s, k))) continue;
+    const partner = slots.find(
+      (o) =>
+        o.scopeKey === s.scopeKey &&
+        o.mp.identity === s.mp.pairOf &&
+        o.bind &&
+        handOf(byKey.get(o.bind.lineKey)?.name ?? ''),
+    );
+    if (!partner?.bind) continue;
+    const partnerPart = partKey(byKey.get(partner.bind.lineKey)?.name ?? '');
+    const fit = live.filter(
+      (p) =>
+        near.includes(p.lineKey) &&
+        handOf(p.name) === s.hand &&
+        partKey(p.name) === partnerPart &&
+        (costOf(s, p.lineKey) ?? Infinity) <= SHAPE_SAME,
+    );
+    if (fit.length === 1) bind(s, fit[0].lineKey, 'shape');
+  }
+
+  // 5. the same outline as one remaining card piece's current block of this sheet (same hand)
   const tentative = new Map<string, Slot[]>();
   for (const s of open()) {
     const pool = [
@@ -595,12 +715,12 @@ export function buildDraft(
   }
 
   const pieces: DraftPiece[] = [];
-  const pieceUpdates: DraftPieceUpdate[] = [];
+  const pieceDifferences: DraftPieceDifference[] = [];
   const aliases: DraftAlias[] = [];
   const seenAlias = new Set<string>();
   for (const g of groups.values()) {
     const existing = g.existingLineKey ? byKey.get(g.existingLineKey) ?? null : null;
-    const ppg = Math.max(
+    const drawingPpg = Math.max(
       1,
       ...[...g.byScope.values()].map((ss) =>
         ss.reduce((n, s) => n + Math.max(1, s.mp.piecesPerGarment), 0),
@@ -608,54 +728,57 @@ export function buildDraft(
     );
     const key = existing?.lineKey ?? mint();
     const force = g.pair ? 'pair' : g.unfolded ? 'unfolded' : g.half ? 'half' : undefined;
-    // L13: a half on fold is cut on the fold — a new piece too (the drawing carries the half only)
-    const symmetry = existing
-      ? importedCutSymmetry(existing.cutSymmetry, ppg, force)
+    const drawingSymmetry = existing
+      ? importedCutSymmetry(existing.cutSymmetry, drawingPpg, force)
       : force === 'half'
         ? FOLD_CUT_SYMMETRY
         : IDENTICAL;
+    const cardPpg = existing?.piecesPerGarment ?? 1;
+    const cardSymmetry = existing?.cutSymmetry ?? '';
+    const cardFused = existing?.fused ?? false;
     pieces.push({
       lineKey: key,
       name: existing?.name ?? g.name,
-      piecesPerGarment: ppg,
-      cutSymmetry: symmetry ?? (existing?.cutSymmetry || IDENTICAL),
-      ...(force ? { symmetryForce: force } : {}),
+      piecesPerGarment: existing ? cardPpg : drawingPpg,
+      cutSymmetry: existing ? cardSymmetry : drawingSymmetry ?? IDENTICAL,
+      ...(!existing && force ? { symmetryForce: force } : {}),
       grainline: '',
-      fused: g.fused,
+      fused: existing ? cardFused : g.fused,
       existingLineKey: existing?.lineKey ?? null,
       ungraded: g.ungraded,
-      fusingMode: g.fused ? FUSING_FULL : FUSING_UNKNOWN,
+      fusingMode: existing
+        ? existing.fusingMode ?? FUSING_UNKNOWN
+        : g.fused
+          ? FUSING_FULL
+          : FUSING_UNKNOWN,
       basis: existing ? g.basis : 'new',
       scopeKeys: [...g.byScope.keys()],
     });
     if (existing) {
-      const u: DraftPieceUpdate = { lineKey: existing.lineKey, reason: '' };
-      const why: string[] = [];
-      if (symmetry) {
-        u.cutSymmetry = symmetry;
-        why.push(
-          g.pair
-            ? 'the drawing carries both hands as separate pieces — cut as drawn'
-            : g.unfolded
-              ? 'the drawing carries the unfolded piece — cut flat, not on the fold'
-              : g.half
-                ? 'the drawing carries the half with its fold line — cut on the fold'
-                : (existing.cutSymmetry ?? '').trim().endsWith('MIRRORED')
-                  ? `a mirrored pair cannot be ${ppg} per garment — cut as drawn`
-                  : 'not marked — the drawing carries every contour, cut as drawn',
-        );
-      }
-      if ((existing.piecesPerGarment ?? 1) !== ppg) {
-        u.piecesPerGarment = ppg;
-        why.push(`× per garment ${existing.piecesPerGarment ?? 1} → ${ppg} from the drawing`);
-      }
-      if (g.fused && !existing.fused) {
-        u.fused = true;
-        why.push('cut from interlining too — marked fused');
-        const mode = (existing.fusingMode ?? '').trim();
-        if (!mode || mode === FUSING_UNKNOWN) u.fusingMode = FUSING_FULL;
-      }
-      if (why.length) pieceUpdates.push({ ...u, reason: why.join('; ') });
+      if (cardPpg !== drawingPpg)
+        pieceDifferences.push({
+          pieceLineKey: existing.lineKey,
+          pieceName: existing.name,
+          field: 'piecesPerGarment',
+          cardValue: cardPpg,
+          drawingValue: drawingPpg,
+        });
+      if (drawingSymmetry && cardSymmetry !== drawingSymmetry)
+        pieceDifferences.push({
+          pieceLineKey: existing.lineKey,
+          pieceName: existing.name,
+          field: 'cutSymmetry',
+          cardValue: cardSymmetry,
+          drawingValue: drawingSymmetry,
+        });
+      if (g.fused && !cardFused)
+        pieceDifferences.push({
+          pieceLineKey: existing.lineKey,
+          pieceName: existing.name,
+          field: 'fused',
+          cardValue: false,
+          drawingValue: true,
+        });
     }
     for (const [scopeKey, ss] of g.byScope) {
       const target = ss[0].scope.target;
@@ -728,7 +851,8 @@ export function buildDraft(
     scopes,
     pieces,
     aliases,
-    pieceUpdates,
+    pieceUpdates: [],
+    pieceDifferences,
     ...(unresolved.length ? { unresolved } : {}),
     downloads: scopes.map((s) => ({ filename: s.filename, dxfText: s.dxfText })),
   };

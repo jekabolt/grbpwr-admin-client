@@ -142,6 +142,24 @@ function mainPatterns(
   );
 }
 
+/**
+ * T5 (09.11): the generated sheet's header time — the newest upload among the sheets it is built from.
+ * It moves only when a source sheet does; the wall clock made every rebuild a new file (new sha256, a
+ * new upload, a card write and a version bump on every open that owed one).
+ */
+export function newestUpload(patterns: readonly common_TechCardSizePattern[]): string | undefined {
+  let best: string | undefined;
+  let bestAt = -Infinity;
+  for (const pattern of patterns) {
+    const at = pattern.uploadedAt ? Date.parse(pattern.uploadedAt) : NaN;
+    if (!Number.isNaN(at) && at > bestAt) {
+      bestAt = at;
+      best = pattern.uploadedAt;
+    }
+  }
+  return best;
+}
+
 function tokenIndex(sizes: readonly common_Size[], cardSizeIds: readonly number[]) {
   const idRank = new Map(cardSizeIds.map((id, rank) => [id, rank]));
   const byToken = new Map<string, { id: number; rank: number; token: string }>();
@@ -405,10 +423,23 @@ const ECHO_AWARE = {
   packagingPicksAware: true,
 } satisfies Partial<common_TechCardInsert>;
 
+/** T5: how many times the rebuild's write goes out in all while only the card's version moves. */
+export const REBUILD_WRITE_TRIES = 5;
+
+const pauseBeforeTry = (attempt: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, 400 * attempt));
+
 /**
  * T3 (09.11): a write built on `read`. On 409 the card is read again; when only its version moved
  * (`onlyVersionMoved`, the page's rule), the same write goes once more under the fresh version.
- * Otherwise — a body edit by someone else, a failed re-read, a second 409 — the error stands.
+ * Otherwise — a body edit by someone else, a failed re-read — the error stands.
+ *
+ * T5 (09.11, beta card 124): not once — up to REBUILD_WRITE_TRIES writes in all. The page measures the
+ * piece areas of each sheet after an import (one SaveTechCardPieceAreas per scope, each bumping
+ * tech_card.lock_version, one after another), so a second bump landing between the re-read and the
+ * re-send was common, and the single retry turned the page's own measurement into «"fusing DXF" was
+ * changed by someone else meanwhile». Every re-read is still judged against the FIRST read: a body
+ * that moved since the rebuild read it is a conflict, whichever try sees it.
  * Returns the version the write went out under.
  */
 export async function writeOverOnlyVersionMoved(
@@ -416,23 +447,28 @@ export async function writeOverOnlyVersionMoved(
   put: (expectedLockVersion: number) => Promise<unknown>,
   onlyVersionMoved: ((read: common_TechCard, fresh: common_TechCard) => boolean) | undefined,
   reread: () => Promise<common_TechCard | undefined>,
+  opts: { tries?: number; pause?: (attempt: number) => Promise<void> } = {},
 ): Promise<number> {
-  const first = read.lockVersion ?? 0;
-  try {
-    await put(first);
-    return first;
-  } catch (error) {
-    if ((error as { status?: number })?.status !== 409 || !onlyVersionMoved) throw error;
-    let fresh: common_TechCard | undefined;
+  const tries = Math.max(1, opts.tries ?? REBUILD_WRITE_TRIES);
+  const pause = opts.pause ?? pauseBeforeTry;
+  let version = read.lockVersion ?? 0;
+  for (let attempt = 1; ; attempt++) {
     try {
-      fresh = await reread();
-    } catch {
-      throw error;
+      await put(version);
+      return version;
+    } catch (error) {
+      if ((error as { status?: number })?.status !== 409 || !onlyVersionMoved || attempt >= tries)
+        throw error;
+      if (attempt > 1) await pause(attempt - 1);
+      let fresh: common_TechCard | undefined;
+      try {
+        fresh = await reread();
+      } catch {
+        throw error;
+      }
+      if (!fresh || !onlyVersionMoved(read, fresh)) throw error;
+      version = fresh.lockVersion ?? 0;
     }
-    if (!fresh || !onlyVersionMoved(read, fresh)) throw error;
-    const next = fresh.lockVersion ?? 0;
-    await put(next);
-    return next;
   }
 }
 
@@ -546,6 +582,7 @@ export async function regenerateFusingSheets(
         );
       built = buildFusingSheets({
         techCardId,
+        createdAt: newestUpload(patterns),
         style: card.styleNumber?.trim() || card.name?.trim() || `style-${techCardId}`,
         baseSizeId: card.baseSampleSizeId,
         bomLines: lines,

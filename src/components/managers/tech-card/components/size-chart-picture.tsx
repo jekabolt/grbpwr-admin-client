@@ -2,13 +2,13 @@ import {
   normalizePicturePoint,
   normalizedLineSegment,
   parsePictureViewBox,
-  iconLineSegment,
   type PicturePoint,
   type PictureSegment,
   type PictureViewBox,
   type SizeChartPictureDraft,
   type SizeChartPictureSource,
 } from 'lib/pom/size-chart-picture';
+import { placeIconLine } from 'lib/pom/size-chart-icon-lines';
 import { SIZE_CHART_ICONS } from 'lib/pom/size-chart-icons';
 import { cn } from 'lib/utility';
 import {
@@ -31,6 +31,9 @@ import {
 
 export type SizeChartSketch = { id: number; url: string; label: string };
 
+/** A table row: the number on its line is the row's `#`. */
+export type SizeChartPictureRow = { measurementNameId: number; position: number };
+
 type LineFocus = { measurementNameId: number; position: number };
 
 const ICON_OPTIONS = Object.entries(SIZE_CHART_ICONS)
@@ -38,7 +41,6 @@ const ICON_OPTIONS = Object.entries(SIZE_CHART_ICONS)
   .sort((a, b) => String(a.label).localeCompare(String(b.label)));
 
 const viewBoxText = (box: PictureViewBox) => `${box.x} ${box.y} ${box.width} ${box.height}`;
-const humanName = (value: string) => value.replace(/[-_]+/g, ' ').trim();
 
 export function isSizeChartPictureReady(picture: SizeChartPictureDraft): boolean {
   return picture.source === 'icon' ? !!SIZE_CHART_ICONS[picture.iconKey] : !!picture.mediaUrl;
@@ -47,8 +49,7 @@ export function isSizeChartPictureReady(picture: SizeChartPictureDraft): boolean
 function LineGraphic({
   segment,
   unit,
-  label,
-  value,
+  number,
   active,
   dim,
   onEnter,
@@ -56,25 +57,16 @@ function LineGraphic({
 }: {
   segment: PictureSegment;
   unit: number;
-  label: string;
-  value: string;
+  number: number;
   active: boolean;
   dim: boolean;
   onEnter?: () => void;
   onLeave?: () => void;
 }) {
   const { x, y, x2, y2 } = segment;
-  const dx = x2 - x;
-  const dy = y2 - y;
-  const length = Math.hypot(dx, dy) || 1;
-  const nx = (-dy / length) * unit * 0.4;
-  const ny = (dx / length) * unit * 0.4;
   const cx = (x + x2) / 2;
   const cy = (y + y2) / 2;
-  const shownLabel = humanName(label || 'point').toUpperCase();
-  const shownValue = value || '—';
-  const width = Math.max(shownLabel.length, shownValue.length) * unit * 0.62 + unit * 1.2;
-  const height = unit * 2.6;
+  const radius = unit * 0.75;
 
   return (
     <g
@@ -87,42 +79,27 @@ function LineGraphic({
         d={`M${x} ${y}L${x2} ${y2}`}
         fill='none'
         stroke='var(--color-highlightColor)'
-        strokeWidth={active ? 2.5 : 1}
+        strokeWidth={active ? 2.5 : 1.5}
         vectorEffect='non-scaling-stroke'
       />
-      <path
-        d={`M${x + nx} ${y + ny}L${x - nx} ${y - ny}M${x2 + nx} ${y2 + ny}L${x2 - nx} ${y2 - ny}`}
-        fill='none'
+      <circle
+        cx={cx}
+        cy={cy}
+        r={radius}
+        fill='var(--color-bgColor)'
         stroke='var(--color-highlightColor)'
-        strokeWidth={1}
+        strokeWidth={active ? 2.5 : 1.5}
         vectorEffect='non-scaling-stroke'
       />
-      <rect
-        x={cx - width / 2}
-        y={cy - height / 2}
-        width={width}
-        height={height}
+      <text
+        x={cx}
+        y={cy + unit * 0.36}
         fill='var(--color-highlightColor)'
-      />
-      <text
-        x={cx}
-        y={cy - unit * 0.15}
-        fill='var(--color-bgColor)'
         fontFamily='var(--font-family-mono)'
         fontSize={unit}
         textAnchor='middle'
       >
-        {shownLabel}
-      </text>
-      <text
-        x={cx}
-        y={cy + unit * 1.05}
-        fill='var(--color-bgColor)'
-        fontFamily='var(--font-family-mono)'
-        fontSize={unit}
-        textAnchor='middle'
-      >
-        {shownValue}
+        {number || ''}
       </text>
     </g>
   );
@@ -168,9 +145,8 @@ function PictureLines({
   picture,
   viewBox,
   unit,
+  rows,
   measurementNameById,
-  measurementNameIdOf,
-  valueFor,
   activeMeasurementNameId,
   activeFreeLinePosition,
   onFocus,
@@ -182,9 +158,8 @@ function PictureLines({
   picture: SizeChartPictureDraft;
   viewBox: PictureViewBox;
   unit: number;
+  rows: readonly SizeChartPictureRow[];
   measurementNameById: ReadonlyMap<number, string>;
-  measurementNameIdOf: (name: string) => number;
-  valueFor: (measurementNameId: number) => string;
   activeMeasurementNameId: number | null;
   activeFreeLinePosition: number | null;
   onFocus?: (focus: LineFocus) => void;
@@ -193,32 +168,40 @@ function PictureLines({
   drawingCursor?: PicturePoint | null;
   includeIconLines: boolean;
 }) {
-  const icon = SIZE_CHART_ICONS[picture.iconKey];
   const anyActive = activeMeasurementNameId != null || activeFreeLinePosition != null;
+  const numberOf = (measurementNameId: number, fallback: number) =>
+    rows.find((row) => row.measurementNameId === measurementNameId)?.position ?? fallback;
+  // Every row without a hand-drawn line gets its line on the icon, like the old schematic.
+  const drawnByHand = new Set(picture.lines.map((line) => line.measurementNameId));
+  const iconRows = includeIconLines
+    ? rows.flatMap((row) => {
+        if (!row.measurementNameId || drawnByHand.has(row.measurementNameId)) return [];
+        const name = measurementNameById.get(row.measurementNameId);
+        const segment = name ? placeIconLine(picture.iconKey, name) : null;
+        return segment ? [{ row, segment }] : [];
+      })
+    : [];
   return (
     <>
-      {includeIconLines &&
-        icon?.lines.map((line, index) => {
-          const measurementNameId = measurementNameIdOf(line.name);
-          const active = measurementNameId > 0 && activeMeasurementNameId === measurementNameId;
-          return (
-            <LineGraphic
-              key={`icon:${index}:${line.name}`}
-              segment={iconLineSegment(line)}
-              unit={unit}
-              label={line.name}
-              value={measurementNameId ? valueFor(measurementNameId) : ''}
-              active={active}
-              dim={anyActive && !active}
-              onEnter={
-                onFocus && measurementNameId
-                  ? () => onFocus({ measurementNameId, position: 0 })
-                  : undefined
-              }
-              onLeave={onBlur}
-            />
-          );
-        })}
+      {iconRows.map(({ row, segment }) => {
+        const active = activeMeasurementNameId === row.measurementNameId;
+        return (
+          <LineGraphic
+            key={`icon:${row.measurementNameId}`}
+            segment={segment}
+            unit={unit}
+            number={row.position}
+            active={active}
+            dim={anyActive && !active}
+            onEnter={
+              onFocus
+                ? () => onFocus({ measurementNameId: row.measurementNameId, position: 0 })
+                : undefined
+            }
+            onLeave={onBlur}
+          />
+        );
+      })}
       {picture.lines.map((line) => {
         const active = line.measurementNameId
           ? activeMeasurementNameId === line.measurementNameId
@@ -228,8 +211,7 @@ function PictureLines({
             key={`free:${line.position}`}
             segment={normalizedLineSegment(line, viewBox)}
             unit={unit}
-            label={measurementNameById.get(line.measurementNameId) ?? 'point'}
-            value={line.measurementNameId ? valueFor(line.measurementNameId) : ''}
+            number={numberOf(line.measurementNameId, line.position)}
             active={active}
             dim={anyActive && !active}
             onEnter={onFocus ? () => onFocus(line) : undefined}
@@ -250,8 +232,7 @@ function PictureLines({
 export function SizeChartPictureGraphic({
   picture,
   measurementNameById,
-  measurementNameIdOf,
-  valueFor,
+  rows,
   activeMeasurementNameId = null,
   activeFreeLinePosition = null,
   onFocus,
@@ -264,8 +245,7 @@ export function SizeChartPictureGraphic({
 }: {
   picture: SizeChartPictureDraft;
   measurementNameById: ReadonlyMap<number, string>;
-  measurementNameIdOf: (name: string) => number;
-  valueFor: (measurementNameId: number) => string;
+  rows: readonly SizeChartPictureRow[];
   activeMeasurementNameId?: number | null;
   activeFreeLinePosition?: number | null;
   onFocus?: (focus: LineFocus) => void;
@@ -347,8 +327,7 @@ export function SizeChartPictureGraphic({
             viewBox={iconViewBox}
             unit={unit}
             measurementNameById={measurementNameById}
-            measurementNameIdOf={measurementNameIdOf}
-            valueFor={valueFor}
+            rows={rows}
             activeMeasurementNameId={activeMeasurementNameId}
             activeFreeLinePosition={activeFreeLinePosition}
             onFocus={onFocus}
@@ -361,8 +340,7 @@ export function SizeChartPictureGraphic({
           viewBox={iconViewBox}
           unit={unit}
           measurementNameById={measurementNameById}
-          measurementNameIdOf={measurementNameIdOf}
-          valueFor={valueFor}
+          rows={rows}
           activeMeasurementNameId={activeMeasurementNameId}
           activeFreeLinePosition={activeFreeLinePosition}
           onFocus={onFocus}
@@ -408,8 +386,7 @@ export function SizeChartPictureGraphic({
             viewBox={mediaViewBox}
             unit={25}
             measurementNameById={measurementNameById}
-            measurementNameIdOf={measurementNameIdOf}
-            valueFor={valueFor}
+            rows={rows}
             activeMeasurementNameId={activeMeasurementNameId}
             activeFreeLinePosition={activeFreeLinePosition}
             onFocus={onFocus}
@@ -429,11 +406,11 @@ export function SizeChartPictureEditor({
   sketches,
   size,
   sizeOptions,
+  editing,
   disabled,
   uploading,
   measurementNameById,
-  measurementNameIdOf,
-  valueFor,
+  rows,
   activeMeasurementNameId,
   activeFreeLinePosition,
   onSizeChange,
@@ -449,11 +426,11 @@ export function SizeChartPictureEditor({
   sketches: readonly SizeChartSketch[];
   size: string;
   sizeOptions: readonly ViewSwitchOption<string>[];
+  editing: boolean;
   disabled: boolean;
   uploading: boolean;
   measurementNameById: ReadonlyMap<number, string>;
-  measurementNameIdOf: (name: string) => number;
-  valueFor: (measurementNameId: number) => string;
+  rows: readonly SizeChartPictureRow[];
   activeMeasurementNameId: number | null;
   activeFreeLinePosition: number | null;
   onSizeChange: (size: string) => void;
@@ -496,50 +473,52 @@ export function SizeChartPictureEditor({
 
   return (
     <div className='flex min-w-0 flex-col gap-2'>
-      <div className='flex flex-wrap items-center gap-1'>
-        <Chip
-          selected={picture.source === 'icon'}
-          pressed={picture.source === 'icon'}
-          onClick={() => chooseSource('icon')}
-          disabled={disabled}
-        >
-          Icon
-        </Chip>
-        <Chip
-          selected={picture.source === 'sketch'}
-          pressed={picture.source === 'sketch'}
-          onClick={() => chooseSource('sketch')}
-          disabled={disabled || sketches.length === 0}
-        >
-          Sketch
-        </Chip>
-        <Chip
-          selected={picture.source === 'upload'}
-          pressed={picture.source === 'upload'}
-          onClick={() => chooseSource('upload')}
-          disabled={disabled}
-        >
-          Upload
-        </Chip>
-        <Button
-          type='button'
-          variant='secondary'
-          size='xs'
-          className='ml-auto'
-          aria-pressed={drawing}
-          disabled={disabled || !ready}
-          onClick={() => {
-            setDrawing((value) => !value);
-            setStart(null);
-            setCursor(null);
-          }}
-        >
-          + Line
-        </Button>
-      </div>
+      {editing && (
+        <div className='flex flex-wrap items-center gap-1'>
+          <Chip
+            selected={picture.source === 'icon'}
+            pressed={picture.source === 'icon'}
+            onClick={() => chooseSource('icon')}
+            disabled={disabled}
+          >
+            Icon
+          </Chip>
+          <Chip
+            selected={picture.source === 'sketch'}
+            pressed={picture.source === 'sketch'}
+            onClick={() => chooseSource('sketch')}
+            disabled={disabled || sketches.length === 0}
+          >
+            Sketch
+          </Chip>
+          <Chip
+            selected={picture.source === 'upload'}
+            pressed={picture.source === 'upload'}
+            onClick={() => chooseSource('upload')}
+            disabled={disabled}
+          >
+            Upload
+          </Chip>
+          <Button
+            type='button'
+            variant='secondary'
+            size='xs'
+            className='ml-auto'
+            aria-pressed={drawing}
+            disabled={disabled || !ready}
+            onClick={() => {
+              setDrawing((value) => !value);
+              setStart(null);
+              setCursor(null);
+            }}
+          >
+            + Line
+          </Button>
+        </div>
+      )}
 
       <div className='flex min-w-0 flex-wrap items-center gap-2'>
-        {picture.source === 'icon' && (
+        {editing && picture.source === 'icon' && (
           <Select
             name='size-chart-icon'
             value={picture.iconKey || undefined}
@@ -551,7 +530,7 @@ export function SizeChartPictureEditor({
             className='min-w-44 flex-1'
           />
         )}
-        {picture.source === 'upload' && picture.mediaUrl && (
+        {editing && picture.source === 'upload' && picture.mediaUrl && (
           <Button
             type='button'
             variant='underline'
@@ -568,12 +547,12 @@ export function SizeChartPictureEditor({
             options={sizeOptions}
             label='Size'
             onChange={onSizeChange}
-            className='ml-auto max-w-full overflow-x-auto'
+            className='ml-auto max-w-full overflow-x-auto @min-[50rem]:hidden'
           />
         )}
       </div>
 
-      {picture.source === 'sketch' && (
+      {editing && picture.source === 'sketch' && (
         <Tiles min={64} className='grid-cols-[repeat(auto-fill,minmax(4rem,1fr))]'>
           {sketches.map((sketch) => (
             <Tile
@@ -612,8 +591,7 @@ export function SizeChartPictureEditor({
         <SizeChartPictureGraphic
           picture={picture}
           measurementNameById={measurementNameById}
-          measurementNameIdOf={measurementNameIdOf}
-          valueFor={valueFor}
+          rows={rows}
           activeMeasurementNameId={activeMeasurementNameId}
           activeFreeLinePosition={activeFreeLinePosition}
           onFocus={onFocus}

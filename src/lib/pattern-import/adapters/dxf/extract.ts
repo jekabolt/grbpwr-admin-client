@@ -1092,7 +1092,7 @@ async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
 }
 
 export async function readDxf(
-  file: { id: string; name: string; bytes: ArrayBuffer },
+  file: { id: string; name: string; bytes: ArrayBuffer; generatedFusing?: boolean },
   opts: ExtractOpts,
   progress?: Progress,
 ): Promise<DxfRead> {
@@ -1217,6 +1217,7 @@ export async function readDxf(
     binary: dec.binary,
     units,
     manifest,
+    generatedFusing: dec.generatedFusing || file.generatedFusing === true,
     modelLabels,
     groups: b.groups,
     pathEntity: b.pathEntity,

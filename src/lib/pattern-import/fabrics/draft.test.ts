@@ -35,6 +35,87 @@ function scopeOf(m: ConversionManifest, purpose: string, line: string): DraftSco
 const mainScope = (k: 'main1101' | 'main1107') => scopeOf(manifest(k), MAIN, 'line:main');
 const pckScope = () => scopeOf(manifest('pocketing'), PCK, 'line:pocketing');
 
+type SmallPiece = {
+  identity: string;
+  displayName?: string;
+  nameOrigin?: 'text' | 'operator';
+  pairHand?: 'L' | 'R' | null;
+  pairOf?: string | null;
+  piecesPerGarment?: number;
+  fused?: boolean;
+  unfoldedFold?: boolean;
+  box?: [number, number];
+};
+
+function smallManifest(specs: SmallPiece[]): ConversionManifest {
+  const base = manifest('pocketing');
+  const pieceBase = base.pieces[0];
+  const blockBase = base.blocks[0];
+  return {
+    ...base,
+    createdAt: '2026-11-09T00:00:00.000Z',
+    pieces: specs.map((s) => ({
+      ...pieceBase,
+      identity: s.identity,
+      code: s.identity,
+      mods: [],
+      displayName: s.displayName ?? s.identity,
+      nameOrigin: s.nameOrigin ?? 'text',
+      pairHand: s.pairHand ?? null,
+      pairOf: s.pairOf ?? null,
+      piecesPerGarment: s.piecesPerGarment ?? 1,
+      fused: s.fused ?? false,
+      unfoldedFold: s.unfoldedFold ?? false,
+      ungraded: true,
+    })),
+    blocks: specs.map((s) => {
+      const [w, h] = s.box ?? [10, 10];
+      return {
+        ...blockBase,
+        block: s.identity,
+        identity: s.identity,
+        sizeToken: 'UNI',
+        bboxMm: [0, 0, w, h],
+        areaMm2: w * h,
+      };
+    }),
+  };
+}
+
+const TEST_URL = 'https://files.example/current.dxf';
+const smallScope = (specs: SmallPiece[]) => scopeOf(smallManifest(specs), MAIN, 'line:test');
+const smallShape = (
+  pieceLineKey: string,
+  identity: string,
+  box: [number, number] = [10, 10],
+): DraftShapeRef => ({
+  scopeKey: MAIN,
+  pieceLineKey,
+  identity,
+  url: TEST_URL,
+  sizes: { uni: { areaMm2: box[0] * box[1], wMm: box[0], hMm: box[1] } },
+});
+const smallCard = (
+  existingPieces: DraftCardContext['existingPieces'],
+  existingAliases: NonNullable<DraftCardContext['existingAliases']>,
+  existingShapes: DraftShapeRef[] = [],
+): DraftCardContext => ({
+  techCardId: 1,
+  existingPieces,
+  existingAliases,
+  existingShapes,
+  existingPatterns: [
+    {
+      scopeKey: MAIN,
+      filename: 'current.dxf',
+      url: TEST_URL,
+      lineKey: 'row:current',
+      name: 'current',
+    },
+  ],
+  styleLabel: 'TEST',
+});
+
 function card(over: Partial<DraftCardContext> = {}): DraftCardContext {
   return {
     techCardId: 6,
@@ -396,5 +477,291 @@ describe('name and outline helpers', () => {
     const ref = (k: string) => fixture.card.shapes.find((r) => r.pieceLineKey === k)!.sizes;
     expect(shapeCost(blocks, ref('k:P_L_MAIN'))!).toBeLessThan(0.01);
     expect(shapeCost(blocks, ref('k:P_L_U'))!).toBeGreaterThan(0.1);
+  });
+});
+
+describe('production re-import binding continuity', () => {
+  it('ignores one-size suffixes and uses the previous outlined alias to break a tie', () => {
+    const d = buildDraft(
+      {
+        scopes: [
+          smallScope([
+            { identity: 'LIN_BLT', displayName: 'blt · lining' },
+            { identity: 'LIN_FP_OS_1', displayName: 'FP_OS_1' },
+            { identity: 'BLT_OS_L_2', displayName: 'BLT_OS_L_2', pairHand: 'L' },
+          ]),
+        ],
+      },
+      smallCard(
+        [
+          { lineKey: 'k:belt', name: 'blt_S' },
+          { lineKey: 'k:front', name: 'FP_OS_1_M' },
+          { lineKey: 'k:back', name: 'BP_OS_1_M' },
+          { lineKey: 'k:left-belt', name: 'BLT_L_OS_2_M' },
+          { lineKey: 'k:belt-twin', name: 'blt_M' },
+        ],
+        [
+          { scopeKey: MAIN, blockName: 'blt_S', pieceLineKey: 'k:belt' },
+          { scopeKey: MAIN, blockName: 'FP_OS_1_M', pieceLineKey: 'k:front' },
+          { scopeKey: MAIN, blockName: 'BP_OS_1_M', pieceLineKey: 'k:back' },
+          { scopeKey: MAIN, blockName: 'BLT_L_OS_2_M', pieceLineKey: 'k:left-belt' },
+        ],
+        [
+          smallShape('k:belt', 'blt_S'),
+          smallShape('k:front', 'FP_OS_1_M'),
+          smallShape('k:back', 'BP_OS_1_M', [20, 10]),
+          smallShape('k:left-belt', 'BLT_L_OS_2_M'),
+          smallShape('k:belt-twin', 'blt_M', [20, 10]),
+        ],
+      ),
+      { mintKey },
+    );
+
+    expect(links(d, MAIN)).toEqual({
+      LIN_BLT: 'blt_S',
+      LIN_FP_OS_1: 'FP_OS_1_M',
+      BLT_OS_L_2: 'BLT_L_OS_2_M',
+    });
+    expect(d.pieces.filter((piece) => !piece.existingLineKey)).toEqual([]);
+    expect(d.unresolved).toBeUndefined();
+  });
+
+  it('keeps the linked duplicate when a sibling has the new block name', () => {
+    const d = buildDraft(
+      { scopes: [smallScope([{ identity: 'PCK_MAIN_L', pairHand: 'L' }])] },
+      smallCard(
+        [
+          { lineKey: 'k:linked', name: 'PCK_MAIN_L_S_S' },
+          { lineKey: 'k:sibling', name: 'PCK_MAIN_L' },
+        ],
+        [{ scopeKey: MAIN, blockName: 'PCK_MAIN_L_S_S', pieceLineKey: 'k:linked' }],
+        [smallShape('k:linked', 'PCK_MAIN_L_S_S')],
+      ),
+      { mintKey },
+    );
+
+    expect(links(d, MAIN).PCK_MAIN_L).toBe('PCK_MAIN_L_S_S');
+    expect(d.pieces.find((p) => p.name === 'PCK_MAIN_L_S_S')?.basis).toBe('shape');
+    expect(d.pieces.filter((p) => !p.existingLineKey)).toEqual([]);
+    expect(d.unresolved).toBeUndefined();
+  });
+
+  it('restores both new pair blocks through the linked opposite hands', () => {
+    const d = buildDraft(
+      {
+        scopes: [
+          smallScope([
+            {
+              identity: 'P02_L',
+              displayName: 'SHLD_1_L_1',
+              nameOrigin: 'operator',
+              pairHand: 'L',
+              pairOf: 'P02_R',
+            },
+            { identity: 'P02_R', pairHand: 'R', pairOf: 'P02_L' },
+            { identity: 'P01_L', pairHand: 'L', pairOf: 'P01_R' },
+            {
+              identity: 'P01_R',
+              displayName: 'SHLD_1_R_1',
+              nameOrigin: 'operator',
+              pairHand: 'R',
+              pairOf: 'P01_L',
+            },
+          ]),
+        ],
+      },
+      smallCard(
+        [
+          { lineKey: 'k:left', name: 'SHLD_1_L_1' },
+          { lineKey: 'k:right', name: 'SHLD_1_R_1' },
+        ],
+        [
+          { scopeKey: MAIN, blockName: 'SHLD_1_L_1', pieceLineKey: 'k:left' },
+          { scopeKey: MAIN, blockName: 'SHLD_1_R_1', pieceLineKey: 'k:right' },
+        ],
+        [smallShape('k:left', 'SHLD_1_L_1'), smallShape('k:right', 'SHLD_1_R_1')],
+      ),
+      { mintKey },
+    );
+
+    expect(links(d, MAIN)).toEqual({
+      P02_L: 'SHLD_1_L_1',
+      P02_R: 'SHLD_1_R_1',
+      P01_L: 'SHLD_1_L_1',
+      P01_R: 'SHLD_1_R_1',
+    });
+    expect(d.pieces.filter((p) => !p.existingLineKey)).toEqual([]);
+  });
+
+  it('uses a same-outline mojibake alias without changing its card name', () => {
+    const d = buildDraft(
+      {
+        scopes: [
+          smallScope([
+            { identity: 'P02', displayName: 'Р?Р _8', nameOrigin: 'operator' },
+            { identity: 'P01', displayName: 'Р?Р _9', nameOrigin: 'operator' },
+          ]),
+        ],
+      },
+      smallCard(
+        [
+          { lineKey: 'k:eight', name: 'Ð?Ð _8' },
+          { lineKey: 'k:nine', name: 'Ð?Ð _9' },
+        ],
+        [
+          { scopeKey: MAIN, blockName: 'Ð?Ð _8', pieceLineKey: 'k:eight' },
+          { scopeKey: MAIN, blockName: 'Ð?Ð _9', pieceLineKey: 'k:nine' },
+        ],
+        [smallShape('k:eight', 'Ð?Ð _8'), smallShape('k:nine', 'Ð?Ð _9')],
+      ),
+      { mintKey },
+    );
+
+    expect(links(d, MAIN)).toEqual({ P02: 'Ð?Ð _8', P01: 'Ð?Ð _9' });
+    expect(d.pieces.map((p) => p.name).sort()).toEqual(['Ð?Ð _8', 'Ð?Ð _9']);
+    expect(d.unresolved).toBeUndefined();
+  });
+
+  it('keeps a same-contour cross-hand link from the replaced sheet', () => {
+    const d = buildDraft(
+      {
+        scopes: [
+          smallScope([
+            { identity: 'P01', displayName: 'PCK_BACK_L', nameOrigin: 'operator' },
+            { identity: 'BP_L_1', pairHand: 'L' },
+          ]),
+        ],
+      },
+      smallCard(
+        [
+          { lineKey: 'k:left', name: 'PCK_BACK_L' },
+          { lineKey: 'k:right', name: 'PCK_BACK_R' },
+        ],
+        [
+          { scopeKey: MAIN, blockName: 'PCK_BACK_L', pieceLineKey: 'k:left' },
+          { scopeKey: MAIN, blockName: 'PCK_BACK_L_1', pieceLineKey: 'k:right' },
+        ],
+        [smallShape('k:left', 'PCK_BACK_L'), smallShape('k:right', 'PCK_BACK_L_1')],
+      ),
+      { mintKey },
+    );
+
+    expect(links(d, MAIN).BP_L_1).toBe('PCK_BACK_R');
+    expect(d.pieces.filter((p) => !p.existingLineKey)).toEqual([]);
+    expect(d.unresolved).toBeUndefined();
+  });
+
+  it('normalizes a generated label and lets its prior alias beat a sibling name', () => {
+    const d = buildDraft(
+      {
+        scopes: [
+          smallScope([
+            { identity: 'P04', displayName: 'Piece Name: Back_Top_L_R', nameOrigin: 'operator' },
+            { identity: 'P05', displayName: 'Piece Name: Back_Top_R_R', nameOrigin: 'operator' },
+            { identity: 'PCK_R', displayName: 'FLAP_R_UNI', pairHand: 'R' },
+          ]),
+        ],
+      },
+      smallCard(
+        [
+          { lineKey: 'k:back-left', name: 'Back_Top_L_R' },
+          { lineKey: 'k:back-right', name: 'Back_Top_R_R' },
+          { lineKey: 'k:flap', name: 'FLAP_R' },
+          { lineKey: 'k:sibling', name: 'PCK_R' },
+        ],
+        [
+          { scopeKey: MAIN, blockName: 'Back_Top_L_R', pieceLineKey: 'k:back-left' },
+          { scopeKey: MAIN, blockName: 'Back_Top_R_R', pieceLineKey: 'k:back-right' },
+          { scopeKey: MAIN, blockName: 'FLAP_R', pieceLineKey: 'k:flap' },
+        ],
+      ),
+      { mintKey },
+    );
+
+    expect(links(d, MAIN)).toEqual({
+      P04: 'Back_Top_L_R',
+      P05: 'Back_Top_R_R',
+      PCK_R: 'FLAP_R',
+    });
+    expect(d.pieces.filter((p) => !p.existingLineKey)).toEqual([]);
+    expect(d.unresolved).toBeUndefined();
+  });
+});
+
+describe('existing piece settings', () => {
+  it('keeps card values, exposes drawing differences, and plans no setting writes', () => {
+    const mirrored = 'TECH_CARD_PIECE_CUT_SYMMETRY_MIRRORED';
+    const existing = {
+      lineKey: 'k:cut',
+      name: 'CUT',
+      piecesPerGarment: 1,
+      cutSymmetry: mirrored,
+      fused: false,
+      fusingMode: 'TECH_CARD_PIECE_FUSING_MODE_ZONE',
+    };
+    const aliases = [{ scopeKey: MAIN, blockName: 'CUT', pieceLineKey: 'k:cut' }];
+    const d = buildDraft(
+      {
+        scopes: [
+          smallScope([
+            {
+              identity: 'CUT',
+              piecesPerGarment: 2,
+              fused: true,
+              unfoldedFold: true,
+            },
+          ]),
+        ],
+      },
+      smallCard([existing], aliases, [smallShape('k:cut', 'CUT')]),
+      { mintKey },
+    );
+
+    expect(d.pieces[0]).toMatchObject({
+      piecesPerGarment: 1,
+      cutSymmetry: mirrored,
+      fused: false,
+      fusingMode: 'TECH_CARD_PIECE_FUSING_MODE_ZONE',
+    });
+    expect(d.pieces[0].symmetryForce).toBeUndefined();
+    expect(d.pieceUpdates).toEqual([]);
+    expect(d.pieceDifferences?.map((x) => x.field).sort()).toEqual([
+      'cutSymmetry',
+      'fused',
+      'piecesPerGarment',
+    ]);
+
+    const plan = planFormWrites(
+      d,
+      {
+        patterns: [
+          {
+            lineKey: 'row:current',
+            fabricPurpose: MAIN,
+            url: TEST_URL,
+            filename: 'current.dxf',
+          },
+        ],
+        pieces: [existing],
+        aliases: aliases.map((a) => ({
+          fabricPurpose: a.scopeKey,
+          blockName: a.blockName,
+          pieceLineKey: a.pieceLineKey,
+        })),
+      },
+      [
+        {
+          scopeKey: MAIN,
+          url: 'https://files.example/reimport.dxf',
+          filename: d.scopes[0].filename,
+          sizeBytes: 1,
+        },
+      ],
+      { storageSizeId: 2, mintKey },
+    );
+    expect(plan.created).toBe(0);
+    expect(plan.writes.filter((w) => w.path === 'pieces' || w.path.startsWith('pieces.'))).toEqual(
+      [],
+    );
   });
 });

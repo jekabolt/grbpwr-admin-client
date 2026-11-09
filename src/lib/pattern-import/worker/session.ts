@@ -69,6 +69,8 @@ import {
 } from '../adapters/pdf';
 import {
   dxfFastPath,
+  dxfPresegmentedIdentities,
+  dxfWrittenPresegmentedIdentities,
   dxfScaleCandidates,
   readDxf,
   settleSeamPair,
@@ -128,6 +130,8 @@ import {
   createProposeSizeMap,
   defaultTokensOf,
   markNotDrawn,
+  sizeRunForCard,
+  storedSizeMap,
 } from '../sizes/map';
 import { fileSizeLabel } from '../sizes/recover';
 import {
@@ -412,6 +416,8 @@ export class Session {
   /** DARTS: the outlines the pieces stage set aside (the proven darts are read off them). */
   private setAside: SetAside[] = [];
   private semantics: SemanticsOutput | null = null;
+  /** Exact card identities supplied with the last semantics run; copied into the manifest gate. */
+  private presegmentedIdentities: string[] = [];
   /** PASSPORT Ф1: what the document says (extract), and the same bound to the pieces (semantics). */
   private passport: GarmentPassport | null = null;
   private passportBound: GarmentPassport | null = null;
@@ -430,7 +436,10 @@ export class Session {
   /** sha256 per file id, computed once when the bytes are first read (provenance, error report). */
   private sha = new Map<string, string>();
 
-  constructor(id: number, input: { name: string; bytes: ArrayBuffer }[]) {
+  constructor(
+    id: number,
+    input: { name: string; bytes: ArrayBuffer; generatedFusing?: boolean }[],
+  ) {
     let files = input;
     this.id = id;
     if (!files.length) throw new ImportError('out-of-order', 'no files given');
@@ -498,6 +507,7 @@ export class Session {
       sha256: '',
       kind: routes[i].kind,
       pages: 0,
+      ...(files[i].generatedFusing ? { generatedFusing: true } : {}),
     }));
     // The ArrayBuffers are copied into Blobs (the browser may page those out) and released.
     files.forEach((f, i) => this.blobs.set(`file:${i}`, new Blob([f.bytes])));
@@ -656,7 +666,13 @@ export class Session {
         },
         dxf: async (f, o, p) => {
           const graded = this.rul ? await this.gradeByRul(f) : null;
-          const read = await readDxf(graded ? { ...f, bytes: graded.bytes } : f, o, p);
+          const read = await readDxf(
+            graded
+              ? { ...f, bytes: graded.bytes, generatedFusing: info.generatedFusing }
+              : { ...f, generatedFusing: info.generatedFusing },
+            o,
+            p,
+          );
           const seg = segmentDxf(read);
           if (graded) {
             const off = rulSizesMismatch(graded.sizes, seg, graded.blocks);
@@ -1281,9 +1297,14 @@ export class Session {
     const label = this.countEv?.set === this.chains ? this.countEv.v.label : null;
     const named =
       expected?.n === 1 && expected.from !== 'source' ? labelSingleRun(read, label) : read;
-    const run = runForExpected(named, expected);
+    const run = sizeRunForCard(
+      runForExpected(named, expected),
+      input.card,
+      this.files.length === 1 ? this.files[0].id : null,
+    );
     let map = proposeCardSizeMap(run, input.card);
     if (this.dxfSet) map = reviewPlaceholderSizes(map, this.setSizes, input.card);
+    map = storedSizeMap(run, input.card, input.storedMaps ?? []) ?? map;
     if (input.operatorMap?.length) map = applyOperatorMap(map, input.operatorMap, input.card);
     // a size the sheet lists but draws no line of its own for is not drawn here: never written,
     // never filled from its neighbour (cause E, viola's 34)
@@ -1763,6 +1784,11 @@ export class Session {
       throw new ImportError('out-of-order', 'find the pieces first', 'semantics');
     if (!this.sizeMap)
       throw new ImportError('out-of-order', 'map the sizes to the card first', 'semantics');
+    this.presegmentedIdentities = [
+      ...new Set(
+        (input.presegmentedIdentities ?? []).map((identity) => identity.trim()).filter(Boolean),
+      ),
+    ];
     // Nobody decided the file's allowance yet: what the sheet says (text in 9 languages, or the gap
     // between two nested loops) beats the owner default. The decision rides on every spec.
     // D6: a drawing of several tile sheets — each sheet states (or measures) its own allowance; where
@@ -1994,6 +2020,17 @@ export class Session {
     const sem = this.semantics;
     if (!sem) throw new ImportError('out-of-order', 'piece details have not been built', 'write');
     const raster = this.files.some((f) => f.kind === 'raster');
+    const presegmentedIdentities = [
+      ...new Set([
+        ...dxfPresegmentedIdentities(this.fast?.families ?? []),
+        ...this.presegmentedIdentities,
+        ...dxfWrittenPresegmentedIdentities(
+          this.fast?.families ?? [],
+          sem.pieces,
+          this.presegmentedIdentities,
+        ),
+      ]),
+    ];
     const source: ManifestSource = {
       files: [
         ...this.files.map((f) => ({
@@ -2062,6 +2099,8 @@ export class Session {
         : {}),
       sizeEncoding: this.run?.encoding ?? 'single',
       variant: this.pieceVariant ?? sem.pieces.find((p) => p.variant)?.variant ?? null,
+      ...(this.dxf?.read.meta.generatedFusing ? { generatedFusing: true } : {}),
+      ...(presegmentedIdentities.length ? { presegmentedIdentities } : {}),
     };
     // VARIANTS (D5): the pieces the drawing ties to one model — in THIS file or left out — and why
     const chosen = this.pieceVariant;

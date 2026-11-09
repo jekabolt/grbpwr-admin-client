@@ -143,6 +143,8 @@ export type GarmentLabelMark = {
   widthMm: number;
   heightMm: number;
   fold: 'flat' | 'half' | 'ends' | 'mitre' | 'loop' | '';
+  /** Fold lines, mm from the top along the height (stored, else implied by `fold`). */
+  foldLines?: number[];
   attachment: string;
 };
 

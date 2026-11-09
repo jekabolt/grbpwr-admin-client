@@ -41,6 +41,33 @@ export function cycleLayerHit(
   return hits[(previousIndex + 1) % hits.length];
 }
 
+const ringArea = (ring: readonly Pt2[]): number =>
+  Math.abs(
+    ring.reduce((sum, [x, y], index) => {
+      const [nx, ny] = ring[(index + 1) % ring.length];
+      return sum + x * ny - nx * y;
+    }, 0),
+  ) / 2;
+
+/**
+ * The piece a press moves. The selected piece keeps the press when it is under the pointer, so a
+ * piece can be dragged from below another one; a small piece lying on it (a label, a pocket) takes
+ * the press instead, otherwise it could never be picked up off its host.
+ */
+export function pressedPiece(
+  hits: readonly string[],
+  rings: readonly PosePieceRing[],
+  selected: string | null | undefined,
+  clickPiece: string,
+): string {
+  const at = selected ? hits.indexOf(selected) : -1;
+  if (at < 0) return clickPiece;
+  const top = hits[0];
+  if (at === 0 || top !== clickPiece) return selected as string;
+  const area = (piece: string) => ringArea(rings.find((ring) => ring.piece === piece)?.ring ?? []);
+  return area(top) * 4 <= area(selected as string) ? top : (selected as string);
+}
+
 /** A snap marker exists only as part of the current drag. */
 export function snapAtDuringDrag(drag: { snap: { at: Pt2 } | null } | null): Pt2 | null {
   return drag?.snap?.at ?? null;

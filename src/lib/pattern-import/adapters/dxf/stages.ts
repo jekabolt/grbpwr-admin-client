@@ -24,6 +24,7 @@ import type {
   PathId,
   PathRange,
   PieceFamily,
+  PieceSpec,
   ScaleCandidate,
   SeamLineFeature,
   Seed,
@@ -52,6 +53,62 @@ export type DxfFastPath = {
   /** File-level allowance as drawn (SemanticsInput.fileAllowance default). */
   allowance: AllowanceDecision | null;
 };
+
+/** Identities whose PIECE NAME or separate SIZE label defeats a block-name size-tail guess. */
+export function dxfPresegmentedIdentities(families: readonly PieceFamily[]): string[] {
+  const exact = new Map<string, boolean>();
+  for (const family of families)
+    for (const candidate of family.candidates) {
+      const dxf = (candidate as DxfPieceCandidate).dxf;
+      const identity = dxf.identity.trim();
+      if (!identity) continue;
+      exact.set(
+        identity,
+        (exact.get(identity) ?? true) &&
+          (dxf.sizeSource === 'label' || dxf.identitySource === 'label'),
+      );
+    }
+  return [...exact]
+    .filter(([, presegmented]) => presegmented)
+    .map(([identity]) => identity)
+    .sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Carry source-identity proof through semantic naming. Legacy cards may link `FLAP_L` while the
+ * naming pass writes `PCK_L`; the shared seed proves these are the same pre-segmented piece.
+ */
+export function dxfWrittenPresegmentedIdentities(
+  families: readonly PieceFamily[],
+  written: readonly Pick<PieceSpec, 'seed' | 'identity'>[],
+  cardIdentities: readonly string[],
+): string[] {
+  const provenSource = new Set(
+    [...dxfPresegmentedIdentities(families), ...cardIdentities]
+      .map((identity) => identity.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const provenSeeds = new Set(
+    families
+      .filter(
+        (family) =>
+          family.candidates.length > 0 &&
+          family.candidates.every((candidate) => {
+            const identity = (candidate as DxfPieceCandidate).dxf?.identity.trim().toLowerCase();
+            return !!identity && provenSource.has(identity);
+          }),
+      )
+      .map((family) => family.seed),
+  );
+  return [
+    ...new Set(
+      written
+        .filter((piece) => provenSeeds.has(piece.seed))
+        .map((piece) => piece.identity.trim())
+        .filter(Boolean),
+    ),
+  ].sort((a, b) => a.localeCompare(b));
+}
 
 const ROLE_OF: Record<PathRole, ChainRole> = {
   cut: 'size',
@@ -415,6 +472,9 @@ function candidateOf(
       group: p.group,
       identity: p.identity,
       size: p.size,
+      sizeSource: p.sizeSource,
+      identitySource: p.identitySource,
+      ...(read.meta.generatedFusing ? { generatedFusing: true } : {}),
       features,
       outerIsSeam: outerIsSeam && !!p.seam,
       ...(p.seamPair ? { seamPairMm: p.seamPair.offsetMm } : {}),

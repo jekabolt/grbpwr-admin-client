@@ -12,7 +12,8 @@
 //   • every identity (all its sizes together, keeping their shared grade nest) is translated onto a
 //     shelf so different pieces never overlap in world space — the source sheet placement is not
 //     kept: a derived mirror lands on top of its sibling, and an unfolded piece on its neighbour;
-//   • grain = CLO 3-vertex arrow, 180 mm shaft centred on the source grain's midpoint;
+//   • grain = CLO 3-vertex arrow, 180 mm shaft centred on the source grain's midpoint when that
+//     midpoint is on the cut, otherwise on the same axis fitted through the cut;
 //   • notch = one LINE per logical notch, start projected ONTO the written cut line, inward, depth
 //     clamped to [1, 8] mm (< 1 cm, so the card never takes it for a grain candidate);
 //   • every open 2-point L8 line (internal or fold) gets a midpoint: the card's parser takes any
@@ -32,6 +33,7 @@ import type {
 } from '../types';
 import { PATIMPORT } from '../types';
 import { stripSpikes } from '../spikes';
+import { fitGrainInside, pointOnRings } from '../semantics/grain-inside';
 import {
   IDENTITY,
   applyAffine,
@@ -224,12 +226,17 @@ function deriveSibling(
 
 // ── written primitives ─────────────────────────────────────────────────────────────────────
 
-function grainArrow(g: GrainFeature): PlannedGrain | null {
+function grainArrow(g: GrainFeature, cut: readonly PtMm[]): PlannedGrain | null {
   const L = dist(g.a, g.b);
   if (!(L > 0)) return null;
   const u = { x: (g.b.x - g.a.x) / L, y: (g.b.y - g.a.y) / L };
   const n = { x: -u.y, y: u.x };
-  const mid = { x: (g.a.x + g.b.x) / 2, y: (g.a.y + g.b.y) / 2 };
+  const originalMid = { x: (g.a.x + g.b.x) / 2, y: (g.a.y + g.b.y) / 2 };
+  const fitted = pointOnRings(originalMid, [cut])
+    ? ([g.a, g.b] as const)
+    : fitGrainInside(g.a, g.b, [cut], { minMm: 1 });
+  if (!fitted) return null;
+  const mid = { x: (fitted[0].x + fitted[1].x) / 2, y: (fitted[0].y + fitted[1].y) / 2 };
   const tail = { x: mid.x - (GRAIN_SHAFT_MM / 2) * u.x, y: mid.y - (GRAIN_SHAFT_MM / 2) * u.y };
   const tip = { x: tail.x + GRAIN_SHAFT_MM * u.x, y: tail.y + GRAIN_SHAFT_MM * u.y };
   const barb = {
@@ -428,7 +435,7 @@ export function planBlocks(
         foldLines = 1;
       }
       const foldIsMirror = foldLines === 1 && !w.spec.unfoldedFold;
-      const grain = s.grain ? grainArrow(s.grain) : null;
+      const grain = s.grain ? grainArrow(s.grain, cut) : null;
       if (!grain) warnings.push(`${who}: no grain line`);
       const notches = sNotches.map((n) => plannedNotch(cut, n, warnings, who));
       const annotation: string[] = [];

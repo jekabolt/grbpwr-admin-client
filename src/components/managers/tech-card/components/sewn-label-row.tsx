@@ -47,15 +47,16 @@ import {
   removeLabelWithLine,
   takeLabelMaterialOff,
 } from './label-bom';
+import { LabelShapeIcon } from './label-shape-icon';
 import { LabelFilePicker } from './label-file-picker';
 import type { FormGarmentLabel } from './labels-schema';
 import type { TechCardFormData } from './schema';
-import { labelBomLine, type LabelAxes } from './sewn-label-model';
+import { confirmCompositionLabel } from './label-bom';
+import { isCompositionLabel, labelBomLine, type LabelAxes } from './sewn-label-model';
 import {
   kindLabel,
   labelAttachmentOptions,
   labelDefaults,
-  labelFoldingOptions,
   labelMadeByOptions,
   labelPlacementOptions,
   labelPrintMethodOptions,
@@ -63,6 +64,8 @@ import {
 } from './tech-card-options';
 import { bomUnitKind } from './nesting/marker-io';
 import { wireInt } from './wire-int';
+import { garmentLabelMark } from './garment-label-pieces';
+import { LabelFoldEditor } from './label-fold-editor';
 import { ulid } from 'utils/ulid';
 
 const OTHER = '__other';
@@ -353,6 +356,13 @@ export function ensureLabelLineKey(
   setValue: UseFormSetValue<TechCardFormData>,
   labelKey: string,
 ): string {
+  // A composition label put on a step without its size is confirmed first: size + BOM line,
+  // otherwise the step picker has no label to place.
+  const born = ((getValues('garmentLabels') ?? []) as FormGarmentLabel[]).find((row) =>
+    sameKey(row.key, labelKey),
+  );
+  if (isCompositionLabel(labelKey) && !(Number(born?.widthMm) > 0 && Number(born?.heightMm) > 0))
+    confirmCompositionLabel(getValues, setValue);
   const rows = (getValues('garmentLabels') ?? []) as FormGarmentLabel[];
   const index = rows.findIndex((row) => sameKey(row.key, labelKey));
   const current = index >= 0 ? rows[index]?.lineKey?.trim() : '';
@@ -457,30 +467,26 @@ function LabelStepLink({
   );
 }
 
-function FoldChips({
-  value,
+function LabelFold({
+  row,
   disabled,
   onChange,
 }: {
-  value?: string;
+  row: FormGarmentLabel;
   disabled: boolean;
-  onChange: (value: FormGarmentLabel['fold']) => void;
+  onChange: (value: Pick<FormGarmentLabel, 'fold' | 'foldLinesMm'>) => void;
 }) {
+  const shape = garmentLabelMark(row);
   return (
-    <ChipRow>
-      {labelFoldingOptions.map((option) => (
-        <Chip
-          key={option}
-          nonForm
-          selected={value === option}
-          pressed={value === option}
-          disabled={disabled}
-          onClick={() => onChange(option as FormGarmentLabel['fold'])}
-        >
-          {option}
-        </Chip>
-      ))}
-    </ChipRow>
+    <LabelFoldEditor
+      widthMm={shape?.widthMm ?? 30}
+      heightMm={shape?.heightMm ?? 100}
+      fold={row.fold}
+      foldLinesMm={row.foldLinesMm}
+      libraryFileId={row.files?.[0]?.libraryFileId}
+      disabled={disabled}
+      onChange={onChange}
+    />
   );
 }
 
@@ -850,11 +856,7 @@ export function SewnLabelModal({
             <LabelStepLink labelKey={labelKey} lineKey={row.lineKey} canEdit={canEdit} />
           </Field>
           <Field label='fold' className='sm:col-span-2'>
-            <FoldChips
-              value={row.fold}
-              disabled={!canEdit || built}
-              onChange={(fold) => patch({ fold })}
-            />
+            <LabelFold row={row} disabled={!canEdit} onChange={patch} />
           </Field>
           <Field label='per garment'>
             <Input
@@ -1041,7 +1043,7 @@ export function SewnLabelRow({
       <Button
         type='button'
         variant='default'
-        className={`${ROW_GRID} px-0 py-2 text-left`}
+        className={`${ROW_GRID} px-0 py-2 text-left press:!bg-transparent press:!text-textColor`}
         aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
       >
@@ -1049,7 +1051,7 @@ export function SewnLabelRow({
           <MaterialThumb material={material} size='sm' className='hidden size-12 sm:block' />
         ) : (
           <span className='hidden size-12 items-center justify-center border border-borderColor bg-pageBg sm:flex'>
-            <LabelIcon kind={labelPictogram(kind)} size={36} />
+            <LabelShapeIcon label={row} size={40} />
           </span>
         )}
         <span className='min-w-0'>
@@ -1308,11 +1310,7 @@ export function SewnLabelRow({
 
           <div className='mt-3'>
             <Field label='fold'>
-              <FoldChips
-                value={row.fold}
-                disabled={!canEdit}
-                onChange={(fold) => patch({ fold })}
-              />
+              <LabelFold row={row} disabled={!canEdit} onChange={patch} />
             </Field>
           </div>
 

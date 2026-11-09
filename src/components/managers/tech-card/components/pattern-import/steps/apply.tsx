@@ -11,7 +11,25 @@
 import type { FollowUpCell, FollowUpRow, FollowUpStep } from 'lib/pattern-import/fabrics/followup';
 import type { DraftScope } from 'lib/pattern-import/types';
 import { useContext, useState } from 'react';
-import { Button, CalloutBox, DataTable, GroupLabel, Pill, Row, Text, EmptyCell } from 'ui';
+import {
+  Button,
+  CalloutBox,
+  DataTable,
+  GroupLabel,
+  HeaderWarnings,
+  Pill,
+  Row,
+  Text,
+  EmptyCell,
+  type HeaderWarning,
+} from 'ui';
+import {
+  assemblyImpact,
+  unclearCount,
+  withAnswers,
+  type Impact,
+} from 'lib/pattern-import/fabrics/assembly-impact';
+import { AssemblyResult, AssemblyTiles } from './assembly-tiles';
 import type { CardContext } from '../client';
 import type { ImportSessionApi } from '../use-import-session';
 import { DebugFold, Fold, Panel, ask, fmtBytes } from '../ui-bits';
@@ -75,8 +93,15 @@ export function ApplyStep({
   const running = apply.phase === 'running';
   const done = apply.phase === 'done' ? apply.result : null;
   const progress = apply.phase === 'idle' ? {} : apply.progress;
-  const created = draft.pieces.filter((p) => !p.existingLineKey);
-  const reused = draft.pieces.filter((p) => p.existingLineKey);
+  // T4: the assembly impact (the run's card snapshot, as the session gates on it) and the draft as
+  // apply will write it — the operator's answers made into rows (the minted keys are placeholders)
+  const runCard = api.runCard ?? card;
+  const impacts = assemblyImpact(draft, runCard);
+  let minted = 0;
+  const eff = withAnswers(draft, runCard.existingPieces, () => `answer-${++minted}`);
+  const unclearN = unclearCount(impacts);
+  const created = eff.pieces.filter((p) => !p.existingLineKey);
+  const reused = eff.pieces.filter((p) => p.existingLineKey);
   const existingName = (lineKey: string) =>
     card.existingPieces.find((p) => p.lineKey === lineKey)?.name ?? lineKey;
   const reimports = draft.scopes.filter((sc) => !!sc.replaces);
@@ -112,10 +137,18 @@ export function ApplyStep({
   };
 
   const consequences = (
-    <Panel title='to the card'>
+    <Panel
+      title='to the card'
+      aside={result ? undefined : <HeaderWarnings countOnly items={impactWarnings(impacts)} />}
+    >
       <Row
         label='pieces'
-        value={`${created.length} new${reused.length ? ` · ${reused.length} existing` : ''}`}
+        value={
+          <>
+            {`${created.length} new${reused.length ? ` · ${reused.length} existing` : ''}`}
+            {unclearN > 0 && <span className='text-error'>{` · ${unclearN} unclear`}</span>}
+          </>
+        }
       />
       <Row label='sizes' value={sizes.length ? sizes.join(' ') : <EmptyCell />} />
       {draft.scopes.map((s) => (
@@ -155,10 +188,11 @@ export function ApplyStep({
           className='[&>span:first-child]:shrink-0 [&>span:last-child]:shrink'
         />
       )}
-      {draft.pieceUpdates.length > 0 && (
+      <AssemblyTiles api={api} card={runCard} impacts={impacts} locked={running || !!done?.ok} />
+      {eff.pieceUpdates.length > 0 && (
         <>
           <GroupLabel>card pieces rewritten</GroupLabel>
-          {draft.pieceUpdates.map((u) => (
+          {eff.pieceUpdates.map((u) => (
             <Row key={u.lineKey} label={existingName(u.lineKey)} value={u.reason} />
           ))}
         </>
@@ -217,7 +251,7 @@ export function ApplyStep({
         </>
       )}
 
-      <Fold label={`piece list (${draft.pieces.length})`}>
+      <Fold label={`piece list (${eff.pieces.length})`}>
         <DataTable>
           <thead>
             <tr>
@@ -235,7 +269,7 @@ export function ApplyStep({
             </tr>
           </thead>
           <tbody>
-            {draft.pieces.map((p) => (
+            {eff.pieces.map((p) => (
               <tr key={p.lineKey}>
                 <td>{p.name}</td>
                 <td>{p.piecesPerGarment}</td>
@@ -385,6 +419,7 @@ export function ApplyStep({
             ))}
           </div>
         )}
+        {done?.ok && !stub && <AssemblyResult impacts={impacts} />}
         {followUpWaitsForSave && (
           <Text
             size='nano'
@@ -457,6 +492,20 @@ export function ApplyStep({
       </Panel>
     </div>
   );
+}
+
+/** The header's `! N`: answers apply waits for, and warnings not yet answered (`warnCount`). */
+function impactWarnings(impacts: Impact[]): HeaderWarning[] {
+  return impacts.flatMap((i): HeaderWarning[] => {
+    if (i.kind === 'unclear' && i.state === 'open')
+      return [{ text: `${i.blockName}: which piece`, error: true }];
+    if (i.kind === 'lost' && i.severity === 'block' && !i.answer)
+      return [{ text: `${i.pieceName}: not drawn`, error: true }];
+    if (i.kind === 'lost' && i.severity === 'warn') return [`${i.pieceName}: not drawn`];
+    if (i.kind === 'differ' && i.severity === 'warn' && !i.answer)
+      return [`${plural(i.pieces.length, 'piece')}: × per garment`];
+    return [];
+  });
 }
 
 /**

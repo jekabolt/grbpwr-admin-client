@@ -87,6 +87,7 @@ import { driveTick, newDriveState, type DriveState, type DriveStopWhy } from './
 import { autopilotRecordOf, mergeAssumptions, type Assumption } from './autopilot/types';
 import { aiAsideAssumptions } from './autopilot/ai-pages';
 import { answerRecordOf } from './autopilot/replay-record';
+import { acceptCurrentFindings } from './steps/accepted-findings';
 import {
   before,
   cloneInput,
@@ -106,6 +107,7 @@ import type {
   NameSuggester,
 } from './client';
 import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
+import { assemblyImpact, blockingCount } from 'lib/pattern-import/fabrics/assembly-impact';
 import { aiFabricHintsOf } from 'lib/pattern-import/fabrics/propose';
 import { fusedSeeds, pinToScope, planScopes } from 'lib/pattern-import/fabrics/scope';
 import {
@@ -125,6 +127,7 @@ import {
   unansweredAtWrite,
   type AnswerCtx,
 } from './answers';
+import { cardPresegmentedIdentities } from './entry';
 
 export const STEPS: { id: WizardStep; label: string }[] = [
   { id: 'files', label: 'files' },
@@ -309,6 +312,7 @@ const SHAPE_FIX_KEEPS = new Set<WizardEvent['type']>([
   'write-storage',
   'fabrics',
   'apply',
+  'impact-answer',
   'download',
   'names',
   'semantics',
@@ -395,6 +399,7 @@ export function cardFingerprint(c: CardContext): string {
     c.existingPieces.map((x) => [x.lineKey, x.name, x.cutSymmetry, x.piecesPerGarment ?? null]),
     (c.existingAliases ?? []).map((x) => [x.scopeKey, x.blockName, x.pieceLineKey]),
     (c.existingPatterns ?? []).map((x) => [x.scopeKey, x.url, x.lineKey ?? null]),
+    c.generatedFusingSources ?? [],
     cardIdentity(c),
   ]);
 }
@@ -704,10 +709,10 @@ export function useImportSession(deps: {
    * takes the parse: a card that has sheets is never drafted as one without outlines. A parse that
    * failed is not waited for — the draft then asks (`unresolved`).
    */
-  async function cardParsed(): Promise<void> {
+  async function cardParsed(stage: 'sizes' | 'write' = 'write'): Promise<void> {
     if (cardRef.current.shapesPending) {
       const gen = histGen.current;
-      patch({ busy: { stage: 'write', done: 0, total: 1 }, error: null });
+      patch({ busy: { stage, done: 0, total: 1 }, error: null });
       try {
         while (cardRef.current.shapesPending) {
           if (stopReq.current)
@@ -726,6 +731,16 @@ export function useImportSession(deps: {
     if (sRef.current.sessionId == null) throw new Error('no session — read the files first');
     // STOPFIX: a stop holds every stage after the one it stopped (a move, a drive)
     if (stopReq.current) throw new ImportWorkerError('cancelled', 'stopped by the operator', stage);
+    // A stored size decision arrives with the card parse, just like its outline references. Wait
+    // for that parse before resolving sizes so a re-upload can reuse the same-scope manifest.
+    if (stage === 'sizes') await cardParsed('sizes');
+    const actualInput =
+      stage === 'sizes'
+        ? ({
+            ...input,
+            storedMaps: storedSizeMaps(),
+          } as StageIO[S]['in'])
+        : input;
     // the stage that reads the card's run: what everything after it was built against
     patch({ busy: { stage, done: 0, total: 1 }, error: null });
     setErrorCode(null);
@@ -746,9 +761,9 @@ export function useImportSession(deps: {
       }
       id = workerId();
       if (id == null) throw new Error('no session — read the files first');
-      const kept = RESTORE_STAGES.has(stage) ? cloneInput(input) : null;
+      const kept = RESTORE_STAGES.has(stage) ? cloneInput(actualInput) : null;
       if (kept && move.current) move.current.touched = true;
-      const out = await client.run(id, stage, input, (p) => {
+      const out = await client.run(id, stage, actualInput, (p) => {
         if (live()) patch({ busy: { stage, done: p.done, total: p.total, note: p.note } });
       });
       if (!live()) throw new StaleRun();
@@ -786,6 +801,43 @@ export function useImportSession(deps: {
     }
   }
 
+  /** Existing manifested sheet(s) that can carry this run's previous size decision. */
+  function storedSizeMaps(): NonNullable<StageIO['sizes']['in']['storedMaps']> {
+    const files = new Set(iRef.current.fileList.map((f) => f.name.trim().toLowerCase()));
+    const manifested = (rc().existingPatterns ?? []).filter(
+      (p): p is typeof p & { manifest: NonNullable<typeof p.manifest> } => !!p.manifest,
+    );
+    const scoped = deps.pinScopeKey
+      ? manifested.filter((p) => p.scopeKey === deps.pinScopeKey)
+      : manifested;
+    const matching = scoped.filter((p) => files.has(p.filename.trim().toLowerCase()));
+    const matchingScopes = new Set(matching.map((p) => p.scopeKey));
+    const chosen = deps.pinScopeKey
+      ? matching.length
+        ? matching
+        : scoped.length === 1
+          ? scoped
+          : []
+      : matchingScopes.size === 1
+        ? matching
+        : [];
+    return chosen.map((p) => p.manifest.sizes);
+  }
+
+  /** Legacy generated sheets have no DXF marker; the system-owned card row supplies provenance. */
+  const generatedFusingFile = (name: string) => {
+    const sourceMatch = (rc().generatedFusingSources ?? []).some(
+      (source) => source.trim().toLowerCase() === name.trim().toLowerCase(),
+    );
+    if (sourceMatch) return true;
+    const matches = (rc().existingPatterns ?? []).filter(
+      (pattern) =>
+        (!deps.pinScopeKey || pattern.scopeKey === deps.pinScopeKey) &&
+        pattern.filename.trim().toLowerCase() === name.trim().toLowerCase(),
+    );
+    return matches.length === 1 && matches[0].generatedFusing === true;
+  };
+
   /**
    * STOPFIX: the run back in a fresh worker session — the files read again, every stage of the
    * history played again quietly with its recorded input, each output checked against the one
@@ -803,7 +855,11 @@ export function useImportSession(deps: {
     try {
       if (!files.length) throw new Error('the files are no longer at hand');
       const bytes = await Promise.all(
-        files.map(async (f) => ({ name: f.name, bytes: await f.arrayBuffer() })),
+        files.map(async (f) => ({
+          name: f.name,
+          bytes: await f.arrayBuffer(),
+          ...(generatedFusingFile(f.name) ? { generatedFusing: true } : {}),
+        })),
       );
       const opened = await client.open(bytes);
       fresh = opened.sessionId;
@@ -944,6 +1000,7 @@ export function useImportSession(deps: {
       },
       s.pieces?.families,
     );
+
   /** S3: after the pieces changed, drop the answers whose question moved and re-stamp the rest. */
   const settleToPieces = () => {
     const now = answersNow();
@@ -964,6 +1021,7 @@ export function useImportSession(deps: {
       evidence: [],
     },
     pieceOverrides: i.overrides,
+    presegmentedIdentities: cardPresegmentedIdentities(rc(), deps.pinScopeKey),
     operatorGrain: i.operatorGrain,
     aiQuantity: aiQuantityOf(sRef.current.names, i.editedNames),
     operatorFold: i.operatorFold,
@@ -1002,7 +1060,11 @@ export function useImportSession(deps: {
           checkFilesBeforeReading(ev.files);
           setSession({ ...EMPTY_SESSION, busy: { stage: 'extract', done: 0, total: 1 } });
           const bytes = await Promise.all(
-            ev.files.map(async (f) => ({ name: f.name, bytes: await f.arrayBuffer() })),
+            ev.files.map(async (f) => ({
+              name: f.name,
+              bytes: await f.arrayBuffer(),
+              ...(generatedFusingFile(f.name) ? { generatedFusing: true } : {}),
+            })),
           );
           const opened = await client.open(bytes);
           patch({ sessionId: opened.sessionId, files: opened.files });
@@ -1420,7 +1482,17 @@ export function useImportSession(deps: {
             ...replayOf(),
           });
           const draft = buildDraft(out, { card: rc(), semantics: sem });
-          patch({ draft, gate: out.gate, step: 'check' });
+          const accepted = acceptCurrentFindings(out.gate, draft, rc().existingShapes ?? []);
+          patch({ draft: accepted.draft, gate: accepted.gate, step: 'check' });
+          return;
+        }
+        case 'impact-answer': {
+          // T4: an answer changes the draft only before its apply: one running or done keeps it
+          const s = sRef.current;
+          const held = applyLock.current;
+          const free = !held || held.draft !== s.draft || held.token === REWRITE;
+          if (!s.draft || s.step !== 'apply' || !free) return;
+          patch({ draft: { ...s.draft, answers: ev.answers } });
           return;
         }
         case 'apply': {
@@ -1434,6 +1506,8 @@ export function useImportSession(deps: {
             )
           )
             return;
+          // T4: an unclear block, a lost piece the assembly uses — answered before anything goes up
+          if (blockingCount(assemblyImpact(built, rc()))) return;
           // Codex re-check #2: the lock, before anything else can await
           const held = applyLock.current;
           if (held && held.draft === built) {
@@ -2099,6 +2173,12 @@ export function useImportSession(deps: {
         if (failing.length)
           return `${failing.length} blocking ${failing.length === 1 ? 'check' : 'checks'}`;
         return null;
+      }
+      case 'apply': {
+        // T4: the apply step's tiles — an unclear block, a lost piece the assembly uses
+        if (rc().downloadOnly) return null;
+        const n = blockingCount(assemblyImpact(s.draft, rc()));
+        return n ? `${n} to answer` : null;
       }
       default:
         return null;

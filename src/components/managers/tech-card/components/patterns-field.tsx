@@ -1342,7 +1342,9 @@ export function PatternsField({
     return shapeRefsOf(
       scopeGroups.flatMap((group) => {
         const bySheet = new Map<string, PieceDTO[]>();
-        for (const piece of contourPiecesByScope.get(group.scope.key) ?? []) {
+        for (const piece of bundle.pieces) {
+          const file = piece.fileIndex ?? -1;
+          if (bundle.scopeByFile.get(file) !== group.scope.key) continue;
           const url = bundle.urlByFile?.get(piece.fileIndex ?? -1) ?? '';
           bySheet.set(url, [...(bySheet.get(url) ?? []), piece]);
         }
@@ -1366,16 +1368,7 @@ export function PatternsField({
         }));
       }),
     );
-  }, [
-    bundle,
-    importing,
-    cardPieces,
-    scopeGroups,
-    contourPiecesByScope,
-    pieceDxfAliases,
-    linkSet,
-    dictTokens,
-  ]);
+  }, [bundle, importing, cardPieces, scopeGroups, pieceDxfAliases, linkSet, dictTokens]);
   // the card has sheets and their parse is not read yet: the import's write waits for it (T1 (a))
   const importShapesPending = allDxfFiles.length > 0 && !bundle && !geometry.isError;
 
@@ -3158,6 +3151,8 @@ export function PatternsField({
   // 'ok' и только если применение что-то записало: повторное применение того же импорта остаётся
   // нулевым (F7).
   const importScopeRef = useRef('');
+  /** The fusing rebuild run counter when the import's save started (T5). */
+  const importSaveRun = useRef(0);
   importScopeRef.current = importing?.scopeKey ?? '';
   function followUpApply(apply: ApplyDraftFn): ApplyDraftFn {
     return async (draft, onProgress) => {
@@ -4709,12 +4704,27 @@ export function PatternsField({
               lineKey: p.lineKey,
               name: p.name,
               manifest: (p.url && bundle?.manifestByUrl?.get(p.url)) || null,
+              generatedFusing: isGeneratedFusingRow(p),
             })),
             shapes: importShapes,
             shapesPending: importShapesPending,
             styleLabel: [season, styleNumber].filter(Boolean).join(' · '),
             cardName,
             styleNumber,
+            // T4: what the re-import does to the assembly, weighed at the apply step
+            assembly: {
+              ops: (getValues('operations') ?? []).map((o, i) => ({
+                number: o.operationNumber || (i + 1) * 10,
+                work: o.work ?? '',
+                inputKeys: (o.inputKeys ?? []).map((k) => k.trim()).filter(Boolean),
+                outputUnitKey: (o.outputUnitKey ?? '').trim(),
+                outputUnitName: (o.outputUnitName ?? '').trim(),
+              })),
+              seams: rowsOf(useSeamsStore.getState()).map((r) => ({
+                pieces: [...new Set([...r.sideA, ...r.sideB].map((a) => a.piece))],
+                confirmed: r.status === 'confirmed',
+              })),
+            },
           })}
           // F7: upload every file, then ONE batch into this form, then the card's own save.
           applyDraft={followUpApply(
@@ -4731,7 +4741,16 @@ export function PatternsField({
               storageSizeId,
               // read at commit time: the BOM may have been sorted while the wizard was open
               scopeOf: liveScopeOf,
-              save: (reason) => undoHistory.flushThenCut(reason),
+              save: (reason) => {
+                importSaveRun.current = getFusingSheetGenerationState(techCardId).run;
+                return undoHistory.flushThenCut(reason);
+              },
+              // T5: a rebuild this save started — the body before it has landed. The wizard closes
+              // then; the rebuild finishes under the card's own chip.
+              rebuilding: () => {
+                const g = getFusingSheetGenerationState(techCardId);
+                return g.phase === 'generating' && g.run > importSaveRun.current;
+              },
               // A sheet replaced in place: its save archives the old file with a card snapshot.
               onReplaced: (list) =>
                 list.forEach((r) => armReuploadSnapshot(techCardId, r.newUrl, r.oldUrl)),

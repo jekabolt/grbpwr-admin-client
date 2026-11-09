@@ -11,9 +11,10 @@
 //      since the wizard read it): `patterns` (a scope with an occupant puts its file into that row —
 //      same lineKey, name, size slot and binding,
 //      new url/filename/size, version 0 so the server numbers the new file) → `pieces` (append
-//      created) → point writes
-//      `pieces.N.*` (symmetry, × per garment, fused — never a root rewrite of existing pieces) →
-//      `pieceDxfAliases` (full set: other scopes' links preserved, ours keyed
+//      created; reused pieces keep every live setting, except a setting the operator took from the
+//      drawing at the apply step: a point write `pieces.N.*`, T4 `withAnswers`) → `pieceDxfAliases`
+//      (full set: other scopes'
+//      links preserved, ours keyed
 //      `${scopeKey}|${normBlock(block).toLowerCase()}` as the piece-match modal keys them).
 //      A write that changes nothing is not made: re-applying the same import makes zero writes.
 //   3. The card's own save (autosave `flush`): only that save is a transaction (K1: BOM, pieces,
@@ -25,10 +26,8 @@
 
 import type { ApplyResult, ApplyUploaded, CardDraft, DraftPiece } from '../types';
 import { FUSING_FULL, FUSING_UNKNOWN, IDENTICAL, aliasKey, mintLineKey } from './draft';
-import {
-  FOLD_CUT_SYMMETRY,
-  importedCutSymmetry,
-} from 'components/managers/tech-card/components/piece-codes';
+import { FOLD_CUT_SYMMETRY } from 'components/managers/tech-card/components/piece-codes';
+import { NEW_PIECE, withAnswers } from './assembly-impact';
 
 /** 40 MiB — `MAX_PATTERN_BYTES` (utils/pattern.ts), the server's hard limit. */
 export const MAX_PATTERN_BYTES = 40 * 1024 * 1024;
@@ -103,6 +102,13 @@ export type ApplyDeps = {
    * the card; answers null while the rows are not the saved card's, else what is still owed.
    */
   landed?: (urls: string[]) => { owed?: 'fusing' } | null;
+  /**
+   * T5 (09.11): the card's save is past its body and runs only what comes after it — the fusing
+   * rebuild (download, parse, upload, write: 20–50 s on beta). With `landed`, the apply does not wait
+   * for it: once the rows are the saved card's, it answers ok with the fusing sheets owed, and the
+   * card's own save finishes the rebuild in the background (its chip, its error line).
+   */
+  rebuilding?: () => boolean;
   mintKey?: () => string;
   /**
    * The card scope a live sheet or link belongs to (bom-purpose `scopeKeyOfBinding` over the card's
@@ -180,6 +186,8 @@ export function planFormWrites(
   reusedPieces: number;
   replaced: { scopeKey: string; lineKey: string; oldUrl: string; newUrl: string }[];
 } {
+  // T4: the apply step's answers become ordinary rows (links, new pieces, point writes) here only
+  draft = withAnswers(draft, live.pieces, opts.mintKey);
   const writes: FormWrite[] = [];
   const scopeOf = opts.scopeOf ?? scopeKeyOf;
 
@@ -308,6 +316,7 @@ export function planFormWrites(
   const remap = new Map<string, string>(); // draft lineKey → the live piece it binds to
   const created: Record<string, unknown>[] = [];
   const points: FormWrite[] = [];
+  const updates = new Map(draft.pieceUpdates.map((u) => [u.lineKey.toLowerCase(), u]));
   const taken = new Set<string>();
   const resolveExisting = (p: DraftPiece): number | null => {
     if (p.existingLineKey) {
@@ -350,17 +359,18 @@ export function planFormWrites(
     const key = (cur.lineKey ?? '').trim();
     taken.add(key.toLowerCase());
     if (key !== p.lineKey) remap.set(p.lineKey, key);
-    // F14 MAJOR 2: the modal's rule on the LIVE value — an explicit MIRRORED/FOLD is rewritten only
-    // on the manifest's proof (pair / unfolded fold) or when the new count makes the pair impossible.
-    const symmetry = importedCutSymmetry(cur.cutSymmetry, p.piecesPerGarment, p.symmetryForce);
-    if (symmetry) points.push({ path: `pieces.${i}.cutSymmetry`, value: symmetry });
-    if ((cur.piecesPerGarment ?? 1) !== p.piecesPerGarment)
-      points.push({ path: `pieces.${i}.piecesPerGarment`, value: p.piecesPerGarment });
-    if (p.fused && !cur.fused) {
+    // T4: only what the operator took from the drawing — on the LIVE value, a no-op is not written
+    const u = updates.get(key.toLowerCase());
+    if (!u) continue;
+    if (u.cutSymmetry && (cur.cutSymmetry ?? '') !== u.cutSymmetry)
+      points.push({ path: `pieces.${i}.cutSymmetry`, value: u.cutSymmetry });
+    if (u.piecesPerGarment != null && (cur.piecesPerGarment ?? 1) !== u.piecesPerGarment)
+      points.push({ path: `pieces.${i}.piecesPerGarment`, value: u.piecesPerGarment });
+    if (u.fused && !cur.fused) {
       points.push({ path: `pieces.${i}.fused`, value: true });
       const mode = (cur.fusingMode ?? '').trim();
       if (!mode || mode === FUSING_UNKNOWN)
-        points.push({ path: `pieces.${i}.fusingMode`, value: p.fusingMode ?? FUSING_FULL });
+        points.push({ path: `pieces.${i}.fusingMode`, value: u.fusingMode ?? FUSING_FULL });
     }
   }
   if (created.length) writes.push({ path: 'pieces', value: [...live.pieces, ...created] });
@@ -415,6 +425,44 @@ export function planFormWrites(
   return { writes, created: created.length, reusedPieces, replaced };
 }
 
+/** What `saveOrLanded` answers when the body landed and only the rebuild after it still runs. */
+export const SAVE_LANDED = 'landed';
+
+/**
+ * T5 (09.11): the card's save, or SAVE_LANDED as soon as `bodyLanded` holds — checked every `pollMs`
+ * while the save runs. The save is not cancelled: it goes on and settles the card itself.
+ */
+export function saveOrLanded(
+  save: Promise<string>,
+  bodyLanded: (() => boolean) | undefined,
+  pollMs = 250,
+): Promise<string> {
+  if (!bodyLanded) return save;
+  return new Promise<string>((resolve, reject) => {
+    const timer = setInterval(() => {
+      let done = false;
+      try {
+        done = bodyLanded();
+      } catch {
+        done = false;
+      }
+      if (!done) return;
+      clearInterval(timer);
+      resolve(SAVE_LANDED);
+    }, pollMs);
+    save.then(
+      (r) => {
+        clearInterval(timer);
+        resolve(r);
+      },
+      (e) => {
+        clearInterval(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
 export async function applyDraft(
   draft: CardDraft,
   deps: ApplyDeps,
@@ -423,6 +471,24 @@ export async function applyDraft(
   const mintKey = deps.mintKey ?? mintLineKey;
   const uploaded: ApplyUploaded[] = [];
   const reused: string[] = [];
+
+  // T4 (Codex HIGH, T1): a block nothing binds is answered first — never applied unbound
+  const open = (draft.unresolved ?? []).filter((u) => {
+    const a = draft.answers?.blocks?.[aliasKey(u.scopeKey, u.blockName)];
+    return !(a === NEW_PIECE || u.candidates.some((c) => c.pieceLineKey === a));
+  });
+  const follows = withAnswers(draft, deps.read().pieces, () => '').aliases;
+  const unbound = open.filter(
+    (u) =>
+      !follows.some((a) => aliasKey(a.scopeKey, a.blockName) === aliasKey(u.scopeKey, u.blockName)),
+  );
+  if (unbound.length)
+    return {
+      ok: false,
+      failedScope: '',
+      message: `${unbound.length} unclear ${unbound.length === 1 ? 'block' : 'blocks'} to answer; nothing was uploaded`,
+      uploaded: [],
+    };
 
   // pre-flight: a file over the server limit fails before anything is uploaded
   for (const s of draft.scopes) {
@@ -479,17 +545,19 @@ export async function applyDraft(
 
   // 3. the card's own save (the only transaction) — this try's rows, or an earlier try's rows the
   //    save refused; success only on what the save answered
+  const urls = [...uploaded.map((u) => u.url), ...plan.replaced.map((r) => r.newUrl)];
+  const { rebuilding, landed: rowsLanded } = deps;
   const save =
-    (plan.writes.length || retry) && deps.save ? await deps.save('pattern-import') : undefined;
+    (plan.writes.length || retry) && deps.save
+      ? await saveOrLanded(
+          deps.save('pattern-import'),
+          rebuilding && rowsLanded ? () => rebuilding() && !!rowsLanded(urls) : undefined,
+        )
+      : undefined;
   if (save !== undefined) {
     const fine = retry ? save === 'ok' : save === 'ok' || save === 'nothing' || save === 'off';
     // T3: the rows are the saved card's — the card saved; a later write is what is owed.
-    const landed = fine
-      ? null
-      : (deps.landed?.([
-          ...uploaded.map((u) => u.url),
-          ...plan.replaced.map((r) => r.newUrl),
-        ]) ?? null);
+    const landed = fine ? null : deps.landed?.(urls) ?? null;
     if (landed) {
       deps.unsaved?.set(false);
       return {
