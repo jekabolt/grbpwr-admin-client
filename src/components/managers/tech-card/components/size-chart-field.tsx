@@ -705,7 +705,13 @@ export function SizeChartField({
         points: pointPayload,
         pointsSet: true,
         picture: picturePayload,
-        pictureSet: true,
+        // The default picture is only shown; it is saved once the user touched the picture.
+        pictureSet: [...touched].some(
+          (key) =>
+            ['picture', 'icon', 'sketch', 'upload'].includes(key) ||
+            key.startsWith('line:') ||
+            key.startsWith('remove:'),
+        ),
         shrinkagePct: shrinkagePct.trim() ? { value: shrinkagePct } : undefined,
       });
     } finally {
