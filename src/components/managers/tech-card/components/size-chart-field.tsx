@@ -20,6 +20,7 @@ import {
 import { SIZE_CHART_ICONS } from 'lib/pom/size-chart-icons';
 import {
   defaultSizeChartIcon,
+  iconLineMeasurementId,
   type PicturePoint,
   type SizeChartPictureDraft,
   type SizeChartPictureSource,
@@ -186,10 +187,6 @@ export function SizeChartField({
       }),
     [techCard?.resolvedTechnicalMedia],
   );
-  const measurementNameIdOf = useCallback(
-    (name: string) => nameIds.get(name.trim().toLowerCase()) ?? 0,
-    [nameIds],
-  );
 
   const [cells, setCells] = useState<ChartCellDraft[]>([]);
   const [savedCells, setSavedCells] = useState<ChartCellDraft[]>([]);
@@ -209,6 +206,20 @@ export function SizeChartField({
   const [mobileSize, setMobileSize] = useState('');
   const [picture, setPicture] = useState<SizeChartPictureDraft>(EMPTY_PICTURE);
   const [picturePrepared, setPicturePrepared] = useState(false);
+  const rowNameIds = useMemo(
+    () => new Set(points.map((point) => point.measurementNameId)),
+    [points],
+  );
+  const measurementNameIdOf = useCallback(
+    (name: string) =>
+      iconLineMeasurementId(
+        picture.iconKey,
+        name,
+        (candidate) => nameIds.get(candidate.trim().toLowerCase()) ?? 0,
+        rowNameIds,
+      ),
+    [nameIds, picture.iconKey, rowNameIds],
+  );
   const [pendingLineValues, setPendingLineValues] = useState<
     Record<number, Record<number, string>>
   >({});

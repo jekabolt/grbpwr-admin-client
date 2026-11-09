@@ -2,7 +2,7 @@ import type { common_StyleSizeChart, common_TechCard } from 'api/proto-http/admi
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import type { PrintOrient } from 'components/managers/print/scope';
 import { POM_CODES_BY_GARMENT, isGirth } from 'lib/pom/chart-points';
-import type { SizeChartPictureDraft } from 'lib/pom/size-chart-picture';
+import { iconLineMeasurementId, type SizeChartPictureDraft } from 'lib/pom/size-chart-picture';
 import type { GarmentKind, PomCode } from 'lib/pom/types';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo } from 'react';
@@ -271,6 +271,7 @@ export function MeasurementsPage({
   const kind: GarmentKind = rows.some((row) => row.pomCode && !TOP_CODES.has(row.pomCode))
     ? 'bottom'
     : 'top';
+  const rowIds = new Set(rows.map((row) => row.id));
   const baseSizeId = techCard.techCard?.baseSampleSizeId ?? 0;
   const pictureSizeId = sizeIds.includes(baseSizeId) ? baseSizeId : sizeIds[0] ?? 0;
   const pictureValueFor = (measurementNameId: number) =>
@@ -322,7 +323,12 @@ export function MeasurementsPage({
                 picture={picture}
                 measurementNameById={measurementNameById}
                 measurementNameIdOf={(name) =>
-                  measurementIdByName.get(name.trim().toLowerCase()) ?? 0
+                  iconLineMeasurementId(
+                    picture.iconKey,
+                    name,
+                    (candidate) => measurementIdByName.get(candidate.trim().toLowerCase()) ?? 0,
+                    rowIds,
+                  )
                 }
                 valueFor={pictureValueFor}
                 className='max-h-[35rem]'
