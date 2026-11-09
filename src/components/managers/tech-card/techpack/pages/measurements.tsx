@@ -2,10 +2,13 @@ import type { common_StyleSizeChart, common_TechCard } from 'api/proto-http/admi
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import type { PrintOrient } from 'components/managers/print/scope';
 import { POM_CODES_BY_GARMENT, isGirth } from 'lib/pom/chart-points';
+import type { SizeChartPictureDraft } from 'lib/pom/size-chart-picture';
 import type { GarmentKind, PomCode } from 'lib/pom/types';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo } from 'react';
 import { DataTable, EmptyCell, HeaderNote, SectionHeader } from 'ui';
 
+import { SizeChartPictureGraphic } from '../../components/size-chart-picture';
 import { SizeChartSchematic } from '../../components/size-chart-schematic';
 import {
   deriveMeasurementsPage,
@@ -68,6 +71,27 @@ const humanName = (value: string): string => {
 
 const pomCodeOf = (value: string | undefined): PomCode | undefined =>
   value && POM_CODES.has(value as PomCode) ? (value as PomCode) : undefined;
+
+function pictureOf(chart: common_StyleSizeChart | undefined): SizeChartPictureDraft | null {
+  const stored = chart?.picture;
+  if (stored?.source !== 'icon' && stored?.source !== 'sketch' && stored?.source !== 'upload') {
+    return null;
+  }
+  return {
+    source: stored.source,
+    iconKey: stored.iconKey ?? '',
+    mediaId: stored.mediaId ?? 0,
+    mediaUrl: stored.mediaUrl ?? '',
+    lines: (stored.lines ?? []).map((line, index) => ({
+      measurementNameId: line.measurementNameId ?? 0,
+      x1: line.x1 ?? 0,
+      y1: line.y1 ?? 0,
+      x2: line.x2 ?? 0,
+      y2: line.y2 ?? 0,
+      position: line.position ?? index + 1,
+    })),
+  };
+}
 
 function toleranceOf(
   minus: { value?: string } | undefined,
@@ -205,6 +229,27 @@ export function MeasurementsPage({
   release = false,
 }: Props) {
   const { t } = useT();
+  const { dictionary } = useDictionary();
+  // A chart row names any dictionary measurement, not only the ones the category suggests.
+  const allMeasurements = useMemo<TechpackMeasurement[]>(
+    () =>
+      (dictionary?.measurements ?? []).flatMap((measurement) =>
+        measurement.id && measurement.name ? [{ id: measurement.id, name: measurement.name }] : [],
+      ),
+    [dictionary?.measurements],
+  );
+  const measurementNameById = useMemo(
+    () => new Map(allMeasurements.map((measurement) => [measurement.id, measurement.name])),
+    [allMeasurements],
+  );
+  const measurementIdByName = useMemo(
+    () =>
+      new Map(
+        allMeasurements.map((measurement) => [measurement.name.toLowerCase(), measurement.id]),
+      ),
+    [allMeasurements],
+  );
+  const picture = useMemo(() => pictureOf(sizeChart), [sizeChart]);
   const model = useMemo(
     () => deriveMeasurementsPage({ techCard, measurements, sizeChart, sizeNames, t }),
     [techCard, measurements, sizeChart, sizeNames, t],
@@ -214,12 +259,22 @@ export function MeasurementsPage({
     [techCard.techCard?.sizeIds],
   );
   const rows = useMemo(
-    () => chartRows(sizeChart, measurements, model.rows, sizeIds),
-    [measurements, model.rows, sizeChart, sizeIds],
+    () =>
+      chartRows(
+        sizeChart,
+        allMeasurements.length ? allMeasurements : measurements,
+        model.rows,
+        sizeIds,
+      ),
+    [allMeasurements, measurements, model.rows, sizeChart, sizeIds],
   );
   const kind: GarmentKind = rows.some((row) => row.pomCode && !TOP_CODES.has(row.pomCode))
     ? 'bottom'
     : 'top';
+  const baseSizeId = techCard.techCard?.baseSampleSizeId ?? 0;
+  const pictureSizeId = sizeIds.includes(baseSizeId) ? baseSizeId : sizeIds[0] ?? 0;
+  const pictureValueFor = (measurementNameId: number) =>
+    oneDecimal(rows.find((row) => row.id === measurementNameId)?.values.get(pictureSizeId));
   const rowGaps = model.rows.flatMap((row) => (row.gap ? [row.gap] : []));
   const override = numberOf(sizeChart?.shrinkagePct?.value);
   const title = [
@@ -262,17 +317,29 @@ export function MeasurementsPage({
           <p className='text-nano uppercase text-labelColor'>{t('common.notInRevision')}</p>
         ) : (
           <div className='grid grid-cols-[2fr_3fr] items-start gap-5'>
-            <SizeChartSchematic
-              kind={kind}
-              points={pageRows}
-              label={own('Size chart')}
-              className='max-h-[35rem]'
-            />
+            {picture ? (
+              <SizeChartPictureGraphic
+                picture={picture}
+                measurementNameById={measurementNameById}
+                measurementNameIdOf={(name) =>
+                  measurementIdByName.get(name.trim().toLowerCase()) ?? 0
+                }
+                valueFor={pictureValueFor}
+                className='max-h-[35rem]'
+              />
+            ) : (
+              <SizeChartSchematic
+                kind={kind}
+                points={pageRows}
+                label={own('Size chart')}
+                className='max-h-[35rem]'
+              />
+            )}
             <ChartTable
               rows={pageRows}
               sizeIds={sizeIds}
               sizeNames={sizeNames}
-              baseSizeId={techCard.techCard?.baseSampleSizeId ?? 0}
+              baseSizeId={baseSizeId}
             />
           </div>
         )}
