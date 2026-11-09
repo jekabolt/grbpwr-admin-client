@@ -47,6 +47,7 @@ import {
   removeLabelWithLine,
   takeLabelMaterialOff,
 } from './label-bom';
+import { LabelShapeIcon } from './label-shape-icon';
 import { LabelFilePicker } from './label-file-picker';
 import type { FormGarmentLabel } from './labels-schema';
 import type { TechCardFormData } from './schema';
@@ -1057,7 +1058,7 @@ export function SewnLabelRow({
           <MaterialThumb material={material} size='sm' className='hidden size-12 sm:block' />
         ) : (
           <span className='hidden size-12 items-center justify-center border border-borderColor bg-pageBg sm:flex'>
-            <LabelIcon kind={labelPictogram(kind)} size={36} />
+            <LabelShapeIcon label={row} size={40} />
           </span>
         )}
         <span className='min-w-0'>

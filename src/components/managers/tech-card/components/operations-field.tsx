@@ -63,7 +63,7 @@ import {
   TILE_QUIET,
 } from 'ui';
 import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-textarea-field';
-import { LabelIcon } from './design/hardware-icons';
+import { LabelShapeIcon } from './label-shape-icon';
 import { decimalToInput, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { revealField } from 'utils/field-errors';
 import { isDxfUrl } from 'utils/pattern';
@@ -178,7 +178,7 @@ import {
 } from './equipment-options';
 import { kindLabel, preferredBomKinds } from './bom-kind';
 import type { FormGarmentLabel } from './labels-schema';
-import { ensureLabelLineKey, labelPictogram, labelSizeText } from './sewn-label-row';
+import { ensureLabelLineKey, labelSizeText } from './sewn-label-row';
 import { COMPOSITION_LABEL_KEY, isCompositionLabel, labelBomLine } from './sewn-label-model';
 import { useLabelStock } from './use-label-stock';
 import { wireInt as wireIntOf } from './wire-int';
@@ -2546,7 +2546,7 @@ function OperationLabelPicker({ index, frozen }: { index: number; frozen: boolea
                     />
                   ) : (
                     <span className='flex h-16 items-center justify-center border-b border-hairline bg-pageBg'>
-                      <LabelIcon kind={labelPictogram(kind)} size={40} />
+                      <LabelShapeIcon label={label} size={48} />
                     </span>
                   )
                 }
