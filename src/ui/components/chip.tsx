@@ -167,5 +167,5 @@ export function ChipRow({
   children: React.ReactNode;
   className?: string;
 }) {
-  return <div className={`flex flex-wrap items-center gap-1 ${className ?? ''}`}>{children}</div>;
+  return <div className={cn('flex flex-wrap items-center gap-1', className)}>{children}</div>;
 }
