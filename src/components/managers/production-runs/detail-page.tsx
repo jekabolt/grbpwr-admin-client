@@ -331,7 +331,7 @@ export function ProductionRunDetail() {
   const receipts = run.receipts ?? [];
   const auxMaterialWarningCount = isAux
     ? (materialPlan.data?.blockers?.length ?? 0) ||
-      (mpRows.length === 0 ? techCard?.techCard?.bomItems?.length ?? 0 : 0)
+      (mpRows.length === 0 && plannedQtyTotal > 0 ? techCard?.techCard?.bomItems?.length ?? 0 : 0)
     : 0;
 
   // The band. Every figure on it is read from the same field the panel below reads.
