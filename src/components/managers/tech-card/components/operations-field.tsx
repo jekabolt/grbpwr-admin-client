@@ -178,7 +178,7 @@ import {
 import { kindLabel, preferredBomKinds } from './bom-kind';
 import type { FormGarmentLabel } from './labels-schema';
 import { ensureLabelLineKey, labelPictogram, labelSizeText } from './sewn-label-row';
-import { labelBomLine } from './sewn-label-model';
+import { COMPOSITION_LABEL_KEY, isCompositionLabel, labelBomLine } from './sewn-label-model';
 import { useLabelStock } from './use-label-stock';
 import { wireInt as wireIntOf } from './wire-int';
 import { garmentLabelKindNames, kindLabel as garmentLabelName } from './tech-card-options';
@@ -2493,7 +2493,12 @@ function OperationLabelPicker({ index, frozen }: { index: number; frozen: boolea
       operationIndex === index ? [] : operation.labelKeys ?? [],
     ),
   );
-  const available = labels.filter((label) => {
+  // The composition label is drawn in its own block and joins the card on first use, so it is
+  // offered here even before its row exists.
+  const offered = labels.some((label) => isCompositionLabel(label.key))
+    ? labels
+    : [...labels, { key: COMPOSITION_LABEL_KEY, lineKey: '' } as FormGarmentLabel];
+  const available = offered.filter((label) => {
     const key = label.lineKey?.trim() || '';
     return !key || selected.includes(key) || !ownedElsewhere.has(key);
   });
