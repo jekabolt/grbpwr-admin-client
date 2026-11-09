@@ -2367,6 +2367,11 @@ export type ApplyResult =
       reused?: string[];
       writes?: number;
       save?: string;
+      /**
+       * T3 (09.11): the body with this import's rows saved, a write after it did not — the fusing
+       * sheets still need a rebuild. Set only when the save answered otherwise and the rows landed.
+       */
+      owed?: 'fusing';
       /** MF-C: rows whose file was replaced in place (M4), old url → new url. */
       replaced?: { scopeKey: string; lineKey: string; oldUrl: string; newUrl: string }[];
     }

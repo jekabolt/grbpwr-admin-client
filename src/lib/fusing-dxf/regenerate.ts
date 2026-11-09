@@ -1,6 +1,7 @@
 import { adminService } from 'api/api';
 import type {
   common_Size,
+  common_TechCard,
   common_TechCardBomItem,
   common_TechCardBomPurpose,
   common_TechCardInsert,
@@ -405,12 +406,52 @@ const ECHO_AWARE = {
 } satisfies Partial<common_TechCardInsert>;
 
 /**
+ * T3 (09.11): a write built on `read`. On 409 the card is read again; when only its version moved
+ * (`onlyVersionMoved`, the page's rule), the same write goes once more under the fresh version.
+ * Otherwise — a body edit by someone else, a failed re-read, a second 409 — the error stands.
+ * Returns the version the write went out under.
+ */
+export async function writeOverOnlyVersionMoved(
+  read: common_TechCard,
+  put: (expectedLockVersion: number) => Promise<unknown>,
+  onlyVersionMoved: ((read: common_TechCard, fresh: common_TechCard) => boolean) | undefined,
+  reread: () => Promise<common_TechCard | undefined>,
+): Promise<number> {
+  const first = read.lockVersion ?? 0;
+  try {
+    await put(first);
+    return first;
+  } catch (error) {
+    if ((error as { status?: number })?.status !== 409 || !onlyVersionMoved) throw error;
+    let fresh: common_TechCard | undefined;
+    try {
+      fresh = await reread();
+    } catch {
+      throw error;
+    }
+    if (!fresh || !onlyVersionMoved(read, fresh)) throw error;
+    const next = fresh.lockVersion ?? 0;
+    await put(next);
+    return next;
+  }
+}
+
+/**
  * Rebuilds and atomically reattaches generated fusing DXFs. Files upload first; one UpdateTechCard
  * then replaces current generated rows and removes generated rows for no-longer-used lines.
  */
 export async function regenerateFusingSheets(
   techCardId: number,
   saveSessionId?: string,
+  opts: {
+    /**
+     * T3 (09.11): the rebuild's write heard 409 — is the card read again `fresh` the one it read
+     * (`read`) but for its version? (The automatic piece-area measurement bumps tech_card.lock_version
+     * while the sheets upload.) Then the same write goes once more under `fresh`'s version; without
+     * it, or when the body moved (another editor), the 409 stands.
+     */
+    onlyVersionMoved?: (read: common_TechCard, fresh: common_TechCard) => boolean;
+  } = {},
 ): Promise<RegenerateFusingSheetsResult> {
   if (!Number.isInteger(techCardId) || techCardId <= 0)
     throw new Error('techCardId must be positive');
@@ -664,23 +705,32 @@ export async function regenerateFusingSheets(
   );
   const aliasesChanged = !sameAliasSet(oldAliases, nextAliases);
   const changed = !samePatterns(oldPatterns, nextPatterns) || aliasesChanged;
+  let wroteOver = stored.lockVersion ?? 0;
   if (changed) {
-    await adminService.UpdateTechCard({
-      id: techCardId,
-      // The body is the stored card echoed back, so it does carry every gated field it holds —
-      // without the flags the server refuses it as an outdated client (machine/press steps etc.).
-      techCard: {
-        ...card,
-        ...ECHO_AWARE,
-        patterns: nextPatterns,
-        // The links of the generated sheets' blocks to their pieces ride in the same write; every
-        // other row is echoed as read.
-        pieceDxfAliases: { items: nextAliases },
-      },
-      expectedLockVersion: stored.lockVersion,
-      snapshotReason: 'Regenerate generated fusing DXF sheets',
-      saveSessionId,
-    });
+    const put = (expectedLockVersion: number) =>
+      adminService.UpdateTechCard({
+        id: techCardId,
+        // The body is the stored card echoed back, so it does carry every gated field it holds —
+        // without the flags the server refuses it as an outdated client (machine/press steps etc.).
+        techCard: {
+          ...card,
+          ...ECHO_AWARE,
+          patterns: nextPatterns,
+          // The links of the generated sheets' blocks to their pieces ride in the same write; every
+          // other row is echoed as read.
+          pieceDxfAliases: { items: nextAliases },
+        },
+        expectedLockVersion,
+        snapshotReason: 'Regenerate generated fusing DXF sheets',
+        saveSessionId,
+      });
+    wroteOver = await writeOverOnlyVersionMoved(
+      stored,
+      put,
+      opts.onlyVersionMoved,
+      async () =>
+        (await adminService.GetTechCard({ id: techCardId, vatCountryCode: undefined })).techCard,
+    );
   }
   return {
     generated: activeSheets.length,
@@ -689,7 +739,7 @@ export async function regenerateFusingSheets(
     removed: oldGenerated.filter((pattern) => !replacements.has(pattern.bomLineKey?.trim() ?? ''))
       .length,
     changed,
-    ...(changed ? { lockVersion: (stored.lockVersion ?? 0) + 1 } : {}),
+    ...(changed ? { lockVersion: wroteOver + 1 } : {}),
     warnings,
     skippedSizes: built.skippedSizes,
   };

@@ -97,6 +97,12 @@ export type ApplyDeps = {
    * retry finds them there (nothing to write) and must still save. Kept by the caller across tries.
    */
   unsaved?: { get: () => boolean; set: (v: boolean) => void };
+  /**
+   * T3 (09.11): the save answered not-ok, yet the body write may have gone through and only a write
+   * after it failed (the fusing rebuild 409'd on a piece-area bump). Told the urls this try put on
+   * the card; answers null while the rows are not the saved card's, else what is still owed.
+   */
+  landed?: (urls: string[]) => { owed?: 'fusing' } | null;
   mintKey?: () => string;
   /**
    * The card scope a live sheet or link belongs to (bom-purpose `scopeKeyOfBinding` over the card's
@@ -477,6 +483,25 @@ export async function applyDraft(
     (plan.writes.length || retry) && deps.save ? await deps.save('pattern-import') : undefined;
   if (save !== undefined) {
     const fine = retry ? save === 'ok' : save === 'ok' || save === 'nothing' || save === 'off';
+    // T3: the rows are the saved card's — the card saved; a later write is what is owed.
+    const landed = fine
+      ? null
+      : (deps.landed?.([
+          ...uploaded.map((u) => u.url),
+          ...plan.replaced.map((r) => r.newUrl),
+        ]) ?? null);
+    if (landed) {
+      deps.unsaved?.set(false);
+      return {
+        ok: true,
+        uploaded,
+        reused,
+        writes: plan.writes.length,
+        ...(plan.replaced.length ? { replaced: plan.replaced } : {}),
+        save: 'ok',
+        ...(landed.owed ? { owed: landed.owed } : {}),
+      };
+    }
     if (!fine)
       return {
         ok: false,

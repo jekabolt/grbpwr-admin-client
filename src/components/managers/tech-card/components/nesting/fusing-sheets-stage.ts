@@ -1,7 +1,9 @@
 import { GENERATED_FUSING_NAME_PREFIX, regenerateFusingSheets } from 'lib/fusing-dxf';
 import { SECTION } from 'lib/pattern-import/fabrics/scope';
 import { notify, removeNotify } from 'lib/stores/store';
+import type { common_TechCard } from 'api/proto-http/admin';
 import { clearFuseOwed, markFuseOwed } from '../card-owed';
+import { onlyVersionMoved } from '../useTechCardAutosave';
 import type { StagedChange } from '../useTechCardStaging';
 
 // THE FUSIBLE SHEETS FOLLOW THE FUSE MARKUP. One staged change, shared by the PIECES modal (which
@@ -54,6 +56,14 @@ export function subscribeFusingSheetGeneration(
 // of the same failure, and a manual save has its own. `onWrote` hears the version the rebuild's own
 // card write left, only when it actually wrote. The queue lives in memory and the debt must not:
 // card-owed.ts holds it from here until a rebuild succeeds, so a reloaded page takes it back.
+// The rebuild's own read is the base; the stricter body rule (costing fields counted too).
+export function rebuildReadOnlyVersionMoved(
+  read: common_TechCard,
+  fresh: common_TechCard,
+): boolean {
+  return onlyVersionMoved({ version: read.lockVersion ?? 0, card: read }, fresh, true);
+}
+
 export function fusingSheetsChange(
   techCardId: number,
   onWrote?: (lockVersion: number) => void,
@@ -68,7 +78,11 @@ export function fusingSheetsChange(
       const run = getFusingSheetGenerationState(techCardId).run + 1;
       publishGeneration(techCardId, { phase: 'generating', at: Date.now(), run });
       try {
-        const r = await regenerateFusingSheets(techCardId, saveSessionId);
+        // T3 (09.11): the piece-area measurement that follows an import bumps the card's version
+        // while the sheets upload; a 409 for that alone is no conflict — the write goes once more.
+        const r = await regenerateFusingSheets(techCardId, saveSessionId, {
+          onlyVersionMoved: rebuildReadOnlyVersionMoved,
+        });
         if (r.lockVersion !== undefined) onWrote?.(r.lockVersion);
         // L5: the warnings were dropped — a piece fused with no interlining chosen built no sheet,
         // and the rebuild ended with no request and no word.

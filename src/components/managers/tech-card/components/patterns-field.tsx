@@ -156,7 +156,8 @@ import {
 } from './nesting/use-block-sizes';
 import type { NestingFile } from './nesting/use-nesting';
 import { PATTERN_IMPORT_ENABLED, buildCardContext, shapeRefsOf } from './pattern-import/entry';
-import { createCardApply } from './pattern-import/card-apply';
+import { fuseOwed } from './card-owed';
+import { createCardApply, importRowsLanded } from './pattern-import/card-apply';
 import type { ApplyDraftFn } from './pattern-import/client';
 import type { LiveCard } from 'lib/pattern-import/fabrics/apply';
 import {
@@ -4740,6 +4741,21 @@ export function PatternsField({
                   importUnsaved.current = v;
                 },
               },
+              // T3: the body saved and a write after it failed — the card is saved, the fusing
+              // sheets still owed.
+              landed: (urls) =>
+                importRowsLanded(
+                  getValues(),
+                  control._defaultValues as Partial<TechCardFormData>,
+                  urls,
+                )
+                  ? {
+                      ...(fuseOwed(techCardId) ||
+                      getFusingSheetGenerationState(techCardId).phase === 'error'
+                        ? { owed: 'fusing' as const }
+                        : {}),
+                    }
+                  : null,
             }),
           )}
           followUp={followUp?.rows ?? null}
