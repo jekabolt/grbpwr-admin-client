@@ -2264,6 +2264,8 @@ export type DraftShapeRef = {
   sizes: Record<string, { areaMm2: number; wMm: number; hMm: number }>;
   /** Blocking gate findings already present on this card piece's current sheet. */
   acceptedGate?: GateCheckId[];
+  /** T4: the contour of one size (the middle one), mm, bbox at the origin — the piece tile's picture. */
+  outline?: [number, number][];
 };
 
 /**
@@ -2354,8 +2356,38 @@ export type CardDraft = {
   pieceDifferences?: DraftPieceDifference[];
   /** Re-import: blocks bound to no piece because nothing proves which card piece they are. */
   unresolved?: DraftUnresolved[];
+  /** T4: the operator's answers at the apply step (`fabrics/assembly-impact.ts`). */
+  answers?: ImpactAnswers;
   /** Also offered as a download: the same texts. */
   downloads: { filename: string; dxfText: string }[];
+};
+
+/**
+ * T4: what the operator answered about the assembly at the apply step. Read by `withAnswers`
+ * (planFormWrites) — nothing here is written until apply.
+ */
+export type ImpactAnswers = {
+  /** Unresolved block (`aliasKey(scopeKey, blockName)`) → card piece lineKey, or `'new'`. */
+  blocks?: Record<string, string>;
+  /** Lost card piece lineKey → `'keep'`, or the new draft piece (its lineKey) it becomes. */
+  lost?: Record<string, string>;
+  /** A setting the card and the drawing disagree on: whose value the card keeps. Absent = card. */
+  take?: Partial<Record<DraftPieceDifference['field'], 'card' | 'drawing'>>;
+};
+
+/** T4: the card's assembly as the apply step weighs it (ops, seams) — lineKeys only. */
+export type AssemblyContext = {
+  ops: {
+    number: number;
+    /** The op's work token (`operation-work.ts`); the screen says it in the catalog's words. */
+    work: string;
+    /** Piece lineKeys and earlier ops' output unit keys, as the form keeps them. */
+    inputKeys: string[];
+    outputUnitKey: string;
+    outputUnitName: string;
+  }[];
+  /** Seam rows: the pieces on either side, and whether the seam is confirmed. */
+  seams: { pieces: string[]; confirmed: boolean }[];
 };
 
 export type ApplyUploaded = {
@@ -3400,6 +3432,8 @@ export type WizardEvent =
   | { type: 'shape-fix'; identity: string; size: string; action: ShapeFixAction | 'clear' }
   /** `token`: the apply lock the caller took (`lockApply`) — the autopilot's gated path. */
   | { type: 'apply'; token?: number }
+  /** T4: the operator's answers about the assembly at the apply step (`CardDraft.answers`). */
+  | { type: 'impact-answer'; answers: ImpactAnswers }
   | { type: 'download' }
   | { type: 'back'; to: WizardStep }
   | { type: 'reset' };

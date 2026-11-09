@@ -2,6 +2,7 @@
 // itself is a lazy chunk.
 import type { PieceShapeReference } from 'lib/dxf-reconcile';
 import type {
+  AssemblyContext,
   CardSize,
   ConversionManifest,
   DraftScopeTarget,
@@ -61,6 +62,8 @@ export function buildCardContext(args: {
   /** A10: the card's name and style number (the autopilot's model / sheet match). */
   cardName?: string;
   styleNumber?: string;
+  /** T4: the card's ops and seams (apply step: what the re-import does to the assembly). */
+  assembly?: AssemblyContext | null;
 }): CardContext {
   const sizes: CardSize[] = args.orderedSizeIds.map((sizeId, rank) => {
     // The card's own reader of the dictionary name (xs_44ta_m → xs, 44): the worker's size map
@@ -122,6 +125,7 @@ export function buildCardContext(args: {
     styleLabel: args.styleLabel,
     cardName: args.cardName ?? '',
     styleNumber: args.styleNumber ?? '',
+    ...(args.assembly ? { assembly: args.assembly } : {}),
   };
 }
 
@@ -145,6 +149,16 @@ export function shapeRefsOf(
           { areaMm2: p.areaCm2 * 100, wMm: p.bboxW * 10, hMm: p.bboxH * 10 },
         ]),
       ),
+      ...outlineOf(ref.entry.sizes.flatMap((z) => ref.entry.bySize.get(z) ?? [])),
     })),
   );
+}
+
+/** T4: the middle size's contour, mm — the piece tile's picture at the apply step. */
+function outlineOf(bySize: readonly { poly?: { x: number; y: number }[] }[]) {
+  const mid = bySize[Math.floor(bySize.length / 2)];
+  const poly = mid?.poly ?? [];
+  return poly.length >= 3
+    ? { outline: poly.map((q) => [q.x * 10, q.y * 10] as [number, number]) }
+    : {};
 }

@@ -4708,6 +4708,20 @@ export function PatternsField({
             styleLabel: [season, styleNumber].filter(Boolean).join(' · '),
             cardName,
             styleNumber,
+            // T4: what the re-import does to the assembly, weighed at the apply step
+            assembly: {
+              ops: (getValues('operations') ?? []).map((o, i) => ({
+                number: o.operationNumber || (i + 1) * 10,
+                work: o.work ?? '',
+                inputKeys: (o.inputKeys ?? []).map((k) => k.trim()).filter(Boolean),
+                outputUnitKey: (o.outputUnitKey ?? '').trim(),
+                outputUnitName: (o.outputUnitName ?? '').trim(),
+              })),
+              seams: rowsOf(useSeamsStore.getState()).map((r) => ({
+                pieces: [...new Set([...r.sideA, ...r.sideB].map((a) => a.piece))],
+                confirmed: r.status === 'confirmed',
+              })),
+            },
           })}
           // F7: upload every file, then ONE batch into this form, then the card's own save.
           applyDraft={followUpApply(

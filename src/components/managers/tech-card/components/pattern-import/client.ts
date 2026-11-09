@@ -7,6 +7,7 @@
 // structurally, the AI namer (F10) is `ai-namer.ts`, and the atomic apply (F7 fabrics/apply.ts)
 // plugs into the same types without the steps changing. The stub stays for fixture mode.
 import type {
+  AssemblyContext,
   ApplyResult,
   CardDraft,
   CardSize,
@@ -97,6 +98,8 @@ export type CardContext = {
    * downloaded, never applied (J1). Set by `forRun`, not by the card.
    */
   downloadOnly?: boolean;
+  /** T4: the card's ops and seams, for what a re-import does to the assembly (apply step). */
+  assembly?: AssemblyContext | null;
 };
 
 /** The one scope of a download-only run: a main-fabric file bound to no BOM line. */

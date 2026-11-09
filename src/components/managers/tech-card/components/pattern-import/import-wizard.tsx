@@ -35,6 +35,11 @@ import { apiPageRoleDeps } from './ai-page-roles';
 import { createAiNamer } from './ai-namer';
 import { cardBuildDraft } from './card-apply';
 import { ApplyStep } from './steps/apply';
+import {
+  assemblyImpact,
+  blockingCount,
+  createdCount,
+} from 'lib/pattern-import/fabrics/assembly-impact';
 import type { FollowUpRow, FollowUpStep } from 'lib/pattern-import/fabrics/followup';
 import { CheckStep } from './steps/check';
 import { DetailsStep, firstBlockedSeed } from './steps/details';
@@ -588,7 +593,12 @@ function WizardBody({
   // ── the one primary: action + count, derived from the session ──────────────────────────────
   const [override, setOverride] = useState<PrimaryOverride | null>(null);
   const draft = session.draft;
-  const created = draft ? draft.pieces.filter((p) => !p.existingLineKey).length : 0;
+  const created = createdCount(draft);
+  // T4: answers the apply step's assembly tiles still owe (apply waits for them)
+  const impactOpen =
+    session.step === 'apply' && !card.downloadOnly
+      ? blockingCount(assemblyImpact(draft, api.runCard ?? card))
+      : 0;
   const continueAnyway = async () => {
     if (autopilot) {
       // the primary IS "resume autopilot": the drive runs on past every step that asks nothing.
@@ -642,6 +652,8 @@ function WizardBody({
           disabled: !draft,
         };
       if (applied) return { label: 'back to the card', onClick: onClose };
+      if (impactOpen && !applyRunning)
+        return { label: `answer ${impactOpen}`, onClick: onAsk, title: blocker ?? undefined };
       return {
         label: `apply ${plural(created, 'piece')} to the card`,
         onClick: blocked ? onAsk : () => void api.dispatch({ type: 'apply' }),

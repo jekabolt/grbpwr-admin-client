@@ -1,0 +1,1051 @@
+{
+ "note": "Card 6 (SS26-006) assembly, prod read 09.11: operations (work labels, unit keys bare, pieces as k:<name>) and the confirmed seam count of each piece.",
+ "ops": [
+  {
+   "number": 10,
+   "work": "fuse",
+   "inputKeys": [
+    "k:SLV_L"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 20,
+   "work": "fuse",
+   "inputKeys": [
+    "k:FLP_L"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 30,
+   "work": "join / seam",
+   "inputKeys": [
+    "k:FLP_L",
+    "k:SLV_L"
+   ],
+   "outputUnitKey": "SLEEVE",
+   "outputUnitName": "left sleeve with placket detail"
+  },
+  {
+   "number": 40,
+   "work": "press to one side",
+   "inputKeys": [
+    "SLEEVE"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 50,
+   "work": "topstitch",
+   "inputKeys": [
+    "SLEEVE"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 60,
+   "work": "press flat",
+   "inputKeys": [
+    "SLEEVE"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 70,
+   "work": "fuse",
+   "inputKeys": [
+    "k:SLV_R"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 80,
+   "work": "fuse",
+   "inputKeys": [
+    "k:FLP_R"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 90,
+   "work": "join / seam",
+   "inputKeys": [
+    "k:SLV_R",
+    "k:FLP_R"
+   ],
+   "outputUnitKey": "SLEEVE-3",
+   "outputUnitName": "Right sleeve with placket detail"
+  },
+  {
+   "number": 100,
+   "work": "press to one side",
+   "inputKeys": [
+    "SLEEVE-3"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 110,
+   "work": "topstitch",
+   "inputKeys": [
+    "SLEEVE-3"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 120,
+   "work": "press flat",
+   "inputKeys": [
+    "SLEEVE-3"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 130,
+   "work": "fuse",
+   "inputKeys": [
+    "k:clr_main"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 140,
+   "work": "fuse",
+   "inputKeys": [
+    "k:clr_main_2"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 150,
+   "work": "join / seam",
+   "inputKeys": [
+    "k:clr_main",
+    "k:clr_main_2"
+   ],
+   "outputUnitKey": "MAIN COLLAR",
+   "outputUnitName": ""
+  },
+  {
+   "number": 160,
+   "work": "press flat",
+   "inputKeys": [
+    "MAIN COLLAR"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 170,
+   "work": "topstitch",
+   "inputKeys": [
+    "MAIN COLLAR"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 180,
+   "work": "fuse",
+   "inputKeys": [
+    "k:CLR_SECOND"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 190,
+   "work": "fuse",
+   "inputKeys": [
+    "k:CLR_SECOND_2"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 200,
+   "work": "join / seam",
+   "inputKeys": [
+    "k:CLR_SECOND",
+    "k:CLR_SECOND_2"
+   ],
+   "outputUnitKey": "SECOND COLLAR",
+   "outputUnitName": ""
+  },
+  {
+   "number": 210,
+   "work": "press flat",
+   "inputKeys": [
+    "SECOND COLLAR"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 220,
+   "work": "topstitch",
+   "inputKeys": [
+    "SECOND COLLAR"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 230,
+   "work": "fuse",
+   "inputKeys": [
+    "k:FLP_R_MAIN"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 240,
+   "work": "press flat",
+   "inputKeys": [
+    "k:FLP_R_MAIN"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 250,
+   "work": "buttonhole",
+   "inputKeys": [
+    "k:FLP_R_MAIN"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 260,
+   "work": "join / seam",
+   "inputKeys": [
+    "k:FLP_R_MAIN",
+    "SLEEVE-3"
+   ],
+   "outputUnitKey": "RIGHT SLEEVE",
+   "outputUnitName": ""
+  },
+  {
+   "number": 270,
+   "work": "hem \u2013 turned twice",
+   "inputKeys": [
+    "RIGHT SLEEVE"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 280,
+   "work": "press flat",
+   "inputKeys": [
+    "RIGHT SLEEVE"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 290,
+   "work": "topstitch",
+   "inputKeys": [
+    "RIGHT SLEEVE"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 300,
+   "work": "final press",
+   "inputKeys": [
+    "RIGHT SLEEVE"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 310,
+   "work": "join / seam",
+   "inputKeys": [
+    "RIGHT SLEEVE"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 320,
+   "work": "bind / tape edge",
+   "inputKeys": [
+    "RIGHT SLEEVE"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 330,
+   "work": "final press",
+   "inputKeys": [
+    "RIGHT SLEEVE"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 340,
+   "work": "button attach",
+   "inputKeys": [
+    "RIGHT SLEEVE"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 350,
+   "work": "fuse",
+   "inputKeys": [
+    "k:FLP_L_MAIN"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 360,
+   "work": "press flat",
+   "inputKeys": [
+    "k:FLP_L_MAIN"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 370,
+   "work": "buttonhole",
+   "inputKeys": [
+    "k:FLP_L_MAIN"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 380,
+   "work": "join / seam",
+   "inputKeys": [
+    "k:FLP_L_MAIN",
+    "SLEEVE"
+   ],
+   "outputUnitKey": "SLEEVE-2",
+   "outputUnitName": "left sleeve"
+  },
+  {
+   "number": 390,
+   "work": "hem \u2013 turned twice",
+   "inputKeys": [
+    "SLEEVE-2"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 400,
+   "work": "press flat",
+   "inputKeys": [
+    "SLEEVE-2"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 410,
+   "work": "topstitch",
+   "inputKeys": [
+    "SLEEVE-2"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 420,
+   "work": "final press",
+   "inputKeys": [
+    "SLEEVE-2"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 430,
+   "work": "join / seam",
+   "inputKeys": [
+    "SLEEVE-2"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 440,
+   "work": "bind / tape edge",
+   "inputKeys": [
+    "SLEEVE-2"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 450,
+   "work": "final press",
+   "inputKeys": [
+    "SLEEVE-2"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 460,
+   "work": "button attach",
+   "inputKeys": [
+    "SLEEVE-2"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 470,
+   "work": "join / seam",
+   "inputKeys": [
+    "k:BP_U",
+    "k:BP_MAIN"
+   ],
+   "outputUnitKey": "BACK WITH UPPER DETAIL",
+   "outputUnitName": ""
+  },
+  {
+   "number": 480,
+   "work": "press to one side",
+   "inputKeys": [
+    "BACK WITH UPPER DETAIL"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 490,
+   "work": "join / seam",
+   "inputKeys": [
+    "k:BP_U_1",
+    "BACK WITH UPPER DETAIL"
+   ],
+   "outputUnitKey": "BACK",
+   "outputUnitName": ""
+  },
+  {
+   "number": 500,
+   "work": "press to one side",
+   "inputKeys": [
+    "BACK"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 510,
+   "work": "topstitch",
+   "inputKeys": [
+    "BACK"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 520,
+   "work": "press flat",
+   "inputKeys": [
+    "BACK"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 530,
+   "work": "bind / tape edge",
+   "inputKeys": [
+    "BACK"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 540,
+   "work": "join / seam",
+   "inputKeys": [
+    "k:P_L_MAIN",
+    "k:PCK_L_BTTM"
+   ],
+   "outputUnitKey": "FRONT lEFT WITH POCKET DETAIL",
+   "outputUnitName": ""
+  },
+  {
+   "number": 550,
+   "work": "press to one side",
+   "inputKeys": [
+    "FRONT lEFT WITH POCKET DETAIL"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 560,
+   "work": "join / seam",
+   "inputKeys": [
+    "FRONT lEFT WITH POCKET DETAIL"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 570,
+   "work": "join / seam",
+   "inputKeys": [
+    "k:P_L_U",
+    "k:PCK_L_MAIN"
+   ],
+   "outputUnitKey": "FRONT UPPER LEFT WITH POCKET DETAIL",
+   "outputUnitName": ""
+  },
+  {
+   "number": 580,
+   "work": "bind / tape edge",
+   "inputKeys": [
+    "FRONT UPPER LEFT WITH POCKET DETAIL"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 590,
+   "work": "button attach",
+   "inputKeys": [
+    "FRONT UPPER LEFT WITH POCKET DETAIL"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 600,
+   "work": "button attach",
+   "inputKeys": [
+    "k:PCK_R_MAIN"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 610,
+   "work": "join / seam",
+   "inputKeys": [
+    "k:P_R_U",
+    "k:PCK_R_MAIN"
+   ],
+   "outputUnitKey": "FRONT UPPER RIGHT WITH POCKET DETAIL",
+   "outputUnitName": ""
+  },
+  {
+   "number": 620,
+   "work": "bind / tape edge",
+   "inputKeys": [
+    "FRONT UPPER RIGHT WITH POCKET DETAIL"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 630,
+   "work": "join / seam",
+   "inputKeys": [
+    "k:P_R_MAIN",
+    "k:PCK_R_BTTM"
+   ],
+   "outputUnitKey": "FRONT RIGHT WITH POCKET DETAIL",
+   "outputUnitName": ""
+  },
+  {
+   "number": 640,
+   "work": "press to one side",
+   "inputKeys": [
+    "FRONT RIGHT WITH POCKET DETAIL"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 650,
+   "work": "join / seam",
+   "inputKeys": [
+    "FRONT RIGHT WITH POCKET DETAIL"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 660,
+   "work": "join / seam",
+   "inputKeys": [
+    "FRONT UPPER LEFT WITH POCKET DETAIL",
+    "FRONT lEFT WITH POCKET DETAIL"
+   ],
+   "outputUnitKey": "LEFT FRONT PANEL",
+   "outputUnitName": ""
+  },
+  {
+   "number": 670,
+   "work": "press flat",
+   "inputKeys": [
+    "LEFT FRONT PANEL"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 680,
+   "work": "join / seam",
+   "inputKeys": [
+    "LEFT FRONT PANEL"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 690,
+   "work": "bind / tape edge",
+   "inputKeys": [
+    "LEFT FRONT PANEL"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 700,
+   "work": "fuse",
+   "inputKeys": [
+    "k:PLCK_L"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 710,
+   "work": "press flat",
+   "inputKeys": [
+    "k:PLCK_L"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 720,
+   "work": "join / seam",
+   "inputKeys": [
+    "k:PLCK_L",
+    "LEFT FRONT PANEL"
+   ],
+   "outputUnitKey": "LEFT FRONT PANEL WITH PLACKET",
+   "outputUnitName": ""
+  },
+  {
+   "number": 730,
+   "work": "topstitch",
+   "inputKeys": [
+    "LEFT FRONT PANEL WITH PLACKET"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 740,
+   "work": "press flat",
+   "inputKeys": [
+    "LEFT FRONT PANEL WITH PLACKET"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 750,
+   "work": "buttonhole",
+   "inputKeys": [
+    "LEFT FRONT PANEL WITH PLACKET"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 760,
+   "work": "final press",
+   "inputKeys": [
+    "LEFT FRONT PANEL WITH PLACKET"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 770,
+   "work": "join / seam",
+   "inputKeys": [
+    "FRONT UPPER RIGHT WITH POCKET DETAIL",
+    "FRONT RIGHT WITH POCKET DETAIL"
+   ],
+   "outputUnitKey": "RIGHT FRONT PANEL",
+   "outputUnitName": ""
+  },
+  {
+   "number": 780,
+   "work": "press flat",
+   "inputKeys": [
+    "RIGHT FRONT PANEL"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 790,
+   "work": "join / seam",
+   "inputKeys": [
+    "RIGHT FRONT PANEL"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 800,
+   "work": "bind / tape edge",
+   "inputKeys": [
+    "RIGHT FRONT PANEL"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 810,
+   "work": "fuse",
+   "inputKeys": [
+    "k:PLCK_R"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 820,
+   "work": "press flat",
+   "inputKeys": [
+    "k:PLCK_R"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 830,
+   "work": "join / seam",
+   "inputKeys": [
+    "RIGHT FRONT PANEL",
+    "k:PLCK_R"
+   ],
+   "outputUnitKey": "RIGHT FRONT PANEL WITH PLACKET",
+   "outputUnitName": ""
+  },
+  {
+   "number": 840,
+   "work": "topstitch",
+   "inputKeys": [
+    "RIGHT FRONT PANEL WITH PLACKET"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 850,
+   "work": "press flat",
+   "inputKeys": [
+    "RIGHT FRONT PANEL WITH PLACKET"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 860,
+   "work": "button attach",
+   "inputKeys": [
+    "RIGHT FRONT PANEL WITH PLACKET"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 870,
+   "work": "join / seam",
+   "inputKeys": [
+    "MAIN COLLAR",
+    "SECOND COLLAR"
+   ],
+   "outputUnitKey": "COLLAR BASE",
+   "outputUnitName": ""
+  },
+  {
+   "number": 880,
+   "work": "press flat",
+   "inputKeys": [
+    "COLLAR BASE"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 890,
+   "work": "fuse",
+   "inputKeys": [
+    "k:nck"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 900,
+   "work": "press to one side",
+   "inputKeys": [
+    "k:nck"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 910,
+   "work": "join / seam",
+   "inputKeys": [
+    "COLLAR BASE",
+    "k:nck"
+   ],
+   "outputUnitKey": "COLLAR WITH NECK DETAIL",
+   "outputUnitName": ""
+  },
+  {
+   "number": 920,
+   "work": "fuse",
+   "inputKeys": [
+    "k:nck_2"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 930,
+   "work": "press to one side",
+   "inputKeys": [
+    "k:nck_2"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 940,
+   "work": "join / seam",
+   "inputKeys": [
+    "k:nck_2",
+    "COLLAR WITH NECK DETAIL"
+   ],
+   "outputUnitKey": "COLLAR",
+   "outputUnitName": ""
+  },
+  {
+   "number": 950,
+   "work": "press to one side",
+   "inputKeys": [
+    "COLLAR"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 960,
+   "work": "attach label",
+   "inputKeys": [
+    "COLLAR"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 970,
+   "work": "join / seam",
+   "inputKeys": [
+    "BACK",
+    "LEFT FRONT PANEL WITH PLACKET",
+    "RIGHT FRONT PANEL WITH PLACKET"
+   ],
+   "outputUnitKey": "BASE",
+   "outputUnitName": ""
+  },
+  {
+   "number": 980,
+   "work": "join / seam",
+   "inputKeys": [
+    "BASE"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 990,
+   "work": "press flat",
+   "inputKeys": [
+    "BASE"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 1000,
+   "work": "bind / tape edge",
+   "inputKeys": [
+    "BASE"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 1010,
+   "work": "hem \u2013 turned twice",
+   "inputKeys": [
+    "BASE"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 1020,
+   "work": "press flat",
+   "inputKeys": [
+    "BASE"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 1030,
+   "work": "attach label",
+   "inputKeys": [
+    "BASE"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 1040,
+   "work": "join / seam",
+   "inputKeys": [
+    "SLEEVE-2",
+    "RIGHT SLEEVE",
+    "BASE"
+   ],
+   "outputUnitKey": "BASE WITH SLEEVES",
+   "outputUnitName": ""
+  },
+  {
+   "number": 1050,
+   "work": "bind / tape edge",
+   "inputKeys": [
+    "BASE WITH SLEEVES"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 1060,
+   "work": "press flat",
+   "inputKeys": [
+    "BASE WITH SLEEVES"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 1070,
+   "work": "join / seam",
+   "inputKeys": [
+    "BASE WITH SLEEVES",
+    "COLLAR"
+   ],
+   "outputUnitKey": "OUTER",
+   "outputUnitName": "starvation shirt"
+  },
+  {
+   "number": 1080,
+   "work": "join / seam",
+   "inputKeys": [
+    "OUTER"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 1090,
+   "work": "final press",
+   "inputKeys": [
+    "OUTER"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 1100,
+   "work": "buttonhole",
+   "inputKeys": [
+    "OUTER"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  },
+  {
+   "number": 1110,
+   "work": "button attach",
+   "inputKeys": [
+    "OUTER"
+   ],
+   "outputUnitKey": "",
+   "outputUnitName": ""
+  }
+ ],
+ "seamCounts": {
+  "BP_MAIN": 17,
+  "BP_U": 7,
+  "BP_U_1": 8,
+  "clr_main": 13,
+  "clr_main_2": 10,
+  "CLR_SECOND": 7,
+  "CLR_SECOND_2": 9,
+  "FLP_L": 6,
+  "FLP_L_MAIN": 3,
+  "FLP_R": 3,
+  "FLP_R_MAIN": 4,
+  "nck": 6,
+  "nck_2": 6,
+  "P_L_MAIN": 9,
+  "P_L_U": 8,
+  "P_R_MAIN": 10,
+  "P_R_U": 10,
+  "PLCK_L": 2,
+  "PLCK_R": 5,
+  "SLV_L": 11,
+  "SLV_R": 10
+ }
+}

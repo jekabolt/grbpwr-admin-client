@@ -107,6 +107,7 @@ import type {
   NameSuggester,
 } from './client';
 import { identitiesOf, identityProblem, sizeTokenTest } from 'lib/pattern-import/manifest';
+import { assemblyImpact, blockingCount } from 'lib/pattern-import/fabrics/assembly-impact';
 import { aiFabricHintsOf } from 'lib/pattern-import/fabrics/propose';
 import { fusedSeeds, pinToScope, planScopes } from 'lib/pattern-import/fabrics/scope';
 import {
@@ -310,6 +311,7 @@ const SHAPE_FIX_KEEPS = new Set<WizardEvent['type']>([
   'write-storage',
   'fabrics',
   'apply',
+  'impact-answer',
   'download',
   'names',
   'semantics',
@@ -1458,6 +1460,15 @@ export function useImportSession(deps: {
           patch({ draft: accepted.draft, gate: accepted.gate, step: 'check' });
           return;
         }
+        case 'impact-answer': {
+          // T4: an answer changes the draft only before its apply: one running or done keeps it
+          const s = sRef.current;
+          const held = applyLock.current;
+          const free = !held || held.draft !== s.draft || held.token === REWRITE;
+          if (!s.draft || s.step !== 'apply' || !free) return;
+          patch({ draft: { ...s.draft, answers: ev.answers } });
+          return;
+        }
         case 'apply': {
           const built = sRef.current.draft;
           // a download-only run has no BOM line to bind a file to: nothing is applied; and only
@@ -1469,6 +1480,8 @@ export function useImportSession(deps: {
             )
           )
             return;
+          // T4: an unclear block, a lost piece the assembly uses — answered before anything goes up
+          if (blockingCount(assemblyImpact(built, rc()))) return;
           // Codex re-check #2: the lock, before anything else can await
           const held = applyLock.current;
           if (held && held.draft === built) {
@@ -2134,6 +2147,12 @@ export function useImportSession(deps: {
         if (failing.length)
           return `${failing.length} blocking ${failing.length === 1 ? 'check' : 'checks'}`;
         return null;
+      }
+      case 'apply': {
+        // T4: the apply step's tiles — an unclear block, a lost piece the assembly uses
+        if (rc().downloadOnly) return null;
+        const n = blockingCount(assemblyImpact(s.draft, rc()));
+        return n ? `${n} to answer` : null;
       }
       default:
         return null;

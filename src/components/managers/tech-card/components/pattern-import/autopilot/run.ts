@@ -6,6 +6,7 @@
 //   · `hookDriveCtx`: the drive tick's context (auto-drive.ts) over the wizard API, for a caller
 //     that drives the hook from outside (the e2e probe over the React shim) — the wizard's own
 //     effect builds the same context over its refs.
+import { assemblyImpact, blockingCount } from 'lib/pattern-import/fabrics/assembly-impact';
 import type {
   CardDraft,
   ImportSession,
@@ -243,6 +244,14 @@ export async function autopilotApply(
         .join(
           '; ',
         )}${unresolved.length > 3 ? ` (+${unresolved.length - 3} more)` : ''} — nothing proves which card piece is which: confirm on the apply step`,
+    };
+  // T4: a card piece the assembly uses and the file no longer draws is the operator's call too
+  const asks = blockingCount(assemblyImpact(get().session.draft, get().runCard ?? card));
+  if (asks)
+    return {
+      ok: false,
+      step: 'check',
+      reason: `${asks} assembly ${asks === 1 ? 'question' : 'questions'} open (a piece the operations or seams use is no longer drawn) — answer on the apply step`,
     };
   // the lock first (synchronous): an apply already running or done for this draft refuses this one
   const token = get().lockApply();
