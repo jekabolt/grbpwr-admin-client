@@ -1,5 +1,5 @@
 // A garment label's tile picture drawn from the label itself: its true proportions, a dashed stitch
-// where it is sewn, the fold line and one straight mark of its kind. Straight lines, sharp corners.
+// where it is sewn and the fold line. Straight lines, sharp corners.
 import type { JSX } from 'react';
 
 import { garmentLabelMark, type GarmentLabelLike } from './garment-label-pieces';
@@ -9,7 +9,6 @@ const FIT = 56;
 const INSET = 2.5;
 const STITCH = { strokeDasharray: '2 1.5', strokeWidth: 0.9 } as const;
 const THIN = { strokeWidth: 0.6 } as const;
-const MARK = { strokeWidth: 0.9 } as const;
 
 type Box = { x: number; y: number; w: number; h: number };
 
@@ -41,40 +40,6 @@ function fold(kind: string, b: Box): JSX.Element | null {
       <path
         {...THIN}
         d={`M${b.x} ${b.y + d} H${b.x + b.w} M${b.x} ${b.y + b.h - d} H${b.x + b.w}`}
-      />
-    );
-  }
-  return null;
-}
-
-function mark(kind: string, b: Box): JSX.Element | null {
-  const cx = b.x + b.w / 2;
-  const cy = b.y + b.h / 2;
-  if (kind === 'composition' || kind === 'care') {
-    const rows = Math.max(1, Math.min(5, Math.floor((b.h - 14) / 5)));
-    const top = cy - ((rows - 1) * 5) / 2;
-    const d = Array.from({ length: rows }, (_, k) => {
-      const right = b.x + b.w - 4 - (k % 2) * Math.min(4, b.w / 6);
-      return `M${b.x + 4} ${top + k * 5} H${right}`;
-    }).join(' ');
-    return <path {...MARK} d={d} />;
-  }
-  if (kind === 'size') {
-    const s = Math.min(b.w, b.h) / 4;
-    return (
-      <path
-        {...MARK}
-        d={`M${cx - s} ${cy + s * 0.8} V${cy - s} L${cx} ${cy} L${cx + s} ${cy - s} V${cy + s * 0.8}`}
-      />
-    );
-  }
-  if (kind === 'brand' || kind === 'logo' || kind === 'patch') {
-    const w = Math.min(14, b.w / 3);
-    const h = Math.min(10, b.h / 3);
-    return (
-      <path
-        {...MARK}
-        d={`M${cx - w / 2} ${cy - h / 2} H${cx + w / 2} V${cy + h / 2} H${cx - w / 2} Z M${cx - w / 2} ${cy} H${cx + w / 2}`}
       />
     );
   }
@@ -115,7 +80,6 @@ export function LabelShapeIcon({
       <rect x={b.x} y={b.y} width={b.w} height={b.h} strokeWidth={1.25} />
       {stitches(shape?.attachment ?? label.attachment ?? '', b)}
       {fold(shape?.fold ?? '', b)}
-      {mark(kind, b)}
     </svg>
   );
 }
