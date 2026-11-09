@@ -50,7 +50,8 @@ import {
 import { LabelFilePicker } from './label-file-picker';
 import type { FormGarmentLabel } from './labels-schema';
 import type { TechCardFormData } from './schema';
-import { labelBomLine, type LabelAxes } from './sewn-label-model';
+import { confirmCompositionLabel } from './label-bom';
+import { isCompositionLabel, labelBomLine, type LabelAxes } from './sewn-label-model';
 import {
   kindLabel,
   labelAttachmentOptions,
@@ -353,6 +354,13 @@ export function ensureLabelLineKey(
   setValue: UseFormSetValue<TechCardFormData>,
   labelKey: string,
 ): string {
+  // A composition label put on a step without its size is confirmed first: size + BOM line,
+  // otherwise the step picker has no label to place.
+  const born = ((getValues('garmentLabels') ?? []) as FormGarmentLabel[]).find((row) =>
+    sameKey(row.key, labelKey),
+  );
+  if (isCompositionLabel(labelKey) && !(Number(born?.widthMm) > 0 && Number(born?.heightMm) > 0))
+    confirmCompositionLabel(getValues, setValue);
   const rows = (getValues('garmentLabels') ?? []) as FormGarmentLabel[];
   const index = rows.findIndex((row) => sameKey(row.key, labelKey));
   const current = index >= 0 ? rows[index]?.lineKey?.trim() : '';

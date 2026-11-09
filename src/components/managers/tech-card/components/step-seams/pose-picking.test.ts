@@ -4,6 +4,7 @@ import {
   cycleLayerHit,
   piecesUnder,
   posePieceOrder,
+  pressedPiece,
   snapAtDuringDrag,
   type PosePieceRing,
 } from './pose-picking';
@@ -57,5 +58,28 @@ describe('PLACE snap marker', () => {
 
   it('stays absent while a drag has no snap candidate', () => {
     expect(snapAtDuringDrag({ snap: null })).toBeNull();
+  });
+});
+
+describe('pressedPiece', () => {
+  const sq = (x: number, y: number, s: number): [number, number][] => [
+    [x, y],
+    [x + s, y],
+    [x + s, y + s],
+    [x, y + s],
+  ];
+  const rings = [
+    { piece: 'panel', ring: sq(0, 0, 100) },
+    { piece: 'label', ring: sq(10, 10, 10) },
+    { piece: 'sleeve', ring: sq(50, 50, 80) },
+  ];
+  it('a small label on the selected panel takes the press', () => {
+    expect(pressedPiece(['label', 'panel'], rings, 'panel', 'label')).toBe('label');
+  });
+  it('the selected panel keeps the press under a big piece', () => {
+    expect(pressedPiece(['sleeve', 'panel'], rings, 'panel', 'sleeve')).toBe('panel');
+  });
+  it('nothing selected: the click piece', () => {
+    expect(pressedPiece(['label', 'panel'], rings, null, 'label')).toBe('label');
   });
 });

@@ -44,10 +44,27 @@ export function garmentLabelName(label: GarmentLabelLike): string {
   return kindLabel(garmentLabelKindNames, kind) || key || 'label';
 }
 
+// A label saved without its size still has to be placeable: it is drawn at its kind's usual size
+// until the size is entered (composition = the vertical care tape, the card default).
+const UNSIZED_MM: Record<string, { widthMm: number; heightMm: number }> = {
+  composition: { widthMm: 30, heightMm: 100 },
+  size: { widthMm: 20, heightMm: 20 },
+  flag: { widthMm: 20, heightMm: 20 },
+  hanger_loop: { widthMm: 10, heightMm: 60 },
+  neck_tape: { widthMm: 10, heightMm: 150 },
+  hangtag: { widthMm: 50, heightMm: 90 },
+};
+
+export function unsizedLabelMm(label: GarmentLabelLike): { widthMm: number; heightMm: number } {
+  const kind = ((label.kind ?? '').trim() || (label.key ?? '').trim()).toLowerCase();
+  return UNSIZED_MM[kind] ?? { widthMm: 50, heightMm: 20 };
+}
+
 export function garmentLabelMark(label: GarmentLabelLike): GarmentLabelMark | null {
-  const widthMm = decimal(label.widthMm);
-  const heightMm = decimal(label.heightMm);
-  if (widthMm <= 0 || heightMm <= 0) return null;
+  const sized = decimal(label.widthMm) > 0 && decimal(label.heightMm) > 0;
+  const fallback = sized ? null : unsizedLabelMm(label);
+  const widthMm = fallback ? fallback.widthMm : decimal(label.widthMm);
+  const heightMm = fallback ? fallback.heightMm : decimal(label.heightMm);
   const rawFold = (label.fold ?? '').trim();
   const fold: GarmentLabelMark['fold'] =
     rawFold === 'flat' ||

@@ -6,6 +6,7 @@ import { useMemo, useRef, type PointerEvent, type ReactNode } from 'react';
 import {
   cycleLayerHit,
   piecesUnder,
+  pressedPiece,
   posePieceOrder,
   type LayerHit,
   type PosePieceRing,
@@ -313,7 +314,7 @@ export function PoseOverlay({
                 : [e.clientX, e.clientY];
               const hits = piecesUnder(at, pieces);
               const clickPiece = cycleLayerHit(hits, at, lastHit.current) ?? item.piece;
-              const piece = selected && hits.includes(selected) ? selected : clickPiece;
+              const piece = pressedPiece(hits, pieces, selected, clickPiece);
               e.currentTarget.setPointerCapture?.(e.pointerId);
               drag.current = {
                 mode: 'move',
