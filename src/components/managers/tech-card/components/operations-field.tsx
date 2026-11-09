@@ -290,8 +290,18 @@ import {
 import { UnitNameField, unitNameProducerIndex } from './unit-block';
 import { OperationMediaStrip } from './operation-media-strip';
 import { type SchematicMode, useSchematicPrefs } from './use-schematic-prefs';
-import { stripKeysOf, stripKeysOfCard } from './cut-strips/strip-pieces';
+import { rowTouchesStrip, stripKeysOf, stripKeysOfCard } from './cut-strips/strip-pieces';
 import { StripTileFace } from './cut-strips/strip-tile';
+import { cutStripNorm } from './cut-strips/norm';
+import type { CutStrip } from './cut-strip-editor/use-cut-strip';
+import {
+  BINDING_BOM_KINDS,
+  bindingBomLines,
+  bindingLineSub,
+  bindingStripsOfStep,
+  freshBindingStrip,
+  unpickBindingLine,
+} from './binding-step';
 import { PieceAddChip, PieceRef, useFormAssemblyPieces, useFormPieces } from './piece-picker';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
@@ -1163,6 +1173,10 @@ type BomLine = {
   section?: string;
   materialId?: number;
   kind?: string;
+  unit?: string;
+  purpose?: string;
+  fabricWidth?: string;
+  spec?: string;
 };
 
 // What each colourway actually takes for a slot. The operation links the SLOT («основная молния»);
@@ -2575,6 +2589,138 @@ function OperationLabelPicker({ index, frozen }: { index: number; frozen: boolea
           add labels
         </Button>
       )}
+    </>
+  );
+}
+
+const bindingPickerLinks = new WeakMap<object, Set<string>>();
+
+const bindingPickerLinksFor = (control: object): Set<string> => {
+  const current = bindingPickerLinks.get(control);
+  if (current) return current;
+  const created = new Set<string>();
+  bindingPickerLinks.set(control, created);
+  return created;
+};
+
+function OperationBindingPicker({
+  index,
+  lines,
+  frozen,
+  articles,
+}: {
+  index: number;
+  lines: BomLine[];
+  frozen: boolean;
+  articles?: ColorwayArticles;
+}) {
+  const { control, getValues, setValue } = useFormContext<TechCardFormData>();
+  const operation = useWatch({ control, name: `operations.${index}` });
+  const strips = (useWatch({ control, name: 'cutStrips' }) ?? []) as CutStrip[];
+  const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
+  const ctx = useStepSeams();
+  const options = useMemo(() => bindingBomLines(lines), [lines]);
+
+  const toggle = async (line: BomLine) => {
+    const bomLineKey = line.lineKey?.trim() ?? '';
+    if (!bomLineKey) return;
+    const currentOperation = getValues(`operations.${index}`);
+    const currentStrips = (getValues('cutStrips') ?? []) as CutStrip[];
+    const own = bindingStripsOfStep(currentOperation, currentStrips, bomLineKey);
+    const linkToken = `${currentOperation?.operationNumber ?? index}:${bomLineKey}`;
+    const pickerLinks = bindingPickerLinksFor(control);
+
+    if (own.length) {
+      const plan = unpickBindingLine(
+        currentOperation,
+        currentStrips,
+        bomLineKey,
+        pickerLinks.has(linkToken),
+      );
+      const removedSeams = new Set(plan.seamKeysRemoved);
+      const removedStrips = new Set(plan.stripKeys);
+      const rows = rowsOf(useSeamsStore.getState()).filter(
+        (row) => removedSeams.has(row.seamKey) || rowTouchesStrip(row, removedStrips),
+      );
+      if (rows.length && (!ctx || !(await ctx.writes.remove(rows)))) return;
+      const removedRowKeys = new Set(rows.map((row) => row.seamKey));
+      setValue('cutStrips', plan.strips as never, { shouldDirty: true });
+      setValue(`operations.${index}.inputKeys`, plan.inputKeys, { shouldDirty: true });
+      setValue(
+        `operations.${index}.seamKeys`,
+        plan.seamKeys.filter((key) => !removedRowKeys.has(key)),
+        { shouldDirty: true },
+      );
+      setValue(`operations.${index}.bomLineKeys`, plan.bomLineKeys, { shouldDirty: true });
+      pickerLinks.delete(linkToken);
+      return;
+    }
+
+    const bomLineKeys = (currentOperation?.bomLineKeys ?? []) as string[];
+    if (!bomLineKeys.includes(bomLineKey)) pickerLinks.add(linkToken);
+    const material = articles?.materialById.get(wireIntOf(line.materialId));
+    const strip = freshBindingStrip({ line, sizeIds, material });
+    const lineKey = strip.lineKey?.trim() ?? '';
+    if (!lineKey) return;
+    setValue('cutStrips', [...currentStrips, strip] as never, { shouldDirty: true });
+    setValue(
+      `operations.${index}.inputKeys`,
+      [...(currentOperation?.inputKeys ?? []).filter((key) => key !== lineKey), lineKey],
+      { shouldDirty: true },
+    );
+    setValue(
+      `operations.${index}.bomLineKeys`,
+      [...bomLineKeys.filter((key) => key !== bomLineKey), bomLineKey],
+      { shouldDirty: true },
+    );
+  };
+
+  if (!options.length) return null;
+  return (
+    <>
+      <GroupLabel>binding</GroupLabel>
+      <div className='flex flex-wrap gap-2'>
+        {options.map((line) => {
+          const key = line.lineKey?.trim() ?? '';
+          const own = bindingStripsOfStep(operation, strips, key);
+          const selected = own.length > 0;
+          const edges = own.filter((strip) => !!strip.seamKey?.trim()).length;
+          const norm = cutStripNorm(
+            ctx?.techCard?.cutStripNorms,
+            key,
+            ctx?.techCard?.techCard?.baseSampleSizeId,
+          );
+          const amount = parseDecimalNumber(norm);
+          const sub = selected
+            ? `${edges} ${edges === 1 ? 'edge' : 'edges'} · ${Number.isFinite(amount) ? `${amount.toFixed(2)} m` : 'no pattern'}`
+            : bindingLineSub(line);
+          const material = articles?.materialById.get(wireIntOf(line.materialId));
+          return (
+            <Tile
+              key={key}
+              name={line.name?.trim() || 'binding'}
+              sub={sub}
+              selected={selected}
+              pressed={selected}
+              media={
+                material ? (
+                  <MaterialThumb
+                    material={material}
+                    size='lg'
+                    className='h-16 w-full border-b border-hairline'
+                  />
+                ) : (
+                  <span className='flex h-16 items-center justify-center overflow-hidden border-b border-hairline bg-pageBg'>
+                    <StripTileFace name='tape' qty={1} found={null} className='h-16 w-full' />
+                  </span>
+                )
+              }
+              className='w-32 p-0 [&>p]:mx-2'
+              onClick={frozen ? undefined : () => void toggle(line)}
+            />
+          );
+        })}
+      </div>
     </>
   );
 }
@@ -4345,9 +4491,12 @@ function OperationEditor({
 
   // The chip row IS the material link. The legacy single `bomLineKey` went with the break — it
   // asked the same question with room for one answer, and an operation genuinely takes several.
-  const linkedMaterials = selectedBomKeys
+  const linkedMaterialLines = selectedBomKeys
     .map((k) => bomLines.find((b) => b.lineKey === k))
     .filter(Boolean) as BomLine[];
+  const linkedMaterials = linkedMaterialLines.filter(
+    (line) => activeKind?.id !== 'B1' || !BINDING_BOM_KINDS.has(line.kind?.trim() ?? ''),
+  );
   const quantityStep = qtyStepFromFormOperation({
     operationNumber: storedOperationNumber,
     operationType: opType,
@@ -4380,8 +4529,12 @@ function OperationEditor({
     distinctArticleHoles.length === 1
       ? distinctArticleHoles[0]
       : null;
-  const bomOutOfRange = selectedBomKeys.length > linkedMaterials.length;
-  const unlinkedBoms = linkableBoms.filter((b) => !selectedBomKeys.includes(b.lineKey ?? ''));
+  const bomOutOfRange = selectedBomKeys.length > linkedMaterialLines.length;
+  const unlinkedBoms = linkableBoms.filter(
+    (line) =>
+      !selectedBomKeys.includes(line.lineKey ?? '') &&
+      (activeKind?.id !== 'B1' || !BINDING_BOM_KINDS.has(line.kind?.trim() ?? '')),
+  );
   // Grouped for the reveal: six sections in one flat pile would read as undifferentiated, and
   // «нитки основных швов» sitting next to «основная молния» invites the wrong pick. linkableBoms is
   // already sorted into section order, so a Map keeps the groups in that order too. Not memoised on
@@ -4826,6 +4979,15 @@ function OperationEditor({
       </div>
 
       {isLabelStep && <OperationLabelPicker index={index} frozen={frozen} />}
+
+      {activeKind?.id === 'B1' && (
+        <OperationBindingPicker
+          index={index}
+          lines={bomLines}
+          frozen={frozen}
+          articles={colorwayArticles}
+        />
+      )}
 
       {howKind === 'label' && (
         <>

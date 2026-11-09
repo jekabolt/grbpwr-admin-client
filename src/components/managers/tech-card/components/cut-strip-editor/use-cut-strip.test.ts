@@ -32,7 +32,7 @@ const context = {
 
 describe('cut strip toggle', () => {
   it('adds, removes and restores the same values', () => {
-    const stash = new Map<string, CutStrip>();
+    const stash = new Map<string, CutStrip[]>();
     const added = toggleCutStrips([], true, context, stash);
     expect(added.strips).toHaveLength(1);
 
@@ -49,6 +49,21 @@ describe('cut strip toggle', () => {
 
     const restored = toggleCutStrips(removed.strips, true, context, stash);
     expect(restored.strips[0]).toEqual(edited);
+  });
+
+  it('stashes and restores every strip of one line', () => {
+    const stash = new Map<string, CutStrip[]>();
+    const first = freshCutStrip(context);
+    const second = { ...first, lineKey: 'strip-second', overlapMm: '42' };
+    const other = { ...first, lineKey: 'strip-other', bomLineKey: 'other-line' };
+
+    const removed = toggleCutStrips([first, second, other], false, context, stash);
+    expect(removed.strips).toEqual([other]);
+    expect(stash.get(line.lineKey)).toEqual([first, second]);
+
+    const restored = toggleCutStrips(removed.strips, true, context, stash);
+    expect(restored.lineStrips).toEqual([first, second]);
+    expect(restored.strips).toEqual([other, first, second]);
   });
 
   it('auto-fills the matching seam and article width', () => {

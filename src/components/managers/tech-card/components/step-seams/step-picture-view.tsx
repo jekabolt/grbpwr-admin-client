@@ -41,7 +41,7 @@ import { useFormContext, useWatch } from 'react-hook-form';
 import { plainEdges } from '../assembly-seams/words';
 import { posesOf, rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import { useCardSeamGraph } from '../card-unit-pictures';
-import { stripKeysOfCard } from '../cut-strips/strip-pieces';
+import { stripKeysOf, stripKeysOfCard, type CutStripLike } from '../cut-strips/strip-pieces';
 import { GarmentLabelOverlay } from '../garment-label-picture';
 import {
   ownStripKeys,
@@ -311,14 +311,16 @@ export function earlierSurface(
 /** Every piece the card knows: by geometry, and by line key on the card's piece rows. */
 export function useCardPieceKeys(): ReadonlySet<string> {
   const { ctx, geo } = useCardGeoms();
+  const liveStrips = useWatch({ name: 'cutStrips' }) as readonly CutStripLike[] | undefined;
   return useMemo(() => {
     const s = new Set<string>(geo?.pieces.keys() ?? []);
     for (const p of ctx?.techCard?.techCard?.pieces ?? []) if (p.lineKey) s.add(p.lineKey);
     for (const key of stripKeysOfCard(ctx?.techCard)) s.add(key);
+    for (const key of stripKeysOf(liveStrips ?? [])) s.add(key);
     for (const label of ctx?.techCard?.techCard?.garmentLabels ?? [])
       if (label.lineKey) s.add(label.lineKey);
     return s;
-  }, [geo?.pieces, ctx?.techCard]);
+  }, [geo?.pieces, ctx?.techCard, liveStrips]);
 }
 
 /** The card's stored seam rows by key, server and pending alike. */

@@ -1,7 +1,7 @@
 // The strip panel's source of `seam_mm`: `seamLengthsMm(seamKey)`, per size. The reading itself is pure
 // and lives in seam-side-length.ts; this is the card's pattern handed to it.
 import { useSizeNames } from 'components/managers/model/components/use-size-systems';
-import { splitWire, type TechCardSeamWire } from 'lib/seams';
+import { splitWire, type StoredSeam, type TechCardSeamWire } from 'lib/seams';
 import { useMemo } from 'react';
 import { useWatch } from 'react-hook-form';
 
@@ -22,6 +22,12 @@ const NOTHING: SeamLengthsMm = () => undefined;
  * what is stored alone.
  */
 export function useSeamLengthsMm(seams: readonly TechCardSeamWire[] | undefined): SeamLengthsMm {
+  const rows = useMemo(() => splitWire(seams).seams, [seams]);
+  return useStoredSeamLengthsMm(rows);
+}
+
+/** The live seam store variant used by the card-level sync immediately after an RPC echo. */
+export function useStoredSeamLengthsMm(rows: readonly StoredSeam[]): SeamLengthsMm {
   const aliases = useWatch<TechCardFormData>({ name: 'pieceDxfAliases' });
   const bomItems = useWatch<TechCardFormData>({ name: 'bomItems' });
   const sizeIds = useWatch<TechCardFormData>({ name: 'sizeIds' }) as number[] | undefined;
@@ -39,13 +45,13 @@ export function useSeamLengthsMm(seams: readonly TechCardSeamWire[] | undefined)
   );
   const stripKeys = useMemo(() => stripKeysOf(strips ?? []), [strips]);
   return useMemo(() => {
-    if (!index || !seams) return NOTHING;
+    if (!index) return NOTHING;
     return seamLengthsReader({
-      rows: splitWire(seams).seams,
+      rows,
       stripKeys,
       find: (key, atSize) => findPiece(index, refs.get(pieceRefKey(key)) ?? [], atSize),
       sizeIds: (sizeIds ?? []).map(Number),
       sizeNames,
     });
-  }, [index, seams, refs, stripKeys, sizeIds, sizeNames]);
+  }, [index, rows, refs, stripKeys, sizeIds, sizeNames]);
 }
