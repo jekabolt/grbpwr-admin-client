@@ -80,6 +80,15 @@ describe('size chart data rules', () => {
     });
   });
 
+  it('does not mark a round pattern value changed when the server dropped its zero', () => {
+    const reopened = mergePatternIntoCells(
+      [cell({ value: '30', source: 'STYLE_SIZE_CHART_CELL_SOURCE_PATTERN' })],
+      [point()],
+      pattern(30),
+    );
+    expect(reopened.changed).toBe(false);
+  });
+
   it('reviews stale manual differences and counts changed cells', () => {
     const reviews = reviewDiffs([point({ stale: true })], [cell()], pattern());
     expect(reviews[0].cells).toEqual([{ sizeId: 2, saved: '26.8', pattern: 27.2 }]);
