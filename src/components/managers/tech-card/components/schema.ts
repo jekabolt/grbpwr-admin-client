@@ -133,6 +133,7 @@ import {
   seamKindDef,
 } from './step-icon-tiles/rules';
 import { z } from 'zod';
+import { countedPairOut } from './design/counted-pair';
 import {
   blankFuse,
   fuseFieldsFromWire,
@@ -541,6 +542,10 @@ const bomItemSchema = z
     // Own auxiliary cards use this as the production norm. Presence is three-state, like
     // estUsage: undefined preserves, '' clears, and a decimal writes.
     consumptionPerUnit: z.string().optional(),
+    // Counted slot norm (0333): pieces sewn on per garment and spare bought on top. One presence
+    // pair on the wire (see `countedPairOut`): undefined on both = this form does not know them.
+    qtyPerGarment: z.string().optional(),
+    spareQty: z.string().optional(),
     unitPrice: z.string().optional().default(''), // decimal as string
     currency: z.string().optional().default(''),
     comment: z.string().optional().default(''),
@@ -2668,6 +2673,8 @@ function mapBomItemToForm(b: NonNullable<common_TechCardInsert['bomItems']>[numb
     // сохранение чужой карточки отправило бы команду «очисти» вместо молчания.
     estUsage: decimalToInput(b.estUsage) || undefined,
     consumptionPerUnit: decimalToInput(b.consumptionPerUnit) || undefined,
+    qtyPerGarment: decimalToInput(b.qtyPerGarment) || undefined,
+    spareQty: decimalToInput(b.spareQty) || undefined,
     unitPrice: decimalToInput(b.unitPrice),
     currency: b.currency || '',
     comment: b.comment || '',
@@ -3848,6 +3855,9 @@ export function mapFormToTechCardInsert(
             ? undefined
             : { value: '' }
         : undefined,
+      // qty_per_garment + spare_qty: both or neither, never one half (`countedPairOut`).
+      qtyPerGarment: countedPairOut(b.qtyPerGarment, b.spareQty).qtyPerGarment,
+      spareQty: countedPairOut(b.qtyPerGarment, b.spareQty).spareQty,
       // ДЕНЬГИ СТРОКИ — ТОЛЬКО ОТ РЕДАКТОРА С costing:write, тем же verbatim-протоколом
       // «поля нет = сохрани что было», что у пары провенанса ниже и у costing в конце файла.
       // Аккаунту без права сервер вырезает цены на чтении, форма держит пустоту — и отправка

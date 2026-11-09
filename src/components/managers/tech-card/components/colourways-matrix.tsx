@@ -16,7 +16,7 @@ import { materialImageUrl } from 'components/managers/materials/components/mater
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useFormContext } from 'react-hook-form';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
 import {
   AddDoor,
@@ -45,6 +45,15 @@ import { readColorwayVersion } from './colorway-version';
 import { paletteValueFromRead } from './colourway-palette';
 import { proposePins } from './colourway-material-match';
 import { ColourwayCreatePopover } from './design/colourway-create';
+import {
+  colourwayToBuy,
+  formQtySteps,
+  isCountedLine,
+  slotNorm,
+  slotSpare,
+  slotUsed,
+  type FormQtyOperation,
+} from './design/slot-norm';
 import { TrimPictogram, trimPictogramKind } from './design/pattern/trim-pictograms';
 import { DxfApplyHint } from './dxf-apply';
 import { KitMarkerHint } from './kit-marker';
@@ -99,6 +108,8 @@ const gridInput =
 const LABEL = 'text-micro uppercase tracking-label text-labelColor';
 
 type Focus = { cwId: number; kind: 'picker' | 'norm'; key: string } | null;
+/** Счётный слот: сколько ставится на изделие (null — базиса нет) и запас. */
+type CountedSlot = { used: number | null; spare: number };
 type RecipeSnapshot = { usages: UsageDraft[] };
 type GradingCache = { scalar: string; perSize: { sizeId: number; consumption: string }[] };
 
@@ -771,7 +782,9 @@ function MaterialCell({
   onNormOpenChange,
   onNoNorm,
   editor,
+  counted,
 }: {
+  counted: boolean;
   cw: common_AdminColorwayRef;
   slot: BomLine;
   draft: UsageDraft;
@@ -864,7 +877,7 @@ function MaterialCell({
         )}
         <span className='mt-0.5 flex items-baseline justify-between gap-2 border-t border-hairline pt-0.5 text-micro'>
           {empty ? (
-            <span className='text-error'>no material</span>
+            <span className='text-error'>{counted ? 'no article' : 'no material'}</span>
           ) : (
             <>
               <span className='min-w-0 truncate text-labelColor' title={colour || undefined}>
@@ -904,6 +917,51 @@ function MaterialCell({
   );
 }
 
+// TO BUY колорвея: Σ (used или явные quantity колорвея) + spare по счётным слотам с артикулом;
+// слоты без артикула — красным «+N» рядом.
+function ToBuyCell({
+  cardSlots,
+  countedSlots,
+  rowsBySlot,
+  materials,
+}: {
+  cardSlots: BomLine[];
+  countedSlots: ReadonlyMap<string, CountedSlot>;
+  rowsBySlot: ReadonlyMap<string, SlotRows>;
+  materials: common_Material[];
+}) {
+  const cells = cardSlots.flatMap((slot) => {
+    const key = slot.lineKey ?? '';
+    const counted = countedSlots.get(key);
+    if (!counted) return [];
+    const rows = rowsBySlot.get(key);
+    const quantities = [...(rows?.garment ?? []), ...(rows?.pieces ?? [])]
+      .map((row) => parseDecimalNumber(row.draft.quantity))
+      .filter((n) => Number.isFinite(n));
+    const { materialId } = resolveSlotArticle(slotDraft(rows, key), slot, materials);
+    return [
+      {
+        ...counted,
+        explicit: quantities.length ? quantities.reduce((a, b) => a + b, 0) : null,
+        hasArticle: materialId > 0,
+      },
+    ];
+  });
+  const { total, missing } = colourwayToBuy(cells);
+  return (
+    <div
+      className={cn(ROW_CELL, 'flex items-baseline gap-2 tabular-nums')}
+      style={{ width: TILE + 12 }}
+      data-cw-to-buy={total}
+    >
+      <Text component='span' size='stat'>
+        {total}
+      </Text>
+      {missing > 0 && <span className='text-micro text-error'>+{missing}</span>}
+    </div>
+  );
+}
+
 // ═══ КОЛОНКА КОЛОРВЕЯ ═════════════════════════════════════════════════════════════════════════
 
 type ColumnProps = {
@@ -914,6 +972,8 @@ type ColumnProps = {
   techCardId: number;
   bomItems: BomLine[];
   cardSlots: BomLine[];
+  /** Счётные слоты карточки по ключу строки; пусто — строки TO BUY нет. */
+  countedSlots: ReadonlyMap<string, CountedSlot>;
   bomKeySet: ReadonlySet<string>;
   materials: common_Material[];
   stockFacts: ReadonlyMap<number, MaterialStockFacts>;
@@ -955,6 +1015,7 @@ function ColourwayColumn({
   techCardId,
   bomItems,
   cardSlots,
+  countedSlots,
   bomKeySet,
   materials,
   stockFacts,
@@ -1243,6 +1304,7 @@ function ColourwayColumn({
         return (
           <MaterialCell
             key={key}
+            counted={countedSlots.has(key)}
             cw={colorway}
             slot={slot}
             draft={d}
@@ -1279,6 +1341,14 @@ function ColourwayColumn({
           />
         );
       })}
+      {countedSlots.size > 0 && (
+        <ToBuyCell
+          cardSlots={cardSlots}
+          countedSlots={countedSlots}
+          rowsBySlot={draft.rowsBySlot}
+          materials={materials}
+        />
+      )}
       {/* Каталог грузится только открытым диалогом; секция слота — жёсткий фильтр. Выбор артикула
           самого слота = «пина нет» (pinPatch). */}
       <MaterialPickerDialog
@@ -1354,6 +1424,30 @@ export function ColourwaysMatrix({
     () => new Set(bomItems.map((b) => b.lineKey ?? '').filter(Boolean)),
     [bomItems],
   );
+  // СЧЁТНЫЕ СЛОТЫ: used из шагов (живая форма), иначе ручное число слота; spare — со слота.
+  const operations = useWatch<TechCardFormData>({ name: 'operations' }) as
+    | FormQtyOperation[]
+    | undefined;
+  const cutStrips = useWatch<TechCardFormData>({ name: 'cutStrips' }) as
+    | TechCardFormData['cutStrips']
+    | undefined;
+  const readOperations = techCard?.techCard?.operations;
+  const countedSlots = useMemo(() => {
+    const cutKeys = new Set(
+      (cutStrips ?? []).map((strip) => strip.bomLineKey?.trim() ?? '').filter(Boolean),
+    );
+    const steps = formQtySteps(operations, readOperations);
+    const out = new Map<string, CountedSlot>();
+    for (const slot of cardSlots) {
+      if (!isCountedLine(slot, cutKeys)) continue;
+      const norm = slotNorm(slot, steps, cutKeys);
+      out.set(slot.lineKey ?? '', {
+        used: slotUsed(norm, slot.qtyPerGarment),
+        spare: slotSpare(slot.spareQty),
+      });
+    }
+    return out;
+  }, [cardSlots, operations, cutStrips, readOperations]);
   const [focus, setFocus] = useState<Focus>(null);
   const [creating, setCreating] = useState(false);
   const stockFacts = useMaterialStockFacts();
@@ -1468,7 +1562,7 @@ export function ColourwaysMatrix({
     [],
   );
 
-  const rowCount = 2 + cardSlots.length;
+  const rowCount = 2 + cardSlots.length + (countedSlots.size > 0 ? 1 : 0);
   const plusColumn = colorways.length + 2;
 
   return (
@@ -1490,14 +1584,38 @@ export function ColourwaysMatrix({
             >
               <div className={FB_HEAD} />
               <div className={FB_AUTO} />
-              {cardSlots.map((slot) => (
-                <div
-                  key={slot.lineKey}
-                  className={cn(ROW_CELL, LABEL, 'self-stretch pr-8', FB_SLOT)}
-                >
-                  {slotLabel(slot)}
-                </div>
-              ))}
+              {cardSlots.map((slot) => {
+                const counted = countedSlots.get(slot.lineKey ?? '');
+                return (
+                  <div
+                    key={slot.lineKey}
+                    className={cn(
+                      ROW_CELL,
+                      LABEL,
+                      'flex flex-col gap-1 self-stretch pr-8',
+                      FB_SLOT,
+                    )}
+                  >
+                    <span>{slotLabel(slot)}</span>
+                    {counted && (
+                      <span className='flex flex-col tabular-nums' data-cw-counted={slot.lineKey}>
+                        <span>
+                          used{' '}
+                          <span className='font-bold text-textColor'>
+                            {counted.used ?? <EmptyCell />}
+                          </span>
+                        </span>
+                        <span>
+                          spare <span className='text-textColor'>{counted.spare}</span>
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+              {countedSlots.size > 0 && (
+                <div className={cn(ROW_CELL, LABEL, 'self-stretch pr-8')}>to buy</div>
+              )}
             </div>
 
             {colorways.map((cw, i) => {
@@ -1511,6 +1629,7 @@ export function ColourwaysMatrix({
                   techCardId={techCardId}
                   bomItems={bomItems}
                   cardSlots={cardSlots}
+                  countedSlots={countedSlots}
                   bomKeySet={bomKeySet}
                   materials={materials}
                   stockFacts={stockFacts}
@@ -1573,6 +1692,7 @@ export function ColourwaysMatrix({
               {cardSlots.map((slot) => (
                 <div key={slot.lineKey} className={cn(ROW_CELL, FB_SLOT)} style={{ width: TILE }} />
               ))}
+              {countedSlots.size > 0 && <div className={ROW_CELL} style={{ width: TILE }} />}
             </div>
           </div>
         </div>

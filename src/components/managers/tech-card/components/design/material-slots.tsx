@@ -66,6 +66,7 @@ import { useSeamLengthsMm } from '../cut-strips/seam-lengths';
 import { CutStripModal } from '../cut-strip-editor/cut-strip-fields';
 import { useCutStrip } from '../cut-strip-editor/use-cut-strip';
 import { measured } from '../use-colourway-auto';
+import { formQtySteps, slotNorm, type FormQtyOperation, type SlotNorm } from './slot-norm';
 
 /**
  * ═══ MATERIAL SLOTS — СЛОТЫ МАТЕРИАЛОВ ВМЕСТО СПЕЦИФИКАЦИИ (B-16 / B-19 / B-20 круга 20) ═══════
@@ -197,6 +198,9 @@ export function MaterialSlots({
   const { control, getValues, setValue, setFocus } = useFormContext<TechCardFormData>();
   const lines = (useWatch({ control, name: 'bomItems' }) ?? []) as Line[];
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []).map(wireInt);
+  // REPEATS-правки шагов видны в NORM сразу: шаги читаются из живой формы, не из прочитанной карты.
+  const operations = useWatch({ control, name: 'operations' }) as FormQtyOperation[] | undefined;
+  const cutStrips = useWatch({ control, name: 'cutStrips' });
   const { data: materialsData } = useMaterials('', true);
   const materials = useMemo(() => materialsData?.materials ?? [], [materialsData]);
 
@@ -207,6 +211,15 @@ export function MaterialSlots({
   const { data: card } = useTechCard(techCardId);
   const colorways = card?.colorways;
   const seamLengthsMm = useSeamLengthsMm(card?.seams);
+  const readOperations = card?.techCard?.operations;
+  const qtySteps = useMemo(
+    () => formQtySteps(operations, readOperations),
+    [operations, readOperations],
+  );
+  const cutKeys = useMemo(
+    () => new Set((cutStrips ?? []).map((strip) => strip.bomLineKey?.trim() ?? '').filter(Boolean)),
+    [cutStrips],
+  );
   const [openStripKey, setOpenStripKey] = useState('');
 
   const stripNorm = (line: Line): string => {
@@ -421,13 +434,14 @@ export function MaterialSlots({
              («mesh / second layer»), остальное режется многоточием с полным текстом в `title`.
              `min-w` включается с `sm`; на телефоне вторичные composition / estimate / cut / from
              сняты, и четыре рабочих колонки помещаются без горизонтальной прокрутки. */
-          <DataTable className='min-w-0 table-fixed [&_td]:py-2.5 sm:min-w-[1110px]'>
+          <DataTable className='min-w-0 table-fixed [&_td]:py-2.5 sm:min-w-[1174px]'>
             <colgroup>
               <col />
               <col className='w-20 sm:w-[200px]' />
               <col className='hidden sm:table-column sm:w-[18%]' />
               <col className='hidden sm:table-column sm:w-[150px]' />
               {auxMode !== 'bought' && <col className='w-20 sm:w-16' />}
+              {auxMode !== 'bought' && <col className='hidden sm:table-column sm:w-16' />}
               <col className='hidden sm:table-column sm:w-36' />
               <col className='hidden sm:table-column sm:w-[90px]' />
               <col className='w-16 sm:w-[110px]' />
@@ -444,6 +458,7 @@ export function MaterialSlots({
                 </th>
                 <th className='hidden sm:table-cell'>est usage</th>
                 {auxMode !== 'bought' && <th>{auxMode === 'own' ? 'norm / pc' : 'norm'}</th>}
+                {auxMode !== 'bought' && <th className='hidden sm:table-cell'>spare</th>}
                 <th data-align='left' className='hidden sm:table-cell'>
                   cut
                 </th>
@@ -474,6 +489,7 @@ export function MaterialSlots({
                     onRemove={askRemove}
                     blockersOf={blockersOf}
                     norm={stripNorm(lines[index])}
+                    counted={slotNorm(lines[index], qtySteps, cutKeys)}
                     auxMode={auxMode}
                     sizeIds={sizeIds}
                     seams={card?.seams ?? []}
@@ -541,6 +557,7 @@ function SlotRow({
   onRemove,
   blockersOf,
   norm,
+  counted,
   auxMode,
   sizeIds,
   seams,
@@ -559,6 +576,8 @@ function SlotRow({
   onRemove: (index: number) => void;
   blockersOf: (line: Line) => Blocker[];
   norm: string;
+  /** Счётная норма слота: Σ шагов, ручное число или ничего (мерная / режется в длину). */
+  counted: SlotNorm;
   auxMode: 'own' | 'bought' | null;
   sizeIds: number[];
   seams: common_TechCardSeam[];
@@ -670,6 +689,8 @@ function SlotRow({
     line.composition,
     line.estUsage,
     line.consumptionPerUnit,
+    line.qtyPerGarment,
+    line.spareQty,
     line.unit,
     line.purpose,
     line.kind,
@@ -938,8 +959,36 @@ function SlotRow({
         )}
       </td>
       {auxMode !== 'bought' && (
-        <td className='align-top text-right'>
-          {auxMode === 'own' ? (
+        <td className='align-top text-right' data-b16-norm={index}>
+          {counted.kind === 'ops' ? (
+            /* ЧИСЛО СТАВЯТ ШАГИ — только чтение; в слот оно не пишется, сервер выводит его сам. */
+            <span className='flex items-baseline justify-end gap-1.5 whitespace-nowrap'>
+              <Text component='span' className='font-bold tabular-nums'>
+                {counted.qty}
+              </Text>
+              <Text
+                component='span'
+                size='micro'
+                variant='label'
+                title={counted.opNumbers.join(' · ') || undefined}
+              >
+                {counted.ops} ops
+              </Text>
+            </span>
+          ) : counted.kind === 'manual' ? (
+            readOnly ? (
+              countText(line.qtyPerGarment) || <EmptyCell />
+            ) : (
+              <DecimalField
+                name={`bomItems.${index}.qtyPerGarment`}
+                label='norm'
+                srLabel
+                maxDecimals={0}
+                data-b16-qty={index}
+                className='min-w-0 text-right'
+              />
+            )
+          ) : auxMode === 'own' ? (
             cutStrip.checked ? (
               norm || <EmptyCell />
             ) : ownNormEligible ? (
@@ -970,6 +1019,24 @@ function SlotRow({
             )
           ) : (
             norm || <EmptyCell />
+          )}
+        </td>
+      )}
+      {auxMode !== 'bought' && (
+        <td className='hidden align-top text-right sm:table-cell' data-b16-spare={index}>
+          {counted.kind === 'none' ? (
+            <EmptyCell />
+          ) : readOnly ? (
+            countText(line.spareQty) || <EmptyCell />
+          ) : (
+            <DecimalField
+              name={`bomItems.${index}.spareQty`}
+              label='spare'
+              srLabel
+              maxDecimals={0}
+              data-b16-spare-input={index}
+              className='min-w-0 text-right'
+            />
           )}
         </td>
       )}
@@ -1066,6 +1133,12 @@ function SlotRow({
  * Плита НЕ кнопка: ✕ и дверь — настоящие кнопки, и класть их внутрь третьей было бы невалидной
  * разметкой, которую браузер чинит на свой вкус.
  */
+/** Целое число слота для чтения: «12.000» с провода → «12». */
+function countText(raw?: string): string {
+  const value = Number((raw ?? '').trim().replace(/,/g, '.'));
+  return (raw ?? '').trim() && Number.isFinite(value) ? String(value) : '';
+}
+
 function FibreField({ index, raw, readable }: { index: number; raw: string; readable: string }) {
   const { setValue } = useFormContext<TechCardFormData>();
   const [open, setOpen] = useState(false);
