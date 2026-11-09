@@ -52,7 +52,7 @@ import {
 import type { TechCardFormData } from '../schema';
 import { nameSpot } from './name-spot';
 import { mmOnPoints, repeatClickTarget } from './span-pick';
-import { fmtMm } from './step-seams-model';
+import { fmtMm, seamlessLabelStep, unsewnLabel } from './step-seams-model';
 import { placementPictureGlyphsForStep, type ButtonholeOperation } from './buttonhole-glyph';
 import { PAIR_INK, pairNo } from './palette';
 import { layerStyle } from './layer-style';
@@ -471,14 +471,17 @@ export function stepSeamsOfOp(
       .map((part) => part.target),
     ...fullyUsedEdges(usedEdgesBeforeStep(ops, index + 1, byKey, geoms), geoms),
   ]);
-  const suggestions = ready
-    ? suggestStepPairs(ops, index, pieceKeys, geoms, used, ease, byKey)
-    : [];
+  // A hung or stuck-on label is placed by its pose: nothing to propose, nothing missing.
+  const seamless = seamlessLabelStep(active, geoms);
+  const suggestions =
+    ready && !seamless ? suggestStepPairs(ops, index, pieceKeys, geoms, used, ease, byKey) : [];
   const suggestion: Suggestion | null = suggestions[0] ?? null;
   // No pair to propose: a lone part may go into the slit its twin was sewn on (the second placket);
   // two lone plackets each get their own sleeve, and one accepted leaves the other standing.
   const surfaceSuggestions: StepSurface[] = (
-    ready && !suggestions.length ? suggestStepSurfaces(ops, index, pieceKeys, geoms, byKey) : []
+    ready && !seamless && !suggestions.length
+      ? suggestStepSurfaces(ops, index, pieceKeys, geoms, byKey)
+      : []
   ).filter(
     (surface) =>
       !stored.some((seam) =>
@@ -521,6 +524,7 @@ export function stepSeamsOfOp(
       ].filter((candidate): candidate is SeamCandidate => !!candidate);
   return {
     active,
+    seamless,
     innerLines,
     byKey,
     groups,
@@ -565,6 +569,7 @@ export function stepPictureOfOp(
   } = options;
   const {
     active,
+    seamless,
     innerLines,
     byKey,
     groups,
@@ -623,6 +628,7 @@ export function stepPictureOfOp(
   const highlight = stepHighlightOf(options.operations, options.index, byKey);
   return {
     op: active,
+    seamless,
     geoms,
     innerLines,
     groups,
@@ -1720,6 +1726,7 @@ export function StepPictureSvg({
   actionGlyphs = NO_ACTION_GLYPHS,
   actionDims = NO_ACTION_DIMS,
   noSeamText,
+  seamless: suppliedSeamless,
   stripWords,
   nos = NO_NOS,
   names: givenNames,
@@ -1764,6 +1771,8 @@ export function StepPictureSvg({
   actionDims?: readonly PictureActionDim[];
   /** Localized print wording. Screen pictures reuse the existing editor status. */
   noSeamText?: string;
+  /** The step only poses labels that go on without a seam: no «no seam» for it. */
+  seamless?: boolean;
   stripWords?: StripWords;
   nos?: readonly NoMark[];
   names?: readonly string[];
@@ -2232,7 +2241,7 @@ export function StepPictureSvg({
     // a stacked twin's edges follow its drawn offset. An edge the caller names stays pickable even
     // under a piece of its own unit: a seam inside a unit joins exactly such an edge.
     const named = pickable && pickTargets ? new Set(pickTargets) : undefined;
-    const targets = picturePickTargets(
+    const doorTargets = picturePickTargets(
       layout,
       geoms,
       innerLines,
@@ -2252,6 +2261,10 @@ export function StepPictureSvg({
             hiddenTargets: named,
           },
     );
+    // A hung or stuck-on label takes no seam: no door on it, so its whole body drags.
+    const targets = doorTargets.filter(
+      (target) => !unsewnLabel(flatGeoms.get(pieceOfTarget(target.id))),
+    );
     return layers
       ? withoutCoveredDoors(
           targets,
@@ -2267,6 +2280,7 @@ export function StepPictureSvg({
     look,
     layout,
     geoms,
+    flatGeoms,
     innerLines,
     fit,
     layers,
@@ -2665,8 +2679,12 @@ export function StepPictureSvg({
     hideCrowdedLabels ? spots[i] : spots[nameSpots.length + labels.length + i];
   const stepColor = look === 'print' ? INK : 'var(--color-highlightColor)';
   const stepWidth = L.outline * 1.26;
+  const seamless = suppliedSeamless ?? seamlessLabelStep(operation, flatGeoms);
   const noStepSeams =
-    stepEdges !== undefined && stepEdges.length === 0 && !marks.some((m) => isPick(m.tone));
+    !seamless &&
+    stepEdges !== undefined &&
+    stepEdges.length === 0 &&
+    !marks.some((m) => isPick(m.tone));
   const noStepSeamLabel = noSeamText ?? (look === 'print' ? '' : NO_SEAM_TEXT);
 
   // The door strokes are the densest paths of the picture (every edge and inner line, twice: the

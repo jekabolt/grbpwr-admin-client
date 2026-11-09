@@ -237,6 +237,25 @@ export function posesLabels(
   return (ops[index]?.labelKeys ?? []).some((key) => pieceKeys.has(key));
 }
 
+/** Sewn into a seam or on its sides; an empty attachment reads as sewn (every kind's default). */
+export function labelSewn(attachment: string | undefined): boolean {
+  const a = (attachment ?? '').trim().toLowerCase();
+  return !a || a.startsWith('sewn');
+}
+
+/** A label hung, tacked, pressed or stuck on: a pose places it, it takes no seam. */
+export const unsewnLabel = (geom: PieceGeom | undefined): boolean =>
+  !!geom?.garmentLabel && !labelSewn(geom.garmentLabel.attachment);
+
+/** A step whose labels all go on without a seam: it needs a pose, never a seam. */
+export function seamlessLabelStep(
+  op: Pick<FormOpLike, 'labelKeys'> | undefined,
+  geoms: ReadonlyMap<string, PieceGeom> | undefined,
+): boolean {
+  const keys = op?.labelKeys ?? [];
+  return !!geoms && keys.length > 0 && keys.every((key) => unsewnLabel(geoms.get(key)));
+}
+
 /** Kept for the picker API; eligibility includes the leaf pieces of one resolved input unit. */
 export function hasMultipleStepPieces(
   ops: readonly FormOpLike[],
