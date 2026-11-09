@@ -84,6 +84,34 @@ describe('accepted gate findings on the current card sheet', () => {
     expect(found.get('sl_lin_r')).toContain('G12-pair');
   });
 
+  it('records a piece-sized closed outline inside the current piece', () => {
+    const sample = piece({
+      poly: [
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+        { x: 100, y: 100 },
+        { x: 0, y: 100 },
+      ],
+      bboxW: 100,
+      bboxH: 100,
+      areaCm2: 10000,
+      inner: [
+        {
+          layer: '8',
+          closed: true,
+          pts: [
+            { x: 10, y: 10 },
+            { x: 30, y: 10 },
+            { x: 30, y: 30 },
+            { x: 10, y: 30 },
+          ],
+        },
+      ],
+    });
+
+    expect(acceptedGateFindings([entry('HOST', sample)]).get('host')).toContain('G20-nested-piece');
+  });
+
   it('keeps a clean piece unmarked', () => {
     const clean = piece({
       grain: [{ layer: '7', angleDeg: 90, lengthCm: 8, a: { x: 5, y: 1 }, b: { x: 5, y: 9 } }],

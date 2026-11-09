@@ -12,7 +12,12 @@ import type {
   GateReport,
 } from 'lib/pattern-import/types';
 
-const REIMPORT_CHECKS = new Set<GateCheckId>(['G5-features', 'G12-pair', 'G16-glyphs']);
+const REIMPORT_CHECKS = new Set<GateCheckId>([
+  'G5-features',
+  'G12-pair',
+  'G16-glyphs',
+  'G20-nested-piece',
+]);
 const key = (value: string) => value.trim().toLowerCase();
 
 function acceptedCheck(

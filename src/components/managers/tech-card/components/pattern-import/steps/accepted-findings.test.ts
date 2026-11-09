@@ -141,4 +141,13 @@ describe('accepted re-import findings', () => {
     const found = acceptCurrentFindings({ [scopeKey]: gate }, draft(), [other]);
     expect(found.gate[scopeKey].checks[0].severity).toBe('block');
   });
+
+  it('downgrades nesting already present on the bound current piece', () => {
+    const gate = report('G20-nested-piece', ['SL_LIN_L_UNI']);
+    const found = acceptCurrentFindings({ [scopeKey]: gate }, draft(), [
+      shape('piece-left', ['G20-nested-piece']),
+    ]);
+    expect(found.gate[scopeKey].passed).toBe(true);
+    expect(found.gate[scopeKey].checks[0].severity).toBe('warn');
+  });
 });

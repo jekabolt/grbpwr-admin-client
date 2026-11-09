@@ -481,6 +481,51 @@ describe('name and outline helpers', () => {
 });
 
 describe('production re-import binding continuity', () => {
+  it('ignores one-size suffixes and uses the previous outlined alias to break a tie', () => {
+    const d = buildDraft(
+      {
+        scopes: [
+          smallScope([
+            { identity: 'LIN_BLT', displayName: 'blt · lining' },
+            { identity: 'LIN_FP_OS_1', displayName: 'FP_OS_1' },
+            { identity: 'BLT_OS_L_2', displayName: 'BLT_OS_L_2', pairHand: 'L' },
+          ]),
+        ],
+      },
+      smallCard(
+        [
+          { lineKey: 'k:belt', name: 'blt_S' },
+          { lineKey: 'k:front', name: 'FP_OS_1_M' },
+          { lineKey: 'k:back', name: 'BP_OS_1_M' },
+          { lineKey: 'k:left-belt', name: 'BLT_L_OS_2_M' },
+          { lineKey: 'k:belt-twin', name: 'blt_M' },
+        ],
+        [
+          { scopeKey: MAIN, blockName: 'blt_S', pieceLineKey: 'k:belt' },
+          { scopeKey: MAIN, blockName: 'FP_OS_1_M', pieceLineKey: 'k:front' },
+          { scopeKey: MAIN, blockName: 'BP_OS_1_M', pieceLineKey: 'k:back' },
+          { scopeKey: MAIN, blockName: 'BLT_L_OS_2_M', pieceLineKey: 'k:left-belt' },
+        ],
+        [
+          smallShape('k:belt', 'blt_S'),
+          smallShape('k:front', 'FP_OS_1_M'),
+          smallShape('k:back', 'BP_OS_1_M', [20, 10]),
+          smallShape('k:left-belt', 'BLT_L_OS_2_M'),
+          smallShape('k:belt-twin', 'blt_M', [20, 10]),
+        ],
+      ),
+      { mintKey },
+    );
+
+    expect(links(d, MAIN)).toEqual({
+      LIN_BLT: 'blt_S',
+      LIN_FP_OS_1: 'FP_OS_1_M',
+      BLT_OS_L_2: 'BLT_L_OS_2_M',
+    });
+    expect(d.pieces.filter((piece) => !piece.existingLineKey)).toEqual([]);
+    expect(d.unresolved).toBeUndefined();
+  });
+
   it('keeps the linked duplicate when a sibling has the new block name', () => {
     const d = buildDraft(
       { scopes: [smallScope([{ identity: 'PCK_MAIN_L', pairHand: 'L' }])] },

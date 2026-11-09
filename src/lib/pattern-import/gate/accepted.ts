@@ -77,6 +77,31 @@ function grainFinding(piece: PieceDTO): boolean {
   return through < GRAIN_PROPOSAL_MIN_MM;
 }
 
+const polygonArea = (points: readonly PtMm[]) => {
+  let twice = 0;
+  for (let index = 0; index < points.length; index++) {
+    const point = points[index];
+    const next = points[(index + 1) % points.length];
+    twice += point.x * next.y - next.x * point.y;
+  }
+  return Math.abs(twice / 2);
+};
+
+function nestedPieceFinding(piece: PieceDTO): boolean {
+  const cutArea = polygonArea(piece.poly.map((point) => mmPoint(point)));
+  if (!(cutArea > 0)) return false;
+  return (piece.inner ?? []).some((path) => {
+    if (path.layer !== '8' || path.pts.length < 3) return false;
+    const points = path.pts.map((point) => mmPoint(point));
+    const first = points[0];
+    const last = points[points.length - 1];
+    const closed = path.closed || Math.hypot(first.x - last.x, first.y - last.y) <= 0.5;
+    if (!closed || drillMarkOf({ closed: path.closed, pts: points })) return false;
+    const area = polygonArea(points);
+    return area >= PATIMPORT.nestedPieceMinMm2 && area <= 0.45 * cutArea;
+  });
+}
+
 const hand = (identity: string): 'L' | 'R' | null => {
   const tokens = identity
     .toUpperCase()
@@ -121,6 +146,7 @@ export function acceptedGateFindings(
     if (entry.pieces.some(glyphFinding)) add(entry.identity, 'G16-glyphs');
     if (entry.pieces.some(drillFinding) || [...entry.bySize.values()].some(grainFinding))
       add(entry.identity, 'G5-features');
+    if (entry.pieces.some(nestedPieceFinding)) add(entry.identity, 'G20-nested-piece');
   }
   const left = entries.filter((entry) => hand(entry.identity) === 'L');
   for (const l of left) {

@@ -717,11 +717,13 @@ function checkNoOp(
     const beforeKeys = new Set(before.map((b) => renamedKey(b.blockName)));
     const fresh = after.filter((a) => !beforeKeys.has(tokenKey(a.blockName)));
     const lost = before.filter((b) => !afterByKey.has(renamedKey(b.blockName)));
+    const continuedRenames = new Set<(typeof after)[number]>();
     for (const b of lost) {
       if (!owners.has(b.pieceLineKey)) continue; // left without a block: reported above
       const to = fresh.find((a) => a.pieceLineKey === b.pieceLineKey);
       if (to) {
         fresh.splice(fresh.indexOf(to), 1);
+        continuedRenames.add(to);
         v.notes.push(
           `link renamed, same piece: block ${b.blockName} becomes ${to.blockName} on «${pn(b.pieceLineKey)}»`,
         );
@@ -741,10 +743,11 @@ function checkNoOp(
       const hb = handOf(a.blockName);
       const hp = handOf(pn(a.pieceLineKey));
       if (!hb || !hp || hb === hp) continue;
-      const had = before.some(
-        (b) =>
-          b.pieceLineKey === a.pieceLineKey && renamedKey(b.blockName) === tokenKey(a.blockName),
-      );
+      const had =
+        before.some(
+          (b) =>
+            b.pieceLineKey === a.pieceLineKey && renamedKey(b.blockName) === tokenKey(a.blockName),
+        ) || continuedRenames.has(a);
       if (!had) v.fails.push(`hand swap: ${a.blockName} (${hb}) → «${pn(a.pieceLineKey)}» (${hp})`);
     }
   }

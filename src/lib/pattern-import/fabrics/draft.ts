@@ -187,6 +187,8 @@ type Hand = 'L' | 'R';
 const HAND_TOKENS: Record<string, Hand> = { L: 'L', R: 'R', LEFT: 'L', RIGHT: 'R' };
 /** `UNI` marks an ungraded block (block-code.ts), not another piece: FLP_L_UNI is FLP_L. */
 const NOISE_TOKENS = new Set(['UNI']);
+/** Legacy one-size cards omit the lining prefix and append their size, sometimes more than once. */
+const ONE_SIZE_TOKENS = new Set(['LIN', 'LINING', 'S', 'M', 'OS']);
 
 /** A name as its tokens: upper case, split on anything not a letter or a digit, `UNI` dropped. */
 export function nameTokens(s: string): string[] {
@@ -203,6 +205,12 @@ const damagedNameKey = (s: string) =>
 const hasNonAscii = (s: string) => [...s].some((c) => c.charCodeAt(0) > 0x7f);
 /** Order-free key of a name: FLP_MAIN_L_UNI and FLP_L_MAIN are one key. */
 export const tokenKey = (s: string) => nameTokens(s).sort().join(' ');
+/** Name key used only as secondary re-import evidence for the one-size bag cards. */
+const oneSizeTokenKey = (s: string) =>
+  nameTokens(s)
+    .filter((token) => !ONE_SIZE_TOKENS.has(token))
+    .sort()
+    .join(' ');
 /** The key without the hand — the part both hands of a pair share (FP_L, FP_R → FP). */
 const partKey = (s: string) =>
   nameTokens(s)
@@ -521,6 +529,32 @@ export function buildDraft(
   for (const s of open()) {
     const owners = nearShapeOwners(s, true);
     if (owners.length === 1) bind(s, owners[0], 'shape');
+  }
+
+  // One-size bag cards kept the size in their piece and alias names (BLT_S, LP_OS_M,
+  // BLT_L_OS_2_M) and omitted the writer's LIN_ / `· lining` scope labels. Treat those tokens as
+  // storage noise here, after exact aliases and contours. A collision is resolved only when the
+  // current outline and the card's previous link identify one owner together.
+  const byOneSizeTokens = new Map<string, string[]>();
+  for (const p of live) push(byOneSizeTokens, oneSizeTokenKey(p.name), p.lineKey);
+  for (const s of open()) {
+    const keys = new Set(s.names.map(oneSizeTokenKey).filter(Boolean));
+    const linked = new Set(
+      (linksOf.get(s.scopeKey) ?? [])
+        .filter((l) => linkOnSheet(s.scopeKey, l) && keys.has(oneSizeTokenKey(l.blockName)))
+        .map((l) => l.lineKey),
+    );
+    const hits = new Set([...keys].flatMap((key) => byOneSizeTokens.get(key) ?? []));
+    for (const k of linked) hits.add(k);
+    const fit = [...hits].filter((k) => handsMeet(s.hand, pieceHand(k)) && free(s, k));
+    if (fit.length === 1) {
+      bind(s, fit[0], linked.has(fit[0]) ? 'alias' : 'name');
+      continue;
+    }
+    const outlined = fit.filter((k) => (costOf(s, k) ?? Infinity) <= SHAPE_SAME);
+    const linkedOutlined = outlined.filter((k) => linked.has(k));
+    if (linkedOutlined.length === 1) bind(s, linkedOutlined[0], 'alias');
+    else if (outlined.length === 1) bind(s, outlined[0], 'shape');
   }
 
   // 2. a card piece of the same name
