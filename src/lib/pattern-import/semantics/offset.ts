@@ -778,7 +778,11 @@ export function offsetContour(
   const reasons: string[] = [];
   if (loops.length !== 1)
     reasons.push(loops.length ? `${loops.length} loops (the outline splits)` : 'offset vanished');
-  if (holes) reasons.push(`${holes} hole(s) appeared`);
+  // An outward allowance can close a narrow bay and leave a negative loop inside the union. The
+  // cutter follows the outer loop; that trapped void is not a second cut line. An inward offset
+  // must still reject holes because they mean the seam topology changed.
+  const blockingHoles = mm < 0 ? holes : 0;
+  if (blockingHoles) reasons.push(`${blockingHoles} hole(s) appeared`);
   const si = best.length ? selfIntersects(best) : false;
   if (si) reasons.push('self-intersection');
   const hr = best.length ? hullRatio(best) : 1;
@@ -793,7 +797,7 @@ export function offsetContour(
     sourceHullRatio: srcHull,
     report: {
       ok: reasons.length === 0,
-      loops: loops.length + holes,
+      loops: loops.length + blockingHoles,
       selfIntersects: si,
       hullRatio: hr,
       maxDeviationMm: dev,

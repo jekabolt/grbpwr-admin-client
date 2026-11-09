@@ -217,6 +217,8 @@ export type SourceFileInfo = {
    * blocks carry a boundary on layer 1 (AAMA / ASTM: 1 = cut line, 14 = sew line).
    */
   dxf?: { dialect: string; cutBlocks: number };
+  /** System-owned card-row provenance for a legacy generated fusing sheet. */
+  generatedFusing?: boolean;
 };
 
 /** Everything an adapter returns for one file. */
@@ -1718,6 +1720,12 @@ export type SemanticsInput = {
   run: SizeRun;
   sizeMap: SizeMap;
   families: PieceFamily[];
+  /**
+   * Exact identities already held by this card (parsed shapes, a trusted manifest, or an existing
+   * block link). They prove that a trailing card-size token belongs to the identity on a re-import;
+   * a new block-name-only identity is deliberately absent.
+   */
+  presegmentedIdentities?: string[];
   /** File-level allowance decision; per-piece overrides live in `pieceOverrides`. */
   fileAllowance: AllowanceDecision;
   /**
@@ -2559,6 +2567,10 @@ export type ManifestSource = {
   }[];
   sizeEncoding: SizeEncoding;
   variant: string | null;
+  /** The source is a fusing sheet produced by this app, proven by its marker or card row. */
+  generatedFusing?: true;
+  /** DXF identities proven separately from a block-name size-tail guess. */
+  presegmentedIdentities?: string[];
   /**
    * VARIANTS (D5): the pieces the drawing ties to ONE model (a bare "Style A" in the piece's label
    * block), with what it rests on — `kept` = written in this file (it is the chosen model's, or no
@@ -2568,6 +2580,9 @@ export type ManifestSource = {
 };
 /** VARIANTS: at most this many `source.models` entries (the writer and the reader alike). */
 export const MODELS_MAX = 64;
+
+/** Exact comment written before SECTION in every generated fusing DXF. */
+export const GENERATED_FUSING_DXF_MARKER = 'GRBPWR-GENERATED-FUSING v1' as const;
 
 export type GateCheckId =
   | 'G1-roundtrip'
@@ -3326,7 +3341,11 @@ export type ImportErrorCode =
   | 'internal';
 
 export type ImportWorkerRequest =
-  | { type: 'open'; id: number; files: { name: string; bytes: ArrayBuffer }[] }
+  | {
+      type: 'open';
+      id: number;
+      files: { name: string; bytes: ArrayBuffer; generatedFusing?: boolean }[];
+    }
   | {
       [S in StageName]: {
         type: 'run';
@@ -3745,6 +3764,8 @@ export const PATIMPORT = {
   hausdorffMaxMm: 1.0,
   overviewBboxTolMm: 1,
   overviewBboxTolRatio: 0.01,
+  /** G8: sub-1% reversals occur on narrow graded interfacing runs; larger area loss still blocks. */
+  areaGrowthTolerance: 0.01,
   pairAreaTol: 0.001,
   pairBboxTolMm: 0.1,
   /** G12 (F14b): symmetric Hausdorff of the mirrored `_L` vs `_R`, mm — the gate's "on the line". */

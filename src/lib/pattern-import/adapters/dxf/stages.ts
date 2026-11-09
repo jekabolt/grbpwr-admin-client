@@ -53,6 +53,26 @@ export type DxfFastPath = {
   allowance: AllowanceDecision | null;
 };
 
+/** Identities whose PIECE NAME or separate SIZE label defeats a block-name size-tail guess. */
+export function dxfPresegmentedIdentities(families: readonly PieceFamily[]): string[] {
+  const exact = new Map<string, boolean>();
+  for (const family of families)
+    for (const candidate of family.candidates) {
+      const dxf = (candidate as DxfPieceCandidate).dxf;
+      const identity = dxf.identity.trim();
+      if (!identity) continue;
+      exact.set(
+        identity,
+        (exact.get(identity) ?? true) &&
+          (dxf.sizeSource === 'label' || dxf.identitySource === 'label'),
+      );
+    }
+  return [...exact]
+    .filter(([, presegmented]) => presegmented)
+    .map(([identity]) => identity)
+    .sort((a, b) => a.localeCompare(b));
+}
+
 const ROLE_OF: Record<PathRole, ChainRole> = {
   cut: 'size',
   'cut-extra': 'ignore',
@@ -415,6 +435,9 @@ function candidateOf(
       group: p.group,
       identity: p.identity,
       size: p.size,
+      sizeSource: p.sizeSource,
+      identitySource: p.identitySource,
+      ...(read.meta.generatedFusing ? { generatedFusing: true } : {}),
       features,
       outerIsSeam: outerIsSeam && !!p.seam,
       ...(p.seamPair ? { seamPairMm: p.seamPair.offsetMm } : {}),

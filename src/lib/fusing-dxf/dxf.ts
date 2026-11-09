@@ -8,6 +8,7 @@ import type {
   PieceSpec,
   PtMm,
 } from 'lib/pattern-import/types';
+import { GENERATED_FUSING_DXF_MARKER } from 'lib/pattern-import/types';
 import { writeScopes } from 'lib/pattern-import/write';
 import { fitGrainInside } from 'lib/pattern-import/semantics/grain-inside';
 import { edgeRunsOf } from './edge-runs';
@@ -94,6 +95,11 @@ const slug = (value: string, fallback: string) =>
 
 export function fusingSheetFilename(style: string, bomCode: string): string {
   return `${slug(style, 'style')}-fusing-${slug(bomCode, 'interlining')}.dxf`;
+}
+
+function markGeneratedFusing(dxfText: string): string {
+  const eol = dxfText.includes('\r\n') ? '\r\n' : '\n';
+  return `999${eol}${GENERATED_FUSING_DXF_MARKER}${eol}${dxfText}`;
 }
 
 function bbox(points: readonly PtMm[]) {
@@ -609,7 +615,7 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
     sheets.push({
       bomLineKey: line.bomLineKey,
       filename: fusingSheetFilename(input.style, line.code),
-      dxfText: written.detail.bareText,
+      dxfText: markGeneratedFusing(written.detail.bareText),
       blocks: written.detail.plan.blocks.map((block) => block.name),
       aliases: [...aliasNames(written.detail.manifest)].map(([identity, blockName]) => ({
         identity,

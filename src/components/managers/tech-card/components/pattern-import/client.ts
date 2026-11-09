@@ -26,7 +26,7 @@ export type StageProgress = { done: number; total: number; note?: string };
 export interface ImportClient {
   /** 'stub' renders fixture data and writes nothing; the shell says so on screen. */
   readonly kind: 'stub' | 'worker';
-  open(files: { name: string; bytes: ArrayBuffer }[]): Promise<{
+  open(files: { name: string; bytes: ArrayBuffer; generatedFusing?: boolean }[]): Promise<{
     sessionId: number;
     files: SourceFileInfo[];
   }>;
@@ -74,7 +74,14 @@ export type CardContext = {
     lineKey?: string;
     name?: string;
     manifest?: ConversionManifest | null;
+    /** System-owned generated-sheet row, not inferred from its filename. */
+    generatedFusing?: boolean;
   }[];
+  /**
+   * Session provenance for legacy generated sheets that predate the DXF marker. The system fills
+   * this from its generated-row flag; entries are not pattern occupants and cannot bind a draft.
+   */
+  generatedFusingSources?: string[];
   /**
    * Each card piece's current outline per scope and size (the card's parse). Re-import binds a
    * block the importer renamed to the piece of the same outline (`buildDraft`).

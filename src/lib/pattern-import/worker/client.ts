@@ -199,7 +199,7 @@ export class ImportWorkerClient {
   }
 
   async open(
-    files: { name: string; bytes: ArrayBuffer }[],
+    files: { name: string; bytes: ArrayBuffer; generatedFusing?: boolean }[],
   ): Promise<{ sessionId: number; files: SourceFileInfo[] }> {
     const id = this.nextId++;
     const total = files.reduce((a, f) => a + f.bytes.byteLength, 0);

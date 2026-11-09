@@ -8,7 +8,13 @@
 //                                      the contract, so the wizard skips assemble/chains/pieces.
 export { extractDxf, readDxf } from './extract';
 export { isOurDxf } from './tags';
-export { segmentDxf, layerKind, bareSize } from './segment';
-export { dxfFastPath, dxfScaleCandidates, settleSeamPair, type DxfFastPath } from './stages';
+export { segmentDxf, layerKind, bareSize, chooseDxfSizeLabel } from './segment';
+export {
+  dxfFastPath,
+  dxfPresegmentedIdentities,
+  dxfScaleCandidates,
+  settleSeamPair,
+  type DxfFastPath,
+} from './stages';
 export { DxfImportError, isDxfImportError, type DxfImportErrorKind } from './errors';
 export type * from './dxf-types';

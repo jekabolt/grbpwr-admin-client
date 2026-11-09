@@ -11,7 +11,13 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as blockCode from 'components/managers/tech-card/components/nesting/block-code';
 import { decide } from 'components/managers/tech-card/components/pattern-import/autopilot/policy';
-import { readDxf, segmentDxf, dxfFastPath } from 'lib/pattern-import/adapters/dxf';
+import {
+  chooseDxfSizeLabel,
+  dxfPresegmentedIdentities,
+  readDxf,
+  segmentDxf,
+  dxfFastPath,
+} from 'lib/pattern-import/adapters/dxf';
 import type { DxfPieceCandidate } from 'lib/pattern-import/adapters/dxf';
 import { extractPdf, DEFAULT_EXTRACT_OPTS, setPdfjsLoader } from 'lib/pattern-import/adapters/pdf';
 import {
@@ -499,6 +505,37 @@ export async function main(): Promise<number> {
         li.report.ok,
       'W2 L-shape ±10: reflex corner mitred inward, convex corners outward (11900 / 3900 mm², 6 vertices)',
       `${areaOf(lo.pts).toFixed(2)} (${lo.pts.length}) / ${areaOf(li.pts).toFixed(2)} (${li.pts.length})`,
+    );
+    const narrowBay = [
+      { x: 0, y: 0 },
+      { x: 200, y: 0 },
+      { x: 200, y: 100 },
+      { x: 180, y: 100 },
+      { x: 180, y: 50 },
+      { x: 120, y: 50 },
+      { x: 120, y: 100 },
+      { x: 60, y: 100 },
+      { x: 60, y: 20 },
+      { x: 40, y: 20 },
+      { x: 40, y: 100 },
+      { x: 0, y: 100 },
+    ];
+    const closedBay = offsetContour(narrowBay, 15);
+    ck(
+      closedBay.report.ok && closedBay.report.loops === 1,
+      'outward allowance may close one narrow bay without inventing an inner cut',
+      `${closedBay.report.reason ?? 'ok'}; loops ${closedBay.report.loops}`,
+    );
+    ck(
+      chooseDxfSizeLabel([
+        { value: 'S', layer: '15' },
+        { value: 'L', layer: '1' },
+      ]) === 'L' &&
+        chooseDxfSizeLabel([
+          { value: 'S', layer: '1' },
+          { value: 'M', layer: '15', tagged: true },
+        ]) === 'M',
+      'DXF piece size outranks garment annotation; ATTRIB remains authoritative',
     );
     // W2: a 20° tip — the mitre would reach 10 / sin 10° = 57.6 mm: square-cut at 2 × 10 mm
     // (MITER_LIMIT, SILENT-TAIL: real CAD never reaches further), perpendicular to the bisector
@@ -3126,6 +3163,98 @@ export async function main(): Promise<number> {
     );
   }
 
+  // ── D8 ─────────────────────────────────────────────────────────────────────────────────
+  head('D8 area reversals: tolerance, broken grade, exact fusing geometry');
+  {
+    const buildBand = (
+      widths: readonly [number, number, number],
+      source?: { name: string; generatedFusing?: boolean },
+    ) => {
+      const F = fx();
+      addFamily(
+        F,
+        1,
+        (k) => {
+          const width = widths[SCALE3.indexOf(k)];
+          return [
+            { x: 0, y: 0 },
+            { x: width, y: 0 },
+            { x: width, y: 40 },
+            { x: 0, y: 40 },
+          ];
+        },
+        0,
+      );
+      if (source) {
+        for (const candidate of F.families[0].candidates) {
+          (
+            candidate as PieceCandidate & {
+              dxf: { identity: string; sizeSource: 'label'; generatedFusing?: boolean };
+            }
+          ).dxf = {
+            identity: 'SLV',
+            sizeSource: 'label',
+            ...(source.generatedFusing ? { generatedFusing: true } : {}),
+          };
+        }
+      }
+      const inp = input(F, source ? { ...CUT10, allowanceMm: 0 } : CUT10, {
+        pieceOverrides: { 1: { code: 'SLV' } },
+        operatorGrain: { 1: { a: { x: 20, y: 5 }, b: { x: 20, y: 35 } } },
+      });
+      return { inp, built: buildPieceSpecsDetailed(inp) };
+    };
+
+    const mild = buildBand([100, 99.8, 99.6]);
+    ck(
+      mild.built.output.pieces.length === 1 &&
+        mild.built.output.blocked.length === 0 &&
+        mild.built.output.warnings.some((warning) => /does not strictly grow/.test(warning)),
+      'sub-1% area reversals warn without hiding the family',
+      mild.built.output.warnings.join('; '),
+    );
+
+    const broken = buildBand([100, 70, 110]);
+    ck(
+      broken.built.output.blocked.some((row) => row.reason === 'non-monotone'),
+      'a materially broken three-size grade still blocks',
+      broken.built.output.blocked.map((row) => row.reason).join(', '),
+    );
+
+    const sourceName = 'probe-fusing-interlining.dxf';
+    const owner = buildBand([100, 70, 110], { name: sourceName });
+    ck(
+      owner.built.output.blocked.some((row) => row.reason === 'non-monotone'),
+      'an owner DXF named fusing still blocks a materially broken grade',
+      owner.built.output.blocked.map((row) => row.reason).join(', '),
+    );
+
+    const fusing = buildBand([100, 70, 110], { name: sourceName, generatedFusing: true });
+    const fusingSource: ManifestSource = {
+      ...SOURCE,
+      files: [{ ...SOURCE.files[0], name: sourceName, kind: 'dxf' }],
+      sizeEncoding: 'dxf-block',
+      generatedFusing: true,
+      presegmentedIdentities: ['SLV'],
+    };
+    const fusingGate = await gate(
+      fusing.built.output.pieces,
+      fusing.inp.sizeMap,
+      fusing.built.wallsOf,
+      fusingSource,
+    );
+    ck(
+      fusing.built.output.blocked.length === 0 &&
+        fusing.built.output.pieces[0]?.sizes.every(
+          (size) => size.seam != null && Math.abs(areaOf(size.cut) - areaOf(size.seam)) < 0.01,
+        ) &&
+        fusingGate.report.passed &&
+        checkOf(fusingGate.report, 'G8-monotone')?.severity === 'warn',
+      'generated fusing zones preserve zero allowance and warn on source area order',
+      gateLine(fusingGate.report),
+    );
+  }
+
   // ── E ─────────────────────────────────────────────────────────────────────────────────
   head('E  CLO DXF corpus: fast path → semantics → writeAndGate G1–G13');
   const eRows: unknown[] = [];
@@ -3152,6 +3281,18 @@ export async function main(): Promise<number> {
         continue;
       }
       const fp = dxfFastPath(read, seg);
+      // The corpus exercise is a re-import: these are the exact identities the card already holds.
+      // A fresh block-name-only identity is covered by the G11 negative probe in f6-entry.
+      const cardIdentities = [
+        ...new Set([
+          ...fp.families.flatMap((family) =>
+            family.candidates.map((candidate) => (candidate as DxfPieceCandidate).dxf.identity),
+          ),
+          // This legacy card already stores PCK_L. Its source blocks are numbered, so the card
+          // identity (not the fresh DXF block name) is the evidence under test.
+          ...(f === 'blazer.dxf' ? ['PCK_L'] : []),
+        ]),
+      ];
       const sizeMap = proposeSizeMap(fp.run, CARD5);
       const fileAllowance = fp.allowance ?? detectAllowance(fp.sheet, fp.families, fp.chains);
       const inp: SemanticsInput = {
@@ -3160,6 +3301,7 @@ export async function main(): Promise<number> {
         run: fp.run,
         sizeMap,
         families: fp.families,
+        presegmentedIdentities: cardIdentities,
         fileAllowance,
         pieceOverrides: {},
         operatorGrain: {},
@@ -3171,6 +3313,9 @@ export async function main(): Promise<number> {
         ...SOURCE,
         files: [{ name: f, sha256: '0'.repeat(64), bytes: 0, kind: 'dxf', pages: 1 }],
         sizeEncoding: fp.run.encoding,
+        presegmentedIdentities: [
+          ...new Set([...dxfPresegmentedIdentities(fp.families), ...cardIdentities]),
+        ],
       };
       let report: GateReport | null = null;
       let blocks: string[] = [];

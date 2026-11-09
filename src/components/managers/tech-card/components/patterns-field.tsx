@@ -4702,6 +4702,7 @@ export function PatternsField({
               lineKey: p.lineKey,
               name: p.name,
               manifest: (p.url && bundle?.manifestByUrl?.get(p.url)) || null,
+              generatedFusing: isGeneratedFusingRow(p),
             })),
             shapes: importShapes,
             shapesPending: importShapesPending,

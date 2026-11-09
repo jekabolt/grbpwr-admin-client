@@ -396,17 +396,25 @@ async function cardSide(snap: Snapshot, card: Card): Promise<CardSide> {
       lineKey: p.lineKey,
       name: p.name,
       manifest: (p.url && manifestByUrl.get(p.url)) || null,
+      generatedFusing: isGeneratedFusingRow(p),
     })),
     shapes,
     shapesPending: false,
   } as never);
-  const empty = buildCardContext({
-    ...args,
-    pieces: [],
-    aliases: [],
-    patterns: [],
-    shapes: [],
-  } as never);
+  const empty = {
+    ...buildCardContext({
+      ...args,
+      pieces: [],
+      aliases: [],
+      patterns: [],
+      shapes: [],
+    } as never),
+    // Variant C removes every card occupant, link and outline. Keep only the backend's system-row
+    // flag so legacy generated sheets (before the DXF marker) retain controlled provenance.
+    generatedFusingSources: liveRows
+      .filter(isGeneratedFusingRow)
+      .flatMap((row) => (row.filename?.trim() ? [row.filename.trim()] : [])),
+  };
   return {
     ctx,
     empty,

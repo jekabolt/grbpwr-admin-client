@@ -214,18 +214,19 @@ const centre = (pts: readonly PtMm[]): PtMm => {
 export function g5Shape(ctx: GateCtx): GateCheck[] {
   const f = shapeFamilies(ctx);
   const out: GateCheck[] = [];
-  if (f.failed.length)
+  if (f.failed.length) {
+    const exactFusing = ctx.m.source.generatedFusing === true;
     out.push({
       id: 'G5-features',
       ok: false,
-      severity: 'block',
+      severity: exactFusing ? 'warn' : 'block',
       value: null,
       threshold: 'one cut-line shape in every size (fix the shape or leave the size out)',
       blocks: [...new Set(f.failed)].sort(),
       note: f.notes.join('; '),
-      shapeIssues: f.issues,
-      door: 'check',
+      ...(!exactFusing ? { shapeIssues: f.issues, door: 'check' as const } : {}),
     });
+  }
   return [...out, ...countsCheck(f)];
 }
 

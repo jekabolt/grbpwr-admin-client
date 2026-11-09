@@ -418,6 +418,18 @@ type BlockWork = {
   raw: RawNotch[];
 };
 
+/** Prefer an ATTRIB, then a piece-layer label, over a garment annotation such as `size: S`. */
+export function chooseDxfSizeLabel(
+  labels: readonly { value: string; layer: string | null; tagged?: boolean }[],
+): string | null {
+  let best: { value: string; priority: number } | null = null;
+  for (const label of labels) {
+    const priority = label.tagged ? 2 : layerKind(label.layer) === 'annotation' ? 0 : 1;
+    if (!best || priority > best.priority) best = { value: label.value, priority };
+  }
+  return best?.value ?? null;
+}
+
 function readLabels(
   texts: IRText[],
   attribTag: Record<number, string>,
@@ -434,15 +446,16 @@ function readLabels(
     texts: [],
   };
   let pointNumbers = 0;
+  const sizeLabels: { value: string; layer: string | null; tagged: boolean }[] = [];
   const annotations: number[] = [];
   // one entry per LINE of text: MTEXT carries several labels; an ATTRIB's tag is its key
-  const lines: { t: IRText; text: string }[] = [];
+  const lines: { t: IRText; text: string; tagged: boolean }[] = [];
   for (const t of texts) {
     const tag = attribTag[t.id];
-    if (tag) lines.push({ t, text: `${tag}: ${t.text}` });
-    else for (const ln of t.text.split('\n')) lines.push({ t, text: ln });
+    if (tag) lines.push({ t, text: `${tag}: ${t.text}`, tagged: true });
+    else for (const ln of t.text.split('\n')) lines.push({ t, text: ln, tagged: false });
   }
-  for (const { t, text } of lines) {
+  for (const { t, text, tagged } of lines) {
     if (isPointNumber(text)) {
       pointNumbers++;
       continue;
@@ -461,9 +474,10 @@ function readLabels(
       case 'pieceName':
         labels.pieceName ??= l.value;
         break;
-      case 'size':
-        labels.size ??= l.value;
+      case 'size': {
+        sizeLabels.push({ value: l.value, layer: t.layer, tagged });
         break;
+      }
       case 'quantity': {
         const q = parseInt(l.value, 10);
         labels.quantity ??= Number.isFinite(q) ? q : null;
@@ -485,6 +499,7 @@ function readLabels(
         labels.other.push(l);
     }
   }
+  labels.size = chooseDxfSizeLabel(sizeLabels);
   return { labels, pointNumbers, annotations };
 }
 

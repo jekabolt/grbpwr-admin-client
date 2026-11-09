@@ -10,6 +10,7 @@ import type {
 import type { PieceDTO, PieceManifestFacts } from 'lib/nesting/types';
 import { parseSheets } from 'lib/nesting/worker/parse-files';
 import { readRawDxf } from 'lib/pattern-import/gate/reader';
+import { readDxf } from 'lib/pattern-import/adapters/dxf';
 import { pointOnRings } from 'lib/pattern-import/semantics/grain-inside';
 import { buildFusingSheets } from './dxf';
 import { sourcePieces } from './regenerate';
@@ -121,6 +122,12 @@ describe('fusing regeneration contours', () => {
     expect(built.sheets).toHaveLength(1);
     expect(built.sheets[0].blocks).toHaveLength(expectedContours);
     expect(new Set(built.sheets[0].blocks)).toHaveLength(expectedContours);
+    const markedBytes = new TextEncoder().encode(built.sheets[0].dxfText).buffer as ArrayBuffer;
+    const marked = await readDxf(
+      { id: 'generated', name: 'neutral-name.dxf', bytes: markedBytes },
+      { sagittaMm: 0.05, keepFills: true },
+    );
+    expect(marked.meta.generatedFusing).toBe(true);
     const raw = readRawDxf(built.sheets[0].dxfText);
     let grains = 0;
     for (const entities of raw.blocks.values()) {

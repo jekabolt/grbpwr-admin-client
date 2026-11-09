@@ -478,6 +478,16 @@ function validateSource(x: unknown): ManifestSource {
             : [],
         )
     : [];
+  const presegmentedIdentities = Array.isArray(x.presegmentedIdentities)
+    ? [
+        ...new Set(
+          x.presegmentedIdentities
+            .filter((identity): identity is string => isBoundedStr(identity, 128))
+            .map((identity) => identity.trim())
+            .filter(Boolean),
+        ),
+      ].slice(0, 128)
+    : [];
   return {
     files,
     scale: {
@@ -496,6 +506,8 @@ function validateSource(x: unknown): ManifestSource {
     ...(holes.length ? { holes } : {}),
     sizeEncoding: x.sizeEncoding as ManifestSource['sizeEncoding'],
     variant: x.variant,
+    ...(x.generatedFusing === true ? { generatedFusing: true as const } : {}),
+    ...(presegmentedIdentities.length ? { presegmentedIdentities } : {}),
     ...(models.length ? { models } : {}),
   };
 }

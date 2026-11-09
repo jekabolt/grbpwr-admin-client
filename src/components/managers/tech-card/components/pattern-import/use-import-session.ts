@@ -398,6 +398,7 @@ export function cardFingerprint(c: CardContext): string {
     c.existingPieces.map((x) => [x.lineKey, x.name, x.cutSymmetry, x.piecesPerGarment ?? null]),
     (c.existingAliases ?? []).map((x) => [x.scopeKey, x.blockName, x.pieceLineKey]),
     (c.existingPatterns ?? []).map((x) => [x.scopeKey, x.url, x.lineKey ?? null]),
+    c.generatedFusingSources ?? [],
     cardIdentity(c),
   ]);
 }
@@ -822,6 +823,20 @@ export function useImportSession(deps: {
     return chosen.map((p) => p.manifest.sizes);
   }
 
+  /** Legacy generated sheets have no DXF marker; the system-owned card row supplies provenance. */
+  const generatedFusingFile = (name: string) => {
+    const sourceMatch = (rc().generatedFusingSources ?? []).some(
+      (source) => source.trim().toLowerCase() === name.trim().toLowerCase(),
+    );
+    if (sourceMatch) return true;
+    const matches = (rc().existingPatterns ?? []).filter(
+      (pattern) =>
+        (!deps.pinScopeKey || pattern.scopeKey === deps.pinScopeKey) &&
+        pattern.filename.trim().toLowerCase() === name.trim().toLowerCase(),
+    );
+    return matches.length === 1 && matches[0].generatedFusing === true;
+  };
+
   /**
    * STOPFIX: the run back in a fresh worker session — the files read again, every stage of the
    * history played again quietly with its recorded input, each output checked against the one
@@ -839,7 +854,11 @@ export function useImportSession(deps: {
     try {
       if (!files.length) throw new Error('the files are no longer at hand');
       const bytes = await Promise.all(
-        files.map(async (f) => ({ name: f.name, bytes: await f.arrayBuffer() })),
+        files.map(async (f) => ({
+          name: f.name,
+          bytes: await f.arrayBuffer(),
+          ...(generatedFusingFile(f.name) ? { generatedFusing: true } : {}),
+        })),
       );
       const opened = await client.open(bytes);
       fresh = opened.sessionId;
@@ -980,6 +999,36 @@ export function useImportSession(deps: {
       },
       s.pieces?.families,
     );
+
+  /** Card-owned evidence that an apparent size suffix is actually part of an existing identity. */
+  const cardPresegmentedIdentities = (): string[] => {
+    const card = rc();
+    const inScope = (scopeKey: string) => !deps.pinScopeKey || scopeKey === deps.pinScopeKey;
+    const identities = new Set<string>();
+    for (const shape of card.existingShapes ?? [])
+      if (inScope(shape.scopeKey) && shape.identity.trim()) identities.add(shape.identity.trim());
+    for (const pattern of card.existingPatterns ?? []) {
+      if (!inScope(pattern.scopeKey)) continue;
+      for (const piece of pattern.manifest?.pieces ?? [])
+        if (piece.identity.trim()) identities.add(piece.identity.trim());
+    }
+    const sizeTokens = [
+      ...new Set(
+        card.sizes
+          .flatMap((size) => [size.token, ...(size.spellings ?? [])])
+          .map((token) => token.trim().toUpperCase())
+          .filter(Boolean),
+      ),
+    ].sort((a, b) => b.length - a.length);
+    for (const alias of card.existingAliases ?? []) {
+      if (!inScope(alias.scopeKey)) continue;
+      const block = alias.blockName.trim();
+      const upper = block.toUpperCase();
+      const size = sizeTokens.find((token) => upper.endsWith(`_${token}`));
+      if (size) identities.add(block.slice(0, -(size.length + 1)));
+    }
+    return [...identities].sort((a, b) => a.localeCompare(b));
+  };
   /** S3: after the pieces changed, drop the answers whose question moved and re-stamp the rest. */
   const settleToPieces = () => {
     const now = answersNow();
@@ -1000,6 +1049,7 @@ export function useImportSession(deps: {
       evidence: [],
     },
     pieceOverrides: i.overrides,
+    presegmentedIdentities: cardPresegmentedIdentities(),
     operatorGrain: i.operatorGrain,
     aiQuantity: aiQuantityOf(sRef.current.names, i.editedNames),
     operatorFold: i.operatorFold,
@@ -1038,7 +1088,11 @@ export function useImportSession(deps: {
           checkFilesBeforeReading(ev.files);
           setSession({ ...EMPTY_SESSION, busy: { stage: 'extract', done: 0, total: 1 } });
           const bytes = await Promise.all(
-            ev.files.map(async (f) => ({ name: f.name, bytes: await f.arrayBuffer() })),
+            ev.files.map(async (f) => ({
+              name: f.name,
+              bytes: await f.arrayBuffer(),
+              ...(generatedFusingFile(f.name) ? { generatedFusing: true } : {}),
+            })),
           );
           const opened = await client.open(bytes);
           patch({ sessionId: opened.sessionId, files: opened.files });

@@ -53,6 +53,8 @@ export function buildCardContext(args: {
     name?: string;
     /** MF-C: the conversion manifest the card's parse read off this sheet (null = none / unread). */
     manifest?: ConversionManifest | null;
+    /** System-owned generated-sheet row, never inferred from its filename. */
+    generatedFusing?: boolean;
   }[];
   /** Each card piece's current outline per scope, sheet and size (`shapeRefsOf`). */
   shapes?: DraftShapeRef[];
@@ -116,9 +118,13 @@ export function buildCardContext(args: {
               lineKey: p.lineKey ?? '',
               name: p.name ?? '',
               manifest: p.manifest ?? null,
+              ...(p.generatedFusing ? { generatedFusing: true } : {}),
             },
           ]
         : [],
+    ),
+    generatedFusingSources: (args.patterns ?? []).flatMap((pattern) =>
+      pattern.generatedFusing && pattern.filename?.trim() ? [pattern.filename.trim()] : [],
     ),
     existingShapes: args.shapes ?? [],
     ...(args.shapesPending ? { shapesPending: true } : {}),

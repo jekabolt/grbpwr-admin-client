@@ -159,6 +159,9 @@ type DxfExtra = {
   dxf?: {
     identity?: string;
     outerIsSeam?: boolean;
+    sizeSource?: 'label' | 'block-name' | 'none';
+    identitySource?: 'label' | 'block-name';
+    generatedFusing?: boolean;
     features?: Feature[];
     instances?: number;
     /** The block's own QUANTITY label (AAMA/CLO), if it carries one. */
@@ -731,6 +734,9 @@ export function buildPieceSpecsDetailed(
   input: SemanticsInput,
   progress?: Progress,
 ): SemanticsDetail {
+  const cardIdentities = new Set(
+    (input.presegmentedIdentities ?? []).map((identity) => identity.trim().toUpperCase()),
+  );
   const { sheet, set, run, sizeMap, families, fileAllowance, pieceOverrides, operatorGrain } =
     input;
   const traced = !!input.traced;
@@ -1167,6 +1173,9 @@ export function buildPieceSpecsDetailed(
     /** MOOD Ф3.3: the facing fold per size, once every size of the family shows it */
     const facingOf = new Map<PieceCandidate, FoldChord[]>();
     const largest = p.cands[p.cands.length - 1].c;
+    const generatedFusingSource = p.cands.every(({ c }) => c.dxf?.generatedFusing === true);
+    const exactRulGrade = p.cands.every(({ c }) => c.dxf?.rulGraded);
+    const exactSourceGeometry = generatedFusingSource || exactRulGrade;
     const symmetric = isMirrorSymmetric(largest.outer);
 
     // allowance decision for this piece
@@ -1874,6 +1883,9 @@ export function buildPieceSpecsDetailed(
       } else {
         cut = outer;
         if (drawnSeam) seam = drawnSeam;
+        // The generated sheet's layer 1 is already its final zero-allowance cut. Keep the paired
+        // seam layer on that same contour instead of inventing a 10 mm inset that can split a zone.
+        else if (generatedFusingSource) seam = outer;
         else {
           const r = halfEdge
             ? offsetAcrossFold(cut, -allowMm, halfEdge)
@@ -2209,12 +2221,16 @@ export function buildPieceSpecsDetailed(
       }
       intendedHere = gs.intended;
     }
+    // Exact generated geometry is authoritative. A fusing zone is only part of its garment piece,
+    // so its area need not grow with the garment size; its individual topology still passed above.
     // operator grain given after a size already borrowed nothing: fine. Monotone growth (G8).
-    const exactRulGrade = p.cands.every(({ c }) => c.dxf?.rulGraded);
-    if (!p.ungraded && sizes.length > 1 && !exactRulGrade) {
+    if (!p.ungraded && sizes.length > 1 && !exactSourceGeometry) {
       const grows = sizes.every((s, i) => i === 0 || s.areaMm2 > sizes[i - 1].areaMm2);
       if (!grows) {
-        if (sizes.length > 2) {
+        const gross = sizes.some(
+          (s, i) => i > 0 && s.areaMm2 < sizes[i - 1].areaMm2 * (1 - PATIMPORT.areaGrowthTolerance),
+        );
+        if (sizes.length > 2 && gross) {
           block(
             seed,
             'non-monotone',
@@ -2222,7 +2238,7 @@ export function buildPieceSpecsDetailed(
           );
           continue;
         }
-        warnings.push(`${name.code}: area does not grow between its two sizes`);
+        warnings.push(`${name.code}: area does not strictly grow with size`);
       }
     }
     // ── pair / quantity
@@ -2430,9 +2446,20 @@ export function buildPieceSpecsDetailed(
         { hand: s.pairHand, of: s.pairOf },
         isSizeToken,
       );
-      // In a RUL package the size is an explicit label, so a source identity such as PLCK_L cannot
-      // be mistaken for identity PLCK in size L. The manifest keeps that split authoritative.
-      if (why && !(exactRulGrade && /reads as a size of the run/.test(why)))
+      // An explicit per-block size label separates identity from size, so PLCK_L cannot be
+      // mistaken for identity PLCK in size L. RUL carries the same exact split.
+      const presegmentedIdentity = p.cands.every(
+        ({ c }) => c.dxf?.sizeSource === 'label' || c.dxf?.identitySource === 'label',
+      );
+      if (
+        why &&
+        !(
+          (exactRulGrade ||
+            presegmentedIdentity ||
+            cardIdentities.has(s.identity.trim().toUpperCase())) &&
+          /reads as a size of the run/.test(why)
+        )
+      )
         gram = `${s.identity}: ${why}`;
     }
     if (gram) {
