@@ -34,7 +34,8 @@ test('generator emits the typed icon shape and maps front-rise', async () => {
   const catalog = await generateSizeChartIcons(dir, output);
   const moduleText = await readFile(output, 'utf8');
 
-  assert.deepEqual(Object.keys(catalog.sample), ['label', 'viewBox', 'inner', 'lines']);
+  assert.deepEqual(Object.keys(catalog.sample), ['family', 'label', 'viewBox', 'inner', 'lines']);
+  assert.equal(catalog.sample.family, 'tops');
   assert.equal(catalog.sample.viewBox, '0 0 100 200');
   assert.equal(catalog.sample.lines[0].name, 'rise');
   assert.equal(catalog.sample.lines[1].xEnd, 5);

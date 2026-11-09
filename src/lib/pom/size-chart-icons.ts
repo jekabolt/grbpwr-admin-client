@@ -12,7 +12,10 @@ export type SizeChartIconLine =
       xEnd?: number;
     };
 
+export type SizeChartIconFamily = 'tops' | 'outerwear' | 'bottoms' | 'footwear' | 'accessories';
+
 export type SizeChartIcon = {
+  family: SizeChartIconFamily;
   label: string;
   viewBox: string;
   inner: string;
@@ -21,6 +24,7 @@ export type SizeChartIcon = {
 
 export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
   shirt: {
+    family: 'tops',
     label: 'Long-sleeve shirt',
     viewBox: '160 0 212 541',
     inner:
@@ -59,6 +63,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   hoodie: {
+    family: 'tops',
     label: 'Pullover hoodie',
     viewBox: '160 0 212 541',
     inner:
@@ -104,6 +109,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   ls_tee: {
+    family: 'tops',
     label: 'Long-sleeve tee',
     viewBox: '160 0 212 541',
     inner:
@@ -142,6 +148,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   henley: {
+    family: 'tops',
     label: 'Henley',
     viewBox: '160 0 212 541',
     inner:
@@ -180,6 +187,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   cami: {
+    family: 'tops',
     label: 'Camisole',
     viewBox: '160 0 212 541',
     inner:
@@ -223,6 +231,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   crop_top: {
+    family: 'tops',
     label: 'Crop top',
     viewBox: '160 0 212 541',
     inner:
@@ -268,6 +277,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   polo: {
+    family: 'tops',
     label: 'Polo',
     viewBox: '160 0 212 541',
     inner:
@@ -306,6 +316,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   bodysuit: {
+    family: 'tops',
     label: 'Bodysuit',
     viewBox: '160 0 212 541',
     inner:
@@ -351,6 +362,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   blouse: {
+    family: 'tops',
     label: 'Blouse',
     viewBox: '160 0 212 541',
     inner:
@@ -396,6 +408,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   ss_shirt: {
+    family: 'tops',
     label: 'Short-sleeve shirt',
     viewBox: '160 0 212 541',
     inner:
@@ -434,6 +447,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   overshirt: {
+    family: 'tops',
     label: 'Overshirt',
     viewBox: '160 0 212 541',
     inner:
@@ -472,6 +486,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   cardigan: {
+    family: 'tops',
     label: 'Cardigan',
     viewBox: '160 0 212 541',
     inner:
@@ -517,6 +532,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   turtleneck: {
+    family: 'tops',
     label: 'Turtleneck',
     viewBox: '160 0 212 541',
     inner:
@@ -555,6 +571,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   zip_hoodie: {
+    family: 'tops',
     label: 'Zip hoodie',
     viewBox: '160 0 212 541',
     inner:
@@ -600,6 +617,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   half_zip: {
+    family: 'tops',
     label: 'Half-zip sweatshirt',
     viewBox: '160 0 212 541',
     inner:
@@ -638,6 +656,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   crop_hoodie: {
+    family: 'tops',
     label: 'Crop hoodie',
     viewBox: '160 0 212 541',
     inner:
@@ -683,6 +702,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   pyjamas: {
+    family: 'tops',
     label: 'Pyjama top',
     viewBox: '160 0 212 541',
     inner:
@@ -721,6 +741,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   lounge_set: {
+    family: 'tops',
     label: 'Lounge top',
     viewBox: '160 0 212 541',
     inner:
@@ -766,6 +787,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   biker: {
+    family: 'outerwear',
     label: 'leather biker jacket',
     viewBox: '110 -75 212 557',
     inner:
@@ -804,6 +826,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   puffer: {
+    family: 'outerwear',
     label: 'short puffer jacket',
     viewBox: '110 -75 212 557',
     inner:
@@ -842,6 +865,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   shell: {
+    family: 'outerwear',
     label: 'shell / windbreaker',
     viewBox: '110 -75 212 557',
     inner:
@@ -887,6 +911,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   track_jacket: {
+    family: 'outerwear',
     label: 'track jacket',
     viewBox: '110 -75 212 557',
     inner:
@@ -925,6 +950,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   shearling: {
+    family: 'outerwear',
     label: 'shearling jacket',
     viewBox: '110 -75 212 557',
     inner:
@@ -963,6 +989,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   fleece: {
+    family: 'outerwear',
     label: 'fleece jacket',
     viewBox: '110 -75 212 557',
     inner:
@@ -1001,6 +1028,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   varsity: {
+    family: 'outerwear',
     label: 'varsity jacket',
     viewBox: '110 -75 212 557',
     inner:
@@ -1039,6 +1067,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   puffer_coat: {
+    family: 'outerwear',
     label: 'long puffer coat',
     viewBox: '110 -142 212 710',
     inner:
@@ -1084,6 +1113,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   puffer_vest: {
+    family: 'outerwear',
     label: 'puffer vest',
     viewBox: '20 -50 212 541',
     inner:
@@ -1120,6 +1150,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   utility_vest: {
+    family: 'outerwear',
     label: 'utility / cargo vest',
     viewBox: '20 -50 212 541',
     inner:
@@ -1156,6 +1187,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   robe: {
+    family: 'outerwear',
     label: 'bath robe',
     viewBox: '110 -75 212 557',
     inner:
@@ -1201,6 +1233,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   swimsuit: {
+    family: 'outerwear',
     label: 'one-piece swimsuit',
     viewBox: '160 0 212 541',
     inner:
@@ -1237,6 +1270,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   swim_shorts: {
+    family: 'outerwear',
     label: 'swim shorts',
     viewBox: '160 5 212 557',
     inner:
@@ -1280,6 +1314,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   drop_crotch: {
+    family: 'bottoms',
     label: 'drop-crotch pants',
     viewBox: '0 -50 212 557',
     inner:
@@ -1330,6 +1365,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   joggers: {
+    family: 'bottoms',
     label: 'joggers',
     viewBox: '0 -50 212 557',
     inner:
@@ -1380,6 +1416,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   sweatpants: {
+    family: 'bottoms',
     label: 'sweatpants',
     viewBox: '0 -50 212 557',
     inner:
@@ -1430,6 +1467,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   track_pants: {
+    family: 'bottoms',
     label: 'track pants',
     viewBox: '0 -50 212 557',
     inner:
@@ -1480,6 +1518,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   leggings: {
+    family: 'bottoms',
     label: 'leggings',
     viewBox: '0 -50 212 557',
     inner:
@@ -1530,6 +1569,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   sport_shorts: {
+    family: 'bottoms',
     label: 'athletic shorts',
     viewBox: '160 5 212 557',
     inner:
@@ -1573,6 +1613,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   sweat_shorts: {
+    family: 'bottoms',
     label: 'sweat shorts',
     viewBox: '160 5 212 557',
     inner:
@@ -1616,6 +1657,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   skirt_mini: {
+    family: 'bottoms',
     label: 'mini skirt',
     viewBox: '160 15 212 386',
     inner:
@@ -1652,6 +1694,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   skirt_midi: {
+    family: 'bottoms',
     label: 'midi skirt',
     viewBox: '160 15 212 556.89',
     inner:
@@ -1688,6 +1731,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   skirt_maxi: {
+    family: 'bottoms',
     label: 'maxi skirt',
     viewBox: '160 15 212 756',
     inner:
@@ -1724,6 +1768,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   jumpsuit: {
+    family: 'bottoms',
     label: 'jumpsuit',
     viewBox: '164 40 212 800',
     inner:
@@ -1769,6 +1814,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   boiler_suit: {
+    family: 'bottoms',
     label: 'boiler suit',
     viewBox: '164 40 212 800',
     inner:
@@ -1814,6 +1860,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   overalls: {
+    family: 'bottoms',
     label: 'overalls / dungarees',
     viewBox: '0 -150 212 640',
     inner:
@@ -1857,6 +1904,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   dress_mini: {
+    family: 'bottoms',
     label: 'mini dress',
     viewBox: '160 0 212 424',
     inner:
@@ -1895,6 +1943,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   dress_midi: {
+    family: 'bottoms',
     label: 'midi dress',
     viewBox: '160 0 212 541',
     inner:
@@ -1933,6 +1982,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   dress_maxi: {
+    family: 'bottoms',
     label: 'maxi dress',
     viewBox: '160 0 212 724',
     inner:
@@ -1971,6 +2021,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   shoe: {
+    family: 'footwear',
     label: 'low-top sneaker',
     viewBox: '36 296 308 146',
     inner:
@@ -1993,6 +2044,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   high_top: {
+    family: 'footwear',
     label: 'high-top sneaker',
     viewBox: '36 208 308 234',
     inner:
@@ -2022,6 +2074,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   boot: {
+    family: 'footwear',
     label: 'ankle boot',
     viewBox: '36 241 308 201',
     inner:
@@ -2058,6 +2111,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   tall_boot: {
+    family: 'footwear',
     label: 'tall boot',
     viewBox: '36 51 308 391',
     inner:
@@ -2094,6 +2148,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   heel: {
+    family: 'footwear',
     label: 'heeled pump',
     viewBox: '36 269 308 173',
     inner:
@@ -2116,6 +2171,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   heel_sandal: {
+    family: 'footwear',
     label: 'heeled sandal',
     viewBox: '36 213 308 229',
     inner:
@@ -2138,6 +2194,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   sandal: {
+    family: 'footwear',
     label: 'flat sandal',
     viewBox: '36 303 308 139',
     inner:
@@ -2160,6 +2217,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   ballerina: {
+    family: 'footwear',
     label: 'ballerina flat',
     viewBox: '36 357 308 85',
     inner:
@@ -2182,6 +2240,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   derby: {
+    family: 'footwear',
     label: 'derby / oxford',
     viewBox: '36 302.47 308 139.53',
     inner:
@@ -2204,6 +2263,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   loafer: {
+    family: 'footwear',
     label: 'loafer',
     viewBox: '36 329 308 113',
     inner:
@@ -2226,6 +2286,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   monk: {
+    family: 'footwear',
     label: 'monk strap',
     viewBox: '36 315 308 127',
     inner:
@@ -2248,6 +2309,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   mule: {
+    family: 'footwear',
     label: 'mule / clog',
     viewBox: '36 340 308 102',
     inner:
@@ -2270,6 +2332,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   cap: {
+    family: 'footwear',
     label: 'baseball cap',
     viewBox: '-6 107.5 426 231.5',
     inner:
@@ -2299,6 +2362,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   bucket_hat: {
+    family: 'footwear',
     label: 'bucket hat',
     viewBox: '45 115 450 271',
     inner:
@@ -2328,6 +2392,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   hat: {
+    family: 'footwear',
     label: 'brimmed hat',
     viewBox: '0 115 540 211',
     inner:
@@ -2357,6 +2422,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   beanie: {
+    family: 'footwear',
     label: 'beanie',
     viewBox: '114 115 312 259',
     inner:
@@ -2379,6 +2445,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   wallet: {
+    family: 'accessories',
     label: 'bifold wallet',
     viewBox: '-145 -25 290 205',
     inner:
@@ -2401,6 +2468,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   cardholder: {
+    family: 'accessories',
     label: 'card holder',
     viewBox: '-145 -25 290 180',
     inner:
@@ -2423,6 +2491,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   pouch: {
+    family: 'accessories',
     label: 'zip pouch',
     viewBox: '-145 -20 290 210',
     inner:
@@ -2445,6 +2514,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   bag: {
+    family: 'accessories',
     label: 'tote bag',
     viewBox: '-150 -90 300 310',
     inner:
@@ -2474,6 +2544,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   handbag: {
+    family: 'accessories',
     label: 'top-handle bag',
     viewBox: '-150 -90 300 310',
     inner:
@@ -2503,6 +2574,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   shoulder_bag: {
+    family: 'accessories',
     label: 'shoulder bag',
     viewBox: '-150 -190 300 410',
     inner:
@@ -2532,6 +2604,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   crossbody: {
+    family: 'accessories',
     label: 'crossbody bag',
     viewBox: '-150 -190 300 410',
     inner:
@@ -2561,6 +2634,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   belt_bag: {
+    family: 'accessories',
     label: 'belt bag',
     viewBox: '-150 -190 300 410',
     inner:
@@ -2590,6 +2664,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   clutch: {
+    family: 'accessories',
     label: 'envelope clutch',
     viewBox: '-150 10 300 210',
     inner:
@@ -2619,6 +2694,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   duffle_bag: {
+    family: 'accessories',
     label: 'duffle bag',
     viewBox: '-150 -190 300 410',
     inner:
@@ -2655,6 +2731,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   backpack: {
+    family: 'accessories',
     label: 'backpack',
     viewBox: '-150 -90 300 310',
     inner:
@@ -2684,6 +2761,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   sock: {
+    family: 'accessories',
     label: 'crew sock',
     viewBox: '-60 -20 250 300',
     inner:
@@ -2713,6 +2791,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   ankle_sock: {
+    family: 'accessories',
     label: 'ankle sock',
     viewBox: '-60 65 250 215',
     inner:
@@ -2742,6 +2821,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   knee_sock: {
+    family: 'accessories',
     label: 'knee-high sock',
     viewBox: '-60 -110 250 390',
     inner:
@@ -2771,6 +2851,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   scarf: {
+    family: 'accessories',
     label: 'fringed scarf',
     viewBox: '-100 -225 200 450',
     inner:
@@ -2793,6 +2874,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   bandana: {
+    family: 'accessories',
     label: 'folded bandana',
     viewBox: '-150 -150 300 300',
     inner:
@@ -2815,6 +2897,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   tie: {
+    family: 'accessories',
     label: 'necktie',
     viewBox: '-90 -180 180 370',
     inner:
@@ -2837,6 +2920,7 @@ export const SIZE_CHART_ICONS: Record<string, SizeChartIcon> = {
     ],
   },
   mitten: {
+    family: 'accessories',
     label: 'mitten',
     viewBox: '-60 -30 290 410',
     inner:

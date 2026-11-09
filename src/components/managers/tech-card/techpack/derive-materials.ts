@@ -1,4 +1,9 @@
 import type { common_TechCard } from 'api/proto-http/admin';
+import {
+  isAttachStep,
+  qtyStepFromOperation,
+  stepQtyOfLine,
+} from 'components/managers/tech-card/components/button-qty';
 import { wireInt } from 'components/managers/tech-card/components/wire-int';
 import {
   bomLinesOfStep,
@@ -15,7 +20,6 @@ import {
   materialColour,
   materialForPiece,
   materialRole,
-  repeatsQty,
   rollGoods,
   technicalMedia,
 } from './derive-shared';
@@ -182,6 +186,7 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink, t: Pd
       };
     });
 
+  const hasSpareKitBag = refs.some((ref) => ref.item.kind === 'TECH_CARD_BOM_KIND_SPARE_KIT_BAG');
   const hardware = refs
     .filter((ref) => TRIM_SECTIONS.has(ref.item.section ?? ''))
     .map((ref) => {
@@ -191,18 +196,16 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink, t: Pd
       // one row per place: ops that put this line on the same pin and zone share it
       const spots: Spot[] = [];
       for (const operation of linkedOperations) {
+        const lineKey = clean(ref.item.lineKey);
+        const quantity =
+          stepQtyOfLine(qtyStepFromOperation(operation), lineKey) ??
+          stripQtyInStep(operation, cutStrips, lineKey);
+        if (quantity == null) continue;
         const callout = callouts.find((item) => item.number === operation.calloutNumber);
         const pin = operation.calloutNumber == null ? '' : String(operation.calloutNumber);
         const where = operation.zone
           ? t('common.generated', { text: enumLabel(operation.zone) })
           : own(clean(callout?.part));
-        const quantity =
-          decimal(
-            operation.bomQuantities?.find((item) => clean(item.lineKey) === clean(ref.item.lineKey))
-              ?.qtyPerGarment,
-          ) ??
-          stripQtyInStep(operation, cutStrips, clean(ref.item.lineKey)) ??
-          repeatsQty(operation);
         const same = spots.find((spot) => spot.pin === pin && spot.where === where);
         if (same) {
           if (operation.operationNumber != null)
@@ -227,8 +230,6 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink, t: Pd
         });
       }
       const lineQty = decimal(ref.item.qtyPerGarment);
-      // a line placed in one spot puts all of its quantity there
-      if (spots.length === 1 && spots[0].qty == null) spots[0].qty = lineQty;
       for (const spot of spots) {
         const opRef = spot.operationNumbers[0] ? [`op:${spot.operationNumbers[0]}`] : [];
         spot.gaps = {
@@ -248,12 +249,43 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink, t: Pd
         };
       }
       const spotQty = spots.reduce((sum, spot) => sum + (spot.qty ?? 0), 0);
-      const qty = lineQty ?? (spotQty || null);
+      const qty = spots.length ? spotQty : lineQty;
+      const spareQty = decimal(ref.item.spareQty);
+      const spareBagGap =
+        spareQty != null && spareQty > 0 && !hasSpareKitBag
+          ? add('pdf_spare_bag_missing', t('gaps.spareBag'), 'spare kit bag', undefined, [
+              `bom:${ref.key}`,
+            ])
+          : undefined;
+      const attachFacts = linkedOperations
+        .filter((operation) => isAttachStep(qtyStepFromOperation(operation)))
+        .map((operation) => ({
+          holes: operation.fastening?.buttonHoles ?? 0,
+          pattern: clean(operation.fastening?.attachPattern),
+        }));
+      const firstAttach = attachFacts[0];
+      const fasteningDetail =
+        firstAttach &&
+        firstAttach.holes > 0 &&
+        firstAttach.pattern &&
+        !firstAttach.pattern.endsWith('_UNKNOWN') &&
+        attachFacts.every(
+          (fact) => fact.holes === firstAttach.holes && fact.pattern === firstAttach.pattern,
+        )
+          ? `${t('materials.buttonHoles', { count: firstAttach.holes })} · ${t('common.generated', {
+              text: enumLabel(firstAttach.pattern, 'TECH_CARD_BUTTON_ATTACH_PATTERN_'),
+            })}`
+          : '';
       const empty = spots.length === 0;
       return {
         key: ref.key,
         name: clean(ref.item.name),
-        detail: formatCompositionCell(ref.item.composition) || clean(ref.item.spec),
+        detail: [
+          formatCompositionCell(ref.item.composition) || clean(ref.item.spec),
+          fasteningDetail,
+        ]
+          .filter(Boolean)
+          .join(' · '),
         kind: bomKindText(
           ref.item.kind,
           t('common.generated', {
@@ -263,6 +295,10 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink, t: Pd
         ),
         spots,
         qty,
+        spareQty: spareQty != null && spareQty > 0 ? spareQty : null,
+        toBuy: spareQty != null && spareQty > 0 && qty != null ? qty + spareQty : null,
+        spareSource: hasSpareKitBag ? t('materials.spareKitBag') : '',
+        spareBagGap,
         emptyGaps: empty
           ? {
               pin: add('pdf_trim_pin_missing', t('gaps.pin'), 'pin', ref.key),

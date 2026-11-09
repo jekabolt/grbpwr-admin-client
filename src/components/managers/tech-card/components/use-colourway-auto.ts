@@ -5,9 +5,7 @@ import type {
   common_TechCardMarkerSummary,
   common_TechCardSlotAreaEstimate,
 } from 'api/proto-http/admin';
-import {
-  materialCompositionCode,
-} from 'components/managers/materials/components/material-code';
+import { materialCompositionCode } from 'components/managers/materials/components/material-code';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import {
   blankDraft,
@@ -95,6 +93,9 @@ export type BomLine = {
   materialId?: number;
   // the linked catalog material (resolved from ListMaterials by materialId).
   material?: common_Material;
+  // Counted slot norm (0333) as the form holds it — read-only here.
+  qtyPerGarment?: string;
+  spareQty?: string;
 };
 
 export type RecipePiece = PieceRef & { id: number };
@@ -362,7 +363,9 @@ function canonicalHex(s?: string): string {
 
 // Название цвета целиком: регистр и пробелы. Общее слово («dark», «blue») совпадением НЕ считается.
 function canonicalLabel(s?: string): string {
-  return lc(s).replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  return lc(s)
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
 }
 
 /** Ключи цвета по каналам. Совпадение — равенство внутри ОДНОГО канала, никогда не общее слово. */
@@ -407,7 +410,9 @@ function intersects(a: Set<string>, b: Set<string>): boolean {
 }
 
 export function coloursMatch(a: ColourKeys, b: ColourKeys): boolean {
-  return intersects(a.pantone, b.pantone) || intersects(a.hex, b.hex) || intersects(a.label, b.label);
+  return (
+    intersects(a.pantone, b.pantone) || intersects(a.hex, b.hex) || intersects(a.label, b.label)
+  );
 }
 
 const emptyKeys = (k: ColourKeys) => k.pantone.size + k.hex.size + k.label.size === 0;

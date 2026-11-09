@@ -248,6 +248,100 @@ describe('re-import onto card 6 (golden G1)', () => {
   });
 });
 
+describe('a link across hands', () => {
+  const yoke = (pieces: { lineKey: string; name: string; piecesPerGarment: number }[]) =>
+    buildDraft(
+      { scopes: [mainScope('main1107')] },
+      {
+        techCardId: 1,
+        existingPieces: pieces,
+        existingAliases: [
+          { scopeKey: MAIN, blockName: 'YK_L', pieceLineKey: 'k:YOKE_R' },
+          { scopeKey: MAIN, blockName: 'YK_R', pieceLineKey: 'k:YOKE_R' },
+        ],
+        styleLabel: 'SS26-006',
+      },
+      { mintKey },
+    );
+
+  it('an R in a pair piece name is no hand: both hands keep their link to it', () => {
+    const d = yoke([{ lineKey: 'k:YOKE_R', name: 'YOKE R', piecesPerGarment: 2 }]);
+    expect(links(d, MAIN).YK_L).toBe('YOKE R');
+    expect(links(d, MAIN).YK_R).toBe('YOKE R');
+    expect(d.pieces.find((p) => p.name === 'YOKE R')?.piecesPerGarment).toBe(2);
+    expect(d.pieces.some((p) => p.name === 'YK')).toBe(false);
+  });
+
+  it('is dropped once the card holds the piece of the block’s own hand', () => {
+    const d = yoke([
+      { lineKey: 'k:YOKE_L', name: 'YOKE L', piecesPerGarment: 1 },
+      { lineKey: 'k:YOKE_R', name: 'YOKE R', piecesPerGarment: 1 },
+    ]);
+    expect(links(d, MAIN).YK_L).not.toBe('YOKE R');
+    expect(links(d, MAIN).YK_R).toBe('YOKE R');
+  });
+});
+
+describe('a scope with two sheets: the re-import replaces one', () => {
+  const MAIN_URL = 'https://files.example/TECH_CARD_BOM_PURPOSE_MAIN.dxf';
+  const BELT_URL = 'https://files.example/belt.dxf';
+  const shapeOf = (k: string) => fixture.card.shapes.find((r) => r.pieceLineKey === k)!;
+  const extra = (name: string) => ({
+    ...fixture.card.pieces.find((p) => p.name === 'SLV_L')!,
+    lineKey: `k:${name}`,
+    name,
+  });
+  /** A second main sheet draws a belt and a piece of the very outline of P_L_MAIN. */
+  const sibling: DraftShapeRef[] = [
+    { ...shapeOf('k:P_L_MAIN'), pieceLineKey: 'k:Q_L_MAIN', identity: 'Q_L_MAIN', url: BELT_URL },
+    { ...shapeOf('k:SLV_L'), pieceLineKey: 'k:BELT_L', identity: 'BELT_L', url: BELT_URL },
+  ];
+  const twoSheets = (own: DraftShapeRef[]) =>
+    card({
+      existingPieces: [...fixture.card.pieces, extra('Q_L_MAIN'), extra('BELT_L')],
+      existingAliases: [
+        ...fixture.card.aliases,
+        { scopeKey: MAIN, blockName: 'Q_L_MAIN', pieceLineKey: 'k:Q_L_MAIN' },
+        { scopeKey: MAIN, blockName: 'BELT_L', pieceLineKey: 'k:BELT_L' },
+      ],
+      existingPatterns: [
+        ...fixture.card.patterns,
+        { scopeKey: MAIN, filename: 'belt.dxf', url: BELT_URL, lineKey: 'row:belt', name: 'belt' },
+      ],
+      existingShapes: [...own, ...sibling],
+    });
+  const own = (fixture.card.shapes as DraftShapeRef[]).map((r) =>
+    r.scopeKey === MAIN ? { ...r, url: MAIN_URL } : r,
+  );
+  const siblingKeys = ['k:Q_L_MAIN', 'k:BELT_L'];
+
+  it('the other sheet’s outlines are no candidates, its pieces are not «no longer drawn»', () => {
+    const d = buildDraft({ scopes: [mainScope('main1107')] }, twoSheets(own), { mintKey });
+    expect(d.scopes[0].replaces?.url).toBe(MAIN_URL);
+    expect(links(d, MAIN)).toEqual(MAIN_1107);
+    expect(d.unresolved).toBeUndefined();
+    expect(d.pieces.filter((p) => !p.existingLineKey)).toEqual([]);
+    const gone = (d.scopes[0].vanished ?? []).map((v) => v.pieceLineKey);
+    expect(gone.filter((k) => siblingKeys.includes(k))).toEqual([]);
+  });
+
+  it('outlines of the replaced sheet not loaded: only its own pieces are asked', () => {
+    const d = buildDraft(
+      { scopes: [mainScope('main1107')] },
+      twoSheets(own.filter((r) => r.scopeKey !== MAIN)),
+      { mintKey },
+    );
+    const un = Object.fromEntries(
+      (d.unresolved ?? []).map((u) => [u.blockName, u.candidates.map((c) => c.pieceName)]),
+    );
+    expect(un.FP_L).toEqual(['P_L_MAIN', 'P_L_U']);
+    expect(un.YK_L).toEqual(['P_L_MAIN', 'P_L_U']);
+    const gone = (d.scopes[0].vanished ?? []).map((v) => v.pieceLineKey);
+    expect(gone.filter((k) => siblingKeys.includes(k))).toEqual([]);
+    expect(d.pieces.filter((p) => !p.existingLineKey)).toEqual([]);
+  });
+});
+
 describe('a fresh card keeps pairing', () => {
   it('both hands of a pair become one piece × 2', () => {
     const m = manifest('main1107');

@@ -245,7 +245,7 @@ function MaterialsBody({
                         </td>
                       </tr>
                     ))}
-                    {item.showTotal !== false && (
+                    {item.showTotal !== false && item.spareQty == null && (
                       <TotalRow>
                         <td />
                         <td data-align='left'>{t('materials.perGarment')}</td>
@@ -257,6 +257,42 @@ function MaterialsBody({
                             : formatNumber(item.qty, 2)}
                         </td>
                       </TotalRow>
+                    )}
+                    {item.showTotal !== false && item.spareQty != null && (
+                      <>
+                        <tr>
+                          <td />
+                          <td data-align='left'>{t('materials.perGarment')}</td>
+                          <td />
+                          <td />
+                          <td>
+                            {item.qty == null
+                              ? item.qtyGap && <Missing gap={item.qtyGap} />
+                              : formatNumber(item.qty, 2)}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td />
+                          <td data-align='left'>{t('materials.spare')}</td>
+                          <td />
+                          <td data-align='left' className='text-labelColor'>
+                            {item.spareSource ||
+                              (item.spareBagGap && <Missing gap={item.spareBagGap} />)}
+                          </td>
+                          <td>{formatNumber(item.spareQty, 2)}</td>
+                        </tr>
+                        <TotalRow>
+                          <td />
+                          <td data-align='left'>{t('materials.toBuy')}</td>
+                          <td />
+                          <td />
+                          <td>
+                            {item.toBuy == null
+                              ? item.qtyGap && <Missing gap={item.qtyGap} />
+                              : formatNumber(item.toBuy, 2)}
+                          </td>
+                        </TotalRow>
+                      </>
                     )}
                   </tbody>
                 </DataTable>
@@ -314,7 +350,10 @@ export function MaterialsPage({ techCard, orient, docline, n }: TechpackPageProp
   const itemCount =
     model.fabrics.length +
     model.thread.length +
-    model.hardware.reduce((sum, item) => sum + Math.max(1, item.spots.length), 0);
+    model.hardware.reduce(
+      (sum, item) => sum + Math.max(1, item.spots.length) + (item.spareQty == null ? 0 : 2),
+      0,
+    );
   const paginationKey = `${techCard.id ?? 0}:${orient}:${itemCount}:${model.missingInterlining.length}`;
   const { contentRef, overflow } = useTechpackOverflow(paginationKey);
 
@@ -351,7 +390,10 @@ export function MaterialsPage({ techCard, orient, docline, n }: TechpackPageProp
     spotPages.forEach((pageSpots, index) => {
       blocks.push({
         kind: 'hardware',
-        weight: Math.max(1, pageSpots.length) + 3,
+        weight:
+          Math.max(1, pageSpots.length) +
+          3 +
+          (index === spotPages.length - 1 && item.spareQty != null ? 2 : 0),
         hardware: {
           ...item,
           spots: pageSpots,

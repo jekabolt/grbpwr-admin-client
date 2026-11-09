@@ -2255,6 +2255,11 @@ export type DraftShapeRef = {
   pieceLineKey: string;
   /** The block identity the card reads for this piece (P_L_MAIN). */
   identity: string;
+  /**
+   * The sheet (pattern row url) the outline is drawn on. A re-import replaces one sheet of the
+   * scope: the outlines of its sibling sheets are never its candidates. Absent = unknown, any sheet.
+   */
+  url?: string;
   /** Bare size token (`bareToken`, '' for a sizeless block) → outline facts, mm. */
   sizes: Record<string, { areaMm2: number; wMm: number; hMm: number }>;
 };
@@ -2362,6 +2367,11 @@ export type ApplyResult =
       reused?: string[];
       writes?: number;
       save?: string;
+      /**
+       * T3 (09.11): the body with this import's rows saved, a write after it did not — the fusing
+       * sheets still need a rebuild. Set only when the save answered otherwise and the rows landed.
+       */
+      owed?: 'fusing';
       /** MF-C: rows whose file was replaced in place (M4), old url → new url. */
       replaced?: { scopeKey: string; lineKey: string; oldUrl: string; newUrl: string }[];
     }

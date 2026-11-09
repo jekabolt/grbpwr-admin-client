@@ -15,6 +15,7 @@
 //
 // Pure TS: no React. The hook in use-assembly-geometry.ts reads the DXF and hands the pieces in.
 import type { common_TechCard, common_TechCardOperation } from 'api/proto-http/admin';
+import { formatCompositionCell } from 'components/managers/materials/components/material-code';
 import { Clipper, FillRule, Path64, Point64 } from 'clipper2-js';
 import {
   isPressStepType,
@@ -3004,13 +3005,19 @@ function wordsOf(
     if (!toward) assemblyGap(ctx.sink, 'pdf_side_missing', t('gaps.pressSide'), op.n, 'side');
     if (note) line.push({ t: cap(note) });
   } else if (note) line.push({ t: cap(note) });
-  const linkedNames = (section: string) =>
+  const linkedNames = (section: string, includeComposition = false) =>
     (o.bomLineKeys ?? [])
       .map((k) => ins?.bomItems?.find((b) => b.lineKey === k))
       .filter((b) => b?.section === section)
-      .map((b) => own(b?.name ?? ''))
+      .map((b) =>
+        own(
+          [b?.name?.trim(), includeComposition ? formatCompositionCell(b?.composition) : '']
+            .filter(Boolean)
+            .join(' · '),
+        ),
+      )
       .filter(Boolean);
-  const hardware = linkedNames('TECH_CARD_BOM_SECTION_HARDWARE');
+  const hardware = linkedNames('TECH_CARD_BOM_SECTION_HARDWARE', true);
   const sewnLabels = linkedNames('TECH_CARD_BOM_SECTION_LABEL');
   for (const h of hardware) line.push({ t: h });
   for (const l of sewnLabels) line.push({ t: l });

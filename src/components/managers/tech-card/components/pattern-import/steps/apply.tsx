@@ -298,7 +298,10 @@ export function ApplyStep({
       {consequences}
       <Panel title='result'>
         {done?.ok && (
-          <CalloutBox tone={saveFailed(done.save) ? 'warning' : 'note'} className='mb-2'>
+          <CalloutBox
+            tone={saveFailed(done.save) || done.owed ? 'warning' : 'note'}
+            className='mb-2'
+          >
             {stub ? (
               <Text size='micro' component='p'>
                 <b>simulated.</b> nothing was written.
@@ -330,6 +333,11 @@ export function ApplyStep({
                       ? `! card not saved yet (${done.save})`
                       : 'card saving…'}
                 </Text>
+                {done.owed === 'fusing' && (
+                  <Text size='micro' component='p' className='mt-1'>
+                    ! fusing not rebuilt
+                  </Text>
+                )}
               </>
             )}
           </CalloutBox>

@@ -178,6 +178,8 @@ export function ColorwayRecipes({
             effectiveFabricWidthCm: b.effectiveFabricWidthCm,
             selvedgeCm: b.selvedgeCm,
             composition: b.composition,
+            qtyPerGarment: b.qtyPerGarment,
+            spareQty: b.spareQty,
             materialId,
             material: materialId > 0 ? materialById.get(materialId) : undefined,
           };

@@ -1,4 +1,8 @@
 import type { common_TechCard } from 'api/proto-http/admin';
+import {
+  qtyStepFromOperation,
+  slotQtyFromSteps,
+} from 'components/managers/tech-card/components/button-qty';
 import { skuToSeasonLabel } from 'components/managers/tech-card/components/season-util';
 import { approvalStateLabel, stageLabel } from 'components/managers/tech-cards/components/utils';
 import {
@@ -11,7 +15,6 @@ import {
   materialColour,
   materialForPiece,
   materialRole,
-  repeatsQty,
   rollGoods,
   technicalMedia,
 } from './derive-shared';
@@ -58,21 +61,13 @@ export function deriveCover(
   const buttons = refs.filter(
     (ref) => ref.item.kind === 'TECH_CARD_BOM_KIND_BUTTON' || /button/i.test(clean(ref.item.name)),
   );
+  const quantitySteps = operations.map(qtyStepFromOperation);
   const buttonFacts = buttons.map((ref) => {
     const lineKey = clean(ref.item.lineKey);
-    const operationQty = operations
-      .filter((operation) => (operation.bomLineKeys ?? []).map(clean).includes(lineKey))
-      .map(
-        (operation) =>
-          decimal(
-            operation.bomQuantities?.find((qty) => clean(qty.lineKey) === lineKey)?.qtyPerGarment,
-          ) ?? repeatsQty(operation),
-      )
-      .filter((qty): qty is number => qty != null)
-      .reduce((sum, qty) => sum + qty, 0);
+    const operationQty = slotQtyFromSteps(quantitySteps, lineKey).qty;
     return {
       name: clean(ref.item.name) || t('assembly.button'),
-      qty: decimal(ref.item.qtyPerGarment) ?? (operationQty || null),
+      qty: operationQty ?? decimal(ref.item.qtyPerGarment),
       spec: clean(ref.item.spec),
     };
   });

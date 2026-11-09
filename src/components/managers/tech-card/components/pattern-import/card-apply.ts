@@ -7,7 +7,28 @@ import { applyDraft } from 'lib/pattern-import/fabrics/apply';
 import type { ApplyDeps, LiveCard, ScopeOf } from 'lib/pattern-import/fabrics/apply';
 import { buildDraft } from 'lib/pattern-import/fabrics/draft';
 import { MAX_PATTERN_FILENAME, clampUtf8Bytes, patternUploadErrorMessage } from 'utils/pattern';
+import { deepEqual } from '../useTechCardAutosave';
 import type { ApplyDraftFn, DraftBuilder } from './client';
+
+const IMPORT_PATHS = ['patterns', 'pieces', 'pieceDxfAliases'] as const;
+type ImportRows = Partial<Record<(typeof IMPORT_PATHS)[number], unknown>>;
+
+/**
+ * T3 (09.11): did this import's rows land? The form's import rows are its saved baseline (a body
+ * write resets the baseline to what the server holds), and every url this try put on the card is
+ * among the baseline's sheets. A save that answered otherwise then failed AFTER the body.
+ */
+export function importRowsLanded(
+  values: ImportRows,
+  baseline: ImportRows,
+  urls: readonly string[],
+): boolean {
+  if (!IMPORT_PATHS.every((k) => deepEqual(values[k] ?? [], baseline[k] ?? []))) return false;
+  const saved = new Set(
+    ((baseline.patterns ?? []) as { url?: string }[]).map((p) => p.url ?? '').filter(Boolean),
+  );
+  return urls.every((u) => saved.has(u));
+}
 
 /** F7 `buildDraft` against the card the wizard read when it opened. */
 export const cardBuildDraft: DraftBuilder = (write, { card }) => buildDraft(write, card);
@@ -41,6 +62,8 @@ export function createCardApply(deps: {
   onReplaced?: ApplyDeps['onReplaced'];
   /** Rows a try wrote whose save was not confirmed — held by the card across the wizard's tries. */
   unsaved?: { get: () => boolean; set: (v: boolean) => void };
+  /** The rows landed though the save answered otherwise (a write after the body failed). */
+  landed?: ApplyDeps['landed'];
 }): ApplyDraftFn {
   return (draft, onProgress) =>
     applyDraft(
@@ -69,6 +92,7 @@ export function createCardApply(deps: {
         save: deps.save,
         onReplaced: deps.onReplaced,
         unsaved: deps.unsaved,
+        landed: deps.landed,
       },
       onProgress,
     );

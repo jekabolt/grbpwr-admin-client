@@ -82,6 +82,32 @@ export function defaultSizeChartIcon(categoryNames: readonly string[]): string |
   return undefined;
 }
 
+/**
+ * Trousers draw their body length as `length`; the dictionary names that outseam `height`, and
+ * older cards still call the row `length`. Only bottoms read them as one point: on bags and shoes
+ * `height` and `length` are two different measurements.
+ */
+const BOTTOM_LENGTH_NAMES = ['height', 'length', 'outseam'];
+
+/** The measurement a predrawn icon line stands for on this card: an existing row wins. */
+export function iconLineMeasurementId(
+  iconKey: string,
+  lineName: string,
+  idOf: (name: string) => number,
+  rowIds: ReadonlySet<number>,
+): number {
+  const exact = idOf(lineName);
+  const name = lineName.trim().toLowerCase();
+  if (SIZE_CHART_ICONS[iconKey]?.family !== 'bottoms' || !BOTTOM_LENGTH_NAMES.includes(name)) {
+    return exact;
+  }
+  for (const candidate of [name, ...BOTTOM_LENGTH_NAMES]) {
+    const id = idOf(candidate);
+    if (id && rowIds.has(id)) return id;
+  }
+  return idOf('height') || exact;
+}
+
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
 
 /** Pointer position in the picture box, persisted in the backend's normalised 0..1 frame. */

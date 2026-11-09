@@ -1,6 +1,7 @@
+import type { common_TechCard } from 'api/proto-http/admin';
 import { describe, expect, it } from 'vitest';
 
-import { compactInputNames } from './derive-assembly';
+import { compactInputNames, deriveAssembly } from './derive-assembly';
 
 describe('compactInputNames', () => {
   it('drops the tail every input shares and step numbers that tell nothing apart', () => {
@@ -36,6 +37,35 @@ describe('compactInputNames', () => {
     ]);
     expect(compactInputNames([{ name: 'part_1' }, { name: 'part_2' }, { name: 'part_5' }])).toEqual(
       ['part_1', 'part_2', 'part_5'],
+    );
+  });
+
+  it('formats a button composition before printing it in the operation line', () => {
+    const techCard = {
+      techCard: {
+        bomItems: [
+          {
+            lineKey: 'BTN',
+            section: 'TECH_CARD_BOM_SECTION_HARDWARE',
+            name: 'Button',
+            composition: '{"fibre":[{"code":"POL","percent":100}]}',
+          },
+        ],
+        operations: [
+          {
+            operationNumber: 10,
+            operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+            machineType: 'TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH',
+            work: 'button_attach',
+            bomLineKeys: ['BTN'],
+          },
+        ],
+      },
+    } as unknown as common_TechCard;
+
+    const model = deriveAssembly({ techCard, pieces: new Map(), grainDeg: new Map() });
+    expect(model.rows[0].words.line.map((segment) => segment.t)).toContain(
+      'Button · 100% Polyester',
     );
   });
 });

@@ -53,8 +53,10 @@ export function buildCardContext(args: {
     /** MF-C: the conversion manifest the card's parse read off this sheet (null = none / unread). */
     manifest?: ConversionManifest | null;
   }[];
-  /** Each card piece's current outline per scope and size (`shapeRefsOf`). */
+  /** Each card piece's current outline per scope, sheet and size (`shapeRefsOf`). */
   shapes?: DraftShapeRef[];
+  /** The card has sheets and their parse is not read yet (`CardContext.shapesPending`). */
+  shapesPending?: boolean;
   styleLabel: string;
   /** A10: the card's name and style number (the autopilot's model / sheet match). */
   cardName?: string;
@@ -116,6 +118,7 @@ export function buildCardContext(args: {
         : [],
     ),
     existingShapes: args.shapes ?? [],
+    ...(args.shapesPending ? { shapesPending: true } : {}),
     styleLabel: args.styleLabel,
     cardName: args.cardName ?? '',
     styleNumber: args.styleNumber ?? '',
@@ -123,17 +126,18 @@ export function buildCardContext(args: {
 }
 
 /**
- * The card's piece outlines per scope (`pieceShapeReferences` of each scope's contour pieces) as the
- * import draft reads them: mm, per bare size token. PieceDTO carries cm.
+ * The card's piece outlines per scope and sheet (`pieceShapeReferences` of one sheet's contour
+ * pieces) as the import draft reads them: mm, per bare size token. PieceDTO carries cm.
  */
 export function shapeRefsOf(
-  byScope: ReadonlyMap<string, readonly PieceShapeReference[]>,
+  sheets: readonly { scopeKey: string; url?: string; refs: readonly PieceShapeReference[] }[],
 ): DraftShapeRef[] {
-  return [...byScope].flatMap(([scopeKey, refs]) =>
+  return sheets.flatMap(({ scopeKey, url, refs }) =>
     refs.map((ref) => ({
       scopeKey,
       pieceLineKey: ref.pieceLineKey,
       identity: ref.identity,
+      ...(url ? { url } : {}),
       sizes: Object.fromEntries(
         [...ref.entry.bySize].map(([size, p]) => [
           size,

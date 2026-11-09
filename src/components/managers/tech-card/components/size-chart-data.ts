@@ -123,7 +123,11 @@ export function mergePatternIntoCells(
       const have = next.get(key);
       if (have?.source === 'STYLE_SIZE_CHART_CELL_SOURCE_MANUAL' && have.value.trim()) continue;
       const valueText = decimal(value);
-      if (have?.value === valueText && have.source === 'STYLE_SIZE_CHART_CELL_SOURCE_PATTERN')
+      // Compare numbers: the server drops trailing zeros ("30"), the pattern prints "30.0".
+      if (
+        have?.source === 'STYLE_SIZE_CHART_CELL_SOURCE_PATTERN' &&
+        numberOf(have.value) === Number(valueText)
+      )
         continue;
       next.set(key, {
         sizeId,
