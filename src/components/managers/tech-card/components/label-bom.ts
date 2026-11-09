@@ -346,6 +346,18 @@ export function confirmCompositionLabel(
   const bomItems = (getValues('bomItems') ?? []) as BomItems;
   let lineKey = row ? labelBomLine(row, bomItems)?.lineKey?.trim() ?? '' : '';
   if (!lineKey) {
+    // A composition line already in the BOM (made by hand, or by an import) is taken, not doubled.
+    const packaging = (getValues('packagingItems') ?? []) as FormPackagingItem[];
+    const free = bomItems.find(
+      (line) =>
+        (line.section ?? '') === LABEL_BOM_SECTION &&
+        /^composition( label)?$/i.test((line.name ?? '').trim()) &&
+        !!line.lineKey?.trim() &&
+        !lineHasAnotherOwner(line, COMPOSITION_LABEL_KEY, labels, packaging, bomItems),
+    );
+    lineKey = free?.lineKey?.trim() ?? '';
+  }
+  if (!lineKey) {
     const born = bornBomLine({
       section: LABEL_BOM_SECTION,
       name: uniqueLineName(bomItems, 'composition label'),

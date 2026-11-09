@@ -416,3 +416,22 @@ describe('confirmCompositionLabel', () => {
     expect(compositionLabelConfirmed([{ ...bareLabel('composition') }], [])).toBe(false);
   });
 });
+
+describe('confirmCompositionLabel with a composition line already in the BOM', () => {
+  it('takes that line instead of adding a second one', () => {
+    const form = formHarness({
+      garmentLabels: [],
+      bomItems: [
+        {
+          lineKey: 'L1',
+          section: 'TECH_CARD_BOM_SECTION_LABEL',
+          name: 'composition label',
+          materialId: 8,
+        },
+      ] as never,
+      careLabel: {} as never,
+    });
+    expect(confirmCompositionLabel(form.getValues, form.setValue)).toBe('L1');
+    expect(form.state.bomItems as unknown[]).toHaveLength(1);
+  });
+});
