@@ -1432,7 +1432,7 @@ export function useImportSession(deps: {
             failureRef.current = {
               stage: null,
               code: null,
-              message: `apply: ${result.failedScope}: ${result.message}`,
+              message: `apply: ${result.failedScope ? `${result.failedScope}: ` : ''}${result.message}`,
             };
           setApply({ phase: 'done', result, progress: { ...progress } });
           return;

@@ -139,8 +139,6 @@ import {
   type AutosaveApi,
 } from './design/autosave-contract';
 import {
-  bodyMoved,
-  bodyOnTheWire,
   bodyWorkOf,
   deepEqual,
   failureClassOf,
@@ -149,6 +147,7 @@ import {
   failureFieldsOf,
   failureStatus,
   formOnTheWire,
+  onlyVersionMoved,
   serverSentenceOf,
   settleFormAfterSave,
   useTechCardAutosaveController,
@@ -1429,10 +1428,7 @@ export function TechCardForm({
     }
     // The body did not move since the card this page stands on — or, when that card was never read back,
     // since the body this page SENT under its version (mn-1): a panel's bump, a roll-up. Taken.
-    const unmoved = cur.card
-      ? !bodyMoved(cur.card, fresh, canWriteCosting)
-      : !!cur.sent &&
-        deepEqual(bodyOnTheWire(fresh, cur.sent.echo, canWriteCosting), cur.sent.body);
+    const unmoved = onlyVersionMoved(cur, fresh, canWriteCosting);
     if (unmoved) {
       adopt(fresh);
       return 'adopted';
@@ -1809,9 +1805,29 @@ export function TechCardForm({
     return verdict;
   }
 
+  // T3: after a 409 on the body write — read the card; when only its version moved since the card this
+  // page stands on, stand on it (the write is then sent again by the caller). No «keep mine» override, no
+  // approval in the write: those keep the conflict decision.
+  async function versionOnlyMoved(data: TechCardFormData): Promise<boolean> {
+    if (!numId || lockOverride.current != null) return false;
+    if (approvalAttempt.current && data.approvalState === approvalAttempt.current.next)
+      return false;
+    let fresh: common_TechCard | undefined;
+    try {
+      fresh = (await adminService.GetTechCard({ id: numId, vatCountryCode: undefined })).techCard;
+    } catch {
+      return false;
+    }
+    if (!fresh || !onlyVersionMoved(base.current, fresh, canWriteCosting)) return false;
+    adopt(fresh);
+    needsRead.current = false;
+    queryClient.setQueryData(techCardKeys.detail(numId), fresh);
+    return true;
+  }
+
   async function writeTechCardPass(
     data: TechCardFormData,
-    opts: { mode: SaveMode; autoStage?: boolean; keepPurpose?: string },
+    opts: { mode: SaveMode; autoStage?: boolean; keepPurpose?: string; lockRetried?: boolean },
   ): Promise<WriteResult> {
     const silent = opts.mode === 'silent';
     setStagingError(null);
@@ -2231,6 +2247,14 @@ export function TechCardForm({
           outcome: 'error',
           message: 'another save moved this card, and re-reading it failed',
         };
+      }
+      // T3 (09.11, card 6): a 409 on the BODY write whose card moved only its version meanwhile — this
+      // page's own background writes (the automatic piece-area measurement bumps tech_card.lock_version,
+      // and the pattern import saves right after it), a panel, a roll-up. Nobody's body is under this
+      // write: the page takes that version and sends the same body once more. A moved body (another
+      // editor, another tab) is the conflict decision, as before; a second 409 too.
+      if (status === 409 && !bodySaved && !opts.lockRetried && (await versionOnlyMoved(data))) {
+        return writeTechCardPass(data, { ...opts, lockRetried: true });
       }
       // Серверный отказ: и модалка конфликта, и пришпиленные к полям нарушения, и — главное —
       // `ClearAssemblyButton`, единственный выход из щита «карточка несёт узлы», живут под
