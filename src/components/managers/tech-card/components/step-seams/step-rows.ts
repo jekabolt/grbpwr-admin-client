@@ -3,10 +3,12 @@
 // resolves against today's geometry here or contributes no placement.
 
 import type { Affine, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
+import { edgeIdsOf } from 'lib/assembly-skeleton/geometry';
 import { orderSideAlongOutline } from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
 import { resolveEdge } from 'lib/assembly-skeleton/union';
 import {
+  expandSidePart,
   resolveSeamDecisions,
   type EdgeAnchor,
   type SeamPlacement,
@@ -50,10 +52,22 @@ export function edgeRowFromPick(
   parts?: { a: readonly SidePart[]; b: readonly SidePart[] },
 ): StoredSeam | null {
   const ordered = orderedPickSides(sides, geoms);
-  return rowFromHand(parts?.a ?? ordered.a, parts?.b ?? ordered.b, geoms, anchorCtx, {
-    direction: 'reversed',
-  });
+  const a = parts?.a ?? ordered.a.map((target): SidePart => ({ target }));
+  const b = parts?.b ?? ordered.b.map((target): SidePart => ({ target }));
+  const o = { direction: 'reversed' as const };
+  // What was picked is what is sewn: a pick the run rules refuse is stored edge by edge instead.
+  // Only an edge that does not resolve, or too many parts, keeps ACCEPT from saving.
+  return (
+    rowFromHand(a, b, geoms, anchorCtx, o) ??
+    rowFromHand(edgeByEdge(a, geoms), edgeByEdge(b, geoms), geoms, anchorCtx, o)
+  );
 }
+
+/** A side as single edges: chains split into their members, stretches kept on the edge they lie on. */
+const edgeByEdge = (parts: readonly SidePart[], geoms: ReadonlyMap<string, PieceGeom>) =>
+  parts.flatMap((part): SidePart[] =>
+    part.range ? expandSidePart(part, geoms) : edgeIdsOf(part.target).map((target) => ({ target })),
+  );
 
 /** The edge ids and inner targets an anchor names on today's drawing (by its persisted hint). */
 export function rowTargetsOfAnchor(anchor: EdgeAnchor): TargetId[] {

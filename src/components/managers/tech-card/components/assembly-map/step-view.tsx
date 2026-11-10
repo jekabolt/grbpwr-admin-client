@@ -52,17 +52,13 @@ export function mismatchFacts(
   const aPlain = plainLengthOf(aParts);
   const bPlain = plainLengthOf(bParts);
   /** The side's length once its plies lie on each other; null when no active fold changes it. */
-  const foldedOf = (parts: typeof aParts, plain: number | null, other: number | null) => {
+  const foldedOf = (parts: typeof aParts, plain: number | null) => {
     if (!activeFolds.length || plain == null) return null;
-    const folded = sideLengthMm(parts, read.geoms, () => 0, {
-      activeFolds,
-      otherSideMm: other,
-      grainDeg,
-    });
+    const folded = sideLengthMm(parts, read.geoms, () => 0, { activeFolds, grainDeg });
     return folded !== plain ? folded : null;
   };
-  const aFolded = foldedOf(aParts, aPlain, bPlain);
-  const bFolded = foldedOf(bParts, bPlain, aPlain);
+  const aFolded = foldedOf(aParts, aPlain);
+  const bFolded = foldedOf(bParts, bPlain);
   // Without a fold event, evidence remains the first and byte-identical answer.
   const a = aFolded ?? seam.evidence?.aLenMm ?? aPlain;
   const b = bFolded ?? seam.evidence?.bLenMm ?? bPlain;

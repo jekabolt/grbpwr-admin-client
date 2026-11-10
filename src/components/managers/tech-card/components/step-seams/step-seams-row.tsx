@@ -69,23 +69,15 @@ export function seamTileSideLines(
   },
 ): [string, string] {
   const innerLen = (piece: string, index: number) => polyLen(innerLines.get(piece)?.[index] ?? []);
-  const line = (parts: readonly SidePart[], other: readonly SidePart[]) => {
+  const line = (parts: readonly SidePart[]) => {
     const codes = [
       ...new Set(parts.map((part) => geoms.get(pieceOfTarget(part.target))?.name).filter(Boolean)),
     ];
     if (codes.length === 0) return '';
-    const length = targetsLen(
-      parts,
-      geoms,
-      innerLen,
-      folds && {
-        ...folds,
-        otherSideMm: other.length ? targetsLen(other, geoms, innerLen) : null,
-      },
-    );
+    const length = targetsLen(parts, geoms, innerLen, folds);
     return `${codes.join(' + ')} ${Math.round(length)}`;
   };
-  return [line(sides.a, sides.b), line(sides.b, sides.a)];
+  return [line(sides.a), line(sides.b)];
 }
 
 /** The picker's state lives above both its doors: the panel head and the tiles of the group. */

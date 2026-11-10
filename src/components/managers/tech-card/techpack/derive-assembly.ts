@@ -2272,7 +2272,7 @@ function buildCards(
   const seamLessCard = [...bound.values()].every((seams) => seams.length === 0);
   const roles = pieceRoleMap(pieces, ops);
   const metricGeoms = new Map([...pieces].map(([key, piece]) => [key, piece.geom]));
-  const plainMetricLength = (parts: readonly SeamPart[]) => {
+  const metricLength = (parts: readonly SeamPart[], activeFolds: readonly StoredFold[]) => {
     if (parts.every((part) => !!part.edgeId))
       return sideLengthMm(
         parts.map(
@@ -2283,25 +2283,7 @@ function buildCards(
         ),
         metricGeoms,
         () => 0,
-      );
-    return parts.reduce((total, part) => total + part.lenMm, 0);
-  };
-  const metricLength = (
-    parts: readonly SeamPart[],
-    otherSideMm: number | null,
-    activeFolds: readonly StoredFold[],
-  ) => {
-    if (parts.every((part) => !!part.edgeId))
-      return sideLengthMm(
-        parts.map(
-          (part): SidePart => ({
-            target: part.edgeId!,
-            ...(part.range ? { range: part.range } : {}),
-          }),
-        ),
-        metricGeoms,
-        () => 0,
-        { activeFolds, otherSideMm, grainDeg },
+        { activeFolds, grainDeg },
       );
     return parts.reduce((total, part) => total + part.lenMm, 0);
   };
@@ -2510,11 +2492,9 @@ function buildCards(
     }
 
     const metrics: SeamMetric[] = seams.map((s, i) => {
-      const leftPlain = plainMetricLength(s.a);
-      const rightPlain = plainMetricLength(s.b);
-      const left = metricLength(s.a, s.b.length ? rightPlain : null, activeFolds);
+      const left = metricLength(s.a, activeFolds);
       if (!s.b.length) return { letter: String(i + 1), left, bad: false };
-      const right = metricLength(s.b, leftPlain, activeFolds);
+      const right = metricLength(s.b, activeFolds);
       // A strip's side reads through its fit, and a strip typed by hand states no seam length at all.
       const lengths = seamLengthCheck(
         left,
