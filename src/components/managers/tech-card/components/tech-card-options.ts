@@ -154,6 +154,7 @@ export const labelPlacementOptions = [
 
 export const labelAttachmentOptions = [
   'sewn into the seam',
+  'on_fabric_piece',
   'sewn 2 sides',
   'sewn 4 sides',
   'heat press',

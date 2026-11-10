@@ -7,6 +7,7 @@ import type {
 } from 'api/proto-http/admin';
 import { z } from 'zod';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
+import { LABEL_PRINT_METHODS, pieceFitIssue, printFitIssue } from './label-placement';
 import { wireInt } from './wire-int';
 
 /**
@@ -113,6 +114,14 @@ const labelMillimetres = z
     message: 'positive millimetres',
   });
 
+const nonnegativeMillimetres = z
+  .string()
+  .optional()
+  .default('')
+  .refine((value) => !value || /^\d+(?:\.\d{1,2})?$/.test(value), {
+    message: 'zero or positive millimetres',
+  });
+
 // One artwork file of a sewn-in label (0447). 0 on an axis = «any colour» / «all sizes». `publicUrl`
 // is read-only: the server fills it from the file's live link, and an empty one reads as «no file».
 export const garmentLabelFileSchema = z.object({
@@ -123,39 +132,71 @@ export const garmentLabelFileSchema = z.object({
   publicUrl: z.string().optional().default(''),
 });
 
-export const garmentLabelSchema = z.object({
-  key: labelKey,
-  lineKey: z.string().optional().default(''),
-  source: z.enum(['', 'stock', 'make']).optional().default(''),
-  kind: text(LABEL_KEY_MAX, 'type'),
-  madeBy: text(LABEL_KEY_MAX, 'made by'),
-  printMethod: text(LABEL_KEY_MAX, 'print'),
-  lengthCm: labelLengthCm,
-  placement: text(LABEL_TEXT_MAX, 'placement'),
-  attachment: text(LABEL_TEXT_MAX, 'attachment'),
-  folding: text(LABEL_TEXT_MAX, 'folding'),
-  size: text(LABEL_SIZE_MAX, 'size'),
+export const garmentLabelPrintSchema = z.object({
+  id: z.number().optional().default(0),
+  name: text(LABEL_TEXT_MAX, 'print name'),
+  libraryFileId: z.number().optional().default(0),
+  method: z.enum(LABEL_PRINT_METHODS).optional().default('screen'),
+  colour: text(LABEL_TEXT_MAX, 'colour'),
   widthMm: labelMillimetres,
   heightMm: labelMillimetres,
-  fold: z.enum(['', 'flat', 'half', 'ends', 'mitre', 'loop', 'tee']).optional().default(''),
-  // Fold/stitch lines: mm from the sewn edge along foldAxis, CSV ("12,88").
-  foldLinesMm: z.string().optional().default(''),
-  stitchLinesMm: z.string().optional().default(''),
-  foldAxis: z.string().optional().default(''),
-  pages: z.number().int().min(1).max(12).optional().default(1),
-  qtyPerGarment,
-  // FK to the label material's BOM line; 0 = none.
-  bomItemId: z.number().optional().default(0),
-  // The same link by line key: it can name a line born in this very edit.
-  bomLineKey: z.string().optional().default(''),
-  note: text(LABEL_NOTE_MAX, 'note'),
-  mediaIds,
-  // The pin: the number of a callout on a flat; 0 = no pin.
-  calloutNumber: z.number().optional().default(0),
-  artworkPerSize: z.boolean().optional().default(false),
-  artworkPerColorway: z.boolean().optional().default(false),
-  files: z.array(garmentLabelFileSchema).default([]),
+  xMm: nonnegativeMillimetres,
+  yMm: nonnegativeMillimetres,
 });
+
+export const garmentLabelSchema = z
+  .object({
+    key: labelKey,
+    lineKey: z.string().optional().default(''),
+    source: z.enum(['', 'stock', 'make']).optional().default(''),
+    kind: text(LABEL_KEY_MAX, 'type'),
+    madeBy: text(LABEL_KEY_MAX, 'made by'),
+    printMethod: text(LABEL_KEY_MAX, 'print'),
+    lengthCm: labelLengthCm,
+    placement: text(LABEL_TEXT_MAX, 'placement'),
+    attachment: text(LABEL_TEXT_MAX, 'attachment'),
+    folding: text(LABEL_TEXT_MAX, 'folding'),
+    size: text(LABEL_SIZE_MAX, 'size'),
+    widthMm: labelMillimetres,
+    heightMm: labelMillimetres,
+    fold: z.enum(['', 'flat', 'half', 'ends', 'mitre', 'loop', 'tee']).optional().default(''),
+    // Fold/stitch lines: mm from the sewn edge along foldAxis, CSV ("12,88").
+    foldLinesMm: z.string().optional().default(''),
+    stitchLinesMm: z.string().optional().default(''),
+    foldAxis: z.string().optional().default(''),
+    pages: z.number().int().min(1).max(12).optional().default(1),
+    qtyPerGarment,
+    // FK to the label material's BOM line; 0 = none.
+    bomItemId: z.number().optional().default(0),
+    // The same link by line key: it can name a line born in this very edit.
+    bomLineKey: z.string().optional().default(''),
+    note: text(LABEL_NOTE_MAX, 'note'),
+    mediaIds,
+    // The pin: the number of a callout on a flat; 0 = no pin.
+    calloutNumber: z.number().optional().default(0),
+    artworkPerSize: z.boolean().optional().default(false),
+    artworkPerColorway: z.boolean().optional().default(false),
+    files: z.array(garmentLabelFileSchema).default([]),
+    pieceBomItemId: z.number().int().nonnegative().optional().default(0),
+    pieceWidthMm: nonnegativeMillimetres,
+    pieceHeightMm: nonnegativeMillimetres,
+    pieceSeamMm: nonnegativeMillimetres,
+    labelXMm: nonnegativeMillimetres,
+    labelYMm: nonnegativeMillimetres,
+    labelOnPiece: z.enum(['', '4_sides', 'top_edge']).optional().default(''),
+    prints: z.array(garmentLabelPrintSchema).default([]),
+  })
+  .superRefine((label, ctx) => {
+    if (label.attachment === 'on_fabric_piece') {
+      const issue = pieceFitIssue(label);
+      if (issue) ctx.addIssue({ code: z.ZodIssueCode.custom, message: issue, path: ['labelXMm'] });
+    }
+    label.prints.forEach((print, index) => {
+      const issue = printFitIssue(print, label.widthMm, label.heightMm);
+      if (issue)
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: issue, path: ['prints', index] });
+    });
+  });
 
 export const packagingItemSchema = z.object({
   key: labelKey,
@@ -306,6 +347,7 @@ export function keyedList<T extends z.ZodTypeAny>(row: T, what: string, unique =
 }
 
 export type FormGarmentLabel = z.input<typeof garmentLabelSchema>;
+export type FormGarmentLabelPrint = z.input<typeof garmentLabelPrintSchema>;
 export type FormPackagingItem = z.input<typeof packagingItemSchema>;
 export type FormCareLabel = z.input<typeof careLabelSchema>;
 export type FormCareLabelColorway = z.input<typeof careLabelColorwaySchema>;
@@ -399,6 +441,27 @@ export function garmentLabelsToForm(ls?: common_TechCardGarmentLabel[]): FormGar
       sourceHash: f.sourceHash || '',
       publicUrl: f.publicUrl || '',
     })),
+    pieceBomItemId: wireInt(l.pieceBomItemId),
+    pieceWidthMm: decimalToInput(l.pieceWidthMm),
+    pieceHeightMm: decimalToInput(l.pieceHeightMm),
+    pieceSeamMm: decimalToInput(l.pieceSeamMm),
+    labelXMm: decimalToInput(l.labelXMm),
+    labelYMm: decimalToInput(l.labelYMm),
+    labelOnPiece:
+      l.labelOnPiece === '4_sides' || l.labelOnPiece === 'top_edge' ? l.labelOnPiece : '',
+    prints: (l.prints ?? []).map((print) => ({
+      id: wireInt(print.id),
+      name: print.name || '',
+      libraryFileId: wireInt(print.libraryFileId),
+      method: LABEL_PRINT_METHODS.includes(print.method as (typeof LABEL_PRINT_METHODS)[number])
+        ? (print.method as (typeof LABEL_PRINT_METHODS)[number])
+        : 'screen',
+      colour: print.colour || '',
+      widthMm: decimalToInput(print.widthMm),
+      heightMm: decimalToInput(print.heightMm),
+      xMm: decimalToInput(print.xMm),
+      yMm: decimalToInput(print.yMm),
+    })),
   }));
 }
 
@@ -457,47 +520,69 @@ export function careLabelOut(c?: FormCareLabel): common_TechCardCareLabel {
 }
 
 export function garmentLabelsOut(ls?: FormGarmentLabel[]): common_TechCardGarmentLabel[] {
-  return (ls ?? []).map((l) => ({
-    key: l.key?.trim() || '',
-    lineKey: l.lineKey?.trim() || '',
-    // Presence is the compatibility bit for the stock/make contract. Every row written by this
-    // screen sends it, including '' for a legacy row or an explicitly cleared source.
-    source: l.source || '',
-    kind: l.kind?.trim() || '',
-    madeBy: l.madeBy?.trim() || '',
-    printMethod: l.printMethod?.trim() || '',
-    lengthCm: inputToDecimal(l.lengthCm),
-    placement: l.placement?.trim() || '',
-    attachment: l.attachment?.trim() || '',
-    folding: l.folding?.trim() || '',
-    size: l.size?.trim() || '',
-    widthMm: inputToDecimal(l.widthMm),
-    heightMm: inputToDecimal(l.heightMm),
-    fold: l.fold || '',
-    // ALWAYS sent: '' means «no lines»; an older bundle omits it and the server keeps the stored value.
-    foldLinesMm: l.foldLinesMm?.trim() || '',
-    stitchLinesMm: l.stitchLinesMm?.trim() || '',
-    // ALWAYS sent: both are presence fields; old clients omit them and the server keeps storage.
-    foldAxis: l.foldAxis === 'width' ? 'width' : '',
-    pages: Math.min(12, Math.max(1, Math.round(wireInt(l.pages)) || 1)),
-    qtyPerGarment: l.qtyPerGarment || 1,
-    bomItemId: wireInt(l.bomItemId),
-    bomLineKey: l.bomLineKey?.trim() || '',
-    note: l.note?.trim() || '',
-    mediaIds: [...(l.mediaIds ?? [])],
-    calloutNumber: wireInt(l.calloutNumber),
-    // ALWAYS sent: this bit says «this client knows the artwork block», so a save that sends no
-    // files means «no files», while a bundle older than 0447 stays silent and the server carries.
-    artworkPerSize: !!l.artworkPerSize,
-    artworkPerColorway: !!l.artworkPerColorway,
-    files: (l.files ?? []).map((f) => ({
-      colorwayId: wireInt(f.colorwayId),
-      sizeId: wireInt(f.sizeId),
-      libraryFileId: wireInt(f.libraryFileId),
-      sourceHash: f.sourceHash ?? '',
-      publicUrl: f.publicUrl ?? '',
-    })),
-  }));
+  return (ls ?? []).map((l) => {
+    const onPiece = l.attachment?.trim() === 'on_fabric_piece';
+    return {
+      key: l.key?.trim() || '',
+      lineKey: l.lineKey?.trim() || '',
+      // Presence is the compatibility bit for the stock/make contract. Every row written by this
+      // screen sends it, including '' for a legacy row or an explicitly cleared source.
+      source: l.source || '',
+      kind: l.kind?.trim() || '',
+      madeBy: l.madeBy?.trim() || '',
+      printMethod: l.printMethod?.trim() || '',
+      lengthCm: inputToDecimal(l.lengthCm),
+      placement: l.placement?.trim() || '',
+      attachment: l.attachment?.trim() || '',
+      folding: l.folding?.trim() || '',
+      size: l.size?.trim() || '',
+      widthMm: inputToDecimal(l.widthMm),
+      heightMm: inputToDecimal(l.heightMm),
+      fold: l.fold || '',
+      // ALWAYS sent: '' means «no lines»; an older bundle omits it and the server keeps the stored value.
+      foldLinesMm: l.foldLinesMm?.trim() || '',
+      stitchLinesMm: l.stitchLinesMm?.trim() || '',
+      // ALWAYS sent: both are presence fields; old clients omit them and the server keeps storage.
+      foldAxis: l.foldAxis === 'width' ? 'width' : '',
+      pages: Math.min(12, Math.max(1, Math.round(wireInt(l.pages)) || 1)),
+      qtyPerGarment: l.qtyPerGarment || 1,
+      bomItemId: wireInt(l.bomItemId),
+      bomLineKey: l.bomLineKey?.trim() || '',
+      note: l.note?.trim() || '',
+      mediaIds: [...(l.mediaIds ?? [])],
+      calloutNumber: wireInt(l.calloutNumber),
+      // ALWAYS sent: this bit says «this client knows the artwork block», so a save that sends no
+      // files means «no files», while a bundle older than 0447 stays silent and the server carries.
+      artworkPerSize: !!l.artworkPerSize,
+      artworkPerColorway: !!l.artworkPerColorway,
+      files: (l.files ?? []).map((f) => ({
+        colorwayId: wireInt(f.colorwayId),
+        sizeId: wireInt(f.sizeId),
+        libraryFileId: wireInt(f.libraryFileId),
+        sourceHash: f.sourceHash ?? '',
+        publicUrl: f.publicUrl ?? '',
+      })),
+      pieceBomItemId: onPiece ? wireInt(l.pieceBomItemId) : 0,
+      pieceWidthMm: inputToDecimal(onPiece ? l.pieceWidthMm || '0' : '0'),
+      pieceHeightMm: inputToDecimal(onPiece ? l.pieceHeightMm || '0' : '0'),
+      pieceSeamMm: inputToDecimal(onPiece ? l.pieceSeamMm || '0' : '0'),
+      labelXMm: inputToDecimal(onPiece ? l.labelXMm || '0' : '0'),
+      labelYMm: inputToDecimal(onPiece ? l.labelYMm || '0' : '0'),
+      // ALWAYS sent: this is also the compatibility bit for the replace-all prints list.
+      labelOnPiece: onPiece ? l.labelOnPiece || '' : '',
+      prints: (l.prints ?? []).map((print) => ({
+        id: wireInt(print.id),
+        name: print.name?.trim() || '',
+        libraryFileId: wireInt(print.libraryFileId),
+        method: print.method || '',
+        colour: print.colour?.trim() || '',
+        widthMm: inputToDecimal(print.widthMm),
+        heightMm: inputToDecimal(print.heightMm),
+        xMm: inputToDecimal(print.xMm),
+        yMm: inputToDecimal(print.yMm),
+      })),
+    };
+  });
 }
 
 export function packagingItemsOut(ls?: FormPackagingItem[]): common_TechCardPackagingItem[] {

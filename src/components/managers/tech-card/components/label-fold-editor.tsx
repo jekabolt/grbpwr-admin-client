@@ -13,7 +13,8 @@ import { Chip, ChipRow, Input, Text } from 'ui';
 import type { PaperDoc } from '../assembly-print/paper';
 import { PaperNested } from '../assembly-print/paper-svg';
 
-import type { FormGarmentLabel } from './labels-schema';
+import { clampPrintToLabel } from './label-placement';
+import type { FormGarmentLabel, FormGarmentLabelPrint } from './labels-schema';
 import {
   foldFront,
   foldWordOf,
@@ -44,7 +45,9 @@ type FoldChange = Pick<
   'fold' | 'foldLinesMm' | 'stitchLinesMm' | 'foldAxis' | 'pages' | 'widthMm' | 'heightMm'
 >;
 
-type Drag = { kind: 'fold' | 'stitch'; index: number; pointerId: number };
+type Drag =
+  | { kind: 'fold' | 'stitch'; index: number; pointerId: number }
+  | { kind: 'print'; index: number; pointerId: number; dx: number; dy: number };
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const mmText = (value: number) => String(Math.round(value * 10) / 10);
@@ -212,8 +215,12 @@ export function LabelFoldEditor({
   artworkAction,
   libraryFileId,
   ribbons,
+  prints = [],
+  selectedPrintIndex = 0,
   disabled,
   onChange,
+  onSelectPrint,
+  onPrintChange,
 }: {
   widthMm: number;
   heightMm: number;
@@ -229,8 +236,12 @@ export function LabelFoldEditor({
   libraryFileId?: unknown;
   /** Built ribbons of the composition label, page by page; set, they own the pages. */
   ribbons?: readonly PaperDoc[];
+  prints?: readonly FormGarmentLabelPrint[];
+  selectedPrintIndex?: number;
   disabled: boolean;
   onChange: (value: Partial<FoldChange>) => void;
+  onSelectPrint?: (index: number) => void;
+  onPrintChange?: (index: number, value: Partial<FormGarmentLabelPrint>) => void;
 }) {
   const fileId = wireInt(libraryFileId);
   const fileQuery = useLibraryFile(fileId || undefined);
@@ -379,9 +390,30 @@ export function LabelFoldEditor({
     return Math.round(((widthAxis ? local.x - x : local.y - y) / k) * 1) / 1;
   };
 
+  const pointXYMm = (event: ReactPointerEvent<SVGElement>) => {
+    const svg = svgRef.current;
+    const matrix = svg?.getScreenCTM();
+    if (!svg || !matrix) return null;
+    const point = svg.createSVGPoint();
+    point.x = event.clientX;
+    point.y = event.clientY;
+    const local = point.matrixTransform(matrix.inverse());
+    return { x: (local.x - x) / k, y: (local.y - y) / k };
+  };
+
   const onPointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
     const active = drag.current;
     if (!active || active.pointerId !== event.pointerId || disabled) return;
+    if (active.kind === 'print') {
+      const point = pointXYMm(event);
+      const print = prints[active.index];
+      if (!point || !print) return;
+      onPrintChange?.(
+        active.index,
+        clampPrintToLabel(print, widthValue, heightValue, point.x - active.dx, point.y - active.dy),
+      );
+      return;
+    }
     const raw = pointMm(event);
     if (raw == null) return;
     if (active.kind === 'fold') {
@@ -413,7 +445,7 @@ export function LabelFoldEditor({
 
   const startDrag = (
     event: ReactPointerEvent<SVGRectElement>,
-    kind: Drag['kind'],
+    kind: 'fold' | 'stitch',
     index: number,
   ) => {
     if (disabled) return;
@@ -421,6 +453,23 @@ export function LabelFoldEditor({
     const svg = event.currentTarget.ownerSVGElement;
     svg?.setPointerCapture(event.pointerId);
     drag.current = { kind, index, pointerId: event.pointerId };
+  };
+
+  const startPrintDrag = (event: ReactPointerEvent<SVGRectElement>, index: number) => {
+    if (disabled) return;
+    const print = prints[index];
+    const point = pointXYMm(event);
+    if (!print || !point) return;
+    event.preventDefault();
+    svgRef.current?.setPointerCapture(event.pointerId);
+    onSelectPrint?.(index);
+    drag.current = {
+      kind: 'print',
+      index,
+      pointerId: event.pointerId,
+      dx: point.x - Number(print.xMm || 0),
+      dy: point.y - Number(print.yMm || 0),
+    };
   };
 
   const isPreset = (word: (typeof FOLDS)[number]) =>
@@ -520,6 +569,40 @@ export function LabelFoldEditor({
               pointerEvents='none'
             />
           ) : null}
+          {page === 0
+            ? prints.map((print, index) => {
+                const printX = x + Number(print.xMm || 0) * k;
+                const printY = y + Number(print.yMm || 0) * k;
+                const printW = Number(print.widthMm || 0) * k;
+                const printH = Number(print.heightMm || 0) * k;
+                const selected = index === selectedPrintIndex;
+                return (
+                  <g key={`${print.id || 0}-${print.libraryFileId || 0}-${index}`}>
+                    <rect
+                      x={printX}
+                      y={printY}
+                      width={printW}
+                      height={printH}
+                      fill='transparent'
+                      stroke={selected ? 'var(--color-warning)' : 'transparent'}
+                      strokeWidth={1.5}
+                      strokeDasharray={print.method === 'embroidery' ? '2 2' : undefined}
+                      className={disabled ? '' : 'cursor-move'}
+                      onPointerDown={(event) => startPrintDrag(event, index)}
+                    />
+                    <text
+                      x={printX + printW / 2}
+                      y={printY + printH / 2 + 3}
+                      textAnchor='middle'
+                      className='fill-textColor text-nano font-bold'
+                      pointerEvents='none'
+                    >
+                      {(print.name || 'print').toUpperCase()}
+                    </text>
+                  </g>
+                );
+              })
+            : null}
           {isTee ? (
             <g pointerEvents='none' data-label-tee-band=''>
               <rect

@@ -69,3 +69,38 @@ describe('LabelFoldEditor tee fold', () => {
     expect(html).not.toContain('aria-label="pages"');
   });
 });
+
+describe('LabelFoldEditor prints', () => {
+  it('server-renders prints on the flat label canvas', () => {
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <LabelFoldEditor
+          widthMm={44}
+          heightMm={28}
+          widthValue='44'
+          heightValue='28'
+          fold='flat'
+          pages={1}
+          composition={false}
+          prints={[
+            {
+              id: 1,
+              name: 'grbpwr logo',
+              libraryFileId: 9,
+              method: 'screen',
+              colour: 'black',
+              widthMm: '30',
+              heightMm: '8',
+              xMm: '7',
+              yMm: '6',
+            },
+          ]}
+          disabled={false}
+          onChange={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+    expect(html).toContain('GRBPWR LOGO');
+    expect(html).toContain('stroke="var(--color-warning)"');
+  });
+});

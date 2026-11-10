@@ -7,7 +7,7 @@ import { ConfirmationModal, Input, Media, Placeholder, Text, Tile, Tiles } from 
 
 import { sharePublicFile, uploadPublicFile } from './label-artwork-upload';
 
-export type LabelFilePick = { libraryFileId: number; publicUrl: string };
+export type LabelFilePick = { libraryFileId: number; publicUrl: string; fileName?: string };
 
 function FileMedia({ file }: { file: LibraryFile }) {
   if (!file.previewUrl) return <Placeholder label='file' className='aspect-square w-full' />;
@@ -56,7 +56,7 @@ export function LabelFilePicker({
     setBusy(true);
     try {
       const picked = await sharePublicFile(id);
-      onPick(picked);
+      onPick({ ...picked, fileName: file.fileName || '' });
       onOpenChange(false);
     } catch (error) {
       notify({ sev: 'error', subject: '', text: '', bad: failureText(error, 'file link failed') });
@@ -70,7 +70,7 @@ export function LabelFilePicker({
     setBusy(true);
     try {
       const picked = await uploadPublicFile(file);
-      onPick(picked);
+      onPick({ ...picked, fileName: file.name });
       onOpenChange(false);
     } catch (error) {
       notify({ sev: 'error', subject: '', text: '', bad: failureText(error, 'upload failed') });

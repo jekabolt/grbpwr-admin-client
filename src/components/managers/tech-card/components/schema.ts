@@ -2510,6 +2510,25 @@ export const techCardSchema = techCardObject.superRefine((data, ctx) => {
       path: ['requiredSeamAllowanceMm'],
     });
   }
+  const fabricBomIds = new Set(
+    (data.bomItems ?? [])
+      .filter((line) => isRollGoodsSection(line.section))
+      .map((line) => wireInt(line.id))
+      .filter((id) => id > 0),
+  );
+  (data.garmentLabels ?? []).forEach((label, index) => {
+    const pieceBomItemId = wireInt(label.pieceBomItemId);
+    if (
+      label.attachment === 'on_fabric_piece' &&
+      pieceBomItemId > 0 &&
+      !fabricBomIds.has(pieceBomItemId)
+    )
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'pick piece fabric',
+        path: ['garmentLabels', index, 'pieceBomItemId'],
+      });
+  });
   // #64: every BOM article should link a catalog material — enforced as a RELEASE blocker
   // (releaseBlockers in index.tsx), not here. A hard zod error on every past-IDEA save wrongly
   // blocked the whole main insert (notes/season/labels/sign-offs/…) for any card carrying a
