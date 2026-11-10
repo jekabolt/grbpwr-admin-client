@@ -27,7 +27,11 @@ import { readDxf, segmentDxf } from 'lib/pattern-import/adapters/dxf';
 import { buildAst } from 'lib/pattern-import/adapters/dxf/ast';
 import { loadDxf } from 'lib/pattern-import/adapters/dxf/tags';
 import { pieceBlocks } from 'lib/pattern-import/adapters/rul/model';
-import { isUnsupportedFormat, sniffFormat } from 'lib/pattern-import/adapters/sniff';
+import {
+  UnsupportedFormat,
+  isUnsupportedFormat,
+  sniffFormat,
+} from 'lib/pattern-import/adapters/sniff';
 import { ImportError } from 'lib/pattern-import/worker/errors';
 import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
 import type { CardSize, DraftScopeTarget, StageIO, StageName } from 'lib/pattern-import/types';
@@ -636,7 +640,70 @@ function sectionC(t: RulTable) {
   );
   for (const [what, f, re] of cases) {
     const r = refusal(f);
-    check('C', `refused: ${what}`, r.startsWith('rul-invalid') && re.test(r), r.slice(0, 160));
+    // sizes drawn in the DXF itself are not a failure: the session reads the DXF alone
+    const code = what === 'label-less blocks in two sizes' ? 'rul-dxf-sized' : 'rul-invalid';
+    check('C', `refused: ${what}`, r.startsWith(code) && re.test(r), r.slice(0, 160));
+  }
+  // a rule text a hair off its point is that point's text (RUL_SNAP_MM), and says so
+  {
+    const exact = expandRul({
+      dxf: enc(baseDxf()),
+      dxfName: 'f.dxf',
+      rul: t,
+      rulName: 'B9000.rul',
+    });
+    const off = [
+      T('1', 0, 0, '# 1'),
+      T('1', 200.2, 0.1, '# 2'),
+      T('1', 200, 150, '# -1'),
+      T('1', 200, 300, '# 3'),
+      T('1', 0, 300, '# 2'),
+    ].join('');
+    let near: ReturnType<typeof expandRul> | null = null;
+    const why = refusal(() => {
+      near = expandRul({
+        dxf: enc(baseDxf({ texts: off })),
+        dxfName: 'f.dxf',
+        rul: t,
+        rulName: 'B9000.rul',
+      });
+    });
+    const got = near as ReturnType<typeof expandRul> | null;
+    const strip = (x: string) => x.replace(/200\.2|0\.1(?=\r)/g, '');
+    check(
+      'C',
+      'accepted: a rule text 0.2 mm off its point grades that point, with a warning',
+      !!got &&
+        got.warnings.some((w) => /bound to the nearest one/.test(w)) &&
+        got.stats.ruled === exact.stats.ruled &&
+        strip(got.text).length === strip(exact.text).length,
+      why || (got ? got.warnings.join(' | ').slice(0, 160) : ''),
+    );
+    const curved = refusal(() =>
+      expandRul({
+        dxf: enc(
+          baseDxf().replace(
+            V(200, 0),
+            V(200, 0).replace(' 30\r\n0.0\r\n', ' 30\r\n0.0\r\n 42\r\n0.5\r\n'),
+          ),
+        ),
+        dxfName: 'f.dxf',
+        rul: t,
+        rulName: 'B9000.rul',
+      }),
+    );
+    check(
+      'C',
+      'refused as OUR limit, not the export: a bulged polyline',
+      curved.startsWith('rul-limit') && /not built yet/.test(curved),
+      curved.slice(0, 160),
+    );
+    check(
+      'C',
+      'the limit wording does not ask for a re-export of the pair',
+      !/Re-export the DXF and RUL/.test(new UnsupportedFormat('rul-limit').message),
+      new UnsupportedFormat('rul-limit').message,
+    );
   }
   // one CLO export: "Size Group 1" in the RUL, "Size_Group_1" in the DXF — the same table
   const cloTable = refusal(() =>
@@ -772,25 +839,14 @@ function sectionC(t: RulTable) {
     gathered.slice(0, 160),
   );
   // a DXF that already holds several sizes
-  const two = baseDxf()
-    .replace(
-      '  0\r\nENDSEC\r\n  0\r\nSECTION\r\n  2\r\nENTITIES',
-      baseDxf({ size: '38' })
-        .split('  0\r\nSECTION\r\n  2\r\nBLOCKS\r\n')[1]
-        .split('  0\r\nENDSEC\r\n')[0]
-        .replace(/FRONT/g, 'FRONT_38') + '  0\r\nENDSEC\r\n  0\r\nSECTION\r\n  2\r\nENTITIES',
-    )
-    .replace(
-      '  0\r\nENDSEC\r\n  0\r\nEOF',
-      '  0\r\nINSERT\r\n  8\r\n1\r\n  2\r\nFRONT_38\r\n 10\r\n0\r\n 20\r\n0\r\n  0\r\nENDSEC\r\n  0\r\nEOF',
-    );
+  const two = twoSizeDxf();
   const r2 = refusal(() =>
     expandRul({ dxf: enc(two), dxfName: 'two.dxf', rul: t, rulName: 'B9000.rul' }),
   );
   check(
     'C',
-    'refused: a DXF that already holds 2 sizes',
-    /already holds 2 sizes/.test(r2),
+    'not graded: a DXF that already holds 2 sizes (the session reads it alone)',
+    r2.startsWith('rul-dxf-sized') && /already holds 2 sizes/.test(r2),
     r2.slice(0, 140),
   );
   // F17: the AccuMark binary rule table keeps its refusal; a text table alone is told what to add
@@ -811,6 +867,22 @@ function sectionC(t: RulTable) {
     sn.route === null && sn.refusal === 'rul-alone',
     sn.route === null ? sn.refusal : sn.route,
   );
+}
+
+/** One DXF that draws FRONT in two sizes (36 and 38). */
+function twoSizeDxf() {
+  return baseDxf()
+    .replace(
+      '  0\r\nENDSEC\r\n  0\r\nSECTION\r\n  2\r\nENTITIES',
+      baseDxf({ size: '38' })
+        .split('  0\r\nSECTION\r\n  2\r\nBLOCKS\r\n')[1]
+        .split('  0\r\nENDSEC\r\n')[0]
+        .replace(/FRONT/g, 'FRONT_38') + '  0\r\nENDSEC\r\n  0\r\nSECTION\r\n  2\r\nENTITIES',
+    )
+    .replace(
+      '  0\r\nENDSEC\r\n  0\r\nEOF',
+      '  0\r\nINSERT\r\n  8\r\n1\r\n  2\r\nFRONT_38\r\n 10\r\n0\r\n 20\r\n0\r\n  0\r\nENDSEC\r\n  0\r\nEOF',
+    );
 }
 
 // ── D · the session ────────────────────────────────────────────────────────────────────────────
@@ -1068,6 +1140,24 @@ async function sectionD() {
     'a rule the table lacks: the read stage refuses the run (no partial grade)',
     /unsupported-format/.test(e4) && /#3/.test(e4),
     e4.slice(0, 200),
+  );
+  // a DXF that draws its sizes itself + a RUL: the DXF's sizes are read, the table is not applied
+  const s6 = new Session(1, [{ name: 'two.dxf', bytes: enc(twoSizeDxf()) }, pair[1]]);
+  let e6 = '';
+  let n6 = 0;
+  let w6 = '';
+  try {
+    const { ex: ex6, sz: sz6 } = await toSizes(s6, SIZES);
+    n6 = sz6.map.entries.length;
+    w6 = JSON.stringify(ex6).match(/B9000\.rul not applied[^"]*/)?.[0] ?? '';
+  } catch (e) {
+    e6 = e instanceof ImportError ? `${e.code}: ${e.message}` : String(e);
+  }
+  check(
+    'D',
+    'a DXF holding 2 sizes + a RUL: the 2 sizes are imported, the table is not applied (warning)',
+    !e6 && n6 === 2 && !!w6,
+    e6 || `${n6} sizes · ${w6}`.slice(0, 200),
   );
   // the DXF alone: today's behaviour, one size
   const s5 = new Session(1, [pair[0]]);

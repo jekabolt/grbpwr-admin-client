@@ -9,6 +9,7 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ImportSession, SeedId, WizardStep } from 'lib/pattern-import/types';
+import { reportImportRefusal } from 'lib/observability';
 import { cn } from 'lib/utility';
 import {
   BackLink,
@@ -34,6 +35,7 @@ import {
 import { apiPageRoleDeps } from './ai-page-roles';
 import { createAiNamer } from './ai-namer';
 import { cardBuildDraft } from './card-apply';
+import { setRefusalSink } from './refusal-report';
 import { ApplyStep } from './steps/apply';
 import {
   assemblyImpact,
@@ -96,6 +98,9 @@ import { isReplayed } from './autopilot/replay-record';
 import { applyRunningLabel } from './apply-label';
 
 /** Two frames: React has rendered what the last move changed (the autopilot reads it after). */
+// every import the wizard stops on is reported (file names + reason); a no-op without a DSN
+setRefusalSink(reportImportRefusal);
+
 const nextFrames = () =>
   new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
 

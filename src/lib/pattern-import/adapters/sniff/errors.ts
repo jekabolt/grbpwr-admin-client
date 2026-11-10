@@ -32,7 +32,9 @@ export type UnsupportedCode =
   | 'zip-archive' // any other ZIP — the importer does not open archives
   // RUL · an AAMA/ASTM grade rule table (text .rul) — read only together with its base-size DXF
   | 'rul-alone' // a RUL without the base DXF it grades (or with something that is not that DXF)
-  | 'rul-invalid'; // a RUL / base DXF pair we cannot grade exactly: malformed, or not matching
+  | 'rul-invalid' // a RUL / base DXF pair we cannot grade exactly: malformed, or not matching
+  | 'rul-dxf-sized' // the DXF of the pair already holds its sizes: the session reads it alone
+  | 'rul-limit'; // a well-formed pair the importer does not grade yet (the limit is ours)
 
 type Refusal = { what: string; hint: string };
 
@@ -128,6 +130,14 @@ const REFUSALS: Record<UnsupportedCode, Refusal> = {
   'rul-invalid': {
     what: 'The grade rule table (.rul) and its DXF cannot be graded exactly, so nothing was graded.',
     hint: 'Re-export the DXF and RUL together from the pattern CAD (AAMA/ASTM, with grading), or export all sizes as one DXF instead.',
+  },
+  'rul-dxf-sized': {
+    what: 'The DXF already holds its sizes, so the grade rule table (.rul) was not applied.',
+    hint: 'Nothing to do: the sizes are read from the DXF.',
+  },
+  'rul-limit': {
+    what: 'The importer does not grade this pair yet — the files are fine, the limit is ours.',
+    hint: 'Export all sizes as one DXF and drop that instead; the case is reported to the developers.',
   },
   'zip-archive': {
     what: 'This is a ZIP archive; the importer does not open archives.',

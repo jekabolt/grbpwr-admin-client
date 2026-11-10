@@ -35,6 +35,11 @@ export const RUL_SAME_PLACE_MM = 0.01;
  * 10–15 mm, our 10 mm square), graded as one rigid thing — the drill ceiling of the DXF reader.
  */
 export const RUL_MARK_MAX_MM = 15;
+/**
+ * A rule text this close (mm) to exactly ONE point without a rule is that point's text, written a
+ * hair off (a CAD that rounds the text's place and the vertex differently). Said in a warning.
+ */
+export const RUL_SNAP_MM = 0.5;
 
 /** One weighted rule term: the point moves by `w` × that rule's delta. */
 type Term = { rule: number; w: number };
@@ -74,6 +79,10 @@ export type RulExpansion = {
 };
 
 const refuse = (detail: string) => new UnsupportedFormat('rul-invalid', detail);
+/** The DXF holds its sizes itself: not a failure — the session reads the DXF alone. */
+const sized = (detail: string) => new UnsupportedFormat('rul-dxf-sized', detail);
+/** A well-formed pair we do not grade yet: the wording must not blame the export. */
+const limit = (detail: string) => new UnsupportedFormat('rul-limit', detail);
 
 const add = (g: Grade, t: Grade, w: number) => {
   if (w === 0) return;
@@ -174,6 +183,8 @@ type PieceGrades = {
   interior: number;
   still: number;
   rules: Set<number>;
+  /** Rule texts bound to the nearest point (`RUL_SNAP_MM`), in the operator's words. */
+  snapped: string[];
 };
 
 /** ASTM quality-validation layers (84–87) copy a line: their points take that line's rules. */
@@ -243,6 +254,7 @@ function gradePiece(
   piece: PieceBlock,
   eps: number,
   markMax: number,
+  snap: number,
   label: string,
   sameRow: (a: number, b: number) => boolean,
   sameMove: (a: Grade, b: Grade) => boolean,
@@ -367,6 +379,7 @@ function gradePiece(
     interior: 0,
     still: 0,
     rules: new Set(),
+    snapped: [],
   };
   const gradable = (m: ModelEntity) => m.kind === 'chain' || m.kind === 'point';
   // Keep absent rule text distinct from CLO's explicit `# -1`: only the former may use the
@@ -384,6 +397,34 @@ function gradePiece(
       }
     });
   });
+  // a rule text a hair off its point: bound to the ONE nearest point that has no rule of its own
+  for (const b of bindings) {
+    if (b.used || !real(b.rule)) continue;
+    const free: { e: number; k: number; d: number; x: number; y: number }[] = [];
+    ents.forEach((m, e) => {
+      if (!gradable(m)) return;
+      m.slots.forEach((s, k) => {
+        const d = Math.hypot(s.x - b.x, s.y - b.y);
+        if (d <= snap && sourceRule[e][k] === undefined) free.push({ e, k, d, x: s.x, y: s.y });
+      });
+    });
+    if (!free.length) continue;
+    const at = free.reduce((a, c) => (c.d < a.d ? c : a));
+    const one = (c: { x: number; y: number }) =>
+      Math.abs(c.x - at.x) <= eps && Math.abs(c.y - at.y) <= eps;
+    // two different points in reach: which one the text means is not defined — refused below
+    if (!free.every(one)) continue;
+    for (const c of free) {
+      sourceRule[c.e][c.k] = b.rule;
+      out.of[c.e][c.k] = [{ rule: b.rule, w: 1 }];
+      out.ruled++;
+    }
+    out.rules.add(b.rule);
+    b.used = true;
+    out.snapped.push(
+      `${label}: the rule text "# ${b.rule}" at (${b.x.toFixed(3)}, ${b.y.toFixed(3)}) is at no point — bound to the nearest one at (${at.x.toFixed(3)}, ${at.y.toFixed(3)})`,
+    );
+  }
   const orphan = bindings.find((b) => !b.used && real(b.rule));
   if (orphan)
     throw refuse(
@@ -401,8 +442,8 @@ function gradePiece(
           )),
     );
     if (arc)
-      throw refuse(
-        `${label}: a ${arc.raw.type} on layer ${arc.layer} is curved between its points (bulges / spline); AAMA grades points, and such a curve's grade is not defined by its points`,
+      throw limit(
+        `${label}: a ${arc.raw.type} on layer ${arc.layer} is curved between its points (bulges / spline); grading such a curve is not built yet`,
       );
   }
 
@@ -683,8 +724,8 @@ export function expandRul(input: ExpandInput): RulExpansion {
   // the DXF must be the sample size, and only that
   const drawn = [...new Set(pieces.map((p) => p.sizeLabel).filter((s): s is string => !!s))];
   if (drawn.length > 1)
-    throw refuse(
-      `${input.dxfName} already holds ${drawn.length} sizes (${drawn.slice(0, 6).join(', ')}); a RUL grades ONE base size — import the DXF alone`,
+    throw sized(
+      `${input.dxfName} already holds ${drawn.length} sizes (${drawn.slice(0, 6).join(', ')}); a RUL grades ONE base size`,
     );
   if (drawn.length === 1 && bareSize(drawn[0]) !== sample)
     throw refuse(
@@ -711,9 +752,13 @@ export function expandRul(input: ExpandInput): RulExpansion {
     [...tails.values()].length === pieces.length &&
     pieces.length > 1;
   if (named.size > 1 || allOther)
-    throw refuse(
-      `${input.dxfName} names sizes ${[...named].join(', ')} in its block names; a RUL grades ONE base size (${rul.sample}) — import the DXF alone`,
-    );
+    throw named.size > 1
+      ? sized(
+          `${input.dxfName} names sizes ${[...named].join(', ')} in its block names; a RUL grades ONE base size (${rul.sample})`,
+        )
+      : refuse(
+          `${input.dxfName} names size ${[...named].join(', ')} in its block names, but the RUL's sample size is ${rul.sample}`,
+        );
   const declared = modelLabelsOf(raw).find((l) => l.key === 'sampleSize')?.value;
   if (declared && bareSize(declared) !== sample)
     throw refuse(
@@ -767,6 +812,7 @@ export function expandRul(input: ExpandInput): RulExpansion {
       p,
       eps,
       RUL_MARK_MAX_MM / units.mmPerUnit,
+      RUL_SNAP_MM / units.mmPerUnit,
       `${input.dxfName} · ${p.block.name}`,
       (a, b) => {
         const A = rul.rules.get(a);
@@ -1046,6 +1092,7 @@ export function expandRul(input: ExpandInput): RulExpansion {
     warnings.push(
       `${tot.still} point${tot.still > 1 ? 's' : ''} in ${stillPieces} graded piece${stillPieces > 1 ? 's' : ''} carry no rule and lie on no graded line: they stay as drawn in every size`,
     );
+  for (const g of grades) warnings.push(...g.snapped);
   for (const w of rul.warnings) warnings.push(`${input.rulName}: ${w}`);
   return {
     text,

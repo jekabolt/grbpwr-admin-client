@@ -76,6 +76,7 @@ import {
   weakAsides,
   type AutoResolver,
 } from './auto-advance';
+import { reportRefusal } from './refusal-report';
 import { singlePageSheet } from './sheet-skip';
 import {
   normWriteStorage,
@@ -910,6 +911,12 @@ export function useImportSession(deps: {
       message,
     };
     setErrorCode(code);
+    reportRefusal({
+      stage: failureRef.current.stage,
+      code,
+      message,
+      files: iRef.current.fileList.map((f) => f.name),
+    });
     const id = workerId();
     const dead = id != null && !!client.alive && !client.alive(id);
     // STOPFIX: a stop is the operator's — the run stays on its step with everything it had and
