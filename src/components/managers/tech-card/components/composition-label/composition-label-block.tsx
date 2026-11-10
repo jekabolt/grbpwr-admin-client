@@ -114,7 +114,9 @@ import {
   PX_PER_MM,
   type Region,
 } from './regions';
+import { usePublishBuiltRibbons } from './built-ribbons-context';
 import { Ribbon, type RegionView, type RibbonSide } from './ribbon';
+import { builtRibbonPages } from './ribbon-pages';
 import {
   useCompositionLabel,
   useShaper,
@@ -299,6 +301,19 @@ export function CompositionLabelBlock({
   const orderedSizes = orderedSizeIds
     .map((id) => sizes.find((entry) => entry.id === id))
     .filter((entry): entry is CareLabelSize => !!entry);
+  // The LABELS section draws these ribbons on its canvas: first colour with a set, first size.
+  const colorwayKey = colorways.map((entry) => entry.id).join(',');
+  const sizeKey = orderedSizeIds.join(',');
+  const ribbonPages = useMemo(
+    () =>
+      builtRibbonPages(
+        model.plan?.sets,
+        colorwayKey ? colorwayKey.split(',').map(Number) : [],
+        sizeKey ? sizeKey.split(',').map(Number) : [],
+      ),
+    [model.plan, colorwayKey, sizeKey],
+  );
+  usePublishBuiltRibbons(ribbonPages);
 
   // ── вариант на лентах ─────────────────────────────────────────────────────────────────────
   const [colorwayId, setColorwayId] = useState<number | null>(null);
