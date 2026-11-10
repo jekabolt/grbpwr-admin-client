@@ -51,6 +51,7 @@ import { moveRow, orderOfRows, windowRows, type LayerMove } from './layers-windo
 import { LayersMenu, LayersWindow } from './layers-window-view';
 import { PairNo } from './pair-no';
 import { recordSeamDecision } from './seam-decisions';
+import { NO_STEP_EDGES, NO_STEP_PARTS } from './step-highlight';
 import { isGuess, pickTarget, seamSideName, sideForClick } from './seam-focus';
 import { usePictureZoom } from './picture-zoom';
 import {
@@ -1022,6 +1023,9 @@ export function SeamPickerBody({
       geoms={geoms}
       innerLines={innerLines}
       marks={marks}
+      {...(topstitchMode
+        ? { stepEdges: NO_STEP_EDGES, stepParts: NO_STEP_PARTS, seamless: true }
+        : {})}
       nos={nos}
       names={groupNames}
       namesBelow={phone}
