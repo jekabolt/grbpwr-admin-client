@@ -2799,10 +2799,16 @@ function buildActions(
 ): Map<number, AsmAction> {
   const actions = new Map<number, AsmAction>();
   const hemPieces = [...pieces.values()].flatMap((piece) => (piece.geom ? [piece.geom] : []));
+  // The step's label pieces are hosts too, as in the editor's picture: a drawn label takes no mark.
   const placementSelections = walkPlacementMarks(
     ops.map((op) => ({
       operation: op.raw,
-      hosts: [...new Set((targets.get(op.n) ?? []).map((item) => item.p))].flatMap((key) => {
+      hosts: [
+        ...new Set([
+          ...(targets.get(op.n) ?? []).map((item) => item.p),
+          ...(op.raw.labelKeys ?? []).filter((key) => pieces.get(key)?.geom.garmentLabel),
+        ]),
+      ].flatMap((key) => {
         const piece = pieces.get(key);
         return piece ? [{ key, name: piece.name, code: piece.code, geom: piece.geom }] : [];
       }),
@@ -2813,7 +2819,8 @@ function buildActions(
     const items = targets.get(op.n) ?? [];
     const placementSelection = placementSelections[opIndex];
     let placements = placementGlyphs(op, placementSelection);
-    if (!placements.length && !placementSelection?.issue)
+    const drawnLabel = !!placementSelection?.drawnLabel;
+    if (!placements.length && !placementSelection?.issue && !drawnLabel)
       placements = fallbackPlacements(op, pieces, items);
     if (placementSelection?.issue === 'count-exceeds-marks')
       assemblyGap(
@@ -2896,7 +2903,7 @@ function buildActions(
           }
         : {}),
       missing:
-        placementOp && !placements.length
+        placementOp && !placements.length && !drawnLabel
           ? 'position'
           : edgeOp && !edgeParts.length
             ? 'seam'
