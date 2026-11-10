@@ -6,7 +6,7 @@ import { useFormContext, useFormState, useWatch, type FieldErrors } from 'react-
 import type { HeaderWarning, HeaderWarningAction } from 'ui';
 import { flattenFieldErrors } from 'utils/field-errors';
 import { slotNormRows } from './bom-norm';
-import { catalogPrice, resolveBomPrice } from './bom-price';
+import { catalogPrice, resolveBomPrice, threadConeLengthMissing } from './bom-price';
 import { normalizeMaterialUnit } from './material-unit';
 import { UNSET_PURPOSE, isRollGoodsSection } from './bom-purpose';
 import { looksLikeArticleName, normalizeRole } from './bom-roles';
@@ -132,7 +132,12 @@ export function useBomWarnings({
     // и без права любая строка выглядела бы «без цены»).
     if (linked && canReadCosting) {
       const price = resolveBomPrice(line, material);
-      if (price.source === 'none') {
+      if (threadConeLengthMissing(line, material)) {
+        warn('no cone length', {
+          label: 'open article',
+          href: `${ROUTES.materials}?tab=catalog&material=${materialId}`,
+        });
+      } else if (price.source === 'none') {
         warn('no price', {
           label: 'open article',
           href: `${ROUTES.materials}?tab=catalog&material=${materialId}`,
