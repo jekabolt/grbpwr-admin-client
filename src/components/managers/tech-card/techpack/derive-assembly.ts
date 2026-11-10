@@ -95,6 +95,7 @@ import { FRAMES, inFrame, reverses, rmsFit, runById, runSamples } from 'lib/seam
 import { hitOf } from 'lib/seams/resolve';
 
 import { GapSink, type Gap } from './gaps';
+import { ownerLayoutsByNumber, ownerStepResultsOfCard } from './owner-step-results';
 import { assemblyPieceCode } from './assembly-piece-code';
 import { pressMode, type PressPiece } from './press-arrows';
 import { asmProtoFlags } from './asm-proto-flags';
@@ -2262,6 +2263,7 @@ function buildCards(
   t: PdfT = englishT,
   inferMissing = true,
   stripKeys: ReadonlySet<string> = new Set(),
+  ownerLayouts: ReadonlyMap<number, ReadonlyMap<string, Matrix>> = new Map(),
 ): Built {
   const cards = new Map<number, JoinCard>();
   const units = new Map<string, Item[]>();
@@ -2495,13 +2497,9 @@ function buildCards(
       world.push(...g);
     }
 
-    // The engine's edges are y up, the drawing's y down: a stretch laid on another piece counts once.
-    const placed = new Map(
-      world.map((item) => {
-        const [a, b, c, d, e, f] = item.T;
-        return [item.p, [a, b, -c, -d, e, f] as Matrix] as const;
-      }),
-    );
+    // A stretch laid on another piece counts once, read on the editor's own step picture (picker,
+    // tile, map): the drawing's layout above is for ink, not for lengths.
+    const placed = ownerLayouts.get(op.n);
     const metrics: SeamMetric[] = seams.map((s, i) => {
       const left = metricLength(s.a, activeFolds, placed);
       if (!s.b.length) return { letter: String(i + 1), left, bad: false };
@@ -3326,6 +3324,21 @@ export function compactInputNames(inputs: readonly InputName[]): string[] {
   return words.filter((word, i) => !ranges.has(named[i]) || words.indexOf(word) === i);
 }
 
+/** The editor's step layouts by operation number; none when the pattern cannot be laid. */
+function ownerLayoutsOfCard(
+  input: AssemblyInput,
+  resolved: common_TechCard,
+): ReadonlyMap<number, ReadonlyMap<string, Matrix>> {
+  if (!input.pieces.size) return new Map();
+  try {
+    return ownerLayoutsByNumber(
+      ownerStepResultsOfCard(input.techCard, resolved, input.pieces, input.grainDeg),
+    );
+  } catch {
+    return new Map();
+  }
+}
+
 export function deriveAssembly(
   input: AssemblyInput,
   sink?: GapSink,
@@ -3401,6 +3414,7 @@ export function deriveAssembly(
     t,
     !garment,
     stripKeysOfCard(techCard),
+    ownerLayoutsOfCard(input, techCard),
   );
   const actions = buildActions(
     ops,
