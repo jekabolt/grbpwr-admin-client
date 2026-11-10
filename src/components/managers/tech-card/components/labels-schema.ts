@@ -138,9 +138,11 @@ export const garmentLabelSchema = z.object({
   widthMm: labelMillimetres,
   heightMm: labelMillimetres,
   fold: z.enum(['', 'flat', 'half', 'ends', 'mitre', 'loop']).optional().default(''),
-  // Fold lines: mm from the top along the height, CSV ("12,88"); '' = derive from fold.
+  // Fold/stitch lines: mm from the sewn edge along foldAxis, CSV ("12,88").
   foldLinesMm: z.string().optional().default(''),
   stitchLinesMm: z.string().optional().default(''),
+  foldAxis: z.string().optional().default(''),
+  pages: z.number().int().min(1).max(12).optional().default(1),
   qtyPerGarment,
   // FK to the label material's BOM line; 0 = none.
   bomItemId: z.number().optional().default(0),
@@ -379,6 +381,8 @@ export function garmentLabelsToForm(ls?: common_TechCardGarmentLabel[]): FormGar
         : '',
     foldLinesMm: l.foldLinesMm || '',
     stitchLinesMm: l.stitchLinesMm || '',
+    foldAxis: l.foldAxis === 'width' ? 'width' : '',
+    pages: Math.min(12, Math.max(1, Math.round(wireInt(l.pages)) || 1)),
     qtyPerGarment: wireInt(l.qtyPerGarment) || 1,
     bomItemId: wireInt(l.bomItemId),
     bomLineKey: l.bomLineKey || '',
@@ -472,6 +476,9 @@ export function garmentLabelsOut(ls?: FormGarmentLabel[]): common_TechCardGarmen
     // ALWAYS sent: '' means «no lines»; an older bundle omits it and the server keeps the stored value.
     foldLinesMm: l.foldLinesMm?.trim() || '',
     stitchLinesMm: l.stitchLinesMm?.trim() || '',
+    // ALWAYS sent: both are presence fields; old clients omit them and the server keeps storage.
+    foldAxis: l.foldAxis === 'width' ? 'width' : '',
+    pages: Math.min(12, Math.max(1, Math.round(wireInt(l.pages)) || 1)),
     qtyPerGarment: l.qtyPerGarment || 1,
     bomItemId: wireInt(l.bomItemId),
     bomLineKey: l.bomLineKey?.trim() || '',

@@ -3,7 +3,7 @@
 import type { JSX } from 'react';
 
 import { garmentLabelMark, type GarmentLabelLike } from './garment-label-pieces';
-import { foldedSpans } from './label-fold-lines';
+import { foldedSpans, labelAxisLen } from './label-fold-lines';
 
 const VIEW = 64;
 const FIT = 56;
@@ -13,7 +13,7 @@ const THIN = { strokeWidth: 0.6 } as const;
 
 type Box = { x: number; y: number; w: number; h: number };
 
-function stitches(attachment: string, b: Box): JSX.Element | null {
+function stitches(attachment: string, b: Box, widthAxis: boolean): JSX.Element | null {
   const a = attachment.toLowerCase();
   if (!a.startsWith('sewn')) return null;
   const i = INSET;
@@ -26,28 +26,44 @@ function stitches(attachment: string, b: Box): JSX.Element | null {
         d={`M${b.x + i} ${b.y} V${b.y + b.h} M${b.x + b.w - i} ${b.y} V${b.y + b.h}`}
       />
     );
+  if (widthAxis) {
+    const x = b.x + i + 1;
+    return <path {...STITCH} d={`M${x} ${b.y} V${b.y + b.h}`} />;
+  }
   const y = b.y + i + 1;
   return <path {...STITCH} d={`M${b.x} ${y} H${b.x + b.w}`} />;
 }
 
-function foldLines(lines: readonly number[], heightMm: number, b: Box): JSX.Element | null {
+function foldLines(
+  lines: readonly number[],
+  axisMm: number,
+  b: Box,
+  widthAxis: boolean,
+): JSX.Element | null {
   if (!lines.length) return null;
-  const at = (mm: number) => b.y + (mm / heightMm) * b.h;
+  const at = (mm: number) => (widthAxis ? b.x + (mm / axisMm) * b.w : b.y + (mm / axisMm) * b.h);
   return (
     <g data-label-fold-lines={lines.join(',')}>
-      {foldedSpans(lines, heightMm).map(([from, to]) => (
+      {foldedSpans(lines, axisMm).map(([from, to]) => (
         <rect
           key={`${from}-${to}`}
-          x={b.x}
-          y={at(from)}
-          width={b.w}
-          height={at(to) - at(from)}
+          x={widthAxis ? at(from) : b.x}
+          y={widthAxis ? b.y : at(from)}
+          width={widthAxis ? at(to) - at(from) : b.w}
+          height={widthAxis ? b.h : at(to) - at(from)}
           fill='currentColor'
           stroke='none'
           opacity={0.22}
         />
       ))}
-      <path {...THIN} d={lines.map((mm) => `M${b.x} ${at(mm)} H${b.x + b.w}`).join(' ')} />
+      <path
+        {...THIN}
+        d={lines
+          .map((mm) =>
+            widthAxis ? `M${at(mm)} ${b.y} V${b.y + b.h}` : `M${b.x} ${at(mm)} H${b.x + b.w}`,
+          )
+          .join(' ')}
+      />
     </g>
   );
 }
@@ -68,6 +84,8 @@ export function LabelShapeIcon({
   const w = widthMm * k;
   const h = heightMm * k;
   const b: Box = { x: (VIEW - w) / 2, y: (VIEW - h) / 2, w, h };
+  const widthAxis = shape?.foldAxis === 'width';
+  const axisMm = labelAxisLen({ widthMm, heightMm, foldAxis: shape?.foldAxis });
   const kind = ((label.kind ?? '').trim() || (label.key ?? '').trim()).toLowerCase();
   return (
     <svg
@@ -84,18 +102,27 @@ export function LabelShapeIcon({
       className={className}
     >
       <rect x={b.x} y={b.y} width={b.w} height={b.h} strokeWidth={1.25} />
+      <path
+        d={widthAxis ? `M${b.x} ${b.y} V${b.y + b.h}` : `M${b.x} ${b.y} H${b.x + b.w}`}
+        strokeWidth={2.5}
+        data-label-sewn-edge=''
+      />
       {shape?.stitchLines?.length ? (
         <path
           {...STITCH}
           data-label-stitch-lines={shape.stitchLines.join(',')}
           d={shape.stitchLines
-            .map((mm) => `M${b.x} ${b.y + (mm / heightMm) * b.h} H${b.x + b.w}`)
+            .map((mm) =>
+              widthAxis
+                ? `M${b.x + (mm / axisMm) * b.w} ${b.y} V${b.y + b.h}`
+                : `M${b.x} ${b.y + (mm / axisMm) * b.h} H${b.x + b.w}`,
+            )
             .join(' ')}
         />
       ) : (
-        stitches(shape?.attachment ?? label.attachment ?? '', b)
+        stitches(shape?.attachment ?? label.attachment ?? '', b, widthAxis)
       )}
-      {foldLines(shape?.foldLines ?? [], heightMm, b)}
+      {foldLines(shape?.foldLines ?? [], axisMm, b, widthAxis)}
     </svg>
   );
 }

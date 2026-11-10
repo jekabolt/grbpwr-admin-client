@@ -5,7 +5,7 @@ import type { common_TechCard } from 'api/proto-http/admin';
 import type { GarmentLabelMark } from 'lib/assembly-skeleton/types';
 import type { PieceDTO } from 'lib/nesting/types';
 
-import { labelAssembly, labelFoldLines, parseStitchLines } from './label-fold-lines';
+import { labelAssembly, labelAxisLen, labelFoldLines, parseStitchLines } from './label-fold-lines';
 import type { FoundPiece } from './nesting/dxf-geometry';
 import { garmentLabelKindNames, kindLabel } from './tech-card-options';
 
@@ -18,6 +18,8 @@ export type GarmentLabelLike = {
   fold?: string | null;
   foldLinesMm?: string | null;
   stitchLinesMm?: string | null;
+  foldAxis?: string | null;
+  pages?: number | null;
   attachment?: string | null;
   qtyPerGarment?: number | null;
 };
@@ -68,6 +70,8 @@ export function garmentLabelMark(label: GarmentLabelLike): GarmentLabelMark | nu
   const fallback = sized ? null : unsizedLabelMm(label);
   const widthMm = fallback ? fallback.widthMm : decimal(label.widthMm);
   const heightMm = fallback ? fallback.heightMm : decimal(label.heightMm);
+  const foldAxis = label.foldAxis === 'width' ? 'width' : '';
+  const axisMm = labelAxisLen({ ...label, widthMm, heightMm, foldAxis });
   const rawFold = (label.fold ?? '').trim();
   const fold: GarmentLabelMark['fold'] =
     rawFold === 'flat' ||
@@ -82,8 +86,9 @@ export function garmentLabelMark(label: GarmentLabelLike): GarmentLabelMark | nu
     widthMm,
     heightMm,
     fold,
-    foldLines: labelFoldLines({ fold, foldLinesMm: label.foldLinesMm }, heightMm),
-    stitchLines: parseStitchLines(label.stitchLinesMm, heightMm),
+    foldAxis,
+    foldLines: labelFoldLines({ fold, foldLinesMm: label.foldLinesMm }, axisMm),
+    stitchLines: parseStitchLines(label.stitchLinesMm, axisMm),
     attachment: (label.attachment ?? '').trim(),
   };
 }
@@ -124,8 +129,9 @@ export function garmentLabelFoundPiece(
   mark: GarmentLabelMark,
   sizeToken = '',
 ): FoundPiece {
-  const widthCm = mark.widthMm / 10;
-  const heightCm = labelShownMm(mark) / 10;
+  const shown = labelShownSizeMm(mark);
+  const widthCm = shown.widthMm / 10;
+  const heightCm = shown.heightMm / 10;
   const piece: PieceDTO = {
     id: labelPieceId(key),
     name: mark.label,
@@ -162,9 +168,13 @@ export function garmentLabelDrawingsOf(
   });
 }
 
-/** The label's height as it lies on the garment: folded, cut at its stitch to the part that shows. */
-export function labelShownMm(mark: GarmentLabelMark): number {
-  return labelAssembly(mark.foldLines ?? [], mark.stitchLines ?? [], mark.heightMm).heightMm;
+/** The label as it lies on the garment: folded, cut at its stitch to the part that shows. */
+export function labelShownSizeMm(mark: GarmentLabelMark): { widthMm: number; heightMm: number } {
+  const axisMm = labelAxisLen(mark);
+  const shown = labelAssembly(mark.foldLines ?? [], mark.stitchLines ?? [], axisMm).heightMm;
+  return mark.foldAxis === 'width'
+    ? { widthMm: shown, heightMm: mark.heightMm }
+    : { widthMm: mark.widthMm, heightMm: shown };
 }
 
 /** Width × the height that shows on the garment (folded, cut at its stitch); '' while unsized. */
@@ -172,6 +182,7 @@ export function labelShownSizeText(label: GarmentLabelLike): string {
   if (!(decimal(label.widthMm) > 0 && decimal(label.heightMm) > 0)) return '';
   const mark = garmentLabelMark(label);
   if (!mark) return '';
+  const shown = labelShownSizeMm(mark);
   const mm = (value: number) => String(Math.round(value * 10) / 10);
-  return `${mm(mark.widthMm)} × ${mm(labelShownMm(mark))}`;
+  return `${mm(shown.widthMm)} × ${mm(shown.heightMm)}`;
 }

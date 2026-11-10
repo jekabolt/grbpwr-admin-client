@@ -1,5 +1,6 @@
-// A label's fold lines: positions in mm along its height, from the top edge. Stored as CSV
-// ("12,88"); a label saved before the lines existed derives them from its fold word.
+// A label's fold lines: positions in mm along its fold axis. The legacy axis is the height, from
+// the top edge; `width` is measured from the left edge. Stored as CSV ("12,88"); a label saved
+// before the lines existed derives them from its fold word.
 
 export const MAX_FOLD_LINES = 8;
 
@@ -7,6 +8,26 @@ type FoldLabel = {
   foldLinesMm?: string | null;
   fold?: string | null;
 };
+
+type LabelAxis = {
+  foldAxis?: string | null;
+  widthMm?: string | number | { value?: string | null } | null;
+  heightMm?: string | number | { value?: string | null } | null;
+};
+
+const axisNumber = (value: LabelAxis['widthMm']): number => {
+  const text = (typeof value === 'object' && value !== null ? value.value ?? '' : value ?? '')
+    .toString()
+    .trim()
+    .replace(',', '.');
+  const parsed = text ? Number(text) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+/** Length used by every fold/stitch reader: width from the left, else legacy height from the top. */
+export function labelAxisLen(label: LabelAxis): number {
+  return axisNumber(label.foldAxis === 'width' ? label.widthMm : label.heightMm);
+}
 
 const round1 = (value: number) => Math.round(value * 10) / 10;
 

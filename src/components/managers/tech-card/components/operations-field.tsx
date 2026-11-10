@@ -938,7 +938,7 @@ type PressProfileRow = NonNullable<EquipmentDefaultsForm['presses']>[number];
 /** A step row exactly as the field array holds it. */
 export type OperationRow = typeof emptyOperation;
 
-function newOperationRow(overrides: Partial<OperationRow> = {}): OperationRow {
+export function newOperationRow(overrides: Partial<OperationRow> = {}): OperationRow {
   return { ...emptyOperation, historyKey: ulid(), ...overrides };
 }
 
