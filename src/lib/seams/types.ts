@@ -234,8 +234,11 @@ export const SEAMS = {
   ratioDrift: 0.03,
   /** Candidate runs: chains of up to this many neighbouring edges. */
   maxChain: 3,
-  /** Anchors of one side of a row: the server refuses more. */
-  maxAnchorsPerSide: 8,
+  /**
+   * Anchors of one side of a row: the server refuses more. A collar on a whole neckline (fronts,
+   * back split by fold cuts, two plackets) needs more than 8.
+   */
+  maxAnchorsPerSide: 24,
 } as const;
 
 export type ResolveOptions = {

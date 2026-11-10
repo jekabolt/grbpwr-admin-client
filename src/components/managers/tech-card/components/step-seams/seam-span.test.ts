@@ -441,13 +441,16 @@ describe('one edge sewn with a gap: a long edge broken by a pocket', () => {
       expect(part.range[1]).toBeGreaterThan(part.range[0]);
   });
 
-  it('holds to the limit of anchors per side: eight build, nine do not', () => {
+  it('holds to the limit of anchors per side: the limit builds, one more does not', () => {
+    const step = length / (SEAMS.maxAnchorsPerSide + 1);
     const spans = (count: number) =>
-      Array.from({ length: count }, (_, at) => range('FRONT_L', 4, at * 100, at * 100 + 50));
-    const eight = rowFromHand(spans(SEAMS.maxAnchorsPerSide), [other], pantsGeoms, anchorCtx, {
+      Array.from({ length: count }, (_, at) =>
+        range('FRONT_L', 4, at * step, at * step + step / 2),
+      );
+    const full = rowFromHand(spans(SEAMS.maxAnchorsPerSide), [other], pantsGeoms, anchorCtx, {
       direction: 'reversed',
     });
-    expect(eight?.sideA).toHaveLength(SEAMS.maxAnchorsPerSide);
+    expect(full?.sideA).toHaveLength(SEAMS.maxAnchorsPerSide);
     expect(
       rowFromHand(spans(SEAMS.maxAnchorsPerSide + 1), [other], pantsGeoms, anchorCtx, {
         direction: 'reversed',
@@ -1229,12 +1232,13 @@ describe('ACCEPT with a stretch on a side of many edges', () => {
   });
 
   it('a side that cannot fit says so', () => {
-    const ranged = (name: string, edges: number[]) =>
-      edges.map((k) => ({ target: id(name, k), range: [0, 10] as [number, number] }));
-    const { row, refusal } = store([
-      ...ranged('Back_L', [0, 1, 2, 3, 4]),
-      ...ranged('FRONT_L', [0, 1, 2, 3]),
-    ]);
+    const all = [...pantsGeoms]
+      .filter(([key]) => key !== piece('FRONT_R').key)
+      .flatMap(([key, geom]) =>
+        geom.edges.map((_, k) => ({ target: `${key}#${k}`, range: [0, 10] as [number, number] })),
+      );
+    expect(all.length).toBeGreaterThan(SEAMS.maxAnchorsPerSide);
+    const { row, refusal } = store(all.slice(0, SEAMS.maxAnchorsPerSide + 1));
     expect(row).toBeNull();
     expect(refusal).toBe('too many parts');
   });
