@@ -151,6 +151,20 @@ export function refusalMessage(code: UnsupportedCode): string {
   return `${r.what} ${r.hint}`;
 }
 
+/**
+ * A grading refusal as the session words it (`<rul> + <dxf>: <what> <hint> (<detail>)`) → its
+ * detail alone (the piece, the point, the rule), or null when the message is not one.
+ */
+export function gradeRefusalDetail(message: string): string | null {
+  for (const code of ['rul-invalid', 'rul-limit'] as const) {
+    const at = message.indexOf(refusalMessage(code));
+    if (at < 0) continue;
+    const rest = message.slice(at + refusalMessage(code).length).trim();
+    return rest.replace(/^\(/, '').replace(/\)$/, '') || REFUSALS[code].what;
+  }
+  return null;
+}
+
 /** The concrete export instruction alone. */
 export function refusalHint(code: UnsupportedCode): string {
   return REFUSALS[code].hint;

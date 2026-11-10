@@ -32,6 +32,7 @@ import {
   isUnsupportedFormat,
   sniffFormat,
 } from 'lib/pattern-import/adapters/sniff';
+import { gradeRefusalDetail } from 'lib/pattern-import/adapters/sniff/errors';
 import { ImportError } from 'lib/pattern-import/worker/errors';
 import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
 import type { CardSize, DraftScopeTarget, StageIO, StageName } from 'lib/pattern-import/types';
@@ -1158,6 +1159,55 @@ async function sectionD() {
     'a DXF holding 2 sizes + a RUL: the 2 sizes are imported, the table is not applied (warning)',
     !e6 && n6 === 2 && !!w6,
     e6 || `${n6} sizes · ${w6}`.slice(0, 200),
+  );
+  // the operator's way out of that refusal: the base size alone, the table kept but not applied
+  check(
+    'D',
+    'the refusal names its detail alone for the footer',
+    /^FRONT\.dxf uses rule/.test(gradeRefusalDetail(e4) ?? ''),
+    (gradeRefusalDetail(e4) ?? 'null').slice(0, 120),
+  );
+  const s7 = new Session(1, [
+    pair[0],
+    { name: 'B9000.rul', bytes: enc(SPEC_RUL.replace('RULE: DELTA 3', 'RULE: DELTA 4')) },
+  ]);
+  let e7 = '';
+  let n7 = 0;
+  let w7 = false;
+  try {
+    const c7 = ctx();
+    const ex7 = await s7.runStage(
+      'extract',
+      { opts: { sagittaMm: 0.05, keepFills: true, baseOnly: true } },
+      c7,
+    );
+    w7 = ex7.warnings.some((w) => w.includes('B9000.rul not applied'));
+    await s7.runStage(
+      'scale',
+      {
+        decision: {
+          factor: ex7.scale[0]?.factor ?? 1,
+          method: ex7.scale[0]?.method ?? 'declared',
+          operatorConfirmed: false,
+        },
+      },
+      c7,
+    );
+    await s7.runStage('assemble', { sheet: 0 }, c7);
+    await s7.runStage(
+      'chains',
+      { opts: { joinGapMm: 3, joinAngleDeg: 15, joinLateralMm: 0.15 } },
+      c7,
+    );
+    n7 = (await s7.runStage('sizes', { card: card(SIZES) }, c7)).map.entries.length;
+  } catch (e) {
+    e7 = e instanceof ImportError ? `${e.code}: ${e.message}` : String(e);
+  }
+  check(
+    'D',
+    'base size only: the same pair reads as one size, the table is not applied (warning)',
+    !e7 && n7 === 1 && w7,
+    e7 || `${n7} sizes · warned ${w7}`,
   );
   // the DXF alone: today's behaviour, one size
   const s5 = new Session(1, [pair[0]]);

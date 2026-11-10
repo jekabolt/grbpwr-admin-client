@@ -1077,7 +1077,11 @@ export function useImportSession(deps: {
           patch({ sessionId: opened.sessionId, files: opened.files });
           sRef.current = { ...sRef.current, sessionId: opened.sessionId };
           const out = await run('extract', {
-            opts: { sagittaMm: PATIMPORT.sagittaMm, keepFills: true },
+            opts: {
+              sagittaMm: PATIMPORT.sagittaMm,
+              keepFills: true,
+              ...(ev.baseOnly ? { baseOnly: true } : {}),
+            },
           });
           // A8: the pages are cleaned before anything is parsed — furniture masked, the pages
           // that are not pattern set aside, a test square drawn as lines offered as the scale

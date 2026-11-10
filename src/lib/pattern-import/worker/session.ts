@@ -365,6 +365,8 @@ export class Session {
   private rul: { name: string; bytes: number; sha256: string } | null = null;
   /** The DXF of the pair holds its sizes itself: the table was dropped but not applied. */
   private rulSkipped = false;
+  /** The operator's "base size only": the table is kept as a file but never applied. */
+  private baseOnly = false;
   // scale
   private decision: ScaleDecision | null = null;
   private fast: DxfFastPath | null = null;
@@ -667,7 +669,17 @@ export class Session {
           return doc;
         },
         dxf: async (f, o, p) => {
-          const graded = this.rul ? await this.gradeByRul(f) : null;
+          const graded = !this.rul
+            ? null
+            : this.baseOnly
+              ? {
+                  bytes: f.bytes,
+                  sizes: [],
+                  blocks: [],
+                  warnings: [],
+                  skipped: `${this.rul.name} not applied: base size only`,
+                }
+              : await this.gradeByRul(f);
           const read = await readDxf(
             graded && !graded.skipped
               ? { ...f, bytes: graded.bytes, generatedFusing: info.generatedFusing }
@@ -816,6 +828,7 @@ export class Session {
     ctx: StageCtx,
   ): Promise<StageIO['extract']['out']> {
     const opts = { ...DEFAULT_OPTS, ...input.opts };
+    this.baseOnly = !!input.opts.baseOnly;
     const docs = await this.readAll(ctx, opts);
     this.docs = docs;
     this.docsFactor = 1;
