@@ -1099,6 +1099,66 @@ describe('stepActionMarks stored span', () => {
   });
 });
 
+describe('StepPictureSvg topstitch lines', () => {
+  const line = {
+    id: 'line-a:0:0:topstitch',
+    piece: 'bag',
+    target: 'bag#0',
+    points: [
+      [2, 2],
+      [68, 2],
+    ] as Pt2[],
+    weight: 'ink' as const,
+    dashed: true,
+    kind: 'topstitch',
+  };
+  const render = (look: 'canvas' | 'result' | 'tile' | 'print', activeNo?: number) =>
+    renderToStaticMarkup(
+      <StepPictureSvg
+        w={120}
+        h={100}
+        pad={4}
+        look={look}
+        layout={layout}
+        geoms={geoms}
+        stepEdges={[]}
+        stepParts={[]}
+        seamless
+        actionLines={[line]}
+        nos={[{ id: 'bag#0', i: 0 }]}
+        activeNo={activeNo}
+      />,
+    );
+  const tagOf = (markup: string) =>
+    markup.match(/<path[^>]*data-asm-mark="topstitch"[^>]*>/)?.[0] ?? '';
+  const strokeOf = (markup: string) => tagOf(markup).match(/ stroke="([^"]+)"/)?.[1];
+
+  it.each(['canvas', 'result', 'tile'] as const)(
+    'draws a stored line dashed in the highlight ink on the %s',
+    (look) => {
+      const markup = render(look);
+      expect(strokeOf(markup)).toBe('var(--color-highlightColor)');
+      expect(tagOf(markup)).toContain('stroke-dasharray="5 3"');
+    },
+  );
+
+  it('keeps print in ink', () => {
+    expect(strokeOf(render('print'))).toBe('var(--color-textColor)');
+  });
+
+  it('numbers a line on the canvas, filled while active, never on a tile', () => {
+    const idle = render('canvas');
+    const active = render('canvas', 0);
+    const box = (markup: string) =>
+      markup.match(/<g data-pair-no="1"><rect[^>]*>/)?.[0].match(/ fill="([^"]+)"/)?.[1];
+
+    expect(idle).toContain('data-pair-no="1"');
+    expect(box(idle)).not.toBe('var(--color-textColor)');
+    expect(box(active)).toBe('var(--color-textColor)');
+    expect(render('tile')).not.toContain('data-pair-no=');
+  });
+});
+
 describe('StepPictureSvg action glyphs', () => {
   const narrow = rectangle('narrow', 'narrow placket', 10, 100);
   const narrowGeoms = new Map([['narrow', narrow]]);
