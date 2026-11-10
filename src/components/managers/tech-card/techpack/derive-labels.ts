@@ -36,6 +36,7 @@ import {
 import type { Gap, GapSink } from './gaps';
 import { englishT, own, type PdfT } from './i18n';
 import {
+  labelAxisLen,
   parseFoldLines,
   parseStitchLines,
 } from 'components/managers/tech-card/components/label-fold-lines';
@@ -148,8 +149,8 @@ function deriveSewn(techCard: common_TechCard, options: LabelsDeriveOptions, t: 
     // A card not saved since the size/fold fields came keeps its old free text.
     fold: [
       clean(row.fold) || clean(row.folding),
-      foldLinesText(row.foldLinesMm, decimal(row.heightMm) ?? 0),
-      stitchLinesText(row.stitchLinesMm, decimal(row.heightMm) ?? 0),
+      foldLinesText(row.foldLinesMm, labelAxisLen(row)),
+      stitchLinesText(row.stitchLinesMm, labelAxisLen(row)),
     ]
       .filter(Boolean)
       .join(' · '),

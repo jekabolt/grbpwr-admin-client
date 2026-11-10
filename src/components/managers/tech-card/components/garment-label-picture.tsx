@@ -1,6 +1,6 @@
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 
-import { labelAssembly } from './label-fold-lines';
+import { labelAssembly, labelAxisLen } from './label-fold-lines';
 
 const INK = 'var(--color-textColor)';
 const PAPER = 'var(--color-bgColor)';
@@ -20,7 +20,7 @@ const mix = (a: Pt2, b: Pt2, at: number): Pt2 => [
 /**
  * The label as it lies on the garment — folded, cut at its stitch to the part that shows — over the ordinary posed piece
  * geometry, in the colour of the pieces it lies on (`stroke`), so a label reads as one more piece of the garment. The sewn
- * edge is dashed.
+ * edge is heavy and its stitch is dashed.
  */
 export function GarmentLabelOverlay({
   pieces,
@@ -45,7 +45,8 @@ export function GarmentLabelOverlay({
         const [a, b, c, d] = piece.drawn;
         if (!a || !b || !c || !d) return null;
         const fold = mark.foldLines ?? [];
-        const sewn = labelAssembly(fold, mark.stitchLines ?? [], mark.heightMm);
+        const axisMm = labelAxisLen(mark);
+        const sewn = labelAssembly(fold, mark.stitchLines ?? [], axisMm);
         const mitreInset = Math.min(mark.heightMm * 0.6, mark.widthMm * 0.2) / mark.widthMm;
         const outline =
           mark.fold === 'mitre' && !sewn.sewnTop
@@ -60,9 +61,16 @@ export function GarmentLabelOverlay({
               strokeWidth={outlineWidth ?? hair * 1.5}
               strokeLinejoin='round'
             />
+            <path
+              d={pathOf(mark.foldAxis === 'width' ? [a, d] : [d, c])}
+              fill='none'
+              stroke={stroke}
+              strokeWidth={(outlineWidth ?? hair * 1.5) * 1.8}
+              data-label-sewn-edge=''
+            />
             {sewn.shownStitches.map((at) => {
-              // The picture is y-up: the label's top (its sewn edge) is the d–c side. A stitch on an
-              // edge is drawn just inside it, so it never hides under the outline.
+              // The picture is y-up. Legacy labels sew the top d–c side; width-axis labels sew the
+              // left a–d side. A stitch on an edge sits just inside the outline.
               const inset = Math.min(1.5, sewn.heightMm * 0.08);
               const mm = Math.min(Math.max(at, inset), sewn.heightMm - inset);
               const t = sewn.heightMm > 0 ? mm / sewn.heightMm : 0;
@@ -70,7 +78,11 @@ export function GarmentLabelOverlay({
               return (
                 <path
                   key={at}
-                  d={pathOf([mix(d, a, t), mix(c, b, t)])}
+                  d={pathOf(
+                    mark.foldAxis === 'width'
+                      ? [mix(a, b, t), mix(d, c, t)]
+                      : [mix(d, a, t), mix(c, b, t)],
+                  )}
                   fill='none'
                   stroke={stroke}
                   strokeWidth={width}

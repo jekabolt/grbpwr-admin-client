@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   foldedSpans,
   labelAssembly,
+  labelAxisLen,
   parseStitchLines,
   formatFoldLines,
   labelFoldLines,
@@ -11,6 +12,14 @@ import {
 } from './label-fold-lines';
 
 describe('label fold lines', () => {
+  it('uses width only for the explicit width axis', () => {
+    expect(labelAxisLen({ widthMm: '100', heightMm: '30', foldAxis: 'width' })).toBe(100);
+    expect(labelAxisLen({ widthMm: '100', heightMm: '30', foldAxis: '' })).toBe(30);
+    expect(labelAxisLen({ widthMm: { value: '75,5' }, heightMm: '20', foldAxis: 'width' })).toBe(
+      75.5,
+    );
+  });
+
   it('parses, drops bad items, keeps 0 < v < height, sorts and dedupes', () => {
     expect(parseFoldLines('88, 12,x,0,-3,100,12.04,150', 100)).toEqual([12, 88]);
     expect(parseFoldLines('', 100)).toEqual([]);
@@ -113,5 +122,20 @@ describe('label shown size', () => {
       '30 × 100',
     );
     expect(labelShownSizeText({ kind: 'composition' })).toBe('');
+  });
+
+  it('folds and stitches a width-axis label from the left', async () => {
+    const { labelShownSizeText } = await import('./garment-label-pieces');
+    expect(
+      labelShownSizeText({
+        kind: 'composition',
+        widthMm: '100',
+        heightMm: '30',
+        foldAxis: 'width',
+        fold: 'half',
+        foldLinesMm: '50',
+        stitchLinesMm: '40,60',
+      }),
+    ).toBe('40 × 30');
   });
 });

@@ -255,6 +255,9 @@ export function LabelsBlock({
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as NonNullable<
     TechCardFormData['bomItems']
   >;
+  const operations = (useWatch({ control, name: 'operations' }) ?? []) as NonNullable<
+    TechCardFormData['operations']
+  >;
   const rows = useMemo(() => all.filter((row) => !isCompositionLabel(row.key)), [all]);
   const composition = all.find((row) => isCompositionLabel(row.key));
   const compositionLine = composition ? labelBomLine(composition, bomItems) : undefined;
@@ -269,9 +272,9 @@ export function LabelsBlock({
   const keys = rows.map((row) => row.key ?? '');
   const targetRow = all.find((row) => row.key === materialTarget);
   const selectedLine = targetRow ? labelBomLine(targetRow, bomItems) : undefined;
-  const warnings = rows
+  const warnings = all
     .map((row, index) => {
-      const issue = labelIssue(row, bomItems);
+      const issue = labelIssue(row, bomItems, false, operations);
       if (!issue) return null;
       const key = row.key?.trim() || `label ${index + 1}`;
       return {
@@ -319,7 +322,7 @@ export function LabelsBlock({
                         ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
                     }
                   >
-                    open
+                    artwork
                   </Button>
                 ),
               }}

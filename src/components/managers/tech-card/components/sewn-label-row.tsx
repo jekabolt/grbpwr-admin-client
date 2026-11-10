@@ -1,4 +1,8 @@
-import type { common_Material, common_TechCard } from 'api/proto-http/admin';
+import type {
+  common_Material,
+  common_TechCard,
+  common_TechCardGarmentZone,
+} from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { publicFilePageUrl } from 'components/file-share-viewer/link';
 import { useLibraryFile } from 'components/managers/files/hooks/useFiles';
@@ -9,6 +13,7 @@ import { notify } from 'lib/stores/store';
 import {
   useEffect,
   useId,
+  useRef,
   useState,
   type ChangeEvent,
   type JSX,
@@ -36,7 +41,6 @@ import {
   Select,
   Text,
   Tile,
-  Tiles,
 } from 'ui';
 
 import { LabelIcon, type LabelKind as PictogramKind } from './design/hardware-icons';
@@ -58,7 +62,6 @@ import {
   labelAttachmentOptions,
   labelDefaults,
   labelMadeByOptions,
-  labelPlacementOptions,
   labelPrintMethodOptions,
   labelStockKinds,
 } from './tech-card-options';
@@ -67,8 +70,10 @@ import { wireInt } from './wire-int';
 import { garmentLabelMark } from './garment-label-pieces';
 import { LabelFoldEditor } from './label-fold-editor';
 import { ulid } from 'utils/ulid';
-
-const OTHER = '__other';
+import { zoneLabel } from './operation-options';
+import { pieceRefKey } from './piece-block-refs';
+import { PieceSilhouette, SILHOUETTE_INK } from './piece-silhouette';
+import { usePieceShapes } from './use-piece-shapes';
 
 const sameKey = (a?: string, b?: string) =>
   (a ?? '').trim().toLowerCase() === (b ?? '').trim().toLowerCase();
@@ -84,6 +89,8 @@ export function bornLabelFacts(kind: string): Partial<FormGarmentLabel> {
     lengthCm: '',
     attachment: defaults?.attachment ?? '',
     fold: (defaults?.folding ?? '') as FormGarmentLabel['fold'],
+    foldAxis: '',
+    pages: 1,
     qtyPerGarment: 1,
   };
 }
@@ -103,6 +110,10 @@ const virtualRow = (key: string): FormGarmentLabel => ({
   widthMm: '',
   heightMm: '',
   fold: '',
+  foldLinesMm: '',
+  stitchLinesMm: '',
+  foldAxis: '',
+  pages: 1,
   qtyPerGarment: 1,
   bomItemId: 0,
   bomLineKey: '',
@@ -137,10 +148,15 @@ export function labelIssue(
   row: FormGarmentLabel,
   bomItems: readonly { id?: number; lineKey?: string | null; unit?: string }[],
   compositionMissingCountry = false,
+  operations?: readonly { labelKeys?: string[] }[],
 ): string | null {
   const built = (row.key ?? '').trim().toLowerCase() === 'composition';
   if (built && compositionMissingCountry) return 'no country';
-  if (!row.placement?.trim()) return 'no location';
+  const lineKey = row.lineKey?.trim();
+  const linked = lineKey
+    ? operations?.some((operation) => (operation.labelKeys ?? []).includes(lineKey))
+    : false;
+  if (operations ? !linked : !row.placement?.trim()) return 'no location';
   if (!row.attachment?.trim()) return 'no attachment';
   if (!row.widthMm?.trim() || !row.heightMm?.trim()) return 'no size';
   if (!built && !row.madeBy?.trim()) return 'no maker';
@@ -349,6 +365,14 @@ export const labelSizeText = (row: Pick<FormGarmentLabel, 'widthMm' | 'heightMm'
   row.widthMm || row.heightMm ? `${row.widthMm || '—'} × ${row.heightMm || '—'}` : '';
 
 const LABEL_STEP_WORKS = new Set(['attach_label', 'hang_tag']);
+const NEW_STEP = '__new_step';
+
+type LabelOperation = NonNullable<TechCardFormData['operations']>[number];
+
+const linkedStepIndex = (operations: readonly LabelOperation[], lineKey?: string): number => {
+  const key = lineKey?.trim() ?? '';
+  return key ? operations.findIndex((operation) => (operation.labelKeys ?? []).includes(key)) : -1;
+};
 
 /** The label's step key; a row without one (generated, or saved before 0454) gets it on first use. */
 export function ensureLabelLineKey(
@@ -392,44 +416,53 @@ function LabelStepLink({
   labelKey,
   lineKey,
   canEdit,
+  openRequest = 0,
 }: {
   labelKey: string;
   lineKey?: string;
   canEdit: boolean;
+  openRequest?: number;
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const operations = useWatch({ control, name: 'operations' }) ?? [];
+  const pieces = useWatch({ control, name: 'pieces' }) ?? [];
+  const shapes = usePieceShapes(true).shapeByKey;
   const [, setParams] = useSearchParams();
-  const key = lineKey?.trim() ?? '';
-  const index = key
-    ? operations.findIndex((operation) => (operation.labelKeys ?? []).includes(key))
-    : -1;
+  const trigger = useRef<HTMLSpanElement>(null);
+  const index = linkedStepIndex(operations, lineKey);
   const steps = operations
     .map((operation, at) => ({ operation, at }))
     .filter(
       ({ operation, at }) => at === index || LABEL_STEP_WORKS.has((operation.work ?? '').trim()),
     );
-  const openSteps = () =>
+  const openSteps = (at = index, operation = operations[at]) =>
     setParams(
       (previous) => {
         const next = new URLSearchParams(previous);
         next.set('tab', 'construction');
-        const operation = index >= 0 ? operations[index] : undefined;
         if (operation?.operationNumber) next.set('op', String(operation.operationNumber));
-        else if (index >= 0) next.set('opi', String(index));
+        else if (at >= 0) next.set('opi', String(at));
         return next;
       },
       { replace: true },
     );
-  if (!steps.length)
-    return (
-      <Button type='button' variant='underline' size='xs' onClick={openSteps}>
-        add step
-      </Button>
-    );
-  const choose = (value: string | undefined) => {
-    const target = value ? Number(value) : -1;
+  useEffect(() => {
+    if (!openRequest || index >= 0 || !canEdit) return;
+    const frame = requestAnimationFrame(() => trigger.current?.querySelector('button')?.click());
+    return () => cancelAnimationFrame(frame);
+  }, [canEdit, index, openRequest]);
+
+  const choose = async (value: string | undefined) => {
     const key = ensureLabelLineKey(getValues, setValue, labelKey);
+    if (value === NEW_STEP) {
+      const current = getValues('operations') ?? [];
+      const { newOperationRow } = await import('./operations-field');
+      const next = newOperationRow({ work: 'attach_label', labelKeys: [key] });
+      setValue('operations', [...current, next] as never, { shouldDirty: true });
+      openSteps(current.length, next);
+      return;
+    }
+    const target = value ? Number(value) : -1;
     const current = getValues('operations') ?? [];
     current.forEach((operation, at) => {
       const keys = (operation.labelKeys ?? []).filter(Boolean);
@@ -444,25 +477,54 @@ function LabelStepLink({
         );
     });
   };
-  return (
-    <span className='flex items-center gap-3'>
+  const linked = index >= 0 ? operations[index] : undefined;
+  const number = linked?.operationNumber || (index + 1) * 10;
+  const zone = zoneLabel(linked?.zone as common_TechCardGarmentZone);
+  const summary = linked
+    ? [number, stepName((linked.work ?? '').trim())].filter(Boolean).join(' ') +
+      (zone ? ` · ${zone}` : '')
+    : '';
+  const pieceKey = linked?.inputKeys?.find((candidate) => !!candidate?.trim())?.trim() ?? '';
+  const pieceName = pieces.find((piece) => piece.lineKey === pieceKey)?.name?.trim() || '';
+  const shape = pieceKey ? shapes?.get(pieceRefKey(pieceKey)) ?? null : null;
+  const items = [
+    ...steps.map(({ operation, at }) => {
+      const optionZone = zoneLabel(operation.zone as common_TechCardGarmentZone);
+      return {
+        value: String(at),
+        label: `${operation.operationNumber || (at + 1) * 10} ${stepName((operation.work ?? '').trim())}${optionZone ? ` · ${optionZone}` : ''}`,
+      };
+    }),
+    { value: NEW_STEP, label: 'new step' },
+  ];
+  return linked ? (
+    <Button
+      type='button'
+      variant='default'
+      className='flex min-h-5.5 w-full min-w-0 items-center justify-start gap-1.5 border border-borderColor bg-bgColor px-1.75 py-0.75 text-left hover:border-textColor press:!bg-bgColor press:!text-textColor'
+      title={pieceName || summary}
+      onClick={() => openSteps()}
+    >
+      <PieceSilhouette
+        found={shape}
+        boxClassName={`m-0 size-4 ${SILHOUETTE_INK}`}
+        boxPx={{ w: 16, h: 16 }}
+      />
+      <span className='min-w-0 truncate'>{summary}</span>
+    </Button>
+  ) : (
+    <span ref={trigger} data-placement-select=''>
       <Select
         name={`${labelKey}-step`}
-        value={index >= 0 ? String(index) : ''}
-        placeholder='pick'
+        value=''
+        placeholder='no location'
         readOnly={!canEdit}
-        className='h-7 min-w-0 flex-1'
-        items={steps.map(({ operation, at }) => ({
-          value: String(at),
-          label: `${operation.operationNumber || (at + 1) * 10} ${stepName((operation.work ?? '').trim())}`,
-        }))}
-        onValueChange={choose}
+        invalid
+        fullWidth
+        className='min-w-0 text-error'
+        items={items}
+        onValueChange={(value: string | undefined) => void choose(value)}
       />
-      {index >= 0 ? (
-        <Button type='button' variant='underline' size='xs' onClick={openSteps}>
-          open
-        </Button>
-      ) : null}
     </span>
   );
 }
@@ -471,19 +533,27 @@ function LabelFold({
   row,
   disabled,
   onChange,
+  artworkAction,
 }: {
   row: FormGarmentLabel;
   disabled: boolean;
-  onChange: (value: Pick<FormGarmentLabel, 'fold' | 'foldLinesMm' | 'stitchLinesMm'>) => void;
+  onChange: (value: Partial<Omit<FormGarmentLabel, 'key'>>) => void;
+  artworkAction?: ReactNode;
 }) {
   const shape = garmentLabelMark(row);
   return (
     <LabelFoldEditor
       widthMm={shape?.widthMm ?? 30}
       heightMm={shape?.heightMm ?? 100}
+      widthValue={row.widthMm}
+      heightValue={row.heightMm}
       fold={row.fold}
       foldLinesMm={row.foldLinesMm}
       stitchLinesMm={row.stitchLinesMm}
+      foldAxis={row.foldAxis}
+      pages={row.pages}
+      composition={isCompositionLabel(row.key)}
+      artworkAction={artworkAction}
       libraryFileId={row.files?.[0]?.libraryFileId}
       disabled={disabled}
       onChange={onChange}
@@ -831,17 +901,6 @@ export function SewnLabelModal({
               patch={patch}
             />
           </Field>
-          <Field label='location'>
-            <Select
-              name={`${labelKey}-location`}
-              value={row.placement || ''}
-              placeholder='pick'
-              readOnly={!canEdit}
-              className='h-7'
-              items={withStored(labelPlacementOptions, row.placement)}
-              onValueChange={(value: string | undefined) => patch({ placement: value || '' })}
-            />
-          </Field>
           <Field label='attachment'>
             <Select
               name={`${labelKey}-attachment`}
@@ -853,7 +912,7 @@ export function SewnLabelModal({
               onValueChange={(value: string | undefined) => patch({ attachment: value || '' })}
             />
           </Field>
-          <Field label='step'>
+          <Field label='placed'>
             <LabelStepLink labelKey={labelKey} lineKey={row.lineKey} canEdit={canEdit} />
           </Field>
           <Field label='fold' className='sm:col-span-2'>
@@ -898,7 +957,7 @@ export function SewnLabelModal({
 }
 
 const ROW_GRID =
-  'grid w-full items-center gap-x-3 grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[48px_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,.9fr)_74px_110px_16px]';
+  'grid w-full items-center gap-x-3 grid-cols-[48px_minmax(0,1fr)_16px] sm:grid-cols-[48px_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,.9fr)_74px_110px_16px]';
 
 /** The one header over the label rows. */
 export function LabelRowsHead(): JSX.Element {
@@ -950,7 +1009,6 @@ export function SewnLabelRow({
   canEdit,
   last,
   removable = true,
-  axes,
   generated,
 }: {
   labelKey: string;
@@ -973,6 +1031,7 @@ export function SewnLabelRow({
   const { canWrite } = usePermissions();
   const uid = useId().replace(/:/g, '');
   const rows = (useWatch({ control, name: 'garmentLabels' }) ?? []) as FormGarmentLabel[];
+  const operations = useWatch({ control, name: 'operations' }) ?? [];
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as NonNullable<
     TechCardFormData['bomItems']
   >;
@@ -986,12 +1045,11 @@ export function SewnLabelRow({
   const kind = row.kind?.trim() || row.key?.trim() || '';
   const kindWord = kindLabel(labelStockKinds, kind);
 
-  const [placeOther, setPlaceOther] = useState(false);
-  const [attachOther, setAttachOther] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
   const [filePicker, setFilePicker] = useState(false);
   const [internalOpen, setInternalOpen] = useState(true);
   const [materialPicker, setMaterialPicker] = useState(false);
+  const [placementRequest, setPlacementRequest] = useState(0);
 
   const expanded = open ?? internalOpen;
   const setExpanded = onOpenChange ?? setInternalOpen;
@@ -1017,9 +1075,10 @@ export function SewnLabelRow({
 
   const placement = row.placement?.trim() ?? '';
   const attachment = row.attachment?.trim() ?? '';
-  const customPlace = placeOther || (!!placement && !labelPlacementOptions.includes(placement));
-  const customAttach =
-    attachOther || (!!attachment && !labelAttachmentOptions.includes(attachment));
+  const stepIndex = linkedStepIndex(operations, row.lineKey);
+  const step = stepIndex >= 0 ? operations[stepIndex] : undefined;
+  const stepZone = zoneLabel(step?.zone as common_TechCardGarmentZone);
+  const location = stepZone || placement;
   const file = row.files?.[0];
   const fileId = wireInt(file?.libraryFileId);
   const fileQuery = useLibraryFile(fileId || undefined);
@@ -1033,6 +1092,44 @@ export function SewnLabelRow({
     }
     setFilePicker(true);
   };
+
+  const openPlaced = (event?: { preventDefault: () => void; stopPropagation: () => void }) => {
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (!expanded) setExpanded(true);
+    setPlacementRequest((request) => request + 1);
+  };
+
+  const locationValue = location ? (
+    location
+  ) : (
+    <span
+      role='button'
+      tabIndex={0}
+      className='cursor-pointer text-error underline underline-offset-2'
+      onClick={openPlaced}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        openPlaced(event);
+      }}
+    >
+      no location
+    </span>
+  );
+
+  const artworkAction =
+    generated?.action ??
+    (made ? (
+      <Button type='button' variant='underline' size='xs' disabled={!canEdit} onClick={openFiles}>
+        artwork
+      </Button>
+    ) : legacyFiles && fileUrl ? (
+      <Button asChild variant='underline' size='xs'>
+        <a href={fileUrl} target='_blank' rel='noopener noreferrer'>
+          artwork
+        </a>
+      </Button>
+    ) : undefined);
 
   return (
     <div
@@ -1049,9 +1146,9 @@ export function SewnLabelRow({
         onClick={() => setExpanded(!expanded)}
       >
         {material ? (
-          <MaterialThumb material={material} size='sm' className='hidden size-12 sm:block' />
+          <MaterialThumb material={material} size='sm' className='size-12' />
         ) : (
-          <span className='hidden size-12 items-center justify-center border border-borderColor bg-pageBg sm:flex'>
+          <span className='flex size-12 items-center justify-center border border-borderColor bg-pageBg'>
             <LabelShapeIcon label={row} size={40} />
           </span>
         )}
@@ -1066,17 +1163,16 @@ export function SewnLabelRow({
           </Text>
           <Text size='micro' variant='label' component='span' className='block truncate'>
             {made ? row.madeBy || <Miss>made by</Miss> : kindWord}
-            {placement ? null : (
-              <span className='sm:hidden'>
-                {' · '}
-                <Miss>pick location</Miss>
-              </span>
-            )}
+            <span className='sm:hidden'>
+              {' '}
+              {' · '}
+              {locationValue}
+            </span>
           </Text>
           {generated?.pills}
         </span>
         <Text component='span' className='hidden min-w-0 truncate sm:block'>
-          {placement || <Miss>pick location</Miss>}
+          {locationValue}
         </Text>
         <Text component='span' className='hidden min-w-0 truncate sm:block'>
           {attachment || <EmptyCell />}
@@ -1102,27 +1198,64 @@ export function SewnLabelRow({
 
       {expanded ? (
         <div className='pb-3 pl-0 sm:pl-10'>
-          {generated ? (
-            <div className='mb-3 max-w-80'>
-              <Field label='material'>
-                <Input
-                  readOnly
-                  disabled={!canEdit}
-                  value={line?.name || ''}
-                  placeholder='pick stock'
-                  className='cursor-pointer'
-                  aria-label='material'
-                  onClick={chooseMaterial}
-                  onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
-                    if (event.key === 'Enter') chooseMaterial();
-                  }}
-                />
-              </Field>
-            </div>
-          ) : null}
+          <div className='grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4'>
+            <Field label='material'>
+              <Input
+                readOnly
+                disabled={!canEdit}
+                value={material?.name || line?.name || ''}
+                placeholder='pick stock'
+                className='cursor-pointer'
+                aria-label='material'
+                onClick={chooseMaterial}
+                onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+                  if (event.key === 'Enter') chooseMaterial();
+                }}
+              />
+            </Field>
+            <Field label='attachment'>
+              <Select
+                name={`${uid}-attachment`}
+                value={attachment}
+                readOnly={!canEdit}
+                placeholder='pick'
+                items={withStored(labelAttachmentOptions, attachment)}
+                onValueChange={(value: string | undefined) => patch({ attachment: value || '' })}
+              />
+            </Field>
+            <Field label='per garment'>
+              <Input
+                type='number'
+                min={1}
+                value={row.qtyPerGarment ?? 1}
+                disabled={!canEdit}
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  patch({ qtyPerGarment: Math.max(1, Number(event.target.value) || 1) })
+                }
+              />
+            </Field>
+            <Field label='placed'>
+              <LabelStepLink
+                labelKey={labelKey}
+                lineKey={row.lineKey}
+                canEdit={canEdit}
+                openRequest={placementRequest}
+              />
+            </Field>
+          </div>
+
+          <div className='mt-4' data-label-artwork={labelKey}>
+            <LabelFold
+              row={row}
+              disabled={!canEdit}
+              onChange={patch}
+              artworkAction={artworkAction}
+            />
+          </div>
+
           {made ? (
-            <div className='mb-3 flex flex-col gap-3'>
-              <Field label='made by'>
+            <div className='mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4'>
+              <Field label='made by' className='sm:col-span-2'>
                 <ChipRow>
                   {withStored(labelMadeByOptions, row.madeBy).map((option) => (
                     <Chip
@@ -1143,247 +1276,52 @@ export function SewnLabelRow({
                   ))}
                 </ChipRow>
               </Field>
-            </div>
-          ) : legacyFiles ? (
-            <div className='mb-3 flex items-center gap-2'>
-              <Text size='micro' variant='label' tracking='label' className='uppercase'>
-                files
-              </Text>
-              {(row.files ?? []).map((legacyFile, index) => {
-                const url = publicFilePageUrl(legacyFile.publicUrl || '') || legacyFile.publicUrl;
-                return url ? (
-                  <Button
-                    key={`${legacyFile.libraryFileId}-${index}`}
-                    asChild
-                    variant='underline'
-                    size='xs'
-                  >
-                    <a href={url} target='_blank' rel='noopener noreferrer'>
-                      file {index + 1}
-                    </a>
-                  </Button>
-                ) : (
-                  <Text
-                    key={`${legacyFile.libraryFileId}-${index}`}
-                    size='micro'
-                    variant='errorLabel'
-                  >
-                    ! file {index + 1}
-                  </Text>
-                );
-              })}
-            </div>
-          ) : null}
-
-          {generated ? (
-            <div className='mb-3 flex flex-col gap-2' data-label-artwork={labelKey}>
-              <div className='flex flex-wrap items-center gap-2'>
-                <Text size='micro' variant='label' tracking='label' className='uppercase'>
-                  artwork
-                </Text>
-                {generated.action}
-              </div>
-              {generated.body ?? (
-                <Tiles min={96}>
-                  {(axes?.colorways ?? []).flatMap((colour) =>
-                    (axes?.sizes ?? []).map((size) => {
-                      const artwork = (row.files ?? []).find(
-                        (candidate) =>
-                          wireInt(candidate.colorwayId) === colour.id &&
-                          wireInt(candidate.sizeId) === size.id,
-                      );
-                      const url =
-                        publicFilePageUrl(artwork?.publicUrl || '') || artwork?.publicUrl || '';
-                      return (
-                        <Tile
-                          key={`${colour.id}-${size.id}`}
-                          name={`${colour.name} · ${size.label}`}
-                          sub={url ? 'file' : '! file'}
-                          tone={url ? 'default' : 'error'}
-                          onClick={url ? () => window.open(url, '_blank', 'noopener') : undefined}
-                        />
-                      );
-                    }),
-                  )}
-                </Tiles>
-              )}
-            </div>
-          ) : null}
-
-          <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4'>
-            <Field label='location'>
-              <Select
-                name={`${uid}-location`}
-                value={customPlace ? OTHER : placement}
-                readOnly={!canEdit}
-                placeholder='pick'
-                items={[
-                  ...labelPlacementOptions.map((option) => ({ value: option, label: option })),
-                  { value: OTHER, label: 'other' },
-                ]}
-                onValueChange={(value: string | undefined) => {
-                  if (value === OTHER) {
-                    setPlaceOther(true);
-                    if (labelPlacementOptions.includes(placement)) patch({ placement: '' });
-                  } else {
-                    setPlaceOther(false);
-                    patch({ placement: value || '' });
-                  }
-                }}
-              />
-            </Field>
-            {customPlace ? (
-              <Field label='where'>
-                <Input
-                  value={placement}
-                  disabled={!canEdit}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                    patch({ placement: event.target.value })
-                  }
-                />
-              </Field>
-            ) : null}
-            <Field label='attachment'>
-              <Select
-                name={`${uid}-attachment`}
-                value={customAttach ? OTHER : attachment}
-                readOnly={!canEdit}
-                placeholder='pick'
-                items={[
-                  ...labelAttachmentOptions.map((option) => ({ value: option, label: option })),
-                  { value: OTHER, label: 'other' },
-                ]}
-                onValueChange={(value: string | undefined) => {
-                  if (value === OTHER) {
-                    setAttachOther(true);
-                    if (labelAttachmentOptions.includes(attachment)) patch({ attachment: '' });
-                  } else {
-                    setAttachOther(false);
-                    patch({ attachment: value || '' });
-                  }
-                }}
-              />
-            </Field>
-            {customAttach ? (
-              <Field label='how'>
-                <Input
-                  value={attachment}
-                  disabled={!canEdit}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                    patch({ attachment: event.target.value })
-                  }
-                />
-              </Field>
-            ) : null}
-            <Field label='size, mm'>
-              <LabelSizeFields row={row} material={material} canEdit={canEdit} patch={patch} />
-            </Field>
-            <Field label='step'>
-              <LabelStepLink labelKey={labelKey} lineKey={row.lineKey} canEdit={canEdit} />
-            </Field>
-            {quantities.lengthGoods ? (
-              <Field label='cm per garment'>
-                <Input
-                  inputMode='decimal'
-                  min='0.1'
-                  value={row.lengthCm ?? ''}
-                  disabled={!canEdit}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                    const value = event.target.value.replace(',', '.');
-                    if (/^\d*(?:\.\d?)?$/.test(value)) patch({ lengthCm: value });
-                  }}
-                />
-              </Field>
-            ) : (
-              <Field label='per garment'>
-                <Input
-                  type='number'
-                  min={1}
-                  value={row.qtyPerGarment ?? 1}
-                  disabled={!canEdit}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                    patch({ qtyPerGarment: Math.max(1, Number(event.target.value) || 1) })
-                  }
-                />
-              </Field>
-            )}
-          </div>
-
-          <div className='mt-3'>
-            <Field label='fold'>
-              <LabelFold row={row} disabled={!canEdit} onChange={patch} />
-            </Field>
-          </div>
-
-          {made ? (
-            <div className='mt-3'>
-              <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4'>
-                <Field label='material'>
-                  <Input
-                    readOnly
-                    disabled={!canEdit}
-                    value={material?.name || line?.name || ''}
-                    placeholder='pick stock'
-                    className='cursor-pointer'
-                    aria-label='material'
-                    onClick={chooseMaterial}
-                    onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
-                      if (event.key === 'Enter') chooseMaterial();
-                    }}
+              {printedBy(row.madeBy) ? (
+                <Field label='print'>
+                  <Select
+                    name={`${uid}-print`}
+                    value={row.printMethod || ''}
+                    readOnly={!canEdit}
+                    placeholder='pick'
+                    items={withStored(labelPrintMethodOptions, row.printMethod)}
+                    onValueChange={(value: string | undefined) =>
+                      patch({ printMethod: value || '' })
+                    }
                   />
                 </Field>
-                {printedBy(row.madeBy) ? (
-                  <Field label='print'>
-                    <Select
-                      name={`${uid}-print`}
-                      value={row.printMethod || ''}
-                      readOnly={!canEdit}
-                      placeholder='pick'
-                      items={withStored(labelPrintMethodOptions, row.printMethod)}
-                      onValueChange={(value: string | undefined) =>
-                        patch({ printMethod: value || '' })
-                      }
-                    />
-                  </Field>
-                ) : null}
-                <Field label='file'>
-                  <span className='flex items-center gap-2'>
-                    {file ? (
-                      <>
-                        {fileUrl ? (
-                          <Button
-                            asChild
-                            variant='underline'
-                            size='xs'
-                            className='min-w-0 truncate'
-                          >
-                            <a href={fileUrl} target='_blank' rel='noopener noreferrer'>
-                              {fileName || 'file'}
-                            </a>
-                          </Button>
-                        ) : (
-                          <Text size='micro' variant='errorLabel' className='min-w-0 truncate'>
-                            ! file
-                          </Text>
-                        )}
-                        {canEdit ? (
-                          <Close
-                            size='sm'
-                            aria-label='remove file'
-                            onClick={() => patch({ files: [] })}
-                          />
-                        ) : null}
-                      </>
-                    ) : canEdit ? (
-                      <Button type='button' variant='underline' size='xs' onClick={openFiles}>
-                        choose file
-                      </Button>
-                    ) : (
-                      <EmptyCell />
-                    )}
-                  </span>
-                </Field>
-              </div>
+              ) : null}
+              <Field label='file'>
+                <span className='flex items-center gap-2'>
+                  {file ? (
+                    <>
+                      {fileUrl ? (
+                        <Button asChild variant='underline' size='xs' className='min-w-0 truncate'>
+                          <a href={fileUrl} target='_blank' rel='noopener noreferrer'>
+                            {fileName || 'file'}
+                          </a>
+                        </Button>
+                      ) : (
+                        <Text size='micro' variant='errorLabel' className='min-w-0 truncate'>
+                          ! file
+                        </Text>
+                      )}
+                      {canEdit ? (
+                        <Close
+                          size='sm'
+                          aria-label='remove file'
+                          onClick={() => patch({ files: [] })}
+                        />
+                      ) : null}
+                    </>
+                  ) : canEdit ? (
+                    <Button type='button' variant='underline' size='xs' onClick={openFiles}>
+                      choose file
+                    </Button>
+                  ) : (
+                    <EmptyCell />
+                  )}
+                </span>
+              </Field>
             </div>
           ) : null}
 

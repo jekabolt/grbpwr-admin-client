@@ -143,9 +143,11 @@ export type GarmentLabelMark = {
   widthMm: number;
   heightMm: number;
   fold: 'flat' | 'half' | 'ends' | 'mitre' | 'loop' | '';
-  /** Fold lines, mm from the top along the height (stored, else implied by `fold`). */
+  /** `width` measures from the left and sews the left edge; empty is legacy top/height. */
+  foldAxis: 'width' | '';
+  /** Fold lines, mm from the sewn edge along `foldAxis` (stored, else implied by `fold`). */
   foldLines?: number[];
-  /** Stitch lines, mm from the top along the height; 0 and the height are the edges. */
+  /** Stitch lines, mm from the sewn edge along `foldAxis`; 0 and the axis length are edges. */
   stitchLines?: number[];
   attachment: string;
 };
