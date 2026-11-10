@@ -39,12 +39,13 @@ function foldLines(
   axisMm: number,
   b: Box,
   widthAxis: boolean,
+  fold: string,
 ): JSX.Element | null {
   if (!lines.length) return null;
   const at = (mm: number) => (widthAxis ? b.x + (mm / axisMm) * b.w : b.y + (mm / axisMm) * b.h);
   return (
     <g data-label-fold-lines={lines.join(',')}>
-      {foldedSpans(lines, axisMm).map(([from, to]) => (
+      {foldedSpans(lines, axisMm, fold).map(([from, to]) => (
         <rect
           key={`${from}-${to}`}
           x={widthAxis ? at(from) : b.x}
@@ -86,6 +87,11 @@ export function LabelShapeIcon({
   const b: Box = { x: (VIEW - w) / 2, y: (VIEW - h) / 2, w, h };
   const widthAxis = shape?.foldAxis === 'width';
   const axisMm = labelAxisLen({ widthMm, heightMm, foldAxis: shape?.foldAxis });
+  const teeTipMm =
+    shape?.fold === 'tee' && (shape.foldLines?.length ?? 0) >= 2
+      ? ((shape.foldLines?.[0] ?? 0) + (shape.foldLines?.at(-1) ?? 0)) / 2
+      : 0;
+  const sewnAt = widthAxis ? b.x + (teeTipMm / axisMm) * b.w : b.y + (teeTipMm / axisMm) * b.h;
   const kind = ((label.kind ?? '').trim() || (label.key ?? '').trim()).toLowerCase();
   return (
     <svg
@@ -103,7 +109,7 @@ export function LabelShapeIcon({
     >
       <rect x={b.x} y={b.y} width={b.w} height={b.h} strokeWidth={1.25} />
       <path
-        d={widthAxis ? `M${b.x} ${b.y} V${b.y + b.h}` : `M${b.x} ${b.y} H${b.x + b.w}`}
+        d={widthAxis ? `M${sewnAt} ${b.y} V${b.y + b.h}` : `M${b.x} ${sewnAt} H${b.x + b.w}`}
         strokeWidth={2.5}
         data-label-sewn-edge=''
       />
@@ -122,7 +128,7 @@ export function LabelShapeIcon({
       ) : (
         stitches(shape?.attachment ?? label.attachment ?? '', b, widthAxis)
       )}
-      {foldLines(shape?.foldLines ?? [], axisMm, b, widthAxis)}
+      {foldLines(shape?.foldLines ?? [], axisMm, b, widthAxis, shape?.fold ?? '')}
     </svg>
   );
 }

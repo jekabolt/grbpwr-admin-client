@@ -6,7 +6,7 @@
 // `?pick=<op number>` (a PDF-gap deep link) opens the picker on arrival.
 
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
-import { activeFoldRows, type StoredFold } from 'lib/folds';
+import { activeFoldRows } from 'lib/folds';
 import type { SidePart } from 'lib/seams';
 import { cn } from 'lib/utility';
 import { lazy, Suspense, useEffect, useMemo } from 'react';
@@ -20,6 +20,7 @@ import { isTopstitchStep } from '../operation-kinds';
 import type { TechCardFormData } from '../schema';
 import { topstitchLineMm, type TopstitchLine } from '../topstitch-lines';
 import { drawsStepResult } from './draws-result';
+import type { SideLengthOptions } from './seam-length';
 import { PairNo } from './pair-no';
 import { NO_SEAM_TEXT, NO_STEP_EDGES, NO_STEP_PARTS } from './step-highlight';
 import { useStepResults } from './step-result-context';
@@ -63,10 +64,7 @@ export function seamTileSideLines(
   sides: { a: readonly SidePart[]; b: readonly SidePart[] },
   geoms: ReadonlyMap<string, PieceGeom>,
   innerLines: ReadonlyMap<string, readonly (readonly Pt2[])[]>,
-  folds?: {
-    activeFolds: readonly StoredFold[];
-    grainDeg?: number | ReadonlyMap<string, number> | null;
-  },
+  folds?: SideLengthOptions,
 ): [string, string] {
   const innerLen = (piece: string, index: number) => polyLen(innerLines.get(piece)?.[index] ?? []);
   const line = (parts: readonly SidePart[]) => {
@@ -298,6 +296,7 @@ export function StepSeamsRow({
           const sideLines = seamTileSideLines(parts, geoms, scene.innerLines, {
             activeFolds,
             grainDeg: geo?.grainDeg,
+            placed: result?.layout.T,
           });
           return (
             <div key={key} className='group relative w-30 flex-none'>

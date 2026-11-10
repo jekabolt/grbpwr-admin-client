@@ -54,6 +54,9 @@ import {
 import { LabelShapeIcon } from './label-shape-icon';
 import { LabelFilePicker } from './label-file-picker';
 import type { FormGarmentLabel } from './labels-schema';
+import { labelPlacementIssue } from './label-placement';
+import { FabricPieceEditor } from './fabric-piece-editor';
+import { LabelPrintsEditor } from './label-prints-editor';
 import type { TechCardFormData } from './schema';
 import { confirmCompositionLabel } from './label-bom';
 import { useBuiltRibbons } from './composition-label/built-ribbons-context';
@@ -72,6 +75,7 @@ import {
   labelStockKinds,
 } from './tech-card-options';
 import { bomUnitKind } from './nesting/marker-io';
+import { isRollGoodsSection } from './bom-purpose';
 import { wireInt } from './wire-int';
 import { garmentLabelMark } from './garment-label-pieces';
 import { LabelFoldEditor } from './label-fold-editor';
@@ -129,6 +133,14 @@ const virtualRow = (key: string): FormGarmentLabel => ({
   artworkPerSize: false,
   artworkPerColorway: false,
   files: [],
+  pieceBomItemId: 0,
+  pieceWidthMm: '',
+  pieceHeightMm: '',
+  pieceSeamMm: '',
+  labelXMm: '',
+  labelYMm: '',
+  labelOnPiece: '',
+  prints: [],
 });
 
 /** A row from `+ make new` holds no source until its material is picked, only its type. */
@@ -152,7 +164,12 @@ export function labelMiss(
 
 export function labelIssue(
   row: FormGarmentLabel,
-  bomItems: readonly { id?: number; lineKey?: string | null; unit?: string }[],
+  bomItems: readonly {
+    id?: number;
+    lineKey?: string | null;
+    unit?: string;
+    section?: string;
+  }[],
   compositionMissingCountry = false,
   operations?: readonly { labelKeys?: string[] }[],
 ): string | null {
@@ -165,6 +182,16 @@ export function labelIssue(
   if (operations ? !linked : !row.placement?.trim()) return 'no location';
   if (!row.attachment?.trim()) return 'no attachment';
   if (!row.widthMm?.trim() || !row.heightMm?.trim()) return 'no size';
+  if (row.attachment === 'on_fabric_piece') {
+    const pieceId = wireInt(row.pieceBomItemId);
+    if (
+      pieceId > 0 &&
+      !bomItems.some((line) => wireInt(line.id) === pieceId && isRollGoodsSection(line.section))
+    )
+      return 'pick piece fabric';
+  }
+  const placementIssue = labelPlacementIssue(row);
+  if (placementIssue) return placementIssue;
   if (!built && !row.madeBy?.trim()) return 'no maker';
   if (built) return null;
   if (artworkIntent(row))
@@ -194,7 +221,33 @@ function Field({
 function withStored(options: readonly string[], value?: string) {
   const current = value?.trim() ?? '';
   const values = current && !options.includes(current) ? [current, ...options] : [...options];
-  return values.map((option) => ({ value: option, label: option }));
+  return values.map((option) => ({
+    value: option,
+    label: option === 'on_fabric_piece' ? 'on fabric piece' : option,
+  }));
+}
+
+const attachmentWord = (value?: string): string =>
+  value === 'on_fabric_piece' ? 'on fabric piece' : value?.trim() || '';
+
+function attachmentChange(row: FormGarmentLabel, value?: string): Partial<FormGarmentLabel> {
+  const attachment = value || '';
+  if (attachment !== 'on_fabric_piece') return { attachment };
+  const labelWidth = Number(row.widthMm) || 30;
+  const labelHeight = Number(row.heightMm) || 50;
+  // The server sends unset piece sizes as "0", so only a positive stored value counts as set.
+  const set = (value?: string) => (Number(value) > 0 ? value : undefined);
+  const hasPiece = !!set(row.pieceWidthMm) && !!set(row.pieceHeightMm);
+  const seam = set(row.pieceSeamMm) || '8';
+  return {
+    attachment,
+    labelOnPiece: row.labelOnPiece || '4_sides',
+    pieceWidthMm: set(row.pieceWidthMm) || String(Math.max(40, labelWidth + 10)),
+    pieceHeightMm: set(row.pieceHeightMm) || String(Math.max(70, labelHeight + 20)),
+    pieceSeamMm: seam,
+    labelXMm: hasPiece ? row.labelXMm || '0' : '5',
+    labelYMm: hasPiece ? row.labelYMm || seam : String(Math.max(Number(seam), 12)),
+  };
 }
 
 export function labelPictogram(kind?: string): PictogramKind {
@@ -546,28 +599,65 @@ function LabelFold({
   onChange: (value: Partial<Omit<FormGarmentLabel, 'key'>>) => void;
   artworkAction?: ReactNode;
 }) {
+  const { control } = useFormContext<TechCardFormData>();
+  const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as NonNullable<
+    TechCardFormData['bomItems']
+  >;
+  const [selectedPrintIndex, setSelectedPrintIndex] = useState(0);
   const shape = garmentLabelMark(row);
   const composition = isCompositionLabel(row.key);
   const ribbons = useBuiltRibbons();
   const built = composition && !(row.files ?? []).some(isOwnArtworkFile);
+  const prints = row.prints ?? [];
+  const patchPrint = (index: number, value: Partial<(typeof prints)[number]>) =>
+    onChange({
+      prints: prints.map((print, at) => (at === index ? { ...print, ...value } : { ...print })),
+    });
   return (
-    <LabelFoldEditor
-      widthMm={shape?.widthMm ?? 30}
-      heightMm={shape?.heightMm ?? 100}
-      widthValue={row.widthMm}
-      heightValue={row.heightMm}
-      fold={row.fold}
-      foldLinesMm={row.foldLinesMm}
-      stitchLinesMm={row.stitchLinesMm}
-      foldAxis={row.foldAxis}
-      pages={row.pages}
-      composition={composition}
-      artworkAction={artworkAction}
-      libraryFileId={row.files?.[0]?.libraryFileId}
-      ribbons={built ? ribbons : undefined}
-      disabled={disabled}
-      onChange={onChange}
-    />
+    <>
+      {row.attachment === 'on_fabric_piece' ? (
+        <FabricPieceEditor
+          row={row}
+          fabricLines={bomItems.filter((line) => isRollGoodsSection(line.section))}
+          artworkAction={artworkAction}
+          selectedPrintIndex={selectedPrintIndex}
+          disabled={disabled}
+          onSelectPrint={setSelectedPrintIndex}
+          onChange={onChange}
+        />
+      ) : (
+        <LabelFoldEditor
+          widthMm={shape?.widthMm ?? 30}
+          heightMm={shape?.heightMm ?? 100}
+          widthValue={row.widthMm}
+          heightValue={row.heightMm}
+          fold={row.fold}
+          foldLinesMm={row.foldLinesMm}
+          stitchLinesMm={row.stitchLinesMm}
+          foldAxis={row.foldAxis}
+          pages={row.pages}
+          composition={composition}
+          artworkAction={artworkAction}
+          libraryFileId={row.files?.[0]?.libraryFileId}
+          ribbons={built ? ribbons : undefined}
+          prints={prints}
+          selectedPrintIndex={selectedPrintIndex}
+          disabled={disabled}
+          onSelectPrint={setSelectedPrintIndex}
+          onPrintChange={patchPrint}
+          onChange={onChange}
+        />
+      )}
+      <LabelPrintsEditor
+        prints={prints}
+        labelWidthMm={row.widthMm}
+        labelHeightMm={row.heightMm}
+        selectedIndex={selectedPrintIndex}
+        disabled={disabled}
+        onSelect={setSelectedPrintIndex}
+        onChange={(next) => onChange({ prints: next })}
+      />
+    </>
   );
 }
 
@@ -919,7 +1009,7 @@ export function SewnLabelModal({
               readOnly={!canEdit}
               className='h-7'
               items={withStored(labelAttachmentOptions, row.attachment)}
-              onValueChange={(value: string | undefined) => patch({ attachment: value || '' })}
+              onValueChange={(value: string | undefined) => patch(attachmentChange(row, value))}
             />
           </Field>
           <Field label='placed'>
@@ -1185,7 +1275,7 @@ export function SewnLabelRow({
           {locationValue}
         </Text>
         <Text component='span' className='hidden min-w-0 truncate sm:block'>
-          {attachment || <EmptyCell />}
+          {attachmentWord(attachment) || <EmptyCell />}
         </Text>
         <Text
           component='span'
@@ -1231,7 +1321,7 @@ export function SewnLabelRow({
                 placeholder='pick'
                 className='min-w-0 whitespace-nowrap [&>span:first-child]:min-w-0 [&>span:first-child]:truncate'
                 items={withStored(labelAttachmentOptions, attachment)}
-                onValueChange={(value: string | undefined) => patch({ attachment: value || '' })}
+                onValueChange={(value: string | undefined) => patch(attachmentChange(row, value))}
               />
             </Field>
             <Field label='per garment'>

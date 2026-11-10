@@ -1,14 +1,21 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  foldFront,
+  foldWordOf,
   foldedSpans,
   labelAssembly,
   labelAxisLen,
+  layersAt,
   parseStitchLines,
   formatFoldLines,
   labelFoldLines,
   parseFoldLines,
   presetFoldLines,
+  teeFolded,
+  teeStem,
+  teeStitch,
+  teeStitchLines,
 } from './label-fold-lines';
 
 describe('label fold lines', () => {
@@ -33,6 +40,7 @@ describe('label fold lines', () => {
     expect(labelFoldLines({ fold: 'ends' }, 100)).toEqual([10, 90]);
     expect(labelFoldLines({ fold: 'half', foldLinesMm: '30' }, 100)).toEqual([30]);
     expect(presetFoldLines('flat', 100)).toEqual([]);
+    expect(presetFoldLines('tee', 100)).toEqual([42, 58]);
   });
 
   it('shades from each end to the nearest line, one line = everything after it', () => {
@@ -42,6 +50,22 @@ describe('label fold lines', () => {
       [88, 100],
     ]);
     expect(foldedSpans([], 100)).toEqual([]);
+  });
+
+  it('keeps tee explicit and folds only its stem band', () => {
+    expect(foldWordOf([42, 58], 100)).toBe('ends');
+    expect(foldWordOf([42, 58], 100, 'tee')).toBe('tee');
+    expect(foldedSpans([42, 58], 100, 'tee')).toEqual([[42, 58]]);
+    expect(foldFront([42, 58], 100, 'tee')).toEqual([0, 84]);
+    expect(teeStem([42, 58])).toBe(8);
+    expect(teeFolded([42, 58], 100)).toBe(84);
+  });
+
+  it('stores one tee stitch distance as two absolute lines', () => {
+    expect(teeStitchLines(3, [42, 58])).toEqual([47, 53]);
+    expect(teeStitch([47, 53], [42, 58])).toBe(3);
+    expect(teeStitchLines(0, [42, 58])).toEqual([49, 51]);
+    expect(teeStitchLines(20, [42, 58])).toEqual([43, 57]);
   });
 });
 
@@ -103,6 +127,19 @@ describe('label assembly', () => {
   it('reads edges as stitch positions', () => {
     expect(parseStitchLines('0, 100, 120, -1, 40', 100)).toEqual([0, 40, 100]);
   });
+  it('joins tee wings at the internal tip line', () => {
+    expect(labelAssembly([42, 58], [47, 53], 100, 'tee')).toEqual({
+      foldedMm: 84,
+      heightMm: 84,
+      stitches: [42],
+      shownStitches: [42],
+      sewnTop: false,
+      sewnAtMm: 42,
+      layers: 2,
+    });
+    expect(layersAt(42, [42, 58], 100, 'tee')).toBe(2);
+    expect(layersAt(12, [42, 58], 100, 'tee')).toBe(1);
+  });
 });
 
 describe('label shown size', () => {
@@ -137,6 +174,31 @@ describe('label shown size', () => {
         stitchLinesMm: '40,60',
       }),
     ).toBe('40 × 30');
+  });
+
+  it('shows both tee wings on either fold axis', async () => {
+    const { labelShownSizeText } = await import('./garment-label-pieces');
+    expect(
+      labelShownSizeText({
+        kind: 'composition',
+        widthMm: '30',
+        heightMm: '100',
+        fold: 'tee',
+        foldLinesMm: '42,58',
+        stitchLinesMm: '47,53',
+      }),
+    ).toBe('30 × 84');
+    expect(
+      labelShownSizeText({
+        kind: 'composition',
+        widthMm: '100',
+        heightMm: '30',
+        foldAxis: 'width',
+        fold: 'tee',
+        foldLinesMm: '42,58',
+        stitchLinesMm: '47,53',
+      }),
+    ).toBe('84 × 30');
   });
 });
 

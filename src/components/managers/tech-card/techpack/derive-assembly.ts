@@ -2272,7 +2272,11 @@ function buildCards(
   const seamLessCard = [...bound.values()].every((seams) => seams.length === 0);
   const roles = pieceRoleMap(pieces, ops);
   const metricGeoms = new Map([...pieces].map(([key, piece]) => [key, piece.geom]));
-  const metricLength = (parts: readonly SeamPart[], activeFolds: readonly StoredFold[]) => {
+  const metricLength = (
+    parts: readonly SeamPart[],
+    activeFolds: readonly StoredFold[],
+    placed?: ReadonlyMap<string, Matrix>,
+  ) => {
     if (parts.every((part) => !!part.edgeId))
       return sideLengthMm(
         parts.map(
@@ -2283,7 +2287,7 @@ function buildCards(
         ),
         metricGeoms,
         () => 0,
-        { activeFolds, grainDeg },
+        { activeFolds, grainDeg, placed },
       );
     return parts.reduce((total, part) => total + part.lenMm, 0);
   };
@@ -2491,10 +2495,17 @@ function buildCards(
       world.push(...g);
     }
 
+    // The engine's edges are y up, the drawing's y down: a stretch laid on another piece counts once.
+    const placed = new Map(
+      world.map((item) => {
+        const [a, b, c, d, e, f] = item.T;
+        return [item.p, [a, b, -c, -d, e, f] as Matrix] as const;
+      }),
+    );
     const metrics: SeamMetric[] = seams.map((s, i) => {
-      const left = metricLength(s.a, activeFolds);
+      const left = metricLength(s.a, activeFolds, placed);
       if (!s.b.length) return { letter: String(i + 1), left, bad: false };
-      const right = metricLength(s.b, activeFolds);
+      const right = metricLength(s.b, activeFolds, placed);
       // A strip's side reads through its fit, and a strip typed by hand states no seam length at all.
       const lengths = seamLengthCheck(
         left,

@@ -7,6 +7,7 @@ import { normalizeParts, SEAMS, type StoredSeam } from 'lib/seams';
 import { rowPairSig, rowsSig } from '../assembly-seams/seams-store';
 
 import realFixture from './fixtures/span-real-geoms.json';
+import { foldCrossingsMm } from './step-folds';
 import {
   clickSegment,
   edgeBreaks,
@@ -330,5 +331,38 @@ describe('rows of one edge', () => {
       direction: 'reversed' as const,
     });
     expect(rowsSig([gap(0.25)])).not.toBe(rowsSig([gap(0.5)]));
+  });
+});
+
+describe('a folded edge is picked by the stretches its folds cut', () => {
+  const edge = resolveEdge(id, geoms)!;
+  const across = (t: number) => {
+    // A fold line through the point t of the edge, square to it.
+    const i = Math.max(1, Math.floor(t * (edge.pts.length - 1)));
+    const [p, q] = [edge.pts[i - 1], edge.pts[i]];
+    const at = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2] as const;
+    const n = [-(q[1] - p[1]), q[0] - p[0]] as const;
+    return {
+      a: [at[0] - n[0] * 50, at[1] - n[1] * 50] as [number, number],
+      b: [at[0] + n[0] * 50, at[1] + n[1] * 50] as [number, number],
+      flipAt: at as unknown as [number, number],
+      kind: 'inward' as const,
+    };
+  };
+
+  it('a fold line across the edge is a break point, a click takes one stretch', () => {
+    const lines = new Map([[piece.geom.pieceKey, [across(0.5)]]]);
+    const cuts = foldCrossingsMm(id, geoms, lines);
+    expect(cuts).toHaveLength(1);
+    const breaks = edgeBreaks(id, geoms, cuts);
+    expect(breaks.some((b) => b.kind === 'fold')).toBe(true);
+    const [from, to] = segmentAt(breaks, length, cuts[0] + 0.5);
+    expect(from).toBeCloseTo(cuts[0], 3);
+    expect(to).toBeLessThanOrEqual(length);
+  });
+
+  it('no folds, the same breaks as before', () => {
+    expect(edgeBreaks(id, geoms, [])).toEqual(edgeBreaks(id, geoms));
+    expect(foldCrossingsMm(id, geoms, new Map())).toEqual([]);
   });
 });

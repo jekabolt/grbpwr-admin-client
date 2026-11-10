@@ -82,4 +82,50 @@ describe('garment label picture', () => {
   it('draws no stitch on an unsewn label', () => {
     expect(stitchYs(render([]))).toHaveLength(0);
   });
+  it('draws the tee tip as the sewn line on both axes', () => {
+    const tee = {
+      ...mark,
+      fold: 'tee' as const,
+      foldLines: [42, 58],
+      stitchLines: [47, 53],
+    };
+    const height = renderToStaticMarkup(
+      <svg>
+        <GarmentLabelOverlay
+          pieces={[{ key: 'label', drawn }]}
+          geoms={new Map([['label', { garmentLabel: tee } as unknown as PieceGeom]])}
+          hair={1}
+          outlineWidth={2}
+        />
+      </svg>,
+    );
+    expect(height).toContain('d="M0.00 20.00 L30.00 20.00"');
+
+    const widthDrawn: Pt2[] = [
+      [0, 30],
+      [84, 30],
+      [84, 0],
+      [0, 0],
+    ];
+    const width = renderToStaticMarkup(
+      <svg>
+        <GarmentLabelOverlay
+          pieces={[{ key: 'label', drawn: widthDrawn }]}
+          geoms={
+            new Map([
+              [
+                'label',
+                {
+                  garmentLabel: { ...tee, widthMm: 100, heightMm: 30, foldAxis: 'width' },
+                } as unknown as PieceGeom,
+              ],
+            ])
+          }
+          hair={1}
+          outlineWidth={2}
+        />
+      </svg>,
+    );
+    expect(width).toContain('d="M42.00 30.00 L42.00 0.00"');
+  });
 });

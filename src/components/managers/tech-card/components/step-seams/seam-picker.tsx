@@ -105,8 +105,14 @@ import {
   type EdgeTick,
   type NoMark,
 } from './step-picture-view';
-import { foldedDrawing, foldedFitSides, withFoldPartners } from './step-folds';
-import { edgeRowFromPick, initialPickerPick, orderedPickSides } from './step-rows';
+import {
+  cardFoldLines,
+  foldCrossingsMm,
+  foldedDrawing,
+  foldedFitSides,
+  withFoldPartners,
+} from './step-folds';
+import { edgeRowOfPick, initialPickerPick, orderedPickSides } from './step-rows';
 import { fitSourceOf } from './step-pose';
 import { stepPictureOf } from './surface-picture';
 import { useMirrorStep } from './use-mirror-step';
@@ -225,6 +231,14 @@ export function SeamPickerBody({
   const seamActions = useStepSeamActions(index);
   const errors = useSeamsStore((s) => s.errors);
   const foldRows = useFoldRows();
+  const foldLines = useMemo(
+    () => cardFoldLines(foldRows, geoms, geo?.grainDeg, innerLines),
+    [foldRows, geoms, geo?.grainDeg, innerLines],
+  );
+  const breaksOf = useCallback(
+    (id: TargetId) => edgeBreaks(id, geoms, foldCrossingsMm(id, geoms, foldLines)),
+    [geoms, foldLines],
+  );
   const { catalog: workCatalog } = useOperationWorkCatalog();
   const cutStrips = (useWatch({ control: form.control, name: 'cutStrips' }) ?? []) as CutStrip[];
   const sizeIds = (useWatch({ control: form.control, name: 'sizeIds' }) ?? []) as number[];
@@ -347,6 +361,7 @@ export function SeamPickerBody({
     targetsLen(ids, geoms, (piece, k) => polyLen(pieces?.get(piece)?.inner[k] ?? []), {
       activeFolds,
       grainDeg: geo?.grainDeg,
+      placed: stepPicture?.layout.T,
     });
   const pickParts = (side: Side) => sideParts(sel[side], sel.spans[side]);
 
@@ -408,21 +423,28 @@ export function SeamPickerBody({
     [geoms, geo?.grainDeg, nameOf],
   );
 
+  // An edge-only pick as ACCEPT stores it, with the words it shows when it cannot.
+  const edgePick = useCallback(
+    (clicked: Sel) => {
+      const s = orderedPickSides(clicked, geoms);
+      const ranged = Object.keys(clicked.spans.a).length || Object.keys(clicked.spans.b).length;
+      return edgeRowOfPick(
+        s,
+        geoms,
+        anchorCtx,
+        ranged
+          ? { a: sideParts(s.a, clicked.spans.a), b: sideParts(s.b, clicked.spans.b) }
+          : undefined,
+      );
+    },
+    [geoms, anchorCtx],
+  );
+
   const buildRow = useCallback(
     (clicked: Sel): StoredSeam | null => {
       const s = orderedPickSides(clicked, geoms);
       const ins = [...s.a, ...s.b].filter((t) => parseInner(t));
-      if (ins.length === 0) {
-        const ranged = Object.keys(clicked.spans.a).length || Object.keys(clicked.spans.b).length;
-        return edgeRowFromPick(
-          s,
-          geoms,
-          anchorCtx,
-          ranged
-            ? { a: sideParts(s.a, clicked.spans.a), b: sideParts(s.b, clicked.spans.b) }
-            : undefined,
-        );
-      }
+      if (ins.length === 0) return edgePick(clicked).row;
       const h = parseInner(ins[0]);
       const g = h ? geoms.get(h.piece) : undefined;
       const line = h ? pieces?.get(h.piece)?.inner[h.k] : undefined;
@@ -439,7 +461,7 @@ export function SeamPickerBody({
         undefined,
       );
     },
-    [geoms, anchorCtx, pieces, geo, partKey],
+    [geoms, anchorCtx, pieces, geo, partKey, edgePick],
   );
 
   const reset = () => {
@@ -506,7 +528,8 @@ export function SeamPickerBody({
     }
     const row = pickReady ? draftRow : null;
     if (pickReady && !row) {
-      setRefused('cannot pair');
+      const edgeOnly = !bindingReady && pair && ![...pick.a, ...pick.b].some((t) => parseInner(t));
+      setRefused((edgeOnly && edgePick(pick).refusal) || 'cannot pair');
       return;
     }
     if (posePending && !(await savePose())) return;
@@ -649,8 +672,7 @@ export function SeamPickerBody({
         );
         return;
       }
-      const segment =
-        labelSpanAt(id, side, length, atMm) ?? segmentAt(edgeBreaks(id, geoms), length, atMm);
+      const segment = labelSpanAt(id, side, length, atMm) ?? segmentAt(breaksOf(id), length, atMm);
       if (topstitchMode && topstitchPickOverlaps(topstitchLines, id, segment, geoms)) {
         setRefused('already picked');
         return;
@@ -675,6 +697,7 @@ export function SeamPickerBody({
       setPoseSel,
       onFolded,
       labelSpanAt,
+      breaksOf,
     ],
   );
   const onHoverAt = useCallback(
@@ -692,7 +715,7 @@ export function SeamPickerBody({
                 : sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget),
               length,
               atMm,
-            ) ?? segmentAt(edgeBreaks(id, geoms), length, atMm)
+            ) ?? segmentAt(breaksOf(id), length, atMm)
           : null;
       setHover((current) =>
         current?.id === id && current?.range[0] === free?.[0] && current?.range[1] === free?.[1]
@@ -702,12 +725,12 @@ export function SeamPickerBody({
             : null,
       );
     },
-    [geoms, stored, labelSpanAt, groups, sel, bindingMode, topstitchMode],
+    [geoms, stored, labelSpanAt, groups, sel, bindingMode, topstitchMode, breaksOf],
   );
   const onSpanDrag = useCallback(
     (id: TargetId, fromMm: number, toMm: number, done: boolean) => {
       if (frozen) return;
-      const breaks = edgeBreaks(id, geoms);
+      const breaks = breaksOf(id);
       const range: SpanRange = [snapToBreak(breaks, fromMm), snapToBreak(breaks, toMm)];
       if (!done) {
         setSpanDrag({ id, range });
@@ -754,6 +777,7 @@ export function SeamPickerBody({
       pickRules,
       setPoseSel,
       onFolded,
+      breaksOf,
     ],
   );
 
@@ -814,13 +838,13 @@ export function SeamPickerBody({
     if (hover) ids.add(hover.id);
     if (spanDrag) ids.add(spanDrag.id);
     return [...ids].flatMap((id) =>
-      edgeBreaks(id, geoms).map((point) => ({
+      breaksOf(id).map((point) => ({
         id,
         atMm: point.atMm,
         notch: point.kind === 'notch',
       })),
     );
-  }, [sel, hover, spanDrag, geoms]);
+  }, [sel, hover, spanDrag, geoms, breaksOf]);
   const groupNames = useMemo(() => groups.map((g) => g.name), [groups]);
   const canvasPickTargets = useMemo(
     () =>

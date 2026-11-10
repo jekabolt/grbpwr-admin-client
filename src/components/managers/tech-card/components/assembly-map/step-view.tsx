@@ -1,8 +1,8 @@
 // STEP — the active operation reduced to its result, seam picture, exceptions, and sewn values.
-import { isJoin, stepConfidence, type MapRead } from 'lib/assembly-skeleton/map';
+import { confidenceWord, isJoin, type MapRead } from 'lib/assembly-skeleton/map';
 import { edgesOf } from 'lib/assembly-skeleton/map/frame';
 import { pieceKeyOf, resolveEdge } from 'lib/assembly-skeleton/union/layout';
-import type { SeamCandidate } from 'lib/assembly-skeleton/types';
+import type { Affine, SeamCandidate } from 'lib/assembly-skeleton/types';
 import { activeFoldRows, type StoredFold } from 'lib/folds';
 import { candidateSideParts } from 'lib/seams';
 import { Text } from 'ui';
@@ -17,6 +17,7 @@ import {
   DEFAULT_SEAM_TOLERANCE_MM,
   seamToleranceOf,
   sideLengthMm,
+  sideLiesUnder,
 } from '../step-seams/seam-length';
 import { stepPictureOf, type SurfacePicture } from '../step-seams/surface-picture';
 import { SewnStrip } from './sewn-strip';
@@ -42,6 +43,7 @@ export function mismatchFacts(
   activeFolds: readonly StoredFold[] = [],
   grainDeg?: ReadonlyMap<string, number>,
   toleranceMm: number = DEFAULT_SEAM_TOLERANCE_MM,
+  placed?: ReadonlyMap<string, Affine>,
 ): string[] {
   const aParts = candidateSideParts(seam, 'a', read.geoms);
   const bParts = candidateSideParts(seam, 'b', read.geoms);
@@ -57,11 +59,17 @@ export function mismatchFacts(
     const folded = sideLengthMm(parts, read.geoms, () => 0, { activeFolds, grainDeg });
     return folded !== plain ? folded : null;
   };
+  /** The side's length as it lies in the step's picture; null when no overlap changes it. */
+  const laidOf = (parts: typeof aParts, plain: number | null) => {
+    if (!placed || plain == null) return null;
+    const laid = sideLengthMm(parts, read.geoms, () => 0, { activeFolds, grainDeg, placed });
+    return Math.abs(laid - plain) > 0.5 ? laid : null;
+  };
   const aFolded = foldedOf(aParts, aPlain);
   const bFolded = foldedOf(bParts, bPlain);
-  // Without a fold event, evidence remains the first and byte-identical answer.
-  const a = aFolded ?? seam.evidence?.aLenMm ?? aPlain;
-  const b = bFolded ?? seam.evidence?.bLenMm ?? bPlain;
+  // Without a fold or an overlap, evidence remains the first and byte-identical answer.
+  const a = laidOf(aParts, aPlain) ?? aFolded ?? seam.evidence?.aLenMm ?? aPlain;
+  const b = laidOf(bParts, bPlain) ?? bFolded ?? seam.evidence?.bLenMm ?? bPlain;
   const facts: string[] = [];
   const piecesOf = (parts: typeof aParts) => [
     ...new Set(parts.map((part) => pieceKeyOf(part.target))),
@@ -102,6 +110,31 @@ export function mismatchFacts(
   return facts;
 }
 
+/**
+ * The step's seams the map speaks of: an engine reading whose side lies under a stored seam of the
+ * same step (an edge a pocket already covers) is that seam again, not a seam of its own.
+ */
+export function stepSeamsShown(
+  read: MapRead,
+  index: number,
+  placed: ReadonlyMap<string, Affine> | undefined,
+): SeamCandidate[] {
+  const seams = read.seams[index] ?? [];
+  const stored = seams.filter((seam) => seam.provenance);
+  if (!placed || !stored.length) return seams;
+  const under = stored.flatMap((seam) => [
+    ...candidateSideParts(seam, 'a', read.geoms),
+    ...candidateSideParts(seam, 'b', read.geoms),
+  ]);
+  return seams.filter(
+    (seam) =>
+      seam.provenance ||
+      !(['a', 'b'] as const).some((side) =>
+        sideLiesUnder(candidateSideParts(seam, side, read.geoms), under, read.geoms, placed),
+      ),
+  );
+}
+
 export function StepView({ model, index }: { model: MapModel; index: number }) {
   const { read, ops, pieceName, unitName, isUnit } = model;
   const results = useStepResults();
@@ -129,19 +162,23 @@ export function StepView({ model, index }: { model: MapModel; index: number }) {
       : output
         ? unitName(output)
         : '';
-  const unsure = join && (!read || stepConfidence(read, index) !== 'sure');
+  const seams = read ? stepSeamsShown(read, index, picture?.layout.T) : [];
+  const unsure =
+    join &&
+    (!read || !seams.length || confidenceWord(Math.min(...seams.map((s) => s.score))) !== 'sure');
   const inputNames = inputs.map(nameOf);
   const fallbackNames = [...new Set(inputNames)];
   const facts = read
     ? [
         ...new Set(
-          (read.seams[index] ?? []).flatMap((seam) =>
+          seams.flatMap((seam) =>
             mismatchFacts(
               read,
               seam,
               activeFolds,
               geo?.grainDeg,
               seamToleranceOf(op.seamToleranceMm),
+              picture?.layout.T,
             ),
           ),
         ),

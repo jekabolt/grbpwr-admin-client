@@ -16,7 +16,7 @@ import {
   type StoredSeam,
 } from 'lib/seams';
 
-import { rowFromHand, type AnchorCtx } from '../assembly-seams/seam-actions';
+import { handRow, type AnchorCtx, type HandRowRefusal } from '../assembly-seams/seam-actions';
 import { innerId, parseInner, pieceOfTarget, type TargetId } from './step-seams-model';
 import { seamOfSides, surfaceSeam, type SeamSides } from './step-picture';
 
@@ -51,16 +51,26 @@ export function edgeRowFromPick(
   anchorCtx: AnchorCtx,
   parts?: { a: readonly SidePart[]; b: readonly SidePart[] },
 ): StoredSeam | null {
+  return edgeRowOfPick(sides, geoms, anchorCtx, parts).row;
+}
+
+/** `edgeRowFromPick` with the reason ACCEPT shows when it stores nothing. */
+export function edgeRowOfPick(
+  sides: SeamSides,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  anchorCtx: AnchorCtx,
+  parts?: { a: readonly SidePart[]; b: readonly SidePart[] },
+): { row: StoredSeam | null; refusal: HandRowRefusal } {
   const ordered = orderedPickSides(sides, geoms);
   const a = parts?.a ?? ordered.a.map((target): SidePart => ({ target }));
   const b = parts?.b ?? ordered.b.map((target): SidePart => ({ target }));
   const o = { direction: 'reversed' as const };
   // What was picked is what is sewn: a pick the run rules refuse is stored edge by edge instead.
   // Only an edge that does not resolve, or too many parts, keeps ACCEPT from saving.
-  return (
-    rowFromHand(a, b, geoms, anchorCtx, o) ??
-    rowFromHand(edgeByEdge(a, geoms), edgeByEdge(b, geoms), geoms, anchorCtx, o)
-  );
+  const first = handRow(a, b, geoms, anchorCtx, o);
+  if (first.row) return first;
+  const second = handRow(edgeByEdge(a, geoms), edgeByEdge(b, geoms), geoms, anchorCtx, o);
+  return second.row || second.refusal === 'too many parts' ? second : first;
 }
 
 /** A side as single edges: chains split into their members, stretches kept on the edge they lie on. */

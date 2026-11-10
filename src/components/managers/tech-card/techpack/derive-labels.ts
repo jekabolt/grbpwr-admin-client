@@ -39,6 +39,7 @@ import {
   labelAxisLen,
   parseFoldLines,
   parseStitchLines,
+  teeStitch,
 } from 'components/managers/tech-card/components/label-fold-lines';
 
 export type LabelsDeriveOptions = {
@@ -135,8 +136,17 @@ function deriveSewn(techCard: common_TechCard, options: LabelsDeriveOptions, t: 
     return lines.length ? `${lines.join(' / ')} mm` : '';
   };
 
-  const stitchLinesText = (csv: string | undefined, heightMm: number) => {
+  const stitchLinesText = (
+    csv: string | undefined,
+    heightMm: number,
+    fold?: string,
+    foldCsv?: string,
+  ) => {
     const lines = parseStitchLines(csv, heightMm);
+    if (fold === 'tee') {
+      const stitch = teeStitch(lines, parseFoldLines(foldCsv, heightMm));
+      return stitch ? `stitch ${stitch} mm from tip` : '';
+    }
     return lines.length ? `stitch ${lines.join(' / ')} mm` : '';
   };
 
@@ -150,7 +160,7 @@ function deriveSewn(techCard: common_TechCard, options: LabelsDeriveOptions, t: 
     fold: [
       clean(row.fold) || clean(row.folding),
       foldLinesText(row.foldLinesMm, labelAxisLen(row)),
-      stitchLinesText(row.stitchLinesMm, labelAxisLen(row)),
+      stitchLinesText(row.stitchLinesMm, labelAxisLen(row), row.fold, row.foldLinesMm),
     ]
       .filter(Boolean)
       .join(' · '),

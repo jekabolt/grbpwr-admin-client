@@ -50,7 +50,12 @@ import {
   type SpanFitPlan,
 } from './step-pose';
 import { OWNER_FIT, stepResults } from './step-result';
-import { candidateOfStoredSeam, edgeRowFromPick, storedSeamSides } from './step-rows';
+import {
+  candidateOfStoredSeam,
+  edgeRowFromPick,
+  edgeRowOfPick,
+  storedSeamSides,
+} from './step-rows';
 import { NO_SPANS, pickSegment, repeatsStoredSeam, sideParts, type SidePick } from './span-pick';
 import { fullyUsedEdges, usedEdgesBeforeStep } from './step-seams-model';
 import { seamTileSideLines } from './step-seams-row';
@@ -1197,6 +1202,41 @@ describe('ACCEPT stores what was picked', () => {
     );
     if (!stored) throw new Error('the pick did not save');
     expect(stored.sideA.map((anchor) => anchor.edgeHint)).toEqual([chain]);
+  });
+});
+
+describe('ACCEPT with a stretch on a side of many edges', () => {
+  const whole = (name: string, edges: number[]) => edges.map((k) => ({ target: id(name, k) }));
+  const stretch = { target: id('FLAP_R', 0), range: [0, 12.5] as [number, number] };
+  const store = (a: { target: string; range?: [number, number] }[]) =>
+    edgeRowOfPick(
+      { a: a.map((part) => part.target), b: [id('FRONT_R', 3)] },
+      pantsGeoms,
+      anchorCtx,
+      { a, b: [{ target: id('FRONT_R', 3) }] },
+    );
+
+  it('whole edges in a row still sew as one run when the side also holds a stretch', () => {
+    const a = [
+      ...whole('Back_L', [0, 1, 2]),
+      ...whole('FRONT_L', [0, 1, 2]),
+      ...whole('Back_Top_L_R', [0, 1, 2]),
+      stretch,
+    ];
+    const { row, refusal } = store(a);
+    expect(refusal).toBe('');
+    expect(row?.sideA).toHaveLength(4);
+  });
+
+  it('a side that cannot fit says so', () => {
+    const ranged = (name: string, edges: number[]) =>
+      edges.map((k) => ({ target: id(name, k), range: [0, 10] as [number, number] }));
+    const { row, refusal } = store([
+      ...ranged('Back_L', [0, 1, 2, 3, 4]),
+      ...ranged('FRONT_L', [0, 1, 2, 3]),
+    ]);
+    expect(row).toBeNull();
+    expect(refusal).toBe('too many parts');
   });
 });
 

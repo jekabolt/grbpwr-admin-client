@@ -109,6 +109,59 @@ function layFolds(
 }
 
 /**
+ * Every fold line of the card laid on its flat piece, whatever step closes it: the pattern's dashes.
+ * A row marked stale still lies where its dashes are drawn; it only places pick points here.
+ */
+export function cardFoldLines(
+  rows: readonly StoredFold[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+  grainDeg: ReadonlyMap<string, number> | undefined,
+  innerLines?: ReadonlyMap<string, readonly (readonly Pt2[])[]>,
+): FlatFolds {
+  if (!rows.length) return new Map();
+  const out = new Map<string, FlatFold[]>();
+  const fresh = rows.map((row) => (row.stale ? { ...row, stale: false } : row));
+  for (const fold of layFolds(fresh, geoms, grainDeg ?? new Map(), innerLines).values())
+    out.set(fold.piece, [...(out.get(fold.piece) ?? []), fold.flat]);
+  return out;
+}
+
+const CROSS_EPS = 1e-9;
+
+/** Where the fold lines of the edge's piece cross the edge, mm from its start. */
+export function foldCrossingsMm(
+  id: string,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  lines: FlatFolds | undefined,
+): number[] {
+  const edge = lines?.size ? resolveEdge(id, geoms) : null;
+  const folds = edge && lines?.get(edge.pieceKey);
+  if (!edge || !folds?.length) return [];
+  const out: number[] = [];
+  for (const fold of folds) {
+    const dx = fold.b[0] - fold.a[0];
+    const dy = fold.b[1] - fold.a[1];
+    if (Math.hypot(dx, dy) <= CROSS_EPS) continue;
+    const side = (p: Pt2) => dx * (p[1] - fold.a[1]) - dy * (p[0] - fold.a[0]);
+    let at = 0;
+    for (let i = 1; i < edge.pts.length; i++) {
+      const p = edge.pts[i - 1];
+      const q = edge.pts[i];
+      const step = Math.hypot(q[0] - p[0], q[1] - p[1]);
+      const sp = side(p);
+      const sq = side(q);
+      if (step > 0 && sp * sq < 0) out.push(at + (step * sp) / (sp - sq));
+      at += step;
+    }
+  }
+  const scale = edge.len > 0 && out.length ? edge.len / polyLen(edge.pts) : 1;
+  return out.map((mm) => mm * scale).sort((a, b) => a - b);
+}
+
+const polyLen = (pts: readonly Pt2[]) =>
+  pts.slice(1).reduce((sum, p, i) => sum + Math.hypot(p[0] - pts[i][0], p[1] - pts[i][1]), 0);
+
+/**
  * What each step of a card sees, or null when no step names a fold. Steps with the same folds share
  * one `flat`, so the drawing is folded once per fold set.
  */

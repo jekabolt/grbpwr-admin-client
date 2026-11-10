@@ -46,7 +46,9 @@ export function GarmentLabelOverlay({
         if (!a || !b || !c || !d) return null;
         const fold = mark.foldLines ?? [];
         const axisMm = labelAxisLen(mark);
-        const sewn = labelAssembly(fold, mark.stitchLines ?? [], axisMm);
+        const sewn = labelAssembly(fold, mark.stitchLines ?? [], axisMm, mark.fold);
+        const sewnAt = sewn.sewnAtMm ?? 0;
+        const sewnT = sewn.heightMm > 0 ? sewnAt / sewn.heightMm : 0;
         const mitreInset = Math.min(mark.heightMm * 0.6, mark.widthMm * 0.2) / mark.widthMm;
         const outline =
           mark.fold === 'mitre' && !sewn.sewnTop
@@ -62,7 +64,11 @@ export function GarmentLabelOverlay({
               strokeLinejoin='round'
             />
             <path
-              d={pathOf(mark.foldAxis === 'width' ? [a, d] : [d, c])}
+              d={pathOf(
+                mark.foldAxis === 'width'
+                  ? [mix(a, b, sewnT), mix(d, c, sewnT)]
+                  : [mix(d, a, sewnT), mix(c, b, sewnT)],
+              )}
               fill='none'
               stroke={stroke}
               strokeWidth={(outlineWidth ?? hair * 1.5) * 1.8}
