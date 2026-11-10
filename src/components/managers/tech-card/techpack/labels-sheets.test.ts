@@ -75,6 +75,22 @@ describe('page 05 sewn-in labels', () => {
     expect([legacy?.size, legacy?.fold, legacy?.step]).toEqual(['30 × 60 mm', 'end fold', '']);
   });
 
+  it('prints the tee stitch as one distance from the tip', () => {
+    const tee = card({
+      garmentLabels: [
+        {
+          key: 'composition',
+          widthMm: { value: '30' },
+          heightMm: { value: '100' },
+          fold: 'tee',
+          foldLinesMm: '42,58',
+          stitchLinesMm: '47,53',
+        },
+      ],
+    });
+    expect(model(tee).sewn.table[0].fold).toBe('tee · 42 / 58 mm · stitch 3 mm from tip');
+  });
+
   it('puts composition first and takes the material from the BOM line', () => {
     const [first, second] = model().sewn.table;
     expect([first.item, first.number, first.material]).toEqual([

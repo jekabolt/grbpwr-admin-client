@@ -30,3 +30,42 @@ describe('LabelFoldEditor with built ribbons', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 });
+
+const renderTee = (foldAxis = '') =>
+  renderToStaticMarkup(
+    <QueryClientProvider client={new QueryClient()}>
+      <LabelFoldEditor
+        widthMm={foldAxis === 'width' ? 100 : 30}
+        heightMm={foldAxis === 'width' ? 30 : 100}
+        widthValue={foldAxis === 'width' ? '100' : '30'}
+        heightValue={foldAxis === 'width' ? '30' : '100'}
+        fold='tee'
+        foldAxis={foldAxis}
+        foldLinesMm='42,58'
+        stitchLinesMm='47,53'
+        pages={1}
+        composition
+        disabled={false}
+        onChange={vi.fn()}
+      />
+    </QueryClientProvider>,
+  );
+
+describe('LabelFoldEditor tee fold', () => {
+  it.each([
+    ['', '30 × 84'],
+    ['width', '84 × 30'],
+  ])('draws the band, side and joined front on the %s axis', (foldAxis, folded) => {
+    const html = renderTee(foldAxis);
+    expect(html).toContain('data-label-tee-band');
+    expect(html).toContain('data-label-folded-view="tee"');
+    expect(html).toContain('aria-label="T fold side"');
+    expect(html).toContain('aria-label="fold a"');
+    expect(html).toContain('aria-label="fold b"');
+    expect(html).toContain('aria-label="in seam"');
+    expect(html).toContain('value="8"');
+    expect(html).toContain('mm from tip');
+    expect(html).toContain(folded);
+    expect(html).not.toContain('aria-label="pages"');
+  });
+});

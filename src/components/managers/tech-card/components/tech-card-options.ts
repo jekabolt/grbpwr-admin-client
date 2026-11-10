@@ -162,7 +162,7 @@ export const labelAttachmentOptions = [
   'stuck on',
 ];
 
-export const labelFoldingOptions = ['flat', 'half', 'ends', 'mitre', 'loop'];
+export const labelFoldingOptions = ['flat', 'half', 'ends', 'mitre', 'loop', 'tee'];
 
 export const labelMadeByOptions = ['woven', 'printed', 'embroidered', 'heat transfer'];
 

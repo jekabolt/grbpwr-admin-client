@@ -137,7 +137,7 @@ export const garmentLabelSchema = z.object({
   size: text(LABEL_SIZE_MAX, 'size'),
   widthMm: labelMillimetres,
   heightMm: labelMillimetres,
-  fold: z.enum(['', 'flat', 'half', 'ends', 'mitre', 'loop']).optional().default(''),
+  fold: z.enum(['', 'flat', 'half', 'ends', 'mitre', 'loop', 'tee']).optional().default(''),
   // Fold/stitch lines: mm from the sewn edge along foldAxis, CSV ("12,88").
   foldLinesMm: z.string().optional().default(''),
   stitchLinesMm: z.string().optional().default(''),
@@ -376,7 +376,8 @@ export function garmentLabelsToForm(ls?: common_TechCardGarmentLabel[]): FormGar
       l.fold === 'half' ||
       l.fold === 'ends' ||
       l.fold === 'mitre' ||
-      l.fold === 'loop'
+      l.fold === 'loop' ||
+      l.fold === 'tee'
         ? l.fold
         : '',
     foldLinesMm: l.foldLinesMm || '',
