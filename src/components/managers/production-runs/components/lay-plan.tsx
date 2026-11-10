@@ -27,6 +27,8 @@ import { LayEditor, LaySlotOption } from './lay-editor';
 import { useCutReceipts } from './useCutReceipts';
 import { layErrorMessage, useDeleteLay, useRunLays, useSaveLay } from './useLays';
 import { useRunNormCard } from './useRunNormCard';
+import { RunMarkersTable } from './run-markers-table';
+import { useRunMarkers } from './use-run-markers';
 
 // Слоты, которые вообще можно настелить: рулонные секции BOM. Фурнитура, нитки и упаковка настила
 // не имеют, и предлагать их в выборе слота значило бы приглашать в отказ сервера (§4.3 шаг 5).
@@ -292,6 +294,17 @@ export function LayPlan({
     return (colorwayId: number) => [...(byColorway.get(colorwayId) ?? [])].join(' + ');
   }, [neededPairs, slotByItemId]);
 
+  // «build markers» / «build lays» — маркеры партии по материалам (вариант «One marker»).
+  const batch = useRunMarkers({
+    run,
+    techCard,
+    editable: canEdit && !locked,
+    runMarkers,
+    lays,
+    laysReady: !!data && !isLoading,
+    colorwayLabel,
+  });
+
   // aux-карточка: сервер отдаёт applicable = false с причиной, и блок не рисуется ВОВСЕ. Пустой
   // список настилов читался бы как «настилов пока нет», то есть как приглашение их построить, — а
   // у aux-прогона нет ни колорвеев, ни деталей, ни раскладок, и строить нечего.
@@ -369,16 +382,48 @@ export function LayPlan({
       title='step 3 · how to cut'
       question='lays: how many plies we spread with which marker, and whether they cover the run plan.'
       action={
-        neededPairs.length > 0 ? (
-          <Text
-            size='micro'
-            variant='label'
-            tracking='label'
-            component='span'
-            className='uppercase'
-          >
-            spread: {layedPairs} of {neededPairs.length} pairs
-          </Text>
+        neededPairs.length > 0 || batch.canBuild || batch.canBuildLays ? (
+          <span className='inline-flex flex-wrap items-center gap-3.5'>
+            {neededPairs.length > 0 ? (
+              <Text
+                size='micro'
+                variant='label'
+                tracking='label'
+                component='span'
+                className='uppercase'
+              >
+                spread: {layedPairs} of {neededPairs.length} pairs
+              </Text>
+            ) : null}
+            {batch.canBuild ? (
+              <Button
+                type='button'
+                variant='underline'
+                size='xs'
+                disabled={!!batch.progress}
+                onClick={() => void batch.buildMarkers()}
+              >
+                {batch.progress
+                  ? batch.progress.total > 0
+                    ? `building ${batch.progress.done}/${batch.progress.total}`
+                    : 'building…'
+                  : batch.rows.some((r) => r.kind === 'marker')
+                    ? 'rebuild markers'
+                    : 'build markers'}
+              </Button>
+            ) : null}
+            {batch.canBuildLays && !batch.progress ? (
+              <Button
+                type='button'
+                variant='underline'
+                size='xs'
+                disabled={batch.layingLays}
+                onClick={() => void batch.buildLays()}
+              >
+                build lays
+              </Button>
+            ) : null}
+          </span>
         ) : null
       }
     >
@@ -388,6 +433,8 @@ export function LayPlan({
         <Text size='small'>the lay plan is unavailable.</Text>
       ) : (
         <>
+          <RunMarkersTable rows={batch.rows} />
+
           <LayCoverageTable
             cells={coverage}
             pieceYields={pieceYields}
