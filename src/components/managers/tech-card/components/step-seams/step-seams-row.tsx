@@ -10,10 +10,15 @@ import { activeFoldRows, type StoredFold } from 'lib/folds';
 import type { SidePart } from 'lib/seams';
 import { cn } from 'lib/utility';
 import { lazy, Suspense, useEffect, useMemo } from 'react';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
-import { Button, Close, GroupLabel, Text, TILE_PRESS, TILE_QUIET } from 'ui';
+import { useSizeNames } from 'components/managers/model/components/use-size-systems';
+import { Button, Close, DataTable, EmptyCell, GroupLabel, Text, TILE_PRESS, TILE_QUIET } from 'ui';
 import { useFoldRows } from '../assembly-folds/folds-store';
 import { useSeamsStore } from '../assembly-seams/seams-store';
+import { isTopstitchStep } from '../operation-kinds';
+import type { TechCardFormData } from '../schema';
+import { topstitchLineMm, type TopstitchLine } from '../topstitch-lines';
 import { drawsStepResult } from './draws-result';
 import { PairNo } from './pair-no';
 import { NO_SEAM_TEXT } from './step-highlight';
@@ -96,24 +101,130 @@ export function StepSeamsDoor({
   index: number;
   onOpen: (request: SeamPickerRequest) => void;
 }) {
-  const { ctx, ops, geoms, pieceKeys, stored } = useStepScene(index);
+  const { ctx, op, ops, geoms, pieceKeys, stored, groups } = useStepScene(index);
+  const topstitch = isTopstitchStep(op ?? {});
+  const lines = (op?.topstitchLines ?? []) as TopstitchLine[];
   const hasMultiplePieces = useMemo(
     () => hasMultipleStepPieces(ops, index, pieceKeys, geoms) || posesLabels(ops, index, pieceKeys),
     [ops, index, pieceKeys, geoms],
   );
-  if (!ctx || !hasMultiplePieces) return null;
+  if (!ctx || (!hasMultiplePieces && !(topstitch && groups.length > 0))) return null;
   return (
     <Button
       type='button'
       variant='underline'
       size='xs'
       onClick={() => onOpen(PLAIN_PICK)}
-      disabled={!ctx.cardId}
-      title={ctx.cardId ? undefined : 'save first'}
+      disabled={!topstitch && !ctx.cardId}
+      title={!topstitch && !ctx.cardId ? 'save first' : undefined}
       data-step-seams-pick=''
     >
-      seams {stored.length}
+      {topstitch ? `lines ${lines.length}` : `seams ${stored.length}`}
     </Button>
+  );
+}
+
+function TopstitchLinesTable({
+  index,
+  scene,
+  picture,
+  onOpen,
+}: {
+  index: number;
+  scene: StepScene;
+  picture?: SurfacePicture | null;
+  onOpen: () => void;
+}) {
+  const { control, setValue } = useFormContext<TechCardFormData>();
+  const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
+  const lines = (useWatch({ control, name: `operations.${index}.topstitchLines` }) ??
+    []) as TopstitchLine[];
+  const sizeNames = useSizeNames();
+  const frozen = scene.ctx?.frozen ?? true;
+  const write = (next: TopstitchLine[]) =>
+    setValue(`operations.${index}.topstitchLines`, next, { shouldDirty: true });
+
+  return (
+    <div className='flex min-w-0 flex-col gap-2.5'>
+      <SeamTile
+        scene={scene}
+        picture={picture}
+        marks={NO_MARKS}
+        ownMarksOnly
+        quiet
+        caption={lines.length ? undefined : 'pick'}
+        onOpen={onOpen}
+      />
+      <DataTable className='min-w-max'>
+        <thead>
+          <tr>
+            <th data-align='left'>line, mm</th>
+            <th>rows</th>
+            {sizeIds.map((sizeId) => (
+              <th key={sizeId}>{sizeNames.get(Number(sizeId)) || sizeId}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {lines.length ? (
+            lines.map((line, lineIndex) => (
+              <tr key={line.lineKey} className={line.stale ? 'text-error' : undefined}>
+                <td data-align='left'>
+                  <span className='flex items-center gap-2'>
+                    <Text component='span' className='tabular-nums'>
+                      line {lineIndex + 1}
+                    </Text>
+                    <Close
+                      size='sm'
+                      aria-label={`remove line ${lineIndex + 1}`}
+                      disabled={frozen}
+                      onClick={() => write(lines.filter((_, at) => at !== lineIndex))}
+                    />
+                  </span>
+                </td>
+                <td>
+                  <Button
+                    type='button'
+                    variant='underline'
+                    size='xs'
+                    disabled={frozen}
+                    onClick={() =>
+                      write(
+                        lines.map((candidate, at) =>
+                          at === lineIndex
+                            ? { ...candidate, rows: candidate.rows === 1 ? 2 : 1 }
+                            : candidate,
+                        ),
+                      )
+                    }
+                  >
+                    {'×'}
+                    {line.rows || 1}
+                  </Button>
+                </td>
+                {sizeIds.map((sizeId) => (
+                  <td key={sizeId} className='text-right tabular-nums'>
+                    {topstitchLineMm(line, sizeId) ?? <EmptyCell />}
+                  </td>
+                ))}
+              </tr>
+            ))
+          ) : (
+            <tr>
+              <td data-align='left'>no lines</td>
+              <td>
+                <EmptyCell />
+              </td>
+              {sizeIds.map((sizeId) => (
+                <td key={sizeId}>
+                  <EmptyCell />
+                </td>
+              ))}
+            </tr>
+          )}
+        </tbody>
+      </DataTable>
+    </div>
   );
 }
 
@@ -131,6 +242,7 @@ export function StepSeamsRow({
   const results = useStepResults();
   const result = drawsStepResult(results, index) ? results?.[index] : undefined;
   const { ctx, op, ops, geo, geoms, pieceKeys, keys, stored, suggestions } = scene;
+  const topstitch = isTopstitchStep(op ?? {});
   const unitStep = isUnitStep(scene.groups);
   const seamActions = useStepSeamActions(index);
   const pendingWrites = useSeamsStore((state) => state.pending);
@@ -159,12 +271,31 @@ export function StepSeamsRow({
     );
   }, [ctx, hasMultiplePieces, pick, opNumber, setParams, onPicker]);
 
-  if (!ctx || !hasMultiplePieces) return null;
+  if (!ctx || (!hasMultiplePieces && !(topstitch && scene.groups.length > 0))) return null;
   const { cardId, frozen } = ctx;
   // A step that only poses a label still shows where the label lies, before any seam exists.
   const labelPose = posesLabels(ops, index, pieceKeys);
   const pending = geo?.dep.status === 'pending';
   const activeFolds = activeFoldRows(ops, index, foldRows);
+
+  if (topstitch) {
+    return (
+      <div className='flex flex-col' data-step-seams={opNumber ?? ''}>
+        <GroupLabel>lines</GroupLabel>
+        <TopstitchLinesTable
+          index={index}
+          scene={scene}
+          picture={result}
+          onOpen={() => setOpen(true)}
+        />
+        {open && (
+          <Suspense fallback={null}>
+            <SeamPicker index={index} open={open} onClose={() => setOpen(false)} />
+          </Suspense>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className='flex flex-col' data-step-seams={opNumber ?? ''}>

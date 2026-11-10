@@ -2286,6 +2286,57 @@ export function solveDoll(input: DollInput): DollReport {
     graph.pieces.flatMap((p) => p.edges.map((e) => [e.id, e.lenMm] as const)),
   );
   /**
+   * A row's laid end sewn over the shell edge under it. A waist row runs along the left front's top
+   * onto the fly facing laid on that front: the row sews the front's top only up to where the
+   * facing starts (a part range) and the facing's top for the rest. The facing is laid after the
+   * solve, so that end of the band would be pulled by nothing and stand off the front at a corner.
+   * The facing lies on its host over the front's uncovered tail: the band is sewn over that tail.
+   * Only for a laid piece laid on the panel of the drawn part next to it, whose sewn stretch leaves
+   * one uncovered tail about the laid part's length.
+   */
+  for (const sm of G.seams) {
+    if (!isConf(sm.seam)) continue;
+    for (const side of ['a', 'b'] as const) {
+      const ids = sm[side];
+      if (ids.length < 2 || sewnStretchesOf(sm, side)) continue;
+      const orig = (
+        side === 'a'
+          ? sm.seam.aParts ?? edgeIdsOf(sm.seam.a)
+          : sm.seam.bParts ?? edgeIdsOf(sm.seam.b)
+      ).flatMap((x) => edgeIdsOf(x));
+      if (orig.length !== ids.length) continue;
+      for (const end of [ids.length - 1, 0]) {
+        const L = ids[end];
+        const nb = end === 0 ? 1 : end - 1;
+        const H = ids[nb];
+        if (panelByKey.has(pk(L)) || !panelByKey.has(pk(H)) || !laidKeys.has(pk(L))) continue;
+        if ((ownerSurface.get(pk(L))?.host ?? rowLays.get(pk(L))?.host) !== pk(H)) continue;
+        const pr = sm.seam.partRange ?? {};
+        const key = pr[orig[nb]] ? orig[nb] : H;
+        const r = pr[key];
+        const lenH = restLenOf.get(H) ?? 0;
+        const want = restLenOf.get(L) ?? 0;
+        if (!r || want <= 0) continue;
+        const tail = r[0] <= 5 ? lenH - r[1] : lenH - r[1] <= 5 ? r[0] : 0;
+        if (tail <= 5 || Math.abs(tail - want) > Math.max(10, 0.3 * want)) continue;
+        const keep = (_: unknown, i: number) => i !== end;
+        const rest = Object.fromEntries(Object.entries(pr).filter(([k]) => k !== key));
+        laidOverShell.set(sm, { a: [...sm.a], b: [...sm.b], off: [pk(L)], over: [H] });
+        sm[side] = ids.filter(keep);
+        sm.seam = {
+          ...sm.seam,
+          partRange: Object.keys(rest).length ? rest : undefined,
+          ...(side === 'a' ? { aParts: orig.filter(keep) } : { bParts: orig.filter(keep) }),
+        };
+        if (opt.debug)
+          warnings.push(
+            `debug: ${sm.seam.a}~${sm.seam.b}: its end on ${pk(L)} (laid on ${pk(H)}) sewn over ${H}'s uncovered ${tail.toFixed(0)} mm`,
+          );
+        break;
+      }
+    }
+  }
+  /**
    * A side's stretches in walk order, and the ones the solve can sew: a row whose walk starts or
    * ends on a piece laid on a panel (a waist run ending on the fly's flap, an armhole run starting
    * on a pocket) is sewn over its drawn parts; `share` is the part of the side's rest length they
@@ -8510,6 +8561,15 @@ export function solveDoll(input: DollInput): DollReport {
         0.3,
       );
   }
+  /** Band vertices past a row's laid end, by piece (an underlap on the fly shield): held under. */
+  const bandFree = new Map<string, number[]>();
+  /** Each such vertex: rest arc `e` past its laid end, height `h` off its run, the end's point. */
+  const pastEnd = new Map<number, { e: number; h: number; end: Vec3 }>();
+  /** The sewn run of each band piece laid along its row: vertices, rest arcs, pattern points. */
+  const bandRun = new Map<
+    string,
+    { v: number[]; s: number[]; len: number; run: Pt2[]; side: number }
+  >();
   /**
    * L4: a band piece laid along the stretch of the body its confirmed seam names — its sewn run on
    * that path (over the share the row's drawn parts take; a run carried on to a laid piece goes on
@@ -8629,7 +8689,106 @@ export function solveDoll(input: DollInput): DollReport {
       setPos(v, ps[i]);
       placed[v] = 1;
     });
+    // Past a laid end of the row (the stretch sewn onto a piece laid after the solve) no seam pulls
+    // the band: those vertices are held under the band piece over them.
+    const past = 5 / Bp.len;
+    const free = vs.filter((v, i) => {
+      const r = feet[i].s / Pb.len;
+      const t = ((ps === hi ? r : 1 - r) - share[0]) / span;
+      const at1 = share[1] < 1 - 1e-3 && t > 1 + past;
+      if (!at1 && !(share[0] > 1e-3 && t < -past)) return false;
+      pastEnd.set(v, {
+        e: (at1 ? t - 1 : -t) * span * Pb.len,
+        h: side * feet[i].h,
+        end: bodyAt(at1 ? 1 : 0),
+      });
+      return true;
+    });
+    if (free.length) bandFree.set(P.key, free);
+    bandRun.set(P.key, { v: [...Pb.v], s: [...Pb.s], len: Pb.len, run, side });
     return P;
+  };
+  /**
+   * An underlap past a laid end lies just under the band piece over it, at the same place along the
+   * band: a free vertex `e` mm past its laid end, `h` up off its run, is tied 2.5 mm under the point
+   * of the piece over it that lies `e` mm on along that piece's run from where the run passes the
+   * laid end, `h` up off it. The piece over it is held by its own seam and does not follow. (Paired
+   * by nearest vertex alone, the underlap sank 4-22 mm into the body, B-180.)
+   */
+  const tieUnder = (Q: Panel, free: number[], axis: Vec3) => {
+    const R = bandRun.get(Q.key);
+    if (!R || R.v.length < 2) return;
+    const R3 = R.v.map(getPos);
+    const segAt = (s: number) =>
+      Math.max(
+        1,
+        Math.min(
+          R.s.length - 1,
+          R.s.findIndex((x) => x >= s),
+        ),
+      );
+    const lerpAt = <T extends number[]>(pts: T[], s: number): T => {
+      const k = segAt(s);
+      const w = R.s[k] > R.s[k - 1] ? (s - R.s[k - 1]) / (R.s[k] - R.s[k - 1]) : 0;
+      return pts[k - 1].map((x, j) => x + (pts[k][j] - x) * w) as T;
+    };
+    const ends = new Map<Vec3, number[]>();
+    for (const v of free) {
+      const f = pastEnd.get(v);
+      if (f) ends.set(f.end, [...(ends.get(f.end) ?? []), v]);
+    }
+    const ia: number[] = [];
+    const wa: number[] = [];
+    const ib: number[] = [];
+    const wb: number[] = [];
+    for (const [E, fs] of ends) {
+      // Where Q's run passes the laid end (rest arc), and which way along it the underlap goes.
+      let c = { d: Infinity, s: 0 };
+      for (let k = 1; k < R3.length; k++) {
+        const ab = sub(R3[k], R3[k - 1]);
+        const l2 = dot(ab, ab);
+        if (l2 < 1e-12) continue;
+        const t = Math.max(0, Math.min(1, dot(sub(E, R3[k - 1]), ab) / l2));
+        const d = Math.hypot(...sub(add(R3[k - 1], ab, t), E));
+        if (d < c.d) c = { d, s: R.s[k - 1] + t * (R.s[k] - R.s[k - 1]) };
+      }
+      if (c.d > 40) continue;
+      const far = fs.reduce((a, b) => (pastEnd.get(b)!.e > pastEnd.get(a)!.e ? b : a));
+      const eMax = pastEnd.get(far)!.e;
+      const toFar = (sg: number) =>
+        Math.hypot(...sub(lerpAt(R3, Math.max(0, Math.min(R.len, c.s + sg * eMax))), getPos(far)));
+      const sg = toFar(1) <= toFar(-1) ? 1 : -1;
+      for (const v of fs) {
+        const { e, h } = pastEnd.get(v)!;
+        const s = c.s + sg * e;
+        if (s < -2 || s > R.len + 2) continue;
+        const sc = Math.max(0, Math.min(R.len, s));
+        const k = segAt(sc);
+        const dx = R.run[k][0] - R.run[k - 1][0];
+        const dy = R.run[k][1] - R.run[k - 1][1];
+        const l = Math.hypot(dx, dy) || 1;
+        const q = lerpAt(R.run, sc);
+        const L = locate(Q, [q[0] - (R.side * h * dy) / l, q[1] + (R.side * h * dx) / l]);
+        if (!L) continue;
+        ia.push(...L.i);
+        wa.push(...L.w);
+        ib.push(v, v, v);
+        wb.push(1, 0, 0);
+      }
+    }
+    if (ia.length)
+      ties.push({
+        ia: Int32Array.from(ia),
+        wa: Float64Array.from(wa),
+        ib: Int32Array.from(ib),
+        wb: Float64Array.from(wb),
+        k: 0.5,
+        lift: 2.5,
+        ax: axis[0],
+        az: axis[2],
+        active: true,
+        holdA: true,
+      });
   };
   // Waistband / hem band.
   for (const gid of ['WAISTBAND', 'HEMBAND'] as DollGroupId[]) {
@@ -8675,6 +8834,7 @@ export function solveDoll(input: DollInput): DollReport {
           own.set(k, (own.get(k) ?? 0) + 1);
         }
         const alongRow: string[] = [];
+        bandFree.clear();
         if (conf.length > 1 || groups.get(gid)!.length > 1)
           for (const { sm, bandSide } of conf) {
             const k = pk((bandSide === 'a' ? sm.a : sm.b)[0]);
@@ -8683,6 +8843,20 @@ export function solveDoll(input: DollInput): DollReport {
             if (P) alongRow.push(P.key);
           }
         for (const P of groups.get(gid)!) buildPanel(P);
+        // A band piece's free end (its underlap) lies under the band piece over it, never through
+        // it: one-sided contacts keep the piece over it outside, a tie holds the underlap just
+        // under it at its place along the band. Two free ends are not ordered.
+        for (const [key, free] of bandFree)
+          for (const Q of groups.get(gid)!) {
+            if (Q.key === key || bandFree.has(Q.key)) continue;
+            const over: number[] = [];
+            for (let i = 0; i < Q.count; i++) {
+              const v = Q.offset + i;
+              if (free.some((f) => Math.hypot(...sub(getPos(f), getPos(v))) < 40)) over.push(v);
+            }
+            if (over.length) contactOf(over, free, 1.5);
+            if (over.length) tieUnder(Q, free, F.c);
+          }
         for (const sm of G.seams)
           if (inGroups(sm.a, band) && inGroups(sm.b, band)) graphWork(sm, passes);
         warnings.push(

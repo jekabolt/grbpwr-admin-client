@@ -2700,6 +2700,9 @@ export type TechCardBomItem = {
   // Absent = keep the stored value; explicit Decimal{value:""} clears it (the est_usage protocol).
   // Unset = no norm: the line is unpriced and blocks the run plan, never zero.
   consumptionPerUnit: googletype_Decimal | undefined;
+  // Thread millimetres used per sewn millimetre. Absent keeps; an explicit empty Decimal clears.
+  // Required for a complete norm when an operation measures topstitch lines against this BOM line.
+  threadPerMm: googletype_Decimal | undefined;
 };
 
 // MaterialFabricAttrs are the typed attributes of a fabric-class material (material_fabric_attr).
@@ -3607,6 +3610,74 @@ export type TechCardOperation = {
   // The labels this step attaches or hangs, by TechCardGarmentLabel.line_key. Not an assembly input. A key
   // that names no label of the saved card is a field violation.
   labelKeys: string[] | undefined;
+  // Measured topstitch runs owned by this step. Written only with topstitch_lines_aware.
+  topstitchLines: TechCardTopstitchLine[] | undefined;
+};
+
+// A measured topstitch run owned by one operation.
+export type TechCardTopstitchLine = {
+  lineKey: string | undefined;
+  bomLineKey: string | undefined;
+  parts: TechCardSeamAnchor[] | undefined;
+  anchoredSize: string | undefined;
+  rows: number | undefined;
+  sizes: TechCardTopstitchLineSize[] | undefined;
+  measured: boolean | undefined;
+  stale: boolean | undefined;
+};
+
+// TechCardSeamAnchor is one run of one piece taking part in a seam side.
+export type TechCardSeamAnchor = {
+  // tech_card_piece.line_key — never a block name, never an id.
+  pieceLineKey: string | undefined;
+  // Five points along the run at s = 0, 1/4, 1/2, 3/4, 1 of its length, walk order (CCW).
+  samples: TechCardSeamSample[] | undefined;
+  // Share of the sewing-line perimeter covered by the run, (0, 1].
+  perimShare: number | undefined;
+  // Run length at the size it was anchored on, mm (> 0).
+  lenMm: number | undefined;
+  // Notch count on the run, ends excluded.
+  notches: number | undefined;
+  // Signed turn of the run, degrees (+ convex).
+  turnDeg: number | undefined;
+  // Sewn sub-range of the run as shares of its length from its start. range_from = range_to = 0 is
+  // the WHOLE run (protojson cannot carry «absent» for doubles; 0/0 is the whole run by rule).
+  rangeFrom: number | undefined;
+  rangeTo: number | undefined;
+  // Fast path + diagnostics, never trusted alone: the engine's edge id when anchored ('FP_L#2',
+  // 'BP#3+4') and the piece contour's signature then.
+  edgeHint: string | undefined;
+  contourSig: string | undefined;
+  // Hand placement of THIS anchor's piece on the host piece («Place by hand») when the target is an
+  // inner line or a free spot rather than an edge (edge_hint "i<k>" names inner line k). Absent =
+  // the client places the piece geometrically.
+  placement: TechCardSeamPlacement | undefined;
+  // Which way THIS anchor's piece lies against the other side's pieces in the step that sews the
+  // row (the owner's under/over switch). UNKNOWN = unset: the client's own rule, as before.
+  layer: TechCardSeamLayer | undefined;
+};
+
+// TechCardSeamSample is one point of an edge's shape, in the piece's own bbox-normalised frame
+// (u, v ∈ [0, 1]).
+export type TechCardSeamSample = {
+  u: number | undefined;
+  v: number | undefined;
+};
+
+// TechCardSeamPlacement is where a part piece sits on its host piece: millimetres in the host
+// piece's frame with the origin at the host bbox's min corner, then a rotation and a mirror of the
+// part piece.
+export type TechCardSeamPlacement = {
+  xMm: number | undefined;
+  yMm: number | undefined;
+  rotDeg: number | undefined;
+  flip: boolean | undefined;
+};
+
+// One size of a measured topstitch line.
+export type TechCardTopstitchLineSize = {
+  sizeId: number | undefined;
+  lineMm: googletype_Decimal | undefined;
 };
 
 // TechCardIssue is a maker-flagged problem ("this seam is impossible") against an
@@ -4474,6 +4545,8 @@ export type TechCardInsert = {
   // so a client that has never heard of strips loses nothing.
   cutStrips: TechCardCutStrip[] | undefined;
   cutStripsAware: boolean | undefined;
+  // Declares support for operation topstitch_lines on full-replace writes.
+  topstitchLinesAware: boolean | undefined;
 };
 
 // A strip: how long the piece of a metre-bought BOM line is, cut for one garment. It is not a pattern
@@ -4941,54 +5014,6 @@ export type TechCardSeamSide = {
   parts: TechCardSeamAnchor[] | undefined;
 };
 
-// TechCardSeamAnchor is one run of one piece taking part in a seam side.
-export type TechCardSeamAnchor = {
-  // tech_card_piece.line_key — never a block name, never an id.
-  pieceLineKey: string | undefined;
-  // Five points along the run at s = 0, 1/4, 1/2, 3/4, 1 of its length, walk order (CCW).
-  samples: TechCardSeamSample[] | undefined;
-  // Share of the sewing-line perimeter covered by the run, (0, 1].
-  perimShare: number | undefined;
-  // Run length at the size it was anchored on, mm (> 0).
-  lenMm: number | undefined;
-  // Notch count on the run, ends excluded.
-  notches: number | undefined;
-  // Signed turn of the run, degrees (+ convex).
-  turnDeg: number | undefined;
-  // Sewn sub-range of the run as shares of its length from its start. range_from = range_to = 0 is
-  // the WHOLE run (protojson cannot carry «absent» for doubles; 0/0 is the whole run by rule).
-  rangeFrom: number | undefined;
-  rangeTo: number | undefined;
-  // Fast path + diagnostics, never trusted alone: the engine's edge id when anchored ('FP_L#2',
-  // 'BP#3+4') and the piece contour's signature then.
-  edgeHint: string | undefined;
-  contourSig: string | undefined;
-  // Hand placement of THIS anchor's piece on the host piece («Place by hand») when the target is an
-  // inner line or a free spot rather than an edge (edge_hint "i<k>" names inner line k). Absent =
-  // the client places the piece geometrically.
-  placement: TechCardSeamPlacement | undefined;
-  // Which way THIS anchor's piece lies against the other side's pieces in the step that sews the
-  // row (the owner's under/over switch). UNKNOWN = unset: the client's own rule, as before.
-  layer: TechCardSeamLayer | undefined;
-};
-
-// TechCardSeamSample is one point of an edge's shape, in the piece's own bbox-normalised frame
-// (u, v ∈ [0, 1]).
-export type TechCardSeamSample = {
-  u: number | undefined;
-  v: number | undefined;
-};
-
-// TechCardSeamPlacement is where a part piece sits on its host piece: millimetres in the host
-// piece's frame with the origin at the host bbox's min corner, then a rotation and a mirror of the
-// part piece.
-export type TechCardSeamPlacement = {
-  xMm: number | undefined;
-  yMm: number | undefined;
-  rotDeg: number | undefined;
-  flip: boolean | undefined;
-};
-
 // TechCardPieceFold is one stored fold line, keyed by a client-minted ULID.
 export type TechCardPieceFold = {
   // ULID (26 chars), client-minted, the row's identity across saves.
@@ -5028,15 +5053,15 @@ export type TechCardPieceFold = {
   updatedAt: wellKnownTimestamp | undefined;
 };
 
-// The norm of one strip line in metres per garment: the sum over its strips of cut * qty / 1000,
-// wastage not included. consumption_source cut_length on the recipe row carries the same numbers.
+// One derived BOM-line norm in metres per garment: cut strips plus measured topstitch runs.
+// Wastage is not included. consumption_source cut_length carries the same numbers.
 export type TechCardCutStripNorm = {
   bomLineKey: string | undefined;
-  // Set when every strip of the line is one_length: one norm for all sizes.
+  // Set only when all contributors have one size-independent norm.
   norm: googletype_Decimal | undefined;
-  // Otherwise one row per size whose length is known on every strip of the line.
+  // Otherwise one row per size whose length is known on every contributor.
   sizeNorms: TechCardBomSizeConsumption[] | undefined;
-  // False when a size has no known length, or the line is not bought in metres. Unknown is not zero.
+  // False when a size or factor is unknown, or the line is not bought in metres. Unknown is not zero.
   complete: boolean | undefined;
 };
 

@@ -25,6 +25,12 @@ import { productionRunKeys, useMaterialPlan } from './useProductionRuns';
 
 const num = (d?: googletype_Decimal) => decimalToInput(d) || '0';
 const isShort = (r: MaterialPlanRow) => Number(r.shortage?.value) > 0;
+// What is still to go into the run: need − already issued. The issue dialog opens on it, not on
+// the warehouse shortage (which is 0 whenever stock covers the need).
+const toIssue = (r?: MaterialPlanRow): string => {
+  const left = Number(r?.required?.value ?? 0) - Number(r?.issued?.value ?? 0);
+  return left > 0 ? String(Math.round(left * 1000) / 1000) : '';
+};
 // issued_variance (gap-04): signed issued − required. Blank until anything is issued; a material
 // issued exactly per plan shows an explicit "0" — '—' would read as "untouched".
 const variance = (d?: googletype_Decimal, issued?: googletype_Decimal) => {
@@ -154,7 +160,12 @@ export function MaterialPlan({
     () => new Map((materialsData?.materials ?? []).map((material) => [material.id ?? 0, material])),
     [materialsData?.materials],
   );
-  const noNormSlots = isAux && rows.length === 0 ? techCard?.techCard?.bomItems ?? [] : [];
+  // Before a plan the server has nothing to multiply the norm by and returns no rows — that is «no
+  // plan yet», not «no norm».
+  const plannedTotal = (run.run?.lines ?? []).reduce((s, l) => s + (l.plannedQty ?? 0), 0);
+  const noPlan = isAux && plannedTotal === 0;
+  const noNormSlots =
+    isAux && !noPlan && rows.length === 0 ? techCard?.techCard?.bomItems ?? [] : [];
   const colorways = useMemo(
     () =>
       (techCard?.colorways ?? [])
@@ -268,6 +279,10 @@ export function MaterialPlan({
         <Text size='small'>loading…</Text>
       ) : isError ? (
         <Text size='small'>Material plan is unavailable.</Text>
+      ) : noPlan ? (
+        <Text variant='inactive' size='small'>
+          no plan yet
+        </Text>
       ) : noNormSlots.length > 0 ? (
         <div className='flex flex-col'>
           {noNormSlots.map((slot, index) => {
@@ -395,7 +410,7 @@ export function MaterialPlan({
                                 unit: contribution.unit ?? '',
                                 onHand: decimalToInput(planRow?.onHand) || '0',
                               },
-                              qty: num(planRow?.shortage),
+                              qty: toIssue(planRow),
                             })
                           }
                         >
@@ -459,7 +474,7 @@ export function MaterialPlan({
                             unit: r.unit ?? '',
                             onHand: decimalToInput(r.onHand) || '0',
                           },
-                          qty: isShort(r) ? num(r.shortage) : '',
+                          qty: toIssue(r),
                         })
                       }
                     >

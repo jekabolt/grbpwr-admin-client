@@ -9,6 +9,7 @@ import {
   seamLengthsOf,
   seamLengthsReader,
   seamSideOf,
+  sideAnchorLengthsOf,
   type FindPiece,
 } from './seam-side-length';
 import { stripKeysOf } from './strip-pieces';
@@ -116,6 +117,20 @@ describe('seam length per size', () => {
   it('a size the piece is not drawn in is absent, never zero', () => {
     const lengths = seamLengthsOf(storedRow(), STRIP_KEYS, gradedBand(WAISTBAND, { M: 79, L: 83 }));
     expect(Object.fromEntries(lengths)).toEqual({ M: 790, L: 830 });
+  });
+
+  it('measures one persisted side and keeps its partial range across sizes', () => {
+    const row = storedRow();
+    const side = row.sideA.map((anchor) => ({
+      ...anchor,
+      range: [0.25, 0.75] as [number, number],
+    }));
+    const lengths = sideAnchorLengthsOf(
+      { anchoredSize: row.anchoredSize, kind: 'partial' },
+      side,
+      gradedBand(WAISTBAND),
+    );
+    expect(Object.fromEntries(lengths)).toEqual({ S: 375, M: 395, L: 415, XL: 435 });
   });
 
   it('a surface seam, or a seam of strips alone, has no length', () => {

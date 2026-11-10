@@ -39,6 +39,8 @@ export {
 } from './span';
 export {
   POSE_KIND_WIRE,
+  anchorFromWire,
+  anchorToWire,
   fromWire,
   isPoseWire,
   poseFromWire,

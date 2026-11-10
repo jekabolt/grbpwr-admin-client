@@ -38,6 +38,14 @@ import type { CutStrip } from '../cut-strip-editor/use-cut-strip';
 import { fittedSideMm } from '../cut-strips/length-check';
 import { stripKeysOf, stripName, type BomLineLike } from '../cut-strips/strip-pieces';
 import type { TechCardFormData } from '../schema';
+import { isTopstitchStep } from '../operation-kinds';
+import {
+  createTopstitchLineFromPick,
+  topstitchPickOverlaps,
+  topstitchThreadKey,
+  type TopstitchBomLine,
+  type TopstitchLine,
+} from '../topstitch-lines';
 import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { moveRow, orderOfRows, windowRows, type LayerMove } from './layers-window';
 import { LayersMenu, LayersWindow } from './layers-window-view';
@@ -216,7 +224,9 @@ export function SeamPickerBody({
     [op, cutStrips, sizeIds],
   );
   const bindingStripKeys = useMemo(() => stripKeysOf(cutStrips), [cutStrips]);
-  const bomItems = (useWatch({ control: form.control, name: 'bomItems' }) ?? []) as BomLineLike[];
+  const bomItems = (useWatch({ control: form.control, name: 'bomItems' }) ?? []) as Array<
+    BomLineLike & TopstitchBomLine
+  >;
   // A strip the card has not stored yet has no name on the card: its BOM line names it.
   const nameOf = useCallback(
     (key: string) => {
@@ -225,13 +235,17 @@ export function SeamPickerBody({
     },
     [cutStrips, bomItems, sceneName],
   );
-  const bindingMode = !!bindingTarget;
+  const topstitchMode = isTopstitchStep(op ?? {});
+  const topstitchLines = (op?.topstitchLines ?? []) as TopstitchLine[];
+  const topstitchBomLineKey = topstitchThreadKey(op, bomItems);
+  const bindingMode = !topstitchMode && !!bindingTarget;
 
   const suggestion = suggestions[initialProposal] ?? suggestions[0] ?? null;
   const unitStep = isUnitStep(groups);
-  const initialPick = bindingMode
-    ? null
-    : initialPickerPick(suggestion, preselectProposal, unitStep);
+  const initialPick =
+    bindingMode || topstitchMode
+      ? null
+      : initialPickerPick(suggestion, preselectProposal, unitStep);
   const [sel, setSel] = useState<Sel>(() => (initialPick ? wholeSel(initialPick) : EMPTY));
   const [hover, setHover] = useState<SpanHover | null>(null);
   const [spanDrag, setSpanDrag] = useState<SpanHover | null>(null);
@@ -345,6 +359,12 @@ export function SeamPickerBody({
   }, [suggestion, surfaceSuggestion, geoms, groups]);
 
   /** The pair on the table: both sides picked by hand, edge to edge. */
+  const topstitchReady =
+    topstitchMode &&
+    !!topstitchBomLineKey &&
+    !inners.length &&
+    sel.a.length > 0 &&
+    sel.b.length === 0;
   const bindingReady = bindingMode && !inners.length && sel.a.length > 0 && sel.b.length === 0;
   const pair: SeamSides | null =
     !bindingMode && !inners.length && sel.a.length && sel.b.length ? { a: sel.a, b: sel.b } : null;
@@ -354,11 +374,23 @@ export function SeamPickerBody({
     pickParts('a').some(
       (part) => storedSeamOverlapping(stored, part.target, part.range, geoms) >= 0,
     );
+  const repeatsTopstitch =
+    topstitchMode &&
+    pickParts('a').some((part) =>
+      topstitchPickOverlaps(topstitchLines, part.target, part.range, geoms),
+    );
   const pickReady =
     !repeatsSeam &&
     !repeatsBinding &&
-    (bindingReady || (surface ? !!partKey && pick[hostSide!].length === 1 : !!pair));
-  const canAccept = !frozen && !busy && !!cardId && (pickReady || posePending);
+    !repeatsTopstitch &&
+    (topstitchReady ||
+      bindingReady ||
+      (surface ? !!partKey && pick[hostSide!].length === 1 : !!pair));
+  const canAccept =
+    !frozen &&
+    !busy &&
+    (topstitchMode || !!cardId) &&
+    (pickReady || (!topstitchMode && posePending));
 
   const anchorCtx = useMemo(
     () => ({ pieces: [...geoms.values()], grainDeg: geo?.grainDeg ?? new Map(), nameOf }),
@@ -432,6 +464,35 @@ export function SeamPickerBody({
 
   const commit = async () => {
     if (!canAccept) return;
+    if (topstitchMode) {
+      const line = createTopstitchLineFromPick({
+        parts: pickParts('a'),
+        geoms,
+        anchors: { pieces: anchorCtx.pieces, grainDeg: geo?.grainDeg },
+        bomLineKey: topstitchBomLineKey,
+        anchoredSize: geo?.size ?? '',
+      });
+      if (!line) {
+        setRefused('cannot add line');
+        return;
+      }
+      const currentOperation = form.getValues(`operations.${index}`);
+      const currentLines = (currentOperation?.topstitchLines ?? []) as TopstitchLine[];
+      form.setValue(`operations.${index}.topstitchLines`, [...currentLines, line], {
+        shouldDirty: true,
+      });
+      const bomLineKeys = currentOperation?.bomLineKeys ?? [];
+      if (!bomLineKeys.includes(topstitchBomLineKey)) {
+        form.setValue(`operations.${index}.bomLineKeys`, [...bomLineKeys, topstitchBomLineKey], {
+          shouldDirty: true,
+        });
+      }
+      reset();
+      setSaved(true);
+      onAccepted?.();
+      onClose?.();
+      return;
+    }
     const row = pickReady ? draftRow : null;
     if (pickReady && !row) {
       setRefused('cannot pair');
@@ -532,8 +593,12 @@ export function SeamPickerBody({
   const toggle = useCallback(
     (id: TargetId, atMm?: number) => {
       if (frozen) return;
+      if (topstitchMode && parseInner(id)) return;
       if (bindingMode && bindingStripKeys.has(pieceOfTarget(id))) return;
-      const side = bindingMode ? 'a' : sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget);
+      const side =
+        bindingMode || topstitchMode
+          ? 'a'
+          : sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget);
       setSaved(false);
       setPoseSel(null);
       const length = resolveEdge(id, geoms)?.len ?? 0;
@@ -544,7 +609,7 @@ export function SeamPickerBody({
           sel.spans[side][id].some(([from, to]) => atMm >= from && atMm <= to));
       setRefused('');
       // A stored seam's part is that seam, not a new pick; what is in hand comes off first.
-      if (!picked('a') && !picked('b')) {
+      if (!topstitchMode && !picked('a') && !picked('b')) {
         const at = storedSeamAt(stored, id, atMm, geoms);
         if (at >= 0) {
           if (bindingMode) {
@@ -558,8 +623,12 @@ export function SeamPickerBody({
         }
       }
       setActiveSeam(null);
-      const base = bindingMode && !sel.a.includes(id) ? EMPTY : sel;
+      const base = (bindingMode || topstitchMode) && !sel.a.includes(id) ? EMPTY : sel;
       if (atMm == null || parseInner(id) || !(length > 0)) {
+        if (topstitchMode && topstitchPickOverlaps(topstitchLines, id, undefined, geoms)) {
+          setRefused('already picked');
+          return;
+        }
         if (bindingMode && storedSeamOverlapping(stored, id, undefined, geoms) >= 0) {
           setRefused('already bound');
           return;
@@ -571,6 +640,10 @@ export function SeamPickerBody({
       }
       const segment =
         labelSpanAt(id, side, length, atMm) ?? segmentAt(edgeBreaks(id, geoms), length, atMm);
+      if (topstitchMode && topstitchPickOverlaps(topstitchLines, id, segment, geoms)) {
+        setRefused('already picked');
+        return;
+      }
       if (bindingMode && storedSeamOverlapping(stored, id, segment, geoms) >= 0) {
         setRefused('already bound');
         return;
@@ -579,6 +652,8 @@ export function SeamPickerBody({
     },
     [
       frozen,
+      topstitchMode,
+      topstitchLines,
       bindingMode,
       bindingStripKeys,
       groups,
@@ -595,10 +670,15 @@ export function SeamPickerBody({
     (id: TargetId | null, atMm: number | null) => {
       const length = id ? resolveEdge(id, geoms)?.len ?? 0 : 0;
       const free =
-        id && atMm != null && length > 0 && storedSeamAt(stored, id, atMm, geoms) < 0
+        id &&
+        atMm != null &&
+        length > 0 &&
+        (topstitchMode || storedSeamAt(stored, id, atMm, geoms) < 0)
           ? labelSpanAt(
               id,
-              bindingMode ? 'a' : sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget),
+              bindingMode || topstitchMode
+                ? 'a'
+                : sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget),
               length,
               atMm,
             ) ?? segmentAt(edgeBreaks(id, geoms), length, atMm)
@@ -611,7 +691,7 @@ export function SeamPickerBody({
             : null,
       );
     },
-    [geoms, stored, labelSpanAt, groups, sel, bindingMode],
+    [geoms, stored, labelSpanAt, groups, sel, bindingMode, topstitchMode],
   );
   const onSpanDrag = useCallback(
     (id: TargetId, fromMm: number, toMm: number, done: boolean) => {
@@ -627,13 +707,21 @@ export function SeamPickerBody({
       setSaved(false);
       setPoseSel(null);
       setActiveSeam(null);
+      if (topstitchMode && parseInner(id)) return;
       if (bindingMode && bindingStripKeys.has(pieceOfTarget(id))) return;
+      if (topstitchMode && topstitchPickOverlaps(topstitchLines, id, range, geoms)) {
+        setRefused('already picked');
+        return;
+      }
       if (bindingMode && storedSeamOverlapping(stored, id, range, geoms) >= 0) {
         setRefused('already bound');
         return;
       }
-      const side = bindingMode ? 'a' : sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget);
-      const base = bindingMode && !sel.a.includes(id) ? EMPTY : sel;
+      const side =
+        bindingMode || topstitchMode
+          ? 'a'
+          : sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget);
+      const base = (bindingMode || topstitchMode) && !sel.a.includes(id) ? EMPTY : sel;
       setSel(
         onFolded(
           pickFreeSpan(base, side, id, range, resolveEdge(id, geoms)?.len ?? 0, pickRules),
@@ -644,6 +732,8 @@ export function SeamPickerBody({
     },
     [
       frozen,
+      topstitchMode,
+      topstitchLines,
       bindingMode,
       bindingStripKeys,
       groups,
@@ -662,15 +752,17 @@ export function SeamPickerBody({
     const marks: EdgeMark[] = [];
     const nos: NoMark[] = [];
     // A stored seam reads as a proposal does: its edges, its number on the first.
-    stored.forEach((s, i) => {
-      const parts = [...s.parts.a, ...s.parts.b];
-      const active = s.key === activeSeam;
-      parts.forEach(({ target, range }) =>
-        marks.push({ id: target, tone: 'stored', ...(range ? { range } : {}), active }),
-      );
-      const first = s.parts.a[0] ?? s.parts.b[0];
-      if (first) nos.push({ id: first.target, i, ...(first.range ? { range: first.range } : {}) });
-    });
+    if (!topstitchMode)
+      stored.forEach((s, i) => {
+        const parts = [...s.parts.a, ...s.parts.b];
+        const active = s.key === activeSeam;
+        parts.forEach(({ target, range }) =>
+          marks.push({ id: target, tone: 'stored', ...(range ? { range } : {}), active }),
+        );
+        const first = s.parts.a[0] ?? s.parts.b[0];
+        if (first)
+          nos.push({ id: first.target, i, ...(first.range ? { range: first.range } : {}) });
+      });
     const sideMarks = (side: Side, tone: EdgeMark['tone']) =>
       sideParts(sel[side], sel.spans[side]).forEach(({ target, range }) =>
         marks.push({ id: target, tone, ...(range ? { range } : {}) }),
@@ -681,7 +773,7 @@ export function SeamPickerBody({
       marks.push({
         id: spanDrag.id,
         tone:
-          (bindingMode
+          (bindingMode || topstitchMode
             ? 'a'
             : sideForClick(pieceOfTarget(spanDrag.id), groups, sel, pieceOfTarget)) === 'a'
             ? 'pickFirst'
@@ -692,7 +784,7 @@ export function SeamPickerBody({
         ],
       });
     return { marks, nos };
-  }, [stored, sel, activeSeam, spanDrag, groups, bindingMode]);
+  }, [stored, sel, activeSeam, spanDrag, groups, bindingMode, topstitchMode]);
   // The break points of every edge in hand: what a segment or a drag can land on.
   const ticks = useMemo<EdgeTick[]>(() => {
     const ids = new Set([...sel.a, ...sel.b].filter((id) => !parseInner(id)));
@@ -709,7 +801,7 @@ export function SeamPickerBody({
   const groupNames = useMemo(() => groups.map((g) => g.name), [groups]);
   const canvasPickTargets = useMemo(
     () =>
-      unitStep
+      unitStep && !topstitchMode
         ? [
             ...new Set([
               ...suggestions.flatMap((candidate) => [...candidate.a, ...candidate.b]),
@@ -719,7 +811,7 @@ export function SeamPickerBody({
             ]),
           ]
         : undefined,
-    [unitStep, suggestions, stored, sel],
+    [unitStep, topstitchMode, suggestions, stored, sel],
   );
 
   // Edge to edge on both sides (a part on its host's line has no Δ).
@@ -741,7 +833,8 @@ export function SeamPickerBody({
           ease,
         )
       : null;
-  const empty = !pair && !surface && stored.length === 0 && !sel.a.length && !sel.b.length;
+  const empty =
+    !pair && !surface && (topstitchMode || stored.length === 0) && !sel.a.length && !sel.b.length;
 
   const [canvasEl, canvas] = useBoxSize();
   const phone = canvas.w > 0 && canvas.w < 600;
@@ -837,7 +930,9 @@ export function SeamPickerBody({
   const error =
     refused ||
     stored.map((s) => (errors[s.key] ? 'refused' : '')).find(Boolean) ||
-    (repeatsSeam ? 'already sewn' : '');
+    (repeatsSeam ? 'already sewn' : '') ||
+    (repeatsTopstitch ? 'already picked' : '') ||
+    (topstitchMode && !topstitchBomLineKey ? 'thread missing' : '');
   const shownActive = stored.find((s) => s.key === activeSeam);
   const activeIndex = shownActive ? stored.indexOf(shownActive) : -1;
 
@@ -1148,43 +1243,44 @@ export function SeamPickerBody({
               {error}
             </Text>
           )}
-          {listed.map((s) => {
-            const on = s.key === activeSeam;
-            return (
-              <span
-                key={s.key}
-                className='flex min-w-0 items-center gap-2'
-                data-seam-stored={s.key}
-              >
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  aria-pressed={on}
-                  onClick={() => {
-                    setSel(EMPTY);
-                    setFilled(null);
-                    setActiveSeam(on ? null : s.key);
-                  }}
+          {!topstitchMode &&
+            listed.map((s) => {
+              const on = s.key === activeSeam;
+              return (
+                <span
+                  key={s.key}
+                  className='flex min-w-0 items-center gap-2'
+                  data-seam-stored={s.key}
                 >
-                  <PairNo i={stored.indexOf(s)} />
-                </Button>
-                {(on || listed.length === 1) && (
-                  <Text size='micro' tracking='label' className='min-w-0 truncate uppercase'>
-                    {seamName(s.sides)}
-                  </Text>
-                )}
-                {on && !frozen && (
-                  <Close
-                    onClick={() => void removeSeam(s)}
-                    disabled={busy}
-                    aria-label='remove seam'
-                    data-seam-remove=''
-                  />
-                )}
-              </span>
-            );
-          })}
+                  <Button
+                    type='button'
+                    variant='underline'
+                    size='xs'
+                    aria-pressed={on}
+                    onClick={() => {
+                      setSel(EMPTY);
+                      setFilled(null);
+                      setActiveSeam(on ? null : s.key);
+                    }}
+                  >
+                    <PairNo i={stored.indexOf(s)} />
+                  </Button>
+                  {(on || listed.length === 1) && (
+                    <Text size='micro' tracking='label' className='min-w-0 truncate uppercase'>
+                      {seamName(s.sides)}
+                    </Text>
+                  )}
+                  {on && !frozen && (
+                    <Close
+                      onClick={() => void removeSeam(s)}
+                      disabled={busy}
+                      aria-label='remove seam'
+                      data-seam-remove=''
+                    />
+                  )}
+                </span>
+              );
+            })}
           {(sel.a.length > 0 || sel.b.length > 0) && (
             <ChipRow>
               <Chip
@@ -1194,20 +1290,24 @@ export function SeamPickerBody({
                 data-seam-side='1'
               >
                 {sel.a.length
-                  ? `1 ${sideName(sel.a)} ${mmText(sideLen(pickParts('a'), pickParts('b')))}`
-                  : '1'}
+                  ? `${topstitchMode ? 'line' : '1'} ${sideName(sel.a)} ${mmText(sideLen(pickParts('a'), pickParts('b')))}`
+                  : topstitchMode
+                    ? 'line'
+                    : '1'}
               </Chip>
-              <Chip
-                selected={sel.b.length > 0}
-                tone={sel.b.length ? 'attention' : 'default'}
-                onClick={() => clearSide('b')}
-                disabled={!sel.b.length}
-                data-seam-side='2'
-              >
-                {sel.b.length
-                  ? `2 ${sideName(sel.b)} ${mmText(sideLen(pickParts('b'), pickParts('a')))}`
-                  : '2'}
-              </Chip>
+              {!topstitchMode && (
+                <Chip
+                  selected={sel.b.length > 0}
+                  tone={sel.b.length ? 'attention' : 'default'}
+                  onClick={() => clearSide('b')}
+                  disabled={!sel.b.length}
+                  data-seam-side='2'
+                >
+                  {sel.b.length
+                    ? `2 ${sideName(sel.b)} ${mmText(sideLen(pickParts('b'), pickParts('a')))}`
+                    : '2'}
+                </Chip>
+              )}
             </ChipRow>
           )}
           {delta != null ? (
@@ -1238,7 +1338,7 @@ export function SeamPickerBody({
               FIT
             </Button>
           )}
-          {!frozen && (suggestion || surfaceSuggestion) && (
+          {!frozen && !topstitchMode && (suggestion || surfaceSuggestion) && (
             <Button
               type='button'
               variant='underline'
@@ -1251,13 +1351,13 @@ export function SeamPickerBody({
               guess
             </Button>
           )}
-          {!frozen && mirror.visible && mirror.plan.kind === 'no-twin' && (
+          {!frozen && !topstitchMode && mirror.visible && mirror.plan.kind === 'no-twin' && (
             <Chip tone='error'>NO TWIN</Chip>
           )}
-          {!frozen && mirror.visible && mirror.plan.kind === 'edge-mismatch' && (
+          {!frozen && !topstitchMode && mirror.visible && mirror.plan.kind === 'edge-mismatch' && (
             <Chip tone='error'>EDGE MISMATCH</Chip>
           )}
-          {!frozen && mirror.visible && (
+          {!frozen && !topstitchMode && mirror.visible && (
             <Button
               type='button'
               variant='underline'
@@ -1288,7 +1388,7 @@ export function SeamPickerBody({
               clear
             </Button>
           )}
-          {!frozen && listed.length > 0 && (
+          {!frozen && !topstitchMode && listed.length > 0 && (
             <Button
               type='button'
               variant='underline'

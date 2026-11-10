@@ -3,12 +3,13 @@
 // sew it. What folds under is
 // shaded grey. Beside it, the label folded, with its size and the stitch over its layers.
 import { useLibraryFile } from 'components/managers/files/hooks/useFiles';
-import type { MouseEvent } from 'react';
+import { useId, type MouseEvent } from 'react';
 import { Chip, ChipRow } from 'ui';
 
 import type { FormGarmentLabel } from './labels-schema';
 import {
   MAX_FOLD_LINES,
+  foldFront,
   foldWordOf,
   foldedSpans,
   formatFoldLines,
@@ -133,6 +134,8 @@ export function LabelFoldEditor({
     formatFoldLines(lines, heightMm) === formatFoldLines(presetFoldLines(word, heightMm), heightMm);
 
   const fh = sewn.foldedMm * k;
+  const frontTop = foldFront(lines, heightMm)[0];
+  const clipId = `label-folded-${useId().replace(/:/g, '')}`;
   const foldedW = x + w + GUTTER;
   const foldedH = y + fh + PAD_Y;
 
@@ -235,6 +238,24 @@ export function LabelFoldEditor({
               stroke='var(--color-textColor)'
               strokeWidth={1.25}
             />
+            {preview ? (
+              <>
+                <clipPath id={clipId}>
+                  <rect x={x} y={y} width={w} height={fh} />
+                </clipPath>
+                <image
+                  href={preview}
+                  x={x}
+                  y={y - frontTop * k}
+                  width={w}
+                  height={h}
+                  preserveAspectRatio='xMidYMid meet'
+                  clipPath={`url(#${clipId})`}
+                  pointerEvents='none'
+                  data-label-folded-artwork=''
+                />
+              </>
+            ) : null}
             {sewn.stitches.map((line) => (
               <g key={line}>
                 <line

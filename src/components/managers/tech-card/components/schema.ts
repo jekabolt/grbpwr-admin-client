@@ -41,6 +41,7 @@ import {
   common_TechCardPressProfile,
   common_TechCardSeamClass,
   common_TechCardThreadTension,
+  common_TechCardTopstitchLine,
   common_TechCardTopstitchMode,
   common_TechCardCosting,
   common_TechCardFabricDirection,
@@ -73,7 +74,7 @@ import {
 } from 'utils/decimal';
 import { validateSeamAllowanceStandard } from 'utils/seam-allowance';
 import { ulid } from 'utils/ulid';
-import { poseKeysOfWire } from 'lib/seams/wire';
+import { anchorFromWire, anchorToWire, poseKeysOfWire } from 'lib/seams/wire';
 import { KIND_HOME_SECTION, UNSET_KIND, isKindEligibleSection } from './bom-kind';
 import {
   UNSET_PURPOSE,
@@ -542,6 +543,8 @@ const bomItemSchema = z
     // Own auxiliary cards use this as the production norm. Presence is three-state, like
     // estUsage: undefined preserves, '' clears, and a decimal writes.
     consumptionPerUnit: z.string().optional(),
+    // Same three-state decimal contract as estUsage: absent preserves, empty clears.
+    threadPerMm: z.string().optional(),
     // Counted slot norm (0333): pieces sewn on per garment and spare bought on top. One presence
     // pair on the wire (see `countedPairOut`): undefined on both = this form does not know them.
     qtyPerGarment: z.string().optional(),
@@ -1380,6 +1383,43 @@ export function operationFieldNames(): string[] {
   return shape ? Object.keys(shape) : [];
 }
 
+const topstitchAnchorSchema = z.object({
+  piece: z.string(),
+  samples: z.array(z.tuple([z.number(), z.number()])),
+  perimShare: z.number(),
+  lenMm: z.number(),
+  notches: z.number(),
+  turnDeg: z.number(),
+  range: z.tuple([z.number(), z.number()]),
+  edgeHint: z.string(),
+  contourSig: z.string(),
+  placement: z
+    .object({
+      xMm: z.number(),
+      yMm: z.number(),
+      rotDeg: z.number(),
+      flip: z.boolean(),
+    })
+    .optional(),
+  layer: z.enum(['under', 'over']).optional(),
+});
+
+const topstitchLineSchema = z.object({
+  lineKey: z.string().min(1),
+  bomLineKey: z.string().min(1),
+  parts: z.array(topstitchAnchorSchema).min(1),
+  anchoredSize: z.string().default(''),
+  rows: z.number().int().min(1).max(4).default(1),
+  sizes: z.array(
+    z.object({
+      sizeId: z.number(),
+      lineMm: z.string(),
+    }),
+  ),
+  measured: z.boolean().optional(),
+  stale: z.boolean().optional(),
+});
+
 const operationSchema = z
   .object({
     // Client-only row identity for in-session undo. It is preserved through reconciliation and
@@ -1448,6 +1488,7 @@ const operationSchema = z
       )
       .optional()
       .default(0),
+    topstitchLines: z.array(topstitchLineSchema).optional().default([]),
     attachmentKind: z.string().optional().default('TECH_CARD_ATTACHMENT_KIND_UNKNOWN'),
     attachmentSizeMm: z.string().optional().default(''),
 
@@ -2675,6 +2716,7 @@ function mapBomItemToForm(b: NonNullable<common_TechCardInsert['bomItems']>[numb
     // сохранение чужой карточки отправило бы команду «очисти» вместо молчания.
     estUsage: decimalToInput(b.estUsage) || undefined,
     consumptionPerUnit: decimalToInput(b.consumptionPerUnit) || undefined,
+    threadPerMm: decimalToInput(b.threadPerMm) || undefined,
     qtyPerGarment: decimalToInput(b.qtyPerGarment) || undefined,
     spareQty: decimalToInput(b.spareQty) || undefined,
     unitPrice: decimalToInput(b.unitPrice),
@@ -3024,6 +3066,18 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       topstitchMode: o.topstitch?.mode || 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN',
       topstitchWidthMm: decimalToInput(o.topstitch?.widthMm),
       topstitchRows: o.topstitch?.rows || 0,
+      topstitchLines: (o.topstitchLines ?? []).map((line) => ({
+        lineKey: line.lineKey ?? '',
+        bomLineKey: line.bomLineKey ?? '',
+        parts: (line.parts ?? []).map(anchorFromWire),
+        anchoredSize: line.anchoredSize ?? '',
+        rows: line.rows || 1,
+        sizes: (line.sizes ?? []).map((size) => ({
+          sizeId: wireInt(size.sizeId),
+          lineMm: decimalToInput(size.lineMm),
+        })),
+        stale: !!line.stale,
+      })),
       attachmentKind: o.attachmentKind || 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN',
       attachmentSizeMm: decimalToInput(o.attachmentSizeMm),
       // The machine block (0306). Enum tokens arrive as the `_UNKNOWN` string and bare int32s as 0
@@ -3848,6 +3902,7 @@ export function mapFormToTechCardInsert(
       unit: b.unit?.trim() || '',
       // Присутствие решается формой, а не пустотой значения, — довод целиком у `estUsageOut`.
       estUsage: estUsageOut(b.estUsage),
+      threadPerMm: estUsageOut(b.threadPerMm),
       // Norms belong only to own, measured, non-strip lines. Hidden supplier/sellable values are
       // omitted so changing kind does not erase them; a line that becomes countable/a strip clears
       // a norm the form actually read.
@@ -4018,6 +4073,7 @@ export function mapFormToTechCardInsert(
     operationSeamToleranceAware: true,
     // Step layer order likewise.
     operationLayerOrderAware: true,
+    topstitchLinesAware: true,
     // `!!` and not `!== undefined`: a card with no construction row comes back with an explicit
     // `null` (the gateway marshals an unset message that way), and treating that as «had one» would
     // make every such card start writing an all-NULL construction row — see mapConstructionOut.
@@ -4267,6 +4323,26 @@ export function mapFormToTechCardInsert(
                 rows: o.topstitchRows || 0,
               }
             : undefined,
+        topstitchLines: (o.topstitchLines ?? [])
+          .filter((line) => opBomKeys.includes(line.bomLineKey?.trim() || ''))
+          .map(
+            (line): common_TechCardTopstitchLine => ({
+              lineKey: line.lineKey?.trim() || '',
+              bomLineKey: line.bomLineKey?.trim() || '',
+              parts: (line.parts ?? []).map((part) => {
+                const wire = anchorToWire(part);
+                return { ...wire, placement: wire.placement, layer: wire.layer };
+              }),
+              anchoredSize: line.anchoredSize?.trim() || '',
+              rows: line.rows || 1,
+              sizes: (line.sizes ?? []).map((size) => ({
+                sizeId: wireInt(size.sizeId),
+                lineMm: inputToDecimal(size.lineMm),
+              })),
+              measured: !!line.measured,
+              stale: undefined,
+            }),
+          ),
         attachmentKind: (o.attachmentKind ||
           'TECH_CARD_ATTACHMENT_KIND_UNKNOWN') as common_TechCardAttachmentKind,
         attachmentSizeMm: optionalDecimal(o.attachmentSizeMm),

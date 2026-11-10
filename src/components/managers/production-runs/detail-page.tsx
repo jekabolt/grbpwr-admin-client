@@ -331,7 +331,7 @@ export function ProductionRunDetail() {
   const receipts = run.receipts ?? [];
   const auxMaterialWarningCount = isAux
     ? (materialPlan.data?.blockers?.length ?? 0) ||
-      (mpRows.length === 0 ? techCard?.techCard?.bomItems?.length ?? 0 : 0)
+      (mpRows.length === 0 && plannedQtyTotal > 0 ? techCard?.techCard?.bomItems?.length ?? 0 : 0)
     : 0;
 
   // The band. Every figure on it is read from the same field the panel below reads.
@@ -879,8 +879,11 @@ export function ProductionRunDetail() {
                 {!boughtAux && (
                   <Row
                     label='materials issued'
+                    tone={actuals?.hasUncostedIssues ? 'error' : undefined}
                     value={
-                      actuals?.materialsFromStockBase?.value ? (
+                      actuals?.hasUncostedIssues ? (
+                        'unpriced'
+                      ) : actuals?.materialsFromStockBase?.value ? (
                         `${decimalToInput(actuals.materialsFromStockBase)} ${actuals.baseCurrency || ''}`
                       ) : (
                         <EmptyCell />

@@ -73,6 +73,14 @@ describe('cut strip toggle', () => {
     expect(strip.widthMm).toBe('30');
   });
 
+  it('leaves the strip width blank on a roll line', () => {
+    const strip = freshCutStrip({
+      ...context,
+      line: { ...line, section: 'TECH_CARD_BOM_SECTION_LINING', fabricWidth: '140' },
+    });
+    expect(strip.widthMm).toBe('');
+  });
+
   it('does not create a strip for main fabric or pieces', () => {
     expect(cutStripEligible({ unit: 'm', purpose: 'TECH_CARD_BOM_PURPOSE_MAIN' })).toBe(false);
     expect(cutStripEligible({ unit: 'pcs', purpose: 'TECH_CARD_BOM_PURPOSE_OTHER' })).toBe(false);

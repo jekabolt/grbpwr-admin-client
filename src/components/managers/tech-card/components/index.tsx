@@ -127,6 +127,7 @@ import { PresenceLossBanner, VersionSkewBanner, type VersionSkew } from './save-
 import { useTechCardStagingRequired, type CommitOutcome } from './useTechCardStaging';
 import { fuseOwed } from './card-owed';
 import { useSeamsStore } from './assembly-seams/seams-store';
+import { dropTopstitchMeasured } from './topstitch-lines';
 import {
   FUSING_SHEETS_KEY,
   fusingSheetsChange,
@@ -1605,11 +1606,11 @@ export function TechCardForm({
       audit: PresenceAudit | null = null,
       server: TechCardFormData | null = null,
     ) => ({
-      values: {
+      values: dropTopstitchMeasured({
         ...v,
         assemblyCleared: false,
         mediaCleared: false,
-      },
+      }),
       audit,
       server,
     });
@@ -2947,7 +2948,7 @@ export function TechCardForm({
     settleAfterBodySave(
       before,
       {
-        values: {
+        values: dropTopstitchMeasured({
           ...data,
           signoffs,
           patterns,
@@ -2955,7 +2956,7 @@ export function TechCardForm({
           construction: server.construction,
           assemblyCleared: false,
           mediaCleared: false,
-        },
+        }),
         server,
       },
       undefined,

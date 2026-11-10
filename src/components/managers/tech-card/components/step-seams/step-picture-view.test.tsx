@@ -1055,6 +1055,48 @@ describe('stepActionMarks stored span', () => {
     expect(reach(ranged.lines[0].points)).toBeLessThan(55);
     expect(reach(whole.lines[0].points)).toBeGreaterThan(190);
   });
+
+  it('uses explicit line parts and draws every row before seam-derived marks', () => {
+    const explicit = stepActionMarks(
+      {
+        operationNumber: 10,
+        operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+        machineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
+        topstitchMode: 'TECH_CARD_TOPSTITCH_MODE_EDGE',
+        topstitchWidthMm: '2',
+        topstitchLines: [
+          {
+            lineKey: 'line-a',
+            bomLineKey: 'thread-a',
+            anchoredSize: 'M',
+            rows: 2,
+            sizes: [],
+            parts: [
+              {
+                piece: 'tall',
+                samples: [],
+                perimShare: 1,
+                lenMm: 200,
+                notches: 0,
+                turnDeg: 0,
+                range: [0, 0.5],
+                edgeHint: 'tall#0',
+                contourSig: 'shape',
+              },
+            ],
+          },
+        ],
+      } as never,
+      [{ target: 'tall#0', range: [150, 200] }],
+      geoms,
+      new Map(),
+    );
+
+    expect(explicit.lines).toHaveLength(2);
+    expect(explicit.lines.every((line) => line.dashed && line.kind === 'topstitch')).toBe(true);
+    expect(explicit.lines.every((line) => reach(line.points) < 105)).toBe(true);
+    expect(explicit.lines[0].points).not.toEqual(explicit.lines[1].points);
+  });
 });
 
 describe('StepPictureSvg action glyphs', () => {

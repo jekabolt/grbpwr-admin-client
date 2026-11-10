@@ -11,12 +11,13 @@ import { useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   Button,
+  Chip,
+  ChipRow,
   DataTable,
   DateRangePicker,
   EmptyCell,
   GroupLabel,
   Section,
-  Select,
   SkeletonRows,
   Text,
 } from 'ui';
@@ -425,15 +426,20 @@ export function MovementsTab() {
   const range = (
     <DateRangePicker from={from} to={to} onChange={(f, t) => patch({ from: f, to: t })} />
   );
-  const typeSelect = (
-    <Select
-      name='type'
-      items={movementTypeFilterOptions}
-      value={type}
-      placeholder='type'
-      fullWidth
-      onValueChange={(v: string) => patch({ type: v })}
-    />
+  // Types as chips (owner pick, w1107 №220): one tap, the current type is the filled chip.
+  const typeChips = (
+    <ChipRow className={phone ? 'flex-nowrap overflow-x-auto' : undefined}>
+      {movementTypeFilterOptions.map((o) => (
+        <Chip
+          key={o.value}
+          selected={type === o.value}
+          pressed={type === o.value}
+          onClick={() => patch({ type: o.value })}
+        >
+          {o.label}
+        </Chip>
+      ))}
+    </ChipRow>
   );
   // Run/sample arrive by deep link and have no picker: the scope is a plain word next to `clear`.
   const scopeText = runId ? `PR-${runId}` : sampleId ? `sample #${sampleId}` : '';
@@ -453,15 +459,17 @@ export function MovementsTab() {
           <div className='flex flex-col gap-1.5'>
             {material}
             {range}
-            {typeSelect}
+            {typeChips}
             {scope}
           </div>
         ) : (
-          <div className='grid grid-cols-[1fr_1fr_11rem_auto] items-center gap-2'>
-            {material}
-            {range}
-            {typeSelect}
-            {scope ?? <span />}
+          <div className='flex flex-col gap-2'>
+            <div className='grid grid-cols-[1fr_1fr_auto] items-center gap-2'>
+              {material}
+              {range}
+              {scope ?? <span />}
+            </div>
+            {typeChips}
           </div>
         )}
       </div>

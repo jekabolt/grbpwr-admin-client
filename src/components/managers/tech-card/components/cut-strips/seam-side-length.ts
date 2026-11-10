@@ -117,6 +117,15 @@ export function seamLengthsOf(
 ): ReadonlyMap<string, number> {
   const side = seamSideOf(row, stripKeys);
   if (!side) return NO_LENGTHS;
+  return sideAnchorLengthsOf(row, side, find);
+}
+
+/** One persisted side across the pattern sizes; used by one-sided topstitch lines. */
+export function sideAnchorLengthsOf(
+  row: Pick<StoredSeam, 'anchoredSize'> & { kind?: StoredSeam['kind'] },
+  side: readonly EdgeAnchor[],
+  find: FindPiece,
+): ReadonlyMap<string, number> {
   const keys = [...new Set(side.map((anchor) => anchor.piece))];
   const medians = new Map(keys.map((key) => [key, find(key)]));
   if ([...medians.values()].some((hit) => !hit)) return NO_LENGTHS;
@@ -134,7 +143,21 @@ export function seamLengthsOf(
     }
     return { size, pieces, grainDeg };
   });
-  return sideLengthsAcrossSizes(row, side, sizes);
+  return sideLengthsAcrossSizes(
+    {
+      seamKey: 'one-sided-length',
+      status: 'confirmed',
+      kind: row.kind ?? 'partial',
+      direction: 'unknown',
+      source: 'manual',
+      sideA: [...side],
+      sideB: [],
+      anchoredSize: row.anchoredSize,
+      note: '',
+    },
+    side,
+    sizes,
+  );
 }
 
 /** The seam on the geometry already read for one size: the print's question, "is what is stored still so". */

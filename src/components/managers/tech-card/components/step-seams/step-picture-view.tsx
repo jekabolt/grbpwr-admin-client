@@ -43,6 +43,7 @@ import { posesOf, rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import { useCardSeamGraph } from '../card-unit-pictures';
 import { stripKeysOf, stripKeysOfCard, type CutStripLike } from '../cut-strips/strip-pieces';
 import { GarmentLabelOverlay } from '../garment-label-picture';
+import { isTopstitchStep } from '../operation-kinds';
 import {
   ownStripKeys,
   StripOverlay,
@@ -50,6 +51,7 @@ import {
   type StripWords,
 } from '../cut-strips/strip-picture';
 import type { TechCardFormData } from '../schema';
+import { topstitchLineParts, type TopstitchLine } from '../topstitch-lines';
 import { nameSpot } from './name-spot';
 import { mmOnPoints, repeatClickTarget } from './span-pick';
 import { fmtMm, seamlessLabelStep, unsewnLabel } from './step-seams-model';
@@ -121,6 +123,7 @@ export type SceneOp = FormOpLike & {
   pressAction?: string;
   pressToward?: string;
   topstitchWidthMm?: string;
+  topstitchLines?: TopstitchLine[];
 };
 
 function sceneOpsSignature(ops: readonly SceneOp[], index: number): string {
@@ -148,6 +151,7 @@ function sceneOpsSignature(ops: readonly SceneOp[], index: number): string {
       pressAction: op?.pressAction,
       pressToward: op?.pressToward,
       topstitchWidthMm: op?.topstitchWidthMm,
+      topstitchLines: op?.topstitchLines,
       outputUnitName: op?.outputUnitName,
     })),
   );
@@ -914,15 +918,62 @@ export function stepActionMarks(
   geoms: ReadonlyMap<string, PieceGeom>,
   innerLines: ReadonlyMap<string, Pt2[][]>,
 ): { lines: PictureActionLine[]; glyphs: PictureActionGlyph[] } {
-  if (!op || !stepParts.length) return { lines: [], glyphs: [] };
+  if (!op) return { lines: [], glyphs: [] };
   const pressRaw = {
     operationType: op.operationType,
     work: op.work,
     press: { action: op.pressAction, toward: op.pressToward },
   } as Parameters<typeof pressMode>[0];
   const press = pressMode(pressRaw);
-  const topstitch = /topstitch/i.test(`${op.work ?? ''} ${op.operationType ?? ''}`);
+  const topstitch =
+    isTopstitchStep(op) || /topstitch/i.test(`${op.work ?? ''} ${op.operationType ?? ''}`);
   if (!press && !topstitch) return { lines: [], glyphs: [] };
+
+  const storedTopstitch = op.topstitchLines ?? [];
+  if (!stepParts.length && !storedTopstitch.length) return { lines: [], glyphs: [] };
+
+  if (topstitch) {
+    const parsed = Number.parseFloat(String(op.topstitchWidthMm ?? '').replace(',', '.'));
+    const distance = Number.isFinite(parsed) && parsed > 0 ? parsed : 1.5;
+    const sources = storedTopstitch.length
+      ? storedTopstitch.flatMap((line) =>
+          topstitchLineParts(line, geoms).map((part) => ({
+            part,
+            lineKey: line.lineKey,
+            rows: Math.max(1, Math.min(4, line.rows || 1)),
+          })),
+        )
+      : stepParts.map((part) => ({ part, lineKey: String(op.operationNumber ?? 'step'), rows: 1 }));
+    const parts = sources.flatMap(({ part, lineKey, rows }) => {
+      const points = rangedPicturePoints(
+        targetPoints(part.target, geoms, innerLines),
+        part.range,
+        resolveEdge(part.target, geoms)?.len ?? 0,
+      );
+      const piece = pieceOfTarget(part.target);
+      return points.length > 1 && geoms.has(piece)
+        ? [{ target: part.target, piece, points, lineKey, rows }]
+        : [];
+    });
+    return {
+      lines: parts.flatMap((part, partIndex) =>
+        Array.from({ length: part.rows }, (_, rowIndex) => ({
+          id: `${part.lineKey}:${partIndex}:${rowIndex}:topstitch`,
+          piece: part.piece,
+          target: part.target,
+          points: offsetTowardPiece(
+            part.points,
+            geoms.get(part.piece)?.rs ?? [],
+            distance * (rowIndex + 1),
+          ),
+          weight: 'ink' as const,
+          dashed: true,
+          kind: 'topstitch' as const,
+        })),
+      ),
+      glyphs: [],
+    };
+  }
 
   const parts = stepParts.flatMap(({ target, range }) => {
     const points = rangedPicturePoints(
@@ -933,23 +984,6 @@ export function stepActionMarks(
     const piece = pieceOfTarget(target);
     return points.length > 1 && geoms.has(piece) ? [{ target, piece, points }] : [];
   });
-  if (topstitch) {
-    const parsed = Number.parseFloat(String(op.topstitchWidthMm ?? '').replace(',', '.'));
-    const distance = Number.isFinite(parsed) && parsed > 0 ? parsed : 1.5;
-    return {
-      lines: parts.map((part, index) => ({
-        id: `${op.operationNumber ?? 'step'}:${index}:topstitch`,
-        piece: part.piece,
-        target: part.target,
-        points: offsetTowardPiece(part.points, geoms.get(part.piece)?.rs ?? [], distance),
-        weight: 'ink',
-        dashed: true,
-        kind: 'topstitch',
-      })),
-      glyphs: [],
-    };
-  }
-
   const toward = op.pressToward;
   const label = pressWord(press, toward);
   const aim = press === 'side' ? pressScreenAim(toward) : undefined;
@@ -2432,7 +2466,8 @@ export function StepPictureSvg({
     return shown ? [{ id: part.target, points: shown }] : [];
   });
   const actionLinePaths = drawnActionLines.flatMap((line) => {
-    if (stepEdges && line.target && !stepEdgeSet.has(line.target)) return [];
+    if (stepEdges && line.target && line.kind !== 'topstitch' && !stepEdgeSet.has(line.target))
+      return [];
     // Bind/hem action geometry is the exact worked edge already drawn by stepLines. Keeping a
     // second path here would make the print stroke heavier than the specified 1.26× outline.
     if (line.target && stepEdgeSet.has(line.target) && /^(?:bind|hem|tape)$/.test(line.kind))

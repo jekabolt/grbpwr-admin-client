@@ -58,6 +58,19 @@ export const RUN_REQ_TAB: Record<string, string> = {
   sizes_in_range: 'sizes',
   sizes_in_dxf: 'patterns',
   stock_shortage: 'bom',
+  // Own aux item (T10): its output material, norm per unit and supplier price live in the studio,
+  // not on a tab of their own. The step below says which studio step holds the field.
+  aux_output_material: 'studio',
+  aux_norm_per_unit: 'studio',
+  aux_supplier_price: 'studio',
+};
+
+// Studio step that fixes the key (`?step=` is read by studio-tab.tsx). The norm per unit is the
+// NORM / PC column of MATERIAL SLOTS on the mood step; the rest are card details.
+export const RUN_REQ_STEP: Record<string, string> = {
+  aux_output_material: 'card',
+  aux_norm_per_unit: 'mood',
+  aux_supplier_price: 'card',
 };
 
 /** Вкладка, чинящая ключ. Неизвестный ключ — `header`, всегда, без исключений. */
@@ -86,6 +99,8 @@ export function findingHref(f: Finding, techCardId: number): string | null {
   const p = new URLSearchParams({ tab });
   if (tab === 'colorways' && f.target?.colorwayId) p.set('colorway', String(f.target.colorwayId));
   if (tab === 'bom' && f.target?.bomLineKey) p.set('bom', f.target.bomLineKey);
+  const step = RUN_REQ_STEP[f.key ?? ''];
+  if (tab === 'studio' && step) p.set('step', step);
   return `${ROUTES.techCards}/${cardId}?${p.toString()}`;
 }
 

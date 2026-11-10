@@ -66,6 +66,9 @@ import { cutStripNorm } from '../cut-strips/norm';
 import { CutStripModal } from '../cut-strip-editor/cut-strip-fields';
 import { useCutStrip } from '../cut-strip-editor/use-cut-strip';
 import { useBindingStripTeardown } from '../use-binding-strip-teardown';
+import { useTopstitchLineTeardown } from '../use-topstitch-line-teardown';
+import { TopstitchThreadModal } from '../topstitch-thread-fields';
+import type { TopstitchOperation } from '../topstitch-lines';
 import { measured } from '../use-colourway-auto';
 import { formQtySteps, slotNorm, type FormQtyOperation, type SlotNorm } from './slot-norm';
 
@@ -198,6 +201,7 @@ export function MaterialSlots({
 }) {
   const { control, getValues, setValue, setFocus } = useFormContext<TechCardFormData>();
   const teardownBinding = useBindingStripTeardown();
+  const teardownTopstitch = useTopstitchLineTeardown();
   const lines = (useWatch({ control, name: 'bomItems' }) ?? []) as Line[];
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []).map(wireInt);
   // REPEATS-правки шагов видны в NORM сразу: шаги читаются из живой формы, не из прочитанной карты.
@@ -223,6 +227,16 @@ export function MaterialSlots({
     [cutStrips],
   );
   const [openStripKey, setOpenStripKey] = useState('');
+  const [openTopstitchKey, setOpenTopstitchKey] = useState('');
+  const topstitchKeys = useMemo(
+    () =>
+      new Set(
+        ((operations ?? []) as TopstitchOperation[]).flatMap((operation) =>
+          (operation.topstitchLines ?? []).map((line) => line.bomLineKey).filter(Boolean),
+        ),
+      ),
+    [operations],
+  );
 
   const stripNorm = (line: Line): string =>
     cutStripNorm(card?.cutStripNorms, line.lineKey, card?.techCard?.baseSampleSizeId);
@@ -309,6 +323,7 @@ export function MaterialSlots({
     if (!line || blockersOf(line).length > 0) return false;
     const lineKey = line.lineKey?.trim() ?? '';
     if (lineKey && !(await teardownBinding({ bomLineKeys: [lineKey] }))) return false;
+    if (lineKey) teardownTopstitch({ bomLineKeys: [lineKey] });
     releaseBomLineRefs(getValues, setValue, line);
     setValue('bomItems', cur.filter((_, j) => j !== at) as never, { shouldDirty: true });
     return true;
@@ -481,6 +496,7 @@ export function MaterialSlots({
                     onRemove={askRemove}
                     blockersOf={blockersOf}
                     norm={stripNorm(lines[index])}
+                    topstitch={topstitchKeys.has(lines[index].lineKey?.trim() ?? '')}
                     counted={slotNorm(lines[index], qtySteps, cutKeys)}
                     auxMode={auxMode}
                     sizeIds={sizeIds}
@@ -489,6 +505,7 @@ export function MaterialSlots({
                       (material) => wireInt(material.id) === wireInt(lines[index].materialId),
                     )}
                     onOpenStrip={setOpenStripKey}
+                    onOpenTopstitch={setOpenTopstitchKey}
                   />
                 )),
               )}
@@ -536,6 +553,13 @@ export function MaterialSlots({
         readOnly={!!readOnly}
         seamLengthsMm={seamLengthsMm}
       />
+      <TopstitchThreadModal
+        openKey={openTopstitchKey}
+        onClose={() => setOpenTopstitchKey('')}
+        norms={card?.cutStripNorms}
+        baseSizeId={card?.techCard?.baseSampleSizeId}
+        readOnly={!!readOnly}
+      />
     </Section>
   );
 }
@@ -551,12 +575,14 @@ function SlotRow({
   onRemove,
   blockersOf,
   norm,
+  topstitch,
   counted,
   auxMode,
   sizeIds,
   seams,
   material,
   onOpenStrip,
+  onOpenTopstitch,
 }: {
   index: number;
   family: Family;
@@ -570,6 +596,7 @@ function SlotRow({
   onRemove: (index: number) => void;
   blockersOf: (line: Line) => Blocker[];
   norm: string;
+  topstitch: boolean;
   /** Счётная норма слота: Σ шагов, ручное число или ничего (мерная / режется в длину). */
   counted: SlotNorm;
   auxMode: 'own' | 'bought' | null;
@@ -577,6 +604,7 @@ function SlotRow({
   seams: common_TechCardSeam[];
   material?: common_Material;
   onOpenStrip: (lineKey: string) => void;
+  onOpenTopstitch: (lineKey: string) => void;
 }) {
   const { getValues, setValue } = useFormContext<TechCardFormData>();
   const teardownBinding = useBindingStripTeardown();
@@ -672,7 +700,7 @@ function SlotRow({
 
   const blockers = blockersOf(line);
   const blocked = blockers.length > 0;
-  const ownNormEligible = auxMode === 'own' && measured(section) && !cutStrip.checked;
+  const ownNormEligible = auxMode === 'own' && measured(section) && !cutStrip.checked && !topstitch;
   const ownNorm = (line.consumptionPerUnit ?? '').trim();
 
   /* ПРАВКА ЯЧЕЙКИ = ПРОСМОТР (D-07). Строка спецификации — вещь, а не текст: её живость меряется
@@ -955,7 +983,13 @@ function SlotRow({
       </td>
       {auxMode !== 'bought' && (
         <td className='align-top text-right' data-b16-norm={index}>
-          {counted.kind === 'ops' ? (
+          {topstitch ? (
+            norm || (
+              <Text size='micro' variant='label'>
+                no pattern
+              </Text>
+            )
+          ) : counted.kind === 'ops' ? (
             /* ЧИСЛО СТАВЯТ ШАГИ — только чтение; в слот оно не пишется, сервер выводит его сам. */
             <span className='flex items-baseline justify-end gap-1.5 whitespace-nowrap'>
               <Text component='span' className='font-bold tabular-nums'>
@@ -1018,7 +1052,7 @@ function SlotRow({
             )
           ) : (
             norm ||
-            (cutStrip.checked ? (
+            (topstitch || cutStrip.checked ? (
               <Text size='micro' variant='label'>
                 no pattern
               </Text>
@@ -1030,7 +1064,7 @@ function SlotRow({
       )}
       {auxMode !== 'bought' && (
         <td className='hidden align-top text-right sm:table-cell' data-b16-spare={index}>
-          {counted.kind === 'none' ? (
+          {topstitch || counted.kind === 'none' ? (
             <EmptyCell />
           ) : readOnly ? (
             countText(line.spareQty) || <EmptyCell />
@@ -1047,7 +1081,18 @@ function SlotRow({
         </td>
       )}
       <td data-align='left' className='hidden align-top sm:table-cell'>
-        {cutStrip.eligible ? (
+        {topstitch ? (
+          <div className='flex items-center gap-2'>
+            <Pill tone='ink'>from lines</Pill>
+            <Button
+              variant='underline'
+              size='xs'
+              onClick={() => onOpenTopstitch(line.lineKey?.trim() ?? '')}
+            >
+              lines
+            </Button>
+          </div>
+        ) : cutStrip.eligible ? (
           <div className='flex items-center gap-2'>
             <CheckboxField
               name='cutStrips'

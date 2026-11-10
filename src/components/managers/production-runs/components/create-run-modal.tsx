@@ -797,9 +797,12 @@ export function CreateRunModal({
 
           <div className='sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-borderColor bg-bgColor px-4 py-3'>
             <Text size='micro' variant='label' className='mr-auto'>
-              {totalUnits > 0
-                ? `${totalUnits} ${totalUnits === 1 ? 'garment' : 'garments'} in the plan`
-                : 'no quantities entered'}
+              {/* An aux card has no quantity grid here: its plan is set on the run page. */}
+              {isAux
+                ? null
+                : totalUnits > 0
+                  ? `${totalUnits} ${totalUnits === 1 ? 'garment' : 'garments'} in the plan`
+                  : 'no quantities entered'}
               {/* ПОЧЕМУ КНОПКА ПОГАШЕНА — рядом с самой кнопкой. Вердикт печатает причину подробно,
                   но подвал липкий, а вердикт остаётся выше по прокрутке: погашенная кнопка, чьё
                   объяснение уехало за край экрана, читается как поломка интерфейса. Когда блокер
