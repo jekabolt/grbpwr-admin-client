@@ -99,7 +99,8 @@ function TeeSideView({
   const viewW = 260;
   const centre = viewW / 2;
   const xScale = (viewW / 2 - 16) / (safeWing + 6);
-  const yScale = 5;
+  // The stem is drawn ~56 units long whatever its mm, so a 1.6 mm stem still reads in the tile.
+  const yScale = Math.min(20, Math.max(3, 56 / Math.max(stem, 0.5)));
   const allowance = 5;
   const top = 22;
   const panelTop = top + 3;
