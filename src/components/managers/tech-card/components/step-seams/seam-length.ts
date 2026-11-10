@@ -1,5 +1,6 @@
-import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
+import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { resolveEdge } from 'lib/assembly-skeleton/union';
+import { apply } from 'lib/assembly-skeleton/union/affine';
 import {
   foldedSideLengthMm,
   foldMap,
@@ -16,6 +17,11 @@ export type SideLengthOptions = {
   /** The fold rows closed at this step: a folded stretch counts as long as it lies once folded. */
   activeFolds?: readonly StoredFold[];
   grainDeg?: number | ReadonlyMap<string, number> | null;
+  /**
+   * Where each piece lies in the step's picture. A stretch that lies on a stretch of another piece
+   * already counted (a pocket on its panel) is sewn once and counts once.
+   */
+  placed?: ReadonlyMap<string, Affine>;
 };
 
 /** A step that states no tolerance: 51 / 50 is the same seam, 52 / 50 is not. */
@@ -89,7 +95,8 @@ export function sideLengthMm(
     });
     return sum + to - from;
   }, 0);
-  if (!opts.activeFolds?.length) return sum;
+  const laidOnce = opts.placed ? sum - overlapOnLayout(foldable, opts.placed) : sum;
+  if (!opts.activeFolds?.length) return laidOnce;
   const grainOf = (piece: string) =>
     typeof opts.grainDeg === 'number' ? opts.grainDeg : opts.grainDeg?.get(piece) ?? 0;
   const plainOf = (list: readonly { lenMm: number }[]) =>
@@ -101,7 +108,7 @@ export function sideLengthMm(
   );
   // A pleat's intake is internal: the pleat rule, never matched to the other side.
   const pleated = foldable.filter((part) => pleatPieces.has(part.piece.toUpperCase()));
-  let out = sum;
+  let out = laidOnce;
   if (pleated.length)
     out +=
       foldedSideLengthMm(pleated, null, opts.activeFolds, (piece) => {
@@ -206,6 +213,119 @@ export function visibleFoldedLength(
     }
   }
   return total;
+}
+
+const LAID_ON_MM = 3;
+const PARALLEL_COS = 0.9;
+
+/**
+ * How much of the parts lies on an earlier part of another piece, mm, once every piece sits where
+ * the step's picture puts it. Only along it: a stretch that ends where the next begins, or crosses
+ * it, lies on nothing.
+ */
+export function overlapOnLayout(
+  parts: readonly { piece: string; pts: readonly Pt2[]; lenMm: number }[],
+  placed: ReadonlyMap<string, Affine>,
+): number {
+  const laid: { piece: string; pts: Pt2[] }[] = [];
+  let overlap = 0;
+  for (const part of parts) {
+    const T = placed.get(part.piece);
+    if (!T || part.pts.length < 2) continue;
+    const pts = part.pts.map((p) => apply(T, p));
+    const others = laid.filter((other) => other.piece !== part.piece);
+    laid.push({ piece: part.piece, pts });
+    if (!others.length) continue;
+    const dense = densify(pts);
+    const drawn = polylineLen(dense);
+    if (!(drawn > 0)) continue;
+    const scale = part.lenMm / drawn;
+    for (let i = 1; i < dense.length; i++) {
+      const a = dense[i - 1];
+      const b = dense[i];
+      const step = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (!(step > 0)) continue;
+      const mid: Pt2 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      const dir: Pt2 = [(b[0] - a[0]) / step, (b[1] - a[1]) / step];
+      if (others.some((other) => liesAlong(mid, dir, other.pts))) overlap += step * scale;
+    }
+  }
+  return overlap;
+}
+
+/** A side part as the stretch it names, in its piece's flat frame; null for a target that does not resolve. */
+function partLineOf(
+  part: SidePart,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): { piece: string; pts: Pt2[]; lenMm: number } | null {
+  if (INNER.test(part.target)) return null;
+  const edge = resolveEdge(part.target, geoms);
+  if (!edge) return null;
+  if (!part.range) return { piece: edge.pieceKey, pts: edge.pts, lenMm: edge.len };
+  const from = Math.max(0, Math.min(edge.len, Math.min(part.range[0], part.range[1])));
+  const to = Math.max(from, Math.min(edge.len, Math.max(part.range[0], part.range[1])));
+  const pts = sampleAt(
+    edge.pts,
+    Array.from({ length: FOLD_SAMPLES }, (_, i) =>
+      edge.len > 0 ? (from + ((to - from) * i) / (FOLD_SAMPLES - 1)) / edge.len : 0,
+    ),
+  );
+  return { piece: edge.pieceKey, pts, lenMm: to - from };
+}
+
+const UNDER_SHARE = 0.9;
+
+/**
+ * The side lies, in the step's picture, on stretches already named (an edge under a pocket that is
+ * sewn already): at least nine tenths of its length runs along them.
+ */
+export function sideLiesUnder(
+  side: readonly SidePart[],
+  under: readonly SidePart[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+  placed: ReadonlyMap<string, Affine>,
+): boolean {
+  const lines = (parts: readonly SidePart[]) =>
+    parts.flatMap((part) => {
+      const line = partLineOf(part, geoms);
+      const T = line && placed.get(line.piece);
+      return line && T ? [{ ...line, pts: line.pts.map((p) => apply(T, p)) }] : [];
+    });
+  const own = lines(side);
+  const base = lines(under);
+  if (!own.length || !base.length || own.length < side.length) return false;
+  let total = 0;
+  let laid = 0;
+  for (const part of own) {
+    const dense = densify(part.pts);
+    for (let i = 1; i < dense.length; i++) {
+      const a = dense[i - 1];
+      const b = dense[i];
+      const step = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (!(step > 0)) continue;
+      total += step;
+      const mid: Pt2 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      const dir: Pt2 = [(b[0] - a[0]) / step, (b[1] - a[1]) / step];
+      if (base.some((other) => liesAlong(mid, dir, other.pts))) laid += step;
+    }
+  }
+  return total > 0 && laid >= UNDER_SHARE * total;
+}
+
+function liesAlong(p: Pt2, dir: Pt2, line: readonly Pt2[]): boolean {
+  for (let i = 1; i < line.length; i++) {
+    const [ax, ay] = line[i - 1];
+    const dx = line[i][0] - ax;
+    const dy = line[i][1] - ay;
+    const l2 = dx * dx + dy * dy;
+    if (!(l2 > 0)) continue;
+    const t = ((p[0] - ax) * dx + (p[1] - ay) * dy) / l2;
+    if (t < 0 || t > 1) continue;
+    const l = Math.sqrt(l2);
+    if (Math.abs(dir[0] * dx + dir[1] * dy) / l < PARALLEL_COS) continue;
+    if (Math.abs((p[0] - ax) * dy - (p[1] - ay) * dx) / l < LAID_ON_MM) return true;
+  }
+  return false;
 }
 
 const polylineLen = (pts: readonly Pt2[]) =>

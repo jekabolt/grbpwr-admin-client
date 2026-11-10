@@ -347,6 +347,7 @@ export function SeamPickerBody({
     targetsLen(ids, geoms, (piece, k) => polyLen(pieces?.get(piece)?.inner[k] ?? []), {
       activeFolds,
       grainDeg: geo?.grainDeg,
+      placed: stepPicture?.layout.T,
     });
   const pickParts = (side: Side) => sideParts(sel[side], sel.spans[side]);
 
