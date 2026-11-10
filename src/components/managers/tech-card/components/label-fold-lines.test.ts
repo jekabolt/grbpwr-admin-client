@@ -139,3 +139,11 @@ describe('label shown size', () => {
     ).toBe('40 × 30');
   });
 });
+
+describe('one fold line keeps the sewn edge in front', () => {
+  it('shows from the sewn edge to the fold, whichever side is longer', () => {
+    expect(labelAssembly([12], [], 100).foldedMm).toBe(12);
+    expect(labelAssembly([48], [], 100).foldedMm).toBe(48);
+    expect(labelAssembly([70], [], 100).foldedMm).toBe(70);
+  });
+});
