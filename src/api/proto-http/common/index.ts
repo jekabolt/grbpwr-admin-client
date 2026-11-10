@@ -3829,6 +3829,24 @@ export type TechCardGarmentLabel = {
   // Pages of a booklet label (a composition label folded into a little book), 1..12; 0 or less = 1.
   // PRESENCE BIT: absent = keep the stored value.
   pages?: number;
+  // Label on a fabric piece (attachment on_fabric_piece): the label is sewn onto a small spare piece of
+  // fabric whose top edge goes into the seam. All in mm. PRESENCE BITS: each absent field keeps the stored
+  // value. The server refuses a negative size. When piece_width_mm > 0 and piece_height_mm > 0 the label
+  // (width_mm x height_mm at label_x_mm, label_y_mm from the piece's top-left) must lie inside the piece
+  // and start at or below piece_seam_mm, else InvalidArgument.
+  pieceBomItemId?: number;
+  pieceWidthMm?: googletype_Decimal;
+  pieceHeightMm?: googletype_Decimal;
+  pieceSeamMm?: googletype_Decimal;
+  labelXMm?: googletype_Decimal;
+  labelYMm?: googletype_Decimal;
+  // How the label is sewn onto the piece: 4_sides | top_edge; anything else is stored as "".
+  // It is also the presence bit of `prints`: a client that knows this block always sends it, and its
+  // prints list replaces the stored one (empty = none). Absent = an older client, whose save keeps the
+  // stored prints.
+  labelOnPiece?: string;
+  // Printed artworks on the label, in display order. Replace-all on save when label_on_piece is sent.
+  prints: TechCardGarmentLabelPrint[] | undefined;
 };
 
 // TechCardGarmentLabelFile is one artwork file of a garment label, printed as a QR on the tech pack.
@@ -3840,6 +3858,21 @@ export type TechCardGarmentLabelFile = {
   // OUTPUT-ONLY: the public link of the library file, filled when the card is read for a response.
   // Empty when the file has no live link (revoked, expired, access changed): no QR may be printed.
   publicUrl: string | undefined;
+};
+
+// TechCardGarmentLabelPrint is one printed artwork on a garment label, placed in mm from the label's
+// top-left, unfolded. The rectangle must lie inside the label (x_mm + width_mm <= label width_mm,
+// y_mm + height_mm <= label height_mm), so the label's size must be set.
+export type TechCardGarmentLabelPrint = {
+  id: number | undefined;
+  name: string | undefined;
+  libraryFileId: number | undefined;
+  method: string | undefined;
+  colour: string | undefined;
+  widthMm: googletype_Decimal | undefined;
+  heightMm: googletype_Decimal | undefined;
+  xMm: googletype_Decimal | undefined;
+  yMm: googletype_Decimal | undefined;
 };
 
 // TechCardPackagingItem is one packaging item (labels rework, 0386): the label card with two words
