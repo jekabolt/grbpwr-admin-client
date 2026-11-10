@@ -462,7 +462,8 @@ export function MarkersSection({
   const groups = useMemo(() => {
     const byKey = new Map<string, { key: string; label: string; markers: typeof markers }>();
     for (const m of markers) {
-      const label = (m.bomItemName ?? '').trim();
+      // «interlining interlining»: a BOM line named purpose + scope repeats a word; say it once.
+      const label = (m.bomItemName ?? '').trim().replace(/\b(\S+)(\s+\1\b)+/gi, '$1');
       const key = label || '\u0000';
       let g = byKey.get(key);
       if (!g) {
@@ -561,7 +562,7 @@ export function MarkersSection({
           {length ? `${length} cm` : <EmptyCell />}
         </span>
         <span className='text-right text-labelColor'>{eff ? `${eff} %` : <EmptyCell />}</span>
-        <span className='inline-flex items-baseline justify-end gap-2'>
+        <span className='flex min-w-0 flex-wrap items-baseline justify-end gap-x-2 gap-y-1'>
           {m.isNorm && (
             <Pill
               tone='ok'
