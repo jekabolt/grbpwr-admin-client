@@ -108,7 +108,10 @@ function layFolds(
   return laid;
 }
 
-/** Every fold line of the card laid on its flat piece, whatever step closes it: the pattern's dashes. */
+/**
+ * Every fold line of the card laid on its flat piece, whatever step closes it: the pattern's dashes.
+ * A row marked stale still lies where its dashes are drawn; it only places pick points here.
+ */
 export function cardFoldLines(
   rows: readonly StoredFold[],
   geoms: ReadonlyMap<string, PieceGeom>,
@@ -117,7 +120,8 @@ export function cardFoldLines(
 ): FlatFolds {
   if (!rows.length) return new Map();
   const out = new Map<string, FlatFold[]>();
-  for (const fold of layFolds(rows, geoms, grainDeg ?? new Map(), innerLines).values())
+  const fresh = rows.map((row) => (row.stale ? { ...row, stale: false } : row));
+  for (const fold of layFolds(fresh, geoms, grainDeg ?? new Map(), innerLines).values())
     out.set(fold.piece, [...(out.get(fold.piece) ?? []), fold.flat]);
   return out;
 }
