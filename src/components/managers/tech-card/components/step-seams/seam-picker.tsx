@@ -105,7 +105,13 @@ import {
   type EdgeTick,
   type NoMark,
 } from './step-picture-view';
-import { foldedDrawing, foldedFitSides, withFoldPartners } from './step-folds';
+import {
+  cardFoldLines,
+  foldCrossingsMm,
+  foldedDrawing,
+  foldedFitSides,
+  withFoldPartners,
+} from './step-folds';
 import { edgeRowOfPick, initialPickerPick, orderedPickSides } from './step-rows';
 import { fitSourceOf } from './step-pose';
 import { stepPictureOf } from './surface-picture';
@@ -225,6 +231,14 @@ export function SeamPickerBody({
   const seamActions = useStepSeamActions(index);
   const errors = useSeamsStore((s) => s.errors);
   const foldRows = useFoldRows();
+  const foldLines = useMemo(
+    () => cardFoldLines(foldRows, geoms, geo?.grainDeg, innerLines),
+    [foldRows, geoms, geo?.grainDeg, innerLines],
+  );
+  const breaksOf = useCallback(
+    (id: TargetId) => edgeBreaks(id, geoms, foldCrossingsMm(id, geoms, foldLines)),
+    [geoms, foldLines],
+  );
   const { catalog: workCatalog } = useOperationWorkCatalog();
   const cutStrips = (useWatch({ control: form.control, name: 'cutStrips' }) ?? []) as CutStrip[];
   const sizeIds = (useWatch({ control: form.control, name: 'sizeIds' }) ?? []) as number[];
@@ -658,8 +672,7 @@ export function SeamPickerBody({
         );
         return;
       }
-      const segment =
-        labelSpanAt(id, side, length, atMm) ?? segmentAt(edgeBreaks(id, geoms), length, atMm);
+      const segment = labelSpanAt(id, side, length, atMm) ?? segmentAt(breaksOf(id), length, atMm);
       if (topstitchMode && topstitchPickOverlaps(topstitchLines, id, segment, geoms)) {
         setRefused('already picked');
         return;
@@ -684,6 +697,7 @@ export function SeamPickerBody({
       setPoseSel,
       onFolded,
       labelSpanAt,
+      breaksOf,
     ],
   );
   const onHoverAt = useCallback(
@@ -701,7 +715,7 @@ export function SeamPickerBody({
                 : sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget),
               length,
               atMm,
-            ) ?? segmentAt(edgeBreaks(id, geoms), length, atMm)
+            ) ?? segmentAt(breaksOf(id), length, atMm)
           : null;
       setHover((current) =>
         current?.id === id && current?.range[0] === free?.[0] && current?.range[1] === free?.[1]
@@ -711,12 +725,12 @@ export function SeamPickerBody({
             : null,
       );
     },
-    [geoms, stored, labelSpanAt, groups, sel, bindingMode, topstitchMode],
+    [geoms, stored, labelSpanAt, groups, sel, bindingMode, topstitchMode, breaksOf],
   );
   const onSpanDrag = useCallback(
     (id: TargetId, fromMm: number, toMm: number, done: boolean) => {
       if (frozen) return;
-      const breaks = edgeBreaks(id, geoms);
+      const breaks = breaksOf(id);
       const range: SpanRange = [snapToBreak(breaks, fromMm), snapToBreak(breaks, toMm)];
       if (!done) {
         setSpanDrag({ id, range });
@@ -763,6 +777,7 @@ export function SeamPickerBody({
       pickRules,
       setPoseSel,
       onFolded,
+      breaksOf,
     ],
   );
 
@@ -823,13 +838,13 @@ export function SeamPickerBody({
     if (hover) ids.add(hover.id);
     if (spanDrag) ids.add(spanDrag.id);
     return [...ids].flatMap((id) =>
-      edgeBreaks(id, geoms).map((point) => ({
+      breaksOf(id).map((point) => ({
         id,
         atMm: point.atMm,
         notch: point.kind === 'notch',
       })),
     );
-  }, [sel, hover, spanDrag, geoms]);
+  }, [sel, hover, spanDrag, geoms, breaksOf]);
   const groupNames = useMemo(() => groups.map((g) => g.name), [groups]);
   const canvasPickTargets = useMemo(
     () =>

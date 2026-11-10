@@ -35,17 +35,41 @@ const edgeLen = (id: string, geoms: ReadonlyMap<string, PieceGeom>) =>
 const isWhole = (range: SpanRange, length: number) =>
   range[0] <= TOUCH_MM && range[1] >= length - TOUCH_MM;
 
-/** The edge's ends, notches and real turns, in mm from its start. */
-export function edgeBreaks(id: string, geoms: ReadonlyMap<string, PieceGeom>): EdgeBreakPoint[] {
+export type PickBreak = { atMm: number; kind: EdgeBreakPoint['kind'] | 'fold' };
+
+const FOLD_NEAR_MM = 0.5;
+
+/**
+ * The edge's ends, notches and real turns, in mm from its start, and where a fold line of its piece
+ * crosses it (`folds`): a folded placket's edge is picked by the stretches its folds cut.
+ */
+export function edgeBreaks(
+  id: string,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  folds: readonly number[] = [],
+): PickBreak[] {
   const at = id.lastIndexOf('#');
   const geom = at < 0 ? undefined : geoms.get(id.slice(0, at));
   const edge = geom?.edges.find((candidate) => candidate.id === id);
-  return geom && edge ? breakPoints(geom, edge) : [];
+  if (!geom || !edge) return [];
+  const own: PickBreak[] = breakPoints(geom, edge);
+  const end = own[own.length - 1]?.atMm ?? 0;
+  const cuts = folds.filter(
+    (mm) =>
+      mm > FOLD_NEAR_MM &&
+      mm < end - FOLD_NEAR_MM &&
+      own.every((point) => Math.abs(point.atMm - mm) > FOLD_NEAR_MM),
+  );
+  return cuts.length
+    ? [...own, ...cuts.map((atMm) => ({ atMm, kind: 'fold' as const }))].sort(
+        (x, y) => x.atMm - y.atMm,
+      )
+    : own;
 }
 
 /** The segment under a point of the edge. */
 export function segmentAt(
-  breaks: readonly EdgeBreakPoint[],
+  breaks: readonly { atMm: number }[],
   length: number,
   atMm: number,
 ): SpanRange {
@@ -59,7 +83,7 @@ export function segmentAt(
 }
 
 /** A free drag's end lands on a break point near it, and anywhere else as it is. */
-export function snapToBreak(breaks: readonly EdgeBreakPoint[], atMm: number): number {
+export function snapToBreak(breaks: readonly { atMm: number }[], atMm: number): number {
   let best = atMm;
   let bestGap = SNAP_MM;
   for (const { atMm: point } of breaks) {
