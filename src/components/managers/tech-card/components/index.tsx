@@ -107,6 +107,7 @@ import { SamplesTab } from './samples-tab';
 import { BaseModelFields } from './header-meta-fields';
 import { SizeIdsField } from './size-ids-field';
 import { SizeChartField } from './size-chart-field';
+import { BuiltRibbonsProvider } from './composition-label/built-ribbons-context';
 import { CompositionLabelBlock } from './composition-label/composition-label-block';
 import { StyleFactsField } from './style-facts-field';
 import { STYLE_FACT_KEYS } from './tech-card-options';
@@ -4313,20 +4314,25 @@ export function TechCardForm({
                 composition label → labels → packaging. The assembly bill and the packaging recipe
                 stay below, unchanged (D-07). */}
             <SectionStack hidden={activeTab !== 'labels'}>
-              <div className='flex flex-col gap-12' data-labels-tab=''>
-                <CompositionLabelBlock
-                  techCard={techCard}
-                  techCardId={isEditMode && numId ? numId : undefined}
-                  canEdit={canWrite(SECTION.techCards) && !frozen}
-                />
-                <LabelsBlock techCard={techCard} canEdit={canWrite(SECTION.techCards) && !frozen} />
-                <PackagingBlock
-                  techCardId={isEditMode && numId ? numId : undefined}
-                  colorwayRefs={techCard?.colorways}
-                  resolvedMedia={techCard?.resolvedLabelMedia}
-                  canEdit={canWrite(SECTION.techCards) && !frozen}
-                />
-              </div>
+              <BuiltRibbonsProvider>
+                <div className='flex flex-col gap-12' data-labels-tab=''>
+                  <CompositionLabelBlock
+                    techCard={techCard}
+                    techCardId={isEditMode && numId ? numId : undefined}
+                    canEdit={canWrite(SECTION.techCards) && !frozen}
+                  />
+                  <LabelsBlock
+                    techCard={techCard}
+                    canEdit={canWrite(SECTION.techCards) && !frozen}
+                  />
+                  <PackagingBlock
+                    techCardId={isEditMode && numId ? numId : undefined}
+                    colorwayRefs={techCard?.colorways}
+                    resolvedMedia={techCard?.resolvedLabelMedia}
+                    canEdit={canWrite(SECTION.techCards) && !frozen}
+                  />
+                </div>
+              </BuiltRibbonsProvider>
               {/* Assembly bill is per-style, managed via its own RPC — it
                 needs a saved card id. For a brand-new card, prompt to Save (which lands back here)
                 instead of silently hiding it, so the user is never left wondering. */}

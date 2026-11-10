@@ -199,3 +199,7 @@ export function stepHighlightOf(
     inherited: inherited.length > 0,
   };
 }
+
+// A topstitch step lights none of the edges it inherits: its own lines are the only marks.
+export const NO_STEP_EDGES: readonly TargetId[] = [];
+export const NO_STEP_PARTS: readonly SidePart[] = [];

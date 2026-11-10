@@ -108,12 +108,15 @@ export function formatStitchLines(lines: readonly number[], heightMm: number): s
   return parseStitchLines(lines.join(','), heightMm).join(',');
 }
 
-/** The span that stays in front once folded: between the outer lines; one line keeps the longer side. */
+/**
+ * The span that stays in front once folded: between the outer lines. One line keeps the sewn edge
+ * (0) in front: the label shows from its sewn edge to the fold, the rest folds back behind it.
+ */
 export function foldFront(lines: readonly number[], heightMm: number): [number, number] {
   if (!lines.length || !(heightMm > 0)) return [0, heightMm];
   const first = lines[0]!;
   const last = lines[lines.length - 1]!;
-  if (lines.length === 1) return first >= heightMm - first ? [0, first] : [first, heightMm];
+  if (lines.length === 1) return [0, first];
   return [first, last];
 }
 

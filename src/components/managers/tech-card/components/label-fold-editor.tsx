@@ -10,6 +10,9 @@ import {
 } from 'react';
 import { Chip, ChipRow, Input, Text } from 'ui';
 
+import type { PaperDoc } from '../assembly-print/paper';
+import { PaperNested } from '../assembly-print/paper-svg';
+
 import type { FormGarmentLabel } from './labels-schema';
 import {
   foldFront,
@@ -82,6 +85,7 @@ export function LabelFoldEditor({
   composition,
   artworkAction,
   libraryFileId,
+  ribbons,
   disabled,
   onChange,
 }: {
@@ -97,6 +101,8 @@ export function LabelFoldEditor({
   composition: boolean;
   artworkAction?: ReactNode;
   libraryFileId?: unknown;
+  /** Built ribbons of the composition label, page by page; set, they own the pages. */
+  ribbons?: readonly PaperDoc[];
   disabled: boolean;
   onChange: (value: Partial<FoldChange>) => void;
 }) {
@@ -108,7 +114,10 @@ export function LabelFoldEditor({
   const lines = labelFoldLines({ fold, foldLinesMm }, axisMm);
   const stitches = parseStitchLines(stitchLinesMm, axisMm);
   const sewn = labelAssembly(lines, stitches, axisMm);
-  const safePages = clamp(Math.round(pages || 1), 1, 12);
+  const built = ribbons && ribbons.length > 0 ? ribbons : null;
+  const storedPages = clamp(Math.round(pages || 1), 1, 12);
+  const builtPages = built ? clamp(built.length, 1, 12) : 0;
+  const safePages = built ? built.length : storedPages;
   const [page, setPage] = useState(0);
   const [foldText, setFoldText] = useState(formatFoldLines(lines, axisMm));
   const [stitchText, setStitchText] = useState(formatStitchLines(stitches, axisMm));
@@ -123,6 +132,11 @@ export function LabelFoldEditor({
   const foldedClipId = `label-folded-${useId().replace(/:/g, '')}`;
 
   useEffect(() => setPage((current) => Math.min(current, safePages - 1)), [safePages]);
+  // Built ribbons own the page count: the row follows them once, then the values agree.
+  useEffect(() => {
+    if (builtPages > 0 && !disabled && storedPages !== builtPages) onChange({ pages: builtPages });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [builtPages, storedPages, disabled]);
   useEffect(() => {
     if (document.activeElement !== pagesInput.current) setPagesText(String(safePages));
   }, [safePages]);
@@ -330,7 +344,10 @@ export function LabelFoldEditor({
             stroke='var(--color-textColor)'
             strokeWidth={1}
           />
-          {preview && page === 0 ? (
+          {built?.[page] ? (
+            <PaperNested doc={built[page]} x={x} y={y} width={w} height={h} />
+          ) : null}
+          {!built && preview && page === 0 ? (
             <image
               href={preview}
               x={x}
@@ -556,7 +573,18 @@ export function LabelFoldEditor({
               stroke='var(--color-textColor)'
               strokeWidth={1}
             />
-            {preview ? (
+            {built ? (
+              <g clipPath={`url(#${foldedClipId})`} data-label-folded-artwork=''>
+                <PaperNested
+                  doc={built[0]}
+                  x={widthAxis ? foldedX - frontStart * foldedK : foldedX}
+                  y={widthAxis ? foldedY : foldedY - frontStart * foldedK}
+                  width={widthMm * foldedK}
+                  height={heightMm * foldedK}
+                />
+              </g>
+            ) : null}
+            {!built && preview ? (
               <image
                 href={preview}
                 x={widthAxis ? foldedX - frontStart * foldedK : foldedX}
@@ -649,8 +677,8 @@ export function LabelFoldEditor({
               <Input
                 ref={pagesInput}
                 inputMode='numeric'
-                value={pagesText}
-                disabled={disabled}
+                value={built ? String(safePages) : pagesText}
+                disabled={disabled || !!built}
                 aria-label='pages'
                 className='w-14'
                 onChange={(event: ChangeEvent<HTMLInputElement>) => {

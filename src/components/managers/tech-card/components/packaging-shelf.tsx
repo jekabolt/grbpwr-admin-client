@@ -304,7 +304,7 @@ function PickField({
         type='button'
         variant='secondary'
         size='sm'
-        className='h-7 min-w-0 flex-1 gap-2 p-0 pr-2 text-left'
+        className='flex h-7 min-w-0 flex-1 items-center gap-2 p-0 pr-2 text-left'
         disabled={!canEdit}
         onClick={onPick}
       >

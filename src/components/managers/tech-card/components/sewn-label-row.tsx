@@ -56,7 +56,13 @@ import { LabelFilePicker } from './label-file-picker';
 import type { FormGarmentLabel } from './labels-schema';
 import type { TechCardFormData } from './schema';
 import { confirmCompositionLabel } from './label-bom';
-import { isCompositionLabel, labelBomLine, type LabelAxes } from './sewn-label-model';
+import { useBuiltRibbons } from './composition-label/built-ribbons-context';
+import {
+  isCompositionLabel,
+  isOwnArtworkFile,
+  labelBomLine,
+  type LabelAxes,
+} from './sewn-label-model';
 import {
   kindLabel,
   labelAttachmentOptions,
@@ -541,6 +547,9 @@ function LabelFold({
   artworkAction?: ReactNode;
 }) {
   const shape = garmentLabelMark(row);
+  const composition = isCompositionLabel(row.key);
+  const ribbons = useBuiltRibbons();
+  const built = composition && !(row.files ?? []).some(isOwnArtworkFile);
   return (
     <LabelFoldEditor
       widthMm={shape?.widthMm ?? 30}
@@ -552,9 +561,10 @@ function LabelFold({
       stitchLinesMm={row.stitchLinesMm}
       foldAxis={row.foldAxis}
       pages={row.pages}
-      composition={isCompositionLabel(row.key)}
+      composition={composition}
       artworkAction={artworkAction}
       libraryFileId={row.files?.[0]?.libraryFileId}
+      ribbons={built ? ribbons : undefined}
       disabled={disabled}
       onChange={onChange}
     />

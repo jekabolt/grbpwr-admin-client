@@ -21,7 +21,7 @@ import type { TechCardFormData } from '../schema';
 import { topstitchLineMm, type TopstitchLine } from '../topstitch-lines';
 import { drawsStepResult } from './draws-result';
 import { PairNo } from './pair-no';
-import { NO_SEAM_TEXT } from './step-highlight';
+import { NO_SEAM_TEXT, NO_STEP_EDGES, NO_STEP_PARTS } from './step-highlight';
 import { useStepResults } from './step-result-context';
 import {
   hasMultipleStepPieces,
@@ -150,7 +150,7 @@ function TopstitchLinesTable({
         scene={scene}
         picture={picture}
         marks={NO_MARKS}
-        ownMarksOnly
+        noStepHighlight
         quiet
         caption={lines.length ? undefined : 'pick'}
         onOpen={onOpen}
@@ -399,6 +399,7 @@ export function SeamTile({
   picture,
   marks,
   ownMarksOnly,
+  noStepHighlight,
   dashed,
   missing,
   no,
@@ -418,6 +419,8 @@ export function SeamTile({
   marks: { id: TargetId; tone: EdgeMark['tone'] }[];
   /** A seam inside a unit shows only its own marks, not the step's highlight. */
   ownMarksOnly?: boolean;
+  /** A topstitch step: its own lines only, never the seams it inherits from a join. */
+  noStepHighlight?: boolean;
   dashed?: boolean;
   missing?: boolean;
   /** Opens the picker on this step — the tile is a way in, as `+ seam`. */
@@ -477,9 +480,9 @@ export function SeamTile({
           geoms={scene.geoms}
           innerLines={scene.innerLines}
           marks={marks}
-          stepEdges={ownMarksOnly ? undefined : scene.stepEdges}
-          seamless={scene.seamless}
-          stepParts={ownMarksOnly ? undefined : scene.stepParts}
+          stepEdges={noStepHighlight ? NO_STEP_EDGES : ownMarksOnly ? undefined : scene.stepEdges}
+          seamless={noStepHighlight || scene.seamless}
+          stepParts={noStepHighlight ? NO_STEP_PARTS : ownMarksOnly ? undefined : scene.stepParts}
           {...(quiet ? { noSeamText: '' } : {})}
         />
       ) : null}

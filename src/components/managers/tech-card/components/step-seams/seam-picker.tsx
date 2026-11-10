@@ -51,6 +51,7 @@ import { moveRow, orderOfRows, windowRows, type LayerMove } from './layers-windo
 import { LayersMenu, LayersWindow } from './layers-window-view';
 import { PairNo } from './pair-no';
 import { recordSeamDecision } from './seam-decisions';
+import { NO_STEP_EDGES, NO_STEP_PARTS } from './step-highlight';
 import { isGuess, pickTarget, seamSideName, sideForClick } from './seam-focus';
 import { usePictureZoom } from './picture-zoom';
 import {
@@ -75,6 +76,13 @@ import { useStepResults } from './step-result-context';
 import { useAttachStepPose, useAttachStepSeam, useStepSeamActions } from './step-seams-context';
 import { stepWords } from './step-words';
 import {
+  TopstitchLineList,
+  topstitchLineNos,
+  topstitchLineText,
+  withoutTopstitchLine,
+  writeTopstitchLines,
+} from './topstitch-picker';
+import {
   deltaMm,
   fmtMm,
   innerId,
@@ -89,6 +97,7 @@ import {
 import type { SeamSides } from './step-picture';
 import {
   isUnitStep,
+  stepActionMarks,
   StepPictureSvg,
   useBoxSize,
   useStepScene,
@@ -219,6 +228,9 @@ export function SeamPickerBody({
   const { catalog: workCatalog } = useOperationWorkCatalog();
   const cutStrips = (useWatch({ control: form.control, name: 'cutStrips' }) ?? []) as CutStrip[];
   const sizeIds = (useWatch({ control: form.control, name: 'sizeIds' }) ?? []) as number[];
+  const baseSizeId = useWatch({ control: form.control, name: 'baseSampleSizeId' }) as
+    | number
+    | undefined;
   const bindingTarget = useMemo(
     () => bindingStripTarget(op, cutStrips, sizeIds),
     [op, cutStrips, sizeIds],
@@ -236,7 +248,10 @@ export function SeamPickerBody({
     [cutStrips, bomItems, sceneName],
   );
   const topstitchMode = isTopstitchStep(op ?? {});
-  const topstitchLines = (op?.topstitchLines ?? []) as TopstitchLine[];
+  const topstitchLines = useMemo(
+    () => (op?.topstitchLines ?? []) as TopstitchLine[],
+    [op?.topstitchLines],
+  );
   const topstitchBomLineKey = topstitchThreadKey(op, bomItems);
   const bindingMode = !topstitchMode && !!bindingTarget;
 
@@ -249,8 +264,10 @@ export function SeamPickerBody({
   const [sel, setSel] = useState<Sel>(() => (initialPick ? wholeSel(initialPick) : EMPTY));
   const [hover, setHover] = useState<SpanHover | null>(null);
   const [spanDrag, setSpanDrag] = useState<SpanHover | null>(null);
+  // The selected stored seam's key; in topstitch mode, the selected line's `lineKey`.
   const [activeSeam, setActiveSeam] = useState<string | null>(null);
   const [clearingSeams, setClearingSeams] = useState(false);
+  const [clearingLines, setClearingLines] = useState(false);
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState('');
   const [replaceMirrorOpen, setReplaceMirrorOpen] = useState(false);
@@ -751,6 +768,8 @@ export function SeamPickerBody({
   const { marks, nos } = useMemo(() => {
     const marks: EdgeMark[] = [];
     const nos: NoMark[] = [];
+    // A stored topstitch line: its number at the middle of its longest part, as in LINES.
+    if (topstitchMode) nos.push(...topstitchLineNos(topstitchLines, geoms));
     // A stored seam reads as a proposal does: its edges, its number on the first.
     if (!topstitchMode)
       stored.forEach((s, i) => {
@@ -784,7 +803,17 @@ export function SeamPickerBody({
         ],
       });
     return { marks, nos };
-  }, [stored, sel, activeSeam, spanDrag, groups, bindingMode, topstitchMode]);
+  }, [
+    stored,
+    sel,
+    activeSeam,
+    spanDrag,
+    groups,
+    bindingMode,
+    topstitchMode,
+    topstitchLines,
+    geoms,
+  ]);
   // The break points of every edge in hand: what a segment or a drag can land on.
   const ticks = useMemo<EdgeTick[]>(() => {
     const ids = new Set([...sel.a, ...sel.b].filter((id) => !parseInner(id)));
@@ -834,7 +863,11 @@ export function SeamPickerBody({
         )
       : null;
   const empty =
-    !pair && !surface && (topstitchMode || stored.length === 0) && !sel.a.length && !sel.b.length;
+    !pair &&
+    !surface &&
+    (topstitchMode ? topstitchLines.length === 0 : stored.length === 0) &&
+    !sel.a.length &&
+    !sel.b.length;
 
   const [canvasEl, canvas] = useBoxSize();
   const phone = canvas.w > 0 && canvas.w < 600;
@@ -913,6 +946,29 @@ export function SeamPickerBody({
     setClearingSeams(false);
     for (const seam of listed) if (!(await removeSeam(seam))) return;
   };
+  const writeLines = (next: TopstitchLine[]) => {
+    writeTopstitchLines(form.setValue, index, next);
+    setActiveSeam(null);
+    setSaved(false);
+  };
+  const removeLine = (lineKey: string) =>
+    writeLines(
+      withoutTopstitchLine(
+        (form.getValues(`operations.${index}.topstitchLines`) ?? []) as TopstitchLine[],
+        lineKey,
+      ),
+    );
+  const clearLines = () => {
+    setClearingLines(false);
+    writeLines([]);
+  };
+  const lineText = (line: TopstitchLine) =>
+    topstitchLineText(line, {
+      geoms,
+      sideName,
+      widthMm: op?.topstitchWidthMm,
+      sizeId: baseSizeId || sizeIds[0],
+    });
   const clearSide = (side: Side) => {
     setSel((current) => ({
       ...current,
@@ -934,7 +990,27 @@ export function SeamPickerBody({
     (repeatsTopstitch ? 'already picked' : '') ||
     (topstitchMode && !topstitchBomLineKey ? 'thread missing' : '');
   const shownActive = stored.find((s) => s.key === activeSeam);
-  const activeIndex = shownActive ? stored.indexOf(shownActive) : -1;
+  const activeLine = topstitchMode
+    ? topstitchLines.find((line) => line.lineKey === activeSeam)
+    : undefined;
+  const activeIndex = topstitchMode
+    ? activeLine
+      ? topstitchLines.indexOf(activeLine)
+      : -1
+    : shownActive
+      ? stored.indexOf(shownActive)
+      : -1;
+  const clearActive = topstitchMode
+    ? activeLine && (() => removeLine(activeLine.lineKey))
+    : shownActive && (() => void removeSeam(shownActive));
+  // Stored lines in the highlight ink, read from the op itself rather than the shared results.
+  const topstitchActions = useMemo(
+    () =>
+      topstitchMode && topstitchLines.length
+        ? stepActionMarks(op, NO_STEP_PARTS, geoms, innerLines).lines
+        : undefined,
+    [topstitchMode, topstitchLines, op, geoms, innerLines],
+  );
 
   const movable = !frozen && !!cardId;
   const pad = phone ? 28 : 64;
@@ -1022,6 +1098,14 @@ export function SeamPickerBody({
       geoms={geoms}
       innerLines={innerLines}
       marks={marks}
+      {...(topstitchMode
+        ? {
+            stepEdges: NO_STEP_EDGES,
+            stepParts: NO_STEP_PARTS,
+            seamless: true,
+            actionLines: topstitchActions,
+          }
+        : {})}
       nos={nos}
       names={groupNames}
       namesBelow={phone}
@@ -1031,7 +1115,7 @@ export function SeamPickerBody({
       hoverRange={spanDrag?.range ?? hover?.range ?? null}
       ticks={ticks}
       activeNo={activeIndex >= 0 ? activeIndex : null}
-      onClearNo={frozen || !shownActive ? undefined : () => void removeSeam(shownActive)}
+      onClearNo={frozen || !clearActive ? undefined : clearActive}
       onHoverAt={frozen ? undefined : onHoverAt}
       onSpanDrag={frozen ? undefined : onSpanDrag}
       onPick={frozen ? undefined : toggle}
@@ -1281,6 +1365,22 @@ export function SeamPickerBody({
                 </span>
               );
             })}
+          {topstitchMode && (
+            <TopstitchLineList
+              lines={topstitchLines}
+              active={activeSeam}
+              frozen={frozen}
+              busy={busy}
+              textOf={lineText}
+              onToggle={(lineKey) => {
+                setSel(EMPTY);
+                setFilled(null);
+                setRefused('');
+                setActiveSeam(lineKey);
+              }}
+              onRemove={removeLine}
+            />
+          )}
           {(sel.a.length > 0 || sel.b.length > 0) && (
             <ChipRow>
               <Chip
@@ -1400,6 +1500,18 @@ export function SeamPickerBody({
               clear seams
             </Button>
           )}
+          {!frozen && topstitchMode && topstitchLines.length > 0 && (
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              onClick={() => setClearingLines(true)}
+              disabled={busy}
+              data-topstitch-clear-all=''
+            >
+              clear lines
+            </Button>
+          )}
           {!frozen && (posePending || ownPoseRows.size > 0) && (
             <Button
               type='button'
@@ -1456,6 +1568,19 @@ export function SeamPickerBody({
         confirmLabel='REPLACE'
       >
         {null}
+      </ConfirmationModal>
+      <ConfirmationModal
+        open={clearingLines}
+        onOpenChange={setClearingLines}
+        onConfirm={clearLines}
+        title='clear lines'
+        confirmLabel='clear'
+      >
+        <ChipRow>
+          {topstitchLines.map((line, i) => (
+            <PairNo key={line.lineKey} i={i} />
+          ))}
+        </ChipRow>
       </ConfirmationModal>
       <ConfirmationModal
         open={clearingSeams}
