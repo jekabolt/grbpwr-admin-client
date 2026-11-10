@@ -112,8 +112,10 @@ export function LabelFoldEditor({
   const [page, setPage] = useState(0);
   const [foldText, setFoldText] = useState(formatFoldLines(lines, axisMm));
   const [stitchText, setStitchText] = useState(formatStitchLines(stitches, axisMm));
+  const [pagesText, setPagesText] = useState(String(safePages));
   const foldInput = useRef<HTMLInputElement>(null);
   const stitchInput = useRef<HTMLInputElement>(null);
+  const pagesInput = useRef<HTMLInputElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const drag = useRef<Drag | null>(null);
   const hatchId = `label-hatch-${useId().replace(/:/g, '')}`;
@@ -121,6 +123,9 @@ export function LabelFoldEditor({
   const foldedClipId = `label-folded-${useId().replace(/:/g, '')}`;
 
   useEffect(() => setPage((current) => Math.min(current, safePages - 1)), [safePages]);
+  useEffect(() => {
+    if (document.activeElement !== pagesInput.current) setPagesText(String(safePages));
+  }, [safePages]);
   useEffect(() => {
     if (document.activeElement !== foldInput.current) setFoldText(formatFoldLines(lines, axisMm));
   }, [axisMm, foldLinesMm, fold, lines]);
@@ -263,23 +268,25 @@ export function LabelFoldEditor({
 
   return (
     <div className='flex flex-col gap-4'>
-      <div className='relative flex h-65 items-center justify-center overflow-hidden bg-pageBg px-3 pt-8 pb-24 sm:h-55 sm:pt-4 sm:pb-14'>
-        {artworkAction ? <div className='absolute top-3 left-3'>{artworkAction}</div> : null}
-        {composition && safePages > 1 ? (
-          <ChipRow className='absolute top-3 right-3 flex-wrap justify-end'>
-            {Array.from({ length: safePages }, (_, index) => (
-              <Chip
-                key={index}
-                nonForm
-                selected={page === index}
-                pressed={page === index}
-                onClick={() => setPage(index)}
-              >
-                {index + 1}
-              </Chip>
-            ))}
-          </ChipRow>
-        ) : null}
+      <div className='relative flex min-h-65 flex-col items-center justify-center gap-2 overflow-hidden bg-pageBg px-3 pt-3 pb-24 sm:h-55 sm:min-h-0 sm:flex-row sm:pt-4 sm:pb-14'>
+        <div className='flex w-full items-start justify-between gap-2 sm:absolute sm:inset-x-3 sm:top-3 sm:w-auto'>
+          {artworkAction ? <div className='shrink-0'>{artworkAction}</div> : <span />}
+          {composition && safePages > 1 ? (
+            <ChipRow className='min-w-0 flex-wrap justify-end'>
+              {Array.from({ length: safePages }, (_, index) => (
+                <Chip
+                  key={index}
+                  nonForm
+                  selected={page === index}
+                  pressed={page === index}
+                  onClick={() => setPage(index)}
+                >
+                  {index + 1}
+                </Chip>
+              ))}
+            </ChipRow>
+          ) : null}
+        </div>
         <svg
           ref={svgRef}
           viewBox={`0 0 ${viewW} ${viewH}`}
@@ -640,18 +647,19 @@ export function LabelFoldEditor({
           {composition ? (
             <InputRow label='pages'>
               <Input
-                type='number'
-                min={1}
-                max={12}
+                ref={pagesInput}
                 inputMode='numeric'
-                value={safePages}
+                value={pagesText}
                 disabled={disabled}
+                aria-label='pages'
                 className='w-14'
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  onChange({
-                    pages: clamp(Math.round(Number(event.target.value)) || 1, 1, 12),
-                  })
-                }
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  const text = event.target.value;
+                  if (!/^\d{0,2}$/.test(text)) return;
+                  setPagesText(text);
+                  if (text) onChange({ pages: clamp(Number(text), 1, 12) });
+                }}
+                onBlur={() => setPagesText(String(safePages))}
               />
             </InputRow>
           ) : null}

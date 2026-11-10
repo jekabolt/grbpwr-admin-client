@@ -1219,6 +1219,7 @@ export function SewnLabelRow({
                 value={attachment}
                 readOnly={!canEdit}
                 placeholder='pick'
+                className='min-w-0 whitespace-nowrap [&>span:first-child]:min-w-0 [&>span:first-child]:truncate'
                 items={withStored(labelAttachmentOptions, attachment)}
                 onValueChange={(value: string | undefined) => patch({ attachment: value || '' })}
               />
