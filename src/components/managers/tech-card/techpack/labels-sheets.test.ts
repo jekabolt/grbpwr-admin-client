@@ -272,3 +272,42 @@ describe('page 05 sewn-in labels', () => {
     expect(bare).toContain('a · identity');
   });
 });
+
+describe('page 05 composition lines', () => {
+  const fibre = (cotton: number) =>
+    JSON.stringify({
+      fibre: [
+        { code: 'Cotton', percent: cotton },
+        { code: 'Viscose', percent: 100 - cotton },
+      ],
+    });
+  const fabric = (id: number, purpose: string, composition: string) => ({
+    id,
+    lineKey: `F${id}`,
+    name: `fabric ${id}`,
+    section: 'TECH_CARD_BOM_SECTION_FABRIC',
+    purpose,
+    composition,
+  });
+  const lines = (bomItems: unknown[]) =>
+    model(card({ bomItems, garmentLabels: [] })).composition.map((l) => `${l.part}: ${l.value}`);
+
+  it('prints one line for two fabrics of the same composition', () => {
+    const out = lines([
+      fabric(1, 'TECH_CARD_BOM_PURPOSE_MAIN', fibre(55)),
+      fabric(2, 'TECH_CARD_BOM_PURPOSE_POCKETING', fibre(55)),
+      fabric(3, 'TECH_CARD_BOM_PURPOSE_MAIN', fibre(55)),
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatch(/^SHELL \/ POCKET LINING: /);
+  });
+
+  it('keeps one line per different composition', () => {
+    expect(
+      lines([
+        fabric(1, 'TECH_CARD_BOM_PURPOSE_MAIN', fibre(55)),
+        fabric(2, 'TECH_CARD_BOM_PURPOSE_POCKETING', fibre(60)),
+      ]),
+    ).toHaveLength(2);
+  });
+});

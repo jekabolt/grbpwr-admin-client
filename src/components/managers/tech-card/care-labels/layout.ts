@@ -907,6 +907,12 @@ export function typesetABack(
 
 // ---------- B: состав ----------
 
+/** Заголовок колонки B: имя части, у слитых частей — все имена через « / ». */
+const partHeader = (p: PartComposition): string =>
+  p.part === 'NOTE'
+    ? ''
+    : [p.part, ...(p.alsoParts ?? [])].map((part) => LABEL_PART_NAME[part]).join(' / ');
+
 type Column = { part: PrintedPart; header: string; rows: Record<LabelLang, string>; w: number };
 
 type VerticalRow = {
@@ -942,7 +948,7 @@ function typesetBVertical(
   const cols: VerticalColumn[] = [];
 
   for (const part of parts) {
-    const header = part.part === 'NOTE' ? '' : LABEL_PART_NAME[part.part];
+    const header = partHeader(part);
     if (!LABEL_LANGS.some((lang) => part.rows[lang]?.trim())) continue;
     const holesBefore = probe.holes.length;
     let chosen: VerticalColumn | null = null;
@@ -1097,7 +1103,7 @@ export function typesetB(
   // 1) Ширины колонок: max(заголовок, 10 строк). Часть без строк не рисуется.
   const cols: Column[] = [];
   for (const p of parts) {
-    const header = p.part === 'NOTE' ? '' : LABEL_PART_NAME[p.part];
+    const header = partHeader(p);
     const rows = p.rows;
     if (!LABEL_LANGS.some((lang) => rows[lang]?.trim())) continue;
     let w = probe.width(header, 'en', pt, { part: p.part }) ?? 0;
