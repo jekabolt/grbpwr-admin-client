@@ -12,7 +12,7 @@ import { NestingWorkerClient } from 'lib/nesting/worker/client';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Button, ConfirmationModal, HeaderWarnings, type HeaderWarning, Pill, Text } from 'ui';
 import { MAX_PATTERN_BYTES, formatBytes, patternFileError } from 'utils/pattern';
-import { planSizeMerge, type SizeMergePlan } from './size-merge';
+import { orderSizeFiles, planSizeMerge, type SizeMergePlan } from './size-merge';
 import { useDictionarySizeTokens } from './use-block-sizes';
 
 /** Сколько листов принимаем за раз: размерный ряд, а не «всю папку». */
@@ -148,7 +148,9 @@ export function MergeSizesModal({
     }
     setBuilt(null); // старую ссылку отзовёт эффект: у времени жизни blob'а один хозяин
     setError(null);
-    setPicked(files);
+    // Порядок пачки — из самих файлов, не из того, как их бросили: иначе повторная загрузка тех же
+    // выгрузок даёт другие байты и сохраняет базовый лист заново (см. `orderSizeFiles`).
+    setPicked(orderSizeFiles(files));
   }
 
   // Брошенные на слот файлы: разбор стартует сразу, при каждом открытии с новой пачкой.

@@ -215,3 +215,19 @@ export function planSizeMerge(
 
   return { rows, offsets, maxShiftMm, warnings };
 }
+
+/**
+ * Порядок, в котором файлы идут в склейку. Склейка зависит от порядка (первый файл — шаблон,
+ * одноимённый блок берётся из первого), а повторная загрузка в карточку узнаёт «тот же файл» только
+ * по sha256. Поэтому те же выгрузки, брошенные в другом порядке, давали другие байты и сохраняли
+ * базовый лист заново новой версией. Порядок выводится из самих файлов: имя, затем вес — так одна и
+ * та же пачка всегда склеивается в одни и те же байты.
+ */
+export function orderSizeFiles<T extends { name: string; size: number }>(files: readonly T[]): T[] {
+  return [...files].sort(
+    (a, b) =>
+      a.name.localeCompare(b.name, 'en', { numeric: true, sensitivity: 'base' }) ||
+      (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) ||
+      a.size - b.size,
+  );
+}
