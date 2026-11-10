@@ -235,15 +235,18 @@ function attachmentChange(row: FormGarmentLabel, value?: string): Partial<FormGa
   if (attachment !== 'on_fabric_piece') return { attachment };
   const labelWidth = Number(row.widthMm) || 30;
   const labelHeight = Number(row.heightMm) || 50;
-  const seam = row.pieceSeamMm || '8';
+  // The server sends unset piece sizes as "0", so only a positive stored value counts as set.
+  const set = (value?: string) => (Number(value) > 0 ? value : undefined);
+  const hasPiece = !!set(row.pieceWidthMm) && !!set(row.pieceHeightMm);
+  const seam = set(row.pieceSeamMm) || '8';
   return {
     attachment,
     labelOnPiece: row.labelOnPiece || '4_sides',
-    pieceWidthMm: row.pieceWidthMm || String(Math.max(40, labelWidth + 10)),
-    pieceHeightMm: row.pieceHeightMm || String(Math.max(70, labelHeight + 20)),
+    pieceWidthMm: set(row.pieceWidthMm) || String(Math.max(40, labelWidth + 10)),
+    pieceHeightMm: set(row.pieceHeightMm) || String(Math.max(70, labelHeight + 20)),
     pieceSeamMm: seam,
-    labelXMm: row.labelXMm || '5',
-    labelYMm: row.labelYMm || String(Math.max(Number(seam), 12)),
+    labelXMm: hasPiece ? row.labelXMm || '0' : '5',
+    labelYMm: hasPiece ? row.labelYMm || seam : String(Math.max(Number(seam), 12)),
   };
 }
 
