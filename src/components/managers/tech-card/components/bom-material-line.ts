@@ -4,24 +4,31 @@ import { materialCompositionCode } from 'components/managers/materials/component
 import { UNSET_KIND, kindLabel, kindsForSection } from './bom-kind';
 import { bornBomLine, emptyBomItem } from './form-writers';
 import { isRollGoodsSection } from './bom-purpose';
+import { isMassAreaOrVolumeUnit, metresPerArticleUnit, pricePerMetre } from './material-unit';
 import { materialFabricWeight, materialFabricWidth } from './nesting/fabric-weight';
 import { wireInt } from './wire-int';
 
 // The catalog facts a BOM line snapshots off the article it links. Every catalog-backed BOM birth
 // and link passes through these helpers, so a linked line cannot acquire a different shape
 // depending on which screen created it.
-export function materialLineFields(m: common_Material) {
+export function materialLineFields(m: common_Material, targetSection = m.section || '') {
+  const threadInMetres =
+    targetSection === 'TECH_CARD_BOM_SECTION_THREAD' && !isMassAreaOrVolumeUnit(m);
+  const catalogPrice = m.latestPrice?.price?.value || '';
+  const unitPrice = threadInMetres
+    ? pricePerMetre(catalogPrice, metresPerArticleUnit(m))
+    : catalogPrice;
   return {
     // `name` is intentionally not a catalog snapshot. Callers preserve or supply the garment role.
-    section: m.section || emptyBomItem.section,
+    section: targetSection || emptyBomItem.section,
     supplier: m.supplier || '',
     supplierRef: m.supplierRef || '',
     composition: materialCompositionCode(m),
     spec: m.spec || '',
-    unit: m.unit || '',
+    unit: threadInMetres ? 'm' : m.unit || '',
     fabricWidth: materialFabricWidth(m) || '',
     fabricWeightGsm: materialFabricWeight(m) || '',
-    unitPrice: m.latestPrice?.price?.value || '',
+    unitPrice,
     currency: m.latestPrice?.currency || '',
   };
 }
@@ -56,7 +63,7 @@ export function bornMaterialBomLine(
   const section = String(values.section || material.section || emptyBomItem.section);
   const auto = materialAutoFields(material, section);
   return bornBomLine({
-    ...materialLineFields(material),
+    ...materialLineFields(material, section),
     kind: auto.kind || UNSET_KIND,
     color: auto.color,
     pantone: auto.pantone,

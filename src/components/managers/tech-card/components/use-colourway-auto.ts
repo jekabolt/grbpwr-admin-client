@@ -28,6 +28,7 @@ import {
 } from './nesting/marker-io';
 import type { Proposal } from './colourway-material-match';
 import { MEASURED_SECTIONS } from './button-qty';
+import { metresPerArticleUnit, normalizeMaterialUnit, pricePerMetre } from './material-unit';
 import type { PieceRef } from './piece-picker';
 import { wireInt } from './schema';
 
@@ -156,12 +157,18 @@ export function articleForUsage(
     };
   }
   const isDefault = wireInt(material.id) === slot.materialId;
+  const threadInMetres =
+    slot.section === 'TECH_CARD_BOM_SECTION_THREAD' && normalizeMaterialUnit(slot.unit) === 'm';
+  const latestPrice = decimalToInput(material.latestPrice?.price);
+  const effectivePrice = threadInMetres
+    ? pricePerMetre(latestPrice, metresPerArticleUnit(material))
+    : latestPrice;
   return {
     ...slot,
     material,
     materialId: wireInt(material.id),
-    unit: material.unit?.trim() || slot.unit,
-    unitPrice: decimalToInput(material.latestPrice?.price) || (isDefault ? slot.unitPrice : ''),
+    unit: threadInMetres ? 'm' : material.unit?.trim() || slot.unit,
+    unitPrice: effectivePrice || (isDefault ? slot.unitPrice : ''),
     currency: material.latestPrice?.currency || (isDefault ? slot.currency : ''),
     composition: materialCompositionCode(material) || (isDefault ? slot.composition : ''),
   };

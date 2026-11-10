@@ -11,6 +11,7 @@ import type {
 } from 'api/proto-http/admin';
 import type { SpreadMode } from 'lib/nesting/spread';
 import type { NestConfig, NestResult, PieceDTO, RotationDeg, Unit } from 'lib/nesting/types';
+import { normalizeMaterialUnit } from '../material-unit';
 
 // The BOM fabric line as the marker features need it — a projection of the card form's
 // bomItems rows (strings exactly as the form holds them). `id` is the server PK: 0 means
@@ -386,16 +387,12 @@ export function compositionLabel(
 // «м|m|см|cm», и слот, написанный «metres», получал отказ, хотя сервер считает его метрами.
 // Ничего сверх словаря здесь НЕ появляется (ни mm, ни g, ни m²): писать норму в этих единицах
 // инструменты не умеют, и выдуманная поддержка хуже честного отказа.
-const METRE_UNITS = new Set(['m', 'м', 'meter', 'meters', 'metre', 'metres']);
-const CM_UNITS = new Set(['cm', 'см']);
-const KG_UNITS = new Set(['kg', 'кг']);
-
 /** Чем единица строки является для записи нормы. null — норму в неё писать не умеем. */
 export function bomUnitKind(unit?: string): 'm' | 'cm' | 'kg' | null {
-  const u = (unit ?? '').trim().toLowerCase();
-  if (METRE_UNITS.has(u)) return 'm';
-  if (CM_UNITS.has(u)) return 'cm';
-  if (KG_UNITS.has(u)) return 'kg';
+  const normalized = normalizeMaterialUnit(unit);
+  if (normalized === 'm') return 'm';
+  if (normalized === 'cm') return 'cm';
+  if (normalized === 'kg') return 'kg';
   return null;
 }
 

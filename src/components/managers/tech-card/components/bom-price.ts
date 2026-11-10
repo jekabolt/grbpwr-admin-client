@@ -1,5 +1,6 @@
 import { common_Material } from 'api/proto-http/admin';
 import { parseDecimalNumber } from 'utils/decimal';
+import { metresPerArticleUnit, normalizeMaterialUnit, pricePerMetre } from './material-unit';
 
 // ЛЕСТНИЦА ЦЕНЫ строки BOM — одна на весь клиент.
 //
@@ -25,16 +26,22 @@ import { parseDecimalNumber } from 'utils/decimal';
  * костингу оно просто отсутствует (не ноль), и весь клиент честно читает это как «каталожной цены
  * нет».
  */
-export function catalogPrice(m?: common_Material) {
-  const value = m?.latestPrice?.price?.value?.trim() ?? '';
+export function catalogPrice(m?: common_Material, line?: BomPriceLine) {
+  const rawValue = m?.latestPrice?.price?.value?.trim() ?? '';
+  const threadInMetres =
+    line?.section === 'TECH_CARD_BOM_SECTION_THREAD' && normalizeMaterialUnit(line.unit) === 'm';
+  const factor = m && threadInMetres ? metresPerArticleUnit(m) : null;
+  const converted = factor == null ? '' : pricePerMetre(rawValue, factor);
+  const value = converted || rawValue;
   return {
     value,
     // Валюта принадлежит ЧИСЛУ: подписать каталожное число валютой строки — хуже, чем не
     // подписать вовсе, поэтому без цены валюты тоже нет.
-    currency: value ? (m?.latestPrice?.currency?.trim() ?? '') : '',
-    // Единица — свойство САМОГО артикула (в ней же лежит и складской остаток), и каталожная цена
-    // всегда котируется за неё. Поэтому она переживает отсутствие цены, в отличие от валюты.
-    unit: m?.unit?.trim() ?? '',
+    currency: value ? m?.latestPrice?.currency?.trim() ?? '' : '',
+    // Без контекста строки единица и цена остаются каталожными. Для THREAD-строки в метрах оба
+    // поля становятся строкиными: цена пересчитана за метр, единица — `m`. Без фактора остаются сырые
+    // каталожные значения, чтобы `units differ` не дал перенести конусную цену в метровую.
+    unit: converted ? 'm' : m?.unit?.trim() ?? '',
   };
 }
 
@@ -42,6 +49,7 @@ export type BomPriceSource = 'line' | 'catalog' | 'none';
 
 /** Ценовые поля строки BOM как простые строки: поле формы или `decimalToInput(item.unitPrice)`. */
 export type BomPriceLine = {
+  section?: string;
   unitPrice?: string;
   currency?: string;
   unit?: string;
@@ -79,6 +87,8 @@ export function formatBomMoney(value: string, currency?: string, unit?: string):
 // единица или валюта не заполнены, и объявлять дрейф по их отсутствию значило бы кричать на каждой
 // такой строке о расхождении, которого никто не вносил.
 const sameFacet = (a: string, b: string) => !a || !b || a === b;
+const sameUnitFacet = (a: string, b: string) =>
+  !a || !b || normalizeMaterialUnit(a) === normalizeMaterialUnit(b);
 
 // Та же цена? «80» и «80.00» — одно и то же число, записанное дважды, и сравнение строк выдумывало
 // бы дрейф на каждой аккуратно переоценённой строке. Сравниваем численно (с запятой в разделителе
@@ -89,7 +99,7 @@ function samePrice(
   b: { value: string; currency: string; unit: string },
 ) {
   if (!sameFacet(a.currency, b.currency)) return false;
-  if (!sameFacet(a.unit, b.unit)) return false;
+  if (!sameUnitFacet(a.unit, b.unit)) return false;
   const na = parseDecimalNumber(a.value);
   const nb = parseDecimalNumber(b.value);
   if (!Number.isFinite(na) || !Number.isFinite(nb)) return a.value.trim() === b.value.trim();
@@ -102,7 +112,7 @@ function samePrice(
  * + расхождение со справочником, если снапшот есть и он устарел.
  */
 export function resolveBomPrice(line: BomPriceLine, material?: common_Material): ResolvedBomPrice {
-  const catalog = catalogPrice(material);
+  const catalog = catalogPrice(material, line);
   const value = line.unitPrice?.trim() ?? '';
   const currency = line.currency?.trim() ?? '';
   const unit = line.unit?.trim() ?? '';
@@ -129,7 +139,7 @@ export function resolveBomPrice(line: BomPriceLine, material?: common_Material):
             label: formatBomMoney(
               catalog.value,
               catalog.currency && catalog.currency !== currency ? catalog.currency : '',
-              catalog.unit && catalog.unit !== unit ? catalog.unit : '',
+              catalog.unit && !sameUnitFacet(catalog.unit, unit) ? catalog.unit : '',
             ),
           }
         : undefined,
