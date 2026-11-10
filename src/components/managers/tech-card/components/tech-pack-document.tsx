@@ -2604,7 +2604,12 @@ export function TechPackDocument({
                 // версий, от которой релизная печать и существует. Непроценённая в релизе строка
                 // честно печатает прочерк.
                 const price = resolveBomPrice(
-                  { unitPrice: dec(b.unitPrice), currency: b.currency ?? '', unit: b.unit ?? '' },
+                  {
+                    section: b.section ?? '',
+                    unitPrice: dec(b.unitPrice),
+                    currency: b.currency ?? '',
+                    unit: b.unit ?? '',
+                  },
                   printScope.revision.source === 'release'
                     ? undefined
                     : materialById.get(wireInt(b.materialId)),

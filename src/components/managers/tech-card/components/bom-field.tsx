@@ -923,8 +923,11 @@ export function BomField({
   // Привязать артикул к УЖЕ существующей строке (дверь `link article`).
   const linkLine = (index: number, m: common_Material) => {
     setValue(`bomItems.${index}.materialId`, wireInt(m.id), { shouldDirty: true });
-    Object.entries(materialLineFields(m)).forEach(([field, val]) => {
-      if (!val) return;
+    const section = getValues(`bomItems.${index}.section`) || m.section || emptyBomItem.section;
+    Object.entries(materialLineFields(m, section)).forEach(([field, val]) => {
+      // Price and currency are one catalogue snapshot. A package thread with no length is
+      // deliberately unpriced, and relinking must not leave the previous article's price behind.
+      if (!val && field !== 'unitPrice' && field !== 'currency') return;
       setValue(`bomItems.${index}.${field}` as never, val as never, { shouldDirty: true });
     });
     fillAutoFields(getValues as never, setValue as never, index, m);

@@ -7,6 +7,7 @@ import type { HeaderWarning, HeaderWarningAction } from 'ui';
 import { flattenFieldErrors } from 'utils/field-errors';
 import { slotNormRows } from './bom-norm';
 import { catalogPrice, resolveBomPrice } from './bom-price';
+import { normalizeMaterialUnit } from './material-unit';
 import { UNSET_PURPOSE, isRollGoodsSection } from './bom-purpose';
 import { looksLikeArticleName, normalizeRole } from './bom-roles';
 import { markersForLine } from './nesting/marker-io';
@@ -137,10 +138,13 @@ export function useBomWarnings({
           href: `${ROUTES.materials}?tab=catalog&material=${materialId}`,
         });
       } else if (price.source === 'catalog' || price.drift) {
-        const catalog = catalogPrice(material);
+        const catalog = catalogPrice(material, line);
         const lineUnit = line.unit?.trim() ?? '';
         // Единица — часть цены: «95 / kg» в строку «за метр» не переносится молча.
-        const unitClash = !!lineUnit && !!catalog.unit && lineUnit !== catalog.unit;
+        const unitClash =
+          !!lineUnit &&
+          !!catalog.unit &&
+          normalizeMaterialUnit(lineUnit) !== normalizeMaterialUnit(catalog.unit);
         const take =
           canWriteCosting && canEdit && !frozen
             ? unitClash

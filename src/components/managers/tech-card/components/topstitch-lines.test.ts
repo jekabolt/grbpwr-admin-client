@@ -5,11 +5,28 @@ import {
   clearTopstitchLinesForKind,
   createTopstitchLineFromPick,
   dropTopstitchMeasured,
+  isTopstitchThreadLine,
   topstitchPickOverlaps,
   unlinkTopstitchBomLine,
   type TopstitchLine,
   type TopstitchOperation,
 } from './topstitch-lines';
+
+describe('topstitch thread eligibility', () => {
+  const line = {
+    section: 'TECH_CARD_BOM_SECTION_THREAD',
+    kind: 'TECH_CARD_BOM_KIND_TOPSTITCH_THREAD',
+  } as const;
+
+  it.each(['m', 'м', 'meter', 'meters', 'metre', 'metres', 'MATERIAL_UNIT_M'])(
+    'accepts the metre spelling %s',
+    (unit) => expect(isTopstitchThreadLine({ ...line, unit })).toBe(true),
+  );
+
+  it('still refuses a non-metre slot unit', () => {
+    expect(isTopstitchThreadLine({ ...line, unit: 'cone' })).toBe(false);
+  });
+});
 
 function rectangle(key: string, width: number, height: number): PieceGeom {
   const ring: Pt2[] = [

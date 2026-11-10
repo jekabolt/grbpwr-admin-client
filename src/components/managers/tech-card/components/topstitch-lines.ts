@@ -11,6 +11,7 @@ import {
 import { ulid } from 'utils/ulid';
 
 import { runsOfSide } from './assembly-seams/seam-actions';
+import { normalizeMaterialUnit } from './material-unit';
 import type { TechCardFormData } from './schema';
 
 export type TopstitchOperation = NonNullable<TechCardFormData['operations']>[number];
@@ -24,7 +25,7 @@ export function isTopstitchThreadLine(line: Partial<TopstitchBomLine>): boolean 
   return (
     line.section === 'TECH_CARD_BOM_SECTION_THREAD' &&
     line.kind === 'TECH_CARD_BOM_KIND_TOPSTITCH_THREAD' &&
-    line.unit?.trim().toLowerCase() === 'm'
+    normalizeMaterialUnit(line.unit) === 'm'
   );
 }
 
