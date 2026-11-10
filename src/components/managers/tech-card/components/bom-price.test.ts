@@ -1,7 +1,7 @@
 import type { common_Material } from 'api/proto-http/admin';
 import { describe, expect, it } from 'vitest';
 
-import { catalogPrice, resolveBomPrice } from './bom-price';
+import { catalogPrice, resolveBomPrice, threadConeLengthMissing } from './bom-price';
 
 const material = (length?: string): common_Material =>
   ({
@@ -58,5 +58,29 @@ describe('thread BOM catalogue price', () => {
       currency: 'EUR',
       unit: 'm',
     });
+  });
+});
+
+describe('thread cone length missing', () => {
+  it('flags a metre thread line on a cone article with no cone length', () => {
+    expect(threadConeLengthMissing(line, material())).toBe(true);
+  });
+  it('is quiet once the cone length is known', () => {
+    expect(threadConeLengthMissing(line, material('5000'))).toBe(false);
+  });
+  it('is quiet when the line has its own price', () => {
+    expect(threadConeLengthMissing({ ...line, unitPrice: '0.0010' }, material())).toBe(false);
+  });
+  it('is quiet for a kg article and for non-thread lines', () => {
+    expect(
+      threadConeLengthMissing(line, {
+        ...material(),
+        unit: 'kg',
+        unitCode: 'MATERIAL_UNIT_KG',
+      } as common_Material),
+    ).toBe(false);
+    expect(
+      threadConeLengthMissing({ ...line, section: 'TECH_CARD_BOM_SECTION_TRIM' }, material()),
+    ).toBe(false);
   });
 });

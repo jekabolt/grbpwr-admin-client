@@ -363,6 +363,10 @@ export class Session {
    * DXF into every size of the table (`expandRul`) and reads THAT drawing; the run is a DXF run.
    */
   private rul: { name: string; bytes: number; sha256: string } | null = null;
+  /** The DXF of the pair holds its sizes itself: the table was dropped but not applied. */
+  private rulSkipped = false;
+  /** The operator's "base size only": the table is kept as a file but never applied. */
+  private baseOnly = false;
   // scale
   private decision: ScaleDecision | null = null;
   private fast: DxfFastPath | null = null;
@@ -665,16 +669,28 @@ export class Session {
           return doc;
         },
         dxf: async (f, o, p) => {
-          const graded = this.rul ? await this.gradeByRul(f) : null;
+          const graded = !this.rul
+            ? null
+            : this.baseOnly
+              ? {
+                  bytes: f.bytes,
+                  sizes: [],
+                  blocks: [],
+                  warnings: [],
+                  skipped: `${this.rul.name} not applied: base size only`,
+                }
+              : await this.gradeByRul(f);
           const read = await readDxf(
-            graded
+            graded && !graded.skipped
               ? { ...f, bytes: graded.bytes, generatedFusing: info.generatedFusing }
               : { ...f, generatedFusing: info.generatedFusing },
             o,
             p,
           );
           const seg = segmentDxf(read);
-          if (graded) {
+          this.rulSkipped = !!graded?.skipped;
+          if (graded?.skipped) read.doc.warnings.unshift(graded.skipped);
+          else if (graded) {
             const off = rulSizesMismatch(graded.sizes, seg, graded.blocks);
             if (off)
               throw new ImportError(
@@ -724,10 +740,14 @@ export class Session {
    * CAD export draws it (`expandRul`). A malformed table, a rule the table lacks, a rule text at no
    * point… refuse the whole run (`rul-invalid`): never a partial grade.
    */
-  private async gradeByRul(f: {
-    name: string;
+  private async gradeByRul(f: { name: string; bytes: ArrayBuffer }): Promise<{
     bytes: ArrayBuffer;
-  }): Promise<{ bytes: ArrayBuffer; sizes: string[]; blocks: string[]; warnings: string[] }> {
+    sizes: string[];
+    blocks: string[];
+    warnings: string[];
+    /** Set when the DXF holds its sizes itself: the table is not applied, and this says so. */
+    skipped?: string;
+  }> {
     const meta = this.rul!;
     const blob = this.blobs.get('rul');
     if (!blob) throw new ImportError('no-session', 'the session lost its files — read them again');
@@ -746,6 +766,15 @@ export class Session {
         ],
       };
     } catch (e) {
+      // the DXF already draws every size: read it as it is, the table adds nothing
+      if (isUnsupportedFormat(e) && e.code === 'rul-dxf-sized')
+        return {
+          bytes: f.bytes,
+          sizes: [],
+          blocks: [],
+          warnings: [],
+          skipped: `${meta.name} not applied: ${e.detail ?? 'the DXF already holds its sizes'}`,
+        };
       if (isUnsupportedFormat(e))
         throw new ImportError('unsupported-format', `${meta.name} + ${f.name}: ${e.message}`);
       throw e;
@@ -799,6 +828,7 @@ export class Session {
     ctx: StageCtx,
   ): Promise<StageIO['extract']['out']> {
     const opts = { ...DEFAULT_OPTS, ...input.opts };
+    this.baseOnly = !!input.opts.baseOnly;
     const docs = await this.readAll(ctx, opts);
     this.docs = docs;
     this.docsFactor = 1;
@@ -949,7 +979,7 @@ export class Session {
               const r2: DxfRead = { doc: applyScale(read.doc, d), meta: read.meta };
               return { read: r2, seg: segmentDxf(r2) };
             })();
-      this.fast = dxfFastPath(scaled.read, scaled.seg, !!this.rul);
+      this.fast = dxfFastPath(scaled.read, scaled.seg, !!this.rul && !this.rulSkipped);
       if (this.dxfSet) this.fast = attributeSizes(this.fast, this.setSizes);
       ctx.progress(1, 1);
     } else {
@@ -2041,7 +2071,7 @@ export class Session {
           pages: f.pages,
         })),
         // RUL: the grade rule table the DXF was graded by is a source file of the run too
-        ...(this.rul
+        ...(this.rul && !this.rulSkipped
           ? [
               {
                 name: this.rul.name,

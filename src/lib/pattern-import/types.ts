@@ -259,6 +259,8 @@ export type ExtractOpts = {
    * files of a run; a caller without one gets a budget per file.
    */
   budget?: WorkBudgetLike;
+  /** A .rul dropped with the DXF is not applied: the DXF is read as drawn (its base size). */
+  baseOnly?: boolean;
 };
 
 /** Units of adapter work (points emitted, PDF operators, SVG elements); throws past the limit. */
@@ -3403,7 +3405,7 @@ export type ImportSession = {
 
 /** Transitions the wizard may take; the state machine is in 08-CONTRACT §6. */
 export type WizardEvent =
-  | { type: 'files'; files: File[] }
+  | { type: 'files'; files: File[]; baseOnly?: boolean }
   /** A8: the operator's mask edits (undo a kind, accept a suggestion, re-include a page). */
   | { type: 'clean'; edits: PageMaskEdit[] }
   /** A9: ask the AI the page roles again (fresh answers for the pages as they are now). */

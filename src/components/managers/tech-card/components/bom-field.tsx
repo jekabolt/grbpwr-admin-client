@@ -30,7 +30,8 @@ import {
   useWatch,
   type FieldErrors,
 } from 'react-hook-form';
-import { useSearchParams } from 'react-router-dom';
+import { ROUTES } from 'constants/routes';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   AddDoor,
   Button,
@@ -66,7 +67,7 @@ import {
   isRollGoodsSection,
   purposeEditorOptions,
 } from './bom-purpose';
-import { resolveBomPrice } from './bom-price';
+import { resolveBomPrice, threadConeLengthMissing } from './bom-price';
 import { ResidueStrip, type ResidueErrorRow, type ResidueRow } from './residue-strip';
 import { defaultRoleFor, normalizeRole, roleCollision, roleSuggestions } from './bom-roles';
 import {
@@ -1111,9 +1112,18 @@ export function BomField({
                 <span className='min-w-0 truncate text-labelColor' title={m?.name || undefined}>
                   {m?.name?.trim() || 'missing article'}
                 </span>
-                {canReadCosting && (
-                  <span className='shrink-0 tabular-nums'>{price.label || 'no price'}</span>
-                )}
+                {canReadCosting &&
+                  (threadConeLengthMissing(l, m) ? (
+                    <Link
+                      to={`${ROUTES.materials}?tab=catalog&material=${materialId}`}
+                      className='shrink-0 text-error underline'
+                      data-bom-no-cone-length=''
+                    >
+                      no cone length
+                    </Link>
+                  ) : (
+                    <span className='shrink-0 tabular-nums'>{price.label || 'no price'}</span>
+                  ))}
               </>
             )}
           </span>

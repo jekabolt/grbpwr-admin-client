@@ -116,7 +116,6 @@ export function LabelFoldEditor({
   const sewn = labelAssembly(lines, stitches, axisMm);
   const built = ribbons && ribbons.length > 0 ? ribbons : null;
   const storedPages = clamp(Math.round(pages || 1), 1, 12);
-  const builtPages = built ? clamp(built.length, 1, 12) : 0;
   const safePages = built ? built.length : storedPages;
   const [page, setPage] = useState(0);
   const [foldText, setFoldText] = useState(formatFoldLines(lines, axisMm));
@@ -132,11 +131,7 @@ export function LabelFoldEditor({
   const foldedClipId = `label-folded-${useId().replace(/:/g, '')}`;
 
   useEffect(() => setPage((current) => Math.min(current, safePages - 1)), [safePages]);
-  // Built ribbons own the page count: the row follows them once, then the values agree.
-  useEffect(() => {
-    if (builtPages > 0 && !disabled && storedPages !== builtPages) onChange({ pages: builtPages });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [builtPages, storedPages, disabled]);
+  // Built ribbons own the page count on screen only: opening a card never writes the row.
   useEffect(() => {
     if (document.activeElement !== pagesInput.current) setPagesText(String(safePages));
   }, [safePages]);

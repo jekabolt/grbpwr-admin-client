@@ -342,16 +342,10 @@ export function SeamPickerBody({
 
   const pieces = geo?.pieces;
   const activeFolds = activeFoldRows(ops, index, foldRows);
-  // A stack of identical plies runs one layer long (the model's own count).
-  const plainSideLen = (ids: readonly TargetId[] | readonly SidePart[]) =>
-    targetsLen(ids, geoms, (piece, k) => polyLen(pieces?.get(piece)?.inner[k] ?? []));
-  const sideLen = (
-    ids: readonly TargetId[] | readonly SidePart[],
-    otherIds: readonly TargetId[] | readonly SidePart[],
-  ) =>
+  // What was picked, as it lies at this step: a folded stretch counts once, never the other side's.
+  const sideLen = (ids: readonly TargetId[] | readonly SidePart[]) =>
     targetsLen(ids, geoms, (piece, k) => polyLen(pieces?.get(piece)?.inner[k] ?? []), {
       activeFolds,
-      otherSideMm: otherIds.length ? plainSideLen(otherIds) : null,
       grainDeg: geo?.grainDeg,
     });
   const pickParts = (side: Side) => sideParts(sel[side], sel.spans[side]);
@@ -847,20 +841,16 @@ export function SeamPickerBody({
   const edgeToEdge = (s: { a: readonly TargetId[]; b: readonly TargetId[] }) =>
     s.a.length > 0 && s.b.length > 0 && [...s.a, ...s.b].every((id) => !parseInner(id));
   // A strip's side reads through its fit: elastic is short of its seam on purpose.
-  const fitted = (parts: readonly SidePart[], other: readonly SidePart[]) =>
+  const fitted = (parts: readonly SidePart[]) =>
     fittedSideMm(
-      sideLen(parts, other),
+      sideLen(parts),
       [...new Set(parts.map((part) => pieceOfTarget(part.target)))],
       geoms,
     );
   const delta = pair
-    ? deltaMm(fitted(pickParts('a'), pickParts('b')), fitted(pickParts('b'), pickParts('a')), ease)
+    ? deltaMm(fitted(pickParts('a')), fitted(pickParts('b')), ease)
     : shownSeam && edgeToEdge(shownSeam.sides)
-      ? deltaMm(
-          fitted(shownSeam.parts.a, shownSeam.parts.b),
-          fitted(shownSeam.parts.b, shownSeam.parts.a),
-          ease,
-        )
+      ? deltaMm(fitted(shownSeam.parts.a), fitted(shownSeam.parts.b), ease)
       : null;
   const empty =
     !pair &&
@@ -1390,7 +1380,7 @@ export function SeamPickerBody({
                 data-seam-side='1'
               >
                 {sel.a.length
-                  ? `${topstitchMode ? 'line' : '1'} ${sideName(sel.a)} ${mmText(sideLen(pickParts('a'), pickParts('b')))}`
+                  ? `${topstitchMode ? 'line' : '1'} ${sideName(sel.a)} ${mmText(sideLen(pickParts('a')))}`
                   : topstitchMode
                     ? 'line'
                     : '1'}
@@ -1403,9 +1393,7 @@ export function SeamPickerBody({
                   disabled={!sel.b.length}
                   data-seam-side='2'
                 >
-                  {sel.b.length
-                    ? `2 ${sideName(sel.b)} ${mmText(sideLen(pickParts('b'), pickParts('a')))}`
-                    : '2'}
+                  {sel.b.length ? `2 ${sideName(sel.b)} ${mmText(sideLen(pickParts('b')))}` : '2'}
                 </Chip>
               )}
             </ChipRow>

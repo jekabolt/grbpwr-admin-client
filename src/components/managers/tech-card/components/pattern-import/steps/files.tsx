@@ -4,7 +4,7 @@
 // extension's guess. Reading IS the stage's primary ("read 2 files", the wizard footer). After
 // reading the pages panel shows only the pages that ask (a doubtful role) — the rest is a count.
 import { useRef, useState } from 'react';
-import { refusalMessage } from 'lib/pattern-import/adapters/sniff/errors';
+import { gradeRefusalDetail, refusalMessage } from 'lib/pattern-import/adapters/sniff/errors';
 import { refusalForName } from 'lib/pattern-import/adapters/sniff/native';
 import type { PageClass } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
@@ -206,6 +206,12 @@ export function FilesStep({
                             <Pill tone='warn' title={refusalMessage('rul-alone')}>
                               add its DXF
                             </Pill>
+                          ) : extracted.warnings.some((w) =>
+                              w.includes(`${f.name} not applied`),
+                            ) ? (
+                            <Pill tone='warn'>not applied</Pill>
+                          ) : gradeRefusalDetail(session.error ?? '') != null ? (
+                            <Pill tone='warn'>grade rules</Pill>
                           ) : (
                             'grade rules'
                           )

@@ -17,6 +17,8 @@ export type ButtonholeOperation = {
     buttonholeOrientation?: string;
   };
   placementLayout?: { count?: number };
+  /** Garment labels the step attaches: one the card draws as its own piece takes no mark. */
+  labelKeys?: readonly string[];
 };
 
 export type ButtonholePictureGlyph = {
@@ -112,6 +114,8 @@ export type PlacementMarkSelection = {
   /** Marks this step takes out of play beyond the ones it draws. */
   spent?: readonly PieceMark[];
   issue?: 'count-exceeds-marks' | 'marks-outside-zone';
+  /** The label is its own piece, placed by its pose or seam: no mark, nothing else to draw. */
+  drawnLabel?: true;
 };
 
 export type PlacementMarkStep = {
@@ -212,6 +216,13 @@ export function selectPlacementMarks(
 ): PlacementMarkSelection | null {
   const kind = placementMarkKind(op);
   if (!op || !kind) return null;
+  // A label piece among the hosts is drawn where its pose or seam puts it. A pocket outline on the
+  // panel is not its place: a glyph there would draw the label a second time.
+  const labelPiece =
+    kind === 'label'
+      ? hosts.find((host) => host.geom.garmentLabel && op.labelKeys?.includes(host.key))
+      : undefined;
+  if (labelPiece) return { host: labelPiece, kind, marks: [], exact: true, drawnLabel: true };
   const candidates = hosts.flatMap((host) => {
     const available = (host.geom.marks ?? []).filter((mark) => !used.has(mark.id));
     const exact = exactMarks(kind, available);
