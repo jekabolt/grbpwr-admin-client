@@ -655,6 +655,122 @@ function sectionC(t: RulTable) {
     cloTable === '',
     cloTable.slice(0, 160),
   );
+  // CLO names the DXF's table after the export FILE: a renamed pair is still one export
+  const cloRul = SPEC_RUL.replace('AUTHOR: GERBER TECHNOLOGY', 'AUTHOR: CLO Virtual Fashion Inc.');
+  const renamed = refusal(() =>
+    expandRul({
+      dxf: enc(baseDxf().replace('Grade Rule Table: B9000', 'Grade Rule Table: shirt_final')),
+      dxfName: 'renamed (1).dxf',
+      rul: parseRul(enc(cloRul.replace('GRADE RULE TABLE: B9000', 'GRADE RULE TABLE: Sizes'))),
+      rulName: 'renamed (1).rul',
+    }),
+  );
+  check('C', 'accepted: a renamed CLO pair (table = old file name)', renamed === '', renamed);
+  // Lines that END at one point, each with its own rule there (CLO: a line, then its texts).
+  // #4 is #2 within a thousandth of a mm (CLO derives a rule per line end); #3 is another row.
+  const L8 = (x1: number, y1: number, x2: number, y2: number, r1: string, r2: string) =>
+    `  0\r\nLINE\r\n  8\r\n8\r\n 10\r\n${x1}\r\n 20\r\n${y1}\r\n 11\r\n${x2}\r\n 21\r\n${y2}\r\n` +
+    T('8', x1, y1, r1) +
+    T('8', x2, y2, r2);
+  const rul4 = parseRul(
+    enc(
+      SPEC_RUL.replace(
+        'END',
+        'RULE: DELTA 4\r\n7.0004, 0.00 0.00, 0.00 -7.0004, 0.00 -14.0004, 0.00\r\n-20.0004, 0.00 -25.98, 0.00 -31.98, 0.00 -37.98, 0.00\r\nEND',
+      ),
+    ),
+    'B9000.rul',
+  );
+  const lines8 = (text: string, block: string) =>
+    pieceBlocks(buildAst(loadDxf(enc(text)).tok.tags))
+      .find((p) => p.block.name === block)!
+      .entities.filter((m) => m.kind === 'chain' && m.layer === '8')
+      .map((m) => m.slots.map((s) => ({ x: s.x, y: s.y })));
+  const fan = (a: string, b: string, c: string) =>
+    baseDxf({
+      extra:
+        L8(100, 100, 0, 300, a, '# 2') +
+        L8(100, 100, 100, 300, b, '# 2') +
+        L8(100, 100, 200, 300, c, '# 3'),
+      drill: '',
+    });
+  let fanErr = '';
+  let apex: { x: number; y: number }[] = [];
+  try {
+    const ex = expandRul({
+      dxf: enc(fan('# 2', '# 3', '# 4')),
+      dxfName: 'fan.dxf',
+      rul: rul4,
+      rulName: 'B9000.rul',
+    });
+    apex = lines8(ex.text, 'FRONT_34').map((l) => l[0]);
+  } catch (e) {
+    fanErr = (e as Error).message;
+  }
+  check(
+    'C',
+    'three lines end at one point with rules #2 / #3 / #4: each line takes its own',
+    apex.length === 3 &&
+      near(apex[0], 107, 100) &&
+      near(apex[1], 97, 100) &&
+      near(apex[2], 107.0004, 100),
+    fanErr || JSON.stringify(apex),
+  );
+  // the same three rules at ONE vertex of one line: #2 and #4 are one grade, #3 is not
+  const oneLine = (r: string) =>
+    refusal(() =>
+      expandRul({
+        dxf: enc(
+          baseDxf({ extra: L8(100, 100, 100, 300, '# 2', '# 2') + T('8', 100, 100, r), drill: '' })
+            // the extra text follows the far end's: gather all three after the line, CLO-like
+            .replace(
+              T('8', 100, 300, '# 2') + T('8', 100, 100, r),
+              T('8', 100, 100, r) + T('8', 100, 300, '# 2'),
+            ),
+        ),
+        dxfName: 'f.dxf',
+        rul: rul4,
+        rulName: 'B9000.rul',
+      }),
+    );
+  check(
+    'C',
+    'accepted: two rules at one point that differ by 0.0004 mm',
+    oneLine('# 4') === '',
+    oneLine('# 4'),
+  );
+  check(
+    'C',
+    'refused: two rules at one point that differ by mm',
+    /sit at one point/.test(oneLine('# 3')),
+    oneLine('# 3'),
+  );
+  // texts gathered away from their lines own nothing: the same fan is refused, not guessed
+  const gathered = refusal(() =>
+    expandRul({
+      dxf: enc(
+        baseDxf({
+          extra:
+            '  0\r\nLINE\r\n  8\r\n8\r\n 10\r\n100\r\n 20\r\n100\r\n 11\r\n0\r\n 21\r\n300\r\n' +
+            '  0\r\nLINE\r\n  8\r\n8\r\n 10\r\n100\r\n 20\r\n100\r\n 11\r\n200\r\n 21\r\n300\r\n' +
+            T('8', 0, 300, '# 2') +
+            T('8', 100, 100, '# 2') +
+            T('8', 100, 100, '# 3') +
+            T('8', 200, 300, '# 3'),
+          drill: '',
+        }),
+      ),
+      dxfName: 'f.dxf',
+      rul: rul4,
+      rulName: 'B9000.rul',
+    }),
+  );
+  check(
+    'C',
+    'refused: rules #2 / #3 at one point, texts not written after their lines',
+    /sit at one point/.test(gathered),
+    gathered.slice(0, 160),
+  );
   // a DXF that already holds several sizes
   const two = baseDxf()
     .replace(
@@ -975,8 +1091,21 @@ async function sectionE() {
     ['CLO', 'W_SS_Graded.dxf', 'W_SS_Graded.rul', 6],
     ['Richpeace (ENGLISH)', 'S350.dxf', 'S350.rul', 9],
     ['Grafis (repeated sample breakpoint)', 'neay.dxf', 'neay.rul', 14],
+    // owner's CLO exports; the slim shirt's back has three lines ending at one point, a rule each
+    ['CLO slim shirt', 'slim_shirt_woman_allsizes.dxf', 'slim_shirt_woman_allsizes.rul', 5],
+    ['CLO men shirt', 'all_sizes_men_shirt.dxf', 'all_sizes_men_shirt.rul', 5],
+    [
+      'CLO men shirt pockets',
+      'all_sizes_pockets_men_shirt.dxf',
+      'all_sizes_pockets_men_shirt.rul',
+      5,
+    ],
   ];
   for (const [who, d, r, n] of cases) {
+    if (!existsSync(resolve(dir, d)) || !existsSync(resolve(dir, r))) {
+      console.log(`skip  E · ${who}: ${d} / ${r} not present`);
+      continue;
+    }
     const go = async () => {
       const t = parseRul(ab(resolve(dir, r)), r);
       const ex = expandRul({ dxf: ab(resolve(dir, d)), dxfName: d, rul: t, rulName: r });
@@ -1042,6 +1171,18 @@ async function sectionE() {
         `${who}: cut areas grow with the size (sign / units sanity)`,
         tot > 0 && mono === tot,
         `${mono}/${tot} pieces monotone${odd.length ? ` · ${odd.join(' | ')}` : ''}`,
+      );
+      // and the pair goes through the session the wizard runs, to the card's sizes
+      const s = new Session(1, [
+        { name: d, bytes: ab(resolve(dir, d)) },
+        { name: r, bytes: ab(resolve(dir, r)) },
+      ]);
+      const { ex: sx, sz } = await toSizes(s, ex.sizes);
+      check(
+        'E',
+        `${who}: the pair imports as ${n} sizes`,
+        sx.presegmented === true && sz.map.entries.filter((e) => e.card).length === n,
+        sz.map.entries.map((e) => `${e.source.label}→${e.card?.token ?? '—'}`).join(' '),
       );
     } catch (e) {
       check(
