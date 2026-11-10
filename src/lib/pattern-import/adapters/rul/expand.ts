@@ -245,7 +245,7 @@ function gradePiece(
   markMax: number,
   label: string,
   sameRow: (a: number, b: number) => boolean,
-  moveKey: (g: Grade) => string,
+  sameMove: (a: Grade, b: Grade) => boolean,
 ): PieceGrades {
   const ents = piece.entities;
   // AAMA turn / curve POINTs (layers 2 / 3) describe the chain immediately before them. At an
@@ -265,17 +265,46 @@ function gradePiece(
   // `# -1` is CLO's "no rule here" (a curve point); every other id is a rule the table must define
   const real = (r: number) => r !== -1;
   // 1 · rule texts → bindings by place
-  const anyLayer = new PointIndex<{ rule: number; layer: string; e: number; x: number; y: number }>(
-    eps,
-  );
+  const anyLayer = new PointIndex<{
+    rule: number;
+    layer: string;
+    e: number;
+    owner: number;
+    x: number;
+    y: number;
+  }>(eps);
   const bindings: { rule: number; layer: string; x: number; y: number; used: boolean }[] = [];
+  // AAMA writers put an entity's rule texts right after it (CLO: POLYLINE, its `# n` texts in
+  // vertex order, its turn POINTs; a notch POINT, its text). A text therefore belongs to the line or
+  // point before it when that one has a coordinate at the text's place — which settles the case of
+  // several lines that END at one point and each carry their own rule there (a pleat fan, darts
+  // from one apex): every line is graded by its own text. The order is trusted only when the whole
+  // block is written that way — every rule text lies on the entity before it; in any other block
+  // (texts gathered at the end, written before their line) no text has an owner and all bind by
+  // place alone.
+  let before = -1;
+  let ownedAll = true;
   ents.forEach((m, e) => {
+    // a turn / curve marker (layers 2 / 3) describes its line; it never carries a text of its own
+    if (m.kind === 'chain' || (m.kind === 'point' && m.layer !== '2' && m.layer !== '3'))
+      before = e;
     if (m.kind !== 'rule' || !m.slots.length) return;
     const s = m.slots[0];
+    const owner =
+      before >= 0 &&
+      ents[before].slots.some((c) => Math.abs(c.x - s.x) <= eps && Math.abs(c.y - s.y) <= eps)
+        ? before
+        : -1;
+    if (owner < 0) ownedAll = false;
     bindings.push({ rule: m.rule!, layer: m.layer, x: s.x, y: s.y, used: false });
-    anyLayer.add(s.x, s.y, { rule: m.rule!, layer: m.layer, e, x: s.x, y: s.y });
+    anyLayer.add(s.x, s.y, { rule: m.rule!, layer: m.layer, e, owner, x: s.x, y: s.y });
   });
-  const ruleAt = (m: ModelEntity, x: number, y: number): number | null | undefined => {
+  const ruleAt = (
+    m: ModelEntity,
+    self: number,
+    x: number,
+    y: number,
+  ): number | null | undefined => {
     // undefined = no text here; null = `# -1` (explicitly none); number = the rule.
     // The text of the entity's own layer wins, then its partner line's (a quality-validation copy
     // follows the line it copies), then the boundary, the sew line, the internal lines, any other.
@@ -294,14 +323,23 @@ function gradePiece(
       return g >= 0 ? 10 + g : 100;
     };
     const best = Math.min(...here.map((b) => rank(b.layer)));
-    const pick = here.filter((b) => rank(b.layer) === best);
+    const ranked = here.filter((b) => rank(b.layer) === best);
+    // the entity's own texts (a turn / curve POINT: those of the chain it marks) say it exactly
+    const mine = ownedAll ? ranked.filter((b) => b.owner === self) : [];
+    const marked = pointOwner.get(self);
+    const own =
+      mine.length || marked === undefined || !ownedAll
+        ? mine
+        : ranked.filter((b) => b.owner === marked);
+    const pick = own.length ? own : ranked;
     const found = [...new Set(pick.map((b) => b.rule).filter(real))];
     if (found.length && pick.some((b) => !real(b.rule)))
       throw refuse(
         `${label}: "# -1" (no rule) and rule #${found[0]} sit at one point (${x.toFixed(3)}, ${y.toFixed(3)}) for a point on layer ${m.layer} — whether it is graded is not defined`,
       );
     // two lines that meet at a point may each carry their own rule there (Richpeace writes one
-    // text per line end): harmless when the table moves both alike, undefined otherwise
+    // text per line end): harmless when the table moves both alike (to within "one place": CLO
+    // derives a rule per line end, and they differ in the 4th decimal), undefined otherwise
     if (found.length > 1 && found.every((r) => sameRow(r, found[0])))
       return mark(pick, x, y, found[0]);
     if (found.length > 1)
@@ -337,7 +375,7 @@ function gradePiece(
   ents.forEach((m, e) => {
     if (!gradable(m)) return;
     m.slots.forEach((s, k) => {
-      const r = ruleAt(m, s.x, s.y);
+      const r = ruleAt(m, e, s.x, s.y);
       sourceRule[e][k] = r;
       if (typeof r === 'number') {
         out.of[e][k] = [{ rule: r, w: 1 }];
@@ -405,8 +443,7 @@ function gradePiece(
     if (!hits.length) return null;
     const best = Math.min(...hits.map((h) => h.rank));
     const top = hits.filter((h) => h.rank === best);
-    const k0 = moveKey(top[0].g);
-    if (top.some((h) => moveKey(h.g) !== k0))
+    if (top.some((h) => !sameMove(h.g, top[0].g)))
       throw refuse(
         `${label}: a point on layer ${m.layer} at (${s.x.toFixed(3)}, ${s.y.toFixed(3)}) has no rule and lies on graded lines (layers ${[...new Set(top.map((h) => h.layer))].join(', ')}) that move it differently — which one it follows is not defined`,
       );
@@ -473,7 +510,7 @@ function gradePiece(
     if (box.maxX - box.minX > 2 * markMax || box.maxY - box.minY > 2 * markMax) continue;
     const c = mid(box);
     const m0 = ents[members[idx[0]].e];
-    const r = ruleAt(m0, c.x, c.y);
+    const r = ruleAt(m0, members[idx[0]].e, c.x, c.y);
     let g: Grade | null = null;
     if (typeof r === 'number') {
       g = [{ rule: r, w: 1 }];
@@ -566,7 +603,9 @@ function gradeAxes(p: PieceBlock, label: string): { cos: number; sin: number } {
   }
   if (!angles.length) return { cos: 1, sin: 0 };
   const t = angles[0];
-  if (angles.some((a) => Math.abs(Math.atan2(Math.sin(a - t), Math.cos(a - t))) > 1e-6))
+  // parallel to within what coordinates written in single precision can say (a 100 mm line at
+  // x ≈ 2000 mm is only known to ~2e-6 rad); 1e-4 rad turns a 100 mm delta by 0.01 mm — one place
+  if (angles.some((a) => Math.abs(Math.atan2(Math.sin(a - t), Math.cos(a - t))) > 1e-4))
     throw refuse(
       `${label}: its grade reference lines (layer 5) point different ways — the grade axes are not defined`,
     );
@@ -688,12 +727,12 @@ export function expandRul(input: ExpandInput): RulExpansion {
   // codepages, and CLO writes "Size Group 1" in the RUL but "Size_Group_1" in the DXF
   const ascii = (v: string) => v.replace(/[^0-9A-Za-z]+/g, '').toUpperCase();
   const key = (v: string) => ascii(v) || v.trim().toUpperCase();
-  const fileStem = (name: string) => (name.split(/[\\/]/).pop() ?? name).replace(/\.[^.]*$/, '');
-  const cloFilenameTable =
-    /CLO/i.test(rul.author ?? '') &&
-    (key(declaredTable ?? '') === key(fileStem(input.dxfName)) ||
-      key(declaredTable ?? '') === key(fileStem(input.rulName)));
-  if (declaredTable && key(declaredTable) !== key(rul.name) && !cloFilenameTable)
+  // CLO writes the EXPORT FILE's name as the DXF's grade rule table and the size group's name in
+  // the RUL: the two never match by design, and the DXF's stops matching its own file the moment
+  // the operator renames the pair. For a CLO table the name says nothing about the pairing; the
+  // sample size, the size list and every used rule being defined (all checked here) do.
+  const cloTable = /CLO/i.test(rul.author ?? '');
+  if (declaredTable && key(declaredTable) !== key(rul.name) && !cloTable)
     throw refuse(
       `${input.dxfName} names grade rule table "${declaredTable}", but ${input.rulName} is "${rul.name}" — they are not one export`,
     );
@@ -705,6 +744,24 @@ export function expandRul(input: ExpandInput): RulExpansion {
 
   // grades, piece by piece (all or nothing)
   const eps = RUL_SAME_PLACE_MM / units.mmPerUnit;
+  // Two grades that land a point within "one place" of each other in every size are one grade:
+  // which of them is taken cannot be seen in the result (RUL units).
+  const alike = RUL_SAME_PLACE_MM / rul.mmPerUnit;
+  const moveOf = (g: Grade): { dx: number; dy: number }[] | null => {
+    const out: { dx: number; dy: number }[] = [];
+    for (let si = 0; si < rul.sizes.length; si++) {
+      let dx = 0;
+      let dy = 0;
+      for (const t of g) {
+        const d = rul.rules.get(t.rule)?.[si];
+        if (!d) return null;
+        dx += t.w * d.dx;
+        dy += t.w * d.dy;
+      }
+      out.push({ dx, dy });
+    }
+    return out;
+  };
   const grades = pieces.map((p) =>
     gradePiece(
       p,
@@ -714,22 +771,20 @@ export function expandRul(input: ExpandInput): RulExpansion {
       (a, b) => {
         const A = rul.rules.get(a);
         const B = rul.rules.get(b);
-        return !!A && !!B && A.every((d, i) => d.dx === B[i].dx && d.dy === B[i].dy);
+        return (
+          !!A &&
+          !!B &&
+          A.every((d, i) => Math.abs(d.dx - B[i].dx) <= alike && Math.abs(d.dy - B[i].dy) <= alike)
+        );
       },
-      (g) =>
-        rul.sizes
-          .map((_, si) => {
-            let dx = 0;
-            let dy = 0;
-            for (const t of g) {
-              const d = rul.rules.get(t.rule)?.[si];
-              if (!d) return `?${t.rule}`;
-              dx += t.w * d.dx;
-              dy += t.w * d.dy;
-            }
-            return `${dx.toFixed(4)},${dy.toFixed(4)}`;
-          })
-          .join(' '),
+      (a, b) => {
+        const A = moveOf(a);
+        const B = moveOf(b);
+        if (!A || !B) return A === B && a.map((t) => t.rule).join() === b.map((t) => t.rule).join();
+        return A.every(
+          (d, i) => Math.abs(d.dx - B[i].dx) <= alike && Math.abs(d.dy - B[i].dy) <= alike,
+        );
+      },
     ),
   );
   const used = new Set<number>();
