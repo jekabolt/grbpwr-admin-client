@@ -19,6 +19,7 @@
 // ряда (XS, S, XL — законный набор, где центры и не должны лежать на равных шагах), и подвинуть
 // там значит испортить правильный файл ради красивой картинки.
 import { unitFactorCm } from 'lib/nesting/units';
+import { parseSizeToken } from 'lib/pattern-import/sizes/tokens';
 import type { PieceDTO, Unit } from 'lib/nesting/types';
 import { splitPiecesBySize } from './split-pieces';
 
@@ -217,11 +218,11 @@ export function planSizeMerge(
 }
 
 /**
- * Порядок, в котором файлы идут в склейку. Склейка зависит от порядка (первый файл — шаблон,
- * одноимённый блок берётся из первого), а повторная загрузка в карточку узнаёт «тот же файл» только
- * по sha256. Поэтому те же выгрузки, брошенные в другом порядке, давали другие байты и сохраняли
- * базовый лист заново новой версией. Порядок выводится из самих файлов: имя, затем вес — так одна и
- * та же пачка всегда склеивается в одни и те же байты.
+ * Склейка зависит от порядка (первый файл — шаблон, одноимённый блок берётся из первого), а
+ * повторная загрузка в карточку узнаёт «тот же файл» только по sha256. Те же выгрузки, брошенные в
+ * другом порядке, давали другие байты и сохраняли базовый лист заново новой версией. Поэтому
+ * порядок выводится из самих файлов, в два шага: сначала имя и вес (`orderSizeFiles`, до разбора),
+ * затем размерная сетка (`sizeLadderOrder`, когда размеры узнаны).
  */
 export function orderSizeFiles<T extends { name: string; size: number }>(files: readonly T[]): T[] {
   return [...files].sort(
@@ -230,4 +231,33 @@ export function orderSizeFiles<T extends { name: string; size: number }>(files: 
       (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) ||
       a.size - b.size,
   );
+}
+
+/** Место размера в сетке: буквы XXXS…6XL, затем числа по значению; незнакомый — null. */
+function ladderRank(size: string): [number, number] | null {
+  const t = parseSizeToken(size, true);
+  if (!t) return null;
+  return [t.kind === 'letter' ? 0 : 1, t.value];
+}
+
+/**
+ * Порядок файлов по размерной сетке: XS…XL, числа как числа (44 < 46 < 100). Файл встаёт по
+ * своему меньшему узнанному размеру; файлы без узнанного размера — после, в прежнем порядке
+ * (а он уже устойчив: `orderSizeFiles`). Возвращает индексы строк в новом порядке.
+ */
+export function sizeLadderOrder(rows: readonly { sizes: readonly string[] }[]): number[] {
+  const keyOf = (sizes: readonly string[]) =>
+    sizes
+      .map(ladderRank)
+      .filter((r): r is [number, number] => r != null)
+      .sort((a, b) => a[0] - b[0] || a[1] - b[1])[0] ?? null;
+  const keys = rows.map((r) => keyOf(r.sizes));
+  return rows
+    .map((_, i) => i)
+    .sort((a, b) => {
+      const ka = keys[a];
+      const kb = keys[b];
+      if (!ka || !kb) return ka ? -1 : kb ? 1 : a - b;
+      return ka[0] - kb[0] || ka[1] - kb[1] || a - b;
+    });
 }

@@ -12,13 +12,15 @@ import { NestingWorkerClient } from 'lib/nesting/worker/client';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Button, ConfirmationModal, HeaderWarnings, type HeaderWarning, Pill, Text } from 'ui';
 import { MAX_PATTERN_BYTES, formatBytes, patternFileError } from 'utils/pattern';
-import { orderSizeFiles, planSizeMerge, type SizeMergePlan } from './size-merge';
+import { orderSizeFiles, planSizeMerge, sizeLadderOrder, type SizeMergePlan } from './size-merge';
 import { useDictionarySizeTokens } from './use-block-sizes';
 
 /** Сколько листов принимаем за раз: размерный ряд, а не «всю папку». */
 const MAX_SHEETS = 20;
 
 type Built = {
+  /** Исходники в порядке склейки — по размерной сетке. */
+  files: File[];
   file: File;
   url: string;
   result: MergeResult;
@@ -93,13 +95,27 @@ export function MergeSizesModal({
           tolChain: NEST_DEFAULTS.tolChain,
         });
         if (dead) return;
-        const names = picked.map((f) => f.name);
-        const plan = planSizeMerge(parsed.pieces, names, dictTokens, parsed.detectedUnit);
+        // Порядок склейки — по размерной сетке, а не по тому, как бросили: те же выгрузки обязаны
+        // давать те же байты, иначе повторная загрузка сохраняет базовый лист заново.
+        const first = planSizeMerge(
+          parsed.pieces,
+          picked.map((f) => f.name),
+          dictTokens,
+          parsed.detectedUnit,
+        );
+        const perm = sizeLadderOrder(first.rows);
+        const files = perm.map((i) => picked[i]);
+        const newIndex = new Map(perm.map((old, i) => [old, i]));
+        const pieces = parsed.pieces
+          .map((p) => ({ ...p, fileIndex: newIndex.get(p.fileIndex ?? 0) ?? 0 }))
+          .sort((a, b) => a.fileIndex - b.fileIndex);
+        const names = files.map((f) => f.name);
+        const plan = planSizeMerge(pieces, names, dictTokens, parsed.detectedUnit);
         // Читаем БАЙТАМИ: `File.text()` декодировал бы cp1251-выгрузку как UTF-8 и подменил бы
         // кириллические имена блоков ромбиками — теми самыми именами, по которым карточка потом
         // сопоставляет детали кроя.
         const texts = await Promise.all(
-          picked.map(async (f) => decodeDxfBytes(await f.arrayBuffer())),
+          files.map(async (f) => decodeDxfBytes(await f.arrayBuffer())),
         );
         if (dead) return;
         const result = mergeDxfSheets(
@@ -111,6 +127,7 @@ export function MergeSizesModal({
         });
         if (dead) return;
         setBuilt({
+          files,
           file,
           url: URL.createObjectURL(file),
           result,
@@ -240,7 +257,7 @@ export function MergeSizesModal({
           </>
         ) : (
           <div>
-            {picked.map((f, i) => {
+            {(built?.files ?? picked).map((f, i) => {
               const row = built?.plan.rows[i];
               return (
                 <div
