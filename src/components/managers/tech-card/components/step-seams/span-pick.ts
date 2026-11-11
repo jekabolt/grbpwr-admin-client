@@ -43,6 +43,39 @@ export function samePick(x: SidePick, y: SidePick): boolean {
     spansSig(x.spans.b) === spansSig(y.spans.b)
   );
 }
+/**
+ * The side a surface seam's part sits on: the side opposite the one inner line in hand, or null
+ * when the pick is not a surface (no inner line, or one on each side).
+ */
+export function surfacePartSide(
+  sel: Pick<SidePick, 'a' | 'b'>,
+  isInner: (id: string) => boolean,
+): SpanSide | null {
+  const a = sel.a.some(isInner);
+  const b = sel.b.some(isInner);
+  return a === b ? null : a ? 'b' : 'a';
+}
+
+/**
+ * A surface seam lays one piece on a line, by whole edges (owner, Р5, 11.11): the part side drops its
+ * stretches and keeps the edges of one piece — the one just clicked, else the first one in hand.
+ */
+export function surfacePick<T extends SidePick>(
+  sel: T,
+  isInner: (id: string) => boolean,
+  pieceOf: (id: string) => string,
+  clicked?: string,
+): T {
+  const side = surfacePartSide(sel, isInner);
+  if (!side) return sel;
+  const edges = sel[side].filter((id) => !isInner(id));
+  const lead = clicked && edges.includes(clicked) ? clicked : edges[0];
+  const piece = lead ? pieceOf(lead) : null;
+  const kept = sel[side].filter((id) => isInner(id) || pieceOf(id) === piece);
+  if (kept.length === sel[side].length && !Object.keys(sel.spans[side]).length) return sel;
+  return { ...sel, [side]: kept, spans: { ...sel.spans, [side]: {} } };
+}
+
 const TOUCH_MM = 0.5;
 const SNAP_MM = 4;
 const MIN_SPAN_MM = 1;

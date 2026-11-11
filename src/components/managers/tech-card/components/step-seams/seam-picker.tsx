@@ -71,6 +71,8 @@ import {
   labelSideLength,
   sidePartsShareEdge,
   segmentAt,
+  surfacePartSide,
+  surfacePick,
   spanOfLength,
   sideParts,
   snapToBreak,
@@ -687,7 +689,14 @@ export function SeamPickerBody({
       }
       setActiveSeam(null);
       const base = (bindingMode || topstitchMode) && !sel.a.includes(id) ? EMPTY : sel;
-      if (atMm == null || parseInner(id) || !(length > 0)) {
+      // A surface's part is taken by whole edges of one piece (Р5).
+      const surfaced = (next: Sel) =>
+        bindingMode || topstitchMode
+          ? next
+          : surfacePick(next, pickRules.isInner, pickRules.pieceOf, id);
+      const wholeOnly =
+        !bindingMode && !topstitchMode && surfacePartSide(base, pickRules.isInner) === side;
+      if (atMm == null || parseInner(id) || !(length > 0) || wholeOnly) {
         if (topstitchMode && topstitchPickOverlaps(topstitchLines, id, undefined, geoms)) {
           setRefused('already picked');
           return;
@@ -697,7 +706,9 @@ export function SeamPickerBody({
           return;
         }
         setSel(
-          onFolded(pickTarget(base, side, id, pickRules.isInner, pickRules.pieceOf), side, id),
+          surfaced(
+            onFolded(pickTarget(base, side, id, pickRules.isInner, pickRules.pieceOf), side, id),
+          ),
         );
         return;
       }
@@ -711,7 +722,9 @@ export function SeamPickerBody({
         return;
       }
       setSel(
-        onFolded(pickSegment(base, side, id, segment, length, pickRules, breaksOf(id)), side, id),
+        surfaced(
+          onFolded(pickSegment(base, side, id, segment, length, pickRules, breaksOf(id)), side, id),
+        ),
       );
     },
     [
@@ -735,10 +748,16 @@ export function SeamPickerBody({
   const onHoverAt = useCallback(
     (id: TargetId | null, atMm: number | null) => {
       const length = id ? resolveEdge(id, geoms)?.len ?? 0 : 0;
+      const wholeOnly =
+        !!id &&
+        !bindingMode &&
+        !topstitchMode &&
+        surfacePartSide(sel, pickRules.isInner) === clickSide(id);
       const free =
         id &&
         atMm != null &&
         length > 0 &&
+        !wholeOnly &&
         (topstitchMode || storedSeamAt(stored, id, atMm, geoms) < 0)
           ? labelSpanAt(id, bindingMode || topstitchMode ? 'a' : clickSide(id), length, atMm) ??
             segmentAt(breaksOf(id), length, atMm)
@@ -751,7 +770,7 @@ export function SeamPickerBody({
             : null,
       );
     },
-    [geoms, stored, labelSpanAt, bindingMode, topstitchMode, breaksOf, clickSide],
+    [geoms, stored, labelSpanAt, bindingMode, topstitchMode, breaksOf, clickSide, sel, pickRules],
   );
   const onSpanDrag = useCallback(
     (id: TargetId, fromMm: number, toMm: number, done: boolean) => {
@@ -779,10 +798,28 @@ export function SeamPickerBody({
       }
       const side = bindingMode || topstitchMode ? 'a' : clickSide(id);
       const base = (bindingMode || topstitchMode) && !sel.a.includes(id) ? EMPTY : sel;
+      // A surface's part has no stretches (Р5): a drag on it takes the whole edge.
+      if (!bindingMode && !topstitchMode && surfacePartSide(base, pickRules.isInner) === side) {
+        if (base[side].includes(id)) return;
+        setSel(
+          surfacePick(
+            onFolded(pickTarget(base, side, id, pickRules.isInner, pickRules.pieceOf), side, id),
+            pickRules.isInner,
+            pickRules.pieceOf,
+            id,
+          ),
+        );
+        return;
+      }
       setSel(
-        onFolded(
-          pickFreeSpan(base, side, id, range, resolveEdge(id, geoms)?.len ?? 0, pickRules),
-          side,
+        surfacePick(
+          onFolded(
+            pickFreeSpan(base, side, id, range, resolveEdge(id, geoms)?.len ?? 0, pickRules),
+            side,
+            id,
+          ),
+          pickRules.isInner,
+          pickRules.pieceOf,
           id,
         ),
       );
