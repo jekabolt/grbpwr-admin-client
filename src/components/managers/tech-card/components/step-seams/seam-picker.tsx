@@ -681,7 +681,9 @@ export function SeamPickerBody({
         setRefused('already bound');
         return;
       }
-      setSel(onFolded(pickSegment(base, side, id, segment, length, pickRules), side, id));
+      setSel(
+        onFolded(pickSegment(base, side, id, segment, length, pickRules, breaksOf(id)), side, id),
+      );
     },
     [
       frozen,

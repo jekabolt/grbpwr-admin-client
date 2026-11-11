@@ -1,4 +1,5 @@
 import { adminService } from 'api/api';
+import { OPERATION_FIELDS_AWARE } from 'lib/tech-card-operation-aware';
 import type {
   common_Size,
   common_TechCard,
@@ -403,21 +404,9 @@ function samePatterns(
   return JSON.stringify(material(left)) === JSON.stringify(material(right));
 }
 
-const ECHO_AWARE = {
-  machineFieldsAware: true,
-  assemblyAware: true,
-  mediaAware: true,
-  operationKindsAware: true,
-  operationWorkAware: true,
-  // The stored operations ride verbatim, seamKind / workVariant / fastening.buttonHoles included.
-  operationSeamKindAware: true,
-  operationDraftAware: true,
-  operationReviewAware: true,
-  // the echoed card carries each step's seamKeys as stored
-  operationSeamsAware: true,
-  // and each step's foldKeys
-  operationFoldsAware: true,
-  operationLayerOrderAware: true,
+export const ECHO_AWARE = {
+  // The stored operations ride verbatim, every gated field included.
+  ...OPERATION_FIELDS_AWARE,
   bomQtyAware: true,
   labelsAware: true,
   packagingPicksAware: true,

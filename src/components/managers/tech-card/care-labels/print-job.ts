@@ -10,6 +10,7 @@
 import { variantSku, type CareLabelData } from './adapter';
 import { labelComposition } from './composition-override';
 import type { PartComposition } from './composition-resolver';
+import { LABEL_LANGS } from './phrases';
 import { hole, isGlobalHole, type Hole } from './holes';
 import type { LabelOrientation, PrintMode } from './layout';
 import { fileSlug, planPrint, type PrintJob, type PrintSet } from './pages';
@@ -31,16 +32,43 @@ export function compositionsOf(data: CareLabelData): Map<number, PartComposition
   return new Map(
     data.colorways.map((cw) => [
       cw.id,
-      labelComposition({
-        colorwayId: cw.id,
-        bom: data.bom,
-        usages: cw.usages,
-        materials: data.materials,
-        fibers: data.fibers,
-        override: cw.fiberOverride,
-      }).parts,
+      mergeSameComposition(
+        labelComposition({
+          colorwayId: cw.id,
+          bom: data.bom,
+          usages: cw.usages,
+          materials: data.materials,
+          fibers: data.fibers,
+          override: cw.fiberOverride,
+        }).parts,
+      ),
     ]),
   );
+}
+
+/**
+ * Части с одинаковым составом — одна колонка ленты: иначе фабрика видит два одинаковых блока и
+ * может вшить лишний ярлык. Заголовок первой части, остальные — в `alsoParts`; NOTE не сливается.
+ */
+export function mergeSameComposition(parts: readonly PartComposition[]): PartComposition[] {
+  const out: PartComposition[] = [];
+  const byText = new Map<string, PartComposition>();
+  for (const part of parts) {
+    const key = LABEL_LANGS.map((lang) => part.rows[lang]?.trim() ?? '').join('\n');
+    const same = part.part === 'NOTE' || !key.trim() ? undefined : byText.get(key);
+    if (!same) {
+      const copy = { ...part, lineKeys: [...part.lineKeys] };
+      out.push(copy);
+      if (part.part !== 'NOTE' && key.trim()) byText.set(key, copy);
+      continue;
+    }
+    if (same.part !== part.part && !same.alsoParts?.includes(part.part)) {
+      same.alsoParts = [...(same.alsoParts ?? []), part.part];
+    }
+    same.lineKeys.push(...part.lineKeys);
+    same.animal ||= part.animal;
+  }
+  return out;
 }
 
 export type PrintJobInput = {

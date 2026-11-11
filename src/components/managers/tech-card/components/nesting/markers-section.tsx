@@ -17,17 +17,7 @@ import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { useWatch } from 'react-hook-form';
-import {
-  Button,
-  CalloutBox,
-  ConfirmationModal,
-  GroupLabel,
-  Pill,
-  Row,
-  Text,
-  EmptyCell,
-  Close,
-} from 'ui';
+import { Button, CalloutBox, ConfirmationModal, GroupLabel, Row, Text, EmptyCell } from 'ui';
 import {
   cardMarkers,
   compositionLabel,
@@ -49,6 +39,7 @@ import {
 import { patternSourcesForMarker, type MarkerPatternRow } from './marker-rebuild';
 import { planAutoNorm } from './auto-norm';
 import { markerBehind, markersBehindSheets } from './marker-sheets';
+import { MarkerBadges, markerGroupLabel } from './marker-badges';
 import {
   fabricScopes,
   isRollGoodsSection,
@@ -462,7 +453,7 @@ export function MarkersSection({
   const groups = useMemo(() => {
     const byKey = new Map<string, { key: string; label: string; markers: typeof markers }>();
     for (const m of markers) {
-      const label = (m.bomItemName ?? '').trim();
+      const label = markerGroupLabel(m.bomItemName);
       const key = label || '\u0000';
       let g = byKey.get(key);
       if (!g) {
@@ -561,48 +552,27 @@ export function MarkersSection({
           {length ? `${length} cm` : <EmptyCell />}
         </span>
         <span className='text-right text-labelColor'>{eff ? `${eff} %` : <EmptyCell />}</span>
-        <span className='inline-flex items-baseline justify-end gap-2'>
-          {m.isNorm && (
-            <Pill
-              tone='ok'
-              title='the norm: the marker costing and the readiness gate measure this fabric by. chosen automatically — the newest complete single-size marker of the fabric.'
-            >
-              norm
-            </Pill>
-          )}
-          {draft && (
-            <Pill tone='warn' title={refusal}>
-              draft
-              {Number(m.totalCount ?? 0) > Number(m.placedCount ?? 0)
-                ? ` · ${m.placedCount ?? 0} of ${m.totalCount ?? 0}`
-                : ''}
-            </Pill>
-          )}
-          {changed && (
-            <Pill
-              tone='attention'
-              title='the piece set on the card changed since the capture — recheck'
-            >
-              set changed
-            </Pill>
-          )}
-          {sheetMoved && <Pill tone='attention'>patterns changed</Pill>}
-          {conflict && (
-            <Pill tone='warn' title={conflict}>
-              norm conflict
-            </Pill>
-          )}
-          {canEdit && (
-            <Close
-              size='sm'
-              aria-label='delete marker'
-              onClick={(e: React.MouseEvent) => {
-                e.stopPropagation();
-                setDeleting({ id, name: m.name ?? '' });
-              }}
-            />
-          )}
-        </span>
+        <MarkerBadges
+          isNorm={!!m.isNorm}
+          draft={draft}
+          draftProgress={
+            Number(m.totalCount ?? 0) > Number(m.placedCount ?? 0)
+              ? ` · ${m.placedCount ?? 0} of ${m.totalCount ?? 0}`
+              : ''
+          }
+          refusal={refusal}
+          changed={changed}
+          sheetMoved={sheetMoved}
+          conflict={conflict}
+          onDelete={
+            canEdit
+              ? (e) => {
+                  e.stopPropagation();
+                  setDeleting({ id, name: m.name ?? '' });
+                }
+              : undefined
+          }
+        />
       </li>
     );
   };

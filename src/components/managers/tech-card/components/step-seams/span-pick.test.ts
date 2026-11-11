@@ -366,3 +366,62 @@ describe('a folded edge is picked by the stretches its folds cut', () => {
     expect(foldCrossingsMm(id, geoms, new Map())).toEqual([]);
   });
 });
+
+describe('a gap a fold cut fills on its own', () => {
+  const edge = resolveEdge(id, geoms)!;
+  const across = (t: number) => {
+    const i = Math.max(1, Math.floor(t * (edge.pts.length - 1)));
+    const [p, q] = [edge.pts[i - 1], edge.pts[i]];
+    const at = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2] as const;
+    const n = [-(q[1] - p[1]), q[0] - p[0]] as const;
+    return {
+      a: [at[0] - n[0] * 50, at[1] - n[1] * 50] as [number, number],
+      b: [at[0] + n[0] * 50, at[1] + n[1] * 50] as [number, number],
+      flipAt: at as unknown as [number, number],
+      kind: 'inward' as const,
+    };
+  };
+  const lines = new Map([[piece.geom.pieceKey, [across(0.45), across(0.55)]]]);
+  const cuts = foldCrossingsMm(id, geoms, lines);
+  const breaks = edgeBreaks(id, geoms, cuts);
+  const [f1, f2] = cuts;
+  const before = segmentAt(breaks, length, f1 - 0.5);
+  const between = segmentAt(breaks, length, (f1 + f2) / 2);
+  const after = segmentAt(breaks, length, f2 + 0.5);
+  const click = (pick: SidePick, segment: readonly [number, number]) =>
+    pickSegment(pick, 'a', id, [segment[0], segment[1]], length, rules, breaks);
+
+  it('102: the stretch between two fold points skipped, the edge stays one piece', () => {
+    expect(cuts).toHaveLength(2);
+    expect(between).toEqual([f1, f2].map((mm) => expect.closeTo(mm, 3)));
+    for (const order of [
+      [before, after],
+      [after, before],
+    ]) {
+      const pick = order.reduce(click, empty);
+      expect(pick.spans.a[id]).toHaveLength(1);
+      expect(pick.spans.a[id][0][0]).toBeCloseTo(before[0], 3);
+      expect(pick.spans.a[id][0][1]).toBeCloseTo(after[1], 3);
+    }
+  });
+
+  it('the owner: a click on the middle of a taken edge still cuts a hole there', () => {
+    let pick = [before, between, after].reduce(click, empty);
+    expect(pick.spans.a[id]).toHaveLength(1);
+    pick = click(pick, between);
+    expect(pick.spans.a[id]).toHaveLength(2);
+    expect(pick.spans.a[id][0][1]).toBeCloseTo(f1, 3);
+    expect(pick.spans.a[id][1][0]).toBeCloseTo(f2, 3);
+  });
+
+  it('a gap with no fold at its ends (a pocket) stays', () => {
+    const plain = edgeBreaks(id, geoms);
+    const inner = plain.filter((b) => b.atMm > 1 && b.atMm < length - 1);
+    expect(inner.length).toBeGreaterThanOrEqual(2);
+    const first = segmentAt(plain, length, inner[0].atMm - 0.5);
+    const third = segmentAt(plain, length, inner[1].atMm + 0.5);
+    let pick = pickSegment(empty, 'a', id, first, length, rules, plain);
+    pick = pickSegment(pick, 'a', id, third, length, rules, plain);
+    expect(pick.spans.a[id]).toHaveLength(2);
+  });
+});

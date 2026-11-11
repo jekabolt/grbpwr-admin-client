@@ -151,7 +151,42 @@ type PickRules = {
   pieceOf: (id: string) => string;
 };
 
-/** A click on an edge, by the segment under the pointer. */
+/**
+ * A gap a fold made: exactly one stretch between neighbouring break points (no break inside it)
+ * with a fold point at one of its ends at least. A gap between notches or corners — a pocket — is
+ * not one.
+ */
+function isFoldGap(from: number, to: number, breaks: readonly PickBreak[]): boolean {
+  if (to - from <= SAME_MM) return false;
+  const at = (mm: number) => breaks.find((point) => Math.abs(point.atMm - mm) < SAME_MM);
+  const [start, end] = [at(from), at(to)];
+  if (!start || !end || (start.kind !== 'fold' && end.kind !== 'fold')) return false;
+  return breaks.every((point) => point.atMm <= from + SAME_MM || point.atMm >= to - SAME_MM);
+}
+
+/** One more segment added beside a span with only a fold's stretch between them: the gap fills. */
+function withFoldGapsFilled(
+  spans: readonly SpanRange[],
+  segment: SpanRange,
+  breaks: readonly PickBreak[],
+): SpanRange[] {
+  const out = [...spans].sort((x, y) => x[0] - y[0]);
+  const i = out.findIndex(
+    ([from, to]) => segment[0] >= from - SAME_MM && segment[1] <= to + SAME_MM,
+  );
+  if (i < 0) return out;
+  if (i + 1 < out.length && isFoldGap(out[i][1], out[i + 1][0], breaks))
+    out.splice(i, 2, [out[i][0], out[i + 1][1]]);
+  if (i > 0 && isFoldGap(out[i - 1][1], out[i][0], breaks))
+    out.splice(i - 1, 2, [out[i - 1][0], out[i][1]]);
+  return out;
+}
+
+/**
+ * A click on an edge, by the segment under the pointer. With the edge's `breaks`, a segment added
+ * one fold stretch away from a span closes that gap, so a stretch a fold cut off and the hand
+ * skipped does not split the edge; a click inside a span still cuts it out.
+ */
 export function pickSegment(
   pick: SidePick,
   side: SpanSide,
@@ -159,15 +194,20 @@ export function pickSegment(
   segment: SpanRange,
   length: number,
   rules: PickRules,
+  breaks: readonly PickBreak[] = [],
 ): SidePick {
   if (pick[side].includes(id)) {
     const own = pick.spans[side][id];
     const current = own ?? [[0, length]];
     // An edge offered whole (a guess) narrows to the segment; spans picked by hand split around it.
     const inside = !own && segment[0] > SAME_MM && segment[1] < length - SAME_MM;
-    const next = inside
+    const adds = !current.some(
+      ([from, to]) => segment[0] >= from - SAME_MM && segment[1] <= to + SAME_MM,
+    );
+    const clicked = inside
       ? [segment]
       : clickSegment(current, segment).filter(([from, to]) => to - from > SAME_MM);
+    const next = adds && breaks.length ? withFoldGapsFilled(clicked, segment, breaks) : clicked;
     if (next.length > current.length && sideIsFull(pick, side)) return pick;
     if (next.length)
       return own
