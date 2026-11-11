@@ -930,11 +930,24 @@ export function workApplication(input: {
   // выбором работы значило бы молча переставить шаг на другой станок.
   const links: WorkApplication['links'] = {};
   const targetMachine = writes.machineType ?? '';
-  if (targetMachine && !(current.machineProfileKey ?? '').trim()) {
-    const fits = park.machines.filter(
-      (m) => m.machineType === targetMachine && (m.profileKey ?? '').trim(),
-    );
-    if (fits.length === 1) links.machineProfileKey = (fits[0].profileKey ?? '').trim();
+  const currentMachineKey = (current.machineProfileKey ?? '').trim();
+  const machineFits = park.machines.filter(
+    (m) => m.machineType === targetMachine && (m.profileKey ?? '').trim(),
+  );
+  // A link made for the machine the step had is the technologist's answer for THAT machine. Once
+  // the work moves the step to another machine it points at the wrong type, and the server refuses
+  // the whole card (`profile_type_mismatch`: hem on lockstitch → bind/tape edge, card 162 step 190).
+  const staleMachineKey =
+    !!targetMachine &&
+    !!currentMachineKey &&
+    targetMachine !== (current.machineType ?? '') &&
+    !machineFits.some((m) => (m.profileKey ?? '').trim() === currentMachineKey);
+  if (targetMachine && (!currentMachineKey || staleMachineKey)) {
+    if (machineFits.length === 1) {
+      links.machineProfileKey = (machineFits[0].profileKey ?? '').trim();
+    } else if (staleMachineKey) {
+      links.machineProfileKey = '';
+    }
   }
   const targetPress = writes.pressEquipment ?? '';
   if (targetPress && !(current.pressProfileKey ?? '').trim()) {
