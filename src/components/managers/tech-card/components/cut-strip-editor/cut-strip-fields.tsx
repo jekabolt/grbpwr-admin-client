@@ -80,6 +80,8 @@ export function CutStripFields({
     seamItems.push({ value: strip.seamKey, label: 'seam missing', matchText: '' });
   }
 
+  const gone = goneSeamKeys(seams);
+  const seamGone = gone.has((strip.seamKey ?? '').trim());
   const effectiveStrip: CutStrip = withSeamGone(
     {
       ...strip,
@@ -91,7 +93,7 @@ export function CutStripFields({
             : '',
       })),
     },
-    goneSeamKeys(seams),
+    gone,
   );
   const sizesById = new Map((strip.sizes ?? []).map((row, index) => [wireInt(row.sizeId), index]));
   const sizeNames = new Map(
@@ -168,8 +170,9 @@ export function CutStripFields({
             const sizeIndex = sizesById.get(wireInt(sizeId));
             const manual =
               sizeIndex == null ? '' : (strip.sizes?.[sizeIndex]?.manualCutMm ?? '').trim();
+            // A seam that went stale or was rejected has no length to show, stored or live.
             const seam =
-              mode === 'from_seam'
+              mode === 'from_seam' && !seamGone
                 ? seamLengthAt(seamSource, sizeId) ??
                   storedSeamMm(sizeIndex == null ? undefined : strip.sizes?.[sizeIndex]?.seamMm)
                 : undefined;
