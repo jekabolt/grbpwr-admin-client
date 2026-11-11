@@ -22,7 +22,6 @@ import { Button, Chip, ChipRow } from 'ui';
 import { pieceRefKey } from '../piece-block-refs';
 import type { FoundPiece } from '../nesting/dxf-geometry';
 import {
-  defaultSide,
   detectPleatFans,
   foldGroupsOf,
   openHints,
@@ -31,15 +30,23 @@ import {
   pleatDirectionRows,
   ptsAttr,
   rowsOfChoice,
-  rowsOfPleat,
   type FoldGroup,
   type PickKind,
   type PleatFan,
 } from './fold-model';
 import { FAINT, GREY, HatchDef, INK, PAPER, PICK, PliesSvg, SectionSvg } from './fold-picture';
+import {
+  drawnLineRefusal,
+  planKindChange,
+  planNewFold,
+  planPleat,
+  type FoldPlan,
+  type FoldPlanCtx,
+} from './fold-plan';
 import { foldStepBlocked, stepOfFold, useFoldStep } from './fold-step';
 import { useFoldRows } from './folds-store';
 import { useFoldWrites } from './use-fold-writes';
+import { refuseGesture } from '../refuse-gesture';
 
 type Shapes = ReadonlyMap<string, FoundPiece | null> | null | undefined;
 
@@ -60,7 +67,6 @@ export type PieceRead = {
   groups: FoldGroup[];
   hints: FoldHint[];
   rows: StoredFold[];
-  maxSeq: number;
 };
 
 type PickerLine = {
@@ -123,7 +129,6 @@ export function usePieceReads(
             groups,
             hints: openHints(hints, groups),
             rows: own,
-            maxSeq: own.reduce((max, row) => Math.max(max, row.seq), 0),
           };
         }),
     [pieces, shapes, grainDeg, innerLines, rows],
@@ -285,7 +290,14 @@ export function FoldPicker({
       return;
     }
     if (Math.hypot(snapped.mm[0] - drawing.p1[0], snapped.mm[1] - drawing.p1[1]) <= 5) return;
-    setPending({ line: [drawing.p1, snapped.mm], source: 'owner' });
+    const line: [Pt2, Pt2] = [drawing.p1, snapped.mm];
+    // A line that is no fold is refused at once; the first point stays for another end.
+    const refused = drawnLineRefusal(geom, line, groups);
+    if (refused) {
+      refuseGesture('FOLDS', refused[0], refused[1]);
+      return;
+    }
+    setPending({ line, source: 'owner' });
     setDrawing(null);
     setLive(null);
   };
@@ -320,17 +332,41 @@ export function FoldPicker({
     }
   };
 
+  const planCtx = (): FoldPlanCtx => ({
+    geom,
+    deg,
+    size,
+    rows,
+    operations: foldStep.operations,
+    stepIndex,
+  });
+
+  /** One upsert, then the rows it no longer uses, then the step link; a refusal writes nothing. */
+  const execute = async (plan: FoldPlan): Promise<boolean> => {
+    if ('refused' in plan) {
+      refuseGesture('FOLDS', plan.refused[0], plan.refused[1]);
+      return false;
+    }
+    if (!(await writes.upsert(plan.upsert))) return false;
+    // The replacement is stored: a leftover row that fails to go is still removable in the list.
+    if (plan.remove.length) await writes.remove(plan.remove);
+    if (plan.link) foldStep.assign(plan.link.keys, plan.link.step);
+    return true;
+  };
+
   const applyChoice = async (line: PickerLine, kind: PickKind) => {
     if (!line.group) {
-      const saved = rowsOfChoice(
-        geom,
-        { line: line.line, side: defaultSide(geom, line.line), kind, source: line.source },
-        { seq: read.maxSeq + 1, grainDeg: deg, anchoredSize: size },
-      );
+      const plan = planNewFold(planCtx(), { line: line.line, kind, source: line.source });
+      // A line that is no fold stays drawn: the refusal says why, the owner redraws or cancels.
+      if ('refused' in plan) {
+        await execute(plan);
+        return;
+      }
+      const drawn = pending;
       setPending(null);
       setDrawing(null);
       setLive(null);
-      if (saved?.length && (await writes.upsert(saved))) linkToStep(saved, stepIndex);
+      if (!(await execute(plan)) && drawn) setPending(drawn);
       return;
     }
 
@@ -345,37 +381,24 @@ export function FoldPicker({
       return;
     }
     const sameCount = (kind === 'double') === (group.kind === 'double');
+    if (!sameCount) {
+      await execute(planKindChange(planCtx(), group, kind));
+      return;
+    }
     const saved = rowsOfChoice(
       geom,
       { line: group.line, side: group.side, kind, source: group.source },
       {
-        seq: sameCount ? group.rows[0].seq : read.maxSeq + 1,
+        seq: group.rows[0].seq,
         grainDeg: deg,
-        keys: sameCount ? group.rows.map((row) => row.foldKey) : undefined,
+        keys: group.rows.map((row) => row.foldKey),
         anchoredSize: size,
       },
     );
     if (!saved?.length) return;
-    if (sameCount) {
-      if (await writes.upsert(saved)) {
-        if (saved.every((row) => stepOfFold(foldStep.operations, row.foldKey) === null))
-          linkToStep(saved, stepIndex);
-      }
-      return;
-    }
-    const oldKeys = group.rows.map((row) => row.foldKey);
-    const oldStep = oldKeys
-      .map((foldKey) => stepOfFold(foldStep.operations, foldKey))
-      .find((step) => step !== null);
-    if (!(await writes.remove(group.rows))) return;
-    foldStep.assign(oldKeys, null);
     if (await writes.upsert(saved)) {
-      if (oldStep !== undefined && oldStep !== null)
-        foldStep.assign(
-          saved.map((row) => row.foldKey),
-          oldStep,
-        );
-      else linkToStep(saved, stepIndex);
+      if (saved.every((row) => stepOfFold(foldStep.operations, row.foldKey) === null))
+        linkToStep(saved, stepIndex);
     }
   };
 
@@ -453,50 +476,8 @@ export function FoldPicker({
           ),
         ),
       ];
-      const replaced = replacedGroups.flatMap((group) => group.rows);
-      const replacedKeys = new Set(replaced.map((row) => row.foldKey));
-      const oldStep = replaced
-        .map((row) => stepOfFold(foldStep.operations, row.foldKey))
-        .find((step) => step !== null);
-      const insertSeq = replaced.length
-        ? Math.min(...replaced.map((row) => row.seq))
-        : read.maxSeq + 1;
-      const saved = rowsOfPleat(geom, fan, {
-        seq: insertSeq,
-        grainDeg: deg,
-        anchoredSize: size,
-      });
-      if (!saved?.length) return;
-      const shifted = replaced.length
-        ? rows.flatMap((row) => {
-            if (replacedKeys.has(row.foldKey) || row.seq < insertSeq) return [];
-            const removedBefore = replaced.filter((old) => old.seq <= row.seq).length;
-            const seq = row.seq + 3 - removedBefore;
-            return seq === row.seq ? [] : [{ ...row, seq }];
-          })
-        : [];
-      const shiftedByKey = new Map(shifted.map((row) => [row.foldKey, row]));
-      const effectiveRows = [
-        ...rows
-          .filter((row) => !replacedKeys.has(row.foldKey))
-          .map((row) => shiftedByKey.get(row.foldKey) ?? row),
-        ...saved,
-      ];
-      if (replaced.length) {
-        if (!(await writes.remove(replaced))) return;
-        foldStep.assign(
-          replaced.map((row) => row.foldKey),
-          null,
-        );
-      }
-      if (!(await writes.upsert([...saved, ...shifted]))) return;
-      setChosenPleat(saved[0].foldKey);
-      if (oldStep !== undefined && oldStep !== null)
-        foldStep.assign(
-          saved.map((row) => row.foldKey),
-          oldStep,
-        );
-      else linkToStep(saved, stepIndex, effectiveRows);
+      const plan = planPleat(planCtx(), fan, replacedGroups);
+      if ((await execute(plan)) && !('refused' in plan)) setChosenPleat(plan.upsert[0].foldKey);
     } finally {
       choosing.current = false;
     }

@@ -97,7 +97,6 @@ describe('pleat direction in the picker', () => {
     groups: foldGroupsOf(piece, rows, 0, lines).groups,
     hints: [],
     rows,
-    maxSeq: 6,
   });
   const picker = (rows: StoredFold[]) =>
     renderToStaticMarkup(

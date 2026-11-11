@@ -3,7 +3,7 @@
 //
 // - the fusing rebuild runs after the body it reads. The body's baseline already holds the new markup,
 //   so nothing on a reloaded page would ever see the sheets as stale;
-// - a step's link to a seam or pose row travels in the whole-card body, which is too big for a
+// - a step's link to a seam, pose or fold row travels in the whole-card body, which is too big for a
 //   keepalive request, while the row itself is already on the server.
 //
 // One record per card in this browser, until a read shows the write landed. Per-browser by nature:
@@ -11,7 +11,10 @@
 
 const key = (cardId: number) => `tech-card-owed:${cardId}`;
 
-export type OwedField = 'seamKeys' | 'poseKeys';
+export type OwedField = 'seamKeys' | 'poseKeys' | 'foldKeys';
+
+/** The fields the seam replay finishes; the fold replay reads `foldKeys` on its own rows. */
+const SEAM_FIELDS: readonly OwedField[] = ['seamKeys', 'poseKeys'];
 
 export type OwedLink = {
   /** The step: the number it had, the only identity it has on a reloaded page. */
@@ -47,7 +50,8 @@ export const fuseOwed = (cardId: number): boolean => !!read(cardId).fuse;
 export const markFuseOwed = (cardId: number) => write(cardId, { ...read(cardId), fuse: true });
 export const clearFuseOwed = (cardId: number) => write(cardId, { ...read(cardId), fuse: false });
 
-export const owedLinks = (cardId: number): OwedLink[] => read(cardId).links ?? [];
+export const owedLinks = (cardId: number, fields: readonly OwedField[] = SEAM_FIELDS): OwedLink[] =>
+  (read(cardId).links ?? []).filter((link) => fields.includes(link.field));
 
 export function markLinkOwed(cardId: number, link: OwedLink): void {
   const owed = read(cardId);
@@ -55,9 +59,10 @@ export function markLinkOwed(cardId: number, link: OwedLink): void {
   write(cardId, { ...owed, links: [...others, link] });
 }
 
-export function clearLinkOwed(cardId: number, linkKey: string): void {
+export function clearLinkOwed(cardId: number, linkKey: string, field?: OwedField): void {
   const owed = read(cardId);
-  write(cardId, { ...owed, links: (owed.links ?? []).filter((l) => l.key !== linkKey) });
+  const keep = (l: OwedLink) => l.key !== linkKey || (field !== undefined && l.field !== field);
+  write(cardId, { ...owed, links: (owed.links ?? []).filter(keep) });
 }
 
 type OpLinks = { operationNumber?: number } & { [F in OwedField]?: string[] };

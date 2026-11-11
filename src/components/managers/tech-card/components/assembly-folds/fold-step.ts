@@ -1,8 +1,11 @@
 import { useCallback } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { extractFieldViolations, violationReason } from 'utils/field-errors';
+import { clearLinkOwed, markLinkOwed } from '../card-owed';
 import { useTechCardAutosave } from '../design/autosave-contract';
 import type { TechCardFormData } from '../schema';
+import { owedFoldLinks } from './fold-links-keep';
+import { useFoldsStore } from './folds-store';
 
 type FoldStepForm = {
   operations?: {
@@ -106,6 +109,14 @@ export function useFoldStep() {
           shouldDirty: true,
         });
       });
+      // The link reaches the server with the next card save; until a read shows it, this browser owes it.
+      const cardId = useFoldsStore.getState().cardId;
+      if (changed && cardId) {
+        const now = Date.now();
+        for (const key of foldKeys) clearLinkOwed(cardId, key, 'foldKeys');
+        for (const link of owedFoldLinks(next, foldKeys, stepIndex, now))
+          markLinkOwed(cardId, link);
+      }
       if (changed) autosave.request('fold-step');
     },
     [autosave, form],
