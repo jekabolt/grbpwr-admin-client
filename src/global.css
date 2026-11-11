@@ -36,6 +36,28 @@
   --color-hairline: #e6e6e6;
   --color-pageBg: #f2f2f2; /* the canvas every panel sits on */
 
+  /* LEKALO FILL SYSTEM — the models fill panel (Category / LineField / Segmented / BracketOptions /
+     NoteBlock). Added beside the four greys, not instead of them: other screens keep theirs. */
+  --color-ink: #131313; /* text ink of the fill system */
+  --color-fieldFill: #f8f8f8; /* fill button */
+  --color-segOff: #f6f6f6; /* segmented control, off */
+  --color-placeholder: #cdcdcd; /* placeholder, row label, unchosen option */
+  --color-pinOff: #d2d2d2; /* pin, off */
+  --color-titleOff: #e3e3e3; /* category title, not active */
+  --color-note: #fcf6a8; /* note block ground */
+  --color-noteInk: #e4ae3d; /* note block text */
+  --color-titleMuted: #989898; /* model card name, at rest */
+  --color-labelDark: #585858; /* model card meta row */
+  --color-cardOn: #e1e1e1; /* model card, selected */
+  --color-sel: #2c28ff; /* Lekalo selection blue: the measurement being filled on the scheme */
+  --color-alert: #d57f80; /* the new red: a deadline within two days or past, overdue counts */
+  --color-tileFill: #fcfcfc; /* task tile ground */
+
+  /* MOTION — Lekalo «slow dopamine»: the soft ease with a long calm tail. Durations are Tailwind's
+     numeric `duration-900` (a step) / `duration-700` (a fade). */
+  --ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-cubic: cubic-bezier(0.65, 0, 0.35, 1); /* easeInOutCubic: the board drag compression */
+
   /* SPACING — the block grammar. See DESIGN.md → "5. Components → The Block".
      gutter — the grey gap BETWEEN blocks. It is the divider; never draw a line instead.
      block  — padding inside a block.
@@ -72,8 +94,8 @@
   --z-toast: 70;
 
   /* FONTS */
-  --font-family-sans: 'FeatureMono', 'Inter', 'Helvetica Neue', Arial, sans-serif;
-  --font-family-mono: 'FeatureMono', 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  --font-family-sans: Arial, 'Helvetica Neue', Helvetica, sans-serif;
+  --font-family-mono: Arial, 'Helvetica Neue', Helvetica, sans-serif;
 
   /* TEXT — body 12 with three sizes below it for chrome, plus heading 18.
      giant/giantSmall are display-only, reserved for the login + hero splash.
@@ -87,6 +109,9 @@
   --text-reading: 16px; /* public QR pages + email canvas — read on a phone */
   --text-statBig: 22px; /* hero stat value */
   --text-lg: 18px; /* heading */
+  --text-display: 32px; /* Lekalo display: category title, model card name */
+  --text-head: 24px; /* Lekalo head */
+  --text-tileSmall: 16px; /* task tile title in its minimal (scrolled) state */
   --text-giantSmall: 110px; /* display (login/hero only) */
   --text-giant: 200px; /* display (login/hero only) */
 

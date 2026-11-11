@@ -78,3 +78,52 @@ export function dueMeta(
   if (days <= 2) return { label: format(date, 'MMM d'), state: 'soon' };
   return { label: format(date, 'MMM d'), state: 'later' };
 }
+
+/**
+ * THE FILL-SYSTEM WORDS (taskboard frames, owner 2026-11): Title Case, the board's own names for its
+ * columns — «Current» for in progress, «Completed» for done. One table for the column headers, the
+ * status dropdowns and the tile's bracketed status, so the three never name a column differently.
+ */
+export const COLUMN_LABEL: Record<TaskStatus, string> = {
+  TASK_STATUS_UNKNOWN: 'Unknown',
+  TASK_STATUS_BACKLOG: 'Backlog',
+  TASK_STATUS_TODO: 'To Do',
+  TASK_STATUS_IN_PROGRESS: 'Current',
+  TASK_STATUS_REVIEW: 'In Review',
+  TASK_STATUS_DONE: 'Completed',
+};
+
+export const PRIORITY_TITLE: Record<TaskPriority, string> = {
+  TASK_PRIORITY_UNKNOWN: 'No Priority',
+  TASK_PRIORITY_LOW: 'Low',
+  TASK_PRIORITY_MEDIUM: 'Medium',
+  TASK_PRIORITY_HIGH: 'High',
+  TASK_PRIORITY_URGENT: 'Urgent',
+};
+
+/** Past its due date and not settled (done or archived): the red count of a column header. */
+export function isOverdue(dueDate: string | undefined, settled: boolean): boolean {
+  return dueMeta(dueDate, settled).state === 'overdue';
+}
+
+/** A deadline this many days away (or closer) is «near»: the tile's title turns ink. */
+export const NEAR_DAYS = 7;
+/** Within this many days, or past: the deadline word and date take the new red (`alert`). */
+export const HOT_DAYS = 2;
+
+export type DeadlineTone = 'none' | 'far' | 'near' | 'hot';
+
+/**
+ * HOW LOUD A TILE IS, BY ITS DEADLINE (owner 2026-11): not close yet — the title is grey; close
+ * (a week) — ink; within two days or past — ink, and the deadline itself is red. A settled task
+ * (done or archived) is never loud, the same rule as `dueMeta`.
+ */
+export function deadlineTone(dueDate: string | undefined, settled: boolean): DeadlineTone {
+  if (!dueDate) return 'none';
+  const date = new Date(dueDate);
+  if (Number.isNaN(date.getTime())) return 'none';
+  if (settled) return 'far';
+  const days = differenceInCalendarDays(date, new Date());
+  if (days <= HOT_DAYS) return 'hot';
+  return days <= NEAR_DAYS ? 'near' : 'far';
+}

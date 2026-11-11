@@ -3,6 +3,50 @@
 // Inside src/ui, files import each other by relative path, never from this barrel (no cycles).
 // A new export here is a new primitive and needs the owner's OK.
 
+/** @primitive Inline bracket choice, >> overflow */
+export { BracketOptions, type BracketOption } from './components/bracket-options';
+/** @primitive Collapsible 32px fill category */
+export { Category } from './components/category';
+/** @primitive Main dropdown: line, sliding list */
+export { Dropdown, type DropdownOption } from './components/dropdown';
+/** @primitive Underline field with pin */
+export { LineField, type LineFieldProps } from './components/line-field';
+/** @primitive Yellow note with text-file door */
+export { NoteBlock, type NoteBlockProps } from './components/note-block';
+/** @primitive 9px pin toggle */
+export { PinToggle } from './components/pin-toggle';
+/** @primitive iconoir icon set (inline SVG) */
+export { Iconoir, type IconoirName } from './icons/iconoir';
+/** @primitive Whole-item stepping row (wheel, swipe, keys) */
+export { StepRow, type StepRowMetrics } from './components/step-row';
+/** @primitive Filled exclusive choice strip */
+export { Segmented, type SegmentedItem } from './components/segmented';
+/** @primitive Row of immediate actions, sliding ink fill */
+export { ButtonRow, type ButtonRowItem } from './components/segmented';
+/** @primitive Tab row, underline flows between tabs */
+export { LiquidTabs, type LiquidTabItem } from './components/segmented';
+/** @primitive In-place accordion choice, 24px words */
+export { CascadeList, type CascadeOption } from './components/cascade-list';
+/** @primitive Year / month wheels + day grid */
+export { WheelDatePicker } from './components/wheel-date-picker';
+/** @primitive Assignee circles unfolding downward */
+export { PeopleUnfold } from './components/people-unfold';
+/** @primitive «Add +» door stretching into a name field */
+export { AddInline } from './components/add-inline';
+/** @primitive Title-row filters, list under the value */
+export { FilterRow, FilterItem, FilterFaces, useFilterOpen } from './components/filter-row';
+/** @primitive Tile ground, selection words, rule */
+export { TileShell, TileTitle, QUIET_PRESS } from './components/tile';
+/** @primitive Selection words, grey → [ink] */
+export { SelectWords, type SelectWord } from './components/tile';
+/** @primitive Header word «Label: [ value ]», editor trigger */
+export { MetaWord } from './components/tile';
+/** @primitive Part folding by height, both ways */
+export { Fold } from './components/tile';
+/** @primitive Count that toggles sorting */
+export { SortCount } from './components/tile';
+/** @primitive Step / free column scroll, board step wheel, press-hold */
+export { useStepScroll, useStepWheel, usePressHold } from './hooks/use-step-scroll';
 /** @primitive Bordered collapsible block */
 export { Accordion } from './components/accordion';
 /** @primitive Dashed «+ noun» door after a list */
@@ -145,6 +189,8 @@ export { default as ComboField } from './form/fields/combo-field';
 export { default as DecimalField } from './form/fields/decimal-field';
 /** @primitive Form-bound text input */
 export { default as InputField } from './form/fields/input-field';
+/** @primitive Form-bound underline field */
+export { default as LineInputField } from './form/fields/line-input-field';
 /** @primitive Rich text field */
 export { RichTextField } from './form/fields/rich-text-field';
 /** @primitive Form-bound segmented choice */

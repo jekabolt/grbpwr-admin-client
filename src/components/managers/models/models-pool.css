@@ -1,0 +1,53 @@
+/* Models pool — Lekalo typography: hierarchy by size and grey, never weight, normal case.
+   Unlayered on purpose: it outranks the layered Tailwind utilities (`uppercase`, `font-bold`,
+   tracking) that the shared primitives carry, on this screen only. Portalled modals and popovers
+   sit outside `.models-screen` and keep the system look. */
+.models-screen,
+.models-screen * {
+  text-transform: none;
+  font-weight: 400;
+  letter-spacing: normal;
+}
+
+/* The models screen sits on white (owner, Lekalo frame `models-edit.svg`), not on the grey page
+   ground. Scoped: the body turns white only while this screen is mounted. */
+body:has(.models-screen) {
+  background: var(--color-bgColor);
+}
+
+/* Lekalo motion of the models screen. Opening a card: it grows from the pool card's 300px to the
+   open card's width, and the panel turns in from the right (`openR`, 1100ms soft, 90ms late). */
+@keyframes models-grow {
+  from {
+    max-width: 18.75rem;
+  }
+  to {
+    max-width: 43.5625rem;
+  }
+}
+
+@keyframes models-open-r {
+  from {
+    transform: perspective(1400px) rotateY(68deg);
+    opacity: 0;
+  }
+  38% {
+    opacity: 1;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* The action bar's message arrives: a short rise and fade on the soft ease. */
+@keyframes models-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

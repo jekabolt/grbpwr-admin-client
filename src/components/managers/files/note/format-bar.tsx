@@ -12,7 +12,7 @@ import { sheetTokenEdit } from 'components/managers/tasks/utils/sheet-token';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import { Button, buttonVariants, GenericPopover, Text } from 'ui';
+import { Button, buttonVariants, GenericPopover, Iconoir, type IconoirName, Text } from 'ui';
 import {
   codeEdit,
   emphasisEdit,
@@ -109,6 +109,7 @@ export function FormatBar({
   onTogglePreview,
   phone,
   attachTable,
+  tiles,
 }: {
   areaRef: RefObject<HTMLTextAreaElement | null>;
   value: string;
@@ -134,6 +135,13 @@ export function FormatBar({
   compact?: boolean;
   /** Компактная полоса держит у себя и переключатель показа разметки (одно «preview»). */
   onTogglePreview?: () => void;
+  /**
+   * ПЛИТКИ ПОД ЖЁЛТОЙ ЗАМЕТКОЙ (панель задачи, owner: «механика редактирования стилей текста …
+   * только они теперь показываются в плиточках»): один ряд квадратных жёлтых плиток со значком
+   * iconoir, все инструменты сразу. Логика правок та же — меняется только раскладка.
+   * `previewing` подсвечивает плитку показа разметки и гасит остальные.
+   */
+  tiles?: { previewing?: boolean };
   /** Вставка «как таблица»: сначала файл садится в задачу, токен только после успеха. */
   attachTable?: (file: LibraryFile) => Promise<boolean>;
 }) {
@@ -594,7 +602,89 @@ export function FormatBar({
 
   return (
     <>
-      {phone ? null : compact ? (
+      {phone ? null : tiles ? (
+        <div className='grid grid-cols-[repeat(auto-fit,minmax(1.75rem,1fr))] gap-1'>
+          {TILE_TOOLS.map((t) => {
+            const a = actions.find((x) => x.label === t.label);
+            if (!a) return null;
+            return (
+              <Button
+                key={t.label}
+                type='button'
+                variant='default'
+                aria-label={t.label}
+                title={a.title}
+                disabled={tiles.previewing}
+                onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+                onClick={a.run}
+                className={TILE_CELL}
+              >
+                <Iconoir name={t.icon} strokeWidth={1.8} className='size-4' />
+              </Button>
+            );
+          })}
+          <Button
+            type='button'
+            variant='default'
+            aria-label='file link'
+            title='file link'
+            disabled={tiles.previewing}
+            onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+            onClick={() => setPicker('link')}
+            className={TILE_CELL}
+          >
+            <Iconoir name='page' strokeWidth={1.8} className='size-4' />
+          </Button>
+          <Button
+            type='button'
+            variant='default'
+            aria-label='file preview'
+            title='file preview'
+            disabled={tiles.previewing}
+            onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+            onClick={() => setPicker('preview')}
+            className={TILE_CELL}
+          >
+            <Iconoir name='page-search' strokeWidth={1.8} className='size-4' />
+          </Button>
+          <TableSizePicker
+            cellClassName={TILE_CELL}
+            trigger={<Iconoir name='table' strokeWidth={1.8} className='size-4' />}
+            onPick={(rows, cols) => apply((t, s2, e) => tableInsertEdit(t, s2, e, rows, cols))}
+          />
+          <MediaSelector
+            label='media'
+            purpose='a picture in the text'
+            allowMultiple
+            showVideos={false}
+            saveSelectedMedia={insertMedia}
+            trigger={
+              <Button
+                type='button'
+                variant='default'
+                aria-label='media gallery'
+                title='media gallery'
+                onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+                className={TILE_CELL}
+              >
+                <Iconoir name='media-image' strokeWidth={1.8} className='size-4' />
+              </Button>
+            }
+          />
+          {onTogglePreview && (
+            <Button
+              type='button'
+              variant='default'
+              aria-label='preview markdown'
+              aria-pressed={!!tiles.previewing}
+              onClick={onTogglePreview}
+              className={cn(TILE_CELL, tiles.previewing && 'text-ink')}
+            >
+              <Iconoir name='eye' strokeWidth={1.8} className='size-4' />
+            </Button>
+          )}
+        </div>
+      ) : compact ? (
         <>
           <div className='flex border-t border-hairline'>
             {PRIMARY_TOOLS.map((t) => {
@@ -929,6 +1019,19 @@ const PRIMARY_TOOLS: { label: string; glyph: string; className?: string }[] = [
   { label: 'link', glyph: 'link' },
 ];
 const MORE_TOOLS = ['heading', 'quote', 'code'];
+/** Плитки панели задачи: все инструменты правки разом, значками iconoir. */
+const TILE_TOOLS: { label: string; icon: IconoirName }[] = [
+  { label: 'bold', icon: 'bold' },
+  { label: 'italic', icon: 'italic' },
+  { label: 'heading', icon: 'text-size' },
+  { label: 'list', icon: 'list' },
+  { label: 'numbering', icon: 'numbered-list-left' },
+  { label: 'quote', icon: 'quote' },
+  { label: 'code', icon: 'code' },
+  { label: 'link', icon: 'link' },
+];
+const TILE_CELL =
+  'grid aspect-square w-full cursor-pointer place-items-center bg-note text-labelDark transition-colors duration-500 ease-soft hover:text-ink disabled:cursor-default disabled:text-noteInk motion-reduce:transition-none';
 /** Телефонный ряд над клавиатурой; остальное — в «•••» (`PHONE_MORE` и пункты редактора). */
 const PHONE_TOOLS: { label: string; glyph: string; className?: string }[] = [
   { label: 'bold', glyph: 'B', className: 'font-bold' },
@@ -989,8 +1092,11 @@ const PICK_MAX = 6;
 function TableSizePicker({
   onPick,
   cellClassName,
+  trigger,
 }: {
   onPick: (rows: number, cols: number) => void;
+  /** Плитка панели задачи: значок вместо слова. */
+  trigger?: React.ReactNode;
   /** В компактной полосе триггер — клетка сетки, а не кнопка-рамка. */
   cellClassName?: string;
 }) {
@@ -1011,7 +1117,9 @@ function TableSizePicker({
         ...(cellClassName ? { className: cellClassName } : {}),
       }}
       openElement={
-        cellClassName ? (
+        trigger ? (
+          <span aria-label='table'>{trigger}</span>
+        ) : cellClassName ? (
           <span>table</span>
         ) : (
           <Button type='button' size='xs' variant='secondary' title='table' asChild>

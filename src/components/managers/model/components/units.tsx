@@ -1,13 +1,16 @@
 import { createContext, ReactNode, useCallback, useContext, useMemo, useState } from 'react';
-import { ViewSwitch } from 'ui';
+import { BracketOptions } from 'ui';
 
-export type MeasurementUnit = 'mm' | 'in';
+export type MeasurementUnit = 'mm' | 'cm' | 'in';
 
 const UNIT_STORAGE_KEY = 'model-form-unit';
+const UNITS: readonly MeasurementUnit[] = ['mm', 'cm', 'in'];
 const UNIT_OPTIONS = [
   { value: 'mm', label: 'mm' },
-  { value: 'in', label: 'in' },
+  { value: 'cm', label: 'cm' },
+  { value: 'in', label: 'inch' },
 ] as const;
+const MM_PER: Record<MeasurementUnit, number> = { mm: 1, cm: 10, in: 25.4 };
 
 const MeasurementUnitContext = createContext<{
   unit: MeasurementUnit;
@@ -16,7 +19,8 @@ const MeasurementUnitContext = createContext<{
 
 function storedUnit(): MeasurementUnit {
   try {
-    return window.localStorage.getItem(UNIT_STORAGE_KEY) === 'in' ? 'in' : 'mm';
+    const stored = window.localStorage.getItem(UNIT_STORAGE_KEY);
+    return UNITS.find((u) => u === stored) ?? 'mm';
   } catch {
     return 'mm';
   }
@@ -48,7 +52,8 @@ export function useMeasurementUnit() {
 export function displayMeasurementValue(valueMm: unknown, unit: MeasurementUnit): string {
   const value = Number(valueMm);
   if (!(value > 0)) return '';
-  return unit === 'mm' ? String(Math.round(value)) : (value / 25.4).toFixed(1);
+  if (unit === 'mm') return String(Math.round(value));
+  return String(Number((value / MM_PER[unit]).toFixed(1)));
 }
 
 export function measurementValueInMm(
@@ -57,19 +62,19 @@ export function measurementValueInMm(
 ): number | undefined {
   const value = Number(displayValue.replace(',', '.'));
   if (!(value > 0) || !Number.isFinite(value)) return undefined;
-  return Math.round(value * (unit === 'in' ? 25.4 : 1));
+  return Math.round(value * MM_PER[unit]);
 }
 
+/** `[ mm ] cm inch` — the unit switch at the right of the Measurements title. */
 export function MeasurementUnitSwitch() {
   const { unit, setUnit } = useMeasurementUnit();
   return (
-    <ViewSwitch<MeasurementUnit>
-      value={unit}
+    <BracketOptions
       options={UNIT_OPTIONS}
-      onChange={setUnit}
-      label='units'
-      quiet
-      className='shrink-0'
+      value={unit}
+      onChange={(next) => next && setUnit(next as MeasurementUnit)}
+      ariaLabel='units'
+      overflow={false}
     />
   );
 }

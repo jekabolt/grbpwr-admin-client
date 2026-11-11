@@ -1,39 +1,50 @@
 import { cn } from 'lib/utility';
 import { ChangeEvent, FocusEvent, KeyboardEvent, useRef, useState } from 'react';
-import { useController, useFormContext, useWatch } from 'react-hook-form';
-import { Button, GroupLabel, Input, Text } from 'ui';
+import { useController, useFormContext } from 'react-hook-form';
+import { LineField, Text } from 'ui';
 import { BODY_MEASUREMENT_GROUPS } from './measurements';
+import { usePinFor } from './model-pins';
 import { ModelFormData } from './schema';
 import {
   measurementLabel,
   MOBILE_STRIP_PX,
-  MODEL_MEASUREMENTS,
   shortMeasurementGroup,
   useSheetMeasurementFocus,
 } from './sheet-measurement-focus';
 import {
   displayMeasurementValue,
+  MeasurementUnit,
   measurementValueInMm,
   MeasurementUnitSwitch,
   useMeasurementUnit,
 } from './units';
 
-type MeasurementValues = Record<string, number | undefined>;
+/** The primary ones: a full row each (Lekalo frame). */
+const FULL_ROW = new Set(['BODY_MEASUREMENT_NAME_INSEAM', 'BODY_MEASUREMENT_NAME_HEIGHT']);
 
-function useMeasurements(): MeasurementValues {
-  const { control } = useFormContext<ModelFormData>();
-  return (useWatch({ control, name: 'measurements' }) ?? {}) as MeasurementValues;
+const UPPER = new Set(['cb']);
+const LOWER = new Set(['to']);
+
+/** `hps to waist (front)` → `Hps to Waist (Front)`; `cb` stays an abbreviation. */
+export function titleCase(text: string): string {
+  return text.replace(/[a-z]+/gi, (word, offset: number) => {
+    const w = word.toLowerCase();
+    if (UPPER.has(w)) return w.toUpperCase();
+    if (offset > 0 && LOWER.has(w)) return w;
+    return w.charAt(0).toUpperCase() + w.slice(1);
+  });
 }
 
-function filledCount(values: MeasurementValues, names: string[]): number {
-  return names.filter((name) => Number(values[name]) > 0).length;
+function groupTitle(title: string): string {
+  const short = shortMeasurementGroup(title);
+  return titleCase(short === 'widths' ? 'width' : short);
 }
 
 function measurementInputId(name: string): string {
   return `model-measurement-${name}`;
 }
 
-function cleanMeasurementInput(value: string, unit: 'mm' | 'in'): string {
+function cleanMeasurementInput(value: string, unit: MeasurementUnit): string {
   const normalized = value.replace(',', '.');
   if (unit === 'mm') return normalized.replace(/[^0-9]/g, '');
   return normalized.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
@@ -46,17 +57,25 @@ function nextMeasurementInput(current: HTMLInputElement): HTMLInputElement | und
   return inputs[inputs.indexOf(current) + 1];
 }
 
-function MeasurementInput({ name }: { name: string }) {
+/** One measurement as a `LineField`. `scope='card'` is the active card's copy: same form field, own id. */
+export function MeasurementLine({
+  name,
+  scope = 'panel',
+}: {
+  name: string;
+  scope?: 'panel' | 'card';
+}) {
   const { control } = useFormContext<ModelFormData>();
   const { field } = useController({ control, name: `measurements.${name}` });
-  const { setFocus, setFocused } = useSheetMeasurementFocus();
+  const { setFocus, setFocused, setHover } = useSheetMeasurementFocus();
   const { unit } = useMeasurementUnit();
+  const label = titleCase(measurementLabel(name));
+  const pin = usePinFor(name, measurementLabel(name));
   const [draft, setDraft] = useState<string | null>(null);
   const editStart = useRef<{ display: string; valueMm: number | undefined }>({
     display: '',
     valueMm: undefined,
   });
-  const empty = !(Number(field.value) > 0);
   const shown = draft ?? displayMeasurementValue(field.value, unit);
 
   const writeEditedValue = (value: string) => {
@@ -68,136 +87,84 @@ function MeasurementInput({ name }: { name: string }) {
   };
 
   return (
-    <Input
-      {...field}
-      id={measurementInputId(name)}
-      data-model-measurement={name}
-      data-mm={field.value ?? ''}
-      data-unit={unit}
-      inputMode={unit === 'mm' ? 'numeric' : 'decimal'}
-      pattern={unit === 'mm' ? '[0-9]*' : '[0-9]*[.,]?[0-9]*'}
-      enterKeyHint='next'
-      autoComplete='off'
-      aria-label={measurementLabel(name)}
-      value={shown}
-      placeholder='—'
-      onFocus={(event: FocusEvent<HTMLInputElement>) => {
-        const display = displayMeasurementValue(field.value, unit);
-        editStart.current = { display, valueMm: field.value };
-        setFocus(name);
-        setFocused(name);
-        setDraft(display);
-        event.currentTarget.select();
-        keepClearOfMobileStrip(event.currentTarget);
-      }}
-      onBlur={() => {
-        setDraft(null);
-        setFocused(null);
-        field.onBlur();
-      }}
-      onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
-        if (event.key === 'Enter') {
-          event.preventDefault();
-          setDraft(null);
-          nextMeasurementInput(event.currentTarget)?.focus();
-          return;
-        }
-        if (event.metaKey || event.ctrlKey || event.altKey || event.key.length !== 1) return;
-        if (/[0-9]/.test(event.key)) return;
-        if (unit === 'in' && /[.,]/.test(event.key) && !/[.,]/.test(event.currentTarget.value))
-          return;
-        event.preventDefault();
-      }}
-      onChange={(event: ChangeEvent<HTMLInputElement>) => {
-        const clean = cleanMeasurementInput(event.target.value, unit);
-        setDraft(clean);
-        writeEditedValue(clean);
-      }}
-      className={cn(
-        'h-8 w-full py-0 text-right text-stat tabular-nums',
-        empty && 'border-dashed border-highlightColor bg-bgColor',
-      )}
-    />
-  );
-}
-
-function MeasurementLabel({ name }: { name: string }) {
-  const measurements = useMeasurements();
-  const empty = !(Number(measurements[name]) > 0);
-  return (
-    <label htmlFor={measurementInputId(name)}>
-      <Text component='span' className={cn('leading-tight text-textColor', empty && 'font-bold')}>
-        {measurementLabel(name)}
-      </Text>
-    </label>
-  );
-}
-
-function MeasurementCell({ name }: { name: string }) {
-  const { setHover } = useSheetMeasurementFocus();
-  return (
     <div
       onMouseEnter={() => setHover(name)}
       onMouseLeave={() => setHover(null)}
-      className='flex min-w-0 flex-col gap-1'
+      className={cn('min-w-0', scope === 'panel' && FULL_ROW.has(name) && '@[28.75rem]:col-span-2')}
     >
-      <MeasurementLabel name={name} />
-      <MeasurementInput name={name} />
-    </div>
-  );
-}
-
-function MeasurementGroup({
-  title,
-  measurements,
-}: {
-  title: string;
-  measurements: (typeof MODEL_MEASUREMENTS)[number][];
-}) {
-  const values = useMeasurements();
-  const { unit } = useMeasurementUnit();
-  const names = measurements.map((measurement) => measurement.name as string);
-  const filled = filledCount(values, names);
-
-  return (
-    <div className='min-w-0'>
-      <GroupLabel
-        flush
-        action={
-          <Text size='micro' variant='label' component='span' className='tabular-nums'>
-            {filled < names.length ? (
-              <span className='text-highlightColor'>
-                {filled}/{names.length} ·{' '}
-              </span>
-            ) : null}
-            {unit}
-          </Text>
-        }
-      >
-        <span className='text-textColor'>{shortMeasurementGroup(title)}</span>
-      </GroupLabel>
-      <div className='flex flex-col gap-3 pt-3'>
-        {measurements.map((measurement) => (
-          <MeasurementCell key={measurement.name} name={measurement.name} />
-        ))}
-      </div>
+      <LineField
+        ref={field.ref}
+        name={field.name}
+        id={`${measurementInputId(name)}${scope === 'card' ? '-card' : ''}`}
+        label={label}
+        pin={pin}
+        data-model-measurement={scope === 'panel' ? name : undefined}
+        data-mm={field.value ?? ''}
+        data-unit={unit}
+        inputMode={unit === 'mm' ? 'numeric' : 'decimal'}
+        pattern={unit === 'mm' ? '[0-9]*' : '[0-9]*[.,]?[0-9]*'}
+        enterKeyHint='next'
+        autoComplete='off'
+        value={shown}
+        onFocus={(event: FocusEvent<HTMLInputElement>) => {
+          const display = displayMeasurementValue(field.value, unit);
+          editStart.current = { display, valueMm: field.value };
+          setFocus(name);
+          setFocused(name);
+          setDraft(display);
+          event.currentTarget.select();
+          keepClearOfMobileStrip(event.currentTarget);
+        }}
+        onBlur={() => {
+          setDraft(null);
+          setFocused(null);
+          field.onBlur();
+        }}
+        onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            setDraft(null);
+            nextMeasurementInput(event.currentTarget)?.focus();
+            return;
+          }
+          if (event.metaKey || event.ctrlKey || event.altKey || event.key.length !== 1) return;
+          if (/[0-9]/.test(event.key)) return;
+          if (unit !== 'mm' && /[.,]/.test(event.key) && !/[.,]/.test(event.currentTarget.value))
+            return;
+          event.preventDefault();
+        }}
+        onChange={(event: ChangeEvent<HTMLInputElement>) => {
+          const clean = cleanMeasurementInput(event.target.value, unit);
+          setDraft(clean);
+          writeEditedValue(clean);
+        }}
+      />
     </div>
   );
 }
 
 export function MeasurementsHeaderActions() {
-  return (
-    <div className='flex items-center gap-2'>
-      <MeasurementUnitSwitch />
-    </div>
-  );
+  return <MeasurementUnitSwitch />;
 }
 
+/**
+ * Groups Torso / Arms / Legs / Vertical / Width, fields in the panel's grid: two columns when the
+ * panel's content is ≥ 460px wide, one below. Inseam and Height take a full row.
+ */
 export function MeasurementsFields() {
   return (
-    <div className='grid grid-cols-2 gap-x-4 gap-y-4 md:grid-cols-3 xl:grid-cols-5'>
+    <div className='@container flex flex-col gap-8'>
       {BODY_MEASUREMENT_GROUPS.map((group) => (
-        <MeasurementGroup key={group.title} title={group.title} measurements={group.measurements} />
+        <div key={group.title} className='flex flex-col gap-2'>
+          <Text component='h3' className='text-ink'>
+            {groupTitle(group.title)}
+          </Text>
+          <div className='grid grid-cols-1 gap-x-6.5 gap-y-4 @[28.75rem]:grid-cols-2'>
+            {group.measurements.map((m) => (
+              <MeasurementLine key={m.name} name={m.name} />
+            ))}
+          </div>
+        </div>
       ))}
     </div>
   );

@@ -122,9 +122,6 @@ const TierAudit = lazyRoute(() =>
 const Models = lazyRoute(() =>
   import('components/managers/models').then((m) => ({ default: m.Models })),
 );
-const Model = lazyRoute(() =>
-  import('components/managers/model/page').then((m) => ({ default: m.Model })),
-);
 const Fittings = lazyRoute(() =>
   import('components/managers/fittings').then((m) => ({ default: m.Fittings })),
 );
@@ -238,9 +235,6 @@ const AcctEvents = lazyRoute(() =>
 );
 const Employees = lazyRoute(() =>
   import('components/managers/employees').then((m) => ({ default: m.Employees })),
-);
-const TaskDetail = lazyRoute(() =>
-  import('components/managers/tasks/task-detail/page').then((m) => ({ default: m.TaskDetail })),
 );
 const Fulfillment = lazyRoute(() =>
   import('components/managers/fulfillment').then((m) => ({ default: m.Fulfillment })),
@@ -417,8 +411,8 @@ const app = (
                   <Route path={ROUTES.hacker} element={<HackerManager />} />
                   <Route path={ROUTES.tierAudit} element={<TierAudit />} />
                   <Route path={ROUTES.models} element={<Models />} />
-                  <Route path={ROUTES.addModel} element={<Model />} />
-                  <Route path={ROUTES.singleModel} element={<Model />} />
+                  <Route path={ROUTES.addModel} element={<Models />} />
+                  <Route path={ROUTES.singleModel} element={<Models />} />
                   <Route path={ROUTES.fittings} element={<Fittings />} />
                   <Route path={ROUTES.addFitting} element={<Fitting />} />
                   <Route path={ROUTES.singleFitting} element={<Fitting />} />
@@ -468,7 +462,7 @@ const app = (
                     <Route path={ROUTES.accountingEvents} element={<AcctEvents />} />
                   </Route>
                   <Route path={ROUTES.employees} element={<Employees />} />
-                  <Route path={ROUTES.taskDetails} element={<TaskDetail />} />
+                  <Route path={ROUTES.taskDetails} element={<Tasks />} />
                   <Route path={ROUTES.accounts} element={<Accounts />} />
                   {/* Свой аккаунт открыт любому вошедшему и потому НЕ гейтится секцией —
                       в отличие от /accounts, который гейт закрывает и который уводит сюда

@@ -1,0 +1,70 @@
+/* Taskboard — the Models screen's fill system (Lekalo typography: hierarchy by size and grey, never
+   weight, normal case). Unlayered on purpose: it outranks the layered Tailwind utilities
+   (`uppercase`, `font-bold`, tracking) that older shared primitives carry, on this screen only.
+   Portalled modals and popovers sit outside `.tasks-screen` and keep the system look. */
+.tasks-screen,
+.tasks-screen * {
+  text-transform: none;
+  font-weight: 400;
+  letter-spacing: normal;
+}
+
+/* The taskboard sits on white (owner frame `frame-task-main.svg`), not on the grey page ground.
+   Scoped: the body turns white only while this screen is mounted. */
+body:has(.tasks-screen) {
+  background: var(--color-bgColor);
+}
+
+/* Opening a task: the panel turns in from the right (the Models `openR`, 1100ms soft, 90ms late). */
+@keyframes tasks-open-r {
+  from {
+    transform: perspective(1400px) rotateY(68deg);
+    opacity: 0;
+  }
+  38% {
+    opacity: 1;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* The action bar's message arrives: a short rise and fade on the soft ease. */
+@keyframes tasks-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* A row that comes in (a step, a link, an attachment, a comment) slides open from nothing
+   (owner: «плавная съезжающая анимация для всех раздвиганий полей и текстов»). */
+@keyframes tasks-slide-in {
+  from {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    max-height: 40rem;
+    transform: none;
+  }
+}
+
+/* The page never scrolls on the board: every status column scrolls by itself. */
+html:has(.tasks-board-mode),
+body:has(.tasks-board-mode) {
+  overflow: hidden;
+}
+
+/* Hovering a status header turns every grey title of that column ink. */
+.tasks-screen [data-drop-column]:has([data-column-head]:hover) [data-tile-title],
+.tasks-screen [data-task-card]:hover [data-tile-title] {
+  color: var(--color-ink);
+}

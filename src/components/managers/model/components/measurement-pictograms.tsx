@@ -146,7 +146,7 @@ const TICK = 2.5;
 const EMPHASIS = { ...LINE, strokeWidth: LINE_BOLD } as const;
 const TICKS = { ...LINE, strokeWidth: LINE_EMPHASIS } as const;
 
-function Highlight({ geometry }: { geometry: Geometry }) {
+function Highlight({ geometry, dashed: forceDash }: { geometry: Geometry; dashed?: boolean }) {
   switch (geometry.kind) {
     case 'band': {
       const { y, x1, x2, dashed } = geometry;
@@ -154,7 +154,7 @@ function Highlight({ geometry }: { geometry: Geometry }) {
         <g>
           <line
             {...EMPHASIS}
-            strokeDasharray={dashed ? DASH : undefined}
+            strokeDasharray={dashed || forceDash ? DASH : undefined}
             x1={x1}
             y1={y}
             x2={x2}
@@ -171,7 +171,7 @@ function Highlight({ geometry }: { geometry: Geometry }) {
         <g>
           <line
             {...EMPHASIS}
-            strokeDasharray={dashed ? DASH : undefined}
+            strokeDasharray={dashed || forceDash ? DASH : undefined}
             x1={x}
             y1={y1}
             x2={x}
@@ -186,6 +186,7 @@ function Highlight({ geometry }: { geometry: Geometry }) {
       return (
         <ellipse
           {...EMPHASIS}
+          strokeDasharray={forceDash ? DASH : undefined}
           cx={geometry.cx}
           cy={geometry.cy}
           rx={geometry.rx}
@@ -193,7 +194,13 @@ function Highlight({ geometry }: { geometry: Geometry }) {
         />
       );
     case 'trace':
-      return <polyline {...EMPHASIS} points={geometry.points} />;
+      return (
+        <polyline
+          {...EMPHASIS}
+          strokeDasharray={forceDash ? DASH : undefined}
+          points={geometry.points}
+        />
+      );
   }
 }
 
@@ -225,6 +232,82 @@ export function MeasurementPictogram({
         ))}
       </g>
       <Highlight geometry={geometry} />
+    </svg>
+  );
+}
+
+/** A hit area for a segment: the same shape, wide and transparent, so a click lands easily. */
+function HitArea({ geometry }: { geometry: Geometry }) {
+  const hit = { stroke: 'transparent', strokeWidth: 6, fill: 'none' } as const;
+  switch (geometry.kind) {
+    case 'band':
+      return <line {...hit} x1={geometry.x1} y1={geometry.y} x2={geometry.x2} y2={geometry.y} />;
+    case 'vband':
+      return <line {...hit} x1={geometry.x} y1={geometry.y1} x2={geometry.x} y2={geometry.y2} />;
+    case 'ring':
+      return (
+        <ellipse {...hit} cx={geometry.cx} cy={geometry.cy} rx={geometry.rx} ry={geometry.ry} />
+      );
+    case 'trace':
+      return <polyline {...hit} points={geometry.points} />;
+  }
+}
+
+/**
+ * The measurement SCHEME: the same mannequin with every measurement's segment on it. The one being
+ * filled (`active`) is the Lekalo selection blue, dashed; the others are quiet. Each segment is a
+ * door: `onPick(name)` — the caller focuses that measurement's field.
+ */
+export function MeasurementScheme({
+  names,
+  active,
+  onPick,
+  className,
+}: {
+  /** `common_BodyMeasurementName` values, in the sheet's order. */
+  names: readonly string[];
+  active?: string | null;
+  onPick?: (name: string) => void;
+  className?: string;
+}) {
+  return (
+    <svg
+      viewBox='0 0 64 96'
+      className={cn('h-full w-full', className)}
+      role='group'
+      aria-label='measurement scheme'
+      xmlns='http://www.w3.org/2000/svg'
+    >
+      <g opacity={GHOST_OPACITY}>
+        <circle {...LINE} cx={32} cy={10} r={6} />
+        {MANNEQUIN_LINES.map((points) => (
+          <polyline {...LINE} key={points} points={points} />
+        ))}
+      </g>
+      {names.map((name) => {
+        const on = name === active;
+        const geometry = resolveMeasurementGeometry(name);
+        return (
+          <g
+            key={name}
+            role='button'
+            aria-label={name
+              .replace(/^BODY_MEASUREMENT_NAME_/, '')
+              .toLowerCase()
+              .replace(/_/g, ' ')}
+            aria-pressed={on}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onPick?.(name)}
+            className={cn(
+              'cursor-pointer transition-colors duration-500 ease-soft',
+              on ? 'text-sel' : 'text-placeholder hover:text-ink',
+            )}
+          >
+            <HitArea geometry={geometry} />
+            <Highlight geometry={geometry} dashed={on} />
+          </g>
+        );
+      })}
     </svg>
   );
 }

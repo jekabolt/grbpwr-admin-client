@@ -1,78 +1,82 @@
-import { formatSizeName } from 'components/managers/product/utility/sizes';
-import { cn } from 'lib/utility';
+import { common_Size } from 'api/proto-http/admin';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Arrow, Chip, FormField, FormItem, FormLabel } from 'ui';
+import { BracketOptions, FormField, PinToggle } from 'ui';
+import { SIZE_PIN_CATEGORIES, usePinFor } from './model-pins';
 import { ModelFormData } from './schema';
-import { SizePickerModal } from './size-picker-modal';
-import { useSizeNames } from './use-size-systems';
+import { SIZE_CATEGORY_ORDER } from './size-categories';
+import { useSizeSystems } from './use-size-systems';
 
-// Multi-select of default sample sizes via the shared category/gender modal.
+/** `M_38BO_F` → `M / 38`, `xs` → `XS`, `42.5` stays. */
+export function sizeOptionLabel(name = ''): string {
+  const [letter, system] = name.split('_');
+  const number = system?.match(/\d+(\.\d+)?/)?.[0];
+  return number ? `${letter.toUpperCase()} / ${number}` : letter.toUpperCase();
+}
+
+const LABEL = new Map(SIZE_CATEGORY_ORDER.map((c) => [c.key, c.label]));
+
+function SizeRow({
+  category,
+  sizes,
+  selectedIds,
+  onChange,
+}: {
+  category: (typeof SIZE_PIN_CATEGORIES)[number];
+  sizes: common_Size[];
+  selectedIds: number[];
+  onChange: (ids: number[]) => void;
+}) {
+  const label = LABEL.get(category) ?? category;
+  const pin = usePinFor(`sizes.${category}`, label);
+  const inCategory = new Set(sizes.map((s) => s.id ?? 0));
+  const chosen = selectedIds.filter((id) => inCategory.has(id)).map(String);
+
+  return (
+    <BracketOptions
+      ruled
+      multiple
+      overflowList='cascade'
+      ariaLabel={label}
+      label={`${label.charAt(0).toUpperCase()}${label.slice(1)}:`}
+      options={sizes.map((s) => ({ value: String(s.id), label: sizeOptionLabel(s.name) }))}
+      values={chosen}
+      // Several sizes per category (owner: «верни механику Multiple Option Choices»).
+      onValuesChange={(next) =>
+        onChange([...selectedIds.filter((id) => !inCategory.has(id)), ...next.map(Number)])
+      }
+      end={pin && <PinToggle {...pin} />}
+    />
+  );
+}
+
+/**
+ * Default sample sizes: one ruled row per category (Tops / Bottoms / Tailored / Shoes), offering the
+ * sizes that fit the model's gender (`useSizeSystems`). Storage is unchanged — `defaultSizeIds` —
+ * and an id outside these four categories is kept as it is.
+ */
 export function DefaultSizesField() {
   const { control } = useFormContext<ModelFormData>();
   const gender = useWatch({ control, name: 'gender' }) as string;
-  const sizeById = useSizeNames();
+  const selectedIds = (useWatch({ control, name: 'defaultSizeIds' }) ?? []) as number[];
+  const { permitted } = useSizeSystems({ gender, selectedIds });
 
   return (
     <FormField
       control={control}
       name='defaultSizeIds'
-      render={({ field }) => {
-        const selectedIds = field.value ?? [];
-        const toggle = (id: number) => {
-          const selected = new Set(selectedIds);
-          if (selected.has(id)) selected.delete(id);
-          else selected.add(id);
-          field.onChange([...selected]);
-        };
-        const remove = (id: number) =>
-          field.onChange(selectedIds.filter((selectedId) => selectedId !== id));
-
-        return (
-          <FormItem>
-            <FormLabel>sizes</FormLabel>
-            {/* The whole box is the popover trigger (a div, so chip × buttons are not nested in a
-                button); × stops propagation, so removing never opens. Box = Input/Select box. */}
-            <SizePickerModal
-              selectedIds={selectedIds}
-              onToggle={toggle}
-              gender={gender}
-              title='sizes'
-              renderTrigger={(isOpen) => (
-                <div
-                  role='button'
-                  tabIndex={0}
-                  aria-label='sizes'
-                  onKeyDown={(e) => {
-                    if (e.target !== e.currentTarget) return;
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      e.currentTarget.click();
-                    }
-                  }}
-                  className='flex min-h-6.5 w-full cursor-pointer flex-wrap items-center gap-1 border border-borderColor bg-bgColor px-2 py-0.5 text-textBaseSize transition-colors focus:border-textColor focus:outline-none data-[state=open]:border-textColor'
-                >
-                  {selectedIds.map((id) => (
-                    <Chip
-                      key={id}
-                      onRemove={() => remove(id)}
-                      className='h-5 px-1.5 py-0 text-textBaseSize leading-4 text-textColor'
-                    >
-                      {formatSizeName(sizeById.get(id) ?? `#${id}`)}
-                    </Chip>
-                  ))}
-                  <Arrow
-                    aria-hidden
-                    className={cn(
-                      'ml-auto shrink-0 rotate-180 text-textColor',
-                      isOpen && 'rotate-0',
-                    )}
-                  />
-                </div>
-              )}
+      render={({ field }) => (
+        <div className='flex flex-col gap-4'>
+          {SIZE_PIN_CATEGORIES.map((category) => (
+            <SizeRow
+              key={category}
+              category={category}
+              sizes={permitted.find((g) => g.key === category)?.sizes ?? []}
+              selectedIds={field.value ?? []}
+              onChange={field.onChange}
             />
-          </FormItem>
-        );
-      }}
+          ))}
+        </div>
+      )}
     />
   );
 }

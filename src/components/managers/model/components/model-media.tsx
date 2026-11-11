@@ -1,5 +1,6 @@
 import { common_MediaFull, common_Model } from 'api/proto-http/admin';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
+import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { useUploadMedia } from 'components/managers/media/utils/useUploadMedia';
 import { PictureBusy } from 'components/managers/tech-card/annotation/picture-busy';
 import {
@@ -10,7 +11,7 @@ import {
 } from 'components/shared/media-viewer/media-viewer';
 import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { useController, useFormContext } from 'react-hook-form';
 import { Button, Close, TILE_QUIET } from 'ui';
 import { ModelFormData } from './schema';
@@ -115,8 +116,7 @@ export function ModelMedia({
   const replacePhoto = async (dataUrl: string, item: MediaViewerItem) => {
     const sourceId = item.meta?.id ?? 0;
     const before = getValues('mediaIds') ?? [];
-    if (!sourceId || before[0] !== sourceId)
-      throw new Error('slot changed');
+    if (!sourceId || before[0] !== sourceId) throw new Error('slot changed');
 
     const uploaded = await uploadMedia.mutateAsync(dataUrl);
     const newId = uploaded.id;
@@ -183,5 +183,49 @@ export function ModelMedia({
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * The panel's photo door (Lekalo frame): a fill button that opens the media library. Same rule as
+ * `ModelMedia`: a pick replaces the photo (`mediaIds[0]`) and keeps the rest. The photo itself is
+ * shown on the model's card, not in the panel.
+ */
+export function ModelPhotoPick({
+  disabled,
+  trigger,
+  onPicked,
+}: {
+  disabled?: boolean;
+  /** Replaces the fill button (the active card's `+`); rendered through Radix `asChild`. */
+  trigger?: ReactNode;
+  /** The picked media, so a card can show it before the model is saved and re-read. */
+  onPicked?: (media: common_MediaFull) => void;
+}) {
+  const { control } = useFormContext<ModelFormData>();
+  const { field } = useController({ control, name: 'mediaIds' });
+  const ids = field.value ?? [];
+  return (
+    <MediaSelector
+      label='Upload Profile Picture'
+      purpose='model photos'
+      aspectRatio={['3:4']}
+      showVideos={false}
+      allowMultiple={false}
+      saveSelectedMedia={(picked) => {
+        const m = picked.find((p) => (p.id ?? 0) > 0);
+        if (!m?.id) return;
+        const id = m.id;
+        onPicked?.(m);
+        field.onChange([id, ...ids.slice(1).filter((r) => r !== id)]);
+      }}
+      trigger={
+        trigger ?? (
+          <Button type='button' variant='fill' disabled={disabled} className='w-full'>
+            Upload Profile Picture
+          </Button>
+        )
+      }
+    />
   );
 }

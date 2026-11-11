@@ -1,0 +1,43 @@
+/* Employees — the Models screen's fill system (Lekalo typography: hierarchy by size and grey, never
+   weight, normal case). Unlayered on purpose: it outranks the layered Tailwind utilities
+   (`uppercase`, `font-bold`, tracking) that older shared primitives carry, on this screen only.
+   Portalled modals and popovers sit outside `.employees-screen` and keep the system look. */
+.employees-screen,
+.employees-screen * {
+  text-transform: none;
+  font-weight: 400;
+  letter-spacing: normal;
+}
+
+/* The screen sits on white, not on the grey page ground. Scoped: the body turns white only while
+   this screen is mounted. */
+body:has(.employees-screen) {
+  background: var(--color-bgColor);
+}
+
+/* Opening a person: the panel turns in from the right (the Models `openR`, 1100ms soft, 90ms late). */
+@keyframes employees-open-r {
+  from {
+    transform: perspective(1400px) rotateY(68deg);
+    opacity: 0;
+  }
+  38% {
+    opacity: 1;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* The action bar's message, a board arriving: a short rise and fade on the soft ease. */
+@keyframes employees-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

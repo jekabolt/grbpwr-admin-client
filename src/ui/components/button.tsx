@@ -52,6 +52,21 @@ export const buttonVariants = cva(
           'press:bg-bgColor',
           'press:text-textColor',
         ],
+        // The fill system's (Lekalo) action: a `fieldFill` slab, 33px, 12px ink, centred. No frame.
+        fill: [
+          'h-8.25',
+          'px-4',
+          'bg-fieldFill',
+          'text-textBaseSize',
+          'text-ink',
+          'text-center',
+          'cursor-pointer',
+          'hover:bg-segOff',
+          'disabled:text-placeholder',
+          'disabled:hover:bg-fieldFill',
+          'press:bg-ink',
+          'press:text-bgColor',
+        ],
         secondary: [
           'border',
           'border-borderColor',

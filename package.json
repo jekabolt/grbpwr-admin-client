@@ -262,6 +262,7 @@
     "embla-carousel-wheel-gestures": "^8.0.2",
     "fflate": "^0.8.3",
     "formik": "^2.4.5",
+    "iconoir": "7.12.1",
     "jspdf": "^4.2.1",
     "opentype.js": "^1.3.4",
     "pdfjs-dist": "^4",

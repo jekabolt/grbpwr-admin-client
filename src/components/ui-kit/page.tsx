@@ -11,6 +11,8 @@ import {
 import { actionDemos } from './actions';
 import { dataDemos } from './data';
 import { formDemos, SampleForm } from './form-fields';
+import { dropdownDemos } from './dropdown-demo';
+import { fillDemos } from './fill-system';
 import { iconDemos } from './icons';
 import { inputDemos } from './inputs';
 import { KitEntry, KitGroup } from './kit-entry';
@@ -19,6 +21,7 @@ import { headerActionsDemo, neighboursDemo } from './neighbours';
 import { mediaDemos } from './media';
 import { overlayDemos } from './overlays';
 import { statusDemos } from './status';
+import { taskboardDemos } from './taskboard-system';
 import { TOKEN_BLOCKS, TOKEN_COUNT, TokenEntry, visibleTokens } from './tokens';
 
 /**
@@ -31,6 +34,8 @@ const GROUPS: KitGroup[] = [
   { label: 'layout', demos: [neighboursDemo, headerActionsDemo, ...layoutDemos] },
   { label: 'actions', demos: actionDemos },
   { label: 'inputs', demos: inputDemos },
+  { label: 'fill system', demos: [...fillDemos, ...dropdownDemos] },
+  { label: 'taskboard system', demos: taskboardDemos },
   { label: 'form fields', demos: formDemos, Provider: SampleForm },
   { label: 'data', demos: dataDemos },
   { label: 'status', demos: statusDemos },

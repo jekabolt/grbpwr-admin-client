@@ -1,4 +1,10 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { common_GenderEnum, common_ModelInsert } from 'api/proto-http/admin';
 
@@ -104,5 +110,26 @@ export function useDeleteModel() {
       queryClient.removeQueries({ queryKey: modelKeys.detail(id) });
       queryClient.invalidateQueries({ queryKey: modelKeys.lists() });
     },
+  });
+}
+
+// How many models each gender filter would show: ListModels' `total` with `limit: 1` per gender.
+// Under `modelKeys.lists()`, so every create / update / delete refreshes the counts too.
+export function useModelCounts(genders: readonly string[]) {
+  return useQueries({
+    queries: genders.map((g) => ({
+      queryKey: [...modelKeys.lists(), 'count', g],
+      queryFn: async () => {
+        const response = await adminService.ListModels({
+          limit: 1,
+          offset: 0,
+          orderFactor: 'ORDER_FACTOR_DESC',
+          gender: (g || 'GENDER_ENUM_UNKNOWN') as common_GenderEnum,
+          name: '',
+        });
+        return response.total ?? 0;
+      },
+      staleTime: 5 * 60 * 1000,
+    })),
   });
 }

@@ -13,6 +13,7 @@ import {
   FormMessage,
   Input,
   InputField,
+  LineInputField,
   RichTextField,
   SelectField,
   TextareaField,
@@ -128,6 +129,16 @@ export const formDemos: KitDemo[] = [
           <InputField name='name' label='name' />
           <InputField name='qty' label='qty' />
           <InputField name='code' label='code' disabled />
+        </>,
+      ),
+  },
+  {
+    names: ['LineInputField'],
+    Demo: () =>
+      grid(
+        <>
+          <LineInputField name='name' placeholder='Model Name' />
+          <LineInputField name='qty' placeholder='qty' />
         </>,
       ),
   },

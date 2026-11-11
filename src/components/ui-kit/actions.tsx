@@ -9,6 +9,7 @@ import { KitDemo, KitLines, KitMatrix } from './kit-entry';
 const SIZES = ['xs', 'sm', 'default', 'lg'] as const;
 const VARIANTS = [
   'main',
+  'fill',
   'secondary',
   'underline',
   'default',
