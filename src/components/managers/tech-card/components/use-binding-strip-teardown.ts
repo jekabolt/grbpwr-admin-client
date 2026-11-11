@@ -4,14 +4,14 @@ import { useParams } from 'react-router-dom';
 
 import { rowsOf, useSeamsStore } from './assembly-seams/seams-store';
 import { useSeamWrites } from './assembly-seams/use-seam-decisions';
-import { teardownBindingStrips } from './binding-step';
+import { runBindingTeardown, teardownBindingStrips } from './binding-step';
 import type { CutStrip } from './cut-strip-editor/use-cut-strip';
 import type { TechCardFormData } from './schema';
 import { useStepSeams } from './step-seams/step-seams-context';
 
 type Scope = Parameters<typeof teardownBindingStrips>[1];
 
-/** Delete stored seam rows first, then apply the pure binding-strip teardown to the live form. */
+/** Delete stored seam rows first, then apply the binding-strip teardown read after that await. */
 export function useBindingStripTeardown() {
   const ctx = useStepSeams();
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
@@ -33,28 +33,25 @@ export function useBindingStripTeardown() {
       const seamState = useSeamsStore.getState();
       // A card switch settles in an effect. Never let the previous card's rows authorize a delete.
       const seamReady = !cardId || seamState.cardId === cardId;
-      const seamRows = seamReady ? rowsOf(seamState) : [];
-      const plan = teardownBindingStrips(
+      return runBindingTeardown(
         {
-          cutStrips: (getValues('cutStrips') ?? []) as CutStrip[],
-          operations: getValues('operations') ?? [],
-          seamRows,
+          read: () => ({
+            cutStrips: (getValues('cutStrips') ?? []) as CutStrip[],
+            operations: getValues('operations') ?? [],
+          }),
+          seamRows: seamReady ? rowsOf(seamState) : [],
+          seamReady,
+          removeRows,
+          write: (plan) => {
+            setValue('cutStrips', plan.strips as never, { shouldDirty: true });
+            for (const patch of plan.operations) {
+              setValue(`operations.${patch.index}.inputKeys`, patch.inputKeys, { shouldDirty: true });
+              setValue(`operations.${patch.index}.seamKeys`, patch.seamKeys, { shouldDirty: true });
+            }
+          },
         },
         scope,
       );
-      if (!plan.operations.length && plan.strips.length === (getValues('cutStrips') ?? []).length)
-        return true;
-      if (!seamReady) return false;
-      const removeKeys = new Set(plan.seamRowsToRemove);
-      const rows = seamRows.filter((row) => removeKeys.has(row.seamKey));
-      if (rows.length && !(await removeRows(rows))) return false;
-
-      setValue('cutStrips', plan.strips as never, { shouldDirty: true });
-      for (const patch of plan.operations) {
-        setValue(`operations.${patch.index}.inputKeys`, patch.inputKeys, { shouldDirty: true });
-        setValue(`operations.${patch.index}.seamKeys`, patch.seamKeys, { shouldDirty: true });
-      }
-      return true;
     },
     [cardId, getValues, removeRows, setValue],
   );

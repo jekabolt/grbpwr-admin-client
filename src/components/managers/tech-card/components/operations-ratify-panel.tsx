@@ -24,6 +24,9 @@ import {
   type WorkCatalog,
 } from './operation-work';
 import type { TechCardFormData } from './schema';
+import { stepKindFlip } from './step-kind-flip';
+import { useBindingStripTeardown } from './use-binding-strip-teardown';
+import { useTopstitchLineTeardown } from './use-topstitch-line-teardown';
 
 // ПАНЕЛЬ РАТИФИКАЦИИ — ЭКРАН, КОТОРЫЙ НЕ СПРАШИВАЕТ «ЧТО ЭТО».
 //
@@ -201,6 +204,8 @@ export function OperationsRatifyPanel(props: RatifyPanelProps) {
 
 function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: RatifyPanelProps) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
+  const teardownBinding = useBindingStripTeardown();
+  const teardownTopstitch = useTopstitchLineTeardown();
   const operations = (useWatch({ control, name: 'operations' }) ?? []) as OperationRow[];
   const defaultSeamClass = useWatch({
     control,
@@ -322,7 +327,7 @@ function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: Ratif
    * (`press_action` дождался своего контракта, не написав ни разу и не сломав ни одного шага).
    */
   const apply = useCallback(
-    (row: RatifyRow, p: RatifyProposal) => {
+    async (row: RatifyRow, p: RatifyProposal) => {
       // ГЕЙТ ЗАМОРОЗКИ ПЕРВОЙ СТРОКОЙ, КАК У ВСЕХ МУТАТОРОВ КАРТОЧКИ (`removeOperation`,
       // `moveOperation`, `addInputToOperation`, `renameUnit`). Тело панели на
       // выпущенной карточке не монтируется вовсе — но ПРИКРЫТИЕ РАЗМЕТКОЙ НЕ КОНТРАКТ: этот гейт
@@ -338,7 +343,19 @@ function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: Ratif
       // «СНЯТЬ ВИД» — ОДНА ЗАПИСЬ И БОЛЬШЕ НИЧЕГО, слово в слово как у строки шага: ни глагол, ни
       // машинка, ни одно свойство не трогаются. Человек сказал «эта работа названа неправильно», а
       // не «этот шаг стал другим»; строка немедленно возвращается на прежнюю деривацию.
+      const stored = (getValues('operations') ?? [])[index];
+      // The same kind-change teardown as the step's own work picker (E1): a step that stops being
+      // B1 or A2 here must not keep hidden strips or lines that still count in the norm.
+      const leave = async (next: Partial<NonNullable<typeof stored>>) => {
+        if (!stored) return true;
+        const flip = stepKindFlip(stored, { ...stored, ...next });
+        if (flip.binding && !(await teardownBinding({ stepIndexes: [index] }))) return false;
+        if (flip.topstitch) teardownTopstitch({ stepIndexes: [index] });
+        return true;
+      };
+
       if (!p.token) {
+        if (!(await leave({ work: '' }))) return;
         setValue(`${path}.work`, '', { shouldDirty: true });
         setValue(`${path}.workVariant`, variantAfterWork('', current.workVariant ?? ''), {
           shouldDirty: true,
@@ -355,14 +372,15 @@ function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: Ratif
       const item = catalog.byToken.get(p.token);
       if (!item) return;
 
-      setValue(`${path}.work`, p.token, { shouldDirty: true });
-
       const { writes, clears, links } = workApplication({
         item,
         kind: KIND_BY_WORK_TOKEN.get(p.token),
         current,
         park: { machines: parkMachines, presses: parkPresses },
       });
+      if (!(await leave({ work: p.token, ...writes, ...clears }))) return;
+
+      setValue(`${path}.work`, p.token, { shouldDirty: true });
       for (const [field, value] of Object.entries(writes) as Array<
         [OperationFormStringField, string]
       >) {
@@ -398,7 +416,18 @@ function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: Ratif
         return next;
       });
     },
-    [blanks, bomKindByKey, catalog, frozen, getValues, parkMachines, parkPresses, setValue],
+    [
+      blanks,
+      bomKindByKey,
+      catalog,
+      frozen,
+      getValues,
+      parkMachines,
+      parkPresses,
+      setValue,
+      teardownBinding,
+      teardownTopstitch,
+    ],
   );
 
   /**

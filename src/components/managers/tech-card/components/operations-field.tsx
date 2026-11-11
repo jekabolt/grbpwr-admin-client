@@ -300,12 +300,14 @@ import {
   bindingBomLines,
   bindingLineSub,
   bindingStripsOfStep,
+  bindingUndoLinks,
   freshBindingStrip,
   isBindingLine,
   isBindingOperation,
 } from './binding-step';
 import { useBindingStripTeardown } from './use-binding-strip-teardown';
 import { useTopstitchLineTeardown } from './use-topstitch-line-teardown';
+import { stepKindFlip } from './step-kind-flip';
 import { isTopstitchThreadLine, type TopstitchLine } from './topstitch-lines';
 import { PieceAddChip, PieceRef, useFormAssemblyPieces, useFormPieces } from './piece-picker';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
@@ -3598,10 +3600,15 @@ function OperationEditor({
     const row = stepFields.find((f) => f.field === field);
     if (!row) return;
     const p = `operations.${index}` as const;
+    const before = getValues(`${p}.${row.field}`);
     if (row.discipline === 'enum') setValue(`${p}.${row.field}`, row.none, { shouldDirty: true });
     else if (row.discipline === 'text') setValue(`${p}.${row.field}`, '', { shouldDirty: true });
     else if (row.discipline === 'int') setValue(`${p}.${row.field}`, 0, { shouldDirty: true });
     else setValue(`${p}.${row.field}`, undefined, { shouldDirty: true });
+    // A cleared kind field is a kind change like any select: owned strips and lines go with it.
+    if (isKindField(row.field)) {
+      void afterKindField(row.field, String(before ?? ''))(getValues(`${p}.${row.field}`));
+    }
   };
 
   // ЗДЕСЬ СТОЯЛИ ЧЕТЫРЕ ЭФФЕКТА ОЧИСТКИ, И ИХ БОЛЬШЕ НЕТ.
@@ -3920,6 +3927,24 @@ function OperationEditor({
    * резолв, и пять пунктов не брались ВОВСЕ — то есть выбор человека стирался целиком ради поля,
    * которое человек не заполнял.
    */
+  /**
+   * E1: the plain selects that decide the step kind (operation, machine, topstitch mode, seam class)
+   * take the step's owned rows with them exactly like `applyWork`. The field is already written when
+   * this runs, so the value before the change comes from this render's watch. A refused seam delete
+   * puts the field back: a B1 step never leaves B1 with its strips still priced.
+   */
+  const afterKindField =
+    (field: KindField, before: string) =>
+    async (value: string | number | undefined) => {
+      const next = getValues(`operations.${index}`);
+      const flip = stepKindFlip({ ...next, [field]: before }, { ...next, [field]: value ?? '' });
+      if (flip.binding && !(await teardownBinding({ stepIndexes: [index] }))) {
+        setValue(`operations.${index}.${field}`, before, { shouldDirty: true });
+        return;
+      }
+      if (flip.topstitch) teardownTopstitch({ stepIndexes: [index] });
+    };
+
   const applyWork = async (token: string) => {
     const p = `operations.${index}` as const;
     const currentOperation = getValues(p);
@@ -5058,6 +5083,7 @@ function OperationEditor({
             name={`operations.${index}.operationType`}
             label='operation *'
             items={operationTypeOptionsFor(opType)}
+            onAfterChange={afterKindField('operationType', opType)}
             className={selectNoGrow}
           />
         )}
@@ -5065,6 +5091,7 @@ function OperationEditor({
           <SelectField
             name={`operations.${index}.machineType`}
             label='machine *'
+            onAfterChange={afterKindField('machineType', machineType)}
             items={
               askedMachines
                 ? machineTypeOptionsFor(machineType).filter(
@@ -5178,6 +5205,7 @@ function OperationEditor({
                 <SelectField
                   name={`operations.${index}.topstitchMode`}
                   label='at'
+                  onAfterChange={afterKindField('topstitchMode', topstitchMode)}
                   items={topstitchModeOptionsFor(topstitchMode)}
                   className={selectNoGrow}
                 />
@@ -5543,6 +5571,7 @@ function OperationEditor({
               <SelectField
                 name={`operations.${index}.operationType`}
                 label='operation'
+                onAfterChange={afterKindField('operationType', opType)}
                 items={operationTypeOptionsFor(opType)}
                 className={selectNoGrow}
               />
@@ -5551,6 +5580,7 @@ function OperationEditor({
               <SelectField
                 name={`operations.${index}.machineType`}
                 label='machine'
+                onAfterChange={afterKindField('machineType', machineType)}
                 items={machineTypeOptionsFor(machineType)}
                 className={selectNoGrow}
               />
@@ -5605,6 +5635,7 @@ function OperationEditor({
                 <SelectField
                   name={`operations.${index}.topstitchMode`}
                   label='topstitch'
+                  onAfterChange={afterKindField('topstitchMode', topstitchMode)}
                   items={topstitchModeOptionsFor(topstitchMode)}
                   className={selectNoGrow}
                 />
@@ -5970,6 +6001,7 @@ function OperationEditor({
                 <SelectField
                   name={`operations.${index}.seamClass`}
                   label='seam class'
+                  onAfterChange={afterKindField('seamClass', seamClass)}
                   items={seamClassOptions}
                   className={selectNoGrow}
                 />
@@ -6085,6 +6117,12 @@ function OperationEditor({
 // Layout is a rail + editor, the same grammar the hero and archive block editors use: the whole
 // sequence stays on one screen as 26px lines (which is what makes it read as an ORDER), and the
 // step you are on opens beside it as a full sewing spec.
+/** Step fields whose change can move a step in or out of B1 / A2 (see `stepKindFlip`). */
+const KIND_FIELDS = ['operationType', 'machineType', 'topstitchMode', 'seamClass'] as const;
+type KindField = (typeof KIND_FIELDS)[number];
+const isKindField = (field: string): field is KindField =>
+  (KIND_FIELDS as readonly string[]).includes(field);
+
 export function OperationsField({
   activePin = null,
   onActivePinChange,
@@ -6413,8 +6451,19 @@ export function OperationsField({
   /** Everything a removal must return, read while the row is still on the card. */
   const removeRecord = (index: number): RemoveEntry | null => {
     const operations = (getValues('operations') ?? []) as OperationFormValue[];
-    const row = operations[index];
-    if (!row?.historyKey) return null;
+    const stored = operations[index];
+    if (!stored?.historyKey) return null;
+    // The row as it stands after its binding teardown: strips and seams that the removal deletes
+    // never come back, so the undo neither names nor restores them.
+    const links = bindingUndoLinks(
+      {
+        cutStrips: (getValues('cutStrips') ?? []) as CutStrip[],
+        operations,
+        seamRows: rowsOf(useSeamsStore.getState()),
+      },
+      index,
+    );
+    const row = { ...stored, ...links };
     const onCard = cardKeysNow();
     const seamKeys = [...(row.seamKeys ?? []), ...(row.poseKeys ?? [])];
     const number = operationStepNumber(index);
@@ -6423,7 +6472,7 @@ export function OperationsField({
     );
     return {
       kind: 'remove',
-      historyKey: row.historyKey,
+      historyKey: stored.historyKey,
       row: structuredClone(row),
       before: operations.map((op) => op.historyKey ?? ''),
       issues: structuredClone(linkedIssues),
