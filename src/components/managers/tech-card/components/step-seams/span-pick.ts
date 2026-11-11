@@ -343,7 +343,8 @@ export function storedSeamOverlapping(
   );
 }
 
-const overlaps = (
+/** Whether two lists of parts share a stretch of any edge (a chain counts by its members). */
+export const sidePartsOverlap = (
   x: readonly SidePart[],
   y: readonly SidePart[],
   geoms: ReadonlyMap<string, PieceGeom>,
@@ -367,8 +368,8 @@ export function repeatsStoredSeam(
 ): boolean {
   return stored.some(
     ({ parts }) =>
-      (overlaps(a, parts.a, geoms) && overlaps(b, parts.b, geoms)) ||
-      (overlaps(a, parts.b, geoms) && overlaps(b, parts.a, geoms)),
+      (sidePartsOverlap(a, parts.a, geoms) && sidePartsOverlap(b, parts.b, geoms)) ||
+      (sidePartsOverlap(a, parts.b, geoms) && sidePartsOverlap(b, parts.a, geoms)),
   );
 }
 

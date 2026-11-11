@@ -35,6 +35,60 @@ export function sideForClick(
   return picked.a.length ? 'b' : 'a';
 }
 
+/**
+ * The side one EDGE click goes to. An edge already in hand keeps its side (a click shrinks or drops
+ * it there). A piece closed on itself — a dart, a sleeve's underarm — has nobody else to open side 2:
+ * while side 1 holds only this piece and side 2 nothing, its next edge opens side 2, unless the input
+ * has other pieces and the edge runs on from side 1 (a run that grows). Later edges of that piece
+ * join the side they run on from; otherwise the input rule of `sideForClick` decides.
+ */
+export function sideForTarget(
+  id: string,
+  groups: readonly { pieces: readonly string[] }[],
+  picked: PickSides,
+  pieceOf: (id: string) => string,
+  touches: (x: string, y: string) => boolean,
+): 'a' | 'b' {
+  if (picked.b.includes(id)) return 'b';
+  if (picked.a.includes(id)) return 'a';
+  const piece = pieceOf(id);
+  const side = sideForClick(piece, groups, picked, pieceOf);
+  if (groups.length === 2 || side !== 'a' || !picked.a.length) return side;
+  if (!picked.a.every((x) => pieceOf(x) === piece)) return side;
+  const nextToA = picked.a.some((x) => touches(x, id));
+  if (!picked.b.length) {
+    const input = groups.find((group) => group.pieces.includes(piece));
+    const alone = !input || input.pieces.every((key) => key === piece);
+    return !alone && nextToA ? 'a' : 'b';
+  }
+  const nextToB = picked.b.some((x) => pieceOf(x) === piece && touches(x, id));
+  return nextToB && !nextToA ? 'b' : 'a';
+}
+
+/** Two edge targets of one piece meet end to end (a chain counts by its members). */
+export function edgesTouch(
+  x: string,
+  y: string,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  pieceOf: (id: string) => string,
+): boolean {
+  const piece = pieceOf(x);
+  if (piece !== pieceOf(y)) return false;
+  const geom = geoms.get(piece);
+  const n = geom?.rs.length ?? 0;
+  if (!geom || !n) return false;
+  const members = (target: string) => {
+    const at = target.lastIndexOf('#');
+    if (at < 0) return [];
+    const ks = target.slice(at + 1).split('+');
+    return geom.edges.filter((edge) => ks.some((k) => edge.id === `${piece}#${k}`));
+  };
+  const xs = members(x);
+  const ys = members(y);
+  const meet = (p: number, q: number) => ((p % n) + n) % n === ((q % n) + n) % n;
+  return xs.some((ex) => ys.some((ey) => meet(ex.e, ey.s) || meet(ey.e, ex.s)));
+}
+
 const NAMED_EDGE_WORDS = ['neckline', 'armhole', 'shoulder', 'hem', 'front_edge'] as const;
 
 /** A coarse, human edge word when geometry decides one; every inner line reads as a slit. */

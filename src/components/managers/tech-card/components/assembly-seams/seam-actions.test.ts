@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Edge, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
 import { resolveSeamDecisions, seamFromCandidate, type StoredSeam } from 'lib/seams';
 
-import { autoReconfirmable, type AnchorCtx } from './seam-actions';
+import { autoReconfirmable, handRow, type AnchorCtx } from './seam-actions';
 
 /** A straight-edged piece walking `corners` CCW: edge k runs from corner k to corner k + 1. */
 function pieceOf(pieceKey: string, corners: Pt2[]): PieceGeom {
@@ -235,5 +235,28 @@ describe('autoReconfirmable (T6: re-confirm a stale seam only on an unchanged ed
     const was = sideSeam();
     const surface: StoredSeam = { ...was, seamKey: 'SURF', kind: 'surface' };
     expect(autoReconfirmable([surface], ctxOf(today))).toEqual([]);
+  });
+});
+
+describe('handRow: one edge on both sides (C1)', () => {
+  const geoms = new Map(today.map((p) => [p.pieceKey, p]));
+  const hand = (a: Parameters<typeof handRow>[0], b: Parameters<typeof handRow>[1]) =>
+    handRow(a, b, geoms, ctxOf(today), { direction: 'unknown' });
+
+  it('two edges of one piece are a seam', () => {
+    expect(hand(['BP#1'], ['BP#3']).row).not.toBeNull();
+  });
+
+  it('the same edge on both sides is refused, whole or a shared stretch', () => {
+    expect(hand(['BP#0', 'BP#3'], ['BP#3']).refusal).toBe('cannot pair');
+    expect(
+      hand([{ target: 'BP#3', range: [0, 300] }], [{ target: 'BP#3', range: [200, 500] }]).row,
+    ).toBeNull();
+  });
+
+  it('two separate stretches of one edge still pair (a vent)', () => {
+    expect(
+      hand([{ target: 'BP#3', range: [0, 200] }], [{ target: 'BP#3', range: [300, 500] }]).row,
+    ).not.toBeNull();
   });
 });

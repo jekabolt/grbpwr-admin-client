@@ -5,10 +5,12 @@ import { describe, expect, it } from 'vitest';
 import { card6Geoms, card6InnerLines } from './card6.fixture';
 import {
   cycleLayerHit,
+  edgesTouch,
   isGuess,
   pickTarget,
   seamSideName,
   sideForClick,
+  sideForTarget,
 } from './seam-focus';
 import { stepLayout } from './step-picture';
 import { DOOR_SPAN_MM, spanMm, StepPictureSvg } from './step-picture-view';
@@ -81,6 +83,60 @@ describe('click-order sides', () => {
     const groups = [{ pieces: ['BODY'] }, { pieces: ['SLEEVE', 'PLACKET'] }];
     expect(sideForClick('BODY', groups, { a: [], b: [] }, pieceOf)).toBe('a');
     expect(sideForClick('PLACKET', groups, { a: [], b: [] }, pieceOf)).toBe('b');
+  });
+});
+
+describe('a piece closed on itself (C1)', () => {
+  const pieceOf = (id: string) => id.slice(0, id.lastIndexOf('#'));
+  // A four-edge piece: #0 → #1 → #2 → #3 around the ring.
+  const geoms = new Map([
+    [
+      'SLV',
+      {
+        rs: Array.from({ length: 40 }, () => [0, 0]),
+        edges: [0, 1, 2, 3].map((k) => ({ id: `SLV#${k}`, s: k * 10, e: k * 10 + 10 })),
+      },
+    ],
+  ]) as unknown as Parameters<typeof edgesTouch>[2];
+  const touches = (x: string, y: string) => edgesTouch(x, y, geoms, pieceOf);
+  const alone = [{ pieces: ['SLV'] }];
+  const withCuff = [{ pieces: ['SLV', 'CUFF'] }];
+  const side = (
+    id: string,
+    picked: { a: string[]; b: string[] },
+    groups: { pieces: string[] }[] = alone,
+  ) => sideForTarget(id, groups, picked, pieceOf, touches);
+
+  it('the old rule sends every edge of the piece to side 1, even one already on side 2', () => {
+    expect(sideForClick('SLV', alone, { a: ['SLV#0'], b: ['SLV#2'] }, pieceOf)).toBe('a');
+  });
+
+  it('an edge in hand keeps its side', () => {
+    expect(side('SLV#2', { a: ['SLV#0'], b: ['SLV#2'] })).toBe('b');
+    expect(side('SLV#0', { a: ['SLV#0'], b: ['SLV#2'] })).toBe('a');
+  });
+
+  it('a lone piece: the second edge opens side 2, even next to the first (a dart)', () => {
+    expect(side('SLV#0', { a: [], b: [] })).toBe('a');
+    expect(side('SLV#2', { a: ['SLV#0'], b: [] })).toBe('b');
+    expect(side('SLV#1', { a: ['SLV#0'], b: [] })).toBe('b');
+  });
+
+  it('with other pieces in the input a run still grows on side 1', () => {
+    expect(side('SLV#1', { a: ['SLV#0'], b: [] }, withCuff)).toBe('a');
+    expect(side('SLV#2', { a: ['SLV#0'], b: [] }, withCuff)).toBe('b');
+    expect(side('CUFF#0', { a: ['SLV#0'], b: [] }, withCuff)).toBe('b');
+  });
+
+  it('later edges join the side they run on from', () => {
+    expect(side('SLV#3', { a: ['SLV#0'], b: ['SLV#2'] })).toBe('a');
+    expect(side('SLV#1', { a: ['SLV#3'], b: ['SLV#2'] })).toBe('b');
+  });
+
+  it('chains touch by their members; the ring wraps', () => {
+    expect(touches('SLV#1+2', 'SLV#3')).toBe(true);
+    expect(touches('SLV#3', 'SLV#0')).toBe(true);
+    expect(touches('SLV#0', 'SLV#2')).toBe(false);
   });
 });
 
