@@ -61,6 +61,7 @@ import { pieceBlockRefs, pieceRefKey, rollGoodsScopes } from '../piece-block-ref
 import { useSizeNames } from 'components/managers/model/components/use-size-systems';
 import type { TechCardFormData } from '../schema';
 import { useStepResults } from '../step-seams/step-result-context';
+import { liveRow } from '../step-seams/live-row';
 import { candidateOfStoredSeam } from '../step-seams/step-rows';
 import { isJoinStep } from '../step-seams/step-seams-model';
 import {
@@ -145,9 +146,9 @@ const pairIdOf = (candidate: SeamCandidate) => {
 };
 
 /**
- * The doll sews BY STEPS (owner decision 1.11): walking the assembly order, every confirmed row an
+ * The doll sews BY STEPS (owner decision 1.11): walking the assembly order, every live row an
  * operation names (through the same conversion as the step editor, in the operation's order). A
- * confirmed row no step names is not sewn (the doll lists it); a rejected row never is. A sewing
+ * confirmed row no step names is not sewn (the doll lists it); a rejected or stale row never is. A sewing
  * step that names no row is sewn by the guess its step picture draws (`stepGuessOf`), as a doll
  * guess the views draw dashed. All rows still travel to the doll: rejected pairs stay excluded,
  * stale / orphan rows keep their words. Kept pure so non-React readers (the pinned golden) stay
@@ -187,7 +188,7 @@ export function dollOwnerSeamsOf(args: {
     const out: DollOwnerCandidate[] = [];
     for (const key of op.seamKeys ?? []) {
       const row = byKey.get(key);
-      if (!row || row.status !== 'confirmed' || bound.has(key)) continue;
+      if (!row || !liveRow(row) || bound.has(key)) continue;
       bound.add(key);
       inStepKeys.push(key);
       const candidate = candidateOfStoredSeam(row, args.geoms, args.innerLines);
