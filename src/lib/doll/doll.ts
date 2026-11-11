@@ -93,6 +93,8 @@ import {
 import { liningByName } from 'lib/assembly-skeleton/names';
 import { readName } from 'lib/assembly-skeleton/skeleton';
 import { findLoops, loopPath, type RawLoop } from './loops';
+import { splitMultiPickRows, type MultiPickSplit } from './multi-pick';
+import { edgesLyingOnHost, readOverStack, type OnHost } from './stack-rows';
 import { meshPiece, pointInPolygon, type MeshCrease, type PieceMesh } from './mesh';
 import { planPleats, sideOfLine, type MeshPleat, type PleatPlan } from './pleat-mesh';
 import { type Ring, ringsFromJoins } from './rings';
@@ -159,6 +161,9 @@ const LAYERED_BODY_BEND_K = 0.3;
 // the collar step lands (options.folds on the collar piece); ROLL_FRAC and the stand / fall split
 // below stay until then.
 const ROLL_FRAC = 0.5;
+// A confirmed collar row that cannot be the neck seam (the unit does not fit its neck path) still
+// holds the collar where it lies, but only lightly: a guess must not tear the body seams.
+const MISFIT_NECK_K = 0.15;
 // A standing collar part leans in toward the neck by this much off vertical.
 const STAND_LEAN = (8 * Math.PI) / 180;
 // Folds (options.folds): the plies of a folded piece lie this far apart, mm, ramped to 0 at the crease.
@@ -974,6 +979,7 @@ export function solveDoll(input: DollInput): DollReport {
   let resolvedRows: SizeResolved | undefined;
   /** By steps: confirmed rows no step names — not sewn, kept only as cues for laying composites. */
   let joinsNotSewn: SeamCandidate[] = [];
+  let multiPickSplits: MultiPickSplit[] = [];
   let graphIn = input.graph;
   if (l4 && opt.seams?.rows.length) {
     const S = opt.seams!;
@@ -1044,6 +1050,11 @@ export function solveDoll(input: DollInput): DollReport {
             return [{ ...candidate, provenance }];
           });
         }
+        // A row a person picked several seams in (sides far apart, its edges pairing up at
+        // corners other rows sew) is sewn as those seams; the report still names the row.
+        const picked = splitMultiPickRows(r.forced, pieces);
+        r.forced = picked.rows;
+        multiPickSplits = picked.splits;
         resolvedRows = r;
         return r;
       },
@@ -1594,6 +1605,77 @@ export function solveDoll(input: DollInput): DollReport {
         shellCoveredSeamKeys.add(candidate.provenance?.seamKey ?? '');
     }
   }
+  // A DRAWN PIECE LAID ON AN UNDRAWN ONE IS THE TOP PLY OF ONE STACK. A surface row may lay a shell
+  // piece on a piece the doll skips (a front yoke on a pocket panel that runs from the shoulder to
+  // the pocket mouth). Rows naming the skipped ply's edges — the shoulder onto the back yoke, the
+  // armhole run, the placket's front edge — sewed nothing there: a front hung open at the
+  // shoulder, a yoke and its sleeve turned over to the back. They are sewn over
+  // the drawn ply's edges lying on the named ones (by the surface row's motion), when the row so
+  // read fits as a seam. A row sewing the drawn ply onto the edge it lies on joins the two plies:
+  // not a seam, not sewn, said as a contradiction.
+  const stackNotes: string[] = [];
+  if (owner) {
+    const drawnKeys = new Set(G.pieces.map((P) => P.key));
+    const surfaceKeys = new Set(G.skipped.filter((x) => x.surface).map((x) => x.pieceKey));
+    const stacks = graph.chosen.flatMap((c) =>
+      isConf(c) &&
+      c.kind === 'surface' &&
+      c.surface &&
+      surfaceKeys.has(c.surface.host) &&
+      drawnKeys.has(c.surface.part)
+        ? [{ part: c.surface.part, host: c.surface.host, T: c.surface.T }]
+        : [],
+    );
+    const on = stacks.length ? edgesLyingOnHost(stacks, geomOfKey) : new Map<EdgeId, OnHost>();
+    if (on.size) {
+      const lead = (id: EdgeId) => G.leadEdge?.(id) ?? id;
+      const restLen = (id: EdgeId) =>
+        geomOfKey.get(pk(id))?.edges.find((e) => e.id === id)?.lenMm ?? 0;
+      const grouped = new Map(G.seams.map((sm) => [sm.seam, sm]));
+      const dropped = new Set<GroupedSeam>();
+      const sigs = new Set(
+        G.seams.map((sm) => [...sm.a].sort().join('+') + '~' + [...sm.b].sort().join('+')),
+      );
+      for (const c of graph.chosen) {
+        if (!isConf(c) || c.kind === 'surface' || c.kind === 'closure-not-seam') continue;
+        const sm = grouped.get(c);
+        const a0 = sm ? [...sm.a] : rowParts(c, 'a').map((p) => lead(p.id));
+        const b0 = sm ? [...sm.b] : rowParts(c, 'b').map((p) => lead(p.id));
+        const ranged = new Set(Object.keys(c.partRange ?? {}));
+        // A stored stretch on a skipped ply's edge is not read over the drawn one.
+        if ([...a0, ...b0].some((id) => on.has(id) && (ranged.has(id) || c.range))) continue;
+        const sewn = (id: EdgeId) => {
+          const r = c.partRange?.[id];
+          return r ? r[1] - r[0] : restLen(id);
+        };
+        const read = readOverStack(a0, b0, on, sewn);
+        if (!read) continue;
+        const id = `${c.a}~${c.b}`;
+        if (read.kind === 'stack') {
+          if (sm) dropped.add(sm);
+          stackNotes.push(
+            `${id}: confirmed by a person, but ${read.part} lies on ${read.host} (its surface row) and this row sews ${read.edge} onto ${read.on}, the edge it lies on — two plies of one stack, not a seam: not sewn`,
+          );
+          continue;
+        }
+        if (![...read.a, ...read.b].every((e) => drawnKeys.has(pk(e)))) continue;
+        const sig = [...read.a].sort().join('+') + '~' + [...read.b].sort().join('+');
+        if (!sm && sigs.has(sig)) continue;
+        const g: GroupedSeam = sm ?? { seam: c, a: [], b: [] };
+        laidOverShell.set(g, { a: a0, b: b0, off: read.off, over: read.over });
+        g.a = read.a;
+        g.b = read.b;
+        g.seam = { ...g.seam, aParts: read.a, bParts: read.b };
+        if (!sm) G.seams.push(g);
+        sigs.add(sig);
+        if (opt.debug)
+          warnings.push(
+            `debug: ${id} sewn over the drawn ply ${read.over.join('+')} lying on ${read.off.join(', ')}`,
+          );
+      }
+      if (dropped.size) G.seams = G.seams.filter((sm) => !dropped.has(sm));
+    }
+  }
   // A step picture's guess onto an edge a person's row already sews whole (the collar's neck edge,
   // sewn to the stand by a row, guessed onto the body by the step that attaches the collar): an
   // edge takes one seam — the row stands, the guess is not sewn.
@@ -2002,7 +2084,7 @@ export function solveDoll(input: DollInput): DollReport {
   };
 
   // L4: confirmed rows that cannot be what they say, before solving (lengths, an edge sewn twice).
-  const preContradictions: string[] = [];
+  const preContradictions: string[] = [...stackNotes];
   if (l4) {
     const sideLen = (g: GroupedSeam, side: 'a' | 'b') => {
       const gapped = sewnStretchesOf(g, side);
@@ -2050,6 +2132,18 @@ export function solveDoll(input: DollInput): DollReport {
           for (const e of side === 'a' ? g.a : g.b)
             usedBy.set(e, [...(usedBy.get(e) ?? []), `${id}|${span(e, side).join(',')}`]);
       }
+    }
+    for (const { id, la, lb, fold } of multiPickSplits) {
+      if (fold) {
+        warnings.push(
+          `${id}: a strip folded over ${fold.edge.join('+')} — ${fold.ply} and ${fold.over} both sew it; drawn unfolded, sewn by ${fold.ply}`,
+        );
+        continue;
+      }
+      const diff = 1 - Math.min(la, lb) / Math.max(la, lb, 1e-9);
+      preContradictions.push(
+        `${id}: confirmed by a person, but its sides are ${la.toFixed(0)} and ${lb.toFixed(0)} mm — ${(diff * 100).toFixed(0)} % apart, more than any ease: not one seam`,
+      );
     }
     const ringish = new Set<DollGroupId>(['COLLAR', 'STAND']);
     const groupOfKey = new Map(G.pieces.map((P) => [P.key, P.group]));
@@ -7362,7 +7456,7 @@ export function solveDoll(input: DollInput): DollReport {
       // A multi-part body run is the composite armhole. A lone cross-group pairing may instead be
       // the bad underarm-to-yoke reading that the far/release checks below must still be free to drop.
       if (targetIds.length > 1) sleeveCapSeams.add(sm);
-      return [{ sleeve, body }];
+      return [{ sleeve, body, capParts: new Set(sm[sleeveSide]).size }];
     });
     // Confirmed rows that no operation names are not sewing work in owner mode, but they remain
     // exact placement topology. This is how an omitted cap row can register a sleeve without the
@@ -7386,7 +7480,7 @@ export function solveDoll(input: DollInput): DollReport {
           sleeveIds === aIds ? bodyIds(bIds) : sleeveIds === bIds ? bodyIds(aIds) : [];
         const sleeve = pathOf(sleeveIds);
         const body = pathOf(targetIds);
-        return sleeve && body ? [{ sleeve, body }] : [];
+        return sleeve && body ? [{ sleeve, body, capParts: new Set(sleeveIds).size }] : [];
       });
     const selectedCues = cuesOf(resolvedRows?.forced ?? []);
     const confirmedCues = cuesOf(joinsNotSewn);
@@ -7470,7 +7564,27 @@ export function solveDoll(input: DollInput): DollReport {
       graphPlaced.add(gid);
       const gap = Math.max(...placementSeams.map(({ sleeve, body }) => pathGap(sleeve, body)));
       if (gap > 15) {
-        const fit = fitPaths(placementSeams, [-F.up[0], -F.up[1], -F.up[2]]);
+        // A CAP OF SEVERAL PARTS ON A WHOLE ARMHOLE SAYS NO PHASE. A one-edge cap starts and ends at
+        // the underarm, and its armhole run is cut there above; a cap run over two sleeve pieces
+        // starts wherever the person began picking it (one at the underarm, its armhole at the
+        // shoulder; the other sleeve the other way round). Sewn as listed, the sleeve
+        // hangs upside down. When such a run closes round the armhole, the row says only which
+        // edges meet: the cap is registered in it like a free cap — every turn round the ring, the
+        // arm kept hanging as placed.
+        const ring = (P: Path) =>
+          P.v.length > 2 &&
+          Math.hypot(...sub(getPos(P.v[0]), getPos(P.v[P.v.length - 1]))) <=
+            Math.max(30, 0.08 * P.len);
+        const pairs = placementSeams.map((p) => ({
+          ...p,
+          bodyClosed: p.capParts > 1 && ring(p.body),
+        }));
+        const free = pairs.some((p) => p.bodyClosed);
+        const fit = fitPaths(
+          pairs,
+          [-F.up[0], -F.up[1], -F.up[2]],
+          free ? FREE_CAP_TURN : undefined,
+        );
         applySleeveFit(gid, list, F, fit);
       } else sleeveRegistered.add(gid);
     }
@@ -8416,7 +8530,7 @@ export function solveDoll(input: DollInput): DollReport {
             [a1, at(a1)],
           ],
           `proposed by the doll · ${label} · the unit ${Lu.toFixed(0)} mm does not fit the neck path ${N.path.len.toFixed(0)} mm: ${(a1 - a0).toFixed(0)} mm of it sewn at its own length, CB on CB, ${(N.path.len - (a1 - a0)).toFixed(0)} mm of the neckline left open · not in the pattern`,
-          0.8,
+          cn ? MISFIT_NECK_K : 0.8,
         );
         return w;
       };
