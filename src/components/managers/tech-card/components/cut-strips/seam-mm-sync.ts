@@ -7,11 +7,17 @@ export type CutStripSeamSync = {
   seamChanged: boolean;
 };
 
-/** One card-wide pass: align size rows, then copy measured cloth-side lengths onto from-seam strips. */
+/**
+ * One card-wide pass: align size rows, then copy measured cloth-side lengths onto from-seam strips.
+ * E5: a binding strip's typed cut for a size the pattern did not grade yields once the live seam
+ * gets a length for that size. Only on that transition: a cut typed while the length was known,
+ * and a strip on a rejected or stale seam (the reader gives nothing), keep their manual length.
+ */
 export function syncCutStripSeamMm(
   strips: readonly CutStrip[],
   sizeIds: readonly number[],
   seamLengthsMm: SeamLengthsMm,
+  isBinding: (strip: CutStrip) => boolean = () => false,
 ): CutStripSeamSync {
   let changed = false;
   let seamChanged = false;
@@ -33,7 +39,10 @@ export function syncCutStripSeamMm(
       const seamMm = measured == null ? '' : String(measured);
       if ((stored.seamMm ?? '') === seamMm) return stored;
       seamChanged = true;
-      return { ...stored, seamMm };
+      const appeared = !(stored.seamMm ?? '').trim() && measured != null;
+      return appeared && isBinding(strip) && (stored.manualCutMm ?? '').trim()
+        ? { ...stored, seamMm, manualCutMm: '' }
+        : { ...stored, seamMm };
     });
     const rowChanged =
       rows.length !== current.length ||

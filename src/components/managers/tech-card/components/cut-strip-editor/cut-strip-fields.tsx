@@ -18,6 +18,7 @@ import { isCardBindingStrip } from '../binding-step';
 import { goneSeamKeys, stripCutMm, stripSewnMm, withSeamGone } from '../cut-strips/lengths';
 import type { SeamLengthsMm } from '../cut-strips/seam-lengths';
 import { wireInt, type TechCardFormData } from '../schema';
+import { cutCellLocked } from './cut-cell';
 import { cutStripSeamOptions, type CutStrip } from './use-cut-strip';
 
 const CUT_MODE_OPTIONS = [
@@ -192,7 +193,7 @@ export function CutStripFields({
                       maxDecimals={0}
                       placeholder={cut == null ? '' : String(cut)}
                       {...(mode === 'one_length' ? { value: cut ?? '' } : {})}
-                      disabled={readOnly || binding || mode === 'one_length'}
+                      disabled={cutCellLocked({ readOnly, binding, mode, seamMm: seam })}
                       className={cn(
                         'text-right placeholder:text-textColor!',
                         !!manual && mode !== 'one_length' && 'font-bold',
