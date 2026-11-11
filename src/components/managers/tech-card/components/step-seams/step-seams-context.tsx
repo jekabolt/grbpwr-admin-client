@@ -22,19 +22,13 @@ import {
 import { useFormContext, useWatch } from 'react-hook-form';
 import type { AssemblyGeometry } from '../../techpack/use-assembly-geometry';
 import { useAssemblyGeometry } from '../../techpack/use-assembly-geometry';
-import { clearLinkOwed, markLinkOwed, owedLinks, planOwedLinks } from '../card-owed';
+import { clearLinkOwed, owedLinks, planOwedLinks } from '../card-owed';
 import {
   flushAllowsRun,
   flushRefusalSentence,
   useTechCardAutosave,
 } from '../design/autosave-contract';
-import {
-  hydrateSeams,
-  rowPairSig,
-  rowsOf,
-  useSeamsStore,
-  writeRefusal,
-} from '../assembly-seams/seams-store';
+import { hydrateSeams, rowPairSig, rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import { useSeamWrites, type SeamWrites } from '../assembly-seams/use-seam-decisions';
 import {
   isCardBindingStrip,
@@ -50,7 +44,6 @@ import type { TechCardFormData } from '../schema';
 import { syncTopstitchLineMm } from '../topstitch-line-mm-sync';
 import type { TopstitchOperation } from '../topstitch-lines';
 import { TopstitchThreadDefaults } from '../topstitch-thread-fields';
-import { planStepSeamRemoval } from './step-seam-actions';
 import { dropKeys } from './step-seams-model';
 
 export type StepSeamsCtx = {
@@ -72,31 +65,26 @@ const Ctx = createContext<StepSeamsCtx | null>(null);
 /** Null outside a provider: the row then draws nothing (print, stands, other tabs). */
 export const useStepSeams = () => useContext(Ctx);
 
-/**
- * ACCEPT WRITES AT ONCE (L16). The row has its own request; the step's link to it travels in the
- * whole-card body, which waited out the autosave's debounce. A link stays owed from before the row's
- * request until a read shows it stored (card-owed.ts): a page that dies on the way leaves the row with
- * no step, and the next page finishes the link.
- */
-function useFlushLink() {
-  const autosave = useTechCardAutosave();
-  const latest = useRef(autosave);
-  latest.current = autosave;
-  return useCallback(() => {
-    // The form tells the machine of a change a microtask after the event.
-    window.setTimeout(() => void latest.current.flush('seam'), 0);
-  }, []);
-}
+type StepRow = { historyKey?: string; seamKeys?: string[]; poseKeys?: string[] };
 
-/** Store one seam row, then attach the server's canonical key to this form step; that key, or why not. */
+/** The form step a gesture started on, by its row identity; -1 when it is gone meanwhile. */
+const indexOfStep = (ops: readonly StepRow[], historyKey: string) =>
+  ops.findIndex((op) => op.historyKey === historyKey);
+
+/**
+ * ACCEPT WRITES AT ONCE (L16, C7). The row and the step's link to it go in ONE seam change: the form
+ * is saved first (the step is addressed by its stored number), the server writes both, and the form
+ * adopts the link as it is stored — nothing is owed to a later body write.
+ */
 export function useAttachStepSeam(index: number) {
   const ctx = useStepSeams();
   const { getValues, setValue } = useFormContext<TechCardFormData>();
   const autosave = useTechCardAutosave();
-  const flushLink = useFlushLink();
   return useCallback(
     async (row: StoredSeam): Promise<{ key: string } | { refused: string }> => {
       if (!ctx) return { refused: 'not saved' };
+      const historyKey = getValues(`operations.${index}.historyKey`);
+      if (!historyKey) return { refused: 'not saved' };
       const liveStrips = (getValues('cutStrips') ?? []) as CutStrip[];
       const savedKeys = stripKeysOf(cutStripsOfCard(ctx.techCard));
       const unsavedKeys = new Set(
@@ -110,77 +98,70 @@ export function useAttachStepSeam(index: number) {
             refused: flushRefusalSentence(result, autosave.errorsCount, autosave.refusal),
           };
       }
-      const sig = rowPairSig(row);
-      const op = getValues(`operations.${index}.operationNumber`) ?? 0;
-      const owes = !!ctx.cardId && op > 0;
-      if (owes)
-        markLinkOwed(ctx.cardId!, {
-          op,
-          field: 'seamKeys',
-          key: row.seamKey,
-          sig,
-          at: Date.now(),
-        });
-      const ok = await ctx.writes.upsert([row]);
-      if (!ok) {
-        if (owes) clearLinkOwed(ctx.cardId!, row.seamKey);
-        return { refused: writeRefusal(row, useSeamsStore.getState()) };
-      }
-      const stored = rowsOf(useSeamsStore.getState()).find(
-        (candidate) => rowPairSig(candidate) === sig,
-      );
-      const key = stored?.seamKey ?? row.seamKey;
-      const operation = getValues(`operations.${index}`);
+      const res = await ctx.writes.acceptSeam(row, { historyKey });
+      if (!res.ok) return { refused: res.why };
+      const { key } = res;
+      const at = indexOfStep((getValues('operations') ?? []) as StepRow[], historyKey);
+      if (at < 0) return { key };
+      const stored = rowsOf(useSeamsStore.getState()).find((r) => r.seamKey === key);
       const linked = linkBindingStripToSeam(
-        operation,
+        getValues(`operations.${at}`),
         (getValues('cutStrips') ?? []) as CutStrip[],
         stored ?? row,
         key,
       );
       if (linked) setValue('cutStrips', linked.strips as never, { shouldDirty: true });
-      const current = (getValues(`operations.${index}.seamKeys`) ?? []) as string[];
-      setValue(`operations.${index}.seamKeys`, [...current.filter((item) => item !== key), key], {
-        shouldDirty: true,
-      });
-      flushLink();
+      // The form adopted the stored link already; a step it could not tell by number gets it here,
+      // and the next body write repeats what the server holds.
+      const current = (getValues(`operations.${at}.seamKeys`) ?? []) as string[];
+      if (!current.includes(key))
+        setValue(`operations.${at}.seamKeys`, [...current, key], { shouldDirty: true });
       return { key };
     },
-    [autosave, ctx, flushLink, getValues, index, setValue],
+    [autosave, ctx, getValues, index, setValue],
   );
 }
 
 /**
- * Remove one of a step's stored seams through the shared seam writer, the step chosen per call so
- * a list of steps (the ratify panel) can use one remover.
+ * Take one stored seam off a step through the shared seam writer, the step chosen per call so a list
+ * of steps (the ratify panel) can use one remover. The server deletes the row with its last link
+ * (C7, detach); a shared row stays with its other step.
  */
 export function useStepSeamRemover() {
   const ctx = useStepSeams();
   const { getValues, setValue } = useFormContext<TechCardFormData>();
 
   return useCallback(
-    async (index: number, seamKey: string, row: StoredSeam | undefined): Promise<boolean> => {
+    async (index: number, seamKey: string, _row: StoredSeam | undefined): Promise<boolean> => {
       if (!ctx || ctx.frozen) return false;
-      const operations = getValues('operations') ?? [];
-      const removal = planStepSeamRemoval(operations, index, seamKey);
-      if (ctx.cardId) clearLinkOwed(ctx.cardId, seamKey);
-      if (removal.deleteRow && row && !(await ctx.writes.remove([row]))) return false;
-      const field = `operations.${index}.seamKeys` as const;
-      const seamKeys = removal.deleteRow
-        ? ((getValues(field) ?? []) as string[]).filter((key) => key !== seamKey)
-        : removal.seamKeys;
-      setValue(field, seamKeys, { shouldDirty: true });
-      // A shared row still belongs to its other step; only its last detach owns the strip teardown.
-      if (removal.deleteRow) {
-        const operation = getValues(`operations.${index}`);
+      const historyKey = getValues(`operations.${index}.historyKey`);
+      if (!historyKey) return false;
+      const ops = (getValues('operations') ?? []) as StepRow[];
+      // What the page expects of the server: the row goes when no other step links it.
+      const gone = !ops.some((op, i) => i !== index && (op.seamKeys ?? []).includes(seamKey));
+      const res = await ctx.writes.detachSeam({ historyKey }, seamKey, gone);
+      if (!res.ok) return false;
+      const at = indexOfStep((getValues('operations') ?? []) as StepRow[], historyKey);
+      if (at < 0) return true;
+      const field = `operations.${at}.seamKeys` as const;
+      const current = (getValues(field) ?? []) as string[];
+      if (current.includes(seamKey))
+        setValue(
+          field,
+          current.filter((key) => key !== seamKey),
+          { shouldDirty: true },
+        );
+      // A shared row still belongs to its other step; only the row's deletion owns the strip teardown.
+      if (res.deletedKeys.includes(seamKey)) {
         const stripped = removeBindingStripsForSeam(
-          operation,
+          getValues(`operations.${at}`),
           (getValues('cutStrips') ?? []) as CutStrip[],
           seamKey,
         );
         if (stripped) {
           setValue('cutStrips', stripped.strips as never, { shouldDirty: true });
-          setValue(`operations.${index}.inputKeys`, stripped.inputKeys, { shouldDirty: true });
-          setValue(`operations.${index}.bomLineKeys`, stripped.bomLineKeys, { shouldDirty: true });
+          setValue(`operations.${at}.inputKeys`, stripped.inputKeys, { shouldDirty: true });
+          setValue(`operations.${at}.bomLineKeys`, stripped.bomLineKeys, { shouldDirty: true });
         }
       }
       return true;
@@ -243,14 +224,12 @@ function TopstitchLineMmSync({ disabled }: { disabled: boolean }) {
 }
 
 /**
- * Store a step's pose rows (P8) and keep this form step's `poseKeys` with them: `drop` is deleted
- * before `put` is upserted (so a replacement cannot briefly make a host cycle). True when the
- * server took every write.
+ * Store a step's pose rows (P8) and this form step's links to them in ONE seam change (C7): `drop` is
+ * deleted, `reflag` rewritten in place, `put` written and linked. True when the server took it.
  */
 export function useAttachStepPose(index: number) {
   const ctx = useStepSeams();
   const { getValues, setValue } = useFormContext<TechCardFormData>();
-  const flushLink = useFlushLink();
   return useCallback(
     async (
       put: readonly StoredPose[],
@@ -259,33 +238,22 @@ export function useAttachStepPose(index: number) {
       reflag: readonly StoredPose[] = [],
     ): Promise<boolean> => {
       if (!ctx) return false;
-      const field = `operations.${index}.poseKeys` as const;
-      const keys = () => ((getValues(field) ?? []) as string[]).slice();
-      if (drop.length) {
-        if (ctx.cardId) for (const r of drop) clearLinkOwed(ctx.cardId, r.seamKey);
-        if (!(await ctx.writes.removePoses([...drop]))) return false;
-        const gone = new Set(drop.map((r) => r.seamKey));
-        const left = keys().filter((k) => !gone.has(k));
-        if (left.length !== keys().length) setValue(field, left, { shouldDirty: true });
-      }
-      if (reflag.length && !(await ctx.writes.upsertPoses([...reflag]))) return false;
-      if (put.length) {
-        const op = getValues(`operations.${index}.operationNumber`) ?? 0;
-        const owes = !!ctx.cardId && op > 0;
-        if (owes)
-          for (const r of put)
-            markLinkOwed(ctx.cardId!, { op, field: 'poseKeys', key: r.seamKey, at: Date.now() });
-        if (!(await ctx.writes.upsertPoses([...put]))) {
-          if (owes) for (const r of put) clearLinkOwed(ctx.cardId!, r.seamKey);
-          return false;
-        }
-        const add = new Set(put.map((r) => r.seamKey));
-        setValue(field, [...keys().filter((k) => !add.has(k)), ...add], { shouldDirty: true });
-        flushLink();
-      }
+      const historyKey = getValues(`operations.${index}.historyKey`);
+      if (!historyKey) return false;
+      if (!(await ctx.writes.placePoses({ historyKey }, put, drop, reflag))) return false;
+      const at = indexOfStep((getValues('operations') ?? []) as StepRow[], historyKey);
+      if (at < 0) return true;
+      // The form adopted the stored links already; a step it could not tell by number gets them here.
+      const field = `operations.${at}.poseKeys` as const;
+      const current = (getValues(field) ?? []) as string[];
+      const add = new Set(put.map((r) => r.seamKey));
+      const gone = new Set(drop.map((r) => r.seamKey).filter((k) => !add.has(k)));
+      const next = [...current.filter((k) => !gone.has(k) && !add.has(k)), ...add];
+      const missing = put.some((r) => !current.includes(r.seamKey));
+      if (missing || current.some((k) => gone.has(k))) setValue(field, next, { shouldDirty: true });
       return true;
     },
-    [ctx, flushLink, getValues, index, setValue],
+    [ctx, getValues, index, setValue],
   );
 }
 
@@ -315,13 +283,17 @@ export function StepSeamsProvider({
   const wire = techCard?.seams as TechCardSeamWire[] | undefined;
   const wireRef = useRef(wire);
   wireRef.current = wire;
+  const wireVersion = techCard?.lockVersion;
+  const wireVersionRef = useRef(wireVersion);
+  wireVersionRef.current = wireVersion;
   useEffect(() => {
     if (!cardId) return;
-    if (useSeamsStore.getState().cardId !== cardId) hydrateSeams(cardId, wire);
+    // At its version (C7): an echo older than the list it reads is then never taken over it.
+    if (useSeamsStore.getState().cardId !== cardId) hydrateSeams(cardId, wire, wireVersion);
     return useSeamsStore.subscribe((s) => {
-      if (s.cardId === null) hydrateSeams(cardId, wireRef.current);
+      if (s.cardId === null) hydrateSeams(cardId, wireRef.current, wireVersionRef.current);
     });
-  }, [cardId, wire]);
+  }, [cardId, wire, wireVersion]);
 
   // A key that leaves the server's list of THIS card leaves the steps. A card switch or a reset is
   // not a removal; neither is a row only in flight.
