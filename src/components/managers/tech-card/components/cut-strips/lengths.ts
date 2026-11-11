@@ -4,6 +4,9 @@ type DecimalLike = string | number | { value?: string | null } | null | undefine
 
 type StripLike = {
   lengthMode?: string | null;
+  seamKey?: string | null;
+  /** Set by withSeamGone: the strip's seam is stale or rejected, so its stored seam length is not a length. */
+  seamGone?: boolean;
   fitPct?: DecimalLike;
   overlapMm?: DecimalLike;
   oneLengthMm?: string | number | null;
@@ -59,7 +62,7 @@ export function stripCutMm(strip: StripLike, sizeId: number): number | undefined
 
   if (strip.lengthMode !== 'one_length' && manual !== undefined) return manual;
   if (strip.lengthMode === 'one_length') return numberValue(strip.oneLengthMm);
-  if (strip.lengthMode !== 'from_seam') return undefined;
+  if (strip.lengthMode !== 'from_seam' || strip.seamGone) return undefined;
 
   const seam = decimalFraction(size?.seamMm);
   if (!seam) return undefined;
@@ -78,4 +81,32 @@ export function stripCutMm(strip: StripLike, sizeId: number): number | undefined
 export function stripSewnMm(strip: StripLike, sizeId: number): number | undefined {
   const cut = stripCutMm(strip, sizeId);
   return cut === undefined ? undefined : cut - decimalNumber(strip.overlapMm, 0);
+}
+
+type SeamStateLike = { seamKey?: string | null; status?: string | null; stale?: boolean | null };
+
+const confirmedSeam = (status?: string | null) =>
+  status === 'confirmed' || status === 'TECH_CARD_SEAM_STATUS_CONFIRMED';
+
+/**
+ * The seams whose decision no longer holds: stale (the pattern changed since) or not confirmed. A
+ * from_seam strip on one of them has no length, as on the server; a seam key with no row is left alone.
+ */
+export function goneSeamKeys(
+  rows: ReadonlyArray<SeamStateLike> | null | undefined,
+): ReadonlySet<string> {
+  return new Set(
+    (rows ?? [])
+      .filter((row) => row.stale || !confirmedSeam(row.status))
+      .map((row) => (row.seamKey ?? '').trim())
+      .filter(Boolean),
+  );
+}
+
+/** The strip as the length functions must read it: a from_seam strip on a gone seam has no length. */
+export function withSeamGone<T extends StripLike>(strip: T, gone: ReadonlySet<string>): T {
+  const key = (strip.seamKey ?? '').trim();
+  return strip.lengthMode === 'from_seam' && key && gone.has(key)
+    ? { ...strip, seamGone: true }
+    : strip;
 }

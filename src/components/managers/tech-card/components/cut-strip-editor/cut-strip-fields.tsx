@@ -15,7 +15,7 @@ import {
   ViewSwitch,
 } from 'ui';
 import { isCardBindingStrip } from '../binding-step';
-import { stripCutMm, stripSewnMm } from '../cut-strips/lengths';
+import { goneSeamKeys, stripCutMm, stripSewnMm, withSeamGone } from '../cut-strips/lengths';
 import type { SeamLengthsMm } from '../cut-strips/seam-lengths';
 import { wireInt, type TechCardFormData } from '../schema';
 import { cutStripSeamOptions, type CutStrip } from './use-cut-strip';
@@ -79,16 +79,19 @@ export function CutStripFields({
     seamItems.push({ value: strip.seamKey, label: 'seam missing', matchText: '' });
   }
 
-  const effectiveStrip: CutStrip = {
-    ...strip,
-    sizes: (strip.sizes ?? []).map((row) => ({
-      ...row,
-      seamMm:
-        mode === 'from_seam'
-          ? seamLengthAt(seamSource, wireInt(row.sizeId))?.toString() ?? row.seamMm ?? ''
-          : '',
-    })),
-  };
+  const effectiveStrip: CutStrip = withSeamGone(
+    {
+      ...strip,
+      sizes: (strip.sizes ?? []).map((row) => ({
+        ...row,
+        seamMm:
+          mode === 'from_seam'
+            ? seamLengthAt(seamSource, wireInt(row.sizeId))?.toString() ?? row.seamMm ?? ''
+            : '',
+      })),
+    },
+    goneSeamKeys(seams),
+  );
   const sizesById = new Map((strip.sizes ?? []).map((row, index) => [wireInt(row.sizeId), index]));
   const sizeNames = new Map(
     (dictionary?.sizes ?? []).map((size) => [wireInt(size.id), formatSizeName(size.name ?? '')]),

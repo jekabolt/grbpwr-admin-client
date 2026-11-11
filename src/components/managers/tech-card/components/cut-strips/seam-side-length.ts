@@ -201,7 +201,7 @@ export function lengthsBySizeId(
   return out;
 }
 
-/** A stable reader: the same seam gives the same Map, so an effect on it runs once. */
+/** A stable reader: the same seam gives the same Map, so an effect on it runs once. Live rows only. */
 export function seamLengthsReader(input: {
   rows: readonly StoredSeam[];
   stripKeys: ReadonlySet<string>;
@@ -212,7 +212,10 @@ export function seamLengthsReader(input: {
   const cache = new Map<string, ReadonlyMap<number, number> | undefined>();
   return (seamKey) => {
     if (cache.has(seamKey)) return cache.get(seamKey);
-    const row = input.rows.find((candidate) => candidate.seamKey === seamKey);
+    const found = input.rows.find((candidate) => candidate.seamKey === seamKey);
+    // A stale or rejected seam is not a decision on today's pattern: its length is not known, and
+    // the strip keeps the length it was last given until the seam is confirmed again.
+    const row = found && found.status === 'confirmed' && !found.stale ? found : undefined;
     const lengths = row
       ? lengthsBySizeId(
           seamLengthsOf(row, input.stripKeys, input.find),
