@@ -213,6 +213,15 @@ describe('step seam eligibility', () => {
     expect(hasMultipleStepPieces([{ inputKeys: ['FP'] }], 0, pieces)).toBe(false);
   });
 
+  it('opens the picker on a dart step of one piece only', () => {
+    expect(isJoinStep([{ inputKeys: ['FP'], work: 'dart' }], 0, pieces)).toBe(true);
+    expect(isJoinStep([{ inputKeys: ['FP'], work: 'join_lockstitch' }], 0, pieces)).toBe(false);
+    expect(isJoinStep([{ inputKeys: ['FP'], work: 'press_flat' }], 0, pieces)).toBe(false);
+    expect(
+      isJoinStep([{ inputKeys: ['FP'], work: 'dart', operationType: 'press' }], 0, pieces),
+    ).toBe(false);
+  });
+
   it('does not count materials, photos, duplicates, or unresolved keys as pieces', () => {
     const ops = [
       {

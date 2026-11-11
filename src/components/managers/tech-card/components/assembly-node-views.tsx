@@ -1611,6 +1611,7 @@ export function TileView({
   hoverProps,
   stepProps,
   onAddOperation,
+  onAddFold,
   onGoToUnit,
   unitNameOf,
   orphanBoard,
@@ -1647,6 +1648,8 @@ export function TileView({
   stepProps: (index: number) => OrganProps;
   /** Добавить обработку на эту деталь. Пусто — вставить некуда (`pieceAddPrefill` дал `null`). */
   onAddOperation?: () => void;
+  /** Open the fold picker on this piece. */
+  onAddFold?: () => void;
   /** Перейти к узлу, который деталь съел. Пусто у свободной: вести некуда. */
   onGoToUnit?: () => void;
   /** Owner-facing name of the unit that consumed the piece. */
@@ -1700,6 +1703,11 @@ export function TileView({
           {addable && (
             <Chip dashed onClick={onAddOperation} title='add a processing step on this piece'>
               + operation
+            </Chip>
+          )}
+          {addable && onAddFold && (
+            <Chip dashed onClick={onAddFold} title='add a fold on this piece'>
+              + fold
             </Chip>
           )}
         </NodeHoverBar>

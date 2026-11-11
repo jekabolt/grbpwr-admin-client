@@ -18,6 +18,8 @@ import {
 import { hashString, runGa } from './ga';
 import { NfpCache, mirrorParts, type Flip, type PreparedPiece } from './nfp';
 import { compactPlacements, type Gene, type PlacedGene } from './place';
+import { mirrorRefusedWarning } from './warnings';
+import { nestWithSparrow } from '../sparrow';
 
 export type NestProgress = {
   phase: 'nfp' | 'ga';
@@ -36,17 +38,11 @@ const MAX_GENERATIONS = 400;
 // копия расходится с движком молча, и расходится она в ту сторону, где экран обещает поиск,
 // которого не будет. Всё, что осталось тут, — вызов estimateRun и следствия его ответа.
 
-// Имена деталей для предупреждения. Ключ у карты — id, потому что две РАЗНЫЕ детали кроя
-// законно называются одинаково (полочка верха и полочка подклада приходят из градалки под одним
-// именем). Одинаковые имена поэтому не схлопываются, а пересчитываются: «ПОЛОЧКА ×2» — это две
-// детали, а не одна, и оператор, пересчитывающий комплект кроя, обязан это видеть.
-function namesWithCount(byId: ReadonlyMap<number, string>): string {
-  const n = new Map<string, number>();
-  for (const name of byId.values()) n.set(name, (n.get(name) ?? 0) + 1);
-  return [...n.entries()].map(([name, c]) => (c > 1 ? `${name} ×${c}` : name)).join(', ');
-}
-
-export async function nest(
+// THE OLD ENGINE (NFP prepass + GA). Since nest-sparrow it is the fallback for one version: it
+// runs only when sparrow gives no checked layout — the module did not load, the solver failed,
+// or nothing it reported passed the clearance check (see ../sparrow/index.ts). Do not delete
+// before sparrow has been accepted on production — and roll-search still uses its pieces.
+export async function nestLegacy(
   allPieces: readonly PieceDTO[],
   config: NestConfig,
   isCancelled: () => boolean,
@@ -181,22 +177,7 @@ export async function nest(
   }
 
   if (mirrorRefused.size > 0) {
-    // Причина названа ТОЧНО, а не одним словом на два разных случая. Переворот запрещают два
-    // разных факта: ворс (ответ есть, и он «нельзя») и ОТСУТСТВИЕ ответа (направление у строки
-    // BOM не проставлено — тогда сервер не примет норму с переворотом, потому что не может
-    // отличить безобидные 180° от испорченного ворса). Чинятся они по-разному: первый — кроем в
-    // два слоя, второй — одним полем на вкладке BOM. Сказать «ворс» про второй значит послать
-    // раскройщика решать проблему, которой нет.
-    const why =
-      config.fabricDirection === 'one_way'
-        ? 'the fabric is directional (nap)'
-        : 'the fabric direction is not set on the BOM line, and without an answer flipping is forbidden (the norm could not be saved otherwise)';
-    warnings.push(
-      `${why} — the mirrored instances are not placed: ${namesWithCount(mirrorRefused)}. ` +
-        'a flip on such a fabric lays the piece against the nap, and so does a half-turn, and a ' +
-        'marker with it cannot be saved. mirrored pieces on a napped fabric are cut in two plies ' +
-        'face to face — that is a different marker.',
-    );
+    warnings.push(mirrorRefusedWarning(config.fabricDirection, mirrorRefused));
   }
 
   if (foldRefused.size > 0) {
@@ -515,4 +496,16 @@ export async function nest(
   }
 
   return finalize(best, generation, isCancelled());
+}
+
+// THE ENTRY the worker, the probes and the golden runner call. Sparrow computes the layout; the
+// old engine above is handed in as the fallback (passed, not imported there, to keep the module
+// graph acyclic).
+export function nest(
+  allPieces: readonly PieceDTO[],
+  config: NestConfig,
+  isCancelled: () => boolean,
+  onProgress: (p: NestProgress) => void,
+): Promise<NestResult> {
+  return nestWithSparrow(allPieces, config, isCancelled, onProgress, nestLegacy);
 }

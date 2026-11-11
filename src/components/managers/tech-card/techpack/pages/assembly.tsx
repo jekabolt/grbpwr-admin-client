@@ -50,22 +50,14 @@ import {
   pinPoses,
   posePinsOf,
 } from 'components/managers/tech-card/components/step-seams/step-pose';
-import {
-  OWNER_FIT,
-  stepResults,
-  type StepResult,
-} from 'components/managers/tech-card/components/step-seams/step-result';
-import {
-  drawsStepResult,
-  ROWLESS_CARDS_FOLLOW_EDITOR,
-} from 'components/managers/tech-card/components/step-seams/draws-result';
+import type { StepResult } from 'components/managers/tech-card/components/step-seams/step-result';
+import { drawsStepResult } from 'components/managers/tech-card/components/step-seams/draws-result';
 import type { Affine, Pt2 } from 'lib/assembly-skeleton/types';
 import { pairOverlap, pieceKeyOf, rasterize, resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply, compose, rigid, translate } from 'lib/assembly-skeleton/union/affine';
 import { nameTokens, readName } from 'lib/assembly-skeleton/skeleton/model';
 import { ROLE_BOOK } from 'lib/assembly-skeleton/skeleton/template';
-import { foldsFromWire } from 'lib/folds';
-import { isPoseWire, poseKeysOfWire, type SidePart } from 'lib/seams';
+import { isPoseWire, type SidePart } from 'lib/seams';
 import { viewerOrigin } from 'utils/viewer-origin';
 import {
   annotationFromWire,
@@ -87,6 +79,7 @@ import {
   type SvgMarkup,
 } from '../derive-assembly';
 import { gapHref, gapSection, gapSubjects, gapWhere } from '../gap-findings';
+import { ownerStepResultsOfCard, sceneOperations } from '../owner-step-results';
 import { gapKey, type Gap } from '../gaps';
 import {
   normalIntoPiece,
@@ -2981,29 +2974,6 @@ function compactFinalPicture(
   });
 }
 
-// An op's keys name seams and pose rows alike (P8): the card's rows tell them apart, as the form does.
-const sceneOperations = (techCard: common_TechCard): SceneOp[] => {
-  const poseKeys = poseKeysOfWire(techCard.seams);
-  return (techCard.techCard?.operations ?? []).map((operation) => {
-    const keys = operation.seamKeys ?? [];
-    const posed = keys.filter((key) => poseKeys.has(key));
-    return {
-      operationNumber: operation.operationNumber,
-      operationType: operation.operationType,
-      work: operation.work,
-      inputKeys: operation.inputKeys ?? [],
-      outputUnitKey: operation.outputUnitKey,
-      outputUnitName: operation.outputUnitName,
-      seamKeys: posed.length ? keys.filter((key) => !poseKeys.has(key)) : keys,
-      ...(posed.length ? { poseKeys: posed } : {}),
-      ...(operation.foldKeys?.length ? { foldKeys: operation.foldKeys } : {}),
-      ...(operation.labelKeys?.length ? { labelKeys: operation.labelKeys } : {}),
-      ...(operation.layerOrder?.length ? { layerOrder: operation.layerOrder } : {}),
-      fullnessRatio: operation.stitching?.fullnessRatio?.value,
-    };
-  });
-};
-
 function semanticPieceKeys(
   texts: readonly (string | undefined)[],
   geoms: ReadonlyMap<string, { name: string; areaMm2: number }>,
@@ -3367,19 +3337,14 @@ export function editorOperationPictures(
       useInferredLayout && model.garment
         ? model.garment.graph
         : seamGraphOfCard(resolvedCard, model.pieces);
-    const geoms = new Map([...model.pieces].map(([key, piece]) => [key, piece.geom]));
-    const innerLines = new Map(
-      [...model.pieces].map(([key, piece]) => [
-        key,
-        piece.inner.map((line) => line.map(([x, y]) => [x, -y] as Pt2)),
-      ]),
-    );
-    const pieceKeys = new Set([
-      ...geoms.keys(),
-      ...(resolvedCard.techCard?.pieces ?? []).flatMap((piece) =>
-        piece.lineKey ? [piece.lineKey] : [],
-      ),
-    ]);
+    // The editor's step pictures: the same pass the PDF lengths read (derive-assembly).
+    const owner = ownerStepResultsOfCard(techCard, resolvedCard, model.pieces, model.grainDeg);
+    const { geoms, innerLines, pieceKeys, cardFolds } = owner;
+    const ownerResults = owner.results;
+    // The editor provider reads the stored/form operations before the PDF model resolves DXF
+    // aliases. Keep that exact input for shared results; legacy pictures still use resolved keys.
+    const resultOperations = owner.operations;
+    const operations = sceneOperations(resolvedCard);
     const byKey = seamRowsOfCard(resolvedCard);
     const poses = poseRowsOfCard(resolvedCard);
     const names = new Map(
@@ -3387,31 +3352,6 @@ export function editorOperationPictures(
         piece.lineKey ? [[piece.lineKey, piece.name?.trim() || piece.lineKey] as const] : [],
       ),
     );
-    const operations = sceneOperations(resolvedCard);
-    // The editor provider reads the stored/form operations before the PDF model resolves DXF
-    // aliases. Keep that exact input for shared results; legacy pictures still use resolved keys.
-    const resultOperations = sceneOperations(techCard);
-    const foldRows = foldsFromWire(techCard.pieceFolds ?? resolvedCard.pieceFolds).folds;
-    const cardFolds = foldRows.length
-      ? { rows: foldRows, grainDeg: model.grainDeg ?? new Map<string, number>() }
-      : undefined;
-    // With no stored row every result is provably rowless; keep that legacy path allocation-free
-    // until the one shared flag opts rowless cards into editor parity.
-    const ownerResults =
-      byKey.size || poses.size || ROWLESS_CARDS_FOLLOW_EDITOR
-        ? stepResults(
-            {
-              ops: resultOperations,
-              byKey,
-              poses,
-              geoms,
-              innerLines,
-              pieceKeys,
-              ...(cardFolds ? { folds: cardFolds } : {}),
-            },
-            OWNER_FIT,
-          )
-        : [];
     const ownedNumbers = new Set(
       ownerResults.flatMap((result, index) =>
         drawsStepResult(ownerResults, index) ? [resultOperations[index]?.operationNumber ?? 0] : [],

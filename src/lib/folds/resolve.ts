@@ -5,7 +5,8 @@
 // inward, extend it to the contour. A hem allowance stays 30 mm on every size, where a scaled (u, v)
 // line would grow with the piece. A bounded drawn line is matched to the corresponding construction
 // line on this size; without those lines, the stored (u, v) locator remains the legacy fallback.
-// Every other row is extended to the contour. The flipping side is kept from the stored `flipAt`.
+// A row tied to an edge that is not found on this size is reported, never laid by its (u, v) place
+// (owner, 11.11): the frame guess put hems where no edge was. Every other row is extended to the contour. The flipping side is kept from the stored `flipAt`.
 // What cannot be laid on this size is reported in words and left out — never guessed.
 
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
@@ -121,14 +122,16 @@ function resolveOne(
 
   let line: [Pt2, Pt2] | null = null;
   let via: FoldVia = 'uv';
-  if (hit && row.edge) {
+  if (row.edge) {
+    if (!hit) return 'its edge is not on this size';
     const a = hit.run.pts[0];
     const b = hit.run.pts[hit.run.pts.length - 1];
     const d = sub(b, a);
     const n = mul(perp(unit(d)), inwardSign(piece, hit.run));
     const p = add(mul(add(a, b), 0.5), mul(n, row.edge.offsetMm));
     line = clipThrough(piece.rs, p, d);
-    if (line) via = hit.via;
+    if (!line) return 'its edge offset falls outside the piece on this size';
+    via = hit.via;
   }
   if (!line && inner) {
     line = inner.line;

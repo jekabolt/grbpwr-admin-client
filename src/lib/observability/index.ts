@@ -10,7 +10,8 @@ import type { ErrorInfo } from 'react';
 type SentryModule = typeof import('./sentry');
 type Pending = (m: SentryModule) => void;
 
-const DSN = (import.meta.env.VITE_SENTRY_DSN || '').trim();
+// `?.`: the importer's probes bundle the wizard hook for node, where there is no env
+const DSN = (import.meta.env?.VITE_SENTRY_DSN || '').trim();
 const MAX_PENDING = 20;
 
 let sentry: SentryModule | null = null;
@@ -62,4 +63,21 @@ export interface ApiErrorContext {
 export function reportApiError(error: unknown, ctx: ApiErrorContext) {
   if (ctx.status < 500 || ctx.status > 599) return;
   call((m) => m.captureApiError(error, ctx));
+}
+
+export interface ImportRefusalContext {
+  /** The import stage that stopped (`extract`, `sizes`…), when known. */
+  stage: string | null;
+  /** The importer's error code (`unsupported-format`, `too-large`…). */
+  code: string | null;
+  /** What the operator was told. */
+  message: string;
+  /** Names of the dropped files — the owner asked for them, to find the file that failed. */
+  files: string[];
+}
+
+/** A pattern import the wizard stopped on. The operator's own stop is not one. */
+export function reportImportRefusal(ctx: ImportRefusalContext) {
+  if (ctx.code === 'cancelled') return;
+  call((m) => m.captureImportRefusal(ctx));
 }

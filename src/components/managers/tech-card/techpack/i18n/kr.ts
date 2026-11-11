@@ -386,6 +386,7 @@ export const kr = {
     pin: '표시점',
     placement: '부착 위치',
     hemEdge: '밑단 가장자리 미상',
+    fold: '접음',
     tooFewPatternMarks: '패턴 표시 부족',
     marksOutsideOperationZone: '작업 영역 밖 표시',
     operation: '공정',

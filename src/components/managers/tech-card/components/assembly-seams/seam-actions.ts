@@ -12,6 +12,7 @@ import {
   sameRunLen,
   seamFromCandidate,
   SEAMS,
+  expandSidePart,
   normalizeParts,
   sidePartEdges,
   type AnchorHit,
@@ -86,6 +87,9 @@ export function runsOfSide(edges: readonly EdgeId[], geoms: ReadonlyMap<string, 
   );
 }
 
+/** Why a hand pick stores no row, in the picker's words; '' when it does. */
+export type HandRowRefusal = '' | 'cannot pair' | 'too many parts';
+
 /** A hand connection (click A, click B; shift-click for more runs on a side) → a confirmed row. */
 export function rowFromHand(
   a: readonly EdgeId[] | readonly SidePart[],
@@ -94,6 +98,18 @@ export function rowFromHand(
   ctx: AnchorCtx,
   o: { direction: StoredSeamDirection; seamKey?: string; note?: string },
 ): StoredSeam | null {
+  return handRow(a, b, geoms, ctx, o).row;
+}
+
+/** `rowFromHand` with the reason it refused. */
+export function handRow(
+  a: readonly EdgeId[] | readonly SidePart[],
+  b: readonly EdgeId[] | readonly SidePart[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+  ctx: AnchorCtx,
+  o: { direction: StoredSeamDirection; seamKey?: string; note?: string },
+): { row: StoredSeam | null; refusal: HandRowRefusal } {
+  const refused = { row: null, refusal: 'cannot pair' as const };
   const partsOf = (side: readonly EdgeId[] | readonly SidePart[]) =>
     normalizeParts(
       side.map((part) => (typeof part === 'string' ? { target: part } : part)),
@@ -112,18 +128,35 @@ export function rowFromHand(
       }
     return false;
   };
-  if (repeatsEdge(pa) || repeatsEdge(pb)) return null;
+  if (repeatsEdge(pa) || repeatsEdge(pb)) return refused;
+  // A piece closed on itself sews one edge onto ANOTHER: an edge on both sides is no seam, whatever
+  // stretches of it — the resolver reads edges, and such a row is stale from its first read.
+  const edgesOf = (parts: readonly SidePart[]) =>
+    new Set(parts.flatMap((part) => expandSidePart(part, geoms)).flatMap(sidePartEdges));
+  const ea = edgesOf(pa);
+  if ([...edgesOf(pb)].some((edge) => ea.has(edge))) return refused;
   const anyRange = [...pa, ...pb].some((part) => !!part.range);
-  const runs = (parts: readonly SidePart[]): SidePart[] =>
-    anyRange
-      ? [...parts]
-      : runsOfSide(
-          parts.map((part) => part.target as EdgeId),
-          geoms,
-        ).map((target): SidePart => ({ target }));
+  // Whole edges in a row of one piece sew as one run, whatever else the side holds: a stretch
+  // picked elsewhere must not turn every edge into a part of its own.
+  const runs = (parts: readonly SidePart[]): SidePart[] => {
+    const out: SidePart[] = [];
+    let whole: EdgeId[] = [];
+    const flush = () => {
+      out.push(...runsOfSide(whole, geoms).map((target): SidePart => ({ target })));
+      whole = [];
+    };
+    for (const part of parts) {
+      if (part.range) {
+        flush();
+        out.push(part);
+      } else whole.push(part.target as EdgeId);
+    }
+    flush();
+    return out;
+  };
   const ra = runs(pa);
   const rb = runs(pb);
-  if (ra.length === 0 || rb.length === 0) return null;
+  if (ra.length === 0 || rb.length === 0) return refused;
   const composite = ra.length > 1 || rb.length > 1;
   const partial = !composite && anyRange;
   const aLen = sideLengthMm(pa, geoms, () => 0);
@@ -171,7 +204,10 @@ export function rowFromHand(
     note: (o.note ?? '').trim().slice(0, 255),
     ...opts(ctx),
   });
-  return row && Math.max(row.sideA.length, row.sideB.length) > SEAMS.maxAnchorsPerSide ? null : row;
+  if (!row) return refused;
+  if (Math.max(row.sideA.length, row.sideB.length) > SEAMS.maxAnchorsPerSide)
+    return { row: null, refusal: 'too many parts' };
+  return { row, refusal: '' };
 }
 
 /**

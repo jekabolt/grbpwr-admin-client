@@ -154,6 +154,7 @@ export const labelPlacementOptions = [
 
 export const labelAttachmentOptions = [
   'sewn into the seam',
+  'on_fabric_piece',
   'sewn 2 sides',
   'sewn 4 sides',
   'heat press',
@@ -162,7 +163,7 @@ export const labelAttachmentOptions = [
   'stuck on',
 ];
 
-export const labelFoldingOptions = ['flat', 'half', 'ends', 'mitre', 'loop'];
+export const labelFoldingOptions = ['flat', 'half', 'ends', 'mitre', 'loop', 'tee'];
 
 export const labelMadeByOptions = ['woven', 'printed', 'embroidered', 'heat transfer'];
 

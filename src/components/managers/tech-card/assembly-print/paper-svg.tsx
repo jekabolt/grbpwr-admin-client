@@ -137,10 +137,42 @@ function PrimView({ p }: { p: Prim }) {
   return createElement(m.tag, { ...m.attrs, style: m.style }, m.text);
 }
 
-
 /** Лист на экране в размере листа — стенд и всё, что не знает про страницы файла. */
 export function PaperSvg({ doc }: { doc: PaperDoc }) {
   return <PaperPage doc={doc} page={{ w: doc.w, h: doc.h }} scale={1} tile={SHEET_TILE} />;
+}
+
+/** The sheet drawn inside another SVG: fitted `meet` into the rect, never distorted. */
+export function PaperNested({
+  doc,
+  x,
+  y,
+  width,
+  height,
+}: {
+  doc: PaperDoc;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}) {
+  return (
+    <svg
+      x={x}
+      y={y}
+      width={width}
+      height={height}
+      viewBox={`0 0 ${doc.w} ${doc.h}`}
+      preserveAspectRatio='xMidYMid meet'
+      style={{ fontFamily: FONT }}
+      pointerEvents='none'
+    >
+      <rect x={0} y={0} width={doc.w} height={doc.h} fill='white' />
+      {doc.prims.map((p, i) => (
+        <PrimView key={i} p={p} />
+      ))}
+    </svg>
+  );
 }
 
 const SHEET_TILE: Tile = { tx: 0, ty: 0, clip: null, furniture: [] };

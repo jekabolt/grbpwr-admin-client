@@ -42,6 +42,21 @@ describe('fold steps', () => {
     expect(suggestStep(ops, 'CUFF')).toBeNull();
   });
 
+  it('never suggests a join or a step on two pieces', () => {
+    const joined = [
+      { operationType: 'TECH_CARD_OPERATION_TYPE_FUSING', inputKeys: ['FLAP_L'] },
+      {
+        operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+        inputKeys: ['FLAP_L', 'FRONT'],
+        outputUnitKey: 'FLAP_UNIT',
+      },
+      { operationType: 'TECH_CARD_OPERATION_TYPE_PRESS', inputKeys: ['FLAP_L', 'FRONT'] },
+      { operationType: 'TECH_CARD_OPERATION_TYPE_PRESS', inputKeys: ['FLAP_L'] },
+    ];
+    expect(suggestStep(joined, 'FLAP_L')).toBe(3);
+    expect(suggestStep(joined.slice(0, 3), 'FLAP_L')).toBeNull();
+  });
+
   it('moves one fold without mutating the operations', () => {
     const next = assignFold(ops, 'fold-1', 2);
     expect(next).toEqual([[], [], ['fold-2', 'fold-1']]);

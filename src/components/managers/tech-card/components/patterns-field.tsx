@@ -110,7 +110,6 @@ import {
   fabricScopes,
   moveSheet,
   purposeEditorOptions,
-  scopeImpact,
   scopeKeyOfBinding,
   scopeOfLine,
   type ArtifactKind,
@@ -118,20 +117,12 @@ import {
   strictestDirection,
   UNSET_PURPOSE,
 } from './bom-purpose';
-import {
-  applyLineChange,
-  bornBomLine,
-  holdNames,
-  releaseBomLineRefs,
-  withoutGenerated,
-  writeBindings,
-} from './form-writers';
+import { applyLineChange, bornBomLine, writeBindings } from './form-writers';
 import { bareToken, normBlock, sizeTokensOf, splitBlockSize, uniOf } from './nesting/block-code';
 import { geometryFailureLabel, isFetchFailure } from './nesting/dxf-warnings';
 import { defaultContourLayer, layerOptions } from './nesting/contour-layer';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
 import { hydrateSeams, posesOf, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
-import { useBindingStripTeardown } from './use-binding-strip-teardown';
 import { toWire, type TechCardSeamWire } from 'lib/seams';
 import { dxfByScope, patternSheetName } from './nesting/dxf-by-scope';
 import {
@@ -227,6 +218,7 @@ import {
   type SheetRevisionRef,
 } from './nesting/reupload-session';
 import { PatternDropZone } from './pattern-drop-zone';
+import { slotTilePlan } from './pattern-slot-tiles';
 import {
   getFusingSheetGenerationState,
   subscribeFusingSheetGeneration,
@@ -687,7 +679,6 @@ export function PatternsField({
   savedSizeIds?: number[];
 }) {
   const { control, setValue, getValues, register, setFocus } = useFormContext<TechCardFormData>();
-  const teardownBinding = useBindingStripTeardown();
   const writeDirty = (path: string, value: unknown) =>
     setValue(path as Parameters<typeof setValue>[0], value as never, { shouldDirty: true });
   const [params, setParams] = useSearchParams();
@@ -988,6 +979,11 @@ export function PatternsField({
   const [pickedKey, setPickedKey] = useState<string | null>(null);
   // Подтверждение удаления живёт в самой плитке; ключ скоупа не зависит от позиции плитки.
   const [confirmScopeKey, setConfirmScopeKey] = useState<string | null>(null);
+  // Empty tiles the operator added from «+ slot», by BOM line (a purpose change re-keys the scope,
+  // never the line). Client-only: not saved, gone after a reload (owner 11.11).
+  const [addedSlotLines, setAddedSlotLines] = useState<ReadonlySet<string>>(() => new Set());
+  const [slotMenuOpen, setSlotMenuOpen] = useState(false);
+  const slotMenuRef = useRef<HTMLDivElement | null>(null);
   // Разовое намерение фокуса переживает рендер, на котором новая строка входит в useWatch.
   const pendingSlotFocus = useRef<string | null>(null);
   // Отказ публикации индекса размеров, по подписи набора листов. Только отказ: публикация идёт
@@ -1157,6 +1153,12 @@ export function PatternsField({
     return once([purpose, names.join(', ')]).join(' · ');
   };
 
+  // «+ slot» menu row: the line name(s), then the purpose word (unsorted: the section's role).
+  const slotMenuName = (s: FabricScope<FabricLine>): string =>
+    once(s.lines.map((l) => l.name)).join(', ') || scopeLabel(s);
+  const slotMenuWord = (s: FabricScope<FabricLine>): string =>
+    s.byPurpose ? bomPurposeLabel(s.key) : s.lines[0]?.role ?? '';
+
   // Structure (order, ids) from the array snapshot; values from the live form state so
   // setValue-written fields (rename, rebind) show through.
   const entries: Entry[] = useMemo(
@@ -1260,6 +1262,25 @@ export function PatternsField({
   // едут вместе с листом по сырой паре привязки; прочие потребители до переноса видят его ничьим.
   const orphanDxf = useMemo(() => dxfByScopeMap.get('') ?? [], [dxfByScopeMap]);
   const orphanHome = scopes[0]?.key ?? '';
+
+  // Sheets of a slot, every format (a legacy PDF occupies a slot like a DXF).
+  const slotFileCount = (scopeKey: string) => allByScopeMap.get(scopeKey)?.length ?? 0;
+  // Which slots get a tile (owner 11.11): those holding a sheet, plus the empty ones added from
+  // «+ slot». Legacy unbound DXFs sit under the first material, so they keep its tile drawn.
+  const tilePlan = useMemo(
+    () =>
+      slotTilePlan(
+        scopes,
+        (key) =>
+          (allByScopeMap.get(key)?.length ?? 0) + (key === orphanHome ? orphanDxf.length : 0),
+        addedSlotLines,
+      ),
+    [scopes, allByScopeMap, orphanHome, orphanDxf.length, addedSlotLines],
+  );
+  const tileGroups = useMemo(() => {
+    const shown = new Set(tilePlan.tiles.map((s) => s.key));
+    return scopeGroups.filter((g) => shown.has(g.scope.key));
+  }, [tilePlan, scopeGroups]);
 
   const filesOf = (list: Entry[]): NestingFile[] =>
     list.map(({ row }) => ({ name: patternSheetName(row), url: row.url! }));
@@ -1573,8 +1594,8 @@ export function PatternsField({
   // материал могли удалить из BOM, пока панель открыта, и залипший ключ показал бы пустоту вместо
   // ближайшего осмысленного материала.
   const shelfKeys = useMemo(
-    () => [...scopeGroups.map((g) => g.scope.key), ...(pdfEntries.length > 0 ? [PDF_KEY] : [])],
-    [scopeGroups, pdfEntries.length],
+    () => [...tileGroups.map((g) => g.scope.key), ...(pdfEntries.length > 0 ? [PDF_KEY] : [])],
+    [tileGroups, pdfEntries.length],
   );
   // Фолбэк идёт ЗА ФАЙЛАМИ, а не за материалами: на карточке, где все DXF залиты до 0260 (значит
   // все непривязанные) или остались только PDF, «первый материал» — это пустая плитка «раскроить
@@ -1582,12 +1603,14 @@ export function PatternsField({
   const selectedKey =
     pickedKey && shelfKeys.includes(pickedKey)
       ? pickedKey
-      : scopeGroups.find((g) => g.entries.length > 0)?.scope.key ??
+      : tileGroups.find((g) => g.entries.length > 0)?.scope.key ??
         (orphanDxf.length > 0 && orphanHome ? orphanHome : null) ??
         (pdfEntries.length > 0 ? PDF_KEY : null) ??
         shelfKeys[0] ??
         null;
   const setSelectedKey = setPickedKey;
+  // The remove overlay belongs to the tile it was opened on; another pick closes it.
+  useEffect(() => setConfirmScopeKey(null), [selectedKey]);
 
   useEffect(() => {
     const key = pendingSlotFocus.current;
@@ -1598,39 +1621,9 @@ export function PatternsField({
     setFocus(`bomItems.${index}.name` as never);
   }, [bomItems, isSubmitting, setFocus]);
 
-  const colourwayBlockers = (scope: FabricScope<FabricLine>): string[] => {
-    const keys = new Set(scope.lines.map((line) => line.lineKey));
-    const ids = new Set(scope.lines.map((line) => Number(line.id ?? 0)).filter((id) => id > 0));
-    return (cardRead?.colorways ?? [])
-      .filter((colorway) =>
-        (colorway.usages ?? []).some(
-          (usage) =>
-            ids.has(Number(usage.bomItemId ?? 0)) || keys.has(usage.bomLineKey?.trim() ?? ''),
-        ),
-      )
-      .map(
-        (colorway) =>
-          colorway.baseSku?.trim() || colorway.colorCode?.trim() || `#${colorway.colorwayId ?? 0}`,
-      );
-  };
-
   // The cloth lines as the form holds them NOW. Handlers and uploads read these, not the render's
   // `scopes`: an upload awaits files, dialogs and the server while the BOM may be re-sorted.
   const liveCloth = () => clothLines((getValues('bomItems') ?? []) as BomLine[]);
-
-  // What keeps a slot on the card besides colourways: its sheets, piece links and markers. Removing
-  // the slot would leave them without a material, so it is refused, naming them.
-  const scopeHold = (scope: FabricScope<FabricLine>): string[] =>
-    holdNames(
-      withoutGenerated(
-        scopeImpact(scope, {
-          patterns: liveRows,
-          aliases: pieceDxfAliases,
-          markers: cardRead?.markers ?? [],
-          scopes,
-        }),
-      ),
-    );
 
   // PURPOSE OF A WHOLE SLOT. Its sheets and piece links go with it through the one writer
   // (form-writers applyLineChange → bom-purpose planLineChange); a merge into a slot that links one
@@ -1700,8 +1693,11 @@ export function PatternsField({
       name: defaultRoleForPurpose(purpose) || bomPurposeLabel(purpose),
       purpose,
     }) as BomLine;
-    pendingSlotFocus.current = line.lineKey?.trim() ?? null;
+    const lineKey = line.lineKey?.trim() ?? '';
+    pendingSlotFocus.current = lineKey || null;
+    if (lineKey) setAddedSlotLines((all) => new Set(all).add(lineKey));
     setConfirmScopeKey(null);
+    setSlotMenuOpen(false);
     setSelectedKey(purpose);
     setValue('bomItems', [...current, line] as never, {
       shouldDirty: true,
@@ -1709,22 +1705,63 @@ export function PatternsField({
     });
   };
 
-  const removeMaterialScope = async (scope: FabricScope<FabricLine>): Promise<boolean> => {
-    if (colourwayBlockers(scope).length > 0 || scopeHold(scope).length > 0) return false;
-    const lineKeys = new Set(scope.lines.map((line) => line.lineKey));
-    const current = (getValues('bomItems') ?? []) as BomLine[];
-    const removed = current.filter((line) => lineKeys.has(line.lineKey?.trim() ?? ''));
-    if (removed.length === 0) return false;
-    if (!(await teardownBinding({ bomLineKeys: [...lineKeys] }))) return false;
-    removed.forEach((line) => releaseBomLineRefs(getValues, setValue, line));
-    const rest = current.filter((line) => !lineKeys.has(line.lineKey?.trim() ?? ''));
-    // The slot's bindings settle in one change; the fusing rebuild's generated sheets leave with it.
-    applyLineChange(getValues, setValue, rest as never, lineKeys, cardRead?.markers ?? []);
-    setValue('bomItems', rest as never, { shouldDirty: true, shouldValidate: true });
+  // «+ slot» → a BOM line without a tile: an EMPTY tile for it, selected. BOM untouched.
+  const addSlotFromBom = (scope: FabricScope<FabricLine>) => {
+    setAddedSlotLines((all) => {
+      const next = new Set(all);
+      for (const line of scope.lines) next.add(line.lineKey);
+      return next;
+    });
     setConfirmScopeKey(null);
-    setSelectedKey(scopes.find((candidate) => candidate.key !== scope.key)?.key ?? null);
-    return true;
+    setSlotMenuOpen(false);
+    setSelectedKey(scope.key);
   };
+
+  // × on a slot takes the TILE away, never the BOM line, its recipe rows or markers (owner 11.11).
+  const dropAddedSlot = (scope: FabricScope<FabricLine>) => {
+    setAddedSlotLines((all) => {
+      const next = new Set(all);
+      for (const line of scope.lines) next.delete(line.lineKey);
+      return next;
+    });
+    setConfirmScopeKey(null);
+    setSelectedKey(null);
+  };
+
+  // A slot with files: every sheet of it leaves the form, each through the ordinary sheet delete
+  // (its cascade, snapshots and seams). DXFs by identity first, then legacy rows by index, last first.
+  const removeSlotSheets = async (scope: FabricScope<FabricLine>) => {
+    const inSlot = (row: PatternRow) => liveScopeOf(row, 'sheet') === scope.key;
+    const live = () => (getValues('patterns') ?? []) as PatternRow[];
+    const dxfIds = live()
+      .filter((row) => isDxfUrl(row.url) && inSlot(row))
+      .map((row) => sheetRowId(row));
+    for (const rowId of dxfIds) await confirmDelete(rowId);
+    const legacy = live()
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => !isDxfUrl(row.url) && inSlot(row))
+      .map(({ index }) => index)
+      .sort((a, b) => b - a);
+    for (const index of legacy) await confirmDelete(`#${index}`);
+    dropAddedSlot(scope);
+  };
+
+  useEffect(() => {
+    if (!slotMenuOpen) return;
+    const away = (event: PointerEvent) => {
+      if (slotMenuRef.current && !slotMenuRef.current.contains(event.target as Node))
+        setSlotMenuOpen(false);
+    };
+    const esc = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSlotMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', away);
+    document.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('pointerdown', away);
+      document.removeEventListener('keydown', esc);
+    };
+  }, [slotMenuOpen]);
 
   // Размерный токен из имён блоков → id размера карточки. Нужен раскладке: один DXF несёт весь
   // ряд, и маркер обязан лечь на ВЫБРАННЫЙ внутри размер, а не на тот, в чей слот файл положили.
@@ -1797,7 +1834,15 @@ export function PatternsField({
     g.scope.byPurpose
       ? g.scope.key === 'TECH_CARD_BOM_PURPOSE_MAIN'
       : g.scope.lines[0]?.section === 'TECH_CARD_BOM_SECTION_FABRIC';
-  const materialsWithoutDxf = scopeGroups.filter((g) => g.entries.length === 0 && isMainScope(g));
+  // A slot without a file has no tile now, so «no pattern» stays only where a main pattern is
+  // required: the MAIN purpose slot, or — on a card with no main pattern at all — the unsorted
+  // fabric-section lines that stand in for it. Once any main candidate has a file, an unsorted
+  // fabric line without one (a «lining» left in FABRIC) is just a BOM line (owner 11.11).
+  const mainCandidates = scopeGroups.filter(isMainScope);
+  const mainHasDxf = mainCandidates.some((g) => g.entries.length > 0);
+  const materialsWithoutDxf = mainCandidates.filter(
+    (g) => g.entries.length === 0 && (g.scope.key === 'TECH_CARD_BOM_PURPOSE_MAIN' || !mainHasDxf),
+  );
   // Строки, чей size_id вне ряда карточки. Размер — артефакт хранения, но сервер всё равно
   // сверяет НЕПУСТОЙ размер с размерным рядом и отвергает такую строку, роняя ВЕСЬ сейв карточки.
   // Лист БЕЗ размера (0281) сюда не попадает: он не называет размера вовсе, и ряду его проверять
@@ -4307,7 +4352,7 @@ export function PatternsField({
           <>
             <span className='text-micro'>+ drop pattern files</span>
             <span className='text-nano text-labelColor'>
-              {importOk && sizeIds.length > 0 ? 'DXF or PDF' : 'DXF'} · one file or one per size
+              {importOk && sizeIds.length > 0 ? 'DXF or PDF' : 'DXF'}
             </span>
           </>
         )}
@@ -4461,64 +4506,72 @@ export function PatternsField({
         index: bomItems.findIndex((candidate) => candidate.lineKey === line.lineKey),
       }))
       .filter(({ index }) => index >= 0);
-    const blockers = [...colourwayBlockers(g.scope), ...scopeHold(g.scope)];
+    // × takes the tile away: an empty one at once, one with files after the overlay below.
+    const fileCount = slotFileCount(key);
     const activeMedia = (
       <div className='relative'>
         {media}
         {canEdit && (
           <div
             className={cn(
-              'absolute right-px bg-bgColor md:opacity-0 md:group-hover/slot:opacity-100 md:group-focus-within/slot:opacity-100',
+              'absolute right-px z-10 border border-textColor bg-bgColor',
               slotState ? 'top-8' : 'top-px',
             )}
             onClick={(event) => event.stopPropagation()}
           >
-            {confirmScopeKey === key ? (
-              <span className='flex items-center gap-1 px-1 py-0.5 text-micro uppercase'>
-                <span>remove?</span>
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  className='p-0 text-textColor'
-                  onClick={() => void removeMaterialScope(g.scope)}
-                >
-                  yes
-                </Button>
-                <span className='text-labelColor'>/</span>
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  className='p-0 text-labelColor hover:text-textColor'
-                  onClick={() => setConfirmScopeKey(null)}
-                >
-                  no
-                </Button>
-              </span>
-            ) : (
-              <Close
-                size='sm'
-                aria-label='remove slot'
-                disabled={busy || blockers.length > 0}
-                title={blockers.length > 0 ? `used by ${blockers.join(', ')}` : 'remove slot'}
-                className='bg-bgColor text-labelColor hover:text-textColor hover:no-underline'
-                onClick={() => setConfirmScopeKey(key)}
-              />
-            )}
+            <Close
+              size='sm'
+              aria-label='remove slot'
+              title='remove slot'
+              disabled={busy || isSubmitting}
+              className='size-5 text-textColor hover:bg-textColor hover:text-bgColor hover:no-underline'
+              onClick={() => (fileCount > 0 ? setConfirmScopeKey(key) : dropAddedSlot(g.scope))}
+            />
           </div>
         )}
       </div>
     );
+    const removeOverlay =
+      canEdit && confirmScopeKey === key && fileCount > 0 ? (
+        <div
+          className='absolute inset-0 z-20 flex flex-col items-center justify-center gap-2.5 bg-bgColor text-micro uppercase tracking-label'
+          onClick={(event) => event.stopPropagation()}
+        >
+          <span>
+            remove slot · {fileCount} {plural(fileCount, 'file')}
+          </span>
+          <span className='flex gap-1.5'>
+            <Button
+              type='button'
+              variant='secondary'
+              size='sm'
+              disabled={busy || isSubmitting}
+              className='border-error text-error hover:bg-error hover:text-bgColor'
+              onClick={() => void removeSlotSheets(g.scope)}
+            >
+              remove
+            </Button>
+            <Button
+              type='button'
+              variant='secondary'
+              size='sm'
+              onClick={() => setConfirmScopeKey(null)}
+            >
+              cancel
+            </Button>
+          </span>
+        </div>
+      ) : null;
 
     return (
       <div
         key={key}
-        className={cn('group/slot', dragging && 'outline outline-2 outline-textColor')}
+        className={cn('group/slot relative', dragging && 'outline outline-2 outline-textColor')}
         data-field={`patterns.slot.${g.scope.lines[0]?.lineKey ?? key}`}
         onClickCapture={() => setSelectedKey(key)}
         {...dropProps(key)}
       >
+        {removeOverlay}
         <Tile
           selected
           dashed={!has}
@@ -4555,6 +4608,65 @@ export function PatternsField({
           </div>
           {has && <span className='mt-1 block'>{renderCoverage(g.entries)}</span>}
         </Tile>
+      </div>
+    );
+  }
+
+  // «+ slot»: a menu inside the tile — BOM lines without a tile, then a new material.
+  function renderAddSlot() {
+    const menuRow = 'flex w-full justify-between gap-2 border-t border-hairline p-2 text-left';
+    return (
+      <div ref={slotMenuRef} className='relative'>
+        <Tile dashed title='Add slot' className='min-h-36 p-0'>
+          <Button
+            type='button'
+            variant='default'
+            aria-expanded={slotMenuOpen}
+            className='flex h-full min-h-36 w-full items-center justify-center text-labelColor hover:text-textColor'
+            onClick={() => setSlotMenuOpen((open) => !open)}
+          >
+            <Text size='control' variant='label' className='uppercase tracking-label'>
+              + slot
+            </Text>
+          </Button>
+        </Tile>
+        {slotMenuOpen && (
+          <div className='absolute inset-x-2 top-2 z-20 flex flex-col border border-textColor bg-bgColor'>
+            {tilePlan.free.length > 0 && (
+              <Text
+                size='micro'
+                variant='label'
+                className='px-2 pb-1 pt-1.5 uppercase tracking-label'
+              >
+                from BOM
+              </Text>
+            )}
+            {tilePlan.free.map((scope) => (
+              <Button
+                key={scope.key}
+                type='button'
+                variant='default'
+                size='sm'
+                className={cn(menuRow, 'group/row hover:bg-textColor hover:text-bgColor')}
+                onClick={() => addSlotFromBom(scope)}
+              >
+                <span className='truncate'>{slotMenuName(scope)}</span>
+                <span className='shrink-0 text-labelColor group-hover/row:text-bgColor'>
+                  {slotMenuWord(scope)}
+                </span>
+              </Button>
+            ))}
+            <Button
+              type='button'
+              variant='default'
+              size='sm'
+              className={cn(menuRow, 'hover:bg-textColor hover:text-bgColor')}
+              onClick={addMaterialSlot}
+            >
+              + new material
+            </Button>
+          </div>
+        )}
       </div>
     );
   }
@@ -4999,7 +5111,15 @@ export function PatternsField({
   }));
   const noPatternWarnings: HeaderWarning[] = materialsWithoutDxf.map((g) => ({
     text: `${scopeLabel(g.scope)}: no pattern`,
-    action: canUpload ? { label: 'add files', onClick: () => openPicker(g.scope.key) } : undefined,
+    action: canUpload
+      ? {
+          label: 'add files',
+          onClick: () => {
+            addSlotFromBom(g.scope);
+            openPicker(g.scope.key);
+          },
+        }
+      : undefined,
   }));
   const indexWarnings: HeaderWarning[] = Object.entries(indexFailures).flatMap(([sig, reason]) => {
     const g = scopeGroups.find((x) => x.entries.length > 0 && sigOf(x.entries) === sig);
@@ -5047,13 +5167,13 @@ export function PatternsField({
     ...indexWarnings,
     ...areaWarnings,
   ].filter((w): w is HeaderWarning => !!w);
-  const withoutPattern = scopeGroups.filter((g) => g.entries.length === 0).length;
   const header = (
     <>
       {geometry.isFetching && <HeaderNote>parsing…</HeaderNote>}
-      {scopeGroups.length > 0 && (
+      {(tileGroups.length > 0 || canEdit) && (
         <HeaderNote>
-          materials: {scopeGroups.length} · without pattern: {withoutPattern}
+          slots: {tileGroups.length}
+          {tilePlan.emptyAdded > 0 && ` · empty: ${tilePlan.emptyAdded}`}
         </HeaderNote>
       )}
       <HeaderWarnings items={warnings} />
@@ -5127,20 +5247,9 @@ export function PatternsField({
         <>
           <div data-field='patterns.shelf'>
             <Tiles min={200}>
-              {scopeGroups.map(renderTile)}
+              {tileGroups.map(renderTile)}
               {pdfEntries.length > 0 && renderExtraTile(PDF_KEY, 'PDF', pdfEntries)}
-              {canEdit && (
-                <Tile
-                  dashed
-                  title='Add slot'
-                  className='min-h-36 items-center justify-center text-labelColor hover:text-textColor'
-                  onClick={addMaterialSlot}
-                >
-                  <Text size='control' variant='label' className='uppercase tracking-label'>
-                    + slot
-                  </Text>
-                </Tile>
-              )}
+              {canEdit && renderAddSlot()}
             </Tiles>
           </div>
           {renderSelected()}

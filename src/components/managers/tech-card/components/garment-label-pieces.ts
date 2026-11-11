@@ -78,7 +78,8 @@ export function garmentLabelMark(label: GarmentLabelLike): GarmentLabelMark | nu
     rawFold === 'half' ||
     rawFold === 'ends' ||
     rawFold === 'mitre' ||
-    rawFold === 'loop'
+    rawFold === 'loop' ||
+    rawFold === 'tee'
       ? rawFold
       : '';
   return {
@@ -171,7 +172,12 @@ export function garmentLabelDrawingsOf(
 /** The label as it lies on the garment: folded, cut at its stitch to the part that shows. */
 export function labelShownSizeMm(mark: GarmentLabelMark): { widthMm: number; heightMm: number } {
   const axisMm = labelAxisLen(mark);
-  const shown = labelAssembly(mark.foldLines ?? [], mark.stitchLines ?? [], axisMm).heightMm;
+  const shown = labelAssembly(
+    mark.foldLines ?? [],
+    mark.stitchLines ?? [],
+    axisMm,
+    mark.fold,
+  ).heightMm;
   return mark.foldAxis === 'width'
     ? { widthMm: shown, heightMm: mark.heightMm }
     : { widthMm: mark.widthMm, heightMm: shown };

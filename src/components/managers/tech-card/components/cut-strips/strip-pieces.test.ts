@@ -31,11 +31,13 @@ import {
   fromSeamStrip,
   oneLengthStrip,
   RUBBER,
+  SEAM,
   STRIP,
   STRIP_SIZE_NAMES,
   WAISTBAND,
   waistbandCard,
 } from './strip.fixture';
+import { goneSeamKeys, withSeamGone } from './lengths';
 
 const BOM = [{ lineKey: RUBBER, name: 'rubber' }];
 const DRAW = { sizeToken: 'M', sizeNames: STRIP_SIZE_NAMES, baseSizeId: 2 };
@@ -112,6 +114,20 @@ describe('the rectangle', () => {
     const none = fromSeamStrip({ sizes: [] } as never);
     expect(stripMarkOf(none, BOM, DRAW)).toBeNull();
     expect(stripDrawingsOf([none], BOM, DRAW)).toEqual([]);
+  });
+
+  it('draws no strip from a rejected or stale seam, as the norm counts none', () => {
+    const strip = fromSeamStrip({ seamKey: SEAM });
+    for (const row of [
+      { seamKey: SEAM, status: 'rejected' },
+      { seamKey: SEAM, status: 'confirmed', stale: true },
+    ]) {
+      const measured = withSeamGone(strip, goneSeamKeys([row]));
+      expect(stripMarkOf(measured, BOM, DRAW)).toBeNull();
+      expect(stripDrawingsOf([measured], BOM, DRAW)).toEqual([]);
+    }
+    const kept = withSeamGone(strip, goneSeamKeys([{ seamKey: SEAM, status: 'confirmed' }]));
+    expect(stripMarkOf(kept, BOM, DRAW)?.sewnMm).toBe(672);
   });
 
   it('has one length at every size', () => {

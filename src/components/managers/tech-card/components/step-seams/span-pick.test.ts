@@ -7,6 +7,7 @@ import { normalizeParts, SEAMS, type StoredSeam } from 'lib/seams';
 import { rowPairSig, rowsSig } from '../assembly-seams/seams-store';
 
 import realFixture from './fixtures/span-real-geoms.json';
+import { foldCrossingsMm } from './step-folds';
 import {
   clickSegment,
   edgeBreaks,
@@ -17,6 +18,8 @@ import {
   repeatsStoredSeam,
   segmentAt,
   sideParts,
+  surfacePartSide,
+  surfacePick,
   snapToBreak,
   storedSeamAt,
   storedSeamOverlapping,
@@ -330,5 +333,137 @@ describe('rows of one edge', () => {
       direction: 'reversed' as const,
     });
     expect(rowsSig([gap(0.25)])).not.toBe(rowsSig([gap(0.5)]));
+  });
+});
+
+describe('a folded edge is picked by the stretches its folds cut', () => {
+  const edge = resolveEdge(id, geoms)!;
+  const across = (t: number) => {
+    // A fold line through the point t of the edge, square to it.
+    const i = Math.max(1, Math.floor(t * (edge.pts.length - 1)));
+    const [p, q] = [edge.pts[i - 1], edge.pts[i]];
+    const at = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2] as const;
+    const n = [-(q[1] - p[1]), q[0] - p[0]] as const;
+    return {
+      a: [at[0] - n[0] * 50, at[1] - n[1] * 50] as [number, number],
+      b: [at[0] + n[0] * 50, at[1] + n[1] * 50] as [number, number],
+      flipAt: at as unknown as [number, number],
+      kind: 'inward' as const,
+    };
+  };
+
+  it('a fold line across the edge is a break point, a click takes one stretch', () => {
+    const lines = new Map([[piece.geom.pieceKey, [across(0.5)]]]);
+    const cuts = foldCrossingsMm(id, geoms, lines);
+    expect(cuts).toHaveLength(1);
+    const breaks = edgeBreaks(id, geoms, cuts);
+    expect(breaks.some((b) => b.kind === 'fold')).toBe(true);
+    const [from, to] = segmentAt(breaks, length, cuts[0] + 0.5);
+    expect(from).toBeCloseTo(cuts[0], 3);
+    expect(to).toBeLessThanOrEqual(length);
+  });
+
+  it('no folds, the same breaks as before', () => {
+    expect(edgeBreaks(id, geoms, [])).toEqual(edgeBreaks(id, geoms));
+    expect(foldCrossingsMm(id, geoms, new Map())).toEqual([]);
+  });
+});
+
+describe('a gap a fold cut fills on its own', () => {
+  const edge = resolveEdge(id, geoms)!;
+  const across = (t: number) => {
+    const i = Math.max(1, Math.floor(t * (edge.pts.length - 1)));
+    const [p, q] = [edge.pts[i - 1], edge.pts[i]];
+    const at = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2] as const;
+    const n = [-(q[1] - p[1]), q[0] - p[0]] as const;
+    return {
+      a: [at[0] - n[0] * 50, at[1] - n[1] * 50] as [number, number],
+      b: [at[0] + n[0] * 50, at[1] + n[1] * 50] as [number, number],
+      flipAt: at as unknown as [number, number],
+      kind: 'inward' as const,
+    };
+  };
+  const lines = new Map([[piece.geom.pieceKey, [across(0.45), across(0.55)]]]);
+  const cuts = foldCrossingsMm(id, geoms, lines);
+  const breaks = edgeBreaks(id, geoms, cuts);
+  const [f1, f2] = cuts;
+  const before = segmentAt(breaks, length, f1 - 0.5);
+  const between = segmentAt(breaks, length, (f1 + f2) / 2);
+  const after = segmentAt(breaks, length, f2 + 0.5);
+  const click = (pick: SidePick, segment: readonly [number, number]) =>
+    pickSegment(pick, 'a', id, [segment[0], segment[1]], length, rules, breaks);
+
+  it('102: the stretch between two fold points skipped, the edge stays one piece', () => {
+    expect(cuts).toHaveLength(2);
+    expect(between).toEqual([f1, f2].map((mm) => expect.closeTo(mm, 3)));
+    for (const order of [
+      [before, after],
+      [after, before],
+    ]) {
+      const pick = order.reduce(click, empty);
+      expect(pick.spans.a[id]).toHaveLength(1);
+      expect(pick.spans.a[id][0][0]).toBeCloseTo(before[0], 3);
+      expect(pick.spans.a[id][0][1]).toBeCloseTo(after[1], 3);
+    }
+  });
+
+  it('the owner: a click on the middle of a taken edge still cuts a hole there', () => {
+    let pick = [before, between, after].reduce(click, empty);
+    expect(pick.spans.a[id]).toHaveLength(1);
+    pick = click(pick, between);
+    expect(pick.spans.a[id]).toHaveLength(2);
+    expect(pick.spans.a[id][0][1]).toBeCloseTo(f1, 3);
+    expect(pick.spans.a[id][1][0]).toBeCloseTo(f2, 3);
+  });
+
+  it('a gap with no fold at its ends (a pocket) stays', () => {
+    const plain = edgeBreaks(id, geoms);
+    const inner = plain.filter((b) => b.atMm > 1 && b.atMm < length - 1);
+    expect(inner.length).toBeGreaterThanOrEqual(2);
+    const first = segmentAt(plain, length, inner[0].atMm - 0.5);
+    const third = segmentAt(plain, length, inner[1].atMm + 0.5);
+    let pick = pickSegment(empty, 'a', id, first, length, rules, plain);
+    pick = pickSegment(pick, 'a', id, third, length, rules, plain);
+    expect(pick.spans.a[id]).toHaveLength(2);
+  });
+});
+
+describe('a surface takes one piece by whole edges (C2, Р5)', () => {
+  const isInner = (id: string) => id.includes(':i');
+  const pieceOf = (id: string) => id.split(/[#:]/)[0];
+
+  it('the part side is opposite the one inner line', () => {
+    expect(surfacePartSide({ a: ['FR:i0'], b: ['PCK#0'] }, isInner)).toBe('b');
+    expect(surfacePartSide({ a: ['PCK#0'], b: ['FR:i0'] }, isInner)).toBe('a');
+    expect(surfacePartSide({ a: ['FR#1'], b: ['BK#1'] }, isInner)).toBeNull();
+    expect(surfacePartSide({ a: ['FR:i0'], b: ['BK:i0'] }, isInner)).toBeNull();
+  });
+
+  it('drops the stretch on the part side and keeps the line whole', () => {
+    const sel = {
+      a: ['FR:i0'],
+      b: ['PCK#0'],
+      spans: { a: {}, b: { 'PCK#0': [[10, 40]] as const } },
+    };
+    expect(surfacePick(sel, isInner, pieceOf)).toEqual({
+      a: ['FR:i0'],
+      b: ['PCK#0'],
+      spans: { a: {}, b: {} },
+    });
+  });
+
+  it('a click on a second piece takes that piece instead', () => {
+    const sel = { a: ['FR:i0'], b: ['PCK#0', 'PCK#1', 'FLP#2'], spans: NO_SPANS };
+    expect(surfacePick(sel, isInner, pieceOf, 'FLP#2').b).toEqual(['FLP#2']);
+    expect(surfacePick(sel, isInner, pieceOf).b).toEqual(['PCK#0', 'PCK#1']);
+  });
+
+  it('an edge pair is left as it is', () => {
+    const sel = {
+      a: ['FR#1'],
+      b: ['BK#1', 'SLV#0'],
+      spans: { a: { 'FR#1': [[0, 5]] as const }, b: {} },
+    };
+    expect(surfacePick(sel, isInner, pieceOf)).toBe(sel);
   });
 });

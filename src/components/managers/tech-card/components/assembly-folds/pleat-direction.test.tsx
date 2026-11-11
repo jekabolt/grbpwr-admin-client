@@ -11,7 +11,11 @@ import { SectionSvg } from './fold-picture';
 import { stepOfFold } from './fold-step';
 
 vi.mock('./use-fold-writes', () => ({
-  useFoldWrites: () => ({ upsert: async () => true, remove: async () => true }),
+  useFoldWrites: () => ({
+    upsert: async () => true,
+    remove: async () => true,
+    replace: async () => true,
+  }),
 }));
 vi.mock('./fold-step', async (original) => ({
   ...(await original<typeof import('./fold-step')>()),
@@ -97,7 +101,6 @@ describe('pleat direction in the picker', () => {
     groups: foldGroupsOf(piece, rows, 0, lines).groups,
     hints: [],
     rows,
-    maxSeq: 6,
   });
   const picker = (rows: StoredFold[]) =>
     renderToStaticMarkup(

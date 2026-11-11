@@ -1,4 +1,5 @@
 import { clampPatternName } from 'utils/pattern';
+import { OPERATION_FIELDS_AWARE } from 'lib/tech-card-operation-aware';
 import {
   common_GenderEnum,
   common_AuxMadeBy,
@@ -104,6 +105,7 @@ import {
   topstitchModeRefusesWidth,
 } from './operation-options';
 import { isMachineStepType, isWeldMachineType } from './equipment-options';
+import { isTopstitchStep } from './operation-kinds';
 import { wireInt } from './wire-int';
 import { CUT_STRIP_MODES } from './cut-strips/lengths';
 import { isOwnAux, AUX_MADE_BY_UNKNOWN } from './aux-card';
@@ -2510,6 +2512,25 @@ export const techCardSchema = techCardObject.superRefine((data, ctx) => {
       path: ['requiredSeamAllowanceMm'],
     });
   }
+  const fabricBomIds = new Set(
+    (data.bomItems ?? [])
+      .filter((line) => isRollGoodsSection(line.section))
+      .map((line) => wireInt(line.id))
+      .filter((id) => id > 0),
+  );
+  (data.garmentLabels ?? []).forEach((label, index) => {
+    const pieceBomItemId = wireInt(label.pieceBomItemId);
+    if (
+      label.attachment === 'on_fabric_piece' &&
+      pieceBomItemId > 0 &&
+      !fabricBomIds.has(pieceBomItemId)
+    )
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'pick piece fabric',
+        path: ['garmentLabels', index, 'pieceBomItemId'],
+      });
+  });
   // #64: every BOM article should link a catalog material — enforced as a RELEASE blocker
   // (releaseBlockers in index.tsx), not here. A hard zod error on every past-IDEA save wrongly
   // blocked the whole main insert (notes/season/labels/sign-offs/…) for any card carrying a
@@ -3997,11 +4018,13 @@ export function mapFormToTechCardInsert(
     // WITHOUT it against a card that carries machine facts is refused with FailedPrecondition
     // instead of erasing them. It is TRANSPORT, not content — it is not hashed into any section
     // digest, so declaring it cannot stale a signature.
-    machineFieldsAware: true,
+    // Declared from one list with every other operation-field flag (the fusing DXF rebuild spreads
+    // the same object): machineFieldsAware, assemblyAware, mediaAware, operation*Aware, topstitchLinesAware.
+    ...OPERATION_FIELDS_AWARE,
     // Осведомлённость о полях сборки. Ставится на КАЖДОМ сохранении: сервер по нему отличает
     // «этот бандл знает про узлы» от «этот бандл сейчас их сотрёт». Снятие разметки — отдельный
     // флаг assemblyCleared, и его ставит только явный жест снятия.
-    assemblyAware: true,
+    // assemblyAware: in OPERATION_FIELDS_AWARE above.
     // Намерение живёт ровно одно сохранение: форма сбрасывает флаг сразу после отправки.
     //
     // ФЛАГ РЕШАЕТСЯ ПО СОХРАНЁННОЙ КАРТОЧКЕ, А НЕ ПО ФОРМЕ. Намерение «снять разметку» имеет
@@ -4016,7 +4039,7 @@ export function mapFormToTechCardInsert(
       (original?.operations ?? []).some((o) => (o?.outputUnitKey ?? '').trim() !== ''),
     // Осведомлённость о фотографиях шагов — на КАЖДОМ сохранении, как и две выше: сервер по ней
     // отличает «этот бандл знает про снимки» от «этот бандл сейчас их сотрёт».
-    mediaAware: true,
+    // mediaAware: in OPERATION_FIELDS_AWARE above.
     // Решается по СОХРАНЁННОЙ карточке, а не по форме — тот же довод, что у assemblyCleared:
     // приложить снимок локально и тут же убрать это законный жест, но на сохранённой карточке
     // при этом ничего не менялось, и объявлять снятие незачем.
@@ -4036,7 +4059,7 @@ export function mapFormToTechCardInsert(
     //
     // ТРАНСПОРТ, а не содержание: в дайджест секции не входит — объявить его не значит просрочить
     // подпись.
-    operationKindsAware: true,
+    // operationKindsAware: in OPERATION_FIELDS_AWARE above.
     // ПЯТЫЙ ЩИТ ТОЙ ЖЕ ПОРОДЫ — про ось «работа» (0330). Ставится ВСЕГДА, как четыре выше.
     //
     // Почему ЯВНЫЙ ФЛАГ, а не «в payload есть непустой work»: пустая строка `work` на записи
@@ -4050,30 +4073,30 @@ export function mapFormToTechCardInsert(
     //
     // ТРАНСПОРТ, а не содержание: в дайджест секции не входит — объявить его не значит просрочить
     // подпись.
-    operationWorkAware: true,
+    // operationWorkAware: in OPERATION_FIELDS_AWARE above.
     // Same shield for seamKind / workVariant / fastening.buttonHoles (0436): this bundle carries all three.
-    operationSeamKindAware: true,
+    // operationSeamKindAware: in OPERATION_FIELDS_AWARE above.
     // ШЕСТОЙ — черновик каркаса (0410). Ставится ВСЕГДА: этот бандл везёт `draft` каждого шага, и
     // `false` здесь — «проверено», а не «не знаю про поле». Без флага сервер отказывает записи
     // поверх карточки с draft-шагами (старая вкладка стёрла бы метки полной заменой).
-    operationDraftAware: true,
+    // operationDraftAware: in OPERATION_FIELDS_AWARE above.
     // СЕДЬМОЙ — метка «проверить» после перезалива DXF (0422). Ставится ВСЕГДА, как draft: этот
     // бандл везёт `review` каждого шага, и '' здесь — «проверено», а не «не знаю про поле».
-    operationReviewAware: true,
+    // operationReviewAware: in OPERATION_FIELDS_AWARE above.
     // Full-replace operations must always declare that this bundle carries the stored block
     // membership override; otherwise an older payload could silently clear detached rows.
-    operationBlockMembershipAware: true,
+    // operationBlockMembershipAware: in OPERATION_FIELDS_AWARE above.
     // Step seams (op.seamKeys) travel on every save; without the flag the server refuses a write
     // over a card whose steps hold seams.
-    operationSeamsAware: true,
+    // operationSeamsAware: in OPERATION_FIELDS_AWARE above.
     // Step folds (op.foldKeys) likewise: without the flag the server refuses a write over a card
     // whose steps close folds.
-    operationFoldsAware: true,
+    // operationFoldsAware: in OPERATION_FIELDS_AWARE above.
     // Step seam tolerance likewise.
-    operationSeamToleranceAware: true,
+    // operationSeamToleranceAware: in OPERATION_FIELDS_AWARE above.
     // Step layer order likewise.
-    operationLayerOrderAware: true,
-    topstitchLinesAware: true,
+    // operationLayerOrderAware: in OPERATION_FIELDS_AWARE above.
+    // topstitchLinesAware: in OPERATION_FIELDS_AWARE above.
     // `!!` and not `!== undefined`: a card with no construction row comes back with an explicit
     // `null` (the gateway marshals an unset message that way), and treating that as «had one» would
     // make every such card start writing an all-NULL construction row — see mapConstructionOut.
@@ -4082,6 +4105,7 @@ export function mapFormToTechCardInsert(
       const o = sourceOperations[sourceIndex];
       // Only lines this payload carries: a dangling key fails the whole save (B-01, liveBomKey).
       const opBomKeys = (o.bomLineKeys ?? []).map((k) => liveBomKey(k)).filter(Boolean);
+      const cardSizeIds = new Set((data.sizeIds ?? []).map(Number));
       // An override goes out ONLY when it is set. An empty control means «inherit the card
       // standard», and sending 0 for it would state the opposite — 0 is the real setting «cut on
       // the line as drawn». That distinction is the entire point of the cascade, so it is preserved
@@ -4323,8 +4347,10 @@ export function mapFormToTechCardInsert(
                 rows: o.topstitchRows || 0,
               }
             : undefined,
+        // Lines live only on a topstitch step: a kind changed by a path with no teardown must not
+        // keep pricing thread from lines nobody can see. Sizes outside the card range are refused.
         topstitchLines: (o.topstitchLines ?? [])
-          .filter((line) => opBomKeys.includes(line.bomLineKey?.trim() || ''))
+          .filter((line) => isTopstitchStep(o) && opBomKeys.includes(line.bomLineKey?.trim() || ''))
           .map(
             (line): common_TechCardTopstitchLine => ({
               lineKey: line.lineKey?.trim() || '',
@@ -4335,10 +4361,12 @@ export function mapFormToTechCardInsert(
               }),
               anchoredSize: line.anchoredSize?.trim() || '',
               rows: line.rows || 1,
-              sizes: (line.sizes ?? []).map((size) => ({
-                sizeId: wireInt(size.sizeId),
-                lineMm: inputToDecimal(size.lineMm),
-              })),
+              sizes: (line.sizes ?? [])
+                .filter((size) => cardSizeIds.has(Number(size.sizeId)))
+                .map((size) => ({
+                  sizeId: wireInt(size.sizeId),
+                  lineMm: inputToDecimal(size.lineMm),
+                })),
               measured: !!line.measured,
               stale: undefined,
             }),

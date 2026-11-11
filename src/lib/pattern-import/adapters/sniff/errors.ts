@@ -32,7 +32,9 @@ export type UnsupportedCode =
   | 'zip-archive' // any other ZIP — the importer does not open archives
   // RUL · an AAMA/ASTM grade rule table (text .rul) — read only together with its base-size DXF
   | 'rul-alone' // a RUL without the base DXF it grades (or with something that is not that DXF)
-  | 'rul-invalid'; // a RUL / base DXF pair we cannot grade exactly: malformed, or not matching
+  | 'rul-invalid' // a RUL / base DXF pair we cannot grade exactly: malformed, or not matching
+  | 'rul-dxf-sized' // the DXF of the pair already holds its sizes: the session reads it alone
+  | 'rul-limit'; // a well-formed pair the importer does not grade yet (the limit is ours)
 
 type Refusal = { what: string; hint: string };
 
@@ -129,6 +131,14 @@ const REFUSALS: Record<UnsupportedCode, Refusal> = {
     what: 'The grade rule table (.rul) and its DXF cannot be graded exactly, so nothing was graded.',
     hint: 'Re-export the DXF and RUL together from the pattern CAD (AAMA/ASTM, with grading), or export all sizes as one DXF instead.',
   },
+  'rul-dxf-sized': {
+    what: 'The DXF already holds its sizes, so the grade rule table (.rul) was not applied.',
+    hint: 'Nothing to do: the sizes are read from the DXF.',
+  },
+  'rul-limit': {
+    what: 'The importer does not grade this pair yet — the files are fine, the limit is ours.',
+    hint: 'Export all sizes as one DXF and drop that instead; the case is reported to the developers.',
+  },
   'zip-archive': {
     what: 'This is a ZIP archive; the importer does not open archives.',
     hint: 'Unzip it and drop the pattern files themselves (PDF, DXF, PLT, SVG, AI or scans) here.',
@@ -139,6 +149,20 @@ const REFUSALS: Record<UnsupportedCode, Refusal> = {
 export function refusalMessage(code: UnsupportedCode): string {
   const r = REFUSALS[code];
   return `${r.what} ${r.hint}`;
+}
+
+/**
+ * A grading refusal as the session words it (`<rul> + <dxf>: <what> <hint> (<detail>)`) → its
+ * detail alone (the piece, the point, the rule), or null when the message is not one.
+ */
+export function gradeRefusalDetail(message: string): string | null {
+  for (const code of ['rul-invalid', 'rul-limit'] as const) {
+    const at = message.indexOf(refusalMessage(code));
+    if (at < 0) continue;
+    const rest = message.slice(at + refusalMessage(code).length).trim();
+    return rest.replace(/^\(/, '').replace(/\)$/, '') || REFUSALS[code].what;
+  }
+  return null;
 }
 
 /** The concrete export instruction alone. */

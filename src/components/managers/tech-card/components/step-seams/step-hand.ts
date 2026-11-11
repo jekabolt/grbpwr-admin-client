@@ -3,6 +3,7 @@ import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply, compose, rigid } from 'lib/assembly-skeleton/union/affine';
 import type { EdgeAnchor, SeamPlacement, StoredPose, StoredSeam } from 'lib/seams';
 import { runsOfSide } from '../assembly-seams/seam-actions';
+import { liveRow } from './live-row';
 import { posePinsOf, type PosePin } from './step-pose';
 import { parseInner, pieceOfTarget, type TargetId } from './step-seams-model';
 
@@ -99,7 +100,12 @@ export function stepHandsOf(
   poses?: ReadonlyMap<string, StoredPose>,
 ): StepHands {
   const rows = (steps: readonly { seamKeys?: readonly string[] }[]) =>
-    steps.flatMap((step) => (step.seamKeys ?? []).flatMap((key) => byKey.get(key) ?? []));
+    steps.flatMap((step) =>
+      (step.seamKeys ?? []).flatMap((key) => {
+        const row = byKey.get(key);
+        return row && liveRow(row) ? [row] : [];
+      }),
+    );
   const pose = posePinsOf(ops.slice(0, index + 1), poses);
   return {
     hand: handsFromSeams(rows(ops.slice(0, index + 1))),

@@ -33,7 +33,7 @@ import {
   type AsmPiece,
   type AssemblyInput,
 } from '../../techpack/derive-assembly';
-import { toUV } from 'lib/seams/frame';
+import { sampleAt, toUV } from 'lib/seams/frame';
 import { activeFoldRows, foldToWire, type StoredFold } from 'lib/folds';
 import realFixture from './fixtures/span-real-geoms.json';
 import { sideLengthMm } from './seam-length';
@@ -50,7 +50,12 @@ import {
   type SpanFitPlan,
 } from './step-pose';
 import { OWNER_FIT, stepResults } from './step-result';
-import { candidateOfStoredSeam, edgeRowFromPick, storedSeamSides } from './step-rows';
+import {
+  candidateOfStoredSeam,
+  edgeRowFromPick,
+  edgeRowOfPick,
+  storedSeamSides,
+} from './step-rows';
 import { NO_SPANS, pickSegment, repeatsStoredSeam, sideParts, type SidePick } from './span-pick';
 import { fullyUsedEdges, usedEdgesBeforeStep } from './step-seams-model';
 import { seamTileSideLines } from './step-seams-row';
@@ -436,13 +441,16 @@ describe('one edge sewn with a gap: a long edge broken by a pocket', () => {
       expect(part.range[1]).toBeGreaterThan(part.range[0]);
   });
 
-  it('holds to the limit of anchors per side: eight build, nine do not', () => {
+  it('holds to the limit of anchors per side: the limit builds, one more does not', () => {
+    const step = length / (SEAMS.maxAnchorsPerSide + 1);
     const spans = (count: number) =>
-      Array.from({ length: count }, (_, at) => range('FRONT_L', 4, at * 100, at * 100 + 50));
-    const eight = rowFromHand(spans(SEAMS.maxAnchorsPerSide), [other], pantsGeoms, anchorCtx, {
+      Array.from({ length: count }, (_, at) =>
+        range('FRONT_L', 4, at * step, at * step + step / 2),
+      );
+    const full = rowFromHand(spans(SEAMS.maxAnchorsPerSide), [other], pantsGeoms, anchorCtx, {
       direction: 'reversed',
     });
-    expect(eight?.sideA).toHaveLength(SEAMS.maxAnchorsPerSide);
+    expect(full?.sideA).toHaveLength(SEAMS.maxAnchorsPerSide);
     expect(
       rowFromHand(spans(SEAMS.maxAnchorsPerSide + 1), [other], pantsGeoms, anchorCtx, {
         direction: 'reversed',
@@ -1166,43 +1174,105 @@ describe('active fold rows', () => {
 });
 
 describe('sideLengthMm with active folds', () => {
-  it('counts two edges folded onto each other once, when the other side says so', () => {
+  it('counts two edges folded onto each other once, whatever the other side is', () => {
     expect(lengthOf(flapBoth)).toBeCloseTo(400, 0);
-    expect(
-      sideLengthMm(flapBoth, pantsGeoms, () => 0, {
-        activeFolds: [flapFoldRow],
-        otherSideMm: 200,
-      }),
-    ).toBeCloseTo(200, 0);
-  });
-
-  it('keeps the sum with no active fold, no other side, or an other side of the sum', () => {
-    expect(sideLengthMm(flapBoth, pantsGeoms, () => 0, { otherSideMm: 200 })).toBeCloseTo(400, 0);
     expect(sideLengthMm(flapBoth, pantsGeoms, () => 0, { activeFolds: [flapFoldRow] })).toBeCloseTo(
-      400,
+      200,
       0,
     );
-    expect(
-      sideLengthMm(flapBoth, pantsGeoms, () => 0, {
-        activeFolds: [flapFoldRow],
-        otherSideMm: 400,
-      }),
-    ).toBeCloseTo(400, 0);
   });
 
-  it("uses each folded side's other plain sum without iterating", () => {
-    const plainA = lengthOf(flapBoth);
-    const plainB = lengthOf(flapBoth);
-    const foldedA = sideLengthMm(flapBoth, pantsGeoms, () => 0, {
-      activeFolds: [flapFoldRow],
-      otherSideMm: plainB,
-    });
-    const foldedB = sideLengthMm(flapBoth, pantsGeoms, () => 0, {
-      activeFolds: [flapFoldRow],
-      otherSideMm: plainA,
-    });
+  it('keeps the sum with no active fold', () => {
+    expect(sideLengthMm(flapBoth, pantsGeoms, () => 0)).toBeCloseTo(400, 0);
+    expect(sideLengthMm(flapBoth, pantsGeoms, () => 0, { activeFolds: [] })).toBeCloseTo(400, 0);
+  });
+});
 
-    expect([foldedA, foldedB]).toEqual([expect.closeTo(400, 0), expect.closeTo(400, 0)]);
+describe('ACCEPT stores what was picked', () => {
+  it('a chain and a stretch of its own member still save, edge by edge', () => {
+    const chain = `${piece('FLAP_R').key}#0+1`;
+    const member = id('FLAP_R', 1);
+    const half = flap.geom.edges[1].lenMm / 2;
+    const picked = {
+      a: [{ target: chain }, { target: member, range: [0, half] as [number, number] }],
+      b: [{ target: id('FLAP_R', 3) }],
+    };
+    const stored = edgeRowFromPick(
+      { a: [chain, member], b: [id('FLAP_R', 3)] },
+      pantsGeoms,
+      anchorCtx,
+      picked,
+    );
+    if (!stored) throw new Error('the pick did not save');
+    expect(stored.sideA.map((anchor) => anchor.edgeHint)).toEqual([chain]);
+  });
+});
+
+describe('ACCEPT with a stretch on a side of many edges', () => {
+  const whole = (name: string, edges: number[]) => edges.map((k) => ({ target: id(name, k) }));
+  const stretch = { target: id('FLAP_R', 0), range: [0, 12.5] as [number, number] };
+  const store = (a: { target: string; range?: [number, number] }[]) =>
+    edgeRowOfPick(
+      { a: a.map((part) => part.target), b: [id('FRONT_R', 3)] },
+      pantsGeoms,
+      anchorCtx,
+      { a, b: [{ target: id('FRONT_R', 3) }] },
+    );
+
+  it('whole edges in a row still sew as one run when the side also holds a stretch', () => {
+    const a = [
+      ...whole('Back_L', [0, 1, 2]),
+      ...whole('FRONT_L', [0, 1, 2]),
+      ...whole('Back_Top_L_R', [0, 1, 2]),
+      stretch,
+    ];
+    const { row, refusal } = store(a);
+    expect(refusal).toBe('');
+    expect(row?.sideA).toHaveLength(4);
+  });
+
+  it('a side that cannot fit says so', () => {
+    const all = [...pantsGeoms]
+      .filter(([key]) => key !== piece('FRONT_R').key)
+      .flatMap(([key, geom]) =>
+        geom.edges.map((_, k) => ({ target: `${key}#${k}`, range: [0, 10] as [number, number] })),
+      );
+    expect(all.length).toBeGreaterThan(SEAMS.maxAnchorsPerSide);
+    const { row, refusal } = store(all.slice(0, SEAMS.maxAnchorsPerSide + 1));
+    expect(row).toBeNull();
+    expect(refusal).toBe('too many parts');
+  });
+});
+
+describe('sideLengthMm: an edge the folds cross', () => {
+  // Folds across a picked edge (a placket folded flat): the edge counts as long as it lies folded.
+  const edge0 = flap.geom.edges[0];
+  const edge2 = flap.geom.edges[2];
+  const at = (pts: readonly Pt2[], t: number) => sampleAt(pts, [t])[0];
+  const across = (seq: number, t: number, toward: number, u = 1 - t): StoredFold => ({
+    ...flapFoldRow,
+    foldKey: `across-${seq}`,
+    seq,
+    line: [toUV(flapFrame, at(edge0.pts, t)), toUV(flapFrame, at(edge2.pts, u))],
+    flipAt: toUV(flapFrame, at(edge0.pts, toward)),
+  });
+  const picked = [{ target: id('FLAP_R', 0) }];
+  const len = (folds: StoredFold[]) =>
+    sideLengthMm(picked, pantsGeoms, () => 0, { activeFolds: folds });
+
+  it('counts the folded footprint of the picked edge, not its flat length', () => {
+    expect(len([])).toBeCloseTo(edge0.lenMm, 0);
+    expect(len([across(1, 0.5, 0.75)])).toBeCloseTo(edge0.lenMm / 2, 0);
+    // A tuck square to the edge: its last quarter lies on the quarter before it.
+    expect(len([across(1, 0.75, 0.9, 0.5)])).toBeCloseTo(edge0.lenMm * 0.75, 0);
+  });
+
+  it('a stretch of that edge counts only what is picked', () => {
+    const half = edge0.lenMm / 2;
+    const stretch = [{ target: id('FLAP_R', 0), range: [0, half] as [number, number] }];
+    expect(
+      sideLengthMm(stretch, pantsGeoms, () => 0, { activeFolds: [across(1, 0.5, 0.75)] }),
+    ).toBeCloseTo(half, 0);
   });
 });
 

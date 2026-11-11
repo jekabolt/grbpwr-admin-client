@@ -390,6 +390,7 @@ export const es = {
     pin: 'marca',
     placement: 'ubicación',
     hemEdge: 'borde del dobladillo desconocido',
+    fold: 'doblez',
     tooFewPatternMarks: 'pocas marcas de patrón',
     marksOutsideOperationZone: 'marcas fuera de zona operativa',
     operation: 'operación',

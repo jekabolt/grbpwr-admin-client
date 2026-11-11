@@ -6,22 +6,37 @@
 // `?pick=<op number>` (a PDF-gap deep link) opens the picker on arrival.
 
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
-import { activeFoldRows, type StoredFold } from 'lib/folds';
+import { activeFoldRows } from 'lib/folds';
 import type { SidePart } from 'lib/seams';
 import { cn } from 'lib/utility';
-import { lazy, Suspense, useEffect, useMemo } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
 import { useSizeNames } from 'components/managers/model/components/use-size-systems';
-import { Button, Close, DataTable, EmptyCell, GroupLabel, Text, TILE_PRESS, TILE_QUIET } from 'ui';
+import {
+  Button,
+  Chip,
+  ChipRow,
+  Close,
+  DataTable,
+  EmptyCell,
+  GroupLabel,
+  Text,
+  TILE_PRESS,
+  TILE_QUIET,
+} from 'ui';
 import { useFoldRows } from '../assembly-folds/folds-store';
 import { useSeamsStore } from '../assembly-seams/seams-store';
+import { bindingLinesOfStep, chosenBindingLine, type BindingOperation } from '../binding-step';
+import type { CutStrip } from '../cut-strip-editor/use-cut-strip';
+import { stripName } from '../cut-strips/strip-pieces';
 import { isTopstitchStep } from '../operation-kinds';
 import type { TechCardFormData } from '../schema';
 import { topstitchLineMm, type TopstitchLine } from '../topstitch-lines';
 import { drawsStepResult } from './draws-result';
+import type { SideLengthOptions } from './seam-length';
 import { PairNo } from './pair-no';
-import { NO_SEAM_TEXT } from './step-highlight';
+import { NO_SEAM_TEXT, NO_STEP_EDGES, NO_STEP_PARTS } from './step-highlight';
 import { useStepResults } from './step-result-context';
 import {
   hasMultipleStepPieces,
@@ -63,29 +78,18 @@ export function seamTileSideLines(
   sides: { a: readonly SidePart[]; b: readonly SidePart[] },
   geoms: ReadonlyMap<string, PieceGeom>,
   innerLines: ReadonlyMap<string, readonly (readonly Pt2[])[]>,
-  folds?: {
-    activeFolds: readonly StoredFold[];
-    grainDeg?: number | ReadonlyMap<string, number> | null;
-  },
+  folds?: SideLengthOptions,
 ): [string, string] {
   const innerLen = (piece: string, index: number) => polyLen(innerLines.get(piece)?.[index] ?? []);
-  const line = (parts: readonly SidePart[], other: readonly SidePart[]) => {
+  const line = (parts: readonly SidePart[]) => {
     const codes = [
       ...new Set(parts.map((part) => geoms.get(pieceOfTarget(part.target))?.name).filter(Boolean)),
     ];
     if (codes.length === 0) return '';
-    const length = targetsLen(
-      parts,
-      geoms,
-      innerLen,
-      folds && {
-        ...folds,
-        otherSideMm: other.length ? targetsLen(other, geoms, innerLen) : null,
-      },
-    );
+    const length = targetsLen(parts, geoms, innerLen, folds);
     return `${codes.join(' + ')} ${Math.round(length)}`;
   };
-  return [line(sides.a, sides.b), line(sides.b, sides.a)];
+  return [line(sides.a), line(sides.b)];
 }
 
 /** The picker's state lives above both its doors: the panel head and the tiles of the group. */
@@ -150,7 +154,7 @@ function TopstitchLinesTable({
         scene={scene}
         picture={picture}
         marks={NO_MARKS}
-        ownMarksOnly
+        noStepHighlight
         quiet
         caption={lines.length ? undefined : 'pick'}
         onOpen={onOpen}
@@ -247,6 +251,19 @@ export function StepSeamsRow({
   const seamActions = useStepSeamActions(index);
   const pendingWrites = useSeamsStore((state) => state.pending);
   const opNumber = op?.operationNumber;
+  // E3: two binding lines on one step — the new edge goes to the line picked here.
+  const { control } = useFormContext<TechCardFormData>();
+  const cutStrips = (useWatch({ control, name: 'cutStrips' }) ?? []) as CutStrip[];
+  const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
+    lineKey?: string;
+    name?: string;
+  }>;
+  const bindingLines = useMemo(
+    () => bindingLinesOfStep(op as BindingOperation | undefined, cutStrips),
+    [op, cutStrips],
+  );
+  const [pickedLine, setPickedLine] = useState('');
+  const bindingLine = chosenBindingLine(bindingLines, pickedLine);
   // A suggestion tile carries its pair into the picker; the door and stored tiles start empty.
   const open = picker != null;
   const setOpen = (next: boolean) => onPicker(next ? PLAIN_PICK : null);
@@ -300,12 +317,29 @@ export function StepSeamsRow({
   return (
     <div className='flex flex-col' data-step-seams={opNumber ?? ''}>
       <GroupLabel>seams</GroupLabel>
+      {bindingLines.length > 1 && (
+        <ChipRow className='mb-2' data-step-binding-lines=''>
+          {bindingLines.map((key) => (
+            <Chip
+              key={key}
+              selected={key === bindingLine}
+              pressed={key === bindingLine}
+              disabled={frozen}
+              onClick={() => setPickedLine(key)}
+              data-step-binding-line={key}
+            >
+              {stripName({ bomLineKey: key }, bomItems)}
+            </Chip>
+          ))}
+        </ChipRow>
+      )}
       <div className='flex flex-wrap items-start gap-x-4 gap-y-2'>
         {stored.map(({ key, row, parts }, i) => {
           const writing = !!pendingWrites[key];
           const sideLines = seamTileSideLines(parts, geoms, scene.innerLines, {
             activeFolds,
             grainDeg: geo?.grainDeg,
+            placed: result?.layout.T,
           });
           return (
             <div key={key} className='group relative w-30 flex-none'>
@@ -382,6 +416,7 @@ export function StepSeamsRow({
             open={open}
             proposal={picker?.proposal ?? 0}
             preselectProposal={picker?.preselect ?? false}
+            bindingLineKey={bindingLine || undefined}
             onClose={() => setOpen(false)}
           />
         </Suspense>
@@ -399,6 +434,7 @@ export function SeamTile({
   picture,
   marks,
   ownMarksOnly,
+  noStepHighlight,
   dashed,
   missing,
   no,
@@ -418,6 +454,8 @@ export function SeamTile({
   marks: { id: TargetId; tone: EdgeMark['tone'] }[];
   /** A seam inside a unit shows only its own marks, not the step's highlight. */
   ownMarksOnly?: boolean;
+  /** A topstitch step: its own lines only, never the seams it inherits from a join. */
+  noStepHighlight?: boolean;
   dashed?: boolean;
   missing?: boolean;
   /** Opens the picker on this step — the tile is a way in, as `+ seam`. */
@@ -477,9 +515,9 @@ export function SeamTile({
           geoms={scene.geoms}
           innerLines={scene.innerLines}
           marks={marks}
-          stepEdges={ownMarksOnly ? undefined : scene.stepEdges}
-          seamless={scene.seamless}
-          stepParts={ownMarksOnly ? undefined : scene.stepParts}
+          stepEdges={noStepHighlight ? NO_STEP_EDGES : ownMarksOnly ? undefined : scene.stepEdges}
+          seamless={noStepHighlight || scene.seamless}
+          stepParts={noStepHighlight ? NO_STEP_PARTS : ownMarksOnly ? undefined : scene.stepParts}
           {...(quiet ? { noSeamText: '' } : {})}
         />
       ) : null}

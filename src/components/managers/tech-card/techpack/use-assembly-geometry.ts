@@ -33,6 +33,10 @@ import {
   garmentLabelsOfCard,
   withGarmentLabelPieces,
 } from 'components/managers/tech-card/components/garment-label-pieces';
+import {
+  goneSeamKeys,
+  withSeamGone,
+} from 'components/managers/tech-card/components/cut-strips/lengths';
 import { patternSheetName } from 'components/managers/tech-card/components/nesting/sheet-name';
 import {
   pieceBlockRefs,
@@ -190,15 +194,16 @@ export function useAssemblyGeometry(techCard: common_TechCard, enabled = true): 
   // was, and the strip is drawn at the size the pattern pieces were read at.
   const sizeNames = useSizeNames();
   const strips = cutStripsOfCard(techCard);
-  const drawings = useMemo(
-    () =>
-      stripDrawingsOf(strips, ins?.bomItems ?? [], {
-        sizeToken: drawnSize,
-        sizeNames,
-        baseSizeId: ins?.baseSampleSizeId,
-      }),
-    [strips, ins?.bomItems, ins?.baseSampleSizeId, drawnSize, sizeNames],
-  );
+  const seams = techCard?.seams;
+  // A strip on a stale or rejected seam is drawn without a length, as the server reads it.
+  const drawings = useMemo(() => {
+    const gone = goneSeamKeys(seams);
+    return stripDrawingsOf(
+      strips.map((strip) => withSeamGone(strip, gone)),
+      ins?.bomItems ?? [],
+      { sizeToken: drawnSize, sizeNames, baseSizeId: ins?.baseSampleSizeId },
+    );
+  }, [strips, seams, ins?.bomItems, ins?.baseSampleSizeId, drawnSize, sizeNames]);
   const labels = garmentLabelsOfCard(techCard);
   const labelDrawings = useMemo(
     () => garmentLabelDrawingsOf(labels, drawnSize),

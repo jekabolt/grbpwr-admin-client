@@ -9,6 +9,8 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ImportSession, SeedId, WizardStep } from 'lib/pattern-import/types';
+import { reportImportRefusal } from 'lib/observability';
+import { gradeRefusalDetail } from 'lib/pattern-import/adapters/sniff/errors';
 import { cn } from 'lib/utility';
 import {
   BackLink,
@@ -34,6 +36,7 @@ import {
 import { apiPageRoleDeps } from './ai-page-roles';
 import { createAiNamer } from './ai-namer';
 import { cardBuildDraft } from './card-apply';
+import { setRefusalSink } from './refusal-report';
 import { ApplyStep } from './steps/apply';
 import {
   assemblyImpact,
@@ -96,6 +99,9 @@ import { isReplayed } from './autopilot/replay-record';
 import { applyRunningLabel } from './apply-label';
 
 /** Two frames: React has rendered what the last move changed (the autopilot reads it after). */
+// every import the wizard stops on is reported (file names + reason); a no-op without a DSN
+setRefusalSink(reportImportRefusal);
+
 const nextFrames = () =>
   new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
 
@@ -529,6 +535,9 @@ function WizardBody({
     session.error && !(session.step === 'check' && api.writeStorage.rewriteError)
       ? session.error
       : null;
+  // a pair that cannot be graded still holds a readable DXF: its base size can go on alone
+  const notGraded =
+    footerError && api.errorCode === 'unsupported-format' ? gradeRefusalDetail(footerError) : null;
   const askText = footerError ? null : blocker ?? autopilotStop ?? api.offer ?? null;
   const askKind: 'blocker' | 'stop' | 'offer' | null = footerError
     ? null
@@ -1064,6 +1073,7 @@ function WizardBody({
                   <StageMessage
                     code={api.errorCode}
                     message={footerError}
+                    notGraded={notGraded}
                     onReport={api.downloadReport}
                   />
                 ) : askText && !session.busy ? (
@@ -1112,6 +1122,19 @@ function WizardBody({
                     download .dxf ({draft.downloads.length})
                   </Button>
                 )}
+              {notGraded != null && !session.busy && (
+                <Button
+                  variant='secondary'
+                  size='sm'
+                  className='shrink-0'
+                  data-testid='pattern-import-base-only'
+                  onClick={() =>
+                    void api.dispatch({ type: 'files', files: api.inputs.fileList, baseOnly: true })
+                  }
+                >
+                  base size only
+                </Button>
+              )}
               {(nextStep || session.step === 'apply') && (
                 <Button
                   ref={primaryRef}
@@ -1228,10 +1251,13 @@ function Working({
 function StageMessage({
   code,
   message,
+  notGraded,
   onReport,
 }: {
   code: string | null;
   message: string;
+  /** A grading refusal's own detail (piece, point, rule): said instead of the whole message. */
+  notGraded?: string | null;
   onReport: () => void;
 }) {
   if (code === 'stage-unavailable')
@@ -1263,8 +1289,8 @@ function StageMessage({
   return (
     <CalloutBox tone='error' className='py-1'>
       <div className='flex items-start justify-between gap-3'>
-        <Text size='micro' component='p'>
-          <b>! {head}:</b> {message}
+        <Text size='micro' component='p' title={notGraded != null ? message : undefined}>
+          <b>! {notGraded != null ? 'not graded' : head}:</b> {notGraded ?? message}
         </Text>
         {/* a refusal of the file's size is not a defect: nothing to report */}
         {code !== 'too-large' && (

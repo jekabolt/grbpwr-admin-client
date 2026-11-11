@@ -36,6 +36,7 @@ import {
   type PendingOp,
   type PosePendingOp,
 } from './seams-store';
+import { seamRefresher } from './seam-refresh';
 
 export type SeamReviewRead = {
   graph: SeamGraph | null;
@@ -86,7 +87,12 @@ const message = (e: unknown) =>
 
 /** A server list older than this is read again before a new row is written. */
 const FRESH_MS = 10_000;
-let refreshing: Promise<void> | null = null;
+const refreshSeams = seamRefresher(async (cardId) => {
+  const res = await adminService.GetTechCard({ id: cardId, vatCountryCode: undefined });
+  if (useSeamsStore.getState().cardId !== cardId) return;
+  hydrateSeams(cardId, (res.techCard?.seams ?? []) as TechCardSeamWire[]);
+  useSeamsStore.setState({ serverAt: Date.now() });
+});
 
 export type SeamWrites = {
   /** Insert or replace these rows (by seam key); resolves true when the server took them. */
@@ -186,31 +192,24 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
 
   // The list a new row is checked against must be recent: another client may have confirmed the
   // same pair since this card was read (the card query lives 5 min). Older than FRESH_MS → read
-  // the card's rows again first (one read for writes queued meanwhile).
-  const fresh = useCallback(async () => {
-    if (!cardId || frozen) return;
+  // the card's rows again first (one read per card for writes queued meanwhile). False: the list
+  // could not be read, so a new row is not written against it.
+  const fresh = useCallback(async (): Promise<boolean> => {
+    if (!cardId || frozen) return true;
     const s = useSeamsStore.getState();
     const readAt = qc.getQueryState(techCardKeys.detail(cardId))?.dataUpdatedAt ?? 0;
-    if (Date.now() - Math.max(readAt, s.serverAt) <= FRESH_MS) return;
-    refreshing ??= adminService
-      .GetTechCard({ id: cardId, vatCountryCode: undefined })
-      .then((res) => {
-        if (useSeamsStore.getState().cardId !== cardId) return;
-        hydrateSeams(cardId, (res.techCard?.seams ?? []) as TechCardSeamWire[]);
-        useSeamsStore.setState({ serverAt: Date.now() });
-      })
-      .catch(() => {
-        /* the write goes on with the list it has; the server keeps whatever it is sent */
-      })
-      .finally(() => {
-        refreshing = null;
-      });
-    await refreshing;
+    if (Date.now() - Math.max(readAt, s.serverAt) <= FRESH_MS) return true;
+    return refreshSeams(cardId);
   }, [cardId, frozen, qc]);
 
   const upsert = useCallback(
     async (rows0: StoredRow[], errorAt?: string) => {
-      await fresh();
+      if (!(await fresh())) {
+        refuseGesture('SEAMS', 'not read', 'the seam list did not load — try again');
+        return false;
+      }
+      // The card changed while its list was read: this write belongs to nobody here.
+      if (cardId && useSeamsStore.getState().cardId !== cardId) return false;
       // A new row of a pair already stored (server or in flight) goes onto that row's key.
       const s = useSeamsStore.getState();
       const seams = reuseKeys(

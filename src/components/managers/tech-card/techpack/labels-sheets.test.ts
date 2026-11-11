@@ -75,6 +75,22 @@ describe('page 05 sewn-in labels', () => {
     expect([legacy?.size, legacy?.fold, legacy?.step]).toEqual(['30 × 60 mm', 'end fold', '']);
   });
 
+  it('prints the tee stitch as one distance from the tip', () => {
+    const tee = card({
+      garmentLabels: [
+        {
+          key: 'composition',
+          widthMm: { value: '30' },
+          heightMm: { value: '100' },
+          fold: 'tee',
+          foldLinesMm: '42,58',
+          stitchLinesMm: '47,53',
+        },
+      ],
+    });
+    expect(model(tee).sewn.table[0].fold).toBe('tee · 42 / 58 mm · stitch 3 mm from tip');
+  });
+
   it('puts composition first and takes the material from the BOM line', () => {
     const [first, second] = model().sewn.table;
     expect([first.item, first.number, first.material]).toEqual([
@@ -254,5 +270,44 @@ describe('page 05 sewn-in labels', () => {
     const bare = page(card({ garmentLabels: [] }));
     expect(bare).not.toContain('data-label-qr');
     expect(bare).toContain('a · identity');
+  });
+});
+
+describe('page 05 composition lines', () => {
+  const fibre = (cotton: number) =>
+    JSON.stringify({
+      fibre: [
+        { code: 'Cotton', percent: cotton },
+        { code: 'Viscose', percent: 100 - cotton },
+      ],
+    });
+  const fabric = (id: number, purpose: string, composition: string) => ({
+    id,
+    lineKey: `F${id}`,
+    name: `fabric ${id}`,
+    section: 'TECH_CARD_BOM_SECTION_FABRIC',
+    purpose,
+    composition,
+  });
+  const lines = (bomItems: unknown[]) =>
+    model(card({ bomItems, garmentLabels: [] })).composition.map((l) => `${l.part}: ${l.value}`);
+
+  it('prints one line for two fabrics of the same composition', () => {
+    const out = lines([
+      fabric(1, 'TECH_CARD_BOM_PURPOSE_MAIN', fibre(55)),
+      fabric(2, 'TECH_CARD_BOM_PURPOSE_POCKETING', fibre(55)),
+      fabric(3, 'TECH_CARD_BOM_PURPOSE_MAIN', fibre(55)),
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatch(/^SHELL \/ POCKET LINING: /);
+  });
+
+  it('keeps one line per different composition', () => {
+    expect(
+      lines([
+        fabric(1, 'TECH_CARD_BOM_PURPOSE_MAIN', fibre(55)),
+        fabric(2, 'TECH_CARD_BOM_PURPOSE_POCKETING', fibre(60)),
+      ]),
+    ).toHaveLength(2);
   });
 });

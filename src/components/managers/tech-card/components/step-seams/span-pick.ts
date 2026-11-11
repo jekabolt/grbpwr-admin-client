@@ -24,6 +24,58 @@ export type SideSpans = Readonly<Record<string, readonly SpanRange[]>>;
 export const NO_SPANS: SidePick['spans'] = { a: {}, b: {} };
 
 const SAME_MM = 0.1;
+
+const spansSig = (spans: SideSpans) =>
+  Object.entries(spans)
+    .filter(([, ranges]) => ranges.length)
+    .map(([id, ranges]) => `${id}:${ranges.map((r) => r.join('-')).join(',')}`)
+    .sort()
+    .join('|');
+
+/** The same edges on the same sides, with the same stretches of them. */
+export function samePick(x: SidePick, y: SidePick): boolean {
+  const sameIds = (p: readonly string[], q: readonly string[]) =>
+    p.length === q.length && p.every((id) => q.includes(id));
+  return (
+    sameIds(x.a, y.a) &&
+    sameIds(x.b, y.b) &&
+    spansSig(x.spans.a) === spansSig(y.spans.a) &&
+    spansSig(x.spans.b) === spansSig(y.spans.b)
+  );
+}
+/**
+ * The side a surface seam's part sits on: the side opposite the one inner line in hand, or null
+ * when the pick is not a surface (no inner line, or one on each side).
+ */
+export function surfacePartSide(
+  sel: Pick<SidePick, 'a' | 'b'>,
+  isInner: (id: string) => boolean,
+): SpanSide | null {
+  const a = sel.a.some(isInner);
+  const b = sel.b.some(isInner);
+  return a === b ? null : a ? 'b' : 'a';
+}
+
+/**
+ * A surface seam lays one piece on a line, by whole edges (owner, Р5, 11.11): the part side drops its
+ * stretches and keeps the edges of one piece — the one just clicked, else the first one in hand.
+ */
+export function surfacePick<T extends SidePick>(
+  sel: T,
+  isInner: (id: string) => boolean,
+  pieceOf: (id: string) => string,
+  clicked?: string,
+): T {
+  const side = surfacePartSide(sel, isInner);
+  if (!side) return sel;
+  const edges = sel[side].filter((id) => !isInner(id));
+  const lead = clicked && edges.includes(clicked) ? clicked : edges[0];
+  const piece = lead ? pieceOf(lead) : null;
+  const kept = sel[side].filter((id) => isInner(id) || pieceOf(id) === piece);
+  if (kept.length === sel[side].length && !Object.keys(sel.spans[side]).length) return sel;
+  return { ...sel, [side]: kept, spans: { ...sel.spans, [side]: {} } };
+}
+
 const TOUCH_MM = 0.5;
 const SNAP_MM = 4;
 const MIN_SPAN_MM = 1;
@@ -35,17 +87,41 @@ const edgeLen = (id: string, geoms: ReadonlyMap<string, PieceGeom>) =>
 const isWhole = (range: SpanRange, length: number) =>
   range[0] <= TOUCH_MM && range[1] >= length - TOUCH_MM;
 
-/** The edge's ends, notches and real turns, in mm from its start. */
-export function edgeBreaks(id: string, geoms: ReadonlyMap<string, PieceGeom>): EdgeBreakPoint[] {
+export type PickBreak = { atMm: number; kind: EdgeBreakPoint['kind'] | 'fold' };
+
+const FOLD_NEAR_MM = 0.5;
+
+/**
+ * The edge's ends, notches and real turns, in mm from its start, and where a fold line of its piece
+ * crosses it (`folds`): a folded placket's edge is picked by the stretches its folds cut.
+ */
+export function edgeBreaks(
+  id: string,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  folds: readonly number[] = [],
+): PickBreak[] {
   const at = id.lastIndexOf('#');
   const geom = at < 0 ? undefined : geoms.get(id.slice(0, at));
   const edge = geom?.edges.find((candidate) => candidate.id === id);
-  return geom && edge ? breakPoints(geom, edge) : [];
+  if (!geom || !edge) return [];
+  const own: PickBreak[] = breakPoints(geom, edge);
+  const end = own[own.length - 1]?.atMm ?? 0;
+  const cuts = folds.filter(
+    (mm) =>
+      mm > FOLD_NEAR_MM &&
+      mm < end - FOLD_NEAR_MM &&
+      own.every((point) => Math.abs(point.atMm - mm) > FOLD_NEAR_MM),
+  );
+  return cuts.length
+    ? [...own, ...cuts.map((atMm) => ({ atMm, kind: 'fold' as const }))].sort(
+        (x, y) => x.atMm - y.atMm,
+      )
+    : own;
 }
 
 /** The segment under a point of the edge. */
 export function segmentAt(
-  breaks: readonly EdgeBreakPoint[],
+  breaks: readonly { atMm: number }[],
   length: number,
   atMm: number,
 ): SpanRange {
@@ -59,7 +135,7 @@ export function segmentAt(
 }
 
 /** A free drag's end lands on a break point near it, and anywhere else as it is. */
-export function snapToBreak(breaks: readonly EdgeBreakPoint[], atMm: number): number {
+export function snapToBreak(breaks: readonly { atMm: number }[], atMm: number): number {
   let best = atMm;
   let bestGap = SNAP_MM;
   for (const { atMm: point } of breaks) {
@@ -127,7 +203,42 @@ type PickRules = {
   pieceOf: (id: string) => string;
 };
 
-/** A click on an edge, by the segment under the pointer. */
+/**
+ * A gap a fold made: exactly one stretch between neighbouring break points (no break inside it)
+ * with a fold point at one of its ends at least. A gap between notches or corners — a pocket — is
+ * not one.
+ */
+function isFoldGap(from: number, to: number, breaks: readonly PickBreak[]): boolean {
+  if (to - from <= SAME_MM) return false;
+  const at = (mm: number) => breaks.find((point) => Math.abs(point.atMm - mm) < SAME_MM);
+  const [start, end] = [at(from), at(to)];
+  if (!start || !end || (start.kind !== 'fold' && end.kind !== 'fold')) return false;
+  return breaks.every((point) => point.atMm <= from + SAME_MM || point.atMm >= to - SAME_MM);
+}
+
+/** One more segment added beside a span with only a fold's stretch between them: the gap fills. */
+function withFoldGapsFilled(
+  spans: readonly SpanRange[],
+  segment: SpanRange,
+  breaks: readonly PickBreak[],
+): SpanRange[] {
+  const out = [...spans].sort((x, y) => x[0] - y[0]);
+  const i = out.findIndex(
+    ([from, to]) => segment[0] >= from - SAME_MM && segment[1] <= to + SAME_MM,
+  );
+  if (i < 0) return out;
+  if (i + 1 < out.length && isFoldGap(out[i][1], out[i + 1][0], breaks))
+    out.splice(i, 2, [out[i][0], out[i + 1][1]]);
+  if (i > 0 && isFoldGap(out[i - 1][1], out[i][0], breaks))
+    out.splice(i - 1, 2, [out[i - 1][0], out[i][1]]);
+  return out;
+}
+
+/**
+ * A click on an edge, by the segment under the pointer. With the edge's `breaks`, a segment added
+ * one fold stretch away from a span closes that gap, so a stretch a fold cut off and the hand
+ * skipped does not split the edge; a click inside a span still cuts it out.
+ */
 export function pickSegment(
   pick: SidePick,
   side: SpanSide,
@@ -135,15 +246,20 @@ export function pickSegment(
   segment: SpanRange,
   length: number,
   rules: PickRules,
+  breaks: readonly PickBreak[] = [],
 ): SidePick {
   if (pick[side].includes(id)) {
     const own = pick.spans[side][id];
     const current = own ?? [[0, length]];
     // An edge offered whole (a guess) narrows to the segment; spans picked by hand split around it.
     const inside = !own && segment[0] > SAME_MM && segment[1] < length - SAME_MM;
-    const next = inside
+    const adds = !current.some(
+      ([from, to]) => segment[0] >= from - SAME_MM && segment[1] <= to + SAME_MM,
+    );
+    const clicked = inside
       ? [segment]
       : clickSegment(current, segment).filter(([from, to]) => to - from > SAME_MM);
+    const next = adds && breaks.length ? withFoldGapsFilled(clicked, segment, breaks) : clicked;
     if (next.length > current.length && sideIsFull(pick, side)) return pick;
     if (next.length)
       return own
@@ -279,7 +395,18 @@ export function storedSeamOverlapping(
   );
 }
 
-const overlaps = (
+/** Whether two lists of parts name one edge at all, any stretch of it (a chain counts by its members). */
+export const sidePartsShareEdge = (
+  x: readonly SidePart[],
+  y: readonly SidePart[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+) => {
+  const xs = new Set(pieces(x, geoms).map((part) => part.edge));
+  return pieces(y, geoms).some((part) => xs.has(part.edge));
+};
+
+/** Whether two lists of parts share a stretch of any edge (a chain counts by its members). */
+export const sidePartsOverlap = (
   x: readonly SidePart[],
   y: readonly SidePart[],
   geoms: ReadonlyMap<string, PieceGeom>,
@@ -303,8 +430,8 @@ export function repeatsStoredSeam(
 ): boolean {
   return stored.some(
     ({ parts }) =>
-      (overlaps(a, parts.a, geoms) && overlaps(b, parts.b, geoms)) ||
-      (overlaps(a, parts.b, geoms) && overlaps(b, parts.a, geoms)),
+      (sidePartsOverlap(a, parts.a, geoms) && sidePartsOverlap(b, parts.b, geoms)) ||
+      (sidePartsOverlap(a, parts.b, geoms) && sidePartsOverlap(b, parts.a, geoms)),
   );
 }
 

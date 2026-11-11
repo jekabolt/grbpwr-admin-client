@@ -27,7 +27,12 @@ import { readDxf, segmentDxf } from 'lib/pattern-import/adapters/dxf';
 import { buildAst } from 'lib/pattern-import/adapters/dxf/ast';
 import { loadDxf } from 'lib/pattern-import/adapters/dxf/tags';
 import { pieceBlocks } from 'lib/pattern-import/adapters/rul/model';
-import { isUnsupportedFormat, sniffFormat } from 'lib/pattern-import/adapters/sniff';
+import {
+  UnsupportedFormat,
+  isUnsupportedFormat,
+  sniffFormat,
+} from 'lib/pattern-import/adapters/sniff';
+import { gradeRefusalDetail } from 'lib/pattern-import/adapters/sniff/errors';
 import { ImportError } from 'lib/pattern-import/worker/errors';
 import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
 import type { CardSize, DraftScopeTarget, StageIO, StageName } from 'lib/pattern-import/types';
@@ -636,7 +641,70 @@ function sectionC(t: RulTable) {
   );
   for (const [what, f, re] of cases) {
     const r = refusal(f);
-    check('C', `refused: ${what}`, r.startsWith('rul-invalid') && re.test(r), r.slice(0, 160));
+    // sizes drawn in the DXF itself are not a failure: the session reads the DXF alone
+    const code = what === 'label-less blocks in two sizes' ? 'rul-dxf-sized' : 'rul-invalid';
+    check('C', `refused: ${what}`, r.startsWith(code) && re.test(r), r.slice(0, 160));
+  }
+  // a rule text a hair off its point is that point's text (RUL_SNAP_MM), and says so
+  {
+    const exact = expandRul({
+      dxf: enc(baseDxf()),
+      dxfName: 'f.dxf',
+      rul: t,
+      rulName: 'B9000.rul',
+    });
+    const off = [
+      T('1', 0, 0, '# 1'),
+      T('1', 200.2, 0.1, '# 2'),
+      T('1', 200, 150, '# -1'),
+      T('1', 200, 300, '# 3'),
+      T('1', 0, 300, '# 2'),
+    ].join('');
+    let near: ReturnType<typeof expandRul> | null = null;
+    const why = refusal(() => {
+      near = expandRul({
+        dxf: enc(baseDxf({ texts: off })),
+        dxfName: 'f.dxf',
+        rul: t,
+        rulName: 'B9000.rul',
+      });
+    });
+    const got = near as ReturnType<typeof expandRul> | null;
+    const strip = (x: string) => x.replace(/200\.2|0\.1(?=\r)/g, '');
+    check(
+      'C',
+      'accepted: a rule text 0.2 mm off its point grades that point, with a warning',
+      !!got &&
+        got.warnings.some((w) => /bound to the nearest one/.test(w)) &&
+        got.stats.ruled === exact.stats.ruled &&
+        strip(got.text).length === strip(exact.text).length,
+      why || (got ? got.warnings.join(' | ').slice(0, 160) : ''),
+    );
+    const curved = refusal(() =>
+      expandRul({
+        dxf: enc(
+          baseDxf().replace(
+            V(200, 0),
+            V(200, 0).replace(' 30\r\n0.0\r\n', ' 30\r\n0.0\r\n 42\r\n0.5\r\n'),
+          ),
+        ),
+        dxfName: 'f.dxf',
+        rul: t,
+        rulName: 'B9000.rul',
+      }),
+    );
+    check(
+      'C',
+      'refused as OUR limit, not the export: a bulged polyline',
+      curved.startsWith('rul-limit') && /not built yet/.test(curved),
+      curved.slice(0, 160),
+    );
+    check(
+      'C',
+      'the limit wording does not ask for a re-export of the pair',
+      !/Re-export the DXF and RUL/.test(new UnsupportedFormat('rul-limit').message),
+      new UnsupportedFormat('rul-limit').message,
+    );
   }
   // one CLO export: "Size Group 1" in the RUL, "Size_Group_1" in the DXF — the same table
   const cloTable = refusal(() =>
@@ -655,26 +723,131 @@ function sectionC(t: RulTable) {
     cloTable === '',
     cloTable.slice(0, 160),
   );
-  // a DXF that already holds several sizes
-  const two = baseDxf()
-    .replace(
-      '  0\r\nENDSEC\r\n  0\r\nSECTION\r\n  2\r\nENTITIES',
-      baseDxf({ size: '38' })
-        .split('  0\r\nSECTION\r\n  2\r\nBLOCKS\r\n')[1]
-        .split('  0\r\nENDSEC\r\n')[0]
-        .replace(/FRONT/g, 'FRONT_38') + '  0\r\nENDSEC\r\n  0\r\nSECTION\r\n  2\r\nENTITIES',
-    )
-    .replace(
-      '  0\r\nENDSEC\r\n  0\r\nEOF',
-      '  0\r\nINSERT\r\n  8\r\n1\r\n  2\r\nFRONT_38\r\n 10\r\n0\r\n 20\r\n0\r\n  0\r\nENDSEC\r\n  0\r\nEOF',
+  // CLO names the DXF's table after the export FILE: a renamed pair is still one export
+  const cloRul = SPEC_RUL.replace('AUTHOR: GERBER TECHNOLOGY', 'AUTHOR: CLO Virtual Fashion Inc.');
+  const renamed = refusal(() =>
+    expandRul({
+      dxf: enc(baseDxf().replace('Grade Rule Table: B9000', 'Grade Rule Table: shirt_final')),
+      dxfName: 'renamed (1).dxf',
+      rul: parseRul(enc(cloRul.replace('GRADE RULE TABLE: B9000', 'GRADE RULE TABLE: Sizes'))),
+      rulName: 'renamed (1).rul',
+    }),
+  );
+  check('C', 'accepted: a renamed CLO pair (table = old file name)', renamed === '', renamed);
+  // Lines that END at one point, each with its own rule there (CLO: a line, then its texts).
+  // #4 is #2 within a thousandth of a mm (CLO derives a rule per line end); #3 is another row.
+  const L8 = (x1: number, y1: number, x2: number, y2: number, r1: string, r2: string) =>
+    `  0\r\nLINE\r\n  8\r\n8\r\n 10\r\n${x1}\r\n 20\r\n${y1}\r\n 11\r\n${x2}\r\n 21\r\n${y2}\r\n` +
+    T('8', x1, y1, r1) +
+    T('8', x2, y2, r2);
+  const rul4 = parseRul(
+    enc(
+      SPEC_RUL.replace(
+        'END',
+        'RULE: DELTA 4\r\n7.0004, 0.00 0.00, 0.00 -7.0004, 0.00 -14.0004, 0.00\r\n-20.0004, 0.00 -25.98, 0.00 -31.98, 0.00 -37.98, 0.00\r\nEND',
+      ),
+    ),
+    'B9000.rul',
+  );
+  const lines8 = (text: string, block: string) =>
+    pieceBlocks(buildAst(loadDxf(enc(text)).tok.tags))
+      .find((p) => p.block.name === block)!
+      .entities.filter((m) => m.kind === 'chain' && m.layer === '8')
+      .map((m) => m.slots.map((s) => ({ x: s.x, y: s.y })));
+  const fan = (a: string, b: string, c: string) =>
+    baseDxf({
+      extra:
+        L8(100, 100, 0, 300, a, '# 2') +
+        L8(100, 100, 100, 300, b, '# 2') +
+        L8(100, 100, 200, 300, c, '# 3'),
+      drill: '',
+    });
+  let fanErr = '';
+  let apex: { x: number; y: number }[] = [];
+  try {
+    const ex = expandRul({
+      dxf: enc(fan('# 2', '# 3', '# 4')),
+      dxfName: 'fan.dxf',
+      rul: rul4,
+      rulName: 'B9000.rul',
+    });
+    apex = lines8(ex.text, 'FRONT_34').map((l) => l[0]);
+  } catch (e) {
+    fanErr = (e as Error).message;
+  }
+  check(
+    'C',
+    'three lines end at one point with rules #2 / #3 / #4: each line takes its own',
+    apex.length === 3 &&
+      near(apex[0], 107, 100) &&
+      near(apex[1], 97, 100) &&
+      near(apex[2], 107.0004, 100),
+    fanErr || JSON.stringify(apex),
+  );
+  // the same three rules at ONE vertex of one line: #2 and #4 are one grade, #3 is not
+  const oneLine = (r: string) =>
+    refusal(() =>
+      expandRul({
+        dxf: enc(
+          baseDxf({ extra: L8(100, 100, 100, 300, '# 2', '# 2') + T('8', 100, 100, r), drill: '' })
+            // the extra text follows the far end's: gather all three after the line, CLO-like
+            .replace(
+              T('8', 100, 300, '# 2') + T('8', 100, 100, r),
+              T('8', 100, 100, r) + T('8', 100, 300, '# 2'),
+            ),
+        ),
+        dxfName: 'f.dxf',
+        rul: rul4,
+        rulName: 'B9000.rul',
+      }),
     );
+  check(
+    'C',
+    'accepted: two rules at one point that differ by 0.0004 mm',
+    oneLine('# 4') === '',
+    oneLine('# 4'),
+  );
+  check(
+    'C',
+    'refused: two rules at one point that differ by mm',
+    /sit at one point/.test(oneLine('# 3')),
+    oneLine('# 3'),
+  );
+  // texts gathered away from their lines own nothing: the same fan is refused, not guessed
+  const gathered = refusal(() =>
+    expandRul({
+      dxf: enc(
+        baseDxf({
+          extra:
+            '  0\r\nLINE\r\n  8\r\n8\r\n 10\r\n100\r\n 20\r\n100\r\n 11\r\n0\r\n 21\r\n300\r\n' +
+            '  0\r\nLINE\r\n  8\r\n8\r\n 10\r\n100\r\n 20\r\n100\r\n 11\r\n200\r\n 21\r\n300\r\n' +
+            T('8', 0, 300, '# 2') +
+            T('8', 100, 100, '# 2') +
+            T('8', 100, 100, '# 3') +
+            T('8', 200, 300, '# 3'),
+          drill: '',
+        }),
+      ),
+      dxfName: 'f.dxf',
+      rul: rul4,
+      rulName: 'B9000.rul',
+    }),
+  );
+  check(
+    'C',
+    'refused: rules #2 / #3 at one point, texts not written after their lines',
+    /sit at one point/.test(gathered),
+    gathered.slice(0, 160),
+  );
+  // a DXF that already holds several sizes
+  const two = twoSizeDxf();
   const r2 = refusal(() =>
     expandRul({ dxf: enc(two), dxfName: 'two.dxf', rul: t, rulName: 'B9000.rul' }),
   );
   check(
     'C',
-    'refused: a DXF that already holds 2 sizes',
-    /already holds 2 sizes/.test(r2),
+    'not graded: a DXF that already holds 2 sizes (the session reads it alone)',
+    r2.startsWith('rul-dxf-sized') && /already holds 2 sizes/.test(r2),
     r2.slice(0, 140),
   );
   // F17: the AccuMark binary rule table keeps its refusal; a text table alone is told what to add
@@ -695,6 +868,22 @@ function sectionC(t: RulTable) {
     sn.route === null && sn.refusal === 'rul-alone',
     sn.route === null ? sn.refusal : sn.route,
   );
+}
+
+/** One DXF that draws FRONT in two sizes (36 and 38). */
+function twoSizeDxf() {
+  return baseDxf()
+    .replace(
+      '  0\r\nENDSEC\r\n  0\r\nSECTION\r\n  2\r\nENTITIES',
+      baseDxf({ size: '38' })
+        .split('  0\r\nSECTION\r\n  2\r\nBLOCKS\r\n')[1]
+        .split('  0\r\nENDSEC\r\n')[0]
+        .replace(/FRONT/g, 'FRONT_38') + '  0\r\nENDSEC\r\n  0\r\nSECTION\r\n  2\r\nENTITIES',
+    )
+    .replace(
+      '  0\r\nENDSEC\r\n  0\r\nEOF',
+      '  0\r\nINSERT\r\n  8\r\n1\r\n  2\r\nFRONT_38\r\n 10\r\n0\r\n 20\r\n0\r\n  0\r\nENDSEC\r\n  0\r\nEOF',
+    );
 }
 
 // ── D · the session ────────────────────────────────────────────────────────────────────────────
@@ -953,6 +1142,73 @@ async function sectionD() {
     /unsupported-format/.test(e4) && /#3/.test(e4),
     e4.slice(0, 200),
   );
+  // a DXF that draws its sizes itself + a RUL: the DXF's sizes are read, the table is not applied
+  const s6 = new Session(1, [{ name: 'two.dxf', bytes: enc(twoSizeDxf()) }, pair[1]]);
+  let e6 = '';
+  let n6 = 0;
+  let w6 = '';
+  try {
+    const { ex: ex6, sz: sz6 } = await toSizes(s6, SIZES);
+    n6 = sz6.map.entries.length;
+    w6 = JSON.stringify(ex6).match(/B9000\.rul not applied[^"]*/)?.[0] ?? '';
+  } catch (e) {
+    e6 = e instanceof ImportError ? `${e.code}: ${e.message}` : String(e);
+  }
+  check(
+    'D',
+    'a DXF holding 2 sizes + a RUL: the 2 sizes are imported, the table is not applied (warning)',
+    !e6 && n6 === 2 && !!w6,
+    e6 || `${n6} sizes · ${w6}`.slice(0, 200),
+  );
+  // the operator's way out of that refusal: the base size alone, the table kept but not applied
+  check(
+    'D',
+    'the refusal names its detail alone for the footer',
+    /^FRONT\.dxf uses rule/.test(gradeRefusalDetail(e4) ?? ''),
+    (gradeRefusalDetail(e4) ?? 'null').slice(0, 120),
+  );
+  const s7 = new Session(1, [
+    pair[0],
+    { name: 'B9000.rul', bytes: enc(SPEC_RUL.replace('RULE: DELTA 3', 'RULE: DELTA 4')) },
+  ]);
+  let e7 = '';
+  let n7 = 0;
+  let w7 = false;
+  try {
+    const c7 = ctx();
+    const ex7 = await s7.runStage(
+      'extract',
+      { opts: { sagittaMm: 0.05, keepFills: true, baseOnly: true } },
+      c7,
+    );
+    w7 = ex7.warnings.some((w) => w.includes('B9000.rul not applied'));
+    await s7.runStage(
+      'scale',
+      {
+        decision: {
+          factor: ex7.scale[0]?.factor ?? 1,
+          method: ex7.scale[0]?.method ?? 'declared',
+          operatorConfirmed: false,
+        },
+      },
+      c7,
+    );
+    await s7.runStage('assemble', { sheet: 0 }, c7);
+    await s7.runStage(
+      'chains',
+      { opts: { joinGapMm: 3, joinAngleDeg: 15, joinLateralMm: 0.15 } },
+      c7,
+    );
+    n7 = (await s7.runStage('sizes', { card: card(SIZES) }, c7)).map.entries.length;
+  } catch (e) {
+    e7 = e instanceof ImportError ? `${e.code}: ${e.message}` : String(e);
+  }
+  check(
+    'D',
+    'base size only: the same pair reads as one size, the table is not applied (warning)',
+    !e7 && n7 === 1 && w7,
+    e7 || `${n7} sizes · warned ${w7}`,
+  );
   // the DXF alone: today's behaviour, one size
   const s5 = new Session(1, [pair[0]]);
   const { sz: sz5 } = await toSizes(s5, SIZES);
@@ -975,8 +1231,21 @@ async function sectionE() {
     ['CLO', 'W_SS_Graded.dxf', 'W_SS_Graded.rul', 6],
     ['Richpeace (ENGLISH)', 'S350.dxf', 'S350.rul', 9],
     ['Grafis (repeated sample breakpoint)', 'neay.dxf', 'neay.rul', 14],
+    // owner's CLO exports; the slim shirt's back has three lines ending at one point, a rule each
+    ['CLO slim shirt', 'slim_shirt_woman_allsizes.dxf', 'slim_shirt_woman_allsizes.rul', 5],
+    ['CLO men shirt', 'all_sizes_men_shirt.dxf', 'all_sizes_men_shirt.rul', 5],
+    [
+      'CLO men shirt pockets',
+      'all_sizes_pockets_men_shirt.dxf',
+      'all_sizes_pockets_men_shirt.rul',
+      5,
+    ],
   ];
   for (const [who, d, r, n] of cases) {
+    if (!existsSync(resolve(dir, d)) || !existsSync(resolve(dir, r))) {
+      console.log(`skip  E · ${who}: ${d} / ${r} not present`);
+      continue;
+    }
     const go = async () => {
       const t = parseRul(ab(resolve(dir, r)), r);
       const ex = expandRul({ dxf: ab(resolve(dir, d)), dxfName: d, rul: t, rulName: r });
@@ -1042,6 +1311,18 @@ async function sectionE() {
         `${who}: cut areas grow with the size (sign / units sanity)`,
         tot > 0 && mono === tot,
         `${mono}/${tot} pieces monotone${odd.length ? ` · ${odd.join(' | ')}` : ''}`,
+      );
+      // and the pair goes through the session the wizard runs, to the card's sizes
+      const s = new Session(1, [
+        { name: d, bytes: ab(resolve(dir, d)) },
+        { name: r, bytes: ab(resolve(dir, r)) },
+      ]);
+      const { ex: sx, sz } = await toSizes(s, ex.sizes);
+      check(
+        'E',
+        `${who}: the pair imports as ${n} sizes`,
+        sx.presegmented === true && sz.map.entries.filter((e) => e.card).length === n,
+        sz.map.entries.map((e) => `${e.source.label}→${e.card?.token ?? '—'}`).join(' '),
       );
     } catch (e) {
       check(

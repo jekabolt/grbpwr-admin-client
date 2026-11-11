@@ -169,7 +169,9 @@ describe('resolveFolds — grading keeps offset_mm', () => {
     expect(yMm(L, r.folds[KEY][0])[0]).toBeCloseTo(33, 0);
   });
 
-  it('falls back to (u, v) when the edge is not on the piece any more', () => {
+  // Р1 (owner, 11.11): a fold tied to an edge that is gone is NOT laid by its frame position; it is
+  // reported as not found. The (u, v) fallback stays for rows without an edge.
+  it('reports a fold whose edge is not on the piece any more, never guesses it by the frame', () => {
     const row = hemS();
     // Samples of an edge no run of this piece matches.
     row.edge = {
@@ -178,8 +180,10 @@ describe('resolveFolds — grading keeps offset_mm', () => {
       samples: row.edge!.samples.map(([u]) => [u * 0.3, 0.5] as Pt2),
     };
     const r = resolveFolds([row], [L]);
-    expect(r.unresolved).toEqual([]);
-    expect(r.via[row.foldKey]).toBe('uv');
+    expect(r.folds[KEY]).toBeUndefined();
+    expect(r.via[row.foldKey]).toBeUndefined();
+    expect(r.unresolved.map((u) => [u.foldKey, u.seq])).toEqual([[row.foldKey, row.seq]]);
+    expect(r.unresolved[0].words).toMatch(/edge/);
   });
 });
 

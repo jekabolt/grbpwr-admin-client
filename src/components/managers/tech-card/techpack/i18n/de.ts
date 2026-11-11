@@ -389,6 +389,7 @@ export const de = {
     pin: 'Marke',
     placement: 'Position',
     hemEdge: 'Saumkante unbekannt',
+    fold: 'Falte',
     tooFewPatternMarks: 'zu wenige Schnittmarkierungen',
     marksOutsideOperationZone: 'Markierungen außerhalb des Arbeitsbereichs',
     operation: 'Arbeitsgang',

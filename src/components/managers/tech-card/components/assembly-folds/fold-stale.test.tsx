@@ -9,7 +9,11 @@ import { foldGroupsOf, openHints, rowsOfChoice } from './fold-model';
 import { FoldPicker, type PieceRead } from './fold-picker';
 
 vi.mock('./use-fold-writes', () => ({
-  useFoldWrites: () => ({ upsert: async () => true, remove: async () => true }),
+  useFoldWrites: () => ({
+    upsert: async () => true,
+    remove: async () => true,
+    replace: async () => true,
+  }),
 }));
 vi.mock('./fold-step', async (original) => ({
   ...(await original<typeof import('./fold-step')>()),
@@ -75,7 +79,6 @@ describe('a stale fold in the picker', () => {
       groups,
       hints: openHints([hint], groups),
       rows,
-      maxSeq: 1,
     };
     const html = renderToStaticMarkup(
       <FoldPicker

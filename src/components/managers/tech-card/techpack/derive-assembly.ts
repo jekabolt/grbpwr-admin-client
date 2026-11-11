@@ -95,11 +95,12 @@ import { FRAMES, inFrame, reverses, rmsFit, runById, runSamples } from 'lib/seam
 import { hitOf } from 'lib/seams/resolve';
 
 import { GapSink, type Gap } from './gaps';
+import { ownerLayoutsByNumber, ownerStepResultsOfCard } from './owner-step-results';
 import { assemblyPieceCode } from './assembly-piece-code';
 import { pressMode, type PressPiece } from './press-arrows';
 import { asmProtoFlags } from './asm-proto-flags';
 import { hemFinishWords, isHemClass, isHemStep } from './hem-step';
-import { foldLinesOf } from './fold-lines';
+import { foldLinesOf, unresolvedFoldsOf } from './fold-lines';
 import { englishT, own, type PdfT } from './i18n';
 import { partNoun, type PartNounId } from './i18n/part-nouns';
 import { machineText, operationVerb, pressEquipmentText } from './i18n/vocabulary';
@@ -2262,6 +2263,7 @@ function buildCards(
   t: PdfT = englishT,
   inferMissing = true,
   stripKeys: ReadonlySet<string> = new Set(),
+  ownerLayouts: ReadonlyMap<number, ReadonlyMap<string, Matrix>> = new Map(),
 ): Built {
   const cards = new Map<number, JoinCard>();
   const units = new Map<string, Item[]>();
@@ -2272,24 +2274,10 @@ function buildCards(
   const seamLessCard = [...bound.values()].every((seams) => seams.length === 0);
   const roles = pieceRoleMap(pieces, ops);
   const metricGeoms = new Map([...pieces].map(([key, piece]) => [key, piece.geom]));
-  const plainMetricLength = (parts: readonly SeamPart[]) => {
-    if (parts.every((part) => !!part.edgeId))
-      return sideLengthMm(
-        parts.map(
-          (part): SidePart => ({
-            target: part.edgeId!,
-            ...(part.range ? { range: part.range } : {}),
-          }),
-        ),
-        metricGeoms,
-        () => 0,
-      );
-    return parts.reduce((total, part) => total + part.lenMm, 0);
-  };
   const metricLength = (
     parts: readonly SeamPart[],
-    otherSideMm: number | null,
     activeFolds: readonly StoredFold[],
+    placed?: ReadonlyMap<string, Matrix>,
   ) => {
     if (parts.every((part) => !!part.edgeId))
       return sideLengthMm(
@@ -2301,7 +2289,7 @@ function buildCards(
         ),
         metricGeoms,
         () => 0,
-        { activeFolds, otherSideMm, grainDeg },
+        { activeFolds, grainDeg, placed },
       );
     return parts.reduce((total, part) => total + part.lenMm, 0);
   };
@@ -2509,12 +2497,13 @@ function buildCards(
       world.push(...g);
     }
 
+    // A stretch laid on another piece counts once, read on the editor's own step picture (picker,
+    // tile, map): the drawing's layout above is for ink, not for lengths.
+    const placed = ownerLayouts.get(op.n);
     const metrics: SeamMetric[] = seams.map((s, i) => {
-      const leftPlain = plainMetricLength(s.a);
-      const rightPlain = plainMetricLength(s.b);
-      const left = metricLength(s.a, s.b.length ? rightPlain : null, activeFolds);
+      const left = metricLength(s.a, activeFolds, placed);
       if (!s.b.length) return { letter: String(i + 1), left, bad: false };
-      const right = metricLength(s.b, leftPlain, activeFolds);
+      const right = metricLength(s.b, activeFolds, placed);
       // A strip's side reads through its fit, and a strip typed by hand states no seam length at all.
       const lengths = seamLengthCheck(
         left,
@@ -2799,10 +2788,16 @@ function buildActions(
 ): Map<number, AsmAction> {
   const actions = new Map<number, AsmAction>();
   const hemPieces = [...pieces.values()].flatMap((piece) => (piece.geom ? [piece.geom] : []));
+  // The step's label pieces are hosts too, as in the editor's picture: a drawn label takes no mark.
   const placementSelections = walkPlacementMarks(
     ops.map((op) => ({
       operation: op.raw,
-      hosts: [...new Set((targets.get(op.n) ?? []).map((item) => item.p))].flatMap((key) => {
+      hosts: [
+        ...new Set([
+          ...(targets.get(op.n) ?? []).map((item) => item.p),
+          ...(op.raw.labelKeys ?? []).filter((key) => pieces.get(key)?.geom.garmentLabel),
+        ]),
+      ].flatMap((key) => {
         const piece = pieces.get(key);
         return piece ? [{ key, name: piece.name, code: piece.code, geom: piece.geom }] : [];
       }),
@@ -2813,7 +2808,8 @@ function buildActions(
     const items = targets.get(op.n) ?? [];
     const placementSelection = placementSelections[opIndex];
     let placements = placementGlyphs(op, placementSelection);
-    if (!placements.length && !placementSelection?.issue)
+    const drawnLabel = !!placementSelection?.drawnLabel;
+    if (!placements.length && !placementSelection?.issue && !drawnLabel)
       placements = fallbackPlacements(op, pieces, items);
     if (placementSelection?.issue === 'count-exceeds-marks')
       assemblyGap(
@@ -2896,7 +2892,7 @@ function buildActions(
           }
         : {}),
       missing:
-        placementOp && !placements.length
+        placementOp && !placements.length && !drawnLabel
           ? 'position'
           : edgeOp && !edgeParts.length
             ? 'seam'
@@ -3328,6 +3324,21 @@ export function compactInputNames(inputs: readonly InputName[]): string[] {
   return words.filter((word, i) => !ranges.has(named[i]) || words.indexOf(word) === i);
 }
 
+/** The editor's step layouts by operation number; none when the pattern cannot be laid. */
+function ownerLayoutsOfCard(
+  input: AssemblyInput,
+  resolved: common_TechCard,
+): ReadonlyMap<number, ReadonlyMap<string, Matrix>> {
+  if (!input.pieces.size) return new Map();
+  try {
+    return ownerLayoutsByNumber(
+      ownerStepResultsOfCard(input.techCard, resolved, input.pieces, input.grainDeg),
+    );
+  } catch {
+    return new Map();
+  }
+}
+
 export function deriveAssembly(
   input: AssemblyInput,
   sink?: GapSink,
@@ -3393,6 +3404,12 @@ export function deriveAssembly(
       }),
   );
   const foldRows = foldsFromWire(resolvedInput.techCard.pieceFolds).folds;
+  const storedPieceCode = (key: string) => {
+    const stored = techCard.techCard?.pieces?.find(
+      (piece) => piece.lineKey?.toUpperCase() === key.toUpperCase(),
+    );
+    return assemblyPieceCode(stored?.name);
+  };
   const { cards, units, targets } = buildCards(
     ops,
     bound,
@@ -3403,6 +3420,7 @@ export function deriveAssembly(
     t,
     !garment,
     stripKeysOfCard(techCard),
+    ownerLayoutsOfCard(input, techCard),
   );
   const actions = buildActions(
     ops,
@@ -3452,6 +3470,25 @@ export function deriveAssembly(
     });
     const foldLines = foldLinesOf(op.raw.foldKeys, foldRows, input.pieces, input.grainDeg, t);
     words.set(op.n, foldLines.length ? { ...opWords, folds: foldLines } : opWords);
+    // A fold the step names that this size cannot lay stays flat and prints no line: it is a gap.
+    for (const fold of unresolvedFoldsOf(
+      op.raw.foldKeys,
+      foldRows,
+      input.pieces,
+      input.grainDeg,
+      storedPieceCode,
+    )) {
+      const label = [t('gaps.fold'), fold.piece, String(fold.seq), input.drawnSize ?? '']
+        .filter(Boolean)
+        .join(' ');
+      gapSink.add({
+        code: 'pdf_fold_unresolved',
+        refs: [`op:${op.n}`, `fold:${fold.foldKey}`],
+        label,
+        section: '06',
+        target: { tab: 'construction', op: op.n },
+      });
+    }
   }
 
   const rows: AsmRow[] = ops.map((op) => {

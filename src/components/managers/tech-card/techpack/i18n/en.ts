@@ -433,6 +433,7 @@ export const en = {
     pin: 'pin',
     placement: 'placement',
     hemEdge: 'hem edge unknown',
+    fold: 'fold',
     tooFewPatternMarks: 'too few pattern marks',
     marksOutsideOperationZone: 'marks outside operation zone',
     operation: 'operation',

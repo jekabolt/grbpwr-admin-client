@@ -1,6 +1,11 @@
 import { common_Material } from 'api/proto-http/admin';
 import { parseDecimalNumber } from 'utils/decimal';
-import { metresPerArticleUnit, normalizeMaterialUnit, pricePerMetre } from './material-unit';
+import {
+  isMassAreaOrVolumeUnit,
+  metresPerArticleUnit,
+  normalizeMaterialUnit,
+  pricePerMetre,
+} from './material-unit';
 
 // ЛЕСТНИЦА ЦЕНЫ строки BOM — одна на весь клиент.
 //
@@ -159,4 +164,16 @@ export function resolveBomPrice(line: BomPriceLine, material?: common_Material):
   // 3) Цены нет нигде — и только здесь «заведите её в справочнике» правда. Валюта и единица
   //    остаются строкины: подписывать нечего, но её собственные объявления печатать можно.
   return { source: 'none', value: '', currency, unit, label: '' };
+}
+
+/**
+ * A thread line counted in metres, linked to an article bought by the cone (or another package)
+ * whose cone length is empty: the metre price cannot be derived, so the tile says what to fill.
+ * A line with its own price, or an article in kg, is not this case.
+ */
+export function threadConeLengthMissing(line: BomPriceLine, m?: common_Material): boolean {
+  if (!m || line.section !== 'TECH_CARD_BOM_SECTION_THREAD') return false;
+  if (normalizeMaterialUnit(line.unit) !== 'm' || line.unitPrice?.trim()) return false;
+  if (isMassAreaOrVolumeUnit(m)) return false;
+  return metresPerArticleUnit(m) == null;
 }

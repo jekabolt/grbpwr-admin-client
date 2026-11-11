@@ -76,6 +76,7 @@ import {
   weakAsides,
   type AutoResolver,
 } from './auto-advance';
+import { reportRefusal } from './refusal-report';
 import { singlePageSheet } from './sheet-skip';
 import {
   normWriteStorage,
@@ -910,6 +911,12 @@ export function useImportSession(deps: {
       message,
     };
     setErrorCode(code);
+    reportRefusal({
+      stage: failureRef.current.stage,
+      code,
+      message,
+      files: iRef.current.fileList.map((f) => f.name),
+    });
     const id = workerId();
     const dead = id != null && !!client.alive && !client.alive(id);
     // STOPFIX: a stop is the operator's — the run stays on its step with everything it had and
@@ -1070,7 +1077,11 @@ export function useImportSession(deps: {
           patch({ sessionId: opened.sessionId, files: opened.files });
           sRef.current = { ...sRef.current, sessionId: opened.sessionId };
           const out = await run('extract', {
-            opts: { sagittaMm: PATIMPORT.sagittaMm, keepFills: true },
+            opts: {
+              sagittaMm: PATIMPORT.sagittaMm,
+              keepFills: true,
+              ...(ev.baseOnly ? { baseOnly: true } : {}),
+            },
           });
           // A8: the pages are cleaned before anything is parsed — furniture masked, the pages
           // that are not pattern set aside, a test square drawn as lines offered as the scale

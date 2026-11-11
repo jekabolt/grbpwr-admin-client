@@ -104,6 +104,8 @@ export type PartComposition = {
   rows: Record<LabelLang, string>;
   /** Строки BOM, из которых собрана часть. */
   lineKeys: string[];
+  /** Другие части с тем же составом, слитые в эту колонку (`mergeSameComposition`). */
+  alsoParts?: PrintedPart[];
 };
 
 export type ResolvedComposition = { parts: PartComposition[]; holes: Hole[] };

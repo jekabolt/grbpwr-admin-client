@@ -44,8 +44,54 @@ describe('syncTopstitchLineMm', () => {
     expect(result.operations[0]).toBe(current);
   });
 
-  it('stores no numbers when the pattern has no measurable edge', () => {
-    const result = syncTopstitchLineMm([operation], [1], () => undefined);
-    expect(result.operations[0].topstitchLines?.[0]).toMatchObject({ sizes: [], measured: true });
+  it('leaves the stored lengths and the stale mark alone when the pattern cannot be read', () => {
+    const stale = {
+      ...operation,
+      topstitchLines: [{ ...line, sizes: [{ sizeId: 1, lineMm: '240.5' }], stale: true }],
+    } as TopstitchOperation;
+    const result = syncTopstitchLineMm([stale], [1], () => undefined);
+    expect(result.changed).toEqual([]);
+    expect(result.operations[0]).toBe(stale);
+  });
+
+  it('re-measures a stale line whose lengths did not change, so the server stamps it fresh', () => {
+    const stale = {
+      ...operation,
+      topstitchLines: [{ ...line, sizes: [{ sizeId: 1, lineMm: '240.5' }], stale: true }],
+    } as TopstitchOperation;
+    const result = syncTopstitchLineMm([stale], [1], () => new Map([[1, 240.5]]));
+    expect(result.changed).toEqual([0]);
+    expect(result.operations[0].topstitchLines?.[0]).toMatchObject({
+      measured: true,
+      stale: false,
+      sizes: [{ sizeId: 1, lineMm: '240.5' }],
+    });
+  });
+
+  it('does not rewrite a line when the card lists its sizes out of id order', () => {
+    // The server stores and returns rows by ascending size_id; the card range may be [2, 1].
+    const current = {
+      ...operation,
+      topstitchLines: [
+        {
+          ...line,
+          sizes: [
+            { sizeId: 1, lineMm: '240.5' },
+            { sizeId: 2, lineMm: '252' },
+          ],
+        },
+      ],
+    } as TopstitchOperation;
+    const result = syncTopstitchLineMm(
+      [current],
+      [2, 1],
+      () =>
+        new Map([
+          [1, 240.5],
+          [2, 252],
+        ]),
+    );
+    expect(result.changed).toEqual([]);
+    expect(result.operations[0]).toBe(current);
   });
 });

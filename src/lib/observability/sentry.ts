@@ -3,7 +3,7 @@
 import * as Sentry from '@sentry/react';
 import { sentryEnvironment } from 'lib/deployment-env';
 import type { ErrorInfo } from 'react';
-import type { ApiErrorContext } from './index';
+import type { ApiErrorContext, ImportRefusalContext } from './index';
 import { scrubEnvelope } from './scrub';
 
 // Default integrations that stay off:
@@ -54,5 +54,19 @@ export function captureApiError(error: unknown, { route, status, method }: ApiEr
     tags: { route, status: String(status), 'http.method': method },
     // One issue per failing RPC and status, not one per error message text.
     fingerprint: ['api-5xx', route, String(status)],
+  });
+}
+
+export function captureImportRefusal({ stage, code, message, files }: ImportRefusalContext) {
+  // One issue per reason, not per file: names and numbers are taken out of the grouping key.
+  const reason = files
+    .reduce((t, f) => t.split(f).join('<file>'), message)
+    .replace(/\d+(\.\d+)?/g, '#')
+    .slice(0, 200);
+  Sentry.captureMessage(`pattern import refused: ${message}`.slice(0, 1000), {
+    level: 'warning',
+    tags: { 'import.stage': stage ?? 'unknown', 'import.code': code ?? 'unknown' },
+    extra: { files, message },
+    fingerprint: ['pattern-import-refusal', code ?? 'unknown', stage ?? 'unknown', reason],
   });
 }

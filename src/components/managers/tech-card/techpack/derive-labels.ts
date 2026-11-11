@@ -39,6 +39,7 @@ import {
   labelAxisLen,
   parseFoldLines,
   parseStitchLines,
+  teeStitch,
 } from 'components/managers/tech-card/components/label-fold-lines';
 
 export type LabelsDeriveOptions = {
@@ -135,8 +136,17 @@ function deriveSewn(techCard: common_TechCard, options: LabelsDeriveOptions, t: 
     return lines.length ? `${lines.join(' / ')} mm` : '';
   };
 
-  const stitchLinesText = (csv: string | undefined, heightMm: number) => {
+  const stitchLinesText = (
+    csv: string | undefined,
+    heightMm: number,
+    fold?: string,
+    foldCsv?: string,
+  ) => {
     const lines = parseStitchLines(csv, heightMm);
+    if (fold === 'tee') {
+      const stitch = teeStitch(lines, parseFoldLines(foldCsv, heightMm));
+      return stitch ? `stitch ${stitch} mm from tip` : '';
+    }
     return lines.length ? `stitch ${lines.join(' / ')} mm` : '';
   };
 
@@ -150,7 +160,7 @@ function deriveSewn(techCard: common_TechCard, options: LabelsDeriveOptions, t: 
     fold: [
       clean(row.fold) || clean(row.folding),
       foldLinesText(row.foldLinesMm, labelAxisLen(row)),
-      stitchLinesText(row.stitchLinesMm, labelAxisLen(row)),
+      stitchLinesText(row.stitchLinesMm, labelAxisLen(row), row.fold, row.foldLinesMm),
     ]
       .filter(Boolean)
       .join(' · '),
@@ -202,6 +212,22 @@ const partFromWire = (value?: string): LabelPart => {
   return part && part in LABEL_PART_NAME ? part : 'SHELL';
 };
 
+/**
+ * Одинаковый состав — одна строка ленты (как колонка B у `mergeSameComposition`): две одинаковые
+ * строки фабрика читает как два ярлыка. Части сливаются в заголовок через « / ».
+ */
+function oneLinePerComposition(
+  lines: readonly { part: string; value: string }[],
+): { part: string; value: string }[] {
+  const out: { part: string; value: string; parts: string[] }[] = [];
+  for (const line of lines) {
+    const same = out.find((item) => item.value === line.value);
+    if (!same) out.push({ ...line, parts: [line.part] });
+    else if (!same.parts.includes(line.part)) same.parts.push(line.part);
+  }
+  return out.map(({ parts, value }) => ({ part: parts.join(' / '), value }));
+}
+
 // Лента этикетки печатается как есть, на любом языке листа: это то, что пришьют на изделие.
 // Переводятся только подписи страницы и пробелы — их читает фабрика.
 export function deriveLabels(
@@ -216,24 +242,26 @@ export function deriveLabels(
     (item) => wireInt(item.colorwayId) === wireInt(primary?.colorwayId),
   );
   const overrideFibers = careOverride?.fibers ?? [];
-  const composition = overrideFibers.length
-    ? [...new Set(overrideFibers.map((fiber) => partFromWire(fiber.part)))].map((part) => ({
-        part: LABEL_PART_NAME[part],
-        value: overrideFibers
-          .filter((fiber) => partFromWire(fiber.part) === part)
-          .map((fiber) =>
-            [fiber.pct != null ? `${fiber.pct}%` : '', clean(fiber.fiberCode)]
-              .filter(Boolean)
-              .join(' '),
-          )
-          .filter(Boolean)
-          .join(' · '),
-      }))
-    : bomRefs(techCard).flatMap((ref) => {
-        const part = effectiveLabelPart(ref.item);
-        const value = formatCompositionCell(ref.item.composition);
-        return part === 'NOT_ON_LABEL' || !value ? [] : [{ part: LABEL_PART_NAME[part], value }];
-      });
+  const composition = oneLinePerComposition(
+    overrideFibers.length
+      ? [...new Set(overrideFibers.map((fiber) => partFromWire(fiber.part)))].map((part) => ({
+          part: LABEL_PART_NAME[part],
+          value: overrideFibers
+            .filter((fiber) => partFromWire(fiber.part) === part)
+            .map((fiber) =>
+              [fiber.pct != null ? `${fiber.pct}%` : '', clean(fiber.fiberCode)]
+                .filter(Boolean)
+                .join(' '),
+            )
+            .filter(Boolean)
+            .join(' · '),
+        }))
+      : bomRefs(techCard).flatMap((ref) => {
+          const part = effectiveLabelPart(ref.item);
+          const value = formatCompositionCell(ref.item.composition);
+          return part === 'NOT_ON_LABEL' || !value ? [] : [{ part: LABEL_PART_NAME[part], value }];
+        }),
+  );
   const fallbackComposition = composition.length
     ? composition
     : (techCard.compositionEntries ?? []).length

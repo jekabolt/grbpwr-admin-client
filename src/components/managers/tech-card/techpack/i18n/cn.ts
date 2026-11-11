@@ -386,6 +386,7 @@ export const cn = {
     pin: '定位点',
     placement: '位置',
     hemEdge: '下摆边未知',
+    fold: '折边',
     tooFewPatternMarks: '纸样标记不足',
     marksOutsideOperationZone: '标记不在工序区域',
     operation: '工序',

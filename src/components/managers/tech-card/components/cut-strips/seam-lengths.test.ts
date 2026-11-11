@@ -154,6 +154,22 @@ describe('the reader the panel takes', () => {
       sizeNames: STRIP_SIZE_NAMES,
     });
 
+  it('measures nothing on a stale or rejected seam, so the stored length stands', () => {
+    for (const row of [
+      { ...storedRow(), stale: true },
+      { ...storedRow(), status: 'rejected' as const },
+    ]) {
+      const read = seamLengthsReader({
+        rows: [row],
+        stripKeys: STRIP_KEYS,
+        find: gradedBand(WAISTBAND),
+        sizeIds: SIZES,
+        sizeNames: STRIP_SIZE_NAMES,
+      });
+      expect(read(SEAM)).toBeUndefined();
+    }
+  });
+
   it('names the sizes by the card`s ids, and hands back the same Map', () => {
     const read = reader();
     const lengths = read(SEAM)!;

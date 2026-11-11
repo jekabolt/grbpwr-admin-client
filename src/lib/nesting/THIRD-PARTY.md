@@ -1,5 +1,17 @@
 # Third-party notices — lib/nesting
 
+- **sparrow** (Jeroen Gardeyn, MIT, https://github.com/JeroenGar/sparrow, commit
+  `67bfaf88f8ff9dca6607c1fa9737bb2006e06517`): the nesting engine since nest-sparrow (11.11.2026).
+  Built unmodified to WebAssembly (`sparrow/pkg/`, one thread) by a thin wrapper in
+  `tools/sparrow-wasm/`; our code around it (`sparrow/`) exports the job, runs it in its own
+  worker and checks every layout on the true contours.
+- **jagua-rs** 2.0.0 (Jeroen Gardeyn, MPL-2.0, https://github.com/JeroenGar/jagua-rs): sparrow's
+  geometry/collision core, compiled into the same module, **unmodified**. MPL-2.0 is file-level
+  copyleft: changes to jagua-rs's own files would have to be published; using it does not.
+- The engine below (SVGnest lineage, clipper2-js) is the previous one: it stays one version as the
+  fallback for when the sparrow module cannot be loaded or returns no layout that passes our
+  check (`nest/index.ts`, `nestLegacy`; `sparrow/index.ts` says when).
+
 - **SVGnest** (Jack Qiao, MIT, https://github.com/Jack000/SVGnest): the nesting *algorithm*
   lineage — no-fit-polygon placement with an inner-fit rectangle, bottom-left scoring by
   resulting strip length, and the seeded order+rotation genetic search (OX crossover,

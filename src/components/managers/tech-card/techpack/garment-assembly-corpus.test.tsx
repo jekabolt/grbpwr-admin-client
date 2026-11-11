@@ -11,6 +11,7 @@ import type { Pt2 } from 'lib/assembly-skeleton/types';
 import { boxOf } from '../components/step-seams/step-picture';
 import { StepPictureSvg, type StepPicture } from '../components/step-seams/step-picture-view';
 import { inputGroups } from '../components/step-seams/step-seams-model';
+import { liveRow } from '../components/step-seams/live-row';
 import { poseRowsOfCard, seamRowsOfCard } from '../components/card-seam-graph';
 import { deriveAssembly, type AssemblyInput } from './derive-assembly';
 import {
@@ -82,7 +83,11 @@ const operationOwnsRow = (input: AssemblyInput, number: number) => {
   const poses = poseRowsOfCard(input.techCard);
   const numbers = new Set(
     (input.techCard.techCard?.operations ?? []).flatMap((operation) =>
-      (operation.seamKeys ?? []).some((key) => seams.has(key) || poses.has(key))
+      // A stale or rejected seam lays nothing, so a step naming only such rows owns none.
+      (operation.seamKeys ?? []).some((key) => {
+        const seam = seams.get(key);
+        return (seam && liveRow(seam)) || poses.has(key);
+      })
         ? [operation.operationNumber ?? 0]
         : [],
     ),

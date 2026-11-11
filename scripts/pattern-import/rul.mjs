@@ -21,6 +21,8 @@ await esbuild({
   logLevel: 'warning',
   absWorkingDir: REPO,
   external: ['pdfjs-dist', 'pdfjs-dist/*'],
+  // the wizard's door flag reads Vite's env at module load; node has none
+  define: { 'import.meta.env': '{"VITE_PATTERN_IMPORT":"1"}' },
   alias: {
     // RULHOOK (section H) mounts the real wizard hook: React is the one-component shim
     react: resolve(HERE, 'react-hook-shim.ts'),

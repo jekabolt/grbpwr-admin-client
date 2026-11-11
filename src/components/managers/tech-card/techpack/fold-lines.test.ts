@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { frameOf, toUV } from 'lib/folds/geom';
 import type { FoldKind, StoredFold } from 'lib/folds';
-import { foldLinesOf } from './fold-lines';
+import { foldLinesOf, unresolvedFoldsOf } from './fold-lines';
 import { createPdfT, PDF_LANGS } from './i18n';
 import { cn } from './i18n/cn';
 import { de } from './i18n/de';
@@ -139,5 +139,28 @@ describe('the OPERATION fold lines', () => {
       expect(line).toContain('70');
       expect(line.endsWith('→')).toBe(true);
     }
+  });
+});
+
+describe('a step fold this size cannot lay', () => {
+  const absent = { ...hem('gone', 2, 'inward'), pieceKey: '01OTHERPIECE00000000000001' };
+  const unresolved = (rows: StoredFold[], linked: string[] = keys(rows)) =>
+    unresolvedFoldsOf(linked, rows, pieces, grain, (key) => (key === absent.pieceKey ? 'CF' : ''));
+
+  it('names nothing when every step fold lays', () => {
+    expect(unresolved([hem('a', 1, 'inward')])).toEqual([]);
+  });
+
+  it('names the piece by its code and the fold by its number, never a key', () => {
+    expect(unresolved([hem('a', 1, 'inward'), absent])).toEqual([
+      { foldKey: 'gone', piece: 'CF', seq: 2 },
+    ]);
+    expect(unresolved([{ ...hem('a', 3, 'inward'), stale: true }])).toEqual([
+      { foldKey: 'a', piece: 'BP', seq: 3 },
+    ]);
+  });
+
+  it('a fold no step names is not a step gap', () => {
+    expect(unresolved([hem('a', 1, 'inward'), absent], ['a'])).toEqual([]);
   });
 });

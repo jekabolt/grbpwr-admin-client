@@ -142,7 +142,7 @@ export type GarmentLabelMark = {
   label: string;
   widthMm: number;
   heightMm: number;
-  fold: 'flat' | 'half' | 'ends' | 'mitre' | 'loop' | '';
+  fold: 'flat' | 'half' | 'ends' | 'mitre' | 'loop' | 'tee' | '';
   /** `width` measures from the left and sews the left edge; empty is legacy top/height. */
   foldAxis: 'width' | '';
   /** Fold lines, mm from the sewn edge along `foldAxis` (stored, else implied by `fold`). */
