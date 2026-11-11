@@ -254,9 +254,9 @@ describe('handRow: one edge on both sides (C1)', () => {
     ).toBeNull();
   });
 
-  it('two separate stretches of one edge still pair (a vent)', () => {
+  it('two separate stretches of one edge are refused too: the resolver reads edges, not stretches', () => {
     expect(
-      hand([{ target: 'BP#3', range: [0, 200] }], [{ target: 'BP#3', range: [300, 500] }]).row,
-    ).not.toBeNull();
+      hand([{ target: 'BP#3', range: [0, 200] }], [{ target: 'BP#3', range: [300, 500] }]).refusal,
+    ).toBe('cannot pair');
   });
 });

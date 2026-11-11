@@ -53,7 +53,8 @@ export function sideForTarget(
   if (picked.a.includes(id)) return 'a';
   const piece = pieceOf(id);
   const side = sideForClick(piece, groups, picked, pieceOf);
-  if (groups.length === 2 || side !== 'a' || !picked.a.length) return side;
+  // Steps of several inputs keep input-owned sides: a piece sewn to itself is a one-input step.
+  if (groups.length >= 2 || side !== 'a' || !picked.a.length) return side;
   if (!picked.a.every((x) => pieceOf(x) === piece)) return side;
   const nextToA = picked.a.some((x) => touches(x, id));
   if (!picked.b.length) {

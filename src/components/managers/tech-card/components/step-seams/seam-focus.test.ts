@@ -133,6 +133,12 @@ describe('a piece closed on itself (C1)', () => {
     expect(side('SLV#1', { a: ['SLV#3'], b: ['SLV#2'] })).toBe('b');
   });
 
+  it('a step of three inputs keeps input-owned sides: a run of one piece grows side 1', () => {
+    const three = [{ pieces: ['SLV'] }, { pieces: ['CUFF'] }, { pieces: ['BODY'] }];
+    expect(side('SLV#1', { a: ['SLV#0'], b: [] }, three)).toBe('a');
+    expect(side('SLV#2', { a: ['SLV#0'], b: [] }, three)).toBe('a');
+  });
+
   it('chains touch by their members; the ring wraps', () => {
     expect(touches('SLV#1+2', 'SLV#3')).toBe(true);
     expect(touches('SLV#3', 'SLV#0')).toBe(true);
