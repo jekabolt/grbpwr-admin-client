@@ -390,6 +390,7 @@ export const fr = {
     pin: 'repère',
     placement: 'emplacement',
     hemEdge: 'bord d’ourlet inconnu',
+    fold: 'pli',
     tooFewPatternMarks: 'repères de patron insuffisants',
     marksOutsideOperationZone: 'repères hors zone d’opération',
     operation: 'opération',

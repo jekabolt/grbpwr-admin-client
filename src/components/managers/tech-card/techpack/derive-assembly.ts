@@ -100,7 +100,7 @@ import { assemblyPieceCode } from './assembly-piece-code';
 import { pressMode, type PressPiece } from './press-arrows';
 import { asmProtoFlags } from './asm-proto-flags';
 import { hemFinishWords, isHemClass, isHemStep } from './hem-step';
-import { foldLinesOf } from './fold-lines';
+import { foldLinesOf, unresolvedFoldsOf } from './fold-lines';
 import { englishT, own, type PdfT } from './i18n';
 import { partNoun, type PartNounId } from './i18n/part-nouns';
 import { machineText, operationVerb, pressEquipmentText } from './i18n/vocabulary';
@@ -3404,6 +3404,12 @@ export function deriveAssembly(
       }),
   );
   const foldRows = foldsFromWire(resolvedInput.techCard.pieceFolds).folds;
+  const storedPieceCode = (key: string) => {
+    const stored = techCard.techCard?.pieces?.find(
+      (piece) => piece.lineKey?.toUpperCase() === key.toUpperCase(),
+    );
+    return assemblyPieceCode(stored?.name);
+  };
   const { cards, units, targets } = buildCards(
     ops,
     bound,
@@ -3464,6 +3470,25 @@ export function deriveAssembly(
     });
     const foldLines = foldLinesOf(op.raw.foldKeys, foldRows, input.pieces, input.grainDeg, t);
     words.set(op.n, foldLines.length ? { ...opWords, folds: foldLines } : opWords);
+    // A fold the step names that this size cannot lay stays flat and prints no line: it is a gap.
+    for (const fold of unresolvedFoldsOf(
+      op.raw.foldKeys,
+      foldRows,
+      input.pieces,
+      input.grainDeg,
+      storedPieceCode,
+    )) {
+      const label = [t('gaps.fold'), fold.piece, String(fold.seq), input.drawnSize ?? '']
+        .filter(Boolean)
+        .join(' ');
+      gapSink.add({
+        code: 'pdf_fold_unresolved',
+        refs: [`op:${op.n}`, `fold:${fold.foldKey}`],
+        label,
+        section: '06',
+        target: { tab: 'construction', op: op.n },
+      });
+    }
   }
 
   const rows: AsmRow[] = ops.map((op) => {
