@@ -11,7 +11,11 @@ import { SectionSvg } from './fold-picture';
 import { stepOfFold } from './fold-step';
 
 vi.mock('./use-fold-writes', () => ({
-  useFoldWrites: () => ({ upsert: async () => true, remove: async () => true }),
+  useFoldWrites: () => ({
+    upsert: async () => true,
+    remove: async () => true,
+    replace: async () => true,
+  }),
 }));
 vi.mock('./fold-step', async (original) => ({
   ...(await original<typeof import('./fold-step')>()),

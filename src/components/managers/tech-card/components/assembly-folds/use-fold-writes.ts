@@ -23,6 +23,8 @@ export type FoldWrites = {
   upsert: (rows: StoredFold[]) => Promise<boolean>;
   /** Remove rows by their keys. */
   remove: (rows: StoredFold[]) => Promise<boolean>;
+  /** Save `upsert` and remove `remove` in one server transaction. */
+  replace: (upsert: StoredFold[], remove: StoredFold[]) => Promise<boolean>;
   frozen: boolean;
 };
 
@@ -119,6 +121,22 @@ export function useFoldWrites(cardId: number | undefined, frozen: boolean): Fold
     [cardId, run],
   );
 
+  // The server took removed keys off every step in the same transaction. An open form still holds
+  // them, and its next save would be refused for naming a fold that is gone. Nothing is left to
+  // save here, so the form does not turn dirty.
+  const dropFromSteps = useCallback(
+    (keys: string[]) => {
+      if (!form) return;
+      for (const { index, foldKeys } of stepsWithoutFolds(
+        form.getValues('operations') ?? [],
+        keys,
+      )) {
+        form.setValue(`operations.${index}.foldKeys`, foldKeys);
+      }
+    },
+    [form],
+  );
+
   const remove = useCallback(
     async (rows: StoredFold[]) => {
       const keys = rows.map((r) => r.foldKey);
@@ -127,18 +145,33 @@ export function useFoldWrites(cardId: number | undefined, frozen: boolean): Fold
         () => adminService.DeleteTechCardPieceFolds({ techCardId: cardId, foldKeys: keys }),
         'fold removal',
       );
-      // The server took these keys off every step in the same transaction. An open form still holds
-      // them, and its next save would be refused for naming a fold that is gone. Nothing is left to
-      // save here, so the form does not turn dirty.
-      if (removed && form) {
-        for (const { index, foldKeys } of stepsWithoutFolds(form.getValues('operations') ?? [], keys)) {
-          form.setValue(`operations.${index}.foldKeys`, foldKeys);
-        }
-      }
+      if (removed) dropFromSteps(keys);
       return removed;
     },
-    [cardId, form, run],
+    [cardId, dropFromSteps, run],
   );
 
-  return useMemo(() => ({ upsert, remove, frozen }), [upsert, remove, frozen]);
+  const replace = useCallback(
+    async (rows: StoredFold[], gone: StoredFold[]) => {
+      const keys = gone.map((r) => r.foldKey);
+      const replaced = await run(
+        {
+          ...Object.fromEntries(gone.map((row) => [row.foldKey, { kind: 'delete' as const, row }])),
+          ...Object.fromEntries(rows.map((row) => [row.foldKey, { kind: 'upsert' as const, row }])),
+        },
+        () =>
+          adminService.ReplaceTechCardPieceFolds({
+            techCardId: cardId,
+            deleteFoldKeys: keys,
+            folds: rows.map(foldToWire) as common_TechCardPieceFold[],
+          }),
+        rows.length > 1 ? `folds (${rows.length})` : 'fold',
+      );
+      if (replaced) dropFromSteps(keys);
+      return replaced;
+    },
+    [cardId, dropFromSteps, run],
+  );
+
+  return useMemo(() => ({ upsert, remove, replace, frozen }), [upsert, remove, replace, frozen]);
 }

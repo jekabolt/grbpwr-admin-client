@@ -43,6 +43,7 @@ import {
   type FoldPlan,
   type FoldPlanCtx,
 } from './fold-plan';
+import { executeFoldPlan } from './fold-execute';
 import { foldStepBlocked, stepOfFold, useFoldStep } from './fold-step';
 import { useFoldRows } from './folds-store';
 import { useFoldWrites } from './use-fold-writes';
@@ -341,18 +342,11 @@ export function FoldPicker({
     stepIndex,
   });
 
-  /** One upsert, then the rows it no longer uses, then the step link; a refusal writes nothing. */
-  const execute = async (plan: FoldPlan): Promise<boolean> => {
-    if ('refused' in plan) {
-      refuseGesture('FOLDS', plan.refused[0], plan.refused[1]);
-      return false;
-    }
-    if (!(await writes.upsert(plan.upsert))) return false;
-    // The replacement is stored: a leftover row that fails to go is still removable in the list.
-    if (plan.remove.length) await writes.remove(plan.remove);
-    if (plan.link) foldStep.assign(plan.link.keys, plan.link.step);
-    return true;
-  };
+  /** Rows (one replace call when some go), then the step link; a refusal writes nothing. */
+  const execute = (plan: FoldPlan): Promise<boolean> =>
+    executeFoldPlan(plan, writes, foldStep.assign, (title, detail) =>
+      refuseGesture('FOLDS', title, detail),
+    );
 
   const applyChoice = async (line: PickerLine, kind: PickKind) => {
     if (!line.group) {
