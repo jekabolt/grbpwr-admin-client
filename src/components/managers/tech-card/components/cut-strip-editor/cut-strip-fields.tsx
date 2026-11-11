@@ -193,7 +193,13 @@ export function CutStripFields({
                       maxDecimals={0}
                       placeholder={cut == null ? '' : String(cut)}
                       {...(mode === 'one_length' ? { value: cut ?? '' } : {})}
-                      disabled={cutCellLocked({ readOnly, binding, mode, seamMm: seam })}
+                      disabled={cutCellLocked({
+                        readOnly,
+                        binding,
+                        mode,
+                        seamMm: seam,
+                        seamGone: !!(effectiveStrip as { seamGone?: boolean }).seamGone,
+                      })}
                       className={cn(
                         'text-right placeholder:text-textColor!',
                         !!manual && mode !== 'one_length' && 'font-bold',

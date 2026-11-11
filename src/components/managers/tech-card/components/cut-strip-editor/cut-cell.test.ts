@@ -21,4 +21,8 @@ describe('cut cell (E5: an ungraded size of a binding strip takes a typed cut)',
     expect(cutCellLocked({ ...base, mode: 'one_length', seamMm: undefined })).toBe(true);
     expect(cutCellLocked({ ...base, readOnly: true, seamMm: undefined })).toBe(true);
   });
+
+  it('a binding strip on a rejected or stale seam is typed by hand despite a stored seam length', () => {
+    expect(cutCellLocked({ ...base, seamMm: 800, seamGone: true })).toBe(false);
+  });
 });
