@@ -128,6 +128,16 @@ import { PresenceLossBanner, VersionSkewBanner, type VersionSkew } from './save-
 import { useTechCardStagingRequired, type CommitOutcome } from './useTechCardStaging';
 import { fuseOwed } from './card-owed';
 import { useSeamsStore } from './assembly-seams/seams-store';
+import { linksByOperation } from './assembly-seams/seam-change-plan';
+import { NOT_SAVED } from './assembly-seams/seam-change';
+import {
+  adoptStepLinks,
+  baseAfterSeamChange,
+  registerSeamFormBridge,
+  stepNumberOf,
+  stepNumbersAgree,
+  type SeamFormBridge,
+} from './assembly-seams/seam-form-bridge';
 import { dropTopstitchMeasured } from './topstitch-lines';
 import {
   FUSING_SHEETS_KEY,
@@ -137,6 +147,7 @@ import {
 } from './nesting/fusing-sheets-stage';
 import {
   AutosaveContext,
+  flushAllowsRun,
   flushRefusalSentence,
   type AutosaveApi,
 } from './design/autosave-contract';
@@ -1037,7 +1048,7 @@ export function TechCardForm({
   // or reloaded. Asked at the moment of leaving (mn-3: dirt nobody can write is no reason to hold the
   // page); a new card's create writes the style facts too, so all of its dirt counts.
   // L16: a fusing rebuild alone holds nothing — it is owed in this browser (card-owed.ts) and a
-  // reloaded page takes it back. A seam row on the wire holds: its step link is written only after it.
+  // reloaded page takes it back. A seam write on the wire holds: the page that sent it adopts its links.
   const canWriteCard = canWrite(SECTION.techCards) && !frozen;
   useEffect(() => {
     if (!canWriteCard) return;
@@ -3311,6 +3322,111 @@ export function TechCardForm({
       setRestoringSnapshotId(null);
     }
   };
+
+  // ═══ THE SEAM WRITE'S DOOR (C7) ═══════════════════════════════════════════════════════════════════
+  // A seam gesture writes rows AND step links in one ChangeTechCardSeams under this card's
+  // lock_version — the version the body write claims too — so the two take turns here
+  // (assembly-seams/seam-form-bridge.ts, seam-change.ts):
+  //   flush — the form is saved first: a step is addressed by the number its last save gave it;
+  //   hold  — no body write starts while the request flies (one already on the wire is waited out),
+  //           and `writing` keeps a background read from judging the request's own bump as another
+  //           editor's; refused while the conflict decision is open, or when the steps' numbers are
+  //           not the card's (the read after the last save never came back);
+  //   adopt — the committed change: the new version into `base` with the card patched by its links
+  //           (a read at that version is «the same»), each step's links into the form's baseline AND
+  //           values — clean. An edit typed meanwhile stays dirty against that baseline; the held
+  //           autosave skipped its cycle and runs it on release, on the new version: nothing is lost,
+  //           nothing 409s.
+  const seamReadFailed = 'the card could not be re-read — nothing was saved';
+  const seamConflict = () => {
+    leaveFullscreen();
+    openConflict();
+    autosave.settleExternal(
+      { outcome: 'conflict', message: 'another editor saved this card meanwhile' },
+      'read',
+    );
+    return flushRefusalSentence('conflict');
+  };
+  // The form's steps against the card this page stands on (a keep-mine override was rebased onto the
+  // card it read: its numbers are that card's).
+  const seamStepsAgree = () =>
+    lockOverride.current != null ||
+    !base.current.card ||
+    stepNumbersAgree(form.getValues('operations') ?? [], base.current.card);
+  const seamDoorNow: SeamFormBridge = {
+    flush: async (reason) => {
+      const r = await autosave.flush(reason);
+      return flushAllowsRun(r)
+        ? { ok: true }
+        : { ok: false, why: flushRefusalSentence(r, autosave.errorsCount, autosave.refusalNow()) };
+    },
+    hold: async () => {
+      const releaseWrites = autosave.holdWrites();
+      writing.current += 1;
+      let held = true;
+      const release = () => {
+        if (!held) return;
+        held = false;
+        writing.current -= 1;
+        releaseWrites();
+        // A read that came in meanwhile waited for this (M-3): judged against the adopted card.
+        if (writing.current === 0) queueMicrotask(reconcileLatest);
+      };
+      await autosave.whenSettled();
+      if (conflictOpen.current) return { release, refused: flushRefusalSentence('conflict') };
+      if (lockOverride.current == null && (needsRead.current || !base.current.card)) {
+        const r = await readInChain();
+        if (r === 'error' || (r !== 'conflict' && !base.current.card))
+          return { release, refused: seamReadFailed };
+        if (r === 'conflict') return { release, refused: seamConflict() };
+      }
+      if (!seamStepsAgree()) return { release, refused: NOT_SAVED };
+      return { release };
+    },
+    version: () => claimVersion(),
+    operationNumber: (step) => stepNumberOf(form, step),
+    adopt: (a) => {
+      if (lockOverride.current != null) {
+        if (lockOverride.current === a.expected) lockOverride.current = a.lockVersion;
+        else needsRead.current = true;
+      } else {
+        const next = baseAfterSeamChange(base.current, a);
+        // Not the version the request claimed: the next body write reads the card first (m1).
+        if (next) base.current = next;
+        else needsRead.current = true;
+      }
+      // The body on the server moved (its links): the backstop's payload is not on the server now.
+      lastBody.current = null;
+      const finishHistoryReconciliation = undoHistory.api.beginServerReconciliation();
+      try {
+        adoptStepLinks(form, linksByOperation(a.links, a.seams));
+      } finally {
+        finishHistoryReconciliation();
+      }
+    },
+    reread: async () => {
+      const r = await readInChain();
+      if (r === 'error') return { ok: false, why: seamReadFailed };
+      if (r === 'conflict') return { ok: false, why: seamConflict() };
+      const card = storedCard();
+      if (!card) return { ok: false, why: seamReadFailed };
+      if (!seamStepsAgree()) return { ok: false, why: NOT_SAVED };
+      return { ok: true, card };
+    },
+  };
+  const seamDoor = useRef(seamDoorNow);
+  seamDoor.current = seamDoorNow;
+  useEffect(() => {
+    if (!isEditMode || !numId) return;
+    return registerSeamFormBridge(numId, {
+      flush: (reason) => seamDoor.current.flush(reason),
+      hold: () => seamDoor.current.hold(),
+      version: () => seamDoor.current.version(),
+      operationNumber: (step) => seamDoor.current.operationNumber(step),
+      adopt: (a) => seamDoor.current.adopt(a),
+      reread: () => seamDoor.current.reread(),
+    });
+  }, [isEditMode, numId]);
 
   const saving = form.formState.isSubmitting || autosave.status === 'saving';
   // A card at rest has nothing to answer for: the quiet check's list goes with the work it was about
