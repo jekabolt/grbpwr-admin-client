@@ -9,13 +9,27 @@ import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { activeFoldRows } from 'lib/folds';
 import type { SidePart } from 'lib/seams';
 import { cn } from 'lib/utility';
-import { lazy, Suspense, useEffect, useMemo } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
 import { useSizeNames } from 'components/managers/model/components/use-size-systems';
-import { Button, Close, DataTable, EmptyCell, GroupLabel, Text, TILE_PRESS, TILE_QUIET } from 'ui';
+import {
+  Button,
+  Chip,
+  ChipRow,
+  Close,
+  DataTable,
+  EmptyCell,
+  GroupLabel,
+  Text,
+  TILE_PRESS,
+  TILE_QUIET,
+} from 'ui';
 import { useFoldRows } from '../assembly-folds/folds-store';
 import { useSeamsStore } from '../assembly-seams/seams-store';
+import { bindingLinesOfStep, chosenBindingLine, type BindingOperation } from '../binding-step';
+import type { CutStrip } from '../cut-strip-editor/use-cut-strip';
+import { stripName } from '../cut-strips/strip-pieces';
 import { isTopstitchStep } from '../operation-kinds';
 import type { TechCardFormData } from '../schema';
 import { topstitchLineMm, type TopstitchLine } from '../topstitch-lines';
@@ -237,6 +251,19 @@ export function StepSeamsRow({
   const seamActions = useStepSeamActions(index);
   const pendingWrites = useSeamsStore((state) => state.pending);
   const opNumber = op?.operationNumber;
+  // E3: two binding lines on one step — the new edge goes to the line picked here.
+  const { control } = useFormContext<TechCardFormData>();
+  const cutStrips = (useWatch({ control, name: 'cutStrips' }) ?? []) as CutStrip[];
+  const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
+    lineKey?: string;
+    name?: string;
+  }>;
+  const bindingLines = useMemo(
+    () => bindingLinesOfStep(op as BindingOperation | undefined, cutStrips),
+    [op, cutStrips],
+  );
+  const [pickedLine, setPickedLine] = useState('');
+  const bindingLine = chosenBindingLine(bindingLines, pickedLine);
   // A suggestion tile carries its pair into the picker; the door and stored tiles start empty.
   const open = picker != null;
   const setOpen = (next: boolean) => onPicker(next ? PLAIN_PICK : null);
@@ -290,6 +317,22 @@ export function StepSeamsRow({
   return (
     <div className='flex flex-col' data-step-seams={opNumber ?? ''}>
       <GroupLabel>seams</GroupLabel>
+      {bindingLines.length > 1 && (
+        <ChipRow className='mb-2' data-step-binding-lines=''>
+          {bindingLines.map((key) => (
+            <Chip
+              key={key}
+              selected={key === bindingLine}
+              pressed={key === bindingLine}
+              disabled={frozen}
+              onClick={() => setPickedLine(key)}
+              data-step-binding-line={key}
+            >
+              {stripName({ bomLineKey: key }, bomItems)}
+            </Chip>
+          ))}
+        </ChipRow>
+      )}
       <div className='flex flex-wrap items-start gap-x-4 gap-y-2'>
         {stored.map(({ key, row, parts }, i) => {
           const writing = !!pendingWrites[key];
@@ -373,6 +416,7 @@ export function StepSeamsRow({
             open={open}
             proposal={picker?.proposal ?? 0}
             preselectProposal={picker?.preselect ?? false}
+            bindingLineKey={bindingLine || undefined}
             onClose={() => setOpen(false)}
           />
         </Suspense>

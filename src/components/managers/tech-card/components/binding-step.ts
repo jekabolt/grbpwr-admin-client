@@ -165,14 +165,47 @@ export function nextBindingStrip(base: CutStrip, sizeIds: readonly number[]): Cu
 
 export type BindingStripTarget = { strip: CutStrip; fresh: boolean };
 
-/** The pending strip born by the tile is used first; later edges clone the same line. */
+/**
+ * The step's binding lines, once each, in the order the step took them (E3): `bomLineKeys` grows
+ * as tiles are picked, so its order is the order lines were added; strip order is not, since a
+ * second edge of the first line is appended after the second line's strip.
+ */
+export function bindingLinesOfStep(
+  operation: BindingOperation | undefined,
+  strips: readonly CutStrip[],
+): string[] {
+  const own = [
+    ...new Set(
+      bindingStripsOfStep(operation, strips)
+        .map((strip) => strip.bomLineKey?.trim() ?? '')
+        .filter(Boolean),
+    ),
+  ];
+  const order = (operation?.bomLineKeys ?? []).map((key) => key.trim());
+  const rank = (key: string) => {
+    const at = order.indexOf(key);
+    return at < 0 ? order.length + own.indexOf(key) : at;
+  };
+  return own.sort((a, b) => rank(a) - rank(b));
+}
+
+/** The line a new edge goes to: the one picked while it is still on the step, else the last added. */
+export function chosenBindingLine(lines: readonly string[], picked: string): string {
+  return lines.includes(picked) ? picked : lines[lines.length - 1] ?? '';
+}
+
+/**
+ * The pending strip born by the tile is used first; later edges clone the same line. With
+ * `bomLineKey` (E3, two lines on one step) only that line's strips count.
+ */
 export function bindingStripTarget(
   operation: BindingOperation | undefined,
   strips: readonly CutStrip[],
   sizeIds: readonly number[],
+  bomLineKey?: string,
 ): BindingStripTarget | null {
   if (!isBindingOperation(operation)) return null;
-  const own = bindingStripsOfStep(operation, strips);
+  const own = bindingStripsOfStep(operation, strips, bomLineKey);
   const open = own.find((strip) => strip.lengthMode === 'from_seam' && !strip.seamKey?.trim());
   if (open) return { strip: open, fresh: false };
   const base = own[0];
@@ -241,7 +274,9 @@ export function linkBindingStripToSeam(
   const inputs = new Set(operation?.inputKeys ?? []);
   const stripKeys = new Set(
     strips
-      .filter((strip) => isBindingStrip(strip, operation) && inputs.has(strip.lineKey?.trim() ?? ''))
+      .filter(
+        (strip) => isBindingStrip(strip, operation) && inputs.has(strip.lineKey?.trim() ?? ''),
+      )
       .map((strip) => strip.lineKey?.trim() ?? '')
       .filter(Boolean),
   );
@@ -399,7 +434,9 @@ export function bindingUndoLinks(
   const patch = plan.operations.find((entry) => entry.index === index);
   const inputKeys = patch?.inputKeys ?? [...(operation?.inputKeys ?? [])];
   const removed = (card.cutStrips ?? []).filter(
-    (strip) => !plan.strips.includes(strip) && (operation?.inputKeys ?? []).includes(strip.lineKey?.trim() ?? ''),
+    (strip) =>
+      !plan.strips.includes(strip) &&
+      (operation?.inputKeys ?? []).includes(strip.lineKey?.trim() ?? ''),
   );
   return {
     inputKeys,
@@ -427,7 +464,8 @@ export async function runBindingTeardown(
 ): Promise<boolean> {
   const before = io.read();
   const plan = teardownBindingStrips({ ...before, seamRows: io.seamRows }, scope);
-  if (!plan.operations.length && plan.strips.length === (before.cutStrips ?? []).length) return true;
+  if (!plan.operations.length && plan.strips.length === (before.cutStrips ?? []).length)
+    return true;
   if (!io.seamReady) return false;
   const removeKeys = new Set(plan.seamRowsToRemove);
   const rows = io.seamRows.filter((row) => removeKeys.has(row.seamKey));

@@ -160,6 +160,7 @@ export default function SeamPicker({
   onClose,
   proposal: initialProposal = 0,
   preselectProposal = false,
+  bindingLineKey,
 }: {
   index: number;
   open: boolean;
@@ -168,6 +169,8 @@ export default function SeamPicker({
   proposal?: number;
   /** A suggestion tile opens with that proposal already selected. */
   preselectProposal?: boolean;
+  /** E3: the binding line a new edge goes to, when the step binds with two or more. */
+  bindingLineKey?: string;
 }) {
   return (
     <Dialog.Root
@@ -182,6 +185,7 @@ export default function SeamPicker({
           index={index}
           proposal={initialProposal}
           preselectProposal={preselectProposal}
+          bindingLineKey={bindingLineKey}
           mode='dialog'
           onClose={onClose}
         />
@@ -200,6 +204,7 @@ export function SeamPickerBody({
   footerActions,
   readOnly = false,
   walk = false,
+  bindingLineKey,
 }: {
   index: number;
   /** Which of the step's proposals is selected first. */
@@ -213,6 +218,8 @@ export function SeamPickerBody({
   readOnly?: boolean;
   /** Inside the seam walk: the window names the op, the canvas fills it, ACCEPT reads back SAVED. */
   walk?: boolean;
+  /** E3: the binding line a new edge goes to; without it, the step's pending strip first. */
+  bindingLineKey?: string;
 }) {
   const scene = useStepScene(index);
   const stepResults = useStepResults();
@@ -257,8 +264,8 @@ export function SeamPickerBody({
     | number
     | undefined;
   const bindingTarget = useMemo(
-    () => bindingStripTarget(op, cutStrips, sizeIds),
-    [op, cutStrips, sizeIds],
+    () => bindingStripTarget(op, cutStrips, sizeIds, bindingLineKey),
+    [op, cutStrips, sizeIds, bindingLineKey],
   );
   const bindingStripKeys = useMemo(() => stripKeysOf(cutStrips), [cutStrips]);
   const cardOps = (useWatch({ control: form.control, name: 'operations' }) ??
