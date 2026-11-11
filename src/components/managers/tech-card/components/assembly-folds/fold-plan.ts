@@ -5,7 +5,13 @@
 // before the write: a write the card save would refuse later is not sent at all.
 
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
-import type { FoldSource, StoredFold } from 'lib/folds';
+import {
+  foldFromLine,
+  isPleatKind,
+  pointOnSide,
+  type FoldSource,
+  type StoredFold,
+} from 'lib/folds';
 import { distToPoly, inside } from 'lib/folds/geom';
 import {
   defaultSide,
@@ -212,4 +218,34 @@ export function planPleat(
   const linked = linkOf(ctx, saved, afterWrite(ctx.rows, upsert, remove), oldStep);
   if ('refused' in linked) return linked;
   return { upsert, remove, link: linked.link };
+}
+
+/**
+ * A lost fold (its line is not found on today's pattern) laid again on a new line: the same key,
+ * seq, kind and note, so its place in the order and its step link stay; only the line changes. The
+ * owner drew the new line, so its source is `owner` (a `dxf` row without an edge must match a
+ * construction line and would be lost again). One keyed upsert; a bad line writes nothing.
+ */
+export function planRepick(
+  ctx: FoldPlanCtx,
+  lost: StoredFold,
+  line: [Pt2, Pt2],
+  groups: readonly Pick<FoldGroup, 'flat'>[] = [],
+): FoldPlan {
+  const refused = drawnLineRefusal(ctx.geom, line, groups);
+  if (refused) return { refused };
+  const flipAt = pointOnSide(ctx.geom.rs, line[0], line[1], defaultSide(ctx.geom, line));
+  if (!flipAt) return { refused: FOLD_LINE_REFUSAL };
+  const row = foldFromLine(ctx.geom, line, flipAt, {
+    seq: lost.seq,
+    kind: lost.kind,
+    source: 'owner',
+    foldKey: lost.foldKey,
+    grainDeg: ctx.deg,
+    anchoredSize: ctx.size,
+    note: lost.note,
+    ...(isPleatKind(lost.kind) ? { edge: null } : {}),
+  });
+  if (!upsertOrderHolds(ctx, [row])) return { refused: FOLD_ORDER_REFUSAL };
+  return { upsert: [row], remove: [], link: null };
 }

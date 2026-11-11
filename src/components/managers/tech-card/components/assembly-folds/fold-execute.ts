@@ -27,3 +27,17 @@ export async function executeFoldPlan(
   if (plan.link) assign(plan.link.keys, plan.link.step);
   return true;
 }
+
+/** Remove rows, then let their steps go of the keys; nothing changes when the removal fails. */
+export async function removeFoldRows(
+  rows: StoredFold[],
+  remove: (rows: StoredFold[]) => Promise<boolean>,
+  assign: (keys: string[], step: null) => void,
+): Promise<boolean> {
+  if (!rows.length || !(await remove(rows))) return false;
+  assign(
+    rows.map((row) => row.foldKey),
+    null,
+  );
+  return true;
+}

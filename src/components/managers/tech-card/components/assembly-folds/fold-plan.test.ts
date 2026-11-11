@@ -13,6 +13,7 @@ import {
   planKindChange,
   planNewFold,
   planPleat,
+  planRepick,
   type FoldPlanCtx,
 } from './fold-plan';
 import { FOLD_MAX_SEQ, placeFolds } from './fold-seq';
@@ -321,5 +322,80 @@ describe('D4: a bad line is refused before it is written, the drawing stays', ()
       ),
     ).toEqual(FOLD_SAME_REFUSAL);
     expect(drawnLineRefusal(piece, across(500), groups)).toBeNull();
+  });
+});
+
+describe('D6: a lost fold re-picked on a new line', () => {
+  // seq 2 named an edge that is gone after a re-upload: it lays nowhere and is listed as lost.
+  const lostOf = () => ({
+    ...fold(600, 2)[0],
+    note: 'hem',
+    edge: {
+      hint: '' as const,
+      samples: Array.from({ length: 5 }, () => [5, 5] as Pt2),
+      offsetMm: 30,
+    },
+  });
+
+  it('keeps key, seq, kind, note and step; only the line changes', () => {
+    const a = fold(200, 1, 'out');
+    const lost = lostOf();
+    const c = fold(1000, 3);
+    const rows = [...a, lost, ...c];
+    expect(foldGroupsOf(piece, rows, 0).groups.flatMap((g) => g.rows.map((r) => r.seq))).toEqual([
+      1, 3,
+    ]);
+    const ops = [
+      { foldKeys: [a[0].foldKey] },
+      { foldKeys: [lost.foldKey] },
+      { foldKeys: [c[0].foldKey] },
+    ];
+    const groups = foldGroupsOf(piece, rows, 0).groups;
+    const p = plan(planRepick(ctxOf(rows, ops, 0), lost, across(650), groups));
+    expect(p.remove).toEqual([]);
+    expect(p.link).toBeNull();
+    expect(p.upsert).toHaveLength(1);
+    const row = p.upsert[0];
+    expect(row).toMatchObject({
+      foldKey: lost.foldKey,
+      pieceKey: lost.pieceKey,
+      seq: 2,
+      kind: lost.kind,
+      note: 'hem',
+      stale: false,
+    });
+    expect(row.line).not.toEqual(lost.line);
+    // Laid on the new line, it is found again in its own place.
+    const after = rows.map((r) => (r.foldKey === lost.foldKey ? row : r));
+    expect(foldGroupsOf(piece, after, 0).groups.flatMap((g) => g.rows.map((r) => r.seq))).toEqual([
+      1, 2, 3,
+    ]);
+  });
+
+  it('keeps a pleat kind', () => {
+    const lost = { ...lostOf(), kind: 'pleat_l' as const };
+    const p = plan(planRepick(ctxOf([lost], []), lost, across(650)));
+    expect(p.upsert[0]).toMatchObject({
+      foldKey: lost.foldKey,
+      seq: 2,
+      kind: 'pleat_l',
+      edge: null,
+    });
+  });
+
+  it('a bad line is refused and nothing is written', () => {
+    const lost = lostOf();
+    const rows = [...fold(200, 1), lost];
+    const groups = foldGroupsOf(piece, rows, 0).groups;
+    const alongContour: [Pt2, Pt2] = [
+      [0, 0],
+      [0, 1300],
+    ];
+    expect(planRepick(ctxOf(rows, []), lost, alongContour, groups)).toEqual({
+      refused: FOLD_LINE_REFUSAL,
+    });
+    expect(planRepick(ctxOf(rows, []), lost, across(200), groups)).toEqual({
+      refused: FOLD_SAME_REFUSAL,
+    });
   });
 });

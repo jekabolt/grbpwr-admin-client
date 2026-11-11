@@ -40,10 +40,11 @@ import {
   planKindChange,
   planNewFold,
   planPleat,
+  planRepick,
   type FoldPlan,
   type FoldPlanCtx,
 } from './fold-plan';
-import { executeFoldPlan } from './fold-execute';
+import { executeFoldPlan, removeFoldRows } from './fold-execute';
 import { foldStepBlocked, stepOfFold, useFoldStep } from './fold-step';
 import { useFoldRows } from './folds-store';
 import { useFoldWrites } from './use-fold-writes';
@@ -77,6 +78,8 @@ type PickerLine = {
   group?: FoldGroup;
   pleatGroup?: FoldGroup;
   pending?: boolean;
+  /** A saved row whose line is not found on today's pattern: listed, never drawn. */
+  lost?: StoredFold;
 };
 
 type Snap = { mm: Pt2; px: Pt2; notch: boolean };
@@ -170,6 +173,7 @@ export function FoldPicker({
   const [hovered, setHovered] = useState<string[]>([]);
   const [chosenPleat, setChosenPleat] = useState<string | null>(null);
   const [live, setLive] = useState<Pt2 | null>(null);
+  const [repick, setRepick] = useState<StoredFold | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -179,36 +183,39 @@ export function FoldPicker({
 
   const lines = useMemo<PickerLine[]>(
     () =>
-      sortPickerLines([
-        ...groups.flatMap((group): PickerLine[] =>
-          group.kind === 'pleat'
-            ? group.flat.map((fold, index) => ({
-                id: `saved:${group.rows.map((row) => row.foldKey).join(':')}:${index}`,
-                line: [fold.a, fold.b] as [Pt2, Pt2],
-                source: group.rows[index]?.source ?? group.source,
-                pleatGroup: group,
-              }))
-            : [
-                {
-                  id: `saved:${group.rows.map((row) => row.foldKey).join(':')}`,
-                  line: group.line,
-                  source: group.source,
-                  group,
-                },
-              ],
-        ),
-        ...hints.map((hint) => ({
-          id: `hint:${hint.id}`,
-          line: hint.lineMm,
-          source: hint.source,
-        })),
-        ...(pending
-          ? [{ id: 'pending', line: pending.line, source: pending.source, pending: true }]
-          : []),
-      ]),
-    [groups, hints, pending],
+      withLostRows(
+        sortPickerLines([
+          ...groups.flatMap((group): PickerLine[] =>
+            group.kind === 'pleat'
+              ? group.flat.map((fold, index) => ({
+                  id: `saved:${group.rows.map((row) => row.foldKey).join(':')}:${index}`,
+                  line: [fold.a, fold.b] as [Pt2, Pt2],
+                  source: group.rows[index]?.source ?? group.source,
+                  pleatGroup: group,
+                }))
+              : [
+                  {
+                    id: `saved:${group.rows.map((row) => row.foldKey).join(':')}`,
+                    line: group.line,
+                    source: group.source,
+                    group,
+                  },
+                ],
+          ),
+          ...hints.map((hint) => ({
+            id: `hint:${hint.id}`,
+            line: hint.lineMm,
+            source: hint.source,
+          })),
+          ...(pending
+            ? [{ id: 'pending', line: pending.line, source: pending.source, pending: true }]
+            : []),
+        ]),
+        lostRows(rows, groups),
+      ),
+    [groups, hints, pending, rows],
   );
-  const pleatFans = useMemo(() => detectPleatFans(lines), [lines]);
+  const pleatFans = useMemo(() => detectPleatFans(lines.filter((line) => !line.lost)), [lines]);
   const brokenPleats = useMemo(
     () =>
       groups.filter(
@@ -244,6 +251,7 @@ export function FoldPicker({
     setDrawing(null);
     setPending(null);
     setLive(null);
+    setRepick(null);
   };
 
   const svgPoint = (event: { clientX: number; clientY: number }): Pt2 | null => {
@@ -305,6 +313,10 @@ export function FoldPicker({
     const refused = drawnLineRefusal(geom, line, groups);
     if (refused) {
       refuseGesture('FOLDS', refused[0], refused[1]);
+      return;
+    }
+    if (repick) {
+      void repickOn(repick, line);
       return;
     }
     setPending({ line, source: 'owner' });
@@ -373,6 +385,7 @@ export function FoldPicker({
       setPending(null);
       setDrawing(null);
       setLive(null);
+      setRepick(null);
       if (!(await execute(plan)) && drawn) setPending(drawn);
       return;
     }
@@ -435,6 +448,38 @@ export function FoldPicker({
     const foldKeys = line.group.rows.map((row) => row.foldKey);
     if (!(await writes.remove(line.group.rows))) return;
     foldStep.assign(foldKeys, null);
+  };
+
+  /** The lost fold takes the drawn line in its own place: same key, seq, kind and step. */
+  const repickOn = async (lost: StoredFold, line: [Pt2, Pt2]) => {
+    if (frozen || choosing.current) return;
+    const plan = planRepick(planCtx(), lost, line, groups);
+    // A bad line is refused; the first point stays for another end, the lost fold is untouched.
+    if ('refused' in plan) {
+      await execute(plan);
+      return;
+    }
+    choosing.current = true;
+    try {
+      resetDrawing();
+      await execute(plan);
+    } finally {
+      choosing.current = false;
+    }
+  };
+
+  const startRepick = (lost: StoredFold) => {
+    if (frozen) return;
+    setPending(null);
+    setLive(null);
+    setRepick(lost);
+    setDrawing({ p1: null });
+  };
+
+  const removeLost = async (lost: StoredFold) => {
+    if (frozen) return;
+    if (repick?.foldKey === lost.foldKey) resetDrawing();
+    await removeFoldRows([lost], writes.remove, foldStep.assign);
   };
 
   const removeGroup = async (group: FoldGroup) => {
@@ -559,15 +604,17 @@ export function FoldPicker({
                   pointerEvents='none'
                 />
               ))}
-              {lines.map((line, index) => (
-                <FoldLineSvg
-                  key={line.id}
-                  line={line}
-                  number={index + 1}
-                  hovered={hovered.includes(line.id)}
-                  view={view}
-                />
-              ))}
+              {lines.map((line, index) =>
+                line.lost ? null : (
+                  <FoldLineSvg
+                    key={line.id}
+                    line={line}
+                    number={index + 1}
+                    hovered={hovered.includes(line.id)}
+                    view={view}
+                  />
+                ),
+              )}
               <PieceName piece={geom} view={view} />
               {drawing && (
                 <g pointerEvents='none'>
@@ -794,6 +841,45 @@ export function FoldPicker({
             })}
             {lines.map((line, index) => {
               if (line.pleatGroup) return null;
+              const lost = line.lost;
+              if (lost)
+                return (
+                  <div
+                    key={line.id}
+                    className='py-2 hover:bg-pageBg'
+                    data-fold-row={index + 1}
+                    data-fold-lost=''
+                  >
+                    <div className='flex min-h-7 flex-wrap items-center gap-1.5'>
+                      <span className='grid size-4.5 place-items-center border border-textColor text-nano tabular-nums'>
+                        {index + 1}
+                      </span>
+                      <span className='min-w-0 flex-1 text-error'>not found</span>
+                      <span className='ml-auto flex gap-2'>
+                        <Button
+                          variant='underline'
+                          size='xs'
+                          disabled={frozen}
+                          onClick={() => startRepick(lost)}
+                          className='hover:text-textColor active:translate-y-px'
+                          data-fold-repick=''
+                        >
+                          re-pick
+                        </Button>
+                        <Button
+                          variant='underline'
+                          size='xs'
+                          disabled={frozen}
+                          onClick={() => void removeLost(lost)}
+                          className='hover:text-textColor active:translate-y-px'
+                          data-fold-remove=''
+                        >
+                          remove
+                        </Button>
+                      </span>
+                    </div>
+                  </div>
+                );
               const kind = line.group?.kind ?? null;
               return (
                 <div
@@ -868,7 +954,10 @@ export function FoldPicker({
                 variant='underline'
                 size='xs'
                 disabled={frozen}
-                onClick={() => setDrawing({ p1: null })}
+                onClick={() => {
+                  setRepick(null);
+                  setDrawing({ p1: null });
+                }}
                 className='hover:text-textColor active:translate-y-px'
                 data-fold-line=''
               >
@@ -971,6 +1060,43 @@ function PieceName({
       {piece.name}
     </text>
   );
+}
+
+/** The piece's rows that no group lays: their line is not found on today's pattern. */
+function lostRows(rows: readonly StoredFold[], groups: readonly FoldGroup[]): StoredFold[] {
+  const laid = new Set(groups.flatMap((group) => group.rows.map((row) => row.foldKey)));
+  return rows.filter((row) => !laid.has(row.foldKey)).sort((a, b) => a.seq - b.seq);
+}
+
+/** Each lost row stands before the first saved line that comes after it in the fold order. */
+function withLostRows(lines: PickerLine[], lost: readonly StoredFold[]): PickerLine[] {
+  const out = [...lines];
+  const seqOf = (line: PickerLine): number | null => {
+    if (line.lost) return line.lost.seq;
+    const group = line.group ?? line.pleatGroup;
+    return group ? Math.min(...group.rows.map((row) => row.seq)) : null;
+  };
+  for (const row of lost) {
+    const at = out.findIndex((line) => {
+      const seq = seqOf(line);
+      return seq !== null && seq > row.seq;
+    });
+    let lastSaved = -1;
+    out.forEach((line, index) => {
+      if (seqOf(line) !== null) lastSaved = index;
+    });
+    const entry: PickerLine = {
+      id: `lost:${row.foldKey}`,
+      line: [
+        [0, 0],
+        [0, 0],
+      ],
+      source: row.source,
+      lost: row,
+    };
+    out.splice(at >= 0 ? at : lastSaved + 1, 0, entry);
+  }
+  return out;
 }
 
 function sortPickerLines(lines: PickerLine[]): PickerLine[] {
