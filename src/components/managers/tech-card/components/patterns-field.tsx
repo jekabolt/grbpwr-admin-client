@@ -122,7 +122,8 @@ import { bareToken, normBlock, sizeTokensOf, splitBlockSize, uniOf } from './nes
 import { geometryFailureLabel, isFetchFailure } from './nesting/dxf-warnings';
 import { defaultContourLayer, layerOptions } from './nesting/contour-layer';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
-import { hydrateSeams, posesOf, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
+import { posesOf, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
+import { runSeamChange } from './assembly-seams/seam-change';
 import { toWire, type TechCardSeamWire } from 'lib/seams';
 import { dxfByScope, patternSheetName } from './nesting/dxf-by-scope';
 import {
@@ -3332,20 +3333,27 @@ export function PatternsField({
     });
   }
 
+  // One ChangeTechCardSeams under the version the form stands on (C7): the delete also unlinks the
+  // rows from every step, and the form adopts those links with the new version.
   async function deleteSeamsOnServer(cardId: number, seamKeys: string[]): Promise<boolean> {
-    let res: Awaited<ReturnType<typeof adminService.DeleteTechCardSeams>>;
-    try {
-      res = await adminService.DeleteTechCardSeams({ techCardId: cardId, seamKeys });
-    } catch (e) {
-      console.error('seams of a deleted sheet not removed', e);
+    const res = await runSeamChange(
+      cardId,
+      { delete: seamKeys },
+      { verb: 'removal', quiet: true },
+      { call: (req) => adminService.ChangeTechCardSeams(req) },
+    );
+    if (!res.ok) {
+      console.error('seams of a deleted sheet not removed', res.why);
+      // The snackbar says it and the retry owns it: the rows carry no refusal of their own.
+      const errors = { ...useSeamsStore.getState().errors };
+      for (const key of seamKeys) delete errors[key];
+      useSeamsStore.setState({ errors });
       armSeamDeleteRetry(cardId, seamKeys);
       lastSeamRetrySave.current = { cardId, at: autosaveRef.current.lastSavedAt };
       useSnackBarStore.getState().showMessage('seams not deleted', 'error');
       return false;
     }
     consumeSeamDeleteRetry(cardId, seamKeys);
-    if (useSeamsStore.getState().cardId === cardId)
-      hydrateSeams(cardId, (res.seams ?? []) as TechCardSeamWire[]);
     await queryClient.invalidateQueries({ queryKey: techCardKeys.detail(cardId) });
     return true;
   }
