@@ -37,7 +37,7 @@ import {
 import { fasteningsFromOps, type DeclaredFastening } from 'lib/doll/buttons';
 import type { DollLayerRelation, DollOwnerCandidate } from 'lib/doll/types';
 import { turnedSeamsOf } from 'lib/doll/turned';
-import { resolveFolds, type StoredFold } from 'lib/folds';
+import { activeFoldRows, resolveFolds, type FoldStep, type StoredFold } from 'lib/folds';
 import { hemFoldsOf, hemSigOf, isHemStep, type HemStepLike } from 'lib/hem/hem-folds';
 import { grainDegOf } from 'lib/seams/frame';
 import { candidatesOnSize } from 'lib/seams/transfer';
@@ -254,6 +254,21 @@ export function dollOwnerSeamsOf(args: {
   };
 }
 
+/**
+ * The folds the finished doll makes: every fold some step names (the step pictures and the PDF read
+ * the same `fold_keys`). A card whose steps name no fold keeps every stored fold, as before folds
+ * were linked to steps. `sig` names the folded keys, so linking a fold builds a new doll.
+ */
+export function dollFoldRowsOf(
+  operations: readonly FoldStep[],
+  rows: readonly StoredFold[],
+): { rows: StoredFold[]; sig: string } {
+  const linked = operations.some((op) => op.foldKeys?.length);
+  const out = linked ? activeFoldRows(operations, operations.length - 1, rows) : [...rows];
+  const keys = out.map((row) => row.foldKey).sort();
+  return { rows: out, sig: `${linked ? 'steps' : 'all'}:${keys.join(',')}` };
+}
+
 export function useDollCard(): DollCard | null {
   const facts = useSeamsStore((s) => s.facts);
   const cardId = useSeamsStore((s) => s.cardId);
@@ -291,6 +306,7 @@ export function useDollCard(): DollCard | null {
   const cutStrips = useWatch({ name: 'cutStrips' }) as readonly CutStripLike[] | undefined;
   const stripKeys = useMemo(() => stripKeysOf(cutStrips ?? []), [cutStrips]);
   const hemOps = useMemo(() => withoutStripInputs(operations, stripKeys), [operations, stripKeys]);
+  const dollFolds = useMemo(() => dollFoldRowsOf(operations, foldRows), [operations, foldRows]);
   const ownerSeams = useMemo(
     () =>
       dollOwnerSeamsOf({
@@ -486,8 +502,8 @@ export function useDollCard(): DollCard | null {
           }
         : null,
       rowsSig: sig,
-      foldRows,
-      foldRowsSig: foldRowsSignature,
+      foldRows: dollFolds.rows,
+      foldRowsSig: `${foldRowsSignature}|${dollFolds.sig}`,
       ...(hemOps.some(isHemStep) ? { hem: { ops: hemOps, standardMm } } : {}),
       joins,
       hardware,
@@ -505,7 +521,7 @@ export function useDollCard(): DollCard | null {
     rows,
     ownerSeams,
     sig,
-    foldRows,
+    dollFolds,
     foldRowsSignature,
     hemOps,
     standardMm,
