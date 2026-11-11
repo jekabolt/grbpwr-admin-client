@@ -24,6 +24,25 @@ export type SideSpans = Readonly<Record<string, readonly SpanRange[]>>;
 export const NO_SPANS: SidePick['spans'] = { a: {}, b: {} };
 
 const SAME_MM = 0.1;
+
+const spansSig = (spans: SideSpans) =>
+  Object.entries(spans)
+    .filter(([, ranges]) => ranges.length)
+    .map(([id, ranges]) => `${id}:${ranges.map((r) => r.join('-')).join(',')}`)
+    .sort()
+    .join('|');
+
+/** The same edges on the same sides, with the same stretches of them. */
+export function samePick(x: SidePick, y: SidePick): boolean {
+  const sameIds = (p: readonly string[], q: readonly string[]) =>
+    p.length === q.length && p.every((id) => q.includes(id));
+  return (
+    sameIds(x.a, y.a) &&
+    sameIds(x.b, y.b) &&
+    spansSig(x.spans.a) === spansSig(y.spans.a) &&
+    spansSig(x.spans.b) === spansSig(y.spans.b)
+  );
+}
 const TOUCH_MM = 0.5;
 const SNAP_MM = 4;
 const MIN_SPAN_MM = 1;
@@ -342,6 +361,16 @@ export function storedSeamOverlapping(
     ),
   );
 }
+
+/** Whether two lists of parts name one edge at all, any stretch of it (a chain counts by its members). */
+export const sidePartsShareEdge = (
+  x: readonly SidePart[],
+  y: readonly SidePart[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+) => {
+  const xs = new Set(pieces(x, geoms).map((part) => part.edge));
+  return pieces(y, geoms).some((part) => xs.has(part.edge));
+};
 
 /** Whether two lists of parts share a stretch of any edge (a chain counts by its members). */
 export const sidePartsOverlap = (

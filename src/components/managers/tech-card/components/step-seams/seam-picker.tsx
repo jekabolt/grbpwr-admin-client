@@ -67,8 +67,9 @@ import {
   pickFreeSpan,
   pickSegment,
   repeatsStoredSeam,
+  samePick,
   labelSideLength,
-  sidePartsOverlap,
+  sidePartsShareEdge,
   segmentAt,
   spanOfLength,
   sideParts,
@@ -78,6 +79,7 @@ import {
   type SidePick,
   type SpanRange,
 } from './span-pick';
+import { bindingRowsOf, seamsToClear } from './step-seam-actions';
 import { piecesUnder, snapAtDuringDrag } from './pose-picking';
 import { poseFit, PoseOverlay, poseRings } from './pose-overlay';
 import { useStepResults } from './step-result-context';
@@ -112,6 +114,7 @@ import {
   type EdgeMark,
   type EdgeTick,
   type NoMark,
+  useSeamRows,
 } from './step-picture-view';
 import {
   cardFoldLines,
@@ -120,7 +123,7 @@ import {
   foldedFitSides,
   withFoldPartners,
 } from './step-folds';
-import { edgeRowOfPick, initialPickerPick, orderedPickSides } from './step-rows';
+import { edgeRowOfPick, initialPickerPick, orderedPickSides, storedSeamSides } from './step-rows';
 import { fitSourceOf } from './step-pose';
 import { stepPictureOf } from './surface-picture';
 import { useMirrorStep } from './use-mirror-step';
@@ -135,14 +138,6 @@ const wholeSel = (sides: { a: readonly TargetId[]; b: readonly TargetId[] }): Se
   spans: NO_SPANS,
 });
 type SpanHover = { id: TargetId; range: SpanRange };
-
-const sameSel = (x: Sel, y: Sel) =>
-  !Object.keys(x.spans.a).length &&
-  !Object.keys(x.spans.b).length &&
-  x.a.length === y.a.length &&
-  x.b.length === y.b.length &&
-  x.a.every((id) => y.a.includes(id)) &&
-  x.b.every((id) => y.b.includes(id));
 
 const polyLen = (pts: readonly Pt[]) =>
   pts.reduce((s, p, i) => (i ? s + Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) : s), 0);
@@ -258,6 +253,23 @@ export function SeamPickerBody({
     [op, cutStrips, sizeIds],
   );
   const bindingStripKeys = useMemo(() => stripKeysOf(cutStrips), [cutStrips]);
+  const seamRows = useSeamRows();
+  const cardBindings = useMemo(
+    () =>
+      bindingTarget
+        ? bindingRowsOf(seamRows.values(), bindingStripKeys).map((row) => ({
+            parts: storedSeamSides(row, geoms).parts,
+          }))
+        : [],
+    [bindingTarget, seamRows, bindingStripKeys, geoms],
+  );
+  // An edge is bound once on the card: any step's binding row holding that stretch refuses it.
+  const boundOnCard = useCallback(
+    (id: TargetId, range: SpanRange | undefined) =>
+      storedSeamOverlapping(stored, id, range, geoms) >= 0 ||
+      storedSeamOverlapping(cardBindings, id, range, geoms) >= 0,
+    [stored, cardBindings, geoms],
+  );
   const bomItems = (useWatch({ control: form.control, name: 'bomItems' }) ?? []) as Array<
     BomLineLike & TopstitchBomLine
   >;
@@ -414,13 +426,11 @@ export function SeamPickerBody({
   const pair: SeamSides | null =
     !bindingMode && !inners.length && sel.a.length && sel.b.length ? { a: sel.a, b: sel.b } : null;
   const repeatsSeam = !!pair && repeatsStoredSeam(pickParts('a'), pickParts('b'), stored, geoms);
-  // One stretch of an edge on both sides sews nothing: the row would be stale from its first read.
-  const sidesShare = !!pair && sidePartsOverlap(pickParts('a'), pickParts('b'), geoms);
+  // One edge on both sides sews nothing: the row would be stale from its first read.
+  const sidesShare = !!pair && sidePartsShareEdge(pickParts('a'), pickParts('b'), geoms);
+  // An edge is bound once on the card: a second step binding it would double the strip and its norm.
   const repeatsBinding =
-    bindingReady &&
-    pickParts('a').some(
-      (part) => storedSeamOverlapping(stored, part.target, part.range, geoms) >= 0,
-    );
+    bindingReady && pickParts('a').some((part) => boundOnCard(part.target, part.range));
   const repeatsTopstitch =
     topstitchMode &&
     pickParts('a').some((part) =>
@@ -580,9 +590,9 @@ export function SeamPickerBody({
     }
     setBusy(true);
     setRefused('');
-    const ok = await attach(row);
+    const res = await attach(row);
     setBusy(false);
-    if (!ok) {
+    if ('refused' in res) {
       if (addedBindingKey) {
         const currentStrips = (form.getValues('cutStrips') ?? []) as CutStrip[];
         form.setValue(
@@ -597,16 +607,16 @@ export function SeamPickerBody({
           { shouldDirty: true },
         );
       }
-      setRefused(useSeamsStore.getState().errors[row.seamKey] ?? 'not saved');
+      setRefused(res.refused);
       return;
     }
     // Accepted as «guess» filled it: the proposal's acceptance; any change made it the owner's own.
-    const guessed = !!filled && sameSel(filled, pick);
+    const guessed = !!filled && samePick(filled, pick);
     recordSeamDecision({
       cardId: cardId ?? 0,
       operationNumber: op?.operationNumber ?? 0,
       action: guessed ? 'accept' : 'own',
-      seamKey: ok,
+      seamKey: res.key,
       tier: guessed ? (isGuess(suggestion ?? surfaceSuggestion) ? 'guess' : 'confident') : 'none',
       shown: filled ? { a: [...filled.a], b: [...filled.b] } : null,
     });
@@ -682,7 +692,7 @@ export function SeamPickerBody({
           setRefused('already picked');
           return;
         }
-        if (bindingMode && storedSeamOverlapping(stored, id, undefined, geoms) >= 0) {
+        if (bindingMode && boundOnCard(id, undefined)) {
           setRefused('already bound');
           return;
         }
@@ -696,7 +706,7 @@ export function SeamPickerBody({
         setRefused('already picked');
         return;
       }
-      if (bindingMode && storedSeamOverlapping(stored, id, segment, geoms) >= 0) {
+      if (bindingMode && boundOnCard(id, segment)) {
         setRefused('already bound');
         return;
       }
@@ -763,7 +773,7 @@ export function SeamPickerBody({
         setRefused('already picked');
         return;
       }
-      if (bindingMode && storedSeamOverlapping(stored, id, range, geoms) >= 0) {
+      if (bindingMode && boundOnCard(id, range)) {
         setRefused('already bound');
         return;
       }
@@ -970,7 +980,7 @@ export function SeamPickerBody({
   };
   const clearSeams = async () => {
     setClearingSeams(false);
-    for (const seam of listed) if (!(await removeSeam(seam))) return;
+    for (const seam of seamsToClear(stored)) if (!(await removeSeam(seam))) return;
   };
   const writeLines = (next: TopstitchLine[]) => {
     writeTopstitchLines(form.setValue, index, next);
@@ -1013,6 +1023,7 @@ export function SeamPickerBody({
     refused ||
     stored.map((s) => (errors[s.key] ? 'refused' : '')).find(Boolean) ||
     (repeatsSeam ? 'already sewn' : '') ||
+    (repeatsBinding ? 'already bound' : '') ||
     (repeatsTopstitch ? 'already picked' : '') ||
     (topstitchMode && !topstitchBomLineKey ? 'thread missing' : '');
   const shownActive = stored.find((s) => s.key === activeSeam);
