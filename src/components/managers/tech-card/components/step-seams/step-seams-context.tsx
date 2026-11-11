@@ -159,6 +159,7 @@ export function useStepSeamActions(index: number) {
         if (stripped) {
           setValue('cutStrips', stripped.strips as never, { shouldDirty: true });
           setValue(`operations.${index}.inputKeys`, stripped.inputKeys, { shouldDirty: true });
+          setValue(`operations.${index}.bomLineKeys`, stripped.bomLineKeys, { shouldDirty: true });
         }
       }
       return true;
@@ -313,10 +314,18 @@ export function StepSeamsProvider({
           if (!stripped) continue;
           strips = stripped.strips;
           stripsChanged = true;
-          operation = { ...operation, inputKeys: stripped.inputKeys };
+          operation = {
+            ...operation,
+            inputKeys: stripped.inputKeys,
+            bomLineKeys: stripped.bomLineKeys,
+          };
         }
-        if (operation !== o)
+        if (operation !== o) {
           setValue(`operations.${i}.inputKeys`, operation.inputKeys ?? [], { shouldDirty: true });
+          setValue(`operations.${i}.bomLineKeys`, operation.bomLineKeys ?? [], {
+            shouldDirty: true,
+          });
+        }
         if (o === ops[i]) return;
         if (o.seamKeys !== ops[i].seamKeys)
           setValue(`operations.${i}.seamKeys`, o.seamKeys ?? [], { shouldDirty: true });
