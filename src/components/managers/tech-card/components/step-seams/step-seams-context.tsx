@@ -36,7 +36,12 @@ import {
   writeRefusal,
 } from '../assembly-seams/seams-store';
 import { useSeamWrites, type SeamWrites } from '../assembly-seams/use-seam-decisions';
-import { linkBindingStripToSeam, removeBindingStripsForSeam } from '../binding-step';
+import {
+  isCardBindingStrip,
+  linkBindingStripToSeam,
+  removeBindingStripsForSeam,
+  type BindingOperation,
+} from '../binding-step';
 import type { CutStrip } from '../cut-strip-editor/use-cut-strip';
 import { useStoredSeamLengthsMm, useTopstitchLengthsMm } from '../cut-strips/seam-lengths';
 import { syncCutStripSeamMm } from '../cut-strips/seam-mm-sync';
@@ -199,6 +204,7 @@ function CutStripSeamMmSync({ disabled }: { disabled: boolean }) {
   const { control, setValue } = useFormContext<TechCardFormData>();
   const strips = (useWatch({ control, name: 'cutStrips' }) ?? []) as CutStrip[];
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
+  const operations = (useWatch({ control, name: 'operations' }) ?? []) as BindingOperation[];
   const server = useSeamsStore((state) => state.server);
   const pending = useSeamsStore((state) => state.pending);
   const rows = useMemo(() => rowsOf({ server, pending }), [server, pending]);
@@ -206,10 +212,12 @@ function CutStripSeamMmSync({ disabled }: { disabled: boolean }) {
 
   useEffect(() => {
     if (disabled) return;
-    const synced = syncCutStripSeamMm(strips, sizeIds, seamLengthsMm);
+    const synced = syncCutStripSeamMm(strips, sizeIds, seamLengthsMm, (strip) =>
+      isCardBindingStrip(strip, operations),
+    );
     if (!synced.changed) return;
     setValue('cutStrips', synced.strips as never, { shouldDirty: synced.seamChanged });
-  }, [disabled, seamLengthsMm, setValue, sizeIds, strips]);
+  }, [disabled, operations, seamLengthsMm, setValue, sizeIds, strips]);
 
   return null;
 }
