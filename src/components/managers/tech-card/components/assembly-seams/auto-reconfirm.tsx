@@ -6,9 +6,10 @@
 // other apply only waits out a rebuild in flight (it moves the fused pieces' source again). Then it
 // reads the card, segments its DXF the way the step seams were anchored (useAssemblyGeometry), lets
 // `autoReconfirmable` pick the rows and stores them in ONE seam write: `useSeamWrites().upsert`, the
-// path the review's re-confirm took. UpsertTechCardSeams locks the card row and leaves its
-// lock_version as it was, so the next card save meets no version conflict. Any failure (rebuild,
-// read, geometry, write, timeout) ends quietly: the rows stay stale for the review, as before.
+// path the review's re-confirm took. It is a ChangeTechCardSeams under the version the open form
+// stands on (C7): the write moves lock_version and the form adopts it, so the next card save meets
+// no version conflict. Any failure (rebuild, read, geometry, write, timeout) ends quietly: the rows
+// stay stale for the review, as before.
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
