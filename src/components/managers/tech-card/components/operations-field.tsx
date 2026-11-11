@@ -295,6 +295,7 @@ import { type SchematicMode, useSchematicPrefs } from './use-schematic-prefs';
 import { stripKeysOf, stripKeysOfCard } from './cut-strips/strip-pieces';
 import { StripTileFace } from './cut-strips/strip-tile';
 import { cutStripNorm } from './cut-strips/norm';
+import { stepBindingNorm } from './cut-strips/step-norm';
 import type { CutStrip } from './cut-strip-editor/use-cut-strip';
 import {
   bindingBomLines,
@@ -2629,7 +2630,7 @@ function OperationBindingPicker({
   const strips = (useWatch({ control, name: 'cutStrips' }) ?? []) as CutStrip[];
   const pieces = useWatch({ control, name: 'pieces' }) ?? [];
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
-  const ctx = useStepSeams();
+  const baseSizeId = Number(useWatch({ control, name: 'baseSampleSizeId' }) ?? 0);
   const teardownBinding = useBindingStripTeardown();
   const blockedPurposeLineKeys = useMemo(() => {
     const keys = new Set(articles?.bindingBlockedLineKeys ?? []);
@@ -2692,16 +2693,23 @@ function OperationBindingPicker({
           const own = bindingStripsOfStep(operation, strips, key);
           const selected = own.length > 0;
           const edges = own.filter((strip) => !!strip.seamKey?.trim()).length;
-          const norm = cutStripNorm(
-            ctx?.techCard?.cutStripNorms,
-            key,
-            ctx?.techCard?.techCard?.baseSampleSizeId,
-          );
-          const amount = parseDecimalNumber(norm);
-          const sub = selected
-            ? `${edges} ${edges === 1 ? 'edge' : 'edges'} · ${!edges ? '—' : Number.isFinite(amount) ? `${amount.toFixed(2)} m` : 'no pattern'}`
-            : bindingLineSub(line);
           const material = articles?.materialById.get(wireIntOf(line.materialId));
+          const norm = stepBindingNorm({ operation, strips, line, baseSizeId, material });
+          const normText =
+            norm.kind === 'metres'
+              ? `${norm.m.toFixed(2)} m`
+              : norm.kind === 'no_width'
+                ? 'no width'
+                : 'no pattern';
+          const subText = selected
+            ? `${edges} ${edges === 1 ? 'edge' : 'edges'} · ${edges ? normText : '—'}`
+            : bindingLineSub(line);
+          const sub =
+            selected && edges > 0 && norm.kind === 'no_width' ? (
+              <span className='text-error'>{subText}</span>
+            ) : (
+              subText
+            );
           return (
             <Tile
               key={key}
