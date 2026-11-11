@@ -167,7 +167,9 @@ export function useFoldWrites(cardId: number | undefined, frozen: boolean): Fold
           }),
         rows.length > 1 ? `folds (${rows.length})` : 'fold',
       );
-      if (replaced) dropFromSteps(keys);
+      // A key that is both dropped and written stays live, so its step keeps it.
+      const kept = new Set(rows.map((row) => row.foldKey));
+      if (replaced) dropFromSteps(keys.filter((key) => !kept.has(key)));
       return replaced;
     },
     [cardId, dropFromSteps, run],
