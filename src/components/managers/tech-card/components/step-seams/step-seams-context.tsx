@@ -144,13 +144,16 @@ export function useAttachStepSeam(index: number) {
   );
 }
 
-/** Remove one of this step's stored seams through the shared seam writer. */
-export function useStepSeamActions(index: number) {
+/**
+ * Remove one of a step's stored seams through the shared seam writer, the step chosen per call so
+ * a list of steps (the ratify panel) can use one remover.
+ */
+export function useStepSeamRemover() {
   const ctx = useStepSeams();
   const { getValues, setValue } = useFormContext<TechCardFormData>();
 
-  const remove = useCallback(
-    async (seamKey: string, row: StoredSeam | undefined): Promise<boolean> => {
+  return useCallback(
+    async (index: number, seamKey: string, row: StoredSeam | undefined): Promise<boolean> => {
       if (!ctx || ctx.frozen) return false;
       const operations = getValues('operations') ?? [];
       const removal = planStepSeamRemoval(operations, index, seamKey);
@@ -177,9 +180,17 @@ export function useStepSeamActions(index: number) {
       }
       return true;
     },
-    [ctx, getValues, index, setValue],
+    [ctx, getValues, setValue],
   );
+}
 
+/** Remove one of this step's stored seams through the shared seam writer. */
+export function useStepSeamActions(index: number) {
+  const removeAt = useStepSeamRemover();
+  const remove = useCallback(
+    (seamKey: string, row: StoredSeam | undefined) => removeAt(index, seamKey, row),
+    [index, removeAt],
+  );
   return { remove };
 }
 
