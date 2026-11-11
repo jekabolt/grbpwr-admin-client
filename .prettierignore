@@ -1,0 +1,2 @@
+# wasm-bindgen output, rebuilt by scripts/build-sparrow-wasm.sh
+src/lib/nesting/sparrow/pkg/

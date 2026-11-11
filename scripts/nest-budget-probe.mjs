@@ -31,6 +31,8 @@ await build({
   format: 'esm',
   target: 'node20',
   outfile,
+  // sparrow (src/lib/nesting/sparrow/runtime.ts): the wasm bytes are inlined and run in-process.
+  loader: { '.wasm': 'binary' },
   logLevel: 'warning',
 });
 const mod = await import(pathToFileURL(outfile).href);

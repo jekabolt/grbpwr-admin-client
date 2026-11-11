@@ -57,6 +57,8 @@ const legacyDirectivePlugin = {
 };
 
 export default [
+  // wasm-bindgen output, rebuilt by scripts/build-sparrow-wasm.sh — never hand-edited
+  { ignores: ['src/lib/nesting/sparrow/pkg/**'] },
   {
     files: ['src/**/*.{js,ts,tsx,json}'],
     linterOptions: { reportUnusedDisableDirectives: false },

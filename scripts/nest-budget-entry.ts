@@ -18,7 +18,9 @@ import { NEST_DEFAULTS } from '../src/lib/nesting/types';
 import { parseSheets, type SheetBytes } from '../src/lib/nesting/worker/parse-files';
 import { orientToGrain } from '../src/lib/nesting/geom/grain-orient';
 import { applySeamAllowance } from '../src/lib/nesting/geom/seam-allowance';
-import { nest } from '../src/lib/nesting/nest';
+// The forecast models the PREVIOUS engine's NFP prepass (sparrow has none, its telemetry is
+// zero); since nest-sparrow that engine is the fallback, so this probe checks it directly.
+import { nestLegacy as nest } from '../src/lib/nesting/nest';
 import { estimateJob, estimateRun, type RunEstimate } from '../src/lib/nesting/nest/estimate';
 
 export type Forecast = Omit<RunEstimate, 'decompositions'>;
