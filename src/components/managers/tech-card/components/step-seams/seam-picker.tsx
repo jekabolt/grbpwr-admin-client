@@ -33,7 +33,13 @@ import { runsOfSide } from '../assembly-seams/seam-actions';
 import { useSeamsStore } from '../assembly-seams/seams-store';
 import { useFoldRows } from '../assembly-folds/folds-store';
 import { useTechCardAutosave } from '../design/autosave-contract';
-import { bindingRowFromCloth, bindingStripTarget } from '../binding-step';
+import {
+  bindingRowFromCloth,
+  bindingStripsOfStep,
+  bindingStripTarget,
+  isBindingOperation,
+  type BindingOperation,
+} from '../binding-step';
 import type { CutStrip } from '../cut-strip-editor/use-cut-strip';
 import { fittedSideMm } from '../cut-strips/length-check';
 import { stripKeysOf, stripName, type BomLineLike } from '../cut-strips/strip-pieces';
@@ -255,15 +261,25 @@ export function SeamPickerBody({
     [op, cutStrips, sizeIds],
   );
   const bindingStripKeys = useMemo(() => stripKeysOf(cutStrips), [cutStrips]);
+  const cardOps = (useWatch({ control: form.control, name: 'operations' }) ??
+    []) as BindingOperation[];
+  // Only strips some binding step sews: a seam on another strip binds nothing.
+  const boundStripKeys = useMemo(
+    () =>
+      stripKeysOf(
+        cardOps.filter(isBindingOperation).flatMap((o) => bindingStripsOfStep(o, cutStrips)),
+      ),
+    [cardOps, cutStrips],
+  );
   const seamRows = useSeamRows();
   const cardBindings = useMemo(
     () =>
       bindingTarget
-        ? bindingRowsOf(seamRows.values(), bindingStripKeys).map((row) => ({
+        ? bindingRowsOf(seamRows.values(), boundStripKeys).map((row) => ({
             parts: storedSeamSides(row, geoms).parts,
           }))
         : [],
-    [bindingTarget, seamRows, bindingStripKeys, geoms],
+    [bindingTarget, seamRows, boundStripKeys, geoms],
   );
   // An edge is bound once on the card: any step's binding row holding that stretch refuses it.
   const boundOnCard = useCallback(
@@ -743,6 +759,7 @@ export function SeamPickerBody({
       labelSpanAt,
       breaksOf,
       clickSide,
+      boundOnCard,
     ],
   );
   const onHoverAt = useCallback(
@@ -839,6 +856,7 @@ export function SeamPickerBody({
       onFolded,
       breaksOf,
       clickSide,
+      boundOnCard,
     ],
   );
 
@@ -1060,6 +1078,7 @@ export function SeamPickerBody({
     refused ||
     stored.map((s) => (errors[s.key] ? 'refused' : '')).find(Boolean) ||
     (repeatsSeam ? 'already sewn' : '') ||
+    (sidesShare ? 'cannot pair' : '') ||
     (repeatsBinding ? 'already bound' : '') ||
     (repeatsTopstitch ? 'already picked' : '') ||
     (topstitchMode && !topstitchBomLineKey ? 'thread missing' : '');
