@@ -32,6 +32,7 @@ import {
   readWire,
   reuseKeys,
   rowsOf,
+  takesList,
   useSeamsStore,
   type PendingOp,
   type PosePendingOp,
@@ -90,8 +91,15 @@ const FRESH_MS = 10_000;
 const refreshSeams = seamRefresher(async (cardId) => {
   const res = await adminService.GetTechCard({ id: cardId, vatCountryCode: undefined });
   if (useSeamsStore.getState().cardId !== cardId) return;
-  hydrateSeams(cardId, (res.techCard?.seams ?? []) as TechCardSeamWire[]);
-  useSeamsStore.setState({ serverAt: Date.now() });
+  // An older read than the list in the store (a write landed meanwhile) changes nothing.
+  if (
+    hydrateSeams(
+      cardId,
+      (res.techCard?.seams ?? []) as TechCardSeamWire[],
+      res.techCard?.lockVersion,
+    )
+  )
+    useSeamsStore.setState({ serverAt: Date.now() });
 });
 
 export type SeamWrites = {
@@ -116,6 +124,7 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
       echo: readonly TechCardSeamWire[] | undefined,
       error?: string,
       errorAt?: string,
+      version?: number,
     ) => {
       const s = useSeamsStore.getState();
       // The card may have changed while the call flew: then its echo belongs to nobody here.
@@ -130,11 +139,23 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
         else delete errors[k];
       }
       const read = echo ? readWire(echo) : null;
+      // An echo older than the list in the store (a later write answered first) lifts its own
+      // pending and nothing else (C7, invariant 3).
+      const take = read && takesList(s, version, read.rows, read.poses);
       useSeamsStore.setState({
         pending,
         posePending,
         errors,
-        ...(read ? { server: read.rows, poses: read.poses, serverAt: Date.now() } : {}),
+        ...(read && take
+          ? {
+              server: read.rows,
+              poses: read.poses,
+              serverAt: Date.now(),
+              ...(version !== undefined
+                ? { serverVersion: Math.max(version, s.serverVersion) }
+                : {}),
+            }
+          : {}),
       });
       if (cardId) qc.invalidateQueries({ queryKey: techCardKeys.detail(cardId) });
     },

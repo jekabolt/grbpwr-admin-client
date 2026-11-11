@@ -84,8 +84,8 @@ export function SeamsReconfirmRunner({
         if (!read || read.techCard?.approvalState === RELEASED || staleSeams(wire).length === 0)
           return finish(0);
         // The store takes the read's stale stamps; the write then needs no read of its own.
-        hydrateSeams(cardId, wire);
-        useSeamsStore.setState({ serverAt: Date.now() });
+        if (hydrateSeams(cardId, wire, read.lockVersion))
+          useSeamsStore.setState({ serverAt: Date.now() });
         setCard(read);
       })
       .catch(() => {
