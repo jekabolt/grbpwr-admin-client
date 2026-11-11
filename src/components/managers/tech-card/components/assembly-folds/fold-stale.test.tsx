@@ -75,7 +75,6 @@ describe('a stale fold in the picker', () => {
       groups,
       hints: openHints([hint], groups),
       rows,
-      maxSeq: 1,
     };
     const html = renderToStaticMarkup(
       <FoldPicker

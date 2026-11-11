@@ -1,7 +1,8 @@
 // The OPERATION column's fold lines: one per fold or pleat a step closes, in the piece's own upright
 // view, whatever way the step picture lays the piece. Never a key: only the printed piece name.
 
-import { foldedOutline, type StoredFold } from 'lib/folds';
+import type { Pt2 } from 'lib/assembly-skeleton/types';
+import { foldedOutline, resolveFolds, type StoredFold } from 'lib/folds';
 import { foldGroupsOf, type FoldGroup } from '../components/assembly-folds/fold-model';
 import { assemblyPieceCode } from './assembly-piece-code';
 import { own, type PdfT } from './i18n';
@@ -38,5 +39,42 @@ export function foldLinesOf(
       .groups.filter((group) => group.rows.some((row) => linked.has(row.foldKey)))
       .sort((a, b) => a.rows[0].seq - b.rows[0].seq)
       .map((group) => lineOf(group, piece, name, t));
+  });
+}
+
+export type UnresolvedStepFold = { foldKey: string; piece: string; seq: number };
+
+/**
+ * The folds a step names that this size cannot lay (the piece is not in this size's pattern, the
+ * row went stale, or its line no longer fits). Each one stays flat in the picture and prints no
+ * line, so it goes to the card's gaps instead of vanishing. The piece is its printed code, or the
+ * card's name for a piece this pattern does not hold (`nameOf`); never a key.
+ */
+export function unresolvedFoldsOf(
+  foldKeys: readonly string[] | undefined,
+  rows: readonly StoredFold[],
+  pieces: ReadonlyMap<string, AsmPiece>,
+  grainDeg: ReadonlyMap<string, number>,
+  nameOf: (pieceKey: string) => string = () => '',
+): UnresolvedStepFold[] {
+  const linked = new Set(foldKeys ?? []);
+  const linkedRows = rows.filter((row) => linked.has(row.foldKey));
+  if (!linkedRows.length) return [];
+  const byKey = new Map([...pieces].map(([key, piece]) => [key.toUpperCase(), piece]));
+  const innerLines = new Map(
+    [...pieces].map(([key, piece]) => [
+      piece.geom.pieceKey ?? key,
+      piece.inner.map((line) => line.map(([x, y]): Pt2 => [x, -y])),
+    ]),
+  );
+  const { unresolved } = resolveFolds(
+    linkedRows,
+    [...pieces.values()].map((piece) => piece.geom),
+    { grainDeg, innerLines },
+  );
+  return unresolved.map((row) => {
+    const piece = byKey.get(row.pieceKey.toUpperCase());
+    const code = piece ? assemblyPieceCode(piece.code, piece.name) : '';
+    return { foldKey: row.foldKey, piece: code || nameOf(row.pieceKey), seq: row.seq };
   });
 }

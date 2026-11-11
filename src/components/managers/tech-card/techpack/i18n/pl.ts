@@ -431,6 +431,7 @@ export const pl = {
     pin: 'znacznik',
     placement: 'umiejscowienie',
     hemEdge: 'nieznana krawędź podwinięcia',
+    fold: 'złożenie',
     tooFewPatternMarks: 'za mało oznaczeń szablonu',
     marksOutsideOperationZone: 'oznaczenia poza strefą operacji',
     operation: 'operacja',

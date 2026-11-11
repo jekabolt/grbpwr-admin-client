@@ -5,10 +5,12 @@
 import type { common_TechCard } from 'api/proto-http/admin';
 import type { TechCardPieceFoldWire } from 'lib/folds';
 import { useEffect } from 'react';
+import { useFoldLinksKeep } from './fold-links-keep';
 import { resetFolds, useHydrateFolds } from './folds-store';
 
 export function FoldsHydrate({ techCard }: { techCard: common_TechCard | undefined }) {
   useHydrateFolds(techCard?.id, techCard?.pieceFolds as TechCardPieceFoldWire[] | undefined);
+  useFoldLinksKeep(techCard);
   useEffect(() => () => resetFolds(), []);
   return null;
 }

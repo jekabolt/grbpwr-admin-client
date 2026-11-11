@@ -386,6 +386,7 @@ export const ja = {
     pin: 'ピン',
     placement: '付け位置',
     hemEdge: '裾の縁が不明',
+    fold: '折り',
     tooFewPatternMarks: '型紙マーク不足',
     marksOutsideOperationZone: '工程範囲外のマーク',
     operation: '工程',

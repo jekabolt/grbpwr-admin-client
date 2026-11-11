@@ -2,6 +2,10 @@
 // strip no step sews is a strip nobody will find; a seam that moved since the strip's length was read
 // from it is a length nobody should trust.
 import type { common_TechCard } from 'api/proto-http/admin';
+import {
+  goneSeamKeys,
+  withSeamGone,
+} from 'components/managers/tech-card/components/cut-strips/lengths';
 import { seamLengthOnGeoms } from 'components/managers/tech-card/components/cut-strips/seam-side-length';
 import {
   cutStripsOfCard,
@@ -76,6 +80,7 @@ export function deriveCutStrips(
   const bomLines = ins?.bomItems ?? [];
   const operations = ins?.operations ?? [];
   const seamRows = raw.length ? splitWire(techCard.seams ?? []).seams : [];
+  const gone = goneSeamKeys(raw.length ? techCard.seams : []);
   const stripKeys = stripKeysOf(raw);
   const geoms = new Map<string, PieceGeom>(
     [...(o.pieces ?? [])].map(([key, piece]) => [key, piece.geom]),
@@ -115,7 +120,15 @@ export function deriveCutStrips(
     const row = strip.seamKey
       ? seamRows.find((candidate) => candidate.seamKey === strip.seamKey)
       : undefined;
-    if (stored !== undefined && row) {
+    if (strip.seamKey && gone.has(strip.seamKey.trim()))
+      add({
+        code: 'cut_strip_seam_stale',
+        refs,
+        label: t('cutStrips.staleSeam'),
+        section: '06',
+        target: { tab: 'materials', bomLine, field: 'cutStrips' },
+      });
+    else if (stored !== undefined && row) {
       const today = seamLengthOnGeoms(row, stripKeys, geoms, o.grainDeg);
       if (today !== undefined && lengthsDiffer(today, stored, DEFAULT_SEAM_TOLERANCE_MM))
         add({
@@ -128,6 +141,7 @@ export function deriveCutStrips(
     }
 
     const oneLength = strip.lengthMode === 'one_length';
+    const measured = withSeamGone(strip, gone);
     return [
       {
         key,
@@ -136,8 +150,10 @@ export function deriveCutStrips(
         qty: strip.qty || 1,
         widthMm: widthOf(strip),
         oneLength,
-        cuts: oneLength ? [stripCutMm(strip, 0)] : sizes.map((size) => stripCutMm(strip, size.id)),
-        baseCutMm: stripCutMm(strip, baseId),
+        cuts: oneLength
+          ? [stripCutMm(measured, 0)]
+          : sizes.map((size) => stripCutMm(measured, size.id)),
+        baseCutMm: stripCutMm(measured, baseId),
         steps,
       },
     ];

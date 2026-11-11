@@ -151,7 +151,7 @@ export function nextBindingStrip(base: CutStrip, sizeIds: readonly number[]): Cu
     placement: '__binding__',
     lengthMode: 'from_seam',
     seamKey: '',
-    fitPct: '100',
+    fitPct: base.fitPct?.trim() || '100',
     overlapMm: base.overlapMm?.trim() || '30',
     widthMm: base.widthMm ?? '',
     qty: 1,
@@ -262,7 +262,12 @@ export function removeBindingStripsForSeam(
   operation: BindingOperation | undefined,
   strips: readonly CutStrip[],
   seamKey: string,
-): { strips: CutStrip[]; inputKeys: string[]; removedLineKeys: string[] } | null {
+): {
+  strips: CutStrip[];
+  inputKeys: string[];
+  bomLineKeys: string[];
+  removedLineKeys: string[];
+} | null {
   if (!isBindingOperation(operation)) return null;
   const inputs = new Set(operation?.inputKeys ?? []);
   const removed = strips.filter(
@@ -274,11 +279,35 @@ export function removeBindingStripsForSeam(
   if (!removed.length) return null;
   const removedLineKeys = removed.map((strip) => strip.lineKey?.trim() ?? '').filter(Boolean);
   const gone = new Set(removedLineKeys);
+  const kept = strips.filter((strip) => !gone.has(strip.lineKey?.trim() ?? ''));
+  const inputKeys = (operation?.inputKeys ?? []).filter((key) => !gone.has(key));
   return {
-    strips: strips.filter((strip) => !gone.has(strip.lineKey?.trim() ?? '')),
-    inputKeys: (operation?.inputKeys ?? []).filter((key) => !gone.has(key)),
+    strips: kept,
+    inputKeys,
+    bomLineKeys: withoutBareBindingLines(operation, removed, kept, inputKeys),
     removedLineKeys,
   };
+}
+
+/**
+ * The step's link to a binding line is its strips: when the last own strip of a line goes, the
+ * line leaves `bomLineKeys` too, exactly as the tile unpick does. Otherwise the PDF keeps listing a
+ * binding under a step that binds nothing with it.
+ */
+function withoutBareBindingLines(
+  operation: BindingOperation | undefined,
+  removed: readonly CutStrip[],
+  kept: readonly CutStrip[],
+  inputKeys: readonly string[],
+): string[] {
+  const after = { ...operation, inputKeys };
+  const still = new Set(
+    bindingStripsOfStep(after, kept).map((strip) => strip.bomLineKey?.trim() ?? ''),
+  );
+  const bare = new Set(
+    removed.map((strip) => strip.bomLineKey?.trim() ?? '').filter((key) => key && !still.has(key)),
+  );
+  return (operation?.bomLineKeys ?? []).filter((key) => !bare.has(key.trim()));
 }
 
 export type BindingStripTeardownPatch = {
@@ -351,4 +380,58 @@ export function teardownBindingStrips(
     operations: patches,
     seamRowsToRemove,
   };
+}
+
+type TeardownCard = Parameters<typeof teardownBindingStrips>[0];
+type TeardownScope = Parameters<typeof teardownBindingStrips>[1];
+
+/**
+ * The links a deleted step keeps for its undo: the row as it stands AFTER its binding teardown. The
+ * strips and seams the teardown deletes do not come back, so naming them would make every undo of a
+ * B1 step refuse with «piece deleted».
+ */
+export function bindingUndoLinks(
+  card: TeardownCard,
+  index: number,
+): { inputKeys: string[]; seamKeys: string[]; bomLineKeys: string[] } {
+  const operation = card.operations?.[index];
+  const plan = teardownBindingStrips(card, { stepIndexes: [index] });
+  const patch = plan.operations.find((entry) => entry.index === index);
+  const inputKeys = patch?.inputKeys ?? [...(operation?.inputKeys ?? [])];
+  const removed = (card.cutStrips ?? []).filter(
+    (strip) => !plan.strips.includes(strip) && (operation?.inputKeys ?? []).includes(strip.lineKey?.trim() ?? ''),
+  );
+  return {
+    inputKeys,
+    seamKeys: patch?.seamKeys ?? [...(operation?.seamKeys ?? [])],
+    bomLineKeys: withoutBareBindingLines(operation, removed, plan.strips, inputKeys),
+  };
+}
+
+export type BindingTeardownIo = {
+  read: () => Pick<TeardownCard, 'cutStrips' | 'operations'>;
+  seamRows: readonly StoredSeam[];
+  /** False while the seam store still holds another card: its rows must not authorize a delete. */
+  seamReady: boolean;
+  removeRows: (rows: StoredSeam[]) => Promise<boolean>;
+  write: (plan: BindingStripTeardown) => void;
+};
+
+/**
+ * Delete the stored seam rows first, then write a plan read AFTER that await: a strip edit that
+ * lands while the RPC is in flight (the mm sync, the open editor) must survive the teardown.
+ */
+export async function runBindingTeardown(
+  io: BindingTeardownIo,
+  scope: TeardownScope,
+): Promise<boolean> {
+  const before = io.read();
+  const plan = teardownBindingStrips({ ...before, seamRows: io.seamRows }, scope);
+  if (!plan.operations.length && plan.strips.length === (before.cutStrips ?? []).length) return true;
+  if (!io.seamReady) return false;
+  const removeKeys = new Set(plan.seamRowsToRemove);
+  const rows = io.seamRows.filter((row) => removeKeys.has(row.seamKey));
+  if (rows.length && !(await io.removeRows(rows))) return false;
+  io.write(teardownBindingStrips({ ...io.read(), seamRows: io.seamRows }, scope));
+  return true;
 }

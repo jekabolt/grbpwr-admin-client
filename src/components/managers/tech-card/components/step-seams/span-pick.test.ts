@@ -18,6 +18,8 @@ import {
   repeatsStoredSeam,
   segmentAt,
   sideParts,
+  surfacePartSide,
+  surfacePick,
   snapToBreak,
   storedSeamAt,
   storedSeamOverlapping,
@@ -423,5 +425,45 @@ describe('a gap a fold cut fills on its own', () => {
     let pick = pickSegment(empty, 'a', id, first, length, rules, plain);
     pick = pickSegment(pick, 'a', id, third, length, rules, plain);
     expect(pick.spans.a[id]).toHaveLength(2);
+  });
+});
+
+describe('a surface takes one piece by whole edges (C2, Р5)', () => {
+  const isInner = (id: string) => id.includes(':i');
+  const pieceOf = (id: string) => id.split(/[#:]/)[0];
+
+  it('the part side is opposite the one inner line', () => {
+    expect(surfacePartSide({ a: ['FR:i0'], b: ['PCK#0'] }, isInner)).toBe('b');
+    expect(surfacePartSide({ a: ['PCK#0'], b: ['FR:i0'] }, isInner)).toBe('a');
+    expect(surfacePartSide({ a: ['FR#1'], b: ['BK#1'] }, isInner)).toBeNull();
+    expect(surfacePartSide({ a: ['FR:i0'], b: ['BK:i0'] }, isInner)).toBeNull();
+  });
+
+  it('drops the stretch on the part side and keeps the line whole', () => {
+    const sel = {
+      a: ['FR:i0'],
+      b: ['PCK#0'],
+      spans: { a: {}, b: { 'PCK#0': [[10, 40]] as const } },
+    };
+    expect(surfacePick(sel, isInner, pieceOf)).toEqual({
+      a: ['FR:i0'],
+      b: ['PCK#0'],
+      spans: { a: {}, b: {} },
+    });
+  });
+
+  it('a click on a second piece takes that piece instead', () => {
+    const sel = { a: ['FR:i0'], b: ['PCK#0', 'PCK#1', 'FLP#2'], spans: NO_SPANS };
+    expect(surfacePick(sel, isInner, pieceOf, 'FLP#2').b).toEqual(['FLP#2']);
+    expect(surfacePick(sel, isInner, pieceOf).b).toEqual(['PCK#0', 'PCK#1']);
+  });
+
+  it('an edge pair is left as it is', () => {
+    const sel = {
+      a: ['FR#1'],
+      b: ['BK#1', 'SLV#0'],
+      spans: { a: { 'FR#1': [[0, 5]] as const }, b: {} },
+    };
+    expect(surfacePick(sel, isInner, pieceOf)).toBe(sel);
   });
 });

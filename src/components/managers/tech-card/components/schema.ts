@@ -105,6 +105,7 @@ import {
   topstitchModeRefusesWidth,
 } from './operation-options';
 import { isMachineStepType, isWeldMachineType } from './equipment-options';
+import { isTopstitchStep } from './operation-kinds';
 import { wireInt } from './wire-int';
 import { CUT_STRIP_MODES } from './cut-strips/lengths';
 import { isOwnAux, AUX_MADE_BY_UNKNOWN } from './aux-card';
@@ -4104,6 +4105,7 @@ export function mapFormToTechCardInsert(
       const o = sourceOperations[sourceIndex];
       // Only lines this payload carries: a dangling key fails the whole save (B-01, liveBomKey).
       const opBomKeys = (o.bomLineKeys ?? []).map((k) => liveBomKey(k)).filter(Boolean);
+      const cardSizeIds = new Set((data.sizeIds ?? []).map(Number));
       // An override goes out ONLY when it is set. An empty control means «inherit the card
       // standard», and sending 0 for it would state the opposite — 0 is the real setting «cut on
       // the line as drawn». That distinction is the entire point of the cascade, so it is preserved
@@ -4345,8 +4347,10 @@ export function mapFormToTechCardInsert(
                 rows: o.topstitchRows || 0,
               }
             : undefined,
+        // Lines live only on a topstitch step: a kind changed by a path with no teardown must not
+        // keep pricing thread from lines nobody can see. Sizes outside the card range are refused.
         topstitchLines: (o.topstitchLines ?? [])
-          .filter((line) => opBomKeys.includes(line.bomLineKey?.trim() || ''))
+          .filter((line) => isTopstitchStep(o) && opBomKeys.includes(line.bomLineKey?.trim() || ''))
           .map(
             (line): common_TechCardTopstitchLine => ({
               lineKey: line.lineKey?.trim() || '',
@@ -4357,10 +4361,12 @@ export function mapFormToTechCardInsert(
               }),
               anchoredSize: line.anchoredSize?.trim() || '',
               rows: line.rows || 1,
-              sizes: (line.sizes ?? []).map((size) => ({
-                sizeId: wireInt(size.sizeId),
-                lineMm: inputToDecimal(size.lineMm),
-              })),
+              sizes: (line.sizes ?? [])
+                .filter((size) => cardSizeIds.has(Number(size.sizeId)))
+                .map((size) => ({
+                  sizeId: wireInt(size.sizeId),
+                  lineMm: inputToDecimal(size.lineMm),
+                })),
               measured: !!line.measured,
               stale: undefined,
             }),

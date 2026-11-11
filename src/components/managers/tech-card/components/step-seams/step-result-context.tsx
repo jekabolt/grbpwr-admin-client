@@ -8,7 +8,7 @@ import { foldRowsOf, useFoldRowsSig, useFoldsStore } from '../assembly-folds/fol
 import type { TechCardFormData } from '../schema';
 import { useCardGeoms, useCardPieceKeys, usePoseRows, useSeamRows } from './step-picture-view';
 import { OWNER_FIT, stepResults, type StepResult, type StepResultsInput } from './step-result';
-import type { FormOpLike } from './step-seams-model';
+import { sewsNothing, type FormOpLike } from './step-seams-model';
 
 const StepResultsContext = createContext<readonly StepResult[] | null>(null);
 
@@ -22,6 +22,7 @@ const operationsSignature = (ops: readonly FormOpLike[]) =>
       poseKeys: op.poseKeys,
       operationNumber: op.operationNumber,
       assemblyBlockDetached: op.assemblyBlockDetached,
+      sewsNothing: sewsNothing(op),
       ...(op.foldKeys?.length ? { foldKeys: op.foldKeys } : {}),
       ...(op.layerOrder?.length ? { layerOrder: op.layerOrder } : {}),
     })),

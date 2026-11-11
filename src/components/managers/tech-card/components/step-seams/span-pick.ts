@@ -24,6 +24,58 @@ export type SideSpans = Readonly<Record<string, readonly SpanRange[]>>;
 export const NO_SPANS: SidePick['spans'] = { a: {}, b: {} };
 
 const SAME_MM = 0.1;
+
+const spansSig = (spans: SideSpans) =>
+  Object.entries(spans)
+    .filter(([, ranges]) => ranges.length)
+    .map(([id, ranges]) => `${id}:${ranges.map((r) => r.join('-')).join(',')}`)
+    .sort()
+    .join('|');
+
+/** The same edges on the same sides, with the same stretches of them. */
+export function samePick(x: SidePick, y: SidePick): boolean {
+  const sameIds = (p: readonly string[], q: readonly string[]) =>
+    p.length === q.length && p.every((id) => q.includes(id));
+  return (
+    sameIds(x.a, y.a) &&
+    sameIds(x.b, y.b) &&
+    spansSig(x.spans.a) === spansSig(y.spans.a) &&
+    spansSig(x.spans.b) === spansSig(y.spans.b)
+  );
+}
+/**
+ * The side a surface seam's part sits on: the side opposite the one inner line in hand, or null
+ * when the pick is not a surface (no inner line, or one on each side).
+ */
+export function surfacePartSide(
+  sel: Pick<SidePick, 'a' | 'b'>,
+  isInner: (id: string) => boolean,
+): SpanSide | null {
+  const a = sel.a.some(isInner);
+  const b = sel.b.some(isInner);
+  return a === b ? null : a ? 'b' : 'a';
+}
+
+/**
+ * A surface seam lays one piece on a line, by whole edges (owner, Р5, 11.11): the part side drops its
+ * stretches and keeps the edges of one piece — the one just clicked, else the first one in hand.
+ */
+export function surfacePick<T extends SidePick>(
+  sel: T,
+  isInner: (id: string) => boolean,
+  pieceOf: (id: string) => string,
+  clicked?: string,
+): T {
+  const side = surfacePartSide(sel, isInner);
+  if (!side) return sel;
+  const edges = sel[side].filter((id) => !isInner(id));
+  const lead = clicked && edges.includes(clicked) ? clicked : edges[0];
+  const piece = lead ? pieceOf(lead) : null;
+  const kept = sel[side].filter((id) => isInner(id) || pieceOf(id) === piece);
+  if (kept.length === sel[side].length && !Object.keys(sel.spans[side]).length) return sel;
+  return { ...sel, [side]: kept, spans: { ...sel.spans, [side]: {} } };
+}
+
 const TOUCH_MM = 0.5;
 const SNAP_MM = 4;
 const MIN_SPAN_MM = 1;
@@ -343,7 +395,18 @@ export function storedSeamOverlapping(
   );
 }
 
-const overlaps = (
+/** Whether two lists of parts name one edge at all, any stretch of it (a chain counts by its members). */
+export const sidePartsShareEdge = (
+  x: readonly SidePart[],
+  y: readonly SidePart[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+) => {
+  const xs = new Set(pieces(x, geoms).map((part) => part.edge));
+  return pieces(y, geoms).some((part) => xs.has(part.edge));
+};
+
+/** Whether two lists of parts share a stretch of any edge (a chain counts by its members). */
+export const sidePartsOverlap = (
   x: readonly SidePart[],
   y: readonly SidePart[],
   geoms: ReadonlyMap<string, PieceGeom>,
@@ -367,8 +430,8 @@ export function repeatsStoredSeam(
 ): boolean {
   return stored.some(
     ({ parts }) =>
-      (overlaps(a, parts.a, geoms) && overlaps(b, parts.b, geoms)) ||
-      (overlaps(a, parts.b, geoms) && overlaps(b, parts.a, geoms)),
+      (sidePartsOverlap(a, parts.a, geoms) && sidePartsOverlap(b, parts.b, geoms)) ||
+      (sidePartsOverlap(a, parts.b, geoms) && sidePartsOverlap(b, parts.a, geoms)),
   );
 }
 

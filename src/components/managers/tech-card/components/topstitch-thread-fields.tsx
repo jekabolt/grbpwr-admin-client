@@ -18,24 +18,42 @@ const boundLines = (operations: readonly TopstitchOperation[], bomLineKey: strin
     .flatMap((operation) => operation.topstitchLines ?? [])
     .filter((line) => line.bomLineKey === bomLineKey);
 
-/** New line-driven thread rows start with the workshop factor; a deliberate clear stays empty. */
+const lineKeysOf = (operations: readonly TopstitchOperation[], bomLineKey: string) =>
+  new Set(boundLines(operations, bomLineKey).map((line) => line.lineKey));
+
+/**
+ * BOM rows that take the workshop factor now: the thread's first line was just picked (no line on it
+ * in the loaded or last-saved card) and the factor was never touched. A stored NULL reads back as
+ * `undefined`, so «absent» alone cannot tell a fresh thread from a deliberate clear: only a line the
+ * baseline does not have can. Opening a card therefore never writes 2.5.
+ */
+export function threadPerMmToPrefill(
+  bomItems: readonly TopstitchBomLine[],
+  operations: readonly TopstitchOperation[],
+  baseline: readonly TopstitchOperation[],
+): number[] {
+  return bomItems.flatMap((line, index) => {
+    const key = line.lineKey?.trim() ?? '';
+    if (!key || line.threadPerMm !== undefined) return [];
+    if (lineKeysOf(baseline, key).size) return [];
+    return lineKeysOf(operations, key).size ? [index] : [];
+  });
+}
+
+/** A thread's first line starts it with the workshop factor; a clear, or a card as loaded, stays empty. */
 export function TopstitchThreadDefaults() {
   const { control, setValue } = useFormContext<TechCardFormData>();
   const operations = (useWatch({ control, name: 'operations' }) ?? []) as TopstitchOperation[];
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as TopstitchBomLine[];
 
   useEffect(() => {
-    const used = new Set(
-      operations.flatMap((operation) =>
-        (operation.topstitchLines ?? []).map((line) => line.bomLineKey).filter(Boolean),
-      ),
-    );
-    bomItems.forEach((line, index) => {
-      const key = line.lineKey?.trim() ?? '';
-      if (!key || !used.has(key) || line.threadPerMm !== undefined) return;
+    // The form's baseline: the card as loaded, re-based after every save.
+    const baseline = ((control._defaultValues as Partial<TechCardFormData>).operations ??
+      []) as TopstitchOperation[];
+    for (const index of threadPerMmToPrefill(bomItems, operations, baseline)) {
       setValue(`bomItems.${index}.threadPerMm`, '2.5', { shouldDirty: true });
-    });
-  }, [bomItems, operations, setValue]);
+    }
+  }, [bomItems, control, operations, setValue]);
 
   return null;
 }

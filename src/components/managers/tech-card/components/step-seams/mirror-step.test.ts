@@ -213,6 +213,31 @@ describe('mirrorStepPlan on production fixtures', () => {
         }
       }
     }
+
+    // A stale source pose is not a decision to copy: the whole mirror is refused.
+    const stalePose = mirrorStepPlan({
+      step: ops[3],
+      cardOps: ops,
+      rows: [sourceSurface, rightSurface],
+      poses: [{ ...sourcePoses[0], stale: true }, sourcePoses[1], rightPose],
+      geoms,
+    });
+    expect(stalePose).toMatchObject({ kind: 'edge-mismatch', upsert: [], deleteKeys: [] });
+  });
+
+  it('#85 refuses to mirror a stale source seam, and mirrors it again once re-confirmed', () => {
+    const geoms = card85Geoms();
+    const plan = (stale: boolean) =>
+      mirrorStepPlan({
+        step: CARD85_OPS[card85Step(600)],
+        cardOps: CARD85_OPS,
+        rows: [...CARD85_SEAMS.values()].map((row) => ({ ...row, stale })),
+        poses: [],
+        geoms,
+      });
+    expect(plan(true)).toMatchObject({ kind: 'edge-mismatch', upsert: [], linkKeys: [] });
+    expect(plan(true).sourceOp?.operationNumber).toBe(560);
+    expect(plan(false).kind).toBe('create');
   });
 
   it('#96 op 570 creates its surface, placement, layers, and pose on op 610', () => {
