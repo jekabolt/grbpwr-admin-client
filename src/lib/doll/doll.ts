@@ -31,7 +31,15 @@ import {
   type FasteningSide,
   type Located,
 } from './buttons';
-import { buildChart, toChart, type Chart, type ChartSeam } from './chart';
+import {
+  buildChart,
+  toChart,
+  type Chart,
+  type ChartJoint,
+  type ChartPin,
+  type ChartSeam,
+  sideOfRun,
+} from './chart';
 import {
   finishedAnchors,
   finishedArc,
@@ -860,7 +868,10 @@ type Work = {
   fromOrder?: boolean;
   /** Exact sleeve-cap row used to register a sleeve on the body; keep the attachment structural. */
   sleeveCap?: boolean;
-  /** L4: a seam a person confirmed (stored row) — never released; open at the end = contradiction. */
+  /**
+   * L4: a seam a person confirmed (stored row) — never released (except a row that folds a leg's
+   * strip onto itself, see `foldsStrip`); open at the end = contradiction.
+   */
   confirmed?: boolean;
   /** Owner mode: whether an operation names this confirmed row. */
   inStep?: boolean;
@@ -2469,6 +2480,16 @@ export function solveDoll(input: DollInput): DollReport {
   };
 
   // ── charts ───────────────────────────────────────────────────────────────────────────────
+  // L4, owner mode: a band piece (a belt-loop strip) no row, graph seam or ply names at all is not
+  // on the doll — drawn apart, as an unsewn body piece is, never ringed round the waist or hem.
+  if (l4 && ownerSeamPieces)
+    for (const P of panels) {
+      if (P.group !== 'WAISTBAND' && P.group !== 'HEMBAND') continue;
+      if (P.layers.length || ownerSeamPieces.has(P.key)) continue;
+      if (G.seams.some((s) => [...s.a, ...s.b].some((id) => pk(id) === P.key))) continue;
+      P.group = 'FLOAT';
+      for (let i = 0; i < P.count; i++) groupOfV[P.offset + i] = 'FLOAT';
+    }
   const groups = new Map<DollGroupId, Panel[]>();
   for (const P of panels) {
     if (!groups.has(P.group)) groups.set(P.group, []);
@@ -2485,12 +2506,76 @@ export function solveDoll(input: DollInput): DollReport {
       return null;
     return { id: `${s.seam.a}~${s.seam.b}`, a, b, partial: s.seam.kind === 'partial' };
   };
+  /** Confirmed rows (`a~b`) that fold a leg's strip onto itself: released, said as contradictions. */
+  const foldsStrip = new Set<string>();
   for (const [gid, list] of groups) {
     const keys = new Set(list.map((P) => P.key));
     const cs = G.seams
       .filter((s) => keys.has(pk(s.a[0])) && keys.has(pk(s.b[0])))
       .map(chartSeamOf)
       .filter((x): x is ChartSeam => !!x);
+    // L4: a leg's pieces off the main strip (a yoke no side seam reaches) are wrapped where the
+    // chart lays them; nothing in 3D moves them after. A confirmed composite side that goes on from
+    // a main-strip piece onto them (the back rise running on up the yoke, the waist run going on
+    // from the yoke onto the front) says where they sit: chart joints (chart.ts).
+    const joints: ChartJoint[] = [];
+    if (l4 && (gid === 'LEG_L' || gid === 'LEG_R'))
+      for (const g of G.seams) {
+        if (!isConf(g.seam)) continue;
+        for (const side of ['a', 'b'] as const) {
+          const ids = side === 'a' ? g.a : g.b;
+          if (new Set(ids.map(pk)).size < 2) continue;
+          const orig = (
+            side === 'a'
+              ? g.seam.aParts ?? edgeIdsOf(g.seam.a)
+              : g.seam.bParts ?? edgeIdsOf(g.seam.b)
+          ).flatMap((x) => edgeIdsOf(x));
+          const pr = g.seam.partRange ?? {};
+          const stretches =
+            sewnStretchesOf(g, side) ??
+            ids.map((id, i) => ({ id, range: pr[orig[i]] ?? pr[id] }) as const);
+          // The point `mm` along an edge as drawn (by its polyline's own length, as the ranges are).
+          const at = (id: EdgeId, mm: number): ChartPin | null => {
+            const e = edgeById.get(id);
+            if (!e || !keys.has(e.pieceKey) || e.pts.length < 2) return null;
+            let total = 0;
+            for (let k = 1; k < e.pts.length; k++)
+              total += Math.hypot(e.pts[k][0] - e.pts[k - 1][0], e.pts[k][1] - e.pts[k - 1][1]);
+            let left = Math.max(0, Math.min(1, mm / Math.max(1e-9, e.lenMm))) * total;
+            for (let k = 1; k < e.pts.length; k++) {
+              const [x0, y0] = e.pts[k - 1];
+              const [x1, y1] = e.pts[k];
+              const d = Math.hypot(x1 - x0, y1 - y0);
+              if (left <= d || k === e.pts.length - 1) {
+                const u = d > 1e-9 ? Math.min(1, left / d) : 0;
+                return { key: e.pieceKey, pt: [x0 + (x1 - x0) * u, y0 + (y1 - y0) * u] };
+              }
+              left -= d;
+            }
+            return null;
+          };
+          const along: [ChartPin, ChartPin][] = [];
+          const against: [ChartPin, ChartPin][] = [];
+          for (let i = 0; i + 1 < stretches.length; i++) {
+            const p = stretches[i];
+            const q = stretches[i + 1];
+            if (pk(p.id) === pk(q.id)) continue;
+            const lp = lenOfEdge.get(p.id) ?? 0;
+            const lq = lenOfEdge.get(q.id) ?? 0;
+            const [p0, p1] = p.range ?? [0, lp];
+            const [q0, q1] = q.range ?? [0, lq];
+            const a1 = at(p.id, p1);
+            const b0 = at(q.id, q0);
+            const a0 = at(p.id, p0);
+            const b1 = at(q.id, q1);
+            if (!a1 || !b0 || !a0 || !b1) continue;
+            along.push([a1, b0]);
+            against.push([a0, b1]);
+          }
+          if (along.length)
+            joints.push({ id: `${g.seam.a}~${g.seam.b}:${side}`, readings: [along, against] });
+        }
+      }
     // L4: a confirmed composite (one edge ↔ parts on two or more pieces of this group) lays each
     // part along its stretch of the single edge. Which end of the edge the stored walk starts at is
     // not in the row: each composite is laid both ways and keeps the one whose parts land on their
@@ -2637,6 +2722,7 @@ export function solveDoll(input: DollInput): DollReport {
           root,
           false,
           footprints,
+          joints,
         ),
         sel(),
       );
@@ -2650,6 +2736,7 @@ export function solveDoll(input: DollInput): DollReport {
           root,
           false,
           footprints,
+          joints,
         ),
         sel(),
       );
@@ -2663,6 +2750,7 @@ export function solveDoll(input: DollInput): DollReport {
             root,
             false,
             footprints,
+            joints,
           ),
           sel(),
         );
@@ -2681,6 +2769,7 @@ export function solveDoll(input: DollInput): DollReport {
       root,
       false,
       footprints,
+      joints,
     );
     if (gid === 'BODY') {
       // Which way round does the strip run? Seen from outside, a back's drawing-left is the doll's
@@ -2768,6 +2857,45 @@ export function solveDoll(input: DollInput): DollReport {
     }
     for (const id of [...chart.used])
       if (id.includes('@')) chart.used.add(id.slice(0, id.lastIndexOf('@')));
+    // L4, a leg: no seam of a leg goes over the top. A confirmed row between two pieces the strip
+    // already lays together that sews a top to a top (or a bottom to a bottom) of stretches lying
+    // apart in it folds the strip onto itself: forced, it crumples both pieces and turns them inside
+    // out. It is released and said as a contradiction (graphWork), never forced.
+    if (l4 && (gid === 'LEG_L' || gid === 'LEG_R'))
+      for (const g of G.seams) {
+        if (!isConf(g.seam) || g.a.length !== 1 || g.b.length !== 1 || g.seam.walk) continue;
+        const ea = edgeById.get(g.a[0]);
+        const eb = edgeById.get(g.b[0]);
+        if (!ea || !eb || ea.pieceKey === eb.pieceKey) continue;
+        const pa = chart.place.get(ea.pieceKey);
+        const pb = chart.place.get(eb.pieceKey);
+        const ga = list.find((P) => P.key === ea.pieceKey)?.geom;
+        const gb = list.find((P) => P.key === eb.pieceKey)?.geom;
+        if (!pa || !pb || !ga || !gb) continue;
+        if (
+          !chart.components.some(
+            (c) => c.keys.includes(ea.pieceKey) && c.keys.includes(eb.pieceKey),
+          )
+        )
+          continue;
+        const fa = sideOfRun(ga, [ea]);
+        if (fa !== sideOfRun(gb, [eb]) || (fa !== 'T' && fa !== 'B')) continue;
+        const share = (e: Edge, mm: [number, number] | undefined): [number, number] =>
+          mm
+            ? ([mm[0] / Math.max(1e-9, e.lenMm), mm[1] / Math.max(1e-9, e.lenMm)].map((x) =>
+                Math.max(0, Math.min(1, x)),
+              ) as [number, number])
+            : [0, 1];
+        const A = sampleOn(ea.pts, ...share(ea, g.seam.range?.a), 8).map((q) => toChart(pa, q));
+        const B = sampleOn(eb.pts, ...share(eb, g.seam.range?.b), 8).map((q) => toChart(pb, q));
+        let fw = 0;
+        let bw = 0;
+        for (let k = 0; k <= 8; k++) {
+          fw += Math.hypot(A[k][0] - B[k][0], A[k][1] - B[k][1]) / 9;
+          bw += Math.hypot(A[k][0] - B[8 - k][0], A[k][1] - B[8 - k][1]) / 9;
+        }
+        if (Math.min(fw, bw) > 30) foldsStrip.add(`${g.seam.a}~${g.seam.b}`);
+      }
     charts.set(gid, chart);
     for (const P of list) {
       const pl = chart.place.get(P.key)!;
@@ -2784,7 +2912,7 @@ export function solveDoll(input: DollInput): DollReport {
   if (opt.debug)
     for (const [gid, ch] of charts)
       warnings.push(
-        `debug: chart ${gid}: ${ch.components.map((c) => `[${c.keys.map((k) => `${k}${ch.place.get(k)!.mirror ? '(m)' : ''}@${ch.place.get(k)!.dx.toFixed(0)},${ch.place.get(k)!.dy.toFixed(0)}`).join(' ')}]`).join(' ')}${ch.rejected.length ? ` · refused: ${ch.rejected.join('; ')}` : ''}`,
+        `debug: chart ${gid}: ${ch.components.map((c) => `[${c.keys.map((k) => `${k}${ch.place.get(k)!.mirror ? '(m)' : ''}@${ch.place.get(k)!.dx.toFixed(0)},${ch.place.get(k)!.dy.toFixed(0)}`).join(' ')}]`).join(' ')}${ch.rejected.length ? ` · refused: ${ch.rejected.join('; ')}` : ''}${ch.joined ? ` · joined: ${ch.joined.join('; ')}` : ''}`,
       );
   const compOfKey = new Map<string, number>();
   for (const ch of charts.values())
@@ -4639,6 +4767,33 @@ export function solveDoll(input: DollInput): DollReport {
         const best = [...free].sort((a, b) => meanV(b) - meanV(a))[0];
         if (meanV(best) >= pHi - Math.max(60, 0.25 * (pHi - pLo))) edges = [best];
       }
+      // The waist is the strip's free top: a top edge another piece of the strip stands over in
+      // the chart (a yoke sewn on through a pocket bag laid between them, so no seam of the two
+      // says it) is inside the trousers, and sizing the pelvis by it made the top half as wide again.
+      const over = main.filter((Q) => Q !== P);
+      const pl = ch.place.get(P.key);
+      if (over.length && pl && main.includes(P))
+        edges = edges.filter((e) => {
+          const cum = [0];
+          for (let i = 1; i < e.pts.length; i++)
+            cum.push(
+              cum[i - 1] + Math.hypot(e.pts[i][0] - e.pts[i - 1][0], e.pts[i][1] - e.pts[i - 1][1]),
+            );
+          const T = cum[cum.length - 1];
+          if (!(T > 0)) return true;
+          let hit = 0;
+          for (let k = 0, j = 1; k <= 8; k++) {
+            const t = (T * k) / 8;
+            while (j < e.pts.length - 1 && cum[j] < t) j++;
+            const w = (t - cum[j - 1]) / Math.max(1e-9, cum[j] - cum[j - 1]);
+            const [u, v] = toChart(pl, [
+              e.pts[j - 1][0] + (e.pts[j][0] - e.pts[j - 1][0]) * w,
+              e.pts[j - 1][1] + (e.pts[j][1] - e.pts[j - 1][1]) * w,
+            ]);
+            if (crossings(over, v + 20).some(([a, b]) => u >= a && u <= b)) hit++;
+          }
+          return hit < 0.6 * 9;
+        });
       if (!edges.length) continue;
       // Chained in ring order from the edge no other selected edge leads into.
       const byStart = new Map(edges.map((e) => [((e.s % n) + n) % n, e]));
@@ -5317,6 +5472,12 @@ export function solveDoll(input: DollInput): DollReport {
           : 380,
     );
     if (conf) w0.confirmed = true;
+    // A confirmed row that folds a leg's strip onto itself (chart loop): released, so the state
+    // below says it as a contradiction instead of crumpling the pieces to close it.
+    if (conf && foldsStrip.has(`${s.seam.a}~${s.seam.b}`)) {
+      w0.released = true;
+      w0.solver.active = false;
+    }
     if (sleeveCapSeams.has(s)) w0.sleeveCap = true;
     if (share)
       w0.laidEnds = {

@@ -25,6 +25,8 @@ export type Chart = {
   used: Set<string>;
   /** Why chart links were refused (probe diagnostics). */
   rejected: string[];
+  /** Later components moved to meet the composite runs that go on onto them (probe diagnostics). */
+  joined?: string[];
 };
 
 export type ChartSeam = {
@@ -35,6 +37,16 @@ export type ChartSeam = {
   /** L4: the stretch of each side the seam sews, shares of its length (one part of a composite). */
   ranges?: { a: [number, number]; b: [number, number] };
 };
+
+/** A point of a piece as drawn (its own pattern coordinates). */
+export type ChartPin = { key: string; pt: Pt2 };
+/**
+ * L4: one confirmed composite side whose consecutive parts lie on different pieces — the run goes
+ * on from one piece onto the next, so where one part ends the next one starts. Which ends those are
+ * is not in the row: `readings[0]` walks the parts the way their edges run, `readings[1]` against
+ * it. Each reading lists the meeting points, one pair per change of piece.
+ */
+export type ChartJoint = { id: string; readings: [ChartPin, ChartPin][][] };
 
 export const toChart = (p: ChartPlace, q: Pt2): Pt2 => {
   const x = (p.mirror ? 2 * p.cx - q[0] : q[0]) - p.cx;
@@ -80,7 +92,7 @@ function sample(edges: Edge[], K: number): { pts: Pt2[]; len: number } {
 }
 
 /** Where an edge run sits on its piece: a vertical side (L/R) or a horizontal top/bottom. */
-function sideOfRun(g: PieceGeom, edges: Edge[]): 'L' | 'R' | 'T' | 'B' {
+export function sideOfRun(g: PieceGeom, edges: Edge[]): 'L' | 'R' | 'T' | 'B' {
   const first = edges[0].pts[0];
   const lastE = edges[edges.length - 1];
   const last = lastE.pts[lastE.pts.length - 1];
@@ -129,6 +141,11 @@ export function buildChart(
    * the folds: self-overlapping, blind to an even-odd test) — the overlap test reads these instead.
    */
   footprints?: ReadonlyMap<string, readonly (readonly Pt2[])[]>,
+  /**
+   * Composite runs that go on from piece to piece. A later component no side seam reaches is moved
+   * (translation only) to where these runs meet what is already laid, instead of standing apart.
+   */
+  joints?: readonly ChartJoint[],
 ): Chart {
   const geom = new Map(pieces.map((g) => [g.pieceKey, g]));
   const place = new Map<string, ChartPlace>();
@@ -323,6 +340,79 @@ export function buildChart(
     return all.sort((x, y) => x.rms - y.rms);
   };
 
+  /**
+   * A later component that no usable seam reaches: when confirmed composite runs go on from its
+   * pieces onto pieces already laid, translate it so those runs meet (both readings of each run are
+   * tried; the pair of readings whose meeting points agree best, without laying it over a laid
+   * piece, wins; a tie keeps the parts' own direction). Otherwise it stays apart, as before.
+   */
+  const joined: string[] = [];
+  const joinLater = (comp: string[]): ChartComponent | null => {
+    const own = new Set(comp);
+    const laid = [...place.keys()].filter((k) => !own.has(k));
+    const sides = (joints ?? [])
+      .map((j) => ({
+        id: j.id,
+        readings: j.readings.map((pairs) =>
+          pairs.flatMap(([a, b]): [Pt2, Pt2][] => {
+            const pa = place.get(a.key);
+            const pb = place.get(b.key);
+            if (!pa || !pb || own.has(a.key) === own.has(b.key)) return [];
+            return own.has(a.key)
+              ? [[toChart(pb, b.pt), toChart(pa, a.pt)]]
+              : [[toChart(pa, a.pt), toChart(pb, b.pt)]];
+          }),
+        ),
+      }))
+      .filter(
+        (j) =>
+          j.readings.length === 2 &&
+          j.readings[0].length > 0 &&
+          j.readings[0].length === j.readings[1].length,
+      )
+      .slice(0, 6);
+    if (!sides.length) return null;
+    let best: { t: Pt2; rms: number; mask: number } | null = null;
+    for (let mask = 0; mask < 1 << sides.length; mask++) {
+      const pairs = sides.flatMap((j, i) => j.readings[(mask >> i) & 1]);
+      const t: Pt2 = [0, 0];
+      for (const [f, m] of pairs) {
+        t[0] += (f[0] - m[0]) / pairs.length;
+        t[1] += (f[1] - m[1]) / pairs.length;
+      }
+      let e = 0;
+      for (const [f, m] of pairs) e += (f[0] - m[0] - t[0]) ** 2 + (f[1] - m[1] - t[1]) ** 2;
+      const rms = Math.sqrt(e / pairs.length);
+      if (best && rms >= best.rms - 1e-6) continue;
+      const clash = comp.some((k) => {
+        const p = place.get(k)!;
+        return !!overlaps(k, { ...p, dx: p.dx + t[0], dy: p.dy + t[1] }, laid);
+      });
+      if (!clash) best = { t, rms, mask };
+    }
+    if (!best || best.rms > 40) return null;
+    for (const k of comp) {
+      const p = place.get(k)!;
+      const q = { ...p, dx: p.dx + best.t[0], dy: p.dy + best.t[1] };
+      place.set(k, q);
+      boxes.set(k, boxOf(k, q));
+      ringsOf.delete(k);
+    }
+    joined.push(
+      `${comp.join('+')} by ${sides.map((j, i) => `${j.id} ${(best!.mask >> i) & 1 ? 'against' : 'along'}`).join(', ')} (meet within ${best.rms.toFixed(0)} mm)`,
+    );
+    // It is now part of the strip it was joined to (wrapped with it, not as a loose piece).
+    const onto = new Set(
+      sides.flatMap((j, i) =>
+        (joints ?? [])
+          .find((x) => x.id === j.id)!
+          .readings[(best!.mask >> i) & 1].flatMap((pair) => pair.map((pin) => pin.key)),
+      ),
+    );
+    const target = components.find((c) => c.keys.some((k) => onto.has(k) && !own.has(k)));
+    return target ?? null;
+  };
+
   const remaining = new Set(pieces.map((g) => g.pieceKey));
   let root = geom.has(rootKey) ? rootKey : pieces[0]?.pieceKey;
   while (root) {
@@ -406,11 +496,19 @@ export function buildChart(
       }
       if (!progressed) break;
     }
-    components.push({ root, keys: comp });
+    const into = components.length && joints?.length ? joinLater(comp) : null;
+    if (into) into.keys.push(...comp);
+    else components.push({ root, keys: comp });
     root = [...remaining].sort(
       (x, y) =>
         Math.abs(geom.get(y)!.areaMm2) - Math.abs(geom.get(x)!.areaMm2) || x.localeCompare(y),
     )[0];
   }
-  return { place, components, used, rejected: [...new Set(rejected)] };
+  return {
+    place,
+    components,
+    used,
+    rejected: [...new Set(rejected)],
+    ...(joined.length ? { joined } : {}),
+  };
 }
