@@ -25,6 +25,7 @@ import {
 } from './operation-work';
 import type { TechCardFormData } from './schema';
 import { stepKindFlip } from './step-kind-flip';
+import { useStepSeamUnlink } from './use-step-seam-unlink';
 import { useBindingStripTeardown } from './use-binding-strip-teardown';
 import { useTopstitchLineTeardown } from './use-topstitch-line-teardown';
 
@@ -206,6 +207,7 @@ function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: Ratif
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const teardownBinding = useBindingStripTeardown();
   const teardownTopstitch = useTopstitchLineTeardown();
+  const unlinkSeams = useStepSeamUnlink();
   const operations = (useWatch({ control, name: 'operations' }) ?? []) as OperationRow[];
   const defaultSeamClass = useWatch({
     control,
@@ -351,6 +353,7 @@ function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: Ratif
         const flip = stepKindFlip(stored, { ...stored, ...next });
         if (flip.binding && !(await teardownBinding({ stepIndexes: [index] }))) return false;
         if (flip.topstitch) teardownTopstitch({ stepIndexes: [index] });
+        if (flip.seams && !(await unlinkSeams(index))) return false;
         return true;
       };
 
@@ -427,6 +430,7 @@ function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: Ratif
       setValue,
       teardownBinding,
       teardownTopstitch,
+      unlinkSeams,
     ],
   );
 
@@ -453,7 +457,7 @@ function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: Ratif
     if (e.code !== 'Enter' && e.code !== 'NumpadEnter') return;
     e.preventDefault();
     const first = row.proposals[0];
-    if (first) apply(row, first);
+    if (first) void apply(row, first);
     // Последняя строка держит фокус на себе: уводить его в пустоту значило бы потерять клавиатуру
     // ровно там, где человек дошёл до конца прохода.
     if (row.index + 1 < rows.length) focusRow(row.index + 1);
@@ -465,9 +469,11 @@ function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: Ratif
   const unique = rows.filter(
     (r) => r.tier !== 'named' && r.proposals.length === 1 && !str(operations[r.index]?.work),
   );
-  const ratifyUnique = () => {
+  // One step at a time: each apply may delete seams or strips on the server, and two teardowns in
+  // flight would read the same cutStrips and overwrite each other.
+  const ratifyUnique = async () => {
     if (frozen) return;
-    for (const r of unique) apply(r, r.proposals[0]);
+    for (const r of unique) await apply(r, r.proposals[0]);
   };
 
   return (

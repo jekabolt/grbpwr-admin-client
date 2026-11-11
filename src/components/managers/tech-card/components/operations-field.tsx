@@ -308,6 +308,7 @@ import {
 import { useBindingStripTeardown } from './use-binding-strip-teardown';
 import { useTopstitchLineTeardown } from './use-topstitch-line-teardown';
 import { stepKindFlip } from './step-kind-flip';
+import { useStepSeamUnlink } from './use-step-seam-unlink';
 import { isTopstitchThreadLine, type TopstitchLine } from './topstitch-lines';
 import { PieceAddChip, PieceRef, useFormAssemblyPieces, useFormPieces } from './piece-picker';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
@@ -2911,6 +2912,7 @@ function OperationEditor({
   const { control, getValues, setValue } = form;
   const teardownBinding = useBindingStripTeardown();
   const teardownTopstitch = useTopstitchLineTeardown();
+  const unlinkSeams = useStepSeamUnlink();
   const cutStrips = (useWatch({ control, name: 'cutStrips' }) ?? []) as CutStrip[];
   const cutLineKeys = new Set(
     cutStrips.map((strip) => strip.bomLineKey?.trim() ?? '').filter(Boolean),
@@ -3934,8 +3936,7 @@ function OperationEditor({
    * puts the field back: a B1 step never leaves B1 with its strips still priced.
    */
   const afterKindField =
-    (field: KindField, before: string) =>
-    async (value: string | number | undefined) => {
+    (field: KindField, before: string) => async (value: string | number | undefined) => {
       const next = getValues(`operations.${index}`);
       const flip = stepKindFlip({ ...next, [field]: before }, { ...next, [field]: value ?? '' });
       if (flip.binding && !(await teardownBinding({ stepIndexes: [index] }))) {
@@ -3943,6 +3944,9 @@ function OperationEditor({
         return;
       }
       if (flip.topstitch) teardownTopstitch({ stepIndexes: [index] });
+      if (flip.seams && !(await unlinkSeams(index))) {
+        setValue(`operations.${index}.${field}`, before, { shouldDirty: true });
+      }
     };
 
   const applyWork = async (token: string) => {
@@ -4005,15 +4009,10 @@ function OperationEditor({
       park: { machines: parkMachines, presses: parkPresses },
     });
     const nextOperation = { ...currentOperation, work: token, ...written, ...clears };
-    if (
-      isBindingOperation(currentOperation) &&
-      !isBindingOperation(nextOperation) &&
-      !(await teardownBinding({ stepIndexes: [index] }))
-    )
-      return;
-    if (isTopstitchStep(currentOperation) && !isTopstitchStep(nextOperation)) {
-      teardownTopstitch({ stepIndexes: [index] });
-    }
+    const flip = stepKindFlip(currentOperation, nextOperation);
+    if (flip.binding && !(await teardownBinding({ stepIndexes: [index] }))) return;
+    if (flip.topstitch) teardownTopstitch({ stepIndexes: [index] });
+    if (flip.seams && !(await unlinkSeams(index))) return;
     setPickedKindId(k?.id ?? '');
 
     // РАБОТА ПИШЕТСЯ ПЕРВОЙ И ВСЕГДА — даже когда пункта у неё нет вовсе (0331). Это идентичность
