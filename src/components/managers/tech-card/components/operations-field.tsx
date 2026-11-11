@@ -60,6 +60,7 @@ import {
   InputField,
   SelectField,
   Tile,
+  Tiles,
   TILE_PRESS,
   TILE_QUIET,
 } from 'ui';
@@ -153,7 +154,7 @@ import {
 } from './operation-work';
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
 import { autoFuseRefusal, operationStepNumber, serverKeepsFusingStep } from './fusing-override';
-import { operationMoveMembership } from './operation-move';
+import { operationMoveMembership, planMove, sweepOperationOrder } from './operation-move';
 import { AdoptMachineIntoProfile, AdoptPressIntoProfile } from './equipment-park';
 import {
   isMachineStepType,
@@ -315,6 +316,7 @@ import { PieceAddChip, PieceRef, useFormAssemblyPieces, useFormPieces } from './
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
 import { posesOf, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
+import { foldRowsOf, useFoldsStore } from './assembly-folds/folds-store';
 import { useStepSeams } from './step-seams/step-seams-context';
 import { UnitPictureTile } from './step-seams/unit-picture-tile';
 import {
@@ -933,6 +935,14 @@ export const emptyOperation = {
 };
 
 type OperationFormValue = NonNullable<TechCardFormData['operations']>[number];
+type PendingMoveChoice = {
+  from: number;
+  to: number;
+  standalone: boolean;
+  stepKey: string;
+  options: string[];
+  selected: string;
+};
 // One row of the card's equipment park, as the form holds it (decimals as strings). The step editor
 // reads the park to resolve what a blank field would inherit; CARD DEFAULTS owns editing it.
 type EquipmentDefaultsForm = NonNullable<TechCardFormData['construction']['equipmentDefaults']>;
@@ -6259,7 +6269,7 @@ export function OperationsField({
 } = {}) {
   const { clearErrors, control, getValues, setValue, watch } = useFormContext<TechCardFormData>();
   const teardownBinding = useBindingStripTeardown();
-  const { fields, append, remove, insert, move, replace } = useFieldArray({
+  const { fields, append, remove, insert, replace } = useFieldArray({
     control,
     name: 'operations',
   });
@@ -6287,6 +6297,7 @@ export function OperationsField({
   // жившая внутри него, закрывалась бы САМА в момент, когда человек назвал последний шаг, унося
   // с собой контекст «а как названы соседи», ради которого она и рисует всю карточку.
   const [ratifyOpen, setRatifyOpen] = useState(false);
+  const [pendingMoveChoice, setPendingMoveChoice] = useState<PendingMoveChoice | null>(null);
 
   // Which step the editor is showing. Clamped rather than reset, so deleting the last step keeps
   // the editor on a real row instead of blanking.
@@ -6565,25 +6576,26 @@ export function OperationsField({
     setSelected(index + 1);
   };
 
-  const moveOperation = (from: number, to: number, standalone = false) => {
+  const moveOperation = (from: number, to: number, standalone = false, choice?: string) => {
     // ГЕЙТ С ОТКАЗОМ СЛОВАМИ, а не молчанием: ручка ⠿ рельса в СПИСКЕ ФУЛСКРИНА — настоящая
     // <button> в портале, вне обоих fieldset (внешнего карточки и докового), и на выпущенной
     // карточке жест перетаскивания честно начинается и доезжает досюда — строка прыгала бы
     // обратно без единого слова. Инлайновую ручку глушит внешний fieldset, снекбар не спамит.
     if (frozen) {
+      if (choice) setPendingMoveChoice(null);
       refuseGesture('SEQUENCE', 'frozen', FROZEN_REFUSAL);
       return;
     }
     const operations = (getValues('operations') ?? []) as OperationFormValue[];
     const operation = operations[from];
     if (!operation) return;
-    if (operation.historyKey) placeBlankOnFirstInput.current.delete(operation.historyKey);
     const membership = operationMoveMembership(
       operation,
       standalone,
       new Set(pieces.map((piece) => piece.lineKey)),
     );
     if (!membership.accepted) {
+      if (choice) setPendingMoveChoice(null);
       if (membership.reason === 'pieces-only') {
         refuseGesture('SEQUENCE', 'pieces only', 'use cut pieces');
         return;
@@ -6596,28 +6608,61 @@ export function OperationsField({
     }
     if (from === to && !!operation.assemblyBlockDetached === membership.assemblyBlockDetached)
       return;
-    // (3/10) САМАЯ ДОРОГАЯ ИЗ ДЕСЯТИ: после перестановки `removeOperation(index)` удалил бы ЧУЖОЙ
-    // шаг. Guard по `fieldId` это ловит и сам, но отказ словами лучше отказа по совпадению.
-    clearFormHistory();
-    if (from !== to) {
-      remapIssues((old) => {
-        if (old === from) return to;
-        if (from < to) return old > from && old <= to ? old - 1 : old;
-        return old >= to && old < from ? old + 1 : old;
+    const plannedOperations = operations.map((row, index) =>
+      index === from ? { ...row, assemblyBlockDetached: membership.assemblyBlockDetached } : row,
+    );
+    const plan = planMove(plannedOperations, from, to, {
+      pieces: pieces.map((piece) => ({ lineKey: piece.lineKey, name: piece.name })),
+      foldRows: foldRowsOf(useFoldsStore.getState()),
+      choice,
+    });
+    if (plan.kind === 'refuse') {
+      if (choice) setPendingMoveChoice(null);
+      refuseGesture(
+        'SEQUENCE',
+        plan.reason === FOLD_STEP_REFUSAL ? FOLD_STEP_REFUSAL : 'move refused',
+        plan.reason === FOLD_STEP_REFUSAL ? 'FOLD ORDER' : plan.reason,
+      );
+      return;
+    }
+    if (plan.kind === 'choose') {
+      setPendingMoveChoice({
+        from,
+        to,
+        standalone,
+        stepKey: plan.stepKey,
+        options: plan.options,
+        selected: plan.options.includes(choice ?? '') ? choice! : plan.options[0],
       });
-      move(from, to);
-      setSelected((s) => {
-        if (s === from) return to;
-        if (from < s && s <= to) return s - 1;
-        if (to <= s && s < from) return s + 1;
-        return s;
+      return;
+    }
+
+    // (3/10) САМАЯ ДОРОГАЯ ИЗ ДЕСЯТИ: row + repaired inputs land as one field-array write. An
+    // intermediate moved row with its old input would be exactly the refused state this gate
+    // prevents, and autosave is allowed to observe neither half on its own.
+    setPendingMoveChoice(null);
+    if (operation.historyKey) placeBlankOnFirstInput.current.delete(operation.historyKey);
+    clearFormHistory();
+    const target = Math.min(Math.max(to, 0), plannedOperations.length - 1);
+    if (from !== target) {
+      remapIssues((old) => {
+        if (old === from) return target;
+        if (from < target) return old > from && old <= target ? old - 1 : old;
+        return old >= target && old < from ? old + 1 : old;
       });
     }
-    // Inputs are a production fact and stay untouched. Divider drop sets only membership; an
-    // ordinary row drop clears it. Write after `move` so the address is the final row position.
-    setValue(`operations.${to}.assemblyBlockDetached`, membership.assemblyBlockDetached, {
-      shouldDirty: true,
-    });
+    const next = [...plannedOperations];
+    const [movedOperation] = next.splice(from, 1);
+    next.splice(target, 0, { ...movedOperation, inputKeys: plan.inputKeys });
+    replace(next);
+    if (from !== target) {
+      setSelected((selectedIndex) => {
+        if (selectedIndex === from) return target;
+        if (from < selectedIndex && selectedIndex <= target) return selectedIndex - 1;
+        if (target <= selectedIndex && selectedIndex < from) return selectedIndex + 1;
+        return selectedIndex;
+      });
+    }
   };
 
   // append here (this field array owns the rendered list) when the panel requests it. The request
@@ -7349,6 +7394,7 @@ export function OperationsField({
     if (!frozen) return;
     setPendingCreate(null);
     setRemoveWarning(null);
+    setPendingMoveChoice(null);
     // (8/10) ГОНКА RELEASE. Карточку выпустили, пока фулскрин открыт: жест, сделанный секунду
     // назад, отменять уже нельзя — правка выпущенной карточки запрещена целиком (R10). Гейт на
     // самом ⌘Z стоит тоже, но записи обязаны умереть, а не ждать, пока в них упрутся.
@@ -7593,17 +7639,8 @@ export function OperationsField({
     // метка увела бы на следующий шаг мимо нарушения. Отказ — словами движка, как у дропа;
     // джойн чинят входом, удалением шага или заменой призрака.
     const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
-    const pieceKeys = new Set(sweepPieces.map((p) => p.lineKey));
     const violationsOf = (ops: readonly OperationFormValue[]) =>
-      assemblySweep(
-        sweepPieces,
-        ops.map((o) => ({
-          inputs: classifyAssemblyInputs(pieceKeys, (o?.inputKeys ?? []).filter(Boolean)),
-          outputUnitKey: (o?.outputUnitKey ?? '').trim(),
-          outputUnitName: (o?.outputUnitName ?? '').trim(),
-          assemblyBlockDetached: !!o?.assemblyBlockDetached,
-        })),
-      ).violations;
+      sweepOperationOrder(sweepPieces, ops).violations;
     const sig = (v: { rule: number; detail: string; step: number; key: string }) =>
       `${v.rule}|${v.detail}|${v.step}|${v.key}`;
     const had = new Set(violationsOf(operations).map(sig));
@@ -9107,6 +9144,80 @@ export function OperationsField({
           setRatifyOpen(false);
         }}
       />
+
+      <ConfirmationModal
+        open={pendingMoveChoice != null}
+        onOpenChange={(open) => {
+          if (!open) setPendingMoveChoice(null);
+        }}
+        onConfirm={() => {
+          if (!pendingMoveChoice) return;
+          const current = (getValues('operations') ?? []) as OperationFormValue[];
+          const operation = current[pendingMoveChoice.from];
+          const currentStepKey = operation?.historyKey?.trim() || `step:${pendingMoveChoice.from}`;
+          if (!operation || currentStepKey !== pendingMoveChoice.stepKey) {
+            setPendingMoveChoice(null);
+            refuseGesture('SEQUENCE', 'not moved', 'the sequence has changed since');
+            return;
+          }
+          moveOperation(
+            pendingMoveChoice.from,
+            pendingMoveChoice.to,
+            pendingMoveChoice.standalone,
+            pendingMoveChoice.selected,
+          );
+        }}
+        onCancel={() => setPendingMoveChoice(null)}
+        title='Pieces'
+        confirmLabel='Move'
+        hideCancel
+        confirmDisabled={!pendingMoveChoice?.selected}
+        closeOnConfirm={false}
+        onCloseAutoFocus={restoreScreenFocus}
+      >
+        <Tiles min={96}>
+          {(pendingMoveChoice?.options ?? []).map((key) => {
+            const piece = pieces.find((candidate) => candidate.lineKey === key);
+            const selected = pendingMoveChoice?.selected === key;
+            const name =
+              piece?.name ??
+              unitDisplayName({ key, outputUnitName: grouping.res.units.get(key)?.name });
+            return (
+              <Tile
+                key={key}
+                selected={selected}
+                pressed={selected}
+                title={name}
+                onClick={() =>
+                  setPendingMoveChoice((current) =>
+                    current ? { ...current, selected: key } : current,
+                  )
+                }
+                media={
+                  piece ? (
+                    piece.strip ? (
+                      <StripTileFace
+                        name={piece.name}
+                        qty={piece.strip.qty}
+                        found={pieceShapes?.get(pieceRefKey(key)) ?? null}
+                        className='size-14'
+                      />
+                    ) : (
+                      <PieceTile
+                        found={pieceShapes?.get(pieceRefKey(key)) ?? null}
+                        name={piece.name}
+                        cloth={inlineCloth?.map.get(key) ?? null}
+                      />
+                    )
+                  ) : undefined
+                }
+                name={piece ? undefined : name}
+                sub={piece ? undefined : 'unit'}
+              />
+            );
+          })}
+        </Tiles>
+      </ConfirmationModal>
 
       <AssemblyCreateDialog
         prefill={pendingCreate}
