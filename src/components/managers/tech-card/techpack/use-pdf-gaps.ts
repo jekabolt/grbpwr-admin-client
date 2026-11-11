@@ -10,6 +10,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo } from 'react';
 import { viewerOrigin } from 'utils/viewer-origin';
 
+import { sizeOf } from '../components/assembly-folds/fold-model';
 import { deriveLabels } from './derive-labels';
 import { derivePieces } from './derive-pieces';
 import { collectPdfGaps, type Gap } from './gaps';
@@ -57,6 +58,7 @@ export function usePdfGaps(
       sampleSizeName,
       revisionLabel,
       grainDeg: geometry.grainDeg,
+      drawnSize: sizeOf(geometry.shapes.shapeByKey),
       pieceGeometry: geometry.shapes,
       measurements: sizing.measurements,
       sizeChart: sizing.sizeChart,
