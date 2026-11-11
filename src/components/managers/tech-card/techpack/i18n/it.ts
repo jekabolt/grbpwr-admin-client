@@ -390,6 +390,7 @@ export const it = {
     pin: 'riferimento',
     placement: 'posizione',
     hemEdge: 'bordo dell’orlo sconosciuto',
+    fold: 'piega',
     tooFewPatternMarks: 'pochi riferimenti sul cartamodello',
     marksOutsideOperationZone: 'riferimenti fuori zona operativa',
     operation: 'operazione',

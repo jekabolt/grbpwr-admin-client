@@ -23,10 +23,25 @@ import { useFormContext, useWatch } from 'react-hook-form';
 import type { AssemblyGeometry } from '../../techpack/use-assembly-geometry';
 import { useAssemblyGeometry } from '../../techpack/use-assembly-geometry';
 import { clearLinkOwed, markLinkOwed, owedLinks, planOwedLinks } from '../card-owed';
-import { flushAllowsRun, useTechCardAutosave } from '../design/autosave-contract';
-import { hydrateSeams, rowPairSig, rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
+import {
+  flushAllowsRun,
+  flushRefusalSentence,
+  useTechCardAutosave,
+} from '../design/autosave-contract';
+import {
+  hydrateSeams,
+  rowPairSig,
+  rowsOf,
+  useSeamsStore,
+  writeRefusal,
+} from '../assembly-seams/seams-store';
 import { useSeamWrites, type SeamWrites } from '../assembly-seams/use-seam-decisions';
-import { linkBindingStripToSeam, removeBindingStripsForSeam } from '../binding-step';
+import {
+  isCardBindingStrip,
+  linkBindingStripToSeam,
+  removeBindingStripsForSeam,
+  type BindingOperation,
+} from '../binding-step';
 import type { CutStrip } from '../cut-strip-editor/use-cut-strip';
 import { useStoredSeamLengthsMm, useTopstitchLengthsMm } from '../cut-strips/seam-lengths';
 import { syncCutStripSeamMm } from '../cut-strips/seam-mm-sync';
@@ -73,15 +88,15 @@ function useFlushLink() {
   }, []);
 }
 
-/** Store one seam row, then attach the server's canonical key to this form step; that key, or null. */
+/** Store one seam row, then attach the server's canonical key to this form step; that key, or why not. */
 export function useAttachStepSeam(index: number) {
   const ctx = useStepSeams();
   const { getValues, setValue } = useFormContext<TechCardFormData>();
   const autosave = useTechCardAutosave();
   const flushLink = useFlushLink();
   return useCallback(
-    async (row: StoredSeam): Promise<string | null> => {
-      if (!ctx) return null;
+    async (row: StoredSeam): Promise<{ key: string } | { refused: string }> => {
+      if (!ctx) return { refused: 'not saved' };
       const liveStrips = (getValues('cutStrips') ?? []) as CutStrip[];
       const savedKeys = stripKeysOf(cutStripsOfCard(ctx.techCard));
       const unsavedKeys = new Set(
@@ -90,7 +105,10 @@ export function useAttachStepSeam(index: number) {
       // A seam RPC cannot name a strip the card body has not stored yet.
       if (rowTouchesStrip(row, unsavedKeys)) {
         const result = await autosave.flush('binding-strip');
-        if (!flushAllowsRun(result)) return null;
+        if (!flushAllowsRun(result))
+          return {
+            refused: flushRefusalSentence(result, autosave.errorsCount, autosave.refusal),
+          };
       }
       const sig = rowPairSig(row);
       const op = getValues(`operations.${index}.operationNumber`) ?? 0;
@@ -106,7 +124,7 @@ export function useAttachStepSeam(index: number) {
       const ok = await ctx.writes.upsert([row]);
       if (!ok) {
         if (owes) clearLinkOwed(ctx.cardId!, row.seamKey);
-        return null;
+        return { refused: writeRefusal(row, useSeamsStore.getState()) };
       }
       const stored = rowsOf(useSeamsStore.getState()).find(
         (candidate) => rowPairSig(candidate) === sig,
@@ -125,19 +143,22 @@ export function useAttachStepSeam(index: number) {
         shouldDirty: true,
       });
       flushLink();
-      return key;
+      return { key };
     },
     [autosave, ctx, flushLink, getValues, index, setValue],
   );
 }
 
-/** Remove one of this step's stored seams through the shared seam writer. */
-export function useStepSeamActions(index: number) {
+/**
+ * Remove one of a step's stored seams through the shared seam writer, the step chosen per call so
+ * a list of steps (the ratify panel) can use one remover.
+ */
+export function useStepSeamRemover() {
   const ctx = useStepSeams();
   const { getValues, setValue } = useFormContext<TechCardFormData>();
 
-  const remove = useCallback(
-    async (seamKey: string, row: StoredSeam | undefined): Promise<boolean> => {
+  return useCallback(
+    async (index: number, seamKey: string, row: StoredSeam | undefined): Promise<boolean> => {
       if (!ctx || ctx.frozen) return false;
       const operations = getValues('operations') ?? [];
       const removal = planStepSeamRemoval(operations, index, seamKey);
@@ -159,13 +180,22 @@ export function useStepSeamActions(index: number) {
         if (stripped) {
           setValue('cutStrips', stripped.strips as never, { shouldDirty: true });
           setValue(`operations.${index}.inputKeys`, stripped.inputKeys, { shouldDirty: true });
+          setValue(`operations.${index}.bomLineKeys`, stripped.bomLineKeys, { shouldDirty: true });
         }
       }
       return true;
     },
-    [ctx, getValues, index, setValue],
+    [ctx, getValues, setValue],
   );
+}
 
+/** Remove one of this step's stored seams through the shared seam writer. */
+export function useStepSeamActions(index: number) {
+  const removeAt = useStepSeamRemover();
+  const remove = useCallback(
+    (seamKey: string, row: StoredSeam | undefined) => removeAt(index, seamKey, row),
+    [index, removeAt],
+  );
   return { remove };
 }
 
@@ -174,6 +204,7 @@ function CutStripSeamMmSync({ disabled }: { disabled: boolean }) {
   const { control, setValue } = useFormContext<TechCardFormData>();
   const strips = (useWatch({ control, name: 'cutStrips' }) ?? []) as CutStrip[];
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
+  const operations = (useWatch({ control, name: 'operations' }) ?? []) as BindingOperation[];
   const server = useSeamsStore((state) => state.server);
   const pending = useSeamsStore((state) => state.pending);
   const rows = useMemo(() => rowsOf({ server, pending }), [server, pending]);
@@ -181,10 +212,12 @@ function CutStripSeamMmSync({ disabled }: { disabled: boolean }) {
 
   useEffect(() => {
     if (disabled) return;
-    const synced = syncCutStripSeamMm(strips, sizeIds, seamLengthsMm);
+    const synced = syncCutStripSeamMm(strips, sizeIds, seamLengthsMm, (strip) =>
+      isCardBindingStrip(strip, operations),
+    );
     if (!synced.changed) return;
     setValue('cutStrips', synced.strips as never, { shouldDirty: synced.seamChanged });
-  }, [disabled, seamLengthsMm, setValue, sizeIds, strips]);
+  }, [disabled, operations, seamLengthsMm, setValue, sizeIds, strips]);
 
   return null;
 }
@@ -313,10 +346,18 @@ export function StepSeamsProvider({
           if (!stripped) continue;
           strips = stripped.strips;
           stripsChanged = true;
-          operation = { ...operation, inputKeys: stripped.inputKeys };
+          operation = {
+            ...operation,
+            inputKeys: stripped.inputKeys,
+            bomLineKeys: stripped.bomLineKeys,
+          };
         }
-        if (operation !== o)
+        if (operation !== o) {
           setValue(`operations.${i}.inputKeys`, operation.inputKeys ?? [], { shouldDirty: true });
+          setValue(`operations.${i}.bomLineKeys`, operation.bomLineKeys ?? [], {
+            shouldDirty: true,
+          });
+        }
         if (o === ops[i]) return;
         if (o.seamKeys !== ops[i].seamKeys)
           setValue(`operations.${i}.seamKeys`, o.seamKeys ?? [], { shouldDirty: true });

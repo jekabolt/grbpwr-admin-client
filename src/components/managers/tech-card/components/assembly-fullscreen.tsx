@@ -46,6 +46,7 @@ import {
 import type { PieceShapeMap } from './use-piece-shapes';
 import type { useSchematicPrefs } from './use-schematic-prefs';
 import type { OrphanBoardState } from './orphan-pieces';
+import type { InsertFoldPress } from './assembly-folds/piece-fold';
 
 // ФУЛСКРИН СХЕМЫ СБОРКИ — ТРЕТИЙ ВИД, а не отдельный экран.
 //
@@ -195,6 +196,8 @@ export type AssemblyFullscreenProps = {
   labelOf: (index: number) => string;
   pieceShapes: PieceShapeMap;
   orphanBoard?: OrphanBoardState;
+  /** `+ fold` on a piece tile: makes the draft Press step its fold closes on. */
+  onInsertFoldPress?: InsertFoldPress;
   smvOfBlock: Map<string, string>;
   /**
    * Σ SMV ХВОСТОВОГО БОКСА — по НАРИСОВАННЫМ им строкам, а не по хвостовому блоку. Считает досье
@@ -464,6 +467,7 @@ export function AssemblyFullscreen({
   labelOf,
   pieceShapes,
   orphanBoard,
+  onInsertFoldPress,
   smvOfBlock,
   tailSmv,
   prefs,
@@ -2019,6 +2023,7 @@ export function AssemblyFullscreen({
                   onPicked={setPicked}
                   onHint={setHint}
                   orphanBoard={orphanBoard}
+                  onInsertFoldPress={onInsertFoldPress}
                 />
               )}
               {/* СТИКЕР ЭСКИЗА — СЛОЙ ПОВЕРХ СЦЕНЫ, А НЕ ВОСЬМОЙ ТРЕК ГРИДА. Грид-ребёнком он был

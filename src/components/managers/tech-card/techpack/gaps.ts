@@ -89,6 +89,8 @@ export type CollectPdfGapsInput = {
   revisionLabel?: string;
   pieces?: ReadonlyMap<string, AsmPiece>;
   grainDeg?: ReadonlyMap<string, number>;
+  /** The size the pattern pieces were read at, as the document passes it (a fold gap names it). */
+  drawnSize?: string;
   /**
    * The assembly the caller already derived from the same card, pieces, grain and `t` (the
    * document derives it once for section 06). Handed over, it replaces the second
@@ -123,7 +125,10 @@ export function collectPdfGaps(input: CollectPdfGapsInput): Gap[] {
   } else {
     const pieces = input.pieces ?? new Map<string, AsmPiece>();
     const grainDeg = input.grainDeg ?? new Map<string, number>();
-    assembly = deriveAssembly({ techCard: input.techCard, pieces, grainDeg, t }, sink);
+    assembly = deriveAssembly(
+      { techCard: input.techCard, pieces, grainDeg, drawnSize: input.drawnSize, t },
+      sink,
+    );
   }
   deriveCutStrips(
     input.techCard,

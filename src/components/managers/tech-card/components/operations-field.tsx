@@ -60,6 +60,7 @@ import {
   InputField,
   SelectField,
   Tile,
+  Tiles,
   TILE_PRESS,
   TILE_QUIET,
 } from 'ui';
@@ -153,7 +154,7 @@ import {
 } from './operation-work';
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
 import { autoFuseRefusal, operationStepNumber, serverKeepsFusingStep } from './fusing-override';
-import { operationMoveMembership } from './operation-move';
+import { operationMoveMembership, planMove, sweepOperationOrder } from './operation-move';
 import { AdoptMachineIntoProfile, AdoptPressIntoProfile } from './equipment-park';
 import {
   isMachineStepType,
@@ -295,22 +296,27 @@ import { type SchematicMode, useSchematicPrefs } from './use-schematic-prefs';
 import { stripKeysOf, stripKeysOfCard } from './cut-strips/strip-pieces';
 import { StripTileFace } from './cut-strips/strip-tile';
 import { cutStripNorm } from './cut-strips/norm';
+import { stepBindingNorm } from './cut-strips/step-norm';
 import type { CutStrip } from './cut-strip-editor/use-cut-strip';
 import {
   bindingBomLines,
   bindingLineSub,
   bindingStripsOfStep,
+  bindingUndoLinks,
   freshBindingStrip,
   isBindingLine,
   isBindingOperation,
 } from './binding-step';
 import { useBindingStripTeardown } from './use-binding-strip-teardown';
 import { useTopstitchLineTeardown } from './use-topstitch-line-teardown';
+import { stepKindFlip } from './step-kind-flip';
+import { useStepSeamUnlink } from './use-step-seam-unlink';
 import { isTopstitchThreadLine, type TopstitchLine } from './topstitch-lines';
 import { PieceAddChip, PieceRef, useFormAssemblyPieces, useFormPieces } from './piece-picker';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
 import { posesOf, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
+import { foldRowsOf, useFoldsStore } from './assembly-folds/folds-store';
 import { useStepSeams } from './step-seams/step-seams-context';
 import { UnitPictureTile } from './step-seams/unit-picture-tile';
 import {
@@ -929,6 +935,14 @@ export const emptyOperation = {
 };
 
 type OperationFormValue = NonNullable<TechCardFormData['operations']>[number];
+type PendingMoveChoice = {
+  from: number;
+  to: number;
+  standalone: boolean;
+  stepKey: string;
+  options: string[];
+  selected: string;
+};
 // One row of the card's equipment park, as the form holds it (decimals as strings). The step editor
 // reads the park to resolve what a blank field would inherit; CARD DEFAULTS owns editing it.
 type EquipmentDefaultsForm = NonNullable<TechCardFormData['construction']['equipmentDefaults']>;
@@ -1111,6 +1125,29 @@ export function rowFromStep(step: SkeletonStep, ctx: SkeletonRowContext): Operat
     ...row,
     ...(join ? { seamClass: NONE_SEAM_CLASS } : {}),
     ...(materials.length ? { bomLineKeys: [...row.bomLineKeys, ...materials] } : {}),
+    draft: true,
+  };
+}
+
+/**
+ * The Press step a fold picked on a piece tile closes on, when the piece has no own step for it:
+ * that piece alone, an iron, pressed flat, draft until someone reviews it. Pure; the caller places it.
+ */
+export function rowForFold(
+  pieceKey: string,
+  foldKeys: readonly string[],
+): OperationRow & { foldKeys: string[] } {
+  return {
+    ...rowFromCreate({
+      inputKeys: [pieceKey.trim()],
+      outputUnitKey: '',
+      outputUnitName: '',
+      operationType: 'TECH_CARD_OPERATION_TYPE_PRESS',
+      zone: 'TECH_CARD_GARMENT_ZONE_OTHER',
+      pressEquipment: 'TECH_CARD_PRESS_EQUIPMENT_IRON',
+      kindWrites: { pressAction: 'TECH_CARD_PRESS_ACTION_PRESS_FLAT' },
+    }),
+    foldKeys: [...foldKeys],
     draft: true,
   };
 }
@@ -2626,7 +2663,7 @@ function OperationBindingPicker({
   const strips = (useWatch({ control, name: 'cutStrips' }) ?? []) as CutStrip[];
   const pieces = useWatch({ control, name: 'pieces' }) ?? [];
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
-  const ctx = useStepSeams();
+  const baseSizeId = Number(useWatch({ control, name: 'baseSampleSizeId' }) ?? 0);
   const teardownBinding = useBindingStripTeardown();
   const blockedPurposeLineKeys = useMemo(() => {
     const keys = new Set(articles?.bindingBlockedLineKeys ?? []);
@@ -2689,16 +2726,23 @@ function OperationBindingPicker({
           const own = bindingStripsOfStep(operation, strips, key);
           const selected = own.length > 0;
           const edges = own.filter((strip) => !!strip.seamKey?.trim()).length;
-          const norm = cutStripNorm(
-            ctx?.techCard?.cutStripNorms,
-            key,
-            ctx?.techCard?.techCard?.baseSampleSizeId,
-          );
-          const amount = parseDecimalNumber(norm);
-          const sub = selected
-            ? `${edges} ${edges === 1 ? 'edge' : 'edges'} · ${!edges ? '—' : Number.isFinite(amount) ? `${amount.toFixed(2)} m` : 'no pattern'}`
-            : bindingLineSub(line);
           const material = articles?.materialById.get(wireIntOf(line.materialId));
+          const norm = stepBindingNorm({ operation, strips, line, baseSizeId, material });
+          const normText =
+            norm.kind === 'metres'
+              ? `${norm.m.toFixed(2)} m`
+              : norm.kind === 'no_width'
+                ? 'no width'
+                : 'no pattern';
+          const subText = selected
+            ? `${edges} ${edges === 1 ? 'edge' : 'edges'} · ${edges ? normText : '—'}`
+            : bindingLineSub(line);
+          const sub =
+            selected && edges > 0 && norm.kind === 'no_width' ? (
+              <span className='text-error'>{subText}</span>
+            ) : (
+              subText
+            );
           return (
             <Tile
               key={key}
@@ -2909,6 +2953,7 @@ function OperationEditor({
   const { control, getValues, setValue } = form;
   const teardownBinding = useBindingStripTeardown();
   const teardownTopstitch = useTopstitchLineTeardown();
+  const unlinkSeams = useStepSeamUnlink();
   const cutStrips = (useWatch({ control, name: 'cutStrips' }) ?? []) as CutStrip[];
   const cutLineKeys = new Set(
     cutStrips.map((strip) => strip.bomLineKey?.trim() ?? '').filter(Boolean),
@@ -3598,10 +3643,15 @@ function OperationEditor({
     const row = stepFields.find((f) => f.field === field);
     if (!row) return;
     const p = `operations.${index}` as const;
+    const before = getValues(`${p}.${row.field}`);
     if (row.discipline === 'enum') setValue(`${p}.${row.field}`, row.none, { shouldDirty: true });
     else if (row.discipline === 'text') setValue(`${p}.${row.field}`, '', { shouldDirty: true });
     else if (row.discipline === 'int') setValue(`${p}.${row.field}`, 0, { shouldDirty: true });
     else setValue(`${p}.${row.field}`, undefined, { shouldDirty: true });
+    // A cleared kind field is a kind change like any select: owned strips and lines go with it.
+    if (isKindField(row.field)) {
+      void afterKindField(row.field, String(before ?? ''))(getValues(`${p}.${row.field}`));
+    }
   };
 
   // ЗДЕСЬ СТОЯЛИ ЧЕТЫРЕ ЭФФЕКТА ОЧИСТКИ, И ИХ БОЛЬШЕ НЕТ.
@@ -3920,6 +3970,26 @@ function OperationEditor({
    * резолв, и пять пунктов не брались ВОВСЕ — то есть выбор человека стирался целиком ради поля,
    * которое человек не заполнял.
    */
+  /**
+   * E1: the plain selects that decide the step kind (operation, machine, topstitch mode, seam class)
+   * take the step's owned rows with them exactly like `applyWork`. The field is already written when
+   * this runs, so the value before the change comes from this render's watch. A refused seam delete
+   * puts the field back: a B1 step never leaves B1 with its strips still priced.
+   */
+  const afterKindField =
+    (field: KindField, before: string) => async (value: string | number | undefined) => {
+      const next = getValues(`operations.${index}`);
+      const flip = stepKindFlip({ ...next, [field]: before }, { ...next, [field]: value ?? '' });
+      if (flip.binding && !(await teardownBinding({ stepIndexes: [index] }))) {
+        setValue(`operations.${index}.${field}`, before, { shouldDirty: true });
+        return;
+      }
+      if (flip.topstitch) teardownTopstitch({ stepIndexes: [index] });
+      if (flip.seams && !(await unlinkSeams(index))) {
+        setValue(`operations.${index}.${field}`, before, { shouldDirty: true });
+      }
+    };
+
   const applyWork = async (token: string) => {
     const p = `operations.${index}` as const;
     const currentOperation = getValues(p);
@@ -3980,15 +4050,10 @@ function OperationEditor({
       park: { machines: parkMachines, presses: parkPresses },
     });
     const nextOperation = { ...currentOperation, work: token, ...written, ...clears };
-    if (
-      isBindingOperation(currentOperation) &&
-      !isBindingOperation(nextOperation) &&
-      !(await teardownBinding({ stepIndexes: [index] }))
-    )
-      return;
-    if (isTopstitchStep(currentOperation) && !isTopstitchStep(nextOperation)) {
-      teardownTopstitch({ stepIndexes: [index] });
-    }
+    const flip = stepKindFlip(currentOperation, nextOperation);
+    if (flip.binding && !(await teardownBinding({ stepIndexes: [index] }))) return;
+    if (flip.topstitch) teardownTopstitch({ stepIndexes: [index] });
+    if (flip.seams && !(await unlinkSeams(index))) return;
     setPickedKindId(k?.id ?? '');
 
     // РАБОТА ПИШЕТСЯ ПЕРВОЙ И ВСЕГДА — даже когда пункта у неё нет вовсе (0331). Это идентичность
@@ -5058,6 +5123,7 @@ function OperationEditor({
             name={`operations.${index}.operationType`}
             label='operation *'
             items={operationTypeOptionsFor(opType)}
+            onAfterChange={afterKindField('operationType', opType)}
             className={selectNoGrow}
           />
         )}
@@ -5065,6 +5131,7 @@ function OperationEditor({
           <SelectField
             name={`operations.${index}.machineType`}
             label='machine *'
+            onAfterChange={afterKindField('machineType', machineType)}
             items={
               askedMachines
                 ? machineTypeOptionsFor(machineType).filter(
@@ -5178,6 +5245,7 @@ function OperationEditor({
                 <SelectField
                   name={`operations.${index}.topstitchMode`}
                   label='at'
+                  onAfterChange={afterKindField('topstitchMode', topstitchMode)}
                   items={topstitchModeOptionsFor(topstitchMode)}
                   className={selectNoGrow}
                 />
@@ -5543,6 +5611,7 @@ function OperationEditor({
               <SelectField
                 name={`operations.${index}.operationType`}
                 label='operation'
+                onAfterChange={afterKindField('operationType', opType)}
                 items={operationTypeOptionsFor(opType)}
                 className={selectNoGrow}
               />
@@ -5551,6 +5620,7 @@ function OperationEditor({
               <SelectField
                 name={`operations.${index}.machineType`}
                 label='machine'
+                onAfterChange={afterKindField('machineType', machineType)}
                 items={machineTypeOptionsFor(machineType)}
                 className={selectNoGrow}
               />
@@ -5605,6 +5675,7 @@ function OperationEditor({
                 <SelectField
                   name={`operations.${index}.topstitchMode`}
                   label='topstitch'
+                  onAfterChange={afterKindField('topstitchMode', topstitchMode)}
                   items={topstitchModeOptionsFor(topstitchMode)}
                   className={selectNoGrow}
                 />
@@ -5970,6 +6041,7 @@ function OperationEditor({
                 <SelectField
                   name={`operations.${index}.seamClass`}
                   label='seam class'
+                  onAfterChange={afterKindField('seamClass', seamClass)}
                   items={seamClassOptions}
                   className={selectNoGrow}
                 />
@@ -6085,6 +6157,12 @@ function OperationEditor({
 // Layout is a rail + editor, the same grammar the hero and archive block editors use: the whole
 // sequence stays on one screen as 26px lines (which is what makes it read as an ORDER), and the
 // step you are on opens beside it as a full sewing spec.
+/** Step fields whose change can move a step in or out of B1 / A2 (see `stepKindFlip`). */
+const KIND_FIELDS = ['operationType', 'machineType', 'topstitchMode', 'seamClass'] as const;
+type KindField = (typeof KIND_FIELDS)[number];
+const isKindField = (field: string): field is KindField =>
+  (KIND_FIELDS as readonly string[]).includes(field);
+
 export function OperationsField({
   activePin = null,
   onActivePinChange,
@@ -6191,7 +6269,7 @@ export function OperationsField({
 } = {}) {
   const { clearErrors, control, getValues, setValue, watch } = useFormContext<TechCardFormData>();
   const teardownBinding = useBindingStripTeardown();
-  const { fields, append, remove, insert, move, replace } = useFieldArray({
+  const { fields, append, remove, insert, replace } = useFieldArray({
     control,
     name: 'operations',
   });
@@ -6219,6 +6297,7 @@ export function OperationsField({
   // жившая внутри него, закрывалась бы САМА в момент, когда человек назвал последний шаг, унося
   // с собой контекст «а как названы соседи», ради которого она и рисует всю карточку.
   const [ratifyOpen, setRatifyOpen] = useState(false);
+  const [pendingMoveChoice, setPendingMoveChoice] = useState<PendingMoveChoice | null>(null);
 
   // Which step the editor is showing. Clamped rather than reset, so deleting the last step keeps
   // the editor on a real row instead of blanking.
@@ -6413,8 +6492,19 @@ export function OperationsField({
   /** Everything a removal must return, read while the row is still on the card. */
   const removeRecord = (index: number): RemoveEntry | null => {
     const operations = (getValues('operations') ?? []) as OperationFormValue[];
-    const row = operations[index];
-    if (!row?.historyKey) return null;
+    const stored = operations[index];
+    if (!stored?.historyKey) return null;
+    // The row as it stands after its binding teardown: strips and seams that the removal deletes
+    // never come back, so the undo neither names nor restores them.
+    const links = bindingUndoLinks(
+      {
+        cutStrips: (getValues('cutStrips') ?? []) as CutStrip[],
+        operations,
+        seamRows: rowsOf(useSeamsStore.getState()),
+      },
+      index,
+    );
+    const row = { ...stored, ...links };
     const onCard = cardKeysNow();
     const seamKeys = [...(row.seamKeys ?? []), ...(row.poseKeys ?? [])];
     const number = operationStepNumber(index);
@@ -6423,7 +6513,7 @@ export function OperationsField({
     );
     return {
       kind: 'remove',
-      historyKey: row.historyKey,
+      historyKey: stored.historyKey,
       row: structuredClone(row),
       before: operations.map((op) => op.historyKey ?? ''),
       issues: structuredClone(linkedIssues),
@@ -6486,25 +6576,26 @@ export function OperationsField({
     setSelected(index + 1);
   };
 
-  const moveOperation = (from: number, to: number, standalone = false) => {
+  const moveOperation = (from: number, to: number, standalone = false, choice?: string) => {
     // ГЕЙТ С ОТКАЗОМ СЛОВАМИ, а не молчанием: ручка ⠿ рельса в СПИСКЕ ФУЛСКРИНА — настоящая
     // <button> в портале, вне обоих fieldset (внешнего карточки и докового), и на выпущенной
     // карточке жест перетаскивания честно начинается и доезжает досюда — строка прыгала бы
     // обратно без единого слова. Инлайновую ручку глушит внешний fieldset, снекбар не спамит.
     if (frozen) {
+      if (choice) setPendingMoveChoice(null);
       refuseGesture('SEQUENCE', 'frozen', FROZEN_REFUSAL);
       return;
     }
     const operations = (getValues('operations') ?? []) as OperationFormValue[];
     const operation = operations[from];
     if (!operation) return;
-    if (operation.historyKey) placeBlankOnFirstInput.current.delete(operation.historyKey);
     const membership = operationMoveMembership(
       operation,
       standalone,
       new Set(pieces.map((piece) => piece.lineKey)),
     );
     if (!membership.accepted) {
+      if (choice) setPendingMoveChoice(null);
       if (membership.reason === 'pieces-only') {
         refuseGesture('SEQUENCE', 'pieces only', 'use cut pieces');
         return;
@@ -6517,28 +6608,61 @@ export function OperationsField({
     }
     if (from === to && !!operation.assemblyBlockDetached === membership.assemblyBlockDetached)
       return;
-    // (3/10) САМАЯ ДОРОГАЯ ИЗ ДЕСЯТИ: после перестановки `removeOperation(index)` удалил бы ЧУЖОЙ
-    // шаг. Guard по `fieldId` это ловит и сам, но отказ словами лучше отказа по совпадению.
-    clearFormHistory();
-    if (from !== to) {
-      remapIssues((old) => {
-        if (old === from) return to;
-        if (from < to) return old > from && old <= to ? old - 1 : old;
-        return old >= to && old < from ? old + 1 : old;
+    const plannedOperations = operations.map((row, index) =>
+      index === from ? { ...row, assemblyBlockDetached: membership.assemblyBlockDetached } : row,
+    );
+    const plan = planMove(plannedOperations, from, to, {
+      pieces: pieces.map((piece) => ({ lineKey: piece.lineKey, name: piece.name })),
+      foldRows: foldRowsOf(useFoldsStore.getState()),
+      choice,
+    });
+    if (plan.kind === 'refuse') {
+      if (choice) setPendingMoveChoice(null);
+      refuseGesture(
+        'SEQUENCE',
+        plan.reason === FOLD_STEP_REFUSAL ? FOLD_STEP_REFUSAL : 'move refused',
+        plan.reason === FOLD_STEP_REFUSAL ? 'FOLD ORDER' : plan.reason,
+      );
+      return;
+    }
+    if (plan.kind === 'choose') {
+      setPendingMoveChoice({
+        from,
+        to,
+        standalone,
+        stepKey: plan.stepKey,
+        options: plan.options,
+        selected: plan.options.includes(choice ?? '') ? choice! : plan.options[0],
       });
-      move(from, to);
-      setSelected((s) => {
-        if (s === from) return to;
-        if (from < s && s <= to) return s - 1;
-        if (to <= s && s < from) return s + 1;
-        return s;
+      return;
+    }
+
+    // (3/10) САМАЯ ДОРОГАЯ ИЗ ДЕСЯТИ: row + repaired inputs land as one field-array write. An
+    // intermediate moved row with its old input would be exactly the refused state this gate
+    // prevents, and autosave is allowed to observe neither half on its own.
+    setPendingMoveChoice(null);
+    if (operation.historyKey) placeBlankOnFirstInput.current.delete(operation.historyKey);
+    clearFormHistory();
+    const target = Math.min(Math.max(to, 0), plannedOperations.length - 1);
+    if (from !== target) {
+      remapIssues((old) => {
+        if (old === from) return target;
+        if (from < target) return old > from && old <= target ? old - 1 : old;
+        return old >= target && old < from ? old + 1 : old;
       });
     }
-    // Inputs are a production fact and stay untouched. Divider drop sets only membership; an
-    // ordinary row drop clears it. Write after `move` so the address is the final row position.
-    setValue(`operations.${to}.assemblyBlockDetached`, membership.assemblyBlockDetached, {
-      shouldDirty: true,
-    });
+    const next = [...plannedOperations];
+    const [movedOperation] = next.splice(from, 1);
+    next.splice(target, 0, { ...movedOperation, inputKeys: plan.inputKeys });
+    replace(next);
+    if (from !== target) {
+      setSelected((selectedIndex) => {
+        if (selectedIndex === from) return target;
+        if (from < selectedIndex && selectedIndex <= target) return selectedIndex - 1;
+        if (target <= selectedIndex && selectedIndex < from) return selectedIndex + 1;
+        return selectedIndex;
+      });
+    }
   };
 
   // append here (this field array owns the rendered list) when the panel requests it. The request
@@ -7270,6 +7394,7 @@ export function OperationsField({
     if (!frozen) return;
     setPendingCreate(null);
     setRemoveWarning(null);
+    setPendingMoveChoice(null);
     // (8/10) ГОНКА RELEASE. Карточку выпустили, пока фулскрин открыт: жест, сделанный секунду
     // назад, отменять уже нельзя — правка выпущенной карточки запрещена целиком (R10). Гейт на
     // самом ⌘Z стоит тоже, но записи обязаны умереть, а не ждать, пока в них упрутся.
@@ -7514,17 +7639,8 @@ export function OperationsField({
     // метка увела бы на следующий шаг мимо нарушения. Отказ — словами движка, как у дропа;
     // джойн чинят входом, удалением шага или заменой призрака.
     const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
-    const pieceKeys = new Set(sweepPieces.map((p) => p.lineKey));
     const violationsOf = (ops: readonly OperationFormValue[]) =>
-      assemblySweep(
-        sweepPieces,
-        ops.map((o) => ({
-          inputs: classifyAssemblyInputs(pieceKeys, (o?.inputKeys ?? []).filter(Boolean)),
-          outputUnitKey: (o?.outputUnitKey ?? '').trim(),
-          outputUnitName: (o?.outputUnitName ?? '').trim(),
-          assemblyBlockDetached: !!o?.assemblyBlockDetached,
-        })),
-      ).violations;
+      sweepOperationOrder(sweepPieces, ops).violations;
     const sig = (v: { rule: number; detail: string; step: number; key: string }) =>
       `${v.rule}|${v.detail}|${v.step}|${v.key}`;
     const had = new Set(violationsOf(operations).map(sig));
@@ -7554,6 +7670,16 @@ export function OperationsField({
     requestAnimationFrame(() =>
       editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
     );
+  };
+
+  /** `+ fold` on a piece tile: the Press step its fold closes on, at `at`. Returns its index. */
+  const insertFoldPress = (at: number, pieceKey: string, foldKeys: readonly string[]) => {
+    if (frozen || !pieceKey) return null;
+    clearFormHistory();
+    const index = Math.min(Math.max(at, 0), fields.length);
+    remapIssues((old) => (old >= index ? old + 1 : old));
+    insert(index, rowForFold(pieceKey, foldKeys));
+    return index;
   };
 
   // --- авторинг, общий для СПИСКА и СХЕМЫ -------------------------------------------------------
@@ -8696,6 +8822,7 @@ export function OperationsField({
                   // который этот раунд вычищал.
                   renamedUnit={renamedUnit}
                   orphanBoard={orphanBoard}
+                  onInsertFoldPress={insertFoldPress}
                   frozen={frozen}
                 />
               ) : (
@@ -8810,6 +8937,7 @@ export function OperationsField({
           labelOf={labelOfStep}
           pieceShapes={pieceShapes}
           orphanBoard={orphanBoard}
+          onInsertFoldPress={insertFoldPress}
           smvOfBlock={grouping.smvOfBlock}
           tailSmv={grouping.tailSmv}
           // ЦЕЛИКОМ, а не разложенный на positions/onMove/…: после Ф5б в объекте появятся ось и её
@@ -9016,6 +9144,80 @@ export function OperationsField({
           setRatifyOpen(false);
         }}
       />
+
+      <ConfirmationModal
+        open={pendingMoveChoice != null}
+        onOpenChange={(open) => {
+          if (!open) setPendingMoveChoice(null);
+        }}
+        onConfirm={() => {
+          if (!pendingMoveChoice) return;
+          const current = (getValues('operations') ?? []) as OperationFormValue[];
+          const operation = current[pendingMoveChoice.from];
+          const currentStepKey = operation?.historyKey?.trim() || `step:${pendingMoveChoice.from}`;
+          if (!operation || currentStepKey !== pendingMoveChoice.stepKey) {
+            setPendingMoveChoice(null);
+            refuseGesture('SEQUENCE', 'not moved', 'the sequence has changed since');
+            return;
+          }
+          moveOperation(
+            pendingMoveChoice.from,
+            pendingMoveChoice.to,
+            pendingMoveChoice.standalone,
+            pendingMoveChoice.selected,
+          );
+        }}
+        onCancel={() => setPendingMoveChoice(null)}
+        title='Pieces'
+        confirmLabel='Move'
+        hideCancel
+        confirmDisabled={!pendingMoveChoice?.selected}
+        closeOnConfirm={false}
+        onCloseAutoFocus={restoreScreenFocus}
+      >
+        <Tiles min={96}>
+          {(pendingMoveChoice?.options ?? []).map((key) => {
+            const piece = pieces.find((candidate) => candidate.lineKey === key);
+            const selected = pendingMoveChoice?.selected === key;
+            const name =
+              piece?.name ??
+              unitDisplayName({ key, outputUnitName: grouping.res.units.get(key)?.name });
+            return (
+              <Tile
+                key={key}
+                selected={selected}
+                pressed={selected}
+                title={name}
+                onClick={() =>
+                  setPendingMoveChoice((current) =>
+                    current ? { ...current, selected: key } : current,
+                  )
+                }
+                media={
+                  piece ? (
+                    piece.strip ? (
+                      <StripTileFace
+                        name={piece.name}
+                        qty={piece.strip.qty}
+                        found={pieceShapes?.get(pieceRefKey(key)) ?? null}
+                        className='size-14'
+                      />
+                    ) : (
+                      <PieceTile
+                        found={pieceShapes?.get(pieceRefKey(key)) ?? null}
+                        name={piece.name}
+                        cloth={inlineCloth?.map.get(key) ?? null}
+                      />
+                    )
+                  ) : undefined
+                }
+                name={piece ? undefined : name}
+                sub={piece ? undefined : 'unit'}
+              />
+            );
+          })}
+        </Tiles>
+      </ConfirmationModal>
 
       <AssemblyCreateDialog
         prefill={pendingCreate}

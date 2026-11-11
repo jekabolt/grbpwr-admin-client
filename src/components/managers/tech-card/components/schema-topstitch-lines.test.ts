@@ -27,6 +27,7 @@ const anchor = {
 const card = {
   id: 91,
   techCard: {
+    sizeIds: [1, 2],
     bomItems: [
       {
         lineKey: 'thread-a',
@@ -114,5 +115,21 @@ describe('topstitch form and wire mapping', () => {
     expect(payload.bomItems?.find((line) => line.lineKey === 'clear')?.threadPerMm).toEqual({
       value: '',
     });
+  });
+
+  it('sends no measurement for a size the card no longer has', () => {
+    const form = mapTechCardToForm(card);
+    form.sizeIds = [2];
+    const payload = mapFormToTechCardInsert(form);
+    expect(payload.operations?.[0]?.topstitchLines?.[0]?.sizes).toEqual([
+      { sizeId: 2, lineMm: { value: '252' } },
+    ]);
+  });
+
+  it('sends no lines for a step that is no longer a topstitch step', () => {
+    const form = mapTechCardToForm(card);
+    form.operations![0].machineType = 'TECH_CARD_MACHINE_TYPE_OVERLOCK';
+    const payload = mapFormToTechCardInsert(form);
+    expect(payload.operations?.[0]?.topstitchLines).toEqual([]);
   });
 });

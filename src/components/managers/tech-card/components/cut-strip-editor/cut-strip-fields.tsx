@@ -15,9 +15,10 @@ import {
   ViewSwitch,
 } from 'ui';
 import { isCardBindingStrip } from '../binding-step';
-import { stripCutMm, stripSewnMm } from '../cut-strips/lengths';
+import { goneSeamKeys, stripCutMm, stripSewnMm, withSeamGone } from '../cut-strips/lengths';
 import type { SeamLengthsMm } from '../cut-strips/seam-lengths';
 import { wireInt, type TechCardFormData } from '../schema';
+import { cutCellLocked } from './cut-cell';
 import { cutStripSeamOptions, type CutStrip } from './use-cut-strip';
 
 const CUT_MODE_OPTIONS = [
@@ -79,16 +80,21 @@ export function CutStripFields({
     seamItems.push({ value: strip.seamKey, label: 'seam missing', matchText: '' });
   }
 
-  const effectiveStrip: CutStrip = {
-    ...strip,
-    sizes: (strip.sizes ?? []).map((row) => ({
-      ...row,
-      seamMm:
-        mode === 'from_seam'
-          ? seamLengthAt(seamSource, wireInt(row.sizeId))?.toString() ?? row.seamMm ?? ''
-          : '',
-    })),
-  };
+  const gone = goneSeamKeys(seams);
+  const seamGone = gone.has((strip.seamKey ?? '').trim());
+  const effectiveStrip: CutStrip = withSeamGone(
+    {
+      ...strip,
+      sizes: (strip.sizes ?? []).map((row) => ({
+        ...row,
+        seamMm:
+          mode === 'from_seam'
+            ? seamLengthAt(seamSource, wireInt(row.sizeId))?.toString() ?? row.seamMm ?? ''
+            : '',
+      })),
+    },
+    gone,
+  );
   const sizesById = new Map((strip.sizes ?? []).map((row, index) => [wireInt(row.sizeId), index]));
   const sizeNames = new Map(
     (dictionary?.sizes ?? []).map((size) => [wireInt(size.id), formatSizeName(size.name ?? '')]),
@@ -164,8 +170,9 @@ export function CutStripFields({
             const sizeIndex = sizesById.get(wireInt(sizeId));
             const manual =
               sizeIndex == null ? '' : (strip.sizes?.[sizeIndex]?.manualCutMm ?? '').trim();
+            // A seam that went stale or was rejected has no length to show, stored or live.
             const seam =
-              mode === 'from_seam'
+              mode === 'from_seam' && !seamGone
                 ? seamLengthAt(seamSource, sizeId) ??
                   storedSeamMm(sizeIndex == null ? undefined : strip.sizes?.[sizeIndex]?.seamMm)
                 : undefined;
@@ -189,7 +196,13 @@ export function CutStripFields({
                       maxDecimals={0}
                       placeholder={cut == null ? '' : String(cut)}
                       {...(mode === 'one_length' ? { value: cut ?? '' } : {})}
-                      disabled={readOnly || binding || mode === 'one_length'}
+                      disabled={cutCellLocked({
+                        readOnly,
+                        binding,
+                        mode,
+                        seamMm: seam,
+                        seamGone: !!(effectiveStrip as { seamGone?: boolean }).seamGone,
+                      })}
                       className={cn(
                         'text-right placeholder:text-textColor!',
                         !!manual && mode !== 'one_length' && 'font-bold',

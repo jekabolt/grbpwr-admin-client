@@ -29,6 +29,7 @@ import {
   useFormState,
   useWatch,
   type FieldErrors,
+  type UseFormGetValues,
 } from 'react-hook-form';
 import { ROUTES } from 'constants/routes';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -49,6 +50,7 @@ import {
 } from 'ui';
 import { carriesGarmentComposition } from 'utils/care-label';
 import { FIELD_REVEAL_EVENT, revealField, type FieldRevealDetail } from 'utils/field-errors';
+import { bomLineHold, stripCount } from './bom-line-hold';
 import { sectionShort } from './bom-line-picker';
 import { bornMaterialBomLine, materialAutoFields, materialLineFields } from './bom-material-line';
 import { TrimPictogram, trimPictogramKind } from './design/pattern/trim-pictograms';
@@ -180,6 +182,14 @@ const refusalOf = (out: BindingChange): { title: string; items: string[] } | nul
       ? { title: 'blocks clash', items: out.blocks }
       : null;
 
+/** Held right now, read from the form at the moment of the write — the writers' own bolt. */
+const lineHeldNow = (getValues: UseFormGetValues<TechCardFormData>, index: number): boolean =>
+  bomLineHold(
+    getValues(`bomItems.${index}.lineKey`) as string | undefined,
+    getValues('cutStrips'),
+    getValues('operations'),
+  ).held;
+
 // The slot's identity — its ROLE in the garment and its section — editable on EVERY line, linked
 // or not. The role is the one field a linked line used to render nowhere, which made a wrong or
 // article-borrowed role permanently uncorrectable. Section is editable on a linked line too: the
@@ -210,6 +220,11 @@ export function SlotIdentityFields({
   const rowLabelPart = useWatch({ control, name: `bomItems.${index}.labelPart` }) as
     | string
     | undefined;
+  const rowLineKey = useWatch({ control, name: `bomItems.${index}.lineKey` }) as string | undefined;
+  const rowCutStrips = useWatch({ control, name: 'cutStrips' });
+  const rowOperations = useWatch({ control, name: 'operations' });
+  // Полосы и линии отстрочки этой строки держат её назначение (Р2): живая форма, без сохранения.
+  const purposeHeld = bomLineHold(rowLineKey, rowCutStrips, rowOperations).held;
   const rollGoods = isRollGoodsSection(rowSection);
   const kindEligible = isKindEligibleSection(rowSection);
   const kindItems = useMemo(() => kindOptionsForSection(rowSection), [rowSection]);
@@ -376,12 +391,23 @@ export function SlotIdentityFields({
             setRefusal(refusalOf(out));
           }}
         />
-        {rollGoods && (
+        {rollGoods && purposeHeld && (
+          <div className='flex flex-col gap-2' data-bom-purpose-locked={index}>
+            <Text size='micro' variant='label' component='p'>
+              purpose
+            </Text>
+            <Text component='span' className='flex min-h-6 items-center'>
+              {bomPurposeLabel(rowPurpose)}
+            </Text>
+          </div>
+        )}
+        {rollGoods && !purposeHeld && (
           <SelectField
             name={`bomItems.${index}.purpose`}
             label='purpose'
             // The scope's only line takes its sheets and piece links along (bom-purpose moveScope).
             onValueChange={(value: string | undefined) => {
+              if (lineHeldNow(getValues, index)) return;
               const out = changeLinePurpose(getValues, setValue, index, value ?? UNSET_PURPOSE);
               setRefusal(refusalOf(out));
             }}
@@ -703,6 +729,9 @@ export function BomField({
   const { fields, append, remove } = useFieldArray({ control, name: 'bomItems' });
   const bomWatch = (useWatch({ control, name: 'bomItems' }) ?? []) as MatrixLine[];
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []).map(wireInt);
+  // Cut strips and topstitch lines hold a line's unit, purpose and article (Р2); live values.
+  const cutStripsWatch = useWatch({ control, name: 'cutStrips' });
+  const operationsWatch = useWatch({ control, name: 'operations' });
   // Positions, never reordered rows: every cell, editor and delete addresses a line by its index in
   // the field array. Length comes from `fields` — the watch settles a render later after append.
   const lines = fields.map((_, i) => bomWatch[i] ?? {});
@@ -743,12 +772,15 @@ export function BomField({
   fieldCount.current = fields.length;
 
   // Артикул слота меняется на плитке, не в модалке полей: дверь к `materialId` открывает пикер.
+  // Строку держат полосы или линии — пикера нет, открывается сама строка.
   const openArticle = (index: number) =>
-    setPicking({
-      section: (getValues(`bomItems.${index}.section`) as string) || '',
-      line: index,
-      quiet: true,
-    });
+    lineHeldNow(getValues, index)
+      ? setSelected(index)
+      : setPicking({
+          section: (getValues(`bomItems.${index}.section`) as string) || '',
+          line: index,
+          quiet: true,
+        });
 
   const openLine = (index: number, field?: string) => {
     if (field === 'materialId') {
@@ -923,6 +955,7 @@ export function BomField({
 
   // Привязать артикул к УЖЕ существующей строке (дверь `link article`).
   const linkLine = (index: number, m: common_Material) => {
+    if (lineHeldNow(getValues, index)) return;
     setValue(`bomItems.${index}.materialId`, wireInt(m.id), { shouldDirty: true });
     const section = getValues(`bomItems.${index}.section`) || m.section || emptyBomItem.section;
     Object.entries(materialLineFields(m, section)).forEach(([field, val]) => {
@@ -943,6 +976,7 @@ export function BomField({
     const materialId = wireInt(m.id);
     if (!materialId) return;
     if (target?.line !== undefined) {
+      if (lineHeldNow(getValues, target.line)) return;
       linkLine(target.line, m);
       // Смена артикула с фото строки панель не открывает: человек остался в списке.
       if (!target.quiet) setSelected(target.line);
@@ -1014,10 +1048,12 @@ export function BomField({
     const facts = materialId ? stockFacts.get(materialId) : undefined;
     const onHand = facts ? Number(facts.onHand) : NaN;
     const price = resolveBomPrice(l, m);
+    const hold = bomLineHold(l.lineKey, cutStripsWatch, operationsWatch);
     const tile = (
       <button
         type='button'
-        disabled={!canEdit}
+        disabled={!canEdit || hold.held}
+        data-bom-held={hold.held ? i : undefined}
         onClick={() => setPicking({ section: l.section || '', line: i, quiet: true })}
         aria-label={empty ? `pick an article for ${role}` : `change the article of ${role}`}
         className={cn(
@@ -1036,7 +1072,7 @@ export function BomField({
         {empty ? (
           <>
             <TrimPictogram kind={slotPictogram(l)} className='size-16 text-textColor opacity-15' />
-            <span className='text-micro uppercase tracking-label'>+ material</span>
+            {!hold.held && <span className='text-micro uppercase tracking-label'>+ material</span>}
           </>
         ) : url ? (
           <img src={url} alt={m?.name || role} className='size-full object-cover' />
@@ -1127,6 +1163,17 @@ export function BomField({
               </>
             )}
           </span>
+          {hold.strips > 0 && (
+            <Text
+              size='micro'
+              variant='label'
+              component='span'
+              className='normal-case'
+              data-bom-strips={i}
+            >
+              {stripCount(hold.strips)}
+            </Text>
+          )}
         </span>
       </div>
     );

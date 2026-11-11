@@ -198,6 +198,8 @@ const typeOf = (op: FormOpLike | undefined) =>
 const workOf = (op: FormOpLike | undefined) => (op?.work ?? '').trim().toLowerCase();
 const keyedOf = (op: FormOpLike | undefined) => (op?.seamKeys?.length ?? 0) > 0;
 const joinsUnitPieces = (op: FormOpLike | undefined) => JOIN_WORK.test(workOf(op));
+/** A dart step: one piece sewn to itself, its two legs picked by hand. */
+const sewsDart = (op: FormOpLike | undefined) => workOf(op) === 'dart' && !sewsNothing(op);
 
 /** A press, a fuse, a button, a bartack…: the step touches its inputs but sews none to another. */
 export function sewsNothing(op: FormOpLike | undefined): boolean {
@@ -223,6 +225,7 @@ export function isJoinStep(
   if (groups.length !== 1) return false;
   if (keyedOf(op)) return true;
   if (groups[0].pieces.length >= 2) return joinsUnitPieces(op);
+  if (sewsDart(op)) return true;
   return (
     !!geoms && selfJoin(op, groups[0], geoms) && selfPairs(groups[0], geoms, new Set()).length > 0
   );

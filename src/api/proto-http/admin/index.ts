@@ -14720,6 +14720,20 @@ export type DeleteTechCardPieceFoldsResponse = {
   deleted: number | undefined;
 };
 
+export type ReplaceTechCardPieceFoldsRequest = {
+  techCardId: number | undefined;
+  // Keys to delete first; unknown keys are not an error. May be empty.
+  deleteFoldKeys: string[] | undefined;
+  // Rows to insert or replace whole, by fold_key, after the deletes. May be empty.
+  folds: common_TechCardPieceFold[] | undefined;
+};
+
+export type ReplaceTechCardPieceFoldsResponse = {
+  folds: common_TechCardPieceFold[] | undefined;
+  written: number | undefined;
+  deleted: number | undefined;
+};
+
 export type AddTechCardSeamDecisionsRequest = {
   techCardId: number | undefined;
   // 1..50 decisions; output-only fields (id, created_by, created_at) are ignored.
@@ -21393,6 +21407,13 @@ export interface AdminService {
   // DeleteTechCardPieceFolds removes fold lines by fold_key. Unknown keys are not an error. Same
   // lock, same released-card refusal, same echo of the full list as UpsertTechCardPieceFolds.
   DeleteTechCardPieceFolds(request: DeleteTechCardPieceFoldsRequest): Promise<DeleteTechCardPieceFoldsResponse>;
+  // ReplaceTechCardPieceFolds deletes and upserts fold rows of one card in ONE transaction: the
+  // deletes first (their keys leave the steps, as DeleteTechCardPieceFolds), then the keyed upsert,
+  // then the checks over the result (seq unique per piece, ≤ 16 per piece, ≤ 200 per card, step
+  // order). Any refusal leaves the card as it was. A key may not be in both lists; both empty is
+  // refused. NO lock_version: it never addresses steps by number, it only takes deleted keys off
+  // them. Same lock, released-card refusal and full-list echo as UpsertTechCardPieceFolds.
+  ReplaceTechCardPieceFolds(request: ReplaceTechCardPieceFoldsRequest): Promise<ReplaceTechCardPieceFoldsResponse>;
   // AddTechCardSeamDecisions appends what the technologist did with the seam guesses — accept,
   // own pick, skip, refuse — one immutable row each, ≤ 50 per call. A log beside the seams: it never
   // touches tech_card_seam, never moves lock_version, enters no digest, and works on a released card
@@ -28362,6 +28383,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "DeleteTechCardPieceFolds",
       }) as Promise<DeleteTechCardPieceFoldsResponse>;
+    },
+    ReplaceTechCardPieceFolds(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/piece-folds:replace`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ReplaceTechCardPieceFolds",
+      }) as Promise<ReplaceTechCardPieceFoldsResponse>;
     },
     AddTechCardSeamDecisions(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {

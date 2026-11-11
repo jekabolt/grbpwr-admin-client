@@ -171,6 +171,19 @@ export function reuseKeys(rows: readonly StoredSeam[], have: readonly StoredSeam
 }
 
 /**
+ * Why a write of `row` was refused, read where the write landed: `reuseKeys` may have put it onto a
+ * stored pair's key, so the refusal sits there, not under the row's own key. A pair still in flight
+ * drops the second write without a server word.
+ */
+export function writeRefusal(
+  row: StoredSeam,
+  s: Pick<SeamsState, 'server' | 'pending' | 'errors'>,
+): string {
+  const key = reuseKeys([row], rowsOf(s))[0].seamKey;
+  return s.errors[key] ?? s.errors[row.seamKey] ?? (s.pending[key] ? 'still saving' : 'not saved');
+}
+
+/**
  * The card read's rows: THE split of a stored list — seams (readable ones) in `rows`, pose rows in
  * `poses`, how many were neither. Every list from the server enters the store through here.
  */

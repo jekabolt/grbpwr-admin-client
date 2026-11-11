@@ -39,6 +39,23 @@ function tablesOf(markup: string): string[][][] {
   );
 }
 
+/** The card with its seam decision undone: rejected, or still confirmed but stale. */
+function seamGone(input: ReturnType<typeof waistbandCard>, how: 'rejected' | 'stale') {
+  const seams = (input.techCard as { seams?: Record<string, unknown>[] }).seams ?? [];
+  expect(seams).toHaveLength(1);
+  return {
+    ...input,
+    techCard: {
+      ...input.techCard,
+      seams: seams.map((row) =>
+        how === 'rejected'
+          ? { ...row, status: 'TECH_CARD_SEAM_STATUS_REJECTED' }
+          : { ...row, stale: true },
+      ),
+    },
+  } as ReturnType<typeof waistbandCard>;
+}
+
 function page(input: ReturnType<typeof waistbandCard>, lang: PdfLocale = 'en', n = '06b') {
   return renderToStaticMarkup(
     <PdfLangProvider lang={lang}>
@@ -89,6 +106,24 @@ describe('the cut-to-length sheet', () => {
     expect(row).toEqual(['×1, 40 mm', '668', '702', '—', '770']);
   });
 
+  it.each(['rejected', 'stale'] as const)(
+    'prints no length from a %s seam, as the norm does not count it',
+    (how) => {
+      const [, row] = tablesOf(page(seamGone(waistbandCard(fromSeamStrip()), how)))[1];
+      expect(row).toEqual(['×1, 40 mm', '—', '—', '—', '—']);
+    },
+  );
+
+  it('still prints a manual cut on a rejected seam', () => {
+    const strip = fromSeamStrip();
+    const manual = {
+      ...strip,
+      sizes: strip.sizes?.map((row) => (row.sizeId === 3 ? { ...row, manualCutMm: 740 } : row)),
+    };
+    const [, row] = tablesOf(page(seamGone(waistbandCard(manual), 'rejected')))[1];
+    expect(row).toEqual(['×1, 40 mm', '—', '—', '740', '—']);
+  });
+
   it('prints no sheet at all for a card with no strip', () => {
     const input = waistbandCard(fromSeamStrip());
     const none = { ...input.techCard, cutStrips: [] };
@@ -133,6 +168,11 @@ describe('what the audit asks of a strip', () => {
       sizes: strip.sizes?.map((row) => ({ ...row, seamMm: { value: '500' } })),
     };
     expect(codesOf(waistbandCard(stored))).toContain('cut_strip_seam_stale');
+  });
+
+  it('finds a strip on a rejected seam even when the pattern did not move', () => {
+    const codes = codesOf(seamGone(waistbandCard(fromSeamStrip()), 'rejected'));
+    expect(codes.filter((code) => code === 'cut_strip_seam_stale')).toHaveLength(1);
   });
 
   it('does not call a length read from the seam today stale', () => {

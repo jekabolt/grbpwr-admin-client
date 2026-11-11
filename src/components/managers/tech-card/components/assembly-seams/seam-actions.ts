@@ -12,6 +12,7 @@ import {
   sameRunLen,
   seamFromCandidate,
   SEAMS,
+  expandSidePart,
   normalizeParts,
   sidePartEdges,
   type AnchorHit,
@@ -128,6 +129,12 @@ export function handRow(
     return false;
   };
   if (repeatsEdge(pa) || repeatsEdge(pb)) return refused;
+  // A piece closed on itself sews one edge onto ANOTHER: an edge on both sides is no seam, whatever
+  // stretches of it — the resolver reads edges, and such a row is stale from its first read.
+  const edgesOf = (parts: readonly SidePart[]) =>
+    new Set(parts.flatMap((part) => expandSidePart(part, geoms)).flatMap(sidePartEdges));
+  const ea = edgesOf(pa);
+  if ([...edgesOf(pb)].some((edge) => ea.has(edge))) return refused;
   const anyRange = [...pa, ...pb].some((part) => !!part.range);
   // Whole edges in a row of one piece sew as one run, whatever else the side holds: a stretch
   // picked elsewhere must not turn every edge into a part of its own.

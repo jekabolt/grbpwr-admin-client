@@ -8,10 +8,11 @@ import { frameOf, toUV } from 'lib/folds/geom';
 import { StepPictureSvg } from '../components/step-seams/step-picture-view';
 import { card83StoredSeamsFixture } from './assembly-inference.fixture';
 import { deriveAssembly } from './derive-assembly';
+import { collectPdfGaps } from './gaps';
 import { editorOperationPictures } from './pages/assembly';
 
 // The real print path of a real card: a right pleat on the largest piece of its first join.
-function printedPleat() {
+function printedPleat(staleSeq?: number) {
   const input = card83StoredSeamsFixture();
   const first = deriveAssembly(input);
   const opNumber = first.rows.find((row) => row.card)!.n;
@@ -69,7 +70,7 @@ function printedPleat() {
     contourSig: '',
     anchoredSize: 'M',
     note: '',
-    stale: false,
+    stale: index + 1 === staleSeq,
     createdBy: '',
     createdAt: '',
     updatedBy: '',
@@ -89,7 +90,7 @@ function printedPleat() {
   } as typeof input.techCard;
   const model = deriveAssembly({ ...input, pieces, techCard, drawnSize: 'M' });
   const pictures = editorOperationPictures(techCard, model)!;
-  return { model, pictures, opNumber };
+  return { model, pictures, opNumber, techCard, pieces, grainDeg: input.grainDeg };
 }
 
 type Picture =
@@ -124,5 +125,24 @@ describe('a pleat through the real print path', () => {
     expect(later.length).toBeGreaterThan(0);
     for (const n of later) expect(render(pictures.get(n)!)).not.toContain('data-fold-section');
     for (const [n, words] of model.words) if (n !== opNumber) expect(words.folds).toBeUndefined();
+    expect(model.gaps.filter((gap) => gap.code === 'pdf_fold_unresolved')).toEqual([]);
+  }, 60_000);
+
+  it('a step fold this size cannot lay is a gap on its step: piece code, fold number, size', () => {
+    const { model, opNumber } = printedPleat(2);
+    const gaps = model.gaps.filter((gap) => gap.code === 'pdf_fold_unresolved');
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0]).toMatchObject({ section: '06', target: { tab: 'construction', op: opNumber } });
+    expect(gaps[0].label).toMatch(/^fold \S+ 2 M$/);
+    expect(gaps[0].label).not.toMatch(/[0-9A-HJKMNP-TV-Z]{26}/);
+  }, 60_000);
+
+  it('the card audit lists the same fold gap with its size', () => {
+    const { techCard, pieces, grainDeg } = printedPleat(2);
+    const gaps = collectPdfGaps({ techCard, pieces, grainDeg, drawnSize: 'M' }).filter(
+      (gap) => gap.code === 'pdf_fold_unresolved',
+    );
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0].label).toMatch(/^fold \S+ 2 M$/);
   }, 60_000);
 });

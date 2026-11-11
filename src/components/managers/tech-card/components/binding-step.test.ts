@@ -215,6 +215,7 @@ describe('binding step', () => {
     expect(removeBindingStripsForSeam(operation, [linked], 'saved-seam')).toEqual({
       strips: [],
       inputKeys: ['cloth'],
+      bomLineKeys: [],
       removedLineKeys: ['strip-a'],
     });
   });
@@ -291,6 +292,7 @@ describe('binding step', () => {
     expect(removeBindingStripsForSeam(operation, [reloaded], 'saved-seam')).toEqual({
       strips: [],
       inputKeys: ['cloth'],
+      bomLineKeys: [],
       removedLineKeys: ['strip-a'],
     });
     const plan = teardownBindingStrips(

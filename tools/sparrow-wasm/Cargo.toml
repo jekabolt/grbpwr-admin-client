@@ -1,0 +1,27 @@
+[package]
+name = "sparrow-wasm"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+publish = false
+license = "MIT"
+description = "Browser/Node entry point around sparrow (MIT) + jagua-rs (MPL-2.0) for the admin nesting worker"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Pinned sparrow commit (MIT). Root of that repo is the library crate.
+sparrow = { git = "https://github.com/JeroenGar/sparrow", rev = "67bfaf88f8ff9dca6607c1fa9737bb2006e06517" }
+jagua-rs = { version = "=2.0.0", features = ["spp"] }
+rand = "0.10"
+# Must equal the wasm-bindgen-cli version used by scripts/build-sparrow-wasm.sh.
+wasm-bindgen = "=0.2.130"
+serde_json = "1.0"
+anyhow = "1.0"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"

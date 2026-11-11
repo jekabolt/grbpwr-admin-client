@@ -45,6 +45,8 @@ await build({
   format: 'esm',
   target: 'node20',
   outfile,
+  // sparrow (src/lib/nesting/sparrow/runtime.ts): the wasm bytes are inlined and run in-process.
+  loader: { '.wasm': 'binary' },
   logLevel: 'warning',
 });
 
@@ -99,36 +101,18 @@ function verify(pieces, res, cfg, label) {
   return v;
 }
 
-// ДЕТЕРМИНИЗМ СРАВНИВАЕТСЯ ПОКОЛЕНИЕ В ПОКОЛЕНИЕ, а не по итогу двух прогонов.
-//
-// Обещание движка (nest/index.ts) условное: одинаковый вход даёт одинаковый маркер НА МАШИНЕ,
-// которая успевает пройти те же поколения; часы — вторичный стоп, и на них детерминизм
-// сознательно разменян на отзывчивость. Сравнение итогов двух прогонов с ОГРАНИЧИВАЮЩИМ
-// бюджетом проверяет поэтому не движок, а ровность машины: замеры показали 66/79 и 330/278
-// поколений в соседних запусках, и итоги законно расходились — проба падала на зелёном коде.
-// Гонять её с заведомо избыточным бюджетом (оба прогона до конца) значит перестать проверять
-// то, ради чего она есть.
-//
-// Прогресс отдаёт лучший маркер НА КАЖДОМ поколении, и это ответ: сравниваются траектории на
-// общих поколениях. Расхождение хоть на одном — настоящая недетерминированность; разное число
-// поколений — часы, и они больше ничего не портят.
-const traceGenerations = (key) => {
-  const seen = new Map();
-  return {
-    seen,
-    onProgress: (p) => {
-      if (p.phase === 'ga' && p.best && p.generation != null) seen.set(p.generation, key(p.best));
-    },
-  };
-};
-
-function checkSameTrajectory(ta, tb, label) {
-  const common = [...ta.seen.keys()].filter((g) => tb.seen.has(g));
-  const bad = common.filter((g) => ta.seen.get(g) !== tb.seen.get(g));
+// ВОСПРОИЗВОДИМОСТЬ — НЕ ПОБИТОВАЯ. С nest-sparrow маркер считает sparrow (sparrow/index.ts):
+// зерно случайное на каждый прогон, стоп — по часам, так что два прогона одного входа дают
+// РАЗНЫЕ раскладки. Обещание теперь такое: одинаковый вход → обе раскладки верны (verify) и
+// одной длины с точностью до нескольких процентов. Побитовое «ген в ген» проверяло старый
+// движок; он остался запасным (nestLegacy) и своей детерминированности не потерял.
+const SAME_LENGTH_TOLERANCE = 0.05;
+function checkSimilarLength(a, b, label, tol = SAME_LENGTH_TOLERANCE) {
+  const rel = Math.abs(a.usedLengthCm - b.usedLengthCm) / Math.max(a.usedLengthCm, b.usedLengthCm);
   check(
-    common.length >= 3 && bad.length === 0,
+    a.usedLengthCm > 0 && rel <= tol,
     label,
-    `общих поколений ${common.length}, разошлись на ${bad.length}${bad.length ? ` (первое ${bad[0]})` : ''}`,
+    `${a.usedLengthCm.toFixed(1)} и ${b.usedLengthCm.toFixed(1)} см, разница ${(rel * 100).toFixed(1)} % при допуске ${tol * 100} %`,
   );
 }
 
@@ -150,12 +134,9 @@ function checkSameTrajectory(ta, tb, label) {
   verify(pieces, res, cfg, 'не влезло');
 }
 
-// ── probe 2: determinism AND length ────────────────────────────────────────────────────
-// The budget deliberately BINDS (the run stops on the clock, not on maxGenerations): two
-// runs that both saturate MAX_GENERATIONS would agree for a reason that says nothing about
-// the change under test.
+// ── probe 2: same input → same length ──────────────────────────────────────────────────
 {
-  console.log('\n── детерминизм и длина ──');
+  console.log('\n── воспроизводимость и длина ──');
   const pieces = mod.syntheticPieces(
     Array.from({ length: 12 }, (_, i) => ({ w: 20 + (i % 4) * 7, h: 30 + (i % 3) * 11 })),
   );
@@ -164,54 +145,36 @@ function checkSameTrajectory(ta, tb, label) {
     pieces: pieces.map((p) => ({ pieceId: p.id, quantity: 6 })),
     timeBudgetMs: 4_000,
   };
-  const key = (r) =>
-    JSON.stringify(
-      r.placements.map((p) => [p.pieceId, p.instance, p.rot, Math.round(p.x * 1000), Math.round(p.y * 1000)]),
-    );
-  const ta = traceGenerations(key);
-  const tb = traceGenerations(key);
-  const a = await mod.nest(pieces, cfg, () => false, ta.onProgress);
-  const b = await mod.nest(pieces, cfg, () => false, tb.onProgress);
-  check(
-    a.generation < 399,
-    'бюджет действительно ограничивал (иначе сравнение — тавтология)',
-    `generation=${a.generation}`,
-  );
-  checkSameTrajectory(ta, tb, 'два прогона идут поколение в поколение одинаково');
-  check(
-    a.generation !== b.generation || key(a) === key(b),
-    'при равном числе поколений совпадают и итоги',
-    `gen ${a.generation}/${b.generation}`,
-  );
+  const a = await mod.nest(pieces, cfg, () => false, () => {});
+  const b = await mod.nest(pieces, cfg, () => false, () => {});
+  checkSimilarLength(a, b, 'два прогона одного входа — одной длины');
   check(a.placedCount === a.totalCount, 'всё размещено', `${a.placedCount}/${a.totalCount}`);
-  // Measured at 746.9 cm on the commit that added this probe; the ceiling sits ~7 % above it.
-  // It exists to catch the ONE risk the eps ladder introduces — a coarser simplification
-  // inflates the NFP octagon and spreads the marker out — which the clearance check cannot
-  // see, being one-sided by construction (it only ever catches «too tight»).
-  const LENGTH_CEILING_CM = 800;
+  check(b.placedCount === b.totalCount, 'и во втором прогоне всё размещено', `${b.placedCount}/${b.totalCount}`);
+  // The old engine measured 746.9 cm here (ceiling 800); sparrow 709.5 cm (11.11.2026). The
+  // ceiling catches a marker that spreads out — which the clearance check cannot see, being
+  // one-sided by construction (it only ever catches «too tight»).
+  const LENGTH_CEILING_CM = 760;
   check(
     a.usedLengthCm <= LENGTH_CEILING_CM,
     'маркер не раздулся',
     `${a.usedLengthCm.toFixed(1)} см при потолке ${LENGTH_CEILING_CM}`,
   );
-  verify(pieces, a, cfg, 'детерминизм');
+  verify(pieces, a, cfg, 'воспроизводимость');
+  verify(pieces, b, cfg, 'воспроизводимость, второй прогон');
 }
 
-// ── probe 3: cancellation reaches the tails ────────────────────────────────────────────
-// The cancel flag is flipped BY A TIMER, not read from a clock. That distinction is the
-// whole point: in the worker «стоп» arrives as a message, so a flag the engine can only
-// observe after yielding is what production actually has. A clock-based flag would flip
-// synchronously mid-loop and let this probe certify a responsiveness the worker cannot
-// deliver — the instrument agreeing with the defect, one level up.
+// ── probe 3: cancellation ──────────────────────────────────────────────────────────────
+// В браузере sparrow идёт в собственном воркере, и «стоп» — это terminate() (sparrow/runtime.ts):
+// ответ мгновенный, результат — лучшая уже проверенная раскладка. Это проверяют vitest
+// (sparrow.test.ts, «cancelled result») и живой экран. В Node (эта проба) solve синхронный и
+// идёт в этом же потоке: флаг, поднятый таймером посреди прогона, услышать некому, и проба,
+// которая бы его ждала, мерила бы бюджет, а не отмену. Здесь проверяется то, что Node обещает:
+// уже поднятый флаг не запускает решатель вовсе.
 {
-  console.log('\n── отмена: доходит до хвостов ──');
+  console.log('\n── отмена ──');
   const pieces = mod.syntheticPieces(
     Array.from({ length: 14 }, (_, i) => ({ w: 18 + (i % 5) * 6, h: 24 + (i % 4) * 9 })),
   );
-  let stop = false;
-  const timer = setTimeout(() => {
-    stop = true;
-  }, 700);
   const started = Date.now();
   const res = await mod.nest(
     pieces,
@@ -221,12 +184,11 @@ function checkSameTrajectory(ta, tb, label) {
       pieces: pieces.map((p) => ({ pieceId: p.id, quantity: 3 })),
       timeBudgetMs: 60_000,
     },
-    () => stop,
+    () => true,
     () => {},
   );
-  clearTimeout(timer);
   const elapsed = Date.now() - started;
-  check(elapsed < 8_000, 'отмена вернула управление быстро', `${elapsed} ms`);
+  check(elapsed < 3_000, 'отмена до старта вернула управление быстро', `${elapsed} ms`);
   check(res.cancelled === true, 'результат помечен отменённым', JSON.stringify({ cancelled: res.cancelled }));
 }
 
@@ -540,8 +502,9 @@ const CHIRAL = [
 // ── probe 8: сокращение против ЧЕСТНО УДВОЕННОГО набора деталей ────────────────────────
 // Второй, независимый от probe 7 угол: то же задание, но зеркальная деталь заведена ОТДЕЛЬНОЙ
 // деталью с заранее отражённым контуром — то есть ровно тот дорогой путь, от которого
-// сокращение и спасает. Зерно поиска намеренно не знает про зеркала (nest/index.ts), поэтому
-// оба прогона идут одним потоком случайных чисел и сравнимы ген в ген.
+// сокращение и спасает. С sparrow прогоны не воспроизводимы (зерно случайное), поэтому
+// сравнивается не раскладка, а длина: зеркальное задание не должно стоить ткани больше, чем
+// честно удвоенный набор.
 {
   console.log('\n── зеркало против честно удвоенного набора ──');
   const base = mod.syntheticPolyPieces([...CHIRAL, ...CHIRAL]);
@@ -575,38 +538,12 @@ const CHIRAL = [
   });
   const withFlip = await mod.nest(base, job(true), () => false, () => {});
   const doubled = await mod.nest(mirroredSet, job(false), () => false, () => {});
-  // Сравниваются НЕ x/y размещений, а КОНТУРЫ НА ПОЛОСЕ. У зеркального варианта локальное
-  // начало координат уезжает на другой край детали (контур из [0,w] переходит в [−w,0]), так
-  // что одна и та же фигура на одном и том же месте законно записывается разными x. Вопрос,
-  // который здесь задаётся, — «легла ли ткань одинаково», а не «совпали ли числа».
-  const geomKey = (pieces, r) => {
-    const byId = new Map(pieces.map((p) => [p.id, p]));
-    return JSON.stringify(
-      r.placements
-        .map((pl) =>
-          mod
-            .placeIndependently(byId.get(pl.pieceId).poly, pl)
-            .map((p) => [Math.round(p.x * 1000), Math.round(p.y * 1000)])
-            .sort((a, b) => a[0] - b[0] || a[1] - b[1]),
-        )
-        .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
-    );
-  };
   check(
     withFlip.placedCount === doubled.placedCount && withFlip.placedCount === withFlip.totalCount,
     'оба прогона разместили всё',
     `${withFlip.placedCount}/${withFlip.totalCount} и ${doubled.placedCount}/${doubled.totalCount}`,
   );
-  check(
-    withFlip.generation >= 399 && doubled.generation >= 399,
-    'оба поиска дошли до конца — сравниваются одинаковые поиски, а не одинаковые часы',
-    `${withFlip.generation} и ${doubled.generation}`,
-  );
-  check(
-    geomKey(base, withFlip) === geomKey(mirroredSet, doubled),
-    'сокращение дало ТУ ЖЕ раскладку, что честный пересчёт',
-    `длина ${withFlip.usedLengthCm.toFixed(3)} против ${doubled.usedLengthCm.toFixed(3)} см`,
-  );
+  checkSimilarLength(withFlip, doubled, 'сокращение дало ту же длину, что честный пересчёт');
   check(
     withFlip.placements.filter((p) => p.flipped).length === 4,
     'и при этом зеркальные экземпляры остались зеркальными',
@@ -660,9 +597,9 @@ const CHIRAL = [
   verify(pieces, oneWay, baseCfg, 'one_way + зеркала');
 }
 
-// ── probe 10: детерминизм с зеркалами ──────────────────────────────────────────────────
+// ── probe 10: воспроизводимость с зеркалами ────────────────────────────────────────────
 {
-  console.log('\n── детерминизм с зеркалами ──');
+  console.log('\n── воспроизводимость с зеркалами ──');
   const pieces = mod.syntheticPolyPieces([
     ...CHIRAL,
     { name: 'РУКАВ', poly: [{ x: 0, y: 0 }, { x: 44, y: 6 }, { x: 40, y: 24 }, { x: 3, y: 19 }] },
@@ -675,41 +612,18 @@ const CHIRAL = [
     // ПОПЕРЁК ДОЛЕВОЙ — здесь, а не в пробе выше: это единственная проба, где зеркальные детали
     // реально ложатся на 90 и 270, то есть где разнохиральные NFP работают на всех четырёх
     // относительных углах, и где за ними следит полная проверка геометрии (наложения, зазор,
-    // полоса). Детерминизму разница наборов кандидатов не мешает: вход один и тот же дважды.
+    // полоса).
     allowCrossGrain: true,
     pieces: pieces.map((p) => ({ pieceId: p.id, quantity: 6, flippedQuantity: 3 })),
     timeBudgetMs: 4_000,
   };
-  const key = (r) =>
-    JSON.stringify(
-      r.placements.map((p) => [p.pieceId, p.instance, p.rot, p.flipped === true, Math.round(p.x * 1000), Math.round(p.y * 1000)]),
-    );
-  // БЮДЖЕТ ПОДБИРАЕТСЯ ПОД МАШИНУ, а не задаётся числом. Смысл предусловия в том, чтобы поиск
-  // ОБОРВАЛСЯ по времени: на потолке поколений обе стороны доходят до конца, и «совпали» тогда
-  // означало бы только «одинаковая арифметика», а проверяется здесь другое — что оборванный на
-  // произвольном месте поиск обрывается ОДИНАКОВО.
-  //
-  // Числом это не задать: на загруженной машине 4 с не хватало и на 300 поколений, на свободной
-  // хватает на все 400 — и зонд начинал падать от того, что вокруг стало тихо. Уменьшаем, пока
-  // время не станет ограничителем.
-  let ta;
-  let tb;
-  let a;
-  let b;
-  for (const ms of [4_000, 1_500, 600, 250, 100]) {
-    ta = traceGenerations(key);
-    tb = traceGenerations(key);
-    const c = { ...cfg, timeBudgetMs: ms };
-    a = await mod.nest(pieces, c, () => false, ta.onProgress);
-    b = await mod.nest(pieces, c, () => false, tb.onProgress);
-    if (a.generation < 399) break;
-  }
-  check(a.generation < 399, 'бюджет ограничивал (иначе сравнение — тавтология)', `generation=${a.generation}`);
-  checkSameTrajectory(ta, tb, 'поколение в поколение совпадают размещения ВМЕСТЕ с зеркальностью');
+  const a = await mod.nest(pieces, cfg, () => false, () => {});
+  const b = await mod.nest(pieces, cfg, () => false, () => {});
+  checkSimilarLength(a, b, 'два прогона с зеркалами — одной длины');
   check(
-    a.generation !== b.generation || key(a) === key(b),
-    'при равном числе поколений совпадают и итоги (с зеркалами)',
-    `gen ${a.generation}/${b.generation}`,
+    b.placements.filter((p) => p.flipped).length === pieces.length * 3,
+    'и во втором прогоне зеркальность та же',
+    `${b.placements.filter((p) => p.flipped).length}`,
   );
   check(a.placedCount === a.totalCount, 'всё размещено', `${a.placedCount}/${a.totalCount}`);
   check(
@@ -717,7 +631,8 @@ const CHIRAL = [
     'зеркал ровно половина',
     `${a.placements.filter((p) => p.flipped).length} из ${a.placements.length}`,
   );
-  verify(pieces, a, cfg, 'детерминизм с зеркалами');
+  verify(pieces, a, cfg, 'воспроизводимость с зеркалами');
+  verify(pieces, b, cfg, 'воспроизводимость с зеркалами, второй прогон');
 }
 
 // ── probe 11: real files, В ОБОИХ РЕЖИМАХ ─────────────────────────────────────────────

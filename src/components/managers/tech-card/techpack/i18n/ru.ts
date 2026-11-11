@@ -431,6 +431,7 @@ export const ru = {
     pin: 'метка',
     placement: 'расположение',
     hemEdge: 'край подгибки неизвестен',
+    fold: 'сгиб',
     tooFewPatternMarks: 'мало меток на лекале',
     marksOutsideOperationZone: 'метки вне зоны операции',
     operation: 'операция',
