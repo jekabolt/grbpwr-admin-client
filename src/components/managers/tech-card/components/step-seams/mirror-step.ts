@@ -539,6 +539,9 @@ export function mirrorStepPlan({
   const sourceKeys = opKeys(candidate.op);
   const sourceSeams = sourceKeys.flatMap((key) => rowByKey.get(key) ?? []);
   const sourcePoses = sourceKeys.flatMap((key) => poseByKey.get(key) ?? []);
+  // A source the server marked stale is not a decision to copy; it is fixed on the left first.
+  if ([...sourceSeams, ...sourcePoses].some((row) => row.stale))
+    return EMPTY_PLAN('edge-mismatch', candidate.op);
   const mappedSeams = sourceSeams.map((row) => mapSeam(row, candidate.links, geoms, grainDeg));
   const mappedPoseRows = sourcePoses.map((row) => mapPose(row, candidate.links, geoms, grainDeg));
   if (mappedSeams.some((row) => !row) || mappedPoseRows.some((row) => !row))
