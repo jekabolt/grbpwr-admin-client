@@ -2,12 +2,13 @@ import { useCallback, useMemo } from 'react';
 import { useFormContext } from 'react-hook-form';
 import type { StoredPose, StoredRow, StoredSeam } from 'lib/seams';
 
-import { posesOf, rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
+import { mirrorChange, type SeamChange, type StepRef } from '../assembly-seams/seam-change-plan';
+import type { SeamChangeResult } from '../assembly-seams/seam-change';
+import { reuseKeys, rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import type { TechCardFormData } from '../schema';
 import { useTechCardAutosave } from '../design/autosave-contract';
 import {
   isRightMirrorStep,
-  mirrorRowSig,
   mirrorStepPlan,
   type MirrorStepPlan,
   type MirrorStepPlanInput,
@@ -17,40 +18,47 @@ import { useStepSeams } from './step-seams-context';
 export type MirrorStepWriteResult = { ok: true } | { ok: false; error: string };
 
 export type MirrorStepWriteDeps = {
-  upsert: (rows: readonly StoredRow[]) => Promise<boolean>;
+  /** The mirrored step, by its form row identity. */
+  step: StepRef;
+  /** The keys the step links now (seams and poses), read when the write starts. */
+  stepKeys: () => readonly string[];
+  /** New rows onto the key of a row already stored for their pair (the server lands them there too). */
   canonicalize: (rows: readonly StoredRow[]) => StoredRow[];
+  /** ONE ChangeTechCardSeams for the whole mirror; `gone`: rows it is expected to delete. */
+  change: (change: SeamChange, gone: readonly string[]) => Promise<SeamChangeResult>;
+  /** The committed rows (stored keys) and the mirrored folds and layer order onto the step. */
   link: (
     rows: readonly StoredRow[],
     foldKeys: readonly string[],
     layerOrder: readonly string[],
   ) => void;
   requestAutosave: () => void;
-  rowsByKey: () => ReadonlyMap<string, StoredRow>;
-  remove: (rows: readonly StoredRow[]) => Promise<boolean>;
-  errorOf: (keys: readonly string[]) => string;
 };
 
-/** Execute the transaction/form boundary in its required order; exported for the failure probe. */
+/**
+ * MIRROR as one transaction (C7, invariant 5): the mapped rows written AND linked to the step, every
+ * other key of the step detached (the server deletes the ones no other step links) — all or nothing.
+ * Only a committed change touches the form; exported for the failure probe.
+ */
 export async function executeMirrorStep(
   plan: MirrorStepPlan,
   deps: MirrorStepWriteDeps,
 ): Promise<MirrorStepWriteResult> {
   if (plan.kind !== 'create' && plan.kind !== 'replace') return { ok: false, error: 'not saved' };
   try {
-    if (plan.upsert.length && !(await deps.upsert(plan.upsert))) {
-      return {
-        ok: false,
-        error: deps.errorOf(plan.upsert.map((row) => row.seamKey)) || 'not saved',
-      };
-    }
-    const canonical = deps.canonicalize(plan.upsert);
-    deps.link(canonical, plan.foldKeys, plan.layerOrder);
+    const upsert = deps.canonicalize(plan.upsert);
+    const moved = new Map(plan.upsert.map((row, i) => [row.seamKey, upsert[i]?.seamKey]));
+    const linkKeys = [...new Set(plan.linkKeys.map((key) => moved.get(key) ?? key))];
+    const change = mirrorChange(deps.step, { upsert, linkKeys }, deps.stepKeys());
+    const gone = plan.deleteKeys.filter((key) => !linkKeys.includes(key));
+    const res = await deps.change(change, gone);
+    if (!res.ok) return { ok: false, error: res.why || 'not saved' };
+    const stored = upsert.map((row) => {
+      const key = res.keyMap.get(row.seamKey) ?? row.seamKey;
+      return key === row.seamKey ? row : { ...row, seamKey: key };
+    });
+    deps.link(stored, plan.foldKeys, plan.layerOrder);
     deps.requestAutosave();
-    const byKey = deps.rowsByKey();
-    const dropping = plan.deleteKeys.flatMap((key) => byKey.get(key) ?? []);
-    if (dropping.length && !(await deps.remove(dropping))) {
-      return { ok: false, error: deps.errorOf(plan.deleteKeys) || 'not saved' };
-    }
     return { ok: true };
   } catch (error) {
     return {
@@ -60,22 +68,18 @@ export async function executeMirrorStep(
   }
 }
 
-/** Match the server echo after an upsert while preserving one row per expected mapped fact. */
+/** The client's half of the server's rekey: a new seam row of a stored pair goes onto that key. */
 export function canonicalMirrorRows(
   expected: readonly StoredRow[],
-  have: readonly StoredRow[],
+  have: readonly StoredSeam[],
 ): StoredRow[] {
-  const used = new Set<string>();
-  return expected.map((row) => {
-    const sameKey = have.find((candidate) => candidate.seamKey === row.seamKey);
-    const sameFact = have.find(
-      (candidate) => !used.has(candidate.seamKey) && mirrorRowSig(candidate) === mirrorRowSig(row),
-    );
-    const found = sameKey ?? sameFact ?? row;
-    used.add(found.seamKey);
-    return found;
-  });
+  return expected.map((row) =>
+    row.kind === 'pose' ? row : reuseKeys([row as StoredSeam], have)[0] ?? row,
+  );
 }
+
+const sameSet = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((key) => b.includes(key));
 
 type UseMirrorStepInput = Omit<MirrorStepPlanInput, 'rows' | 'poses'> & {
   rows: ReadonlyMap<string, StoredSeam>;
@@ -95,7 +99,7 @@ export function useMirrorStep({
 }: UseMirrorStepInput) {
   const ctx = useStepSeams();
   const autosave = useTechCardAutosave();
-  const { setValue } = useFormContext<TechCardFormData>();
+  const { getValues, setValue } = useFormContext<TechCardFormData>();
   const rowList = useMemo(() => [...rows.values()], [rows]);
   const poseList = useMemo(() => [...poses.values()], [poses]);
   const plan = useMemo(
@@ -118,36 +122,40 @@ export function useMirrorStep({
 
   const write = useCallback(async (): Promise<MirrorStepWriteResult> => {
     if (!ctx || ctx.frozen) return { ok: false, error: 'not saved' };
-    const liveRows = () => {
-      const state = useSeamsStore.getState();
-      return [...rowsOf(state), ...posesOf(state)];
-    };
+    const historyKey = getValues(`operations.${index}.historyKey`);
+    if (!historyKey) return { ok: false, error: 'not saved' };
+    // The step's row by identity: the list may have moved while the request flew.
+    const rowAt = () =>
+      (getValues('operations') ?? []).findIndex((op) => op.historyKey === historyKey);
     return executeMirrorStep(plan, {
-      upsert: (put) => ctx.writes.upsert([...put]),
-      canonicalize: (put) => canonicalMirrorRows(put, liveRows()),
+      step: { historyKey },
+      stepKeys: () => {
+        const op = getValues('operations')?.[rowAt()];
+        return [...(op?.seamKeys ?? []), ...(op?.poseKeys ?? [])];
+      },
+      canonicalize: (put) => canonicalMirrorRows(put, rowsOf(useSeamsStore.getState())),
+      change: (change, gone) =>
+        ctx.writes.change(change, {
+          verb: plan.upsert.length > 1 ? `decisions (${plan.upsert.length})` : 'decision',
+          gone,
+        }),
       link: (linked, foldKeys, layerOrder) => {
-        setValue(
-          `operations.${index}.seamKeys`,
-          linked.filter((row) => row.kind !== 'pose').map((row) => row.seamKey),
-          { shouldDirty: true },
-        );
-        setValue(
-          `operations.${index}.poseKeys`,
-          linked.filter((row) => row.kind === 'pose').map((row) => row.seamKey),
-          { shouldDirty: true },
-        );
-        setValue(`operations.${index}.foldKeys`, [...foldKeys], { shouldDirty: true });
-        setValue(`operations.${index}.layerOrder`, [...layerOrder], { shouldDirty: true });
+        const at = rowAt();
+        if (at < 0) return;
+        const op = getValues(`operations.${at}`);
+        const seamKeys = linked.filter((row) => row.kind !== 'pose').map((row) => row.seamKey);
+        const poseKeys = linked.filter((row) => row.kind === 'pose').map((row) => row.seamKey);
+        // The form adopted the server's links already; this only covers a step it could not tell.
+        if (!sameSet(op?.seamKeys ?? [], seamKeys))
+          setValue(`operations.${at}.seamKeys`, seamKeys, { shouldDirty: true });
+        if (!sameSet(op?.poseKeys ?? [], poseKeys))
+          setValue(`operations.${at}.poseKeys`, poseKeys, { shouldDirty: true });
+        setValue(`operations.${at}.foldKeys`, [...foldKeys], { shouldDirty: true });
+        setValue(`operations.${at}.layerOrder`, [...layerOrder], { shouldDirty: true });
       },
       requestAutosave: () => autosave.request('seams'),
-      rowsByKey: () => new Map(liveRows().map((row) => [row.seamKey, row])),
-      remove: (drop) => ctx.writes.remove([...drop]),
-      errorOf: (keys) => {
-        const errors = useSeamsStore.getState().errors;
-        return keys.map((key) => errors[key]).find(Boolean) ?? '';
-      },
     });
-  }, [autosave, ctx, index, plan, setValue]);
+  }, [autosave, ctx, getValues, index, plan, setValue]);
 
   return { plan, visible, write };
 }
