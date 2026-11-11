@@ -17,8 +17,14 @@ import {
 } from 'lib/seams';
 
 import { handRow, type AnchorCtx, type HandRowRefusal } from '../assembly-seams/seam-actions';
-import { liveRow } from './live-row';
-import { innerId, parseInner, pieceOfTarget, type TargetId } from './step-seams-model';
+import { laysRow } from './live-row';
+import {
+  innerId,
+  parseInner,
+  pieceOfTarget,
+  type FormOpLike,
+  type TargetId,
+} from './step-seams-model';
 import { seamOfSides, surfaceSeam, type SeamSides } from './step-picture';
 
 /** A suggestion tile opens with its unit pair selected; every other picker entry stays empty. */
@@ -238,17 +244,18 @@ export type StepStoredRow = {
 
 /**
  * Resolve only the live rows explicitly referenced by this operation, in operation key order. A
- * stale or rejected row lays nothing: the step is drawn as if it named no such row.
+ * stale or rejected row, or a join kept on a press / fuse / button step, lays nothing: the step is
+ * drawn as if it named no such row.
  */
 export function storedRowsOfStep(
-  op: { seamKeys?: readonly string[] } | undefined,
+  op: FormOpLike | undefined,
   byKey: ReadonlyMap<string, StoredSeam>,
   geoms: ReadonlyMap<string, PieceGeom>,
   innerLines: ReadonlyMap<string, Pt2[][]>,
 ): StepStoredRow[] {
   return (op?.seamKeys ?? []).flatMap((key) => {
     const row = byKey.get(key);
-    const candidate = row && liveRow(row) ? candidateOfStoredSeam(row, geoms, innerLines) : null;
+    const candidate = row && laysRow(op, row) ? candidateOfStoredSeam(row, geoms, innerLines) : null;
     return row && candidate ? [{ key, row, candidate }] : [];
   });
 }

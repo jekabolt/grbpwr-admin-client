@@ -85,6 +85,44 @@ describe('live rows: a stale or rejected seam lays nothing', () => {
     );
   });
 
+  it('a step turned into a press stops sewing its join rows; a surface row still lays', () => {
+    const asType = (number: number, operationType: string, seamKeys?: string[]) =>
+      CARD6_OPS.map((op) =>
+        op.operationNumber === number
+          ? { ...op, operationType, ...(seamKeys ? { seamKeys } : {}) }
+          : op,
+      );
+    const at = (ops: readonly FormOpLike[], number: number) =>
+      [...stepResults(inputWith(CARD6_SEAMS, ops))[card6Step(number)].transforms].map(
+        ([piece, T]) => [piece, T.map((v) => Math.round(v * 1000) / 1000)],
+      );
+    // The collar step joins by two edge rows: as a press it lays like a step that names none.
+    const sewn = at(CARD6_OPS, 150);
+    const pressed = at(asType(150, 'press'), 150);
+    const bare = at(asType(150, 'press', []), 150);
+    expect(sewn).not.toEqual(bare);
+    expect(pressed).toEqual(bare);
+    // The sleeve slit is a surface row (a part laid on its host): fusing still lays it there.
+    expect(at(asType(30, 'fusing'), 30)).toEqual(transformsAt(inputWith(CARD6_SEAMS)));
+  }, 60_000);
+
+  it('the doll sews no join row of a press step', () => {
+    const ops = CARD6_OPS.map((op) =>
+      op.operationNumber === 150 ? { ...op, operationType: 'press' } : op,
+    ) as SceneOp[];
+    const picked = dollOwnerSeamsOf({
+      rows: [...CARD6_SEAMS.values()],
+      poses: new Map(),
+      operations: ops,
+      geoms,
+      innerLines,
+      stepResults: null,
+      pieceKeys: CARD6_PIECE_KEYS,
+    });
+    expect(picked?.inStepKeys).not.toContain('main neck');
+    expect(picked?.inStepKeys).toContain(KEY);
+  });
+
   it('the doll sews only live rows a step names', () => {
     const selection = (byKey: ReadonlyMap<string, StoredSeam>) =>
       dollOwnerSeamsOf({

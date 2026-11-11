@@ -9,7 +9,7 @@ import { poseAnchorOf, poseOf, type SeamLayer, type StoredPose, type StoredSeam 
 import { anchorsNameStrip, stripHostUnder } from '../cut-strips/strip-place';
 import { cardFoldsOf, foldOnceOf, type CardFolds, type StepFolds } from './step-folds';
 import { handsFromSeams } from './step-hand';
-import { inputGroups, type FormOpLike, type InputGroup } from './step-seams-model';
+import { inputGroups, sewsNothing, type FormOpLike, type InputGroup } from './step-seams-model';
 import { invert, stepLayout, type StepLayout } from './step-picture';
 import { pinPoses, poseBlockGroup, type PosePin } from './step-pose';
 import { seamIsLaid, storedRowsOfStep, type StepStoredRow } from './step-rows';
@@ -612,6 +612,8 @@ export function stepResultsSignature(
       seamKeys: op.seamKeys,
       poseKeys: op.poseKeys,
       operationNumber: op.operationNumber,
+      // A press / fuse / button step lays no join: its kind changes the picture.
+      sewsNothing: sewsNothing(op),
       assemblyBlockDetached: op.assemblyBlockDetached,
       ...(op.foldKeys?.length ? { foldKeys: op.foldKeys } : {}),
       ...(op.layerOrder?.length ? { layerOrder: op.layerOrder } : {}),

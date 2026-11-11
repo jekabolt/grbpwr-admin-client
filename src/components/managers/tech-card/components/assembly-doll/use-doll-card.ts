@@ -61,7 +61,7 @@ import { pieceBlockRefs, pieceRefKey, rollGoodsScopes } from '../piece-block-ref
 import { useSizeNames } from 'components/managers/model/components/use-size-systems';
 import type { TechCardFormData } from '../schema';
 import { useStepResults } from '../step-seams/step-result-context';
-import { liveRow } from '../step-seams/live-row';
+import { laysRow } from '../step-seams/live-row';
 import { candidateOfStoredSeam } from '../step-seams/step-rows';
 import { isJoinStep } from '../step-seams/step-seams-model';
 import {
@@ -188,7 +188,7 @@ export function dollOwnerSeamsOf(args: {
     const out: DollOwnerCandidate[] = [];
     for (const key of op.seamKeys ?? []) {
       const row = byKey.get(key);
-      if (!row || !liveRow(row) || bound.has(key)) continue;
+      if (!row || !laysRow(op, row) || bound.has(key)) continue;
       bound.add(key);
       inStepKeys.push(key);
       const candidate = candidateOfStoredSeam(row, args.geoms, args.innerLines);
