@@ -89,13 +89,33 @@ describe('step kind flip (Р3: a sewing step that stops sewing drops its seams)'
     expect(stepKindFlip(join, next).seams).toBe(false);
   });
 
-  it('a non-machine step that names its own seam class keeps it while the class stays', () => {
+  it('a hand-sewn step keeps its seams while it sews, and drops them when it stops', () => {
     const hand = {
       operationType: 'TECH_CARD_OPERATION_TYPE_HANDWORK',
       seamClass: 'TECH_CARD_SEAM_CLASS_SS_PLAIN',
     };
-    const next = { ...hand, operationType: 'TECH_CARD_OPERATION_TYPE_PRESS' };
-    expect(stepKindFlip(hand, next).seams).toBe(false);
+    const press = { ...hand, operationType: 'TECH_CARD_OPERATION_TYPE_PRESS' };
+    expect(stepKindFlip(hand, { ...hand, seamClass: 'TECH_CARD_SEAM_CLASS_LS_LAPPED' }).seams).toBe(
+      false,
+    );
+    expect(stepKindFlip(hand, press).seams).toBe(true);
     expect(stepKindFlip(hand, { ...hand, seamClass: '' }).seams).toBe(true);
+  });
+
+  it('a machine step with its own seam class that becomes pressing unlinks its seams (card 145, step 370)', () => {
+    const sewn = { ...join, seamClass: 'TECH_CARD_SEAM_CLASS_SS_PLAIN' };
+    expect(
+      stepKindFlip(sewn, { ...sewn, operationType: 'TECH_CARD_OPERATION_TYPE_PRESS' }).seams,
+    ).toBe(true);
+    expect(
+      stepKindFlip(sewn, { ...sewn, operationType: 'TECH_CARD_OPERATION_TYPE_FUSING' }).seams,
+    ).toBe(true);
+  });
+
+  it('a machine step that becomes hand sewing keeps its seams with its class', () => {
+    const sewn = { ...join, seamClass: 'TECH_CARD_SEAM_CLASS_SS_PLAIN' };
+    expect(
+      stepKindFlip(sewn, { ...sewn, operationType: 'TECH_CARD_OPERATION_TYPE_HANDWORK' }).seams,
+    ).toBe(false);
   });
 });
