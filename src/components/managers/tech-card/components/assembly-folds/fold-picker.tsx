@@ -142,6 +142,7 @@ export function FoldPicker({
   frozen,
   size,
   stepIndex,
+  resolveStep,
   onClose,
 }: {
   read: PieceRead;
@@ -150,6 +151,14 @@ export function FoldPicker({
   size: string;
   /** The step this picker is open on. */
   stepIndex?: number;
+  /**
+   * Opened on a piece, not a step: finds (or makes) the step a new fold closes on. `blocked` says
+   * whether a step index would break the piece's fold order on the given operations.
+   */
+  resolveStep?: (
+    foldKeys: readonly string[],
+    blocked: (ops: Parameters<typeof foldStepBlocked>[0], index: number) => boolean,
+  ) => number | null;
   onClose: () => void;
 }) {
   const choosing = useRef(false);
@@ -313,13 +322,17 @@ export function FoldPicker({
     target: number | null | undefined,
     currentRows: readonly StoredFold[] = rows,
   ) => {
-    if (target === null || target === undefined) return;
     const foldKeys = saved.map((row) => row.foldKey);
     const others = currentRows.filter((row) => !foldKeys.includes(row.foldKey));
-    const blocked = saved.some((row) =>
-      foldStepBlocked(foldStep.operations, [...others, row], row.foldKey, target),
-    );
-    if (!blocked) foldStep.assign(foldKeys, target);
+    const blockedOn = (ops: Parameters<typeof foldStepBlocked>[0], index: number) =>
+      saved.some((row) => foldStepBlocked(ops, [...others, row], row.foldKey, index));
+    if (target === undefined && resolveStep) {
+      const resolved = resolveStep(foldKeys, blockedOn);
+      if (resolved !== null) foldStep.assign(foldKeys, resolved);
+      return;
+    }
+    if (target === null || target === undefined) return;
+    if (!blockedOn(foldStep.operations, target)) foldStep.assign(foldKeys, target);
   };
 
   const choose = async (line: PickerLine, kind: PickKind) => {

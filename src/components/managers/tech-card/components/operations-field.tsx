@@ -1120,6 +1120,29 @@ export function rowFromStep(step: SkeletonStep, ctx: SkeletonRowContext): Operat
 }
 
 /**
+ * The Press step a fold picked on a piece tile closes on, when the piece has no own step for it:
+ * that piece alone, an iron, pressed flat, draft until someone reviews it. Pure; the caller places it.
+ */
+export function rowForFold(
+  pieceKey: string,
+  foldKeys: readonly string[],
+): OperationRow & { foldKeys: string[] } {
+  return {
+    ...rowFromCreate({
+      inputKeys: [pieceKey.trim()],
+      outputUnitKey: '',
+      outputUnitName: '',
+      operationType: 'TECH_CARD_OPERATION_TYPE_PRESS',
+      zone: 'TECH_CARD_GARMENT_ZONE_OTHER',
+      pressEquipment: 'TECH_CARD_PRESS_EQUIPMENT_IRON',
+      kindWrites: { pressAction: 'TECH_CARD_PRESS_ACTION_PRESS_FLAT' },
+    }),
+    foldKeys: [...foldKeys],
+    draft: true,
+  };
+}
+
+/**
  * The print a draft row is judged by: the WHOLE persisted step (`operationRowPrint`), less `draft`
  * itself and the server-stamped `operationNumber` — a save re-stamps it, and a save is not a touch.
  * Any edit of any field (allowance, topstitch, a kind block, BOM links, photos) takes the mark off.
@@ -7612,6 +7635,16 @@ export function OperationsField({
     );
   };
 
+  /** `+ fold` on a piece tile: the Press step its fold closes on, at `at`. Returns its index. */
+  const insertFoldPress = (at: number, pieceKey: string, foldKeys: readonly string[]) => {
+    if (frozen || !pieceKey) return null;
+    clearFormHistory();
+    const index = Math.min(Math.max(at, 0), fields.length);
+    remapIssues((old) => (old >= index ? old + 1 : old));
+    insert(index, rowForFold(pieceKey, foldKeys));
+    return index;
+  };
+
   // --- авторинг, общий для СПИСКА и СХЕМЫ -------------------------------------------------------
   //
   // Мутаторы живут ЗДЕСЬ и в одном экземпляре, а схема их только вызывает. Два вида, редактирующих
@@ -8752,6 +8785,7 @@ export function OperationsField({
                   // который этот раунд вычищал.
                   renamedUnit={renamedUnit}
                   orphanBoard={orphanBoard}
+                  onInsertFoldPress={insertFoldPress}
                   frozen={frozen}
                 />
               ) : (
@@ -8866,6 +8900,7 @@ export function OperationsField({
           labelOf={labelOfStep}
           pieceShapes={pieceShapes}
           orphanBoard={orphanBoard}
+          onInsertFoldPress={insertFoldPress}
           smvOfBlock={grouping.smvOfBlock}
           tailSmv={grouping.tailSmv}
           // ЦЕЛИКОМ, а не разложенный на positions/onMove/…: после Ф5б в объекте появятся ось и её

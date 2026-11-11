@@ -13,6 +13,7 @@ type FoldStepForm = {
     inputKeys?: string[];
     operationType?: string;
     operationNumber?: number;
+    outputUnitKey?: string;
   }[];
 };
 
@@ -25,14 +26,52 @@ export function stepOfFold(ops: readonly FoldStepOperation[], foldKey: string): 
   return index >= 0 ? index : null;
 }
 
+const FUSING = 'TECH_CARD_OPERATION_TYPE_FUSING';
+const PRESS_TYPES = new Set([
+  'TECH_CARD_OPERATION_TYPE_PRESS',
+  'TECH_CARD_OPERATION_TYPE_PRESS_OPEN',
+]);
+const sameKey = (a: string, b: string) => a.trim().toUpperCase() === b.trim().toUpperCase();
+
+/**
+ * The step works on this one piece alone: it makes no unit and every input is that piece. The same
+ * contract as `processedPieceOf` (assembly-layout.ts), read off a form row.
+ */
+export function ownsOnlyPiece(operation: FoldStepOperation, pieceKey: string): boolean {
+  if (!pieceKey.trim() || (operation.outputUnitKey ?? '').trim()) return false;
+  const inputs = (operation.inputKeys ?? []).filter((key) => key.trim());
+  return inputs.length > 0 && inputs.every((key) => sameKey(key, pieceKey));
+}
+
+/** The piece's first own non-fusing step; never a join, never FUSING. */
 export function suggestStep(ops: readonly FoldStepOperation[], pieceKey: string): number | null {
-  const key = pieceKey.trim().toUpperCase();
   const index = ops.findIndex(
-    (operation) =>
-      operation.operationType !== 'TECH_CARD_OPERATION_TYPE_FUSING' &&
-      operation.inputKeys?.some((inputKey) => inputKey.trim().toUpperCase() === key),
+    (operation) => operation.operationType !== FUSING && ownsOnlyPiece(operation, pieceKey),
   );
   return index >= 0 ? index : null;
+}
+
+/**
+ * Where a fold picked on the piece tile closes, without making a row: (a) the piece's own
+ * non-fusing step that already closes one of its folds, else (b) its own Press step. Null = a new
+ * Press step is needed. Never FUSING.
+ */
+export function pieceFoldStep(
+  ops: readonly FoldStepOperation[],
+  pieceKey: string,
+  pieceFoldKeys: ReadonlySet<string>,
+): number | null {
+  const own = (operation: FoldStepOperation) =>
+    operation.operationType !== FUSING && ownsOnlyPiece(operation, pieceKey);
+  const closing = ops.findIndex(
+    (operation) =>
+      own(operation) && (operation.foldKeys ?? []).some((key) => pieceFoldKeys.has(key)),
+  );
+  if (closing >= 0) return closing;
+  const press = ops.findIndex(
+    (operation) => own(operation) && PRESS_TYPES.has(operation.operationType ?? ''),
+  );
+  return press >= 0 ? press : null;
 }
 
 export function assignFold(

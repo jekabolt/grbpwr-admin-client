@@ -57,6 +57,8 @@ import {
   type View,
 } from './canvas-view';
 import { hatchId } from './cloth-hatch';
+import { PieceFoldPicker, type InsertFoldPress } from './assembly-folds/piece-fold';
+import { useStepSeams } from './step-seams/step-seams-context';
 import { clothRollup, type PieceCloth, type PieceClothState } from './piece-cloth';
 import type { PieceShapeMap } from './use-piece-shapes';
 import type { OrphanBoardState } from './orphan-pieces';
@@ -272,6 +274,8 @@ export type AssemblyCanvasProps = {
    */
   onHint: (hint: CanvasHint) => void;
   orphanBoard?: OrphanBoardState;
+  /** `+ fold` on a piece tile: makes the draft Press step its fold closes on. */
+  onInsertFoldPress?: InsertFoldPress;
 };
 
 export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(function AssemblyCanvas(
@@ -296,9 +300,12 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     onPicked,
     onHint,
     orphanBoard,
+    onInsertFoldPress,
   },
   handleRef,
 ) {
+  const geometry = useStepSeams()?.geometry;
+  const [foldOn, setFoldOn] = useState<{ pieceKey: string; at: number | undefined } | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<HTMLDivElement>(null);
   const sheetElRef = useRef<HTMLDivElement>(null);
@@ -777,6 +784,8 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     const vp = viewportRef.current;
     if (!vp) return;
     const onWheel = (e: WheelEvent) => {
+      // The fold picker scrolls itself; the world stays put under it.
+      if ((e.target as HTMLElement | null)?.closest?.('[data-canvas-scroll]')) return;
       e.preventDefault();
       const r = vp.getBoundingClientRect();
       fitted.current = false;
@@ -1852,6 +1861,11 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
                 // способа открыть шаг в системе заводить нельзя.
                 stepProps={(i) => activate(clickGuard(() => onPickStep(i)))}
                 onAddOperation={addPrefill ? clickGuard(() => onCreate(addPrefill)) : undefined}
+                onAddFold={
+                  addPrefill && geometry?.pieces.get(t.key)?.geom
+                    ? clickGuard(() => setFoldOn({ pieceKey: t.key, at: addPrefill.at }))
+                    : undefined
+                }
                 // ТОТ ЖЕ `goToNode`, ЧТО У ТОКЕНА: «перейти к узлу» — одно действие, и второго
                 // его исполнителя в системе быть не должно.
                 onGoToUnit={
@@ -1881,6 +1895,22 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
         className='pointer-events-none absolute border border-dashed border-textColor bg-textColor/5'
         style={{ display: 'none', left: 0, top: 0, width: 0, height: 0 }}
       />
+
+      {foldOn && !frozen && (
+        <div
+          data-canvas-chrome
+          data-canvas-scroll
+          className='absolute right-2 top-2 z-20 max-h-[calc(100%-4rem)] w-[min(40rem,calc(100%-1rem))] overflow-y-auto border border-borderColor bg-bgColor p-2'
+        >
+          <PieceFoldPicker
+            key={foldOn.pieceKey}
+            pieceKey={foldOn.pieceKey}
+            at={foldOn.at}
+            insertPress={onInsertFoldPress}
+            onClose={() => setFoldOn(null)}
+          />
+        </div>
+      )}
 
       {/* HUD — инструмент и зум. Внизу слева, поверх мира и вне его трансформа: орган, который
           масштабируется вместе с содержимым, перестаёт быть органом. */}

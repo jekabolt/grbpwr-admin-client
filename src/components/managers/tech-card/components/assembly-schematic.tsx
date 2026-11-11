@@ -29,6 +29,8 @@ import { clothRollup, type PieceCloth, type PieceClothState } from './piece-clot
 import type { PieceShapeMap } from './use-piece-shapes';
 import { useActiveStepStore } from './assembly-map/active-step';
 import type { OrphanBoardState } from './orphan-pieces';
+import { PieceFoldPicker, type InsertFoldPress } from './assembly-folds/piece-fold';
+import { useStepSeams } from './step-seams/step-seams-context';
 
 // Схема сборки: карта чёрных ящиков.
 //
@@ -96,6 +98,7 @@ export function AssemblySchematic({
   onResetPositions,
   renamedUnit,
   orphanBoard,
+  onInsertFoldPress,
   frozen = false,
 }: {
   blocks: AssemblyBlock[];
@@ -145,9 +148,13 @@ export function AssemblySchematic({
    */
   renamedUnit: UnitRenameNotice | null;
   orphanBoard?: OrphanBoardState;
+  /** `+ fold` on a piece tile: makes the draft Press step its fold closes on. */
+  onInsertFoldPress?: InsertFoldPress;
   /** Карточка выпущена: схема остаётся читаемой и раскладываемой, но не редактируемой. */
   frozen?: boolean;
 }) {
+  const geometry = useStepSeams()?.geometry;
+  const [foldOn, setFoldOn] = useState<{ pieceKey: string; at: number | undefined } | null>(null);
   // Выбор — то, из чего собирается следующий узел. Живёт в схеме, потому что это состояние
   // ЖЕСТА, а не данных: уход с экрана его обнуляет, и правильно.
   const [picked, setPicked] = useState<string[]>([]);
@@ -906,6 +913,11 @@ export function AssemblySchematic({
                 // способа открыть шаг в системе заводить нельзя.
                 stepProps={stepOrgan}
                 onAddOperation={addPrefill ? clickGuard(() => onCreate(addPrefill)) : undefined}
+                onAddFold={
+                  addPrefill && geometry?.pieces.get(t.key)?.geom
+                    ? clickGuard(() => setFoldOn({ pieceKey: t.key, at: addPrefill.at }))
+                    : undefined
+                }
                 onGoToUnit={
                   t.state === 'eaten' && t.into ? clickGuard(() => goToNode(t.into)) : undefined
                 }
@@ -923,6 +935,15 @@ export function AssemblySchematic({
           )}
         </div>
       </div>
+      {foldOn && !frozen && (
+        <PieceFoldPicker
+          key={foldOn.pieceKey}
+          pieceKey={foldOn.pieceKey}
+          at={foldOn.at}
+          insertPress={onInsertFoldPress}
+          onClose={() => setFoldOn(null)}
+        />
+      )}
 
       <ResetLayoutModal
         open={resetOpen}
