@@ -11893,6 +11893,9 @@ export type UpdateTechCardRequest = {
 };
 
 export type UpdateTechCardResponse = {
+  // The card's lock_version after this save: expected_lock_version + 1 (the save bumps it exactly
+  // once). The client sends it as its next expected_lock_version without re-reading the card.
+  lockVersion: number | undefined;
 };
 
 export type ListTechCardSnapshotsRequest = {
@@ -14697,6 +14700,47 @@ export type DeleteTechCardSeamsRequest = {
 export type DeleteTechCardSeamsResponse = {
   seams: common_TechCardSeam[] | undefined;
   deleted: number | undefined;
+};
+
+// SeamLink names one step → seam link by the step's operation_number on the card.
+export type SeamLink = {
+  operationNumber: number | undefined;
+  seamKey: string | undefined;
+};
+
+// OperationSeamKeys is one step's linked seam keys, in the step's order.
+export type OperationSeamKeys = {
+  operationNumber: number | undefined;
+  seamKeys: string[] | undefined;
+};
+
+// SeamKeyMap reports the key a sent upsert row was stored under (stored differs from sent when the
+// row went onto a row of the same pair and ranges: a stored row, or an earlier row of this request).
+export type SeamKeyMap = {
+  sent: string | undefined;
+  stored: string | undefined;
+};
+
+export type ChangeTechCardSeamsRequest = {
+  techCardId: number | undefined;
+  // Required: the card's lock_version the client last read.
+  expectedLockVersion?: number;
+  // Rows to insert or replace whole, by seam_key. Output-only fields (stale, *_by, *_at) are ignored.
+  upsert: common_TechCardSeam[] | undefined;
+  // Rows to delete by seam_key; also unlinked from every step. Unknown keys are not an error.
+  delete: string[] | undefined;
+  // Links to append; keys may name rows of this request's upsert by their sent key.
+  link: SeamLink[] | undefined;
+  // Links to remove; keys may name rows of this request's upsert by their sent key.
+  detach: SeamLink[] | undefined;
+};
+
+export type ChangeTechCardSeamsResponse = {
+  seams: common_TechCardSeam[] | undefined;
+  links: OperationSeamKeys[] | undefined;
+  lockVersion: number | undefined;
+  keyMap: SeamKeyMap[] | undefined;
+  deletedKeys: string[] | undefined;
 };
 
 export type UpsertTechCardPieceFoldsRequest = {
@@ -21397,6 +21441,22 @@ export interface AdminService {
   // or a decision the technologist takes back). Unknown keys are not an error. Same lock, same
   // released-card refusal, same echo of the full list as UpsertTechCardSeams.
   DeleteTechCardSeams(request: DeleteTechCardSeamsRequest): Promise<DeleteTechCardSeamsResponse>;
+  // ChangeTechCardSeams applies one seam gesture atomically: upsert rows, link them to steps, detach
+  // them from steps and delete rows, all in ONE transaction under the card's lock_version.
+  // expected_lock_version is REQUIRED (absent = InvalidArgument); a different stored version refuses
+  // with FailedPrecondition `lock_version_moved` and nothing written. A request that changed anything
+  // bumps lock_version exactly once, and the response carries the new version.
+  // Order: upsert (one pair and ranges, one row: a new key whose pair and ranges match a row of the
+  // card — a stored row by what it holds after this upsert — or an earlier row of this request goes
+  // onto that row's key; rows landing on one key are written once, key_map reports every sent key and
+  // links of a sent key follow its row) → link (appended to the step) → detach (a row is deleted only
+  // when THIS call removed a link and no step links it any more; an absent link is a no-op) → delete
+  // (unconditional, also unlinks). The caps — 400 rows per card, 64 links per step — hold on the state
+  // after the whole change: a replace at the cap lands, a change that ends over a cap and grew it is
+  // refused whole (upsert / link[i] too_many). Contradictions — the same (step, key) in link and
+  // detach, a key in link or upsert and in delete, a step number unknown or not unique on the card —
+  // refuse the whole request. A released card refuses (the frozen wording). wr(tech_cards).
+  ChangeTechCardSeams(request: ChangeTechCardSeamsRequest): Promise<ChangeTechCardSeamsResponse>;
   // UpsertTechCardPieceFolds stores fold lines on the card's pieces (placket, cuff, hem turn-up) —
   // construction data the paper doll folds before the solve.
   // KEYED AND PARTIAL, as UpsertTechCardSeams: a row per fold_key is inserted or replaced whole; rows
@@ -28343,6 +28403,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "DeleteTechCardSeams",
       }) as Promise<DeleteTechCardSeamsResponse>;
+    },
+    ChangeTechCardSeams(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/seams/change`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ChangeTechCardSeams",
+      }) as Promise<ChangeTechCardSeamsResponse>;
     },
     UpsertTechCardPieceFolds(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
