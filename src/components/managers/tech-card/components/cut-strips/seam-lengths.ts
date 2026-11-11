@@ -65,7 +65,10 @@ export function useStoredSeamLengthsMm(rows: readonly StoredSeam[]): SeamLengths
 
 export type TopstitchLengthsMm = (line: TopstitchLine) => ReadonlyMap<number, number> | undefined;
 
-/** Pattern-backed reader for one-sided line anchors. `ready` separates loading from no pattern. */
+/**
+ * Pattern-backed reader for one-sided line anchors. `ready` is true only once a pattern is parsed:
+ * loading, a failed fetch or parse, or a card with no pattern files measure nothing.
+ */
 export function useTopstitchLengthsMm(): {
   read: TopstitchLengthsMm;
   ready: boolean;
@@ -101,5 +104,5 @@ export function useTopstitchLengthsMm(): {
       return known;
     };
   }, [index, refs, sizeIds, sizeNames]);
-  return { read, ready: !wanted || !geometry.isLoading };
+  return { read, ready: !wanted || (!geometry.isLoading && !geometry.isError && !!index) };
 }
