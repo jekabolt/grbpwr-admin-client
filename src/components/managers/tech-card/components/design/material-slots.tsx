@@ -70,6 +70,7 @@ import { useTopstitchLineTeardown } from '../use-topstitch-line-teardown';
 import { TopstitchThreadModal } from '../topstitch-thread-fields';
 import type { TopstitchOperation } from '../topstitch-lines';
 import { measured } from '../use-colourway-auto';
+import { bomLineHold, type BomLineHold } from '../bom-line-hold';
 import { formQtySteps, slotNorm, type FormQtyOperation, type SlotNorm } from './slot-norm';
 
 /**
@@ -497,6 +498,11 @@ export function MaterialSlots({
                     blockersOf={blockersOf}
                     norm={stripNorm(lines[index])}
                     topstitch={topstitchKeys.has(lines[index].lineKey?.trim() ?? '')}
+                    hold={bomLineHold(
+                      lines[index].lineKey,
+                      cutStrips,
+                      operations as TopstitchOperation[] | undefined,
+                    )}
                     counted={slotNorm(lines[index], qtySteps, cutKeys)}
                     auxMode={auxMode}
                     sizeIds={sizeIds}
@@ -576,6 +582,7 @@ function SlotRow({
   blockersOf,
   norm,
   topstitch,
+  hold,
   counted,
   auxMode,
   sizeIds,
@@ -597,6 +604,8 @@ function SlotRow({
   blockersOf: (line: Line) => Blocker[];
   norm: string;
   topstitch: boolean;
+  /** Строку режут полосы или шьют линии отстрочки: единица и назначение заперты (Р2). */
+  hold: BomLineHold;
   /** Счётная норма слота: Σ шагов, ручное число или ничего (мерная / режется в длину). */
   counted: SlotNorm;
   auxMode: 'own' | 'bought' | null;
@@ -673,6 +682,9 @@ function SlotRow({
    * читаем, и сказано почему; не привязана — поля ЕЁ, и пишет их тот же орган, что там же.
    */
   const linked = wireInt(line.materialId) > 0;
+  // Полосы и линии отстрочки держат единицу и назначение строки: смена превращала карту в
+  // несохраняемую. Сняли полосы и линии — ячейки снова живые (всё из живой формы).
+  const unitLocked = linked || hold.held;
   /**
    * ЧИТАЕМАЯ ПРОЕКЦИЯ СНИМКА. Сырой JSON человеку нечитаем, а показать его сырым — ровно тот
    * дефект, ради которого `formatCompositionCell` и написана (она же стоит на бумаге). Пусто в
@@ -801,7 +813,7 @@ function SlotRow({
         title={axisTitle}
       >
         {rollGoods &&
-          (readOnly ? (
+          (readOnly || hold.held ? (
             <Text
               size='micro'
               variant='label'
@@ -822,6 +834,14 @@ function SlotRow({
                 label='purpose'
                 // One writer with the BOM tab: the scope's only line takes its sheets along.
                 onValueChange={(value: string | undefined) => {
+                  if (
+                    bomLineHold(
+                      getValues(`bomItems.${index}.lineKey`) as string | undefined,
+                      getValues('cutStrips'),
+                      getValues('operations') as TopstitchOperation[] | undefined,
+                    ).held
+                  )
+                    return;
                   const out = changeLinePurpose(getValues, setValue, index, value ?? UNSET_PURPOSE);
                   if (out.kind !== 'done') {
                     useSnackBarStore
@@ -954,7 +974,7 @@ function SlotRow({
               />
             </div>
             <div className='w-[52px] shrink-0 border-l border-hairline' data-b16-unit={index}>
-              {linked ? (
+              {unitLocked ? (
                 /* ЕДИНИЦА ПРИВЯЗАННОЙ СТРОКИ — СНИМОК СЛОТА, ровно как её состав слева:
                    `materialLineFields` кладёт сюда единицу строки (для THREAD — `m`) при привязке, и вкладка BOM
                    своего писателя на этой ветке тоже не рисует. Причина названа один раз на
