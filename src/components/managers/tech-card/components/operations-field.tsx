@@ -1,5 +1,7 @@
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
+import type { ChangeTechCardSeamsRequest } from 'api/proto-http/admin';
+import { runSeamChange } from './assembly-seams/seam-change';
 import { MaterialThumb } from 'components/managers/materials/components/material-thumb';
 import {
   common_TechCardButtonholeOrientation,
@@ -297,6 +299,7 @@ import {
   runStepRemovalChange,
   quietCleanupChange,
   runStepRemovalCleanup,
+  cleanupCall,
   stepRemovalRowsInDoubt,
   runStepRemovalRedoChange,
   runStepRemovalUndoChange,
@@ -379,7 +382,10 @@ import {
 import { opPieceRefs } from 'lib/dxf-reconcile/defaults';
 import { useTechCardAutosave } from './design/autosave-contract';
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
-import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
+import {
+  techCardKeys,
+  useTechCard,
+} from 'components/managers/tech-cards/components/useTechCardQuery';
 import {
   clearStepLinksOwed,
   clearStepRemovalOwed,
@@ -6535,6 +6541,7 @@ export function OperationsField({
     [],
   );
   const removalCleanupFlight = useRef<Promise<void> | null>(null);
+  const cleanupQueryClient = useQueryClient();
   // Set beside `undoHistoryApi` below: a cleanup that deletes rows cuts the card history.
   const cutHistoryForCleanup = useRef<() => void>(() => undefined);
 
@@ -6568,8 +6575,25 @@ export function OperationsField({
             // C1: the function, not a prebuilt delete, is queued. `runSeamChange` rebuilds it only
             // after its body flush and on lock_version_moved, under the version that saved those
             // operation links. A newly linked row therefore never reaches a delete request.
-            change: quietCleanupChange(entry.candidateKeys, (input) =>
-              sourceStepWrites.change(input, { verb: 'removal', quiet: true }),
+            // The door is called here, not through the seam writes: its server call marks a sent
+            // delete that ended without a server answer (the rows may be gone) for the step undo.
+            change: quietCleanupChange(entry.candidateKeys, async (input) =>
+              sourceStepWrites.frozen
+                ? { ok: false, why: 'frozen' }
+                : runSeamChange(
+                    cardId,
+                    input,
+                    { verb: 'removal', quiet: true },
+                    {
+                      call: cleanupCall(entry.historyKey, (req: ChangeTechCardSeamsRequest) =>
+                        adminService.ChangeTechCardSeams(req),
+                      ),
+                      settled: (id) =>
+                        void cleanupQueryClient.invalidateQueries({
+                          queryKey: techCardKeys.detail(id),
+                        }),
+                    },
+                  ),
             ),
             cutHistory: () => cutHistoryForCleanup.current(),
             clear: () => clearRemovalDebt(cardId, entry),
@@ -6581,7 +6605,7 @@ export function OperationsField({
       });
       removalCleanupFlight.current = flight;
     },
-    [clearRemovalDebt, getValues, sourceStepWrites],
+    [cleanupQueryClient, clearRemovalDebt, getValues, sourceStepWrites],
   );
 
   const replayedRemovalCard = useRef<number | null>(null);

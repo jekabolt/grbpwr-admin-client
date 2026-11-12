@@ -3,6 +3,7 @@ import type { StoredPose, StoredRow, StoredSeam } from 'lib/seams';
 import type { OwedStepRemoval } from './card-owed';
 import type { SeamChangeInput, SeamChangeResult } from './assembly-seams/seam-change';
 import type { SeamChange, StepRef } from './assembly-seams/seam-change-plan';
+import { isLockMoved } from './assembly-seams/seam-change-plan';
 import { reuseKeys, useSeamsStore } from './assembly-seams/seams-store';
 import { heldSeamKeys } from './step-seams/step-removal-seams';
 
@@ -274,15 +275,33 @@ const cleanupRetryable = (why: string): boolean => {
   );
 };
 
-/** The delete may have landed although its answer was lost: the store's rows prove nothing. */
-const lostReply = (why: string): boolean => {
-  const value = why.toLowerCase();
-  return (
-    value.includes('failed to fetch') ||
-    value.includes('network') ||
-    value.includes('server did not answer')
-  );
+/**
+ * A server answer: an HTTP 4xx, or the card-moved refusal the door retries. A sent request that
+ * ends any other way (no network in any browser, a 5xx gateway, an answer cut mid-body) leaves the
+ * delete's outcome unknown: it may have landed.
+ */
+const serverAnswered = (e: unknown): boolean => {
+  const status = (e as { status?: unknown } | null)?.status;
+  return (typeof status === 'number' && status >= 400 && status < 500) || isLockMoved(e);
 };
+
+/** History keys whose cleanup request went out and ended without a server answer. */
+const unclearCalls = new Set<string>();
+
+/** The cleanup door's server call, marking a sent delete whose outcome is unknown. */
+export function cleanupCall<Req, Res>(
+  historyKey: string,
+  call: (req: Req) => Promise<Res>,
+): (req: Req) => Promise<Res> {
+  return async (req) => {
+    try {
+      return await call(req);
+    } catch (e) {
+      if (!serverAnswered(e)) unclearCalls.add(historyKey);
+      throw e;
+    }
+  };
+}
 
 /** History key → the store's row list when a cleanup delete lost its answer. */
 const rowsInDoubt = new Map<string, readonly StoredSeam[]>();
@@ -337,6 +356,7 @@ export async function runStepRemovalCleanup(
     return { delete: lastKeys };
   };
   let changed: SeamChangeResult;
+  unclearCalls.delete(entry.historyKey);
   try {
     changed = await io.change(build);
   } catch {
@@ -349,8 +369,12 @@ export async function runStepRemovalCleanup(
     io.clear();
     return true;
   }
-  if (lostReply(changed.why)) rowsInDoubt.set(entry.historyKey, io.rows().seams);
-  else rowsInDoubt.delete(entry.historyKey);
+  // The delete went out and no answer proves it did not land: keep the debt, distrust the rows.
+  if (unclearCalls.has(entry.historyKey)) {
+    rowsInDoubt.set(entry.historyKey, io.rows().seams);
+    return false;
+  }
+  rowsInDoubt.delete(entry.historyKey);
   // A transient queue, validation or network refusal retries after the next successful body save.
   // A server contradiction is stable for this debt and is dropped silently instead of spinning.
   if (!cleanupRetryable(changed.why)) io.clear();

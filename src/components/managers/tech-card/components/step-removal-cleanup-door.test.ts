@@ -14,6 +14,7 @@ import type { SeamFormBridge } from './assembly-seams/seam-form-bridge';
 import { hydrateSeams, resetSeams, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
 import type { OwedStepRemoval } from './card-owed';
 import {
+  cleanupCall,
   quietCleanupChange,
   runStepRemovalCleanup,
   runStepRemovalUndoChange,
@@ -79,7 +80,10 @@ function harness(call: SeamChangeDeps['call'], over: Partial<SeamFormBridge> = {
     reread: async () => ({ ok: false, why: 'no read' }),
     ...over,
   };
-  const deps: SeamChangeDeps = { call, bridge: (id) => (id === CARD ? bridge : undefined) };
+  const deps: SeamChangeDeps = {
+    call: cleanupCall(entry.historyKey, call),
+    bridge: (id) => (id === CARD ? bridge : undefined),
+  };
   const clear = vi.fn();
   const run = () =>
     runStepRemovalCleanup(entry, {
@@ -219,12 +223,12 @@ describe('a lost cleanup reply, then the step undo', () => {
     candidateKeys: entry.candidateKeys,
   };
 
-  async function lostDelete() {
+  async function lostDelete(thrown: () => unknown = () => new Error('Failed to fetch')) {
     const sent: ChangeTechCardSeamsRequest[] = [];
     const h = harness(async (req) => {
       sent.push(req);
       // The server applied the delete; the answer never came back.
-      throw new Error('Failed to fetch');
+      throw thrown();
     });
     await h.run();
     return { h, sent };
@@ -306,7 +310,7 @@ describe('a lost cleanup reply, then the step undo', () => {
             CARD,
             input,
             { verb: 'removal', quiet: true },
-            { call, bridge: () => h.bridge },
+            { call: cleanupCall(entry.historyKey, call), bridge: () => h.bridge },
           ),
         ),
         clear: h.clear,
@@ -324,4 +328,36 @@ describe('a lost cleanup reply, then the step undo', () => {
     expect(u.restored).toHaveLength(1);
     expect(u.refused).toEqual([]);
   });
+  const status = (code: number, text: string) =>
+    Object.assign(new Error(`Error: ${code} - ${text}`), { status: code });
+
+  it.each([
+    ['Safari without network', () => new TypeError('Load failed')],
+    ['a gateway during a backend restart', () => status(502, 'Bad Gateway')],
+    ['an answer cut after the write', () => new SyntaxError('Unexpected end of JSON input')],
+  ])('%s: the debt stays and the undo does not trust the rows', async (_, thrown) => {
+    const { h } = await lostDelete(thrown);
+    expect(h.clear).not.toHaveBeenCalled();
+    const call = vi.fn<SeamChangeDeps['call']>();
+    const u = undo(h, call);
+    expect(await u.done).toBe(false);
+    expect(call).not.toHaveBeenCalled();
+    expect(u.restored).toHaveLength(0);
+    expect(u.refused).toEqual(['still saving']);
+  });
+
+  it.each([
+    ['409', () => status(409, 'Conflict')],
+    ['400', () => status(400, 'Bad Request')],
+  ])(
+    'a server refusal %s is a sure outcome: no doubt, the undo plans from the rows',
+    async (_, thrown) => {
+      const { h } = await lostDelete(thrown);
+      const call = vi.fn<SeamChangeDeps['call']>();
+      const u = undo(h, call);
+      expect(await u.done).toBe(true);
+      expect(call).not.toHaveBeenCalled();
+      expect(u.refused).toEqual([]);
+    },
+  );
 });
