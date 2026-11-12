@@ -1352,6 +1352,13 @@ export const spanMm = (line: readonly Pt2[]) => {
   return Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
 };
 
+/**
+ * One React key per drawn stretch. Two stretches of one edge share its id; with a shared key React
+ * loses track of the first and leaves its path in the picture after the step changes.
+ */
+export const stepLineKey = (part: SidePart, index: number) =>
+  `step-edge:${part.target}:${part.range?.join('-') ?? ''}:${index}`;
+
 export function rangedPicturePoints(
   points: readonly Pt2[],
   range: readonly [number, number] | undefined,
@@ -2457,13 +2464,13 @@ export function StepPictureSvg({
     marks.flatMap((m) => (m.tone === 'pickFirst' ? [pieceOfId(m.id)] : [])),
   );
   const pickFirstPieces = pieces.filter((piece) => pickFirstKeys.has(piece.key));
-  const stepLines = (stepParts ?? []).flatMap((part) => {
+  const stepLines = (stepParts ?? []).flatMap((part, index) => {
     if (marks.some((m) => m.id === part.target && isPick(m.tone))) return [];
     const points = ptsOf(part.target);
     const edge = resolveEdge(part.target, geoms);
     const ranged = points && rangedPicturePoints(points, part.range, edge?.len ?? 0);
     const shown = ranged && pointsOnDrawnPiece(pieceOfId(part.target), ranged);
-    return shown ? [{ id: part.target, points: shown }] : [];
+    return shown ? [{ id: part.target, key: stepLineKey(part, index), points: shown }] : [];
   });
   const actionLinePaths = drawnActionLines.flatMap((line) => {
     if (stepEdges && line.target && line.kind !== 'topstitch' && !stepEdgeSet.has(line.target))
@@ -3109,9 +3116,9 @@ export function StepPictureSvg({
           data-seam-mark={m.tone}
         />
       ))}
-      {stepLines.map(({ id, points }) => (
+      {stepLines.map(({ id, key, points }) => (
         <path
-          key={`step-edge:${id}`}
+          key={key}
           d={pathOf(points)}
           fill='none'
           stroke={stepColor}
@@ -3309,7 +3316,7 @@ export function StepPictureSvg({
           const at = labelAt(i);
           return at ? (
             <text
-              key={`l:${m.id}`}
+              key={`l:${m.id}:${i}`}
               x={at[0]}
               y={at[1]}
               textAnchor={s.anchor}

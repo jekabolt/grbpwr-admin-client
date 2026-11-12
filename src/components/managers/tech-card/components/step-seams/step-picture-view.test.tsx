@@ -13,6 +13,7 @@ import {
   buttonRadiusPx,
   drawnRing,
   stepActionMarks,
+  stepLineKey,
   StepPictureSvg,
   withoutCoveredDoors,
   type EdgeMark,
@@ -91,6 +92,7 @@ const renderPicture = ({
   stacked,
   marks,
   stepEdges,
+  stepParts,
   actionGlyphs,
   noSeamText,
   picture = layout,
@@ -100,6 +102,7 @@ const renderPicture = ({
   stacked?: readonly (readonly [string, string])[];
   marks?: readonly EdgeMark[];
   stepEdges?: readonly string[];
+  stepParts?: readonly { target: string; range?: readonly [number, number] }[];
   actionGlyphs?: readonly PictureActionGlyph[];
   noSeamText?: string;
   picture?: StepLayout;
@@ -117,6 +120,7 @@ const renderPicture = ({
       geoms={geoms}
       marks={marks}
       stepEdges={stepEdges}
+      stepParts={stepParts}
       actionGlyphs={actionGlyphs}
       noSeamText={noSeamText}
     />,
@@ -1018,6 +1022,21 @@ describe('StepPictureSvg step highlight', () => {
     expect(edgeTag(print)).toContain('stroke="var(--color-textColor)"');
     expect(edgeTag(print)).toContain('stroke-width="2.205"');
     expect(screen).toContain('stroke="var(--color-borderColor)" stroke-width="3.2"');
+  });
+
+  // A seam that leaves an edge for a pocket and returns to it: two stretches, one edge id.
+  it('draws both stretches of one edge and keys each drawn line apart', () => {
+    const stepParts = [
+      { target: 'bag#0', range: [0, 20] as const },
+      { target: 'bag#0', range: [50, 70] as const },
+    ];
+    const markup = renderPicture({ look: 'tile', stepEdges: ['bag#0'], stepParts });
+
+    expect(markup.match(/data-step-seam-edge="bag#0"/g)).toHaveLength(2);
+    const keys = stepParts.map(stepLineKey);
+    expect(new Set(keys).size).toBe(keys.length);
+    // Even the same stretch listed twice must not collide.
+    expect(stepLineKey(stepParts[0], 0)).not.toBe(stepLineKey(stepParts[0], 1));
   });
 
   it('marks a known rowless picture without highlighting an edge or printing a length', () => {
