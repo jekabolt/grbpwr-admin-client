@@ -6802,6 +6802,8 @@ export function OperationsField({
     const run = redo ? runStepRemovalRedoChange : runStepRemovalChange;
     return run<RemovalChangeSnapshot>({
       settle: waitForSeamWritesToSettle,
+      // Step removal cuts the card history; the step's own record is its only way back.
+      cutHistory: () => undoHistoryApi.cut('step-removal'),
       snapshot: () => {
         const operations = (getValues('operations') ?? []) as OperationFormValue[];
         const currentIndex = operations.findIndex(
@@ -8498,6 +8500,15 @@ export function OperationsField({
         candidateKeys: rec.cleanupKeys ?? linkKeys(rec.row),
       },
       {
+        alreadyBack: () =>
+          ((getValues('operations') ?? []) as OperationFormValue[]).some(
+            (op) => op.historyKey === rec.historyKey,
+          ),
+        close: () => {
+          if (techCardId && rec.operationNumber)
+            clearStepRemovalOwed(techCardId, rec.historyKey, rec.operationNumber);
+          if (peekUndo(history.current) === rec) setHistory(dropUndoTop(history.current));
+        },
         validate: () => {
           const seamState = useSeamsStore.getState();
           const operations = (getValues('operations') ?? []) as OperationFormValue[];

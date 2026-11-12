@@ -59,6 +59,12 @@ export type StepRemovalIo<TSnapshot> = {
   /** Older seam writes settle before the snapshot; false is the bounded wait's refusal. */
   settle: () => Promise<boolean>;
   snapshot: () => TSnapshot | null;
+  /**
+   * Cut the card's undo history before the form edit. The confirm click opens a card gesture and
+   * the settle resolves in a microtask, so without the cut the removal's own writes land in that
+   * gesture and a card UNDO brings the step back without its seam rows.
+   */
+  cutHistory: () => void;
   /** One synchronous form edit: binding teardown first, then the step removal. */
   remove: (snapshot: TSnapshot) => void;
   /** The undo record is pushed before durable cleanup is recorded. */
@@ -78,6 +84,7 @@ export async function runStepRemovalChange<TSnapshot>(
   }
   const snapshot = io.snapshot();
   if (!snapshot) return false;
+  io.cutHistory();
   io.remove(snapshot);
   io.record(snapshot);
   io.owe(snapshot);
@@ -139,6 +146,10 @@ export function mapStepRemovalRow<TRow extends StepLinkRow>(
 export type StepRemovalUndoIo<TRow extends StepLinkRow, TInserted> = {
   /** Frozen, sequence and missing-piece validation runs before any wait or write. */
   validate: () => string | null;
+  /** The step with the record's history key is in the form again, whatever brought it back. */
+  alreadyBack: () => boolean;
+  /** Close the record without an insert or a request: the step is already there. */
+  close: () => void;
   /** Waits for a cleanup already in the seam queue, then for every older seam write. */
   settle: () => Promise<boolean>;
   rows: () => { seams: readonly StoredSeam[]; poses: readonly StoredPose[] };
@@ -159,6 +170,10 @@ export async function runStepRemovalUndoChange<TRow extends StepLinkRow, TInsert
   snapshot: StepRemovalSnapshot<TRow>,
   io: StepRemovalUndoIo<TRow, TInserted>,
 ): Promise<boolean> {
+  if (io.alreadyBack()) {
+    io.close();
+    return false;
+  }
   const refused = io.validate();
   if (refused) {
     io.refuse(refused);
@@ -166,6 +181,10 @@ export async function runStepRemovalUndoChange<TRow extends StepLinkRow, TInsert
   }
   if (!(await io.settle())) {
     io.refuse(io.unsettled);
+    return false;
+  }
+  if (io.alreadyBack()) {
+    io.close();
     return false;
   }
   const refusedAfterWait = io.validate();

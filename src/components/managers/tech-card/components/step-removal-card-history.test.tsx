@@ -1,0 +1,327 @@
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { act, createElement } from 'react';
+import { useForm, type UseFormReturn } from 'react-hook-form';
+
+import type { StoredRow } from 'lib/seams';
+
+import type { SeamChange } from './assembly-seams/seam-change-plan';
+import type { TechCardFormData } from './schema';
+import { CARD6_SEAMS } from './step-seams/card6.fixture';
+import {
+  runStepRemovalChange,
+  runStepRemovalUndoChange,
+  type StepRemovalIo,
+  type StepRemovalRows,
+} from './step-removal-change';
+import {
+  useTechCardUndoHistory,
+  type UndoHistoryApi,
+  type UndoHistoryCaptureProps,
+} from './undo-history';
+import type { AutosaveController } from './useTechCardAutosave';
+
+// The REAL card history (`useTechCardUndoHistory`) and the real react-hook-form, mounted by
+// react-dom without a DOM library: the hook only needs `window` timers, `HTMLElement#closest` on
+// event targets and a container react-dom can listen on. The step side is a thin stand-in for
+// operations-field's removal record; the order of form writes, record and debt is the product's
+// (`runStepRemovalChange` / `runStepRemovalUndoChange`).
+
+class FakeElement {
+  dataset: Record<string, string> = {};
+  constructor(private readonly owned = false) {}
+  closest(selector: string) {
+    return this.owned && selector.includes('data-history-owner') ? this : null;
+  }
+  getAttribute() {
+    return null;
+  }
+}
+
+const g = globalThis as Record<string, unknown>;
+const listeners = { addEventListener: () => undefined, removeEventListener: () => undefined };
+
+beforeAll(() => {
+  g.IS_REACT_ACT_ENVIRONMENT = true;
+  g.HTMLElement ??= FakeElement;
+  g.HTMLInputElement ??= class extends FakeElement {};
+  g.HTMLTextAreaElement ??= class extends FakeElement {};
+  g.window ??= Object.assign(globalThis, listeners);
+});
+
+const [seamA] = [...CARD6_SEAMS.values()];
+
+type Op = {
+  historyKey: string;
+  operationNumber: number;
+  seamKeys: string[];
+  poseKeys: string[];
+};
+type Form = { name: string; operations: Op[] };
+type Rec = { historyKey: string; row: Op; rows: StepRemovalRows; at: number };
+
+const ops0 = (): Op[] => [
+  { historyKey: 'h10', operationNumber: 10, seamKeys: [], poseKeys: [] },
+  { historyKey: 'h20', operationNumber: 20, seamKeys: [seamA.seamKey], poseKeys: [] },
+  { historyKey: 'h30', operationNumber: 30, seamKeys: [], poseKeys: [] },
+];
+
+const autosave = {
+  status: 'idle',
+  whenSettled: async () => undefined,
+  request: () => undefined,
+  holdWrites: () => () => undefined,
+  flush: async () => 'ok',
+} as unknown as AutosaveController;
+
+const latest: {
+  api?: UndoHistoryApi;
+  capture?: UndoHistoryCaptureProps;
+  form?: UseFormReturn<Form>;
+} = {};
+
+function Harness() {
+  const form = useForm<Form>({ defaultValues: { name: 'card', operations: ops0() } });
+  const { api, captureProps } = useTechCardUndoHistory({
+    enabled: true,
+    form: form as unknown as UseFormReturn<TechCardFormData>,
+    autosave,
+  });
+  latest.api = api;
+  latest.capture = captureProps;
+  latest.form = form;
+  return null;
+}
+
+const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+const outside = () =>
+  ({ nativeEvent: { isTrusted: true }, target: new FakeElement(false) }) as never;
+/** A click whose DOM target is outside every history owner, e.g. the confirm dialog in a portal. */
+const clickOutside = () => {
+  latest.capture!.onPointerDownCapture(outside());
+  latest.capture!.onPointerUpCapture(outside());
+  latest.capture!.onClickCapture(outside());
+};
+const ops = () => latest.form!.getValues('operations');
+const keys = () => ops().map((op) => op.historyKey);
+
+let root: { render: (node: unknown) => void; unmount: () => void } | undefined;
+let stepUndo: Rec[];
+let owed: Set<string>;
+let server: StepRemovalRows;
+let changes: SeamChange[];
+let refusals: string[];
+let pending: Promise<boolean> | undefined;
+
+const syncOwner = () =>
+  latest.api!.setOwner({
+    undoDepth: stepUndo.length,
+    redoDepth: 0,
+    undo: () => {
+      pending = undoTop();
+    },
+    redo: () => undefined,
+  });
+
+const removalIo = (historyKey: string): StepRemovalIo<Rec> => ({
+  // Nothing in flight: the product's wait resolves in a microtask, inside the click's task.
+  settle: () => Promise.resolve(true),
+  snapshot: () => {
+    const at = keys().indexOf(historyKey);
+    if (at < 0) return null;
+    return {
+      historyKey,
+      row: structuredClone(ops()[at]),
+      rows: { seams: structuredClone(server.seams), poses: [] },
+      at,
+    };
+  },
+  cutHistory: () => latest.api!.cut('step-removal'),
+  remove: (rec) =>
+    latest.form!.setValue(
+      'operations',
+      ops().filter((op) => op.historyKey !== rec.historyKey),
+      { shouldDirty: true },
+    ),
+  record: (rec) => {
+    stepUndo.push(rec);
+    syncOwner();
+  },
+  owe: (rec) => owed.add(rec.historyKey),
+  refuse: (why) => refusals.push(why),
+  unsettled: 'still saving',
+});
+
+function undoTop(settle: () => Promise<boolean> = () => Promise.resolve(true)) {
+  const rec = stepUndo.at(-1)!;
+  const close = () => {
+    stepUndo.pop();
+    syncOwner();
+  };
+  return runStepRemovalUndoChange<Op, { at: number }>(
+    {
+      step: { historyKey: rec.historyKey },
+      row: structuredClone(rec.row),
+      rows: structuredClone(rec.rows),
+      operationNumber: rec.row.operationNumber,
+      candidateKeys: rec.row.seamKeys,
+    },
+    {
+      validate: () => null,
+      alreadyBack: () => keys().includes(rec.historyKey),
+      close: () => {
+        owed.delete(rec.historyKey);
+        close();
+      },
+      settle,
+      rows: () => server,
+      change: async (input) => {
+        const change = (typeof input === 'function' ? input() : input) as SeamChange;
+        changes.push(change);
+        server = {
+          seams: [...server.seams, ...(change.upsert as StoredRow[] as never[])],
+          poses: [],
+        };
+        return { ok: true, keyMap: new Map(), deletedKeys: [], lockVersion: 2 };
+      },
+      restore: (row) => {
+        const next = [...ops()];
+        next.splice(rec.at, 0, row);
+        latest.form!.setValue('operations', next, { shouldDirty: true });
+        return { at: rec.at };
+      },
+      clearOwed: () => owed.delete(rec.historyKey),
+      finishHistory: close,
+      select: () => undefined,
+      refuse: (why) => refusals.push(why),
+      unsettled: 'still saving',
+    },
+  );
+}
+
+/** One header UNDO; an owner-side undo is fire-and-forget in the hook, so wait for it too. */
+async function undo() {
+  pending = undefined;
+  await act(async () => {
+    await latest.api!.undo();
+    await pending;
+  });
+  await act(tick);
+}
+
+async function removeStep(historyKey: string) {
+  await act(async () => {
+    clickOutside();
+    await runStepRemovalChange(removalIo(historyKey));
+  });
+  await act(tick);
+}
+
+async function editName(value: string) {
+  await act(async () => {
+    clickOutside();
+    latest.form!.setValue('name', value, { shouldDirty: true });
+  });
+  await act(tick);
+}
+
+beforeEach(async () => {
+  stepUndo = [];
+  owed = new Set();
+  server = { seams: [structuredClone(seamA)], poses: [] };
+  changes = [];
+  refusals = [];
+  const { createRoot } = await import('react-dom/client');
+  // `defaultView` lets the commit phase look for a focused element without a real document.
+  const view = { document: { activeElement: null }, HTMLIFrameElement: class {} };
+  const doc = { nodeType: 9, defaultView: view, ...listeners };
+  const container = {
+    nodeType: 1,
+    nodeName: 'DIV',
+    tagName: 'DIV',
+    namespaceURI: 'http://www.w3.org/1999/xhtml',
+    ownerDocument: doc,
+    ...listeners,
+  };
+  root = createRoot(container as never) as never;
+  await act(async () => root!.render(createElement(Harness)));
+  await act(async () => syncOwner());
+});
+
+afterEach(async () => {
+  await act(async () => root?.unmount());
+});
+
+describe('step removal against the real card history', () => {
+  it('removal opened by an outside click never lands in card history; UNDO reaches undoRemoval', async () => {
+    await removeStep('h20');
+    expect(keys()).toEqual(['h10', 'h30']);
+    await editName('edited');
+    // The body save went out and the cleanup deleted the free seam row.
+    server = { seams: [], poses: [] };
+    owed.delete('h20');
+
+    await undo();
+    expect(latest.form!.getValues('name')).toBe('card');
+    expect(keys()).toEqual(['h10', 'h30']);
+
+    await undo();
+    expect(changes).toHaveLength(1);
+    expect(changes[0].upsert?.map((row) => row.seamKey)).toEqual([seamA.seamKey]);
+    expect(keys()).toEqual(['h10', 'h20', 'h30']);
+    expect(ops()[1].seamKeys).toEqual([seamA.seamKey]);
+    expect(stepUndo).toHaveLength(0);
+
+    await undo();
+    expect(keys()).toEqual(['h10', 'h20', 'h30']);
+    expect(changes).toHaveLength(1);
+    expect(refusals).toEqual([]);
+  });
+
+  it('immediate card UNDO before any save goes through undoRemoval: debt and step record agree', async () => {
+    await removeStep('h20');
+    expect(owed.has('h20')).toBe(true);
+    expect(latest.api!.canUndo).toBe(true);
+
+    await undo();
+    expect(keys()).toEqual(['h10', 'h20', 'h30']);
+    // Rows were never cleaned up: the zero-request branch.
+    expect(changes).toHaveLength(0);
+    expect(owed.has('h20')).toBe(false);
+    expect(stepUndo).toHaveLength(0);
+
+    await undo();
+    expect(keys()).toEqual(['h10', 'h20', 'h30']);
+    expect(refusals).toEqual([]);
+  });
+
+  it('guard: a step already back closes the record with no insert and no request', async () => {
+    await removeStep('h20');
+    server = { seams: [], poses: [] };
+    // The step came back some other way (a draft, a reload) before UNDO reached the step side.
+    await act(async () => latest.form!.setValue('operations', ops0()));
+
+    await act(async () => {
+      await undoTop();
+    });
+    expect(keys()).toEqual(['h10', 'h20', 'h30']);
+    expect(changes).toHaveLength(0);
+    expect(stepUndo).toHaveLength(0);
+    expect(owed.has('h20')).toBe(false);
+    expect(refusals).toEqual([]);
+  });
+
+  it('guard: a step that comes back while undo waits closes the record after the wait', async () => {
+    await removeStep('h20');
+    server = { seams: [], poses: [] };
+    await act(async () => {
+      await undoTop(async () => {
+        latest.form!.setValue('operations', ops0());
+        return true;
+      });
+    });
+    expect(keys()).toEqual(['h10', 'h20', 'h30']);
+    expect(changes).toHaveLength(0);
+    expect(stepUndo).toHaveLength(0);
+    expect(refusals).toEqual([]);
+  });
+});

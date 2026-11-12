@@ -104,6 +104,7 @@ describe('step removal sequencing', () => {
       runStepRemovalChange({
         settle: async () => true,
         snapshot: () => snapshot,
+        cutHistory: () => undefined,
         remove: () => form.splice(1, 1),
         record: (record) => {
           history = record;
@@ -134,6 +135,7 @@ describe('step removal sequencing', () => {
       runStepRemovalChange({
         settle: async () => true,
         snapshot: () => snapshot,
+        cutHistory: () => undefined,
         remove: () => form.splice(0, 1),
         record: vi.fn(),
         owe: vi.fn(),
@@ -154,6 +156,8 @@ describe('step removal sequencing', () => {
 
     await expect(
       runStepRemovalUndoChange(snapshot, {
+        alreadyBack: () => false,
+        close: () => undefined,
         validate: () => null,
         settle: async () => true,
         rows: () => snapshot.rows,
@@ -183,6 +187,8 @@ describe('step removal sequencing', () => {
 
     await expect(
       runStepRemovalUndoChange(snapshot, {
+        alreadyBack: () => false,
+        close: () => undefined,
         validate: () => null,
         settle: async () => true,
         rows: () => ({ seams: [], poses: [] }),
@@ -331,6 +337,7 @@ describe('step removal sequencing', () => {
       runStepRemovalRedoChange({
         settle: async () => true,
         snapshot: () => structuredClone(snapshot),
+        cutHistory: () => undefined,
         remove: () => form.splice(0, 1),
         record: (fresh) => {
           recorded = fresh;
@@ -380,6 +387,7 @@ describe('step removal sequencing', () => {
     await runStepRemovalChange({
       settle: async () => true,
       snapshot: () => snapshot,
+      cutHistory: () => undefined,
       remove: () => {
         strips = [];
         form[1].inputKeys = [...snapshot.patch.after];
@@ -416,6 +424,8 @@ describe('step removal sequencing', () => {
 
     const undoUpserts: string[][] = [];
     await runStepRemovalUndoChange(snapshot, {
+      alreadyBack: () => false,
+      close: () => undefined,
       validate: () => null,
       settle: async () => true,
       rows: () => savedRows,
@@ -445,6 +455,7 @@ describe('step removal sequencing', () => {
     await runStepRemovalRedoChange({
       settle: async () => true,
       snapshot: () => snapshot,
+      cutHistory: () => undefined,
       remove: () => {
         strips = [];
         form[1].inputKeys = [...snapshot.patch.after];
@@ -491,6 +502,8 @@ describe('step removal sequencing', () => {
 
     const undoChange = vi.fn();
     await runStepRemovalUndoChange(snapshot, {
+      alreadyBack: () => false,
+      close: () => undefined,
       validate: () => null,
       settle: async () => true,
       rows: () => snapshot.rows,
@@ -520,6 +533,8 @@ describe('step removal sequencing', () => {
     ];
     const refuse = vi.fn();
     const io = {
+      alreadyBack: () => false,
+      close: () => undefined,
       validate: () => null,
       settle: async () => true,
       rows: () => ({ seams: [], poses: [] }),
@@ -557,6 +572,8 @@ describe('step removal sequencing', () => {
     let restored: { row: Row; stripSeamKey: string } | null = null;
 
     await runStepRemovalUndoChange(snapshot, {
+      alreadyBack: () => false,
+      close: () => undefined,
       validate: () => null,
       settle: async () => true,
       rows: () => ({ seams: [], poses: [] }),
@@ -601,6 +618,8 @@ describe('step removal sequencing', () => {
       });
       const change = vi.fn(async () => changed());
       const undo = runStepRemovalUndoChange(snapshot, {
+        alreadyBack: () => false,
+        close: () => undefined,
         validate: () => null,
         settle: async () => {
           await cleanup;
@@ -629,6 +648,8 @@ describe('step removal sequencing', () => {
     const form: Row[] = [];
 
     await runStepRemovalUndoChange(snapshot, {
+      alreadyBack: () => false,
+      close: () => undefined,
       validate: () => null,
       settle: async () => true,
       rows: () => snapshot.rows,
@@ -654,6 +675,8 @@ describe('step removal sequencing', () => {
     const order: string[] = [];
 
     await runStepRemovalUndoChange(snapshot, {
+      alreadyBack: () => false,
+      close: () => undefined,
       validate: () => null,
       settle: async () => true,
       rows: () => ({ seams: [], poses: [] }),
