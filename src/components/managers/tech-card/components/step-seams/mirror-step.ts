@@ -31,8 +31,9 @@ import {
 import { decodeHandPlace, encodeHandPlace, isHandSeamKind } from './step-hand';
 import { mirrorPlacement } from './step-pose';
 import {
-  closedInner,
   inputGroups,
+  isClosedInner,
+  polylineLenMm,
   SAME_MM,
   stepInputPieces,
   type FormOpLike,
@@ -249,10 +250,12 @@ const innerAnchorsOnTwin = (
   const index = match ? Number(match[1]) : -1;
   const sourceLine = index >= 0 ? innerLines?.get(source.pieceKey)?.[index] : undefined;
   const targetLine = index >= 0 ? innerLines?.get(target.pieceKey)?.[index] : undefined;
-  const sourceContour = sourceLine && closedInner(sourceLine);
-  const targetContour = targetLine && closedInner(targetLine);
-  if (!sourceLine || !targetLine || !sourceContour || !targetContour) return null;
-  const tolerance = SAME_MM / sourceContour.lenMm;
+  if (!sourceLine || !targetLine || !isClosedInner(sourceLine) || !isClosedInner(targetLine))
+    return null;
+  const sourceLength = polylineLenMm(sourceLine);
+  const targetLength = polylineLenMm(targetLine);
+  if (!(sourceLength > 0) || !(targetLength > 0)) return null;
+  const tolerance = SAME_MM / sourceLength;
   const merged: [number, number][] = [];
   for (const range of anchors
     .map((item) => [Math.max(0, item.range[0]), Math.min(1, item.range[1])] as [number, number])
@@ -275,7 +278,7 @@ const innerAnchorsOnTwin = (
   const startsAfter = (gapAfter + 1) % merged.length;
   const sourceFrom = merged[startsAfter][0];
   const sourceTo = merged[gapAfter][1] + (startsAfter ? 1 : 0);
-  if ((sourceTo - sourceFrom) * sourceContour.lenMm <= SAME_MM) return [];
+  if ((sourceTo - sourceFrom) * sourceLength <= SAME_MM) return [];
   const sourceFrame = frameOf(source, grainDeg?.get(source.pieceKey) ?? 0);
   const targetFrame = frameOf(target, grainDeg?.get(target.pieceKey) ?? 0);
   const wrapShare = (share: number) => ((share % 1) + 1) % 1;
@@ -295,7 +298,7 @@ const innerAnchorsOnTwin = (
           [0, from],
         ];
   return ranges
-    .filter(([start, end]) => (end - start) * targetContour.lenMm > SAME_MM)
+    .filter(([start, end]) => (end - start) * targetLength > SAME_MM)
     .flatMap(([start, end]) => {
       const range: [number, number] = [roundedRange(start), roundedRange(end)];
       return range[1] > range[0] ? [{ ...base, range }] : [];

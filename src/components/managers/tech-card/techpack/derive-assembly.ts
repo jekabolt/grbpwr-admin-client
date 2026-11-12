@@ -61,8 +61,8 @@ import { stepHighlightOf } from 'components/managers/tech-card/components/step-s
 import { sideLengthMm } from 'components/managers/tech-card/components/step-seams/seam-length';
 import {
   innerSlice,
-  closedInner,
   innerSlices,
+  isClosedInner,
 } from 'components/managers/tech-card/components/step-seams/step-seams-model';
 import {
   buttonholeDirection,
@@ -974,8 +974,8 @@ function locateSeams(input: AssemblyInput): { seams: AsmSeam[]; unresolved: numb
       b: [],
       pieces: [piece],
       inner: { piece, index, pts: targetPoints, placement: placementOf(anchor) },
-      // A closed contour with corners is sewn side by side like an outline (C11): not a slit.
-      ...(closedInner(line) ? { surfaceRole: 'inner' as const } : {}),
+      // A closed contour is not a slit, even when the picker keeps it whole.
+      ...(isClosedInner(line) ? { surfaceRole: 'inner' as const } : {}),
     });
   }
   // operation order of the card is the drawing order; the stored order is only a tiebreak
