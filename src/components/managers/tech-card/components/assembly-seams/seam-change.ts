@@ -1,7 +1,8 @@
 // ONE SEAM GESTURE ON THE WIRE (C7). Every seam write of the page — accept, remove, a pose, MIRROR, a
 // DXF's dropped rows — goes through `runSeamChange`:
 //
-//   optimistic rows at once → (queued per card) flush the form → hold its autosave → the request,
+//   optimistic rows at once → (queued per card) flush the form (a user's gesture goes on past a form
+//   that only fails validation, C9) → hold its autosave → the request,
 //   claiming the version the form stands on → the form adopts the committed links and version →
 //   the store takes the server's list at that version → the hold is released.
 //
@@ -44,6 +45,14 @@ export type SeamChangeOpts = {
   gone?: readonly string[];
   /** The caller says the refusal itself: no inbox entry. */
   quiet?: boolean;
+  /**
+   * A user's seam gesture (C9): written even while the form cannot save because it does not validate.
+   * Only that refusal is passed; any other (a failed save, still saving, the conflict, the auxiliary
+   * confirm) stops the write as before. Steps are still addressed by their stored numbers only: one
+   * the form never saved or took away refuses the change. Off by default — every other writer
+   * (a DXF's dropped rows, undo, the step removal) needs the form saved first.
+   */
+  pastInvalidForm?: boolean;
 };
 
 export type SeamChangeDeps = {
@@ -152,8 +161,10 @@ export function runSeamChange(
     const bridge = bridgeOf(cardId);
     if (!bridge) return fail(NOT_SAVED);
     const flushed = await bridge.flush('seam');
-    if (!flushed.ok) return fail(flushed.why);
-    const held = await bridge.hold();
+    if (!flushed.ok && !(flushed.invalid && opts.pastInvalidForm)) return fail(flushed.why);
+    // Past a form that does not validate, the door judges its steps by the saved baseline (C9).
+    const door = flushed.ok ? undefined : { pastInvalidForm: true };
+    const held = await bridge.hold(door);
     try {
       if (held.refused) return fail(held.refused);
       for (let attempt = 0; ; attempt += 1) {
@@ -166,7 +177,7 @@ export function runSeamChange(
           res = await deps.call(req);
         } catch (e) {
           if (attempt === 0 && isLockMoved(e)) {
-            const fresh = await bridge.reread();
+            const fresh = await bridge.reread(door);
             if (!fresh.ok) return fail(fresh.why);
             takeRead(cardId, fresh.card);
             continue;

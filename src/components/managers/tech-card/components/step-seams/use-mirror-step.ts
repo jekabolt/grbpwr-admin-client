@@ -141,6 +141,8 @@ export function useMirrorStep({
         ctx.writes.change(change, {
           verb: plan.upsert.length > 1 ? `decisions (${plan.upsert.length})` : 'decision',
           gone,
+          // The user's gesture: written past a form that only fails validation (C9).
+          pastInvalidForm: true,
         }),
       link: (linked, foldKeys, layerOrder) => {
         const at = rowAt();
