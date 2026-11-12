@@ -134,8 +134,10 @@ import {
   adoptStepLinks,
   baseAfterSeamChange,
   registerSeamFormBridge,
+  seamFlushAnswer,
   stepNumberOf,
-  stepNumbersAgree,
+  seamStepsAgreeOf,
+  type SeamDoorOpts,
   type SeamFormBridge,
 } from './assembly-seams/seam-form-bridge';
 import { dropTopstitchMeasured } from './topstitch-lines';
@@ -3349,18 +3351,21 @@ export function TechCardForm({
   };
   // The form's steps against the card this page stands on (a keep-mine override was rebased onto the
   // card it read: its numbers are that card's).
-  const seamStepsAgree = () =>
+  const seamStepsAgree = (o?: SeamDoorOpts) =>
     lockOverride.current != null ||
     !base.current.card ||
-    stepNumbersAgree(form.getValues('operations') ?? [], base.current.card);
+    seamStepsAgreeOf(form, base.current.card, o);
   const seamDoorNow: SeamFormBridge = {
     flush: async (reason) => {
+      // A body write already on the wire is waited out first: if it fails, flush's queued pass would
+      // answer «invalid» over that failure — and a gesture may go on past «invalid» (C9), never past
+      // a failed save. So that failure is the answer.
+      await autosave.whenSettled();
+      const failed = autosave.statusNow() === 'error';
       const r = await autosave.flush(reason);
-      return flushAllowsRun(r)
-        ? { ok: true }
-        : { ok: false, why: flushRefusalSentence(r, autosave.errorsCount, autosave.refusalNow()) };
+      return seamFlushAnswer(r, autosave.errorsCount, autosave.refusalNow(), failed);
     },
-    hold: async () => {
+    hold: async (o) => {
       const releaseWrites = autosave.holdWrites();
       writing.current += 1;
       let held = true;
@@ -3380,7 +3385,7 @@ export function TechCardForm({
           return { release, refused: seamReadFailed };
         if (r === 'conflict') return { release, refused: seamConflict() };
       }
-      if (!seamStepsAgree()) return { release, refused: NOT_SAVED };
+      if (!seamStepsAgree(o)) return { release, refused: NOT_SAVED };
       return { release };
     },
     version: () => claimVersion(),
@@ -3404,13 +3409,13 @@ export function TechCardForm({
         finishHistoryReconciliation();
       }
     },
-    reread: async () => {
+    reread: async (o) => {
       const r = await readInChain();
       if (r === 'error') return { ok: false, why: seamReadFailed };
       if (r === 'conflict') return { ok: false, why: seamConflict() };
       const card = storedCard();
       if (!card) return { ok: false, why: seamReadFailed };
-      if (!seamStepsAgree()) return { ok: false, why: NOT_SAVED };
+      if (!seamStepsAgree(o)) return { ok: false, why: NOT_SAVED };
       return { ok: true, card };
     },
   };
@@ -3420,11 +3425,11 @@ export function TechCardForm({
     if (!isEditMode || !numId) return;
     return registerSeamFormBridge(numId, {
       flush: (reason) => seamDoor.current.flush(reason),
-      hold: () => seamDoor.current.hold(),
+      hold: (o) => seamDoor.current.hold(o),
       version: () => seamDoor.current.version(),
       operationNumber: (step) => seamDoor.current.operationNumber(step),
       adopt: (a) => seamDoor.current.adopt(a),
-      reread: () => seamDoor.current.reread(),
+      reread: (o) => seamDoor.current.reread(o),
     });
   }, [isEditMode, numId]);
 

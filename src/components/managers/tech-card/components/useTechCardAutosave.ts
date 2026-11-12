@@ -1200,6 +1200,8 @@ export type AutosaveController = AutosaveApi & {
    * `await`: кадр с отказом ещё не отрисован, а её замыкание — из кадра до нажатия.
    */
   refusalNow: () => string | undefined;
+  /** The machine's status NOW (read after an `await`: the frame's `status` is from before it). */
+  statusNow: () => AutosaveStatus;
   /**
    * D-66′ (T61 r5): сохраняет ли карточка себя СЕЙЧАС — машина жива, включена, не остановлена
    * отказом 401/403 и не `off`. Читается после `await`, прямо перед необратимым (архив колорвеев в
@@ -1479,6 +1481,7 @@ export function useTechCardAutosaveController(opts: {
         const live = machineRef.current?.state();
         return live ? refusalOf(live) : undefined;
       },
+      statusNow: () => machineRef.current?.state().status ?? 'off',
       savesNow: () => {
         const m = machineRef.current;
         const o = optsRef.current;

@@ -98,6 +98,9 @@ export type SeamWrites = {
   upsertPoses: (rows: StoredPose[]) => Promise<boolean>;
   /** Delete these pose rows; true when the server took it. */
   removePoses: (rows: StoredPose[]) => Promise<boolean>;
+  // The three gestures below are the user's own on one step: they go on past a form that only fails
+  // validation (C9, `pastInvalidForm`). upsert / remove / the poses' pair serve undo, auto-reconfirm and
+  // the strip teardown — they keep the form saved first.
   /** ACCEPT: one seam row written AND linked to the step in one change; the key it is stored under. */
   acceptSeam: (row: StoredSeam, step: StepRef) => Promise<{ ok: true; key: string } | Refused>;
   /**
@@ -216,7 +219,11 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
       const [row] = reuseKeys([row0], rowsOf(useSeamsStore.getState()));
       const res = await change(
         { upsert: [row], link: [{ step, seamKey: row.seamKey }] },
-        { verb: 'decision', ...(row.seamKey !== row0.seamKey ? { errorAt: row0.seamKey } : {}) },
+        {
+          verb: 'decision',
+          pastInvalidForm: true,
+          ...(row.seamKey !== row0.seamKey ? { errorAt: row0.seamKey } : {}),
+        },
       );
       return res.ok ? { ok: true, key: res.keyMap.get(row.seamKey) ?? row.seamKey } : res;
     },
@@ -228,7 +235,7 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
       if (gone) undoHistory.cut('seam-delete');
       return change(
         { detach: [{ step, seamKey }] },
-        { verb: 'removal', ...(gone ? { gone: [seamKey] } : {}) },
+        { verb: 'removal', pastInvalidForm: true, ...(gone ? { gone: [seamKey] } : {}) },
       );
     },
     [change, undoHistory],
@@ -240,7 +247,13 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
       put: readonly StoredPose[],
       drop: readonly StoredPose[],
       reflag: readonly StoredPose[],
-    ) => (await change(poseChange(step, put, drop, reflag), { verb: 'placement' })).ok,
+    ) =>
+      (
+        await change(poseChange(step, put, drop, reflag), {
+          verb: 'placement',
+          pastInvalidForm: true,
+        })
+      ).ok,
     [change],
   );
 

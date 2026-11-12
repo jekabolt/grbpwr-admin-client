@@ -4,7 +4,11 @@
 // and a seam write
 //
 //   flush   — saves the form first: a step is addressed by the operationNumber the server gave it, and
-//             a version claimed over unsaved work would be written over by the next body save;
+//             a version claimed over unsaved work would be written over by the next body save. A form
+//             that cannot save because it does not validate says so (`invalid`): a user's seam gesture
+//             may go on past it (C9) — the steps it names are stored ones, `adopt` puts the committed
+//             links into the form's baseline AND values, so the body save that follows the fix claims
+//             the new version and carries those links;
 //   hold    — keeps the autosave from starting a body write while the seam request flies (a write
 //             already on the wire is waited out), and refuses while the conflict decision is open;
 //   version — the lock_version the next write must claim;
@@ -19,6 +23,11 @@ import type { common_TechCard, common_TechCardSeam, OperationSeamKeys } from 'ap
 import type { UseFormReturn } from 'react-hook-form';
 import type { TechCardFormData } from '../schema';
 import type { CardBase } from '../useTechCardAutosave';
+import {
+  flushAllowsRun,
+  flushRefusalSentence,
+  type FlushResult,
+} from '../design/autosave-contract';
 import {
   mergeStepKeys,
   patchCardLinks,
@@ -37,14 +46,42 @@ export type SeamAdoption = {
 };
 
 export type SeamFormBridge = {
-  flush: (reason: string) => Promise<{ ok: true } | { ok: false; why: string }>;
-  hold: () => Promise<{ release: () => void; refused?: string }>;
+  /** `invalid`: refused only because the form does not validate (nothing else stood in the way). */
+  flush: (reason: string) => Promise<{ ok: true } | { ok: false; why: string; invalid?: true }>;
+  hold: (o?: SeamDoorOpts) => Promise<{ release: () => void; refused?: string }>;
   version: () => number;
   /** The step's stored number; 0 when the form has no such step or it was never saved. */
   operationNumber: (step: StepRef) => number;
   adopt: (a: SeamAdoption) => void;
-  reread: () => Promise<{ ok: true; card: common_TechCard } | { ok: false; why: string }>;
+  reread: (
+    o?: SeamDoorOpts,
+  ) => Promise<{ ok: true; card: common_TechCard } | { ok: false; why: string }>;
 };
+
+/**
+ * `pastInvalidForm`: the gesture goes on past a form that does not validate (C9). The form's steps
+ * are then judged by its BASELINE (the numbers the card gave them), not by its values: a step deleted
+ * or moved in the unsaved form keeps the other steps addressable — each still carries the number the
+ * card holds for it. The touched step itself must still be in the form with a stored number.
+ */
+export type SeamDoorOpts = { pastInvalidForm?: boolean };
+
+export type SeamFlushAnswer = Awaited<ReturnType<SeamFormBridge['flush']>>;
+
+/** The autosave's flush as the door says it: `invalid` marks the one refusal a gesture may pass (C9). */
+export function seamFlushAnswer(
+  r0: FlushResult,
+  errorsCount?: number,
+  refusal?: string,
+  /** The body write on the wire when the flush began failed: its queued pass may say `invalid` over
+   * that failure, and a gesture never goes on past a failed save. */
+  savedFailed?: boolean,
+): SeamFlushAnswer {
+  const r = r0 === 'invalid' && savedFailed ? 'error' : r0;
+  if (flushAllowsRun(r)) return { ok: true };
+  const why = flushRefusalSentence(r, errorsCount, refusal);
+  return r === 'invalid' ? { ok: false, why, invalid: true } : { ok: false, why };
+}
 
 const bridges = new Map<number, SeamFormBridge>();
 
@@ -202,4 +239,31 @@ export function stepNumbersAgree(
     .map((op) => op.operationNumber ?? 0)
     .filter((n) => n > 0);
   return ours.length === theirs.length && ours.every((n, i) => n === theirs[i]);
+}
+
+/**
+ * The door's step check (index.tsx `hold` / `reread`). Strict: the form's VALUES carry the card's
+ * numbers in its order. Past a form that does not validate (C9): its BASELINE does — what the last
+ * save or read left — so a step deleted, moved or added in the unsaved form does not refuse a gesture
+ * on another step; one whose numbers are older than the card (a save never read back) still does.
+ */
+export function seamStepsAgreeOf(
+  form: Pick<FormLike, 'getValues' | 'control'>,
+  card: common_TechCard,
+  o?: SeamDoorOpts,
+): boolean {
+  const values = (form.getValues('operations') ?? []) as StepRow[];
+  if (!o?.pastInvalidForm) return stepNumbersAgree(values, card);
+  const baseOps = ((form.control._defaultValues as Partial<TechCardFormData>).operations ??
+    []) as StepRow[];
+  if (!stepNumbersAgree(baseOps, card)) return false;
+  // Each live step still carries the number its baseline row (the card) gives it: a save that landed
+  // while the steps were moved back leaves the baseline renumbered and the live numbers old — then a
+  // live number names ANOTHER server step, and the gesture is refused (Codex, C9).
+  const baseNo = new Map(baseOps.map((r) => [r.historyKey, r.operationNumber ?? 0]));
+  return values.every((r) => {
+    const n = r.operationNumber ?? 0;
+    if (!n) return true;
+    return r.historyKey !== undefined && baseNo.get(r.historyKey) === n;
+  });
 }

@@ -61,6 +61,7 @@ const controller: AutosaveController = {
   whenSettled: async () => {},
   holdWrites: () => noop,
   refusalNow: () => undefined,
+  statusNow: () => autosave.status,
   savesNow: () => true,
   saveNow: (reason) => autosave.flush(reason),
   resolveConflict: noop,
