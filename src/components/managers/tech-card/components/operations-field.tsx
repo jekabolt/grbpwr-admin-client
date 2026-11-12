@@ -247,6 +247,8 @@ import {
   dropRedoTop,
   dropUndoTop,
   emptyHistory,
+  finishUndo,
+  issueStepWrite,
   insertLabel,
   issuesToRelink,
   moveLabel,
@@ -272,12 +274,33 @@ import {
   removeLabel,
   removeRestoreIndex,
   removeUndoRefusal,
+  runStepMutation,
+  runStepWrite,
+  STILL_SAVING,
+  waitForIdle,
 } from './last-mutation';
 import { followOpenStep, useActiveStepStore } from './assembly-map/active-step';
 import { AssemblyFullscreen, FROZEN_REFUSAL, restoreScreenFocus } from './assembly-fullscreen';
 import { SeamWalk } from './seam-walk';
 import { StepTimeField } from './step-time-field';
 import { DEFAULT_SEAM_TOLERANCE_MM } from './step-seams/seam-length';
+import {
+  heldSeamKeys,
+  restorableSeamKeys,
+  seamWritesInFlight,
+} from './step-seams/step-removal-seams';
+import {
+  linkKeys,
+  linkedStepRows,
+  mergeStepRemovalRows,
+  runStepRemovalChange,
+  quietCleanupChange,
+  runStepRemovalCleanup,
+  runStepRemovalRedoChange,
+  runStepRemovalUndoChange,
+  savedRemovalStillPresent,
+  type StepRemovalSnapshot,
+} from './step-removal-change';
 import { AssemblySchematic } from './assembly-schematic';
 import { SequenceRail } from './sequence-rail';
 import {
@@ -302,10 +325,10 @@ import {
   bindingBomLines,
   bindingLineSub,
   bindingStripsOfStep,
-  bindingUndoLinks,
   freshBindingStrip,
   isBindingLine,
   isBindingOperation,
+  teardownBindingStrips,
 } from './binding-step';
 import { useBindingStripTeardown } from './use-binding-strip-teardown';
 import { useTopstitchLineTeardown } from './use-topstitch-line-teardown';
@@ -316,6 +339,7 @@ import { PieceAddChip, PieceRef, useFormAssemblyPieces, useFormPieces } from './
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
 import { posesOf, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
+import type { SeamWrites } from './assembly-seams/use-seam-decisions';
 import { foldRowsOf, useFoldsStore } from './assembly-folds/folds-store';
 import { useStepSeams } from './step-seams/step-seams-context';
 import { UnitPictureTile } from './step-seams/unit-picture-tile';
@@ -354,9 +378,31 @@ import { opPieceRefs } from 'lib/dxf-reconcile/defaults';
 import { useTechCardAutosave } from './design/autosave-contract';
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
+import {
+  clearStepLinksOwed,
+  clearStepRemovalOwed,
+  hasStepRemovalOwed,
+  markStepRemovalOwed,
+  owedStepRemovals,
+  type OwedStepRemoval,
+} from './card-owed';
 
 /** Стабильная пустая карта: `new Map()` в пропе рождал бы новую ссылку на каждый рендер. */
 const EMPTY_MEDIA_URLS: Map<number, string> = new Map();
+
+const SEAM_WRITE_SETTLE_TIMEOUT_MS = 20_000;
+
+/** A destructive removal waits for earlier seam writes, then continues even if one never returns. */
+function waitForSeamWritesToSettle(): Promise<boolean> {
+  return waitForIdle({
+    busy: () => seamWritesInFlight(useSeamsStore.getState()),
+    subscribe: (notify) => useSeamsStore.subscribe(notify),
+    timeoutMs: SEAM_WRITE_SETTLE_TIMEOUT_MS,
+  });
+}
+
+const STEP_WRITE_SOURCE = Symbol('step-write-source');
+type TransactionGatedSeamWrites = SeamWrites & { [STEP_WRITE_SOURCE]: SeamWrites };
 // The WITH row: every tile shares one 72 px footprint, the silhouette fills it.
 const WITH_BOX = { w: 72, h: 72 };
 const WITH_CLOSE = cn(
@@ -2651,11 +2697,13 @@ function OperationBindingPicker({
   index,
   lines,
   frozen,
+  isEditorFrozen,
   articles,
 }: {
   index: number;
   lines: BomLine[];
   frozen: boolean;
+  isEditorFrozen: () => boolean;
   articles?: ColorwayArticles;
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
@@ -2681,6 +2729,7 @@ function OperationBindingPicker({
   );
 
   const toggle = async (line: BomLine) => {
+    if (isEditorFrozen()) return;
     const bomLineKey = line.lineKey?.trim() ?? '';
     if (!bomLineKey) return;
     const currentOperation = getValues(`operations.${index}`);
@@ -2690,6 +2739,7 @@ function OperationBindingPicker({
     if (own.length) {
       // The tile is this step's link to the line: unpicking it unlinks the line too.
       if (!(await teardownBinding({ stepIndexes: [index], bomLineKeys: [bomLineKey] }))) return;
+      if (isEditorFrozen()) return;
       setValue(
         `operations.${index}.bomLineKeys`,
         (currentOperation?.bomLineKeys ?? []).filter((key) => key !== bomLineKey),
@@ -2892,6 +2942,7 @@ function OperationEditor({
   mediaUrls,
   serverOperations,
   onEdit,
+  isEditorFrozen,
   frozen = false,
   noteSuggested,
   revokeSuggestions,
@@ -2946,6 +2997,8 @@ function OperationEditor({
    * разметкой не контракт: новый писатель, ушедший в портал, обязан позвать это же.
    */
   onEdit?: () => void;
+  /** Synchronous half of the effective frozen state, used after destructive awaits. */
+  isEditorFrozen: () => boolean;
   /** Карточка выпущена: снимки и выноски читаются, но не правятся. */
   frozen?: boolean;
 }) {
@@ -2971,6 +3024,11 @@ function OperationEditor({
   const [addingMaterial, setAddingMaterial] = useState(false);
   const [over, setOver] = useState(false);
   const [seamPicker, setSeamPicker] = useState<SeamPickerRequest | null>(null);
+  useEffect(() => {
+    if (!frozen) return;
+    setSeamPicker(null);
+    setAddingMaterial(false);
+  }, [frozen]);
 
   // The overrides fold. Open when the step already differs — a folded panel hiding a value the
   // operator set is worse than an open one showing nothing.
@@ -3978,19 +4036,27 @@ function OperationEditor({
    */
   const afterKindField =
     (field: KindField, before: string) => async (value: string | number | undefined) => {
+      if (isEditorFrozen()) return;
       const next = getValues(`operations.${index}`);
       const flip = stepKindFlip({ ...next, [field]: before }, { ...next, [field]: value ?? '' });
-      if (flip.binding && !(await teardownBinding({ stepIndexes: [index] }))) {
-        setValue(`operations.${index}.${field}`, before, { shouldDirty: true });
-        return;
+      if (flip.binding) {
+        const tornDown = await teardownBinding({ stepIndexes: [index] });
+        if (isEditorFrozen()) return;
+        if (!tornDown) {
+          setValue(`operations.${index}.${field}`, before, { shouldDirty: true });
+          return;
+        }
       }
       if (flip.topstitch) teardownTopstitch({ stepIndexes: [index] });
-      if (flip.seams && !(await unlinkSeams(index))) {
-        setValue(`operations.${index}.${field}`, before, { shouldDirty: true });
+      if (flip.seams) {
+        const unlinked = await unlinkSeams(index);
+        if (isEditorFrozen()) return;
+        if (!unlinked) setValue(`operations.${index}.${field}`, before, { shouldDirty: true });
       }
     };
 
   const applyWork = async (token: string) => {
+    if (isEditorFrozen()) return;
     const p = `operations.${index}` as const;
     const currentOperation = getValues(p);
     // «СНЯТЬ ВИД» — ОДНА ЗАПИСЬ И БОЛЬШЕ НИЧЕГО. Ни глагол, ни машинка, ни одно свойство не
@@ -3999,10 +4065,11 @@ function OperationEditor({
     if (!token) {
       if (
         isBindingOperation(currentOperation) &&
-        !isBindingOperation({ ...currentOperation, work: '' }) &&
-        !(await teardownBinding({ stepIndexes: [index] }))
-      )
-        return;
+        !isBindingOperation({ ...currentOperation, work: '' })
+      ) {
+        if (!(await teardownBinding({ stepIndexes: [index] }))) return;
+        if (isEditorFrozen()) return;
+      }
       const nextOperation = { ...currentOperation, work: '' };
       if (isTopstitchStep(currentOperation) && !isTopstitchStep(nextOperation)) {
         teardownTopstitch({ stepIndexes: [index] });
@@ -4051,9 +4118,15 @@ function OperationEditor({
     });
     const nextOperation = { ...currentOperation, work: token, ...written, ...clears };
     const flip = stepKindFlip(currentOperation, nextOperation);
-    if (flip.binding && !(await teardownBinding({ stepIndexes: [index] }))) return;
+    if (flip.binding) {
+      if (!(await teardownBinding({ stepIndexes: [index] }))) return;
+      if (isEditorFrozen()) return;
+    }
     if (flip.topstitch) teardownTopstitch({ stepIndexes: [index] });
-    if (flip.seams && !(await unlinkSeams(index))) return;
+    if (flip.seams) {
+      if (!(await unlinkSeams(index))) return;
+      if (isEditorFrozen()) return;
+    }
     setPickedKindId(k?.id ?? '');
 
     // РАБОТА ПИШЕТСЯ ПЕРВОЙ И ВСЕГДА — даже когда пункта у неё нет вовсе (0331). Это идентичность
@@ -5196,6 +5269,7 @@ function OperationEditor({
           index={index}
           lines={bomLines}
           frozen={frozen}
+          isEditorFrozen={isEditorFrozen}
           articles={colorwayArticles}
         />
       )}
@@ -6267,8 +6341,9 @@ export function OperationsField({
   /** The tab's own controls for the block header (pattern parsing state, the skeleton door). */
   headerAction?: ReactNode;
 } = {}) {
-  const { clearErrors, control, getValues, setValue, watch } = useFormContext<TechCardFormData>();
-  const teardownBinding = useBindingStripTeardown();
+  const { control, getValues, setValue, watch } = useFormContext<TechCardFormData>();
+  const stepSeams = useStepSeams();
+  const seamStoreCardId = useSeamsStore((state) => state.cardId);
   const { fields, append, remove, insert, replace } = useFieldArray({
     control,
     name: 'operations',
@@ -6281,6 +6356,7 @@ export function OperationsField({
   const { id: routeId } = useParams<{ id: string }>();
   const techCardId = routeId ? parseInt(routeId, 10) : undefined;
   const { data: savedCard } = useTechCard(techCardId);
+  const autosave = useTechCardAutosave();
   const [params, setParams] = useSearchParams();
   // КАТАЛОГ РАБОТ НА ВЕСЬ РЕЛЬС — ОДНОЙ ПОДПИСКОЙ (R8). Имя шага теперь спрашивает работу, а
   // спрашивают его здесь три места сразу: строка рельса, схема сборки и панель ратификации.
@@ -6393,6 +6469,10 @@ export function OperationsField({
   // разойтись им было негде.
   type Hist = History<OperationFormValue>;
   type RemoveEntry = Extract<HistoryEntry<OperationFormValue>, { kind: 'remove' }>;
+  type RemovalChangeSnapshot = StepRemovalSnapshot<OperationFormValue> & {
+    record: RemoveEntry;
+    owed: OwedStepRemoval;
+  };
   const history = useRef<Hist>(emptyHistory<OperationFormValue>());
   const [histView, setHistView] = useState<Hist>(history.current);
   const pendingAppend = useRef<PendingAppend<OperationFormValue> | null>(null);
@@ -6403,6 +6483,168 @@ export function OperationsField({
   // историю (массив поехал), и отмена создания, зовущая его, стёрла бы всю остальную историю
   // первым же ⌘Z. Флаг поднят ровно на синхронное время применения записи.
   const applying = useRef(false);
+  const stepTransactionRef = useRef(false);
+  const stepWriteOwner = useRef(false);
+  const [stepTransaction, setStepTransaction] = useState(false);
+  const frozenRef = useRef(frozen);
+  frozenRef.current = frozen;
+  const editorFrozen = frozen || stepTransaction;
+  const isEditorFrozen = useCallback(() => frozenRef.current || stepTransactionRef.current, []);
+  const sourceStepWrites = stepSeams
+    ? (stepSeams.writes as Partial<TransactionGatedSeamWrites>)[STEP_WRITE_SOURCE] ??
+      stepSeams.writes
+    : null;
+  const guardedStepWrites = useMemo<TransactionGatedSeamWrites | null>(() => {
+    if (!sourceStepWrites) return null;
+    const write = <T,>(start: () => Promise<T>, refused: T) =>
+      runStepWrite({
+        transaction: stepTransactionRef,
+        owner: stepWriteOwner,
+        write: start,
+        refused,
+        onRefused: () => refuseGesture('SEAMS', 'not saved', 'still saving'),
+      });
+    const notWritten = { ok: false as const, why: STILL_SAVING };
+    return {
+      change: (c, opts) => write(() => sourceStepWrites.change(c, opts), notWritten),
+      fresh: () => sourceStepWrites.fresh(),
+      acceptSeam: (row, step) => write(() => sourceStepWrites.acceptSeam(row, step), notWritten),
+      detachSeam: (step, seamKey, gone) =>
+        write(() => sourceStepWrites.detachSeam(step, seamKey, gone), notWritten),
+      placePoses: (step, put, drop, reflag) =>
+        write(() => sourceStepWrites.placePoses(step, put, drop, reflag), false),
+      upsert: (rows, errorAt) => write(() => sourceStepWrites.upsert(rows, errorAt), false),
+      remove: (rows) => write(() => sourceStepWrites.remove(rows), false),
+      upsertPoses: (rows) => write(() => sourceStepWrites.upsertPoses(rows), false),
+      removePoses: (rows) => write(() => sourceStepWrites.removePoses(rows), false),
+      frozen: sourceStepWrites.frozen || stepTransaction,
+      [STEP_WRITE_SOURCE]: sourceStepWrites,
+    };
+  }, [sourceStepWrites, stepTransaction]);
+  if (stepSeams && guardedStepWrites) {
+    // The provider's context object is shared by every writer mounted under this editor. Replacing
+    // its write layer here gives old async callbacks the same synchronous transaction gate.
+    stepSeams.frozen = editorFrozen;
+    stepSeams.writes = guardedStepWrites;
+  }
+  const teardownBinding = useBindingStripTeardown();
+  const issueTransactionWrite = useCallback(
+    <T,>(write: () => T): T => issueStepWrite(stepWriteOwner, write),
+    [],
+  );
+  const removalCleanupFlight = useRef<Promise<void> | null>(null);
+
+  const clearRemovalDebt = useCallback((cardId: number, entry: OwedStepRemoval) => {
+    clearStepRemovalOwed(cardId, entry.historyKey, entry.operationNumber);
+  }, []);
+
+  const startRemovalCleanup = useCallback(
+    (cardId: number, entries: readonly OwedStepRemoval[]) => {
+      if (!entries.length || !sourceStepWrites) return;
+      const before = removalCleanupFlight.current ?? Promise.resolve();
+      const run = before.then(async () => {
+        for (const entry of entries) {
+          if (useSeamsStore.getState().cardId !== cardId) return;
+          await runStepRemovalCleanup(entry, {
+            active: () => hasStepRemovalOwed(cardId, entry.historyKey, entry.operationNumber),
+            operations: () =>
+              ((getValues('operations') ?? []) as OperationFormValue[]).map((operation) => ({
+                operationNumber: operation.operationNumber,
+                seamKeys: operation.seamKeys,
+                poseKeys: operation.poseKeys,
+              })),
+            cutStrips: () => (getValues('cutStrips') ?? []) as CutStrip[],
+            rows: () => {
+              const state = useSeamsStore.getState();
+              return {
+                seams: state.cardId === cardId ? state.server : [],
+                poses: state.cardId === cardId ? state.poses : [],
+              };
+            },
+            // C1: the function, not a prebuilt delete, is queued. `runSeamChange` rebuilds it only
+            // after its body flush and on lock_version_moved, under the version that saved those
+            // operation links. A newly linked row therefore never reaches a delete request.
+            change: quietCleanupChange(entry.candidateKeys, (input) =>
+              sourceStepWrites.change(input, { verb: 'removal', quiet: true }),
+            ),
+            clear: () => clearRemovalDebt(cardId, entry),
+          });
+        }
+      });
+      const flight = run.finally(() => {
+        if (removalCleanupFlight.current === flight) removalCleanupFlight.current = null;
+      });
+      removalCleanupFlight.current = flight;
+    },
+    [clearRemovalDebt, getValues, sourceStepWrites],
+  );
+
+  const replayedRemovalCard = useRef<number | null>(null);
+  useEffect(() => {
+    if (!techCardId || !savedCard?.techCard || !stepSeams) return;
+    if (replayedRemovalCard.current === techCardId) return;
+    if (seamStoreCardId !== techCardId) return;
+    replayedRemovalCard.current = techCardId;
+    const entries = owedStepRemovals(techCardId);
+    const operations = savedCard.techCard.operations ?? [];
+    const cleanup: OwedStepRemoval[] = [];
+    for (const entry of entries) {
+      // A reload that still reads the numbered step proves the form-only removal never landed.
+      if (savedRemovalStillPresent(entry, operations)) clearRemovalDebt(techCardId, entry);
+      else cleanup.push(entry);
+    }
+    startRemovalCleanup(techCardId, cleanup);
+  }, [clearRemovalDebt, savedCard, seamStoreCardId, startRemovalCleanup, stepSeams, techCardId]);
+
+  const seenRemovalSave = useRef<{ cardId: number; at: number } | null>(null);
+  useEffect(() => {
+    const savedAt = autosave.lastSavedAt;
+    if (!techCardId || !savedAt || !stepSeams || stepTransaction) return;
+    if (seamStoreCardId !== techCardId) return;
+    const seen = seenRemovalSave.current;
+    if (seen?.cardId === techCardId && seen.at === savedAt) return;
+    seenRemovalSave.current = { cardId: techCardId, at: savedAt };
+    const current = (getValues('operations') ?? []) as OperationFormValue[];
+    const cleanup: OwedStepRemoval[] = [];
+    for (const entry of owedStepRemovals(techCardId)) {
+      if (entry.at > savedAt) continue;
+      if (current.some((operation) => operation.historyKey === entry.historyKey))
+        clearRemovalDebt(techCardId, entry);
+      else cleanup.push(entry);
+    }
+    startRemovalCleanup(techCardId, cleanup);
+  }, [
+    autosave.lastSavedAt,
+    clearRemovalDebt,
+    getValues,
+    seamStoreCardId,
+    startRemovalCleanup,
+    stepSeams,
+    stepTransaction,
+    techCardId,
+  ]);
+
+  const waitForRemovalCleanup = useCallback(async (): Promise<boolean> => {
+    // A cleanup may have been queued just before undo acquired the step transaction. Its outcome
+    // decides whether undo is the zero-request form branch or the one-upsert restore branch.
+    for (;;) {
+      const flight = removalCleanupFlight.current;
+      if (!flight) break;
+      await flight;
+      if (removalCleanupFlight.current === flight) break;
+    }
+    return waitForSeamWritesToSettle();
+  }, []);
+
+  /** Suppress history invalidation only for the synchronous form commit of an inverse gesture. */
+  const applyToForm = (fn: () => void) => {
+    applying.current = true;
+    try {
+      fn();
+    } finally {
+      applying.current = false;
+    }
+  };
 
   const setHistory = useCallback((next: Hist) => {
     // Чистые функции отдают ТОТ ЖЕ объект, когда менять нечего, — и ре-рендера тогда не будет.
@@ -6416,11 +6658,16 @@ export function OperationsField({
    * строк, ни правка полей, ни выпуск карточки, ни закрытие фулскрина раскладку не трогают, и
    * хоронить вместе с формой возможность вернуть подвинутую ноду не за что.
    */
-  const clearFormHistory = useCallback(() => {
-    if (applying.current) return;
+  const clearFormHistoryNow = useCallback(() => {
     pendingAppend.current = null;
     setHistory(dropStale(history.current));
   }, [setHistory]);
+
+  const clearFormHistory = useCallback(() => {
+    if (applying.current) return;
+    if (stepTransactionRef.current) return;
+    clearFormHistoryNow();
+  }, [clearFormHistoryNow]);
 
   /** The card was replaced, frozen, or the screen left: removals die here too. */
   const dropFormHistory = useCallback(() => {
@@ -6494,17 +6741,11 @@ export function OperationsField({
     const operations = (getValues('operations') ?? []) as OperationFormValue[];
     const stored = operations[index];
     if (!stored?.historyKey) return null;
-    // The row as it stands after its binding teardown: strips and seams that the removal deletes
-    // never come back, so the undo neither names nor restores them.
-    const links = bindingUndoLinks(
-      {
-        cutStrips: (getValues('cutStrips') ?? []) as CutStrip[],
-        operations,
-        seamRows: rowsOf(useSeamsStore.getState()),
-      },
-      index,
-    );
-    const row = { ...stored, ...links };
+    // Snapshot the whole row before a binding teardown. Its strips and every patched link return
+    // with it on undo; only the later cleanup is allowed to remove their server rows.
+    const row = structuredClone(stored);
+    const seamState = useSeamsStore.getState();
+    const seamRows = linkedStepRows(row, { seams: seamState.server, poses: seamState.poses });
     const onCard = cardKeysNow();
     const seamKeys = [...(row.seamKeys ?? []), ...(row.poseKeys ?? [])];
     const number = operationStepNumber(index);
@@ -6514,12 +6755,13 @@ export function OperationsField({
     return {
       kind: 'remove',
       historyKey: stored.historyKey,
-      row: structuredClone(row),
+      row,
       before: operations.map((op) => op.historyKey ?? ''),
       issues: structuredClone(linkedIssues),
       pieceKeys: [...new Set(row.inputKeys ?? [])].filter((key) => onCard.pieceKeys.has(key)),
-      seamKeys: [...new Set(seamKeys)].filter((key) => onCard.seamKeys.has(key)),
+      seamKeys: [...new Set(seamKeys)],
       bomLineKeys: [...new Set(row.bomLineKeys ?? [])].filter((key) => onCard.bomLineKeys.has(key)),
+      seamRows: structuredClone(seamRows),
       label: removeLabel(index),
     };
   };
@@ -6541,35 +6783,177 @@ export function OperationsField({
   // <button> под внешним `<fieldset disabled>`, а док фулскрина обёрнут своим fieldset. Но
   // прикрытие разметкой — не контракт: `moveOperation` уже уезжает пропом в портал (потребитель
   // Ф6в), и первый вызыватель вне формы дописал бы перенумерацию в выпущенную карточку молча.
-  const removeOperation = async (index: number): Promise<boolean> => {
+  const removeOperation = async (
+    index: number,
+    {
+      preserveHistory = false,
+      redo = false,
+      recordRemoval,
+    }: {
+      preserveHistory?: boolean;
+      redo?: boolean;
+      recordRemoval?: (record: RemoveEntry) => void;
+    } = {},
+  ): Promise<boolean> => {
     if (frozen) return false;
-    const operations = (getValues('operations') ?? []) as OperationFormValue[];
-    if (foldsClosingOn(operations, index).length > 0) {
-      refuseGesture('FOLDS', FOLD_STEP_REFUSAL, 'NO STEP');
-      return false;
-    }
-    if (!applying.current && serverKeepsFusingStep(operations[index], getValues('pieces') ?? [])) {
-      refuseGesture(`STEP ${operationStepNumber(index)}`, 'auto fuse', 'piece is fused');
-      return false;
-    }
-    const undoRecord = applying.current ? null : removeRecord(index);
-    if (!(await teardownBinding({ stepIndexes: [index] }))) return false;
-    const historyKey = getValues(`operations.${index}.historyKey`);
-    if (historyKey) placeBlankOnFirstInput.current.delete(historyKey);
-    clearFormHistory(); // (1/10) массив поехал — формовые записи протухли
-    remapIssues((old) => (old === index ? null : old > index ? old - 1 : old));
-    remove(index);
-    if (undoRecord) setHistory(record(history.current, undoRecord));
-    // Clamp the STORED index, not just the rendered one: deleting the open last row leaves
-    // `selected` past the end, and the next reorder would then compute the selection from a
-    // position that no longer exists and open the wrong step.
-    const lastAfter = Math.max(0, fields.length - 2);
-    setSelected((s) => Math.min(s > index ? s - 1 : s, lastAfter));
-    return true;
+    if (!stepSeams) return false;
+    const requestedHistoryKey = getValues(`operations.${index}.historyKey`);
+    if (!requestedHistoryKey) return false;
+    const run = redo ? runStepRemovalRedoChange : runStepRemovalChange;
+    return run<RemovalChangeSnapshot>({
+      settle: waitForSeamWritesToSettle,
+      snapshot: () => {
+        const operations = (getValues('operations') ?? []) as OperationFormValue[];
+        const currentIndex = operations.findIndex(
+          (operation) => operation.historyKey === requestedHistoryKey,
+        );
+        if (currentIndex < 0) {
+          refuseGesture('SEQUENCE', 'not removed', 'the sequence has changed since');
+          return null;
+        }
+        if (foldsClosingOn(operations, currentIndex).length > 0) {
+          refuseGesture('FOLDS', FOLD_STEP_REFUSAL, 'NO STEP');
+          return null;
+        }
+        if (
+          !preserveHistory &&
+          serverKeepsFusingStep(operations[currentIndex], getValues('pieces') ?? [])
+        ) {
+          refuseGesture(`STEP ${operationStepNumber(currentIndex)}`, 'auto fuse', 'piece is fused');
+          return null;
+        }
+        const removalRecord = removeRecord(currentIndex);
+        if (!removalRecord) return null;
+        const seamState = useSeamsStore.getState();
+        const stripsBefore = structuredClone((getValues('cutStrips') ?? []) as CutStrip[]);
+        // A binding step takes its strip with it. This plan and every row payload are captured before
+        // the form edit; the server is untouched until a saved body no longer holds the step.
+        const teardown = teardownBindingStrips(
+          {
+            cutStrips: stripsBefore,
+            operations,
+            seamRows: seamState.server,
+          },
+          { stepIndexes: [currentIndex] },
+        );
+        const bindingChanged =
+          teardown.operations.length > 0 || teardown.strips.length !== stripsBefore.length;
+        const patches = teardown.operations.flatMap((patch) => {
+          if (patch.index === currentIndex) return [];
+          const operation = operations[patch.index];
+          if (!operation?.historyKey) return [];
+          return [
+            {
+              historyKey: operation.historyKey,
+              before: {
+                inputKeys: [...(operation.inputKeys ?? [])],
+                seamKeys: [...(operation.seamKeys ?? [])],
+              },
+              after: { inputKeys: [...patch.inputKeys], seamKeys: [...patch.seamKeys] },
+            },
+          ];
+        });
+        const rows = mergeStepRemovalRows(removalRecord.seamRows ?? { seams: [], poses: [] }, {
+          seams: seamState.server.filter((row) => teardown.seamRowsToRemove.includes(row.seamKey)),
+          poses: [],
+        });
+        const operationNumber =
+          operations[currentIndex]?.operationNumber ?? operationStepNumber(currentIndex);
+        // A strip that outlives the step (not torn down with it) still holds its seam: never owed.
+        const stripHeld = heldSeamKeys({ operations: [], cutStrips: teardown.strips });
+        const candidateKeys = [
+          ...new Set([...linkKeys(removalRecord.row), ...teardown.seamRowsToRemove]),
+        ].filter((key) => !stripHeld.has(key));
+        const binding = bindingChanged
+          ? {
+              stripsBefore,
+              stripsAfter: structuredClone(teardown.strips),
+              patches,
+            }
+          : undefined;
+        const record = {
+          ...removalRecord,
+          seamRows: structuredClone(rows),
+          operationNumber,
+          cleanupKeys: candidateKeys,
+          ...(binding ? { binding } : {}),
+        };
+        return {
+          step: { historyKey: record.historyKey },
+          row: structuredClone(record.row),
+          rows: structuredClone(rows),
+          operationNumber,
+          candidateKeys,
+          record,
+          owed: {
+            historyKey: record.historyKey,
+            operationNumber,
+            candidateKeys,
+            at: Date.now(),
+          },
+        };
+      },
+      remove: (snapshot) => {
+        const commit = () => {
+          const operations = (getValues('operations') ?? []) as OperationFormValue[];
+          const currentIndex = operations.findIndex(
+            (operation) => operation.historyKey === snapshot.step.historyKey,
+          );
+          if (currentIndex < 0) return;
+          const operationNumber =
+            operations[currentIndex]?.operationNumber ?? snapshot.operationNumber;
+          placeBlankOnFirstInput.current.delete(snapshot.step.historyKey);
+          if (!preserveHistory) clearFormHistoryNow(); // (1/10) массив поехал
+          const binding = snapshot.record.binding;
+          if (binding) {
+            setValue('cutStrips', structuredClone(binding.stripsAfter) as never, {
+              shouldDirty: true,
+            });
+            for (const patch of binding.patches) {
+              const patchIndex = operations.findIndex(
+                (operation) => operation.historyKey === patch.historyKey,
+              );
+              if (patchIndex < 0) continue;
+              setValue(`operations.${patchIndex}.inputKeys`, [...patch.after.inputKeys], {
+                shouldDirty: true,
+              });
+              setValue(`operations.${patchIndex}.seamKeys`, [...patch.after.seamKeys], {
+                shouldDirty: true,
+              });
+            }
+          }
+          remapIssues((old) => (old === currentIndex ? null : old > currentIndex ? old - 1 : old));
+          remove(currentIndex);
+          // Clamp the STORED index, not just the rendered one: deleting the open last row leaves
+          // `selected` past the end, and the next reorder would then open the wrong step.
+          const lastAfter = Math.max(0, operations.length - 2);
+          setSelected((selectedIndex) =>
+            Math.min(selectedIndex > currentIndex ? selectedIndex - 1 : selectedIndex, lastAfter),
+          );
+          if (techCardId && operationNumber > 0) clearStepLinksOwed(techCardId, operationNumber);
+        };
+        if (preserveHistory) applyToForm(commit);
+        else commit();
+      },
+      record: (snapshot) => {
+        if (recordRemoval) recordRemoval(snapshot.record);
+        else if (!preserveHistory) setHistory(record(history.current, snapshot.record));
+      },
+      owe: (snapshot) => {
+        if (techCardId && snapshot.candidateKeys.length)
+          markStepRemovalOwed(techCardId, snapshot.owed);
+      },
+      refuse: (why) => refuseGesture('SEQUENCE', 'not removed', why),
+      unsettled: STILL_SAVING,
+    });
   };
 
+  const runDirectRemoval = async (index: number): Promise<boolean> =>
+    (await runStepMutation(stepTransactionRef, setStepTransaction, () => removeOperation(index))) ??
+    false;
+
   const insertAfter = (index: number) => {
-    if (frozen) return;
+    if (isEditorFrozen()) return;
     clearFormHistory(); // (2/10)
     remapIssues((old) => (old > index ? old + 1 : old));
     insert(index + 1, newOperationRow());
@@ -6581,9 +6965,13 @@ export function OperationsField({
     // <button> в портале, вне обоих fieldset (внешнего карточки и докового), и на выпущенной
     // карточке жест перетаскивания честно начинается и доезжает досюда — строка прыгала бы
     // обратно без единого слова. Инлайновую ручку глушит внешний fieldset, снекбар не спамит.
-    if (frozen) {
+    if (isEditorFrozen()) {
       if (choice) setPendingMoveChoice(null);
-      refuseGesture('SEQUENCE', 'frozen', FROZEN_REFUSAL);
+      refuseGesture(
+        'SEQUENCE',
+        stepTransactionRef.current ? 'not moved' : 'frozen',
+        stepTransactionRef.current ? 'still saving' : FROZEN_REFUSAL,
+      );
       return;
     }
     const operations = (getValues('operations') ?? []) as OperationFormValue[];
@@ -6668,14 +7056,17 @@ export function OperationsField({
   // append here (this field array owns the rendered list) when the panel requests it. The request
   // no longer carries a step title: there is no title to carry, and the two fields it used to
   // pre-fill (`node`, `placement`) were the same piece name written twice.
+  const seenAddRequest = useRef<number | null>(null);
   useEffect(() => {
-    if (!addRequest) return;
+    if (!addRequest || addRequest.nonce === seenAddRequest.current) return;
+    if (isEditorFrozen()) return;
+    seenAddRequest.current = addRequest.nonce;
     clearFormHistory(); // (4/10) шаг дописала ПАНЕЛЬ, а не жест полотна
     append(newOperationRow());
     setSelected(fields.length);
     onAdded?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [addRequest?.nonce]);
+  }, [addRequest?.nonce, stepTransaction]);
 
   // --- КАРКАС СБОРКИ: ЗАПИСЬ ПРЕДЛОЖЕНИЯ ---------------------------------------------------------
   //
@@ -6683,7 +7074,6 @@ export function OperationsField({
   // которое просто смотрят, не меняет ни одного поля (приёмка волны, п.5 — «ничего молча»).
   // Строки собирает `rowFromStep`, то есть тот же писатель, что и диалог создания: после записи это
   // обычные шаги; след происхождения — только поле `draft` (0410), до первой правки или «reviewed».
-  const autosave = useTechCardAutosave();
   // Отзыв подстановок открытого шага — регистрирует редактор (см. OperationEditor.revokeAll).
   const revokeSuggestions = useRef<(() => void) | null>(null);
 
@@ -6696,7 +7086,11 @@ export function OperationsField({
     const answer = (r: Omit<SkeletonApplyResult, 'nonce'>) =>
       onSkeletonApplied?.({ nonce: applyRequest.nonce, ...r });
     // Гейт заморозки первой строкой — как у каждого мутатора этого файла.
-    if (frozen) return answer({ applied: 0, refused: FROZEN_REFUSAL });
+    if (isEditorFrozen())
+      return answer({
+        applied: 0,
+        refused: stepTransactionRef.current ? 'still saving' : FROZEN_REFUSAL,
+      });
     const steps = applyRequest.steps;
     if (steps.length === 0) return answer({ applied: 0, refused: 'no steps to apply' });
     const current = getValues('operations') ?? [];
@@ -6713,6 +7107,13 @@ export function OperationsField({
         !(await teardownBinding({ stepIndexes: current.map((_, index) => index) }))
       ) {
         answer({ applied: 0, refused: 'binding seams not removed' });
+        return;
+      }
+      if (isEditorFrozen()) {
+        answer({
+          applied: 0,
+          refused: stepTransactionRef.current ? 'still saving' : FROZEN_REFUSAL,
+        });
         return;
       }
       const park = getValues('construction.equipmentDefaults');
@@ -6933,7 +7334,7 @@ export function OperationsField({
       });
     }
     reviewRowsRef.current = anyReview;
-    if (!frozen) {
+    if (!editorFrozen) {
       // Призраки карты — только если правка задела помеченный шаг (иначе считать нечего).
       const ghosts = touched.some((index) => ops[index]?.review)
         ? unaliasedPieceKeys(
@@ -6953,15 +7354,15 @@ export function OperationsField({
     setDraftIds((prev) =>
       prev.size === next.size && [...next].every((id) => prev.has(id)) ? prev : next,
     );
-  }, [touchTick, fields, getValues, setValue, control, frozen, setHistory]);
+  }, [touchTick, fields, getValues, setValue, control, editorFrozen, setHistory]);
   // Жест «проверено»: клик по чипу draft снимает метку, не трогая ни одного поля шага. Выпущенная
   // карточка не правится — и метку там не снять (чип — кнопка внутри `<fieldset disabled>`).
   const markReviewed = (i: number) => {
-    if (frozen) return;
+    if (isEditorFrozen()) return;
     setValue(`operations.${i}.draft`, false, { shouldDirty: true, shouldTouch: true });
   };
   const acceptReview = (i: number) => {
-    if (frozen) return;
+    if (isEditorFrozen()) return;
     const operations = (getValues('operations') ?? []) as CardOperation[];
     const mark = operations[i]?.review?.trim() ?? '';
     // An orphan is resolved by replacing or removing the missing piece, never by acknowledging it.
@@ -7154,7 +7555,7 @@ export function OperationsField({
 
   const relinkOrphan = useCallback(
     (lineKey: string, candidate: OrphanBlockCandidate) => {
-      if (frozen) return;
+      if (isEditorFrozen()) return;
       const scope = scopes.find((item) => item.key === candidate.scopeKey);
       if (!scope) return;
       clearFormHistory();
@@ -7182,12 +7583,12 @@ export function OperationsField({
       );
       setExpandedOrphan(null);
     },
-    [clearFormHistory, frozen, getValues, scopes, setValue],
+    [clearFormHistory, getValues, isEditorFrozen, scopes, setValue],
   );
 
   const deleteOrphan = useCallback(
     (lineKey: string) => {
-      if (frozen) return;
+      if (isEditorFrozen()) return;
       clearFormHistory();
       const currentPieces = getValues('pieces') ?? [];
       setValue(
@@ -7209,7 +7610,7 @@ export function OperationsField({
       if (plan.changed) setValue('operations', plan.operations, { shouldDirty: true });
       setExpandedOrphan(null);
     },
-    [clearFormHistory, frozen, getValues, setValue],
+    [clearFormHistory, getValues, isEditorFrozen, setValue],
   );
 
   const orphanBoard = useMemo<OrphanBoardState>(
@@ -7219,7 +7620,7 @@ export function OperationsField({
       orphanKeys,
       expandedKey: expandedOrphan,
       showHidden: showHiddenOrphans,
-      frozen,
+      frozen: editorFrozen,
       onTogglePiece: (lineKey) =>
         setExpandedOrphan((current) => (current === lineKey ? null : lineKey)),
       onToggleHidden: () => setShowHiddenOrphans((current) => !current),
@@ -7232,7 +7633,7 @@ export function OperationsField({
       orphanKeys,
       expandedOrphan,
       showHiddenOrphans,
-      frozen,
+      editorFrozen,
       relinkOrphan,
       deleteOrphan,
     ],
@@ -7374,7 +7775,8 @@ export function OperationsField({
   // ВСЕ ОРГАНЫ СОЗДАНИЯ ВХОДЯТ ЧЕРЕЗ ЭТУ ДВЕРЬ. Ховер-полоса уже несёт явный `at`; выбор одной
   // детали или одного узла раньше нёс только состав и потому дописывал тот же шаг в общий хвост.
   const openCreate = useCallback(
-    (prefill: CreatePrefill | null) =>
+    (prefill: CreatePrefill | null) => {
+      if (prefill && isEditorFrozen()) return;
       setPendingCreate(
         prefill
           ? targetAddPrefill(
@@ -7384,8 +7786,9 @@ export function OperationsField({
               grouping.schematicBlocks,
             )
           : null,
-      ),
-    [grouping.schematicSteps, grouping.res, grouping.schematicBlocks],
+      );
+    },
+    [grouping.schematicSteps, grouping.res, grouping.schematicBlocks, isEditorFrozen],
   );
   const editorRef = useRef<HTMLDivElement>(null);
   // Карточку выпустили, пока диалог открыт — диалог обязан закрыться сам: он живёт порталом, и
@@ -7403,6 +7806,21 @@ export function OperationsField({
     // выпущенной карточке ЗАКОННА (R10), значит и отмена перестановки обязана её пережить.
     dropFormHistory();
   }, [frozen, dropFormHistory]);
+  useEffect(() => {
+    if (!stepTransaction) return;
+    setPendingCreate(null);
+    setRemoveWarning(null);
+    setPendingMoveChoice(null);
+    setRatifyOpen(false);
+  }, [stepTransaction]);
+  // While a step transaction runs, the editor takes no pointer, focus or typing at all: a plain
+  // field edit is not a mutator and would slip past the frozen gates.
+  useEffect(() => {
+    const roots = document.querySelectorAll<HTMLElement>('[data-history-owner="construction"]');
+    roots.forEach((root) => {
+      root.inert = stepTransaction;
+    });
+  }, [stepTransaction]);
   // ЯВНЫЙ ВЫБОР ПОЛЬЗОВАТЕЛЯ СИЛЬНЕЕ ВЫВОДА — иначе получается замкнутый круг, в который я и
   // попал: схема была доступна только на размеченной карточке, а разметить первый узел можно было
   // только в списке. Схема, на которой сборку собирают с нуля, обязана быть достижима с нуля.
@@ -7484,7 +7902,7 @@ export function OperationsField({
     // (`onDropPiece`). То есть на ВЫПУЩЕННОЙ карточке дроп правил форму, взводя isDirty, и никакая
     // разметка этого не останавливала. Тем более он не остановит фулскрин: тот живёт порталом в
     // body, куда fieldset не достаёт вовсе.
-    if (frozen) return;
+    if (isEditorFrozen()) return;
     if (index < 0 || !key) return;
     const cur = (getValues(`operations.${index}.inputKeys`) ?? []) as string[];
     if (cur.includes(key)) return;
@@ -7595,7 +8013,7 @@ export function OperationsField({
     // Тот же гейт и по той же причине: сегодня кнопку «+ operation» душит внешний fieldset, но
     // мутатор про заморозку не знает, а вызыватель ВНЕ формы дописал бы шаг в выпущенную
     // карточку. Гейт стоит у мутатора, а не у каждой кнопки.
-    if (frozen) return;
+    if (isEditorFrozen()) return;
     // (5/10) Пустой шаг — не жест полотна: отменять его ⌘Z нечего, а старая запись после него
     // указывала бы на шаг, стоящий уже не там.
     clearFormHistory();
@@ -7615,7 +8033,7 @@ export function OperationsField({
   };
 
   const replaceStepGhost = (index: number, ghostKey: string, nextKey: string) => {
-    if (frozen) return;
+    if (isEditorFrozen()) return;
     const operations = (getValues('operations') ?? []) as OperationFormValue[];
     const next = replaceGhost(operations, ghostKey, nextKey, { ghosts: ghostKeys });
     if (next.every((row, i) => row === operations[i])) return;
@@ -7628,7 +8046,7 @@ export function OperationsField({
   };
 
   const removeStepGhost = (index: number, ghostKey: string) => {
-    if (frozen) return;
+    if (isEditorFrozen()) return;
     const operations = (getValues('operations') ?? []) as OperationFormValue[];
     const row = operations[index];
     if (!row) return;
@@ -7655,7 +8073,7 @@ export function OperationsField({
   };
 
   const addReuploadedPiece = (pieceKey: string) => {
-    if (frozen || !pieceKey) return;
+    if (isEditorFrozen() || !pieceKey) return;
     clearFormHistory();
     const placed = targetAddPrefill(
       { inputKeys: [pieceKey], intent: 'process' },
@@ -7674,7 +8092,7 @@ export function OperationsField({
 
   /** `+ fold` on a piece tile: the Press step its fold closes on, at `at`. Returns its index. */
   const insertFoldPress = (at: number, pieceKey: string, foldKeys: readonly string[]) => {
-    if (frozen || !pieceKey) return null;
+    if (isEditorFrozen() || !pieceKey) return null;
     clearFormHistory();
     const index = Math.min(Math.max(at, 0), fields.length);
     remapIssues((old) => (old >= index ? old + 1 : old));
@@ -7712,7 +8130,7 @@ export function OperationsField({
     // внешний `<fieldset disabled>` карточки до него не достаёт вовсе. Гонка настоящая: нажали
     // Release, пока запрос летит открыли создание, ответ перевёл карточку в RELEASED — и
     // «создать» дописал бы шаг в выпущенную карточку, взведя isDirty.
-    if (frozen) return;
+    if (isEditorFrozen()) return;
     // СТРОКА СОБИРАЕТСЯ ОТДЕЛЬНОЙ ПЕРЕМЕННОЙ, потому что её берёт себе запись истории: ⇧⌘Z
     // дописывает ЕЁ ЖЕ, а не пустой шаг. Собрать её второй раз в повторе значило бы завести второе
     // определение того, что такое «созданный этим жестом шаг».
@@ -7858,8 +8276,8 @@ export function OperationsField({
    * Every user door of REMOVE asks this gate; undo of a created step calls the mutator directly.
    * A fold refusal comes first and stays inside the mutator, so it is said in one place.
    */
-  const requestRemoveOperation = (stepIndex: number) => {
-    if (frozen) return;
+  const requestRemoveOperation = async (stepIndex: number) => {
+    if (isEditorFrozen()) return;
     const ops = getValues('operations') ?? [];
     const closing = foldsClosingOn(ops, stepIndex);
     const seamsLost = savedSeamsOnStep(ops[stepIndex]?.seamKeys, rowsOf(useSeamsStore.getState()));
@@ -7867,7 +8285,7 @@ export function OperationsField({
     const fieldId = fields[stepIndex]?.id;
     const refused = serverKeepsFusingStep(ops[stepIndex], getValues('pieces') ?? []);
     if (refused || removeGate(closing, price) !== 'ask' || !price || !fieldId) {
-      removeOperation(stepIndex);
+      await runDirectRemoval(stepIndex);
       return;
     }
     setRemoveWarning({ stepIndex, fieldId, price });
@@ -7916,6 +8334,7 @@ export function OperationsField({
    */
   const moveNodes = useCallback(
     (moves: { key: string; at: { x: number; y: number } }[]) => {
+      if (stepTransactionRef.current) return;
       if (moves.length === 0) return;
       const back = prefs.restore(moves);
       setHistory(
@@ -7956,6 +8375,7 @@ export function OperationsField({
    * последовательность шагов сбросом раскладки не менялась.
    */
   const resetPositions = useCallback(() => {
+    if (stepTransactionRef.current) return;
     setHistory(dropMove(history.current));
     prefs.reset();
   }, [prefs, setHistory]);
@@ -7970,16 +8390,6 @@ export function OperationsField({
    */
   const inputKeysOf = (i: number) =>
     ((getValues(`operations.${i}.inputKeys`) as string[]) ?? []) as string[];
-
-  /** Применить формовую половину инверсии, не дав мутаторам погасить остальную историю. */
-  const applyToForm = (fn: () => void) => {
-    applying.current = true;
-    try {
-      fn();
-    } finally {
-      applying.current = false;
-    }
-  };
 
   /**
    * ИНВЕРСИЯ ЗАПИСИ КАРКАСА — ОДНА НА ОБА РЕЖИМА ПО СМЫСЛУ: вернуть то, что стояло до записи.
@@ -8029,6 +8439,14 @@ export function OperationsField({
   useEffect(() => {
     if (!skeletonUndoRequest || skeletonUndoRequest.seq === seenUndo.current) return;
     seenUndo.current = skeletonUndoRequest.seq;
+    if (stepTransactionRef.current) {
+      onSkeletonUndone?.({
+        nonce: skeletonUndoRequest.nonce,
+        undone: 0,
+        refused: 'still saving',
+      });
+      return;
+    }
     const top = peekUndo(history.current);
     if (top?.kind !== 'skeleton' || top.nonce !== skeletonUndoRequest.nonce) {
       onSkeletonUndone?.({
@@ -8069,48 +8487,166 @@ export function OperationsField({
    * ревью Ф4 («молчание на ⌘Z хуже»). Провалившийся guard молчанием НЕ покрывается: там запись
    * БЫЛА, и молчание читалось бы как «отменил», хотя не отменено ничего.
    */
-  const undoRemoval = (rec: RemoveEntry) => {
-    const rowKeys = ((getValues('operations') ?? []) as OperationFormValue[]).map(
-      (op) => op.historyKey ?? '',
+  const undoRemoval = async (rec: RemoveEntry): Promise<boolean> => {
+    const saved = rec.seamRows ?? { seams: [], poses: [] };
+    return runStepRemovalUndoChange<OperationFormValue, { at: number }>(
+      {
+        step: { historyKey: rec.historyKey },
+        row: structuredClone(rec.row),
+        rows: structuredClone(saved),
+        operationNumber: rec.operationNumber ?? 0,
+        candidateKeys: rec.cleanupKeys ?? linkKeys(rec.row),
+      },
+      {
+        validate: () => {
+          const seamState = useSeamsStore.getState();
+          const operations = (getValues('operations') ?? []) as OperationFormValue[];
+          const rowKeys = operations.map((op) => op.historyKey ?? '');
+          const confirmedSeamKeys = new Set(
+            [...seamState.server, ...seamState.poses].map((row) => row.seamKey),
+          );
+          const bindingChanged = rec.binding?.patches.some((patch) => {
+            const operation = operations.find((row) => row.historyKey === patch.historyKey);
+            return (
+              !operation ||
+              JSON.stringify(operation.inputKeys ?? []) !== JSON.stringify(patch.after.inputKeys) ||
+              JSON.stringify(operation.seamKeys ?? []) !== JSON.stringify(patch.after.seamKeys)
+            );
+          });
+          const keys = cardKeysNow();
+          for (const strip of rec.binding?.stripsBefore ?? []) {
+            const stripKey = strip.lineKey?.trim();
+            if (stripKey) keys.pieceKeys.add(stripKey);
+          }
+          return frozenRef.current
+            ? FROZEN_REFUSAL
+            : peekUndo(history.current) !== rec
+              ? 'the sequence has changed since'
+              : bindingChanged
+                ? 'the sequence has changed since'
+                : removeUndoRefusal(rec, {
+                    rowKeys,
+                    ...keys,
+                    seamKeys: restorableSeamKeys(confirmedSeamKeys, saved),
+                  });
+        },
+        settle: waitForRemovalCleanup,
+        rows: () => {
+          const seamState = useSeamsStore.getState();
+          return { seams: seamState.server, poses: seamState.poses };
+        },
+        restore: (row, keyMap) => {
+          const rowKeys = ((getValues('operations') ?? []) as OperationFormValue[]).map(
+            (op) => op.historyKey ?? '',
+          );
+          const at = removeRestoreIndex(rec.before, rec.historyKey, rowKeys);
+          applyToForm(() => {
+            if (rec.binding) {
+              const current = structuredClone((getValues('cutStrips') ?? []) as CutStrip[]);
+              const afterKeys = new Set(
+                rec.binding.stripsAfter.map((strip) => strip.lineKey?.trim() ?? ''),
+              );
+              const removed = rec.binding.stripsBefore
+                .filter((strip) => !afterKeys.has(strip.lineKey?.trim() ?? ''))
+                .map((strip) => ({
+                  ...structuredClone(strip),
+                  seamKey: strip.seamKey
+                    ? keyMap.get(strip.seamKey) ?? strip.seamKey
+                    : strip.seamKey,
+                }));
+              const restored = [...current];
+              for (const strip of removed) {
+                const stripKey = strip.lineKey?.trim() ?? '';
+                if (!stripKey || restored.some((currentStrip) => currentStrip.lineKey === stripKey))
+                  continue;
+                const home = rec.binding.stripsBefore.findIndex(
+                  (currentStrip) => currentStrip.lineKey?.trim() === stripKey,
+                );
+                let target = restored.length;
+                for (let distance = 1; distance < rec.binding.stripsBefore.length; distance += 1) {
+                  const before = rec.binding.stripsBefore[home - distance]?.lineKey?.trim();
+                  const beforeAt = before
+                    ? restored.findIndex((currentStrip) => currentStrip.lineKey?.trim() === before)
+                    : -1;
+                  if (beforeAt >= 0) {
+                    target = beforeAt + 1;
+                    break;
+                  }
+                  const after = rec.binding.stripsBefore[home + distance]?.lineKey?.trim();
+                  const afterAt = after
+                    ? restored.findIndex((currentStrip) => currentStrip.lineKey?.trim() === after)
+                    : -1;
+                  if (afterAt >= 0) {
+                    target = afterAt;
+                    break;
+                  }
+                }
+                restored.splice(target, 0, strip);
+              }
+              setValue('cutStrips', restored as never, { shouldDirty: true });
+              const operations = (getValues('operations') ?? []) as OperationFormValue[];
+              for (const patch of rec.binding.patches) {
+                const patchIndex = operations.findIndex(
+                  (operation) => operation.historyKey === patch.historyKey,
+                );
+                if (patchIndex < 0) continue;
+                setValue(`operations.${patchIndex}.inputKeys`, [...patch.before.inputKeys], {
+                  shouldDirty: true,
+                });
+                setValue(
+                  `operations.${patchIndex}.seamKeys`,
+                  patch.before.seamKeys.map((key) => keyMap.get(key) ?? key),
+                  { shouldDirty: true },
+                );
+              }
+            }
+            remapIssues((old) => (old >= at ? old + 1 : old));
+            insert(at, row, { shouldFocus: false });
+            for (const i of issuesToRelink(rec.issues, getValues('issues') ?? [])) {
+              setValue(`issues.${i}.operationNumber`, operationStepNumber(at), {
+                shouldDirty: true,
+              });
+            }
+          });
+          return { at };
+        },
+        change: (input) =>
+          issueTransactionWrite(
+            () =>
+              stepSeams?.writes.change(input, { verb: 'undo', quiet: true }) ??
+              Promise.resolve({ ok: false as const, why: STILL_SAVING }),
+          ),
+        clearOwed: () => {
+          if (techCardId && rec.operationNumber)
+            clearStepRemovalOwed(techCardId, rec.historyKey, rec.operationNumber);
+        },
+        finishHistory: () => setHistory(finishUndo(history.current, rec, true)),
+        select: ({ at }) => setSelected(at),
+        refuse: (why) => refuseGesture('SEQUENCE', 'not undone', why),
+        unsettled: STILL_SAVING,
+      },
     );
-    const refused = removeUndoRefusal(rec, { rowKeys, ...cardKeysNow() });
-    if (refused) {
-      setHistory(dropUndoTop(history.current));
-      refuseGesture('SEQUENCE', 'not undone', refused);
-      return;
-    }
-    const at = removeRestoreIndex(rec.before, rec.historyKey, rowKeys);
-    applyToForm(() => {
-      remapIssues((old) => (old >= at ? old + 1 : old));
-      insert(at, structuredClone(rec.row), { shouldFocus: false });
-      for (const i of issuesToRelink(rec.issues, getValues('issues') ?? [])) {
-        setValue(`issues.${i}.operationNumber`, operationStepNumber(at), { shouldDirty: true });
-      }
-      // A refusal of the save without this step names rows by position: none of them holds now.
-      clearErrors('operations');
-    });
-    setSelected(at);
-    setHistory(undoStep(history.current));
   };
 
-  const redoRemoval = (rec: RemoveEntry) => {
+  const redoRemoval = async (rec: RemoveEntry): Promise<boolean> => {
     const operations = (getValues('operations') ?? []) as OperationFormValue[];
     const index = operations.findIndex((op) => op.historyKey === rec.historyKey);
-    const fresh =
-      index < 0 || foldsClosingOn(operations, index).length > 0 ? null : removeRecord(index);
-    if (!fresh) {
+    if (index < 0 || foldsClosingOn(operations, index).length > 0) {
       setHistory(dropRedoTop(history.current));
       refuseGesture('SEQUENCE', 'nothing to redo', 'the sequence has changed since');
-      return;
+      return false;
     }
-    applyToForm(() => {
-      removeOperation(index);
-      clearErrors('operations');
+    return removeOperation(index, {
+      preserveHistory: true,
+      redo: true,
+      recordRemoval: (fresh) => {
+        if (peekRedo(history.current) !== rec) return;
+        setHistory(pushUndo(dropRedoTop(history.current), fresh));
+      },
     });
-    setHistory(pushUndo(dropRedoTop(history.current), fresh));
   };
 
-  const undoGesture = () => {
+  const performUndoGesture = async () => {
     const rec = peekUndo(history.current);
     if (!rec) return; // тишина: отменять нечего, и говорить не о чем
     if (rec.kind !== 'move' && frozen) {
@@ -8126,7 +8662,7 @@ export function OperationsField({
       return;
     }
     if (rec.kind === 'remove') {
-      undoRemoval(rec);
+      await undoRemoval(rec);
       return;
     }
     if (!canUndo(rec, fields, outputUnitKeyOf, inputKeysOf)) {
@@ -8141,14 +8677,16 @@ export function OperationsField({
     } else if (rec.kind === 'append' || rec.kind === 'insert') {
       // ОДНА ИНВЕРСИЯ НА ОБА РОДА: удалить строку по адресу. Дописывание и вставка расходятся
       // только в повторе — там надо знать, куда возвращать, — а обратно они идут одинаково.
+      // Ремап ссылок дефектов уже внутри мутатора — своего удаления заводить нельзя (R3).
+      const removed = await removeOperation(rec.index, { preserveHistory: true });
+      if (!removed) return;
       applyToForm(() => {
-        // Ремап ссылок дефектов уже внутри мутатора — своего удаления заводить нельзя (R3).
-        removeOperation(rec.index);
         // Жест перезаписал `assemblyCleared` — инверсия возвращает и его.
-        if (rec.clearedBefore !== undefined) {
+        if (rec.clearedBefore !== undefined)
           setValue('assemblyCleared', rec.clearedBefore, { shouldDirty: true });
-        }
       });
+      setHistory(finishUndo(history.current, rec, true));
+      return;
     } else {
       // ОДНО НАЖАТИЕ ВОЗВРАЩАЕТ ВСЕ ТРИ ВИДА МЕСТ. Тем же переписывателем, что их и правил, — по
       // адресам, записанным жестом, а не по повторному скану: шаг, дописавший ссылку на НОВЫЙ ключ
@@ -8162,8 +8700,10 @@ export function OperationsField({
     }
     setHistory(undoStep(history.current));
   };
+  const undoGesture = () =>
+    runStepMutation(stepTransactionRef, setStepTransaction, performUndoGesture);
 
-  const redoGesture = () => {
+  const performRedoGesture = async () => {
     const rec = peekRedo(history.current);
     if (!rec) return; // та же тишина: возвращать нечего
     if (rec.kind !== 'move' && frozen) {
@@ -8171,7 +8711,7 @@ export function OperationsField({
       return;
     }
     if (rec.kind === 'remove') {
-      redoRemoval(rec);
+      await redoRemoval(rec);
       return;
     }
     if (!canRedo(rec, fields, outputUnitKeyOf, inputKeysOf)) {
@@ -8255,6 +8795,8 @@ export function OperationsField({
     setRenamedUnit({ from: rec.from, to: rec.to });
     setHistory(redoStep(history.current));
   };
+  const redoGesture = () =>
+    runStepMutation(stepTransactionRef, setStepTransaction, performRedoGesture);
 
   // --- общее для ВСЕХ ТРЁХ видов ----------------------------------------------------------------
   //
@@ -8585,8 +9127,8 @@ export function OperationsField({
       (event.ctrlKey && !event.metaKey && event.code === 'KeyY');
     if (!undo && !redo) return;
     event.preventDefault();
-    if (undo) undoGesture();
-    else redoGesture();
+    if (undo) void undoGesture();
+    else void redoGesture();
   };
 
   return (
@@ -8597,7 +9139,7 @@ export function OperationsField({
         action={
           <>
             <OperationsHeaderWarnings
-              frozen={frozen}
+              frozen={editorFrozen}
               onRatify={() => setRatifyOpen(true)}
               onStepProblem={(index) => setSelected(index)}
               stepProblems={stepProblems}
@@ -8618,13 +9160,17 @@ export function OperationsField({
           снимки в форме и снимки сохранённой карточки. Внешнее условие про второй источник
           прятало кнопку там, где снимки добавили, но ещё не сохранили. */}
       <ChipRow>
-        <ClearOperationMediaButton storedHasMedia={storedHasMedia} frozen={frozen} />
+        <ClearOperationMediaButton storedHasMedia={storedHasMedia} frozen={editorFrozen} />
         {/* ТА ЖЕ ПРИЧИНА, ЧТО У СОСЕДА СЛЕВА, и её пришлось усвоить дважды: кнопка снятия
             разметки узлов жила ВНУТРИ лотка деталей, а лоток прячется при нуле операций. Сценарий
             отказа ровно такой: у сохранённой карточки узлы есть, технолог удалил все шаги, чтобы
             пересобрать последовательность, сервер требует объявить намерение — и кнопка, которой
             это делают, оказалась за `hidden`. Починку применили к одному щиту из двух. */}
-        <ClearAssemblyButton pieces={pieces} storedHasUnits={storedHasUnits} frozen={frozen} />
+        <ClearAssemblyButton
+          pieces={pieces}
+          storedHasUnits={storedHasUnits}
+          frozen={editorFrozen}
+        />
       </ChipRow>
 
       {/* piece tray — click a chip to add it to the open step, or drag it onto any step. Hidden
@@ -8681,7 +9227,7 @@ export function OperationsField({
         <SeamWalk
           fields={fields}
           cardId={techCardId}
-          frozen={frozen}
+          frozen={editorFrozen}
           selectedIndex={selectedIndex}
           onExit={(index) => {
             setSelected(index);
@@ -8823,7 +9369,7 @@ export function OperationsField({
                   renamedUnit={renamedUnit}
                   orphanBoard={orphanBoard}
                   onInsertFoldPress={insertFoldPress}
-                  frozen={frozen}
+                  frozen={editorFrozen}
                 />
               ) : (
                 <div className='lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto'>
@@ -8919,7 +9465,8 @@ export function OperationsField({
                   onRemoveGhost={removeStepGhost}
                   mediaUrls={operationMediaUrls}
                   serverOperations={savedCard?.techCard?.operations}
-                  frozen={frozen}
+                  isEditorFrozen={isEditorFrozen}
+                  frozen={editorFrozen}
                 />
               </div>
             )}
@@ -9028,7 +9575,8 @@ export function OperationsField({
                 onRemoveGhost={removeStepGhost}
                 mediaUrls={operationMediaUrls}
                 serverOperations={savedCard?.techCard?.operations}
-                frozen={frozen}
+                isEditorFrozen={isEditorFrozen}
+                frozen={editorFrozen}
               />
             ) : null
           }
@@ -9045,7 +9593,7 @@ export function OperationsField({
               {reuploadedPieceDoors}
             </>
           }
-          frozen={frozen}
+          frozen={editorFrozen}
           onSave={onSave}
           saving={saving}
           pieceClothByColorway={pieceClothByColorway ?? []}
@@ -9055,19 +9603,19 @@ export function OperationsField({
       )}
 
       <ConfirmationModal
-        open={removeWarning != null}
+        open={removeWarning != null && !editorFrozen}
         onOpenChange={(open) => {
           if (!open) setRemoveWarning(null);
         }}
-        onConfirm={() => {
-          if (!removeWarning) return;
+        onConfirm={async () => {
+          if (!removeWarning || isEditorFrozen()) return;
           // The dialog holds an address: an autosave reset or a release can move the rows under it,
           // and removing by a stale index would delete someone else's step.
           if (fields[removeWarning.stepIndex]?.id !== removeWarning.fieldId) {
             refuseGesture('SEQUENCE', 'not removed', 'the sequence has changed since');
             return;
           }
-          removeOperation(removeWarning.stepIndex);
+          await runDirectRemoval(removeWarning.stepIndex);
         }}
         title={
           removeWarning
@@ -9120,12 +9668,12 @@ export function OperationsField({
           (список и схема), и панель обязана пережить переключение вида: она про имена шагов, а не
           про то, каким из двух способов эти шаги сейчас нарисованы. */}
       <OperationsRatifyPanel
-        open={ratifyOpen}
+        open={ratifyOpen && !editorFrozen}
         // ЗАМОРОЗКА — ПРОПОМ, И ЭТО НЕ ПОВТОР ВНЕШНЕГО `<fieldset disabled>`. До панели фиелдсет не
         // достаёт вовсе (`Dialog.Portal container={document.body}` выносит её наружу), а кнопка,
         // которая панель открывает, на выпущенной карточке не рисуется — то есть без этого пропа
         // панель, открытая на черновике и пережившая выпуск карточки, продолжала бы писать.
-        frozen={frozen}
+        frozen={editorFrozen}
         onClose={() => setRatifyOpen(false)}
         catalog={workCatalog}
         // ПУСТЫЕ ЗНАЧЕНИЯ СТРОКИ ШАГА — ПРОПОМ. Это тот же щит, что и у строки шага: имя, которого
@@ -9146,12 +9694,12 @@ export function OperationsField({
       />
 
       <ConfirmationModal
-        open={pendingMoveChoice != null}
+        open={pendingMoveChoice != null && !editorFrozen}
         onOpenChange={(open) => {
           if (!open) setPendingMoveChoice(null);
         }}
         onConfirm={() => {
-          if (!pendingMoveChoice) return;
+          if (!pendingMoveChoice || isEditorFrozen()) return;
           const current = (getValues('operations') ?? []) as OperationFormValue[];
           const operation = current[pendingMoveChoice.from];
           const currentStepKey = operation?.historyKey?.trim() || `step:${pendingMoveChoice.from}`;
@@ -9220,7 +9768,7 @@ export function OperationsField({
       </ConfirmationModal>
 
       <AssemblyCreateDialog
-        prefill={pendingCreate}
+        prefill={editorFrozen ? null : pendingCreate}
         onClose={() => setPendingCreate(null)}
         onCreate={appendStep}
         // ФРОНТИР ЦЕЛЕВОЙ ПОЗИЦИИ, А НЕ КОНЦА ЛИСТА. У жеста без позиции это одно и то же, у
