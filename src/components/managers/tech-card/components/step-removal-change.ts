@@ -3,7 +3,7 @@ import type { StoredPose, StoredRow, StoredSeam } from 'lib/seams';
 import type { OwedStepRemoval } from './card-owed';
 import type { SeamChangeInput, SeamChangeResult } from './assembly-seams/seam-change';
 import type { SeamChange, StepRef } from './assembly-seams/seam-change-plan';
-import { reuseKeys } from './assembly-seams/seams-store';
+import { reuseKeys, useSeamsStore } from './assembly-seams/seams-store';
 
 export type StepLinkRow = {
   historyKey?: string;
@@ -287,4 +287,24 @@ export async function runStepRemovalCleanup(
   // A server contradiction is stable for this debt and is dropped silently instead of spinning.
   if (!cleanupRetryable(changed.why)) io.clear();
   return false;
+}
+
+/**
+ * A cleanup refusal is silent: `runSeamChange` marks the refused rows with errors even for a quiet
+ * caller, so this debt's errors are lifted once its pending state settled.
+ */
+export function quietCleanupChange(
+  candidateKeys: readonly string[],
+  write: (input: SeamChangeInput) => Promise<SeamChangeResult>,
+): (input: SeamChangeInput) => Promise<SeamChangeResult> {
+  return async (input) => {
+    const result = await write(input);
+    if (!result.ok) {
+      const state = useSeamsStore.getState();
+      const errors = { ...state.errors };
+      for (const key of candidateKeys) delete errors[key];
+      useSeamsStore.setState({ errors });
+    }
+    return result;
+  };
 }

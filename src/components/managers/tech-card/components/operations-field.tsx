@@ -290,6 +290,7 @@ import {
   linkedStepRows,
   mergeStepRemovalRows,
   runStepRemovalChange,
+  quietCleanupChange,
   runStepRemovalCleanup,
   runStepRemovalRedoChange,
   runStepRemovalUndoChange,
@@ -6558,21 +6559,9 @@ export function OperationsField({
             // C1: the function, not a prebuilt delete, is queued. `runSeamChange` rebuilds it only
             // after its body flush and on lock_version_moved, under the version that saved those
             // operation links. A newly linked row therefore never reaches a delete request.
-            change: async (input) => {
-              const result = await sourceStepWrites.change(input, {
-                verb: 'removal',
-                quiet: true,
-              });
-              if (!result.ok) {
-                // Cleanup refusals are silent. `runSeamChange` records row-level errors even for a
-                // quiet caller, so remove only this debt's errors after its pending state settled.
-                const state = useSeamsStore.getState();
-                const errors = { ...state.errors };
-                for (const key of entry.candidateKeys) delete errors[key];
-                useSeamsStore.setState({ errors });
-              }
-              return result;
-            },
+            change: quietCleanupChange(entry.candidateKeys, (input) =>
+              sourceStepWrites.change(input, { verb: 'removal', quiet: true }),
+            ),
             clear: () => clearRemovalDebt(cardId, entry),
           });
         }
