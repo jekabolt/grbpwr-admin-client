@@ -25,6 +25,7 @@ import { poseChange, type SeamChange, type StepRef } from './seam-change-plan';
 import {
   NOT_SAVED,
   runSeamChange,
+  type SeamChangeInput,
   type SeamChangeOpts,
   type SeamChangeResult,
 } from './seam-change';
@@ -86,7 +87,7 @@ export type SeamWrites = {
    * One gesture in one request (C7): rows and step links together, under the card's version. The
    * steps are addressed after the form's autosave flush; the form adopts the committed links.
    */
-  change: (change: SeamChange, opts: SeamChangeOpts) => Promise<SeamChangeResult>;
+  change: (change: SeamChangeInput, opts: SeamChangeOpts) => Promise<SeamChangeResult>;
   /** The list a new row is checked against, read again when old; false: it could not be read. */
   fresh: () => Promise<boolean>;
   /** Insert or replace these rows (by seam key); resolves true when the server took them. */
@@ -119,7 +120,7 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
   const undoHistory = useUndoHistory();
 
   const change = useCallback(
-    async (c: SeamChange, opts: SeamChangeOpts): Promise<SeamChangeResult> => {
+    async (c: SeamChangeInput, opts: SeamChangeOpts): Promise<SeamChangeResult> => {
       if (frozen) {
         refuseGesture('SEAMS', 'frozen', FROZEN_REFUSAL);
         return { ok: false, why: 'frozen' };

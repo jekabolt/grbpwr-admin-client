@@ -361,6 +361,31 @@ describe('lock_version_moved', () => {
     expect(useSeamsStore.getState().serverVersion).toBe(10);
   });
 
+  it('a change given as a function is built again for the retry, after the read', async () => {
+    const f = fakeBridge();
+    f.bridge.reread = async () => {
+      f.setVersion(9);
+      return { ok: true, card: { lockVersion: 9, seams: wire([a]) } as unknown as common_TechCard };
+    };
+    let detachKey = a.seamKey;
+    const sentDetach: (string | undefined)[] = [];
+    const res = await runSeamChange(
+      CARD,
+      () => ({ upsert: [b], detach: [{ step, seamKey: detachKey }] }),
+      { verb: 'decision' },
+      depsOf(f.bridge, async (req) => {
+        sentDetach.push(req.detach?.[0]?.seamKey);
+        if (sentDetach.length === 1) {
+          detachKey = c.seamKey;
+          throw lockMoved();
+        }
+        return reply(10, [a, b]);
+      }),
+    );
+    expect(res.ok).toBe(true);
+    expect(sentDetach).toEqual([a.seamKey, c.seamKey]);
+  });
+
   it('a second refusal is said as it is', async () => {
     const f = fakeBridge();
     f.bridge.reread = async () => ({

@@ -58,6 +58,13 @@ export type SeamChangeDeps = {
 
 export const NOT_SAVED = 'not saved';
 
+/**
+ * A gesture's change, or how to build it: a function is built again after the form's flush and after
+ * a lock_version_moved read, so a change that depends on a step's links (MIRROR's detaches) is made
+ * from the links as they are when it goes out. The optimistic rows come from the first build.
+ */
+export type SeamChangeInput = SeamChange | (() => SeamChange);
+
 const message = (e: unknown) =>
   e instanceof Error ? e.message.replace(/^Error:\s*/, '') : 'the server did not answer';
 
@@ -107,10 +114,12 @@ export function settleSeamWrite(
 /** Write one gesture; resolves with the committed keys, or why nothing was written. */
 export function runSeamChange(
   cardId: number,
-  change: SeamChange,
+  input: SeamChangeInput,
   opts: SeamChangeOpts,
   deps: SeamChangeDeps,
 ): Promise<SeamChangeResult> {
+  const build = typeof input === 'function' ? input : () => input;
+  const change = build();
   const s = useSeamsStore.getState();
   // The store holds another card (its list was never read here): the write goes out without
   // optimistic rows, and its answer is the next read's business.
@@ -150,7 +159,7 @@ export function runSeamChange(
       for (let attempt = 0; ; attempt += 1) {
         // The card left this page while the write waited its turn.
         if (bridgeOf(cardId) !== bridge) return fail(NOT_SAVED);
-        const req = changeRequest(cardId, bridge.version(), change, bridge.operationNumber);
+        const req = changeRequest(cardId, bridge.version(), build(), bridge.operationNumber);
         if (!req) return fail(NOT_SAVED);
         let res: ChangeTechCardSeamsResponse;
         try {
