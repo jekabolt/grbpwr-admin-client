@@ -98,6 +98,7 @@ export function useMirrorStep({
   poses,
   folds,
   geoms,
+  innerLines,
   grainDeg,
 }: UseMirrorStepInput) {
   const ctx = useStepSeams();
@@ -114,9 +115,10 @@ export function useMirrorStep({
         poses: poseList,
         folds,
         geoms,
+        innerLines,
         grainDeg,
       }),
-    [step, cardOps, rowList, poseList, folds, geoms, grainDeg],
+    [step, cardOps, rowList, poseList, folds, geoms, innerLines, grainDeg],
   );
   const visible = useMemo(
     () => plan.kind !== 'no-twin' || isRightMirrorStep(step, cardOps, geoms),

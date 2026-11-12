@@ -62,6 +62,7 @@ import {
 } from './aliases';
 import { fusingDartPolygons } from './darts';
 import { buildFusingSheets } from './dxf';
+import { fusingInternalLines } from './internal-lines';
 import type {
   BuildFusingSheetsResult,
   FusingBomLine,
@@ -355,6 +356,7 @@ export function sourcePieces(
           })) ?? undefined,
         darts: fusingDartPolygons(row),
         grain: sourceGrain(row, grainLayer),
+        internals: fusingInternalLines(row, seamLayer),
       });
     }
     if (!sizes.length) continue;

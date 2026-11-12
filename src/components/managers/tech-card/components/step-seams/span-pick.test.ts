@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { PieceGeom } from 'lib/assembly-skeleton/types';
+import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { normalizeParts, SEAMS, type StoredSeam } from 'lib/seams';
 
@@ -8,15 +8,19 @@ import { rowPairSig, rowsSig } from '../assembly-seams/seams-store';
 
 import realFixture from './fixtures/span-real-geoms.json';
 import { foldCrossingsMm } from './step-folds';
+import { closedInner } from './step-seams-model';
 import {
   clickSegment,
   edgeBreaks,
+  innerBreaks,
   mmOnPoints,
   NO_SPANS,
   pickFreeSpan,
   pickSegment,
+  pickSegments,
   repeatsStoredSeam,
   segmentAt,
+  segmentsAt,
   sideParts,
   surfacePartSide,
   surfacePick,
@@ -34,6 +38,14 @@ const id = `${piece.key}#4`;
 const length = resolveEdge(id, geoms)!.len;
 const rules = { isInner: () => false, pieceOf: (t: string) => t.slice(0, t.lastIndexOf('#')) };
 const empty: SidePick = { a: [], b: [], spans: NO_SPANS };
+const targetLen = (points: readonly Pt2[]) =>
+  points
+    .slice(1)
+    .reduce(
+      (sum, point, index) =>
+        sum + Math.hypot(point[0] - points[index][0], point[1] - points[index][1]),
+      0,
+    );
 
 describe('span hand', () => {
   it('a click takes the segment between neighbouring break points', () => {
@@ -249,6 +261,114 @@ describe('span hand', () => {
   });
 });
 
+describe('closed inner contour span hand', () => {
+  const innerRules = {
+    isInner: (target: string) => /:i\d+$/.test(target),
+    pieceOf: (target: string) => target.replace(/:i\d+$/, ''),
+  };
+  const target = 'HOST:i0';
+  const rectangle: Pt2[] = [
+    [0, 0],
+    [140, 0],
+    [140, 10],
+    [0, 10],
+    [0, 0],
+  ];
+
+  it('a circle with no corners is picked whole', () => {
+    const circle: Pt2[] = Array.from({ length: 72 }, (_, index) => {
+      const angle = (index / 72) * Math.PI * 2;
+      return [100 + 20 * Math.cos(angle), 100 + 20 * Math.sin(angle)];
+    });
+    circle.push(circle[0]);
+    const length = targetLen(circle);
+    const breaks = innerBreaks(circle);
+    const segments = segmentsAt(breaks, length, length / 3, !!closedInner(circle));
+    const pick = pickSegments(empty, 'a', target, segments, length, innerRules, breaks);
+
+    expect(closedInner(circle)).toBeNull();
+    expect(segments).toEqual([[0, length]]);
+    expect(pick.a).toEqual([target]);
+    expect(pick.spans.a).toEqual({});
+  });
+
+  it('a click takes one side between the contour corners', () => {
+    const breaks = innerBreaks(rectangle);
+    const pick = pickSegments(
+      empty,
+      'a',
+      target,
+      segmentsAt(breaks, 300, 70, true),
+      300,
+      innerRules,
+    );
+    expect(pick.a).toEqual([target]);
+    expect(pick.spans.a[target]).toEqual([[0, 140]]);
+  });
+
+  it('the next click extends to the adjacent side', () => {
+    const breaks = innerBreaks(rectangle);
+    const first = pickSegments(
+      empty,
+      'a',
+      target,
+      segmentsAt(breaks, 300, 70, true),
+      300,
+      innerRules,
+    );
+    const pick = pickSegments(
+      first,
+      'a',
+      target,
+      segmentsAt(breaks, 300, 145, true),
+      300,
+      innerRules,
+    );
+    expect(pick.spans.a[target]).toEqual([[0, 150]]);
+  });
+
+  it('a disjoint side replaces the previous host stretch', () => {
+    const breaks = innerBreaks(rectangle);
+    const first = pickSegments(
+      empty,
+      'a',
+      target,
+      segmentsAt(breaks, 300, 70, true),
+      300,
+      innerRules,
+    );
+    const pick = pickSegments(
+      first,
+      'a',
+      target,
+      segmentsAt(breaks, 300, 220, true),
+      300,
+      innerRules,
+    );
+
+    expect(pick.spans.a[target]).toEqual([[150, 290]]);
+  });
+
+  it('a side across vertex 0 writes two spans', () => {
+    const startsOnSide: Pt2[] = [
+      [70, 0],
+      [140, 0],
+      [140, 10],
+      [0, 10],
+      [0, 0],
+      [70, 0],
+    ];
+    const breaks = innerBreaks(startsOnSide);
+    const spans = segmentsAt(breaks, 300, 20, true);
+    expect(spans).toEqual([
+      [0, 70],
+      [230, 300],
+    ]);
+    const pick = pickSegments(empty, 'a', target, spans, 300, innerRules);
+    expect(pick.spans.a[target]).toEqual(spans);
+  });
+});
+
 describe('stored seams in the hand', () => {
   const stored = [{ parts: { a: [{ target: id, range: [100, 300] as const }], b: [] } }];
 
@@ -260,6 +380,14 @@ describe('stored seams in the hand', () => {
   it('a dragged span that crosses a stored part finds its seam', () => {
     expect(storedSeamOverlapping(stored, id, [250, 400], geoms)).toBe(0);
     expect(storedSeamOverlapping(stored, id, [400, 500], geoms)).toBe(-1);
+  });
+
+  it('keeps whole and ranged inner targets addressable for overlap', () => {
+    const target = `${piece.key}:i0`;
+    const ranged = [{ parts: { a: [{ target, range: [100, 200] as const }], b: [] } }];
+    const whole = [{ parts: { a: [{ target }], b: [] } }];
+    expect(storedSeamOverlapping(ranged, target, undefined, geoms)).toBe(0);
+    expect(storedSeamOverlapping(whole, target, [250, 300], geoms)).toBe(0);
   });
 
   it('a pick that repeats a stored seam is refused, another span of the edge is not', () => {

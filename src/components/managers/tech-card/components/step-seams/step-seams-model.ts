@@ -6,6 +6,7 @@
 // millimetres with y UP, so an edge is drawn as [x, −y] and an inner line is anchored as [x, −y].
 
 import { cornerTurn, edgeIdsOf, identicalSeamEdge } from 'lib/assembly-skeleton/geometry';
+import { dist, findCorners, resample } from 'lib/assembly-skeleton/geometry/segment';
 import { xSideOf } from 'lib/assembly-skeleton/geometry/plies';
 import { roleOf, roleVeto } from 'lib/assembly-skeleton/assignment/costs';
 import { readName, roleDef } from 'lib/assembly-skeleton/skeleton/model';
@@ -37,6 +38,7 @@ import { edgeWordPredicate } from './signals/edge-words';
 import { zoneAllows, zoneOf } from './signals/zone';
 
 export type Pt = [number, number];
+export const SAME_MM = 0.1;
 
 /** A pickable target: an edge (`P#3`) or an inner line (`P:i2`). */
 export type TargetId = string;
@@ -2633,8 +2635,132 @@ export function suggestionWords(suggestion: Suggestion, nameOf: (piece: string) 
 
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
 const r = (x: number, d: number) => Math.round(x * 10 ** d) / 10 ** d;
-const polyLen = (pts: readonly Pt[]) =>
+export const polylineLenMm = (pts: readonly Pt[]) =>
   pts.reduce((s, p, i) => (i ? s + Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) : s), 0);
+
+const mmNearestPoint = (line: readonly Pt[], point: Pt): number => {
+  let best = 0;
+  let bestGap = Infinity;
+  let walked = 0;
+  for (let index = 1; index < line.length; index++) {
+    const a = line[index - 1];
+    const b = line[index];
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const length = Math.hypot(dx, dy);
+    const share = length
+      ? Math.max(0, Math.min(1, ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / length ** 2))
+      : 0;
+    const gap = Math.hypot(point[0] - a[0] - dx * share, point[1] - a[1] - dy * share);
+    if (gap < bestGap) {
+      best = walked + share * length;
+      bestGap = gap;
+    }
+    walked += length;
+  }
+  return best;
+};
+
+/** A closed inner contour segmented with the outline's own resample and corner thresholds. */
+export function closedInner(line: readonly Pt[]): { lenMm: number; cornersMm: number[] } | null {
+  if (line.length < 4 || dist(line[0], line[line.length - 1]) > 1e-6) return null;
+  const lenMm = polylineLenMm(line);
+  if (!(lenMm > 0)) return null;
+  const ring = resample(line, SKELETON.resampleMm);
+  if (ring.length < 3) return null;
+  const cornersMm = findCorners(ring)
+    .map((index) => mmNearestPoint(line, ring[index] as Pt))
+    .sort((a, b) => a - b)
+    .filter(
+      (value, index, values) => index === 0 || value - values[index - 1] > SKELETON.resampleMm / 2,
+    );
+  return cornersMm.length ? { lenMm, cornersMm } : null;
+}
+
+const innerSliceBetween = (line: readonly Pt[], from: number, to: number): Pt[] => {
+  if (line.length < 2 || to < from) return [];
+  const out: Pt[] = [];
+  let walked = 0;
+  for (let index = 1; index < line.length; index++) {
+    const a = line[index - 1];
+    const b = line[index];
+    const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const next = walked + length;
+    if (length > 0 && next >= from && walked <= to) {
+      const start = Math.max(0, Math.min(1, (from - walked) / length));
+      const end = Math.max(start, Math.min(1, (to - walked) / length));
+      const first: Pt = [a[0] + (b[0] - a[0]) * start, a[1] + (b[1] - a[1]) * start];
+      const last: Pt = [a[0] + (b[0] - a[0]) * end, a[1] + (b[1] - a[1]) * end];
+      if (!out.length || dist(out[out.length - 1], first) > 1e-6) out.push(first);
+      if (dist(out[out.length - 1], last) > 1e-6) out.push(last);
+    }
+    walked = next;
+  }
+  return out;
+};
+
+/** A millimetre range of an inner polyline; `from > to` joins across its closed vertex 0. */
+export function innerSlice(line: readonly Pt[], range?: readonly [number, number]): Pt[] {
+  const length = polylineLenMm(line);
+  if (!range || !(length > 0)) return [...line];
+  const from = Math.max(0, Math.min(length, range[0]));
+  const to = Math.max(0, Math.min(length, range[1]));
+  if (from <= to) return innerSliceBetween(line, from, to);
+  const first = innerSliceBetween(line, from, length);
+  const second = innerSliceBetween(line, 0, to);
+  return first.length && second.length && dist(first[first.length - 1], second[0]) <= 1e-6
+    ? [...first, ...second.slice(1)]
+    : [...first, ...second];
+}
+
+const mergedInnerRanges = (
+  ranges: readonly (readonly [number, number])[],
+  length: number,
+): [number, number][] => {
+  const clamped = ranges
+    .flatMap(([rawFrom, rawTo]): [number, number][] => {
+      const from = Math.max(0, Math.min(length, rawFrom));
+      const to = Math.max(0, Math.min(length, rawTo));
+      return from <= to
+        ? [[from, to]]
+        : [
+            [from, length],
+            [0, to],
+          ];
+    })
+    .filter(([from, to]) => to - from > 1e-6)
+    .sort((a, b) => a[0] - b[0]);
+  const merged: [number, number][] = [];
+  for (const range of clamped) {
+    const last = merged.at(-1);
+    if (last && range[0] <= last[1] + SAME_MM) last[1] = Math.max(last[1], range[1]);
+    else merged.push([...range]);
+  }
+  return merged;
+};
+
+/** Picked inner stretches as separate polylines; a wrap is the one line crossing stored vertex 0. */
+export function innerSlices(
+  line: readonly Pt[],
+  ranges: readonly (readonly [number, number])[],
+): Pt[][] {
+  if (!ranges.length) return [[...line]];
+  const length = polylineLenMm(line);
+  if (!(length > 0)) return [];
+  const merged = mergedInnerRanges(ranges, length);
+  if (!merged.length) return [];
+  if (
+    merged.length > 1 &&
+    merged[0][0] <= SAME_MM &&
+    merged[merged.length - 1][1] >= length - SAME_MM
+  ) {
+    const wrap = innerSlice(line, [merged[merged.length - 1][0], merged[0][1]]);
+    return [wrap, ...merged.slice(1, -1).map((range) => innerSlice(line, range))].filter(
+      (slice) => slice.length,
+    );
+  }
+  return merged.map((range) => innerSlice(line, range)).filter((slice) => slice.length);
+}
 
 /** An inner line of a host piece as an anchor: edge hint `i<k>`, samples in the host's frame. */
 export function innerAnchor(
@@ -2643,11 +2769,19 @@ export function innerAnchor(
   line: readonly Pt[],
   grainDeg: number,
   placement?: SeamPlacement,
+  rangeMm?: readonly [number, number],
 ): EdgeAnchor | null {
   const pts: Pt2[] = line.map(([x, y]) => [x, -y]);
-  const len = polyLen(line);
+  const len = polylineLenMm(line);
   if (pts.length < 2 || !(len > 0)) return null;
   const f = frameOf(host, grainDeg);
+  const from = rangeMm ? Math.max(0, Math.min(len, rangeMm[0])) : 0;
+  const to = rangeMm ? Math.max(from, Math.min(len, rangeMm[1])) : len;
+  if (rangeMm && to - from <= SAME_MM) return null;
+  const range: [number, number] =
+    from <= 0.05 && to >= len - 0.05 ? [0, 1] : [r(from / len, 4), r(to / len, 4)];
+  // The server refuses from >= to: on a long contour a short stretch can round to one share.
+  if (range[1] <= range[0]) return null;
   return {
     piece: host.pieceKey,
     samples: runSamples(f, { pts }).map(([u, v]) => [r(clamp01(u), 3), r(clamp01(v), 3)]),
@@ -2655,7 +2789,7 @@ export function innerAnchor(
     lenMm: r(len, 1),
     notches: 0,
     turnDeg: 0,
-    range: [0, 1],
+    range,
     edgeHint: `i${k}`,
     contourSig: contourSig(host, f),
     ...(placement ? { placement } : {}),
@@ -2667,20 +2801,29 @@ export function innerAnchor(
  * longest edge — the drawing places the part itself). A hand placement rides on both anchors.
  */
 export function surfaceRow(
-  host: { geom: PieceGeom; k: number; line: readonly Pt[]; grainDeg: number },
+  host: {
+    geom: PieceGeom;
+    k: number;
+    line: readonly Pt[];
+    grainDeg: number;
+    ranges?: readonly (readonly [number, number])[];
+  },
   partAnchors: readonly EdgeAnchor[],
   placement: SeamPlacement | undefined,
   seamKey = newSeamKey(),
 ): StoredSeam | null {
-  const a = innerAnchor(host.geom, host.k, host.line, host.grainDeg, placement);
-  if (!a || partAnchors.length === 0) return null;
+  const sideA = (host.ranges?.length ? host.ranges : [undefined]).flatMap((range) => {
+    const anchor = innerAnchor(host.geom, host.k, host.line, host.grainDeg, placement, range);
+    return anchor ? [anchor] : [];
+  });
+  if (sideA.length === 0 || partAnchors.length === 0) return null;
   return {
     seamKey,
     status: 'confirmed',
     kind: 'surface',
     direction: 'unknown',
     source: 'manual',
-    sideA: [a],
+    sideA,
     sideB: partAnchors.map((p) => (placement ? { ...p, placement } : p)),
     anchoredSize: '',
     note: '',

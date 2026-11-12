@@ -56,12 +56,14 @@ import {
   opIconInputOf,
   type OpIcon,
 } from 'components/managers/tech-card/op-icons';
-import {
-  rowTargetsOfAnchor,
-  storedSeamSides,
-} from 'components/managers/tech-card/components/step-seams/step-rows';
+import { storedSeamSides } from 'components/managers/tech-card/components/step-seams/step-rows';
 import { stepHighlightOf } from 'components/managers/tech-card/components/step-seams/step-highlight';
 import { sideLengthMm } from 'components/managers/tech-card/components/step-seams/seam-length';
+import {
+  innerSlice,
+  closedInner,
+  innerSlices,
+} from 'components/managers/tech-card/components/step-seams/step-seams-model';
 import {
   buttonholeDirection,
   buttonholeLengthMm,
@@ -920,11 +922,10 @@ function locateSeams(input: AssemblyInput): { seams: AsmSeam[]; unresolved: numb
     if (!hits.length || hits.some((h) => !h) || !add(s, hits as AnchorHit[], [])) unresolved++;
   }
   for (const seam of stored.filter((row) => row.kind === 'surface')) {
-    const wireSeam = wire.find((row) => row.seamKey === seam.seamKey);
-    const anchors = [...(wireSeam?.sideA?.parts ?? []), ...(wireSeam?.sideB?.parts ?? [])];
-    const anchor = anchors.find((part) => /^i\d+$/.test(part.edgeHint ?? ''));
+    const allInner = [...seam.sideA, ...seam.sideB].filter((part) => /^i\d+$/.test(part.edgeHint));
+    const anchor = allInner[0];
     const match = /^i(\d+)$/.exec(anchor?.edgeHint ?? '');
-    const piece = anchor?.pieceLineKey ?? '';
+    const piece = anchor?.piece ?? '';
     const index = match ? Number(match[1]) : -1;
     const line = index >= 0 ? input.pieces.get(piece)?.inner[index] : undefined;
     if (!anchor || !line?.length) {
@@ -941,23 +942,40 @@ function locateSeams(input: AssemblyInput): { seams: AsmSeam[]; unresolved: numb
       unresolved++;
       continue;
     }
-    const lenMm = polyLen(line);
-    const part: SeamPart = {
-      piece,
-      pts: line,
-      lenMm,
-      share: 1,
-      turn: turnOf(line),
-    };
+    const anchors = allInner.filter(
+      (part) => part.piece === piece && part.edgeHint === anchor.edgeHint,
+    );
+    const wholeLen = polyLen(line);
+    const whole = anchors.some((part) => part.range[0] <= 0 && part.range[1] >= 1);
+    const ranges = whole
+      ? []
+      : anchors.map(
+          (part) =>
+            [part.range[0] * wholeLen, part.range[1] * wholeLen] as readonly [number, number],
+        );
+    const lines = innerSlices(line, ranges);
+    const parts: SeamPart[] = lines.map((points) => {
+      const lenMm = polyLen(points);
+      return {
+        piece,
+        pts: points,
+        lenMm,
+        share: lenMm / Math.max(wholeLen, 1e-6),
+        turn: turnOf(points),
+      };
+    });
+    const targetPoints = [...lines].sort((left, right) => polyLen(right) - polyLen(left))[0] ?? [];
     out.push({
       key: seam.seamKey,
       kind: seam.kind,
       note: seam.note,
       opHint: opHint(seam),
-      a: [part],
+      a: parts,
       b: [],
       pieces: [piece],
-      inner: { piece, index, pts: line, placement: placementOf(anchor) },
+      inner: { piece, index, pts: targetPoints, placement: placementOf(anchor) },
+      // A closed contour with corners is sewn side by side like an outline (C11): not a slit.
+      ...(closedInner(line) ? { surfaceRole: 'inner' as const } : {}),
     });
   }
   // operation order of the card is the drawing order; the stored order is only a tiebreak
@@ -2699,7 +2717,7 @@ function actionOwnerRows(
   return [...new Map(found.map((row) => [row.seamKey, row])).values()];
 }
 
-function actionPartOfTarget(
+export function actionPartOfTarget(
   target: string,
   pieces: ReadonlyMap<string, AsmPiece>,
   range?: readonly [number, number],
@@ -2709,12 +2727,15 @@ function actionPartOfTarget(
     const piece = pieces.get(inner[1]);
     const pts = piece?.inner[Number(inner[2])] ?? [];
     if (!piece || pts.length < 2) return null;
+    const wholeLen = polyLen(pts);
+    const points = innerSlice(pts, range);
+    const lenMm = polyLen(points);
     return {
       piece: piece.key,
-      pts: [...pts],
-      lenMm: polyLen(pts),
-      share: 1,
-      turn: turnOf(pts),
+      pts: points,
+      lenMm,
+      share: lenMm / Math.max(wholeLen, 1e-6),
+      turn: turnOf(points),
     };
   }
   const geoms = new Map([...pieces].map(([key, piece]) => [key, piece.geom]));
@@ -2742,17 +2763,14 @@ function actionPartsOfRows(
   pieces: ReadonlyMap<string, AsmPiece>,
 ): SeamPart[] {
   const geoms = new Map([...pieces].map(([key, piece]) => [key, piece.geom]));
+  const innerLines = new Map([...pieces].map(([key, piece]) => [key, piece.inner]));
   const targets = rows.flatMap((row) => {
-    const sides = storedSeamSides(row, geoms);
+    const sides = storedSeamSides(row, geoms, innerLines);
     if (row.kind !== 'surface') return [...sides.parts.a, ...sides.parts.b];
-    const laidEdges = row.sideB
-      .flatMap(rowTargetsOfAnchor)
-      .filter((target) => !/:i\d+$/.test(target));
-    return (
-      laidEdges.length
-        ? laidEdges
-        : row.sideA.flatMap(rowTargetsOfAnchor).filter((target) => /:i\d+$/.test(target))
-    ).map((target) => ({ target }));
+    const laidEdges = sides.parts.b.filter((part) => !/:i\d+$/.test(part.target));
+    return laidEdges.length
+      ? laidEdges
+      : sides.parts.a.filter((part) => /:i\d+$/.test(part.target));
   });
   return actionPartsOfTargets(targets, pieces);
 }
@@ -2788,6 +2806,7 @@ function buildActions(
 ): Map<number, AsmAction> {
   const actions = new Map<number, AsmAction>();
   const hemPieces = [...pieces.values()].flatMap((piece) => (piece.geom ? [piece.geom] : []));
+  const innerLines = new Map([...pieces].map(([key, piece]) => [key, piece.inner]));
   // The step's label pieces are hosts too, as in the editor's picture: a drawn label takes no mark.
   const placementSelections = walkPlacementMarks(
     ops.map((op) => ({
@@ -2840,6 +2859,7 @@ function buildActions(
           ops.map((candidate) => candidate.raw),
           opIndex,
           rows,
+          innerLines,
         ).parts
       : [];
     // A hem's edge is never inherited from the step that sewed its unit: its own row, else geometry.

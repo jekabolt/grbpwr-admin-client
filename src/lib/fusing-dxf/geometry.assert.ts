@@ -785,12 +785,28 @@ export async function main() {
   const mappedRings = mapFuseSpecToSize(ringsSpec, outline, rectangle(200, 160));
   assert.ok(mappedRings.zone && 'spline' in mappedRings.zone);
   if (mappedRings.zone && 'spline' in mappedRings.zone) {
-    // A point keeps its mm off its two nearest contour stretches (4b0af47c6): the main ring sits
-    // by the bottom-left corner and stays put; the island and its hole sit nearer the right side
-    // and keep their mm from it on the doubled piece.
-    near(mappedRings.zone.spline.points[1].x, 30);
-    near(mappedRings.zone.islands[0].points[0].x, 150);
-    near(mappedRings.zone.holes[0].points[0].x, 152);
+    // A ring off the contour is carried rigidly (it keeps its mm size), by the contour's
+    // interpolated move at its centroid; a hole moves with the part it cuts.
+    const { spline, islands, holes } = mappedRings.zone;
+    const moves = [
+      [spline, ring(10, 10, 30, 20)],
+      [islands[0], ring(50, 10, 60, 20)],
+      [holes[0], ring(52, 12, 56, 15)],
+    ].map(([mapped, stored]) => {
+      const dx = mapped.points[0].x - stored.points[0].x;
+      const dy = mapped.points[0].y - stored.points[0].y;
+      mapped.points.forEach((point, i) => {
+        near(point.x - stored.points[i].x, dx, 1e-6);
+        near(point.y - stored.points[i].y, dy, 1e-6);
+      });
+      // Never farther than the contour itself moves.
+      assert.ok(Math.hypot(dx, dy) <= Math.hypot(100, 80));
+      return { dx, dy };
+    });
+    near(moves[2].dx, moves[1].dx, 1e-6);
+    near(moves[2].dy, moves[1].dy, 1e-6);
+    // The island sits farther from the fixed bottom-left corner, so it travels farther.
+    assert.ok(moves[1].dx > moves[0].dx && moves[0].dx > 0);
   }
   const ringsDxf = buildFusingSheets({
     techCardId: 7,
@@ -1088,18 +1104,38 @@ export async function main() {
     outline: rectangle(80 + rank * 10, 60 + rank * 5),
   }));
   const proportionalZone = spec({ mode: 'zone', zone: { rect: [8, 6, 40, 30] } });
-  const mappedZone = mapFuseSpecToSize(
-    proportionalZone,
+  const nearAll = (got: number[], want: number[], what: string) =>
+    assert.ok(
+      got.length === want.length && got.every((v, i) => Math.abs(v - want[i]) < 0.01),
+      `${what}: ${JSON.stringify(got)}`,
+    );
+  // 80×60 → 120×80. A rect goes by its four corners like a drawn ring (zone-grade.ts). In the piece
+  // corner: (0,0) stays the corner, the sides on the piece's sides stay on them, and the far corner
+  // (30 mm off the left side, 50 off the right) shares their grade: between keeping its mm (30,21)
+  // and the plain scale (45,28). Still square, so still a rect.
+  const touching = mapFuseSpecToSize(
+    spec({ mode: 'zone', zone: { rect: [0, 0, 30, 21] } }),
     gradedOutlines[0].outline,
     gradedOutlines[4].outline,
   );
-  // Each corner keeps its mm off its nearest stretches (4b0af47c6): (8,6) off the left/bottom,
-  // (40,30) — equidistant, resolved to the right/bottom — keeps 40 mm from the right edge.
-  assert.deepEqual(
-    mappedZone.zone,
-    { rect: [8, 6, 80, 30] },
-    'a drawn zone keeps its mm from its nearest contour stretches in the target-size outline',
+  assert.ok(touching.zone && 'rect' in touching.zone, 'a rect in the corner stays a rect');
+  {
+    const [x0, y0, x1, y1] = touching.zone.rect;
+    assert.ok(Math.hypot(x0, y0) < 0.01, `the rect keeps the piece corner: ${x0},${y0}`);
+    assert.ok(
+      x1 > 30 && x1 < 45 && y1 > 21 && y1 < 28,
+      `far corner between mm and scale: ${x1},${y1}`,
+    );
+  }
+  // 15 mm and more from the contour: the rect moves whole, by the grade at its centre (35, 27.5)
+  // → (52.5, 36.67), and keeps its size.
+  const detached = mapFuseSpecToSize(
+    spec({ mode: 'zone', zone: { rect: [20, 15, 50, 40] } }),
+    gradedOutlines[0].outline,
+    gradedOutlines[4].outline,
   );
+  assert.ok(detached.zone && 'rect' in detached.zone, 'a detached rect stays a rect');
+  nearAll(detached.zone.rect, [37.5, 24.1667, 67.5, 49.1667], 'a detached rect moves whole');
   const mappedStrip = mapFuseSpecToSize(
     spec({ mode: 'strip', widthMm: 12, edges: [{ edge: 0, startMm: 8, endMm: 16 }] }),
     gradedOutlines[0].outline,
@@ -1107,8 +1143,8 @@ export async function main() {
   );
   assert.deepEqual(
     mappedStrip.edges,
-    [{ edge: 0, startMm: 12, endMm: 24 }],
-    'strip trim positions keep their fraction of the graded edge',
+    [{ edge: 0, startMm: 8, endMm: 16 }],
+    'strip trims keep their mm from the corners of the graded edge',
   );
   const gradedSheet = buildFusingSheets({
     techCardId: 71,

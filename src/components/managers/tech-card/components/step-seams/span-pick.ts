@@ -1,8 +1,8 @@
 // THE SPAN HAND, PURE (asm-fixes T6, T7). Segments are virtual: neighbouring break points over the
 // unchanged edges. A click takes a segment, a click on the next one extends it, a click further along
-// adds a span, a drag takes a free span. A side holds any number of spans per edge, ascending and
-// disjoint: a long edge broken by a pocket is sewn above it and below it in one row. A click on a
-// stored part selects that row and starts no pick.
+// adds a span, a drag takes a free span. An outline side holds ascending, disjoint spans; a closed
+// inner host holds one circular stretch, represented by two spans only when it crosses vertex 0. A
+// click on a stored part selects that row and starts no pick.
 
 import { breakPoints, type EdgeBreakPoint } from 'lib/assembly-skeleton/geometry';
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
@@ -10,6 +10,7 @@ import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { expandSidePart, mergedSpans, SEAMS, sidePartEdges, type SidePart } from 'lib/seams';
 
 import { pickTarget } from './seam-focus';
+import { closedInner, parseInner, SAME_MM } from './step-seams-model';
 
 export type SpanRange = readonly [number, number];
 export type SpanSide = 'a' | 'b';
@@ -22,8 +23,6 @@ export type SidePick = {
 export type SideSpans = Readonly<Record<string, readonly SpanRange[]>>;
 
 export const NO_SPANS: SidePick['spans'] = { a: {}, b: {} };
-
-const SAME_MM = 0.1;
 
 const spansSig = (spans: SideSpans) =>
   Object.entries(spans)
@@ -119,6 +118,27 @@ export function edgeBreaks(
     : own;
 }
 
+/** Corners of a closed inner contour, in millimetres from its stored vertex 0. */
+export function innerBreaks(line: readonly Pt2[]): PickBreak[] {
+  return (closedInner(line)?.cornersMm ?? []).map((atMm) => ({ atMm, kind: 'turn' }));
+}
+
+/** Physical target length: an outline run or an inner polyline. */
+export function targetLenMm(
+  id: string,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  innerLines?: ReadonlyMap<string, readonly (readonly Pt2[])[]>,
+): number {
+  const inner = parseInner(id);
+  if (!inner) return resolveEdge(id, geoms)?.len ?? 0;
+  const line = innerLines?.get(inner.piece)?.[inner.k] ?? [];
+  return line.reduce(
+    (sum, point, index) =>
+      index ? sum + Math.hypot(point[0] - line[index - 1][0], point[1] - line[index - 1][1]) : sum,
+    0,
+  );
+}
+
 /** The segment under a point of the edge. */
 export function segmentAt(
   breaks: readonly { atMm: number }[],
@@ -132,6 +152,29 @@ export function segmentAt(
     if (point > atMm && point < to) to = point;
   }
   return [from, to];
+}
+
+/** A closed side may be the two stretches on either side of stored vertex 0. */
+export function segmentsAt(
+  breaks: readonly { atMm: number }[],
+  length: number,
+  atMm: number,
+  closed = false,
+): SpanRange[] {
+  const segment = segmentAt(breaks, length, atMm);
+  if (!breaks.length) return [segment];
+  if (!closed || breaks.some((point) => point.atMm <= SAME_MM || point.atMm >= length - SAME_MM))
+    return [segment];
+  const twin =
+    segment[0] <= SAME_MM
+      ? segmentAt(breaks, length, Math.max(0, length - SAME_MM))
+      : segment[1] >= length - SAME_MM
+        ? segmentAt(breaks, length, Math.min(length, SAME_MM))
+        : null;
+  return twin &&
+    (Math.abs(twin[0] - segment[0]) >= SAME_MM || Math.abs(twin[1] - segment[1]) >= SAME_MM)
+    ? [segment, twin].sort((a, b) => a[0] - b[0])
+    : [segment];
 }
 
 /** A free drag's end lands on a break point near it, and anywhere else as it is. */
@@ -272,6 +315,53 @@ export function pickSegment(
   return withSpans({ ...added, spans: withoutDropped(added) }, side, id, [segment], length);
 }
 
+/** One contour-side click, including both stored spans when that side crosses vertex 0. */
+export function pickSegments(
+  pick: SidePick,
+  side: SpanSide,
+  id: string,
+  segments: readonly SpanRange[],
+  length: number,
+  rules: PickRules,
+  breaks: readonly PickBreak[] = [],
+): SidePick {
+  const next = segments.reduce(
+    (current, segment) => pickSegment(current, side, id, segment, length, rules, breaks),
+    pick,
+  );
+  if (!rules.isInner(id)) return next;
+  const ranges = next.spans[side][id];
+  if (!ranges || innerRangesAreContiguous(ranges, length)) return next;
+  const current = pick.spans[side][id] ?? (pick[side].includes(id) ? [[0, length]] : []);
+  const adds = segments.some(
+    (segment) =>
+      !current.some(([from, to]) => segment[0] >= from - SAME_MM && segment[1] <= to + SAME_MM),
+  );
+  if (!adds) {
+    const longest = [...ranges].sort((a, b) => b[1] - b[0] - (a[1] - a[0]))[0];
+    return withSpans(next, side, id, [longest], length);
+  }
+  const own = Object.fromEntries(Object.entries(pick.spans[side]).filter(([key]) => key !== id));
+  const without: SidePick = {
+    ...pick,
+    [side]: pick[side].filter((target) => target !== id),
+    spans: { ...pick.spans, [side]: own },
+  };
+  return segments.reduce(
+    (currentPick, segment) => pickSegment(currentPick, side, id, segment, length, rules, breaks),
+    without,
+  );
+}
+
+/** One linear range, or the two range parts of one stretch crossing stored vertex 0. */
+export function innerRangesAreContiguous(ranges: readonly SpanRange[], length: number): boolean {
+  const merged = mergedSpans(ranges);
+  return (
+    merged.length <= 1 ||
+    (merged.length === 2 && merged[0][0] <= SAME_MM && merged[1][1] >= length - SAME_MM)
+  );
+}
+
 /**
  * A finished drag: one more span of the edge, joining what it overlaps. An edge in hand whole has no
  * free part to add to, so there the drag narrows it to exactly this range.
@@ -289,6 +379,8 @@ export function pickFreeSpan(
   if (pick[side].includes(id)) {
     const current = pick.spans[side][id] ?? [];
     const next = mergedSpans([...current, ordered]);
+    if (rules.isInner(id) && current.length && !innerRangesAreContiguous(next, length))
+      return withSpans(pick, side, id, [ordered], length);
     if (next.length > current.length && current.length && sideIsFull(pick, side)) return pick;
     return withSpans(pick, side, id, next, length);
   }
@@ -354,13 +446,21 @@ const pieces = (
 ): { edge: string; from: number; to: number }[] =>
   parts
     .flatMap((part) => expandSidePart(part, geoms))
-    .flatMap((part) =>
-      sidePartEdges(part).map((edge) => ({
+    .flatMap((part) => {
+      if (!part.target.includes('#'))
+        return [
+          {
+            edge: part.target,
+            from: part.range ? part.range[0] : 0,
+            to: part.range ? part.range[1] : Infinity,
+          },
+        ];
+      return sidePartEdges(part).map((edge) => ({
         edge,
         from: part.range ? part.range[0] : 0,
         to: part.range ? part.range[1] : edgeLen(edge, geoms),
-      })),
-    );
+      }));
+    });
 
 /** The stored seam whose part is under a click, or -1; a free part of an edge is no seam. */
 export function storedSeamAt(
@@ -385,7 +485,7 @@ export function storedSeamOverlapping(
   range: SpanRange | undefined,
   geoms: ReadonlyMap<string, PieceGeom>,
 ): number {
-  const length = edgeLen(id, geoms);
+  const length = id.includes('#') ? edgeLen(id, geoms) : Infinity;
   const from = range ? Math.min(range[0], range[1]) : 0;
   const to = range ? Math.max(range[0], range[1]) : length;
   return stored.findIndex(({ parts }) =>

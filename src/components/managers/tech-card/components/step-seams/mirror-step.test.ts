@@ -20,7 +20,13 @@ import { CARD85_OPS, CARD85_SEAMS, card85Geoms, card85Step } from './card85.fixt
 import { card63Geoms, card63InnerLines } from './card63.fixture';
 import { isRightMirrorStep, mirrorRowSig, mirrorStepPlan } from './mirror-step';
 import { placementT } from './step-pose';
-import { inputGroups, surfaceRow, type FormOpLike } from './step-seams-model';
+import {
+  closedInner,
+  innerSlice,
+  inputGroups,
+  surfaceRow,
+  type FormOpLike,
+} from './step-seams-model';
 import type { SeamChange } from '../assembly-seams/seam-change-plan';
 import type { SeamChangeResult } from '../assembly-seams/seam-change';
 import { executeMirrorStep } from './use-mirror-step';
@@ -409,6 +415,161 @@ describe('range and refusal rules', () => {
       expect(read).not.toBeNull();
       expect(mirrorRowSig(read!)).toBe(mirrorRowSig(mirrored));
     }
+  });
+
+  it('re-projects an inner stretch onto the twin contour start and direction', () => {
+    const sourceHost = geoms.get('PCK_BACK_L')!;
+    const targetHost = geoms.get('PCK_BACK_R')!;
+    const sourceLine: Pt2[] = [
+      [50, 50],
+      [110, 50],
+      [110, 70],
+      [50, 70],
+      [50, 50],
+    ];
+    const mirror = twinT(sourceHost, targetHost, 'mirror');
+    const mapped = sourceLine.slice(0, -1).map((point) => apply(mirror, point));
+    const targetLine = [mapped[2], mapped[1], mapped[0], mapped[3], mapped[2]];
+    const source = surfaceRow(
+      {
+        geom: sourceHost,
+        k: 0,
+        line: sourceLine.map(([x, y]) => [x, -y]),
+        grainDeg: 0,
+      },
+      [anchor('Back_Top_L_R', 0, [0, 1])],
+      undefined,
+      'range-row',
+    )!;
+    source.sideA[0] = { ...source.sideA[0], range: [0.45, 0.55] };
+    const plan = mirrorStepPlan({
+      step: ops[1],
+      cardOps: ops,
+      rows: [source],
+      poses: [],
+      geoms,
+      innerLines: new Map([
+        ['PCK_BACK_L', [sourceLine]],
+        ['PCK_BACK_R', [targetLine]],
+      ]),
+    });
+
+    expect(plan.kind).toBe('create');
+    const mirrored = plan.upsert[0] as StoredSeam;
+    const targetLength = closedInner(targetLine)!.lenMm;
+    const projected = mirrored.sideA.flatMap((item) =>
+      innerSlice(targetLine, [item.range[0] * targetLength, item.range[1] * targetLength]),
+    );
+    const sourceLength = closedInner(sourceLine)!.lenMm;
+    const sourceEnds = innerSlice(sourceLine, [0.45 * sourceLength, 0.55 * sourceLength]);
+    const expected = [sourceEnds[0], sourceEnds.at(-1)!].map((point) => apply(mirror, point));
+
+    expect(mirrored.sideA.every((item) => item.edgeHint === 'i0')).toBe(true);
+    expect(mirrored.sideA).toHaveLength(2);
+    expect(mirrored.sideA.map((item) => item.range)).toEqual([
+      [0.95, 1],
+      [0, 0.05],
+    ]);
+    for (const point of expected)
+      expect(Math.min(...projected.map((candidate) => distance(point, candidate)))).toBeLessThan(
+        0.5,
+      );
+  });
+
+  it('merges a source wrap before projecting across the twin vertex 0', () => {
+    const sourceHost = geoms.get('PCK_BACK_L')!;
+    const targetHost = geoms.get('PCK_BACK_R')!;
+    const sourceLine: Pt2[] = [
+      [50, 50],
+      [110, 50],
+      [110, 70],
+      [50, 70],
+      [50, 50],
+    ];
+    const mirror = twinT(sourceHost, targetHost, 'mirror');
+    const mapped = sourceLine.slice(0, -1).map((point) => apply(mirror, point));
+    const vertex: Pt2 = [
+      mapped[0][0] + (mapped[1][0] - mapped[0][0]) * (16 / 60),
+      mapped[0][1] + (mapped[1][1] - mapped[0][1]) * (16 / 60),
+    ];
+    const targetLine = [vertex, mapped[1], mapped[2], mapped[3], mapped[0], vertex];
+    const source = surfaceRow(
+      {
+        geom: sourceHost,
+        k: 0,
+        line: sourceLine.map(([x, y]) => [x, -y]),
+        grainDeg: 0,
+      },
+      [anchor('Back_Top_L_R', 0, [0, 1])],
+      undefined,
+      'range-row',
+    )!;
+    const hostAnchor = source.sideA[0];
+    source.sideA = [
+      { ...hostAnchor, range: [0.9, 1] },
+      { ...hostAnchor, range: [0, 0.1] },
+      { ...hostAnchor, range: [0.1, 0.2] },
+    ];
+
+    const plan = mirrorStepPlan({
+      step: ops[1],
+      cardOps: ops,
+      rows: [source],
+      poses: [],
+      geoms,
+      innerLines: new Map([
+        ['PCK_BACK_L', [sourceLine]],
+        ['PCK_BACK_R', [targetLine]],
+      ]),
+    });
+
+    expect(plan.kind).toBe('create');
+    const mirrored = plan.upsert[0] as StoredSeam;
+    expect(mirrored.sideA.map((item) => item.range)).toEqual([
+      [0.8, 1],
+      [0, 0.1],
+    ]);
+  });
+
+  it('drops a mirrored inner range shorter than the millimetre threshold', () => {
+    const sourceHost = geoms.get('PCK_BACK_L')!;
+    const targetHost = geoms.get('PCK_BACK_R')!;
+    const sourceLine: Pt2[] = [
+      [50, 50],
+      [110, 50],
+      [110, 70],
+      [50, 70],
+      [50, 50],
+    ];
+    const mirror = twinT(sourceHost, targetHost, 'mirror');
+    const mapped = sourceLine.slice(0, -1).map((point) => apply(mirror, point));
+    const targetLine = [mapped[2], mapped[1], mapped[0], mapped[3], mapped[2]];
+    const source = surfaceRow(
+      {
+        geom: sourceHost,
+        k: 0,
+        line: sourceLine.map(([x, y]) => [x, -y]),
+        grainDeg: 0,
+      },
+      [anchor('Back_Top_L_R', 0, [0, 1])],
+      undefined,
+      'range-row',
+    )!;
+    source.sideA[0] = { ...source.sideA[0], range: [0.5, 0.5002] };
+
+    expect(
+      mirrorStepPlan({
+        step: ops[1],
+        cardOps: ops,
+        rows: [source],
+        poses: [],
+        geoms,
+        innerLines: new Map([
+          ['PCK_BACK_L', [sourceLine]],
+          ['PCK_BACK_R', [targetLine]],
+        ]),
+      }).kind,
+    ).toBe('edge-mismatch');
   });
 
   it('links the existing geometrically mirrored fold in the same plan', () => {

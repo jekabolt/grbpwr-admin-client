@@ -38,7 +38,13 @@ import {
   type HandOn,
   type LaidHand,
 } from './step-hand';
-import { GUESS_OK, parseInner, pieceOfTarget, type SewnPair } from './step-seams-model';
+import {
+  GUESS_OK,
+  innerSlices,
+  parseInner,
+  pieceOfTarget,
+  type SewnPair,
+} from './step-seams-model';
 import { placeStripsOnHosts } from '../cut-strips/strip-place';
 import { pinPoses, placementT, type PosePin } from './step-pose';
 
@@ -318,6 +324,40 @@ export function surfaceSeam(
  * A stored or picked pair as the placer reads it: an inner line on one side makes it a surface seam
  * (the host's line, the part the other side names), else the plain `candidateOf`.
  */
+export function seamsOfSides(
+  s: SeamSides | SeamPartSides,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  innerLines: ReadonlyMap<string, readonly (readonly Pt2[])[]>,
+  placement?: SeamPlacement,
+  storedKind?: 'edge' | 'partial' | 'composite',
+): SeamCandidate[] {
+  const targetOf = (part: EdgeId | SidePart) => (typeof part === 'string' ? part : part.target);
+  const hostSide = s.a.some((t) => parseInner(targetOf(t)))
+    ? s.a
+    : s.b.some((t) => parseInner(targetOf(t)))
+      ? s.b
+      : null;
+  if (!hostSide) {
+    const candidate = candidateOf(s, geoms, storedKind);
+    return candidate ? [candidate] : [];
+  }
+  const hostPart = hostSide.find((part) => parseInner(targetOf(part)))!;
+  const hostTarget = targetOf(hostPart);
+  const h = parseInner(hostTarget)!;
+  const otherPart = (hostSide === s.a ? s.b : s.a).find((t) => !parseInner(targetOf(t)));
+  const other = otherPart && targetOf(otherPart);
+  if (!other) return [];
+  const wholeLine = innerLines.get(h.piece)?.[h.k] ?? [];
+  const ranges = hostSide.flatMap((part) => {
+    if (targetOf(part) !== hostTarget || typeof part === 'string' || !part.range) return [];
+    return [part.range];
+  });
+  return innerSlices(wholeLine, ranges).flatMap((line) => {
+    const candidate = surfaceSeam(h.piece, pieceOfTarget(other), line, geoms, placement, other);
+    return candidate ? [candidate] : [];
+  });
+}
+
 export function seamOfSides(
   s: SeamSides | SeamPartSides,
   geoms: ReadonlyMap<string, PieceGeom>,
@@ -325,19 +365,7 @@ export function seamOfSides(
   placement?: SeamPlacement,
   storedKind?: 'edge' | 'partial' | 'composite',
 ): SeamCandidate | null {
-  const targetOf = (part: EdgeId | SidePart) => (typeof part === 'string' ? part : part.target);
-  const hostSide = s.a.some((t) => parseInner(targetOf(t)))
-    ? s.a
-    : s.b.some((t) => parseInner(targetOf(t)))
-      ? s.b
-      : null;
-  if (!hostSide) return candidateOf(s, geoms, storedKind);
-  const h = parseInner(targetOf(hostSide.find((t) => parseInner(targetOf(t)))!))!;
-  const otherPart = (hostSide === s.a ? s.b : s.a).find((t) => !parseInner(targetOf(t)));
-  const other = otherPart && targetOf(otherPart);
-  if (!other) return null;
-  const line = innerLines.get(h.piece)?.[h.k] ?? [];
-  return surfaceSeam(h.piece, pieceOfTarget(other), line, geoms, placement, other);
+  return seamsOfSides(s, geoms, innerLines, placement, storedKind)[0] ?? null;
 }
 
 /**

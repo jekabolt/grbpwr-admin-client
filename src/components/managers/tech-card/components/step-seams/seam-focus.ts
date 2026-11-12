@@ -1,5 +1,6 @@
-import type { PieceGeom } from 'lib/assembly-skeleton/types';
+import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { edgeWordVote } from './signals/edge-words';
+import { closedInner, parseInner } from './step-seams-model';
 
 /**
  * A proposal the model could not back (it won on length alone, or barely): shown as the best guess,
@@ -96,8 +97,16 @@ const NAMED_EDGE_WORDS = ['neckline', 'armhole', 'shoulder', 'hem', 'front_edge'
 export function seamEdgeWord(
   ids: readonly string[],
   geoms: ReadonlyMap<string, PieceGeom>,
+  innerLines?: ReadonlyMap<string, readonly (readonly Pt2[])[]>,
 ): string {
-  if (ids.some((id) => /:i\d+$/.test(id))) return 'slit';
+  const inners = ids.flatMap((id) => {
+    const inner = parseInner(id);
+    return inner ? [inner] : [];
+  });
+  if (inners.length)
+    return inners.some((inner) => !closedInner(innerLines?.get(inner.piece)?.[inner.k] ?? []))
+      ? 'slit'
+      : '';
   const edges = ids.flatMap((id) => {
     const at = id.lastIndexOf('#');
     const geom = at < 0 ? undefined : geoms.get(id.slice(0, at));
@@ -121,9 +130,10 @@ export function seamSideName(
   geoms: ReadonlyMap<string, PieceGeom>,
   nameOf: (piece: string) => string,
   pieceOf: (id: string) => string,
+  innerLines?: ReadonlyMap<string, readonly (readonly Pt2[])[]>,
 ): string {
   const names = [...new Set(ids.map((id) => nameOf(pieceOf(id))).filter(Boolean))];
-  const edge = seamEdgeWord(ids, geoms) === 'slit' ? 'slit' : '';
+  const edge = seamEdgeWord(ids, geoms, innerLines) === 'slit' ? 'slit' : '';
   return [...names, edge].filter(Boolean).join(' ');
 }
 

@@ -53,8 +53,8 @@ import {
 import type { TechCardFormData } from '../schema';
 import { topstitchLineParts, type TopstitchLine } from '../topstitch-lines';
 import { nameSpot } from './name-spot';
-import { mmOnPoints, repeatClickTarget } from './span-pick';
-import { fmtMm, seamlessLabelStep, unsewnLabel } from './step-seams-model';
+import { mmOnPoints, repeatClickTarget, targetLenMm } from './span-pick';
+import { closedInner, fmtMm, seamlessLabelStep, unsewnLabel } from './step-seams-model';
 import { placementPictureGlyphsForStep, type ButtonholeOperation } from './buttonhole-glyph';
 import { PAIR_INK, pairNo } from './palette';
 import { layerStyle } from './layer-style';
@@ -95,6 +95,7 @@ import {
   labelSpot,
   pathOf,
   seamOfSides,
+  seamsOfSides,
   splitSeams,
   spotInside,
   surfaceSeam,
@@ -446,7 +447,7 @@ export function stepSeamsOfOp(
     const row = byKey.get(key);
     const candidates = chosenByKey.get(key) ?? [];
     const resolved = candidates.map(candidateSides);
-    const fallback = row ? storedSeamSides(row, geoms) : null;
+    const fallback = row ? storedSeamSides(row, geoms, innerLines) : null;
     return {
       key,
       row,
@@ -511,11 +512,15 @@ export function stepSeamsOfOp(
   const split = splitLaid(graph?.chosen ?? [], leaves, geoms, innerLines, byKey);
   const innerSeams = innerSeamsOf(split, ops, index, pieceKeys, leaves, geoms, innerLines, byKey);
   const storedSeams = stored
-    .flatMap((seam) =>
-      seam.candidates.length
-        ? seam.candidates
-        : [seamOfSides(seam.sides, geoms, innerLines, seam.placement)],
-    )
+    .flatMap((seam) => {
+      if (seam.candidates.length) return seam.candidates;
+      const surfaceInner =
+        seam.row?.kind === 'surface' &&
+        [...seam.parts.a, ...seam.parts.b].some((part) => !!parseInner(part.target));
+      return surfaceInner
+        ? seamsOfSides(seam.parts, geoms, innerLines, seam.placement)
+        : [seamOfSides(seam.sides, geoms, innerLines, seam.placement)];
+    })
     .filter((candidate): candidate is SeamCandidate => !!candidate);
   const crossSeams = stored.length
     ? []
@@ -631,7 +636,7 @@ export function stepPictureOfOp(
     innerSeams,
     hands.pose,
   );
-  const highlight = stepHighlightOf(options.operations, options.index, byKey);
+  const highlight = stepHighlightOf(options.operations, options.index, byKey, innerLines);
   return {
     op: active,
     seamless,
@@ -948,7 +953,7 @@ export function stepActionMarks(
       const points = rangedPicturePoints(
         targetPoints(part.target, geoms, innerLines),
         part.range,
-        resolveEdge(part.target, geoms)?.len ?? 0,
+        targetLenMm(part.target, geoms, innerLines),
       );
       const piece = pieceOfTarget(part.target);
       return points.length > 1 && geoms.has(piece)
@@ -979,7 +984,7 @@ export function stepActionMarks(
     const points = rangedPicturePoints(
       targetPoints(target, geoms, innerLines),
       range,
-      resolveEdge(target, geoms)?.len ?? 0,
+      targetLenMm(target, geoms, innerLines),
     );
     const piece = pieceOfTarget(target);
     return points.length > 1 && geoms.has(piece) ? [{ target, piece, points }] : [];
@@ -1870,8 +1875,11 @@ export function StepPictureSvg({
   const operations = (form?.getValues('operations') ?? []) as SceneOp[];
   const operation = contextResult ? operations[contextResult.opIndex] : undefined;
   const automaticHighlight = useMemo(
-    () => (contextResult ? stepHighlightOf(operations, contextResult.opIndex, byKey) : undefined),
-    [contextResult, operations, byKey],
+    () =>
+      contextResult
+        ? stepHighlightOf(operations, contextResult.opIndex, byKey, innerLines)
+        : undefined,
+    [contextResult, operations, byKey, innerLines],
   );
   const stepEdges = suppliedStepEdges ?? automaticHighlight?.targets;
   const stepParts: readonly SidePart[] | undefined =
@@ -2385,10 +2393,14 @@ export function StepPictureSvg({
   const mmOfDoor = useCallback(
     (id: TargetId, at: Pt2 | null): number | null => {
       const door = doors.find((candidate) => candidate.id === id);
-      const length = resolveEdge(id, geoms)?.len ?? 0;
-      return door && at && !door.inner && length > 0 ? mmOnPoints(door.points, at, length) : null;
+      const inner = parseInner(id);
+      const line = inner ? innerLines?.get(inner.piece)?.[inner.k] ?? [] : [];
+      const length = targetLenMm(id, geoms, innerLines);
+      return door && at && (!door.inner || !!closedInner(line)) && length > 0
+        ? mmOnPoints(door.points, at, length)
+        : null;
     },
-    [doors, geoms],
+    [doors, geoms, innerLines],
   );
   // The click that ends a drag is not a pick. A drag holds no capture: the click keeps its target.
   const dragEnded = useRef(false);
@@ -2455,8 +2467,8 @@ export function StepPictureSvg({
   const pieceOfId = (id: TargetId) => parseInner(id)?.piece ?? id.slice(0, id.lastIndexOf('#'));
   const markLines = marks.flatMap((m) => {
     const points = ptsOf(m.id);
-    const edge = resolveEdge(m.id, geoms);
-    const ranged = points && rangedPicturePoints(points, m.range, edge?.len ?? 0);
+    const ranged =
+      points && rangedPicturePoints(points, m.range, targetLenMm(m.id, geoms, innerLines));
     const shown = ranged && pointsOnDrawnPiece(pieceOfId(m.id), ranged);
     return shown ? [{ m, pts: shown }] : [];
   });
@@ -2467,8 +2479,9 @@ export function StepPictureSvg({
   const stepLines = (stepParts ?? []).flatMap((part, index) => {
     if (marks.some((m) => m.id === part.target && isPick(m.tone))) return [];
     const points = ptsOf(part.target);
-    const edge = resolveEdge(part.target, geoms);
-    const ranged = points && rangedPicturePoints(points, part.range, edge?.len ?? 0);
+    const ranged =
+      points &&
+      rangedPicturePoints(points, part.range, targetLenMm(part.target, geoms, innerLines));
     const shown = ranged && pointsOnDrawnPiece(pieceOfId(part.target), ranged);
     return shown ? [{ id: part.target, key: stepLineKey(part, index), points: shown }] : [];
   });
@@ -2632,7 +2645,7 @@ export function StepPictureSvg({
     }));
   const noSpots = nos.flatMap(({ id, i, range }) => {
     const whole = ptsOf(id);
-    const pts = whole && rangedPicturePoints(whole, range, resolveEdge(id, geoms)?.len ?? 0);
+    const pts = whole && rangedPicturePoints(whole, range, targetLenMm(id, geoms, innerLines));
     return pts
       ? [{ i, id, s: labelSpot(pts, centreOf.get(pieceOfId(id)) ?? pts[0], offsetOf(id, 2)) }]
       : [];
@@ -3064,7 +3077,7 @@ export function StepPictureSvg({
             rangedPicturePoints(
               ptsOf(hover)!,
               hoverRange ?? undefined,
-              resolveEdge(hover, geoms)?.len ?? 0,
+              targetLenMm(hover, geoms, innerLines),
             ),
           )}
           fill='none'
@@ -3459,7 +3472,7 @@ export function StepPictureSvg({
         })}
       {ticks.map(({ id, atMm, notch }) => {
         const whole = ptsOf(id);
-        const length = resolveEdge(id, geoms)?.len ?? 0;
+        const length = targetLenMm(id, geoms, innerLines);
         const at = whole && rangedPicturePoints(whole, [0, atMm], length).at(-1);
         if (!at) return null;
         return notch ? (
@@ -3491,7 +3504,7 @@ export function StepPictureSvg({
         hoverRange &&
         (() => {
           const whole = ptsOf(hover);
-          const length = resolveEdge(hover, geoms)?.len ?? 0;
+          const length = targetLenMm(hover, geoms, innerLines);
           const at =
             whole &&
             rangedPicturePoints(whole, [0, (hoverRange[0] + hoverRange[1]) / 2], length).at(-1);

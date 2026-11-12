@@ -5,6 +5,7 @@ import {
   DEFAULT_SEAM_TOLERANCE_MM,
   lengthsDiffer,
   overlapOnLayout,
+  sideLengthMm,
   seamToleranceOf,
 } from './seam-length';
 
@@ -33,6 +34,13 @@ describe('seam tolerance', () => {
     expect(lengthsDiffer(52, 50, DEFAULT_SEAM_TOLERANCE_MM)).toBe(true);
     expect(lengthsDiffer(120, 114, 5)).toBe(true);
     expect(lengthsDiffer(120, 114, 6)).toBe(false);
+  });
+});
+
+describe('inner contour lengths', () => {
+  it('counts only the picked inner stretch', () => {
+    expect(sideLengthMm([{ target: 'HOST:i0', range: [35, 175] }], new Map(), () => 300)).toBe(140);
+    expect(sideLengthMm([{ target: 'HOST:i0' }], new Map(), () => 300)).toBe(300);
   });
 });
 

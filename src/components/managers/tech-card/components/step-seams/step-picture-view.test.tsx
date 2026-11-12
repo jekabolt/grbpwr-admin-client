@@ -4,9 +4,10 @@ import { describe, expect, it } from 'vitest';
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { levelFill, unionPictureOfLayout, type UnionPicture } from 'lib/assembly-skeleton/union';
 import { IDENTITY, translate } from 'lib/assembly-skeleton/union/affine';
+import type { EdgeAnchor, StoredSeam } from 'lib/seams';
 
 import { UnitGlyph } from '../unit-silhouette';
-import { boxOf, fitBox, toPx, type StepLayout } from './step-picture';
+import { boxOf, fitBox, seamOfSides, seamSig, toPx, type StepLayout } from './step-picture';
 import {
   buttonGlyphGeometry,
   buttonHostChord,
@@ -14,6 +15,7 @@ import {
   drawnRing,
   stepActionMarks,
   stepLineKey,
+  stepSeamsOfOp,
   StepPictureSvg,
   withoutCoveredDoors,
   type EdgeMark,
@@ -49,6 +51,71 @@ const geoms = new Map([
   ['bag', bag],
   ['front', rectangle('front', 'front', 100, 100)],
 ]);
+
+describe('step preview stored-row fallback', () => {
+  const outlinePiece = (pieceKey: string, width: number) =>
+    ({
+      ...rectangle(pieceKey, pieceKey, width, 40),
+      edges: [
+        {
+          id: `${pieceKey}#0`,
+          pieceKey,
+          k: 0,
+          s: 0,
+          e: 1,
+          pts: [
+            [0, 0],
+            [width, 0],
+          ],
+          len: width,
+          lenMm: width,
+          chordMm: width,
+          turnDeg: 0,
+          notchesMm: [],
+          kind: 'edge',
+        },
+      ],
+    }) as unknown as PieceGeom;
+  const left = outlinePiece('left', 100);
+  const right = outlinePiece('right', 80);
+  const outlineGeoms = new Map([
+    [left.pieceKey, left],
+    [right.pieceKey, right],
+  ]);
+  const anchor = (piece: string, length: number, range: readonly [number, number]): EdgeAnchor =>
+    ({ piece, edgeHint: `${piece}#0`, lenMm: length, range }) as EdgeAnchor;
+
+  it('draws a stored outline partial row byte-equal to the pre-C11 whole-side fallback', () => {
+    const row: StoredSeam = {
+      seamKey: 'outline-partial',
+      status: 'confirmed',
+      kind: 'partial',
+      direction: 'reversed',
+      source: 'manual',
+      sideA: [anchor('left', 100, [0.2, 0.8])],
+      sideB: [anchor('right', 80, [0.25, 0.75])],
+      anchoredSize: 'M',
+      note: '',
+    };
+    const operation = {
+      operationNumber: 1,
+      inputKeys: ['left', 'right'],
+      seamKeys: [row.seamKey],
+    };
+    const actual = stepSeamsOfOp(operation, { chosen: [] }, outlineGeoms, {
+      operations: [operation],
+      index: 0,
+      pieceKeys: new Set(['left', 'right']),
+      byKey: new Map([[row.seamKey, row]]),
+      ready: false,
+      skipLayout: true,
+    }).storedSeams;
+    const beforeC11 = seamOfSides({ a: ['left#0'], b: ['right#0'] }, outlineGeoms, new Map());
+
+    expect(seamSig(actual)).toBe(seamSig(beforeC11 ? [beforeC11] : []));
+  });
+});
+
 const transforms = new Map([
   ['bag', translate(15, 15)],
   ['front', IDENTITY],

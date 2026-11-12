@@ -145,7 +145,7 @@ export function StepView({ model, index }: { model: MapModel; index: number }) {
   const activeFolds = activeFoldRows(ops, index, foldRows);
   const op = ops[index];
   if (!op) return null;
-  const highlight = stepHighlightOf(ops, index, byKey);
+  const highlight = stepHighlightOf(ops, index, byKey, innerLines);
 
   const inputs = (op.inputKeys ?? []).filter(Boolean);
   const nameOf = (key: string) => (isUnit(key) ? unitName(key) : pieceName(key));
