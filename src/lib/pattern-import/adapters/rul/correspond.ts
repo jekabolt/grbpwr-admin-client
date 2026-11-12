@@ -109,13 +109,16 @@ const centroid = (pts: readonly PtMm[]) => ({
 });
 
 /**
- * One graded line in every size (drawn order: index 0 = the base) → the same number of points in
- * each, point k of every size the same place of the shape; or the reason it cannot be matched.
+ * The corners of one line in every size, matched: `lines` are the inputs brought to one orientation
+ * (closed: counter-clockwise, closing duplicate dropped; open: the base's direction), `corners[z][k]`
+ * is the vertex of size z that is corner k of the base. Shared with the fusing zone mapper, which
+ * passes its own threshold order; the importer's default is unchanged.
  */
-export function correspondLines(
+export function matchLineCorners(
   lines: readonly PtMm[][],
   closed: boolean,
-): { ok: true; lines: PtMm[][] } | { ok: false; reason: string } {
+  thresholds: readonly number[] = THRESHOLDS,
+): { ok: true; lines: PtMm[][]; corners: number[][] } | { ok: false; reason: string } {
   if (lines.some((l) => l.length < 2)) return { ok: false, reason: 'a line with < 2 points' };
   // one orientation (closed: counter-clockwise; open: the base's direction)
   let ls = lines.map((l) => {
@@ -134,7 +137,7 @@ export function correspondLines(
   }
   const tr = ls.map((l) => turns(l, closed));
   let cs: number[][] | null = null;
-  for (const T of THRESHOLDS) {
+  for (const T of thresholds) {
     const c = ls.map((l, i) => corners(l, tr[i], T, closed));
     if (c.every((x) => x.length === c[0].length) && c[0].length >= 2) {
       cs = c;
@@ -175,6 +178,22 @@ export function correspondLines(
       cs[z] = cs[z].map((_, k) => cs![z][(k + s) % K]);
     }
   }
+  return { ok: true, lines: ls, corners: cs };
+}
+
+/**
+ * One graded line in every size (drawn order: index 0 = the base) → the same number of points in
+ * each, point k of every size the same place of the shape; or the reason it cannot be matched.
+ */
+export function correspondLines(
+  lines: readonly PtMm[][],
+  closed: boolean,
+): { ok: true; lines: PtMm[][] } | { ok: false; reason: string } {
+  const matched = matchLineCorners(lines, closed);
+  if (!matched.ok) return matched;
+  const ls = matched.lines;
+  const cs: number[][] | null = matched.corners;
+  const K = cs[0].length;
   // per edge, the union of every size's vertex fractions
   const out: PtMm[][] = ls.map(() => []);
   const edges = closed ? K : K - 1;

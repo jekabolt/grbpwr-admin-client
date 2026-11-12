@@ -1104,18 +1104,38 @@ export async function main() {
     outline: rectangle(80 + rank * 10, 60 + rank * 5),
   }));
   const proportionalZone = spec({ mode: 'zone', zone: { rect: [8, 6, 40, 30] } });
-  const mappedZone = mapFuseSpecToSize(
-    proportionalZone,
+  const nearAll = (got: number[], want: number[], what: string) =>
+    assert.ok(
+      got.length === want.length && got.every((v, i) => Math.abs(v - want[i]) < 0.01),
+      `${what}: ${JSON.stringify(got)}`,
+    );
+  // 80×60 → 120×80. A rect goes by its four corners like a drawn ring (zone-grade.ts). In the piece
+  // corner: (0,0) stays the corner, the sides on the piece's sides stay on them, and the far corner
+  // (30 mm off the left side, 50 off the right) shares their grade: between keeping its mm (30,21)
+  // and the plain scale (45,28). Still square, so still a rect.
+  const touching = mapFuseSpecToSize(
+    spec({ mode: 'zone', zone: { rect: [0, 0, 30, 21] } }),
     gradedOutlines[0].outline,
     gradedOutlines[4].outline,
   );
-  // Each corner keeps its mm off its nearest stretches (4b0af47c6): (8,6) off the left/bottom,
-  // (40,30) — equidistant, resolved to the right/bottom — keeps 40 mm from the right edge.
-  assert.deepEqual(
-    mappedZone.zone,
-    { rect: [8, 6, 80, 30] },
-    'a drawn zone keeps its mm from its nearest contour stretches in the target-size outline',
+  assert.ok(touching.zone && 'rect' in touching.zone, 'a rect in the corner stays a rect');
+  {
+    const [x0, y0, x1, y1] = touching.zone.rect;
+    assert.ok(Math.hypot(x0, y0) < 0.01, `the rect keeps the piece corner: ${x0},${y0}`);
+    assert.ok(
+      x1 > 30 && x1 < 45 && y1 > 21 && y1 < 28,
+      `far corner between mm and scale: ${x1},${y1}`,
+    );
+  }
+  // 15 mm and more from the contour: the rect moves whole, by the grade at its centre (35, 27.5)
+  // → (52.5, 36.67), and keeps its size.
+  const detached = mapFuseSpecToSize(
+    spec({ mode: 'zone', zone: { rect: [20, 15, 50, 40] } }),
+    gradedOutlines[0].outline,
+    gradedOutlines[4].outline,
   );
+  assert.ok(detached.zone && 'rect' in detached.zone, 'a detached rect stays a rect');
+  nearAll(detached.zone.rect, [37.5, 24.1667, 67.5, 49.1667], 'a detached rect moves whole');
   const mappedStrip = mapFuseSpecToSize(
     spec({ mode: 'strip', widthMm: 12, edges: [{ edge: 0, startMm: 8, endMm: 16 }] }),
     gradedOutlines[0].outline,

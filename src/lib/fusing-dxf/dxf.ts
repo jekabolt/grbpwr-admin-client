@@ -22,6 +22,7 @@ import {
 } from './geometry';
 import { ZONE_ON_CONTOUR_MM, flattenSpline, projectOnRing } from './spline';
 import type { FuseSpline, PieceFuseSpec } from './types';
+import { zoneGrade } from './zone-grade';
 
 export type FusingBomLine = {
   bomLineKey: string;
@@ -204,526 +205,55 @@ function routeOf(piece: FusingSourcePiece, lines: readonly FusingBomLine[]): Fus
 const zoneKey = (identity: string, size: string) =>
   `${normBlock(identity).toLowerCase()}|${size.trim().toLowerCase()}`;
 
-function mapPointBetweenOutlines(
-  point: PtMm,
-  from: ReturnType<typeof bbox>,
-  to: ReturnType<typeof bbox>,
-): PtMm {
-  const fromWidth = from.maxX - from.minX;
-  const fromHeight = from.maxY - from.minY;
-  const toWidth = to.maxX - to.minX;
-  const toHeight = to.maxY - to.minY;
-  return {
-    x: fromWidth > 0 ? to.minX + ((point.x - from.minX) / fromWidth) * toWidth : to.minX,
-    y: fromHeight > 0 ? to.minY + ((point.y - from.minY) / fromHeight) * toHeight : to.minY,
-  };
+/**
+ * A ring clear of the contour by RIGID_AT_MM or more is a free patch and moves whole; one within
+ * RIGID_FROM_MM of it moves point by point; mixed in between. A band drawn a few mm inside the edge
+ * (a placket, a cuff) is attached to it; a patch a centimetre clear of every edge is free.
+ */
+const RIGID_FROM_MM = 6;
+const RIGID_AT_MM = 10;
+/** A point this close to the inset contour lands exactly on the size's inset contour. */
+const ZONE_SNAP_MM = 0.25;
+/** A mapped rect whose corners stay this square is still a rect. */
+const RECT_SQUARE_MM = 0.05;
+
+/** 0 at or below `from`, 1 at or above `to`, smooth in between. */
+function smoothstep(from: number, to: number, value: number): number {
+  const t = Math.max(0, Math.min(1, (value - from) / (to - from)));
+  return t * t * (3 - 2 * t);
 }
 
-/** Vertices where the contour turns by more than this count as its corners. */
-const CONTOUR_CORNER_DEG = 35;
-
-type ContourRuns = { ring: PtMm[]; cum: number[]; corners: number[] };
-
-function contourRuns(outline: readonly PtMm[]): ContourRuns {
-  const ring = outline.filter(
-    (p, i) =>
-      Math.hypot(
-        p.x - outline[(i + 1) % outline.length].x,
-        p.y - outline[(i + 1) % outline.length].y,
-      ) > 1e-6,
-  );
+/** Two closed polygons' sides cross somewhere other than at a shared vertex. */
+function selfCrossing(ring: readonly PtMm[]): boolean {
   const n = ring.length;
-  const cum = [0];
-  for (let i = 1; i <= n; i++)
-    cum.push(cum[i - 1] + Math.hypot(ring[i % n].x - ring[i - 1].x, ring[i % n].y - ring[i - 1].y));
-  const corners: number[] = [];
-  for (let i = 0; i < n; i++) {
-    const a = ring[(i - 1 + n) % n];
-    const b = ring[i];
-    const c = ring[(i + 1) % n];
-    const t1 = Math.atan2(b.y - a.y, b.x - a.x);
-    const t2 = Math.atan2(c.y - b.y, c.x - b.x);
-    let turn = Math.abs(t2 - t1);
-    if (turn > Math.PI) turn = 2 * Math.PI - turn;
-    if ((turn * 180) / Math.PI > CONTOUR_CORNER_DEG) corners.push(i);
-  }
-  return { ring, cum, corners };
-}
-
-function pointAtArc(c: ContourRuns, s: number): { p: PtMm; dir: number } {
-  const total = c.cum[c.ring.length];
-  const t = ((s % total) + total) % total;
-  let i = 0;
-  while (i < c.ring.length - 1 && c.cum[i + 1] < t) i++;
-  const a = c.ring[i];
-  const b = c.ring[(i + 1) % c.ring.length];
-  const len = c.cum[i + 1] - c.cum[i];
-  const f = len > 0 ? (t - c.cum[i]) / len : 0;
-  return {
-    p: { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f },
-    dir: Math.atan2(b.y - a.y, b.x - a.x),
-  };
-}
-
-/** Nearest point of the ring stretch [s0, s1] (arc, cyclic), with its tangent direction. */
-function projectOnRun(
-  c: ContourRuns,
-  q: PtMm,
-  s0: number,
-  s1: number,
-): { p: PtMm; d: number; s: number; tx: number; ty: number } {
-  const n = c.ring.length;
-  const total = c.cum[n];
-  const len = (((s1 - s0) % total) + total) % total || total;
-  let best = { p: q, d: Infinity, s: s0, tx: 1, ty: 0 };
-  for (let i = 0; i < n; i++) {
-    const startArc = (((c.cum[i] - s0) % total) + total) % total;
-    if (startArc >= len - 1e-9) continue;
-    const a = c.ring[i];
-    const b = c.ring[(i + 1) % n];
-    const abx = b.x - a.x;
-    const aby = b.y - a.y;
-    const ll = abx * abx + aby * aby;
-    if (ll <= 0) continue;
-    const t = Math.max(0, Math.min(1, ((q.x - a.x) * abx + (q.y - a.y) * aby) / ll));
-    const p = { x: a.x + abx * t, y: a.y + aby * t };
-    const d = Math.hypot(q.x - p.x, q.y - p.y);
-    if (d < best.d) {
-      const l = Math.sqrt(ll);
-      best = { p, d, s: c.cum[i] + l * t, tx: abx / l, ty: aby / l };
+  const side = (a: PtMm, b: PtMm, c: PtMm) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  for (let i = 0; i < n; i++)
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue;
+      const [a, b, c, d] = [ring[i], ring[(i + 1) % n], ring[j], ring[(j + 1) % n]];
+      if (side(a, b, c) * side(a, b, d) < 0 && side(c, d, a) * side(c, d, b) < 0) return true;
     }
-  }
-  return best;
-}
-
-/** Stretches this close to parallel cannot pin a point between them (one of them is used). */
-const MIN_PIN_ANGLE_DEG = 30;
-
-/** Corner-to-corner stretches of the base contour with their twins on the target contour (arc). */
-type RunMatch = {
-  base: ContourRuns;
-  target: ContourRuns;
-  runs: { b0: number; b1: number; t0: number; t1: number }[];
-};
-
-const arcSpan = (s0: number, s1: number, total: number) =>
-  (((s1 - s0) % total) + total) % total || total;
-
-/**
- * The contour cut into stretches at its corners, corners matched across sizes by the grade's
- * proportional position. null when the corners do not match up.
- */
-function matchContourRuns(
-  baseOutline: readonly PtMm[],
-  targetOutline: readonly PtMm[],
-): RunMatch | null {
-  const from = bbox(baseOutline);
-  const to = bbox(targetOutline);
-  const base = contourRuns(baseOutline);
-  const target = contourRuns(targetOutline);
-  if (base.ring.length < 3 || target.ring.length < 3 || base.corners.length < 2) return null;
-  const matched = base.corners.map((i) => {
-    const want = mapPointBetweenOutlines(base.ring[i], from, to);
-    let best = -1;
-    let bestD = Infinity;
-    for (const j of target.corners) {
-      const d = Math.hypot(target.ring[j].x - want.x, target.ring[j].y - want.y);
-      if (d < bestD) [best, bestD] = [j, d];
-    }
-    return best;
-  });
-  // One-to-one, in the same cyclic order: otherwise the corners are not the same corners.
-  if (new Set(matched).size !== matched.length || matched.some((j) => j < 0)) return null;
-  const start = matched.indexOf(Math.min(...matched));
-  for (let k = 1; k < matched.length; k++)
-    if (matched[(start + k) % matched.length] <= matched[(start + k - 1) % matched.length])
-      return null;
-  const m = base.corners.length;
-  const runs = base.corners.map((i, k) => ({
-    b0: base.cum[i],
-    b1: base.cum[base.corners[(k + 1) % m]],
-    t0: target.cum[matched[k]],
-    t1: target.cum[matched[(k + 1) % m]],
-  }));
-  return { base, target, runs };
-}
-
-/**
- * Carries a point of the base contour onto the target contour. A point keeps its signed mm from
- * its two nearest non-parallel stretches — a placket band keeps its width off the front edge and
- * its depth below the neck while the side seam grows. With one usable stretch it keeps its mm off
- * it at the same arc fraction. Well conditioned on the contour only: interior points go through
- * interiorMap instead.
- */
-function contourCarrier({ base, target, runs }: RunMatch): (point: PtMm) => PtMm {
-  const baseTotal = base.cum[base.ring.length];
-  const targetTotal = target.cum[target.ring.length];
-  return (point) => {
-    const near = runs
-      .map((run, k) => ({ k, run, pr: projectOnRun(base, point, run.b0, run.b1) }))
-      .sort((x, y) => x.pr.d - y.pr.d);
-    const first = near[0];
-    const second = near
-      .slice(1)
-      .find(
-        (x) =>
-          Math.abs(first.pr.tx * x.pr.ty - first.pr.ty * x.pr.tx) >
-          Math.sin((MIN_PIN_ANGLE_DEG * Math.PI) / 180),
-      );
-    const pins = [first, ...(second ? [second] : [])].map(({ run, pr }) => {
-      const signed = pr.tx * (point.y - pr.p.y) - pr.ty * (point.x - pr.p.x);
-      const along = (((pr.s - run.b0) % baseTotal) + baseTotal) % baseTotal;
-      const frac = along / arcSpan(run.b0, run.b1, baseTotal);
-      const length = arcSpan(run.t0, run.t1, targetTotal);
-      const at = pointAtArc(target, run.t0 + frac * length);
-      // The tangent comes from inside the pin's own stretch, as the re-anchoring below reads it. At a
-      // stretch end the arc sits on a corner, and which side's segment it read there depended on
-      // where the ring happens to start: the wrong side threw the point off the piece.
-      const edge = Math.min(1e-3, length / 2);
-      const inside = pointAtArc(
-        target,
-        run.t0 + Math.min(Math.max(frac * length, edge), length - edge),
-      );
-      return {
-        run,
-        signed,
-        p: at.p,
-        tx: Math.cos(inside.dir),
-        ty: Math.sin(inside.dir),
-      };
-    });
-    const offsetOf = (pin: (typeof pins)[number]) => ({
-      x: pin.p.x - pin.ty * pin.signed,
-      y: pin.p.y + pin.tx * pin.signed,
-    });
-    if (pins.length < 2) return offsetOf(pins[0]);
-    let x = offsetOf(pins[0]);
-    for (let iter = 0; iter < 4; iter++) {
-      // tx·(X−P).y − ty·(X−P).x = signed, for both pins: a 2×2 linear system in X.
-      const [a, b] = pins;
-      const a11 = -a.ty;
-      const a12 = a.tx;
-      const c1 = a.signed + (-a.ty * a.p.x + a.tx * a.p.y);
-      const a21 = -b.ty;
-      const a22 = b.tx;
-      const c2 = b.signed + (-b.ty * b.p.x + b.tx * b.p.y);
-      const det = a11 * a22 - a12 * a21;
-      if (Math.abs(det) < 1e-9) break;
-      x = { x: (c1 * a22 - a12 * c2) / det, y: (a11 * c2 - c1 * a21) / det };
-      // Re-anchor each pin at X's nearest point of its target stretch (curved stretches).
-      for (const pin of pins) {
-        const pr = projectOnRun(target, x, pin.run.t0, pin.run.t1);
-        pin.p = pr.p;
-        pin.tx = pr.tx;
-        pin.ty = pr.ty;
-      }
-    }
-    return x;
-  };
-}
-
-// ---------- interior points: interpolated between known correspondences ----------
-//
-// Inside the piece a point has no stretch to keep its mm from: the two-stretch solve there turned a
-// pocket rectangle into a wedge. Its displacement is instead a weighted mean of the displacements
-// the two sizes state outright — the contour (corner-matched, arc fraction along each stretch) and
-// the internal lines matched across sizes. A mean never moves a point farther than its farthest
-// anchor, and a point on an internal line moves with that line.
-
-/** A base segment whose ends are known to move by da / db (linearly in between). */
-type Anchor = { a: PtMm; b: PtMm; da: PtMm; db: PtMm; len: number };
-
-/** Anchors are cut this short, so a long straight line weighs from where it is near. */
-const ANCHOR_STEP_MM = 5;
-/** An anchor weighs len / r^p: the nearest lines decide, the far side of the piece barely counts. */
-const ANCHOR_POWER = 3;
-/** A matched internal line moving this much farther than any contour point is not the same line. */
-const LINE_SLACK_MM = 10;
-/** Fixed-point steps of the inverse mapping (it contracts fast: grades vary slowly). */
-const INVERT_STEPS = 32;
-
-const lerpPt = (a: PtMm, b: PtMm, t: number): PtMm => ({
-  x: a.x + (b.x - a.x) * t,
-  y: a.y + (b.y - a.y) * t,
-});
-
-/** Anchors along a base polyline whose every vertex has a known twin, cut to ANCHOR_STEP_MM. */
-function anchorsAlong(base: readonly PtMm[], moved: readonly PtMm[], closed: boolean): Anchor[] {
-  const out: Anchor[] = [];
-  const n = base.length;
-  for (let i = 0; i < (closed ? n : n - 1); i++) {
-    const j = (i + 1) % n;
-    const len = Math.hypot(base[j].x - base[i].x, base[j].y - base[i].y);
-    if (!(len > 1e-9)) continue;
-    const da = { x: moved[i].x - base[i].x, y: moved[i].y - base[i].y };
-    const db = { x: moved[j].x - base[j].x, y: moved[j].y - base[j].y };
-    const k = Math.ceil(len / ANCHOR_STEP_MM);
-    for (let s = 0; s < k; s++)
-      out.push({
-        a: lerpPt(base[i], base[j], s / k),
-        b: lerpPt(base[i], base[j], (s + 1) / k),
-        da: lerpPt(da, db, s / k),
-        db: lerpPt(da, db, (s + 1) / k),
-        len: len / k,
-      });
-  }
-  return out;
-}
-
-/** Contour anchors: each stretch's point keeps its arc fraction between its matched corners. */
-function contourAnchors({ base, target, runs }: RunMatch): Anchor[] {
-  const n = base.ring.length;
-  const baseTotal = base.cum[n];
-  const targetTotal = target.cum[target.ring.length];
-  return runs.flatMap((run) => {
-    const length = arcSpan(run.b0, run.b1, baseTotal);
-    const twinLength = arcSpan(run.t0, run.t1, targetTotal);
-    // The stretch's own vertices (ring-start independent), then cut to ANCHOR_STEP_MM: the target
-    // point between two samples is read off the target contour, not interpolated.
-    const knots = [
-      0,
-      ...base.cum
-        .slice(0, n)
-        .map((s) => (((s - run.b0) % baseTotal) + baseTotal) % baseTotal)
-        .filter((s) => s > 1e-9 && s < length - 1e-9)
-        .sort((a, b) => a - b),
-      length,
-    ];
-    const stops: number[] = [];
-    for (let k = 1; k < knots.length; k++) {
-      const steps = Math.max(1, Math.ceil((knots[k] - knots[k - 1]) / ANCHOR_STEP_MM));
-      for (let s = 0; s < steps; s++)
-        stops.push(knots[k - 1] + ((knots[k] - knots[k - 1]) * s) / steps);
-    }
-    stops.push(length);
-    return anchorsAlong(
-      stops.map((s) => pointAtArc(base, run.b0 + s).p),
-      stops.map((s) => pointAtArc(target, run.t0 + (s / length) * twinLength).p),
-      false,
-    );
-  });
-}
-
-/** Internal lines paired across sizes: same layer, same order, same vertex count and closure. */
-function matchedLines(
-  base: readonly FuseInternalLine[],
-  target: readonly FuseInternalLine[],
-): [FuseInternalLine, FuseInternalLine][] {
-  const byLayer = (lines: readonly FuseInternalLine[]) => {
-    const out = new Map<string, FuseInternalLine[]>();
-    for (const line of lines)
-      if (line.points.length >= 2) out.set(line.layer, [...(out.get(line.layer) ?? []), line]);
-    return out;
-  };
-  const twinsByLayer = byLayer(target);
-  const pairs: [FuseInternalLine, FuseInternalLine][] = [];
-  for (const [layer, lines] of byLayer(base)) {
-    const twins = twinsByLayer.get(layer);
-    // A layer whose lines do not pair up one to one says nothing reliable: it is left out whole.
-    if (
-      !twins ||
-      twins.length !== lines.length ||
-      lines.some(
-        (line, i) =>
-          line.closed !== twins[i].closed || line.points.length !== twins[i].points.length,
-      )
-    )
-      continue;
-    lines.forEach((line, i) => pairs.push([line, twins[i]]));
-  }
-  return pairs;
-}
-
-type GradeField = { anchors: Anchor[]; lines: Anchor[][] };
-
-function gradeField(
-  baseOutline: readonly PtMm[],
-  targetOutline: readonly PtMm[],
-  baseLines: readonly FuseInternalLine[],
-  targetLines: readonly FuseInternalLine[],
-): GradeField {
-  const match = matchContourRuns(baseOutline, targetOutline);
-  let contour: Anchor[];
-  if (match) contour = contourAnchors(match);
-  else {
-    // Corners that do not match up: the bbox frames stand in, as they do for the contour itself.
-    const from = bbox(baseOutline);
-    const to = bbox(targetOutline);
-    contour = anchorsAlong(
-      baseOutline,
-      baseOutline.map((p) => mapPointBetweenOutlines(p, from, to)),
-      true,
-    );
-  }
-  let reach = 0;
-  for (const a of contour)
-    reach = Math.max(reach, Math.hypot(a.da.x, a.da.y), Math.hypot(a.db.x, a.db.y));
-  const lines = matchedLines(baseLines, targetLines)
-    .filter(([line, twin]) =>
-      line.points.every(
-        (p, i) =>
-          Math.hypot(twin.points[i].x - p.x, twin.points[i].y - p.y) <= reach + LINE_SLACK_MM,
-      ),
-    )
-    .map(([line, twin]) => anchorsAlong(line.points, twin.points, line.closed))
-    .filter((line) => line.length > 0);
-  return { anchors: [...contour, ...lines.flat()], lines };
-}
-
-/** The interpolated displacement at p: exact on an anchor, a convex mean of them elsewhere. */
-function displacementAt(field: GradeField, p: PtMm): PtMm {
-  let sum = 0;
-  let x = 0;
-  let y = 0;
-  for (const s of field.anchors) {
-    const abx = s.b.x - s.a.x;
-    const aby = s.b.y - s.a.y;
-    const t = Math.max(
-      0,
-      Math.min(1, ((p.x - s.a.x) * abx + (p.y - s.a.y) * aby) / (abx * abx + aby * aby)),
-    );
-    const dx = s.da.x + (s.db.x - s.da.x) * t;
-    const dy = s.da.y + (s.db.y - s.da.y) * t;
-    const r = Math.hypot(p.x - s.a.x - abx * t, p.y - s.a.y - aby * t);
-    if (r < 1e-6) return { x: dx, y: dy };
-    const w = s.len / r ** ANCHOR_POWER;
-    sum += w;
-    x += w * dx;
-    y += w * dy;
-  }
-  return sum > 0 ? { x: x / sum, y: y / sum } : { x: 0, y: 0 };
-}
-
-function centroidOf(ring: readonly PtMm[]): PtMm {
-  let twice = 0;
-  let cx = 0;
-  let cy = 0;
-  for (let i = 0; i < ring.length; i++) {
-    const a = ring[i];
-    const b = ring[(i + 1) % ring.length];
-    const cross = a.x * b.y - b.x * a.y;
-    twice += cross;
-    cx += (a.x + b.x) * cross;
-    cy += (a.y + b.y) * cross;
-  }
-  if (Math.abs(twice) > 1e-9) return { x: cx / (3 * twice), y: cy / (3 * twice) };
-  const n = Math.max(1, ring.length);
-  return {
-    x: ring.reduce((s, p) => s + p.x, 0) / n,
-    y: ring.reduce((s, p) => s + p.y, 0) / n,
-  };
-}
-
-/**
- * The one translation of a detached ring: the mean displacement of the internal lines it covers
- * (a patch drawn round a welt goes where the welt goes), else of the parts of lines crossing it,
- * else the interpolated displacement at its centroid.
- */
-function shiftOfRing(field: GradeField, ring: readonly PtMm[]): PtMm {
-  const covered: Anchor[] = [];
-  const crossing: Anchor[] = [];
-  if (ring.length >= 3)
-    for (const line of field.lines) {
-      const inside = line.filter((s) => pointInRing(lerpPt(s.a, s.b, 0.5), ring));
-      if (!inside.length) continue;
-      if (
-        inside.length === line.length &&
-        line.every((s) => pointInRing(s.a, ring) && pointInRing(s.b, ring))
-      )
-        covered.push(...line);
-      else crossing.push(...inside);
-    }
-  const pick = covered.length ? covered : crossing;
-  if (!pick.length) return displacementAt(field, centroidOf(ring));
-  let len = 0;
-  let x = 0;
-  let y = 0;
-  for (const s of pick) {
-    len += s.len;
-    x += (s.len * (s.da.x + s.db.x)) / 2;
-    y += (s.len * (s.da.y + s.db.y)) / 2;
-  }
-  return { x: x / len, y: y / len };
-}
-
-/**
- * Which outline a size mapping is built from: the smaller one, whichever way round it is asked. The
- * other direction inverts the same field, so base → size → base gives the stored points back.
- */
-function buildsFrom(base: readonly PtMm[], target: readonly PtMm[]): boolean {
-  const key = (ring: readonly PtMm[]) => [
-    Math.abs(signedArea(ring)),
-    ring.reduce((s, p) => s + p.x, 0),
-    ring.reduce((s, p) => s + p.y, 0),
-  ];
-  const a = key(base);
-  const b = key(target);
-  for (let i = 0; i < a.length; i++)
-    if (Math.abs(a[i] - b[i]) > 1e-9 * Math.max(1, Math.abs(a[i]), Math.abs(b[i])))
-      return a[i] < b[i];
-  return true;
-}
-
-type InteriorMap = {
-  point: (point: PtMm) => PtMm;
-  /** The translation that carries a whole detached ring. */
-  shift: (ring: readonly PtMm[]) => PtMm;
-};
-
-function interiorMap(
-  baseOutline: readonly PtMm[],
-  targetOutline: readonly PtMm[],
-  internals: FuseInternals | null | undefined,
-): InteriorMap {
-  const baseLines = internals?.base ?? [];
-  const targetLines = internals?.target ?? [];
-  if (buildsFrom(baseOutline, targetOutline)) {
-    const field = gradeField(baseOutline, targetOutline, baseLines, targetLines);
-    return {
-      point: (p) => {
-        const d = displacementAt(field, p);
-        return { x: p.x + d.x, y: p.y + d.y };
-      },
-      shift: (ring) => shiftOfRing(field, ring),
-    };
-  }
-  const field = gradeField(targetOutline, baseOutline, targetLines, baseLines);
-  const solve = (step: (guess: PtMm) => PtMm): PtMm => {
-    let guess = { x: 0, y: 0 };
-    for (let k = 0; k < INVERT_STEPS; k++) {
-      const next = step(guess);
-      const done = Math.hypot(next.x - guess.x, next.y - guess.y) < 1e-7;
-      guess = next;
-      if (done) break;
-    }
-    return guess;
-  };
-  return {
-    // q = p + d(p) solved for p: the displacement d sits where p is, on the field's own side.
-    point: (q) => {
-      const d = solve((guess) => displacementAt(field, { x: q.x - guess.x, y: q.y - guess.y }));
-      return { x: q.x - d.x, y: q.y - d.y };
-    },
-    shift: (ring) => {
-      const d = solve((guess) =>
-        shiftOfRing(
-          field,
-          ring.map((q) => ({ x: q.x - guess.x, y: q.y - guess.y })),
-        ),
-      );
-      return { x: -d.x, y: -d.y };
-    },
-  };
+  return false;
 }
 
 /**
  * Maps base-size markup onto one graded outline. Widths and insets remain physical millimetres;
- * positions follow the grade. Strip trims keep the same fraction of their selected edge run. A
- * drawn zone's point on the cut or inset contour keeps its mm from that contour and, along it, from
- * the nearer corner of that stretch (contourCarrier); a point on the inset contour stays on it, so a
- * contour-following side keeps following the contour in every size. Interior points follow the
- * contour and the internal lines (interiorMap), and a ring with no point on the contour moves
- * whole, by one translation: a patch round a welt pocket stays the same patch in every size.
+ * positions follow the grade. Strip trims keep the same fraction of their selected edge run.
+ *
+ * A drawn zone (zone-grade.ts `follow`): a point near the contour keeps its mm from it and from the
+ * nearer corner of its stretch (the carrier), fully up to 50 mm in, so a band keeps its width; a
+ * point deep inside follows the grade field (the matched contour, corrected by the paired internal
+ * lines), and a point nearer to a paired internal line than to the contour follows the line. A
+ * point on the inset contour stays on it. Everything blends smoothly; nothing jumps at a distance.
+ *
+ * Rigid or pointwise: a ring that keeps RIGID_AT_MM or more from the contour moves whole, by one
+ * translation (a patch round a welt pocket is the same patch in every size); a ring that comes
+ * within RIGID_FROM_MM of it moves point by point; in between the two are mixed by the ring's
+ * nearest distance to the contour, so a ring at 9.9 or 10.1 mm gives the same shape. A hole follows the ring it sits in. A mapped ring that folds over (its
+ * orientation flips, it crosses itself, it collapses) is moved whole instead.
+ *
+ * A rect zone goes the same way by its four corners and stays a rect while they stay square (a
+ * detached rect always does); otherwise it is returned as a four-corner spline.
  * `internals` are the two outlines' internal lines; without them the contour alone leads.
  */
 export function mapFuseSpecToSize(
@@ -734,8 +264,6 @@ export function mapFuseSpecToSize(
   internals?: FuseInternals | null,
 ): PieceFuseSpec {
   if (source.mode === 'zone' && source.zone && !('dxfPieceKey' in source.zone)) {
-    const from = bbox(baseOutline);
-    const to = bbox(targetOutline);
     let baseInset: PtMm[] | null = null;
     let targetInset: PtMm[] | null = null;
     try {
@@ -744,76 +272,122 @@ export function mapFuseSpecToSize(
     } catch {
       // generateFuseGeometry owns the inset refusal; the cut contour stands in for it here.
     }
-    // A zone point on the contour rides it: its nearest contour point keeps its mm from the nearer
-    // corner of that run, and the point keeps its mm off the contour. A placket band so keeps its
-    // width and its distance from the neck and the hem while the grade grows the piece around it.
-    const match = matchContourRuns(baseOutline, targetOutline);
-    const carry = match ? contourCarrier(match) : null;
-    const alongContour = (point: PtMm, followContour: boolean): PtMm => {
-      const moved = carry ? carry(point) : mapPointBetweenOutlines(point, from, to);
-      const onInset =
-        followContour &&
-        baseInset &&
-        targetInset &&
-        projectOnRing(point, baseInset).d <= ZONE_ON_CONTOUR_MM;
-      return onInset ? projectOnRing(moved, targetInset!).p : moved;
+    const grade = zoneGrade(baseOutline, targetOutline, internals);
+    /** mm from the nearer of the cut and the inset contour. */
+    const offContour = (point: PtMm) =>
+      Math.min(
+        projectOnRing(point, baseOutline).d,
+        baseInset ? projectOnRing(point, baseInset).d : Infinity,
+      );
+    const pointwise = (point: PtMm, followContour: boolean): PtMm => {
+      const carried = grade.follow(point);
+      if (!followContour || !baseInset || !targetInset) return carried;
+      // A point on the inset contour stays on it (fully up to ZONE_SNAP_MM, which covers the 0.1 mm
+      // rounding of stored points); the pull fades to nothing at ZONE_ON_CONTOUR_MM, so the point
+      // does not snap as it crosses that distance.
+      const was = projectOnRing(point, baseInset).d;
+      const pull = 1 - smoothstep(ZONE_SNAP_MM, ZONE_ON_CONTOUR_MM, was);
+      if (pull <= 0) return carried;
+      const onto = projectOnRing(carried, targetInset).p;
+      return {
+        x: onto.x + (carried.x - onto.x) * (1 - pull),
+        y: onto.y + (carried.y - onto.y) * (1 - pull),
+      };
     };
-    if ('rect' in source.zone) {
-      const [ax, ay, bx, by] = source.zone.rect;
-      const a = alongContour({ x: ax, y: ay }, false);
-      const b = alongContour({ x: bx, y: by }, false);
-      return { ...source, zone: { rect: [a.x, a.y, b.x, b.y] } };
-    }
-    const onContour = (point: PtMm) =>
-      projectOnRing(point, baseOutline).d <= ZONE_ON_CONTOUR_MM ||
-      (!!baseInset && projectOnRing(point, baseInset).d <= ZONE_ON_CONTOUR_MM);
-    let interior: InteriorMap | null = null;
-    const inside = () => (interior ??= interiorMap(baseOutline, targetOutline, internals));
-    /** shift: the translation a detached ring moved by; null when it touches the contour. */
+    type Carried = { spline: FuseSpline; ring: PtMm[]; rigid: number; shift: PtMm | null };
+    /** rigid: 1 = moved whole by `shift`, 0 = point by point. */
     const mapRing = (
       spline: FuseSpline,
       followContour: boolean,
-      parentShift: PtMm | null = null,
-    ): { spline: FuseSpline; shift: PtMm | null } => {
-      const touching = spline.points.map(onContour);
-      if (touching.some(Boolean))
-        return {
-          spline: {
-            points: spline.points.map((point, i) => ({
-              ...point,
-              ...(touching[i] ? alongContour(point, followContour) : inside().point(point)),
-            })),
-          },
-          shift: null,
-        };
-      const shift = parentShift ?? inside().shift(flattenSpline(spline.points));
+      parent: Carried | null = null,
+    ): Carried => {
+      const ring = flattenSpline(spline.points);
+      let off = Infinity;
+      for (const point of [...spline.points, ...ring]) off = Math.min(off, offContour(point));
+      const own = smoothstep(RIGID_FROM_MM, RIGID_AT_MM, off);
+      const shift = own > 0 ? grade.shift(ring) : null;
+      const whole = (by: PtMm) => spline.points.map((p) => ({ x: p.x + by.x, y: p.y + by.y }));
+      let moved: PtMm[] =
+        own >= 1 && shift
+          ? whole(shift)
+          : spline.points.map((point) => {
+              const loose = pointwise(point, followContour);
+              return shift
+                ? {
+                    x: loose.x + (point.x + shift.x - loose.x) * own,
+                    y: loose.y + (point.y + shift.y - loose.y) * own,
+                  }
+                : loose;
+            });
+      // Fold-over: the control polygon must keep its orientation, a fair share of its area, and
+      // not start crossing itself; otherwise the ring is moved whole.
+      const before = signedArea(spline.points);
+      const after = signedArea(moved);
+      if (
+        own < 1 &&
+        spline.points.length >= 3 &&
+        Math.abs(before) > 1e-6 &&
+        (after * before <= 0 ||
+          Math.abs(after) < Math.abs(before) / 4 ||
+          (!selfCrossing(spline.points) && selfCrossing(moved)))
+      )
+        moved = whole(shift ?? grade.shift(ring));
+      // A hole inside a ring that moved whole moves with it, so it stays where it was cut.
+      if (parent?.shift && parent.rigid > 0) {
+        const by = parent.shift;
+        moved = moved.map((p, i) => ({
+          x: p.x + (spline.points[i].x + by.x - p.x) * parent.rigid,
+          y: p.y + (spline.points[i].y + by.y - p.y) * parent.rigid,
+        }));
+      }
       return {
-        spline: {
-          points: spline.points.map((point) => ({
-            ...point,
-            x: point.x + shift.x,
-            y: point.y + shift.y,
-          })),
-        },
+        spline: { points: spline.points.map((point, i) => ({ ...point, ...moved[i] })) },
+        ring,
+        rigid: own,
         shift,
       };
     };
-    const outers = [source.zone.spline, ...source.zone.islands].map((spline) => ({
-      ring: flattenSpline(spline.points),
-      ...mapRing(spline, true),
-    }));
+    if ('rect' in source.zone) {
+      const [ax, ay, bx, by] = source.zone.rect;
+      const [x0, x1] = [Math.min(ax, bx), Math.max(ax, bx)];
+      const [y0, y1] = [Math.min(ay, by), Math.max(ay, by)];
+      const corners = mapRing(
+        {
+          points: [
+            { x: x0, y: y0, corner: true },
+            { x: x1, y: y0, corner: true },
+            { x: x1, y: y1, corner: true },
+            { x: x0, y: y1, corner: true },
+          ],
+        },
+        false,
+      ).spline;
+      const [a, b, c, d] = corners.points;
+      const square =
+        Math.max(
+          Math.abs(a.y - b.y),
+          Math.abs(b.x - c.x),
+          Math.abs(c.y - d.y),
+          Math.abs(d.x - a.x),
+        ) <= RECT_SQUARE_MM;
+      return square
+        ? { ...source, zone: { rect: [a.x, a.y, c.x, c.y] } }
+        : { ...source, zone: { spline: corners, holes: [], islands: [] } };
+    }
+    const outers = [source.zone.spline, ...source.zone.islands].map((spline) =>
+      mapRing(spline, true),
+    );
     return {
       ...source,
       zone: {
         spline: outers[0].spline,
         islands: outers.slice(1).map((outer) => outer.spline),
-        // A hole inside a ring that moved whole moves with it, so it stays where it was cut.
         holes: source.zone.holes.map((hole) => {
           const first = hole.points[0];
           const parent = first
-            ? outers.find((outer) => outer.shift && pointInRing(first, outer.ring))
+            ? outers.find((outer) => outer.rigid > 0 && pointInRing(first, outer.ring))
             : undefined;
-          return mapRing(hole, false, parent?.shift ?? null).spline;
+          return mapRing(hole, false, parent ?? null).spline;
         }),
       },
     };
