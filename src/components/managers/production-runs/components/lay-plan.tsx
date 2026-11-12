@@ -10,7 +10,16 @@ import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { notify } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
-import { AddDoor, Button, CalloutBox, ConfirmationModal, Section, Text } from 'ui';
+import {
+  AddDoor,
+  Button,
+  CalloutBox,
+  ConfirmationModal,
+  Section,
+  Text,
+  ViewSwitch,
+  type ViewSwitchOption,
+} from 'ui';
 import { wireInt } from 'components/managers/tech-card/components/schema';
 import {
   ClothReport,
@@ -27,8 +36,15 @@ import { LayEditor, LaySlotOption } from './lay-editor';
 import { useCutReceipts } from './useCutReceipts';
 import { layErrorMessage, useDeleteLay, useRunLays, useSaveLay } from './useLays';
 import { useRunNormCard } from './useRunNormCard';
+import { parseTablePick, TABLE_METERS } from './run-markers';
 import { RunMarkersTable } from './run-markers-table';
 import { useRunMarkers } from './use-run-markers';
+
+// Стол раскроя: 4 | 6 | 8 м.
+const TABLE_OPTIONS: ViewSwitchOption<string>[] = TABLE_METERS.map((m) => ({
+  value: String(m),
+  label: `${m} m`,
+}));
 
 // Слоты, которые вообще можно настелить: рулонные секции BOM. Фурнитура, нитки и упаковка настила
 // не имеют, и предлагать их в выборе слота значило бы приглашать в отказ сервера (§4.3 шаг 5).
@@ -45,6 +61,7 @@ const ROLL_SECTIONS = new Set([
 // то же «какой настил сейчас предмет открытой поверхности»). Ни одного поля формы здесь нет: они
 // живут в `LayEditor`, который монтируется с `key` по цели правки. Аддитивен — связи прогон↔
 // раскладка до Ф4 не существовало ни в каком виде, поэтому ничего не вытесняет.
+
 export function LayPlan({
   run,
   canEdit,
@@ -294,7 +311,7 @@ export function LayPlan({
     return (colorwayId: number) => [...(byColorway.get(colorwayId) ?? [])].join(' + ');
   }, [neededPairs, slotByItemId]);
 
-  // «build markers» / «build lays» — маркеры партии по материалам (вариант «One marker»).
+  // «build markers» / «build lays» — маркеры партии по материалам; длиннее стола — частями A, B.
   const batch = useRunMarkers({
     run,
     techCard,
@@ -396,6 +413,27 @@ export function LayPlan({
               </Text>
             ) : null}
             {batch.canBuild ? (
+              <span className='inline-flex items-center gap-1.5'>
+                <Text
+                  size='micro'
+                  variant='label'
+                  tracking='label'
+                  component='span'
+                  className='uppercase'
+                >
+                  table
+                </Text>
+                <ViewSwitch
+                  label='table'
+                  quiet
+                  disabled={!!batch.progress}
+                  value={String(batch.tableM)}
+                  options={TABLE_OPTIONS}
+                  onChange={(v) => batch.pickTable(parseTablePick(v))}
+                />
+              </span>
+            ) : null}
+            {batch.canBuild ? (
               <Button
                 type='button'
                 variant='underline'
@@ -407,7 +445,7 @@ export function LayPlan({
                   ? batch.progress.total > 0
                     ? `building ${batch.progress.done}/${batch.progress.total}`
                     : 'building…'
-                  : batch.rows.some((r) => r.kind === 'marker')
+                  : batch.rows.some((r) => r.kind === 'marker' || r.kind === 'split')
                     ? 'rebuild markers'
                     : 'build markers'}
               </Button>

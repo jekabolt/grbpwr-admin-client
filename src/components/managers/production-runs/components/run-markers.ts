@@ -10,18 +10,33 @@ import { compositionOf, decNum } from 'components/managers/tech-card/components/
 /** Отказ или сбой по паре (материал, колорвей). colorwayId 0 = вся ткань, все колорвеи. */
 export type RunMarkerIssue = { lineKey: string; colorwayId: number; word: string };
 
+/** Один маркер в строке таблицы: целый материал либо его часть A, B, … при разбивке по столу. */
+export type RunMarkerPart = {
+  key: string;
+  widthCm: number | null;
+  lengthCm: number | null;
+  effPct: number | null;
+  plies: number | null;
+  sizes: { label: string; qty: number }[];
+  source: 'auto' | 'manual' | 'draft';
+  /** Длиннее выбранного стола — длина красным. */
+  over: boolean;
+};
+
 export type RunMarkerRow =
-  | {
+  | ({
       kind: 'marker';
+      material: string;
+      colorway: string;
+    } & RunMarkerPart)
+  | {
+      /** Материал разбит по столу: строка-группа и маркеры A, B, … под ней. */
+      kind: 'split';
       key: string;
       material: string;
       colorway: string;
       widthCm: number | null;
-      lengthCm: number | null;
-      effPct: number | null;
-      plies: number | null;
-      sizes: { label: string; qty: number }[];
-      source: 'auto' | 'manual' | 'draft';
+      parts: (RunMarkerPart & { letter: string })[];
     }
   | {
       kind: 'skipped' | 'failed';
@@ -137,34 +152,64 @@ export function buildRunMarkerRows(args: {
   staticRefusals: readonly RunMarkerIssue[];
   sessionRefusals: readonly RunMarkerIssue[];
   failures: readonly RunMarkerIssue[];
+  /** Порядок градации размера (XS…XL); без него — по id. */
+  sizeOrderOf?: (sizeId: number) => number;
+  /** Длина выбранного стола, см: маркер длиннее — красным. */
+  tableCm?: number;
 }): RunMarkerRow[] {
   const lineIndex = new Map(args.lines.map((l, i) => [l.lineKey, i]));
   const cwIndex = new Map(args.colorwayIds.map((id, i) => [id, i]));
   const showColorway = args.colorwayIds.length > 1;
+  const order = args.sizeOrderOf ?? ((id: number) => id);
   const material = (lineKey: string, fallback?: string) =>
     args.lines.find((l) => l.lineKey === lineKey)?.name.trim() || fallback?.trim() || 'unnamed';
   const colorway = (id: number) => (showColorway && id > 0 ? args.colorwayLabel(id) : '');
 
   const rows: { line: number; cw: number; row: RunMarkerRow }[] = [];
   const hasMarker = new Set<string>();
+  const byPair = new Map<string, common_TechCardMarkerSummary[]>();
   for (const m of args.runMarkers) {
-    const lineKey = m.bomLineKey ?? '';
-    const cw = num(m.colorwayId);
-    hasMarker.add(`${lineKey}|${cw}`);
+    const k = `${m.bomLineKey ?? ''}|${num(m.colorwayId)}`;
+    hasMarker.add(k);
+    byPair.set(k, [...(byPair.get(k) ?? []), m]);
+  }
+  const firstOrder = (m: common_TechCardMarkerSummary) =>
+    Math.min(...compositionOf(m).map((e) => order(e.sizeId)), 1e9);
+  const partOf = (m: common_TechCardMarkerSummary): RunMarkerPart => {
+    const lengthCm = finiteOrNull(decNum(m.usedLengthCm));
+    return {
+      key: `m${num(m.id)}`,
+      widthCm: finiteOrNull(decNum(m.fabricWidthCm)),
+      lengthCm,
+      effPct: finiteOrNull(decNum(m.efficiencyPct)),
+      plies: markerPlies(m, args.cells),
+      sizes: compositionOf(m)
+        .sort((a, b) => order(a.sizeId) - order(b.sizeId))
+        .map((e) => ({ label: args.sizeLabel(e.sizeId), qty: e.quantity })),
+      source: m.isDraft ? 'draft' : m.source === 'manual' ? 'manual' : 'auto',
+      over: lengthCm != null && args.tableCm != null && lengthCm > args.tableCm,
+    };
+  };
+  for (const ms of byPair.values()) {
+    const lineKey = ms[0].bomLineKey ?? '';
+    const cw = num(ms[0].colorwayId);
+    const pos = { line: lineIndex.get(lineKey) ?? 1e6, cw: cwIndex.get(cw) ?? 1e6 };
+    const head = { material: material(lineKey, ms[0].bomItemName), colorway: colorway(cw) };
+    if (ms.length === 1) {
+      rows.push({ ...pos, row: { kind: 'marker', ...head, ...partOf(ms[0]) } });
+      continue;
+    }
+    const parts = [...ms]
+      .sort((a, b) => firstOrder(a) - firstOrder(b) || num(a.id) - num(b.id))
+      .map((m, i) => ({ ...partOf(m), letter: markerLetter(i) }));
     rows.push({
-      line: lineIndex.get(lineKey) ?? 1e6,
-      cw: cwIndex.get(cw) ?? 1e6,
+      ...pos,
       row: {
-        kind: 'marker',
-        key: `m${num(m.id)}`,
-        material: material(lineKey, m.bomItemName),
-        colorway: colorway(cw),
-        widthCm: finiteOrNull(decNum(m.fabricWidthCm)),
-        lengthCm: finiteOrNull(decNum(m.usedLengthCm)),
-        effPct: finiteOrNull(decNum(m.efficiencyPct)),
-        plies: markerPlies(m, args.cells),
-        sizes: compositionOf(m).map((e) => ({ label: args.sizeLabel(e.sizeId), qty: e.quantity })),
-        source: m.isDraft ? 'draft' : m.source === 'manual' ? 'manual' : 'auto',
+        kind: 'split',
+        key: `g${lineKey}|${cw}`,
+        ...head,
+        widthCm: parts[0].widthCm,
+        parts,
       },
     });
   }
@@ -222,9 +267,11 @@ export type LayCandidate = {
 };
 
 /**
- * Настилы, которые «build lays» создаст: пара (колорвей, слот) с готовым (не черновым) маркером
- * прогона, без настила, со слоями, выведенными без остатка. Ручной маркер пары предпочтительнее,
- * дальше — самый свежий (наибольший id).
+ * Настилы, которые «build lays» создаст: пара (колорвей, слот) без настила, с готовыми (не
+ * черновыми) маркерами прогона и слоями, выведенными без остатка. Ручной маркер пары — один и
+ * предпочтительнее. Иначе — авто-маркеры пары, начиная с самого свежего, без пересечения по
+ * размерам: при разбивке по столу A и B — отдельные настилы, а уцелевший старый маркер на те же
+ * размеры второй раз не настилается.
  */
 export function layCandidates(args: {
   runMarkers: readonly common_TechCardMarkerSummary[];
@@ -232,28 +279,191 @@ export function layCandidates(args: {
   cells: readonly BatchCell[];
 }): LayCandidate[] {
   const laid = new Set(args.lays.map((l) => `${num(l.colorwayId)}|${l.bomLineKey ?? ''}`));
-  const best = new Map<string, common_TechCardMarkerSummary>();
+  const byPair = new Map<string, common_TechCardMarkerSummary[]>();
   for (const m of args.runMarkers) {
     const cw = num(m.colorwayId);
     const lineKey = m.bomLineKey ?? '';
     if (cw <= 0 || !lineKey || m.isDraft || num(m.id) <= 0) continue;
     const k = `${cw}|${lineKey}`;
     if (laid.has(k)) continue;
-    const prev = best.get(k);
-    const rank = (x: common_TechCardMarkerSummary) =>
-      (x.source === 'manual' ? 1e12 : 0) + num(x.id);
-    if (!prev || rank(m) > rank(prev)) best.set(k, m);
+    byPair.set(k, [...(byPair.get(k) ?? []), m]);
   }
   const out: LayCandidate[] = [];
-  for (const m of best.values()) {
-    const plies = markerPlies(m, args.cells);
-    if (plies == null) continue;
-    out.push({
-      colorwayId: num(m.colorwayId),
-      bomLineKey: m.bomLineKey ?? '',
-      markerId: num(m.id),
-      plies,
-    });
+  for (const ms of byPair.values()) {
+    const newest = [...ms].sort((a, b) => num(b.id) - num(a.id));
+    const manual = newest.find((m) => m.source === 'manual');
+    let picked: common_TechCardMarkerSummary[];
+    if (manual) picked = [manual];
+    else {
+      picked = [];
+      const used = new Set<number>();
+      for (const m of newest) {
+        const sizes = compositionOf(m).map((e) => e.sizeId);
+        if (sizes.length === 0 || sizes.some((id) => used.has(id))) continue;
+        sizes.forEach((id) => used.add(id));
+        picked.push(m);
+      }
+      picked.sort((a, b) => num(a.id) - num(b.id));
+    }
+    for (const m of picked) {
+      const plies = markerPlies(m, args.cells);
+      if (plies == null) continue;
+      out.push({
+        colorwayId: num(m.colorwayId),
+        bomLineKey: m.bomLineKey ?? '',
+        markerId: num(m.id),
+        plies,
+      });
+    }
+  }
+  return out;
+}
+
+/** «marker A», «marker B», … — буква части по порядку размеров. */
+export function markerLetter(i: number): string {
+  return i < 26 ? String.fromCharCode(65 + i) : `${i + 1}`;
+}
+
+// ═══ СТОЛ ════════════════════════════════════════════════════════════════════════════════════
+
+export const TABLE_METERS = [4, 6, 8] as const;
+export type TableMeters = (typeof TABLE_METERS)[number];
+export const DEFAULT_TABLE_M: TableMeters = 6;
+
+/** Выбор стола из localStorage: только 4 | 6 | 8, иначе 6 м. */
+export function parseTablePick(raw: string | null | undefined): TableMeters {
+  const n = Number(raw);
+  return (TABLE_METERS as readonly number[]).includes(n) ? (n as TableMeters) : DEFAULT_TABLE_M;
+}
+
+export const tablePickKey = (runId: number) => `run-markers-table:${runId}`;
+
+export function readTablePick(runId: number): TableMeters {
+  try {
+    return parseTablePick(window.localStorage.getItem(tablePickKey(runId)));
+  } catch {
+    return DEFAULT_TABLE_M;
+  }
+}
+
+export function writeTablePick(runId: number, m: TableMeters): void {
+  try {
+    window.localStorage.setItem(tablePickKey(runId), String(m));
+  } catch {
+    // приватное окно / запрет хранилища — выбор живёт до перезагрузки
+  }
+}
+
+/**
+ * Доля каждого размера в длине ОДНОГО маркера: площадь его деталей × экземпляры, а
+ * неградуированные детали (без размера) делятся по числу изделий размера. Нет площадей — по
+ * изделиям.
+ */
+export function sizeLengthEstimates(args: {
+  sizes: readonly { sizeId: number; units: number }[];
+  pieces: readonly { sizeId: number; areaCm2: number; quantity: number }[];
+  lengthCm: number;
+}): { sizeId: number; estCm: number }[] {
+  const unitsTotal = args.sizes.reduce((n, s) => n + s.units, 0) || 1;
+  const sized = new Map<number, number>();
+  let unsized = 0;
+  for (const p of args.pieces) {
+    const a = Math.max(0, p.areaCm2) * Math.max(0, p.quantity);
+    if (p.sizeId > 0 && args.sizes.some((s) => s.sizeId === p.sizeId))
+      sized.set(p.sizeId, (sized.get(p.sizeId) ?? 0) + a);
+    else unsized += a;
+  }
+  let weights = args.sizes.map(
+    (s) => (sized.get(s.sizeId) ?? 0) + (unsized * s.units) / unitsTotal,
+  );
+  let sum = weights.reduce((n, w) => n + w, 0);
+  if (!(sum > 0)) {
+    weights = args.sizes.map((s) => s.units);
+    sum = unitsTotal;
+  }
+  return args.sizes.map((s, i) => ({
+    sizeId: s.sizeId,
+    estCm: (args.lengthCm * weights[i]) / sum,
+  }));
+}
+
+/** Разбить ряд на k смежных групп с наименьшей самой длинной группой. */
+function balancedPartition(est: readonly number[], k: number): number[][] {
+  const n = est.length;
+  const pre = [0];
+  for (const e of est) pre.push(pre[pre.length - 1] + e);
+  const sum = (i: number, j: number) => pre[j] - pre[i];
+  // best[g][j] — минимум «самой длинной» для первых j размеров в g группах.
+  const best = Array.from({ length: k + 1 }, () => new Array<number>(n + 1).fill(Infinity));
+  const cut = Array.from({ length: k + 1 }, () => new Array<number>(n + 1).fill(0));
+  best[0][0] = 0;
+  for (let g = 1; g <= k; g++) {
+    for (let j = g; j <= n; j++) {
+      for (let i = g - 1; i < j; i++) {
+        const v = Math.max(best[g - 1][i], sum(i, j));
+        if (v < best[g][j]) {
+          best[g][j] = v;
+          cut[g][j] = i;
+        }
+      }
+    }
+  }
+  const out: number[][] = [];
+  let j = n;
+  for (let g = k; g >= 1; g--) {
+    const i = cut[g][j];
+    out.unshift(Array.from({ length: j - i }, (_, x) => i + x));
+    j = i;
+  }
+  return out;
+}
+
+/**
+ * Размеры (в порядке градации) → группы маркеров A, B, … под стол. k = ceil(длина / стол);
+ * размеры не рвутся, соседние держатся вместе, группы ровняются по оценке длины. Не влезло в k —
+ * k + 1, и так до маркера на размер; группа длиннее стола и тогда остаётся (покажется красным).
+ */
+export function splitSizesByTable(
+  est: readonly { sizeId: number; estCm: number }[],
+  tableCm: number,
+): number[][] {
+  const n = est.length;
+  const total = est.reduce((s, e) => s + e.estCm, 0);
+  if (n <= 1 || !(tableCm > 0) || total <= tableCm) return [est.map((e) => e.sizeId)];
+  const lens = est.map((e) => e.estCm);
+  for (let k = Math.min(n, Math.ceil(total / tableCm)); k <= n; k++) {
+    const groups = balancedPartition(lens, k);
+    const longest = Math.max(...groups.map((g) => g.reduce((s, i) => s + lens[i], 0)));
+    if (longest <= tableCm || k === n) return groups.map((g) => g.map((i) => est[i].sizeId));
+  }
+  return est.map((e) => [e.sizeId]);
+}
+
+/** Имя, которое даёт эта очередь: «1XS+2S · колорвей · ткань» (состав с числом впереди). */
+const QUEUE_NAME = /^\d+[^\s+·]+(?:\+\d+[^\s+·]+)* · (.*)$/;
+
+/**
+ * Авто-маркеры пары, которые пересборка убирает: не сохранены этой сборкой, не стоят ни в одном
+ * настиле и названы этой же очередью (копию карточной раскладки в прогон не трогаем).
+ */
+export function staleAutoMarkerIds(args: {
+  runMarkers: readonly common_TechCardMarkerSummary[];
+  colorwayId: number;
+  lineKey: string;
+  colorwayLabel: string;
+  keepIds: ReadonlySet<number>;
+  referencedMarkerIds: ReadonlySet<number>;
+}): number[] {
+  const out: number[] = [];
+  for (const m of args.runMarkers) {
+    const id = num(m.id);
+    if (id <= 0 || args.keepIds.has(id) || args.referencedMarkerIds.has(id)) continue;
+    if ((m.source ?? '') !== 'auto') continue;
+    if (num(m.colorwayId) !== args.colorwayId || (m.bomLineKey ?? '') !== args.lineKey) continue;
+    const hit = QUEUE_NAME.exec(m.name ?? '');
+    if (!hit) continue;
+    if (args.colorwayLabel && !hit[1].startsWith(args.colorwayLabel)) continue;
+    out.push(id);
   }
   return out;
 }

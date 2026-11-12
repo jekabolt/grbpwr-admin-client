@@ -43,8 +43,11 @@ import {
   buildRunMarkerRows,
   layCandidates,
   pendingPairs,
+  readTablePick,
   staticRunRefusals,
+  writeTablePick,
   type RunMarkerIssue,
+  type TableMeters,
 } from './run-markers';
 import { layErrorMessage, layKeys, useSaveLay } from './useLays';
 
@@ -127,6 +130,24 @@ export function useRunMarkers({
     (id: number) => formatSizeName(sizeById.get(id) ?? `#${id}`),
     [sizeById],
   );
+  // Порядок градации размеров партии (XS…XL) — им идут группы стола и подписи состава.
+  const sizeOrderOf = useMemo(() => {
+    const order = new Map(
+      orderSizes([...new Set(cells.map((c) => c.sizeId))]).map((id, i) => [id, i]),
+    );
+    return (id: number) => order.get(id) ?? 1e6;
+  }, [orderSizes, cells]);
+
+  // Стол раскроя: выбор помнится в браузере на прогон.
+  const [pick, setPick] = useState(() => ({ runId, m: readTablePick(runId) }));
+  const tableM: TableMeters = pick.runId === runId ? pick.m : readTablePick(runId);
+  const pickTable = useCallback(
+    (m: TableMeters) => {
+      setPick({ runId, m });
+      writeTablePick(runId, m);
+    },
+    [runId],
+  );
 
   // Статические отказы: видны без разбора DXF, поэтому таблица верна и после перезагрузки.
   const staticRefusals = useMemo(() => {
@@ -192,17 +213,13 @@ export function useRunMarkers({
         materialById,
         cells,
         sizeLabel: sizeName,
-        sizeOrderOf: (() => {
-          const order = new Map(
-            orderSizes([...new Set(cells.map((c) => c.sizeId))]).map((id, i) => [id, i]),
-          );
-          return (id: number) => order.get(id) ?? 1e6;
-        })(),
+        sizeOrderOf,
         sizeTokensOf: (id) => sizeTokensOf(sizeById.get(id)),
         dictTokens,
         cardMarkers: cardMarkers(techCard?.markers),
         runMarkers,
         referencedMarkerIds,
+        tableCm: tableM * 100,
         isAlive: () => aliveRef.current,
         onProgress: (done, total) => {
           if (aliveRef.current) setProgress({ done, total });
@@ -235,8 +252,21 @@ export function useRunMarkers({
         staticRefusals,
         sessionRefusals: session.refusals,
         failures: session.failures,
+        sizeOrderOf,
+        tableCm: tableM * 100,
       }),
-    [lines, colorwayIds, colorwayLabel, runMarkers, cells, sizeName, staticRefusals, session],
+    [
+      lines,
+      colorwayIds,
+      colorwayLabel,
+      runMarkers,
+      cells,
+      sizeName,
+      staticRefusals,
+      session,
+      sizeOrderOf,
+      tableM,
+    ],
   );
 
   // «build lays»: только когда у каждого строящегося материала уже есть маркер.
@@ -296,6 +326,8 @@ export function useRunMarkers({
 
   return {
     canBuild,
+    tableM,
+    pickTable,
     progress,
     buildMarkers,
     rows,
