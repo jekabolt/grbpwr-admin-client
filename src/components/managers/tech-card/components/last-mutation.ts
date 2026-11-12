@@ -1,6 +1,4 @@
 import { unitDisplayName } from 'lib/assembly-unit-name';
-import type { CutStrip } from './cut-strip-editor/use-cut-strip';
-import type { RemovalSeams } from './step-seams/step-removal-seams';
 
 // ИСТОРИЯ ЖЕСТОВ — чистая половина отмены. Глубина здесь БОЛЬШЕ ОДНОЙ: ⌘Z несколько раз подряд,
 // ⇧⌘Z обратно.
@@ -61,9 +59,6 @@ import type { RemovalSeams } from './step-seams/step-removal-seams';
 //
 // Ни React, ни DOM: на вход — история и текущий массив строк, на выход — новая история и ответ
 // «да/нет». Проба — `scripts/last-mutation-probe.mjs`.
-
-/** The refusal a seam write gets while a step transaction holds the editor. */
-export const STILL_SAVING = 'still saving';
 
 /** Минимум, который модулю нужен от строки `useFieldArray`: её устойчивый идентификатор. */
 export type FieldRow = { id: string };
@@ -252,21 +247,6 @@ export type HistoryEntry<TRow = unknown> =
       pieceKeys: string[];
       seamKeys: string[];
       bomLineKeys: string[];
-      /** Seam and pose rows the post-save cleanup may delete; older records may not carry them. */
-      seamRows?: RemovalSeams;
-      /** The stored number and rows whose post-save cleanup this removal owns. */
-      operationNumber?: number;
-      cleanupKeys?: string[];
-      /** A binding step removes its strips and patches other steps in the same form edit. */
-      binding?: {
-        stripsBefore: CutStrip[];
-        stripsAfter: CutStrip[];
-        patches: Array<{
-          historyKey: string;
-          before: { inputKeys: string[]; seamKeys: string[] };
-          after: { inputKeys: string[]; seamKeys: string[] };
-        }>;
-      };
       label: string;
     };
 
@@ -295,90 +275,6 @@ export const HISTORY_DEPTH = 50;
 
 export function emptyHistory<TRow = unknown>(): History<TRow> {
   return { undo: [], redo: [] };
-}
-
-/** Run one async step transaction at a time; the ref locks synchronously, state locks the UI. */
-export async function runStepMutation<T>(
-  transaction: { current: boolean },
-  renderTransaction: (active: boolean) => void,
-  mutation: () => Promise<T>,
-): Promise<T | undefined> {
-  if (transaction.current) return undefined;
-  transaction.current = true;
-  renderTransaction(true);
-  try {
-    return await mutation();
-  } finally {
-    transaction.current = false;
-    renderTransaction(false);
-  }
-}
-
-/** Ordinary seam writers stop at the transaction boundary; the transaction can issue one call. */
-export function runStepWrite<T>({
-  transaction,
-  owner,
-  write,
-  refused,
-  onRefused,
-}: {
-  transaction: { current: boolean };
-  owner: { current: boolean };
-  write: () => Promise<T>;
-  refused: T;
-  onRefused: () => void;
-}): Promise<T> {
-  if (transaction.current && !owner.current) {
-    onRefused();
-    return Promise.resolve(refused);
-  }
-  return write();
-}
-
-/** Mark only the synchronous hand-off into the guarded write layer as transaction-owned. */
-export function issueStepWrite<T>(owner: { current: boolean }, write: () => T): T {
-  owner.current = true;
-  try {
-    return write();
-  } finally {
-    owner.current = false;
-  }
-}
-
-/** Wait for an external writer to go idle, but never hold a destructive transaction forever. */
-export function waitForIdle({
-  busy,
-  subscribe,
-  timeoutMs,
-}: {
-  busy: () => boolean;
-  subscribe: (notify: () => void) => () => void;
-  timeoutMs: number;
-}): Promise<boolean> {
-  if (!busy()) return Promise.resolve(true);
-  return new Promise((resolve) => {
-    let done = false;
-    let unsubscribe: () => void = () => undefined;
-    let cleanupReady = false;
-    let cleanupRequested = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const finish = (settled: boolean) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      if (cleanupReady) unsubscribe();
-      else cleanupRequested = true;
-      resolve(settled);
-    };
-    timer = setTimeout(() => finish(false), timeoutMs);
-    unsubscribe = subscribe(() => {
-      if (!busy()) finish(true);
-    });
-    cleanupReady = true;
-    if (cleanupRequested) unsubscribe();
-    // A writer may have settled between the first read and the subscription.
-    if (!busy()) finish(true);
-  });
 }
 
 /** Срезать самое СТАРОЕ: вытесняется дно стопки, а не вершина. */
@@ -421,15 +317,6 @@ export function undoStep<TRow>(h: History<TRow>): History<TRow> {
   const e = peekUndo(h);
   if (!e) return h;
   return { undo: h.undo.slice(0, -1), redo: trim([...h.redo, e]) };
-}
-
-/** A refused/stale async undo keeps its record and never moves the record now above it. */
-export function finishUndo<TRow>(
-  h: History<TRow>,
-  expected: HistoryEntry<TRow>,
-  completed: boolean,
-): History<TRow> {
-  return completed && peekUndo(h) === expected ? undoStep(h) : h;
 }
 
 /** Шаг вперёд состоялся: вершина возврата переезжает обратно в отмену. */
