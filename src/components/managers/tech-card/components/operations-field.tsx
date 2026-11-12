@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
+import type { TechCardSeamWire } from 'lib/seams';
 import type { ChangeTechCardSeamsRequest } from 'api/proto-http/admin';
 import { runSeamChange } from './assembly-seams/seam-change';
 import { MaterialThumb } from 'components/managers/materials/components/material-thumb';
@@ -300,7 +301,6 @@ import {
   quietCleanupChange,
   runStepRemovalCleanup,
   cleanupCall,
-  stepRemovalRowsInDoubt,
   runStepRemovalRedoChange,
   runStepRemovalUndoChange,
   savedRemovalStillPresent,
@@ -343,7 +343,7 @@ import { isTopstitchThreadLine, type TopstitchLine } from './topstitch-lines';
 import { PieceAddChip, PieceRef, useFormAssemblyPieces, useFormPieces } from './piece-picker';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
-import { posesOf, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
+import { hydrateSeams, posesOf, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
 import type { SeamWrites } from './assembly-seams/use-seam-decisions';
 import { foldRowsOf, useFoldsStore } from './assembly-folds/folds-store';
 import { useStepSeams } from './step-seams/step-seams-context';
@@ -8570,15 +8570,23 @@ export function OperationsField({
                     seamKeys: restorableSeamKeys(confirmedSeamKeys, saved),
                   });
         },
-        settle: () => {
-          // A cleanup delete lost its answer: retry it first, its lock_version_moved reads the card.
-          const server = useSeamsStore.getState().server;
-          if (techCardId && stepRemovalRowsInDoubt(rec.historyKey, server))
-            startRemovalCleanup(
-              techCardId,
-              owedStepRemovals(techCardId).filter((e) => e.historyKey === rec.historyKey),
+        settle: waitForRemovalCleanup,
+        // A cleanup delete may have landed unseen: the card itself, from the server, not the cache.
+        readServer: async () => {
+          const cardId = techCardId;
+          if (!cardId) return false;
+          try {
+            const res = await adminService.GetTechCard({ id: cardId, vatCountryCode: undefined });
+            if (useSeamsStore.getState().cardId !== cardId) return false;
+            hydrateSeams(
+              cardId,
+              (res.techCard?.seams ?? []) as TechCardSeamWire[],
+              res.techCard?.lockVersion,
             );
-          return waitForRemovalCleanup();
+            return true;
+          } catch {
+            return false;
+          }
         },
         cutHistory: () => undoHistoryApi.cut('step-removal-undo'),
         rows: () => {

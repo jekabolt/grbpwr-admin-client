@@ -213,6 +213,7 @@ function undoTop(settle: () => Promise<boolean> = () => Promise.resolve(true)) {
       select: () => undefined,
       refuse: (why) => refusals.push(why),
       unsettled: 'still saving',
+      readServer: async () => true,
     },
   );
 }

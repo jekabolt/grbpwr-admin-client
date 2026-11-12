@@ -167,6 +167,11 @@ export type StepRemovalUndoIo<TRow extends StepLinkRow, TInserted> = {
   select: (inserted: TInserted) => void;
   refuse: (why: string) => void;
   unsettled: string;
+  /**
+   * Read the card from the server (never the query cache) into the seam store; false when it could
+   * not be read. Asked only while a cleanup delete may have landed unseen; no form flush.
+   */
+  readServer: () => Promise<boolean>;
 };
 
 /**
@@ -200,10 +205,22 @@ export async function runStepRemovalUndoChange<TRow extends StepLinkRow, TInsert
     return false;
   }
 
-  // A cleanup delete lost its answer and no read came since: the plan would trust gone rows.
-  if (stepRemovalRowsInDoubt(snapshot.step.historyKey, io.rows().seams)) {
-    io.refuse(io.unsettled);
-    return false;
+  // A cleanup delete lost its answer: the plan would trust gone rows until the card is read.
+  if (rowsInDoubt.has(snapshot.step.historyKey)) {
+    if (!(await io.readServer())) {
+      io.refuse(io.unsettled);
+      return false;
+    }
+    rowsInDoubt.delete(snapshot.step.historyKey);
+    if (io.alreadyBack()) {
+      io.close();
+      return false;
+    }
+    const refusedAfterRead = io.validate();
+    if (refusedAfterRead) {
+      io.refuse(refusedAfterRead);
+      return false;
+    }
   }
   const plan = stepRemovalRestorePlan(snapshot.rows, io.rows());
   const keyMap = new Map(plan.keyMap);
@@ -303,12 +320,20 @@ export function cleanupCall<Req, Res>(
   };
 }
 
-/** History key → the store's row list when a cleanup delete lost its answer. */
-const rowsInDoubt = new Map<string, readonly StoredSeam[]>();
+/**
+ * History keys whose cleanup delete may have landed unseen. Only a server answer to that cleanup or
+ * a forced read of the card from the server lifts it: a new store list proves nothing (a cached
+ * card of the same version hydrates one), and a retry refused before its request neither.
+ */
+const rowsInDoubt = new Set<string>();
 
-/** True while the store still shows the very rows a cleanup delete with a lost answer left. */
-export function stepRemovalRowsInDoubt(historyKey: string, seams: readonly StoredSeam[]): boolean {
-  return rowsInDoubt.get(historyKey) === seams;
+export function stepRemovalRowsInDoubt(historyKey: string): boolean {
+  return rowsInDoubt.has(historyKey);
+}
+
+/** Forget every doubt (a fresh page state; tests). */
+export function forgetStepRemovalDoubts(): void {
+  rowsInDoubt.clear();
 }
 
 export type StepRemovalCleanupIo = {
@@ -364,17 +389,16 @@ export async function runStepRemovalCleanup(
   }
   // The first build supplies optimistic state. Only a later build proves that the body flush ran
   // and that its saved links leave no row to delete.
+  if (changed.ok) rowsInDoubt.delete(entry.historyKey);
   if (changed.ok || (builds > 1 && !lastKeys.length)) {
-    rowsInDoubt.delete(entry.historyKey);
     io.clear();
     return true;
   }
   // The delete went out and no answer proves it did not land: keep the debt, distrust the rows.
   if (unclearCalls.has(entry.historyKey)) {
-    rowsInDoubt.set(entry.historyKey, io.rows().seams);
+    rowsInDoubt.add(entry.historyKey);
     return false;
   }
-  rowsInDoubt.delete(entry.historyKey);
   // A transient queue, validation or network refusal retries after the next successful body save.
   // A server contradiction is stable for this debt and is dropped silently instead of spinning.
   if (!cleanupRetryable(changed.why)) io.clear();

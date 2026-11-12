@@ -15,6 +15,7 @@ import { hydrateSeams, resetSeams, rowsOf, useSeamsStore } from './assembly-seam
 import type { OwedStepRemoval } from './card-owed';
 import {
   cleanupCall,
+  forgetStepRemovalDoubts,
   quietCleanupChange,
   runStepRemovalCleanup,
   runStepRemovalUndoChange,
@@ -116,6 +117,7 @@ function harness(call: SeamChangeDeps['call'], over: Partial<SeamFormBridge> = {
 const storeKeys = () => rowsOf(useSeamsStore.getState()).map((row) => row.seamKey);
 
 beforeEach(() => {
+  forgetStepRemovalDoubts();
   resetSeams();
   hydrateSeams(CARD, wire([a, b]), 7);
 });
@@ -238,6 +240,8 @@ describe('a lost cleanup reply, then the step undo', () => {
     h: ReturnType<typeof harness>,
     call: SeamChangeDeps['call'],
     settle = async () => true,
+    // A forced read of the card from the server; it fails by default.
+    readServer: () => Promise<boolean> = async () => false,
   ) {
     const restored: Array<{ row: unknown; keyMap: ReadonlyMap<string, string> }> = [];
     const refused: string[] = [];
@@ -259,6 +263,7 @@ describe('a lost cleanup reply, then the step undo', () => {
       select: () => undefined,
       refuse: (why) => refused.push(why),
       unsettled: 'still saving',
+      readServer,
     });
     return { done, restored, refused };
   }
@@ -295,28 +300,33 @@ describe('a lost cleanup reply, then the step undo', () => {
       }
       return reply(9, [a, b], []);
     });
-    const u = undo(h, call, async () => {
-      await runStepRemovalCleanup(entry, {
-        active: () => true,
-        operations: () => h.ops,
-        cutStrips: () => h.strips,
-        cutHistory: () => undefined,
-        rows: () => {
-          const s = useSeamsStore.getState();
-          return { seams: s.server, poses: s.poses };
-        },
-        change: quietCleanupChange(entry.candidateKeys, (input) =>
-          runSeamChange(
-            CARD,
-            input,
-            { verb: 'removal', quiet: true },
-            { call: cleanupCall(entry.historyKey, call), bridge: () => h.bridge },
+    const u = undo(
+      h,
+      call,
+      async () => {
+        await runStepRemovalCleanup(entry, {
+          active: () => true,
+          operations: () => h.ops,
+          cutStrips: () => h.strips,
+          cutHistory: () => undefined,
+          rows: () => {
+            const s = useSeamsStore.getState();
+            return { seams: s.server, poses: s.poses };
+          },
+          change: quietCleanupChange(entry.candidateKeys, (input) =>
+            runSeamChange(
+              CARD,
+              input,
+              { verb: 'removal', quiet: true },
+              { call: cleanupCall(entry.historyKey, call), bridge: () => h.bridge },
+            ),
           ),
-        ),
-        clear: h.clear,
-      });
-      return true;
-    });
+          clear: h.clear,
+        });
+        return true;
+      },
+      serverRead,
+    );
     expect(await u.done).toBe(true);
     expect(retry).toHaveLength(1);
     expect(
@@ -360,4 +370,68 @@ describe('a lost cleanup reply, then the step undo', () => {
       expect(u.refused).toEqual([]);
     },
   );
+  // The server after the lost delete: both rows gone, the card one version on.
+  const serverRead = async () => {
+    hydrateSeams(CARD, wire([]), 8);
+    return true;
+  };
+  const upsertCall = () => {
+    const sent: ChangeTechCardSeamsRequest[] = [];
+    const call = vi.fn<SeamChangeDeps['call']>(async (req) => {
+      sent.push(req);
+      return reply(9, [a, b], []);
+    });
+    return { sent, call };
+  };
+
+  it('codex r10 #1: the form went invalid, the retried cleanup stops at the flush; the undo refuses, then upserts once the form is fixed', async () => {
+    const { h } = await lostDelete();
+    // The owner cleared the card name: every flush now refuses before any request.
+    const flush = h.bridge.flush;
+    h.bridge.flush = async () => ({ ok: false, why: 'fix the name', invalid: true });
+    const { sent, call } = upsertCall();
+    const retry = async () => {
+      await h.run();
+      return true;
+    };
+    const first = undo(h, call, retry, serverRead);
+    expect(await first.done).toBe(false);
+    // Refused with the form's own reason; the step is not back with a link to a gone row.
+    expect(first.refused).toEqual(['fix the name']);
+    expect(first.restored).toHaveLength(0);
+    expect(sent).toHaveLength(0);
+    // The form is fixed: the undo upserts both rows and only then restores the step.
+    h.bridge.flush = flush;
+    const second = undo(h, call, retry, serverRead);
+    expect(await second.done).toBe(true);
+    expect(second.refused).toEqual([]);
+    expect(
+      sent
+        .at(-1)
+        ?.upsert?.map((row) => row.seamKey)
+        .sort(),
+    ).toEqual([a.seamKey, b.seamKey].sort());
+    expect(second.restored).toHaveLength(1);
+  });
+
+  it('codex r10 #2: a same-version hydrate from the cached card is no fresh read; the undo still upserts', async () => {
+    await lostDelete().then(({ h }) => {
+      // The Sizes tab hydrates the store again from the cached card: a new list, same rows.
+      hydrateSeams(CARD, wire([a, b]), 7);
+      expect(storeKeys()).toEqual([a.seamKey, b.seamKey]);
+      const { sent, call } = upsertCall();
+      return (async () => {
+        const u = undo(h, call, async () => true, serverRead);
+        const done = await u.done;
+        expect(u.refused).toEqual([]);
+        expect(done).toBe(true);
+        expect(
+          sent
+            .at(-1)
+            ?.upsert?.map((row) => row.seamKey)
+            .sort(),
+        ).toEqual([a.seamKey, b.seamKey].sort());
+      })();
+    });
+  });
 });

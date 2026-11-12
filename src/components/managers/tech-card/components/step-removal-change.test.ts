@@ -172,6 +172,7 @@ describe('step removal sequencing', () => {
         select: vi.fn(),
         refuse: vi.fn(),
         unsettled: 'still saving',
+        readServer: async () => true,
       }),
     ).resolves.toBe(true);
 
@@ -209,6 +210,7 @@ describe('step removal sequencing', () => {
         select: vi.fn(),
         refuse: vi.fn(),
         unsettled: 'still saving',
+        readServer: async () => true,
       }),
     ).resolves.toBe(true);
 
@@ -473,6 +475,7 @@ describe('step removal sequencing', () => {
       select: vi.fn(),
       refuse: vi.fn(),
       unsettled: 'still saving',
+      readServer: async () => true,
     });
 
     expect(undoUpserts).toEqual([['seam-b', 'strip-seam']]);
@@ -544,6 +547,7 @@ describe('step removal sequencing', () => {
       select: vi.fn(),
       refuse: vi.fn(),
       unsettled: 'still saving',
+      readServer: async () => true,
     });
     expect(undoChange).not.toHaveBeenCalled();
   });
@@ -585,6 +589,7 @@ describe('step removal sequencing', () => {
       select: vi.fn(),
       refuse,
       unsettled: 'still saving',
+      readServer: async () => true,
     };
 
     await expect(runStepRemovalUndoChange(snapshot, io)).resolves.toBe(false);
@@ -625,6 +630,7 @@ describe('step removal sequencing', () => {
       select: vi.fn(),
       refuse: vi.fn(),
       unsettled: 'still saving',
+      readServer: async () => true,
     });
 
     expect(restored).toEqual({
@@ -666,6 +672,7 @@ describe('step removal sequencing', () => {
         select: vi.fn(),
         refuse: vi.fn(),
         unsettled: 'still saving',
+        readServer: async () => true,
       });
 
       expect(change).not.toHaveBeenCalled();
@@ -697,6 +704,7 @@ describe('step removal sequencing', () => {
       select: vi.fn(),
       refuse: vi.fn(),
       unsettled: 'still saving',
+      readServer: async () => true,
     });
 
     expect(change).not.toHaveBeenCalled();
@@ -728,6 +736,7 @@ describe('step removal sequencing', () => {
       select: vi.fn(),
       refuse: vi.fn(),
       unsettled: 'still saving',
+      readServer: async () => true,
     });
 
     const reloadCleanup = vi.fn();
