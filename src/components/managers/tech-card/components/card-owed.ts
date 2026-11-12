@@ -65,6 +65,13 @@ export function clearLinkOwed(cardId: number, linkKey: string, field?: OwedField
   write(cardId, { ...owed, links: (owed.links ?? []).filter(keep) });
 }
 
+/** A removed step cannot receive its delayed seam/pose links on a later step with the same number. */
+export function clearStepLinksOwed(cardId: number, operationNumber: number): void {
+  const owed = read(cardId);
+  const keep = (link: OwedLink) => link.op !== operationNumber || !SEAM_FIELDS.includes(link.field);
+  write(cardId, { ...owed, links: (owed.links ?? []).filter(keep) });
+}
+
 type OpLinks = { operationNumber?: number } & { [F in OwedField]?: string[] };
 type RowOf = { seamKey: string; sig?: string };
 

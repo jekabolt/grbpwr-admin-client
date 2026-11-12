@@ -1,4 +1,5 @@
 import { unitDisplayName } from 'lib/assembly-unit-name';
+import type { RemovalSeams } from './step-seams/step-removal-seams';
 
 // ИСТОРИЯ ЖЕСТОВ — чистая половина отмены. Глубина здесь БОЛЬШЕ ОДНОЙ: ⌘Z несколько раз подряд,
 // ⇧⌘Z обратно.
@@ -59,6 +60,9 @@ import { unitDisplayName } from 'lib/assembly-unit-name';
 //
 // Ни React, ни DOM: на вход — история и текущий массив строк, на выход — новая история и ответ
 // «да/нет». Проба — `scripts/last-mutation-probe.mjs`.
+
+/** The refusal a seam write gets while a step transaction holds the editor. */
+export const STILL_SAVING = 'still saving';
 
 /** Минимум, который модулю нужен от строки `useFieldArray`: её устойчивый идентификатор. */
 export type FieldRow = { id: string };
@@ -247,6 +251,8 @@ export type HistoryEntry<TRow = unknown> =
       pieceKeys: string[];
       seamKeys: string[];
       bomLineKeys: string[];
+      /** Seam and pose rows deleted with the step; older in-memory records may not carry them. */
+      seamRows?: RemovalSeams;
       label: string;
     };
 
@@ -275,6 +281,133 @@ export const HISTORY_DEPTH = 50;
 
 export function emptyHistory<TRow = unknown>(): History<TRow> {
   return { undo: [], redo: [] };
+}
+
+/** Run one async step transaction at a time; the ref locks synchronously, state locks the UI. */
+export async function runStepMutation<T>(
+  transaction: { current: boolean },
+  renderTransaction: (active: boolean) => void,
+  mutation: () => Promise<T>,
+): Promise<T | undefined> {
+  if (transaction.current) return undefined;
+  transaction.current = true;
+  renderTransaction(true);
+  try {
+    return await mutation();
+  } finally {
+    transaction.current = false;
+    renderTransaction(false);
+  }
+}
+
+/** Ordinary seam writers stop at the transaction boundary; the transaction can issue one call. */
+export function runStepWrite<T>({
+  transaction,
+  owner,
+  write,
+  refused,
+  onRefused,
+}: {
+  transaction: { current: boolean };
+  owner: { current: boolean };
+  write: () => Promise<T>;
+  refused: T;
+  onRefused: () => void;
+}): Promise<T> {
+  if (transaction.current && !owner.current) {
+    onRefused();
+    return Promise.resolve(refused);
+  }
+  return write();
+}
+
+/** Mark only the synchronous hand-off into the guarded write layer as transaction-owned. */
+export function issueStepWrite<T>(owner: { current: boolean }, write: () => T): T {
+  owner.current = true;
+  try {
+    return write();
+  } finally {
+    owner.current = false;
+  }
+}
+
+/** Wait for an external writer to go idle, but never hold a destructive transaction forever. */
+export function waitForIdle({
+  busy,
+  subscribe,
+  timeoutMs,
+}: {
+  busy: () => boolean;
+  subscribe: (notify: () => void) => () => void;
+  timeoutMs: number;
+}): Promise<boolean> {
+  if (!busy()) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let done = false;
+    let unsubscribe: () => void = () => undefined;
+    let cleanupReady = false;
+    let cleanupRequested = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const finish = (settled: boolean) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (cleanupReady) unsubscribe();
+      else cleanupRequested = true;
+      resolve(settled);
+    };
+    timer = setTimeout(() => finish(false), timeoutMs);
+    unsubscribe = subscribe(() => {
+      if (!busy()) finish(true);
+    });
+    cleanupReady = true;
+    if (cleanupRequested) unsubscribe();
+    // A writer may have settled between the first read and the subscription.
+    if (!busy()) finish(true);
+  });
+}
+
+/**
+ * Keep validation ahead of destructive awaits, then make ownership → delete → finish one-way.
+ * `prepareDeletion` is deliberately synchronous: ownership is read while rows still exist and no
+ * other awaited work can land between that read and the delete call.
+ */
+export async function runRemovalSequence<TTarget, TDeletion>({
+  prepare,
+  teardown,
+  settle,
+  prepareDeletion,
+  deleteRows,
+  finish,
+  deleteTimeoutMs = 20_000,
+}: {
+  deleteTimeoutMs?: number;
+  prepare: () => TTarget | null;
+  teardown: (target: TTarget) => Promise<boolean>;
+  settle?: () => Promise<boolean | void>;
+  prepareDeletion: (target: TTarget) => TDeletion;
+  deleteRows: (deletion: TDeletion, settled: boolean) => Promise<boolean>;
+  finish: (target: TTarget, deletion: TDeletion) => void;
+}): Promise<boolean> {
+  const target = prepare();
+  if (!target) return false;
+  if (!(await teardown(target))) return false;
+  const settled = (await settle?.()) !== false;
+  const deletion = prepareDeletion(target);
+  // Teardown has already changed persisted rows. Seam cleanup may be refused, but the step must
+  // still leave the form; stopping here would strand a partially stripped step with no undo.
+  // A delete that never answers (or throws) must not hold the step half stripped and the editor
+  // locked: after `deleteTimeoutMs` the removal finishes one-way.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    deleteRows(deletion, settled).catch(() => false),
+    new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), deleteTimeoutMs);
+    }),
+  ]);
+  clearTimeout(timer);
+  finish(target, deletion);
+  return true;
 }
 
 /** Срезать самое СТАРОЕ: вытесняется дно стопки, а не вершина. */
@@ -317,6 +450,15 @@ export function undoStep<TRow>(h: History<TRow>): History<TRow> {
   const e = peekUndo(h);
   if (!e) return h;
   return { undo: h.undo.slice(0, -1), redo: trim([...h.redo, e]) };
+}
+
+/** A refused/stale async undo keeps its record and never moves the record now above it. */
+export function finishUndo<TRow>(
+  h: History<TRow>,
+  expected: HistoryEntry<TRow>,
+  completed: boolean,
+): History<TRow> {
+  return completed && peekUndo(h) === expected ? undoStep(h) : h;
 }
 
 /** Шаг вперёд состоялся: вершина возврата переезжает обратно в отмену. */
