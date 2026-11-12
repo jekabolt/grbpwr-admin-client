@@ -36,7 +36,52 @@ export type InnerPath = { layer: string; closed: boolean; pts: Pt[] };
 // Потолок на точку внутренней геометрии одной детали. Лекальные файлы бывают с тысячами
 // вершин на кривых, и тащить их все в главный поток незачем: это картинка для человека, а не
 // геометрия для движка. Что не поместилось — честно считается и называется.
-const MAX_INNER_POINTS = 4000;
+// Cost it bounds: points packed per piece into the worker → main-thread buffer (piece-transfer.ts)
+// and drawn on every preview / sheet. The real 4-size pattern peaks at ~650 points per piece.
+export const MAX_INNER_POINTS = 4000;
+
+/**
+ * Fits a piece's internal paths into `budget` points without cutting any path mid-line. Short
+ * paths (pocket marks, folds, notches — what the fusing mapper and the seams anchor on) are kept
+ * whole first, smallest first, so dense artwork on one size cannot push them out; paths that do not
+ * fit whole share what is left and are evenly thinned, keeping both ends and `closed`. A path whose
+ * share is below its minimum (2 points, 3 closed) is dropped whole. The file's order is kept.
+ */
+export function budgetInnerPaths(paths: readonly InnerPath[], budget: number): InnerPath[] {
+  const total = paths.reduce((sum, path) => sum + path.pts.length, 0);
+  if (total <= budget) return [...paths];
+  const order = paths
+    .map((_, index) => index)
+    .sort((a, b) => paths[a].pts.length - paths[b].pts.length);
+  const out: (InnerPath | null)[] = paths.map(() => null);
+  let left = budget;
+  let at = 0;
+  for (; at < order.length && paths[order[at]].pts.length <= left; at++) {
+    out[order[at]] = paths[order[at]];
+    left -= paths[order[at]].pts.length;
+  }
+  const rest = order.slice(at);
+  rest.forEach((index, k) => {
+    const path = paths[index];
+    const share = Math.floor(left / (rest.length - k));
+    if (share < (path.closed ? 3 : 2)) return;
+    const pts = thinPath(path.pts, share, path.closed);
+    out[index] = { ...path, pts };
+    left -= pts.length;
+  });
+  return out.filter((path): path is InnerPath => path !== null);
+}
+
+function thinPath(pts: readonly Pt[], count: number, closed: boolean): Pt[] {
+  if (pts.length <= count) return [...pts];
+  // A closed path has no end to keep: spread `count` vertices round it. An open one keeps both ends.
+  return closed
+    ? Array.from({ length: count }, (_, i) => pts[Math.floor((i * pts.length) / count)])
+    : Array.from(
+        { length: count },
+        (_, i) => pts[Math.round((i * (pts.length - 1)) / (count - 1))],
+      );
+}
 
 // Свёрла конвертера — квадрат 1×1 см на слое внутренних линий (pattern-import write/plan.ts
 // DRILL_SQUARE_MM = 10) или кружок пуговицы: замкнутый 20-угольник до 1.5 см (write/r2000.ts
@@ -49,6 +94,8 @@ const DRILL_CIRCLE_MAX_CM = 1.5;
 // MAX_INNER_POINTS: шов на 5001 вершину съедает его целиком, и надсечка за ним в `inner` не попадает.
 // Кто СУДИТ по числу надсечек и свёрл (сверка манифеста с чертежом), считает здесь: те же пути, что
 // пошли бы в `inner` без бюджета, по слою — сколько путей и сколько из них квадратов свёрл.
+// Since budgetInnerPaths an over-budget path is thinned, not cut, and short paths always fit; the
+// tally still stays the count to judge by (a path can be dropped when its share is too small).
 export type InnerTally = Record<string, { paths: number; drillSquares: number }>;
 
 export function isDrillSquare(c: { closed: boolean; pts: readonly Pt[] }): boolean {
@@ -248,8 +295,7 @@ export function groupToPieces(
       // Внутренняя геометрия = всё, что НЕ на слое самого контура. Для детали, взятой по линии
       // шва (слой 14), сюда попадает и линия кроя (слой 1) — то есть припуск виден как зазор
       // между двумя линиями, а не как число, которое надо кому-то верить.
-      const inner: InnerPath[] = [];
-      let budget = MAX_INNER_POINTS;
+      const candidates: InnerPath[] = [];
       // Одна надсечка — один путь: CLO пишет её дважды (на линии кроя и на линии шва, или точной
       // копией). Остаётся та, что лежит на контуре ЭТОЙ детали (notch.ts).
       const twins = duplicateNotches(group.chains, cleaned);
@@ -266,11 +312,9 @@ export function groupToPieces(
       for (let ci = 0; ci < group.chains.length; ci++) {
         const c = group.chains[ci];
         if (c.layer === loop.layer || c.pts.length < 2 || twins.has(ci)) continue;
-        if (budget <= 0) break;
-        const pts = c.pts.length > budget ? c.pts.slice(0, budget) : c.pts;
-        budget -= pts.length;
-        inner.push({ layer: c.layer, closed: c.closed && pts.length === c.pts.length, pts });
+        candidates.push({ layer: c.layer, closed: c.closed, pts: c.pts });
       }
+      const inner = budgetInnerPaths(candidates, MAX_INNER_POINTS);
       pieces.push({
         name: label,
         blockName: group.blockName,
