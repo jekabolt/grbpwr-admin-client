@@ -154,6 +154,12 @@ export type StepRemovalUndoIo<TRow extends StepLinkRow, TInserted> = {
   settle: () => Promise<boolean>;
   rows: () => { seams: readonly StoredSeam[]; poses: readonly StoredPose[] };
   change: (input: SeamChangeInput) => Promise<SeamChangeResult>;
+  /**
+   * Cut the card's undo history right before `restore` writes the form, in the same task. A press
+   * outside the history owner during the upsert would otherwise record the restored step in a card
+   * gesture, and a card UNDO would take it out again without any cleanup debt.
+   */
+  cutHistory: () => void;
   restore: (row: TRow, keyMap: ReadonlyMap<string, string>) => TInserted;
   clearOwed: () => void;
   finishHistory: () => void;
@@ -215,6 +221,7 @@ export async function runStepRemovalUndoChange<TRow extends StepLinkRow, TInsert
   // C5: restored rows may remain unlinked until the next body save. No cleanup debt may survive
   // into that window, including when the form is invalid or the page reloads.
   io.clearOwed();
+  io.cutHistory();
   const inserted = io.restore(mapStepRemovalRow(snapshot.row, keyMap), keyMap);
   io.finishHistory();
   io.select(inserted);

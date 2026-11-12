@@ -158,6 +158,7 @@ describe('step removal sequencing', () => {
       runStepRemovalUndoChange(snapshot, {
         alreadyBack: () => false,
         close: () => undefined,
+        cutHistory: () => undefined,
         validate: () => null,
         settle: async () => true,
         rows: () => snapshot.rows,
@@ -189,6 +190,7 @@ describe('step removal sequencing', () => {
       runStepRemovalUndoChange(snapshot, {
         alreadyBack: () => false,
         close: () => undefined,
+        cutHistory: () => undefined,
         validate: () => null,
         settle: async () => true,
         rows: () => ({ seams: [], poses: [] }),
@@ -426,6 +428,7 @@ describe('step removal sequencing', () => {
     await runStepRemovalUndoChange(snapshot, {
       alreadyBack: () => false,
       close: () => undefined,
+      cutHistory: () => undefined,
       validate: () => null,
       settle: async () => true,
       rows: () => savedRows,
@@ -504,6 +507,7 @@ describe('step removal sequencing', () => {
     await runStepRemovalUndoChange(snapshot, {
       alreadyBack: () => false,
       close: () => undefined,
+      cutHistory: () => undefined,
       validate: () => null,
       settle: async () => true,
       rows: () => snapshot.rows,
@@ -535,6 +539,7 @@ describe('step removal sequencing', () => {
     const io = {
       alreadyBack: () => false,
       close: () => undefined,
+      cutHistory: () => undefined,
       validate: () => null,
       settle: async () => true,
       rows: () => ({ seams: [], poses: [] }),
@@ -574,6 +579,7 @@ describe('step removal sequencing', () => {
     await runStepRemovalUndoChange(snapshot, {
       alreadyBack: () => false,
       close: () => undefined,
+      cutHistory: () => undefined,
       validate: () => null,
       settle: async () => true,
       rows: () => ({ seams: [], poses: [] }),
@@ -620,6 +626,7 @@ describe('step removal sequencing', () => {
       const undo = runStepRemovalUndoChange(snapshot, {
         alreadyBack: () => false,
         close: () => undefined,
+        cutHistory: () => undefined,
         validate: () => null,
         settle: async () => {
           await cleanup;
@@ -650,6 +657,7 @@ describe('step removal sequencing', () => {
     await runStepRemovalUndoChange(snapshot, {
       alreadyBack: () => false,
       close: () => undefined,
+      cutHistory: () => undefined,
       validate: () => null,
       settle: async () => true,
       rows: () => snapshot.rows,
@@ -677,6 +685,7 @@ describe('step removal sequencing', () => {
     await runStepRemovalUndoChange(snapshot, {
       alreadyBack: () => false,
       close: () => undefined,
+      cutHistory: () => undefined,
       validate: () => null,
       settle: async () => true,
       rows: () => ({ seams: [], poses: [] }),

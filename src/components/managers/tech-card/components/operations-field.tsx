@@ -8542,6 +8542,7 @@ export function OperationsField({
                   });
         },
         settle: waitForRemovalCleanup,
+        cutHistory: () => undoHistoryApi.cut('step-removal-undo'),
         rows: () => {
           const seamState = useSeamsStore.getState();
           return { seams: seamState.server, poses: seamState.poses };

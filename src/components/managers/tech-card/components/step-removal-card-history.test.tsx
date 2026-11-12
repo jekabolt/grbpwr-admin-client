@@ -111,6 +111,8 @@ let server: StepRemovalRows;
 let changes: SeamChange[];
 let refusals: string[];
 let pending: Promise<boolean> | undefined;
+/** Runs while the undo upsert is on the wire; `false` makes the server refuse it. */
+let duringRequest: (() => boolean | void) | undefined;
 
 const syncOwner = () =>
   latest.api!.setOwner({
@@ -177,6 +179,8 @@ function undoTop(settle: () => Promise<boolean> = () => Promise.resolve(true)) {
       change: async (input) => {
         const change = (typeof input === 'function' ? input() : input) as SeamChange;
         changes.push(change);
+        await tick();
+        if (duringRequest?.() === false) return { ok: false, why: 'refused' };
         server = {
           seams: [...server.seams, ...(change.upsert as StoredRow[] as never[])],
           poses: [],
@@ -190,6 +194,7 @@ function undoTop(settle: () => Promise<boolean> = () => Promise.resolve(true)) {
         return { at: rec.at };
       },
       clearOwed: () => owed.delete(rec.historyKey),
+      cutHistory: () => latest.api!.cut('step-removal-undo'),
       finishHistory: close,
       select: () => undefined,
       refuse: (why) => refusals.push(why),
@@ -230,6 +235,7 @@ beforeEach(async () => {
   server = { seams: [structuredClone(seamA)], poses: [] };
   changes = [];
   refusals = [];
+  duringRequest = undefined;
   const { createRoot } = await import('react-dom/client');
   // `defaultView` lets the commit phase look for a focused element without a real document.
   const view = { document: { activeElement: null }, HTMLIFrameElement: class {} };
@@ -292,6 +298,43 @@ describe('step removal against the real card history', () => {
     await undo();
     expect(keys()).toEqual(['h10', 'h20', 'h30']);
     expect(refusals).toEqual([]);
+  });
+
+  it('a press outside the owner during the undo request does not put the restored step in card history', async () => {
+    await removeStep('h20');
+    server = { seams: [], poses: [] };
+    // Pointer down outside the owner while the upsert is on the wire: the gesture stays open until
+    // pointer up, after the restore has written the form.
+    duringRequest = () => latest.capture!.onPointerDownCapture(outside());
+
+    await undo();
+    expect(changes).toHaveLength(1);
+    expect(keys()).toEqual(['h10', 'h20', 'h30']);
+    await act(async () => latest.capture!.onPointerUpCapture(outside()));
+    await act(tick);
+
+    expect(latest.api!.canUndo).toBe(false);
+    await undo();
+    expect(keys()).toEqual(['h10', 'h20', 'h30']);
+    expect(refusals).toEqual([]);
+  });
+
+  it('a refused undo request leaves the card history alone', async () => {
+    await removeStep('h20');
+    server = { seams: [], poses: [] };
+    await editName('edited');
+    duringRequest = () => false;
+
+    await act(async () => {
+      await undoTop();
+    });
+    expect(refusals).toEqual(['refused']);
+    expect(keys()).toEqual(['h10', 'h30']);
+    expect(stepUndo).toHaveLength(1);
+
+    await undo();
+    expect(latest.form!.getValues('name')).toBe('card');
+    expect(keys()).toEqual(['h10', 'h30']);
   });
 
   it('guard: a step already back closes the record with no insert and no request', async () => {
