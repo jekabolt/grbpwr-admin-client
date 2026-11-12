@@ -38,6 +38,7 @@ const keys = () => useSeamsStore.getState().server.map((r) => r.seamKey);
 const pose = (seamKey: string): StoredPose =>
   ({ ...a, seamKey, kind: 'pose', status: 'confirmed' }) as unknown as StoredPose;
 const INVALID = seamFlushAnswer('invalid', 2);
+const INVALID_WHY = (INVALID as { why: string }).why;
 
 const reply = (
   lockVersion: number,
@@ -202,7 +203,7 @@ describe('a form that does not validate + a user gesture: the seam is written al
 });
 
 describe('what still refuses, with the option on', () => {
-  it('a step never saved (number 0): «not saved», nothing sent, the optimistic row goes back', async () => {
+  it('a step never saved (number 0): the form’s own reason, nothing sent, the optimistic row goes back', async () => {
     const f = fakeBridge();
     const call = vi.fn();
     const res = await runSeamChange(
@@ -211,13 +212,13 @@ describe('what still refuses, with the option on', () => {
       { verb: 'decision', pastInvalidForm: true },
       depsOf(f.bridge, call),
     );
-    expect(res).toEqual({ ok: false, why: NOT_SAVED });
+    expect(res).toEqual({ ok: false, why: INVALID_WHY });
     expect(call).not.toHaveBeenCalled();
     expect(useSeamsStore.getState().pending).toEqual({});
     expect(keys()).toEqual([a.seamKey]);
   });
 
-  it('the touched step deleted in the form: «not saved»', async () => {
+  it('the touched step deleted in the form: the form’s own reason', async () => {
     const form = createFormControl<TechCardFormData>({
       defaultValues: {
         operations: [{ historyKey: 'h10', operationNumber: 10, seamKeys: [], poseKeys: [] }],
@@ -234,7 +235,7 @@ describe('what still refuses, with the option on', () => {
       { verb: 'removal', pastInvalidForm: true },
       depsOf(f.bridge, call),
     );
-    expect(res).toEqual({ ok: false, why: NOT_SAVED });
+    expect(res).toEqual({ ok: false, why: INVALID_WHY });
     expect(call).not.toHaveBeenCalled();
   });
 
@@ -634,7 +635,7 @@ describe('the door judges the steps by the baseline past a form that does not va
       { verb: 'removal', pastInvalidForm: true },
       depsOf(door, call),
     );
-    expect(r3).toEqual({ ok: false, why: NOT_SAVED });
+    expect(r3).toEqual({ ok: false, why: INVALID_WHY });
 
     expect(server.version).toBe(9);
     expect(base.version).toBe(9);
@@ -741,5 +742,151 @@ describe('a body write that fails while the gesture waits (Codex review)', () =>
       why: 'the card is not saved — bad body',
     });
     expect(seamFlushAnswer('ok', 0, undefined, true)).toEqual({ ok: true });
+  });
+});
+
+describe('C10: a step just added (never stored) through the real autosave and the real door', () => {
+  function cardWithNewStep(styleNumber: string) {
+    const server = { version: 7, steps: [{ no: 10, links: [] as string[] }] };
+    const form = createFormControl<TechCardFormData>({
+      defaultValues: {
+        styleNumber: 'S-1',
+        operations: [{ historyKey: 'h10', operationNumber: 10, seamKeys: [], poseKeys: [] }],
+      } as unknown as TechCardFormData,
+    });
+    form.control._state.mount = true;
+    form.control._proxyFormState.isDirty = true;
+    form.control._proxyFormState.dirtyFields = true;
+    const base = { version: 7 };
+    let holds = 0;
+    const valid = () => (form.getValues('styleNumber') ?? '') !== '';
+    const card = () =>
+      ({
+        techCard: { operations: server.steps.map((s) => ({ operationNumber: s.no })) },
+      }) as unknown as common_TechCard;
+    const machine = createAutosaveMachine({
+      debounceMs: 10,
+      retryDelaysMs: [],
+      setTimer: (fn) => fn,
+      clearTimer: () => undefined,
+      now: () => Date.now(),
+      isEnabled: () => true,
+      isPaused: () => holds > 0,
+      hasWork: () => form.control._getDirty(),
+      validate: async () => ({ ok: valid(), errors: valid() ? 0 : 1 }),
+      countErrors: () => (valid() ? 0 : 1),
+      onState: () => undefined,
+      save: async () => {
+        // The body save numbers every step and stores the card wholesale.
+        const ops = (form.getValues('operations') ?? []).map((op, i) => ({
+          ...op,
+          operationNumber: (i + 1) * 10,
+        }));
+        server.steps = ops.map((op) => ({
+          no: op.operationNumber,
+          links: [...(op.seamKeys ?? [])],
+        }));
+        server.version += 1;
+        base.version = server.version;
+        form.reset({ ...form.getValues(), operations: ops } as TechCardFormData);
+        return { outcome: 'complete' };
+      },
+    });
+    const bridge: SeamFormBridge = {
+      flush: async (reason) => seamFlushAnswer(await machine.flush(reason), 1),
+      hold: async (o) => {
+        holds += 1;
+        const release = () => {
+          holds -= 1;
+          if (holds === 0) machine.resume();
+        };
+        return seamStepsAgreeOf(form, card(), o) ? { release } : { release, refused: NOT_SAVED };
+      },
+      version: () => base.version,
+      operationNumber: (s) => stepNumberOf(form, s),
+      adopt: (x) => {
+        if (base.version === x.expected) base.version = x.lockVersion;
+        adoptStepLinks(form, linksByOperation(x.links, x.seams));
+      },
+      reread: async () => ({ ok: false, why: 'unused' }),
+    };
+    const sent: ChangeTechCardSeamsRequest[] = [];
+    const call = vi.fn(async (req: ChangeTechCardSeamsRequest) => {
+      sent.push(req);
+      if (req.expectedLockVersion !== server.version) throw lockMoved();
+      for (const l of req.link ?? [])
+        server.steps.find((s) => s.no === l.operationNumber)!.links.push(l.seamKey!);
+      server.version += 1;
+      return reply(
+        server.version,
+        [a, b],
+        server.steps.map((s) => ({ operationNumber: s.no, seamKeys: [...s.links] })),
+      );
+    });
+    // The operator adds a step (no number yet) and sets the style number as given.
+    form.setValue(
+      'operations',
+      [
+        form.getValues('operations.0'),
+        { historyKey: 'hNew', operationNumber: 0, seamKeys: [], poseKeys: [] },
+      ] as TechCardFormData['operations'],
+      { shouldDirty: true },
+    );
+    form.setValue('styleNumber', styleNumber, { shouldDirty: true });
+    return { server, form, machine, bridge, call, sent };
+  }
+  const accept = { upsert: [b], link: [{ step: { historyKey: 'hNew' }, seamKey: b.seamKey }] };
+
+  it('past a form that does not validate: the form’s own reason, nothing sent', async () => {
+    const t = cardWithNewStep('');
+    const res = await runSeamChange(
+      CARD,
+      accept,
+      { verb: 'decision', pastInvalidForm: true },
+      depsOf(t.bridge, t.call),
+    );
+    expect(res).toEqual({ ok: false, why: (seamFlushAnswer('invalid', 1) as { why: string }).why });
+    expect(res).not.toEqual({ ok: false, why: NOT_SAVED });
+    expect(t.call).not.toHaveBeenCalled();
+    expect(useSeamsStore.getState().pending).toEqual({});
+    expect(keys()).toEqual([a.seamKey]);
+    t.machine.dispose();
+  });
+
+  it('a form that validates: the flush stores the step, ACCEPT goes out on its new number', async () => {
+    const t = cardWithNewStep('S-2');
+    const res = await runSeamChange(
+      CARD,
+      accept,
+      { verb: 'decision', pastInvalidForm: true },
+      depsOf(t.bridge, t.call),
+    );
+    expect(res.ok).toBe(true);
+    expect(t.sent).toHaveLength(1);
+    expect(t.sent[0].expectedLockVersion).toBe(8);
+    expect(t.sent[0].link).toEqual([expect.objectContaining({ operationNumber: 20 })]);
+    expect(t.server.steps).toEqual([
+      { no: 10, links: [] },
+      { no: 20, links: [b.seamKey] },
+    ]);
+    expect(t.form.getValues('operations.1.seamKeys')).toEqual([b.seamKey]);
+    t.machine.dispose();
+  });
+
+  it('the door refuses past an invalid form (steps disagree): the form’s reason, not a bare one', async () => {
+    const t = cardWithNewStep('');
+    t.server.steps = [
+      { no: 10, links: [] },
+      { no: 20, links: [] },
+    ]; // the card moved on elsewhere
+    const res = await runSeamChange(
+      CARD,
+      { upsert: [b], link: [{ step: { historyKey: 'h10' }, seamKey: b.seamKey }] },
+      { verb: 'decision', pastInvalidForm: true },
+      depsOf(t.bridge, t.call),
+    );
+    expect(res).toEqual({ ok: false, why: (seamFlushAnswer('invalid', 1) as { why: string }).why });
+    expect(t.call).not.toHaveBeenCalled();
+    t.machine.dispose();
   });
 });
