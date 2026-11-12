@@ -367,49 +367,6 @@ export function waitForIdle({
   });
 }
 
-/**
- * Keep validation ahead of destructive awaits, then make ownership → delete → finish one-way.
- * `prepareDeletion` is deliberately synchronous: ownership is read while rows still exist and no
- * other awaited work can land between that read and the delete call.
- */
-export async function runRemovalSequence<TTarget, TDeletion>({
-  prepare,
-  teardown,
-  settle,
-  prepareDeletion,
-  deleteRows,
-  finish,
-  deleteTimeoutMs = 20_000,
-}: {
-  deleteTimeoutMs?: number;
-  prepare: () => TTarget | null;
-  teardown: (target: TTarget) => Promise<boolean>;
-  settle?: () => Promise<boolean | void>;
-  prepareDeletion: (target: TTarget) => TDeletion;
-  deleteRows: (deletion: TDeletion, settled: boolean) => Promise<boolean>;
-  finish: (target: TTarget, deletion: TDeletion) => void;
-}): Promise<boolean> {
-  const target = prepare();
-  if (!target) return false;
-  if (!(await teardown(target))) return false;
-  const settled = (await settle?.()) !== false;
-  const deletion = prepareDeletion(target);
-  // Teardown has already changed persisted rows. Seam cleanup may be refused, but the step must
-  // still leave the form; stopping here would strand a partially stripped step with no undo.
-  // A delete that never answers (or throws) must not hold the step half stripped and the editor
-  // locked: after `deleteTimeoutMs` the removal finishes one-way.
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  await Promise.race([
-    deleteRows(deletion, settled).catch(() => false),
-    new Promise<boolean>((resolve) => {
-      timer = setTimeout(() => resolve(false), deleteTimeoutMs);
-    }),
-  ]);
-  clearTimeout(timer);
-  finish(target, deletion);
-  return true;
-}
-
 /** Срезать самое СТАРОЕ: вытесняется дно стопки, а не вершина. */
 function trim<TRow>(stack: HistoryEntry<TRow>[]): HistoryEntry<TRow>[] {
   return stack.length > HISTORY_DEPTH ? stack.slice(stack.length - HISTORY_DEPTH) : stack;

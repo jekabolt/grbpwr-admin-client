@@ -9,7 +9,6 @@ import {
   peekUndo,
   pushUndo,
   record,
-  runRemovalSequence,
   runStepMutation,
   runStepWrite,
   undoStep,
@@ -162,121 +161,6 @@ describe('waitForIdle', () => {
   });
 });
 
-describe('runRemovalSequence', () => {
-  it('validates before teardown and reads ownership immediately before deletion', async () => {
-    const order: string[] = [];
-
-    await expect(
-      runRemovalSequence({
-        prepare: () => {
-          order.push('validate');
-          return { key: 'step' };
-        },
-        teardown: async () => {
-          order.push('teardown');
-          return true;
-        },
-        settle: async () => {
-          order.push('settle');
-        },
-        prepareDeletion: () => {
-          order.push('ownership');
-          return ['seam'];
-        },
-        deleteRows: async (_, settled) => {
-          expect(settled).toBe(true);
-          order.push('delete');
-          return true;
-        },
-        finish: () => order.push('finish'),
-      }),
-    ).resolves.toBe(true);
-    expect(order).toEqual(['validate', 'teardown', 'settle', 'ownership', 'delete', 'finish']);
-  });
-
-  it('does no destructive work when validation refuses', async () => {
-    const teardown = vi.fn(async () => true);
-    const deleteRows = vi.fn(async () => true);
-    const finish = vi.fn();
-
-    await expect(
-      runRemovalSequence({
-        prepare: () => null,
-        teardown,
-        prepareDeletion: () => [],
-        deleteRows,
-        finish,
-      }),
-    ).resolves.toBe(false);
-    expect(teardown).not.toHaveBeenCalled();
-    expect(deleteRows).not.toHaveBeenCalled();
-    expect(finish).not.toHaveBeenCalled();
-  });
-
-  it('waits for in-flight writers after teardown and then finishes one-way', async () => {
-    let settle!: () => void;
-    const pending = new Promise<void>((resolve) => {
-      settle = resolve;
-    });
-    const order: string[] = [];
-    const sequence = runRemovalSequence({
-      prepare: () => {
-        order.push('validate');
-        return { key: 'step' };
-      },
-      teardown: async () => {
-        order.push('teardown');
-        return true;
-      },
-      settle: async () => {
-        order.push('settle');
-        await pending;
-      },
-      prepareDeletion: () => {
-        order.push('ownership');
-        return ['seam'];
-      },
-      deleteRows: async (_, settled) => {
-        expect(settled).toBe(true);
-        order.push('delete refused');
-        return false;
-      },
-      finish: () => order.push('finish'),
-    });
-
-    await Promise.resolve();
-    expect(order).toEqual(['validate', 'teardown', 'settle']);
-    settle();
-    await expect(sequence).resolves.toBe(true);
-    expect(order).toEqual([
-      'validate',
-      'teardown',
-      'settle',
-      'ownership',
-      'delete refused',
-      'finish',
-    ]);
-  });
-
-  it('continues one-way after the settle timeout result', async () => {
-    const deleteRows = vi.fn(async () => false);
-    const finish = vi.fn();
-
-    await expect(
-      runRemovalSequence({
-        prepare: () => ({ key: 'step' }),
-        teardown: async () => true,
-        settle: async () => false,
-        prepareDeletion: () => ['seam'],
-        deleteRows,
-        finish,
-      }),
-    ).resolves.toBe(true);
-    expect(deleteRows).toHaveBeenCalledWith(['seam'], false);
-    expect(finish).toHaveBeenCalledOnce();
-  });
-});
-
 describe('finishUndo', () => {
   type Row = { historyKey: string };
   type RemoveEntry = Extract<HistoryEntry<Row>, { kind: 'remove' }>;
@@ -302,38 +186,5 @@ describe('finishUndo', () => {
     const changed = record(history, unrelated);
     expect(finishUndo(changed, expected, true)).toBe(changed);
     expect(peekUndo(changed)).toBe(unrelated);
-  });
-});
-
-describe('runRemovalSequence delete timeout', () => {
-  it('finishes the removal when the seam delete never answers', async () => {
-    vi.useFakeTimers();
-    const finish = vi.fn();
-    const done = runRemovalSequence({
-      deleteTimeoutMs: 1000,
-      prepare: () => 'step',
-      teardown: async () => true,
-      prepareDeletion: () => 'rows',
-      deleteRows: () => new Promise<boolean>(() => undefined),
-      finish,
-    });
-    await vi.advanceTimersByTimeAsync(1000);
-    await expect(done).resolves.toBe(true);
-    expect(finish).toHaveBeenCalledWith('step', 'rows');
-    vi.useRealTimers();
-  });
-
-  it('finishes the removal when the seam delete throws', async () => {
-    const finish = vi.fn();
-    await expect(
-      runRemovalSequence({
-        prepare: () => 'step',
-        teardown: async () => true,
-        prepareDeletion: () => 'rows',
-        deleteRows: () => Promise.reject(new Error('network')),
-        finish,
-      }),
-    ).resolves.toBe(true);
-    expect(finish).toHaveBeenCalledOnce();
   });
 });

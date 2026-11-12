@@ -274,7 +274,6 @@ import {
   removeLabel,
   removeRestoreIndex,
   removeUndoRefusal,
-  runRemovalSequence,
   runStepMutation,
   runStepWrite,
   STILL_SAVING,
@@ -285,15 +284,14 @@ import { AssemblyFullscreen, FROZEN_REFUSAL, restoreScreenFocus } from './assemb
 import { SeamWalk } from './seam-walk';
 import { StepTimeField } from './step-time-field';
 import { DEFAULT_SEAM_TOLERANCE_MM } from './step-seams/seam-length';
+import { restorableSeamKeys, seamWritesInFlight } from './step-seams/step-removal-seams';
 import {
-  relinkRestoredStep,
-  removalRows,
-  restorableSeamKeys,
-  runSeamRestore,
-  seamRestorePlan,
-  seamWritesInFlight,
-  seamsOnlyOfStep,
-} from './step-seams/step-removal-seams';
+  linkedStepRows,
+  runStepRemovalChange,
+  runStepRemovalRedoChange,
+  runStepRemovalUndoChange,
+  type StepRemovalSnapshot,
+} from './step-removal-change';
 import { AssemblySchematic } from './assembly-schematic';
 import { SequenceRail } from './sequence-rail';
 import {
@@ -322,6 +320,7 @@ import {
   freshBindingStrip,
   isBindingLine,
   isBindingOperation,
+  teardownBindingStrips,
 } from './binding-step';
 import { useBindingStripTeardown } from './use-binding-strip-teardown';
 import { useTopstitchLineTeardown } from './use-topstitch-line-teardown';
@@ -6453,6 +6452,10 @@ export function OperationsField({
   // разойтись им было негде.
   type Hist = History<OperationFormValue>;
   type RemoveEntry = Extract<HistoryEntry<OperationFormValue>, { kind: 'remove' }>;
+  type RemovalChangeSnapshot = StepRemovalSnapshot<OperationFormValue> & {
+    operationNumber: number;
+    record: RemoveEntry;
+  };
   const history = useRef<Hist>(emptyHistory<OperationFormValue>());
   const [histView, setHistView] = useState<Hist>(history.current);
   const pendingAppend = useRef<PendingAppend<OperationFormValue> | null>(null);
@@ -6618,8 +6621,8 @@ export function OperationsField({
     const operations = (getValues('operations') ?? []) as OperationFormValue[];
     const stored = operations[index];
     if (!stored?.historyKey) return null;
-    // The row as it stands after its binding teardown: links owned by that teardown do not return,
-    // while the remaining seam and pose links stay on the row for this removal's restore.
+    // The row as it stands after its binding teardown: the strip and the seams that teardown deletes
+    // do not return, while the remaining seam and pose links stay on the row for the relink.
     const links = bindingUndoLinks(
       {
         cutStrips: (getValues('cutStrips') ?? []) as CutStrip[],
@@ -6628,18 +6631,9 @@ export function OperationsField({
       },
       index,
     );
-    const row = { ...stored, ...links };
+    const row = structuredClone({ ...stored, ...links });
     const seamState = useSeamsStore.getState();
-    const seamRows = seamsOnlyOfStep(
-      {
-        operations,
-        cutStrips: (getValues('cutStrips') ?? []) as CutStrip[],
-        seams: rowsOf(seamState),
-        poses: posesOf(seamState),
-      },
-      index,
-      row,
-    );
+    const seamRows = linkedStepRows(row, { seams: seamState.server, poses: seamState.poses });
     const onCard = cardKeysNow();
     const seamKeys = [...(row.seamKeys ?? []), ...(row.poseKeys ?? [])];
     const number = operationStepNumber(index);
@@ -6649,11 +6643,11 @@ export function OperationsField({
     return {
       kind: 'remove',
       historyKey: stored.historyKey,
-      row: structuredClone(row),
+      row,
       before: operations.map((op) => op.historyKey ?? ''),
       issues: structuredClone(linkedIssues),
       pieceKeys: [...new Set(row.inputKeys ?? [])].filter((key) => onCard.pieceKeys.has(key)),
-      seamKeys: [...new Set(seamKeys)].filter((key) => onCard.seamKeys.has(key)),
+      seamKeys: [...new Set(seamKeys)],
       bomLineKeys: [...new Set(row.bomLineKeys ?? [])].filter((key) => onCard.bomLineKeys.has(key)),
       seamRows: structuredClone(seamRows),
       label: removeLabel(index),
@@ -6680,99 +6674,117 @@ export function OperationsField({
   const removeOperation = async (
     index: number,
     {
-      recordForCaller,
       preserveHistory = false,
-    }: { recordForCaller?: RemoveEntry; preserveHistory?: boolean } = {},
+      redo = false,
+      recordRemoval,
+    }: {
+      preserveHistory?: boolean;
+      redo?: boolean;
+      recordRemoval?: (record: RemoveEntry) => void;
+    } = {},
   ): Promise<boolean> => {
     if (frozen) return false;
     if (!stepSeams) return false;
-
-    return runRemovalSequence({
-      prepare: () => {
+    const requestedHistoryKey = getValues(`operations.${index}.historyKey`);
+    if (!requestedHistoryKey) return false;
+    const run = redo ? runStepRemovalRedoChange : runStepRemovalChange;
+    return run<OperationFormValue, RemovalChangeSnapshot>({
+      settle: waitForSeamWritesToSettle,
+      snapshot: () => {
         const operations = (getValues('operations') ?? []) as OperationFormValue[];
-        if (foldsClosingOn(operations, index).length > 0) {
+        const currentIndex = operations.findIndex(
+          (operation) => operation.historyKey === requestedHistoryKey,
+        );
+        if (currentIndex < 0) {
+          refuseGesture('SEQUENCE', 'not removed', 'the sequence has changed since');
+          return null;
+        }
+        if (foldsClosingOn(operations, currentIndex).length > 0) {
           refuseGesture('FOLDS', FOLD_STEP_REFUSAL, 'NO STEP');
           return null;
         }
         if (
           !preserveHistory &&
-          serverKeepsFusingStep(operations[index], getValues('pieces') ?? [])
+          serverKeepsFusingStep(operations[currentIndex], getValues('pieces') ?? [])
         ) {
-          refuseGesture(`STEP ${operationStepNumber(index)}`, 'auto fuse', 'piece is fused');
+          refuseGesture(`STEP ${operationStepNumber(currentIndex)}`, 'auto fuse', 'piece is fused');
           return null;
         }
-        const removalRecord = recordForCaller ?? removeRecord(index);
+        const removalRecord = removeRecord(currentIndex);
         if (!removalRecord) return null;
-        if (operations[index]?.historyKey !== removalRecord.historyKey) {
-          refuseGesture('SEQUENCE', 'not removed', 'the sequence has changed since');
-          return null;
-        }
+        // A binding step takes its strip with it: the strip's seam rows go in the same change.
+        const teardown = teardownBindingStrips(
+          {
+            cutStrips: (getValues('cutStrips') ?? []) as CutStrip[],
+            operations,
+            seamRows: rowsOf(useSeamsStore.getState()),
+          },
+          { stepIndexes: [currentIndex] },
+        );
         return {
-          historyKey: removalRecord.historyKey,
-          operationNumber: operations[index]?.operationNumber ?? operationStepNumber(index),
+          step: { historyKey: removalRecord.historyKey },
+          row: structuredClone(removalRecord.row),
+          rows: structuredClone(removalRecord.seamRows ?? { seams: [], poses: [] }),
+          alsoDelete: teardown.seamRowsToRemove,
+          operationNumber:
+            operations[currentIndex]?.operationNumber ?? operationStepNumber(currentIndex),
           record: removalRecord,
-          recordDirectly: !preserveHistory && !recordForCaller,
         };
       },
-      teardown: () => issueTransactionWrite(() => teardownBinding({ stepIndexes: [index] })),
-      settle: waitForSeamWritesToSettle,
-      prepareDeletion: (target) => {
-        const operations = (getValues('operations') ?? []) as OperationFormValue[];
-        const currentIndex = operations.findIndex(
-          (operation) => operation.historyKey === target.historyKey,
-        );
-        const currentRow = operations[currentIndex];
-        const seamState = useSeamsStore.getState();
-        const currentRecord = currentIndex >= 0 ? removeRecord(currentIndex) : null;
-        if (currentRecord?.historyKey === target.historyKey)
-          Object.assign(target.record, currentRecord);
-        if (currentRow)
-          target.operationNumber = currentRow.operationNumber ?? operationStepNumber(currentIndex);
-        const seamRows = seamsOnlyOfStep(
-          {
-            operations,
-            cutStrips: (getValues('cutStrips') ?? []) as CutStrip[],
-            seams: rowsOf(seamState),
-            poses: posesOf(seamState),
-          },
-          currentIndex,
-          currentRow ?? target.record.row,
-        );
-        return { seamRows: structuredClone(seamRows), rows: removalRows(seamRows) };
-      },
-      deleteRows: ({ rows }, settled) =>
-        settled && rows.length
-          ? issueTransactionWrite(() => stepSeams.writes.remove(rows))
-          : Promise.resolve(true),
-      finish: (target, deletion) => {
+      change: (input) =>
+        issueTransactionWrite(() =>
+          stepSeams.writes.change(input, { verb: 'removal', quiet: true }),
+        ),
+      remove: (snapshot) => {
         const commit = () => {
-          target.record.seamRows = deletion.seamRows;
           const operations = (getValues('operations') ?? []) as OperationFormValue[];
           const currentIndex = operations.findIndex(
-            (operation) => operation.historyKey === target.historyKey,
+            (operation) => operation.historyKey === snapshot.step.historyKey,
           );
-          placeBlankOnFirstInput.current.delete(target.historyKey);
+          if (currentIndex < 0) return;
+          const operationNumber =
+            operations[currentIndex]?.operationNumber ?? snapshot.operationNumber;
+          placeBlankOnFirstInput.current.delete(snapshot.step.historyKey);
           if (!preserveHistory) clearFormHistoryNow(); // (1/10) массив поехал
-          if (currentIndex >= 0) {
-            remapIssues((old) =>
-              old === currentIndex ? null : old > currentIndex ? old - 1 : old,
-            );
-            remove(currentIndex);
-            // Clamp the STORED index, not just the rendered one: deleting the open last row leaves
-            // `selected` past the end, and the next reorder would then compute the selection from a
-            // position that no longer exists and open the wrong step.
-            const lastAfter = Math.max(0, operations.length - 2);
-            setSelected((selectedIndex) =>
-              Math.min(selectedIndex > currentIndex ? selectedIndex - 1 : selectedIndex, lastAfter),
-            );
+          // The binding strip leaves with its step; the plan is read after the change committed.
+          const teardown = teardownBindingStrips(
+            {
+              cutStrips: (getValues('cutStrips') ?? []) as CutStrip[],
+              operations,
+              seamRows: rowsOf(useSeamsStore.getState()),
+            },
+            { stepIndexes: [currentIndex] },
+          );
+          if (teardown.strips.length !== ((getValues('cutStrips') ?? []) as CutStrip[]).length) {
+            setValue('cutStrips', teardown.strips as never, { shouldDirty: true });
+            for (const patch of teardown.operations) {
+              if (patch.index === currentIndex) continue;
+              setValue(`operations.${patch.index}.inputKeys`, patch.inputKeys, {
+                shouldDirty: true,
+              });
+              setValue(`operations.${patch.index}.seamKeys`, patch.seamKeys, { shouldDirty: true });
+            }
           }
-          if (techCardId && target.operationNumber > 0)
-            clearStepLinksOwed(techCardId, target.operationNumber);
-          if (target.recordDirectly) setHistory(record(history.current, target.record));
+          remapIssues((old) => (old === currentIndex ? null : old > currentIndex ? old - 1 : old));
+          remove(currentIndex);
+          // Clamp the STORED index, not just the rendered one: deleting the open last row leaves
+          // `selected` past the end, and the next reorder would then open the wrong step.
+          const lastAfter = Math.max(0, operations.length - 2);
+          setSelected((selectedIndex) =>
+            Math.min(selectedIndex > currentIndex ? selectedIndex - 1 : selectedIndex, lastAfter),
+          );
+          if (techCardId && operationNumber > 0) clearStepLinksOwed(techCardId, operationNumber);
         };
         if (preserveHistory) applyToForm(commit);
         else commit();
       },
+      record: (snapshot, deleted) => {
+        const nextRecord = { ...snapshot.record, seamRows: structuredClone(deleted) };
+        if (recordRemoval) recordRemoval(nextRecord);
+        else if (!preserveHistory) setHistory(record(history.current, nextRecord));
+      },
+      refuse: (why) => refuseGesture('SEQUENCE', 'not removed', why),
+      unsettled: STILL_SAVING,
     });
   };
 
@@ -8319,113 +8331,91 @@ export function OperationsField({
   const undoRemoval = async (rec: RemoveEntry): Promise<boolean> => {
     // A delete issued before the lock may still land after the restore and take a relinked row.
     if (seamWritesInFlight(useSeamsStore.getState())) {
-      refuseGesture('SEQUENCE', 'not undone', 'still saving');
+      refuseGesture('SEQUENCE', 'not undone', STILL_SAVING);
       return false;
     }
-    const seamState = useSeamsStore.getState();
     const saved = rec.seamRows ?? { seams: [], poses: [] };
-    const rowKeys = ((getValues('operations') ?? []) as OperationFormValue[]).map(
-      (op) => op.historyKey ?? '',
-    );
-    const cardKeys = cardKeysNow();
-    const confirmedSeamKeys = new Set(
-      [...seamState.server, ...seamState.poses].map((row) => row.seamKey),
-    );
-    const refused = removeUndoRefusal(rec, {
-      rowKeys,
-      ...cardKeys,
-      seamKeys: restorableSeamKeys(confirmedSeamKeys, saved),
-    });
-    if (refused) {
-      refuseGesture('SEQUENCE', 'not undone', refused);
-      return false;
-    }
-    const plan = seamRestorePlan(saved, {
-      seams: seamState.server,
-      poses: seamState.poses,
-    });
-    let restoredAt = -1;
-    let commitRefusal: string | null = null;
-    let committed = false;
-    const restored = await runSeamRestore(plan, {
-      upsert: (rows) =>
-        issueTransactionWrite(() => stepSeams?.writes.upsert(rows) ?? Promise.resolve(false)),
-      upsertPoses: (rows) =>
-        issueTransactionWrite(() => stepSeams?.writes.upsertPoses(rows) ?? Promise.resolve(false)),
-      seamsNow: () => useSeamsStore.getState().server,
-      restoreStep: (keyMap) => {
-        const currentSeamState = useSeamsStore.getState();
-        const currentRowKeys = ((getValues('operations') ?? []) as OperationFormValue[]).map(
-          (op) => op.historyKey ?? '',
-        );
-        const currentCardKeys = cardKeysNow();
-        const currentConfirmedSeamKeys = new Set(
-          [...currentSeamState.server, ...currentSeamState.poses].map((row) => row.seamKey),
-        );
-        commitRefusal = frozenRef.current
-          ? FROZEN_REFUSAL
-          : peekUndo(history.current) !== rec
-            ? 'the sequence has changed since'
-            : removeUndoRefusal(rec, {
-                rowKeys: currentRowKeys,
-                ...currentCardKeys,
-                seamKeys: restorableSeamKeys(currentConfirmedSeamKeys, saved),
-              });
-        if (commitRefusal) return;
-        const nextHistory = finishUndo(history.current, rec, true);
-        if (nextHistory === history.current) {
-          commitRefusal = 'the sequence has changed since';
-          return;
-        }
-        restoredAt = removeRestoreIndex(rec.before, rec.historyKey, currentRowKeys);
-        applyToForm(() => {
-          remapIssues((old) => (old >= restoredAt ? old + 1 : old));
-          insert(restoredAt, relinkRestoredStep(structuredClone(rec.row), keyMap), {
-            shouldFocus: false,
-          });
-          for (const i of issuesToRelink(rec.issues, getValues('issues') ?? [])) {
-            setValue(`issues.${i}.operationNumber`, operationStepNumber(restoredAt), {
-              shouldDirty: true,
-            });
-          }
-          // A refusal of the save without this step names rows by position: none of them holds now.
-          clearErrors('operations');
-        });
-        setHistory(nextHistory);
-        committed = true;
+    return runStepRemovalUndoChange<OperationFormValue, { at: number }>(
+      {
+        step: { historyKey: rec.historyKey },
+        row: structuredClone(rec.row),
+        rows: structuredClone(saved),
       },
-    });
-    if (!restored) {
-      refuseGesture('SEQUENCE', 'not undone', 'seam deleted');
-      return false;
-    }
-    if (!committed) {
-      refuseGesture('SEQUENCE', 'not undone', commitRefusal ?? 'the sequence has changed since');
-      return false;
-    }
-    setSelected(restoredAt);
-    return true;
+      {
+        validate: () => {
+          const seamState = useSeamsStore.getState();
+          const rowKeys = ((getValues('operations') ?? []) as OperationFormValue[]).map(
+            (op) => op.historyKey ?? '',
+          );
+          const confirmedSeamKeys = new Set(
+            [...seamState.server, ...seamState.poses].map((row) => row.seamKey),
+          );
+          return frozenRef.current
+            ? FROZEN_REFUSAL
+            : peekUndo(history.current) !== rec
+              ? 'the sequence has changed since'
+              : removeUndoRefusal(rec, {
+                  rowKeys,
+                  ...cardKeysNow(),
+                  seamKeys: restorableSeamKeys(confirmedSeamKeys, saved),
+                });
+        },
+        insert: (row) => {
+          const rowKeys = ((getValues('operations') ?? []) as OperationFormValue[]).map(
+            (op) => op.historyKey ?? '',
+          );
+          const at = removeRestoreIndex(rec.before, rec.historyKey, rowKeys);
+          applyToForm(() => {
+            remapIssues((old) => (old >= at ? old + 1 : old));
+            insert(at, row, { shouldFocus: false });
+            for (const i of issuesToRelink(rec.issues, getValues('issues') ?? [])) {
+              setValue(`issues.${i}.operationNumber`, operationStepNumber(at), {
+                shouldDirty: true,
+              });
+            }
+            // Old errors name the form without this step; the flush validates the provisional form.
+            clearErrors('operations');
+          });
+          return { at };
+        },
+        change: (input) =>
+          issueTransactionWrite(
+            () =>
+              stepSeams?.writes.change(input, { verb: 'undo', quiet: true }) ??
+              Promise.resolve({ ok: false as const, why: STILL_SAVING }),
+          ),
+        remove: () => {
+          const operations = (getValues('operations') ?? []) as OperationFormValue[];
+          const at = operations.findIndex((operation) => operation.historyKey === rec.historyKey);
+          if (at < 0) return;
+          applyToForm(() => {
+            remapIssues((old) => (old === at ? null : old > at ? old - 1 : old));
+            remove(at);
+          });
+        },
+        finishHistory: () => setHistory(finishUndo(history.current, rec, true)),
+        select: ({ at }) => setSelected(at),
+        refuse: (why) => refuseGesture('SEQUENCE', 'not undone', why),
+      },
+    );
   };
 
   const redoRemoval = async (rec: RemoveEntry): Promise<boolean> => {
     const operations = (getValues('operations') ?? []) as OperationFormValue[];
     const index = operations.findIndex((op) => op.historyKey === rec.historyKey);
-    const fresh =
-      index < 0 || foldsClosingOn(operations, index).length > 0 ? null : removeRecord(index);
-    if (!fresh) {
+    if (index < 0 || foldsClosingOn(operations, index).length > 0) {
       setHistory(dropRedoTop(history.current));
       refuseGesture('SEQUENCE', 'nothing to redo', 'the sequence has changed since');
       return false;
     }
-    const removed = await removeOperation(index, {
-      recordForCaller: fresh,
+    return removeOperation(index, {
       preserveHistory: true,
+      redo: true,
+      recordRemoval: (fresh) => {
+        if (peekRedo(history.current) !== rec) return;
+        setHistory(pushUndo(dropRedoTop(history.current), fresh));
+      },
     });
-    if (!removed) return false;
-    clearErrors('operations');
-    if (peekRedo(history.current) !== rec) return true;
-    setHistory(pushUndo(dropRedoTop(history.current), fresh));
-    return true;
   };
 
   const performUndoGesture = async () => {
