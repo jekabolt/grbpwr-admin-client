@@ -648,7 +648,7 @@ describe('mirror write boundary', () => {
         canonicalize: (rows) => [...rows],
         change: async (change, gone) => {
           calls.push('change');
-          sent.push({ change, gone });
+          sent.push({ change: change(), gone });
           return okRes([['put', 'stored']]);
         },
         link: (rows, foldKeys) => {
@@ -693,7 +693,7 @@ describe('mirror write boundary', () => {
         // The pair is stored under 'old' already: the row is written there.
         canonicalize: (rows) => rows.map((r) => ({ ...r, seamKey: 'old' })),
         change: async (c, gone) => {
-          change = c;
+          change = c();
           expect(gone).toEqual([]);
           return okRes();
         },
@@ -705,6 +705,41 @@ describe('mirror write boundary', () => {
     expect(change?.upsert?.map((r) => r.seamKey)).toEqual(['old']);
     expect(change?.link).toEqual([{ step, seamKey: 'old' }]);
     expect(change?.detach).toEqual([]);
+  });
+
+  it('builds the detaches from the links as they are when the change goes out', async () => {
+    const row = [...CARD85_SEAMS.values()][0];
+    const put = { ...row, seamKey: 'put' };
+    let links = ['old'];
+    let built: SeamChange | undefined;
+    const result = await executeMirrorStep(
+      {
+        kind: 'replace',
+        upsert: [put],
+        deleteKeys: ['old'],
+        linkKeys: ['put'],
+        foldKeys: [],
+        layerOrder: [],
+      },
+      {
+        step,
+        stepKeys: () => links,
+        canonicalize: (rows) => [...rows],
+        change: async (build) => {
+          // A gesture before this one (or a re-read) linked B while MIRROR waited its turn.
+          links = ['old', 'B'];
+          built = build();
+          return okRes();
+        },
+        link: () => undefined,
+        requestAutosave: () => undefined,
+      },
+    );
+    expect(result).toEqual({ ok: true });
+    expect(built?.detach).toEqual([
+      { step, seamKey: 'old' },
+      { step, seamKey: 'B' },
+    ]);
   });
 
   it('changes no visible state when the transaction fails', async () => {

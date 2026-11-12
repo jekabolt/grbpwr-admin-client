@@ -24,8 +24,11 @@ export type MirrorStepWriteDeps = {
   stepKeys: () => readonly string[];
   /** New rows onto the key of a row already stored for their pair (the server lands them there too). */
   canonicalize: (rows: readonly StoredRow[]) => StoredRow[];
-  /** ONE ChangeTechCardSeams for the whole mirror; `gone`: rows it is expected to delete. */
-  change: (change: SeamChange, gone: readonly string[]) => Promise<SeamChangeResult>;
+  /**
+   * ONE ChangeTechCardSeams for the whole mirror; `gone`: rows it is expected to delete. The change is
+   * built again when it goes out (after the flush, after a re-read): detaches follow the links then.
+   */
+  change: (change: () => SeamChange, gone: readonly string[]) => Promise<SeamChangeResult>;
   /** The committed rows (stored keys) and the mirrored folds and layer order onto the step. */
   link: (
     rows: readonly StoredRow[],
@@ -49,7 +52,7 @@ export async function executeMirrorStep(
     const upsert = deps.canonicalize(plan.upsert);
     const moved = new Map(plan.upsert.map((row, i) => [row.seamKey, upsert[i]?.seamKey]));
     const linkKeys = [...new Set(plan.linkKeys.map((key) => moved.get(key) ?? key))];
-    const change = mirrorChange(deps.step, { upsert, linkKeys }, deps.stepKeys());
+    const change = () => mirrorChange(deps.step, { upsert, linkKeys }, deps.stepKeys());
     const gone = plan.deleteKeys.filter((key) => !linkKeys.includes(key));
     const res = await deps.change(change, gone);
     if (!res.ok) return { ok: false, error: res.why || 'not saved' };
