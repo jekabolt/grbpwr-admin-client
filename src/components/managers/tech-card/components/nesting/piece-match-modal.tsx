@@ -46,6 +46,7 @@ import {
 } from 'lib/dxf-reconcile';
 import { fusingDartPolygons } from 'lib/fusing-dxf/darts';
 import { mapFuseSpecToSize } from 'lib/fusing-dxf/dxf';
+import { fusingInternalLines } from 'lib/fusing-dxf/internal-lines';
 import { fuseAreaMm2, fuseInsetRingMm, generateFuseGeometry } from 'lib/fusing-dxf/geometry';
 import {
   interliningBlockCodes,
@@ -1730,19 +1731,31 @@ export function PieceMatchModal({
     const sized = sizeOptions.filter((o) => o.size);
     return (sized.find((o) => preferred.has(o.size.toLowerCase())) ?? sized[0])?.size ?? null;
   })();
-  const outlineMmOf = (ci: string, size: string) =>
-    contourPieces
-      .find((p) => sizeOfPiece(p) === size && ciOf(p) === ci)
-      ?.poly.map((q) => ({ x: q.x * 10, y: q.y * 10 }));
+  const contourOf = (ci: string, size: string) =>
+    contourPieces.find((p) => sizeOfPiece(p) === size && ciOf(p) === ci);
+  // The outlines and their internal lines (the same ones the DXF builder reads, sourcePieces), so
+  // a drawn zone rides the welts and folds on screen exactly as on the generated sheet.
   const sizeMapOf = (ci: string, size: string) => {
     if (!ci || baseShapeSize == null || size === baseShapeSize) return null;
-    const base = outlineMmOf(ci, baseShapeSize);
-    const shown = outlineMmOf(ci, size);
-    return base && shown ? { base, shown } : null;
+    const base = contourOf(ci, baseShapeSize);
+    const shown = contourOf(ci, size);
+    if (!base || !shown) return null;
+    const mm = (piece: PieceDTO) => piece.poly.map((q) => ({ x: q.x * 10, y: q.y * 10 }));
+    return {
+      base: mm(base),
+      shown: mm(shown),
+      baseLines: fusingInternalLines(base, seamLayer),
+      shownLines: fusingInternalLines(shown, seamLayer),
+    };
   };
   const fuseOnSize = (ci: string, size: string, spec: PieceFuseSpec): PieceFuseSpec => {
     const m = sizeMapOf(ci, size);
-    return m ? mapFuseSpecToSize(spec, m.base, m.shown, requiredSeamAllowanceMm) : spec;
+    return m
+      ? mapFuseSpecToSize(spec, m.base, m.shown, requiredSeamAllowanceMm, {
+          base: m.baseLines,
+          target: m.shownLines,
+        })
+      : spec;
   };
   /** A spec edited on `size` → base-size markup. Untouched markup keeps its stored points exactly. */
   const fuseFromSize = (
@@ -1753,11 +1766,17 @@ export function PieceMatchModal({
   ): PieceFuseSpec => {
     const m = sizeMapOf(ci, size);
     if (!m) return next;
-    const shown = mapFuseSpecToSize(stored, m.base, m.shown, requiredSeamAllowanceMm);
+    const shown = mapFuseSpecToSize(stored, m.base, m.shown, requiredSeamAllowanceMm, {
+      base: m.baseLines,
+      target: m.shownLines,
+    });
     const same = (a: PieceFuseSpec, b: PieceFuseSpec) =>
       a.mode === b.mode && JSON.stringify([a.zone, a.edges]) === JSON.stringify([b.zone, b.edges]);
     if (same(next, shown)) return { ...next, zone: stored.zone, edges: stored.edges };
-    return mapFuseSpecToSize(next, m.shown, m.base, requiredSeamAllowanceMm);
+    return mapFuseSpecToSize(next, m.shown, m.base, requiredSeamAllowanceMm, {
+      base: m.shownLines,
+      target: m.baseLines,
+    });
   };
 
   // The display name of an existing piece, with a buffered rename applied.

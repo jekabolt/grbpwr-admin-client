@@ -2,6 +2,8 @@ export { buildFusingSheets, fusingSheetFilename } from './dxf';
 export type {
   BuildFusingSheetsInput,
   BuildFusingSheetsResult,
+  FuseInternalLine,
+  FuseInternals,
   FusingBomLine,
   FusingSkippedSize,
   FusingSourcePiece,

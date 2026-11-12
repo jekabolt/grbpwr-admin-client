@@ -12,14 +12,33 @@ import { GENERATED_FUSING_DXF_MARKER } from 'lib/pattern-import/types';
 import { writeScopes } from 'lib/pattern-import/write';
 import { fitGrainInside } from 'lib/pattern-import/semantics/grain-inside';
 import { edgeRunsOf } from './edge-runs';
-import { fuseAreaMm2, fuseInsetRingMm, fuseParts, generateFuseGeometry } from './geometry';
-import { ZONE_ON_CONTOUR_MM, projectOnRing } from './spline';
+import {
+  fuseAreaMm2,
+  fuseInsetRingMm,
+  fuseParts,
+  generateFuseGeometry,
+  pointInRing,
+  signedArea,
+} from './geometry';
+import { ZONE_ON_CONTOUR_MM, flattenSpline, projectOnRing } from './spline';
 import type { FuseSpline, PieceFuseSpec } from './types';
 
 export type FusingBomLine = {
   bomLineKey: string;
   code: string;
   label: string;
+};
+
+/**
+ * One internal pattern line of a size (welt, fold, dart leg, notch, drill), piece-local mm, in the
+ * file's own vertex order. Never the cut or the sewing contour.
+ */
+export type FuseInternalLine = { layer: string; closed: boolean; points: PtMm[] };
+
+/** The internal lines of the two outlines a size mapping runs between. */
+export type FuseInternals = {
+  base: readonly FuseInternalLine[];
+  target: readonly FuseInternalLine[];
 };
 
 export type FusingSourceSize = {
@@ -31,6 +50,8 @@ export type FusingSourceSize = {
   netOutline?: PtMm[];
   darts?: PtMm[][];
   grain?: { a: PtMm; b: PtMm } | null;
+  /** Internal lines in the outline's frame: a drawn zone rides them between sizes. */
+  internals?: FuseInternalLine[];
 };
 
 export type FusingSourcePiece = {
@@ -278,19 +299,26 @@ function projectOnRun(
 /** Stretches this close to parallel cannot pin a point between them (one of them is used). */
 const MIN_PIN_ANGLE_DEG = 30;
 
+/** Corner-to-corner stretches of the base contour with their twins on the target contour (arc). */
+type RunMatch = {
+  base: ContourRuns;
+  target: ContourRuns;
+  runs: { b0: number; b1: number; t0: number; t1: number }[];
+};
+
+const arcSpan = (s0: number, s1: number, total: number) =>
+  (((s1 - s0) % total) + total) % total || total;
+
 /**
- * Carries a point of the base contour's plane onto the target contour. The contour is cut into
- * stretches at its corners (corners matched across sizes by the grade's proportional position). A
- * point keeps its signed mm from its two nearest non-parallel stretches — a placket band keeps its
- * width off the front edge and its depth below the neck while the side seam grows. With one usable
- * stretch it keeps its mm off it at the same arc fraction. null when the corners do not match up.
+ * The contour cut into stretches at its corners, corners matched across sizes by the grade's
+ * proportional position. null when the corners do not match up.
  */
-function contourCarrier(
+function matchContourRuns(
   baseOutline: readonly PtMm[],
   targetOutline: readonly PtMm[],
-  from: ReturnType<typeof bbox>,
-  to: ReturnType<typeof bbox>,
-): ((point: PtMm) => PtMm) | null {
+): RunMatch | null {
+  const from = bbox(baseOutline);
+  const to = bbox(targetOutline);
   const base = contourRuns(baseOutline);
   const target = contourRuns(targetOutline);
   if (base.ring.length < 3 || target.ring.length < 3 || base.corners.length < 2) return null;
@@ -311,16 +339,25 @@ function contourCarrier(
     if (matched[(start + k) % matched.length] <= matched[(start + k - 1) % matched.length])
       return null;
   const m = base.corners.length;
-  const baseTotal = base.cum[base.ring.length];
-  const targetTotal = target.cum[target.ring.length];
   const runs = base.corners.map((i, k) => ({
     b0: base.cum[i],
     b1: base.cum[base.corners[(k + 1) % m]],
     t0: target.cum[matched[k]],
     t1: target.cum[matched[(k + 1) % m]],
   }));
-  const span = (s0: number, s1: number, total: number) =>
-    (((s1 - s0) % total) + total) % total || total;
+  return { base, target, runs };
+}
+
+/**
+ * Carries a point of the base contour onto the target contour. A point keeps its signed mm from
+ * its two nearest non-parallel stretches — a placket band keeps its width off the front edge and
+ * its depth below the neck while the side seam grows. With one usable stretch it keeps its mm off
+ * it at the same arc fraction. Well conditioned on the contour only: interior points go through
+ * interiorMap instead.
+ */
+function contourCarrier({ base, target, runs }: RunMatch): (point: PtMm) => PtMm {
+  const baseTotal = base.cum[base.ring.length];
+  const targetTotal = target.cum[target.ring.length];
   return (point) => {
     const near = runs
       .map((run, k) => ({ k, run, pr: projectOnRun(base, point, run.b0, run.b1) }))
@@ -336,8 +373,8 @@ function contourCarrier(
     const pins = [first, ...(second ? [second] : [])].map(({ run, pr }) => {
       const signed = pr.tx * (point.y - pr.p.y) - pr.ty * (point.x - pr.p.x);
       const along = (((pr.s - run.b0) % baseTotal) + baseTotal) % baseTotal;
-      const frac = along / span(run.b0, run.b1, baseTotal);
-      const length = span(run.t0, run.t1, targetTotal);
+      const frac = along / arcSpan(run.b0, run.b1, baseTotal);
+      const length = arcSpan(run.t0, run.t1, targetTotal);
       const at = pointAtArc(target, run.t0 + frac * length);
       // The tangent comes from inside the pin's own stretch, as the re-anchoring below reads it. At a
       // stretch end the arc sits on a corner, and which side's segment it read there depended on
@@ -385,18 +422,316 @@ function contourCarrier(
   };
 }
 
+// ---------- interior points: interpolated between known correspondences ----------
+//
+// Inside the piece a point has no stretch to keep its mm from: the two-stretch solve there turned a
+// pocket rectangle into a wedge. Its displacement is instead a weighted mean of the displacements
+// the two sizes state outright — the contour (corner-matched, arc fraction along each stretch) and
+// the internal lines matched across sizes. A mean never moves a point farther than its farthest
+// anchor, and a point on an internal line moves with that line.
+
+/** A base segment whose ends are known to move by da / db (linearly in between). */
+type Anchor = { a: PtMm; b: PtMm; da: PtMm; db: PtMm; len: number };
+
+/** Anchors are cut this short, so a long straight line weighs from where it is near. */
+const ANCHOR_STEP_MM = 5;
+/** An anchor weighs len / r^p: the nearest lines decide, the far side of the piece barely counts. */
+const ANCHOR_POWER = 3;
+/** A matched internal line moving this much farther than any contour point is not the same line. */
+const LINE_SLACK_MM = 10;
+/** Fixed-point steps of the inverse mapping (it contracts fast: grades vary slowly). */
+const INVERT_STEPS = 32;
+
+const lerpPt = (a: PtMm, b: PtMm, t: number): PtMm => ({
+  x: a.x + (b.x - a.x) * t,
+  y: a.y + (b.y - a.y) * t,
+});
+
+/** Anchors along a base polyline whose every vertex has a known twin, cut to ANCHOR_STEP_MM. */
+function anchorsAlong(base: readonly PtMm[], moved: readonly PtMm[], closed: boolean): Anchor[] {
+  const out: Anchor[] = [];
+  const n = base.length;
+  for (let i = 0; i < (closed ? n : n - 1); i++) {
+    const j = (i + 1) % n;
+    const len = Math.hypot(base[j].x - base[i].x, base[j].y - base[i].y);
+    if (!(len > 1e-9)) continue;
+    const da = { x: moved[i].x - base[i].x, y: moved[i].y - base[i].y };
+    const db = { x: moved[j].x - base[j].x, y: moved[j].y - base[j].y };
+    const k = Math.ceil(len / ANCHOR_STEP_MM);
+    for (let s = 0; s < k; s++)
+      out.push({
+        a: lerpPt(base[i], base[j], s / k),
+        b: lerpPt(base[i], base[j], (s + 1) / k),
+        da: lerpPt(da, db, s / k),
+        db: lerpPt(da, db, (s + 1) / k),
+        len: len / k,
+      });
+  }
+  return out;
+}
+
+/** Contour anchors: each stretch's point keeps its arc fraction between its matched corners. */
+function contourAnchors({ base, target, runs }: RunMatch): Anchor[] {
+  const n = base.ring.length;
+  const baseTotal = base.cum[n];
+  const targetTotal = target.cum[target.ring.length];
+  return runs.flatMap((run) => {
+    const length = arcSpan(run.b0, run.b1, baseTotal);
+    const twinLength = arcSpan(run.t0, run.t1, targetTotal);
+    // The stretch's own vertices (ring-start independent), then cut to ANCHOR_STEP_MM: the target
+    // point between two samples is read off the target contour, not interpolated.
+    const knots = [
+      0,
+      ...base.cum
+        .slice(0, n)
+        .map((s) => (((s - run.b0) % baseTotal) + baseTotal) % baseTotal)
+        .filter((s) => s > 1e-9 && s < length - 1e-9)
+        .sort((a, b) => a - b),
+      length,
+    ];
+    const stops: number[] = [];
+    for (let k = 1; k < knots.length; k++) {
+      const steps = Math.max(1, Math.ceil((knots[k] - knots[k - 1]) / ANCHOR_STEP_MM));
+      for (let s = 0; s < steps; s++)
+        stops.push(knots[k - 1] + ((knots[k] - knots[k - 1]) * s) / steps);
+    }
+    stops.push(length);
+    return anchorsAlong(
+      stops.map((s) => pointAtArc(base, run.b0 + s).p),
+      stops.map((s) => pointAtArc(target, run.t0 + (s / length) * twinLength).p),
+      false,
+    );
+  });
+}
+
+/** Internal lines paired across sizes: same layer, same order, same vertex count and closure. */
+function matchedLines(
+  base: readonly FuseInternalLine[],
+  target: readonly FuseInternalLine[],
+): [FuseInternalLine, FuseInternalLine][] {
+  const byLayer = (lines: readonly FuseInternalLine[]) => {
+    const out = new Map<string, FuseInternalLine[]>();
+    for (const line of lines)
+      if (line.points.length >= 2) out.set(line.layer, [...(out.get(line.layer) ?? []), line]);
+    return out;
+  };
+  const twinsByLayer = byLayer(target);
+  const pairs: [FuseInternalLine, FuseInternalLine][] = [];
+  for (const [layer, lines] of byLayer(base)) {
+    const twins = twinsByLayer.get(layer);
+    // A layer whose lines do not pair up one to one says nothing reliable: it is left out whole.
+    if (
+      !twins ||
+      twins.length !== lines.length ||
+      lines.some(
+        (line, i) =>
+          line.closed !== twins[i].closed || line.points.length !== twins[i].points.length,
+      )
+    )
+      continue;
+    lines.forEach((line, i) => pairs.push([line, twins[i]]));
+  }
+  return pairs;
+}
+
+type GradeField = { anchors: Anchor[]; lines: Anchor[][] };
+
+function gradeField(
+  baseOutline: readonly PtMm[],
+  targetOutline: readonly PtMm[],
+  baseLines: readonly FuseInternalLine[],
+  targetLines: readonly FuseInternalLine[],
+): GradeField {
+  const match = matchContourRuns(baseOutline, targetOutline);
+  let contour: Anchor[];
+  if (match) contour = contourAnchors(match);
+  else {
+    // Corners that do not match up: the bbox frames stand in, as they do for the contour itself.
+    const from = bbox(baseOutline);
+    const to = bbox(targetOutline);
+    contour = anchorsAlong(
+      baseOutline,
+      baseOutline.map((p) => mapPointBetweenOutlines(p, from, to)),
+      true,
+    );
+  }
+  let reach = 0;
+  for (const a of contour)
+    reach = Math.max(reach, Math.hypot(a.da.x, a.da.y), Math.hypot(a.db.x, a.db.y));
+  const lines = matchedLines(baseLines, targetLines)
+    .filter(([line, twin]) =>
+      line.points.every(
+        (p, i) =>
+          Math.hypot(twin.points[i].x - p.x, twin.points[i].y - p.y) <= reach + LINE_SLACK_MM,
+      ),
+    )
+    .map(([line, twin]) => anchorsAlong(line.points, twin.points, line.closed))
+    .filter((line) => line.length > 0);
+  return { anchors: [...contour, ...lines.flat()], lines };
+}
+
+/** The interpolated displacement at p: exact on an anchor, a convex mean of them elsewhere. */
+function displacementAt(field: GradeField, p: PtMm): PtMm {
+  let sum = 0;
+  let x = 0;
+  let y = 0;
+  for (const s of field.anchors) {
+    const abx = s.b.x - s.a.x;
+    const aby = s.b.y - s.a.y;
+    const t = Math.max(
+      0,
+      Math.min(1, ((p.x - s.a.x) * abx + (p.y - s.a.y) * aby) / (abx * abx + aby * aby)),
+    );
+    const dx = s.da.x + (s.db.x - s.da.x) * t;
+    const dy = s.da.y + (s.db.y - s.da.y) * t;
+    const r = Math.hypot(p.x - s.a.x - abx * t, p.y - s.a.y - aby * t);
+    if (r < 1e-6) return { x: dx, y: dy };
+    const w = s.len / r ** ANCHOR_POWER;
+    sum += w;
+    x += w * dx;
+    y += w * dy;
+  }
+  return sum > 0 ? { x: x / sum, y: y / sum } : { x: 0, y: 0 };
+}
+
+function centroidOf(ring: readonly PtMm[]): PtMm {
+  let twice = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    const cross = a.x * b.y - b.x * a.y;
+    twice += cross;
+    cx += (a.x + b.x) * cross;
+    cy += (a.y + b.y) * cross;
+  }
+  if (Math.abs(twice) > 1e-9) return { x: cx / (3 * twice), y: cy / (3 * twice) };
+  const n = Math.max(1, ring.length);
+  return {
+    x: ring.reduce((s, p) => s + p.x, 0) / n,
+    y: ring.reduce((s, p) => s + p.y, 0) / n,
+  };
+}
+
+/**
+ * The one translation of a detached ring: the mean displacement of the internal lines it covers
+ * (a patch drawn round a welt goes where the welt goes), else of the parts of lines crossing it,
+ * else the interpolated displacement at its centroid.
+ */
+function shiftOfRing(field: GradeField, ring: readonly PtMm[]): PtMm {
+  const covered: Anchor[] = [];
+  const crossing: Anchor[] = [];
+  if (ring.length >= 3)
+    for (const line of field.lines) {
+      const inside = line.filter((s) => pointInRing(lerpPt(s.a, s.b, 0.5), ring));
+      if (!inside.length) continue;
+      if (
+        inside.length === line.length &&
+        line.every((s) => pointInRing(s.a, ring) && pointInRing(s.b, ring))
+      )
+        covered.push(...line);
+      else crossing.push(...inside);
+    }
+  const pick = covered.length ? covered : crossing;
+  if (!pick.length) return displacementAt(field, centroidOf(ring));
+  let len = 0;
+  let x = 0;
+  let y = 0;
+  for (const s of pick) {
+    len += s.len;
+    x += (s.len * (s.da.x + s.db.x)) / 2;
+    y += (s.len * (s.da.y + s.db.y)) / 2;
+  }
+  return { x: x / len, y: y / len };
+}
+
+/**
+ * Which outline a size mapping is built from: the smaller one, whichever way round it is asked. The
+ * other direction inverts the same field, so base → size → base gives the stored points back.
+ */
+function buildsFrom(base: readonly PtMm[], target: readonly PtMm[]): boolean {
+  const key = (ring: readonly PtMm[]) => [
+    Math.abs(signedArea(ring)),
+    ring.reduce((s, p) => s + p.x, 0),
+    ring.reduce((s, p) => s + p.y, 0),
+  ];
+  const a = key(base);
+  const b = key(target);
+  for (let i = 0; i < a.length; i++)
+    if (Math.abs(a[i] - b[i]) > 1e-9 * Math.max(1, Math.abs(a[i]), Math.abs(b[i])))
+      return a[i] < b[i];
+  return true;
+}
+
+type InteriorMap = {
+  point: (point: PtMm) => PtMm;
+  /** The translation that carries a whole detached ring. */
+  shift: (ring: readonly PtMm[]) => PtMm;
+};
+
+function interiorMap(
+  baseOutline: readonly PtMm[],
+  targetOutline: readonly PtMm[],
+  internals: FuseInternals | null | undefined,
+): InteriorMap {
+  const baseLines = internals?.base ?? [];
+  const targetLines = internals?.target ?? [];
+  if (buildsFrom(baseOutline, targetOutline)) {
+    const field = gradeField(baseOutline, targetOutline, baseLines, targetLines);
+    return {
+      point: (p) => {
+        const d = displacementAt(field, p);
+        return { x: p.x + d.x, y: p.y + d.y };
+      },
+      shift: (ring) => shiftOfRing(field, ring),
+    };
+  }
+  const field = gradeField(targetOutline, baseOutline, targetLines, baseLines);
+  const solve = (step: (guess: PtMm) => PtMm): PtMm => {
+    let guess = { x: 0, y: 0 };
+    for (let k = 0; k < INVERT_STEPS; k++) {
+      const next = step(guess);
+      const done = Math.hypot(next.x - guess.x, next.y - guess.y) < 1e-7;
+      guess = next;
+      if (done) break;
+    }
+    return guess;
+  };
+  return {
+    // q = p + d(p) solved for p: the displacement d sits where p is, on the field's own side.
+    point: (q) => {
+      const d = solve((guess) => displacementAt(field, { x: q.x - guess.x, y: q.y - guess.y }));
+      return { x: q.x - d.x, y: q.y - d.y };
+    },
+    shift: (ring) => {
+      const d = solve((guess) =>
+        shiftOfRing(
+          field,
+          ring.map((q) => ({ x: q.x - guess.x, y: q.y - guess.y })),
+        ),
+      );
+      return { x: -d.x, y: -d.y };
+    },
+  };
+}
+
 /**
  * Maps base-size markup onto one graded outline. Widths and insets remain physical millimetres;
- * positions follow the grade. Drawn zones use the two outlines' local frames, while strip trims
- * keep the same fraction of their selected edge run. A drawn zone's point keeps its mm from the cut
- * contour and, along it, from the nearer corner of that stretch (contourCarrier). A point on the
- * inset contour stays on it, so a contour-following side keeps following the contour in every size.
+ * positions follow the grade. Strip trims keep the same fraction of their selected edge run. A
+ * drawn zone's point on the cut or inset contour keeps its mm from that contour and, along it, from
+ * the nearer corner of that stretch (contourCarrier); a point on the inset contour stays on it, so a
+ * contour-following side keeps following the contour in every size. Interior points follow the
+ * contour and the internal lines (interiorMap), and a ring with no point on the contour moves
+ * whole, by one translation: a patch round a welt pocket stays the same patch in every size.
+ * `internals` are the two outlines' internal lines; without them the contour alone leads.
  */
 export function mapFuseSpecToSize(
   source: PieceFuseSpec,
   baseOutline: readonly PtMm[],
   targetOutline: readonly PtMm[],
   seamAllowanceMm?: number | null,
+  internals?: FuseInternals | null,
 ): PieceFuseSpec {
   if (source.mode === 'zone' && source.zone && !('dxfPieceKey' in source.zone)) {
     const from = bbox(baseOutline);
@@ -409,34 +744,77 @@ export function mapFuseSpecToSize(
     } catch {
       // generateFuseGeometry owns the inset refusal; the cut contour stands in for it here.
     }
-    // A zone point rides the cut contour: its nearest contour point keeps its mm from the nearer
+    // A zone point on the contour rides it: its nearest contour point keeps its mm from the nearer
     // corner of that run, and the point keeps its mm off the contour. A placket band so keeps its
     // width and its distance from the neck and the hem while the grade grows the piece around it.
-    const carry = contourCarrier(baseOutline, targetOutline, from, to);
-    const mapPoint = (point: PtMm, followContour: boolean): PtMm => {
+    const match = matchContourRuns(baseOutline, targetOutline);
+    const carry = match ? contourCarrier(match) : null;
+    const alongContour = (point: PtMm, followContour: boolean): PtMm => {
       const moved = carry ? carry(point) : mapPointBetweenOutlines(point, from, to);
-      const onContour =
+      const onInset =
         followContour &&
         baseInset &&
         targetInset &&
         projectOnRing(point, baseInset).d <= ZONE_ON_CONTOUR_MM;
-      return onContour ? projectOnRing(moved, targetInset!).p : moved;
+      return onInset ? projectOnRing(moved, targetInset!).p : moved;
     };
     if ('rect' in source.zone) {
       const [ax, ay, bx, by] = source.zone.rect;
-      const a = mapPoint({ x: ax, y: ay }, false);
-      const b = mapPoint({ x: bx, y: by }, false);
+      const a = alongContour({ x: ax, y: ay }, false);
+      const b = alongContour({ x: bx, y: by }, false);
       return { ...source, zone: { rect: [a.x, a.y, b.x, b.y] } };
     }
-    const mapSpline = (spline: FuseSpline, followContour: boolean): FuseSpline => ({
-      points: spline.points.map((point) => ({ ...point, ...mapPoint(point, followContour) })),
-    });
+    const onContour = (point: PtMm) =>
+      projectOnRing(point, baseOutline).d <= ZONE_ON_CONTOUR_MM ||
+      (!!baseInset && projectOnRing(point, baseInset).d <= ZONE_ON_CONTOUR_MM);
+    let interior: InteriorMap | null = null;
+    const inside = () => (interior ??= interiorMap(baseOutline, targetOutline, internals));
+    /** shift: the translation a detached ring moved by; null when it touches the contour. */
+    const mapRing = (
+      spline: FuseSpline,
+      followContour: boolean,
+      parentShift: PtMm | null = null,
+    ): { spline: FuseSpline; shift: PtMm | null } => {
+      const touching = spline.points.map(onContour);
+      if (touching.some(Boolean))
+        return {
+          spline: {
+            points: spline.points.map((point, i) => ({
+              ...point,
+              ...(touching[i] ? alongContour(point, followContour) : inside().point(point)),
+            })),
+          },
+          shift: null,
+        };
+      const shift = parentShift ?? inside().shift(flattenSpline(spline.points));
+      return {
+        spline: {
+          points: spline.points.map((point) => ({
+            ...point,
+            x: point.x + shift.x,
+            y: point.y + shift.y,
+          })),
+        },
+        shift,
+      };
+    };
+    const outers = [source.zone.spline, ...source.zone.islands].map((spline) => ({
+      ring: flattenSpline(spline.points),
+      ...mapRing(spline, true),
+    }));
     return {
       ...source,
       zone: {
-        spline: mapSpline(source.zone.spline, true),
-        islands: source.zone.islands.map((island) => mapSpline(island, true)),
-        holes: source.zone.holes.map((hole) => mapSpline(hole, false)),
+        spline: outers[0].spline,
+        islands: outers.slice(1).map((outer) => outer.spline),
+        // A hole inside a ring that moved whole moves with it, so it stays where it was cut.
+        holes: source.zone.holes.map((hole) => {
+          const first = hole.points[0];
+          const parent = first
+            ? outers.find((outer) => outer.shift && pointInRing(first, outer.ring))
+            : undefined;
+          return mapRing(hole, false, parent?.shift ?? null).spline;
+        }),
       },
     };
   }
@@ -511,6 +889,7 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
             base.outline,
             sourceSize.outline,
             sourcePiece.seamAllowanceMm,
+            { base: base.internals ?? [], target: sourceSize.internals ?? [] },
           );
           const reference =
             fuse.zone && 'dxfPieceKey' in fuse.zone

@@ -785,12 +785,28 @@ export async function main() {
   const mappedRings = mapFuseSpecToSize(ringsSpec, outline, rectangle(200, 160));
   assert.ok(mappedRings.zone && 'spline' in mappedRings.zone);
   if (mappedRings.zone && 'spline' in mappedRings.zone) {
-    // A point keeps its mm off its two nearest contour stretches (4b0af47c6): the main ring sits
-    // by the bottom-left corner and stays put; the island and its hole sit nearer the right side
-    // and keep their mm from it on the doubled piece.
-    near(mappedRings.zone.spline.points[1].x, 30);
-    near(mappedRings.zone.islands[0].points[0].x, 150);
-    near(mappedRings.zone.holes[0].points[0].x, 152);
+    // A ring off the contour is carried rigidly (it keeps its mm size), by the contour's
+    // interpolated move at its centroid; a hole moves with the part it cuts.
+    const { spline, islands, holes } = mappedRings.zone;
+    const moves = [
+      [spline, ring(10, 10, 30, 20)],
+      [islands[0], ring(50, 10, 60, 20)],
+      [holes[0], ring(52, 12, 56, 15)],
+    ].map(([mapped, stored]) => {
+      const dx = mapped.points[0].x - stored.points[0].x;
+      const dy = mapped.points[0].y - stored.points[0].y;
+      mapped.points.forEach((point, i) => {
+        near(point.x - stored.points[i].x, dx, 1e-6);
+        near(point.y - stored.points[i].y, dy, 1e-6);
+      });
+      // Never farther than the contour itself moves.
+      assert.ok(Math.hypot(dx, dy) <= Math.hypot(100, 80));
+      return { dx, dy };
+    });
+    near(moves[2].dx, moves[1].dx, 1e-6);
+    near(moves[2].dy, moves[1].dy, 1e-6);
+    // The island sits farther from the fixed bottom-left corner, so it travels farther.
+    assert.ok(moves[1].dx > moves[0].dx && moves[0].dx > 0);
   }
   const ringsDxf = buildFusingSheets({
     techCardId: 7,
