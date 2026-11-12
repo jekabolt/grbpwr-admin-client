@@ -23,7 +23,7 @@
 //   node scripts/techcard-hscroll-probe.mjs --mutate-unguard  # снять min-w-0 с формы
 //   node scripts/techcard-hscroll-probe.mjs --self-test       # САМОПРОВЕРКА: детектор обязан покраснеть
 
-import { build as esbuild } from 'esbuild';
+import { build as esbuild } from './probe-esbuild.mjs';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';

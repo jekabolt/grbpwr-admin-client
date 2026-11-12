@@ -50,7 +50,7 @@ import { readFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { build as esbuild } from 'esbuild';
+import { build as esbuild } from './probe-esbuild.mjs';
 
 const arg = process.argv.find((a) => a.startsWith('--mutate'));
 const MUTANT = arg ? Number((arg.split('=')[1] ?? '0').trim()) || 0 : null;

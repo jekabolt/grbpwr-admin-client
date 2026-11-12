@@ -22,7 +22,7 @@
 //   node scripts/labels-foundation-probe.mjs                 всё: код + все мутанты
 //   node scripts/labels-foundation-probe.mjs --mutate=lastField   один мутант, вывод как есть (красный)
 
-import { build } from 'esbuild';
+import { build } from './probe-esbuild.mjs';
 import { readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';

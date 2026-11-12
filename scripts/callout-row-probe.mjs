@@ -5,7 +5,7 @@
 // зачем?», «при выбранном стиче показывает только исо но без пиктограмки».
 //
 //   node scripts/callout-row-probe.mjs [--mutate=open|stitch]
-import { build } from 'esbuild';
+import { build } from './probe-esbuild.mjs';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
