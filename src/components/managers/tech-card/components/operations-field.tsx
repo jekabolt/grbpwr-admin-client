@@ -284,7 +284,11 @@ import { AssemblyFullscreen, FROZEN_REFUSAL, restoreScreenFocus } from './assemb
 import { SeamWalk } from './seam-walk';
 import { StepTimeField } from './step-time-field';
 import { DEFAULT_SEAM_TOLERANCE_MM } from './step-seams/seam-length';
-import { restorableSeamKeys, seamWritesInFlight } from './step-seams/step-removal-seams';
+import {
+  heldSeamKeys,
+  restorableSeamKeys,
+  seamWritesInFlight,
+} from './step-seams/step-removal-seams';
 import {
   linkKeys,
   linkedStepRows,
@@ -6549,6 +6553,7 @@ export function OperationsField({
                 seamKeys: operation.seamKeys,
                 poseKeys: operation.poseKeys,
               })),
+            cutStrips: () => (getValues('cutStrips') ?? []) as CutStrip[],
             rows: () => {
               const state = useSeamsStore.getState();
               return {
@@ -6854,9 +6859,11 @@ export function OperationsField({
         });
         const operationNumber =
           operations[currentIndex]?.operationNumber ?? operationStepNumber(currentIndex);
+        // A strip that outlives the step (not torn down with it) still holds its seam: never owed.
+        const stripHeld = heldSeamKeys({ operations: [], cutStrips: teardown.strips });
         const candidateKeys = [
           ...new Set([...linkKeys(removalRecord.row), ...teardown.seamRowsToRemove]),
-        ];
+        ].filter((key) => !stripHeld.has(key));
         const binding = bindingChanged
           ? {
               stripsBefore,

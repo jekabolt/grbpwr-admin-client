@@ -231,6 +231,7 @@ describe('step removal sequencing', () => {
     };
     const io = {
       active: () => hasStepRemovalOwed(CARD, 'b', 20),
+      cutStrips: () => [],
       operations: () => operations,
       rows: () => rows,
       change,
@@ -259,6 +260,7 @@ describe('step removal sequencing', () => {
     await expect(
       runStepRemovalCleanup(entry, {
         active: () => true,
+        cutStrips: () => [],
         operations: () => operations,
         rows: () => rows,
         change: async (input) => {
@@ -288,6 +290,7 @@ describe('step removal sequencing', () => {
     const change = vi.fn(async () => answers.shift()!);
     const io = {
       active: () => hasStepRemovalOwed(CARD, 'b', 20),
+      cutStrips: () => [],
       operations: () => [] as Row[],
       rows: () => middleSnapshot().rows,
       change,
@@ -308,6 +311,7 @@ describe('step removal sequencing', () => {
     await expect(
       runStepRemovalCleanup(entry, {
         active: () => true,
+        cutStrips: () => [],
         operations: () => [],
         rows: () => middleSnapshot().rows,
         change: async () => refused('contradicts_delete'),
@@ -392,23 +396,33 @@ describe('step removal sequencing', () => {
       strips: [],
     });
 
+    const bindingDeletes: string[][] = [];
     await runStepRemovalCleanup(owedOf(snapshot), {
       active: () => true,
       operations: () => form,
+      cutStrips: () => strips,
       rows: () => savedRows,
       change: async (input) => {
         const gone = build(input).delete ?? [];
+        bindingDeletes.push([...gone]);
         savedRows.seams = savedRows.seams.filter((row) => !gone.includes(row.seamKey));
         return changed();
       },
       clear: () => clearStepRemovalOwed(CARD, 'b', 20),
     });
+    // The strip left with its binding step: nothing holds its seam, so it is cleaned with the step's.
+    expect(bindingDeletes).toEqual([['seam-b', 'strip-seam']]);
+    expect(savedRows.seams).toEqual([]);
 
+    const undoUpserts: string[][] = [];
     await runStepRemovalUndoChange(snapshot, {
       validate: () => null,
       settle: async () => true,
       rows: () => savedRows,
-      change: async () => changed(),
+      change: async (input) => {
+        undoUpserts.push((build(input).upsert ?? []).map((row) => row.seamKey));
+        return changed();
+      },
       restore: (row, keyMap) => {
         strips = [{ ...snapshot.strip, seamKey: keyMap.get('strip-seam') ?? 'strip-seam' }];
         form[0].inputKeys = [...snapshot.patch.before];
@@ -423,6 +437,7 @@ describe('step removal sequencing', () => {
       unsettled: 'still saving',
     });
 
+    expect(undoUpserts).toEqual([['seam-b', 'strip-seam']]);
     expect(strips).toEqual([snapshot.strip]);
     expect(form[0]).toEqual(snapshot.row);
     expect(form[1].inputKeys).toEqual(snapshot.patch.before);
@@ -463,6 +478,7 @@ describe('step removal sequencing', () => {
 
     await runStepRemovalCleanup(entry, {
       active: () => true,
+      cutStrips: () => [],
       operations: () => [
         { historyKey: 'c', operationNumber: 20, seamKeys: ['shared'], poseKeys: [] },
       ],
@@ -660,5 +676,74 @@ describe('step removal sequencing', () => {
     for (const entry of owedStepRemovals(CARD)) await runStepRemovalCleanup(entry, reloadCleanup());
     expect(order).toEqual(['clear', 'restore']);
     expect(reloadCleanup).not.toHaveBeenCalled();
+  });
+});
+
+// A cut strip names the seam its length is taken from (TechCardCutStrip.seam_key, a soft reference
+// the server never guards). That seam is held exactly like a step link: cleanup never deletes it.
+describe('step removal cleanup and cut strip seams', () => {
+  const entry: OwedStepRemoval = {
+    historyKey: 'b',
+    operationNumber: 20,
+    candidateKeys: ['own', 'strip-seam'],
+    at: 10,
+  };
+  const rows = () => ({ seams: [seam('own'), seam('strip-seam')], poses: [] });
+
+  it('S1. a from_seam strip that outlives a non-binding step keeps its seam; the other own seam goes', async () => {
+    const deletes: string[][] = [];
+    await expect(
+      runStepRemovalCleanup(entry, {
+        active: () => true,
+        operations: () => [],
+        cutStrips: () => [{ seamKey: 'strip-seam' }],
+        rows,
+        change: async (input) => {
+          build(input);
+          deletes.push([...(build(input).delete ?? [])]);
+          return changed();
+        },
+        clear: vi.fn(),
+      }),
+    ).resolves.toBe(true);
+    expect(deletes).toEqual([['own']]);
+  });
+
+  it('S2. a strip pointed at a candidate while the cleanup waited keeps that seam alive', async () => {
+    const strips: { seamKey?: string }[] = [];
+    const deletes: string[][] = [];
+    await runStepRemovalCleanup(entry, {
+      active: () => true,
+      operations: () => [],
+      cutStrips: () => strips,
+      rows,
+      change: async (input) => {
+        build(input);
+        // The body save the flush carries holds the new strip.
+        strips.push({ seamKey: 'own' });
+        deletes.push([...(build(input).delete ?? [])]);
+        return changed();
+      },
+      clear: vi.fn(),
+    });
+    expect(deletes).toEqual([['strip-seam']]);
+  });
+
+  it('S3. a strip holding the only candidate left sends no request and drops the debt', async () => {
+    const change = vi.fn();
+    const clear = vi.fn();
+    await runStepRemovalCleanup(
+      { ...entry, candidateKeys: ['strip-seam'] },
+      {
+        active: () => true,
+        operations: () => [],
+        cutStrips: () => [{ seamKey: 'strip-seam' }],
+        rows,
+        change,
+        clear,
+      },
+    );
+    expect(change).not.toHaveBeenCalled();
+    expect(clear).toHaveBeenCalledOnce();
   });
 });

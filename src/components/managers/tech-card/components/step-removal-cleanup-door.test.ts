@@ -56,6 +56,7 @@ const reply = (
 function harness(call: SeamChangeDeps['call'], over: Partial<SeamFormBridge> = {}) {
   // The saved body: the removed step is gone, h10 is the step that may take its seams.
   const ops: Op[] = [{ historyKey: 'h10', operationNumber: 10, seamKeys: [], poseKeys: [] }];
+  const strips: { seamKey?: string }[] = [];
   let version = 7;
   const log: string[] = [];
   const bridge: SeamFormBridge = {
@@ -80,6 +81,7 @@ function harness(call: SeamChangeDeps['call'], over: Partial<SeamFormBridge> = {
     runStepRemovalCleanup(entry, {
       active: () => true,
       operations: () => ops,
+      cutStrips: () => strips,
       rows: () => {
         const s = useSeamsStore.getState();
         return { seams: s.server, poses: s.poses };
@@ -91,6 +93,7 @@ function harness(call: SeamChangeDeps['call'], over: Partial<SeamFormBridge> = {
     });
   return {
     ops,
+    strips,
     log,
     bridge,
     clear,
@@ -176,5 +179,23 @@ describe('step removal cleanup through the real seam door', () => {
     const s = useSeamsStore.getState();
     expect(s.pending[a.seamKey]).toBeUndefined();
     expect(s.errors[a.seamKey]).toBeUndefined();
+  });
+
+  it('d) a cut strip measured from a candidate keeps that seam: one request deleting only the other', async () => {
+    const sent: ChangeTechCardSeamsRequest[] = [];
+    const h = harness(async (req) => {
+      sent.push(req);
+      return reply(8, [b], [a.seamKey]);
+    });
+    // A non-binding step took the strip as an input; the strip outlives the removed step.
+    h.strips.push({ seamKey: b.seamKey });
+    await h.run();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].delete).toEqual([a.seamKey]);
+    expect(h.clear).toHaveBeenCalledOnce();
+    expect(storeKeys()).toEqual([b.seamKey]);
+    const s = useSeamsStore.getState();
+    expect(s.pending[b.seamKey]).toBeUndefined();
+    expect(s.errors[b.seamKey]).toBeUndefined();
   });
 });

@@ -4,6 +4,7 @@ import type { OwedStepRemoval } from './card-owed';
 import type { SeamChangeInput, SeamChangeResult } from './assembly-seams/seam-change';
 import type { SeamChange, StepRef } from './assembly-seams/seam-change-plan';
 import { reuseKeys, useSeamsStore } from './assembly-seams/seams-store';
+import { heldSeamKeys } from './step-seams/step-removal-seams';
 
 export type StepLinkRow = {
   historyKey?: string;
@@ -214,15 +215,18 @@ export function savedRemovalStillPresent(
   return !!operation && linkKeys(operation).some((key) => candidates.has(key));
 }
 
-/** Candidate rows that exist and are unlinked by every operation of the saved body. */
+type CleanupStrip = { seamKey?: string };
+
+/** Candidate rows that exist and that nothing in the saved body holds (`heldSeamKeys`). */
 export function stepRemovalCleanupKeys(
   entry: OwedStepRemoval,
   operations: readonly CleanupOperation[],
   rows: StepRemovalRows,
+  cutStrips: readonly CleanupStrip[] = [],
 ): string[] {
-  const linked = new Set(operations.flatMap(linkKeys));
+  const held = heldSeamKeys({ operations, cutStrips });
   const stored = new Set([...rows.seams, ...rows.poses].map((row) => row.seamKey));
-  return [...new Set(entry.candidateKeys)].filter((key) => stored.has(key) && !linked.has(key));
+  return [...new Set(entry.candidateKeys)].filter((key) => stored.has(key) && !held.has(key));
 }
 
 const cleanupRetryable = (why: string): boolean => {
@@ -241,6 +245,8 @@ const cleanupRetryable = (why: string): boolean => {
 export type StepRemovalCleanupIo = {
   active: () => boolean;
   operations: () => readonly CleanupOperation[];
+  /** The saved body's cut strips: a strip measured from a candidate holds it like a step link. */
+  cutStrips: () => readonly CleanupStrip[];
   rows: () => StepRemovalRows;
   change: (input: SeamChangeInput) => Promise<SeamChangeResult>;
   clear: () => void;
@@ -257,7 +263,7 @@ export async function runStepRemovalCleanup(
   io: StepRemovalCleanupIo,
 ): Promise<boolean> {
   if (!io.active()) return true;
-  let lastKeys = stepRemovalCleanupKeys(entry, io.operations(), io.rows());
+  let lastKeys = stepRemovalCleanupKeys(entry, io.operations(), io.rows(), io.cutStrips());
   // Every candidate is already linked again or gone: nothing to delete, nothing to queue.
   if (!lastKeys.length || !entry.candidateKeys.length) {
     io.clear();
@@ -266,7 +272,7 @@ export async function runStepRemovalCleanup(
   let builds = 0;
   const build = (): SeamChange => {
     builds += 1;
-    lastKeys = stepRemovalCleanupKeys(entry, io.operations(), io.rows());
+    lastKeys = stepRemovalCleanupKeys(entry, io.operations(), io.rows(), io.cutStrips());
     return lastKeys.length
       ? { delete: lastKeys }
       : { link: [{ step: { historyKey: entry.historyKey }, seamKey: entry.candidateKeys[0] }] };
