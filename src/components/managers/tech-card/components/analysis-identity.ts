@@ -112,7 +112,10 @@ const SEP = '\u0000';
 
 /** The bare uid: category and the anchors, sorted so anchor order cannot rename a finding. */
 export function findingUid(category: string, refs: string[], titleSalt?: string): string {
-  const sorted = [...refs].map((r) => r.trim()).filter(Boolean).sort();
+  const sorted = [...refs]
+    .map((r) => r.trim())
+    .filter(Boolean)
+    .sort();
   const material =
     category.trim() + SEP + sorted.join(SEP) + (titleSalt ? SEP + sha256Hex(titleSalt) : '');
   return sha256Hex(material).slice(0, UID_LEN);
@@ -128,7 +131,10 @@ export function findingUid(category: string, refs: string[], titleSalt?: string)
  */
 export function assignUids(findings: TechCardAnalysisFinding[]): string[] {
   const plain = findings.map((f) =>
-    findingUid((f.category ?? '').trim(), (f.refs ?? []).filter((r): r is string => !!r?.trim())),
+    findingUid(
+      (f.category ?? '').trim(),
+      (f.refs ?? []).filter((r): r is string => !!r?.trim()),
+    ),
   );
   const seen = new Map<string, number>();
   for (const u of plain) seen.set(u, (seen.get(u) ?? 0) + 1);

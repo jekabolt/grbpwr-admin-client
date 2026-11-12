@@ -3,39 +3,33 @@
 // Reads: the graph the provider read (held through its 400 ms settle, as the map holds it), the
 // rows (server + optimistic) and the resolver's verdict → one `Review`.
 //
-// Writes: optimistic per row — the row is laid over the server's list at once, the RPC sends ONLY
-// the rows that changed (a keyed upsert, never the whole list), the server's echo replaces the list
-// (it carries `stale` and who / when), and the card query is invalidated so the next read agrees. A
-// refused write puts the server's words on the row and reverts it. A released card writes nothing.
+// Writes: one gesture, one ChangeTechCardSeams (C7, seam-change.ts) — the rows are laid over the
+// server's list at once, the request carries ONLY what the gesture changes (rows and step links,
+// under the version the form stands on), the server's answer replaces the list and the form adopts
+// its links, and the card query is invalidated so the next read agrees. A refused write puts the
+// server's words on the row and reverts it. A released card writes nothing.
 
 import { adminService } from 'api/api';
-import type { common_TechCardSeam } from 'api/proto-http/admin';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import { notify } from 'lib/stores/store';
 import { refuseGesture } from '../refuse-gesture';
 import type { PieceGeom, SeamGraph } from 'lib/assembly-skeleton/types';
-import {
-  toWire,
-  type StoredPose,
-  type StoredRow,
-  type StoredSeam,
-  type TechCardSeamWire,
-} from 'lib/seams';
+import type { StoredPose, StoredRow, StoredSeam, TechCardSeamWire } from 'lib/seams';
 import { useCallback, useMemo, useRef } from 'react';
 import { useCardSeamGraph } from '../card-unit-pictures';
 import { FROZEN_REFUSAL } from '../assembly-fullscreen';
 import { useUndoHistory } from '../undo-history';
 import { buildReview, type Review } from './review-model';
+import { poseChange, type SeamChange, type StepRef } from './seam-change-plan';
 import {
-  hydrateSeams,
-  readWire,
-  reuseKeys,
-  rowsOf,
-  useSeamsStore,
-  type PendingOp,
-  type PosePendingOp,
-} from './seams-store';
+  NOT_SAVED,
+  runSeamChange,
+  type SeamChangeInput,
+  type SeamChangeOpts,
+  type SeamChangeResult,
+} from './seam-change';
+import { hydrateSeams, reuseKeys, rowsOf, useSeamsStore } from './seams-store';
 import { seamRefresher } from './seam-refresh';
 
 export type SeamReviewRead = {
@@ -69,32 +63,33 @@ export function useSeamReview(): SeamReviewRead {
   return { graph, geoms, review, settling };
 }
 
-/** A row as the generated client sends it: output-only fields left empty. */
-const wireOut = (row: StoredRow): common_TechCardSeam => ({
-  ...(toWire(row) as Omit<
-    common_TechCardSeam,
-    'stale' | 'createdBy' | 'createdAt' | 'updatedBy' | 'updatedAt'
-  >),
-  stale: undefined,
-  createdBy: undefined,
-  createdAt: undefined,
-  updatedBy: undefined,
-  updatedAt: undefined,
-});
-
-const message = (e: unknown) =>
-  e instanceof Error ? e.message.replace(/^Error:\s*/, '') : 'the server did not answer';
-
 /** A server list older than this is read again before a new row is written. */
 const FRESH_MS = 10_000;
 const refreshSeams = seamRefresher(async (cardId) => {
   const res = await adminService.GetTechCard({ id: cardId, vatCountryCode: undefined });
   if (useSeamsStore.getState().cardId !== cardId) return;
-  hydrateSeams(cardId, (res.techCard?.seams ?? []) as TechCardSeamWire[]);
-  useSeamsStore.setState({ serverAt: Date.now() });
+  // An older read than the list in the store (a write landed meanwhile) changes nothing.
+  if (
+    hydrateSeams(
+      cardId,
+      (res.techCard?.seams ?? []) as TechCardSeamWire[],
+      res.techCard?.lockVersion,
+    )
+  )
+    useSeamsStore.setState({ serverAt: Date.now() });
 });
 
+type Refused = { ok: false; why: string };
+const NOT_WRITTEN: Refused = { ok: false, why: NOT_SAVED };
+
 export type SeamWrites = {
+  /**
+   * One gesture in one request (C7): rows and step links together, under the card's version. The
+   * steps are addressed after the form's autosave flush; the form adopts the committed links.
+   */
+  change: (change: SeamChangeInput, opts: SeamChangeOpts) => Promise<SeamChangeResult>;
+  /** The list a new row is checked against, read again when old; false: it could not be read. */
+  fresh: () => Promise<boolean>;
   /** Insert or replace these rows (by seam key); resolves true when the server took them. */
   upsert: (rows: StoredRow[], errorAt?: string) => Promise<boolean>;
   /** Delete these rows; resolves true when the server took it. */
@@ -103,6 +98,20 @@ export type SeamWrites = {
   upsertPoses: (rows: StoredPose[]) => Promise<boolean>;
   /** Delete these pose rows; true when the server took it. */
   removePoses: (rows: StoredPose[]) => Promise<boolean>;
+  /** ACCEPT: one seam row written AND linked to the step in one change; the key it is stored under. */
+  acceptSeam: (row: StoredSeam, step: StepRef) => Promise<{ ok: true; key: string } | Refused>;
+  /**
+   * A seam taken off a step. The server deletes the row with its last link; `gone`: this page expects
+   * that (no other step links it), so the row leaves the list at once.
+   */
+  detachSeam: (step: StepRef, seamKey: string, gone: boolean) => Promise<SeamChangeResult>;
+  /** A step's pose rows (P8) in one change: `drop` deleted, `put` written and linked, `reflag` rewritten. */
+  placePoses: (
+    step: StepRef,
+    put: readonly StoredPose[],
+    drop: readonly StoredPose[],
+    reflag: readonly StoredPose[],
+  ) => Promise<boolean>;
   frozen: boolean;
 };
 
@@ -110,48 +119,11 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
   const qc = useQueryClient();
   const undoHistory = useUndoHistory();
 
-  const settle = useCallback(
-    (
-      keys: string[],
-      echo: readonly TechCardSeamWire[] | undefined,
-      error?: string,
-      errorAt?: string,
-    ) => {
-      const s = useSeamsStore.getState();
-      // The card may have changed while the call flew: then its echo belongs to nobody here.
-      if (s.cardId !== (cardId ?? null)) return;
-      const pending = { ...s.pending };
-      const posePending = { ...s.posePending };
-      const errors = { ...s.errors };
-      for (const k of [...keys, ...(errorAt ? [errorAt] : [])]) {
-        delete pending[k];
-        delete posePending[k];
-        if (error) errors[k] = error;
-        else delete errors[k];
-      }
-      const read = echo ? readWire(echo) : null;
-      useSeamsStore.setState({
-        pending,
-        posePending,
-        errors,
-        ...(read ? { server: read.rows, poses: read.poses, serverAt: Date.now() } : {}),
-      });
-      if (cardId) qc.invalidateQueries({ queryKey: techCardKeys.detail(cardId) });
-    },
-    [cardId, qc],
-  );
-
-  const run = useCallback(
-    async (
-      ops: Record<string, PendingOp>,
-      call: () => Promise<{ seams: common_TechCardSeam[] | undefined }>,
-      verb: string,
-      errorAt?: string,
-      poseOps: Record<string, PosePendingOp> = {},
-    ): Promise<boolean> => {
+  const change = useCallback(
+    async (c: SeamChangeInput, opts: SeamChangeOpts): Promise<SeamChangeResult> => {
       if (frozen) {
         refuseGesture('SEAMS', 'frozen', FROZEN_REFUSAL);
-        return false;
+        return { ok: false, why: 'frozen' };
       }
       if (!cardId) {
         refuseGesture(
@@ -159,35 +131,21 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
           'not saved',
           'save the card first — seams are stored on a saved card',
         );
-        return false;
+        return NOT_WRITTEN;
       }
-      const keys = [...Object.keys(ops), ...Object.keys(poseOps)];
-      const s = useSeamsStore.getState();
-      // One write per row at a time: a second intent on a row in flight is dropped, never raced.
-      if (keys.some((k) => s.pending[k] || s.posePending[k])) return false;
-      const errors = { ...s.errors };
-      for (const k of [...keys, ...(errorAt ? [errorAt] : [])]) delete errors[k];
-      useSeamsStore.setState({
-        pending: { ...s.pending, ...ops },
-        posePending: { ...s.posePending, ...poseOps },
-        errors,
-      });
-      try {
-        const res = await call();
-        settle(keys, (res.seams ?? []) as TechCardSeamWire[]);
-        return true;
-      } catch (e) {
-        const why = message(e);
-        settle(keys, undefined, why, errorAt);
+      return runSeamChange(cardId, c, opts, {
+        call: (req) => adminService.ChangeTechCardSeams(req),
+        // The store already holds the answer; the card query reads the same version again.
+        settled: (id) => void qc.invalidateQueries({ queryKey: techCardKeys.detail(id) }),
         // The row says «refused: …» on the page; the inbox keeps it.
-        notify(
-          { sev: 'error', subject: 'SEAM', text: `${verb} not saved`, detail: why },
-          { toast: false },
-        );
-        return false;
-      }
+        refused: (verb, why) =>
+          notify(
+            { sev: 'error', subject: 'SEAM', text: `${verb} not saved`, detail: why },
+            { toast: false },
+          ),
+      });
     },
-    [cardId, frozen, settle],
+    [cardId, frozen, qc],
   );
 
   // The list a new row is checked against must be recent: another client may have confirmed the
@@ -211,73 +169,105 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
       // The card changed while its list was read: this write belongs to nobody here.
       if (cardId && useSeamsStore.getState().cardId !== cardId) return false;
       // A new row of a pair already stored (server or in flight) goes onto that row's key.
-      const s = useSeamsStore.getState();
       const seams = reuseKeys(
         rows0.filter((row): row is StoredSeam => row.kind !== 'pose'),
-        rowsOf(s),
+        rowsOf(useSeamsStore.getState()),
       );
       const poses = rows0.filter((row): row is StoredPose => row.kind === 'pose');
       const rows: StoredRow[] = [...seams, ...poses];
-      return run(
-        Object.fromEntries(seams.map((row) => [row.seamKey, { kind: 'upsert' as const, row }])),
-        () => adminService.UpsertTechCardSeams({ techCardId: cardId, seams: rows.map(wireOut) }),
-        rows.length > 1 ? `decisions (${rows.length})` : 'decision',
-        errorAt,
-        Object.fromEntries(poses.map((row) => [row.seamKey, { kind: 'upsert' as const, row }])),
+      const res = await change(
+        { upsert: rows },
+        { verb: rows.length > 1 ? `decisions (${rows.length})` : 'decision', errorAt },
       );
+      return res.ok;
     },
-    [cardId, fresh, run],
+    [cardId, change, fresh],
   );
 
   const remove = useCallback(
     async (rows: StoredRow[]) => {
       undoHistory.cut('seam-delete');
-      const seams = rows.filter((row): row is StoredSeam => row.kind !== 'pose');
-      const poses = rows.filter((row): row is StoredPose => row.kind === 'pose');
-      return run(
-        Object.fromEntries(seams.map((row) => [row.seamKey, { kind: 'delete' as const, row }])),
-        () =>
-          adminService.DeleteTechCardSeams({
-            techCardId: cardId,
-            seamKeys: rows.map((r) => r.seamKey),
-          }),
-        'removal',
-        undefined,
-        Object.fromEntries(poses.map((row) => [row.seamKey, { kind: 'delete' as const, row }])),
-      );
+      const res = await change({ delete: rows.map((r) => r.seamKey) }, { verb: 'removal' });
+      return res.ok;
     },
-    [cardId, run, undoHistory],
+    [change, undoHistory],
   );
 
   // A pose (P8) is one row per piece per step, keyed by the caller (it replaces its own key), so no
   // pair reuse: the server list is not consulted first.
   const upsertPoses = useCallback(
-    async (rows: StoredPose[]) =>
-      run(
-        {},
-        () => adminService.UpsertTechCardSeams({ techCardId: cardId, seams: rows.map(wireOut) }),
-        'placement',
-        undefined,
-        Object.fromEntries(rows.map((row) => [row.seamKey, { kind: 'upsert' as const, row }])),
-      ),
-    [cardId, run],
+    async (rows: StoredPose[]) => (await change({ upsert: rows }, { verb: 'placement' })).ok,
+    [change],
   );
 
   const removePoses = useCallback(
     async (rows: StoredPose[]) =>
-      run(
-        {},
-        () =>
-          adminService.DeleteTechCardSeams({
-            techCardId: cardId,
-            seamKeys: rows.map((r) => r.seamKey),
-          }),
-        'placement removal',
-        undefined,
-        Object.fromEntries(rows.map((row) => [row.seamKey, { kind: 'delete' as const, row }])),
-      ),
-    [cardId, run],
+      (await change({ delete: rows.map((r) => r.seamKey) }, { verb: 'placement removal' })).ok,
+    [change],
   );
 
-  return { upsert, remove, upsertPoses, removePoses, frozen };
+  const acceptSeam = useCallback(
+    async (row0: StoredSeam, step: StepRef): Promise<{ ok: true; key: string } | Refused> => {
+      if (!(await fresh())) {
+        refuseGesture('SEAMS', 'not read', 'the seam list did not load — try again');
+        return NOT_WRITTEN;
+      }
+      if (cardId && useSeamsStore.getState().cardId !== cardId) return NOT_WRITTEN;
+      const [row] = reuseKeys([row0], rowsOf(useSeamsStore.getState()));
+      const res = await change(
+        { upsert: [row], link: [{ step, seamKey: row.seamKey }] },
+        { verb: 'decision', ...(row.seamKey !== row0.seamKey ? { errorAt: row0.seamKey } : {}) },
+      );
+      return res.ok ? { ok: true, key: res.keyMap.get(row.seamKey) ?? row.seamKey } : res;
+    },
+    [cardId, change, fresh],
+  );
+
+  const detachSeam = useCallback(
+    async (step: StepRef, seamKey: string, gone: boolean) => {
+      if (gone) undoHistory.cut('seam-delete');
+      return change(
+        { detach: [{ step, seamKey }] },
+        { verb: 'removal', ...(gone ? { gone: [seamKey] } : {}) },
+      );
+    },
+    [change, undoHistory],
+  );
+
+  const placePoses = useCallback(
+    async (
+      step: StepRef,
+      put: readonly StoredPose[],
+      drop: readonly StoredPose[],
+      reflag: readonly StoredPose[],
+    ) => (await change(poseChange(step, put, drop, reflag), { verb: 'placement' })).ok,
+    [change],
+  );
+
+  return useMemo(
+    () => ({
+      change,
+      fresh,
+      upsert,
+      remove,
+      upsertPoses,
+      removePoses,
+      acceptSeam,
+      detachSeam,
+      placePoses,
+      frozen,
+    }),
+    [
+      change,
+      fresh,
+      upsert,
+      remove,
+      upsertPoses,
+      removePoses,
+      acceptSeam,
+      detachSeam,
+      placePoses,
+      frozen,
+    ],
+  );
 }

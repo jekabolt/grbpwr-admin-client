@@ -58,6 +58,8 @@ type SeamsState = {
   grainDeg: Map<string, number> | null;
   /** When `server` was last taken from the server itself (an RPC echo or a fresh read), ms. */
   serverAt: number;
+  /** The card's lock_version the list in `server` was read at; -1 while no list said. */
+  serverVersion: number;
 };
 
 const EMPTY: SeamsState = {
@@ -72,6 +74,7 @@ const EMPTY: SeamsState = {
   facts: null,
   grainDeg: null,
   serverAt: 0,
+  serverVersion: -1,
 };
 
 export const useSeamsStore = create<SeamsState>(() => EMPTY);
@@ -196,14 +199,53 @@ export function readWire(wire: readonly TechCardSeamWire[] | undefined): {
   return { rows: seams, poses, unreadable };
 }
 
-/** The card read arrived (or the card changed): its rows become the server's list. */
-export function hydrateSeams(cardId: number | null, wire: readonly TechCardSeamWire[] | undefined) {
+/**
+ * May a list read at `version` replace the store's (C7, invariant 3)? An older one never: a reply
+ * that left first and landed last would bring back a deleted row or hide a new one. An equal one
+ * only when it says the same thing. A list without a version (the old RPCs) is taken as before.
+ */
+export function takesList(
+  s: Pick<SeamsState, 'server' | 'poses' | 'serverVersion'>,
+  version: number | undefined,
+  rows: readonly StoredSeam[],
+  poses: readonly StoredPose[],
+): boolean {
+  if (version === undefined || s.serverVersion < 0) return true;
+  if (version > s.serverVersion) return true;
+  if (version < s.serverVersion) return false;
+  return rowsSig(rows) === rowsSig(s.server) && posesSig(poses) === posesSig(s.poses);
+}
+
+function posesSig(poses: readonly StoredPose[]): string {
+  return poses
+    .map((p) => JSON.stringify(p))
+    .sort()
+    .join(',');
+}
+
+/**
+ * A list from the server (the card read, a re-read, an RPC echo) for `cardId`, read at `version`.
+ * Another card resets the store. False: the list was older than the store's and changed nothing.
+ */
+export function hydrateSeams(
+  cardId: number | null,
+  wire: readonly TechCardSeamWire[] | undefined,
+  version?: number,
+): boolean {
   const { rows, poses, unreadable } = readWire(wire);
   const s = useSeamsStore.getState();
   if (s.cardId !== cardId) {
-    useSeamsStore.setState({ ...EMPTY, cardId, server: rows, poses, unreadable });
-    return;
+    useSeamsStore.setState({
+      ...EMPTY,
+      cardId,
+      server: rows,
+      poses,
+      unreadable,
+      serverVersion: version ?? -1,
+    });
+    return true;
   }
+  if (!takesList(s, version, rows, poses)) return false;
   // Another list (a re-upload stamped rows stale, a colleague decided): the last verdict was read
   // on the old rows and must not vouch for the new ones until the provider re-reads.
   const changed = rowsSig(rows) !== rowsSig(s.server);
@@ -211,8 +253,10 @@ export function hydrateSeams(cardId: number | null, wire: readonly TechCardSeamW
     server: rows,
     poses,
     unreadable,
+    ...(version !== undefined ? { serverVersion: Math.max(version, s.serverVersion) } : {}),
     ...(changed ? { resolved: null } : {}),
   });
+  return true;
 }
 
 export function resetSeams() {
@@ -223,8 +267,11 @@ export function resetSeams() {
 export function useHydrateSeams(
   cardId: number | null,
   wire: readonly TechCardSeamWire[] | undefined,
+  version?: number,
 ) {
-  useEffect(() => hydrateSeams(cardId, wire), [cardId, wire]);
+  useEffect(() => {
+    hydrateSeams(cardId, wire, version);
+  }, [cardId, wire, version]);
   useEffect(() => () => resetSeams(), []);
 }
 

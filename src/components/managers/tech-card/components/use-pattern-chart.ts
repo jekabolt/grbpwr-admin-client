@@ -62,9 +62,13 @@ export function usePatternChart({
   // open-card stores to its existing readers instead of erasing them between tabs.
   useEffect(() => {
     if (!active || !techCard?.id) return;
-    hydrateSeams(techCard.id, techCard.seams as TechCardSeamWire[] | undefined);
+    hydrateSeams(
+      techCard.id,
+      techCard.seams as TechCardSeamWire[] | undefined,
+      techCard.lockVersion,
+    );
     hydrateFolds(techCard.id, techCard.pieceFolds as TechCardPieceFoldWire[] | undefined);
-  }, [active, techCard?.id, techCard?.seams, techCard?.pieceFolds]);
+  }, [active, techCard?.id, techCard?.seams, techCard?.pieceFolds, techCard?.lockVersion]);
 
   useEffect(() => {
     if (!active || !shapes.shapeByKey || pieces.length === 0) return;

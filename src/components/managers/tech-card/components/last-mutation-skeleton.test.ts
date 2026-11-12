@@ -52,10 +52,7 @@ describe('the step references of an undone skeleton', () => {
   });
 
   it('give a defect that was unlinked nothing, also next to its twin', () => {
-    const links = skeletonIssueLinks(
-      [issue('T'), issue('T', 20)],
-      [issue('T'), issue('T')],
-    );
+    const links = skeletonIssueLinks([issue('T'), issue('T', 20)], [issue('T'), issue('T')]);
     expect(links).toEqual([{ index: 1, operationNumber: 20 }]);
   });
 

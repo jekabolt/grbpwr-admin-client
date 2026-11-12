@@ -62,13 +62,7 @@ export function Materials() {
         ))}
       </div>
 
-      {tab === 'stock' ? (
-        <StockTab />
-      ) : tab === 'movements' ? (
-        <MovementsTab />
-      ) : (
-        <CatalogTab />
-      )}
+      {tab === 'stock' ? <StockTab /> : tab === 'movements' ? <MovementsTab /> : <CatalogTab />}
     </div>
   );
 }

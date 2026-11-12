@@ -16,7 +16,11 @@ interface ProtoMetaParams {
 
 // A seam row outlives the page that accepted it (L16): the browser finishes a keepalive request after
 // the tab is gone, up to 64 KiB across the page. The whole-card body is over that, and stays ordinary.
-const OUTLIVES_THE_PAGE = new Set(['UpsertTechCardSeams', 'DeleteTechCardSeams']);
+const OUTLIVES_THE_PAGE = new Set([
+  'ChangeTechCardSeams',
+  'UpsertTechCardSeams',
+  'DeleteTechCardSeams',
+]);
 const KEEPALIVE_MAX_CHARS = 20_000;
 const outlivesThePage = (meta: ProtoMetaParams | undefined, body: string | null): boolean =>
   !!meta && OUTLIVES_THE_PAGE.has(meta.method) && (body?.length ?? 0) <= KEEPALIVE_MAX_CHARS;

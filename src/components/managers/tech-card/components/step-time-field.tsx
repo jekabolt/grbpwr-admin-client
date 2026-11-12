@@ -12,7 +12,7 @@ const STEPPER = 'absolute inset-y-px z-10 w-6 text-labelColor hover:text-textCol
  */
 export function steppedTime(raw: string | undefined, delta: number, empty?: number): string {
   const parsed = parseDecimalNumber(raw);
-  const value = Number.isFinite(parsed) ? parsed : (empty ?? parsed);
+  const value = Number.isFinite(parsed) ? parsed : empty ?? parsed;
   const known = Number.isFinite(value);
   if (!known && delta < 0) return raw ?? '';
   const next = Math.round(((known ? value : 0) + delta) * 1000) / 1000;
@@ -42,7 +42,9 @@ export function StepTimeField({
       name={name}
       render={({ field }) => {
         const step = (direction: 1 | -1, shift: boolean) =>
-          field.onChange(steppedTime(field.value, direction * (shift ? SHIFT_STEP : stepBy), empty));
+          field.onChange(
+            steppedTime(field.value, direction * (shift ? SHIFT_STEP : stepBy), empty),
+          );
         return (
           <FormItem>
             <FormLabel>{label}</FormLabel>

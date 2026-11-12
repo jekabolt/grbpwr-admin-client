@@ -165,7 +165,11 @@ const OTHER_PATTERN = 'TECH_CARD_BUTTON_ATTACH_PATTERN_OTHER';
 
 /** Three holes reuse the tokens by thread shape: SQUARE = closed (triangle), U_SHAPE = open (V). */
 const THREE_HOLE_TILES: readonly PatternTile[] = [
-  { value: 'TECH_CARD_BUTTON_ATTACH_PATTERN_SQUARE', label: 'triangle', icon: 'button_three_triangle' },
+  {
+    value: 'TECH_CARD_BUTTON_ATTACH_PATTERN_SQUARE',
+    label: 'triangle',
+    icon: 'button_three_triangle',
+  },
   { value: 'TECH_CARD_BUTTON_ATTACH_PATTERN_U_SHAPE', label: 'V', icon: 'button_three_v' },
   { value: OTHER_PATTERN, label: 'other', icon: 'button_three_other' },
 ];

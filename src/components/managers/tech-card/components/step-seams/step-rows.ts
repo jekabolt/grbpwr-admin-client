@@ -255,7 +255,8 @@ export function storedRowsOfStep(
 ): StepStoredRow[] {
   return (op?.seamKeys ?? []).flatMap((key) => {
     const row = byKey.get(key);
-    const candidate = row && laysRow(op, row) ? candidateOfStoredSeam(row, geoms, innerLines) : null;
+    const candidate =
+      row && laysRow(op, row) ? candidateOfStoredSeam(row, geoms, innerLines) : null;
     return row && candidate ? [{ key, row, candidate }] : [];
   });
 }

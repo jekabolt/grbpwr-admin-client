@@ -21,6 +21,8 @@ import { card63Geoms, card63InnerLines } from './card63.fixture';
 import { isRightMirrorStep, mirrorRowSig, mirrorStepPlan } from './mirror-step';
 import { placementT } from './step-pose';
 import { inputGroups, surfaceRow, type FormOpLike } from './step-seams-model';
+import type { SeamChange } from '../assembly-seams/seam-change-plan';
+import type { SeamChangeResult } from '../assembly-seams/seam-change';
 import { executeMirrorStep } from './use-mirror-step';
 
 const withKeys = (
@@ -617,11 +619,20 @@ describe('mirrorStepPlan carries the layer order', () => {
 });
 
 describe('mirror write boundary', () => {
-  it('upserts, links, requests autosave, then deletes', async () => {
+  const step = { historyKey: 'h600' };
+  const okRes = (keyMap: [string, string][] = []): SeamChangeResult => ({
+    ok: true,
+    keyMap: new Map(keyMap),
+    deletedKeys: [],
+    lockVersion: 8,
+  });
+
+  it('writes rows, links and detaches in ONE change, then the folds and the autosave', async () => {
     const row = [...CARD85_SEAMS.values()][0];
     const put = { ...row, seamKey: 'put' };
-    const drop = { ...row, seamKey: 'drop' };
     const calls: string[] = [];
+    const sent: { change: SeamChange; gone: readonly string[] }[] = [];
+    let linked: readonly StoredRow[] = [];
     const result = await executeMirrorStep(
       {
         kind: 'replace',
@@ -632,31 +643,109 @@ describe('mirror write boundary', () => {
         layerOrder: [],
       },
       {
-        upsert: async () => {
-          calls.push('upsert');
-          return true;
-        },
+        step,
+        stepKeys: () => ['drop', 'shared'],
         canonicalize: (rows) => [...rows],
-        link: (_rows, foldKeys) => calls.push(`link:${foldKeys.join()}`),
-        requestAutosave: () => calls.push('autosave'),
-        rowsByKey: () => new Map([['drop', drop]]),
-        remove: async () => {
-          calls.push('delete');
-          return true;
+        change: async (change, gone) => {
+          calls.push('change');
+          sent.push({ change: change(), gone });
+          return okRes([['put', 'stored']]);
         },
-        errorOf: () => '',
+        link: (rows, foldKeys) => {
+          linked = rows;
+          calls.push(`link:${foldKeys.join()}`);
+        },
+        requestAutosave: () => calls.push('autosave'),
       },
     );
 
     expect(result).toEqual({ ok: true });
-    expect(calls).toEqual(['upsert', 'link:right-fold', 'autosave', 'delete']);
+    expect(calls).toEqual(['change', 'link:right-fold', 'autosave']);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].change.upsert?.map((r) => r.seamKey)).toEqual(['put']);
+    expect(sent[0].change.link).toEqual([{ step, seamKey: 'put' }]);
+    // A shared key is only detached: the server keeps a row another step still links.
+    expect(sent[0].change.detach).toEqual([
+      { step, seamKey: 'drop' },
+      { step, seamKey: 'shared' },
+    ]);
+    expect(sent[0].gone).toEqual(['drop']);
+    // The form takes the key the server stored the row under.
+    expect(linked.map((r) => r.seamKey)).toEqual(['stored']);
+  });
+
+  it('never detaches the key a new row lands on (no contradicts_link / contradicts_upsert)', async () => {
+    const row = [...CARD85_SEAMS.values()][0];
+    const put = { ...row, seamKey: 'fresh' };
+    let change: SeamChange | undefined;
+    const result = await executeMirrorStep(
+      {
+        kind: 'replace',
+        upsert: [put],
+        deleteKeys: ['old'],
+        linkKeys: ['fresh'],
+        foldKeys: [],
+        layerOrder: [],
+      },
+      {
+        step,
+        stepKeys: () => ['old'],
+        // The pair is stored under 'old' already: the row is written there.
+        canonicalize: (rows) => rows.map((r) => ({ ...r, seamKey: 'old' })),
+        change: async (c, gone) => {
+          change = c();
+          expect(gone).toEqual([]);
+          return okRes();
+        },
+        link: () => undefined,
+        requestAutosave: () => undefined,
+      },
+    );
+    expect(result).toEqual({ ok: true });
+    expect(change?.upsert?.map((r) => r.seamKey)).toEqual(['old']);
+    expect(change?.link).toEqual([{ step, seamKey: 'old' }]);
+    expect(change?.detach).toEqual([]);
+  });
+
+  it('builds the detaches from the links as they are when the change goes out', async () => {
+    const row = [...CARD85_SEAMS.values()][0];
+    const put = { ...row, seamKey: 'put' };
+    let links = ['old'];
+    let built: SeamChange | undefined;
+    const result = await executeMirrorStep(
+      {
+        kind: 'replace',
+        upsert: [put],
+        deleteKeys: ['old'],
+        linkKeys: ['put'],
+        foldKeys: [],
+        layerOrder: [],
+      },
+      {
+        step,
+        stepKeys: () => links,
+        canonicalize: (rows) => [...rows],
+        change: async (build) => {
+          // A gesture before this one (or a re-read) linked B while MIRROR waited its turn.
+          links = ['old', 'B'];
+          built = build();
+          return okRes();
+        },
+        link: () => undefined,
+        requestAutosave: () => undefined,
+      },
+    );
+    expect(result).toEqual({ ok: true });
+    expect(built?.detach).toEqual([
+      { step, seamKey: 'old' },
+      { step, seamKey: 'B' },
+    ]);
   });
 
   it('changes no visible state when the transaction fails', async () => {
     const row = [...CARD85_SEAMS.values()][0];
     const link = vi.fn();
     const autosave = vi.fn();
-    const remove = vi.fn();
     const result = await executeMirrorStep(
       {
         kind: 'create',
@@ -667,60 +756,48 @@ describe('mirror write boundary', () => {
         layerOrder: [],
       },
       {
-        upsert: async () => false,
+        step,
+        stepKeys: () => [],
         canonicalize: (rows) => [...rows],
+        change: async () => ({ ok: false, why: 'refused' }),
         link,
         requestAutosave: autosave,
-        rowsByKey: () => new Map(),
-        remove,
-        errorOf: () => 'refused',
       },
     );
     expect(result).toEqual({ ok: false, error: 'refused' });
     expect(link).not.toHaveBeenCalled();
     expect(autosave).not.toHaveBeenCalled();
-    expect(remove).not.toHaveBeenCalled();
   });
 
-  it('reuses unlinked rows after a failure between upsert and link', async () => {
+  it('a failed change stores nothing, and the retry plans the same rows', async () => {
     const geoms = card85Geoms();
     const sourceRows = [...CARD85_SEAMS.values()];
-    const step = CARD85_OPS[card85Step(600)];
+    const at = card85Step(600);
     const first = mirrorStepPlan({
-      step,
+      step: CARD85_OPS[at],
       cardOps: CARD85_OPS,
       rows: sourceRows,
       poses: [],
       geoms,
     });
-    let stored: StoredRow[] = [...sourceRows];
     const firstResult = await executeMirrorStep(first, {
-      upsert: async (rows) => {
-        stored = [...stored, ...rows];
-        return true;
-      },
+      step,
+      stepKeys: () => [],
       canonicalize: (rows) => [...rows],
-      link: () => {
-        throw new Error('link failed');
-      },
+      change: async () => ({ ok: false, why: 'lock_version_moved' }),
+      link: vi.fn(),
       requestAutosave: vi.fn(),
-      rowsByKey: () => new Map(stored.map((row) => [row.seamKey, row])),
-      remove: async () => true,
-      errorOf: () => '',
     });
-    expect(firstResult).toEqual({ ok: false, error: 'link failed' });
+    expect(firstResult).toEqual({ ok: false, error: 'lock_version_moved' });
 
     const retry = mirrorStepPlan({
-      step,
+      step: CARD85_OPS[at],
       cardOps: CARD85_OPS,
-      rows: stored.filter((row): row is StoredSeam => row.kind !== 'pose'),
+      rows: sourceRows,
       poses: [],
       geoms,
     });
-    expect(retry.kind).toBe('create');
-    expect(retry.upsert[0].seamKey).toBe(first.upsert[0].seamKey);
-    expect(
-      stored.filter((row) => mirrorRowSig(row) === mirrorRowSig(first.upsert[0])),
-    ).toHaveLength(1);
+    expect(retry.kind).toBe(first.kind);
+    expect(retry.upsert.map(mirrorRowSig)).toEqual(first.upsert.map(mirrorRowSig));
   });
 });
