@@ -2780,6 +2780,8 @@ export function innerAnchor(
   if (rangeMm && to - from <= SAME_MM) return null;
   const range: [number, number] =
     from <= 0.05 && to >= len - 0.05 ? [0, 1] : [r(from / len, 4), r(to / len, 4)];
+  // The server refuses from >= to: on a long contour a short stretch can round to one share.
+  if (range[1] <= range[0]) return null;
   return {
     piece: host.pieceKey,
     samples: runSamples(f, { pts }).map(([u, v]) => [r(clamp01(u), 3), r(clamp01(v), 3)]),

@@ -1331,6 +1331,19 @@ describe('surface seam rows', () => {
     expect(innerAnchor(host, 0, closed, 0, undefined, [150, 150.001])).toBeNull();
     expect(innerAnchor(host, 0, closed, 0, undefined, [299.99, 300])).toBeNull();
   });
+
+  it('drops a range whose rounded shares meet on a contour longer than a metre', () => {
+    const long: Pt2[] = [
+      [0, 0],
+      [1400, 0],
+      [1400, 100],
+      [0, 100],
+      [0, 0],
+    ];
+    expect(innerAnchor(host, 0, long, 0, undefined, [0, 0.15])).toBeNull();
+    expect(innerAnchor(host, 0, long, 0, undefined, [1499.91, 1500.02])).toBeNull();
+    expect(innerAnchor(host, 0, long, 0, undefined, [0, 3])?.range).toEqual([0, 0.001]);
+  });
   it('writes one confirmed manual surface row with the placement on both sides', () => {
     const part = rect('FLP', 120, 60);
     const partAnchor = innerAnchor(
