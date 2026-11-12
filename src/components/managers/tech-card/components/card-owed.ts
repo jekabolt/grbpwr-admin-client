@@ -26,12 +26,61 @@ export type OwedLink = {
   at: number;
 };
 
-type Owed = { fuse?: boolean; links?: OwedLink[] };
+export type OwedStepRemoval = {
+  /** Page-local identity while the page that removed the step is still alive. */
+  historyKey: string;
+  /** Stored identity after a reload, before a successful removal save renumbers later steps. */
+  operationNumber: number;
+  /** Rows that may become unlinked when the body saves the removal. */
+  candidateKeys: string[];
+  /** Only a body save at or after this gesture may start its cleanup. */
+  at: number;
+};
+
+type Owed = { fuse?: boolean; links?: OwedLink[]; stepRemovals?: OwedStepRemoval[] };
+
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
+
+const validLink = (value: unknown): value is OwedLink => {
+  if (!isObject(value)) return false;
+  return (
+    typeof value.op === 'number' &&
+    (value.field === 'seamKeys' || value.field === 'poseKeys' || value.field === 'foldKeys') &&
+    typeof value.key === 'string' &&
+    (value.sig === undefined || typeof value.sig === 'string') &&
+    typeof value.at === 'number'
+  );
+};
+
+const validStepRemoval = (value: unknown): value is OwedStepRemoval => {
+  if (!isObject(value)) return false;
+  return (
+    typeof value.historyKey === 'string' &&
+    !!value.historyKey &&
+    typeof value.operationNumber === 'number' &&
+    value.operationNumber > 0 &&
+    Array.isArray(value.candidateKeys) &&
+    value.candidateKeys.every((candidate) => typeof candidate === 'string' && !!candidate) &&
+    typeof value.at === 'number'
+  );
+};
+
+function parsedOwed(value: unknown): Owed {
+  if (!isObject(value)) return {};
+  return {
+    ...(typeof value.fuse === 'boolean' ? { fuse: value.fuse } : {}),
+    ...(Array.isArray(value.links) ? { links: value.links.filter(validLink) } : {}),
+    ...(Array.isArray(value.stepRemovals)
+      ? { stepRemovals: value.stepRemovals.filter(validStepRemoval) }
+      : {}),
+  };
+}
 
 function read(cardId: number): Owed {
   try {
     const raw = localStorage.getItem(key(cardId));
-    return raw ? (JSON.parse(raw) as Owed) : {};
+    return raw ? parsedOwed(JSON.parse(raw) as unknown) : {};
   } catch {
     return {};
   }
@@ -39,7 +88,8 @@ function read(cardId: number): Owed {
 
 function write(cardId: number, owed: Owed): void {
   try {
-    if (owed.fuse || owed.links?.length) localStorage.setItem(key(cardId), JSON.stringify(owed));
+    if (owed.fuse || owed.links?.length || owed.stepRemovals?.length)
+      localStorage.setItem(key(cardId), JSON.stringify(owed));
     else localStorage.removeItem(key(cardId));
   } catch {
     /* storage unavailable: the debt stays in memory, and the page's guard counts it as unsaved */
@@ -63,6 +113,58 @@ export function clearLinkOwed(cardId: number, linkKey: string, field?: OwedField
   const owed = read(cardId);
   const keep = (l: OwedLink) => l.key !== linkKey || (field !== undefined && l.field !== field);
   write(cardId, { ...owed, links: (owed.links ?? []).filter(keep) });
+}
+
+/** A removed step cannot receive its delayed seam/pose links on a later step with the same number. */
+export function clearStepLinksOwed(cardId: number, operationNumber: number): void {
+  const owed = read(cardId);
+  const keep = (link: OwedLink) => link.op !== operationNumber || !SEAM_FIELDS.includes(link.field);
+  write(cardId, { ...owed, links: (owed.links ?? []).filter(keep) });
+}
+
+export const owedStepRemovals = (cardId: number): OwedStepRemoval[] =>
+  structuredClone(read(cardId).stepRemovals ?? []);
+
+export function markStepRemovalOwed(cardId: number, entry: OwedStepRemoval): void {
+  const owed = read(cardId);
+  const others = (owed.stepRemovals ?? []).filter(
+    (current) =>
+      current.historyKey !== entry.historyKey || current.operationNumber !== entry.operationNumber,
+  );
+  write(cardId, {
+    ...owed,
+    stepRemovals: [
+      ...others,
+      {
+        ...entry,
+        candidateKeys: [...new Set(entry.candidateKeys.filter(Boolean))],
+      },
+    ],
+  });
+}
+
+export function clearStepRemovalOwed(
+  cardId: number,
+  historyKey: string,
+  operationNumber: number,
+): void {
+  const owed = read(cardId);
+  write(cardId, {
+    ...owed,
+    stepRemovals: (owed.stepRemovals ?? []).filter(
+      (entry) => entry.historyKey !== historyKey || entry.operationNumber !== operationNumber,
+    ),
+  });
+}
+
+export function hasStepRemovalOwed(
+  cardId: number,
+  historyKey: string,
+  operationNumber: number,
+): boolean {
+  return (read(cardId).stepRemovals ?? []).some(
+    (entry) => entry.historyKey === historyKey && entry.operationNumber === operationNumber,
+  );
 }
 
 type OpLinks = { operationNumber?: number } & { [F in OwedField]?: string[] };
