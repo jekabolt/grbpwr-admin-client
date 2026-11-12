@@ -24,31 +24,6 @@ const keysOf = (links: StepSeamLinks | undefined) => [
   ...(links?.poseKeys ?? []),
 ];
 
-/** Everything in the card's form that names a seam row (techcard.proto): steps and cut strips. */
-export type SeamHolders = {
-  operations: readonly StepSeamLinks[];
-  /** TechCardCutStrip.seam_key: a soft reference the server never guards, so only the client does. */
-  cutStrips?: readonly { seamKey?: string }[];
-};
-
-/**
- * The one rule for «who holds a seam», shared by a step removal and its post-save cleanup: a key a
- * step links (seam or pose) or a cut strip is measured from. `skipStep` leaves out the step being
- * removed. The decision journal is not a holder.
- */
-export function heldSeamKeys(card: SeamHolders, skipStep?: number): Set<string> {
-  const held = new Set<string>();
-  card.operations.forEach((op, i) => {
-    if (i === skipStep) return;
-    for (const key of keysOf(op)) if (key) held.add(key);
-  });
-  for (const strip of card.cutStrips ?? []) {
-    const key = strip.seamKey?.trim();
-    if (key) held.add(key);
-  }
-  return held;
-}
-
 /**
  * C8 («Удалять»): the seams and poses that only the step at `index` links. A row that another step
  * links, or that a cut strip is cut for, is shared and stays. `own` is the step's links as its undo
@@ -62,7 +37,14 @@ export function seamsOnlyOfStep(
 ): RemovalSeams {
   const mine = new Set(keysOf(own).filter(Boolean));
   if (!mine.size) return { seams: [], poses: [] };
-  const shared = heldSeamKeys(card, index);
+  const shared = new Set<string>();
+  card.operations.forEach((op, i) => {
+    if (i !== index) for (const key of keysOf(op)) shared.add(key);
+  });
+  for (const strip of card.cutStrips ?? []) {
+    const key = strip.seamKey?.trim();
+    if (key) shared.add(key);
+  }
   const only = (key: string) => mine.has(key) && !shared.has(key);
   return {
     seams: card.seams.filter((row) => only(row.seamKey)),
