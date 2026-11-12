@@ -103,6 +103,110 @@ export function edgeRunsOf<T extends EdgePoint>(
   });
 }
 
+/** Mean per-run mismatch above which two outlines are not taken for the same piece. */
+const PAIR_MAX_COST = 0.2;
+/** The runner-up must be at least this much worse (mean per run), or the pairing is ambiguous. */
+const PAIR_MIN_MARGIN = 0.05;
+
+export type EdgeRunPairing = {
+  /** target[i] = the target run that is base run i. */
+  target: number[];
+  /** The target ring runs the other way round: a run's start trim is the paired run's end trim. */
+  reversed: boolean;
+};
+
+function ringArea(points: readonly EdgePoint[]): number {
+  let sum = 0;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    sum += a.x * b.y - b.x * a.y;
+  }
+  return sum / 2;
+}
+
+type RunShape = { share: number; mid: EdgePoint; convex: number };
+
+/**
+ * Start-independent description of each run: its share of the perimeter, its arc-length midpoint in
+ * the outline's bbox (0..1 on both axes), and whether the corner it starts at turns with the ring
+ * (+1), against it (-1) or not at all (0, a cornerless loop). Both are the same read either way round.
+ */
+function runShapes(outline: readonly EdgePoint[], runs: readonly EdgeRun[]): RunShape[] {
+  const xs = outline.map((p) => p.x);
+  const ys = outline.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const w = Math.max(Math.max(...xs) - minX, EPS);
+  const h = Math.max(Math.max(...ys) - minY, EPS);
+  const perimeter = runs.reduce((sum, run) => sum + run.length, 0) || 1;
+  const winding = Math.sign(ringArea(outline)) || 1;
+  const direction = (from: EdgePoint, to: EdgePoint) => ({ x: to.x - from.x, y: to.y - from.y });
+  return runs.map((run, index) => {
+    const mid = pointOnEdgeRun(run, run.length / 2).point;
+    let convex = 0;
+    if (runs.length > 1) {
+      const prev = runs[(index - 1 + runs.length) % runs.length].points;
+      const corner = run.points[0];
+      const before = [...prev].reverse().find((p) => !samePoint(p, corner));
+      const after = run.points.find((p) => !samePoint(p, corner));
+      if (before && after) {
+        const a = direction(before, corner);
+        const b = direction(corner, after);
+        convex = Math.sign(a.x * b.y - a.y * b.x) * winding;
+      }
+    }
+    return {
+      share: run.length / perimeter,
+      mid: { x: (mid.x - minX) / w, y: (mid.y - minY) / h },
+      convex,
+    };
+  });
+}
+
+/**
+ * Pairs the edge runs of two outlines of the same piece (another size, or the same ring started at
+ * another vertex / run the other way round) by geometry: cyclic order, corner turn signs, perimeter
+ * share and bbox position. Run indices alone depend on where each DXF ring starts. Null when the run
+ * counts differ, nothing fits, or two pairings fit about equally well.
+ */
+export function pairEdgeRuns(
+  baseOutline: readonly EdgePoint[],
+  targetOutline: readonly EdgePoint[],
+  cornerTurnDeg = EDGE_CORNER_TURN_DEG,
+): EdgeRunPairing | null {
+  const from = edgeRunsOf(baseOutline, cornerTurnDeg);
+  const to = edgeRunsOf(targetOutline, cornerTurnDeg);
+  const n = from.length;
+  if (!n || n !== to.length) return null;
+  const reversed =
+    Math.sign(ringArea(baseOutline)) !== Math.sign(ringArea(targetOutline)) &&
+    ringArea(baseOutline) !== 0 &&
+    ringArea(targetOutline) !== 0;
+  if (n === 1) return { target: [0], reversed };
+  const a = runShapes(baseOutline, from);
+  const b = runShapes(targetOutline, to);
+  // Base run i starts at the corner where its paired run starts — or, reversed, where the paired
+  // run ends, i.e. where the target run after it starts.
+  const pairOf = (i: number, k: number) => (reversed ? (k - i + n) % n : (i + k) % n);
+  const startCornerOf = (j: number) => (reversed ? (j + 1) % n : j);
+  const scored = Array.from({ length: n }, (_, k) => {
+    let cost = 0;
+    for (let i = 0; i < n; i++) {
+      const j = pairOf(i, k);
+      cost +=
+        Math.hypot(a[i].mid.x - b[j].mid.x, a[i].mid.y - b[j].mid.y) +
+        2 * Math.abs(a[i].share - b[j].share) +
+        (a[i].convex === b[startCornerOf(j)].convex ? 0 : 0.5);
+    }
+    return { k, cost: cost / n };
+  }).sort((x, y) => x.cost - y.cost);
+  const [best, second] = scored;
+  if (best.cost > PAIR_MAX_COST) return null;
+  if (second && second.cost - best.cost < PAIR_MIN_MARGIN) return null;
+  return { target: from.map((_, i) => pairOf(i, best.k)), reversed };
+}
+
 export function polylineLength(points: readonly EdgePoint[]): number {
   let length = 0;
   for (let i = 1; i < points.length; i++) length += distance(points[i - 1], points[i]);

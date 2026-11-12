@@ -11,7 +11,7 @@ import type {
 import { GENERATED_FUSING_DXF_MARKER } from 'lib/pattern-import/types';
 import { writeScopes } from 'lib/pattern-import/write';
 import { fitGrainInside } from 'lib/pattern-import/semantics/grain-inside';
-import { edgeRunsOf } from './edge-runs';
+import { edgeRunsOf, pairEdgeRuns } from './edge-runs';
 import {
   fuseAreaMm2,
   fuseInsetRingMm,
@@ -819,17 +819,27 @@ export function mapFuseSpecToSize(
     };
   }
   if (source.mode === 'strip' && source.edges.length > 0) {
+    // Runs are paired by geometry: the index of a run depends on where each size's ring starts.
+    const pairing = pairEdgeRuns(baseOutline, targetOutline);
+    // generateFuseGeometry owns the topology refusal and its actionable error text.
+    if (!pairing) return source;
     const from = edgeRunsOf(baseOutline);
     const to = edgeRunsOf(targetOutline);
-    // generateFuseGeometry owns the topology refusal and its actionable error text.
-    if (from.length !== to.length) return source;
     return {
       ...source,
-      edges: source.edges.map((edge) => {
-        const fromLength = from[edge.edge]?.length ?? 0;
-        const ratio = fromLength > 0 ? (to[edge.edge]?.length ?? fromLength) / fromLength : 1;
-        return { ...edge, startMm: edge.startMm * ratio, endMm: edge.endMm * ratio };
-      }),
+      edges: source.edges
+        .map((edge) => {
+          const target = pairing.target[edge.edge];
+          if (target == null) return edge;
+          const fromLength = from[edge.edge].length;
+          // Trims keep their fraction of the graded run (see FuseEdge).
+          const ratio = fromLength > 0 ? to[target].length / fromLength : 1;
+          const [startMm, endMm] = pairing.reversed
+            ? [edge.endMm, edge.startMm]
+            : [edge.startMm, edge.endMm];
+          return { ...edge, edge: target, startMm: startMm * ratio, endMm: endMm * ratio };
+        })
+        .sort((a, b) => a.edge - b.edge),
     };
   }
   return source;

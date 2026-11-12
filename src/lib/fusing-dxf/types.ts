@@ -9,8 +9,16 @@ export type FuseGrain = 'as_piece' | 'lengthwise' | 'crosswise' | 'bias' | 'any'
 export type FuseDarts = 'cut' | 'fuse';
 
 export type FuseEdge = {
-  /** Zero-based edge-run index on the base-size outline (a run is bounded by >30° corners). */
+  /**
+   * Zero-based edge-run index on the base-size outline (a run is bounded by >30° corners). Other
+   * sizes reach the same physical run by geometry (pairEdgeRuns), not by this index.
+   */
   edge: number;
+  /**
+   * Trims off the run's start / end, in real mm on the base size only. Every other size keeps the
+   * same FRACTION of its graded run (mapFuseSpecToSize, pinned by strip-size-map.test.ts), so a
+   * 10 mm trim on a 200 mm base edge is 11 mm on a 220 mm edge of a bigger size.
+   */
   startMm: number;
   endMm: number;
 };
