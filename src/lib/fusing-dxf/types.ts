@@ -15,9 +15,10 @@ export type FuseEdge = {
    */
   edge: number;
   /**
-   * Trims off the run's start / end, in real mm on the base size only. Every other size keeps the
-   * same FRACTION of its graded run (mapFuseSpecToSize, pinned by strip-size-map.test.ts), so a
-   * 10 mm trim on a 200 mm base edge is 11 mm on a 220 mm edge of a bigger size.
+   * Trims off the run's start / end corner, in real mm, the same mm in every size: a 10 mm trim on
+   * a 200 mm base edge is 10 mm on the 220 mm edge of a bigger size. Only a run too short to hold
+   * both trims shrinks them, by one factor, keeping STRIP_MIN_KEEP_MM of the run (clampStripTrims,
+   * pinned by strip-size-map.test.ts).
    */
   startMm: number;
   endMm: number;

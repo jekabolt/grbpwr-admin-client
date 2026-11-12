@@ -11,7 +11,7 @@ import type {
 import { GENERATED_FUSING_DXF_MARKER } from 'lib/pattern-import/types';
 import { writeScopes } from 'lib/pattern-import/write';
 import { fitGrainInside } from 'lib/pattern-import/semantics/grain-inside';
-import { edgeRunsOf, pairEdgeRuns } from './edge-runs';
+import { clampStripTrims, edgeRunsOf, pairEdgeRuns } from './edge-runs';
 import {
   fuseAreaMm2,
   fuseInsetRingMm,
@@ -718,7 +718,8 @@ function interiorMap(
 
 /**
  * Maps base-size markup onto one graded outline. Widths and insets remain physical millimetres;
- * positions follow the grade. Strip trims keep the same fraction of their selected edge run. A
+ * positions follow the grade. Strip trims keep their mm from the paired run's corners, shrunk
+ * only when a shorter run cannot hold them (clampStripTrims). A
  * drawn zone's point on the cut or inset contour keeps its mm from that contour and, along it, from
  * the nearer corner of that stretch (contourCarrier); a point on the inset contour stays on it, so a
  * contour-following side keeps following the contour in every size. Interior points follow the
@@ -823,7 +824,6 @@ export function mapFuseSpecToSize(
     const pairing = pairEdgeRuns(baseOutline, targetOutline);
     // generateFuseGeometry owns the topology refusal and its actionable error text.
     if (!pairing) return source;
-    const from = edgeRunsOf(baseOutline);
     const to = edgeRunsOf(targetOutline);
     return {
       ...source,
@@ -831,13 +831,13 @@ export function mapFuseSpecToSize(
         .map((edge) => {
           const target = pairing.target[edge.edge];
           if (target == null) return edge;
-          const fromLength = from[edge.edge].length;
-          // Trims keep their fraction of the graded run (see FuseEdge).
-          const ratio = fromLength > 0 ? to[target].length / fromLength : 1;
-          const [startMm, endMm] = pairing.reversed
-            ? [edge.endMm, edge.startMm]
-            : [edge.startMm, edge.endMm];
-          return { ...edge, edge: target, startMm: startMm * ratio, endMm: endMm * ratio };
+          // Trims are fixed mm from the run's corners in every size (see FuseEdge).
+          const [startMm, endMm] = clampStripTrims(
+            to[target].length,
+            pairing.reversed ? edge.endMm : edge.startMm,
+            pairing.reversed ? edge.startMm : edge.endMm,
+          );
+          return { ...edge, edge: target, startMm, endMm };
         })
         .sort((a, b) => a.edge - b.edge),
     };

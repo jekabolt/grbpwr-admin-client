@@ -207,6 +207,28 @@ export function pairEdgeRuns(
   return { target: from.map((_, i) => pairOf(i, best.k)), reversed };
 }
 
+/** What a strip edge keeps of its run at least, however long its trims (the editor's own floor). */
+export const STRIP_MIN_KEEP_MM = 10;
+
+/**
+ * A strip edge's trims on a run of `runLength` mm. Trims are fixed mm from the run's corners; when
+ * they would leave less than STRIP_MIN_KEEP_MM of the run, both shrink by the same factor until
+ * that much is left (the whole run when it is shorter than that), so the strip never inverts or
+ * vanishes on a smaller size.
+ */
+export function clampStripTrims(
+  runLength: number,
+  startMm: number,
+  endMm: number,
+): [startMm: number, endMm: number] {
+  const start = Math.max(0, startMm || 0);
+  const end = Math.max(0, endMm || 0);
+  const room = Math.max(0, runLength - STRIP_MIN_KEEP_MM);
+  if (start + end <= room) return [start, end];
+  const factor = room / (start + end);
+  return [start * factor, end * factor];
+}
+
 export function polylineLength(points: readonly EdgePoint[]): number {
   let length = 0;
   for (let i = 1; i < points.length; i++) length += distance(points[i - 1], points[i]);

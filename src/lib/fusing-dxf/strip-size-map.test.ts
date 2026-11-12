@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import fixture from './bp-shirt-back.fixture.json';
 import { mapFuseSpecToSize } from './dxf';
-import { edgeRunsOf, pairEdgeRuns, pointOnEdgeRun, type EdgePoint } from './edge-runs';
+import {
+  STRIP_MIN_KEEP_MM,
+  clampStripTrims,
+  edgeRunsOf,
+  pairEdgeRuns,
+  pointOnEdgeRun,
+  type EdgePoint,
+} from './edge-runs';
 import { blankFuse, type FuseEdge, type PieceFuseSpec } from './types';
 
 // A strip edge is stored as an edge-run index on the base outline. Each size is its own DXF block,
@@ -153,22 +160,67 @@ describe('strip edge identity across sizes', () => {
 });
 
 describe('strip trims between sizes', () => {
-  it('are proportional to the paired run length, not fixed millimetres', () => {
-    // Pinned on purpose (8c032d9ec): `startMm`/`endMm` are real mm on the base size only; on every
-    // other size they keep their fraction of the graded edge.
-    const base = ring([
-      [0, 0],
-      [80, 0],
-      [80, 60],
-      [0, 60],
+  const base = ring([
+    [0, 0],
+    [80, 0],
+    [80, 60],
+    [0, 60],
+  ]);
+  const bigger = ring([
+    [0, 0],
+    [120, 0],
+    [120, 80],
+    [0, 80],
+  ]);
+  const smaller = ring([
+    [0, 0],
+    [30, 0],
+    [30, 20],
+    [0, 20],
+  ]);
+
+  it('are the same millimetres from the corners in every size (owner, 12.11)', () => {
+    const mapped = mapFuseSpecToSize(strip([{ edge: 0, startMm: 8, endMm: 16 }]), base, bigger);
+    expect(mapped.edges).toEqual([{ edge: 0, startMm: 8, endMm: 16 }]);
+  });
+
+  it('shrink by one factor on a run too short to hold them, keeping 10 mm of strip', () => {
+    // 30 mm run, 20 + 40 mm trims: room 30 - 10 = 20 mm, both × 1/3.
+    const mapped = mapFuseSpecToSize(strip([{ edge: 0, startMm: 20, endMm: 40 }]), base, smaller);
+    const [edge] = mapped.edges;
+    expect(edge.startMm).toBeCloseTo(20 / 3, 9);
+    expect(edge.endMm).toBeCloseTo(40 / 3, 9);
+    expect(30 - edge.startMm - edge.endMm).toBeCloseTo(STRIP_MIN_KEEP_MM, 9);
+  });
+
+  it('clampStripTrims never inverts the strip', () => {
+    expect(clampStripTrims(100, 20, 30)).toEqual([20, 30]);
+    expect(clampStripTrims(100, 60, 30)).toEqual([60, 30]);
+    const [s, e] = clampStripTrims(50, 60, 60);
+    expect(s).toBeCloseTo(20, 9);
+    expect(e).toBeCloseTo(20, 9);
+    // A run shorter than the floor keeps all of itself.
+    expect(clampStripTrims(6, 3, 3)).toEqual([0, 0]);
+    expect(clampStripTrims(100, -5, Number.NaN)).toEqual([0, 0]);
+  });
+
+  it('editor round trip: base → size → base returns the stored mm exactly', () => {
+    const stored = strip([
+      { edge: 1, startMm: 10, endMm: 20 },
+      { edge: 3, startMm: 0, endMm: 5 },
     ]);
-    const target = ring([
-      [0, 0],
-      [120, 0],
-      [120, 80],
-      [0, 80],
-    ]);
-    const mapped = mapFuseSpecToSize(strip([{ edge: 0, startMm: 8, endMm: 16 }]), base, target);
-    expect(mapped.edges).toEqual([{ edge: 0, startMm: 12, endMm: 24 }]);
+    for (const k of [0, 7, 40]) {
+      const size = rotate(xs, k);
+      const back = mapFuseSpecToSize(mapFuseSpecToSize(stored, m, size), size, m);
+      expect(back.edges).toEqual(stored.edges);
+    }
+  });
+
+  it('a trim edited on another size is stored as the same mm on the base', () => {
+    const stored = strip([{ edge: 1, startMm: 10, endMm: 20 }]);
+    const size = rotate(xs, 13);
+    const shown = mapFuseSpecToSize(stored, m, size);
+    const edited = { ...shown, edges: shown.edges.map((e) => ({ ...e, startMm: 35 })) };
+    expect(mapFuseSpecToSize(edited, size, m).edges).toEqual([{ edge: 1, startMm: 35, endMm: 20 }]);
   });
 });
