@@ -3449,8 +3449,8 @@ export function PatternsField({
       autosave.request('dxf-reupload');
       return true;
     }
-    const saved = await autosave.flush('dxf-reupload');
-    if (saved !== 'ok' && saved !== 'nothing') return false;
+    // The seam change saves the form first, in its turn behind any seam write in flight; a refusal
+    // there arms the retry instead of dropping the rows (a flush here returned early while held).
     await deleteSeamsOnServer(techCardId, plan.removedSeamIds);
     return true;
   }
@@ -3476,9 +3476,8 @@ export function PatternsField({
       autosave.request('dxf-delete');
       return;
     }
-    // Seams live outside the card body: they go once the card without their pieces is saved.
-    const saved = await autosave.flush('dxf-delete');
-    if (saved !== 'ok' && saved !== 'nothing') return;
+    // Seams live outside the card body: they go once the card without their pieces is saved — the
+    // seam change flushes the form itself, in its turn, and a refusal arms the retry.
     await deleteSeamsOnServer(techCardId, plan.removedSeamIds);
   }
 
