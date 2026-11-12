@@ -139,7 +139,11 @@ describe('button holes', () => {
   });
 
   it('offers triangle, V and other on three holes', () => {
-    expect(patternTiles(3, NO_ATTACH_PATTERN).map((t) => t.label)).toEqual(['triangle', 'V', 'other']);
+    expect(patternTiles(3, NO_ATTACH_PATTERN).map((t) => t.label)).toEqual([
+      'triangle',
+      'V',
+      'other',
+    ]);
   });
 
   it('crossing three holes keeps only other, so a square never turns into a triangle', () => {

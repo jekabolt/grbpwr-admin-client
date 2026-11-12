@@ -111,7 +111,9 @@ describe('binding E4', () => {
           cutStrips = plan.strips;
           for (const patch of plan.operations) {
             operations = operations.map((op, i) =>
-              i === patch.index ? { ...op, inputKeys: patch.inputKeys, seamKeys: patch.seamKeys } : op,
+              i === patch.index
+                ? { ...op, inputKeys: patch.inputKeys, seamKeys: patch.seamKeys }
+                : op,
             );
           }
         },

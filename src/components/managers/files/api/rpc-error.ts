@@ -426,11 +426,7 @@ const RULES: Rule[] = [
     // dto.ParseLibraryDate, с префиксом поля: «starts_at: date must be YYYY-MM-DD, got "…"».
     when: 'date must be yyyy-mm-dd',
     say: (raw) => {
-      const which = /^ends_at:/i.test(raw)
-        ? 'end'
-        : /^starts_at:/i.test(raw)
-          ? 'start'
-          : undefined;
+      const which = /^ends_at:/i.test(raw) ? 'end' : /^starts_at:/i.test(raw) ? 'start' : undefined;
       const what = which ? `the “${which}” date is written` : 'the date is written';
       return `${what} not the way the server reads it: it needs year-month-day, for example 2026-09-12`;
     },

@@ -45,7 +45,9 @@ export function useBindingStripTeardown() {
           write: (plan) => {
             setValue('cutStrips', plan.strips as never, { shouldDirty: true });
             for (const patch of plan.operations) {
-              setValue(`operations.${patch.index}.inputKeys`, patch.inputKeys, { shouldDirty: true });
+              setValue(`operations.${patch.index}.inputKeys`, patch.inputKeys, {
+                shouldDirty: true,
+              });
               setValue(`operations.${patch.index}.seamKeys`, patch.seamKeys, { shouldDirty: true });
             }
           },

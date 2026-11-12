@@ -29,7 +29,18 @@ const SPARE_LINES = 3;
 const MAX_AUTO_HEIGHT = 480;
 
 const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
-  ({ className, name, variant = 'default', autoGrow = true, spareLines = SPARE_LINES, onInput, ...props }, ref) => {
+  (
+    {
+      className,
+      name,
+      variant = 'default',
+      autoGrow = true,
+      spareLines = SPARE_LINES,
+      onInput,
+      ...props
+    },
+    ref,
+  ) => {
     const innerRef = useRef<HTMLTextAreaElement | null>(null);
 
     // СЛИЯНИЕ РЕФОВ. Примитиву нужен свой ref (он меряет и правит высоту), но в тот же ref пишет

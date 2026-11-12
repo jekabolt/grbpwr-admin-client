@@ -59,8 +59,7 @@ const anchor = (row: RawAnchor): EdgeAnchor => ({
   contourSig: row.contourSig,
 });
 
-export const card85RealFixtureAvailable = () =>
-  existsSync(CARD85_REAL_INPUT);
+export const card85RealFixtureAvailable = () => existsSync(CARD85_REAL_INPUT);
 
 /** The untrimmed 2.3 MB card 85 capture (outside the repo; skipped when absent) plus its 25 stored beta seams. */
 export function card85RealFixture(): AssemblyInput {

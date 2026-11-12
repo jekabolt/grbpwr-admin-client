@@ -54,7 +54,13 @@ describe('stripTaskTokens', () => {
 
 describe('search snippet', () => {
   it('shows no token from the server', () => {
-    const task = { id: 1, boardId: 1, archivedAt: '', task: { title: 't', description: '' }, checklist: [] };
+    const task = {
+      id: 1,
+      boardId: 1,
+      archivedAt: '',
+      task: { title: 't', description: '' },
+      checklist: [],
+    };
     const [hit] = searchTasks([task as never], 'text', [
       { taskId: 1, field: 'description', snippet: '…heet:13]] text [[sheet:13]] end [[sh…' },
     ] as never);

@@ -184,7 +184,10 @@ describe('derived turned seams', () => {
 
   it('leaves a bagged surface flap to surface geometry', () => {
     const f = fixture();
-    f.candidates[0].candidate = { ...f.candidates[0].candidate, surface: { host: 'FRONT', part: 'FLAP', mark: '', T: [1, 0, 0, 1, 0, 0] as never, fit: 0 } };
+    f.candidates[0].candidate = {
+      ...f.candidates[0].candidate,
+      surface: { host: 'FRONT', part: 'FLAP', mark: '', T: [1, 0, 0, 1, 0, 0] as never, fit: 0 },
+    };
     expect(turned(f)).toBeUndefined();
   });
 
