@@ -11,7 +11,7 @@ import type {
 import { GENERATED_FUSING_DXF_MARKER } from 'lib/pattern-import/types';
 import { writeScopes } from 'lib/pattern-import/write';
 import { fitGrainInside } from 'lib/pattern-import/semantics/grain-inside';
-import { edgeRunsOf } from './edge-runs';
+import { clampStripTrims, edgeRunsOf, pairEdgeRuns } from './edge-runs';
 import {
   fuseAreaMm2,
   fuseInsetRingMm,
@@ -238,7 +238,8 @@ function selfCrossing(ring: readonly PtMm[]): boolean {
 
 /**
  * Maps base-size markup onto one graded outline. Widths and insets remain physical millimetres;
- * positions follow the grade. Strip trims keep the same fraction of their selected edge run.
+ * positions follow the grade. Strip trims keep their mm from the paired run's corners, shrunk
+ * only when a shorter run cannot hold them (clampStripTrims).
  *
  * A drawn zone (zone-grade.ts `follow`): a point near the contour keeps its mm from it and from the
  * nearer corner of its stretch (the carrier), fully up to 50 mm in, so a band keeps its width; a
@@ -249,8 +250,9 @@ function selfCrossing(ring: readonly PtMm[]): boolean {
  * Rigid or pointwise: a ring that keeps RIGID_AT_MM or more from the contour moves whole, by one
  * translation (a patch round a welt pocket is the same patch in every size); a ring that comes
  * within RIGID_FROM_MM of it moves point by point; in between the two are mixed by the ring's
- * nearest distance to the contour, so a ring at 9.9 or 10.1 mm gives the same shape. A hole follows the ring it sits in. A mapped ring that folds over (its
- * orientation flips, it crosses itself, it collapses) is moved whole instead.
+ * nearest distance to the contour, so a ring at 9.9 or 10.1 mm gives the same shape. A hole
+ * follows the ring it sits in. A mapped ring that folds over (its orientation flips, it crosses
+ * itself, it collapses) is moved whole instead.
  *
  * A rect zone goes the same way by its four corners and stays a rect while they stay square (a
  * detached rect always does); otherwise it is returned as a four-corner spline.
@@ -393,17 +395,26 @@ export function mapFuseSpecToSize(
     };
   }
   if (source.mode === 'strip' && source.edges.length > 0) {
-    const from = edgeRunsOf(baseOutline);
-    const to = edgeRunsOf(targetOutline);
+    // Runs are paired by geometry: the index of a run depends on where each size's ring starts.
+    const pairing = pairEdgeRuns(baseOutline, targetOutline);
     // generateFuseGeometry owns the topology refusal and its actionable error text.
-    if (from.length !== to.length) return source;
+    if (!pairing) return source;
+    const to = edgeRunsOf(targetOutline);
     return {
       ...source,
-      edges: source.edges.map((edge) => {
-        const fromLength = from[edge.edge]?.length ?? 0;
-        const ratio = fromLength > 0 ? (to[edge.edge]?.length ?? fromLength) / fromLength : 1;
-        return { ...edge, startMm: edge.startMm * ratio, endMm: edge.endMm * ratio };
-      }),
+      edges: source.edges
+        .map((edge) => {
+          const target = pairing.target[edge.edge];
+          if (target == null) return edge;
+          // Trims are fixed mm from the run's corners in every size (see FuseEdge).
+          const [startMm, endMm] = clampStripTrims(
+            to[target].length,
+            pairing.reversed ? edge.endMm : edge.startMm,
+            pairing.reversed ? edge.startMm : edge.endMm,
+          );
+          return { ...edge, edge: target, startMm, endMm };
+        })
+        .sort((a, b) => a.edge - b.edge),
     };
   }
   return source;

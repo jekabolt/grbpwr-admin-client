@@ -1143,8 +1143,8 @@ export async function main() {
   );
   assert.deepEqual(
     mappedStrip.edges,
-    [{ edge: 0, startMm: 12, endMm: 24 }],
-    'strip trim positions keep their fraction of the graded edge',
+    [{ edge: 0, startMm: 8, endMm: 16 }],
+    'strip trims keep their mm from the corners of the graded edge',
   );
   const gradedSheet = buildFusingSheets({
     techCardId: 71,
