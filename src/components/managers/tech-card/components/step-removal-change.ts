@@ -222,7 +222,7 @@ export function stepRemovalCleanupKeys(
   entry: OwedStepRemoval,
   operations: readonly CleanupOperation[],
   rows: StepRemovalRows,
-  cutStrips: readonly CleanupStrip[] = [],
+  cutStrips: readonly CleanupStrip[],
 ): string[] {
   const held = heldSeamKeys({ operations, cutStrips });
   const stored = new Set([...rows.seams, ...rows.poses].map((row) => row.seamKey));
