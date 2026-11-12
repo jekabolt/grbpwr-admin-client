@@ -61,6 +61,7 @@ import { stepHighlightOf } from 'components/managers/tech-card/components/step-s
 import { sideLengthMm } from 'components/managers/tech-card/components/step-seams/seam-length';
 import {
   innerSlice,
+  closedInner,
   innerSlices,
 } from 'components/managers/tech-card/components/step-seams/step-seams-model';
 import {
@@ -921,8 +922,8 @@ function locateSeams(input: AssemblyInput): { seams: AsmSeam[]; unresolved: numb
     if (!hits.length || hits.some((h) => !h) || !add(s, hits as AnchorHit[], [])) unresolved++;
   }
   for (const seam of stored.filter((row) => row.kind === 'surface')) {
-    const anchors = [...seam.sideA, ...seam.sideB].filter((part) => /^i\d+$/.test(part.edgeHint));
-    const anchor = anchors[0];
+    const allInner = [...seam.sideA, ...seam.sideB].filter((part) => /^i\d+$/.test(part.edgeHint));
+    const anchor = allInner[0];
     const match = /^i(\d+)$/.exec(anchor?.edgeHint ?? '');
     const piece = anchor?.piece ?? '';
     const index = match ? Number(match[1]) : -1;
@@ -941,30 +942,40 @@ function locateSeams(input: AssemblyInput): { seams: AsmSeam[]; unresolved: numb
       unresolved++;
       continue;
     }
-    const wholeLen = polyLen(line);
-    const ranges = anchors.flatMap((part) =>
-      part.range[0] <= 0 && part.range[1] >= 1
-        ? []
-        : ([[part.range[0] * wholeLen, part.range[1] * wholeLen]] as const),
+    const anchors = allInner.filter(
+      (part) => part.piece === piece && part.edgeHint === anchor.edgeHint,
     );
-    const points = innerSlices(line, ranges);
-    const lenMm = polyLen(points);
-    const part: SeamPart = {
-      piece,
-      pts: points,
-      lenMm,
-      share: lenMm / Math.max(wholeLen, 1e-6),
-      turn: turnOf(points),
-    };
+    const wholeLen = polyLen(line);
+    const whole = anchors.some((part) => part.range[0] <= 0 && part.range[1] >= 1);
+    const ranges = whole
+      ? []
+      : anchors.map(
+          (part) =>
+            [part.range[0] * wholeLen, part.range[1] * wholeLen] as readonly [number, number],
+        );
+    const lines = innerSlices(line, ranges);
+    const parts: SeamPart[] = lines.map((points) => {
+      const lenMm = polyLen(points);
+      return {
+        piece,
+        pts: points,
+        lenMm,
+        share: lenMm / Math.max(wholeLen, 1e-6),
+        turn: turnOf(points),
+      };
+    });
+    const targetPoints = [...lines].sort((left, right) => polyLen(right) - polyLen(left))[0] ?? [];
     out.push({
       key: seam.seamKey,
       kind: seam.kind,
       note: seam.note,
       opHint: opHint(seam),
-      a: [part],
+      a: parts,
       b: [],
       pieces: [piece],
-      inner: { piece, index, pts: points, placement: placementOf(anchor) },
+      inner: { piece, index, pts: targetPoints, placement: placementOf(anchor) },
+      // A closed contour with corners is sewn side by side like an outline (C11): not a slit.
+      ...(closedInner(line) ? { surfaceRole: 'inner' as const } : {}),
     });
   }
   // operation order of the card is the drawing order; the stored order is only a tiebreak
@@ -2752,8 +2763,9 @@ function actionPartsOfRows(
   pieces: ReadonlyMap<string, AsmPiece>,
 ): SeamPart[] {
   const geoms = new Map([...pieces].map(([key, piece]) => [key, piece.geom]));
+  const innerLines = new Map([...pieces].map(([key, piece]) => [key, piece.inner]));
   const targets = rows.flatMap((row) => {
-    const sides = storedSeamSides(row, geoms);
+    const sides = storedSeamSides(row, geoms, innerLines);
     if (row.kind !== 'surface') return [...sides.parts.a, ...sides.parts.b];
     const laidEdges = sides.parts.b.filter((part) => !/:i\d+$/.test(part.target));
     return laidEdges.length
@@ -2794,6 +2806,7 @@ function buildActions(
 ): Map<number, AsmAction> {
   const actions = new Map<number, AsmAction>();
   const hemPieces = [...pieces.values()].flatMap((piece) => (piece.geom ? [piece.geom] : []));
+  const innerLines = new Map([...pieces].map(([key, piece]) => [key, piece.inner]));
   // The step's label pieces are hosts too, as in the editor's picture: a drawn label takes no mark.
   const placementSelections = walkPlacementMarks(
     ops.map((op) => ({
@@ -2846,6 +2859,7 @@ function buildActions(
           ops.map((candidate) => candidate.raw),
           opIndex,
           rows,
+          innerLines,
         ).parts
       : [];
     // A hem's edge is never inherited from the step that sewed its unit: its own row, else geometry.

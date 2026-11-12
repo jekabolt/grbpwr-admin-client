@@ -1,7 +1,14 @@
+import type { Pt2 } from 'lib/assembly-skeleton/types';
 import { sidePartEdges, type SidePart, type StoredSeam } from 'lib/seams';
 
 import { rowTargetsOfAnchor, storedSeamSides } from './step-rows';
-import { pieceOfTarget, type FormOpLike, type TargetId } from './step-seams-model';
+import {
+  parseInner,
+  pieceOfTarget,
+  polylineLenMm,
+  type FormOpLike,
+  type TargetId,
+} from './step-seams-model';
 
 export const NO_SEAM_TEXT = 'no seam';
 
@@ -48,6 +55,7 @@ export function highlightPartsOfRows(
   rows: readonly StoredSeam[],
   hostOnly = false,
   hostPieces: ReadonlySet<string> = new Set(),
+  innerLines?: ReadonlyMap<string, readonly (readonly Pt2[])[]>,
 ): SidePart[] {
   const targetOrder = highlightTargetsOfRows(rows, hostOnly, hostPieces);
   const allowed = new Set(targetOrder);
@@ -58,7 +66,9 @@ export function highlightPartsOfRows(
       const inner = targets.length === 1 && /:i\d+$/.test(targets[0]);
       if (row.kind !== 'partial' && row.kind !== 'composite' && !(row.kind === 'surface' && inner))
         return targets.map((target): SidePart => ({ target }));
-      const length = anchor.lenMm;
+      const mark = inner ? parseInner(targets[0]) : null;
+      const line = mark ? innerLines?.get(mark.piece)?.[mark.k] : undefined;
+      const length = line?.length ? polylineLenMm(line) : anchor.lenMm;
       const from = Math.max(0, Math.min(length, anchor.range[0] * length));
       const to = Math.max(from, Math.min(length, anchor.range[1] * length));
       return from > 0.05 || to < length - 0.05
@@ -179,13 +189,14 @@ export function stepHighlightOf(
   ops: readonly FormOpLike[],
   index: number,
   byKey: ReadonlyMap<string, StoredSeam>,
+  innerLines?: ReadonlyMap<string, readonly (readonly Pt2[])[]>,
 ): StepHighlight {
   const own = rowsOf(ops[index], byKey);
   if (own.length) {
     return {
       rows: own,
       targets: highlightTargetsOfRows(own),
-      parts: highlightPartsOfRows(own),
+      parts: highlightPartsOfRows(own, false, new Set(), innerLines),
       inherited: false,
     };
   }
@@ -196,7 +207,7 @@ export function stepHighlightOf(
   return {
     rows: inherited,
     targets: highlightTargetsOfRows(inherited, true, producerHostPieces(ops, sources)),
-    parts: highlightPartsOfRows(inherited, true, producerHostPieces(ops, sources)),
+    parts: highlightPartsOfRows(inherited, true, producerHostPieces(ops, sources), innerLines),
     inherited: inherited.length > 0,
   };
 }

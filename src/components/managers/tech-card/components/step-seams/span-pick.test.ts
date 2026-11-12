@@ -8,6 +8,7 @@ import { rowPairSig, rowsSig } from '../assembly-seams/seams-store';
 
 import realFixture from './fixtures/span-real-geoms.json';
 import { foldCrossingsMm } from './step-folds';
+import { closedInner } from './step-seams-model';
 import {
   clickSegment,
   edgeBreaks,
@@ -37,6 +38,14 @@ const id = `${piece.key}#4`;
 const length = resolveEdge(id, geoms)!.len;
 const rules = { isInner: () => false, pieceOf: (t: string) => t.slice(0, t.lastIndexOf('#')) };
 const empty: SidePick = { a: [], b: [], spans: NO_SPANS };
+const targetLen = (points: readonly Pt2[]) =>
+  points
+    .slice(1)
+    .reduce(
+      (sum, point, index) =>
+        sum + Math.hypot(point[0] - points[index][0], point[1] - points[index][1]),
+      0,
+    );
 
 describe('span hand', () => {
   it('a click takes the segment between neighbouring break points', () => {
@@ -266,6 +275,23 @@ describe('closed inner contour span hand', () => {
     [0, 0],
   ];
 
+  it('a circle with no corners is picked whole', () => {
+    const circle: Pt2[] = Array.from({ length: 72 }, (_, index) => {
+      const angle = (index / 72) * Math.PI * 2;
+      return [100 + 20 * Math.cos(angle), 100 + 20 * Math.sin(angle)];
+    });
+    circle.push(circle[0]);
+    const length = targetLen(circle);
+    const breaks = innerBreaks(circle);
+    const segments = segmentsAt(breaks, length, length / 3, !!closedInner(circle));
+    const pick = pickSegments(empty, 'a', target, segments, length, innerRules, breaks);
+
+    expect(closedInner(circle)).toBeNull();
+    expect(segments).toEqual([[0, length]]);
+    expect(pick.a).toEqual([target]);
+    expect(pick.spans.a).toEqual({});
+  });
+
   it('a click takes one side between the contour corners', () => {
     const breaks = innerBreaks(rectangle);
     const pick = pickSegments(
@@ -299,6 +325,28 @@ describe('closed inner contour span hand', () => {
       innerRules,
     );
     expect(pick.spans.a[target]).toEqual([[0, 150]]);
+  });
+
+  it('a disjoint side replaces the previous host stretch', () => {
+    const breaks = innerBreaks(rectangle);
+    const first = pickSegments(
+      empty,
+      'a',
+      target,
+      segmentsAt(breaks, 300, 70, true),
+      300,
+      innerRules,
+    );
+    const pick = pickSegments(
+      first,
+      'a',
+      target,
+      segmentsAt(breaks, 300, 220, true),
+      300,
+      innerRules,
+    );
+
+    expect(pick.spans.a[target]).toEqual([[150, 290]]);
   });
 
   it('a side across vertex 0 writes two spans', () => {

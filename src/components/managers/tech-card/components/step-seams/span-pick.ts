@@ -1,8 +1,8 @@
 // THE SPAN HAND, PURE (asm-fixes T6, T7). Segments are virtual: neighbouring break points over the
 // unchanged edges. A click takes a segment, a click on the next one extends it, a click further along
-// adds a span, a drag takes a free span. A side holds any number of spans per edge, ascending and
-// disjoint: a long edge broken by a pocket is sewn above it and below it in one row. A click on a
-// stored part selects that row and starts no pick.
+// adds a span, a drag takes a free span. An outline side holds ascending, disjoint spans; a closed
+// inner host holds one circular stretch, represented by two spans only when it crosses vertex 0. A
+// click on a stored part selects that row and starts no pick.
 
 import { breakPoints, type EdgeBreakPoint } from 'lib/assembly-skeleton/geometry';
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
@@ -10,7 +10,7 @@ import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { expandSidePart, mergedSpans, SEAMS, sidePartEdges, type SidePart } from 'lib/seams';
 
 import { pickTarget } from './seam-focus';
-import { closedInner, parseInner } from './step-seams-model';
+import { closedInner, parseInner, SAME_MM } from './step-seams-model';
 
 export type SpanRange = readonly [number, number];
 export type SpanSide = 'a' | 'b';
@@ -23,8 +23,6 @@ export type SidePick = {
 export type SideSpans = Readonly<Record<string, readonly SpanRange[]>>;
 
 export const NO_SPANS: SidePick['spans'] = { a: {}, b: {} };
-
-const SAME_MM = 0.1;
 
 const spansSig = (spans: SideSpans) =>
   Object.entries(spans)
@@ -164,6 +162,7 @@ export function segmentsAt(
   closed = false,
 ): SpanRange[] {
   const segment = segmentAt(breaks, length, atMm);
+  if (!breaks.length) return [segment];
   if (!closed || breaks.some((point) => point.atMm <= SAME_MM || point.atMm >= length - SAME_MM))
     return [segment];
   const twin =
@@ -172,7 +171,10 @@ export function segmentsAt(
       : segment[1] >= length - SAME_MM
         ? segmentAt(breaks, length, Math.min(length, SAME_MM))
         : null;
-  return twin ? [segment, twin].sort((a, b) => a[0] - b[0]) : [segment];
+  return twin &&
+    (Math.abs(twin[0] - segment[0]) >= SAME_MM || Math.abs(twin[1] - segment[1]) >= SAME_MM)
+    ? [segment, twin].sort((a, b) => a[0] - b[0])
+    : [segment];
 }
 
 /** A free drag's end lands on a break point near it, and anywhere else as it is. */
@@ -323,9 +325,40 @@ export function pickSegments(
   rules: PickRules,
   breaks: readonly PickBreak[] = [],
 ): SidePick {
-  return segments.reduce(
+  const next = segments.reduce(
     (current, segment) => pickSegment(current, side, id, segment, length, rules, breaks),
     pick,
+  );
+  if (!rules.isInner(id)) return next;
+  const ranges = next.spans[side][id];
+  if (!ranges || innerRangesAreContiguous(ranges, length)) return next;
+  const current = pick.spans[side][id] ?? (pick[side].includes(id) ? [[0, length]] : []);
+  const adds = segments.some(
+    (segment) =>
+      !current.some(([from, to]) => segment[0] >= from - SAME_MM && segment[1] <= to + SAME_MM),
+  );
+  if (!adds) {
+    const longest = [...ranges].sort((a, b) => b[1] - b[0] - (a[1] - a[0]))[0];
+    return withSpans(next, side, id, [longest], length);
+  }
+  const own = Object.fromEntries(Object.entries(pick.spans[side]).filter(([key]) => key !== id));
+  const without: SidePick = {
+    ...pick,
+    [side]: pick[side].filter((target) => target !== id),
+    spans: { ...pick.spans, [side]: own },
+  };
+  return segments.reduce(
+    (currentPick, segment) => pickSegment(currentPick, side, id, segment, length, rules, breaks),
+    without,
+  );
+}
+
+/** One linear range, or the two range parts of one stretch crossing stored vertex 0. */
+export function innerRangesAreContiguous(ranges: readonly SpanRange[], length: number): boolean {
+  const merged = mergedSpans(ranges);
+  return (
+    merged.length <= 1 ||
+    (merged.length === 2 && merged[0][0] <= SAME_MM && merged[1][1] >= length - SAME_MM)
   );
 }
 
@@ -346,6 +379,8 @@ export function pickFreeSpan(
   if (pick[side].includes(id)) {
     const current = pick.spans[side][id] ?? [];
     const next = mergedSpans([...current, ordered]);
+    if (rules.isInner(id) && current.length && !innerRangesAreContiguous(next, length))
+      return withSpans(pick, side, id, [ordered], length);
     if (next.length > current.length && current.length && sideIsFull(pick, side)) return pick;
     return withSpans(pick, side, id, next, length);
   }

@@ -20,9 +20,9 @@ import { handRow, type AnchorCtx, type HandRowRefusal } from '../assembly-seams/
 import { laysRow } from './live-row';
 import {
   innerId,
-  innerSlices,
   parseInner,
   pieceOfTarget,
+  polylineLenMm,
   type FormOpLike,
   type TargetId,
 } from './step-seams-model';
@@ -103,6 +103,7 @@ export function rowTargetsOfAnchor(anchor: EdgeAnchor): TargetId[] {
 export function storedSeamSides(
   row: StoredSeam,
   geoms?: ReadonlyMap<string, PieceGeom>,
+  innerLines?: ReadonlyMap<string, readonly (readonly Pt2[])[]>,
 ): SeamSides & {
   parts: { a: SidePart[]; b: SidePart[] };
   placement?: SeamPlacement;
@@ -118,8 +119,12 @@ export function storedSeamSides(
         targets.length === 0
       )
         return targets.map((target) => ({ target }));
-      const length = inner
-        ? anchor.lenMm
+      const mark = inner ? parseInner(targets[0]) : null;
+      const currentLine = mark ? innerLines?.get(mark.piece)?.[mark.k] : undefined;
+      const length = mark
+        ? currentLine?.length
+          ? polylineLenMm(currentLine)
+          : anchor.lenMm
         : resolveEdge(anchor.edgeHint, geoms ?? new Map())?.len ?? anchor.lenMm;
       const from = Math.max(0, Math.min(length, anchor.range[0] * length));
       const to = Math.max(from, Math.min(length, anchor.range[1] * length));
@@ -150,7 +155,7 @@ export function candidateOfStoredSeam(
   innerLines: ReadonlyMap<string, Pt2[][]>,
 ): SeamCandidate | null {
   if (row.kind === 'closure') return null;
-  const { a, b, parts, placement } = storedSeamSides(row, geoms);
+  const { a, b, parts, placement } = storedSeamSides(row, geoms, innerLines);
   if (row.kind === 'surface') {
     // The persisted surface contract is side A = host, side B = laid part. Old rows may have lost
     // their `iN` hint; their kind still makes them a surface, placed by the stored numbers (or a
@@ -159,13 +164,10 @@ export function candidateOfStoredSeam(
     const part = row.sideB[0]?.piece;
     if (!host || !part) return null;
     const mark = a.map(parseInner).find((target) => target?.piece === host);
-    const wholeLine = mark ? innerLines.get(host)?.[mark.k] ?? [] : [];
-    const ranges = parts.a
-      .filter((part) => part.target === innerId(host, mark?.k ?? -1) && part.range)
-      .map((part) => part.range!);
-    const line = innerSlices(wholeLine, ranges);
     const edge = b.find((target) => !parseInner(target));
-    return surfaceSeam(host, part, line, geoms, placement, edge);
+    return mark
+      ? seamOfSides(parts, geoms, innerLines, placement)
+      : surfaceSeam(host, part, [], geoms, placement, edge);
   }
   const hasRealRange =
     (row.kind === 'partial' || row.kind === 'composite') &&

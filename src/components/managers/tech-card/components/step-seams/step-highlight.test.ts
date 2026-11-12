@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
+import type { Pt2 } from 'lib/assembly-skeleton/types';
 import type { EdgeAnchor, StoredSeam } from 'lib/seams';
 
-import { stepHighlightOf } from './step-highlight';
+import { highlightPartsOfRows, stepHighlightOf } from './step-highlight';
 
 const anchor = (piece: string, edgeHint: string): EdgeAnchor => ({ piece, edgeHint }) as EdgeAnchor;
 
@@ -60,5 +61,34 @@ describe('step highlight targets', () => {
     expect(highlight.targets).not.toContain('SLEEVE#7');
     expect(highlight.targets).not.toContain('SLEEVE_2#8');
     expect(highlight.inherited).toBe(true);
+  });
+
+  it('converts an inner highlight with the current contour length', () => {
+    const surface: StoredSeam = {
+      ...row(
+        'surface',
+        [
+          {
+            ...anchor('HOST', 'i0'),
+            lenMm: 300,
+            range: [0.5, 0.75],
+          } as EdgeAnchor,
+        ],
+        [anchor('PART', 'PART#0')],
+      ),
+      kind: 'surface',
+    };
+    const line: Pt2[] = [
+      [0, 0],
+      [100, 0],
+      [100, 100],
+      [0, 100],
+      [0, 0],
+    ];
+
+    expect(highlightPartsOfRows([surface], false, new Set(), new Map([['HOST', [line]]]))).toEqual([
+      { target: 'HOST:i0', range: [200, 300] },
+      { target: 'PART#0' },
+    ]);
   });
 });

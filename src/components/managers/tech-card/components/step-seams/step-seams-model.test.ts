@@ -1253,10 +1253,44 @@ describe('surface seam rows', () => {
         [290, 300],
       ]),
     ).toEqual([
-      [20, -60],
-      [20, -50],
-      [30, -50],
+      [
+        [20, -60],
+        [20, -50],
+        [30, -50],
+      ],
     ]);
+  });
+
+  it('merges every touching wrap part and keeps disjoint stretches separate', () => {
+    expect(
+      innerSlices(closed, [
+        [250, 300],
+        [0, 20],
+        [20, 60],
+        [140, 150],
+      ]),
+    ).toEqual([
+      [
+        [60, -60],
+        [20, -60],
+        [20, -50],
+        [80, -50],
+      ],
+      [
+        [160, -50],
+        [160, -60],
+      ],
+    ]);
+  });
+
+  it('does not segment a closed contour without corners', () => {
+    const circle: Pt2[] = Array.from({ length: 72 }, (_, index) => {
+      const angle = (index / 72) * Math.PI * 2;
+      return [100 + 20 * Math.cos(angle), 100 + 20 * Math.sin(angle)];
+    });
+    circle.push(circle[0]);
+
+    expect(closedInner(circle)).toBeNull();
   });
 
   it('anchors the inner line by edge hint i<k>, inside the host frame', () => {
@@ -1291,6 +1325,11 @@ describe('surface seam rows', () => {
     expect(side.samples).toEqual(legacy.samples);
     expect(side.lenMm).toBe(legacy.lenMm);
     expect(side.contourSig).toBe(legacy.contourSig);
+  });
+
+  it('drops sub-millimetre inner ranges before rounding their shares', () => {
+    expect(innerAnchor(host, 0, closed, 0, undefined, [150, 150.001])).toBeNull();
+    expect(innerAnchor(host, 0, closed, 0, undefined, [299.99, 300])).toBeNull();
   });
   it('writes one confirmed manual surface row with the placement on both sides', () => {
     const part = rect('FLP', 120, 60);

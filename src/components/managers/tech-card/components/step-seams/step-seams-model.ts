@@ -38,6 +38,7 @@ import { edgeWordPredicate } from './signals/edge-words';
 import { zoneAllows, zoneOf } from './signals/zone';
 
 export type Pt = [number, number];
+export const SAME_MM = 0.1;
 
 /** A pickable target: an edge (`P#3`) or an inner line (`P:i2`). */
 export type TargetId = string;
@@ -2634,7 +2635,7 @@ export function suggestionWords(suggestion: Suggestion, nameOf: (piece: string) 
 
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
 const r = (x: number, d: number) => Math.round(x * 10 ** d) / 10 ** d;
-const polyLen = (pts: readonly Pt[]) =>
+export const polylineLenMm = (pts: readonly Pt[]) =>
   pts.reduce((s, p, i) => (i ? s + Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) : s), 0);
 
 const mmNearestPoint = (line: readonly Pt[], point: Pt): number => {
@@ -2663,7 +2664,7 @@ const mmNearestPoint = (line: readonly Pt[], point: Pt): number => {
 /** A closed inner contour segmented with the outline's own resample and corner thresholds. */
 export function closedInner(line: readonly Pt[]): { lenMm: number; cornersMm: number[] } | null {
   if (line.length < 4 || dist(line[0], line[line.length - 1]) > 1e-6) return null;
-  const lenMm = polyLen(line);
+  const lenMm = polylineLenMm(line);
   if (!(lenMm > 0)) return null;
   const ring = resample(line, SKELETON.resampleMm);
   if (ring.length < 3) return null;
@@ -2673,7 +2674,7 @@ export function closedInner(line: readonly Pt[]): { lenMm: number; cornersMm: nu
     .filter(
       (value, index, values) => index === 0 || value - values[index - 1] > SKELETON.resampleMm / 2,
     );
-  return { lenMm, cornersMm };
+  return cornersMm.length ? { lenMm, cornersMm } : null;
 }
 
 const innerSliceBetween = (line: readonly Pt[], from: number, to: number): Pt[] => {
@@ -2700,7 +2701,7 @@ const innerSliceBetween = (line: readonly Pt[], from: number, to: number): Pt[] 
 
 /** A millimetre range of an inner polyline; `from > to` joins across its closed vertex 0. */
 export function innerSlice(line: readonly Pt[], range?: readonly [number, number]): Pt[] {
-  const length = polyLen(line);
+  const length = polylineLenMm(line);
   if (!range || !(length > 0)) return [...line];
   const from = Math.max(0, Math.min(length, range[0]));
   const to = Math.max(0, Math.min(length, range[1]));
@@ -2712,24 +2713,53 @@ export function innerSlice(line: readonly Pt[], range?: readonly [number, number
     : [...first, ...second];
 }
 
-/** One picked inner stretch from its one or two persisted, non-wrapping range parts. */
+const mergedInnerRanges = (
+  ranges: readonly (readonly [number, number])[],
+  length: number,
+): [number, number][] => {
+  const clamped = ranges
+    .flatMap(([rawFrom, rawTo]): [number, number][] => {
+      const from = Math.max(0, Math.min(length, rawFrom));
+      const to = Math.max(0, Math.min(length, rawTo));
+      return from <= to
+        ? [[from, to]]
+        : [
+            [from, length],
+            [0, to],
+          ];
+    })
+    .filter(([from, to]) => to - from > 1e-6)
+    .sort((a, b) => a[0] - b[0]);
+  const merged: [number, number][] = [];
+  for (const range of clamped) {
+    const last = merged.at(-1);
+    if (last && range[0] <= last[1] + SAME_MM) last[1] = Math.max(last[1], range[1]);
+    else merged.push([...range]);
+  }
+  return merged;
+};
+
+/** Picked inner stretches as separate polylines; a wrap is the one line crossing stored vertex 0. */
 export function innerSlices(
   line: readonly Pt[],
   ranges: readonly (readonly [number, number])[],
-): Pt[] {
-  if (!ranges.length) return [...line];
-  const length = polyLen(line);
-  const ordered = [...ranges].sort((a, b) => a[0] - b[0]);
-  if (ordered.length === 2 && ordered[0][0] <= 0.05 && ordered[1][1] >= length - 0.05)
-    return innerSlice(line, [ordered[1][0], ordered[0][1]]);
-  const out: Pt[] = [];
-  for (const range of ordered) {
-    const slice = innerSlice(line, range);
-    if (!slice.length) continue;
-    if (out.length && dist(out[out.length - 1], slice[0]) <= 1e-6) out.push(...slice.slice(1));
-    else out.push(...slice);
+): Pt[][] {
+  if (!ranges.length) return [[...line]];
+  const length = polylineLenMm(line);
+  if (!(length > 0)) return [];
+  const merged = mergedInnerRanges(ranges, length);
+  if (!merged.length) return [];
+  if (
+    merged.length > 1 &&
+    merged[0][0] <= SAME_MM &&
+    merged[merged.length - 1][1] >= length - SAME_MM
+  ) {
+    const wrap = innerSlice(line, [merged[merged.length - 1][0], merged[0][1]]);
+    return [wrap, ...merged.slice(1, -1).map((range) => innerSlice(line, range))].filter(
+      (slice) => slice.length,
+    );
   }
-  return out;
+  return merged.map((range) => innerSlice(line, range)).filter((slice) => slice.length);
 }
 
 /** An inner line of a host piece as an anchor: edge hint `i<k>`, samples in the host's frame. */
@@ -2742,11 +2772,12 @@ export function innerAnchor(
   rangeMm?: readonly [number, number],
 ): EdgeAnchor | null {
   const pts: Pt2[] = line.map(([x, y]) => [x, -y]);
-  const len = polyLen(line);
+  const len = polylineLenMm(line);
   if (pts.length < 2 || !(len > 0)) return null;
   const f = frameOf(host, grainDeg);
   const from = rangeMm ? Math.max(0, Math.min(len, rangeMm[0])) : 0;
   const to = rangeMm ? Math.max(from, Math.min(len, rangeMm[1])) : len;
+  if (rangeMm && to - from <= SAME_MM) return null;
   const range: [number, number] =
     from <= 0.05 && to >= len - 0.05 ? [0, 1] : [r(from / len, 4), r(to / len, 4)];
   return {

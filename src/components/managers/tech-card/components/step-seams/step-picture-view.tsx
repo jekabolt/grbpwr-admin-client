@@ -95,6 +95,7 @@ import {
   labelSpot,
   pathOf,
   seamOfSides,
+  seamsOfSides,
   splitSeams,
   spotInside,
   surfaceSeam,
@@ -446,7 +447,7 @@ export function stepSeamsOfOp(
     const row = byKey.get(key);
     const candidates = chosenByKey.get(key) ?? [];
     const resolved = candidates.map(candidateSides);
-    const fallback = row ? storedSeamSides(row, geoms) : null;
+    const fallback = row ? storedSeamSides(row, geoms, innerLines) : null;
     return {
       key,
       row,
@@ -511,11 +512,15 @@ export function stepSeamsOfOp(
   const split = splitLaid(graph?.chosen ?? [], leaves, geoms, innerLines, byKey);
   const innerSeams = innerSeamsOf(split, ops, index, pieceKeys, leaves, geoms, innerLines, byKey);
   const storedSeams = stored
-    .flatMap((seam) =>
-      seam.candidates.length
-        ? seam.candidates
-        : [seamOfSides(seam.parts, geoms, innerLines, seam.placement)],
-    )
+    .flatMap((seam) => {
+      if (seam.candidates.length) return seam.candidates;
+      const surfaceInner =
+        seam.row?.kind === 'surface' &&
+        [...seam.parts.a, ...seam.parts.b].some((part) => !!parseInner(part.target));
+      return surfaceInner
+        ? seamsOfSides(seam.parts, geoms, innerLines, seam.placement)
+        : [seamOfSides(seam.sides, geoms, innerLines, seam.placement)];
+    })
     .filter((candidate): candidate is SeamCandidate => !!candidate);
   const crossSeams = stored.length
     ? []
@@ -631,7 +636,7 @@ export function stepPictureOfOp(
     innerSeams,
     hands.pose,
   );
-  const highlight = stepHighlightOf(options.operations, options.index, byKey);
+  const highlight = stepHighlightOf(options.operations, options.index, byKey, innerLines);
   return {
     op: active,
     seamless,
@@ -1870,8 +1875,11 @@ export function StepPictureSvg({
   const operations = (form?.getValues('operations') ?? []) as SceneOp[];
   const operation = contextResult ? operations[contextResult.opIndex] : undefined;
   const automaticHighlight = useMemo(
-    () => (contextResult ? stepHighlightOf(operations, contextResult.opIndex, byKey) : undefined),
-    [contextResult, operations, byKey],
+    () =>
+      contextResult
+        ? stepHighlightOf(operations, contextResult.opIndex, byKey, innerLines)
+        : undefined,
+    [contextResult, operations, byKey, innerLines],
   );
   const stepEdges = suppliedStepEdges ?? automaticHighlight?.targets;
   const stepParts: readonly SidePart[] | undefined =

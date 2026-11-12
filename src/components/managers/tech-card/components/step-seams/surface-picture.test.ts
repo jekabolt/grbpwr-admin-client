@@ -149,4 +149,45 @@ describe('stored closed-contour surfaces', () => {
     expect(edge[1][1]).toBeCloseTo(50, 6);
     expect((edge[0][0] + edge[1][0]) / 2).toBeCloseTo(90, 6);
   });
+
+  it('lays a many-part wrap like the equivalent merged wrap without a chord', () => {
+    const many: StoredSeam = {
+      ...base,
+      sideA: [
+        { ...base.sideA[0], range: [250 / 300, 1] },
+        { ...base.sideA[0], range: [0, 20 / 300] },
+        { ...base.sideA[0], range: [20 / 300, 60 / 300] },
+      ],
+    };
+    const merged: StoredSeam = {
+      ...base,
+      sideA: [
+        { ...base.sideA[0], range: [250 / 300, 1] },
+        { ...base.sideA[0], range: [0, 60 / 300] },
+      ],
+    };
+
+    expect(seamSig([candidateOfStoredSeam(many, geoms, innerLines)!])).toBe(
+      seamSig([candidateOfStoredSeam(merged, geoms, innerLines)!]),
+    );
+  });
+
+  it('converts inner shares with the current contour length', () => {
+    const currentLine: Pt2[] = [
+      [20, 50],
+      [180, 50],
+      [180, 60],
+      [20, 60],
+      [20, 50],
+    ];
+    const ranged: StoredSeam = {
+      ...base,
+      sideA: [{ ...base.sideA[0], range: [0.5, 0.75] }],
+    };
+    const currentLines = new Map([['HOST', [currentLine]]]);
+
+    expect(storedSeamSides(ranged, geoms, currentLines).parts.a).toEqual([
+      { target: 'HOST:i0', range: [170, 255] },
+    ]);
+  });
 });

@@ -70,6 +70,7 @@ import { usePictureZoom } from './picture-zoom';
 import {
   edgeBreaks,
   innerBreaks,
+  innerRangesAreContiguous,
   NO_SPANS,
   pickFreeSpan,
   pickSegments,
@@ -292,10 +293,10 @@ export function SeamPickerBody({
     () =>
       bindingTarget
         ? bindingRowsOf(seamRows.values(), boundStripKeys).map((row) => ({
-            parts: storedSeamSides(row, geoms).parts,
+            parts: storedSeamSides(row, geoms, innerLines).parts,
           }))
         : [],
-    [bindingTarget, seamRows, boundStripKeys, geoms],
+    [bindingTarget, seamRows, boundStripKeys, geoms, innerLines],
   );
   // An edge is bound once on the card: any step's binding row holding that stretch refuses it.
   const boundOnCard = useCallback(
@@ -517,6 +518,12 @@ export function SeamPickerBody({
       const line = h ? pieces?.get(h.piece)?.inner[h.k] : undefined;
       if (!h || !g || !line || !partKey || !geo) return null;
       const hs: Side = s.a.includes(ins[0]) ? 'a' : 'b';
+      const hostRanges = clicked.spans[hs][ins[0]];
+      if (
+        hostRanges &&
+        !innerRangesAreContiguous(hostRanges, targetLenMm(ins[0], geoms, innerLines))
+      )
+        return null;
       const picked = s[hs === 'a' ? 'b' : 'a'];
       if (!picked.length) return null;
       const parts = runsOfSide(picked, geoms)
@@ -534,7 +541,7 @@ export function SeamPickerBody({
         undefined,
       );
     },
-    [geoms, anchorCtx, pieces, geo, partKey, edgePick],
+    [geoms, anchorCtx, pieces, geo, partKey, edgePick, innerLines],
   );
 
   const reset = () => {
