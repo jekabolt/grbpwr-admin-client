@@ -1,4 +1,5 @@
 import { unitDisplayName } from 'lib/assembly-unit-name';
+import type { CutStrip } from './cut-strip-editor/use-cut-strip';
 import type { RemovalSeams } from './step-seams/step-removal-seams';
 
 // ИСТОРИЯ ЖЕСТОВ — чистая половина отмены. Глубина здесь БОЛЬШЕ ОДНОЙ: ⌘Z несколько раз подряд,
@@ -251,8 +252,21 @@ export type HistoryEntry<TRow = unknown> =
       pieceKeys: string[];
       seamKeys: string[];
       bomLineKeys: string[];
-      /** Seam and pose rows deleted with the step; older in-memory records may not carry them. */
+      /** Seam and pose rows the post-save cleanup may delete; older records may not carry them. */
       seamRows?: RemovalSeams;
+      /** The stored number and rows whose post-save cleanup this removal owns. */
+      operationNumber?: number;
+      cleanupKeys?: string[];
+      /** A binding step removes its strips and patches other steps in the same form edit. */
+      binding?: {
+        stripsBefore: CutStrip[];
+        stripsAfter: CutStrip[];
+        patches: Array<{
+          historyKey: string;
+          before: { inputKeys: string[]; seamKeys: string[] };
+          after: { inputKeys: string[]; seamKeys: string[] };
+        }>;
+      };
       label: string;
     };
 
