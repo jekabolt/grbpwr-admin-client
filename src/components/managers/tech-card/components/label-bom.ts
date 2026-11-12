@@ -181,6 +181,174 @@ export function takeLabelMaterialOff(
   });
 }
 
+/**
+ * WHAT ONE LABEL REMOVAL TOOK AWAY — a delta, never a snapshot of whole arrays. The undo row
+ * outlives later edits (a step removed and cleaned up, a neighbour renamed, a line added); writing
+ * a snapshot back would resurrect a step whose seams the server already deleted and overwrite
+ * those edits. Steps are addressed by `historyKey`; a step that is gone is skipped.
+ */
+export type LabelRemoval = {
+  label?: { row: FormGarmentLabel; index: number };
+  line?: { row: BomLine; index: number };
+  steps: Array<{ historyKey: string; labelKeys: string[]; bomLineKeys: string[] }>;
+};
+
+type StepRefs = { labelKeys: string[]; bomLineKeys: string[] };
+
+const stepRefs = (
+  operations: TechCardFormData['operations'] | undefined,
+): Map<string, StepRefs> => {
+  const out = new Map<string, StepRefs>();
+  (operations ?? []).forEach((op) => {
+    if (!op.historyKey) return;
+    out.set(op.historyKey, {
+      labelKeys: (op.labelKeys ?? []).slice(),
+      bomLineKeys: (op.bomLineKeys ?? []).slice(),
+    });
+  });
+  return out;
+};
+
+/** Remove a label with its line and return the delta the undo row needs to put it back. */
+export function removeLabelUndoable(
+  getValues: UseFormGetValues<TechCardFormData>,
+  setValue: UseFormSetValue<TechCardFormData>,
+  labelKey: string,
+): LabelRemoval {
+  const labelsBefore = ((getValues('garmentLabels') ?? []) as FormGarmentLabel[]).slice();
+  const linesBefore = ((getValues('bomItems') ?? []) as BomItems).slice();
+  const refsBefore = stepRefs(getValues('operations'));
+
+  removeLabelWithLine(getValues, setValue, labelKey);
+
+  const labelsAfter = (getValues('garmentLabels') ?? []) as FormGarmentLabel[];
+  const linesAfter = (getValues('bomItems') ?? []) as BomItems;
+  const refsAfter = stepRefs(getValues('operations'));
+
+  const labelIndex = labelsBefore.findIndex(
+    (row) => sameKey(row.key, labelKey) && !labelsAfter.some((r) => sameKey(r.key, row.key)),
+  );
+  const lineIndex = linesBefore.findIndex(
+    (row) => !linesAfter.some((candidate) => sameLine(candidate, row)),
+  );
+  const steps: LabelRemoval['steps'] = [];
+  refsBefore.forEach((before, historyKey) => {
+    const after = refsAfter.get(historyKey);
+    if (!after) return;
+    const labelKeys = before.labelKeys.filter((key) => !after.labelKeys.includes(key));
+    const bomLineKeys = before.bomLineKeys.filter((key) => !after.bomLineKeys.includes(key));
+    if (labelKeys.length || bomLineKeys.length) steps.push({ historyKey, labelKeys, bomLineKeys });
+  });
+  return {
+    label: labelIndex >= 0 ? { row: labelsBefore[labelIndex], index: labelIndex } : undefined,
+    line: lineIndex >= 0 ? { row: linesBefore[lineIndex], index: lineIndex } : undefined,
+    steps,
+  };
+}
+
+const insertAt = <T>(rows: readonly T[], row: T, index: number): T[] => {
+  const at = Math.min(Math.max(index, 0), rows.length);
+  return [...rows.slice(0, at), row, ...rows.slice(at)];
+};
+
+const withKeys = (current: readonly string[], back: readonly string[]): string[] => [
+  ...current,
+  ...back.filter((key) => !current.includes(key)),
+];
+
+/**
+ * Undo row of the label block: puts back the label row and its line where they are missing and
+ * the removed refs on the steps that are still in the form. Everything edited since stays.
+ */
+export function undoLabelRemoval(
+  getValues: UseFormGetValues<TechCardFormData>,
+  setValue: UseFormSetValue<TechCardFormData>,
+  removal: LabelRemoval,
+): void {
+  const { label, line } = removal;
+  // The same label was added again meanwhile: the steps take its keys, the old line stays out.
+  const lineKeyMap = new Map<string, string>();
+  const labels = (getValues('garmentLabels') ?? []) as FormGarmentLabel[];
+  const twin = label && labels.find((row) => sameKey(row.key, label.row.key));
+  if (label && twin) {
+    const [oldLabel, newLabel] = [label.row.lineKey?.trim(), twin.lineKey?.trim()];
+    const [oldLine, newLine] = [label.row.bomLineKey?.trim(), twin.bomLineKey?.trim()];
+    if (oldLabel && newLabel) lineKeyMap.set(oldLabel, newLabel);
+    if (oldLine && newLine) lineKeyMap.set(oldLine, newLine);
+  } else if (label) {
+    setValue('garmentLabels', insertAt(labels, label.row, label.index) as never, {
+      shouldDirty: true,
+    });
+  }
+  const lineTaken = !!line?.row.lineKey && lineKeyMap.has(line.row.lineKey.trim());
+  if (line && !lineTaken) {
+    const lines = (getValues('bomItems') ?? []) as BomItems;
+    if (!lines.some((candidate) => sameLine(candidate, line.row))) {
+      setValue('bomItems', insertAt(lines, line.row, line.index) as never, { shouldDirty: true });
+    }
+  }
+  if (removal.steps.length === 0) return;
+  const mapped = (keys: readonly string[]) => keys.map((key) => lineKeyMap.get(key) ?? key);
+  const back = new Map(
+    removal.steps.map((step) => [
+      step.historyKey,
+      { labelKeys: mapped(step.labelKeys), bomLineKeys: mapped(step.bomLineKeys) },
+    ]),
+  );
+  (getValues('operations') ?? []).forEach((op, index) => {
+    const step = op.historyKey ? back.get(op.historyKey) : undefined;
+    if (!step) return;
+    back.delete(op.historyKey!);
+    const labelKeys = op.labelKeys ?? [];
+    const bomLineKeys = op.bomLineKeys ?? [];
+    const nextLabels = withKeys(labelKeys, step.labelKeys);
+    const nextLines = withKeys(bomLineKeys, step.bomLineKeys);
+    if (nextLabels.length !== labelKeys.length) {
+      setValue(`operations.${index}.labelKeys`, nextLabels, { shouldDirty: true });
+    }
+    if (nextLines.length !== bomLineKeys.length) {
+      setValue(`operations.${index}.bomLineKeys`, nextLines, { shouldDirty: true });
+    }
+  });
+  // A step that is out of the form takes its refs when its own undo brings it back.
+  back.forEach((refs, historyKey) => {
+    const owed = owedLabelRefs.get(historyKey);
+    owedLabelRefs.set(historyKey, {
+      labelKeys: withKeys(owed?.labelKeys ?? [], refs.labelKeys),
+      bomLineKeys: withKeys(owed?.bomLineKeys ?? [], refs.bomLineKeys),
+    });
+  });
+}
+
+/** History key → label refs a label undo owed a step that was out of the form. */
+const owedLabelRefs = new Map<string, StepRefs>();
+
+/** The step row a step undo puts back, with the label refs owed to it that still resolve. */
+export function withOwedLabelRefs<
+  T extends { historyKey?: string; labelKeys?: string[]; bomLineKeys?: string[] },
+>(row: T, getValues: UseFormGetValues<TechCardFormData>): T {
+  const owed = row.historyKey ? owedLabelRefs.get(row.historyKey) : undefined;
+  if (!owed) return row;
+  owedLabelRefs.delete(row.historyKey!);
+  const labelKeys = new Set(
+    ((getValues('garmentLabels') ?? []) as FormGarmentLabel[]).map((l) => l.lineKey?.trim()),
+  );
+  const lineKeys = new Set(
+    ((getValues('bomItems') ?? []) as BomItems).map((l) => l.lineKey?.trim()),
+  );
+  return {
+    ...row,
+    labelKeys: withKeys(
+      row.labelKeys ?? [],
+      owed.labelKeys.filter((key) => labelKeys.has(key)),
+    ),
+    bomLineKeys: withKeys(
+      row.bomLineKeys ?? [],
+      owed.bomLineKeys.filter((key) => lineKeys.has(key)),
+    ),
+  };
+}
+
 /** Remove the label and, when it is not shared, the BOM line it owns. */
 export function removeLabelWithLine(
   getValues: UseFormGetValues<TechCardFormData>,

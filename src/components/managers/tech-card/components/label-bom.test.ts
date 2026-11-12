@@ -9,10 +9,13 @@ import {
   dropPackagingRowLine,
   packagingLineForPick,
   pickLabelMaterial,
+  removeLabelUndoable,
   removeLabelWithLine,
   removePackagingItemWithLine,
   takeLabelMaterialOff,
+  undoLabelRemoval,
   uniqueLineName,
+  withOwedLabelRefs,
 } from './label-bom';
 
 type FormState = Partial<TechCardFormData> & Record<string, unknown>;
@@ -433,5 +436,131 @@ describe('confirmCompositionLabel with a composition line already in the BOM', (
     });
     expect(confirmCompositionLabel(form.getValues, form.setValue)).toBe('L1');
     expect(form.state.bomItems as unknown[]).toHaveLength(1);
+  });
+});
+
+describe('undoLabelRemoval', () => {
+  const seed = (): FormState =>
+    ({
+      garmentLabels: [
+        { ...bareLabel('brand'), lineKey: 'lk-brand', bomLineKey: 'line-brand' },
+        { ...bareLabel('size'), lineKey: 'lk-size', bomLineKey: 'line-size' },
+      ],
+      packagingItems: [],
+      bomItems: [
+        { lineKey: 'line-brand', section: 'TECH_CARD_BOM_SECTION_LABEL', name: 'brand tape' },
+        { lineKey: 'line-size', section: 'TECH_CARD_BOM_SECTION_LABEL', name: 'size tape' },
+      ],
+      operations: [
+        {
+          historyKey: 'h-a',
+          name: 'attach brand',
+          labelKeys: ['lk-brand'],
+          bomLineKeys: ['line-brand'],
+        },
+        {
+          historyKey: 'h-b',
+          name: 'attach both',
+          labelKeys: ['lk-brand', 'lk-size'],
+          bomLineKeys: ['line-brand', 'line-size'],
+        },
+        { historyKey: 'h-c', name: 'hem', labelKeys: [], bomLineKeys: [] },
+      ],
+      pieces: [],
+      patterns: [],
+      pieceDxfAliases: [],
+      labels: [],
+    }) as unknown as FormState;
+  type Op = { historyKey: string; name: string; labelKeys: string[]; bomLineKeys: string[] };
+  const ops = (h: ReturnType<typeof formHarness>) => h.state.operations as unknown as Op[];
+
+  it('puts the label back without resurrecting a step removed after it', () => {
+    const h = formHarness(seed());
+    const removal = removeLabelUndoable(h.getValues, h.setValue, 'brand');
+    expect(ops(h)[1].labelKeys).toEqual(['lk-size']);
+
+    // the step that held the label goes, a neighbour is edited, then the label comes back
+    h.state.operations = ops(h).filter((op) => op.historyKey !== 'h-a') as never;
+    ops(h)[1].name = 'hem edited';
+    undoLabelRemoval(h.getValues, h.setValue, removal);
+
+    expect(ops(h).map((op) => op.historyKey)).toEqual(['h-b', 'h-c']);
+    expect(ops(h)[0].labelKeys).toEqual(['lk-size', 'lk-brand']);
+    expect(ops(h)[0].bomLineKeys).toEqual(['line-size', 'line-brand']);
+    expect(ops(h)[1].name).toBe('hem edited');
+    expect((h.state.garmentLabels as FormGarmentLabel[]).map((row) => row.key)).toEqual([
+      'brand',
+      'size',
+    ]);
+    expect((h.state.bomItems as { lineKey: string }[]).map((line) => line.lineKey)).toEqual([
+      'line-brand',
+      'line-size',
+    ]);
+  });
+
+  it('keeps label and BOM edits made after the removal', () => {
+    const h = formHarness(seed());
+    const removal = removeLabelUndoable(h.getValues, h.setValue, 'brand');
+    (h.state.garmentLabels as FormGarmentLabel[])[0].key = 'size renamed';
+    (h.state.bomItems as unknown[]).push({ lineKey: 'line-new', name: 'new' });
+    undoLabelRemoval(h.getValues, h.setValue, removal);
+
+    expect((h.state.garmentLabels as FormGarmentLabel[]).map((row) => row.key)).toEqual([
+      'brand',
+      'size renamed',
+    ]);
+    expect((h.state.bomItems as { lineKey: string }[]).map((line) => line.lineKey)).toEqual([
+      'line-brand',
+      'line-size',
+      'line-new',
+    ]);
+  });
+
+  it('does not double a label or line that is already back', () => {
+    const h = formHarness(seed());
+    const removal = removeLabelUndoable(h.getValues, h.setValue, 'brand');
+    undoLabelRemoval(h.getValues, h.setValue, removal);
+    undoLabelRemoval(h.getValues, h.setValue, removal);
+    expect((h.state.garmentLabels as unknown[]).length).toBe(2);
+    expect((h.state.bomItems as unknown[]).length).toBe(2);
+    expect(ops(h)[1].labelKeys).toEqual(['lk-size', 'lk-brand']);
+  });
+  it('(3) a label put back while its step is out reaches that step when the step comes back', () => {
+    const h = formHarness(seed());
+    const removal = removeLabelUndoable(h.getValues, h.setValue, 'brand');
+    // the step goes (its undo record keeps the row as it is now), then the label comes back
+    const stepRow = structuredClone(ops(h)[0]);
+    h.state.operations = ops(h).filter((op) => op.historyKey !== 'h-a') as never;
+    undoLabelRemoval(h.getValues, h.setValue, removal);
+    // the step undo puts its recorded row back
+    h.state.operations = [withOwedLabelRefs(stepRow, h.getValues), ...ops(h)] as never;
+    expect(ops(h)[0].labelKeys).toEqual(['lk-brand']);
+    expect(ops(h)[0].bomLineKeys).toEqual(['line-brand']);
+  });
+
+  it('(4) the same label added again before the undo: steps point at a label that exists, no orphan line', () => {
+    const h = formHarness(seed());
+    const removal = removeLabelUndoable(h.getValues, h.setValue, 'brand');
+    (h.state.garmentLabels as FormGarmentLabel[]).push({
+      ...bareLabel('brand'),
+      lineKey: 'lk-brand-2',
+      bomLineKey: 'line-brand-2',
+    } as FormGarmentLabel);
+    (h.state.bomItems as unknown[]).push({
+      lineKey: 'line-brand-2',
+      section: 'TECH_CARD_BOM_SECTION_LABEL',
+      name: 'brand tape',
+    });
+    undoLabelRemoval(h.getValues, h.setValue, removal);
+    const labels = h.state.garmentLabels as Array<FormGarmentLabel & { lineKey?: string }>;
+    const lines = h.state.bomItems as { lineKey: string }[];
+    const labelLineKeys = new Set(labels.map((row) => row.lineKey));
+    const bomKeys = new Set(lines.map((line) => line.lineKey));
+    for (const op of ops(h)) {
+      for (const key of op.labelKeys) expect(labelLineKeys.has(key)).toBe(true);
+      for (const key of op.bomLineKeys) expect(bomKeys.has(key)).toBe(true);
+    }
+    const owned = new Set(labels.map((row) => row.bomLineKey));
+    expect(lines.filter((line) => !owned.has(line.lineKey))).toEqual([]);
   });
 });

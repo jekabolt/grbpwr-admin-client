@@ -20,7 +20,13 @@ import {
   UndoRow,
 } from 'ui';
 
-import { pickLabelMaterial, removeLabelWithLine, takeLabelMaterialOff } from './label-bom';
+import {
+  type LabelRemoval,
+  pickLabelMaterial,
+  removeLabelUndoable,
+  takeLabelMaterialOff,
+  undoLabelRemoval,
+} from './label-bom';
 import { labelKindOfMaterial } from './label-material-kind';
 import { upsertGarmentLabel } from './form-writers';
 import { type FormGarmentLabel, type FormPackagingItem } from './labels-schema';
@@ -237,9 +243,7 @@ const displayLabelName = (row: FormGarmentLabel): string => {
 
 type RemovedLabel = {
   name: string;
-  labels: FormGarmentLabel[];
-  bomItems: NonNullable<TechCardFormData['bomItems']>;
-  operations: NonNullable<TechCardFormData['operations']>;
+  removal: LabelRemoval;
 };
 
 /** LABELS: stock-aware rows, expanded in place. */
@@ -348,15 +352,8 @@ export function LabelsBlock({
                 onRemove={() => {
                   setRemoved({
                     name: displayLabelName(row),
-                    labels: ((getValues('garmentLabels') ?? []) as FormGarmentLabel[]).slice(),
-                    bomItems: (
-                      (getValues('bomItems') ?? []) as NonNullable<TechCardFormData['bomItems']>
-                    ).slice(),
-                    operations: (
-                      (getValues('operations') ?? []) as NonNullable<TechCardFormData['operations']>
-                    ).slice(),
+                    removal: removeLabelUndoable(getValues, setValue, key),
                   });
-                  removeLabelWithLine(getValues, setValue, key);
                   setExpanded(null);
                 }}
                 last={index === rows.length - 1}
@@ -377,9 +374,7 @@ export function LabelsBlock({
           <UndoRow
             name={removed.name}
             onUndo={() => {
-              setValue('garmentLabels', removed.labels as never, { shouldDirty: true });
-              setValue('bomItems', removed.bomItems as never, { shouldDirty: true });
-              setValue('operations', removed.operations as never, { shouldDirty: true });
+              undoLabelRemoval(getValues, setValue, removed.removal);
               setRemoved(null);
             }}
             onCommit={() => setRemoved(null)}

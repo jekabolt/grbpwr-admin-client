@@ -117,7 +117,7 @@ describe('the record', () => {
     expect(owedLinks(100)).toEqual([link({ at: 2 })]);
   });
 
-  it('storage that throws is no debt and no crash', () => {
+  it('storage that throws keeps the debt in memory and does not crash', () => {
     vi.stubGlobal('localStorage', {
       getItem: () => {
         throw new Error('blocked');
@@ -130,6 +130,8 @@ describe('the record', () => {
       },
     });
     expect(() => markFuseOwed(100)).not.toThrow();
+    expect(fuseOwed(100)).toBe(true);
+    clearFuseOwed(100);
     expect(fuseOwed(100)).toBe(false);
   });
 });

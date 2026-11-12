@@ -164,21 +164,25 @@ export function runSeamChange(
     if (!flushed.ok && !(flushed.invalid && opts.pastInvalidForm)) return fail(flushed.why);
     // Past a form that does not validate, the door judges its steps by the saved baseline (C9).
     const door = flushed.ok ? undefined : { pastInvalidForm: true };
+    // Past that form, a step the door or the request cannot address (never stored, deleted, the
+    // numbers moved) is held back by the form itself: the answer is the form's reason, not a bare
+    // «not saved» (C10, owner 12.11: «OP #0» + NOT SAVED).
+    const why = (w: string) => (!flushed.ok && w === NOT_SAVED ? flushed.why : w);
     const held = await bridge.hold(door);
     try {
-      if (held.refused) return fail(held.refused);
+      if (held.refused) return fail(why(held.refused));
       for (let attempt = 0; ; attempt += 1) {
         // The card left this page while the write waited its turn.
         if (bridgeOf(cardId) !== bridge) return fail(NOT_SAVED);
         const req = changeRequest(cardId, bridge.version(), build(), bridge.operationNumber);
-        if (!req) return fail(NOT_SAVED);
+        if (!req) return fail(why(NOT_SAVED));
         let res: ChangeTechCardSeamsResponse;
         try {
           res = await deps.call(req);
         } catch (e) {
           if (attempt === 0 && isLockMoved(e)) {
             const fresh = await bridge.reread(door);
-            if (!fresh.ok) return fail(fresh.why);
+            if (!fresh.ok) return fail(why(fresh.why));
             takeRead(cardId, fresh.card);
             continue;
           }
