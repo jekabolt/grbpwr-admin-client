@@ -77,7 +77,16 @@ function parsedOwed(value: unknown): Owed {
   };
 }
 
+/**
+ * The page's own copy of a debt storage refused to keep (private mode, quota, a blocked origin).
+ * A card listed here reads from memory until a storage write succeeds again; the page's guard
+ * counts the debt as unsaved meanwhile. Lives as long as the page.
+ */
+const memory = new Map<number, Owed>();
+
 function read(cardId: number): Owed {
+  const kept = memory.get(cardId);
+  if (kept) return kept;
   try {
     const raw = localStorage.getItem(key(cardId));
     return raw ? parsedOwed(JSON.parse(raw) as unknown) : {};
@@ -91,8 +100,9 @@ function write(cardId: number, owed: Owed): void {
     if (owed.fuse || owed.links?.length || owed.stepRemovals?.length)
       localStorage.setItem(key(cardId), JSON.stringify(owed));
     else localStorage.removeItem(key(cardId));
+    memory.delete(cardId);
   } catch {
-    /* storage unavailable: the debt stays in memory, and the page's guard counts it as unsaved */
+    memory.set(cardId, owed);
   }
 }
 

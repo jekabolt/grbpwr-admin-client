@@ -2,13 +2,24 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { act, createElement } from 'react';
 import { useForm, type UseFormReturn } from 'react-hook-form';
 
-import type { StoredRow } from 'lib/seams';
+import type {
+  ChangeTechCardSeamsRequest,
+  ChangeTechCardSeamsResponse,
+  common_TechCardSeam,
+} from 'api/proto-http/admin';
+import { toWire, type StoredRow } from 'lib/seams';
 
+import { runSeamChange, type SeamChangeDeps } from './assembly-seams/seam-change';
 import type { SeamChange } from './assembly-seams/seam-change-plan';
+import type { SeamFormBridge } from './assembly-seams/seam-form-bridge';
+import { hydrateSeams, resetSeams, useSeamsStore } from './assembly-seams/seams-store';
+import type { OwedStepRemoval } from './card-owed';
 import type { TechCardFormData } from './schema';
 import { CARD6_SEAMS } from './step-seams/card6.fixture';
 import {
+  quietCleanupChange,
   runStepRemovalChange,
+  runStepRemovalCleanup,
   runStepRemovalUndoChange,
   type StepRemovalIo,
   type StepRemovalRows,
@@ -56,7 +67,8 @@ type Op = {
   seamKeys: string[];
   poseKeys: string[];
 };
-type Form = { name: string; operations: Op[] };
+type Strip = { seamKey?: string };
+type Form = { name: string; operations: Op[]; cutStrips: Strip[] };
 type Rec = { historyKey: string; row: Op; rows: StepRemovalRows; at: number };
 
 const ops0 = (): Op[] => [
@@ -80,7 +92,9 @@ const latest: {
 } = {};
 
 function Harness() {
-  const form = useForm<Form>({ defaultValues: { name: 'card', operations: ops0() } });
+  const form = useForm<Form>({
+    defaultValues: { name: 'card', operations: ops0(), cutStrips: [] },
+  });
   const { api, captureProps } = useTechCardUndoHistory({
     enabled: true,
     form: form as unknown as UseFormReturn<TechCardFormData>,
@@ -366,5 +380,129 @@ describe('step removal against the real card history', () => {
     expect(changes).toHaveLength(0);
     expect(stepUndo).toHaveLength(0);
     expect(refusals).toEqual([]);
+  });
+});
+
+// BLOCKER 2: the cleanup really deletes rows, so it cuts the card history. Strip edits made before
+// the save (S, then T) must not bring S back onto the strip after the row is gone.
+describe('step removal cleanup against the real card history and the real seam door', () => {
+  const CARD = 6;
+  const T = 'strip-seam-t';
+  const wire = (rows: readonly StoredRow[]) => rows.map(toWire) as common_TechCardSeam[];
+  const entry: OwedStepRemoval = {
+    historyKey: 'h20',
+    operationNumber: 20,
+    candidateKeys: [seamA.seamKey],
+    at: 0,
+  };
+  const strips = () => latest.form!.getValues('cutStrips').map((strip) => strip.seamKey);
+
+  async function setStrip(seamKey: string) {
+    await act(async () => {
+      clickOutside();
+      latest.form!.setValue('cutStrips', [{ seamKey }], { shouldDirty: true });
+    });
+    await act(tick);
+  }
+
+  function cleanup(call: SeamChangeDeps['call'], log: string[]) {
+    let version = 7;
+    const bridge: SeamFormBridge = {
+      flush: async () => ({ ok: true }),
+      hold: async () => ({ release: () => undefined }),
+      version: () => version,
+      operationNumber: (step) =>
+        ops().find((op) => op.historyKey === step.historyKey)?.operationNumber ?? 0,
+      adopt: (x) => {
+        if (version === x.expected) version = x.lockVersion;
+      },
+      reread: async () => ({ ok: false, why: 'no read' }),
+    };
+    const deps: SeamChangeDeps = { call, bridge: (id) => (id === CARD ? bridge : undefined) };
+    return runStepRemovalCleanup(entry, {
+      active: () => true,
+      operations: () => ops(),
+      cutStrips: () => latest.form!.getValues('cutStrips'),
+      rows: () => {
+        const st = useSeamsStore.getState();
+        return { seams: st.server, poses: st.poses };
+      },
+      change: quietCleanupChange(entry.candidateKeys, (input) =>
+        runSeamChange(CARD, input, { verb: 'removal', quiet: true }, deps),
+      ),
+      cutHistory: () => {
+        log.push('cut');
+        latest.api!.cut('step-removal-cleanup');
+      },
+      clear: () => log.push('clear'),
+    });
+  }
+
+  beforeEach(async () => {
+    resetSeams();
+    hydrateSeams(CARD, wire([seamA]), 7);
+    await removeStep('h20');
+    // Isolate the page side: the owner record is covered by the suite above.
+    stepUndo = [];
+    await act(async () => syncOwner());
+  });
+
+  it('a deleting cleanup cuts before the request; UNDO during and after it never puts S back', async () => {
+    await setStrip(seamA.seamKey);
+    await setStrip(T);
+    expect(latest.api!.canUndo).toBe(true);
+
+    const log: string[] = [];
+    let answer: (reply: ChangeTechCardSeamsResponse) => void = () => undefined;
+    const sent: ChangeTechCardSeamsRequest[] = [];
+    let running: Promise<boolean> | undefined;
+    await act(async () => {
+      running = cleanup((req) => {
+        log.push('call');
+        sent.push(req);
+        return new Promise<ChangeTechCardSeamsResponse>((resolve) => {
+          answer = resolve;
+        });
+      }, log);
+      for (let i = 0; i < 5 && sent.length === 0; i += 1) await tick();
+    });
+    expect(sent).toHaveLength(1);
+    // Every build that sends a delete cuts (the optimistic one and the one after the body flush),
+    // and all of them run before the request.
+    expect(log.indexOf('call')).toBeGreaterThan(0);
+    expect(log.slice(0, log.indexOf('call')).every((step) => step === 'cut')).toBe(true);
+
+    // UNDO while the delete is on the wire.
+    await undo();
+    expect(strips()).toEqual([T]);
+    expect(latest.api!.canUndo).toBe(false);
+
+    await act(async () => {
+      answer({ seams: [], links: [], lockVersion: 8, keyMap: [], deletedKeys: [seamA.seamKey] });
+      await running;
+    });
+    expect(log.at(-1)).toBe('clear');
+
+    // UNDO after the row is gone.
+    await undo();
+    await undo();
+    expect(strips()).toEqual([T]);
+  });
+
+  it('a cleanup with nothing to delete leaves the card history alone', async () => {
+    // The strip still holds S at cleanup time: no row to delete, no request, no cut.
+    await setStrip(seamA.seamKey);
+    const log: string[] = [];
+    const call = async () => {
+      log.push('call');
+      throw new Error('no request expected');
+    };
+    await act(async () => {
+      await cleanup(call, log);
+    });
+    expect(log).toEqual(['clear']);
+    expect(latest.api!.canUndo).toBe(true);
+    await undo();
+    expect(strips()).toEqual([]);
   });
 });

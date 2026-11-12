@@ -240,6 +240,7 @@ describe('step removal sequencing', () => {
     const io = {
       active: () => hasStepRemovalOwed(CARD, 'b', 20),
       cutStrips: () => [],
+      cutHistory: () => undefined,
       operations: () => operations,
       rows: () => rows,
       change,
@@ -269,6 +270,7 @@ describe('step removal sequencing', () => {
       runStepRemovalCleanup(entry, {
         active: () => true,
         cutStrips: () => [],
+        cutHistory: () => undefined,
         operations: () => operations,
         rows: () => rows,
         change: async (input) => {
@@ -299,6 +301,7 @@ describe('step removal sequencing', () => {
     const io = {
       active: () => hasStepRemovalOwed(CARD, 'b', 20),
       cutStrips: () => [],
+      cutHistory: () => undefined,
       operations: () => [] as Row[],
       rows: () => middleSnapshot().rows,
       change,
@@ -312,6 +315,26 @@ describe('step removal sequencing', () => {
     expect(hasStepRemovalOwed(CARD, 'b', 20)).toBe(false);
   });
 
+  it('C6b. a cleanup refused because the body is not saved keeps its debt', async () => {
+    const entry = owedOf(middleSnapshot());
+    markStepRemovalOwed(CARD, entry);
+
+    await expect(
+      runStepRemovalCleanup(entry, {
+        active: () => true,
+        cutStrips: () => [],
+        operations: () => [],
+        rows: () => middleSnapshot().rows,
+        change: async () => refused('not saved'),
+        cutHistory: () => undefined,
+        clear: () => clearStepRemovalOwed(CARD, 'b', 20),
+      }),
+    ).resolves.toBe(false);
+
+    expect(hasStepRemovalOwed(CARD, 'b', 20)).toBe(true);
+    clearStepRemovalOwed(CARD, 'b', 20);
+  });
+
   it('C6. a substantive cleanup refusal is silent work that drops its debt', async () => {
     const entry = owedOf(middleSnapshot());
     markStepRemovalOwed(CARD, entry);
@@ -320,6 +343,7 @@ describe('step removal sequencing', () => {
       runStepRemovalCleanup(entry, {
         active: () => true,
         cutStrips: () => [],
+        cutHistory: () => undefined,
         operations: () => [],
         rows: () => middleSnapshot().rows,
         change: async () => refused('contradicts_delete'),
@@ -411,6 +435,7 @@ describe('step removal sequencing', () => {
       active: () => true,
       operations: () => form,
       cutStrips: () => strips,
+      cutHistory: () => undefined,
       rows: () => savedRows,
       change: async (input) => {
         const gone = build(input).delete ?? [];
@@ -493,6 +518,7 @@ describe('step removal sequencing', () => {
     await runStepRemovalCleanup(entry, {
       active: () => true,
       cutStrips: () => [],
+      cutHistory: () => undefined,
       operations: () => [
         { historyKey: 'c', operationNumber: 20, seamKeys: ['shared'], poseKeys: [] },
       ],
@@ -729,6 +755,7 @@ describe('step removal cleanup and cut strip seams', () => {
         active: () => true,
         operations: () => [],
         cutStrips: () => [{ seamKey: 'strip-seam' }],
+        cutHistory: () => undefined,
         rows,
         change: async (input) => {
           build(input);
@@ -748,6 +775,7 @@ describe('step removal cleanup and cut strip seams', () => {
       active: () => true,
       operations: () => [],
       cutStrips: () => strips,
+      cutHistory: () => undefined,
       rows,
       change: async (input) => {
         build(input);
@@ -770,6 +798,7 @@ describe('step removal cleanup and cut strip seams', () => {
         active: () => true,
         operations: () => [],
         cutStrips: () => [{ seamKey: 'strip-seam' }],
+        cutHistory: () => undefined,
         rows,
         change,
         clear,

@@ -181,6 +181,123 @@ export function takeLabelMaterialOff(
   });
 }
 
+/**
+ * WHAT ONE LABEL REMOVAL TOOK AWAY — a delta, never a snapshot of whole arrays. The undo row
+ * outlives later edits (a step removed and cleaned up, a neighbour renamed, a line added); writing
+ * a snapshot back would resurrect a step whose seams the server already deleted and overwrite
+ * those edits. Steps are addressed by `historyKey`; a step that is gone is skipped.
+ */
+export type LabelRemoval = {
+  label?: { row: FormGarmentLabel; index: number };
+  line?: { row: BomLine; index: number };
+  steps: Array<{ historyKey: string; labelKeys: string[]; bomLineKeys: string[] }>;
+};
+
+type StepRefs = { labelKeys: string[]; bomLineKeys: string[] };
+
+const stepRefs = (
+  operations: TechCardFormData['operations'] | undefined,
+): Map<string, StepRefs> => {
+  const out = new Map<string, StepRefs>();
+  (operations ?? []).forEach((op) => {
+    if (!op.historyKey) return;
+    out.set(op.historyKey, {
+      labelKeys: (op.labelKeys ?? []).slice(),
+      bomLineKeys: (op.bomLineKeys ?? []).slice(),
+    });
+  });
+  return out;
+};
+
+/** Remove a label with its line and return the delta the undo row needs to put it back. */
+export function removeLabelUndoable(
+  getValues: UseFormGetValues<TechCardFormData>,
+  setValue: UseFormSetValue<TechCardFormData>,
+  labelKey: string,
+): LabelRemoval {
+  const labelsBefore = ((getValues('garmentLabels') ?? []) as FormGarmentLabel[]).slice();
+  const linesBefore = ((getValues('bomItems') ?? []) as BomItems).slice();
+  const refsBefore = stepRefs(getValues('operations'));
+
+  removeLabelWithLine(getValues, setValue, labelKey);
+
+  const labelsAfter = (getValues('garmentLabels') ?? []) as FormGarmentLabel[];
+  const linesAfter = (getValues('bomItems') ?? []) as BomItems;
+  const refsAfter = stepRefs(getValues('operations'));
+
+  const labelIndex = labelsBefore.findIndex(
+    (row) => sameKey(row.key, labelKey) && !labelsAfter.some((r) => sameKey(r.key, row.key)),
+  );
+  const lineIndex = linesBefore.findIndex(
+    (row) => !linesAfter.some((candidate) => sameLine(candidate, row)),
+  );
+  const steps: LabelRemoval['steps'] = [];
+  refsBefore.forEach((before, historyKey) => {
+    const after = refsAfter.get(historyKey);
+    if (!after) return;
+    const labelKeys = before.labelKeys.filter((key) => !after.labelKeys.includes(key));
+    const bomLineKeys = before.bomLineKeys.filter((key) => !after.bomLineKeys.includes(key));
+    if (labelKeys.length || bomLineKeys.length) steps.push({ historyKey, labelKeys, bomLineKeys });
+  });
+  return {
+    label: labelIndex >= 0 ? { row: labelsBefore[labelIndex], index: labelIndex } : undefined,
+    line: lineIndex >= 0 ? { row: linesBefore[lineIndex], index: lineIndex } : undefined,
+    steps,
+  };
+}
+
+const insertAt = <T>(rows: readonly T[], row: T, index: number): T[] => {
+  const at = Math.min(Math.max(index, 0), rows.length);
+  return [...rows.slice(0, at), row, ...rows.slice(at)];
+};
+
+const withKeys = (current: readonly string[], back: readonly string[]): string[] => [
+  ...current,
+  ...back.filter((key) => !current.includes(key)),
+];
+
+/**
+ * Undo row of the label block: puts back the label row and its line where they are missing and
+ * the removed refs on the steps that are still in the form. Everything edited since stays.
+ */
+export function undoLabelRemoval(
+  getValues: UseFormGetValues<TechCardFormData>,
+  setValue: UseFormSetValue<TechCardFormData>,
+  removal: LabelRemoval,
+): void {
+  const { label, line } = removal;
+  if (label) {
+    const labels = (getValues('garmentLabels') ?? []) as FormGarmentLabel[];
+    if (!labels.some((row) => sameKey(row.key, label.row.key))) {
+      setValue('garmentLabels', insertAt(labels, label.row, label.index) as never, {
+        shouldDirty: true,
+      });
+    }
+  }
+  if (line) {
+    const lines = (getValues('bomItems') ?? []) as BomItems;
+    if (!lines.some((candidate) => sameLine(candidate, line.row))) {
+      setValue('bomItems', insertAt(lines, line.row, line.index) as never, { shouldDirty: true });
+    }
+  }
+  if (removal.steps.length === 0) return;
+  const back = new Map(removal.steps.map((step) => [step.historyKey, step]));
+  (getValues('operations') ?? []).forEach((op, index) => {
+    const step = op.historyKey ? back.get(op.historyKey) : undefined;
+    if (!step) return;
+    const labelKeys = op.labelKeys ?? [];
+    const bomLineKeys = op.bomLineKeys ?? [];
+    const nextLabels = withKeys(labelKeys, step.labelKeys);
+    const nextLines = withKeys(bomLineKeys, step.bomLineKeys);
+    if (nextLabels.length !== labelKeys.length) {
+      setValue(`operations.${index}.labelKeys`, nextLabels, { shouldDirty: true });
+    }
+    if (nextLines.length !== bomLineKeys.length) {
+      setValue(`operations.${index}.bomLineKeys`, nextLines, { shouldDirty: true });
+    }
+  });
+}
+
 /** Remove the label and, when it is not shared, the BOM line it owns. */
 export function removeLabelWithLine(
   getValues: UseFormGetValues<TechCardFormData>,

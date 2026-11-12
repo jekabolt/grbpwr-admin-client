@@ -82,6 +82,7 @@ function harness(call: SeamChangeDeps['call'], over: Partial<SeamFormBridge> = {
       active: () => true,
       operations: () => ops,
       cutStrips: () => strips,
+      cutHistory: () => undefined,
       rows: () => {
         const s = useSeamsStore.getState();
         return { seams: s.server, poses: s.poses };

@@ -6533,6 +6533,8 @@ export function OperationsField({
     [],
   );
   const removalCleanupFlight = useRef<Promise<void> | null>(null);
+  // Set beside `undoHistoryApi` below: a cleanup that deletes rows cuts the card history.
+  const cutHistoryForCleanup = useRef<() => void>(() => undefined);
 
   const clearRemovalDebt = useCallback((cardId: number, entry: OwedStepRemoval) => {
     clearStepRemovalOwed(cardId, entry.historyKey, entry.operationNumber);
@@ -6567,6 +6569,7 @@ export function OperationsField({
             change: quietCleanupChange(entry.candidateKeys, (input) =>
               sourceStepWrites.change(input, { verb: 'removal', quiet: true }),
             ),
+            cutHistory: () => cutHistoryForCleanup.current(),
             clear: () => clearRemovalDebt(cardId, entry),
           });
         }
@@ -9093,6 +9096,7 @@ export function OperationsField({
   // The fullscreen answers for itself. A layout move has nothing to show here and stays in it.
   const undoHistoryApi = useUndoHistory();
   const setHistoryOwner = undoHistoryApi.setOwner;
+  cutHistoryForCleanup.current = () => undoHistoryApi.cut('step-removal-cleanup');
   const historyDoors = useRef({ undo: undoGesture, redo: redoGesture });
   historyDoors.current = { undo: undoGesture, redo: redoGesture };
   useEffect(() => {

@@ -264,7 +264,8 @@ const cleanupRetryable = (why: string): boolean => {
     value.includes('network') ||
     value.includes('still saving') ||
     value.includes('fix ') ||
-    value.includes('kept changing')
+    value.includes('kept changing') ||
+    value.includes('not saved')
   );
 };
 
@@ -275,6 +276,11 @@ export type StepRemovalCleanupIo = {
   cutStrips: () => readonly CleanupStrip[];
   rows: () => StepRemovalRows;
   change: (input: SeamChangeInput) => Promise<SeamChangeResult>;
+  /**
+   * Cut the card history. Called by every build that sends a delete, before the request: an
+   * earlier card entry may hold a cleaned-up key (a strip's seam before the save) without its row.
+   */
+  cutHistory: () => void;
   clear: () => void;
 };
 
@@ -299,9 +305,13 @@ export async function runStepRemovalCleanup(
   const build = (): SeamChange => {
     builds += 1;
     lastKeys = stepRemovalCleanupKeys(entry, io.operations(), io.rows(), io.cutStrips());
-    return lastKeys.length
-      ? { delete: lastKeys }
-      : { link: [{ step: { historyKey: entry.historyKey }, seamKey: entry.candidateKeys[0] }] };
+    if (!lastKeys.length) {
+      return {
+        link: [{ step: { historyKey: entry.historyKey }, seamKey: entry.candidateKeys[0] }],
+      };
+    }
+    io.cutHistory();
+    return { delete: lastKeys };
   };
   let changed: SeamChangeResult;
   try {
