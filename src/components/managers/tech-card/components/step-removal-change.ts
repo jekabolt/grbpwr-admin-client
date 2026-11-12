@@ -199,6 +199,11 @@ export async function runStepRemovalUndoChange<TRow extends StepLinkRow, TInsert
     return false;
   }
 
+  // A cleanup delete lost its answer and no read came since: the plan would trust gone rows.
+  if (stepRemovalRowsInDoubt(snapshot.step.historyKey, io.rows().seams)) {
+    io.refuse(io.unsettled);
+    return false;
+  }
   const plan = stepRemovalRestorePlan(snapshot.rows, io.rows());
   const keyMap = new Map(plan.keyMap);
   if (plan.upsert.length) {
@@ -269,6 +274,24 @@ const cleanupRetryable = (why: string): boolean => {
   );
 };
 
+/** The delete may have landed although its answer was lost: the store's rows prove nothing. */
+const lostReply = (why: string): boolean => {
+  const value = why.toLowerCase();
+  return (
+    value.includes('failed to fetch') ||
+    value.includes('network') ||
+    value.includes('server did not answer')
+  );
+};
+
+/** History key → the store's row list when a cleanup delete lost its answer. */
+const rowsInDoubt = new Map<string, readonly StoredSeam[]>();
+
+/** True while the store still shows the very rows a cleanup delete with a lost answer left. */
+export function stepRemovalRowsInDoubt(historyKey: string, seams: readonly StoredSeam[]): boolean {
+  return rowsInDoubt.get(historyKey) === seams;
+}
+
 export type StepRemovalCleanupIo = {
   active: () => boolean;
   operations: () => readonly CleanupOperation[];
@@ -322,9 +345,12 @@ export async function runStepRemovalCleanup(
   // The first build supplies optimistic state. Only a later build proves that the body flush ran
   // and that its saved links leave no row to delete.
   if (changed.ok || (builds > 1 && !lastKeys.length)) {
+    rowsInDoubt.delete(entry.historyKey);
     io.clear();
     return true;
   }
+  if (lostReply(changed.why)) rowsInDoubt.set(entry.historyKey, io.rows().seams);
+  else rowsInDoubt.delete(entry.historyKey);
   // A transient queue, validation or network refusal retries after the next successful body save.
   // A server contradiction is stable for this debt and is dropped silently instead of spinning.
   if (!cleanupRetryable(changed.why)) io.clear();

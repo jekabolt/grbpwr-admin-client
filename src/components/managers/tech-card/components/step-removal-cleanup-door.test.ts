@@ -13,7 +13,11 @@ import { runSeamChange, type SeamChangeDeps } from './assembly-seams/seam-change
 import type { SeamFormBridge } from './assembly-seams/seam-form-bridge';
 import { hydrateSeams, resetSeams, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
 import type { OwedStepRemoval } from './card-owed';
-import { quietCleanupChange, runStepRemovalCleanup } from './step-removal-change';
+import {
+  quietCleanupChange,
+  runStepRemovalCleanup,
+  runStepRemovalUndoChange,
+} from './step-removal-change';
 
 // The cleanup through the REAL `runSeamChange` and the real seams store: only the door (bridge) and
 // the server call are doubles. A fake `io.change` would hide what the strict door does.
@@ -198,5 +202,126 @@ describe('step removal cleanup through the real seam door', () => {
     const s = useSeamsStore.getState();
     expect(s.pending[b.seamKey]).toBeUndefined();
     expect(s.errors[b.seamKey]).toBeUndefined();
+  });
+});
+
+describe('a lost cleanup reply, then the step undo', () => {
+  const snapshot = {
+    step: { historyKey: entry.historyKey },
+    row: {
+      historyKey: entry.historyKey,
+      operationNumber: 20,
+      seamKeys: [a.seamKey, b.seamKey],
+      poseKeys: [],
+    },
+    rows: { seams: [a, b], poses: [] },
+    operationNumber: 20,
+    candidateKeys: entry.candidateKeys,
+  };
+
+  async function lostDelete() {
+    const sent: ChangeTechCardSeamsRequest[] = [];
+    const h = harness(async (req) => {
+      sent.push(req);
+      // The server applied the delete; the answer never came back.
+      throw new Error('Failed to fetch');
+    });
+    await h.run();
+    return { h, sent };
+  }
+
+  function undo(
+    h: ReturnType<typeof harness>,
+    call: SeamChangeDeps['call'],
+    settle = async () => true,
+  ) {
+    const restored: Array<{ row: unknown; keyMap: ReadonlyMap<string, string> }> = [];
+    const refused: string[] = [];
+    const deps: SeamChangeDeps = { call, bridge: (id) => (id === CARD ? h.bridge : undefined) };
+    const done = runStepRemovalUndoChange(snapshot, {
+      validate: () => null,
+      alreadyBack: () => false,
+      close: () => undefined,
+      settle,
+      rows: () => {
+        const s = useSeamsStore.getState();
+        return { seams: s.server, poses: s.poses };
+      },
+      change: (input) => runSeamChange(CARD, input, { verb: 'restore' }, deps),
+      cutHistory: () => undefined,
+      restore: (row, keyMap) => restored.push({ row, keyMap }),
+      clearOwed: () => undefined,
+      finishHistory: () => undefined,
+      select: () => undefined,
+      refuse: (why) => refused.push(why),
+      unsettled: 'still saving',
+    });
+    return { done, restored, refused };
+  }
+
+  it('the rows the store still shows are not trusted: undo restores nothing without a fresh read', async () => {
+    const { h, sent } = await lostDelete();
+    expect(sent).toHaveLength(1);
+    expect(h.clear).not.toHaveBeenCalled();
+    // The store still shows both rows; the server dropped them.
+    expect(storeKeys()).toEqual([a.seamKey, b.seamKey]);
+    const call = vi.fn<SeamChangeDeps['call']>();
+    const u = undo(h, call);
+    expect(await u.done).toBe(false);
+    expect(call).not.toHaveBeenCalled();
+    expect(u.restored).toHaveLength(0);
+    expect(u.refused).toEqual(['still saving']);
+  });
+
+  it('the retried cleanup rereads the card; the undo then upserts both rows and links the step to them', async () => {
+    const { h } = await lostDelete();
+    // The retry meets the moved card and reads it: both rows are gone.
+    h.bridge.reread = async () => {
+      h.setVersion(8);
+      return { ok: true, card: { lockVersion: 8, seams: [] } as unknown as common_TechCard };
+    };
+    const retry: ChangeTechCardSeamsRequest[] = [];
+    h.bridge.hold = async () => ({ release: () => undefined });
+    const sent: ChangeTechCardSeamsRequest[] = [];
+    const call = vi.fn<SeamChangeDeps['call']>(async (req) => {
+      sent.push(req);
+      if (req.delete?.length) {
+        retry.push(req);
+        throw lockMoved();
+      }
+      return reply(9, [a, b], []);
+    });
+    const u = undo(h, call, async () => {
+      await runStepRemovalCleanup(entry, {
+        active: () => true,
+        operations: () => h.ops,
+        cutStrips: () => h.strips,
+        cutHistory: () => undefined,
+        rows: () => {
+          const s = useSeamsStore.getState();
+          return { seams: s.server, poses: s.poses };
+        },
+        change: quietCleanupChange(entry.candidateKeys, (input) =>
+          runSeamChange(
+            CARD,
+            input,
+            { verb: 'removal', quiet: true },
+            { call, bridge: () => h.bridge },
+          ),
+        ),
+        clear: h.clear,
+      });
+      return true;
+    });
+    expect(await u.done).toBe(true);
+    expect(retry).toHaveLength(1);
+    expect(
+      sent
+        .at(-1)
+        ?.upsert?.map((row) => row.seamKey)
+        .sort(),
+    ).toEqual([a.seamKey, b.seamKey].sort());
+    expect(u.restored).toHaveLength(1);
+    expect(u.refused).toEqual([]);
   });
 });

@@ -15,6 +15,7 @@ import {
   takeLabelMaterialOff,
   undoLabelRemoval,
   uniqueLineName,
+  withOwedLabelRefs,
 } from './label-bom';
 
 type FormState = Partial<TechCardFormData> & Record<string, unknown>;
@@ -523,5 +524,43 @@ describe('undoLabelRemoval', () => {
     expect((h.state.garmentLabels as unknown[]).length).toBe(2);
     expect((h.state.bomItems as unknown[]).length).toBe(2);
     expect(ops(h)[1].labelKeys).toEqual(['lk-size', 'lk-brand']);
+  });
+  it('(3) a label put back while its step is out reaches that step when the step comes back', () => {
+    const h = formHarness(seed());
+    const removal = removeLabelUndoable(h.getValues, h.setValue, 'brand');
+    // the step goes (its undo record keeps the row as it is now), then the label comes back
+    const stepRow = structuredClone(ops(h)[0]);
+    h.state.operations = ops(h).filter((op) => op.historyKey !== 'h-a') as never;
+    undoLabelRemoval(h.getValues, h.setValue, removal);
+    // the step undo puts its recorded row back
+    h.state.operations = [withOwedLabelRefs(stepRow, h.getValues), ...ops(h)] as never;
+    expect(ops(h)[0].labelKeys).toEqual(['lk-brand']);
+    expect(ops(h)[0].bomLineKeys).toEqual(['line-brand']);
+  });
+
+  it('(4) the same label added again before the undo: steps point at a label that exists, no orphan line', () => {
+    const h = formHarness(seed());
+    const removal = removeLabelUndoable(h.getValues, h.setValue, 'brand');
+    (h.state.garmentLabels as FormGarmentLabel[]).push({
+      ...bareLabel('brand'),
+      lineKey: 'lk-brand-2',
+      bomLineKey: 'line-brand-2',
+    } as FormGarmentLabel);
+    (h.state.bomItems as unknown[]).push({
+      lineKey: 'line-brand-2',
+      section: 'TECH_CARD_BOM_SECTION_LABEL',
+      name: 'brand tape',
+    });
+    undoLabelRemoval(h.getValues, h.setValue, removal);
+    const labels = h.state.garmentLabels as Array<FormGarmentLabel & { lineKey?: string }>;
+    const lines = h.state.bomItems as { lineKey: string }[];
+    const labelLineKeys = new Set(labels.map((row) => row.lineKey));
+    const bomKeys = new Set(lines.map((line) => line.lineKey));
+    for (const op of ops(h)) {
+      for (const key of op.labelKeys) expect(labelLineKeys.has(key)).toBe(true);
+      for (const key of op.bomLineKeys) expect(bomKeys.has(key)).toBe(true);
+    }
+    const owned = new Set(labels.map((row) => row.bomLineKey));
+    expect(lines.filter((line) => !owned.has(line.lineKey))).toEqual([]);
   });
 });

@@ -65,6 +65,7 @@ import {
   TILE_QUIET,
 } from 'ui';
 import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-textarea-field';
+import { withOwedLabelRefs } from './label-bom';
 import { LabelShapeIcon } from './label-shape-icon';
 import { decimalToInput, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { revealField } from 'utils/field-errors';
@@ -296,6 +297,7 @@ import {
   runStepRemovalChange,
   quietCleanupChange,
   runStepRemovalCleanup,
+  stepRemovalRowsInDoubt,
   runStepRemovalRedoChange,
   runStepRemovalUndoChange,
   savedRemovalStillPresent,
@@ -8544,7 +8546,16 @@ export function OperationsField({
                     seamKeys: restorableSeamKeys(confirmedSeamKeys, saved),
                   });
         },
-        settle: waitForRemovalCleanup,
+        settle: () => {
+          // A cleanup delete lost its answer: retry it first, its lock_version_moved reads the card.
+          const server = useSeamsStore.getState().server;
+          if (techCardId && stepRemovalRowsInDoubt(rec.historyKey, server))
+            startRemovalCleanup(
+              techCardId,
+              owedStepRemovals(techCardId).filter((e) => e.historyKey === rec.historyKey),
+            );
+          return waitForRemovalCleanup();
+        },
         cutHistory: () => undoHistoryApi.cut('step-removal-undo'),
         rows: () => {
           const seamState = useSeamsStore.getState();
@@ -8616,7 +8627,8 @@ export function OperationsField({
               }
             }
             remapIssues((old) => (old >= at ? old + 1 : old));
-            insert(at, row, { shouldFocus: false });
+            // A label undo that ran while this step was out owes it those refs.
+            insert(at, withOwedLabelRefs(row, getValues), { shouldFocus: false });
             for (const i of issuesToRelink(rec.issues, getValues('issues') ?? [])) {
               setValue(`issues.${i}.operationNumber`, operationStepNumber(at), {
                 shouldDirty: true,
