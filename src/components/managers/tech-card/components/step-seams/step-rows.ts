@@ -20,6 +20,7 @@ import { handRow, type AnchorCtx, type HandRowRefusal } from '../assembly-seams/
 import { laysRow } from './live-row';
 import {
   innerId,
+  innerSlices,
   parseInner,
   pieceOfTarget,
   type FormOpLike,
@@ -109,18 +110,21 @@ export function storedSeamSides(
   const sideParts = (anchors: readonly EdgeAnchor[]): SidePart[] =>
     anchors.flatMap((anchor) => {
       const targets = rowTargetsOfAnchor(anchor);
+      const inner = targets.length === 1 && !!parseInner(targets[0]);
       if (
         row.kind === 'edge' ||
-        row.kind === 'surface' ||
+        (row.kind === 'surface' && !inner) ||
         row.kind === 'closure' ||
         targets.length === 0
       )
         return targets.map((target) => ({ target }));
-      const length = resolveEdge(anchor.edgeHint, geoms ?? new Map())?.len ?? anchor.lenMm;
+      const length = inner
+        ? anchor.lenMm
+        : resolveEdge(anchor.edgeHint, geoms ?? new Map())?.len ?? anchor.lenMm;
       const from = Math.max(0, Math.min(length, anchor.range[0] * length));
       const to = Math.max(from, Math.min(length, anchor.range[1] * length));
       if (from <= 0.05 && to >= length - 0.05) return targets.map((target) => ({ target }));
-      return [{ target: anchor.edgeHint, range: [from, to] }];
+      return [{ target: inner ? targets[0] : anchor.edgeHint, range: [from, to] }];
     });
   const parts = { a: sideParts(row.sideA), b: sideParts(row.sideB) };
   // Two stretches of one edge name it once: `parts` holds them both.
@@ -155,7 +159,11 @@ export function candidateOfStoredSeam(
     const part = row.sideB[0]?.piece;
     if (!host || !part) return null;
     const mark = a.map(parseInner).find((target) => target?.piece === host);
-    const line = mark ? innerLines.get(host)?.[mark.k] ?? [] : [];
+    const wholeLine = mark ? innerLines.get(host)?.[mark.k] ?? [] : [];
+    const ranges = parts.a
+      .filter((part) => part.target === innerId(host, mark?.k ?? -1) && part.range)
+      .map((part) => part.range!);
+    const line = innerSlices(wholeLine, ranges);
     const edge = b.find((target) => !parseInner(target));
     return surfaceSeam(host, part, line, geoms, placement, edge);
   }

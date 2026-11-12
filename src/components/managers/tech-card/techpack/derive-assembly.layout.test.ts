@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import * as seamLength from 'components/managers/tech-card/components/step-seams/seam-length';
 
 import { card83RealFixture } from './assembly-inference.fixture';
-import { deriveAssembly } from './derive-assembly';
+import { actionPartOfTarget, deriveAssembly, type AsmPiece } from './derive-assembly';
 import { createPdfT } from './i18n';
 import { ownerLayoutsByNumber, ownerStepResultsOfCard } from './owner-step-results';
 
@@ -35,5 +35,30 @@ describe('assembly seam lengths', () => {
     )?.[3]?.placed;
     expect(placed).toBeDefined();
     for (const { piece } of neckline) expect(placed?.get(piece)).toEqual(editor?.get(piece));
+  });
+});
+
+describe('assembly inner contour ranges', () => {
+  it('slices the inner range used by the PDF action', () => {
+    const piece = {
+      key: 'HOST',
+      inner: [
+        [
+          [0, 0],
+          [140, 0],
+          [140, 10],
+          [0, 10],
+          [0, 0],
+        ],
+      ],
+    } as AsmPiece;
+    const part = actionPartOfTarget('HOST:i0', new Map([['HOST', piece]]), [140, 150]);
+
+    expect(part?.pts).toEqual([
+      [140, 0],
+      [140, 10],
+    ]);
+    expect(part?.lenMm).toBe(10);
+    expect(part?.share).toBeCloseTo(1 / 30, 6);
   });
 });

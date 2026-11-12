@@ -1,6 +1,7 @@
 import { edgeIdsOf } from 'lib/assembly-skeleton/geometry';
-import type { EdgeId, PieceGeom } from 'lib/assembly-skeleton/types';
+import type { EdgeId, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { FOLDS, type StoredFold } from 'lib/folds';
+import { fromUV } from 'lib/folds/geom';
 import {
   anchorOfRunId,
   edgeMapOf,
@@ -16,11 +17,20 @@ import {
   type StoredRow,
   type StoredSeam,
 } from 'lib/seams';
-import { contourSig, frameOf, inFrame, reverses, rmsFit, runsOfPiece } from 'lib/seams/frame';
+import {
+  contourSig,
+  frameOf,
+  inFrame,
+  reverses,
+  rmsFit,
+  runsOfPiece,
+  sampleAt,
+  toUV,
+} from 'lib/seams/frame';
 
 import { decodeHandPlace, encodeHandPlace, isHandSeamKind } from './step-hand';
 import { mirrorPlacement } from './step-pose';
-import { inputGroups, stepInputPieces, type FormOpLike } from './step-seams-model';
+import { closedInner, inputGroups, stepInputPieces, type FormOpLike } from './step-seams-model';
 
 export type MirrorStepKind = 'no-twin' | 'edge-mismatch' | 'same' | 'create' | 'replace';
 
@@ -41,6 +51,7 @@ export type MirrorStepPlanInput = {
   poses: readonly StoredPose[];
   folds?: readonly StoredFold[];
   geoms: ReadonlyMap<string, PieceGeom>;
+  innerLines?: ReadonlyMap<string, readonly (readonly Pt2[])[]>;
   grainDeg?: ReadonlyMap<string, number>;
 };
 
@@ -173,6 +184,7 @@ const edgeMapFor = (
       );
 
 const rounded = (value: number) => Math.round(value * 1000) / 1000;
+const roundedRange = (value: number) => Math.round(value * 10000) / 10000;
 
 const innerAnchorOnTwin = (
   anchor: EdgeAnchor,
@@ -186,6 +198,71 @@ const innerAnchorOnTwin = (
   contourSig: contourSig(target, frameOf(target, grainDeg?.get(target.pieceKey) ?? 0)),
 });
 
+const projectedShare = (line: readonly Pt2[], point: Pt2): number => {
+  let best = 0;
+  let bestGap = Infinity;
+  let walked = 0;
+  let total = 0;
+  const lengths = line.slice(1).map((next, index) => {
+    const length = Math.hypot(next[0] - line[index][0], next[1] - line[index][1]);
+    total += length;
+    return length;
+  });
+  lengths.forEach((length, index) => {
+    const a = line[index];
+    const b = line[index + 1];
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const share = length
+      ? Math.max(0, Math.min(1, ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / length ** 2))
+      : 0;
+    const gap = Math.hypot(point[0] - a[0] - dx * share, point[1] - a[1] - dy * share);
+    if (gap < bestGap) {
+      best = walked + share * length;
+      bestGap = gap;
+    }
+    walked += length;
+  });
+  return total > 0 ? best / total : 0;
+};
+
+const innerAnchorsOnTwin = (
+  anchor: EdgeAnchor,
+  source: PieceGeom,
+  target: PieceGeom,
+  edgeMap: EdgeMap,
+  grainDeg: ReadonlyMap<string, number> | undefined,
+  innerLines: ReadonlyMap<string, readonly (readonly Pt2[])[]> | undefined,
+): EdgeAnchor[] | null => {
+  const base = innerAnchorOnTwin(anchor, target, edgeMap, grainDeg);
+  if (anchor.range[0] <= 0 && anchor.range[1] >= 1) return [base];
+  const match = /^i(\d+)$/.exec(anchor.edgeHint);
+  const index = match ? Number(match[1]) : -1;
+  const sourceLine = index >= 0 ? innerLines?.get(source.pieceKey)?.[index] : undefined;
+  const targetLine = index >= 0 ? innerLines?.get(target.pieceKey)?.[index] : undefined;
+  if (!sourceLine || !targetLine || !closedInner(sourceLine) || !closedInner(targetLine))
+    return null;
+  const sourceFrame = frameOf(source, grainDeg?.get(source.pieceKey) ?? 0);
+  const targetFrame = frameOf(target, grainDeg?.get(target.pieceKey) ?? 0);
+  const shares = [anchor.range[0], (anchor.range[0] + anchor.range[1]) / 2, anchor.range[1]];
+  const projected = sampleAt(sourceLine, shares).map((point) => {
+    const mapped = inFrame([toUV(sourceFrame, point)], edgeMap.frame)[0];
+    return projectedShare(targetLine, fromUV(targetFrame, mapped));
+  });
+  const from = Math.min(projected[0], projected[2]);
+  const to = Math.max(projected[0], projected[2]);
+  const ranges: [number, number][] =
+    projected[1] >= from && projected[1] <= to
+      ? [[from, to]]
+      : [
+          [to, 1],
+          [0, from],
+        ];
+  return ranges
+    .filter(([start, end]) => end - start > 1e-4)
+    .map(([start, end]) => ({ ...base, range: [roundedRange(start), roundedRange(end)] }));
+};
+
 const runOnTwin = (anchor: EdgeAnchor, target: PieceGeom, edgeMap: EdgeMap): EdgeId | null => {
   const mapped = edgeIdsOf(anchor.edgeHint).map((edge) => edgeMap.map.get(edge));
   if (mapped.some((edge) => !edge)) return null;
@@ -196,7 +273,7 @@ const runOnTwin = (anchor: EdgeAnchor, target: PieceGeom, edgeMap: EdgeMap): Edg
   return matches.length === 1 ? matches[0].id : null;
 };
 
-type MappedAnchor = { anchor: EdgeAnchor; link: TwinLink };
+type MappedAnchor = { anchor: EdgeAnchor; link: TwinLink; placed: boolean };
 
 const mapAnchor = (
   sourceAnchor: EdgeAnchor,
@@ -204,16 +281,17 @@ const mapAnchor = (
   links: ReadonlyMap<string, TwinLink>,
   geoms: ReadonlyMap<string, PieceGeom>,
   grainDeg: ReadonlyMap<string, number> | undefined,
-): MappedAnchor | null => {
+  innerLines: ReadonlyMap<string, readonly (readonly Pt2[])[]> | undefined,
+): MappedAnchor[] | null => {
   const link = links.get(sourceAnchor.piece);
   const source = geoms.get(sourceAnchor.piece);
   const target = link ? geoms.get(link.key) : undefined;
   if (!link || !source || !target) return null;
   const edgeMap = edgeMapFor(source, target, link, grainDeg);
   if (!edgeMap) return null;
-  let anchor: EdgeAnchor | null;
+  let anchors: EdgeAnchor[] | null;
   if (/^i\d+$/.test(sourceAnchor.edgeHint)) {
-    anchor = innerAnchorOnTwin(sourceAnchor, target, edgeMap, grainDeg);
+    anchors = innerAnchorsOnTwin(sourceAnchor, source, target, edgeMap, grainDeg, innerLines);
   } else {
     const run = runOnTwin(sourceAnchor, target, edgeMap);
     const ranged = kind === 'partial' || kind === 'composite';
@@ -221,20 +299,27 @@ const mapAnchor = (
     const range: [number, number] = reverses(edgeMap.frame)
       ? [1 - sourceRange[1], 1 - sourceRange[0]]
       : [...sourceRange];
-    anchor = run ? anchorOfRunId([...geoms.values()], run, grainDeg, range) : null;
+    const anchor = run ? anchorOfRunId([...geoms.values()], run, grainDeg, range) : null;
+    anchors = anchor ? [anchor] : null;
   }
-  if (!anchor) return null;
+  if (!anchors) return null;
   const hand = isHandSeamKind(kind) ? decodeHandPlace(sourceAnchor.placement) : undefined;
-  const placed = hand
-    ? {
-        ...anchor,
-        placement: encodeHandPlace({
-          ...hand,
-          slideMm: link.kind === 'mirror' ? -hand.slideMm : hand.slideMm,
-        }),
-      }
-    : anchor;
-  return { anchor: withSeamLayer(placed, sourceAnchor.layer), link };
+  return anchors.map((anchor) => {
+    const placed = hand
+      ? {
+          ...anchor,
+          placement: encodeHandPlace({
+            ...hand,
+            slideMm: link.kind === 'mirror' ? -hand.slideMm : hand.slideMm,
+          }),
+        }
+      : anchor;
+    return {
+      anchor: withSeamLayer(placed, sourceAnchor.layer),
+      link,
+      placed: !!sourceAnchor.placement,
+    };
+  });
 };
 
 const placeSurface = (
@@ -276,11 +361,9 @@ const placeSurface = (
     hostLink.kind,
     partLink.kind,
   );
-  const place = (mapped: readonly MappedAnchor[], originals: readonly EdgeAnchor[]) =>
-    mapped.map((item, index) =>
-      originals[index]?.placement ? { ...item.anchor, placement } : item.anchor,
-    );
-  return { sideA: place(mappedA, source.sideA), sideB: place(mappedB, source.sideB) };
+  const place = (mapped: readonly MappedAnchor[]) =>
+    mapped.map((item) => (item.placed ? { ...item.anchor, placement } : item.anchor));
+  return { sideA: place(mappedA), sideB: place(mappedB) };
 };
 
 const mapSeam = (
@@ -288,20 +371,23 @@ const mapSeam = (
   links: ReadonlyMap<string, TwinLink>,
   geoms: ReadonlyMap<string, PieceGeom>,
   grainDeg: ReadonlyMap<string, number> | undefined,
+  innerLines: ReadonlyMap<string, readonly (readonly Pt2[])[]> | undefined,
 ): StoredSeam | null => {
   const sideA = source.sideA.map((anchor) =>
-    mapAnchor(anchor, source.kind, links, geoms, grainDeg),
+    mapAnchor(anchor, source.kind, links, geoms, grainDeg, innerLines),
   );
   const sideB = source.sideB.map((anchor) =>
-    mapAnchor(anchor, source.kind, links, geoms, grainDeg),
+    mapAnchor(anchor, source.kind, links, geoms, grainDeg, innerLines),
   );
   if (sideA.some((anchor) => !anchor) || sideB.some((anchor) => !anchor)) return null;
+  const mappedA = sideA.flat() as MappedAnchor[];
+  const mappedB = sideB.flat() as MappedAnchor[];
   const placed =
     source.kind === 'surface'
-      ? placeSurface(source, sideA as MappedAnchor[], sideB as MappedAnchor[], geoms)
+      ? placeSurface(source, mappedA, mappedB, geoms)
       : {
-          sideA: (sideA as MappedAnchor[]).map((item) => item.anchor),
-          sideB: (sideB as MappedAnchor[]).map((item) => item.anchor),
+          sideA: mappedA.map((item) => item.anchor),
+          sideB: mappedB.map((item) => item.anchor),
         };
   if (!placed) return null;
   return {
@@ -524,6 +610,7 @@ export function mirrorStepPlan({
   poses,
   folds = [],
   geoms,
+  innerLines,
   grainDeg,
 }: MirrorStepPlanInput): MirrorStepPlan {
   const targetIndex = stepIndexOf(step, cardOps);
@@ -542,7 +629,9 @@ export function mirrorStepPlan({
   // A source the server marked stale is not a decision to copy; it is fixed on the left first.
   if ([...sourceSeams, ...sourcePoses].some((row) => row.stale))
     return EMPTY_PLAN('edge-mismatch', candidate.op);
-  const mappedSeams = sourceSeams.map((row) => mapSeam(row, candidate.links, geoms, grainDeg));
+  const mappedSeams = sourceSeams.map((row) =>
+    mapSeam(row, candidate.links, geoms, grainDeg, innerLines),
+  );
   const mappedPoseRows = sourcePoses.map((row) => mapPose(row, candidate.links, geoms, grainDeg));
   if (mappedSeams.some((row) => !row) || mappedPoseRows.some((row) => !row))
     return EMPTY_PLAN('edge-mismatch', candidate.op);

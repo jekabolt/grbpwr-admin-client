@@ -53,7 +53,12 @@ export function sideLengthMm(
   const foldable: Array<{ id: string; piece: string; pts: Pt2[]; lenMm: number }> = [];
   const sum = parts.reduce((sum, part) => {
     const inner = INNER.exec(part.target);
-    if (inner) return sum + innerLen(inner[1], Number(inner[2]));
+    if (inner) {
+      const length = innerLen(inner[1], Number(inner[2]));
+      const from = part.range ? Math.max(0, Math.min(length, part.range[0])) : 0;
+      const to = part.range ? Math.max(from, Math.min(length, part.range[1])) : length;
+      return sum + to - from;
+    }
     const edge = resolveEdge(part.target, geoms);
     if (!edge) return sum;
     const ks = part.target

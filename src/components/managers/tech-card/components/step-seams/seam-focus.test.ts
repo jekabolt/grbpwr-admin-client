@@ -2,12 +2,15 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
+import type { Pt2 } from 'lib/assembly-skeleton/types';
+
 import { card6Geoms, card6InnerLines } from './card6.fixture';
 import {
   cycleLayerHit,
   edgesTouch,
   isGuess,
   pickTarget,
+  seamEdgeWord,
   seamSideName,
   sideForClick,
   sideForTarget,
@@ -157,6 +160,29 @@ describe('side names', () => {
     expect(seamSideName(['SLV_L:i0'], geoms, nameOf, (id) => id.replace(/:i\d+$/, ''))).toBe(
       'sleeve slit',
     );
+  });
+
+  it('reads an open inner line as a slit and a closed contour without slit', () => {
+    const lines = new Map<string, Pt2[][]>([
+      [
+        'SLV_L',
+        [
+          [
+            [0, 0],
+            [100, 0],
+          ],
+          [
+            [0, 0],
+            [140, 0],
+            [140, 10],
+            [0, 10],
+            [0, 0],
+          ],
+        ],
+      ],
+    ]);
+    expect(seamEdgeWord(['SLV_L:i0'], geoms, lines)).toBe('slit');
+    expect(seamEdgeWord(['SLV_L:i1'], geoms, lines)).toBe('');
   });
 
   it('names a generic placket run by the piece alone', () => {

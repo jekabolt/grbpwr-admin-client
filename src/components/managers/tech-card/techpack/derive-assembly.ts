@@ -56,12 +56,13 @@ import {
   opIconInputOf,
   type OpIcon,
 } from 'components/managers/tech-card/op-icons';
-import {
-  rowTargetsOfAnchor,
-  storedSeamSides,
-} from 'components/managers/tech-card/components/step-seams/step-rows';
+import { storedSeamSides } from 'components/managers/tech-card/components/step-seams/step-rows';
 import { stepHighlightOf } from 'components/managers/tech-card/components/step-seams/step-highlight';
 import { sideLengthMm } from 'components/managers/tech-card/components/step-seams/seam-length';
+import {
+  innerSlice,
+  innerSlices,
+} from 'components/managers/tech-card/components/step-seams/step-seams-model';
 import {
   buttonholeDirection,
   buttonholeLengthMm,
@@ -920,11 +921,10 @@ function locateSeams(input: AssemblyInput): { seams: AsmSeam[]; unresolved: numb
     if (!hits.length || hits.some((h) => !h) || !add(s, hits as AnchorHit[], [])) unresolved++;
   }
   for (const seam of stored.filter((row) => row.kind === 'surface')) {
-    const wireSeam = wire.find((row) => row.seamKey === seam.seamKey);
-    const anchors = [...(wireSeam?.sideA?.parts ?? []), ...(wireSeam?.sideB?.parts ?? [])];
-    const anchor = anchors.find((part) => /^i\d+$/.test(part.edgeHint ?? ''));
+    const anchors = [...seam.sideA, ...seam.sideB].filter((part) => /^i\d+$/.test(part.edgeHint));
+    const anchor = anchors[0];
     const match = /^i(\d+)$/.exec(anchor?.edgeHint ?? '');
-    const piece = anchor?.pieceLineKey ?? '';
+    const piece = anchor?.piece ?? '';
     const index = match ? Number(match[1]) : -1;
     const line = index >= 0 ? input.pieces.get(piece)?.inner[index] : undefined;
     if (!anchor || !line?.length) {
@@ -941,13 +941,20 @@ function locateSeams(input: AssemblyInput): { seams: AsmSeam[]; unresolved: numb
       unresolved++;
       continue;
     }
-    const lenMm = polyLen(line);
+    const wholeLen = polyLen(line);
+    const ranges = anchors.flatMap((part) =>
+      part.range[0] <= 0 && part.range[1] >= 1
+        ? []
+        : ([[part.range[0] * wholeLen, part.range[1] * wholeLen]] as const),
+    );
+    const points = innerSlices(line, ranges);
+    const lenMm = polyLen(points);
     const part: SeamPart = {
       piece,
-      pts: line,
+      pts: points,
       lenMm,
-      share: 1,
-      turn: turnOf(line),
+      share: lenMm / Math.max(wholeLen, 1e-6),
+      turn: turnOf(points),
     };
     out.push({
       key: seam.seamKey,
@@ -957,7 +964,7 @@ function locateSeams(input: AssemblyInput): { seams: AsmSeam[]; unresolved: numb
       a: [part],
       b: [],
       pieces: [piece],
-      inner: { piece, index, pts: line, placement: placementOf(anchor) },
+      inner: { piece, index, pts: points, placement: placementOf(anchor) },
     });
   }
   // operation order of the card is the drawing order; the stored order is only a tiebreak
@@ -2699,7 +2706,7 @@ function actionOwnerRows(
   return [...new Map(found.map((row) => [row.seamKey, row])).values()];
 }
 
-function actionPartOfTarget(
+export function actionPartOfTarget(
   target: string,
   pieces: ReadonlyMap<string, AsmPiece>,
   range?: readonly [number, number],
@@ -2709,12 +2716,15 @@ function actionPartOfTarget(
     const piece = pieces.get(inner[1]);
     const pts = piece?.inner[Number(inner[2])] ?? [];
     if (!piece || pts.length < 2) return null;
+    const wholeLen = polyLen(pts);
+    const points = innerSlice(pts, range);
+    const lenMm = polyLen(points);
     return {
       piece: piece.key,
-      pts: [...pts],
-      lenMm: polyLen(pts),
-      share: 1,
-      turn: turnOf(pts),
+      pts: points,
+      lenMm,
+      share: lenMm / Math.max(wholeLen, 1e-6),
+      turn: turnOf(points),
     };
   }
   const geoms = new Map([...pieces].map(([key, piece]) => [key, piece.geom]));
@@ -2745,14 +2755,10 @@ function actionPartsOfRows(
   const targets = rows.flatMap((row) => {
     const sides = storedSeamSides(row, geoms);
     if (row.kind !== 'surface') return [...sides.parts.a, ...sides.parts.b];
-    const laidEdges = row.sideB
-      .flatMap(rowTargetsOfAnchor)
-      .filter((target) => !/:i\d+$/.test(target));
-    return (
-      laidEdges.length
-        ? laidEdges
-        : row.sideA.flatMap(rowTargetsOfAnchor).filter((target) => /:i\d+$/.test(target))
-    ).map((target) => ({ target }));
+    const laidEdges = sides.parts.b.filter((part) => !/:i\d+$/.test(part.target));
+    return laidEdges.length
+      ? laidEdges
+      : sides.parts.a.filter((part) => /:i\d+$/.test(part.target));
   });
   return actionPartsOfTargets(targets, pieces);
 }

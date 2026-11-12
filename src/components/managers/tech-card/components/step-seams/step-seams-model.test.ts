@@ -24,6 +24,7 @@ import {
 } from './card6.fixture';
 import {
   deltaMm,
+  closedInner,
   dropKeys,
   easeOf,
   fullyUsedEdges,
@@ -31,6 +32,8 @@ import {
   inputGroups,
   inputUnitsWithOuterEdges,
   innerAnchor,
+  innerSlice,
+  innerSlices,
   isJoinStep,
   longestEdge,
   proposalLabel,
@@ -1227,6 +1230,35 @@ describe('join steps by type and work', () => {
 
 describe('surface seam rows', () => {
   const host = rect('SLV', 200, 400);
+  const closed: Pt2[] = [
+    [20, -50],
+    [160, -50],
+    [160, -60],
+    [20, -60],
+    [20, -50],
+  ];
+
+  it('finds closed-contour corners and slices a wrap from vertex 0', () => {
+    const contour = closedInner(closed)!;
+    expect(contour.lenMm).toBe(300);
+    expect(contour.cornersMm).toHaveLength(4);
+    expect(innerSlice(closed, [290, 10])).toEqual([
+      [20, -60],
+      [20, -50],
+      [30, -50],
+    ]);
+    expect(
+      innerSlices(closed, [
+        [0, 10],
+        [290, 300],
+      ]),
+    ).toEqual([
+      [20, -60],
+      [20, -50],
+      [30, -50],
+    ]);
+  });
+
   it('anchors the inner line by edge hint i<k>, inside the host frame', () => {
     const a = innerAnchor(
       host,
@@ -1247,6 +1279,18 @@ describe('surface seam rows', () => {
       expect(v).toBeLessThanOrEqual(1);
     }
     expect(innerAnchor(host, 0, [[1, 1]], 0)).toBeNull();
+  });
+  it('writes range shares while a whole contour stays byte-for-byte legacy', () => {
+    const legacy = innerAnchor(host, 0, closed, 0)!;
+    const explicitWhole = innerAnchor(host, 0, closed, 0, undefined, [0, 300])!;
+    const side = innerAnchor(host, 0, closed, 0, undefined, [140, 150])!;
+
+    expect(JSON.stringify(explicitWhole)).toBe(JSON.stringify(legacy));
+    expect(legacy.range).toEqual([0, 1]);
+    expect(side.range).toEqual([0.4667, 0.5]);
+    expect(side.samples).toEqual(legacy.samples);
+    expect(side.lenMm).toBe(legacy.lenMm);
+    expect(side.contourSig).toBe(legacy.contourSig);
   });
   it('writes one confirmed manual surface row with the placement on both sides', () => {
     const part = rect('FLP', 120, 60);

@@ -55,13 +55,14 @@ export function highlightPartsOfRows(
     [...row.sideA, ...row.sideB].flatMap((anchor) => {
       const targets = rowTargetsOfAnchor(anchor);
       if (!targets.some((target) => allowed.has(target))) return [];
-      if (row.kind !== 'partial' && row.kind !== 'composite')
+      const inner = targets.length === 1 && /:i\d+$/.test(targets[0]);
+      if (row.kind !== 'partial' && row.kind !== 'composite' && !(row.kind === 'surface' && inner))
         return targets.map((target): SidePart => ({ target }));
       const length = anchor.lenMm;
       const from = Math.max(0, Math.min(length, anchor.range[0] * length));
       const to = Math.max(from, Math.min(length, anchor.range[1] * length));
       return from > 0.05 || to < length - 0.05
-        ? [{ target: anchor.edgeHint, range: [from, to] as const }]
+        ? [{ target: inner ? targets[0] : anchor.edgeHint, range: [from, to] as const }]
         : targets.map((target): SidePart => ({ target }));
     }),
   );

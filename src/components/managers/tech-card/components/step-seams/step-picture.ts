@@ -38,7 +38,13 @@ import {
   type HandOn,
   type LaidHand,
 } from './step-hand';
-import { GUESS_OK, parseInner, pieceOfTarget, type SewnPair } from './step-seams-model';
+import {
+  GUESS_OK,
+  innerSlices,
+  parseInner,
+  pieceOfTarget,
+  type SewnPair,
+} from './step-seams-model';
 import { placeStripsOnHosts } from '../cut-strips/strip-place';
 import { pinPoses, placementT, type PosePin } from './step-pose';
 
@@ -332,11 +338,18 @@ export function seamOfSides(
       ? s.b
       : null;
   if (!hostSide) return candidateOf(s, geoms, storedKind);
-  const h = parseInner(targetOf(hostSide.find((t) => parseInner(targetOf(t)))!))!;
+  const hostPart = hostSide.find((part) => parseInner(targetOf(part)))!;
+  const hostTarget = targetOf(hostPart);
+  const h = parseInner(hostTarget)!;
   const otherPart = (hostSide === s.a ? s.b : s.a).find((t) => !parseInner(targetOf(t)));
   const other = otherPart && targetOf(otherPart);
   if (!other) return null;
-  const line = innerLines.get(h.piece)?.[h.k] ?? [];
+  const wholeLine = innerLines.get(h.piece)?.[h.k] ?? [];
+  const ranges = hostSide.flatMap((part) => {
+    if (targetOf(part) !== hostTarget || typeof part === 'string' || !part.range) return [];
+    return [part.range];
+  });
+  const line = innerSlices(wholeLine, ranges);
   return surfaceSeam(h.piece, pieceOfTarget(other), line, geoms, placement, other);
 }
 
