@@ -1213,8 +1213,7 @@ function buildZoneGrade(
       };
   const builtFollow = followOf(built, builtCarry, canonical);
   // Pairs are read on the built side either way round, so both directions see the same twins.
-  const linePair = (anchor: PtMm) =>
-    linePairAt(canonical().pairs, forward ? 0 : 1, baseLines, anchor);
+  const linePair = (anchor: PtMm) => linePairAt(canonical().pairs, forward ? 0 : 1, anchor);
   if (forward)
     return {
       match,
@@ -1271,29 +1270,27 @@ function buildZoneGrade(
   };
 }
 
-/** The anchor of a 'follow_line' ring may sit this much farther from its line than from the nearest. */
+/**
+ * The anchor of a 'follow_line' ring sits on its line (it is picked there, 0.1 mm rounding) within
+ * this. An anchor on no paired line — on a line with no twin, or carried the default way because
+ * its line had none — follows nothing, either way round.
+ */
 const ANCHOR_ON_LINE_MM = 0.5;
 
 /**
- * The pair whose `side` (the asked base side) runs through `anchor`. `askedBase` holds the asked
- * base size's own lines: an anchor nearer to an unpaired line than to any paired one has no pair.
+ * The pair whose `side` (the asked base side) runs through `anchor`.
  */
 function linePairAt(
   pairs: readonly [PtMm[], PtMm[], boolean][],
   side: 0 | 1,
-  askedBase: readonly FuseInternalLine[],
   anchor: PtMm,
 ): LinePair | null {
-  let onLine = Infinity;
-  for (const line of askedBase)
-    if (line.points.length >= 2)
-      onLine = Math.min(onLine, distanceToPolyline(anchor, line.points, line.closed));
   let best: { d: number; pair: readonly [PtMm[], PtMm[], boolean] } | null = null;
   for (const pair of pairs) {
     const d = distanceToPolyline(anchor, pair[side], pair[2]);
     if (!best || d < best.d) best = { d, pair };
   }
-  if (!best || !Number.isFinite(onLine) || best.d > onLine + ANCHOR_ON_LINE_MM) return null;
+  if (!best || best.d > ANCHOR_ON_LINE_MM) return null;
   const [built, other, closed] = best.pair;
   return side ? { from: other, to: built, closed } : { from: built, to: other, closed };
 }

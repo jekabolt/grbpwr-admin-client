@@ -348,11 +348,15 @@ export function mapFuseSpecToSize(
       for (const point of [...spline.points, ...ring]) off = Math.min(off, offContour(point));
       const own = smoothstep(RIGID_FROM_MM, RIGID_AT_MM, off);
       const shift = own > 0 ? grade.shift(ring) : null;
-      const whole = (by: PtMm) => spline.points.map((p) => ({ x: p.x + by.x, y: p.y + by.y }));
+      // A follow_line ring whose line has no twin lands here: its anchor goes as a point of the
+      // ring, so the stored anchor stays with the ring on this size and the way back starts there.
+      const n = spline.points.length;
+      const carried = spline.anchor ? [...spline.points, spline.anchor] : spline.points;
+      const whole = (by: PtMm) => carried.map((p) => ({ x: p.x + by.x, y: p.y + by.y }));
       let moved: PtMm[] =
         own >= 1 && shift
           ? whole(shift)
-          : spline.points.map((point) => {
+          : carried.map((point) => {
               const loose = pointwise(point, followContour);
               return shift
                 ? {
@@ -364,26 +368,30 @@ export function mapFuseSpecToSize(
       // Fold-over: the control polygon must keep its orientation, a fair share of its area, and
       // not start crossing itself; otherwise the ring is moved whole.
       const before = signedArea(spline.points);
-      const after = signedArea(moved);
+      const after = signedArea(moved.slice(0, n));
       if (
         own < 1 &&
         spline.points.length >= 3 &&
         Math.abs(before) > 1e-6 &&
         (after * before <= 0 ||
           Math.abs(after) < Math.abs(before) / 4 ||
-          (!selfCrossing(spline.points) && selfCrossing(moved)))
+          (!selfCrossing(spline.points) && selfCrossing(moved.slice(0, n))))
       )
         moved = whole(shift ?? grade.shift(ring));
       // A hole inside a ring that moved whole moves with it, so it stays where it was cut.
       if (parent?.shift && parent.rigid > 0) {
         const by = parent.shift;
         moved = moved.map((p, i) => ({
-          x: p.x + (spline.points[i].x + by.x - p.x) * parent.rigid,
-          y: p.y + (spline.points[i].y + by.y - p.y) * parent.rigid,
+          x: p.x + (carried[i].x + by.x - p.x) * parent.rigid,
+          y: p.y + (carried[i].y + by.y - p.y) * parent.rigid,
         }));
       }
       return {
-        spline: { ...spline, points: spline.points.map((point, i) => ({ ...point, ...moved[i] })) },
+        spline: {
+          ...spline,
+          points: spline.points.map((point, i) => ({ ...point, ...moved[i] })),
+          ...(spline.anchor ? { anchor: moved[n] } : {}),
+        },
         ring,
         rigid: own,
         shift,

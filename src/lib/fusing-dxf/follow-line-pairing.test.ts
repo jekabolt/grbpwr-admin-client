@@ -1,6 +1,8 @@
 import type { PtMm } from 'lib/pattern-import/types';
 import { describe, expect, it } from 'vitest';
 import { mapFuseSpecToSize, type FuseInternalLine, type FuseInternals } from './dxf';
+import { generateFuseGeometry } from './geometry';
+import { projectOnRing } from './spline';
 import fixture from './p-lin-l-2.fixture.json';
 import { blankFuse, type FuseSpline, type PieceFuseSpec } from './types';
 import { zoneGrade } from './zone-grade';
@@ -152,6 +154,20 @@ describe('follow_line: the twin by geometry', () => {
     expect(worst(spline.points, plain.points)).toBe(0);
   });
 
+  it('its line missing on the size: the anchor goes with the ring and the way back returns', () => {
+    const lost = { ...internals, target: internals.target.slice(1) };
+    const there = mapFuseSpecToSize(zoneOf(patch, 'follow_line', onBox), piece, target, null, lost);
+    // The anchor moved as a point of the ring would: the same carry, not left at its base mm.
+    const withAnchor = outer(
+      mapFuseSpecToSize(zoneOf([...patch, onBox]), piece, target, null, lost),
+    );
+    expect(dist(outer(there).anchor!, withAnchor.points[4])).toBeLessThan(1.5);
+    expect(dist(outer(there).anchor!, onBox)).toBeGreaterThan(5);
+    const back = outer(mapFuseSpecToSize(there, target, piece, null, reverse(lost)));
+    expect(worst(back.points, patch)).toBeLessThan(0.1);
+    expect(dist(back.anchor!, onBox)).toBeLessThan(0.1);
+  });
+
   it('an anchor on an unpaired line is a guess, not the neighbour line', () => {
     const stray: FuseInternalLine = {
       layer: '4',
@@ -171,6 +187,24 @@ describe('follow_line: the twin by geometry', () => {
       (w) => guesses.push(w),
     );
     expect(guesses).toEqual(['line']);
+  });
+
+  it('a ring carried past the edge of the piece glues nothing outside it', () => {
+    // Moved whole with its line, a patch near the edge may reach past the cut on another size; the
+    // drawn ring keeps its mm, the glue is clipped to the piece as for every zone.
+    const edgePatch = patch.map((p) => ({ x: p.x + 120, y: p.y }));
+    const spline = outer(
+      mapFuseSpecToSize(zoneOf(edgePatch, 'follow_line', onBox), piece, target, null, internals),
+    );
+    expect(Math.max(...spline.points.map((p) => p.x))).toBeGreaterThan(330);
+    const glue = generateFuseGeometry({
+      outline: target,
+      spec: zoneOf(spline.points, 'follow_line', spline.anchor),
+    });
+    expect(glue.length).toBeGreaterThan(0);
+    for (const { outer: ring } of glue)
+      for (const p of ring) expect(projectOnRing(p, target).d < 0.01 || p.x < 330).toBe(true);
+    expect(Math.max(...glue.flatMap((g) => g.outer.map((p) => p.x)))).toBeLessThanOrEqual(330.01);
   });
 
   it('grow: every point follows the grade field', () => {
