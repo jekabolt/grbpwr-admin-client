@@ -613,33 +613,68 @@ function cageOf({ base, target, runs }: ContourMatch): Cage {
   return { p, dx, dy };
 }
 
-/** Mean-value interpolation of the cage's move at c: exact for an affine move of the cage. */
-function meanValueMove(cage: Cage, c: PtMm): PtMm {
+/**
+ * The cage in flat arrays, with the scratch rows `meanValueMove` fills (it never runs re-entered, so
+ * one set per cage serves every call).
+ */
+type FlatCage = {
+  n: number;
+  x: Float64Array;
+  y: Float64Array;
+  dx: Float64Array;
+  dy: Float64Array;
+  rx: Float64Array;
+  ry: Float64Array;
+  d: Float64Array;
+  t: Float64Array;
+};
+
+function flatCage(cage: Cage): FlatCage {
   const n = cage.p.length;
-  const rx = new Array<number>(n);
-  const ry = new Array<number>(n);
-  const d = new Array<number>(n);
+  const out: FlatCage = {
+    n,
+    x: new Float64Array(n),
+    y: new Float64Array(n),
+    dx: Float64Array.from(cage.dx),
+    dy: Float64Array.from(cage.dy),
+    rx: new Float64Array(n),
+    ry: new Float64Array(n),
+    d: new Float64Array(n),
+    t: new Float64Array(n),
+  };
+  for (let i = 0; i < n; i++) {
+    out.x[i] = cage.p[i].x;
+    out.y[i] = cage.p[i].y;
+  }
+  return out;
+}
+
+/** Mean-value interpolation of the cage's move at (cx, cy): exact for an affine move of the cage. */
+function meanValueMove(cage: FlatCage, cx: number, cy: number): PtMm {
+  const { n, x: px, y: py, dx, dy, rx, ry, d, t } = cage;
   let nearest = 0;
   for (let i = 0; i < n; i++) {
-    rx[i] = cage.p[i].x - c.x;
-    ry[i] = cage.p[i].y - c.y;
-    d[i] = Math.hypot(rx[i], ry[i]);
-    if (d[i] < 1e-9) return { x: cage.dx[i], y: cage.dy[i] };
-    if (d[i] < d[nearest]) nearest = i;
+    const ix = px[i] - cx;
+    const iy = py[i] - cy;
+    rx[i] = ix;
+    ry[i] = iy;
+    const di = Math.hypot(ix, iy);
+    d[i] = di;
+    if (di < 1e-9) return { x: dx[i], y: dy[i] };
+    if (di < d[nearest]) nearest = i;
   }
   // tan(α/2) = sin α / (1 + cos α) of the angle at c between consecutive vertices, signed, so the
   // cage's winding cancels out of the normalised weights.
-  const t = new Array<number>(n);
   for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
+    const j = i + 1 === n ? 0 : i + 1;
     const pair = d[i] * d[j];
     const den = pair + rx[i] * rx[j] + ry[i] * ry[j];
     if (den < 1e-12 * pair) {
       // c lies on the edge i → j: the move is linear along it.
       const f = d[i] / (d[i] + d[j]);
       return {
-        x: cage.dx[i] + (cage.dx[j] - cage.dx[i]) * f,
-        y: cage.dy[i] + (cage.dy[j] - cage.dy[i]) * f,
+        x: dx[i] + (dx[j] - dx[i]) * f,
+        y: dy[i] + (dy[j] - dy[i]) * f,
       };
     }
     t[i] = (rx[i] * ry[j] - ry[i] * rx[j]) / den;
@@ -648,12 +683,12 @@ function meanValueMove(cage: Cage, c: PtMm): PtMm {
   let x = 0;
   let y = 0;
   for (let i = 0; i < n; i++) {
-    const w = (t[(i - 1 + n) % n] + t[i]) / d[i];
+    const w = ((i === 0 ? t[n - 1] : t[i - 1]) + t[i]) / d[i];
     sum += w;
-    x += w * cage.dx[i];
-    y += w * cage.dy[i];
+    x += w * dx[i];
+    y += w * dy[i];
   }
-  if (!(Math.abs(sum) > 1e-12)) return { x: cage.dx[nearest], y: cage.dy[nearest] };
+  if (!(Math.abs(sum) > 1e-12)) return { x: dx[nearest], y: dy[nearest] };
   return { x: x / sum, y: y / sum };
 }
 
@@ -730,28 +765,89 @@ const lengthOf = (points: readonly PtMm[], closed: boolean) => {
   return len;
 };
 
-/** Points every ≤ 2 mm along a polyline (each stands for an equal share of its segment). */
-function samplesOf(points: readonly PtMm[], closed: boolean): { p: PtMm; w: number }[] {
-  const out: { p: PtMm; w: number }[] = [];
+/**
+ * A polyline read once for `chamfer`: its length, its points every ≤ 2 mm (each standing for an
+ * equal share of its segment) and its segments, in flat arrays.
+ */
+type ChamferLine = {
+  len: number;
+  first: PtMm;
+  sx: Float64Array;
+  sy: Float64Array;
+  sw: Float64Array;
+  ax: Float64Array;
+  ay: Float64Array;
+  abx: Float64Array;
+  aby: Float64Array;
+  ll: Float64Array;
+};
+
+function chamferLine(points: readonly PtMm[], closed: boolean): ChamferLine {
   const n = points.length;
-  for (let i = 0; i < (closed ? n : n - 1); i++) {
+  const segs = Math.max(0, closed ? n : n - 1);
+  const sx: number[] = [];
+  const sy: number[] = [];
+  const sw: number[] = [];
+  const ax = new Float64Array(segs);
+  const ay = new Float64Array(segs);
+  const abx = new Float64Array(segs);
+  const aby = new Float64Array(segs);
+  const ll = new Float64Array(segs);
+  for (let i = 0; i < segs; i++) {
     const a = points[i];
     const b = points[(i + 1) % n];
+    ax[i] = a.x;
+    ay[i] = a.y;
+    abx[i] = b.x - a.x;
+    aby[i] = b.y - a.y;
+    ll[i] = abx[i] * abx[i] + aby[i] * aby[i];
     const len = Math.hypot(b.x - a.x, b.y - a.y);
     const k = Math.max(1, Math.min(64, Math.ceil(len / 2)));
-    for (let s = 0; s < k; s++) out.push({ p: lerpPt(a, b, (s + 0.5) / k), w: len / k });
+    for (let s = 0; s < k; s++) {
+      const p = lerpPt(a, b, (s + 0.5) / k);
+      sx.push(p.x);
+      sy.push(p.y);
+      sw.push(len / k);
+    }
   }
-  return out;
+  return {
+    len: lengthOf(points, closed),
+    first: points[0],
+    sx: Float64Array.from(sx),
+    sy: Float64Array.from(sy),
+    sw: Float64Array.from(sw),
+    ax,
+    ay,
+    abx,
+    aby,
+    ll,
+  };
+}
+
+/** `distanceToPolyline` of (qx, qy) to a prepared line: the same arithmetic. */
+function distanceToChamferLine(qx: number, qy: number, l: ChamferLine): number {
+  let best = Infinity;
+  const { ax, ay, abx, aby, ll } = l;
+  for (let i = 0; i < ll.length; i++) {
+    const t =
+      ll[i] > 0
+        ? Math.max(0, Math.min(1, ((qx - ax[i]) * abx[i] + (qy - ay[i]) * aby[i]) / ll[i]))
+        : 0;
+    best = Math.min(best, Math.hypot(qx - ax[i] - abx[i] * t, qy - ay[i] - aby[i] * t));
+  }
+  return best;
 }
 
 /** Symmetric length-weighted RMS distance between two polylines, mm: order and direction free. */
-function chamfer(a: readonly PtMm[], b: readonly PtMm[], closed: boolean): number {
-  const la = lengthOf(a, closed);
-  const lb = lengthOf(b, closed);
-  if (!(la + lb > 0)) return Math.hypot(a[0].x - b[0].x, a[0].y - b[0].y);
+function chamfer(a: ChamferLine, b: ChamferLine): number {
+  const la = a.len;
+  const lb = b.len;
+  if (!(la + lb > 0)) return Math.hypot(a.first.x - b.first.x, a.first.y - b.first.y);
   let sum = 0;
-  for (const s of samplesOf(a, closed)) sum += s.w * distanceToPolyline(s.p, b, closed) ** 2;
-  for (const s of samplesOf(b, closed)) sum += s.w * distanceToPolyline(s.p, a, closed) ** 2;
+  for (let i = 0; i < a.sx.length; i++)
+    sum += a.sw[i] * distanceToChamferLine(a.sx[i], a.sy[i], b) ** 2;
+  for (let i = 0; i < b.sx.length; i++)
+    sum += b.sw[i] * distanceToChamferLine(b.sx[i], b.sy[i], a) ** 2;
   return Math.sqrt(sum / (la + lb));
 }
 
@@ -844,16 +940,23 @@ function pairLines(
   for (const { b, t } of groups.values()) {
     if (!t.length) continue;
     const closed = b[0].closed;
-    const predicted = b.map((line) => line.points.map(predict));
-    const cost = predicted.map((p) => t.map((line) => chamfer(p, line.points, closed)));
+    // Each polyline is read once, whatever it is measured against.
+    const read = new Map<readonly PtMm[], ChamferLine>();
+    const line = (points: readonly PtMm[]) => {
+      let l = read.get(points);
+      if (!l) read.set(points, (l = chamferLine(points, closed)));
+      return l;
+    };
+    const predicted = b.map((x) => line(x.points.map(predict)));
+    const cost = predicted.map((p) => t.map((x) => chamfer(p, line(x.points))));
     const sameTarget = t.map((x) =>
-      t.map((y) => x === y || chamfer(x.points, y.points, closed) <= SAME_LINE_MM),
+      t.map((y) => x === y || chamfer(line(x.points), line(y.points)) <= SAME_LINE_MM),
     );
     const sameBase = b.map((x) =>
-      b.map((y) => x === y || chamfer(x.points, y.points, closed) <= SAME_LINE_MM),
+      b.map((y) => x === y || chamfer(line(x.points), line(y.points)) <= SAME_LINE_MM),
     );
     const margin = (c: number) => Math.max(0.5, 0.5 * c);
-    b.forEach((line, i) => {
+    b.forEach((baseLine, i) => {
       let j = 0;
       for (let k = 1; k < t.length; k++) if (cost[i][k] < cost[i][j]) j = k;
       const c = cost[i][j];
@@ -862,7 +965,7 @@ function pairLines(
       if (t.some((_, k) => !sameTarget[j][k] && cost[i][k] - c < margin(c))) return;
       if (b.some((_, k) => !sameBase[i][k] && cost[k][j] - c < margin(c))) return;
       const twin = t[j].points;
-      const matched = correspondLines([line.points, twin], closed);
+      const matched = correspondLines([baseLine.points, twin], closed);
       if (matched.ok) {
         // The matcher keeps an open line's direction; which way the twin runs shows at its ends.
         const [from, to] = matched.lines;
@@ -871,16 +974,20 @@ function pairLines(
           Math.hypot(to[0].x - twin[twin.length - 1].x, to[0].y - twin[twin.length - 1].y);
         const bends = closed
           ? null
-          : pairAtBends(line.points, flipped ? [...twin].reverse() : twin);
+          : pairAtBends(baseLine.points, flipped ? [...twin].reverse() : twin);
         pairs.push(bends ? [bends[0], bends[1], false] : [from, to, closed]);
         return;
       }
       // A closed mark with no corners to match (a drill circle): it moves whole, when it kept its shape.
       if (!closed) return;
-      const from = centroidOfPoints(line.points);
+      const from = centroidOfPoints(baseLine.points);
       const to = centroidOfPoints(twin);
-      const moved = line.points.map((p) => ({ x: p.x + to.x - from.x, y: p.y + to.y - from.y }));
-      if (chamfer(moved, twin, true) <= SAME_LINE_MM) pairs.push([[...line.points], moved, true]);
+      const moved = baseLine.points.map((p) => ({
+        x: p.x + to.x - from.x,
+        y: p.y + to.y - from.y,
+      }));
+      if (chamfer(line(moved), line(twin)) <= SAME_LINE_MM)
+        pairs.push([[...baseLine.points], moved, true]);
     });
   }
   return pairs;
@@ -908,11 +1015,29 @@ function buildField(
   ) => GivenLinePairs,
 ): GradeField {
   const cage = cageOf(match);
-  const base = (p: PtMm) => meanValueMove(cage, p);
+  const flat = flatCage(cage);
+  const base = (p: PtMm) => meanValueMove(flat, p.x, p.y);
   let contourReach = 0;
   for (let i = 0; i < cage.p.length; i++)
     contourReach = Math.max(contourReach, Math.hypot(cage.dx[i], cage.dy[i]));
   const rim = segmentsAlong(cage.p, true);
+  // The rim's per-segment constants, as `move` computes them.
+  const rimN = rim.length;
+  const rimAx = new Float64Array(rimN);
+  const rimAy = new Float64Array(rimN);
+  const rimAbx = new Float64Array(rimN);
+  const rimAby = new Float64Array(rimN);
+  const rimLl = new Float64Array(rimN);
+  const rimLen = new Float64Array(rimN);
+  for (let k = 0; k < rimN; k++) {
+    const s = rim[k];
+    rimAx[k] = s.a.x;
+    rimAy[k] = s.a.y;
+    rimAbx[k] = s.b.x - s.a.x;
+    rimAby[k] = s.b.y - s.a.y;
+    rimLl[k] = rimAbx[k] * rimAbx[k] + rimAby[k] * rimAby[k];
+    rimLen[k] = Math.sqrt(rimLl[k]);
+  }
   const inferred = () =>
     pairLines(
       baseLines,
@@ -966,9 +1091,48 @@ function buildField(
     let reach = contourReach;
     for (const s of anchors)
       reach = Math.max(reach, Math.hypot(s.da.x, s.da.y), Math.hypot(s.db.x, s.db.y));
-    const move = (p: PtMm): PtMm => {
-      const b = base(p);
-      if (!anchors.length) return b;
+    // Every anchor's constants in flat arrays, each computed as the loop below once computed it.
+    const n = anchors.length;
+    const ax = new Float64Array(n);
+    const ay = new Float64Array(n);
+    const abX = new Float64Array(n);
+    const abY = new Float64Array(n);
+    const abLl = new Float64Array(n);
+    const raX = new Float64Array(n);
+    const raY = new Float64Array(n);
+    const rdX = new Float64Array(n);
+    const rdY = new Float64Array(n);
+    const daX = new Float64Array(n);
+    const daY = new Float64Array(n);
+    const ddX = new Float64Array(n);
+    const ddY = new Float64Array(n);
+    const segLen = new Float64Array(n);
+    const nX = new Float64Array(n);
+    const nY = new Float64Array(n);
+    const across = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      const s = anchors[i];
+      ax[i] = s.a.x;
+      ay[i] = s.a.y;
+      abX[i] = s.b.x - s.a.x;
+      abY[i] = s.b.y - s.a.y;
+      abLl[i] = abX[i] * abX[i] + abY[i] * abY[i];
+      raX[i] = s.ra.x;
+      raY[i] = s.ra.y;
+      rdX[i] = s.rb.x - s.ra.x;
+      rdY[i] = s.rb.y - s.ra.y;
+      daX[i] = s.da.x;
+      daY[i] = s.da.y;
+      ddX[i] = s.db.x - s.da.x;
+      ddY[i] = s.db.y - s.da.y;
+      segLen[i] = s.len;
+      nX[i] = s.nx;
+      nY[i] = s.ny;
+      across[i] = s.across ? 1 : 0;
+    }
+    /** The move at (px, py), whose base-field move (bx, by) is known. */
+    const moveFrom = (px: number, py: number, bx: number, by: number): PtMm => {
+      if (!n) return { x: bx, y: by };
       // Weighted least squares of the residual R: Σ w·|P(R − r)|², P = identity for a full anchor
       // and n·nᵀ for a straight line's; the contour (residual zero) weighs in as identity.
       let mxx = 0;
@@ -977,32 +1141,38 @@ function buildField(
       let vx = 0;
       let vy = 0;
       /** A straight line the point sits on: its normal residual holds exactly. */
-      let pin: { nx: number; ny: number; value: number } | null = null;
-      for (const s of anchors) {
-        const abx = s.b.x - s.a.x;
-        const aby = s.b.y - s.a.y;
-        const t = Math.max(
-          0,
-          Math.min(1, ((p.x - s.a.x) * abx + (p.y - s.a.y) * aby) / (abx * abx + aby * aby)),
-        );
-        const r2 = (p.x - s.a.x - abx * t) ** 2 + (p.y - s.a.y - aby * t) ** 2;
-        const rx = s.ra.x + (s.rb.x - s.ra.x) * t;
-        const ry = s.ra.y + (s.rb.y - s.ra.y) * t;
+      let pinned = false;
+      let pinNx = 0;
+      let pinNy = 0;
+      let pinValue = 0;
+      for (let i = 0; i < n; i++) {
+        const abx = abX[i];
+        const aby = abY[i];
+        const t = Math.max(0, Math.min(1, ((px - ax[i]) * abx + (py - ay[i]) * aby) / abLl[i]));
+        const r2 = (px - ax[i] - abx * t) ** 2 + (py - ay[i] - aby * t) ** 2;
+        const rx = raX[i] + rdX[i] * t;
+        const ry = raY[i] + rdY[i] * t;
         if (r2 < 1e-12) {
           // On a bent or closed line the point moves exactly with it.
-          if (!s.across)
-            return { x: s.da.x + (s.db.x - s.da.x) * t, y: s.da.y + (s.db.y - s.da.y) * t };
-          pin ??= { nx: s.nx, ny: s.ny, value: rx * s.nx + ry * s.ny };
+          if (!across[i]) return { x: daX[i] + ddX[i] * t, y: daY[i] + ddY[i] * t };
+          if (!pinned) {
+            pinned = true;
+            pinNx = nX[i];
+            pinNy = nY[i];
+            pinValue = rx * nX[i] + ry * nY[i];
+          }
           continue;
         }
-        const w = s.len / (r2 * Math.sqrt(r2));
-        if (s.across) {
-          const along = w * (rx * s.nx + ry * s.ny);
-          mxx += w * s.nx * s.nx;
-          mxy += w * s.nx * s.ny;
-          myy += w * s.ny * s.ny;
-          vx += along * s.nx;
-          vy += along * s.ny;
+        const w = segLen[i] / (r2 * Math.sqrt(r2));
+        if (across[i]) {
+          const nx = nX[i];
+          const ny = nY[i];
+          const along = w * (rx * nx + ry * ny);
+          mxx += w * nx * nx;
+          mxy += w * nx * ny;
+          myy += w * ny * ny;
+          vx += along * nx;
+          vy += along * ny;
         } else {
           mxx += w;
           myy += w;
@@ -1010,64 +1180,130 @@ function buildField(
           vy += w * ry;
         }
       }
-      for (const s of rim) {
-        const abx = s.b.x - s.a.x;
-        const aby = s.b.y - s.a.y;
-        const ll = abx * abx + aby * aby;
-        const t = Math.max(0, Math.min(1, ((p.x - s.a.x) * abx + (p.y - s.a.y) * aby) / ll));
-        const r2 = (p.x - s.a.x - abx * t) ** 2 + (p.y - s.a.y - aby * t) ** 2;
-        if (r2 < 1e-12) return b;
-        const w = Math.sqrt(ll) / (r2 * Math.sqrt(r2));
+      for (let k = 0; k < rimN; k++) {
+        const abx = rimAbx[k];
+        const aby = rimAby[k];
+        const t = Math.max(
+          0,
+          Math.min(1, ((px - rimAx[k]) * abx + (py - rimAy[k]) * aby) / rimLl[k]),
+        );
+        const r2 = (px - rimAx[k] - abx * t) ** 2 + (py - rimAy[k] - aby * t) ** 2;
+        if (r2 < 1e-12) return { x: bx, y: by };
+        const w = rimLen[k] / (r2 * Math.sqrt(r2));
         mxx += w;
         myy += w;
       }
       const det = mxx * myy - mxy * mxy;
       let rx = det > 0 ? (vx * myy - vy * mxy) / det : 0;
       let ry = det > 0 ? (vy * mxx - vx * mxy) / det : 0;
-      if (pin) {
-        const gap = pin.value - (rx * pin.nx + ry * pin.ny);
-        rx += gap * pin.nx;
-        ry += gap * pin.ny;
+      if (pinned) {
+        const gap = pinValue - (rx * pinNx + ry * pinNy);
+        rx += gap * pinNx;
+        ry += gap * pinNy;
       }
-      const out = { x: b.x + rx, y: b.y + ry };
+      const out = { x: bx + rx, y: by + ry };
       // A safety bound only: no point moves farther than the farthest anchor.
       const size = Math.hypot(out.x, out.y);
       return size > reach ? { x: (out.x * reach) / size, y: (out.y * reach) / size } : out;
     };
-    return { reach, move };
+    const move = (p: PtMm): PtMm => {
+      const b = base(p);
+      return moveFrom(p.x, p.y, b.x, b.y);
+    };
+    return { reach, move, moveFrom };
   };
 
-  // Fold-over: round every paired line the map p → p + move(p) must keep its orientation. The
-  // line with the largest residual among the offenders is dropped until none offends.
+  // Fold-over: round every paired line the map p → p + move(p) must keep its orientation (det of
+  // its Jacobian, central differences FOLD_H apart, at both sides of every other anchor's middle).
+  // The line with the largest residual among the offenders is dropped until none offends.
+  /** Per line, its probes: the four difference points of each, and their base moves once read. */
+  const probes = new Map<Anchor[], { at: Float64Array; base: Float64Array | null }[]>();
+  const probesOf = (line: Anchor[]) => {
+    let list = probes.get(line);
+    if (list) return list;
+    list = [];
+    for (let k = 0; k < line.length; k += 2) {
+      const s = line[k];
+      const mid = lerpPt(s.a, s.b, 0.5);
+      const nx = -(s.b.y - s.a.y) / s.len;
+      const ny = (s.b.x - s.a.x) / s.len;
+      for (const side of [-1, 1]) {
+        const p = { x: mid.x + nx * side, y: mid.y + ny * side };
+        const at = Float64Array.of(
+          p.x + FOLD_H,
+          p.y,
+          p.x - FOLD_H,
+          p.y,
+          p.x,
+          p.y + FOLD_H,
+          p.x,
+          p.y - FOLD_H,
+        );
+        list.push({ at, base: null });
+      }
+    }
+    probes.set(line, list);
+    return list;
+  };
+  type MoveFrom = (px: number, py: number, bx: number, by: number) => PtMm;
+  const folds = (line: Anchor[], moveFrom: MoveFrom) => {
+    for (const probe of probesOf(line)) {
+      const { at } = probe;
+      // The base field does not depend on the kept lines: read once per probe.
+      let b = probe.base;
+      if (!b) {
+        b = new Float64Array(8);
+        for (let q = 0; q < 8; q += 2) {
+          const m = base({ x: at[q], y: at[q + 1] });
+          b[q] = m.x;
+          b[q + 1] = m.y;
+        }
+        probe.base = b;
+      }
+      const xp = moveFrom(at[0], at[1], b[0], b[1]);
+      const xm = moveFrom(at[2], at[3], b[2], b[3]);
+      const yp = moveFrom(at[4], at[5], b[4], b[5]);
+      const ym = moveFrom(at[6], at[7], b[6], b[7]);
+      const ja = 1 + (xp.x - xm.x) / (2 * FOLD_H);
+      const jb = (yp.x - ym.x) / (2 * FOLD_H);
+      const jc = (xp.y - xm.y) / (2 * FOLD_H);
+      const jd = 1 + (yp.y - ym.y) / (2 * FOLD_H);
+      if (ja * jd - jb * jc < MIN_FOLD_DET) return true;
+    }
+    return false;
+  };
+  const residuals = new Map<Anchor[], number>();
+  for (const line of lines) {
+    let r = -Infinity;
+    for (const s of line)
+      r = Math.max(r, Math.max(Math.hypot(s.ra.x, s.ra.y), Math.hypot(s.rb.x, s.rb.y)));
+    residuals.set(line, r);
+  }
+  const residual = (line: Anchor[]) => residuals.get(line)!;
+  // The worst offender is the first offender in this order (largest residual, then the earlier
+  // line), so the lines are checked in it and the check stops there. NaN has no order: then all.
+  const ranked = lines.every((line) => !Number.isNaN(residual(line)));
+  const order = lines
+    .map((line, i) => ({ line, i, r: residual(line) }))
+    .sort((x, y) => (x.r > y.r ? -1 : x.r < y.r ? 1 : x.i - y.i))
+    .map((x) => x.line);
   for (;;) {
     const field = fieldOf(lines);
-    const offenders = lines.filter((line) =>
-      line.some((s, k) => {
-        if (k % 2) return false;
-        const mid = lerpPt(s.a, s.b, 0.5);
-        const nx = -(s.b.y - s.a.y) / s.len;
-        const ny = (s.b.x - s.a.x) / s.len;
-        return [-1, 1].some(
-          (side) =>
-            jacobianDet(field.move, { x: mid.x + nx * side, y: mid.y + ny * side }) < MIN_FOLD_DET,
-        );
-      }),
-    );
-    if (!offenders.length) return { match, pairs, lines, ...field };
-    const residual = (line: Anchor[]) =>
-      Math.max(
-        ...line.map((s) => Math.max(Math.hypot(s.ra.x, s.ra.y), Math.hypot(s.rb.x, s.rb.y))),
-      );
-    const worst = offenders.reduce((x, y) => (residual(y) > residual(x) ? y : x));
+    let worst: Anchor[] | undefined;
+    if (ranked) {
+      const kept = new Set(lines);
+      worst = order.find((line) => kept.has(line) && folds(line, field.moveFrom));
+    } else {
+      const offenders = lines.filter((line) => folds(line, field.moveFrom));
+      if (offenders.length) worst = offenders.reduce((x, y) => (residual(y) > residual(x) ? y : x));
+    }
+    if (!worst) return { match, pairs, lines, reach: field.reach, move: field.move };
     lines = lines.filter((line) => line !== worst);
   }
 }
 
-/** det of the Jacobian of p → p + move(p), by central differences. */
-function jacobianDet(move: (p: PtMm) => PtMm, p: PtMm, h = 0.25): number {
-  const [a, b, c, d] = jacobian(move, p, h);
-  return a * d - b * c;
-}
+/** Half the central-difference step of the fold-over check, mm. */
+const FOLD_H = 0.25;
 
 function jacobian(move: (p: PtMm) => PtMm, p: PtMm, h: number): [number, number, number, number] {
   const xp = move({ x: p.x + h, y: p.y });
