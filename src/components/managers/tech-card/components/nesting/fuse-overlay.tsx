@@ -25,6 +25,7 @@ import {
   type ZoneRingRef,
 } from './fuse-zone';
 import { FuseZoneEditor } from './fuse-zone-editor';
+import { SheetPop } from './sheet-pop';
 
 const INK = 'var(--color-warning)';
 const PAPER = 'var(--color-bgColor)';
@@ -725,22 +726,11 @@ export function FuseOverlay({
                     );
                   })}
                 {open && (
-                  <foreignObject
-                    x={at.x + 12 * px}
-                    y={at.y + 12 * px}
-                    width={END_POP_W * px}
-                    height={64 * px}
-                    style={{ overflow: 'visible' }}
-                    onPointerDown={(e) => e.stopPropagation()}
-                  >
+                  <SheetPop x={at.x} y={at.y} dx={12} dy={12}>
                     <div
                       data-end-pop={`${i}${end}`}
                       className='grid gap-1 border border-textColor bg-bgColor p-1.5'
-                      style={{
-                        width: END_POP_W,
-                        transform: `scale(${px})`,
-                        transformOrigin: '0 0',
-                      }}
+                      style={{ width: END_POP_W }}
                     >
                       <div className='grid grid-cols-3 gap-1'>
                         {END_MODES.map(([value, label]) => (
@@ -776,7 +766,7 @@ export function FuseOverlay({
                         />
                       )}
                     </div>
-                  </foreignObject>
+                  </SheetPop>
                 )}
               </g>
             );

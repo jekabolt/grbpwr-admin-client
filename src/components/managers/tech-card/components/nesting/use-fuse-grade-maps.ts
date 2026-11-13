@@ -13,9 +13,11 @@ import { NestingWorkerClient } from 'lib/nesting/worker/client';
 export function useFuseGradeMaps(
   pieces: readonly FusingSourcePiece[],
   baseSizeId: number | null,
-): ReadonlyMap<string, PieceGradeMap> {
+): { maps: ReadonlyMap<string, PieceGradeMap>; settled: boolean } {
   // Bumped when the worker has put new maps into the cache: the plan is read again from it.
   const [built, setBuilt] = useState(0);
+  // The plan whose worker run failed: its pieces stay inferred, and nothing more will arrive.
+  const [failed, setFailed] = useState<unknown>(null);
   const plan = useMemo(() => planGradeMaps(pieces, baseSizeId), [pieces, baseSizeId, built]);
   const maps = useMemo(() => {
     const out = new Map<string, PieceGradeMap>();
@@ -34,12 +36,14 @@ export function useFuseGradeMaps(
         if (live) setBuilt((n) => n + 1);
       })
       // A failed run leaves those pieces inferred until the pieces change; no retry loop.
-      .catch(() => undefined)
+      .catch(() => {
+        if (live) setFailed(plan);
+      })
       .finally(() => worker.terminate());
     return () => {
       live = false;
       worker.terminate();
     };
   }, [plan]);
-  return maps;
+  return { maps, settled: !plan.jobs.length || failed === plan };
 }
