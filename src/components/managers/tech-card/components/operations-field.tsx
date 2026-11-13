@@ -1,6 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import type { TechCardSeamWire } from 'lib/seams';
 import type { ChangeTechCardSeamsRequest } from 'api/proto-http/admin';
 import { runSeamChange } from './assembly-seams/seam-change';
 import { MaterialThumb } from 'components/managers/materials/components/material-thumb';
@@ -299,6 +298,7 @@ import {
   mergeStepRemovalRows,
   runStepRemovalChange,
   quietCleanupChange,
+  readCardForStepUndo,
   runStepRemovalCleanup,
   cleanupCall,
   runStepRemovalRedoChange,
@@ -343,7 +343,7 @@ import { isTopstitchThreadLine, type TopstitchLine } from './topstitch-lines';
 import { PieceAddChip, PieceRef, useFormAssemblyPieces, useFormPieces } from './piece-picker';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
-import { hydrateSeams, posesOf, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
+import { posesOf, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
 import type { SeamWrites } from './assembly-seams/use-seam-decisions';
 import { foldRowsOf, useFoldsStore } from './assembly-folds/folds-store';
 import { useStepSeams } from './step-seams/step-seams-context';
@@ -399,6 +399,8 @@ import {
 const EMPTY_MEDIA_URLS: Map<number, string> = new Map();
 
 const SEAM_WRITE_SETTLE_TIMEOUT_MS = 20_000;
+/** Pauses before a failed step-removal cleanup runs again on its own (U1 #5). */
+const REMOVAL_RETRY_MS = [5_000, 15_000, 45_000, 120_000];
 
 /** A destructive removal waits for earlier seam writes, then continues even if one never returns. */
 function waitForSeamWritesToSettle(): Promise<boolean> {
@@ -6549,6 +6551,44 @@ export function OperationsField({
     clearStepRemovalOwed(cardId, entry.historyKey, entry.operationNumber);
   }, []);
 
+  // U1 #5: a cleanup that failed for a transient reason runs again on its own, a few times with a
+  // growing pause, instead of waiting for the next card save. The save path still retries after.
+  const removalRetries = useRef(new Map<string, { timer: number; attempt: number }>());
+  const restartRemovalCleanup = useRef<(cardId: number, entry: OwedStepRemoval) => void>(
+    () => undefined,
+  );
+  const scheduleRemovalRetry = useCallback((cardId: number, entry: OwedStepRemoval) => {
+    const id = `${cardId}:${entry.historyKey}:${entry.operationNumber}`;
+    const prev = removalRetries.current.get(id);
+    if (prev) window.clearTimeout(prev.timer);
+    const attempt = (prev?.attempt ?? 0) + 1;
+    const delay = REMOVAL_RETRY_MS[attempt - 1];
+    if (delay === undefined) {
+      removalRetries.current.delete(id);
+      return;
+    }
+    const fire = () => {
+      // An undo or a removal holds the steps: wait for it, the same attempt.
+      if (stepTransactionRef.current) {
+        removalRetries.current.set(id, { timer: window.setTimeout(fire, delay), attempt });
+        return;
+      }
+      if (!hasStepRemovalOwed(cardId, entry.historyKey, entry.operationNumber)) {
+        removalRetries.current.delete(id);
+        return;
+      }
+      restartRemovalCleanup.current(cardId, entry);
+    };
+    removalRetries.current.set(id, { timer: window.setTimeout(fire, delay), attempt });
+  }, []);
+  useEffect(() => {
+    const retries = removalRetries.current;
+    return () => {
+      for (const { timer } of retries.values()) window.clearTimeout(timer);
+      retries.clear();
+    };
+  }, []);
+
   const startRemovalCleanup = useCallback(
     (cardId: number, entries: readonly OwedStepRemoval[]) => {
       if (!entries.length || !sourceStepWrites) return;
@@ -6597,6 +6637,7 @@ export function OperationsField({
             ),
             cutHistory: () => cutHistoryForCleanup.current(),
             clear: () => clearRemovalDebt(cardId, entry),
+            retryLater: () => scheduleRemovalRetry(cardId, entry),
           });
         }
       });
@@ -6605,8 +6646,9 @@ export function OperationsField({
       });
       removalCleanupFlight.current = flight;
     },
-    [cleanupQueryClient, clearRemovalDebt, getValues, sourceStepWrites],
+    [cleanupQueryClient, clearRemovalDebt, getValues, scheduleRemovalRetry, sourceStepWrites],
   );
+  restartRemovalCleanup.current = (cardId, entry) => startRemovalCleanup(cardId, [entry]);
 
   const replayedRemovalCard = useRef<number | null>(null);
   useEffect(() => {
@@ -8572,22 +8614,7 @@ export function OperationsField({
         },
         settle: waitForRemovalCleanup,
         // A cleanup delete may have landed unseen: the card itself, from the server, not the cache.
-        readServer: async () => {
-          const cardId = techCardId;
-          if (!cardId) return false;
-          try {
-            const res = await adminService.GetTechCard({ id: cardId, vatCountryCode: undefined });
-            if (useSeamsStore.getState().cardId !== cardId) return false;
-            hydrateSeams(
-              cardId,
-              (res.techCard?.seams ?? []) as TechCardSeamWire[],
-              res.techCard?.lockVersion,
-            );
-            return true;
-          } catch {
-            return false;
-          }
-        },
+        readServer: async () => (techCardId ? readCardForStepUndo(techCardId) : false),
         cutHistory: () => undoHistoryApi.cut('step-removal-undo'),
         rows: () => {
           const seamState = useSeamsStore.getState();

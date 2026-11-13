@@ -17,6 +17,7 @@ import {
   cleanupCall,
   forgetStepRemovalDoubts,
   quietCleanupChange,
+  readCardForStepUndo,
   runStepRemovalCleanup,
   runStepRemovalUndoChange,
 } from './step-removal-change';
@@ -86,6 +87,7 @@ function harness(call: SeamChangeDeps['call'], over: Partial<SeamFormBridge> = {
     bridge: (id) => (id === CARD ? bridge : undefined),
   };
   const clear = vi.fn();
+  const retryLater = vi.fn();
   const run = () =>
     runStepRemovalCleanup(entry, {
       active: () => true,
@@ -100,9 +102,11 @@ function harness(call: SeamChangeDeps['call'], over: Partial<SeamFormBridge> = {
         runSeamChange(CARD, input, { verb: 'removal', quiet: true }, deps),
       ),
       clear,
+      retryLater,
     });
   return {
     ops,
+    retryLater,
     strips,
     log,
     bridge,
@@ -433,5 +437,110 @@ describe('a lost cleanup reply, then the step undo', () => {
         ).toEqual([a.seamKey, b.seamKey].sort());
       })();
     });
+  });
+});
+
+describe('U1 #4: the undo forced read moves the form version with the card', () => {
+  const snapshot = {
+    step: { historyKey: entry.historyKey },
+    row: {
+      historyKey: entry.historyKey,
+      operationNumber: 20,
+      seamKeys: [a.seamKey, b.seamKey],
+      poseKeys: [],
+    },
+    rows: { seams: [a, b], poses: [] },
+    operationNumber: 20,
+    candidateKeys: entry.candidateKeys,
+  };
+
+  it('after a lost cleanup reply the restore upsert claims the read version: one request, no lock_version_moved retry', async () => {
+    // The cleanup delete landed at 8; its answer was lost.
+    const h = harness(async () => {
+      throw new Error('Failed to fetch');
+    });
+    await h.run();
+    let serverVersion = 8;
+    h.bridge.reread = async () => {
+      // The page's read in chain: the form stands on the card it read.
+      h.setVersion(serverVersion);
+      return {
+        ok: true,
+        card: { lockVersion: serverVersion, seams: [] } as unknown as common_TechCard,
+      };
+    };
+    const sent: ChangeTechCardSeamsRequest[] = [];
+    const call = vi.fn<SeamChangeDeps['call']>(async (req) => {
+      sent.push(req);
+      if (req.expectedLockVersion !== serverVersion) throw lockMoved();
+      serverVersion += 1;
+      return reply(serverVersion, [a, b], []);
+    });
+    const deps: SeamChangeDeps = { call, bridge: (id) => (id === CARD ? h.bridge : undefined) };
+    const refused: string[] = [];
+    const restored: unknown[] = [];
+    const ok = await runStepRemovalUndoChange(snapshot, {
+      validate: () => null,
+      alreadyBack: () => false,
+      close: () => undefined,
+      settle: async () => true,
+      rows: () => {
+        const s = useSeamsStore.getState();
+        return { seams: s.server, poses: s.poses };
+      },
+      change: (input) => runSeamChange(CARD, input, { verb: 'restore' }, deps),
+      cutHistory: () => undefined,
+      restore: (row) => restored.push(row),
+      clearOwed: () => undefined,
+      finishHistory: () => undefined,
+      select: () => undefined,
+      refuse: (why) => refused.push(why),
+      unsettled: 'still saving',
+      readServer: () => readCardForStepUndo(CARD, (id) => (id === CARD ? h.bridge : undefined)),
+    });
+    expect(refused).toEqual([]);
+    expect(ok).toBe(true);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].expectedLockVersion).toBe(8);
+    expect(restored).toHaveLength(1);
+  });
+});
+
+describe('U1 #5: a failed cleanup asks for its own retry instead of waiting for the next card save', () => {
+  const status = (code: number, text: string) =>
+    Object.assign(new Error(`Error: ${code} - ${text}`), { status: code });
+
+  it.each([
+    ['no network', () => new TypeError('Failed to fetch')],
+    ['a gateway during a backend restart', () => status(502, 'Bad Gateway')],
+  ])('%s: the debt stays and one retry is asked for', async (_, thrown) => {
+    const h = harness(async () => {
+      throw thrown();
+    });
+    expect(await h.run()).toBe(false);
+    expect(h.clear).not.toHaveBeenCalled();
+    expect(h.retryLater).toHaveBeenCalledTimes(1);
+  });
+
+  it('the form cannot be saved yet: the debt stays and one retry is asked for', async () => {
+    const h = harness(vi.fn(), { flush: async () => ({ ok: false, why: 'fix the name' }) });
+    expect(await h.run()).toBe(false);
+    expect(h.clear).not.toHaveBeenCalled();
+    expect(h.retryLater).toHaveBeenCalledTimes(1);
+  });
+
+  it('a stable server refusal drops the debt: no retry', async () => {
+    const h = harness(async () => {
+      throw status(400, 'Bad Request');
+    });
+    expect(await h.run()).toBe(false);
+    expect(h.clear).toHaveBeenCalledTimes(1);
+    expect(h.retryLater).not.toHaveBeenCalled();
+  });
+
+  it('a cleanup that lands asks for nothing', async () => {
+    const h = harness(async () => reply(8, [], [a.seamKey, b.seamKey]));
+    expect(await h.run()).toBe(true);
+    expect(h.retryLater).not.toHaveBeenCalled();
   });
 });

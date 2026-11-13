@@ -1,10 +1,11 @@
-import type { StoredPose, StoredRow, StoredSeam } from 'lib/seams';
+import type { StoredPose, StoredRow, StoredSeam, TechCardSeamWire } from 'lib/seams';
 
 import type { OwedStepRemoval } from './card-owed';
 import type { SeamChangeInput, SeamChangeResult } from './assembly-seams/seam-change';
 import type { SeamChange, StepRef } from './assembly-seams/seam-change-plan';
 import { isLockMoved } from './assembly-seams/seam-change-plan';
-import { reuseKeys, useSeamsStore } from './assembly-seams/seams-store';
+import { seamFormBridge, type SeamFormBridge } from './assembly-seams/seam-form-bridge';
+import { hydrateSeams, reuseKeys, useSeamsStore } from './assembly-seams/seams-store';
 import { heldSeamKeys } from './step-seams/step-removal-seams';
 
 export type StepLinkRow = {
@@ -349,6 +350,11 @@ export type StepRemovalCleanupIo = {
    */
   cutHistory: () => void;
   clear: () => void;
+  /**
+   * The debt stays after a transient failure (no answer, a queue or validation refusal): the page
+   * runs this cleanup again on its own (U1 #5) instead of waiting for the next card save.
+   */
+  retryLater?: () => void;
 };
 
 /**
@@ -385,6 +391,7 @@ export async function runStepRemovalCleanup(
   try {
     changed = await io.change(build);
   } catch {
+    io.retryLater?.();
     return false;
   }
   // The first build supplies optimistic state. Only a later build proves that the body flush ran
@@ -397,11 +404,14 @@ export async function runStepRemovalCleanup(
   // The delete went out and no answer proves it did not land: keep the debt, distrust the rows.
   if (unclearCalls.has(entry.historyKey)) {
     rowsInDoubt.add(entry.historyKey);
+    io.retryLater?.();
     return false;
   }
-  // A transient queue, validation or network refusal retries after the next successful body save.
-  // A server contradiction is stable for this debt and is dropped silently instead of spinning.
-  if (!cleanupRetryable(changed.why)) io.clear();
+  // A transient queue, validation or network refusal retries on its own and after the next
+  // successful body save. A server contradiction is stable for this debt and is dropped silently
+  // instead of spinning.
+  if (cleanupRetryable(changed.why)) io.retryLater?.();
+  else io.clear();
   return false;
 }
 
@@ -423,4 +433,21 @@ export function quietCleanupChange(
     }
     return result;
   };
+}
+
+/**
+ * The step undo's forced read of the card (U1 #4), through the form's door: the form then stands on
+ * the version the read returned, so the restore upsert claims the version the lost cleanup delete
+ * left instead of meeting lock_version_moved and reading the card a second time.
+ */
+export async function readCardForStepUndo(
+  cardId: number,
+  bridgeOf: (id: number) => SeamFormBridge | undefined = seamFormBridge,
+): Promise<boolean> {
+  const bridge = bridgeOf(cardId);
+  if (!bridge) return false;
+  const fresh = await bridge.reread();
+  if (!fresh.ok || useSeamsStore.getState().cardId !== cardId) return false;
+  hydrateSeams(cardId, (fresh.card.seams ?? []) as TechCardSeamWire[], fresh.card.lockVersion);
+  return true;
 }
