@@ -27,6 +27,7 @@ import type { FuseEdge, FuseSpline, PieceFuseSpec } from './types';
 import { zoneGrade } from './zone-grade';
 import { chooseBaseSize } from './grade-map-base';
 import { gradeMapGiven, type GradeMapPair, type PieceGradeMap } from './grade-map-pair';
+import { gradeMapLines, gradeMapNotches } from './grade-map-resolve';
 
 export type FusingBomLine = {
   bomLineKey: string;
@@ -301,6 +302,7 @@ export function mapFuseSpecToSize(
     }
     const given = gradeMapGiven(pair, source, baseOutline, targetOutline, internals);
     const grade = zoneGrade(baseOutline, targetOutline, internals, given);
+    const lineByMap = gradeMapLines(pair, baseOutline, targetOutline, internals);
     /** mm from the nearer of the cut and the inset contour. */
     const offContour = (point: PtMm) =>
       Math.min(
@@ -341,7 +343,7 @@ export function mapFuseSpecToSize(
       // A ring with a mode of its own, or a default hole inside one, goes that way and no other.
       const followed =
         spline.gradeMode === 'follow_line' && spline.anchor
-          ? followLineMove(spline.anchor, grade.linePair(spline.anchor))
+          ? followLineMove(spline.anchor, grade.linePair(spline.anchor), lineByMap)
           : null;
       if (spline.gradeMode === 'follow_line' && !followed) onGuess?.('line', ref);
       const by =
@@ -471,46 +473,47 @@ export function mapFuseSpecToSize(
     if (!pairing) return source;
     const to = edgeRunsOf(targetOutline);
     const from = edgeRunsOf(baseOutline);
-    return {
-      ...source,
-      edges: source.edges
-        .map((edge) => {
-          const target = pairing.target[edge.edge];
-          if (target == null) return edge;
-          const baseRun = from[edge.edge];
-          const run = to[target];
-          // An end's trim on this size; absent mode = the same mm from the run's corner (FuseEdge).
-          const pair = {
-            baseRun,
-            run,
-            reversed: pairing.reversed,
-            baseLines: internals?.base ?? [],
-            lines: internals?.target ?? [],
-          };
-          const carried = (mm: number, mode: FuseEdge['startMode'], atStart: boolean): number => {
-            if (!baseRun) return mm;
-            const end = carryStripEnd(mm, mode, atStart, pair);
-            if (end.guessed)
-              onGuess?.('notch', `${target}:${atStart !== pairing.reversed ? 's' : 'e'}`);
-            return end.mm;
-          };
-          const start = carried(edge.startMm, edge.startMode, true);
-          const end = carried(edge.endMm, edge.endMode, false);
-          const [startMm, endMm] = clampStripTrims(
-            run.length,
-            pairing.reversed ? end : start,
-            pairing.reversed ? start : end,
-          );
-          const next: FuseEdge = { edge: target, startMm, endMm };
-          const [startMode, endMode] = pairing.reversed
-            ? [edge.endMode, edge.startMode]
-            : [edge.startMode, edge.endMode];
-          if (startMode) next.startMode = startMode;
-          if (endMode) next.endMode = endMode;
-          return next;
-        })
-        .sort((a, b) => a.edge - b.edge),
-    };
+    const notchByMap = gradeMapNotches(pair, baseOutline, targetOutline, internals);
+    const edges = source.edges
+      .map((edge) => {
+        const target = pairing.target[edge.edge];
+        if (target == null) return edge;
+        const baseRun = from[edge.edge];
+        const run = to[target];
+        // An end's trim on this size; absent mode = the same mm from the run's corner (FuseEdge).
+        const pair = {
+          baseRun,
+          run,
+          reversed: pairing.reversed,
+          baseLines: internals?.base ?? [],
+          lines: internals?.target ?? [],
+          resolveNotch: notchByMap?.resolveNotch,
+        };
+        const carried = (mm: number, mode: FuseEdge['startMode'], atStart: boolean): number => {
+          if (!baseRun) return mm;
+          const end = carryStripEnd(mm, mode, atStart, pair);
+          if (end.guessed)
+            onGuess?.('notch', `${target}:${atStart !== pairing.reversed ? 's' : 'e'}`);
+          return end.mm;
+        };
+        const start = carried(edge.startMm, edge.startMode, true);
+        const end = carried(edge.endMm, edge.endMode, false);
+        const [startMm, endMm] = clampStripTrims(
+          run.length,
+          pairing.reversed ? end : start,
+          pairing.reversed ? start : end,
+        );
+        const next: FuseEdge = { edge: target, startMm, endMm };
+        const [startMode, endMode] = pairing.reversed
+          ? [edge.endMode, edge.startMode]
+          : [edge.startMode, edge.endMode];
+        if (startMode) next.startMode = startMode;
+        if (endMode) next.endMode = endMode;
+        return next;
+      })
+      .sort((a, b) => a.edge - b.edge);
+    notchByMap?.done();
+    return { ...source, edges };
   }
   return source;
 }

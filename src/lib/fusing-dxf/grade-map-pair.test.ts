@@ -4,9 +4,11 @@ import { mapFuseSpecToSize, type FuseInternalLine, type FusingSourcePiece } from
 import { chooseBaseSize } from './grade-map-base';
 import { attachGradeMapsSync } from './grade-map-job';
 import { gradeMapGiven, type GradeMapPair, type PieceGradeMap } from './grade-map-pair';
+import { gradeMapLines, gradeMapNotches } from './grade-map-resolve';
+import { edgeRunsOf } from './edge-runs';
 import { pathOf, pointAt, project } from 'lib/grade-map/geom';
 import { clearGradeMapCache } from './grade-map-source';
-import { blankFuse, type FuseSpline, type PieceFuseSpec } from './types';
+import { blankFuse, type FuseEdge, type FuseSpline, type PieceFuseSpec } from './types';
 
 // A synthetic front panel: corners, a curved armhole, two notches on the cut, an internal line the
 // zones lean on. Size 1 is the base; the other sizes are exact transforms of it.
@@ -27,7 +29,16 @@ function armhole(): PtMm[] {
   return out;
 }
 
-const CUT = [P(0, 0), P(150, 0), P(300, 0), P(330, 250), ...armhole(), P(150, 330), P(0, 280), P(0, 140)];
+const CUT = [
+  P(0, 0),
+  P(150, 0),
+  P(300, 0),
+  P(330, 250),
+  ...armhole(),
+  P(150, 330),
+  P(0, 280),
+  P(0, 140),
+];
 const LINES: FuseInternalLine[] = [
   { layer: '4', closed: false, points: [P(150, 0), P(150, 5)] },
   { layer: '4', closed: false, points: [P(0, 140), P(5, 140)] },
@@ -116,7 +127,8 @@ function pointsOf(spec: PieceFuseSpec): PtMm[] {
   return spec.zone.spline.points.map(({ x, y }) => ({ x, y }));
 }
 
-const worst = (a: PtMm[], b: PtMm[]) => Math.max(...a.map((p, i) => Math.hypot(p.x - b[i].x, p.y - b[i].y)));
+const worst = (a: PtMm[], b: PtMm[]) =>
+  Math.max(...a.map((p, i) => Math.hypot(p.x - b[i].x, p.y - b[i].y)));
 
 describe('zone carry with a grade map', () => {
   const base = sizeOf(1, (p) => p);
@@ -238,7 +250,11 @@ describe('a refused internal line', () => {
   const shifted = sizeOf(2, SHIFT);
   const doubled: Size = {
     ...sizeOf(3, SCALE),
-    internals: [...LINES.slice(0, 2).map((l) => ({ ...l, points: l.points.map(SCALE) })), twin(-0.5), twin(0.5)],
+    internals: [
+      ...LINES.slice(0, 2).map((l) => ({ ...l, points: l.points.map(SCALE) })),
+      twin(-0.5),
+      twin(0.5),
+    ],
   };
   const map = mapOf([base, shifted, doubled]);
 
@@ -270,7 +286,9 @@ describe('two marks traced onto one line', () => {
   const scaled = sizeOf(3, SCALE, 0, [{ ...SECOND, points: SECOND.points.map(SCALE) }]);
   const clean = mapOf([base, scaled]);
   const at = (x: number) =>
-    clean.piece.tracks.findIndex((t) => t.kind === 'internal' && t.layer === '8' && t.base[0][0] === x * 100);
+    clean.piece.tracks.findIndex(
+      (t) => t.kind === 'internal' && t.layer === '8' && t.base[0][0] === x * 100,
+    );
   const first = clean.piece.tracks[at(220)];
   const second = clean.piece.tracks[at(240)];
   const onto = first.sizes.find((s) => s.sizeId === 3)!.delta!;
@@ -316,8 +334,14 @@ describe('two marks traced onto one line', () => {
       { base: base.internals, target: scaled.internals },
     )!;
     const own = given.lines!(base.internals, scaled.internals, () => [], true);
-    expect(own.some(([from]) => from.every((p) => Math.abs(p.x - 220) < 1e-6 || Math.abs(p.x - 240) < 1e-6))).toBe(false);
-    expect(reasons.join('; ')).toMatch(/internal line near the zone: another mark is traced onto the same line/);
+    expect(
+      own.some(([from]) =>
+        from.every((p) => Math.abs(p.x - 220) < 1e-6 || Math.abs(p.x - 240) < 1e-6),
+      ),
+    ).toBe(false);
+    expect(reasons.join('; ')).toMatch(
+      /internal line near the zone: another mark is traced onto the same line/,
+    );
     const { out } = carry(ON_LINE, base, scaled, edited);
     for (const p of pointsOf(out)) expect(Number.isFinite(p.x) && Number.isFinite(p.y)).toBe(true);
   });
@@ -332,8 +356,31 @@ describe('two marks traced onto one line', () => {
       { base: scaled.internals, target: base.internals },
     )!;
     const own = given.lines!(scaled.internals, base.internals, () => [], true);
-    expect(own.some(([, to]) => to.every((p) => Math.abs(p.x - 220) < 1e-6 || Math.abs(p.x - 240) < 1e-6))).toBe(false);
+    expect(
+      own.some(([, to]) =>
+        to.every((p) => Math.abs(p.x - 220) < 1e-6 || Math.abs(p.x - 240) < 1e-6),
+      ),
+    ).toBe(false);
     expect(reasons.join('; ')).toMatch(/another mark is traced onto the same line/);
+  });
+
+  it('a follow_line ring asks the map for its line: a line bound twice has no twin', () => {
+    const internals = { base: base.internals, target: scaled.internals };
+    const ok = gradeMapLines(
+      { map: clean, from: 1, to: 3 },
+      base.outline,
+      scaled.outline,
+      internals,
+    )!;
+    const bad = gradeMapLines(
+      { map: edited, from: 1, to: 3 },
+      base.outline,
+      scaled.outline,
+      internals,
+    )!;
+    const line = base.internals.find((l) => l.layer === '8' && l.points[0].x === 220)!;
+    expect(worst([...ok.resolve(line)!], line.points.map(SCALE))).toBeLessThan(1e-6);
+    expect(bad.resolve(line)).toBeNull();
   });
 });
 
@@ -371,13 +418,31 @@ describe('the base size', () => {
     { id: 3, rank: 0 },
   ];
   it('is the preferred size when the piece has it', () => {
-    expect(chooseBaseSize(sizes, (s) => s.id === 4, (s) => s.rank)?.id).toBe(4);
+    expect(
+      chooseBaseSize(
+        sizes,
+        (s) => s.id === 4,
+        (s) => s.rank,
+      )?.id,
+    ).toBe(4);
   });
   it('else the smallest rank, ties to the earlier size', () => {
-    expect(chooseBaseSize(sizes, (s) => s.id === 9, (s) => s.rank)?.id).toBe(2);
+    expect(
+      chooseBaseSize(
+        sizes,
+        (s) => s.id === 9,
+        (s) => s.rank,
+      )?.id,
+    ).toBe(2);
   });
   it('by list order when the rank is the index (the piece editor)', () => {
-    expect(chooseBaseSize(sizes, () => false, (_, i) => i)?.id).toBe(4);
+    expect(
+      chooseBaseSize(
+        sizes,
+        () => false,
+        (_, i) => i,
+      )?.id,
+    ).toBe(4);
   });
 });
 
@@ -396,5 +461,88 @@ describe('the map cache', () => {
     const out = attachGradeMapsSync([strip, single], 1, 'f');
     expect(out.pieces[0]).toBe(strip);
     expect(out.pieces[1]).toBe(single);
+  });
+});
+
+describe('the map answers the modes that look one mark up', () => {
+  const base = sizeOf(1, (p) => p);
+  const scaled = sizeOf(3, SCALE);
+  const shifted = sizeOf(2, SHIFT);
+  const map = mapOf([base, shifted, scaled]);
+  const internals = (from: Size, to: Size) => ({ base: from.internals, target: to.internals });
+
+  it("a follow_line ring's line: its twin point for point, both ways", () => {
+    const line = base.internals.find((l) => l.layer === '8')!;
+    const there = gradeMapLines(
+      { map, from: 1, to: 2 },
+      base.outline,
+      shifted.outline,
+      internals(base, shifted),
+    )!;
+    expect(worst([...there.resolve(line)!], line.points.map(SHIFT))).toBeLessThan(1e-6);
+    const twin = shifted.internals.find((l) => l.layer === '8')!;
+    const back = gradeMapLines(
+      { map, from: 2, to: 1 },
+      shifted.outline,
+      base.outline,
+      internals(shifted, base),
+    )!;
+    expect(worst([...back.resolve(twin)!], line.points)).toBeLessThan(1e-6);
+    // A line that is not one of the size's own: no answer.
+    expect(there.resolve({ ...line, points: [...line.points] })).toBeNull();
+  });
+
+  it("a notch strip end: the notch's twin on the cut; a point with no notch is a miss, flagged", () => {
+    const reasons: string[] = [];
+    const notches = gradeMapNotches(
+      { map, from: 1, to: 3, approximate: (r) => reasons.push(...r) },
+      base.outline,
+      scaled.outline,
+      internals(base, scaled),
+    )!;
+    const at = notches.resolveNotch(P(150, 0.4))!;
+    expect(Math.hypot(at.x - 157.5, at.y)).toBeLessThan(0.5);
+    expect(notches.resolveNotch(P(250, 0))).toBeNull();
+    expect(reasons).toEqual([]);
+    notches.done();
+    expect(reasons).toEqual(['notch at a strip end: not traced between these sizes']);
+  });
+
+  it('a strip with notch ends carries as without the map when the map agrees', () => {
+    const runs = edgeRunsOf(base.outline);
+    const bottom = runs.findIndex((r) => r.points.some((p) => p.x === 150 && p.y === 0));
+    const edge: FuseEdge = {
+      edge: bottom,
+      startMm: 140,
+      endMm: 140,
+      startMode: 'notch',
+      endMode: 'notch',
+    };
+    const spec: PieceFuseSpec = { ...blankFuse('strip'), widthMm: 12, edges: [edge] };
+    for (const to of [shifted, scaled]) {
+      const off = carry(spec, base, to, null);
+      const on = carry(spec, base, to, map);
+      expect(on.out.edges).toEqual(off.out.edges);
+      expect(on.reasons).toEqual([]);
+    }
+  });
+
+  it('a strip piece with a notch end reads a map; a strip without one does not', () => {
+    clearGradeMapCache();
+    const sizes = [base, shifted];
+    const notch = {
+      ...pieceOf(sizes),
+      fuse: {
+        ...blankFuse('strip'),
+        edges: [{ edge: 0, startMm: 10, endMm: 10, startMode: 'notch' as const }],
+      },
+    };
+    const plain = {
+      ...pieceOf(sizes),
+      fuse: { ...blankFuse('strip'), edges: [{ edge: 0, startMm: 10, endMm: 10 }] },
+    };
+    const out = attachGradeMapsSync([notch, plain], 1, 'strip');
+    expect(out.pieces[0].gradeMap).toBeTruthy();
+    expect(out.pieces[1]).toBe(plain);
   });
 });

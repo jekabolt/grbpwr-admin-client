@@ -19,7 +19,12 @@ export function runGradeMapJobs(jobs: readonly GradeMapJob[]): GradeMapJobResult
       const { piece } = buildPieceMap(job.input, job.sizeOrder);
       return { key: job.key, piece, ms: now() - t0 };
     } catch (e) {
-      return { key: job.key, piece: null, ms: now() - t0, error: e instanceof Error ? e.message : String(e) };
+      return {
+        key: job.key,
+        piece: null,
+        ms: now() - t0,
+        error: e instanceof Error ? e.message : String(e),
+      };
     }
   });
 }

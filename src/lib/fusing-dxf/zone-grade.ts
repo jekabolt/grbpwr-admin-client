@@ -355,11 +355,7 @@ export type GivenCorrespondence = {
   /** Tells cached mappings apart: one key, one set of correspondences. */
   key: string;
   /** The contour's nodes on the two rings (counter-clockwise); null = infer the contour. */
-  contour?: (
-    base: readonly PtMm[],
-    target: readonly PtMm[],
-    sameWay: boolean,
-  ) => GivenNodes | null;
+  contour?: (base: readonly PtMm[], target: readonly PtMm[], sameWay: boolean) => GivenNodes | null;
   /** The line pairs; `inferred` is the geometric pairing of the same lines. */
   lines?: (
     base: readonly FuseInternalLine[],
@@ -1263,8 +1259,7 @@ export function zoneGrade(
   );
   if (hit) return hit.grade;
   // The same outlines often arrive as fresh arrays (a size row rebuilt per render): key by content.
-  const key =
-    contentKey(baseOutline, targetOutline, internals) + (given ? `#gm:${given.key}` : '');
+  const key = contentKey(baseOutline, targetOutline, internals) + (given ? `#gm:${given.key}` : '');
   let grade = byContent.get(key);
   if (grade) byContent.delete(key);
   else grade = buildZoneGrade(baseOutline, targetOutline, internals, given ?? undefined);

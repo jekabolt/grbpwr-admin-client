@@ -56,8 +56,13 @@ export function clearGradeMapCache() {
 /** The piece reads a map: a drawn zone, two or more sizes. */
 export function wantsGradeMap(piece: FusingSourcePiece): boolean {
   const fuse = piece.fuse;
-  if (!fuse || fuse.mode !== 'zone' || !fuse.zone || 'dxfPieceKey' in fuse.zone) return false;
-  if (piece.ungraded) return false;
+  if (!fuse || piece.ungraded) return false;
+  // A drawn zone, or a strip with an end kept at its notch: the two carries that read the map.
+  const zone = fuse.mode === 'zone' && !!fuse.zone && !('dxfPieceKey' in fuse.zone);
+  const notch =
+    fuse.mode === 'strip' &&
+    fuse.edges.some((e) => e.startMode === 'notch' || e.endMode === 'notch');
+  if (!zone && !notch) return false;
   return new Set(piece.sizes.map((s) => s.sizeId)).size >= 2;
 }
 
@@ -140,7 +145,9 @@ export function planGradeMaps(
       if (!r) continue;
       stats.buildMs += r.ms;
       if (r.piece) stats.built++;
-      const map = r.piece ? { piece: r.piece, baseSizeId: job.input.baseSizeId, key: job.key } : null;
+      const map = r.piece
+        ? { piece: r.piece, baseSizeId: job.input.baseSizeId, key: job.key }
+        : null;
       remember(job.key, map);
       resolved.set(job.key, map);
     }

@@ -10,7 +10,16 @@
 import { lineCorners } from 'lib/pattern-import/adapters/rul/correspond';
 import type { PtMm } from 'lib/pattern-import/types';
 import { BIND_MM, bindToLine, carryArc, nodesOf, type BoundLine } from 'lib/grade-map/bind';
-import { dist, distanceToPolyline, mod, pathOf, pointAt, pointInRing, type Path } from 'lib/grade-map/geom';
+import {
+  dist,
+  distanceToPolyline,
+  mod,
+  pathOf,
+  pointAt,
+  pointInRing,
+  project,
+  type Path,
+} from 'lib/grade-map/geom';
 import { classify, type SizeMarks } from 'lib/grade-map/marks';
 import type { GmPiece, GmTrack } from 'lib/grade-map/types';
 import type { FuseInternalLine, FuseInternals } from './dxf';
@@ -64,7 +73,7 @@ const KIND_WORD: Record<GmTrack['kind'], string> = {
   drill: 'drill',
 };
 
-type Side = { lines: readonly FuseInternalLine[]; cut: Path | null; marks: SizeMarks };
+export type Side = { lines: readonly FuseInternalLine[]; cut: Path | null; marks: SizeMarks };
 
 const sideOf = (outline: readonly PtMm[], lines: readonly FuseInternalLine[]): Side => {
   const cut = pathOf(outline, true);
@@ -84,7 +93,7 @@ function nodesIn(
   return nodes ? { nodes } : { refused: size.refused ?? 'refused' };
 }
 
-type BoundMark = { line: BoundLine; idx: number[] } | { point: PtMm; idx: number[] };
+export type BoundMark = { line: BoundLine; idx: number[] } | { point: PtMm; idx: number[] };
 
 /** A mark track bound to the live lines of one size (the binder's own rule), with the line indices. */
 function bindMark(track: GmTrack, nodes: readonly PtMm[], side: Side): BoundMark | null {
@@ -295,6 +304,103 @@ export function pairCorrespondence(
   return out;
 }
 
+/**
+ * The map's mark tracks (internal lines, notches, drills) bound to the live lines of both sizes:
+ * the pairs it carries, and why each from-size mark it knows was not carried.
+ */
+export type MarkBinding = {
+  fromSide: Side;
+  toSide: Side;
+  accepted: { kind: GmTrack['kind']; fb: BoundMark; tb: BoundMark }[];
+  refusedAt: ReadonlyMap<number, string>;
+};
+
+const bindings = new WeakMap<
+  GmPiece,
+  {
+    from: number;
+    to: number;
+    base: readonly PtMm[];
+    target: readonly PtMm[];
+    internals: FuseInternals | null | undefined;
+    out: MarkBinding;
+  }[]
+>();
+
+/** `bindMarks` for the pair between these two outlines, reused while the inputs are the same objects. */
+export function markBinding(
+  pair: GradeMapPair,
+  baseOutline: readonly PtMm[],
+  targetOutline: readonly PtMm[],
+  internals: FuseInternals | null | undefined,
+): MarkBinding {
+  const known = bindings.get(pair.map.piece) ?? [];
+  const hit = known.find(
+    (k) =>
+      k.from === pair.from &&
+      k.to === pair.to &&
+      k.base === baseOutline &&
+      k.target === targetOutline &&
+      k.internals === internals,
+  );
+  if (hit) return hit.out;
+  const out = bindMarks(
+    pair,
+    sideOf(baseOutline, internals?.base ?? []),
+    sideOf(targetOutline, internals?.target ?? []),
+  );
+  bindings.set(pair.map.piece, [
+    ...known.slice(-15),
+    { from: pair.from, to: pair.to, base: baseOutline, target: targetOutline, internals, out },
+  ]);
+  return out;
+}
+
+function bindMarks(pair: GradeMapPair, fromSide: Side, toSide: Side): MarkBinding {
+  const { map } = pair;
+  const refusedAt = new Map<number, string>();
+  const bound: MarkBinding['accepted'] = [];
+  const count = (hits: Map<number, number>, idx: readonly number[]) => {
+    for (const i of new Set(idx)) hits.set(i, (hits.get(i) ?? 0) + 1);
+  };
+  const fromHits = new Map<number, number>();
+  const ontoHits = new Map<number, number>();
+  for (const track of map.piece.tracks) {
+    if (track.kind === 'cut' || track.kind === 'seam') continue;
+    const f = nodesIn(map, track, pair.from);
+    const fb = 'nodes' in f ? bindMark(track, f.nodes, fromSide) : null;
+    // A track not traced in the size carried from: its lines are swept up as unknown.
+    if (!fb) continue;
+    count(fromHits, fb.idx);
+    const t = nodesIn(map, track, pair.to);
+    const tb = 'nodes' in t ? bindMark(track, t.nodes, toSide) : null;
+    if (!tb || 'line' in fb !== 'line' in tb) {
+      const reason = 'refused' in t ? t.refused : 'the map does not lie on a line of this size';
+      for (const i of fb.idx) if (!refusedAt.has(i)) refusedAt.set(i, reason);
+      continue;
+    }
+    count(ontoHits, tb.idx);
+    bound.push({ kind: track.kind, fb, tb });
+  }
+  // Two tracks on one mark, in either size (two near-twin lines, one of them followed into the
+  // other's place; carried back, the same two tracks share the one line they left): the map
+  // contradicts itself, both go to inference. Checking both sides keeps the way back the mirror
+  // of the way there.
+  const accepted = bound.filter(({ fb, tb }) => {
+    if (fb.idx.some((i) => fromHits.get(i)! > 1) || tb.idx.some((i) => ontoHits.get(i)! > 1)) {
+      for (const i of fb.idx) refusedAt.set(i, 'another mark is traced onto the same line');
+      return false;
+    }
+    return true;
+  });
+  return { fromSide, toSide, accepted, refusedAt };
+}
+
+/** A from-size point on a bound line, carried onto the twin line by the map's node fractions. */
+export function carriedOn(from: BoundLine, to: BoundLine, p: PtMm): PtMm {
+  return pointAt(to.path, carryArc(from, to, project(from.path, p).s));
+}
+
 function buildPairCorrespondence(
   pair: GradeMapPair,
   source: PieceFuseSpec,
@@ -304,8 +410,12 @@ function buildPairCorrespondence(
 ): PairCorrespondence | null {
   if (pair.from === pair.to) return null;
   const { map } = pair;
-  const fromSide = sideOf(baseOutline, internals?.base ?? []);
-  const toSide = sideOf(targetOutline, internals?.target ?? []);
+  const { fromSide, toSide, accepted, refusedAt } = markBinding(
+    pair,
+    baseOutline,
+    targetOutline,
+    internals,
+  );
   const rings = zoneRings(source);
   const reasons: string[] = [];
   let mapped = 0;
@@ -338,41 +448,8 @@ function buildPairCorrespondence(
   const fromClaimed = new Set<FuseInternalLine>();
   const toClaimed = new Set<FuseInternalLine>();
   const fromIdx = new Set<number>();
-  /** Why a from-size mark the map knows was not carried to the target size. */
-  const refusedAt = new Map<number, string>();
   const pairs: GivenLinePairs = [];
-  const bound: { fb: BoundMark; tb: BoundMark }[] = [];
-  const count = (hits: Map<number, number>, idx: readonly number[]) => {
-    for (const i of new Set(idx)) hits.set(i, (hits.get(i) ?? 0) + 1);
-  };
-  const fromHits = new Map<number, number>();
-  const ontoHits = new Map<number, number>();
-  for (const track of map.piece.tracks) {
-    if (track.kind === 'cut' || track.kind === 'seam') continue;
-    const f = nodesIn(map, track, pair.from);
-    const fb = 'nodes' in f ? bindMark(track, f.nodes, fromSide) : null;
-    // A track not traced in the size carried from: its lines are swept up below as unknown.
-    if (!fb) continue;
-    count(fromHits, fb.idx);
-    const t = nodesIn(map, track, pair.to);
-    const tb = 'nodes' in t ? bindMark(track, t.nodes, toSide) : null;
-    if (!tb || ('line' in fb) !== ('line' in tb)) {
-      const reason = 'refused' in t ? t.refused : 'the map does not lie on a line of this size';
-      for (const i of fb.idx) if (!refusedAt.has(i)) refusedAt.set(i, reason);
-      continue;
-    }
-    count(ontoHits, tb.idx);
-    bound.push({ fb, tb });
-  }
-  // Two tracks on one mark, in either size (two near-twin lines, one of them followed into the
-  // other's place; carried back, the same two tracks share the one line they left): the map
-  // contradicts itself, both go to inference. Checking both sides keeps the way back the mirror
-  // of the way there.
-  for (const { fb, tb } of bound) {
-    if (fb.idx.some((i) => fromHits.get(i)! > 1) || tb.idx.some((i) => ontoHits.get(i)! > 1)) {
-      for (const i of fb.idx) refusedAt.set(i, 'another mark is traced onto the same line');
-      continue;
-    }
+  for (const { fb, tb } of accepted) {
     for (const i of fb.idx) fromIdx.add(i);
     for (const i of fb.idx) fromClaimed.add(fromSide.lines[i]);
     for (const i of tb.idx) toClaimed.add(toSide.lines[i]);
@@ -422,7 +499,8 @@ function buildPairCorrespondence(
     if (m.idx.some((i) => fromIdx.has(i))) continue;
     inferred++;
     if (!nearZone(m.points, m.closed, rings)) continue;
-    const reason = m.idx.map((i) => refusedAt.get(i)).find(Boolean) ?? 'not traced between these sizes';
+    const reason =
+      m.idx.map((i) => refusedAt.get(i)).find(Boolean) ?? 'not traced between these sizes';
     reasons.push(`${KIND_WORD[m.kind]} near the zone: ${reason}`);
   }
 
@@ -436,7 +514,9 @@ function buildPairCorrespondence(
         : pairs.map(([from, to, closed]) => [to, from, closed]);
       const kept = infer().filter(
         ([from, to]) =>
-          !claimedHolds(from, bClaimed) && !claimedHolds(to, tClaimed) && !contradicts(from, to, own),
+          !claimedHolds(from, bClaimed) &&
+          !claimedHolds(to, tClaimed) &&
+          !contradicts(from, to, own),
       );
       return [...own, ...kept];
     },
@@ -445,7 +525,7 @@ function buildPairCorrespondence(
 }
 
 /** Distinct reasons, the first MAX_REASONS listed and the rest counted. */
-function summarized(reasons: readonly string[]): string[] {
+export function summarized(reasons: readonly string[]): string[] {
   const counts = new Map<string, number>();
   for (const r of reasons) counts.set(r, (counts.get(r) ?? 0) + 1);
   const list = [...counts].map(([r, n]) => (n > 1 ? `${r} (×${n})` : r));
