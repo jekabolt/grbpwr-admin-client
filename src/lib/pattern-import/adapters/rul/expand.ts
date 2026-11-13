@@ -65,6 +65,37 @@ export type RulExpandStats = {
   rulesUsed: number;
 };
 
+/**
+ * How one coordinate got its grade: its own rule text (`rule`), the rule of the rigid mark it belongs
+ * to (`mark`), the graded line it lies on (`follow`), its mean-value place in the outline
+ * (`interior`), arc-length interpolation between graded points of its line (`interpolated`), or none
+ * (`still`, drawn the same in every size).
+ */
+export type RulSlotHow = 'rule' | 'mark' | 'follow' | 'interior' | 'interpolated' | 'still';
+
+/** One graded entity of a piece: every coordinate in every size. */
+export type RulGradedEntity = {
+  layer: string;
+  kind: 'chain' | 'point';
+  closed: boolean;
+  /** Per coordinate, in the entity's own order. */
+  how: RulSlotHow[];
+  /**
+   * Per coordinate, per size (`RulExpansion.sizes` order): the place written in that size's block,
+   * block-local, in mm. `rule` coordinates are the exact grade points (trust `exact`).
+   */
+  at: PtMm[][];
+};
+
+/** The grade of one piece as the expansion applied it (GRADEMAP-DESIGN §2, source «.rul»). */
+export type RulPieceGrade = {
+  /** Piece name (block name without the sample size). */
+  piece: string;
+  /** The block written for each size (`RulExpansion.sizes` order). */
+  blocks: string[];
+  entities: RulGradedEntity[];
+};
+
 export type RulExpansion = {
   /** The per-size drawing (ASCII DXF text; values keep their decoded characters). */
   text: string;
@@ -76,6 +107,8 @@ export type RulExpansion = {
   blocks: string[];
   stats: RulExpandStats;
   warnings: string[];
+  /** Per piece: where every graded coordinate went in each size and how it was graded. */
+  grades: RulPieceGrade[];
 };
 
 const refuse = (detail: string) => new UnsupportedFormat('rul-invalid', detail);
@@ -177,6 +210,8 @@ function onChain(
 type PieceGrades = {
   /** Per entity (index into piece.entities): one grade per slot; null = not graded (labels…). */
   of: (Grade | null)[][];
+  /** Per entity, per slot: how the grade was found (null until found; labels stay null). */
+  how: (RulSlotHow | null)[][];
   ruled: number;
   interpolated: number;
   following: number;
@@ -373,6 +408,7 @@ function gradePiece(
 
   const out: PieceGrades = {
     of: ents.map((m) => m.slots.map(() => null)),
+    how: ents.map((m) => m.slots.map(() => null)),
     ruled: 0,
     interpolated: 0,
     following: 0,
@@ -392,6 +428,7 @@ function gradePiece(
       sourceRule[e][k] = r;
       if (typeof r === 'number') {
         out.of[e][k] = [{ rule: r, w: 1 }];
+        out.how[e][k] = 'rule';
         out.rules.add(r);
         out.ruled++;
       }
@@ -417,6 +454,7 @@ function gradePiece(
     for (const c of free) {
       sourceRule[c.e][c.k] = b.rule;
       out.of[c.e][c.k] = [{ rule: b.rule, w: 1 }];
+      out.how[c.e][c.k] = 'rule';
       out.ruled++;
     }
     out.rules.add(b.rule);
@@ -564,6 +602,7 @@ function gradePiece(
       const m = ents[e];
       if (m.slots.some((s) => follow(m, e, s))) continue;
       out.of[e] = m.slots.map(() => [...g!]);
+      out.how[e] = m.slots.map(() => 'mark');
       out.following += m.slots.length;
       if (m.kind === 'chain') graded.add(e);
     }
@@ -583,6 +622,7 @@ function gradePiece(
       const g = edge ?? inside(s);
       if (!g) return;
       out.of[e][k] = g;
+      out.how[e][k] = edge ? 'follow' : 'interior';
       if (edge) out.following++;
       else out.interior++;
     });
@@ -602,6 +642,7 @@ function gradePiece(
         const g = follow(m, e, s);
         if (g) {
           out.of[e][k] = g;
+          out.how[e][k] = 'follow';
           out.following++;
           got = true;
         }
@@ -614,11 +655,16 @@ function gradePiece(
       }
     });
   }
-  // 4 · whatever is left stays as drawn
+  // 4 · whatever is left stays as drawn; a grade found by none of the named steps came from
+  // interpolateChain
   ents.forEach((m, e) => {
     if (!gradable(m)) return;
-    out.of[e] = out.of[e].map((g) => {
-      if (g) return g;
+    out.of[e] = out.of[e].map((g, k) => {
+      if (g) {
+        out.how[e][k] ??= 'interpolated';
+        return g;
+      }
+      out.how[e][k] = 'still';
       out.still++;
       return [];
     });
@@ -952,9 +998,39 @@ export function expandRul(input: ExpandInput): RulExpansion {
   }
   let stillPieces = 0;
   const ungradedPieces: string[] = [];
+  const pieceGrades: RulPieceGrade[] = [];
   pieces.forEach((p, pi) => {
     const g = grades[pi];
     const { cos, sin } = gradeAxes(p, `${input.dxfName} · ${p.block.name}`);
+    // where each graded coordinate lands in each size, in mm (the same sum the block rewrite uses)
+    const mm = units.mmPerUnit;
+    const graded: RulGradedEntity[] = [];
+    p.entities.forEach((m, e) => {
+      if (m.kind !== 'chain' && m.kind !== 'point') return;
+      graded.push({
+        layer: m.layer,
+        kind: m.kind,
+        closed: m.closed,
+        how: m.slots.map((_, k2) => g.how[e][k2] ?? 'still'),
+        at: m.slots.map((s, k2) =>
+          sizes.map((_, si) => {
+            let dx = 0;
+            let dy = 0;
+            for (const t of g.of[e][k2] ?? []) {
+              const d = rul.rules.get(t.rule)![si];
+              dx += t.w * (d.dx * cos - d.dy * sin) * k;
+              dy += t.w * (d.dx * sin + d.dy * cos) * k;
+            }
+            return { x: (s.x + dx) * mm, y: (s.y + dy) * mm };
+          }),
+        ),
+      });
+    });
+    pieceGrades.push({
+      piece: pieceName[p.block.name],
+      blocks: sizes.map((z) => `${pieceName[p.block.name]}_${sizeNameToken(z)}`),
+      entities: graded,
+    });
     if (!g.rules.size) ungradedPieces.push(pieceName[p.block.name]);
     else if (g.still) stillPieces++;
     sizes.forEach((size, si) => {
@@ -1110,5 +1186,6 @@ export function expandRul(input: ExpandInput): RulExpansion {
       rulesUsed: used.size,
     },
     warnings,
+    grades: pieceGrades,
   };
 }

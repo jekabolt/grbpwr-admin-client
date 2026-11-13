@@ -66,6 +66,7 @@ import {
   type DerivedEdgeKind,
 } from '../types';
 import { readPassportDigest } from '../passport/digest';
+import { isGradeMapTagged, leadingComments } from './leading';
 
 export { MANIFEST_TAG, MANIFEST_VERSION };
 export {
@@ -195,45 +196,6 @@ function fromBase64(b64: string, form: ManifestLineForm): string {
   } catch {
     throw new ManifestError('corrupt', 'payload is not UTF-8');
   }
-}
-
-// ── the leading comment block ─────────────────────────────────────────────────────────────────
-
-type LeadingComments = {
-  /** Offset where the leading 999 block ends (the first non-999 group starts here). */
-  end: number;
-  /** Offset where the content starts, after an optional BOM. */
-  start: number;
-  /** Every leading comment as [startOffset, endOffset, value]. */
-  comments: { from: number; to: number; value: string }[];
-};
-
-// Walks group pairs from the top of the file while the group code is 999. Only this block is
-// scanned: a 999 later in the file is somebody else's comment, and a manifest is only ever written
-// in front of the first section.
-function leadingComments(text: string): LeadingComments {
-  const start = text.charCodeAt(0) === 0xfeff ? 1 : 0;
-  const comments: LeadingComments['comments'] = [];
-  let pos = start;
-  const lineAt = (from: number): { line: string; next: number } | null => {
-    if (from >= text.length) return null;
-    const nl = text.indexOf('\n', from);
-    const endOfLine = nl < 0 ? text.length : nl;
-    const raw = text.slice(from, endOfLine);
-    return {
-      line: raw.endsWith('\r') ? raw.slice(0, -1) : raw,
-      next: nl < 0 ? text.length : nl + 1,
-    };
-  };
-  for (;;) {
-    const code = lineAt(pos);
-    if (!code || code.line.trim() !== '999') break;
-    const value = lineAt(code.next);
-    if (!value) break;
-    comments.push({ from: pos, to: value.next, value: value.line });
-    pos = value.next;
-  }
-  return { end: pos, start, comments };
 }
 
 const isTagged = (value: string) => value === MANIFEST_TAG || value.startsWith(`${MANIFEST_TAG} `);
@@ -1084,12 +1046,19 @@ export function embedManifestAs(
 
 /**
  * Bytes of the leading 999 block (the manifest prologue plus any foreign leading comments) — what
- * a sniffer has to walk before it sees `0 / SECTION`. The writer's preflight warns above 48 KB.
+ * a sniffer has to walk before it sees `0 / SECTION`, minus the grade map block. The writer's
+ * preflight warns above 48 KB.
  */
 export function manifestPrologueBytes(dxfText: string): number {
   const lead = leadingComments(dxfText);
   let n = 0;
   for (let i = lead.start; i < lead.end; i++) n += dxfText.charCodeAt(i) < 0x80 ? 1 : 2;
+  // The grade map block (grade-map-block.ts) rides in the same prologue but has its own size cap;
+  // the 48 KB preflight speaks about the manifest and foreign comments only.
+  for (const c of lead.comments) {
+    if (!isGradeMapTagged(c.value)) continue;
+    for (let i = c.from; i < c.to; i++) n -= dxfText.charCodeAt(i) < 0x80 ? 1 : 2;
+  }
   return n;
 }
 

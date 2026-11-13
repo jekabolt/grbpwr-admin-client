@@ -311,6 +311,40 @@ async function sectionB(t: RulTable) {
     exact,
     why || `stats ${JSON.stringify(ex.stats)}`,
   );
+  {
+    // grade map P2io: the graded points come out per slot × size, equal to the written blocks
+    const g = ex.grades.find((p) => p.piece === 'FRONT');
+    const cut = g?.entities.find((e) => e.layer === '1' && e.kind === 'chain');
+    const drill = g?.entities.find((e) => e.layer === '13' && e.kind === 'point');
+    let ok = !!g && !!cut && !!drill && g.blocks.join() === SIZES.map((s) => `FRONT_${s}`).join();
+    let gWhy = ok ? '' : `grades ${JSON.stringify(ex.grades.map((p) => [p.piece, p.blocks]))}`;
+    if (ok) {
+      SIZES.forEach((s, i) => {
+        const b = blocks.get(`FRONT_${s}`)!;
+        cut!.at.forEach((sizes, k) => {
+          if (sizes.length !== SIZES.length || !near(b.cut[k], sizes[i].x, sizes[i].y)) {
+            ok = false;
+            gWhy ||= `${s} cut slot ${k}: ${JSON.stringify(sizes[i])} ≠ ${JSON.stringify(b.cut[k])}`;
+          }
+        });
+        if (!near(b.pts['13'][0], drill!.at[0][i].x, drill!.at[0][i].y)) {
+          ok = false;
+          gWhy ||= `${s} drill ${JSON.stringify(drill!.at[0][i])}`;
+        }
+      });
+      const how = cut!.how.join(' ');
+      if (how !== 'rule rule interpolated rule rule' || drill!.how[0] !== 'rule') {
+        ok = false;
+        gWhy ||= `how: cut ${how}, drill ${drill!.how.join(' ')}`;
+      }
+    }
+    check(
+      'B',
+      'graded points per slot × size equal the written blocks; corners ruled, E interpolated',
+      ok,
+      gWhy,
+    );
+  }
   check(
     'B',
     'warnings say what was interpolated / left',
