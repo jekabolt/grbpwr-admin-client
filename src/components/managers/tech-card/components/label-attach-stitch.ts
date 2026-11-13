@@ -66,7 +66,7 @@ export function linkedLabels<L extends StitchLabel>(
 
 /**
  * What an «attach label» step stores as its stitch on save. Any other step keeps its own value
- * untouched; so does a label step that links no label.
+ * untouched; so does a label step that links no label, or only labels with no attachment yet.
  */
 export function stepLabelStitch(
   step: { work?: string; labelAttachStitch?: string; labelKeys?: readonly string[] },
@@ -75,7 +75,8 @@ export function stepLabelStitch(
   const stored = step.labelAttachStitch || LABEL_STITCH_UNKNOWN;
   if ((step.work ?? '').trim() !== ATTACH_LABEL_WORK) return stored;
   const linked = linkedLabels(step.labelKeys, labels);
-  if (linked.length === 0) return stored;
+  // A label that says nothing yet (blank attachment) is not a fact: the stored stitch stays.
+  if (linked.every((l) => !(l.attachment ?? '').trim())) return stored;
   for (const l of linked) {
     const s = stitchForAttachment(l.attachment, l.foldAxis);
     if (s !== LABEL_STITCH_UNKNOWN) return s;

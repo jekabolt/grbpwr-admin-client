@@ -37,6 +37,15 @@ describe('J1 label attachment → step stitch', () => {
     expect(stepLabelStitch(step, labels)).toBe(S('CAUGHT_IN_SEAM'));
   });
 
+  it('a label step whose labels say nothing yet keeps its stored stitch', () => {
+    const blank = [{ lineKey: 'L4', attachment: '' }];
+    const step = { work: 'attach_label', labelAttachStitch: S('FOUR_SIDES'), labelKeys: ['L4'] };
+    expect(stepLabelStitch(step, blank)).toBe(S('FOUR_SIDES'));
+    expect(stepLabelStitch({ ...step, labelKeys: ['L4', 'L1'] }, [...blank, ...labels])).toBe(
+      S('UNKNOWN'),
+    );
+  });
+
   it('another step keeps its own value', () => {
     const step = { work: 'side_seam', labelAttachStitch: S('UNKNOWN'), labelKeys: ['L2'] };
     expect(stepLabelStitch(step, labels)).toBe(S('UNKNOWN'));
