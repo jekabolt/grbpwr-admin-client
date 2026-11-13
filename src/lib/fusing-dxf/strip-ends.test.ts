@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { mapFuseSpecToSize, type FuseInternalLine } from './dxf';
 import { edgeRunsOf, pointOnEdgeRun, type EdgePoint } from './edge-runs';
-import { NOTCH_PICK_MM, carryStripEnd, notchesOnRun } from './strip-ends';
+import {
+  NOTCH_PICK_MM,
+  carryStripEnd,
+  notchesOnRun,
+  type NotchResolver,
+  type StripEndPair,
+} from './strip-ends';
 import { blankFuse, type FuseEdge, type PieceFuseSpec } from './types';
 
 // Strip end modes against rings that start at another vertex or run the other way: the run index
@@ -134,5 +140,67 @@ describe('strip end modes', () => {
     expect(carryStripEnd(50, 'share', true, pair)).toEqual({ mm: 55, guessed: false });
     // Base start pairs with the size run's end: the base's first notch is the size's last one.
     expect(carryStripEnd(52, 'notch', true, pair)).toEqual({ mm: 55, guessed: false });
+  });
+});
+
+describe('strip end notch found by the grade map', () => {
+  const [baseRun] = edgeRunsOf(base);
+  const [run] = edgeRunsOf(size);
+  // Two size notches 3 mm apart next to the twin: order pairing cannot tell them apart.
+  const crowded = [notch(55), notch(162), notch(165)];
+  const pairOf = (lines: FuseInternalLine[], resolveNotch?: NotchResolver): StripEndPair => ({
+    baseRun,
+    run,
+    reversed: false,
+    baseLines,
+    lines,
+    resolveNotch,
+  });
+  /** The map's notch track for this piece: base notch on the cut → its twin. */
+  const map: NotchResolver = (p) =>
+    Math.abs(p.x - 50) < 1e-6
+      ? { x: 55, y: 0 }
+      : Math.abs(p.x - 150) < 1e-6
+        ? { x: 162, y: 0 }
+        : null;
+
+  it('a map hit keeps that notch where order pairing is ambiguous', () => {
+    expect(carryStripEnd(152, 'notch', true, pairOf(crowded))).toEqual({ mm: 152, guessed: true });
+    expect(carryStripEnd(152, 'notch', true, pairOf(crowded, map))).toEqual({
+      mm: 162,
+      guessed: false,
+    });
+  });
+
+  it('a map hit snaps onto the size notch it lands next to', () => {
+    const nudged: NotchResolver = (p) => {
+      const hit = map(p);
+      return hit && { x: hit.x + 0.8, y: hit.y + 0.4 };
+    };
+    expect(carryStripEnd(152, 'notch', true, pairOf(crowded, nudged)).mm).toBe(162);
+  });
+
+  it('the map miss, or a hit on another run, falls back to order pairing', () => {
+    const none: NotchResolver = () => null;
+    const elsewhere: NotchResolver = () => ({ x: 220, y: 60 });
+    const today = carryStripEnd(52, 'notch', true, pairOf(sizeLines));
+    expect(today).toEqual({ mm: 55, guessed: false });
+    expect(carryStripEnd(52, 'notch', true, pairOf(sizeLines, none))).toEqual(today);
+    expect(carryStripEnd(52, 'notch', true, pairOf(sizeLines, elsewhere))).toEqual(today);
+    expect(carryStripEnd(152, 'notch', true, pairOf(crowded, none)).guessed).toBe(true);
+  });
+
+  it('a map hit counts from the paired corner on a reversed ring', () => {
+    const pair = { ...pairOf(crowded, map), reversed: true };
+    // Base start pairs with the size run's end: the twin at x 162 is 58 from that end.
+    expect(carryStripEnd(152, 'notch', true, pair)).toEqual({ mm: 58, guessed: false });
+  });
+
+  it('the map is never asked for an end far from every base notch', () => {
+    let asked = 0;
+    const counting: NotchResolver = (p) => (asked++, map(p));
+    const far = 150 - NOTCH_PICK_MM - 5;
+    expect(carryStripEnd(far, 'notch', true, pairOf(crowded, counting)).guessed).toBe(true);
+    expect(asked).toBe(0);
   });
 });
