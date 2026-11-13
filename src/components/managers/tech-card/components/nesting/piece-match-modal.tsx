@@ -126,6 +126,7 @@ import { useNesting, type NestingFile } from './use-nesting';
 import { manifestFactsOf } from './manifest-facts';
 import { isFetchFailure } from './dxf-warnings';
 import { planOldPieceOps } from './old-pieces-ops';
+import { useDeferredChecks, type DeferredCheck } from './use-deferred-checks';
 import { useFuseGradeMaps } from './use-fuse-grade-maps';
 import {
   autoPieceMatchRows,
@@ -1791,7 +1792,7 @@ export function PieceMatchModal({
       }),
     }));
   }, [gradeMapFuses, sizeOptions, contourPieces, netOutlineByPieceId, seamLayer, split]);
-  const gradeMaps = useFuseGradeMaps(
+  const { maps: gradeMaps, settled: gradeMapsSettled } = useFuseGradeMaps(
     gradeMapSources,
     baseShapeSize == null ? null : shapeSizeId(baseShapeSize),
   );
@@ -1927,21 +1928,30 @@ export function PieceMatchModal({
   // any contour that will receive a drawn zone clips to no positive area; otherwise the generator
   // catches the error later by silently skipping only that size. Stored invalid zones count too: an
   // unrelated edit must not be allowed to re-save one and leave its generated sheet incomplete.
-  const invalidZone = contourPieces.some((piece) => {
-    const fuse = effectiveFuseOf(ciOf(piece));
-    if (fuse?.mode !== 'zone' || !isDrawnZone(fuse.zone)) return false;
-    try {
-      const polygons = generateFuseGeometry({
-        outline: piece.poly.map((point) => ({ x: point.x * 10, y: point.y * 10 })),
-        spec: fuseOnSize(ciOf(piece), sizeOfPiece(piece), fuse),
-        seamAllowanceMm: requiredSeamAllowanceMm,
-        darts: fusingDartPolygons(piece),
-      });
-      return !(fuseAreaMm2(polygons) > 0);
-    } catch {
-      return true;
-    }
-  });
+  // Checked in the background, a size at a time (use-deferred-checks): run inside the render, it
+  // carried every zone to every size at once and froze the dialog for seconds.
+  const zoneChecks: DeferredCheck[] = [];
+  for (const piece of contourPieces) {
+    const ci = ciOf(piece);
+    const fuse = effectiveFuseOf(ci);
+    if (fuse?.mode !== 'zone' || !isDrawnZone(fuse.zone)) continue;
+    const size = sizeOfPiece(piece);
+    zoneChecks.push({
+      key: `${piece.id}`,
+      input: `${ci}|${size}|${requiredSeamAllowanceMm}|${JSON.stringify(fuse)}`,
+      run: () => {
+        const polygons = generateFuseGeometry({
+          outline: piece.poly.map((point) => ({ x: point.x * 10, y: point.y * 10 })),
+          spec: fuseOnSize(ci, size, fuse),
+          seamAllowanceMm: requiredSeamAllowanceMm,
+          darts: fusingDartPolygons(piece),
+        });
+        return !(fuseAreaMm2(polygons) > 0);
+      },
+    });
+  }
+  const zoneCheck = useDeferredChecks(zoneChecks, gradeMapsSettled);
+  const invalidZone = zoneCheck.failed || zoneCheck.pending;
 
   const markOf = (p: PieceDTO): PieceMark => {
     const ci = ciOf(p);
