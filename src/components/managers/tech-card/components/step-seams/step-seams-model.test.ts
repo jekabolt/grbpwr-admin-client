@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Edge, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
+import { SKELETON, type Edge, type PieceGeom, type Pt2 } from 'lib/assembly-skeleton/types';
+import { findCorners, resample } from 'lib/assembly-skeleton/geometry/segment';
 import type { EdgeAnchor, StoredSeam } from 'lib/seams';
 
 import { CARD77_OPS, CARD77_PIECE_KEYS, card77Geoms, card77Step } from './card77.fixture';
@@ -1261,6 +1262,69 @@ describe('surface seam rows', () => {
     ]);
   });
 
+  it('keeps a 140 × 10 mm interlining rectangle split into four sides', () => {
+    const contour = closedInner(closed);
+
+    expect(contour).not.toBeNull();
+    expect(contour?.cornersMm).toHaveLength(4);
+    expect(contour?.cornersMm).toEqual(expect.arrayContaining([0, 140, 150, 290]));
+  });
+
+  it('keeps coarse circles and ovals whole because their source polygon supplies the turns', () => {
+    const oval = (vertices: number, rx: number, ry: number): Pt2[] => {
+      const points = Array.from({ length: vertices }, (_, index): Pt2 => {
+        const angle = (index / vertices) * Math.PI * 2;
+        return [100 + rx * Math.cos(angle), 100 + ry * Math.sin(angle)];
+      });
+      return [...points, points[0]];
+    };
+    const coarse = oval(6, 80, 80);
+
+    expect(findCorners(resample(coarse, SKELETON.resampleMm)).length).toBeGreaterThan(0);
+    for (const contour of [coarse, oval(8, 200, 80), oval(12, 16, 8), oval(16, 70, 30)])
+      expect(closedInner(contour)).toBeNull();
+  });
+
+  it('keeps the sides of a rectangle with chamfered corners: convex and sparse, but not an oval', () => {
+    const chamfered: Pt2[] = [
+      [3, 0],
+      [137, 0],
+      [140, 3],
+      [140, 7],
+      [137, 10],
+      [3, 10],
+      [0, 7],
+      [0, 3],
+      [3, 0],
+    ];
+
+    expect(closedInner(chamfered)).not.toBeNull();
+  });
+
+  it('keeps a tiny polygon whole when its longest side is below the existing side minimum', () => {
+    const tiny: Pt2[] = [
+      [0, 0],
+      [12, 0],
+      [12, 4],
+      [0, 4],
+      [0, 0],
+    ];
+
+    expect(closedInner(tiny)).toBeNull();
+    expect(
+      innerSlices(tiny, [
+        [0, 4],
+        [28, 32],
+      ]),
+    ).toEqual([
+      [
+        [0, 4],
+        [0, 0],
+        [4, 0],
+      ],
+    ]);
+  });
+
   it('merges every touching wrap part and keeps disjoint stretches separate', () => {
     expect(
       innerSlices(closed, [
@@ -1291,6 +1355,10 @@ describe('surface seam rows', () => {
     circle.push(circle[0]);
 
     expect(closedInner(circle)).toBeNull();
+  });
+
+  it('does not segment an open inner line', () => {
+    expect(closedInner(closed.slice(0, -1))).toBeNull();
   });
 
   it('anchors the inner line by edge hint i<k>, inside the host frame', () => {

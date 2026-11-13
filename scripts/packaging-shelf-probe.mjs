@@ -20,7 +20,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { basename, dirname, join, resolve } from 'node:path';
-import { build as esbuild } from 'esbuild';
+import { build as esbuild } from './probe-esbuild.mjs';
 
 const setupError = (what) => {
   console.log(`DID NOT RUN: ${what}`);

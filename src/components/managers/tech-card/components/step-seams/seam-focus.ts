@@ -1,6 +1,6 @@
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { edgeWordVote } from './signals/edge-words';
-import { closedInner, parseInner } from './step-seams-model';
+import { isClosedInner, parseInner } from './step-seams-model';
 
 /**
  * A proposal the model could not back (it won on length alone, or barely): shown as the best guess,
@@ -93,7 +93,7 @@ export function edgesTouch(
 
 const NAMED_EDGE_WORDS = ['neckline', 'armhole', 'shoulder', 'hem', 'front_edge'] as const;
 
-/** A coarse, human edge word when geometry decides one; every inner line reads as a slit. */
+/** A coarse, human edge word when geometry decides one; open inner lines read as slits. */
 export function seamEdgeWord(
   ids: readonly string[],
   geoms: ReadonlyMap<string, PieceGeom>,
@@ -104,7 +104,7 @@ export function seamEdgeWord(
     return inner ? [inner] : [];
   });
   if (inners.length)
-    return inners.some((inner) => !closedInner(innerLines?.get(inner.piece)?.[inner.k] ?? []))
+    return inners.some((inner) => !isClosedInner(innerLines?.get(inner.piece)?.[inner.k] ?? []))
       ? 'slit'
       : '';
   const edges = ids.flatMap((id) => {

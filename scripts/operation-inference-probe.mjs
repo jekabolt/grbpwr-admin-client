@@ -66,7 +66,7 @@
 // Половина «живой DOM» требует playwright: он не в зависимостях, ищется в кэше npx и МОЛЧА
 // пропускается. Функциональные цитаты считаются в node и красят пробу всегда.
 
-import { build as esbuild } from 'esbuild';
+import { build as esbuild } from './probe-esbuild.mjs';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync } from 'node:fs';

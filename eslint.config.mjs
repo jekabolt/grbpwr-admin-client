@@ -117,4 +117,19 @@ export default [
       'react/react-in-jsx-scope': 'off',
     },
   },
+  // JSON is data (fixtures, templates): a top-level object literal is not an unused expression
+  {
+    files: ['**/*.json'],
+    rules: { '@typescript-eslint/no-unused-expressions': 'off' },
+  },
+  // generated clients — never hand-edited
+  {
+    files: ['src/api/proto-http/**'],
+    rules: { '@typescript-eslint/no-empty-object-type': 'off' },
+  },
+  // the TS-aware rule understands overloads and type+value merging
+  {
+    files: ['**/*.{ts,tsx}'],
+    rules: { 'no-redeclare': 'off', '@typescript-eslint/no-redeclare': 'warn' },
+  },
 ];

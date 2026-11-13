@@ -172,6 +172,58 @@ describe('stored closed-contour surfaces', () => {
     );
   });
 
+  it('lays a straight partner on the longer leg of a stored wrap that turns a sharp corner', () => {
+    const longPart = rect('LONG_PART', 150, 20);
+    const cornerGeoms = new Map(geoms).set(longPart.pieceKey, longPart);
+    const cornerBase = surfaceRow(
+      { geom: host, k: 0, line: lineDown, grainDeg: 0 },
+      [anchorOfRunId([...cornerGeoms.values()], 'LONG_PART#0')!],
+      undefined,
+      'corner-inner',
+    )!;
+    const row: StoredSeam = {
+      ...cornerBase,
+      sideA: [
+        { ...cornerBase.sideA[0], range: [0, 140 / 300] },
+        { ...cornerBase.sideA[0], range: [290 / 300, 1] },
+      ],
+    };
+    const sides = storedSeamSides(row, cornerGeoms, innerLines);
+    const candidate = candidateOfStoredSeam(row, cornerGeoms, innerLines)!;
+    const edge = longPart.edges[0].pts.map((point) => apply(candidate.surface!.T, point));
+
+    expect(sides.parts.a).toEqual([
+      { target: 'HOST:i0', range: [0, 140] },
+      { target: 'HOST:i0', range: [290, 300] },
+    ]);
+    expect(edge.map((point) => point[1])).toEqual([50, 50]);
+    expect(edge.map((point) => point[0]).sort((a, b) => a - b)).toEqual([10, 160]);
+    expect(edge).toContainEqual([160, 50]);
+  });
+
+  it('keeps a straight partner on the chord when the stored host bend is soft', () => {
+    const longPart = rect('SOFT_PART', 150, 20);
+    const softGeoms = new Map(geoms).set(longPart.pieceKey, longPart);
+    const line: Pt2[] = [
+      [20, 50],
+      [90, 50],
+      [160, 80],
+    ];
+    const candidate = surfaceSeam(
+      'HOST',
+      longPart.pieceKey,
+      line,
+      softGeoms,
+      undefined,
+      'SOFT_PART#0',
+    )!;
+    const edge = longPart.edges[0].pts.map((point) => apply(candidate.surface!.T, point));
+
+    expect((edge[0][0] + edge[1][0]) / 2).toBeCloseTo(90, 6);
+    expect((edge[0][1] + edge[1][1]) / 2).toBeCloseTo(65, 6);
+    expect((edge[1][1] - edge[0][1]) / (edge[1][0] - edge[0][0])).toBeCloseTo(30 / 140, 6);
+  });
+
   it('converts inner shares with the current contour length', () => {
     const currentLine: Pt2[] = [
       [20, 50],
