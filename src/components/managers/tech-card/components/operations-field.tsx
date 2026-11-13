@@ -6573,11 +6573,16 @@ export function OperationsField({
         removalRetries.current.set(id, { timer: window.setTimeout(fire, delay), attempt });
         return;
       }
-      if (!hasStepRemovalOwed(cardId, entry.historyKey, entry.operationNumber)) {
+      // The debt as it stands now: an undo and a redo meanwhile wrote a new one under the same step,
+      // and the old candidates must not clear it.
+      const owed = owedStepRemovals(cardId).find(
+        (e) => e.historyKey === entry.historyKey && e.operationNumber === entry.operationNumber,
+      );
+      if (!owed) {
         removalRetries.current.delete(id);
         return;
       }
-      restartRemovalCleanup.current(cardId, entry);
+      restartRemovalCleanup.current(cardId, owed);
     };
     removalRetries.current.set(id, { timer: window.setTimeout(fire, delay), attempt });
   }, []);
