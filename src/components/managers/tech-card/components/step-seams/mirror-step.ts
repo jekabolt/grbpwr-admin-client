@@ -318,6 +318,55 @@ const projectedShare = (line: readonly Pt2[], point: Pt2): number => {
   return total > 0 ? best / total : 0;
 };
 
+const TWIN_INNER_MM = 3;
+const TWIN_INNER_SAMPLES = 16;
+
+const gapToLine = (line: readonly Pt2[], point: Pt2): number => {
+  let best = Infinity;
+  for (let index = 0; index < line.length - 1; index++) {
+    const a = line[index];
+    const b = line[index + 1];
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const length2 = dx * dx + dy * dy;
+    const share = length2
+      ? Math.max(0, Math.min(1, ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / length2))
+      : 0;
+    best = Math.min(best, Math.hypot(point[0] - a[0] - dx * share, point[1] - a[1] - dy * share));
+  }
+  return best;
+};
+
+/** The twin's inner line the mirrored source line `index` lies on: the same index when it fits,
+ *  else the one other line that does; -1 when none or several fit. */
+const twinInnerIndex = (
+  index: number,
+  source: PieceGeom,
+  target: PieceGeom,
+  edgeMap: EdgeMap,
+  grainDeg: ReadonlyMap<string, number> | undefined,
+  innerLines: ReadonlyMap<string, readonly (readonly Pt2[])[]>,
+): number => {
+  const sourceLine = index >= 0 ? innerLines.get(source.pieceKey)?.[index] : undefined;
+  const targetLines = innerLines.get(target.pieceKey) ?? [];
+  if (!sourceLine || sourceLine.length < 2) return -1;
+  const sourceFrame = frameOf(source, grainDeg?.get(source.pieceKey) ?? 0);
+  const targetFrame = frameOf(target, grainDeg?.get(target.pieceKey) ?? 0);
+  const shares = Array.from({ length: TWIN_INNER_SAMPLES + 1 }, (_, i) => i / TWIN_INNER_SAMPLES);
+  const mapped = sampleAt(sourceLine, shares).map((point) =>
+    fromUV(targetFrame, inFrame([toUV(sourceFrame, point)], edgeMap.frame)[0]),
+  );
+  const sourceLength = polylineLenMm(sourceLine);
+  const fits = (line: readonly Pt2[] | undefined) =>
+    !!line &&
+    line.length >= 2 &&
+    Math.abs(polylineLenMm(line) - sourceLength) <= TWIN_INNER_MM &&
+    mapped.every((point) => gapToLine(line, point) <= TWIN_INNER_MM);
+  if (fits(targetLines[index])) return index;
+  const others = targetLines.flatMap((line, at) => (at !== index && fits(line) ? [at] : []));
+  return others.length === 1 ? others[0] : -1;
+};
+
 const innerAnchorsOnTwin = (
   anchors: readonly EdgeAnchor[],
   source: PieceGeom,
@@ -329,12 +378,21 @@ const innerAnchorsOnTwin = (
   const whole = anchors.find((anchor) => anchor.range[0] <= 0 && anchor.range[1] >= 1);
   const anchor = whole ?? anchors[0];
   if (!anchor) return null;
-  const base = innerAnchorOnTwin(anchor, target, edgeMap, grainDeg);
-  if (whole) return [base];
   const match = /^i(\d+)$/.exec(anchor.edgeHint);
   const index = match ? Number(match[1]) : -1;
-  const sourceLine = index >= 0 ? innerLines?.get(source.pieceKey)?.[index] : undefined;
-  const targetLine = index >= 0 ? innerLines?.get(target.pieceKey)?.[index] : undefined;
+  // The twin's inner lines need not come in the source's order: the contour to land on is the one
+  // the mirrored source line lies on, never just the same index on the twin.
+  const twinIndex = innerLines
+    ? twinInnerIndex(index, source, target, edgeMap, grainDeg, innerLines)
+    : index;
+  if (twinIndex < 0) return null;
+  const base = {
+    ...innerAnchorOnTwin(anchor, target, edgeMap, grainDeg),
+    edgeHint: `i${twinIndex}`,
+  };
+  if (whole) return [base];
+  const sourceLine = innerLines?.get(source.pieceKey)?.[index];
+  const targetLine = innerLines?.get(target.pieceKey)?.[twinIndex];
   if (!sourceLine || !targetLine || !isClosedInner(sourceLine) || !isClosedInner(targetLine))
     return null;
   const sourceLength = polylineLenMm(sourceLine);
