@@ -321,6 +321,9 @@ const invertMatch = (m: ContourMatch): ContourMatch => ({
   })),
 });
 
+/** The corner thresholds the contour matcher tries, in order (shared with the grade-map builder). */
+export const CONTOUR_CORNER_THRESHOLDS: readonly number[] = CORNER_THRESHOLDS;
+
 /** The contour correspondence base → target; null when an outline is not a ring. */
 export function matchContours(
   baseOutline: readonly PtMm[],
@@ -1110,6 +1113,19 @@ export function zoneGrade(
   if (byContent.size > CONTENT_CACHE_SIZE) byContent.delete(byContent.keys().next().value!);
   cache.set(baseOutline, [...known.slice(-7), { target: targetOutline, internals, grade }]);
   return grade;
+}
+
+/**
+ * How many internal lines the grade field pairs and keeps base → target (read only: the grade-map
+ * survey compares its own pairing with it). Built the asked way round; 0 when an outline is no ring.
+ */
+export function pairedInternalLineCount(
+  baseOutline: readonly PtMm[],
+  targetOutline: readonly PtMm[],
+  internals: FuseInternals,
+): number {
+  const built = buildContourMatch(baseOutline, targetOutline);
+  return built ? buildField(built, internals.base, internals.target).lines.length : 0;
 }
 
 const CONTENT_CACHE_SIZE = 16;
