@@ -45,7 +45,9 @@ import {
   type PieceShapeReference,
 } from 'lib/dxf-reconcile';
 import { fusingDartPolygons } from 'lib/fusing-dxf/darts';
-import { mapFuseSpecToSize } from 'lib/fusing-dxf/dxf';
+import { mapFuseSpecToSize, type FusingSourcePiece } from 'lib/fusing-dxf/dxf';
+import { chooseBaseSize } from 'lib/fusing-dxf/grade-map-base';
+import type { GradeMapPair } from 'lib/fusing-dxf/grade-map-pair';
 import { useFusingMarkupStale } from 'lib/grade-map/fusing-base-store';
 import { fusingInternalLines } from 'lib/fusing-dxf/internal-lines';
 import { fuseAreaMm2, fuseInsetRingMm, generateFuseGeometry } from 'lib/fusing-dxf/geometry';
@@ -124,6 +126,7 @@ import { useNesting, type NestingFile } from './use-nesting';
 import { manifestFactsOf } from './manifest-facts';
 import { isFetchFailure } from './dxf-warnings';
 import { planOldPieceOps } from './old-pieces-ops';
+import { useFuseGradeMaps } from './use-fuse-grade-maps';
 import {
   autoPieceMatchRows,
   CREATE_PIECE_CHOICE,
@@ -1729,11 +1732,17 @@ export function PieceMatchModal({
   // (mapFuseSpecToSize). The sheet shows one size, so what it draws and edits goes through that
   // same mapping — there, and back on write. The base is the builder's: the card's sample size,
   // else the smallest size of the grade.
+  const shapeSizes = sizeOptions.filter((o) => o.size).map((o) => o.size);
   const baseShapeSize = (() => {
     const preferred = new Set((preferredShapeSizeTokens ?? []).map((t) => t.toLowerCase()));
-    const sized = sizeOptions.filter((o) => o.size);
-    return (sized.find((o) => preferred.has(o.size.toLowerCase())) ?? sized[0])?.size ?? null;
+    return chooseBaseSize(
+      shapeSizes,
+      (size) => preferred.has(size.toLowerCase()),
+      (_, index) => index,
+    );
   })();
+  // A size's id in this dialog's grade maps: its place in the grade, from 1.
+  const shapeSizeId = (size: string) => shapeSizes.indexOf(size) + 1 || null;
   const contourOf = (ci: string, size: string) =>
     contourPieces.find((p) => sizeOfPiece(p) === size && ciOf(p) === ci);
   // The outlines and their internal lines (the same ones the DXF builder reads, sourcePieces), so
@@ -1751,6 +1760,48 @@ export function PieceMatchModal({
       shownLines: fusingInternalLines(shown, seamLayer),
     };
   };
+  // The pieces whose zone or notch end reads a grade map, with that fuse (set after render, below:
+  // only whether it reads one matters, so an edit inside the same mode builds nothing new).
+  const [gradeMapFuses, setGradeMapFuses] = useState<ReadonlyMap<string, PieceFuseSpec>>(
+    () => new Map(),
+  );
+  const gradeMapSources = useMemo((): FusingSourcePiece[] => {
+    const sizes = sizeOptions.filter((o) => o.size).map((o) => o.size);
+    const mm = (q: { x: number; y: number }) => ({ x: q.x * 10, y: q.y * 10 });
+    return [...gradeMapFuses].map(([ci, fuse]) => ({
+      identity: ci,
+      displayName: ci,
+      piecesPerGarment: 1,
+      ungraded: false,
+      fuse,
+      seamAllowanceMm: requiredSeamAllowanceMm,
+      sizes: sizes.flatMap((size, rank) => {
+        const piece = contourPieces.find((p) => sizeOfPiece(p) === size && ciOf(p) === ci);
+        if (!piece) return [];
+        return [
+          {
+            sizeToken: size,
+            sizeId: rank + 1,
+            rank,
+            outline: piece.poly.map(mm),
+            netOutline: netOutlineByPieceId.get(piece.id)?.map(mm),
+            internals: fusingInternalLines(piece, seamLayer),
+          },
+        ];
+      }),
+    }));
+  }, [gradeMapFuses, sizeOptions, contourPieces, netOutlineByPieceId, seamLayer, split]);
+  const gradeMaps = useFuseGradeMaps(
+    gradeMapSources,
+    baseShapeSize == null ? null : shapeSizeId(baseShapeSize),
+  );
+  /** The piece's map read from one size to another, as the sheet builder reads it. */
+  const gradePairOf = (ci: string, from: string, to: string): GradeMapPair | null => {
+    const map = gradeMaps.get(ci);
+    const a = shapeSizeId(from);
+    const b = shapeSizeId(to);
+    return map && a && b ? { map, from: a, to: b } : null;
+  };
   const fuseOnSize = (
     ci: string,
     size: string,
@@ -1766,6 +1817,7 @@ export function PieceMatchModal({
           requiredSeamAllowanceMm,
           { base: m.baseLines, target: m.shownLines },
           onGuess,
+          gradePairOf(ci, baseShapeSize!, size),
         )
       : spec;
   };
@@ -1778,17 +1830,29 @@ export function PieceMatchModal({
   ): PieceFuseSpec => {
     const m = sizeMapOf(ci, size);
     if (!m) return next;
-    const shown = mapFuseSpecToSize(stored, m.base, m.shown, requiredSeamAllowanceMm, {
-      base: m.baseLines,
-      target: m.shownLines,
-    });
+    const there = gradePairOf(ci, baseShapeSize!, size);
+    const back = there && { ...there, from: there.to, to: there.from };
+    const shown = mapFuseSpecToSize(
+      stored,
+      m.base,
+      m.shown,
+      requiredSeamAllowanceMm,
+      { base: m.baseLines, target: m.shownLines },
+      undefined,
+      there,
+    );
     const same = (a: PieceFuseSpec, b: PieceFuseSpec) =>
       a.mode === b.mode && JSON.stringify([a.zone, a.edges]) === JSON.stringify([b.zone, b.edges]);
     if (same(next, shown)) return { ...next, zone: stored.zone, edges: stored.edges };
-    return mapFuseSpecToSize(next, m.shown, m.base, requiredSeamAllowanceMm, {
-      base: m.shownLines,
-      target: m.baseLines,
-    });
+    return mapFuseSpecToSize(
+      next,
+      m.shown,
+      m.base,
+      requiredSeamAllowanceMm,
+      { base: m.shownLines, target: m.baseLines },
+      undefined,
+      back,
+    );
   };
 
   // The display name of an existing piece, with a buffered rename applied.
@@ -2710,6 +2774,21 @@ export function PieceMatchModal({
     if (vals.fuse) return vals.fuse;
     return vals.fused ? readFuseSpec(vals) : undefined;
   };
+  // Which pieces read a grade map (a drawn zone, or a strip end kept at its notch), for the maps
+  // above. Keyed on the piece list alone, so editing inside one mode builds nothing new.
+  const readsGradeMap = (fuse: PieceFuseSpec | undefined) =>
+    !!fuse &&
+    ((fuse.mode === 'zone' && isDrawnZone(fuse.zone)) ||
+      (fuse.mode === 'strip' &&
+        fuse.edges.some((e) => e.startMode === 'notch' || e.endMode === 'notch')));
+  const gradeMapWant = [...new Set(contourPieces.map(ciOf))]
+    .filter((ci) => readsGradeMap(fuseOfCi(ci)))
+    .sort()
+    .join('\n');
+  useEffect(() => {
+    const cis = gradeMapWant ? gradeMapWant.split('\n') : [];
+    setGradeMapFuses(new Map(cis.map((ci) => [ci, fuseOfCi(ci)!])));
+  }, [gradeMapWant]);
   const ownerFileLinesOfPiece = (pieceLineKey: string): string[] => {
     const pieceKey = pieceLineKey.trim().toLowerCase();
     if (!pieceKey) return [];
