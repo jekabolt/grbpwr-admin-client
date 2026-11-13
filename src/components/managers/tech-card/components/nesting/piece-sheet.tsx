@@ -155,6 +155,7 @@ export function PieceSheet({
   bare,
   topLeft,
   focus,
+  focusId,
   focusMark,
   overlay,
   onFit,
@@ -168,6 +169,12 @@ export function PieceSheet({
   bare?: boolean;
   /** Zoom to this mm/Y-up box when its numbers change. null leaves the current view alone. */
   focus?: BoxMm | null;
+  /**
+   * What `focus` stands on. While it stays the same, a moved `focus` (the same piece in another
+   * size) carries the current view along instead of zooming again — the operator's zoom and place
+   * survive a size switch. Without a focus the view follows the sheet's own box the same way.
+   */
+  focusId?: string;
   /** Stroke-only ring in the same mm/Y-up sheet coordinates. */
   focusMark?: { x: number; y: number; r: number } | null;
   /** Drawn over the pieces, under the names, in sheet coords (cm, Y down); gets cm per px. */
@@ -223,11 +230,27 @@ export function PieceSheet({
   const svgRef = useRef<SVGSVGElement | null>(null);
 
   const focusKey = focus ? `${focus.minX}|${focus.minY}|${focus.maxX}|${focus.maxY}` : '';
+  // The centre the view was last tied to (cm, Y down) and whose it was.
+  const anchor = useRef<{ id: string | undefined; x: number; y: number } | null>(null);
   useEffect(() => {
+    const at = focus
+      ? { x: (focus.minX + focus.maxX) / 20, y: vy((focus.minY + focus.maxY) / 20) }
+      : fit
+        ? { x: fit.x + fit.w / 2, y: fit.y + fit.h / 2 }
+        : null;
+    const prev = anchor.current;
+    const id = focus ? focusId : undefined;
+    anchor.current = at ? { id, ...at } : null;
+    if (focusId !== undefined && prev && at && prev.id === id) {
+      const dx = at.x - prev.x;
+      const dy = at.y - prev.y;
+      if (dx || dy) setView((v) => (v ? { ...v, x: v.x + dx, y: v.y + dy } : v));
+      return;
+    }
     if (focus) setView(boxFromMm(focus, 0.25));
     // focusKey stands for `focus`: a new object with the same numbers must not re-zoom.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusKey]);
+  }, [focusKey, focusId, fit]);
   // Жест: одновременно кандидат на выбор детали и на протяжку — что это было, решает пройденный
   // путь. Раньше деталь съедала pointerdown через stopPropagation, и лист переставал двигаться
   // ровно там, где деталь заполняла кадр, то есть на любом полезном увеличении.

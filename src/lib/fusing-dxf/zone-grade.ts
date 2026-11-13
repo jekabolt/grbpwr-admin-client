@@ -1285,7 +1285,7 @@ export function pairedInternalLineCount(
   return built ? buildField(built, internals.base, internals.target).lines.length : 0;
 }
 
-const CONTENT_CACHE_SIZE = 16;
+const CONTENT_CACHE_SIZE = 256;
 /** Least recently used last out: Map keeps insertion order, a hit is re-inserted. */
 const byContent = new Map<string, ZoneGrade>();
 

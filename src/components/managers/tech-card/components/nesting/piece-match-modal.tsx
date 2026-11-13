@@ -3166,10 +3166,11 @@ export function PieceMatchModal({
           <div className='flex flex-wrap gap-4'>
             <div className='min-w-0' style={{ flex: '999 1 560px' }}>
               <PieceSheet
-                // Keyed by the FILE and the SIZE: zoom/pan live inside the sheet, so without a
-                // remount switching either kept the previous drawing's viewBox.
+                // Keyed by the FILE: zoom/pan live inside the sheet, so without a remount another
+                // file kept the previous drawing's viewBox. NOT by the size: a size switch keeps
+                // the operator's zoom and place (owner, 13.11) — the sheet carries its view along.
                 // …and by the zoom: leaving it remounts onto the whole sheet.
-                key={`${sheet.index}|${shownSize}|${zoomed ?? ''}`}
+                key={`${sheet.index}|${zoomed ?? ''}`}
                 pieces={sheetPieces}
                 grainLayer={grainLayer}
                 innerLayers={innerLayers}
@@ -3197,6 +3198,7 @@ export function PieceMatchModal({
                   setSelected(key);
                 }}
                 focus={zoomFocus}
+                focusId={zoomed ?? ''}
                 onFit={() => setZoomOut(selected)}
                 overlay={
                   interlining
@@ -3232,12 +3234,7 @@ export function PieceMatchModal({
                     <CanvasSegments
                       label='size on screen'
                       value={shownSize}
-                      onChange={(size) => {
-                        // A size switch shows the whole new sheet (owner, w1107 A5): the fused
-                        // piece's zoom is left, as if «whole sheet» was pressed.
-                        if (size !== shownSize && zoomed) setZoomOut(zoomed);
-                        setActiveSize(size);
-                      }}
+                      onChange={setActiveSize}
                       options={sizeOptions.map((o) => ({
                         key: o.size,
                         label:
