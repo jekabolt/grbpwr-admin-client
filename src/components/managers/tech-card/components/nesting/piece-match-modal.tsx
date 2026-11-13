@@ -3102,6 +3102,12 @@ export function PieceMatchModal({
                           zoneBus={zoneBus}
                           zoneOutlines={ownerZoneOutlines}
                           netOutlineOf={(piece) => netOutlineByPieceId.get(piece.id) ?? null}
+                          linesOf={(piece) =>
+                            fusingInternalLines(
+                              contourOf(ciOf(piece), shownSize) ?? piece,
+                              seamLayer,
+                            )
+                          }
                           requiredSeamAllowanceMm={requiredSeamAllowanceMm}
                         />
                       )
