@@ -166,7 +166,8 @@ function gapError(c: Corr, Sa: number, Sb: number): { err: number; at: number } 
   const Tb = fwdU(c, Sb);
   const ds = Sb - Sa;
   const dt = Tb - Ta;
-  if (ds < 1e-9 || dt < 1e-9) return ds < 1e-9 && dt < 1e-9 ? { err: 0, at: Sa } : { err: Infinity, at: (Sa + Sb) / 2 };
+  if (ds < 1e-9 || dt < 1e-9)
+    return ds < 1e-9 && dt < 1e-9 ? { err: 0, at: Sa } : { err: Infinity, at: (Sa + Sb) / 2 };
   let err = 0;
   let at = Sa;
   const shifts = c.closed ? [-1, 0, 1, 2] : [0];
@@ -196,14 +197,17 @@ export function refineNodes(
   tol = FIDELITY_MM,
 ): { nodes: number[]; residual: number[]; added: number } | null {
   const LB = base.total;
-  const sorted = [...new Set(anchorArcs.map((s) => (base.closed ? mod(s, LB) : s)))].sort((a, b) => a - b);
+  const sorted = [...new Set(anchorArcs.map((s) => (base.closed ? mod(s, LB) : s)))].sort(
+    (a, b) => a - b,
+  );
   // anchors closer than the storage can tell apart are one node (an open line keeps its ends)
   let nodes: number[] = [];
   for (const s of sorted) {
     if (!nodes.length || s - nodes[nodes.length - 1] > ANCHOR_MERGE_MM) nodes.push(s);
     else if (!base.closed && s >= LB - 1e-9) nodes[nodes.length - 1] = s;
   }
-  if (base.closed && nodes.length > 1 && nodes[0] + LB - nodes[nodes.length - 1] <= ANCHOR_MERGE_MM) nodes.pop();
+  if (base.closed && nodes.length > 1 && nodes[0] + LB - nodes[nodes.length - 1] <= ANCHOR_MERGE_MM)
+    nodes.pop();
   if (!nodes.length) nodes = [0];
   const anchors = nodes.length;
   const gaps = () => {
@@ -257,4 +261,3 @@ export function nearestUnique<T>(
     return i0;
   });
 }
-

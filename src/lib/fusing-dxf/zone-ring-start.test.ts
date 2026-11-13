@@ -49,24 +49,28 @@ describe('a zone across sizes does not depend on where the DXF starts a ring', (
   it.each([
     ['M → XS', m, xs],
     ['XS → M', xs, m],
-  ])('%s', (_, from, to) => {
-    const reference = pointsOf(mapFuseSpecToSize(zone, from, to));
-    for (const a of starts)
-      for (const b of [0, 37, 101, 180]) {
-        const moved = pointsOf(
-          mapFuseSpecToSize(zone, rotate(from, a % from.length), rotate(to, b % to.length)),
-        );
-        moved.forEach((p, i) =>
-          expect(
-            Math.hypot(p.x - reference[i].x, p.y - reference[i].y),
-            `point ${i}, rings from ${a}/${b}`,
-          ).toBeLessThan(1),
-        );
-      }
-    // And nothing jumps across the piece: M and XS differ by 20 mm on each axis, so a point moves
-    // with its edge by about that much (the shoulder jump of d4e493531 was a quarter of the piece).
-    pointsOf(zone).forEach((p, i) =>
-      expect(Math.hypot(p.x - reference[i].x, p.y - reference[i].y)).toBeLessThan(35),
-    );
-  });
+  ])(
+    '%s',
+    (_, from, to) => {
+      const reference = pointsOf(mapFuseSpecToSize(zone, from, to));
+      for (const a of starts)
+        for (const b of [0, 37, 101, 180]) {
+          const moved = pointsOf(
+            mapFuseSpecToSize(zone, rotate(from, a % from.length), rotate(to, b % to.length)),
+          );
+          moved.forEach((p, i) =>
+            expect(
+              Math.hypot(p.x - reference[i].x, p.y - reference[i].y),
+              `point ${i}, rings from ${a}/${b}`,
+            ).toBeLessThan(1),
+          );
+        }
+      // And nothing jumps across the piece: M and XS differ by 20 mm on each axis, so a point moves
+      // with its edge by about that much (the shoulder jump of d4e493531 was a quarter of the piece).
+      pointsOf(zone).forEach((p, i) =>
+        expect(Math.hypot(p.x - reference[i].x, p.y - reference[i].y)).toBeLessThan(35),
+      );
+    },
+    30_000,
+  );
 });

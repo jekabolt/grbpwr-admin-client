@@ -42,7 +42,10 @@ export function liveOf(geo: GmSizeGeometry): LiveSize {
 
 /** A track bound in one size: its line and the node arcs on it (closed: unwrapped, ascending). */
 export type BoundLine = { path: Path; arcs: number[] };
-export type Bound = { ok: true; line: BoundLine } | { ok: true; point: PtMm } | { ok: false; reason: string };
+export type Bound =
+  | { ok: true; line: BoundLine }
+  | { ok: true; point: PtMm }
+  | { ok: false; reason: string };
 
 function bindToLine(nodes: readonly PtMm[], path: Path): { line: BoundLine; worst: number } | null {
   const proj = nodes.map((p) => project(path, p));
@@ -87,9 +90,7 @@ function candidatesOf(track: GmTrack, live: LiveSize): Path[] {
     case 'seam':
       return live.seam ? [live.seam] : [];
     case 'notch':
-      return live.marks.notches
-        .map((n) => pathOf([n.a, n.b], false))
-        .filter((p): p is Path => !!p);
+      return live.marks.notches.map((n) => pathOf([n.a, n.b], false)).filter((p): p is Path => !!p);
     case 'internal':
       return live.marks.internals
         .filter((l) => l.line.layer === track.layer && l.line.closed === track.closed)
@@ -104,7 +105,10 @@ export function nodesOf(track: GmTrack, sizeId: number | null): PtMm[] | null {
   if (sizeId === null) return track.base.map(([x, y]) => ({ x: fromQ(x), y: fromQ(y) }));
   const s = track.sizes.find((z) => z.sizeId === sizeId);
   if (!s?.delta) return null;
-  return track.base.map(([x, y], j) => ({ x: fromQ(x + s.delta![j][0]), y: fromQ(y + s.delta![j][1]) }));
+  return track.base.map(([x, y], j) => ({
+    x: fromQ(x + s.delta![j][0]),
+    y: fromQ(y + s.delta![j][1]),
+  }));
 }
 
 export function bindNodes(track: GmTrack, nodes: readonly PtMm[], live: LiveSize): Bound {
@@ -116,14 +120,18 @@ export function bindNodes(track: GmTrack, nodes: readonly PtMm[], live: LiveSize
       const e = dist(d.c, nodes[0]);
       if (e <= bestD) [best, bestD] = [d.c, e];
     }
-    return best ? { ok: true, point: best } : { ok: false, reason: 'unbound: no drill within 0.15 mm' };
+    return best
+      ? { ok: true, point: best }
+      : { ok: false, reason: 'unbound: no drill within 0.15 mm' };
   }
   let best: { line: BoundLine; worst: number } | null = null;
   for (const path of candidatesOf(track, live)) {
     const b = bindToLine(nodes, path);
     if (b && (!best || b.worst < best.worst)) best = b;
   }
-  return best ? { ok: true, line: best.line } : { ok: false, reason: `unbound: no ${track.kind} line holds the nodes in order` };
+  return best
+    ? { ok: true, line: best.line }
+    : { ok: false, reason: `unbound: no ${track.kind} line holds the nodes in order` };
 }
 
 /** Size arc of base arc s, by node fractions between two bound lines of one track. */
@@ -135,7 +143,9 @@ export function carryArc(base: BoundLine, size: BoundLine, s: number): number {
   const closed = base.path.closed;
   const U = closed ? [...u, u[0] + base.path.total] : u;
   const V = closed ? [...v, v[0] + size.path.total] : v;
-  const x = closed ? u[0] + mod(s - u[0], base.path.total) : Math.max(U[0], Math.min(U[U.length - 1], s));
+  const x = closed
+    ? u[0] + mod(s - u[0], base.path.total)
+    : Math.max(U[0], Math.min(U[U.length - 1], s));
   let j = 0;
   while (j < U.length - 2 && U[j + 1] <= x) j++;
   const span = U[j + 1] - U[j];
@@ -163,7 +173,11 @@ export type PieceBinding = {
   tracks: { base: Bound; sizes: Map<number, Bound> }[];
 };
 
-export function bindPiece(piece: GmPiece, base: LiveSize, sizes: ReadonlyMap<number, LiveSize>): PieceBinding {
+export function bindPiece(
+  piece: GmPiece,
+  base: LiveSize,
+  sizes: ReadonlyMap<number, LiveSize>,
+): PieceBinding {
   return {
     tracks: piece.tracks.map((t) => {
       const b = bindNodes(t, nodesOf(t, null)!, base);
@@ -180,7 +194,8 @@ export function bindPiece(piece: GmPiece, base: LiveSize, sizes: ReadonlyMap<num
   };
 }
 
-const lineOf = (b: Bound | undefined): BoundLine | null => (b && b.ok && 'line' in b ? b.line : null);
+const lineOf = (b: Bound | undefined): BoundLine | null =>
+  b && b.ok && 'line' in b ? b.line : null;
 const pointOf = (b: Bound | undefined): PtMm | null => (b && b.ok && 'point' in b ? b.point : null);
 
 export type MeshSourceResult = {
@@ -192,7 +207,11 @@ export type MeshSourceResult = {
 };
 
 /** The mesh input of one piece from its bound tracks. */
-export function meshSourceOf(piece: GmPiece, binding: PieceBinding, base: LiveSize): MeshSourceResult {
+export function meshSourceOf(
+  piece: GmPiece,
+  binding: PieceBinding,
+  base: LiveSize,
+): MeshSourceResult {
   const noCut = new Map<number, string>();
   const ci = piece.tracks.findIndex((t) => t.kind === 'cut');
   if (ci < 0) return { src: null, noCut, notInMesh: [] };

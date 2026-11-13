@@ -156,8 +156,10 @@ function segCross(a: PtMm, b: PtMm, c: PtMm, d: PtMm): boolean {
   const d2 = orient(a, b, d);
   const d3 = orient(c, d, a);
   const d4 = orient(c, d, b);
-  return ((d1 > EPS_AREA && d2 < -EPS_AREA) || (d1 < -EPS_AREA && d2 > EPS_AREA)) &&
-    ((d3 > EPS_AREA && d4 < -EPS_AREA) || (d3 < -EPS_AREA && d4 > EPS_AREA));
+  return (
+    ((d1 > EPS_AREA && d2 < -EPS_AREA) || (d1 < -EPS_AREA && d2 > EPS_AREA)) &&
+    ((d3 > EPS_AREA && d4 < -EPS_AREA) || (d3 < -EPS_AREA && d4 > EPS_AREA))
+  );
 }
 
 /**
@@ -295,7 +297,8 @@ function insertSegment(m: Mesh, a: number, b: number): boolean {
       continue;
     }
     const [p, q] = e;
-    if (p !== a && p !== b && q !== a && q !== b && segCross(A, B, P[p], P[q])) crossing.push([p, q]);
+    if (p !== a && p !== b && q !== a && q !== b && segCross(A, B, P[p], P[q]))
+      crossing.push([p, q]);
     else fresh.push([p, q]);
   }
   if (!(m.dir.has(m.key(a, b)) || m.dir.has(m.key(b, a)))) return false;
@@ -317,7 +320,14 @@ export function triangulate(
   const m = new Mesh(pts, pts.length + 1);
   for (let i = 0; i < ring.length; i++) m.cons.add(m.ukey(i, (i + 1) % ring.length));
   const failed = ring.length < 3 ? 'ring has < 3 points' : earClip(m, ring.length);
-  if (failed) return { pts, tris: [], skippedPoints: points.length, skippedSegments: segments.length, failed };
+  if (failed)
+    return {
+      pts,
+      tris: [],
+      skippedPoints: points.length,
+      skippedSegments: segments.length,
+      failed,
+    };
   const interior: [number, number][] = [];
   for (const t of m.tris) if (t) for (let k = 0; k < 3; k++) interior.push([t[k], t[(k + 1) % 3]]);
   m.legalize(interior);
@@ -329,7 +339,10 @@ export function triangulate(
   }
   let skippedSegments = 0;
   for (const [a, b] of segments) {
-    const ok = (a < ring.length || placed.has(a)) && (b < ring.length || placed.has(b)) && insertSegment(m, a, b);
+    const ok =
+      (a < ring.length || placed.has(a)) &&
+      (b < ring.length || placed.has(b)) &&
+      insertSegment(m, a, b);
     if (!ok) skippedSegments++;
   }
   const tris = m.tris.filter((t): t is Tri => !!t);

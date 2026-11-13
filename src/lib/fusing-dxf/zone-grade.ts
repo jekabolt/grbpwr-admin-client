@@ -763,6 +763,8 @@ function pairLines(
 
 type GradeField = {
   match: ContourMatch;
+  /** The paired internal lines, point i onto point i: [built base side, built target side, closed]. */
+  pairs: [PtMm[], PtMm[], boolean][];
   /** The largest move of any anchor: no point moves farther. */
   reach: number;
   lines: Anchor[][];
@@ -780,7 +782,7 @@ function buildField(
   for (let i = 0; i < cage.p.length; i++)
     contourReach = Math.max(contourReach, Math.hypot(cage.dx[i], cage.dy[i]));
   const rim = segmentsAlong(cage.p, true);
-  let lines: Anchor[][] = pairLines(
+  const pairs = pairLines(
     baseLines,
     targetLines,
     (p) => {
@@ -788,7 +790,8 @@ function buildField(
       return { x: p.x + d.x, y: p.y + d.y };
     },
     contourReach,
-  )
+  );
+  let lines: Anchor[][] = pairs
     .map(([from, to, closed]) => {
       const out: Anchor[] = [];
       const n = from.length;
@@ -917,7 +920,7 @@ function buildField(
         );
       }),
     );
-    if (!offenders.length) return { match, lines, ...field };
+    if (!offenders.length) return { match, pairs, lines, ...field };
     const residual = (line: Anchor[]) =>
       Math.max(
         ...line.map((s) => Math.max(Math.hypot(s.ra.x, s.ra.y), Math.hypot(s.rb.x, s.rb.y))),
@@ -1085,7 +1088,15 @@ export type ZoneGrade = {
   follow: (point: PtMm) => PtMm;
   /** The translation that carries a whole detached ring. */
   shift: (ring: readonly PtMm[]) => PtMm;
+  /**
+   * The internal line a 'follow_line' ring is tied to at `anchor`, with its twin on the other size,
+   * point i onto point i, as the field's geometric pairing found it. null when the anchor is on no
+   * line, or its line has no twin (the caller then carries the ring the default way, as a guess).
+   */
+  linePair: (anchor: PtMm) => LinePair | null;
 };
+
+export type LinePair = { from: readonly PtMm[]; to: readonly PtMm[]; closed: boolean };
 
 const cache = new WeakMap<
   readonly PtMm[],
@@ -1176,6 +1187,7 @@ function buildZoneGrade(
         const moved = frame(c);
         return { x: moved.x - c.x, y: moved.y - c.y };
       },
+      linePair: () => null,
     };
   }
   const baseLines = internals?.base ?? [];
@@ -1200,6 +1212,8 @@ function buildZoneGrade(
         return p ?? askedCarry(q);
       };
   const builtFollow = followOf(built, builtCarry, canonical);
+  // Pairs are read on the built side either way round, so both directions see the same twins.
+  const linePair = (anchor: PtMm) => linePairAt(canonical().pairs, forward ? 0 : 1, anchor);
   if (forward)
     return {
       match,
@@ -1210,6 +1224,7 @@ function buildZoneGrade(
       },
       follow: builtFollow,
       shift: (ring) => shiftOfRing(canonical(), ring),
+      linePair,
     };
   // The asked direction runs against the built one. A point the solver cannot return goes through
   // the field built the asked way round (its own pairing and residuals, not an exact inverse).
@@ -1251,5 +1266,31 @@ function buildZoneGrade(
       const back = point(c);
       return { x: back.x - c.x, y: back.y - c.y };
     },
+    linePair,
   };
+}
+
+/**
+ * The anchor of a 'follow_line' ring sits on its line (it is picked there, 0.1 mm rounding) within
+ * this. An anchor on no paired line — on a line with no twin, or carried the default way because
+ * its line had none — follows nothing, either way round.
+ */
+const ANCHOR_ON_LINE_MM = 0.5;
+
+/**
+ * The pair whose `side` (the asked base side) runs through `anchor`.
+ */
+function linePairAt(
+  pairs: readonly [PtMm[], PtMm[], boolean][],
+  side: 0 | 1,
+  anchor: PtMm,
+): LinePair | null {
+  let best: { d: number; pair: readonly [PtMm[], PtMm[], boolean] } | null = null;
+  for (const pair of pairs) {
+    const d = distanceToPolyline(anchor, pair[side], pair[2]);
+    if (!best || d < best.d) best = { d, pair };
+  }
+  if (!best || best.d > ANCHOR_ON_LINE_MM) return null;
+  const [built, other, closed] = best.pair;
+  return side ? { from: other, to: built, closed } : { from: built, to: other, closed };
 }

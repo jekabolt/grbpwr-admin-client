@@ -9,7 +9,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { edgeRunsOf, pointOnEdgeRun, projectPointToEdgeRun } from 'lib/fusing-dxf/edge-runs';
 import { fusingDartPolygons } from 'lib/fusing-dxf/darts';
 import { fuseAreaMm2, fuseInsetRingMm, generateFuseGeometry } from 'lib/fusing-dxf/geometry';
-import type { FusePolygon } from 'lib/fusing-dxf/types';
+import type { FuseInternalLine } from 'lib/fusing-dxf/dxf';
+import { nearestNotch, notchesOnRun } from 'lib/fusing-dxf/strip-ends';
+import type { FuseEdge, FuseEndMode, FusePolygon } from 'lib/fusing-dxf/types';
+import { Chip, Input } from 'ui';
 import type { PieceDTO, Pt } from 'lib/nesting/types';
 import { resolveFuse, fuseIncomplete, type PieceFuseSpec } from './fuse-spec';
 import {
@@ -25,6 +28,15 @@ const INK = 'var(--color-warning)';
 const PAPER = 'var(--color-bgColor)';
 const DART_INK = 'var(--color-labelColor)';
 const SNAP_MM = 5;
+const NO_LINES: readonly FuseInternalLine[] = [];
+const END_MODES: [FuseEndMode, string][] = [
+  ['mm', 'mm'],
+  ['notch', 'notch'],
+  ['share', 'share'],
+];
+/** The strip-end popover, screen px. */
+const END_POP_W = 186;
+const r1 = (v: number) => Math.round(v * 10) / 10;
 
 const sub = (a: Pt, b: Pt) => ({ x: a.x - b.x, y: a.y - b.y });
 const add = (a: Pt, b: Pt, k = 1) => ({ x: a.x + b.x * k, y: a.y + b.y * k });
@@ -109,6 +121,7 @@ export function FuseOverlay({
   zoneBus,
   zoneOutlines,
   netOutlineOf,
+  linesOf,
   requiredSeamAllowanceMm,
 }: {
   /** cm per screen pixel. */
@@ -126,11 +139,23 @@ export function FuseOverlay({
   zoneOutlines?: ReadonlyMap<string, PieceDTO>;
   /** The piece's own sewing contour in its local cm frame. */
   netOutlineOf?: (piece: PieceDTO) => readonly Pt[] | null;
+  /** The piece's internal lines on the size on screen, piece-local mm (notches, followed lines). */
+  linesOf?: (piece: PieceDTO) => readonly FuseInternalLine[];
   /** The card's live seam-allowance standard; null means no standard is available. */
   requiredSeamAllowanceMm: number | null;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const [handle, setHandle] = useState<{ edge: number; end: 's' | 'e' } | null>(null);
+  /** The strip end whose mode popover is open. */
+  const [pop, setPop] = useState<{ edge: number; end: 's' | 'e' } | null>(null);
+  const dragged = useRef(false);
+  useEffect(() => setPop(null), [sel]);
+  useEffect(() => {
+    if (!pop) return;
+    const k = (e: KeyboardEvent) => e.key === 'Escape' && setPop(null);
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  }, [pop]);
   // Fill cache: generator geometry per piece object, keyed by everything the geometry reads.
   const fills = useRef(new WeakMap<PieceDTO, Map<string, FuseFill | null>>());
   const fillOf = (p: PieceDTO, f: PieceFuseSpec) => {
@@ -172,6 +197,19 @@ export function FuseOverlay({
   }, [pieces, ciOf]);
   const sp = sel ? byCi.get(sel) : undefined;
   const sf = sel ? fuseOf(sel) : undefined;
+  const linesOfRef = useRef(linesOf);
+  linesOfRef.current = linesOf;
+  const lines = useMemo(() => (sp ? linesOfRef.current?.(sp) : null) ?? NO_LINES, [sp]);
+  useEffect(() => {
+    if (!sel || !zoneBus) return;
+    zoneBus.setLines(sel, lines);
+    return () => zoneBus.setLines(sel, undefined);
+  }, [sel, lines, zoneBus]);
+  // Notches per edge, mm from the edge's start: the same runs and lines the size carry-over reads.
+  const notchesByEdge = useMemo(
+    () => (sp ? edgeRunsOf(sp.poly.map(mm10)).map((run) => notchesOnRun(run, lines)) : []),
+    [sp, lines],
+  );
 
   const world = (p: PieceDTO, q: Pt) => ({
     x: (p.originX ?? 0) + q.x,
@@ -454,6 +492,7 @@ export function FuseOverlay({
           outline={pts}
           inner={g.inner}
           bus={zoneBus}
+          lines={lines}
           onChange={(next) => onChange(sel, next)}
         />
       )}
@@ -527,6 +566,44 @@ export function FuseOverlay({
             const active = handle?.edge === i && handle.end === end;
             const mm = end === 's' ? o.startMm : o.endMm;
             const lab = add(at, n, -38 * px);
+            const lenMm = run.length * 10;
+            const other = end === 's' ? o.endMm : o.startMm;
+            const limit = Math.max(0, Math.floor(lenMm - other - 10));
+            const endMode: FuseEndMode = (end === 's' ? o.startMode : o.endMode) ?? 'mm';
+            const notches = notchesByEdge[i] ?? [];
+            const onNotch = notches.length
+              ? nearestNotch(notches, end === 's' ? mm : lenMm - mm)
+              : -1;
+            const open = pop?.edge === i && pop.end === end;
+            const tag =
+              endMode === 'notch'
+                ? `notch${onNotch >= 0 ? ` ${onNotch + 1}` : ''}`
+                : endMode === 'share'
+                  ? `${lenMm > 0 ? Math.round((mm / lenMm) * 100) : 0} %`
+                  : `${r1(mm)} mm`;
+            const setEnd = (value: number, mode: FuseEndMode) => {
+              if (!sel) return;
+              const v = r1(Math.max(0, Math.min(value, limit)));
+              onChange(sel, {
+                ...sf,
+                edges: sf.edges.map((x) => {
+                  if (x.edge !== i) return x;
+                  const next: FuseEdge = { ...x, [end === 's' ? 'startMm' : 'endMm']: v };
+                  const key = end === 's' ? 'startMode' : 'endMode';
+                  if (mode === 'mm') delete next[key];
+                  else next[key] = mode;
+                  return next;
+                }),
+              });
+            };
+            const toNotch = (k: number) =>
+              setEnd(end === 's' ? notches[k] : lenMm - notches[k], 'notch');
+            const toMode = (mode: FuseEndMode) => {
+              if (mode === endMode) return;
+              if (mode === 'notch') {
+                if (onNotch >= 0) toNotch(onNotch);
+              } else setEnd(mm, mode);
+            };
             return (
               <g key={`h-${i}${end}`}>
                 <rect
@@ -535,7 +612,7 @@ export function FuseOverlay({
                   y={at.y - hs / 2}
                   width={hs}
                   height={hs}
-                  fill={PAPER}
+                  fill={open ? INK : PAPER}
                   stroke={INK}
                   strokeWidth={1}
                   vectorEffect='non-scaling-stroke'
@@ -543,6 +620,7 @@ export function FuseOverlay({
                   onPointerDown={(e) => {
                     e.stopPropagation();
                     (e.currentTarget as Element).setPointerCapture(e.pointerId);
+                    dragged.current = false;
                     setHandle({ edge: i, end });
                   }}
                   onPointerMove={(e) => {
@@ -553,39 +631,143 @@ export function FuseOverlay({
                       end === 's'
                         ? projected.distance * 10
                         : (run.length - projected.distance) * 10;
-                    const other = end === 's' ? o.endMm : o.startMm;
-                    const v = Math.max(
-                      0,
-                      Math.min(
-                        Math.round(raw / SNAP_MM) * SNAP_MM,
-                        Math.floor(run.length * 10 - other - 10),
-                      ),
-                    );
-                    onChange(sel, {
-                      ...sf,
-                      edges: sf.edges.map((x) =>
-                        x.edge === i ? { ...x, [end === 's' ? 'startMm' : 'endMm']: v } : x,
-                      ),
-                    });
+                    dragged.current = true;
+                    // An end at a notch moves from notch to notch; the others snap to 5 mm.
+                    if (endMode === 'notch' && notches.length) {
+                      const k = nearestNotch(notches, end === 's' ? raw : lenMm - raw);
+                      const v = end === 's' ? notches[k] : lenMm - notches[k];
+                      if (r1(v) !== mm) toNotch(k);
+                      return;
+                    }
+                    const v = Math.max(0, Math.min(Math.round(raw / SNAP_MM) * SNAP_MM, limit));
+                    if (v !== mm) setEnd(v, endMode);
                   }}
-                  onPointerUp={() => setHandle(null)}
+                  onPointerUp={() => {
+                    setHandle(null);
+                    if (!dragged.current) setPop(open ? null : { edge: i, end });
+                  }}
                 />
-                {active && (
-                  <text
-                    data-live-mm={mm}
-                    x={lab.x}
-                    y={lab.y}
-                    fontSize={11 * px}
-                    textAnchor='middle'
-                    dominantBaseline='middle'
-                    fill={INK}
-                    pointerEvents='none'
-                    paintOrder='stroke'
-                    stroke={PAPER}
-                    strokeWidth={3 * px}
+                <text
+                  data-live-mm={mm}
+                  data-end-tag={`${i}${end}`}
+                  x={lab.x}
+                  y={lab.y}
+                  fontSize={11 * px}
+                  textAnchor='middle'
+                  dominantBaseline='middle'
+                  fill={INK}
+                  pointerEvents='none'
+                  paintOrder='stroke'
+                  stroke={PAPER}
+                  strokeWidth={3 * px}
+                >
+                  {tag.toUpperCase()}
+                </text>
+                <rect
+                  x={lab.x - 30 * px}
+                  y={lab.y - 9 * px}
+                  width={60 * px}
+                  height={18 * px}
+                  fill='transparent'
+                  style={{ cursor: 'pointer' }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => setPop(open ? null : { edge: i, end })}
+                />
+                {open &&
+                  endMode === 'notch' &&
+                  notches.map((notchAt, k) => {
+                    const q = pointOnEdgeRun(run, notchAt / 10);
+                    const out = {
+                      x: q.tangent.y * g.sign,
+                      y: -q.tangent.x * g.sign,
+                    };
+                    const text = add(q.point, out, 16 * px);
+                    return (
+                      <g key={`notch-${k}`} data-notch={k}>
+                        <rect
+                          x={q.point.x - 9 * px}
+                          y={q.point.y - 9 * px}
+                          width={18 * px}
+                          height={18 * px}
+                          fill={INK}
+                          fillOpacity={k === onNotch ? 0.4 : 0.12}
+                          stroke={INK}
+                          strokeWidth={1}
+                          vectorEffect='non-scaling-stroke'
+                          style={{ cursor: 'pointer' }}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={() => toNotch(k)}
+                        />
+                        <text
+                          x={text.x}
+                          y={text.y}
+                          fontSize={10 * px}
+                          textAnchor='middle'
+                          dominantBaseline='middle'
+                          fill={INK}
+                          pointerEvents='none'
+                          paintOrder='stroke'
+                          stroke={PAPER}
+                          strokeWidth={3 * px}
+                        >
+                          {k + 1}
+                        </text>
+                      </g>
+                    );
+                  })}
+                {open && (
+                  <foreignObject
+                    x={at.x + 12 * px}
+                    y={at.y + 12 * px}
+                    width={END_POP_W * px}
+                    height={64 * px}
+                    style={{ overflow: 'visible' }}
+                    onPointerDown={(e) => e.stopPropagation()}
                   >
-                    {mm} mm
-                  </text>
+                    <div
+                      data-end-pop={`${i}${end}`}
+                      className='grid gap-1 border border-textColor bg-bgColor p-1.5'
+                      style={{
+                        width: END_POP_W,
+                        transform: `scale(${px})`,
+                        transformOrigin: '0 0',
+                      }}
+                    >
+                      <div className='grid grid-cols-3 gap-1'>
+                        {END_MODES.map(([value, label]) => (
+                          <Chip
+                            key={value}
+                            className='justify-center'
+                            selected={endMode === value}
+                            pressed={endMode === value}
+                            disabled={value === 'notch' && notches.length === 0}
+                            onClick={() => toMode(value)}
+                          >
+                            {label}
+                          </Chip>
+                        ))}
+                      </div>
+                      {endMode !== 'notch' && (
+                        <Input
+                          type='number'
+                          aria-label={endMode === 'share' ? 'share %' : 'mm'}
+                          min={0}
+                          value={
+                            endMode === 'share'
+                              ? lenMm > 0
+                                ? Math.round((mm / lenMm) * 100)
+                                : 0
+                              : r1(mm)
+                          }
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                            const typed = Number(e.target.value);
+                            if (!Number.isFinite(typed)) return;
+                            setEnd(endMode === 'share' ? (typed / 100) * lenMm : typed, endMode);
+                          }}
+                        />
+                      )}
+                    </div>
+                  </foreignObject>
                 )}
               </g>
             );
