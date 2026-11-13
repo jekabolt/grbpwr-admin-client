@@ -10597,6 +10597,11 @@ export type common_TechCardPiece = {
   fusingGrain?: string;
   // Empty/NULL = cut; otherwise cut|fuse.
   fusingDarts?: string;
+  // Staleness key of the fusing markup. Absent = do not touch (an older client keeps the stored
+  // key); present empty = clear; present with both fields = replace. Half a key is rejected. The
+  // server clears it on its own when the piece stops being fused or loses its edges / zone. Reads
+  // return it only when one is stored. Not part of the CONSTRUCTION digest.
+  fusingBase: common_TechCardPieceFusingBase | undefined;
 };
 
 // TechCardPieceColorwayMaterial maps ONE cut-piece to its fabric (and optional fusing) for ONE
@@ -10629,8 +10634,18 @@ export type common_TechCardPieceFusingEdge = {
   edge: number | undefined;
   startMm: googletype_Decimal | undefined;
   endMm: googletype_Decimal | undefined;
+  startMode: common_TechCardPieceFusingEndMode | undefined;
+  endMode: common_TechCardPieceFusingEndMode | undefined;
 };
 
+// How one end of a strip-fusing edge is carried from the base size to the other sizes. The trim
+// itself always stays in start_mm / end_mm as base-size millimetres; the mode only tells the size
+// carry-over what to hold constant.
+export type common_TechCardPieceFusingEndMode =
+  | "TECH_CARD_PIECE_FUSING_END_MODE_UNKNOWN"
+  | "TECH_CARD_PIECE_FUSING_END_MODE_MM"
+  | "TECH_CARD_PIECE_FUSING_END_MODE_NOTCH"
+  | "TECH_CARD_PIECE_FUSING_END_MODE_SHARE";
 // Geometry for ZONE fusing: a rectangle or freeform spline drawn on the garment piece, or a
 // dedicated DXF piece supplied by the pattern maker. An empty message deliberately clears it.
 export type common_TechCardPieceFusingZone = {
@@ -10657,12 +10672,37 @@ export type common_TechCardPieceFusingRect = {
 // Closed spline through piece-local points in millimetres. corner keeps that point sharp.
 export type common_TechCardPieceFusingSpline = {
   points: common_TechCardPieceFusingSplinePoint[] | undefined;
+  gradeMode: common_TechCardPieceFusingGradeMode | undefined;
+  // Required with FOLLOW_LINE and rejected with any other mode.
+  anchor: common_TechCardPieceFusingAnchor | undefined;
 };
 
 export type common_TechCardPieceFusingSplinePoint = {
   x: googletype_Decimal | undefined;
   y: googletype_Decimal | undefined;
   corner: boolean | undefined;
+};
+
+// How one fusing ring is carried from the base size to the other sizes.
+export type common_TechCardPieceFusingGradeMode =
+  | "TECH_CARD_PIECE_FUSING_GRADE_MODE_UNKNOWN"
+  | "TECH_CARD_PIECE_FUSING_GRADE_MODE_FIXED"
+  | "TECH_CARD_PIECE_FUSING_GRADE_MODE_FOLLOW_LINE"
+  | "TECH_CARD_PIECE_FUSING_GRADE_MODE_GROW";
+// Piece-local point in base-size millimetres that picks the internal line a ring follows.
+export type common_TechCardPieceFusingAnchor = {
+  x: googletype_Decimal | undefined;
+  y: googletype_Decimal | undefined;
+};
+
+// The base the piece's fusing markup (fusing_edges / fusing_zone) was drawn against: the base size
+// and a signature of that size's piece contour. A client compares it with the current pattern file
+// to tell whether the markup still fits after the pattern was replaced. The server stores it as an
+// opaque pair and never computes or compares the signature itself.
+// Both fields are set together, or both are empty (= clear).
+export type common_TechCardPieceFusingBase = {
+  baseSizeId: number | undefined;
+  contourSignature: string | undefined;
 };
 
 // TechCardPurpose is the numeric enum form of a style's purpose (R6). Replaces the free-text

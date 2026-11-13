@@ -37,6 +37,13 @@ import { ImportError } from 'lib/pattern-import/worker/errors';
 import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
 import type { CardSize, DraftScopeTarget, StageIO, StageName } from 'lib/pattern-import/types';
 import { sectionH, sectionShapeKink } from './rulhook-entry';
+import { compareMaps } from 'lib/grade-map/compare';
+import { gradeMapFromBytes } from 'lib/grade-map/serialize';
+import { gradeMapOfParsed, gradeMapSources } from 'lib/grade-map/source';
+import { roundTrip } from 'lib/pattern-import/gate/roundtrip';
+import { readManifest } from 'lib/pattern-import/manifest';
+import { readGradeMapBlock, writeGradeMapBlock } from 'lib/pattern-import/manifest/grade-map-block';
+import { sizeRefsOf } from 'lib/pattern-import/write/grade-map';
 
 const REPO = process.env.PATIMPORT_REPO ?? process.cwd();
 const CORPUS =
@@ -311,6 +318,40 @@ async function sectionB(t: RulTable) {
     exact,
     why || `stats ${JSON.stringify(ex.stats)}`,
   );
+  {
+    // grade map P2io: the graded points come out per slot × size, equal to the written blocks
+    const g = ex.grades.find((p) => p.piece === 'FRONT');
+    const cut = g?.entities.find((e) => e.layer === '1' && e.kind === 'chain');
+    const drill = g?.entities.find((e) => e.layer === '13' && e.kind === 'point');
+    let ok = !!g && !!cut && !!drill && g.blocks.join() === SIZES.map((s) => `FRONT_${s}`).join();
+    let gWhy = ok ? '' : `grades ${JSON.stringify(ex.grades.map((p) => [p.piece, p.blocks]))}`;
+    if (ok) {
+      SIZES.forEach((s, i) => {
+        const b = blocks.get(`FRONT_${s}`)!;
+        cut!.at.forEach((sizes, k) => {
+          if (sizes.length !== SIZES.length || !near(b.cut[k], sizes[i].x, sizes[i].y)) {
+            ok = false;
+            gWhy ||= `${s} cut slot ${k}: ${JSON.stringify(sizes[i])} ≠ ${JSON.stringify(b.cut[k])}`;
+          }
+        });
+        if (!near(b.pts['13'][0], drill!.at[0][i].x, drill!.at[0][i].y)) {
+          ok = false;
+          gWhy ||= `${s} drill ${JSON.stringify(drill!.at[0][i])}`;
+        }
+      });
+      const how = cut!.how.join(' ');
+      if (how !== 'rule rule interpolated rule rule' || drill!.how[0] !== 'rule') {
+        ok = false;
+        gWhy ||= `how: cut ${how}, drill ${drill!.how.join(' ')}`;
+      }
+    }
+    check(
+      'B',
+      'graded points per slot × size equal the written blocks; corners ruled, E interpolated',
+      ok,
+      gWhy,
+    );
+  }
   check(
     'B',
     'warnings say what was interpolated / left',
@@ -976,6 +1017,71 @@ const sessionErr = (files: { name: string; bytes: ArrayBuffer }[]) => {
   }
 };
 
+/**
+ * P2 grade map: the written file carries the map; under its own (trusted) manifest it reads `ok`,
+ * the .rul grade makes the cut `exact`, the map equals the one built on the fly from the same file
+ * (≤ 0.1 mm), and the block changes nothing the card's parse reads.
+ */
+async function gradeMapChecks(
+  scope: StageIO['write']['out']['scopes'][number] | undefined,
+  entries: StageIO['sizes']['out']['map']['entries'],
+) {
+  if (!scope) return check('D', 'grade map: a written scope', false);
+  const sizes = entries.flatMap((e) =>
+    e.card
+      ? [
+          {
+            token: e.card.token,
+            sizeId: e.card.sizeId,
+            name: e.card.name,
+            sourceLabel: e.source.label,
+            rank: e.source.rank,
+          },
+        ]
+      : [],
+  );
+  const text = scope.dxfText;
+  const read = readGradeMapBlock(text, { manifestTrusted: true });
+  const file = read.status === 'ok' ? gradeMapFromBytes(read.bytes) : null;
+  // the writer names FRONT by its identity code: the file's one graded piece
+  const front = file?.pieces.length === 1 ? file.pieces[0] : undefined;
+  const cut = front?.tracks.find((t) => t.kind === 'cut');
+  check(
+    'D',
+    'grade map: the written file carries it, the .rul grade makes the cut exact',
+    !!file && cut?.trust === 'exact' && cut.sizes.length === sizes.length - 1,
+    `${read.status} · ${front ? front.tracks.map((t) => `${t.kind}:${t.trust}`).join(' ') : `no FRONT in ${file?.pieces.map((p) => p.key).join(',')}`}${scope.gradeMapNotes?.length ? ` · ${scope.gradeMapNotes.join(' | ')}` : ''}`,
+  );
+  const bare = writeGradeMapBlock(text, null);
+  const [withBlock, without] = await Promise.all([roundTrip(text), roundTrip(bare)]);
+  check(
+    'D',
+    'grade map: under the trusted manifest the file parses the same with and without the block',
+    !!readManifest(text) &&
+      JSON.stringify(readManifest(text)) === JSON.stringify(readManifest(bare)) &&
+      JSON.stringify(withBlock.pieces) === JSON.stringify(without.pieces) &&
+      JSON.stringify(withBlock.warnings) === JSON.stringify(without.warnings),
+    `${withBlock.pieces.length} pieces`,
+  );
+  if (!file) return;
+  const refs = sizeRefsOf(sizes);
+  const onTheFly = gradeMapOfParsed(withBlock.pieces, refs);
+  const geo = new Map(
+    gradeMapSources(withBlock.pieces, refs).map((s) => [s.key.toLowerCase(), s.sizes]),
+  );
+  const d = onTheFly
+    ? compareMaps(file, onTheFly.file, (k) => geo.get(k.toLowerCase()) ?? null)
+    : null;
+  check(
+    'D',
+    'grade map: from the file = on the fly, within 0.1 mm',
+    !!d && d.compared > 0 && d.maxMm <= 0.1 && !d.unmatched.length,
+    d
+      ? `max ${d.maxMm.toFixed(4)} mm over ${d.compared} tracks${d.unmatched.length ? ` · ${d.unmatched.join(' | ')}` : ''}`
+      : 'no map on the fly',
+  );
+}
+
 async function sectionD() {
   const dxf = baseDxf();
   const pair = [
@@ -1103,6 +1209,7 @@ async function sectionD() {
       'write without storage: no rul package',
       w2.scopes.every((x) => x.rul === undefined),
     );
+    await gradeMapChecks(w2.scopes[0], sz.map.entries);
     s.close();
   }
   const e1 = sessionErr([{ name: 'B9000.rul', bytes: enc(SPEC_RUL) }]);

@@ -554,3 +554,29 @@ describe('a field edited while ACCEPT flies (the card page door over the real au
     machine.dispose();
   });
 });
+
+describe('U1 #3: a change rebuilt to nothing', () => {
+  it('after the read every key is held: no second request, the pending rows are lifted', async () => {
+    const f = fakeBridge();
+    f.bridge.reread = async () => {
+      f.setVersion(9);
+      return { ok: true, card: { lockVersion: 9, seams: wire([a]) } as unknown as common_TechCard };
+    };
+    let owed = [a.seamKey];
+    let calls = 0;
+    const res = await runSeamChange(
+      CARD,
+      () => ({ delete: owed }),
+      { verb: 'removal', quiet: true },
+      depsOf(f.bridge, async () => {
+        calls += 1;
+        owed = [];
+        throw lockMoved();
+      }),
+    );
+    expect(res).toMatchObject({ ok: true, deletedKeys: [] });
+    expect(calls).toBe(1);
+    expect(useSeamsStore.getState().pending[a.seamKey]).toBeUndefined();
+    expect(keys()).toEqual([a.seamKey]);
+  });
+});

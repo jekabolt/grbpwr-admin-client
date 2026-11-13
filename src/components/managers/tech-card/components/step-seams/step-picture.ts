@@ -43,6 +43,7 @@ import {
   innerSlices,
   parseInner,
   pieceOfTarget,
+  SOFT_CORNER_DEG,
   type SewnPair,
 } from './step-seams-model';
 import { placeStripsOnHosts } from '../cut-strips/strip-place';
@@ -223,6 +224,64 @@ const inner = (pts: readonly Pt2[]) => {
   return pts.slice(cut, pts.length - cut);
 };
 
+type SurfacePlacementLine = { points: readonly Pt2[]; pin?: 'start' | 'end' };
+
+/** Rounding of a stored share (1e-4 of the contour) stays under this on any contour up to 20 m. */
+const HAIR_TAIL_MM = 1;
+
+/** A straight part cannot follow a sharp inner turn: use the longer leg and pin its outer end. */
+export const surfacePlacementLine = (line: readonly Pt2[]): SurfacePlacementLine => {
+  const turnDeg = (a: Pt2, b: Pt2, c: Pt2) => {
+    const before: Pt2 = [b[0] - a[0], b[1] - a[1]];
+    const after: Pt2 = [c[0] - b[0], c[1] - b[1]];
+    return (
+      (Math.atan2(
+        before[0] * after[1] - before[1] * after[0],
+        before[0] * after[0] + before[1] * after[1],
+      ) *
+        180) /
+      Math.PI
+    );
+  };
+  const sharpOf = (points: readonly Pt2[]) =>
+    points
+      .slice(1, -1)
+      .flatMap((point, offset) =>
+        Math.abs(turnDeg(points[offset], point, points[offset + 2])) >= SOFT_CORNER_DEG
+          ? [offset + 1]
+          : [],
+      );
+  const length = (points: readonly Pt2[]) =>
+    points
+      .slice(1)
+      .reduce(
+        (sum, point, index) =>
+          sum + Math.hypot(point[0] - points[index][0], point[1] - points[index][1]),
+        0,
+      );
+  // A stored stretch is kept in shares of the contour rounded to 1e-4, so its end can run a hair
+  // past a corner (140.01 mm of a 140 mm side). Such a tail is not a leg: cut it off first.
+  let trimmed = line;
+  for (let sharp = sharpOf(trimmed); sharp.length; sharp = sharpOf(trimmed)) {
+    const last = sharp[sharp.length - 1];
+    if (length(trimmed.slice(0, sharp[0] + 1)) <= HAIR_TAIL_MM) trimmed = trimmed.slice(sharp[0]);
+    else if (length(trimmed.slice(last)) <= HAIR_TAIL_MM) trimmed = trimmed.slice(0, last + 1);
+    else break;
+  }
+  const sharp = sharpOf(trimmed);
+  if (sharp.length > 1) return { points: line };
+  if (!sharp.length) return { points: trimmed };
+  const corner = sharp[0];
+  const before = trimmed.slice(0, corner + 1);
+  const after = trimmed.slice(corner);
+  const beforeLength = length(before);
+  const afterLength = length(after);
+  if (Math.abs(beforeLength - afterLength) <= 1e-6) return { points: trimmed };
+  return beforeLength > afterLength
+    ? { points: before, pin: 'start' }
+    : { points: after, pin: 'end' };
+};
+
 /**
  * The part's sewn edge laid along the host's line (rs frame): end on end, its own way up; turned
  * over only when, its own way up, the two curves would cross (a stand on a collar's line). Null
@@ -237,9 +296,11 @@ function alongLine(
   if (!edge || line.length < 2 || pieceKeyOf(edge) !== pg.pieceKey) return null;
   const e = resolveEdge(edge, geoms);
   if (!e || e.pts.length < 2) return null;
-  const l0 = line[0];
-  const l1 = line[line.length - 1];
-  const lineIn = inner(line);
+  const placementLine = surfacePlacementLine(line);
+  const points = placementLine.points;
+  const l0 = points[0];
+  const l1 = points[points.length - 1];
+  const lineIn = inner(points);
   let best: { M: Affine; score: number } | null = null;
   for (const rev of [false, true])
     for (const mir of [false, true]) {
@@ -248,17 +309,21 @@ function alongLine(
       const R = rigid(l0, l1, q0, q1, mir);
       const m0 = apply(R, q0);
       const m1 = apply(R, q1);
-      // Centred on the line: a longer edge overhangs both its ends alike.
-      const M = compose(
-        translate((l0[0] + l1[0] - m0[0] - m1[0]) / 2, (l0[1] + l1[1] - m0[1] - m1[1]) / 2),
-        R,
-      );
+      // A sharp-corner leg holds the partner at the stretch's outer end. A straight/soft line
+      // keeps the legacy centring: a longer edge overhangs both ends alike.
+      const shift =
+        placementLine.pin === 'start'
+          ? [l0[0] - m0[0], l0[1] - m0[1]]
+          : placementLine.pin === 'end'
+            ? [l1[0] - m1[0], l1[1] - m1[1]]
+            : [(l0[0] + l1[0] - m0[0] - m1[0]) / 2, (l0[1] + l1[1] - m0[1] - m1[1]) / 2];
+      const M = compose(translate(shift[0], shift[1]), R);
       const laid = inner(e.pts.map((p) => apply(M, p)));
       let crosses = 0;
       for (let i = 1; i < laid.length; i++)
         for (let k = 1; k < lineIn.length; k++)
           if (segCross(laid[i - 1], laid[i], lineIn[k - 1], lineIn[k])) crosses++;
-      const gap = laid.reduce((s, p) => s + toLine(p, line), 0) / (laid.length || 1);
+      const gap = laid.reduce((s, p) => s + toLine(p, points), 0) / (laid.length || 1);
       // A bare rectangle reads the same both ways up; marks on it (a placket's holes, off its
       // middle) say which way is up, so a half turn is no longer a tie settled by edge order.
       const tilt = pg.marks?.length ? tiltOf(M) : pieceTilt(pg, M);

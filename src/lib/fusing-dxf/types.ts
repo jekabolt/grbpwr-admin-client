@@ -22,11 +22,35 @@ export type FuseEdge = {
    */
   startMm: number;
   endMm: number;
+  /**
+   * How each end is carried to another size. Absent = 'mm' (the trim above, the same in every
+   * size). 'notch': the end sits on the notch nearest to its base-size trim, and on that same notch
+   * in every size. 'share': the trim keeps its share of the run's length.
+   */
+  startMode?: FuseEndCarry;
+  endMode?: FuseEndCarry;
 };
+/** A strip end's non-default carry-over; 'mm' is the absent field. */
+export type FuseEndCarry = 'notch' | 'share';
+export type FuseEndMode = 'mm' | FuseEndCarry;
+/** A zone ring's non-default carry-over; 'fixed' is the absent field. */
+export type FuseRingCarry = 'follow_line' | 'grow';
+export type FuseGradeMode = 'fixed' | FuseRingCarry;
 
 /** A control point of a freeform zone; corner = a sharp vertex (the curve does not round it). */
 export type FuseSplinePoint = { x: number; y: number; corner?: boolean };
-export type FuseSpline = { points: FuseSplinePoint[] };
+export type FuseSpline = {
+  points: FuseSplinePoint[];
+  /**
+   * How the ring is carried to another size. Absent = 'fixed': the shape as drawn (a band keeps its
+   * mm off the contour, a detached patch moves whole). 'follow_line': the ring travels and turns
+   * with the internal line nearest to `anchor`, its shape untouched. 'grow': every point follows
+   * the grade, so the ring grows with the piece.
+   */
+  gradeMode?: FuseRingCarry;
+  /** follow_line only: a point on the followed internal line, in the ring's own size. */
+  anchor?: { x: number; y: number };
+};
 
 /**
  * Piece-local mm, DXF axes (Y up), the outline's own frame — or another DXF block. A spline is a
@@ -124,6 +148,17 @@ const MODE_FULL = 'TECH_CARD_PIECE_FUSING_MODE_FULL';
 const MODE_STRIP = 'TECH_CARD_PIECE_FUSING_MODE_STRIP';
 const MODE_ZONE = 'TECH_CARD_PIECE_FUSING_MODE_ZONE';
 const MODE_UNSET = 'TECH_CARD_PIECE_FUSING_MODE_UNKNOWN';
+const END_NOTCH = 'TECH_CARD_PIECE_FUSING_END_MODE_NOTCH';
+const END_SHARE = 'TECH_CARD_PIECE_FUSING_END_MODE_SHARE';
+const END_MM = 'TECH_CARD_PIECE_FUSING_END_MODE_MM';
+const RING_FIXED = 'TECH_CARD_PIECE_FUSING_GRADE_MODE_FIXED';
+const RING_FOLLOW_LINE = 'TECH_CARD_PIECE_FUSING_GRADE_MODE_FOLLOW_LINE';
+const RING_GROW = 'TECH_CARD_PIECE_FUSING_GRADE_MODE_GROW';
+const endCarryOf = (raw: string | undefined): FuseEndCarry | undefined =>
+  raw === END_NOTCH ? 'notch' : raw === END_SHARE ? 'share' : undefined;
+/** Always a named mode: an unnamed one tells the server «an older client, keep what is stored». */
+const endCarryToWire = (mode: FuseEndCarry | undefined) =>
+  mode === 'notch' ? END_NOTCH : mode === 'share' ? END_SHARE : END_MM;
 const GRAINS: readonly FuseGrain[] = ['as_piece', 'lengthwise', 'crosswise', 'bias', 'any'];
 
 /**
@@ -215,9 +250,16 @@ function splineFromWire(spline: common_TechCardPieceFusingZone['spline']): FuseS
   const pts = spline?.points ?? [];
   if (!pts.length) return null;
   const points = pts.map((p) => ({ x: num(p.x?.value), y: num(p.y?.value), corner: !!p.corner }));
-  return points.every((p) => p.x != null && p.y != null)
-    ? { points: points as { x: number; y: number; corner: boolean }[] }
-    : null;
+  if (!points.every((p) => p.x != null && p.y != null)) return null;
+  const out: FuseSpline = { points: points as { x: number; y: number; corner: boolean }[] };
+  const ax = num(spline?.anchor?.x?.value);
+  const ay = num(spline?.anchor?.y?.value);
+  if (spline?.gradeMode === RING_GROW) out.gradeMode = 'grow';
+  else if (spline?.gradeMode === RING_FOLLOW_LINE && ax != null && ay != null) {
+    out.gradeMode = 'follow_line';
+    out.anchor = { x: ax, y: ay };
+  }
+  return out;
 }
 
 /** The wire zone → the form's zone (null = none, or an unreadable one). */
@@ -243,9 +285,14 @@ function zoneFromWire(z: common_TechCardPieceFusingZone | undefined): FuseZone |
 
 /** The form's zone → the wire. An empty message clears the stored zone. */
 function zoneToWire(z: FuseZone | null): common_TechCardPieceFusingZone {
-  const splineToWire = (spline: FuseSpline) => ({
-    points: spline.points.map((p) => ({ x: dec(p.x), y: dec(p.y), corner: !!p.corner })),
-  });
+  const splineToWire = (spline: FuseSpline) => {
+    const follows = spline.gradeMode === 'follow_line' && !!spline.anchor;
+    return {
+      points: spline.points.map((p) => ({ x: dec(p.x), y: dec(p.y), corner: !!p.corner })),
+      gradeMode: follows ? RING_FOLLOW_LINE : spline.gradeMode === 'grow' ? RING_GROW : RING_FIXED,
+      ...(follows ? { anchor: { x: dec(spline.anchor!.x), y: dec(spline.anchor!.y) } } : {}),
+    } as NonNullable<common_TechCardPieceFusingZone['spline']>;
+  };
   if (!z) return { holes: [], islands: [] };
   if ('rect' in z)
     return {
@@ -268,11 +315,18 @@ export function fuseFieldsFromWire(
 ): Omit<PieceFuseFields, 'fused' | 'fusingMode' | 'fusingWidthMm'> {
   return {
     fusingBomLineKey: (p.fusingBomLineKey ?? '').trim(),
-    fusingEdges: (p.fusingEdges?.items ?? []).map((e) => ({
-      edge: e.edge ?? 0,
-      startMm: num(e.startMm?.value) ?? 0,
-      endMm: num(e.endMm?.value) ?? 0,
-    })),
+    fusingEdges: (p.fusingEdges?.items ?? []).map((e) => {
+      const edge: FuseEdge = {
+        edge: e.edge ?? 0,
+        startMm: num(e.startMm?.value) ?? 0,
+        endMm: num(e.endMm?.value) ?? 0,
+      };
+      const startMode = endCarryOf(e.startMode);
+      const endMode = endCarryOf(e.endMode);
+      if (startMode) edge.startMode = startMode;
+      if (endMode) edge.endMode = endMode;
+      return edge;
+    }),
     fusingZone: zoneFromWire(p.fusingZone),
     fusingInsetMm: (p.fusingInsetMm?.value ?? '').trim(),
     fusingInsetNet: !!p.fusingInsetNet,
@@ -295,7 +349,9 @@ export function fuseFieldsToWire(
         edge: e.edge,
         startMm: dec(e.startMm),
         endMm: dec(e.endMm),
-      })),
+        startMode: endCarryToWire(e.startMode),
+        endMode: endCarryToWire(e.endMode),
+      })) as NonNullable<common_TechCardPiece['fusingEdges']>['items'],
     },
     fusingZone: zoneToWire(f.fusingZone),
     fusingInsetMm: { value: f.fusingInsetMm.trim() },

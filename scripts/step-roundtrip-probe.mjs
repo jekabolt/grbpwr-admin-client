@@ -50,7 +50,7 @@
 //   стирает так же, а форму даже не пачкает — прячась и от поведенческой проверки) и спрашивает
 //   обе арности useEffect. Тот же стиратель после ужесточения — 1 провал. Откатано.
 
-import { build as esbuild } from 'esbuild';
+import { build as esbuild } from './probe-esbuild.mjs';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';

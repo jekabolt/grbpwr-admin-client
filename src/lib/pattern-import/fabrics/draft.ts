@@ -51,6 +51,7 @@ import type {
   ManifestPiece,
 } from '../types';
 import { MANIFEST_TAG } from '../types';
+import { isGradeMapTagged } from '../manifest/leading';
 import { isInterliningScope, purposeWord } from './scope';
 import {
   FOLD_CUT_SYMMETRY,
@@ -109,12 +110,16 @@ export function cardNameOf(
   return [p.code, ...mods].filter(Boolean).join('_') || p.identity.trim();
 }
 
-/** The DXF without the manifest comment block and without its creation time (ISO and R12 header). */
+/**
+ * The DXF without the manifest and grade map comment blocks and without its creation time (ISO and
+ * R12 header).
+ */
 export function bareOf(dxfText: string, createdAt: string): string {
   const lines = dxfText.split(/\r?\n/);
   const out: string[] = [];
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trim() === '999' && (lines[i + 1] ?? '').startsWith(MANIFEST_TAG)) {
+    const next = lines[i + 1] ?? '';
+    if (lines[i].trim() === '999' && (next.startsWith(MANIFEST_TAG) || isGradeMapTagged(next))) {
       i++;
       continue;
     }

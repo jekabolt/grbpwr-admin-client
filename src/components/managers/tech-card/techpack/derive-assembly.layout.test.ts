@@ -109,9 +109,10 @@ describe('assembly inner contour ranges', () => {
   const surfaceInput = (
     ranges: readonly (readonly [number, number])[],
     mutate?: (row: StoredSeam) => void,
+    partWidth = 40,
   ) => {
     const hostGeom = geom('HOST', 200, 100);
-    const partGeom = geom('PART', 40, 20);
+    const partGeom = geom('PART', partWidth, 20);
     const line: Pt2[] = [
       [0, 0],
       [140, 0],
@@ -151,7 +152,7 @@ describe('assembly inner contour ranges', () => {
           inner: [
             [
               [0, 0],
-              [40, 0],
+              [partWidth, 0],
             ],
           ],
           notch: [],
@@ -197,6 +198,43 @@ describe('assembly inner contour ranges', () => {
     expect(seam?.a.map((part) => part.lenMm)).toEqual([30, 30]);
     expect(seam?.a.reduce((sum, part) => sum + part.lenMm, 0)).toBe(60);
   });
+
+  it.each([
+    ['exact shares', 140 / 300, 290 / 300],
+    // What the server holds: shares rounded to 1e-4 run a hair (0.01 mm) past the corner.
+    ['stored rounded shares', 0.4667, 0.9667],
+  ])(
+    'lays a straight partner on the longer leg of a sharp inner-contour stretch: %s',
+    (_, to, from) => {
+      const input = surfaceInput(
+        [
+          [0, to],
+          [from, 1],
+        ],
+        undefined,
+        150,
+      );
+      const card = deriveAssembly(input, undefined, { globalAssembly: false }).cards.get(1)!;
+      const host = card.items.find((item) => item.p === 'HOST')!;
+      const part = card.items.find((item) => item.p === 'PART')!;
+      const transform = (matrix: typeof host.T, point: Pt2): Pt2 => [
+        matrix[0] * point[0] + matrix[2] * point[1] + matrix[4],
+        matrix[1] * point[0] + matrix[3] * point[1] + matrix[5],
+      ];
+      const leg = [transform(host.T, [0, 0]), transform(host.T, [140, 0])] as const;
+      const partner = [transform(part.T, [0, 0]), transform(part.T, [150, 0])] as const;
+      const distanceToLeg = (point: Pt2) => {
+        const dx = leg[1][0] - leg[0][0];
+        const dy = leg[1][1] - leg[0][1];
+        return Math.abs(dy * (point[0] - leg[0][0]) - dx * (point[1] - leg[0][1])) / 140;
+      };
+
+      expect(Math.max(...partner.map(distanceToLeg))).toBeLessThan(1e-6);
+      expect(
+        Math.min(...partner.map((point) => Math.hypot(point[0] - leg[1][0], point[1] - leg[1][1]))),
+      ).toBeLessThan(1e-6);
+    },
+  );
 
   it('names a side of a closed inner contour without the slit word', () => {
     const model = deriveAssembly(surfaceInput([[0, 0.4667]]), undefined, { globalAssembly: false });

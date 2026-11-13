@@ -20,6 +20,8 @@
 //      round the lines) is dropped.
 //   5. Inverse — the field is built once, from the smaller outline; the other direction solves
 //      q = p + D(p) by damped Newton with a residual check, else the field built the asked way round.
+//   6. Handed in — the grade map may give the contour's nodes and the line pairs (`given`); they
+//      replace steps 1 and 3 where present, everything after them is unchanged.
 //
 // The contour carrier (a point keeps its mm off its two nearest contour stretches) uses the same
 // correspondence, is built from the same outline and inverted the same way. `follow` mixes the
@@ -320,6 +322,132 @@ const invertMatch = (m: ContourMatch): ContourMatch => ({
     kt: r.kb,
   })),
 });
+
+/** The corner thresholds the contour matcher tries, in order (shared with the grade-map builder). */
+export const CONTOUR_CORNER_THRESHOLDS: readonly number[] = CORNER_THRESHOLDS;
+
+// ---------- correspondences handed in (the grade map) ----------
+
+/**
+ * Matched nodes of the two rings the mapping is built between: ascending arcs, one lap from the
+ * first node (the rings as `GivenCorrespondence.contour` received them). `breaks[k]` makes node k a
+ * corner, where one contour stretch ends. The stretches run corner to corner (from the first node
+ * round the loop when there is no corner) and are spaced inside as an inferred stretch is: the
+ * carrier mixes one stretch's twin with two-stretch pins that only read the stretches' lines, so a
+ * twin pulled along by the other nodes (notches 6–9 mm off the even spacing on a sleeve seam) folds
+ * that mix and the way back cannot be solved. The other nodes are handed in all the same.
+ */
+export type GivenNodes = {
+  s: readonly number[];
+  t: readonly number[];
+  breaks: readonly boolean[];
+};
+
+/** Internal line pairs on the built side, point i onto point i: [base side, target side, closed]. */
+export type GivenLinePairs = [PtMm[], PtMm[], boolean][];
+
+/**
+ * Correspondences from outside (the grade map); whatever they leave out is inferred as before. Both
+ * are asked on the side the mapping is built from: `sameWay` is false when that is the target
+ * outline, so its rings and lines come first.
+ */
+export type GivenCorrespondence = {
+  /** Tells cached mappings apart: one key, one set of correspondences. */
+  key: string;
+  /** The contour's nodes on the two rings (counter-clockwise); null = infer the contour. */
+  contour?: (base: readonly PtMm[], target: readonly PtMm[], sameWay: boolean) => GivenNodes | null;
+  /** The line pairs; `inferred` is the geometric pairing of the same lines. */
+  lines?: (
+    base: readonly FuseInternalLine[],
+    target: readonly FuseInternalLine[],
+    inferred: () => GivenLinePairs,
+    sameWay: boolean,
+  ) => GivenLinePairs;
+};
+
+/** The handed-in contour correspondence on the built side; null when absent or not usable. */
+function givenMatch(
+  baseOutline: readonly PtMm[],
+  targetOutline: readonly PtMm[],
+  forward: boolean,
+  given: GivenCorrespondence | undefined,
+): ContourMatch | null {
+  if (!given?.contour) return null;
+  const base = loopOf(forward ? baseOutline : targetOutline);
+  const target = loopOf(forward ? targetOutline : baseOutline);
+  if (base.ring.length < 3 || target.ring.length < 3) return null;
+  const nodes = given.contour(base.ring, target.ring, forward);
+  return nodes ? matchFromNodes(base, target, nodes) : null;
+}
+
+/**
+ * Given nodes sit within this of a ring vertex are read as that vertex. The map stores 0.01 mm
+ * steps, so a corner lands a few µm off it; the carrier reads a stretch's direction 1 µm inside its
+ * end, and a few µm off the corner that is the neighbouring stretch's direction.
+ */
+const GIVEN_SNAP_MM = 0.05;
+
+/** Arc x (any lap) moved onto the nearest vertex of the loop when within GIVEN_SNAP_MM. */
+function snapToVertex(loop: Loop, x: number): number {
+  if (!Number.isFinite(x)) return x;
+  const a = mod(x, loop.total);
+  const i = segmentAt(loop, a);
+  const lo = loop.cum[i];
+  const hi = loop.cum[i + 1];
+  const v = a - lo <= hi - a ? lo : hi;
+  return Math.abs(v - a) <= GIVEN_SNAP_MM ? x + (v - a) : x;
+}
+
+/** Runs from corner node to corner node, spaced inside as `buildContourMatch` spaces its runs. */
+function matchFromNodes(base: Loop, target: Loop, nodes: GivenNodes): ContourMatch | null {
+  const LB = base.total;
+  const LT = target.total;
+  const n = nodes.s.length;
+  if (!n || nodes.t.length !== n || nodes.breaks.length !== n || !(LB > 0) || !(LT > 0))
+    return null;
+  const s: number[] = [];
+  const t: number[] = [];
+  const cut: boolean[] = [];
+  for (let k = 0; k < n; k++) {
+    const sk = snapToVertex(base, nodes.s[k]);
+    const tk = snapToVertex(target, nodes.t[k]);
+    if (!Number.isFinite(sk) || !Number.isFinite(tk)) return null;
+    const last = s.length - 1;
+    if (last >= 0 && (sk < s[last] - 1e-9 || tk < t[last] - 1e-9)) return null;
+    if (last >= 0 && sk - s[last] < 1e-6) {
+      cut[last] ||= nodes.breaks[k];
+      continue;
+    }
+    s.push(sk);
+    t.push(tk);
+    cut.push(nodes.breaks[k]);
+  }
+  if (s[s.length - 1] - s[0] > LB + 1e-6 || t[t.length - 1] - t[0] > LT + 1e-6) return null;
+  while (s.length > 1 && s[0] + LB - s[s.length - 1] < 1e-6) {
+    cut[0] ||= cut[cut.length - 1];
+    s.pop();
+    t.pop();
+    cut.pop();
+  }
+  const m = s.length;
+  // Node m + k is node k one lap on.
+  const S = (k: number) => (k < m ? s[k] : s[k - m] + LB);
+  const T = (k: number) => (k < m ? t[k] : t[k - m] + LT);
+  const starts = cut.flatMap((c, k) => (c ? [k] : []));
+  const cornered = starts.length > 0;
+  if (!cornered) starts.push(0);
+  const from = boxOf(base.ring);
+  const to = boxOf(target.ring);
+  const sx = from.maxX > from.minX ? (to.maxX - to.minX) / (from.maxX - from.minX) || 1 : 1;
+  const sy = from.maxY > from.minY ? (to.maxY - to.minY) / (from.maxY - from.minY) || 1 : 1;
+  const runs = starts.map((i, r): ContourRun => {
+    const j = r + 1 < starts.length ? starts[r + 1] : starts[0] + m;
+    const b0 = mod(S(i), LB);
+    const t0 = mod(T(i), LT);
+    return runOf(base, b0, S(j) - S(i), target, t0, T(j) - T(i), sx, sy);
+  });
+  return { base, target, runs, cornered };
+}
 
 /** The contour correspondence base → target; null when an outline is not a ring. */
 export function matchContours(
@@ -760,6 +888,8 @@ function pairLines(
 
 type GradeField = {
   match: ContourMatch;
+  /** The paired internal lines, point i onto point i: [built base side, built target side, closed]. */
+  pairs: [PtMm[], PtMm[], boolean][];
   /** The largest move of any anchor: no point moves farther. */
   reach: number;
   lines: Anchor[][];
@@ -770,6 +900,12 @@ function buildField(
   match: ContourMatch,
   baseLines: readonly FuseInternalLine[],
   targetLines: readonly FuseInternalLine[],
+  /** Handed-in line pairs (the grade map) in place of the inferred ones. */
+  pairsOf?: (
+    base: readonly FuseInternalLine[],
+    target: readonly FuseInternalLine[],
+    inferred: () => GivenLinePairs,
+  ) => GivenLinePairs,
 ): GradeField {
   const cage = cageOf(match);
   const base = (p: PtMm) => meanValueMove(cage, p);
@@ -777,15 +913,18 @@ function buildField(
   for (let i = 0; i < cage.p.length; i++)
     contourReach = Math.max(contourReach, Math.hypot(cage.dx[i], cage.dy[i]));
   const rim = segmentsAlong(cage.p, true);
-  let lines: Anchor[][] = pairLines(
-    baseLines,
-    targetLines,
-    (p) => {
-      const d = base(p);
-      return { x: p.x + d.x, y: p.y + d.y };
-    },
-    contourReach,
-  )
+  const inferred = () =>
+    pairLines(
+      baseLines,
+      targetLines,
+      (p) => {
+        const d = base(p);
+        return { x: p.x + d.x, y: p.y + d.y };
+      },
+      contourReach,
+    );
+  const pairs = pairsOf ? pairsOf(baseLines, targetLines, inferred) : inferred();
+  let lines: Anchor[][] = pairs
     .map(([from, to, closed]) => {
       const out: Anchor[] = [];
       const n = from.length;
@@ -914,7 +1053,7 @@ function buildField(
         );
       }),
     );
-    if (!offenders.length) return { match, lines, ...field };
+    if (!offenders.length) return { match, pairs, lines, ...field };
     const residual = (line: Anchor[]) =>
       Math.max(
         ...line.map((s) => Math.max(Math.hypot(s.ra.x, s.ra.y), Math.hypot(s.rb.x, s.rb.y))),
@@ -1082,34 +1221,68 @@ export type ZoneGrade = {
   follow: (point: PtMm) => PtMm;
   /** The translation that carries a whole detached ring. */
   shift: (ring: readonly PtMm[]) => PtMm;
+  /**
+   * The internal line a 'follow_line' ring is tied to at `anchor`, with its twin on the other size,
+   * point i onto point i, as the field's geometric pairing found it. null when the anchor is on no
+   * line, or its line has no twin (the caller then carries the ring the default way, as a guess).
+   */
+  linePair: (anchor: PtMm) => LinePair | null;
 };
+
+export type LinePair = { from: readonly PtMm[]; to: readonly PtMm[]; closed: boolean };
 
 const cache = new WeakMap<
   readonly PtMm[],
-  { target: readonly PtMm[]; internals: FuseInternals | null | undefined; grade: ZoneGrade }[]
+  {
+    target: readonly PtMm[];
+    internals: FuseInternals | null | undefined;
+    given: string | undefined;
+    grade: ZoneGrade;
+  }[]
 >();
 
 /**
  * The size mapping between two outlines. The field is built from the smaller outline and inverted
- * the other way, so base → size → base returns the stored points.
+ * the other way, so base → size → base returns the stored points. `given`: correspondences from
+ * the grade map; without them everything is inferred from the outlines and lines.
  */
 export function zoneGrade(
   baseOutline: readonly PtMm[],
   targetOutline: readonly PtMm[],
   internals?: FuseInternals | null,
+  given?: GivenCorrespondence | null,
 ): ZoneGrade {
   const known = cache.get(baseOutline) ?? [];
-  const hit = known.find((k) => k.target === targetOutline && k.internals === internals);
+  const givenKey = given ? given.key : undefined;
+  const hit = known.find(
+    (k) => k.target === targetOutline && k.internals === internals && k.given === givenKey,
+  );
   if (hit) return hit.grade;
   // The same outlines often arrive as fresh arrays (a size row rebuilt per render): key by content.
-  const key = contentKey(baseOutline, targetOutline, internals);
+  const key = contentKey(baseOutline, targetOutline, internals) + (given ? `#gm:${given.key}` : '');
   let grade = byContent.get(key);
   if (grade) byContent.delete(key);
-  else grade = buildZoneGrade(baseOutline, targetOutline, internals);
+  else grade = buildZoneGrade(baseOutline, targetOutline, internals, given ?? undefined);
   byContent.set(key, grade);
   if (byContent.size > CONTENT_CACHE_SIZE) byContent.delete(byContent.keys().next().value!);
-  cache.set(baseOutline, [...known.slice(-7), { target: targetOutline, internals, grade }]);
+  cache.set(baseOutline, [
+    ...known.slice(-7),
+    { target: targetOutline, internals, given: givenKey, grade },
+  ]);
   return grade;
+}
+
+/**
+ * How many internal lines the grade field pairs and keeps base → target (read only: the grade-map
+ * survey compares its own pairing with it). Built the asked way round; 0 when an outline is no ring.
+ */
+export function pairedInternalLineCount(
+  baseOutline: readonly PtMm[],
+  targetOutline: readonly PtMm[],
+  internals: FuseInternals,
+): number {
+  const built = buildContourMatch(baseOutline, targetOutline);
+  return built ? buildField(built, internals.base, internals.target).lines.length : 0;
 }
 
 const CONTENT_CACHE_SIZE = 16;
@@ -1135,11 +1308,23 @@ function buildZoneGrade(
   baseOutline: readonly PtMm[],
   targetOutline: readonly PtMm[],
   internals: FuseInternals | null | undefined,
+  given?: GivenCorrespondence,
 ): ZoneGrade {
   const forward = buildsFrom(baseOutline, targetOutline);
-  const built = forward
-    ? buildContourMatch(baseOutline, targetOutline)
-    : buildContourMatch(targetOutline, baseOutline);
+  const built =
+    givenMatch(baseOutline, targetOutline, forward, given) ??
+    (forward
+      ? buildContourMatch(baseOutline, targetOutline)
+      : buildContourMatch(targetOutline, baseOutline));
+  /** The handed-in line pairs for a field whose base side is (sameWay) or is not the asked base. */
+  const pairsOf = (sameWay: boolean) =>
+    given?.lines
+      ? (
+          b: readonly FuseInternalLine[],
+          t: readonly FuseInternalLine[],
+          inferred: () => GivenLinePairs,
+        ) => given.lines!(b, t, inferred, sameWay)
+      : undefined;
   if (!built) {
     // Not a ring: the bbox frames are all there is.
     const from = boxOf(baseOutline);
@@ -1160,6 +1345,7 @@ function buildZoneGrade(
         const moved = frame(c);
         return { x: moved.x - c.x, y: moved.y - c.y };
       },
+      linePair: () => null,
     };
   }
   const baseLines = internals?.base ?? [];
@@ -1167,8 +1353,8 @@ function buildZoneGrade(
   let field: GradeField | null = null;
   const canonical = () =>
     (field ??= forward
-      ? buildField(built, baseLines, targetLines)
-      : buildField(built, targetLines, baseLines));
+      ? buildField(built, baseLines, targetLines, pairsOf(true))
+      : buildField(built, targetLines, baseLines, pairsOf(false)));
   const match = forward ? built : invertMatch(built);
   // The carrier too is built from the smaller outline; the other way round it is solved for, so a
   // contour point returns where it was. Where the solver fails, the carrier read the asked way.
@@ -1184,6 +1370,8 @@ function buildZoneGrade(
         return p ?? askedCarry(q);
       };
   const builtFollow = followOf(built, builtCarry, canonical);
+  // Pairs are read on the built side either way round, so both directions see the same twins.
+  const linePair = (anchor: PtMm) => linePairAt(canonical().pairs, forward ? 0 : 1, anchor);
   if (forward)
     return {
       match,
@@ -1194,11 +1382,12 @@ function buildZoneGrade(
       },
       follow: builtFollow,
       shift: (ring) => shiftOfRing(canonical(), ring),
+      linePair,
     };
   // The asked direction runs against the built one. A point the solver cannot return goes through
   // the field built the asked way round (its own pairing and residuals, not an exact inverse).
   let direct: GradeField | null = null;
-  const asked = () => (direct ??= buildField(match, baseLines, targetLines));
+  const asked = () => (direct ??= buildField(match, baseLines, targetLines, pairsOf(true)));
   const point = (q: PtMm): PtMm => {
     const p = invertPoint(canonical().move, q);
     if (p) return p;
@@ -1235,5 +1424,31 @@ function buildZoneGrade(
       const back = point(c);
       return { x: back.x - c.x, y: back.y - c.y };
     },
+    linePair,
   };
+}
+
+/**
+ * The anchor of a 'follow_line' ring sits on its line (it is picked there, 0.1 mm rounding) within
+ * this. An anchor on no paired line — on a line with no twin, or carried the default way because
+ * its line had none — follows nothing, either way round.
+ */
+const ANCHOR_ON_LINE_MM = 0.5;
+
+/**
+ * The pair whose `side` (the asked base side) runs through `anchor`.
+ */
+function linePairAt(
+  pairs: readonly [PtMm[], PtMm[], boolean][],
+  side: 0 | 1,
+  anchor: PtMm,
+): LinePair | null {
+  let best: { d: number; pair: readonly [PtMm[], PtMm[], boolean] } | null = null;
+  for (const pair of pairs) {
+    const d = distanceToPolyline(anchor, pair[side], pair[2]);
+    if (!best || d < best.d) best = { d, pair };
+  }
+  if (!best || best.d > ANCHOR_ON_LINE_MM) return null;
+  const [built, other, closed] = best.pair;
+  return side ? { from: other, to: built, closed } : { from: built, to: other, closed };
 }

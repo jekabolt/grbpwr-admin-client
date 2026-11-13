@@ -212,6 +212,7 @@ import {
   consumeSeamDeleteRetry,
   noteSheetRestore,
   peekSeamDeleteRetry,
+  seamDeleteRetryKeys,
   provideSheetRestorer,
   restoreSheetVersion,
   swapSheetFile,
@@ -235,6 +236,8 @@ import {
   type InterliningShapePair,
 } from './nesting/interlining-shape-match';
 import { blankFuse, writeFuseFields } from './nesting/fuse-spec';
+import { fusingBaseRows } from 'lib/grade-map/fusing-base-source';
+import { currentFusingBases, publishFusingBases } from 'lib/grade-map/fusing-base-store';
 
 // The whole nesting feature (modal + worker + dxf/clipper deps) lives in a lazy chunk —
 // nothing loads until someone actually opens a раскладка.
@@ -858,11 +861,19 @@ export function PatternsField({
   const lastSeamRetrySave = useRef({ cardId: techCardId, at: autosave.lastSavedAt });
   retrySeamDeletesRef.current = async () => {
     if (!techCardId || retryingSeamDeletes.current) return;
-    const seamKeys = peekSeamDeleteRetry(techCardId);
-    if (!seamKeys.length) return;
+    const holders = () => ({
+      operations: (getValues('operations') ?? []) as FormOp[],
+      cutStrips: getValues('cutStrips') ?? [],
+    });
+    // A step or a strip may have taken a key since the delete failed (U1 #3): it stays.
+    const { send, held } = seamDeleteRetryKeys(peekSeamDeleteRetry(techCardId), holders());
+    if (held.length) consumeSeamDeleteRetry(techCardId, held);
+    if (!send.length) return;
     retryingSeamDeletes.current = true;
     try {
-      await deleteSeamsOnServer(techCardId, seamKeys);
+      // The card's undo may still hold the rows on a step or a strip; it cannot bring them back.
+      undoHistory.cut('dxf-delete-retry');
+      await deleteSeamsOnServer(techCardId, send, () => seamDeleteRetryKeys(send, holders()).send);
     } finally {
       retryingSeamDeletes.current = false;
     }
@@ -1468,6 +1479,33 @@ export function PatternsField({
         : [],
     [mainPatternScope, pieceDxfAliases, linkSet],
   );
+
+  // grademap P3: each main-pattern piece's base contour → the fusing markup key the save sends and
+  // the stale flag other screens read (lib/grade-map/fusing-base-store). Data only, no UI.
+  const cardSizeOfToken = useMemo(() => {
+    const m = new Map<string, { sizeId: number; rank: number }>();
+    orderSizes(sizeIds).forEach((id, rank) => {
+      for (const t of sizeTokensOf(sizeById.get(id))) {
+        const k = bareToken(t);
+        if (k && !m.has(k)) m.set(k, { sizeId: id, rank });
+      }
+    });
+    return m;
+  }, [sizeIds, sizeById, orderSizes]);
+  const currentBases = useMemo(
+    () =>
+      currentFusingBases(
+        fusingBaseRows(
+          mainPatternScope ? pieceShapesByScope.get(mainPatternScope.scope.key) ?? [] : [],
+          (token) => cardSizeOfToken.get(bareToken(token)),
+          baseSampleSizeId,
+        ),
+      ),
+    [mainPatternScope, pieceShapesByScope, cardSizeOfToken, baseSampleSizeId],
+  );
+  useEffect(() => {
+    if (bundle) publishFusingBases(techCardId, currentBases);
+  }, [bundle, techCardId, currentBases]);
 
   const interliningReviews = useMemo(() => {
     const out = new Map<
@@ -3335,10 +3373,14 @@ export function PatternsField({
 
   // One ChangeTechCardSeams under the version the form stands on (C7): the delete also unlinks the
   // rows from every step, and the form adopts those links with the new version.
-  async function deleteSeamsOnServer(cardId: number, seamKeys: string[]): Promise<boolean> {
+  async function deleteSeamsOnServer(
+    cardId: number,
+    seamKeys: string[],
+    stillOwed?: () => string[],
+  ): Promise<boolean> {
     const res = await runSeamChange(
       cardId,
-      { delete: seamKeys },
+      stillOwed ? () => ({ delete: stillOwed() }) : { delete: seamKeys },
       { verb: 'removal', quiet: true },
       { call: (req) => adminService.ChangeTechCardSeams(req) },
     );

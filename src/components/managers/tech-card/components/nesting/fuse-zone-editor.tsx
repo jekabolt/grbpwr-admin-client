@@ -9,14 +9,20 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ZONE_ON_CONTOUR_MM } from 'lib/fusing-dxf/spline';
 import { zoneRingsMm } from 'lib/fusing-dxf/geometry';
 import type { PieceDTO, Pt } from 'lib/nesting/types';
-import type { FuseZone } from 'lib/fusing-dxf/types';
+import type { FuseInternalLine } from 'lib/fusing-dxf/dxf';
+import { followLineChoices } from 'lib/fusing-dxf/follow-line';
+import type { FuseGradeMode, FuseZone } from 'lib/fusing-dxf/types';
+import { Chip } from 'ui';
 import type { PieceFuseSpec } from './fuse-spec';
 import {
   drawZoneRing,
   insertZonePoint,
   isDrawnZone,
   removeZonePoint,
+  withZoneRingMode,
   withZoneRingPoints,
+  zoneRingLine,
+  zoneRingMode,
   zoneRingOutline,
   zoneRingPoints,
   zoneRingRefs,
@@ -71,6 +77,16 @@ function nearestOn(q: Pt, ring: Pt[]) {
   return best;
 }
 
+const NO_LINES: readonly FuseInternalLine[] = [];
+const RING_MODES: [FuseGradeMode, string][] = [
+  ['fixed', 'fixed'],
+  ['follow_line', 'follow line'],
+  ['grow', 'grow'],
+];
+/** The mode chips under the ring, screen px. */
+const MODE_BAR_W = 230;
+const MODE_BAR_H = 26;
+
 type Drag =
   | { t: 'pt'; i: number; moved: boolean; cx: number; cy: number }
   | { t: 'side'; side?: number };
@@ -83,6 +99,7 @@ export function FuseZoneEditor({
   outline,
   inner,
   bus,
+  lines = NO_LINES,
   onChange,
 }: {
   /** cm per screen pixel. */
@@ -95,6 +112,8 @@ export function FuseZoneEditor({
   /** The inset contour, sheet coords (points snap onto it and stay inside it). */
   inner: Pt[];
   bus?: ZoneBus;
+  /** The piece's internal lines, piece-local mm: what «follow line» ties a ring to. */
+  lines?: readonly FuseInternalLine[];
   onChange: (next: PieceFuseSpec) => void;
 }) {
   const ox = piece.originX ?? 0;
@@ -288,6 +307,23 @@ export function FuseZoneEditor({
   };
 
   const d = drag.current;
+  const mode = zoneRingMode(zone, selected);
+  const choices = followLineChoices(lines);
+  const followed = zoneRingLine(zone, selected, lines);
+  const setMode = (next: FuseGradeMode, line?: number) => {
+    if (next === mode && line == null) return;
+    const nextZone = withZoneRingMode(zone, selected, next, lines, line);
+    if (!nextZone || nextZone === zone) return;
+    bus?.commit(ci, zone, selected, selected);
+    onChange({ ...spec, zone: nextZone });
+  };
+  const modeBar =
+    ring.length >= 3
+      ? {
+          x: Math.min(...ring.map((q) => q.x)),
+          y: Math.max(...ring.map((q) => q.y)) + (R + 6 * px),
+        }
+      : null;
 
   if (drawKind)
     return (
@@ -386,6 +422,49 @@ export function FuseZoneEditor({
           }}
         />
       )}
+      {mode === 'follow_line' &&
+        choices.map((index, k) => {
+          const line = lines[index];
+          const path = line.points.map(W);
+          const on = k === followed;
+          const tag = path[path.length - 1];
+          const Shape = line.closed ? 'polygon' : 'polyline';
+          return (
+            <g key={`line-${index}`} data-follow-line={k} data-followed={on || undefined}>
+              <Shape
+                points={str(path)}
+                fill='none'
+                stroke={on ? INK : 'var(--color-labelColor)'}
+                strokeWidth={on ? 2.5 : 1}
+                strokeDasharray={on ? undefined : '4 3'}
+                vectorEffect='non-scaling-stroke'
+                pointerEvents='none'
+              />
+              <text
+                x={tag.x + 5 * px}
+                y={tag.y + 3 * px}
+                fontSize={10 * px}
+                fill={on ? INK : 'var(--color-labelColor)'}
+                pointerEvents='none'
+                paintOrder='stroke'
+                stroke={PAPER}
+                strokeWidth={3 * px}
+              >
+                LINE {k + 1}
+              </text>
+              <Shape
+                points={str(path)}
+                fill='none'
+                stroke='transparent'
+                strokeWidth={14}
+                vectorEffect='non-scaling-stroke'
+                style={{ cursor: 'pointer', touchAction: 'none' }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => setMode('follow_line', index)}
+              />
+            </g>
+          );
+        })}
       {pts.map((p, i) => {
         const sharp = mm[i].corner;
         const on = (d?.t === 'pt' && d.i === i && d.moved) || snapped(p);
@@ -437,6 +516,34 @@ export function FuseZoneEditor({
           </g>
         );
       })}
+      {modeBar && (
+        <foreignObject
+          x={modeBar.x}
+          y={modeBar.y}
+          width={MODE_BAR_W * px}
+          height={MODE_BAR_H * px}
+          style={{ overflow: 'visible' }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <div
+            data-ring-modes=''
+            className='flex gap-0.5'
+            style={{ width: MODE_BAR_W, transform: `scale(${px})`, transformOrigin: '0 0' }}
+          >
+            {RING_MODES.map(([value, label]) => (
+              <Chip
+                key={value}
+                selected={mode === value}
+                pressed={mode === value}
+                disabled={value === 'follow_line' && choices.length === 0}
+                onClick={() => setMode(value)}
+              >
+                {label}
+              </Chip>
+            ))}
+          </div>
+        </foreignObject>
+      )}
     </g>
   );
 }

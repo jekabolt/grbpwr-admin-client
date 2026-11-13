@@ -12,7 +12,9 @@ import {
 import { EDGE_CORNER_TURN_DEG } from 'lib/fusing-dxf/edge-runs';
 import { ZONE_MAX_HOLES, ZONE_MAX_OUTER_RINGS, zoneRingsMm } from 'lib/fusing-dxf/geometry';
 import type { PtMm } from 'lib/pattern-import/types';
-import type { FuseSpline, FuseSplinePoint, FuseZone } from 'lib/fusing-dxf/types';
+import type { FuseInternalLine } from 'lib/fusing-dxf/dxf';
+import { anchorOnLine, followLineChoices, nearestInternalLine } from 'lib/fusing-dxf/follow-line';
+import type { FuseGradeMode, FuseSpline, FuseSplinePoint, FuseZone } from 'lib/fusing-dxf/types';
 
 export type ZonePoint = { x: number; y: number; corner: boolean };
 type DrawnZone = Exclude<FuseZone, { dxfPieceKey: string }>;
@@ -150,9 +152,118 @@ export function splineZone(
   return { spline: { points }, holes: rings.holes, islands: rings.islands };
 }
 
-const splineOfPoints = (pts: readonly ZonePoint[]): FuseSpline => ({
+/** How the ring is carried to other sizes travels with it through every reshape. */
+const carryOf = (ring: FuseSpline | null | undefined): Pick<FuseSpline, 'gradeMode' | 'anchor'> =>
+  ring?.gradeMode
+    ? { gradeMode: ring.gradeMode, ...(ring.anchor ? { anchor: ring.anchor } : {}) }
+    : {};
+
+const splineOfPoints = (pts: readonly ZonePoint[], was?: FuseSpline | null): FuseSpline => ({
   points: pts.map((p) => ({ x: r1(p.x), y: r1(p.y), corner: p.corner })),
+  ...carryOf(was),
 });
+
+/** The stored ring; null for a legacy rectangle or a missing ring. */
+export function zoneRingSpline(
+  z: FuseZone | null | undefined,
+  ref: ZoneRingRef,
+): FuseSpline | null {
+  if (!isSplineZone(z)) return null;
+  if (ref === 'main') return z.spline;
+  const hole = ringIndex(ref, 'hole');
+  const island = ringIndex(ref, 'island');
+  return (hole >= 0 ? z.holes[hole] : island >= 0 ? z.islands[island] : null) ?? null;
+}
+
+export const zoneRingMode = (z: FuseZone | null | undefined, ref: ZoneRingRef): FuseGradeMode =>
+  zoneRingSpline(z, ref)?.gradeMode ?? 'fixed';
+
+/** The ordinal (from 0) among the lines a ring can follow of the one this ring follows; -1 = none. */
+export function zoneRingLine(
+  z: FuseZone | null | undefined,
+  ref: ZoneRingRef,
+  lines: readonly FuseInternalLine[],
+): number {
+  const ring = zoneRingSpline(z, ref);
+  if (ring?.gradeMode !== 'follow_line' || !ring.anchor) return -1;
+  return followLineChoices(lines).indexOf(nearestInternalLine(ring.anchor, lines));
+}
+
+/**
+ * What a size could not find and so built by guess, one key per element: a ring's followed line
+ * (`line:<ring ref>`), a strip end's notch (`notch:<edge>:s|e`, the edge and end as shown).
+ */
+export type FuseGuess = string;
+export const NO_GUESS: ReadonlySet<FuseGuess> = new Set();
+export const fuseGuessKey = (what: 'line' | 'notch', at: string): FuseGuess => `${what}:${at}`;
+export const ringGuessed = (guessed: ReadonlySet<FuseGuess>, ref: ZoneRingRef) =>
+  guessed.has(fuseGuessKey('line', ref));
+export const endGuessed = (guessed: ReadonlySet<FuseGuess>, edge: number, end: 's' | 'e') =>
+  guessed.has(fuseGuessKey('notch', `${edge}:${end}`));
+
+/** The word a ring row shows for its carry-over mode. */
+export function zoneRingModeLabel(
+  z: FuseZone | null | undefined,
+  ref: ZoneRingRef,
+  lines: readonly FuseInternalLine[],
+): string {
+  const mode = zoneRingMode(z, ref);
+  if (mode === 'grow') return 'grow';
+  if (mode !== 'follow_line') return 'fixed';
+  const line = zoneRingLine(z, ref, lines);
+  return line >= 0 ? `line ${line + 1}` : 'line';
+}
+
+/**
+ * Sets how one ring is carried to other sizes. «Follow line» ties it to `line` (an index into
+ * `lines`), or to the followable line nearest to the ring when none is given; null when the piece
+ * has no such line. A legacy rectangle becomes a spline to hold a mode.
+ */
+export function withZoneRingMode(
+  z: FuseZone | null | undefined,
+  ref: ZoneRingRef,
+  mode: FuseGradeMode,
+  lines: readonly FuseInternalLine[] = [],
+  line?: number,
+): DrawnZone | null {
+  if (!isDrawnZone(z)) return null;
+  if (mode === 'fixed' && !isSplineZone(z)) return z;
+  const points = zoneRingPoints(z, ref);
+  if (!points.length) return null;
+  let carry: Pick<FuseSpline, 'gradeMode' | 'anchor'> = {};
+  if (mode === 'grow') carry = { gradeMode: 'grow' };
+  if (mode === 'follow_line') {
+    const centre = {
+      x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+      y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+    };
+    const choices = followLineChoices(lines);
+    let pick = line ?? -1;
+    if (pick < 0) {
+      let gap = Infinity;
+      for (const index of choices) {
+        const on = anchorOnLine(lines[index], centre);
+        const d = Math.hypot(on.x - centre.x, on.y - centre.y);
+        if (d < gap) [pick, gap] = [index, d];
+      }
+    }
+    if (!choices.includes(pick)) return null;
+    carry = { gradeMode: 'follow_line', anchor: anchorOnLine(lines[pick], centre) };
+  }
+  const base = isSplineZone(z) ? z : splineZone(points);
+  const set = (ring: FuseSpline): FuseSpline => ({ points: ring.points, ...carry });
+  if (ref === 'main') return { ...base, spline: set(base.spline) };
+  const hole = ringIndex(ref, 'hole');
+  if (hole >= 0 && hole < base.holes.length)
+    return { ...base, holes: base.holes.map((ring, index) => (index === hole ? set(ring) : ring)) };
+  const island = ringIndex(ref, 'island');
+  if (island >= 0 && island < base.islands.length)
+    return {
+      ...base,
+      islands: base.islands.map((ring, index) => (index === island ? set(ring) : ring)),
+    };
+  return null;
+}
 
 /** Replaces one ring without touching the others; editing a legacy rect promotes it to a spline. */
 export function withZoneRingPoints(
@@ -160,20 +271,27 @@ export function withZoneRingPoints(
   ref: ZoneRingRef,
   pts: readonly ZonePoint[],
 ): SplineZone | null {
-  if (ref === 'main')
-    return splineZone(pts, isSplineZone(z) ? { holes: z.holes, islands: z.islands } : undefined);
+  if (ref === 'main') {
+    const next = splineZone(
+      pts,
+      isSplineZone(z) ? { holes: z.holes, islands: z.islands } : undefined,
+    );
+    return isSplineZone(z) ? { ...next, spline: { ...next.spline, ...carryOf(z.spline) } } : next;
+  }
   if (!isSplineZone(z)) return null;
   const hole = ringIndex(ref, 'hole');
   if (hole >= 0 && hole < z.holes.length)
     return {
       ...z,
-      holes: z.holes.map((ring, index) => (index === hole ? splineOfPoints(pts) : ring)),
+      holes: z.holes.map((ring, index) => (index === hole ? splineOfPoints(pts, ring) : ring)),
     };
   const island = ringIndex(ref, 'island');
   if (island >= 0 && island < z.islands.length)
     return {
       ...z,
-      islands: z.islands.map((ring, index) => (index === island ? splineOfPoints(pts) : ring)),
+      islands: z.islands.map((ring, index) =>
+        index === island ? splineOfPoints(pts, ring) : ring,
+      ),
     };
   return null;
 }
@@ -1016,6 +1134,9 @@ export type ZoneBus = {
   ) => void;
   contour: (ci: string) => readonly PtMm[] | undefined;
   setContour: (ci: string, contour: readonly PtMm[] | undefined) => void;
+  /** The piece's internal lines on the size on screen, piece-local mm (what a ring can follow). */
+  lines: (ci: string) => readonly FuseInternalLine[];
+  setLines: (ci: string, lines: readonly FuseInternalLine[] | undefined) => void;
   selected: (ci: string) => ZoneRingRef;
   select: (ci: string, ref: ZoneRingRef) => void;
   /** The ring waiting to be drawn on the piece; a committed zone change clears it. */
@@ -1035,10 +1156,13 @@ export type ZoneBus = {
   version: () => number;
 };
 
+const NO_LINES: readonly FuseInternalLine[] = [];
+
 export function createZoneBus(): ZoneBus {
   const areas = new Map<string, number | null>();
   const ringAreaMap = new Map<string, Partial<Record<ZoneRingRef, number | null>>>();
   const contours = new Map<string, readonly PtMm[]>();
+  const lineMap = new Map<string, { key: string; lines: readonly FuseInternalLine[] }>();
   const selections = new Map<string, ZoneRingRef>();
   const drawings = new Map<string, ZoneDrawKind>();
   const hist = new Map<string, { zone: FuseZone | null; selected: ZoneRingRef }[]>();
@@ -1090,6 +1214,17 @@ export function createZoneBus(): ZoneBus {
           ci,
           contour.map((point) => ({ ...point })),
         );
+      }
+      bump();
+    },
+    lines: (ci) => lineMap.get(ci)?.lines ?? NO_LINES,
+    setLines: (ci, lines) => {
+      if (lines === undefined) {
+        if (!lineMap.delete(ci)) return;
+      } else {
+        const key = JSON.stringify(lines);
+        if (lineMap.get(ci)?.key === key) return;
+        lineMap.set(ci, { key, lines });
       }
       bump();
     },

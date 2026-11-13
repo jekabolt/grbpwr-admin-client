@@ -84,15 +84,35 @@ function parsedOwed(value: unknown): Owed {
  */
 const memory = new Map<number, Owed>();
 
-function read(cardId: number): Owed {
-  const kept = memory.get(cardId);
-  if (kept) return kept;
+/** The step removals this page marked or cleared, by card: storage's copy of them is stale. */
+const ownRemovals = new Set<string>();
+const removalId = (cardId: number, historyKey: string, operationNumber: number) =>
+  `${cardId}|${historyKey}|${operationNumber}`;
+
+function stored(cardId: number): Owed {
   try {
     const raw = localStorage.getItem(key(cardId));
     return raw ? parsedOwed(JSON.parse(raw) as unknown) : {};
   } catch {
     return {};
   }
+}
+
+function read(cardId: number): Owed {
+  const kept = memory.get(cardId);
+  if (!kept) return stored(cardId);
+  // Another tab may have written its own cleanup debt meanwhile (U1 #6): it joins this page's copy,
+  // so the next storage write does not wipe it.
+  const theirs = (stored(cardId).stepRemovals ?? []).filter(
+    (entry) => !ownRemovals.has(removalId(cardId, entry.historyKey, entry.operationNumber)),
+  );
+  if (!theirs.length) return kept;
+  const mine = kept.stepRemovals ?? [];
+  const known = new Set(mine.map((e) => removalId(cardId, e.historyKey, e.operationNumber)));
+  const added = theirs.filter(
+    (e) => !known.has(removalId(cardId, e.historyKey, e.operationNumber)),
+  );
+  return added.length ? { ...kept, stepRemovals: [...mine, ...added] } : kept;
 }
 
 function write(cardId: number, owed: Owed): void {
@@ -136,6 +156,7 @@ export const owedStepRemovals = (cardId: number): OwedStepRemoval[] =>
   structuredClone(read(cardId).stepRemovals ?? []);
 
 export function markStepRemovalOwed(cardId: number, entry: OwedStepRemoval): void {
+  ownRemovals.add(removalId(cardId, entry.historyKey, entry.operationNumber));
   const owed = read(cardId);
   const others = (owed.stepRemovals ?? []).filter(
     (current) =>
@@ -158,6 +179,7 @@ export function clearStepRemovalOwed(
   historyKey: string,
   operationNumber: number,
 ): void {
+  ownRemovals.add(removalId(cardId, historyKey, operationNumber));
   const owed = read(cardId);
   write(cardId, {
     ...owed,

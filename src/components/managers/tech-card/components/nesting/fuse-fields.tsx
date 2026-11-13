@@ -54,6 +54,11 @@ import {
   zoneDrawKind,
   zonePoints,
   zoneRingLabel,
+  zoneRingModeLabel,
+  zoneRingMode,
+  NO_GUESS,
+  ringGuessed,
+  type FuseGuess,
   zoneRingPoints,
   zoneRingRefs,
   ZONE_DRAW_POINTS,
@@ -152,6 +157,8 @@ export function FuseFields({
   allowanceUsesNetOutline = false,
   ci,
   zoneBus,
+  guessed = NO_GUESS,
+  stale,
 }: {
   spec: PieceFuseSpec;
   /** The stored `fused` — true with no mode is the legacy «fused, how not said». */
@@ -171,6 +178,10 @@ export function FuseFields({
   /** The piece's canvas id and the dialog's zone bus (area + undo), shared with the canvas. */
   ci?: string;
   zoneBus?: ZoneBus;
+  /** What the shown size built by guess. */
+  guessed?: ReadonlySet<FuseGuess>;
+  /** The markup was drawn on another base than the pattern file now holds. */
+  stale?: 'base_size_changed' | 'contour_changed';
 }) {
   const on = spec.mode !== '';
   const [more, setMore] = useState(() => fuseOffDefault(spec));
@@ -206,16 +217,30 @@ export function FuseFields({
         label='fusing'
         error={fused && !on}
         door={
-          on && (
-            <Button
-              type='button'
-              aria-label='more'
-              aria-expanded={more}
-              className={`flex items-center ${more ? 'text-textColor' : 'text-labelColor'} hover:text-textColor`}
-              onClick={() => setMore(!more)}
-            >
-              <DotsHorizontalIcon />
-            </Button>
+          (on || stale) && (
+            <span className='flex items-baseline gap-2'>
+              {stale && (
+                <Text
+                  size='micro'
+                  component='span'
+                  className='uppercase text-error'
+                  data-fuse-stale={stale}
+                >
+                  {stale === 'base_size_changed' ? 'base changed' : 'contour changed'}
+                </Text>
+              )}
+              {on && (
+                <Button
+                  type='button'
+                  aria-label='more'
+                  aria-expanded={more}
+                  className={`flex items-center ${more ? 'text-textColor' : 'text-labelColor'} hover:text-textColor`}
+                  onClick={() => setMore(!more)}
+                >
+                  <DotsHorizontalIcon />
+                </Button>
+              )}
+            </span>
           )
         }
       >
@@ -294,6 +319,7 @@ export function FuseFields({
           readOnly={readOnly}
           toggleBox={toggleBox}
           onChange={onChange}
+          guessed={guessed}
         />
       )}
       {on && more && (
@@ -350,6 +376,7 @@ function ZoneRow({
   readOnly,
   toggleBox,
   onChange,
+  guessed,
 }: {
   spec: PieceFuseSpec;
   ci: string;
@@ -357,6 +384,7 @@ function ZoneRow({
   readOnly: boolean;
   toggleBox: string;
   onChange: (next: PieceFuseSpec) => void;
+  guessed: ReadonlySet<FuseGuess>;
 }) {
   useSyncExternalStore(bus.subscribe, bus.version);
   const area = bus.area(ci);
@@ -557,7 +585,7 @@ function ZoneRow({
                   aria-label={zoneRingLabel(spline, ref)}
                   aria-pressed={selectedRow}
                   aria-invalid={ringInvalid || undefined}
-                  className={`grid min-h-7 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5 px-1.5 py-1 text-left text-micro uppercase tracking-label ${
+                  className={`grid min-h-7 w-full grid-cols-[auto_minmax(0,1fr)_auto_4.5rem] items-center gap-1.5 px-1.5 py-1 text-left text-micro uppercase tracking-label ${
                     selectedRow && ringInvalid
                       ? 'bg-error text-bgColor'
                       : selectedRow
@@ -571,7 +599,14 @@ function ZoneRow({
                 >
                   <span aria-hidden>{ringInvalid ? '!' : ref.startsWith('hole:') ? '◇' : '◆'}</span>
                   <span className='truncate'>{zoneRingLabel(spline, ref)}</span>
-                  <span className='tabular-nums'>
+                  {ringGuessed(guessed, ref) && zoneRingMode(spline, ref) === 'follow_line' ? (
+                    <span data-ring-mode='guess' className={selectedRow ? '' : 'text-error'}>
+                      guess
+                    </span>
+                  ) : (
+                    <span data-ring-mode=''>{zoneRingModeLabel(spline, ref, bus.lines(ci))}</span>
+                  )}
+                  <span className='text-right tabular-nums'>
                     {ringArea != null ? `${Math.round(ringArea)} cm²` : <EmptyCell />}
                   </span>
                 </Button>

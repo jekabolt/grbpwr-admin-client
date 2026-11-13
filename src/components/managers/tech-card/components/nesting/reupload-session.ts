@@ -2,6 +2,7 @@
 // несущего перезалив, и восстановление прошлой версии листа.
 import { DELETE_SNAPSHOT_REASON } from './dxf-delete';
 import { REUPLOAD_SNAPSHOT_REASON } from './dxf-reupload';
+import { heldSeamKeys, type SeamHolders } from '../step-seams/step-removal-seams';
 
 // ─── причина снимка: одна, на сохранение С ЭТИМ перезаливом ───────────────────────────────────
 //
@@ -162,6 +163,21 @@ export function armSeamDeleteRetry(cardId: number | undefined, seamKeys: Iterabl
 /** The seam keys whose cascade must run after this card next saves. */
 export function peekSeamDeleteRetry(cardId: number | undefined): string[] {
   return cardId ? [...storedSeamDeleteRetries(cardId)] : [];
+}
+
+/**
+ * A retry's keys against the card as it is now (U1 #3): a key a step or a cut strip took meanwhile
+ * is held and leaves the retry without a request; only the rest is sent.
+ */
+export function seamDeleteRetryKeys(
+  seamKeys: readonly string[],
+  card: SeamHolders,
+): { send: string[]; held: string[] } {
+  const holders = heldSeamKeys(card);
+  return {
+    send: seamKeys.filter((key) => !holders.has(key)),
+    held: seamKeys.filter((key) => holders.has(key)),
+  };
 }
 
 /** One retry landed; do not consume keys added while its RPC was in flight. */

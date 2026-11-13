@@ -42,7 +42,7 @@ const dieNotRun = (why) => {
 process.on('uncaughtException', (e) => dieNotRun(e?.stack ?? e?.message ?? String(e)));
 process.on('unhandledRejection', (e) => dieNotRun(e?.stack ?? e?.message ?? String(e)));
 
-import { build as esbuild } from 'esbuild';
+import { build as esbuild } from './probe-esbuild.mjs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';

@@ -31,8 +31,9 @@ import {
 import { decodeHandPlace, encodeHandPlace, isHandSeamKind } from './step-hand';
 import { mirrorPlacement } from './step-pose';
 import {
-  closedInner,
   inputGroups,
+  isClosedInner,
+  polylineLenMm,
   SAME_MM,
   stepInputPieces,
   type FormOpLike,
@@ -67,6 +68,12 @@ type TwinCandidate = {
   index: number;
   links: Map<string, TwinLink>;
   ambiguous: boolean;
+};
+
+type StepShape = {
+  work: string;
+  groups: string[][];
+  pieces: string[];
 };
 
 const EMPTY_PLAN = (kind: 'no-twin' | 'edge-mismatch', sourceOp?: FormOpLike): MirrorStepPlan => ({
@@ -145,6 +152,65 @@ const mappingsOf = (
   return out;
 };
 
+const samePieces = (left: readonly string[], right: readonly string[]) =>
+  left.length === right.length && left.every((piece) => right.includes(piece));
+
+const sameGroups = (left: readonly string[][], right: readonly string[][]) => {
+  if (left.length !== right.length) return false;
+  const used = new Set<number>();
+  return left.every((group) => {
+    const match = right.findIndex(
+      (candidate, index) => !used.has(index) && samePieces(group, candidate),
+    );
+    if (match < 0) return false;
+    used.add(match);
+    return true;
+  });
+};
+
+const stepShapeOf = (
+  cardOps: readonly FormOpLike[],
+  index: number,
+  pieceKeys: ReadonlySet<string>,
+): StepShape => ({
+  work: cardOps[index]?.work ?? '',
+  groups: inputGroups(cardOps, index, pieceKeys).map((group) => [...new Set(group.pieces)]),
+  pieces: stepInputPieces(cardOps, index, pieceKeys),
+});
+
+const mappingKeepsGroups = (
+  source: StepShape,
+  target: StepShape,
+  mapping: ReadonlyMap<string, TwinLink>,
+) => {
+  const groups = source.groups.map((group) =>
+    group.flatMap((piece) => mapping.get(piece)?.key ?? []),
+  );
+  return (
+    groups.every((group, index) => group.length === source.groups[index].length) &&
+    sameGroups(groups, target.groups)
+  );
+};
+
+/** Preserve the historical earlier-only result for a step whose own pieces mirror among themselves. */
+const symmetricTwinCandidateOf = (
+  targetIndex: number,
+  cardOps: readonly FormOpLike[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+  liveKeys: ReadonlySet<string>,
+  pieceKeys: ReadonlySet<string>,
+  targetPieces: readonly string[],
+): TwinCandidate | null => {
+  for (let index = targetIndex - 1; index >= 0; index--) {
+    const op = cardOps[index];
+    if (!opFactKeys(op).some((key) => liveKeys.has(key))) continue;
+    const mappings = mappingsOf(stepInputPieces(cardOps, index, pieceKeys), targetPieces, geoms);
+    if (!mappings.length) continue;
+    return { op, index, links: mappings[0], ambiguous: mappings.length > 1 };
+  }
+  return null;
+};
+
 const twinCandidateOf = (
   targetIndex: number,
   cardOps: readonly FormOpLike[],
@@ -152,21 +218,41 @@ const twinCandidateOf = (
   liveKeys: ReadonlySet<string>,
 ): TwinCandidate | null => {
   const pieceKeys = new Set(geoms.keys());
-  const targetPieces = stepInputPieces(cardOps, targetIndex, pieceKeys);
-  for (let index = targetIndex - 1; index >= 0; index--) {
-    const op = cardOps[index];
-    if (!opFactKeys(op).some((key) => liveKeys.has(key))) continue;
-    const pieces = stepInputPieces(cardOps, index, pieceKeys);
-    const mappings = mappingsOf(pieces, targetPieces, geoms);
-    if (!mappings.length) continue;
-    return {
-      op,
-      index,
-      links: mappings[0],
-      ambiguous: mappings.length > 1,
-    };
-  }
-  return null;
+  const target = stepShapeOf(cardOps, targetIndex, pieceKeys);
+  if (mappingsOf(target.pieces, target.pieces, geoms).length)
+    return symmetricTwinCandidateOf(
+      targetIndex,
+      cardOps,
+      geoms,
+      liveKeys,
+      pieceKeys,
+      target.pieces,
+    );
+
+  const shapes = cardOps.map((_, index) => stepShapeOf(cardOps, index, pieceKeys));
+  const targets = shapes.flatMap((shape, index) =>
+    shape.work === target.work &&
+    samePieces(shape.pieces, target.pieces) &&
+    sameGroups(shape.groups, target.groups)
+      ? [{ index, shape }]
+      : [],
+  );
+  const twins = shapes.flatMap((shape, index) => {
+    if (shape.work !== target.work) return [];
+    const mappings = mappingsOf(shape.pieces, target.pieces, geoms);
+    const compatible = mappings.filter((mapping) => mappingKeepsGroups(shape, target, mapping));
+    return compatible.length ? [{ index, mappings, compatible }] : [];
+  });
+  if (targets.length !== twins.length) return null;
+  const rank = targets.findIndex((candidate) => candidate.index === targetIndex);
+  const twin = rank >= 0 ? twins[rank] : undefined;
+  if (!twin || !opFactKeys(cardOps[twin.index]).some((key) => liveKeys.has(key))) return null;
+  return {
+    op: cardOps[twin.index],
+    index: twin.index,
+    links: twin.compatible[0],
+    ambiguous: twin.mappings.length > 1,
+  };
 };
 
 const edgeMapFor = (
@@ -232,6 +318,55 @@ const projectedShare = (line: readonly Pt2[], point: Pt2): number => {
   return total > 0 ? best / total : 0;
 };
 
+const TWIN_INNER_MM = 3;
+const TWIN_INNER_SAMPLES = 16;
+
+const gapToLine = (line: readonly Pt2[], point: Pt2): number => {
+  let best = Infinity;
+  for (let index = 0; index < line.length - 1; index++) {
+    const a = line[index];
+    const b = line[index + 1];
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const length2 = dx * dx + dy * dy;
+    const share = length2
+      ? Math.max(0, Math.min(1, ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / length2))
+      : 0;
+    best = Math.min(best, Math.hypot(point[0] - a[0] - dx * share, point[1] - a[1] - dy * share));
+  }
+  return best;
+};
+
+/** The twin's inner line the mirrored source line `index` lies on: the same index when it fits,
+ *  else the one other line that does; -1 when none or several fit. */
+const twinInnerIndex = (
+  index: number,
+  source: PieceGeom,
+  target: PieceGeom,
+  edgeMap: EdgeMap,
+  grainDeg: ReadonlyMap<string, number> | undefined,
+  innerLines: ReadonlyMap<string, readonly (readonly Pt2[])[]>,
+): number => {
+  const sourceLine = index >= 0 ? innerLines.get(source.pieceKey)?.[index] : undefined;
+  const targetLines = innerLines.get(target.pieceKey) ?? [];
+  if (!sourceLine || sourceLine.length < 2) return -1;
+  const sourceFrame = frameOf(source, grainDeg?.get(source.pieceKey) ?? 0);
+  const targetFrame = frameOf(target, grainDeg?.get(target.pieceKey) ?? 0);
+  const shares = Array.from({ length: TWIN_INNER_SAMPLES + 1 }, (_, i) => i / TWIN_INNER_SAMPLES);
+  const mapped = sampleAt(sourceLine, shares).map((point) =>
+    fromUV(targetFrame, inFrame([toUV(sourceFrame, point)], edgeMap.frame)[0]),
+  );
+  const sourceLength = polylineLenMm(sourceLine);
+  const fits = (line: readonly Pt2[] | undefined) =>
+    !!line &&
+    line.length >= 2 &&
+    Math.abs(polylineLenMm(line) - sourceLength) <= TWIN_INNER_MM &&
+    mapped.every((point) => gapToLine(line, point) <= TWIN_INNER_MM);
+  if (fits(targetLines[index])) return index;
+  const others = targetLines.flatMap((line, at) => (at !== index && fits(line) ? [at] : []));
+  return others.length === 1 ? others[0] : -1;
+};
+
 const innerAnchorsOnTwin = (
   anchors: readonly EdgeAnchor[],
   source: PieceGeom,
@@ -243,16 +378,27 @@ const innerAnchorsOnTwin = (
   const whole = anchors.find((anchor) => anchor.range[0] <= 0 && anchor.range[1] >= 1);
   const anchor = whole ?? anchors[0];
   if (!anchor) return null;
-  const base = innerAnchorOnTwin(anchor, target, edgeMap, grainDeg);
-  if (whole) return [base];
   const match = /^i(\d+)$/.exec(anchor.edgeHint);
   const index = match ? Number(match[1]) : -1;
-  const sourceLine = index >= 0 ? innerLines?.get(source.pieceKey)?.[index] : undefined;
-  const targetLine = index >= 0 ? innerLines?.get(target.pieceKey)?.[index] : undefined;
-  const sourceContour = sourceLine && closedInner(sourceLine);
-  const targetContour = targetLine && closedInner(targetLine);
-  if (!sourceLine || !targetLine || !sourceContour || !targetContour) return null;
-  const tolerance = SAME_MM / sourceContour.lenMm;
+  // The twin's inner lines need not come in the source's order: the contour to land on is the one
+  // the mirrored source line lies on, never just the same index on the twin.
+  const twinIndex = innerLines
+    ? twinInnerIndex(index, source, target, edgeMap, grainDeg, innerLines)
+    : index;
+  if (twinIndex < 0) return null;
+  const base = {
+    ...innerAnchorOnTwin(anchor, target, edgeMap, grainDeg),
+    edgeHint: `i${twinIndex}`,
+  };
+  if (whole) return [base];
+  const sourceLine = innerLines?.get(source.pieceKey)?.[index];
+  const targetLine = innerLines?.get(target.pieceKey)?.[twinIndex];
+  if (!sourceLine || !targetLine || !isClosedInner(sourceLine) || !isClosedInner(targetLine))
+    return null;
+  const sourceLength = polylineLenMm(sourceLine);
+  const targetLength = polylineLenMm(targetLine);
+  if (!(sourceLength > 0) || !(targetLength > 0)) return null;
+  const tolerance = SAME_MM / sourceLength;
   const merged: [number, number][] = [];
   for (const range of anchors
     .map((item) => [Math.max(0, item.range[0]), Math.min(1, item.range[1])] as [number, number])
@@ -275,7 +421,7 @@ const innerAnchorsOnTwin = (
   const startsAfter = (gapAfter + 1) % merged.length;
   const sourceFrom = merged[startsAfter][0];
   const sourceTo = merged[gapAfter][1] + (startsAfter ? 1 : 0);
-  if ((sourceTo - sourceFrom) * sourceContour.lenMm <= SAME_MM) return [];
+  if ((sourceTo - sourceFrom) * sourceLength <= SAME_MM) return [];
   const sourceFrame = frameOf(source, grainDeg?.get(source.pieceKey) ?? 0);
   const targetFrame = frameOf(target, grainDeg?.get(target.pieceKey) ?? 0);
   const wrapShare = (share: number) => ((share % 1) + 1) % 1;
@@ -295,7 +441,7 @@ const innerAnchorsOnTwin = (
           [0, from],
         ];
   return ranges
-    .filter(([start, end]) => (end - start) * targetContour.lenMm > SAME_MM)
+    .filter(([start, end]) => (end - start) * targetLength > SAME_MM)
     .flatMap(([start, end]) => {
       const range: [number, number] = [roundedRange(start), roundedRange(end)];
       return range[1] > range[0] ? [{ ...base, range }] : [];
@@ -755,6 +901,18 @@ export function mirrorStepPlan({
     foldKeys: mappedFoldKeys,
     layerOrder,
   };
+}
+
+/** Which confirm a «mirror left» click opens: no plan writes on the click itself. */
+export function mirrorClickDialog(kind: MirrorStepKind): 'create' | 'replace' {
+  return kind === 'replace' ? 'replace' : 'create';
+}
+
+/** The create confirm's title: how many seams the plan writes (poses are not seams). */
+export function mirrorConfirmTitle(plan: Pick<MirrorStepPlan, 'upsert'>): string {
+  const seams = plan.upsert.filter((row) => row.kind !== 'pose').length;
+  if (!seams) return 'MIRROR LEFT?';
+  return `MIRROR ${seams} ${seams === 1 ? 'SEAM' : 'SEAMS'}?`;
 }
 
 /** Only right pieces: nothing to mirror from is worth saying. A step with a left piece stays quiet. */

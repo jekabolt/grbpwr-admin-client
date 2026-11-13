@@ -139,6 +139,7 @@ import {
 import { edgeRowOfPick, initialPickerPick, orderedPickSides, storedSeamSides } from './step-rows';
 import { fitSourceOf } from './step-pose';
 import { stepPictureOf } from './surface-picture';
+import { mirrorClickDialog, mirrorConfirmTitle } from './mirror-step';
 import { useMirrorStep } from './use-mirror-step';
 import { usePoseEdit } from './use-pose-edit';
 
@@ -340,6 +341,7 @@ export function SeamPickerBody({
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState('');
   const [replaceMirrorOpen, setReplaceMirrorOpen] = useState(false);
+  const [createMirrorOpen, setCreateMirrorOpen] = useState(false);
   // A tile preloads its proposal; GUESS does the same from the manual + seam entry.
   const [filled, setFilled] = useState<Sel | null>(() =>
     initialPick ? wholeSel(initialPick) : null,
@@ -1612,8 +1614,8 @@ export function SeamPickerBody({
               variant='underline'
               size='xs'
               onClick={() => {
-                if (mirror.plan.kind === 'replace') setReplaceMirrorOpen(true);
-                else void mirrorLeft();
+                if (mirrorClickDialog(mirror.plan.kind) === 'replace') setReplaceMirrorOpen(true);
+                else setCreateMirrorOpen(true);
               }}
               disabled={
                 busy ||
@@ -1709,6 +1711,15 @@ export function SeamPickerBody({
           onClose={closeLayerMenu}
         />
       )}
+      <ConfirmationModal
+        open={createMirrorOpen}
+        onOpenChange={setCreateMirrorOpen}
+        onConfirm={() => void mirrorLeft()}
+        title={mirrorConfirmTitle(mirror.plan)}
+        confirmLabel='MIRROR'
+      >
+        {null}
+      </ConfirmationModal>
       <ConfirmationModal
         open={replaceMirrorOpen}
         onOpenChange={setReplaceMirrorOpen}

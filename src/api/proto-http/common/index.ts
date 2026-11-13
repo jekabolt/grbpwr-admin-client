@@ -1758,6 +1758,20 @@ export type TechCardSignoffState =
   | "TECH_CARD_SIGNOFF_STATE_PENDING"
   | "TECH_CARD_SIGNOFF_STATE_APPROVED"
   | "TECH_CARD_SIGNOFF_STATE_REJECTED";
+// How one end of a strip-fusing edge is carried from the base size to the other sizes. The trim
+// itself always stays in start_mm / end_mm as base-size millimetres; the mode only tells the size
+// carry-over what to hold constant.
+export type TechCardPieceFusingEndMode =
+  | "TECH_CARD_PIECE_FUSING_END_MODE_UNKNOWN"
+  | "TECH_CARD_PIECE_FUSING_END_MODE_MM"
+  | "TECH_CARD_PIECE_FUSING_END_MODE_NOTCH"
+  | "TECH_CARD_PIECE_FUSING_END_MODE_SHARE";
+// How one fusing ring is carried from the base size to the other sizes.
+export type TechCardPieceFusingGradeMode =
+  | "TECH_CARD_PIECE_FUSING_GRADE_MODE_UNKNOWN"
+  | "TECH_CARD_PIECE_FUSING_GRADE_MODE_FIXED"
+  | "TECH_CARD_PIECE_FUSING_GRADE_MODE_FOLLOW_LINE"
+  | "TECH_CARD_PIECE_FUSING_GRADE_MODE_GROW";
 // StyleNumberSource records how a tech card's style_number was set (PLM-rework Q1): GENERATED = the
 // server proposed it from the season+sequence contract (SuggestStyleNumber); MANUAL = the owner
 // overrode the proposal (the value then passes the strict format validator). UNKNOWN defaults to
@@ -4092,6 +4106,8 @@ export type TechCardPieceFusingEdge = {
   edge: number | undefined;
   startMm: googletype_Decimal | undefined;
   endMm: googletype_Decimal | undefined;
+  startMode: TechCardPieceFusingEndMode | undefined;
+  endMode: TechCardPieceFusingEndMode | undefined;
 };
 
 // Presence wrapper: absent means an older client did not speak edge selection; present with no
@@ -4115,9 +4131,18 @@ export type TechCardPieceFusingSplinePoint = {
   corner: boolean | undefined;
 };
 
+// Piece-local point in base-size millimetres that picks the internal line a ring follows.
+export type TechCardPieceFusingAnchor = {
+  x: googletype_Decimal | undefined;
+  y: googletype_Decimal | undefined;
+};
+
 // Closed spline through piece-local points in millimetres. corner keeps that point sharp.
 export type TechCardPieceFusingSpline = {
   points: TechCardPieceFusingSplinePoint[] | undefined;
+  gradeMode: TechCardPieceFusingGradeMode | undefined;
+  // Required with FOLLOW_LINE and rejected with any other mode.
+  anchor: TechCardPieceFusingAnchor | undefined;
 };
 
 // Geometry for ZONE fusing: a rectangle or freeform spline drawn on the garment piece, or a
@@ -4132,6 +4157,16 @@ export type TechCardPieceFusingZone = {
   // Additional disjoint outer rings beside spline. Valid only with spline; spline plus islands has
   // at most 16 outer rings, which may neither overlap, touch, nor nest.
   islands: TechCardPieceFusingSpline[] | undefined;
+};
+
+// The base the piece's fusing markup (fusing_edges / fusing_zone) was drawn against: the base size
+// and a signature of that size's piece contour. A client compares it with the current pattern file
+// to tell whether the markup still fits after the pattern was replaced. The server stores it as an
+// opaque pair and never computes or compares the signature itself.
+// Both fields are set together, or both are empty (= clear).
+export type TechCardPieceFusingBase = {
+  baseSizeId: number | undefined;
+  contourSignature: string | undefined;
 };
 
 // TechCardPiece is one structural cut-piece of the garment (полочка, спинка, обтачка горловины…):
@@ -4225,6 +4260,11 @@ export type TechCardPiece = {
   fusingGrain?: string;
   // Empty/NULL = cut; otherwise cut|fuse.
   fusingDarts?: string;
+  // Staleness key of the fusing markup. Absent = do not touch (an older client keeps the stored
+  // key); present empty = clear; present with both fields = replace. Half a key is rejected. The
+  // server clears it on its own when the piece stops being fused or loses its edges / zone. Reads
+  // return it only when one is stored. Not part of the CONSTRUCTION digest.
+  fusingBase: TechCardPieceFusingBase | undefined;
 };
 
 // SkuSeason is the normalized style-owned season used in every SKU. The pair is atomic: callers
