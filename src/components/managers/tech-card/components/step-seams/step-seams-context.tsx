@@ -44,6 +44,8 @@ import type { TechCardFormData } from '../schema';
 import { syncTopstitchLineMm } from '../topstitch-line-mm-sync';
 import type { TopstitchOperation } from '../topstitch-lines';
 import { TopstitchThreadDefaults } from '../topstitch-thread-fields';
+import { useUndoHistory } from '../undo-history';
+import { finishStepSeamDetach } from './seam-detach-finish';
 import { dropKeys } from './step-seams-model';
 
 export type StepSeamsCtx = {
@@ -130,6 +132,7 @@ export function useAttachStepSeam(index: number) {
 export function useStepSeamRemover() {
   const ctx = useStepSeams();
   const { getValues, setValue } = useFormContext<TechCardFormData>();
+  const undoHistory = useUndoHistory();
 
   return useCallback(
     async (index: number, seamKey: string, _row: StoredSeam | undefined): Promise<boolean> => {
@@ -143,30 +146,26 @@ export function useStepSeamRemover() {
       if (!res.ok) return false;
       const at = indexOfStep((getValues('operations') ?? []) as StepRow[], historyKey);
       if (at < 0) return true;
-      const field = `operations.${at}.seamKeys` as const;
-      const current = (getValues(field) ?? []) as string[];
-      if (current.includes(seamKey))
-        setValue(
-          field,
-          current.filter((key) => key !== seamKey),
-          { shouldDirty: true },
-        );
-      // A shared row still belongs to its other step; only the row's deletion owns the strip teardown.
-      if (res.deletedKeys.includes(seamKey)) {
-        const stripped = removeBindingStripsForSeam(
-          getValues(`operations.${at}`),
-          (getValues('cutStrips') ?? []) as CutStrip[],
-          seamKey,
-        );
-        if (stripped) {
-          setValue('cutStrips', stripped.strips as never, { shouldDirty: true });
-          setValue(`operations.${at}.inputKeys`, stripped.inputKeys, { shouldDirty: true });
-          setValue(`operations.${at}.bomLineKeys`, stripped.bomLineKeys, { shouldDirty: true });
-        }
-      }
+      finishStepSeamDetach(
+        {
+          operation: (i) => getValues(`operations.${i}`),
+          strips: () => (getValues('cutStrips') ?? []) as CutStrip[],
+          setSeamKeys: (i, keys) =>
+            setValue(`operations.${i}.seamKeys`, keys, { shouldDirty: true }),
+          setStrips: (strips) => setValue('cutStrips', strips as never, { shouldDirty: true }),
+          setInputs: (i, inputKeys, bomLineKeys) => {
+            setValue(`operations.${i}.inputKeys`, inputKeys, { shouldDirty: true });
+            setValue(`operations.${i}.bomLineKeys`, bomLineKeys, { shouldDirty: true });
+          },
+          cutHistory: () => undoHistory.cut('seam-delete'),
+        },
+        at,
+        seamKey,
+        res.deletedKeys,
+      );
       return true;
     },
-    [ctx, getValues, setValue],
+    [ctx, getValues, setValue, undoHistory],
   );
 }
 
