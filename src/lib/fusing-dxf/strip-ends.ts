@@ -36,3 +36,42 @@ export function nearestNotch(notches: readonly number[], at: number): number {
     if (best < 0 || Math.abs(notches[i] - at) < Math.abs(notches[best] - at)) best = i;
   return best;
 }
+
+/** A notch-mode end farther than this from every base notch has no notch to keep. */
+export const NOTCH_PICK_MM = 30;
+
+/** One strip edge on the base size and the run it pairs with on another size. */
+export type StripEndPair = {
+  baseRun: EdgeRun;
+  run: EdgeRun;
+  /** The size's ring runs the other way: the base run's start pairs with this run's end. */
+  reversed: boolean;
+  baseLines: readonly FuseInternalLine[];
+  lines: readonly FuseInternalLine[];
+};
+
+/**
+ * One strip end's trim on another size, mm from the corner that pairs with the base end's corner.
+ * `guessed`: a notch end found no notch to keep (none near the trim on the base, or the size's run
+ * has a different count) and kept the mm; the sheet is still built, the caller reports it.
+ */
+export function carryStripEnd(
+  mm: number,
+  mode: 'notch' | 'share' | undefined,
+  atStart: boolean,
+  pair: StripEndPair,
+): { mm: number; guessed: boolean } {
+  const { baseRun, run, reversed } = pair;
+  if (!mode) return { mm, guessed: false };
+  if (mode === 'share')
+    return { mm: baseRun.length > 0 ? (mm / baseRun.length) * run.length : mm, guessed: false };
+  const was = notchesOnRun(baseRun, pair.baseLines);
+  const now = notchesOnRun(run, pair.lines);
+  const trim = atStart ? mm : baseRun.length - mm;
+  const k = nearestNotch(was, trim);
+  // The same notch only while both sizes have the same notches on this run.
+  if (k < 0 || Math.abs(was[k] - trim) > NOTCH_PICK_MM || was.length !== now.length)
+    return { mm, guessed: true };
+  const at = now[reversed ? now.length - 1 - k : k];
+  return { mm: atStart !== reversed ? at : run.length - at, guessed: false };
+}

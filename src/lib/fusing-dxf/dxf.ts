@@ -22,7 +22,7 @@ import {
 } from './geometry';
 import { ZONE_ON_CONTOUR_MM, flattenSpline, projectOnRing } from './spline';
 import { followLineMove } from './follow-line';
-import { nearestNotch, notchesOnRun } from './strip-ends';
+import { carryStripEnd } from './strip-ends';
 import type { FuseEdge, FuseSpline, PieceFuseSpec } from './types';
 import { zoneGrade } from './zone-grade';
 
@@ -451,22 +451,19 @@ export function mapFuseSpecToSize(
           if (target == null) return edge;
           const baseRun = from[edge.edge];
           const run = to[target];
-          // An end's trim on this size, mm from the target run's start (`fromStart`) or end.
-          // Default: the same mm from the run's corner in every size (see FuseEdge).
+          // An end's trim on this size; absent mode = the same mm from the run's corner (FuseEdge).
+          const pair = {
+            baseRun,
+            run,
+            reversed: pairing.reversed,
+            baseLines: internals?.base ?? [],
+            lines: internals?.target ?? [],
+          };
           const carried = (mm: number, mode: FuseEdge['startMode'], atStart: boolean): number => {
-            if (!baseRun || !mode) return mm;
-            if (mode === 'share')
-              return baseRun.length > 0 ? (mm / baseRun.length) * run.length : mm;
-            const was = notchesOnRun(baseRun, internals?.base ?? []);
-            const now = notchesOnRun(run, internals?.target ?? []);
-            // The same notch only while both sizes have the same notches on this run.
-            if (!was.length || was.length !== now.length) {
-              onGuess?.('notch');
-              return mm;
-            }
-            const k = nearestNotch(was, atStart ? mm : baseRun.length - mm);
-            const at = now[pairing.reversed ? now.length - 1 - k : k];
-            return atStart !== pairing.reversed ? at : run.length - at;
+            if (!baseRun) return mm;
+            const end = carryStripEnd(mm, mode, atStart, pair);
+            if (end.guessed) onGuess?.('notch');
+            return end.mm;
           };
           const start = carried(edge.startMm, edge.startMode, true);
           const end = carried(edge.endMm, edge.endMode, false);
