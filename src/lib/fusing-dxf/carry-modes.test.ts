@@ -84,7 +84,7 @@ describe('zone ring carry-over modes', () => {
     // … and back: the stored points return.
     const back = outerOf(mapFuseSpecToSize({ ...spec, zone: mapped }, wide, square));
     back.spline.points.forEach((p, i) =>
-      expect(dist(p, spec.zone && outerOf(spec).spline.points[i])).toBeLessThan(0.05),
+      expect(dist(p, outerOf(spec).spline.points[i])).toBeLessThan(0.05),
     );
   });
 
@@ -134,9 +134,15 @@ describe('zone ring carry-over modes', () => {
       gradeMode: 'follow_line',
       anchor: { x: 200, y: 180 },
     };
+    // The piece grades too: a line never moves farther than the grade of its piece allows, and the
+    // geometric pairing refuses a twin beyond it.
+    const guessed: string[] = [];
     const mapped = outerOf(
-      mapFuseSpecToSize(zone(patch), square, square, null, { base: [base], target: [turned] }),
+      mapFuseSpecToSize(zone(patch), square, wide, null, { base: [base], target: [turned] }, (w) =>
+        guessed.push(w),
+      ),
     );
+    expect(guessed).toEqual([]);
     shape(mapped.spline).forEach((d, i) => expect(d).toBeCloseTo(shape(patch)[i], 6));
     const [a, b] = mapped.spline.points;
     const angle = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
@@ -259,15 +265,15 @@ describe('carry-over modes on the wire', () => {
       fusingDarts: '',
     };
     const wire = fuseFieldsToWire(fields);
-    expect(wire.fusingEdges?.items.map((e) => [e.startMode, e.endMode])).toEqual([
+    expect(wire.fusingEdges?.items?.map((e) => [e.startMode, e.endMode])).toEqual([
       ['TECH_CARD_PIECE_FUSING_END_MODE_NOTCH', 'TECH_CARD_PIECE_FUSING_END_MODE_MM'],
       ['TECH_CARD_PIECE_FUSING_END_MODE_MM', 'TECH_CARD_PIECE_FUSING_END_MODE_SHARE'],
     ]);
-    expect(wire.fusingZone?.islands.map((s) => s.gradeMode)).toEqual([
+    expect(wire.fusingZone?.islands?.map((s) => s.gradeMode)).toEqual([
       'TECH_CARD_PIECE_FUSING_GRADE_MODE_GROW',
       'TECH_CARD_PIECE_FUSING_GRADE_MODE_FIXED',
     ]);
-    expect(wire.fusingZone?.islands[1].anchor).toBeUndefined();
+    expect(wire.fusingZone?.islands?.[1].anchor).toBeUndefined();
     expect(fuseFieldsFromWire(wire)).toEqual(fields);
   });
 });

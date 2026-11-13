@@ -321,7 +321,7 @@ export function mapFuseSpecToSize(
       // A ring with a mode of its own, or a default hole inside one, goes that way and no other.
       const followed =
         spline.gradeMode === 'follow_line' && spline.anchor
-          ? followLineMove(spline.anchor, internals?.base ?? [], internals?.target ?? [])
+          ? followLineMove(spline.anchor, grade.linePair(spline.anchor))
           : null;
       if (spline.gradeMode === 'follow_line' && !followed) onGuess?.('line');
       const by =
