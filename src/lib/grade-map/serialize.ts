@@ -43,7 +43,9 @@ function trackTuple(t: GmTrack): TrackTuple {
     t.reason ?? null,
     um(t.residualMm),
     flat(t.base),
-    t.sizes.map((s) => (s.delta ? [s.sizeId, flat(s.delta), um(s.residualMm)] : [s.sizeId, s.refused ?? 'refused'])),
+    t.sizes.map((s) =>
+      s.delta ? [s.sizeId, flat(s.delta), um(s.residualMm)] : [s.sizeId, s.refused ?? 'refused'],
+    ),
   ];
 }
 
@@ -54,14 +56,19 @@ export function canonicalJson(file: GmFile): string {
     b: file.builder,
     s: file.sizes,
     base: file.baseSizeId,
-    p: file.pieces.map((p) => [p.key, p.sig ? [p.sig.dev, p.sig.pts] : null, p.tracks.map(trackTuple)]),
+    p: file.pieces.map((p) => [
+      p.key,
+      p.sig ? [p.sig.dev, p.sig.pts] : null,
+      p.tracks.map(trackTuple),
+    ]),
   };
   return JSON.stringify(json);
 }
 
 function parseJson(text: string): GmFile {
   const j = JSON.parse(text) as FileJson;
-  if (j.f !== GRADEMAP_TAG || j.v !== 1) throw new Error('grade map: not a GRBPWR-GRADEMAP v1 payload');
+  if (j.f !== GRADEMAP_TAG || j.v !== 1)
+    throw new Error('grade map: not a GRBPWR-GRADEMAP v1 payload');
   const pieces: GmPiece[] = j.p.map(([key, sig, tracks]) => ({
     key,
     sig: sig ? ({ dev: sig[0], pts: sig[1] } as ContourSignature) : null,
@@ -77,11 +84,22 @@ function parseJson(text: string): GmFile {
         (s): GmTrackSize =>
           typeof s[1] === 'string'
             ? { sizeId: s[0], refused: s[1] }
-            : { sizeId: s[0], delta: pairs(s[1]), residualMm: (s as [number, number[], number])[2] / 1000 },
+            : {
+                sizeId: s[0],
+                delta: pairs(s[1]),
+                residualMm: (s as [number, number[], number])[2] / 1000,
+              },
       ),
     })),
   }));
-  return { format: 'GRBPWR-GRADEMAP', version: 1, builder: j.b, sizes: j.s, baseSizeId: j.base, pieces };
+  return {
+    format: 'GRBPWR-GRADEMAP',
+    version: 1,
+    builder: j.b,
+    sizes: j.s,
+    baseSizeId: j.base,
+    pieces,
+  };
 }
 
 function toBase64(bytes: Uint8Array): string {
@@ -120,9 +138,25 @@ export function encodeGradeMap(file: GmFile): GradeMapBytes {
     const chunk = base64.slice(i * LINE_MAX, (i + 1) * LINE_MAX);
     inFile += `999\n${GRADEMAP_TAG} ${GRADEMAP_FORM} ${i + 1}/${n} ${chunk}\n`.length;
   }
-  return { json, rawBytes: raw.length, deflatedBytes: deflated.length, base64, inFileBytes: inFile };
+  return {
+    json,
+    rawBytes: raw.length,
+    deflatedBytes: deflated.length,
+    base64,
+    inFileBytes: inFile,
+  };
 }
 
 export function decodeGradeMap(base64: string): GmFile {
   return parseJson(strFromU8(inflateSync(fromBase64(base64))));
+}
+
+/** The bytes the DXF block carries (UTF-8 canonical JSON; the block deflates them itself). */
+export function gradeMapBytes(file: GmFile): Uint8Array {
+  return strToU8(canonicalJson(file));
+}
+
+/** A map from the bytes of a DXF block. Throws on anything that is not a v1 map. */
+export function gradeMapFromBytes(bytes: Uint8Array): GmFile {
+  return parseJson(strFromU8(bytes));
 }
