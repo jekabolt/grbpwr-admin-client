@@ -393,8 +393,9 @@ const innerAnchorsOnTwin = (
   if (whole) return [base];
   const sourceLine = innerLines?.get(source.pieceKey)?.[index];
   const targetLine = innerLines?.get(target.pieceKey)?.[twinIndex];
-  if (!sourceLine || !targetLine || !isClosedInner(sourceLine) || !isClosedInner(targetLine))
-    return null;
+  if (!sourceLine || !targetLine) return null;
+  const open = !isClosedInner(sourceLine) && !isClosedInner(targetLine);
+  if (!open && (!isClosedInner(sourceLine) || !isClosedInner(targetLine))) return null;
   const sourceLength = polylineLenMm(sourceLine);
   const targetLength = polylineLenMm(targetLine);
   if (!(sourceLength > 0) || !(targetLength > 0)) return null;
@@ -409,6 +410,20 @@ const innerAnchorsOnTwin = (
     else merged.push([...range]);
   }
   if (!merged.length) return [];
+  if (open) {
+    // An open line has no wrap: each stretch lands where its two ends land on the twin's line.
+    const fromFrame = frameOf(source, grainDeg?.get(source.pieceKey) ?? 0);
+    const toFrame = frameOf(target, grainDeg?.get(target.pieceKey) ?? 0);
+    const onTwin = (share: number) => {
+      const mapped = inFrame([toUV(fromFrame, sampleAt(sourceLine, [share])[0])], edgeMap.frame)[0];
+      return projectedShare(targetLine, fromUV(toFrame, mapped));
+    };
+    return merged.flatMap(([from, to]) => {
+      const [a, b] = [onTwin(from), onTwin(to)];
+      const range: [number, number] = [roundedRange(Math.min(a, b)), roundedRange(Math.max(a, b))];
+      return (range[1] - range[0]) * targetLength > SAME_MM ? [{ ...base, range }] : [];
+    });
+  }
   let gapAfter = merged.length - 1;
   let largestGap = merged[0][0] + 1 - merged[merged.length - 1][1];
   for (let index = 0; index < merged.length - 1; index++) {

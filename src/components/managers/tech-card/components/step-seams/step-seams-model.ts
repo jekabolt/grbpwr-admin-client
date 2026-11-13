@@ -6,7 +6,13 @@
 // millimetres with y UP, so an edge is drawn as [x, −y] and an inner line is anchored as [x, −y].
 
 import { cornerTurn, edgeIdsOf, identicalSeamEdge } from 'lib/assembly-skeleton/geometry';
-import { angleAt, dist, findCorners, resample } from 'lib/assembly-skeleton/geometry/segment';
+import {
+  angleAt,
+  dist,
+  findCorners,
+  openCornersMm,
+  resample,
+} from 'lib/assembly-skeleton/geometry/segment';
 import { xSideOf } from 'lib/assembly-skeleton/geometry/plies';
 import { roleOf, roleVeto } from 'lib/assembly-skeleton/assignment/costs';
 import { readName, roleDef } from 'lib/assembly-skeleton/skeleton/model';
@@ -2706,6 +2712,24 @@ export function closedInner(line: readonly Pt[]): { lenMm: number; cornersMm: nu
   return longestSide >= MIN_SIDE_MM ? { lenMm, cornersMm } : null;
 }
 
+/**
+ * An inner line that takes stretches like an outline edge: a closed contour by `closedInner`, an open
+ * line by its own corners (none = one stretch, the whole line). `closed` only says a stretch may wrap.
+ */
+export function innerStretches(
+  line: readonly Pt[],
+): { lenMm: number; cornersMm: number[]; closed: boolean } | null {
+  if (isClosedInner(line)) {
+    const ring = closedInner(line);
+    return ring ? { ...ring, closed: true } : null;
+  }
+  if (line.length < 2) return null;
+  const lenMm = polylineLenMm(line);
+  if (!(lenMm > 0)) return null;
+  const cornersMm = openCornersMm(line).filter((mm) => mm > SAME_MM && mm < lenMm - SAME_MM);
+  return { lenMm, cornersMm, closed: false };
+}
+
 const innerSliceBetween = (line: readonly Pt[], from: number, to: number): Pt[] => {
   if (line.length < 2 || to < from) return [];
   const out: Pt[] = [];
@@ -2780,6 +2804,7 @@ export function innerSlices(
   if (!merged.length) return [];
   if (
     merged.length > 1 &&
+    isClosedInner(line) &&
     merged[0][0] <= SAME_MM &&
     merged[merged.length - 1][1] >= length - SAME_MM
   ) {

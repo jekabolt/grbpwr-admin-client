@@ -54,7 +54,7 @@ import type { TechCardFormData } from '../schema';
 import { topstitchLineParts, type TopstitchLine } from '../topstitch-lines';
 import { nameSpot } from './name-spot';
 import { mmOnPoints, repeatClickTarget, targetLenMm } from './span-pick';
-import { closedInner, fmtMm, seamlessLabelStep, unsewnLabel } from './step-seams-model';
+import { fmtMm, innerStretches, seamlessLabelStep, unsewnLabel } from './step-seams-model';
 import { placementPictureGlyphsForStep, type ButtonholeOperation } from './buttonhole-glyph';
 import { PAIR_INK, pairNo } from './palette';
 import { layerStyle } from './layer-style';
@@ -2396,7 +2396,7 @@ export function StepPictureSvg({
       const inner = parseInner(id);
       const line = inner ? innerLines?.get(inner.piece)?.[inner.k] ?? [] : [];
       const length = targetLenMm(id, geoms, innerLines);
-      return door && at && (!door.inner || !!closedInner(line)) && length > 0
+      return door && at && (!door.inner || !!innerStretches(line)) && length > 0
         ? mmOnPoints(door.points, at, length)
         : null;
     },
