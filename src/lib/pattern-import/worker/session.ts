@@ -107,6 +107,7 @@ import { marksOn, pageStats } from '../clean/page-roles';
 import { writeAndGate } from '../gate';
 import { writeR12 } from '../write/r12';
 import type { PlannedBlock } from '../write/plan';
+import { withGradeMap, type RulGrades } from '../write/grade-map';
 import { expandRul, looksLikeRul, packRul, parseRul, zipRulPair } from '../adapters/rul';
 import { equalizeForRul } from '../adapters/rul/correspond';
 import { rulSizesMismatch } from '../adapters/rul/settle';
@@ -365,6 +366,8 @@ export class Session {
   private rul: { name: string; bytes: number; sha256: string } | null = null;
   /** The DXF of the pair holds its sizes itself: the table was dropped but not applied. */
   private rulSkipped = false;
+  /** The .rul grade of the last expansion: the write stage upgrades the grade map with it. */
+  private rulGrades: RulGrades | null = null;
   /** The operator's "base size only": the table is kept as a file but never applied. */
   private baseOnly = false;
   // scale
@@ -756,6 +759,7 @@ export class Session {
     try {
       const table = parseRul(bytes, meta.name);
       const ex = expandRul({ dxf: f.bytes, dxfName: f.name, rul: table, rulName: meta.name });
+      this.rulGrades = { grades: ex.grades, sizes: ex.sizes };
       return {
         bytes: new TextEncoder().encode(ex.text).buffer as ArrayBuffer,
         sizes: ex.sizes,
@@ -2261,11 +2265,18 @@ export class Session {
       );
       const base = (this.files[0]?.name ?? 'pattern').replace(/\.[^.]+$/, '');
       const filename = `${base}-${purposeWord(scope)}.dxf`;
+      // GRADEMAP-DESIGN §2: the grade map rides in the written file, built from that file itself.
+      const mapped = await withGradeMap(
+        res.dxfText,
+        input.sizes,
+        this.rul && !this.rulSkipped ? this.rulGrades : null,
+      );
       scopes.push({
         target: scope,
         filename,
         name: '',
-        dxfText: res.dxfText,
+        dxfText: mapped.text,
+        ...(mapped.notes.length ? { gradeMapNotes: mapped.notes } : {}),
         manifest: res.detail.manifest,
         ...(input.storage === 'rul'
           ? {

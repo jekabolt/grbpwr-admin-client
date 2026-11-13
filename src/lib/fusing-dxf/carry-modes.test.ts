@@ -150,6 +150,47 @@ describe('zone ring carry-over modes', () => {
     expect(angle).toBeLessThan(12);
   });
 
+  it('follow line: only the ring whose line is missing is told as a guess', () => {
+    const line = (points: number[][]): FuseInternalLine => ({
+      layer: '8',
+      closed: false,
+      points: ring(points),
+    });
+    const found = line([
+      [100, 200],
+      [200, 180],
+      [300, 200],
+    ]);
+    const lost = line([
+      [60, 340],
+      [120, 335],
+      [180, 340],
+    ]);
+    const follow = (spline: FuseSpline, anchor: PtMm): FuseSpline => ({
+      ...spline,
+      gradeMode: 'follow_line',
+      anchor,
+    });
+    const spec: PieceFuseSpec = {
+      ...blankFuse('zone'),
+      zone: {
+        spline: follow(box(180, 210, 240, 240), { x: 200, y: 180 }),
+        holes: [],
+        islands: [follow(box(100, 300, 140, 320), { x: 120, y: 335 })],
+      },
+    };
+    const guessed: string[] = [];
+    mapFuseSpecToSize(
+      spec,
+      square,
+      wide,
+      null,
+      { base: [found, lost], target: [found] },
+      (what, at) => guessed.push(`${what}:${at}`),
+    );
+    expect(guessed).toEqual(['line:island:0']);
+  });
+
   it('follow line with no internal lines falls back to the default carry', () => {
     const patch: FuseSpline = {
       ...box(150, 150, 250, 250),
@@ -239,9 +280,10 @@ describe('strip end carry-over modes', () => {
       xs,
       null,
       null,
-      (what) => guessed.push(what),
+      (what, at) => guessed.push(`${what}:${at}`),
     ).edges;
-    expect(guessed).toEqual(['notch', 'notch']);
+    // One key per end, named as the size shows it: the edge on that size, its own start or end.
+    expect(guessed.sort()).toEqual([`notch:${edge.edge}:e`, `notch:${edge.edge}:s`]);
     expect([edge.startMm, edge.endMm].sort((a, b) => a - b)).toEqual([10, 20]);
   });
 });

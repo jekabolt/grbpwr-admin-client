@@ -14,9 +14,15 @@ import {
   type StoredRow,
   type StoredSeam,
 } from 'lib/seams';
-import { inFrame } from 'lib/seams/frame';
+import { inFrame, runsOfPiece } from 'lib/seams/frame';
 
-import { CARD85_OPS, CARD85_SEAMS, card85Geoms, card85Step } from './card85.fixture';
+import {
+  CARD85_OPS,
+  CARD85_PIECE_NAME_BY_KEY,
+  CARD85_SEAMS,
+  card85Geoms,
+  card85Step,
+} from './card85.fixture';
 import { card63Geoms, card63InnerLines } from './card63.fixture';
 import { isRightMirrorStep, mirrorRowSig, mirrorStepPlan } from './mirror-step';
 import { placementT } from './step-pose';
@@ -29,7 +35,7 @@ import {
 } from './step-seams-model';
 import type { SeamChange } from '../assembly-seams/seam-change-plan';
 import type { SeamChangeResult } from '../assembly-seams/seam-change';
-import { executeMirrorStep } from './use-mirror-step';
+import { canonicalMirrorRows, executeMirrorStep } from './use-mirror-step';
 
 const withKeys = (
   ops: readonly FormOpLike[],
@@ -56,7 +62,137 @@ const twinT = (from: PieceGeom, to: PieceGeom, kind: 'mirror' | 'identical'): Af
 
 const distance = (a: Pt2, b: Pt2) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 
+const card85PieceKey = (name: string) =>
+  [...CARD85_PIECE_NAME_BY_KEY].find(([, pieceName]) => pieceName === name)?.[0] ?? name;
+
+const card85SleeveRow = (
+  geoms: ReadonlyMap<string, PieceGeom>,
+  operationNumber: number,
+): StoredSeam => {
+  const flap = card85PieceKey('FLP_L_MAIN');
+  const sleeve = card85PieceKey('SLV_L');
+  const flapRun = runsOfPiece(geoms.get(flap)!)[0];
+  const sleeveRun = runsOfPiece(geoms.get(sleeve)!)[0];
+  return {
+    seamKey: `left-${operationNumber}`,
+    status: 'confirmed',
+    kind: 'edge',
+    direction: 'reversed',
+    source: 'manual',
+    sideA: [anchorOfRunId([...geoms.values()], flapRun.id)!],
+    sideB: [anchorOfRunId([...geoms.values()], sleeveRun.id)!],
+    anchoredSize: 'M',
+    note: `source ${operationNumber}`,
+  };
+};
+
 describe('mirrorStepPlan on production fixtures', () => {
+  it('#85 pairs right-first sleeve steps by work and input-group position', () => {
+    const geoms = card85Geoms();
+    const sourceRows = new Map(
+      [380, 430].map((operationNumber) => [
+        operationNumber,
+        card85SleeveRow(geoms, operationNumber),
+      ]),
+    );
+    const cardOps = CARD85_OPS.map((op) => {
+      const operationNumber = op.operationNumber;
+      return {
+        ...op,
+        seamKeys:
+          operationNumber != null && sourceRows.has(operationNumber)
+            ? [sourceRows.get(operationNumber)!.seamKey]
+            : [],
+      };
+    });
+    const plan = (operationNumber: number) =>
+      mirrorStepPlan({
+        step: cardOps[card85Step(operationNumber)],
+        cardOps,
+        rows: [...sourceRows.values()],
+        poses: [],
+        geoms,
+      });
+
+    expect(plan(260).sourceOp?.operationNumber).toBe(380);
+    expect(plan(310).sourceOp?.operationNumber).toBe(430);
+    expect(plan(270).kind).toBe('no-twin');
+    expect(plan(320).kind).toBe('no-twin');
+
+    const source = sourceRows.get(380)!;
+    const mirrored = plan(260).upsert[0] as StoredSeam;
+    expect(mirrored.note).toBe(source.note);
+    for (const [sourceAnchor, targetAnchor] of [
+      [source.sideA[0], mirrored.sideA[0]],
+      [source.sideB[0], mirrored.sideB[0]],
+    ] as const) {
+      expect(
+        geoms
+          .get(sourceAnchor.piece)!
+          .twinOf.some((link) => link.kind === 'mirror' && link.key === targetAnchor.piece),
+      ).toBe(true);
+    }
+  });
+
+  it('#85 gives every right-hand sleeve and pocket step its positional left twin', () => {
+    const geoms = card85Geoms();
+    const pocket = [...CARD85_SEAMS.values()][0];
+    const pairs = [
+      [260, 380],
+      [270, 390],
+      [300, 420],
+      [310, 430],
+      [320, 440],
+      [330, 450],
+      [600, 560],
+      [610, 570],
+    ] as const;
+    const sourceRows = new Map<number, StoredSeam>(
+      pairs.map(([, source]) => [
+        source,
+        source < 500
+          ? card85SleeveRow(geoms, source)
+          : { ...pocket, seamKey: `left-${source}`, note: `source ${source}` },
+      ]),
+    );
+    const cardOps = CARD85_OPS.map((op) => {
+      const operationNumber = op.operationNumber;
+      return {
+        ...op,
+        seamKeys:
+          operationNumber != null && sourceRows.has(operationNumber)
+            ? [sourceRows.get(operationNumber)!.seamKey]
+            : [],
+      };
+    });
+    const rows = [...sourceRows.values()];
+
+    for (const [target, source] of pairs) {
+      const plan = mirrorStepPlan({
+        step: cardOps[card85Step(target)],
+        cardOps,
+        rows,
+        poses: [],
+        geoms,
+      });
+      expect(plan.kind).toBe('create');
+      expect(plan.sourceOp?.operationNumber).toBe(source);
+      expect((plan.upsert[0] as StoredSeam).note).toBe(`source ${source}`);
+    }
+  });
+
+  it('#85 does not copy op 560 into op 610 when the true op 570 twin is empty', () => {
+    const plan = mirrorStepPlan({
+      step: CARD85_OPS[card85Step(610)],
+      cardOps: CARD85_OPS,
+      rows: [...CARD85_SEAMS.values()],
+      poses: [],
+      geoms: card85Geoms(),
+    });
+
+    expect(plan.kind).toBe('no-twin');
+  });
+
   it('#85 op 560 creates the full mirrored set on op 600', () => {
     const geoms = card85Geoms();
     const rows = [...CARD85_SEAMS.values()];
@@ -396,6 +532,180 @@ describe('range and refusal rules', () => {
     note: '',
   });
 
+  const positionalOps = (order: readonly ('R1' | 'R2' | 'L1' | 'L2')[]) => {
+    const rows = [
+      { ...rangedRow('partial'), seamKey: 'left-rank-1', note: 'L1' },
+      { ...rangedRow('partial'), seamKey: 'left-rank-2', note: 'L2' },
+    ];
+    const byName: Record<(typeof order)[number], FormOpLike> = {
+      R1: { ...ops[1], operationNumber: 101, work: 'join_lockstitch', seamKeys: [] },
+      R2: { ...ops[1], operationNumber: 102, work: 'join_lockstitch', seamKeys: [] },
+      L1: {
+        ...ops[0],
+        operationNumber: 201,
+        work: 'join_lockstitch',
+        seamKeys: [rows[0].seamKey],
+      },
+      L2: {
+        ...ops[0],
+        operationNumber: 202,
+        work: 'join_lockstitch',
+        seamKeys: [rows[1].seamKey],
+      },
+    };
+    return { cardOps: order.map((name) => byName[name]), rows };
+  };
+
+  it('pairs two same-shape steps by hand rank in grouped and interleaved card orders', () => {
+    const orders = [
+      ['R1', 'R2', 'L1', 'L2'],
+      ['L1', 'L2', 'R1', 'R2'],
+      ['R1', 'L1', 'R2', 'L2'],
+      ['L1', 'R1', 'L2', 'R2'],
+    ] as const;
+
+    for (const order of orders) {
+      const { cardOps, rows } = positionalOps(order);
+      for (const [target, source] of [
+        [101, 201],
+        [102, 202],
+      ] as const) {
+        const step = cardOps.find((op) => op.operationNumber === target)!;
+        const plan = mirrorStepPlan({ step, cardOps, rows, poses: [], geoms });
+        expect(plan.kind).toBe('create');
+        expect(plan.sourceOp?.operationNumber).toBe(source);
+        expect((plan.upsert[0] as StoredSeam).note).toBe(source === 201 ? 'L1' : 'L2');
+      }
+    }
+  });
+
+  it('does not skip an empty same-rank twin for a filled farther step', () => {
+    const { cardOps, rows } = positionalOps(['L1', 'L2', 'R1', 'R2']);
+    const emptyTwin = cardOps.map((op) =>
+      op.operationNumber === 201 ? { ...op, seamKeys: [] } : op,
+    );
+    const plan = mirrorStepPlan({
+      step: emptyTwin.find((op) => op.operationNumber === 101)!,
+      cardOps: emptyTwin,
+      rows: [rows[1]],
+      poses: [],
+      geoms,
+    });
+
+    expect(plan.kind).toBe('no-twin');
+  });
+
+  it('returns no-twin when the two hands have unequal comparable-step counts', () => {
+    const { cardOps, rows } = positionalOps(['L1', 'L2', 'R1']);
+    const plan = mirrorStepPlan({
+      step: cardOps.find((op) => op.operationNumber === 101)!,
+      cardOps,
+      rows,
+      poses: [],
+      geoms,
+    });
+
+    expect(plan.kind).toBe('no-twin');
+  });
+
+  it('keeps the earlier-only behavior for a step containing both mirrored hands', () => {
+    const row = rangedRow('partial');
+    const bothHands = [...(ops[0].inputKeys ?? []), ...(ops[1].inputKeys ?? [])];
+    const first: FormOpLike = {
+      operationNumber: 1,
+      work: 'join_lockstitch',
+      inputKeys: bothHands,
+      seamKeys: [row.seamKey],
+    };
+    const second: FormOpLike = {
+      operationNumber: 2,
+      work: 'join_lockstitch',
+      inputKeys: bothHands,
+      seamKeys: [],
+    };
+    const later = mirrorStepPlan({
+      step: second,
+      cardOps: [first, second],
+      rows: [row],
+      poses: [],
+      geoms,
+    });
+    const earlier = mirrorStepPlan({
+      step: first,
+      cardOps: [
+        { ...first, seamKeys: [] },
+        { ...second, seamKeys: [row.seamKey] },
+      ],
+      rows: [row],
+      poses: [],
+      geoms,
+    });
+
+    expect(later.sourceOp?.operationNumber).toBe(1);
+    expect(earlier.kind).toBe('no-twin');
+  });
+
+  it('maps folds from a later positional twin using the target piece order', () => {
+    const source: StoredFold = {
+      foldKey: 'left-fold-below',
+      pieceKey: 'PCK_BACK_L',
+      seq: 1,
+      kind: 'inward',
+      source: 'dxf',
+      line: [
+        [0.2, 0.25],
+        [0.2, 0.75],
+      ],
+      flipAt: [0.3, 0.5],
+      edge: null,
+      contourSig: 'left',
+      anchoredSize: 'M',
+      note: '',
+      stale: false,
+    };
+    const edgeMap = mirrorEdgeMapOf(geoms.get(source.pieceKey)!, geoms.get('PCK_BACK_R')!);
+    const target: StoredFold = {
+      ...source,
+      foldKey: 'right-fold-target',
+      pieceKey: 'PCK_BACK_R',
+      line: inFrame(source.line, edgeMap!.frame) as StoredFold['line'],
+      flipAt: inFrame([source.flipAt], edgeMap!.frame)[0],
+      contourSig: 'right',
+    };
+    const after: StoredFold = { ...target, foldKey: 'right-fold-after', seq: 2 };
+    const cardOps: FormOpLike[] = [
+      { ...ops[1], operationNumber: 1, work: 'join_lockstitch', seamKeys: [], foldKeys: [] },
+      { ...ops[1], operationNumber: 2, work: 'fold', seamKeys: [], foldKeys: [after.foldKey] },
+      {
+        ...ops[0],
+        operationNumber: 3,
+        work: 'join_lockstitch',
+        seamKeys: ['range-row'],
+        foldKeys: [source.foldKey],
+      },
+    ];
+    const plan = (ordered: StoredFold) =>
+      mirrorStepPlan({
+        step: cardOps[0],
+        cardOps,
+        rows: [rangedRow('partial')],
+        poses: [],
+        folds: [source, target, ordered],
+        geoms,
+      });
+
+    expect(plan(after)).toMatchObject({
+      kind: 'create',
+      sourceOp: { operationNumber: 3 },
+      foldKeys: [target.foldKey],
+    });
+    expect(plan({ ...after, seq: 0 })).toMatchObject({
+      kind: 'edge-mismatch',
+      upsert: [],
+      foldKeys: [],
+    });
+  });
+
   it('reverses 1:1 and per-part composite ranges and round-trips on the wire', () => {
     for (const kind of ['partial', 'composite'] as const) {
       const row = rangedRow(kind);
@@ -619,7 +929,7 @@ describe('range and refusal rules', () => {
     expect(plan.foldKeys).toEqual([target.foldKey]);
     expect(plan.upsert).toHaveLength(1);
 
-    const third = { ...ops[1], foldKeys: [target.foldKey] };
+    const third = { ...ops[1], work: 'fold', foldKeys: [target.foldKey] };
     expect(
       mirrorStepPlan({
         step: foldOps[1],
@@ -786,6 +1096,19 @@ describe('mirror write boundary', () => {
     keyMap: new Map(keyMap),
     deletedKeys: [],
     lockVersion: 8,
+  });
+
+  it('does not canonicalize a new mirror row onto a key linked by another step', () => {
+    const stored = [...CARD85_SEAMS.values()][0];
+    const expected = { ...stored, seamKey: 'fresh' };
+
+    expect(canonicalMirrorRows([expected], [stored], new Set([stored.seamKey]))[0].seamKey).toBe(
+      'fresh',
+    );
+    expect(canonicalMirrorRows([expected], [stored])[0].seamKey).toBe(stored.seamKey);
+    expect(canonicalMirrorRows([stored], [stored], new Set([stored.seamKey]))[0].seamKey).not.toBe(
+      stored.seamKey,
+    );
   });
 
   it('writes rows, links and detaches in ONE change, then the folds and the autosave', async () => {

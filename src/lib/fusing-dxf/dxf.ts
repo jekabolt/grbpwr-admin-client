@@ -282,9 +282,11 @@ export function mapFuseSpecToSize(
   internals?: FuseInternals | null,
   /**
    * Told when a ring's line or a strip end's notch is not found on the target size: that markup
-   * then goes the default way (built by guess), and the sheet is still built.
+   * then goes the default way (built by guess), and the sheet is still built. `at` names the
+   * element on the target size: a ring as `main` / `island:N` / `hole:N`, a strip end as
+   * `<target edge>:s` / `<target edge>:e`.
    */
-  onGuess?: (what: 'line' | 'notch') => void,
+  onGuess?: (what: 'line' | 'notch', at: string) => void,
   /** The piece's grade map read from this size to that one (the way back: swapped). */
   pair?: GradeMapPair | null,
 ): PieceFuseSpec {
@@ -333,6 +335,7 @@ export function mapFuseSpecToSize(
       spline: FuseSpline,
       followContour: boolean,
       parent: Carried | null = null,
+      ref = 'main',
     ): Carried => {
       const ring = flattenSpline(spline.points);
       // A ring with a mode of its own, or a default hole inside one, goes that way and no other.
@@ -340,7 +343,7 @@ export function mapFuseSpecToSize(
         spline.gradeMode === 'follow_line' && spline.anchor
           ? followLineMove(spline.anchor, grade.linePair(spline.anchor))
           : null;
-      if (spline.gradeMode === 'follow_line' && !followed) onGuess?.('line');
+      if (spline.gradeMode === 'follow_line' && !followed) onGuess?.('line', ref);
       const by =
         spline.gradeMode === 'grow'
           ? grade.point
@@ -365,11 +368,15 @@ export function mapFuseSpecToSize(
       for (const point of [...spline.points, ...ring]) off = Math.min(off, offContour(point));
       const own = smoothstep(RIGID_FROM_MM, RIGID_AT_MM, off);
       const shift = own > 0 ? grade.shift(ring) : null;
-      const whole = (by: PtMm) => spline.points.map((p) => ({ x: p.x + by.x, y: p.y + by.y }));
+      // A follow_line ring whose line has no twin lands here: its anchor goes as a point of the
+      // ring, so the stored anchor stays with the ring on this size and the way back starts there.
+      const n = spline.points.length;
+      const carried = spline.anchor ? [...spline.points, spline.anchor] : spline.points;
+      const whole = (by: PtMm) => carried.map((p) => ({ x: p.x + by.x, y: p.y + by.y }));
       let moved: PtMm[] =
         own >= 1 && shift
           ? whole(shift)
-          : spline.points.map((point) => {
+          : carried.map((point) => {
               const loose = pointwise(point, followContour);
               return shift
                 ? {
@@ -381,26 +388,30 @@ export function mapFuseSpecToSize(
       // Fold-over: the control polygon must keep its orientation, a fair share of its area, and
       // not start crossing itself; otherwise the ring is moved whole.
       const before = signedArea(spline.points);
-      const after = signedArea(moved);
+      const after = signedArea(moved.slice(0, n));
       if (
         own < 1 &&
         spline.points.length >= 3 &&
         Math.abs(before) > 1e-6 &&
         (after * before <= 0 ||
           Math.abs(after) < Math.abs(before) / 4 ||
-          (!selfCrossing(spline.points) && selfCrossing(moved)))
+          (!selfCrossing(spline.points) && selfCrossing(moved.slice(0, n))))
       )
         moved = whole(shift ?? grade.shift(ring));
       // A hole inside a ring that moved whole moves with it, so it stays where it was cut.
       if (parent?.shift && parent.rigid > 0) {
         const by = parent.shift;
         moved = moved.map((p, i) => ({
-          x: p.x + (spline.points[i].x + by.x - p.x) * parent.rigid,
-          y: p.y + (spline.points[i].y + by.y - p.y) * parent.rigid,
+          x: p.x + (carried[i].x + by.x - p.x) * parent.rigid,
+          y: p.y + (carried[i].y + by.y - p.y) * parent.rigid,
         }));
       }
       return {
-        spline: { ...spline, points: spline.points.map((point, i) => ({ ...point, ...moved[i] })) },
+        spline: {
+          ...spline,
+          points: spline.points.map((point, i) => ({ ...point, ...moved[i] })),
+          ...(spline.anchor ? { anchor: moved[n] } : {}),
+        },
         ring,
         rigid: own,
         shift,
@@ -433,22 +444,22 @@ export function mapFuseSpecToSize(
         ? { ...source, zone: { rect: [a.x, a.y, c.x, c.y] } }
         : { ...source, zone: { spline: corners, holes: [], islands: [] } };
     }
-    const outers = [source.zone.spline, ...source.zone.islands].map((spline) =>
-      mapRing(spline, true),
+    const outers = [source.zone.spline, ...source.zone.islands].map((spline, i) =>
+      mapRing(spline, true, null, i ? `island:${i - 1}` : 'main'),
     );
     return {
       ...source,
       zone: {
         spline: outers[0].spline,
         islands: outers.slice(1).map((outer) => outer.spline),
-        holes: source.zone.holes.map((hole) => {
+        holes: source.zone.holes.map((hole, j) => {
           const first = hole.points[0];
           const parent = first
             ? outers.find(
                 (outer) => (outer.rigid > 0 || outer.by) && pointInRing(first, outer.ring),
               )
             : undefined;
-          return mapRing(hole, false, parent ?? null).spline;
+          return mapRing(hole, false, parent ?? null, `hole:${j}`).spline;
         }),
       },
     };
@@ -479,7 +490,8 @@ export function mapFuseSpecToSize(
           const carried = (mm: number, mode: FuseEdge['startMode'], atStart: boolean): number => {
             if (!baseRun) return mm;
             const end = carryStripEnd(mm, mode, atStart, pair);
-            if (end.guessed) onGuess?.('notch');
+            if (end.guessed)
+              onGuess?.('notch', `${target}:${atStart !== pairing.reversed ? 's' : 'e'}`);
             return end.mm;
           };
           const start = carried(edge.startMm, edge.startMode, true);

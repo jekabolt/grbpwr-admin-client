@@ -8,6 +8,7 @@
                   в студию узлом — печатный порядок concept → aspects → notes сохранён. */
 }
 
+import { fusingBaseResolver } from 'lib/grade-map/fusing-base-store';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
@@ -1868,7 +1869,12 @@ export function TechCardForm({
     // version, so nothing would refuse it.
     const original = (base.current.card ?? storedCard())?.techCard;
     const { payload: techCardInsert } = gateTechCardPayload(
-      mapFormToTechCardInsert(data, original, canWriteCosting),
+      mapFormToTechCardInsert(
+        data,
+        original,
+        canWriteCosting,
+        fusingBaseResolver(numId || createdIdRef.current),
+      ),
       { serverSpeaksDesign: designBandSpeaks },
     );
     let bodySaved = false;
@@ -2143,7 +2149,12 @@ export function TechCardForm({
         // straight to the panels and drop them on the way to the list.
         const current = await adminService.GetTechCard({ id: newId, vatCountryCode: undefined });
         const { payload } = gateTechCardPayload(
-          mapFormToTechCardInsert(data, current.techCard?.techCard, canWriteCosting),
+          mapFormToTechCardInsert(
+            data,
+            current.techCard?.techCard,
+            canWriteCosting,
+            fusingBaseResolver(newId),
+          ),
           { serverSpeaksDesign: designBandSpeaks },
         );
         const snapshot = peekReuploadSnapshot(
@@ -2831,7 +2842,7 @@ export function TechCardForm({
     let before = cloneFormValues(form.getValues());
     for (;;) {
       const { payload } = gateTechCardPayload(
-        mapFormToTechCardInsert(data, undefined, canWriteCosting),
+        mapFormToTechCardInsert(data, undefined, canWriteCosting, fusingBaseResolver(undefined)),
         { serverSpeaksDesign: designBandSpeaks },
       );
       try {

@@ -4159,6 +4159,16 @@ export type TechCardPieceFusingZone = {
   islands: TechCardPieceFusingSpline[] | undefined;
 };
 
+// The base the piece's fusing markup (fusing_edges / fusing_zone) was drawn against: the base size
+// and a signature of that size's piece contour. A client compares it with the current pattern file
+// to tell whether the markup still fits after the pattern was replaced. The server stores it as an
+// opaque pair and never computes or compares the signature itself.
+// Both fields are set together, or both are empty (= clear).
+export type TechCardPieceFusingBase = {
+  baseSizeId: number | undefined;
+  contourSignature: string | undefined;
+};
+
 // TechCardPiece is one structural cut-piece of the garment (полочка, спинка, обтачка горловины…):
 // how many per garment, whether mirrored/paired, its grainline (долевая) and whether it is fused
 // (клеевая). materials picks, per colourway, which BOM fabric it is cut from. Full-replace child.
@@ -4250,6 +4260,11 @@ export type TechCardPiece = {
   fusingGrain?: string;
   // Empty/NULL = cut; otherwise cut|fuse.
   fusingDarts?: string;
+  // Staleness key of the fusing markup. Absent = do not touch (an older client keeps the stored
+  // key); present empty = clear; present with both fields = replace. Half a key is rejected. The
+  // server clears it on its own when the piece stops being fused or loses its edges / zone. Reads
+  // return it only when one is stored. Not part of the CONSTRUCTION digest.
+  fusingBase: TechCardPieceFusingBase | undefined;
 };
 
 // SkuSeason is the normalized style-owned season used in every SKU. The pair is atomic: callers

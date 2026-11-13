@@ -37,7 +37,8 @@ export function pathOf(points: readonly PtMm[], closed: boolean): Path | null {
   } else if (pts.length < 2) return null;
   const n = pts.length;
   const cum = [0];
-  for (let i = 1; i <= (closed ? n : n - 1); i++) cum.push(cum[i - 1] + dist(pts[i - 1], pts[i % n]));
+  for (let i = 1; i <= (closed ? n : n - 1); i++)
+    cum.push(cum[i - 1] + dist(pts[i - 1], pts[i % n]));
   const total = cum[cum.length - 1];
   return total > 1e-9 ? { pts, closed, cum, total } : null;
 }

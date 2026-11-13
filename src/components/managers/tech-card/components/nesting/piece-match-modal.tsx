@@ -96,7 +96,7 @@ import { separateForDisplay } from './sheet-separate';
 import { CanvasSegments, PieceSheet, type PieceMark } from './piece-sheet';
 import { FuseFields, type InterliningLine } from './fuse-fields';
 import { FuseOverlay } from './fuse-overlay';
-import { createZoneBus, isDrawnZone } from './fuse-zone';
+import { createZoneBus, fuseGuessKey, isDrawnZone, NO_GUESS, type FuseGuess } from './fuse-zone';
 import { pieceNetOutline, sewingLineLayer } from './net-outline';
 import { fusingSheetsChange, fusingSignature, hasFusedPiece } from './fusing-sheets-stage';
 import {
@@ -1748,13 +1748,22 @@ export function PieceMatchModal({
       shownLines: fusingInternalLines(shown, seamLayer),
     };
   };
-  const fuseOnSize = (ci: string, size: string, spec: PieceFuseSpec): PieceFuseSpec => {
+  const fuseOnSize = (
+    ci: string,
+    size: string,
+    spec: PieceFuseSpec,
+    onGuess?: (what: 'line' | 'notch', at: string) => void,
+  ): PieceFuseSpec => {
     const m = sizeMapOf(ci, size);
     return m
-      ? mapFuseSpecToSize(spec, m.base, m.shown, requiredSeamAllowanceMm, {
-          base: m.baseLines,
-          target: m.shownLines,
-        })
+      ? mapFuseSpecToSize(
+          spec,
+          m.base,
+          m.shown,
+          requiredSeamAllowanceMm,
+          { base: m.baseLines, target: m.shownLines },
+          onGuess,
+        )
       : spec;
   };
   /** A spec edited on `size` → base-size markup. Untouched markup keeps its stored points exactly. */
@@ -2766,10 +2775,20 @@ export function PieceMatchModal({
     patch({ fuse: resolved, ...writeFuseFields(resolved) });
   };
   // The same spec as drawn and edited on the sheet's size (see fuseOnSize / fuseFromSize).
+  // What the shown size built by guess (a followed line or a notch not found there), per element.
+  const shownGuesses = new Map<string, Set<FuseGuess>>();
+  const shownGuessOfCi = (ci: string): ReadonlySet<FuseGuess> => {
+    if (!shownGuesses.has(ci)) shownFuseOfCi(ci);
+    return shownGuesses.get(ci) ?? NO_GUESS;
+  };
   const shownFuseOfCi = (ci: string): PieceFuseSpec | undefined => {
     const spec = fuseOfCi(ci);
     if (!spec) return undefined;
-    const shown = fuseOnSize(ci, shownSize, spec);
+    const guessed = new Set<FuseGuess>();
+    shownGuesses.set(ci, guessed);
+    const shown = fuseOnSize(ci, shownSize, spec, (what, at) =>
+      guessed.add(fuseGuessKey(what, at)),
+    );
     const { st } = ioOf(ci);
     if (shown.mode !== 'whole' || st.kind !== 'existing') return shown;
     const lineKey = shown.bomLineKey.trim();
@@ -2902,10 +2921,14 @@ export function PieceMatchModal({
     // A piece, panel «Fold»: NAME · FUSING (phone: docked above the footer) · GRAIN + UNGRADED ·
     // NOTE.
     const fuse = vals.fuse ?? readFuseSpec(vals);
+    const fuseGuessed = new Set<FuseGuess>();
     const fuseFields = interlining ? null : (
       <FuseFields
         key={ci}
-        spec={fuseOnSize(ci, shownSize, fuse)}
+        spec={fuseOnSize(ci, shownSize, fuse, (what, at) =>
+          fuseGuessed.add(fuseGuessKey(what, at)),
+        )}
+        guessed={fuseGuessed}
         fused={!!vals.fused}
         lines={interlinings}
         readOnly={readOnly}
@@ -3098,6 +3121,7 @@ export function PieceMatchModal({
                           ciOf={ciOf}
                           sel={zoomed}
                           fuseOf={shownFuseOfCi}
+                          guessOf={shownGuessOfCi}
                           onChange={setShownFuse}
                           zoneBus={zoneBus}
                           zoneOutlines={ownerZoneOutlines}

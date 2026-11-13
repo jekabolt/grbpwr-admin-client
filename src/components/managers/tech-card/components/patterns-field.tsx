@@ -235,6 +235,8 @@ import {
   type InterliningShapePair,
 } from './nesting/interlining-shape-match';
 import { blankFuse, writeFuseFields } from './nesting/fuse-spec';
+import { fusingBaseRows } from 'lib/grade-map/fusing-base-source';
+import { currentFusingBases, publishFusingBases } from 'lib/grade-map/fusing-base-store';
 
 // The whole nesting feature (modal + worker + dxf/clipper deps) lives in a lazy chunk —
 // nothing loads until someone actually opens a раскладка.
@@ -1468,6 +1470,33 @@ export function PatternsField({
         : [],
     [mainPatternScope, pieceDxfAliases, linkSet],
   );
+
+  // grademap P3: each main-pattern piece's base contour → the fusing markup key the save sends and
+  // the stale flag other screens read (lib/grade-map/fusing-base-store). Data only, no UI.
+  const cardSizeOfToken = useMemo(() => {
+    const m = new Map<string, { sizeId: number; rank: number }>();
+    orderSizes(sizeIds).forEach((id, rank) => {
+      for (const t of sizeTokensOf(sizeById.get(id))) {
+        const k = bareToken(t);
+        if (k && !m.has(k)) m.set(k, { sizeId: id, rank });
+      }
+    });
+    return m;
+  }, [sizeIds, sizeById, orderSizes]);
+  const currentBases = useMemo(
+    () =>
+      currentFusingBases(
+        fusingBaseRows(
+          mainPatternScope ? pieceShapesByScope.get(mainPatternScope.scope.key) ?? [] : [],
+          (token) => cardSizeOfToken.get(bareToken(token)),
+          baseSampleSizeId,
+        ),
+      ),
+    [mainPatternScope, pieceShapesByScope, cardSizeOfToken, baseSampleSizeId],
+  );
+  useEffect(() => {
+    if (bundle) publishFusingBases(techCardId, currentBases);
+  }, [bundle, techCardId, currentBases]);
 
   const interliningReviews = useMemo(() => {
     const out = new Map<

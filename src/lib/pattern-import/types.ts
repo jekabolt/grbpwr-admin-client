@@ -2223,6 +2223,8 @@ export type DraftScope = {
   rul?: DraftRul;
   /** Identities written into THIS file. */
   identities: PieceKey[];
+  /** Why the grade map block of this file left a piece out, kept it derived, or is missing. */
+  gradeMapNotes?: string[];
   /**
    * F7: the very same file (same content fingerprint in its name) is already a pattern row of this
    * scope — no upload, no new row; re-applying an import changes nothing.

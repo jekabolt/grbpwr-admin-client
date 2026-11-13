@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from 'react';
 import { useFormContext } from 'react-hook-form';
-import type { StoredPose, StoredRow, StoredSeam } from 'lib/seams';
+import { newSeamKey, type StoredPose, type StoredRow, type StoredSeam } from 'lib/seams';
 
 import { mirrorChange, type SeamChange, type StepRef } from '../assembly-seams/seam-change-plan';
 import type { SeamChangeResult } from '../assembly-seams/seam-change';
@@ -75,10 +75,14 @@ export async function executeMirrorStep(
 export function canonicalMirrorRows(
   expected: readonly StoredRow[],
   have: readonly StoredSeam[],
+  linkedElsewhere: ReadonlySet<string> = new Set(),
 ): StoredRow[] {
-  return expected.map((row) =>
-    row.kind === 'pose' ? row : reuseKeys([row as StoredSeam], have)[0] ?? row,
-  );
+  const available = have.filter((row) => !linkedElsewhere.has(row.seamKey));
+  return expected.map((row) => {
+    if (row.kind === 'pose') return row;
+    const fresh = linkedElsewhere.has(row.seamKey) ? { ...row, seamKey: newSeamKey() } : row;
+    return reuseKeys([fresh as StoredSeam], available)[0] ?? fresh;
+  });
 }
 
 const sameSet = (a: readonly string[], b: readonly string[]) =>
@@ -138,7 +142,17 @@ export function useMirrorStep({
         const op = getValues('operations')?.[rowAt()];
         return [...(op?.seamKeys ?? []), ...(op?.poseKeys ?? [])];
       },
-      canonicalize: (put) => canonicalMirrorRows(put, rowsOf(useSeamsStore.getState())),
+      canonicalize: (put) => {
+        const operations = getValues('operations') ?? [];
+        const at = rowAt();
+        const currentKeys = new Set(operations[at]?.seamKeys ?? []);
+        const linkedElsewhere = new Set(
+          operations.flatMap((op, opIndex) =>
+            opIndex === at ? [] : (op.seamKeys ?? []).filter((key) => !currentKeys.has(key)),
+          ),
+        );
+        return canonicalMirrorRows(put, rowsOf(useSeamsStore.getState()), linkedElsewhere);
+      },
       change: (change, gone) =>
         ctx.writes.change(change, {
           verb: plan.upsert.length > 1 ? `decisions (${plan.upsert.length})` : 'decision',

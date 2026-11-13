@@ -201,6 +201,34 @@ describe('stored closed-contour surfaces', () => {
     expect(edge).toContainEqual([160, 50]);
   });
 
+  it('lays the partner on the longer leg when the stored shares are rounded past the corner', () => {
+    // What the server really holds: shares rounded to 1e-4, so 0.4667 × 300 = 140.01 mm runs a
+    // hair round the far corner and 0.9667 × 300 = 290.01 mm starts a hair after the near one.
+    const longPart = rect('LONG_PART', 150, 20);
+    const cornerGeoms = new Map(geoms).set(longPart.pieceKey, longPart);
+    const cornerBase = surfaceRow(
+      { geom: host, k: 0, line: lineDown, grainDeg: 0 },
+      [anchorOfRunId([...cornerGeoms.values()], 'LONG_PART#0')!],
+      undefined,
+      'corner-inner-rounded',
+    )!;
+    const row: StoredSeam = {
+      ...cornerBase,
+      sideA: [
+        { ...cornerBase.sideA[0], range: [0, 0.4667] },
+        { ...cornerBase.sideA[0], range: [0.9667, 1] },
+      ],
+    };
+    const candidate = candidateOfStoredSeam(row, cornerGeoms, innerLines)!;
+    const edge = longPart.edges[0].pts.map((point) => apply(candidate.surface!.T, point));
+    const xs = edge.map((point) => point[0]).sort((a, b) => a - b);
+
+    expect(edge[0][1]).toBeCloseTo(50, 6);
+    expect(edge[1][1]).toBeCloseTo(50, 6);
+    expect(xs[0]).toBeCloseTo(10, 6);
+    expect(xs[1]).toBeCloseTo(160, 6);
+  });
+
   it('keeps a straight partner on the chord when the stored host bend is soft', () => {
     const longPart = rect('SOFT_PART', 150, 20);
     const softGeoms = new Map(geoms).set(longPart.pieceKey, longPart);

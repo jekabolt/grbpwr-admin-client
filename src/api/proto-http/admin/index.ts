@@ -10597,6 +10597,11 @@ export type common_TechCardPiece = {
   fusingGrain?: string;
   // Empty/NULL = cut; otherwise cut|fuse.
   fusingDarts?: string;
+  // Staleness key of the fusing markup. Absent = do not touch (an older client keeps the stored
+  // key); present empty = clear; present with both fields = replace. Half a key is rejected. The
+  // server clears it on its own when the piece stops being fused or loses its edges / zone. Reads
+  // return it only when one is stored. Not part of the CONSTRUCTION digest.
+  fusingBase: common_TechCardPieceFusingBase | undefined;
 };
 
 // TechCardPieceColorwayMaterial maps ONE cut-piece to its fabric (and optional fusing) for ONE
@@ -10688,6 +10693,16 @@ export type common_TechCardPieceFusingGradeMode =
 export type common_TechCardPieceFusingAnchor = {
   x: googletype_Decimal | undefined;
   y: googletype_Decimal | undefined;
+};
+
+// The base the piece's fusing markup (fusing_edges / fusing_zone) was drawn against: the base size
+// and a signature of that size's piece contour. A client compares it with the current pattern file
+// to tell whether the markup still fits after the pattern was replaced. The server stores it as an
+// opaque pair and never computes or compares the signature itself.
+// Both fields are set together, or both are empty (= clear).
+export type common_TechCardPieceFusingBase = {
+  baseSizeId: number | undefined;
+  contourSignature: string | undefined;
 };
 
 // TechCardPurpose is the numeric enum form of a style's purpose (R6). Replaces the free-text
