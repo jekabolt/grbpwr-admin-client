@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { ATTACH_LABEL_WORK, linkedLabels, NOT_SEWN_ATTACHMENTS } from './label-attach-stitch';
 import { adminService } from 'api/api';
 import type { ChangeTechCardSeamsRequest } from 'api/proto-http/admin';
 import { runSeamChange } from './assembly-seams/seam-change';
@@ -1054,7 +1055,12 @@ export function rowFromCreate(r: CreateResult): OperationRow {
  * to ADD; a person's links are never touched.
  */
 export function autoStepMaterialKeys(
-  row: { operationType?: string; labelAttachStitch?: string; bomLineKeys?: readonly string[] },
+  row: {
+    operationType?: string;
+    work?: string;
+    labelAttachStitch?: string;
+    bomLineKeys?: readonly string[];
+  },
   bomLines: ReadonlyArray<{ lineKey?: string; section?: string }>,
 ): string[] {
   const linked = new Set((row.bomLineKeys ?? []).map((k) => k.trim()).filter(Boolean));
@@ -1067,9 +1073,8 @@ export function autoStepMaterialKeys(
   };
   if (row.operationType === 'TECH_CARD_OPERATION_TYPE_FUSING')
     take('TECH_CARD_BOM_SECTION_INTERLINING');
-  if (row.labelAttachStitch && row.labelAttachStitch !== NONE_LABEL_ATTACH) {
-    take('TECH_CARD_BOM_SECTION_LABEL');
-  }
+  // J1: the label step is known by its work; its stitch now follows the label it links.
+  if ((row.work ?? '').trim() === ATTACH_LABEL_WORK) take('TECH_CARD_BOM_SECTION_LABEL');
   return out;
 }
 
@@ -2608,7 +2613,16 @@ function useStepInference(
 }
 
 // ── the step editor ──────────────────────────────────────────────────────────────────────────
-function OperationLabelPicker({ index, frozen }: { index: number; frozen: boolean }) {
+function OperationLabelPicker({
+  index,
+  frozen,
+  attachment,
+}: {
+  index: number;
+  frozen: boolean;
+  /** An «attach label» step: each linked label's attachment is shown as the step's fact (J1). */
+  attachment?: boolean;
+}) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const labels = (useWatch({ control, name: 'garmentLabels' }) ?? []) as FormGarmentLabel[];
   const operations = useWatch({ control, name: 'operations' }) ?? [];
@@ -2699,7 +2713,56 @@ function OperationLabelPicker({ index, frozen }: { index: number; frozen: boolea
           add labels
         </Button>
       )}
+      {attachment && (
+        <LabelAttachmentFacts
+          labels={linkedLabels(selected, labels)}
+          stored={operations[index]?.labelAttachStitch}
+        />
+      )}
     </>
+  );
+}
+
+/** «brand · sewn 2 sides · left + right» per linked label; with none, the step's own stored stitch. */
+function LabelAttachmentFacts({ labels, stored }: { labels: FormGarmentLabel[]; stored?: string }) {
+  if (!labels.length) {
+    const text = labelAttachStitchLabel(stored);
+    return text ? (
+      <Text size='small' variant='label' component='p'>
+        {text}
+      </Text>
+    ) : null;
+  }
+  return (
+    <div className='flex flex-col gap-1'>
+      {labels.map((label) => {
+        const name =
+          label.key?.trim() ||
+          garmentLabelName(garmentLabelKindNames, label.kind?.trim() || '') ||
+          'label';
+        const word = label.attachment?.trim() || '';
+        const sides =
+          word === 'sewn 2 sides'
+            ? label.foldAxis === 'width'
+              ? 'left + right'
+              : 'top + bottom'
+            : '';
+        const notSewn = NOT_SEWN_ATTACHMENTS.has(word);
+        const fact = !word
+          ? 'no attachment'
+          : [word, sides, notSewn ? 'not sewn' : ''].filter(Boolean).join(' · ');
+        return (
+          <Text
+            key={label.lineKey || label.key}
+            size='small'
+            variant={!word ? 'error' : notSewn ? 'label' : 'default'}
+            component='p'
+          >
+            {name} · {fact}
+          </Text>
+        );
+      })}
+    </div>
   );
 }
 
@@ -4176,7 +4239,7 @@ function OperationEditor({
     const implied = autoStepMaterialKeys(
       {
         operationType: named.operationType,
-        labelAttachStitch: named.labelAttachStitch,
+        work: named.work,
         bomLineKeys: named.bomLineKeys,
       },
       bomLines,
@@ -5263,7 +5326,13 @@ function OperationEditor({
         )}
       </div>
 
-      {isLabelStep && <OperationLabelPicker index={index} frozen={frozen} />}
+      {isLabelStep && (
+        <OperationLabelPicker
+          index={index}
+          frozen={frozen}
+          attachment={workValue === ATTACH_LABEL_WORK}
+        />
+      )}
 
       {activeKind?.id === 'A2' && (
         <OperationTopstitchThreadPicker
@@ -5282,24 +5351,6 @@ function OperationEditor({
           isEditorFrozen={isEditorFrozen}
           articles={colorwayArticles}
         />
-      )}
-
-      {howKind === 'label' && (
-        <>
-          <GroupLabel>stitch</GroupLabel>
-          <div className='grid grid-cols-2 gap-2'>
-            <SelectField
-              name={`operations.${index}.labelAttachStitch`}
-              label=''
-              items={stepEnumOptions(
-                LABEL_ATTACH_STITCH_LABELS,
-                '— not stated —',
-                labelAttachStitch,
-              )}
-              className={selectNoGrow}
-            />
-          </div>
-        </>
       )}
 
       {((howKind !== 'none' && howKind !== 'label') || showPressToward) && (

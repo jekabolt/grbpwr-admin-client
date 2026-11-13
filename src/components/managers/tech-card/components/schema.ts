@@ -1,4 +1,5 @@
 import { clampPatternName } from 'utils/pattern';
+import { stepLabelStitch } from './label-attach-stitch';
 import { OPERATION_FIELDS_AWARE } from 'lib/tech-card-operation-aware';
 import {
   common_GenderEnum,
@@ -4183,8 +4184,11 @@ export function mapFormToTechCardInsert(
         // молча при первом же сохранении шага, у которого класс шва поменяли.
         bindingStyle: (o.bindingStyle ||
           'TECH_CARD_BINDING_STYLE_UNKNOWN') as common_TechCardBindingStyle,
-        labelAttachStitch: (o.labelAttachStitch ||
-          'TECH_CARD_LABEL_ATTACH_STITCH_UNKNOWN') as common_TechCardLabelAttachStitch,
+        // J1: an «attach label» step takes its stitch from the label it links (label-attach-stitch).
+        labelAttachStitch: stepLabelStitch(
+          { work: o.work, labelAttachStitch: o.labelAttachStitch, labelKeys: o.labelKeys },
+          data.garmentLabels,
+        ) as common_TechCardLabelAttachStitch,
       }));
       const placementLayout = blockOut(() => ({
         count: o.placementCount || 0,
