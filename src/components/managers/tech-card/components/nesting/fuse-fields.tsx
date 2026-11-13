@@ -57,6 +57,7 @@ import {
   zoneRingModeLabel,
   zoneRingMode,
   NO_GUESS,
+  ringGuessed,
   type FuseGuess,
   zoneRingPoints,
   zoneRingRefs,
@@ -581,7 +582,7 @@ function ZoneRow({
                 >
                   <span aria-hidden>{ringInvalid ? '!' : ref.startsWith('hole:') ? '◇' : '◆'}</span>
                   <span className='truncate'>{zoneRingLabel(spline, ref)}</span>
-                  {guessed.has('line') && zoneRingMode(spline, ref) === 'follow_line' ? (
+                  {ringGuessed(guessed, ref) && zoneRingMode(spline, ref) === 'follow_line' ? (
                     <span data-ring-mode='guess' className={selectedRow ? '' : 'text-error'}>
                       guess
                     </span>

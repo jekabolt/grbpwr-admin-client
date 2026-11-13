@@ -268,9 +268,11 @@ export function mapFuseSpecToSize(
   internals?: FuseInternals | null,
   /**
    * Told when a ring's line or a strip end's notch is not found on the target size: that markup
-   * then goes the default way (built by guess), and the sheet is still built.
+   * then goes the default way (built by guess), and the sheet is still built. `at` names the
+   * element on the target size: a ring as `main` / `island:N` / `hole:N`, a strip end as
+   * `<target edge>:s` / `<target edge>:e`.
    */
-  onGuess?: (what: 'line' | 'notch') => void,
+  onGuess?: (what: 'line' | 'notch', at: string) => void,
 ): PieceFuseSpec {
   if (source.mode === 'zone' && source.zone && !('dxfPieceKey' in source.zone)) {
     let baseInset: PtMm[] | null = null;
@@ -316,6 +318,7 @@ export function mapFuseSpecToSize(
       spline: FuseSpline,
       followContour: boolean,
       parent: Carried | null = null,
+      ref = 'main',
     ): Carried => {
       const ring = flattenSpline(spline.points);
       // A ring with a mode of its own, or a default hole inside one, goes that way and no other.
@@ -323,7 +326,7 @@ export function mapFuseSpecToSize(
         spline.gradeMode === 'follow_line' && spline.anchor
           ? followLineMove(spline.anchor, grade.linePair(spline.anchor))
           : null;
-      if (spline.gradeMode === 'follow_line' && !followed) onGuess?.('line');
+      if (spline.gradeMode === 'follow_line' && !followed) onGuess?.('line', ref);
       const by =
         spline.gradeMode === 'grow'
           ? grade.point
@@ -424,22 +427,22 @@ export function mapFuseSpecToSize(
         ? { ...source, zone: { rect: [a.x, a.y, c.x, c.y] } }
         : { ...source, zone: { spline: corners, holes: [], islands: [] } };
     }
-    const outers = [source.zone.spline, ...source.zone.islands].map((spline) =>
-      mapRing(spline, true),
+    const outers = [source.zone.spline, ...source.zone.islands].map((spline, i) =>
+      mapRing(spline, true, null, i ? `island:${i - 1}` : 'main'),
     );
     return {
       ...source,
       zone: {
         spline: outers[0].spline,
         islands: outers.slice(1).map((outer) => outer.spline),
-        holes: source.zone.holes.map((hole) => {
+        holes: source.zone.holes.map((hole, j) => {
           const first = hole.points[0];
           const parent = first
             ? outers.find(
                 (outer) => (outer.rigid > 0 || outer.by) && pointInRing(first, outer.ring),
               )
             : undefined;
-          return mapRing(hole, false, parent ?? null).spline;
+          return mapRing(hole, false, parent ?? null, `hole:${j}`).spline;
         }),
       },
     };
@@ -470,7 +473,8 @@ export function mapFuseSpecToSize(
           const carried = (mm: number, mode: FuseEdge['startMode'], atStart: boolean): number => {
             if (!baseRun) return mm;
             const end = carryStripEnd(mm, mode, atStart, pair);
-            if (end.guessed) onGuess?.('notch');
+            if (end.guessed)
+              onGuess?.('notch', `${target}:${atStart !== pairing.reversed ? 's' : 'e'}`);
             return end.mm;
           };
           const start = carried(edge.startMm, edge.startMode, true);
