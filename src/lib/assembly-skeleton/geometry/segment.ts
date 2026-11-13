@@ -132,6 +132,48 @@ export function findCorners(pts: readonly Pt2[]): number[] {
   return merged;
 }
 
+/**
+ * Corners of an open polyline, in mm from its first point: the same resample step, turn window and
+ * angle as `findCorners`, but the ends never wrap onto each other.
+ */
+export function openCornersMm(pts: readonly Pt2[]): number[] {
+  const p = pts.filter((q, i) => i === 0 || dist(q, pts[i - 1]) > 1e-6);
+  if (p.length < 2) return [];
+  const rs: Pt2[] = [];
+  const at: number[] = [];
+  let walked = 0;
+  for (let i = 1; i < p.length; i++) {
+    const a = p[i - 1];
+    const b = p[i];
+    const len = dist(a, b);
+    const k = Math.max(1, Math.round(len / SKELETON.resampleMm));
+    for (let j = 0; j < k; j++) {
+      rs.push([a[0] + ((b[0] - a[0]) * j) / k, a[1] + ((b[1] - a[1]) * j) / k]);
+      at.push(walked + (len * j) / k);
+    }
+    walked += len;
+  }
+  rs.push(p[p.length - 1]);
+  at.push(walked);
+  const n = rs.length;
+  const w = Math.max(1, Math.round(SKELETON.cornerWinMm / SKELETON.resampleMm));
+  if (n < 2 * w + 1) return [];
+  const ang = rs.map((_, i) => (i < w || i > n - 1 - w ? 0 : Math.abs(angleAt(rs, i, w))));
+  const merged: number[] = [];
+  for (let i = w; i <= n - 1 - w; i++) {
+    if (ang[i] < SKELETON.cornerDeg) continue;
+    let isMax = true;
+    for (let d = -w; d <= w && isMax; d++) {
+      const j = i + d;
+      if (d !== 0 && j >= 0 && j < n && ang[j] > ang[i]) isMax = false;
+    }
+    if (!isMax) continue;
+    if (merged.length && i - merged[merged.length - 1] < CORNER_MERGE_STEPS) continue;
+    merged.push(i);
+  }
+  return merged.map((i) => at[i]);
+}
+
 /** Source-polyline turns mapped onto the resample, without changing the edge segmentation. */
 function sourceVertexIndices(loop: readonly Pt2[], rs: readonly Pt2[], grid?: PointGrid): number[] {
   if (!grid || loop.length < 3 || rs.length < 3) return [];

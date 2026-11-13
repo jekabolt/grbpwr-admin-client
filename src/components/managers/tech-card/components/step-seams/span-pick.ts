@@ -10,7 +10,7 @@ import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { expandSidePart, mergedSpans, SEAMS, sidePartEdges, type SidePart } from 'lib/seams';
 
 import { pickTarget } from './seam-focus';
-import { closedInner, parseInner, SAME_MM } from './step-seams-model';
+import { innerStretches, parseInner, SAME_MM } from './step-seams-model';
 
 export type SpanRange = readonly [number, number];
 export type SpanSide = 'a' | 'b';
@@ -118,9 +118,9 @@ export function edgeBreaks(
     : own;
 }
 
-/** Corners of a closed inner contour, in millimetres from its stored vertex 0. */
+/** Corners of an inner line that takes stretches, in millimetres from its stored vertex 0. */
 export function innerBreaks(line: readonly Pt2[]): PickBreak[] {
-  return (closedInner(line)?.cornersMm ?? []).map((atMm) => ({ atMm, kind: 'turn' }));
+  return (innerStretches(line)?.cornersMm ?? []).map((atMm) => ({ atMm, kind: 'turn' }));
 }
 
 /** Physical target length: an outline run or an inner polyline. */
@@ -244,6 +244,8 @@ const sideIsFull = (pick: SidePick, side: SpanSide) =>
 type PickRules = {
   isInner: (id: string) => boolean;
   pieceOf: (id: string) => string;
+  /** Whether an inner target is a closed contour, whose stretch may cross vertex 0 (default). */
+  wraps?: (id: string) => boolean;
 };
 
 /**
@@ -331,7 +333,7 @@ export function pickSegments(
   );
   if (!rules.isInner(id)) return next;
   const ranges = next.spans[side][id];
-  if (!ranges || innerRangesAreContiguous(ranges, length)) return next;
+  if (!ranges || innerRangesAreContiguous(ranges, length, rules.wraps?.(id) ?? true)) return next;
   const current = pick.spans[side][id] ?? (pick[side].includes(id) ? [[0, length]] : []);
   const adds = segments.some(
     (segment) =>
@@ -353,12 +355,16 @@ export function pickSegments(
   );
 }
 
-/** One linear range, or the two range parts of one stretch crossing stored vertex 0. */
-export function innerRangesAreContiguous(ranges: readonly SpanRange[], length: number): boolean {
+/** One linear range, or on a closed contour the two range parts of one stretch crossing vertex 0. */
+export function innerRangesAreContiguous(
+  ranges: readonly SpanRange[],
+  length: number,
+  wraps = true,
+): boolean {
   const merged = mergedSpans(ranges);
   return (
     merged.length <= 1 ||
-    (merged.length === 2 && merged[0][0] <= SAME_MM && merged[1][1] >= length - SAME_MM)
+    (wraps && merged.length === 2 && merged[0][0] <= SAME_MM && merged[1][1] >= length - SAME_MM)
   );
 }
 
@@ -379,7 +385,11 @@ export function pickFreeSpan(
   if (pick[side].includes(id)) {
     const current = pick.spans[side][id] ?? [];
     const next = mergedSpans([...current, ordered]);
-    if (rules.isInner(id) && current.length && !innerRangesAreContiguous(next, length))
+    if (
+      rules.isInner(id) &&
+      current.length &&
+      !innerRangesAreContiguous(next, length, rules.wraps?.(id) ?? true)
+    )
       return withSpans(pick, side, id, [ordered], length);
     if (next.length > current.length && current.length && sideIsFull(pick, side)) return pick;
     return withSpans(pick, side, id, next, length);

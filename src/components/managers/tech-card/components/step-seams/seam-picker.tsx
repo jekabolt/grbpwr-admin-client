@@ -106,7 +106,8 @@ import {
 } from './topstitch-picker';
 import {
   deltaMm,
-  closedInner,
+  innerStretches,
+  isClosedInner,
   fmtMm,
   innerId,
   longestEdge,
@@ -523,7 +524,11 @@ export function SeamPickerBody({
       const hostRanges = clicked.spans[hs][ins[0]];
       if (
         hostRanges &&
-        !innerRangesAreContiguous(hostRanges, targetLenMm(ins[0], geoms, innerLines))
+        !innerRangesAreContiguous(
+          hostRanges,
+          targetLenMm(ins[0], geoms, innerLines),
+          isClosedInner(line),
+        )
       )
         return null;
       const picked = s[hs === 'a' ? 'b' : 'a'];
@@ -680,8 +685,15 @@ export function SeamPickerBody({
   // Stable while the selection stands: the canvas keeps its hit layer across hovers (a fresh
   // closure per render re-created every hit path of the picture on each pointer event).
   const pickRules = useMemo(
-    () => ({ isInner: (t: string) => !!parseInner(t), pieceOf: pieceOfTarget }),
-    [],
+    () => ({
+      isInner: (t: string) => !!parseInner(t),
+      pieceOf: pieceOfTarget,
+      wraps: (t: string) => {
+        const inner = parseInner(t);
+        return !inner || isClosedInner(innerLines.get(inner.piece)?.[inner.k] ?? []);
+      },
+    }),
+    [innerLines],
   );
   // Two flat edges folded onto each other are one line on the canvas: what the hand does to one it
   // does to both, and the side reads as the composite row the card stores.
@@ -716,7 +728,8 @@ export function SeamPickerBody({
       setPoseSel(null);
       const length = targetLenMm(id, geoms, innerLines);
       const inner = parseInner(id);
-      const closed = inner ? !!closedInner(innerLines.get(inner.piece)?.[inner.k] ?? []) : false;
+      const stretches = inner ? innerStretches(innerLines.get(inner.piece)?.[inner.k] ?? []) : null;
+      const closed = !!stretches?.closed;
       const picked = (side: Side) =>
         sel[side].includes(id) &&
         (atMm == null ||
@@ -746,7 +759,7 @@ export function SeamPickerBody({
           : surfacePick(next, pickRules.isInner, pickRules.pieceOf, id);
       const wholeOnly =
         !bindingMode && !topstitchMode && surfacePartSide(base, pickRules.isInner) === side;
-      if (atMm == null || (inner && !closed) || !(length > 0) || wholeOnly) {
+      if (atMm == null || (inner && !stretches) || !(length > 0) || wholeOnly) {
         if (topstitchMode && topstitchPickOverlaps(topstitchLines, id, undefined, geoms)) {
           setRefused('already picked');
           return;
@@ -806,7 +819,7 @@ export function SeamPickerBody({
     (id: TargetId | null, atMm: number | null) => {
       const length = id ? targetLenMm(id, geoms, innerLines) : 0;
       const inner = id ? parseInner(id) : null;
-      const closed = inner ? !!closedInner(innerLines.get(inner.piece)?.[inner.k] ?? []) : false;
+      const stretches = inner ? innerStretches(innerLines.get(inner.piece)?.[inner.k] ?? []) : null;
       const wholeOnly =
         !!id &&
         !bindingMode &&
@@ -816,7 +829,7 @@ export function SeamPickerBody({
         id &&
         atMm != null &&
         length > 0 &&
-        (!inner || closed) &&
+        (!inner || !!stretches) &&
         !wholeOnly &&
         (topstitchMode || storedSeamAt(stored, id, atMm, geoms) < 0)
           ? labelSpanAt(id, bindingMode || topstitchMode ? 'a' : clickSide(id), length, atMm) ??
@@ -847,7 +860,7 @@ export function SeamPickerBody({
     (id: TargetId, fromMm: number, toMm: number, done: boolean) => {
       if (frozen) return;
       const inner = parseInner(id);
-      if (inner && !closedInner(innerLines.get(inner.piece)?.[inner.k] ?? [])) return;
+      if (inner && !innerStretches(innerLines.get(inner.piece)?.[inner.k] ?? [])) return;
       const breaks = breaksOf(id);
       const range: SpanRange = [snapToBreak(breaks, fromMm), snapToBreak(breaks, toMm)];
       if (!done) {
