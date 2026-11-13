@@ -83,9 +83,8 @@ describe('zone ring carry-over modes', () => {
     expect(dist(ha, hb)).toBeCloseTo(60, 0);
     // … and back: the stored points return.
     const back = outerOf(mapFuseSpecToSize({ ...spec, zone: mapped }, wide, square));
-    back.spline.points.forEach((p, i) =>
-      expect(dist(p, spec.zone && outerOf(spec).spline.points[i])).toBeLessThan(0.05),
-    );
+    const stored = outerOf(spec).spline.points;
+    back.spline.points.forEach((p, i) => expect(dist(p, stored[i])).toBeLessThan(0.05));
   });
 
   it('follow line: the ring travels with its line and keeps its shape', () => {
@@ -259,15 +258,15 @@ describe('carry-over modes on the wire', () => {
       fusingDarts: '',
     };
     const wire = fuseFieldsToWire(fields);
-    expect(wire.fusingEdges?.items.map((e) => [e.startMode, e.endMode])).toEqual([
+    expect(wire.fusingEdges?.items?.map((e) => [e.startMode, e.endMode])).toEqual([
       ['TECH_CARD_PIECE_FUSING_END_MODE_NOTCH', 'TECH_CARD_PIECE_FUSING_END_MODE_MM'],
       ['TECH_CARD_PIECE_FUSING_END_MODE_MM', 'TECH_CARD_PIECE_FUSING_END_MODE_SHARE'],
     ]);
-    expect(wire.fusingZone?.islands.map((s) => s.gradeMode)).toEqual([
+    expect(wire.fusingZone?.islands?.map((s) => s.gradeMode)).toEqual([
       'TECH_CARD_PIECE_FUSING_GRADE_MODE_GROW',
       'TECH_CARD_PIECE_FUSING_GRADE_MODE_FIXED',
     ]);
-    expect(wire.fusingZone?.islands[1].anchor).toBeUndefined();
+    expect(wire.fusingZone?.islands?.[1].anchor).toBeUndefined();
     expect(fuseFieldsFromWire(wire)).toEqual(fields);
   });
 });
