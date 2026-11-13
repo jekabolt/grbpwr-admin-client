@@ -82,6 +82,40 @@ export function anchorOnLine(line: FuseInternalLine, near: PtMm): PtMm {
 }
 
 /**
+ * The grade map's answer for `followLineMove`. `lines` are the internal lines of the outline the
+ * ring is carried from; `resolve` gives a line's twin on the outline it is carried to, from the
+ * map's internal / seam track (exact, derived or fitted — a refused track answers null). The twin
+ * runs the way its line runs and, closed, starts where it starts; with as many points as the line
+ * they pair point i onto point i, otherwise by share of length.
+ */
+export type LineByMap = {
+  lines: readonly FuseInternalLine[];
+  resolve: (line: FuseInternalLine) => readonly PtMm[] | null;
+};
+
+/** A ring's anchor is picked on its line (0.1 mm rounding), so it sits within this of it. */
+const ANCHOR_ON_LINE_MM = 0.5;
+
+/** The line under `anchor` paired with its twin by the map; null on a miss. */
+function pairByMap(anchor: PtMm, byMap: LineByMap): LinePair | null {
+  const i = nearestInternalLine(anchor, byMap.lines);
+  if (i < 0) return null;
+  const line = byMap.lines[i];
+  if (projectOn(walkOf(line), anchor).gap > ANCHOR_ON_LINE_MM) return null;
+  const twin = byMap.resolve(line);
+  if (!twin || twin.length < 2) return null;
+  const from = line.points;
+  if (twin.length === from.length) return { from, to: twin, closed: line.closed };
+  // Different point counts: each point of the line goes to the twin's point at the same share of
+  // the length (closed lines measured round to their start).
+  const own = walkOf(line);
+  const other = walkOf({ ...line, points: [...twin] });
+  if (own.total < 1e-9 || other.total < 1e-9) return null;
+  const to = own.cum.slice(0, from.length).map((s) => at(other, (s / own.total) * other.total).p);
+  return { from, to, closed: line.closed };
+}
+
+/**
  * «Follow line»: the rigid move (travel + turn, never a scale) that carries a ring tied to a line
  * from one size to another. `pair` is the line with its twin on the other size, point i onto
  * point i, as the grade field's geometric pairing found it — so neither the file's order of lines
@@ -89,11 +123,17 @@ export function anchorOnLine(line: FuseInternalLine, near: PtMm): PtMm {
  * to the matching point of the twin, and the ring turns as the whole line turned (a least-squares
  * fit over the paired points, weighed alike both ways round, so the move back is the exact
  * inverse). Null without a pair: the caller then carries the ring the default way, as a guess.
+ *
+ * `byMap`, when given, is asked first: the line the anchor sits on, and its twin as the grade map
+ * carries it. A hit replaces `pair`; a miss (the anchor on no line, or the map has no trusted twin)
+ * falls back to `pair`. Without `byMap` the result is the same as before it existed.
  */
 export function followLineMove(
   anchor: PtMm,
   pair: LinePair | null,
+  byMap?: LineByMap,
 ): ((point: PtMm) => PtMm) | null {
+  pair = (byMap && pairByMap(anchor, byMap)) || pair;
   if (!pair) return null;
   const n = Math.min(pair.from.length, pair.to.length);
   if (n < 2) return null;
