@@ -7,17 +7,21 @@
 // within the contour's largest move + 2 mm. A paired line's nodes are its ends and matched corners
 // (the importer's corner matcher; a closed line that matches more than one way is refused).
 
-import {
-  lineCorners,
-  matchLineCorners,
-} from 'lib/pattern-import/adapters/rul/correspond';
+import { lineCorners, matchLineCorners } from 'lib/pattern-import/adapters/rul/correspond';
 import { contourSignature } from 'lib/pattern-import/manifest/contour-sig';
 import type { PtMm } from 'lib/pattern-import/types';
 import { CONTOUR_CORNER_THRESHOLDS, zoneGrade } from 'lib/fusing-dxf/zone-grade';
 import { contourTrack } from './contour';
 import { corrOf, fwdU, nearestUnique, refineNodes, type Anchor, type Corr } from './corr';
 import { chamfer, dist, pathOf, pointAt, resampled, toQ, type Path } from './geom';
-import { classify, NOTCH_LAYER, type Drill, type Internal, type Notch, type SizeMarks } from './marks';
+import {
+  classify,
+  NOTCH_LAYER,
+  type Drill,
+  type Internal,
+  type Notch,
+  type SizeMarks,
+} from './marks';
 import type {
   GmBuildOptions,
   GmFile,
@@ -83,7 +87,8 @@ function pairRule(
     for (let k = 0; k < row.length; k++) if (!sameT(j, k)) second = Math.min(second, row[k]);
     if (second - c < margin(c)) return { refused: 'ambiguous: another mark as near' };
     for (let k = 0; k < cost.length; k++)
-      if (!sameB(i, k) && cost[k][j] - c < margin(c)) return { refused: 'ambiguous: another base mark as near' };
+      if (!sameB(i, k) && cost[k][j] - c < margin(c))
+        return { refused: 'ambiguous: another base mark as near' };
     return { j, margin: c > 1e-9 ? second / c : Infinity };
   });
 }
@@ -125,19 +130,31 @@ function lineAnchors(
 ): { ok: true; anchors: Anchor[]; oriented: Path } | { ok: false; reason: string } {
   const m = matchLineCorners([b.pts, twin.pts], b.closed, CONTOUR_CORNER_THRESHOLDS);
   if (!m.ok) {
-    if (m.reason.includes('more than one way')) return { ok: false, reason: 'symmetric: corners match more than one way' };
+    if (m.reason.includes('more than one way'))
+      return { ok: false, reason: 'symmetric: corners match more than one way' };
     if (m.reason.includes('differ in number')) {
       const T = CONTOUR_CORNER_THRESHOLDS[0];
       const nb = lineCorners(b.pts, b.closed, T).length;
       const nz = lineCorners(twin.pts, b.closed, T).length;
-      return { ok: false, reason: nb < 2 && nz < 2 ? 'round: no corners' : `corners-differ: base ${nb} / size ${nz} at ${T}°` };
+      return {
+        ok: false,
+        reason:
+          nb < 2 && nz < 2
+            ? 'round: no corners'
+            : `corners-differ: base ${nb} / size ${nz} at ${T}°`,
+      };
     }
     return { ok: false, reason: `corners-turn: ${m.reason}` };
   }
   const oriented = pathOf(m.lines[1], b.closed);
-  if (!oriented || oriented.pts.length !== m.lines[1].length) return { ok: false, reason: 'degenerate: twin line' };
+  if (!oriented || oriented.pts.length !== m.lines[1].length)
+    return { ok: false, reason: 'degenerate: twin line' };
   const [cb, cz] = m.corners;
-  return { ok: true, anchors: cb.map((i, k) => ({ s: b.cum[i], t: oriented.cum[cz[k]] })), oriented };
+  return {
+    ok: true,
+    anchors: cb.map((i, k) => ({ s: b.cum[i], t: oriented.cum[cz[k]] })),
+    oriented,
+  };
 }
 
 export function buildPieceMap(
@@ -147,13 +164,21 @@ export function buildPieceMap(
 ): GmPieceBuild {
   const sideOf = (geo: GmSizeGeometry): Side => {
     const cut = pathOf(geo.cut, true);
-    return { geo, cut, seam: geo.seam ? pathOf(geo.seam, true) : null, marks: classify(geo.lines, cut) };
+    return {
+      geo,
+      cut,
+      seam: geo.seam ? pathOf(geo.seam, true) : null,
+      marks: classify(geo.lines, cut),
+    };
   };
   const byId = new Map(input.sizes.map((g) => [g.sizeId, g]));
   const baseGeo = byId.get(input.baseSizeId);
-  if (!baseGeo) throw new Error(`grade map: base size ${input.baseSizeId} missing for ${input.key}`);
+  if (!baseGeo)
+    throw new Error(`grade map: base size ${input.baseSizeId} missing for ${input.key}`);
   const base = sideOf(baseGeo);
-  const others = sizeOrder.filter((id) => id !== input.baseSizeId && byId.has(id)).map((id) => sideOf(byId.get(id)!));
+  const others = sizeOrder
+    .filter((id) => id !== input.baseSizeId && byId.has(id))
+    .map((id) => sideOf(byId.get(id)!));
   const tracks: GmTrack[] = [];
   const info: GmTrackInfo[] = [];
   const claimed = new Map<number, Set<string>>(others.map((s) => [s.geo.sizeId, new Set()]));
@@ -231,7 +256,12 @@ export function buildPieceMap(
       if (!pr) return baseList.map((): PairResult => ({ refused: 'no-cut: no contour field' }));
       const predicted = baseList.map((m) => pr.predict(m.c));
       const cost = predicted.map((p) => list.map((m) => dist(p, m.c)));
-      return pairRule(cost, (j, k) => j === k, (i, k) => i === k, pr.reach + LINE_SLACK_MM);
+      return pairRule(
+        cost,
+        (j, k) => j === k,
+        (i, k) => i === k,
+        pr.reach + LINE_SLACK_MM,
+      );
     });
     baseList.forEach((m, i) => {
       let margin = Infinity;
@@ -245,10 +275,20 @@ export function buildPieceMap(
         // a notch keeps its ends in the order nearest to the prediction
         const pr = predictors.get(s.geo.sizeId)!;
         const [pa, pb] = m.pts.map(pr.predict);
-        const flip = dist(pa, twin.pts[1]) + dist(pb, twin.pts[0]) < dist(pa, twin.pts[0]) + dist(pb, twin.pts[1]);
+        const flip =
+          dist(pa, twin.pts[1]) + dist(pb, twin.pts[0]) <
+          dist(pa, twin.pts[0]) + dist(pb, twin.pts[1]);
         return { sizeId: s.geo.sizeId, pts: flip ? [twin.pts[1], twin.pts[0]] : twin.pts };
       });
-      tracks.push(trackOf(kind, layer ?? m.layer ?? '', kind === 'drill', kind === 'drill' ? [m.c] : m.pts, sizes));
+      tracks.push(
+        trackOf(
+          kind,
+          layer ?? m.layer ?? '',
+          kind === 'drill',
+          kind === 'drill' ? [m.c] : m.pts,
+          sizes,
+        ),
+      );
       info.push({ margin, anchors: kind === 'drill' ? 1 : 2, source: m.idx });
     });
   }
@@ -264,16 +304,21 @@ export function buildPieceMap(
     const bs = bl.map((l) => sample(l.path));
     const closed = bl[0].line.closed;
     const perSize = others.map((s) => {
-      const tl = s.marks.internals.filter((l) => `${l.line.layer}|${l.line.closed ? 1 : 0}` === key);
+      const tl = s.marks.internals.filter(
+        (l) => `${l.line.layer}|${l.line.closed ? 1 : 0}` === key,
+      );
       const pr = predictors.get(s.geo.sizeId);
-      if (!pr) return { tl, res: bl.map((): PairResult => ({ refused: 'no-cut: no contour field' })) };
+      if (!pr)
+        return { tl, res: bl.map((): PairResult => ({ refused: 'no-cut: no contour field' })) };
       const ts = tl.map((l) => sample(l.path));
       const cost = bs.map((p) => {
         const moved = p.map(pr.predict);
         return ts.map((t) => chamfer(moved, t, closed));
       });
-      const sameT = (j: number, k: number) => j === k || chamfer(ts[j], ts[k], closed) <= SAME_LINE_MM;
-      const sameB = (i: number, k: number) => i === k || chamfer(bs[i], bs[k], closed) <= SAME_LINE_MM;
+      const sameT = (j: number, k: number) =>
+        j === k || chamfer(ts[j], ts[k], closed) <= SAME_LINE_MM;
+      const sameB = (i: number, k: number) =>
+        i === k || chamfer(bs[i], bs[k], closed) <= SAME_LINE_MM;
       return { tl, res: pairRule(cost, sameT, sameB, pr.reach + LINE_SLACK_MM) };
     });
     bl.forEach((l, i) => {
@@ -313,14 +358,23 @@ export function buildPieceMap(
       const nodes = refined?.nodes ?? [0];
       const sizes = others.map((s) => {
         const p = pairs.get(s.geo.sizeId);
-        if (!p || !refined) return { sizeId: s.geo.sizeId, refused: refused.get(s.geo.sizeId) ?? 'too-many-nodes' };
+        if (!p || !refined)
+          return { sizeId: s.geo.sizeId, refused: refused.get(s.geo.sizeId) ?? 'too-many-nodes' };
         return {
           sizeId: s.geo.sizeId,
           pts: nodes.map((x) => pointAt(p.twin, fwdU(p.corr, x))),
           residualMm: refined.residual[carried.indexOf(s)],
         };
       });
-      tracks.push(trackOf('internal', l.line.layer, closed, nodes.map((x) => pointAt(l.path, x)), sizes));
+      tracks.push(
+        trackOf(
+          'internal',
+          l.line.layer,
+          closed,
+          nodes.map((x) => pointAt(l.path, x)),
+          sizes,
+        ),
+      );
       info.push({ margin, anchors: refined ? nodes.length - refined.added : 0, source: l.idx });
     });
   }

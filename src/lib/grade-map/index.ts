@@ -8,7 +8,13 @@ export * from './types';
 export { BUILDER, buildFileMap, buildPieceMap } from './build';
 export { bindNodes, bindPiece, carryArc, liveOf, meshSourceOf, nodesOf, BIND_MM } from './bind';
 export { buildMesh, forward, inverse, samplesInside } from './mesh';
-export { canonicalJson, decodeGradeMap, encodeGradeMap, GRADEMAP_TAG, GRADEMAP_FORM } from './serialize';
+export {
+  canonicalJson,
+  decodeGradeMap,
+  encodeGradeMap,
+  GRADEMAP_TAG,
+  GRADEMAP_FORM,
+} from './serialize';
 
 /** The builder's view of one size of a runtime piece (cut = outline, seam = net outline). */
 export function fromSourceSize(s: FusingSourceSize): GmSizeGeometry {

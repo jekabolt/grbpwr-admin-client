@@ -209,8 +209,16 @@ class Buckets {
   }
   addBox(i: number, a: PtMm, b: PtMm) {
     const C = Buckets.CELL;
-    for (let ix = Math.floor(Math.min(a.x, b.x) / C); ix <= Math.floor(Math.max(a.x, b.x) / C); ix++)
-      for (let iy = Math.floor(Math.min(a.y, b.y) / C); iy <= Math.floor(Math.max(a.y, b.y) / C); iy++)
+    for (
+      let ix = Math.floor(Math.min(a.x, b.x) / C);
+      ix <= Math.floor(Math.max(a.x, b.x) / C);
+      ix++
+    )
+      for (
+        let iy = Math.floor(Math.min(a.y, b.y) / C);
+        iy <= Math.floor(Math.max(a.y, b.y) / C);
+        iy++
+      )
         this.push(ix, iy, i);
   }
   /** Every index whose box touches the 3 × 3 cells around p (an index may repeat). */
@@ -246,7 +254,11 @@ function assemble(src: MeshSource, excluded: ReadonlySet<number>): Assembled {
   const vertices = new Buckets();
   const segs = new Buckets();
   const nearRing = (p: PtMm): boolean =>
-    ringEdges.near(p).some((i) => distanceToPolyline(p, [ring[i], ring[(i + 1) % ring.length]], false) < RING_CLEAR_MM);
+    ringEdges
+      .near(p)
+      .some(
+        (i) => distanceToPolyline(p, [ring[i], ring[(i + 1) % ring.length]], false) < RING_CLEAR_MM,
+      );
   const nearRingVertex = (p: PtMm): number => {
     let best = -1;
     let bestD = RING_CLEAR_MM;
@@ -265,7 +277,11 @@ function assemble(src: MeshSource, excluded: ReadonlySet<number>): Assembled {
   const nearSegment = (p: PtMm, track: number): boolean =>
     segs.near(p).some((si) => {
       const [a, b] = segments[si];
-      return owner[a] !== track && owner[b] !== track && distanceToPolyline(p, [pts[a], pts[b]], false) < MERGE_MM;
+      return (
+        owner[a] !== track &&
+        owner[b] !== track &&
+        distanceToPolyline(p, [pts[a], pts[b]], false) < MERGE_MM
+      );
     });
   for (const part of src.parts) {
     if (excluded.has(part.track)) continue;
@@ -325,7 +341,8 @@ export function buildMesh(src: MeshSource): GmMesh {
     const tri = triangulate(asm.ring, points, asm.segments);
     const sizes = new Map<number, GmSizeMesh>();
     if (tri.failed) {
-      for (const z of src.sizes) sizes.set(z, { ok: false, reason: `ring: ${tri.failed}`, flips: 0, degenerate: 0 });
+      for (const z of src.sizes)
+        sizes.set(z, { ok: false, reason: `ring: ${tri.failed}`, flips: 0, degenerate: 0 });
       return {
         pts: tri.pts,
         tris: [],
@@ -380,14 +397,16 @@ export function buildMesh(src: MeshSource): GmMesh {
         if (A1 <= 0) flips++;
         else degenerate++;
         const corners = [tri.pts[a], tri.pts[b], tri.pts[c]];
-        if (src.notchNodes.some((n) => corners.some((p) => dist(p, n) <= NOTCH_NEAR_MM))) nearNotch++;
+        if (src.notchNodes.some((n) => corners.some((p) => dist(p, n) <= NOTCH_NEAR_MM)))
+          nearNotch++;
         else if (sharp.some((n) => corners.some((p) => dist(p, n) <= DART_NEAR_MM))) nearDart++;
       }
-      const where = nearNotch >= Math.max(nearDart, bad.length - nearNotch - nearDart)
-        ? 'notch'
-        : nearDart >= bad.length - nearNotch - nearDart
-          ? 'dart'
-          : 'cut';
+      const where =
+        nearNotch >= Math.max(nearDart, bad.length - nearNotch - nearDart)
+          ? 'notch'
+          : nearDart >= bad.length - nearNotch - nearDart
+            ? 'dart'
+            : 'cut';
       const what = flips ? 'flip' : 'degenerate';
       sizes.set(z, {
         ok: false,
@@ -443,4 +462,3 @@ export function samplesInside(mesh: GmMesh, ring: readonly PtMm[], n: number): P
   }
   return out;
 }
-

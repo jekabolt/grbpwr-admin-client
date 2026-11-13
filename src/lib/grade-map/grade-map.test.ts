@@ -29,10 +29,21 @@ function armhole(): PtMm[] {
   return out;
 }
 
-const CUT: PtMm[] = [P(0, 0), P(150, 0), P(300, 0), P(330, 250), ...armhole(), P(150, 330), P(0, 280), P(0, 140)];
+const CUT: PtMm[] = [
+  P(0, 0),
+  P(150, 0),
+  P(300, 0),
+  P(330, 250),
+  ...armhole(),
+  P(150, 330),
+  P(0, 280),
+  P(0, 140),
+];
 
 function circle(c: PtMm, r: number, n = 12): PtMm[] {
-  return Array.from({ length: n }, (_, i) => P(c.x + r * Math.cos((2 * Math.PI * i) / n), c.y + r * Math.sin((2 * Math.PI * i) / n)));
+  return Array.from({ length: n }, (_, i) =>
+    P(c.x + r * Math.cos((2 * Math.PI * i) / n), c.y + r * Math.sin((2 * Math.PI * i) / n)),
+  );
 }
 
 const LINES: GmLine[] = [
@@ -62,7 +73,11 @@ function pieceOf(rotate = 0, baseRotate = 0): GmPieceInput {
   return {
     key: 'front',
     baseSizeId: 1,
-    sizes: [sizeGeo(1, undefined, baseRotate), sizeGeo(2, grades[2], rotate), sizeGeo(3, grades[3], rotate)],
+    sizes: [
+      sizeGeo(1, undefined, baseRotate),
+      sizeGeo(2, grades[2], rotate),
+      sizeGeo(3, grades[3], rotate),
+    ],
   };
 }
 
@@ -110,15 +125,29 @@ describe('grade map builder', () => {
   });
 
   it('refuses a round piece and an undetermined (symmetric) corner match instead of guessing', () => {
-    const round = (id: number, r: number): GmSizeGeometry => ({ sizeId: id, cut: circle(P(0, 0), r, 64), lines: [] });
-    const r = buildPieceMap({ key: 'round', baseSizeId: 1, sizes: [round(1, 50), round(2, 53)] }, [1, 2]);
+    const round = (id: number, r: number): GmSizeGeometry => ({
+      sizeId: id,
+      cut: circle(P(0, 0), r, 64),
+      lines: [],
+    });
+    const r = buildPieceMap(
+      { key: 'round', baseSizeId: 1, sizes: [round(1, 50), round(2, 53)] },
+      [1, 2],
+    );
     expect(r.piece.tracks[0].trust).toBe('refused');
     expect(r.piece.tracks[0].reason).toMatch(/^round/);
     // a square against the same square turned 45°: two corner shifts fit equally well
     const sq: PtMm[] = [P(50, -50), P(50, 50), P(-50, 50), P(-50, -50)];
     const diamond: PtMm[] = [P(70.7, 0), P(0, 70.7), P(-70.7, 0), P(0, -70.7)];
     const s = buildPieceMap(
-      { key: 'sym', baseSizeId: 1, sizes: [{ sizeId: 1, cut: sq, lines: [] }, { sizeId: 2, cut: diamond, lines: [] }] },
+      {
+        key: 'sym',
+        baseSizeId: 1,
+        sizes: [
+          { sizeId: 1, cut: sq, lines: [] },
+          { sizeId: 2, cut: diamond, lines: [] },
+        ],
+      },
       [1, 2],
     );
     expect(s.piece.tracks[0].trust).toBe('refused');
@@ -151,12 +180,15 @@ describe('grade map builder', () => {
   });
 
   it('gives the same cut nodes, cyclically, when the base ring starts at another vertex', () => {
-    const cutOf = (r: number) => buildPieceMap(pieceOf(0, r), ORDER).piece.tracks.find((t) => t.kind === 'cut')!;
+    const cutOf = (r: number) =>
+      buildPieceMap(pieceOf(0, r), ORDER).piece.tracks.find((t) => t.kind === 'cut')!;
     const a = cutOf(0);
     const b = cutOf(11);
     expect(b.base.length).toBe(a.base.length);
     const key = (t: typeof a) =>
-      t.base.map(([x, y], j) => `${x},${y}:${t.sizes.map((s) => s.delta![j].join(',')).join('|')}`).sort();
+      t.base
+        .map(([x, y], j) => `${x},${y}:${t.sizes.map((s) => s.delta![j].join(',')).join('|')}`)
+        .sort();
     expect(key(b)).toEqual(key(a));
   });
 });
@@ -170,10 +202,15 @@ describe('grade map binding', () => {
       lines: g.lines.map((l) => {
         if (l.layer === '4' || l.closed) return l;
         const path = pathOf(l.points, false)!;
-        return { ...l, points: Array.from({ length: 4000 }, (_, i) => pointAt(path, (path.total * i) / 3999)) };
+        return {
+          ...l,
+          points: Array.from({ length: 4000 }, (_, i) => pointAt(path, (path.total * i) / 3999)),
+        };
       }),
     });
-    const lives = new Map(pieceOf().sizes.map((g, k) => [g.sizeId, liveOf(resample(g, 3 + k * 5))]));
+    const lives = new Map(
+      pieceOf().sizes.map((g, k) => [g.sizeId, liveOf(resample(g, 3 + k * 5))]),
+    );
     const binding = bindPiece(piece, lives.get(1)!, lives);
     for (const t of binding.tracks) {
       expect(t.base.ok).toBe(true);
@@ -243,8 +280,28 @@ describe('grade map mesh', () => {
     for (let i = 0; i < 20; i++) ring.push(P(0, 100 - i * 5));
     const id = (p: PtMm) => p;
     const src = (ringImg3: (p: PtMm, i: number) => PtMm, drill3: PtMm) => ({
-      ring: { track: 0, kind: 'cut' as const, closed: true, base: ring, images: new Map([[2, ring.map(id)], [3, ring.map(ringImg3)]]) },
-      parts: [{ track: 1, kind: 'drill' as const, closed: false, base: [P(50, 50)], images: new Map([[2, [P(50, 50)]], [3, [drill3]]]) }],
+      ring: {
+        track: 0,
+        kind: 'cut' as const,
+        closed: true,
+        base: ring,
+        images: new Map([
+          [2, ring.map(id)],
+          [3, ring.map(ringImg3)],
+        ]),
+      },
+      parts: [
+        {
+          track: 1,
+          kind: 'drill' as const,
+          closed: false,
+          base: [P(50, 50)],
+          images: new Map([
+            [2, [P(50, 50)]],
+            [3, [drill3]],
+          ]),
+        },
+      ],
       notchNodes: [],
       baseCut: ring,
       sizes: [2, 3],

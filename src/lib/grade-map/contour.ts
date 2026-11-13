@@ -4,10 +4,7 @@
 // where that correspondence predicts them (nearest, clearly nearest, mutual). Matched notches become
 // anchors too. The nodes are every size's anchors read on the base plus the refinement points.
 
-import {
-  lineCorners,
-  matchLineCorners,
-} from 'lib/pattern-import/adapters/rul/correspond';
+import { lineCorners, matchLineCorners } from 'lib/pattern-import/adapters/rul/correspond';
 import { CONTOUR_CORNER_THRESHOLDS } from 'lib/fusing-dxf/zone-grade';
 import type { PtMm } from 'lib/pattern-import/types';
 import { corrOf, fwdU, nearestUnique, refineNodes, type Anchor, type Corr } from './corr';
@@ -56,8 +53,10 @@ export function cornerAnchors(
     if (nb < 2 && nz < 2) return { ok: false, reason: 'round: no corners' };
     return { ok: false, reason: `corners-differ: base ${nb} / size ${nz} at ${T}°` };
   }
-  if (m.reason.includes('more than one way')) return { ok: false, reason: 'symmetric: corners match more than one way' };
-  if (m.reason.includes('turn differently')) return { ok: false, reason: 'corners-turn: no shift with agreeing turns' };
+  if (m.reason.includes('more than one way'))
+    return { ok: false, reason: 'symmetric: corners match more than one way' };
+  if (m.reason.includes('turn differently'))
+    return { ok: false, reason: 'corners-turn: no shift with agreeing turns' };
   return { ok: false, reason: `corners: ${m.reason}` };
 }
 
@@ -82,14 +81,16 @@ export function positionAnchors(
   const pairs = nearestUnique(
     cb,
     cz,
-    (x, y) => (Math.sign(x.turn) === Math.sign(y.turn) ? dist(image(b.pts[x.i]), z.pts[y.i]) : Infinity),
+    (x, y) =>
+      Math.sign(x.turn) === Math.sign(y.turn) ? dist(image(b.pts[x.i]), z.pts[y.i]) : Infinity,
     reach,
   );
   const anchors: Anchor[] = [];
   pairs.forEach((j, k) => {
     if (j !== null) anchors.push({ s: b.cum[cb[k].i], t: z.cum[cz[j].i] });
   });
-  if (anchors.length < 2) return { ok: false, reason: `gap-tolerant: ${anchors.length} corner pairs` };
+  if (anchors.length < 2)
+    return { ok: false, reason: `gap-tolerant: ${anchors.length} corner pairs` };
   return { ok: true, anchors };
 }
 
@@ -113,16 +114,27 @@ function pairNotches(
   const pair: (number | string)[] = baseNotches.map(() => 'notch-missing: none within reach');
   let all = [...anchors];
   for (let pass = 0; pass < 2; pass++) {
-    const open = baseNotches.map((n, k) => ({ n, k })).filter((x) => typeof pair[x.k] === 'string' && x.n.arc !== null);
+    const open = baseNotches
+      .map((n, k) => ({ n, k }))
+      .filter((x) => typeof pair[x.k] === 'string' && x.n.arc !== null);
     const taken = new Set(pair.filter((p): p is number => typeof p === 'number'));
     const free = onCut.filter((x) => !taken.has(x.i));
     const predicted = open.map((x) => pointAt(z, fwdU(corr!, x.n.arc!)));
-    const got = nearestUnique(predicted, free.map((x) => x.n.a), dist, NOTCH_REACH_MM);
+    const got = nearestUnique(
+      predicted,
+      free.map((x) => x.n.a),
+      dist,
+      NOTCH_REACH_MM,
+    );
     const added: Anchor[] = [];
     got.forEach((j, k) => {
       const at = open[k].k;
       if (j === null) {
-        pair[at] = reasonOfNotch(predicted[k], free.map((x) => x.n), NOTCH_REACH_MM);
+        pair[at] = reasonOfNotch(
+          predicted[k],
+          free.map((x) => x.n),
+          NOTCH_REACH_MM,
+        );
         return;
       }
       const cand = { s: open[k].n.arc!, t: free[j].n.arc! };
@@ -150,7 +162,7 @@ export function contourTrack(
 ): ContourBuild | null {
   const b = base.path;
   if (!b) return null;
-  const baseNotches = kind === 'cut' ? (base.notches ?? []) : [];
+  const baseNotches = kind === 'cut' ? base.notches ?? [] : [];
   const corr = new Map<number, Corr>();
   const notchPair = new Map<number, (number | string)[]>();
   const refused = new Map<number, string>();
@@ -200,7 +212,8 @@ export function contourTrack(
   const basePts = nodes.map((s) => pointAt(b, s));
   const sizes: GmTrackSize[] = others.map((side) => {
     const c = corr.get(side.sizeId);
-    if (!c || !side.path) return { sizeId: side.sizeId, refused: refused.get(side.sizeId) ?? 'refused' };
+    if (!c || !side.path)
+      return { sizeId: side.sizeId, refused: refused.get(side.sizeId) ?? 'refused' };
     const k = carried.indexOf(side);
     return {
       sizeId: side.sizeId,
