@@ -69,6 +69,7 @@ import type {
   FusingSourcePiece,
   FusingSourceSize,
 } from './dxf';
+import { attachGradeMaps } from './grade-map-source';
 import { fuseSpecFromPiece } from './types';
 
 export const GENERATED_FUSING_NAME_PREFIX = 'Fusing · generated · ';
@@ -83,6 +84,8 @@ export type RegenerateFusingSheetsResult = {
   lockVersion?: number;
   warnings: string[];
   skippedSizes: BuildFusingSheetsResult['skippedSizes'];
+  /** Sizes whose zone fell back to inference where the grade map refused a track (no UI yet). */
+  approximate?: BuildFusingSheetsResult['approximate'];
 };
 
 const unsetPurpose = 'TECH_CARD_BOM_PURPOSE_UNSET' as const;
@@ -571,13 +574,21 @@ export async function regenerateFusingSheets(
         warnings.push(
           `fused card pieces are not linked to the main DXF: ${prepared.unmatchedFused.join(', ')}`,
         );
+      // Drawn zones ride the piece's grade map between sizes; it is built in the worker, once per
+      // file and piece. A piece the map cannot be built for is carried as before.
+      const mapped = await attachGradeMaps(
+        prepared.pieces,
+        card.baseSampleSizeId,
+        (jobs) => worker.gradeMaps(jobs),
+        patterns.map((pattern) => pattern.sha256 || pattern.url || '').join(','),
+      );
       built = buildFusingSheets({
         techCardId,
         createdAt: newestUpload(patterns),
         style: card.styleNumber?.trim() || card.name?.trim() || `style-${techCardId}`,
         baseSizeId: card.baseSampleSizeId,
         bomLines: lines,
-        pieces: prepared.pieces,
+        pieces: mapped.pieces,
       });
       warnings.push(...built.warnings);
     } finally {
@@ -770,5 +781,6 @@ export async function regenerateFusingSheets(
     ...(changed ? { lockVersion: wroteOver + 1 } : {}),
     warnings,
     skippedSizes: built.skippedSizes,
+    ...(built.approximate?.length ? { approximate: built.approximate } : {}),
   };
 }

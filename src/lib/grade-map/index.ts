@@ -1,5 +1,6 @@
 // Grade map — the drawn elements of a piece traced through its sizes, and the transfer inside the
-// piece built from them. Phase 0: nothing in the app imports this module yet.
+// piece built from them. Phase 1: the fusing zone carry reads it (lib/fusing-dxf/grade-map-*.ts);
+// the map is built in the nesting worker, the mesh is not used by the app yet.
 
 import type { FusingSourceSize } from 'lib/fusing-dxf/dxf';
 import type { GmSizeGeometry } from './types';

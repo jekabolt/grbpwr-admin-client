@@ -17,6 +17,7 @@ import { applySeamAllowance } from '../geom/seam-allowance';
 import { nest } from '../nest';
 import { fetchMediaBlob } from 'lib/features/media-blob';
 import { rollSearch, type RollSearchJob } from 'lib/pattern-export/roll-search';
+import { runGradeMapJobs } from 'lib/fusing-dxf/grade-map-job';
 
 const post = (msg: WorkerResponse, transfer: ArrayBuffer[] = []) => {
   (
@@ -231,6 +232,13 @@ self.onmessage = (ev: MessageEvent<WorkerRequest>) => {
       void handleRollSearch(msg.id, msg.job).catch((e) =>
         post({ type: 'error', id: msg.id, message: e instanceof Error ? e.message : String(e) }),
       );
+      break;
+    case 'grade-maps':
+      try {
+        post({ type: 'grade-maps', id: msg.id, maps: runGradeMapJobs(msg.jobs) });
+      } catch (e) {
+        post({ type: 'error', id: msg.id, message: e instanceof Error ? e.message : String(e) });
+      }
       break;
     case 'cancel':
       cancelled.add(msg.id);

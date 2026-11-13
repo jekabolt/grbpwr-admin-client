@@ -47,7 +47,11 @@ export type Bound =
   | { ok: true; point: PtMm }
   | { ok: false; reason: string };
 
-function bindToLine(nodes: readonly PtMm[], path: Path): { line: BoundLine; worst: number } | null {
+/** Nodes on one live line, in order (closed: wound once), or null; `worst` = the farthest node, mm. */
+export function bindToLine(
+  nodes: readonly PtMm[],
+  path: Path,
+): { line: BoundLine; worst: number } | null {
   const proj = nodes.map((p) => project(path, p));
   const worst = Math.max(...proj.map((p) => p.d));
   if (!(worst <= BIND_MM)) return null;
