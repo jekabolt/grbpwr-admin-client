@@ -55,6 +55,9 @@ import {
   zonePoints,
   zoneRingLabel,
   zoneRingModeLabel,
+  zoneRingMode,
+  NO_GUESS,
+  type FuseGuess,
   zoneRingPoints,
   zoneRingRefs,
   ZONE_DRAW_POINTS,
@@ -153,6 +156,7 @@ export function FuseFields({
   allowanceUsesNetOutline = false,
   ci,
   zoneBus,
+  guessed = NO_GUESS,
 }: {
   spec: PieceFuseSpec;
   /** The stored `fused` — true with no mode is the legacy «fused, how not said». */
@@ -172,6 +176,8 @@ export function FuseFields({
   /** The piece's canvas id and the dialog's zone bus (area + undo), shared with the canvas. */
   ci?: string;
   zoneBus?: ZoneBus;
+  /** What the shown size built by guess. */
+  guessed?: ReadonlySet<FuseGuess>;
 }) {
   const on = spec.mode !== '';
   const [more, setMore] = useState(() => fuseOffDefault(spec));
@@ -295,6 +301,7 @@ export function FuseFields({
           readOnly={readOnly}
           toggleBox={toggleBox}
           onChange={onChange}
+          guessed={guessed}
         />
       )}
       {on && more && (
@@ -351,6 +358,7 @@ function ZoneRow({
   readOnly,
   toggleBox,
   onChange,
+  guessed,
 }: {
   spec: PieceFuseSpec;
   ci: string;
@@ -358,6 +366,7 @@ function ZoneRow({
   readOnly: boolean;
   toggleBox: string;
   onChange: (next: PieceFuseSpec) => void;
+  guessed: ReadonlySet<FuseGuess>;
 }) {
   useSyncExternalStore(bus.subscribe, bus.version);
   const area = bus.area(ci);
@@ -572,7 +581,13 @@ function ZoneRow({
                 >
                   <span aria-hidden>{ringInvalid ? '!' : ref.startsWith('hole:') ? '◇' : '◆'}</span>
                   <span className='truncate'>{zoneRingLabel(spline, ref)}</span>
-                  <span data-ring-mode=''>{zoneRingModeLabel(spline, ref, bus.lines(ci))}</span>
+                  {guessed.has('line') && zoneRingMode(spline, ref) === 'follow_line' ? (
+                    <span data-ring-mode='guess' className={selectedRow ? '' : 'text-error'}>
+                      guess
+                    </span>
+                  ) : (
+                    <span data-ring-mode=''>{zoneRingModeLabel(spline, ref, bus.lines(ci))}</span>
+                  )}
                   <span className='text-right tabular-nums'>
                     {ringArea != null ? `${Math.round(ringArea)} cm²` : <EmptyCell />}
                   </span>

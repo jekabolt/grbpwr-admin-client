@@ -189,6 +189,10 @@ export function zoneRingLine(
   return followLineChoices(lines).indexOf(nearestInternalLine(ring.anchor, lines));
 }
 
+/** What a size could not find and so built by guess: a ring's followed line, a strip end's notch. */
+export type FuseGuess = 'line' | 'notch';
+export const NO_GUESS: ReadonlySet<FuseGuess> = new Set();
+
 /** The word a ring row shows for its carry-over mode. */
 export function zoneRingModeLabel(
   z: FuseZone | null | undefined,
