@@ -19,6 +19,7 @@ import {
   isDrawnZone,
   zoneRingOutline,
   zoneRingRefs,
+  type FuseGuess,
   type ZoneBus,
   type ZoneRingRef,
 } from './fuse-zone';
@@ -117,6 +118,7 @@ export function FuseOverlay({
   ciOf,
   sel,
   fuseOf,
+  guessOf,
   onChange,
   zoneBus,
   zoneOutlines,
@@ -132,6 +134,8 @@ export function FuseOverlay({
   sel: string | null;
   /** The fuse spec of a fused piece; undefined = not fused. */
   fuseOf: (ci: string) => PieceFuseSpec | undefined;
+  /** What the size on screen built by guess for a piece. */
+  guessOf?: (ci: string) => ReadonlySet<FuseGuess>;
   onChange: (ci: string, next: PieceFuseSpec) => void;
   /** Shared with the panel: the zone's clipped area and its undo stack. */
   zoneBus?: ZoneBus;
@@ -575,8 +579,10 @@ export function FuseOverlay({
               ? nearestNotch(notches, end === 's' ? mm : lenMm - mm)
               : -1;
             const open = pop?.edge === i && pop.end === end;
-            const tag =
-              endMode === 'notch'
+            const guess = endMode === 'notch' && !!sel && !!guessOf?.(sel).has('notch');
+            const tag = guess
+              ? 'guess'
+              : endMode === 'notch'
                 ? `notch${onNotch >= 0 ? ` ${onNotch + 1}` : ''}`
                 : endMode === 'share'
                   ? `${lenMm > 0 ? Math.round((mm / lenMm) * 100) : 0} %`
@@ -650,12 +656,13 @@ export function FuseOverlay({
                 <text
                   data-live-mm={mm}
                   data-end-tag={`${i}${end}`}
+                  data-guess={guess || undefined}
                   x={lab.x}
                   y={lab.y}
                   fontSize={11 * px}
                   textAnchor='middle'
                   dominantBaseline='middle'
-                  fill={INK}
+                  fill={guess ? 'var(--color-error)' : INK}
                   pointerEvents='none'
                   paintOrder='stroke'
                   stroke={PAPER}
