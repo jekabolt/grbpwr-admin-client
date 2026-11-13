@@ -22,7 +22,7 @@
 // красный на шуме. Ничего больше не нормализуется: pretty-print, сортировка атрибутов и trim
 // прячут настоящие расхождения.
 
-import { build } from 'esbuild';
+import { build } from './probe-esbuild.mjs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, relative, resolve } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

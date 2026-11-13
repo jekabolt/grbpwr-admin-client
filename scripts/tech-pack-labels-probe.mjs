@@ -21,7 +21,7 @@ import { readFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { build as esbuild } from 'esbuild';
+import { build as esbuild } from './probe-esbuild.mjs';
 
 const ONLY = (process.argv.find((a) => a.startsWith('--mutate=')) ?? '').split('=')[1] ?? '';
 

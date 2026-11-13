@@ -34,7 +34,7 @@
 //   Узел Б зелёный по устройству: `data-unnamed-steps={unnamed || undefined}` на нуле атрибута не
 //   несёт, так что молчание стережёт теперь проверка фразы — она и читает пункты поповера.
 
-import { build as esbuild } from 'esbuild';
+import { build as esbuild } from './probe-esbuild.mjs';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { existsSync, readFileSync } from 'node:fs';

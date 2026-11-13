@@ -6,7 +6,7 @@
 // millimetres with y UP, so an edge is drawn as [x, −y] and an inner line is anchored as [x, −y].
 
 import { cornerTurn, edgeIdsOf, identicalSeamEdge } from 'lib/assembly-skeleton/geometry';
-import { dist, findCorners, resample } from 'lib/assembly-skeleton/geometry/segment';
+import { angleAt, dist, findCorners, resample } from 'lib/assembly-skeleton/geometry/segment';
 import { xSideOf } from 'lib/assembly-skeleton/geometry/plies';
 import { roleOf, roleVeto } from 'lib/assembly-skeleton/assignment/costs';
 import { readName, roleDef } from 'lib/assembly-skeleton/skeleton/model';
@@ -490,7 +490,7 @@ const CURVE_DEG = 28;
 /** Two curves this deep (deg) and bending the same way are never an implied seam. */
 const DEEP_CURVE_DEG = 90;
 /** A chain crosses a corner of its own piece turning less than this (deg). */
-const SOFT_CORNER_DEG = 60;
+export const SOFT_CORNER_DEG = 60;
 /** A chain crosses a seam endpoint where the joined contour turns less than this (deg). */
 const SOFT_JUNCTION_DEG = 45;
 /** Sewn edges a chain may step across at one junction before it gives up. */
@@ -2661,9 +2661,32 @@ const mmNearestPoint = (line: readonly Pt[], point: Pt): number => {
   return best;
 };
 
+/** Geometric closure, independent of whether the picker may offer the contour side by side. */
+export const isClosedInner = (line: readonly Pt[]) =>
+  line.length >= 4 && dist(line[0], line[line.length - 1]) <= 1e-6;
+
+/** Longest chord of a sparse ring over its shortest: past this one straight side dominates. */
+const COARSE_OVAL_CHORD_RATIO = 3;
+
+/**
+ * A sparse convex ring of alike chords is how CAD circles and ovals reach this model: its vertices
+ * are not sides. A rectangle with chamfered corners is convex and sparse too, but its long sides
+ * dwarf the chamfers — that one keeps its sides.
+ */
+const isCoarseOval = (line: readonly Pt[]) => {
+  const points = line
+    .slice(0, -1)
+    .filter((point, index, all) => index === 0 || dist(point, all[index - 1]) > 1e-6);
+  if (points.length < 6 || points.length > 16) return false;
+  const turns = points.map((_, index) => angleAt(points, index, 1));
+  if (!turns.every((turn) => turn > 0) && !turns.every((turn) => turn < 0)) return false;
+  const chords = points.map((point, index) => dist(point, points[(index + 1) % points.length]));
+  return Math.max(...chords) <= COARSE_OVAL_CHORD_RATIO * Math.min(...chords);
+};
+
 /** A closed inner contour segmented with the outline's own resample and corner thresholds. */
 export function closedInner(line: readonly Pt[]): { lenMm: number; cornersMm: number[] } | null {
-  if (line.length < 4 || dist(line[0], line[line.length - 1]) > 1e-6) return null;
+  if (!isClosedInner(line)) return null;
   const lenMm = polylineLenMm(line);
   if (!(lenMm > 0)) return null;
   const ring = resample(line, SKELETON.resampleMm);
@@ -2674,7 +2697,13 @@ export function closedInner(line: readonly Pt[]): { lenMm: number; cornersMm: nu
     .filter(
       (value, index, values) => index === 0 || value - values[index - 1] > SKELETON.resampleMm / 2,
     );
-  return cornersMm.length ? { lenMm, cornersMm } : null;
+  if (!cornersMm.length || isCoarseOval(line)) return null;
+  const longestSide = cornersMm.reduce((longest, from, index) => {
+    const to =
+      cornersMm[(index + 1) % cornersMm.length] + (index + 1 === cornersMm.length ? lenMm : 0);
+    return Math.max(longest, to - from);
+  }, 0);
+  return longestSide >= MIN_SIDE_MM ? { lenMm, cornersMm } : null;
 }
 
 const innerSliceBetween = (line: readonly Pt[], from: number, to: number): Pt[] => {

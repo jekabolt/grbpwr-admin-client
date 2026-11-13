@@ -84,7 +84,7 @@
 //   --mutate-slitlabel  → 2 провала: гейт цел, поле на месте — и на обеих машинках работы «прорезь»
 //                         оно снова называется петельным, то есть врёт о том, что на нём режут.
 
-import { build as esbuild } from 'esbuild';
+import { build as esbuild } from './probe-esbuild.mjs';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
