@@ -83,8 +83,9 @@ describe('zone ring carry-over modes', () => {
     expect(dist(ha, hb)).toBeCloseTo(60, 0);
     // … and back: the stored points return.
     const back = outerOf(mapFuseSpecToSize({ ...spec, zone: mapped }, wide, square));
-    const stored = outerOf(spec).spline.points;
-    back.spline.points.forEach((p, i) => expect(dist(p, stored[i])).toBeLessThan(0.05));
+    back.spline.points.forEach((p, i) =>
+      expect(dist(p, outerOf(spec).spline.points[i])).toBeLessThan(0.05),
+    );
   });
 
   it('follow line: the ring travels with its line and keeps its shape', () => {
@@ -133,9 +134,15 @@ describe('zone ring carry-over modes', () => {
       gradeMode: 'follow_line',
       anchor: { x: 200, y: 180 },
     };
+    // The piece grades too: a line never moves farther than the grade of its piece allows, and the
+    // geometric pairing refuses a twin beyond it.
+    const guessed: string[] = [];
     const mapped = outerOf(
-      mapFuseSpecToSize(zone(patch), square, square, null, { base: [base], target: [turned] }),
+      mapFuseSpecToSize(zone(patch), square, wide, null, { base: [base], target: [turned] }, (w) =>
+        guessed.push(w),
+      ),
     );
+    expect(guessed).toEqual([]);
     shape(mapped.spline).forEach((d, i) => expect(d).toBeCloseTo(shape(patch)[i], 6));
     const [a, b] = mapped.spline.points;
     const angle = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;

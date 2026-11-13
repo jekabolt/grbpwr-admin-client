@@ -1,5 +1,6 @@
 import type { PtMm } from 'lib/pattern-import/types';
 import type { FuseInternalLine } from './dxf';
+import type { LinePair } from './zone-grade';
 
 type Walk = { points: PtMm[]; cum: number[]; total: number };
 
@@ -44,12 +45,6 @@ function at(walk: Walk, s: number): { p: PtMm; dir: number } {
   };
 }
 
-const chord = (w: Walk) => {
-  const a = w.points[0];
-  const b = w.points[w.points.length - 1];
-  return { x: b.x - a.x, y: b.y - a.y };
-};
-
 /**
  * The internal line of `lines` nearest to `anchor`, as its index; -1 when there is none.
  */
@@ -87,42 +82,91 @@ export function anchorOnLine(line: FuseInternalLine, near: PtMm): PtMm {
 }
 
 /**
- * «Follow line»: the rigid move (travel + turn, never a scale) that carries a ring tied to the
- * internal line nearest to `anchor` from one size to another. The line's twin on the other size is
- * the line of the same layer and closure at the same place in the file's order; the anchor keeps its
- * share of the line's length, and the ring turns by as much as the line did (an open line by its
- * chord, a closed one by its side under the anchor). Null when the twin cannot be told: the caller
- * then carries the ring the default way.
+ * «Follow line»: the rigid move (travel + turn, never a scale) that carries a ring tied to a line
+ * from one size to another. `pair` is the line with its twin on the other size, point i onto
+ * point i, as the grade field's geometric pairing found it — so neither the file's order of lines
+ * nor where a closed line starts or which way it runs matters. The anchor's foot on the line goes
+ * to the matching point of the twin, and the ring turns as the whole line turned (a least-squares
+ * fit over the paired points, weighed alike both ways round, so the move back is the exact
+ * inverse). Null without a pair: the caller then carries the ring the default way, as a guess.
  */
 export function followLineMove(
   anchor: PtMm,
-  baseLines: readonly FuseInternalLine[],
-  targetLines: readonly FuseInternalLine[],
+  pair: LinePair | null,
 ): ((point: PtMm) => PtMm) | null {
-  const index = nearestInternalLine(anchor, baseLines);
-  if (index < 0) return null;
-  const line = baseLines[index];
-  const alike = (l: FuseInternalLine) =>
-    l.layer === line.layer && l.closed === line.closed && l.points.length >= 2;
-  const twins = targetLines.filter(alike);
-  if (twins.length !== baseLines.filter(alike).length) return null;
-  const twin = twins[baseLines.slice(0, index).filter(alike).length];
-  const from = walkOf(line);
-  let to = walkOf(twin);
-  if (!line.closed) {
-    // The other size's file may list the same line end first.
-    const [a, b] = [chord(from), chord(to)];
-    if (a.x * b.x + a.y * b.y < 0) to = walkOf(twin, true);
+  if (!pair) return null;
+  const n = Math.min(pair.from.length, pair.to.length);
+  if (n < 2) return null;
+  const { from, to, closed } = pair;
+  // The anchor's foot: segment k, share t.
+  let foot = { k: 0, t: 0, gap: Infinity };
+  for (let k = 0; k < (closed ? n : n - 1); k++) {
+    const a = from[k];
+    const b = from[(k + 1) % n];
+    const len2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
+    const t =
+      len2 < 1e-18
+        ? 0
+        : Math.max(
+            0,
+            Math.min(1, ((anchor.x - a.x) * (b.x - a.x) + (anchor.y - a.y) * (b.y - a.y)) / len2),
+          );
+    const gap = Math.hypot(anchor.x - a.x - (b.x - a.x) * t, anchor.y - a.y - (b.y - a.y) * t);
+    if (gap < foot.gap) foot = { k, t, gap };
   }
-  if (from.total < 1e-6 || to.total < 1e-6) return null;
-  const on = projectOn(from, anchor);
-  const was = at(from, on.at);
-  const now = at(to, (on.at / from.total) * to.total);
-  const [c0, c1] = [chord(from), chord(to)];
-  const turn = line.closed ? now.dir - was.dir : Math.atan2(c1.y, c1.x) - Math.atan2(c0.y, c0.x);
+  const lerp = (line: readonly PtMm[]) => {
+    const a = line[foot.k];
+    const b = line[(foot.k + 1) % n];
+    return { x: a.x + (b.x - a.x) * foot.t, y: a.y + (b.y - a.y) * foot.t };
+  };
+  const was = lerp(from);
+  const now = lerp(to);
+  const turn = lineTurn(from, to, n, closed);
   const [cos, sin] = [Math.cos(turn), Math.sin(turn)];
   return (p) => ({
-    x: now.p.x + (p.x - was.p.x) * cos - (p.y - was.p.y) * sin,
-    y: now.p.y + (p.x - was.p.x) * sin + (p.y - was.p.y) * cos,
+    x: now.x + (p.x - was.x) * cos - (p.y - was.y) * sin,
+    y: now.y + (p.x - was.x) * sin + (p.y - was.y) * cos,
   });
+}
+
+/**
+ * The turn (radians) that best carries `from` onto `to`, point i onto point i. Each point weighs
+ * half its two segments on both lines, the same either way round, so the turn back is the exact
+ * negative.
+ */
+function lineTurn(from: readonly PtMm[], to: readonly PtMm[], n: number, closed: boolean): number {
+  const seg = (line: readonly PtMm[], i: number, j: number) =>
+    j < 0 || j >= n ? 0 : Math.hypot(line[j].x - line[i].x, line[j].y - line[i].y);
+  const w: number[] = [];
+  let sw = 0;
+  for (let i = 0; i < n; i++) {
+    const prev = closed ? (i + n - 1) % n : i - 1;
+    const next = closed ? (i + 1) % n : i + 1;
+    const wi = (seg(from, i, prev) + seg(from, i, next) + seg(to, i, prev) + seg(to, i, next)) / 4;
+    w.push(wi);
+    sw += wi;
+  }
+  if (sw < 1e-12) return 0;
+  const centre = (line: readonly PtMm[]) => {
+    let x = 0;
+    let y = 0;
+    for (let i = 0; i < n; i++) {
+      x += w[i] * line[i].x;
+      y += w[i] * line[i].y;
+    }
+    return { x: x / sw, y: y / sw };
+  };
+  const f = centre(from);
+  const t = centre(to);
+  let dot = 0;
+  let cross = 0;
+  for (let i = 0; i < n; i++) {
+    const ax = from[i].x - f.x;
+    const ay = from[i].y - f.y;
+    const bx = to[i].x - t.x;
+    const by = to[i].y - t.y;
+    dot += w[i] * (ax * bx + ay * by);
+    cross += w[i] * (ax * by - ay * bx);
+  }
+  return dot === 0 && cross === 0 ? 0 : Math.atan2(cross, dot);
 }
