@@ -158,6 +158,7 @@ export function FuseFields({
   ci,
   zoneBus,
   guessed = NO_GUESS,
+  stale,
 }: {
   spec: PieceFuseSpec;
   /** The stored `fused` — true with no mode is the legacy «fused, how not said». */
@@ -179,6 +180,8 @@ export function FuseFields({
   zoneBus?: ZoneBus;
   /** What the shown size built by guess. */
   guessed?: ReadonlySet<FuseGuess>;
+  /** The markup was drawn on another base than the pattern file now holds. */
+  stale?: 'base_size_changed' | 'contour_changed';
 }) {
   const on = spec.mode !== '';
   const [more, setMore] = useState(() => fuseOffDefault(spec));
@@ -214,16 +217,30 @@ export function FuseFields({
         label='fusing'
         error={fused && !on}
         door={
-          on && (
-            <Button
-              type='button'
-              aria-label='more'
-              aria-expanded={more}
-              className={`flex items-center ${more ? 'text-textColor' : 'text-labelColor'} hover:text-textColor`}
-              onClick={() => setMore(!more)}
-            >
-              <DotsHorizontalIcon />
-            </Button>
+          (on || stale) && (
+            <span className='flex items-baseline gap-2'>
+              {stale && (
+                <Text
+                  size='micro'
+                  component='span'
+                  className='uppercase text-error'
+                  data-fuse-stale={stale}
+                >
+                  {stale === 'base_size_changed' ? 'base changed' : 'contour changed'}
+                </Text>
+              )}
+              {on && (
+                <Button
+                  type='button'
+                  aria-label='more'
+                  aria-expanded={more}
+                  className={`flex items-center ${more ? 'text-textColor' : 'text-labelColor'} hover:text-textColor`}
+                  onClick={() => setMore(!more)}
+                >
+                  <DotsHorizontalIcon />
+                </Button>
+              )}
+            </span>
           )
         }
       >

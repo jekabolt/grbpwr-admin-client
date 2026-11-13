@@ -46,6 +46,7 @@ import {
 } from 'lib/dxf-reconcile';
 import { fusingDartPolygons } from 'lib/fusing-dxf/darts';
 import { mapFuseSpecToSize } from 'lib/fusing-dxf/dxf';
+import { useFusingMarkupStale } from 'lib/grade-map/fusing-base-store';
 import { fusingInternalLines } from 'lib/fusing-dxf/internal-lines';
 import { fuseAreaMm2, fuseInsetRingMm, generateFuseGeometry } from 'lib/fusing-dxf/geometry';
 import {
@@ -1128,6 +1129,8 @@ export function PieceMatchModal({
   // every block that will coalesce into one new piece shares one buffer — keyed by the creating
   // block, FP_R's edits were dropped whenever FP_L (same default name) was processed first.
   const [pieceEdits, setPieceEdits] = useState<Record<string, PieceFields>>({});
+  // Markup drawn on an older base than the pattern file now holds: marked, never reset (12.11).
+  const staleByPiece = useFusingMarkupStale(techCardId, pieces);
   const [newEdits, setNewEdits] = useState<Record<string, PieceFields>>({});
   // Block whose «this is» select was opened by the `relink` door (a linked block shows only its name).
   const [relinkOf, setRelinkOf] = useState<string | null>(null);
@@ -2922,6 +2925,10 @@ export function PieceMatchModal({
     // NOTE.
     const fuse = vals.fuse ?? readFuseSpec(vals);
     const fuseGuessed = new Set<FuseGuess>();
+    // A markup edited here gets a fresh key on save; one with no key at all is not marked.
+    const staleKey = st.kind === 'existing' ? st.key.trim().toLowerCase() : '';
+    const staleReason =
+      staleKey && !pieceEdits[staleKey]?.fuse ? staleByPiece.get(staleKey)?.reason : undefined;
     const fuseFields = interlining ? null : (
       <FuseFields
         key={ci}
@@ -2929,6 +2936,7 @@ export function PieceMatchModal({
           fuseGuessed.add(fuseGuessKey(what, at)),
         )}
         guessed={fuseGuessed}
+        stale={staleReason === 'no_key' ? undefined : staleReason}
         fused={!!vals.fused}
         lines={interlinings}
         readOnly={readOnly}
