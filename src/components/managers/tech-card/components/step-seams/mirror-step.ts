@@ -70,6 +70,12 @@ type TwinCandidate = {
   ambiguous: boolean;
 };
 
+type StepShape = {
+  work: string;
+  groups: string[][];
+  pieces: string[];
+};
+
 const EMPTY_PLAN = (kind: 'no-twin' | 'edge-mismatch', sourceOp?: FormOpLike): MirrorStepPlan => ({
   kind,
   ...(sourceOp ? { sourceOp } : {}),
@@ -146,6 +152,65 @@ const mappingsOf = (
   return out;
 };
 
+const samePieces = (left: readonly string[], right: readonly string[]) =>
+  left.length === right.length && left.every((piece) => right.includes(piece));
+
+const sameGroups = (left: readonly string[][], right: readonly string[][]) => {
+  if (left.length !== right.length) return false;
+  const used = new Set<number>();
+  return left.every((group) => {
+    const match = right.findIndex(
+      (candidate, index) => !used.has(index) && samePieces(group, candidate),
+    );
+    if (match < 0) return false;
+    used.add(match);
+    return true;
+  });
+};
+
+const stepShapeOf = (
+  cardOps: readonly FormOpLike[],
+  index: number,
+  pieceKeys: ReadonlySet<string>,
+): StepShape => ({
+  work: cardOps[index]?.work ?? '',
+  groups: inputGroups(cardOps, index, pieceKeys).map((group) => [...new Set(group.pieces)]),
+  pieces: stepInputPieces(cardOps, index, pieceKeys),
+});
+
+const mappingKeepsGroups = (
+  source: StepShape,
+  target: StepShape,
+  mapping: ReadonlyMap<string, TwinLink>,
+) => {
+  const groups = source.groups.map((group) =>
+    group.flatMap((piece) => mapping.get(piece)?.key ?? []),
+  );
+  return (
+    groups.every((group, index) => group.length === source.groups[index].length) &&
+    sameGroups(groups, target.groups)
+  );
+};
+
+/** Preserve the historical earlier-only result for a step whose own pieces mirror among themselves. */
+const symmetricTwinCandidateOf = (
+  targetIndex: number,
+  cardOps: readonly FormOpLike[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+  liveKeys: ReadonlySet<string>,
+  pieceKeys: ReadonlySet<string>,
+  targetPieces: readonly string[],
+): TwinCandidate | null => {
+  for (let index = targetIndex - 1; index >= 0; index--) {
+    const op = cardOps[index];
+    if (!opFactKeys(op).some((key) => liveKeys.has(key))) continue;
+    const mappings = mappingsOf(stepInputPieces(cardOps, index, pieceKeys), targetPieces, geoms);
+    if (!mappings.length) continue;
+    return { op, index, links: mappings[0], ambiguous: mappings.length > 1 };
+  }
+  return null;
+};
+
 const twinCandidateOf = (
   targetIndex: number,
   cardOps: readonly FormOpLike[],
@@ -153,21 +218,41 @@ const twinCandidateOf = (
   liveKeys: ReadonlySet<string>,
 ): TwinCandidate | null => {
   const pieceKeys = new Set(geoms.keys());
-  const targetPieces = stepInputPieces(cardOps, targetIndex, pieceKeys);
-  for (let index = targetIndex - 1; index >= 0; index--) {
-    const op = cardOps[index];
-    if (!opFactKeys(op).some((key) => liveKeys.has(key))) continue;
-    const pieces = stepInputPieces(cardOps, index, pieceKeys);
-    const mappings = mappingsOf(pieces, targetPieces, geoms);
-    if (!mappings.length) continue;
-    return {
-      op,
-      index,
-      links: mappings[0],
-      ambiguous: mappings.length > 1,
-    };
-  }
-  return null;
+  const target = stepShapeOf(cardOps, targetIndex, pieceKeys);
+  if (mappingsOf(target.pieces, target.pieces, geoms).length)
+    return symmetricTwinCandidateOf(
+      targetIndex,
+      cardOps,
+      geoms,
+      liveKeys,
+      pieceKeys,
+      target.pieces,
+    );
+
+  const shapes = cardOps.map((_, index) => stepShapeOf(cardOps, index, pieceKeys));
+  const targets = shapes.flatMap((shape, index) =>
+    shape.work === target.work &&
+    samePieces(shape.pieces, target.pieces) &&
+    sameGroups(shape.groups, target.groups)
+      ? [{ index, shape }]
+      : [],
+  );
+  const twins = shapes.flatMap((shape, index) => {
+    if (shape.work !== target.work) return [];
+    const mappings = mappingsOf(shape.pieces, target.pieces, geoms);
+    const compatible = mappings.filter((mapping) => mappingKeepsGroups(shape, target, mapping));
+    return compatible.length ? [{ index, mappings, compatible }] : [];
+  });
+  if (targets.length !== twins.length) return null;
+  const rank = targets.findIndex((candidate) => candidate.index === targetIndex);
+  const twin = rank >= 0 ? twins[rank] : undefined;
+  if (!twin || !opFactKeys(cardOps[twin.index]).some((key) => liveKeys.has(key))) return null;
+  return {
+    op: cardOps[twin.index],
+    index: twin.index,
+    links: twin.compatible[0],
+    ambiguous: twin.mappings.length > 1,
+  };
 };
 
 const edgeMapFor = (

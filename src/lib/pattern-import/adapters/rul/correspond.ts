@@ -78,6 +78,19 @@ function corners(
   return [...new Set(keep)].sort((a, b) => a - b);
 }
 
+/**
+ * The corners of one line at threshold T (deg), ascending: vertex index and signed turn (+ = left).
+ * The same reading `matchLineCorners` uses; exported for the grade-map builder's diagnostics.
+ */
+export function lineCorners(
+  pts: readonly PtMm[],
+  closed: boolean,
+  T: number,
+): { i: number; turn: number }[] {
+  const tr = turns(pts, closed);
+  return corners(pts, tr, T, closed).map((i) => ({ i, turn: tr[i] }));
+}
+
 /** Cumulative arc fractions of the vertices from index a to b (forward, cyclic when closed). */
 function edgeOf(pts: readonly PtMm[], a: number, b: number): { pts: PtMm[]; fr: number[] } {
   const n = pts.length;

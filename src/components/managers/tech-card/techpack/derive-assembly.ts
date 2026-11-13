@@ -58,6 +58,7 @@ import {
 } from 'components/managers/tech-card/op-icons';
 import { storedSeamSides } from 'components/managers/tech-card/components/step-seams/step-rows';
 import { stepHighlightOf } from 'components/managers/tech-card/components/step-seams/step-highlight';
+import { surfacePlacementLine } from 'components/managers/tech-card/components/step-seams/step-picture';
 import { sideLengthMm } from 'components/managers/tech-card/components/step-seams/seam-length';
 import {
   innerSlice,
@@ -408,7 +409,14 @@ type SeamPart = {
 };
 
 type Placement = { xMm: number; yMm: number; rotDeg: number; flip: boolean };
-type InnerTarget = { piece: string; index: number; pts: Pt[]; placement?: Placement };
+type InnerTarget = {
+  piece: string;
+  index: number;
+  pts: Pt[];
+  placement?: Placement;
+  /** The stored owner row selected a proper stretch, rather than the whole inner line. */
+  ranged?: boolean;
+};
 type AsmSeam = {
   key: string;
   kind: StoredSeam['kind'];
@@ -973,7 +981,13 @@ function locateSeams(input: AssemblyInput): { seams: AsmSeam[]; unresolved: numb
       a: parts,
       b: [],
       pieces: [piece],
-      inner: { piece, index, pts: targetPoints, placement: placementOf(anchor) },
+      inner: {
+        piece,
+        index,
+        pts: targetPoints,
+        placement: placementOf(anchor),
+        ranged: !whole,
+      },
       // A closed contour is not a slit, even when the picker keeps it whole.
       ...(isClosedInner(line) ? { surfaceRole: 'inner' as const } : {}),
     });
@@ -1268,10 +1282,11 @@ function alignEdges(
   pieces: ReadonlyMap<string, AsmPiece>,
   B: Item[],
   itemA: Item,
-  ptsA: Pt[],
+  ptsA: readonly Pt[],
   itemB: Item,
-  ptsB: Pt[],
+  ptsB: readonly Pt[],
   mode: 'stack' | 'flat',
+  pin?: 'start' | 'end',
 ): void {
   const a = ptsA.map((p) => apply(itemA.T, p));
   const ends = () => {
@@ -1289,9 +1304,15 @@ function alignEdges(
   }
   moveAll(B, rotate(theta, [0, 0]));
   [b0, b1] = ends();
-  const mb: Pt = [(b0[0] + b1[0]) / 2, (b0[1] + b1[1]) / 2];
-  const ma: Pt = [(a0[0] + a1[0]) / 2, (a0[1] + a1[1]) / 2];
-  moveAll(B, translate(ma[0] - mb[0], ma[1] - mb[1]));
+  if (pin) {
+    const fixed = pin === 'start' ? a0 : a1;
+    const moving = target[0] === fixed ? b0 : b1;
+    moveAll(B, translate(fixed[0] - moving[0], fixed[1] - moving[1]));
+  } else {
+    const mb: Pt = [(b0[0] + b1[0]) / 2, (b0[1] + b1[1]) / 2];
+    const ma: Pt = [(a0[0] + a1[0]) / 2, (a0[1] + a1[1]) / 2];
+    moveAll(B, translate(ma[0] - mb[0], ma[1] - mb[1]));
+  }
   const dir = sub(a1, a0);
   const sideA = Math.sign(cross(dir, sub(centerOf(pieces, [itemA]), a0)));
   const sideB = Math.sign(cross(dir, sub(centerOf(pieces, [itemB]), a0)));
@@ -2268,7 +2289,17 @@ function placeAtInnerTarget(
     }
   }
   if (!best) return;
-  alignEdges(pieces, moving, host, target.pts, best.item, best.pts, 'stack');
+  const placementLine = target.ranged ? surfacePlacementLine(target.pts) : { points: target.pts };
+  alignEdges(
+    pieces,
+    moving,
+    host,
+    placementLine.points,
+    best.item,
+    best.pts,
+    'stack',
+    placementLine.pin,
+  );
 }
 
 function buildCards(

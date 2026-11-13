@@ -226,8 +226,11 @@ const inner = (pts: readonly Pt2[]) => {
 
 type SurfacePlacementLine = { points: readonly Pt2[]; pin?: 'start' | 'end' };
 
+/** Rounding of a stored share (1e-4 of the contour) stays under this on any contour up to 20 m. */
+const HAIR_TAIL_MM = 1;
+
 /** A straight part cannot follow a sharp inner turn: use the longer leg and pin its outer end. */
-const surfacePlacementLine = (line: readonly Pt2[]): SurfacePlacementLine => {
+export const surfacePlacementLine = (line: readonly Pt2[]): SurfacePlacementLine => {
   const turnDeg = (a: Pt2, b: Pt2, c: Pt2) => {
     const before: Pt2 = [b[0] - a[0], b[1] - a[1]];
     const after: Pt2 = [c[0] - b[0], c[1] - b[1]];
@@ -240,15 +243,14 @@ const surfacePlacementLine = (line: readonly Pt2[]): SurfacePlacementLine => {
       Math.PI
     );
   };
-  const sharp = line
-    .slice(1, -1)
-    .flatMap((point, offset) =>
-      Math.abs(turnDeg(line[offset], point, line[offset + 2])) >= SOFT_CORNER_DEG
-        ? [offset + 1]
-        : [],
-    );
-  if (sharp.length !== 1) return { points: line };
-  const corner = sharp[0];
+  const sharpOf = (points: readonly Pt2[]) =>
+    points
+      .slice(1, -1)
+      .flatMap((point, offset) =>
+        Math.abs(turnDeg(points[offset], point, points[offset + 2])) >= SOFT_CORNER_DEG
+          ? [offset + 1]
+          : [],
+      );
   const length = (points: readonly Pt2[]) =>
     points
       .slice(1)
@@ -257,11 +259,24 @@ const surfacePlacementLine = (line: readonly Pt2[]): SurfacePlacementLine => {
           sum + Math.hypot(point[0] - points[index][0], point[1] - points[index][1]),
         0,
       );
-  const before = line.slice(0, corner + 1);
-  const after = line.slice(corner);
+  // A stored stretch is kept in shares of the contour rounded to 1e-4, so its end can run a hair
+  // past a corner (140.01 mm of a 140 mm side). Such a tail is not a leg: cut it off first.
+  let trimmed = line;
+  for (let sharp = sharpOf(trimmed); sharp.length; sharp = sharpOf(trimmed)) {
+    const last = sharp[sharp.length - 1];
+    if (length(trimmed.slice(0, sharp[0] + 1)) <= HAIR_TAIL_MM) trimmed = trimmed.slice(sharp[0]);
+    else if (length(trimmed.slice(last)) <= HAIR_TAIL_MM) trimmed = trimmed.slice(0, last + 1);
+    else break;
+  }
+  const sharp = sharpOf(trimmed);
+  if (sharp.length > 1) return { points: line };
+  if (!sharp.length) return { points: trimmed };
+  const corner = sharp[0];
+  const before = trimmed.slice(0, corner + 1);
+  const after = trimmed.slice(corner);
   const beforeLength = length(before);
   const afterLength = length(after);
-  if (Math.abs(beforeLength - afterLength) <= 1e-6) return { points: line };
+  if (Math.abs(beforeLength - afterLength) <= 1e-6) return { points: trimmed };
   return beforeLength > afterLength
     ? { points: before, pin: 'start' }
     : { points: after, pin: 'end' };
