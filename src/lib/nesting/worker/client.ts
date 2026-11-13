@@ -10,6 +10,7 @@ import type {
   WorkerResponse,
 } from '../types';
 import type { ConversionManifest } from 'lib/pattern-import/types';
+import type { GradeMapJob, GradeMapJobResult } from 'lib/fusing-dxf/grade-map-source';
 import type {
   RollSearchJob,
   RollSearchPlan,
@@ -219,6 +220,24 @@ export class NestingWorkerClient {
       w.postMessage(request);
     });
     return { id, done };
+  }
+
+  /** Grade maps of fused zone pieces, built in the worker so the page does not freeze. */
+  gradeMaps(jobs: GradeMapJob[]): Promise<GradeMapJobResult[]> {
+    const id = this.nextId++;
+    const w = this.spawn();
+    const request: WorkerRequest = { type: 'grade-maps', id, jobs };
+    return new Promise<GradeMapJobResult[]>((resolve, reject) => {
+      this.handlers.set(id, {
+        request,
+        resolve: (msg) => {
+          if (msg.type === 'grade-maps') resolve(msg.maps);
+          else reject(new Error('unexpected worker reply'));
+        },
+        reject,
+      });
+      w.postMessage(request);
+    });
   }
 
   // Soft cancel: the GA checks between individuals and returns its best-so-far.

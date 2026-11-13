@@ -25,6 +25,8 @@ import { followLineMove } from './follow-line';
 import { carryStripEnd } from './strip-ends';
 import type { FuseEdge, FuseSpline, PieceFuseSpec } from './types';
 import { zoneGrade } from './zone-grade';
+import { chooseBaseSize } from './grade-map-base';
+import { gradeMapGiven, type GradeMapPair, type PieceGradeMap } from './grade-map-pair';
 
 export type FusingBomLine = {
   bomLineKey: string;
@@ -66,6 +68,8 @@ export type FusingSourcePiece = {
   fuse: PieceFuseSpec | null;
   seamAllowanceMm?: number | null;
   sizes: FusingSourceSize[];
+  /** The piece's grade map (two or more sizes, built in the worker); absent = inferred as before. */
+  gradeMap?: PieceGradeMap | null;
 };
 
 export type BuildFusingSheetsInput = {
@@ -108,10 +112,20 @@ export type GeneratedFusingSheet = {
   aliases: { identity: string; blockName: string }[];
 };
 
+/** A size whose zone leaned on a track the grade map refused: carried by inference there. */
+export type FusingApproximateSize = {
+  piece: string;
+  size: string;
+  approximate: true;
+  reason: string;
+};
+
 export type BuildFusingSheetsResult = {
   sheets: GeneratedFusingSheet[];
   warnings: string[];
   skippedSizes: FusingSkippedSize[];
+  /** Present when a piece had a grade map: the sizes built partly by inference. */
+  approximate?: FusingApproximateSize[];
 };
 
 const SOURCE: ManifestSource = {
@@ -271,6 +285,8 @@ export function mapFuseSpecToSize(
    * then goes the default way (built by guess), and the sheet is still built.
    */
   onGuess?: (what: 'line' | 'notch') => void,
+  /** The piece's grade map read from this size to that one (the way back: swapped). */
+  pair?: GradeMapPair | null,
 ): PieceFuseSpec {
   if (source.mode === 'zone' && source.zone && !('dxfPieceKey' in source.zone)) {
     let baseInset: PtMm[] | null = null;
@@ -281,7 +297,8 @@ export function mapFuseSpecToSize(
     } catch {
       // generateFuseGeometry owns the inset refusal; the cut contour stands in for it here.
     }
-    const grade = zoneGrade(baseOutline, targetOutline, internals);
+    const given = gradeMapGiven(pair, source, baseOutline, targetOutline, internals);
+    const grade = zoneGrade(baseOutline, targetOutline, internals, given);
     /** mm from the nearer of the cut and the inset contour. */
     const offContour = (point: PtMm) =>
       Math.min(
@@ -490,6 +507,7 @@ export function mapFuseSpecToSize(
 export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingSheetsResult {
   const warnings: string[] = [];
   const skippedSizes: FusingSkippedSize[] = [];
+  const approximate: FusingApproximateSize[] = [];
   const byLine = new Map<string, FusingSourcePiece[]>();
   const validLines = input.bomLines.filter((line) => line.bomLineKey.trim());
   const zoneOutlines = new Map<string, PtMm[]>();
@@ -524,7 +542,11 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
       const sourcePiece = sources[pieceIndex];
       const fuse = sourcePiece.fuse!;
       const ordered = [...sourcePiece.sizes].sort((a, b) => a.rank - b.rank);
-      const base = ordered.find((size) => size.sizeId === input.baseSizeId) ?? ordered[0] ?? null;
+      const base = chooseBaseSize(
+        ordered,
+        (size) => size.sizeId === input.baseSizeId,
+        (size) => size.rank,
+      );
       if (!base) {
         warnings.push(`${sourcePiece.identity}: no source sizes`);
         continue;
@@ -543,6 +565,20 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
             sourcePiece.seamAllowanceMm,
             { base: base.internals ?? [], target: sourceSize.internals ?? [] },
             (what) => guessed.add(what),
+            sourcePiece.gradeMap && sourceSize.sizeId !== base.sizeId
+              ? {
+                  map: sourcePiece.gradeMap,
+                  from: base.sizeId,
+                  to: sourceSize.sizeId,
+                  approximate: (reasons) =>
+                    approximate.push({
+                      piece: sourcePiece.identity,
+                      size: sourceSize.sizeToken,
+                      approximate: true,
+                      reason: reasons.join('; '),
+                    }),
+                }
+              : null,
           );
           for (const what of guessed)
             warnings.push(
@@ -677,5 +713,7 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
       })),
     });
   }
-  return { sheets, warnings, skippedSizes };
+  return input.pieces.some((piece) => piece.gradeMap)
+    ? { sheets, warnings, skippedSizes, approximate }
+    : { sheets, warnings, skippedSizes };
 }

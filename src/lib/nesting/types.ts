@@ -4,6 +4,7 @@
 // lands in the main bundle.
 
 import type { ConversionManifest } from 'lib/pattern-import/types';
+import type { GradeMapJob, GradeMapJobResult } from 'lib/fusing-dxf/grade-map-source';
 import type {
   RollSearchJob,
   RollSearchPlan,
@@ -458,6 +459,8 @@ export type WorkerRequest =
   | { type: 'nest'; id: number; parseId: number; config: NestConfig }
   /** Roll print layout (pattern-export/roll-search.ts): seed first, then the budgeted GA. */
   | { type: 'roll-search'; id: number; job: RollSearchJob }
+  /** Grade maps of fused zone pieces (lib/fusing-dxf/grade-map-source.ts), built off the main thread. */
+  | { type: 'grade-maps'; id: number; jobs: GradeMapJob[] }
   | { type: 'cancel'; id: number };
 
 export type WorkerResponse =
@@ -508,6 +511,7 @@ export type WorkerResponse =
   /** The roll search's deterministic plan, posted before its GA starts. */
   | { type: 'roll-seed'; id: number; seed: RollSearchPlan }
   | { type: 'roll-result'; id: number; result: RollSearchResult }
+  | { type: 'grade-maps'; id: number; maps: GradeMapJobResult[] }
   | { type: 'error'; id: number; message: string };
 
 export const NEST_DEFAULTS = {
