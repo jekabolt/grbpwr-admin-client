@@ -212,6 +212,7 @@ import {
   consumeSeamDeleteRetry,
   noteSheetRestore,
   peekSeamDeleteRetry,
+  seamDeleteRetryKeys,
   provideSheetRestorer,
   restoreSheetVersion,
   swapSheetFile,
@@ -860,11 +861,19 @@ export function PatternsField({
   const lastSeamRetrySave = useRef({ cardId: techCardId, at: autosave.lastSavedAt });
   retrySeamDeletesRef.current = async () => {
     if (!techCardId || retryingSeamDeletes.current) return;
-    const seamKeys = peekSeamDeleteRetry(techCardId);
-    if (!seamKeys.length) return;
+    const holders = () => ({
+      operations: (getValues('operations') ?? []) as FormOp[],
+      cutStrips: getValues('cutStrips') ?? [],
+    });
+    // A step or a strip may have taken a key since the delete failed (U1 #3): it stays.
+    const { send, held } = seamDeleteRetryKeys(peekSeamDeleteRetry(techCardId), holders());
+    if (held.length) consumeSeamDeleteRetry(techCardId, held);
+    if (!send.length) return;
     retryingSeamDeletes.current = true;
     try {
-      await deleteSeamsOnServer(techCardId, seamKeys);
+      // The card's undo may still hold the rows on a step or a strip; it cannot bring them back.
+      undoHistory.cut('dxf-delete-retry');
+      await deleteSeamsOnServer(techCardId, send, () => seamDeleteRetryKeys(send, holders()).send);
     } finally {
       retryingSeamDeletes.current = false;
     }
@@ -3364,10 +3373,14 @@ export function PatternsField({
 
   // One ChangeTechCardSeams under the version the form stands on (C7): the delete also unlinks the
   // rows from every step, and the form adopts those links with the new version.
-  async function deleteSeamsOnServer(cardId: number, seamKeys: string[]): Promise<boolean> {
+  async function deleteSeamsOnServer(
+    cardId: number,
+    seamKeys: string[],
+    stillOwed?: () => string[],
+  ): Promise<boolean> {
     const res = await runSeamChange(
       cardId,
-      { delete: seamKeys },
+      stillOwed ? () => ({ delete: stillOwed() }) : { delete: seamKeys },
       { verb: 'removal', quiet: true },
       { call: (req) => adminService.ChangeTechCardSeams(req) },
     );

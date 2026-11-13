@@ -174,7 +174,13 @@ export function runSeamChange(
       for (let attempt = 0; ; attempt += 1) {
         // The card left this page while the write waited its turn.
         if (bridgeOf(cardId) !== bridge) return fail(NOT_SAVED);
-        const req = changeRequest(cardId, bridge.version(), build(), bridge.operationNumber);
+        const built = build();
+        // Rebuilt to nothing (every row it named was taken meanwhile): no request, nothing to say.
+        if (emptyChange(built)) {
+          settleSeamWrite(cardId, keys, undefined, undefined, opts.errorAt);
+          return { ok: true, keyMap: new Map(), deletedKeys: [], lockVersion: bridge.version() };
+        }
+        const req = changeRequest(cardId, bridge.version(), built, bridge.operationNumber);
         if (!req) return fail(why(NOT_SAVED));
         let res: ChangeTechCardSeamsResponse;
         try {
@@ -218,6 +224,9 @@ export function runSeamChange(
     }
   });
 }
+
+const emptyChange = (c: SeamChange) =>
+  !c.upsert?.length && !c.delete?.length && !c.link?.length && !c.detach?.length;
 
 /** The card read after lock_version_moved: its rows into the store at its version. */
 function takeRead(cardId: number, card: common_TechCard) {
