@@ -14,6 +14,7 @@ import { followLineChoices } from 'lib/fusing-dxf/follow-line';
 import type { FuseGradeMode, FuseZone } from 'lib/fusing-dxf/types';
 import { Chip } from 'ui';
 import type { PieceFuseSpec } from './fuse-spec';
+import { SheetPop } from './sheet-pop';
 import {
   drawZoneRing,
   insertZonePoint,
@@ -85,7 +86,6 @@ const RING_MODES: [FuseGradeMode, string][] = [
 ];
 /** The mode chips under the ring, screen px. */
 const MODE_BAR_W = 230;
-const MODE_BAR_H = 26;
 
 type Drag =
   | { t: 'pt'; i: number; moved: boolean; cx: number; cy: number }
@@ -517,19 +517,8 @@ export function FuseZoneEditor({
         );
       })}
       {modeBar && (
-        <foreignObject
-          x={modeBar.x}
-          y={modeBar.y}
-          width={MODE_BAR_W * px}
-          height={MODE_BAR_H * px}
-          style={{ overflow: 'visible' }}
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          <div
-            data-ring-modes=''
-            className='flex gap-0.5'
-            style={{ width: MODE_BAR_W, transform: `scale(${px})`, transformOrigin: '0 0' }}
-          >
+        <SheetPop x={modeBar.x} y={modeBar.y}>
+          <div data-ring-modes='' className='flex gap-0.5' style={{ width: MODE_BAR_W }}>
             {RING_MODES.map(([value, label]) => (
               <Chip
                 key={value}
@@ -542,7 +531,7 @@ export function FuseZoneEditor({
               </Chip>
             ))}
           </div>
-        </foreignObject>
+        </SheetPop>
       )}
     </g>
   );
