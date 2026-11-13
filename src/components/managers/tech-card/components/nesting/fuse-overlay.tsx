@@ -19,6 +19,7 @@ import {
   isDrawnZone,
   zoneRingOutline,
   zoneRingRefs,
+  endGuessed,
   type FuseGuess,
   type ZoneBus,
   type ZoneRingRef,
@@ -579,7 +580,8 @@ export function FuseOverlay({
               ? nearestNotch(notches, end === 's' ? mm : lenMm - mm)
               : -1;
             const open = pop?.edge === i && pop.end === end;
-            const guess = endMode === 'notch' && !!sel && !!guessOf?.(sel).has('notch');
+            const guess =
+              endMode === 'notch' && !!sel && !!guessOf && endGuessed(guessOf(sel), i, end);
             const tag = guess
               ? 'guess'
               : endMode === 'notch'
