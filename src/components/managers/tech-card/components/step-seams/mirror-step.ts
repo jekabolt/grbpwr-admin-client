@@ -903,6 +903,18 @@ export function mirrorStepPlan({
   };
 }
 
+/** Which confirm a «mirror left» click opens: no plan writes on the click itself. */
+export function mirrorClickDialog(kind: MirrorStepKind): 'create' | 'replace' {
+  return kind === 'replace' ? 'replace' : 'create';
+}
+
+/** The create confirm's title: how many seams the plan writes (poses are not seams). */
+export function mirrorConfirmTitle(plan: Pick<MirrorStepPlan, 'upsert'>): string {
+  const seams = plan.upsert.filter((row) => row.kind !== 'pose').length;
+  if (!seams) return 'MIRROR LEFT?';
+  return `MIRROR ${seams} ${seams === 1 ? 'SEAM' : 'SEAMS'}?`;
+}
+
 /** Only right pieces: nothing to mirror from is worth saying. A step with a left piece stays quiet. */
 export function isRightMirrorStep(
   step: FormOpLike,
