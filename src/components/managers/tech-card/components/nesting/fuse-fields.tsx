@@ -54,6 +54,7 @@ import {
   zoneDrawKind,
   zonePoints,
   zoneRingLabel,
+  zoneRingModeLabel,
   zoneRingPoints,
   zoneRingRefs,
   ZONE_DRAW_POINTS,
@@ -557,7 +558,7 @@ function ZoneRow({
                   aria-label={zoneRingLabel(spline, ref)}
                   aria-pressed={selectedRow}
                   aria-invalid={ringInvalid || undefined}
-                  className={`grid min-h-7 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5 px-1.5 py-1 text-left text-micro uppercase tracking-label ${
+                  className={`grid min-h-7 w-full grid-cols-[auto_minmax(0,1fr)_auto_4.5rem] items-center gap-1.5 px-1.5 py-1 text-left text-micro uppercase tracking-label ${
                     selectedRow && ringInvalid
                       ? 'bg-error text-bgColor'
                       : selectedRow
@@ -571,7 +572,8 @@ function ZoneRow({
                 >
                   <span aria-hidden>{ringInvalid ? '!' : ref.startsWith('hole:') ? '◇' : '◆'}</span>
                   <span className='truncate'>{zoneRingLabel(spline, ref)}</span>
-                  <span className='tabular-nums'>
+                  <span data-ring-mode=''>{zoneRingModeLabel(spline, ref, bus.lines(ci))}</span>
+                  <span className='text-right tabular-nums'>
                     {ringArea != null ? `${Math.round(ringArea)} cm²` : <EmptyCell />}
                   </span>
                 </Button>

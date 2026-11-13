@@ -21,7 +21,9 @@ import {
   signedArea,
 } from './geometry';
 import { ZONE_ON_CONTOUR_MM, flattenSpline, projectOnRing } from './spline';
-import type { FuseSpline, PieceFuseSpec } from './types';
+import { followLineMove } from './follow-line';
+import { carryStripEnd } from './strip-ends';
+import type { FuseEdge, FuseSpline, PieceFuseSpec } from './types';
 import { zoneGrade } from './zone-grade';
 
 export type FusingBomLine = {
@@ -264,6 +266,11 @@ export function mapFuseSpecToSize(
   targetOutline: readonly PtMm[],
   seamAllowanceMm?: number | null,
   internals?: FuseInternals | null,
+  /**
+   * Told when a ring's line or a strip end's notch is not found on the target size: that markup
+   * then goes the default way (built by guess), and the sheet is still built.
+   */
+  onGuess?: (what: 'line' | 'notch') => void,
 ): PieceFuseSpec {
   if (source.mode === 'zone' && source.zone && !('dxfPieceKey' in source.zone)) {
     let baseInset: PtMm[] | null = null;
@@ -296,7 +303,14 @@ export function mapFuseSpecToSize(
         y: onto.y + (carried.y - onto.y) * (1 - pull),
       };
     };
-    type Carried = { spline: FuseSpline; ring: PtMm[]; rigid: number; shift: PtMm | null };
+    type Carried = {
+      spline: FuseSpline;
+      ring: PtMm[];
+      rigid: number;
+      shift: PtMm | null;
+      /** Set by a ring with a carry-over mode of its own: its holes go the same way. */
+      by?: (point: PtMm) => PtMm;
+    };
     /** rigid: 1 = moved whole by `shift`, 0 = point by point. */
     const mapRing = (
       spline: FuseSpline,
@@ -304,6 +318,32 @@ export function mapFuseSpecToSize(
       parent: Carried | null = null,
     ): Carried => {
       const ring = flattenSpline(spline.points);
+      // A ring with a mode of its own, or a default hole inside one, goes that way and no other.
+      const followed =
+        spline.gradeMode === 'follow_line' && spline.anchor
+          ? followLineMove(spline.anchor, grade.linePair(spline.anchor))
+          : null;
+      if (spline.gradeMode === 'follow_line' && !followed) onGuess?.('line');
+      const by =
+        spline.gradeMode === 'grow'
+          ? grade.point
+          : followed
+            ? followed
+            : !spline.gradeMode && parent?.by
+              ? parent.by
+              : null;
+      if (by)
+        return {
+          spline: {
+            ...spline,
+            points: spline.points.map((point) => ({ ...point, ...by(point) })),
+            ...(spline.anchor ? { anchor: by(spline.anchor) } : {}),
+          },
+          ring,
+          rigid: 0,
+          shift: null,
+          by,
+        };
       let off = Infinity;
       for (const point of [...spline.points, ...ring]) off = Math.min(off, offContour(point));
       const own = smoothstep(RIGID_FROM_MM, RIGID_AT_MM, off);
@@ -343,7 +383,7 @@ export function mapFuseSpecToSize(
         }));
       }
       return {
-        spline: { points: spline.points.map((point, i) => ({ ...point, ...moved[i] })) },
+        spline: { ...spline, points: spline.points.map((point, i) => ({ ...point, ...moved[i] })) },
         ring,
         rigid: own,
         shift,
@@ -387,7 +427,9 @@ export function mapFuseSpecToSize(
         holes: source.zone.holes.map((hole) => {
           const first = hole.points[0];
           const parent = first
-            ? outers.find((outer) => outer.rigid > 0 && pointInRing(first, outer.ring))
+            ? outers.find(
+                (outer) => (outer.rigid > 0 || outer.by) && pointInRing(first, outer.ring),
+              )
             : undefined;
           return mapRing(hole, false, parent ?? null).spline;
         }),
@@ -400,19 +442,43 @@ export function mapFuseSpecToSize(
     // generateFuseGeometry owns the topology refusal and its actionable error text.
     if (!pairing) return source;
     const to = edgeRunsOf(targetOutline);
+    const from = edgeRunsOf(baseOutline);
     return {
       ...source,
       edges: source.edges
         .map((edge) => {
           const target = pairing.target[edge.edge];
           if (target == null) return edge;
-          // Trims are fixed mm from the run's corners in every size (see FuseEdge).
+          const baseRun = from[edge.edge];
+          const run = to[target];
+          // An end's trim on this size; absent mode = the same mm from the run's corner (FuseEdge).
+          const pair = {
+            baseRun,
+            run,
+            reversed: pairing.reversed,
+            baseLines: internals?.base ?? [],
+            lines: internals?.target ?? [],
+          };
+          const carried = (mm: number, mode: FuseEdge['startMode'], atStart: boolean): number => {
+            if (!baseRun) return mm;
+            const end = carryStripEnd(mm, mode, atStart, pair);
+            if (end.guessed) onGuess?.('notch');
+            return end.mm;
+          };
+          const start = carried(edge.startMm, edge.startMode, true);
+          const end = carried(edge.endMm, edge.endMode, false);
           const [startMm, endMm] = clampStripTrims(
-            to[target].length,
-            pairing.reversed ? edge.endMm : edge.startMm,
-            pairing.reversed ? edge.startMm : edge.endMm,
+            run.length,
+            pairing.reversed ? end : start,
+            pairing.reversed ? start : end,
           );
-          return { ...edge, edge: target, startMm, endMm };
+          const next: FuseEdge = { edge: target, startMm, endMm };
+          const [startMode, endMode] = pairing.reversed
+            ? [edge.endMode, edge.startMode]
+            : [edge.startMode, edge.endMode];
+          if (startMode) next.startMode = startMode;
+          if (endMode) next.endMode = endMode;
+          return next;
         })
         .sort((a, b) => a.edge - b.edge),
     };
@@ -468,6 +534,7 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
       const partSizes: PieceSizeSpec[][] = [];
       const partCounts = new Set<number>();
       for (const sourceSize of ordered) {
+        const guessed = new Set<'line' | 'notch'>();
         try {
           const sizedFuse = mapFuseSpecToSize(
             fuse,
@@ -475,7 +542,12 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
             sourceSize.outline,
             sourcePiece.seamAllowanceMm,
             { base: base.internals ?? [], target: sourceSize.internals ?? [] },
+            (what) => guessed.add(what),
           );
+          for (const what of guessed)
+            warnings.push(
+              `${sourcePiece.identity}_${sourceSize.sizeToken}: ${what} not found, built by guess`,
+            );
           const reference =
             fuse.zone && 'dxfPieceKey' in fuse.zone
               ? zoneOutlines.get(zoneKey(fuse.zone.dxfPieceKey, sourceSize.sizeToken)) ??
