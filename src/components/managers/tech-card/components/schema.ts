@@ -144,6 +144,11 @@ import {
   writeFuseFields,
 } from 'lib/fusing-dxf/types';
 import {
+  fusingBaseAttacher,
+  fusingBaseFromWire,
+  type FusingBaseKey,
+} from 'lib/grade-map/fusing-base';
+import {
   ANNOTATION_CAPS_KEYS,
   ANNOTATION_COLOR_KEYS,
   ANNOTATION_KIND_KEYS,
@@ -428,6 +433,13 @@ const pieceSchema = z
     fusingInsetNet: z.boolean().optional().default(false),
     fusingGrain: z.string().optional().default(''),
     fusingDarts: z.string().optional().default(''),
+    // grademap P3: the STORED fusing markup key (base size + contour signature), read only. The save
+    // never echoes it; it sends a fresh key only with a markup change (lib/grade-map/fusing-base).
+    fusingBase: z
+      .object({ baseSizeId: z.number(), contourSignature: z.string() })
+      .nullable()
+      .optional()
+      .default(null),
     calloutNumber: z.number().optional().default(0),
     note: z.string().optional().default(''),
     materials: z.array(pieceMaterialSchema).default([]),
@@ -2950,6 +2962,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
         fusingMode: danglingFusing ? UNSET_FUSING_MODE : p.fusingMode || UNSET_FUSING_MODE,
         fusingWidthMm: danglingFusing ? '' : p.fusingWidthMm?.value ?? '',
         ...safeFuseFields,
+        fusingBase: danglingFusing ? null : fusingBaseFromWire(p.fusingBase),
         calloutNumber: p.calloutNumber ?? 0,
         note: p.note || '',
         materials: (p.materials ?? []).map((m) => ({
@@ -3518,6 +3531,9 @@ export function mapFormToTechCardInsert(
   // that empty form would send `costing: undefined` and — under full-replace — WIPE the stored
   // costing. Preserve the original block instead so a non-costing editor can never destroy it.
   canWriteCosting: boolean = true,
+  // grademap P3: piece line key → the fusing markup key of its CURRENT base contour (null = not
+  // known). Absent = never send the key (the dirty-check paths compare bodies without it).
+  currentFusingBase?: (pieceLineKey: string) => FusingBaseKey | null,
 ): common_TechCardInsert {
   // B-2: an IDEA card may carry an empty style_number — the backend now accepts it while
   // stage == IDEA and only enforces a real number when the card moves out (to PROTO+). So we
@@ -3854,7 +3870,8 @@ export function mapFormToTechCardInsert(
               note: m.note?.trim() || '',
             };
           }),
-      })),
+      }))
+      .map(fusingBaseAttacher(original?.pieces, currentFusingBase)),
     // DXF block → piece aliases (0262). ALWAYS sent as a wrapper — the wrapper IS the presence
     // signal, and a client that owns the mapping must be able to empty it. A dead material scope is
     // deliberately NOT filtered: the store grandfathers an existing (scope, block) pair, while this
