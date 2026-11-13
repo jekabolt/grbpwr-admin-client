@@ -76,9 +76,21 @@ export function materialWidthMm(
   return dimension ? numberText(dimension) : '';
 }
 
+/** The seam rows the page is deleting right now (U1 #2): not offered to a strip. */
+export function leavingSeamKeys(
+  pending: Readonly<Record<string, { kind: string }>>,
+): ReadonlySet<string> {
+  return new Set(
+    Object.entries(pending)
+      .filter(([, op]) => op.kind === 'delete')
+      .map(([key]) => key),
+  );
+}
+
 export function cutStripSeamOptions(
   seams: readonly common_TechCardSeam[],
   pieces: readonly CutStripPiece[],
+  leaving?: ReadonlySet<string>,
 ): CutStripSeamOption[] {
   const pieceName = new Map(
     pieces.map((piece) => [piece.lineKey?.trim() ?? '', piece.name?.trim() ?? '']),
@@ -97,7 +109,7 @@ export function cutStripSeamOptions(
         matchText: [...names, note].filter(Boolean).join(' · ') || label,
       };
     })
-    .filter((option) => !!option.value);
+    .filter((option) => !!option.value && !leaving?.has(option.value));
 }
 
 export function matchingSeamKey(

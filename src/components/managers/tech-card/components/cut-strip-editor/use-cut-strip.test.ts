@@ -1,6 +1,13 @@
 import type { common_Material, common_TechCardSeam } from 'api/proto-http/admin';
 import { describe, expect, it } from 'vitest';
-import { cutStripEligible, freshCutStrip, toggleCutStrips, type CutStrip } from './use-cut-strip';
+import {
+  cutStripEligible,
+  cutStripSeamOptions,
+  freshCutStrip,
+  leavingSeamKeys,
+  toggleCutStrips,
+  type CutStrip,
+} from './use-cut-strip';
 
 const line = {
   lineKey: 'bom-waistband',
@@ -91,5 +98,23 @@ describe('cut strip toggle', () => {
       new Map(),
     );
     expect(result.strips).toEqual([]);
+  });
+});
+
+describe('U1 #2: the strip seam chooser', () => {
+  const other = { ...seam, seamKey: 'seam-hem' } as common_TechCardSeam;
+
+  it('leaves out a seam the page is deleting', () => {
+    const leaving = leavingSeamKeys({
+      'seam-waistband': { kind: 'delete' },
+      'seam-hem': { kind: 'upsert' },
+    });
+    const options = cutStripSeamOptions([seam, other], context.pieces, leaving);
+    expect(options.map((o) => o.value)).toEqual(['seam-hem']);
+  });
+
+  it('offers every seam when none is leaving', () => {
+    const options = cutStripSeamOptions([seam, other], context.pieces, leavingSeamKeys({}));
+    expect(options.map((o) => o.value)).toEqual(['seam-waistband', 'seam-hem']);
   });
 });

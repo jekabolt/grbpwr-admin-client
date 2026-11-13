@@ -14,12 +14,13 @@ import {
   SelectField,
   ViewSwitch,
 } from 'ui';
+import { useSeamsStore } from '../assembly-seams/seams-store';
 import { isCardBindingStrip } from '../binding-step';
 import { goneSeamKeys, stripCutMm, stripSewnMm, withSeamGone } from '../cut-strips/lengths';
 import type { SeamLengthsMm } from '../cut-strips/seam-lengths';
 import { wireInt, type TechCardFormData } from '../schema';
 import { cutCellLocked } from './cut-cell';
-import { cutStripSeamOptions, type CutStrip } from './use-cut-strip';
+import { cutStripSeamOptions, leavingSeamKeys, type CutStrip } from './use-cut-strip';
 
 const CUT_MODE_OPTIONS = [
   { value: 'from_seam', label: 'from seam' },
@@ -65,6 +66,7 @@ export function CutStripFields({
   const operations = useWatch({ control, name: 'operations' }) ?? [];
   const strip = strips[stripIndex];
   const { dictionary } = useDictionary();
+  const seamPending = useSeamsStore((s) => s.pending);
 
   const mode = strip?.lengthMode ?? 'per_size';
   const binding = !!strip && isCardBindingStrip(strip, operations);
@@ -75,7 +77,7 @@ export function CutStripFields({
 
   if (!strip) return null;
 
-  const seamItems = cutStripSeamOptions(seams, pieces);
+  const seamItems = cutStripSeamOptions(seams, pieces, leavingSeamKeys(seamPending));
   if (strip.seamKey && !seamItems.some((item) => item.value === strip.seamKey)) {
     seamItems.push({ value: strip.seamKey, label: 'seam missing', matchText: '' });
   }
