@@ -13,6 +13,8 @@ import { Chip, ChipRow, Input, Text } from 'ui';
 import type { PaperDoc } from '../assembly-print/paper';
 import { PaperNested } from '../assembly-print/paper-svg';
 
+import { attachmentStitch } from './garment-label-picture';
+import { labelAttachmentFact } from './label-attach-stitch';
 import { clampPrintToLabel } from './label-placement';
 import type { FormGarmentLabel, FormGarmentLabelPrint } from './labels-schema';
 import {
@@ -211,6 +213,7 @@ export function LabelFoldEditor({
   foldLinesMm,
   stitchLinesMm,
   foldAxis,
+  attachment,
   pages = 1,
   composition,
   artworkAction,
@@ -231,6 +234,8 @@ export function LabelFoldEditor({
   foldLinesMm?: string;
   stitchLinesMm?: string;
   foldAxis?: string;
+  /** The label's ATTACHMENT word: a label that is not sewn has no sewn edge or sewn side. */
+  attachment?: string;
   pages?: number;
   composition: boolean;
   artworkAction?: ReactNode;
@@ -258,6 +263,22 @@ export function LabelFoldEditor({
   const teeStemMm = teeStem(lines);
   const teeStitchMm = teeStitch(stitches, lines) || defaultTeeStitch(lines);
   const sewn = labelAssembly(lines, stitches, axisMm, fold);
+  // J1, owner 14.11: the big pictures read the same attachment fact as the tile.
+  const notSewn = labelAttachmentFact({ attachment, foldAxis }).notSewn;
+  const schemeOn = (rect: { x: number; y: number; w: number; h: number }, k: number) =>
+    stitches.length || notSewn
+      ? null
+      : attachmentStitch(
+          { attachment, foldAxis, widthMm: rect.w / k, heightMm: rect.h / k },
+          [
+            [rect.x, rect.y + rect.h],
+            [rect.x + rect.w, rect.y + rect.h],
+            [rect.x + rect.w, rect.y],
+            [rect.x, rect.y],
+          ],
+          1.4,
+          'var(--color-textColor)',
+        );
   const built = ribbons && ribbons.length > 0 ? ribbons : null;
   const storedPages = clamp(Math.round(pages || 1), 1, 12);
   const safePages = built ? built.length : storedPages;
@@ -642,7 +663,7 @@ export function LabelFoldEditor({
               pointerEvents='none'
             />
           ) : null}
-          {!isTee ? (
+          {!isTee && !notSewn ? (
             <line
               x1={x}
               x2={widthAxis ? x : x + w}
@@ -653,7 +674,7 @@ export function LabelFoldEditor({
               data-label-sewn-edge=''
             />
           ) : null}
-          {fold === 'loop' ? (
+          {fold === 'loop' && !notSewn ? (
             <line
               x1={widthAxis ? x + w : x}
               x2={x + w}
@@ -685,6 +706,7 @@ export function LabelFoldEditor({
               </text>
             </g>
           ) : null}
+          {!isTee && schemeOn({ x, y, w, h }, k)}
           {stitches.map((line, index) => {
             const p = at(line);
             return (
@@ -760,31 +782,35 @@ export function LabelFoldEditor({
           })}
         </svg>
         <div className='absolute inset-x-3 bottom-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
-          <span className='flex flex-wrap items-center gap-2'>
-            <Text
-              size='micro'
-              variant='label'
-              tracking='label'
-              component='span'
-              className='uppercase'
-            >
-              sewn side
-            </Text>
-            <ChipRow>
-              {(['short', 'long'] as const).map((side) => (
-                <Chip
-                  key={side}
-                  nonForm
-                  selected={sewnSide === side}
-                  pressed={sewnSide === side}
-                  disabled={disabled}
-                  onClick={() => setSewnSide(side)}
-                >
-                  {side}
-                </Chip>
-              ))}
-            </ChipRow>
-          </span>
+          {notSewn ? (
+            <span />
+          ) : (
+            <span className='flex flex-wrap items-center gap-2'>
+              <Text
+                size='micro'
+                variant='label'
+                tracking='label'
+                component='span'
+                className='uppercase'
+              >
+                sewn side
+              </Text>
+              <ChipRow>
+                {(['short', 'long'] as const).map((side) => (
+                  <Chip
+                    key={side}
+                    nonForm
+                    selected={sewnSide === side}
+                    pressed={sewnSide === side}
+                    disabled={disabled}
+                    onClick={() => setSewnSide(side)}
+                  >
+                    {side}
+                  </Chip>
+                ))}
+              </ChipRow>
+            </span>
+          )}
           <span className='flex flex-wrap items-center gap-2'>
             <Text
               size='micro'
@@ -1033,14 +1059,18 @@ export function LabelFoldEditor({
                   />
                 );
               })}
-              <line
-                x1={foldedX}
-                x2={widthAxis ? foldedX : foldedX + foldedW}
-                y1={foldedY}
-                y2={widthAxis ? foldedY + foldedH : foldedY}
-                stroke='var(--color-textColor)'
-                strokeWidth={3}
-              />
+              {!notSewn && (
+                <line
+                  x1={foldedX}
+                  x2={widthAxis ? foldedX : foldedX + foldedW}
+                  y1={foldedY}
+                  y2={widthAxis ? foldedY + foldedH : foldedY}
+                  stroke='var(--color-textColor)'
+                  strokeWidth={3}
+                  data-label-sewn-edge=''
+                />
+              )}
+              {schemeOn({ x: foldedX, y: foldedY, w: foldedW, h: foldedH }, foldedK)}
             </svg>
           </div>
         )}

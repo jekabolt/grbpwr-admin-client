@@ -1,4 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { LabelShapeIcon } from 'components/managers/tech-card/components/label-shape-icon';
 import { PatternQR } from 'components/managers/tech-card/patterns/pattern-qr';
 import { DataTable, GrbpwrMark, HeaderNote, SectionHeader } from 'ui';
 import {
@@ -108,7 +109,12 @@ function SewnTable({
                 {own(row.location) ||
                   (model.gaps.placement && <Missing gap={model.gaps.placement} />)}
               </td>
-              <td data-align='left'>{own(row.attachment)}</td>
+              <td data-align='left'>
+                <span className='inline-flex items-center gap-1'>
+                  {row.shape && <LabelShapeIcon label={row.shape} size={22} />}
+                  {own(row.attachment)}
+                </span>
+              </td>
               <td data-align='left'>{own(row.fold)}</td>
               <td data-align='left'>{own(row.size)}</td>
               <td data-align='left'>{own(row.material)}</td>

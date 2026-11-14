@@ -3,6 +3,7 @@
 // колорвея по умолчанию — той же выводкой, что у блока на вкладке (`compositionLabelSummary`), —
 // а этикетки и предметы упаковки таблицами с мокапом в первой колонке. Мокапа нет — клетка так и
 // говорит: пустая клетка на бумаге читается как «картинка не нужна».
+import { labelAttachmentFact } from './label-attach-stitch';
 import type {
   common_Dictionary,
   common_Material,
@@ -330,7 +331,7 @@ export function TechPackLabelSheets({
                     {txt(kindLabel(garmentLabelKindNames, l.key))}
                   </td>
                   <td className={TD}>{txt(l.placement)}</td>
-                  <td className={TD}>{txt(l.attachment)}</td>
+                  <td className={TD}>{txt(labelAttachmentFact(l).words)}</td>
                   <td className={TD}>{txt(l.fold)}</td>
                   <td className={TD}>{txt(l.size)}</td>
                   <td className={TD}>{txt(labelBomLine(l, bomItems)?.name)}</td>

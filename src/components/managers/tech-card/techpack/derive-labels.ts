@@ -1,4 +1,6 @@
 import type { common_TechCard } from 'api/proto-http/admin';
+import { labelAttachmentFact } from 'components/managers/tech-card/components/label-attach-stitch';
+import type { GarmentLabelLike } from 'components/managers/tech-card/components/garment-label-pieces';
 import {
   effectiveLabelPart,
   LABEL_PART_NAME,
@@ -56,6 +58,8 @@ export type SewnTableRow = {
   item: string;
   location: string;
   attachment: string;
+  /** The label itself, for its picture: how it is sewn, drawn from the same fact as the words. */
+  shape?: GarmentLabelLike;
   fold: string;
   size: string;
   material: string;
@@ -155,7 +159,8 @@ function deriveSewn(techCard: common_TechCard, options: LabelsDeriveOptions, t: 
     number: pinned[index]?.number ?? null,
     item: kindLabel(garmentLabelKindNames, row.key),
     location: clean(row.placement),
-    attachment: clean(row.attachment),
+    attachment: labelAttachmentFact(row).words,
+    shape: row,
     // A card not saved since the size/fold fields came keeps its old free text.
     fold: [
       clean(row.fold) || clean(row.folding),
@@ -350,7 +355,7 @@ export function deriveLabels(
     composition: fallbackComposition,
     placement: {
       name: clean(placementLabel?.placement),
-      attachment: clean(placementLabel?.attachment),
+      attachment: placementLabel ? labelAttachmentFact(placementLabel).words : '',
       folding: clean(placementLabel?.fold),
       size: clean(placementLabel?.size),
       qty: placementLabel?.qtyPerGarment ?? null,

@@ -43,6 +43,7 @@ const CHAR_PX = 7.3;
 const LINE_PX = 18;
 const CELL_X_PX = 12;
 const CELL_Y_PX = 9;
+const ATTACH_ICON_PX = 26;
 const TAPES_PX: Record<PrintOrient, number> = { land: 172, port: 310 };
 
 export type QrGridRow =
@@ -96,7 +97,13 @@ function rowPx(row: SewnTableRow, cols: readonly number[]): number {
     row.step,
     row.note,
   ];
-  return CELL_Y_PX + LINE_PX * Math.max(...cols.map((width, i) => linesIn(cells[i], width)));
+  // The attachment cell carries the label picture (22px + gap) before its words.
+  const textWidth = (width: number, i: number) =>
+    i === 3 && row.shape ? width - ATTACH_ICON_PX : width;
+  return (
+    CELL_Y_PX +
+    LINE_PX * Math.max(...cols.map((width, i) => linesIn(cells[i], textWidth(width, i))))
+  );
 }
 
 /** The grid in rows: a long size run breaks into segments, each under its own row of sizes. */

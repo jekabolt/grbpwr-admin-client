@@ -1,5 +1,7 @@
-import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
+import type { GarmentLabelMark, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 
+import { labelAttachmentFact } from './label-attach-stitch';
+import { labelShownSizeMm } from './garment-label-pieces';
 import { labelAssembly, labelAxisLen } from './label-fold-lines';
 
 const INK = 'var(--color-textColor)';
@@ -30,7 +32,7 @@ export function GarmentLabelOverlay({
   outlineWidth,
 }: {
   pieces: readonly DrawnPiece[];
-  geoms: ReadonlyMap<string, PieceGeom>;
+  geoms: ReadonlyMap<string, Pick<PieceGeom, 'garmentLabel'>>;
   hair: number;
   stroke?: string;
   /** The pieces' outline width; the label's own hairline when not given. */
@@ -47,6 +49,7 @@ export function GarmentLabelOverlay({
         const fold = mark.foldLines ?? [];
         const axisMm = labelAxisLen(mark);
         const sewn = labelAssembly(fold, mark.stitchLines ?? [], axisMm, mark.fold);
+        const fact = labelAttachmentFact(mark);
         const sewnAt = sewn.sewnAtMm ?? 0;
         const sewnT = sewn.heightMm > 0 ? sewnAt / sewn.heightMm : 0;
         const mitreInset = Math.min(mark.heightMm * 0.6, mark.widthMm * 0.2) / mark.widthMm;
@@ -63,17 +66,21 @@ export function GarmentLabelOverlay({
               strokeWidth={outlineWidth ?? hair * 1.5}
               strokeLinejoin='round'
             />
-            <path
-              d={pathOf(
-                mark.foldAxis === 'width'
-                  ? [mix(a, b, sewnT), mix(d, c, sewnT)]
-                  : [mix(d, a, sewnT), mix(c, b, sewnT)],
-              )}
-              fill='none'
-              stroke={stroke}
-              strokeWidth={(outlineWidth ?? hair * 1.5) * 1.8}
-              data-label-sewn-edge=''
-            />
+            {!fact.notSewn && (
+              <path
+                d={pathOf(
+                  mark.foldAxis === 'width'
+                    ? [mix(a, b, sewnT), mix(d, c, sewnT)]
+                    : [mix(d, a, sewnT), mix(c, b, sewnT)],
+                )}
+                fill='none'
+                stroke={stroke}
+                strokeWidth={(outlineWidth ?? hair * 1.5) * 1.8}
+                data-label-sewn-edge=''
+              />
+            )}
+            {!sewn.shownStitches.length &&
+              attachmentStitch(mark, [a, b, c, d], outlineWidth ?? hair * 1.5, stroke)}
             {sewn.shownStitches.map((at) => {
               // The picture is y-up. Legacy labels sew the top d–c side; width-axis labels sew the
               // left a–d side. A stitch on an edge sits just inside the outline.
@@ -101,5 +108,136 @@ export function GarmentLabelOverlay({
         );
       })}
     </g>
+  );
+}
+
+/** The inset's long side on paper: 150 px ≈ 40 mm on A4 at 96 dpi, the label itself ≈ 29 mm. */
+export const LABEL_INSET_PX = 150;
+
+/**
+ * The label drawn large beside the step picture (J1, owner 14.11, variant A): the same label the
+ * step picture draws as a dot, at a size where its sewn scheme reads on paper. Lines keep about 1 px
+ * whatever the label's size.
+ */
+export function GarmentLabelInset({
+  mark,
+  px = LABEL_INSET_PX,
+}: {
+  mark: GarmentLabelMark;
+  px?: number;
+}) {
+  const { widthMm: w, heightMm: h } = labelShownSizeMm(mark);
+  if (!(w > 0 && h > 0)) return null;
+  const pad = Math.max(w, h) * 0.16;
+  const viewW = w + pad * 2;
+  const viewH = h + pad * 2;
+  const k = px / Math.max(viewW, viewH);
+  return (
+    <svg
+      width={viewW * k}
+      height={viewH * k}
+      viewBox={`${-pad} ${-pad} ${viewW} ${viewH}`}
+      data-label-inset={mark.label}
+    >
+      <GarmentLabelOverlay
+        pieces={[
+          {
+            key: 'inset',
+            drawn: [
+              [0, h],
+              [w, h],
+              [w, 0],
+              [0, 0],
+            ],
+          },
+        ]}
+        geoms={new Map([['inset', { garmentLabel: mark }]])}
+        hair={0.67 / k}
+      />
+    </svg>
+  );
+}
+
+/**
+ * A label with no stitch lines of its own is drawn sewn the way its ATTACHMENT word says (J1): the
+ * same fact the step, the label row and the tech pack tables print. The picture is y-up: d–c is the
+ * top edge, a–d the left one. The label editor draws it too, on a y-down rect: d is its top-left.
+ */
+export function attachmentStitch(
+  mark: { attachment?: string; foldAxis?: string; widthMm: number; heightMm: number },
+  [a, b, c, d]: readonly [Pt2, Pt2, Pt2, Pt2],
+  width: number,
+  stroke: string,
+) {
+  const { scheme } = labelAttachmentFact(mark);
+  // u runs left → right, v top → bottom, both 0..1 over the drawn label.
+  const at = (u: number, v: number): Pt2 => mix(mix(d, c, u), mix(a, b, u), v);
+  const iu = Math.min(1.5 / Math.max(mark.widthMm, 1), 0.1);
+  const iv = Math.min(1.5 / Math.max(mark.heightMm, 1), 0.1);
+  const widthAxis = mark.foldAxis === 'width';
+  const h = (v: number, u0 = 0, u1 = 1) => [at(u0, v), at(u1, v)];
+  const v = (u: number, v0 = 0, v1 = 1) => [at(u, v0), at(u, v1)];
+  const lines: Pt2[][] = [];
+  switch (scheme) {
+    case 'four':
+      lines.push([at(iu, iv), at(1 - iu, iv), at(1 - iu, 1 - iv), at(iu, 1 - iv), at(iu, iv)]);
+      break;
+    case 'top_bottom':
+      lines.push(h(iv), h(1 - iv));
+      break;
+    case 'left_right':
+      lines.push(v(iu), v(1 - iu));
+      break;
+    case 'edge':
+      lines.push(widthAxis ? v(iu * 2) : h(iv * 2));
+      break;
+    case 'seam':
+      lines.push(widthAxis ? v(iu, -0.15, 1.15) : h(iv, -0.15, 1.15));
+      break;
+    case 'corners': {
+      const tu = Math.min(0.15, 3 / Math.max(mark.widthMm, 1));
+      const tv = Math.min(0.15, 3 / Math.max(mark.heightMm, 1));
+      return (
+        <path
+          d={[
+            [at(iu, iv), at(iu + tu, iv + tv)],
+            [at(1 - iu, iv), at(1 - iu - tu, iv + tv)],
+            [at(iu, 1 - iv), at(iu + tu, 1 - iv - tv)],
+            [at(1 - iu, 1 - iv), at(1 - iu - tu, 1 - iv - tv)],
+          ]
+            .map((line) => pathOf(line))
+            .join(' ')}
+          fill='none'
+          stroke={stroke}
+          strokeWidth={width * 1.4}
+          data-label-attach={scheme}
+        />
+      );
+    }
+    case 'piece': {
+      // Printed on a fabric piece: the piece outline around the label is the sewn part.
+      const ou = Math.min(0.1, 2.5 / Math.max(mark.widthMm, 1));
+      const ov = Math.min(0.15, 2.5 / Math.max(mark.heightMm, 1));
+      lines.push([
+        at(-ou, -ov),
+        at(1 + ou, -ov),
+        at(1 + ou, 1 + ov),
+        at(-ou, 1 + ov),
+        at(-ou, -ov),
+      ]);
+      break;
+    }
+    default:
+      return null;
+  }
+  return (
+    <path
+      d={lines.map((line) => pathOf(line)).join(' ')}
+      fill='none'
+      stroke={stroke}
+      strokeWidth={width}
+      strokeDasharray={`${width * 2.5} ${width * 1.5}`}
+      data-label-attach={scheme}
+    />
   );
 }

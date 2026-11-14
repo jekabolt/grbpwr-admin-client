@@ -104,3 +104,35 @@ describe('LabelFoldEditor prints', () => {
     expect(html).toContain('stroke="var(--color-warning)"');
   });
 });
+
+describe('LabelFoldEditor reads the attachment fact (J1, owner 14.11)', () => {
+  const renderAttach = (attachment: string) =>
+    renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <LabelFoldEditor
+          widthMm={50}
+          heightMm={20}
+          widthValue='50'
+          heightValue='20'
+          fold='flat'
+          attachment={attachment}
+          pages={1}
+          composition={false}
+          disabled={false}
+          onChange={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+  it('a hung label has no sewn edge on either picture and no sewn side', () => {
+    const html = renderAttach('hung');
+    expect(html).not.toContain('data-label-sewn-edge');
+    expect(html).not.toContain('sewn side');
+    expect(html).not.toContain('data-label-attach');
+  });
+  it('corner tacks show the corners on both pictures, as on the tile', () => {
+    const html = renderAttach('corner tacks');
+    expect(html.match(/data-label-attach="corners"/g)).toHaveLength(2);
+    expect(html).toContain('sewn side');
+    expect(html.match(/data-label-sewn-edge/g)?.length).toBe(2);
+  });
+});

@@ -157,6 +157,8 @@ export const labelAttachmentOptions = [
   'on_fabric_piece',
   'sewn 2 sides',
   'sewn 4 sides',
+  'sewn 1 edge',
+  'corner tacks',
   'heat press',
   'swift tack',
   'hung',

@@ -3,6 +3,9 @@
 // (TechCard.seams on today's DXF), every other op draws the key of its technique next to the
 // outline of what it acts on. Rows are measured in the DOM once the print font is in and paginated
 // so an operation row never splits.
+import { labelAttachmentFact } from 'components/managers/tech-card/components/label-attach-stitch';
+import { LabelShapeIcon } from 'components/managers/tech-card/components/label-shape-icon';
+import { GarmentLabelInset } from 'components/managers/tech-card/components/garment-label-picture';
 import {
   createContext,
   memo,
@@ -19,6 +22,7 @@ import type { common_TechCard, common_TechCardOperationMedia } from 'api/proto-h
 import type { PrintOrient } from 'components/managers/print/scope';
 import { AnnotationCanvas } from 'components/managers/tech-card/components/annotation-canvas';
 import {
+  garmentLabelMark,
   garmentLabelName,
   type GarmentLabelLike,
 } from 'components/managers/tech-card/components/garment-label-pieces';
@@ -52,7 +56,7 @@ import {
 } from 'components/managers/tech-card/components/step-seams/step-pose';
 import type { StepResult } from 'components/managers/tech-card/components/step-seams/step-result';
 import { drawsStepResult } from 'components/managers/tech-card/components/step-seams/draws-result';
-import type { Affine, Pt2 } from 'lib/assembly-skeleton/types';
+import type { Affine, GarmentLabelMark, Pt2 } from 'lib/assembly-skeleton/types';
 import { pairOverlap, pieceKeyOf, rasterize, resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply, compose, rigid, translate } from 'lib/assembly-skeleton/union/affine';
 import { nameTokens, readName } from 'lib/assembly-skeleton/skeleton/model';
@@ -106,6 +110,7 @@ const ASM_CSS = String.raw`
 .asm-seams { display: flex; min-width: 0; flex-direction: column; gap: 1px; margin-top: 2px; }
 .asm-picture-box { position: relative; display: flex; width: 100%; max-width: 100%; flex: none; align-items: center; justify-content: center; }
 .asm-picture-box > svg { max-width: 100%; max-height: 100%; }
+.asm-label-insets { display: flex; max-width: 100%; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-top: 4px; }
 .asm-table td.asm-key-cell { padding-left: 0 !important; padding-right: 0 !important; }
 .asm-key-cell svg { stroke-width: 1; }
 .asm-pic svg, .asm-table td svg { display: block; flex: none; }
@@ -119,6 +124,7 @@ const ASM_CSS = String.raw`
 .asm-labels th, .asm-labels td { padding: 2px 4px 2px 0; border-bottom: 1px solid var(--color-hairline); vertical-align: top; }
 .asm-labels th, .asm-labels td { word-break: normal; overflow-wrap: normal; hyphens: none; }
 .asm-labels td:nth-child(2), .asm-labels td:nth-child(3) { white-space: nowrap; }
+.asm-label-attach { display: inline-flex; align-items: center; gap: 4px; }
 .asm-measure { position: fixed; left: -30000px; top: 0; visibility: hidden; pointer-events: none; }
 .asm-measure .asm-col { overflow: visible; }
 .asm-photos { display: grid; min-height: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 24px; }
@@ -161,7 +167,16 @@ type Row = AsmRow & {
   photoCount: number;
   /** The size this sheet's pleat openings are measured on. */
   drawnSize: string;
-  labels: Array<{ key: string; name: string; size: string; fold: string; attachment: string }>;
+  labels: Array<{
+    key: string;
+    name: string;
+    size: string;
+    fold: string;
+    attachment: string;
+    shape: GarmentLabelLike;
+    /** The label as the step picture draws it; drawn large in the inset under the picture. */
+    mark: GarmentLabelMark | null;
+  }>;
 };
 
 const wireDecimal = (value: GarmentLabelLike['widthMm']): string =>
@@ -189,7 +204,9 @@ function labelsAtStep(techCard: common_TechCard, operationNumber: number): Row['
         name: garmentLabelName(label),
         size: width || height ? `${width || '—'} × ${height || '—'}` : '',
         fold: label.fold?.trim() || '',
-        attachment: label.attachment?.trim() || '',
+        attachment: labelAttachmentFact(label).words,
+        shape: label,
+        mark: garmentLabelMark(label),
       },
     ];
   });
@@ -4531,6 +4548,13 @@ const OpRow = memo(function OpRow({ r, orient }: { r: Row; orient: PrintOrient }
       <td className='asm-n'>{r.n}</td>
       <td data-align='left'>
         <Picture r={r} orient={orient} />
+        {r.labels.some((label) => label.mark) && (
+          <div className='asm-label-insets' style={{ width: DIM[orient].joinW }}>
+            {r.labels.map((label) =>
+              label.mark ? <GarmentLabelInset key={label.key} mark={label.mark} /> : null,
+            )}
+          </div>
+        )}
       </td>
       <td className='asm-key-cell'>
         <KeyArt icon={w.icon} w={DIM[orient].keyW} h={DIM[orient].keyH} />
@@ -4584,7 +4608,12 @@ const OpRow = memo(function OpRow({ r, orient }: { r: Row; orient: PrintOrient }
                   <td>{label.name}</td>
                   <td>{label.size}</td>
                   <td>{label.fold}</td>
-                  <td>{label.attachment}</td>
+                  <td>
+                    <span className='asm-label-attach'>
+                      <LabelShapeIcon label={label.shape} size={22} />
+                      {label.attachment}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>
