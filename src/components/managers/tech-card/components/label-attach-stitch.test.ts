@@ -4,7 +4,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { labelAttachmentFact, stepLabelStitch, stitchForAttachment } from './label-attach-stitch';
 import { LabelShapeIcon } from './label-shape-icon';
-import { GarmentLabelOverlay } from './garment-label-picture';
+import { GarmentLabelInset, GarmentLabelOverlay } from './garment-label-picture';
 import type { PieceGeom } from 'lib/assembly-skeleton/types';
 import type { common_TechCard } from 'api/proto-http/admin';
 import { mapFormToTechCardInsert, mapTechCardToForm } from './schema';
@@ -250,5 +250,41 @@ describe('J1 owner edits 14.11: not sewn has no sewn edge, a fabric piece is fra
   it('a label on a fabric piece is framed on the tile and the step picture alike', () => {
     expect(icon('on_fabric_piece')).toContain('data-label-stitch="piece"');
     expect(overlay('on_fabric_piece')).toContain('data-label-attach="piece"');
+  });
+});
+
+describe('J1 owner 14.11 variant A: the label drawn large under the step picture', () => {
+  const mark = (attachment: string, foldAxis: '' | 'width' = '', stitchLines: number[] = []) => ({
+    label: 'brand',
+    widthMm: 50,
+    heightMm: 20,
+    fold: 'flat' as const,
+    foldAxis,
+    foldLines: [],
+    stitchLines,
+    attachment,
+  });
+  const inset = (m: ReturnType<typeof mark>) =>
+    renderToStaticMarkup(createElement(GarmentLabelInset, { mark: m }));
+  it('draws the sewn scheme of the word, about 40 mm long', () => {
+    for (const [w, scheme] of [
+      ['corner tacks', 'corners'],
+      ['on_fabric_piece', 'piece'],
+      ['sewn 4 sides', 'four'],
+    ])
+      expect(inset(mark(w))).toContain(`data-label-attach="${scheme}"`);
+    expect(inset(mark('sewn 2 sides', 'width'))).toContain('data-label-attach="left_right"');
+    expect(inset(mark('corner tacks'))).toMatch(/<svg width="150(\.0+)?"/);
+  });
+  it('a label with its own stitch lines is drawn by them', () => {
+    const html = inset(mark('sewn 4 sides', '', [0, 20]));
+    expect(html).not.toContain('data-label-attach');
+    expect(html).toContain('data-label-stitch=');
+  });
+  it('a label that is not sewn has no stitch and no sewn edge', () => {
+    const html = inset(mark('hung'));
+    expect(html).toContain('data-label-inset');
+    expect(html).not.toContain('data-label-attach');
+    expect(html).not.toContain('data-label-sewn-edge');
   });
 });

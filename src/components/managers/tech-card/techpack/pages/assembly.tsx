@@ -5,6 +5,7 @@
 // so an operation row never splits.
 import { labelAttachmentFact } from 'components/managers/tech-card/components/label-attach-stitch';
 import { LabelShapeIcon } from 'components/managers/tech-card/components/label-shape-icon';
+import { GarmentLabelInset } from 'components/managers/tech-card/components/garment-label-picture';
 import {
   createContext,
   memo,
@@ -21,6 +22,7 @@ import type { common_TechCard, common_TechCardOperationMedia } from 'api/proto-h
 import type { PrintOrient } from 'components/managers/print/scope';
 import { AnnotationCanvas } from 'components/managers/tech-card/components/annotation-canvas';
 import {
+  garmentLabelMark,
   garmentLabelName,
   type GarmentLabelLike,
 } from 'components/managers/tech-card/components/garment-label-pieces';
@@ -54,7 +56,7 @@ import {
 } from 'components/managers/tech-card/components/step-seams/step-pose';
 import type { StepResult } from 'components/managers/tech-card/components/step-seams/step-result';
 import { drawsStepResult } from 'components/managers/tech-card/components/step-seams/draws-result';
-import type { Affine, Pt2 } from 'lib/assembly-skeleton/types';
+import type { Affine, GarmentLabelMark, Pt2 } from 'lib/assembly-skeleton/types';
 import { pairOverlap, pieceKeyOf, rasterize, resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply, compose, rigid, translate } from 'lib/assembly-skeleton/union/affine';
 import { nameTokens, readName } from 'lib/assembly-skeleton/skeleton/model';
@@ -108,6 +110,7 @@ const ASM_CSS = String.raw`
 .asm-seams { display: flex; min-width: 0; flex-direction: column; gap: 1px; margin-top: 2px; }
 .asm-picture-box { position: relative; display: flex; width: 100%; max-width: 100%; flex: none; align-items: center; justify-content: center; }
 .asm-picture-box > svg { max-width: 100%; max-height: 100%; }
+.asm-label-insets { display: flex; max-width: 100%; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-top: 4px; }
 .asm-table td.asm-key-cell { padding-left: 0 !important; padding-right: 0 !important; }
 .asm-key-cell svg { stroke-width: 1; }
 .asm-pic svg, .asm-table td svg { display: block; flex: none; }
@@ -171,6 +174,8 @@ type Row = AsmRow & {
     fold: string;
     attachment: string;
     shape: GarmentLabelLike;
+    /** The label as the step picture draws it; drawn large in the inset under the picture. */
+    mark: GarmentLabelMark | null;
   }>;
 };
 
@@ -201,6 +206,7 @@ function labelsAtStep(techCard: common_TechCard, operationNumber: number): Row['
         fold: label.fold?.trim() || '',
         attachment: labelAttachmentFact(label).words,
         shape: label,
+        mark: garmentLabelMark(label),
       },
     ];
   });
@@ -4542,6 +4548,13 @@ const OpRow = memo(function OpRow({ r, orient }: { r: Row; orient: PrintOrient }
       <td className='asm-n'>{r.n}</td>
       <td data-align='left'>
         <Picture r={r} orient={orient} />
+        {r.labels.some((label) => label.mark) && (
+          <div className='asm-label-insets' style={{ width: DIM[orient].joinW }}>
+            {r.labels.map((label) =>
+              label.mark ? <GarmentLabelInset key={label.key} mark={label.mark} /> : null,
+            )}
+          </div>
+        )}
       </td>
       <td className='asm-key-cell'>
         <KeyArt icon={w.icon} w={DIM[orient].keyW} h={DIM[orient].keyH} />

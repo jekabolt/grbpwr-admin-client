@@ -633,6 +633,7 @@ function LabelFold({
           foldLinesMm={row.foldLinesMm}
           stitchLinesMm={row.stitchLinesMm}
           foldAxis={row.foldAxis}
+          attachment={row.attachment}
           pages={row.pages}
           composition={composition}
           artworkAction={artworkAction}

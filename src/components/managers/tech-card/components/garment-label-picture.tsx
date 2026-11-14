@@ -1,6 +1,7 @@
-import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
+import type { GarmentLabelMark, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 
 import { labelAttachmentFact } from './label-attach-stitch';
+import { labelShownSizeMm } from './garment-label-pieces';
 import { labelAssembly, labelAxisLen } from './label-fold-lines';
 
 const INK = 'var(--color-textColor)';
@@ -31,7 +32,7 @@ export function GarmentLabelOverlay({
   outlineWidth,
 }: {
   pieces: readonly DrawnPiece[];
-  geoms: ReadonlyMap<string, PieceGeom>;
+  geoms: ReadonlyMap<string, Pick<PieceGeom, 'garmentLabel'>>;
   hair: number;
   stroke?: string;
   /** The pieces' outline width; the label's own hairline when not given. */
@@ -110,12 +111,59 @@ export function GarmentLabelOverlay({
   );
 }
 
+/** The inset's long side on paper: 150 px ≈ 40 mm on A4 at 96 dpi, the label itself ≈ 29 mm. */
+export const LABEL_INSET_PX = 150;
+
+/**
+ * The label drawn large beside the step picture (J1, owner 14.11, variant A): the same label the
+ * step picture draws as a dot, at a size where its sewn scheme reads on paper. Lines keep about 1 px
+ * whatever the label's size.
+ */
+export function GarmentLabelInset({
+  mark,
+  px = LABEL_INSET_PX,
+}: {
+  mark: GarmentLabelMark;
+  px?: number;
+}) {
+  const { widthMm: w, heightMm: h } = labelShownSizeMm(mark);
+  if (!(w > 0 && h > 0)) return null;
+  const pad = Math.max(w, h) * 0.16;
+  const viewW = w + pad * 2;
+  const viewH = h + pad * 2;
+  const k = px / Math.max(viewW, viewH);
+  return (
+    <svg
+      width={viewW * k}
+      height={viewH * k}
+      viewBox={`${-pad} ${-pad} ${viewW} ${viewH}`}
+      data-label-inset={mark.label}
+    >
+      <GarmentLabelOverlay
+        pieces={[
+          {
+            key: 'inset',
+            drawn: [
+              [0, h],
+              [w, h],
+              [w, 0],
+              [0, 0],
+            ],
+          },
+        ]}
+        geoms={new Map([['inset', { garmentLabel: mark }]])}
+        hair={0.67 / k}
+      />
+    </svg>
+  );
+}
+
 /**
  * A label with no stitch lines of its own is drawn sewn the way its ATTACHMENT word says (J1): the
  * same fact the step, the label row and the tech pack tables print. The picture is y-up: d–c is the
- * top edge, a–d the left one.
+ * top edge, a–d the left one. The label editor draws it too, on a y-down rect: d is its top-left.
  */
-function attachmentStitch(
+export function attachmentStitch(
   mark: { attachment?: string; foldAxis?: string; widthMm: number; heightMm: number },
   [a, b, c, d]: readonly [Pt2, Pt2, Pt2, Pt2],
   width: number,
