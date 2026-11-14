@@ -83,3 +83,56 @@ export function stepLabelStitch(
   }
   return LABEL_STITCH_UNKNOWN;
 }
+
+// ── ONE FACT, ONE WORDING (J1, owner 13.11: «одинаковый и в операции и в лейблс энд пекеджес …
+// и потом геометрия показывалась в пдфе»). Every place that says how a label is attached — the
+// step, the label row, the tech pack tables, the label picture — reads `labelAttachmentFact`.
+
+/** Where the stitch runs, for the picture. */
+export type LabelStitchScheme =
+  | 'seam' // caught in a garment seam along the sewn edge
+  | 'four' // all four sides
+  | 'top_bottom' // two sides: top and bottom edges
+  | 'left_right' // two sides: left and right edges
+  | 'edge' // one edge, the sewn edge
+  | 'corners' // tacked at the four corners
+  | 'piece' // printed on a fabric piece, the piece is sewn
+  | 'none'; // not sewn, or not said
+
+export type LabelAttachmentFact = {
+  /** «sewn 2 sides · left + right», «hung · not sewn», '' when the label says nothing. */
+  words: string;
+  scheme: LabelStitchScheme;
+  stitch: common_TechCardLabelAttachStitch;
+  notSewn: boolean;
+};
+
+const SCHEME_OF_STITCH: Readonly<Record<string, LabelStitchScheme>> = {
+  TECH_CARD_LABEL_ATTACH_STITCH_CAUGHT_IN_SEAM: 'seam',
+  TECH_CARD_LABEL_ATTACH_STITCH_FOUR_SIDES: 'four',
+  TECH_CARD_LABEL_ATTACH_STITCH_TWO_SIDES_TOP_BOTTOM: 'top_bottom',
+  TECH_CARD_LABEL_ATTACH_STITCH_TWO_SIDES_LEFT_RIGHT: 'left_right',
+  TECH_CARD_LABEL_ATTACH_STITCH_ONE_EDGE: 'edge',
+  TECH_CARD_LABEL_ATTACH_STITCH_CORNERS_TACK: 'corners',
+};
+
+/** The one wording of an attachment word on screen and paper. */
+export const attachmentWord = (value?: string | null): string =>
+  value === 'on_fabric_piece' ? 'on fabric piece' : (value ?? '').trim();
+
+export function labelAttachmentFact(label: {
+  attachment?: string | null;
+  foldAxis?: string | null;
+}): LabelAttachmentFact {
+  const word = (label.attachment ?? '').trim();
+  const stitch = stitchForAttachment(word, label.foldAxis ?? '');
+  const notSewn = NOT_SEWN_ATTACHMENTS.has(word);
+  const scheme: LabelStitchScheme =
+    word === 'on_fabric_piece' ? 'piece' : SCHEME_OF_STITCH[stitch] ?? 'none';
+  const sides =
+    scheme === 'top_bottom' ? 'top + bottom' : scheme === 'left_right' ? 'left + right' : '';
+  const words = [attachmentWord(word), sides, notSewn ? 'not sewn' : '']
+    .filter(Boolean)
+    .join(' · ');
+  return { words, scheme, stitch, notSewn };
+}

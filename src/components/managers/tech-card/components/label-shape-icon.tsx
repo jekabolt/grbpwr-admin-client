@@ -3,6 +3,7 @@
 import type { JSX } from 'react';
 
 import { garmentLabelMark, type GarmentLabelLike } from './garment-label-pieces';
+import { labelAttachmentFact } from './label-attach-stitch';
 import { foldedSpans, labelAxisLen } from './label-fold-lines';
 
 const VIEW = 64;
@@ -11,27 +12,61 @@ const INSET = 2.5;
 const STITCH = { strokeDasharray: '2 1.5', strokeWidth: 0.9 } as const;
 const THIN = { strokeWidth: 0.6 } as const;
 
-type Box = { x: number; y: number; w: number; h: number };
+export type Box = { x: number; y: number; w: number; h: number };
 
-function stitches(attachment: string, b: Box, widthAxis: boolean): JSX.Element | null {
-  const a = attachment.toLowerCase();
-  if (!a.startsWith('sewn')) return null;
+/**
+ * Where the label is sewn, drawn from the one attachment fact (J1): the same scheme the step, the
+ * label row and the tech pack words say. Straight dashed lines; corner tacks are short bars.
+ */
+export function stitches(label: GarmentLabelLike, b: Box, widthAxis: boolean): JSX.Element | null {
+  const { scheme } = labelAttachmentFact(label);
   const i = INSET;
-  if (a.includes('4'))
-    return <rect {...STITCH} x={b.x + i} y={b.y + i} width={b.w - 2 * i} height={b.h - 2 * i} />;
-  if (a.includes('2'))
-    return (
-      <path
-        {...STITCH}
-        d={`M${b.x + i} ${b.y} V${b.y + b.h} M${b.x + b.w - i} ${b.y} V${b.y + b.h}`}
-      />
-    );
-  if (widthAxis) {
-    const x = b.x + i + 1;
-    return <path {...STITCH} d={`M${x} ${b.y} V${b.y + b.h}`} />;
+  const x0 = b.x + i;
+  const x1 = b.x + b.w - i;
+  const y0 = b.y + i;
+  const y1 = b.y + b.h - i;
+  const d = (path: string) => <path {...STITCH} data-label-stitch={scheme} d={path} />;
+  switch (scheme) {
+    case 'four':
+      return d(`M${x0} ${y0} H${x1} V${y1} H${x0} Z`);
+    case 'top_bottom':
+      return d(`M${b.x} ${y0} H${b.x + b.w} M${b.x} ${y1} H${b.x + b.w}`);
+    case 'left_right':
+      return d(`M${x0} ${b.y} V${b.y + b.h} M${x1} ${b.y} V${b.y + b.h}`);
+    case 'edge':
+      return widthAxis
+        ? d(`M${x0 + 1} ${b.y} V${b.y + b.h}`)
+        : d(`M${b.x} ${y0 + 1} H${b.x + b.w}`);
+    case 'seam': {
+      // The garment seam runs past the label: the label is caught in it along the sewn edge.
+      const o = Math.min(3, b.x - 0.5, b.y - 0.5);
+      return widthAxis
+        ? d(`M${x0} ${b.y - o} V${b.y + b.h + o}`)
+        : d(`M${b.x - o} ${y0} H${b.x + b.w + o}`);
+    }
+    case 'corners': {
+      const t = Math.min(3, b.w / 4, b.h / 4);
+      return (
+        <path
+          data-label-stitch={scheme}
+          strokeWidth={1.4}
+          d={[
+            `M${x0} ${y0} L${x0 + t} ${y0 + t}`,
+            `M${x1} ${y0} L${x1 - t} ${y0 + t}`,
+            `M${x0} ${y1} L${x0 + t} ${y1 - t}`,
+            `M${x1} ${y1} L${x1 - t} ${y1 - t}`,
+          ].join(' ')}
+        />
+      );
+    }
+    case 'piece': {
+      // Printed on a fabric piece: the piece outline is the stitched part, around the label.
+      const o = Math.min(2.5, b.x - 0.5, b.y - 0.5);
+      return d(`M${b.x - o} ${b.y - o} H${b.x + b.w + o} V${b.y + b.h + o} H${b.x - o} Z`);
+    }
+    default:
+      return null;
   }
-  const y = b.y + i + 1;
-  return <path {...STITCH} d={`M${b.x} ${y} H${b.x + b.w}`} />;
 }
 
 function foldLines(
@@ -93,6 +128,11 @@ export function LabelShapeIcon({
       : 0;
   const sewnAt = widthAxis ? b.x + (teeTipMm / axisMm) * b.w : b.y + (teeTipMm / axisMm) * b.h;
   const kind = ((label.kind ?? '').trim() || (label.key ?? '').trim()).toLowerCase();
+  // A label that is not sewn (hung, heat press …) has no sewn edge to draw.
+  const { notSewn } = labelAttachmentFact({
+    ...label,
+    attachment: shape?.attachment ?? label.attachment,
+  });
   return (
     <svg
       aria-hidden
@@ -108,11 +148,13 @@ export function LabelShapeIcon({
       className={className}
     >
       <rect x={b.x} y={b.y} width={b.w} height={b.h} strokeWidth={1.25} />
-      <path
-        d={widthAxis ? `M${sewnAt} ${b.y} V${b.y + b.h}` : `M${b.x} ${sewnAt} H${b.x + b.w}`}
-        strokeWidth={2.5}
-        data-label-sewn-edge=''
-      />
+      {!notSewn && (
+        <path
+          d={widthAxis ? `M${sewnAt} ${b.y} V${b.y + b.h}` : `M${b.x} ${sewnAt} H${b.x + b.w}`}
+          strokeWidth={2.5}
+          data-label-sewn-edge=''
+        />
+      )}
       {shape?.stitchLines?.length ? (
         <path
           {...STITCH}
@@ -126,7 +168,7 @@ export function LabelShapeIcon({
             .join(' ')}
         />
       ) : (
-        stitches(shape?.attachment ?? label.attachment ?? '', b, widthAxis)
+        stitches({ ...label, attachment: shape?.attachment ?? label.attachment }, b, widthAxis)
       )}
       {foldLines(shape?.foldLines ?? [], axisMm, b, widthAxis, shape?.fold ?? '')}
     </svg>

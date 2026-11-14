@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { autoStepMaterialKeys } from './operations-field';
-import { stepLabelStitch, stitchForAttachment } from './label-attach-stitch';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { labelAttachmentFact, stepLabelStitch, stitchForAttachment } from './label-attach-stitch';
+import { LabelShapeIcon } from './label-shape-icon';
+import { GarmentLabelOverlay } from './garment-label-picture';
+import type { PieceGeom } from 'lib/assembly-skeleton/types';
 import type { common_TechCard } from 'api/proto-http/admin';
 import { mapFormToTechCardInsert, mapTechCardToForm } from './schema';
 
@@ -89,5 +94,161 @@ describe('J1 label attachment → step stitch', () => {
 
   it('the save keeps the stored stitch of a step with no label linked', () => {
     expect(saved('sewn 4 sides', false, S('CAUGHT_IN_SEAM'))).toBe(S('CAUGHT_IN_SEAM'));
+  });
+});
+
+describe('J1 one attachment fact for every reader', () => {
+  it('says the same words and scheme for every value', () => {
+    const f = (attachment: string, foldAxis = '') => labelAttachmentFact({ attachment, foldAxis });
+    expect(f('sewn into the seam')).toMatchObject({ words: 'sewn into the seam', scheme: 'seam' });
+    expect(f('sewn 4 sides')).toMatchObject({ words: 'sewn 4 sides', scheme: 'four' });
+    expect(f('sewn 2 sides')).toMatchObject({
+      words: 'sewn 2 sides · top + bottom',
+      scheme: 'top_bottom',
+    });
+    expect(f('sewn 2 sides', 'width')).toMatchObject({
+      words: 'sewn 2 sides · left + right',
+      scheme: 'left_right',
+    });
+    expect(f('sewn 1 edge')).toMatchObject({ scheme: 'edge' });
+    expect(f('corner tacks')).toMatchObject({ scheme: 'corners' });
+    expect(f('on_fabric_piece')).toMatchObject({ words: 'on fabric piece', scheme: 'piece' });
+    expect(f('hung')).toMatchObject({ words: 'hung · not sewn', scheme: 'none', notSewn: true });
+    expect(f('')).toMatchObject({ words: '', scheme: 'none', notSewn: false });
+  });
+
+  it('the label picture draws the scheme of the fact', () => {
+    const draw = (attachment: string, foldAxis = '') =>
+      renderToStaticMarkup(
+        createElement(LabelShapeIcon, {
+          label: { key: 'brand', attachment, foldAxis, widthMm: 50, heightMm: 20 },
+        }),
+      );
+    for (const [w, scheme] of [
+      ['sewn into the seam', 'seam'],
+      ['sewn 4 sides', 'four'],
+      ['sewn 1 edge', 'edge'],
+      ['corner tacks', 'corners'],
+      ['on_fabric_piece', 'piece'],
+    ])
+      expect(draw(w)).toContain(`data-label-stitch="${scheme}"`);
+    expect(draw('sewn 2 sides')).toContain('data-label-stitch="top_bottom"');
+    expect(draw('sewn 2 sides', 'width')).toContain('data-label-stitch="left_right"');
+    expect(draw('hung')).not.toContain('data-label-stitch');
+  });
+});
+
+describe('J1 the step picture draws the label sewn by its word', () => {
+  const drawOverlay = (attachment: string, foldAxis = '', stitchLines: number[] = []) =>
+    renderToStaticMarkup(
+      createElement(
+        'svg',
+        null,
+        createElement(GarmentLabelOverlay, {
+          pieces: [
+            {
+              key: 'l',
+              drawn: [
+                [0, 20],
+                [50, 20],
+                [50, 0],
+                [0, 0],
+              ],
+            },
+          ],
+          geoms: new Map([
+            [
+              'l',
+              {
+                garmentLabel: {
+                  label: 'brand',
+                  widthMm: 50,
+                  heightMm: 20,
+                  fold: 'flat',
+                  foldAxis,
+                  foldLines: [],
+                  stitchLines,
+                  attachment,
+                },
+              } as unknown as PieceGeom,
+            ],
+          ]),
+          hair: 1,
+        }),
+      ),
+    );
+  it('draws every sewn scheme, nothing for a label that is not sewn', () => {
+    for (const [w, scheme] of [
+      ['sewn into the seam', 'seam'],
+      ['sewn 4 sides', 'four'],
+      ['sewn 1 edge', 'edge'],
+      ['corner tacks', 'corners'],
+    ])
+      expect(drawOverlay(w)).toContain(`data-label-attach="${scheme}"`);
+    expect(drawOverlay('sewn 2 sides')).toContain('data-label-attach="top_bottom"');
+    expect(drawOverlay('sewn 2 sides', 'width')).toContain('data-label-attach="left_right"');
+    expect(drawOverlay('hung')).not.toContain('data-label-attach');
+  });
+  it('the label own stitch lines win over the word', () => {
+    expect(drawOverlay('sewn 4 sides', '', [0, 20])).not.toContain('data-label-attach');
+  });
+});
+
+describe('J1 owner edits 14.11: not sewn has no sewn edge, a fabric piece is framed', () => {
+  const icon = (attachment: string) =>
+    renderToStaticMarkup(
+      createElement(LabelShapeIcon, {
+        label: { key: 'brand', attachment, widthMm: 50, heightMm: 20 },
+      }),
+    );
+  const overlay = (attachment: string) =>
+    renderToStaticMarkup(
+      createElement(
+        'svg',
+        null,
+        createElement(GarmentLabelOverlay, {
+          pieces: [
+            {
+              key: 'l',
+              drawn: [
+                [0, 20],
+                [50, 20],
+                [50, 0],
+                [0, 0],
+              ],
+            },
+          ],
+          geoms: new Map([
+            [
+              'l',
+              {
+                garmentLabel: {
+                  label: 'brand',
+                  widthMm: 50,
+                  heightMm: 20,
+                  fold: 'flat',
+                  foldAxis: '',
+                  foldLines: [],
+                  stitchLines: [],
+                  attachment,
+                },
+              } as unknown as PieceGeom,
+            ],
+          ]),
+          hair: 1,
+        }),
+      ),
+    );
+  it('a label that is not sewn has no sewn edge on the tile or the step picture', () => {
+    for (const w of ['hung', 'heat press', 'swift tack', 'stuck on']) {
+      expect(icon(w)).not.toContain('data-label-sewn-edge');
+      expect(overlay(w)).not.toContain('data-label-sewn-edge');
+    }
+    expect(icon('sewn 4 sides')).toContain('data-label-sewn-edge');
+    expect(overlay('sewn 4 sides')).toContain('data-label-sewn-edge');
+  });
+  it('a label on a fabric piece is framed on the tile and the step picture alike', () => {
+    expect(icon('on_fabric_piece')).toContain('data-label-stitch="piece"');
+    expect(overlay('on_fabric_piece')).toContain('data-label-attach="piece"');
   });
 });

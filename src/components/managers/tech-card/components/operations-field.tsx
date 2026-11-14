@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { ATTACH_LABEL_WORK, linkedLabels, NOT_SEWN_ATTACHMENTS } from './label-attach-stitch';
+import { ATTACH_LABEL_WORK, labelAttachmentFact, linkedLabels } from './label-attach-stitch';
 import { adminService } from 'api/api';
 import type { ChangeTechCardSeamsRequest } from 'api/proto-http/admin';
 import { runSeamChange } from './assembly-seams/seam-change';
@@ -2740,17 +2740,9 @@ function LabelAttachmentFacts({ labels, stored }: { labels: FormGarmentLabel[]; 
           label.key?.trim() ||
           garmentLabelName(garmentLabelKindNames, label.kind?.trim() || '') ||
           'label';
-        const word = label.attachment?.trim() || '';
-        const sides =
-          word === 'sewn 2 sides'
-            ? label.foldAxis === 'width'
-              ? 'left + right'
-              : 'top + bottom'
-            : '';
-        const notSewn = NOT_SEWN_ATTACHMENTS.has(word);
-        const fact = !word
-          ? 'no attachment'
-          : [word, sides, notSewn ? 'not sewn' : ''].filter(Boolean).join(' · ');
+        const fact = labelAttachmentFact(label);
+        const word = fact.words;
+        const notSewn = fact.notSewn;
         return (
           <Text
             key={label.lineKey || label.key}
@@ -2758,7 +2750,7 @@ function LabelAttachmentFacts({ labels, stored }: { labels: FormGarmentLabel[]; 
             variant={!word ? 'error' : notSewn ? 'label' : 'default'}
             component='p'
           >
-            {name} · {fact}
+            {name} · {word || 'no attachment'}
           </Text>
         );
       })}

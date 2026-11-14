@@ -3,6 +3,8 @@
 // (TechCard.seams on today's DXF), every other op draws the key of its technique next to the
 // outline of what it acts on. Rows are measured in the DOM once the print font is in and paginated
 // so an operation row never splits.
+import { labelAttachmentFact } from 'components/managers/tech-card/components/label-attach-stitch';
+import { LabelShapeIcon } from 'components/managers/tech-card/components/label-shape-icon';
 import {
   createContext,
   memo,
@@ -119,6 +121,7 @@ const ASM_CSS = String.raw`
 .asm-labels th, .asm-labels td { padding: 2px 4px 2px 0; border-bottom: 1px solid var(--color-hairline); vertical-align: top; }
 .asm-labels th, .asm-labels td { word-break: normal; overflow-wrap: normal; hyphens: none; }
 .asm-labels td:nth-child(2), .asm-labels td:nth-child(3) { white-space: nowrap; }
+.asm-label-attach { display: inline-flex; align-items: center; gap: 4px; }
 .asm-measure { position: fixed; left: -30000px; top: 0; visibility: hidden; pointer-events: none; }
 .asm-measure .asm-col { overflow: visible; }
 .asm-photos { display: grid; min-height: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 24px; }
@@ -161,7 +164,14 @@ type Row = AsmRow & {
   photoCount: number;
   /** The size this sheet's pleat openings are measured on. */
   drawnSize: string;
-  labels: Array<{ key: string; name: string; size: string; fold: string; attachment: string }>;
+  labels: Array<{
+    key: string;
+    name: string;
+    size: string;
+    fold: string;
+    attachment: string;
+    shape: GarmentLabelLike;
+  }>;
 };
 
 const wireDecimal = (value: GarmentLabelLike['widthMm']): string =>
@@ -189,7 +199,8 @@ function labelsAtStep(techCard: common_TechCard, operationNumber: number): Row['
         name: garmentLabelName(label),
         size: width || height ? `${width || '—'} × ${height || '—'}` : '',
         fold: label.fold?.trim() || '',
-        attachment: label.attachment?.trim() || '',
+        attachment: labelAttachmentFact(label).words,
+        shape: label,
       },
     ];
   });
@@ -4584,7 +4595,12 @@ const OpRow = memo(function OpRow({ r, orient }: { r: Row; orient: PrintOrient }
                   <td>{label.name}</td>
                   <td>{label.size}</td>
                   <td>{label.fold}</td>
-                  <td>{label.attachment}</td>
+                  <td>
+                    <span className='asm-label-attach'>
+                      <LabelShapeIcon label={label.shape} size={22} />
+                      {label.attachment}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>

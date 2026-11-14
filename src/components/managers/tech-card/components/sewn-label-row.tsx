@@ -3,6 +3,7 @@ import type {
   common_TechCard,
   common_TechCardGarmentZone,
 } from 'api/proto-http/admin';
+import { labelAttachmentFact } from './label-attach-stitch';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { publicFilePageUrl } from 'components/file-share-viewer/link';
 import { useLibraryFile } from 'components/managers/files/hooks/useFiles';
@@ -226,9 +227,6 @@ function withStored(options: readonly string[], value?: string) {
     label: option === 'on_fabric_piece' ? 'on fabric piece' : option,
   }));
 }
-
-const attachmentWord = (value?: string): string =>
-  value === 'on_fabric_piece' ? 'on fabric piece' : value?.trim() || '';
 
 function attachmentChange(row: FormGarmentLabel, value?: string): Partial<FormGarmentLabel> {
   const attachment = value || '';
@@ -1275,7 +1273,7 @@ export function SewnLabelRow({
           {locationValue}
         </Text>
         <Text component='span' className='hidden min-w-0 truncate sm:block'>
-          {attachmentWord(attachment) || <EmptyCell />}
+          {labelAttachmentFact(row).words || <EmptyCell />}
         </Text>
         <Text
           component='span'
