@@ -222,7 +222,7 @@ function marksPng(flat: FlatRegions, seeds: Int32Array): string {
   canvas.height = flat.h;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('no 2d context');
-  ctx.putImageData(new ImageData(marksTint(flat), flat.w, flat.h), 0, 0);
+  ctx.putImageData(new ImageData(new Uint8ClampedArray(marksTint(flat)), flat.w, flat.h), 0, 0);
   const px = markFontPx(flat.w, flat.h);
   ctx.font = `${px}px Menlo, Monaco, 'Courier New', monospace`;
   ctx.textAlign = 'center';
@@ -282,7 +282,7 @@ function pngOf(rgba: Uint8ClampedArray, w: number, h: number): string {
   canvas.height = h;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('no 2d context');
-  ctx.putImageData(new ImageData(rgba, w, h), 0, 0);
+  ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), w, h), 0, 0);
   return canvas.toDataURL('image/png');
 }
 
@@ -1211,13 +1211,15 @@ export class PaintSession {
         if (saved && !carry && !saved.gone) {
           if (!saved.url) throw new Error('the saved map has no picture');
           const map = await pixelsOf(saved.url);
-          labels = labelsFromMap(
-            map.data,
-            map.width,
-            map.height,
-            img.width,
-            img.height,
-            saved.palette.map((s) => s.hex),
+          labels = new Uint32Array(
+            labelsFromMap(
+              map.data,
+              map.width,
+              map.height,
+              img.width,
+              img.height,
+              saved.palette.map((s) => s.hex),
+            ),
           );
         }
         let moved = false;
@@ -1237,7 +1239,7 @@ export class PaintSession {
               flat,
             );
             if (got && got.painted > 0) {
-              labels = got.labels;
+              labels = new Uint32Array(got.labels);
               moved = true;
             }
           } catch {

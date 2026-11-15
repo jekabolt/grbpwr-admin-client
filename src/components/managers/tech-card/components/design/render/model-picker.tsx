@@ -1,6 +1,6 @@
 import type { common_Model } from 'api/proto-http/admin';
 import { genderOptions } from 'constants/filter';
-import { useMemo, type JSX } from 'react';
+import { useMemo, type JSX, type ReactNode } from 'react';
 import { Select } from 'ui';
 
 import { BODY_TYPES, mediaThumb } from './model';
@@ -94,7 +94,15 @@ function modelThumb(model: common_Model): string {
  * него нажимали. Разнится ТОЛЬКО рост, и по арифметике ряда — довод у самого класса ниже.
  * Без снимка полосатого квадрата тут НЕТ: он в 24 пикселя читается как сор; имя стоит одно.
  */
-function Face({ url, alt, tight }: { url: string; alt: string; tight?: boolean }): JSX.Element | null {
+function Face({
+  url,
+  alt,
+  tight,
+}: {
+  url: string;
+  alt: string;
+  tight?: boolean;
+}): JSX.Element | null {
   if (!url) return null;
   return (
     <img
@@ -124,6 +132,9 @@ export function BodyPicker({
   bodyType,
   sizeName,
   disabled,
+  modelsOnly = false,
+  name = 'design-threed-body',
+  className = 'w-[260px]',
   onModel,
   onBodyType,
 }: {
@@ -133,6 +144,10 @@ export function BodyPicker({
   bodyType: string;
   sizeName: (id: number) => string;
   disabled?: boolean;
+  /** Reuses this one-body picker for persisted fit-model bindings without generator body words. */
+  modelsOnly?: boolean;
+  name?: string;
+  className?: string;
   onModel: (id: number) => void;
   onBodyType: (value: string) => void;
 }): JSX.Element {
@@ -149,23 +164,28 @@ export function BodyPicker({
   const items = useMemo(() => {
     const rows: {
       value: string;
-      label: React.ReactNode;
+      label: ReactNode;
       group?: string;
       disabled?: boolean;
-    }[] = [{ value: NO_BODY, label: 'any body' }];
-    for (const word of BODY_TYPES) {
-      rows.push({
-        value: `${BUILD}${word}`,
-        label: word,
-        group: 'build — the generator reads this word',
-      });
+    }[] = [{ value: NO_BODY, label: modelsOnly ? 'pick a model' : 'any body' }];
+    if (!modelsOnly) {
+      for (const word of BODY_TYPES) {
+        rows.push({
+          value: `${BUILD}${word}`,
+          label: word,
+          group: 'build — the generator reads this word',
+        });
+      }
     }
+    const modelGroup = modelsOnly
+      ? 'measurement models'
+      : 'our models — recorded on the run; nothing about her is sent';
     if (loading) {
       rows.push({
         value: '__loading__',
         label: 'loading the models…',
         disabled: true,
-        group: 'our models — recorded on the run; nothing about her is sent',
+        group: modelGroup,
       });
       return rows;
     }
@@ -174,7 +194,7 @@ export function BodyPicker({
         value: '__nomodels__',
         label: 'no fit models on this admin yet — add them under MODELS',
         disabled: true,
-        group: 'our models — recorded on the run; nothing about her is sent',
+        group: modelGroup,
       });
       return rows;
     }
@@ -183,7 +203,7 @@ export function BodyPicker({
       const facts = modelFacts(model, sizeName);
       rows.push({
         value: `${MODEL}${id}`,
-        group: 'our models — recorded on the run; nothing about her is sent',
+        group: modelGroup,
         label: (
           <span className='flex min-w-0 items-center gap-1.5'>
             <Face url={modelThumb(model)} alt='' />
@@ -196,14 +216,18 @@ export function BodyPicker({
       });
     }
     return rows;
-  }, [all, loading, sizeName]);
+  }, [all, loading, modelsOnly, sizeName]);
 
   return (
-    <div className='w-[260px] shrink-0' data-body-picker=''>
+    <div
+      className={`${className} shrink-0`}
+      data-body-picker=''
+      data-models-only={modelsOnly || undefined}
+    >
       <Select
-        name='design-threed-body'
+        name={name}
         value={value}
-        placeholder='any body'
+        placeholder={modelsOnly ? 'pick a model' : 'any body'}
         disabled={disabled}
         items={items}
         fullWidth
@@ -227,7 +251,9 @@ export function BodyPicker({
             );
           }
           if (bodyType) return <span className='truncate uppercase'>{bodyType} build</span>;
-          return <span className='truncate uppercase'>any body</span>;
+          return (
+            <span className='truncate uppercase'>{modelsOnly ? 'pick a model' : 'any body'}</span>
+          );
         }}
         onValueChange={(next: string) => {
           /* ОДИН ОТВЕТ НА ОДИН ВОПРОС: каждая ветка пишет ОБЕ половины, и вторая всегда пустая.

@@ -322,7 +322,11 @@ const push = <K, V>(m: Map<K, V[]>, k: K, v: V) => {
 export function buildDraft(
   write: { scopes: DraftScope[] },
   card: DraftCardContext,
-  opts: { mintKey?: () => string } = {},
+  opts: {
+    mintKey?: () => string;
+    dxfProvenance?: CardDraft['dxfProvenance'];
+    dxfPhaseDReplay?: CardDraft['dxfPhaseDReplay'];
+  } = {},
 ): CardDraft {
   const mint = opts.mintKey ?? mintLineKey;
   const scopes: DraftScope[] = write.scopes.map((sc) => {
@@ -858,6 +862,8 @@ export function buildDraft(
     aliases,
     pieceUpdates: [],
     pieceDifferences,
+    ...(opts.dxfProvenance ? { dxfProvenance: opts.dxfProvenance } : {}),
+    ...(opts.dxfPhaseDReplay ? { dxfPhaseDReplay: opts.dxfPhaseDReplay } : {}),
     ...(unresolved.length ? { unresolved } : {}),
     downloads: scopes.map((s) => ({ filename: s.filename, dxfText: s.dxfText })),
   };

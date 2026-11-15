@@ -238,6 +238,10 @@ const patternSchema = z.object({
   // on this card before and preserves the number for one it has, so the client only ever pins a
   // version deliberately (the factory's own numbering).
   version: z.number().optional().default(0),
+  // Server-owned ABA clock for the saved pattern row. It is read into the form only so exact
+  // saved-DXF consumers can bind a transactional snapshot to this row; the full-card save mapper
+  // deliberately omits it because the server alone advances the clock.
+  savedRowRevision: z.number().optional().default(0),
   // Server-owned; round-tripped read-only so the grid can show when a PDF actually arrived. Sending
   // it back is harmless — the write path drops it and carries the stored value forward by url.
   uploadedAt: z.string().optional().default(''),
@@ -2875,6 +2879,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       // so the form value passes z.number() (a string would silently block save).
       sizeBytes: wireInt(p.sizeBytes),
       version: p.version || 0,
+      savedRowRevision: p.savedRowRevision || 0,
       uploadedAt: p.uploadedAt ?? '',
       // Kept EXACTLY as stored, including the LEGACY… keys the 0260 backfill wrote: this client
       // never re-mints an existing row's key (see patternSchema).

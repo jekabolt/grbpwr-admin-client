@@ -61,6 +61,8 @@ const LATENCY: Record<StageName, number> = {
   sizes: 250,
   pieces: 800,
   semantics: 600,
+  'dxf-provenance': 50,
+  'dxf-phase-d-replay': 50,
   fabrics: 300,
   'render-som': 500,
   'render-pages': 400,
@@ -200,6 +202,50 @@ export function createStubClient(): ImportClient {
             s.semantics = o;
             return o;
           }
+          case 'dxf-provenance':
+            return {
+              schemaVersion: 'dxf-pipeline-provenance/1',
+              pipelineIntegrated: false,
+              productionReady: false,
+              heuristicRecoveryUsed: false,
+              pieceSpecWireIntegrated: false,
+              includesRawDxf: false,
+              includesTags: false,
+              includesAst: false,
+              carrier: null,
+              blockers: [
+                {
+                  code: 'not-opted-in',
+                  identity: null,
+                  sizeToken: null,
+                  detail: 'the fixture importer does not opt in to DXF provenance',
+                },
+              ],
+            };
+          case 'dxf-phase-d-replay':
+            return {
+              schemaVersion: 'dxf-product-phase-d-replay/1',
+              replayReady: false,
+              carrier: null,
+              blockers: [
+                {
+                  code: 'not-opted-in',
+                  identity: null,
+                  sizeToken: null,
+                  detail: 'the fixture importer does not opt in to Phase-D replay',
+                },
+              ],
+              claims: {
+                exactPhaseCSourceRetained: false,
+                exactProjectedContoursRetained: false,
+                freshPublicCarrierRebuilt: false,
+                publicContentBindingExactMatched: false,
+                rawDxfRetained: false,
+                g4f1V2InputComplete: false,
+                phaseEAuthorityIntegrated: false,
+                productionReady: false,
+              },
+            };
           case 'fabrics': {
             const i = input as StageIO['fabrics']['in'];
             const o = fixtureFabrics(i.bom, s.seeds, s.semantics?.pieces ?? []);

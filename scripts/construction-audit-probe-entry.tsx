@@ -45,7 +45,10 @@ import {
   techCardSchema,
   type TechCardFormData,
 } from 'components/managers/tech-card/components/schema';
-import { ANALYZE_CLIENT_BUDGET_MS } from 'components/managers/tech-cards/components/useTechCardQuery';
+import {
+  ANALYZE_CLIENT_BUDGET_MS,
+  useTechCardConstructionAudit,
+} from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useSnackBarStore } from 'lib/stores/store';
 
 type MountOpts = {
@@ -140,6 +143,31 @@ probe.uidsOf = (findings) => assignUids(findings as never);
 probe.session = (cardId) => loadAnalysis(cardId);
 probe.budgetMs = () => ANALYZE_CLIENT_BUDGET_MS;
 
+function AuditPanel({
+  techCardId,
+  active,
+  frozen,
+  operationCount,
+  onGoTab,
+}: {
+  techCardId?: number;
+  active: boolean;
+  frozen: boolean;
+  operationCount?: number;
+  onGoTab?: (tab: string, extra?: Record<string, string>) => void;
+}) {
+  const auditOwner = useTechCardConstructionAudit(techCardId, active);
+  return (
+    <ConstructionAudit
+      techCardId={techCardId}
+      auditOwner={auditOwner}
+      frozen={frozen}
+      operationCount={operationCount}
+      onGoTab={onGoTab}
+    />
+  );
+}
+
 function Harness({
   techCardId,
   active,
@@ -197,7 +225,7 @@ function Harness({
           <fieldset disabled={frozen}>
             <form>
               <div data-probe-panel>
-                <ConstructionAudit
+                <AuditPanel
                   techCardId={techCardId}
                   active={active}
                   frozen={frozen}

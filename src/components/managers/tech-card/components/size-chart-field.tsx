@@ -841,8 +841,7 @@ export function SizeChartField({
       const iconKey =
         rememberedPicture.current.iconKey ??
         defaultSizeChartIcon(pattern.categoryNames) ??
-        (pattern.kind === 'bottom' ? 'joggers' : 'shirt') ??
-        '';
+        (pattern.kind === 'bottom' ? 'joggers' : 'shirt');
       setPicture((previous) => ({
         ...previous,
         source,

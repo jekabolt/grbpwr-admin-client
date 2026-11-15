@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { common_GenderEnum, common_ModelInsert } from 'api/proto-http/admin';
+import { collectAllModelsForMeasurementAuditV1 } from './model-measurement-audit-query';
 
 export type ModelFilter = {
   gender?: string; // common_GenderEnum or '' for any
@@ -60,6 +61,26 @@ export function useAllModels(limit: number = 500) {
       });
       return response.models || [];
     },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** Fetches the complete cohort only for the Models-page measurement audit. */
+export function useAllModelsForMeasurementAudit(limit: number = 500) {
+  return useQuery({
+    queryKey: [...modelKeys.lists(), 'measurement-audit', 'all', limit],
+    queryFn: () =>
+      collectAllModelsForMeasurementAuditV1(
+        ({ limit: pageLimit, offset }) =>
+          adminService.ListModels({
+            limit: pageLimit,
+            offset,
+            orderFactor: 'ORDER_FACTOR_DESC',
+            gender: 'GENDER_ENUM_UNKNOWN',
+            name: '',
+          }),
+        limit,
+      ),
     staleTime: 5 * 60 * 1000,
   });
 }

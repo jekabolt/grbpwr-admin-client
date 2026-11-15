@@ -1,7 +1,19 @@
 import { common_MediaFull, common_TechCard, type common_Material } from 'api/proto-http/admin';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
+import {
+  useSizeNames,
+  useSizeOrdering,
+} from 'components/managers/model/components/use-size-systems';
 import { techCardMediaKindOptions } from 'constants/filter';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import {
   Canvas,
@@ -38,11 +50,20 @@ import { SeamHintsBar } from './step-seams/seam-hints-map';
 import { StepResultProvider } from './step-seams/step-result-context';
 import { StepSeamsProvider } from './step-seams/step-seams-context';
 import { FoldsHydrate } from './assembly-folds/folds-hydrate';
-import { useTechCardPrint } from 'components/managers/tech-cards/components/useTechCardQuery';
+import {
+  useTechCardConstructionAudit,
+  useTechCardPrint,
+} from 'components/managers/tech-cards/components/useTechCardQuery';
 import { gapSubjects } from '../techpack/gap-findings';
 import { usePdfGaps } from '../techpack/use-pdf-gaps';
 import { CalloutsPanel, PanelCollapseDoor, useCalloutsPanel } from './design/callouts-panel';
 import { ASSEMBLY_MAP_PREFS_KEY } from './design/use-callouts-prefs';
+import { projectPatternImportDxfPhaseEGoldenCardWarningCountFactsV1 } from './pattern-import/phase-e-workbench-v2/golden-card-aggregate-metrics-v1';
+import { PatternImportDxfPhaseEGoldenCardPreflightProductionMountV1 } from './pattern-import/phase-e-workbench-v2/golden-card-preflight-production-mount-v1';
+import {
+  readPatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1,
+  subscribePatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1,
+} from './pattern-import/phase-e-workbench-v2/golden-card-production-v2-snapshot-feed-v1';
 
 const mediaKindLabels: Record<string, string> = Object.fromEntries(
   techCardMediaKindOptions.map((o) => [o.value, o.label]),
@@ -385,6 +406,37 @@ export function ConstructionTab({
   // смене отпечатка — см. там же.
   const { getValues, watch } = useFormContext<TechCardFormData>();
 
+  // ONE card-level owner for the saved construction audit. The panel below consumes this exact
+  // query result; future whole-card preflight may consume its count-only projection without
+  // starting another GetTechCardConstructionAudit request. `active` remains the sole network gate.
+  const constructionAuditOwner = useTechCardConstructionAudit(techCard?.id, active);
+  const subscribeGoldenV2Feed = useCallback(
+    (listener: () => void) =>
+      subscribePatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1(techCard?.id, listener),
+    [techCard?.id],
+  );
+  const readGoldenV2Feed = useCallback(
+    () => readPatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1(techCard?.id),
+    [techCard?.id],
+  );
+  const goldenV2Feed = useSyncExternalStore(
+    subscribeGoldenV2Feed,
+    readGoldenV2Feed,
+    readGoldenV2Feed,
+  );
+  const sizeNameById = useSizeNames();
+  const orderSizeIds = useSizeOrdering();
+  const [assemblyWarningCount, setAssemblyWarningCount] = useState<number | null>(null);
+  useEffect(() => setAssemblyWarningCount(null), [techCard?.id]);
+  const goldenWarningFacts = useMemo(
+    () =>
+      projectPatternImportDxfPhaseEGoldenCardWarningCountFactsV1(
+        techCard?.id,
+        assemblyWarningCount,
+      ),
+    [assemblyWarningCount, techCard?.id],
+  );
+
   // ЗДЕСЬ ЧИТАЛИСЬ `purpose` / `isAux` / `canWriteCard` / `frozen` — ГЕЙТЫ БЛОКА C-5, и они сняты
   // вместе с ним: подписка на `purpose` и запрос прав, которые никто больше не спрашивает, — это
   // лишний рендер вкладки и лишний вопрос к правам на каждое открытие. Признак выпущенной карточки
@@ -680,7 +732,7 @@ export function ConstructionTab({
                     <SeamHintsBar />
                     <ConstructionAudit
                       techCardId={techCard?.id}
-                      active={active}
+                      auditOwner={constructionAuditOwner}
                       onGoTab={onGoTab}
                       // ТОТ ЖЕ ПРЕДИКАТ, ЧТО ГЛУШИТ ВКЛАДКУ ФИЛДСЕТОМ (ниже, у OperationsField, и в
                       // index.tsx). Панель по нему решает, КУДА уходит поданная претензия: на живой
@@ -698,11 +750,22 @@ export function ConstructionTab({
                       gaps={pdfGaps ?? undefined}
                       gapSubject={gapSubject}
                     />
+                    <PatternImportDxfPhaseEGoldenCardPreflightProductionMountV1
+                      techCard={techCard}
+                      active={!!active}
+                      auditOwner={constructionAuditOwner}
+                      warningFacts={goldenWarningFacts}
+                      orderSizeIds={orderSizeIds}
+                      sizeNameById={sizeNameById}
+                      betaAcceptanceV2Feed={goldenV2Feed}
+                    />
                     <CardStandards />
                     <section className='border border-borderColor bg-bgColor p-4'>
                       {/* The block header (title, warnings, the pattern's state, the skeleton door) is drawn
                     by OperationsField: its warnings read the rail's own subscriptions. */}
                       <OperationsField
+                        assemblyTableActive={active}
+                        onWarningCountChange={setAssemblyWarningCount}
                         activePin={pin.active}
                         onActivePinChange={pin.setActive}
                         activeBom={bom.active}

@@ -16,6 +16,15 @@
 import type { PieceDTO } from 'lib/nesting/types';
 import type { GarmentPassport, PassportDigest } from './passport/types';
 import type { SheetAnswer, SheetLegend, SheetPieces } from './pieces/sheets';
+import type {
+  DxfPathProvenanceOpenV1,
+  DxfPipelineProvenanceRequestV1,
+  DxfPipelineProvenanceStageOutputV1,
+} from './dxf-pipeline-provenance-v1';
+import type {
+  DxfProductPhaseDReplayRequestV1,
+  DxfProductPhaseDReplayStageOutputV1,
+} from './dxf-product-phase-d-replay-v1';
 export type { SheetAnswer, SheetLegend, SheetPieces } from './pieces/sheets';
 
 // The garment passport (auto/PASSPORT.md): its own module, re-exported here for the UI.
@@ -2212,6 +2221,20 @@ export type DraftRul =
 /** SHAPE-KINK: one RUL refusal, structured (DraftRul.refusals). */
 export type RulRefusal = { identity: string | null; why: string; gradeAskKey?: string };
 
+export const PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_CARRIER_V1 =
+  'pattern-import-dxf-product-writer-replay-carrier/1' as const;
+
+/**
+ * Reproducible product-writer inputs retained beside the rendered scope. It intentionally contains
+ * no caller-supplied replacement bytes or digest: a later owner must rerun the production writer,
+ * embed the scope's final manifest and hash that rebuilt text itself.
+ */
+export type DraftWriterReplayV1 = {
+  schemaVersion: typeof PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_CARRIER_V1;
+  job: WriteJob;
+  createdAt: string;
+};
+
 export type DraftScope = {
   target: DraftScopeTarget;
   filename: string;
@@ -2219,6 +2242,8 @@ export type DraftScope = {
   name: string;
   dxfText: string;
   manifest: ConversionManifest;
+  /** Exact job/clock inputs for replaying the complete product R12 bytes after save. */
+  writerReplay?: DraftWriterReplayV1;
   /** RUL: the base DXF + .rul package of this scope (write `storage: 'rul'` only). */
   rul?: DraftRul;
   /** Identities written into THIS file. */
@@ -2364,6 +2389,14 @@ export type CardDraft = {
   pieces: DraftPiece[];
   aliases: DraftAlias[];
   pieceUpdates: DraftPieceUpdate[];
+  /**
+   * Exact opt-in direct-DXF Phase-D carrier read from the same worker session after the final
+   * semantics pass. It contains no raw DXF. A blocked result is retained too, so later host wiring
+   * cannot silently pretend that source-path identity exists.
+   */
+  dxfProvenance?: DxfPipelineProvenanceStageOutputV1;
+  /** Opt-in detached Phase-D inputs for a later fresh G4F1 V2 replay; never contains raw DXF. */
+  dxfPhaseDReplay?: DxfProductPhaseDReplayStageOutputV1;
   /** Re-import review only: card settings win; a later UI may warn about these differences. */
   pieceDifferences?: DraftPieceDifference[];
   /** Re-import: blocks bound to no piece because nothing proves which card piece they are. */
@@ -2388,6 +2421,36 @@ export type ImpactAnswers = {
 };
 
 /** T4: the card's assembly as the apply step weighs it (ops, seams) — lineKeys only. */
+export type AssemblySeamAnchorContext = {
+  /** Existing tech-card piece line key; this is already the assembly graph's piece identity. */
+  pieceLineKey: string;
+  /** Diagnostic/resolution hint such as `FP_L#2`; never promoted directly to Phase-E authority. */
+  edgeHint: string;
+  /** Explicit sewn window on the stored run. */
+  range: [number, number];
+  lenMm: number;
+  contourSig: string;
+  samples: [number, number][];
+  layer?: 'under' | 'over';
+};
+
+export type AssemblySeamSummaryContext = { pieces: string[]; confirmed: boolean };
+
+/**
+ * Exact current-card seam context retained for the Phase-E workbench. It is proposal authority for
+ * the card's existing topology/order, not automatic authority for DXF contour or source vertices.
+ */
+export type AssemblySeamExactContext = AssemblySeamSummaryContext & {
+  seamKey: string;
+  stale: boolean;
+  kind: 'edge' | 'partial' | 'composite' | 'surface' | 'closure';
+  direction: 'reversed' | 'same' | 'unknown';
+  source: 'graph' | 'doll' | 'order' | 'manual' | 'ai';
+  anchoredSize: string;
+  sideA: AssemblySeamAnchorContext[];
+  sideB: AssemblySeamAnchorContext[];
+};
+
 export type AssemblyContext = {
   ops: {
     number: number;
@@ -2397,9 +2460,11 @@ export type AssemblyContext = {
     inputKeys: string[];
     outputUnitKey: string;
     outputUnitName: string;
+    /** Existing ordered seam identities sewn by this operation; reused by the Phase-E binder. */
+    seamKeys?: string[];
   }[];
-  /** Seam rows: the pieces on either side, and whether the seam is confirmed. */
-  seams: { pieces: string[]; confirmed: boolean }[];
+  /** Legacy summaries remain accepted; the real product card supplies the exact stored context. */
+  seams: (AssemblySeamSummaryContext | AssemblySeamExactContext)[];
 };
 
 export type ApplyUploaded = {
@@ -2409,6 +2474,50 @@ export type ApplyUploaded = {
   sizeBytes: number;
   /** hex SHA-256 of the uploaded bytes (0423); '' / absent when unknown */
   sha256?: string;
+};
+
+/**
+ * Exact form-row identity planned for one imported scope. This is deliberately narrower than a
+ * card snapshot: it carries only the identities a post-save readback must observe again before a
+ * semantic sidecar may be attached.
+ */
+export type ApplyCommitScopeBinding = {
+  scopeKey: string;
+  patternLineKey: string;
+  patternUrl: string;
+  patternSizeId: number;
+  pieceLineKeys: string[];
+  aliases: { scopeKey: string; blockName: string; pieceLineKey: string }[];
+};
+
+export type ApplyCommitBindingBlocker = {
+  scopeKey: string;
+  code:
+    | 'pattern-row-missing'
+    | 'pattern-row-ambiguous'
+    | 'pattern-identity-incomplete'
+    | 'alias-row-missing'
+    | 'alias-row-ambiguous'
+    | 'piece-row-missing'
+    | 'piece-row-ambiguous'
+    | 'scope-has-no-aliases'
+    | 'previous-lock-version-unavailable';
+  detail: string;
+};
+
+export const PATTERN_IMPORT_APPLY_COMMIT_RECEIPT_V1 =
+  'pattern-import-apply-commit-receipt/1' as const;
+
+/**
+ * Produced only after the host reports that the card body was saved. `previousLockVersion` is read
+ * synchronously before the import mutates the form, so a fresh server readback can prove that the
+ * shared card lock advanced and that these exact rows landed.
+ */
+export type ApplyCommitReceiptV1 = {
+  schemaVersion: typeof PATTERN_IMPORT_APPLY_COMMIT_RECEIPT_V1;
+  techCardId: number;
+  previousLockVersion: number;
+  scopes: ApplyCommitScopeBinding[];
 };
 
 /**
@@ -2431,6 +2540,15 @@ export type ApplyResult =
       owed?: 'fusing';
       /** MF-C: rows whose file was replaced in place (M4), old url → new url. */
       replaced?: { scopeKey: string; lineKey: string; oldUrl: string; newUrl: string }[];
+      /**
+       * Exact identities of the rows this successful save committed. Absent when the host did not
+       * provide a pre-save lock reader, did not persist the form, or the planned identities were
+       * incomplete/ambiguous. A sidecar host must require this field; it must never infer rows from
+       * filenames after the fact.
+       */
+      commitReceipt?: ApplyCommitReceiptV1;
+      /** Why a successful DXF save could not mint `commitReceipt` (the DXF itself remains saved). */
+      commitReceiptBlockers?: ApplyCommitBindingBlocker[];
     }
   | { ok: false; failedScope: string; message: string; uploaded: ApplyUploaded[] };
 
@@ -3081,6 +3199,10 @@ export type StageName =
   | 'sizes'
   | 'pieces'
   | 'semantics'
+  /** Opt-in side stage: exact DXF sample identity carried to an untouched PieceSpec contour. */
+  | 'dxf-provenance'
+  /** Separate opt-in source/contour replay carrier; the public provenance stage stays path-id-free. */
+  | 'dxf-phase-d-replay'
   | 'fabrics'
   | 'render-som'
   /** A9 side stage: page thumbnails + stats for the AI page-role call (invalidates nothing). */
@@ -3265,6 +3387,14 @@ export type StageIO = {
     >;
     out: SemanticsOutput;
   };
+  'dxf-provenance': {
+    in: DxfPipelineProvenanceRequestV1;
+    out: DxfPipelineProvenanceStageOutputV1;
+  };
+  'dxf-phase-d-replay': {
+    in: DxfProductPhaseDReplayRequestV1;
+    out: DxfProductPhaseDReplayStageOutputV1;
+  };
   fabrics: {
     in: {
       bom: DraftScopeTarget[];
@@ -3348,7 +3478,13 @@ export type ImportWorkerRequest =
   | {
       type: 'open';
       id: number;
-      files: { name: string; bytes: ArrayBuffer; generatedFusing?: boolean }[];
+      files: {
+        name: string;
+        bytes: ArrayBuffer;
+        generatedFusing?: boolean;
+        /** `null` is an internal fail-closed sentinel for a hostile option descriptor. */
+        dxfPathProvenance?: DxfPathProvenanceOpenV1 | null;
+      }[];
     }
   | {
       [S in StageName]: {
@@ -3361,6 +3497,14 @@ export type ImportWorkerRequest =
     }[StageName]
   | { type: 'cancel'; id: number }
   | { type: 'close'; id: number; sessionId: number };
+
+/** Main-thread opt-in. When absent, the posted open-file record keeps its legacy own keys. */
+export type PatternImportOpenFile = {
+  name: string;
+  bytes: ArrayBuffer;
+  generatedFusing?: boolean;
+  dxfPathProvenance?: DxfPathProvenanceOpenV1;
+};
 
 export type ImportWorkerResponse =
   | { type: 'opened'; id: number; sessionId: number; files: SourceFileInfo[] }

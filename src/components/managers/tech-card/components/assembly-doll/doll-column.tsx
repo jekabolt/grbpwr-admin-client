@@ -20,8 +20,36 @@ import { stateLine } from './words';
 
 const DollOverlay = lazy(() => import('./doll-overlay'));
 
-export function DollColumn() {
+export type DollColumnSelectionFocusV1 = Readonly<{
+  operationNumber: number | null;
+  pieceId?: string | null;
+  seamId?: string | null;
+}>;
+
+export type DollColumnProps = Readonly<{
+  variant?: 'column' | 'workbench';
+  /** Caller-owned workbench context. It does not mutate the doll store or claim a 3D highlight. */
+  selection?: DollColumnSelectionFocusV1 | null;
+}>;
+
+export function describeDollColumnSelectionFocusV1(
+  selection: DollColumnSelectionFocusV1 | null | undefined,
+): string | null {
+  if (!selection) return null;
+  const parts = [
+    Number.isSafeInteger(selection.operationNumber) && (selection.operationNumber ?? 0) > 0
+      ? `operation ${selection.operationNumber}`
+      : null,
+    selection.pieceId?.trim() ? `piece ${selection.pieceId.trim()}` : null,
+    selection.seamId?.trim() ? `seam ${selection.seamId.trim()}` : null,
+  ].filter((part): part is string => part !== null);
+  return parts.length ? parts.join(', ') : null;
+}
+
+export function DollColumn({ variant = 'column', selection = null }: DollColumnProps = {}) {
   const card = useDollCard();
+  const workbench = variant === 'workbench';
+  const selectionDescription = describeDollColumnSelectionFocusV1(selection);
   const open = useDollStore((s) => s.open);
   const key = card ? dollKey(card, card.baseSize, false) : null;
   const solve = useDollStore((s) => (key ? s.solves[key] : undefined));
@@ -47,12 +75,22 @@ export function DollColumn() {
         ? `the doll could not be built: ${solve.error}`
         : stateLine(solve.report!);
   return (
-    <div className='space-y-1.5' data-doll-column=''>
+    <div
+      className={workbench ? 'flex h-full min-h-0 flex-col gap-1.5' : 'space-y-1.5'}
+      data-doll-column=''
+      data-doll-workbench={workbench || undefined}
+      data-doll-selection-boundary={selectionDescription ? 'context-only' : undefined}
+      data-selected-operation={selection?.operationNumber ?? undefined}
+      data-selected-piece={selection?.pieceId ?? undefined}
+      data-selected-seam={selection?.seamId ?? undefined}
+    >
       <button
         type='button'
         onClick={openDoll}
-        className='group block w-full border border-borderColor bg-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-        aria-label={`open the paper doll, size ${card.sizeLabel(card.baseSize)}`}
+        className={`group block w-full border border-borderColor bg-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor ${workbench ? 'min-h-0 flex-1' : ''}`}
+        aria-label={`open the paper doll, size ${card.sizeLabel(card.baseSize)}${
+          selectionDescription ? `; workbench selection ${selectionDescription}` : ''
+        }`}
         data-doll-still=''
       >
         {solve?.thumbUrl ? (
@@ -62,10 +100,12 @@ export function DollColumn() {
             width={240}
             height={300}
             draggable={false}
-            className='mx-auto block h-auto w-full max-w-[240px] select-none'
+            className={`mx-auto block h-auto w-full select-none ${workbench ? 'max-h-full max-w-[560px] object-contain' : 'max-w-[240px]'}`}
           />
         ) : (
-          <div className='flex aspect-[4/5] w-full items-center justify-center bg-pageBg'>
+          <div
+            className={`flex w-full items-center justify-center bg-pageBg ${workbench ? 'h-full min-h-[420px]' : 'aspect-[4/5]'}`}
+          >
             <Text
               size='micro'
               variant='label'

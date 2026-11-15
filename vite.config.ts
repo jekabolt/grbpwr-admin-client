@@ -194,6 +194,13 @@ export default defineConfig(({ command, mode }) => {
       // contains a dynamic import (the nesting worker's dependency graph does).
       format: 'es' as const,
     },
+    optimizeDeps: {
+      // Three's WebGPU capability module uses top-level await. The cloth runtime is lazy and only
+      // runs in current WebGPU-capable browsers, but Vite still discovers that dependency during
+      // the initial dev scan. Its legacy default esbuild target otherwise crashes the whole card
+      // before auth or the lazy Phase-E door can render.
+      esbuildOptions: { target: 'esnext' },
+    },
     build: {
       outDir: 'dist',
       sourcemap: sentryPlugins.length > 0 ? ('hidden' as const) : false,

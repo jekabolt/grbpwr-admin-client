@@ -24,6 +24,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ChangeEvent as ReactChangeEvent,
   type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -284,6 +285,7 @@ import {
   waitForIdle,
 } from './last-mutation';
 import { followOpenStep, useActiveStepStore } from './assembly-map/active-step';
+import { resolveAssemblyTableWorkbenchOpenV1 } from './assembly-table-auto-open-v1';
 import { AssemblyFullscreen, FROZEN_REFUSAL, restoreScreenFocus } from './assembly-fullscreen';
 import { SeamWalk } from './seam-walk';
 import { StepTimeField } from './step-time-field';
@@ -345,8 +347,77 @@ import { PieceAddChip, PieceRef, useFormAssemblyPieces, useFormPieces } from './
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
 import { posesOf, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
-import type { SeamWrites } from './assembly-seams/use-seam-decisions';
+import type { SeamWrites, StrictSeamUpsertResult } from './assembly-seams/use-seam-decisions';
 import { foldRowsOf, useFoldsStore } from './assembly-folds/folds-store';
+import { PatternImportDxfPhaseEAssemblyOrderEntryMountV1 } from './pattern-import/phase-e-workbench/assembly-order-entry';
+import { createPatternImportDxfProductCompositeSidecarProductionTransactionV4 } from './pattern-import/phase-e-workbench-v2/composite-sidecar-production-transaction-v4';
+import {
+  readPatternImportDxfProductExactNSeamProductionSessionV2,
+  subscribePatternImportDxfProductExactNSeamProductionSessionV2,
+} from './pattern-import/phase-e-workbench-v2/exact-n-seam-production-session-v2';
+import {
+  capturePatternImportDxfPhaseECadSemanticPendingUpgradeV1,
+  planPatternImportDxfPhaseECadSemanticOperationUpgradeV1,
+  type PatternImportDxfPhaseECadSemanticPendingUpgradeV1,
+} from './pattern-import/phase-e-workbench-v2/cad-command-semantic-operation-upgrade-v1';
+import {
+  readPatternImportDxfPhaseECadSemanticReimportSessionV1,
+  subscribePatternImportDxfPhaseECadSemanticReimportSessionV1,
+} from './pattern-import/phase-e-workbench-v2/cad-command-semantic-reimport-session-owner-v1';
+import {
+  preparePatternImportDxfPhaseECadCommandAuthoringHandoffV1,
+  revisionOfPatternImportDxfPhaseECadCommandAuthoringOperationV1,
+  type PatternImportDxfPhaseECadCommandAuthoringHandoffOwnerV1,
+} from './pattern-import/phase-e-workbench-v2/cad-command-draft-authoring-handoff-v1';
+import {
+  PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_AUTHORING_HANDOFF_V1,
+  type PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1,
+} from './pattern-import/phase-e-workbench-v2/cad-table-zero-connect-authoring-handoff-v1';
+import {
+  executePatternImportDxfPhaseECadTableCrossScopeAuthoringHandoffV1,
+  type PatternImportDxfPhaseECadTableCrossScopeAuthoringHandoffOwnerV1,
+} from './pattern-import/phase-e-workbench-v2/cad-table-cross-scope-authoring-handoff-v1';
+import {
+  preparePatternImportDxfPhaseECadTablePressDraftRowV1,
+  type PatternImportDxfPhaseECadTablePressAuthoringOwnerV1,
+} from './pattern-import/phase-e-workbench-v2/cad-table-press-authoring-v1';
+import { preparePatternImportDxfPhaseEZeroConnectCardOperationRowV1 } from './pattern-import/phase-e-workbench-v2/cad-table-zero-connect-row-adapter-v1';
+import { buildPatternImportDxfPhaseECadTableZeroConnectIdentityPlanV1 } from './pattern-import/phase-e-workbench-v2/cad-table-zero-connect-session-v1';
+import {
+  PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_POST_SAVE_OWNER_CLAIMS_V1,
+  PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_POST_SAVE_OWNER_V1,
+  createPatternImportDxfPhaseEZeroConnectPendingHandoffV1,
+  patternImportDxfPhaseEZeroConnectPendingForOperationV1,
+  planPatternImportDxfPhaseEZeroConnectOperationSeamAttachV1,
+  resolvePatternImportDxfPhaseEZeroConnectSavedOperationV1,
+  type PatternImportDxfPhaseEZeroConnectPendingHandoffV1,
+  type PatternImportDxfPhaseEZeroConnectPostSaveOwnerBlockerV1,
+  type PatternImportDxfPhaseEZeroConnectPostSaveOwnerResultV1,
+  type PatternImportDxfPhaseEZeroConnectPostSaveOwnerV1,
+} from './pattern-import/phase-e-workbench-v2/cad-table-zero-connect-post-save-owner-v1';
+import {
+  completePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1,
+  preparePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1,
+} from './pattern-import/phase-e-workbench-v2/cad-table-zero-connect-post-save-seam-link-v1';
+import { PatternImportDxfPhaseECadTableZeroOperationProductionMountV1 } from './pattern-import/phase-e-workbench-v2/cad-table-zero-operation-production-mount-v1';
+import { projectPatternImportDxfPhaseECadTableCurrentOperationV1 } from './pattern-import/phase-e-workbench-v2/cad-table-current-operation-projection-v1';
+import {
+  PATTERN_IMPORT_DXF_PHASE_E_CAD_OPERATION_NAVIGATION_V1,
+  type PatternImportDxfPhaseECadOperationNavigationV1,
+} from './pattern-import/phase-e-workbench-v2/cad-operation-navigation-v1';
+import { resolvePatternImportDxfPhaseECadWorkbenchOperationEditorOwnershipV1 } from './pattern-import/phase-e-workbench-v2/cad-workbench-operation-editor-ownership-v1';
+import { resolvePatternImportDxfPhaseECadWorkbenchThreadCatalogV1 } from './pattern-import/phase-e-workbench-v2/cad-workbench-bom-visual-authority-v1';
+import {
+  parsePatternImportDxfPhaseECadWorkbenchStitchEditorFieldV1,
+  resolvePatternImportDxfPhaseECadWorkbenchStitchEditorHandoffV1,
+  type PatternImportDxfPhaseECadWorkbenchStitchEditorContextV1,
+  type PatternImportDxfPhaseECadWorkbenchStitchEditorFieldV1,
+} from './pattern-import/phase-e-workbench-v2/cad-workbench-stitch-editor-handoff-v1';
+import {
+  derivePatternImportDxfPhaseECadWorkbenchStitchEditCapabilitiesV1,
+  planPatternImportDxfPhaseECadWorkbenchStitchRouteIntentV1,
+  type PatternImportDxfPhaseECadWorkbenchStitchEditCapabilitiesV1,
+} from './pattern-import/phase-e-workbench-v2/cad-workbench-stitch-route-intent-v1';
 import { useStepSeams } from './step-seams/step-seams-context';
 import { UnitPictureTile } from './step-seams/unit-picture-tile';
 import {
@@ -1000,6 +1071,112 @@ type PendingMoveChoice = {
   options: string[];
   selected: string;
 };
+
+function zeroConnectPostSaveRefused(
+  blocker: PatternImportDxfPhaseEZeroConnectPostSaveOwnerBlockerV1,
+  context: Readonly<{
+    historyKey?: string | null;
+    operationNumber?: number | null;
+    seamKey?: string | null;
+  }> = {},
+): PatternImportDxfPhaseEZeroConnectPostSaveOwnerResultV1 {
+  const pending =
+    blocker.code === 'zero-connect-seam-link-operation-pending-save' ||
+    blocker.code === 'zero-connect-seam-link-geometry-unavailable';
+  return Object.freeze({
+    ok: false as const,
+    status: pending ? ('pending' as const) : ('blocked' as const),
+    historyKey: context.historyKey ?? null,
+    operationNumber: context.operationNumber ?? null,
+    seamKey: context.seamKey ?? null,
+    blocker,
+    claims: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_POST_SAVE_OWNER_CLAIMS_V1,
+  });
+}
+
+function ZeroConnectPostSaveAction({
+  index,
+  pending,
+  owner,
+}: {
+  index: number;
+  pending: PatternImportDxfPhaseEZeroConnectPendingHandoffV1;
+  owner: PatternImportDxfPhaseEZeroConnectPostSaveOwnerV1;
+}) {
+  const { control } = useFormContext<TechCardFormData>();
+  const operationNumber =
+    (useWatch({ control, name: `operations.${index}.operationNumber` }) as number | undefined) ?? 0;
+  const [direction, setDirection] = useState<'same' | 'reversed' | null>(null);
+  const [linking, setLinking] = useState(false);
+  const [result, setResult] =
+    useState<PatternImportDxfPhaseEZeroConnectPostSaveOwnerResultV1 | null>(null);
+
+  const link = async () => {
+    if (linking || !direction || operationNumber <= 0 || owner.status !== 'available') return;
+    setLinking(true);
+    try {
+      setResult(
+        await owner.link({
+          schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_POST_SAVE_OWNER_V1,
+          candidate: pending.candidate,
+          catalog: pending.catalog,
+          projection: pending.projection,
+          direction,
+        }),
+      );
+    } finally {
+      setLinking(false);
+    }
+  };
+
+  return (
+    <div
+      className='mb-2 flex flex-wrap items-center gap-1 border border-borderColor bg-bgColor p-1.5'
+      data-zero-connect-pending-handoff={pending.historyKey}
+    >
+      <Text component='span' size='micro' className='mr-1 font-bold'>
+        CAD connection
+      </Text>
+      {(['same', 'reversed'] as const).map((value) => (
+        <button
+          key={value}
+          type='button'
+          className={cn(
+            'h-7 border px-2 text-micro',
+            direction === value
+              ? 'border-textColor bg-textColor text-bgColor'
+              : 'border-borderColor bg-bgColor text-textColor',
+          )}
+          aria-pressed={direction === value}
+          disabled={linking}
+          onClick={() => {
+            setDirection(value);
+            setResult(null);
+          }}
+        >
+          {value === 'same' ? 'Same direction' : 'Reversed'}
+        </button>
+      ))}
+      <button
+        type='button'
+        className='h-7 border border-textColor bg-textColor px-2 text-micro font-bold text-bgColor disabled:cursor-not-allowed disabled:opacity-40'
+        disabled={linking || !direction || operationNumber <= 0 || owner.status !== 'available'}
+        onClick={() => void link()}
+      >
+        {linking ? 'Linking…' : 'Link seam'}
+      </button>
+      <Text component='span' size='micro' variant='label' className='basis-full'>
+        {result?.blocker
+          ? result.blocker.detail
+          : owner.status === 'unavailable'
+            ? owner.blocker.detail
+            : operationNumber <= 0
+              ? 'Save this operation first. The table keeps its exact edge evidence in this session.'
+              : 'Choose direction, link the echoed seam key, then save the card normally.'}
+      </Text>
+    </div>
+  );
+}
 // One row of the card's equipment park, as the form holds it (decimals as strings). The step editor
 // reads the park to resolve what a blank field would inherit; CARD DEFAULTS owns editing it.
 type EquipmentDefaultsForm = NonNullable<TechCardFormData['construction']['equipmentDefaults']>;
@@ -1282,6 +1459,22 @@ type BomLine = {
   spec?: string;
 };
 
+type CadOperationNavigationRow = {
+  operationNumber?: number;
+  operationType?: common_TechCardOperationType;
+  machineType?: common_TechCardMachineType;
+  seamClass?: string;
+  topstitchMode?: string;
+  work?: string;
+  zone?: Parameters<typeof operationHeading>[0]['zone'];
+  note?: string;
+  inputKeys: string[];
+  seamKeys: string[];
+  outputUnitKey?: string;
+  outputUnitName?: string;
+  bomLineKeys: string[];
+};
+
 // What each colourway actually takes for a slot. The operation links the SLOT («основная молния»);
 // the article is per colourway, so this is the read-side join that makes «в разных колорвеях разная
 // фурнитура» visible on the step instead of only on the colorways tab.
@@ -1393,12 +1586,15 @@ function OperationsHeaderWarnings({
   frozen,
   onRatify,
   onStepProblem,
+  onWarningCountChange,
   stepProblems,
   cloth,
 }: {
   frozen?: boolean;
   onRatify: () => void;
   onStepProblem: (index: number) => void;
+  /** Count-only receipt for the card-level preflight owner; warning text never leaves this leaf. */
+  onWarningCountChange?: (count: number | null) => void;
   stepProblems: RailProblem[];
   cloth?: HeaderWarning | null;
 }) {
@@ -1552,6 +1748,10 @@ function OperationsHeaderWarnings({
   }
   if (unpinned > 0)
     items.push(`${unpinned} ${unpinned === 1 ? 'step' : 'steps'} without a sketch pin`);
+
+  const warningCount = items.length;
+  useEffect(() => onWarningCountChange?.(warningCount), [onWarningCountChange, warningCount]);
+  useEffect(() => () => onWarningCountChange?.(null), [onWarningCountChange]);
   if (items.length === 0) return null;
   return (
     <span className='contents' data-unnamed-steps={unnamed || undefined}>
@@ -3008,6 +3208,7 @@ function OperationEditor({
   serverOperations,
   onEdit,
   isEditorFrozen,
+  onStitchEditCapabilitiesChange,
   frozen = false,
   noteSuggested,
   revokeSuggestions,
@@ -3064,11 +3265,16 @@ function OperationEditor({
   onEdit?: () => void;
   /** Synchronous half of the effective frozen state, used after destructive awaits. */
   isEditorFrozen: () => boolean;
+  /** Publishes navigation-only stitch targets owned by this exact editor instance. */
+  onStitchEditCapabilitiesChange?: (
+    capabilities: PatternImportDxfPhaseECadWorkbenchStitchEditCapabilitiesV1 | null,
+  ) => void;
   /** Карточка выпущена: снимки и выноски читаются, но не правятся. */
   frozen?: boolean;
 }) {
   const form = useFormContext<TechCardFormData>();
   const { control, getValues, setValue } = form;
+  const stitchEditorRootRef = useRef<HTMLDivElement>(null);
   const teardownBinding = useBindingStripTeardown();
   const teardownTopstitch = useTopstitchLineTeardown();
   const unlinkSeams = useStepSeamUnlink();
@@ -4022,6 +4228,55 @@ function OperationEditor({
       : undefined;
   const kindHowKind = operationHowKind(activeKind?.id, workValue);
   const howKind = showBindingStyle ? 'bind' : kindHowKind;
+
+  // The workbench's stitch strip is a read-only projection. A contextual click comes back to this
+  // one editor through `?stitch=<field>`; the resolver only reveals/focuses an already-registered
+  // control. It does not write a value, add another form owner or ask for autosave.
+  const stitchEditorContext = useMemo<PatternImportDxfPhaseECadWorkbenchStitchEditorContextV1>(
+    () => ({
+      frozen,
+      showTopstitch,
+      showSewingOverrides,
+      showNeedleFacts,
+      needleCount,
+      topstitchModeTakesWidth: topstitchModeTakesWidth(topstitchMode),
+      topstitchModeInSetup: howKind !== 'topstitch',
+      topstitchOffsetInSetup: howKind !== 'topstitch' && howKind !== 'hem',
+      topstitchOperation: activeKind?.id === 'A2',
+      eligibleTopstitchThreadCount: (() => {
+        const catalog = resolvePatternImportDxfPhaseECadWorkbenchThreadCatalogV1(bomLines);
+        return catalog.ok ? catalog.keys.length : 0;
+      })(),
+    }),
+    [
+      activeKind?.id,
+      bomLines,
+      frozen,
+      howKind,
+      needleCount,
+      showNeedleFacts,
+      showSewingOverrides,
+      showTopstitch,
+      topstitchMode,
+    ],
+  );
+  const stitchEditCapabilities = useMemo(
+    () => derivePatternImportDxfPhaseECadWorkbenchStitchEditCapabilitiesV1(stitchEditorContext),
+    [stitchEditorContext],
+  );
+  useEffect(() => {
+    onStitchEditCapabilitiesChange?.(stitchEditCapabilities);
+    return () => onStitchEditCapabilitiesChange?.(null);
+  }, [onStitchEditCapabilitiesChange, stitchEditCapabilities]);
+  const stitchFocusField = parsePatternImportDxfPhaseECadWorkbenchStitchEditorFieldV1(
+    stepParams.get('stitch'),
+  );
+  const stitchEditorHandoff = stitchFocusField
+    ? resolvePatternImportDxfPhaseECadWorkbenchStitchEditorHandoffV1(
+        stitchFocusField,
+        stitchEditorContext,
+      )
+    : null;
   const isLabelStep = activeKind?.id === 'B5' || activeKind?.id === 'J3';
   const showIdentityOperation = !activeKind || activeKind.verb !== opType;
   const showIdentityMachine =
@@ -5147,6 +5402,46 @@ function OperationEditor({
   };
   howFields[howKind].forEach((field) => frontFields.add(field));
   const hasSetupError = Object.keys(stepErrors ?? {}).some((field) => !frontFields.has(field));
+  useEffect(() => {
+    if (!stitchFocusField || !stitchEditorHandoff) return;
+    if (!stitchEditorHandoff.ok) {
+      setStepParams(
+        (previous) => {
+          const next = new URLSearchParams(previous);
+          next.delete('stitch');
+          return next;
+        },
+        { replace: true },
+      );
+      return;
+    }
+    if (stitchEditorHandoff.openSetup && !overridesOpen && !hasSetupError) {
+      setOverridesOpen(true);
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      const target = stitchEditorRootRef.current?.querySelector<HTMLElement>(
+        `[data-stitch-editor-target="${stitchEditorHandoff.target}"]`,
+      );
+      if (!target) return;
+      const focusable = target.matches('button,input,select,textarea,[role="button"],[tabindex]')
+        ? target
+        : target.querySelector<HTMLElement>(
+            'button,input,select,textarea,[role="button"],[tabindex]',
+          );
+      target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      focusable?.focus({ preventScroll: true });
+      setStepParams(
+        (previous) => {
+          const next = new URLSearchParams(previous);
+          next.delete('stitch');
+          return next;
+        },
+        { replace: true },
+      );
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [hasSetupError, overridesOpen, setStepParams, stitchEditorHandoff, stitchFocusField]);
 
   // THE PRESET EFFECT AND THE THREAD AUTO-FILL BOTH LIVED HERE, and both are gone: nothing is
   // pre-filled from the step type any more. What replaces them is the PLACEHOLDER — the inherited
@@ -5327,12 +5622,14 @@ function OperationEditor({
       )}
 
       {activeKind?.id === 'A2' && (
-        <OperationTopstitchThreadPicker
-          index={index}
-          lines={bomLines}
-          frozen={frozen}
-          articles={colorwayArticles}
-        />
+        <div data-stitch-editor-target='thread'>
+          <OperationTopstitchThreadPicker
+            index={index}
+            lines={bomLines}
+            frozen={frozen}
+            articles={colorwayArticles}
+          />
+        </div>
       )}
 
       {activeKind?.id === 'B1' && (
@@ -5361,6 +5658,7 @@ function OperationEditor({
                     name={`operations.${index}.topstitchWidthMm`}
                     label='distance, mm'
                     maxDecimals={1}
+                    data-stitch-editor-target='offset'
                   />
                 </div>
               )}
@@ -5369,19 +5667,22 @@ function OperationEditor({
           {howKind === 'topstitch' && (
             <div className='space-y-2'>
               <div className='grid grid-cols-2 gap-2 sm:grid-cols-3'>
-                <SelectField
-                  name={`operations.${index}.topstitchMode`}
-                  label='at'
-                  onAfterChange={afterKindField('topstitchMode', topstitchMode)}
-                  items={topstitchModeOptionsFor(topstitchMode)}
-                  className={selectNoGrow}
-                />
+                <div data-stitch-editor-target='type'>
+                  <SelectField
+                    name={`operations.${index}.topstitchMode`}
+                    label='at'
+                    onAfterChange={afterKindField('topstitchMode', topstitchMode)}
+                    items={topstitchModeOptionsFor(topstitchMode)}
+                    className={selectNoGrow}
+                  />
+                </div>
                 <TopstitchEdgeSelect index={index} className={selectNoGrow} />
                 {showTopstitchWidth && (
                   <DecimalField
                     name={`operations.${index}.topstitchWidthMm`}
                     label='distance, mm'
                     maxDecimals={1}
+                    data-stitch-editor-target='offset'
                   />
                 )}
               </div>
@@ -5799,18 +6100,21 @@ function OperationEditor({
               )}
             {showTopstitch && howKind !== 'topstitch' && (
               <>
-                <SelectField
-                  name={`operations.${index}.topstitchMode`}
-                  label='topstitch'
-                  onAfterChange={afterKindField('topstitchMode', topstitchMode)}
-                  items={topstitchModeOptionsFor(topstitchMode)}
-                  className={selectNoGrow}
-                />
+                <div data-stitch-editor-target='type'>
+                  <SelectField
+                    name={`operations.${index}.topstitchMode`}
+                    label='topstitch'
+                    onAfterChange={afterKindField('topstitchMode', topstitchMode)}
+                    items={topstitchModeOptionsFor(topstitchMode)}
+                    className={selectNoGrow}
+                  />
+                </div>
                 {showTopstitchWidth && howKind !== 'hem' && (
                   <DecimalField
                     name={`operations.${index}.topstitchWidthMm`}
                     label={topstitchWidthLabel(topstitchMode)}
                     maxDecimals={1}
+                    data-stitch-editor-target='offset'
                   />
                 )}
                 <TopstitchRowTiles index={index} className='sm:col-span-2' />
@@ -5819,16 +6123,19 @@ function OperationEditor({
 
             {showNeedleFacts && (
               <>
-                <InheritableNumberField
-                  name={`operations.${index}.needleCount`}
-                  label='needles'
-                  value={needleCount}
-                />
+                <div data-stitch-editor-target='gauge-prerequisite'>
+                  <InheritableNumberField
+                    name={`operations.${index}.needleCount`}
+                    label='needles'
+                    value={needleCount}
+                  />
+                </div>
                 {showNeedleGauge && (
                   <DecimalField
                     name={`operations.${index}.needleGaugeMm`}
                     label='needle gauge, mm'
                     maxDecimals={1}
+                    data-stitch-editor-target='gauge'
                   />
                 )}
                 <SelectField
@@ -6183,6 +6490,7 @@ function OperationEditor({
                   label='stitches / cm'
                   maxDecimals={2}
                   placeholder={inherited.stitchDensity}
+                  data-stitch-editor-target='density'
                 />
                 <StitchLengthMirror
                   index={index}
@@ -6251,6 +6559,8 @@ function OperationEditor({
 
   return (
     <div
+      ref={stitchEditorRootRef}
+      data-operation-stitch-editor-owner=''
       onDragEnter={(e: ReactDragEvent) => {
         e.preventDefault();
         setOver(true);
@@ -6291,6 +6601,7 @@ const isKindField = (field: string): field is KindField =>
   (KIND_FIELDS as readonly string[]).includes(field);
 
 export function OperationsField({
+  assemblyTableActive = false,
   activePin = null,
   onActivePinChange,
   activeBom = null,
@@ -6316,7 +6627,10 @@ export function OperationsField({
   saving = false,
   sketchNote,
   headerAction,
+  onWarningCountChange,
 }: {
+  /** The production Assembly Table tab is visible; prepare its single CAD owner without a door. */
+  assemblyTableActive?: boolean;
   /** Несёт ли СОХРАНЁННАЯ карточка разметку — предикат тот же, что у маппера (§7.2 сервера). */
   storedHasUnits?: boolean;
   /** Несёт ли СОХРАНЁННАЯ карточка фотографии шагов — предикат тот же, что у серверного щита. */
@@ -6393,11 +6707,14 @@ export function OperationsField({
   sketchNote?: ReactNode;
   /** The tab's own controls for the block header (pattern parsing state, the skeleton door). */
   headerAction?: ReactNode;
+  /** Count-only projection of the exact warning list rendered in this block header. */
+  onWarningCountChange?: (count: number | null) => void;
 } = {}) {
-  const { control, getValues, setValue, watch } = useFormContext<TechCardFormData>();
+  const { clearErrors, control, getValues, setValue, watch } = useFormContext<TechCardFormData>();
   const stepSeams = useStepSeams();
   const seamStoreCardId = useSeamsStore((state) => state.cardId);
-  const { fields, append, remove, insert, replace } = useFieldArray({
+  const teardownBinding = useBindingStripTeardown();
+  const { fields, append, remove, insert, move, replace } = useFieldArray({
     control,
     name: 'operations',
   });
@@ -6408,9 +6725,62 @@ export function OperationsField({
   // only, and the print door is not drawn.
   const { id: routeId } = useParams<{ id: string }>();
   const techCardId = routeId ? parseInt(routeId, 10) : undefined;
+  const exactNApplicationOwner = useMemo(
+    () => createPatternImportDxfProductCompositeSidecarProductionTransactionV4(),
+    [],
+  );
+  const exactNSession = useSyncExternalStore(
+    useCallback(
+      (listener: () => void) =>
+        subscribePatternImportDxfProductExactNSeamProductionSessionV2(techCardId, listener),
+      [techCardId],
+    ),
+    useCallback(
+      () => readPatternImportDxfProductExactNSeamProductionSessionV2(techCardId),
+      [techCardId],
+    ),
+    () => null,
+  );
   const { data: savedCard } = useTechCard(techCardId);
   const autosave = useTechCardAutosave();
+  const [cadSemanticSessionRevision, setCadSemanticSessionRevision] = useState(0);
+  useEffect(
+    () =>
+      subscribePatternImportDxfPhaseECadSemanticReimportSessionV1(techCardId, () =>
+        setCadSemanticSessionRevision((revision) => revision + 1),
+      ),
+    [techCardId],
+  );
+  const cadSemanticSession = useMemo(
+    () => readPatternImportDxfPhaseECadSemanticReimportSessionV1(techCardId),
+    [cadSemanticSessionRevision, techCardId],
+  );
   const [params, setParams] = useSearchParams();
+  const [stitchEditCapabilities, setStitchEditCapabilities] =
+    useState<PatternImportDxfPhaseECadWorkbenchStitchEditCapabilitiesV1 | null>(null);
+  const publishStitchEditCapabilities = useCallback(
+    (capabilities: PatternImportDxfPhaseECadWorkbenchStitchEditCapabilitiesV1 | null) =>
+      setStitchEditCapabilities(capabilities),
+    [],
+  );
+  const editStitchField = useCallback(
+    (field: PatternImportDxfPhaseECadWorkbenchStitchEditorFieldV1) => {
+      const capability = stitchEditCapabilities?.[field];
+      if (!capability?.editable) return;
+      setParams(
+        (previous) => {
+          const intent = planPatternImportDxfPhaseECadWorkbenchStitchRouteIntentV1({
+            current: previous,
+            field,
+            capability,
+          });
+          return intent.ok ? new URLSearchParams(intent.search) : previous;
+        },
+        { replace: true },
+      );
+    },
+    [setParams, stitchEditCapabilities],
+  );
   // КАТАЛОГ РАБОТ НА ВЕСЬ РЕЛЬС — ОДНОЙ ПОДПИСКОЙ (R8). Имя шага теперь спрашивает работу, а
   // спрашивают его здесь три места сразу: строка рельса, схема сборки и панель ратификации.
   // Ключ у запроса один на приложение, поэтому второго обращения к сети хук не делает; но
@@ -6433,11 +6803,24 @@ export function OperationsField({
   //
   // Новый объект на каждый выбор: так отличается жест, выбравший шаг, от списка, сменившегося сам.
   const [selection, setSelection] = useState({ index: 0 });
+  const [zeroConnectPendingHandoff, setZeroConnectPendingHandoff] =
+    useState<PatternImportDxfPhaseEZeroConnectPendingHandoffV1 | null>(null);
   const selected = selection.index;
   const setSelected = useCallback((next: number | ((current: number) => number)) => {
     setSelection((cur) => ({ index: typeof next === 'function' ? next(cur.index) : next }));
   }, []);
   const selectedIndex = fields.length === 0 ? -1 : Math.min(selected, fields.length - 1);
+  const [cadWorkbenchOpen, setCadWorkbenchOpen] = useState(false);
+  useEffect(() => {
+    setCadWorkbenchOpen((current) =>
+      resolveAssemblyTableWorkbenchOpenV1(current, assemblyTableActive, selectedIndex),
+    );
+  }, [assemblyTableActive, selectedIndex]);
+  const cadOperationEditorOwnership =
+    resolvePatternImportDxfPhaseECadWorkbenchOperationEditorOwnershipV1(
+      selectedIndex,
+      cadWorkbenchOpen,
+    );
 
   // СПИСОК СМЕНИЛСЯ БЕЗ ЖЕСТА (сервер вставил шаг при записи): редактор остаётся на той же строке.
   // Сверка по historyKey, номер строки к этому моменту уже чужой.
@@ -6558,6 +6941,16 @@ export function OperationsField({
         onRefused: () => refuseGesture('SEAMS', 'not saved', 'still saving'),
       });
     const notWritten = { ok: false as const, why: STILL_SAVING };
+    const strictNotWritten: StrictSeamUpsertResult = Object.freeze({
+      ok: false as const,
+      rows: Object.freeze([]) as readonly [],
+      seamKeys: Object.freeze([]) as readonly [],
+      outcome: 'not-attempted' as const,
+      blocker: Object.freeze({
+        code: 'write-in-flight' as const,
+        detail: STILL_SAVING,
+      }),
+    });
     return {
       change: (c, opts) => write(() => sourceStepWrites.change(c, opts), notWritten),
       fresh: () => sourceStepWrites.fresh(),
@@ -6567,6 +6960,8 @@ export function OperationsField({
       placePoses: (step, put, drop, reflag) =>
         write(() => sourceStepWrites.placePoses(step, put, drop, reflag), false),
       upsert: (rows, errorAt) => write(() => sourceStepWrites.upsert(rows, errorAt), false),
+      upsertWithReceipt: (rows, errorAt) =>
+        write(() => sourceStepWrites.upsertWithReceipt(rows, errorAt), strictNotWritten),
       remove: (rows) => write(() => sourceStepWrites.remove(rows), false),
       upsertPoses: (rows) => write(() => sourceStepWrites.upsertPoses(rows), false),
       removePoses: (rows) => write(() => sourceStepWrites.removePoses(rows), false),
@@ -6580,7 +6975,6 @@ export function OperationsField({
     stepSeams.frozen = editorFrozen;
     stepSeams.writes = guardedStepWrites;
   }
-  const teardownBinding = useBindingStripTeardown();
   const issueTransactionWrite = useCallback(
     <T,>(write: () => T): T => issueStepWrite(stepWriteOwner, write),
     [],
@@ -7317,6 +7711,559 @@ export function OperationsField({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [applyRequest?.nonce]);
 
+  // CAD Pattern edits enter the card through THIS owner, never through the workbench. The callback
+  // re-reads the selected row at click time, validates the complete dependency-closed batch, and
+  // performs one field-array append. It deliberately does not request autosave: after the handoff
+  // these are ordinary `draft` rows, edited and saved by the existing Assembly Order flow.
+  const cadCommandHandoffLocks = useRef(new Map<string, number>());
+  const [, publishCadCommandHandoffLock] = useState(0);
+  const [cadSemanticPendingUpgrades, setCadSemanticPendingUpgrades] = useState<
+    readonly PatternImportDxfPhaseECadSemanticPendingUpgradeV1[]
+  >([]);
+  const [cadSemanticUpgradeFeedback, setCadSemanticUpgradeFeedback] = useState<string | null>(null);
+  useEffect(() => {
+    setCadSemanticPendingUpgrades([]);
+    setCadSemanticUpgradeFeedback(null);
+  }, [techCardId]);
+  const selectedCadAuthoringOperation =
+    selectedIndex >= 0
+      ? ((getValues('operations') ?? [])[selectedIndex] as OperationFormValue | undefined)
+      : undefined;
+  const selectedCadAuthoringProjection = selectedCadAuthoringOperation
+    ? projectPatternImportDxfPhaseECadTableCurrentOperationV1(selectedCadAuthoringOperation)
+    : null;
+  const selectedCadAuthoringKey = selectedCadAuthoringOperation?.historyKey ?? '';
+  const selectedCadAuthoringLocked = selectedCadAuthoringKey
+    ? cadCommandHandoffLocks.current.get(selectedCadAuthoringKey)
+    : undefined;
+  const cadCommandAuthoringHandoff: PatternImportDxfPhaseECadCommandAuthoringHandoffOwnerV1 =
+    selectedCadAuthoringLocked !== undefined
+      ? {
+          status: 'unavailable',
+          blocker: {
+            code: 'authoring-source-immutable',
+            detail: `CAD source revision ${selectedCadAuthoringLocked} was handed off and is now immutable.`,
+          },
+        }
+      : selectedCadAuthoringProjection
+        ? {
+            status: 'available',
+            operationNumber: selectedCadAuthoringProjection.operationNumber ?? 0,
+            assemblyRevision: revisionOfPatternImportDxfPhaseECadCommandAuthoringOperationV1(
+              selectedCadAuthoringProjection,
+            ),
+            ingest: (request) => {
+              if (frozen)
+                return {
+                  ok: false,
+                  inserted: 0,
+                  draftOperationIds: [],
+                  sourceRevision: request.sourceRevision,
+                  blocker: {
+                    code: 'authoring-owner-frozen',
+                    detail: FROZEN_REFUSAL,
+                  },
+                };
+              const live = (getValues('operations') ?? [])[selectedIndex] as
+                | OperationFormValue
+                | undefined;
+              if (!live)
+                return {
+                  ok: false,
+                  inserted: 0,
+                  draftOperationIds: [],
+                  sourceRevision: request.sourceRevision,
+                  blocker: {
+                    code: 'authoring-operation-mismatch',
+                    detail: 'The selected Assembly Order row is no longer available.',
+                  },
+                };
+              const current = projectPatternImportDxfPhaseECadTableCurrentOperationV1(live);
+              const existing = (getValues('operations') ?? []).map(
+                (operation) => operation.historyKey ?? '',
+              );
+              const prepared = preparePatternImportDxfPhaseECadCommandAuthoringHandoffV1({
+                request,
+                currentOperation: current,
+                existingHistoryKeys: existing,
+                workCatalog,
+                // The current card owner has no readback receipt correlating compiled DXF bytes
+                // with a fresh ordinary re-import yet. The compiler therefore emits only explicit
+                // persistence-pending draft rows with conservative work semantics.
+                reimportReceipt: null,
+              });
+              if (!prepared.ok)
+                return {
+                  ok: false,
+                  inserted: 0,
+                  draftOperationIds: [],
+                  sourceRevision: request.sourceRevision,
+                  blocker: prepared.blocker,
+                };
+              const pendingUpgrade = capturePatternImportDxfPhaseECadSemanticPendingUpgradeV1(
+                request,
+                current,
+              );
+              if (!pendingUpgrade)
+                return {
+                  ok: false,
+                  inserted: 0,
+                  draftOperationIds: [],
+                  sourceRevision: request.sourceRevision,
+                  blocker: {
+                    code: 'cad-semantic-reimport-receipt-invalid',
+                    detail: 'The exact same-session CAD upgrade evidence could not be retained.',
+                  },
+                };
+              const rows = prepared.rows.map((row) =>
+                newOperationRow({
+                  historyKey: row.historyKey,
+                  draft: row.draft,
+                  operationType: row.operationType,
+                  zone: row.zone,
+                  work: row.work,
+                  inputKeys: [...row.inputKeys],
+                  note: row.note,
+                }),
+              );
+              clearFormHistory();
+              append(rows);
+              setCadSemanticPendingUpgrades((currentPending) =>
+                Object.freeze([...currentPending, pendingUpgrade]),
+              );
+              setCadSemanticUpgradeFeedback(null);
+              cadCommandHandoffLocks.current.set(selectedCadAuthoringKey, request.sourceRevision);
+              publishCadCommandHandoffLock((revision) => revision + 1);
+              return {
+                ok: true,
+                inserted: rows.length,
+                draftOperationIds: prepared.draftOperationIds,
+                sourceRevision: request.sourceRevision,
+                blocker: null,
+              };
+            },
+          }
+        : {
+            status: 'unavailable',
+            blocker: {
+              code: 'authoring-owner-unavailable',
+              detail: 'The existing Assembly Order form owner is not mounted for this selection.',
+            },
+          };
+
+  const selectedCadSemanticPending = cadSemanticPendingUpgrades.find((pending) =>
+    pending.historyKeys.includes(selectedCadAuthoringKey),
+  );
+  const selectedCadSemanticReceipt = selectedCadSemanticPending
+    ? cadSemanticSession.receipts.find((receipt) => {
+        const first = selectedCadSemanticPending.drafts[0];
+        return (
+          first !== undefined &&
+          receipt.sourceRevision === selectedCadSemanticPending.sourceRevision &&
+          receipt.source.catalogCanonicalSha256 === first.sourceCatalogCanonicalSha256 &&
+          receipt.source.sizeSelectionCanonicalSha256 === first.sourceSizeSelectionCanonicalSha256
+        );
+      }) ?? null
+    : null;
+  const upgradeSelectedCadSemanticDrafts = () => {
+    if (!selectedCadSemanticPending || frozen) return;
+    const liveRows = (getValues('operations') ?? []) as OperationFormValue[];
+    const plan = planPatternImportDxfPhaseECadSemanticOperationUpgradeV1({
+      pending: selectedCadSemanticPending,
+      receipt: selectedCadSemanticReceipt,
+      liveRows,
+      workCatalog,
+    });
+    if (!plan.ok) {
+      setCadSemanticUpgradeFeedback(`${plan.blocker.detail} [${plan.blocker.code}]`);
+      return;
+    }
+    if (plan.status === 'already-verified') {
+      setCadSemanticUpgradeFeedback('Verified re-import semantics are already applied.');
+      return;
+    }
+    clearFormHistory();
+    for (const update of plan.updates) {
+      setValue(`operations.${update.index}.operationType`, update.operationType, {
+        shouldDirty: true,
+      });
+      setValue(`operations.${update.index}.work`, update.work, { shouldDirty: true });
+      setValue(`operations.${update.index}.note`, update.note, { shouldDirty: true });
+    }
+    setCadSemanticUpgradeFeedback(
+      `${plan.updates.length} CAD draft${plan.updates.length === 1 ? '' : 's'} verified in place. Save the tech card normally.`,
+    );
+  };
+
+  // Contextual Press/Iron gestures append one ordinary editable draft through this sole field-array
+  // owner. Exact piece authority is prepared by the active 2D scope; this boundary only admits the
+  // detached candidate, resolves its work through the current catalog and performs one local append.
+  const pressAuthoringHandoff: PatternImportDxfPhaseECadTablePressAuthoringOwnerV1 = frozen
+    ? {
+        status: 'unavailable',
+        blocker: {
+          code: 'press-authoring-owner-frozen',
+          detail: FROZEN_REFUSAL,
+        },
+      }
+    : {
+        status: 'available',
+        ingest: (candidate) => {
+          if (!techCardId || candidate.techCardId !== techCardId)
+            return {
+              ok: false,
+              inserted: 0,
+              historyKey: null,
+              blocker: {
+                code: 'press-exact-selection-unavailable',
+                detail: 'The selected Press pieces do not belong to the current tech card.',
+              },
+            };
+          const liveOperations = (getValues('operations') ?? []) as OperationFormValue[];
+          const identity = newOperationRow().historyKey;
+          const preparedPress = preparePatternImportDxfPhaseECadTablePressDraftRowV1({
+            candidate,
+            historyKey: identity,
+            existingHistoryKeys: liveOperations.map(({ historyKey }) => historyKey ?? ''),
+            workCatalog,
+          });
+          if (!preparedPress.ok)
+            return {
+              ok: false,
+              inserted: 0,
+              historyKey: null,
+              blocker: preparedPress.blocker,
+            };
+          clearFormHistory();
+          append(
+            newOperationRow({
+              ...preparedPress.row,
+              inputKeys: [...preparedPress.row.inputKeys],
+            }),
+          );
+          setSelected(liveOperations.length);
+          return {
+            ok: true,
+            inserted: 1,
+            historyKey: preparedPress.row.historyKey,
+            blocker: null,
+          };
+        },
+      };
+
+  // A connection drawn on the 2D table enters the card through the same, sole field-array owner.
+  // The workbench only supplies exact detached evidence. This boundary re-reads the live rows,
+  // rebuilds the append identity plan and rejects stale/duplicate evidence before one append.
+  // It deliberately does not save or mint a persisted operation identity: the ordinary card save
+  // remains the only network writer, and the current backend returns only a positional number.
+  const zeroConnectAuthoringHandoff: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1 =
+    frozen
+      ? {
+          status: 'unavailable',
+          blocker: {
+            code: 'zero-connect-authoring-owner-frozen',
+            detail: FROZEN_REFUSAL,
+          },
+        }
+      : {
+          status: 'available',
+          ingest: (request) => {
+            if (
+              request.schemaVersion !== PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_AUTHORING_HANDOFF_V1
+            )
+              return {
+                ok: false,
+                inserted: 0,
+                historyKey: null,
+                sessionRevision: null,
+                blocker: {
+                  code: 'zero-connect-authoring-write-refused',
+                  detail: 'The 2D table connection uses an unsupported handoff schema.',
+                },
+              };
+            const liveOperations = (getValues('operations') ?? []) as OperationFormValue[];
+            if (
+              zeroConnectPendingHandoff &&
+              liveOperations.some(
+                ({ historyKey }) => historyKey === zeroConnectPendingHandoff.historyKey,
+              )
+            )
+              return {
+                ok: false,
+                inserted: 0,
+                historyKey: null,
+                sessionRevision: request.session.revision,
+                blocker: {
+                  code: 'zero-connect-authoring-write-refused',
+                  detail:
+                    'Finish or remove the pending CAD connection before starting another one.',
+                },
+              };
+            const identity = buildPatternImportDxfPhaseECadTableZeroConnectIdentityPlanV1(
+              [request.session],
+              liveOperations.length,
+            );
+            if (!identity.ok)
+              return {
+                ok: false,
+                inserted: 0,
+                historyKey: null,
+                sessionRevision: request.session.revision,
+                blocker: {
+                  code: 'zero-connect-authoring-write-refused',
+                  detail:
+                    identity.blockers[0]?.detail ??
+                    'The current Assembly Order cannot admit this connection draft.',
+                },
+              };
+            const prepared = preparePatternImportDxfPhaseEZeroConnectCardOperationRowV1({
+              candidate: request.candidate,
+              session: request.session,
+              identityPlan: identity.plan,
+              existingHistoryKeys: liveOperations.map(({ historyKey }) => historyKey ?? ''),
+            });
+            if (!prepared.ok)
+              return {
+                ok: false,
+                inserted: 0,
+                historyKey: null,
+                sessionRevision: prepared.sessionRevision,
+                blocker: prepared.blocker,
+              };
+            const row = prepared.row;
+            const pending = createPatternImportDxfPhaseEZeroConnectPendingHandoffV1({
+              historyKey: row.historyKey,
+              candidate: request.candidate,
+              catalog: request.catalog,
+              projection: request.projection,
+            });
+            if (!pending)
+              return {
+                ok: false,
+                inserted: 0,
+                historyKey: null,
+                sessionRevision: prepared.sessionRevision,
+                blocker: {
+                  code: 'zero-connect-authoring-write-refused',
+                  detail: 'The exact zero-connect gesture evidence could not be retained.',
+                },
+              };
+            clearFormHistory();
+            append(
+              newOperationRow({
+                ...row,
+                inputKeys: [...row.inputKeys],
+              }),
+            );
+            setZeroConnectPendingHandoff(pending);
+            return {
+              ok: true,
+              inserted: 1,
+              historyKey: row.historyKey,
+              sessionRevision: prepared.sessionRevision,
+              blocker: null,
+            };
+          },
+        };
+
+  // Phase two is deliberately a separate, user-triggered boundary. The operation must have come
+  // back through the ordinary card save with its same client history key and a positive positional
+  // number; then the existing seam writer persists one row and only its verified echoed key is
+  // attached through this field-array owner. No save is triggered here and the two writes are not
+  // presented as atomic.
+  const zeroConnectPostSaveOwner: PatternImportDxfPhaseEZeroConnectPostSaveOwnerV1 = frozen
+    ? {
+        status: 'unavailable',
+        blocker: {
+          code: 'zero-connect-seam-link-owner-frozen',
+          detail: FROZEN_REFUSAL,
+        },
+      }
+    : !stepSeams
+      ? {
+          status: 'unavailable',
+          blocker: {
+            code: 'zero-connect-seam-link-owner-unavailable',
+            detail: 'The existing seam and Assembly Order owners are not mounted.',
+          },
+        }
+      : {
+          status: 'available',
+          link: async (request) => {
+            if (
+              request.schemaVersion !==
+                PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_POST_SAVE_OWNER_V1 ||
+              (request.direction !== 'same' && request.direction !== 'reversed')
+            )
+              return zeroConnectPostSaveRefused({
+                code: 'zero-connect-seam-link-request-invalid',
+                detail: 'Choose an explicit same or reversed seam direction for this connection.',
+              });
+            const liveOperations = (getValues('operations') ?? []) as OperationFormValue[];
+            const saved = resolvePatternImportDxfPhaseEZeroConnectSavedOperationV1(
+              liveOperations,
+              request.candidate,
+            );
+            if (!saved.ok)
+              return zeroConnectPostSaveRefused(saved.blocker, {
+                historyKey: request.candidate.operation.sessionOperationId,
+              });
+            const geometry = [...stepSeams.geometry.pieces.values()].map(({ geom }) => geom);
+            if (
+              !stepSeams.cardId ||
+              stepSeams.geometry.dep.status !== 'ok' ||
+              !stepSeams.geometry.size ||
+              geometry.length === 0
+            )
+              return zeroConnectPostSaveRefused(
+                {
+                  code: 'zero-connect-seam-link-geometry-unavailable',
+                  detail: 'Current saved-card skeleton geometry is still unavailable for linking.',
+                },
+                {
+                  historyKey: saved.savedOperation.historyKey,
+                  operationNumber: saved.savedOperation.operationNumber,
+                },
+              );
+            const prepared = preparePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1({
+              savedOperation: saved.savedOperation,
+              candidate: request.candidate,
+              catalog: request.catalog,
+              projection: request.projection,
+              geometry,
+              geometrySizeToken: stepSeams.geometry.size,
+              direction: request.direction,
+              nameOf: stepSeams.nameOf,
+              grainDeg: stepSeams.geometry.grainDeg,
+            });
+            if (!prepared.ok)
+              return zeroConnectPostSaveRefused(prepared.blocker, {
+                historyKey: saved.savedOperation.historyKey,
+                operationNumber: saved.savedOperation.operationNumber,
+              });
+            const strictReceipt = await stepSeams.writes.upsertWithReceipt([
+              ...prepared.receipt.nextCommand.rows,
+            ]);
+            const completed = completePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1(
+              prepared.receipt,
+              strictReceipt,
+            );
+            if (!completed.ok)
+              return zeroConnectPostSaveRefused(completed.blocker, {
+                historyKey: saved.savedOperation.historyKey,
+                operationNumber: saved.savedOperation.operationNumber,
+              });
+            const attach = planPatternImportDxfPhaseEZeroConnectOperationSeamAttachV1(
+              (getValues('operations') ?? []) as OperationFormValue[],
+              completed.receipt,
+            );
+            if (!attach.ok)
+              return zeroConnectPostSaveRefused(attach.blocker, {
+                historyKey: saved.savedOperation.historyKey,
+                operationNumber: saved.savedOperation.operationNumber,
+                seamKey: completed.receipt.finalSeamKey,
+              });
+            if (attach.changed) {
+              clearFormHistory();
+              setValue(`operations.${attach.operationIndex}.seamKeys`, [...attach.seamKeys], {
+                shouldDirty: true,
+              });
+            }
+            setZeroConnectPendingHandoff((current) =>
+              current?.historyKey === saved.savedOperation.historyKey ? null : current,
+            );
+            return Object.freeze({
+              ok: true as const,
+              status: 'final-echoed-seam-key-attached' as const,
+              historyKey: saved.savedOperation.historyKey,
+              operationNumber: saved.savedOperation.operationNumber,
+              seamKey: completed.receipt.finalSeamKey,
+              blocker: null,
+              claims: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_POST_SAVE_OWNER_CLAIMS_V1,
+            });
+          },
+        };
+
+  const crossScopeOperation =
+    selectedIndex >= 0
+      ? ((getValues('operations') ?? [])[selectedIndex] as OperationFormValue | undefined) ?? null
+      : null;
+  const crossScopeInputKeys = (crossScopeOperation?.inputKeys ?? [])
+    .map((key) => key.trim())
+    .filter(Boolean);
+  const crossScopeOperationBindingReady = Boolean(
+    crossScopeOperation &&
+      Number.isSafeInteger(crossScopeOperation.operationNumber) &&
+      (crossScopeOperation.operationNumber ?? 0) > 0 &&
+      /^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,255}$/.test(crossScopeOperation.historyKey ?? '') &&
+      crossScopeInputKeys.length === 2 &&
+      new Set(crossScopeInputKeys).size === 2,
+  );
+  const crossScopeAuthoringHandoff: PatternImportDxfPhaseECadTableCrossScopeAuthoringHandoffOwnerV1 =
+    frozen
+      ? {
+          status: 'unavailable',
+          blocker: {
+            code: 'cross-scope-authoring-owner-frozen',
+            detail: FROZEN_REFUSAL,
+          },
+        }
+      : !stepSeams
+        ? {
+            status: 'unavailable',
+            blocker: {
+              code: 'cross-scope-authoring-owner-unavailable',
+              detail: 'The existing seam and Assembly Order owners are not mounted.',
+            },
+          }
+        : !crossScopeOperationBindingReady
+          ? {
+              status: 'unavailable',
+              blocker: {
+                code: 'cross-scope-authoring-operation-mismatch',
+                detail:
+                  'Save one operation with stable history and exactly two distinct piece inputs before linking material scopes.',
+              },
+            }
+          : {
+              status: 'available',
+              link: async (request) => {
+                const operations = (getValues('operations') ?? []) as OperationFormValue[];
+                const selectedOperation =
+                  selectedIndex >= 0 ? operations[selectedIndex] ?? null : null;
+                const toExactOperation = (operation: OperationFormValue) => ({
+                  historyKey: operation.historyKey ?? '',
+                  operationNumber: operation.operationNumber ?? 0,
+                  inputKeys: operation.inputKeys ?? [],
+                  seamKeys: operation.seamKeys ?? [],
+                });
+                const result =
+                  await executePatternImportDxfPhaseECadTableCrossScopeAuthoringHandoffV1({
+                    request,
+                    techCardId: stepSeams.cardId ?? 0,
+                    selectedOperation: selectedOperation
+                      ? toExactOperation(selectedOperation)
+                      : null,
+                    geometry: [...stepSeams.geometry.pieces.values()].map(({ geom }) => geom),
+                    geometrySizeToken: stepSeams.geometry.size,
+                    nameOf: stepSeams.nameOf,
+                    grainDeg: stepSeams.geometry.grainDeg,
+                    strictUpsert: (rows) => stepSeams.writes.upsertWithReceipt([...rows]),
+                    readOperations: () =>
+                      ((getValues('operations') ?? []) as OperationFormValue[]).map(
+                        toExactOperation,
+                      ),
+                  });
+                if (result.ok) {
+                  clearFormHistory();
+                  setValue(`operations.${result.operationIndex}.seamKeys`, [...result.seamKeys], {
+                    shouldDirty: true,
+                  });
+                }
+                return result;
+              },
+            };
+
   // --- ЧЕРНОВИК КАРКАСА (0410): МЕТКА — ПОЛЕ СТРОКИ `draft`, А НЕ СОСТОЯНИЕ СЕССИИ -------------------
   //
   // Правда одна — `operations[i].draft`: его ставит `rowFromStep`, его везёт автосейв, его читает
@@ -7521,6 +8468,29 @@ export function OperationsField({
     name: 'operations',
     compute: (rows) => (rows ?? []).map((row) => (row?.review ?? '').trim()),
   }) ?? []) as string[];
+  // Compact CAD navigation is a read projection of this existing owner. Keeping the exact heading
+  // and context inputs in one computed watch makes the dock follow edits without a second form,
+  // field array or document model.
+  const cadNavigationRows = (useWatch({
+    control,
+    name: 'operations',
+    compute: (rows) =>
+      (rows ?? []).map((row) => ({
+        operationNumber: row?.operationNumber,
+        operationType: row?.operationType,
+        machineType: row?.machineType,
+        seamClass: row?.seamClass,
+        topstitchMode: row?.topstitchMode,
+        work: row?.work,
+        zone: row?.zone,
+        note: row?.note,
+        inputKeys: [...(row?.inputKeys ?? [])],
+        seamKeys: [...(row?.seamKeys ?? [])],
+        outputUnitKey: row?.outputUnitKey,
+        outputUnitName: row?.outputUnitName,
+        bomLineKeys: [...(row?.bomLineKeys ?? [])],
+      })),
+  }) ?? []) as CadOperationNavigationRow[];
   const operationPieceInputs = (useWatch({
     control,
     name: 'operations',
@@ -7597,7 +8567,7 @@ export function OperationsField({
   const previousPack = useMemo(() => reviewDxfPack(previousRows, scopes), [previousRows, scopes]);
   const previousGeometry = useDxfGeometry(
     previousPack,
-    anyReview && params.get('tab') === 'construction',
+    anyReview && params.get('tab') === 'assembly-table',
   );
   const previousIndex = useDxfIndex(previousGeometry.data);
   const ghostKeys = useMemo(
@@ -8973,6 +9943,57 @@ export function OperationsField({
     }) || 'step') + (draftIds.has(fields[i]?.id ?? '') ? ' · draft' : '');
 
   const pieceNameOf = (k: string) => pieces.find((p) => p.lineKey === k)?.name ?? k;
+  const cadOperationNavigation: PatternImportDxfPhaseECadOperationNavigationV1 = {
+    schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_CAD_OPERATION_NAVIGATION_V1,
+    selectedIndex,
+    items: fields.map((field, index) => {
+      const row = cadNavigationRows[index];
+      const storedNumber = Number(row?.operationNumber ?? 0);
+      const operationNumber =
+        Number.isSafeInteger(storedNumber) && storedNumber > 0 ? storedNumber : (index + 1) * 10;
+      const inputKeys = (row?.inputKeys ?? []).map((key) => key.trim()).filter(Boolean);
+      const seamKeys = (row?.seamKeys ?? []).map((key) => key.trim()).filter(Boolean);
+      const outputKey = row?.outputUnitKey?.trim() ?? '';
+      const bomLineKeys = (row?.bomLineKeys ?? []).map((key) => key.trim()).filter(Boolean);
+      const missing = errorIndices.has(index);
+      const broken = brokenSteps.has(index);
+      const review = Boolean(reviewKinds[index]);
+      const draft = draftIds.has(field.id);
+      const warnings = [
+        missing ? 'required fields' : null,
+        broken ? 'assembly dependency' : null,
+        review ? 'review' : null,
+      ].filter((warning): warning is string => Boolean(warning));
+      return {
+        index,
+        operationNumber,
+        title: labelOfStep(index).replace(/ · draft$/, ''),
+        work: row?.work?.trim() || null,
+        typeLabel: row?.operationType
+          ? OPERATION_TYPE_LABELS[row.operationType] ?? row.operationType
+          : null,
+        status: {
+          missing,
+          broken,
+          problem: problemIndices.has(index),
+          draft,
+          review,
+        },
+        context: {
+          inputs: inputKeys.map((key) => ({ key, label: pieceNameOf(key) })),
+          seamKeys,
+          output: outputKey
+            ? { key: outputKey, label: row?.outputUnitName?.trim() || outputKey }
+            : null,
+          bomRefs: bomLineKeys.map((key) => ({
+            key,
+            label: bomItems.find((line) => line.lineKey?.trim() === key)?.name?.trim() || key,
+          })),
+          warnings,
+        },
+      };
+    }),
+  };
   const unplacedReuploadedKeys = unplacedPieceKeys(
     [...reuploadedPieceKeys],
     (getValues('operations') ?? []) as CardOperation[],
@@ -9095,7 +10116,7 @@ export function OperationsField({
             // Фулскрин — вид ВКЛАДКИ СБОРКИ. Пришедший по ссылке без `tab` иначе открывал бы
             // оверлей над заголовком карточки, а по выходу оставлял бы человека не там, где он
             // только что работал.
-            p.set('tab', 'construction');
+            p.set('tab', 'assembly-table');
           } else {
             p.delete('fs');
           }
@@ -9116,7 +10137,7 @@ export function OperationsField({
           const p = new URLSearchParams(prev);
           if (on) {
             p.set('walk', '1');
-            p.set('tab', 'construction');
+            p.set('tab', 'assembly-table');
           } else {
             p.delete('walk');
           }
@@ -9158,12 +10179,12 @@ export function OperationsField({
       tabEnforced.current = false;
       return;
     }
-    if (tabEnforced.current || tabParam === 'construction') return;
+    if (tabEnforced.current || tabParam === 'assembly-table') return;
     tabEnforced.current = true;
     setParams(
       (prev) => {
         const p = new URLSearchParams(prev);
-        p.set('tab', 'construction');
+        p.set('tab', 'assembly-table');
         return p;
       },
       { replace: true },
@@ -9266,6 +10287,48 @@ export function OperationsField({
     else void redoGesture();
   };
 
+  // ONE editor node, two possible homes. OperationsField still owns the only useFieldArray and
+  // react-hook-form tree; opening CAD unmounts the inline placement before the same editor is
+  // mounted in its dock. Rendering both would register every operation control twice.
+  const selectedZeroConnectPending = patternImportDxfPhaseEZeroConnectPendingForOperationV1(
+    zeroConnectPendingHandoff,
+    selectedIndex >= 0
+      ? ((getValues('operations') ?? [])[selectedIndex] as OperationFormValue | undefined)
+      : null,
+  );
+  const selectedOperationEditor =
+    selectedIndex >= 0 ? (
+      <OperationEditor
+        key={`${fields[selectedIndex]?.id ?? 'op'}:${selectedIndex}`}
+        noteSuggested={noteSuggested}
+        revokeSuggestions={revokeSuggestions}
+        index={selectedIndex}
+        bomLines={bomItems}
+        pieces={pieces}
+        pieceShapes={pieceShapes}
+        previousPieceShapes={previousPieceShapes}
+        ghostKeys={ghostKeys}
+        cloth={inlineCloth?.map ?? null}
+        colorwayArticles={colorwayArticles}
+        pinOptions={pinOptions}
+        onInsertAfter={() => insertAfter(selectedIndex)}
+        onRemove={() => requestRemoveOperation(selectedIndex)}
+        onMarkReviewed={() => markReviewed(selectedIndex)}
+        onReviewAccepted={() => acceptReview(selectedIndex)}
+        onFlashPieces={flashPieces}
+        onActiveBomChange={onActiveBomChange}
+        onEdit={clearFormHistory}
+        onDropPiece={addInputToOperation}
+        onReplaceGhost={replaceStepGhost}
+        onRemoveGhost={removeStepGhost}
+        mediaUrls={operationMediaUrls}
+        serverOperations={savedCard?.techCard?.operations}
+        isEditorFrozen={isEditorFrozen}
+        onStitchEditCapabilitiesChange={publishStitchEditCapabilities}
+        frozen={editorFrozen}
+      />
+    ) : null;
+
   return (
     <div className='space-y-2.5' data-history-owner='construction' onKeyDown={routeHistoryKey}>
       <SectionHeader
@@ -9277,6 +10340,7 @@ export function OperationsField({
               frozen={editorFrozen}
               onRatify={() => setRatifyOpen(true)}
               onStepProblem={(index) => setSelected(index)}
+              onWarningCountChange={onWarningCountChange}
               stepProblems={stepProblems}
               cloth={clothWarning}
             />
@@ -9570,38 +10634,86 @@ export function OperationsField({
                 // колонкой, и там `flex-1` растягивал бы высоту, а не ширину.
                 className={cn('min-w-0 scroll-mt-20', effectiveMode === 'list' && 'lg:flex-1')}
               >
-                <OperationEditor
-                  // Keyed on the row's identity AND its position: both of the editor's "skip the first
-                  // run" guards are keyed to a mount, and their effects depend on `index`. Reordering
-                  // the open step changes the index without remounting, which would fire the
-                  // operation-type preset and the thread-from-BOM fill as if the user had just picked
-                  // them — quietly writing into blank machine / stitch / thread fields on a drag.
-                  key={`${fields[selectedIndex]?.id ?? 'op'}:${selectedIndex}`}
-                  noteSuggested={noteSuggested}
-                  revokeSuggestions={revokeSuggestions}
-                  index={selectedIndex}
-                  bomLines={bomItems}
-                  pieces={pieces}
-                  pieceShapes={pieceShapes}
-                  previousPieceShapes={previousPieceShapes}
-                  ghostKeys={ghostKeys}
-                  cloth={inlineCloth?.map ?? null}
-                  colorwayArticles={colorwayArticles}
-                  pinOptions={pinOptions}
-                  onInsertAfter={() => insertAfter(selectedIndex)}
-                  onRemove={() => requestRemoveOperation(selectedIndex)}
-                  onMarkReviewed={() => markReviewed(selectedIndex)}
-                  onReviewAccepted={() => acceptReview(selectedIndex)}
-                  onFlashPieces={flashPieces}
-                  onActiveBomChange={onActiveBomChange}
-                  onEdit={clearFormHistory}
-                  onDropPiece={addInputToOperation}
-                  onReplaceGhost={replaceStepGhost}
-                  onRemoveGhost={removeStepGhost}
-                  mediaUrls={operationMediaUrls}
-                  serverOperations={savedCard?.techCard?.operations}
-                  isEditorFrozen={isEditorFrozen}
-                  frozen={editorFrozen}
+                {selectedCadSemanticPending ? (
+                  <CalloutBox
+                    tone={selectedCadSemanticReceipt ? 'note' : 'warning'}
+                    className='mb-2'
+                  >
+                    <div
+                      className='flex flex-wrap items-center justify-between gap-2'
+                      data-cad-semantic-persistence-upgrade=''
+                    >
+                      <div className='min-w-0'>
+                        <Text component='p' size='micro' className='font-bold'>
+                          CAD geometry persistence
+                        </Text>
+                        <Text component='p' size='micro'>
+                          {selectedCadSemanticReceipt
+                            ? 'Fresh DXF re-import exact-matched this same-session compile. Upgrade the existing draft rows in place.'
+                            : cadSemanticSession.blocker?.detail ??
+                              'Pending: compile and re-import the generated DXF through the ordinary Patterns import in this same card session.'}
+                        </Text>
+                        {cadSemanticUpgradeFeedback ? (
+                          <Text component='p' size='micro' className='mt-1 font-bold'>
+                            {cadSemanticUpgradeFeedback}
+                          </Text>
+                        ) : null}
+                      </div>
+                      <Button
+                        type='button'
+                        size='xs'
+                        variant='main'
+                        disabled={frozen || !selectedCadSemanticReceipt}
+                        onClick={upgradeSelectedCadSemanticDrafts}
+                      >
+                        Verify re-import
+                      </Button>
+                    </div>
+                  </CalloutBox>
+                ) : null}
+                {selectedZeroConnectPending ? (
+                  <ZeroConnectPostSaveAction
+                    key={selectedZeroConnectPending.historyKey}
+                    index={selectedIndex}
+                    pending={selectedZeroConnectPending}
+                    owner={zeroConnectPostSaveOwner}
+                  />
+                ) : null}
+                {cadOperationEditorOwnership.renderInline ? selectedOperationEditor : null}
+                <PatternImportDxfPhaseEAssemblyOrderEntryMountV1
+                  techCardId={techCardId}
+                  selectedIndex={selectedIndex}
+                  operationsPanel={
+                    cadOperationEditorOwnership.renderInWorkbench
+                      ? selectedOperationEditor
+                      : undefined
+                  }
+                  operationNavigation={cadOperationNavigation}
+                  onSelectOperation={setSelected}
+                  cadCommandAuthoringHandoff={cadCommandAuthoringHandoff}
+                  zeroConnectAuthoringHandoff={zeroConnectAuthoringHandoff}
+                  crossScopeAuthoringHandoff={crossScopeAuthoringHandoff}
+                  pressAuthoringHandoff={pressAuthoringHandoff}
+                  stitchEditCapabilities={stitchEditCapabilities ?? undefined}
+                  onEditStitchField={editStitchField}
+                  exactNApplicationOwner={exactNApplicationOwner}
+                  exactNSession={exactNSession}
+                  workbenchOpen={cadWorkbenchOpen}
+                  autoOpen={assemblyTableActive}
+                  onOpenChange={setCadWorkbenchOpen}
+                  frozen={frozen}
+                />
+              </div>
+            )}
+            {selectedIndex < 0 && assemblyTableActive && (
+              <div className='min-w-0 lg:flex-1' data-zero-operation-cad-owner=''>
+                <PatternImportDxfPhaseECadTableZeroOperationProductionMountV1
+                  techCardId={techCardId}
+                  zeroConnectAuthoringHandoff={zeroConnectAuthoringHandoff}
+                  disabled={frozen}
+                  savedOnly={(savedCard?.techCard?.patterns ?? []).some((pattern) =>
+                    Boolean(pattern?.url),
+                  )}
                 />
               </div>
             )}

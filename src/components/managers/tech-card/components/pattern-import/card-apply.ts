@@ -6,6 +6,7 @@ import { sha256Hex } from 'lib/features/sha256';
 import { applyDraft } from 'lib/pattern-import/fabrics/apply';
 import type { ApplyDeps, LiveCard, ScopeOf } from 'lib/pattern-import/fabrics/apply';
 import { buildDraft } from 'lib/pattern-import/fabrics/draft';
+import type { ApplyResult, CardDraft } from 'lib/pattern-import/types';
 import { MAX_PATTERN_FILENAME, clampUtf8Bytes, patternUploadErrorMessage } from 'utils/pattern';
 import { deepEqual } from '../useTechCardAutosave';
 import type { ApplyDraftFn, DraftBuilder } from './client';
@@ -31,7 +32,8 @@ export function importRowsLanded(
 }
 
 /** F7 `buildDraft` against the card the wizard read when it opened. */
-export const cardBuildDraft: DraftBuilder = (write, { card }) => buildDraft(write, card);
+export const cardBuildDraft: DraftBuilder = (write, { card, dxfProvenance, dxfPhaseDReplay }) =>
+  buildDraft(write, card, { dxfProvenance, dxfPhaseDReplay });
 
 /**
  * ASCII DXF (the writer guarantees it, write/format.ts) → base64 as UploadPattern takes it. `btoa`
@@ -58,6 +60,8 @@ export function createCardApply(deps: {
   scopeOf: ScopeOf;
   /** The card's autosave `flush` (the one save path the page has). */
   save?: (reason: string) => Promise<string>;
+  /** Shared card lock the autosave form will claim for the body write. */
+  readPreviousLockVersion?: () => number;
   /** Sheets replaced in place, told after the form writes and before the save. */
   onReplaced?: ApplyDeps['onReplaced'];
   /** Rows a try wrote whose save was not confirmed — held by the card across the wizard's tries. */
@@ -66,9 +70,21 @@ export function createCardApply(deps: {
   landed?: ApplyDeps['landed'];
   /** The save is past the body: only the fusing rebuild after it still runs (T5). */
   rebuilding?: ApplyDeps['rebuilding'];
+  /**
+   * Additive post-save seam for product semantic attachment. It runs only after `applyDraft`
+   * returns a confirmed commit receipt. Its failure must never rewrite or roll back the DXF save.
+   */
+  afterConfirmedPatternImportSave?: (
+    draft: CardDraft,
+    result: Extract<ApplyResult, { ok: true }> & {
+      commitReceipt: NonNullable<Extract<ApplyResult, { ok: true }>['commitReceipt']>;
+    },
+  ) => void | Promise<void>;
+  /** Best-effort observability for the additive post-save seam; this callback is also fail-open. */
+  onPatternSemanticAttachmentHostError?: (error: unknown) => void;
 }): ApplyDraftFn {
-  return (draft, onProgress) =>
-    applyDraft(
+  return async (draft, onProgress) => {
+    const result = await applyDraft(
       draft,
       {
         upload: async ({ filename, text }) => {
@@ -92,6 +108,7 @@ export function createCardApply(deps: {
         storageSizeId: deps.storageSizeId,
         scopeOf: deps.scopeOf,
         save: deps.save,
+        readPreviousLockVersion: deps.readPreviousLockVersion,
         onReplaced: deps.onReplaced,
         unsaved: deps.unsaved,
         landed: deps.landed,
@@ -99,4 +116,20 @@ export function createCardApply(deps: {
       },
       onProgress,
     );
+    if (result.ok && result.commitReceipt && deps.afterConfirmedPatternImportSave) {
+      try {
+        await deps.afterConfirmedPatternImportSave(draft, {
+          ...result,
+          commitReceipt: result.commitReceipt,
+        });
+      } catch (error) {
+        try {
+          deps.onPatternSemanticAttachmentHostError?.(error);
+        } catch {
+          // Neither attachment nor observability is allowed to change the confirmed DXF save.
+        }
+      }
+    }
+    return result;
+  };
 }

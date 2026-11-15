@@ -13,6 +13,7 @@ import type {
   TextId,
 } from '../../types';
 import type { DecodedLabel } from './text';
+import type { DxfPathProvenanceV1 } from '../../dxf-path-provenance-v1';
 
 export type DxfDialect =
   | 'grbpwr' // our writer (manifest present)
@@ -112,6 +113,55 @@ export type DxfMeta = {
 };
 
 export type DxfRead = { doc: SourceDoc; meta: DxfMeta };
+
+export const DXF_PATH_PROVENANCE_READ_V1 = 'dxf-path-provenance-read/1' as const;
+
+export type DxfPathProvenanceReadOptionsV1 = Readonly<{
+  /** Caller-owned stable document identity. Never inferred from filename, bytes, or file.id. */
+  sourceFileId: string;
+}>;
+
+export type DxfPathProvenanceReadBlockerCodeV1 =
+  | 'source-file-id-missing'
+  | 'source-file-id-invalid'
+  | 'native-parameter-unavailable'
+  | 'instance-kind-unsupported'
+  | 'sample-count-mismatch'
+  | 'contour-limit-exceeded'
+  | 'identity-rejected';
+
+export type DxfPathProvenanceReadBlockerV1 = Readonly<{
+  code: DxfPathProvenanceReadBlockerCodeV1;
+  pathId: PathId | null;
+  entityType: string | null;
+  entityOp: number | null;
+  detail: string;
+}>;
+
+export type DxfPathProvenanceReadArtifactV1 = Readonly<{
+  schemaVersion: typeof DXF_PATH_PROVENANCE_READ_V1;
+  sourceFileId: string;
+  /** Original pre-clean/pre-merge IR path ids only; no nearest-geometry recovery is performed. */
+  paths: readonly Readonly<{ pathId: PathId; provenance: DxfPathProvenanceV1 }>[];
+  blockers: readonly DxfPathProvenanceReadBlockerV1[];
+  sharedVertexOwnership: 'outgoing-primitive-open-final-end';
+  productionReady: false;
+  heuristicRecoveryUsed: false;
+  pieceSpecIntegrated: false;
+}>;
+
+export type DxfPathProvenanceDetailedReadV1 = Readonly<{
+  read: DxfRead;
+  provenance: DxfPathProvenanceReadArtifactV1;
+}>;
+
+export type DxfPathProvenanceDetailedReadResultV1 =
+  | Readonly<{ ok: true; value: DxfPathProvenanceDetailedReadV1 }>
+  | Readonly<{
+      ok: false;
+      blockers: readonly DxfPathProvenanceReadBlockerV1[];
+      productionReady: false;
+    }>;
 
 // ── segmentation (pre-segmented piece candidates) ────────────────────────────────────────────
 

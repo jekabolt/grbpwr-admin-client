@@ -537,7 +537,7 @@ export async function regenerateFusingSheets(
       );
       warnings.push(...merged.notes);
       files = [
-        new File([merged.bytes], merged.name, {
+        new File([new Uint8Array(merged.bytes)], merged.name, {
           type: 'image/vnd.dxf',
         }),
       ];
@@ -694,6 +694,8 @@ export async function regenerateFusingSheets(
       filename: uploadedFile.filename ?? filename,
       sizeBytes: Number(uploadedFile.sizeBytes ?? bytes.byteLength) || bytes.byteLength,
       version: 0,
+      // Server advances the saved-row ABA clock after the card write.
+      savedRowRevision: 0,
       uploadedAt: undefined,
       name: clampUtf8Bytes(
         `${GENERATED_FUSING_NAME_PREFIX}${

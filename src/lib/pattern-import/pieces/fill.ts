@@ -982,7 +982,7 @@ function fillOneSheet(
         if (endTicks.length) {
           const cut = cutAtTicks(gg, mask, r, pts[si], kk);
           if (!cut) return null;
-          mask = cut;
+          mask = new Uint8Array(cut);
         }
         // knives (variant cutting lines) crossing the region: cut and keep the seed's side
         const kis = knivesOf(r);

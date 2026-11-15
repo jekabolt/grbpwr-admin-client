@@ -24,6 +24,21 @@ import type {
   StyleId,
 } from '../../types';
 import { PATIMPORT } from '../../types';
+import {
+  createDxfCurveSampleV1,
+  createDxfInsertInstancePathV1,
+  createDxfPathProvenanceV1,
+  createDxfSourceCurveIdV1,
+  DXF_PATH_PROVENANCE_MAX_VERTICES_PER_CONTOUR_V1,
+  type DxfCurveParameterSpaceV1,
+  type DxfCurveSampleV1,
+  type DxfPathProvenanceV1,
+} from '../../dxf-path-provenance-v1';
+import type {
+  DxfSourceNativeStraightEdgeDecodedBlockerV1,
+  DxfSourceNativeStraightEdgeDecodedCandidateV1,
+  DxfSourceNativeStraightEdgeUnsupportedCodeV1,
+} from '../../dxf-source-native-straight-edge-authority-v1';
 import { budgetOf } from '../budget';
 import {
   buildAst,
@@ -40,29 +55,39 @@ import type {
   DxfDialect,
   DxfGroup,
   DxfMeta,
+  DxfPathProvenanceDetailedReadResultV1,
+  DxfPathProvenanceReadArtifactV1,
+  DxfPathProvenanceReadBlockerCodeV1,
+  DxfPathProvenanceReadBlockerV1,
   DxfPointAttrs,
   DxfRead,
   DxfUnits,
   TallyRow,
 } from './dxf-types';
+import { DXF_PATH_PROVENANCE_READ_V1 } from './dxf-types';
 import {
   IDENTITY,
   apply,
   applyDir,
   arcPts,
+  arcPointSamples,
   bboxOf,
   bulgePolyline,
+  bulgePolylinePointSamples,
   catmullRom,
   ellipsePts,
+  ellipsePointSamples,
   mul,
   nurbsAt,
   ocsToWcs,
   rotate,
   sampleAdaptive,
+  sampleAdaptivePointSamples,
   scale,
   scaleOf,
   translate,
   type P,
+  type DxfNativePointSample,
 } from './geometry';
 import { loadDxf, num, type Tag } from './tags';
 import { decodeLabel, decodeMText, decodeTextValue, type DecodedLabel } from './text';
@@ -143,7 +168,21 @@ type Ctx = {
   colorByBlock: number | null;
   group: DxfGroup;
   depth: number;
+  /** Canonical nested INSERT/MINSERT lineage; empty in model space. */
+  instancePath: readonly string[];
+  /** DIMENSION or rejected identity in the ancestry blocks exact provenance only, not legacy IR. */
+  instancePathBlocker: DxfPathProvenanceReadBlockerCodeV1 | null;
 };
+
+type SampledPoint = Readonly<{
+  point: PtMm;
+  parameterSpace: DxfCurveParameterSpaceV1;
+  sourceCurveT: number;
+  primitiveSegmentIndex: number;
+  entityHandle: string | null;
+  entityOp: number;
+  sub: number;
+}>;
 
 type Emit = {
   pts: PtMm[];
@@ -151,7 +190,48 @@ type Emit = {
   sub: number;
   fill: boolean;
   width?: number;
+  /** Present only when every point came directly from an exact source-native sampler. */
+  sampled?: readonly SampledPoint[];
+  /** Decoder-minted primitive classification. Never reconstructed from emitted endpoints. */
+  straightEdgeFacts?: readonly NativeStraightEdgeFact[];
+  provenanceBlocker?: DxfPathProvenanceReadBlockerCodeV1;
 };
+
+type NativeStraightEdgeFact =
+  | Readonly<{
+      kind: 'line';
+      primitiveSegmentIndex: number;
+      startPointIndex: number;
+      endPointIndex: number;
+      nativeStart: Readonly<P>;
+      nativeEnd: Readonly<P>;
+      sourceAffine: Readonly<Affine>;
+    }>
+  | Readonly<{
+      kind: 'unsupported';
+      primitiveSegmentIndex: number;
+      code: DxfSourceNativeStraightEdgeUnsupportedCodeV1;
+      detail: string;
+    }>;
+
+type ProvenanceCapture = {
+  readonly sourceFileId: string;
+  readonly paths: { pathId: PathId; provenance: DxfPathProvenanceV1 }[];
+  readonly blockers: DxfPathProvenanceReadBlockerV1[];
+};
+
+type StraightEdgeCapture = {
+  readonly sourceFileId: string;
+  readonly candidates: DxfSourceNativeStraightEdgeDecodedCandidateV1[];
+  readonly blockers: DxfSourceNativeStraightEdgeDecodedBlockerV1[];
+  readonly identities: Set<string>;
+  descriptorOverflow: boolean;
+  blockerOverflow: boolean;
+};
+
+const MAX_STRAIGHT_EDGE_DESCRIPTORS = 100_000;
+const MAX_STRAIGHT_EDGE_BLOCKERS = 4_096;
+const MAX_STRAIGHT_EDGE_COORDINATE_ABS_MM = 1_000_000_000;
 
 class Builder {
   paths: IRPath[] = [];
@@ -177,14 +257,30 @@ class Builder {
   budget = MAX_INSTANCES;
   budgetWarned = false;
   insertCount = 0;
+  readonly duplicateEntityHandles = new Set<string>();
 
   constructor(
     readonly fileId: string,
     readonly raw: RawDxf,
     readonly units: DxfUnits,
     readonly opts: ExtractOpts,
+    readonly provenanceCapture: ProvenanceCapture | null = null,
+    readonly straightEdgeCapture: StraightEdgeCapture | null = null,
   ) {
     for (const l of raw.layers) this.addLayer(l.name);
+    const handleCounts = new Map<string, number>();
+    const countHandles = (entities: readonly RawEntity[]) => {
+      for (const entity of entities) {
+        if (entity.handle) {
+          const handle = entity.handle.toUpperCase();
+          handleCounts.set(handle, (handleCounts.get(handle) ?? 0) + 1);
+        }
+      }
+    };
+    countHandles(raw.entities);
+    for (const block of raw.blockOrder) countHandles(block.entities);
+    for (const [handle, count] of handleCounts)
+      if (count > 1) this.duplicateEntityHandles.add(handle);
   }
 
   addLayer(name: string) {
@@ -244,6 +340,403 @@ class Builder {
     return l;
   }
 
+  private provenanceBlocker(
+    pathId: PathId,
+    e: RawEntity,
+    code: DxfPathProvenanceReadBlockerCodeV1,
+    detail: string,
+  ): void {
+    this.provenanceCapture?.blockers.push(
+      Object.freeze({ code, pathId, entityType: e.type, entityOp: e.op, detail }),
+    );
+  }
+
+  private capturePathProvenance(
+    pathId: PathId,
+    e: RawEntity,
+    ctx: Ctx,
+    em: Emit,
+  ): DxfPathProvenanceV1 | null {
+    const capture = this.provenanceCapture;
+    if (!capture) return null;
+    if (e.handle && this.duplicateEntityHandles.has(e.handle.toUpperCase())) {
+      this.provenanceBlocker(
+        pathId,
+        e,
+        'identity-rejected',
+        'The DXF repeats an entity handle, so handle-or-op identity is ambiguous.',
+      );
+      return null;
+    }
+    if (ctx.instancePathBlocker) {
+      this.provenanceBlocker(
+        pathId,
+        e,
+        ctx.instancePathBlocker,
+        'Exact provenance is unavailable through this block-instance ancestry.',
+      );
+      return null;
+    }
+    if (em.provenanceBlocker || !em.sampled) {
+      this.provenanceBlocker(
+        pathId,
+        e,
+        em.provenanceBlocker ?? 'native-parameter-unavailable',
+        'The legacy path is preserved, but this entity has no exact pre-flatten native parameter trace.',
+      );
+      return null;
+    }
+    if (em.sampled.length !== em.pts.length) {
+      this.provenanceBlocker(
+        pathId,
+        e,
+        'sample-count-mismatch',
+        'Native samples do not align one-to-one with the emitted path points.',
+      );
+      return null;
+    }
+    if (em.sampled.length > DXF_PATH_PROVENANCE_MAX_VERTICES_PER_CONTOUR_V1) {
+      this.provenanceBlocker(
+        pathId,
+        e,
+        'contour-limit-exceeded',
+        'The emitted contour exceeds the assembly handoff vertex limit.',
+      );
+      return null;
+    }
+    const curveIds = new Map<number, string>();
+    const samples: DxfCurveSampleV1[] = [];
+    for (let index = 0; index < em.sampled.length; index += 1) {
+      const native = em.sampled[index];
+      let sourceCurveId = curveIds.get(native.primitiveSegmentIndex);
+      if (!sourceCurveId) {
+        const curve = createDxfSourceCurveIdV1({
+          sourceFileId: capture.sourceFileId,
+          instancePath: ctx.instancePath,
+          entityHandle: native.entityHandle,
+          entityOp: native.entityOp,
+          sub: native.sub,
+          primitiveSegmentIndex: native.primitiveSegmentIndex,
+        });
+        if (!curve.ok) {
+          this.provenanceBlocker(pathId, e, 'identity-rejected', curve.errors.join('; '));
+          return null;
+        }
+        sourceCurveId = curve.value;
+        curveIds.set(native.primitiveSegmentIndex, sourceCurveId);
+      }
+      const sample = createDxfCurveSampleV1(
+        sourceCurveId,
+        index,
+        native.parameterSpace,
+        native.sourceCurveT,
+      );
+      if (!sample.ok) {
+        this.provenanceBlocker(pathId, e, 'identity-rejected', sample.errors.join('; '));
+        return null;
+      }
+      samples.push(sample.value);
+    }
+    const provenance = createDxfPathProvenanceV1({
+      sourceFileId: capture.sourceFileId,
+      instancePath: ctx.instancePath,
+      samples,
+      expectedPointCount: em.pts.length,
+    });
+    if (!provenance.ok) {
+      const code =
+        provenance.code === 'sample-count-mismatch' ? 'sample-count-mismatch' : 'identity-rejected';
+      this.provenanceBlocker(pathId, e, code, provenance.errors.join('; '));
+      return null;
+    }
+    capture.paths.push(Object.freeze({ pathId, provenance: provenance.value }));
+    return provenance.value;
+  }
+
+  private straightEdgeBlocker(
+    code: DxfSourceNativeStraightEdgeDecodedBlockerV1['code'],
+    pathId: PathId | null,
+    e: RawEntity | null,
+    detail: string,
+    sourceCurveId: string | null = null,
+    primitiveSegmentIndex: number | null = null,
+  ): void {
+    const capture = this.straightEdgeCapture;
+    if (!capture || capture.blockerOverflow) return;
+    if (capture.blockers.length >= MAX_STRAIGHT_EDGE_BLOCKERS) {
+      capture.blockerOverflow = true;
+      return;
+    }
+    if (capture.blockers.length >= MAX_STRAIGHT_EDGE_BLOCKERS - 1 && code !== 'bounds-exceeded') {
+      capture.blockers.push(
+        Object.freeze({
+          code: 'bounds-exceeded',
+          sourceFileId: capture.sourceFileId,
+          sourcePathId: pathId,
+          sourceCurveId: null,
+          primitiveSegmentIndex: null,
+          entityType: e?.type ?? null,
+          detail: 'Straight-edge blocker capture reached its fixed extraction bound.',
+        }),
+      );
+      capture.blockerOverflow = true;
+      return;
+    }
+    capture.blockers.push(
+      Object.freeze({
+        code,
+        sourceFileId: capture.sourceFileId,
+        sourcePathId: pathId,
+        sourceCurveId,
+        primitiveSegmentIndex,
+        entityType: e?.type ?? null,
+        detail,
+      }),
+    );
+    if (code === 'bounds-exceeded' && capture.blockers.length >= MAX_STRAIGHT_EDGE_BLOCKERS)
+      capture.blockerOverflow = true;
+  }
+
+  private captureStraightEdgeAuthority(
+    pathId: PathId,
+    e: RawEntity,
+    ctx: Ctx,
+    em: Emit,
+    provenance: DxfPathProvenanceV1 | null,
+  ): void {
+    const capture = this.straightEdgeCapture;
+    if (!capture) return;
+    if (e.handle && this.duplicateEntityHandles.has(e.handle.toUpperCase())) {
+      this.straightEdgeBlocker(
+        'identity-rejected',
+        pathId,
+        e,
+        'The DXF repeats an entity handle, so straight-edge identity is ambiguous.',
+      );
+      return;
+    }
+    if (ctx.instancePathBlocker) {
+      this.straightEdgeBlocker(
+        'identity-rejected',
+        pathId,
+        e,
+        'Exact nested-instance identity is unavailable for this path.',
+      );
+      return;
+    }
+    const facts = em.straightEdgeFacts;
+    if (!facts || facts.length === 0) {
+      this.straightEdgeBlocker(
+        'unsupported-entity-kind',
+        pathId,
+        e,
+        'This emitted entity is outside the source-native straight-edge beta subset.',
+      );
+      return;
+    }
+
+    for (const fact of facts) {
+      const curve = createDxfSourceCurveIdV1({
+        sourceFileId: capture.sourceFileId,
+        instancePath: ctx.instancePath,
+        entityHandle: e.handle?.toUpperCase() ?? null,
+        entityOp: e.op,
+        sub: em.sub,
+        primitiveSegmentIndex: fact.primitiveSegmentIndex,
+      });
+      if (!curve.ok) {
+        this.straightEdgeBlocker(
+          'identity-rejected',
+          pathId,
+          e,
+          curve.errors.join('; '),
+          null,
+          fact.primitiveSegmentIndex,
+        );
+        continue;
+      }
+      const sourceCurveId = curve.value;
+      if (fact.kind === 'unsupported') {
+        this.straightEdgeBlocker(
+          fact.code,
+          pathId,
+          e,
+          fact.detail,
+          sourceCurveId,
+          fact.primitiveSegmentIndex,
+        );
+        continue;
+      }
+      if (!provenance) {
+        this.straightEdgeBlocker(
+          'path-provenance-unavailable',
+          pathId,
+          e,
+          'A decoder-minted line exists, but its exact V1 path provenance was not admitted.',
+          sourceCurveId,
+          fact.primitiveSegmentIndex,
+        );
+        continue;
+      }
+      if (
+        !Number.isSafeInteger(fact.startPointIndex) ||
+        !Number.isSafeInteger(fact.endPointIndex) ||
+        fact.startPointIndex < 0 ||
+        fact.endPointIndex < 0 ||
+        fact.startPointIndex >= em.pts.length ||
+        fact.endPointIndex >= em.pts.length ||
+        provenance.samples.length !== em.pts.length
+      ) {
+        this.straightEdgeBlocker(
+          'identity-rejected',
+          pathId,
+          e,
+          'The decoder-minted primitive indices do not exact-match the emitted path.',
+          sourceCurveId,
+          fact.primitiveSegmentIndex,
+        );
+        continue;
+      }
+      const startSample = provenance.samples[fact.startPointIndex];
+      const endSample = provenance.samples[fact.endPointIndex];
+      if (!startSample || !endSample || startSample.sourceCurveId !== sourceCurveId) {
+        this.straightEdgeBlocker(
+          'identity-rejected',
+          pathId,
+          e,
+          'The line start does not own the exact decoder-minted source curve identity.',
+          sourceCurveId,
+          fact.primitiveSegmentIndex,
+        );
+        continue;
+      }
+      const startMm = apply(fact.sourceAffine, fact.nativeStart);
+      const endMm = apply(fact.sourceAffine, fact.nativeEnd);
+      const emittedStart = em.pts[fact.startPointIndex];
+      const emittedEnd = em.pts[fact.endPointIndex];
+      const affine = fact.sourceAffine;
+      const finiteNumbers = [
+        startMm.x,
+        startMm.y,
+        endMm.x,
+        endMm.y,
+        affine.a,
+        affine.b,
+        affine.c,
+        affine.d,
+        affine.e,
+        affine.f,
+      ];
+      if (
+        finiteNumbers.some(
+          (value) =>
+            !Number.isFinite(value) || Math.abs(value) > MAX_STRAIGHT_EDGE_COORDINATE_ABS_MM,
+        ) ||
+        startMm.x !== emittedStart.x ||
+        startMm.y !== emittedStart.y ||
+        endMm.x !== emittedEnd.x ||
+        endMm.y !== emittedEnd.y
+      ) {
+        this.straightEdgeBlocker(
+          'identity-rejected',
+          pathId,
+          e,
+          'Exact affine line normalization does not match the emitted page-mm path.',
+          sourceCurveId,
+          fact.primitiveSegmentIndex,
+        );
+        continue;
+      }
+      if (startMm.x === endMm.x && startMm.y === endMm.y) {
+        this.straightEdgeBlocker(
+          'degenerate-line',
+          pathId,
+          e,
+          'A zero-length source line cannot become Phase2 line authority.',
+          sourceCurveId,
+          fact.primitiveSegmentIndex,
+        );
+        continue;
+      }
+      if (e.type !== 'LINE' && e.type !== 'LWPOLYLINE' && e.type !== 'POLYLINE') {
+        this.straightEdgeBlocker(
+          'unsupported-entity-kind',
+          pathId,
+          e,
+          'Only LINE and primitive straight polyline segments are admitted.',
+          sourceCurveId,
+          fact.primitiveSegmentIndex,
+        );
+        continue;
+      }
+      const identity = `${capture.sourceFileId}\0${pathId}\0${sourceCurveId}\0${fact.primitiveSegmentIndex}`;
+      if (capture.identities.has(identity)) {
+        this.straightEdgeBlocker(
+          'duplicate-descriptor',
+          pathId,
+          e,
+          'A duplicate source-native straight-edge descriptor was rejected.',
+          sourceCurveId,
+          fact.primitiveSegmentIndex,
+        );
+        continue;
+      }
+      if (capture.candidates.length >= MAX_STRAIGHT_EDGE_DESCRIPTORS) {
+        if (!capture.descriptorOverflow) {
+          capture.descriptorOverflow = true;
+          this.straightEdgeBlocker(
+            'bounds-exceeded',
+            pathId,
+            e,
+            'Straight-edge descriptor capture reached its fixed extraction bound.',
+            sourceCurveId,
+            fact.primitiveSegmentIndex,
+          );
+        }
+        continue;
+      }
+      capture.identities.add(identity);
+      capture.candidates.push(
+        Object.freeze({
+          sourceFileId: capture.sourceFileId,
+          sourceCurveId,
+          instancePath: Object.freeze([...ctx.instancePath]),
+          path: Object.freeze({
+            sourcePathId: pathId,
+            closed: em.closed,
+            startPointIndex: fact.startPointIndex,
+            endPointIndex: fact.endPointIndex,
+          }),
+          primitive: Object.freeze({
+            entityType: e.type,
+            entityHandle: e.handle?.toUpperCase() ?? null,
+            entityOp: e.op,
+            sub: em.sub,
+            primitiveSegmentIndex: fact.primitiveSegmentIndex,
+          }),
+          startVertexId: startSample.vertexId,
+          endVertexId: endSample.vertexId,
+          startMm: Object.freeze([startMm.x, startMm.y]) as readonly [number, number],
+          endMm: Object.freeze([endMm.x, endMm.y]) as readonly [number, number],
+          nativeFrame: 'page-mm',
+          normalization: Object.freeze({
+            kind: 'exact-affine-line-to-page-mm',
+            sourceAffine: Object.freeze({ ...affine }),
+          }),
+          native: Object.freeze({
+            sourceCurveId,
+            curveKind: 'line',
+            parameterSpace: 'unit',
+            sourceCurveTRange: Object.freeze([0, 1]) as readonly [0, 1],
+            chordErrorBoundMm: 0,
+            periodic: false,
+            transform: Object.freeze({ kind: 'identity' }),
+          }),
+        }),
+      );
+    }
+  }
+
   pushPath(e: RawEntity, ctx: Ctx, em: Emit, key: string): PathId {
     // C4: every point of every block instance is paid for (adapters/budget.ts)
     this.opts.budget?.spend(em.pts.length, 'the DXF entities (with block copies)');
@@ -263,6 +756,8 @@ class Builder {
       },
     });
     this.pathEntity.push(e.type);
+    const provenance = this.capturePathProvenance(id, e, ctx, em);
+    this.captureStraightEdgeAuthority(id, e, ctx, em, provenance);
     ctx.group.paths.push(id);
     this.rendered.add(key);
     this.bumpEmit(e.type, 'p');
@@ -343,6 +838,138 @@ function lwVertices(tags: Tag[]): { x: number; y: number; bulge: number }[] {
   return v;
 }
 
+function linearPointSamples(points: readonly P[], closed: boolean): DxfNativePointSample[] {
+  const finalPrimitive = Math.max(0, points.length - 2);
+  const isOpenFinal = (index: number) =>
+    !closed && points.length > 1 && index === points.length - 1;
+  return points.map((point, index) => ({
+    point,
+    parameterSpace: 'unit',
+    nativeT: isOpenFinal(index) ? 1 : 0,
+    primitiveSegmentIndex: isOpenFinal(index) ? finalPrimitive : index,
+  }));
+}
+
+function lineFact(
+  primitiveSegmentIndex: number,
+  startPointIndex: number,
+  endPointIndex: number,
+  nativeStart: Readonly<P>,
+  nativeEnd: Readonly<P>,
+  sourceAffine: Readonly<Affine>,
+): NativeStraightEdgeFact {
+  return Object.freeze({
+    kind: 'line',
+    primitiveSegmentIndex,
+    startPointIndex,
+    endPointIndex,
+    nativeStart: Object.freeze({ ...nativeStart }),
+    nativeEnd: Object.freeze({ ...nativeEnd }),
+    sourceAffine: Object.freeze({ ...sourceAffine }),
+  });
+}
+
+function unsupportedStraightEdgeFact(
+  code: DxfSourceNativeStraightEdgeUnsupportedCodeV1,
+  detail: string,
+  primitiveSegmentIndex = 0,
+): NativeStraightEdgeFact {
+  return Object.freeze({ kind: 'unsupported', primitiveSegmentIndex, code, detail });
+}
+
+function polylineStraightEdgeFacts(
+  vertices: readonly Readonly<{ x: number; y: number; bulge: number }>[],
+  closed: boolean,
+  samples: readonly DxfNativePointSample[],
+  sourceAffine: Readonly<Affine>,
+  splineFit: boolean,
+): readonly NativeStraightEdgeFact[] {
+  const segmentCount = closed ? vertices.length : Math.max(0, vertices.length - 1);
+  const facts: NativeStraightEdgeFact[] = [];
+  for (
+    let primitiveSegmentIndex = 0;
+    primitiveSegmentIndex < segmentCount;
+    primitiveSegmentIndex++
+  ) {
+    if (splineFit) {
+      facts.push(
+        unsupportedStraightEdgeFact(
+          'unsupported-spline-fit-polyline',
+          'Spline-fit POLYLINE primitives are outside the straight-edge beta subset.',
+          primitiveSegmentIndex,
+        ),
+      );
+      continue;
+    }
+    const start = vertices[primitiveSegmentIndex];
+    const end = vertices[(primitiveSegmentIndex + 1) % vertices.length];
+    if (start.bulge !== 0) {
+      facts.push(
+        unsupportedStraightEdgeFact(
+          'unsupported-bulge',
+          'A non-zero polyline bulge is source-native curved geometry and is not a line.',
+          primitiveSegmentIndex,
+        ),
+      );
+      continue;
+    }
+    const startPointIndex = samples.findIndex(
+      (sample) => sample.primitiveSegmentIndex === primitiveSegmentIndex,
+    );
+    const endPointIndex =
+      primitiveSegmentIndex + 1 < segmentCount
+        ? samples.findIndex((sample) => sample.primitiveSegmentIndex === primitiveSegmentIndex + 1)
+        : closed
+          ? 0
+          : samples.length - 1;
+    facts.push(
+      lineFact(primitiveSegmentIndex, startPointIndex, endPointIndex, start, end, sourceAffine),
+    );
+  }
+  return Object.freeze(facts);
+}
+
+function markUnsupportedStraightEdge(
+  emitted: Emit,
+  code: DxfSourceNativeStraightEdgeUnsupportedCodeV1,
+  detail: string,
+): Emit {
+  emitted.straightEdgeFacts = Object.freeze([unsupportedStraightEdgeFact(code, detail)]);
+  return emitted;
+}
+
+function sampledEmit(
+  e: RawEntity,
+  m: Affine,
+  nativeSamples: readonly DxfNativePointSample[],
+  options: Readonly<{
+    closed: boolean;
+    sub: number;
+    fill: boolean;
+    width?: number;
+  }>,
+): Emit {
+  const sampled = nativeSamples.map((native) =>
+    Object.freeze({
+      point: apply(m, native.point),
+      parameterSpace: native.parameterSpace,
+      sourceCurveT: native.nativeT,
+      primitiveSegmentIndex: native.primitiveSegmentIndex,
+      entityHandle: e.handle?.toUpperCase() ?? null,
+      entityOp: e.op,
+      sub: options.sub,
+    }),
+  );
+  return {
+    pts: sampled.map(({ point }) => point),
+    closed: options.closed,
+    sub: options.sub,
+    fill: options.fill,
+    ...(options.width === undefined ? {} : { width: options.width }),
+    sampled: Object.freeze(sampled),
+  };
+}
+
 function decodeGeometry(e: RawEntity, ctx: Ctx, b: Builder): Emit[] | { drop: string } {
   const tg = e.tags;
   const tol = ctx.tol;
@@ -350,25 +977,32 @@ function decodeGeometry(e: RawEntity, ctx: Ctx, b: Builder): Emit[] | { drop: st
   const toPage = (m: Affine, pts: P[]) => pts.map((p) => apply(m, p));
   switch (e.type) {
     case 'LINE': {
-      return [
-        { pts: toPage(M, [pt(tg, 10, 20), pt(tg, 11, 21)]), closed: false, sub: 0, fill: false },
-      ];
+      const nativeStart = pt(tg, 10, 20);
+      const nativeEnd = pt(tg, 11, 21);
+      const emitted = sampledEmit(e, M, linearPointSamples([nativeStart, nativeEnd], false), {
+        closed: false,
+        sub: 0,
+        fill: false,
+      });
+      emitted.straightEdgeFacts = Object.freeze([lineFact(0, 0, 1, nativeStart, nativeEnd, M)]);
+      return [emitted];
     }
     case 'LWPOLYLINE': {
       const flags = int(tg, 70) ?? 0;
       const closed = (flags & 1) === 1;
       const v = lwVertices(tg);
       if (v.length === 0) return { drop: 'polyline without vertices' };
-      const pts = bulgePolyline(v, closed, tol);
-      return [
-        {
-          pts: toPage(mul(M, ocsOf(tg)), pts),
-          closed,
-          sub: 0,
-          fill: false,
-          width: numOr(tg, 43, 0),
-        },
-      ];
+      const m = mul(M, ocsOf(tg));
+      const nativeSamples = bulgePolylinePointSamples(v, closed, tol);
+      const emitted = sampledEmit(e, m, nativeSamples, {
+        closed,
+        sub: 0,
+        fill: false,
+        width: numOr(tg, 43, 0),
+      });
+      if (v.length < 2) emitted.provenanceBlocker = 'native-parameter-unavailable';
+      emitted.straightEdgeFacts = polylineStraightEdgeFacts(v, closed, nativeSamples, m, false);
+      return [emitted];
     }
     case 'POLYLINE': {
       const flags = int(tg, 70) ?? 0;
@@ -386,9 +1020,23 @@ function decodeGeometry(e: RawEntity, ctx: Ctx, b: Builder): Emit[] | { drop: st
       const splineFit = vs.some((v) => v.f & 8);
       vs = splineFit ? vs.filter((v) => v.f & 8 || !(v.f & 16)) : vs.filter((v) => !(v.f & 16));
       if (vs.length === 0) return { drop: 'polyline without vertices' };
-      const pts = bulgePolyline(vs, closed, tol);
       const m = is3d ? M : mul(M, ocsOf(tg));
-      return [{ pts: toPage(m, pts), closed, sub: 0, fill: false, width: numOr(tg, 40, 0) }];
+      const nativeSamples = bulgePolylinePointSamples(vs, closed, tol);
+      const emitted = sampledEmit(e, m, nativeSamples, {
+        closed,
+        sub: 0,
+        fill: false,
+        width: numOr(tg, 40, 0),
+      });
+      if (vs.length < 2 || splineFit) emitted.provenanceBlocker = 'native-parameter-unavailable';
+      emitted.straightEdgeFacts = polylineStraightEdgeFacts(
+        vs,
+        closed,
+        nativeSamples,
+        m,
+        splineFit,
+      );
+      return [emitted];
     }
     case 'ARC': {
       const c = pt(tg, 10, 20);
@@ -398,34 +1046,52 @@ function decodeGeometry(e: RawEntity, ctx: Ctx, b: Builder): Emit[] | { drop: st
       let sweep = a1 - a0;
       while (sweep <= 1e-12) sweep += 2 * Math.PI;
       return [
-        {
-          pts: toPage(mul(M, ocsOf(tg)), arcPts(c.x, c.y, r, a0, sweep, tol)),
-          closed: false,
-          sub: 0,
-          fill: false,
-        },
+        markUnsupportedStraightEdge(
+          sampledEmit(e, mul(M, ocsOf(tg)), arcPointSamples(c.x, c.y, r, a0, sweep, tol), {
+            closed: false,
+            sub: 0,
+            fill: false,
+          }),
+          'unsupported-arc',
+          'ARC is source-native curved geometry and is not admitted as a line.',
+        ),
       ];
     }
     case 'CIRCLE': {
       const c = pt(tg, 10, 20);
       const r = numOr(tg, 40, 0);
-      const pts = arcPts(c.x, c.y, r, 0, 2 * Math.PI, tol);
-      pts.pop();
-      while (pts.length < 8) {
+      const samples = arcPointSamples(c.x, c.y, r, 0, 2 * Math.PI, tol);
+      samples.pop();
+      while (samples.length < 8) {
         // tiny circles: keep at least an octagon so drills stay recognisable
         const n = 8;
-        pts.length = 0;
+        samples.length = 0;
         for (let i = 0; i < n; i++)
-          pts.push({
-            x: c.x + r * Math.cos((2 * Math.PI * i) / n),
-            y: c.y + r * Math.sin((2 * Math.PI * i) / n),
+          samples.push({
+            point: {
+              x: c.x + r * Math.cos((2 * Math.PI * i) / n),
+              y: c.y + r * Math.sin((2 * Math.PI * i) / n),
+            },
+            parameterSpace: 'angle-radians',
+            nativeT: (2 * Math.PI * i) / n,
+            primitiveSegmentIndex: 0,
           });
       }
-      return [{ pts: toPage(mul(M, ocsOf(tg)), pts), closed: true, sub: 0, fill: false }];
+      return [
+        markUnsupportedStraightEdge(
+          sampledEmit(e, mul(M, ocsOf(tg)), samples, {
+            closed: true,
+            sub: 0,
+            fill: false,
+          }),
+          'unsupported-circle',
+          'CIRCLE is source-native curved geometry and is not admitted as a line.',
+        ),
+      ];
     }
     case 'ELLIPSE': {
       const nz = numOf(tg, 230) ?? 1;
-      const { pts, full } = ellipsePts(
+      const { samples, full } = ellipsePointSamples(
         pt(tg, 10, 20),
         pt(tg, 11, 21),
         numOr(tg, 40, 1),
@@ -434,7 +1100,13 @@ function decodeGeometry(e: RawEntity, ctx: Ctx, b: Builder): Emit[] | { drop: st
         nz < 0 ? -1 : 1,
         tol,
       );
-      return [{ pts: toPage(M, pts), closed: full, sub: 0, fill: false }];
+      return [
+        markUnsupportedStraightEdge(
+          sampledEmit(e, M, samples, { closed: full, sub: 0, fill: false }),
+          'unsupported-ellipse',
+          'ELLIPSE is source-native curved geometry and is not admitted as a line.',
+        ),
+      ];
     }
     case 'SPLINE': {
       const flags = int(tg, 70) ?? 0;
@@ -451,36 +1123,86 @@ function decodeGeometry(e: RawEntity, ctx: Ctx, b: Builder): Emit[] | { drop: st
         else if (t.code === 21 && fit.length) fit[fit.length - 1].y = num(t);
       }
       if (ctrl.length >= degree + 1 && knots.length === ctrl.length + degree + 1) {
+        const exactWeights = weights.length === 0 || weights.length === ctrl.length;
         const w = weights.length === ctrl.length ? weights : ctrl.map(() => 1);
         const t0 = knots[degree];
         const t1 = knots[ctrl.length];
-        const pts = sampleAdaptive(
+        const samples = sampleAdaptivePointSamples(
           (t) => nurbsAt(degree, ctrl, w, knots, t),
           t0,
           t1,
           Math.max(4, ctrl.length - degree) * 2,
           tol,
+          'knot-domain',
+          0,
         );
         if (
           closed &&
-          pts.length > 2 &&
-          Math.hypot(pts[0].x - pts[pts.length - 1].x, pts[0].y - pts[pts.length - 1].y) < tol
+          samples.length > 2 &&
+          Math.hypot(
+            samples[0].point.x - samples[samples.length - 1].point.x,
+            samples[0].point.y - samples[samples.length - 1].point.y,
+          ) < tol
         )
-          pts.pop();
-        return [{ pts: toPage(M, pts), closed, sub: 0, fill: false }];
+          samples.pop();
+        const emitted = sampledEmit(e, M, samples, { closed, sub: 0, fill: false });
+        if (!exactWeights) emitted.provenanceBlocker = 'native-parameter-unavailable';
+        emitted.straightEdgeFacts = Object.freeze([
+          unsupportedStraightEdgeFact(
+            'unsupported-spline',
+            'SPLINE is source-native curved geometry and is not admitted as a line.',
+          ),
+        ]);
+        return [emitted];
       }
-      if (fit.length >= 2)
-        return [{ pts: toPage(M, catmullRom(fit, closed, tol)), closed, sub: 0, fill: false }];
+      if (fit.length >= 2) {
+        const emitted: Emit = {
+          pts: toPage(M, catmullRom(fit, closed, tol)),
+          closed,
+          sub: 0,
+          fill: false,
+          provenanceBlocker: 'native-parameter-unavailable',
+          straightEdgeFacts: Object.freeze([
+            unsupportedStraightEdgeFact(
+              'unsupported-spline',
+              'SPLINE is source-native curved geometry and is not admitted as a line.',
+            ),
+          ]),
+        };
+        return [emitted];
+      }
       if (ctrl.length >= 2) {
         b.warnings.push(
           `SPLINE at line ${e.line}: malformed knot vector — its control polygon is used`,
         );
-        return [{ pts: toPage(M, ctrl), closed, sub: 0, fill: false }];
+        return [
+          {
+            pts: toPage(M, ctrl),
+            closed,
+            sub: 0,
+            fill: false,
+            provenanceBlocker: 'native-parameter-unavailable',
+            straightEdgeFacts: Object.freeze([
+              unsupportedStraightEdgeFact(
+                'unsupported-spline',
+                'SPLINE is source-native curved geometry and is not admitted as a line.',
+              ),
+            ]),
+          },
+        ];
       }
       return { drop: 'spline without control or fit points' };
     }
     case 'POINT': {
-      return [{ pts: toPage(M, [pt(tg, 10, 20)]), closed: false, sub: 0, fill: false }];
+      return [
+        {
+          pts: toPage(M, [pt(tg, 10, 20)]),
+          closed: false,
+          sub: 0,
+          fill: false,
+          provenanceBlocker: 'native-parameter-unavailable',
+        },
+      ];
     }
     case 'SOLID':
     case 'TRACE':
@@ -490,7 +1212,13 @@ function decodeGeometry(e: RawEntity, ctx: Ctx, b: Builder): Emit[] | { drop: st
       const pts = order.map((k) => c[k]);
       if (Math.hypot(pts[3].x - pts[2].x, pts[3].y - pts[2].y) < 1e-12) pts.pop();
       const m = e.type === '3DFACE' ? M : mul(M, ocsOf(tg));
-      return [{ pts: toPage(m, pts), closed: true, sub: 0, fill: e.type !== '3DFACE' }];
+      return [
+        sampledEmit(e, m, linearPointSamples(pts, true), {
+          closed: true,
+          sub: 0,
+          fill: e.type !== '3DFACE',
+        }),
+      ];
     }
     case 'LEADER': {
       const pts: P[] = [];
@@ -499,7 +1227,13 @@ function decodeGeometry(e: RawEntity, ctx: Ctx, b: Builder): Emit[] | { drop: st
         else if (t.code === 20 && pts.length) pts[pts.length - 1].y = num(t);
       }
       if (pts.length < 1) return { drop: 'leader without vertices' };
-      return [{ pts: toPage(M, pts), closed: false, sub: 0, fill: false }];
+      const emitted = sampledEmit(e, M, linearPointSamples(pts, false), {
+        closed: false,
+        sub: 0,
+        fill: false,
+      });
+      if (pts.length < 2) emitted.provenanceBlocker = 'native-parameter-unavailable';
+      return [emitted];
     }
     case 'HATCH':
       return hatchLoops(e, ctx);
@@ -612,7 +1346,13 @@ function hatchLoops(e: RawEntity, ctx: Ctx): Emit[] | { drop: string } {
         pts.pop();
     }
     if (pts.length)
-      out.push({ pts: pts.map((p) => apply(m, p)), closed: true, sub: L, fill: true });
+      out.push({
+        pts: pts.map((p) => apply(m, p)),
+        closed: true,
+        sub: L,
+        fill: true,
+        provenanceBlocker: 'native-parameter-unavailable',
+      });
   }
   if (out.length === 0) return { drop: 'hatch boundary unreadable' };
   return out;
@@ -668,7 +1408,7 @@ function textOf(
   // TEXT / ATTRIB / ATTDEF — OCS
   const m = mul(ctx.M, ocsOf(tg));
   const value =
-    e.type === 'ATTDEF' && rawStr(tg, 1) === '' ? str(tg, 2) ?? '' : rawStr(tg, 1) ?? '';
+    e.type === 'ATTDEF' && rawStr(tg, 1) === '' ? (str(tg, 2) ?? '') : (rawStr(tg, 1) ?? '');
   const text = decodeTextValue(value);
   const h = numOr(tg, 40, 2.5);
   const rot = (numOr(tg, 50, 0) * Math.PI) / 180;
@@ -753,6 +1493,37 @@ function walk(list: RawEntity[], ctx: Ctx, b: Builder, newGroupPerInsert: boolea
               ? insertTransform(e, block, ci, ri)
               : translate(-block.base.x, -block.base.y);
           const M = mul(ctx.M, T);
+          let instancePath = ctx.instancePath;
+          let instancePathBlocker = ctx.instancePathBlocker;
+          if (
+            (b.provenanceCapture || b.straightEdgeCapture) &&
+            e.type === 'INSERT' &&
+            instancePathBlocker === null
+          ) {
+            if (e.handle && b.duplicateEntityHandles.has(e.handle.toUpperCase())) {
+              instancePathBlocker = 'identity-rejected';
+            }
+            const step = createDxfInsertInstancePathV1([
+              {
+                blockName: name,
+                insertHandle: e.handle?.toUpperCase() ?? null,
+                insertOp: e.op,
+                occurrenceIndex: ci * rows + ri,
+                mInsertRow: ri,
+                mInsertColumn: ci,
+              },
+            ]);
+            if (instancePathBlocker === null) {
+              if (step.ok) instancePath = Object.freeze([...ctx.instancePath, ...step.value]);
+              else instancePathBlocker = 'identity-rejected';
+            }
+          } else if (
+            (b.provenanceCapture || b.straightEdgeCapture) &&
+            e.type === 'DIMENSION' &&
+            instancePathBlocker === null
+          ) {
+            instancePathBlocker = 'instance-kind-unsupported';
+          }
           let group = ctx.group;
           if (newGroupPerInsert && e.type === 'INSERT') {
             group = {
@@ -778,6 +1549,8 @@ function walk(list: RawEntity[], ctx: Ctx, b: Builder, newGroupPerInsert: boolea
               colorByBlock: color == null || color === 256 ? null : color,
               group,
               depth: ctx.depth + 1,
+              instancePath,
+              instancePathBlocker,
             },
             b,
             false,
@@ -862,7 +1635,7 @@ function walk(list: RawEntity[], ctx: Ctx, b: Builder, newGroupPerInsert: boolea
           angleDeg,
           z: numOr(e.tags, 30, 0) * scaleOf(ctx.M),
           thickness: numOr(e.tags, 39, 0),
-          layer: b.paths[id] ? b.styles[b.paths[id].style].layer ?? e.layer : e.layer,
+          layer: b.paths[id] ? (b.styles[b.paths[id].style].layer ?? e.layer) : e.layer,
         };
       }
     }
@@ -1091,10 +1864,12 @@ async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   return [...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, '0')).join('');
 }
 
-export async function readDxf(
+async function readDxfInternal(
   file: { id: string; name: string; bytes: ArrayBuffer; generatedFusing?: boolean },
   opts: ExtractOpts,
   progress?: Progress,
+  provenanceCapture: ProvenanceCapture | null = null,
+  straightEdgeCapture: StraightEdgeCapture | null = null,
 ): Promise<DxfRead> {
   progress?.(0, 3, 'decode');
   const dec = loadDxf(file.bytes);
@@ -1106,12 +1881,19 @@ export async function readDxf(
   const version = raw.header['$ACADVER']?.[0]?.value.trim() ?? null;
   progress?.(1, 3, 'expand');
 
-  const b = new Builder(file.id, raw, units, {
-    sagittaMm: opts.sagittaMm || PATIMPORT.sagittaMm,
-    keepFills: opts.keepFills,
-    pages: opts.pages,
-    budget: budgetOf(opts),
-  });
+  const b = new Builder(
+    file.id,
+    raw,
+    units,
+    {
+      sagittaMm: opts.sagittaMm || PATIMPORT.sagittaMm,
+      keepFills: opts.keepFills,
+      pages: opts.pages,
+      budget: budgetOf(opts),
+    },
+    provenanceCapture,
+    straightEdgeCapture,
+  );
   b.warnings.push(...raw.warnings);
   if (dec.fallback) b.warnings.push(`the file is not UTF-8 — decoded as ${dec.encoding}`);
   if (units.source === 'guess') b.warnings.push(units.evidence);
@@ -1135,6 +1917,8 @@ export async function readDxf(
       colorByBlock: null,
       group: loose,
       depth: 0,
+      instancePath: Object.freeze([]),
+      instancePathBlocker: null,
     },
     b,
     true,
@@ -1231,6 +2015,168 @@ export async function readDxf(
   };
   progress?.(3, 3, 'done');
   return { doc, meta };
+}
+
+export async function readDxf(
+  file: { id: string; name: string; bytes: ArrayBuffer; generatedFusing?: boolean },
+  opts: ExtractOpts,
+  progress?: Progress,
+): Promise<DxfRead> {
+  return readDxfInternal(file, opts, progress);
+}
+
+function provenanceReadFailure(
+  code: 'source-file-id-missing' | 'source-file-id-invalid',
+  detail: string,
+): DxfPathProvenanceDetailedReadResultV1 {
+  return Object.freeze({
+    ok: false as const,
+    blockers: Object.freeze([
+      Object.freeze({
+        code,
+        pathId: null,
+        entityType: null,
+        entityOp: null,
+        detail,
+      }),
+    ]),
+    productionReady: false as const,
+  });
+}
+
+function explicitSourceFileId(
+  optionsInput: unknown,
+): string | DxfPathProvenanceDetailedReadResultV1 {
+  if ((typeof optionsInput !== 'object' && typeof optionsInput !== 'function') || !optionsInput)
+    return provenanceReadFailure(
+      'source-file-id-missing',
+      'The detailed read requires an explicit caller-owned sourceFileId.',
+    );
+  let prototype: object | null;
+  let keys: readonly PropertyKey[];
+  let descriptor: PropertyDescriptor | undefined;
+  try {
+    prototype = Object.getPrototypeOf(optionsInput);
+    keys = Reflect.ownKeys(optionsInput);
+    descriptor = Object.getOwnPropertyDescriptor(optionsInput, 'sourceFileId');
+  } catch {
+    return provenanceReadFailure(
+      'source-file-id-invalid',
+      'The detailed read options are inaccessible or hostile.',
+    );
+  }
+  if (
+    prototype !== Object.prototype ||
+    keys.length !== 1 ||
+    keys[0] !== 'sourceFileId' ||
+    !descriptor ||
+    !descriptor.enumerable ||
+    !Object.prototype.hasOwnProperty.call(descriptor, 'value') ||
+    descriptor.get !== undefined ||
+    descriptor.set !== undefined
+  )
+    return provenanceReadFailure(
+      'source-file-id-invalid',
+      'The detailed read options must be an exact data record containing only sourceFileId.',
+    );
+  const sourceFileId = descriptor.value;
+  const probe = createDxfSourceCurveIdV1({
+    sourceFileId,
+    instancePath: [],
+    entityHandle: null,
+    entityOp: 0,
+    sub: 0,
+    primitiveSegmentIndex: 0,
+  });
+  if (!probe.ok) return provenanceReadFailure('source-file-id-invalid', probe.errors.join('; '));
+  return sourceFileId as string;
+}
+
+/**
+ * Opt-in pre-flatten provenance read. The sidecar is keyed only to original IR path ids and is not
+ * propagated through PieceSpec clean/merge/offset stages in V1.
+ */
+export async function readDxfWithPathProvenanceV1(
+  file: { id: string; name: string; bytes: ArrayBuffer; generatedFusing?: boolean },
+  opts: ExtractOpts,
+  provenanceOptions: unknown,
+  progress?: Progress,
+): Promise<DxfPathProvenanceDetailedReadResultV1> {
+  const sourceFileId = explicitSourceFileId(provenanceOptions);
+  if (typeof sourceFileId !== 'string') return sourceFileId;
+  const capture: ProvenanceCapture = { sourceFileId, paths: [], blockers: [] };
+  const read = await readDxfInternal(file, opts, progress, capture);
+  const livePathIds = new Set(read.doc.pages.flatMap((page) => page.paths.map(({ id }) => id)));
+  const provenance: DxfPathProvenanceReadArtifactV1 = Object.freeze({
+    schemaVersion: DXF_PATH_PROVENANCE_READ_V1,
+    sourceFileId,
+    paths: Object.freeze(capture.paths.filter(({ pathId }) => livePathIds.has(pathId))),
+    blockers: Object.freeze(
+      capture.blockers.filter(({ pathId }) => pathId === null || livePathIds.has(pathId)),
+    ),
+    sharedVertexOwnership: 'outgoing-primitive-open-final-end' as const,
+    productionReady: false as const,
+    heuristicRecoveryUsed: false as const,
+    pieceSpecIntegrated: false as const,
+  });
+  return Object.freeze({
+    ok: true as const,
+    value: Object.freeze({ read, provenance }),
+  });
+}
+
+/**
+ * Internal fresh-replay seam for the opaque straight-edge owner. This decoder output is not public
+ * authority: only the owning module can mint and consume the one-shot capability.
+ */
+export type DxfSourceNativeStraightEdgesInternalReadV1 = Readonly<{
+  read: DxfRead;
+  provenance: DxfPathProvenanceReadArtifactV1;
+  candidates: readonly DxfSourceNativeStraightEdgeDecodedCandidateV1[];
+  blockers: readonly DxfSourceNativeStraightEdgeDecodedBlockerV1[];
+}>;
+
+export async function decodeDxfSourceNativeStraightEdgesInternalV1(
+  file: { id: string; name: string; bytes: ArrayBuffer; generatedFusing?: boolean },
+  opts: ExtractOpts,
+  sourceFileId: string,
+  progress?: Progress,
+): Promise<DxfSourceNativeStraightEdgesInternalReadV1> {
+  const provenanceCapture: ProvenanceCapture = { sourceFileId, paths: [], blockers: [] };
+  const straightEdgeCapture: StraightEdgeCapture = {
+    sourceFileId,
+    candidates: [],
+    blockers: [],
+    identities: new Set(),
+    descriptorOverflow: false,
+    blockerOverflow: false,
+  };
+  const read = await readDxfInternal(file, opts, progress, provenanceCapture, straightEdgeCapture);
+  const livePathIds = new Set(read.doc.pages.flatMap((page) => page.paths.map(({ id }) => id)));
+  const provenance: DxfPathProvenanceReadArtifactV1 = Object.freeze({
+    schemaVersion: DXF_PATH_PROVENANCE_READ_V1,
+    sourceFileId,
+    paths: Object.freeze(provenanceCapture.paths.filter(({ pathId }) => livePathIds.has(pathId))),
+    blockers: Object.freeze(
+      provenanceCapture.blockers.filter(({ pathId }) => pathId === null || livePathIds.has(pathId)),
+    ),
+    sharedVertexOwnership: 'outgoing-primitive-open-final-end' as const,
+    productionReady: false as const,
+    heuristicRecoveryUsed: false as const,
+    pieceSpecIntegrated: false as const,
+  });
+  return Object.freeze({
+    read,
+    provenance,
+    candidates: Object.freeze(
+      straightEdgeCapture.candidates.filter(({ path }) => livePathIds.has(path.sourcePathId)),
+    ),
+    blockers: Object.freeze(
+      straightEdgeCapture.blockers.filter(
+        ({ sourcePathId }) => sourcePathId === null || livePathIds.has(sourcePathId),
+      ),
+    ),
+  });
 }
 
 /** Contract entry point (08-CONTRACT §2): DXF → SourceDoc. Use `readDxf` to also get the

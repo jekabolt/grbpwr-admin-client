@@ -9,7 +9,6 @@ import {
   useAddTechCardIssue,
   useAnalyzeTechCardConstruction,
   useSetTechCardFindingSeen,
-  useTechCardConstructionAudit,
 } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
@@ -48,6 +47,7 @@ import { PdfGapsGroup, type GapRow } from './pdf-gaps-group';
 import type { Gap } from '../techpack/gaps';
 import { gapNav, gapsToClientFindings } from '../techpack/gap-findings';
 import { revealField } from 'utils/field-errors';
+import type { TechCardConstructionAuditOwnerV1 } from './construction-audit-owner-v1';
 
 // CONSTRUCTION AUDIT — the machine layer's report on the SAVED card, sitting above everything it is
 // a report ABOUT. Advisory throughout: nothing here disables a control or refuses a save.
@@ -104,16 +104,16 @@ function refTarget(ref: string): RefTarget | null {
   if (!value) return null;
   switch (kind) {
     case 'op':
-      return { tab: 'construction', extra: { op: value } };
+      return { tab: 'assembly-table', extra: { op: value } };
     case 'unit':
-      return { tab: 'construction', extra: { unit: value } };
+      return { tab: 'assembly-table', extra: { unit: value } };
     case 'piece':
       return { tab: 'patterns' };
     case 'bom':
       return { tab: 'bom' };
     // a step's stored seam (PDF gaps): the construction tab, where the steps and their seams are
     case 'seam':
-      return { tab: 'construction' };
+      return { tab: 'assembly-table' };
     default:
       return null;
   }
@@ -783,7 +783,7 @@ function unsavedCaption(status: AutosaveStatus, errorsCount?: number, refusal?: 
 
 export function ConstructionAudit({
   techCardId,
-  active,
+  auditOwner,
   onGoTab,
   frozen = false,
   operationCount,
@@ -797,7 +797,7 @@ export function ConstructionAudit({
    * этого разбор уходил бы на сервер при открытии ЛЮБОЙ тех-карты — включая те, где на сборку никто
    * не заглянет. Тот же гейт, что у `usePieceShapes(active)` в этом же файле.
    */
-  active: boolean;
+  auditOwner: TechCardConstructionAuditOwnerV1;
   /**
    * Навигация внутри карточки — ПРОПОМ, как `onGoTab` у ленты жизненного цикла. Об идентичности
    * вкладок (`TabId`, свёрнутые псевдонимы, что из них вообще есть на этой карточке) знает только
@@ -829,7 +829,7 @@ export function ConstructionAudit({
   gapSubject?: (gap: Gap) => string;
 }) {
   const { getValues, setValue, formState } = useFormContext<TechCardFormData>();
-  const { data, isPending, isError } = useTechCardConstructionAudit(techCardId, active);
+  const { data, isPending, isError } = auditOwner;
   const analyze = useAnalyzeTechCardConstruction();
   const addIssue = useAddTechCardIssue();
   const setSeen = useSetTechCardFindingSeen();

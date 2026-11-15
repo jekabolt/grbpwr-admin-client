@@ -15,6 +15,7 @@ import type {
   DraftScopeTarget,
   DraftShapeRef,
   NameDecision,
+  PatternImportOpenFile,
   SourceFileInfo,
   StageIO,
   StageName,
@@ -26,7 +27,7 @@ export type StageProgress = { done: number; total: number; note?: string };
 export interface ImportClient {
   /** 'stub' renders fixture data and writes nothing; the shell says so on screen. */
   readonly kind: 'stub' | 'worker';
-  open(files: { name: string; bytes: ArrayBuffer; generatedFusing?: boolean }[]): Promise<{
+  open(files: PatternImportOpenFile[]): Promise<{
     sessionId: number;
     files: SourceFileInfo[];
   }>;
@@ -151,6 +152,10 @@ export type DraftBuilder = (
      * `SemanticsInput.pieceOverrides` (I1), so the draft and the manifest inside the DXF agree.
      */
     semantics: StageIO['semantics']['out'];
+    /** Same-session Phase-D provenance side-stage; absent for sources that did not opt in. */
+    dxfProvenance?: StageIO['dxf-provenance']['out'];
+    /** Separate exact source/contour replay carrier; contains no raw DXF. */
+    dxfPhaseDReplay?: StageIO['dxf-phase-d-replay']['out'];
   },
 ) => CardDraft;
 

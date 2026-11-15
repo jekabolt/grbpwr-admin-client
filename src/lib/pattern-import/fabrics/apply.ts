@@ -24,8 +24,16 @@
 //   Links to blocks the new file no longer draws are NEVER removed here (MF-C): the draft lists them
 //   (`DraftScope.vanished`) and the piece-match modal removes them on the card's complete parse.
 
-import type { ApplyResult, ApplyUploaded, CardDraft, DraftPiece } from '../types';
-import { FUSING_FULL, FUSING_UNKNOWN, IDENTICAL, aliasKey, mintLineKey } from './draft';
+import {
+  PATTERN_IMPORT_APPLY_COMMIT_RECEIPT_V1,
+  type ApplyCommitBindingBlocker,
+  type ApplyCommitScopeBinding,
+  type ApplyResult,
+  type ApplyUploaded,
+  type CardDraft,
+  type DraftPiece,
+} from '../types';
+import { FUSING_FULL, FUSING_UNKNOWN, IDENTICAL, aliasKey, mintLineKey, normBlock } from './draft';
 import { FOLD_CUT_SYMMETRY } from 'components/managers/tech-card/components/piece-codes';
 import { NEW_PIECE, withAnswers } from './assembly-impact';
 
@@ -86,6 +94,12 @@ export type ApplyDeps = {
   storageSizeId: number;
   /** The card's save (autosave `flush`); its answer is returned as `save`. */
   save?: (reason: string) => Promise<string>;
+  /**
+   * Shared card lock the editing form stands on, read synchronously immediately before this apply's
+   * form writes. Required to mint a post-save commit receipt; ordinary imports remain compatible
+   * without it, but semantic attachment must then stay blocked.
+   */
+  readPreviousLockVersion?: () => number;
   /**
    * Rows replaced in place (old url → new url), told after the form writes and BEFORE the save, so
    * the caller can arm the snapshot reason the save carries (nesting/reupload-session.ts).
@@ -185,6 +199,8 @@ export function planFormWrites(
   created: number;
   reusedPieces: number;
   replaced: { scopeKey: string; lineKey: string; oldUrl: string; newUrl: string }[];
+  commitBindings: ApplyCommitScopeBinding[];
+  commitBindingBlockers: ApplyCommitBindingBlocker[];
 } {
   // T4: the apply step's answers become ordinary rows (links, new pieces, point writes) here only
   draft = withAnswers(draft, live.pieces, opts.mintKey);
@@ -346,7 +362,7 @@ export function planFormWrites(
         ungraded: !!p.ungraded,
         grainline: p.grainline,
         fused: p.fused,
-        fusingMode: p.fused ? p.fusingMode ?? FUSING_FULL : FUSING_UNKNOWN,
+        fusingMode: p.fused ? (p.fusingMode ?? FUSING_FULL) : FUSING_UNKNOWN,
         fusingWidthMm: '',
         calloutNumber: 0,
         note: '',
@@ -422,7 +438,136 @@ export function planFormWrites(
         (a.bomLineKey ?? '') === (live.aliases[i].bomLineKey ?? ''),
     );
   if (!same) writes.push({ path: 'pieceDxfAliases', value: next });
-  return { writes, created: created.length, reusedPieces, replaced };
+
+  // Exact identities for a later post-save readback. This is derived from the projected form rows,
+  // never from a filename lookup after the save. Any ambiguity blocks only semantic attachment;
+  // the established DXF import remains allowed to save its ordinary rows.
+  const finalPatterns = [...nextPatterns, ...rows];
+  const finalPieces: LivePiece[] = [...live.pieces, ...(created as LivePiece[])];
+  const commitBindings: ApplyCommitScopeBinding[] = [];
+  const commitBindingBlockers: ApplyCommitBindingBlocker[] = [];
+  const addBlocker = (scopeKey: string, code: ApplyCommitBindingBlocker['code'], detail: string) =>
+    commitBindingBlockers.push({ scopeKey, code, detail });
+
+  for (const sc of draft.scopes) {
+    const scopeKey = sc.target.scopeKey;
+    const uploadedRow = uploaded.find((candidate) => candidate.scopeKey === scopeKey);
+    const patternRows = finalPatterns.filter(
+      (row) =>
+        scopeOf(row, 'sheet') === scopeKey &&
+        (uploadedRow ? row.url === uploadedRow.url : row.filename === sc.filename),
+    );
+    if (patternRows.length === 0) {
+      addBlocker(
+        scopeKey,
+        'pattern-row-missing',
+        'The projected card has no exact pattern row for the imported scope.',
+      );
+      continue;
+    }
+    if (patternRows.length !== 1) {
+      addBlocker(
+        scopeKey,
+        'pattern-row-ambiguous',
+        'The projected card has more than one exact pattern row for the imported scope.',
+      );
+      continue;
+    }
+    const pattern = patternRows[0];
+    const patternLineKey = (pattern.lineKey ?? '').trim();
+    const patternUrl = (pattern.url ?? '').trim();
+    const patternSizeId = pattern.sizeId;
+    if (
+      !patternLineKey ||
+      !patternUrl ||
+      !Number.isSafeInteger(patternSizeId) ||
+      Number(patternSizeId) < 0
+    ) {
+      addBlocker(
+        scopeKey,
+        'pattern-identity-incomplete',
+        'The exact pattern row lacks a stable line key, URL, or non-negative size id.',
+      );
+      continue;
+    }
+
+    const wantedAliases = draft.aliases.filter((alias) => alias.scopeKey === scopeKey);
+    if (wantedAliases.length === 0) {
+      addBlocker(
+        scopeKey,
+        'scope-has-no-aliases',
+        'The imported scope has no block-to-piece aliases to bind to semantic evidence.',
+      );
+      continue;
+    }
+    const aliases: ApplyCommitScopeBinding['aliases'] = [];
+    let scopeBlocked = false;
+    for (const wanted of wantedAliases) {
+      const wantedKey = aliasKey(scopeKey, wanted.blockName);
+      const matching = next.filter(
+        (row) => aliasKey(scopeOf(row, 'link'), row.blockName ?? '') === wantedKey,
+      );
+      if (matching.length === 0) {
+        addBlocker(
+          scopeKey,
+          'alias-row-missing',
+          `The projected alias for block ${normBlock(wanted.blockName)} is missing.`,
+        );
+        scopeBlocked = true;
+        continue;
+      }
+      if (matching.length !== 1) {
+        addBlocker(
+          scopeKey,
+          'alias-row-ambiguous',
+          `The projected alias for block ${normBlock(wanted.blockName)} is ambiguous.`,
+        );
+        scopeBlocked = true;
+        continue;
+      }
+      const pieceLineKey = (matching[0].pieceLineKey ?? '').trim();
+      const pieceRows = finalPieces.filter(
+        (piece) => (piece.lineKey ?? '').trim().toLowerCase() === pieceLineKey.toLowerCase(),
+      );
+      if (!pieceLineKey || pieceRows.length === 0) {
+        addBlocker(
+          scopeKey,
+          'piece-row-missing',
+          `The projected piece for block ${normBlock(wanted.blockName)} is missing.`,
+        );
+        scopeBlocked = true;
+        continue;
+      }
+      if (pieceRows.length !== 1) {
+        addBlocker(
+          scopeKey,
+          'piece-row-ambiguous',
+          `The projected piece for block ${normBlock(wanted.blockName)} is ambiguous.`,
+        );
+        scopeBlocked = true;
+        continue;
+      }
+      aliases.push({ scopeKey, blockName: matching[0].blockName ?? '', pieceLineKey });
+    }
+    if (scopeBlocked) continue;
+    commitBindings.push({
+      scopeKey,
+      patternLineKey,
+      patternUrl,
+      patternSizeId: Number(patternSizeId),
+      pieceLineKeys: [...new Set(aliases.map((alias) => alias.pieceLineKey))],
+      aliases,
+    });
+  }
+
+  return {
+    writes,
+    created: created.length,
+    reusedPieces,
+    replaced,
+    commitBindings,
+    commitBindingBlockers,
+  };
 }
 
 /** What `saveOrLanded` answers when the body landed and only the rebuild after it still runs. */
@@ -538,6 +683,9 @@ export async function applyDraft(
     mintKey,
     scopeOf: deps.scopeOf,
   });
+  // No await occurs between this read and the writes/save request below. It is the editing base the
+  // host is about to claim, not a lock value reconstructed from the later response.
+  const previousLockVersion = deps.readPreviousLockVersion?.();
   for (const w of plan.writes) deps.write(w.path, w.value);
   if (plan.replaced.length) deps.onReplaced?.(plan.replaced);
   const retry = !plan.writes.length && !!deps.unsaved?.get();
@@ -547,6 +695,25 @@ export async function applyDraft(
   //    save refused; success only on what the save answered
   const urls = [...uploaded.map((u) => u.url), ...plan.replaced.map((r) => r.newUrl)];
   const { rebuilding, landed: rowsLanded } = deps;
+  const commitFields = (persisted: boolean) => {
+    if (!persisted) return {};
+    const blockers = [...plan.commitBindingBlockers];
+    if (!Number.isSafeInteger(previousLockVersion) || Number(previousLockVersion) < 0)
+      blockers.push({
+        scopeKey: '',
+        code: 'previous-lock-version-unavailable' as const,
+        detail: 'The host did not expose a valid non-negative pre-save card lock version.',
+      });
+    if (blockers.length) return { commitReceiptBlockers: blockers };
+    return {
+      commitReceipt: {
+        schemaVersion: PATTERN_IMPORT_APPLY_COMMIT_RECEIPT_V1,
+        techCardId: draft.techCardId,
+        previousLockVersion: Number(previousLockVersion),
+        scopes: plan.commitBindings,
+      },
+    };
+  };
   const save =
     (plan.writes.length || retry) && deps.save
       ? await saveOrLanded(
@@ -557,7 +724,7 @@ export async function applyDraft(
   if (save !== undefined) {
     const fine = retry ? save === 'ok' : save === 'ok' || save === 'nothing' || save === 'off';
     // T3: the rows are the saved card's — the card saved; a later write is what is owed.
-    const landed = fine ? null : deps.landed?.(urls) ?? null;
+    const landed = fine ? null : (deps.landed?.(urls) ?? null);
     if (landed) {
       deps.unsaved?.set(false);
       return {
@@ -567,6 +734,7 @@ export async function applyDraft(
         writes: plan.writes.length,
         ...(plan.replaced.length ? { replaced: plan.replaced } : {}),
         save: 'ok',
+        ...commitFields(true),
         ...(landed.owed ? { owed: landed.owed } : {}),
       };
     }
@@ -586,5 +754,6 @@ export async function applyDraft(
     writes: plan.writes.length,
     ...(plan.replaced.length ? { replaced: plan.replaced } : {}),
     ...(save ? { save } : {}),
+    ...commitFields(save === 'ok' || save === 'nothing'),
   };
 }

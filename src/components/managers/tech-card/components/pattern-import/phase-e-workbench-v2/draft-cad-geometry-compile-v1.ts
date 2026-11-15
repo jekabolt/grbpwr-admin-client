@@ -1,0 +1,920 @@
+import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
+import type { DxfProductPhaseDSizeSelectionResultV1 } from 'lib/pattern-import/dxf-product-phase-d-size-selection-v1';
+import { readManifest } from 'lib/pattern-import/manifest';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_CARRIER_V1,
+  type ConversionManifest,
+  type InternalFeature,
+  type NotchFeature,
+  type PtMm,
+  type WriteJob,
+} from 'lib/pattern-import/types';
+import { writeDxfDetailed } from 'lib/pattern-import/write';
+
+import {
+  buildPatternImportDxfPhaseEDraftCadPreviewV1,
+  type PatternImportDxfPhaseEDraftCadPreviewPrimitiveV1,
+} from './draft-cad-preview-v1';
+import { executePatternImportDxfPhaseEDraftCadAddPointGeometryV1 } from './draft-cad-add-point-geometry-executor-v1';
+import { executePatternImportDxfPhaseEDraftCadCutGeometryV1 } from './draft-cad-cut-geometry-executor-v1';
+import { executePatternImportDxfPhaseEDraftCadRectanglePieceV1 } from './draft-cad-rectangle-piece-executor-v1';
+import { executePatternImportDxfPhaseEDraftCadRoundPieceV1 } from './draft-cad-round-piece-executor-v1';
+import type { PatternImportDxfPhaseEDraftCadCompileSourceV1 } from './draft-cad-compile-source-v1';
+import type {
+  PatternImportDxfPhaseEDraftCadCommandV1,
+  PatternImportDxfPhaseEDraftCadSessionV1,
+  PatternImportDxfPhaseEDraftCadToolV1,
+} from './draft-cad-session-v1';
+import { PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1 } from './draft-cad-session-v1';
+import { executePatternImportDxfPhaseEDraftCadSpreadGeometryV1 } from './draft-cad-spread-geometry-executor-v1';
+
+export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_GEOMETRY_COMPILE_V1 =
+  'pattern-import-dxf-phase-e-draft-cad-geometry-compile/1' as const;
+
+type SelectedPhaseD = Extract<DxfProductPhaseDSizeSelectionResultV1, { ok: true }>;
+
+export type PatternImportDxfPhaseEDraftCadGeometryCompileBlockerCodeV1 =
+  | 'invalid-input'
+  | 'nothing-to-compile'
+  | 'source-binding-mismatch'
+  | 'writer-replay-unavailable'
+  | 'writer-piece-unavailable'
+  | 'writer-size-unavailable'
+  | 'preview-blocked'
+  | 'add-point-geometry-blocked'
+  | 'rectangle-geometry-blocked'
+  | 'round-piece-geometry-blocked'
+  | 'cut-geometry-blocked'
+  | 'spread-geometry-blocked'
+  | 'unsupported-command'
+  | 'writer-failed'
+  | 'writer-output-mismatch'
+  | 'manifest-readback-mismatch';
+
+export type PatternImportDxfPhaseEDraftCadGeometryCompileBlockerV1 = Readonly<{
+  code: PatternImportDxfPhaseEDraftCadGeometryCompileBlockerCodeV1;
+  detail: string;
+  commandId: string | null;
+  tool: PatternImportDxfPhaseEDraftCadToolV1 | null;
+}>;
+
+export type PatternImportDxfPhaseEDraftCadCompiledFeatureV1 = Readonly<{
+  commandId: string;
+  entityId: string;
+  tool: PatternImportDxfPhaseEDraftCadToolV1;
+  pieceId: string;
+  sizeToken: string;
+  output:
+    | 'internal'
+    | 'drill'
+    | 'notch'
+    | 'boundary-point'
+    | 'piece-create'
+    | 'split'
+    | 'slash-guide'
+    | 'spread';
+  derivedPieceIds?: readonly [string, string];
+  /** Session-local topology identity; the ordinary re-import remains canonical topology owner. */
+  createdTopology?: Readonly<{
+    pieceLineKey: string;
+    contourId: string;
+    vertexIds: readonly string[];
+  }>;
+}>;
+
+export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_GEOMETRY_COMPILE_CLAIMS_V1 = Object.freeze({
+  exactActiveHistoryOnly: true,
+  exactPhaseDSelectionRequired: true,
+  retainedWriterReplayRequired: true,
+  existingPieceSpecModelReused: true,
+  deterministicProductWriterReused: true,
+  embeddedManifestReadbackVerified: true,
+  sessionLocalCutExecutorIntegrated: true,
+  sessionLocalSpreadExecutorIntegrated: true,
+  sessionLocalAddPointExecutorIntegrated: true,
+  sessionLocalRectanglePieceExecutorIntegrated: true,
+  sessionLocalRoundPieceExecutorIntegrated: true,
+  sourcePieceSpecMutated: false,
+  directTopologyInjection: false,
+  parallelDocumentModelCreated: false,
+  productionWritePerformed: false,
+  freshImportSemanticsPhaseDPhaseERequired: true,
+  applyAuthorityCreated: false,
+  productionReady: false,
+} as const);
+
+export type PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1 = Readonly<{
+  schemaVersion: typeof PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_GEOMETRY_COMPILE_V1;
+  status: 'compiled-reimport-required';
+  source: Readonly<{
+    revision: number;
+    sourceFileId: string;
+    sourceSha256: string;
+    selectedGeometrySha256: string;
+    catalogCanonicalSha256: string;
+    sizeSelectionCanonicalSha256: string;
+  }>;
+  scope: Readonly<{ techCardId: number; scopeKey: string; sizeToken: string }>;
+  /** Detached writer input containing the compiled PieceSpec geometry. It is not a CardDraft. */
+  compiledJob: WriteJob;
+  /** New deterministic DXF text. It must enter through the ordinary import pipeline. */
+  dxfText: string;
+  manifest: ConversionManifest;
+  warnings: readonly string[];
+  compiledFeatures: readonly PatternImportDxfPhaseEDraftCadCompiledFeatureV1[];
+  reimport: Readonly<{
+    required: true;
+    boundary: 'ordinary-import-semantics-phase-d-phase-e';
+    applyEligible: false;
+  }>;
+  claims: typeof PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_GEOMETRY_COMPILE_CLAIMS_V1;
+}>;
+
+export type PatternImportDxfPhaseEDraftCadGeometryCompileResultV1 =
+  | Readonly<{
+      ok: true;
+      artifact: PatternImportDxfPhaseEDraftCadGeometryCompileArtifactV1;
+      blockers: readonly [];
+    }>
+  | Readonly<{
+      ok: false;
+      artifact: null;
+      blockers: readonly PatternImportDxfPhaseEDraftCadGeometryCompileBlockerV1[];
+    }>;
+
+export type PatternImportDxfPhaseEDraftCadGeometryCompileInputV1 = Readonly<{
+  session: PatternImportDxfPhaseEDraftCadSessionV1;
+  projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
+  selection: SelectedPhaseD;
+  compileSource: PatternImportDxfPhaseEDraftCadCompileSourceV1;
+}>;
+
+const INTERNAL_TOOLS = new Set<PatternImportDxfPhaseEDraftCadToolV1>([
+  'internal-line',
+  'pattern-line',
+  'french-curve',
+  'dart',
+]);
+const PRODUCTIVE_TOOLS = new Set<PatternImportDxfPhaseEDraftCadToolV1>(
+  PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1,
+);
+
+function deepFreeze<T>(value: T, seen = new Set<object>()): T {
+  if (!value || typeof value !== 'object' || seen.has(value) || Object.isFrozen(value))
+    return value;
+  seen.add(value);
+  for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child, seen);
+  return Object.freeze(value);
+}
+
+function blocked(
+  code: PatternImportDxfPhaseEDraftCadGeometryCompileBlockerCodeV1,
+  detail: string,
+  command: PatternImportDxfPhaseEDraftCadCommandV1 | null = null,
+): PatternImportDxfPhaseEDraftCadGeometryCompileResultV1 {
+  return deepFreeze({
+    ok: false as const,
+    artifact: null,
+    blockers: [
+      {
+        code,
+        detail,
+        commandId: command?.commandId ?? null,
+        tool: command?.tool ?? null,
+      },
+    ],
+  });
+}
+
+function canonical(value: unknown): string {
+  if (value === null || typeof value === 'boolean' || typeof value === 'string')
+    return JSON.stringify(value);
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new TypeError();
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (!value || typeof value !== 'object') throw new TypeError();
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .filter((key) => record[key] !== undefined)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`)
+    .join(',')}}`;
+}
+
+function activeCommands(
+  session: PatternImportDxfPhaseEDraftCadSessionV1,
+): readonly PatternImportDxfPhaseEDraftCadCommandV1[] {
+  return session.history.slice(0, session.cursor).flatMap(({ commands }) => commands);
+}
+
+function supported(command: PatternImportDxfPhaseEDraftCadCommandV1): boolean {
+  if (!PRODUCTIVE_TOOLS.has(command.tool)) return false;
+  if (command.tool === 'rectangle') return Boolean(command.payload.newPiece);
+  if (command.tool === 'circle' || command.tool === 'ellipse')
+    return Boolean(command.payload.newPiece);
+  if (INTERNAL_TOOLS.has(command.tool)) return true;
+  if (command.tool === 'add-point') return Boolean(command.payload.edge);
+  if (command.tool === 'cut') return command.payload.keepSide === 'both';
+  if (command.tool === 'spread') return command.payload.amountMm > 0;
+  if (command.tool === 'mark') return command.payload.kind === 'drill';
+  if (command.tool === 'notch') return command.payload.kind === 'single';
+  return false;
+}
+
+function unsupportedDetail(command: PatternImportDxfPhaseEDraftCadCommandV1): string {
+  if (command.tool === 'rectangle')
+    return 'Legacy rectangle intent has no stable new-piece identity or explicit grading/placement policy.';
+  if (command.tool === 'circle' || command.tool === 'ellipse')
+    return `Legacy ${command.tool} intent has no stable new-piece identity or explicit bounded-approximation/grading/placement policy.`;
+  if (command.tool === 'notch')
+    return `Notch kind ${command.payload.kind} has no lossless PieceSpec encoding; only a single anchored notch is compiled.`;
+  if (command.tool === 'mark')
+    return `Mark kind ${command.payload.kind} has no lossless PieceSpec encoding; only drill marks are compiled.`;
+  return `Tool ${command.tool} changes topology or carries semantics the retained PieceSpec writer cannot encode losslessly.`;
+}
+
+function primitiveFor(
+  primitives: readonly PatternImportDxfPhaseEDraftCadPreviewPrimitiveV1[],
+  command: PatternImportDxfPhaseEDraftCadCommandV1,
+): PatternImportDxfPhaseEDraftCadPreviewPrimitiveV1 | null {
+  const matches = primitives.filter(
+    ({ commandId, entityId, tool, target }) =>
+      commandId === command.commandId &&
+      entityId === command.payload.entityId &&
+      tool === command.tool &&
+      target.pieceId === command.target.pieceId &&
+      target.pieceLineKey === command.target.pieceLineKey,
+  );
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function featureBase() {
+  return { origin: 'operator' as const, ranges: [], confidence: 1 };
+}
+
+function distanceToChord(point: PtMm, from: PtMm, to: PtMm): number {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const length = Math.hypot(dx, dy);
+  if (!length) return Math.hypot(point.x - from.x, point.y - from.y);
+  return Math.abs(dy * point.x - dx * point.y + to.x * from.y - to.y * from.x) / length;
+}
+
+function splitBezier(control: readonly PtMm[]): readonly [PtMm[], PtMm[]] {
+  const levels: PtMm[][] = [control.map(({ x, y }) => ({ x, y }))];
+  while (levels.at(-1)!.length > 1) {
+    const previous = levels.at(-1)!;
+    levels.push(
+      previous.slice(0, -1).map((point, index) => ({
+        x: (point.x + previous[index + 1].x) / 2,
+        y: (point.y + previous[index + 1].y) / 2,
+      })),
+    );
+  }
+  return [levels.map((level) => level[0]), levels.map((level) => level.at(-1)!).reverse()];
+}
+
+function sampleBezier(control: readonly PtMm[], depth = 0): PtMm[] {
+  const from = control[0];
+  const to = control.at(-1)!;
+  const flat = control.slice(1, -1).every((point) => distanceToChord(point, from, to) <= 0.05);
+  if (flat || depth >= 16)
+    return [
+      { x: from.x, y: from.y },
+      { x: to.x, y: to.y },
+    ];
+  const [left, right] = splitBezier(control);
+  return [...sampleBezier(left, depth + 1).slice(0, -1), ...sampleBezier(right, depth + 1)];
+}
+
+function internalFeature(
+  command: PatternImportDxfPhaseEDraftCadCommandV1,
+  primitive: PatternImportDxfPhaseEDraftCadPreviewPrimitiveV1,
+): InternalFeature | null {
+  if (command.tool === 'internal-line' && primitive.kind === 'path')
+    return {
+      kind: 'internal',
+      pts: primitive.pointsMm.map(({ x, y }) => ({ x, y })),
+      closed: false,
+      label: 'draft-cad:internal-line',
+      ...featureBase(),
+    };
+  if (command.tool === 'pattern-line' && primitive.kind === 'path')
+    return {
+      kind: 'internal',
+      pts: primitive.pointsMm.map(({ x, y }) => ({ x, y })),
+      closed: primitive.closed,
+      label: 'draft-cad:pattern-line',
+      ...featureBase(),
+    };
+  if (command.tool === 'french-curve' && primitive.kind === 'curve')
+    return {
+      kind: 'internal',
+      pts: sampleBezier(primitive.controlPointsMm),
+      closed: false,
+      label: 'draft-cad:french-curve',
+      ...featureBase(),
+    };
+  if (command.tool === 'dart' && primitive.kind === 'dart')
+    return {
+      kind: 'internal',
+      pts: [primitive.baseLeftMm, primitive.apexMm, primitive.baseRightMm].map(({ x, y }) => ({
+        x,
+        y,
+      })),
+      closed: false,
+      label: 'draft-cad:dart',
+      ...featureBase(),
+    };
+  return null;
+}
+
+function notchFeature(
+  primitive: Extract<PatternImportDxfPhaseEDraftCadPreviewPrimitiveV1, { kind: 'notch' }>,
+  projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
+): NotchFeature | null {
+  const projectedPiece = projection.pieces.find(
+    ({ pieceId, pieceLineKey }) =>
+      pieceId === primitive.target.pieceId && pieceLineKey === primitive.target.pieceLineKey,
+  );
+  const contour = projectedPiece?.contours.find(
+    ({ contourId }) => contourId === primitive.sourceAnchor.contourId,
+  );
+  const [fromId, toId] = primitive.sourceAnchor.boundaryVertexIds;
+  const from = contour?.vertices.find(({ vertexId }) => vertexId === fromId)?.pointMm;
+  const to = contour?.vertices.find(({ vertexId }) => vertexId === toId)?.pointMm;
+  if (!from || !to) return null;
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const length = Math.hypot(dx, dy);
+  if (!length) return null;
+  const at = { x: primitive.pointMm.x, y: primitive.pointMm.y };
+  return {
+    kind: 'notch',
+    at,
+    seg: [
+      at,
+      {
+        x: at.x - (dy / length) * primitive.depthMm,
+        y: at.y + (dx / length) * primitive.depthMm,
+      },
+    ],
+    depthMm: primitive.depthMm,
+    ...featureBase(),
+  };
+}
+
+function exactSameMembers(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) return false;
+  const sortedLeft = [...left].sort();
+  const sortedRight = [...right].sort();
+  return sortedLeft.every((value, index) => value === sortedRight[index]);
+}
+
+/**
+ * Compiles the PieceSpec-safe feature subset into detached DXF text. The result deliberately cannot
+ * be applied to a card: callers must feed it back through import, semantics, Phase-D and Phase-E.
+ */
+function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
+  input: PatternImportDxfPhaseEDraftCadGeometryCompileInputV1,
+): PatternImportDxfPhaseEDraftCadGeometryCompileResultV1 {
+  let detached: PatternImportDxfPhaseEDraftCadGeometryCompileInputV1;
+  try {
+    detached = structuredClone(input);
+  } catch {
+    return blocked('invalid-input', 'Draft CAD compile input could not be detached safely.');
+  }
+
+  const { session, projection, selection, compileSource } = detached;
+  if (
+    !session ||
+    !projection ||
+    selection?.ok !== true ||
+    !compileSource ||
+    !Number.isSafeInteger(session.cursor) ||
+    session.cursor < 0 ||
+    session.cursor > session.history.length
+  )
+    return blocked('invalid-input', 'Draft CAD compile requires complete V1 session inputs.');
+
+  const commands = activeCommands(session);
+  if (!commands.length)
+    return blocked('nothing-to-compile', 'The active Draft CAD history contains no commands.');
+  if (new Set(commands.map(({ commandId }) => commandId)).size !== commands.length)
+    return blocked('invalid-input', 'Active Draft CAD command ids must be globally unique.');
+
+  const binding = selection.pipeline.contentBinding;
+  const selected = selection.selection;
+  const catalogPieceIds = session.source.catalog.pieces.map(({ pieceId }) => pieceId);
+  if (
+    !binding ||
+    selected.scopeKey === '' ||
+    selected.sizeToken !== projection.sizeToken ||
+    selected.canonicalSha256 !== session.source.catalog.sizeSelectionCanonicalSha256 ||
+    binding.sourceFileId !== session.source.phaseD.sourceFileId ||
+    binding.sourceSha256 !== session.source.phaseD.sourceSha256 ||
+    binding.selectedGeometrySha256 !== session.source.phaseD.selectedGeometrySha256 ||
+    projection.sourceFileId !== binding.sourceFileId ||
+    projection.expectedCatalogCanonicalSha256 !== session.source.catalog.canonicalSha256 ||
+    projection.sizeSelectionCanonicalSha256 !== selected.canonicalSha256 ||
+    !exactSameMembers(selected.pieceIds, catalogPieceIds) ||
+    compileSource.techCardId < 1
+  )
+    return blocked(
+      'source-binding-mismatch',
+      'Session, projection, selected Phase-D identity and compile source do not exact-match.',
+    );
+
+  if (
+    !compileSource.dxfProvenance?.pipelineIntegrated ||
+    !compileSource.dxfProvenance.contentBinding ||
+    !compileSource.dxfPhaseDReplay?.replayReady ||
+    !compileSource.dxfPhaseDReplay.carrier ||
+    compileSource.dxfProvenance.contentBinding.sourceFileId !== binding.sourceFileId ||
+    compileSource.dxfProvenance.contentBinding.sourceSha256 !== binding.sourceSha256 ||
+    compileSource.dxfPhaseDReplay.carrier.sourceFileId !== binding.sourceFileId ||
+    compileSource.dxfPhaseDReplay.carrier.sourceSha256 !== binding.sourceSha256
+  )
+    return blocked(
+      'source-binding-mismatch',
+      'The compile source no longer retains the exact public and replay Phase-D identity.',
+    );
+
+  const scopes = compileSource.scopes.filter(({ target }) => target.scopeKey === selected.scopeKey);
+  const scope = scopes.length === 1 ? scopes[0] : null;
+  const replay = scope?.writerReplay;
+  if (
+    !scope ||
+    !replay ||
+    replay.schemaVersion !== PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_CARRIER_V1 ||
+    replay.job.techCardId !== compileSource.techCardId ||
+    replay.job.scope.scopeKey !== selected.scopeKey ||
+    !Number.isFinite(new Date(replay.createdAt).valueOf())
+  )
+    return blocked(
+      'writer-replay-unavailable',
+      'Exactly one matching retained writer replay is required for Draft CAD compilation.',
+    );
+
+  for (const command of commands) {
+    if (!supported(command))
+      return blocked('unsupported-command', unsupportedDetail(command), command);
+  }
+
+  const preview = buildPatternImportDxfPhaseEDraftCadPreviewV1(session, projection);
+  if (!preview.previewReady)
+    return blocked(
+      'preview-blocked',
+      preview.blockers.map(({ code, detail }) => `${code}: ${detail}`).join('; '),
+    );
+
+  const sourceIds = new Set<string>();
+  for (const piece of session.source.catalog.pieces) {
+    sourceIds.add(piece.pieceId);
+    sourceIds.add(piece.pieceLineKey);
+    for (const contour of piece.contours) {
+      sourceIds.add(contour.contourId);
+      for (const vertex of contour.boundaryVertices) sourceIds.add(vertex.vertexId);
+    }
+  }
+  const cutCommands = commands.filter(
+    (command): command is Extract<PatternImportDxfPhaseEDraftCadCommandV1, { tool: 'cut' }> =>
+      command.tool === 'cut',
+  );
+  const spreadCommands = commands.filter(
+    (command): command is Extract<PatternImportDxfPhaseEDraftCadCommandV1, { tool: 'spread' }> =>
+      command.tool === 'spread',
+  );
+  const duplicateCut = cutCommands.find(
+    (command, index) =>
+      cutCommands.findIndex(({ target }) => target.pieceId === command.target.pieceId) !== index,
+  );
+  if (duplicateCut)
+    return blocked(
+      'cut-geometry-blocked',
+      'unsupported-piece-geometry: Minimal Cut compilation accepts one split per retained PieceSpec.',
+      duplicateCut,
+    );
+  const spreadPair = new Map<
+    string,
+    Extract<PatternImportDxfPhaseEDraftCadCommandV1, { tool: 'cut' }>
+  >();
+  const cutOwners = new Set<string>();
+  for (const spread of spreadCommands) {
+    const matches = cutCommands.filter(
+      (cut) =>
+        cut.payload.entityId === spread.payload.cutLineEntityId &&
+        cut.target.pieceId === spread.target.pieceId &&
+        cut.target.pieceLineKey === spread.target.pieceLineKey,
+    );
+    if (matches.length !== 1)
+      return blocked(
+        'spread-geometry-blocked',
+        'anchor-unavailable: Spread must reference one active same-piece Cut guide.',
+        spread,
+      );
+    const cut = matches[0]!;
+    if (cutOwners.has(cut.commandId))
+      return blocked(
+        'spread-geometry-blocked',
+        'invalid-input: One Cut guide can own only one Spread command.',
+        spread,
+      );
+    cutOwners.add(cut.commandId);
+    spreadPair.set(spread.commandId, cut);
+  }
+  // Retained point/line features commute with a topology mutation and are partitioned by its
+  // executor. Running bare Cuts or paired Spreads last keeps canvas details on the source identity.
+  const compileCommands = [
+    ...commands.filter(({ tool }) => tool !== 'cut' && tool !== 'spread'),
+    ...cutCommands.filter((cut) => !cutOwners.has(cut.commandId)),
+    ...spreadCommands,
+  ];
+
+  let job = structuredClone(replay.job);
+  const createdTopologyIds = new Set(sourceIds);
+  const compiledFeatures: PatternImportDxfPhaseEDraftCadCompiledFeatureV1[] = [];
+  for (const command of compileCommands) {
+    const catalogTargets = session.source.catalog.pieces.filter(
+      ({ pieceId, pieceLineKey }) =>
+        pieceId === command.target.pieceId && pieceLineKey === command.target.pieceLineKey,
+    );
+    const writerPieces = job.pieces.filter(({ identity }) => identity === command.target.pieceId);
+    if (catalogTargets.length !== 1 || writerPieces.length !== 1)
+      return blocked(
+        'writer-piece-unavailable',
+        `Command target ${command.target.pieceId} does not resolve to one retained PieceSpec.`,
+        command,
+      );
+    const sizes = writerPieces[0].sizes.filter(({ sizeToken }) => sizeToken === selected.sizeToken);
+    if (sizes.length !== 1)
+      return blocked(
+        'writer-size-unavailable',
+        `Piece ${command.target.pieceId} does not have one retained ${selected.sizeToken} size.`,
+        command,
+      );
+    const size = sizes[0];
+    const primitive = primitiveFor(preview.primitives, command);
+    if (!primitive)
+      return blocked(
+        'preview-blocked',
+        'The command does not have one exact primitive in the bound preview.',
+        command,
+      );
+
+    if (command.tool === 'rectangle') {
+      if (primitive.kind !== 'rectangle' || !command.payload.newPiece)
+        return blocked(
+          'preview-blocked',
+          'Create rectangle does not have one exact rectangle primitive and piece identity.',
+          command,
+        );
+      const rectangle = executePatternImportDxfPhaseEDraftCadRectanglePieceV1(
+        job,
+        command,
+        selected.sizeToken,
+      );
+      if (!rectangle.ok)
+        return blocked(
+          'rectangle-geometry-blocked',
+          `${rectangle.blockers[0].code}: ${rectangle.blockers[0].detail}`,
+          command,
+        );
+      const topologyIds = [
+        rectangle.createdPiece.pieceId,
+        rectangle.createdPiece.pieceLineKey,
+        rectangle.createdPiece.contourId,
+        ...rectangle.createdPiece.vertexIds,
+      ];
+      if (
+        topologyIds.some((identity) => createdTopologyIds.has(identity)) ||
+        new Set(topologyIds).size !== topologyIds.length
+      )
+        return blocked(
+          'rectangle-geometry-blocked',
+          'duplicate-identity: Rectangle piece, line, contour and vertex identities must be globally distinct from the bound source and active piece creations.',
+          command,
+        );
+      for (const identity of topologyIds) createdTopologyIds.add(identity);
+      job = structuredClone(rectangle.job);
+      compiledFeatures.push({
+        commandId: command.commandId,
+        entityId: command.payload.entityId,
+        tool: command.tool,
+        pieceId: rectangle.createdPiece.pieceId,
+        sizeToken: selected.sizeToken,
+        output: 'piece-create',
+        createdTopology: {
+          pieceLineKey: rectangle.createdPiece.pieceLineKey,
+          contourId: rectangle.createdPiece.contourId,
+          vertexIds: rectangle.createdPiece.vertexIds,
+        },
+      });
+      continue;
+    }
+
+    if (command.tool === 'circle' || command.tool === 'ellipse') {
+      if (primitive.kind !== command.tool || !command.payload.newPiece)
+        return blocked(
+          'preview-blocked',
+          `Create ${command.tool} does not have one exact ${command.tool} primitive and piece identity.`,
+          command,
+        );
+      const roundPiece = executePatternImportDxfPhaseEDraftCadRoundPieceV1(
+        job,
+        command,
+        selected.sizeToken,
+      );
+      if (!roundPiece.ok)
+        return blocked(
+          'round-piece-geometry-blocked',
+          `${roundPiece.blockers[0].code}: ${roundPiece.blockers[0].detail}`,
+          command,
+        );
+      const topologyIds = [
+        roundPiece.createdPiece.pieceId,
+        roundPiece.createdPiece.pieceLineKey,
+        roundPiece.createdPiece.contourId,
+        ...roundPiece.createdPiece.vertexIds,
+      ];
+      if (
+        topologyIds.some((identity) => createdTopologyIds.has(identity)) ||
+        new Set(topologyIds).size !== topologyIds.length
+      )
+        return blocked(
+          'round-piece-geometry-blocked',
+          'duplicate-identity: Circle/Ellipse piece, line, contour and generated vertex identities must be globally distinct from the bound source and active piece creations.',
+          command,
+        );
+      for (const identity of topologyIds) createdTopologyIds.add(identity);
+      job = structuredClone(roundPiece.job);
+      compiledFeatures.push({
+        commandId: command.commandId,
+        entityId: command.payload.entityId,
+        tool: command.tool,
+        pieceId: roundPiece.createdPiece.pieceId,
+        sizeToken: selected.sizeToken,
+        output: 'piece-create',
+        createdTopology: {
+          pieceLineKey: roundPiece.createdPiece.pieceLineKey,
+          contourId: roundPiece.createdPiece.contourId,
+          vertexIds: roundPiece.createdPiece.vertexIds,
+        },
+      });
+      continue;
+    }
+
+    if (command.tool === 'cut') {
+      if (primitive.kind !== 'path' || primitive.role !== 'cut-intent')
+        return blocked(
+          'preview-blocked',
+          'The Cut command does not have one exact cut-intent path in the bound preview.',
+          command,
+        );
+      const cutResult = executePatternImportDxfPhaseEDraftCadCutGeometryV1(job, command);
+      if (!cutResult.ok)
+        return blocked(
+          'cut-geometry-blocked',
+          `${cutResult.blockers[0].code}: ${cutResult.blockers[0].detail}`,
+          command,
+        );
+      job = cutResult.job;
+      compiledFeatures.push({
+        commandId: command.commandId,
+        entityId: command.payload.entityId,
+        tool: command.tool,
+        pieceId: command.target.pieceId,
+        sizeToken: selected.sizeToken,
+        output: 'split',
+        derivedPieceIds: cutResult.derivedPieceIdentities,
+      });
+      continue;
+    }
+
+    if (command.tool === 'spread') {
+      const pairedCut = spreadPair.get(command.commandId);
+      const cutPrimitive = pairedCut ? primitiveFor(preview.primitives, pairedCut) : null;
+      if (
+        primitive.kind !== 'point' ||
+        primitive.indicator !== 'cross' ||
+        !pairedCut ||
+        !cutPrimitive ||
+        cutPrimitive.kind !== 'path' ||
+        cutPrimitive.role !== 'cut-intent'
+      )
+        return blocked(
+          'preview-blocked',
+          'Spread does not have one exact pivot and one referenced cut-intent path.',
+          command,
+        );
+      const spreadResult = executePatternImportDxfPhaseEDraftCadSpreadGeometryV1(
+        job,
+        pairedCut,
+        command,
+      );
+      if (!spreadResult.ok)
+        return blocked(
+          'spread-geometry-blocked',
+          `${spreadResult.blockers[0].code}: ${spreadResult.blockers[0].detail}`,
+          command,
+        );
+      job = spreadResult.job;
+      compiledFeatures.push(
+        {
+          commandId: pairedCut.commandId,
+          entityId: pairedCut.payload.entityId,
+          tool: pairedCut.tool,
+          pieceId: pairedCut.target.pieceId,
+          sizeToken: selected.sizeToken,
+          output: 'slash-guide',
+          derivedPieceIds: spreadResult.derivedPieceIdentities,
+        },
+        {
+          commandId: command.commandId,
+          entityId: command.payload.entityId,
+          tool: command.tool,
+          pieceId: command.target.pieceId,
+          sizeToken: selected.sizeToken,
+          output: 'spread',
+          derivedPieceIds: spreadResult.derivedPieceIdentities,
+        },
+      );
+      continue;
+    }
+
+    if (command.tool === 'add-point') {
+      if (primitive.kind !== 'point' || primitive.indicator !== 'draft')
+        return blocked(
+          'preview-blocked',
+          'Add point does not have one exact sealed-edge point in the bound preview.',
+          command,
+        );
+      const addPoint = executePatternImportDxfPhaseEDraftCadAddPointGeometryV1(
+        job,
+        command,
+        projection,
+        selected.sizeToken,
+      );
+      if (!addPoint.ok)
+        return blocked(
+          'add-point-geometry-blocked',
+          `${addPoint.blockers[0].code}: ${addPoint.blockers[0].detail}`,
+          command,
+        );
+      // The executor seals its detached result. Keep the compiler's remaining feature pass mutable.
+      job = structuredClone(addPoint.job);
+      compiledFeatures.push({
+        commandId: command.commandId,
+        entityId: command.payload.entityId,
+        tool: command.tool,
+        pieceId: command.target.pieceId,
+        sizeToken: selected.sizeToken,
+        output: 'boundary-point',
+      });
+      continue;
+    }
+
+    const internal = internalFeature(command, primitive);
+    let output: PatternImportDxfPhaseEDraftCadCompiledFeatureV1['output'];
+    if (internal) {
+      size.internal.push(internal);
+      output = 'internal';
+    } else if (
+      command.tool === 'mark' &&
+      command.payload.kind === 'drill' &&
+      primitive.kind === 'point' &&
+      primitive.indicator === 'drill'
+    ) {
+      size.drills.push({
+        kind: 'drill',
+        at: { x: primitive.pointMm.x, y: primitive.pointMm.y },
+        form: 'point',
+        ...featureBase(),
+      });
+      output = 'drill';
+    } else if (
+      command.tool === 'notch' &&
+      command.payload.kind === 'single' &&
+      primitive.kind === 'notch'
+    ) {
+      const notch = notchFeature(primitive, projection);
+      if (!notch)
+        return blocked(
+          'preview-blocked',
+          'The anchored notch edge is degenerate in the exact projection.',
+          command,
+        );
+      size.notches.push(notch);
+      output = 'notch';
+    } else {
+      return blocked(
+        'preview-blocked',
+        'The command primitive cannot be compiled losslessly to PieceSpec.',
+        command,
+      );
+    }
+    compiledFeatures.push({
+      commandId: command.commandId,
+      entityId: command.payload.entityId,
+      tool: command.tool,
+      pieceId: command.target.pieceId,
+      sizeToken: selected.sizeToken,
+      output,
+    });
+  }
+
+  let written: ReturnType<typeof writeDxfDetailed>;
+  try {
+    written = writeDxfDetailed(job, { now: () => new Date(replay.createdAt) });
+  } catch (error) {
+    return blocked(
+      'writer-failed',
+      error instanceof Error ? error.message : 'The deterministic DXF writer failed.',
+    );
+  }
+
+  for (const feature of compiledFeatures) {
+    const topologyMutation = compiledFeatures.find(
+      ({ output, pieceId }) =>
+        (output === 'split' || output === 'spread') && pieceId === feature.pieceId,
+    );
+    const expectedPieceIds = feature.derivedPieceIds
+      ? feature.derivedPieceIds
+      : (topologyMutation?.derivedPieceIds ?? ([feature.pieceId] as const));
+    if (!expectedPieceIds?.length)
+      return blocked(
+        'writer-output-mismatch',
+        `Compiled Cut target ${feature.pieceId}/${feature.sizeToken} lost its derived identities.`,
+      );
+    for (const expectedPieceId of expectedPieceIds) {
+      const blocks = written.manifest.blocks.filter(
+        ({ identity, sizeToken: blockSize }) =>
+          identity === expectedPieceId &&
+          (blockSize === feature.sizeToken || blockSize.toUpperCase() === 'UNI'),
+      );
+      if (blocks.length !== 1)
+        return blocked(
+          'writer-output-mismatch',
+          `Compiled target ${expectedPieceId}/${feature.sizeToken} did not produce one exact writer block.`,
+        );
+    }
+  }
+
+  try {
+    const readBack = readManifest(written.dxfText);
+    if (!readBack || canonical(readBack) !== canonical(written.manifest))
+      return blocked(
+        'manifest-readback-mismatch',
+        'The embedded manifest did not exact-roundtrip through the shared reader.',
+      );
+  } catch (error) {
+    return blocked(
+      'manifest-readback-mismatch',
+      error instanceof Error
+        ? `The embedded manifest could not be verified by the shared reader: ${error.message}`
+        : 'The embedded manifest could not be verified by the shared reader.',
+    );
+  }
+
+  const artifact = deepFreeze({
+    schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_GEOMETRY_COMPILE_V1,
+    status: 'compiled-reimport-required' as const,
+    source: {
+      revision: session.source.revision,
+      sourceFileId: binding.sourceFileId,
+      sourceSha256: binding.sourceSha256,
+      selectedGeometrySha256: binding.selectedGeometrySha256,
+      catalogCanonicalSha256: session.source.catalog.canonicalSha256,
+      sizeSelectionCanonicalSha256: selected.canonicalSha256,
+    },
+    scope: {
+      techCardId: compileSource.techCardId,
+      scopeKey: selected.scopeKey,
+      sizeToken: selected.sizeToken,
+    },
+    compiledJob: job,
+    dxfText: written.dxfText,
+    manifest: written.manifest,
+    warnings: written.warnings,
+    compiledFeatures,
+    reimport: {
+      required: true as const,
+      boundary: 'ordinary-import-semantics-phase-d-phase-e' as const,
+      applyEligible: false as const,
+    },
+    claims: PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_GEOMETRY_COMPILE_CLAIMS_V1,
+  });
+  return deepFreeze({ ok: true as const, artifact, blockers: [] as const });
+}
+
+export function compilePatternImportDxfPhaseEDraftCadGeometryV1(
+  input: PatternImportDxfPhaseEDraftCadGeometryCompileInputV1,
+): PatternImportDxfPhaseEDraftCadGeometryCompileResultV1 {
+  try {
+    return compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(input);
+  } catch {
+    return blocked('invalid-input', 'Draft CAD compile input failed closed during validation.');
+  }
+}

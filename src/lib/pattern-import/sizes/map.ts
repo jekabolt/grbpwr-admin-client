@@ -249,7 +249,7 @@ export function createProposeSizeMap(opts: { tokensOf?: SizeTokensOf } = {}): Pr
       const src = [...run.sizes].sort((a, b) => a.rank - b.rank);
       src.forEach((s, i) => {
         const k = run.sizes.indexOf(s);
-        hits[k] = {
+        (hits as (Hit | null)[])[k] = {
           card: cards[i],
           confidence: 0.3,
           why: `no card size spells ${s.label}; same run length → aligned by rank (confirm)`,

@@ -5,6 +5,20 @@ import type { Affine, PtMm } from '../../types';
 
 export type P = { x: number; y: number };
 
+export type DxfNativeParameterSpace = 'unit' | 'angle-radians' | 'knot-domain';
+
+/** Source-native sample produced before affine projection or any downstream geometry processing. */
+export type DxfNativePointSample = {
+  point: P;
+  parameterSpace: DxfNativeParameterSpace;
+  nativeT: number;
+  primitiveSegmentIndex: number;
+};
+
+function pointsOf(samples: readonly DxfNativePointSample[]): P[] {
+  return samples.map(({ point }) => point);
+}
+
 export const IDENTITY: Affine = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
 
 /** m1 ∘ m2 (apply m2 first). */
@@ -87,20 +101,60 @@ export function arcPts(
   sweep: number,
   tol: number,
 ): P[] {
+  return pointsOf(arcPointSamples(cx, cy, r, a0, sweep, tol));
+}
+
+export function arcPointSamples(
+  cx: number,
+  cy: number,
+  r: number,
+  a0: number,
+  sweep: number,
+  tol: number,
+  primitiveSegmentIndex = 0,
+): DxfNativePointSample[] {
   const n = arcSegments(r, Math.abs(sweep), tol);
-  const out: P[] = [];
+  const out: DxfNativePointSample[] = [];
   for (let i = 0; i <= n; i++) {
     const a = a0 + (sweep * i) / n;
-    out.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
+    out.push({
+      point: { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) },
+      parameterSpace: 'angle-radians',
+      nativeT: a,
+      primitiveSegmentIndex,
+    });
   }
   return out;
 }
 
 /** Bulge segment p1→p2 (b = tan(θ/4)); appends the points AFTER p1 (p2 included). */
 export function bulgeTo(p1: P, p2: P, b: number, tol: number, out: P[]): void {
+  const samples = bulgeSegmentPointSamples(p1, p2, b, tol, 0);
+  for (let i = 1; i < samples.length; i++) out.push(samples[i].point);
+}
+
+function bulgeSegmentPointSamples(
+  p1: P,
+  p2: P,
+  b: number,
+  tol: number,
+  primitiveSegmentIndex: number,
+): DxfNativePointSample[] {
   if (Math.abs(b) < 1e-12) {
-    out.push(p2);
-    return;
+    return [
+      {
+        point: { x: p1.x, y: p1.y },
+        parameterSpace: 'unit',
+        nativeT: 0,
+        primitiveSegmentIndex,
+      },
+      {
+        point: p2,
+        parameterSpace: 'unit',
+        nativeT: 1,
+        primitiveSegmentIndex,
+      },
+    ];
   }
   const theta = 4 * Math.atan(b);
   const ux = p2.x - p1.x;
@@ -110,9 +164,10 @@ export function bulgeTo(p1: P, p2: P, b: number, tol: number, out: P[]): void {
   const cy = (p1.y + p2.y) / 2 + k * ux;
   const r = Math.hypot(p1.x - cx, p1.y - cy);
   const a1 = Math.atan2(p1.y - cy, p1.x - cx);
-  const pts = arcPts(cx, cy, r, a1, theta, tol);
-  for (let i = 1; i < pts.length - 1; i++) out.push(pts[i]);
-  out.push(p2); // exact endpoint, no drift
+  const samples = arcPointSamples(cx, cy, r, a1, theta, tol, primitiveSegmentIndex);
+  samples[0] = { ...samples[0], point: { x: p1.x, y: p1.y } };
+  samples[samples.length - 1] = { ...samples[samples.length - 1], point: p2 };
+  return samples;
 }
 
 /** Vertex list with per-vertex bulges → polyline. Closed: the closing segment is included and the
@@ -122,16 +177,42 @@ export function bulgePolyline(
   closed: boolean,
   tol: number,
 ): P[] {
+  return pointsOf(bulgePolylinePointSamples(v, closed, tol));
+}
+
+export function bulgePolylinePointSamples(
+  v: { x: number; y: number; bulge: number }[],
+  closed: boolean,
+  tol: number,
+): DxfNativePointSample[] {
   if (v.length === 0) return [];
-  const pts: P[] = [{ x: v[0].x, y: v[0].y }];
   const segs = closed ? v.length : v.length - 1;
+  if (segs <= 0)
+    return [
+      {
+        point: { x: v[0].x, y: v[0].y },
+        parameterSpace: 'unit',
+        nativeT: 0,
+        primitiveSegmentIndex: 0,
+      },
+    ];
+  const segments: DxfNativePointSample[][] = [];
   for (let i = 0; i < segs; i++) {
     const a = v[i];
     const b = v[(i + 1) % v.length];
-    bulgeTo(a, b, a.bulge, tol, pts);
+    segments.push(bulgeSegmentPointSamples(a, b, a.bulge, tol, i));
   }
-  if (closed && pts.length > 1) pts.pop();
-  return pts;
+  // A shared source vertex belongs to the outgoing primitive at t=0. This preserves every closed
+  // polyline primitive (including its closing edge) without duplicating a geometry point.
+  const samples: DxfNativePointSample[] = [segments[0][0]];
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i];
+    for (let sampleIndex = 1; sampleIndex < segment.length - 1; sampleIndex++)
+      samples.push(segment[sampleIndex]);
+    if (i + 1 < segments.length) samples.push(segments[i + 1][0]);
+    else if (!closed) samples.push(segment[segment.length - 1]);
+  }
+  return samples;
 }
 
 /** Ellipse (WCS): centre, major-axis vector, ratio, params t0..t1 (radians), orientation sign
@@ -145,21 +226,40 @@ export function ellipsePts(
   orient: 1 | -1,
   tol: number,
 ): { pts: P[]; full: boolean } {
+  const sampled = ellipsePointSamples(c, maj, ratio, t0, t1, orient, tol);
+  return { pts: pointsOf(sampled.samples), full: sampled.full };
+}
+
+export function ellipsePointSamples(
+  c: P,
+  maj: P,
+  ratio: number,
+  t0: number,
+  t1: number,
+  orient: 1 | -1,
+  tol: number,
+  primitiveSegmentIndex = 0,
+): { samples: DxfNativePointSample[]; full: boolean } {
   let sweep = t1 - t0;
   while (sweep <= 1e-12) sweep += 2 * Math.PI;
   const full = Math.abs(sweep - 2 * Math.PI) < 1e-9;
   const a = Math.hypot(maj.x, maj.y);
   const minor = { x: -maj.y * ratio * orient, y: maj.x * ratio * orient };
   const n = Math.max(8, arcSegments(a, sweep, tol));
-  const pts: P[] = [];
+  const samples: DxfNativePointSample[] = [];
   const count = full ? n : n + 1;
   for (let i = 0; i < count; i++) {
     const t = t0 + (sweep * i) / n;
     const ct = Math.cos(t);
     const st = Math.sin(t);
-    pts.push({ x: c.x + maj.x * ct + minor.x * st, y: c.y + maj.y * ct + minor.y * st });
+    samples.push({
+      point: { x: c.x + maj.x * ct + minor.x * st, y: c.y + maj.y * ct + minor.y * st },
+      parameterSpace: 'angle-radians',
+      nativeT: t,
+      primitiveSegmentIndex,
+    });
   }
-  return { pts, full };
+  return { samples, full };
 }
 
 // ── NURBS (weights honoured — 05-CODEX-REVIEW item 8) ────────────────────────────────────────
@@ -214,7 +314,21 @@ export function sampleAdaptive(
   nInit: number,
   tol: number,
 ): P[] {
-  const out: P[] = [f(t0)];
+  return pointsOf(sampleAdaptivePointSamples(f, t0, t1, nInit, tol, 'unit', 0));
+}
+
+export function sampleAdaptivePointSamples(
+  f: (t: number) => P,
+  t0: number,
+  t1: number,
+  nInit: number,
+  tol: number,
+  parameterSpace: DxfNativeParameterSpace,
+  primitiveSegmentIndex: number,
+): DxfNativePointSample[] {
+  const out: DxfNativePointSample[] = [
+    { point: f(t0), parameterSpace, nativeT: t0, primitiveSegmentIndex },
+  ];
   const rec = (a: number, pa: P, b: number, pb: P, depth: number) => {
     const m = (a + b) / 2;
     const pm = f(m);
@@ -222,7 +336,7 @@ export function sampleAdaptive(
     const q3 = f(a + (3 * (b - a)) / 4);
     const dev = Math.max(distToSeg(pm, pa, pb), distToSeg(q1, pa, pb), distToSeg(q3, pa, pb));
     if (depth >= 14 || dev <= tol) {
-      out.push(pb);
+      out.push({ point: pb, parameterSpace, nativeT: b, primitiveSegmentIndex });
       return;
     }
     rec(a, pa, m, pm, depth + 1);
@@ -230,7 +344,7 @@ export function sampleAdaptive(
   };
   const n = Math.max(1, nInit);
   let prevT = t0;
-  let prevP = out[0];
+  let prevP = out[0].point;
   for (let i = 1; i <= n; i++) {
     const t = t0 + ((t1 - t0) * i) / n;
     const pt = f(t);
@@ -253,11 +367,25 @@ export function distToSeg(p: P, a: P, b: P): number {
 
 /** Centripetal Catmull-Rom through fit points (a SPLINE with fit data only). */
 export function catmullRom(pts: P[], closed: boolean, tol: number): P[] {
+  return pointsOf(catmullRomPointSamples(pts, closed, tol));
+}
+
+export function catmullRomPointSamples(
+  pts: P[],
+  closed: boolean,
+  tol: number,
+): DxfNativePointSample[] {
   const n = pts.length;
-  if (n < 3) return [...pts];
+  if (n < 3)
+    return pts.map((point, index) => ({
+      point,
+      parameterSpace: 'unit' as const,
+      nativeT: index,
+      primitiveSegmentIndex: 0,
+    }));
   const at = (i: number) =>
     closed ? pts[((i % n) + n) % n] : pts[Math.min(n - 1, Math.max(0, i))];
-  const out: P[] = [];
+  const out: DxfNativePointSample[] = [];
   const segs = closed ? n : n - 1;
   for (let i = 0; i < segs; i++) {
     const p0 = at(i - 1);
@@ -282,7 +410,7 @@ export function catmullRom(pts: P[], closed: boolean, tol: number): P[] {
             (3 * p1.y - p0.y - 3 * p2.y + p3.y) * t3),
       };
     };
-    const seg = sampleAdaptive(f, 0, 1, 1, tol);
+    const seg = sampleAdaptivePointSamples(f, 0, 1, 1, tol, 'unit', i);
     for (let k = i === 0 ? 0 : 1; k < seg.length; k++) out.push(seg[k]);
   }
   if (closed && out.length > 1) out.pop();

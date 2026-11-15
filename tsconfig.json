@@ -9,7 +9,7 @@
     "strict": true,
     "sourceMap": true,
     "target": "esnext",
-    "types": ["vite/client"],
+    "types": ["vite/client", "@webgpu/types"],
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
     "allowImportingTsExtensions": true,

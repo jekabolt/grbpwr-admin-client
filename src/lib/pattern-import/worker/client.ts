@@ -13,6 +13,7 @@ import type {
   ImportErrorCode,
   ImportWorkerRequest,
   ImportWorkerResponse,
+  PatternImportOpenFile,
   SourceFileInfo,
   StageIO,
   StageName,
@@ -66,6 +67,53 @@ const now = () => (typeof performance !== 'undefined' ? performance.now() : Date
 
 /** How long a soft cancel may take before the worker is terminated (sync stages never yield). */
 const HARD_CANCEL_MS = 1200;
+
+function snapshotDxfPathProvenanceOpen(value: unknown): { sourceFileId: string } | null {
+  if ((typeof value !== 'object' && typeof value !== 'function') || value === null) return null;
+  try {
+    if (Object.getPrototypeOf(value) !== Object.prototype) return null;
+    const keys = Reflect.ownKeys(value);
+    const descriptor = Object.getOwnPropertyDescriptor(value, 'sourceFileId');
+    if (
+      keys.length !== 1 ||
+      keys[0] !== 'sourceFileId' ||
+      !descriptor?.enumerable ||
+      !Object.prototype.hasOwnProperty.call(descriptor, 'value') ||
+      typeof descriptor.value !== 'string'
+    )
+      return null;
+    return { sourceFileId: descriptor.value };
+  } catch {
+    return null;
+  }
+}
+
+function wireOpenFiles(
+  files: PatternImportOpenFile[],
+): Extract<ImportWorkerRequest, { type: 'open' }>['files'] {
+  return files.map((file) => {
+    const out: Extract<ImportWorkerRequest, { type: 'open' }>['files'][number] = {
+      name: file.name,
+      bytes: file.bytes,
+    };
+    const generated = Object.getOwnPropertyDescriptor(file, 'generatedFusing');
+    if (generated && Object.prototype.hasOwnProperty.call(generated, 'value'))
+      out.generatedFusing = generated.value as boolean | undefined;
+    let provenance: PropertyDescriptor | undefined;
+    try {
+      provenance = Object.getOwnPropertyDescriptor(file, 'dxfPathProvenance');
+    } catch {
+      out.dxfPathProvenance = null;
+      return out;
+    }
+    if (provenance) {
+      out.dxfPathProvenance = Object.prototype.hasOwnProperty.call(provenance, 'value')
+        ? snapshotDxfPathProvenanceOpen(provenance.value)
+        : null;
+    }
+    return out;
+  });
+}
 
 type Pending = {
   resolve: (m: WorkerMessage) => void;
@@ -199,7 +247,7 @@ export class ImportWorkerClient {
   }
 
   async open(
-    files: { name: string; bytes: ArrayBuffer; generatedFusing?: boolean }[],
+    files: PatternImportOpenFile[],
   ): Promise<{ sessionId: number; files: SourceFileInfo[] }> {
     const id = this.nextId++;
     const total = files.reduce((a, f) => a + f.bytes.byteLength, 0);
@@ -213,11 +261,12 @@ export class ImportWorkerClient {
       throw new ImportWorkerError(refusal.code, refusal.message);
     }
     // Transferred: the bytes leave the main thread (the wizard keeps the File objects).
+    const wireFiles = wireOpenFiles(files);
     const msg = await this.whenRunning()
       .then(() =>
         this.request(
-          { type: 'open', id, files },
-          files.map((f) => f.bytes),
+          { type: 'open', id, files: wireFiles },
+          wireFiles.map((f) => f.bytes),
         ),
       )
       .catch((e) => {

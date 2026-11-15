@@ -355,7 +355,7 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
   const trace: string[] = [];
   let ticks = 0;
   try {
-    await api.dispatch({ type: 'files', files: [new File([bytes], file)] });
+    await api.dispatch({ type: 'files', files: [new File([new Uint8Array(bytes)], file)] });
     await settle();
     for (let t = 0; t < 400 && !done; t++) {
       ticks++;

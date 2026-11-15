@@ -29,7 +29,14 @@ import {
   type SeamChangeOpts,
   type SeamChangeResult,
 } from './seam-change';
-import { hydrateSeams, reuseKeys, rowsOf, useSeamsStore } from './seams-store';
+import {
+  hydrateSeams,
+  readWire,
+  reuseKeys,
+  rowPairRangeSig,
+  rowsOf,
+  useSeamsStore,
+} from './seams-store';
 import { seamRefresher } from './seam-refresh';
 
 export type SeamReviewRead = {
@@ -82,6 +89,112 @@ const refreshSeams = seamRefresher(async (cardId) => {
 type Refused = { ok: false; why: string };
 const NOT_WRITTEN: Refused = { ok: false, why: NOT_SAVED };
 
+export type StrictSeamUpsertFailureCode =
+  | 'frozen'
+  | 'card-unsaved'
+  | 'write-in-flight'
+  | 'write-failed'
+  | 'card-changed'
+  | 'echo-missing'
+  | 'receipt-missing'
+  | 'receipt-ambiguous';
+
+export type StrictSeamUpsertResult =
+  | Readonly<{
+      ok: true;
+      rows: readonly StoredRow[];
+      seamKeys: readonly string[];
+      outcome: 'verified-echo';
+      blocker: null;
+    }>
+  | Readonly<{
+      ok: false;
+      rows: readonly [];
+      seamKeys: readonly [];
+      outcome: 'not-attempted' | 'unknown' | 'acknowledged-unverified';
+      blocker: Readonly<{ code: StrictSeamUpsertFailureCode; detail: string }>;
+    }>;
+
+function strictUpsertBlocked(
+  code: StrictSeamUpsertFailureCode,
+  detail: string,
+  outcome: Extract<StrictSeamUpsertResult, { ok: false }>['outcome'],
+): Extract<StrictSeamUpsertResult, { ok: false }> {
+  return Object.freeze({
+    ok: false as const,
+    rows: Object.freeze([]) as readonly [],
+    seamKeys: Object.freeze([]) as readonly [],
+    outcome,
+    blocker: Object.freeze({ code, detail }),
+  });
+}
+
+/** Resolve the exact final rows acknowledged by the seam RPC. */
+export function resolveStrictSeamUpsertReceipt(
+  submitted: readonly StoredRow[],
+  echo: readonly TechCardSeamWire[],
+): StrictSeamUpsertResult {
+  const decoded = readWire(echo);
+  const resolved: StoredRow[] = [];
+  const seenSeamPairs = new Set<string>();
+  const seenPoseKeys = new Set<string>();
+  for (const row of submitted) {
+    if (row.kind === 'pose') {
+      if (seenPoseKeys.has(row.seamKey))
+        return strictUpsertBlocked(
+          'receipt-ambiguous',
+          `Pose ${row.seamKey} was submitted more than once.`,
+          'acknowledged-unverified',
+        );
+      seenPoseKeys.add(row.seamKey);
+      const matches = decoded.poses.filter(({ seamKey }) => seamKey === row.seamKey);
+      if (matches.length === 0)
+        return strictUpsertBlocked(
+          'receipt-missing',
+          `The seam write echo does not contain pose ${row.seamKey}.`,
+          'acknowledged-unverified',
+        );
+      if (matches.length !== 1)
+        return strictUpsertBlocked(
+          'receipt-ambiguous',
+          `The seam write echo contains multiple poses for ${row.seamKey}.`,
+          'acknowledged-unverified',
+        );
+      resolved.push(matches[0]);
+      continue;
+    }
+    const pair = rowPairRangeSig(row);
+    if (seenSeamPairs.has(pair))
+      return strictUpsertBlocked(
+        'receipt-ambiguous',
+        'The same seam pair was submitted more than once.',
+        'acknowledged-unverified',
+      );
+    seenSeamPairs.add(pair);
+    const matches = decoded.rows.filter((candidate) => rowPairRangeSig(candidate) === pair);
+    if (matches.length === 0)
+      return strictUpsertBlocked(
+        'receipt-missing',
+        `The seam write echo does not contain the submitted pair for ${row.seamKey}.`,
+        'acknowledged-unverified',
+      );
+    if (matches.length !== 1)
+      return strictUpsertBlocked(
+        'receipt-ambiguous',
+        `The seam write echo contains multiple rows for the submitted pair ${row.seamKey}.`,
+        'acknowledged-unverified',
+      );
+    resolved.push(matches[0]);
+  }
+  return Object.freeze({
+    ok: true as const,
+    rows: Object.freeze(resolved),
+    seamKeys: Object.freeze(resolved.map(({ seamKey }) => seamKey)),
+    outcome: 'verified-echo' as const,
+    blocker: null,
+  });
+}
+
 export type SeamWrites = {
   /**
    * One gesture in one request (C7): rows and step links together, under the card's version. The
@@ -92,6 +205,8 @@ export type SeamWrites = {
   fresh: () => Promise<boolean>;
   /** Insert or replace these rows (by seam key); resolves true when the server took them. */
   upsert: (rows: StoredRow[], errorAt?: string) => Promise<boolean>;
+  /** Same write, but only succeeds with the exact final rows and keys echoed by the server. */
+  upsertWithReceipt: (rows: StoredRow[], errorAt?: string) => Promise<StrictSeamUpsertResult>;
   /** Delete these rows; resolves true when the server took it. */
   remove: (rows: StoredRow[]) => Promise<boolean>;
   /** Insert or replace these pose rows (P8, by seam key); true when the server took them. */
@@ -187,6 +302,66 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
     [cardId, change, fresh],
   );
 
+  const upsertWithReceipt = useCallback(
+    async (rows0: StoredRow[], errorAt?: string): Promise<StrictSeamUpsertResult> => {
+      if (rows0.length === 0)
+        return strictUpsertBlocked(
+          'receipt-missing',
+          'A strict seam write requires at least one row.',
+          'not-attempted',
+        );
+      if (frozen) return strictUpsertBlocked('frozen', FROZEN_REFUSAL, 'not-attempted');
+      if (!cardId)
+        return strictUpsertBlocked(
+          'card-unsaved',
+          'Save the card before writing exact seams.',
+          'not-attempted',
+        );
+      if (!(await fresh()))
+        return strictUpsertBlocked(
+          'write-failed',
+          'The seam list did not load before the write.',
+          'unknown',
+        );
+      if (useSeamsStore.getState().cardId !== cardId)
+        return strictUpsertBlocked(
+          'card-changed',
+          'The open tech card changed before the seam write started.',
+          'not-attempted',
+        );
+      const seams = reuseKeys(
+        rows0.filter((row): row is StoredSeam => row.kind !== 'pose'),
+        rowsOf(useSeamsStore.getState()),
+      );
+      const poses = rows0.filter((row): row is StoredPose => row.kind === 'pose');
+      const rows: StoredRow[] = [...seams, ...poses];
+      const result = await change(
+        { upsert: rows },
+        { verb: rows.length > 1 ? `decisions (${rows.length})` : 'decision', errorAt },
+      );
+      if (!result.ok)
+        return strictUpsertBlocked(
+          result.why === 'still saving' ? 'write-in-flight' : 'write-failed',
+          result.why,
+          result.why === 'still saving' ? 'not-attempted' : 'unknown',
+        );
+      if (useSeamsStore.getState().cardId !== cardId)
+        return strictUpsertBlocked(
+          'card-changed',
+          'The open tech card changed before the seam write echo arrived.',
+          'acknowledged-unverified',
+        );
+      if (!result.echo || result.echo.length === 0)
+        return strictUpsertBlocked(
+          'echo-missing',
+          'The seam write was acknowledged without a row echo.',
+          'acknowledged-unverified',
+        );
+      return resolveStrictSeamUpsertReceipt(rows, result.echo);
+    },
+    [cardId, change, fresh, frozen],
+  );
+
   const remove = useCallback(
     async (rows: StoredRow[]) => {
       undoHistory.cut('seam-delete');
@@ -262,6 +437,7 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
       change,
       fresh,
       upsert,
+      upsertWithReceipt,
       remove,
       upsertPoses,
       removePoses,
@@ -274,6 +450,7 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
       change,
       fresh,
       upsert,
+      upsertWithReceipt,
       remove,
       upsertPoses,
       removePoses,

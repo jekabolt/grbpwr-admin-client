@@ -70,7 +70,7 @@ import { ReleaseBlocker, ReleaseBlockersModal } from './release-blockers-modal';
 import { BomField } from './bom-field';
 import { ColorwayRecipes } from './colorway-recipe';
 import { LabDipTab } from './lab-dip-tab';
-import { ConstructionTab } from './construction-tab';
+import { AssemblyTableTab } from './assembly-table-tab';
 import { CostEstimateField } from './cost-estimate-field';
 import { CostingField } from './costing-field';
 import { DetailsEditor } from './details-editor';
@@ -192,119 +192,21 @@ import {
   stageLabel,
   type FormErrorRow,
 } from './stage-progress';
+import {
+  TECH_CARD_FOLDED_TABS,
+  TECH_CARD_TAB_GROUPS,
+  TECH_CARD_TABS,
+  type TechCardTabId,
+} from './tech-card-tabs';
 
 // U-2 / C-5: the fit select and its `FIT_OPTIONS` import left this file with the classification FKs
 // — they render in GENERAL INFORMATION on CONSTRUCTION now (construction-general-info.tsx, which
 // takes the same exported copy from `design/render/model.ts`).
 
-const TABS = [
-  { id: 'studio', label: 'studio' },
-  { id: 'artifacts', label: 'artifacts' },
-  // `sketch` И `moodboard` УДАЛЕНЫ ОТСЮДА ЦЕЛИКОМ, а не оставлены «на всякий случай».
-  //
-  // Обе свёрнуты в STUDIO (FOLDED_TABS), то есть `?tab=sketch` и `?tab=moodboard` резолвятся ДО
-  // сверки с этим списком и никогда не становятся activeTab. Пока их id стояли здесь, под ними
-  // жили две панели, которых не мог открыть ни рейл, ни ссылка, ни закладка, — мёртвый код с
-  // комментарием, утверждавшим обратное. Ссылки при этом не сломаны: свёртка их и обслуживает.
-  { id: 'patterns', label: 'patterns' },
-  { id: 'samples', label: 'samples' },
-  { id: 'bom', label: 'BOM' },
-  { id: 'colorways', label: 'colorways' },
-  { id: 'construction', label: 'assembly' },
-  { id: 'sizes', label: 'sizes' },
-  { id: 'labels', label: 'labels & pkg' },
-  { id: 'costing', label: 'costing' },
-  { id: 'production', label: 'production' },
-  { id: 'issues', label: 'issues' },
-  { id: 'signoff', label: 'sign-off' },
-  { id: 'history', label: 'history' },
-] as const;
-type TabId = (typeof TABS)[number]['id'];
-
-// Tabs grouped into lifecycle bands so the rail reads at a glance (R-2): DESIGN what it is,
-// DEVELOP how it's made, SPEC what ships. History stands alone.
-const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
-  // В DESIGN РОВНО ДВЕ ВКЛАДКИ, и это рейл самого прототипа (`40-organs.js`, константа `RAIL`:
-  // `{ band: 'design', tabs: [['studio', 1], ['artifacts', 1]] }`). STUDIO — где на стиль смотрят:
-  // доска настроения, референсы, эскизы, верстак. ARTIFACTS — во что эта работа заморожена. Вдвоём
-  // они заменили пару moodboard/sketch, которая делила ОДНУ поверхность на два входа рейла; порядок
-  // остался порядком работы: сначала смотрят, потом морозят.
-  { band: 'design', tabs: ['studio', 'artifacts'] },
-  // Patterns OPENS develop rather than closing design: nothing on it describes what the style is.
-  // The DXF sheets and the раскладки (the size range and chart moved to SIZES) are the first artefacts
-  // MADE from the sketch, and the sheets are filed by BOM material — «how it's made» throughout. It
-  // leads the band because everything under it is downstream of a pattern: a sample is cut from
-  // these sheets, and the marker on this tab is what the BOM's fabric consumption is measured from.
-  //
-  // Cut pieces live HERE too, directly under the DXF sheets. A piece is a property of the PATTERN,
-  // not of a colour — every colourway cuts the same pieces — and they are literally created from
-  // the sheets above them by «↔ детали кроя». They used to sit on colorways, so the dialog that
-  // makes them and the list they land in were on different tabs. What stays on colorways is the
-  // per-colourway fabric map: which article each piece is cut from IN THAT COLOUR.
-  //
-  // BOM sits directly under patterns, ahead of samples: the выкройки panel files its DXF sheets BY
-  // BOM material line and names every rollgoods line with no sheet as a hole, so the tab that
-  // DEFINES those lines belongs next to the tab that reads them — two entries apart it read as an
-  // unrelated stop. Samples follow both, which is also the order the work happens in: you cannot
-  // cut a sample before there is a pattern and a fabric to cut it from.
-  // SIZES opens develop, ahead of patterns (owner, 15.10): the size range and the measurement chart
-  // are worked out together with the pattern — every sheet, marker, norm and run is filed against
-  // that range, so it is set first. They used to head PATTERNS; the pattern panels still read the
-  // range from the same form, they just no longer host its editor.
-  {
-    band: 'develop',
-    tabs: ['sizes', 'patterns', 'bom', 'samples', 'colorways', 'construction'],
-  },
-  { band: 'spec', tabs: ['labels', 'costing', 'issues', 'signoff'] },
-  // Production is its own band: it is what happens AFTER the spec is settled, and folding it into
-  // `spec` would break the rail's lifecycle reading — the bands are the story of the card, in order.
-  { band: 'produce', tabs: ['production'] },
-  { band: '', tabs: ['history'] },
-];
-
-// Tabs that were folded into another one keep their deep links working: ?tab=dev became a costing
-// section, ?tab=pieces a section of patterns (it lived on colorways in between). A shared link or a
-// bookmark still lands on the right place, and the address bar is rewritten to match what is
-// rendered. Both targets exist on every card, auxiliary included — which is why no alias needs
-// re-resolving per card any more.
-//
-// TWO tabs fold into STUDIO, not one. `sketch` and `moodboard` were two independent entries here
-// and in the rail — they rendered the SAME component in two modes, but a link, a bookmark and a
-// toast could each name either one. Folding only `sketch` would leave every `?tab=moodboard` link
-// landing on the header with no explanation.
-const FOLDED_TABS: Record<string, TabId> = {
-  dev: 'costing',
-  // LAB DIP was its own tab for one beta round (17.10); it is back under the colourways matrix.
-  'lab-dip': 'colorways',
-  pieces: 'patterns',
-  // ОБЕ СТАРЫЕ ВКЛАДКИ СВЁРНУТЫ, и свёрнуты только теперь, когда за каждую отнятую способность
-  // отвечает названное место. Мудборд студия заменила сразу: её доска пишет `moodboardMedia` и
-  // указания на них. С техническим эскизом было три долга, и вот чем каждый закрыт.
-  //
-  // ЗАВЕСТИ ЭСКИЗ. Путь целиком: полка загрузок → слот верстака → лист на ARTIFACTS. Пока этой
-  // вкладки не было, довод «свернём потом» был верен, и он держал `sketch` на рейле честно.
-  //
-  // (Здесь стояло, что плиты верстака вкладывает в `technicalMedia` документа СЕРВЕР, в транзакции
-  // минта. Минта больше нет — версии листа снесены целиком, вместе с бэкендом, — и вкладывать
-  // плиты в документ этим путём некому. Долг закрыт не этой транзакцией, а тем, что у эскиза
-  // появилось НАЗВАННОЕ МЕСТО: верстак заводит плиту, лист её показывает. Оставить прежний текст
-  // значило бы отправить читателя за доводом в файл, которого нет.)
-  //
-  // СНЯТЬ ЭСКИЗ. Раньше умел только `removeMedia` свёрнутой вкладки; теперь плиту откалывает от
-  // документа ARTIFACTS, тем же правилом — выноски откалываются, их ТЕКСТ остаётся.
-  //
-  // НАРИСОВАТЬ УКАЗАНИЕ. Редактор не переписан и не потерян: он ТОТ ЖЕ САМЫЙ компонент, только
-  // открывается модалкой над ARTIFACTS — над плитами, которые перечисляет документ, — а не
-  // отдельной вкладкой. Не путать с векторным редактором из `proto-15-modal-vector.png`: тот
-  // рисует ШТРИХИ по самому чертежу, слоями, с растром-калькой снизу, и он действительно
-  // следующей волной; дверь `edit ▸` в верстаке ведёт именно к нему и остаётся инертной честно.
-  //
-  // Свернуть раньше, чем закрыт хоть один из трёх, значило бы выдать потерю за переезд.
-  moodboard: 'studio',
-  sketch: 'studio',
-  // `header` тоже свёрнут: его блоки стали шапкой студии, как в прототипе.
-  header: 'studio',
-};
+const TABS = TECH_CARD_TABS;
+type TabId = TechCardTabId;
+const TAB_GROUPS = TECH_CARD_TAB_GROUPS;
+const FOLDED_TABS = TECH_CARD_FOLDED_TABS;
 
 // Maps a form-error root key to the tab that owns it; unmapped keys are header fields.
 const ERROR_TAB: Record<string, TabId> = {
@@ -329,12 +231,12 @@ const ERROR_TAB: Record<string, TabId> = {
   pieces: 'patterns',
   pieceDxfAliases: 'patterns',
   details: 'studio',
-  construction: 'construction',
+  construction: 'assembly-table',
   // A CARD-level field (it deliberately does not live inside `construction` — see schema.ts), but it
   // RENDERS on the construction tab next to the free-text seam-allowance note it disambiguates.
   // Without this row it would fall through to the header default and the toast would name a field
   // that tab does not contain.
-  requiredSeamAllowanceMm: 'construction',
+  requiredSeamAllowanceMm: 'assembly-table',
   // C-5 (круг 19) → ⚠ ИСПРАВЛЕНО В КРУГЕ 20. Эти четыре строки указывали на `construction` и после
   // круга 20 стали ЛОЖЬЮ — ровно тем видом лжи, от которого предостерегает комментарий выше:
   // нарушение сервера приводило на вкладку, которая этого поля больше не показывает.
@@ -356,7 +258,7 @@ const ERROR_TAB: Record<string, TabId> = {
   categoryId: 'studio',
   baseModelId: 'studio',
   baseSampleSizeId: 'studio',
-  operations: 'construction',
+  operations: 'assembly-table',
   labels: 'labels',
   packaging: 'labels',
   careLabel: 'labels',
@@ -387,7 +289,7 @@ const RELEASE_BLOCKER_TAB: Record<string, TabId> = {
   bom_linked: 'bom',
   costing: 'costing',
   costing_computes: 'costing',
-  construction_graph: 'construction',
+  construction_graph: 'assembly-table',
   colorway_linked: 'colorways',
   lab_dip: 'colorways',
   signoffs: 'signoff',
@@ -1126,7 +1028,7 @@ export function TechCardForm({
     // (isTabVisible), and stating `false` for a section that cannot exist would be a claim about
     // work that is not outstanding.
     colorways: isAux ? undefined : (techCard?.colorways?.length ?? 0) > 0,
-    construction: len(operationsW) > 0,
+    'assembly-table': len(operationsW) > 0,
     labels: len(labelsW) > 0,
     // "filled" = actually signed off, not merely present — 7 REJECTED rows must not read as done (M10).
     signoff: signoffsApproved,
@@ -1271,7 +1173,7 @@ export function TechCardForm({
   // `tab=construction` в OperationsField и фолбэк `navTo('studio')` выше зациклились бы,
   // бесконечно переписывая адрес друг за другом — каждый прав в своём правиле, и уступить некому.
   useEffect(() => {
-    if (params.get('fs') === '1' && !isTabVisible('construction')) leaveFullscreen();
+    if (params.get('fs') === '1' && !isTabVisible('assembly-table')) leaveFullscreen();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params, isIdea, canReadCosting, isEditMode, isAux, boughtAux]);
 
@@ -3799,7 +3701,7 @@ export function TechCardForm({
               if (canRelease) return void submitWithApproval(RELEASED);
               if (releaseBlockers.length > 0 || markedOperationCount === 0)
                 return setBlockersOpen(true);
-              navTo('construction', {
+              navTo('assembly-table', {
                 opi: String(firstMarkedOperation((operationsW ?? []) as CardOperation[])),
               });
             }}
@@ -4063,7 +3965,7 @@ export function TechCardForm({
                         key={tab.id}
                         type='button'
                         onClick={() => {
-                          if (tab.id === 'construction' && markedOperationCount > 0) {
+                          if (tab.id === 'assembly-table' && markedOperationCount > 0) {
                             const first = firstMarkedOperation(
                               (operationsW ?? []) as CardOperation[],
                             );
@@ -4093,7 +3995,7 @@ export function TechCardForm({
                         </span>
                         {isNext && <span className='sr-only'>(next step)</span>}
                         <span className='min-w-0 flex-1 truncate'>{tab.label}</span>
-                        {tab.id === 'construction' && markedOperationCount > 0 && (
+                        {tab.id === 'assembly-table' && markedOperationCount > 0 && (
                           <span className='shrink-0 font-bold text-error'>
                             ! {markedOperationCount}
                           </span>
@@ -4409,9 +4311,8 @@ export function TechCardForm({
                 ))}
             </SectionStack>
 
-            {/* CONSTRUCTION — how it's made: the assembly map and the operations. The cut list used
-                to close this tab; it moved to PATTERNS, next to the cut pieces it is derived from. */}
-            <SectionStack hidden={activeTab !== 'construction'}>
+            {/* ASSEMBLY TABLE — the only production mount of the CAD/Assembly Order owner. */}
+            <SectionStack hidden={activeTab !== 'assembly-table'}>
               {/* No PiecesTab branch here any more. It used to be mounted for an AUXILIARY card,
                   whose colourways tab (the pieces' old home) does not exist — two conditional mounts
                   of one field array, which is exactly the shape that made a piece created from the
@@ -4421,9 +4322,9 @@ export function TechCardForm({
                   спрятаны, а разбор выкроек на вкладке заказывается автоматически. Без флага
                   каждое открытие любой тех-карты качало бы её DXF — включая правку одного поля в
                   шапке. */}
-              <ConstructionTab
+              <AssemblyTableTab
                 techCard={techCard}
-                active={activeTab === 'construction'}
+                active={activeTab === 'assembly-table'}
                 // Прокладка до хрома фулскрина: его кнопка save обязана быть той же самой, что в
                 // шапке карточки, — второй путь сохранения разошёлся бы с первым. У карточки, которая
                 // сохраняет себя сама, кнопки нет и там (O-60, D-59): без прокладки хром её не рисует.

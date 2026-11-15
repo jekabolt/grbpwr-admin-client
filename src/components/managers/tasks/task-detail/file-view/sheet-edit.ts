@@ -944,7 +944,9 @@ function xlsxBook(sheets: XlsxSheet[], parts: Unzipped): SheetBook {
         next.set(sheet.part, ENCODER.encode(xml));
       }
       // Порядок частей сохраняется: `[Content_Types].xml` остаётся там, где был.
-      for (const name of Object.keys(parts)) output[name] = next.get(name) ?? parts[name];
+      for (const name of Object.keys(parts)) {
+        output[name] = new Uint8Array(next.get(name) ?? parts[name]);
+      }
       return zipSync(output);
     },
   };

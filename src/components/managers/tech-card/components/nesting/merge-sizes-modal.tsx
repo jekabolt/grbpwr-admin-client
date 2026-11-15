@@ -122,7 +122,7 @@ export function MergeSizesModal({
           names.map((name, i) => ({ name, text: texts[i] })),
           plan.offsets,
         );
-        const file = new File([encodeDxfBytes(result.text)], mergedFileName(plan), {
+        const file = new File([new Uint8Array(encodeDxfBytes(result.text))], mergedFileName(plan), {
           type: 'application/dxf',
         });
         if (dead) return;

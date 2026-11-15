@@ -6,12 +6,13 @@
 //
 // Y is flipped in the numbers (`vy`), not by a group transform, for the reason PieceSheet gives:
 // a transform would mirror every label too.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { BoxMm, PtMm } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
 
 export type ViewBox = { x: number; y: number; w: number; h: number };
 export type ViewTool = 'pan' | 'point' | 'lasso';
+export type ViewModifiers = Readonly<{ shiftKey: boolean }>;
 
 export const vy = (y: number) => -y;
 export const ptsAttr = (pts: readonly PtMm[]) => pts.map((p) => `${p.x},${vy(p.y)}`).join(' ');
@@ -35,6 +36,52 @@ export const SHEET_INK = {
 } as const;
 
 const DRAG_SLOP = 4;
+const MAX_ZOOM_OUT_FACTOR = 8;
+const MAX_ZOOM_IN_FACTOR = 400;
+const FALLBACK_VIEWPORT_WIDTH_PX = 700;
+
+export function clampSheetViewportWidth(nextWidth: number, fitWidth: number): number {
+  const safeFit = Number.isFinite(fitWidth) && fitWidth > 0 ? fitWidth : 1;
+  const safeNext = Number.isFinite(nextWidth) && nextWidth > 0 ? nextWidth : safeFit;
+  return Math.min(safeFit * MAX_ZOOM_OUT_FACTOR, Math.max(safeFit / MAX_ZOOM_IN_FACTOR, safeNext));
+}
+
+/**
+ * Expands (never crops or distorts) a CAD viewBox to the live canvas aspect ratio. Keeping the
+ * SVG and viewBox ratios equal removes the inert letterbox bands which otherwise look like part
+ * of the work surface but cannot be converted to millimetres.
+ */
+export function fitSheetViewportBoxToAspect(
+  box: ViewBox,
+  viewportWidthPx: number,
+  viewportHeightPx: number,
+): ViewBox {
+  if (
+    !Number.isFinite(viewportWidthPx) ||
+    !Number.isFinite(viewportHeightPx) ||
+    viewportWidthPx <= 0 ||
+    viewportHeightPx <= 0
+  )
+    return box;
+  const viewportAspect = viewportWidthPx / viewportHeightPx;
+  const boxAspect = box.w / box.h;
+  if (Math.abs(viewportAspect - boxAspect) < 1e-9) return box;
+  if (viewportAspect > boxAspect) {
+    const width = box.h * viewportAspect;
+    return { ...box, x: box.x - (width - box.w) / 2, w: width };
+  }
+  const height = box.w / viewportAspect;
+  return { ...box, y: box.y - (height - box.h) / 2, h: height };
+}
+
+export function resolveSheetViewportUnit(boxWidthMm: number, viewportWidthPx: number): number {
+  const safeBoxWidth = Number.isFinite(boxWidthMm) && boxWidthMm > 0 ? boxWidthMm : 1;
+  const safeViewportWidth =
+    Number.isFinite(viewportWidthPx) && viewportWidthPx > 0
+      ? viewportWidthPx
+      : FALLBACK_VIEWPORT_WIDTH_PX;
+  return safeBoxWidth / safeViewportWidth;
+}
 
 export function SheetViewport({
   bbox,
@@ -50,11 +97,11 @@ export function SheetViewport({
   bbox: BoxMm;
   tool?: ViewTool;
   /** Pointer released on an element carrying `data-key` without dragging. */
-  onPick?: (key: string) => void;
+  onPick?: (key: string, modifiers: ViewModifiers) => void;
   /** 'point' tool: a click on the sheet, in mm. */
   onPoint?: (pt: PtMm) => void;
   /** 'lasso' tool: the closed polygon the operator drew, in mm. */
-  onLasso?: (pts: PtMm[]) => void;
+  onLasso?: (pts: PtMm[], modifiers: ViewModifiers) => void;
   className?: string;
   /** Zoom to this box when it changes (e.g. the selected piece). null = leave the view alone. */
   focus?: BoxMm | null;
@@ -63,11 +110,24 @@ export function SheetViewport({
    * the box is off-screen, and fits it when it is larger than the view. null = leave it alone.
    */
   reveal?: BoxMm | null;
-  children: (v: { box: ViewBox; unit: number }) => React.ReactNode;
+  children: (v: { box: ViewBox; unit: number }) => ReactNode;
 }) {
-  const fit = boxOf(bbox, 0.03);
+  const rawFit = boxOf(bbox, 0.03);
   const [view, setView] = useState<ViewBox | null>(null);
-  const box = view ?? fit;
+  const [viewportSize, setViewportSize] = useState<Readonly<{
+    width: number;
+    height: number;
+  }> | null>(null);
+  const fit = fitSheetViewportBoxToAspect(
+    rawFit,
+    viewportSize?.width ?? 0,
+    viewportSize?.height ?? 0,
+  );
+  const box = fitSheetViewportBoxToAspect(
+    view ?? fit,
+    viewportSize?.width ?? 0,
+    viewportSize?.height ?? 0,
+  );
   const svgRef = useRef<SVGSVGElement | null>(null);
   const gesture = useRef<{
     px: number;
@@ -75,6 +135,7 @@ export function SheetViewport({
     box: ViewBox;
     key: string;
     moved: boolean;
+    shiftKey: boolean;
   } | null>(null);
   const [panning, setPanning] = useState(false);
   const [lasso, setLassoState] = useState<PtMm[] | null>(null);
@@ -85,6 +146,28 @@ export function SheetViewport({
     lassoRef.current = v;
     setLassoState(v);
   };
+
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const measure = () => {
+      const rect = svg.getBoundingClientRect();
+      if (!(rect.width > 0) || !(rect.height > 0)) return;
+      setViewportSize((current) =>
+        current?.width === rect.width && current.height === rect.height
+          ? current
+          : Object.freeze({ width: rect.width, height: rect.height }),
+      );
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', measure);
+      return () => window.removeEventListener('resize', measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(svg);
+    return () => observer.disconnect();
+  }, []);
 
   const focusKey = focus ? `${focus.minX}|${focus.minY}|${focus.maxX}|${focus.maxY}` : '';
   useEffect(() => {
@@ -145,7 +228,7 @@ export function SheetViewport({
         y: b.y + (e.clientY - m.rect.top - m.padY) / m.scale,
       };
       const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
-      const w = Math.min(fit.w * 1.5, Math.max(fit.w / 60, b.w * factor));
+      const w = clampSheetViewportWidth(b.w * factor, fit.w);
       const k = w / b.w;
       setView({ x: at.x - (at.x - b.x) * k, y: at.y - (at.y - b.y) * k, w, h: b.h * k });
     };
@@ -160,7 +243,7 @@ export function SheetViewport({
     setPanning(false);
   };
 
-  const unit = box.w / 700;
+  const unit = resolveSheetViewportUnit(box.w, viewportSize?.width ?? FALLBACK_VIEWPORT_WIDTH_PX);
   const cursor =
     tool === 'lasso'
       ? 'cursor-crosshair'
@@ -175,6 +258,9 @@ export function SheetViewport({
       ref={svgRef}
       xmlns='http://www.w3.org/2000/svg'
       viewBox={`${box.x} ${box.y} ${box.w} ${box.h}`}
+      preserveAspectRatio='xMidYMid meet'
+      data-sheet-viewport=''
+      data-sheet-viewport-unit={unit}
       fontFamily='monospace'
       className={cn('block h-full w-full touch-none select-none bg-bgColor', cursor, className)}
       onPointerDown={(e) => {
@@ -184,7 +270,14 @@ export function SheetViewport({
           const p = toMm(e.clientX, e.clientY, box);
           if (p) setLasso([p]);
         }
-        gesture.current = { px: e.clientX, py: e.clientY, box, key, moved: false };
+        gesture.current = {
+          px: e.clientX,
+          py: e.clientY,
+          box,
+          key,
+          moved: false,
+          shiftKey: e.shiftKey,
+        };
         e.currentTarget.setPointerCapture(e.pointerId);
       }}
       onPointerMove={(e) => {
@@ -212,14 +305,16 @@ export function SheetViewport({
         const st = gesture.current;
         if (tool === 'lasso') {
           const done = lassoRef.current;
-          if (done && done.length >= 3) onLasso?.(done);
+          if (done && done.length >= 3)
+            onLasso?.(done, { shiftKey: gesture.current?.shiftKey ?? false });
+          else onPick?.('', { shiftKey: gesture.current?.shiftKey ?? false });
           setLasso(null);
         } else if (st && !st.moved) {
-          if (st.key && onPick) onPick(st.key);
+          if (st.key && onPick) onPick(st.key, { shiftKey: st.shiftKey });
           else if (tool === 'point') {
             const p = toMm(e.clientX, e.clientY, st.box);
             if (p) onPoint?.(p);
-          } else if (!st.key) onPick?.('');
+          } else if (!st.key) onPick?.('', { shiftKey: st.shiftKey });
         }
         end();
       }}
@@ -229,6 +324,14 @@ export function SheetViewport({
       }}
       onDoubleClick={() => setView(null)}
     >
+      <rect
+        data-sheet-viewport-hit-surface=''
+        x={box.x}
+        y={box.y}
+        width={box.w}
+        height={box.h}
+        fill='var(--color-bgColor)'
+      />
       {children({ box, unit })}
       {lasso && lasso.length > 1 && (
         <polygon
@@ -236,8 +339,9 @@ export function SheetViewport({
           fill={SHEET_INK.blue}
           fillOpacity={0.06}
           stroke={SHEET_INK.blue}
-          strokeWidth={unit * 1.2}
+          strokeWidth={1.2}
           strokeDasharray={`${unit * 6} ${unit * 4}`}
+          vectorEffect='non-scaling-stroke'
           pointerEvents='none'
         />
       )}

@@ -10601,6 +10601,9 @@ export type common_TechCardSizePattern = {
   // Superseded files, newest first. OUTPUT-ONLY: ignored when this message comes back through
   // UpdateTechCard; restoring one means putting its url into the active fields above.
   history: common_TechCardPatternRevision[] | undefined;
+  // SERVER-OWNED monotonic instance clock of this stable line. Distinct from `version`: version is
+  // factory-facing and may be pinned/restored, while this value closes ABA for exact byte reads.
+  savedRowRevision: number | undefined;
 };
 
 // TechCardPatternRevision is one superseded file of a pattern sheet. The active file stays on
@@ -14843,6 +14846,90 @@ export type SaveTechCardPieceAreasRequest = {
 export type SaveTechCardPieceAreasResponse = {
   sheetFingerprint: string | undefined;
   stored: number | undefined;
+};
+
+export type TechCardPatternSemanticSidecar = {
+  techCardId: number | undefined;
+  patternLineKey: string | undefined;
+  dxfSha256: string | undefined;
+  patternVersion: number | undefined;
+  sidecarSha256: string | undefined;
+  mediaType: string | undefined;
+  byteLength: number | undefined;
+  sidecarBytes: string | undefined;
+  postSaveReceiptSha256: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  createdBy: string | undefined;
+  cardLockVersion: number | undefined;
+  savedRowRevision: number | undefined;
+};
+
+export type PutTechCardPatternSemanticSidecarRequest = {
+  techCardId: number | undefined;
+  patternLineKey: string | undefined;
+  expectedDxfSha256: string | undefined;
+  expectedPatternVersion: number | undefined;
+  expectedPostSaveReceiptSha256: string | undefined;
+  mediaType: string | undefined;
+  sidecarSha256: string | undefined;
+  sidecarBytes: string | undefined;
+  expectedCardLockVersion?: number;
+  expectedSavedRowRevision?: number;
+  expectedPreviousSidecarSha256?: string;
+  expectedServerAssemblyRevision?: string;
+  expectedAssemblyTopologySha256?: string;
+  selectedOperationNumber: number | undefined;
+};
+
+export type PutTechCardPatternSemanticSidecarResponse = {
+  semanticSidecar: TechCardPatternSemanticSidecar | undefined;
+};
+
+export type GetTechCardPatternSemanticSidecarRequest = {
+  techCardId: number | undefined;
+  patternLineKey: string | undefined;
+};
+
+export type GetTechCardPatternSemanticSidecarResponse = {
+  semanticSidecar: TechCardPatternSemanticSidecar | undefined;
+};
+
+export type TechCardSavedPatternRowIdentity = {
+  techCardId: number | undefined;
+  scopeKey: string | undefined;
+  patternLineKey: string | undefined;
+  savedRowRevision: number | undefined;
+  cardLockVersion: number | undefined;
+  url: string | undefined;
+  sizeBytes: number | undefined;
+  sha256: string | undefined;
+  patternVersion: number | undefined;
+  downloadUrl: string | undefined;
+};
+
+export type GetTechCardSavedAssemblySnapshotRequest = {
+  techCardId: number | undefined;
+  patternLineKey: string | undefined;
+  expectedScopeKey: string | undefined;
+  expectedSavedRowRevision: number | undefined;
+  expectedCardLockVersion: number | undefined;
+  expectedUrl: string | undefined;
+  expectedSizeBytes: number | undefined;
+  expectedSha256: string | undefined;
+  selectedOperationNumber: number | undefined;
+  expectedServerAssemblyRevision?: string;
+  expectedAssemblyTopologySha256?: string;
+};
+
+export type GetTechCardSavedAssemblySnapshotResponse = {
+  row: TechCardSavedPatternRowIdentity | undefined;
+  selectedOperationNumber: number | undefined;
+  operations: common_TechCardOperation[] | undefined;
+  selectedSeams: common_TechCardSeam[] | undefined;
+  serverAssemblyRevision: string | undefined;
+  assemblyTopologySha256: string | undefined;
+  topologyCanonicalJson: string | undefined;
+  semanticSidecar?: TechCardPatternSemanticSidecar;
 };
 
 export type UpsertTechCardSeamsRequest = {
@@ -21595,6 +21682,13 @@ export interface AdminService {
   // wr(tech_cards): the same right as the size index — this writes a derived fact about the card's
   // patterns, from the patterns tab, and it feeds costing and the release gate.
   SaveTechCardPieceAreas(request: SaveTechCardPieceAreasRequest): Promise<SaveTechCardPieceAreasResponse>;
+  // Post-save CAS for canonical browser-derived DXF semantics. This attachment is invalidated by
+  // the next full card save and therefore must be written only after the final document save.
+  PutTechCardPatternSemanticSidecar(request: PutTechCardPatternSemanticSidecarRequest): Promise<PutTechCardPatternSemanticSidecarResponse>;
+  GetTechCardPatternSemanticSidecar(request: GetTechCardPatternSemanticSidecarRequest): Promise<GetTechCardPatternSemanticSidecarResponse>;
+  // Narrow server-transactional authority for reopening one already-saved Assembly Order row.
+  // The expected row is POSTed because all eight identity fields are comparison inputs, not filters.
+  GetTechCardSavedAssemblySnapshot(request: GetTechCardSavedAssemblySnapshotRequest): Promise<GetTechCardSavedAssemblySnapshotResponse>;
   // UpsertTechCardSeams stores the technologist's seam decisions — confirmed / rejected seams and
   // seams connected by hand on the pieces map — so every reader resolves ONE list.
   // KEYED AND PARTIAL: a row per seam_key is inserted or replaced whole; rows not named are
@@ -28573,6 +28667,75 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "SaveTechCardPieceAreas",
       }) as Promise<SaveTechCardPieceAreasResponse>;
+    },
+    PutTechCardPatternSemanticSidecar(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      if (!request.patternLineKey) {
+        throw new Error("missing required field request.pattern_line_key");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/patterns/${request.patternLineKey}/semantic-sidecar`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PutTechCardPatternSemanticSidecar",
+      }) as Promise<PutTechCardPatternSemanticSidecarResponse>;
+    },
+    GetTechCardPatternSemanticSidecar(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      if (!request.patternLineKey) {
+        throw new Error("missing required field request.pattern_line_key");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/patterns/${request.patternLineKey}/semantic-sidecar`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTechCardPatternSemanticSidecar",
+      }) as Promise<GetTechCardPatternSemanticSidecarResponse>;
+    },
+    GetTechCardSavedAssemblySnapshot(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      if (!request.patternLineKey) {
+        throw new Error("missing required field request.pattern_line_key");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/patterns/${request.patternLineKey}:read-assembly-snapshot`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTechCardSavedAssemblySnapshot",
+      }) as Promise<GetTechCardSavedAssemblySnapshotResponse>;
     },
     UpsertTechCardSeams(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {

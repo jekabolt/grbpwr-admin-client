@@ -33,6 +33,8 @@ export type SeamChangeResult =
       keyMap: ReadonlyMap<string, string>;
       deletedKeys: readonly string[];
       lockVersion: number;
+      /** Exact server rows returned by this write; strict CAD callers verify their receipt. */
+      echo?: readonly TechCardSeamWire[];
     }
   | { ok: false; why: string };
 
@@ -178,7 +180,13 @@ export function runSeamChange(
         // Rebuilt to nothing (every row it named was taken meanwhile): no request, nothing to say.
         if (emptyChange(built)) {
           settleSeamWrite(cardId, keys, undefined, undefined, opts.errorAt);
-          return { ok: true, keyMap: new Map(), deletedKeys: [], lockVersion: bridge.version() };
+          return {
+            ok: true,
+            keyMap: new Map(),
+            deletedKeys: [],
+            lockVersion: bridge.version(),
+            echo: [],
+          };
         }
         const req = changeRequest(cardId, bridge.version(), built, bridge.operationNumber);
         if (!req) return fail(why(NOT_SAVED));
@@ -203,20 +211,15 @@ export function runSeamChange(
             links: res.links ?? [],
             seams: res.seams ?? [],
           });
-        settleSeamWrite(
-          cardId,
-          keys,
-          (res.seams ?? []) as TechCardSeamWire[],
-          undefined,
-          opts.errorAt,
-          lockVersion,
-        );
+        const echo = (res.seams ?? []) as TechCardSeamWire[];
+        settleSeamWrite(cardId, keys, echo, undefined, opts.errorAt, lockVersion);
         deps.settled?.(cardId);
         return {
           ok: true,
           keyMap: keyMapOf(res),
           deletedKeys: res.deletedKeys ?? [],
           lockVersion,
+          echo,
         };
       }
     } finally {

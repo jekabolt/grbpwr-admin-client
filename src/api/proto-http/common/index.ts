@@ -3092,6 +3092,9 @@ export type TechCardSizePattern = {
   // Superseded files, newest first. OUTPUT-ONLY: ignored when this message comes back through
   // UpdateTechCard; restoring one means putting its url into the active fields above.
   history: TechCardPatternRevision[] | undefined;
+  // SERVER-OWNED monotonic instance clock of this stable line. Distinct from `version`: version is
+  // factory-facing and may be pinned/restored, while this value closes ABA for exact byte reads.
+  savedRowRevision: number | undefined;
 };
 
 // TechCardMachineProfile is one row of CARD DEFAULTS: «this card is sewn on such a machine, set up

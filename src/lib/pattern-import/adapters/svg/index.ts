@@ -95,7 +95,7 @@ export function makeExtractSvg(options: SvgOptions = {}): ExtractFn {
     const keepFills = opts?.keepFills !== false;
     const budget = budgetOf(opts);
     let visited = 0;
-    let u = new Uint8Array(file.bytes);
+    let u: Uint8Array = new Uint8Array(file.bytes);
     if (u.length === 0) throw new UnsupportedFormat('empty');
     if (u[0] === 0x1f && u[1] === 0x8b) u = await gunzip(u);
     const src = decodeText(u);
@@ -904,7 +904,7 @@ async function gunzip(u: Uint8Array): Promise<Uint8Array> {
     }
   ).DecompressionStream;
   if (!DS) throw new UnsupportedFormat('svgz-unsupported');
-  const stream = new Blob([u]).stream().pipeThrough(new DS('gzip'));
+  const stream = new Blob([new Uint8Array(u)]).stream().pipeThrough(new DS('gzip'));
   // Gzip-bomb guard (M6): stop inflating past SVGZ_MAX_BYTES instead of filling the worker.
   const reader = stream.getReader();
   const parts: Uint8Array[] = [];
