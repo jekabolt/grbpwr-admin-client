@@ -1,0 +1,483 @@
+{
+  "schemaVersion": "grbpwr-project-body-measurement-protocol-registry/v1",
+  "protocolId": "grbpwr-body-measurement-protocol-v1",
+  "protocolVersion": "1.0.0",
+  "status": "PROJECT_OWNED_OPERATOR_PROTOCOL_NOT_EXTERNAL_STANDARD_COMPLIANCE",
+  "effectiveDate": "2026-11-12",
+  "scope": {
+    "wireType": "common_ModelMeasurement",
+    "storedUnit": "mm",
+    "fieldCount": 20,
+    "requiredForAnalyticalMannequinCount": 7,
+    "unknownSentinelAllowed": false
+  },
+  "globalProcedure": {
+    "subjectPreparation": [
+      "Measure over close-fitting base clothing or underwear; remove shoes, belts, bulky layers, and pocket contents.",
+      "Subject stands naturally with weight balanced unless a field states another posture.",
+      "Mark the waist, acromion points, neck base, right radial-styloid point, crotch point, and other named landmarks before the first observation.",
+      "Do not infer a missing value from garment size, another person, a photograph, BMI, or an automated scale conversion."
+    ],
+    "tools": [
+      "non-stretch flexible body-measurement tape with millimetre graduations",
+      "stadiometer or rigid vertical rule for height",
+      "right-angle headpiece for height",
+      "washable skin marker or removable landmark stickers",
+      "optional elastic waist cord kept level"
+    ],
+    "unitPolicy": {
+      "captureUnit": "mm",
+      "storedUnit": "mm",
+      "integerStorage": true,
+      "rounding": "round accepted result to the nearest whole millimetre",
+      "automaticUnitCorrectionAllowed": false,
+      "mixedUnitsAllowed": false
+    },
+    "observationPolicy": {
+      "minimumIndependentObservations": 2,
+      "independenceRule": "Release and reposition the tape or tool and re-identify the path before the second observation.",
+      "acceptanceRule": "Accept when the absolute difference between the two observations is no greater than the field repeatToleranceMm.",
+      "retryRule": "If the first two observations disagree, take one third independent observation. Accept only the closest pair when its difference is within repeatToleranceMm; otherwise stop and review landmarks, posture, tool tension, and operator training.",
+      "resultRule": "Store the rounded arithmetic mean of the accepted pair.",
+      "noPairRule": "Do not store a value when no pair passes tolerance. Preserve the field as missing and record a review reason outside the measurement value."
+    },
+    "tapeTension": "Tape lies in contact with the body without compressing soft tissue and without slack.",
+    "breathing": "For torso circumferences, record at the end of a normal relaxed exhalation; do not ask the subject to inhale, hold the abdomen, or pose.",
+    "privacy": "The protocol defines measurements only. Names, photographs, comments, consent records, and raw repeated observations remain outside this registry.",
+    "mutationPolicy": "Existing records are never silently rewritten; corrections require operator confirmation and an audit trail."
+  },
+  "fields": [
+    {
+      "wireField": "BODY_MEASUREMENT_NAME_CHEST",
+      "labelEn": "chest",
+      "labelRu": "обхват груди",
+      "group": "torso",
+      "canonicalKey": "chestCircumferenceMm",
+      "geometryKind": "circumference",
+      "requiredForAnalyticalMannequin": true,
+      "allowedMissing": false,
+      "repeatToleranceMm": 10,
+      "definitionEn": "Horizontal torso circumference through the fullest chest or bust level, under the arms.",
+      "definitionRu": "Горизонтальный обхват туловища через наиболее выступающую точку груди, под руками.",
+      "landmarks": ["fullest chest or bust level", "inferior axillary region"],
+      "posture": "Standing naturally, arms relaxed slightly away from the torso for tape placement and then lowered.",
+      "tapePath": "Pass the tape horizontally around the torso at the marked fullest level; confirm level at front, sides, and back; read at normal exhalation.",
+      "commonMistakes": [
+        "sloping tape",
+        "compressing breast or chest tissue",
+        "measuring under-bust level",
+        "inhaling or posing"
+      ]
+    },
+    {
+      "wireField": "BODY_MEASUREMENT_NAME_UNDER_BUST",
+      "labelEn": "under bust",
+      "labelRu": "обхват под грудью",
+      "group": "torso",
+      "canonicalKey": "underBustCircumferenceMm",
+      "geometryKind": "circumference",
+      "requiredForAnalyticalMannequin": false,
+      "allowedMissing": true,
+      "repeatToleranceMm": 10,
+      "definitionEn": "Horizontal torso circumference immediately below breast tissue at the inframammary level.",
+      "definitionRu": "Горизонтальный обхват туловища непосредственно под грудью на уровне подгрудной складки.",
+      "landmarks": ["inframammary level"],
+      "posture": "Standing naturally with arms relaxed after tape placement.",
+      "tapePath": "Pass the tape horizontally around the ribcage immediately below breast tissue and read at normal exhalation.",
+      "commonMistakes": ["using chest level", "pulling the tape tight", "uneven height at the back"]
+    },
+    {
+      "wireField": "BODY_MEASUREMENT_NAME_WAIST",
+      "labelEn": "waist",
+      "labelRu": "обхват талии",
+      "group": "torso",
+      "canonicalKey": "waistCircumferenceMm",
+      "geometryKind": "circumference",
+      "requiredForAnalyticalMannequin": true,
+      "allowedMissing": false,
+      "repeatToleranceMm": 10,
+      "definitionEn": "Horizontal circumference at the natural waist marked by the side-bend crease, not a preferred garment waistband.",
+      "definitionRu": "Горизонтальный обхват естественной талии, отмеченной по складке при боковом наклоне, а не по желаемой линии пояса одежды.",
+      "landmarks": ["natural waist side-bend crease"],
+      "posture": "Return to relaxed upright standing after locating the waist; abdomen relaxed.",
+      "tapePath": "Place a level elastic cord on the marked natural waist, then measure around the same plane at normal exhalation.",
+      "commonMistakes": [
+        "using trouser waistband",
+        "drawing in the abdomen",
+        "tape above or below the marked plane"
+      ]
+    },
+    {
+      "wireField": "BODY_MEASUREMENT_NAME_HIGH_HIP",
+      "labelEn": "high hip",
+      "labelRu": "верхний обхват бёдер",
+      "group": "torso",
+      "canonicalKey": null,
+      "geometryKind": "circumference",
+      "requiredForAnalyticalMannequin": false,
+      "allowedMissing": true,
+      "repeatToleranceMm": 10,
+      "definitionEn": "Horizontal torso circumference on a plane 100 mm below the marked natural waist.",
+      "definitionRu": "Горизонтальный обхват туловища в плоскости на 100 мм ниже отмеченной естественной талии.",
+      "landmarks": ["natural waist plane", "plane 100 mm below waist"],
+      "posture": "Standing naturally with feet together and abdomen relaxed.",
+      "tapePath": "Mark points 100 mm vertically below the waist at front, sides, and back; pass the tape level through those points.",
+      "commonMistakes": [
+        "measuring fullest seat",
+        "following a curved waistband",
+        "measuring 100 mm along the body instead of vertically"
+      ]
+    },
+    {
+      "wireField": "BODY_MEASUREMENT_NAME_HIP",
+      "labelEn": "hip",
+      "labelRu": "обхват бёдер",
+      "group": "torso",
+      "canonicalKey": "hipCircumferenceMm",
+      "geometryKind": "circumference",
+      "requiredForAnalyticalMannequin": true,
+      "allowedMissing": false,
+      "repeatToleranceMm": 10,
+      "definitionEn": "Maximum horizontal circumference around the seat and hips through the fullest buttock projection.",
+      "definitionRu": "Максимальный горизонтальный обхват таза через наиболее выступающие точки ягодиц.",
+      "landmarks": ["fullest buttock projection"],
+      "posture": "Standing naturally with feet together and weight balanced.",
+      "tapePath": "Move the level tape vertically until the maximum seat circumference is found; keep it horizontal and read without compression.",
+      "commonMistakes": [
+        "measuring high hip",
+        "feet apart",
+        "tape caught above the fullest buttock level"
+      ]
+    },
+    {
+      "wireField": "BODY_MEASUREMENT_NAME_NECK_BASE",
+      "labelEn": "neck base",
+      "labelRu": "обхват основания шеи",
+      "group": "torso",
+      "canonicalKey": "neckBaseCircumferenceMm",
+      "geometryKind": "circumference",
+      "requiredForAnalyticalMannequin": false,
+      "allowedMissing": true,
+      "repeatToleranceMm": 5,
+      "definitionEn": "Circumference of the neck base through the seventh cervical prominence, neck-shoulder junctions, and suprasternal notch.",
+      "definitionRu": "Обхват основания шеи через выступ седьмого шейного позвонка, точки перехода шеи в плечи и яремную вырезку.",
+      "landmarks": ["C7 prominence", "left and right neck-shoulder junction", "suprasternal notch"],
+      "posture": "Head in a natural forward position, shoulders relaxed.",
+      "tapePath": "Follow the sloped base-of-neck contour through all four landmarks; do not measure a horizontal collar line.",
+      "commonMistakes": [
+        "measuring high neck circumference",
+        "horizontal tape",
+        "including collar ease"
+      ]
+    },
+    {
+      "wireField": "BODY_MEASUREMENT_NAME_ACROSS_SHOULDER",
+      "labelEn": "across shoulder",
+      "labelRu": "ширина плеч",
+      "group": "arms",
+      "canonicalKey": "shoulderBreadthMm",
+      "geometryKind": "straight-breadth",
+      "requiredForAnalyticalMannequin": true,
+      "allowedMissing": false,
+      "repeatToleranceMm": 5,
+      "definitionEn": "Straight horizontal breadth between the left and right acromion points; it is not a tape contour over the neck.",
+      "definitionRu": "Прямая горизонтальная ширина между левым и правым акромионами; это не дуга сантиметровой ленты через шею.",
+      "landmarks": ["left acromion", "right acromion"],
+      "posture": "Standing naturally, shoulders relaxed and level, arms hanging.",
+      "tapePath": "Use a rigid breadth tool when available, or hold the tape straight without following the back contour, between the two marked acromion points.",
+      "commonMistakes": [
+        "measuring around the shoulders",
+        "following the curved back",
+        "using sleeve-head points",
+        "raised shoulders"
+      ]
+    },
+    {
+      "wireField": "BODY_MEASUREMENT_NAME_SLEEVE_LENGTH",
+      "labelEn": "sleeve length",
+      "labelRu": "длина руки до запястья",
+      "group": "arms",
+      "canonicalKey": "armLengthMm",
+      "geometryKind": "straight-length",
+      "requiredForAnalyticalMannequin": true,
+      "allowedMissing": false,
+      "repeatToleranceMm": 8,
+      "definitionEn": "Straight endpoint span from the right acromion to the right radial styloid with the elbow extended and wrist neutral; it is not a bent-elbow surface or garment sleeve length.",
+      "definitionRu": "Прямое расстояние между правым акромионом и шиловидным отростком правой лучевой кости при выпрямленном локте и нейтральном запястье; это не длина по согнутой руке и не длина рукава одежды.",
+      "landmarks": ["right acromion", "right radial styloid at thumb side of wrist"],
+      "posture": "Standing naturally with the right arm extended downward, elbow straight without hyperextension, wrist neutral, and fingers relaxed.",
+      "tapePath": "Measure the straight endpoint-to-endpoint span from the marked right acromion to the marked right radial styloid with a rigid length tool or a tape held straight; do not follow the arm surface or elbow contour.",
+      "commonMistakes": [
+        "starting at neck base",
+        "using the left arm",
+        "bent or hyperextended elbow",
+        "following the arm surface over the elbow",
+        "ending at the ulnar styloid, wrist crease, or knuckles",
+        "adding garment ease"
+      ]
+    },
+    {
+      "wireField": "BODY_MEASUREMENT_NAME_BICEP",
+      "labelEn": "bicep",
+      "labelRu": "обхват плеча",
+      "group": "arms",
+      "canonicalKey": "bicepCircumferenceMm",
+      "geometryKind": "circumference",
+      "requiredForAnalyticalMannequin": false,
+      "allowedMissing": true,
+      "repeatToleranceMm": 5,
+      "definitionEn": "Maximum circumference of the relaxed upper arm between shoulder and elbow.",
+      "definitionRu": "Максимальный обхват расслабленного плеча между плечевым суставом и локтем.",
+      "landmarks": ["maximum upper-arm level"],
+      "posture": "Arm hanging relaxed, palm facing the thigh; do not flex the muscle.",
+      "tapePath": "Search along the upper arm for the maximum level and measure perpendicular to the arm axis.",
+      "commonMistakes": ["flexed bicep", "tape oblique to arm", "compressing soft tissue"]
+    },
+    {
+      "wireField": "BODY_MEASUREMENT_NAME_WRIST",
+      "labelEn": "wrist",
+      "labelRu": "обхват запястья",
+      "group": "arms",
+      "canonicalKey": "wristCircumferenceMm",
+      "geometryKind": "circumference",
+      "requiredForAnalyticalMannequin": false,
+      "allowedMissing": true,
+      "repeatToleranceMm": 5,
+      "definitionEn": "Circumference at the wrist crease over the distal radius and ulna prominences.",
+      "definitionRu": "Обхват по линии запястья через выступы лучевой и локтевой костей.",
+      "landmarks": ["wrist crease", "distal radius and ulna prominences"],
+      "posture": "Forearm relaxed, hand open, wrist neutral.",
+      "tapePath": "Pass the tape around the marked wrist level without adding cuff ease.",
+      "commonMistakes": [
+        "measuring the hand",
+        "adding cuff ease",
+        "pulling tape between wrist bones"
+      ]
+    },
+    {
+      "wireField": "BODY_MEASUREMENT_NAME_INSEAM",
+      "labelEn": "inseam",
+      "labelRu": "длина ноги по внутренней стороне",
+      "group": "legs",
+      "canonicalKey": "inseamMm",
+      "geometryKind": "vertical-length",
+      "requiredForAnalyticalMannequin": true,
+      "allowedMissing": false,
+      "repeatToleranceMm": 5,
+      "definitionEn": "Vertical distance from the crotch point to the floor along the inside leg, barefoot.",
+      "definitionRu": "Вертикальное расстояние от точки промежности до пола вдоль внутренней стороны ноги, без обуви.",
+      "landmarks": ["crotch point", "floor at inside foot"],
+      "posture": "Standing barefoot, feet approximately 100 mm apart, legs straight, weight balanced.",
+      "tapePath": "Seat a thin rigid card or measuring aid horizontally at the crotch point and measure vertically to the floor beside the inside leg.",
+      "commonMistakes": [
+        "measuring to ankle",
+        "including shoe heel",
+        "following trouser seam curvature",
+        "aid not seated at crotch point"
+      ]
+    },
+    {
+      "wireField": "BODY_MEASUREMENT_NAME_THIGH",
+      "labelEn": "thigh",
+      "labelRu": "обхват бедра",
+      "group": "legs",
+      "canonicalKey": "thighCircumferenceMm",
+      "geometryKind": "circumference",
+      "requiredForAnalyticalMannequin": false,
+      "allowedMissing": true,
+      "repeatToleranceMm": 10,
+      "definitionEn": "Maximum circumference of the upper thigh immediately below the gluteal fold.",
+      "definitionRu": "Максимальный обхват верхней части бедра непосредственно под ягодичной складкой.",
+      "landmarks": ["gluteal fold", "maximum upper-thigh level"],
+      "posture": "Standing with weight balanced and muscles relaxed.",
+      "tapePath": "Place the tape perpendicular to the thigh axis just below the gluteal fold and confirm the maximum nearby circumference.",
+      "commonMistakes": [
+        "measuring mid-thigh",
+        "weight shifted to one leg",
+        "tape sloping into gluteal fold"
+      ]
+    },
+    {
+      "wireField": "BODY_MEASUREMENT_NAME_KNEE",
+      "labelEn": "knee",
+      "labelRu": "обхват колена",
+      "group": "legs",
+      "canonicalKey": null,
+      "geometryKind": "circumference",
+      "requiredForAnalyticalMannequin": false,
+      "allowedMissing": true,
+      "repeatToleranceMm": 5,
+      "definitionEn": "Circumference through the midpoint of the patella with the knee straight and relaxed.",
+      "definitionRu": "Обхват через середину надколенника при выпрямленном и расслабленном колене.",
+      "landmarks": ["patella midpoint"],
+      "posture": "Standing, knee extended without locking, weight balanced.",
+      "tapePath": "Pass the tape perpendicular to the leg axis through the patella midpoint.",
+      "commonMistakes": ["bent knee", "measuring above or below patella", "locked quadriceps"]
+    },
+    {
+      "wireField": "BODY_MEASUREMENT_NAME_CALF",
+      "labelEn": "calf",
+      "labelRu": "обхват икры",
+      "group": "legs",
+      "canonicalKey": "calfCircumferenceMm",
+      "geometryKind": "circumference",
+      "requiredForAnalyticalMannequin": false,
+      "allowedMissing": true,
+      "repeatToleranceMm": 5,
+      "definitionEn": "Maximum circumference of the relaxed calf.",
+      "definitionRu": "Максимальный обхват расслабленной икры.",
+      "landmarks": ["maximum calf level"],
+      "posture": "Standing with weight balanced and calf relaxed.",
+      "tapePath": "Move the tape along the calf to find the maximum circumference, keeping it perpendicular to the leg axis.",
+      "commonMistakes": ["standing on toes", "measuring a convenient fixed height", "sloping tape"]
+    },
+    {
+      "wireField": "BODY_MEASUREMENT_NAME_ANKLE",
+      "labelEn": "ankle",
+      "labelRu": "обхват щиколотки",
+      "group": "legs",
+      "canonicalKey": "ankleCircumferenceMm",
+      "geometryKind": "circumference",
+      "requiredForAnalyticalMannequin": false,
+      "allowedMissing": true,
+      "repeatToleranceMm": 5,
+      "definitionEn": "Minimum circumference above the medial and lateral ankle bones.",
+      "definitionRu": "Минимальный обхват над внутренней и наружной лодыжками.",
+      "landmarks": ["medial malleolus", "lateral malleolus", "minimum level above malleoli"],
+      "posture": "Standing with foot flat and weight balanced.",
+      "tapePath": "Find the narrowest level immediately above the ankle bones and measure perpendicular to the lower-leg axis.",
+      "commonMistakes": [
+        "measuring over the ankle bones",
+        "measuring foot opening",
+        "including sock thickness"
+      ]
+    },
+    {
+      "wireField": "BODY_MEASUREMENT_NAME_HEIGHT",
+      "labelEn": "height",
+      "labelRu": "рост",
+      "group": "vertical-lengths",
+      "canonicalKey": "heightMm",
+      "geometryKind": "vertical-height",
+      "requiredForAnalyticalMannequin": true,
+      "allowedMissing": false,
+      "repeatToleranceMm": 5,
+      "definitionEn": "Barefoot standing vertical height from the floor to the highest point of the head.",
+      "definitionRu": "Вертикальный рост стоя без обуви от пола до верхней точки головы.",
+      "landmarks": ["floor", "vertex of head"],
+      "posture": "Heels on the floor, weight balanced, body upright without stretching, head in natural forward position.",
+      "tapePath": "Use a stadiometer or rigid vertical rule and a right-angle headpiece; lower the headpiece to touch the hair with light pressure.",
+      "commonMistakes": [
+        "entering centimetres into the millimetre field",
+        "wearing shoes",
+        "measuring along body contour",
+        "head tilted"
+      ]
+    },
+    {
+      "wireField": "BODY_MEASUREMENT_NAME_HPS_TO_WAIST_FRONT",
+      "labelEn": "hps to waist (front)",
+      "labelRu": "от высшей точки плеча до талии спереди",
+      "group": "vertical-lengths",
+      "canonicalKey": "hpsToWaistFrontMm",
+      "geometryKind": "surface-length",
+      "requiredForAnalyticalMannequin": false,
+      "allowedMissing": true,
+      "repeatToleranceMm": 5,
+      "definitionEn": "Front surface length from the high point shoulder at the neck-shoulder junction to the marked natural waist plane.",
+      "definitionRu": "Длина по передней поверхности от высшей точки плеча у основания шеи до отмеченной естественной талии.",
+      "landmarks": [
+        "high point shoulder at neck-shoulder junction",
+        "natural waist plane at front"
+      ],
+      "posture": "Standing naturally, shoulders relaxed, abdomen relaxed.",
+      "tapePath": "Follow the front body contour vertically from high point shoulder, over the chest or bust without compression, to the waist cord.",
+      "commonMistakes": [
+        "starting at acromion",
+        "taking a straight suspended distance",
+        "ending at garment waistband"
+      ]
+    },
+    {
+      "wireField": "BODY_MEASUREMENT_NAME_CB_NECK_TO_WAIST",
+      "labelEn": "cb neck to waist",
+      "labelRu": "от основания шеи до талии по спине",
+      "group": "vertical-lengths",
+      "canonicalKey": "cbNeckToWaistMm",
+      "geometryKind": "surface-length",
+      "requiredForAnalyticalMannequin": false,
+      "allowedMissing": true,
+      "repeatToleranceMm": 5,
+      "definitionEn": "Centre-back surface length from the C7 neck-base prominence to the marked natural waist plane.",
+      "definitionRu": "Длина по центру спины от выступа C7 у основания шеи до отмеченной естественной талии.",
+      "landmarks": ["C7 prominence", "centre-back natural waist point"],
+      "posture": "Standing naturally with head forward and shoulders relaxed.",
+      "tapePath": "Follow the spinal contour from C7 straight down the centre back to the waist cord.",
+      "commonMistakes": [
+        "starting at occiput",
+        "using a straight suspended line",
+        "ending at trouser waistband"
+      ]
+    },
+    {
+      "wireField": "BODY_MEASUREMENT_NAME_ACROSS_FRONT",
+      "labelEn": "across front",
+      "labelRu": "ширина груди спереди",
+      "group": "widths",
+      "canonicalKey": "acrossFrontMm",
+      "geometryKind": "surface-breadth",
+      "requiredForAnalyticalMannequin": false,
+      "allowedMissing": true,
+      "repeatToleranceMm": 5,
+      "definitionEn": "Front torso surface breadth between the left and right anterior axillary folds at the upper-chest level.",
+      "definitionRu": "Ширина по передней поверхности туловища между передними подмышечными складками на уровне верхней части груди.",
+      "landmarks": ["left anterior axillary fold", "right anterior axillary fold"],
+      "posture": "Standing naturally, arms relaxed at sides after landmarks are identified.",
+      "tapePath": "Lay the tape across the front surface between the marked folds without continuing around the sides.",
+      "commonMistakes": [
+        "measuring chest circumference",
+        "using armpit centres",
+        "including side torso",
+        "arms lifted"
+      ]
+    },
+    {
+      "wireField": "BODY_MEASUREMENT_NAME_ACROSS_BACK",
+      "labelEn": "across back",
+      "labelRu": "ширина спины",
+      "group": "widths",
+      "canonicalKey": "acrossBackMm",
+      "geometryKind": "surface-breadth",
+      "requiredForAnalyticalMannequin": false,
+      "allowedMissing": true,
+      "repeatToleranceMm": 5,
+      "definitionEn": "Back torso surface breadth between the left and right posterior axillary folds at the upper-back level.",
+      "definitionRu": "Ширина по задней поверхности туловища между задними подмышечными складками на уровне верхней части спины.",
+      "landmarks": ["left posterior axillary fold", "right posterior axillary fold"],
+      "posture": "Standing naturally, arms relaxed and shoulders not rounded forward.",
+      "tapePath": "Lay the tape across the back surface between the marked folds without continuing around the sides.",
+      "commonMistakes": [
+        "measuring shoulder breadth",
+        "including upper arms",
+        "rounded shoulders",
+        "following a full back arc beyond folds"
+      ]
+    }
+  ],
+  "claimBoundary": {
+    "externalStandardComplianceClaimed": false,
+    "medicalOrDiagnosticUse": false,
+    "populationRepresentativenessClaimed": false,
+    "measurementProtocolAloneValidatesBodySurface": false,
+    "protocolAloneAuthorizesFitGradeClaim": false,
+    "automaticCorrectionAuthorized": false,
+    "note": "This is a project-owned operational definition intended to make repeated observations comparable. It does not reproduce or claim compliance with any paid ISO, ASTM, or other external standard."
+  },
+  "changelog": [
+    {
+      "version": "1.0.0",
+      "date": "2026-11-12",
+      "change": "Initial project-owned definitions for all 20 wire fields, with seven analytical-mannequin required fields and an explicit repeated-observation gate."
+    }
+  ]
+}

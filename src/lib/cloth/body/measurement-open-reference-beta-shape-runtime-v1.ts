@@ -1,0 +1,399 @@
+import {
+  loadMakeHumanTorsoShapeDeltaBundleV1,
+  type MakeHumanTorsoShapeDeltaBundleV1,
+} from './makehuman-torso-shape-delta-bundle-v1';
+import { createMakeHumanAnteriorChestShoulderModesResearchV1 } from './makehuman-anterior-chest-shoulder-modes-research-v1';
+import {
+  applyMakeHuman2ArmLengthProxyToDisplayPositionsMResearchV1,
+  createMakeHuman2ArmLengthProxyRuntimeResearchV1,
+  type MakeHuman2ArmLengthProxyAppliedV1,
+} from './makehuman2-pose-compatible-length-runtime-v1';
+import {
+  loadMakeHuman2PoseCompatibleLengthPackV1,
+  MAKEHUMAN2_POSE_COMPATIBLE_LENGTH_PACK_METADATA_V1,
+  type MakeHuman2PoseCompatibleLengthPackV1,
+} from './makehuman2-pose-compatible-length-pack-v1';
+import type { CanonicalBodyMeasurementsMm } from './measurement-adapter';
+import {
+  evaluateMeasurementOpenReferenceDisplayQualityV1,
+  type MeasurementOpenReferenceDisplayQualityGateResultV1,
+} from './measurement-open-reference-display-quality-gate-v1';
+import { solveOpenReferenceChestShoulderResearchV1 } from './measurement-open-reference-chest-shoulder-research-v1';
+import { applyOpenReferenceUnderBustRibcageResearchV1 } from './measurement-open-reference-underbust-ribcage-research-v1';
+import {
+  createMakeHumanDisplayPoseResourceLoaderV1,
+  type MeasurementOpenReferenceDisplayPoseResourcesV1,
+} from './measurement-open-reference-display-pose-runtime-v1';
+import {
+  createMeasurementOpenReferenceLimbSubsetRuntimeV1,
+  type MeasurementOpenReferenceLimbSubsetRuntimeResultV1,
+} from './measurement-open-reference-limb-subset-runtime-v1';
+import {
+  snapshotMeasurementSurfaceMeshV1,
+  type MakeHumanOpenReferenceBasisV1,
+} from './measurement-open-reference-display-v1';
+import type { MeasurementOpenReferenceUniformWaistHipRuntimeResultV1 } from './measurement-open-reference-uniform-waist-hip-runtime-v1';
+
+export const MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_RUNTIME_V1 =
+  'measurement-open-reference-beta-shape-runtime/v1' as const;
+
+export const MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_KEYS_V1 = Object.freeze([
+  'heightMm',
+  'shoulderBreadthMm',
+  'chestCircumferenceMm',
+  'underBustCircumferenceMm',
+  'waistCircumferenceMm',
+  'hipCircumferenceMm',
+  'armLengthMm',
+  'bicepCircumferenceMm',
+  'wristCircumferenceMm',
+  'thighCircumferenceMm',
+  'calfCircumferenceMm',
+  'ankleCircumferenceMm',
+] as const);
+
+export type MeasurementOpenReferenceBetaShapeKeyV1 =
+  (typeof MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_KEYS_V1)[number];
+
+export interface MeasurementOpenReferenceBetaShapeRuntimeResultV1 {
+  readonly version: typeof MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_RUNTIME_V1;
+  readonly role: 'CC0_OPEN_REFERENCE_BETA_VISUAL_SHAPE';
+  readonly status: 'error' | 'partial' | 'represented' | 'unrepresented';
+  /** Proxy-compatible owner snapshot consumed by FK, live-pose and joint-overlay runtimes. */
+  readonly fkProxyRuntime: MeasurementOpenReferenceUniformWaistHipRuntimeResultV1;
+  readonly representedVisualControls: readonly MeasurementOpenReferenceBetaShapeKeyV1[];
+  /** Bounded visible endpoints that must not be reported as the requested exact value. */
+  readonly limitedVisualControls?: readonly MeasurementOpenReferenceBetaShapeKeyV1[];
+  readonly unrepresentedRequiredControls: readonly 'inseamMm'[];
+  readonly chestShoulderDiagnostics: readonly string[];
+  readonly limbStatus: MeasurementOpenReferenceLimbSubsetRuntimeResultV1['status'];
+  readonly sourceRevisionSuffix: string;
+  readonly claims: {
+    readonly visualReferenceOnly: true;
+    readonly geometricProxyOnly: true;
+    readonly exactHeightOnly: true;
+    readonly anteriorChestPosteriorHeldFixed: true;
+    readonly underBustIndependentRibcageBand: true;
+    readonly armLengthCenterlineProxyOnly: true;
+    readonly sleeveLengthRepresented: false;
+    readonly inseamRepresented: false;
+    readonly canonicalMeasurementSemanticMatchClaimed: false;
+    readonly anatomicalTapePathEquivalent: false;
+    readonly measurementProtocolEquivalent: false;
+    readonly populationRepresentativenessClaimed: false;
+    readonly realBodyValidationClaimed: false;
+    readonly garmentFitClaimed: false;
+    readonly fitClaimEligible: false;
+    readonly runtimeCollisionEligible: false;
+    readonly collisionCandidateEligible: false;
+    readonly productionAuthority: false;
+  };
+}
+
+export type MeasurementOpenReferenceBetaShapeTorsoBundleLoaderV1 =
+  () => Promise<MakeHumanTorsoShapeDeltaBundleV1>;
+export type MeasurementOpenReferenceBetaShapeLengthPackLoaderV1 =
+  () => Promise<MakeHuman2PoseCompatibleLengthPackV1>;
+export type MeasurementOpenReferenceBetaShapePoseResourcesLoaderV1 =
+  () => Promise<MeasurementOpenReferenceDisplayPoseResourcesV1>;
+
+const loadBetaShapePoseResourcesV1 = createMakeHumanDisplayPoseResourceLoaderV1();
+
+const CLAIMS = Object.freeze({
+  visualReferenceOnly: true as const,
+  geometricProxyOnly: true as const,
+  exactHeightOnly: true as const,
+  anteriorChestPosteriorHeldFixed: true as const,
+  underBustIndependentRibcageBand: true as const,
+  armLengthCenterlineProxyOnly: true as const,
+  sleeveLengthRepresented: false as const,
+  inseamRepresented: false as const,
+  canonicalMeasurementSemanticMatchClaimed: false as const,
+  anatomicalTapePathEquivalent: false as const,
+  measurementProtocolEquivalent: false as const,
+  populationRepresentativenessClaimed: false as const,
+  realBodyValidationClaimed: false as const,
+  garmentFitClaimed: false as const,
+  fitClaimEligible: false as const,
+  runtimeCollisionEligible: false as const,
+  collisionCandidateEligible: false as const,
+  productionAuthority: false as const,
+});
+
+function withDisplayPositions(
+  source: MeasurementOpenReferenceUniformWaistHipRuntimeResultV1,
+  positions: Float32Array,
+  qualityGate: MeasurementOpenReferenceDisplayQualityGateResultV1 | null = source.qualityGate,
+  poseCompatibleArmLengthProxy:
+    | MakeHuman2ArmLengthProxyAppliedV1
+    | undefined = source.poseCompatibleArmLengthProxy,
+): MeasurementOpenReferenceUniformWaistHipRuntimeResultV1 {
+  return Object.freeze({
+    ...source,
+    displayMesh: snapshotMeasurementSurfaceMeshV1({
+      ...source.displayMesh,
+      positions,
+      byteLength: positions.byteLength + source.displayMesh.indices.byteLength,
+    }),
+    qualityGate,
+    poseCompatibleArmLengthProxy,
+  });
+}
+
+function stableKeys(keys: readonly MeasurementOpenReferenceBetaShapeKeyV1[]) {
+  const order = new Map(
+    MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_KEYS_V1.map((key, index) => [key, index]),
+  );
+  return Object.freeze(
+    [...new Set(keys)].sort((left, right) => order.get(left)! - order.get(right)!),
+  );
+}
+
+function suffix(
+  keys: readonly MeasurementOpenReferenceBetaShapeKeyV1[],
+  limited: readonly MeasurementOpenReferenceBetaShapeKeyV1[],
+): string {
+  const limitedSuffix = limited.length > 0 ? `;limited=${limited.join(',')}` : '';
+  const armLengthSuffix = limited.includes('armLengthMm')
+    ? `armLengthMm=limited-centerline-proxy;lengthPackSha256=${MAKEHUMAN2_POSE_COMPATIBLE_LENGTH_PACK_METADATA_V1.sha256}`
+    : 'armLengthMm=unrepresented';
+  return `${MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_RUNTIME_V1};represented=${keys.join(',')}${limitedSuffix};${armLengthSuffix};inseamMm=unrepresented`;
+}
+
+/**
+ * Product-visible beta visual response. It promotes only locally bounded CC0 directions that keep
+ * the existing quality/closure rollback. armLengthMm is at most a bounded skeleton-centerline
+ * visual proxy; inseam stays explicitly unrepresented because no reviewed crotch landmark exists.
+ */
+export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: {
+  readonly basis: MakeHumanOpenReferenceBasisV1;
+  readonly measurements: CanonicalBodyMeasurementsMm;
+  readonly waistHipRuntime: MeasurementOpenReferenceUniformWaistHipRuntimeResultV1;
+  readonly loadTorsoBundle?: MeasurementOpenReferenceBetaShapeTorsoBundleLoaderV1;
+  readonly createLimbRuntime?: typeof createMeasurementOpenReferenceLimbSubsetRuntimeV1;
+  readonly loadLengthPack?: MeasurementOpenReferenceBetaShapeLengthPackLoaderV1;
+  readonly loadPoseResources?: MeasurementOpenReferenceBetaShapePoseResourcesLoaderV1;
+  readonly createArmLengthRuntime?: typeof createMakeHuman2ArmLengthProxyRuntimeResearchV1;
+}): Promise<MeasurementOpenReferenceBetaShapeRuntimeResultV1> {
+  const represented: MeasurementOpenReferenceBetaShapeKeyV1[] = ['heightMm'];
+  const limited: MeasurementOpenReferenceBetaShapeKeyV1[] = [];
+  represented.push(
+    ...options.waistHipRuntime.representedGeometricProxies.filter(
+      (key): key is 'waistCircumferenceMm' | 'hipCircumferenceMm' =>
+        key === 'waistCircumferenceMm' || key === 'hipCircumferenceMm',
+    ),
+  );
+  const baselineRepresented = Object.freeze([...represented]);
+  let shapedRuntime = withDisplayPositions(
+    options.waistHipRuntime,
+    options.waistHipRuntime.displayMesh.positions,
+  );
+  const diagnostics: string[] = [];
+
+  try {
+    const torsoBundle = await (options.loadTorsoBundle ?? loadMakeHumanTorsoShapeDeltaBundleV1)();
+    const modes = createMakeHumanAnteriorChestShoulderModesResearchV1({
+      basis: options.basis,
+      measurements: options.measurements,
+      bundle: torsoBundle,
+    });
+    diagnostics.push(...modes.diagnostics);
+    const ribcage = applyOpenReferenceUnderBustRibcageResearchV1({
+      sourcePositionsM: shapedRuntime.displayMesh.positions,
+      triangleIndices: shapedRuntime.displayMesh.indices,
+      measurements: options.measurements,
+      stationOriginM: modes.underBustStationOriginM,
+    });
+    diagnostics.push(...ribcage.diagnostics);
+    represented.push(...ribcage.representedMeasurements);
+    if (ribcage.representedMeasurements.length > 0) {
+      shapedRuntime = withDisplayPositions(shapedRuntime, ribcage.positionsM);
+    }
+    const chestShoulder = solveOpenReferenceChestShoulderResearchV1({
+      sourcePositionsM: shapedRuntime.displayMesh.positions,
+      triangleIndices: shapedRuntime.displayMesh.indices,
+      measurements: options.measurements,
+      modes: modes.modes,
+    });
+    diagnostics.push(...chestShoulder.diagnostics);
+    represented.push(...chestShoulder.representedMeasurements);
+    limited.push(...chestShoulder.limitedMeasurements);
+    if (
+      chestShoulder.representedMeasurements.length > 0 ||
+      chestShoulder.limitedMeasurements.length > 0
+    ) {
+      shapedRuntime = withDisplayPositions(shapedRuntime, chestShoulder.positionsM);
+    }
+  } catch (reason: unknown) {
+    diagnostics.push(
+      `chest-shoulder-runtime-unavailable:${reason instanceof Error ? reason.message : String(reason)}`,
+    );
+  }
+
+  let limbStatus: MeasurementOpenReferenceLimbSubsetRuntimeResultV1['status'] = 'unrepresented';
+  try {
+    const limb = await (
+      options.createLimbRuntime ?? createMeasurementOpenReferenceLimbSubsetRuntimeV1
+    )({
+      basis: options.basis,
+      measurements: options.measurements,
+      waistHipRuntime: shapedRuntime,
+    });
+    limbStatus = limb.status;
+    represented.push(
+      ...limb.representedGeometricProxies.filter(
+        (
+          key,
+        ): key is
+          | 'bicepCircumferenceMm'
+          | 'wristCircumferenceMm'
+          | 'thighCircumferenceMm'
+          | 'calfCircumferenceMm'
+          | 'ankleCircumferenceMm' =>
+          key === 'bicepCircumferenceMm' ||
+          key === 'wristCircumferenceMm' ||
+          key === 'thighCircumferenceMm' ||
+          key === 'calfCircumferenceMm' ||
+          key === 'ankleCircumferenceMm',
+      ),
+    );
+    limited.push(
+      ...(limb.limitedGeometricProxies ?? []).filter(
+        (
+          key,
+        ): key is
+          | 'bicepCircumferenceMm'
+          | 'wristCircumferenceMm'
+          | 'thighCircumferenceMm'
+          | 'calfCircumferenceMm'
+          | 'ankleCircumferenceMm' =>
+          key === 'bicepCircumferenceMm' ||
+          key === 'wristCircumferenceMm' ||
+          key === 'thighCircumferenceMm' ||
+          key === 'calfCircumferenceMm' ||
+          key === 'ankleCircumferenceMm',
+      ),
+    );
+    diagnostics.push(
+      ...(limb.diagnostics ?? []).map(
+        ({ code, measurementKey }) => `${measurementKey ?? 'limb'}:${code}`,
+      ),
+    );
+    if (
+      limb.representedGeometricProxies.length > 0 ||
+      (limb.limitedGeometricProxies?.length ?? 0) > 0
+    ) {
+      shapedRuntime = withDisplayPositions(shapedRuntime, limb.displayMesh.positions);
+    }
+  } catch (reason: unknown) {
+    limbStatus = 'error';
+    diagnostics.push(
+      `limb-runtime-unavailable:${reason instanceof Error ? reason.message : String(reason)}`,
+    );
+  }
+
+  try {
+    const [lengthPack, poseResources] = await Promise.all([
+      (options.loadLengthPack ?? loadMakeHuman2PoseCompatibleLengthPackV1)(),
+      (options.loadPoseResources ?? loadBetaShapePoseResourcesV1)(),
+    ]);
+    const armLength = (
+      options.createArmLengthRuntime ?? createMakeHuman2ArmLengthProxyRuntimeResearchV1
+    )({
+      basis: options.basis,
+      rigBundle: poseResources.rig,
+      pack: lengthPack,
+      armLengthMm: options.measurements.armLengthMm,
+      heightMm: options.measurements.heightMm,
+    });
+    if (armLength.ok) {
+      const positionsM = applyMakeHuman2ArmLengthProxyToDisplayPositionsMResearchV1({
+        basis: options.basis,
+        sourcePositionsM: shapedRuntime.displayMesh.positions,
+        armProxy: armLength,
+      });
+      limited.push('armLengthMm');
+      diagnostics.push(
+        armLength.targetStatus === 'bounded-endpoint'
+          ? 'armLengthMm:centerline-proxy-limited-to-bounded-endpoint'
+          : 'armLengthMm:centerline-proxy-applied',
+      );
+      shapedRuntime = withDisplayPositions(
+        shapedRuntime,
+        positionsM,
+        shapedRuntime.qualityGate,
+        armLength,
+      );
+    } else {
+      diagnostics.push(`armLengthMm:centerline-proxy-unavailable:${armLength.code}`);
+    }
+  } catch (reason: unknown) {
+    diagnostics.push(
+      `arm-length-runtime-unavailable:${reason instanceof Error ? reason.message : String(reason)}`,
+    );
+  }
+
+  const finalQualityGate = evaluateMeasurementOpenReferenceDisplayQualityV1({
+    uniformPositionsM: shapedRuntime.openReference.mesh.positions,
+    personalizedPositionsM: shapedRuntime.displayMesh.positions,
+    triangleIndices: shapedRuntime.displayMesh.indices,
+  });
+  if (finalQualityGate.safe) {
+    shapedRuntime = withDisplayPositions(
+      shapedRuntime,
+      shapedRuntime.displayMesh.positions,
+      finalQualityGate,
+    );
+  } else {
+    diagnostics.push('beta-final-global-quality-rollback');
+    represented.length = 0;
+    represented.push(...baselineRepresented);
+    limited.length = 0;
+    limbStatus = 'unrepresented';
+    const rollbackQualityGate = evaluateMeasurementOpenReferenceDisplayQualityV1({
+      uniformPositionsM: options.waistHipRuntime.openReference.mesh.positions,
+      personalizedPositionsM: options.waistHipRuntime.displayMesh.positions,
+      triangleIndices: options.waistHipRuntime.displayMesh.indices,
+    });
+    shapedRuntime = withDisplayPositions(
+      options.waistHipRuntime,
+      options.waistHipRuntime.displayMesh.positions,
+      rollbackQualityGate,
+    );
+  }
+
+  const representedVisualControls = stableKeys(represented);
+  const limitedVisualControls = stableKeys(limited);
+  const requestedCount =
+    6 +
+    (options.measurements.underBustCircumferenceMm == null ? 0 : 1) +
+    [
+      options.measurements.bicepCircumferenceMm,
+      options.measurements.wristCircumferenceMm,
+      options.measurements.thighCircumferenceMm,
+      options.measurements.calfCircumferenceMm,
+      options.measurements.ankleCircumferenceMm,
+    ].filter((value) => value != null).length;
+  const status =
+    representedVisualControls.length === requestedCount
+      ? ('represented' as const)
+      : representedVisualControls.length > 1
+        ? ('partial' as const)
+        : diagnostics.length > 0
+          ? ('error' as const)
+          : ('unrepresented' as const);
+
+  return Object.freeze({
+    version: MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_RUNTIME_V1,
+    role: 'CC0_OPEN_REFERENCE_BETA_VISUAL_SHAPE' as const,
+    status,
+    fkProxyRuntime: shapedRuntime,
+    representedVisualControls,
+    limitedVisualControls,
+    unrepresentedRequiredControls: Object.freeze(['inseamMm'] as const),
+    chestShoulderDiagnostics: Object.freeze(diagnostics),
+    limbStatus,
+    sourceRevisionSuffix: suffix(representedVisualControls, limitedVisualControls),
+    claims: CLAIMS,
+  });
+}
