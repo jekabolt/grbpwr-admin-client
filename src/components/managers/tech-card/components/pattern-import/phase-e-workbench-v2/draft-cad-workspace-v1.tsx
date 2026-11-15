@@ -892,7 +892,7 @@ export function PatternImportDxfPhaseEDraftCadWorkspaceV1({
                     key={callout.id}
                     className='flex items-center gap-1 border-t border-hairline pt-1'
                   >
-                    <span className='inline-flex h-5 w-5 flex-none items-center justify-center rounded-full bg-textColor text-nano text-bgColor'>
+                    <span className='inline-flex h-5 w-5 flex-none items-center justify-center bg-textColor text-nano text-bgColor'>
                       {index + 1}
                     </span>
                     <Input

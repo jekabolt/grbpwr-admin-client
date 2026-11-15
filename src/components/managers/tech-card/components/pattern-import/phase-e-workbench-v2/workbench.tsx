@@ -15,10 +15,21 @@ import {
   useEffect,
   useRef,
   useState,
+  type ChangeEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
-import { Button, CalloutBox, CheckboxCommon, Pill, RulerSquareIcon, Text } from 'ui';
+import {
+  Button,
+  CalloutBox,
+  CheckboxCommon,
+  Close,
+  Input,
+  Pill,
+  RulerSquareIcon,
+  Select,
+  Text,
+} from 'ui';
 
 import {
   auditPatternImportDxfPhaseEAssemblyV1,
@@ -815,29 +826,29 @@ function ExactSpanInspector({
       </span>
       <label className='flex items-center gap-1'>
         <span className='sr-only'>Exact contour</span>
-        <select
+        <Select
+          name={`phase-e-v2-exact-contour-${seamIndex}-${sideIndex}`}
           aria-label='Exact contour'
-          className='h-7 min-w-40 border border-borderColor bg-bgColor px-1'
+          placeholder='Select exact contour'
+          size='sm'
+          className='min-w-40'
           value={side.contourId ?? ''}
           disabled={disabled || !expectedRole}
-          onChange={(event) =>
+          items={[
+            { value: '', label: 'Select exact contour' },
+            ...contours.map(({ contourId }) => ({ value: contourId, label: contourId })),
+          ]}
+          onValueChange={(value) =>
             onChange(
               selectPatternImportDxfProductPhaseEMultiseamCanvasContourV2(
                 state,
                 seamIndex,
                 sideIndex,
-                event.target.value,
+                value,
               ),
             )
           }
-        >
-          <option value=''>Select exact contour</option>
-          {contours.map(({ contourId }) => (
-            <option key={contourId} value={contourId}>
-              {contourId}
-            </option>
-          ))}
-        </select>
+        />
       </label>
       <span className='text-labelColor' data-v2-span-ids=''>
         {side.boundaryVertexIds.join(' → ') || 'Select edge'}
@@ -960,15 +971,15 @@ function ContextualValidationControl({
       >
         <label className='flex items-center gap-1'>
           <span>Stage</span>
-          <input
+          <Input
             aria-label='Local operation stage'
             type='number'
             min='0'
             step='1'
-            className='h-7 w-16 border border-borderColor bg-bgColor px-1'
+            className='h-7 w-16'
             value={state.operationStage ?? ''}
             disabled={disabled}
-            onChange={(event) =>
+            onChange={(event: ChangeEvent<HTMLInputElement>) =>
               onStateChange({
                 ...state,
                 operationStage: parseNumber(event.target.value),
@@ -995,28 +1006,31 @@ function ContextualValidationControl({
         className='flex flex-wrap items-center gap-2 text-micro'
         data-v2-contextual-surface-action=''
       >
-        <select
+        <Select
+          name='phase-e-v2-physical-surface'
           aria-label='Physical surface'
-          className='h-7 border border-borderColor bg-bgColor px-1'
+          placeholder='Surface'
+          size='sm'
           value={state.physicalSurface?.mode ?? ''}
           disabled={disabled}
-          onChange={(event) =>
+          items={[
+            { value: '', label: 'Surface' },
+            { value: 'sewing-surface', label: 'Sewing' },
+            { value: 'cut-surface', label: 'Cut' },
+          ]}
+          onValueChange={(value) =>
             onStateChange({
               ...state,
               physicalSurface:
-                event.target.value === 'sewing-surface'
+                value === 'sewing-surface'
                   ? { mode: 'sewing-surface', seamAllowancePhysical: false }
-                  : event.target.value === 'cut-surface'
+                  : value === 'cut-surface'
                     ? { mode: 'cut-surface', seamAllowancePhysical: true }
                     : null,
               physicalSurfaceConfirmed: false,
             })
           }
-        >
-          <option value=''>Surface</option>
-          <option value='sewing-surface'>Sewing</option>
-          <option value='cut-surface'>Cut</option>
-        </select>
+        />
         <label className='flex items-center gap-2'>
           <CheckboxCommon
             name='phase-e-v2-surface-confirmed'
@@ -1042,13 +1056,23 @@ function ContextualValidationControl({
         className='flex flex-wrap items-center gap-2 text-micro'
         data-v2-contextual-material-action=''
       >
-        <select
+        <Select
+          name={`phase-e-v2-material-${selectionIndex}-revision`}
           aria-label={`${selection.pieceId} material`}
-          className='h-7 min-w-40 border border-borderColor bg-bgColor px-1'
+          placeholder='Material revision'
+          size='sm'
+          className='min-w-40'
           value={selection.optionId ?? ''}
           disabled={disabled}
-          onChange={(event) => {
-            const next = { ...selection, optionId: event.target.value || null, confirmed: false };
+          items={[
+            { value: '', label: 'Material revision' },
+            ...materialOptions.map((option) => ({
+              value: option.id,
+              label: `${option.label} · ${option.materialRevision}`,
+            })),
+          ]}
+          onValueChange={(value) => {
+            const next = { ...selection, optionId: value || null, confirmed: false };
             onStateChange({
               ...state,
               materialSelections:
@@ -1057,14 +1081,7 @@ function ContextualValidationControl({
                   : ([state.materialSelections[0], next] as const),
             });
           }}
-        >
-          <option value=''>Material revision</option>
-          {materialOptions.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.label} · {option.materialRevision}
-            </option>
-          ))}
-        </select>
+        />
         <label className='flex items-center gap-2'>
           <CheckboxCommon
             name={`phase-e-v2-material-${selectionIndex}`}
@@ -1102,15 +1119,15 @@ function ContextualValidationControl({
         ).map(([key, label, step]) => (
           <label key={key} className='flex items-center gap-1'>
             <span>{label}</span>
-            <input
+            <Input
               aria-label={label}
               type='number'
               min='0'
               step={step}
-              className='h-7 w-20 border border-borderColor bg-bgColor px-1'
+              className='h-7 w-20'
               value={state.tolerance[key] ?? ''}
               disabled={disabled}
-              onChange={(event) =>
+              onChange={(event: ChangeEvent<HTMLInputElement>) =>
                 onStateChange({
                   ...state,
                   tolerance: {
@@ -1341,7 +1358,6 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
       );
   const activeAuditIssue =
     auditReport.issues.find(({ id }) => id === activeIssueId) ?? auditReport.issues[0] ?? null;
-  const activeColorway = colorwayOptions.find(({ id }) => id === activeColorwayId) ?? null;
   const zeroConnectAuthority = { catalog, projection } as const;
   const zeroConnectSegments = derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(
     projection,
@@ -1677,7 +1693,7 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
               >
                 <RulerSquareIcon aria-hidden width='16' height='16' />
               </summary>
-              <div className='absolute top-0 left-[calc(100%+0.5rem)] z-30 grid w-40 grid-cols-3 gap-1 border border-borderColor bg-bgColor p-1.5 shadow-[2px_2px_0_0_var(--color-borderColor)]'>
+              <div className='absolute top-0 left-[calc(100%+0.5rem)] z-30 grid w-40 grid-cols-3 gap-1 border border-borderColor bg-bgColor p-1.5'>
                 <Text component='p' size='micro' className='col-span-3 px-1 font-bold'>
                   Measure
                 </Text>
@@ -2107,7 +2123,7 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                   </div>
                   {zeroConnectController.session ? (
                     <div
-                      className='absolute top-2 left-1/2 z-20 -translate-x-1/2 border border-borderColor bg-bgColor px-2 py-1 text-micro shadow-sm'
+                      className='absolute top-2 left-1/2 z-20 -translate-x-1/2 border border-borderColor bg-bgColor px-2 py-1 text-micro'
                       role='status'
                       data-cad-zero-connect-status={zeroConnectController.session.status}
                       data-cad-zero-connect-apply={
@@ -2128,20 +2144,18 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                   ) : null}
                   {viewOptionsOpen ? (
                     <div
-                      className='absolute top-8 left-3 z-30 w-52 space-y-2 border border-borderColor bg-bgColor p-2 shadow-sm'
+                      className='absolute top-8 left-3 z-30 w-52 space-y-2 border border-borderColor bg-bgColor p-2'
                       data-v2-view-options=''
                     >
                       <div className='flex items-center justify-between gap-2 border-b border-hairline pb-1'>
                         <Text component='p' size='micro' className='font-bold'>
                           View options
                         </Text>
-                        <button
-                          type='button'
+                        <Close
+                          size='sm'
                           aria-label='Close view options'
                           onClick={() => setViewOptionsOpen(false)}
-                        >
-                          ×
-                        </button>
+                        />
                       </div>
                       {(
                         [
@@ -2154,17 +2168,17 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                         ] as const
                       ).map(([label, checked, setChecked]) => (
                         <label key={label} className='flex items-center gap-2 text-micro'>
-                          <input
-                            type='checkbox'
+                          <CheckboxCommon
+                            name={`phase-e-v2-view-${label.toLowerCase().replaceAll(' ', '-')}`}
                             checked={checked}
-                            onChange={(event) => setChecked(event.target.checked)}
+                            onChange={setChecked}
                           />
                           {label}
                         </label>
                       ))}
                     </div>
                   ) : null}
-                  <div className='absolute right-8 bottom-10 z-20 flex items-center gap-1 border border-borderColor bg-bgColor p-1 shadow-sm'>
+                  <div className='absolute right-8 bottom-10 z-20 flex items-center gap-1 border border-borderColor bg-bgColor p-1'>
                     <Text
                       component='span'
                       size='micro'
@@ -2182,27 +2196,20 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                       Fit
                     </Button>
                   </div>
-                  <div className='absolute bottom-10 left-3 z-20 flex items-center gap-2 border border-borderColor bg-bgColor px-2 py-1 text-micro shadow-sm'>
+                  <div className='absolute bottom-10 left-3 z-20 flex items-center gap-2 border border-borderColor bg-bgColor px-2 py-1 text-micro'>
                     {colorwayOptions.length ? (
-                      <label className='flex items-center gap-1'>
-                        <span
-                          aria-hidden
-                          className='h-4 w-4 border border-borderColor'
-                          style={{ backgroundColor: activeColorway?.swatchHex ?? 'transparent' }}
-                        />
-                        <select
-                          aria-label='Active colorway'
-                          className='bg-bgColor font-bold'
-                          value={activeColorwayId ?? ''}
-                          onChange={(event) => setActiveColorwayId(Number(event.target.value))}
-                        >
-                          {colorwayOptions.map((option) => (
-                            <option key={option.id} value={option.id}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                      <Select
+                        name='phase-e-v2-active-colorway'
+                        placeholder='Colorway'
+                        size='sm'
+                        className='font-bold'
+                        value={activeColorwayId ?? undefined}
+                        items={colorwayOptions.map((option) => ({
+                          value: option.id,
+                          label: option.label,
+                        }))}
+                        onValueChange={(value) => setActiveColorwayId(Number(value))}
+                      />
                     ) : null}
                     <span className='font-bold'>Size {catalog.sizeToken}</span>
                     <span className='text-labelColor'>exact Phase-D</span>
@@ -2215,7 +2222,7 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                   measurementError ||
                   calloutError ? (
                     <div
-                      className='absolute right-3 bottom-20 z-20 w-72 space-y-1 border border-borderColor bg-bgColor p-2 text-micro shadow-sm'
+                      className='absolute right-3 bottom-20 z-20 w-72 space-y-1 border border-borderColor bg-bgColor p-2 text-micro'
                       data-v2-session-annotations=''
                     >
                       {measurementTool ? (
@@ -2238,8 +2245,8 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                           <span className='font-bold tabular-nums'>
                             {measurementDisplayLabel(measurement, projection, measurementUnit)}
                           </span>
-                          <button
-                            type='button'
+                          <Close
+                            size='sm'
                             aria-label={`Delete measurement ${index + 1}`}
                             className='text-labelColor hover:text-textColor'
                             onClick={() =>
@@ -2247,9 +2254,7 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                                 current.filter((candidate) => candidate.id !== measurement.id),
                               )
                             }
-                          >
-                            ×
-                          </button>
+                          />
                         </div>
                       ))}
                       {calloutToolActive && !callouts.length ? (
@@ -2265,12 +2270,12 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                       {callouts.map((callout, index) => (
                         <div key={callout.id} className='flex items-center gap-1'>
                           <span className='font-bold'>{index + 1}</span>
-                          <input
+                          <Input
                             type='text'
                             aria-label={`Callout ${index + 1} text`}
-                            className='min-w-0 flex-1 border border-borderColor bg-bgColor px-1 py-0.5'
+                            className='min-w-0 flex-1'
                             value={callout.text}
-                            onChange={(event) => {
+                            onChange={(event: ChangeEvent<HTMLInputElement>) => {
                               const result = updatePatternImportDxfPhaseECalloutTextV1(
                                 projection,
                                 callouts,
@@ -2285,8 +2290,8 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                               setCalloutError(null);
                             }}
                           />
-                          <button
-                            type='button'
+                          <Close
+                            size='sm'
                             aria-label={`Delete callout ${index + 1}`}
                             className='px-1 text-labelColor hover:text-textColor'
                             onClick={() => {
@@ -2302,9 +2307,7 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                               setCallouts(result.callouts);
                               setCalloutError(null);
                             }}
-                          >
-                            ×
-                          </button>
+                          />
                         </div>
                       ))}
                     </div>

@@ -105,7 +105,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   const [chosenSizeToken, setChosenSizeToken] = useState('');
   const defaultScope = choices.ok ? choices.choices[0] : undefined;
   const selectedScope = choices.ok
-    ? (choices.choices.find(({ scopeKey }) => scopeKey === chosenScopeKey) ?? defaultScope)
+    ? choices.choices.find(({ scopeKey }) => scopeKey === chosenScopeKey) ?? defaultScope
     : undefined;
   const scopeKey = selectedScope?.scopeKey ?? '';
   const selectedSize =
@@ -267,7 +267,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
 
           {blocker && (
             <div data-cad-zero-operation-blocker={blocker.code}>
-              <CalloutBox tone='error' className='m-2 text-xs'>
+              <CalloutBox tone='error' className='m-2 text-small'>
                 <b>2D table unavailable.</b> {blocker.detail}
               </CalloutBox>
             </div>

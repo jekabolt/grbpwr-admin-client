@@ -1,5 +1,4 @@
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
+import { Pill, Text } from 'ui';
 
 import {
   PATTERN_IMPORT_DXF_PHYSICAL_CLOTH_BODY_RELATIVE_MISSING_INPUTS_V1,

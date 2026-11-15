@@ -100,11 +100,11 @@ export function DollColumn({ variant = 'column', selection = null }: DollColumnP
             width={240}
             height={300}
             draggable={false}
-            className={`mx-auto block h-auto w-full select-none ${workbench ? 'max-h-full max-w-[560px] object-contain' : 'max-w-[240px]'}`}
+            className={`mx-auto block h-auto w-full select-none ${workbench ? 'max-h-full max-w-xl object-contain' : 'max-w-60'}`}
           />
         ) : (
           <div
-            className={`flex w-full items-center justify-center bg-pageBg ${workbench ? 'h-full min-h-[420px]' : 'aspect-[4/5]'}`}
+            className={`flex w-full items-center justify-center bg-pageBg ${workbench ? 'h-full min-h-96' : 'aspect-[4/5]'}`}
           >
             <Text
               size='micro'

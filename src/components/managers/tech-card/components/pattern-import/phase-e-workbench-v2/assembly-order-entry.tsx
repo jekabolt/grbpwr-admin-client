@@ -16,7 +16,7 @@ import {
 } from 'lib/pattern-import/types';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Button, CalloutBox, Pill, Text } from 'ui';
+import { Button, CalloutBox, EmptyCell, Pill, Text } from 'ui';
 
 import type { TopstitchBomLine } from '../../topstitch-lines';
 import { loadPatternImportDxfPhaseEWorkbenchBetaMaterialPresetsV1 } from '../phase-e-workbench-beta-material-presets-v1';
@@ -2027,8 +2027,8 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
           </Text>
           <Text component='p' size='micro' variant='label'>
             {stitchVisual.topstitch.modeLabel ?? 'No topstitch mode'} ·{' '}
-            {stitchVisual.topstitch.offsetMm ?? '—'} mm offset · thread{' '}
-            {stitchVisual.thread.bomLineKey ?? '—'}
+            {stitchVisual.topstitch.offsetMm ?? <EmptyCell />} mm offset · thread{' '}
+            {stitchVisual.thread.bomLineKey ?? <EmptyCell />}
           </Text>
         </div>
       ) : null}

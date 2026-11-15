@@ -1,4 +1,5 @@
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
+import { Button } from 'ui';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_DXF_STAGING_V1 =
   'pattern-import-dxf-phase-e-cad-mannequin-dxf-staging/1' as const;
@@ -110,9 +111,10 @@ export function PatternImportDxfPhaseECadMannequinDxfStagingV1({
           (!selectedScope || selectedScope === item.scopeKey);
         return (
           <li key={item.key}>
-            <button
+            <Button
               type='button'
-              className={`w-full border p-1 text-left text-micro shadow-sm ${
+              variant={null}
+              className={`w-full border p-1 text-left text-micro ${
                 active
                   ? 'border-textColor bg-bgColor text-textColor'
                   : activeScope
@@ -130,7 +132,7 @@ export function PatternImportDxfPhaseECadMannequinDxfStagingV1({
                   scopeKey: item.scopeKey,
                   pieceId: item.piece.pieceId,
                   seamId:
-                    selection?.pieceId === item.piece.pieceId ? (selection.seamId ?? null) : null,
+                    selection?.pieceId === item.piece.pieceId ? selection.seamId ?? null : null,
                 })
               }
             >
@@ -139,7 +141,7 @@ export function PatternImportDxfPhaseECadMannequinDxfStagingV1({
               {sources.length > 1 ? (
                 <span className='block truncate text-nano opacity-70'>{item.scopeLabel}</span>
               ) : null}
-            </button>
+            </Button>
           </li>
         );
       })}

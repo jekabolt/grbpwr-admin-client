@@ -1,5 +1,4 @@
-import { type ChangeEvent } from 'react';
-import { Pill, Text } from 'ui';
+import { Pill, Select, Text } from 'ui';
 
 import type {
   PatternImportDxfPhaseECadMaterialScopeCatalogResultV1,
@@ -140,8 +139,6 @@ export function PatternImportDxfPhaseECadMaterialScopeBrowserV1({
 
   const { value } = availability;
   const canSwitch = value.prepared.length > 1 && Boolean(onSelectPreparedScope);
-  const select = (event: ChangeEvent<HTMLSelectElement>) =>
-    onSelectPreparedScope?.(event.currentTarget.value);
   return (
     <div
       className='flex min-w-0 items-center gap-2'
@@ -152,18 +149,17 @@ export function PatternImportDxfPhaseECadMaterialScopeBrowserV1({
         Material
       </Text>
       {canSwitch ? (
-        <select
+        <Select
+          name='cad-material-scope'
           className='h-7 min-w-0 max-w-48 border border-borderColor bg-bgColor px-2 text-micro font-bold'
           aria-label='Current material slot'
           value={value.active.scopeKey}
-          onChange={select}
-        >
-          {value.prepared.map((scope) => (
-            <option key={scope.scopeKey} value={scope.scopeKey}>
-              {scope.label}
-            </option>
-          ))}
-        </select>
+          items={value.prepared.map((scope) => ({
+            value: scope.scopeKey,
+            label: scope.label,
+          }))}
+          onValueChange={(scopeKey) => onSelectPreparedScope?.(scopeKey)}
+        />
       ) : (
         <Text component='span' size='micro' className='truncate font-bold'>
           {value.active.label}
@@ -175,7 +171,7 @@ export function PatternImportDxfPhaseECadMaterialScopeBrowserV1({
           <summary className='cursor-pointer list-none text-micro font-bold marker:hidden'>
             +{value.linked.length} linked
           </summary>
-          <div className='absolute left-0 top-[calc(100%+0.25rem)] z-30 w-64 border border-borderColor bg-bgColor p-2 shadow-[2px_2px_0_0_var(--color-borderColor)]'>
+          <div className='absolute left-0 top-[calc(100%+0.25rem)] z-30 w-64 border border-borderColor bg-bgColor p-2'>
             <Text component='p' size='micro' variant='label' className='mb-1'>
               Linked DXF slots · prepare through their real operation
             </Text>

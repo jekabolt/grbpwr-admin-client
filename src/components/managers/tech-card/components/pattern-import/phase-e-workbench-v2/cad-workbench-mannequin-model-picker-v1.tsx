@@ -19,7 +19,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Link } from 'react-router-dom';
-import { Button, Pill, Text } from 'ui';
+import { Button, CheckboxCommon, Pill, Text } from 'ui';
 
 import type { TechCardFormData } from '../../schema';
 import { BodyPicker, modelFacts, modelName } from '../../design/render/model-picker';
@@ -120,13 +120,13 @@ export function PatternImportDxfPhaseECadMannequinViewToolbarV1({
         </>
       ) : null}
       <label className='ml-auto flex min-h-7 cursor-pointer items-center gap-1.5 px-1 text-micro font-bold'>
-        <input
-          type='checkbox'
+        <CheckboxCommon
+          name='cad-mannequin-change-pose'
           checked={poseEditing}
           disabled={poseEditingDisabled}
           aria-label='Change pose'
           data-cad-mannequin-change-pose=''
-          onChange={(event) => onPoseEditingChange(event.currentTarget.checked)}
+          onChange={onPoseEditingChange}
         />
         <span>Change pose</span>
       </label>

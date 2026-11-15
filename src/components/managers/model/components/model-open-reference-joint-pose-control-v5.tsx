@@ -22,9 +22,6 @@ import {
 export const MODEL_OPEN_REFERENCE_JOINT_POSE_CONTROL_V5 =
   'model-open-reference-joint-pose-control/v5' as const;
 
-const MODEL_OPEN_REFERENCE_LOCAL_CONTROL_FORM_OWNER =
-  'model-open-reference-local-control-owner' as const;
-
 export type ModelOpenReferenceJointEditorModeV5 = 'camera' | 'edit-pose';
 
 export interface ModelOpenReferenceJointSelectionV5 {

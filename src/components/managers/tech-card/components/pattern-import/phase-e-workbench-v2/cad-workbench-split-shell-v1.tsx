@@ -7,8 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
-import { Button } from 'ui/components/button';
-import Text from 'ui/components/text';
+import { Button, Text } from 'ui';
 
 import type { PatternImportDxfPhaseEMeasurementUnitV1 } from './measurement-units-v1';
 
@@ -16,9 +15,13 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_WORKBENCH_SPLIT_SHELL_V1 =
   'pattern-import-dxf-phase-e-cad-workbench-split-shell/1' as const;
 
 export type PatternImportDxfPhaseECadWorkbenchViewModeV1 =
-  'desktop-only' | 'split' | 'mannequin-only';
+  | 'desktop-only'
+  | 'split'
+  | 'mannequin-only';
 export type PatternImportDxfPhaseECadWorkbenchOperationsModeV1 =
-  'docked' | 'floating' | 'collapsed';
+  | 'docked'
+  | 'floating'
+  | 'collapsed';
 
 type MeasurementUnitContextV1 = Readonly<{
   unit: PatternImportDxfPhaseEMeasurementUnitV1;
@@ -118,7 +121,9 @@ export type PatternImportDxfPhaseECadWorkbenchSelectionV1 = Readonly<{
 }>;
 
 export type PatternImportDxfPhaseECadWorkbenchSelectionSourceV1 =
-  'desktop' | 'mannequin' | 'operations';
+  | 'desktop'
+  | 'mannequin'
+  | 'operations';
 
 export type PatternImportDxfPhaseECadWorkbenchSelectionEventV1 = Readonly<{
   source: PatternImportDxfPhaseECadWorkbenchSelectionSourceV1;
@@ -132,7 +137,8 @@ export type PatternImportDxfPhaseECadWorkbenchSlotContextV1 = Readonly<{
 }>;
 
 export type PatternImportDxfPhaseECadWorkbenchSlotV1 =
-  ReactNode | ((context: PatternImportDxfPhaseECadWorkbenchSlotContextV1) => ReactNode);
+  | ReactNode
+  | ((context: PatternImportDxfPhaseECadWorkbenchSlotContextV1) => ReactNode);
 
 type DragState =
   | Readonly<{
@@ -184,7 +190,8 @@ function renderSlot(
   source: PatternImportDxfPhaseECadWorkbenchSelectionSourceV1,
   selection: PatternImportDxfPhaseECadWorkbenchSelectionV1 | null,
   onSelectionFocus:
-    ((event: PatternImportDxfPhaseECadWorkbenchSelectionEventV1) => void) | undefined,
+    | ((event: PatternImportDxfPhaseECadWorkbenchSelectionEventV1) => void)
+    | undefined,
 ): ReactNode {
   if (typeof slot !== 'function') return slot;
   return slot({
@@ -194,25 +201,6 @@ function renderSlot(
       onSelectionFocus?.(Object.freeze({ source, selection: nextSelection }));
     },
   });
-}
-
-function ModeButton({
-  active,
-  children,
-  onClick,
-}: Readonly<{ active: boolean; children: ReactNode; onClick: () => void }>) {
-  return (
-    <Button
-      type='button'
-      size='xs'
-      variant='default'
-      className={active ? 'bg-textColor text-bgColor' : 'hover:bg-pageBg'}
-      aria-pressed={active}
-      onClick={onClick}
-    >
-      {children}
-    </Button>
-  );
 }
 
 /**
@@ -401,7 +389,7 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
     <MeasurementUnitContext.Provider value={{ unit: measurementUnit, setUnit: setMeasurementUnit }}>
       <section
         ref={shellRef}
-        className='relative flex h-[calc(100dvh-6rem)] min-h-[640px] w-full flex-col overflow-hidden bg-pageBg'
+        className='relative flex h-[calc(100dvh-6rem)] min-h-0 w-full flex-col overflow-hidden bg-pageBg'
         data-cad-workbench-split-shell-v1=''
         data-view-mode={viewMode}
         data-operations-mode={operationsMode}
@@ -448,65 +436,99 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
                 Workspace
               </Text>
               <div className='grid grid-cols-1 gap-1' aria-label='Workbench focus mode'>
-                <ModeButton
-                  active={viewMode === 'desktop-only'}
+                <Button
+                  type='button'
+                  size='xs'
+                  variant='default'
+                  className={
+                    viewMode === 'desktop-only' ? 'bg-textColor text-bgColor' : 'hover:bg-pageBg'
+                  }
+                  aria-pressed={viewMode === 'desktop-only'}
                   onClick={() => {
                     setViewMode('desktop-only');
                     layoutMenuRef.current?.removeAttribute('open');
                   }}
                 >
                   2D table
-                </ModeButton>
-                <ModeButton
-                  active={viewMode === 'split'}
+                </Button>
+                <Button
+                  type='button'
+                  size='xs'
+                  variant='default'
+                  className={viewMode === 'split' ? 'bg-textColor text-bgColor' : 'hover:bg-pageBg'}
+                  aria-pressed={viewMode === 'split'}
                   onClick={() => {
                     setViewMode('split');
                     layoutMenuRef.current?.removeAttribute('open');
                   }}
                 >
                   2D table + mannequin
-                </ModeButton>
-                <ModeButton
-                  active={viewMode === 'mannequin-only'}
+                </Button>
+                <Button
+                  type='button'
+                  size='xs'
+                  variant='default'
+                  className={
+                    viewMode === 'mannequin-only' ? 'bg-textColor text-bgColor' : 'hover:bg-pageBg'
+                  }
+                  aria-pressed={viewMode === 'mannequin-only'}
                   onClick={() => {
                     setViewMode('mannequin-only');
                     layoutMenuRef.current?.removeAttribute('open');
                   }}
                 >
                   Mannequin
-                </ModeButton>
+                </Button>
               </div>
               <Text component='p' size='micro' variant='label' className='mt-3 mb-1 uppercase'>
                 Assembly Order panel
               </Text>
               <div className='grid grid-cols-1 gap-1' aria-label='Assembly Order window mode'>
-                <ModeButton
-                  active={operationsMode === 'docked'}
+                <Button
+                  type='button'
+                  size='xs'
+                  variant='default'
+                  className={
+                    operationsMode === 'docked' ? 'bg-textColor text-bgColor' : 'hover:bg-pageBg'
+                  }
+                  aria-pressed={operationsMode === 'docked'}
                   onClick={() => {
                     setOperationsMode('docked');
                     layoutMenuRef.current?.removeAttribute('open');
                   }}
                 >
                   Docked
-                </ModeButton>
-                <ModeButton
-                  active={operationsMode === 'floating'}
+                </Button>
+                <Button
+                  type='button'
+                  size='xs'
+                  variant='default'
+                  className={
+                    operationsMode === 'floating' ? 'bg-textColor text-bgColor' : 'hover:bg-pageBg'
+                  }
+                  aria-pressed={operationsMode === 'floating'}
                   onClick={() => {
                     setOperationsMode('floating');
                     layoutMenuRef.current?.removeAttribute('open');
                   }}
                 >
                   Floating
-                </ModeButton>
-                <ModeButton
-                  active={operationsMode === 'collapsed'}
+                </Button>
+                <Button
+                  type='button'
+                  size='xs'
+                  variant='default'
+                  className={
+                    operationsMode === 'collapsed' ? 'bg-textColor text-bgColor' : 'hover:bg-pageBg'
+                  }
+                  aria-pressed={operationsMode === 'collapsed'}
                   onClick={() => {
                     setOperationsMode('collapsed');
                     layoutMenuRef.current?.removeAttribute('open');
                   }}
                 >
                   Collapsed
-                </ModeButton>
+                </Button>
               </div>
             </div>
           </details>
@@ -537,15 +559,18 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
             ) : null}
 
             {split ? (
-              <button
+              <Button
                 type='button'
+                variant='default'
                 className='group relative z-10 w-px shrink-0 cursor-col-resize bg-borderColor before:absolute before:-inset-x-2 before:inset-y-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor'
                 aria-label='Resize 2D and mannequin zones'
                 aria-orientation='vertical'
                 aria-valuemin={28}
                 aria-valuemax={78}
                 aria-valuenow={Math.round(splitPercent)}
-                onPointerDown={(event) => beginDrag('split', event)}
+                onPointerDown={(event: ReactPointerEvent<HTMLButtonElement>) =>
+                  beginDrag('split', event)
+                }
                 onPointerMove={moveDrag}
                 onPointerUp={endDrag}
                 onPointerCancel={endDrag}
@@ -553,7 +578,7 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
                 style={{ touchAction: 'none' }}
               >
                 <span className='absolute left-1/2 top-1/2 h-10 w-px -translate-x-1/2 -translate-y-1/2 bg-labelColor group-hover:bg-textColor' />
-              </button>
+              </Button>
             ) : null}
 
             {mannequinVisible ? (
@@ -570,12 +595,15 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
 
           {dockedOperations ? (
             <>
-              <button
+              <Button
                 type='button'
+                variant='default'
                 className='group relative z-10 w-px shrink-0 cursor-col-resize bg-borderColor before:absolute before:-inset-x-2 before:inset-y-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor'
                 aria-label='Resize Assembly Order window'
                 aria-orientation='vertical'
-                onPointerDown={(event) => beginDrag('operations', event)}
+                onPointerDown={(event: ReactPointerEvent<HTMLButtonElement>) =>
+                  beginDrag('operations', event)
+                }
                 onPointerMove={moveDrag}
                 onPointerUp={endDrag}
                 onPointerCancel={endDrag}
@@ -583,22 +611,23 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
                 style={{ touchAction: 'none' }}
               >
                 <span className='absolute left-1/2 top-1/2 h-10 w-px -translate-x-1/2 -translate-y-1/2 bg-labelColor group-hover:bg-textColor' />
-              </button>
+              </Button>
               <aside
                 className='relative shrink-0 overflow-hidden bg-bgColor'
                 style={{ width: 'var(--cad-operations-width)' }}
                 data-cad-operations-window='docked'
                 aria-label='Assembly Order window'
               >
-                <button
+                <Button
                   type='button'
+                  variant='default'
                   className='absolute top-1 right-1 z-30 flex h-7 w-7 items-center justify-center bg-bgColor text-lg leading-none hover:bg-pageBg'
                   aria-label='Collapse Current operation'
                   title='Collapse Current operation'
                   onClick={() => setOperationsMode('collapsed')}
                 >
                   ›
-                </button>
+                </Button>
                 <div className='h-full overflow-auto'>
                   {renderSlot(operationsPanel, 'operations', selection, onSelectionFocus)}
                 </div>
@@ -620,18 +649,24 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
               data-cad-operations-window='floating'
               aria-label='Floating Assembly Order window'
             >
-              <button
+              <Button
                 type='button'
+                variant='default'
                 className='absolute bottom-0 left-0 top-0 w-2 cursor-col-resize border-r border-borderColor bg-pageBg'
                 aria-label='Resize floating Assembly Order window'
-                onPointerDown={(event) => beginDrag('operations', event)}
+                onPointerDown={(event: ReactPointerEvent<HTMLButtonElement>) =>
+                  beginDrag('operations', event)
+                }
                 onPointerMove={moveDrag}
                 onPointerUp={endDrag}
                 onPointerCancel={endDrag}
                 onLostPointerCapture={clearLostPointerCapture}
-              />
-              <button
+              >
+                <span className='sr-only'>Resize floating Assembly Order window</span>
+              </Button>
+              <Button
                 type='button'
+                variant='default'
                 className='ml-2 flex min-h-8 shrink-0 cursor-move items-center border-b border-borderColor bg-pageBg px-2 text-left text-micro font-bold uppercase focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor'
                 aria-label='Move floating Assembly Order window'
                 onPointerDown={beginFloatingMove}
@@ -641,7 +676,7 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
                 onLostPointerCapture={clearLostPointerCapture}
               >
                 Assembly Order · move
-              </button>
+              </Button>
               <div className='min-h-0 flex-1 overflow-auto pl-2'>
                 {renderSlot(operationsPanel, 'operations', selection, onSelectionFocus)}
               </div>
@@ -654,15 +689,16 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
               data-cad-operations-window='collapsed'
               aria-label='Collapsed Current operation'
             >
-              <button
+              <Button
                 type='button'
+                variant='default'
                 className='flex h-full w-full items-start justify-center pt-3 text-lg leading-none hover:bg-pageBg'
                 aria-label='Expand Current operation'
                 title='Expand Current operation'
                 onClick={() => setOperationsMode('docked')}
               >
                 ‹
-              </button>
+              </Button>
             </aside>
           ) : null}
         </div>

@@ -1,4 +1,11 @@
-import { useMemo, useState, type ChangeEvent, type ElementType, type ReactNode } from 'react';
+import {
+  useMemo,
+  useState,
+  type ChangeEvent,
+  type ElementType,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from 'react';
 import {
   Button,
   DrawingPinIcon,
@@ -13,7 +20,12 @@ import {
 } from 'ui';
 
 export type PatternImportDxfPhaseECadWorkbenchObjectCategoryV1 =
-  'all' | 'dress-form' | 'patterns' | 'seams' | 'pins' | 'fabrics';
+  | 'all'
+  | 'dress-form'
+  | 'patterns'
+  | 'seams'
+  | 'pins'
+  | 'fabrics';
 
 export type PatternImportDxfPhaseECadWorkbenchObjectPieceV1 = Readonly<{
   objectKey?: string;
@@ -182,9 +194,10 @@ export function PatternImportDxfPhaseECadWorkbenchObjectSidebarV1({
           aria-label='Objects'
         >
           {availableCategories.map(({ id, label, icon: Icon }) => (
-            <button
+            <Button
               key={id}
               type='button'
+              variant='default'
               className={`flex h-8 w-8 items-center justify-center ${
                 activeCategory === id
                   ? 'bg-textColor text-bgColor'
@@ -197,7 +210,7 @@ export function PatternImportDxfPhaseECadWorkbenchObjectSidebarV1({
               onClick={() => setCategory(id)}
             >
               <Icon aria-hidden width='16' height='16' />
-            </button>
+            </Button>
           ))}
         </div>
         <Button
@@ -267,8 +280,9 @@ export function PatternImportDxfPhaseECadWorkbenchObjectSidebarV1({
                 return (
                   <li key={objectKey}>
                     {focusable ? (
-                      <button
+                      <Button
                         type='button'
+                        variant='default'
                         className={`flex w-full items-center gap-2 px-1.5 py-1 text-left text-micro ${
                           selected
                             ? 'bg-pageBg text-textColor'
@@ -277,10 +291,12 @@ export function PatternImportDxfPhaseECadWorkbenchObjectSidebarV1({
                         aria-pressed={selected}
                         data-cad-object-piece={piece.pieceId}
                         data-cad-object-key={objectKey}
-                        onClick={(event) => onFocusPiece?.(objectKey, { toggle: event.shiftKey })}
+                        onClick={(event: ReactMouseEvent<HTMLButtonElement>) =>
+                          onFocusPiece?.(objectKey, { toggle: event.shiftKey })
+                        }
                       >
                         {content}
-                      </button>
+                      </Button>
                     ) : (
                       <div
                         className={`flex w-full items-center gap-2 px-1.5 py-1 text-left text-micro ${
@@ -306,8 +322,9 @@ export function PatternImportDxfPhaseECadWorkbenchObjectSidebarV1({
               {seams.map((seam, index) => (
                 <li key={seam.seamId}>
                   {onFocusSeam ? (
-                    <button
+                    <Button
                       type='button'
+                      variant='default'
                       className={`flex w-full items-center gap-2 px-2 py-2 text-left text-micro ${
                         seam.active
                           ? 'bg-textColor text-bgColor'
@@ -319,7 +336,7 @@ export function PatternImportDxfPhaseECadWorkbenchObjectSidebarV1({
                     >
                       <span className='min-w-0 flex-1 truncate font-bold'>{seam.label}</span>
                       <span className='tabular-nums opacity-70'>{index + 1}</span>
-                    </button>
+                    </Button>
                   ) : (
                     <div
                       className={`flex w-full items-center gap-2 px-2 py-2 text-left text-micro ${

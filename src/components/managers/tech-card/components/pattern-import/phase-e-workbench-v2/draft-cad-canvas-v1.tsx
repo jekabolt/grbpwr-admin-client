@@ -1786,20 +1786,22 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
       <div
         data-draft-cad-input-blocker={unavailable || inputError ? '' : undefined}
         aria-live='polite'
-        className={unavailable || inputError ? 'text-xs text-warning' : 'text-xs text-labelColor'}
+        className={
+          unavailable || inputError ? 'text-small text-warning' : 'text-small text-labelColor'
+        }
       >
         {panActive
           ? 'Drag the canvas to pan. Wheel zooms at the pointer; double-click fits.'
           : arrangeActive
             ? `${selectedPieceIds.length} selected · drag a selected piece to move the set; drag empty canvas to select; Shift toggles. Wheel zooms and double-click fits.`
-            : (inputError ??
+            : inputError ??
               unavailable ??
               (activeTopologyTool
                 ? 'Choose an exact highlighted vertex from the sealed projection.'
-                : toolInstruction(activeTool)))}
+                : toolInstruction(activeTool))}
       </div>
       {preview.blockers.length > 0 && (
-        <ul data-draft-cad-preview-blockers='' className='space-y-1 text-xs text-warning'>
+        <ul data-draft-cad-preview-blockers='' className='space-y-1 text-small text-warning'>
           {preview.blockers.map((blocker, index) => (
             <li key={`${blocker.code}:${blocker.commandId ?? index}`}>
               {blocker.code}: {blocker.detail}
