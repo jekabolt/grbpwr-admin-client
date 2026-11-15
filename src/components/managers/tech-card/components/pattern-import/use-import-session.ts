@@ -2003,9 +2003,14 @@ export function useImportSession(deps: {
         if (variants.length > 1 && !s.variant) return 'pick the model — one run imports one model';
         // Only the sizes that are exported must close: an unmapped size is never written.
         const mapped = exportedRanks(s.sizes?.map);
-        const open = fams.filter((f) =>
-          f.candidates.some((c) => (!mapped || mapped.has(c.rank)) && c.outcome !== 'closed'),
-        );
+        // PIECES_OPEN_PASS=1 (node probe only, never in the browser): open and held regions do not
+        // stop the step — a scouting run that shows where a file stops AFTER pieces (13 Nov 2026)
+        const openPass = typeof process !== 'undefined' && !!process.env?.PIECES_OPEN_PASS;
+        const open = openPass
+          ? []
+          : fams.filter((f) =>
+              f.candidates.some((c) => (!mapped || mapped.has(c.rank)) && c.outcome !== 'closed'),
+            );
         if (!fams.length) return 'no pieces — click inside a piece to seed it';
         // H1: a region whose sizes were held back has no gap to close — say why instead
         const held = open.filter((f) =>

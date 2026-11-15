@@ -36,6 +36,7 @@ import {
   sampleAlong,
 } from '../write/geom';
 import { LAYERS, continuityOfBlock } from '../write/manifest-build';
+import { FACING_BRIDGE_MM } from '../pieces/bridges';
 import {
   GRAIN_BARB_BACK_MM,
   GRAIN_BARB_SIDE_MM,
@@ -46,6 +47,7 @@ import {
 import { identityProblem } from '../manifest/identity';
 import { f0Off } from '../pieces/identity';
 import { SIZE_RUN, sizeRunProblems } from '../pieces/gfit/silent';
+import { GFIT_REPAIR } from '../pieces/gfit/repair';
 import { foldShapeProblem } from '../semantics/fold';
 import {
   GRAIN_INSIDE_TOL_MM,
@@ -453,7 +455,9 @@ export function g3g4(
 /**
  * The most one derived edge may add OFF the drawing (its length farther than `snapMm` from every
  * wall and, for a band cut its tick carries, from that tick), mm, by kind:
- *   bridge          — the fill's own gap close: `FillOpts.autoBridgeMm` default 3 (pieces/bridges.ts);
+ *   bridge          — the fill's own gap close. A dangling end to the nearest wall: `autoBridgeMm`
+ *                     default 3. Two open ends that continue one stroke: `FACING_BRIDGE_MM`
+ *                     (pieces/bridges.ts), and only when both ends land on open wall ends;
  *   operator-bridge — the wizard's "close gap": 30 mm. The tool is for a junction the drawing leaves
  *                     open (a dash phase, a line stopping short: palto 4.7 mm); 30 mm is 10× the
  *                     automatic close and still well under any real piece edge — a longer gap is an
@@ -469,7 +473,16 @@ export const DERIVED_OFF_MAX_MM: Record<DerivedEdgeKind, number> = {
   'operator-bridge': 30,
   'band-cut': 30,
   'grade-fill': 15,
+  // bounded per block by its share of the line (DERIVED_DRAWN_MAX_SHARE), not per edge
+  'grade-draw': Infinity,
 };
+/**
+ * 'grade-draw' edges (GRADE P2 draw mode): together at most this share of the written line — the
+ * repair's own bound (GFIT_REPAIR.drawMaxShare). They are not counted in the per-block count / share
+ * / mm of the other kinds: those bound what the pipeline INVENTS as chords; a drawn stretch follows
+ * the piece's grade model, which E3 checked, and the manifest flags the block as drawn.
+ */
+export const DERIVED_DRAWN_MAX_SHARE = GFIT_REPAIR.drawMaxShare;
 /** An end lands when the edge comes within `snapMm` of one of the piece's walls this close to that
  * end, mm (operator bridges overshoot their landing by 0.6 mm, pieces/operator.ts). */
 export const DERIVED_LAND_REACH_MM = 1;
@@ -490,6 +503,7 @@ export const DERIVED_LEN_MAX_MM: Record<DerivedEdgeKind, number> = {
   'operator-bridge': DERIVED_OFF_MAX_MM['operator-bridge'] + 2 * DERIVED_LAND_REACH_MM,
   'band-cut': DERIVED_OFF_MAX_MM['band-cut'] + 2 * DERIVED_LAND_REACH_MM,
   'grade-fill': DERIVED_OFF_MAX_MM['grade-fill'] + 2 * DERIVED_LAND_REACH_MM,
+  'grade-draw': Infinity,
 };
 export const DERIVED_CARRIED_LEN_MAX_MM = 250 + 2 * DERIVED_LAND_REACH_MM;
 /**
@@ -551,6 +565,7 @@ export function g15(ctx: GateCtx): DerivedVerdict {
     const wallIdx = new SegmentIndex(open(walls), 5);
     const before = failed.length;
     let invented = 0;
+    let drawnMm = 0;
     const rows: DerivedEdgeAudit[] = [];
     const passed: DerivedEdge[] = [];
     for (const e of list) {
@@ -587,7 +602,24 @@ export function g15(ctx: GateCtx): DerivedVerdict {
         if (arcs[i] <= DERIVED_LAND_REACH_MM) landA = Math.min(landA, dw[i]);
         if (arc - arcs[i] <= DERIVED_LAND_REACH_MM) landB = Math.min(landB, dw[i]);
       }
-      const lenMax = carried ? DERIVED_CARRIED_LEN_MAX_MM : DERIVED_LEN_MAX_MM[e.kind];
+      const a = e.pts[0];
+      const z = e.pts[e.pts.length - 1];
+      // a bridge longer than the 3 mm nearest-wall close is the fill joining two open ends of one
+      // stroke. Both ends sit on a wall's endpoint; a chord that lands mid-wall stays at 3 mm.
+      const onOpenEnd = (p: PtMm) =>
+        walls.some(
+          (w) =>
+            w.length >= 2 &&
+            (dist(p, w[0]) <= snap + DERIVED_LAND_REACH_MM ||
+              dist(p, w[w.length - 1]) <= snap + DERIVED_LAND_REACH_MM),
+        );
+      const endToEnd = e.kind === 'bridge' && onOpenEnd(a) && onOpenEnd(z);
+      const offMax = endToEnd ? FACING_BRIDGE_MM : DERIVED_OFF_MAX_MM[e.kind];
+      const lenMax = carried
+        ? DERIVED_CARRIED_LEN_MAX_MM
+        : endToEnd
+          ? FACING_BRIDGE_MM + 2 * DERIVED_LAND_REACH_MM
+          : DERIVED_LEN_MAX_MM[e.kind];
       const what = `${e.kind} ${len.toFixed(1)} mm`;
       if (!Number.isFinite(len) || !(len > 0) || s.some((p) => !Number.isFinite(p.x + p.y)))
         bad(`${what}: not a finite edge`);
@@ -603,12 +635,11 @@ export function g15(ctx: GateCtx): DerivedVerdict {
               : ' — whatever runs beside it, a bridge is a chord the pipeline drew'
           }`,
         );
-      else if (!(off <= DERIVED_OFF_MAX_MM[e.kind]))
-        bad(`${what}: ${off.toFixed(1)} mm off the drawing (≤ ${DERIVED_OFF_MAX_MM[e.kind]} mm)`);
-      const a = e.pts[0];
-      const z = e.pts[e.pts.length - 1];
+      else if (!(off <= offMax))
+        bad(`${what}: ${off.toFixed(1)} mm off the drawing (≤ ${offMax} mm)`);
       // what the edge invents: a bridge whole (a chord, wherever it runs), a band cut off its support
-      invented += e.kind === 'band-cut' ? off : len;
+      if (e.kind === 'grade-draw') drawnMm += len;
+      else invented += e.kind === 'band-cut' ? off : len;
       rows.push({
         block: b.block,
         kind: e.kind,
@@ -619,10 +650,14 @@ export function g15(ctx: GateCtx): DerivedVerdict {
       });
       passed.push(carried && e.along ? e : { kind: e.kind, pts: e.pts });
     }
-    if (list.length > DERIVED_MAX_PER_BLOCK)
-      bad(`${list.length} derived edges (≤ ${DERIVED_MAX_PER_BLOCK})`);
+    const chords = list.filter((e) => e.kind !== 'grade-draw').length;
+    if (chords > DERIVED_MAX_PER_BLOCK) bad(`${chords} derived edges (≤ ${DERIVED_MAX_PER_BLOCK})`);
     const { line } = linesFor(ctx, b);
     const per = line ? polylineLength(line, true) : NaN;
+    if (drawnMm > 0 && !(drawnMm / per <= DERIVED_DRAWN_MAX_SHARE))
+      bad(
+        `drawn from the grade ${drawnMm.toFixed(1)} mm${line ? ` = ${((drawnMm / per) * 100).toFixed(1)} % of the line` : ' and there is no written line'} (≤ ${DERIVED_DRAWN_MAX_SHARE * 100} %)`,
+      );
     const share = invented / per;
     if (Number.isFinite(share)) worstShare = Math.max(worstShare, share);
     if (!(share <= DERIVED_MAX_SHARE))
@@ -646,7 +681,7 @@ export function g15(ctx: GateCtx): DerivedVerdict {
           ? `${edges} derived edge(s) land on drawn walls and stay short — listed in the manifest`
           : 'no derived edges'),
       `${edges} edge(s) / ${fmt(worstShare * 100, 2)} %`,
-      `ends ≤ ${snap} mm on a wall; length ≤ ${DERIVED_LEN_MAX_MM.bridge} (auto) / ${DERIVED_LEN_MAX_MM['operator-bridge']} (operator, band cut) mm, a band cut its tick carries (≥ ${PATIMPORT.derivedAlongMinShare * 100} % in one stretch) ≤ ${DERIVED_CARRIED_LEN_MAX_MM} mm; off the drawing ≤ ${DERIVED_OFF_MAX_MM.bridge} / ${DERIVED_OFF_MAX_MM['operator-bridge']} mm; ≤ ${DERIVED_MAX_PER_BLOCK} per block inventing ≤ ${DERIVED_MAX_SHARE * 100} % of the line and ≤ ${DERIVED_MAX_TOTAL_MM} mm`,
+      `ends ≤ ${snap} mm on a wall; length ≤ ${DERIVED_LEN_MAX_MM.bridge} mm to a wall, ≤ ${FACING_BRIDGE_MM} mm between two open ends, ≤ ${DERIVED_LEN_MAX_MM['operator-bridge']} mm for an operator bridge or a band cut; a band cut its tick carries (≥ ${PATIMPORT.derivedAlongMinShare * 100} % in one stretch) ≤ ${DERIVED_CARRIED_LEN_MAX_MM} mm; off the drawing ≤ ${DERIVED_OFF_MAX_MM.bridge} / ${FACING_BRIDGE_MM} / ${DERIVED_OFF_MAX_MM['operator-bridge']} mm; ≤ ${DERIVED_MAX_PER_BLOCK} per block inventing ≤ ${DERIVED_MAX_SHARE * 100} % of the line and ≤ ${DERIVED_MAX_TOTAL_MM} mm`,
     ),
     ok,
     audit,

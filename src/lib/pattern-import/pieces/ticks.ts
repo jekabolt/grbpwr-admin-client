@@ -42,6 +42,12 @@ const SIDE_MIN_MM = 20;
 const PAST_MM = 3;
 /** The knife overshoots the side lines by this much (the raster cut must part the region), mm. */
 const OVERSHOOT_MM = 1;
+/**
+ * A nest draws the side of a strip once per size, 0.1–0.3 mm apart: the knife reaches past the OUTERMOST of
+ * the side lines within this much of the one it met, mm (Memoir A H·0: it stopped 0.3 mm short of size 0's
+ * own side, the region ran around its end). TICK_KNIFE_SPREAD_OFF=1: the old knife.
+ */
+const SIDE_SPREAD_MM = 3;
 /** A strip's two sides are parallel (|cos| at least) and square to its ticks (|cos| at most). */
 const STRIP_PARALLEL = 0.995;
 const STRIP_SQUARE = 0.1;
@@ -84,7 +90,7 @@ type Cand = {
   /** ranks whose own lines end at both ends, with the body side (+1 / −1 along nu) */
   sides: Map<number, number>;
   /** the side segment met at each end (for the knife), any size line */
-  sideAt: [{ p: PtMm; q: PtMm } | null, { p: PtMm; q: PtMm } | null];
+  sideAt: [{ p: PtMm; q: PtMm; reach: number } | null, { p: PtMm; q: PtMm; reach: number } | null];
   /** the rank F3 / the wall model already gave it (null: none) */
   ranked: number | null;
   /** per end: the side lines that run on past it on both sides */
@@ -272,7 +278,8 @@ export function endTicks(
     // the tick's line within reach — for the knife
     const sideAt: Cand['sideAt'] = [null, null];
     for (const end of [0, 1] as const) {
-      let best: { p: PtMm; q: PtMm; k: number } | null = null;
+      let best: { p: PtMm; q: PtMm; k: number; al: number } | null = null;
+      const hits: number[] = [];
       for (const { id, i } of segsNear(end === 0 ? a : b, RAD, sideGrid)) {
         if (id === c.id) continue;
         const oc = set.chains[id];
@@ -291,10 +298,18 @@ export function endTicks(
           const gap = f0.h * f1.h <= 0 ? 0 : Math.min(Math.abs(f0.h), Math.abs(f1.h));
           if (gap > TICK_PERP_MM) continue;
           const k = Math.abs(end === 0 ? al : al - L) + gap;
-          if (!best || k < best.k) best = { p: p0, q: p1, k };
+          hits.push(al);
+          if (!best || k < best.k) best = { p: p0, q: p1, k, al };
         }
       }
-      sideAt[end] = best ? { p: best.p, q: best.q } : null;
+      if (best) {
+        // the outermost near-coincident side line: past it the knife parts every size's region
+        let reach = best.al;
+        for (const al of hits)
+          if (Math.abs(al - best.al) <= SIDE_SPREAD_MM)
+            reach = end === 0 ? Math.min(reach, al) : Math.max(reach, al);
+        sideAt[end] = { p: best.p, q: best.q, reach };
+      } else sideAt[end] = null;
     }
     if (!sideAt[0] || !sideAt[1]) continue;
     // a strip has two parallel sides, square to its ticks (a size's short corner edge in a nest
@@ -535,10 +550,13 @@ export function endTicks(
     if (ala < -0.3) carried.push([xa, c.a]);
     if (alb > c.L + 0.3) carried.push([c.b, xb]);
     const mid = { x: (c.a.x + c.b.x) / 2, y: (c.a.y + c.b.y) / 2 };
+    const spread = !probeOff('TICK_KNIFE_SPREAD_OFF');
+    const ra = spread ? Math.min(ala, c.sideAt[0]!.reach) : ala;
+    const rb = spread ? Math.max(alb, c.sideAt[1]!.reach) : alb;
     out.push({
       rank: pick.r,
       chain: c.id,
-      knife: [add(xa, c.u, -OVERSHOOT_MM), add(xb, c.u, OVERSHOOT_MM)],
+      knife: [add(c.a, c.u, ra - OVERSHOOT_MM), add(c.a, c.u, rb + OVERSHOOT_MM)],
       carried,
       inPt: add(mid, c.nu, s * PROBE_MM),
       outPt: add(mid, c.nu, -s * PROBE_MM),

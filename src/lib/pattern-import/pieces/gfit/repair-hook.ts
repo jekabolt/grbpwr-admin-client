@@ -31,9 +31,35 @@ import { continuityVerdicts, isAnchor } from '../fill';
 import { bboxOf, pointInPoly, signedArea, simplify } from '../geom';
 import type { WallModel } from '../walls';
 import { outlineOf, predictPair } from './checks';
-import { GFIT_TOL_P0, type GfitFamily, type GfitSizeIn } from './fit';
-import { repairSize, type GfitWall } from './repair';
+import { GFIT_TOL_P0, GFIT_TOL_PDF, type GfitFamily, type GfitSizeIn } from './fit';
+import { GFIT_REPAIR, repairSize, type GfitWall } from './repair';
 import { silentRead } from './silent-inputs';
+
+/** The repair's grade-model tolerance: the PDF one; `GRADE_TOL_P0=1` brings back the CAD one. */
+const repairTol = () =>
+  typeof process !== 'undefined' && process.env?.GRADE_TOL_P0 ? GFIT_TOL_P0 : GFIT_TOL_PDF;
+
+/**
+ * A repair try as a replayable case (dev loop: replay `repairSize` on real cells in seconds instead
+ * of re-running the corpus — scripts/pattern-import/gfit-replay.ts). Exactly `repairSize`'s input,
+ * plus what the run decided. Collected only when a sink is set (node scripts); never in the app.
+ */
+export type RepairProbe = {
+  seed: number;
+  rank: number;
+  kind: RepairRecord['kind'];
+  ins: GfitSizeIn[];
+  walls: GfitWall[];
+  tol: typeof GFIT_TOL_PDF;
+  strict: string[];
+  /** null = draw mode was not tried */
+  draw: string[] | null;
+  drawn: boolean;
+};
+let probeSink: ((p: RepairProbe) => void) | null = null;
+export function setRepairProbeSink(fn: ((p: RepairProbe) => void) | null): void {
+  probeSink = fn;
+}
 
 /** G15 bounds the repair must stay inside (gate/checks.ts DERIVED_MAX_PER_BLOCK / _TOTAL_MM). */
 export const GRADE_P2 = {
@@ -76,6 +102,30 @@ const TIME = typeof process !== 'undefined' && !!process.env?.GRADEP2_TIME;
 
 export function gradeP2Off(): boolean {
   return typeof process !== 'undefined' && !!process.env?.GRADE_P2_OFF;
+}
+
+/**
+ * Drawing by the grade (owner, 11 Nov 2026 — "сделай по своим рекомендациям"): a bracketed size the
+ * strict fill refuses is drawn from the piece's grade model up to 15 % of its perimeter in total;
+ * the extreme sizes are never drawn; the model holds per piece (fitFamily, PDF tolerance).
+ * `GRADE_DRAW_OFF=1` turns it off.
+ *
+ * `maxShare` is a point below the gate's `DERIVED_DRAWN_MAX_SHARE`: the repair measures holes along
+ * the prediction, G15 measures the filled polylines against the written line, and the two differ by
+ * a fraction of a mm per hole — a block drawn at 14.9 % must not fail the gate at 15.2 %.
+ * `maxHoles` / `maxHolesMm` are the manifest's `grade` bounds (manifest/index.ts): a drawn block
+ * the manifest would refuse to read back is not drawn.
+ */
+export const GRADE_DRAW = {
+  maxShare: GFIT_REPAIR.drawMaxShare - 0.01,
+  maxHoles: 16,
+  maxHolesMm: 1000,
+  /** The end of the range drawn one step on (owner, 12 Nov 2026; GFIT_REPAIR.extrapolate*). */
+  extrapolate: true,
+};
+
+export function gradeDrawOff(): boolean {
+  return typeof process !== 'undefined' && process.env?.GRADE_DRAW_OFF === '1';
 }
 
 export type RepairWallIn = { chain: ChainId; pts: readonly PtMm[]; closed?: boolean };
@@ -171,6 +221,9 @@ export function repairPass(
           ...(extrapolated ? { extrapolated: true } : {}),
         },
       };
+    // no prediction (no model / not bracketed): the reason still reaches the cell, reporting only
+    // (a hint without a prediction would show the operator a line that is not there)
+    else if (why.length) list[i] = { ...c, gradeTryWhy: why };
   };
   /** Per family: the grade model of a set of anchors (the tries of one family share it). */
   const fitCaches = new Map<number, Map<string, GfitFamily>>();
@@ -188,8 +241,22 @@ export function repairPass(
     const anchors = list
       .filter((x) => x.rank !== r && !exclude.has(x.rank) && gradeAnchor(x))
       .sort((a, b) => a.rank - b.rank);
-    const lo = anchors.filter((x) => x.rank < r).pop();
-    const hi = anchors.find((x) => x.rank > r);
+    let lo = anchors.filter((x) => x.rank < r).pop();
+    let hi = anchors.find((x) => x.rank > r);
+    // the end of the range: the draw mode may carry the grade one step on (repairSize decides,
+    // GFIT_REPAIR.extrapolate*); the walls are then those near the two nearest anchors
+    const edge = lo ?? hi;
+    if (
+      (!lo || !hi) &&
+      edge &&
+      GRADE_DRAW.extrapolate &&
+      !gradeDrawOff() &&
+      anchors.length >= GFIT_REPAIR.extrapolateMinTrusted &&
+      Math.abs(edge.rank - r) === 1
+    ) {
+      const k = anchors.indexOf(edge);
+      [lo, hi] = lo ? [anchors[k - 1], edge] : [edge, anchors[k + 1]];
+    }
     if (!lo || !hi) {
       // no anchor on one side: nothing to repair from — the question still shows where the grade
       // of the two nearest anchors carries the size (marked extrapolated)
@@ -232,19 +299,58 @@ export function repairPass(
     }
     let fitCache = fitCaches.get(c.seed);
     if (!fitCache) fitCaches.set(c.seed, (fitCache = new Map()));
-    const rep = repairSize(ins, r, ws, {
-      tol: GFIT_TOL_P0,
-      frame: 'stacked',
-      fitCache,
-      fast: true,
+    const run = (draw: boolean) => {
+      const rep = repairSize(ins, r, ws, {
+        tol: repairTol(),
+        frame: 'stacked',
+        fitCache,
+        fast: true,
+        ...(draw
+          ? { draw: { maxShare: GRADE_DRAW.maxShare, extrapolate: GRADE_DRAW.extrapolate } }
+          : {}),
+      });
+      const why: string[] = rep.refusals.map((w) =>
+        w === 'no-model' && rep.modelWhy ? `no-model:${rep.modelWhy}` : w,
+      );
+      const holesMm = rep.holes.reduce((a, h) => a + h.lenMm, 0);
+      // G15: a repaired block must pass the derived-edge audit as written. Every hole of a DRAWN
+      // block is a 'grade-draw' edge (below), bounded there by its share, not by the fill's count /
+      // mm; the manifest still bounds the record.
+      if (!draw && rep.holes.length > GRADE_P2.maxHoles) why.push('G15-holes');
+      if (!draw && holesMm > GRADE_P2.maxHolesMm) why.push('G15-holes-mm');
+      if (draw && rep.holes.length > GRADE_DRAW.maxHoles) why.push('D-holes');
+      if (draw && holesMm > GRADE_DRAW.maxHolesMm) why.push('D-holes-mm');
+      return { rep, why, holesMm };
+    };
+    let { rep, why, holesMm } = run(false);
+    const strictWhy = why.slice();
+    let drawWhy: string[] | null = null;
+    // the strict fill refused, the piece has a model and the size is bracketed: draw the missing
+    // line from the grade (owner, 11 Nov 2026), within GRADE_DRAW.maxShare of the perimeter
+    let drawn = false;
+    if (why.length && !rep.refusals.includes('no-model') && !gradeDrawOff()) {
+      const d = run(true);
+      drawWhy = d.why.slice();
+      if (!d.why.length) {
+        ({ rep, why, holesMm } = d);
+        drawn = true;
+      } else {
+        // keep the draw mode's reasons beside the strict ones: the corpus reports read them
+        why.push(...d.why.map((w) => `draw:${w}`));
+        if (DEBUG) console.log(`GRADEP2   draw refused too: ${d.why.join(',')}`);
+      }
+    }
+    probeSink?.({
+      seed: c.seed,
+      rank: r,
+      kind,
+      ins,
+      walls: ws,
+      tol: repairTol(),
+      strict: strictWhy,
+      draw: drawWhy,
+      drawn,
     });
-    const why: string[] = rep.refusals.map((w) =>
-      w === 'no-model' && rep.modelWhy ? `no-model:${rep.modelWhy}` : w,
-    );
-    const holesMm = rep.holes.reduce((a, h) => a + h.lenMm, 0);
-    // G15: a repaired block must pass the derived-edge audit as written
-    if (rep.holes.length > GRADE_P2.maxHoles) why.push('G15-holes');
-    if (holesMm > GRADE_P2.maxHolesMm) why.push('G15-holes-mm');
     let cand: PieceCandidate | null = null;
     if (!why.length && rep.outer && rep.from) {
       const ring0 = signedArea(rep.outer) < 0 ? rep.outer.slice().reverse() : rep.outer;
@@ -271,6 +377,11 @@ export function repairPass(
         holesMm: Math.round(holesMm * 10) / 10,
         score: Math.round((rep.score ?? 0) * 1000) / 1000,
         devMm: Math.round((rep.devMm ?? 0) * 100) / 100,
+        // a drawn block was accepted under the draw rules as a whole (no hole-end / count / sum
+        // check), so every one of its holes is drawn — a short one included
+        ...(drawn ? { drawnMm: Math.round(holesMm * 10) / 10 } : {}),
+        ...(rep.extrapolated ? { extrapolated: true as const } : {}),
+        ...(drawn && rep.spreadMm !== undefined ? { spreadMm: rep.spreadMm } : {}),
         ...(kind === 'neighbour' && c.outer.length > 2
           ? { was: simplify([...c.outer, c.outer[0]], 0.3).slice(0, -1) }
           : {}),
@@ -290,7 +401,13 @@ export function repairPass(
         rankFrom: 'repair',
         repair: record,
         ...(rep.holes.length
-          ? { derived: rep.holes.map((h) => ({ kind: 'grade-fill' as const, pts: h.pts })) }
+          ? {
+              derived: rep.holes.map((h) => ({
+                // the strict fill's holes stay fills; a drawn block's holes are all DRAWN
+                kind: drawn ? ('grade-draw' as const) : ('grade-fill' as const),
+                pts: h.pts,
+              })),
+            }
           : {}),
       };
       // E3 · continuity: the family stays consistent with it (growth in the anchors' band, outline

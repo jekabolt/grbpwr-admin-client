@@ -1252,8 +1252,8 @@ export function PiecesStep({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoNext?.key, session.busy]);
-  // a gap of a pen's width between two line ends that point at each other: closed without asking
-  // (once; undone = asked), said on the quiet line
+  // The fill already joined ends that continue one stroke. What is still open here is a gap the
+  // parser did not take: the card shows it, and one click closes that one.
   const ignoredNow = new Set(
     inputs.edits.flatMap((e) => (e.kind === 'ignore-line' ? [e.chain] : [])),
   );
@@ -1301,46 +1301,6 @@ export function PiecesStep({
     } else setHint(`piece ${nameOf(k.seed)} is still open there — undo, or close it by hand`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.busy, inputs.edits.length]);
-  const autoGap = autoNext
-    ? null
-    : families
-        .filter(needsFix)
-        .flatMap((f) =>
-          f.candidates
-            .filter((c) => isExp(c.rank) && c.outcome === 'leak')
-            .slice(0, 1)
-            .map((c) => ({ f, c, g: gapOf(f.seed, c), key: `gap${f.seed}` })),
-        )
-        .find((x) => x.g && x.g.facing && x.g.mm <= 2 && !seen.autoDone.has(x.key));
-  useEffect(() => {
-    if (!autoGap?.g || session.busy || seen.autoDone.has(autoGap.key)) return;
-    seen.autoDone.add(autoGap.key);
-    seen.applied = {
-      text: `piece ${nameOf(autoGap.f.seed)}: a ${autoGap.g.mm.toFixed(1)} mm gap closed`,
-      n: 1,
-      at: inputs.edits.length + 1,
-    };
-    seen.gapCheck = {
-      seed: autoGap.f.seed,
-      rank: autoGap.c.rank,
-      at: inputs.edits.length + 1,
-      auto: true,
-    };
-    void autoAnswer({
-      type: 'piece-edits',
-      edits: [
-        ...inputs.edits,
-        {
-          kind: 'bridge',
-          seed: autoGap.f.seed,
-          rank: gapRank(autoGap.f, autoGap.c, autoGap.g),
-          from: autoGap.g.from,
-          to: autoGap.g.to,
-        },
-      ],
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoGap?.key, session.busy]);
   // the card follows the active question: a resolved region hands over to the next one by itself
   const guided = useRef(false);
   const activeRegion = active?.kind === 'region' ? active : null;

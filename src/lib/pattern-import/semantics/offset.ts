@@ -71,6 +71,51 @@ export const MAX_DEVIATION_MM = 0.2;
 export const MITER_LIMIT = 2;
 export type OffsetJoin = 'round' | 'miter';
 
+/**
+ * A raw offset's positive union keeps swallowtail remnants where the source turns tighter than the
+ * allowance (an armhole's base, a sleeve cap): small loops whose every point is NEARER to the source
+ * than |mm|. A true parallel never comes nearer than |mm| (a mitre only reaches further), so such a
+ * loop is not part of the line — the standard distance-trim of a raw offset, not a rawOffset bug
+ * (a reversed-arc join leaves the same loops). Genuine split loops measured ≥ |mm| − 0.01 (Paris C
+ * 32: a strap merged over a 1.4 mm neck); remnants ≤ |mm| − 0.05 (Axel A 10, D 26).
+ * `OFFSET_TRIM_OFF=1`: the old count (bisect).
+ */
+const REMNANT_TOL_MM = 0.02;
+
+const distToLoop = (q: PtMm, src: readonly PtMm[]): number => {
+  let m = Infinity;
+  for (let i = 0; i < src.length; i++) {
+    const a = src[i];
+    const b = src[(i + 1) % src.length];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const L2 = dx * dx + dy * dy;
+    const t = L2 > 0 ? Math.max(0, Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / L2)) : 0;
+    m = Math.min(m, Math.hypot(a.x + t * dx - q.x, a.y + t * dy - q.y));
+  }
+  return m;
+};
+
+/** Drops the remnant loops (all but the largest, sorted largest first) in place. */
+function dropRemnants(
+  loops: PtMm[][],
+  src: readonly PtMm[],
+  mm: number,
+): { loops: number; maxAreaMm2: number } | undefined {
+  if (loops.length < 2 || (typeof process !== 'undefined' && process.env?.OFFSET_TRIM_OFF))
+    return undefined;
+  const near = Math.abs(mm) - REMNANT_TOL_MM;
+  let n = 0;
+  let maxArea = 0;
+  for (let i = loops.length - 1; i >= 1; i--) {
+    if (!loops[i].every((q) => distToLoop(q, src) < near)) continue;
+    n++;
+    maxArea = Math.max(maxArea, areaOf(loops[i]));
+    loops.splice(i, 1);
+  }
+  return n ? { loops: n, maxAreaMm2: Math.round(maxArea * 10) / 10 } : undefined;
+}
+
 const toPath = (pts: readonly PtMm[]): Path64 => {
   const p = new Path64();
   for (const q of pts)
@@ -774,6 +819,7 @@ export function offsetContour(
     else holes++;
   }
   loops.sort((a, b) => areaOf(b) - areaOf(a));
+  const dropped = dropRemnants(loops, src, mm);
   const best = loops[0] ?? [];
   const reasons: string[] = [];
   if (loops.length !== 1)
@@ -797,6 +843,7 @@ export function offsetContour(
       selfIntersects: si,
       hullRatio: hr,
       maxDeviationMm: dev,
+      ...(dropped ? { dropped } : {}),
       ...(reasons.length ? { reason: reasons.join('; ') } : {}),
     },
   };

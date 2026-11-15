@@ -2,7 +2,7 @@
 import type { Chain, ChainOpts, Sheet, Style } from 'lib/pattern-import/types';
 
 import { polyLen, simplify } from './geom';
-import { linkItems, linkPts, rangesOf, type WChain } from './link';
+import { linkItems, linkPts, rangesOf, reversed, type WChain } from './link';
 import { signatureOf, type Signature } from './motif';
 
 export type ChainBuild = {
@@ -55,6 +55,7 @@ export function makeChains(sheet: Sheet, opts: ChainOpts): ChainBuild {
   const chains: Chain[] = [];
   const sigs: Signature[] = [];
   const work: WChain[] = [];
+  const dirFree = typeof process !== 'undefined' && !!process.env?.MOTIF_DIR_FREE;
   for (const ch of res.chains) {
     // Beads (dots, cross ticks) carry rhythm, not geometry: a tick's centre sits half a tick off
     // the line. The line is drawn through the strokes; a chain of beads only keeps their centres.
@@ -74,6 +75,7 @@ export function makeChains(sheet: Sheet, opts: ChainOpts): ChainBuild {
     const lengthMm = polyLen(pts);
     if (lengthMm < 0.5) continue;
     const sig = signatureOf(ch, styles, lengthMm);
+    if (dirFree) sig.rev = signatureOf({ ...ch, items: reversed(ch.items) }, styles, lengthMm);
     const first = pts[0];
     const last = pts[pts.length - 1];
     const closed = pts.length > 3 && Math.hypot(first.x - last.x, first.y - last.y) < 0.05;

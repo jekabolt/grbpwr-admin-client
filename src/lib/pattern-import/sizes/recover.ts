@@ -32,8 +32,10 @@ import { dist, endTangent, PtGrid, resample, SegGrid, segNearest } from '../chai
 import { cosine, describeSig, type Signature } from '../chains/motif';
 import { type Group } from './align';
 import { ranksFromCoords, seriate } from './seriate';
-import { closeCorners, type CornerWall } from './corners';
+import { CORNER, closeCorners, type CornerMark, type CornerWall } from './corners';
 import { overlayShare, type OverlayLines } from './overlay';
+import { rankAlikeNests } from './alike-nests';
+import { adoptDashTrains, rankRhythms } from './dash-train';
 import { bridgeSameRank, landEnds, type Landing } from './land';
 import { legendIdentity, type LegendIdentity } from './legend-id';
 import { LABEL_FRAME_WHY, labelFrames } from './label-frame';
@@ -258,7 +260,9 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       .filter((r) => r.labels.length >= 3 && (r.keyword || r.kind === 'legend'))
       .filter((r) => {
         const inRun = r.labels.filter((l) => spelling.has(keyOf(l))).length;
-        return inRun >= 3 && inRun > legendRun.size && inRun >= spelling.size - 2;
+        // a hole of the run (a key entry with no sample) is no sample: count the labels that have one
+        const sampled = [...legendRun].filter((l) => spelling.has(keyOf(l))).length;
+        return inRun >= 3 && inRun > sampled && inRun >= spelling.size - 2;
       })
       .sort((a, b) => b.labels.length - a.labels.length)[0];
     if (stated) legendRun = new Set(stated.labels.map((l) => spelling.get(keyOf(l)) ?? l));
@@ -1708,9 +1712,62 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     if (frames.size) diag.labelFrames = frames.size;
   }
 
+  // ── sizes drawn in ONE pen (the key prints one sample for several): their closed outlines are
+  // told apart by how they nest, between the outlines of the sizes whose ranks are known
+  if (legendHits.length >= 3 && !debugFlag('ALIKE_NESTS_OFF')) {
+    const keyRank = new Map<string, number>();
+    labels.forEach((l, r) => l && keyRank.set(l, r));
+    const given = rankAlikeNests({
+      chains,
+      rankOf,
+      styles,
+      samples: legendHits.map((h) => ({ label: h.label, chain: h.chain })),
+      keyRank,
+      candidate: (i) => i < N0 && cand[i] && !furniture[i],
+    });
+    if (given.size) {
+      diag.alikeNests = given.size;
+      // the key's sample of a size that has a line now is no longer "matching no line"
+      for (const r of given) {
+        const l = labels[r];
+        if (!l) continue;
+        for (let k = ambiguities.length - 1; k >= 0; k--)
+          if (
+            ambiguities[k].kind === 'size-empty' &&
+            ambiguities[k].message.includes(`sample for ${l} `)
+          )
+            ambiguities.splice(k, 1);
+      }
+    }
+  }
+
   // ── shared stretches of size lines → common ─────────────────────────────────────────────────
   const sharedFrom = new Map<number, number>();
+  // dashes of a size line the linker left apart (< 8 mm): ranked by the rhythm of the pen the
+  // drawing's key named — only where the legend named the ranks (sizes/dash-train.ts)
+  const adopted = new Map<number, number>();
+  if (legendId && !debugFlag('DASH_TRAIN_OFF')) {
+    const lid = legendId;
+    const rhythms = rankRhythms(
+      rankOf,
+      (c) => c < N0 && c < sigs.length && lid.label[c] >= 0,
+      (c) => sigs[c].declared ?? sigs[c].motif,
+      (c) => chains[c].lengthMm,
+    );
+    for (const [f, h] of adoptDashTrains({
+      chains,
+      rankOf,
+      rhythms,
+      candidate: (i) => i < N0 && !furniture[i],
+    }))
+      adopted.set(f, h);
+    if (adopted.size) {
+      diag.dashTrains = adopted.size;
+      diag.dashTrainList = [...adopted].map(([f, h]) => ({ f, h, rank: rankOf.get(h) }));
+    }
+  }
   const joined = bridgeSameRank(chains, rankOf);
+  for (const [f, h] of adopted) joined.set(f, h);
   let cornerWalls: CornerWall[] = [];
   // MOOD Ф2: corners closed by the size's own stub / ramps / extended edges (sizes/corners.ts) —
   // only where a chain's own look names its rank (declared dashes, the drawing's key)
@@ -1724,9 +1781,17 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       (c) => ownLook(c) && !joined.has(c),
       (c) => c < N0 && !furniture[c] && !joined.has(c) && !ownLook(c),
       n,
+      debugFlag('MOOD_MARKS_OFF') ? [] : glyphMarks(sheet),
     );
     cornerWalls = cc.walls;
-    diag.corners = { stubs: cc.stubs, ramps: cc.ramps, extended: cc.extended, refused: cc.refused };
+    diag.corners = {
+      stubs: cc.stubs,
+      ramps: cc.ramps,
+      extended: cc.extended,
+      crossed: cc.crossed,
+      marked: cc.marked,
+      refused: cc.refused,
+    };
   }
   const landings = landEnds(
     chains,
@@ -2474,6 +2539,36 @@ function medianWidth(
   }
   ws.sort((a, b) => a - b);
   return ws.length ? ws[0] : 0;
+}
+
+/** The sheet's glyphs (small paths of line work) for MOOD Ф2 MARKS (`sizes/corners.ts`). */
+function glyphMarks(sheet: Sheet): CornerMark[] {
+  const out: CornerMark[] = [];
+  for (const p of sheet.paths) {
+    if (p.background || p.pts.length < 2) continue;
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
+    for (const q of p.pts) {
+      x0 = Math.min(x0, q.x);
+      y0 = Math.min(y0, q.y);
+      x1 = Math.max(x1, q.x);
+      y1 = Math.max(y1, q.y);
+    }
+    const size = Math.max(x1 - x0, y1 - y0);
+    if (size < CORNER.markMinMm || size > CORNER.markMaxMm) continue;
+    const a = p.pts[0];
+    const b = p.pts[p.pts.length - 1];
+    out.push({
+      path: p.id,
+      c: { x: (x0 + x1) / 2, y: (y0 + y1) / 2 },
+      size,
+      closed: p.closed || Math.hypot(a.x - b.x, a.y - b.y) < 0.05,
+      style: p.style,
+    });
+  }
+  return out;
 }
 
 /** Size label in a file name: "44.pdf", "wm_kka_15_01_xl_wykroj.pdf", "Толстовка 48". */

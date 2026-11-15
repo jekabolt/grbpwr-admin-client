@@ -48,8 +48,7 @@ export type BuildExtras = {
   aamaLayers?: boolean;
 };
 
-/** Full pipeline with its diagnostics (the probe and the worker stage use this). */
-export function buildChainsDetailed(
+function buildOnce(
   sheet: Sheet,
   opts: ChainOpts,
   extras: BuildExtras = {},
@@ -63,7 +62,15 @@ export function buildChainsDetailed(
   const fileOf = overlaidFiles(sheet)
     ? (i: number) => pathFile.get(mk.chains[i].ranges[0]?.path ?? -1) ?? ''
     : undefined;
-  const furn = furniture(mk.chains, styles, sheet.poses, sheet.texts, fileOf);
+  const furn = furniture(
+    mk.chains,
+    styles,
+    sheet.poses,
+    sheet.texts,
+    fileOf,
+    opts.keepGuides,
+    opts.keepRepeats,
+  );
   if (fileOf)
     for (const i of overprintLines(mk.chains, fileOf, furn))
       furn[i] = furn[i] ?? 'overprint (drawn over every file)';
@@ -99,6 +106,49 @@ export function buildChainsDetailed(
   );
   progress?.(3, 3);
   return { set, recover: rec };
+}
+
+/**
+ * How badly the read left the sizes of the legend: a size with no line counts 2, a size with less
+ * than half the line the middle size has counts 1 (its lines went elsewhere: Lanai's dotted
+ * sizes, a third of their length, the rest taken for tile frames).
+ */
+function lackOf(r: { set: ChainSet }): number {
+  const rows = r.set.classes.filter((c) => c.role === 'size');
+  const lens = rows.map((c) => c.totalLengthMm).sort((a, b) => a - b);
+  const median = lens[Math.floor(lens.length / 2)] ?? 0;
+  let lack = 0;
+  for (const c of rows) {
+    if (c.chains.length === 0) lack += 2;
+    else if (median > 0 && c.totalLengthMm < 0.5 * median) lack += 1;
+  }
+  return lack;
+}
+
+/**
+ * Full pipeline with its diagnostics (the probe and the worker stage use this).
+ *
+ * A file is read as it is drawn first. When that leaves a size of the legend with no line, or with
+ * far too little (see `lackOf`), the likely reasons are dashes drawn as separate strokes with a wide
+ * gap (Cassandra: 6.1 mm dashes 7.7 mm apart), a size drawn only in straight dashed lines taken
+ * for a guide (Lanai), and straight lines of one length repeated taken for tile frames (Lanai's
+ * rectangles). The file is read again with them joined and those rules off. The second read is
+ * kept only when it lacks less, so a file that reads well is never changed by it.
+ */
+export function buildChainsDetailed(
+  sheet: Sheet,
+  opts: ChainOpts,
+  extras: BuildExtras = {},
+  progress?: Progress,
+): { set: ChainSet; recover: RecoverOut } {
+  const first = buildOnce(sheet, opts, extras, progress);
+  if (opts.dashTrains || lackOf(first) === 0) return first;
+  const again = buildOnce(
+    sheet,
+    { ...opts, dashTrains: true, keepGuides: true, keepRepeats: true },
+    extras,
+  );
+  return lackOf(again) < lackOf(first) ? again : first;
 }
 
 export const buildChains: BuildChainsFn = (sheet, opts, progress) =>

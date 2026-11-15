@@ -49,8 +49,9 @@ import { pageMarginIds } from 'lib/pattern-import/chains/classify';
 import { chainView, partAt, sheetView } from 'lib/pattern-import/assemble/composite';
 import { gradeView } from 'lib/pattern-import/chains/face-role';
 
-import { type Bridge, wallBridges } from './bridges';
+import { type Bridge, facingBridges, wallBridges } from './bridges';
 import { gradeHook, SOLVER_MODEL, type GradeHook } from './grade/hook';
+import { gradeOrderRun } from './continuity-order';
 import { seedFaces, type SeedFaceDiag } from './seed-face';
 import { seedLabel } from './seeds';
 import { snapOutline, type WallItem } from './snap';
@@ -440,9 +441,27 @@ function contOff(): boolean {
   return typeof process !== 'undefined' && !!process.env?.P1_NOCONT;
 }
 
+/**
+ * The continuity order guard: refuses a continuity closure whose outline leaves its neighbours'
+ * grade order for ≥ 50 mm (pieces/continuity-order.ts). ACCEPTED 15 Nov 2026 (set40: 2 wrong
+ * closes refused, 0 correct lost, 0 outlines moved). `CONT_ORDER_OFF=1` = the old rule (bisect).
+ */
+function contOrder(): boolean {
+  return !(typeof process !== 'undefined' && process.env?.CONT_ORDER_OFF);
+}
+
 /** Probe switch (node only): MOOD_F3_OFF turns the Ф3 overlay readings off (the "before" column). */
 function f3Off(): boolean {
   return typeof process !== 'undefined' && !!process.env?.MOOD_F3_OFF;
+}
+
+/**
+ * Probe switch (node only, WIP): MOOD_LOCAL_BAND judges a continuity closure's growth against the
+ * anchor pairs around its own rank, not the min–max of every pair in the family — so a size that
+ * closes far away (a new anchor at the other end of the grade) cannot move this size's verdict.
+ */
+function localBand(): boolean {
+  return typeof process !== 'undefined' && !!process.env?.MOOD_LOCAL_BAND;
 }
 
 /** Probe switch: keep the marking tails (pieces/tails) the fill takes. */
@@ -949,7 +968,18 @@ function fillOneSheet(
     const bridgedCache = new Map<RankCtx, Bridge[]>();
     const bridgedOf = (c0: RankCtx) => {
       let v = bridgedCache.get(c0);
-      if (!v) bridgedCache.set(c0, (v = wallBridges(c0.items, opts.autoBridgeMm ?? 3)));
+      if (!v) {
+        const near = wallBridges(c0.items, opts.autoBridgeMm ?? 3);
+        const facing = facingBridges(c0.items).filter(
+          (b) =>
+            !near.some(
+              (n) =>
+                (dist(n.from, b.from) < 0.6 && dist(n.to, b.to) < 0.6) ||
+                (dist(n.from, b.to) < 0.6 && dist(n.to, b.from) < 0.6),
+            ),
+        );
+        bridgedCache.set(c0, (v = [...near, ...facing]));
+      }
       return v;
     };
     const out = new Map<number, PieceCandidate>();
@@ -1035,12 +1065,16 @@ function fillOneSheet(
       };
       const isMerged = (o: number[]) => o.some((sj) => !dropped.has(use[sj].id));
       let reg = ctx.ext[k] ? null : regionAt(ctx, k);
-      // leak or merge: close the gap the fill escapes through with short derived bridges (≤ 3 mm,
-      // dangling end → nearest wall of this rank). Only bridges crossing the escape path are
-      // added (to the sheet border for a leak, to the other seed for a merge), one round at a
-      // time — never a bridge elsewhere that would cut the piece itself.
+      // leak or merge: close the gap the fill escapes through. A dangling end meets the nearest
+      // wall within 3 mm; two ends that point at each other meet within FACING_BRIDGE_MM. One
+      // size has no sibling area to check against, so that close runs on the first fill. A graded
+      // sheet waits for bridgePass, which keeps the close only when the area still matches the
+      // other sizes. Only bridges crossing the escape path are added (to the sheet border for a
+      // leak, to the other seed for a merge), one round at a time — never a bridge elsewhere that
+      // would cut the piece itself.
       let bridges: Bridge[] = [];
-      if (bridgeFor?.has(seed.id) && (!reg || isMerged(reg.others)))
+      const closeGaps = !!bridgeFor?.has(seed.id) || (!bridgeFor && model.mode === 'single');
+      if (closeGaps && (!reg || isMerged(reg.others)))
         for (const c0 of ctx === base ? [base] : [ctx, base]) {
           const all = bridgedOf(c0);
           if (!all.length) continue;
@@ -1934,8 +1968,11 @@ export function continuityVerdicts(
         );
     return { refused, kept };
   }
-  const gs = pairs.map((p) => p.g);
-  const band: [number, number] = [0.5 * Math.min(...gs), 1.5 * Math.max(...gs) + 0.003];
+  const bandOver = (ps: readonly Pair[]): [number, number] => {
+    const gs = ps.map((p) => p.g);
+    return [0.5 * Math.min(...gs), 1.5 * Math.max(...gs) + 0.003];
+  };
+  const wholeBand = bandOver(pairs);
   /** the anchor pair around rank r, else the nearest */
   const localOf = (r: number) =>
     pairs.find((p) => p.lo <= r && r <= p.hi) ??
@@ -1944,6 +1981,18 @@ export function continuityVerdicts(
         Math.min(Math.abs(a.lo - r), Math.abs(a.hi - r)) -
         Math.min(Math.abs(b.lo - r), Math.abs(b.hi - r)),
     )[0];
+  /**
+   * the growth band at rank r: every pair (default), or (MOOD_LOCAL_BAND) the pair around r and the
+   * pairs with an anchor within 2 sizes of r — how the grade grows HERE, not at the far end
+   */
+  const bandAt = (r: number): [number, number] => {
+    if (!localBand()) return wholeBand;
+    const loc = localOf(r);
+    const near = pairs.filter(
+      (p) => p === loc || Math.min(Math.abs(p.lo - r), Math.abs(p.hi - r)) <= 2,
+    );
+    return bandOver(near);
+  };
   const r3 = (v: number) => Math.round(v * 1000) / 1000;
   /** how badly c fails against neighbour n (> 1 fails), why, and the measured check */
   const judge = (
@@ -1955,6 +2004,7 @@ export function continuityVerdicts(
     const ratio = hi.areaMm2 / Math.max(1, lo.areaMm2);
     const g = ratio > 0 ? Math.log(ratio) / steps : -Infinity;
     const loc = localOf(c.rank);
+    const band = bandAt(c.rank);
     const hAllow = Math.min(CONT_CAP.hMm, 1.5 * loc.h + 1) * steps + 2;
     const huAllow = Math.min(CONT_CAP.hu, 1.5 * loc.hu + 0.05) * steps + 0.1;
     const h = H(c, n);
@@ -2012,6 +2062,9 @@ export function continuityVerdicts(
     return [below, above].filter(Boolean) as PieceCandidate[];
   };
   const anchorPool = anchors.filter((x) => clean.has(x.rank));
+  const orderPool = list.filter(
+    (x) => x.outcome === 'closed' && x.rankFrom !== 'continuity' && x.outer.length >= 3,
+  );
   // 1) against the anchors; an ignore / unclassified path needs them on both sides
   for (const c of conts) {
     if (refused.has(c.rank)) continue;
@@ -2029,6 +2082,16 @@ export function continuityVerdicts(
         refused.set(c.rank, why);
         break;
       }
+    }
+    // order guard (CONT_ORDER_OFF=1 bisects): the shape checks above are blind to ORDER — a far ring of the right shape passes
+    // (pieces/continuity-order.ts). Neighbours: cells closed by anything but continuity.
+    if (!refused.has(c.rank) && contOrder()) {
+      const run = gradeOrderRun(c, orderPool);
+      if (run)
+        refused.set(
+          c.rank,
+          `${Math.round(run.mm)} mm of the outline lie outside ranks ${run.vs[0]}–${run.vs[1]} (near ${Math.round(run.at.x)}, ${Math.round(run.at.y)}): a far size's line, not this size's`,
+        );
     }
   }
   // 2) the survivors together, worst first

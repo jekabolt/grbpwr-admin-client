@@ -10,6 +10,7 @@
 
 import type {
   Affine,
+  DerivedEdge,
   DraftScopeTarget,
   EmbedManifestFn,
   ManifestSize,
@@ -23,6 +24,7 @@ import { isAsciiDxf } from './format';
 import { buildManifest } from './manifest-build';
 import { embedManifest as embedManifestLocal } from '../manifest';
 import { type Plan, pieceInScope, planBlocks } from './plan';
+import { drawnOfBlock } from './drawn';
 import { writeR12 } from './r12';
 import { writeR2000 } from './r2000';
 
@@ -34,6 +36,11 @@ export type WriteOptions = {
   embed?: EmbedManifestFn | null;
   /** Clock for `createdAt` (tests pin it). */
   now?: () => Date;
+  /**
+   * The outline's derived edges (source frame, semantics `derivedOf`): the grade-drawn / grade-filled
+   * ones are copied onto layer GRADE_DRAWN (write/drawn.ts). Absent = no marker layer.
+   */
+  derivedOf?: (sourceIdentity: string, rank: number) => DerivedEdge[] | undefined;
 };
 
 export type WriteDetail = WriteResult & {
@@ -47,6 +54,19 @@ export type WriteDetail = WriteResult & {
 export function writeDxfDetailed(job: WriteJob, opts: WriteOptions = {}): WriteDetail {
   const warnings: string[] = [];
   const plan = planBlocks(job.pieces, job.scope, warnings);
+  if (opts.derivedOf)
+    for (const b of plan.blocks) {
+      const d = drawnOfBlock(
+        b.cut,
+        b.transform,
+        opts.derivedOf(b.derivedFrom ?? b.identity, b.rank),
+      );
+      b.drawn = d.stretches;
+      if (d.skipped)
+        warnings.push(
+          `${b.name}: ${d.skipped} drawn stretch(es) not on the written cut line — not marked`,
+        );
+    }
   const createdAt = (opts.now ?? (() => new Date()))().toISOString();
   const manifest = buildManifest(job, plan.specs, plan.blocks, createdAt);
   const sample = job.sizes.length

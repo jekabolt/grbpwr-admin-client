@@ -407,7 +407,7 @@ const runOne = (rel, extraEnv = {}) =>
       // ARCHIVE_ECHO=<regex>: the child's own debug lines matching it, to the runner's stderr
       if (process.env.ARCHIVE_ECHO) {
         const re = new RegExp(process.env.ARCHIVE_ECHO);
-        for (const l of out.split('\n')) if (re.test(l)) console.error(l);
+        for (const l of out.split('\n')) if (re.test(l)) console.error(process.env.ARCHIVE_ECHO_TAG ? `${rel}\t${l}` : l);
       }
       const cat = rel.split('/')[0];
       const file = rel.slice(cat.length + 1);

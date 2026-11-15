@@ -478,7 +478,7 @@ export async function writeAndGate(
 ): Promise<{ detail: WriteDetail; dxfText: string; report: GateReport; expect: GateExpectation }> {
   const embed = ctx.embed ?? embedManifestLocal;
   const read = ctx.read ?? readManifestLocal;
-  const detail0 = writeDxfDetailed(job, { embed: null, now: ctx.now });
+  const detail0 = writeDxfDetailed(job, { embed: null, now: ctx.now, derivedOf: ctx.derivedOf });
   // SHAPE soft rule: the passport digest records the pieces whose WRITTEN sizes carry different
   // notch / drill counts (from the manifest's blocks, i.e. what the file holds)
   const detail = detail0.manifest.passport

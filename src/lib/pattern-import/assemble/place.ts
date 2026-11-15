@@ -203,6 +203,21 @@ export function placePages(placed: Placed[], dedupeTolMm = 0.15): PlaceResult {
   }
   // Stable order: page, then source path id.
   survivors.sort((a, b) => a.pageIdx - b.pageIdx || a.path.id - b.path.id);
+  // debug: env PLACE_DEBUG="x,y;x,y" — every dashed path each page draws within 20 mm of a point,
+  // as read (before the overlap dedupe), with its x range and whether it survived the whole-copy pass
+  const dbg =
+    typeof process !== 'undefined' && process.env?.PLACE_DEBUG
+      ? process.env.PLACE_DEBUG.split(';').map((t) => t.split(',').map(Number))
+      : [];
+  for (const [x, y] of dbg)
+    for (const c of cands) {
+      if (!c.style.dash || !c.pts.some((p) => Math.abs(p.x - x) <= 20 && Math.abs(p.y - y) <= 20))
+        continue;
+      const xs = c.pts.map((p) => p.x);
+      console.log(
+        `PLACE at ${x},${y} pg ${c.path.src.page} op ${c.path.src.op} look ${c.look.split('|').slice(2, 4).join(' ')} x ${Math.min(...xs).toFixed(1)}..${Math.max(...xs).toFixed(1)} n ${c.pts.length} ${survivors.includes(c) ? 'kept' : 'whole-dup'} clip ${c.style.clip ?? '-'}`,
+      );
+    }
   // 2. Overlap-strip edges. Segments of accepted paths indexed per look on a 2 mm grid.
   const CELL = 2;
   const segs = new Map<string, Map<number, { a: PtMm; b: PtMm; page: number }[]>>();

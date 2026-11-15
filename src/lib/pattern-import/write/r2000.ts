@@ -5,6 +5,7 @@
 import type { PtMm } from '../types';
 import type { PlannedBlock, PlannedDrill } from './plan';
 import { DRILL_CIRCLE_SEGMENTS, DRILL_SQUARE_MM } from './plan';
+import { DRAWN_ACI, DRAWN_LAYER, DRAWN_LINEWEIGHT } from './drawn';
 import { type Tag, hex, num, serialize, txt } from './format';
 
 /** CLO's 8 layers (name, ACI colour). */
@@ -202,8 +203,12 @@ export function writeR2000(blocks: readonly PlannedBlock[]): string {
     E(40, num(0));
   }
   E(0, 'ENDTAB');
-  tableHead('LAYER', 3, CLO_LAYERS.length);
-  for (const [n, c] of CLO_LAYERS) {
+  // GRADE_DRAWN only in a file that has drawn stretches: every other file stays CLO's 8 layers
+  const marked = blocks.some((b) => b.drawn.length);
+  const layers: [string, number, number][] = CLO_LAYERS.map(([n, c]) => [n, c, -3]);
+  if (marked) layers.push([DRAWN_LAYER, DRAWN_ACI, DRAWN_LINEWEIGHT]);
+  tableHead('LAYER', 3, layers.length);
+  for (const [n, c, w] of layers) {
     E(0, 'LAYER');
     E(5, hex(h++));
     rec('AcDbLayerTableRecord', 3);
@@ -211,7 +216,7 @@ export function writeR2000(blocks: readonly PlannedBlock[]): string {
     E(70, '0');
     E(62, String(c));
     E(6, 'CONTINUOUS');
-    E(370, '-3');
+    E(370, String(w));
     E(390, '11');
   }
   E(0, 'ENDTAB');
@@ -328,6 +333,7 @@ export function writeR2000(blocks: readonly PlannedBlock[]): string {
     if (b.seam) lw(o, '14', b.seam, true); // seam line first, as CLO does
     lw(o, '1', b.cut, true); // final cutting line
     for (const loop of b.cutLoops) lw(o, '1', loop, true);
+    for (const st of b.drawn) lw(o, DRAWN_LAYER, st, false); // a marker ON the cut, not a line
     for (const ip of b.internal) lw(o, '8', ip.pts, ip.closed);
     for (const d of b.drills) lw(o, '8', drillMark(d), true);
     if (b.grain) lw(o, '7', [b.grain.tail, b.grain.tip, b.grain.barb], false);

@@ -1919,10 +1919,20 @@ export async function main(opts: { plans: string }): Promise<number> {
         failing(r).join(','),
       );
     }
+    // two open ends of one stroke: the fill closes them up to FACING_BRIDGE_MM (12). A nearest-wall
+    // chord that does not land on both endpoints stays at 3 mm.
+    {
+      const r = await gateOf(8, [bridge(8, 'bridge')]);
+      ck(
+        r.report.passed && one(r.report, 'G15-derived').ok,
+        '8 mm automatic bridge between the two open ends of a gap passes',
+        summary(r.report),
+      );
+    }
     await neg(
-      '8 mm "automatic" bridge (> 3 mm)',
+      '13 mm automatic bridge (> 12 mm between open ends)',
       'G15-derived',
-      (await gateOf(8, [bridge(8, 'bridge')])).report,
+      (await gateOf(13, [bridge(13, 'bridge')])).report,
     );
     await neg('40 mm band cut', 'G15-derived', (await gateOf(40, [bridge(40, 'band-cut')])).report);
     // an end that lands nowhere (2 mm inside the piece)

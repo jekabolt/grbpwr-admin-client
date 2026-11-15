@@ -15,7 +15,7 @@
 //   5. grain   — detected/declared, else the operator's two clicks, else 'no-grain';
 //   6. pairs   — a drawn L/R twin keeps its hand; "cut 2" of an asymmetric piece / "pair" →
 //                `_L` drawn + `_R` = its mirror across the grain (G12), ppg per hand;
-//   7. growth  — cut area must grow with size (G8) → 'non-monotone' when > 2 sizes.
+//   7. growth  — cut area must not shrink with size (G8; a plateau within 0.5 % passes) → 'non-monotone' when > 2 sizes.
 
 import { isMirrorSymmetric } from '../ai/geom';
 import { chainView, partAt, sheetView } from '../assemble/composite';
@@ -232,6 +232,9 @@ const sameLine = (g: { a: PtMm; b: PtMm }, h: { a: PtMm; b: PtMm }) => {
   const d = (p: PtMm, q: PtMm) => Math.hypot(p.x - q.x, p.y - q.y);
   return (d(g.a, h.a) <= 2 && d(g.b, h.b) <= 2) || (d(g.a, h.b) <= 2 && d(g.b, h.a) <= 2);
 };
+
+/** G8 growth: an area drop up to this share of the largest smaller size is a plateau, not a block. */
+const AREA_PLATEAU_TOL = 0.005;
 
 const blockOffset = (r: OffsetReport): BlockReason =>
   r.loops !== 1 ? 'offset-topology' : r.selfIntersects ? 'offset-self-intersection' : 'offset-hull';
@@ -800,10 +803,15 @@ export function buildPieceSpecsDetailed(
     const ov = pieceOverrides[seed] ?? {};
     const sorted = [...fam.candidates].sort((a, b) => a.rank - b.rank) as (PieceCandidate &
       DxfExtra)[];
-    const mapped = sorted.flatMap((c) => {
+    const mapped0 = sorted.flatMap((c) => {
       const card = cardOfRank.get(c.rank);
       return card ? [{ c, card }] : [];
     });
+    // PIECES_OPEN_PASS=1 (node scouting only): a piece is built from the sizes that closed, the open
+    // ones are left out — shows where a file stops after pieces; never in the browser
+    const openPass = typeof process !== 'undefined' && !!process.env?.PIECES_OPEN_PASS;
+    const closedOnly = mapped0.filter((m) => m.c.outcome === 'closed');
+    const mapped = openPass && closedOnly.length ? closedOnly : mapped0;
     if (!mapped.length) {
       block(
         seed,
@@ -1862,7 +1870,7 @@ export function buildPieceSpecsDetailed(
         offset = r.report;
         derived = { base: seam, mm: allowMm };
         pieceNotes.push(
-          `${card.token}: cut = seam + ${allowMm} mm, deviation ${r.report.maxDeviationMm.toFixed(3)} mm, hull ${r.report.hullRatio.toFixed(4)} (source ${r.sourceHullRatio.toFixed(4)})`,
+          `${card.token}: cut = seam + ${allowMm} mm, deviation ${r.report.maxDeviationMm.toFixed(3)} mm, hull ${r.report.hullRatio.toFixed(4)} (source ${r.sourceHullRatio.toFixed(4)})${r.report.dropped ? `, ${r.report.dropped.loops} offset remnant(s) dropped (≤ ${r.report.dropped.maxAreaMm2} mm²)` : ''}`,
         );
         if (!r.report.ok) {
           blockedHere = {
@@ -1882,7 +1890,7 @@ export function buildPieceSpecsDetailed(
           offset = r.report;
           derived = { base: cut, mm: -allowMm };
           pieceNotes.push(
-            `${card.token}: seam = cut − ${allowMm} mm, deviation ${r.report.maxDeviationMm.toFixed(3)} mm`,
+            `${card.token}: seam = cut − ${allowMm} mm, deviation ${r.report.maxDeviationMm.toFixed(3)} mm${r.report.dropped ? `, ${r.report.dropped.loops} offset remnant(s) dropped (≤ ${r.report.dropped.maxAreaMm2} mm²)` : ''}`,
           );
           if (!r.report.ok) {
             blockedHere = {
@@ -2212,7 +2220,17 @@ export function buildPieceSpecsDetailed(
     // operator grain given after a size already borrowed nothing: fine. Monotone growth (G8).
     const exactRulGrade = p.cands.every(({ c }) => c.dxf?.rulGraded);
     if (!p.ungraded && sizes.length > 1 && !exactRulGrade) {
-      const grows = sizes.every((s, i) => i === 0 || s.areaMm2 > sizes[i - 1].areaMm2);
+      // a plateau grows too: one pocket for every size, or one block per size group (Asheville,
+      // Estoril, Verona: 0.03–0.27 % offset noise). A drop over 0.5 % stays a block — it is a
+      // size closed on a wrong line (Verona 24: −58 %) or two sizes swapped (Silverstone 4XL/5XL).
+      // Against the largest smaller size, not the previous one: a slow slide (−0.4 % a step)
+      // must not pass step by step.
+      let peak = 0;
+      const grows = sizes.every((s) => {
+        const ok = s.areaMm2 >= peak * (1 - AREA_PLATEAU_TOL);
+        peak = Math.max(peak, s.areaMm2);
+        return ok;
+      });
       if (!grows) {
         if (sizes.length > 2) {
           block(

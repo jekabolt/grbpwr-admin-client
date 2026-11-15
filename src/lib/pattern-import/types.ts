@@ -706,6 +706,24 @@ export type ChainOpts = {
   joinLateralMm: Mm;
   /** Expected size count when known (from sizes/ or operator); bundles are cut to it. */
   sizeCount?: number;
+  /**
+   * Join regular trains of separate solid dashes whose gap is wider than joinGapMm (chains/link.ts
+   * pass 2b). Off by default: buildChainsDetailed turns it on only for a file where a size of the
+   * legend has no line without it.
+   */
+  dashTrains?: boolean;
+  /**
+   * Do not throw a long straight dashed line out as a "dashed guide" (chains/classify.ts). A size
+   * whose lines are all straight (a skirt) draws no curve with its pen and is taken for a guide.
+   * Off by default; turned on with `dashTrains` for a file where a size has no line.
+   */
+  keepGuides?: boolean;
+  /**
+   * Do not label straight lines of one length repeated ≥ 3 times "tile frame / cut mark"
+   * (chains/classify.ts). A rectangle drawn in every size repeats like a frame does. Off by
+   * default; turned on with `dashTrains` for a file where a size has no line or too little of one.
+   */
+  keepRepeats?: boolean;
 };
 
 export type BuildChainsFn = (sheet: Sheet, opts: ChainOpts, progress?: Progress) => ChainSet;
@@ -1188,6 +1206,12 @@ export type PieceCandidate = {
    */
   gradeHint?: { pred: PtMm[]; from: [number, number]; refusals: string[]; extrapolated?: boolean };
   /**
+   * GRADE P2, reporting only: why the repair's try ended without a prediction (`gradeHint` absent) —
+   * 'no-model:inconsistent' | 'no-model:ambiguous' | 'no-model:no-pair-match' | 'not-bracketed'…
+   * Not `gradeRefusal` (H1's field, read by the UI) and not shown anywhere; the corpus reports count it.
+   */
+  gradeTryWhy?: string[];
+  /**
    * P1 provenance: the continuity walls this closed outline runs along — drawn lines of another
    * class or size that close this rank between its own dangling ends (R0 a chain path, R1 the
    * stretch of one line both ends lie on, R2 a spine several sizes end on). Kept only when the
@@ -1204,8 +1228,9 @@ export type PieceCandidate = {
   /** pieces/grade (H1): the refusal in words for the operator ("the drawing shows 5 lines …"). */
   gradeDetail?: string;
   /**
-   * Outline stretches the SOURCE does not draw (F4b), shown to the operator: 'bridge' = an
-   * automatic ≤ 3 mm gap close between two of this rank's lines; 'operator-bridge' = one the
+   * Outline stretches the SOURCE does not draw (F4b), shown to the operator: 'bridge' = the fill's
+   * own close — a dangling end to the nearest wall within 3 mm, or two open ends of one stroke
+   * within 12 mm; 'operator-bridge' = one the
    * operator drew; 'band-cut' = this rank's end tick across a band, carried to the band's edges
    * where the source stops it short;
    * 'shared-rank' = this rank is not drawn (the run lists it, no line carries it) and reuses the
@@ -1265,7 +1290,17 @@ export type ContinuityVerdict = {
 
 /** F4b outline edges the source does not draw (see `PieceCandidate.derived`); gate G15 audits them. */
 /** 'grade-fill' (GRADE P2): a hole ≤ 15 mm in a repaired size's own line, filled from the grade. */
-export type DerivedEdgeKind = 'bridge' | 'operator-bridge' | 'band-cut' | 'grade-fill';
+/**
+ * 'grade-draw' (GRADE P2, draw mode): a stretch of a bracketed size's line the drawing does not
+ * have, DRAWN from the grade — every hole of a block the strict fill refused and the draw mode
+ * took, ≤ 15 % of the perimeter in all (GFIT_REPAIR.drawMaxShare).
+ */
+export type DerivedEdgeKind =
+  | 'bridge'
+  | 'operator-bridge'
+  | 'band-cut'
+  | 'grade-fill'
+  | 'grade-draw';
 
 /** GRADE P2: how a repaired size was proven (PieceCandidate.repair). */
 export type RepairRecord = {
@@ -1283,6 +1318,15 @@ export type RepairRecord = {
   score: number;
   /** Largest excess of the repaired outline over the corridor, mm. */
   devMm: number;
+  /** Draw mode: mm of the line drawn from the grade (all holes of a drawn block, 'grade-draw'). */
+  drawnMm?: number;
+  /** Draw mode: the size lies past both anchors of `from` (the grade carried one step on). */
+  extrapolated?: true;
+  /**
+   * Draw mode: how differently another pair of trusted anchors draws the same holes, mm (gfit
+   * repair.ts holeSpread). Absent = no other pair to ask. The "check this stretch" cue.
+   */
+  spreadMm?: number;
   /** kind 'neighbour': the outline it had closed to (simplified 0.3 mm) — for the audit picture. */
   was?: PtMm[];
 };
@@ -1560,6 +1604,8 @@ export type OffsetReport = {
   /** Max deviation between result and the expected parallel curve, mm. */
   maxDeviationMm: Mm;
   reason?: string;
+  /** Raw-offset remnants dropped before counting loops (every vertex nearer than the allowance). */
+  dropped?: { loops: number; maxAreaMm2: number };
 };
 
 export type PairHand = 'L' | 'R';
@@ -2477,6 +2523,8 @@ export type ManifestGrade = {
   holes: number;
   holesMm: number;
   cover: number;
+  /** Draw mode: mm of the line DRAWN from the grade ('grade-draw' edges); absent = none. */
+  drawnMm?: number;
 };
 
 /**
