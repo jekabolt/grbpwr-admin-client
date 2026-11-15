@@ -793,13 +793,17 @@ export type MeasurementSurfaceJointPointerOwnerV9 =
   | 'rotation-gizmo'
   | 'camera';
 
-/** Marker hit targets own the pointer before a selected joint's overlapping rotation gizmo. */
+/** An actual ring-axis hit wins; otherwise the enlarged marker keeps selection/drag priority. */
 export function measurementSurfaceJointPointerOwnerV9(options: {
   readonly button: number;
   readonly selectedMarkerId: string | null;
   readonly markerHasPositionTarget: boolean;
   readonly rotationGizmoAvailable: boolean;
+  readonly rotationGizmoHit?: boolean;
 }): MeasurementSurfaceJointPointerOwnerV9 {
+  if (options.button === 0 && options.rotationGizmoAvailable && options.rotationGizmoHit === true) {
+    return 'rotation-gizmo';
+  }
   if (options.selectedMarkerId !== null) {
     return options.button === 0 && options.markerHasPositionTarget
       ? 'position-drag'
@@ -2432,6 +2436,16 @@ export function MeasurementWatertightSurfaceV1Stage({
         )
           return;
         const gizmo = editor.rotationGizmo;
+        let rotationGizmoHit = false;
+        if (gizmo && transformControls?.enabled && transformPointerAdapter) {
+          const transformPointer = normalizedTransformPointer(event, 0);
+          if (transformPointer) {
+            transformPointerAdapter.hover(transformPointer);
+            rotationGizmoHit = transformPointerAdapter.activeAxis() !== null;
+          }
+        }
+        // The selected marker deliberately has a large 56/64 px target. Probe the thin local ring
+        // first so that target cannot make an edge-on rotation gizmo impossible to grab.
         const selectedId = projectedJointMarkerId(event, editor);
         const positionTarget = editor.positionDragTargets?.find(
           ({ groupId }) => groupId === selectedId,
@@ -2444,6 +2458,7 @@ export function MeasurementWatertightSurfaceV1Stage({
             gizmo !== undefined &&
             transformControls?.enabled === true &&
             transformPointerAdapter !== null,
+          rotationGizmoHit,
         });
         if (pointerOwner === 'position-drag' && selectedId && positionTarget) {
           if (positionDragSession) finishPositionDrag('cancel');
@@ -2527,23 +2542,28 @@ export function MeasurementWatertightSurfaceV1Stage({
           publishJointHover(null, false);
           return;
         }
+        if (transformControls?.enabled && transformPointerAdapter) {
+          const pointer = normalizedTransformPointer(event, -1);
+          if (pointer) {
+            transformPointerAdapter.hover(pointer);
+            const axis = transformPointerAdapter.activeAxis();
+            if (axis) {
+              publishJointHover(null, false);
+              if (contextCanvas) {
+                contextCanvas.dataset.transformHoverAxis = axis;
+                contextCanvas.style.cursor = 'grab';
+              }
+              scheduleRender();
+              return;
+            }
+          }
+        }
         const hoveredId = projectedJointMarkerId(event, editor);
         const hoveredPositionTarget = editor.positionDragTargets?.some(
           ({ groupId }) => groupId === hoveredId,
         );
         publishJointHover(hoveredId, hoveredPositionTarget === true);
-        if (hoveredId === null && transformControls?.enabled && transformPointerAdapter) {
-          const pointer = normalizedTransformPointer(event, -1);
-          if (pointer) {
-            transformPointerAdapter.hover(pointer);
-            const axis = transformPointerAdapter.activeAxis();
-            if (contextCanvas) {
-              contextCanvas.dataset.transformHoverAxis = axis ?? 'none';
-              contextCanvas.style.cursor = axis ? 'grab' : '';
-            }
-            scheduleRender();
-          }
-        } else if (contextCanvas) {
+        if (contextCanvas) {
           contextCanvas.dataset.transformHoverAxis = 'none';
         }
       };

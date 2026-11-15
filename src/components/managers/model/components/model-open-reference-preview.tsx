@@ -3342,6 +3342,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                   onSelectionChange: (nextSelection) => {
                     if (jointRingTransactionRef.current) finishActiveJointRing('cancel');
                     setJointSelection(nextSelection);
+                    setDirectSelectedGroupId(nextSelection.groupId);
                   },
                 },
               })}
