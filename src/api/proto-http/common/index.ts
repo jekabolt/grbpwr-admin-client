@@ -8924,11 +8924,110 @@ export type BodyMeasurementName =
   | "BODY_MEASUREMENT_NAME_CB_NECK_TO_WAIST"
   // Widths (front / back)
   | "BODY_MEASUREMENT_NAME_ACROSS_FRONT"
-  | "BODY_MEASUREMENT_NAME_ACROSS_BACK";
+  | "BODY_MEASUREMENT_NAME_ACROSS_BACK"
+  // P0 mannequin-shape contract. These are distinct tape/vertical/depth
+  // observations; HEIGHT remains standing stature and is not reinterpreted.
+  // Exact landmarks and path semantics are identified by ModelMeasurement.metadata.
+  | "BODY_MEASUREMENT_NAME_HPS_HEIGHT"
+  | "BODY_MEASUREMENT_NAME_CF_NECK_TO_WAIST"
+  | "BODY_MEASUREMENT_NAME_WAIST_HEIGHT"
+  | "BODY_MEASUREMENT_NAME_WAIST_TO_HIGH_HIP"
+  | "BODY_MEASUREMENT_NAME_WAIST_TO_HIP"
+  | "BODY_MEASUREMENT_NAME_CHEST_DEPTH"
+  | "BODY_MEASUREMENT_NAME_WAIST_DEPTH"
+  | "BODY_MEASUREMENT_NAME_HIP_DEPTH"
+  | "BODY_MEASUREMENT_NAME_SHOULDER_LENGTH"
+  | "BODY_MEASUREMENT_NAME_SHOULDER_DROP"
+  | "BODY_MEASUREMENT_NAME_ARMSCYE_DEPTH"
+  | "BODY_MEASUREMENT_NAME_ARMSCYE_CIRCUMFERENCE"
+  | "BODY_MEASUREMENT_NAME_BUST_APEX_TO_APEX"
+  | "BODY_MEASUREMENT_NAME_HPS_TO_BUST_APEX";
+// ModelMannequinPoseSpace names the coordinate/control contract used by a
+// mannequin pose. Stored V2 resources admit only DIRECT_POSE_V9; FULL_BODY_V4
+// remains an explicit migration vocabulary value and must not be guessed.
+export type ModelMannequinPoseSpace =
+  | "MODEL_MANNEQUIN_POSE_SPACE_UNKNOWN"
+  | "MODEL_MANNEQUIN_POSE_SPACE_MAKEHUMAN_OPEN_REFERENCE_FULL_BODY_V4"
+  | "MODEL_MANNEQUIN_POSE_SPACE_MAKEHUMAN_OPEN_REFERENCE_DIRECT_POSE_V9";
+export type ModelMannequinArmMode =
+  | "MODEL_MANNEQUIN_ARM_MODE_UNKNOWN"
+  | "MODEL_MANNEQUIN_ARM_MODE_LINKED"
+  | "MODEL_MANNEQUIN_ARM_MODE_INDEPENDENT";
+export type ModelMannequinLegMode =
+  | "MODEL_MANNEQUIN_LEG_MODE_UNKNOWN"
+  | "MODEL_MANNEQUIN_LEG_MODE_LINKED"
+  | "MODEL_MANNEQUIN_LEG_MODE_INDEPENDENT";
+// BodyMeasurementSource records how a value was obtained. It is provenance,
+// not evidence that the value, landmarks, or resulting mannequin are accurate.
+export type BodyMeasurementSource =
+  | "BODY_MEASUREMENT_SOURCE_UNKNOWN"
+  | "BODY_MEASUREMENT_SOURCE_MANUAL_TAPE"
+  | "BODY_MEASUREMENT_SOURCE_THREE_D_SCAN"
+  | "BODY_MEASUREMENT_SOURCE_IMPORTED"
+  | "BODY_MEASUREMENT_SOURCE_DERIVED";
+export type ModelMannequinArmPoseV1 = {
+  shoulderRaiseDegrees: number | undefined;
+  shoulderForwardDegrees: number | undefined;
+  elbowBendDegrees: number | undefined;
+  wristBendDegrees: number | undefined;
+};
+
+export type ModelMannequinLegPoseV1 = {
+  hipForwardDegrees: number | undefined;
+  hipSideDegrees: number | undefined;
+  kneeBendDegrees: number | undefined;
+  ankleBendDegrees: number | undefined;
+};
+
+// ModelMannequinPoseV2 is the typed persistence shape for the direct-pose-v9
+// editor. canonical_sha256 is the lowercase SHA-256 of the canonical frontend
+// V2 JSON document; the server rebuilds and verifies it before every write.
+export type ModelMannequinPoseV2 = {
+  schemaVersion: number | undefined;
+  poseSpace: ModelMannequinPoseSpace | undefined;
+  bodyFlexionDegrees: number | undefined;
+  bodySideBendDegrees: number | undefined;
+  bodyTwistDegrees: number | undefined;
+  armMode: ModelMannequinArmMode | undefined;
+  leftArm: ModelMannequinArmPoseV1 | undefined;
+  rightArm: ModelMannequinArmPoseV1 | undefined;
+  headPitchDegrees: number | undefined;
+  headYawDegrees: number | undefined;
+  headSideDegrees: number | undefined;
+  legMode: ModelMannequinLegMode | undefined;
+  leftLeg: ModelMannequinLegPoseV1 | undefined;
+  rightLeg: ModelMannequinLegPoseV1 | undefined;
+  canonicalSha256: string | undefined;
+  shoulderProtractionDegrees: number | undefined;
+  shoulderElevationDegrees: number | undefined;
+  shoulderLevelDegrees: number | undefined;
+};
+
+export type StoredModelMannequinPose = {
+  modelId: number | undefined;
+  pose: ModelMannequinPoseV2 | undefined;
+  // Canonical positive decimal uint64 string. The admin TypeScript generator
+  // maps protobuf uint64 to number, which is lossy above 2^53.
+  revision: string | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+  updatedBy: string | undefined;
+};
+
+// BodyMeasurementMetadataV1 binds one value to an acquisition method and a
+// caller-owned protocol identifier. Presence is optional for legacy rows. When
+// present, schema_version is exactly 1, source is non-UNKNOWN, and protocol_id
+// is a non-empty stable identifier; the server validates all three together.
+export type BodyMeasurementMetadataV1 = {
+  schemaVersion: number | undefined;
+  source: BodyMeasurementSource | undefined;
+  protocolId: string | undefined;
+};
+
 // ModelMeasurement is a single body measurement value, in millimetres.
 export type ModelMeasurement = {
   name: BodyMeasurementName | undefined;
   valueMm: number | undefined;
+  metadata: BodyMeasurementMetadataV1 | undefined;
 };
 
 // ModelInsert is the writable payload for a fit-model profile. Measurements are
@@ -8941,6 +9040,11 @@ export type ModelInsert = {
   thumbnailId: number | undefined;
   mediaIds: number[] | undefined;
   defaultSizeIds: number[] | undefined;
+  // Writer-awareness version for BodyMeasurementName. The server emits 1.
+  // 0 identifies a legacy writer that only knew values 1..20; on update the
+  // server preserves stored P0 values 21..34 that are absent from its payload.
+  // 1 means the sparse measurements list is authoritative for all values 1..34.
+  bodyMeasurementSchemaVersion: number | undefined;
 };
 
 // Model is a stored fit-model profile.

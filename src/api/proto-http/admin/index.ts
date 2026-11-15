@@ -4628,12 +4628,18 @@ export type common_ModelInsert = {
   thumbnailId: number | undefined;
   mediaIds: number[] | undefined;
   defaultSizeIds: number[] | undefined;
+  // Writer-awareness version for BodyMeasurementName. The server emits 1.
+  // 0 identifies a legacy writer that only knew values 1..20; on update the
+  // server preserves stored P0 values 21..34 that are absent from its payload.
+  // 1 means the sparse measurements list is authoritative for all values 1..34.
+  bodyMeasurementSchemaVersion: number | undefined;
 };
 
 // ModelMeasurement is a single body measurement value, in millimetres.
 export type common_ModelMeasurement = {
   name: common_BodyMeasurementName | undefined;
   valueMm: number | undefined;
+  metadata: common_BodyMeasurementMetadataV1 | undefined;
 };
 
 // BodyMeasurementName enumerates the body-measurement types captured for a fit
@@ -4664,7 +4670,42 @@ export type common_BodyMeasurementName =
   | "BODY_MEASUREMENT_NAME_CB_NECK_TO_WAIST"
   // Widths (front / back)
   | "BODY_MEASUREMENT_NAME_ACROSS_FRONT"
-  | "BODY_MEASUREMENT_NAME_ACROSS_BACK";
+  | "BODY_MEASUREMENT_NAME_ACROSS_BACK"
+  // P0 mannequin-shape contract. These are distinct tape/vertical/depth
+  // observations; HEIGHT remains standing stature and is not reinterpreted.
+  // Exact landmarks and path semantics are identified by ModelMeasurement.metadata.
+  | "BODY_MEASUREMENT_NAME_HPS_HEIGHT"
+  | "BODY_MEASUREMENT_NAME_CF_NECK_TO_WAIST"
+  | "BODY_MEASUREMENT_NAME_WAIST_HEIGHT"
+  | "BODY_MEASUREMENT_NAME_WAIST_TO_HIGH_HIP"
+  | "BODY_MEASUREMENT_NAME_WAIST_TO_HIP"
+  | "BODY_MEASUREMENT_NAME_CHEST_DEPTH"
+  | "BODY_MEASUREMENT_NAME_WAIST_DEPTH"
+  | "BODY_MEASUREMENT_NAME_HIP_DEPTH"
+  | "BODY_MEASUREMENT_NAME_SHOULDER_LENGTH"
+  | "BODY_MEASUREMENT_NAME_SHOULDER_DROP"
+  | "BODY_MEASUREMENT_NAME_ARMSCYE_DEPTH"
+  | "BODY_MEASUREMENT_NAME_ARMSCYE_CIRCUMFERENCE"
+  | "BODY_MEASUREMENT_NAME_BUST_APEX_TO_APEX"
+  | "BODY_MEASUREMENT_NAME_HPS_TO_BUST_APEX";
+// BodyMeasurementMetadataV1 binds one value to an acquisition method and a
+// caller-owned protocol identifier. Presence is optional for legacy rows. When
+// present, schema_version is exactly 1, source is non-UNKNOWN, and protocol_id
+// is a non-empty stable identifier; the server validates all three together.
+export type common_BodyMeasurementMetadataV1 = {
+  schemaVersion: number | undefined;
+  source: common_BodyMeasurementSource | undefined;
+  protocolId: string | undefined;
+};
+
+// BodyMeasurementSource records how a value was obtained. It is provenance,
+// not evidence that the value, landmarks, or resulting mannequin are accurate.
+export type common_BodyMeasurementSource =
+  | "BODY_MEASUREMENT_SOURCE_UNKNOWN"
+  | "BODY_MEASUREMENT_SOURCE_MANUAL_TAPE"
+  | "BODY_MEASUREMENT_SOURCE_THREE_D_SCAN"
+  | "BODY_MEASUREMENT_SOURCE_IMPORTED"
+  | "BODY_MEASUREMENT_SOURCE_DERIVED";
 export type AddModelResponse = {
   id: number | undefined;
 };
@@ -4698,6 +4739,89 @@ export type GetModelRequest = {
 
 export type GetModelResponse = {
   model: common_Model | undefined;
+};
+
+export type GetModelMannequinPoseRequest = {
+  modelId: number | undefined;
+};
+
+export type GetModelMannequinPoseResponse = {
+  storedPose: common_StoredModelMannequinPose | undefined;
+};
+
+export type common_StoredModelMannequinPose = {
+  modelId: number | undefined;
+  pose: common_ModelMannequinPoseV2 | undefined;
+  // Canonical positive decimal uint64 string. The admin TypeScript generator
+  // maps protobuf uint64 to number, which is lossy above 2^53.
+  revision: string | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+  updatedBy: string | undefined;
+};
+
+// ModelMannequinPoseV2 is the typed persistence shape for the direct-pose-v9
+// editor. canonical_sha256 is the lowercase SHA-256 of the canonical frontend
+// V2 JSON document; the server rebuilds and verifies it before every write.
+export type common_ModelMannequinPoseV2 = {
+  schemaVersion: number | undefined;
+  poseSpace: common_ModelMannequinPoseSpace | undefined;
+  bodyFlexionDegrees: number | undefined;
+  bodySideBendDegrees: number | undefined;
+  bodyTwistDegrees: number | undefined;
+  armMode: common_ModelMannequinArmMode | undefined;
+  leftArm: common_ModelMannequinArmPoseV1 | undefined;
+  rightArm: common_ModelMannequinArmPoseV1 | undefined;
+  headPitchDegrees: number | undefined;
+  headYawDegrees: number | undefined;
+  headSideDegrees: number | undefined;
+  legMode: common_ModelMannequinLegMode | undefined;
+  leftLeg: common_ModelMannequinLegPoseV1 | undefined;
+  rightLeg: common_ModelMannequinLegPoseV1 | undefined;
+  canonicalSha256: string | undefined;
+  shoulderProtractionDegrees: number | undefined;
+  shoulderElevationDegrees: number | undefined;
+  shoulderLevelDegrees: number | undefined;
+};
+
+// ModelMannequinPoseSpace names the coordinate/control contract used by a
+// mannequin pose. Stored V2 resources admit only DIRECT_POSE_V9; FULL_BODY_V4
+// remains an explicit migration vocabulary value and must not be guessed.
+export type common_ModelMannequinPoseSpace =
+  | "MODEL_MANNEQUIN_POSE_SPACE_UNKNOWN"
+  | "MODEL_MANNEQUIN_POSE_SPACE_MAKEHUMAN_OPEN_REFERENCE_FULL_BODY_V4"
+  | "MODEL_MANNEQUIN_POSE_SPACE_MAKEHUMAN_OPEN_REFERENCE_DIRECT_POSE_V9";
+export type common_ModelMannequinArmMode =
+  | "MODEL_MANNEQUIN_ARM_MODE_UNKNOWN"
+  | "MODEL_MANNEQUIN_ARM_MODE_LINKED"
+  | "MODEL_MANNEQUIN_ARM_MODE_INDEPENDENT";
+export type common_ModelMannequinArmPoseV1 = {
+  shoulderRaiseDegrees: number | undefined;
+  shoulderForwardDegrees: number | undefined;
+  elbowBendDegrees: number | undefined;
+  wristBendDegrees: number | undefined;
+};
+
+export type common_ModelMannequinLegMode =
+  | "MODEL_MANNEQUIN_LEG_MODE_UNKNOWN"
+  | "MODEL_MANNEQUIN_LEG_MODE_LINKED"
+  | "MODEL_MANNEQUIN_LEG_MODE_INDEPENDENT";
+export type common_ModelMannequinLegPoseV1 = {
+  hipForwardDegrees: number | undefined;
+  hipSideDegrees: number | undefined;
+  kneeBendDegrees: number | undefined;
+  ankleBendDegrees: number | undefined;
+};
+
+export type PutModelMannequinPoseRequest = {
+  modelId: number | undefined;
+  pose: common_ModelMannequinPoseV2 | undefined;
+  // Canonical positive decimal uint64 string. Absent means the caller observed
+  // no stored pose; zero, leading zeroes and non-decimal forms are invalid.
+  expectedRevision?: string;
+};
+
+export type PutModelMannequinPoseResponse = {
+  storedPose: common_StoredModelMannequinPose | undefined;
 };
 
 export type UpdateModelRequest = {
@@ -20560,6 +20684,12 @@ export interface AdminService {
   AddModel(request: AddModelRequest): Promise<AddModelResponse>;
   // GetModel returns a fit-model profile by id.
   GetModel(request: GetModelRequest): Promise<GetModelResponse>;
+  // GetModelMannequinPose returns the dedicated, versioned pose resource. An
+  // existing model with no saved pose returns an empty stored_pose.
+  GetModelMannequinPose(request: GetModelMannequinPoseRequest): Promise<GetModelMannequinPoseResponse>;
+  // PutModelMannequinPose creates or replaces the dedicated pose resource under
+  // optimistic revision control; it never participates in UpdateModel.
+  PutModelMannequinPose(request: PutModelMannequinPoseRequest): Promise<PutModelMannequinPoseResponse>;
   // UpdateModel updates a fit-model profile.
   UpdateModel(request: UpdateModelRequest): Promise<UpdateModelResponse>;
   // DeleteModel deletes a fit-model profile by id.
@@ -24697,6 +24827,46 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetModel",
       }) as Promise<GetModelResponse>;
+    },
+    GetModelMannequinPose(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.modelId) {
+        throw new Error("missing required field request.model_id");
+      }
+      const path = `api/admin/model/${request.modelId}/mannequin-pose`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetModelMannequinPose",
+      }) as Promise<GetModelMannequinPoseResponse>;
+    },
+    PutModelMannequinPose(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.modelId) {
+        throw new Error("missing required field request.model_id");
+      }
+      const path = `api/admin/model/${request.modelId}/mannequin-pose`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PutModelMannequinPose",
+      }) as Promise<PutModelMannequinPoseResponse>;
     },
     UpdateModel(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/model/update`; // eslint-disable-line quotes
