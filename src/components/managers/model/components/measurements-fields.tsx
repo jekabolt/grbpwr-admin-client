@@ -1,7 +1,22 @@
 import { cn } from 'lib/utility';
 import { ChangeEvent, FocusEvent, KeyboardEvent, useRef, useState } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
-import { Button, GroupLabel, Input, Text } from 'ui';
+import {
+  CalloutBox,
+  GroupLabel,
+  HeaderNote,
+  HeaderWarnings,
+  Input,
+  Text,
+  type HeaderWarning,
+} from 'ui';
+import {
+  auditModelMeasurementFieldsV1,
+  EMPTY_MODEL_MEASUREMENT_FIELD_AUDIT_V1,
+  type ModelMeasurementFieldAuditV1,
+  type ModelMeasurementFieldFindingV1,
+} from './model-measurement-field-audit';
+import { MeasurementProtocolGuide } from './measurement-protocol-guide';
 import { BODY_MEASUREMENT_GROUPS } from './measurements';
 import { ModelFormData } from './schema';
 import {
@@ -33,6 +48,10 @@ function measurementInputId(name: string): string {
   return `model-measurement-${name}`;
 }
 
+function measurementFindingListId(name: string): string {
+  return `${measurementInputId(name)}-audit`;
+}
+
 function cleanMeasurementInput(value: string, unit: 'mm' | 'in'): string {
   const normalized = value.replace(',', '.');
   if (unit === 'mm') return normalized.replace(/[^0-9]/g, '');
@@ -46,7 +65,13 @@ function nextMeasurementInput(current: HTMLInputElement): HTMLInputElement | und
   return inputs[inputs.indexOf(current) + 1];
 }
 
-function MeasurementInput({ name }: { name: string }) {
+function MeasurementInput({
+  name,
+  findings,
+}: {
+  name: string;
+  findings: readonly ModelMeasurementFieldFindingV1[];
+}) {
   const { control } = useFormContext<ModelFormData>();
   const { field } = useController({ control, name: `measurements.${name}` });
   const { setFocus, setFocused } = useSheetMeasurementFocus();
@@ -79,6 +104,8 @@ function MeasurementInput({ name }: { name: string }) {
       enterKeyHint='next'
       autoComplete='off'
       aria-label={measurementLabel(name)}
+      aria-invalid={findings.length > 0}
+      aria-describedby={findings.length > 0 ? measurementFindingListId(name) : undefined}
       value={shown}
       placeholder='—'
       onFocus={(event: FocusEvent<HTMLInputElement>) => {
@@ -121,6 +148,27 @@ function MeasurementInput({ name }: { name: string }) {
   );
 }
 
+function MeasurementFindingList({
+  name,
+  findings,
+}: {
+  name: string;
+  findings: readonly ModelMeasurementFieldFindingV1[];
+}) {
+  if (findings.length === 0) return null;
+  return (
+    <ul id={measurementFindingListId(name)} className='flex flex-col gap-0.5'>
+      {findings.map((finding) => (
+        <li key={`${finding.code}:${finding.message}`}>
+          <Text component='span' size='micro' variant='errorLabel' className='leading-tight'>
+            ! {finding.message}
+          </Text>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function MeasurementLabel({ name }: { name: string }) {
   const measurements = useMeasurements();
   const empty = !(Number(measurements[name]) > 0);
@@ -133,7 +181,13 @@ function MeasurementLabel({ name }: { name: string }) {
   );
 }
 
-function MeasurementCell({ name }: { name: string }) {
+function MeasurementCell({
+  name,
+  findings,
+}: {
+  name: string;
+  findings: readonly ModelMeasurementFieldFindingV1[];
+}) {
   const { setHover } = useSheetMeasurementFocus();
   return (
     <div
@@ -142,7 +196,8 @@ function MeasurementCell({ name }: { name: string }) {
       className='flex min-w-0 flex-col gap-1'
     >
       <MeasurementLabel name={name} />
-      <MeasurementInput name={name} />
+      <MeasurementInput name={name} findings={findings} />
+      <MeasurementFindingList name={name} findings={findings} />
     </div>
   );
 }
@@ -150,9 +205,11 @@ function MeasurementCell({ name }: { name: string }) {
 function MeasurementGroup({
   title,
   measurements,
+  audit,
 }: {
   title: string;
   measurements: (typeof MODEL_MEASUREMENTS)[number][];
+  audit: ModelMeasurementFieldAuditV1;
 }) {
   const values = useMeasurements();
   const { unit } = useMeasurementUnit();
@@ -178,27 +235,101 @@ function MeasurementGroup({
       </GroupLabel>
       <div className='flex flex-col gap-3 pt-3'>
         {measurements.map((measurement) => (
-          <MeasurementCell key={measurement.name} name={measurement.name} />
+          <MeasurementCell
+            key={measurement.name}
+            name={measurement.name}
+            findings={audit.byMeasurementName[measurement.name] ?? []}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-export function MeasurementsHeaderActions() {
+function useMeasurementFieldAudit(showAudit: boolean): ModelMeasurementFieldAuditV1 {
+  const values = useMeasurements();
+  return showAudit ? auditModelMeasurementFieldsV1(values) : EMPTY_MODEL_MEASUREMENT_FIELD_AUDIT_V1;
+}
+
+export function MeasurementsHeaderActions({ showAudit = false }: { showAudit?: boolean }) {
+  const audit = useMeasurementFieldAudit(showAudit);
+  const { setFocus } = useSheetMeasurementFocus();
+  const warnings = buildMeasurementHeaderWarnings(audit, (name) => {
+    setFocus(name);
+    window.requestAnimationFrame(() => document.getElementById(measurementInputId(name))?.focus());
+  });
   return (
     <div className='flex items-center gap-2'>
+      <HeaderWarnings items={warnings} countOnly />
+      <HeaderNote
+        tone='attention'
+        title='editing a value clears its source/protocol metadata; repeated readings are not stored'
+      >
+        protocol v1.1 · readings unrecorded
+      </HeaderNote>
       <MeasurementUnitSwitch />
     </div>
   );
 }
 
-export function MeasurementsFields() {
+export function buildMeasurementHeaderWarnings(
+  audit: ModelMeasurementFieldAuditV1,
+  focusMeasurement: (name: string) => void,
+): HeaderWarning[] {
+  const warnings: HeaderWarning[] = Object.entries(audit.byMeasurementName).flatMap(
+    ([name, findings]) =>
+      findings.map((finding) => {
+        const label = measurementLabel(name);
+        return {
+          text: `${label}: ${finding.message}`,
+          error: true,
+          action: {
+            label: `focus ${label}`,
+            onClick: () => focusMeasurement(name),
+          },
+        };
+      }),
+  );
+  if (audit.unassignedErrorCount > 0) {
+    warnings.push({ text: 'measurement mapping needs review', error: true });
+  }
+  return warnings;
+}
+
+function MeasurementAuditStatus({ audit }: { audit: ModelMeasurementFieldAuditV1 }) {
+  const hasErrors = audit.errorCount > 0;
+  const issueLabel = `${audit.errorCount} measurement ${audit.errorCount === 1 ? 'issue' : 'issues'}`;
   return (
-    <div className='grid grid-cols-2 gap-x-4 gap-y-4 md:grid-cols-3 xl:grid-cols-5'>
-      {BODY_MEASUREMENT_GROUPS.map((group) => (
-        <MeasurementGroup key={group.title} title={group.title} measurements={group.measurements} />
-      ))}
+    <CalloutBox tone={hasErrors ? 'error' : 'note'}>
+      <Text component='span' size='micro'>
+        {hasErrors ? (
+          <>
+            <b>{issueLabel}</b> · review the marked fields before using this profile for a mannequin
+          </>
+        ) : (
+          <>structural checks pass · protocol use is not verified</>
+        )}
+      </Text>
+    </CalloutBox>
+  );
+}
+
+export function MeasurementsFields({ showAudit = false }: { showAudit?: boolean }) {
+  const audit = useMeasurementFieldAudit(showAudit);
+  return (
+    <div className='flex flex-col gap-4'>
+      {showAudit && <MeasurementAuditStatus audit={audit} />}
+      <MeasurementProtocolGuide />
+      <div className='grid grid-cols-2 gap-x-4 gap-y-4 md:grid-cols-3 xl:grid-cols-5'>
+        {BODY_MEASUREMENT_GROUPS.map((group) => (
+          <MeasurementGroup
+            key={group.title}
+            title={group.title}
+            measurements={group.measurements}
+            audit={audit}
+          />
+        ))}
+      </div>
     </div>
   );
 }

@@ -12,6 +12,8 @@ export const modelKeys = {
   lists: () => [...modelKeys.all, 'list'] as const,
   details: () => [...modelKeys.all, 'detail'] as const,
   detail: (id: number) => [...modelKeys.details(), id] as const,
+  mannequinPoses: () => [...modelKeys.all, 'mannequin-pose'] as const,
+  mannequinPose: (id: number) => [...modelKeys.mannequinPoses(), id] as const,
 };
 
 // Infinite list with server-side gender + name filters. ListModels returns `total`
@@ -102,6 +104,7 @@ export function useDeleteModel() {
     mutationFn: (id: number) => adminService.DeleteModel({ id }),
     onSuccess: (_data, id) => {
       queryClient.removeQueries({ queryKey: modelKeys.detail(id) });
+      queryClient.removeQueries({ queryKey: modelKeys.mannequinPose(id) });
       queryClient.invalidateQueries({ queryKey: modelKeys.lists() });
     },
   });

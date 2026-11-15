@@ -47,8 +47,13 @@ export const BODY_MEASUREMENT_GROUPS: BodyMeasurementGroup[] = [
     title: 'vertical / lengths',
     measurements: [
       { name: 'BODY_MEASUREMENT_NAME_HEIGHT', label: 'height' },
+      { name: 'BODY_MEASUREMENT_NAME_HPS_HEIGHT', label: 'hps height' },
       { name: 'BODY_MEASUREMENT_NAME_HPS_TO_WAIST_FRONT', label: 'hps to waist (front)' },
+      { name: 'BODY_MEASUREMENT_NAME_CF_NECK_TO_WAIST', label: 'cf neck to waist' },
       { name: 'BODY_MEASUREMENT_NAME_CB_NECK_TO_WAIST', label: 'cb neck to waist' },
+      { name: 'BODY_MEASUREMENT_NAME_WAIST_HEIGHT', label: 'waist height' },
+      { name: 'BODY_MEASUREMENT_NAME_WAIST_TO_HIGH_HIP', label: 'waist to high hip' },
+      { name: 'BODY_MEASUREMENT_NAME_WAIST_TO_HIP', label: 'waist to hip' },
     ],
   },
   {
@@ -56,6 +61,30 @@ export const BODY_MEASUREMENT_GROUPS: BodyMeasurementGroup[] = [
     measurements: [
       { name: 'BODY_MEASUREMENT_NAME_ACROSS_FRONT', label: 'across front' },
       { name: 'BODY_MEASUREMENT_NAME_ACROSS_BACK', label: 'across back' },
+    ],
+  },
+  {
+    title: 'depths',
+    measurements: [
+      { name: 'BODY_MEASUREMENT_NAME_CHEST_DEPTH', label: 'chest depth' },
+      { name: 'BODY_MEASUREMENT_NAME_WAIST_DEPTH', label: 'waist depth' },
+      { name: 'BODY_MEASUREMENT_NAME_HIP_DEPTH', label: 'hip depth' },
+    ],
+  },
+  {
+    title: 'shoulder / armscye',
+    measurements: [
+      { name: 'BODY_MEASUREMENT_NAME_SHOULDER_LENGTH', label: 'shoulder length' },
+      { name: 'BODY_MEASUREMENT_NAME_SHOULDER_DROP', label: 'shoulder drop' },
+      { name: 'BODY_MEASUREMENT_NAME_ARMSCYE_DEPTH', label: 'armscye depth' },
+      { name: 'BODY_MEASUREMENT_NAME_ARMSCYE_CIRCUMFERENCE', label: 'armscye circumference' },
+    ],
+  },
+  {
+    title: 'bust landmarks',
+    measurements: [
+      { name: 'BODY_MEASUREMENT_NAME_BUST_APEX_TO_APEX', label: 'bust apex to apex' },
+      { name: 'BODY_MEASUREMENT_NAME_HPS_TO_BUST_APEX', label: 'hps to bust apex' },
     ],
   },
 ];

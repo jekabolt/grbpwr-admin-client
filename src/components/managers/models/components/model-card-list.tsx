@@ -3,10 +3,23 @@ import { genderOptions } from 'constants/filter';
 import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { notify } from 'lib/stores/store';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent, type MouseEvent } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { useNavigate } from 'react-router-dom';
-import { Close, ConfirmationModal, Input, Pill, Placeholder, Select, Text, Tile, Tiles } from 'ui';
+import {
+  Button,
+  Close,
+  ConfirmationModal,
+  Input,
+  Pill,
+  Placeholder,
+  Select,
+  Text,
+  Tile,
+  Tiles,
+} from 'ui';
+import { ModelCardMannequinPreviewWithSavedPoseV1 } from './model-card-mannequin-preview-v1';
+import { resolveModelCardListIdentitiesV1 } from './model-card-list-identity-v1';
 import { useDeleteModel, useInfiniteModels } from './useModelQuery';
 
 const ALL = 'ALL';
@@ -27,6 +40,7 @@ export function ModelCardList() {
   const [name, setName] = useState('');
   const [debouncedName, setDebouncedName] = useState('');
   const [pendingDelete, setPendingDelete] = useState<{ id: number; name: string } | null>(null);
+  const [activePreviewModelId, setActivePreviewModelId] = useState<number | null>(null);
 
   // Debounce the name search so we don't hit the API on every keystroke.
   useEffect(() => {
@@ -46,8 +60,22 @@ export function ModelCardList() {
     }
   }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  const models = data?.pages.flatMap((page) => page.models) ?? [];
+  const models = useMemo(() => data?.pages.flatMap((page) => page.models) ?? [], [data?.pages]);
+  const modelIdentities = useMemo(() => resolveModelCardListIdentitiesV1(models), [models]);
   const total = data?.pages[0]?.total ?? models.length;
+
+  useEffect(() => {
+    setActivePreviewModelId(null);
+  }, [debouncedName, gender]);
+
+  useEffect(() => {
+    if (
+      activePreviewModelId !== null &&
+      !modelIdentities.some(({ id }) => id === activePreviewModelId)
+    ) {
+      setActivePreviewModelId(null);
+    }
+  }, [activePreviewModelId, modelIdentities]);
 
   const sizesLabel = (ids?: number[]) => {
     if (!ids?.length) return '—';
@@ -80,7 +108,7 @@ export function ModelCardList() {
         <div className='sm:w-64'>
           <Input
             value={name}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
             placeholder='search by name'
           />
         </div>
@@ -113,10 +141,15 @@ export function ModelCardList() {
         </div>
       ) : (
         <Tiles min={160}>
-          {models.map((m) => {
-            const id = m.id ?? 0;
+          {models.map((m, index) => {
+            const identity = modelIdentities[index];
+            const id = identity.id;
             const insert = m.model;
             const thumb = m.media?.[0]?.media?.thumbnail?.mediaUrl || '';
+            const label = insert?.name || (id === null ? 'model with invalid id' : `model #${id}`);
+            const showing3d = id !== null && activePreviewModelId === id;
+            const idIssueLabel =
+              identity.status === 'duplicate' ? 'duplicate model ID' : 'invalid model ID';
             const meta = [
               genderLabel(insert?.gender),
               `sizes ${sizesLabel(insert?.defaultSizeIds)}`,
@@ -125,10 +158,18 @@ export function ModelCardList() {
               .filter(Boolean)
               .join(' · ');
             return (
-              <div key={id} className='relative'>
+              <div
+                key={identity.key}
+                className='relative'
+                data-testid='model-card-list-item'
+                data-model-card-id-status={identity.status}
+                data-model-id={identity.rawId}
+              >
                 <Tile
                   media={
-                    thumb ? (
+                    showing3d ? (
+                      <ModelCardMannequinPreviewWithSavedPoseV1 model={m} label={label} />
+                    ) : thumb ? (
                       <img
                         src={thumb}
                         alt=''
@@ -139,12 +180,14 @@ export function ModelCardList() {
                       <Placeholder aspect='3/4' label='model' />
                     )
                   }
-                  name={insert?.name || `model #${id}`}
-                  onClick={() => navigate(`/models/${id}`)}
+                  name={label}
+                  onClick={id === null ? undefined : () => navigate(`/models/${id}`)}
                   className='h-full w-full'
                 >
                   <div className='mt-1 flex flex-wrap items-center gap-1'>
-                    <Pill tone='mut'>#{id}</Pill>
+                    <Pill tone={id === null ? 'warn' : 'mut'}>
+                      {id === null ? idIssueLabel : `#${id}`}
+                    </Pill>
                   </div>
                   {meta && (
                     <Text size='nano' variant='label' className='mt-1 truncate uppercase'>
@@ -152,13 +195,38 @@ export function ModelCardList() {
                     </Text>
                   )}
                 </Tile>
-                {canEdit && (
+                <div className='absolute top-2 left-2 z-10'>
+                  <Button
+                    type='button'
+                    variant='simpleReverseWithBorder'
+                    size='xs'
+                    aria-label={
+                      id === null
+                        ? `3D preview unavailable for ${label}: ${idIssueLabel}`
+                        : `3D preview for ${label}`
+                    }
+                    aria-pressed={showing3d}
+                    disabled={id === null}
+                    data-testid={
+                      id === null
+                        ? `model-card-mannequin-toggle-${identity.status}-${index}`
+                        : `model-card-mannequin-toggle-${id}`
+                    }
+                    className='flex min-h-11 min-w-11 items-center justify-center bg-bgColor'
+                    onClick={() => {
+                      if (id !== null) setActivePreviewModelId(showing3d ? null : id);
+                    }}
+                  >
+                    {showing3d ? '2D' : '3D'}
+                  </Button>
+                </div>
+                {canEdit && id !== null && (
                   <div className='absolute top-1 right-1'>
                     <Close
                       size='sm'
                       aria-label='delete model'
                       className='bg-bgColor'
-                      onClick={(e: React.MouseEvent) => {
+                      onClick={(e: MouseEvent) => {
                         e.stopPropagation();
                         setPendingDelete({ id, name: insert?.name || `model ${id}` });
                       }}
