@@ -24,6 +24,17 @@ export type PatternImportDxfPhaseECadWorkbenchColorwayOptionV1 = Readonly<{
   swatchHex?: string;
 }>;
 
+export type PatternImportDxfPhaseECadWorkbenchColorwayPreviewV1 = Readonly<{
+  colorwayId: number;
+  label: string;
+  swatchHex: string | null;
+}>;
+
+export type PatternImportDxfPhaseECadWorkbenchColorwayContourPreviewV1 = Readonly<{
+  fill: string;
+  fillOpacity: number;
+}>;
+
 type CardColorwayRefV1 = Readonly<{
   colorwayId?: number;
   baseSku?: string;
@@ -138,6 +149,35 @@ export function projectPatternImportDxfPhaseECadWorkbenchColorwaysV1(
     blocker: null,
     claims: PATTERN_IMPORT_DXF_PHASE_E_CAD_WORKBENCH_BOM_VISUAL_AUTHORITY_CLAIMS_V1,
   });
+}
+
+/**
+ * Resolves the selected saved colorway into a display-only canvas preview. The caller cannot
+ * invent or edit colorway data here: an unknown id stays unpainted and the card remains the sole
+ * colorway authority.
+ */
+export function resolvePatternImportDxfPhaseECadWorkbenchColorwayPreviewV1(
+  options: readonly PatternImportDxfPhaseECadWorkbenchColorwayOptionV1[],
+  activeColorwayId: number | null,
+): PatternImportDxfPhaseECadWorkbenchColorwayPreviewV1 | null {
+  if (activeColorwayId === null) return null;
+  const option = options.find(({ id }) => id === activeColorwayId);
+  if (!option) return null;
+  return Object.freeze({
+    colorwayId: option.id,
+    label: option.label,
+    swatchHex: option.swatchHex ?? null,
+  });
+}
+
+/** Applies a colorway swatch only to a closed exact cut shell, never to sewing or hole topology. */
+export function resolvePatternImportDxfPhaseECadWorkbenchColorwayContourPreviewV1(
+  preview: PatternImportDxfPhaseECadWorkbenchColorwayPreviewV1 | null,
+  contour: Readonly<{ role: string; closed: boolean }>,
+): PatternImportDxfPhaseECadWorkbenchColorwayContourPreviewV1 {
+  if (!preview?.swatchHex || contour.role !== 'cut-boundary' || !contour.closed)
+    return Object.freeze({ fill: 'none', fillOpacity: 0 });
+  return Object.freeze({ fill: preview.swatchHex, fillOpacity: 0.18 });
 }
 
 export type PatternImportDxfPhaseECadWorkbenchThreadCatalogV1 =

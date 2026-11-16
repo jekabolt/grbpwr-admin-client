@@ -56,6 +56,12 @@ import {
 import { PatternImportDxfPhaseECadWorkbenchToolButtonV1 } from './cad-workbench-tool-button-v1';
 import { PatternImportDxfPhaseECadWorkbenchObjectSidebarV1 } from './cad-workbench-object-sidebar-v1';
 import { usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1 } from './cad-workbench-split-shell-v1';
+import {
+  resolvePatternImportDxfPhaseECadWorkbenchColorwayContourPreviewV1,
+  resolvePatternImportDxfPhaseECadWorkbenchColorwayPreviewV1,
+  type PatternImportDxfPhaseECadWorkbenchColorwayOptionV1,
+  type PatternImportDxfPhaseECadWorkbenchColorwayPreviewV1,
+} from './cad-workbench-bom-visual-authority-v1';
 import { PatternImportDxfPhaseECadTableConnectToolControlV1 } from './cad-table-connect-tool-control-v1';
 import {
   derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1,
@@ -104,7 +110,7 @@ export type PatternImportDxfProductPhaseEMultiseamWorkbenchPropsV2 = Readonly<{
   proposal: PatternImportDxfProductPhaseEMultiseamProposalV2;
   state: WorkbenchState;
   materialOptions: readonly PatternImportDxfProductPhaseEMaterialRevisionOptionV1[];
-  colorwayOptions?: readonly Readonly<{ id: number; label: string; swatchHex?: string }>[];
+  colorwayOptions?: readonly PatternImportDxfPhaseECadWorkbenchColorwayOptionV1[];
   activeSeamIndex: SeamIndex;
   activePieceIndex: SideIndex;
   onActiveSeamIndexChange: (index: SeamIndex) => void;
@@ -146,6 +152,7 @@ export const PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_MULTISEAM_WORKBENCH_UI_CONTRACT_
   directConnectCreatesPersistenceOwner: false,
   measurementVariantsGrouped: true,
   proposalEvidenceOwnedByViewOptions: true,
+  savedColorwaySelectionPreviewsExactCutContours: true,
   rawDxfExposed: false,
   arbitraryGarmentSupported: false,
   mountedInAssemblyOrder: true,
@@ -372,6 +379,7 @@ function ProjectedPiece({
   state,
   activeSeamIndex,
   active,
+  colorwayPreview,
   showProposals,
   showVertices,
   showSewingBoundaries,
@@ -405,6 +413,7 @@ function ProjectedPiece({
   state: WorkbenchState;
   activeSeamIndex: SeamIndex;
   active: boolean;
+  colorwayPreview: PatternImportDxfPhaseECadWorkbenchColorwayPreviewV1 | null;
   showProposals: boolean;
   showVertices: boolean;
   showSewingBoundaries: boolean;
@@ -458,6 +467,7 @@ function ProjectedPiece({
       data-v2-piece-offset-y={displayOffset.y}
       data-v2-piece-layout-key={layoutKey}
       data-v2-piece-seam-authority={editableSideIndex === null ? 'read-only' : 'bounded-pair'}
+      data-v2-piece-colorway-swatch={colorwayPreview?.swatchHex ?? undefined}
       onClick={(event) => !disabled && onSelect(event.shiftKey)}
       onPointerDown={onArrangePointerDown}
       onPointerMove={onArrangePointerMove}
@@ -520,11 +530,17 @@ function ProjectedPiece({
           seam,
           side: seam.sides.find(({ pieceId }) => pieceId === piece.pieceId),
         }));
+        const colorwayContourPreview =
+          resolvePatternImportDxfPhaseECadWorkbenchColorwayContourPreviewV1(
+            colorwayPreview,
+            contour,
+          );
         return (
           <g key={contour.contourId} data-v2-contour-id={contour.contourId}>
             <polyline
               points={points}
-              fill='none'
+              fill={colorwayContourPreview.fill}
+              fillOpacity={colorwayContourPreview.fillOpacity}
               stroke='currentColor'
               strokeWidth={exactContour ? 2 : 1}
               opacity={exactContour ? 1 : 0.4}
@@ -1229,6 +1245,10 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
   const [activeColorwayId, setActiveColorwayId] = useState<number | null>(
     colorwayOptions[0]?.id ?? null,
   );
+  const activeColorwayPreview = resolvePatternImportDxfPhaseECadWorkbenchColorwayPreviewV1(
+    colorwayOptions,
+    activeColorwayId,
+  );
   const measurementSequenceRef = useRef(0);
   const calloutSequenceRef = useRef(0);
   const canvasViewportRef = useRef<HTMLDivElement | null>(null);
@@ -1827,6 +1847,8 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                       role='img'
                       aria-label='Pattern pieces with bounded seam proposals and session-only table placement'
                       data-v2-canvas-zoom={canvasZoomPercent}
+                      data-v2-active-colorway-id={activeColorwayPreview?.colorwayId}
+                      data-v2-active-colorway-label={activeColorwayPreview?.label}
                       data-v2-selected-piece-count={pieceLayoutSession.selectedPieceKeys.length}
                       onDoubleClick={fitCanvas}
                       onPointerDown={(event) => {
@@ -1953,6 +1975,7 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                             active={pieceLayoutSession.selectedPieceKeys.includes(
                               layout.identity.key,
                             )}
+                            colorwayPreview={activeColorwayPreview}
                             showProposals={proposalBound && showProposals}
                             showVertices={proposalBound && showVertices}
                             showSewingBoundaries={showSewingBoundaries}
