@@ -191,6 +191,7 @@
     "test:mannequin:browser:list": "node scripts/mannequin-ci-gate.mjs browser-list",
     "test:mannequin:browser": "node scripts/mannequin-ci-gate.mjs browser",
     "test:mannequin:ci": "node scripts/mannequin-ci-gate.mjs all",
+    "test:assembly-table:browser": "node scripts/assembly-table-browser-smoke.mjs",
     "pretest": "vite build",
     "test": "vitest run scripts/probes.test.ts --maxWorkers=1"
   },
