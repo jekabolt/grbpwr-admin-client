@@ -1,7 +1,17 @@
 import { cn } from 'lib/utility';
-import { ChangeEvent, FocusEvent, KeyboardEvent, useRef, useState } from 'react';
+import {
+  ChangeEvent,
+  FocusEvent,
+  KeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
 import {
+  Button,
   CalloutBox,
   GroupLabel,
   HeaderNote,
@@ -9,7 +19,10 @@ import {
   Input,
   Text,
   type HeaderWarning,
+  ViewSwitch,
 } from 'ui';
+import { getBodyMeasurementProtocolFieldV1 } from 'lib/cloth/body/measurement-protocol-v1';
+import { resolveModelGuidedMeasurementPreviewInputV1 } from './model-guided-measurement-preview-input-v1';
 import {
   auditModelMeasurementFieldsV1,
   EMPTY_MODEL_MEASUREMENT_FIELD_AUDIT_V1,
@@ -28,10 +41,26 @@ import {
 } from './sheet-measurement-focus';
 import {
   displayMeasurementValue,
+  type MeasurementUnit,
   measurementValueInMm,
   MeasurementUnitSwitch,
   useMeasurementUnit,
 } from './units';
+
+export type MeasurementEntryModeV1 = 'guided' | 'table';
+
+const MEASUREMENT_ENTRY_MODE_OPTIONS = [
+  {
+    value: 'guided',
+    label: 'guided',
+    hint: 'One measurement at a time with the active path on the mannequin.',
+  },
+  {
+    value: 'table',
+    label: 'table',
+    hint: 'All measurement fields together for rapid entry and review.',
+  },
+] as const;
 
 type MeasurementValues = Record<string, number | undefined>;
 
@@ -68,9 +97,13 @@ function nextMeasurementInput(current: HTMLInputElement): HTMLInputElement | und
 function MeasurementInput({
   name,
   findings,
+  onAdvance,
+  prominent = false,
 }: {
   name: string;
   findings: readonly ModelMeasurementFieldFindingV1[];
+  onAdvance?: () => void;
+  prominent?: boolean;
 }) {
   const { control } = useFormContext<ModelFormData>();
   const { field } = useController({ control, name: `measurements.${name}` });
@@ -126,7 +159,8 @@ function MeasurementInput({
         if (event.key === 'Enter') {
           event.preventDefault();
           setDraft(null);
-          nextMeasurementInput(event.currentTarget)?.focus();
+          if (onAdvance) onAdvance();
+          else nextMeasurementInput(event.currentTarget)?.focus();
           return;
         }
         if (event.metaKey || event.ctrlKey || event.altKey || event.key.length !== 1) return;
@@ -141,7 +175,9 @@ function MeasurementInput({
         writeEditedValue(clean);
       }}
       className={cn(
-        'h-8 w-full py-0 text-right text-stat tabular-nums',
+        prominent
+          ? 'h-12 w-full py-0 text-right text-statBig tabular-nums'
+          : 'h-8 w-full py-0 text-right text-stat tabular-nums',
         empty && 'border-dashed border-highlightColor bg-bgColor',
       )}
     />
@@ -251,7 +287,15 @@ function useMeasurementFieldAudit(showAudit: boolean): ModelMeasurementFieldAudi
   return showAudit ? auditModelMeasurementFieldsV1(values) : EMPTY_MODEL_MEASUREMENT_FIELD_AUDIT_V1;
 }
 
-export function MeasurementsHeaderActions({ showAudit = false }: { showAudit?: boolean }) {
+export function MeasurementsHeaderActions({
+  showAudit = false,
+  mode,
+  onModeChange,
+}: {
+  showAudit?: boolean;
+  mode?: MeasurementEntryModeV1;
+  onModeChange?: (mode: MeasurementEntryModeV1) => void;
+}) {
   const audit = useMeasurementFieldAudit(showAudit);
   const { setFocus } = useSheetMeasurementFocus();
   const warnings = buildMeasurementHeaderWarnings(audit, (name) => {
@@ -259,10 +303,20 @@ export function MeasurementsHeaderActions({ showAudit = false }: { showAudit?: b
     window.requestAnimationFrame(() => document.getElementById(measurementInputId(name))?.focus());
   });
   return (
-    <div className='flex items-center gap-2'>
+    <div className='flex flex-wrap items-center justify-end gap-2'>
+      {mode && onModeChange ? (
+        <ViewSwitch<MeasurementEntryModeV1>
+          value={mode}
+          options={MEASUREMENT_ENTRY_MODE_OPTIONS}
+          onChange={onModeChange}
+          label='measurement entry view'
+          quiet
+        />
+      ) : null}
       <HeaderWarnings items={warnings} countOnly />
       <HeaderNote
         tone='attention'
+        className='hidden sm:inline'
         title='editing a value clears its source/protocol metadata; repeated readings are not stored'
       >
         protocol v1.1 · readings unrecorded
@@ -329,6 +383,187 @@ export function MeasurementsFields({ showAudit = false }: { showAudit?: boolean 
             audit={audit}
           />
         ))}
+      </div>
+    </div>
+  );
+}
+
+export function preferredMeasurementEntryModeV1(viewportWidth: number | undefined) {
+  return viewportWidth != null && viewportWidth < 768 ? ('guided' as const) : ('table' as const);
+}
+
+function measurementGroupLabel(name: string): string {
+  const group = BODY_MEASUREMENT_GROUPS.find(({ measurements }) =>
+    measurements.some((measurement) => measurement.name === name),
+  );
+  return shortMeasurementGroup(group?.title ?? 'measurement');
+}
+
+function formatQuizTolerance(toleranceMm: number, unit: MeasurementUnit): string {
+  return `${displayMeasurementValue(toleranceMm, unit)} ${unit}`;
+}
+
+/**
+ * Guided measurement entry keeps exactly one RHF-controlled field mounted. Switching to the table
+ * remounts the same field names against the same form owner, so values, dirty state and validation
+ * survive the view change without a second draft store.
+ */
+export function MeasurementsQuiz({
+  preview,
+  showAudit = false,
+  onComplete,
+}: {
+  preview: ReactNode;
+  showAudit?: boolean;
+  onComplete: () => void;
+}) {
+  const values = useMeasurements();
+  const audit = useMeasurementFieldAudit(showAudit);
+  const { selected, setFocus } = useSheetMeasurementFocus();
+  const { unit } = useMeasurementUnit();
+  const [activeIndex, setActiveIndex] = useState(() =>
+    Math.max(
+      0,
+      MODEL_MEASUREMENTS.findIndex((measurement) => measurement.name === selected),
+    ),
+  );
+  const measurement = MODEL_MEASUREMENTS[activeIndex] ?? MODEL_MEASUREMENTS[0];
+  const name = measurement?.name as string;
+  const findings = audit.byMeasurementName[name] ?? [];
+  const field = getBodyMeasurementProtocolFieldV1(name);
+  const filled = filledCount(
+    values,
+    MODEL_MEASUREMENTS.map((item) => item.name as string),
+  );
+  const atFirst = activeIndex === 0;
+  const atLast = activeIndex === MODEL_MEASUREMENTS.length - 1;
+  const guidedPreview = resolveModelGuidedMeasurementPreviewInputV1({
+    gender: undefined,
+    measurements: values,
+  });
+
+  useEffect(() => {
+    const selectedIndex = MODEL_MEASUREMENTS.findIndex((candidate) => candidate.name === selected);
+    if (selectedIndex >= 0 && selectedIndex !== activeIndex) setActiveIndex(selectedIndex);
+  }, [activeIndex, selected]);
+
+  const move = (nextIndex: number) => {
+    const next = MODEL_MEASUREMENTS[nextIndex];
+    if (!next) return;
+    setActiveIndex(nextIndex);
+    setFocus(next.name);
+    window.requestAnimationFrame(() =>
+      document.getElementById(measurementInputId(next.name))?.focus({ preventScroll: true }),
+    );
+  };
+
+  if (!measurement) return null;
+
+  return (
+    <div
+      className='flex h-[calc(100dvh-9.5rem)] min-h-0 flex-col gap-stack md:h-[min(46rem,calc(100dvh-12rem))] md:min-h-[34rem]'
+      data-testid='measurements-guided-entry'
+    >
+      <div className='flex min-h-0 flex-1 flex-col md:grid md:grid-cols-[minmax(0,1.6fr)_minmax(16rem,0.7fr)]'>
+        <div
+          className='min-h-0 flex-1 bg-pageBg md:border-r md:border-borderColor'
+          data-testid='measurements-guided-preview'
+        >
+          {preview}
+        </div>
+
+        <div className='flex shrink-0 flex-col gap-2 border-t border-borderColor bg-bgColor p-3 md:min-h-0 md:border-t-0 md:p-4'>
+          <div className='flex items-baseline justify-between gap-3 border-b border-borderColor pb-2'>
+            <div className='min-w-0'>
+              <Text component='p' size='micro' variant='label' className='uppercase'>
+                {measurementGroupLabel(name)}
+              </Text>
+              <Text component='h4' className='truncate font-bold text-textColor'>
+                {measurementLabel(name)}
+              </Text>
+            </div>
+            <Text component='span' size='micro' variant='label' className='shrink-0 tabular-nums'>
+              {activeIndex + 1}/{MODEL_MEASUREMENTS.length} · {filled} filled
+            </Text>
+          </div>
+
+          <div className='flex min-w-0 flex-col gap-1'>
+            <label htmlFor={measurementInputId(name)}>
+              <Text component='span' size='micro' variant='label'>
+                value · {unit}
+              </Text>
+            </label>
+            <MeasurementInput
+              key={name}
+              name={name}
+              findings={findings}
+              prominent
+              onAdvance={() => (atLast ? onComplete() : move(activeIndex + 1))}
+            />
+            <MeasurementFindingList name={name} findings={findings} />
+          </div>
+
+          {field ? (
+            <div
+              className='min-h-0 border-t border-hairline pt-2'
+              data-testid='measurement-guided-protocol'
+            >
+              <Text component='p' size='micro' className='leading-tight text-textColor'>
+                {field.shortDefinition}
+              </Text>
+              <Text component='p' size='nano' variant='label' className='mt-1 leading-tight'>
+                repeat tolerance {formatQuizTolerance(field.repeatToleranceMm, unit)} · two
+                independent readings
+              </Text>
+            </div>
+          ) : null}
+
+          <Text component='p' size='nano' variant='label' className='leading-tight md:mt-auto'>
+            when shown, the highlighted path is a visual guide only · follow the written measurement
+            protocol
+          </Text>
+
+          {guidedPreview.usesReferenceBody ? (
+            <Text
+              component='p'
+              size='nano'
+              variant='label'
+              className='leading-tight'
+              role='status'
+              data-testid='measurement-guided-reference-body-status'
+              data-reference-required-missing={guidedPreview.missingRequiredNames.length}
+            >
+              reference body · {guidedPreview.missingRequiredNames.length} required measurements
+              missing · entered values replace the reference live
+            </Text>
+          ) : null}
+
+          <div className='mt-auto grid grid-cols-2 gap-2 border-t border-borderColor pt-2'>
+            <Button
+              type='button'
+              variant='secondary'
+              size='lg'
+              disabled={atFirst}
+              onPointerDown={(event: ReactPointerEvent<HTMLButtonElement>) =>
+                event.preventDefault()
+              }
+              onClick={() => move(activeIndex - 1)}
+            >
+              previous
+            </Button>
+            <Button
+              type='button'
+              variant='main'
+              size='lg'
+              onPointerDown={(event: ReactPointerEvent<HTMLButtonElement>) =>
+                event.preventDefault()
+              }
+              onClick={() => (atLast ? onComplete() : move(activeIndex + 1))}
+            >
+              {atLast ? 'review table' : 'next'}
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -7,6 +7,7 @@ import { adminService } from 'api/api';
 import {
   type AddModelResponse,
   common_BodyMeasurementName,
+  type common_GenderEnum,
   common_Model,
   common_ModelInsert,
 } from 'api/proto-http/admin';
@@ -20,7 +21,7 @@ import { genderOptions } from 'constants/filter';
 import { ROUTES, SECTION } from 'constants/routes';
 import { failureClassOfError } from 'components/managers/tech-card/components/useTechCardAutosave';
 import { notify } from 'lib/stores/store';
-import { useForm } from 'react-hook-form';
+import { useForm, useFormContext, useWatch } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import {
   BackLink,
@@ -36,7 +37,13 @@ import {
   useDoneFlash,
 } from 'ui';
 import { DefaultSizesField } from './default-sizes-field';
-import { MeasurementsFields, MeasurementsHeaderActions } from './measurements-fields';
+import {
+  type MeasurementEntryModeV1,
+  MeasurementsFields,
+  MeasurementsHeaderActions,
+  MeasurementsQuiz,
+  preferredMeasurementEntryModeV1,
+} from './measurements-fields';
 import {
   retryCreatedModelMannequinPoseV1,
   saveCreatedModelMannequinPoseV1,
@@ -55,7 +62,11 @@ import {
 } from './model-mannequin-pose-session-v1';
 import { modelMannequinPoseRpcEnabledV1 } from './model-mannequin-pose-transport-v1';
 import { MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9 } from './model-open-reference-direct-pose-v9';
-import { ModelOpenReferencePreview } from './model-open-reference-preview';
+import { resolveModelGuidedMeasurementPreviewInputV1 } from './model-guided-measurement-preview-input-v1';
+import {
+  ModelOpenReferencePreview,
+  ModelOpenReferencePreviewFromInput,
+} from './model-open-reference-preview';
 import {
   mapFormToModelInsert,
   mapModelToForm,
@@ -81,15 +92,41 @@ type ModelFormProps = {
   poseTransport?: ModelMannequinPoseTransportControllerV1;
 };
 
-function ActiveMeasurementBodyPreview(
-  props: Omit<ComponentProps<typeof ModelOpenReferencePreview>, 'activeMeasurementName'>,
-) {
+function ActiveMeasurementBodyPreview({
+  compact = false,
+  ...props
+}: Omit<
+  ComponentProps<typeof ModelOpenReferencePreview>,
+  | 'activeMeasurementName'
+  | 'variant'
+  | 'directPoseViewportEditingEnabledV9'
+  | 'hideDirectPoseControlV9'
+> & { compact?: boolean }) {
   const { active } = useSheetMeasurementFocus();
-  return (
-    <ModelOpenReferencePreview
-      {...props}
-      activeMeasurementName={(active as common_BodyMeasurementName) || undefined}
-    />
+  const { control } = useFormContext<ModelFormData>();
+  const gender = useWatch({ control, name: 'gender' }) as common_GenderEnum | '' | undefined;
+  const measurements =
+    (useWatch({ control, name: 'measurements' }) as ModelFormData['measurements']) ?? {};
+  const guidedPreview = useMemo(
+    () =>
+      resolveModelGuidedMeasurementPreviewInputV1({
+        gender: gender || undefined,
+        measurements,
+      }),
+    [gender, measurements],
+  );
+  const sharedProps = {
+    ...props,
+    activeMeasurementName: (active as common_BodyMeasurementName) || undefined,
+    variant: compact ? ('workbench' as const) : ('form' as const),
+    directPoseViewportEditingEnabledV9: !compact,
+    hideDirectPoseControlV9: compact,
+  };
+
+  return compact ? (
+    <ModelOpenReferencePreviewFromInput {...sharedProps} input={guidedPreview.input} />
+  ) : (
+    <ModelOpenReferencePreview {...sharedProps} />
   );
 }
 
@@ -179,6 +216,9 @@ function ModelFormRuntime({
   const [photoBusy, setPhotoBusy] = useState(false);
   useDockBottom(saveBarRef, []);
   const typingOnPhone = useTypingOnPhone();
+  const [measurementEntryMode, setMeasurementEntryMode] = useState<MeasurementEntryModeV1>(() =>
+    preferredMeasurementEntryModeV1(typeof window === 'undefined' ? undefined : window.innerWidth),
+  );
   const saved = useDoneFlash();
   // A refused save stands in the save bar until the next attempt.
   const [formError, setFormError] = useState<string | null>(null);
@@ -293,6 +333,44 @@ function ModelFormRuntime({
     }
   }
 
+  const renderBodyPreview = (compact: boolean) => {
+    if (activePoseOwner && poseTransport?.enabled && poseTransport.readError) {
+      return (
+        <CalloutBox tone='error'>
+          <div className='flex flex-wrap items-center justify-between gap-2'>
+            <Text size='micro' component='p' role='alert'>
+              <b>saved pose not loaded</b> ·{' '}
+              {poseTransport.readError instanceof Error
+                ? poseTransport.readError.message
+                : 'The saved mannequin pose could not be read.'}
+            </Text>
+            <Button type='button' variant='underline' size='xs' onClick={poseTransport.retryRead}>
+              retry pose
+            </Button>
+          </div>
+        </CalloutBox>
+      );
+    }
+    if (activePoseOwner && !directPoseBindingV9) {
+      return (
+        <Text size='micro' variant='inactive' role='status'>
+          {poseTransport?.enabled ? 'loading saved pose…' : 'preparing session pose…'}
+        </Text>
+      );
+    }
+    return (
+      <ActiveMeasurementBodyPreview
+        compact={compact}
+        modelId={model?.id == null ? 'model-form:create' : `model-form:model:${model.id}`}
+        modelContentRevision={
+          model == null ? 'model-form:create:unbound' : modelFormRevisionKeyV1(model)
+        }
+        poseControls='full-body-v9'
+        directPoseBindingV9={directPoseBindingV9}
+      />
+    );
+  };
+
   return (
     <Form {...form}>
       <MeasurementUnitProvider>
@@ -360,49 +438,29 @@ function ModelFormRuntime({
 
                 <Section
                   title='measurements'
-                  action={<MeasurementsHeaderActions showAudit={isEditMode} />}
+                  action={
+                    <MeasurementsHeaderActions
+                      showAudit={isEditMode}
+                      mode={measurementEntryMode}
+                      onModeChange={setMeasurementEntryMode}
+                    />
+                  }
                 >
-                  <MeasurementsFields showAudit={isEditMode} />
+                  {measurementEntryMode === 'table' ? (
+                    <MeasurementsFields showAudit={isEditMode} />
+                  ) : (
+                    <MeasurementsQuiz
+                      showAudit={isEditMode}
+                      preview={renderBodyPreview(true)}
+                      onComplete={() => setMeasurementEntryMode('table')}
+                    />
+                  )}
                 </Section>
               </fieldset>
 
-              <Section title='body preview'>
-                {activePoseOwner && poseTransport?.enabled && poseTransport.readError ? (
-                  <CalloutBox tone='error'>
-                    <div className='flex flex-wrap items-center justify-between gap-2'>
-                      <Text size='micro' component='p' role='alert'>
-                        <b>saved pose not loaded</b> ·{' '}
-                        {poseTransport.readError instanceof Error
-                          ? poseTransport.readError.message
-                          : 'The saved mannequin pose could not be read.'}
-                      </Text>
-                      <Button
-                        type='button'
-                        variant='underline'
-                        size='xs'
-                        onClick={poseTransport.retryRead}
-                      >
-                        retry pose
-                      </Button>
-                    </div>
-                  </CalloutBox>
-                ) : activePoseOwner && !directPoseBindingV9 ? (
-                  <Text size='micro' variant='inactive' role='status'>
-                    {poseTransport?.enabled ? 'loading saved pose…' : 'preparing session pose…'}
-                  </Text>
-                ) : (
-                  <ActiveMeasurementBodyPreview
-                    modelId={
-                      model?.id == null ? 'model-form:create' : `model-form:model:${model.id}`
-                    }
-                    modelContentRevision={
-                      model == null ? 'model-form:create:unbound' : modelFormRevisionKeyV1(model)
-                    }
-                    poseControls='full-body-v9'
-                    directPoseBindingV9={directPoseBindingV9}
-                  />
-                )}
-              </Section>
+              {measurementEntryMode === 'table' ? (
+                <Section title='body preview'>{renderBodyPreview(false)}</Section>
+              ) : null}
 
               {isEditMode && id && (
                 <Section title='fittings'>{runtime.renderFittings(parseInt(id, 10))}</Section>
