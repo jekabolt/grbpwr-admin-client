@@ -61,6 +61,7 @@ const browserSuites = Object.freeze([
       'shoulder marker live-drags posture without taking wrist, torso, or camera controls',
       'ModelForm V9 live-drags head and leg while empty space remains the camera',
       'clean ModelForm V9 lowers linked arms beside the thighs with a 56 px wrist target',
+      'direct ankle and wrist drags retain a non-crossing last-valid pose across limb families',
       'side-view elbow ring admits anterior flexion and cannot reverse past neutral',
       'side-view wrist drag detents a visibly straight arm to exact neutral',
       'hostile wrist drag keeps the last-valid source and canvas',
