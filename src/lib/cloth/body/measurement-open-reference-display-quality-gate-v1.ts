@@ -91,6 +91,27 @@ const FAILED_SELF_INTERSECTION_CLAIMS = Object.freeze({
   selfIntersectionEvaluated: false as const,
 });
 
+/**
+ * Converts an infrastructure failure around the whole-body validator into the same typed,
+ * fail-closed result as an in-validator exception. The local gate still runs so an already unsafe
+ * candidate keeps its more specific local reasons.
+ */
+export function measurementOpenReferenceDisplayQualitySelfIntersectionFailureV1(options: {
+  readonly uniformPositionsM: Float32Array;
+  readonly personalizedPositionsM: Float32Array;
+  readonly triangleIndices: Uint16Array | Uint32Array;
+  readonly policy?: Partial<MeasurementOpenReferenceDisplayQualityPolicyV1>;
+}): MeasurementOpenReferenceDisplayQualityGateResultV1 {
+  const local = evaluateMeasurementOpenReferenceDisplayQualityV1(options);
+  if (!local.safe) return local;
+  return Object.freeze({
+    ...local,
+    safe: false,
+    reasons: Object.freeze(['self-intersection-evaluation-failed'] as const),
+    claims: FAILED_SELF_INTERSECTION_CLAIMS,
+  });
+}
+
 export interface MeasurementOpenReferenceSelfIntersectionDeltaV1 {
   readonly safe: boolean;
   readonly admittedBasisIntersectionCount: number;
@@ -534,11 +555,6 @@ export function evaluateMeasurementOpenReferenceDisplayQualityWithSelfIntersecti
       claims: SELF_INTERSECTION_CLAIMS,
     });
   } catch {
-    return Object.freeze({
-      ...local,
-      safe: false,
-      reasons: Object.freeze(['self-intersection-evaluation-failed'] as const),
-      claims: FAILED_SELF_INTERSECTION_CLAIMS,
-    });
+    return measurementOpenReferenceDisplayQualitySelfIntersectionFailureV1(options);
   }
 }
