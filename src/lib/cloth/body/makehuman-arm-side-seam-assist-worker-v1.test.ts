@@ -1,12 +1,51 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { MakeHumanCoreRigBundleV1 } from './makehuman-core-rig-pose-research-v1';
+import {
+  createMakeHumanArmSideSeamAssistOutcomeV1,
+  MAKEHUMAN_ARM_SIDE_SEAM_ASSIST_OUTCOME_V1,
+  MakeHumanArmSideSeamGeometryGateErrorV1,
+  type MakeHumanArmSideSeamAssistResultV1,
+  type MakeHumanArmSideSeamMetricsV1,
+} from './makehuman-arm-side-seam-assist-v1';
 import type {
   MakeHumanArmSideSeamAssistWorkerRequestV1,
   MakeHumanArmSideSeamAssistWorkerResponseV1,
   MakeHumanArmSideSeamAssistWorkerResultV1,
 } from './makehuman-arm-side-seam-assist-worker-protocol-v1';
-import { createMakeHumanArmSideSeamAssistsInWorkerV1 } from './makehuman-arm-side-seam-assist-worker-v1';
+import {
+  availableMakeHumanArmSideSeamAssistsV1,
+  createMakeHumanArmSideSeamAssistsInWorkerV1,
+} from './makehuman-arm-side-seam-assist-worker-v1';
+
+const GEOMETRY_GATE_METRICS_FIXTURE = Object.freeze({
+  verticality: 0.9714,
+  straightness: 0.9921,
+  wristOuterHipClearanceRatio: 0.3582,
+  minimumOuterHipClearanceRatio: 0.1087,
+  wristHipDepthErrorRatio: 0.0419,
+  wristHipVerticalErrorRatio: 0.2513,
+  sideSeamEligible: false,
+}) satisfies MakeHumanArmSideSeamMetricsV1;
+
+const GEOMETRY_GATE_LIMITS_FIXTURE = Object.freeze({
+  minimumVerticality: 0.94,
+  minimumStraightness: 0.9,
+  minimumOuterHipClearanceRatio: 0.1,
+  maximumDepthErrorRatio: 0.06,
+  maximumVerticalErrorRatio: 0.25,
+});
+
+const outcomeOptions = Object.freeze({
+  bundle: {} as MakeHumanCoreRigBundleV1,
+  basisKind: 'female' as const,
+  heads: Float32Array.from([0, 1, 2]),
+  tails: Float32Array.from([3, 4, 5]),
+  rollDirections: Float32Array.from([0, 0, 1]),
+  side: 'left' as const,
+  minimumOuterHipClearanceRatio: 0.1,
+  maximumVerticalErrorRatio: 0.25,
+});
 
 class FakeWorker {
   readonly posted: Array<{
@@ -34,6 +73,70 @@ class FakeWorker {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('MakeHuman arm side-seam assist worker v1', () => {
+  it('keeps exact gate metrics while making only the failed side-seam snap unavailable', () => {
+    const geometryGateError = new MakeHumanArmSideSeamGeometryGateErrorV1({
+      side: 'left',
+      metrics: GEOMETRY_GATE_METRICS_FIXTURE,
+      limits: GEOMETRY_GATE_LIMITS_FIXTURE,
+    });
+    const left = createMakeHumanArmSideSeamAssistOutcomeV1(outcomeOptions, () => {
+      throw geometryGateError;
+    });
+    const rightAssist = {
+      side: 'right',
+      metrics: Object.freeze({ ...GEOMETRY_GATE_METRICS_FIXTURE, sideSeamEligible: true }),
+    } as unknown as MakeHumanArmSideSeamAssistResultV1;
+    const right = Object.freeze({
+      version: MAKEHUMAN_ARM_SIDE_SEAM_ASSIST_OUTCOME_V1,
+      status: 'available' as const,
+      side: 'right' as const,
+      assist: rightAssist,
+      metrics: rightAssist.metrics,
+    });
+
+    expect(left).toEqual({
+      version: MAKEHUMAN_ARM_SIDE_SEAM_ASSIST_OUTCOME_V1,
+      status: 'unavailable',
+      side: 'left',
+      reason: 'geometry-gate-failed',
+      metrics: GEOMETRY_GATE_METRICS_FIXTURE,
+      limits: GEOMETRY_GATE_LIMITS_FIXTURE,
+      claims: {
+        authenticatedRigGeometryEvaluated: true,
+        sideSeamSnapAvailable: false,
+        productInteractionEnvelopeApplied: true,
+        clinicalAnatomicalRangeAuthority: false,
+        garmentPairEvaluated: false,
+        fitClaimEligible: false,
+        productionAuthority: false,
+      },
+    });
+    expect(availableMakeHumanArmSideSeamAssistsV1({ left, right })).toEqual({
+      left: null,
+      right: rightAssist,
+    });
+  });
+
+  it('keeps rig, resource, and integrity errors fatal', () => {
+    const rigFailure = new Error('Side-seam assist requires authenticated rig bone wrist.L.');
+
+    expect(() =>
+      createMakeHumanArmSideSeamAssistOutcomeV1(outcomeOptions, () => {
+        throw rigFailure;
+      }),
+    ).toThrow(rigFailure);
+
+    expect(() =>
+      createMakeHumanArmSideSeamAssistOutcomeV1(outcomeOptions, () => {
+        throw new MakeHumanArmSideSeamGeometryGateErrorV1({
+          side: 'left',
+          metrics: { ...GEOMETRY_GATE_METRICS_FIXTURE, sideSeamEligible: true },
+          limits: GEOMETRY_GATE_LIMITS_FIXTURE,
+        });
+      }),
+    ).toThrow('Side-seam geometry-gate result failed its integrity envelope.');
+  });
+
   it('keeps live-session anchors attached while transferring private copies', async () => {
     vi.stubGlobal('Worker', class {});
     const worker = new FakeWorker();

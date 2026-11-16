@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-import { createMakeHumanArmSideSeamAssistV1 } from './makehuman-arm-side-seam-assist-v1';
+import { createMakeHumanArmSideSeamAssistOutcomeV1 } from './makehuman-arm-side-seam-assist-v1';
 import type {
   MakeHumanArmSideSeamAssistWorkerRequestV1,
   MakeHumanArmSideSeamAssistWorkerResponseV1,
@@ -18,8 +18,8 @@ context.onmessage = async (event: MessageEvent<MakeHumanArmSideSeamAssistWorkerR
     const resources = await loadResources();
     const shared = { ...request.options, bundle: resources.rig };
     const value = Object.freeze({
-      left: createMakeHumanArmSideSeamAssistV1({ ...shared, side: 'left' }),
-      right: createMakeHumanArmSideSeamAssistV1({ ...shared, side: 'right' }),
+      left: createMakeHumanArmSideSeamAssistOutcomeV1({ ...shared, side: 'left' }),
+      right: createMakeHumanArmSideSeamAssistOutcomeV1({ ...shared, side: 'right' }),
     });
     const response: MakeHumanArmSideSeamAssistWorkerResponseV1 = {
       id: request.id,
