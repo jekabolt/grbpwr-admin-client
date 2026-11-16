@@ -34,6 +34,7 @@ const unitFiles = Object.freeze([
   'src/components/shared/measurement-surface-live-positions-v1.test.ts',
   'src/components/shared/measurement-watertight-surface-v1-stage.test.ts',
   'src/lib/cloth/body/makehuman-live-pose-admissibility-v1.test.ts',
+  'src/lib/cloth/body/makehuman-third-party-asset-manifest-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-card-detail-shape-parity-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-display-quality-gate-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-display-quality-worker-v1.test.ts',
