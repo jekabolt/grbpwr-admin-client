@@ -5,22 +5,59 @@ export interface MeshSurfaceTopologyInputV1 {
   readonly triangleIndices: Uint16Array | Uint32Array;
 }
 
+/**
+ * Adjacency is stored as CSR (compressed rows): the items of vertex `v` are
+ * `vertexTriangles[vertexTriangleOffsets[v] .. vertexTriangleOffsets[v + 1])`, each run ascending.
+ * `vertexEdges` and `vertexNeighbours` share `vertexEdgeOffsets` and are paired: within a row,
+ * sorted by neighbour, `vertexEdges[i]` is the edge to `vertexNeighbours[i]`. Fixed-stride tables use `-1` for "no triangle across a boundary".
+ */
 export interface MeshSurfaceTopologyV1 {
   readonly version: typeof MESH_SURFACE_TOPOLOGY_V1;
   readonly topologyHash: string;
   readonly vertexCount: number;
   readonly triangleCount: number;
   readonly edgeCount: number;
+  /** Stride 3. */
   readonly triangleIndices: Uint32Array;
+  /** Stride 3; local edge i joins corners i and (i + 1) % 3. */
   readonly triangleEdges: Uint32Array;
+  /** Stride 2, `a < b`. */
   readonly edgeVertices: Uint32Array;
-  readonly edgeTriangles: readonly Uint32Array[];
-  readonly vertexEdges: readonly Uint32Array[];
-  readonly vertexNeighbours: readonly Uint32Array[];
-  readonly vertexTriangles: readonly Uint32Array[];
-  readonly triangleNeighbours: readonly Uint32Array[];
+  /** Stride 2, ascending; `-1` when the edge is on a boundary. */
+  readonly edgeTriangles: Int32Array;
+  /** Stride 3, aligned with `triangleEdges`; `-1` across a boundary edge. */
+  readonly triangleNeighbours: Int32Array;
+  /** Length `vertexCount + 1`. */
+  readonly vertexTriangleOffsets: Uint32Array;
+  readonly vertexTriangles: Uint32Array;
+  /** Length `vertexCount + 1`; rows of `vertexEdges` and `vertexNeighbours`. */
+  readonly vertexEdgeOffsets: Uint32Array;
+  readonly vertexEdges: Uint32Array;
+  readonly vertexNeighbours: Uint32Array;
   readonly mirrorVertexMap: Uint32Array;
   readonly midlineVertexOrder: readonly Uint32Array[];
+}
+
+/** A view of one vertex's triangles; allocates a view, so keep it off hot loops. */
+export function meshSurfaceVertexTrianglesV1(
+  topology: MeshSurfaceTopologyV1,
+  vertex: number,
+): Uint32Array {
+  return topology.vertexTriangles.subarray(
+    topology.vertexTriangleOffsets[vertex],
+    topology.vertexTriangleOffsets[vertex + 1],
+  );
+}
+
+/** A view of one vertex's neighbours; allocates a view, so keep it off hot loops. */
+export function meshSurfaceVertexNeighboursV1(
+  topology: MeshSurfaceTopologyV1,
+  vertex: number,
+): Uint32Array {
+  return topology.vertexNeighbours.subarray(
+    topology.vertexEdgeOffsets[vertex],
+    topology.vertexEdgeOffsets[vertex + 1],
+  );
 }
 
 export type MeshSurfaceTopologyFailureCodeV1 =
@@ -51,7 +88,8 @@ function elapsed(startedAt: number): number {
 function topologyHash(vertexCount: number, indices: Uint16Array | Uint32Array): string {
   let first = 0x811c9dc5;
   let second = 0x9e3779b9;
-  for (const value of indices) {
+  for (let index = 0; index < indices.length; index += 1) {
+    const value = indices[index];
     first = Math.imul(first ^ value, 0x01000193) >>> 0;
     second = Math.imul(second ^ (value + 0x7ed55d16), 0x85ebca6b) >>> 0;
   }
@@ -68,24 +106,55 @@ function sameIndices(left: Uint32Array, right: Uint16Array | Uint32Array): boole
   return true;
 }
 
-function coordinateKey(x: number, y: number, z: number): string {
-  return `${x === 0 ? 0 : x}|${y === 0 ? 0 : y}|${z === 0 ? 0 : z}`;
-}
-
-function sortedUnique(values: number[]): Uint32Array {
-  values.sort((left, right) => left - right);
-  let write = 0;
-  for (const value of values) {
-    if (write > 0 && values[write - 1] === value) continue;
-    values[write] = value;
-    write += 1;
+function mirrorMap(positionsM: Float32Array, vertexCount: number): Uint32Array | string {
+  // Exact matching on the float bit patterns; -0 is folded into +0.
+  const bits = new Uint32Array(positionsM.buffer, positionsM.byteOffset, vertexCount * 3);
+  const normal = (value: number) => (value === 0x80000000 ? 0 : value);
+  let size = 1;
+  while (size < vertexCount * 2) size *= 2;
+  const mask = size - 1;
+  const table = new Int32Array(size).fill(-1);
+  const find = (x: number, y: number, z: number): number => {
+    let hash = Math.imul(x ^ 0x9e3779b9, 0x85ebca6b);
+    hash = Math.imul(hash ^ y, 0xc2b2ae35);
+    hash = Math.imul(hash ^ z, 0x27d4eb2f);
+    for (let slot = (hash ^ (hash >>> 15)) & mask; ; slot = (slot + 1) & mask) {
+      const vertex = table[slot];
+      if (vertex < 0) return -1 - slot;
+      const offset = vertex * 3;
+      if (
+        normal(bits[offset]) === x &&
+        normal(bits[offset + 1]) === y &&
+        normal(bits[offset + 2]) === z
+      ) {
+        return vertex;
+      }
+    }
+  };
+  for (let vertex = 0; vertex < vertexCount; vertex += 1) {
+    const offset = vertex * 3;
+    const found = find(normal(bits[offset]), normal(bits[offset + 1]), normal(bits[offset + 2]));
+    if (found >= 0) return 'Mirror construction requires unique exact vertex coordinates.';
+    table[-1 - found] = vertex;
   }
-  return Uint32Array.from(values.slice(0, write));
+  const mirror = new Uint32Array(vertexCount);
+  for (let vertex = 0; vertex < vertexCount; vertex += 1) {
+    const offset = vertex * 3;
+    const found = find(
+      normal((bits[offset] ^ 0x80000000) >>> 0),
+      normal(bits[offset + 1]),
+      normal(bits[offset + 2]),
+    );
+    if (found < 0) return `Vertex ${vertex} has no exact reflected partner.`;
+    mirror[vertex] = found;
+  }
+  return mirror;
 }
 
 function orderedMidlineComponents(
   positionsM: Float32Array,
-  vertexNeighbours: readonly Uint32Array[],
+  neighbourOffsets: Uint32Array,
+  neighbourData: Uint32Array,
 ): readonly Uint32Array[] | null {
   const midline = new Set<number>();
   for (let vertex = 0; vertex < positionsM.length / 3; vertex += 1) {
@@ -93,7 +162,9 @@ function orderedMidlineComponents(
   }
   const adjacency = new Map<number, number[]>();
   for (const vertex of midline) {
-    const neighbours = [...vertexNeighbours[vertex]].filter((candidate) => midline.has(candidate));
+    const neighbours = [
+      ...neighbourData.subarray(neighbourOffsets[vertex], neighbourOffsets[vertex + 1]),
+    ].filter((candidate) => midline.has(candidate));
     if (neighbours.length > 2) return null;
     adjacency.set(
       vertex,
@@ -160,8 +231,8 @@ export function createMeshSurfaceTopologyV1(
       'triangleIndices must be a non-empty triangle index array.',
     ]);
   }
-  for (const coordinate of input.positionsM) {
-    if (!Number.isFinite(coordinate)) {
+  for (let index = 0; index < input.positionsM.length; index += 1) {
+    if (!Number.isFinite(input.positionsM[index])) {
       return failure(startedAt, 'input-invalid', ['positionsM contains a non-finite coordinate.']);
     }
   }
@@ -181,106 +252,147 @@ export function createMeshSurfaceTopologyV1(
 
   const triangleIndices = Uint32Array.from(input.triangleIndices);
   const triangleCount = triangleIndices.length / 3;
-  const vertexEdges = Array.from({ length: vertexCount }, () => [] as number[]);
-  const vertexNeighbours = Array.from({ length: vertexCount }, () => [] as number[]);
-  const vertexTriangles = Array.from({ length: vertexCount }, () => [] as number[]);
-  const edgeVertices: number[] = [];
-  const edgeTriangles: number[][] = [];
-  const triangleEdges = new Uint32Array(triangleIndices.length);
-  const edgeMap = new Map<number, number>();
-
+  // Validate and count vertex -> triangle incidence in one pass.
+  const vertexTriangleOffsets = new Uint32Array(vertexCount + 1);
   for (let triangle = 0; triangle < triangleCount; triangle += 1) {
     const offset = triangle * 3;
-    const vertices = [
-      triangleIndices[offset],
-      triangleIndices[offset + 1],
-      triangleIndices[offset + 2],
-    ] as const;
+    const v0 = triangleIndices[offset];
+    const v1 = triangleIndices[offset + 1];
+    const v2 = triangleIndices[offset + 2];
     if (
-      vertices.some((vertex) => vertex >= vertexCount) ||
-      vertices[0] === vertices[1] ||
-      vertices[1] === vertices[2] ||
-      vertices[2] === vertices[0]
+      v0 >= vertexCount ||
+      v1 >= vertexCount ||
+      v2 >= vertexCount ||
+      v0 === v1 ||
+      v1 === v2 ||
+      v2 === v0
     ) {
       return failure(startedAt, 'input-invalid', [
         `Triangle ${triangle} has invalid or repeated vertices.`,
       ]);
     }
-    for (const vertex of vertices) vertexTriangles[vertex].push(triangle);
-    const pairs = [
-      [vertices[0], vertices[1]],
-      [vertices[1], vertices[2]],
-      [vertices[2], vertices[0]],
-    ] as const;
-    pairs.forEach(([rawA, rawB], localEdge) => {
-      const a = Math.min(rawA, rawB);
-      const b = Math.max(rawA, rawB);
-      const key = a * vertexCount + b;
-      let edge = edgeMap.get(key);
-      if (edge === undefined) {
-        edge = edgeTriangles.length;
-        edgeMap.set(key, edge);
-        edgeVertices.push(a, b);
-        edgeTriangles.push([]);
-        vertexEdges[a].push(edge);
-        vertexEdges[b].push(edge);
-        vertexNeighbours[a].push(b);
-        vertexNeighbours[b].push(a);
+    vertexTriangleOffsets[v0 + 1] += 1;
+    vertexTriangleOffsets[v1 + 1] += 1;
+    vertexTriangleOffsets[v2 + 1] += 1;
+  }
+  for (let vertex = 0; vertex < vertexCount; vertex += 1) {
+    vertexTriangleOffsets[vertex + 1] += vertexTriangleOffsets[vertex];
+  }
+  // Triangles are appended in ascending order, so each CSR row is sorted.
+  const vertexTriangleData = new Uint32Array(triangleIndices.length);
+  const vertexTriangleCursor = vertexTriangleOffsets.slice(0, vertexCount);
+  for (let triangle = 0; triangle < triangleCount; triangle += 1) {
+    const offset = triangle * 3;
+    vertexTriangleData[vertexTriangleCursor[triangleIndices[offset]]++] = triangle;
+    vertexTriangleData[vertexTriangleCursor[triangleIndices[offset + 1]]++] = triangle;
+    vertexTriangleData[vertexTriangleCursor[triangleIndices[offset + 2]]++] = triangle;
+  }
+
+  // Edges, discovered from the lower endpoint with a stamp array instead of a hash map.
+  const maximumEdges = triangleIndices.length;
+  const edgeVerticesScratch = new Uint32Array(maximumEdges * 2);
+  const edgeTrianglesScratch = new Int32Array(maximumEdges * 2).fill(-1);
+  const triangleEdges = new Uint32Array(triangleIndices.length);
+  const stampOwner = new Int32Array(vertexCount).fill(-1);
+  const stampEdge = new Uint32Array(vertexCount);
+  let edgeCount = 0;
+  for (let vertex = 0; vertex < vertexCount; vertex += 1) {
+    const rowEnd = vertexTriangleOffsets[vertex + 1];
+    for (let cursor = vertexTriangleOffsets[vertex]; cursor < rowEnd; cursor += 1) {
+      const triangle = vertexTriangleData[cursor];
+      const offset = triangle * 3;
+      for (let local = 0; local < 3; local += 1) {
+        const rawA = triangleIndices[offset + local];
+        const rawB = triangleIndices[offset + (local === 2 ? 0 : local + 1)];
+        const low = rawA < rawB ? rawA : rawB;
+        if (low !== vertex) continue;
+        const high = rawA < rawB ? rawB : rawA;
+        let edge: number;
+        if (stampOwner[high] === vertex) {
+          edge = stampEdge[high];
+        } else {
+          edge = edgeCount;
+          edgeCount += 1;
+          stampOwner[high] = vertex;
+          stampEdge[high] = edge;
+          edgeVerticesScratch[edge * 2] = low;
+          edgeVerticesScratch[edge * 2 + 1] = high;
+        }
+        if (edgeTrianglesScratch[edge * 2] < 0) {
+          edgeTrianglesScratch[edge * 2] = triangle;
+        } else if (edgeTrianglesScratch[edge * 2 + 1] < 0) {
+          edgeTrianglesScratch[edge * 2 + 1] = triangle;
+        } else {
+          return failure(startedAt, 'non-manifold', [
+            `Edge ${low}-${high} has more than 2 incident triangles.`,
+          ]);
+        }
+        triangleEdges[offset + local] = edge;
       }
-      edgeTriangles[edge].push(triangle);
-      triangleEdges[offset + localEdge] = edge;
-    });
-  }
-
-  const nonManifoldEdge = edgeTriangles.findIndex((triangles) => triangles.length > 2);
-  if (nonManifoldEdge >= 0) {
-    return failure(startedAt, 'non-manifold', [
-      `Edge ${nonManifoldEdge} has ${edgeTriangles[nonManifoldEdge].length} incident triangles.`,
-    ]);
-  }
-
-  const triangleNeighbours = Array.from({ length: triangleCount }, () => [] as number[]);
-  edgeTriangles.forEach((triangles) => {
-    if (triangles.length !== 2) return;
-    triangleNeighbours[triangles[0]].push(triangles[1]);
-    triangleNeighbours[triangles[1]].push(triangles[0]);
-  });
-
-  const coordinateVertices = new Map<string, number>();
-  for (let vertex = 0; vertex < vertexCount; vertex += 1) {
-    const offset = vertex * 3;
-    const key = coordinateKey(
-      input.positionsM[offset],
-      input.positionsM[offset + 1],
-      input.positionsM[offset + 2],
-    );
-    if (coordinateVertices.has(key)) {
-      return failure(startedAt, 'symmetry-mismatch', [
-        'Mirror construction requires unique exact vertex coordinates.',
-      ]);
     }
-    coordinateVertices.set(key, vertex);
   }
-  const mirrorVertexMap = new Uint32Array(vertexCount);
+  const edgeVertices = edgeVerticesScratch.slice(0, edgeCount * 2);
+  const edgeTriangles = edgeTrianglesScratch.slice(0, edgeCount * 2);
+
+  // Vertex -> (neighbour, edge) rows, CSR; each row sorted by neighbour, edges paired.
+  const vertexEdgeOffsets = new Uint32Array(vertexCount + 1);
+  for (let index = 0; index < edgeCount * 2; index += 1) {
+    vertexEdgeOffsets[edgeVertices[index] + 1] += 1;
+  }
   for (let vertex = 0; vertex < vertexCount; vertex += 1) {
-    const offset = vertex * 3;
-    const mirror = coordinateVertices.get(
-      coordinateKey(
-        -input.positionsM[offset],
-        input.positionsM[offset + 1],
-        input.positionsM[offset + 2],
-      ),
-    );
-    if (mirror === undefined) {
-      return failure(startedAt, 'symmetry-mismatch', [
-        `Vertex ${vertex} has no exact reflected partner.`,
-      ]);
+    vertexEdgeOffsets[vertex + 1] += vertexEdgeOffsets[vertex];
+  }
+  const vertexEdgeData = new Uint32Array(edgeCount * 2);
+  const vertexNeighbourData = new Uint32Array(edgeCount * 2);
+  const vertexEdgeCursor = vertexEdgeOffsets.slice(0, vertexCount);
+  for (let edge = 0; edge < edgeCount; edge += 1) {
+    const a = edgeVertices[edge * 2];
+    const b = edgeVertices[edge * 2 + 1];
+    const atA = vertexEdgeCursor[a]++;
+    vertexEdgeData[atA] = edge;
+    vertexNeighbourData[atA] = b;
+    const atB = vertexEdgeCursor[b]++;
+    vertexEdgeData[atB] = edge;
+    vertexNeighbourData[atB] = a;
+  }
+  for (let vertex = 0; vertex < vertexCount; vertex += 1) {
+    // Insertion sort of each short row by neighbour, carrying the edge ids along.
+    const from = vertexEdgeOffsets[vertex];
+    const to = vertexEdgeOffsets[vertex + 1];
+    for (let index = from + 1; index < to; index += 1) {
+      const neighbour = vertexNeighbourData[index];
+      const edge = vertexEdgeData[index];
+      let cursor = index - 1;
+      while (cursor >= from && vertexNeighbourData[cursor] > neighbour) {
+        vertexNeighbourData[cursor + 1] = vertexNeighbourData[cursor];
+        vertexEdgeData[cursor + 1] = vertexEdgeData[cursor];
+        cursor -= 1;
+      }
+      vertexNeighbourData[cursor + 1] = neighbour;
+      vertexEdgeData[cursor + 1] = edge;
     }
-    mirrorVertexMap[vertex] = mirror;
+  }
+  const triangleNeighbours = new Int32Array(triangleCount * 3);
+  for (let triangle = 0; triangle < triangleCount; triangle += 1) {
+    for (let local = 0; local < 3; local += 1) {
+      const edge = triangleEdges[triangle * 3 + local];
+      const left = edgeTriangles[edge * 2];
+      triangleNeighbours[triangle * 3 + local] =
+        left === triangle ? edgeTriangles[edge * 2 + 1] : left;
+    }
   }
 
-  const frozenVertexNeighbours = Object.freeze(vertexNeighbours.map(sortedUnique));
-  const midlineVertexOrder = orderedMidlineComponents(input.positionsM, frozenVertexNeighbours);
+  // Mirror map: open-addressing hash over exact float bit patterns (no string keys).
+  const mirrorVertexMap = mirrorMap(input.positionsM, vertexCount);
+  if (typeof mirrorVertexMap === 'string') {
+    return failure(startedAt, 'symmetry-mismatch', [mirrorVertexMap]);
+  }
+
+  const midlineVertexOrder = orderedMidlineComponents(
+    input.positionsM,
+    vertexEdgeOffsets,
+    vertexNeighbourData,
+  );
   if (!midlineVertexOrder) {
     return failure(startedAt, 'symmetry-mismatch', ['The exact midline graph branches.']);
   }
@@ -290,15 +402,17 @@ export function createMeshSurfaceTopologyV1(
     topologyHash: hash,
     vertexCount,
     triangleCount,
-    edgeCount: edgeTriangles.length,
+    edgeCount,
     triangleIndices,
     triangleEdges,
-    edgeVertices: Uint32Array.from(edgeVertices),
-    edgeTriangles: Object.freeze(edgeTriangles.map((values) => Uint32Array.from(values))),
-    vertexEdges: Object.freeze(vertexEdges.map(sortedUnique)),
-    vertexNeighbours: frozenVertexNeighbours,
-    vertexTriangles: Object.freeze(vertexTriangles.map(sortedUnique)),
-    triangleNeighbours: Object.freeze(triangleNeighbours.map(sortedUnique)),
+    edgeVertices,
+    edgeTriangles,
+    triangleNeighbours,
+    vertexTriangleOffsets,
+    vertexTriangles: vertexTriangleData,
+    vertexEdgeOffsets,
+    vertexEdges: vertexEdgeData,
+    vertexNeighbours: vertexNeighbourData,
     mirrorVertexMap,
     midlineVertexOrder,
   } satisfies MeshSurfaceTopologyV1);

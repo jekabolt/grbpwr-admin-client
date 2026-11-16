@@ -9,6 +9,7 @@ import {
 } from './mesh-surface-path-v1';
 import {
   meshSurfaceTopologyMatchesIndicesV1,
+  meshSurfaceVertexTrianglesV1,
   type MeshSurfaceTopologyV1,
 } from './mesh-surface-topology-v1';
 
@@ -84,12 +85,6 @@ export type MeshSurfaceGeodesicResultV1 =
 interface Vec2 {
   readonly x: number;
   readonly y: number;
-}
-
-interface GraphLink {
-  readonly node: number;
-  readonly triangle: number;
-  readonly length: number;
 }
 
 interface SeedResult {
@@ -208,9 +203,11 @@ function pointTriangles(
   point: MeshSurfacePointV1,
   topology: MeshSurfaceTopologyV1,
 ): readonly number[] {
-  if (point.kind === 'vertex') return [...topology.vertexTriangles[point.vertex]];
-  const right = new Set(topology.vertexTriangles[point.b]);
-  return [...topology.vertexTriangles[point.a]].filter((triangle) => right.has(triangle));
+  if (point.kind === 'vertex') return [...meshSurfaceVertexTrianglesV1(topology, point.vertex)];
+  const right = meshSurfaceVertexTrianglesV1(topology, point.b);
+  return [...meshSurfaceVertexTrianglesV1(topology, point.a)].filter((triangle) =>
+    right.includes(triangle),
+  );
 }
 
 function pointCornerDistances(
@@ -260,7 +257,12 @@ function edgeDijkstra(
     }
     if (current >= goalLength) break;
     const from = pointAt(positionsM, vertex);
-    for (const neighbour of topology.vertexNeighbours[vertex]) {
+    for (
+      let cursor = topology.vertexEdgeOffsets[vertex];
+      cursor < topology.vertexEdgeOffsets[vertex + 1];
+      cursor += 1
+    ) {
+      const neighbour = topology.vertexNeighbours[cursor];
       const candidate = current + distance(from, pointAt(positionsM, neighbour));
       if (candidate >= distances[neighbour]) continue;
       distances[neighbour] = candidate;
@@ -307,7 +309,12 @@ function corridorVertices(
     const vertex = queue[cursor];
     const ring = distanceByVertex[vertex];
     if (ring >= rings) continue;
-    for (const neighbour of topology.vertexNeighbours[vertex]) {
+    for (
+      let cursor = topology.vertexEdgeOffsets[vertex];
+      cursor < topology.vertexEdgeOffsets[vertex + 1];
+      cursor += 1
+    ) {
+      const neighbour = topology.vertexNeighbours[cursor];
       if (distanceByVertex[neighbour] >= 0) continue;
       distanceByVertex[neighbour] = ring + 1;
       queue.push(neighbour);
@@ -318,27 +325,6 @@ function corridorVertices(
     if (regionContains(vertex, positionsM, region)) mask[vertex] = 1;
   });
   return mask;
-}
-
-function pointInTriangle(
-  point: MeshSurfacePointV1,
-  triangle: number,
-  topology: MeshSurfaceTopologyV1,
-) {
-  return pointTriangles(point, topology).includes(triangle);
-}
-
-function addUndirectedLink(
-  adjacency: GraphLink[][],
-  left: number,
-  right: number,
-  triangle: number,
-  positions: readonly MeshSurfaceVec3V1[],
-): void {
-  if (left === right) return;
-  const length = distance(positions[left], positions[right]);
-  adjacency[left].push({ node: right, triangle, length });
-  adjacency[right].push({ node: left, triangle, length });
 }
 
 function extractStrip(segmentTriangles: readonly number[]): readonly number[] | null {
@@ -672,7 +658,7 @@ function vertexFan(
   topology: MeshSurfaceTopologyV1,
   positionsM: Float32Array,
 ): { readonly faces: readonly FanFace[]; readonly total: number } | null {
-  const triangles = [...topology.vertexTriangles[vertex]];
+  const triangles = [...meshSurfaceVertexTrianglesV1(topology, vertex)];
   if (triangles.length < 2) return null;
   const others = new Map<number, readonly [number, number]>();
   triangles.forEach((triangle) => {
@@ -731,17 +717,25 @@ function directionAngleInFace(
   return face.startAngle + Math.min(face.angle, within);
 }
 
-function apexCheck(
+const MAXIMUM_WEDGE_FLIPS = 32;
+
+interface ApexViolation {
+  /** -1 when the fan around the vertex could not be built. */
+  readonly vertex: number;
+  readonly fan: readonly FanFace[];
+}
+
+function apexViolation(
   points: readonly MeshSurfacePointV1[],
   apexVertices: ReadonlySet<number>,
   topology: MeshSurfaceTopologyV1,
   positionsM: Float32Array,
-): boolean {
+): ApexViolation | null {
   for (let index = 1; index < points.length - 1; index += 1) {
     const point = points[index];
     if (point.kind !== 'vertex' || !apexVertices.has(point.vertex)) continue;
     const fan = vertexFan(point.vertex, topology, positionsM);
-    if (!fan) return false;
+    if (!fan) return { vertex: -1, fan: [] };
     const incomingFaces = new Set(pointTriangles(points[index - 1], topology));
     const outgoingFaces = new Set(pointTriangles(points[index + 1], topology));
     const incoming = fan.faces
@@ -757,9 +751,71 @@ function apexCheck(
         return forward + tolerance >= Math.PI && fan.total - forward + tolerance >= Math.PI;
       }),
     );
-    if (!valid) return false;
+    if (!valid) return { vertex: point.vertex, fan: fan.faces };
   }
-  return true;
+  return null;
+}
+
+function trianglesShareEdge(left: number, right: number, topology: MeshSurfaceTopologyV1): boolean {
+  const edges = topology.triangleEdges;
+  for (let i = 0; i < 3; i += 1) {
+    for (let j = 0; j < 3; j += 1) {
+      if (edges[left * 3 + i] === edges[right * 3 + j]) return true;
+    }
+  }
+  return false;
+}
+
+function rerouteStripAroundVertex(
+  strip: readonly number[],
+  vertex: number,
+  fan: readonly FanFace[],
+  topology: MeshSurfaceTopologyV1,
+  corridor: Uint8Array,
+): readonly number[] | null {
+  const order = fan.map(({ triangle }) => triangle);
+  const count = order.length;
+  if (count < 3) return null;
+  // The fan must be closed (interior vertex) to walk it the other way round.
+  if (!trianglesShareEdge(order[count - 1], order[0], topology)) return null;
+  let first = -1;
+  let last = -1;
+  for (let index = 0; index < strip.length; index += 1) {
+    const offset = strip[index] * 3;
+    const has =
+      topology.triangleIndices[offset] === vertex ||
+      topology.triangleIndices[offset + 1] === vertex ||
+      topology.triangleIndices[offset + 2] === vertex;
+    if (!has) continue;
+    if (first < 0) first = index;
+    else if (last !== index - 1) return null;
+    last = index;
+  }
+  if (first < 0 || last <= first) return null;
+  const entry = order.indexOf(strip[first]);
+  const exit = order.indexOf(strip[last]);
+  if (entry < 0 || exit < 0) return null;
+  const direction =
+    order[(entry + 1) % count] === strip[first + 1]
+      ? 1
+      : order[(entry - 1 + count) % count] === strip[first + 1]
+        ? -1
+        : 0;
+  if (direction === 0) return null;
+  const replacement = [strip[first]];
+  for (let cursor = entry; cursor !== exit; ) {
+    cursor = (cursor - direction + count) % count;
+    replacement.push(order[cursor]);
+  }
+  for (const triangle of replacement) {
+    const offset = triangle * 3;
+    for (let corner = 0; corner < 3; corner += 1) {
+      if (corridor[topology.triangleIndices[offset + corner]] !== 1) return null;
+    }
+  }
+  const rerouted = [...strip.slice(0, first), ...replacement, ...strip.slice(last + 1)];
+  if (new Set(rerouted).size !== rerouted.length) return null;
+  return Object.freeze(rerouted);
 }
 
 function pathHasRepeatedPoint(points: readonly MeshSurfacePointV1[]): boolean {
@@ -803,84 +859,134 @@ function steinerAttempt(options: {
     options.positionsM,
     options.region,
   );
+  // Gather candidate triangles from the corridor vertices' incidence instead of scanning the
+  // whole mesh; a triangle belongs to the corridor when all three corners do.
   const corridorTriangles: number[] = [];
-  for (let triangle = 0; triangle < options.topology.triangleCount; triangle += 1) {
-    const vertices = triangleVertices(triangle, options.topology);
-    if (vertices.every((vertex) => corridor[vertex] === 1)) corridorTriangles.push(triangle);
-  }
-  if (corridorTriangles.length === 0) return { ok: false, code: 'corridor-empty' };
-  const corridorEdges = new Set<number>();
-  corridorTriangles.forEach((triangle) => {
-    for (const edge of options.topology.triangleEdges.subarray(triangle * 3, triangle * 3 + 3)) {
-      corridorEdges.add(edge);
-    }
-  });
-  const nodePoints: MeshSurfacePointV1[] = [options.start, options.end];
-  const nodePositions: MeshSurfaceVec3V1[] = [
-    pointPosition(options.start, options.positionsM),
-    pointPosition(options.end, options.positionsM),
-  ];
-  const edgeNodes = new Map<number, number[]>();
-  for (const edge of corridorEdges) {
-    const a = options.topology.edgeVertices[edge * 2];
-    const b = options.topology.edgeVertices[edge * 2 + 1];
-    const nodes: number[] = [];
-    for (let sample = 1; sample <= options.steinerPointsPerEdge; sample += 1) {
-      const point = meshSurfaceEdgePointV1(a, b, sample / (options.steinerPointsPerEdge + 1));
-      nodes.push(nodePoints.length);
-      nodePoints.push(point);
-      nodePositions.push(pointPosition(point, options.positionsM));
-    }
-    edgeNodes.set(edge, nodes);
-  }
-  if (nodePoints.length > options.maximumGraphNodes) {
-    return { ok: false, code: 'geodesic-not-converged' };
-  }
-  const adjacency = Array.from({ length: nodePoints.length }, () => [] as GraphLink[]);
-  for (const triangle of corridorTriangles) {
-    const nodes: number[] = [];
-    for (const edge of options.topology.triangleEdges.subarray(triangle * 3, triangle * 3 + 3)) {
-      nodes.push(...(edgeNodes.get(edge) ?? []));
-    }
-    if (pointInTriangle(options.start, triangle, options.topology)) nodes.push(0);
-    if (pointInTriangle(options.end, triangle, options.topology)) nodes.push(1);
-    for (let left = 0; left < nodes.length; left += 1) {
-      for (let right = left + 1; right < nodes.length; right += 1) {
-        const leftPoint = nodePoints[nodes[left]];
-        const rightPoint = nodePoints[nodes[right]];
-        if (
-          leftPoint.kind === 'edge' &&
-          rightPoint.kind === 'edge' &&
-          leftPoint.a === rightPoint.a &&
-          leftPoint.b === rightPoint.b
-        ) {
-          continue;
-        }
-        addUndirectedLink(adjacency, nodes[left], nodes[right], triangle, nodePositions);
+  const indices = options.topology.triangleIndices;
+  const seenTriangles = new Set<number>();
+  for (let vertex = 0; vertex < corridor.length; vertex += 1) {
+    if (corridor[vertex] !== 1) continue;
+    for (
+      let cursor = options.topology.vertexTriangleOffsets[vertex];
+      cursor < options.topology.vertexTriangleOffsets[vertex + 1];
+      cursor += 1
+    ) {
+      const triangle = options.topology.vertexTriangles[cursor];
+      if (seenTriangles.has(triangle)) continue;
+      seenTriangles.add(triangle);
+      const offset = triangle * 3;
+      if (
+        corridor[indices[offset]] === 1 &&
+        corridor[indices[offset + 1]] === 1 &&
+        corridor[indices[offset + 2]] === 1
+      ) {
+        corridorTriangles.push(triangle);
       }
     }
   }
-  const distances = new Float64Array(nodePoints.length);
-  distances.fill(Number.POSITIVE_INFINITY);
+  corridorTriangles.sort((left, right) => left - right);
+  if (corridorTriangles.length === 0) return { ok: false, code: 'corridor-empty' };
+  // Steiner graph, implicit: node 0 is the start, node 1 the end, and each corridor edge owns
+  // `k` interior nodes. Links are generated on the fly inside each corridor triangle, so no
+  // adjacency is materialised and Dijkstra stops as soon as the end settles.
+  const topology = options.topology;
+  const k = options.steinerPointsPerEdge;
+  const inCorridor = new Uint8Array(topology.triangleCount);
+  for (const triangle of corridorTriangles) inCorridor[triangle] = 1;
+  const edgeSlot = new Int32Array(topology.edgeCount).fill(-1);
+  const slotEdges: number[] = [];
+  for (const triangle of corridorTriangles) {
+    for (let local = 0; local < 3; local += 1) {
+      const edge = topology.triangleEdges[triangle * 3 + local];
+      if (edgeSlot[edge] >= 0) continue;
+      edgeSlot[edge] = slotEdges.length;
+      slotEdges.push(edge);
+    }
+  }
+  const nodeCount = 2 + slotEdges.length * k;
+  if (nodeCount > options.maximumGraphNodes) {
+    return { ok: false, code: 'geodesic-not-converged' };
+  }
+  const positions = options.positionsM;
+  const nodePositions = new Float64Array(nodeCount * 3);
+  const startPosition = pointPosition(options.start, positions);
+  const endPosition = pointPosition(options.end, positions);
+  nodePositions.set(startPosition, 0);
+  nodePositions.set(endPosition, 3);
+  for (let slot = 0; slot < slotEdges.length; slot += 1) {
+    const a = topology.edgeVertices[slotEdges[slot] * 2] * 3;
+    const b = topology.edgeVertices[slotEdges[slot] * 2 + 1] * 3;
+    for (let sample = 0; sample < k; sample += 1) {
+      const t = (sample + 1) / (k + 1);
+      const offset = (2 + slot * k + sample) * 3;
+      nodePositions[offset] = positions[a] + (positions[b] - positions[a]) * t;
+      nodePositions[offset + 1] = positions[a + 1] + (positions[b + 1] - positions[a + 1]) * t;
+      nodePositions[offset + 2] = positions[a + 2] + (positions[b + 2] - positions[a + 2]) * t;
+    }
+  }
+  const pointEdge = (point: MeshSurfacePointV1): number => {
+    if (point.kind !== 'edge') return -1;
+    for (
+      let cursor = topology.vertexEdgeOffsets[point.a];
+      cursor < topology.vertexEdgeOffsets[point.a + 1];
+      cursor += 1
+    ) {
+      if (topology.vertexNeighbours[cursor] === point.b) return topology.vertexEdges[cursor];
+    }
+    return -1;
+  };
+  const startEdge = pointEdge(options.start);
+  const endEdge = pointEdge(options.end);
+  const startTriangles = pointTriangles(options.start, topology).filter(
+    (triangle) => inCorridor[triangle] === 1,
+  );
+  const endTriangleSet = new Set(
+    pointTriangles(options.end, topology).filter((triangle) => inCorridor[triangle] === 1),
+  );
+  const distances = new Float64Array(nodeCount).fill(Number.POSITIVE_INFINITY);
   distances[0] = 0;
-  const parents = new Int32Array(nodePoints.length);
-  parents.fill(-1);
-  const parentTriangles = new Int32Array(nodePoints.length);
-  parentTriangles.fill(-1);
+  const parents = new Int32Array(nodeCount).fill(-1);
+  const parentTriangles = new Int32Array(nodeCount).fill(-1);
   const heap = new MinHeap();
   heap.push(0, 0);
+  const relax = (from: number, to: number, current: number, triangle: number) => {
+    const fx = from * 3;
+    const tx = to * 3;
+    const dx = nodePositions[tx] - nodePositions[fx];
+    const dy = nodePositions[tx + 1] - nodePositions[fx + 1];
+    const dz = nodePositions[tx + 2] - nodePositions[fx + 2];
+    const candidate = current + Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (candidate >= distances[to]) return;
+    distances[to] = candidate;
+    parents[to] = from;
+    parentTriangles[to] = triangle;
+    heap.push(to, candidate);
+  };
+  const expandTriangle = (node: number, ownEdge: number, triangle: number, current: number) => {
+    for (let local = 0; local < 3; local += 1) {
+      const edge = topology.triangleEdges[triangle * 3 + local];
+      if (edge === ownEdge) continue;
+      const first = 2 + edgeSlot[edge] * k;
+      for (let sample = 0; sample < k; sample += 1) relax(node, first + sample, current, triangle);
+    }
+    if (ownEdge !== endEdge || ownEdge < 0) {
+      if (endTriangleSet.has(triangle)) relax(node, 1, current, triangle);
+    }
+  };
   while (heap.size > 0) {
     const popped = heap.pop()!;
     const [node, current] = popped;
     if (current !== distances[node]) continue;
     if (node === 1) break;
-    for (const link of adjacency[node]) {
-      const candidate = current + link.length;
-      if (candidate >= distances[link.node]) continue;
-      distances[link.node] = candidate;
-      parents[link.node] = node;
-      parentTriangles[link.node] = link.triangle;
-      heap.push(link.node, candidate);
+    if (node === 0) {
+      for (const triangle of startTriangles) expandTriangle(0, startEdge, triangle, current);
+      continue;
+    }
+    const edge = slotEdges[((node - 2) / k) | 0];
+    for (let side = 0; side < 2; side += 1) {
+      const triangle = topology.edgeTriangles[edge * 2 + side];
+      if (triangle >= 0 && inCorridor[triangle] === 1)
+        expandTriangle(node, edge, triangle, current);
     }
   }
   if (!Number.isFinite(distances[1])) return { ok: false, code: 'geodesic-not-converged' };
@@ -894,44 +1000,67 @@ function steinerAttempt(options: {
   if (nodes[nodes.length - 1] !== 0) return { ok: false, code: 'geodesic-not-converged' };
   nodes.reverse();
   segmentTriangles.reverse();
-  const strip = extractStrip(segmentTriangles);
-  if (!strip) return { ok: false, code: 'self-intersection' };
-  const unfolded = unfoldStrip(
-    strip,
-    options.start,
-    options.end,
-    options.topology,
-    options.positionsM,
-  );
-  if (!unfolded) return { ok: false, code: 'geodesic-not-converged' };
-  const apexes = funnelApexes(unfolded.portals, options.start, options.end, unfolded.epsilon);
-  const surfacePoints = reconstructSurfacePoints(apexes, unfolded.portals, unfolded.epsilon);
-  if (!surfacePoints) return { ok: false, code: 'geodesic-not-converged' };
-  if (pathHasRepeatedPoint(surfacePoints)) {
-    return {
-      ok: false,
-      code: 'self-intersection',
-      candidateLengthM: surfacePolylineLength(surfacePoints, options.positionsM),
-    };
+  const firstStrip = extractStrip(segmentTriangles);
+  if (!firstStrip) return { ok: false, code: 'self-intersection' };
+  let strip: readonly number[] = firstStrip;
+  let previousLengthM = Number.POSITIVE_INFINITY;
+  let path: MeshSurfacePathV1 | null = null;
+  for (let flip = 0; ; flip += 1) {
+    const unfolded = unfoldStrip(
+      strip,
+      options.start,
+      options.end,
+      options.topology,
+      options.positionsM,
+    );
+    if (!unfolded) return { ok: false, code: 'geodesic-not-converged' };
+    const apexes = funnelApexes(unfolded.portals, options.start, options.end, unfolded.epsilon);
+    const surfacePoints = reconstructSurfacePoints(apexes, unfolded.portals, unfolded.epsilon);
+    if (!surfacePoints) return { ok: false, code: 'geodesic-not-converged' };
+    const candidateLengthM = surfacePolylineLength(surfacePoints, options.positionsM);
+    if (candidateLengthM > previousLengthM) {
+      return { ok: false, code: 'geodesic-not-converged', candidateLengthM };
+    }
+    if (pathHasRepeatedPoint(surfacePoints)) {
+      return { ok: false, code: 'self-intersection', candidateLengthM };
+    }
+    try {
+      path = createMeshSurfacePathV1({ topology: options.topology, points: surfacePoints });
+    } catch {
+      return { ok: false, code: 'geodesic-not-converged', candidateLengthM };
+    }
+    const apexVertices = new Set(
+      apexes.flatMap(({ surfacePoint }) =>
+        surfacePoint.kind === 'vertex' ? [surfacePoint.vertex] : [],
+      ),
+    );
+    const violation = apexViolation(
+      surfacePoints,
+      apexVertices,
+      options.topology,
+      options.positionsM,
+    );
+    if (violation === null) break;
+    // A wrap of less than pi around a saddle vertex is not locally shortest: the path is
+    // shorter on the other side of that vertex. Re-route the strip through the complementary
+    // fan (a wedge flip) and run the funnel again. Each flip must strictly shorten the path.
+    const rerouted =
+      violation.vertex >= 0 && flip < MAXIMUM_WEDGE_FLIPS && candidateLengthM < previousLengthM
+        ? rerouteStripAroundVertex(
+            strip,
+            violation.vertex,
+            violation.fan,
+            options.topology,
+            corridor,
+          )
+        : null;
+    if (!rerouted) {
+      return { ok: false, code: 'geodesic-not-converged', candidateLengthM };
+    }
+    previousLengthM = candidateLengthM;
+    strip = rerouted;
   }
-  let path: MeshSurfacePathV1;
-  try {
-    path = createMeshSurfacePathV1({ topology: options.topology, points: surfacePoints });
-  } catch {
-    return { ok: false, code: 'geodesic-not-converged' };
-  }
-  const apexVertices = new Set(
-    apexes.flatMap(({ surfacePoint }) =>
-      surfacePoint.kind === 'vertex' ? [surfacePoint.vertex] : [],
-    ),
-  );
-  if (!apexCheck(surfacePoints, apexVertices, options.topology, options.positionsM)) {
-    return {
-      ok: false,
-      code: 'geodesic-not-converged',
-      candidateLengthM: surfacePolylineLength(surfacePoints, options.positionsM),
-    };
-  }
+  if (!path) return { ok: false, code: 'geodesic-not-converged' };
   return {
     ok: true,
     result: {
@@ -939,7 +1068,7 @@ function steinerAttempt(options: {
       graphLengthM: distances[1],
       corridorVertexCount: corridor.reduce((sum, value) => sum + value, 0),
       corridorTriangleCount: corridorTriangles.length,
-      graphNodeCount: nodePoints.length,
+      graphNodeCount: nodeCount,
       stripTriangleCount: strip.length,
     },
   };

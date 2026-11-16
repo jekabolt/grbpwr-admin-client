@@ -95,7 +95,7 @@ describe('mesh surface path v1', () => {
 
   it.each(KINDS)('%s mirrors exactly and remains on-surface under a small morph', (kind) => {
     const { positionsM, topology } = fixture(kind);
-    const firstEdge = topology.vertexEdges[8189][0];
+    const firstEdge = topology.vertexEdges[topology.vertexEdgeOffsets[8189]];
     const a = topology.edgeVertices[firstEdge * 2];
     const b = topology.edgeVertices[firstEdge * 2 + 1];
     const path = createMeshSurfacePathV1({

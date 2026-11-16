@@ -1,4 +1,7 @@
-import type { MeshSurfaceTopologyV1 } from './mesh-surface-topology-v1';
+import {
+  meshSurfaceVertexTrianglesV1,
+  type MeshSurfaceTopologyV1,
+} from './mesh-surface-topology-v1';
 
 export const MESH_SURFACE_PATH_V1 = 'mesh-surface-path/v1' as const;
 
@@ -57,7 +60,9 @@ function pointTriangles(
   topology: MeshSurfaceTopologyV1,
 ): Uint32Array | null {
   if (point.kind === 'vertex') {
-    return validVertex(point.vertex, topology) ? topology.vertexTriangles[point.vertex] : null;
+    return validVertex(point.vertex, topology)
+      ? meshSurfaceVertexTrianglesV1(topology, point.vertex)
+      : null;
   }
   if (
     !validVertex(point.a, topology) ||
@@ -69,9 +74,9 @@ function pointTriangles(
   ) {
     return null;
   }
-  const left = topology.vertexTriangles[point.a];
-  const right = new Set(topology.vertexTriangles[point.b]);
-  const shared = [...left].filter((triangle) => right.has(triangle));
+  const left = meshSurfaceVertexTrianglesV1(topology, point.a);
+  const right = meshSurfaceVertexTrianglesV1(topology, point.b);
+  const shared = [...left].filter((triangle) => right.includes(triangle));
   return shared.length > 0 ? Uint32Array.from(shared) : null;
 }
 
@@ -234,6 +239,61 @@ export function evaluateMeshSurfacePathV1(options: {
     lengthM += Math.hypot(first[0] - previous[0], first[1] - previous[1], first[2] - previous[2]);
   }
   return Object.freeze({ positionsM, lengthM });
+}
+
+/**
+ * Live-frame evaluation (design §5.3: ≤ 0.2 ms, zero allocations). Writes XYZ for every point into
+ * `out` and returns the length. No validation: validate the path once with
+ * `validateMeshSurfacePathV1` against the topology, then call this per frame with the current
+ * positions (any mesh sharing that index buffer). `out` must hold `points.length * 3` values.
+ */
+export function evaluateMeshSurfacePathIntoV1(
+  path: MeshSurfacePathV1,
+  positionsM: Float32Array,
+  out: Float32Array,
+): number {
+  const points = path.points;
+  let lengthM = 0;
+  let previousX = 0;
+  let previousY = 0;
+  let previousZ = 0;
+  for (let index = 0; index < points.length; index += 1) {
+    const point = points[index];
+    let x: number;
+    let y: number;
+    let z: number;
+    if (point.kind === 'vertex') {
+      const offset = point.vertex * 3;
+      x = positionsM[offset];
+      y = positionsM[offset + 1];
+      z = positionsM[offset + 2];
+    } else {
+      const offsetA = point.a * 3;
+      const offsetB = point.b * 3;
+      x = positionsM[offsetA] + (positionsM[offsetB] - positionsM[offsetA]) * point.t;
+      y = positionsM[offsetA + 1] + (positionsM[offsetB + 1] - positionsM[offsetA + 1]) * point.t;
+      z = positionsM[offsetA + 2] + (positionsM[offsetB + 2] - positionsM[offsetA + 2]) * point.t;
+    }
+    out[index * 3] = x;
+    out[index * 3 + 1] = y;
+    out[index * 3 + 2] = z;
+    if (index > 0) {
+      const dx = x - previousX;
+      const dy = y - previousY;
+      const dz = z - previousZ;
+      lengthM += Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+    previousX = x;
+    previousY = y;
+    previousZ = z;
+  }
+  if (path.closed && points.length > 1) {
+    const dx = out[0] - previousX;
+    const dy = out[1] - previousY;
+    const dz = out[2] - previousZ;
+    lengthM += Math.sqrt(dx * dx + dy * dy + dz * dz);
+  }
+  return lengthM;
 }
 
 export function mirrorMeshSurfacePointV1(

@@ -12,6 +12,7 @@ import {
 import { computeMeshSurfaceGeodesicV1 } from './mesh-surface-geodesic-v1';
 import type { MeshSurfaceGeodesicResultV1 } from './mesh-surface-geodesic-v1';
 import {
+  evaluateMeshSurfacePathIntoV1,
   evaluateMeshSurfacePathV1,
   meshSurfaceEdgePointV1,
   meshSurfaceVertexPointV1,
@@ -233,14 +234,27 @@ describe('mesh surface geodesic v1', () => {
       if (section.ok && section.selectedLoop) {
         expect(loopLengthM).toBeGreaterThan(section.selectedLoop.perimeterM);
       }
-      const loopMs = c7ToHps.stats.buildMs + hpsToSsn.stats.buildMs;
+      const firstLoopMs = c7ToHps.stats.buildMs + hpsToSsn.stats.buildMs;
+      // Design §5.3: active guide build ≤ 12 ms p95. The first call above also pays for JIT
+      // warm-up, so it is reported, and the budget is asserted on the p95 of repeated builds.
+      const loopSamples: number[] = [];
+      for (let run = 0; run < 20; run += 1) {
+        loopSamples.push(
+          neckSegment(current, 857, hps).stats.buildMs +
+            neckSegment(current, hps, SSN_VERTEX[kind]).stats.buildMs,
+        );
+      }
+      loopSamples.sort((left, right) => left - right);
+      const p95LoopMs = loopSamples[Math.ceil(loopSamples.length * 0.95) - 1];
       console.info(
         `geodesic-neck ${kind}: loop=${(loopLengthM * 1000).toFixed(3)}mm reference=${(
           (measuredLength(c7Reference) + measuredLength(ssnReference)) *
           2000
-        ).toFixed(3)}mm build=${loopMs.toFixed(3)}ms`,
+        ).toFixed(3)}mm first=${firstLoopMs.toFixed(3)}ms p50=${loopSamples[10].toFixed(
+          3,
+        )}ms p95=${p95LoopMs.toFixed(3)}ms`,
       );
-      expect(loopMs).toBeLessThanOrEqual(12);
+      expect(p95LoopMs).toBeLessThanOrEqual(12);
     },
     30_000,
   );
@@ -279,6 +293,37 @@ describe('mesh surface geodesic v1', () => {
     const carried = evaluated(admitted.result.path, current.topology, morphedPositions).positionsM;
     const rebuilt = evaluated(morphed.path, current.topology, morphedPositions).positionsM;
     expect(hausdorff(carried, rebuilt)).toBeLessThanOrEqual(0.003);
+  });
+
+  it.each(KINDS)('%s neck half evaluates per frame within the live-frame budget', (kind) => {
+    const current = fixture(kind);
+    const segments = [
+      neckSegment(current, 857, 8189),
+      neckSegment(current, 8189, SSN_VERTEX[kind]),
+    ].flatMap((result) => (result.ok ? [result.path] : []));
+    expect(segments).toHaveLength(2);
+    const buffers = segments.map((path) => new Float32Array(path.points.length * 3));
+    const samples: number[] = [];
+    for (let frame = 0; frame < 400; frame += 1) {
+      const startedAt = performance.now();
+      segments.forEach((path, index) =>
+        evaluateMeshSurfacePathIntoV1(path, current.positionsM, buffers[index]),
+      );
+      samples.push(performance.now() - startedAt);
+    }
+    segments.forEach((path, index) => {
+      const reference = evaluated(path, current.topology, current.positionsM);
+      expect(evaluateMeshSurfacePathIntoV1(path, current.positionsM, buffers[index])).toBeCloseTo(
+        reference.lengthM,
+        12,
+      );
+      expect([...buffers[index]]).toEqual([...reference.positionsM]);
+    });
+    samples.sort((left, right) => left - right);
+    const p95FrameMs = samples[Math.ceil(samples.length * 0.95) - 1];
+    console.info(`geodesic-frame ${kind}: p95=${p95FrameMs.toFixed(4)}ms`);
+    // Design §5.3: live frame ≤ 0.2 ms.
+    expect(p95FrameMs).toBeLessThanOrEqual(0.2);
   });
 
   it('returns topology-mismatch instead of a fallback chord', () => {
