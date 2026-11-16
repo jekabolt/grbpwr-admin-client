@@ -114,7 +114,7 @@ describe('zero-operation saved card authority', () => {
 
   it('fetches a server-relative tokenized DXF URL from the backend origin', async () => {
     const exactRow = Object.freeze({ ...row, sizeBytes: 3 });
-    const fetcher = vi.fn(
+    const fetcher = vi.fn<typeof globalThis.fetch>(
       async () =>
         new Response(new Uint8Array([1, 2, 3]), {
           status: 200,
@@ -123,6 +123,7 @@ describe('zero-operation saved card authority', () => {
     );
     const host = createPatternImportDxfPhaseESavedDxfReprocessHostV1({
       serverUrl: 'https://api.beta.example/',
+      readAuthToken: () => 'beta-token',
       fetch: fetcher as typeof globalThis.fetch,
       readAuthoritativeRow: async () => ({
         row: exactRow,
@@ -140,6 +141,44 @@ describe('zero-operation saved card authority', () => {
       'https://api.beta.example/api/p/token/download',
       expect.objectContaining({ method: 'GET' }),
     );
+    const request = fetcher.mock.calls[0]?.[1];
+    expect(new Headers(request?.headers).get('Grpc-Metadata-Authorization')).toBe(
+      'Bearer beta-token',
+    );
+    host.dispose();
+  });
+
+  it('does not disclose the backend auth token to a cross-origin saved DXF URL', async () => {
+    const exactRow = Object.freeze({ ...row, sizeBytes: 3 });
+    const fetcher = vi.fn<typeof globalThis.fetch>(
+      async () =>
+        new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { 'content-length': '3' },
+        }),
+    );
+    const host = createPatternImportDxfPhaseESavedDxfReprocessHostV1({
+      serverUrl: 'https://api.beta.example/',
+      readAuthToken: () => 'beta-token',
+      fetch: fetcher as typeof globalThis.fetch,
+      readAuthoritativeRow: async () => ({
+        row: exactRow,
+        downloadUrl: 'https://objects.example/pattern-main.dxf?token=storage-token',
+      }),
+      resolveCard: async () => {
+        throw new Error('Card projection is not used by the byte-read test.');
+      },
+    });
+
+    await expect(
+      host.readAuthoritativeRow(exactRow, new AbortController().signal, () => undefined),
+    ).resolves.toMatchObject({ row: exactRow, bytes: new Uint8Array([1, 2, 3]) });
+    expect(fetcher).toHaveBeenCalledWith(
+      'https://objects.example/pattern-main.dxf?token=storage-token',
+      expect.objectContaining({ method: 'GET' }),
+    );
+    const request = fetcher.mock.calls[0]?.[1];
+    expect(new Headers(request?.headers).get('Grpc-Metadata-Authorization')).toBeNull();
     host.dispose();
   });
 

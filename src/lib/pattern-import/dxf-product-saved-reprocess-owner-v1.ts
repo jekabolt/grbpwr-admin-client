@@ -542,12 +542,14 @@ export function createDxfProductSavedReprocessOwnerV1(host: DxfProductSavedRepro
         loaded = await host.readAuthoritativeRow(row, controller.signal, (done, total, note) =>
           progress('read', 0, done, total, note),
         );
-      } catch {
+      } catch (error) {
+        const reason =
+          error instanceof Error && error.message.trim() ? ` ${error.message.trim()}` : '';
         return blocked(
           aborted(controller.signal) ? 'cancelled' : 'saved-row-read-failed',
           aborted(controller.signal)
             ? 'Saved-DXF reprocess was cancelled.'
-            : 'The authoritative saved DXF row could not be read.',
+            : `The authoritative saved DXF row could not be read.${reason}`,
           row,
           sourceFileId,
         );

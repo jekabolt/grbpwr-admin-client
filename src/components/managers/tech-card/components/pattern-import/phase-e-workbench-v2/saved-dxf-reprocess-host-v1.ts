@@ -50,12 +50,16 @@ export type PatternImportDxfPhaseESavedDxfReprocessHostDepsV1 = Readonly<{
   crypto?: Pick<Crypto, 'subtle'>;
   /** Backend origin for server-relative tokenized pattern URLs; defaults to VITE_SERVER_URL. */
   serverUrl?: string;
+  /** Reads the current admin token for downloads served by that backend origin only. */
+  readAuthToken?: () => string | null;
 }>;
 
 export const PATTERN_IMPORT_DXF_PHASE_E_SAVED_DXF_REPROCESS_HOST_CLAIMS_V1 = Object.freeze({
   transactionalRowReadInjected: true,
   downloadUrlReadFromSameSnapshot: true,
   exactByteFetchUsesAbortSignal: true,
+  backendDownloadUsesGrpcAuthHeader: true,
+  crossOriginDownloadNeverReceivesAdminToken: true,
   disposableWorkerPerReprocess: true,
   directDxfOnly: true,
   dxfPathProvenanceOptInRequired: true,
@@ -135,6 +139,32 @@ export function resolvePatternImportDxfPhaseESavedDownloadUrlV1(
   if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:')
     throw new Error('Saved DXF backend origin must use HTTP or HTTPS.');
   return resolved.toString();
+}
+
+function readBrowserAuthToken(): string | null {
+  try {
+    return globalThis.localStorage?.getItem('authToken') ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function backendDownloadAuthHeaders(
+  resolvedUrl: string,
+  serverUrl: string,
+  readAuthToken: () => string | null,
+): Readonly<Record<string, string>> | undefined {
+  let downloadOrigin: string;
+  let backendOrigin: string;
+  try {
+    downloadOrigin = new URL(resolvedUrl).origin;
+    backendOrigin = new URL(serverUrl).origin;
+  } catch {
+    return undefined;
+  }
+  if (downloadOrigin !== backendOrigin) return undefined;
+  const token = readAuthToken()?.trim();
+  return token ? { 'Grpc-Metadata-Authorization': `Bearer ${token}` } : undefined;
 }
 
 function report(
@@ -590,6 +620,8 @@ export function createPatternImportDxfPhaseESavedDxfReprocessHostV1(
     dispose: () => void;
   }> {
   const fetcher = deps.fetch ?? globalThis.fetch;
+  const serverUrl = (deps.serverUrl ?? import.meta.env.VITE_SERVER_URL ?? '').trim();
+  const readAuthToken = deps.readAuthToken ?? readBrowserAuthToken;
   if (
     typeof deps.readAuthoritativeRow !== 'function' ||
     typeof deps.resolveCard !== 'function' ||
@@ -618,14 +650,17 @@ export function createPatternImportDxfPhaseESavedDxfReprocessHostV1(
     async readAuthoritativeRow(expected, signal, onProgress) {
       const authority = await read(expected, signal);
       onProgress(0, 1, 'downloading authoritative saved DXF');
-      const response = await fetcher(
-        resolvePatternImportDxfPhaseESavedDownloadUrlV1(authority.downloadUrl, deps.serverUrl),
-        {
-          method: 'GET',
-          credentials: 'same-origin',
-          signal,
-        },
+      const resolvedUrl = resolvePatternImportDxfPhaseESavedDownloadUrlV1(
+        authority.downloadUrl,
+        serverUrl,
       );
+      const headers = backendDownloadAuthHeaders(resolvedUrl, serverUrl, readAuthToken);
+      const response = await fetcher(resolvedUrl, {
+        method: 'GET',
+        credentials: 'same-origin',
+        ...(headers ? { headers } : {}),
+        signal,
+      });
       if (!response.ok) throw new Error(`Saved DXF download failed with HTTP ${response.status}.`);
       const declaredLength = response.headers.get('content-length');
       if (
