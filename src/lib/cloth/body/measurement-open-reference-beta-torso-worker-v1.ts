@@ -13,6 +13,7 @@ import type {
 import { solveOpenReferenceChestShoulderResearchV1 } from './measurement-open-reference-chest-shoulder-research-v1';
 import { type MakeHumanOpenReferenceBasisV1 } from './measurement-open-reference-display-v1';
 import { applyOpenReferenceUnderBustRibcageResearchV1 } from './measurement-open-reference-underbust-ribcage-research-v1';
+import { solveMeasurementOpenReferenceHighHipProxyV1 } from './measurement-open-reference-high-hip-proxy-v1';
 import { solveMeasurementOpenReferenceTorsoDepthProxyV1 } from './measurement-open-reference-torso-depth-proxy-v1';
 
 export const MEASUREMENT_OPEN_REFERENCE_BETA_TORSO_WORKER_MEASURE_V1 =
@@ -34,14 +35,44 @@ function abortError(): Error {
   return error;
 }
 
+type HighHipWorkerFieldsV1 = Pick<
+  MeasurementOpenReferenceBetaTorsoWorkerResultV1,
+  | 'highHipStatus'
+  | 'highHipRepresented'
+  | 'highHipLimited'
+  | 'highHipStationOriginM'
+  | 'highHipModeResult'
+  | 'highHipDiagnostics'
+>;
+
+const UNREQUESTED_HIGH_HIP_V1: HighHipWorkerFieldsV1 = Object.freeze({
+  highHipStatus: 'unrequested' as const,
+  highHipRepresented: false,
+  highHipLimited: false,
+  highHipDiagnostics: Object.freeze([]),
+});
+
+function highHipNotApplied(message: string): HighHipWorkerFieldsV1 {
+  return Object.freeze({
+    highHipStatus: 'notApplied' as const,
+    highHipRepresented: false,
+    highHipLimited: false,
+    highHipDiagnostics: Object.freeze([
+      Object.freeze({ code: 'section-invalid' as const, message }),
+    ]),
+  });
+}
+
 /** Shared pure torso pipeline used by both the module worker and the synchronous fallback. */
 export function solveMeasurementOpenReferenceBetaTorsoV1(options: {
   readonly basis: MakeHumanOpenReferenceBasisV1;
   readonly sourcePositionsM: Float32Array;
   readonly triangleIndices: Uint16Array | Uint32Array;
   readonly measurements: MeasurementOpenReferenceBetaTorsoWorkerOptionsV1['measurements'];
+  readonly highHipCircumferenceMm?: number;
   readonly torsoBundle: MakeHumanTorsoShapeDeltaBundleV1;
   readonly solveDepthProxy?: typeof solveMeasurementOpenReferenceTorsoDepthProxyV1;
+  readonly solveHighHipProxy?: typeof solveMeasurementOpenReferenceHighHipProxyV1;
 }): MeasurementOpenReferenceBetaTorsoWorkerResultV1 {
   const { torsoBundle } = options;
   const modes = createMakeHumanAnteriorChestShoulderModesResearchV1({
@@ -67,58 +98,7 @@ export function solveMeasurementOpenReferenceBetaTorsoV1(options: {
   if (!chestMode?.chestStationOriginM) {
     throw new Error('Chest section station is missing.');
   }
-  const depthRequested = [
-    options.measurements.chestDepthMm,
-    options.measurements.waistDepthMm,
-    options.measurements.hipDepthMm,
-  ].some((value) => value != null);
-  if (!depthRequested) {
-    return Object.freeze({
-      positionsM: chestShoulder.positionsM,
-      chestStationOriginM: chestMode.chestStationOriginM,
-      underBustStationOriginM: modes.underBustStationOriginM,
-      ribcageRepresentedMeasurements: ribcage.representedMeasurements,
-      ribcageDiagnostics: Object.freeze([...modes.diagnostics, ...ribcage.diagnostics]),
-      chestShoulderRepresentedMeasurements: chestShoulder.representedMeasurements,
-      chestShoulderLimitedMeasurements: chestShoulder.limitedMeasurements,
-      chestShoulderDiagnostics: chestShoulder.diagnostics,
-      depthRepresentedMeasurements: Object.freeze([]),
-      depthLimitedMeasurements: Object.freeze([]),
-      depthModeResults: Object.freeze([]),
-      depthDiagnostics: Object.freeze([]),
-    });
-  }
-  const waistHipModes = createMakeHumanUniformWaistHipModesV1({
-    basis: options.basis,
-    heightMm: options.measurements.heightMm,
-    bundle: torsoBundle,
-  });
-  const shoulderMode = modes.modes.find(
-    ({ measurementKey }) => measurementKey === 'shoulderBreadthMm',
-  );
-  const waistMode = waistHipModes.modes.find(
-    ({ measurementKey }) => measurementKey === 'waistCircumferenceMm',
-  );
-  const hipMode = waistHipModes.modes.find(
-    ({ measurementKey }) => measurementKey === 'hipCircumferenceMm',
-  );
-  if (!shoulderMode?.shoulderVertices || !waistMode || !hipMode) {
-    throw new Error('Torso depth proxy stations are incomplete.');
-  }
-  const depth = (options.solveDepthProxy ?? solveMeasurementOpenReferenceTorsoDepthProxyV1)({
-    sourcePositionsM: chestShoulder.positionsM,
-    triangleIndices: options.triangleIndices,
-    measurements: options.measurements,
-    stations: [
-      { measurementKey: 'chestDepthMm', originM: chestMode.chestStationOriginM },
-      { measurementKey: 'waistDepthMm', originM: waistMode.stationOriginM },
-      { measurementKey: 'hipDepthMm', originM: hipMode.stationOriginM },
-    ],
-    protectedStationOriginsM: [modes.underBustStationOriginM],
-    shoulderVertices: shoulderMode.shoulderVertices,
-  });
-  return Object.freeze({
-    positionsM: depth.positionsM,
+  const common = {
     chestStationOriginM: chestMode.chestStationOriginM,
     underBustStationOriginM: modes.underBustStationOriginM,
     ribcageRepresentedMeasurements: ribcage.representedMeasurements,
@@ -126,10 +106,139 @@ export function solveMeasurementOpenReferenceBetaTorsoV1(options: {
     chestShoulderRepresentedMeasurements: chestShoulder.representedMeasurements,
     chestShoulderLimitedMeasurements: chestShoulder.limitedMeasurements,
     chestShoulderDiagnostics: chestShoulder.diagnostics,
-    depthRepresentedMeasurements: depth.representedMeasurements,
-    depthLimitedMeasurements: depth.limitedMeasurements,
-    depthModeResults: depth.modeResults,
-    depthDiagnostics: depth.diagnostics,
+  };
+  const depthRequested = [
+    options.measurements.chestDepthMm,
+    options.measurements.waistDepthMm,
+    options.measurements.hipDepthMm,
+  ].some((value) => value != null);
+  const highHipRequested = options.highHipCircumferenceMm != null;
+  if (!depthRequested && !highHipRequested) {
+    return Object.freeze({
+      positionsM: chestShoulder.positionsM,
+      ...common,
+      depthRepresentedMeasurements: Object.freeze([]),
+      depthLimitedMeasurements: Object.freeze([]),
+      depthModeResults: Object.freeze([]),
+      depthDiagnostics: Object.freeze([]),
+      ...UNREQUESTED_HIGH_HIP_V1,
+    });
+  }
+
+  let stations:
+    | Readonly<{
+        shoulderVertices: Readonly<{ negative: number; positive: number }>;
+        waistStationOriginM: readonly [number, number, number];
+        hipStationOriginM: readonly [number, number, number];
+      }>
+    | undefined;
+  let stationError = 'Torso depth proxy stations are incomplete.';
+  try {
+    const waistHipModes = createMakeHumanUniformWaistHipModesV1({
+      basis: options.basis,
+      heightMm: options.measurements.heightMm,
+      bundle: torsoBundle,
+    });
+    const shoulderMode = modes.modes.find(
+      ({ measurementKey }) => measurementKey === 'shoulderBreadthMm',
+    );
+    const waistMode = waistHipModes.modes.find(
+      ({ measurementKey }) => measurementKey === 'waistCircumferenceMm',
+    );
+    const hipMode = waistHipModes.modes.find(
+      ({ measurementKey }) => measurementKey === 'hipCircumferenceMm',
+    );
+    if (shoulderMode?.shoulderVertices && waistMode && hipMode) {
+      stations = Object.freeze({
+        shoulderVertices: shoulderMode.shoulderVertices,
+        waistStationOriginM: waistMode.stationOriginM,
+        hipStationOriginM: hipMode.stationOriginM,
+      });
+    }
+  } catch (reason: unknown) {
+    // The depth path keeps its pre-high-hip contract (throw); high hip alone degrades to notApplied.
+    if (depthRequested) throw reason;
+    stationError = reason instanceof Error ? reason.message : String(reason);
+  }
+  if (!stations) {
+    if (depthRequested) throw new Error(stationError);
+    return Object.freeze({
+      positionsM: chestShoulder.positionsM,
+      ...common,
+      depthRepresentedMeasurements: Object.freeze([]),
+      depthLimitedMeasurements: Object.freeze([]),
+      depthModeResults: Object.freeze([]),
+      depthDiagnostics: Object.freeze([]),
+      ...highHipNotApplied(stationError),
+    });
+  }
+
+  // Order: waist/hip (input) -> ribcage/chest/shoulder -> depth -> high hip.
+  const depth = depthRequested
+    ? (options.solveDepthProxy ?? solveMeasurementOpenReferenceTorsoDepthProxyV1)({
+        sourcePositionsM: chestShoulder.positionsM,
+        triangleIndices: options.triangleIndices,
+        measurements: options.measurements,
+        stations: [
+          { measurementKey: 'chestDepthMm', originM: chestMode.chestStationOriginM },
+          { measurementKey: 'waistDepthMm', originM: stations.waistStationOriginM },
+          { measurementKey: 'hipDepthMm', originM: stations.hipStationOriginM },
+        ],
+        protectedStationOriginsM: [modes.underBustStationOriginM],
+        shoulderVertices: stations.shoulderVertices,
+      })
+    : undefined;
+  const depthFields = {
+    depthRepresentedMeasurements: depth?.representedMeasurements ?? Object.freeze([]),
+    depthLimitedMeasurements: depth?.limitedMeasurements ?? Object.freeze([]),
+    depthModeResults: depth?.modeResults ?? Object.freeze([]),
+    depthDiagnostics: depth?.diagnostics ?? Object.freeze([]),
+  };
+  const afterDepthPositionsM = depth?.positionsM ?? chestShoulder.positionsM;
+  if (!highHipRequested) {
+    return Object.freeze({
+      positionsM: afterDepthPositionsM,
+      ...common,
+      ...depthFields,
+      ...UNREQUESTED_HIGH_HIP_V1,
+    });
+  }
+
+  let positionsM = afterDepthPositionsM;
+  let highHipFields: HighHipWorkerFieldsV1;
+  try {
+    const highHip = (options.solveHighHipProxy ?? solveMeasurementOpenReferenceHighHipProxyV1)({
+      sourcePositionsM: afterDepthPositionsM,
+      triangleIndices: options.triangleIndices,
+      targetCircumferenceMm: options.highHipCircumferenceMm,
+      waistToHighHipMm: options.measurements.waistToHighHipMm,
+      waistStationOriginM: stations.waistStationOriginM,
+      hipStationOriginM: stations.hipStationOriginM,
+      protectedStationOriginsM: [
+        modes.underBustStationOriginM,
+        ...(depthRequested ? [chestMode.chestStationOriginM] : []),
+      ],
+      shoulderVertices: stations.shoulderVertices,
+    });
+    const applied = highHip.status === 'represented' || highHip.status === 'limited';
+    if (applied) positionsM = highHip.positionsM;
+    highHipFields = Object.freeze({
+      highHipStatus: highHip.status,
+      highHipRepresented: highHip.status === 'represented',
+      highHipLimited: highHip.status === 'limited',
+      ...(highHip.station ? { highHipStationOriginM: highHip.station.originM } : {}),
+      ...(highHip.modeResult ? { highHipModeResult: highHip.modeResult } : {}),
+      highHipDiagnostics: highHip.diagnostics,
+    });
+  } catch (reason: unknown) {
+    // A failing high hip never blanks the preview or rolls back waist/hip/depth.
+    highHipFields = highHipNotApplied(reason instanceof Error ? reason.message : String(reason));
+  }
+  return Object.freeze({
+    positionsM,
+    ...common,
+    ...depthFields,
+    ...highHipFields,
   });
 }
 
@@ -142,6 +251,9 @@ async function solveSynchronously(
     sourcePositionsM: options.sourcePositionsM,
     triangleIndices: options.triangleIndices,
     measurements: options.measurements,
+    ...(options.highHipCircumferenceMm == null
+      ? {}
+      : { highHipCircumferenceMm: options.highHipCircumferenceMm }),
     torsoBundle,
   });
 }
@@ -160,6 +272,9 @@ function transferableRequest(
         sourcePositionsM,
         triangleIndices,
         measurements: options.measurements,
+        ...(options.highHipCircumferenceMm == null
+          ? {}
+          : { highHipCircumferenceMm: options.highHipCircumferenceMm }),
       },
     },
     [sourcePositionsM.buffer, triangleIndices.buffer],
