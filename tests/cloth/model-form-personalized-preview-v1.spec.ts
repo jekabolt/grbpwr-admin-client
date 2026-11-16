@@ -872,7 +872,7 @@ async function exerciseHighHipAndKnee(page: import('@playwright/test').Page, bas
   const measurementApplication = page.getByTestId(
     'model-open-reference-measurement-application-status',
   );
-  const inseam = page.getByRole('textbox', { name: 'inseam', exact: true });
+  const inseam = measurementField(page, 'inseam');
   await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
   await expect(canvas).toHaveAttribute(
     'data-source-revision',
@@ -884,6 +884,7 @@ async function exerciseHighHipAndKnee(page: import('@playwright/test').Page, bas
 
   // The inseam guide draws no path, so canvas screenshots compare body geometry only.
   const bodyScreenshot = async () => {
+    await revealMeasurement(page, inseam);
     await inseam.focus();
     await expect(canvas).toHaveAttribute('data-measurement-guide-path-count', '0');
     await page.mouse.move(0, 0);
@@ -893,7 +894,8 @@ async function exerciseHighHipAndKnee(page: import('@playwright/test').Page, bas
     const before = await canvas.getAttribute('data-source-revision');
     const keysBefore = await appliedOrLimitedKeys(measurementApplication);
     await startFrameGapAudit(page);
-    const input = page.getByRole('textbox', { name: label, exact: true });
+    const input = measurementField(page, label);
+    await revealMeasurement(page, input);
     await input.fill(value);
     await input.blur();
     await expect
@@ -922,7 +924,9 @@ async function exerciseHighHipAndKnee(page: import('@playwright/test').Page, bas
   );
   const highHipShape = await bodyScreenshot();
   expect(highHipShape.equals(baselineShape)).toBe(false);
-  await page.getByRole('textbox', { name: 'high hip', exact: true }).focus();
+  const highHipField = measurementField(page, 'high hip');
+  await revealMeasurement(page, highHipField);
+  await highHipField.focus();
   await expect(canvas).toHaveAttribute(
     'data-active-measurement-guide',
     'BODY_MEASUREMENT_NAME_HIGH_HIP',
@@ -938,7 +942,9 @@ async function exerciseHighHipAndKnee(page: import('@playwright/test').Page, bas
   );
   const kneeShape = await bodyScreenshot();
   expect(kneeShape.equals(highHipShape)).toBe(false);
-  await page.getByRole('textbox', { name: 'knee', exact: true }).focus();
+  const kneeField = measurementField(page, 'knee');
+  await revealMeasurement(page, kneeField);
+  await kneeField.focus();
   await expect(canvas).toHaveAttribute(
     'data-active-measurement-guide',
     'BODY_MEASUREMENT_NAME_KNEE',
@@ -985,7 +991,8 @@ test('high hip and knee apply as bounded proxies on female, male and neutral bas
   await page.getByRole('combobox', { name: 'select' }).click();
   await page.getByRole('option', { name: 'unisex' }).click();
   for (const [label, value] of REQUIRED_CREATE_MEASUREMENTS) {
-    const input = page.getByRole('textbox', { name: label, exact: true });
+    const input = measurementField(page, label);
+    await revealMeasurement(page, input);
     await input.fill(value);
     await input.blur();
   }
