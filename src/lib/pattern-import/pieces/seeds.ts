@@ -143,9 +143,22 @@ function joinDigits(texts: IRText[]): { joined: IRText[]; parts: Set<number> } {
   return { joined: out, parts: used };
 }
 
+/** A size, or a range of two sizes ("2XL", "L - 2XL", "S–M"), of the run. */
+function isSizeOrRange(s: string, sizes: ReadonlySet<string>): boolean {
+  const v = s.trim().replace(/\.$/, '').toUpperCase();
+  if (sizes.has(v)) return true;
+  const r = v.match(/^(\S+)\s*[-–—]\s*(\S+)$/);
+  return !!r && sizes.has(r[1]) && sizes.has(r[2]);
+}
+
 export function textSeeds(sheet: Sheet, sizeLabels: ReadonlySet<string> = new Set()): TextSeed[] {
   const texts = sheet.texts.filter((t) => t.text.trim());
   const explicit: TextSeed[] = [];
+  // "L - 2XL" / "XL: 2XL" is a size range, not letter L of a piece named "2XL"
+  const sizesUp =
+    typeof process !== 'undefined' && !!process.env?.SEED_SIZE_RANGE_OFF
+      ? new Set<string>()
+      : new Set([...sizeLabels].map((x) => x.trim().replace(/\.$/, '').toUpperCase()));
   for (const t of texts) {
     const s = t.text.trim();
     for (const re of EXPLICIT) {
@@ -160,14 +173,11 @@ export function textSeeds(sheet: Sheet, sizeLabels: ReadonlySet<string> = new Se
         });
     }
     const m = s.match(LETTER_NAME);
-    if (m && t.fontSizeMm >= 4)
-      explicit.push({
-        label: m[1],
-        name: s.slice(m[0].indexOf(m[1]) + m[1].length).replace(/^\s*[-–—:]\s*/, ''),
-        at: centre(t),
-        text: t,
-        size: t.fontSizeMm,
-      });
+    if (m && t.fontSizeMm >= 4) {
+      const name = s.slice(m[0].indexOf(m[1]) + m[1].length).replace(/^\s*[-–—:]\s*/, '');
+      if (sizesUp.has(m[1].toUpperCase()) && isSizeOrRange(name, sizesUp)) continue;
+      explicit.push({ label: m[1], name, at: centre(t), text: t, size: t.fontSizeMm });
+    }
   }
   if (explicit.length) return dedupe(explicit);
   const jd = joinDigits(texts);
