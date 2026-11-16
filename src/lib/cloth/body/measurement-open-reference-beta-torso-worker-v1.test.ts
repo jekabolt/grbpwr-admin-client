@@ -155,5 +155,27 @@ describe('measurement open-reference beta torso worker v1', () => {
     expect(fallback.depthLimitedMeasurements).toEqual(direct.depthLimitedMeasurements);
     expect(fallback.depthModeResults).toEqual(direct.depthModeResults);
     expect(fallback.depthDiagnostics).toEqual(direct.depthDiagnostics);
+
+    const solveDepthProxy = vi.fn(() => {
+      throw new Error('no-depth path must not run the torso-depth quality gate');
+    });
+    const noDepth = solveMeasurementOpenReferenceBetaTorsoV1({
+      basis: realBasis,
+      sourcePositionsM,
+      triangleIndices: realBasis.indices,
+      measurements: Object.freeze({
+        ...realMeasurements,
+        chestDepthMm: undefined,
+        waistDepthMm: undefined,
+        hipDepthMm: undefined,
+      }),
+      torsoBundle,
+      solveDepthProxy,
+    });
+    expect(solveDepthProxy).not.toHaveBeenCalled();
+    expect(noDepth.depthRepresentedMeasurements).toEqual([]);
+    expect(noDepth.depthLimitedMeasurements).toEqual([]);
+    expect(noDepth.depthModeResults).toEqual([]);
+    expect(noDepth.depthDiagnostics).toEqual([]);
   }, 30_000);
 });
