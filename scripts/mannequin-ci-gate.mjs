@@ -43,6 +43,7 @@ const unitFiles = Object.freeze([
   'src/lib/cloth/body/measurement-open-reference-display-quality-gate-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-display-quality-worker-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-beta-torso-worker-v1.test.ts',
+  'src/lib/cloth/body/measurement-open-reference-torso-depth-proxy-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-limb-final-closure-worker-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-limb-subset-runtime-loader-v1.test.ts',
   'src/lib/cloth/body/measurement-watertight-surface-worker-v1.test.ts',
@@ -85,11 +86,13 @@ const browserSuites = Object.freeze([
     config: 'playwright.model-form-measurement-quiz-v1.config.ts',
   }),
   Object.freeze({
-    label: 'last-valid canvas during continuous measurement typing',
+    label: 'measurement morph, body basis and last-valid canvas coverage',
     config: 'playwright.model-form-personalized-preview.config.ts',
     grep: [
+      'real ModelForm auto-binds edit/create measurements to its V9 mannequin',
       'continuous measurement typing retains the last-valid V9 canvas until replacement is ready',
       'rapid valid measurement edits coalesce while the quality gate leaves animation frames live',
+      'real ModelForm admits female, male and neutral open-reference bases',
     ].join('|'),
   }),
   Object.freeze({

@@ -502,8 +502,13 @@ describe('measurement open-reference beta shape runtime v1', () => {
     60_000,
   );
 
-  it('poses the scaled female arms around their recomputed helper-backed joints', async () => {
-    const baseline = CANONICAL_MEASUREMENT_SIZE_RECORDS[1].measurements;
+  it('poses scaled female arms after torso-depth proxies around recomputed helper-backed joints', async () => {
+    const baseline = Object.freeze({
+      ...CANONICAL_MEASUREMENT_SIZE_RECORDS[1].measurements,
+      chestDepthMm: 205,
+      waistDepthMm: 195,
+      hipDepthMm: 225,
+    });
     const [shortFixture, longFixture] = await Promise.all([
       fixture('female', Object.freeze({ ...baseline, armLengthMm: 560 })),
       fixture('female', Object.freeze({ ...baseline, armLengthMm: 640 })),
@@ -574,6 +579,37 @@ describe('measurement open-reference beta shape runtime v1', () => {
   }, 60_000);
 
   it.each(['neutral', 'male', 'female'] as const)(
+    '%s exposes optional chest, waist and hip depth as bounded circumference-preserving proxies',
+    async (kind) => {
+      const measurements = Object.freeze({
+        ...CANONICAL_MEASUREMENT_SIZE_RECORDS[1].measurements,
+        chestDepthMm: 205,
+        waistDepthMm: 195,
+        hipDepthMm: 225,
+      });
+      const current = await fixture(kind, measurements);
+      const result = await createMeasurementOpenReferenceBetaShapeRuntimeV1({
+        ...current,
+        loadTorsoBundle: async () => torsoBundle,
+      });
+      const applied = new Set([
+        ...result.representedVisualControls,
+        ...(result.limitedVisualControls ?? []),
+      ]);
+      expect(applied.has('chestDepthMm')).toBe(true);
+      expect(applied.has('waistDepthMm')).toBe(true);
+      expect(applied.has('hipDepthMm')).toBe(true);
+      expect(result.chestShoulderDiagnostics).not.toContain('beta-final-global-quality-rollback');
+      expect(result.claims).toMatchObject({
+        torsoDepthSymmetricSectionProxyOnly: true,
+        torsoDepthFrontBackDistributionCalibrated: false,
+        fitClaimEligible: false,
+      });
+    },
+    30_000,
+  );
+
+  it.each(['neutral', 'male', 'female'] as const)(
     '%s admits optional under-bust as an independent research-only visual control',
     async (kind) => {
       const measurements = Object.freeze({
@@ -598,8 +634,10 @@ describe('measurement open-reference beta shape runtime v1', () => {
         ]),
       );
       expect(result.claims).toMatchObject({
-        anteriorChestPosteriorHeldFixed: true,
+        chestCircumferencePosteriorHeldFixed: true,
         underBustIndependentRibcageBand: true,
+        torsoDepthSymmetricSectionProxyOnly: true,
+        torsoDepthFrontBackDistributionCalibrated: false,
         canonicalMeasurementSemanticMatchClaimed: false,
         productionAuthority: false,
       });

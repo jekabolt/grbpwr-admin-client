@@ -1,6 +1,11 @@
 import type { CanonicalBodyMeasurementsMm } from './measurement-adapter';
 import type { UniformChestShoulderResearchKeyV1 } from './makehuman-uniform-chest-shoulder-modes-research-v1';
 import type { MakeHumanOpenReferenceBasisKindV1 } from './measurement-open-reference-display-v1';
+import type {
+  MeasurementOpenReferenceTorsoDepthDiagnosticV1,
+  MeasurementOpenReferenceTorsoDepthKeyV1,
+  MeasurementOpenReferenceTorsoDepthModeResultV1,
+} from './measurement-open-reference-torso-depth-proxy-v1';
 
 export interface MeasurementOpenReferenceBetaTorsoWorkerOptionsV1 {
   readonly basisKind: MakeHumanOpenReferenceBasisKindV1;
@@ -18,6 +23,10 @@ export interface MeasurementOpenReferenceBetaTorsoWorkerResultV1 {
   readonly chestShoulderRepresentedMeasurements: readonly UniformChestShoulderResearchKeyV1[];
   readonly chestShoulderLimitedMeasurements: readonly UniformChestShoulderResearchKeyV1[];
   readonly chestShoulderDiagnostics: readonly string[];
+  readonly depthRepresentedMeasurements: readonly MeasurementOpenReferenceTorsoDepthKeyV1[];
+  readonly depthLimitedMeasurements: readonly MeasurementOpenReferenceTorsoDepthKeyV1[];
+  readonly depthModeResults: readonly MeasurementOpenReferenceTorsoDepthModeResultV1[];
+  readonly depthDiagnostics: readonly MeasurementOpenReferenceTorsoDepthDiagnosticV1[];
 }
 
 export type MeasurementOpenReferenceBetaTorsoWorkerRequestV1 = Readonly<{

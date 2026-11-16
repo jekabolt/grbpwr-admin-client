@@ -7,6 +7,43 @@
     "missingEvidenceBlocksRedistributionAuditClosure": true,
     "packageLicenseIsNotThirdPartyEvidence": true
   },
+  "licenseReceipts": [
+    {
+      "id": "makehuman-assets-cc0-1f508f6083b2f823dab15de924b3bde72e08d77c",
+      "repository": "makehumancommunity/makehuman",
+      "commit": "1f508f6083b2f823dab15de924b3bde72e08d77c",
+      "files": [
+        {
+          "role": "asset-scope-statement",
+          "upstreamPath": "LICENSE.md",
+          "upstreamUrl": "https://raw.githubusercontent.com/makehumancommunity/makehuman/1f508f6083b2f823dab15de924b3bde72e08d77c/LICENSE.md",
+          "snapshotPath": "docs/cloth-simulation/mannequin/makehuman-license-1f508f6083b2f823dab15de924b3bde72e08d77c.md",
+          "sha256": "edd99571ca62698f78c943fd4fffb159a413c315fa0d4819d3cec5cadaf8b4f1"
+        },
+        {
+          "role": "license-text",
+          "upstreamPath": "LICENSE.ASSETS.md",
+          "upstreamUrl": "https://raw.githubusercontent.com/makehumancommunity/makehuman/1f508f6083b2f823dab15de924b3bde72e08d77c/LICENSE.ASSETS.md",
+          "snapshotPath": "docs/cloth-simulation/mannequin/makehuman-assets-cc0-1f508f6083b2f823dab15de924b3bde72e08d77c.md",
+          "sha256": "f6089cba01cb570a24712b41ab8a586ccd3cc5ef53dc266ca50b95c288956d2c"
+        }
+      ]
+    },
+    {
+      "id": "makehuman2-assets-cc0-13b7ff56b388826bee548bc18d78c8d492cf3512",
+      "repository": "makehumancommunity/makehuman2",
+      "commit": "13b7ff56b388826bee548bc18d78c8d492cf3512",
+      "files": [
+        {
+          "role": "asset-scope-statement",
+          "upstreamPath": "data/licenses/makehuman_license.txt",
+          "upstreamUrl": "https://raw.githubusercontent.com/makehumancommunity/makehuman2/13b7ff56b388826bee548bc18d78c8d492cf3512/data/licenses/makehuman_license.txt",
+          "snapshotPath": "docs/cloth-simulation/mannequin/makehuman2-license-13b7ff56b388826bee548bc18d78c8d492cf3512.txt",
+          "sha256": "ef90dd187f3e01d498e8821915d8bfd6e1adc005b8287af126bb91ef9abc55d3"
+        }
+      ]
+    }
+  ],
   "assets": [
     {
       "id": "makehuman-visible-base-v1",
@@ -17,21 +54,30 @@
       },
       "upstream": {
         "repository": "makehumancommunity/makehuman",
+        "repositoryUrl": "https://github.com/makehumancommunity/makehuman.git",
         "commit": "1f508f6083b2f823dab15de924b3bde72e08d77c",
         "paths": ["makehuman/data/3dobjs/base.obj"],
-        "evidenceStatus": "partial",
-        "reason": "The base object path and hash are pinned in code; raw upstream files are not vendored."
+        "sourceFiles": [
+          {
+            "path": "makehuman/data/3dobjs/base.obj",
+            "sha256": "8e761e6624b8f54536409135d1636da63b32486a90d4897f84e121d144f6fb4c"
+          }
+        ],
+        "evidenceStatus": "complete",
+        "reason": "The source path and SHA-256 match the fetched pinned commit."
       },
       "generator": {
         "status": "missingEvidence",
         "expectedPath": "scripts/cloth/build-makehuman-open-reference-variants-v1.mjs",
-        "reason": "The metadata names this generator, but the script is absent from the repository."
+        "command": null,
+        "reason": "The named script is absent from this checkout and its reachable Git history, so no reproducible command can be stated."
       },
       "license": {
         "identifier": "CC0-1.0",
-        "receiptStatus": "missingEvidence",
-        "receiptPath": null,
-        "reason": "No upstream license snapshot or acquisition receipt is committed."
+        "receiptStatus": "present",
+        "receiptId": "makehuman-assets-cc0-1f508f6083b2f823dab15de924b3bde72e08d77c",
+        "receiptPath": "docs/cloth-simulation/mannequin/makehuman-license-1f508f6083b2f823dab15de924b3bde72e08d77c.md",
+        "reason": "The pinned upstream statement defines the base mesh and targets as bundled assets released under CC0 1.0 Universal."
       },
       "claimBoundary": {
         "runtimeAdmission": "production-display",
@@ -52,21 +98,62 @@
       },
       "upstream": {
         "repository": "makehumancommunity/makehuman",
+        "repositoryUrl": "https://github.com/makehumancommunity/makehuman.git",
         "commit": "1f508f6083b2f823dab15de924b3bde72e08d77c",
-        "paths": ["makehuman/data/3dobjs/base.obj"],
+        "paths": [
+          "makehuman/data/3dobjs/base.obj",
+          "makehuman/data/targets/macrodetails/african-male-young.target",
+          "makehuman/data/targets/macrodetails/asian-male-young.target",
+          "makehuman/data/targets/macrodetails/caucasian-male-young.target",
+          "makehuman/data/targets/macrodetails/african-female-young.target",
+          "makehuman/data/targets/macrodetails/asian-female-young.target",
+          "makehuman/data/targets/macrodetails/caucasian-female-young.target"
+        ],
+        "sourceFiles": [
+          {
+            "path": "makehuman/data/3dobjs/base.obj",
+            "sha256": "8e761e6624b8f54536409135d1636da63b32486a90d4897f84e121d144f6fb4c"
+          },
+          {
+            "path": "makehuman/data/targets/macrodetails/african-male-young.target",
+            "sha256": "894abc1fbb3d28543a51fef16f89d5d4bdf9aa2e1534413339811a3d47818b7d"
+          },
+          {
+            "path": "makehuman/data/targets/macrodetails/asian-male-young.target",
+            "sha256": "ed2e8c191cb6b87b4a2d97c80486acb2604fa549316c7aa2a738a5d5a14334dc"
+          },
+          {
+            "path": "makehuman/data/targets/macrodetails/caucasian-male-young.target",
+            "sha256": "70e228ba7164737dae664454394536fc5935fa48d333c1a97d77e2dc6eacc5f5"
+          },
+          {
+            "path": "makehuman/data/targets/macrodetails/african-female-young.target",
+            "sha256": "92d61eeb3c164b421fd5a7c3537ee45e7e1a51de4d49bf312e19c3df2be1d8fc"
+          },
+          {
+            "path": "makehuman/data/targets/macrodetails/asian-female-young.target",
+            "sha256": "095fe79694fa19e1fe98d93009ec116199bd524e081c640351a10eccf2cca1eb"
+          },
+          {
+            "path": "makehuman/data/targets/macrodetails/caucasian-female-young.target",
+            "sha256": "118379f6e8ba9266247fdb8788a20e1df40a239f97ced0b9905bcbcc74f6e820"
+          }
+        ],
         "evidenceStatus": "partial",
-        "reason": "The derived variant formula and source hashes are pinned in code, but target paths and raw inputs are not all vendored."
+        "reason": "The base and six unique macro-target hashes match the pinned commit. The recorded zero-delta hash matches eight upstream paths, and the absent generator does not identify which no-op file was read or reproduce the local repair."
       },
       "generator": {
         "status": "missingEvidence",
         "expectedPath": "scripts/cloth/build-makehuman-open-reference-variants-v1.mjs",
-        "reason": "The metadata names this generator, but the script is absent from the repository."
+        "command": null,
+        "reason": "The named script is absent from this checkout and its reachable Git history, so no reproducible command can be stated."
       },
       "license": {
         "identifier": "CC0-1.0",
-        "receiptStatus": "missingEvidence",
-        "receiptPath": null,
-        "reason": "No upstream license snapshot or acquisition receipt is committed."
+        "receiptStatus": "present",
+        "receiptId": "makehuman-assets-cc0-1f508f6083b2f823dab15de924b3bde72e08d77c",
+        "receiptPath": "docs/cloth-simulation/mannequin/makehuman-license-1f508f6083b2f823dab15de924b3bde72e08d77c.md",
+        "reason": "The pinned upstream statement defines the base mesh and targets as bundled assets released under CC0 1.0 Universal."
       },
       "claimBoundary": {
         "runtimeAdmission": "production-display",
@@ -87,21 +174,47 @@
       },
       "upstream": {
         "repository": "makehumancommunity/makehuman",
+        "repositoryUrl": "https://github.com/makehumancommunity/makehuman.git",
         "commit": "1f508f6083b2f823dab15de924b3bde72e08d77c",
-        "paths": ["makehuman/data/3dobjs/base.obj"],
+        "paths": [
+          "makehuman/data/3dobjs/base.obj",
+          "makehuman/data/targets/macrodetails/african-male-young.target",
+          "makehuman/data/targets/macrodetails/asian-male-young.target",
+          "makehuman/data/targets/macrodetails/caucasian-male-young.target"
+        ],
+        "sourceFiles": [
+          {
+            "path": "makehuman/data/3dobjs/base.obj",
+            "sha256": "8e761e6624b8f54536409135d1636da63b32486a90d4897f84e121d144f6fb4c"
+          },
+          {
+            "path": "makehuman/data/targets/macrodetails/african-male-young.target",
+            "sha256": "894abc1fbb3d28543a51fef16f89d5d4bdf9aa2e1534413339811a3d47818b7d"
+          },
+          {
+            "path": "makehuman/data/targets/macrodetails/asian-male-young.target",
+            "sha256": "ed2e8c191cb6b87b4a2d97c80486acb2604fa549316c7aa2a738a5d5a14334dc"
+          },
+          {
+            "path": "makehuman/data/targets/macrodetails/caucasian-male-young.target",
+            "sha256": "70e228ba7164737dae664454394536fc5935fa48d333c1a97d77e2dc6eacc5f5"
+          }
+        ],
         "evidenceStatus": "partial",
-        "reason": "The derived variant formula and source hashes are pinned in code, but target paths and raw inputs are not all vendored."
+        "reason": "The base and three unique macro-target hashes match the pinned commit. The recorded zero-delta hash matches eight upstream paths, and the absent generator does not identify which no-op file was read or reproduce the local repair."
       },
       "generator": {
         "status": "missingEvidence",
         "expectedPath": "scripts/cloth/build-makehuman-open-reference-variants-v1.mjs",
-        "reason": "The metadata names this generator, but the script is absent from the repository."
+        "command": null,
+        "reason": "The named script is absent from this checkout and its reachable Git history, so no reproducible command can be stated."
       },
       "license": {
         "identifier": "CC0-1.0",
-        "receiptStatus": "missingEvidence",
-        "receiptPath": null,
-        "reason": "No upstream license snapshot or acquisition receipt is committed."
+        "receiptStatus": "present",
+        "receiptId": "makehuman-assets-cc0-1f508f6083b2f823dab15de924b3bde72e08d77c",
+        "receiptPath": "docs/cloth-simulation/mannequin/makehuman-license-1f508f6083b2f823dab15de924b3bde72e08d77c.md",
+        "reason": "The pinned upstream statement defines the base mesh and targets as bundled assets released under CC0 1.0 Universal."
       },
       "claimBoundary": {
         "runtimeAdmission": "production-display",
@@ -122,21 +235,47 @@
       },
       "upstream": {
         "repository": "makehumancommunity/makehuman",
+        "repositoryUrl": "https://github.com/makehumancommunity/makehuman.git",
         "commit": "1f508f6083b2f823dab15de924b3bde72e08d77c",
-        "paths": ["makehuman/data/3dobjs/base.obj"],
+        "paths": [
+          "makehuman/data/3dobjs/base.obj",
+          "makehuman/data/targets/macrodetails/african-female-young.target",
+          "makehuman/data/targets/macrodetails/asian-female-young.target",
+          "makehuman/data/targets/macrodetails/caucasian-female-young.target"
+        ],
+        "sourceFiles": [
+          {
+            "path": "makehuman/data/3dobjs/base.obj",
+            "sha256": "8e761e6624b8f54536409135d1636da63b32486a90d4897f84e121d144f6fb4c"
+          },
+          {
+            "path": "makehuman/data/targets/macrodetails/african-female-young.target",
+            "sha256": "92d61eeb3c164b421fd5a7c3537ee45e7e1a51de4d49bf312e19c3df2be1d8fc"
+          },
+          {
+            "path": "makehuman/data/targets/macrodetails/asian-female-young.target",
+            "sha256": "095fe79694fa19e1fe98d93009ec116199bd524e081c640351a10eccf2cca1eb"
+          },
+          {
+            "path": "makehuman/data/targets/macrodetails/caucasian-female-young.target",
+            "sha256": "118379f6e8ba9266247fdb8788a20e1df40a239f97ced0b9905bcbcc74f6e820"
+          }
+        ],
         "evidenceStatus": "partial",
-        "reason": "The derived variant formula and source hashes are pinned in code, but target paths and raw inputs are not all vendored."
+        "reason": "The base and three unique macro-target hashes match the pinned commit. The recorded zero-delta hash matches eight upstream paths, and the absent generator does not identify which no-op file was read or reproduce the local repair."
       },
       "generator": {
         "status": "missingEvidence",
         "expectedPath": "scripts/cloth/build-makehuman-open-reference-variants-v1.mjs",
-        "reason": "The metadata names this generator, but the script is absent from the repository."
+        "command": null,
+        "reason": "The named script is absent from this checkout and its reachable Git history, so no reproducible command can be stated."
       },
       "license": {
         "identifier": "CC0-1.0",
-        "receiptStatus": "missingEvidence",
-        "receiptPath": null,
-        "reason": "No upstream license snapshot or acquisition receipt is committed."
+        "receiptStatus": "present",
+        "receiptId": "makehuman-assets-cc0-1f508f6083b2f823dab15de924b3bde72e08d77c",
+        "receiptPath": "docs/cloth-simulation/mannequin/makehuman-license-1f508f6083b2f823dab15de924b3bde72e08d77c.md",
+        "reason": "The pinned upstream statement defines the base mesh and targets as bundled assets released under CC0 1.0 Universal."
       },
       "claimBoundary": {
         "runtimeAdmission": "production-display",
@@ -157,6 +296,7 @@
       },
       "upstream": {
         "repository": "makehumancommunity/makehuman",
+        "repositoryUrl": "https://github.com/makehumancommunity/makehuman.git",
         "commit": "1f508f6083b2f823dab15de924b3bde72e08d77c",
         "paths": [
           "makehuman/data/targets/measure/measure-bust-circ-decr.target",
@@ -168,19 +308,55 @@
           "makehuman/data/targets/measure/measure-shoulder-dist-decr.target",
           "makehuman/data/targets/measure/measure-shoulder-dist-incr.target"
         ],
-        "evidenceStatus": "partial",
-        "reason": "Paths and hashes are pinned in code; raw source assets are explicitly not bundled."
+        "sourceFiles": [
+          {
+            "path": "makehuman/data/targets/measure/measure-bust-circ-decr.target",
+            "sha256": "3d4c9f8c7d084e4d6c35ffc3a798bc35bdbe80fd56929d03e0c6f1b31ec5c736"
+          },
+          {
+            "path": "makehuman/data/targets/measure/measure-bust-circ-incr.target",
+            "sha256": "46394c7f9cdfac31654f14950b57bbfb874c9a2fa68e48c9cc3e7bba619b75f4"
+          },
+          {
+            "path": "makehuman/data/targets/measure/measure-waist-circ-decr.target",
+            "sha256": "6a976bd7819fa037a290b381bb3e04dfd04220dddeac194c476472295d2baba8"
+          },
+          {
+            "path": "makehuman/data/targets/measure/measure-waist-circ-incr.target",
+            "sha256": "4949212ec9a5e227b177a029ee42b0be3fd3b273a211bc91c6f4d4dbf0334856"
+          },
+          {
+            "path": "makehuman/data/targets/measure/measure-hips-circ-decr.target",
+            "sha256": "8a98e80047ab89148d60067aad3b452ce715eadcaf7a1e28402140dd1ac8fb11"
+          },
+          {
+            "path": "makehuman/data/targets/measure/measure-hips-circ-incr.target",
+            "sha256": "e4294db231dd3283680e6be4b9d3d8d81aa7c575a32f937f8d0751b1ec3d6512"
+          },
+          {
+            "path": "makehuman/data/targets/measure/measure-shoulder-dist-decr.target",
+            "sha256": "15034d390da69ce7a3e46dfee0e248d0649bf6fc0bfec575b4cacf48b7a1ba5a"
+          },
+          {
+            "path": "makehuman/data/targets/measure/measure-shoulder-dist-incr.target",
+            "sha256": "af7394300c91d64fb0b032377aae72e546c778d1d5c00daed88858c04ee9150b"
+          }
+        ],
+        "evidenceStatus": "complete",
+        "reason": "All eight source paths and SHA-256 values match the fetched pinned commit."
       },
       "generator": {
         "status": "missingEvidence",
         "expectedPath": "scripts/cloth/build-makehuman-torso-shape-deltas-v1.mjs",
-        "reason": "The metadata names this generator, but the script is absent from the repository."
+        "command": null,
+        "reason": "The named script is absent from this checkout and its reachable Git history, so no reproducible command can be stated."
       },
       "license": {
         "identifier": "CC0-1.0",
-        "receiptStatus": "missingEvidence",
-        "receiptPath": null,
-        "reason": "No upstream license snapshot or acquisition receipt is committed."
+        "receiptStatus": "present",
+        "receiptId": "makehuman-assets-cc0-1f508f6083b2f823dab15de924b3bde72e08d77c",
+        "receiptPath": "docs/cloth-simulation/mannequin/makehuman-license-1f508f6083b2f823dab15de924b3bde72e08d77c.md",
+        "reason": "The pinned upstream statement defines targets as bundled assets released under CC0 1.0 Universal."
       },
       "claimBoundary": {
         "runtimeAdmission": "bounded-visual-proxy",
@@ -201,6 +377,7 @@
       },
       "upstream": {
         "repository": "makehumancommunity/makehuman",
+        "repositoryUrl": "https://github.com/makehumancommunity/makehuman.git",
         "commit": "1f508f6083b2f823dab15de924b3bde72e08d77c",
         "paths": [
           "makehuman/data/targets/measure/measure-upperarm-circ-decr.target",
@@ -214,19 +391,63 @@
           "makehuman/data/targets/measure/measure-ankle-circ-decr.target",
           "makehuman/data/targets/measure/measure-ankle-circ-incr.target"
         ],
-        "evidenceStatus": "partial",
-        "reason": "Paths and hashes are pinned in code; raw source assets are explicitly not bundled."
+        "sourceFiles": [
+          {
+            "path": "makehuman/data/targets/measure/measure-upperarm-circ-decr.target",
+            "sha256": "42e5780765402bfedf65c59cf8f846ffe6fe06b120e11762376a4ab9ec57f383"
+          },
+          {
+            "path": "makehuman/data/targets/measure/measure-upperarm-circ-incr.target",
+            "sha256": "37f960203ae6c006399d3d26ab81e6d1de81523e86f845549aa94ca345c5d980"
+          },
+          {
+            "path": "makehuman/data/targets/measure/measure-wrist-circ-decr.target",
+            "sha256": "6bc9862a042361c8afdf0ca427f304b8a40c872c53eb7b324a00302ef48ab9b1"
+          },
+          {
+            "path": "makehuman/data/targets/measure/measure-wrist-circ-incr.target",
+            "sha256": "31fab1eac883e06be0146c2c1f2819638db6e983a125b9f4dcb071420720d9e1"
+          },
+          {
+            "path": "makehuman/data/targets/measure/measure-thigh-circ-decr.target",
+            "sha256": "fe5303874b0ffe26a69cefd3e213b6478eec4648f60b0b110a1e176ccf24eaa9"
+          },
+          {
+            "path": "makehuman/data/targets/measure/measure-thigh-circ-incr.target",
+            "sha256": "5dca89b139df6f9b7c7641485dee18e9f0da10087359b9df5ca6a1e752ea0bcc"
+          },
+          {
+            "path": "makehuman/data/targets/measure/measure-calf-circ-decr.target",
+            "sha256": "2914fc47781e23987607c6546f4535ae5d8b04e2e2bec908ab588ee94e74aa15"
+          },
+          {
+            "path": "makehuman/data/targets/measure/measure-calf-circ-incr.target",
+            "sha256": "c6106ec484a875a8763a7e9b12a4891da8efcd5152efbc1c7061f40bdc4353a6"
+          },
+          {
+            "path": "makehuman/data/targets/measure/measure-ankle-circ-decr.target",
+            "sha256": "0abb3c55b334b8508addf583a626f775ac45fa95eff773131dbd7ff48bf6d95d"
+          },
+          {
+            "path": "makehuman/data/targets/measure/measure-ankle-circ-incr.target",
+            "sha256": "01bbc7823b71199826e987227e22fc97ac88247467368414fd11309062d0fdcf"
+          }
+        ],
+        "evidenceStatus": "complete",
+        "reason": "All ten source paths and SHA-256 values match the fetched pinned commit."
       },
       "generator": {
         "status": "missingEvidence",
         "expectedPath": "scripts/cloth/build-makehuman-limb-circumference-deltas-v1.mjs",
-        "reason": "The metadata names this generator, but the script is absent from the repository."
+        "command": null,
+        "reason": "The named script is absent from this checkout and its reachable Git history, so no reproducible command can be stated."
       },
       "license": {
         "identifier": "CC0-1.0",
-        "receiptStatus": "missingEvidence",
-        "receiptPath": null,
-        "reason": "No upstream license snapshot or acquisition receipt is committed."
+        "receiptStatus": "present",
+        "receiptId": "makehuman-assets-cc0-1f508f6083b2f823dab15de924b3bde72e08d77c",
+        "receiptPath": "docs/cloth-simulation/mannequin/makehuman-license-1f508f6083b2f823dab15de924b3bde72e08d77c.md",
+        "reason": "The pinned upstream statement defines targets as bundled assets released under CC0 1.0 Universal."
       },
       "claimBoundary": {
         "runtimeAdmission": "bounded-visual-proxy",
@@ -247,21 +468,34 @@
       },
       "upstream": {
         "repository": "makehumancommunity/makehuman",
+        "repositoryUrl": "https://github.com/makehumancommunity/makehuman.git",
         "commit": "1f508f6083b2f823dab15de924b3bde72e08d77c",
-        "paths": [],
-        "evidenceStatus": "missingEvidence",
-        "reason": "The existing metadata does not record the exact upstream rig and weight source paths."
+        "paths": ["makehuman/data/rigs/default.mhskel", "makehuman/data/rigs/default_weights.mhw"],
+        "sourceFiles": [
+          {
+            "path": "makehuman/data/rigs/default.mhskel",
+            "sha256": "99f179bce0aa850b45d4191a1d0d234c5851f881c057439470ded3bddf729a24"
+          },
+          {
+            "path": "makehuman/data/rigs/default_weights.mhw",
+            "sha256": "0f3641d651ae3d00ad6b4ccee43142edb109d3bd909d27d9e4139ef1beed8625"
+          }
+        ],
+        "evidenceStatus": "partial",
+        "reason": "The decoded 163-bone hierarchy matches the skeleton, and the bundle weight region corresponds to the pinned weight file. The four basis-anchor inputs and transformation are not recorded."
       },
       "generator": {
         "status": "missingEvidence",
         "expectedPath": null,
-        "reason": "No generator path is recorded for this derived bundle."
+        "command": null,
+        "reason": "No generator path or deterministic build command is recorded for this derived bundle."
       },
       "license": {
         "identifier": "CC0-1.0",
-        "receiptStatus": "missingEvidence",
-        "receiptPath": null,
-        "reason": "No upstream license snapshot or acquisition receipt is committed."
+        "receiptStatus": "present",
+        "receiptId": "makehuman-assets-cc0-1f508f6083b2f823dab15de924b3bde72e08d77c",
+        "receiptPath": "docs/cloth-simulation/mannequin/makehuman-license-1f508f6083b2f823dab15de924b3bde72e08d77c.md",
+        "reason": "The pinned upstream statement defines bundled assets, including poses, under CC0 1.0 Universal; both rig files also declare CC0."
       },
       "claimBoundary": {
         "runtimeAdmission": "research-only",
@@ -282,21 +516,34 @@
       },
       "upstream": {
         "repository": "makehumancommunity/makehuman",
+        "repositoryUrl": "https://github.com/makehumancommunity/makehuman.git",
         "commit": "1f508f6083b2f823dab15de924b3bde72e08d77c",
-        "paths": [],
-        "evidenceStatus": "missingEvidence",
-        "reason": "The repaired runtime metadata does not record exact source paths or the repair input manifest."
+        "paths": ["makehuman/data/rigs/default.mhskel", "makehuman/data/rigs/default_weights.mhw"],
+        "sourceFiles": [
+          {
+            "path": "makehuman/data/rigs/default.mhskel",
+            "sha256": "99f179bce0aa850b45d4191a1d0d234c5851f881c057439470ded3bddf729a24"
+          },
+          {
+            "path": "makehuman/data/rigs/default_weights.mhw",
+            "sha256": "0f3641d651ae3d00ad6b4ccee43142edb109d3bd909d27d9e4139ef1beed8625"
+          }
+        ],
+        "evidenceStatus": "partial",
+        "reason": "The bone, weight, and string regions are byte-identical to the unrepaired rig bundle and retain its pinned rig sources. The repaired anchor inputs are not recorded."
       },
       "generator": {
         "status": "missingEvidence",
         "expectedPath": null,
-        "reason": "The repair generator and deterministic repair recipe are not committed."
+        "command": null,
+        "reason": "The repair generator, input manifest, and deterministic repair command are not committed."
       },
       "license": {
         "identifier": "CC0-1.0",
-        "receiptStatus": "missingEvidence",
-        "receiptPath": null,
-        "reason": "No upstream license snapshot or acquisition receipt is committed."
+        "receiptStatus": "present",
+        "receiptId": "makehuman-assets-cc0-1f508f6083b2f823dab15de924b3bde72e08d77c",
+        "receiptPath": "docs/cloth-simulation/mannequin/makehuman-license-1f508f6083b2f823dab15de924b3bde72e08d77c.md",
+        "reason": "The pinned upstream statement defines bundled assets, including poses, under CC0 1.0 Universal; both retained rig files also declare CC0."
       },
       "claimBoundary": {
         "runtimeAdmission": "production-display",
@@ -317,21 +564,47 @@
       },
       "upstream": {
         "repository": "makehumancommunity/makehuman",
+        "repositoryUrl": "https://github.com/makehumancommunity/makehuman.git",
         "commit": "1f508f6083b2f823dab15de924b3bde72e08d77c",
-        "paths": [],
-        "evidenceStatus": "missingEvidence",
-        "reason": "The repaired runtime metadata does not record exact upstream paths or the repair input manifest."
+        "paths": [
+          "makehuman/data/targets/measure/measure-waist-circ-decr.target",
+          "makehuman/data/targets/measure/measure-waist-circ-incr.target",
+          "makehuman/data/targets/measure/measure-hips-circ-decr.target",
+          "makehuman/data/targets/measure/measure-hips-circ-incr.target"
+        ],
+        "sourceFiles": [
+          {
+            "path": "makehuman/data/targets/measure/measure-waist-circ-decr.target",
+            "sha256": "6a976bd7819fa037a290b381bb3e04dfd04220dddeac194c476472295d2baba8"
+          },
+          {
+            "path": "makehuman/data/targets/measure/measure-waist-circ-incr.target",
+            "sha256": "4949212ec9a5e227b177a029ee42b0be3fd3b273a211bc91c6f4d4dbf0334856"
+          },
+          {
+            "path": "makehuman/data/targets/measure/measure-hips-circ-decr.target",
+            "sha256": "8a98e80047ab89148d60067aad3b452ce715eadcaf7a1e28402140dd1ac8fb11"
+          },
+          {
+            "path": "makehuman/data/targets/measure/measure-hips-circ-incr.target",
+            "sha256": "e4294db231dd3283680e6be4b9d3d8d81aa7c575a32f937f8d0751b1ec3d6512"
+          }
+        ],
+        "evidenceStatus": "partial",
+        "reason": "The embedded torso-bundle binding resolves these four mode sources to hash-matching files at the pinned commit. The repaired rig input manifest and anchor transformation are not recorded."
       },
       "generator": {
         "status": "missingEvidence",
         "expectedPath": null,
-        "reason": "The repair generator and deterministic repair recipe are not committed."
+        "command": null,
+        "reason": "The repair generator, input manifest, and deterministic repair command are not committed."
       },
       "license": {
         "identifier": "CC0-1.0",
-        "receiptStatus": "missingEvidence",
-        "receiptPath": null,
-        "reason": "No upstream license snapshot or acquisition receipt is committed."
+        "receiptStatus": "present",
+        "receiptId": "makehuman-assets-cc0-1f508f6083b2f823dab15de924b3bde72e08d77c",
+        "receiptPath": "docs/cloth-simulation/mannequin/makehuman-license-1f508f6083b2f823dab15de924b3bde72e08d77c.md",
+        "reason": "The pinned upstream statement defines targets as bundled assets released under CC0 1.0 Universal."
       },
       "claimBoundary": {
         "runtimeAdmission": "production-display",
@@ -352,21 +625,77 @@
       },
       "upstream": {
         "repository": "makehumancommunity/makehuman2",
+        "repositoryUrl": "https://github.com/makehumancommunity/makehuman2.git",
         "commit": "13b7ff56b388826bee548bc18d78c8d492cf3512",
-        "paths": [],
-        "evidenceStatus": "missingEvidence",
-        "reason": "The metadata pins the repository and commit but not the exact source paths used by the missing generator."
+        "paths": [
+          "data/base/hm08/base.obj",
+          "data/rigs/hm08/default.mhskel",
+          "data/target/hm08/measure/measure-upperarm-length-decr.target",
+          "data/target/hm08/measure/measure-upperarm-length-incr.target",
+          "data/target/hm08/measure/measure-lowerarm-length-decr.target",
+          "data/target/hm08/measure/measure-lowerarm-length-incr.target",
+          "data/target/hm08/measure/measure-upperleg-height-decr.target",
+          "data/target/hm08/measure/measure-upperleg-height-incr.target",
+          "data/target/hm08/measure/measure-lowerleg-height-decr.target",
+          "data/target/hm08/measure/measure-lowerleg-height-incr.target"
+        ],
+        "sourceFiles": [
+          {
+            "path": "data/base/hm08/base.obj",
+            "sha256": "9e8e529a386823fa0af5aa0cf4f082076f24f0f1a1a904003b2ab2b57b911342"
+          },
+          {
+            "path": "data/rigs/hm08/default.mhskel",
+            "sha256": "3f810b2160ffb3ed7b4f6b3010baedd2153245cbe28d694b4c24a4f98edb2f3c"
+          },
+          {
+            "path": "data/target/hm08/measure/measure-upperarm-length-decr.target",
+            "sha256": "869ab2de8ad254095527d8c3025900a878786fe1a267623869125786336866b7"
+          },
+          {
+            "path": "data/target/hm08/measure/measure-upperarm-length-incr.target",
+            "sha256": "058b0a7a46d249c9665540373253361726ea7feaeb2a1e32db58a9656eb0858d"
+          },
+          {
+            "path": "data/target/hm08/measure/measure-lowerarm-length-decr.target",
+            "sha256": "cbc5009f0823bfea652b695e3bf30ca54d0cab92a0667686674c22035b5b3764"
+          },
+          {
+            "path": "data/target/hm08/measure/measure-lowerarm-length-incr.target",
+            "sha256": "08f47379e86bff9fe22999573e8cd470950a3183463b129d81ce21980eac6ec3"
+          },
+          {
+            "path": "data/target/hm08/measure/measure-upperleg-height-decr.target",
+            "sha256": "34a0f710e32e809a1b69fd6d117e3f8fa7f03c19eb8f89aad818b9eb47c0709b"
+          },
+          {
+            "path": "data/target/hm08/measure/measure-upperleg-height-incr.target",
+            "sha256": "4b5bdc778ea78731529ac5fd201125206b3eded91f2c2aee306af52ace39d8ab"
+          },
+          {
+            "path": "data/target/hm08/measure/measure-lowerleg-height-decr.target",
+            "sha256": "0c484ecdb3ec6df22d0cc575736db335048dcb77e0f0f04fcb289705091870bf"
+          },
+          {
+            "path": "data/target/hm08/measure/measure-lowerleg-height-incr.target",
+            "sha256": "ee923c25ee590e90ffe0bc1321d6c23285a1fc4a2e4015d297dbd10c4534791b"
+          }
+        ],
+        "evidenceStatus": "complete",
+        "reason": "All eight packed target tables exactly match the pinned target records; all 28 joint references and 3,119 helper positions exactly match the pinned skeleton and base object."
       },
       "generator": {
         "status": "missingEvidence",
         "expectedPath": "scripts/cloth/build-makehuman2-pose-compatible-length-pack-v1.mjs",
-        "reason": "The metadata names this generator, but the script is absent from the repository."
+        "command": null,
+        "reason": "The named script is absent from this checkout and its reachable Git history, so no reproducible command can be stated."
       },
       "license": {
         "identifier": "CC0-1.0",
-        "receiptStatus": "missingEvidence",
-        "receiptPath": null,
-        "reason": "No upstream license snapshot or acquisition receipt is committed."
+        "receiptStatus": "present",
+        "receiptId": "makehuman2-assets-cc0-13b7ff56b388826bee548bc18d78c8d492cf3512",
+        "receiptPath": "docs/cloth-simulation/mannequin/makehuman2-license-13b7ff56b388826bee548bc18d78c8d492cf3512.txt",
+        "reason": "The pinned upstream statement defines the base mesh, targets, modifiers, and poses as bundled assets released under CC0 1.0 Universal."
       },
       "claimBoundary": {
         "runtimeAdmission": "bounded-visual-proxy",
