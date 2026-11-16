@@ -357,7 +357,7 @@ export function solveMeasurementOpenReferenceTorsoDepthProxyV1(options: {
   validateMesh(options.sourcePositionsM, options.triangleIndices);
   const policy = policySnapshot(options.policy);
   const original = options.sourcePositionsM.slice();
-  let positionsM = original.slice();
+  let positionsM: Float32Array = original.slice();
   const represented: MeasurementOpenReferenceTorsoDepthKeyV1[] = [];
   const limited: MeasurementOpenReferenceTorsoDepthKeyV1[] = [];
   const modeResults: MeasurementOpenReferenceTorsoDepthModeResultV1[] = [];
@@ -471,7 +471,7 @@ export function solveMeasurementOpenReferenceTorsoDepthProxyV1(options: {
       const depthCoefficient = depthTargetMm / baseline.depthMm;
       let low = policy.minimumScale;
       let high = policy.maximumScale;
-      let bestPositions = positionsM;
+      let bestPositions: Float32Array = positionsM;
       let bestSnapshot = baseline;
       let bestWidth = 1;
       let bestDrift = Number.POSITIVE_INFINITY;
