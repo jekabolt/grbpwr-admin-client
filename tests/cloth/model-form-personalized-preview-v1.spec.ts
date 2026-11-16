@@ -13,6 +13,14 @@ const REQUIRED_CREATE_MEASUREMENTS = [
 const DEV_ROUTE = '/__model-form-personalized-preview-v1';
 const PREWARM_QUIET_MS = 1_000;
 const QUALITY_WORKER_MEASURE = 'measurement-open-reference-display-quality-worker/v1';
+const LIMB_COMPOSITION_MEASURE = 'measurement-open-reference-limb-composition/v1';
+const LIMB_WORKER_MEASURE = 'measurement-open-reference-limb-final-closure-worker/v1';
+const BUILD_STAGE_MEASURE = 'model-open-reference-build-stage/v12';
+const SURFACE_WORKER_MEASURE = 'measurement-watertight-surface-worker/v1';
+const LIVE_SESSION_STAGE_MEASURE = 'makehuman-full-body-live-fk-session-stage/v5';
+const SIDE_SEAM_WORKER_MEASURE = 'makehuman-arm-side-seam-assist-worker/v1';
+const BETA_SHAPE_STAGE_MEASURE = 'measurement-open-reference-beta-shape-stage/v1';
+const BETA_TORSO_WORKER_MEASURE = 'measurement-open-reference-beta-torso-worker/v1';
 
 function v9PoseFromSourceRevision(sourceRevision: string | null): Record<string, unknown> {
   const encoded = sourceRevision?.match(/(?:^|;)editorPoseV9=([^;]+)/u)?.[1];
@@ -505,30 +513,61 @@ test('rapid valid measurement edits coalesce while the quality gate leaves anima
   const previousSourceRevision = await canvas.getAttribute('data-source-revision');
   expect(previousSourceRevision).toBeTruthy();
 
-  await page.evaluate((measureName) => {
-    performance.clearMeasures(measureName);
-    const audit = {
-      active: true,
-      frames: 0,
-      lastAt: performance.now(),
-      maximumGapMs: 0,
-      gaps: [] as Array<{ startAt: number; endAt: number; gapMs: number }>,
-    };
-    (
-      window as typeof window & {
-        __modelFormWorkerFrameAudit?: typeof audit;
-      }
-    ).__modelFormWorkerFrameAudit = audit;
-    const frame = (at: number) => {
-      const gapMs = at - audit.lastAt;
-      audit.frames += 1;
-      audit.maximumGapMs = Math.max(audit.maximumGapMs, gapMs);
-      audit.gaps.push({ startAt: audit.lastAt, endAt: at, gapMs });
-      audit.lastAt = at;
-      if (audit.active) requestAnimationFrame(frame);
-    };
-    requestAnimationFrame(frame);
-  }, QUALITY_WORKER_MEASURE);
+  await page.evaluate(
+    ([
+      measureName,
+      limbMeasureName,
+      limbWorkerMeasureName,
+      buildStageMeasureName,
+      surfaceWorkerMeasureName,
+      liveSessionStageMeasureName,
+      sideSeamWorkerMeasureName,
+      betaShapeStageMeasureName,
+      betaTorsoWorkerMeasureName,
+    ]) => {
+      performance.clearMeasures(measureName);
+      performance.clearMeasures(limbMeasureName);
+      performance.clearMeasures(limbWorkerMeasureName);
+      performance.clearMeasures(buildStageMeasureName);
+      performance.clearMeasures(surfaceWorkerMeasureName);
+      performance.clearMeasures(liveSessionStageMeasureName);
+      performance.clearMeasures(sideSeamWorkerMeasureName);
+      performance.clearMeasures(betaShapeStageMeasureName);
+      performance.clearMeasures(betaTorsoWorkerMeasureName);
+      const audit = {
+        active: true,
+        frames: 0,
+        lastAt: performance.now(),
+        maximumGapMs: 0,
+        gaps: [] as Array<{ startAt: number; endAt: number; gapMs: number }>,
+      };
+      (
+        window as typeof window & {
+          __modelFormWorkerFrameAudit?: typeof audit;
+        }
+      ).__modelFormWorkerFrameAudit = audit;
+      const frame = (at: number) => {
+        const gapMs = at - audit.lastAt;
+        audit.frames += 1;
+        audit.maximumGapMs = Math.max(audit.maximumGapMs, gapMs);
+        audit.gaps.push({ startAt: audit.lastAt, endAt: at, gapMs });
+        audit.lastAt = at;
+        if (audit.active) requestAnimationFrame(frame);
+      };
+      requestAnimationFrame(frame);
+    },
+    [
+      QUALITY_WORKER_MEASURE,
+      LIMB_COMPOSITION_MEASURE,
+      LIMB_WORKER_MEASURE,
+      BUILD_STAGE_MEASURE,
+      SURFACE_WORKER_MEASURE,
+      LIVE_SESSION_STAGE_MEASURE,
+      SIDE_SEAM_WORKER_MEASURE,
+      BETA_SHAPE_STAGE_MEASURE,
+      BETA_TORSO_WORKER_MEASURE,
+    ],
+  );
   const startedAt = Date.now();
 
   const chest = page.getByRole('textbox', { name: 'chest', exact: true });
@@ -543,38 +582,106 @@ test('rapid valid measurement edits coalesce while the quality gate leaves anima
   await expect
     .poll(() => canvas.getAttribute('data-source-revision'), { timeout: 180_000 })
     .not.toBe(previousSourceRevision);
-  const evidence = await page.evaluate((measureName) => {
-    const audit = (
-      window as typeof window & {
-        __modelFormWorkerFrameAudit?: {
-          active: boolean;
-          frames: number;
-          maximumGapMs: number;
-          gaps: Array<{ startAt: number; endAt: number; gapMs: number }>;
-        };
-      }
-    ).__modelFormWorkerFrameAudit;
-    if (audit) audit.active = false;
-    const measures = performance.getEntriesByName(measureName) as PerformanceMeasure[];
-    const workerGaps = (audit?.gaps ?? []).filter((gap) =>
-      measures.some(
-        (measure) =>
-          gap.startAt < measure.startTime + measure.duration && gap.endAt > measure.startTime,
-      ),
-    );
-    return {
-      frames: audit?.frames ?? 0,
-      maximumGapMs: audit?.maximumGapMs ?? Number.POSITIVE_INFINITY,
-      workerFrameCount: workerGaps.length,
-      maximumWorkerGapMs: Math.max(0, ...workerGaps.map(({ gapMs }) => gapMs)),
-      workerJobs: measures.length,
-      workerWallMs: measures.map((measure) => measure.duration),
-      workerComputeMs: measures.map((measure) => {
-        const detail = measure.detail as { workerDurationMs?: number } | null;
-        return detail?.workerDurationMs ?? null;
-      }),
-    };
-  }, QUALITY_WORKER_MEASURE);
+  const evidence = await page.evaluate(
+    ([
+      measureName,
+      limbMeasureName,
+      limbWorkerMeasureName,
+      buildStageMeasureName,
+      surfaceWorkerMeasureName,
+      liveSessionStageMeasureName,
+      sideSeamWorkerMeasureName,
+      betaShapeStageMeasureName,
+      betaTorsoWorkerMeasureName,
+    ]) => {
+      const audit = (
+        window as typeof window & {
+          __modelFormWorkerFrameAudit?: {
+            active: boolean;
+            frames: number;
+            maximumGapMs: number;
+            gaps: Array<{ startAt: number; endAt: number; gapMs: number }>;
+          };
+        }
+      ).__modelFormWorkerFrameAudit;
+      if (audit) audit.active = false;
+      const measures = performance.getEntriesByName(measureName) as PerformanceMeasure[];
+      const limbMeasures = performance.getEntriesByName(limbMeasureName) as PerformanceMeasure[];
+      const limbWorkerMeasures = performance.getEntriesByName(
+        limbWorkerMeasureName,
+      ) as PerformanceMeasure[];
+      const buildStageMeasures = performance.getEntriesByName(
+        buildStageMeasureName,
+      ) as PerformanceMeasure[];
+      const backgroundMeasures = [
+        surfaceWorkerMeasureName,
+        liveSessionStageMeasureName,
+        sideSeamWorkerMeasureName,
+        betaShapeStageMeasureName,
+        betaTorsoWorkerMeasureName,
+      ].flatMap((name) =>
+        (performance.getEntriesByName(name) as PerformanceMeasure[]).map((measure) => ({
+          name,
+          startTime: measure.startTime,
+          durationMs: measure.duration,
+          stage: (measure.detail as { stage?: string } | null)?.stage ?? null,
+          workerDurationMs:
+            (measure.detail as { workerDurationMs?: number } | null)?.workerDurationMs ?? null,
+        })),
+      );
+      const workerGaps = (audit?.gaps ?? []).filter((gap) =>
+        measures.some(
+          (measure) =>
+            gap.startAt < measure.startTime + measure.duration && gap.endAt > measure.startTime,
+        ),
+      );
+      const maximumGap = (audit?.gaps ?? []).reduce<{
+        startAt: number;
+        endAt: number;
+        gapMs: number;
+      } | null>((largest, gap) => (!largest || gap.gapMs > largest.gapMs ? gap : largest), null);
+      return {
+        frames: audit?.frames ?? 0,
+        maximumGapMs: audit?.maximumGapMs ?? Number.POSITIVE_INFINITY,
+        maximumGap,
+        workerFrameCount: workerGaps.length,
+        maximumWorkerGapMs: Math.max(0, ...workerGaps.map(({ gapMs }) => gapMs)),
+        workerJobs: measures.length,
+        workerWallMs: measures.map((measure) => measure.duration),
+        workerComputeMs: measures.map((measure) => {
+          const detail = measure.detail as { workerDurationMs?: number } | null;
+          return detail?.workerDurationMs ?? null;
+        }),
+        limbComposition: limbMeasures.map((measure) => ({
+          durationMs: measure.duration,
+          stage: (measure.detail as { stage?: string } | null)?.stage ?? 'unknown',
+        })),
+        limbWorker: limbWorkerMeasures.map((measure) => ({
+          startTime: measure.startTime,
+          durationMs: measure.duration,
+          workerDurationMs:
+            (measure.detail as { workerDurationMs?: number } | null)?.workerDurationMs ?? null,
+        })),
+        buildStages: buildStageMeasures.map((measure) => ({
+          startTime: measure.startTime,
+          durationMs: measure.duration,
+          stage: (measure.detail as { stage?: string } | null)?.stage ?? 'unknown',
+        })),
+        backgroundMeasures,
+      };
+    },
+    [
+      QUALITY_WORKER_MEASURE,
+      LIMB_COMPOSITION_MEASURE,
+      LIMB_WORKER_MEASURE,
+      BUILD_STAGE_MEASURE,
+      SURFACE_WORKER_MEASURE,
+      LIVE_SESSION_STAGE_MEASURE,
+      SIDE_SEAM_WORKER_MEASURE,
+      BETA_SHAPE_STAGE_MEASURE,
+      BETA_TORSO_WORKER_MEASURE,
+    ],
+  );
   const report = {
     ...evidence,
     totalElapsedMs: Date.now() - startedAt,
@@ -585,7 +692,14 @@ test('rapid valid measurement edits coalesce while the quality gate leaves anima
   expect(evidence.frames).toBeGreaterThan(5);
   expect(evidence.workerFrameCount).toBeGreaterThan(5);
   expect(evidence.maximumWorkerGapMs).toBeLessThan(100);
+  expect(evidence.maximumGapMs).toBeLessThan(500);
   expect(evidence.workerComputeMs[0]).toBeGreaterThan(0);
+  expect(
+    evidence.backgroundMeasures.filter(({ name }) => name === BETA_TORSO_WORKER_MEASURE),
+  ).toHaveLength(1);
+  expect(
+    evidence.backgroundMeasures.filter(({ name }) => name === SIDE_SEAM_WORKER_MEASURE),
+  ).toHaveLength(1);
 });
 
 test('real ModelForm admits female, male and neutral open-reference bases', async ({ page }) => {

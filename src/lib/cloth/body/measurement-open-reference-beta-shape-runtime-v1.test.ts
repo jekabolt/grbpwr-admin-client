@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import process from 'node:process';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createMakeHumanAnteriorChestShoulderModesResearchV1 } from './makehuman-anterior-chest-shoulder-modes-research-v1';
 import { createMakeHumanFullBodyLiveFkSessionV5 } from './makehuman-full-body-live-fk-session-v5';
@@ -166,6 +166,31 @@ describe('measurement open-reference beta shape runtime v1', () => {
       current.waistHipRuntime.displayMesh.positions,
     );
     expect(result.chestShoulderDiagnostics).toContain('chest-shoulder-runtime-unavailable:offline');
+  });
+
+  it('stops before arm-length compilation and quality evaluation when limb closure aborts', async () => {
+    const current = await fixture('female');
+    const aborted = new DOMException('Aborted', 'AbortError');
+    const createArmLengthRuntime = vi.fn(() => {
+      throw new Error('arm-length compilation must not run after abort');
+    });
+    const evaluateQualityGate = vi.fn(() => {
+      throw new Error('quality evaluation must not run after abort');
+    });
+
+    await expect(
+      createMeasurementOpenReferenceBetaShapeRuntimeV1({
+        ...current,
+        loadTorsoBundle: async () => torsoBundle,
+        createLimbRuntime: async () => {
+          throw aborted;
+        },
+        createArmLengthRuntime: createArmLengthRuntime as never,
+        evaluateQualityGate: evaluateQualityGate as never,
+      }),
+    ).rejects.toBe(aborted);
+    expect(createArmLengthRuntime).not.toHaveBeenCalled();
+    expect(evaluateQualityGate).not.toHaveBeenCalled();
   });
 
   it('composes the existing bounded limb subset after chest and shoulder', async () => {
