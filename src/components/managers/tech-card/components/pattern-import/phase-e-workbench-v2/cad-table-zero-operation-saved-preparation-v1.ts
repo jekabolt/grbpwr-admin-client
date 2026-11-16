@@ -32,6 +32,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_SAVED_PREPARATI
     currentGetTechCardProjectionRequired: true,
     operationIndependentRowAuthorityRequired: true,
     exactDownloadedBytesVerified: true,
+    freshAuthoritativeRowSeedsReprocess: true,
     savedRowRevalidatedAfterReprocess: true,
     explicitMaterialScopeRequired: true,
     explicitSizeTokenRequired: true,
@@ -281,9 +282,16 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
         choices.choices,
         blocker('saved-preparation-cancelled', 'Exact saved DXF preparation was cancelled.'),
       );
+    // The cached card projection chooses the stable row (card lock + scope + line key), but its
+    // output-only file metadata can lag a fresh GetTechCard projection. Seed the exact-byte owner
+    // with that fresh authority; all subsequent reads still fail closed if this full identity moves.
+    const authoritative = await request.authority.resolveCurrentRow(
+      capability.row,
+      signal ?? new AbortController().signal,
+    );
     const reprocessed = await owner.run({
       schemaVersion: DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
-      row: capability.row,
+      row: authoritative.row,
     });
     if (!reprocessed.ok)
       return blockedPreparation(
@@ -329,7 +337,7 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
     if (
       selected.scopeKey !== request.scopeKey ||
       selected.sizeToken !== request.sizeToken ||
-      binding?.sourceSha256 !== capability.row.sha256 ||
+      binding?.sourceSha256 !== authoritative.row.sha256 ||
       catalogResult.catalog.sourceFileId !== selection.selection.phaseD.source.sourceFileId ||
       catalogResult.catalog.sourceFileId !== binding?.sourceFileId ||
       catalogResult.catalog.sizeSelectionCanonicalSha256 !== selected.canonicalSha256
@@ -367,6 +375,12 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
       claims: PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_SAVED_PREPARATION_CLAIMS_V1,
     });
   } catch {
+    if (signal?.aborted)
+      return blockedPreparation(
+        request,
+        choices.choices,
+        blocker('saved-preparation-cancelled', 'Exact saved DXF preparation was cancelled.'),
+      );
     return blockedPreparation(
       request,
       choices.choices,

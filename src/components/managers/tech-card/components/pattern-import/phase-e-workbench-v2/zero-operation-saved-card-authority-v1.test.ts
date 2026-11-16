@@ -43,6 +43,24 @@ function card(revision = 7, lockVersion = 13): common_TechCard {
   } as unknown as common_TechCard;
 }
 
+function cardWithSavedRow(
+  saved: Readonly<{
+    revision: number;
+    url: string;
+    sizeBytes: number;
+    sha256: string;
+  }>,
+  lockVersion = 13,
+): common_TechCard {
+  const current = card(saved.revision, lockVersion);
+  const pattern = current.techCard?.patterns?.[0];
+  if (!pattern) throw new Error('Saved-row test fixture is missing its pattern row.');
+  pattern.url = saved.url;
+  pattern.sizeBytes = saved.sizeBytes;
+  pattern.sha256 = saved.sha256;
+  return current;
+}
+
 const row: DxfProductSavedRowIdentityV1 = Object.freeze({
   techCardId: 6,
   scopeKey: 'TECH_CARD_BOM_PURPOSE_MAIN',
@@ -93,6 +111,60 @@ describe('zero-operation saved card authority', () => {
     await expect(runtime.authority.readAuthoritativeRow(row, controller.signal)).rejects.toThrow(
       /card id or optimistic lock moved|row identity moved/,
     );
+  });
+
+  it('rebases a cached row onto the fresh authoritative identity, then fails closed if it moves', async () => {
+    const authoritative = Object.freeze({
+      ...row,
+      revision: 8,
+      url: 'https://objects.example/pattern-main-current.dxf',
+      sizeBytes: 4096,
+      sha256: 'b'.repeat(64),
+    });
+    const moved = Object.freeze({
+      ...authoritative,
+      revision: 9,
+      url: 'https://objects.example/pattern-main-moved.dxf',
+      sizeBytes: 8192,
+      sha256: 'c'.repeat(64),
+    });
+    const reads = [
+      cardWithSavedRow(authoritative),
+      cardWithSavedRow(authoritative),
+      cardWithSavedRow(moved),
+    ];
+    const runtime = createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1({
+      orderSizeIds,
+      sizeNameById,
+      readTechCard: vi.fn(async () => reads.shift()!),
+    });
+    const controller = new AbortController();
+
+    const bootstrap = await runtime.resolveCurrentRow(row, controller.signal);
+    expect(bootstrap).toEqual({
+      row: authoritative,
+      downloadUrl: '/api/p/token/download',
+    });
+    await expect(runtime.authority.readAuthoritativeRow(row, controller.signal)).rejects.toThrow(
+      /row identity moved/i,
+    );
+
+    const fetcher = vi.fn<typeof globalThis.fetch>();
+    const host = createPatternImportDxfPhaseESavedDxfReprocessHostV1({
+      serverUrl: 'https://api.beta.example/',
+      fetch: fetcher,
+      readAuthoritativeRow: runtime.authority.readAuthoritativeRow,
+      resolveCard: async () => ({
+        card: { techCardId: 6, sizes: [], scopes: [], existingPieces: [], styleLabel: 'TEST' },
+        cardLockVersion: 13,
+      }),
+    });
+
+    await expect(
+      host.readAuthoritativeRow(authoritative, controller.signal, () => undefined),
+    ).rejects.toThrow(/row identity moved|authority moved/i);
+    expect(fetcher).not.toHaveBeenCalled();
+    host.dispose();
   });
 
   it('lists only saved scopes with one exact downloadable row', () => {

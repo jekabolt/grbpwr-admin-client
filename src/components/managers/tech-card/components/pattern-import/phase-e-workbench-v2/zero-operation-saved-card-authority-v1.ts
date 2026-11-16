@@ -27,6 +27,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_ZERO_OPERATION_SAVED_CARD_AUTHORITY_CLAI
     exactSavedRowRevisionRequired: true,
     exactScopeBindingRequired: true,
     exactLineKeyUrlSizeAndShaRequired: true,
+    cachedProjectionUsedOnlyAsStableRowSelector: true,
     serverDownloadUrlRequired: true,
     byteLengthAndShaVerifiedBySavedReprocessOwner: true,
     currentRowReadRepeatedAfterReprocess: true,
@@ -40,6 +41,10 @@ type ReadTechCard = (techCardId: number) => Promise<common_TechCard>;
 export type PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1 = Readonly<{
   schemaVersion: typeof PATTERN_IMPORT_DXF_PHASE_E_ZERO_OPERATION_SAVED_CARD_AUTHORITY_V1;
   authority: PatternImportDxfPhaseEZeroOperationSavedDxfAuthorityV1;
+  resolveCurrentRow: (
+    selector: DxfProductSavedRowIdentityV1,
+    signal: AbortSignal,
+  ) => Promise<PatternImportDxfPhaseESavedDxfAuthorityReadV1>;
   resolveCard: (
     expected: DxfProductSavedRowIdentityV1,
     signal: AbortSignal,
@@ -82,34 +87,34 @@ function validDownloadUrl(value: unknown): value is string {
   return !lower.startsWith('data:') && !lower.startsWith('javascript:');
 }
 
-function exactCurrentRow(
+function selectedCurrentRow(
   techCard: common_TechCard,
-  expected: DxfProductSavedRowIdentityV1,
+  selector: DxfProductSavedRowIdentityV1,
 ): Readonly<{ row: DxfProductSavedRowIdentityV1; downloadUrl: string }> {
   if (
-    techCard.id !== expected.techCardId ||
-    techCard.lockVersion !== expected.cardLockVersion ||
+    techCard.id !== selector.techCardId ||
+    techCard.lockVersion !== selector.cardLockVersion ||
     !techCard.techCard
   )
     throw new Error('The current card id or optimistic lock moved from the saved DXF row.');
 
   const insert = techCard.techCard;
   const scopes = rollGoodsScopes(insert.bomItems ?? []);
-  if (!scopes.some(({ key }) => key === expected.scopeKey))
+  if (!scopes.some(({ key }) => key === selector.scopeKey))
     throw new Error('The saved DXF material scope is absent from the current card.');
   const patterns = insert.patterns ?? [];
   const bindings = bindingScopes(scopes, patterns);
   const matches = patterns.filter(
     (pattern) =>
-      pattern.lineKey?.trim() === expected.patternLineKey &&
-      scopeKeyOfBinding(pattern.fabricPurpose, pattern.bomLineKey, bindings) === expected.scopeKey,
+      pattern.lineKey?.trim() === selector.patternLineKey &&
+      scopeKeyOfBinding(pattern.fabricPurpose, pattern.bomLineKey, bindings) === selector.scopeKey,
   );
   if (matches.length !== 1)
     throw new Error('The current card has no unique exact saved DXF row for this scope and key.');
   const pattern = matches[0];
   const current = Object.freeze({
     techCardId: techCard.id,
-    scopeKey: expected.scopeKey,
+    scopeKey: selector.scopeKey,
     patternLineKey: pattern.lineKey!.trim(),
     revision: pattern.savedRowRevision ?? 0,
     cardLockVersion: techCard.lockVersion,
@@ -117,11 +122,28 @@ function exactCurrentRow(
     sizeBytes: pattern.sizeBytes ?? 0,
     sha256: pattern.sha256 ?? '',
   });
-  if (!sameRow(current, expected))
-    throw new Error('The current saved DXF row identity moved before reconstruction completed.');
+  if (
+    !Number.isSafeInteger(current.revision) ||
+    current.revision <= 0 ||
+    !validDownloadUrl(current.url) ||
+    !Number.isSafeInteger(current.sizeBytes) ||
+    current.sizeBytes <= 0 ||
+    !/^[0-9a-f]{64}$/.test(current.sha256)
+  )
+    throw new Error('The current saved DXF row has no complete authoritative identity.');
   if (!validDownloadUrl(pattern.downloadUrl))
     throw new Error('The current saved DXF row has no server download URL.');
   return Object.freeze({ row: current, downloadUrl: pattern.downloadUrl });
+}
+
+function exactCurrentRow(
+  techCard: common_TechCard,
+  expected: DxfProductSavedRowIdentityV1,
+): Readonly<{ row: DxfProductSavedRowIdentityV1; downloadUrl: string }> {
+  const current = selectedCurrentRow(techCard, expected);
+  if (!sameRow(current.row, expected))
+    throw new Error('The current saved DXF row identity moved before reconstruction completed.');
+  return current;
 }
 
 /**
@@ -156,6 +178,19 @@ export function createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1(
     return Object.freeze({ techCard, ...current });
   };
 
+  const readSelected = async (
+    selector: DxfProductSavedRowIdentityV1,
+    signal: AbortSignal,
+  ): Promise<
+    Readonly<{ techCard: common_TechCard; row: DxfProductSavedRowIdentityV1; downloadUrl: string }>
+  > => {
+    assertLive(signal);
+    const techCard = await readTechCard(selector.techCardId);
+    assertLive(signal);
+    const current = selectedCurrentRow(techCard, selector);
+    return Object.freeze({ techCard, ...current });
+  };
+
   const authority = Object.freeze({
     schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_OPERATION_SAVED_DXF_AUTHORITY_V1,
     operationBinding: 'none' as const,
@@ -171,6 +206,10 @@ export function createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1(
   return Object.freeze({
     schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_OPERATION_SAVED_CARD_AUTHORITY_V1,
     authority,
+    async resolveCurrentRow(selector, signal) {
+      const current = await readSelected(selector, signal);
+      return Object.freeze({ row: current.row, downloadUrl: current.downloadUrl });
+    },
     async resolveCard(expected, signal) {
       const current = await readCurrent(expected, signal);
       return Object.freeze({
