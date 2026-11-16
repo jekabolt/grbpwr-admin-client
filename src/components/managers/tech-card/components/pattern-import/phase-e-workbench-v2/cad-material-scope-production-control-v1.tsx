@@ -19,6 +19,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MATERIAL_SCOPE_PRODUCTION_CONTROL_CL
     crossScopeConnectRequiresOperationBinding: true,
     crossScopeConnectInferred: false,
     typedCrossScopeBlockerExposed: true,
+    technicalConnectionStatusHiddenFromChrome: true,
     createsPanel: false,
     createsGeometryOwner: false,
     createsWriter: false,
@@ -82,36 +83,25 @@ export function PatternImportDxfPhaseECadMaterialScopeProductionControlV1({
   onSelectPreparedScope?: (scopeKey: string) => void;
   crossScopeOperationBindingAvailable?: boolean;
 }>) {
+  const crossScopeStatus =
+    preparation?.ok && preparation.scopes.length > 1
+      ? crossScopeOperationBindingAvailable
+        ? 'available'
+        : PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_CROSS_SCOPE_PERSISTENCE_BLOCKER_V1.code
+      : undefined;
   return (
-    <div className='flex min-w-0 items-center gap-2' data-cad-material-scope-production-control=''>
+    <div
+      className='flex min-w-0 items-center gap-2'
+      data-cad-material-scope-production-control=''
+      data-cad-cross-scope-connect={crossScopeStatus}
+    >
       <PatternImportDxfPhaseECadMaterialScopeBrowserV1
         catalog={catalog}
         active={active}
         preparedScopeKeys={preparedScopeKeys}
         onSelectPreparedScope={onSelectPreparedScope}
       />
-      {preparation?.ok && preparation.scopes.length > 1 ? (
-        <Text
-          component='span'
-          size='micro'
-          variant='label'
-          className='truncate'
-          data-cad-cross-scope-connect={
-            crossScopeOperationBindingAvailable
-              ? 'available'
-              : PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_CROSS_SCOPE_PERSISTENCE_BLOCKER_V1.code
-          }
-          title={
-            crossScopeOperationBindingAvailable
-              ? 'Connect exact edges from two prepared material scopes to the selected saved operation.'
-              : PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_CROSS_SCOPE_PERSISTENCE_BLOCKER_V1.detail
-          }
-        >
-          {crossScopeOperationBindingAvailable
-            ? 'cross-material connections ready'
-            : 'same material scope connections only'}
-        </Text>
-      ) : preparation && !preparation.ok ? (
+      {preparation && !preparation.ok ? (
         <Text
           component='span'
           size='micro'
