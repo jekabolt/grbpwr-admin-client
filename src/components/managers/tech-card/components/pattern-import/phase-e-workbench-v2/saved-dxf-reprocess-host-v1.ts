@@ -59,6 +59,8 @@ export const PATTERN_IMPORT_DXF_PHASE_E_SAVED_DXF_REPROCESS_HOST_CLAIMS_V1 = Obj
   downloadUrlReadFromSameSnapshot: true,
   exactByteFetchUsesAbortSignal: true,
   backendDownloadUsesGrpcAuthHeader: true,
+  backendCapabilityResolvedWithoutRedirect: true,
+  presignedDownloadNeverReceivesAdminToken: true,
   crossOriginDownloadNeverReceivesAdminToken: true,
   disposableWorkerPerReprocess: true,
   directDxfOnly: true,
@@ -165,6 +167,67 @@ function backendDownloadAuthHeaders(
   if (downloadOrigin !== backendOrigin) return undefined;
   const token = readAuthToken()?.trim();
   return token ? { 'Grpc-Metadata-Authorization': `Bearer ${token}` } : undefined;
+}
+
+function backendPatternCapabilityJsonUrl(resolvedUrl: string, serverUrl: string): string | null {
+  let download: URL;
+  let backend: URL;
+  try {
+    download = new URL(resolvedUrl);
+    backend = new URL(serverUrl);
+  } catch {
+    return null;
+  }
+  if (download.origin !== backend.origin || !download.pathname.startsWith('/api/p/')) return null;
+  download.searchParams.set('mode', 'json');
+  return download.toString();
+}
+
+function exactPresignedObjectUrl(value: unknown): string {
+  if (!validDownloadUrl(value) || !/^[a-z][a-z0-9+.-]*:/i.test(value))
+    throw new Error('Saved DXF capability returned no absolute object URL.');
+  let resolved: URL;
+  try {
+    resolved = new URL(value);
+  } catch {
+    throw new Error('Saved DXF capability returned an invalid object URL.');
+  }
+  if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:')
+    throw new Error('Saved DXF capability object URL must use HTTP or HTTPS.');
+  return resolved.toString();
+}
+
+async function resolveSavedDxfByteUrl(
+  fetcher: typeof globalThis.fetch,
+  resolvedUrl: string,
+  serverUrl: string,
+  readAuthToken: () => string | null,
+  signal: AbortSignal,
+): Promise<Readonly<{ url: string; usedCapabilityHop: boolean }>> {
+  const capabilityUrl = backendPatternCapabilityJsonUrl(resolvedUrl, serverUrl);
+  if (!capabilityUrl) return Object.freeze({ url: resolvedUrl, usedCapabilityHop: false });
+
+  const authHeaders = backendDownloadAuthHeaders(capabilityUrl, serverUrl, readAuthToken);
+  const response = await fetcher(capabilityUrl, {
+    method: 'GET',
+    credentials: 'same-origin',
+    redirect: 'error',
+    headers: { Accept: 'application/json', ...authHeaders },
+    signal,
+  });
+  if (!response.ok)
+    throw new Error(`Saved DXF capability lookup failed with HTTP ${response.status}.`);
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error('Saved DXF capability returned invalid JSON.');
+  }
+  const objectUrl =
+    payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? (payload as Readonly<Record<string, unknown>>).url
+      : undefined;
+  return Object.freeze({ url: exactPresignedObjectUrl(objectUrl), usedCapabilityHop: true });
 }
 
 function report(
@@ -654,10 +717,19 @@ export function createPatternImportDxfPhaseESavedDxfReprocessHostV1(
         authority.downloadUrl,
         serverUrl,
       );
-      const headers = backendDownloadAuthHeaders(resolvedUrl, serverUrl, readAuthToken);
-      const response = await fetcher(resolvedUrl, {
+      const byteTarget = await resolveSavedDxfByteUrl(
+        fetcher,
+        resolvedUrl,
+        serverUrl,
+        readAuthToken,
+        signal,
+      );
+      const headers = byteTarget.usedCapabilityHop
+        ? undefined
+        : backendDownloadAuthHeaders(byteTarget.url, serverUrl, readAuthToken);
+      const response = await fetcher(byteTarget.url, {
         method: 'GET',
-        credentials: 'same-origin',
+        credentials: byteTarget.usedCapabilityHop ? 'omit' : 'same-origin',
         ...(headers ? { headers } : {}),
         signal,
       });

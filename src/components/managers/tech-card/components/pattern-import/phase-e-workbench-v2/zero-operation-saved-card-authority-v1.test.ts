@@ -216,18 +216,74 @@ describe('zero-operation saved card authority', () => {
     ]);
   });
 
-  it('fetches a server-relative tokenized DXF URL from the backend origin', async () => {
+  it('resolves a server-relative DXF capability before fetching its presigned object', async () => {
+    const exactRow = Object.freeze({ ...row, sizeBytes: 3 });
+    const capabilityUrl = 'https://api.beta.example/api/p/token/download?dl=1&mode=json';
+    const objectUrl = 'https://objects.example/pattern-main.dxf?token=storage-token';
+    const fetcher = vi.fn<typeof globalThis.fetch>(async (input) => {
+      if (String(input) === capabilityUrl)
+        return new Response(JSON.stringify({ url: objectUrl }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      if (String(input) === objectUrl)
+        return new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { 'content-length': '3' },
+        });
+      throw new TypeError(`Unexpected test fetch: ${String(input)}`);
+    });
+    const host = createPatternImportDxfPhaseESavedDxfReprocessHostV1({
+      serverUrl: 'https://api.beta.example/',
+      readAuthToken: () => 'beta-token',
+      fetch: fetcher as typeof globalThis.fetch,
+      readAuthoritativeRow: async () => ({
+        row: exactRow,
+        downloadUrl: '/api/p/token/download?dl=1',
+      }),
+      resolveCard: async () => {
+        throw new Error('Card projection is not used by the byte-read test.');
+      },
+    });
+
+    await expect(
+      host.readAuthoritativeRow(exactRow, new AbortController().signal, () => undefined),
+    ).resolves.toMatchObject({ row: exactRow, bytes: new Uint8Array([1, 2, 3]) });
+    expect(fetcher).toHaveBeenNthCalledWith(
+      1,
+      capabilityUrl,
+      expect.objectContaining({
+        method: 'GET',
+        credentials: 'same-origin',
+        redirect: 'error',
+      }),
+    );
+    const capabilityRequest = fetcher.mock.calls[0]?.[1];
+    expect(new Headers(capabilityRequest?.headers).get('Grpc-Metadata-Authorization')).toBe(
+      'Bearer beta-token',
+    );
+    expect(new Headers(capabilityRequest?.headers).get('Accept')).toBe('application/json');
+    expect(fetcher).toHaveBeenNthCalledWith(
+      2,
+      objectUrl,
+      expect.objectContaining({ method: 'GET', credentials: 'omit' }),
+    );
+    const objectRequest = fetcher.mock.calls[1]?.[1];
+    expect(new Headers(objectRequest?.headers).get('Grpc-Metadata-Authorization')).toBeNull();
+    host.dispose();
+  });
+
+  it('rejects an unsafe capability object URL before attempting its byte fetch', async () => {
     const exactRow = Object.freeze({ ...row, sizeBytes: 3 });
     const fetcher = vi.fn<typeof globalThis.fetch>(
       async () =>
-        new Response(new Uint8Array([1, 2, 3]), {
+        new Response(JSON.stringify({ url: 'javascript:alert(1)' }), {
           status: 200,
-          headers: { 'content-length': '3' },
+          headers: { 'content-type': 'application/json' },
         }),
     );
     const host = createPatternImportDxfPhaseESavedDxfReprocessHostV1({
       serverUrl: 'https://api.beta.example/',
-      readAuthToken: () => 'beta-token',
       fetch: fetcher as typeof globalThis.fetch,
       readAuthoritativeRow: async () => ({
         row: exactRow,
@@ -240,15 +296,30 @@ describe('zero-operation saved card authority', () => {
 
     await expect(
       host.readAuthoritativeRow(exactRow, new AbortController().signal, () => undefined),
-    ).resolves.toMatchObject({ row: exactRow, bytes: new Uint8Array([1, 2, 3]) });
-    expect(fetcher).toHaveBeenCalledWith(
-      'https://api.beta.example/api/p/token/download',
-      expect.objectContaining({ method: 'GET' }),
-    );
-    const request = fetcher.mock.calls[0]?.[1];
-    expect(new Headers(request?.headers).get('Grpc-Metadata-Authorization')).toBe(
-      'Bearer beta-token',
-    );
+    ).rejects.toThrow(/absolute object URL|HTTP or HTTPS/i);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    host.dispose();
+  });
+
+  it('stops before byte download when the capability lookup is unavailable', async () => {
+    const exactRow = Object.freeze({ ...row, sizeBytes: 3 });
+    const fetcher = vi.fn<typeof globalThis.fetch>(async () => new Response(null, { status: 410 }));
+    const host = createPatternImportDxfPhaseESavedDxfReprocessHostV1({
+      serverUrl: 'https://api.beta.example/',
+      fetch: fetcher as typeof globalThis.fetch,
+      readAuthoritativeRow: async () => ({
+        row: exactRow,
+        downloadUrl: '/api/p/token/download',
+      }),
+      resolveCard: async () => {
+        throw new Error('Card projection is not used by the byte-read test.');
+      },
+    });
+
+    await expect(
+      host.readAuthoritativeRow(exactRow, new AbortController().signal, () => undefined),
+    ).rejects.toThrow(/capability lookup failed with HTTP 410/i);
+    expect(fetcher).toHaveBeenCalledTimes(1);
     host.dispose();
   });
 
