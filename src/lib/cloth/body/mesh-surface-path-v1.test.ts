@@ -70,14 +70,29 @@ describe('mesh surface path v1', () => {
       planeOriginM: [0, 0.3, 0],
       planeNormal: [0, 1, 0],
       selection: { kind: 'nearest-seed', seedM: [0, 0.3, 0.05] },
+      includeCrossings: true,
     });
     expect(section.ok, kind).toBe(true);
     if (!section.ok || !section.selectedLoop) return;
-    expect(section.selectedLoop.crossings).toHaveLength(section.selectedLoop.pointsM.length);
+    const crossings = section.selectedLoop.crossings;
+    expect(crossings).toHaveLength(section.selectedLoop.pointsM.length);
+    if (!crossings) return;
+    const plain = measureMeshPlaneSectionPerimetersV1({
+      positionsM,
+      triangleIndices: basis.indices,
+      planeOriginM: [0, 0.3, 0],
+      planeNormal: [0, 1, 0],
+      selection: { kind: 'nearest-seed', seedM: [0, 0.3, 0.05] },
+    });
+    expect(plain.ok).toBe(true);
+    if (!plain.ok || !plain.selectedLoop) return;
+    expect(plain.selectedLoop.crossings).toBeUndefined();
+    expect(plain.selectedLoop.perimeterM).toBe(section.selectedLoop.perimeterM);
+    expect(plain.selectedLoop.pointsM).toEqual(section.selectedLoop.pointsM);
     const path = createMeshSurfacePathV1({
       topology,
       closed: true,
-      points: section.selectedLoop.crossings.map(crossingPoint),
+      points: crossings.map(crossingPoint),
     });
     const validation = validateMeshSurfacePathV1(path, topology);
     expect(validation.ok).toBe(true);
