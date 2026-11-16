@@ -1,4 +1,4 @@
-import { type KeyboardEvent } from 'react';
+import { type ChangeEvent, type KeyboardEvent } from 'react';
 
 import {
   MAKEHUMAN_FULL_BODY_JOINT_OVERLAY_GROUPS_V4,
@@ -6,7 +6,7 @@ import {
   type MakeHumanFullBodyJointOverlayGroupIdV4,
   type MakeHumanFullBodyJointOverlayRuntimeResultV4,
 } from 'lib/cloth/body/makehuman-full-body-joint-overlay-runtime-v4';
-import { Button, CalloutBox, Pill, Text } from 'ui';
+import { Button, CalloutBox, Input, Pill, Text } from 'ui';
 
 import {
   MODEL_OPEN_REFERENCE_FULL_BODY_POSE_LIMITS_V4,
@@ -319,14 +319,15 @@ export function ModelOpenReferenceJointPoseControlV5({
                   key={group.id}
                   className='flex min-h-11 cursor-pointer items-center gap-2 border border-hairline px-2 text-micro uppercase has-[:checked]:border-textColor has-[:checked]:bg-textColor has-[:checked]:text-bgColor'
                 >
-                  <input
+                  <Input
+                    id={`model-open-reference-joint-v5-${group.id}`}
                     type='radio'
                     name='model-open-reference-joint-v5'
                     form={MODEL_OPEN_REFERENCE_LOCAL_CONTROL_FORM_OWNER}
                     value={group.id}
                     checked={selection.groupId === group.id}
                     onChange={() => onSelectionChange(modelOpenReferenceJointSelectionV5(group.id))}
-                    className='size-4 shrink-0 accent-current'
+                    className='size-4 min-h-0 w-4 shrink-0 appearance-auto border-0 p-0 accent-current'
                   />
                   {GROUP_ACCESSIBLE_LABELS[group.id]}
                 </label>
@@ -345,7 +346,8 @@ export function ModelOpenReferenceJointPoseControlV5({
                   key={descriptor.channel}
                   className='flex min-h-11 cursor-pointer items-center gap-2 border border-hairline px-2 text-micro uppercase has-[:checked]:border-textColor has-[:checked]:bg-textColor has-[:checked]:text-bgColor'
                 >
-                  <input
+                  <Input
+                    id={`model-open-reference-channel-v5-${descriptor.channel}`}
                     type='radio'
                     name='model-open-reference-channel-v5'
                     form={MODEL_OPEN_REFERENCE_LOCAL_CONTROL_FORM_OWNER}
@@ -361,7 +363,7 @@ export function ModelOpenReferenceJointPoseControlV5({
                         modelOpenReferenceJointSelectionV5(selectedGroup.id, descriptor.channel),
                       )
                     }
-                    className='size-4 shrink-0 accent-current'
+                    className='size-4 min-h-0 w-4 shrink-0 appearance-auto border-0 p-0 accent-current'
                   />
                   {CHANNEL_LABELS[descriptor.channel]} · {descriptor.axis.toUpperCase()}
                 </label>
@@ -373,7 +375,7 @@ export function ModelOpenReferenceJointPoseControlV5({
               <Text component='p' size='micro' className='tabular-nums'>
                 {currentValue}° · Arrow 1° · Shift + Arrow 5°
               </Text>
-              <input
+              <Input
                 type='range'
                 min={modelOpenReferenceJointChannelLimitV5(selection).min}
                 max={modelOpenReferenceJointChannelLimitV5(selection).max}
@@ -387,7 +389,7 @@ export function ModelOpenReferenceJointPoseControlV5({
                 aria-valuetext={`${currentValue} degrees`}
                 className='h-11 min-w-48 grow accent-textColor'
                 disabled={status === 'building'}
-                onChange={(event) => {
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
                   const next = modelOpenReferenceJointPoseUpdateSelectedV5(
                     draftPose,
                     selection,

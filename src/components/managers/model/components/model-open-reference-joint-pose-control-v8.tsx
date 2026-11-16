@@ -2,8 +2,8 @@ import {
   MAKEHUMAN_FULL_BODY_JOINT_OVERLAY_GROUPS_V4,
   type MakeHumanFullBodyJointOverlayGroupIdV4,
 } from 'lib/cloth/body/makehuman-full-body-joint-overlay-runtime-v4';
-import { useEffect, useRef, useState } from 'react';
-import { Button, Chip, Text } from 'ui';
+import { type ChangeEvent, useEffect, useRef, useState } from 'react';
+import { Button, Chip, Input, Select, Text } from 'ui';
 
 import {
   MODEL_OPEN_REFERENCE_FULL_BODY_NEUTRAL_POSE_V4,
@@ -188,58 +188,55 @@ export function ModelOpenReferenceJointPoseControlV8(
       <div className='sr-only' data-testid='model-open-reference-joint-pose-accessible-fallback-v8'>
         <label>
           Pose joint
-          <select
+          <Select
             name='model-open-reference-joint-v8-fallback'
             form={LOCAL_CONTROL_FORM_OWNER}
             value={selection.groupId}
-            onChange={(event) =>
+            placeholder='Pose joint'
+            items={MAKEHUMAN_FULL_BODY_JOINT_OVERLAY_GROUPS_V4.map((group) => ({
+              value: group.id,
+              label: group.label,
+            }))}
+            onValueChange={(groupId) =>
               onSelectionChange(
                 modelOpenReferenceJointSelectionV5(
-                  event.currentTarget.value as MakeHumanFullBodyJointOverlayGroupIdV4,
+                  groupId as MakeHumanFullBodyJointOverlayGroupIdV4,
                 ),
               )
             }
-          >
-            {MAKEHUMAN_FULL_BODY_JOINT_OVERLAY_GROUPS_V4.map((group) => (
-              <option key={group.id} value={group.id}>
-                {group.label}
-              </option>
-            ))}
-          </select>
+          />
         </label>
         <label>
           Joint axis
-          <select
+          <Select
             name='model-open-reference-axis-v8-fallback'
             form={LOCAL_CONTROL_FORM_OWNER}
             value={selection.channel}
-            onChange={(event) =>
+            placeholder='Joint axis'
+            items={selectedGroup.channelDescriptors.map((descriptor) => ({
+              value: descriptor.channel,
+              label: `${descriptor.channel}, local ${descriptor.axis.toUpperCase()}`,
+            }))}
+            onValueChange={(channel) =>
               onSelectionChange(
                 modelOpenReferenceJointSelectionV5(
                   selectedGroup.id,
-                  event.currentTarget
-                    .value as (typeof selectedGroup.channelDescriptors)[number]['channel'],
+                  channel as (typeof selectedGroup.channelDescriptors)[number]['channel'],
                 ),
               )
             }
-          >
-            {selectedGroup.channelDescriptors.map((descriptor) => (
-              <option key={descriptor.channel} value={descriptor.channel}>
-                {descriptor.channel}, local {descriptor.axis.toUpperCase()}
-              </option>
-            ))}
-          </select>
+          />
         </label>
         <label>
           Joint angle
-          <input
+          <Input
             type='number'
             form={LOCAL_CONTROL_FORM_OWNER}
             min={limit.min}
             max={limit.max}
             step={limit.step}
             value={value}
-            onChange={(event) => {
+            onChange={(event: ChangeEvent<HTMLInputElement>) => {
               const next = modelOpenReferenceJointPoseUpdateSelectedV5(
                 draftPose,
                 selection,
@@ -250,9 +247,9 @@ export function ModelOpenReferenceJointPoseControlV8(
           />
         </label>
         {appliedPose === null ? (
-          <button type='button' onClick={() => onApply(draftPose)}>
+          <Button type='button' variant='secondary' size='sm' onClick={() => onApply(draftPose)}>
             Build mannequin
-          </button>
+          </Button>
         ) : null}
       </div>
     </fieldset>

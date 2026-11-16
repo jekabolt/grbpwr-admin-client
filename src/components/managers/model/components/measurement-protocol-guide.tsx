@@ -40,7 +40,7 @@ export function MeasurementProtocolGuide() {
       </summary>
 
       <div className='flex flex-col gap-3 pt-3'>
-        <ol className='grid list-decimal gap-1 pl-4 text-xs text-labelColor md:grid-cols-3 md:gap-4'>
+        <ol className='grid list-decimal gap-1 pl-4 text-small text-labelColor md:grid-cols-3 md:gap-4'>
           <li>
             <b className='text-textColor'>prepare</b> · close-fitting clothing, neutral stance,
             marked landmarks; tool in contact without compression or slack
@@ -67,7 +67,7 @@ export function MeasurementProtocolGuide() {
             >
               <span className='text-textColor'>{field.label}</span>
             </GroupLabel>
-            <div className='grid gap-x-5 gap-y-2 pt-2 text-xs md:grid-cols-2'>
+            <div className='grid gap-x-5 gap-y-2 pt-2 text-small md:grid-cols-2'>
               <Text size='micro' className='leading-relaxed text-textColor'>
                 {field.shortDefinition}
               </Text>
