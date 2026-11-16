@@ -12,6 +12,7 @@ const REQUIRED_CREATE_MEASUREMENTS = [
 
 const DEV_ROUTE = '/__model-form-personalized-preview-v1';
 const PREWARM_QUIET_MS = 1_000;
+const QUALITY_WORKER_MEASURE = 'measurement-open-reference-display-quality-worker/v1';
 
 function v9PoseFromSourceRevision(sourceRevision: string | null): Record<string, unknown> {
   const encoded = sourceRevision?.match(/(?:^|;)editorPoseV9=([^;]+)/u)?.[1];
@@ -489,6 +490,102 @@ test('continuous measurement typing retains the last-valid V9 canvas until repla
       };
     }),
   ).toEqual({ sameNode: true, sawOpacityZero: false });
+});
+
+test('rapid valid measurement edits coalesce while the quality gate leaves animation frames live', async ({
+  page,
+}) => {
+  await prewarmDevRuntime(page);
+  await page.goto(DEV_ROUTE);
+
+  const preview = page.getByTestId('model-open-reference-preview');
+  const status = page.getByTestId('model-open-reference-preview-status');
+  const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
+  await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
+  const previousSourceRevision = await canvas.getAttribute('data-source-revision');
+  expect(previousSourceRevision).toBeTruthy();
+
+  await page.evaluate((measureName) => {
+    performance.clearMeasures(measureName);
+    const audit = {
+      active: true,
+      frames: 0,
+      lastAt: performance.now(),
+      maximumGapMs: 0,
+      gaps: [] as Array<{ startAt: number; endAt: number; gapMs: number }>,
+    };
+    (
+      window as typeof window & {
+        __modelFormWorkerFrameAudit?: typeof audit;
+      }
+    ).__modelFormWorkerFrameAudit = audit;
+    const frame = (at: number) => {
+      const gapMs = at - audit.lastAt;
+      audit.frames += 1;
+      audit.maximumGapMs = Math.max(audit.maximumGapMs, gapMs);
+      audit.gaps.push({ startAt: audit.lastAt, endAt: at, gapMs });
+      audit.lastAt = at;
+      if (audit.active) requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+  }, QUALITY_WORKER_MEASURE);
+  const startedAt = Date.now();
+
+  const chest = page.getByRole('textbox', { name: 'chest', exact: true });
+  for (const value of ['930', '940', '950', '960']) {
+    await chest.fill(value);
+    await page.waitForTimeout(20);
+  }
+
+  await expect(preview).toHaveAttribute('data-body-display-ownership', 'current', {
+    timeout: 180_000,
+  });
+  await expect
+    .poll(() => canvas.getAttribute('data-source-revision'), { timeout: 180_000 })
+    .not.toBe(previousSourceRevision);
+  const evidence = await page.evaluate((measureName) => {
+    const audit = (
+      window as typeof window & {
+        __modelFormWorkerFrameAudit?: {
+          active: boolean;
+          frames: number;
+          maximumGapMs: number;
+          gaps: Array<{ startAt: number; endAt: number; gapMs: number }>;
+        };
+      }
+    ).__modelFormWorkerFrameAudit;
+    if (audit) audit.active = false;
+    const measures = performance.getEntriesByName(measureName) as PerformanceMeasure[];
+    const workerGaps = (audit?.gaps ?? []).filter((gap) =>
+      measures.some(
+        (measure) =>
+          gap.startAt < measure.startTime + measure.duration && gap.endAt > measure.startTime,
+      ),
+    );
+    return {
+      frames: audit?.frames ?? 0,
+      maximumGapMs: audit?.maximumGapMs ?? Number.POSITIVE_INFINITY,
+      workerFrameCount: workerGaps.length,
+      maximumWorkerGapMs: Math.max(0, ...workerGaps.map(({ gapMs }) => gapMs)),
+      workerJobs: measures.length,
+      workerWallMs: measures.map((measure) => measure.duration),
+      workerComputeMs: measures.map((measure) => {
+        const detail = measure.detail as { workerDurationMs?: number } | null;
+        return detail?.workerDurationMs ?? null;
+      }),
+    };
+  }, QUALITY_WORKER_MEASURE);
+  const report = {
+    ...evidence,
+    totalElapsedMs: Date.now() - startedAt,
+  };
+  console.info(`MANNEQUIN_WORKER_DEBOUNCE_V1=${JSON.stringify(report)}`);
+
+  expect(evidence.workerJobs).toBe(1);
+  expect(evidence.frames).toBeGreaterThan(5);
+  expect(evidence.workerFrameCount).toBeGreaterThan(5);
+  expect(evidence.maximumWorkerGapMs).toBeLessThan(100);
+  expect(evidence.workerComputeMs[0]).toBeGreaterThan(0);
 });
 
 test('real ModelForm admits female, male and neutral open-reference bases', async ({ page }) => {

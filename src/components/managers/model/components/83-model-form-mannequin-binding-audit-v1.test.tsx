@@ -272,7 +272,9 @@ describe('receipt 83 model-form mannequin binding audit v1', () => {
     expect(formSource).toContain('directPoseBindingV9={directPoseBindingV9}');
     expect(formSource).not.toContain('beginSave(');
     expect(formSource).toContain('poseTransport.savePose()');
-    expect(previewSource).toContain('buildFullBodyPreview(draftPoseRef.current)');
+    expect(previewSource).toContain(
+      "buildFullBodyPreview(draftPoseRef.current, 'measurement-change')",
+    );
     expect(previewSource).toContain(
       "!(editor.version === 'full-body-v9' && directPoseBindingRef.current)",
     );

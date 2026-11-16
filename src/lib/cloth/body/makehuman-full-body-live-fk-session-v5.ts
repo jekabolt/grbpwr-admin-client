@@ -3,6 +3,7 @@ import {
   createMakeHumanArmSideSeamAssistV1,
   type MakeHumanArmSideSeamAssistResultV1,
 } from './makehuman-arm-side-seam-assist-v1';
+import { deriveMakeHumanElbowBindNeutralizationV1 } from './makehuman-elbow-bind-neutralization-v1';
 import {
   createNeutralMakeHumanFullBodyLocalFkPoseV4,
   makeHumanFullBodyLocalFkRotationsV4,
@@ -142,6 +143,14 @@ export async function createMakeHumanFullBodyLiveFkSessionV5(options: {
     tailsM: anchors.tailsM,
     rollDirections: anchors.rollDirections,
   });
+  const elbowNeutralization = deriveMakeHumanElbowBindNeutralizationV1({
+    bundle: resources.rig,
+    basisKind: options.basis.kind,
+    heads: coherentAnchors.headsM,
+    tails: coherentAnchors.tailsM,
+    rollDirections: coherentAnchors.rollDirections,
+    rigSha256: MEASUREMENT_OPEN_REFERENCE_DISPLAY_POSE_RUNTIME_METADATA_V1.rigSha256,
+  });
   const sourceRevision = boundRevision(options.sourceRevision);
   const sideSeamAssists = Object.freeze({
     left: createMakeHumanArmSideSeamAssistV1({
@@ -151,6 +160,7 @@ export async function createMakeHumanFullBodyLiveFkSessionV5(options: {
       tails: coherentAnchors.tailsM,
       rollDirections: coherentAnchors.rollDirections,
       side: 'left',
+      elbowNeutralization,
       minimumOuterHipClearanceRatio: options.proxyRuntime.poseCompatibleArmLengthProxy
         ? 0.1
         : undefined,
@@ -165,6 +175,7 @@ export async function createMakeHumanFullBodyLiveFkSessionV5(options: {
       tails: coherentAnchors.tailsM,
       rollDirections: coherentAnchors.rollDirections,
       side: 'right',
+      elbowNeutralization,
       minimumOuterHipClearanceRatio: options.proxyRuntime.poseCompatibleArmLengthProxy
         ? 0.1
         : undefined,
@@ -182,6 +193,7 @@ export async function createMakeHumanFullBodyLiveFkSessionV5(options: {
     rotations: makeHumanFullBodyLocalFkRotationsV4(
       createNeutralMakeHumanFullBodyLocalFkPoseV4(),
       options.basis.kind,
+      elbowNeutralization,
     ),
   });
   const neutralFeet = neutralOverlay.bones.filter(
@@ -208,7 +220,7 @@ export async function createMakeHumanFullBodyLiveFkSessionV5(options: {
       heads: coherentAnchors.headsM,
       tails: coherentAnchors.tailsM,
       rollDirections: coherentAnchors.rollDirections,
-      rotations: makeHumanFullBodyLocalFkRotationsV4(pose, options.basis.kind),
+      rotations: makeHumanFullBodyLocalFkRotationsV4(pose, options.basis.kind, elbowNeutralization),
     });
     const posed = poseMakeHumanFullBodyLocalFkV4({
       bundle: resources.rig,
@@ -218,6 +230,7 @@ export async function createMakeHumanFullBodyLiveFkSessionV5(options: {
       tails: coherentAnchors.tailsM,
       rollDirections: coherentAnchors.rollDirections,
       pose,
+      elbowNeutralization,
     });
     if (
       posed.positions.length !== sourceMesh.positions.length ||

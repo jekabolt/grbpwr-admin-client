@@ -250,6 +250,17 @@ export type ModelOpenReferenceBodyDisplayOwnershipV11 =
   | 'retained-invalid'
   | 'retained-error';
 
+export const MODEL_OPEN_REFERENCE_MEASUREMENT_BUILD_DEBOUNCE_MS_V12 = 120;
+
+export function modelOpenReferenceFullBodyBuildDelayV12(options: {
+  readonly intent: 'immediate' | 'measurement-change';
+  readonly retainsLastValidBody: boolean;
+}): number {
+  return options.intent === 'measurement-change' && options.retainsLastValidBody
+    ? MODEL_OPEN_REFERENCE_MEASUREMENT_BUILD_DEBOUNCE_MS_V12
+    : 0;
+}
+
 export function modelOpenReferenceBodyDisplayOwnershipV11(options: {
   readonly builtFingerprint: string | null;
   readonly requestedFingerprint: string;
@@ -776,7 +787,7 @@ export interface ModelOpenReferencePreviewBuildDependenciesV1 {
   readonly buildFullBodyLocalFkDisplayV4: typeof createMeasurementOpenReferenceFullBodyLocalFkRuntimeV4;
   readonly buildFullBodyJointOverlayV5: typeof createMakeHumanFullBodyJointOverlayRuntimeV5;
   readonly buildFullBodyLiveFkSessionV5: typeof createMakeHumanFullBodyLiveFkSessionV5;
-  readonly scheduleBuild: (callback: () => void) => ReturnType<typeof setTimeout>;
+  readonly scheduleBuild: (callback: () => void, delayMs?: number) => ReturnType<typeof setTimeout>;
 }
 
 const DEFAULT_BUILD_DEPENDENCIES: ModelOpenReferencePreviewBuildDependenciesV1 = Object.freeze({
@@ -794,7 +805,7 @@ const DEFAULT_BUILD_DEPENDENCIES: ModelOpenReferencePreviewBuildDependenciesV1 =
   buildFullBodyLocalFkDisplayV4: createMeasurementOpenReferenceFullBodyLocalFkRuntimeV4,
   buildFullBodyJointOverlayV5: createMakeHumanFullBodyJointOverlayRuntimeV5,
   buildFullBodyLiveFkSessionV5: createMakeHumanFullBodyLiveFkSessionV5,
-  scheduleBuild: (callback: () => void) => setTimeout(callback, 0),
+  scheduleBuild: (callback: () => void, delayMs = 0) => setTimeout(callback, delayMs),
 });
 
 export interface ModelOpenReferencePreviewRuntimeDiagnosticsV1 {
@@ -1341,13 +1352,18 @@ export async function buildModelOpenReferenceBetaShapeRuntimeV1(options: {
   readonly basis: MakeHumanOpenReferenceBasisV1;
   readonly measurements: CanonicalBodyMeasurementsMm;
   readonly waistHipRuntime: MeasurementOpenReferenceUniformWaistHipRuntimeResultV1;
+  readonly signal?: AbortSignal;
 }): Promise<MeasurementOpenReferenceBetaShapeRuntimeResultV1 | null> {
+  const runtimeModule = await import(
+    'lib/cloth/body/measurement-open-reference-beta-shape-runtime-v1'
+  );
   try {
-    const runtimeModule = await import(
-      'lib/cloth/body/measurement-open-reference-beta-shape-runtime-v1'
-    );
     return await runtimeModule.createMeasurementOpenReferenceBetaShapeRuntimeV1(options);
-  } catch {
+  } catch (reason: unknown) {
+    if (reason instanceof runtimeModule.MeasurementOpenReferenceBetaShapeSafetyErrorV1) {
+      throw reason;
+    }
+    if (reason instanceof Error && reason.name === 'AbortError') throw reason;
     return null;
   }
 }
@@ -2357,12 +2373,14 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
   }>(() => Object.freeze({ status: 'idle', blockers: Object.freeze([]) }));
   const generationRef = useRef(0);
   const buildTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const buildAbortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
   const jointRingTransactionRef = useRef<{
     readonly revision: string;
     readonly gizmoGroup:
       | MakeHumanFullBodyJointOverlayGroupV4
       | MakeHumanFullBodyJointOverlayGroupV5;
+    readonly originalPose: Pose;
     transaction: FullBodyJointRingDraggingV9;
     lastAdmittedPose: Pose;
   } | null>(null);
@@ -2408,11 +2426,14 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
   } | null>(null);
   const autoBuildAttemptRef = useRef<string | null>(null);
   const bodyOwnerRef = useRef(`${editor.version}:${modelId}:${modelContentRevision}`);
+  const retainedBodyForMeasurementDebounceRef = useRef(false);
+  const builtRef = useRef(built);
   const controlledGestureActiveRef = useRef(false);
   const directPoseBindingRef = useRef(directPoseBindingV9);
   const draftPoseRef = useRef(draftPose);
   directPoseBindingRef.current = directPoseBindingV9;
   draftPoseRef.current = draftPose;
+  builtRef.current = built;
 
   const updateUncontrolledDraft = (pose: Pose) => {
     if (!(directPoseBindingRef.current && editor.version === 'full-body-v9')) {
@@ -2443,6 +2464,8 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
 
   const cancelBuild = useCallback(() => {
     generationRef.current += 1;
+    buildAbortRef.current?.abort();
+    buildAbortRef.current = null;
     if (buildTimerRef.current !== null) clearTimeout(buildTimerRef.current);
     buildTimerRef.current = null;
   }, []);
@@ -2451,6 +2474,8 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
     const bodyOwner = `${editor.version}:${modelId}:${modelContentRevision}`;
     const retainLastValidBody =
       editor.version === 'full-body-v9' && bodyOwnerRef.current === bodyOwner;
+    retainedBodyForMeasurementDebounceRef.current =
+      retainLastValidBody && builtRef.current !== null;
     bodyOwnerRef.current = bodyOwner;
     autoBuildAttemptRef.current = null;
     cancelBuild();
@@ -2513,7 +2538,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
   }, [cancelBuild]);
 
   const buildFullBodyPreview = useCallback(
-    (pose: Pose) => {
+    (pose: Pose, intent: 'immediate' | 'measurement-change' = 'immediate') => {
       if (!resolution.ok) return;
       const activeJointRing = jointRingTransactionRef.current;
       const poseForBuild =
@@ -2538,16 +2563,31 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
         basisKind: requestedBasisKind,
         pose: requestedPose,
       });
+      const buildDelayMs = modelOpenReferenceFullBodyBuildDelayV12({
+        intent,
+        retainsLastValidBody: retainedBodyForMeasurementDebounceRef.current,
+      });
       cancelBuild();
+      const buildAbortController = new AbortController();
+      buildAbortRef.current = buildAbortController;
       const requestedGeneration = generationRef.current;
       setUpdateStatus('building');
       setUpdateError('');
 
       buildTimerRef.current = resolvedBuildDependencies.scheduleBuild(() => {
         buildTimerRef.current = null;
-        if (!mountedRef.current || generationRef.current !== requestedGeneration) return;
+        if (
+          !mountedRef.current ||
+          generationRef.current !== requestedGeneration ||
+          buildAbortController.signal.aborted
+        ) {
+          return;
+        }
         void (async () => {
-          const stale = () => !mountedRef.current || generationRef.current !== requestedGeneration;
+          const stale = () =>
+            !mountedRef.current ||
+            generationRef.current !== requestedGeneration ||
+            buildAbortController.signal.aborted;
           try {
             const basis = await resolvedBuildDependencies.loadBasis(requestedBasisKind);
             if (stale()) return;
@@ -2572,6 +2612,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                     basis,
                     measurements: requestedMeasurements,
                     waistHipRuntime: proxyRuntime,
+                    signal: buildAbortController.signal,
                   })
                 : null;
             if (stale()) return;
@@ -2713,9 +2754,11 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
             if (stale()) return;
             setUpdateStatus('error');
             setUpdateError(reason instanceof Error ? reason.message : 'Full-body preview failed.');
+          } finally {
+            if (buildAbortRef.current === buildAbortController) buildAbortRef.current = null;
           }
         })();
-      });
+      }, buildDelayMs);
     },
     [
       bodyBuildFingerprint,
@@ -2737,7 +2780,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
       return;
     }
     autoBuildAttemptRef.current = bodyBuildFingerprint;
-    buildFullBodyPreview(draftPoseRef.current);
+    buildFullBodyPreview(draftPoseRef.current, 'measurement-change');
   }, [bodyBuildFingerprint, buildFullBodyPreview, editor, resolution.ok]);
 
   const currentBuilt = built?.bodyBuildFingerprint === bodyBuildFingerprint ? built : null;
@@ -3491,6 +3534,9 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                 displayedBuilt.measurementApplication?.limitedBySafeRange.join(',') ?? ''
               }
               data-not-applied={displayedBuilt.measurementApplication?.notApplied.join(',') ?? ''}
+              data-modifier-only={
+                displayedBuilt.measurementApplication?.modifierOnly.join(',') ?? ''
+              }
               data-unsupported={displayedBuilt.measurementApplication?.unsupported.join(',') ?? ''}
             >
               {measurementApplicationText}
@@ -3579,6 +3625,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                                   jointRingTransactionRef.current = {
                                     revision: jointRingRevision,
                                     gizmoGroup: rotationGizmoGroup,
+                                    originalPose: startPose,
                                     transaction: ring.begin(
                                       startPose,
                                       jointSelection,
@@ -3615,11 +3662,16 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                                     currentJointRingRevisionRef.current === jointRingRevision
                                       ? 'commit'
                                       : 'cancel';
+                                  const poseChanged = !editor.equalGeometry(
+                                    active.originalPose,
+                                    active.lastAdmittedPose,
+                                  );
                                   const finishedPose = finishActiveJointRing(resolvedOutcome);
                                   if (
                                     resolvedOutcome === 'commit' &&
                                     finishedPose &&
-                                    editor.autoApplyJointRingOnCommit
+                                    editor.autoApplyJointRingOnCommit &&
+                                    poseChanged
                                   ) {
                                     buildFullBodyPreview(finishedPose);
                                   }

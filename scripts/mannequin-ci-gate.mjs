@@ -22,6 +22,7 @@ const unitFiles = Object.freeze([
   'src/components/managers/model/components/model-open-reference-direct-pose-control-v9.test.ts',
   'src/components/managers/model/components/model-open-reference-direct-pose-v9.test.ts',
   'src/components/managers/model/components/model-open-reference-measurement-application-v1.test.ts',
+  'src/components/managers/model/components/model-open-reference-measurement-status-contract-v1.test.ts',
   'src/components/managers/model/components/model-open-reference-preview-input-v1.test.ts',
   'src/components/managers/model/components/model-open-reference-preview.test.tsx',
   'src/components/managers/model/components/use-model-mannequin-pose-transport-v1.test.ts',
@@ -32,9 +33,13 @@ const unitFiles = Object.freeze([
   'src/components/shared/measurement-surface-active-measurement-guide-v1.test.ts',
   'src/components/shared/measurement-surface-live-positions-v1.test.ts',
   'src/components/shared/measurement-watertight-surface-v1-stage.test.ts',
+  'src/lib/cloth/body/makehuman-arm-body-part-ik-v1.test.ts',
+  'src/lib/cloth/body/makehuman-clo-like-pose-display-v3.test.ts',
   'src/lib/cloth/body/makehuman-live-pose-admissibility-v1.test.ts',
+  'src/lib/cloth/body/makehuman-third-party-asset-manifest-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-card-detail-shape-parity-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-display-quality-gate-v1.test.ts',
+  'src/lib/cloth/body/measurement-open-reference-display-quality-worker-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-limb-subset-runtime-loader-v1.test.ts',
   'src/lib/cloth/body/measurement-protocol-v1.test.ts',
 ]);
@@ -47,6 +52,8 @@ const browserSuites = Object.freeze([
       'shoulder marker live-drags posture without taking wrist, torso, or camera controls',
       'ModelForm V9 live-drags head and leg while empty space remains the camera',
       'clean ModelForm V9 lowers linked arms beside the thighs with a 56 px wrist target',
+      'side-view elbow ring admits anterior flexion and cannot reverse past neutral',
+      'side-view wrist drag detents a visibly straight arm to exact neutral',
       'hostile wrist drag keeps the last-valid source and canvas',
     ].join('|'),
   }),
@@ -66,7 +73,10 @@ const browserSuites = Object.freeze([
   Object.freeze({
     label: 'last-valid canvas during continuous measurement typing',
     config: 'playwright.model-form-personalized-preview.config.ts',
-    grep: 'continuous measurement typing retains the last-valid V9 canvas until replacement is ready',
+    grep: [
+      'continuous measurement typing retains the last-valid V9 canvas until replacement is ready',
+      'rapid valid measurement edits coalesce while the quality gate leaves animation frames live',
+    ].join('|'),
   }),
   Object.freeze({
     label: 'new-model durable pose handoff and duplicate-safe retry',

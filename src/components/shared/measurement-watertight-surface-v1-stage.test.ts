@@ -11,6 +11,7 @@ import {
   measurementSurfaceJointGroupsTopologyMatchesV10,
   measurementSurfaceJointMarkerHitDiameterV9,
   measurementSurfaceJointPointerOwnerV9,
+  measurementSurfaceRotationGizmoOwnsPointerV10,
   measurementSurfaceLiveJointOverlayDatasetV10,
   measurementSurfaceMeasurementGuideDatasetV1,
   measurementSurfaceNearestJointMarkerV1,
@@ -220,6 +221,30 @@ describe('measurement surface selected-joint occlusion v10', () => {
 });
 
 describe('measurement watertight surface joint marker hit target', () => {
+  it('keeps an unrelated rotation ring from stealing another joint position target', () => {
+    expect(
+      measurementSurfaceRotationGizmoOwnsPointerV10({
+        rotationGizmoHit: true,
+        projectedMarkerId: 'left-wrist',
+        selectedGroupId: 'left-shoulder-group',
+      }),
+    ).toBe(false);
+    expect(
+      measurementSurfaceRotationGizmoOwnsPointerV10({
+        rotationGizmoHit: true,
+        projectedMarkerId: 'left-shoulder-group',
+        selectedGroupId: 'left-shoulder-group',
+      }),
+    ).toBe(true);
+    expect(
+      measurementSurfaceRotationGizmoOwnsPointerV10({
+        rotationGizmoHit: true,
+        projectedMarkerId: null,
+        selectedGroupId: 'left-shoulder-group',
+      }),
+    ).toBe(true);
+  });
+
   it('selects the nearest marker within a 56 CSS pixel target and rejects outside clicks', () => {
     expect(MEASUREMENT_SURFACE_JOINT_MARKER_HIT_DIAMETER_CSS_PX_V1).toBe(56);
     const markers = [

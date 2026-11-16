@@ -33,6 +33,7 @@ import {
 } from './model-open-reference-direct-pose-v9';
 import {
   ModelOpenReferencePreview,
+  MODEL_OPEN_REFERENCE_MEASUREMENT_BUILD_DEBOUNCE_MS_V12,
   MODEL_OPEN_REFERENCE_FULL_BODY_JOINT_OVERLAY_BINDING_ERROR_V5,
   createModelOpenReferencePreviewSnapshotOwnerV1,
   modelOpenReferencePreviewBuildFingerprintV1,
@@ -58,6 +59,7 @@ import {
   modelOpenReferenceLiveJointOverlaySignatureV10,
   modelOpenReferenceLivePoseFrameNextV10,
   modelOpenReferenceBodyDisplayOwnershipV11,
+  modelOpenReferenceFullBodyBuildDelayV12,
   modelOpenReferencePoseBlockedMessageV11,
   modelOpenReferenceJointEditorEffectiveModeV5,
   modelOpenReferenceFullBodyRuntimePoseV3,
@@ -320,6 +322,27 @@ describe('model open-reference preview', () => {
         builtFingerprint: null,
       }),
     ).toBe('empty');
+  });
+
+  it('debounces only measurement replacements that already have a last-valid body', () => {
+    expect(
+      modelOpenReferenceFullBodyBuildDelayV12({
+        intent: 'measurement-change',
+        retainsLastValidBody: true,
+      }),
+    ).toBe(MODEL_OPEN_REFERENCE_MEASUREMENT_BUILD_DEBOUNCE_MS_V12);
+    expect(
+      modelOpenReferenceFullBodyBuildDelayV12({
+        intent: 'measurement-change',
+        retainsLastValidBody: false,
+      }),
+    ).toBe(0);
+    expect(
+      modelOpenReferenceFullBodyBuildDelayV12({
+        intent: 'immediate',
+        retainsLastValidBody: true,
+      }),
+    ).toBe(0);
   });
 
   it('maps typed pose blockers to concise feedback without leaking internal blocker IDs', () => {

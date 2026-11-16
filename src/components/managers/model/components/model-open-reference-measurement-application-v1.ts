@@ -8,22 +8,22 @@ import type {
   CanonicalMeasurementKey,
 } from 'lib/cloth/body/measurement-adapter';
 
+import {
+  resolveModelOpenReferenceMeasurementFieldStatusesV1,
+  type ModelOpenReferenceMeasurementFieldStatusV1,
+} from './model-open-reference-measurement-status-contract-v1';
+
 export const MODEL_OPEN_REFERENCE_MEASUREMENT_APPLICATION_V1 =
   'model-open-reference-measurement-application/v1' as const;
-
-const SUPPORTED = new Set<CanonicalMeasurementKey>(MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_KEYS_V1);
-
-const RAW_ONLY_UNSUPPORTED = Object.freeze({
-  BODY_MEASUREMENT_NAME_HIGH_HIP: 'high hip',
-  BODY_MEASUREMENT_NAME_KNEE: 'knee',
-} as const);
 
 export interface ModelOpenReferenceMeasurementApplicationV1 {
   readonly version: typeof MODEL_OPEN_REFERENCE_MEASUREMENT_APPLICATION_V1;
   readonly applied: readonly MeasurementOpenReferenceBetaShapeKeyV1[];
   readonly limitedBySafeRange: readonly MeasurementOpenReferenceBetaShapeKeyV1[];
   readonly notApplied: readonly MeasurementOpenReferenceBetaShapeKeyV1[];
+  readonly modifierOnly: readonly CanonicalMeasurementKey[];
   readonly unsupported: readonly string[];
+  readonly fields: readonly ModelOpenReferenceMeasurementFieldStatusV1[];
   readonly diagnostics: readonly string[];
 }
 
@@ -110,20 +110,29 @@ export function modelOpenReferenceMeasurementApplicationV1(options: {
   });
   const limited = new Set(limitedBySafeRange);
   const notApplied = omitted.filter((key) => !limited.has(key));
-  const unsupported = requested.filter((key) => !SUPPORTED.has(key)).map(label);
-  for (const [rawKey, rawLabel] of Object.entries(RAW_ONLY_UNSUPPORTED)) {
-    const value = options.rawMeasurements[rawKey];
-    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-      unsupported.push(rawLabel);
-    }
-  }
+  const fields = resolveModelOpenReferenceMeasurementFieldStatusesV1({
+    measurements: options.measurements,
+    rawMeasurements: options.rawMeasurements,
+    representedVisualControls: options.beta.representedVisualControls,
+    limitedVisualControls: limitedBySafeRange,
+  });
+  const modifierOnly = fields.flatMap((field) =>
+    field.requested && field.status === 'modifierOnly' && field.source.kind === 'canonical'
+      ? [field.source.key]
+      : [],
+  );
+  const unsupported = fields
+    .filter((field) => field.requested && field.status === 'unsupported')
+    .map(({ label: fieldLabel }) => fieldLabel);
 
   return Object.freeze({
     version: MODEL_OPEN_REFERENCE_MEASUREMENT_APPLICATION_V1,
     applied: Object.freeze([...applied]),
     limitedBySafeRange: Object.freeze([...limitedBySafeRange]),
     notApplied: Object.freeze([...notApplied]),
+    modifierOnly: Object.freeze([...modifierOnly]),
     unsupported: Object.freeze([...new Set(unsupported)]),
+    fields,
     diagnostics: Object.freeze([
       ...options.beta.chestShoulderDiagnostics,
       ...options.beta.fkProxyRuntime.diagnostics.map(
@@ -142,8 +151,14 @@ export function modelOpenReferenceMeasurementApplicationSummaryV1(
 ): ModelOpenReferenceMeasurementApplicationSummaryV1 {
   const limited = value.limitedBySafeRange.map(label);
   const notApplied = value.notApplied.map(label);
+  const modifierOnly = value.modifierOnly.map(label);
   const status =
-    limited.length > 0 || notApplied.length > 0 ? ('partial' as const) : ('ready' as const);
+    limited.length > 0 ||
+    notApplied.length > 0 ||
+    modifierOnly.length > 0 ||
+    value.unsupported.length > 0
+      ? ('partial' as const)
+      : ('ready' as const);
   const primary =
     limited.length > 0
       ? `body shape partial · limited by safe range: ${limited.join(', ')}`
@@ -151,7 +166,8 @@ export function modelOpenReferenceMeasurementApplicationSummaryV1(
         ? 'body shape partial'
         : 'body shape applied';
   const omitted = notApplied.length > 0 ? ` · not applied: ${notApplied.join(', ')}` : '';
+  const modifiers = modifierOnly.length > 0 ? ` · modifier only: ${modifierOnly.join(', ')}` : '';
   const unsupported =
     value.unsupported.length > 0 ? ` · not modeled: ${value.unsupported.join(', ')}` : '';
-  return Object.freeze({ status, text: `${primary}${omitted}${unsupported}` });
+  return Object.freeze({ status, text: `${primary}${omitted}${modifiers}${unsupported}` });
 }

@@ -5,6 +5,7 @@ import {
   type MakeHumanFullBodyJointOverlayContributionV4,
   type MakeHumanFullBodyJointOverlayRotationComponentV4,
 } from './makehuman-full-body-joint-overlay-runtime-v4';
+import { deriveMakeHumanElbowBindNeutralizationV1 } from './makehuman-elbow-bind-neutralization-v1';
 import {
   makeHumanFullBodyLocalFkRotationsV4,
   validateMakeHumanFullBodyLocalFkPoseV4,
@@ -486,12 +487,12 @@ export async function createMakeHumanFullBodyJointOverlayRuntimeV5(options: {
 }): Promise<MakeHumanFullBodyJointOverlayRuntimeResultV5> {
   const pose = validateMakeHumanFullBodyLocalFkPoseV4(options.input);
   if (options.basis.kind === 'base') throw new Error('Joint overlay V5 binding is invalid.');
-  const rotations = makeHumanFullBodyLocalFkRotationsV4(pose, options.basis.kind);
+  const semanticRotations = makeHumanFullBodyLocalFkRotationsV4(pose, options.basis.kind);
   const measurementFingerprint = makeHumanFullBodyJointOverlayMeasurementFingerprintV5(
     options.measurements,
   );
   const bodySourceRevision = exactString(options.sourceRevision, 'sourceRevision');
-  validateBinding({ ...options, rotationCount: rotations.length });
+  validateBinding({ ...options, rotationCount: semanticRotations.length });
   const metadata = MEASUREMENT_OPEN_REFERENCE_DISPLAY_POSE_RUNTIME_METADATA_V1;
   const binding = Object.freeze({
     basisKind: options.basis.kind as Exclude<MakeHumanOpenReferenceBasisV1['kind'], 'base'>,
@@ -543,6 +544,19 @@ export async function createMakeHumanFullBodyJointOverlayRuntimeV5(options: {
       tailsM: anchors.tailsM,
       rollDirections: anchors.rollDirections,
     });
+    const elbowNeutralization = deriveMakeHumanElbowBindNeutralizationV1({
+      bundle: resources.rig,
+      basisKind: snapshot.basisKind,
+      heads: coherentAnchors.headsM,
+      tails: coherentAnchors.tailsM,
+      rollDirections: coherentAnchors.rollDirections,
+      rigSha256: metadata.rigSha256,
+    });
+    const rotations = makeHumanFullBodyLocalFkRotationsV4(
+      pose,
+      options.basis.kind,
+      elbowNeutralization,
+    );
     const overlay = poseMakeHumanCoreRigDisplayOverlayLocalResearchV4({
       bundle: resources.rig,
       basisKind: snapshot.basisKind,
