@@ -374,17 +374,18 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
       blocker: null,
       claims: PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_SAVED_PREPARATION_CLAIMS_V1,
     });
-  } catch {
+  } catch (error) {
     if (signal?.aborted)
       return blockedPreparation(
         request,
         choices.choices,
         blocker('saved-preparation-cancelled', 'Exact saved DXF preparation was cancelled.'),
       );
+    const reason = error instanceof Error && error.message.trim() ? ` ${error.message.trim()}` : '';
     return blockedPreparation(
       request,
       choices.choices,
-      blocker('saved-preparation-failed', 'Exact saved DXF preparation failed.'),
+      blocker('saved-preparation-failed', `Exact saved DXF preparation failed.${reason}`),
     );
   } finally {
     signal?.removeEventListener('abort', cancel);

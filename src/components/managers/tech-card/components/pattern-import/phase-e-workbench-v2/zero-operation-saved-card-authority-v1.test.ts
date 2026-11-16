@@ -279,4 +279,30 @@ describe('zero-operation saved card authority', () => {
     if (result.ok) return;
     expect(result.blocker.code).toBe('saved-preparation-cancelled');
   });
+
+  it('keeps a safe fresh-authority reason when saved preparation throws', async () => {
+    const authority = createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1({
+      orderSizeIds,
+      sizeNameById,
+      readTechCard: vi.fn(async () => {
+        throw new Error('Fresh saved-row authority is unavailable.');
+      }),
+    });
+
+    const result = await preparePatternImportDxfPhaseECadTableZeroOperationSavedV1({
+      techCard: card(),
+      orderSizeIds,
+      sizeNameById,
+      scopeKey: 'TECH_CARD_BOM_PURPOSE_MAIN',
+      sizeToken: 'M',
+      authority,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.blocker).toMatchObject({
+      code: 'saved-preparation-failed',
+      detail: expect.stringMatching(/fresh saved-row authority is unavailable/i),
+    });
+  });
 });
