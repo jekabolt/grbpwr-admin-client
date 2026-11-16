@@ -38,6 +38,10 @@ import { fileURLToPath } from 'node:url';
 
 const ST = 3;
 const RUN = 20;
+const ROBUST = process.argv.includes('--robust-step');
+// Off by default: a fixed cap fails both ways on the data — ≤ 40 mm marks honest godets/overlays
+// (fixture MDF350 J 28), 50 mm turns wide brackets (Selenite I, 00-0…30-32) into 8 false flags.
+const LIM_CAP = Number(process.env.NEST_LIM_CAP ?? Infinity);
 const segD = (p, a, b) => {
   const dx = b[0] - a[0];
   const dy = b[1] - a[1];
@@ -100,7 +104,7 @@ export function judgeFamily(fam) {
     .map((c, i) => ({ c, i }))
     .filter(({ c }) => c.outcome === 'closed' && c.outer?.length > 2);
   for (const { c } of C) verdicts.set(c.size, { kind: 'unjudged' });
-  if (C.length < 3) return { verdicts, step: 0 };
+  if (C.length < 3) return { verdicts, step: 0, oldStep: 0 };
   const S = C.map(({ c }) => resample(c.outer));
   const memo = new Map();
   const sd = (a, b) => {
@@ -122,9 +126,20 @@ export function judgeFamily(fam) {
     );
     steps.push(p95 / (C[k + 1].i - C[k].i));
   }
-  const step = Math.max(1, median(steps));
-  const lim = (a, b) => Math.max(10, 3 * step * Math.abs(C[b].i - C[a].i));
-  const out = (a, b) => runMax(sd(a, b), (v) => v > lim(a, b));
+  // ROBUST (--robust-step): the cells under judgement inflate a plain median (Memoir A H CFL 60.7 mm
+  // with 00–16 cut vs 7.2 once they close), blinding the check where a family is worst: drop the top
+  // quartile of pair steps. NEST_LIM_CAP=<mm> also caps the verdict lim (off: see LIM_CAP).
+  const oldStep = Math.max(1, median(steps));
+  const keep = sorted(steps).slice(0, Math.max(1, Math.ceil(steps.length * 0.75)));
+  const step = ROBUST ? Math.max(1, median(keep)) : oldStep;
+  // The cap binds the verdicts only, never the lo↔hi bracket test: sizes that honestly cross
+  // (godets, overlay skirts) reach 50–80 mm apart two steps out, and capping the bracket there
+  // turns their clean middles to `unjudged` (fixture: MDF350 J 28, MDF373 K 28).
+  const lim = (a, b, cap) => {
+    const v = Math.max(10, 3 * step * Math.abs(C[b].i - C[a].i));
+    return ROBUST && cap ? Math.min(LIM_CAP, v) : v;
+  };
+  const out = (a, b, cap = true) => runMax(sd(a, b), (v) => v > lim(a, b, cap));
   let bad = new Set();
   for (let pass = 0; pass < 2; pass++) {
     const nb = new Set();
@@ -133,7 +148,7 @@ export function judgeFamily(fam) {
       let hi = -1;
       for (let k = j - 1; k >= 0; k--) if (!bad.has(k)) { lo = k; break; } // prettier-ignore
       for (let k = j + 1; k < C.length; k++) if (!bad.has(k)) { hi = k; break; } // prettier-ignore
-      if (lo < 0 || hi < 0 || out(lo, hi) >= RUN) continue;
+      if (lo < 0 || hi < 0 || out(lo, hi, false) >= RUN) continue;
       const trunc = out(lo, j);
       const over = out(j, hi);
       const kind = trunc >= RUN ? (over >= RUN ? 'both' : 'TRUNC') : over >= RUN ? 'OVER' : 'ok';
@@ -145,22 +160,28 @@ export function judgeFamily(fam) {
     }
     bad = nb;
   }
-  return { verdicts, step: +step.toFixed(1) };
+  return { verdicts, step: +step.toFixed(1), oldStep: +oldStep.toFixed(1) };
 }
 
 const isFlag = (v) => v && v.kind !== 'ok' && v.kind !== 'unjudged';
 
+const famSteps = []; // { key, step, oldStep } per family of the AFTER run (the last judged)
 function judgeRun(dir) {
   const cells = new Map(); // key file|piece|size → verdict
+  famSteps.length = 0;
   for (const f of readdirSync(dir).sort()) {
     const p = join(dir, f, 'cells.json');
     if (!existsSync(p)) continue;
     for (const fam of JSON.parse(readFileSync(p, 'utf8'))) {
-      for (const [size, v] of judgeFamily(fam).verdicts) cells.set(`${f}|${fam.label}|${size}`, v);
+      const j = judgeFamily(fam);
+      if (j.step) famSteps.push({ key: `${f}|${fam.label}`, step: j.step, oldStep: j.oldStep });
+      for (const [size, v] of j.verdicts) cells.set(`${f}|${fam.label}|${size}`, v);
     }
   }
   return cells;
 }
+/** --robust-step: families whose plain step is > 2× the robust one (the old reading was blind). */
+const inflated = () => famSteps.filter((f) => f.oldStep > 2 * f.step);
 
 function totals(cells) {
   let flags = 0;
@@ -191,13 +212,14 @@ if (args[0] === '--fixture') {
   const fx = JSON.parse(readFileSync(resolve(here, 'nest-check.fixture.json'), 'utf8'));
   let bad = 0;
   for (const t of fx.cases) {
-    const v = judgeFamily(fx.families[t.family]).verdicts.get(t.size) ?? { kind: 'absent' };
+    const jf = judgeFamily(fx.families[t.family]);
+    const v = jf.verdicts.get(t.size) ?? { kind: 'absent' };
     // Exact verdict: a clean case drifting to `unjudged` (brackets broken) or a real one flipping
     // TRUNC ↔ OVER (blame moved to the neighbour) is a miss.
     const ok = t.expect === 'undecided' || v.kind === t.expect;
     if (!ok) bad++;
     console.log(
-      `${ok ? 'ok  ' : 'MISS'} expect ${t.expect.padEnd(9)} got ${v.kind.padEnd(8)} ${t.family} · ${t.size}  ${t.note ?? ''}`,
+      `${ok ? 'ok  ' : 'MISS'} expect ${t.expect.padEnd(9)} got ${v.kind.padEnd(8)} ${t.family} · ${t.size}  ${t.note ?? ''}${ok ? '' : `  [step ${jf.oldStep} → ${jf.step}]`}`,
     );
   }
   console.log(`${fx.cases.length - bad} / ${fx.cases.length} as labelled`);
@@ -209,19 +231,30 @@ if (!dir) {
   console.error('usage: nest-check.mjs <run-dir> [--before <run-dir>] [--out f.json] | --fixture');
   process.exit(2);
 }
+const prevRun = before ? judgeRun(before) : null;
 const after = judgeRun(dir);
 const tA = totals(after);
+const mode = ROBUST ? `robust step, lim cap ${LIM_CAP} mm` : 'plain step';
+if (ROBUST)
+  for (const f of inflated())
+    console.log(`inflated  ${f.key.replace('|', ' | ')}  step ${f.oldStep} → ${f.step}`);
 if (!before) {
-  console.log(`flags ${tA.flags} / judged ${tA.judged} / unjudged ${tA.unjudged}   (${BLIND})`);
+  console.log(
+    `flags ${tA.flags} / judged ${tA.judged} / unjudged ${tA.unjudged}   [${mode}] (${BLIND})`,
+  );
   const rows = [...after].filter(([, v]) => isFlag(v));
   for (const [k, v] of rows) console.log(line(k, v));
   if (outFile)
     writeFileSync(
       outFile,
-      JSON.stringify({ totals: tA, flags: rows.map(([k, v]) => ({ key: k, ...v })) }, null, 1),
+      JSON.stringify(
+        { mode, totals: tA, steps: famSteps, flags: rows.map(([k, v]) => ({ key: k, ...v })) },
+        null,
+        1,
+      ),
     );
 } else {
-  const prev = judgeRun(before);
+  const prev = prevRun;
   const tB = totals(prev);
   const diff = { new: [], cleared: [], unjudged: [], unchanged: [] };
   for (const k of new Set([...prev.keys(), ...after.keys()])) {
@@ -234,7 +267,7 @@ if (!before) {
   }
   console.log(`before flags ${tB.flags} / judged ${tB.judged} / unjudged ${tB.unjudged}`);
   console.log(
-    `after  flags ${tA.flags} / judged ${tA.judged} / unjudged ${tA.unjudged}   (${BLIND})`,
+    `after  flags ${tA.flags} / judged ${tA.judged} / unjudged ${tA.unjudged}   [${mode}] (${BLIND})`,
   );
   console.log(
     `new ${diff.new.length} (picture each) · cleared ${diff.cleared.length} (picture each) · cleared-by-unjudged ${diff.unjudged.length} (NOT a fix) · unchanged ${diff.unchanged.length}`,
