@@ -246,19 +246,15 @@ describe('MakeHuman third-party asset manifest v1', () => {
 
       expect(asset.license.identifier).toBe('CC0-1.0');
       expect(asset.license.reason.length).toBeGreaterThan(0);
-      if (asset.license.receiptStatus === 'present') {
-        expect(asset.license.receiptPath).not.toBeNull();
-        const receipt = receiptById.get(asset.license.receiptId);
-        expect(receipt, asset.license.receiptId).toBeDefined();
-        expect(receipt?.repository).toBe(asset.upstream.repository);
-        expect(receipt?.commit).toBe(asset.upstream.commit);
-        expect(receipt?.files.map(({ snapshotPath }) => snapshotPath)).toContain(
-          asset.license.receiptPath,
-        );
-      } else {
-        expect(asset.license.receiptId).toBe('');
-        expect(asset.license.receiptPath).toBeNull();
-      }
+      expect(asset.license.receiptStatus).toBe('present');
+      expect(asset.license.receiptPath).not.toBeNull();
+      const receipt = receiptById.get(asset.license.receiptId);
+      expect(receipt, asset.license.receiptId).toBeDefined();
+      expect(receipt?.repository).toBe(asset.upstream.repository);
+      expect(receipt?.commit).toBe(asset.upstream.commit);
+      expect(receipt?.files.map(({ snapshotPath }) => snapshotPath)).toContain(
+        asset.license.receiptPath,
+      );
 
       expect(asset.generator.reason.length).toBeGreaterThan(0);
       if (asset.generator.status === 'present') {
@@ -273,14 +269,7 @@ describe('MakeHuman third-party asset manifest v1', () => {
       }
     }
 
-    expect(
-      manifest.assets
-        .filter(({ id }) => id !== 'makehuman-female-bust-deltas-v1')
-        .every(({ license }) => license.receiptStatus === 'present'),
-    ).toBe(true);
-    expect(byId.get('makehuman-female-bust-deltas-v1')?.license.receiptStatus).toBe(
-      'missingEvidence',
-    );
+    expect(manifest.assets.every(({ license }) => license.receiptStatus === 'present')).toBe(true);
     expect(
       manifest.assets
         .filter(({ id }) => id !== 'makehuman-female-bust-deltas-v1')

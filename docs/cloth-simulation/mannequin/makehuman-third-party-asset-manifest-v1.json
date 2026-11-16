@@ -399,10 +399,10 @@
       },
       "license": {
         "identifier": "CC0-1.0",
-        "receiptStatus": "missingEvidence",
-        "receiptId": "",
-        "receiptPath": null,
-        "reason": "The target header says the asset was explicitly released as CC0, but no separate receipt for this fetched source is committed."
+        "receiptStatus": "present",
+        "receiptId": "makehuman-assets-cc0-1f508f6083b2f823dab15de924b3bde72e08d77c",
+        "receiptPath": "docs/cloth-simulation/mannequin/makehuman-license-1f508f6083b2f823dab15de924b3bde72e08d77c.md",
+        "reason": "The pinned upstream statement defines targets as bundled assets released under CC0 1.0 Universal; the breast target is fetched from the same pinned commit, and its own header also states CC0."
       },
       "claimBoundary": {
         "runtimeAdmission": "bounded-visual-proxy",
