@@ -1032,11 +1032,15 @@ test('direct ankle and wrist drags retain a non-crossing last-valid pose across 
   });
   await settlePointerOnEmptyCanvas(page, canvas);
   const armBefore = await canvas.screenshot();
+  // Aim between the feet at ankle height: the arm must cross the leg at any canvas scale,
+  // while a marker-edge pixel on the ankle itself can leave the wrist beside the thigh.
+  const armBox = await canvas.boundingBox();
+  expect(armBox).not.toBeNull();
   const armDrag = await attemptExtremePositionDrag({
     page,
     canvas,
     start: wristStart,
-    target: ankleCollisionTarget,
+    target: { x: armBox!.x + armBox!.width / 2, y: ankleCollisionTarget.y },
     expectedBlocker: /arm-overlap|leg-overlap/u,
   });
   await settlePointerOnEmptyCanvas(page, canvas);
