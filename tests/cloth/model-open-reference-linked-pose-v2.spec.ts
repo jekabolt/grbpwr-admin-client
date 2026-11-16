@@ -544,16 +544,16 @@ test('keeps exactly one on-demand mannequin active across real Models cards', as
   await expect(page.getByTestId('measurement-watertight-surface-v1-canvas')).toHaveCount(0);
   expect(authenticatedPoseAssetFetches(requests)).toEqual([]);
 
-  const alexToggle = page.getByRole('button', { name: '3D preview for Alex', exact: true });
+  const alexToggle = page.getByRole('button', { name: 'mannequin preview for Alex', exact: true });
   await expect(alexToggle).toHaveAttribute('aria-pressed', 'false');
-  await expect(alexToggle).toHaveText('3D');
+  await expect(alexToggle).toHaveText('mannequin');
   const toggleBox = await alexToggle.boundingBox();
   expect(toggleBox).not.toBeNull();
   expect(toggleBox!.width).toBeGreaterThanOrEqual(44);
   expect(toggleBox!.height).toBeGreaterThanOrEqual(44);
   await alexToggle.click();
   await expect(alexToggle).toHaveAttribute('aria-pressed', 'true');
-  await expect(alexToggle).toHaveText('2D');
+  await expect(alexToggle).toHaveText('photo');
   const preview = page.getByTestId('model-card-mannequin-preview');
   await expect(preview).toHaveCount(1);
   await expect(preview).toHaveAttribute('data-model-id', '1');
@@ -572,7 +572,10 @@ test('keeps exactly one on-demand mannequin active across real Models cards', as
   expect(await readWebGlContextProbe(page)).toMatchObject({ created: 1, live: 1, maxLive: 1 });
   await firstCanvas.evaluate((element) => element.setAttribute('data-model-card-marker', 'alex'));
 
-  const morganToggle = page.getByRole('button', { name: '3D preview for Morgan', exact: true });
+  const morganToggle = page.getByRole('button', {
+    name: 'mannequin preview for Morgan',
+    exact: true,
+  });
   await morganToggle.click();
   await expect(morganToggle).toHaveAttribute('aria-pressed', 'true');
   await expect(alexToggle).toHaveAttribute('aria-pressed', 'false');
@@ -636,7 +639,7 @@ test('renders the saved pose read-only in the on-demand Models card', async ({
   await expect(page.getByTestId('model-card-mannequin-preview')).toHaveCount(0);
   expect(poseGets).toBe(0);
 
-  await page.getByRole('button', { name: '3D preview for Alex', exact: true }).click();
+  await page.getByRole('button', { name: 'mannequin preview for Alex', exact: true }).click();
   const preview = page.getByTestId('model-card-mannequin-preview');
   await expect(preview).toHaveAttribute('data-pose-resource-status', 'found');
   await expect(preview).toHaveAttribute('data-pose-display', 'saved');
@@ -692,20 +695,23 @@ test('fails closed for duplicate and missing Models-card ids', async ({ page }, 
 
   await expect(
     page.getByRole('button', {
-      name: '3D preview unavailable for Duplicate A: duplicate model ID',
+      name: 'mannequin unavailable for Duplicate A: duplicate model ID',
     }),
   ).toBeDisabled();
   await expect(
     page.getByRole('button', {
-      name: '3D preview unavailable for Duplicate B: duplicate model ID',
+      name: 'mannequin unavailable for Duplicate B: duplicate model ID',
     }),
   ).toBeDisabled();
   await expect(
-    page.getByRole('button', { name: '3D preview unavailable for Missing: invalid model ID' }),
+    page.getByRole('button', { name: 'mannequin unavailable for Missing: invalid model ID' }),
   ).toBeDisabled();
   await expect(page.getByTestId('model-card-mannequin-preview')).toHaveCount(0);
 
-  const validToggle = page.getByRole('button', { name: '3D preview for Valid', exact: true });
+  const validToggle = page.getByRole('button', {
+    name: 'mannequin preview for Valid',
+    exact: true,
+  });
   await validToggle.click();
   await expect(validToggle).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('model-card-mannequin-preview')).toHaveCount(1);
@@ -715,7 +721,7 @@ test('fails closed for duplicate and missing Models-card ids', async ({ page }, 
   );
 });
 
-test('keeps the Models-card 3D toggle touch-safe on mobile', async ({ page }, testInfo) => {
+test('keeps the Models-card mannequin toggle touch-safe on mobile', async ({ page }, testInfo) => {
   mobileOnly(testInfo);
   await page.route('**/api/admin/**', async (route) => {
     const url = new URL(route.request().url());
@@ -730,7 +736,7 @@ test('keeps the Models-card 3D toggle touch-safe on mobile', async ({ page }, te
   });
 
   await page.goto('/__model-card-list-preview-v1');
-  const toggle = page.getByRole('button', { name: '3D preview for Alex', exact: true });
+  const toggle = page.getByRole('button', { name: 'mannequin preview for Alex', exact: true });
   const box = await toggle.boundingBox();
   expect(box).not.toBeNull();
   expect(box!.width).toBeGreaterThanOrEqual(44);

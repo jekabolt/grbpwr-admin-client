@@ -451,7 +451,6 @@ function ModelFormRuntime({
                   ) : (
                     <MeasurementsQuiz
                       showAudit={isEditMode}
-                      preview={renderBodyPreview(true)}
                       onComplete={() => setMeasurementEntryMode('table')}
                     />
                   )}
@@ -471,7 +470,8 @@ function ModelFormRuntime({
           <div
             ref={saveBarRef}
             className={cn(
-              'fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2',
+              'fixed inset-x-0 bottom-0 z-40 items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2',
+              measurementEntryMode === 'guided' ? 'hidden md:flex' : 'flex',
               typingOnPhone && 'hidden',
             )}
           >

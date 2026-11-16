@@ -248,7 +248,7 @@ describe('receipt 83 model-form mannequin binding audit v1', () => {
     );
   });
 
-  it('places the production preview inside the same React Hook Form without mutation dependencies', () => {
+  it('places the table preview and guided quiz inside the same React Hook Form without mutation dependencies', () => {
     const formSource = source('src/components/managers/model/components/index.tsx');
     const previewSource = source(
       'src/components/managers/model/components/model-open-reference-preview.tsx',
@@ -257,9 +257,7 @@ describe('receipt 83 model-form mannequin binding audit v1', () => {
 
     const formOwner = formSource.indexOf('<Form {...form}>');
     expect(formOwner).toBeGreaterThan(-1);
-    expect(formOwner).toBeLessThan(
-      formSource.indexOf('preview={renderBodyPreview(true)}', formOwner),
-    );
+    expect(formOwner).toBeLessThan(formSource.indexOf('<MeasurementsQuiz', formOwner));
     expect(formOwner).toBeLessThan(
       formSource.indexOf(
         "<Section title='body preview'>{renderBodyPreview(false)}</Section>",
@@ -301,16 +299,21 @@ describe('receipt 83 model-form mannequin binding audit v1', () => {
     expect(directControlSource).toContain('nextApplied: props.appliedPose');
   });
 
-  it('uses the live mannequin as the measurement guide instead of a separate pictogram', () => {
+  it('uses gender-aware static guides in the quiz and keeps the live mannequin in table mode', () => {
     const formSource = source('src/components/managers/model/components/index.tsx');
+    const fieldsSource = source('src/components/managers/model/components/measurements-fields.tsx');
     const focusSource = source(
       'src/components/managers/model/components/sheet-measurement-focus.tsx',
     );
 
     expect(formSource).not.toContain('SheetMeasurementDiagram');
     expect(focusSource).not.toContain('MeasurementPictogram');
+    expect(fieldsSource).toContain('<StaticMeasurementGuide');
+    expect(fieldsSource).toContain('measurementGuideFemaleSrc');
+    expect(fieldsSource).toContain('measurementGuideMaleSrc');
+    expect(fieldsSource).toContain("useWatch<ModelFormData>({ name: 'gender' })");
     expect(formSource).toContain(
-      'activeMeasurementName: (active as common_BodyMeasurementName) || undefined',
+      "<Section title='body preview'>{renderBodyPreview(false)}</Section>",
     );
     expect(formSource).toContain('<SheetMeasurementMobileStrip />');
     expect(focusSource).toContain('{measurementLabel(focused)}');

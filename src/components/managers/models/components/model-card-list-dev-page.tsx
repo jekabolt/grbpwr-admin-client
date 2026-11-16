@@ -12,7 +12,7 @@ export function ModelCardListDevPage() {
       >
         <div className='mx-auto flex w-full max-w-5xl flex-col gap-gutter'>
           <Text component='h1' size='large' variant='uppercase'>
-            model card 3D preview fixture
+            model card mannequin preview fixture
           </Text>
           <ModelCardList />
         </div>

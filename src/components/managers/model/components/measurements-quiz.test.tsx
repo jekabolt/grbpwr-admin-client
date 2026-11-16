@@ -32,10 +32,7 @@ function Harness() {
       <MeasurementUnitProvider>
         <SheetMeasurementFocusProvider>
           <MeasurementsHeaderActions mode='guided' onModeChange={vi.fn()} />
-          <MeasurementsQuiz
-            preview={<div data-testid='preview-fixture'>mannequin</div>}
-            onComplete={vi.fn()}
-          />
+          <MeasurementsQuiz onComplete={vi.fn()} />
         </SheetMeasurementFocusProvider>
       </MeasurementUnitProvider>
     </Form>
@@ -50,11 +47,13 @@ describe('guided model measurements', () => {
     expect(preferredMeasurementEntryModeV1(undefined)).toBe('table');
   });
 
-  it('renders one real RHF measurement field with mannequin, progress and protocol context', () => {
+  it('renders one real RHF measurement field with a static marker and progress', () => {
     const html = renderToStaticMarkup(<Harness />);
 
     expect(html).toContain('data-testid="measurements-guided-entry"');
-    expect(html).toContain('data-testid="preview-fixture"');
+    expect(html).toContain('data-testid="static-measurement-guide"');
+    expect(html).toContain('data-testid="static-measurement-marker"');
+    expect(html).toContain('data-guide-gender="neutral"');
     expect(html).toContain('aria-label="measurement entry view"');
     expect(html).toContain('aria-checked="true"');
     expect(html).toContain('guided');
@@ -62,12 +61,13 @@ describe('guided model measurements', () => {
     expect(html).toContain('chest');
     expect(html).toContain('1/34 · 2 filled');
     expect(html).toContain('value · mm');
-    expect(html).toContain('two independent readings');
+    expect(html).not.toContain('Horizontal torso circumference');
+    expect(html).not.toContain('two independent readings');
+    expect(html).not.toContain('follow the written measurement protocol');
     expect(html.match(/data-model-measurement=/g)).toHaveLength(1);
     expect(html).toContain('data-model-measurement="BODY_MEASUREMENT_NAME_CHEST"');
     expect(html).toContain('value="920"');
-    expect(html).toContain('data-testid="measurement-guided-reference-body-status"');
-    expect(html).toContain('data-reference-required-missing="5"');
+    expect(html).not.toContain('data-testid="measurement-guided-reference-body-status"');
   });
 
   it('uses an explicit display-only reference until captured required values replace it', () => {
