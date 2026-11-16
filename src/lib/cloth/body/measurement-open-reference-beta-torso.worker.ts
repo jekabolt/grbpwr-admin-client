@@ -26,6 +26,7 @@ context.onmessage = async (
       sourcePositionsM: request.options.sourcePositionsM,
       triangleIndices: request.options.triangleIndices,
       measurements: request.options.measurements,
+      highHipCircumferenceMm: request.options.highHipCircumferenceMm,
       torsoBundle,
     });
     const response: MeasurementOpenReferenceBetaTorsoWorkerResponseV1 = {
