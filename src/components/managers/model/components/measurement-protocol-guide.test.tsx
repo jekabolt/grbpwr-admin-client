@@ -80,11 +80,11 @@ describe('measurement protocol v1 guide', () => {
   it.each([
     ['create', false],
     ['edit', true],
-  ])('shows the protocol disclosure and evidence caveat in %s mode', (_mode, showAudit) => {
+  ])('does not mount protocol copy in the %s measurement entry', (_mode, showAudit) => {
     const html = renderToStaticMarkup(<MeasurementsHarness showAudit={showAudit} />);
 
-    expect(html).toContain('protocol v1.1 · readings unrecorded');
-    expect(html).toContain('data-measurement-protocol-guide');
-    expect(html).toContain('raw readings or operator identity are not stored');
+    expect(html).not.toContain('protocol v1.1 · readings unrecorded');
+    expect(html).not.toContain('data-measurement-protocol-guide');
+    expect(html).not.toContain('raw readings or operator identity are not stored');
   });
 });

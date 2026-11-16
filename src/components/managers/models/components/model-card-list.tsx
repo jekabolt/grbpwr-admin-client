@@ -202,8 +202,8 @@ export function ModelCardList() {
                     size='xs'
                     aria-label={
                       id === null
-                        ? `3D preview unavailable for ${label}: ${idIssueLabel}`
-                        : `3D preview for ${label}`
+                        ? `mannequin unavailable for ${label}: ${idIssueLabel}`
+                        : `mannequin preview for ${label}`
                     }
                     aria-pressed={showing3d}
                     disabled={id === null}
@@ -217,7 +217,7 @@ export function ModelCardList() {
                       if (id !== null) setActivePreviewModelId(showing3d ? null : id);
                     }}
                   >
-                    {showing3d ? '2D' : '3D'}
+                    {showing3d ? 'photo' : 'mannequin'}
                   </Button>
                 </div>
                 {canEdit && id !== null && (

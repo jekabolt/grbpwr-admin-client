@@ -4,7 +4,6 @@ import {
   FocusEvent,
   KeyboardEvent,
   PointerEvent as ReactPointerEvent,
-  type ReactNode,
   useEffect,
   useRef,
   useState,
@@ -14,24 +13,33 @@ import {
   Button,
   CalloutBox,
   GroupLabel,
-  HeaderNote,
   HeaderWarnings,
   Input,
   Text,
   type HeaderWarning,
   ViewSwitch,
 } from 'ui';
-import { getBodyMeasurementProtocolFieldV1 } from 'lib/cloth/body/measurement-protocol-v1';
-import { resolveModelGuidedMeasurementPreviewInputV1 } from './model-guided-measurement-preview-input-v1';
+import measurementGuideFemaleBackSrc from '@/assets/mannequin/measurement-guide-female-back.png';
+import measurementGuideFemaleSideSrc from '@/assets/mannequin/measurement-guide-female-side.png';
+import measurementGuideFemaleSrc from '@/assets/mannequin/measurement-guide-female.png';
+import measurementGuideMaleBackSrc from '@/assets/mannequin/measurement-guide-male-back.png';
+import measurementGuideMaleSideSrc from '@/assets/mannequin/measurement-guide-male-side.png';
+import measurementGuideMaleSrc from '@/assets/mannequin/measurement-guide-male.png';
+import measurementGuideNeutralBackSrc from '@/assets/mannequin/measurement-guide-neutral-back.png';
+import measurementGuideNeutralSideSrc from '@/assets/mannequin/measurement-guide-neutral-side.png';
+import measurementGuideNeutralSrc from '@/assets/mannequin/measurement-guide-neutral.png';
 import {
   auditModelMeasurementFieldsV1,
   EMPTY_MODEL_MEASUREMENT_FIELD_AUDIT_V1,
   type ModelMeasurementFieldAuditV1,
   type ModelMeasurementFieldFindingV1,
 } from './model-measurement-field-audit';
-import { MeasurementProtocolGuide } from './measurement-protocol-guide';
 import { BODY_MEASUREMENT_GROUPS } from './measurements';
 import { ModelFormData } from './schema';
+import {
+  StaticMeasurementGuide,
+  type StaticMeasurementGuideSourcesV1,
+} from './static-measurement-guide';
 import {
   measurementLabel,
   MOBILE_STRIP_PX,
@@ -61,6 +69,24 @@ const MEASUREMENT_ENTRY_MODE_OPTIONS = [
     hint: 'All measurement fields together for rapid entry and review.',
   },
 ] as const;
+
+const STATIC_MEASUREMENT_GUIDE_SOURCES_V1: StaticMeasurementGuideSourcesV1 = {
+  female: {
+    front: measurementGuideFemaleSrc,
+    back: measurementGuideFemaleBackSrc,
+    side: measurementGuideFemaleSideSrc,
+  },
+  male: {
+    front: measurementGuideMaleSrc,
+    back: measurementGuideMaleBackSrc,
+    side: measurementGuideMaleSideSrc,
+  },
+  neutral: {
+    front: measurementGuideNeutralSrc,
+    back: measurementGuideNeutralBackSrc,
+    side: measurementGuideNeutralSideSrc,
+  },
+};
 
 type MeasurementValues = Record<string, number | undefined>;
 
@@ -316,13 +342,6 @@ export function MeasurementsHeaderActions({
         />
       ) : null}
       <HeaderWarnings items={warnings} countOnly />
-      <HeaderNote
-        tone='attention'
-        className='hidden sm:inline'
-        title='editing a value clears its source/protocol metadata; repeated readings are not stored'
-      >
-        protocol v1.1 · readings unrecorded
-      </HeaderNote>
       <MeasurementUnitSwitch />
     </div>
   );
@@ -375,7 +394,6 @@ export function MeasurementsFields({ showAudit = false }: { showAudit?: boolean 
   return (
     <div className='flex flex-col gap-4'>
       {showAudit && <MeasurementAuditStatus audit={audit} />}
-      <MeasurementProtocolGuide />
       <div className='grid grid-cols-2 gap-x-4 gap-y-4 md:grid-cols-3 xl:grid-cols-5'>
         {BODY_MEASUREMENT_GROUPS.map((group) => (
           <MeasurementGroup
@@ -401,21 +419,15 @@ function measurementGroupLabel(name: string): string {
   return shortMeasurementGroup(group?.title ?? 'measurement');
 }
 
-function formatQuizTolerance(toleranceMm: number, unit: MeasurementUnit): string {
-  return `${displayMeasurementValue(toleranceMm, unit)} ${unit}`;
-}
-
 /**
  * Guided measurement entry keeps exactly one RHF-controlled field mounted. Switching to the table
  * remounts the same field names against the same form owner, so values, dirty state and validation
  * survive the view change without a second draft store.
  */
 export function MeasurementsQuiz({
-  preview,
   showAudit = false,
   onComplete,
 }: {
-  preview: ReactNode;
   showAudit?: boolean;
   onComplete: () => void;
 }) {
@@ -423,6 +435,7 @@ export function MeasurementsQuiz({
   const audit = useMeasurementFieldAudit(showAudit);
   const { selected, setFocus } = useSheetMeasurementFocus();
   const { unit } = useMeasurementUnit();
+  const gender = useWatch<ModelFormData>({ name: 'gender' }) as string | undefined;
   const [activeIndex, setActiveIndex] = useState(() =>
     Math.max(
       0,
@@ -432,17 +445,12 @@ export function MeasurementsQuiz({
   const measurement = MODEL_MEASUREMENTS[activeIndex] ?? MODEL_MEASUREMENTS[0];
   const name = measurement?.name as string;
   const findings = audit.byMeasurementName[name] ?? [];
-  const field = getBodyMeasurementProtocolFieldV1(name);
   const filled = filledCount(
     values,
     MODEL_MEASUREMENTS.map((item) => item.name as string),
   );
   const atFirst = activeIndex === 0;
   const atLast = activeIndex === MODEL_MEASUREMENTS.length - 1;
-  const guidedPreview = resolveModelGuidedMeasurementPreviewInputV1({
-    gender: undefined,
-    measurements: values,
-  });
 
   useEffect(() => {
     const selectedIndex = MODEL_MEASUREMENTS.findIndex((candidate) => candidate.name === selected);
@@ -468,10 +476,14 @@ export function MeasurementsQuiz({
     >
       <div className='flex min-h-0 flex-1 flex-col md:grid md:grid-cols-[minmax(0,1.6fr)_minmax(16rem,0.7fr)]'>
         <div
-          className='min-h-0 flex-1 bg-pageBg md:border-r md:border-borderColor'
+          className='flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-pageBg p-2 md:border-r md:border-borderColor md:p-4'
           data-testid='measurements-guided-preview'
         >
-          {preview}
+          <StaticMeasurementGuide
+            measurementName={name}
+            gender={gender}
+            sources={STATIC_MEASUREMENT_GUIDE_SOURCES_V1}
+          />
         </div>
 
         <div className='flex shrink-0 flex-col gap-2 border-t border-borderColor bg-bgColor p-3 md:min-h-0 md:border-t-0 md:p-4'>
@@ -505,41 +517,6 @@ export function MeasurementsQuiz({
             />
             <MeasurementFindingList name={name} findings={findings} />
           </div>
-
-          {field ? (
-            <div
-              className='min-h-0 border-t border-hairline pt-2'
-              data-testid='measurement-guided-protocol'
-            >
-              <Text component='p' size='micro' className='leading-tight text-textColor'>
-                {field.shortDefinition}
-              </Text>
-              <Text component='p' size='nano' variant='label' className='mt-1 leading-tight'>
-                repeat tolerance {formatQuizTolerance(field.repeatToleranceMm, unit)} · two
-                independent readings
-              </Text>
-            </div>
-          ) : null}
-
-          <Text component='p' size='nano' variant='label' className='leading-tight md:mt-auto'>
-            when shown, the highlighted path is a visual guide only · follow the written measurement
-            protocol
-          </Text>
-
-          {guidedPreview.usesReferenceBody ? (
-            <Text
-              component='p'
-              size='nano'
-              variant='label'
-              className='leading-tight'
-              role='status'
-              data-testid='measurement-guided-reference-body-status'
-              data-reference-required-missing={guidedPreview.missingRequiredNames.length}
-            >
-              reference body · {guidedPreview.missingRequiredNames.length} required measurements
-              missing · entered values replace the reference live
-            </Text>
-          ) : null}
 
           <div className='mt-auto grid grid-cols-2 gap-2 border-t border-borderColor pt-2'>
             <Button
