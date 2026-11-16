@@ -862,3 +862,66 @@ neighbour's line when its area still sits between the neighbours. Should a G8 pl
 - **Next (critic-approved):** `MOTIF_DIR_FREE` — also compute the reversed walk's signature (on
   `sig.rev`, seen by legend-id only) and score each key sample as max over walks, uniformly for all
   keys.
+
+## 16 Nov 2026 — TICK_THROUGH / TICK_ORDER (end ticks that are not ends) — ACCEPTED (default on)
+
+- **Trigger:** Memoir A H CENTER FRONT LOWER and BACK CENTER: per-size waist marks are short lines
+  across the piece, ranked into a ladder, and `endTicks` (`pieces/ticks.ts`) cut sizes at them —
+  size 0 closed as the upper third of its piece (closed, wrong; `notClosed` blind).
+- **TICK_THROUGH (bisect `TICK_THROUGH_OFF=1`):** an end tick of size r is where r's own outline stops; when r's
+  own line runs on past the tick on both sides at an end, it is a mark across r's piece, not an end.
+  Quorum over the ladder (f3: an ANY rule let a waistband's own CB / side marks veto its real ends):
+  `veto = self || (thru ≥ 2 && thru > stops)` over rungs of firm rank.
+- **TICK_ORDER (bisect `TICK_ORDER_OFF=1`):** the ladder's size order must put the larger sizes on the side r's
+  own lines run to (D3 trend); a nest's side edges step the other way at one of its edges (Memoir A
+  D/K) — order against sides: no end.
+- **Strap trap (Memoir B L SHOULDER, MDF364):** first milestone (`m-tickord`) closed sizes 00–8 on
+  size 10's rung (457.2 mm; flags-off 400…447.6) — closed → WRONG. From `rows.json`: tick c1898 r0's
+  own strap side stops on the rung, but a pen-0 line of the NEXT piece (x≈911, y 95→1045) ran 14 mm
+  past the end, inside the −18 mm end window → "through". Tick c1912 r5: its own side overshoots the
+  rung by 3.5 mm (> PAST_MM 3) → "through". A first fix (ignore lines ≥ 2 ranks' rungs end on:
+  "shared") changed nothing — the line was not shared — and was removed.
+- **Fix (default; `TICK_THROUGH_NEAREST_OFF=1` = old union rule), after f3's critique:** at each end
+  of the tick, only rank r's chains that REACH the tick's line (|h| ≤ PAST_MM 3) speak, as one group:
+  every such chain whose outward distance along the tick is within GROUP_MM 1.5 of the nearest (a
+  side split in two at a T-junction is one line). The group's ARC (mm of line more than PAST_MM
+  across) is summed per side: 'through' when both sides carry > THRU_MM 6 (a stroke's end
+  overshooting a corner is short; a side that crosses is long), 'stops' when any arc, and no r line
+  on the tick's line = 'none' (abstain — a far line's 'stops' is a quorum vote too). A first
+  "nearest line + 6 mm overshoot" version was replaced by this one before its milestone.
+- **Measured (TICK_THROUGH + TICK_ORDER, par 1):** Memoir B L SHOULDER 00–8 back to 400…447.6;
+  Memoir A 222 closed (baseline 214), identical to the old rule: H 0/00/8/12/16 moved 135–145 mm =
+  the full piece instead of the part above the waist mark (pictures), +8 gains. Kalla vs flags-off:
+  0 loss, +1 gain, E TOP FRONT 0 moved 230 mm (was cut at an internal mark); the old rule's losses
+  P 00 / Q 6 / Q 14 are gone.
+- **Flags-off control (`ctl-off`, 9 files) vs `baseline-set40`:** only Ophelia D 18 and Taos G 0 —
+  the accepted CONT_ORDER refusals. The earlier "Reims M LOWER SKIRT moved 1800 mm", "Kalla G ±6",
+  "Fawn L changed" were a `media-diff.mjs` bug (pieces matched by label; Reims has two «M - LOWER
+  SKIRT», Fawn three «L - 2XL») — fixed: the n-th piece with a label matches the n-th.
+- **Tooling:** `SHOT_ROWS=1` dxf-shot writes `<file>/rows.json` (the sizes step's rows: chains,
+  byRank, common); `media-diff.mjs` draws `-sheet.png` (whole sheet, own rank blue, common green,
+  closed outline red) when both runs have it, and `--sheet` for one size.
+- **Milestone `m-group` (set40, par 2, group/arc rule, both flags) — ACCEPTED (f3 agreed):**
+  - vs flags-off re-shoot `base-rows`: closed 3664 → 3673, loss 0, gain 9, moved 9 (Memoir A H
+    135–145 mm, Kalla E 0 230 mm, Memoir A K ≤ 9 mm). `nest-check --before base-rows` and
+    `--before m-tickord`: new 0 · cleared 0 · cleared-by-unjudged 0.
+  - vs `m-tickord` (old union rule): 3675 → 3673, loss 5, gain 3; Memoir B L SHOULDER 00–8 restored.
+    All 31 veto flips are true → false; `TICKGROUP` (a split-side group deciding) 0 lines.
+  - The 5 cells lost vs `m-tickord` were the old rule's luck, all open again as in flags-off:
+    Verona H BOW CENTER 0/2/6 — the "tick" c830 r0 is the bottom edge of size 0's 55×63 mm H
+    rectangle; the old veto came from another piece's line 23 mm below (the strap trap, right way
+    round). Verona A 32 and Kalla Q 30 — 'through' from a corner overshoot 1–2 mm past PAST_MM (Kalla
+    c5367/c5863/c2524 hp 3.8–4.5, Verona c1359/c4290 hn 5.0, arc ≤ 2.3 mm); the same noise gave the
+    gains Kalla P 00 / Q 6 / Q 14.
+  - Dead end: "a tick already ranked r with a 'stops' end is r's closing edge, not a mark → no knife"
+    (A'). On 4 files 62 of 86 accepted ticks are exactly that (Memoir B strap, Memoir A H — the
+    helpful knives): ranking runs before ticks, so a tick usually IS r's own end edge.
+- **Queued:**
+  - Verona H 0/2/6: the knife (side line to side line + spread) runs past r0's corner — 833 ends
+    5.2 mm short of the edge, beyond wallBridges' 3 mm — to size 7's side at x 1121, and the fill
+    leaks onto the ring. With no knife (`m-tickord`) the cell closed from the fill (`from: class`, no
+    repair, no grade draw); WHAT closed that 5.2 mm corner then is UNIDENTIFIED (corners EXTEND or a
+    bridge — not traced).
+  - Not a threshold to tune (f3): for a 'stops' end within 3 mm of PAST_MM, let the knife's outcome
+    decide — knife, fill, area on the grade, else veto. The same try-and-check would catch Verona H
+    (the leak's area is off the grade). Any cutoff between 3 and 6 mm only moves the coin.

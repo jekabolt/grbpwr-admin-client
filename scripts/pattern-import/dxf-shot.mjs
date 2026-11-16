@@ -41,6 +41,44 @@ else {
 }
 mkdirSync(OUT, { recursive: true });
 
+// SHOT_ROWS=1: each child also writes <dir>/rows.json — the sheet as the fill sees it: every chain's
+// points and which chains are each size's own (byRank) or shared (common). media-diff.mjs draws
+// it as the sizes step does: one size's lines lit on the whole sheet. Off: the bundle is unchanged.
+const ROWS_ANCHOR = '  // P3: a click carried to the other size files by its face';
+function rowsHook() {
+  return {
+    plugins: [
+      {
+        name: 'shot-rows',
+        setup(b) {
+          b.onLoad({ filter: /pieces[\\/]fill\.ts$/ }, (a) => {
+            const src = readFileSync(a.path, 'utf8');
+            if (!src.includes(ROWS_ANCHOR)) throw new Error('SHOT_ROWS: fill.ts anchor moved');
+            const hook = `  (globalThis as any).__ROWS?.(set, model);\n`;
+            return { contents: src.replace(ROWS_ANCHOR, hook + ROWS_ANCHOR), loader: 'ts' };
+          });
+        },
+      },
+    ],
+    banner: {
+      js: `import { writeFileSync as __rwfs } from 'node:fs';
+const __rows = new Map();
+globalThis.__ROWS = (set, model) => {
+  if (model.mode === 'single') return;
+  const r1 = (v) => Math.round(v * 10) / 10;
+  if (!__rows.has(set)) __rows.set(set, { chains: set.chains.map((c) => (c?.pts ?? []).map((p) => [r1(p.x), r1(p.y)])) });
+  const s = __rows.get(set);
+  s.byRank = model.byRank.map((x) => [...x]);
+  s.common = [...model.common];
+};
+process.on('exit', () => {
+  if (!__rows.size || !process.argv[3]) return;
+  try { __rwfs(process.argv[3] + '/rows.json', JSON.stringify([...__rows.values()])); } catch {}
+});`,
+    },
+  };
+}
+
 const bundle = resolve(tmpdir(), `patimport-dxfshot-${process.pid}.mjs`);
 await esbuild({
   entryPoints: [resolve(HERE, 'dxf-shot-entry.ts')],
@@ -58,6 +96,7 @@ await esbuild({
     components: resolve(REPO, 'src/components'),
     utils: resolve(REPO, 'src/utils'),
   },
+  ...(process.env.SHOT_ROWS ? rowsHook() : {}),
 });
 
 const one = (pdf) =>
