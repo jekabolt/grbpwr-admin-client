@@ -1,6 +1,9 @@
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
+import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 
 import type { PatternImportDxfPhaseECardSessionV1 } from '../phase-e-workbench-card-session-v1';
+import { createPatternImportDxfPhaseEBoundDraftCadSessionV1 } from './draft-cad-binding-v1';
+import { derivePatternImportDxfPhaseEDraftCadTopologySourceIdentityV1 } from './draft-cad-topology-session-v1';
 import {
   preparePatternImportDxfPhaseECadMannequinAllScopeStagingV1,
   type PatternImportDxfPhaseECadMannequinAllScopeStagingResultV1,
@@ -27,6 +30,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_EXACT_N_PRODUCTION_STAGING
     catalogAndSizeHashesExactMatched: true,
     catalogTopologyExactMatched: true,
     sourceFileIdentityExactMatched: true,
+    exactAnnotationSourceBindingReconstructed: true,
     oneExactSizeCandidateRequired: true,
     snapshotCoordinatesUsed: false,
     geometrySynthesized: false,
@@ -56,6 +60,12 @@ export type PatternImportDxfPhaseECadMannequinExactNProductionStagingResultV1 =
         activeScopeKey: string;
         sizeToken: string;
         sources: readonly PatternImportDxfPhaseECadMannequinDxfStagingSourceV1[];
+        annotationSource: Readonly<{
+          identity: string;
+          revision: string;
+          sha256: string;
+          projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
+        }>;
       }>;
       blocker: null;
       claims: typeof PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_EXACT_N_PRODUCTION_STAGING_CLAIMS_V1;
@@ -268,6 +278,27 @@ export async function preparePatternImportDxfPhaseECadMannequinExactNProductionS
       'staging-binding-stale',
       'The prepared all-scope set no longer contains the exact restored scope/catalog/source binding.',
     );
+  const draft = createPatternImportDxfPhaseEBoundDraftCadSessionV1({
+    source: {
+      phaseD: {
+        sourceFileId: active.selection.selection.phaseD.source.sourceFileId,
+        sourceSha256: active.selection.selection.phaseD.sourceSha256,
+        selectedGeometrySha256: active.selection.selection.selection.selectedGeometrySha256,
+      },
+      catalog: {
+        canonicalSha256: active.catalog.canonicalSha256,
+        sizeSelectionCanonicalSha256: active.catalog.sizeSelectionCanonicalSha256,
+        pieces: active.catalog.pieces,
+      },
+      revision: active.importGeneration,
+    },
+    projection: active.projection,
+  });
+  if (!draft.ok)
+    return blocked(
+      'staging-binding-stale',
+      'The exact reconstructed projection cannot open its existing Draft source owner.',
+    );
   return Object.freeze({
     ok: true as const,
     status: 'available' as const,
@@ -277,6 +308,15 @@ export async function preparePatternImportDxfPhaseECadMannequinExactNProductionS
       activeScopeKey: session.current.row.scopeKey,
       sizeToken: active.sizeToken,
       sources: allScopes.sources,
+      annotationSource: Object.freeze({
+        identity: derivePatternImportDxfPhaseEDraftCadTopologySourceIdentityV1(
+          draft.session,
+          active.projection,
+        ),
+        revision: String(active.importGeneration),
+        sha256: active.selection.selection.phaseD.sourceSha256,
+        projection: active.projection,
+      }),
     }),
     blocker: null,
     claims: PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_EXACT_N_PRODUCTION_STAGING_CLAIMS_V1,

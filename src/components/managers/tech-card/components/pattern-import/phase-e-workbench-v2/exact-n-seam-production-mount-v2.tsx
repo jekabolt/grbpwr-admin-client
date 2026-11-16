@@ -37,6 +37,8 @@ export const PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_PRODUCTION_MOUNT_CLAIMS_V2 
   activeSeamPointerCallerOwned: true,
   readOnlyHost: true,
   exactNEditOrApplyControlsRendered: false,
+  topologyAnnotationAuthoringSlotAvailable: true,
+  topologyAnnotationPersistenceCallerOwned: true,
   createsSecondWriter: false,
   fixtureAuthorityAccepted: false,
   persistencePerformed: false,
@@ -56,17 +58,6 @@ export type PatternImportDxfPhaseEExactNAssemblyOrderSessionV2 = Readonly<{
   productionFeed?: PatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1;
 }>;
 
-export type PatternImportDxfProductExactNSeamProductionMountPropsV2 = Readonly<{
-  session: PatternImportDxfPhaseEExactNAssemblyOrderSessionV2;
-  activeSeamIndex: number;
-  onActiveSeamIndexChange: (index: number) => void;
-  mannequin: PatternImportDxfProductExactNSeamProductionMannequinSlotV2;
-  operationsPanel: PatternImportDxfPhaseECadWorkbenchSlotV1;
-  objectSidebar?: PatternImportDxfPhaseECadWorkbenchSlotV1;
-  sceneOverlayInput?: PatternImportDxfProductExactNSeamProductionSceneOverlayInputV2 | null;
-  sceneOverlayBlocker?: Readonly<{ code: string; detail: string }> | null;
-}>;
-
 export type PatternImportDxfProductExactNSeamProductionSceneOverlayInputV2 = Pick<
   PatternImportDxfPhaseECadMannequinProductionSceneOverlayRequestV2,
   'staging' | 'stitchVisuals' | 'bomItems'
@@ -79,6 +70,19 @@ export type PatternImportDxfProductExactNSeamProductionMannequinContextV2 =
 export type PatternImportDxfProductExactNSeamProductionMannequinSlotV2 =
   | ReactNode
   | ((context: PatternImportDxfProductExactNSeamProductionMannequinContextV2) => ReactNode);
+
+export type PatternImportDxfProductExactNSeamProductionMountPropsV2 = Readonly<{
+  session: PatternImportDxfPhaseEExactNAssemblyOrderSessionV2;
+  activeSeamIndex: number;
+  onActiveSeamIndexChange: (index: number) => void;
+  mannequin: PatternImportDxfProductExactNSeamProductionMannequinSlotV2;
+  operationsPanel: PatternImportDxfPhaseECadWorkbenchSlotV1;
+  objectSidebar?: PatternImportDxfPhaseECadWorkbenchSlotV1;
+  sceneOverlayInput?: PatternImportDxfProductExactNSeamProductionSceneOverlayInputV2 | null;
+  sceneOverlayBlocker?: Readonly<{ code: string; detail: string }> | null;
+  /** Mounted only by the caller that owns the genuine V4/V5 annotation transaction. */
+  topologyAnnotationAuthoring?: ReactNode;
+}>;
 
 function sceneOverlayBlocked(
   detail: string,
@@ -155,6 +159,7 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
   objectSidebar,
   sceneOverlayInput = null,
   sceneOverlayBlocker = null,
+  topologyAnnotationAuthoring = null,
 }: PatternImportDxfProductExactNSeamProductionMountPropsV2): ReactNode {
   const resolved = resolvePatternImportDxfProductExactNSeamProductionMountV2(
     session,
@@ -195,6 +200,7 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
           current={session.current}
           activeSeamIndex={activeSeamIndex}
           onActiveSeamIndexChange={onActiveSeamIndexChange}
+          operationWindow={topologyAnnotationAuthoring}
         />
       }
       mannequin={mannequinSlot}

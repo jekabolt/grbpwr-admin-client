@@ -14,6 +14,7 @@ import {
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V4,
   createPatternImportDxfProductCompositeSidecarStorageAdapterV4,
 } from './composite-sidecar-persistence-v4';
+import { createPatternImportDxfProductCompositeSidecarApplicationPersistenceV5 } from './composite-sidecar-persistence-v5';
 import { createPatternImportDxfProductCompositeSidecarRestoreAuthorityV4 } from './composite-sidecar-restore-authority-v4';
 import {
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_TRANSACTION_REQUEST_V4,
@@ -32,6 +33,7 @@ import {
   publishPatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1,
   type PatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1,
 } from './golden-card-production-v2-snapshot-feed-v1';
+import { createPatternImportDxfPhaseETopologyAnnotationApplicationTransactionV5 } from './topology-annotation-application-transaction-v5';
 
 export const PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_APPLICATION_TRANSACTION_V4 =
   'pattern-import-dxf-product-composite-sidecar-application-transaction/4' as const;
@@ -49,6 +51,8 @@ export const PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_APPLICATION_TRANSACTIO
     explicitConfirmRequired: true,
     canonicalReadbackRequiredBeforeFeedPublication: true,
     restoredSessionConfirmIntegrated: true,
+    compositeV5TopologyAnnotationTransactionIntegrated: true,
+    topologyAnnotationSaveRequiresExplicitUserAction: true,
     fromScratchExactNCarrierBuilderIntegrated: false,
   } as const);
 
@@ -115,6 +119,14 @@ export function createPatternImportDxfProductCompositeSidecarApplicationTransact
     crypto: deps.crypto,
   };
   const persistence = createPatternImportDxfProductCompositeSidecarStorageAdapterV4(storageDeps);
+  const annotationPersistence =
+    createPatternImportDxfProductCompositeSidecarApplicationPersistenceV5(storageDeps);
+  const topologyAnnotations =
+    createPatternImportDxfPhaseETopologyAnnotationApplicationTransactionV5({
+      createClient: deps.createClient,
+      persistence: annotationPersistence,
+      crypto: deps.crypto,
+    });
   const readCurrentCompositeV4 = async (
     expected: Readonly<{ techCardId: number; patternLineKey: string }>,
     signal: AbortSignal,
@@ -164,6 +176,7 @@ export function createPatternImportDxfProductCompositeSidecarApplicationTransact
   return Object.freeze({
     schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_APPLICATION_TRANSACTION_V4,
     transaction,
+    topologyAnnotations,
     async confirmRestoredSelection(
       session: PatternImportDxfPhaseEExactNAssemblyOrderSessionV2,
       feed: PatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1,

@@ -1,5 +1,11 @@
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 
+import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4 } from './composite-sidecar-v4';
+import {
+  isPatternImportDxfProductCompositeSidecarProductionPersistenceV5,
+  type PatternImportDxfProductCompositeSidecarProductionPersistenceV5,
+} from './composite-sidecar-persistence-v5';
+import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5 } from './composite-sidecar-v5';
 import type { PatternImportDxfPhaseEDraftCadTopologyScopeV1 } from './draft-cad-topology-scope-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATION_PERSISTENCE_CAPABILITY_V1 =
@@ -15,8 +21,10 @@ export const PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATION_PERSISTENCE_CAPABILI
  *
  * The semantic-sidecar RPC is the correct transport and CAS owner. The client now has a strict
  * Composite V5 codec and storage transaction which nests the current V4 bytes unchanged. The
- * remaining production boundary is live server admission of the new media type; the UI must stay
- * disabled until one genuine PUT echo and fresh GET readback have succeeded against that server.
+ * backend contract now admits and validates the V5 media type. Runtime admission remains false
+ * until a real transaction succeeds. The client enables Save only when the caller supplies the
+ * genuine production persistence owner and proves that the current saved-row sidecar is V4 or V5.
+ * Every Save remains verified by PUT echo and a fresh GET readback.
  */
 export const PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATION_PERSISTENCE_AUDIT_V1 = Object.freeze({
   techCardCallout: Object.freeze({
@@ -52,10 +60,12 @@ export const PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATION_PERSISTENCE_AUDIT_V1
     assemblyRevisionAndTopologyCasExist: true,
     singleBlobPerPatternLine: true,
     currentCompositeVersion: 4,
+    maxSupportedCompositeVersion: 5,
     currentTopologyAnnotationComponentExists: false,
     standaloneReplacementAllowed: false,
     clientCompositeV5CodecExists: true,
     clientCompositeV5StorageTransactionExists: true,
+    serverContractCompositeV5MediaAdmissionImplemented: true,
     runtimeServerCompositeV5MediaAdmissionProven: false,
     transportReusableAfterVersionedComponentExists: true,
   }),
@@ -113,7 +123,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATION_REQUIRED_SCHEMA_SEAM
     ] as const),
     protoRpcShapeChangeRequired: false,
     explanation:
-      'The existing sidecar RPC already carries opaque canonical bytes and exact CAS bindings; the missing owner is a versioned composite component, server media-type admission and its codec/readback path.',
+      'The existing sidecar RPC carries opaque canonical bytes and exact CAS bindings. Composite V5 and backend admission now exist; each UI Save must still receive the genuine production owner and a fresh current V4/V5 authority.',
   } as const,
 );
 
@@ -121,6 +131,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATION_PERSISTENCE_CLAIMS_V
   capabilityExplicit: true,
   currentCanonicalWriterAvailable: true,
   currentCanonicalReadbackAvailable: true,
+  serverContractCompositeV5AdmissionImplemented: true,
   runtimeServerMediaAdmissionProven: false,
   durablePersistenceClaimed: false,
   manualSaveActionAllowed: false,
@@ -147,7 +158,8 @@ export type PatternImportDxfPhaseETopologyAnnotationPersistenceBlockerCodeV1 =
   | 'stale-card-lock-version'
   | 'stale-server-assembly-revision'
   | 'stale-assembly-topology'
-  | 'server-composite-v5-media-admission-unverified';
+  | 'current-composite-v4-or-v5-unavailable'
+  | 'production-v5-writer-unavailable';
 
 export type PatternImportDxfPhaseETopologyAnnotationPersistenceAuthorityV1 = Readonly<{
   row: DxfProductSavedRowIdentityV1;
@@ -172,20 +184,34 @@ export type PatternImportDxfPhaseETopologyAnnotationPersistenceCurrentV1 = Reado
   assemblyTopologySha256: string;
 }>;
 
-export type PatternImportDxfPhaseETopologyAnnotationPersistenceCapabilityV1 = Readonly<{
-  schemaVersion: typeof PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATION_PERSISTENCE_CAPABILITY_V1;
-  status: 'unavailable';
-  durableSaveAvailable: false;
-  durableReadbackAvailable: false;
-  saveActionAllowed: false;
-  autosaveAllowed: false;
-  blocker: Readonly<{
-    code: PatternImportDxfPhaseETopologyAnnotationPersistenceBlockerCodeV1;
-    detail: string;
-  }>;
-  requiredSchemaSeam: typeof PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATION_REQUIRED_SCHEMA_SEAM_V1;
-  claims: typeof PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATION_PERSISTENCE_CLAIMS_V1;
-}>;
+export type PatternImportDxfPhaseETopologyAnnotationPersistenceCapabilityV1 =
+  | Readonly<{
+      schemaVersion: typeof PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATION_PERSISTENCE_CAPABILITY_V1;
+      status: 'unavailable';
+      durableSaveAvailable: false;
+      durableReadbackAvailable: false;
+      saveActionAllowed: false;
+      autosaveAllowed: false;
+      persistence: null;
+      blocker: Readonly<{
+        code: PatternImportDxfPhaseETopologyAnnotationPersistenceBlockerCodeV1;
+        detail: string;
+      }>;
+      requiredSchemaSeam: typeof PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATION_REQUIRED_SCHEMA_SEAM_V1;
+      claims: typeof PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATION_PERSISTENCE_CLAIMS_V1;
+    }>
+  | Readonly<{
+      schemaVersion: typeof PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATION_PERSISTENCE_CAPABILITY_V1;
+      status: 'available';
+      durableSaveAvailable: true;
+      durableReadbackAvailable: true;
+      saveActionAllowed: true;
+      autosaveAllowed: false;
+      persistence: PatternImportDxfProductCompositeSidecarProductionPersistenceV5;
+      blocker: null;
+      requiredSchemaSeam: typeof PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATION_REQUIRED_SCHEMA_SEAM_V1;
+      claims: typeof PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATION_PERSISTENCE_CLAIMS_V1;
+    }>;
 
 const SHA256 = /^[0-9a-f]{64}$/;
 
@@ -200,6 +226,7 @@ function unavailable(
     durableReadbackAvailable: false,
     saveActionAllowed: false,
     autosaveAllowed: false,
+    persistence: null,
     blocker: Object.freeze({ code, detail }),
     requiredSchemaSeam: PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATION_REQUIRED_SCHEMA_SEAM_V1,
     claims: PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATION_PERSISTENCE_CLAIMS_V1,
@@ -229,15 +256,15 @@ function validAuthority(
 }
 
 /**
- * Production/session boundary for a future explicit Save action.
- *
- * Today this always ends unavailable. The ordered comparisons are intentional: even after a writer
- * is supplied, a stale card/source/revision is rejected before any storage capability is considered.
+ * Production/session boundary for an explicit Save action. The ordered comparisons are
+ * intentional: stale card/source/revision input is rejected before the storage owner is exposed.
  */
 export function resolvePatternImportDxfPhaseETopologyAnnotationPersistenceCapabilityV1(input: {
   scope: PatternImportDxfPhaseEDraftCadTopologyScopeV1;
   expected: PatternImportDxfPhaseETopologyAnnotationPersistenceAuthorityV1;
   current: PatternImportDxfPhaseETopologyAnnotationPersistenceCurrentV1;
+  currentCompositeMediaType?: string | null;
+  productionPersistence?: unknown;
 }): PatternImportDxfPhaseETopologyAnnotationPersistenceCapabilityV1 {
   const { scope, expected, current } = input;
   if (!validAuthority(expected))
@@ -298,8 +325,32 @@ export function resolvePatternImportDxfPhaseETopologyAnnotationPersistenceCapabi
       'stale-assembly-topology',
       'The canonical assembly topology changed after annotations were authored.',
     );
-  return unavailable(
-    'server-composite-v5-media-admission-unverified',
-    'The Composite V5 codec and CAS transaction are available, but live server admission of its media type has not been proven by a genuine PUT echo and fresh GET readback. Save remains unavailable.',
-  );
+  if (
+    input.currentCompositeMediaType !==
+      PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4 &&
+    input.currentCompositeMediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5
+  )
+    return unavailable(
+      'current-composite-v4-or-v5-unavailable',
+      'Save requires a fresh current Composite V4 or V5 sidecar for this exact saved row. The editable exact-two workbench currently owns Composite V3 and cannot write annotations through V5.',
+    );
+  if (
+    !isPatternImportDxfProductCompositeSidecarProductionPersistenceV5(input.productionPersistence)
+  )
+    return unavailable(
+      'production-v5-writer-unavailable',
+      'A genuine production Composite V5 persistence owner is required before Save can be shown.',
+    );
+  return Object.freeze({
+    schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATION_PERSISTENCE_CAPABILITY_V1,
+    status: 'available' as const,
+    durableSaveAvailable: true as const,
+    durableReadbackAvailable: true as const,
+    saveActionAllowed: true as const,
+    autosaveAllowed: false as const,
+    persistence: input.productionPersistence,
+    blocker: null,
+    requiredSchemaSeam: PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATION_REQUIRED_SCHEMA_SEAM_V1,
+    claims: PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATION_PERSISTENCE_CLAIMS_V1,
+  });
 }

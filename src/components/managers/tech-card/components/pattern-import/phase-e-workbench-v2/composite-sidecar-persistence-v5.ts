@@ -27,10 +27,13 @@ export const PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V5 =
   'pattern-import-dxf-product-composite-sidecar-storage-request/5' as const;
 export const PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_RECEIPT_V5 =
   'pattern-import-dxf-product-composite-sidecar-storage-receipt/5' as const;
+export const PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_PRODUCTION_PERSISTENCE_V5 =
+  'pattern-import-dxf-product-composite-sidecar-production-persistence/5' as const;
 
 export const PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_PERSISTENCE_CLAIMS_V5 = Object.freeze({
   existingSemanticSidecarWriterReused: true,
   opaqueMediaTypeTransportSupportedByProto: true,
+  serverContractCompositeV5AdmissionImplemented: true,
   runtimeServerMediaAdmissionProven: false,
   explicitUserActionRequired: true,
   autosaveAllowed: false,
@@ -70,6 +73,23 @@ export type PatternImportDxfProductCompositeSidecarStorageAdapterV5 =
     typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5,
     typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_RECEIPT_V5
   >;
+
+declare const productionPersistenceBrand: unique symbol;
+export type PatternImportDxfProductCompositeSidecarProductionPersistenceV5 = Readonly<{
+  schemaVersion: typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_PRODUCTION_PERSISTENCE_V5;
+  adapter: PatternImportDxfProductCompositeSidecarStorageAdapterV5;
+  claims: typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_PERSISTENCE_CLAIMS_V5;
+  readonly [productionPersistenceBrand]: never;
+}>;
+
+const productionPersistenceOwners = new WeakSet<object>();
+
+/** A structural lookalike cannot enable the production annotation Save capability. */
+export function isPatternImportDxfProductCompositeSidecarProductionPersistenceV5(
+  candidate: unknown,
+): candidate is PatternImportDxfProductCompositeSidecarProductionPersistenceV5 {
+  return !!candidate && typeof candidate === 'object' && productionPersistenceOwners.has(candidate);
+}
 
 const SHA256 = /^[0-9a-f]{64}$/;
 const SHA256_ABC = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
@@ -270,18 +290,25 @@ export function createPatternImportDxfProductCompositeSidecarStorageAdapterV5(
   });
 }
 
-/** Must only be called from an explicit Save annotations user action. */
+/** Composes the owner; only its adapter.persist method may run from explicit Save annotations. */
+export function createPatternImportDxfProductCompositeSidecarApplicationPersistenceV5(
+  deps: PatternImportDxfProductCompositeSidecarStorageDepsV3,
+): PatternImportDxfProductCompositeSidecarProductionPersistenceV5 {
+  const owner = Object.freeze({
+    schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_PRODUCTION_PERSISTENCE_V5,
+    adapter: createPatternImportDxfProductCompositeSidecarStorageAdapterV5(deps),
+    claims: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_PERSISTENCE_CLAIMS_V5,
+  }) as PatternImportDxfProductCompositeSidecarProductionPersistenceV5;
+  productionPersistenceOwners.add(owner);
+  return owner;
+}
+
+/** Production composition; only adapter.persist is invoked by explicit Save annotations. */
 export function createPatternImportDxfProductCompositeSidecarProductionPersistenceV5(
   crypto: Pick<Crypto, 'subtle'> | undefined = globalThis.crypto,
-): Readonly<{
-  adapter: PatternImportDxfProductCompositeSidecarStorageAdapterV5;
-  claims: typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_PERSISTENCE_CLAIMS_V5;
-}> {
-  return Object.freeze({
-    adapter: createPatternImportDxfProductCompositeSidecarStorageAdapterV5({
-      createClient: (signal) => abortableAdminService(signal),
-      crypto,
-    }),
-    claims: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_PERSISTENCE_CLAIMS_V5,
+): PatternImportDxfProductCompositeSidecarProductionPersistenceV5 {
+  return createPatternImportDxfProductCompositeSidecarApplicationPersistenceV5({
+    createClient: (signal) => abortableAdminService(signal),
+    crypto,
   });
 }

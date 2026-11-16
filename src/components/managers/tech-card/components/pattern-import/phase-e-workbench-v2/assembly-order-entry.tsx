@@ -17,7 +17,16 @@ import {
   type AssemblyContext,
 } from 'lib/pattern-import/types';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { Button, CalloutBox, EmptyCell, Pill, Text } from 'ui';
 
 import type { TopstitchBomLine } from '../../topstitch-lines';
@@ -129,6 +138,11 @@ import {
   type PatternImportDxfPhaseECadTablePressEquipmentV1,
 } from './cad-table-press-authoring-v1';
 import type { PatternImportDxfProductCompositeSidecarApplicationTransactionV4 } from './composite-sidecar-production-transaction-v4';
+import { PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1 } from './exact-n-topology-annotation-editor-v1';
+import {
+  PatternImportDxfPhaseETopologyAnnotationSaveControlV5,
+  type PatternImportDxfPhaseETopologyAnnotationDraftV5,
+} from './topology-annotation-save-control-v5';
 
 const LazyPatternImportDxfProductPhaseEMultiseamWorkbenchV2 = lazy(async () => {
   const module = await import('./workbench');
@@ -1466,6 +1480,14 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
   >(Object.freeze({ status: 'idle', detail: null }));
   const [exactNMannequinStaging, setExactNMannequinStaging] =
     useState<PatternImportDxfPhaseECadMannequinExactNProductionStagingResultV1 | null>(null);
+  const [exactNAnnotationDraft, setExactNAnnotationDraft] =
+    useState<PatternImportDxfPhaseETopologyAnnotationDraftV5>(() =>
+      Object.freeze({ measurements: Object.freeze([]), callouts: Object.freeze([]) }),
+    );
+  const publishExactNAnnotationReadback = useCallback(
+    (draft: PatternImportDxfPhaseETopologyAnnotationDraftV5) => setExactNAnnotationDraft(draft),
+    [],
+  );
   const exactNConfirmControllerRef = useRef<AbortController | null>(null);
   const gateRef = useRef<ReturnType<
     typeof createPatternImportDxfPhaseEMultiseamAsyncGateV2
@@ -1638,6 +1660,9 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
     exactNConfirmControllerRef.current?.abort();
     exactNConfirmControllerRef.current = null;
     setExactNConfirmation(Object.freeze({ status: 'idle', detail: null }));
+    setExactNAnnotationDraft(
+      Object.freeze({ measurements: Object.freeze([]), callouts: Object.freeze([]) }),
+    );
     if (transition.prepareSelectedOperation) void prepareCurrentRef.current();
   }, [exactNSession?.selectionOwner, gate, identity, savedSession]);
 
@@ -2299,6 +2324,28 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                   detail:
                     'Reopening exact Phase-D coordinates for the restored material scopes and size.',
                 }
+          }
+          topologyAnnotationAuthoring={
+            exactNApplicationOwner &&
+            exactNMannequinStaging?.ok &&
+            exactNConfirmation.status === 'verified' ? (
+              <>
+                <PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1
+                  source={exactNMannequinStaging.staging.annotationSource}
+                  draft={exactNAnnotationDraft}
+                  onDraftChange={publishExactNAnnotationReadback}
+                  disabled={frozen}
+                />
+                <PatternImportDxfPhaseETopologyAnnotationSaveControlV5
+                  transaction={exactNApplicationOwner.topologyAnnotations}
+                  session={exactNSession}
+                  source={exactNMannequinStaging.staging.annotationSource}
+                  draft={exactNAnnotationDraft}
+                  onReadback={publishExactNAnnotationReadback}
+                  disabled={frozen}
+                />
+              </>
+            ) : null
           }
           mannequin={({ selection, focusSelection, sceneOverlay }) => (
             <div className='flex h-full min-h-0 flex-col'>
