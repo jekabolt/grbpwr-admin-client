@@ -10,6 +10,21 @@ async function openPoseEditor(page: Page) {
   await expect(editPose).toBeChecked();
 }
 
+// Desktop pair: scroll to the sticky preview so the whole canvas sits above the save bar.
+async function pinPreviewAboveSaveBar(page: Page) {
+  const pair = page.getByTestId('model-form-pair');
+  if ((await pair.count()) === 0) return;
+  await pair.evaluate((element) =>
+    window.scrollTo(0, element.getBoundingClientRect().top + window.scrollY - 64),
+  );
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+}
+
 interface PoseLegV9 {
   readonly hipForwardDeg: number;
   readonly hipSideDeg: number;
@@ -966,6 +981,7 @@ test('direct ankle and wrist drags retain a non-crossing last-valid pose across 
     'Preview partial: A-rest',
     { timeout: 180_000 },
   );
+  await pinPreviewAboveSaveBar(page);
   const box = await canvas.boundingBox();
   expect(box).not.toBeNull();
   const bounds = box!;
@@ -1000,6 +1016,7 @@ test('direct ankle and wrist drags retain a non-crossing last-valid pose across 
     'Preview partial: A-rest',
     { timeout: 180_000 },
   );
+  await pinPreviewAboveSaveBar(page);
   const ankleCollisionTarget = await findMarker({
     page,
     canvas,
