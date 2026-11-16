@@ -41,6 +41,7 @@ export function solveMeasurementOpenReferenceBetaTorsoV1(options: {
   readonly triangleIndices: Uint16Array | Uint32Array;
   readonly measurements: MeasurementOpenReferenceBetaTorsoWorkerOptionsV1['measurements'];
   readonly torsoBundle: MakeHumanTorsoShapeDeltaBundleV1;
+  readonly solveDepthProxy?: typeof solveMeasurementOpenReferenceTorsoDepthProxyV1;
 }): MeasurementOpenReferenceBetaTorsoWorkerResultV1 {
   const { torsoBundle } = options;
   const modes = createMakeHumanAnteriorChestShoulderModesResearchV1({
@@ -60,6 +61,25 @@ export function solveMeasurementOpenReferenceBetaTorsoV1(options: {
     measurements: options.measurements,
     modes: modes.modes,
   });
+  const depthRequested = [
+    options.measurements.chestDepthMm,
+    options.measurements.waistDepthMm,
+    options.measurements.hipDepthMm,
+  ].some((value) => value != null);
+  if (!depthRequested) {
+    return Object.freeze({
+      positionsM: chestShoulder.positionsM,
+      ribcageRepresentedMeasurements: ribcage.representedMeasurements,
+      ribcageDiagnostics: Object.freeze([...modes.diagnostics, ...ribcage.diagnostics]),
+      chestShoulderRepresentedMeasurements: chestShoulder.representedMeasurements,
+      chestShoulderLimitedMeasurements: chestShoulder.limitedMeasurements,
+      chestShoulderDiagnostics: chestShoulder.diagnostics,
+      depthRepresentedMeasurements: Object.freeze([]),
+      depthLimitedMeasurements: Object.freeze([]),
+      depthModeResults: Object.freeze([]),
+      depthDiagnostics: Object.freeze([]),
+    });
+  }
   const waistHipModes = createMakeHumanUniformWaistHipModesV1({
     basis: options.basis,
     heightMm: options.measurements.heightMm,
@@ -85,7 +105,7 @@ export function solveMeasurementOpenReferenceBetaTorsoV1(options: {
   ) {
     throw new Error('Torso depth proxy stations are incomplete.');
   }
-  const depth = solveMeasurementOpenReferenceTorsoDepthProxyV1({
+  const depth = (options.solveDepthProxy ?? solveMeasurementOpenReferenceTorsoDepthProxyV1)({
     sourcePositionsM: chestShoulder.positionsM,
     triangleIndices: options.triangleIndices,
     measurements: options.measurements,
