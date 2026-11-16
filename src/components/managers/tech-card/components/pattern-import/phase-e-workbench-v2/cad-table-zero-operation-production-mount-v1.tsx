@@ -1,3 +1,9 @@
+import type { common_TechCard } from 'api/proto-http/admin';
+import {
+  useSizeNames,
+  useSizeOrdering,
+} from 'components/managers/model/components/use-size-systems';
+import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import {
   useCallback,
   useEffect,
@@ -20,6 +26,11 @@ import {
   preparePatternImportDxfPhaseECadTableZeroOperationFreshV1,
   type PatternImportDxfPhaseECadTableZeroOperationFreshPreparationResultV1,
 } from './cad-table-zero-operation-fresh-preparation-v1';
+import {
+  listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1,
+  preparePatternImportDxfPhaseECadTableZeroOperationSavedV1,
+  type PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1,
+} from './cad-table-zero-operation-saved-preparation-v1';
 import { preparePatternImportDxfPhaseECadMannequinAllScopeStagingV1 } from './cad-mannequin-all-scope-staging-v1';
 import type { PatternImportDxfPhaseECadMannequinDxfStagingSourceV1 } from './cad-mannequin-dxf-staging-v1';
 import {
@@ -27,7 +38,10 @@ import {
   PatternImportDxfPhaseECadMannequinModelPickerV1,
 } from './cad-workbench-mannequin-model-picker-v1';
 import { PatternImportDxfPhaseECadWorkbenchSplitShellV1 } from './cad-workbench-split-shell-v1';
-import { PATTERN_IMPORT_DXF_PHASE_E_ZERO_OPERATION_SAVED_DXF_REQUIREMENT_V1 } from './zero-operation-saved-dxf-capability-v1';
+import {
+  createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1,
+  type PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1,
+} from './zero-operation-saved-card-authority-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_PRODUCTION_MOUNT_V1 =
   'pattern-import-dxf-phase-e-cad-table-zero-operation-production-mount/1' as const;
@@ -35,7 +49,10 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_PRODUCTION_MOUN
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_PRODUCTION_MOUNT_CLAIMS_V1 =
   Object.freeze({
     operationsLengthMustBeZero: true,
-    freshCardSessionRequired: true,
+    freshCardSessionRequired: false,
+    operationIndependentSavedCardBootstrap: true,
+    savedCardRowReadBeforeAndAfterReprocess: true,
+    savedCardByteLengthAndShaVerified: true,
     explicitReplayScopeAndSizeUsed: true,
     exactCatalogAndProjectionOnly: true,
     selectedOperationRequired: false,
@@ -47,15 +64,20 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_PRODUCTION_MOUN
     realTechCardModelPickerMountedInEveryState: true,
     blockedSavedDxfKeepsMannequinPane: true,
     allMaterialScopeStagingRequested: true,
+    savedCurrentMaterialScopeStaged: true,
+    savedAllMaterialScopeStagingRequested: true,
     existingSplitShellReused: true,
     rawDxfExposed: false,
     productionMounted: true,
   } as const);
 
-type Prepared = Extract<
-  PatternImportDxfPhaseECadTableZeroOperationFreshPreparationResultV1,
-  { ok: true }
->;
+type Prepared =
+  | Extract<PatternImportDxfPhaseECadTableZeroOperationFreshPreparationResultV1, { ok: true }>
+  | Extract<PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1, { ok: true }>;
+
+type PreparationResult =
+  | PatternImportDxfPhaseECadTableZeroOperationFreshPreparationResultV1
+  | PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1;
 
 type PreparationState =
   | Readonly<{ status: 'idle'; key: string; result: null }>
@@ -63,7 +85,7 @@ type PreparationState =
   | Readonly<{
       status: 'settled';
       key: string;
-      result: PatternImportDxfPhaseECadTableZeroOperationFreshPreparationResultV1;
+      result: PreparationResult;
     }>;
 
 type MannequinStagingState = Readonly<{
@@ -72,6 +94,9 @@ type MannequinStagingState = Readonly<{
   blocked: boolean;
 }>;
 
+const IDENTITY_SIZE_ORDER = (ids: number[]) => ids;
+const EMPTY_SIZE_NAMES = new Map<number, string>();
+
 export type PatternImportDxfPhaseECadTableZeroOperationMannequinContextV1 = Readonly<{
   sources: readonly PatternImportDxfPhaseECadMannequinDxfStagingSourceV1[];
   activeScopeKey: string | null;
@@ -79,9 +104,9 @@ export type PatternImportDxfPhaseECadTableZeroOperationMannequinContextV1 = Read
 }>;
 
 /**
- * The zero-row view has no selected Assembly operation to borrow. It takes only a fresh card
- * session plus the existing OperationsField handoff and fails closed until exact saved replay
- * scope/size geometry is available.
+ * The zero-row view has no selected Assembly operation to borrow. It accepts either the confirmed
+ * import session or an operation-independent, revalidated saved-row authority plus the existing
+ * OperationsField handoff. Neither path invents an operation or geometry.
  */
 export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   cardSession,
@@ -89,17 +114,34 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   mannequin,
   disabled = false,
   savedOnly = false,
+  savedCard = null,
+  orderSizeIds = IDENTITY_SIZE_ORDER,
+  sizeNameById = EMPTY_SIZE_NAMES,
+  savedAuthority = null,
 }: Readonly<{
   cardSession: PatternImportDxfPhaseECardSessionV1 | null;
   zeroConnectAuthoringHandoff?: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1;
   mannequin: (context: PatternImportDxfPhaseECadTableZeroOperationMannequinContextV1) => ReactNode;
   disabled?: boolean;
   savedOnly?: boolean;
+  savedCard?: common_TechCard | null;
+  orderSizeIds?: (ids: number[]) => number[];
+  sizeNameById?: ReadonlyMap<number, string>;
+  savedAuthority?: PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1 | null;
 }>) {
   const generation = cardSession?.importGeneration ?? 0;
   const choices = useMemo(
-    () => listPatternImportDxfPhaseECadTableZeroOperationFreshChoicesV1(cardSession, generation),
-    [cardSession, generation],
+    () =>
+      cardSession
+        ? listPatternImportDxfPhaseECadTableZeroOperationFreshChoicesV1(cardSession, generation)
+        : savedOnly
+          ? listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
+              savedCard,
+              orderSizeIds,
+              sizeNameById,
+            )
+          : listPatternImportDxfPhaseECadTableZeroOperationFreshChoicesV1(null, generation),
+    [cardSession, generation, orderSizeIds, savedCard, savedOnly, sizeNameById],
   );
   const [chosenScopeKey, setChosenScopeKey] = useState('');
   const [chosenSizeToken, setChosenSizeToken] = useState('');
@@ -112,7 +154,9 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     selectedScope?.sizes.find(({ sizeToken }) => sizeToken === chosenSizeToken) ??
     selectedScope?.sizes[0];
   const sizeToken = selectedSize?.sizeToken ?? '';
-  const preparationKey = `${cardSession?.techCardId ?? 0}:${generation}:${scopeKey}:${sizeToken}`;
+  const preparationKey = cardSession
+    ? `fresh:${cardSession.techCardId}:${generation}:${scopeKey}:${sizeToken}`
+    : `saved:${savedCard?.id ?? 0}:${savedCard?.lockVersion ?? -1}:${scopeKey}:${sizeToken}`;
   const [preparation, setPreparation] = useState<PreparationState>(() => ({
     status: 'idle',
     key: '',
@@ -120,44 +164,66 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   }));
 
   useEffect(() => {
-    if (!cardSession || !choices.ok || !scopeKey || !sizeToken) {
+    if (!choices.ok || !scopeKey || !sizeToken) {
+      setPreparation({ status: 'idle', key: preparationKey, result: null });
+      return;
+    }
+    if (!cardSession && (!savedOnly || !savedAuthority)) {
       setPreparation({ status: 'idle', key: preparationKey, result: null });
       return;
     }
     let current = true;
+    const controller = new AbortController();
     setPreparation({ status: 'loading', key: preparationKey, result: null });
-    void preparePatternImportDxfPhaseECadTableZeroOperationFreshV1({
-      cardSession,
-      expectedImportGeneration: generation,
-      scopeKey,
-      sizeToken,
-    }).then((result) => {
+    const next = cardSession
+      ? preparePatternImportDxfPhaseECadTableZeroOperationFreshV1({
+          cardSession,
+          expectedImportGeneration: generation,
+          scopeKey,
+          sizeToken,
+        })
+      : preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
+          {
+            techCard: savedCard,
+            orderSizeIds,
+            sizeNameById,
+            scopeKey,
+            sizeToken,
+            authority: savedAuthority!,
+          },
+          controller.signal,
+        );
+    void next.then((result) => {
       if (current) setPreparation({ status: 'settled', key: preparationKey, result });
     });
     return () => {
       current = false;
+      controller.abort();
     };
-  }, [cardSession, choices.ok, generation, preparationKey, scopeKey, sizeToken]);
+  }, [
+    cardSession,
+    choices.ok,
+    generation,
+    orderSizeIds,
+    preparationKey,
+    savedAuthority,
+    savedCard,
+    savedOnly,
+    scopeKey,
+    sizeNameById,
+    sizeToken,
+  ]);
 
   const currentPreparation = preparation.key === preparationKey ? preparation : null;
   const prepared =
     currentPreparation?.status === 'settled' && currentPreparation.result?.ok
       ? (currentPreparation.result as Prepared)
       : null;
-  const savedOnlyBlocker =
-    !cardSession && savedOnly
-      ? Object.freeze({
-          code: 'operation-independent-authoritative-row-read-unavailable' as const,
-          detail: `This saved DXF needs an operation-independent authoritative row read before the first draft can be created. ${PATTERN_IMPORT_DXF_PHASE_E_ZERO_OPERATION_SAVED_DXF_REQUIREMENT_V1.currentClosestRpc} still requires selectedOperationNumber, so the table will not invent one.`,
-        })
+  const blocker = !choices.ok
+    ? choices.blocker
+    : currentPreparation?.status === 'settled' && currentPreparation.result?.ok === false
+      ? currentPreparation.result.blocker
       : null;
-  const blocker =
-    savedOnlyBlocker ??
-    (!choices.ok
-      ? choices.blocker
-      : currentPreparation?.status === 'settled' && currentPreparation.result?.ok === false
-        ? currentPreparation.result.blocker
-        : null);
 
   const currentMannequinSource =
     useMemo<PatternImportDxfPhaseECadMannequinDxfStagingSourceV1 | null>(
@@ -174,40 +240,96 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
       [prepared],
     );
   const mannequinStagingKey = currentMannequinSource
-    ? `${cardSession?.techCardId ?? 0}:${generation}:${currentMannequinSource.scopeKey}:${sizeToken}`
+    ? cardSession
+      ? `fresh:${cardSession.techCardId}:${generation}:${currentMannequinSource.scopeKey}:${sizeToken}`
+      : `saved:${savedCard?.id ?? 0}:${savedCard?.lockVersion ?? -1}:${currentMannequinSource.scopeKey}:${sizeToken}`
     : '';
   const [mannequinStaging, setMannequinStaging] = useState<MannequinStagingState | null>(null);
   useEffect(() => {
-    if (!cardSession || !choices.ok || !currentMannequinSource || !mannequinStagingKey) {
+    if (!choices.ok || !currentMannequinSource || !mannequinStagingKey) {
       setMannequinStaging(null);
       return;
     }
     let current = true;
-    void preparePatternImportDxfPhaseECadMannequinAllScopeStagingV1({
-      draft: cardSession.draft,
-      techCardId: cardSession.techCardId,
-      expectedImportGeneration: generation,
-      currentImportGeneration: cardSession.importGeneration,
-      scopes: choices.choices.map(({ scopeKey: candidate, label }) => ({
-        scopeKey: candidate,
-        label,
-      })),
-      sizeToken,
-      current: currentMannequinSource,
-    }).then((result) => {
-      if (!current) return;
-      setMannequinStaging(
-        Object.freeze({
-          key: mannequinStagingKey,
-          sources: result.sources,
-          blocked: !result.ok,
-        }),
-      );
-    });
+    const controller = new AbortController();
+    if (cardSession) {
+      void preparePatternImportDxfPhaseECadMannequinAllScopeStagingV1({
+        draft: cardSession.draft,
+        techCardId: cardSession.techCardId,
+        expectedImportGeneration: generation,
+        currentImportGeneration: cardSession.importGeneration,
+        scopes: choices.choices.map(({ scopeKey: candidate, label }) => ({
+          scopeKey: candidate,
+          label,
+        })),
+        sizeToken,
+        current: currentMannequinSource,
+      }).then((result) => {
+        if (!current) return;
+        setMannequinStaging(
+          Object.freeze({
+            key: mannequinStagingKey,
+            sources: result.sources,
+            blocked: !result.ok,
+          }),
+        );
+      });
+    } else if (savedOnly && savedCard && savedAuthority) {
+      void (async () => {
+        const sources: PatternImportDxfPhaseECadMannequinDxfStagingSourceV1[] = [
+          currentMannequinSource,
+        ];
+        let blocked = false;
+        for (const choice of choices.choices) {
+          if (!current || choice.scopeKey === currentMannequinSource.scopeKey) continue;
+          const saved = await preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
+            {
+              techCard: savedCard,
+              orderSizeIds,
+              sizeNameById,
+              scopeKey: choice.scopeKey,
+              sizeToken,
+              authority: savedAuthority,
+            },
+            controller.signal,
+          );
+          if (!saved.ok) {
+            blocked = true;
+            continue;
+          }
+          sources.push(
+            Object.freeze({
+              scopeKey: saved.scopeKey,
+              label: choice.label,
+              projection: saved.projection,
+            }),
+          );
+        }
+        if (!current) return;
+        setMannequinStaging(
+          Object.freeze({ key: mannequinStagingKey, sources: Object.freeze(sources), blocked }),
+        );
+      })();
+    } else {
+      setMannequinStaging(null);
+    }
     return () => {
       current = false;
+      controller.abort();
     };
-  }, [cardSession, choices, currentMannequinSource, mannequinStagingKey, sizeToken]);
+  }, [
+    cardSession,
+    choices,
+    currentMannequinSource,
+    generation,
+    mannequinStagingKey,
+    orderSizeIds,
+    savedAuthority,
+    savedCard,
+    savedOnly,
+    sizeNameById,
+    sizeToken,
+  ]);
   const mannequinSources = currentMannequinSource
     ? mannequinStaging?.key === mannequinStagingKey
       ? mannequinStaging.sources
@@ -318,6 +440,19 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
   );
   const read = useCallback(() => readPatternImportDxfPhaseECardSessionV1(techCardId), [techCardId]);
   const cardSession = useSyncExternalStore(subscribe, read, read);
+  const savedCard = useTechCard(savedOnly ? techCardId : undefined);
+  const orderSizeIds = useSizeOrdering();
+  const sizeNameById = useSizeNames();
+  const savedAuthority = useMemo(
+    () =>
+      savedOnly
+        ? createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1({
+            orderSizeIds,
+            sizeNameById,
+          })
+        : null,
+    [orderSizeIds, savedOnly, sizeNameById],
+  );
 
   return (
     <PatternImportDxfPhaseECadTableZeroOperationHostV1
@@ -325,6 +460,10 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
       zeroConnectAuthoringHandoff={zeroConnectAuthoringHandoff}
       disabled={disabled}
       savedOnly={savedOnly}
+      savedCard={savedCard.data ?? null}
+      orderSizeIds={orderSizeIds}
+      sizeNameById={sizeNameById}
+      savedAuthority={savedAuthority}
       mannequin={({ sources, activeScopeKey }) => (
         <PatternImportDxfPhaseECadMannequinModelPickerV1
           disabled={disabled}

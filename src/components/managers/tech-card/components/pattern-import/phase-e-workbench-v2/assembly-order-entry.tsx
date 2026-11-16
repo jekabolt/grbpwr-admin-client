@@ -2404,7 +2404,6 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                         proposal={prepared.proposal}
                         state={state}
                         materialOptions={prepared.materialOptions}
-                        stitchVisual={stitchVisual}
                         colorwayOptions={colorwayOptions}
                         activeSeamIndex={activeSeamIndex}
                         activePieceIndex={activePieceIndex}

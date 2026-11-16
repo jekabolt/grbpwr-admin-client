@@ -53,7 +53,6 @@ import {
   formatPatternImportDxfPhaseEMeasurementValueV1,
   type PatternImportDxfPhaseEMeasurementUnitV1,
 } from './measurement-units-v1';
-import type { PatternImportDxfPhaseEStitchVisualV1 } from './stitch-visual-v1';
 import { PatternImportDxfPhaseECadWorkbenchToolButtonV1 } from './cad-workbench-tool-button-v1';
 import { PatternImportDxfPhaseECadWorkbenchObjectSidebarV1 } from './cad-workbench-object-sidebar-v1';
 import { usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1 } from './cad-workbench-split-shell-v1';
@@ -105,7 +104,6 @@ export type PatternImportDxfProductPhaseEMultiseamWorkbenchPropsV2 = Readonly<{
   proposal: PatternImportDxfProductPhaseEMultiseamProposalV2;
   state: WorkbenchState;
   materialOptions: readonly PatternImportDxfProductPhaseEMaterialRevisionOptionV1[];
-  stitchVisual?: PatternImportDxfPhaseEStitchVisualV1 | null;
   colorwayOptions?: readonly Readonly<{ id: number; label: string; swatchHex?: string }>[];
   activeSeamIndex: SeamIndex;
   activePieceIndex: SideIndex;
@@ -364,15 +362,6 @@ function measurementDisplayLabel(
   return measurement.valueMm === null
     ? measurement.label
     : formatPatternImportDxfPhaseEMeasurementValueV1(measurement.valueMm, unit).formatted;
-}
-
-function StitchContextFact({ label, value }: Readonly<{ label: string; value: string }>) {
-  return (
-    <div className='flex min-w-max items-center gap-1.5 border-r border-hairline pr-3 last:border-r-0 last:pr-0'>
-      <span className='text-labelColor'>{label}</span>
-      <span className='max-w-40 truncate font-bold text-textColor tabular-nums'>{value}</span>
-    </div>
-  );
 }
 
 function ProjectedPiece({
@@ -1167,7 +1156,6 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
   proposal,
   state,
   materialOptions,
-  stitchVisual = null,
   colorwayOptions = [],
   activeSeamIndex,
   activePieceIndex,
@@ -1739,46 +1727,6 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
           </nav>
 
           <div className='flex h-full min-h-0 min-w-0 flex-col'>
-            {stitchVisual ? (
-              <div
-                className='flex items-center gap-3 overflow-x-auto border-b border-hairline bg-bgColor px-3 py-1.5 text-micro'
-                data-v2-stitch-visual=''
-                aria-label='Current operation stitch settings'
-                title='These values are owned by the current Assembly Order operation.'
-              >
-                <StitchContextFact
-                  label='Seam'
-                  value={stitchVisual.seam.classLabel ?? stitchVisual.seam.kind ?? '—'}
-                />
-                <StitchContextFact label='Stitch' value={stitchVisual.topstitch.modeLabel ?? '—'} />
-                <StitchContextFact
-                  label='Density'
-                  value={
-                    stitchVisual.stitch.densityPerCm == null
-                      ? '—'
-                      : `${stitchVisual.stitch.densityPerCm}/cm`
-                  }
-                />
-                <StitchContextFact
-                  label='Gauge'
-                  value={
-                    stitchVisual.machine.needleGaugeMm == null
-                      ? '—'
-                      : `${stitchVisual.machine.needleGaugeMm} mm`
-                  }
-                />
-                <StitchContextFact
-                  label='Offset'
-                  value={
-                    stitchVisual.topstitch.offsetMm == null
-                      ? '—'
-                      : `${stitchVisual.topstitch.offsetMm} mm`
-                  }
-                />
-                <StitchContextFact label='Thread' value={stitchVisual.thread.bomLineKey ?? '—'} />
-              </div>
-            ) : null}
-
             {!ready ? (
               <div
                 ref={validationActionRef}

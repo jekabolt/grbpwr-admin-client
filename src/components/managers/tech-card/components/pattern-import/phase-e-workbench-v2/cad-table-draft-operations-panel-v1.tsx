@@ -22,6 +22,15 @@ import type { PatternImportDxfPhaseECadWorkbenchStitchEditCapabilitiesV1 } from 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_DRAFT_OPERATIONS_PANEL_V1 =
   'pattern-import-dxf-phase-e-cad-table-draft-operations-panel/1' as const;
 
+export function openPatternImportDxfPhaseECadOperationDetailsForEditV1(
+  setOpen: (open: boolean) => void,
+  onEdit: (field: PatternImportDxfPhaseECadWorkbenchStitchEditorFieldV1) => void,
+  field: PatternImportDxfPhaseECadWorkbenchStitchEditorFieldV1,
+): void {
+  setOpen(true);
+  onEdit(field);
+}
+
 function ContextGroup({ label, children }: Readonly<{ label: string; children: ReactNode }>) {
   return (
     <div className='min-w-0 space-y-1'>
@@ -164,6 +173,7 @@ export function PatternImportDxfPhaseECadTableDraftOperationsPanelV1({
   onEditStitchField?: (field: PatternImportDxfPhaseECadWorkbenchStitchEditorFieldV1) => void;
 }>) {
   const [selectedDraftIds, setSelectedDraftIds] = useState<readonly string[]>([]);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [handoffResult, setHandoffResult] =
     useState<PatternImportDxfPhaseECadCommandAuthoringHandoffResultV1 | null>(null);
   const currentItem =
@@ -221,6 +231,14 @@ export function PatternImportDxfPhaseECadTableDraftOperationsPanelV1({
     (result.ok ? 0 : 1) +
     (cadCommandDrafts && !cadCommandDrafts.ok ? 1 : 0);
   const canSwitchOperation = Boolean(navigation?.items.length && onSelectOperation);
+  const editStitchField = onEditStitchField
+    ? (field: PatternImportDxfPhaseECadWorkbenchStitchEditorFieldV1) =>
+        openPatternImportDxfPhaseECadOperationDetailsForEditV1(
+          setDetailsOpen,
+          onEditStitchField,
+          field,
+        )
+    : undefined;
 
   return (
     <div className='min-h-full bg-bgColor' data-cad-draft-operations-panel-v1=''>
@@ -337,7 +355,7 @@ export function PatternImportDxfPhaseECadTableDraftOperationsPanelV1({
           <StitchContext
             stitch={stitchVisual}
             capabilities={stitchEditCapabilities}
-            onEditStitchField={onEditStitchField}
+            onEditStitchField={editStitchField}
           />
           {currentItem?.context.bomRefs.map((material) => (
             <Pill key={material.key} tone='mut' title={material.key}>
@@ -345,11 +363,17 @@ export function PatternImportDxfPhaseECadTableDraftOperationsPanelV1({
             </Pill>
           ))}
         </div>
+      </div>
 
-        <details className='border-b border-hairline' data-cad-operation-context-pane=''>
-          <summary className='cursor-pointer bg-bgColor px-3 py-2 text-micro font-bold uppercase tracking-label'>
-            Context
-          </summary>
+      <details
+        open={detailsOpen}
+        data-cad-operation-details-pane=''
+        onToggle={(event) => setDetailsOpen(event.currentTarget.open)}
+      >
+        <summary className='cursor-pointer border-b border-hairline bg-bgColor px-3 py-2 text-micro font-bold uppercase tracking-label'>
+          Operation details
+        </summary>
+        <section data-cad-operation-context-pane=''>
           <section
             className='grid grid-cols-1 gap-3 bg-pageBg p-3'
             aria-label='Current operation context'
@@ -401,7 +425,7 @@ export function PatternImportDxfPhaseECadTableDraftOperationsPanelV1({
               <StitchContext
                 stitch={stitchVisual}
                 capabilities={stitchEditCapabilities}
-                onEditStitchField={onEditStitchField}
+                onEditStitchField={editStitchField}
               />
             </ContextGroup>
             {currentItem?.context.warnings.length ? (
@@ -414,21 +438,17 @@ export function PatternImportDxfPhaseECadTableDraftOperationsPanelV1({
               </ContextGroup>
             ) : null}
           </section>
-        </details>
-      </div>
+        </section>
 
-      <details className='border-b border-hairline' data-cad-operation-spec-pane=''>
-        <summary className='cursor-pointer bg-bgColor px-3 py-2 text-micro font-bold uppercase tracking-label'>
-          Spec · authoritative editor
-        </summary>
-        <div data-cad-current-operation-editor-owner=''>{editor}</div>
-      </details>
+        <div className='border-t border-hairline' data-cad-operation-spec-pane=''>
+          <div data-cad-current-operation-editor-owner=''>{editor}</div>
+        </div>
 
-      <details data-cad-operation-draft-pane=''>
-        <summary className='cursor-pointer bg-bgColor px-3 py-2 text-micro font-bold uppercase tracking-label'>
-          Draft · Pattern edits
-        </summary>
-        <section className='divide-y divide-borderColor' aria-label='Session Draft Operations'>
+        <section
+          className='divide-y divide-borderColor border-t border-hairline'
+          aria-label='Session Draft Operations'
+          data-cad-operation-draft-pane=''
+        >
           <div className='space-y-2 px-3 py-2'>
             <div className='flex items-center justify-between gap-2'>
               <Text component='h4' size='micro' className='font-bold'>

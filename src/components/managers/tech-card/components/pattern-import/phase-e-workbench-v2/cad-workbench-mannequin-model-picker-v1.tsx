@@ -11,6 +11,7 @@ import { modelFormRevisionKeyV1 } from 'components/managers/model/components/sch
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import type {
   MeasurementSurfacePatternPieceOverlayV1,
+  MeasurementSurfacePatternPieceV1,
   MeasurementSurfacePatternPieceTransformV1,
   MeasurementSurfaceViewPreset,
 } from 'components/shared/measurement-watertight-surface-v1-stage';
@@ -43,6 +44,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_MODEL_PICKER_CLAIMS_V1 = O
   existingMeasurementPreviewReused: true,
   existingMannequinPreviewProviderReused: true,
   exactPatternPiecesUseExistingThreeScene: true,
+  exactPatternPiecesRemainVisibleWithoutModel: true,
   patternPieceTransformsRemainPresentationOnly: true,
   geometryScaleToolExposed: false,
   stagedPiecesRemainVisibleWithoutSelection: true,
@@ -245,6 +247,148 @@ export type PatternImportDxfPhaseECadMannequinPatternPieceSceneV1 = Readonly<{
   onFocus?: (selection: PatternImportDxfPhaseECadMannequinDxfStagingSelectionV1) => void;
 }>;
 
+export type PatternImportDxfPhaseECadMannequinUnboundStageLayoutV1 = Readonly<{
+  viewBox: string;
+  pieces: readonly Readonly<{
+    piece: MeasurementSurfacePatternPieceV1;
+    fillPathD: string;
+    strokePathD: string;
+    transform: string;
+  }>[];
+}>;
+
+function patternContourPathD(
+  contour: MeasurementSurfacePatternPieceV1['contours'][number],
+): string {
+  const [first, ...rest] = contour.vertices;
+  if (!first) return '';
+  return `M ${first.pointMm.x} ${first.pointMm.y} ${rest
+    .map(({ pointMm }) => `L ${pointMm.x} ${pointMm.y}`)
+    .join(' ')} Z`;
+}
+
+function patternPiecePaths(piece: MeasurementSurfacePatternPieceV1): Readonly<{
+  fillPathD: string;
+  strokePathD: string;
+}> {
+  const outerRole = piece.contours.some(({ role }) => role === 'cut-boundary')
+    ? 'cut-boundary'
+    : 'sewing-boundary';
+  const fillPathD = piece.contours
+    .filter(({ role }) => role === outerRole || role === 'hole')
+    .map(patternContourPathD)
+    .filter(Boolean)
+    .join(' ');
+  const strokePathD = piece.contours.map(patternContourPathD).filter(Boolean).join(' ');
+  return Object.freeze({ fillPathD, strokePathD });
+}
+
+/**
+ * Fits the exact prepared contours into one model-free presentation stage. Every piece shares one
+ * scale, so relative pattern dimensions remain visible while the selected model is still empty.
+ */
+export function layoutPatternImportDxfPhaseECadMannequinUnboundStageV1(
+  overlay: MeasurementSurfacePatternPieceOverlayV1,
+): PatternImportDxfPhaseECadMannequinUnboundStageLayoutV1 | null {
+  const source = overlay.pieces.flatMap((piece) => {
+    const points = piece.contours.flatMap((contour) =>
+      contour.vertices.map(({ pointMm }) => pointMm),
+    );
+    if (points.length < 3) return [];
+    const minX = Math.min(...points.map(({ x }) => x));
+    const maxX = Math.max(...points.map(({ x }) => x));
+    const minY = Math.min(...points.map(({ y }) => y));
+    const maxY = Math.max(...points.map(({ y }) => y));
+    if (![minX, maxX, minY, maxY].every(Number.isFinite)) return [];
+    return [{ piece, minX, maxX, minY, maxY, ...patternPiecePaths(piece) }];
+  });
+  if (source.length === 0) return null;
+  const commonSpan = Math.max(
+    ...source.map(({ minX, maxX, minY, maxY }) => Math.max(maxX - minX, maxY - minY)),
+  );
+  if (!Number.isFinite(commonSpan) || commonSpan <= 0) return null;
+  const columns = Math.min(4, Math.max(1, Math.ceil(Math.sqrt(source.length))));
+  const rows = Math.ceil(source.length / columns);
+  const cell = commonSpan * 1.28;
+  return Object.freeze({
+    viewBox: `0 0 ${columns * cell} ${rows * cell}`,
+    pieces: Object.freeze(
+      source.map(({ piece, minX, maxX, minY, maxY, fillPathD, strokePathD }, index) => {
+        const column = index % columns;
+        const row = Math.floor(index / columns);
+        const centreX = (minX + maxX) / 2;
+        const centreY = (minY + maxY) / 2;
+        return Object.freeze({
+          piece,
+          fillPathD,
+          strokePathD,
+          transform: `translate(${column * cell + cell / 2 - centreX} ${
+            row * cell + cell / 2 - centreY
+          })`,
+        });
+      }),
+    ),
+  });
+}
+
+export function PatternImportDxfPhaseECadMannequinUnboundPatternStageV1({
+  overlay,
+}: Readonly<{ overlay: MeasurementSurfacePatternPieceOverlayV1 }>) {
+  const layout = useMemo(
+    () => layoutPatternImportDxfPhaseECadMannequinUnboundStageV1(overlay),
+    [overlay],
+  );
+  if (!layout) return null;
+  return (
+    <div
+      className='absolute inset-0 min-h-0 overflow-hidden bg-pageBg p-3'
+      data-cad-mannequin-unbound-pattern-stage=''
+      data-cad-mannequin-unbound-pattern-count={layout.pieces.length}
+    >
+      <svg
+        className='h-full w-full text-textColor'
+        viewBox={layout.viewBox}
+        preserveAspectRatio='xMidYMid meet'
+        aria-label='Prepared pattern pieces'
+      >
+        {layout.pieces.map(({ piece, fillPathD, strokePathD, transform }) => (
+          <g
+            key={piece.pieceKey}
+            transform={transform}
+            role='button'
+            tabIndex={0}
+            aria-label={piece.pieceLineKey}
+            data-cad-mannequin-unbound-pattern-piece={piece.pieceKey}
+            data-selected={piece.selected || undefined}
+            className='cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+            onClick={() => overlay.onSelectPiece?.(piece)}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' && event.key !== ' ') return;
+              event.preventDefault();
+              overlay.onSelectPiece?.(piece);
+            }}
+          >
+            <path
+              d={fillPathD}
+              fill={piece.swatchCss ?? 'white'}
+              fillOpacity={piece.selected ? 0.72 : 0.46}
+              fillRule='evenodd'
+              stroke='none'
+            />
+            <path
+              d={strokePathD}
+              fill='none'
+              stroke='currentColor'
+              strokeWidth={piece.selected ? 3 : 1.25}
+              vectorEffect='non-scaling-stroke'
+            />
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
 export type PatternImportDxfPhaseECadMannequinSceneOverlayCapabilityV1 =
   | Readonly<{
       status: 'available';
@@ -331,6 +475,14 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
   const correspondenceGuides =
     sceneOverlayBridge?.guides.filter(({ kind }) => kind === 'correspondence') ?? [];
   const threadGuides = sceneOverlayBridge?.guides.filter(({ kind }) => kind === 'thread') ?? [];
+  const unboundPatternStage =
+    patternOverlayResult?.ok && patternOverlayResult.overlay.visibility.pieces ? (
+      <PatternImportDxfPhaseECadMannequinUnboundPatternStageV1
+        overlay={patternOverlayResult.overlay}
+      />
+    ) : (
+      stagedPieces
+    );
 
   useEffect(() => setPoseEditing(false), [modelId, selectedRevision]);
 
@@ -426,31 +578,27 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
       ) : null}
 
       {error ? (
-        <div className='relative flex min-h-[20rem] flex-1 items-center justify-center overflow-hidden p-4 text-center'>
-          <div className='space-y-1'>
+        <div className='relative min-h-[20rem] flex-1 overflow-hidden'>
+          {unboundPatternStage}
+          <div className='absolute bottom-2 left-2 z-10 space-y-1 bg-bgColor/90 px-2 py-1'>
             <Pill tone='warn'>models unavailable</Pill>
-            <Text component='p' size='micro' variant='label'>
-              The existing model list could not be loaded. Prepared DXF pieces remain staged when
-              available.
-            </Text>
           </div>
-          {stagedPieces}
         </div>
       ) : !selected ? (
-        <div className='relative flex min-h-[20rem] flex-1 items-center justify-center overflow-hidden p-4 text-center'>
-          <div className='max-w-xs space-y-2'>
+        <div className='relative min-h-[20rem] flex-1 overflow-hidden'>
+          {unboundPatternStage}
+          <div className='absolute bottom-2 left-2 z-10 flex items-center gap-2 bg-bgColor/90 px-2 py-1'>
             <Pill tone={loading ? 'attention' : 'ink'}>
               {loading ? 'loading models' : 'no model selected'}
             </Pill>
             <Text component='p' size='micro' variant='label'>
-              Select an existing measurement model or create one from body measurements.
+              Select a model to place these pieces around it.
             </Text>
           </div>
-          {stagedPieces}
         </div>
       ) : poseError ? (
         <div className='relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4 text-center'>
-          <div className='space-y-2'>
+          <div className='relative z-10 space-y-2'>
             <Text component='p' size='micro' variant='errorLabel' role='alert'>
               Pose session could not be prepared.
             </Text>
@@ -460,14 +608,14 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
               </Button>
             ) : null}
           </div>
-          {stagedPieces}
+          {unboundPatternStage}
         </div>
       ) : poseLoading || !poseBinding ? (
         <div className='relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4 text-center'>
-          <Text component='p' size='micro' variant='label' role='status'>
+          <Text component='p' size='micro' variant='label' role='status' className='relative z-10'>
             Preparing pose session…
           </Text>
-          {stagedPieces}
+          {unboundPatternStage}
         </div>
       ) : (
         <div

@@ -48,6 +48,8 @@ export type PatternImportDxfPhaseESavedDxfReprocessHostDepsV1 = Readonly<{
   createClient?: () => ImportClient;
   fetch?: typeof globalThis.fetch;
   crypto?: Pick<Crypto, 'subtle'>;
+  /** Backend origin for server-relative tokenized pattern URLs; defaults to VITE_SERVER_URL. */
+  serverUrl?: string;
 }>;
 
 export const PATTERN_IMPORT_DXF_PHASE_E_SAVED_DXF_REPROCESS_HOST_CLAIMS_V1 = Object.freeze({
@@ -109,6 +111,30 @@ function validDownloadUrl(value: unknown): value is string {
     if (value.charCodeAt(index) <= 0x1f) return false;
   const lower = value.trimStart().toLowerCase();
   return !lower.startsWith('data:') && !lower.startsWith('javascript:');
+}
+
+export function resolvePatternImportDxfPhaseESavedDownloadUrlV1(
+  downloadUrl: string,
+  serverUrl = import.meta.env.VITE_SERVER_URL || '',
+): string {
+  if (!validDownloadUrl(downloadUrl)) throw new Error('Saved DXF download URL is invalid.');
+  if (/^[a-z][a-z0-9+.-]*:/i.test(downloadUrl)) {
+    const absolute = new URL(downloadUrl);
+    if (absolute.protocol !== 'http:' && absolute.protocol !== 'https:')
+      throw new Error('Saved DXF download URL must use HTTP or HTTPS.');
+    return absolute.toString();
+  }
+  const base = serverUrl.trim().replace(/\/$/, '');
+  if (!base) throw new Error('VITE_SERVER_URL is required for a relative saved DXF URL.');
+  let resolved: URL;
+  try {
+    resolved = new URL(downloadUrl.startsWith('/') ? downloadUrl : `/${downloadUrl}`, `${base}/`);
+  } catch {
+    throw new Error('Saved DXF backend origin is invalid.');
+  }
+  if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:')
+    throw new Error('Saved DXF backend origin must use HTTP or HTTPS.');
+  return resolved.toString();
 }
 
 function report(
@@ -177,7 +203,7 @@ function exactManifestPieceIndexes(
     const identityMatches = byIdentity.get(piece.identity) ?? [];
     const matches = identityMatches.length
       ? identityMatches
-      : (byDisplayName.get(piece.displayName) ?? []);
+      : byDisplayName.get(piece.displayName) ?? [];
     if (matches.length !== 1)
       throw new Error(
         matches.length
@@ -592,11 +618,14 @@ export function createPatternImportDxfPhaseESavedDxfReprocessHostV1(
     async readAuthoritativeRow(expected, signal, onProgress) {
       const authority = await read(expected, signal);
       onProgress(0, 1, 'downloading authoritative saved DXF');
-      const response = await fetcher(authority.downloadUrl, {
-        method: 'GET',
-        credentials: 'same-origin',
-        signal,
-      });
+      const response = await fetcher(
+        resolvePatternImportDxfPhaseESavedDownloadUrlV1(authority.downloadUrl, deps.serverUrl),
+        {
+          method: 'GET',
+          credentials: 'same-origin',
+          signal,
+        },
+      );
       if (!response.ok) throw new Error(`Saved DXF download failed with HTTP ${response.status}.`);
       const declaredLength = response.headers.get('content-length');
       if (

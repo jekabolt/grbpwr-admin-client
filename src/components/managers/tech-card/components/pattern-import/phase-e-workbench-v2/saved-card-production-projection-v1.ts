@@ -191,7 +191,7 @@ function exactPiecePair(
   });
 }
 
-function savedCardContext(
+export function buildPatternImportDxfPhaseESavedCardContextV1(
   techCard: common_TechCard,
   orderSizeIds: (ids: number[]) => number[],
   sizeNameById: ReadonlyMap<number, string>,
@@ -283,7 +283,11 @@ export function buildPatternImportDxfPhaseESavedCardProductionProjectionV1(
   });
   if (!row.ok)
     return blocked(selectedOperationNumber, row.blockers[0].code, row.blockers[0].detail);
-  const card = savedCardContext(techCard, request.orderSizeIds, request.sizeNameById);
+  const card = buildPatternImportDxfPhaseESavedCardContextV1(
+    techCard,
+    request.orderSizeIds,
+    request.sizeNameById,
+  );
   return Object.freeze({
     ok: true as const,
     selectedOperationNumber,

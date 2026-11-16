@@ -53,6 +53,8 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_WORKBENCH_SPLIT_SHELL_CLAIMS_V1 = Ob
   splitChangesOnlyDuringCapturedDrag: true,
   splitHandleHoverDoesNotChangeLayout: true,
   compactLayoutMenu: true,
+  redundantWorkbenchTitleRemoved: true,
+  measurementUnitsAdjacentToLayout: true,
   productionReady: false,
 } as const);
 
@@ -404,10 +406,10 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
           } as CSSProperties
         }
       >
-        <header className='flex min-h-9 shrink-0 items-center border-b border-borderColor bg-bgColor px-2 py-1'>
-          <Text component='p' size='micro' className='min-w-0 flex-1 truncate font-bold'>
-            CAD workbench
-          </Text>
+        <header
+          className='flex min-h-9 shrink-0 items-center justify-end border-b border-borderColor bg-bgColor px-2 py-1'
+          aria-label='Workbench layout controls'
+        >
           {desktopVisible ? (
             <div className='mr-1 flex items-center' role='group' aria-label='Measurement unit'>
               {(['mm', 'cm', 'in'] as const).map((unit) => (

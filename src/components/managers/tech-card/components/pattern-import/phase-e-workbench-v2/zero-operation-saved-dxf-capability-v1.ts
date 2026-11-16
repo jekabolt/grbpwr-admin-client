@@ -23,8 +23,8 @@ export const PATTERN_IMPORT_DXF_PHASE_E_ZERO_OPERATION_SAVED_DXF_REQUIREMENT_V1 
   schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_OPERATION_SAVED_DXF_AUTHORITY_V1,
   operationBinding: 'none' as const,
   requiredResponseFields: Object.freeze(['row', 'downloadUrl'] as const),
-  currentClosestRpc: 'GetTechCardSavedAssemblySnapshot' as const,
-  currentClosestRpcRequires: Object.freeze(['selectedOperationNumber'] as const),
+  currentClosestRpc: 'GetTechCard' as const,
+  currentClosestRpcRequires: Object.freeze(['techCardId'] as const),
 });
 
 export const PATTERN_IMPORT_DXF_PHASE_E_ZERO_OPERATION_SAVED_DXF_CAPABILITY_CLAIMS_V1 =
@@ -40,8 +40,9 @@ export const PATTERN_IMPORT_DXF_PHASE_E_ZERO_OPERATION_SAVED_DXF_CAPABILITY_CLAI
     selectedOperationAccepted: false,
     savedAssemblySnapshotAcceptedAsRowAuthority: false,
     getTechCardProjectionAcceptedAsRowAuthority: false,
+    getTechCardCurrentReadAcceptedAsRowAuthority: true,
     operationIndependentTransactionalRowReadRequired: true,
-    currentGeneratedServerContractProvidesRequiredRead: false,
+    currentGeneratedServerContractProvidesRequiredRead: true,
     authoritativeRowReadPerformed: false,
     savedDxfReprocessed: false,
     phaseDSelectionBuilt: false,
@@ -203,10 +204,9 @@ function operationBound(candidate: unknown): boolean {
 
 /**
  * Resolves the one current saved DXF row named by an explicit material scope and size, then checks
- * whether an operation-independent transactional row-read capability exists. This intentionally
- * stops before saved-DXF reprocess: today's only generated authoritative row/download read is the
- * Assembly snapshot RPC, whose required selected operation would make a zero-operation canvas a
- * hidden synthetic-operation flow.
+ * whether an operation-independent current row-read capability exists. A cached GetTechCard
+ * projection is not that authority; production injects a new GetTechCard read before and after
+ * reconstruction, while the saved owner verifies the intervening byte length and SHA-256.
  */
 export function resolvePatternImportDxfPhaseEZeroOperationSavedDxfCapabilityV1(
   request: PatternImportDxfPhaseEZeroOperationSavedDxfCapabilityRequestV1,
@@ -310,7 +310,7 @@ export function resolvePatternImportDxfPhaseEZeroOperationSavedDxfCapabilityV1(
       );
     return blocked(
       'operation-independent-authoritative-row-read-unavailable',
-      'The generated server contract exposes authoritative DXF row metadata and download URL only through GetTechCardSavedAssemblySnapshot, whose request requires selectedOperationNumber.',
+      'A current operation-independent GetTechCard row read with its server download URL is required.',
       { row, scopeKey, sizeToken },
     );
   }
