@@ -11,6 +11,7 @@ import {
 } from './measurement-open-reference-display-v1';
 import {
   SURFACE_ANCHOR_TABLE_V1,
+  checkSurfaceAnchorSubsetV1,
   checkSurfaceAnchorsV1,
   evaluateSurfaceAnchorRulesV1,
   type SurfaceAnchorIdV1,
@@ -294,6 +295,40 @@ describe('measurement surface anchors v1', () => {
         expect(hps.positionM[1]).toBeGreaterThanOrEqual(ssnY - 0.01);
         expect(hps.positionM[1]).toBeLessThanOrEqual(c7Y + 0.01);
       }
+    },
+    30_000,
+  );
+
+  it.each(KINDS)(
+    '%s neck subset checks only SSN, C7 and HPS and matches the full check',
+    (kind) => {
+      const current = fixture(kind);
+      const subset = checkSurfaceAnchorSubsetV1({ ...current, ids: ['hps-l', 'hps-r'] });
+      const timesMs: number[] = [];
+      for (let run = 0; run < 20; run += 1) {
+        const startedAt = performance.now();
+        checkSurfaceAnchorSubsetV1({ ...current, ids: ['hps-l', 'hps-r'] });
+        timesMs.push(performance.now() - startedAt);
+      }
+      timesMs.sort((left, right) => left - right);
+      console.info(
+        `surface-anchors neck subset ${kind}: p50 ${timesMs[10].toFixed(3)}ms max ${timesMs[19].toFixed(3)}ms`,
+      );
+      const full = checked(kind);
+      if (kind === 'male') {
+        expect(subset).toMatchObject({ ok: false, code: 'anchor-check-failed' });
+        if (subset.ok) return;
+        expect(subset.failures.map((failure) => failure.id).sort()).toEqual(['hps-l', 'hps-r']);
+        return;
+      }
+      expect(subset.ok).toBe(true);
+      if (!subset.ok || !full.ok) return;
+      expect(Object.keys(subset.anchors).sort()).toEqual(['c7', 'hps-l', 'hps-r', 'ssn']);
+      for (const id of ['ssn', 'c7', 'hps-l', 'hps-r'] as const) {
+        expect(subset.anchors[id]?.rulePositionM).toEqual(full.anchors[id].rulePositionM);
+        expect(subset.anchors[id]?.distanceMm).toBe(full.anchors[id].distanceMm);
+      }
+      expect(Object.isFrozen(subset)).toBe(true);
     },
     30_000,
   );

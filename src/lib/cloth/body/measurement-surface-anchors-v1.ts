@@ -165,6 +165,19 @@ export type SurfaceAnchorCheckResultV1 =
       anchors?: Readonly<Partial<Record<SurfaceAnchorIdV1, CheckedSurfaceAnchorV1>>>;
     }>;
 
+export type SurfaceAnchorSubsetCheckResultV1 =
+  | Readonly<{
+      ok: true;
+      anchors: Readonly<Partial<Record<SurfaceAnchorIdV1, CheckedSurfaceAnchorV1>>>;
+      heightFractions: Readonly<Partial<Record<SurfaceAnchorIdV1, number>>>;
+    }>
+  | Readonly<{
+      ok: false;
+      code: SurfaceAnchorFailureCodeV1;
+      failures: readonly SurfaceAnchorFailureV1[];
+      anchors?: Readonly<Partial<Record<SurfaceAnchorIdV1, CheckedSurfaceAnchorV1>>>;
+    }>;
+
 interface Bounds {
   readonly minimumY: number;
   readonly maximumY: number;
@@ -408,14 +421,46 @@ function c7Rule(
   return ruleSuccess(vertexPosition(positionsM, bestVertex), meshSurfaceVertexPointV1(bestVertex));
 }
 
-function horizontalLoops(
+/** Margin far above the section plane tolerance (1e-8 m), so no crossing triangle is dropped. */
+const BAND_MARGIN_M = 1e-5;
+
+/**
+ * Triangles whose extent along `axis` overlaps [minimumM, maximumM]. Every triangle a plane in that
+ * range can cut is kept, so sections on the band return the same loops as on the full mesh.
+ */
+function bandTriangles(
   topology: MeshSurfaceTopologyV1,
+  positionsM: Float32Array,
+  axis: 1 | 2,
+  minimumM: number,
+  maximumM: number,
+): Uint32Array {
+  const indices = topology.triangleIndices;
+  const low = minimumM - BAND_MARGIN_M;
+  const high = maximumM + BAND_MARGIN_M;
+  const kept = new Uint32Array(indices.length);
+  let count = 0;
+  for (let offset = 0; offset < indices.length; offset += 3) {
+    const a = positionsM[indices[offset] * 3 + axis];
+    const b = positionsM[indices[offset + 1] * 3 + axis];
+    const c = positionsM[indices[offset + 2] * 3 + axis];
+    if (Math.max(a, b, c) < low || Math.min(a, b, c) > high) continue;
+    kept[count] = indices[offset];
+    kept[count + 1] = indices[offset + 1];
+    kept[count + 2] = indices[offset + 2];
+    count += 3;
+  }
+  return kept.subarray(0, count);
+}
+
+function horizontalLoops(
+  triangleIndices: Uint32Array,
   positionsM: Float32Array,
   levelM: number,
 ): readonly MeshPlaneSectionLoopV1[] | SurfaceAnchorRuleFailureV1 {
   const section = measureMeshPlaneSectionPerimetersV1({
     positionsM,
-    triangleIndices: topology.triangleIndices,
+    triangleIndices,
     planeOriginM: [0, levelM, 0],
     planeNormal: [0, 1, 0],
   });
@@ -430,11 +475,12 @@ function bisectionLevel(
   upperFraction: number,
   lowerLoopCount: number,
   upperLoopCount: number,
-): Readonly<{ lowerM: number; upperM: number }> | SurfaceAnchorRuleFailureV1 {
+): Readonly<{ lowerM: number; upperM: number; band: Uint32Array }> | SurfaceAnchorRuleFailureV1 {
   let lowerM = currentBounds.minimumY + currentBounds.heightM * lowerFraction;
   let upperM = currentBounds.minimumY + currentBounds.heightM * upperFraction;
-  const lower = horizontalLoops(topology, positionsM, lowerM);
-  const upper = horizontalLoops(topology, positionsM, upperM);
+  const band = bandTriangles(topology, positionsM, 1, lowerM, upperM);
+  const lower = horizontalLoops(band, positionsM, lowerM);
+  const upper = horizontalLoops(band, positionsM, upperM);
   if ('ok' in lower) return lower;
   if ('ok' in upper) return upper;
   if (lower.length !== lowerLoopCount || upper.length !== upperLoopCount) {
@@ -442,12 +488,12 @@ function bisectionLevel(
   }
   while (upperM - lowerM > SECTION_BISECTION_TOLERANCE_M) {
     const middleM = (lowerM + upperM) / 2;
-    const middle = horizontalLoops(topology, positionsM, middleM);
+    const middle = horizontalLoops(band, positionsM, middleM);
     if ('ok' in middle) return middle;
     if (middle.length === lowerLoopCount) lowerM = middleM;
     else upperM = middleM;
   }
-  return Object.freeze({ lowerM, upperM });
+  return Object.freeze({ lowerM, upperM, band });
 }
 
 function nearestVertex(
@@ -478,7 +524,7 @@ function underarmLeftRule(
 ): UnderarmRuleSuccess | SurfaceAnchorRuleFailureV1 {
   const transition = bisectionLevel(topology, positionsM, currentBounds, 0.65, 0.8, 3, 1);
   if ('ok' in transition) return transition;
-  const loops = horizontalLoops(topology, positionsM, transition.lowerM);
+  const loops = horizontalLoops(transition.band, positionsM, transition.lowerM);
   if ('ok' in loops) return loops;
   if (loops.length !== 3) return ruleFailure('Last underarm section does not have three loops.');
 
@@ -533,8 +579,9 @@ function crotchRule(
   const positionM = vertexPosition(positionsM, crotchVertex);
   let lowerM = positionM[1] - 0.001;
   let upperM = positionM[1] + 0.001;
-  const lower = horizontalLoops(topology, positionsM, lowerM);
-  const upper = horizontalLoops(topology, positionsM, upperM);
+  const band = bandTriangles(topology, positionsM, 1, lowerM, upperM);
+  const lower = horizontalLoops(band, positionsM, lowerM);
+  const upper = horizontalLoops(band, positionsM, upperM);
   if ('ok' in lower) return lower;
   if ('ok' in upper) return upper;
   if (lower.length !== 2 || upper.length === 2) {
@@ -542,7 +589,7 @@ function crotchRule(
   }
   while (upperM - lowerM > SECTION_BISECTION_TOLERANCE_M / 4) {
     const middleM = (lowerM + upperM) / 2;
-    const middle = horizontalLoops(topology, positionsM, middleM);
+    const middle = horizontalLoops(band, positionsM, middleM);
     if ('ok' in middle) return middle;
     if (middle.length === 2) lowerM = middleM;
     else upperM = middleM;
@@ -557,6 +604,53 @@ function crotchRule(
  * closest to A.x + 90 mm; the corner is the contour point between them farthest from chord A–shoulder.
  * Plateau = the largest distance between any two contour points scoring > 90% of the peak.
  */
+/**
+ * Points where the coronal plane z = `sectionZ` cuts the mesh, kept only inside the x/y box. Same
+ * plane and same edge crossings as `measureMeshPlaneSectionPerimetersV1`, but only the triangles in
+ * the box are cut: the HPS rule uses the contour points, not closed loops, and the full coronal
+ * section (whole body outline) costs most of the per-shape guide budget. Shared edges repeat a point;
+ * that changes no extreme, peak or plateau diameter.
+ */
+function coronalContour(
+  topology: MeshSurfaceTopologyV1,
+  positionsM: Float32Array,
+  sectionZ: number,
+  box: Readonly<{ minimumX: number; maximumX: number; minimumY: number; maximumY: number }>,
+): MeshSurfaceVec3V1[] {
+  const indices = topology.triangleIndices;
+  const points: MeshSurfaceVec3V1[] = [];
+  const inBox = (x: number, y: number) =>
+    x > box.minimumX && x < box.maximumX && y > box.minimumY && y < box.maximumY;
+  const crossEdge = (a: number, b: number) => {
+    const da = positionsM[a * 3 + 2] - sectionZ;
+    const db = positionsM[b * 3 + 2] - sectionZ;
+    if (da === 0 || !(da < 0 !== db < 0) || db === 0) return;
+    const t = da / (da - db);
+    const x = positionsM[a * 3] + (positionsM[b * 3] - positionsM[a * 3]) * t;
+    const y = positionsM[a * 3 + 1] + (positionsM[b * 3 + 1] - positionsM[a * 3 + 1]) * t;
+    if (inBox(x, y)) points.push(frozenVec3(x, y, sectionZ));
+  };
+  for (let offset = 0; offset < indices.length; offset += 3) {
+    const a = indices[offset];
+    const b = indices[offset + 1];
+    const c = indices[offset + 2];
+    const za = positionsM[a * 3 + 2];
+    const zb = positionsM[b * 3 + 2];
+    const zc = positionsM[c * 3 + 2];
+    if (Math.max(za, zb, zc) < sectionZ || Math.min(za, zb, zc) > sectionZ) continue;
+    for (const vertex of [a, b, c]) {
+      const z = positionsM[vertex * 3 + 2];
+      if (z === sectionZ && inBox(positionsM[vertex * 3], positionsM[vertex * 3 + 1])) {
+        points.push(vertexPosition(positionsM, vertex));
+      }
+    }
+    crossEdge(a, b);
+    crossEdge(b, c);
+    crossEdge(c, a);
+  }
+  return points;
+}
+
 function hpsLeftRule(
   topology: MeshSurfaceTopologyV1,
   positionsM: Float32Array,
@@ -565,20 +659,14 @@ function hpsLeftRule(
   c7: SurfaceAnchorRuleSuccessV1,
 ): SurfaceAnchorRuleResultV1 {
   const sectionZ = (ssn.positionM[2] + c7.positionM[2]) / 2;
-  const section = measureMeshPlaneSectionPerimetersV1({
-    positionsM,
-    triangleIndices: topology.triangleIndices,
-    planeOriginM: [0, 0, sectionZ],
-    planeNormal: [0, 0, 1],
-  });
-  if (!section.ok) return ruleFailure(`Coronal section failed: ${section.code}.`);
   const levelM = (fraction: number) => currentBounds.minimumY + currentBounds.heightM * fraction;
-  const contour = section.loops.flatMap((loop) =>
-    loop.pointsM.filter(
-      (point) =>
-        point[0] > 0.01 && point[0] < 0.22 && point[1] > levelM(0.78) && point[1] < levelM(0.89),
-    ),
-  );
+  const contour = coronalContour(topology, positionsM, sectionZ, {
+    minimumX: 0.01,
+    maximumX: 0.22,
+    minimumY: levelM(0.78),
+    maximumY: levelM(0.89),
+  });
+  if (contour.length === 0) return ruleFailure('Coronal section has no neck/shoulder contour.');
   const neckLevelM = levelM(0.875);
   const neckCandidates = contour.filter((point) => Math.abs(point[1] - neckLevelM) < 0.006);
   if (neckCandidates.length === 0) return ruleFailure('Neck side point is missing.');
@@ -644,47 +732,78 @@ function mirroredRule(
   );
 }
 
-function failedRuleRecord(failure: SurfaceAnchorRuleFailureV1): SurfaceAnchorRuleResultsV1 {
-  return Object.freeze(
-    Object.fromEntries(ANCHOR_IDS.map((id) => [id, failure])) as Record<
-      SurfaceAnchorIdV1,
-      SurfaceAnchorRuleResultV1
-    >,
-  );
+type SurfaceAnchorRuleSubsetV1 = Readonly<
+  Partial<Record<SurfaceAnchorIdV1, SurfaceAnchorRuleResultV1>>
+>;
+
+/** Requested ids plus their prerequisites: HPS needs SSN and C7 (rule and height order). */
+function withPrerequisites(ids: readonly SurfaceAnchorIdV1[]): readonly SurfaceAnchorIdV1[] {
+  const wanted = new Set(ids);
+  if (wanted.has('hps-l') || wanted.has('hps-r')) {
+    wanted.add('ssn');
+    wanted.add('c7');
+  }
+  return ANCHOR_IDS.filter((id) => wanted.has(id));
+}
+
+function failedRuleSubset(
+  ids: readonly SurfaceAnchorIdV1[],
+  failure: SurfaceAnchorRuleFailureV1,
+): SurfaceAnchorRuleSubsetV1 {
+  return Object.freeze(Object.fromEntries(ids.map((id) => [id, failure])));
+}
+
+function evaluateRuleSubset(
+  topology: MeshSurfaceTopologyV1,
+  positionsM: Float32Array,
+  ids: readonly SurfaceAnchorIdV1[],
+): SurfaceAnchorRuleSubsetV1 {
+  const problem = topologyProblem(topology, positionsM);
+  const currentBounds = bounds(positionsM);
+  if (problem || !currentBounds) {
+    return failedRuleSubset(
+      ids,
+      ruleFailure(problem ?? 'Positions contain invalid coordinates.', 'topology-mismatch'),
+    );
+  }
+  const wanted = new Set(ids);
+  const needsHps = wanted.has('hps-l') || wanted.has('hps-r');
+  const needsUnderarm = wanted.has('underarm-l') || wanted.has('underarm-r');
+  const result: Partial<Record<SurfaceAnchorIdV1, SurfaceAnchorRuleResultV1>> = {};
+  if (needsHps || wanted.has('ssn') || wanted.has('c7') || wanted.has('crotch')) {
+    const profiles = midlineProfiles(topology, positionsM, currentBounds);
+    if ('ok' in profiles) return failedRuleSubset(ids, profiles);
+    const ssn = ssnRule(profiles.front, positionsM, currentBounds);
+    const c7 = c7Rule(profiles.back, positionsM, currentBounds);
+    if (wanted.has('ssn')) result.ssn = ssn;
+    if (wanted.has('c7')) result.c7 = c7;
+    if (needsHps) {
+      const hpsLeft =
+        ssn.ok && c7.ok
+          ? hpsLeftRule(topology, positionsM, currentBounds, ssn, c7)
+          : ruleFailure('HPS prerequisites failed.');
+      if (wanted.has('hps-l')) result['hps-l'] = hpsLeft;
+      if (wanted.has('hps-r')) result['hps-r'] = mirroredRule(hpsLeft, topology);
+    }
+    if (wanted.has('crotch')) result.crotch = crotchRule(topology, positionsM, profiles.crotch);
+  }
+  if (needsUnderarm) {
+    const underarmLeft = underarmLeftRule(topology, positionsM, currentBounds);
+    if (wanted.has('underarm-l')) result['underarm-l'] = underarmLeft;
+    if (wanted.has('underarm-r')) result['underarm-r'] = mirroredRule(underarmLeft, topology);
+  }
+  return Object.freeze(result);
 }
 
 export function evaluateSurfaceAnchorRulesV1(options: {
   readonly topology: MeshSurfaceTopologyV1;
   readonly positionsM: Float32Array;
 }): SurfaceAnchorRuleResultsV1 {
-  const problem = topologyProblem(options.topology, options.positionsM);
-  const currentBounds = bounds(options.positionsM);
-  if (problem || !currentBounds) {
-    return failedRuleRecord(
-      ruleFailure(problem ?? 'Positions contain invalid coordinates.', 'topology-mismatch'),
-    );
-  }
-  const profiles = midlineProfiles(options.topology, options.positionsM, currentBounds);
-  if ('ok' in profiles) return failedRuleRecord(profiles);
-
-  const ssn = ssnRule(profiles.front, options.positionsM, currentBounds);
-  const c7 = c7Rule(profiles.back, options.positionsM, currentBounds);
-  const underarmLeft = underarmLeftRule(options.topology, options.positionsM, currentBounds);
-  const crotch = crotchRule(options.topology, options.positionsM, profiles.crotch);
-  const hpsLeft =
-    ssn.ok && c7.ok && underarmLeft.ok
-      ? hpsLeftRule(options.topology, options.positionsM, currentBounds, ssn, c7)
-      : ruleFailure('HPS prerequisites failed.');
-
-  return Object.freeze({
-    ssn,
-    c7,
-    'hps-l': hpsLeft,
-    'hps-r': mirroredRule(hpsLeft, options.topology),
-    'underarm-l': underarmLeft,
-    'underarm-r': mirroredRule(underarmLeft, options.topology),
-    crotch,
-  });
+  return evaluateRuleSubset(
+    options.topology,
+    options.positionsM,
+    ANCHOR_IDS,
+  ) as SurfaceAnchorRuleResultsV1;
 }
 
 function distanceMm(left: MeshSurfaceVec3V1, right: MeshSurfaceVec3V1): number {
@@ -720,18 +839,21 @@ function failureResult(
   });
 }
 
-export function checkSurfaceAnchorsV1(options: {
-  readonly topology: MeshSurfaceTopologyV1;
-  readonly positionsM: Float32Array;
-  readonly table?: readonly SurfaceAnchorV1[];
-}): SurfaceAnchorCheckResultV1 {
+function checkAnchorSubset(
+  options: {
+    readonly topology: MeshSurfaceTopologyV1;
+    readonly positionsM: Float32Array;
+    readonly table?: readonly SurfaceAnchorV1[];
+  },
+  ids: readonly SurfaceAnchorIdV1[],
+): SurfaceAnchorSubsetCheckResultV1 {
   const problem = topologyProblem(options.topology, options.positionsM);
   const currentBounds = bounds(options.positionsM);
   if (problem || !currentBounds) {
     const detail = problem ?? 'Positions contain invalid coordinates.';
     return failureResult(
       'topology-mismatch',
-      ANCHOR_IDS.map((id) => Object.freeze({ id, code: 'topology-mismatch' as const, detail })),
+      ids.map((id) => Object.freeze({ id, code: 'topology-mismatch' as const, detail })),
     );
   }
 
@@ -749,7 +871,7 @@ export function checkSurfaceAnchorsV1(options: {
     }
     tableById.set(entry.id, entry);
   }
-  const missing = ANCHOR_IDS.find((id) => !tableById.has(id));
+  const missing = ids.find((id) => !tableById.has(id));
   if (missing) {
     return failureResult('anchor-check-failed', [
       Object.freeze({
@@ -760,11 +882,11 @@ export function checkSurfaceAnchorsV1(options: {
     ]);
   }
 
-  const rules = evaluateSurfaceAnchorRulesV1(options);
+  const rules = evaluateRuleSubset(options.topology, options.positionsM, ids);
   const failures: SurfaceAnchorFailureV1[] = [];
   const checked: Partial<Record<SurfaceAnchorIdV1, CheckedSurfaceAnchorV1>> = {};
-  for (const id of ANCHOR_IDS) {
-    const rule = rules[id];
+  for (const id of ids) {
+    const rule = rules[id]!;
     if (!rule.ok) {
       failures.push(Object.freeze({ id, code: rule.code, detail: rule.detail }));
       continue;
@@ -804,9 +926,9 @@ export function checkSurfaceAnchorsV1(options: {
     }
   }
 
-  if (ANCHOR_IDS.every((id) => checked[id])) {
-    const ssnY = checked.ssn!.rulePositionM[1];
-    const c7Y = checked.c7!.rulePositionM[1];
+  if (checked.ssn && checked.c7) {
+    const ssnY = checked.ssn.rulePositionM[1];
+    const c7Y = checked.c7.rulePositionM[1];
     if (!(ssnY < c7Y)) {
       failures.push(
         Object.freeze({
@@ -817,7 +939,9 @@ export function checkSurfaceAnchorsV1(options: {
       );
     }
     for (const id of ['hps-l', 'hps-r'] as const) {
-      const y = checked[id]!.rulePositionM[1];
+      const hps = checked[id];
+      if (!hps) continue;
+      const y = hps.rulePositionM[1];
       if (y < ssnY - 0.01 || y > c7Y + 0.01) {
         failures.push(
           Object.freeze({
@@ -841,16 +965,33 @@ export function checkSurfaceAnchorsV1(options: {
     return failureResult(code, failures, checked);
   }
 
-  const anchors = Object.freeze(
-    Object.fromEntries(ANCHOR_IDS.map((id) => [id, checked[id]!])) as Record<
-      SurfaceAnchorIdV1,
-      CheckedSurfaceAnchorV1
-    >,
-  );
+  const anchors = Object.freeze(Object.fromEntries(ids.map((id) => [id, checked[id]!])));
   const heightFractions = Object.freeze(
     Object.fromEntries(
-      ANCHOR_IDS.map((id) => [id, fractionY(anchors[id].rulePositionM[1], currentBounds)]),
-    ) as Record<SurfaceAnchorIdV1, number>,
+      ids.map((id) => [id, fractionY(checked[id]!.rulePositionM[1], currentBounds)]),
+    ),
   );
   return Object.freeze({ ok: true as const, anchors, heightFractions });
+}
+
+export function checkSurfaceAnchorsV1(options: {
+  readonly topology: MeshSurfaceTopologyV1;
+  readonly positionsM: Float32Array;
+  readonly table?: readonly SurfaceAnchorV1[];
+}): SurfaceAnchorCheckResultV1 {
+  return checkAnchorSubset(options, ANCHOR_IDS) as SurfaceAnchorCheckResultV1;
+}
+
+/**
+ * Checks only the anchors a guide uses (plus prerequisites: HPS brings SSN and C7). The neck loop
+ * asks for `['ssn', 'c7', 'hps-l', 'hps-r']`: one coronal section and two midline walks, so it fits
+ * inside the per-shape guide budget, while underarm and crotch need bisections of many sections.
+ */
+export function checkSurfaceAnchorSubsetV1(options: {
+  readonly topology: MeshSurfaceTopologyV1;
+  readonly positionsM: Float32Array;
+  readonly ids: readonly SurfaceAnchorIdV1[];
+  readonly table?: readonly SurfaceAnchorV1[];
+}): SurfaceAnchorSubsetCheckResultV1 {
+  return checkAnchorSubset(options, withPrerequisites(options.ids));
 }
