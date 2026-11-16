@@ -285,7 +285,10 @@ import {
   waitForIdle,
 } from './last-mutation';
 import { followOpenStep, useActiveStepStore } from './assembly-map/active-step';
-import { resolveAssemblyTableWorkbenchOpenV1 } from './assembly-table-auto-open-v1';
+import {
+  resolveAssemblyTableWorkbenchOpenV1,
+  shouldShowLegacyAssemblyEmptyStateV1,
+} from './assembly-table-auto-open-v1';
 import { AssemblyFullscreen, FROZEN_REFUSAL, restoreScreenFocus } from './assembly-fullscreen';
 import { SeamWalk } from './seam-walk';
 import { StepTimeField } from './step-time-field';
@@ -10435,9 +10438,12 @@ export function OperationsField({
         />
       )}
 
-      {fsOpen || walkOpen ? null : fields.length === 0 &&
-        unplacedReuploadedKeys.length === 0 &&
-        effectiveMode !== 'schematic' ? (
+      {fsOpen || walkOpen ? null : shouldShowLegacyAssemblyEmptyStateV1({
+          assemblyTableActive,
+          operationCount: fields.length,
+          unplacedPieceCount: unplacedReuploadedKeys.length,
+          effectiveMode,
+        }) ? (
         <div className='flex flex-col items-center gap-2 border border-dashed border-borderColor px-3 py-8 text-center'>
           <Text size='micro' variant='label'>
             the assembly sequence is empty so far. add the first step.
