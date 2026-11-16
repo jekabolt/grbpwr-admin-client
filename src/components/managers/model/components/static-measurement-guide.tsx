@@ -7,7 +7,10 @@ type GuidePoint = readonly [x: number, y: number];
 export type StaticMeasurementGuideSpecV1 = {
   readonly path: string;
   readonly points?: readonly GuidePoint[];
+  readonly view?: StaticMeasurementGuideViewV1;
 };
+
+export type StaticMeasurementGuideViewV1 = 'front' | 'back' | 'side';
 
 const loop = (left: number, right: number, y: number, depth: number): string =>
   `M ${left} ${y} C ${left} ${y - depth} ${right} ${y - depth} ${right} ${y} C ${right} ${
@@ -70,25 +73,25 @@ export const STATIC_MEASUREMENT_GUIDES_V1: Readonly<Record<string, StaticMeasure
       ],
     },
     BODY_MEASUREMENT_NAME_SLEEVE_LENGTH: {
-      path: 'M 171 64 Q 190 103 198 142 Q 204 166 207 184',
+      path: 'M 164 64 Q 168 105 170 143 Q 172 166 173 184',
       points: [
-        [171, 64],
-        [198, 142],
-        [207, 184],
+        [164, 64],
+        [170, 143],
+        [173, 184],
       ],
     },
     BODY_MEASUREMENT_NAME_BICEP: {
-      path: loop(171, 192, 94, 5),
+      path: loop(145, 160, 94, 5),
       points: [
-        [171, 94],
-        [192, 94],
+        [145, 94],
+        [160, 94],
       ],
     },
     BODY_MEASUREMENT_NAME_WRIST: {
-      path: loop(198, 216, 181, 4),
+      path: loop(152, 165, 181, 4),
       points: [
-        [198, 181],
-        [216, 181],
+        [152, 181],
+        [165, 181],
       ],
     },
     BODY_MEASUREMENT_NAME_INSEAM: {
@@ -155,11 +158,12 @@ export const STATIC_MEASUREMENT_GUIDES_V1: Readonly<Record<string, StaticMeasure
       ],
     },
     BODY_MEASUREMENT_NAME_CB_NECK_TO_WAIST: {
-      path: 'M 113 55 Q 106 96 111 137',
+      path: 'M 120 55 L 120 137',
       points: [
-        [113, 55],
-        [111, 137],
+        [120, 55],
+        [120, 137],
       ],
+      view: 'back',
     },
     BODY_MEASUREMENT_NAME_WAIST_HEIGHT: {
       path: 'M 64 137 L 64 352',
@@ -195,27 +199,31 @@ export const STATIC_MEASUREMENT_GUIDES_V1: Readonly<Record<string, StaticMeasure
         [80, 78],
         [160, 78],
       ],
+      view: 'back',
     },
     BODY_MEASUREMENT_NAME_CHEST_DEPTH: {
-      path: 'M 91 88 L 164 88 M 156 82 L 164 88 L 156 94',
+      path: 'M 78 88 L 165 88 M 86 82 L 78 88 L 86 94 M 157 82 L 165 88 L 157 94',
       points: [
-        [91, 88],
-        [164, 88],
+        [78, 88],
+        [165, 88],
       ],
+      view: 'side',
     },
     BODY_MEASUREMENT_NAME_WAIST_DEPTH: {
-      path: 'M 86 137 L 158 137 M 150 131 L 158 137 L 150 143',
+      path: 'M 88 137 L 154 137 M 96 131 L 88 137 L 96 143 M 146 131 L 154 137 L 146 143',
       points: [
-        [86, 137],
-        [158, 137],
+        [88, 137],
+        [154, 137],
       ],
+      view: 'side',
     },
     BODY_MEASUREMENT_NAME_HIP_DEPTH: {
-      path: 'M 73 170 L 170 170 M 162 164 L 170 170 L 162 176',
+      path: 'M 84 170 L 169 170 M 92 164 L 84 170 L 92 176 M 161 164 L 169 170 L 161 176',
       points: [
-        [73, 170],
-        [170, 170],
+        [84, 170],
+        [169, 170],
       ],
+      view: 'side',
     },
     BODY_MEASUREMENT_NAME_SHOULDER_LENGTH: {
       path: 'M 137 54 L 171 64',
@@ -240,10 +248,10 @@ export const STATIC_MEASUREMENT_GUIDES_V1: Readonly<Record<string, StaticMeasure
       ],
     },
     BODY_MEASUREMENT_NAME_ARMSCYE_CIRCUMFERENCE: {
-      path: loop(154, 176, 86, 14),
+      path: loop(142, 164, 86, 13),
       points: [
-        [154, 86],
-        [176, 86],
+        [142, 86],
+        [164, 86],
       ],
     },
     BODY_MEASUREMENT_NAME_BUST_APEX_TO_APEX: {
@@ -264,6 +272,10 @@ export const STATIC_MEASUREMENT_GUIDES_V1: Readonly<Record<string, StaticMeasure
 
 export type StaticMeasurementGuideGenderV1 = 'female' | 'male' | 'neutral';
 
+export type StaticMeasurementGuideSourcesV1 = Readonly<
+  Record<StaticMeasurementGuideGenderV1, Readonly<Record<StaticMeasurementGuideViewV1, string>>>
+>;
+
 export function staticMeasurementGuideGenderV1(
   gender: string | null | undefined,
 ): StaticMeasurementGuideGenderV1 {
@@ -275,26 +287,18 @@ export function staticMeasurementGuideGenderV1(
 export function StaticMeasurementGuide({
   measurementName,
   gender,
-  femaleSrc,
-  maleSrc,
-  neutralSrc,
+  sources,
   className,
 }: {
   measurementName: string;
   gender: string | null | undefined;
-  femaleSrc: string;
-  maleSrc: string;
-  neutralSrc?: string;
+  sources: StaticMeasurementGuideSourcesV1;
   className?: string;
 }) {
   const guide = STATIC_MEASUREMENT_GUIDES_V1[measurementName];
   const resolvedGender = staticMeasurementGuideGenderV1(gender);
-  const src =
-    resolvedGender === 'female'
-      ? femaleSrc
-      : resolvedGender === 'male'
-        ? maleSrc
-        : neutralSrc ?? femaleSrc;
+  const view = guide?.view ?? 'front';
+  const src = sources[resolvedGender][view];
 
   return (
     <figure
@@ -306,14 +310,12 @@ export function StaticMeasurementGuide({
       data-testid='static-measurement-guide'
       data-guide-gender={resolvedGender}
       data-guide-measurement={measurementName}
+      data-guide-view={view}
     >
       <img
         src={src}
-        alt={`${resolvedGender} mannequin · ${measurementLabel(measurementName)}`}
-        className={cn(
-          'absolute inset-0 h-full w-full object-contain',
-          resolvedGender === 'neutral' && 'grayscale',
-        )}
+        alt={`${resolvedGender} mannequin · ${view} view · ${measurementLabel(measurementName)}`}
+        className='absolute inset-0 h-full w-full object-contain'
         draggable={false}
       />
 

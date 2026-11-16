@@ -6,7 +6,19 @@ import { notify } from 'lib/stores/store';
 import { useEffect, useMemo, useState, type ChangeEvent, type MouseEvent } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { useNavigate } from 'react-router-dom';
-import { Close, ConfirmationModal, Input, Pill, Placeholder, Select, Text, Tile, Tiles } from 'ui';
+import {
+  Button,
+  Close,
+  ConfirmationModal,
+  Input,
+  Pill,
+  Placeholder,
+  Select,
+  Text,
+  Tile,
+  Tiles,
+} from 'ui';
+import { ModelCardMannequinPreviewWithSavedPoseV1 } from './model-card-mannequin-preview-v1';
 import { resolveModelCardListIdentitiesV1 } from './model-card-list-identity-v1';
 import { useDeleteModel, useInfiniteModels } from './useModelQuery';
 
@@ -28,6 +40,7 @@ export function ModelCardList() {
   const [name, setName] = useState('');
   const [debouncedName, setDebouncedName] = useState('');
   const [pendingDelete, setPendingDelete] = useState<{ id: number; name: string } | null>(null);
+  const [activePreviewModelId, setActivePreviewModelId] = useState<number | null>(null);
 
   // Debounce the name search so we don't hit the API on every keystroke.
   useEffect(() => {
@@ -50,6 +63,19 @@ export function ModelCardList() {
   const models = useMemo(() => data?.pages.flatMap((page) => page.models) ?? [], [data?.pages]);
   const modelIdentities = useMemo(() => resolveModelCardListIdentitiesV1(models), [models]);
   const total = data?.pages[0]?.total ?? models.length;
+
+  useEffect(() => {
+    setActivePreviewModelId(null);
+  }, [debouncedName, gender]);
+
+  useEffect(() => {
+    if (
+      activePreviewModelId !== null &&
+      !modelIdentities.some(({ id }) => id === activePreviewModelId)
+    ) {
+      setActivePreviewModelId(null);
+    }
+  }, [activePreviewModelId, modelIdentities]);
 
   const sizesLabel = (ids?: number[]) => {
     if (!ids?.length) return '—';
@@ -121,6 +147,7 @@ export function ModelCardList() {
             const insert = m.model;
             const thumb = m.media?.[0]?.media?.thumbnail?.mediaUrl || '';
             const label = insert?.name || (id === null ? 'model with invalid id' : `model #${id}`);
+            const showing3d = id !== null && activePreviewModelId === id;
             const idIssueLabel =
               identity.status === 'duplicate' ? 'duplicate model ID' : 'invalid model ID';
             const meta = [
@@ -140,7 +167,9 @@ export function ModelCardList() {
               >
                 <Tile
                   media={
-                    thumb ? (
+                    showing3d ? (
+                      <ModelCardMannequinPreviewWithSavedPoseV1 model={m} label={label} />
+                    ) : thumb ? (
                       <img
                         src={thumb}
                         alt=''
@@ -166,6 +195,31 @@ export function ModelCardList() {
                     </Text>
                   )}
                 </Tile>
+                <div className='absolute top-2 left-2 z-10'>
+                  <Button
+                    type='button'
+                    variant='simpleReverseWithBorder'
+                    size='xs'
+                    aria-label={
+                      id === null
+                        ? `mannequin unavailable for ${label}: ${idIssueLabel}`
+                        : `mannequin preview for ${label}`
+                    }
+                    aria-pressed={showing3d}
+                    disabled={id === null}
+                    data-testid={
+                      id === null
+                        ? `model-card-mannequin-toggle-${identity.status}-${index}`
+                        : `model-card-mannequin-toggle-${id}`
+                    }
+                    className='flex min-h-11 min-w-11 items-center justify-center bg-bgColor'
+                    onClick={() => {
+                      if (id !== null) setActivePreviewModelId(showing3d ? null : id);
+                    }}
+                  >
+                    {showing3d ? 'photo' : 'mannequin'}
+                  </Button>
+                </div>
                 {canEdit && id !== null && (
                   <div className='absolute top-1 right-1'>
                     <Close

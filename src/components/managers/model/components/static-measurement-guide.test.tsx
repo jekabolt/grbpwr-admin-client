@@ -5,8 +5,15 @@ import { MODEL_MEASUREMENTS } from './sheet-measurement-focus';
 import {
   STATIC_MEASUREMENT_GUIDES_V1,
   StaticMeasurementGuide,
+  type StaticMeasurementGuideSourcesV1,
   staticMeasurementGuideGenderV1,
 } from './static-measurement-guide';
+
+const SOURCES: StaticMeasurementGuideSourcesV1 = {
+  female: { front: '/female.png', back: '/female-back.png', side: '/female-side.png' },
+  male: { front: '/male.png', back: '/male-back.png', side: '/male-side.png' },
+  neutral: { front: '/neutral.png', back: '/neutral-back.png', side: '/neutral-side.png' },
+};
 
 describe('static measurement guide', () => {
   it('defines a visible marker for every model measurement', () => {
@@ -28,16 +35,14 @@ describe('static measurement guide', () => {
       <StaticMeasurementGuide
         measurementName='BODY_MEASUREMENT_NAME_CHEST'
         gender='GENDER_ENUM_FEMALE'
-        femaleSrc='/female.png'
-        maleSrc='/male.png'
+        sources={SOURCES}
       />,
     );
     const male = renderToStaticMarkup(
       <StaticMeasurementGuide
         measurementName='BODY_MEASUREMENT_NAME_CHEST'
         gender='GENDER_ENUM_MALE'
-        femaleSrc='/female.png'
-        maleSrc='/male.png'
+        sources={SOURCES}
       />,
     );
 
@@ -52,8 +57,7 @@ describe('static measurement guide', () => {
       <StaticMeasurementGuide
         measurementName='BODY_MEASUREMENT_NAME_INSEAM'
         gender='GENDER_ENUM_FEMALE'
-        femaleSrc='/female.png'
-        maleSrc='/male.png'
+        sources={SOURCES}
       />,
     );
 
@@ -61,5 +65,28 @@ describe('static measurement guide', () => {
     expect(html).toContain('data-testid="static-measurement-marker"');
     expect(html).toContain('M 120 181 L 120 328');
     expect(html.match(/<svg/g)).toHaveLength(1);
+  });
+
+  it('uses back and side artwork for measurements that cannot be explained from the front', () => {
+    const back = renderToStaticMarkup(
+      <StaticMeasurementGuide
+        measurementName='BODY_MEASUREMENT_NAME_ACROSS_BACK'
+        gender='GENDER_ENUM_MALE'
+        sources={SOURCES}
+      />,
+    );
+    const side = renderToStaticMarkup(
+      <StaticMeasurementGuide
+        measurementName='BODY_MEASUREMENT_NAME_CHEST_DEPTH'
+        gender='GENDER_ENUM_UNISEX'
+        sources={SOURCES}
+      />,
+    );
+
+    expect(back).toContain('src="/male-back.png"');
+    expect(back).toContain('data-guide-view="back"');
+    expect(side).toContain('src="/neutral-side.png"');
+    expect(side).toContain('data-guide-gender="neutral"');
+    expect(side).toContain('data-guide-view="side"');
   });
 });

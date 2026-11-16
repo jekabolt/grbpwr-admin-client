@@ -64,6 +64,14 @@ test('mobile guided measurements keep mannequin, field and navigation in one vie
   await expect(guided).toHaveCount(0);
   await expect(page.getByRole('textbox', { name: 'chest', exact: true })).toHaveValue('935');
   await expect(form.locator('[data-model-measurement]')).toHaveCount(34);
+  await expect(page.locator('[data-measurement-protocol-guide]')).toHaveCount(0);
+  await expect(page.getByText(/repeat tolerance/iu)).toHaveCount(0);
+  await expect(
+    page.getByText(
+      'Horizontal torso circumference through the fullest chest or bust level, under the arms.',
+      { exact: true },
+    ),
+  ).toHaveCount(0);
   await expect(page.getByTestId('model-open-reference-direct-pose-control-v9')).toBeVisible();
   await expect(page.getByRole('button', { name: 'cancel', exact: true })).toBeVisible();
   await expect(page.getByTestId('measurement-watertight-surface-v1-canvas')).toBeVisible({
@@ -78,6 +86,18 @@ test('mobile guided measurements keep mannequin, field and navigation in one vie
     'BODY_MEASUREMENT_NAME_INSEAM',
   );
   await expect(page.getByTestId('static-measurement-marker')).toBeVisible();
+
+  await page.getByRole('radio', { name: 'table', exact: true }).click();
+  await page.getByRole('textbox', { name: 'chest depth', exact: true }).focus();
+  await page.getByRole('radio', { name: 'guided', exact: true }).click();
+  await expect(staticGuide).toHaveAttribute('data-guide-view', 'side');
+  await expect(staticGuide.getByRole('img')).toHaveAttribute('alt', /side view/iu);
+
+  await page.getByRole('radio', { name: 'table', exact: true }).click();
+  await page.getByRole('textbox', { name: 'across back', exact: true }).focus();
+  await page.getByRole('radio', { name: 'guided', exact: true }).click();
+  await expect(staticGuide).toHaveAttribute('data-guide-view', 'back');
+  await expect(staticGuide.getByRole('img')).toHaveAttribute('alt', /back view/iu);
 });
 
 test('create flow starts with a neutral static guide and keeps form values empty', async ({

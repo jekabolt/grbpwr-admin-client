@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 
 const POSE_ASSET_NAMES = [
@@ -46,6 +47,69 @@ function expectNoUnexpectedNavigation(navigations: readonly string[]) {
   expect(navigations).toEqual([]);
 }
 
+interface WebGlContextProbe {
+  created: number;
+  live: number;
+  lost: number;
+  maxLive: number;
+}
+
+async function installWebGlContextProbe(page: Page) {
+  await page.addInitScript(() => {
+    const browserWindow = window as typeof window & {
+      __modelCardWebGlContextProbe?: WebGlContextProbe;
+    };
+    const probe: WebGlContextProbe = { created: 0, live: 0, lost: 0, maxLive: 0 };
+    browserWindow.__modelCardWebGlContextProbe = probe;
+    const countedContexts = new WeakSet<object>();
+    const lostContexts = new WeakSet<object>();
+    const originalGetContext = HTMLCanvasElement.prototype.getContext;
+
+    HTMLCanvasElement.prototype.getContext = function (
+      ...args: Parameters<typeof originalGetContext>
+    ) {
+      const context = Reflect.apply(originalGetContext, this, args) as RenderingContext | null;
+      const contextName = String(args[0]);
+      if (
+        context &&
+        (contextName === 'webgl' ||
+          contextName === 'webgl2' ||
+          contextName === 'experimental-webgl') &&
+        !countedContexts.has(context)
+      ) {
+        countedContexts.add(context);
+        probe.created += 1;
+        probe.live += 1;
+        probe.maxLive = Math.max(probe.maxLive, probe.live);
+
+        const webGlContext = context as WebGLRenderingContext;
+        const extension = webGlContext.getExtension('WEBGL_lose_context');
+        if (extension) {
+          const originalLoseContext = extension.loseContext.bind(extension);
+          extension.loseContext = () => {
+            if (!lostContexts.has(context)) {
+              lostContexts.add(context);
+              probe.lost += 1;
+              probe.live -= 1;
+            }
+            originalLoseContext();
+          };
+        }
+      }
+      return context;
+    } as typeof originalGetContext;
+  });
+}
+
+function readWebGlContextProbe(page: Page): Promise<WebGlContextProbe> {
+  return page.evaluate(() => {
+    const probe = (window as typeof window & { __modelCardWebGlContextProbe?: WebGlContextProbe })
+      .__modelCardWebGlContextProbe;
+    if (!probe) throw new Error('WebGL context probe was not installed.');
+    return { ...probe };
+  });
+}
+
 function storedModelFixture(id: number, name: string, waistMm: number) {
   return {
     id,
@@ -65,6 +129,78 @@ function storedModelFixture(id: number, name: string, waistMm: number) {
       mediaIds: [],
     },
     media: [],
+  };
+}
+
+function storedCardPoseFixture(modelId: number) {
+  const arm = {
+    shoulderRaiseDegrees: 0,
+    shoulderForwardDegrees: 0,
+    elbowBendDegrees: 0,
+    wristBendDegrees: 0,
+  };
+  const leg = { hipForwardDeg: 0, hipSideDeg: 0, kneeBendDeg: 0, ankleBendDeg: 0 };
+  const pose = {
+    bodyFlexionDegrees: 0,
+    bodySideBendDegrees: 0,
+    bodyTwistDegrees: 0,
+    armMode: 'linked',
+    leftArm: arm,
+    rightArm: arm,
+    headPitchDeg: 0,
+    headYawDeg: 10,
+    headSideDeg: 0,
+    shoulderProtractionDeg: 0,
+    shoulderElevationDeg: 0,
+    shoulderLevelDeg: 0,
+    legMode: 'linked',
+    leftLeg: leg,
+    rightLeg: leg,
+  } as const;
+  const canonicalSha256 = createHash('sha256')
+    .update(
+      JSON.stringify({
+        schema: 'grbpwr.model-mannequin-pose/v2',
+        poseSpace: 'makehuman-open-reference/direct-pose-v9',
+        pose,
+      }),
+    )
+    .digest('hex');
+  return {
+    modelId,
+    revision: '11',
+    updatedAt: '2026-11-15T00:00:00Z',
+    updatedBy: 'browser-gate',
+    pose: {
+      schemaVersion: 2,
+      poseSpace: 'MODEL_MANNEQUIN_POSE_SPACE_MAKEHUMAN_OPEN_REFERENCE_DIRECT_POSE_V9',
+      bodyFlexionDegrees: pose.bodyFlexionDegrees,
+      bodySideBendDegrees: pose.bodySideBendDegrees,
+      bodyTwistDegrees: pose.bodyTwistDegrees,
+      armMode: 'MODEL_MANNEQUIN_ARM_MODE_LINKED',
+      leftArm: pose.leftArm,
+      rightArm: pose.rightArm,
+      headPitchDegrees: pose.headPitchDeg,
+      headYawDegrees: pose.headYawDeg,
+      headSideDegrees: pose.headSideDeg,
+      shoulderProtractionDegrees: pose.shoulderProtractionDeg,
+      shoulderElevationDegrees: pose.shoulderElevationDeg,
+      shoulderLevelDegrees: pose.shoulderLevelDeg,
+      legMode: 'MODEL_MANNEQUIN_LEG_MODE_LINKED',
+      leftLeg: {
+        hipForwardDegrees: pose.leftLeg.hipForwardDeg,
+        hipSideDegrees: pose.leftLeg.hipSideDeg,
+        kneeBendDegrees: pose.leftLeg.kneeBendDeg,
+        ankleBendDegrees: pose.leftLeg.ankleBendDeg,
+      },
+      rightLeg: {
+        hipForwardDegrees: pose.rightLeg.hipForwardDeg,
+        hipSideDegrees: pose.rightLeg.hipSideDeg,
+        kneeBendDegrees: pose.rightLeg.kneeBendDeg,
+        ankleBendDegrees: pose.rightLeg.ankleBendDeg,
+      },
+      canonicalSha256,
+    },
   };
 }
 
@@ -380,8 +516,11 @@ test('keeps V4 independent controls touch-safe without horizontal overflow', asy
   );
 });
 
-test('keeps model tiles free of the retired 3D preview control', async ({ page }, testInfo) => {
+test('keeps exactly one on-demand mannequin active across real Models cards', async ({
+  page,
+}, testInfo) => {
   desktopOnly(testInfo);
+  await installWebGlContextProbe(page);
   const requests: string[] = [];
   page.on('request', (request) => requests.push(request.url()));
   await page.route('**/api/admin/**', async (route) => {
@@ -401,13 +540,209 @@ test('keeps model tiles free of the retired 3D preview control', async ({ page }
 
   await page.goto('/__model-card-list-preview-v1');
   await expect(page.getByTestId('model-card-list-dev-page')).toBeVisible();
-  await expect(page.getByTestId('model-card-list-item')).toHaveCount(2);
-  await expect(page.getByRole('button', { name: /3D preview/iu })).toHaveCount(0);
-  await expect(page.locator('[data-testid^="model-card-mannequin-toggle-"]')).toHaveCount(0);
   await expect(page.getByTestId('model-card-mannequin-preview')).toHaveCount(0);
   await expect(page.getByTestId('measurement-watertight-surface-v1-canvas')).toHaveCount(0);
   expect(authenticatedPoseAssetFetches(requests)).toEqual([]);
 
-  await page.getByText('Alex', { exact: true }).click();
-  await expect(page).toHaveURL(/\/models\/1$/u);
+  const alexToggle = page.getByRole('button', { name: 'mannequin preview for Alex', exact: true });
+  await expect(alexToggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(alexToggle).toHaveText('mannequin');
+  const toggleBox = await alexToggle.boundingBox();
+  expect(toggleBox).not.toBeNull();
+  expect(toggleBox!.width).toBeGreaterThanOrEqual(44);
+  expect(toggleBox!.height).toBeGreaterThanOrEqual(44);
+  await alexToggle.click();
+  await expect(alexToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(alexToggle).toHaveText('photo');
+  const preview = page.getByTestId('model-card-mannequin-preview');
+  await expect(preview).toHaveCount(1);
+  await expect(preview).toHaveAttribute('data-model-id', '1');
+  await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
+    'Preview ready.',
+    { timeout: 180_000 },
+  );
+  const staticViewport = page.getByRole('img', { name: /Static front view/i });
+  await expect(staticViewport).toHaveCount(1);
+  await expect(staticViewport).not.toHaveAttribute('tabindex');
+  await expect(staticViewport).not.toHaveAttribute('aria-label', /Drag|wheel|Keyboard/iu);
+  expect(requests.filter((url) => /\/api\/admin\/model\/get(?:\?|$)/u.test(url))).toEqual([]);
+  const firstCanvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
+  await expect(firstCanvas).toHaveCount(1);
+  await expect.poll(async () => (await readWebGlContextProbe(page)).live).toBe(1);
+  expect(await readWebGlContextProbe(page)).toMatchObject({ created: 1, live: 1, maxLive: 1 });
+  await firstCanvas.evaluate((element) => element.setAttribute('data-model-card-marker', 'alex'));
+
+  const morganToggle = page.getByRole('button', {
+    name: 'mannequin preview for Morgan',
+    exact: true,
+  });
+  await morganToggle.click();
+  await expect(morganToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(alexToggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(preview).toHaveCount(1);
+  await expect(preview).toHaveAttribute('data-model-id', '2');
+  await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
+    'Preview ready',
+    { timeout: 180_000 },
+  );
+  const secondCanvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
+  await expect(secondCanvas).toHaveCount(1);
+  await expect(secondCanvas).not.toHaveAttribute('data-model-card-marker', 'alex');
+  await expect.poll(async () => (await readWebGlContextProbe(page)).live).toBe(1);
+  expect(await readWebGlContextProbe(page)).toMatchObject({
+    created: 2,
+    live: 1,
+    lost: 1,
+    maxLive: 1,
+  });
+  const cardPoseAssetFetches = authenticatedPoseAssetFetches(requests);
+  expect(cardPoseAssetFetches).toHaveLength(2);
+  expect(
+    cardPoseAssetFetches.map((url) => POSE_ASSET_NAMES.find((name) => url.includes(name))).sort(),
+  ).toEqual([...POSE_ASSET_NAMES].sort());
+
+  await morganToggle.click();
+  await expect(preview).toHaveCount(0);
+  await expect(page.getByTestId('measurement-watertight-surface-v1-canvas')).toHaveCount(0);
+  await expect.poll(async () => (await readWebGlContextProbe(page)).live).toBe(0);
+  expect(await readWebGlContextProbe(page)).toMatchObject({ lost: 2, maxLive: 1 });
+
+  await alexToggle.click();
+  await expect(preview).toHaveCount(1);
+  await page.getByPlaceholder('search by name').fill('Alex');
+  await expect(preview).toHaveCount(0);
+  await expect(alexToggle).toHaveAttribute('aria-pressed', 'false');
+});
+
+test('renders the saved pose read-only in the on-demand Models card', async ({
+  page,
+}, testInfo) => {
+  desktopOnly(testInfo);
+  let poseGets = 0;
+  await page.route('**/api/admin/**', async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    const body = pathname.endsWith('/api/admin/model/list')
+      ? { models: [storedModelFixture(1, 'Alex', 740)], total: 1 }
+      : pathname.endsWith('/api/admin/model/1/mannequin-pose')
+        ? { storedPose: storedCardPoseFixture(1) }
+        : {};
+    if (pathname.endsWith('/api/admin/model/1/mannequin-pose')) poseGets += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(body),
+    });
+  });
+
+  await page.goto('/__model-card-list-preview-v1');
+  await expect(page.getByTestId('model-card-mannequin-preview')).toHaveCount(0);
+  expect(poseGets).toBe(0);
+
+  await page.getByRole('button', { name: 'mannequin preview for Alex', exact: true }).click();
+  const preview = page.getByTestId('model-card-mannequin-preview');
+  await expect(preview).toHaveAttribute('data-pose-resource-status', 'found');
+  await expect(preview).toHaveAttribute('data-pose-display', 'saved');
+  await expect(page.getByTestId('model-open-reference-preview')).toHaveAttribute(
+    'data-pose-controls',
+    'full-body-v9',
+  );
+  await expect(page.getByTestId('model-open-reference-preview')).toHaveAttribute(
+    'data-pose-draft',
+    'custom',
+  );
+  await expect(page.getByTestId('model-open-reference-preview')).toHaveAttribute(
+    'data-pose-viewport-editing',
+    'disabled',
+  );
+  await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
+    'Preview partial: custom full-body pose. Some entered measurement morphs were limited or not applied.',
+    { timeout: 180_000 },
+  );
+  await expect(page.getByRole('button', { name: /save pose|reset pose|undo pose/iu })).toHaveCount(
+    0,
+  );
+  expect(poseGets).toBe(1);
+});
+
+test('fails closed for duplicate and missing Models-card ids', async ({ page }, testInfo) => {
+  desktopOnly(testInfo);
+  await page.route('**/api/admin/**', async (route) => {
+    const url = new URL(route.request().url());
+    const body = url.pathname.endsWith('/api/admin/model/list')
+      ? {
+          models: [
+            storedModelFixture(1, 'Duplicate A', 740),
+            storedModelFixture(1, 'Duplicate B', 760),
+            { ...storedModelFixture(3, 'Missing', 780), id: undefined },
+            storedModelFixture(2, 'Valid', 850),
+          ],
+          total: 4,
+        }
+      : {};
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(body),
+    });
+  });
+
+  await page.goto('/__model-card-list-preview-v1');
+  await expect(page.getByTestId('model-card-list-item')).toHaveCount(4);
+  await expect(page.locator('[data-model-card-id-status="duplicate"]')).toHaveCount(2);
+  await expect(page.locator('[data-model-card-id-status="invalid"]')).toHaveCount(1);
+  await expect(page.locator('[data-model-card-id-status="valid"]')).toHaveCount(1);
+
+  await expect(
+    page.getByRole('button', {
+      name: 'mannequin unavailable for Duplicate A: duplicate model ID',
+    }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole('button', {
+      name: 'mannequin unavailable for Duplicate B: duplicate model ID',
+    }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: 'mannequin unavailable for Missing: invalid model ID' }),
+  ).toBeDisabled();
+  await expect(page.getByTestId('model-card-mannequin-preview')).toHaveCount(0);
+
+  const validToggle = page.getByRole('button', {
+    name: 'mannequin preview for Valid',
+    exact: true,
+  });
+  await validToggle.click();
+  await expect(validToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('model-card-mannequin-preview')).toHaveCount(1);
+  await expect(page.getByTestId('model-card-mannequin-preview')).toHaveAttribute(
+    'data-model-id',
+    '2',
+  );
+});
+
+test('keeps the Models-card mannequin toggle touch-safe on mobile', async ({ page }, testInfo) => {
+  mobileOnly(testInfo);
+  await page.route('**/api/admin/**', async (route) => {
+    const url = new URL(route.request().url());
+    const body = url.pathname.endsWith('/api/admin/model/list')
+      ? { models: [storedModelFixture(1, 'Alex', 740)], total: 1 }
+      : {};
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(body),
+    });
+  });
+
+  await page.goto('/__model-card-list-preview-v1');
+  const toggle = page.getByRole('button', { name: 'mannequin preview for Alex', exact: true });
+  const box = await toggle.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.width).toBeGreaterThanOrEqual(44);
+  expect(box!.height).toBeGreaterThanOrEqual(44);
+  const initialUrl = page.url();
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  expect(page.url()).toBe(initialUrl);
 });
