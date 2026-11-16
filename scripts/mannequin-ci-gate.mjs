@@ -51,6 +51,10 @@ const unitFiles = Object.freeze([
 
 const browserSuites = Object.freeze([
   Object.freeze({
+    label: 'mobile touch pose ownership and guided/table form continuity',
+    config: 'playwright.model-form-direct-pose-touch-v1.config.ts',
+  }),
+  Object.freeze({
     label: 'V9 live pose, camera, arms-at-sides and anatomical rejection',
     config: 'playwright.model-form-direct-pose-v9.config.ts',
     grep: [
