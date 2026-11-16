@@ -193,6 +193,7 @@
     "test:mannequin:ci": "node scripts/mannequin-ci-gate.mjs all",
     "test:assembly-table:browser": "node scripts/assembly-table-browser-smoke.mjs",
     "test:assembly-table:ao-browser": "node scripts/assembly-table-ao-browser-smoke.mjs",
+    "test:assembly-table:mannequin-browser": "node scripts/assembly-table-mannequin-browser-smoke.mjs",
     "pretest": "vite build",
     "test": "vitest run scripts/probes.test.ts --maxWorkers=1"
   },
