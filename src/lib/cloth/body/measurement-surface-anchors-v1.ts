@@ -550,24 +550,19 @@ function crotchRule(
   return ruleSuccess(positionM, meshSurfaceVertexPointV1(crotchVertex));
 }
 
-function shorterArc(length: number, start: number, end: number): readonly number[] {
-  const forward: number[] = [];
-  for (let index = start; index !== end; index = (index + 1) % length) forward.push(index);
-  forward.push(end);
-  const backward: number[] = [];
-  for (let index = start; index !== end; index = (index - 1 + length) % length)
-    backward.push(index);
-  backward.push(end);
-  return forward.length <= backward.length ? forward : backward;
-}
-
+/**
+ * HPS-L, the construction behind design §2.2 (scratch `neck.mjs`): on the coronal section through
+ * mid(z_C7, z_SSN), take the left contour in x ∈ (10, 220) mm, y ∈ (0.78, 0.89)·H; the neck point A is
+ * the innermost contour point within 6 mm of 0.875·H; the shoulder point is the contour point whose x is
+ * closest to A.x + 90 mm; the corner is the contour point between them farthest from chord A–shoulder.
+ * Plateau = the largest distance between any two contour points scoring > 90% of the peak.
+ */
 function hpsLeftRule(
   topology: MeshSurfaceTopologyV1,
   positionsM: Float32Array,
   currentBounds: Bounds,
   ssn: SurfaceAnchorRuleSuccessV1,
   c7: SurfaceAnchorRuleSuccessV1,
-  underarm: UnderarmRuleSuccess,
 ): SurfaceAnchorRuleResultV1 {
   const sectionZ = (ssn.positionM[2] + c7.positionM[2]) / 2;
   const section = measureMeshPlaneSectionPerimetersV1({
@@ -577,82 +572,59 @@ function hpsLeftRule(
     planeNormal: [0, 0, 1],
   });
   if (!section.ok) return ruleFailure(`Coronal section failed: ${section.code}.`);
-  const loop = [...section.loops]
-    .filter((candidate) => {
-      const hasNeck = candidate.pointsM.some(
-        (point) =>
-          point[0] > 0 && Math.abs(point[1] - c7.positionM[1]) <= currentBounds.heightM * 0.05,
-      );
-      const hasShoulder = candidate.pointsM.some(
-        (point) =>
-          point[0] > 0 && point[1] >= underarm.sectionLevelM && point[1] <= c7.positionM[1],
-      );
-      return hasNeck && hasShoulder;
-    })
-    .sort((left, right) => right.perimeterM - left.perimeterM)[0];
-  if (!loop) return ruleFailure('Left neck/shoulder contour is missing.');
-
-  const neckLimitX = currentBounds.heightM * 0.1;
-  const neckCandidates = loop.pointsM.flatMap((point, index) =>
-    point[0] > 0 && point[0] <= neckLimitX ? [{ point, index }] : [],
+  const levelM = (fraction: number) => currentBounds.minimumY + currentBounds.heightM * fraction;
+  const contour = section.loops.flatMap((loop) =>
+    loop.pointsM.filter(
+      (point) =>
+        point[0] > 0.01 && point[0] < 0.22 && point[1] > levelM(0.78) && point[1] < levelM(0.89),
+    ),
   );
-  const shoulderCandidates = loop.pointsM.flatMap((point, index) =>
-    point[0] > 0 && point[1] >= underarm.sectionLevelM && point[1] <= c7.positionM[1]
-      ? [{ point, index }]
-      : [],
+  const neckLevelM = levelM(0.875);
+  const neckCandidates = contour.filter((point) => Math.abs(point[1] - neckLevelM) < 0.006);
+  if (neckCandidates.length === 0) return ruleFailure('Neck side point is missing.');
+  const neck = neckCandidates.reduce((best, point) => (point[0] < best[0] ? point : best));
+  const shoulderX = neck[0] + 0.09;
+  const shoulder = contour.reduce((best, point) =>
+    Math.abs(point[0] - shoulderX) < Math.abs(best[0] - shoulderX) ? point : best,
   );
-  if (neckCandidates.length === 0 || shoulderCandidates.length === 0) {
-    return ruleFailure('Neck/shoulder chord endpoints are missing.');
-  }
-  const neck = neckCandidates.reduce((best, candidate) => {
-    const candidateDistance = Math.abs(candidate.point[1] - c7.positionM[1]);
-    const bestDistance = Math.abs(best.point[1] - c7.positionM[1]);
-    return candidateDistance < bestDistance ||
-      (candidateDistance === bestDistance && candidate.index < best.index)
-      ? candidate
-      : best;
-  });
-  const shoulder = shoulderCandidates.reduce((best, candidate) =>
-    candidate.point[0] > best.point[0] ||
-    (candidate.point[0] === best.point[0] && candidate.index < best.index)
-      ? candidate
-      : best,
+  const outer = contour.filter(
+    (point) =>
+      point[0] >= neck[0] - 0.002 &&
+      point[0] <= shoulder[0] &&
+      point[1] <= neck[1] + 0.001 &&
+      point[1] >= shoulder[1] - 0.001,
   );
-  const arc = shorterArc(loop.pointsM.length, neck.index, shoulder.index);
-  if (arc.length < 3) return ruleFailure('Neck/shoulder contour arc is incomplete.');
-
-  const chordX = shoulder.point[0] - neck.point[0];
-  const chordY = shoulder.point[1] - neck.point[1];
+  const chordX = shoulder[0] - neck[0];
+  const chordY = shoulder[1] - neck[1];
   const chordLength = Math.hypot(chordX, chordY);
-  if (chordLength === 0) return ruleFailure('Neck/shoulder chord is degenerate.');
-  const distances = arc.map((index) => {
-    const point = loop.pointsM[index];
-    // Signed toward the outer neck bulge; the opposite sign is the shoulder's inward sag.
-    return (
-      (chordX * (neck.point[1] - point[1]) - (neck.point[0] - point[0]) * chordY) / chordLength
-    );
-  });
-  const peakOffset = distances.reduce(
-    (best, candidate, index) => (candidate > distances[best] ? index : best),
-    0,
-  );
-  const peakDistance = distances[peakOffset];
-  if (!(peakDistance > 0)) return ruleFailure('Neck/shoulder contour has no outward peak.');
-  const peakIndex = arc[peakOffset];
-  const positionM = frozenVec3(...loop.pointsM[peakIndex]);
-  const plateauOffsets = distances.flatMap((distance, index) =>
-    distance >= peakDistance * 0.9 ? [index] : [],
-  );
-  let plateauM = 0;
-  for (
-    let index = plateauOffsets[0];
-    index < plateauOffsets[plateauOffsets.length - 1];
-    index += 1
-  ) {
-    const left = loop.pointsM[arc[index]];
-    const right = loop.pointsM[arc[index + 1]];
-    plateauM += Math.hypot(right[0] - left[0], right[1] - left[1], right[2] - left[2]);
+  if (outer.length === 0 || chordLength === 0) {
+    return ruleFailure('Neck/shoulder chord is degenerate.');
   }
+  const scored = outer.map((point) => ({
+    point,
+    distance: Math.abs(
+      ((point[0] - neck[0]) * chordY - (point[1] - neck[1]) * chordX) / chordLength,
+    ),
+  }));
+  const peak = scored.reduce((best, candidate) =>
+    candidate.distance > best.distance ? candidate : best,
+  );
+  if (!(peak.distance > 0)) return ruleFailure('Neck/shoulder contour has no corner.');
+  const plateau = scored.filter((candidate) => candidate.distance > peak.distance * 0.9);
+  let plateauM = 0;
+  for (const left of plateau) {
+    for (const right of plateau) {
+      plateauM = Math.max(
+        plateauM,
+        Math.hypot(
+          right.point[0] - left.point[0],
+          right.point[1] - left.point[1],
+          right.point[2] - left.point[2],
+        ),
+      );
+    }
+  }
+  const positionM = frozenVec3(...peak.point);
   return ruleSuccess(
     positionM,
     meshSurfaceVertexPointV1(nearestVertex(topology, positionsM, positionM)),
@@ -701,7 +673,7 @@ export function evaluateSurfaceAnchorRulesV1(options: {
   const crotch = crotchRule(options.topology, options.positionsM, profiles.crotch);
   const hpsLeft =
     ssn.ok && c7.ok && underarmLeft.ok
-      ? hpsLeftRule(options.topology, options.positionsM, currentBounds, ssn, c7, underarmLeft)
+      ? hpsLeftRule(options.topology, options.positionsM, currentBounds, ssn, c7)
       : ruleFailure('HPS prerequisites failed.');
 
   return Object.freeze({

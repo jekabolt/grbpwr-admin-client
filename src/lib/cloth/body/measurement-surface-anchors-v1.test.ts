@@ -125,8 +125,47 @@ function separationMm(left: MeshSurfaceVec3V1, right: MeshSurfaceVec3V1): number
   return Math.hypot(left[0] - right[0], left[1] - right[1], left[2] - right[2]) * 1000;
 }
 
+/**
+ * HPS plateau under the design §2.2 definition (scratch neck.mjs: 24.6 / 22.4 / 31.1 / 11.8 mm).
+ * Male exceeds the design's own 30 mm runtime limit, so its HPS check fails honestly.
+ */
+const DESIGN_HPS_PLATEAU_MM = Object.freeze({
+  female: 24.6,
+  neutral: 22.4,
+  male: 31.1,
+  base: 11.8,
+} as const satisfies Record<MakeHumanOpenReferenceBasisKindV1, number>);
+
 describe('measurement surface anchors v1', () => {
   it.each(KINDS)(
+    '%s HPS plateau reproduces the design definition',
+    (kind) => {
+      const rules = evaluated(kind);
+      for (const id of ['hps-l', 'hps-r'] as const) {
+        const rule = rules[id];
+        expect(rule.ok, id).toBe(true);
+        if (!rule.ok) continue;
+        expect(Math.abs((rule.plateauMm ?? NaN) - DESIGN_HPS_PLATEAU_MM[kind])).toBeLessThanOrEqual(
+          0.1,
+        );
+      }
+    },
+    30_000,
+  );
+
+  it('male fails only the HPS plateau limit, with an honest code', () => {
+    const result = checked('male');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('anchor-check-failed');
+    expect(result.failures.map((failure) => failure.id).sort()).toEqual(['hps-l', 'hps-r']);
+    for (const failure of result.failures) {
+      expect(failure.code).toBe('anchor-check-failed');
+      expect(failure.detail).toMatch(/plateau/i);
+    }
+  }, 30_000);
+
+  it.each(KINDS.filter((kind) => kind !== 'male'))(
     '%s rules pass on the real basis and report fractions and time',
     (kind) => {
       const current = fixture(kind);
@@ -241,15 +280,19 @@ describe('measurement surface anchors v1', () => {
   it.each(KINDS)(
     '%s satisfies the frozen height order',
     (kind) => {
-      const result = checked(kind);
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-      const ssnY = result.anchors.ssn.rulePositionM[1];
-      const c7Y = result.anchors.c7.rulePositionM[1];
+      const rules = evaluated(kind);
+      const { ssn, c7 } = rules;
+      expect(ssn.ok && c7.ok).toBe(true);
+      if (!ssn.ok || !c7.ok) return;
+      const ssnY = ssn.positionM[1];
+      const c7Y = c7.positionM[1];
       expect(ssnY).toBeLessThan(c7Y);
       for (const id of ['hps-l', 'hps-r'] as const) {
-        expect(result.anchors[id].rulePositionM[1]).toBeGreaterThanOrEqual(ssnY - 0.01);
-        expect(result.anchors[id].rulePositionM[1]).toBeLessThanOrEqual(c7Y + 0.01);
+        const hps = rules[id];
+        expect(hps.ok).toBe(true);
+        if (!hps.ok) continue;
+        expect(hps.positionM[1]).toBeGreaterThanOrEqual(ssnY - 0.01);
+        expect(hps.positionM[1]).toBeLessThanOrEqual(c7Y + 0.01);
       }
     },
     30_000,
