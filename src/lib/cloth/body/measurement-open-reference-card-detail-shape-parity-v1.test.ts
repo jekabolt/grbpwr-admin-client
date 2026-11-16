@@ -23,7 +23,12 @@ const torsoBundle = parseMakeHumanTorsoShapeDeltaBundleV1(
   readFileSync(resolve(process.cwd(), 'src/assets/cloth/makehuman-hm08-torso-shape-deltas-v1.bin')),
 );
 
-const measurements = CANONICAL_MEASUREMENT_SIZE_RECORDS[1].measurements;
+const measurements = Object.freeze({
+  ...CANONICAL_MEASUREMENT_SIZE_RECORDS[1].measurements,
+  chestDepthMm: 205,
+  waistDepthMm: 195,
+  hipDepthMm: 225,
+});
 const basis = parseMakeHumanOpenReferenceBasisV1(
   readFileSync(resolve(process.cwd(), MAKEHUMAN_OPEN_REFERENCE_BASIS_METADATA_V1.female.assetPath)),
   'female',
@@ -114,6 +119,9 @@ describe('model card/detail personalized shape parity v1', () => {
         'chestCircumferenceMm',
         'waistCircumferenceMm',
         'hipCircumferenceMm',
+        'chestDepthMm',
+        'waistDepthMm',
+        'hipDepthMm',
       ]),
     });
     expect(card.binding.sourceRevision).toContain(
