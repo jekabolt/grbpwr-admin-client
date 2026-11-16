@@ -16,7 +16,15 @@
 import type { PtMm } from 'lib/pattern-import/types';
 import { segIntersect, segNearest, SegGrid } from 'lib/pattern-import/pieces/geom';
 
-import { canonTopology, chordBumps, outlineOf, predictPair, selfIntersects } from './checks';
+import {
+  canonTopology,
+  chordBumps,
+  insideWithin,
+  outlineOf,
+  predictPair,
+  ringDistance,
+  selfIntersects,
+} from './checks';
 import { predictAll } from './grade-all';
 import { fitFamily, GFIT_TOL_P0, type GfitFamily, type GfitSizeIn, type GfitTol } from './fit';
 import { analyseOutline, ringOf } from './outline';
@@ -27,7 +35,7 @@ import { analyseOutline, ringOf } from './outline';
  * (within `overlayMm`): the sizes coincide there, the drawing draws the edge once (a shared stretch
  * in one size's pen) — the grade puts this size between them, on it.
  */
-export type GfitWallKind = 'own' | 'common' | 'overlay';
+export type GfitWallKind = 'own' | 'common' | 'overlay' | 'loose';
 export type GfitWall = { pts: readonly PtMm[]; kind: GfitWallKind; closed?: boolean };
 
 export const GFIT_REPAIR = {
@@ -125,7 +133,11 @@ export type GfitRepairRefusal =
   // draw mode: a drawn stretch crosses the outline of a bracketing anchor (the nest of sizes breaks)
   | 'D-cross-nest'
   // draw mode, extrapolated size: a drawn stretch longer than GFIT_REPAIR.extrapolateMaxHoleMm
-  | 'X-hole';
+  | 'X-hole'
+  // GFIT_EDGE_ACCEPT: the accepted outline lies on the neighbouring anchor, not one step past it
+  | 'E5-on-anchor'
+  // GFIT_LOCAL_CORRIDOR: the accepted outline does not nest between its two anchors
+  | 'E5-nest';
 
 export type GfitRepairHole = {
   lenMm: number;
@@ -171,6 +183,18 @@ export type GfitRepair = {
   usedWalls: number[];
   /** The anchors the grade model trusts (after the robust fit). */
   trusted?: number[];
+  /** GFIT_LOCAL: the pair an inconsistent family's size was judged by, and whether each anchor is
+   * one fitFamily trusts (an untrusted one may be closed wrong — picture it); `common` = the share of
+   * the perimeter snapped onto common walls (they cover any pair). */
+  local?: {
+    r1: number;
+    r2: number;
+    t1: boolean;
+    t2: boolean;
+    common?: number;
+    /** GFIT_LOCAL_CORRIDOR: median leave-one-out p95 of the trusted anchors, mm. */
+    scatterMm?: number;
+  };
   /** Why there is no model ('inconsistent', 'anchors<2', … — fitFamily; 'no-pair-match'). */
   modelWhy?: string;
   /** Draw mode: the prediction came from all anchors (variant D, grade-all.ts), this many sizes. */
@@ -265,24 +289,57 @@ function repairWith(
     0,
     ...fam.sizes.filter((v) => fam.trusted.includes(v.rank)).map((v) => v.score),
   );
-  if (!fam.model || (inconsistent && (!opts.draw || worstTrusted > C.gradeAllMaxScore))) {
+  // GFIT_LOCAL: an inconsistent family is judged at the size, not over the range — the nearest
+  // trusted anchor on each side is the pair (else the nearest anchor, flagged in res.local), the
+  // E3 tolerance check is the pair's own leave-one-out, and E1–E4 stand as they are: a wrong pair
+  // puts the corridor off the size's own lines and the cover refuses. Not in draw mode (f3, 16 Nov):
+  // there the drawn share is the pair's line, unchecked by any drawn wall.
+  const local =
+    inconsistent && typeof process !== 'undefined' && !!process.env?.GFIT_LOCAL && !opts.draw;
+  if (
+    !fam.model ||
+    (inconsistent && !local && (!opts.draw || worstTrusted > C.gradeAllMaxScore))
+  ) {
     res.modelWhy = fam.why ?? 'no-model';
     refuse('no-model');
     return res;
   }
-  if (inconsistent) res.modelWhy = 'inconsistent';
+  if (inconsistent) res.modelWhy = local ? 'inconsistent-local' : 'inconsistent';
   res.trusted = fam.trusted;
-  const trusted = [...fam.trusted].sort((a, b) => a - b);
+  let pairPool = fam.trusted;
+  if (local) {
+    const pool = ins
+      .filter((x) => x.anchor && !fam.droppedAmbiguous?.includes(x.rank))
+      .map((x) => x.rank);
+    const side = (below: boolean) => {
+      const xs = pool.filter((r) => (below ? r < rank : r > rank));
+      const tr = xs.filter((r) => fam.trusted.includes(r));
+      const pick = (a: number[]) => (a.length ? (below ? Math.max(...a) : Math.min(...a)) : null);
+      return pick(tr) ?? pick(xs);
+    };
+    const a = side(true);
+    const b = side(false);
+    pairPool = [a, b].filter((r): r is number => r != null);
+    if (a != null && b != null)
+      res.local = { r1: a, r2: b, t1: fam.trusted.includes(a), t2: fam.trusted.includes(b) };
+  }
+  const trusted = [...pairPool].sort((a, b) => a - b);
   const lo = trusted.filter((r) => r < rank);
   const hi = trusted.filter((r) => r > rank);
   let r1: number;
   let r2: number;
+  // GFIT_EDGE_ACCEPT (off by default): outside draw mode, accept the size's own line one step
+  // past the last anchor, on the same extrapolation draw mode uses. The corridor stays as it is.
+  let edgeAccepted = false;
   if (lo.length && hi.length) [r1, r2] = [lo[lo.length - 1], hi[0]];
   else {
     // the end of the range: draw mode may carry the grade of the two nearest anchors one step on
     const edge = hi.length ? hi[0] : lo[lo.length - 1];
+    const edgeAccept =
+      !opts.draw && typeof process !== 'undefined' && !!process.env?.GFIT_EDGE_ACCEPT;
     if (
-      !opts.draw?.extrapolate ||
+      local ||
+      !(opts.draw?.extrapolate || edgeAccept) ||
       trusted.length < C.extrapolateMinTrusted ||
       Math.abs(rank - edge) !== 1
     ) {
@@ -291,6 +348,7 @@ function repairWith(
     }
     [r1, r2] = hi.length ? [hi[0], hi[1]] : [lo[lo.length - 2], lo[lo.length - 1]];
     res.extrapolated = true;
+    edgeAccepted = edgeAccept;
   }
   // the pair grade model of the two anchors (checks.ts predictPair; w outside [0, 1] extrapolates)
   const o1 = outlineOf(ins.find((x) => x.rank === r1)!.outer);
@@ -318,7 +376,7 @@ function repairWith(
   };
   // variant D where the pair is fragile: the edge step, an inconsistent family (GFIT_REPAIR.gradeAll*)
   let pts = P.pts;
-  if (useAll && opts.draw && o1 && o2 && (res.extrapolated || inconsistent)) {
+  if (useAll && !local && opts.draw && o1 && o2 && (res.extrapolated || inconsistent)) {
     const members = ins
       .filter((x) => x.anchor && !fam.droppedAmbiguous?.includes(x.rank)) // its corners are unsure
       .map((x) => ({ rank: x.rank, o: outlineOf(x.outer) }))
@@ -333,9 +391,19 @@ function repairWith(
     }
   }
   const n = pts.length;
-  const cor = P.stepN.map((s) =>
-    Math.min(C.corridorMm + C.corridorStep * s, Math.max(C.corridorMinMm, C.corridorHalfStep * s)),
-  );
+  // GFIT_LOCAL_CORRIDOR (off by default; only with GFIT_LOCAL): the corridor grows to the family's
+  // own leave-one-out scatter, and never as far as the neighbour's line (0.45 of the local step).
+  const localCorridor =
+    local && typeof process !== 'undefined' && !!process.env?.GFIT_LOCAL_CORRIDOR;
+  const scatter = localCorridor ? familyScatter(ins, fam.trusted, fam.frame) : null;
+  if (scatter != null && res.local) res.local.scatterMm = scatter;
+  const cor = P.stepN.map((s) => {
+    const base = Math.min(
+      C.corridorMm + C.corridorStep * s,
+      Math.max(C.corridorMinMm, C.corridorHalfStep * s),
+    );
+    return scatter == null ? base : Math.min(Math.max(base, scatter), 0.45 * s);
+  });
   res.pred = pts;
   res.corridor = cor;
 
@@ -352,7 +420,19 @@ function repairWith(
   W.forEach((w, k) => grid.addPolyline(k, w.p));
   /** Own walls that come within the corridor somewhere (E4 audits them all — Codex r1). */
   const touched = new Set<number>();
-  const snapAt = (p: PtMm, r: number): Snap | null => {
+  // GRADE_P2_LOOSE: an unranked line covers a sample only inside the corridor and at least a
+  // quarter step from both anchors (where the grade has not separated, that ink is the neighbour's).
+  const looseOn = typeof process !== 'undefined' && !!process.env?.GRADE_P2_LOOSE;
+  let looseOk: boolean[] | null = null;
+  if (looseOn && walls.some((w) => w.kind === 'loose')) {
+    const d1 = ringDistance(ring1);
+    const d2 = ringDistance(ring2);
+    looseOk = pts.map((p, i) => {
+      const lim = 0.25 * P.stepN[i];
+      return d1(p, lim + 1) >= lim && d2(p, lim + 1) >= lim;
+    });
+  }
+  const snapAt = (p: PtMm, r: number, i: number): Snap | null => {
     // per wall the TRUE nearest point (over all its segments); a nearest point at a wall's END is
     // no cover beyond the base corridor — past the end the line is not drawn (else the hole shrinks
     // and its fill starts from a point the line never reached, cutting the corner the hole took)
@@ -371,12 +451,13 @@ function repairWith(
       const w = W[sn.w];
       const atEnd = !w.closed && (sn.arc <= 1e-6 || sn.arc >= w.L - 1e-6);
       if (sn.d > r || (atEnd && sn.d > C.corridorMm)) continue;
+      if (w.kind === 'loose' && (!looseOn || !looseOk?.[i])) continue;
       if (w.kind === 'overlay' && !(onRing(g1, ring1, sn.q) && onRing(g2, ring2, sn.q))) continue;
       if (!best || sn.d < best.d) best = sn;
     }
     return best;
   };
-  const snaps: (Snap | null)[] = pts.map((p, i) => snapAt(p, cor[i]));
+  const snaps: (Snap | null)[] = pts.map((p, i) => snapAt(p, cor[i], i));
   const segLen = (i: number) => hyp(pts[i], pts[(i + 1) % n]);
   let L = 0;
   for (let i = 0; i < n; i++) L += segLen(i);
@@ -507,6 +588,8 @@ function repairWith(
     const sameWall =
       sp.w === sn.w &&
       W[sp.w].kind !== 'overlay' &&
+      // a loose line covers only the samples that qualified on their own (corridor and quarter step)
+      W[sp.w].kind !== 'loose' &&
       wallArcGap(sp.w, sp.arc, sn.arc) <= 1.5 * gapL + C.notchPathMm;
     if (sameWall) {
       // drawn: the wall runs on between both sides
@@ -561,6 +644,11 @@ function repairWith(
   res.outer = out;
   res.derived = derived;
   res.cover = L ? covL / L : 0;
+  if (res.local) {
+    let cL = 0;
+    for (let i = 0; i < n; i++) if (snaps[i] && W[snaps[i]!.w].kind === 'common') cL += segLen(i);
+    res.local.common = L ? cL / L : 0;
+  }
   res.holeShare = L ? holeSum / L : 1;
 
   // E1
@@ -714,7 +802,8 @@ function repairWith(
     const [aNear, aFar] = rank > r2 ? [a2, a1] : [a1, a2];
     if (!((o.area - aNear) * (aNear - aFar) > 0)) refuse('E3-area');
   } else if (!(Math.min(a1, a2) < o.area && o.area < Math.max(a1, a2))) refuse('E3-area');
-  const chk = fitFamily([...ins, { rank, outer: out, anchor: false }], {
+  const chkIns = local ? ins.filter((x) => x.rank === r1 || x.rank === r2) : ins;
+  const chk = fitFamily([...chkIns, { rank, outer: out, anchor: false }], {
     tol,
     ...(opts.frame ? { frame: opts.frame } : {}),
   });
@@ -728,12 +817,147 @@ function repairWith(
     const order = rank < r1 ? [o, o1, o2] : rank > r2 ? [o1, o2, o] : [o1, o, o2];
     if (!canonTopology(order, chk.frame, 1).ok) refuse('E3-topology');
   }
+  // GFIT_LOCAL_CORRIDOR: the result sits between the two anchors — the smaller inside it, it
+  // inside the larger. Area decides which is which; rank order does not.
+  if (scatter != null && o1 && o2) {
+    const small = o1.area <= o2.area ? ring1 : ring2;
+    const large = o1.area <= o2.area ? ring2 : ring1;
+    // insideWithin's 0.5 mm treats a line lying on the larger anchor as inside it. Where the two
+    // anchors have separated, that line is the neighbour's: a quarter step clear of both.
+    const share = neighbourShare(out, pts, P.stepN, [small, large]);
+    if (process.env?.GFIT_NEST_DEBUG)
+      console.log('nest', {
+        inSmall: insideWithin(small, out, 0.5),
+        inLarge: insideWithin(out, large, 0.5),
+        share,
+        areas: [o1.area, o2.area, o.area],
+      });
+    if (!insideWithin(small, out, 0.5) || !insideWithin(out, large, 0.5) || share >= 0.5)
+      refuse('E5-nest');
+  }
   if (draw && res.holes.length) {
     const s = holeSpread(res.holes, ins, trusted, rank, fam.frame);
     if (s !== undefined) res.spreadMm = s;
   }
+  // GFIT_EDGE_ACCEPT: a close on the neighbouring anchor's line is not this size. Samples where
+  // the grade itself still lies on that anchor (a shared edge) cannot tell the two apart.
+  if (edgeAccepted && res.outer) {
+    const edgeRing = rank > r2 ? ring2 : ring1;
+    if (onEdgeAnchor(res.outer, pts, P.stepN, edgeRing) >= 0.5) refuse('E5-on-anchor');
+  }
   res.ok = res.refusals.length === 0;
   return res;
+}
+
+const p95 = (a: number[]) => {
+  if (!a.length) return 0;
+  const s = a.slice().sort((x, y) => x - y);
+  return s[Math.min(s.length - 1, Math.floor(0.95 * (s.length - 1) + 0.5))];
+};
+
+/**
+ * GFIT_LOCAL_CORRIDOR: hide each trusted anchor that has a trusted neighbour on both sides, predict
+ * it from those two, and take the p95 distance of that prediction from the anchor's own outline.
+ * The family's scatter is the median of those. Null when fewer than two anchors can be measured.
+ */
+function familyScatter(
+  ins: readonly GfitSizeIn[],
+  trusted: readonly number[],
+  frame: 'stacked' | 'registered',
+): number | null {
+  const by = new Map(ins.map((s) => [s.rank, s]));
+  const vals: number[] = [];
+  for (const k of trusted) {
+    const below = trusted.filter((r) => r < k);
+    const above = trusted.filter((r) => r > k);
+    if (!below.length || !above.length) continue;
+    const a = below[below.length - 1];
+    const b = above[0];
+    const s1 = by.get(a);
+    const s2 = by.get(b);
+    const sk = by.get(k);
+    if (!s1 || !s2 || !sk) continue;
+    const o1 = outlineOf(s1.outer);
+    const o2 = outlineOf(s2.outer);
+    if (!o1 || !o2) continue;
+    const pred = predictPair(o1, o2, (k - a) / (b - a), b - a, frame);
+    if (!pred) continue;
+    const dist = ringDistance(sk.outer);
+    vals.push(p95(pred.pts.map((p) => dist(p))));
+  }
+  if (vals.length < 2) return null;
+  vals.sort((x, y) => x - y);
+  const mid = vals.length >> 1;
+  return vals.length % 2 ? vals[mid] : (vals[mid - 1] + vals[mid]) / 2;
+}
+
+/**
+ * Share of `outer` that lies within a quarter of the local step of `edgeRing`, ignoring samples
+ * whose own prediction still lies there (the sizes have not separated). 0 when nothing qualifies.
+ */
+function onEdgeAnchor(
+  outer: readonly PtMm[],
+  pred: readonly PtMm[],
+  stepN: readonly number[],
+  edgeRing: readonly PtMm[],
+): number {
+  const distE = ringDistance(edgeRing);
+  const n = pred.length;
+  let on = 0;
+  let seen = 0;
+  for (const q of outer) {
+    let bi = 0;
+    let bd = Infinity;
+    for (let i = 0; i < n; i++) {
+      const d = hyp(pred[i], q);
+      if (d < bd) {
+        bd = d;
+        bi = i;
+      }
+    }
+    const lim = 0.25 * (stepN[bi] ?? 0);
+    const reach = Math.max(lim, 0.5) + 1;
+    if (distE(pred[bi], reach) <= lim) continue;
+    seen++;
+    if (distE(q, reach) <= lim) on++;
+  }
+  return seen ? on / seen : 0;
+}
+
+/**
+ * Share of `outer` that lies within a quarter step of either anchor, counting only samples where
+ * the prediction itself is at least half a step from both (the anchors have separated there).
+ * 0 when the grade never separates, so a shared edge is not a neighbour close.
+ */
+function neighbourShare(
+  outer: readonly PtMm[],
+  pred: readonly PtMm[],
+  stepN: readonly number[],
+  rings: readonly (readonly PtMm[])[],
+): number {
+  const dists = rings.map((ring) => ringDistance(ring));
+  const n = pred.length;
+  let on = 0;
+  let seen = 0;
+  for (const q of outer) {
+    let bi = 0;
+    let bd = Infinity;
+    for (let i = 0; i < n; i++) {
+      const d = hyp(pred[i], q);
+      if (d < bd) {
+        bd = d;
+        bi = i;
+      }
+    }
+    const s = stepN[bi] ?? 0;
+    const apart = 0.5 * s;
+    const lim = 0.25 * s;
+    const reach = Math.max(apart, lim, 0.5) + 1;
+    if (dists.some((d) => d(pred[bi], reach) < apart)) continue;
+    seen++;
+    if (dists.some((d) => d(q, reach) <= lim)) on++;
+  }
+  return seen ? on / seen : 0;
 }
 
 /**
@@ -837,7 +1061,7 @@ function crossesWalls(
       const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
       let hit = false;
       grid.near(mid, hyp(a, b) / 2 + 0.1, (k, s) => {
-        if (hit || W[k].kind === 'overlay') return;
+        if (hit || W[k].kind === 'overlay' || W[k].kind === 'loose') return;
         const x = segIntersect(a, b, W[k].p[s], W[k].p[s + 1]);
         if (x && hyp(x.p, a0) > END_MM && hyp(x.p, a1) > END_MM) hit = true;
       });

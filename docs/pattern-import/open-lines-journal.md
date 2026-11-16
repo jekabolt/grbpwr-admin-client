@@ -903,8 +903,25 @@ neighbour's line when its area still sits between the neighbours. Should a G8 pl
   closed outline red) when both runs have it, and `--sheet` for one size.
 - **Milestone `m-group` (set40, par 2, group/arc rule, both flags) — ACCEPTED (f3 agreed):**
   - vs flags-off re-shoot `base-rows`: closed 3664 → 3673, loss 0, gain 9, moved 9 (Memoir A H
-    135–145 mm, Kalla E 0 230 mm, Memoir A K ≤ 9 mm). `nest-check --before base-rows` and
-    `--before m-tickord`: new 0 · cleared 0 · cleared-by-unjudged 0.
+    135–145 mm, Kalla E 0 230 mm, Memoir A K ≤ 9 mm). (CORRECTED: the first read used a stale
+    scratchpad copy of nest-check; re-run with `scripts/pattern-import/nest-check.mjs` as committed
+    on `open-lines-global` ef28c82e4, file mtime 16 Nov 02:21.) Same script: `m-tickord` vs
+    `baseline-set40` and vs `base-rows` both give new 2 (the same H CFL 26/30) · cleared 1. H CFL
+    26 and 30 outlines are byte-identical in `base-rows` and `m-group`; only 00–16 moved. Mechanism
+    (f3; confirmed with `judgeFamily` on both runs): the family grade step is the median of
+    adjacent-pair p95 distances, and the broken 00–16 had inflated it — step 60.7 mm in `base-rows`,
+    7.2 mm in `m-group`; `lim` for 26 against 22 (2 index steps) fell from 364 mm to 43 mm, so the
+    231 / 120 mm truncations became visible. 26 and 30 are PRE-EXISTING wrong closes. LESSON:
+    nest-check verdicts depend on the whole family's step, so a fix elsewhere in the family can
+    raise "new" flags on cells that did not move — a new flag is a regression only when the cell
+    itself moved (compare `outer`). Repo `nest-check --before base-rows`: new 2 · cleared 1
+    (Kalla E 0) · cleared-by-unjudged 0; `--before m-tickord`: new 1. All three new flags are OLD
+    geometry newly judged, not moved cells: Memoir A H CFL 26/30 TRUNC (same outline as baseline,
+    old cutAtTicks closes at a waist mark — the ladder's upper sizes the quorum did not reach; bracket
+    22/32 became usable once 00–16 closed whole) and Memoir B L SHOULDER 20 OVER 108 (area 192 cm²,
+    identical in all three runs and on trend; flagged because neighbour 22 — with 24/26 — closes on
+    a smaller size's outline, 174 cm², in every run). Queued: L SHOULDER 22/24/26 wrong close,
+    Memoir A H CFL 26/30.
   - vs `m-tickord` (old union rule): 3675 → 3673, loss 5, gain 3; Memoir B L SHOULDER 00–8 restored.
     All 31 veto flips are true → false; `TICKGROUP` (a split-side group deciding) 0 lines.
   - The 5 cells lost vs `m-tickord` were the old rule's luck, all open again as in flags-off:
@@ -917,11 +934,143 @@ neighbour's line when its area still sits between the neighbours. Should a G8 pl
     (A'). On 4 files 62 of 86 accepted ticks are exactly that (Memoir B strap, Memoir A H — the
     helpful knives): ranking runs before ticks, so a tick usually IS r's own end edge.
 - **Queued:**
-  - Verona H 0/2/6: the knife (side line to side line + spread) runs past r0's corner — 833 ends
-    5.2 mm short of the edge, beyond wallBridges' 3 mm — to size 7's side at x 1121, and the fill
-    leaks onto the ring. With no knife (`m-tickord`) the cell closed from the fill (`from: class`, no
-    repair, no grade draw); WHAT closed that 5.2 mm corner then is UNIDENTIFIED (corners EXTEND or a
-    bridge — not traced).
+  - Verona H 0/2/6 (CORRECTED after f3's read of `fill.ts`; an earlier version of this entry
+    blamed r0's knife spreading past its corner — wrong: `cutAtTicks` is a mask cut after the flood,
+    it can only remove pixels). The cell is refused by the cross-rank check: `TICKCUT r0: runs past
+    c937 (r7)` (also r1/r2/r4/r5/r6). c937 is the right side (x 1163.4, y 1457–1564.5) of the G BOW
+    rectangle below H, accepted as r7's end tick in `m-group` (vetoed in `m-tickord`). Its probe
+    points can only be inside r0's mask if r0's flood already runs from H (55×63 at 1060–1117 ×
+    1374–1437) into G — `leakAt` (1088, 1401) is inside H. Open: why r0's pre-tick mask holds G
+    (trace on Verona alone), and whether c937 is an end tick at all (a side of a closed rectangle).
+    H grades in steps (00–6 one box, 10–12, 16–22, 30–32), so equal boxes there are not wrong.
+    What closed H's 5.2 mm corner (833's end at 1117, 1432) with no knife is UNIDENTIFIED: no fill
+    bridge (`derived []`); corners EXTEND refuses a crossing behind an end (x.b ≈ −0.1 mm) — a stub,
+    a ramp or the drawing itself; check with `MOOD_F2_DEBUG=1`.
   - Not a threshold to tune (f3): for a 'stops' end within 3 mm of PAST_MM, let the knife's outcome
     decide — knife, fill, area on the grade, else veto. The same try-and-check would catch Verona H
     (the leak's area is off the grade). Any cutoff between 3 and 6 mm only moves the coin.
+
+## 16 Nov 2026 — Milestone m-motif (`MOTIF_DIR_FREE=1`) — REJECTED (flag stays off)
+
+- Run `/private/tmp/patimport-runs/m-motif` vs `m-group` (same flags plus `MOTIF_DIR_FREE=1`).
+- Closed 3647 → 3656: +33 (Memoir B I SKIRT FRONT 0 → 12 sizes; L SHOULDER 22/24 back on trend
+  196/200; Venice B 0/6 and E 2/6 were closed wrong at 151/167/84/89 cm², now 225/245/197/205).
+  nest-check: new 0, cleared 5 (plain) / 6 (`--robust-step`, adds Reims M 18).
+- WORSE: 23 sizes closed → open, all on area trend in m-group (Memoir B H/B/C/D/F/E/L, Venice
+  I/H/B/E/C/D); refusals mostly E1-cover / E2-hole — another key read for a pen, holes in outlines.
+- Closed → WRONG: Ambrosia (MDF408) E COLLAR BAND 24, 135 → 128 cm² (neighbours 132 / 138).
+- Handed back to the flag's author (open-lines-global): diff the per-pen key picks on Memoir B and
+  Venice between the runs.
+
+## 16 Nov 2026 — Bucket G (`no-model:inconsistent`, 303 cells in m-group): why, and `GFIT_LOCAL`
+
+- **Mechanism:** fitFamily's robust fit may drop a third of the anchors; when more disagree the
+  whole family is 'inconsistent' and repair refuses every open size, however well bracketed.
+- **Measured offline** over m-group cells (fitFamily on the class-closed anchors):
+  - gross anchors free of the budget (score ≥ 3 / 5 / 8 not counted; scratch patch, not kept): 25 / 17 / 9;
+  - tolerance × 1.25 / 1.5 / 2: 51 / 74 / 101 — rejected: silent.ts shares the fit;
+  - two grade segments (≥ 3 anchors each): 46;
+  - a 4-anchor window around the size (2 each side) is still inconsistent for 243 / 303.
+  - Typical disagreement is modest (score 1–2.5, i.e. 2.4–6 mm) and 353 / 438 are extrapolated:
+    the grade is not linear in rank (Dyanna A BACK: ~7 mm steps at 00–8, ~15 mm at 26–32).
+- **`GFIT_LOCAL=1` (pieces/gfit/repair.ts):** an inconsistent family that would refuse takes the
+  nearest anchor on each side as the pair (no extrapolation, no variant D), E3-tol is the pair's own
+  leave-one-out, E1–E4 unchanged. A wrong pair puts the corridor off the size's own lines — the
+  failure mode should be E1 refusal, not a wrong close. f3 critique requested; milestone m-glocal
+  (`GFIT_PROBES=1` for replay) running.
+- **m-glocal result** (`/private/tmp/patimport-runs/m-glocal` vs `m-group`): closed 3647 → 3658,
+  +11, 0 lost, 0 closed → wrong, all 11 on the area trend; nest-check plain and `--robust-step`:
+  new 0, cleared 0. Bucket G after it (299): E1-cover 137, edge-refused (not bracketed) 68, E2-hole
+  40, E2-hole-end 21, closed-local 11, E2-end-offset 6, E4 4, E3-family 3, E3-tol 3, no-pair 3,
+  E3-area 2. f3 approved the revised diff; acceptance still owes: local cells split by pair trust
+  with r2 − r1, pictures of untrusted-pair cells and cells with `common` ≥ 50 %.
+- **Holdout** (`scripts/pattern-import/holdout40.txt`, 40 unseen MDF files, all garment folders;
+  `h-base` vs `h-glocal`): base 2563 / 3052 closed (84 %); `GFIT_LOCAL` +3, 0 lost (all 3 pairs
+  trusted, `common` 0). Same order as set40 — a general but small rule. Bucket G there: 133, of
+  which E1-cover 88, edge-refused 15: the same dominant failure as set40. Weakest folders (one file
+  each, a signal only): accessories 33 %, activewear 67 %, menswear 70 %, pants 74 % (4 files).
+
+## 16 Nov 2026 — Plan (owner: enough data, start making changes; no runs without the owner's OK)
+
+Every step below is behind an env flag; its milestone is set40 + holdout40 and runs only on the
+owner's OK. Acceptance as before (0 WORSE on both lists, no closed → wrong, nest-check both modes,
+area monotone, f3 review before acceptance).
+
+open-lines-main (bucket G, `pieces/gfit`):
+1. `GFIT_LOCAL` commit prep: the unused `grossScore` was dropped from fit.ts; f3's acceptance
+   pictures are left; commit on the owner's yes.
+2. Piecewise grade model for E1-cover (137 set40 / 88 holdout): the grade is not linear in rank,
+   so the corridor from a pair far apart misses the size's own lines. A per-family break in the
+   step (two linear pieces, or local pairs at ±1 rank), designed offline on existing probes first.
+3. Edge sizes (68 / 15 not bracketed): one step past the last trusted size with the local step
+   (from the two nearest anchors), not the whole-family slope; same hole / D-share bounds as the
+   accepted edge extrapolation.
+4. Foreign-line detector (from open-lines-fc): an own-rank chain running parallel at 1–4 mm to a
+   closed outline means that outline is on another size's line.
+5. Later, lower value (closer to fitting single files): Reims dashed guide, Verona H ORDER,
+   Memoir H CFL 26/28/30 and B L SHOULDER 22/24/26.
+
+open-lines-global: T1 a reusable nest judge (nest-check's bracket rule as a pure src module).
+The `pred-off-bundle` guard as first proposed is dropped: the 27 no-ink cells are never drawn (23
+not bracketed, pred = the operator hint), so it would change 0 cells. The judge's first consumer is
+the LADDER_RESCUE coincident-chain fix (open only when the refill differs or the judge says
+truncated / over). T2 multi-rank shared lines: a simulation on existing corner-probes / cells that
+narrows splitShared's "accompanied" refusal (not a second mechanism; the 14 Nov promotion of
+isShared into rankOf stays a dead end).
+
+## 16 Nov 2026 — Bucket G E1-cover: what the refusals are (offline, existing probes; no shoots)
+
+- Split of GFIT_LOCAL tries refused E1-cover, by what lies along the prediction (own + common walls;
+  a class counts at ≥ 8 % of the perimeter). set40 170 tries: own line 0.6–3 mm off the prediction
+  only 33, both 76, no own line within 3 mm only 58. holdout40 96: 14 / 36 / 45.
+- Of the stretches with no own line (f3's re-split): ink of another size (outline or overlay) within
+  3 mm is 26 % of that length on set40 (39 of 136 tries mostly so), 11 % on holdout40 (15 of 82).
+  The rest has no RANKED ink near; unranked lines are not in the probes, so "blank paper" vs
+  "unranked line" is not separated yet.
+- Model test (f3: judge a model on known truth, not by cover): leave-one-out on closed trusted
+  anchors whose nearest anchors span ≥ 3 ranks; p95 distance of the prediction to the real outline,
+  median over cases. Linear pair / 3-anchor quadratic (pair + Lagrange-weighted residual at the third
+  anchor) / piecewise (near side's local step):
+  set40 consistent 0.69 / 0.75 / 0.86 mm (n 574), inconsistent 2.29 / 2.01 / 3.39 (n 137);
+  holdout40 consistent 1.04 / 1.01 / 1.19 (n 98), inconsistent 3.22 / 3.31 / 3.98 (n 62).
+  The quadratic's weights go below −0.3 in ~75 % of cases. **(A) REJECTED**: the quadratic wins on
+  set40 and loses on the holdout (fitting), piecewise loses everywhere.
+- Reading: in inconsistent families even the best model misses the true outline by 2–3 mm, wider than
+  the 1–2 mm acceptance corridor — the outlines are irregular, not a different curve. Acceptance
+  there should ask whether the size's own line NESTS between its neighbours' lines (the nest judge,
+  open-lines-global T1), not whether it lies near a prediction.
+- f3 (16 Nov): (A) rejected agreed. Constraint for any nesting acceptance: "inside the bracket" with
+  a ~7 mm step is a strip that contains the neighbours' lines themselves (on-neighbour verdict 2/9),
+  so a stretch must lie STRICTLY between — ≥ 0.25·step from both rank−1 and rank+1 lines over its
+  length, except where they converge — or the judge reopens the closed-on-a-neighbour trap.
+- open-lines-global objects, with data: strict-between was their first `onNeighbour` and flooded
+  Memoir B. In stepped grading one line is drawn for a PAIR of sizes and ranked to one of them, so
+  the other size honestly lies on its "neighbour" over 168–390 mm (SKIRT BACK 12/20/22/26/28, TOP
+  A/B/C, J). The distinguisher they and f3 agreed earlier is pile-up (≥ 3 ranks on one line, or the
+  family not paired elsewhere), not distance. OPEN between f3 and open-lines-global; on-neighbour
+  stays diag only. `judgeNest` (pieces/nest-judge.ts) already takes whole closed outlines; its lim
+  max(10, 3·step·gap) cannot see a 2–3 mm miss — a fine `lim` option is being added (pure, tested).
+
+## 16 Nov 2026 — Failure map (offline: m-glocal = set40, h-glocal = holdout40; no shoots)
+
+Open cells by first reason (set40 1068 of 4752 / holdout40 486 of 3052):
+
+| mechanism | set40 | holdout40 | ink on paper along pred (ink-check 13 Nov, set40) |
+| --- | --- | --- | --- |
+| A edge size, no neighbour on one side (`not-bracketed`) | 375 | 167 | 63 % |
+| D own line not along the prediction (`E1-cover`) | 312 | 131 | 90 % |
+| E own line with holes (`E2-*`) | 174 | 41 | ~90 % |
+| F drawn stretch refused (`E3`/`E4`) | 41 | 9 | 75–95 % |
+| B sizes not told apart (`merged` 66/56, `sizes-not-distinguished` 54/45) | 120 | 101 | — |
+| C no model / tiny | 46 | 37 | — |
+
+- Blank paper is rare: ink-check `no-ink` 27 of 517 (5 %), and those were mostly wrong predictions.
+  The probe re-split (ranked ink only) found other-rank ink on 26 % / 11 % of the missing length,
+  so the rest is ink that is on the paper but ranked to NO size (unranked or lost to chains).
+- The reader is lossless (render ≈ IR on every file, 13 Nov); nothing to fix there.
+- Wrong closes the counter does not see: 145 candidates on set40, 41 confirmed.
+- Pieces with every size closed: set40 62 of 329, holdout40 170 of 276.
+- Files: DXF written set40 2 / 40, holdout40 6 / 40. Of the stopped files, set40: 15 stop on other hard
+  reasons (offset-hull, duplicate identity, fold list, …), 11 only on operator questions (grain,
+  fold), 7 on lines, 5 with no piece blocked (sheet/sizes/check step); holdout40: 4 / 7 / 7 / 16.
+  Closing every line does not by itself produce DXF files; the other stops are a separate track.

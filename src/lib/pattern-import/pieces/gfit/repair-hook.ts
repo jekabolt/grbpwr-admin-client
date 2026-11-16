@@ -15,7 +15,8 @@
 // continuity judgement of the family (growth band, outline spread and shape against the anchors —
 // `continuityVerdicts`). A refused size stays as it was (a leak; a 'neighbour' size G26 holds) and
 // carries `gradeHint` — where the grade puts it, for the operator's question. An H1-refused, merged or tiny size is
-// never touched; an extreme size (extrapolation) is never repaired. `GRADE_P2_OFF=1` turns it off.
+// never touched; an extreme size (extrapolation) is never repaired unless `GFIT_EDGE_ACCEPT=1`.
+// `GRADE_P2_OFF=1` turns the pass off.
 import type {
   BoxMm,
   ChainId,
@@ -138,6 +139,11 @@ export type RepairCtx = {
   /** The wall model (size classes, common lines) — the G26 check for 'neighbour' targets. */
   wm: Pick<WallModel, 'mode' | 'byRank' | 'common'>;
   texts: readonly { id: TextId; at: PtMm }[];
+  /**
+   * GRADE_P2_LOOSE (off by default): chains no size owns. Counted only where they lie in the
+   * size's place (repair.ts). Absent when the flag is off — the try is unchanged.
+   */
+  loose?: readonly RepairWallIn[];
 };
 
 export type RepairDiag = {
@@ -246,11 +252,13 @@ export function repairPass(
     // the end of the range: the draw mode may carry the grade one step on (repairSize decides,
     // GFIT_REPAIR.extrapolate*); the walls are then those near the two nearest anchors
     const edge = lo ?? hi;
+    // GFIT_EDGE_ACCEPT: the strict try (draw off) still sees an edge size one step past the last
+    // anchor. Draw mode already did; this opens the same try when drawing is switched off.
+    const edgeAccept = typeof process !== 'undefined' && !!process.env?.GFIT_EDGE_ACCEPT;
     if (
       (!lo || !hi) &&
       edge &&
-      GRADE_DRAW.extrapolate &&
-      !gradeDrawOff() &&
+      (edgeAccept || (GRADE_DRAW.extrapolate && !gradeDrawOff())) &&
       anchors.length >= GFIT_REPAIR.extrapolateMinTrusted &&
       Math.abs(edge.rank - r) === 1
     ) {
@@ -287,6 +295,14 @@ export function repairPass(
         ws.push({ pts: w.pts, kind: 'common', closed: !!w.closed });
         chainOf.push(w.chain);
       }
+    // GRADE_P2_LOOSE: lines no size owns, near this size. Off by default — nothing is pushed,
+    // and the probe's wall list stays what it was.
+    if (typeof process !== 'undefined' && !!process.env?.GRADE_P2_LOOSE && ctx.loose)
+      for (const { w, box: b } of withBox(ctx.loose))
+        if (meets(b, box)) {
+          ws.push({ pts: w.pts, kind: 'loose', closed: !!w.closed });
+          chainOf.push(w.chain);
+        }
     // overlay: the lines the anchors themselves close on (another size's pen, an orphan) — cover
     // only where both bracketing anchors run on them (repairSize)
     // (a whole chain already a wall; a lone PORTION of a chain leaves the rest of it to the overlay)
@@ -381,6 +397,7 @@ export function repairPass(
         // check), so every one of its holes is drawn — a short one included
         ...(drawn ? { drawnMm: Math.round(holesMm * 10) / 10 } : {}),
         ...(rep.extrapolated ? { extrapolated: true as const } : {}),
+        ...(rep.local ? { local: rep.local } : {}),
         ...(drawn && rep.spreadMm !== undefined ? { spreadMm: rep.spreadMm } : {}),
         ...(kind === 'neighbour' && c.outer.length > 2
           ? { was: simplify([...c.outer, c.outer[0]], 0.3).slice(0, -1) }

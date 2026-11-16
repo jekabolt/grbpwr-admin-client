@@ -10,6 +10,7 @@
 //         parallel, within 60 mm, at a consistent step (max/min <= 1.6); for the end ranks the two
 //         inner neighbours on one side at d and ~2d (ratio 1.6..2.4)
 //   step  sideMm = max(20, 1.5 x the file's median grade step (ranked line -> nearest r+1 line))
+// WD_ALL=1 dumps every chain of the set, not only the ranked/common ones.
 // Writes <dir>/<pdf>/walls-dump.json beside the usual dxf-shot files.
 import { build as esbuild } from 'esbuild';
 import { spawnSync } from 'node:child_process';
@@ -189,6 +190,8 @@ process.on('exit', () => {
     for (const p of c.perRank) for (const id of p.rescued ?? []) used.add(id);
     const rr = c.rerank();
     if (rr) for (const ids of rr.byRank) for (const id of ids) used.add(id);
+    // WD_ALL=1: every chain of the set, also the ones no rank or common took (unranked lines)
+    if (process.env.WD_ALL) c.set.chains.forEach((ch, id) => ch && used.add(id));
     const { set, rerank, ...rest } = c;
     const chains = {};
     for (const id of used) if (set.chains[id]) chains[id] = { role: set.chains[id].role, closed: !!set.chains[id].closed, pts: set.chains[id].pts.map((q) => [+q.x.toFixed(2), +q.y.toFixed(2)]) };

@@ -1329,6 +1329,16 @@ export type RepairRecord = {
   spreadMm?: number;
   /** kind 'neighbour': the outline it had closed to (simplified 0.3 mm) — for the audit picture. */
   was?: PtMm[];
+  /** GFIT_LOCAL: judged by the local pair of an inconsistent family (gfit repair.ts `local`). */
+  local?: {
+    r1: number;
+    r2: number;
+    t1: boolean;
+    t2: boolean;
+    common?: number;
+    /** GFIT_LOCAL_CORRIDOR: median leave-one-out p95 the corridor grew to, mm. */
+    scatterMm?: number;
+  };
 };
 export type DerivedEdge = {
   kind: DerivedEdgeKind;
