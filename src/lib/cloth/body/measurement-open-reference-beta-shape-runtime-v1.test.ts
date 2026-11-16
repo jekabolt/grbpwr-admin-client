@@ -22,7 +22,9 @@ import {
   MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_RUNTIME_V1,
   MeasurementOpenReferenceBetaShapeSafetyErrorV1,
 } from './measurement-open-reference-beta-shape-runtime-v1';
+import { createMeasurementOpenReferenceBetaTorsoInWorkerV1 } from './measurement-open-reference-beta-torso-worker-v1';
 import { MEASUREMENT_OPEN_REFERENCE_DISPLAY_POSE_RUNTIME_METADATA_V1 } from './measurement-open-reference-display-pose-v1';
+import { solveMeasurementOpenReferenceKneeProxyV1 } from './measurement-open-reference-knee-proxy-v1';
 import {
   createMeasurementOpenReferenceUniformHeightDisplayV1,
   MAKEHUMAN_OPEN_REFERENCE_BASIS_METADATA_V1,
@@ -609,6 +611,46 @@ describe('measurement open-reference beta shape runtime v1', () => {
     30_000,
   );
 
+  it('rolls back only the depth subset when male chest depth fails the final global gate', async () => {
+    const measurements = Object.freeze({
+      ...CANONICAL_MEASUREMENT_SIZE_RECORDS[1].measurements,
+      heightMm: 1800,
+      shoulderBreadthMm: 460,
+      chestCircumferenceMm: 1000,
+      waistCircumferenceMm: 860,
+      hipCircumferenceMm: 990,
+      armLengthMm: 640,
+      inseamMm: 820,
+      chestDepthMm: 300,
+    });
+    const current = await fixture('male', measurements);
+    const result = await createMeasurementOpenReferenceBetaShapeRuntimeV1({
+      ...current,
+      loadTorsoBundle: async () => torsoBundle,
+    });
+    const applied = new Set([
+      ...result.representedVisualControls,
+      ...(result.limitedVisualControls ?? []),
+    ]);
+    console.log('DEPTH_SUBSET_ROLLBACK_V1=' + JSON.stringify({
+      status: result.status,
+      represented: result.representedVisualControls,
+      limited: result.limitedVisualControls,
+      diagnostics: result.chestShoulderDiagnostics,
+    }));
+    expect(result.chestShoulderDiagnostics).toContain('beta-final-depth-subset-rollback');
+    expect(result.chestShoulderDiagnostics).not.toContain('beta-final-global-quality-rollback');
+    expect(applied.has('shoulderBreadthMm')).toBe(true);
+    expect(applied.has('chestCircumferenceMm')).toBe(true);
+    expect(applied.has('chestDepthMm')).toBe(false);
+    expect(result.status).toBe('partial');
+    expect(applied.has('armLengthMm')).toBe(true);
+    expect(result.claims).toMatchObject({
+      torsoDepthFrontBackDistributionCalibrated: false,
+      fitClaimEligible: false,
+    });
+  }, 60_000);
+
   it.each(['neutral', 'male', 'female'] as const)(
     '%s admits optional under-bust as an independent research-only visual control',
     async (kind) => {
@@ -644,4 +686,147 @@ describe('measurement open-reference beta shape runtime v1', () => {
     },
     30_000,
   );
+});
+
+describe('measurement open-reference beta shape runtime v1 high hip and knee', () => {
+  const highHipAndKnee = Object.freeze({
+    ...CANONICAL_MEASUREMENT_SIZE_RECORDS[1].measurements,
+    highHipCircumferenceMm: 880,
+    kneeCircumferenceMm: 370,
+  });
+
+  it.each(['neutral', 'male', 'female'] as const)(
+    '%s wires high hip and knee as bounded proxies with typed bookkeeping',
+    async (kind) => {
+      const current = await fixture(kind, highHipAndKnee);
+      const solveKneeProxy = vi.fn(
+        async (options: Parameters<typeof solveMeasurementOpenReferenceKneeProxyV1>[0]) =>
+          solveMeasurementOpenReferenceKneeProxyV1(options),
+      );
+      const result = await createMeasurementOpenReferenceBetaShapeRuntimeV1({
+        ...current,
+        loadTorsoBundle: async () => torsoBundle,
+        loadLimbBundle: async () => limbBundle,
+        solveKneeProxy,
+      });
+      const applied = new Set([
+        ...result.representedVisualControls,
+        ...(result.limitedVisualControls ?? []),
+      ]);
+
+      expect(applied.has('highHipCircumferenceMm')).toBe(true);
+      expect(applied.has('kneeCircumferenceMm')).toBe(true);
+      expect(result.representedVisualControls).toEqual(
+        expect.arrayContaining(['waistCircumferenceMm', 'hipCircumferenceMm']),
+      );
+      expect(result.sourceRevisionSuffix).toMatch(/highHipCircumferenceMm/u);
+      expect(result.sourceRevisionSuffix).toMatch(/kneeCircumferenceMm/u);
+      // A represented proxy emits no diagnostic; only a failure or clamp is named.
+      expect(
+        result.chestShoulderDiagnostics.filter(
+          (code) => code.includes('runtime-unavailable') || code.includes('quality-rollback'),
+        ),
+      ).toEqual([]);
+      expect(result.chestShoulderDiagnostics).not.toContain('beta-final-global-quality-rollback');
+      expect(result.torsoSectionStations?.highHip).toBeDefined();
+      expect(result.kneeSectionStations?.map(({ side }) => side)).toEqual(['negative', 'positive']);
+      expect(solveKneeProxy).toHaveBeenCalledTimes(1);
+      expect(solveKneeProxy.mock.calls[0][0].pose).toBe('A');
+      expect(result.fkProxyRuntime.qualityGate?.safe).toBe(true);
+      expect(result.claims).toMatchObject({
+        highHipSectionProxyOnly: true,
+        kneeRadialSectionProxyOnly: true,
+        circumferenceRangeCalibrated: false,
+        fitClaimEligible: false,
+        torsoDepthFrontBackDistributionCalibrated: false,
+      });
+    },
+    90_000,
+  );
+
+  it('drops a knee that fails the final global gate alone and keeps high hip, waist and hip', async () => {
+    const current = await fixture('female', highHipAndKnee);
+    const result = await createMeasurementOpenReferenceBetaShapeRuntimeV1({
+      ...current,
+      loadTorsoBundle: async () => torsoBundle,
+      loadLimbBundle: async () => limbBundle,
+      solveKneeProxy: async (options) => {
+        const positionsM = options.positionsM.slice();
+        positionsM[0] += 10;
+        return {
+          ...solveMeasurementOpenReferenceKneeProxyV1(options),
+          status: 'represented',
+          positionsM,
+          diagnostics: [],
+        } as never;
+      },
+    });
+
+    expect(result.representedVisualControls).not.toContain('kneeCircumferenceMm');
+    expect(result.limitedVisualControls).not.toContain('kneeCircumferenceMm');
+    expect(result.chestShoulderDiagnostics).toContain(
+      'kneeCircumferenceMm:beta-final-quality-rollback',
+    );
+    expect(result.chestShoulderDiagnostics).not.toContain('beta-final-global-quality-rollback');
+    expect(
+      new Set([...result.representedVisualControls, ...(result.limitedVisualControls ?? [])]).has(
+        'highHipCircumferenceMm',
+      ),
+    ).toBe(true);
+    expect(result.representedVisualControls).toEqual(
+      expect.arrayContaining(['waistCircumferenceMm', 'hipCircumferenceMm']),
+    );
+    expect(result.fkProxyRuntime.qualityGate?.safe).toBe(true);
+    expect(Math.abs(result.fkProxyRuntime.displayMesh.positions[0])).toBeLessThan(5);
+    expect(result.fkProxyRuntime.displayMesh.positions).not.toEqual(
+      current.waistHipRuntime.displayMesh.positions,
+    );
+  }, 90_000);
+
+  it('drops a high hip that fails the final global gate alone and keeps torso depth', async () => {
+    const measurements = Object.freeze({
+      ...CANONICAL_MEASUREMENT_SIZE_RECORDS[1].measurements,
+      chestDepthMm: 240,
+      waistDepthMm: 210,
+      hipDepthMm: 270,
+      highHipCircumferenceMm: 880,
+    });
+    const current = await fixture('female', measurements);
+    const result = await createMeasurementOpenReferenceBetaShapeRuntimeV1({
+      ...current,
+      loadTorsoBundle: async () => torsoBundle,
+      createTorsoShape: async (options) => {
+        const clean = await createMeasurementOpenReferenceBetaTorsoInWorkerV1({
+          ...options,
+          highHipCircumferenceMm: undefined,
+        });
+        const positionsM = clean.positionsM.slice();
+        positionsM[0] += 10;
+        return {
+          ...clean,
+          positionsM,
+          positionsBeforeHighHipM: clean.positionsM,
+          highHipStatus: 'represented',
+          highHipRepresented: true,
+          highHipLimited: false,
+          highHipDiagnostics: [],
+        } as never;
+      },
+    });
+    const applied = new Set([
+      ...result.representedVisualControls,
+      ...(result.limitedVisualControls ?? []),
+    ]);
+
+    expect(applied.has('highHipCircumferenceMm')).toBe(false);
+    expect(result.chestShoulderDiagnostics).toContain(
+      'highHipCircumferenceMm:beta-final-quality-rollback',
+    );
+    expect(result.chestShoulderDiagnostics).not.toContain('beta-final-global-quality-rollback');
+    expect(applied.has('chestDepthMm')).toBe(true);
+    expect(applied.has('waistDepthMm')).toBe(true);
+    expect(applied.has('hipDepthMm')).toBe(true);
+    expect(result.fkProxyRuntime.qualityGate?.safe).toBe(true);
+    expect(Math.abs(result.fkProxyRuntime.displayMesh.positions[0])).toBeLessThan(5);
+  }, 90_000);
 });

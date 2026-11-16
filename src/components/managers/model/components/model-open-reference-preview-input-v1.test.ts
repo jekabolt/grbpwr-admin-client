@@ -103,7 +103,7 @@ describe('model open-reference preview input v1', () => {
     expect(result.basis.diagnostics).toEqual([expect.objectContaining({ code })]);
   });
 
-  it('ignores unsupported form measurements without adding unknown-code warnings', () => {
+  it('maps newly canonical unsupported fields and ignores unrelated form measurements', () => {
     const result = resolveModelOpenReferencePreviewInputV1({
       gender: 'GENDER_ENUM_MALE',
       measurements: {
@@ -117,8 +117,39 @@ describe('model open-reference preview input v1', () => {
     expect(result.ok).toBe(true);
     expect(result.diagnostics).toEqual([]);
     if (result.ok) {
-      expect(result.measurements).not.toHaveProperty('highHipCircumferenceMm');
-      expect(result.measurements).not.toHaveProperty('kneeCircumferenceMm');
+      expect(result.measurements.highHipCircumferenceMm).toBe(910);
+      expect(result.measurements.kneeCircumferenceMm).toBe(390);
+    }
+  });
+
+  it('keeps out-of-range high hip and knee non-fatal for saved previews', () => {
+    const result = resolveModelOpenReferencePreviewInputV1({
+      gender: 'GENDER_ENUM_FEMALE',
+      measurements: {
+        ...VALID_MEASUREMENTS,
+        BODY_MEASUREMENT_NAME_HIGH_HIP: 1_601,
+        BODY_MEASUREMENT_NAME_KNEE: 601,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'warning',
+          code: 'invalid-value',
+          canonicalKey: 'highHipCircumferenceMm',
+        }),
+        expect.objectContaining({
+          severity: 'warning',
+          code: 'invalid-value',
+          canonicalKey: 'kneeCircumferenceMm',
+        }),
+      ]),
+    );
+    if (result.ok) {
+      expect(result.measurements.highHipCircumferenceMm).toBe(1_601);
+      expect(result.measurements.kneeCircumferenceMm).toBe(601);
     }
   });
 
