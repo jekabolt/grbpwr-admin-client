@@ -12,6 +12,7 @@ const unitFiles = Object.freeze([
   'src/components/managers/model/components/83-model-form-mannequin-binding-audit-v1.test.tsx',
   'src/components/managers/model/components/measurement-protocol-guide.test.tsx',
   'src/components/managers/model/components/measurements-fields-audit.test.tsx',
+  'src/components/managers/model/components/measurements-quiz.test.tsx',
   'src/components/managers/model/components/model-create-pose-handoff-v1.test.ts',
   'src/components/managers/model/components/model-mannequin-pose-document-v2.test.ts',
   'src/components/managers/model/components/model-mannequin-pose-draft-owner-v1.test.ts',
@@ -69,6 +70,10 @@ const browserSuites = Object.freeze([
   Object.freeze({
     label: 'measurement-to-mannequin form binding',
     config: 'playwright.model-form-mannequin-binding.config.ts',
+  }),
+  Object.freeze({
+    label: 'mobile guided measurement entry',
+    config: 'playwright.model-form-measurement-quiz-v1.config.ts',
   }),
   Object.freeze({
     label: 'last-valid canvas during continuous measurement typing',

@@ -2909,6 +2909,16 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
         : undefined,
     [activeMeasurementName, displayedBuilt, draftPose, editor],
   );
+  const measurementGuideStatusText =
+    measurementGuide?.status === 'visible'
+      ? `visual guide visible for ${measurementGuide.label}`
+      : measurementGuide?.status === 'unsupported'
+        ? `visual guide unavailable for ${measurementGuide.label} · follow the written protocol`
+        : measurementGuide?.status === 'unavailable-pose'
+          ? `visual guide unavailable in this pose for ${measurementGuide.label} · follow the written protocol`
+          : measurementGuide?.status === 'unavailable-section'
+            ? `visual guide could not be derived for ${measurementGuide.label} · follow the written protocol`
+            : null;
   const activeJointOverlayGroups =
     matchingLivePoseFrame?.groups ?? readyJointOverlay?.groups ?? Object.freeze([]);
   const liveJointOverlayStatus = !readyJointOverlay
@@ -3573,6 +3583,22 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                               : `Preview ready: ${editor.label(appliedPose ?? editor.neutralPose)}. Drag to orbit and use the wheel to zoom.`
                             : `Preview failed: ${stageError}`)}
           </Text>
+
+          {measurementGuide && measurementGuideStatusText ? (
+            <Text
+              component='p'
+              size='micro'
+              variant='label'
+              className={measurementGuide.status === 'visible' ? 'sr-only' : undefined}
+              role='status'
+              aria-live='polite'
+              data-testid='model-open-reference-measurement-guide-status'
+              data-guide-status={measurementGuide.status}
+              data-measurement-name={measurementGuide.measurementName}
+            >
+              {measurementGuideStatusText}
+            </Text>
+          ) : null}
 
           {displayedBuilt ? (
             <Suspense fallback={<SkeletonBlocks count={1} height={320} className='w-full' />}>
