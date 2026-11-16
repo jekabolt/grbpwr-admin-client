@@ -33,6 +33,7 @@ const unitFiles = Object.freeze([
   'src/components/managers/models/components/model-card-mannequin-input-v1.test.ts',
   'src/components/managers/models/components/model-card-mannequin-pose-v1.test.ts',
   'src/components/managers/models/components/model-card-mannequin-preview-v1.test.tsx',
+  'src/components/shared/measurement-guide-visibility-v1.test.ts',
   'src/components/shared/measurement-surface-active-measurement-guide-v1.test.ts',
   'src/components/shared/measurement-surface-live-positions-v1.test.ts',
   'src/components/shared/measurement-watertight-surface-v1-stage.test.ts',
