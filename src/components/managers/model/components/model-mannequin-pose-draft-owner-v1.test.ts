@@ -87,6 +87,22 @@ describe('model mannequin pose draft owner v1', () => {
     expect(owner.getSnapshot().phase).toBe('saving');
   });
 
+  it('keeps a create-session owner unbound until AddModel returns its durable ID', async () => {
+    const owner = createModelMannequinPoseDraftOwnerV1({
+      neutralPose: MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9,
+    });
+    await owner.loadRemote({ kind: 'absent' });
+    expect(owner.getSnapshot()).toMatchObject({ phase: 'ready', dirty: false });
+
+    owner.applyEdit(POSE_A);
+    await expect(owner.beginSave()).rejects.toThrow(/Bind the created model ID/);
+
+    owner.bindModelId(8403);
+    await expect(owner.beginSave()).resolves.toMatchObject({ modelId: 8403 });
+    expect(() => owner.bindModelId(8403)).not.toThrow();
+    expect(() => owner.bindModelId(8404)).toThrow(/already bound/);
+  });
+
   it('loads and saves with an exact uint64 optimistic revision', async () => {
     const owner = createModelMannequinPoseDraftOwnerV1({
       modelId: 11,

@@ -426,6 +426,19 @@ function sharedTopologyVertices(indices: Uint32Array, a: number, b: number): rea
   return result;
 }
 
+function sharedTopologyVertexCount(indices: Uint32Array, a: number, b: number): number {
+  const aOffset = a * 3;
+  const bOffset = b * 3;
+  let count = 0;
+  for (let aIndex = 0; aIndex < 3; aIndex += 1) {
+    const vertex = indices[aOffset + aIndex];
+    for (let bIndex = 0; bIndex < 3; bIndex += 1) {
+      if (vertex === indices[bOffset + bIndex]) count += 1;
+    }
+  }
+  return count;
+}
+
 function gridBroadPhase(
   aabbs: Float64Array,
   indices: Uint32Array,
@@ -540,7 +553,7 @@ function gridBroadPhase(
   for (const key of candidatePairKeys) {
     const a = Math.floor(key / triangleCount);
     const b = key - a * triangleCount;
-    if (sharedTopologyVertices(indices, a, b).length > 0) topologyAdjacentPairCount += 1;
+    if (sharedTopologyVertexCount(indices, a, b) > 0) topologyAdjacentPairCount += 1;
   }
   return {
     candidatePairKeys,
@@ -658,7 +671,10 @@ function pointInProjectedTriangle(
 
 function signedPlaneDistance(pointValue: Point3, triangleValue: Triangle): number {
   return (
-    dot(triangleValue.normal, subtract(pointValue, triangleValue.a)) / triangleValue.normalLength
+    (triangleValue.normal[0] * (pointValue[0] - triangleValue.a[0]) +
+      triangleValue.normal[1] * (pointValue[1] - triangleValue.a[1]) +
+      triangleValue.normal[2] * (pointValue[2] - triangleValue.a[2])) /
+    triangleValue.normalLength
   );
 }
 
@@ -791,54 +807,70 @@ function projectedSegmentIntersectionParameters(
   return parameters;
 }
 
-function contactWitnesses(first: Triangle, second: Triangle, epsilonM: number): readonly Point3[] {
-  const witnesses: Point3[] = [];
+function appendDirectionalContactWitnesses(
+  source: Triangle,
+  target: Triangle,
+  epsilonM: number,
+  witnesses: Point3[],
+): void {
   const add = (value: Point3) => {
     if (!witnesses.some((existing) => distance(existing, value) <= epsilonM * 0.25)) {
       witnesses.push(value);
     }
   };
-  const inspect = (source: Triangle, target: Triangle) => {
-    const sourcePoints = [source.a, source.b, source.c] as const;
-    const targetPoints = [target.a, target.b, target.c] as const;
-    const distances = sourcePoints.map((value) => signedPlaneDistance(value, target));
-    for (let index = 0; index < 3; index += 1) {
-      if (
-        Math.abs(distances[index]) <= epsilonM &&
-        pointInProjectedTriangle(sourcePoints[index], target, epsilonM).inside
-      ) {
-        add(sourcePoints[index]);
-      }
+  const sourcePoints = [source.a, source.b, source.c] as const;
+  const targetPoints = [target.a, target.b, target.c] as const;
+  const distances = sourcePoints.map((value) => signedPlaneDistance(value, target));
+  for (let index = 0; index < 3; index += 1) {
+    if (
+      Math.abs(distances[index]) <= epsilonM &&
+      pointInProjectedTriangle(sourcePoints[index], target, epsilonM).inside
+    ) {
+      add(sourcePoints[index]);
     }
-    const axis = dominantProjection(target.normal);
-    for (let index = 0; index < 3; index += 1) {
-      const next = (index + 1) % 3;
-      const a = sourcePoints[index];
-      const b = sourcePoints[next];
-      const distanceA = distances[index];
-      const distanceB = distances[next];
-      if (distanceA > 0 !== distanceB > 0) {
-        const intersection = interpolate(a, b, distanceA / (distanceA - distanceB));
-        if (pointInProjectedTriangle(intersection, target, epsilonM).inside) add(intersection);
-      }
-      if (Math.abs(distanceA) <= epsilonM && Math.abs(distanceB) <= epsilonM) {
-        for (let targetIndex = 0; targetIndex < 3; targetIndex += 1) {
-          for (const t of projectedSegmentIntersectionParameters(
-            a,
-            b,
-            targetPoints[targetIndex],
-            targetPoints[(targetIndex + 1) % 3],
-            axis,
-            epsilonM,
-          )) {
-            add(interpolate(a, b, t));
-          }
+  }
+  const axis = dominantProjection(target.normal);
+  for (let index = 0; index < 3; index += 1) {
+    const next = (index + 1) % 3;
+    const a = sourcePoints[index];
+    const b = sourcePoints[next];
+    const distanceA = distances[index];
+    const distanceB = distances[next];
+    if (distanceA > 0 !== distanceB > 0) {
+      const intersection = interpolate(a, b, distanceA / (distanceA - distanceB));
+      if (pointInProjectedTriangle(intersection, target, epsilonM).inside) add(intersection);
+    }
+    if (Math.abs(distanceA) <= epsilonM && Math.abs(distanceB) <= epsilonM) {
+      for (let targetIndex = 0; targetIndex < 3; targetIndex += 1) {
+        for (const t of projectedSegmentIntersectionParameters(
+          a,
+          b,
+          targetPoints[targetIndex],
+          targetPoints[(targetIndex + 1) % 3],
+          axis,
+          epsilonM,
+        )) {
+          add(interpolate(a, b, t));
         }
       }
     }
-  };
-  inspect(first, second);
-  inspect(second, first);
+  }
+}
+
+function directionalContactWitnesses(
+  source: Triangle,
+  target: Triangle,
+  epsilonM: number,
+): readonly Point3[] {
+  const witnesses: Point3[] = [];
+  appendDirectionalContactWitnesses(source, target, epsilonM, witnesses);
+  return witnesses;
+}
+
+function contactWitnesses(first: Triangle, second: Triangle, epsilonM: number): readonly Point3[] {
+  const witnesses: Point3[] = [];
+  appendDirectionalContactWitnesses(first, second, epsilonM, witnesses);
+  appendDirectionalContactWitnesses(second, first, epsilonM, witnesses);
   return witnesses;
 }
 
@@ -864,12 +896,92 @@ function adjacentContactIsConfined(
   }
   const witnesses = contactWitnesses(first, second, epsilonM);
   if (witnesses.length === 0) return false;
+  return contactWitnessesAreConfined(witnesses, sharedVertices, positions, epsilonM);
+}
+
+function contactWitnessesAreConfined(
+  witnesses: readonly Point3[],
+  sharedVertices: readonly number[],
+  positions: Float32Array,
+  epsilonM: number,
+): boolean {
   const a = point(positions, sharedVertices[0]);
   if (sharedVertices.length === 1) {
     return witnesses.every((witness) => distance(witness, a) <= epsilonM);
   }
   const b = point(positions, sharedVertices[1]);
   return witnesses.every((witness) => pointOnSegment3d(witness, a, b, epsilonM));
+}
+
+function triangleCorner(value: Triangle, corner: number): Point3 {
+  return corner === 0 ? value.a : corner === 1 ? value.b : value.c;
+}
+
+function triangleIsStrictlyOneSidedOfOtherPlane(
+  indices: Uint32Array,
+  triangleIndex: number,
+  sharedVertices: readonly number[],
+  source: Triangle,
+  target: Triangle,
+  epsilonM: number,
+): boolean {
+  let positive = 0;
+  let negative = 0;
+  const indexOffset = triangleIndex * 3;
+  for (let corner = 0; corner < 3; corner += 1) {
+    const vertex = indices[indexOffset + corner];
+    if (sharedVertices.includes(vertex)) continue;
+    const planeDistance = signedPlaneDistance(triangleCorner(source, corner), target);
+    if (planeDistance > epsilonM) positive += 1;
+    else if (planeDistance < -epsilonM) negative += 1;
+  }
+  const nonSharedCount = 3 - sharedVertices.length;
+  return positive === nonSharedCount || negative === nonSharedCount;
+}
+
+/**
+ * Proves the common smooth-mesh case without running the full triangle contact witness search.
+ *
+ * With one shared topology vertex, two strict same-side distances prove that a triangle meets the
+ * other's plane only at that vertex. With a shared edge, one strict off-plane third vertex proves
+ * that a triangle meets the other's plane only on the shared edge. If only one direction has that
+ * strict proof, the unchanged epsilon-aware witness algorithm checks the reciprocal direction and
+ * must confine every witness to the same topology support. Values inside the validator epsilon
+ * deliberately fall back to the unchanged exact classifier.
+ */
+function adjacentContactIsProvablyConfinedByPlaneSides(
+  indices: Uint32Array,
+  triangleA: number,
+  triangleB: number,
+  sharedVertices: readonly number[],
+  first: Triangle,
+  second: Triangle,
+  epsilonM: number,
+  positions: Float32Array,
+): boolean {
+  if (sharedVertices.length !== 1 && sharedVertices.length !== 2) return false;
+  const firstOneSided = triangleIsStrictlyOneSidedOfOtherPlane(
+    indices,
+    triangleA,
+    sharedVertices,
+    first,
+    second,
+    epsilonM,
+  );
+  const secondOneSided = triangleIsStrictlyOneSidedOfOtherPlane(
+    indices,
+    triangleB,
+    sharedVertices,
+    second,
+    first,
+    epsilonM,
+  );
+  if (!firstOneSided && !secondOneSided) return false;
+  if (firstOneSided && secondOneSided) return true;
+  const reciprocalWitnesses = firstOneSided
+    ? directionalContactWitnesses(second, first, epsilonM)
+    : directionalContactWitnesses(first, second, epsilonM);
+  return contactWitnessesAreConfined(reciprocalWitnesses, sharedVertices, positions, epsilonM);
 }
 
 function coplanarSegmentTouchesTriangle(
@@ -1002,16 +1114,33 @@ export function validateMeasurementSurfaceSelfIntersectionV1(
     throw new RangeError('Scale-aware intersection epsilon is not finite and positive.');
   }
   const aabbs = triangleAabbs(positions, indices, vertexCount, triangleCount, epsilonM);
-  const broadPhase = gridBroadPhase(aabbs, indices, bounds, epsilonM, triangleCount, policy);
+  const broadPhase = gridBroadPhase(aabbs, indices, bounds, epsilonM, triangleCount, policy, 2);
   const intersections: MeasurementSurfaceIntersectionPairV1[] = [];
+  const triangleCache: Array<Triangle | undefined> = new Array(triangleCount);
+  const cachedTriangle = (triangleIndex: number): Triangle =>
+    (triangleCache[triangleIndex] ??= triangle(positions, indices, triangleIndex));
   for (const key of broadPhase.candidatePairKeys) {
     const triangleA = Math.floor(key / triangleCount);
     const triangleB = key - triangleA * triangleCount;
-    const first = triangle(positions, indices, triangleA);
-    const second = triangle(positions, indices, triangleB);
+    const sharedVertices = sharedTopologyVertices(indices, triangleA, triangleB);
+    const first = cachedTriangle(triangleA);
+    const second = cachedTriangle(triangleB);
+    if (
+      adjacentContactIsProvablyConfinedByPlaneSides(
+        indices,
+        triangleA,
+        triangleB,
+        sharedVertices,
+        first,
+        second,
+        epsilonM,
+        positions,
+      )
+    ) {
+      continue;
+    }
     const kind = triangleIntersectionKind(first, second, epsilonM, policy.angularEpsilon);
     if (kind === null) continue;
-    const sharedVertices = sharedTopologyVertices(indices, triangleA, triangleB);
     if (
       sharedVertices.length > 0 &&
       adjacentContactIsConfined(kind, sharedVertices, positions, first, second, epsilonM)

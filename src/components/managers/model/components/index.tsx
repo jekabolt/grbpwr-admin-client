@@ -3,7 +3,13 @@ import { useDockBottom } from 'hooks/useDockBottom';
 import { useTypingOnPhone } from './use-typing-on-phone';
 import { type ComponentProps, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { common_BodyMeasurementName, common_Model, common_ModelInsert } from 'api/proto-http/admin';
+import { adminService } from 'api/api';
+import {
+  type AddModelResponse,
+  common_BodyMeasurementName,
+  common_Model,
+  common_ModelInsert,
+} from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { FittingsReadonlyList } from 'components/managers/fittings/components/fittings-readonly-list';
 import {
@@ -31,15 +37,24 @@ import {
 } from 'ui';
 import { DefaultSizesField } from './default-sizes-field';
 import { MeasurementsFields, MeasurementsHeaderActions } from './measurements-fields';
+import {
+  retryCreatedModelMannequinPoseV1,
+  saveCreatedModelMannequinPoseV1,
+  submitModelCreateWithPoseHandoffV1,
+  type ModelCreatePoseHandoffPendingV1,
+} from './model-create-pose-handoff-v1';
 import { ModelMedia } from './model-media';
-import type {
-  ModelMannequinPoseDraftOwnerV1,
-  ModelMannequinPoseDraftSnapshotV1,
+import {
+  createModelMannequinPoseDraftOwnerV1,
+  type ModelMannequinPoseDraftOwnerV1,
+  type ModelMannequinPoseDraftSnapshotV1,
 } from './model-mannequin-pose-draft-owner-v1';
 import {
   createModelMannequinPoseSessionBindingV1,
   modelMannequinPosePersistenceViewV1,
 } from './model-mannequin-pose-session-v1';
+import { modelMannequinPoseRpcEnabledV1 } from './model-mannequin-pose-transport-v1';
+import { MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9 } from './model-open-reference-direct-pose-v9';
 import { ModelOpenReferencePreview } from './model-open-reference-preview';
 import {
   mapFormToModelInsert,
@@ -80,8 +95,13 @@ function ActiveMeasurementBodyPreview(
 
 export type ModelFormDevDependenciesV1 = {
   readonly canWriteModels: boolean;
-  readonly createModel: (model: common_ModelInsert) => Promise<unknown>;
+  readonly createModel: (model: common_ModelInsert) => Promise<AddModelResponse>;
   readonly updateModel: (input: { id: number; model: common_ModelInsert }) => Promise<unknown>;
+  readonly durableCreatePoseEnabled: boolean;
+  readonly saveCreatedModelPose: (
+    owner: ModelMannequinPoseDraftOwnerV1,
+    modelId: number,
+  ) => Promise<void>;
   readonly leaveForm: () => void;
   readonly renderMedia: (input: {
     model?: common_Model;
@@ -133,6 +153,9 @@ function ProductionModelForm(props: ModelFormProps) {
     canWriteModels: canWrite(SECTION.models),
     createModel: (model) => createModel.mutateAsync(model),
     updateModel: (input) => updateModel.mutateAsync(input),
+    durableCreatePoseEnabled: modelMannequinPoseRpcEnabledV1(),
+    saveCreatedModelPose: (owner, modelId) =>
+      saveCreatedModelMannequinPoseV1({ service: adminService, owner, modelId }),
     leaveForm: () => navigate(ROUTES.models),
     renderMedia: ({ model, canEdit, onBusyChange }) => (
       <ModelMedia model={model} canEdit={canEdit} onBusyChange={onBusyChange} />
@@ -159,30 +182,43 @@ function ModelFormRuntime({
   const saved = useDoneFlash();
   // A refused save stands in the save bar until the next attempt.
   const [formError, setFormError] = useState<string | null>(null);
-  const poseSnapshot = useModelMannequinPoseSnapshotV1(poseOwner);
+  const [createPoseOwner] = useState(() => {
+    if (isEditMode) return undefined;
+    const owner = createModelMannequinPoseDraftOwnerV1({
+      neutralPose: MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9,
+    });
+    void owner.loadRemote({ kind: 'absent' });
+    return owner;
+  });
+  const activePoseOwner = poseOwner ?? createPoseOwner;
+  const [createPosePending, setCreatePosePending] =
+    useState<ModelCreatePoseHandoffPendingV1 | null>(null);
+  const [createPoseRetrying, setCreatePoseRetrying] = useState(false);
+  const modelFieldsLocked = createPosePending !== null;
+  const poseSnapshot = useModelMannequinPoseSnapshotV1(activePoseOwner);
   const directPoseBindingV9 = useMemo(() => {
-    if (!poseOwner || !poseSnapshot || poseSnapshot.phase === 'unloaded') return undefined;
+    if (!activePoseOwner || !poseSnapshot || poseSnapshot.phase === 'unloaded') return undefined;
     if (!poseTransport?.enabled) {
-      return createModelMannequinPoseSessionBindingV1(poseOwner, poseSnapshot);
+      return createModelMannequinPoseSessionBindingV1(activePoseOwner, poseSnapshot);
     }
     const view = modelMannequinPosePersistenceViewV1({
       snapshot: poseSnapshot,
       canWrite: runtime.canWriteModels,
       mutationPending: poseTransport.savePending,
     });
-    return createModelMannequinPoseSessionBindingV1(poseOwner, poseSnapshot, {
+    return createModelMannequinPoseSessionBindingV1(activePoseOwner, poseSnapshot, {
       ...view,
       onSave: () => void poseTransport.savePose().catch(() => undefined),
       onKeepMine: () => {
-        poseOwner.rebaseDraftOnConflict();
-        return poseOwner.getSnapshot().draft.pose;
+        activePoseOwner.rebaseDraftOnConflict();
+        return activePoseOwner.getSnapshot().draft.pose;
       },
       onReloadTheirs: () => {
-        poseOwner.discardDraftForConflict();
-        return poseOwner.getSnapshot().draft.pose;
+        activePoseOwner.discardDraftForConflict();
+        return activePoseOwner.getSnapshot().draft.pose;
       },
     });
-  }, [poseOwner, poseSnapshot, poseTransport, runtime.canWriteModels]);
+  }, [activePoseOwner, poseSnapshot, poseTransport, runtime.canWriteModels]);
   const form = useForm<ModelFormData>({
     resolver: zodResolver(modelSchema),
     defaultValues: model ? mapModelToForm(model) : modelDefaultData,
@@ -199,7 +235,19 @@ function ModelFormRuntime({
         saved.flash();
         form.reset(data);
       } else {
-        await runtime.createModel(modelInsert);
+        const createResult = await submitModelCreateWithPoseHandoffV1({
+          model: modelInsert,
+          pending: createPosePending,
+          poseOwner: activePoseOwner!,
+          poseRpcEnabled: runtime.durableCreatePoseEnabled,
+          createModel: runtime.createModel,
+          saveCreatedPose: runtime.saveCreatedModelPose,
+        });
+        if (createResult.kind !== 'complete') {
+          setCreatePosePending(createResult);
+          setFormError(createResult.message);
+          return;
+        }
         // Leaving for the list is the receipt.
         runtime.leaveForm();
       }
@@ -215,6 +263,33 @@ function ModelFormRuntime({
         });
       else setFormError(msg);
       console.error('Failed to submit model', error);
+    }
+  }
+
+  async function handleCreatePoseRetry() {
+    if (createPosePending?.kind !== 'pose-retry' || !activePoseOwner || createPoseRetrying) {
+      return;
+    }
+    setCreatePoseRetrying(true);
+    setFormError(null);
+    try {
+      const retryResult = await retryCreatedModelMannequinPoseV1({
+        pending: createPosePending,
+        poseOwner: activePoseOwner,
+        saveCreatedPose: runtime.saveCreatedModelPose,
+      });
+      if (retryResult.kind === 'complete') {
+        runtime.leaveForm();
+        return;
+      }
+      setCreatePosePending(retryResult);
+      setFormError(retryResult.message);
+    } catch (error) {
+      setFormError(
+        error instanceof Error ? error.message : 'The mannequin pose could not be saved.',
+      );
+    } finally {
+      setCreatePoseRetrying(false);
     }
   }
 
@@ -235,51 +310,64 @@ function ModelFormRuntime({
               </div>
             </div>
 
-            <SheetMeasurementMobileStrip />
+            <fieldset
+              disabled={modelFieldsLocked}
+              className='contents'
+              aria-label='Model measurement navigation'
+            >
+              <SheetMeasurementMobileStrip />
+            </fieldset>
 
             <SectionStack>
-              <Section>
-                <div className='flex flex-col gap-4 md:flex-row md:items-stretch'>
-                  <div className='mx-auto w-full max-w-60 shrink-0 md:mx-0'>
-                    {runtime.renderMedia({
-                      model,
-                      canEdit: runtime.canWriteModels,
-                      onBusyChange: setPhotoBusy,
-                    })}
-                  </div>
-                  <div className='flex min-w-0 flex-1 flex-col gap-3'>
-                    <div className='grid grid-cols-[minmax(0,1fr)_7.5rem] items-end gap-2'>
-                      <InputField name='name' label='name' />
-                      <SelectField
-                        name='gender'
-                        label='gender'
-                        items={genderOptions}
-                        placeholder='select'
-                      />
-                    </div>
-                    {runtime.renderDefaultSizes()}
-                    <div className='sheet-comment-fill flex min-h-20 flex-1 flex-col'>
-                      <TextareaField
-                        name='comment'
-                        label='comment'
-                        maxLength={1000}
-                        autoGrow={false}
-                        className='min-h-20 resize-none md:min-h-0'
-                      />
-                    </div>
-                  </div>
-                </div>
-              </Section>
-
-              <Section
-                title='measurements'
-                action={<MeasurementsHeaderActions showAudit={isEditMode} />}
+              <fieldset
+                disabled={modelFieldsLocked}
+                className='contents'
+                aria-label='Model fields'
+                data-testid='model-create-fields'
               >
-                <MeasurementsFields showAudit={isEditMode} />
-              </Section>
+                <Section>
+                  <div className='flex flex-col gap-4 md:flex-row md:items-stretch'>
+                    <div className='mx-auto w-full max-w-60 shrink-0 md:mx-0'>
+                      {runtime.renderMedia({
+                        model,
+                        canEdit: runtime.canWriteModels,
+                        onBusyChange: setPhotoBusy,
+                      })}
+                    </div>
+                    <div className='flex min-w-0 flex-1 flex-col gap-3'>
+                      <div className='grid grid-cols-[minmax(0,1fr)_7.5rem] items-end gap-2'>
+                        <InputField name='name' label='name' />
+                        <SelectField
+                          name='gender'
+                          label='gender'
+                          items={genderOptions}
+                          placeholder='select'
+                        />
+                      </div>
+                      {runtime.renderDefaultSizes()}
+                      <div className='sheet-comment-fill flex min-h-20 flex-1 flex-col'>
+                        <TextareaField
+                          name='comment'
+                          label='comment'
+                          maxLength={1000}
+                          autoGrow={false}
+                          className='min-h-20 resize-none md:min-h-0'
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </Section>
+
+                <Section
+                  title='measurements'
+                  action={<MeasurementsHeaderActions showAudit={isEditMode} />}
+                >
+                  <MeasurementsFields showAudit={isEditMode} />
+                </Section>
+              </fieldset>
 
               <Section title='body preview'>
-                {poseOwner && poseTransport?.enabled && poseTransport.readError ? (
+                {activePoseOwner && poseTransport?.enabled && poseTransport.readError ? (
                   <CalloutBox tone='error'>
                     <div className='flex flex-wrap items-center justify-between gap-2'>
                       <Text size='micro' component='p' role='alert'>
@@ -298,7 +386,7 @@ function ModelFormRuntime({
                       </Button>
                     </div>
                   </CalloutBox>
-                ) : poseOwner && !directPoseBindingV9 ? (
+                ) : activePoseOwner && !directPoseBindingV9 ? (
                   <Text size='micro' variant='inactive' role='status'>
                     {poseTransport?.enabled ? 'loading saved pose…' : 'preparing session pose…'}
                   </Text>
@@ -358,14 +446,26 @@ function ModelFormRuntime({
                   className='cursor-pointer uppercase'
                   disabled={
                     (isEditMode && !form.formState.isDirty) ||
+                    createPosePending?.kind === 'created-id-missing' ||
                     form.formState.isSubmitting ||
+                    createPoseRetrying ||
                     photoBusy
                   }
-                  loading={form.formState.isSubmitting}
+                  loading={form.formState.isSubmitting || createPoseRetrying}
                   done={saved.on}
-                  onClick={() => form.handleSubmit(handleSubmit)()}
+                  onClick={() =>
+                    createPosePending?.kind === 'pose-retry'
+                      ? void handleCreatePoseRetry()
+                      : form.handleSubmit(handleSubmit)()
+                  }
                 >
-                  {isEditMode ? 'save' : 'add'}
+                  {isEditMode
+                    ? 'save'
+                    : createPosePending?.kind === 'pose-retry'
+                      ? 'retry pose'
+                      : createPosePending?.kind === 'created-id-missing'
+                        ? 'model added'
+                        : 'add model'}
                 </Button>
               )}
             </div>

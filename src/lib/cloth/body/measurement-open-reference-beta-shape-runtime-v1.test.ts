@@ -15,11 +15,12 @@ import {
 import { parseMakeHumanTorsoShapeDeltaBundleV1 } from './makehuman-torso-shape-delta-bundle-v1';
 import { createMeasurementBodyFrameV2 } from './measurement-body-frame-v2';
 import { CANONICAL_MEASUREMENT_SIZE_RECORDS } from './measurement-body-synthetic-corpus';
-import { evaluateMeasurementOpenReferenceDisplayQualityV1 } from './measurement-open-reference-display-quality-gate-v1';
+import { evaluateMeasurementOpenReferenceDisplayQualityWithSelfIntersectionV1 } from './measurement-open-reference-display-quality-gate-v1';
 import { solveOpenReferenceChestShoulderResearchV1 } from './measurement-open-reference-chest-shoulder-research-v1';
 import {
   createMeasurementOpenReferenceBetaShapeRuntimeV1 as createProductionBetaShapeRuntimeV1,
   MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_RUNTIME_V1,
+  MeasurementOpenReferenceBetaShapeSafetyErrorV1,
 } from './measurement-open-reference-beta-shape-runtime-v1';
 import { MEASUREMENT_OPEN_REFERENCE_DISPLAY_POSE_RUNTIME_METADATA_V1 } from './measurement-open-reference-display-pose-v1';
 import {
@@ -31,7 +32,10 @@ import {
 import { createMeasurementOpenReferenceLimbSubsetRuntimeV1 } from './measurement-open-reference-limb-subset-runtime-v1';
 import { createMeasurementOpenReferenceUniformWaistHipRuntimeV1 } from './measurement-open-reference-uniform-waist-hip-runtime-v1';
 import { parseMakeHumanWaistHipRigAnchorDeltaBundleV1 } from './makehuman-waist-hip-rig-anchor-research-v1';
-import { validateMeasurementSurfaceSelfIntersectionV1 } from './measurement-surface-self-intersection-v1';
+import {
+  DEFAULT_MEASUREMENT_SURFACE_SELF_INTERSECTION_POLICY_V1,
+  validateMeasurementSurfaceSelfIntersectionV1,
+} from './measurement-surface-self-intersection-v1';
 
 const torsoBundle = parseMakeHumanTorsoShapeDeltaBundleV1(
   readFileSync(resolve(process.cwd(), 'src/assets/cloth/makehuman-hm08-torso-shape-deltas-v1.bin')),
@@ -252,7 +256,7 @@ describe('measurement open-reference beta shape runtime v1', () => {
           },
         }) as never,
     });
-    const expectedGate = evaluateMeasurementOpenReferenceDisplayQualityV1({
+    const expectedGate = evaluateMeasurementOpenReferenceDisplayQualityWithSelfIntersectionV1({
       uniformPositionsM: current.waistHipRuntime.openReference.mesh.positions,
       personalizedPositionsM: current.waistHipRuntime.displayMesh.positions,
       triangleIndices: current.waistHipRuntime.displayMesh.indices,
@@ -269,6 +273,21 @@ describe('measurement open-reference beta shape runtime v1', () => {
     expect(result.limbStatus).toBe('unrepresented');
     expect(result.chestShoulderDiagnostics).toContain('beta-final-global-quality-rollback');
     expect(result.status).toBe('partial');
+  }, 30_000);
+
+  it('hard-fails instead of publishing a basis whose self-intersection evaluation cannot complete', async () => {
+    const current = await fixture('base');
+
+    await expect(
+      createMeasurementOpenReferenceBetaShapeRuntimeV1({
+        ...current,
+        loadTorsoBundle: async () => torsoBundle,
+        selfIntersectionPolicy: {
+          ...DEFAULT_MEASUREMENT_SURFACE_SELF_INTERSECTION_POLICY_V1,
+          maxTriangles: 1,
+        },
+      }),
+    ).rejects.toEqual(expect.any(MeasurementOpenReferenceBetaShapeSafetyErrorV1));
   }, 30_000);
 
   it('produces different female geometry when only chest changes', async () => {
@@ -436,6 +455,13 @@ describe('measurement open-reference beta shape runtime v1', () => {
           result.fkProxyRuntime.poseCompatibleArmLengthProxy?.targetStatus,
         );
         expect(result.fkProxyRuntime.qualityGate?.safe).toBe(true);
+        expect(result.fkProxyRuntime.qualityGate?.claims).toMatchObject({
+          localGeometryQualityOnly: false,
+          selfIntersectionEvaluated: true,
+          anatomicalAccuracyClaimed: false,
+          fitClaimEligible: false,
+          runtimeCollisionEligible: false,
+        });
         expect(result.fkProxyRuntime.qualityGate?.metrics.flippedTriangleCount).toBe(0);
         expect(
           validateMeasurementSurfaceSelfIntersectionV1(

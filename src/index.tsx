@@ -139,6 +139,13 @@ const ModelFormPersonalizedPreviewDevPage = import.meta.env.DEV
       ),
     )
   : null;
+const ModelCreatePoseHandoffDevPage = import.meta.env.DEV
+  ? lazyRoute(() =>
+      import('components/managers/model/components/model-create-pose-handoff-dev-page').then(
+        (m) => ({ default: m.ModelCreatePoseHandoffDevPage }),
+      ),
+    )
+  : null;
 const ModelCardListDevPage = import.meta.env.DEV
   ? lazyRoute(() =>
       import('components/managers/models/components/model-card-list-dev-page').then((m) => ({
@@ -564,6 +571,14 @@ const app = (
                       ModelFormPersonalizedPreviewDevPage ? (
                         <ModelFormPersonalizedPreviewDevPage />
                       ) : null
+                    }
+                  />
+                )}
+                {import.meta.env.DEV && (
+                  <Route
+                    path='/__model-create-pose-handoff-v1'
+                    element={
+                      ModelCreatePoseHandoffDevPage ? <ModelCreatePoseHandoffDevPage /> : null
                     }
                   />
                 )}

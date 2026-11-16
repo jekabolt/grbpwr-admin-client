@@ -242,6 +242,46 @@ interface FullBodyBuiltPreviewV3 {
   readonly bodyBuildFingerprint: string;
 }
 
+export type ModelOpenReferenceBodyDisplayOwnershipV11 =
+  | 'empty'
+  | 'current'
+  | 'preparing'
+  | 'retained-pending'
+  | 'retained-invalid'
+  | 'retained-error';
+
+export function modelOpenReferenceBodyDisplayOwnershipV11(options: {
+  readonly builtFingerprint: string | null;
+  readonly requestedFingerprint: string;
+  readonly resolutionOk: boolean;
+  readonly updateStatus: 'idle' | 'building' | 'error';
+  readonly stageStatus: 'idle' | MeasurementSurfaceStageStatus;
+}): ModelOpenReferenceBodyDisplayOwnershipV11 {
+  if (options.builtFingerprint === null) return 'empty';
+  if (!options.resolutionOk) return 'retained-invalid';
+  if (options.builtFingerprint !== options.requestedFingerprint) {
+    return options.updateStatus === 'error' ? 'retained-error' : 'retained-pending';
+  }
+  return options.stageStatus === 'ready' ? 'current' : 'preparing';
+}
+
+export function modelOpenReferencePoseBlockedMessageV11(
+  blockers: readonly MakeHumanLivePoseBlockerV1[],
+): string | null {
+  if (blockers.length === 0) return null;
+  const reasons: string[] = [];
+  if (blockers.some((blocker) => blocker.endsWith('-overlap'))) {
+    reasons.push('a limb would overlap the body or another limb');
+  }
+  if (blockers.some((blocker) => blocker.endsWith('-direction'))) {
+    reasons.push('a joint would bend in the wrong direction');
+  }
+  if (blockers.includes('no-grounded-foot')) reasons.push('at least one foot must stay grounded');
+  if (blockers.includes('foot-below-ground')) reasons.push('a foot cannot move below the ground');
+  const explanation = reasons.length > 0 ? reasons.join('; ') : 'the pose is outside safe limits';
+  return `Pose blocked: ${explanation}. Showing the last valid pose.`;
+}
+
 export interface ModelOpenReferenceLivePoseFrameV10 {
   readonly bodyBuildFingerprint: string;
   readonly bodySourceRevision: string;
@@ -2367,6 +2407,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
     lastPose: Pose;
   } | null>(null);
   const autoBuildAttemptRef = useRef<string | null>(null);
+  const bodyOwnerRef = useRef(`${editor.version}:${modelId}:${modelContentRevision}`);
   const controlledGestureActiveRef = useRef(false);
   const directPoseBindingRef = useRef(directPoseBindingV9);
   const draftPoseRef = useRef(draftPose);
@@ -2407,6 +2448,11 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
   }, []);
 
   useEffect(() => {
+    const bodyOwner = `${editor.version}:${modelId}:${modelContentRevision}`;
+    const retainLastValidBody =
+      editor.version === 'full-body-v9' && bodyOwnerRef.current === bodyOwner;
+    bodyOwnerRef.current = bodyOwner;
+    autoBuildAttemptRef.current = null;
     cancelBuild();
     if (controlledGestureActiveRef.current) {
       controlledGestureActiveRef.current = false;
@@ -2428,18 +2474,18 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
     ) {
       setUncontrolledDraftPose(editor.neutralPose);
     }
-    setBuilt(null);
+    if (!retainLastValidBody) setBuilt(null);
     setLivePoseFrame(null);
-    setAppliedPose(null);
+    if (!retainLastValidBody) setAppliedPose(null);
     setUpdateStatus('idle');
-    setStageStatus('idle');
+    if (!retainLastValidBody) setStageStatus('idle');
     setUpdateError('');
     setStageError('');
     setPoseAdmissibility(Object.freeze({ status: 'idle', blockers: Object.freeze([]) }));
     setJointEditorMode(editor.initialJointEditorMode ?? 'camera');
     setJointSelection(modelOpenReferenceJointSelectionV5('torso-group'));
     setDirectSelectedGroupId('torso-group');
-  }, [bodyBuildFingerprint, cancelBuild, editor]);
+  }, [bodyBuildFingerprint, cancelBuild, editor, modelContentRevision, modelId]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -2695,6 +2741,33 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
   }, [bodyBuildFingerprint, buildFullBodyPreview, editor, resolution.ok]);
 
   const currentBuilt = built?.bodyBuildFingerprint === bodyBuildFingerprint ? built : null;
+  const displayedBuilt = currentBuilt ?? (editor.version === 'full-body-v9' ? built : null);
+  const bodyDisplayOwnership =
+    editor.version === 'full-body-v9'
+      ? modelOpenReferenceBodyDisplayOwnershipV11({
+          builtFingerprint: built?.bodyBuildFingerprint ?? null,
+          requestedFingerprint: bodyBuildFingerprint,
+          resolutionOk: resolution.ok,
+          updateStatus,
+          stageStatus,
+        })
+      : currentBuilt
+        ? 'current'
+        : 'empty';
+  const bodyDisplayMessage =
+    bodyDisplayOwnership === 'retained-invalid'
+      ? 'Measurements need attention. Showing the last valid preview; the current entered values are not applied.'
+      : bodyDisplayOwnership === 'retained-pending'
+        ? 'Body update pending. Showing the last valid preview until the new measurements are ready.'
+        : bodyDisplayOwnership === 'retained-error'
+          ? `Body update failed: ${updateError} Showing the last valid preview; the current entered values are not applied.`
+          : bodyDisplayOwnership === 'preparing'
+            ? 'Preparing updated body geometry. The previous rendered preview remains visible until the new preview is ready.'
+            : null;
+  const poseBlockedMessage =
+    poseAdmissibility.status === 'blocked'
+      ? modelOpenReferencePoseBlockedMessageV11(poseAdmissibility.blockers)
+      : null;
   const applyLivePoseFrame = useCallback(
     (pose: Pose): 'applied' | 'rejected' | 'unavailable' => {
       if (!editor.livePose || !currentBuilt?.liveFkSession) return 'unavailable';
@@ -2751,20 +2824,22 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
       )
     : 'camera';
   const controlStatus: FullBodyPoseControlStatus =
-    updateStatus === 'building'
+    bodyDisplayOwnership !== 'current' && bodyDisplayOwnership !== 'empty'
       ? 'building'
-      : updateStatus === 'error'
-        ? 'error'
-        : !editor.equalGeometry(draftPose, appliedPose)
-          ? 'pending'
-          : 'idle';
+      : updateStatus === 'building'
+        ? 'building'
+        : updateStatus === 'error'
+          ? 'error'
+          : !editor.equalGeometry(draftPose, appliedPose)
+            ? 'pending'
+            : 'idle';
   const status: PreviewStatus =
     updateStatus === 'building' ? 'building' : updateStatus === 'error' ? 'error' : stageStatus;
-  const measurementApplicationSummary = currentBuilt?.measurementApplication
-    ? modelOpenReferenceMeasurementApplicationSummaryV1(currentBuilt.measurementApplication)
+  const measurementApplicationSummary = displayedBuilt?.measurementApplication
+    ? modelOpenReferenceMeasurementApplicationSummaryV1(displayedBuilt.measurementApplication)
     : null;
   const measurementApplicationUnavailable =
-    editor.version === 'full-body-v9' && currentBuilt !== null && !measurementApplicationSummary;
+    editor.version === 'full-body-v9' && displayedBuilt !== null && !measurementApplicationSummary;
   const measurementApplicationPartial =
     measurementApplicationUnavailable || measurementApplicationSummary?.status === 'partial';
   const measurementApplicationText = measurementApplicationUnavailable
@@ -2781,15 +2856,15 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
       : null;
   const measurementGuide = useMemo(
     () =>
-      activeMeasurementName && currentBuilt
+      activeMeasurementName && displayedBuilt
         ? buildMeasurementSurfaceActiveMeasurementGuideV1({
             measurementName: activeMeasurementName,
-            frame: currentBuilt.frame,
-            mesh: currentBuilt.measurementGuideSourceMesh,
+            frame: displayedBuilt.frame,
+            mesh: displayedBuilt.measurementGuideSourceMesh,
             neutralPose: editor.equalGeometry(draftPose, editor.neutralPose),
           })
         : undefined,
-    [activeMeasurementName, currentBuilt, draftPose, editor],
+    [activeMeasurementName, displayedBuilt, draftPose, editor],
   );
   const activeJointOverlayGroups =
     matchingLivePoseFrame?.groups ?? readyJointOverlay?.groups ?? Object.freeze([]);
@@ -3266,6 +3341,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
       data-pose-draft={editor.equalGeometry(draftPose, editor.neutralPose) ? 'neutral' : 'custom'}
       data-preview-variant={variant}
       data-pose-viewport-editing={directPoseViewportEditingEnabled ? 'enabled' : 'disabled'}
+      data-body-display-ownership={bodyDisplayOwnership}
     >
       {!editor.minimalViewportUi ? (
         <CalloutBox tone='note'>
@@ -3287,8 +3363,9 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
       {!resolution.ok ? (
         <CalloutBox tone='warning'>
           <Text component='p' size='micro'>
-            <b>preview blocked</b> · enter a plausible value for every required mannequin
-            measurement.
+            <b>{displayedBuilt ? 'measurements need attention' : 'preview blocked'}</b> · enter a
+            plausible value for every required mannequin measurement.
+            {displayedBuilt ? ' The last valid preview remains visible and unchanged.' : ''}
           </Text>
           <ul className='mt-1 grid gap-0.5 md:grid-cols-2'>
             {resolution.diagnostics.map((diagnostic, index) => (
@@ -3301,7 +3378,39 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
             ))}
           </ul>
         </CalloutBox>
-      ) : (
+      ) : null}
+
+      {bodyDisplayMessage ? (
+        <Text
+          component='p'
+          size='micro'
+          variant={bodyDisplayOwnership === 'retained-error' ? 'errorLabel' : 'label'}
+          className={bodyDisplayOwnership === 'retained-error' ? undefined : 'text-warning'}
+          role={bodyDisplayOwnership === 'retained-error' ? 'alert' : 'status'}
+          aria-live={bodyDisplayOwnership === 'retained-error' ? 'assertive' : 'polite'}
+          aria-atomic='true'
+          data-testid='model-open-reference-body-display-status'
+          data-body-display-ownership={bodyDisplayOwnership}
+        >
+          {bodyDisplayMessage}
+        </Text>
+      ) : null}
+
+      {poseBlockedMessage ? (
+        <Text
+          component='p'
+          size='micro'
+          variant='errorLabel'
+          role='alert'
+          aria-live='assertive'
+          aria-atomic='true'
+          data-testid='model-open-reference-pose-blocked-status'
+        >
+          {poseBlockedMessage}
+        </Text>
+      ) : null}
+
+      {resolution.ok || displayedBuilt ? (
         <>
           {!directPoseControlHidden ? (
             <div className={editor.minimalViewportUi ? 'order-2' : undefined}>
@@ -3349,7 +3458,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
             </div>
           ) : null}
 
-          {!editor.minimalViewportUi ? (
+          {!editor.minimalViewportUi && resolution.ok ? (
             <div className='flex flex-wrap items-center gap-2'>
               <Pill tone='ink'>basis {resolution.basis.basisKind}</Pill>
               <Pill tone={statusTone(status)}>{status}</Pill>
@@ -3365,7 +3474,10 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
             </div>
           ) : null}
 
-          {editor.minimalViewportUi && currentBuilt && measurementApplicationText ? (
+          {editor.minimalViewportUi &&
+          bodyDisplayOwnership === 'current' &&
+          displayedBuilt &&
+          measurementApplicationText ? (
             <Text
               component='p'
               size='micro'
@@ -3374,10 +3486,12 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
               aria-live='polite'
               data-testid='model-open-reference-measurement-application-status'
               data-application-status={measurementApplicationPartial ? 'partial' : 'ready'}
-              data-applied={currentBuilt.measurementApplication?.applied.join(',') ?? ''}
-              data-limited={currentBuilt.measurementApplication?.limitedBySafeRange.join(',') ?? ''}
-              data-not-applied={currentBuilt.measurementApplication?.notApplied.join(',') ?? ''}
-              data-unsupported={currentBuilt.measurementApplication?.unsupported.join(',') ?? ''}
+              data-applied={displayedBuilt.measurementApplication?.applied.join(',') ?? ''}
+              data-limited={
+                displayedBuilt.measurementApplication?.limitedBySafeRange.join(',') ?? ''
+              }
+              data-not-applied={displayedBuilt.measurementApplication?.notApplied.join(',') ?? ''}
+              data-unsupported={displayedBuilt.measurementApplication?.unsupported.join(',') ?? ''}
             >
               {measurementApplicationText}
             </Text>
@@ -3386,46 +3500,48 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
           <Text
             component='p'
             size='micro'
-            className={editor.minimalViewportUi ? 'sr-only' : undefined}
+            className={editor.minimalViewportUi || bodyDisplayMessage ? 'sr-only' : undefined}
             variant={status === 'error' ? 'errorLabel' : 'label'}
-            role={status === 'error' ? 'alert' : 'status'}
-            aria-live={status === 'error' ? 'assertive' : 'polite'}
-            aria-atomic='true'
+            role={bodyDisplayMessage ? undefined : status === 'error' ? 'alert' : 'status'}
+            aria-live={bodyDisplayMessage ? undefined : status === 'error' ? 'assertive' : 'polite'}
+            aria-atomic={bodyDisplayMessage ? undefined : 'true'}
+            aria-hidden={bodyDisplayMessage ? 'true' : undefined}
             data-testid='model-open-reference-preview-status'
           >
-            {updateStatus === 'building' && currentBuilt
-              ? `Updating pose; showing preview ${editor.label(appliedPose ?? editor.neutralPose)} until ready.`
-              : updateStatus === 'building'
-                ? 'Building the measurement-driven full-body preview.'
-                : updateStatus === 'error' && currentBuilt
-                  ? `Pose update failed: ${updateError} Previous preview remains visible.`
-                  : updateStatus === 'error'
-                    ? `Preview failed: ${updateError}`
-                    : stageStatus === 'idle'
-                      ? 'Preview not built. Adjust the draft if needed, then select APPLY POSE.'
-                      : stageStatus === 'initializing'
-                        ? 'Preparing the interactive 3D view.'
-                        : stageStatus === 'ready'
-                          ? measurementApplicationPartial
-                            ? `Preview partial: ${editor.label(appliedPose ?? editor.neutralPose)}. Some entered measurement morphs were limited or not applied.`
-                            : `Preview ready: ${editor.label(appliedPose ?? editor.neutralPose)}. Drag to orbit and use the wheel to zoom.`
-                          : `Preview failed: ${stageError}`}
+            {bodyDisplayMessage ??
+              (updateStatus === 'building' && displayedBuilt
+                ? `Updating pose; showing preview ${editor.label(appliedPose ?? editor.neutralPose)} until ready.`
+                : updateStatus === 'building'
+                  ? 'Building the measurement-driven full-body preview.'
+                  : updateStatus === 'error' && displayedBuilt
+                    ? `Pose update failed: ${updateError} Previous preview remains visible.`
+                    : updateStatus === 'error'
+                      ? `Preview failed: ${updateError}`
+                      : stageStatus === 'idle'
+                        ? 'Preview not built. Adjust the draft if needed, then select APPLY POSE.'
+                        : stageStatus === 'initializing'
+                          ? 'Preparing the interactive 3D view.'
+                          : stageStatus === 'ready'
+                            ? measurementApplicationPartial
+                              ? `Preview partial: ${editor.label(appliedPose ?? editor.neutralPose)}. Some entered measurement morphs were limited or not applied.`
+                              : `Preview ready: ${editor.label(appliedPose ?? editor.neutralPose)}. Drag to orbit and use the wheel to zoom.`
+                            : `Preview failed: ${stageError}`)}
           </Text>
 
-          {currentBuilt ? (
+          {displayedBuilt ? (
             <Suspense fallback={<SkeletonBlocks count={1} height={320} className='w-full' />}>
               <MeasurementWatertightSurfaceV1Stage
-                artifact={currentBuilt.artifact}
-                frame={currentBuilt.frame}
+                artifact={displayedBuilt.artifact}
+                frame={displayedBuilt.frame}
                 lod='display'
-                displayMeshOverride={currentBuilt.runtime.displayMesh}
+                displayMeshOverride={displayedBuilt.runtime.displayMesh}
                 measurementGuide={measurementGuide}
                 viewPreset={viewPreset}
                 overlays={DISPLAY_OVERLAYS}
                 jointEditor={
                   directPoseViewportEditingEnabled &&
                   editor.buildsJointOverlay &&
-                  currentBuilt.jointOverlay
+                  currentBuilt?.jointOverlay
                     ? {
                         mode: effectiveJointEditorMode,
                         groups:
@@ -3547,6 +3663,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                   directPoseViewportEditingEnabled && (editor.unifiedViewportInteraction ?? false)
                 }
                 patternPieceOverlay={patternPieceOverlay}
+                retainVisibleCanvasOnRebuild={editor.version === 'full-body-v9'}
                 className={
                   workbench
                     ? 'order-1 h-full min-h-0 w-full border border-hairline'
@@ -3563,7 +3680,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
             </Suspense>
           ) : null}
         </>
-      )}
+      ) : null}
     </div>
   );
 }
