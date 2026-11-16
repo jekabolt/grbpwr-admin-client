@@ -20,12 +20,14 @@ const allMeasurements = Object.freeze({
   underBustCircumferenceMm: 880,
   waistCircumferenceMm: 760,
   hipCircumferenceMm: 980,
+  highHipCircumferenceMm: 900,
   armLengthMm: 600,
   inseamMm: 800,
   neckBaseCircumferenceMm: 360,
   bicepCircumferenceMm: 300,
   wristCircumferenceMm: 170,
   thighCircumferenceMm: 560,
+  kneeCircumferenceMm: 390,
   calfCircumferenceMm: 370,
   ankleCircumferenceMm: 230,
   hpsToWaistFrontMm: 430,
@@ -49,7 +51,7 @@ const allMeasurements = Object.freeze({
 } as const satisfies CanonicalBodyMeasurementsMm);
 
 describe('model open-reference measurement status contract v1', () => {
-  it('exhaustively classifies the 32 canonical and two raw project fields', () => {
+  it('exhaustively classifies all 34 canonical project fields', () => {
     expect(MODEL_OPEN_REFERENCE_MEASUREMENT_STATUS_FIELDS_V1).toHaveLength(34);
     expect(
       new Set(MODEL_OPEN_REFERENCE_MEASUREMENT_STATUS_FIELDS_V1.map(({ fieldId }) => fieldId)).size,
@@ -58,7 +60,7 @@ describe('model open-reference measurement status contract v1', () => {
     const canonical = MODEL_OPEN_REFERENCE_MEASUREMENT_STATUS_FIELDS_V1.filter(
       ({ source }) => source.kind === 'canonical',
     );
-    expect(canonical).toHaveLength(32);
+    expect(canonical).toHaveLength(34);
     expect(new Set(canonical.map(({ fieldId }) => fieldId))).toEqual(
       new Set(Object.keys(PROJECT_BODY_MEASUREMENT_ALIASES)),
     );
@@ -124,7 +126,10 @@ describe('model open-reference measurement status contract v1', () => {
       status: 'unsupported',
       directlyApplied: false,
     });
-    expect(byId.get('highHipMm')).toMatchObject({ status: 'unsupported', requested: true });
+    expect(byId.get('highHipCircumferenceMm')).toMatchObject({
+      status: 'unsupported',
+      requested: true,
+    });
     expect(byId.get('kneeCircumferenceMm')).toMatchObject({
       status: 'unsupported',
       requested: true,
