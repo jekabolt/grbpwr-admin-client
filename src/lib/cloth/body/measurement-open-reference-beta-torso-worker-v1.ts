@@ -3,6 +3,7 @@ import {
   loadMakeHumanTorsoShapeDeltaBundleV1,
   type MakeHumanTorsoShapeDeltaBundleV1,
 } from './makehuman-torso-shape-delta-bundle-v1';
+import { createMakeHumanUniformWaistHipModesV1 } from './makehuman-uniform-waist-hip-modes-v1';
 import type {
   MeasurementOpenReferenceBetaTorsoWorkerOptionsV1,
   MeasurementOpenReferenceBetaTorsoWorkerRequestV1,
@@ -12,6 +13,7 @@ import type {
 import { solveOpenReferenceChestShoulderResearchV1 } from './measurement-open-reference-chest-shoulder-research-v1';
 import { type MakeHumanOpenReferenceBasisV1 } from './measurement-open-reference-display-v1';
 import { applyOpenReferenceUnderBustRibcageResearchV1 } from './measurement-open-reference-underbust-ribcage-research-v1';
+import { solveMeasurementOpenReferenceTorsoDepthProxyV1 } from './measurement-open-reference-torso-depth-proxy-v1';
 
 export const MEASUREMENT_OPEN_REFERENCE_BETA_TORSO_WORKER_MEASURE_V1 =
   'measurement-open-reference-beta-torso-worker/v1' as const;
@@ -32,10 +34,16 @@ function abortError(): Error {
   return error;
 }
 
-async function solveSynchronously(
-  options: MeasurementOpenReferenceBetaTorsoInWorkerOptionsV1,
-): Promise<MeasurementOpenReferenceBetaTorsoWorkerResultV1> {
-  const torsoBundle = await (options.loadTorsoBundle ?? loadMakeHumanTorsoShapeDeltaBundleV1)();
+/** Shared pure torso pipeline used by both the module worker and the synchronous fallback. */
+export function solveMeasurementOpenReferenceBetaTorsoV1(options: {
+  readonly basis: MakeHumanOpenReferenceBasisV1;
+  readonly sourcePositionsM: Float32Array;
+  readonly triangleIndices: Uint16Array | Uint32Array;
+  readonly measurements: MeasurementOpenReferenceBetaTorsoWorkerOptionsV1['measurements'];
+  readonly torsoBundle: MakeHumanTorsoShapeDeltaBundleV1;
+  readonly solveDepthProxy?: typeof solveMeasurementOpenReferenceTorsoDepthProxyV1;
+}): MeasurementOpenReferenceBetaTorsoWorkerResultV1 {
+  const { torsoBundle } = options;
   const modes = createMakeHumanAnteriorChestShoulderModesResearchV1({
     basis: options.basis,
     measurements: options.measurements,
@@ -53,19 +61,88 @@ async function solveSynchronously(
     measurements: options.measurements,
     modes: modes.modes,
   });
-  const chestStationOriginM = modes.modes.find(
+  const chestMode = modes.modes.find(
     ({ measurementKey }) => measurementKey === 'chestCircumferenceMm',
-  )?.chestStationOriginM;
-  if (!chestStationOriginM) throw new Error('Chest section station is missing.');
+  );
+  if (!chestMode?.chestStationOriginM) {
+    throw new Error('Chest section station is missing.');
+  }
+  const depthRequested = [
+    options.measurements.chestDepthMm,
+    options.measurements.waistDepthMm,
+    options.measurements.hipDepthMm,
+  ].some((value) => value != null);
+  if (!depthRequested) {
+    return Object.freeze({
+      positionsM: chestShoulder.positionsM,
+      chestStationOriginM: chestMode.chestStationOriginM,
+      underBustStationOriginM: modes.underBustStationOriginM,
+      ribcageRepresentedMeasurements: ribcage.representedMeasurements,
+      ribcageDiagnostics: Object.freeze([...modes.diagnostics, ...ribcage.diagnostics]),
+      chestShoulderRepresentedMeasurements: chestShoulder.representedMeasurements,
+      chestShoulderLimitedMeasurements: chestShoulder.limitedMeasurements,
+      chestShoulderDiagnostics: chestShoulder.diagnostics,
+      depthRepresentedMeasurements: Object.freeze([]),
+      depthLimitedMeasurements: Object.freeze([]),
+      depthModeResults: Object.freeze([]),
+      depthDiagnostics: Object.freeze([]),
+    });
+  }
+  const waistHipModes = createMakeHumanUniformWaistHipModesV1({
+    basis: options.basis,
+    heightMm: options.measurements.heightMm,
+    bundle: torsoBundle,
+  });
+  const shoulderMode = modes.modes.find(
+    ({ measurementKey }) => measurementKey === 'shoulderBreadthMm',
+  );
+  const waistMode = waistHipModes.modes.find(
+    ({ measurementKey }) => measurementKey === 'waistCircumferenceMm',
+  );
+  const hipMode = waistHipModes.modes.find(
+    ({ measurementKey }) => measurementKey === 'hipCircumferenceMm',
+  );
+  if (!shoulderMode?.shoulderVertices || !waistMode || !hipMode) {
+    throw new Error('Torso depth proxy stations are incomplete.');
+  }
+  const depth = (options.solveDepthProxy ?? solveMeasurementOpenReferenceTorsoDepthProxyV1)({
+    sourcePositionsM: chestShoulder.positionsM,
+    triangleIndices: options.triangleIndices,
+    measurements: options.measurements,
+    stations: [
+      { measurementKey: 'chestDepthMm', originM: chestMode.chestStationOriginM },
+      { measurementKey: 'waistDepthMm', originM: waistMode.stationOriginM },
+      { measurementKey: 'hipDepthMm', originM: hipMode.stationOriginM },
+    ],
+    protectedStationOriginsM: [modes.underBustStationOriginM],
+    shoulderVertices: shoulderMode.shoulderVertices,
+  });
   return Object.freeze({
-    positionsM: chestShoulder.positionsM,
-    chestStationOriginM,
+    positionsM: depth.positionsM,
+    chestStationOriginM: chestMode.chestStationOriginM,
     underBustStationOriginM: modes.underBustStationOriginM,
     ribcageRepresentedMeasurements: ribcage.representedMeasurements,
     ribcageDiagnostics: Object.freeze([...modes.diagnostics, ...ribcage.diagnostics]),
     chestShoulderRepresentedMeasurements: chestShoulder.representedMeasurements,
     chestShoulderLimitedMeasurements: chestShoulder.limitedMeasurements,
     chestShoulderDiagnostics: chestShoulder.diagnostics,
+    depthRepresentedMeasurements: depth.representedMeasurements,
+    depthLimitedMeasurements: depth.limitedMeasurements,
+    depthModeResults: depth.modeResults,
+    depthDiagnostics: depth.diagnostics,
+  });
+}
+
+async function solveSynchronously(
+  options: MeasurementOpenReferenceBetaTorsoInWorkerOptionsV1,
+): Promise<MeasurementOpenReferenceBetaTorsoWorkerResultV1> {
+  const torsoBundle = await (options.loadTorsoBundle ?? loadMakeHumanTorsoShapeDeltaBundleV1)();
+  return solveMeasurementOpenReferenceBetaTorsoV1({
+    basis: options.basis,
+    sourcePositionsM: options.sourcePositionsM,
+    triangleIndices: options.triangleIndices,
+    measurements: options.measurements,
+    torsoBundle,
   });
 }
 
