@@ -1,6 +1,12 @@
 import type { MakeHumanCoreRigBasisKindV1 } from './makehuman-core-rig-pose-research-v1';
-import { type MakeHumanArmSideSeamAssistResultV1 } from './makehuman-arm-side-seam-assist-v1';
-import { createMakeHumanArmSideSeamAssistsInWorkerV1 } from './makehuman-arm-side-seam-assist-worker-v1';
+import type {
+  MakeHumanArmSideSeamAssistOutcomeV1,
+  MakeHumanArmSideSeamAssistResultV1,
+} from './makehuman-arm-side-seam-assist-v1';
+import {
+  availableMakeHumanArmSideSeamAssistsV1,
+  createMakeHumanArmSideSeamAssistsInWorkerV1,
+} from './makehuman-arm-side-seam-assist-worker-v1';
 import { deriveMakeHumanElbowBindNeutralizationV1 } from './makehuman-elbow-bind-neutralization-v1';
 import {
   createNeutralMakeHumanFullBodyLocalFkPoseV4,
@@ -72,8 +78,12 @@ export interface MakeHumanFullBodyLiveFkSessionV5 {
   }>;
   readonly neutralJointOverlay: readonly MakeHumanPosedLocalBoneOverlayV4[];
   readonly sideSeamAssists: Readonly<{
-    left: MakeHumanArmSideSeamAssistResultV1;
-    right: MakeHumanArmSideSeamAssistResultV1;
+    left: MakeHumanArmSideSeamAssistResultV1 | null;
+    right: MakeHumanArmSideSeamAssistResultV1 | null;
+  }>;
+  readonly sideSeamAssistOutcomes: Readonly<{
+    left: MakeHumanArmSideSeamAssistOutcomeV1;
+    right: MakeHumanArmSideSeamAssistOutcomeV1;
   }>;
   readonly solve: (pose: unknown) => MakeHumanFullBodyLiveFkFrameV5;
   readonly claims: typeof CLAIMS;
@@ -141,6 +151,7 @@ export async function createMakeHumanFullBodyLiveFkSessionV5(options: {
   readonly sourceRevision: string;
   readonly signal?: AbortSignal;
   readonly loadResources?: () => Promise<MeasurementOpenReferenceDisplayPoseResourcesV1>;
+  readonly createSideSeamAssists?: typeof createMakeHumanArmSideSeamAssistsInWorkerV1;
 }): Promise<MakeHumanFullBodyLiveFkSessionV5> {
   const resources = await (options.loadResources ?? loadAuthenticatedResourcesV5)();
   const sourceMesh = measuredLiveSessionStageV5('validate-and-snapshot', () => {
@@ -177,7 +188,9 @@ export async function createMakeHumanFullBodyLiveFkSessionV5(options: {
     rigSha256: MEASUREMENT_OPEN_REFERENCE_DISPLAY_POSE_RUNTIME_METADATA_V1.rigSha256,
   });
   const sourceRevision = boundRevision(options.sourceRevision);
-  const sideSeamAssists = await createMakeHumanArmSideSeamAssistsInWorkerV1({
+  const sideSeamAssistOutcomes = await (
+    options.createSideSeamAssists ?? createMakeHumanArmSideSeamAssistsInWorkerV1
+  )({
     bundle: resources.rig,
     basisKind: options.basis.kind,
     heads: coherentAnchors.headsM,
@@ -189,6 +202,7 @@ export async function createMakeHumanFullBodyLiveFkSessionV5(options: {
     maximumVerticalErrorRatio: options.proxyRuntime.poseCompatibleArmLengthProxy ? 0.25 : undefined,
     signal: options.signal,
   });
+  const sideSeamAssists = availableMakeHumanArmSideSeamAssistsV1(sideSeamAssistOutcomes);
   const neutralOverlay = measuredLiveSessionStageV5('neutral-overlay', () =>
     poseMakeHumanCoreRigDisplayOverlayLocalResearchV4({
       bundle: resources.rig,
@@ -265,6 +279,7 @@ export async function createMakeHumanFullBodyLiveFkSessionV5(options: {
     baselineAnklesM,
     neutralJointOverlay: neutralOverlay.bones,
     sideSeamAssists,
+    sideSeamAssistOutcomes,
     solve,
     claims: CLAIMS,
   });

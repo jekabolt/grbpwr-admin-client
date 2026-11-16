@@ -61,6 +61,7 @@ import {
   modelOpenReferenceBodyDisplayOwnershipV11,
   modelOpenReferenceFullBodyBuildDelayV12,
   modelOpenReferencePoseBlockedMessageV11,
+  modelOpenReferenceSideSeamCapabilityV12,
   modelOpenReferenceJointEditorEffectiveModeV5,
   modelOpenReferenceFullBodyRuntimePoseV3,
   modelOpenReferenceFullBodyRuntimePoseV4,
@@ -280,6 +281,22 @@ function Harness({
 }
 
 describe('model open-reference preview', () => {
+  it('reports a partial side-seam capability without blocking free anatomical drag', () => {
+    const session = {
+      version: 'makehuman-full-body-live-fk-session/v5',
+      sideSeamAssistOutcomes: {
+        left: { status: 'unavailable' },
+        right: { status: 'available' },
+      },
+    } as unknown as NonNullable<Parameters<typeof modelOpenReferenceSideSeamCapabilityV12>[0]>;
+
+    expect(modelOpenReferenceSideSeamCapabilityV12(session)).toEqual({
+      unavailableSides: ['left'],
+      message:
+        'Side-seam snap is unavailable for the left arm; free anatomical drag remains available.',
+    });
+  });
+
   it('retains last-valid V9 body ownership until replacement geometry is ready', () => {
     const base = {
       builtFingerprint: 'body:old',

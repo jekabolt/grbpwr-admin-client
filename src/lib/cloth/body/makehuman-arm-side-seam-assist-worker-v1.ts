@@ -1,6 +1,6 @@
 import type { MakeHumanCoreRigBundleV1 } from './makehuman-core-rig-pose-research-v1';
 import {
-  createMakeHumanArmSideSeamAssistV1,
+  createMakeHumanArmSideSeamAssistOutcomeV1,
   type MakeHumanArmSideSeamAssistResultV1,
 } from './makehuman-arm-side-seam-assist-v1';
 import type {
@@ -19,6 +19,21 @@ export interface MakeHumanArmSideSeamAssistsInWorkerOptionsV1
   extends MakeHumanArmSideSeamAssistWorkerOptionsV1 {
   readonly bundle: MakeHumanCoreRigBundleV1;
   readonly signal?: AbortSignal;
+}
+
+export function availableMakeHumanArmSideSeamAssistsV1(
+  outcomes: MakeHumanArmSideSeamAssistWorkerResultV1,
+): Readonly<{
+  left: MakeHumanArmSideSeamAssistResultV1 | null;
+  right: MakeHumanArmSideSeamAssistResultV1 | null;
+}> {
+  if (outcomes.left.side !== 'left' || outcomes.right.side !== 'right') {
+    throw new Error('Side-seam worker result does not match the requested arm sides.');
+  }
+  return Object.freeze({
+    left: outcomes.left.status === 'available' ? outcomes.left.assist : null,
+    right: outcomes.right.status === 'available' ? outcomes.right.assist : null,
+  });
 }
 
 function abortError(): Error {
@@ -49,8 +64,8 @@ function solveSideSeamAssists(options: {
     maximumVerticalErrorRatio: options.maximumVerticalErrorRatio,
   };
   return Object.freeze({
-    left: createMakeHumanArmSideSeamAssistV1({ ...shared, side: 'left' }),
-    right: createMakeHumanArmSideSeamAssistV1({ ...shared, side: 'right' }),
+    left: createMakeHumanArmSideSeamAssistOutcomeV1({ ...shared, side: 'left' }),
+    right: createMakeHumanArmSideSeamAssistOutcomeV1({ ...shared, side: 'right' }),
   });
 }
 

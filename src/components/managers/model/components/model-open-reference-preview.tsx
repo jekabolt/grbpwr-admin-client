@@ -243,6 +243,27 @@ interface FullBodyBuiltPreviewV3 {
   readonly bodyBuildFingerprint: string;
 }
 
+export interface ModelOpenReferenceSideSeamCapabilityV12 {
+  readonly unavailableSides: readonly MakeHumanArmBodyPartIkSideV1[];
+  readonly message: string;
+}
+
+export function modelOpenReferenceSideSeamCapabilityV12(
+  session: MakeHumanFullBodyLiveFkSessionV4 | MakeHumanFullBodyLiveFkSessionV5 | null,
+): ModelOpenReferenceSideSeamCapabilityV12 | null {
+  if (!session || session.version !== 'makehuman-full-body-live-fk-session/v5') return null;
+  const unavailableSides = (['left', 'right'] as const).filter(
+    (side) => session.sideSeamAssistOutcomes[side].status === 'unavailable',
+  );
+  if (unavailableSides.length === 0) return null;
+  const subject =
+    unavailableSides.length === 2 ? 'the left and right arms' : `the ${unavailableSides[0]} arm`;
+  return Object.freeze({
+    unavailableSides: Object.freeze(unavailableSides),
+    message: `Side-seam snap is unavailable for ${subject}; free anatomical drag remains available.`,
+  });
+}
+
 export type ModelOpenReferenceBodyDisplayOwnershipV11 =
   | 'empty'
   | 'current'
@@ -2864,6 +2885,9 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
 
   const currentBuilt = built?.bodyBuildFingerprint === bodyBuildFingerprint ? built : null;
   const displayedBuilt = currentBuilt ?? (editor.version === 'full-body-v9' ? built : null);
+  const sideSeamCapability = modelOpenReferenceSideSeamCapabilityV12(
+    currentBuilt?.liveFkSession ?? null,
+  );
   const bodyDisplayOwnership =
     editor.version === 'full-body-v9'
       ? modelOpenReferenceBodyDisplayOwnershipV11({
@@ -3139,7 +3163,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                   shoulderLocalToWorld: shoulder.localToWorld,
                   targetWristM: targetM,
                   currentArm: transaction.currentArm,
-                  sideSeamAssist: currentBuilt.liveFkSession?.sideSeamAssists[side],
+                  sideSeamAssist: currentBuilt.liveFkSession?.sideSeamAssists[side] ?? undefined,
                 });
                 const nextPose = editor.snapshot(
                   armBodyPartIk.applyArm(transaction.originalPose, side, solved.arm),
@@ -3539,6 +3563,21 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
           data-testid='model-open-reference-pose-blocked-status'
         >
           {poseBlockedMessage}
+        </Text>
+      ) : null}
+
+      {sideSeamCapability ? (
+        <Text
+          component='p'
+          size='micro'
+          variant='label'
+          role='status'
+          aria-live='polite'
+          aria-atomic='true'
+          data-testid='model-open-reference-side-seam-status'
+          data-unavailable-sides={sideSeamCapability.unavailableSides.join(',')}
+        >
+          {sideSeamCapability.message}
         </Text>
       ) : null}
 

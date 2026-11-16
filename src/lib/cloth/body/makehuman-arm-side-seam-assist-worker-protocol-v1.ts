@@ -1,5 +1,5 @@
 import type { MakeHumanCoreRigBasisKindV1 } from './makehuman-core-rig-pose-research-v1';
-import type { MakeHumanArmSideSeamAssistResultV1 } from './makehuman-arm-side-seam-assist-v1';
+import type { MakeHumanArmSideSeamAssistOutcomeV1 } from './makehuman-arm-side-seam-assist-v1';
 
 export interface MakeHumanArmSideSeamAssistWorkerOptionsV1 {
   readonly basisKind: MakeHumanCoreRigBasisKindV1;
@@ -12,8 +12,8 @@ export interface MakeHumanArmSideSeamAssistWorkerOptionsV1 {
 }
 
 export interface MakeHumanArmSideSeamAssistWorkerResultV1 {
-  readonly left: MakeHumanArmSideSeamAssistResultV1;
-  readonly right: MakeHumanArmSideSeamAssistResultV1;
+  readonly left: MakeHumanArmSideSeamAssistOutcomeV1;
+  readonly right: MakeHumanArmSideSeamAssistOutcomeV1;
 }
 
 export type MakeHumanArmSideSeamAssistWorkerRequestV1 = Readonly<{

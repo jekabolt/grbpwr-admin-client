@@ -20,6 +20,8 @@ import {
 } from './makehuman-local-joint-frame-research-v3';
 
 export const MAKEHUMAN_ARM_SIDE_SEAM_ASSIST_V1 = 'makehuman-arm-side-seam-assist/v1' as const;
+export const MAKEHUMAN_ARM_SIDE_SEAM_ASSIST_OUTCOME_V1 =
+  'makehuman-arm-side-seam-assist-outcome/v1' as const;
 
 export type MakeHumanArmSideSeamAssistSideV1 = 'left' | 'right';
 
@@ -56,6 +58,44 @@ export interface MakeHumanArmSideSeamAssistResultV1 {
   }>;
 }
 
+export interface MakeHumanArmSideSeamAssistLimitsV1 {
+  readonly minimumVerticality: number;
+  readonly minimumStraightness: number;
+  readonly minimumOuterHipClearanceRatio: number;
+  readonly maximumDepthErrorRatio: number;
+  readonly maximumVerticalErrorRatio: number;
+}
+
+export interface MakeHumanArmSideSeamAssistAvailableV1 {
+  readonly version: typeof MAKEHUMAN_ARM_SIDE_SEAM_ASSIST_OUTCOME_V1;
+  readonly status: 'available';
+  readonly side: MakeHumanArmSideSeamAssistSideV1;
+  readonly assist: MakeHumanArmSideSeamAssistResultV1;
+  readonly metrics: MakeHumanArmSideSeamMetricsV1;
+}
+
+export interface MakeHumanArmSideSeamAssistUnavailableV1 {
+  readonly version: typeof MAKEHUMAN_ARM_SIDE_SEAM_ASSIST_OUTCOME_V1;
+  readonly status: 'unavailable';
+  readonly side: MakeHumanArmSideSeamAssistSideV1;
+  readonly reason: 'geometry-gate-failed';
+  readonly metrics: MakeHumanArmSideSeamMetricsV1;
+  readonly limits: MakeHumanArmSideSeamAssistLimitsV1;
+  readonly claims: Readonly<{
+    authenticatedRigGeometryEvaluated: true;
+    sideSeamSnapAvailable: false;
+    productInteractionEnvelopeApplied: true;
+    clinicalAnatomicalRangeAuthority: false;
+    garmentPairEvaluated: false;
+    fitClaimEligible: false;
+    productionAuthority: false;
+  }>;
+}
+
+export type MakeHumanArmSideSeamAssistOutcomeV1 =
+  | MakeHumanArmSideSeamAssistAvailableV1
+  | MakeHumanArmSideSeamAssistUnavailableV1;
+
 const CLAIMS = Object.freeze({
   authenticatedRigGeometryEvaluated: true as const,
   straightArmSideSeamAssist: true as const,
@@ -73,6 +113,51 @@ const MAXIMUM_DEPTH_ERROR_RATIO = 0.06;
 const MAXIMUM_VERTICAL_ERROR_RATIO = 0.12;
 const MINIMUM_VERTICALITY = 0.94;
 const MINIMUM_STRAIGHTNESS = 0.9;
+
+const UNAVAILABLE_CLAIMS = Object.freeze({
+  authenticatedRigGeometryEvaluated: true as const,
+  sideSeamSnapAvailable: false as const,
+  productInteractionEnvelopeApplied: true as const,
+  clinicalAnatomicalRangeAuthority: false as const,
+  garmentPairEvaluated: false as const,
+  fitClaimEligible: false as const,
+  productionAuthority: false as const,
+});
+
+export class MakeHumanArmSideSeamGeometryGateErrorV1 extends Error {
+  readonly side: MakeHumanArmSideSeamAssistSideV1;
+  readonly metrics: MakeHumanArmSideSeamMetricsV1;
+  readonly limits: MakeHumanArmSideSeamAssistLimitsV1;
+
+  constructor(options: {
+    readonly side: MakeHumanArmSideSeamAssistSideV1;
+    readonly metrics: MakeHumanArmSideSeamMetricsV1;
+    readonly limits: MakeHumanArmSideSeamAssistLimitsV1;
+  }) {
+    super(
+      `Authenticated arm rig could not satisfy the side-seam geometry gate: ${JSON.stringify(options.metrics)}.`,
+    );
+    this.name = 'MakeHumanArmSideSeamGeometryGateErrorV1';
+    this.side = options.side;
+    this.metrics = options.metrics;
+    this.limits = options.limits;
+  }
+}
+
+export interface MakeHumanArmSideSeamAssistOptionsV1 {
+  readonly bundle: MakeHumanCoreRigBundleV1;
+  readonly basisKind: MakeHumanCoreRigBasisKindV1;
+  readonly heads: Float32Array;
+  readonly tails: Float32Array;
+  readonly rollDirections: Float32Array;
+  readonly side: MakeHumanArmSideSeamAssistSideV1;
+  readonly elbowNeutralization?: MakeHumanElbowBindNeutralizationV1;
+  readonly wristBendDeg?: number;
+  /** Bounded product envelope override for length-scaled visual proxies. */
+  readonly minimumOuterHipClearanceRatio?: number;
+  /** Bounded product envelope override for length-scaled visual proxies. */
+  readonly maximumVerticalErrorRatio?: number;
+}
 
 function vector(value: MakeHumanLocalJointVec3V3): MakeHumanLocalJointVec3V3 {
   return Object.freeze([value[0], value[1], value[2]] as const);
@@ -155,20 +240,9 @@ interface Candidate {
  * search followed by a one-degree refinement avoids assuming that semantic shoulder channels map
  * to world axes identically across the female, male, and neutral bases.
  */
-export function createMakeHumanArmSideSeamAssistV1(options: {
-  readonly bundle: MakeHumanCoreRigBundleV1;
-  readonly basisKind: MakeHumanCoreRigBasisKindV1;
-  readonly heads: Float32Array;
-  readonly tails: Float32Array;
-  readonly rollDirections: Float32Array;
-  readonly side: MakeHumanArmSideSeamAssistSideV1;
-  readonly elbowNeutralization?: MakeHumanElbowBindNeutralizationV1;
-  readonly wristBendDeg?: number;
-  /** Bounded product envelope override for length-scaled visual proxies. */
-  readonly minimumOuterHipClearanceRatio?: number;
-  /** Bounded product envelope override for length-scaled visual proxies. */
-  readonly maximumVerticalErrorRatio?: number;
-}): MakeHumanArmSideSeamAssistResultV1 {
+export function createMakeHumanArmSideSeamAssistV1(
+  options: MakeHumanArmSideSeamAssistOptionsV1,
+): MakeHumanArmSideSeamAssistResultV1 {
   const { bundle } = options;
   if (options.side !== 'left' && options.side !== 'right') {
     throw new RangeError('Side-seam assist side must be left or right.');
@@ -314,9 +388,17 @@ export function createMakeHumanArmSideSeamAssistV1(options: {
   }
   const selected = best as Candidate;
   if (!selected.metrics.sideSeamEligible) {
-    throw new Error(
-      `Authenticated arm rig could not satisfy the side-seam geometry gate: ${JSON.stringify(selected.metrics)}.`,
-    );
+    throw new MakeHumanArmSideSeamGeometryGateErrorV1({
+      side: options.side,
+      metrics: selected.metrics,
+      limits: Object.freeze({
+        minimumVerticality: MINIMUM_VERTICALITY,
+        minimumStraightness: MINIMUM_STRAIGHTNESS,
+        minimumOuterHipClearanceRatio,
+        maximumDepthErrorRatio: MAXIMUM_DEPTH_ERROR_RATIO,
+        maximumVerticalErrorRatio,
+      }),
+    });
   }
   const armLength =
     distance(selected.shoulderM, selected.elbowM) + distance(selected.elbowM, selected.wristM);
@@ -332,4 +414,48 @@ export function createMakeHumanArmSideSeamAssistV1(options: {
     metrics: selected.metrics,
     claims: CLAIMS,
   });
+}
+
+/**
+ * Converts only an authenticated geometry-gate miss into a typed capability result. Resource,
+ * rig, topology, and integrity errors remain fatal and are deliberately rethrown.
+ */
+export function createMakeHumanArmSideSeamAssistOutcomeV1(
+  options: MakeHumanArmSideSeamAssistOptionsV1,
+  solve: (
+    current: MakeHumanArmSideSeamAssistOptionsV1,
+  ) => MakeHumanArmSideSeamAssistResultV1 = createMakeHumanArmSideSeamAssistV1,
+): MakeHumanArmSideSeamAssistOutcomeV1 {
+  try {
+    const assist = solve(options);
+    return Object.freeze({
+      version: MAKEHUMAN_ARM_SIDE_SEAM_ASSIST_OUTCOME_V1,
+      status: 'available',
+      side: options.side,
+      assist,
+      metrics: assist.metrics,
+    });
+  } catch (reason: unknown) {
+    if (!(reason instanceof MakeHumanArmSideSeamGeometryGateErrorV1)) throw reason;
+    if (reason.side !== options.side) {
+      throw new Error('Side-seam geometry-gate result does not match the requested side.');
+    }
+    if (
+      reason.metrics.sideSeamEligible ||
+      !Number.isFinite(reason.limits.maximumVerticalErrorRatio) ||
+      reason.limits.maximumVerticalErrorRatio > 0.25 ||
+      reason.limits.maximumVerticalErrorRatio < MAXIMUM_VERTICAL_ERROR_RATIO
+    ) {
+      throw new Error('Side-seam geometry-gate result failed its integrity envelope.');
+    }
+    return Object.freeze({
+      version: MAKEHUMAN_ARM_SIDE_SEAM_ASSIST_OUTCOME_V1,
+      status: 'unavailable',
+      side: reason.side,
+      reason: 'geometry-gate-failed',
+      metrics: reason.metrics,
+      limits: reason.limits,
+      claims: UNAVAILABLE_CLAIMS,
+    });
+  }
 }
