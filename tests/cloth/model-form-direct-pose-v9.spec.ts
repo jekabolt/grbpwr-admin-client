@@ -995,6 +995,7 @@ test('direct ankle and wrist drags retain a non-crossing last-valid pose across 
   expect(legAfter.equals(legBefore)).toBe(true);
 
   await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.getByRole('checkbox', { name: 'edit pose', exact: true }).check({ timeout: 180_000 });
   await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
     'Preview partial: A-rest',
     { timeout: 180_000 },
