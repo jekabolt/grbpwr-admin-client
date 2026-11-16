@@ -451,7 +451,6 @@ function ModelFormRuntime({
                   ) : (
                     <MeasurementsQuiz
                       showAudit={isEditMode}
-                      preview={renderBodyPreview(true)}
                       onComplete={() => setMeasurementEntryMode('table')}
                     />
                   )}
