@@ -122,15 +122,16 @@ function selectedCurrentRow(
     sizeBytes: pattern.sizeBytes ?? 0,
     sha256: pattern.sha256 ?? '',
   });
-  if (
-    !Number.isSafeInteger(current.revision) ||
-    current.revision <= 0 ||
-    !validDownloadUrl(current.url) ||
-    !Number.isSafeInteger(current.sizeBytes) ||
-    current.sizeBytes <= 0 ||
-    !/^[0-9a-f]{64}$/.test(current.sha256)
-  )
-    throw new Error('The current saved DXF row has no complete authoritative identity.');
+  const invalidIdentityFields = [
+    ...(!Number.isSafeInteger(current.revision) || current.revision <= 0 ? ['revision'] : []),
+    ...(!validDownloadUrl(current.url) ? ['url'] : []),
+    ...(!Number.isSafeInteger(current.sizeBytes) || current.sizeBytes <= 0 ? ['sizeBytes'] : []),
+    ...(!/^[0-9a-f]{64}$/.test(current.sha256) ? ['sha256'] : []),
+  ];
+  if (invalidIdentityFields.length)
+    throw new Error(
+      `The current saved DXF row has no complete authoritative identity. Missing or invalid: ${invalidIdentityFields.join(', ')}.`,
+    );
   if (!validDownloadUrl(pattern.downloadUrl))
     throw new Error('The current saved DXF row has no server download URL.');
   return Object.freeze({ row: current, downloadUrl: pattern.downloadUrl });
