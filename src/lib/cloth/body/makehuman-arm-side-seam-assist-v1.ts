@@ -3,9 +3,15 @@ import {
   MAKEHUMAN_CLO_LIKE_POSE_CHANNELS_V3,
   type MakeHumanCloLikeArmControlsV3,
 } from './makehuman-clo-like-pose-display-v3';
-import type {
-  MakeHumanCoreRigBasisKindV1,
-  MakeHumanCoreRigBundleV1,
+import {
+  applyMakeHumanElbowBindNeutralizationV1,
+  deriveMakeHumanElbowBindNeutralizationV1,
+  type MakeHumanElbowBindNeutralizationV1,
+} from './makehuman-elbow-bind-neutralization-v1';
+import {
+  MAKEHUMAN_CORE_RIG_BUNDLE_METADATA_V1,
+  type MakeHumanCoreRigBasisKindV1,
+  type MakeHumanCoreRigBundleV1,
 } from './makehuman-core-rig-pose-research-v1';
 import {
   poseMakeHumanCoreRigDisplayOverlayLocalResearchV4,
@@ -156,6 +162,7 @@ export function createMakeHumanArmSideSeamAssistV1(options: {
   readonly tails: Float32Array;
   readonly rollDirections: Float32Array;
   readonly side: MakeHumanArmSideSeamAssistSideV1;
+  readonly elbowNeutralization?: MakeHumanElbowBindNeutralizationV1;
   readonly wristBendDeg?: number;
   /** Bounded product envelope override for length-scaled visual proxies. */
   readonly minimumOuterHipClearanceRatio?: number;
@@ -177,6 +184,16 @@ export function createMakeHumanArmSideSeamAssistV1(options: {
     options.minimumOuterHipClearanceRatio ?? MINIMUM_OUTER_HIP_CLEARANCE_RATIO;
   const maximumVerticalErrorRatio =
     options.maximumVerticalErrorRatio ?? MAXIMUM_VERTICAL_ERROR_RATIO;
+  const elbowNeutralization =
+    options.elbowNeutralization ??
+    deriveMakeHumanElbowBindNeutralizationV1({
+      bundle,
+      basisKind: options.basisKind,
+      heads: options.heads,
+      tails: options.tails,
+      rollDirections: options.rollDirections,
+      rigSha256: MAKEHUMAN_CORE_RIG_BUNDLE_METADATA_V1.sha256,
+    });
   if (
     !Number.isFinite(minimumOuterHipClearanceRatio) ||
     minimumOuterHipClearanceRatio < 0.1 ||
@@ -233,7 +250,10 @@ export function createMakeHumanArmSideSeamAssistV1(options: {
       heads: options.heads,
       tails: options.tails,
       rollDirections: options.rollDirections,
-      rotations: compileMakeHumanCloLikePoseDisplayV3(pose).rotations,
+      rotations: applyMakeHumanElbowBindNeutralizationV1(
+        compileMakeHumanCloLikePoseDisplayV3(pose).rotations,
+        elbowNeutralization,
+      ),
     });
     const byName = new Map(overlay.bones.map((bone) => [bone.bone, bone]));
     const shoulderM = requiredBone(byName, `upperarm01${sideSuffix}`).headM;

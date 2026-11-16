@@ -8,8 +8,18 @@ import type {
   MakeHumanLocalJointMatrix3V3,
   MakeHumanLocalJointVec3V3,
 } from './makehuman-local-joint-frame-research-v3';
+import { MAKEHUMAN_ELBOW_NEUTRAL_ASSIST_V1 } from './makehuman-elbow-neutral-assist-v1';
 
 export const MAKEHUMAN_ARM_BODY_PART_IK_V1 = 'makehuman-arm-body-part-ik/v1' as const;
+
+/**
+ * A camera-facing wrist drag preserves the wrist's drag-start depth. Near full extension that can
+ * leave a small geometric bend even when the pointer is visibly past the straight-arm target.
+ * Treat that final product-interaction zone as the neutral detent; finer low-angle flexion remains
+ * available through the elbow rotation ring.
+ */
+export const MAKEHUMAN_ARM_BODY_PART_IK_FULL_EXTENSION_DETENT_DEG_V1 =
+  MAKEHUMAN_ELBOW_NEUTRAL_ASSIST_V1.wristDragMaximumBendDeg;
 
 export type MakeHumanArmBodyPartIkSideV1 = 'left' | 'right';
 
@@ -326,7 +336,7 @@ export function solveMakeHumanArmBodyPartIkV1(
     requestedTargetLocal[1] / requestedReach,
     requestedTargetLocal[2] / requestedReach,
   ];
-  const elbowRadians = Math.acos(
+  const geometricElbowRadians = Math.acos(
     clamp(
       (solvedReach * solvedReach -
         upperArmLength * upperArmLength -
@@ -336,6 +346,10 @@ export function solveMakeHumanArmBodyPartIkV1(
       1,
     ),
   );
+  const elbowRadians =
+    geometricElbowRadians * DEG <= MAKEHUMAN_ARM_BODY_PART_IK_FULL_EXTENSION_DETENT_DEG_V1
+      ? 0
+      : geometricElbowRadians;
   const sideSign = input.side === 'left' ? 1 : -1;
   const bentLocalX = lowerArmLength * Math.sin(elbowRadians);
   const bentLocalY = upperArmLength + lowerArmLength * Math.cos(elbowRadians);

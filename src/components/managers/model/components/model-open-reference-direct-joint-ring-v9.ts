@@ -7,6 +7,7 @@ import {
 } from 'lib/cloth/body/makehuman-full-body-joint-overlay-runtime-v5';
 import { MAKEHUMAN_FULL_BODY_HEAD_ENVELOPE_V4 } from 'lib/cloth/body/makehuman-full-body-pose-v4';
 import { MAKEHUMAN_LEG_BODY_PART_IK_ENVELOPE_V1 } from 'lib/cloth/body/makehuman-leg-body-part-ik-v1';
+import { MAKEHUMAN_ELBOW_NEUTRAL_ASSIST_V1 } from 'lib/cloth/body/makehuman-elbow-neutral-assist-v1';
 
 import {
   MODEL_OPEN_REFERENCE_FULL_BODY_POSE_LIMITS_V4,
@@ -105,6 +106,11 @@ const LEGACY_FIELDS = Object.freeze({
 } as const);
 
 type LegacyChannelV9 = keyof typeof LEGACY_FIELDS;
+
+// In a straight side view the corrected elbow's local ring is nearly edge-on, so a normal
+// tangential sweep reports only a few physical degrees. Gain is direction-scoped to straightening;
+// flex placement keeps its one-degree semantic precision and the zero clamp blocks hyperextension.
+const ELBOW_RING_INTERACTION_GAIN_V9 = MAKEHUMAN_ELBOW_NEUTRAL_ASSIST_V1.ringStraighteningGain;
 
 function isLegacyChannel(
   channel: MakeHumanFullBodyJointOverlayChannelV5,
@@ -261,11 +267,22 @@ export function modelOpenReferenceDirectJointRingMoveV9(
     transaction.accumulatedRingDegrees +
     modelOpenReferenceJointRingDeltaDegreesV6(transaction.previousPointerAngleDegrees, normalized);
   const envelope = limit(transaction.selection.channel);
-  const value = quantizedValue({
+  const semanticDeltaDegrees = accumulatedRingDegrees * transaction.ringToSemanticSign;
+  const interactionGain =
+    transaction.selection.channel === 'elbowBendDeg' && semanticDeltaDegrees < 0
+      ? ELBOW_RING_INTERACTION_GAIN_V9
+      : 1;
+  const quantized = quantizedValue({
     startDegrees: transaction.startSemanticDegrees,
-    semanticDeltaDegrees: accumulatedRingDegrees * transaction.ringToSemanticSign,
+    semanticDeltaDegrees: semanticDeltaDegrees * interactionGain,
     ...envelope,
   });
+  const value =
+    transaction.selection.channel === 'elbowBendDeg' &&
+    semanticDeltaDegrees < 0 &&
+    quantized <= MAKEHUMAN_ELBOW_NEUTRAL_ASSIST_V1.ringNeutralDetentMaximumDeg
+      ? 0
+      : quantized;
   return Object.freeze({
     ...transaction,
     previousPointerAngleDegrees: normalized,
