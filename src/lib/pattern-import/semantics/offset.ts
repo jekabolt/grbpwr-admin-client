@@ -34,6 +34,7 @@ import {
   applyAffine,
   areaOf,
   ccw,
+  convexHull,
   dedupe,
   hullRatio,
   reflection,
@@ -752,6 +753,87 @@ export function familySharedSquares(
   });
 }
 
+export type HullPocket = { mouth: number; depth: number; deep: PtMm };
+
+const nearestOn = (ring: readonly PtMm[], p: PtMm) => {
+  let best = Infinity;
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const L2 = dx * dx + dy * dy;
+    const t = L2 > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2)) : 0;
+    best = Math.min(best, Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy));
+  }
+  return best;
+};
+
+/**
+ * Bays of `src`: a run of the boundary that leaves the convex hull. Points that lie on a hull edge
+ * (a notch's lips, colinear with the side) split the edge, so the notch is its own bay.
+ */
+export function hullPockets(src: readonly PtMm[]): HullPocket[] {
+  if (src.length < 3) return [];
+  const hull = convexHull(src);
+  if (hull.length < 3) return [];
+  const on = src.map((p) => nearestOn(hull, p) <= 0.01);
+  const idx = src.map((_, i) => i).filter((i) => on[i]);
+  if (idx.length < 2) return [];
+  const distSeg = (p: PtMm, a: PtMm, b: PtMm) => {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const L2 = dx * dx + dy * dy;
+    const t = L2 > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2)) : 0;
+    return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
+  };
+  const pockets: HullPocket[] = [];
+  for (let k = 0; k < idx.length; k++) {
+    const i = idx[k];
+    const j = idx[(k + 1) % idx.length];
+    const chain: PtMm[] = [];
+    if (i <= j) for (let t = i; t <= j; t++) chain.push(src[t]);
+    else {
+      for (let t = i; t < src.length; t++) chain.push(src[t]);
+      for (let t = 0; t <= j; t++) chain.push(src[t]);
+    }
+    if (chain.length < 3) continue;
+    const a = chain[0];
+    const b = chain[chain.length - 1];
+    let depth = 0;
+    let deep = a;
+    for (const p of chain) {
+      const d = distSeg(p, a, b);
+      if (d > depth) {
+        depth = d;
+        deep = p;
+      }
+    }
+    if (depth <= 0.01) continue;
+    pockets.push({ mouth: Math.hypot(b.x - a.x, b.y - a.y), depth, deep });
+  }
+  return pockets;
+}
+
+export const hullPocketsOn = () =>
+  typeof process !== 'undefined' && !!process.env?.OFFSET_HULL_POCKETS;
+
+/**
+ * The collapse bridges a bay wider than two allowances and deeper than 0.5 mm. A true parallel
+ * comes within d + 0.5 mm of that bay's deepest point; a bridge stays at the mouth.
+ */
+export function hullPocketBlocks(
+  src: readonly PtMm[],
+  result: readonly PtMm[],
+  allowanceMm: number,
+): boolean {
+  const d = Math.abs(allowanceMm);
+  const lim = d + 0.5;
+  return hullPockets(src).some(
+    (p) => p.mouth >= 2 * (d + 0.2) && p.depth >= 0.5 && nearestOn(result, p.deep) > lim,
+  );
+}
+
 /**
  * Parallel curve of a closed outline: `mm > 0` outward (seam → cut), `mm < 0` inward (cut → seam).
  * The report is what gate G6 reads; `report.ok === false` must BLOCK the piece (Codex C4).
@@ -829,8 +911,12 @@ export function offsetContour(
   if (si) reasons.push('self-intersection');
   const hr = best.length ? hullRatio(best) : 1;
   const hull = srcHull < HULL_SOURCE_CONCAVE_MAX && hr >= HULL_RATIO_MAX;
-  if (hull)
-    reasons.push(`collapsed to the convex hull (${hr.toFixed(4)} vs source ${srcHull.toFixed(4)})`);
+  let note: string | undefined;
+  if (hull) {
+    const msg = `collapsed to the convex hull (${hr.toFixed(4)} vs source ${srcHull.toFixed(4)})`;
+    if (!hullPocketsOn() || hullPocketBlocks(src, best, mm)) reasons.push(msg);
+    else note = msg;
+  }
   const dev = best.length ? parallelDeviation(best, src, mm, { limit, join }) : Infinity;
   if (!(dev <= MAX_DEVIATION_MM))
     reasons.push(`deviation ${dev.toFixed(3)} mm from a true parallel`);
@@ -844,6 +930,7 @@ export function offsetContour(
       hullRatio: hr,
       maxDeviationMm: dev,
       ...(dropped ? { dropped } : {}),
+      ...(note ? { note } : {}),
       ...(reasons.length ? { reason: reasons.join('; ') } : {}),
     },
   };
@@ -953,8 +1040,12 @@ export function offsetAcrossFold(
   const si = best.length ? selfIntersects(best) : false;
   if (si) reasons.push('self-intersection');
   const hr = best.length ? hullRatio(best) : 1;
-  if (srcHull < HULL_SOURCE_CONCAVE_MAX && hr >= HULL_RATIO_MAX)
-    reasons.push(`collapsed to the convex hull (${hr.toFixed(4)} vs source ${srcHull.toFixed(4)})`);
+  let note: string | undefined;
+  if (srcHull < HULL_SOURCE_CONCAVE_MAX && hr >= HULL_RATIO_MAX) {
+    const msg = `collapsed to the convex hull (${hr.toFixed(4)} vs source ${srcHull.toFixed(4)})`;
+    if (!hullPocketsOn() || hullPocketBlocks(src, best, mm)) reasons.push(msg);
+    else note = msg;
+  }
   // the derived line's own run on the fold line reaches past the edge's ends (a seam-meaning cut
   // line by the allowance, a slanted side's by its mitre): the whole reach is left out
   const dev = best.length
@@ -973,6 +1064,7 @@ export function offsetAcrossFold(
       selfIntersects: si,
       hullRatio: hr,
       maxDeviationMm: dev,
+      ...(note ? { note } : {}),
       ...(reasons.length ? { reason: reasons.join('; ') } : {}),
     },
   };

@@ -56,6 +56,8 @@ export type RepairProbe = {
   /** null = draw mode was not tried */
   draw: string[] | null;
   drawn: boolean;
+  /** Share of the covered perimeter snapped to a loose wall. Absent when GRADE_P2_LOOSE is off. */
+  looseShare?: number;
 };
 let probeSink: ((p: RepairProbe) => void) | null = null;
 export function setRepairProbeSink(fn: ((p: RepairProbe) => void) | null): void {
@@ -177,6 +179,11 @@ export function repairPass(
   const ownMemo = new Map<number, { w: RepairWallIn; box: BoxMm }[]>();
   const withBox = (ws: readonly RepairWallIn[]) => ws.map((w) => ({ w, box: bboxOf(w.pts) }));
   const commonB = withBox(ctx.common);
+  // once per pass: the try loop used to rebuild this box for every size
+  const looseB =
+    typeof process !== 'undefined' && !!process.env?.GRADE_P2_LOOSE && ctx.loose
+      ? withBox(ctx.loose)
+      : null;
   const ownOf = (r: number) => {
     let v = ownMemo.get(r);
     if (!v) ownMemo.set(r, (v = withBox(ctx.own(r))));
@@ -297,8 +304,8 @@ export function repairPass(
       }
     // GRADE_P2_LOOSE: lines no size owns, near this size. Off by default — nothing is pushed,
     // and the probe's wall list stays what it was.
-    if (typeof process !== 'undefined' && !!process.env?.GRADE_P2_LOOSE && ctx.loose)
-      for (const { w, box: b } of withBox(ctx.loose))
+    if (looseB)
+      for (const { w, box: b } of looseB)
         if (meets(b, box)) {
           ws.push({ pts: w.pts, kind: 'loose', closed: !!w.closed });
           chainOf.push(w.chain);
@@ -362,6 +369,7 @@ export function repairPass(
       kind,
       ins,
       walls: ws,
+      ...(rep.looseShare != null ? { looseShare: rep.looseShare } : {}),
       tol: repairTol(),
       strict: strictWhy,
       draw: drawWhy,
@@ -395,7 +403,16 @@ export function repairPass(
         devMm: Math.round((rep.devMm ?? 0) * 100) / 100,
         // a drawn block was accepted under the draw rules as a whole (no hole-end / count / sum
         // check), so every one of its holes is drawn — a short one included
-        ...(drawn ? { drawnMm: Math.round(holesMm * 10) / 10 } : {}),
+        ...(drawn
+          ? {
+              drawnMm:
+                Math.round(
+                  (holesMm -
+                    rep.holes.filter((h) => h.endsLoose).reduce((a, h) => a + h.lenMm, 0)) *
+                    10,
+                ) / 10,
+            }
+          : {}),
         ...(rep.extrapolated ? { extrapolated: true as const } : {}),
         ...(rep.local ? { local: rep.local } : {}),
         ...(drawn && rep.spreadMm !== undefined ? { spreadMm: rep.spreadMm } : {}),

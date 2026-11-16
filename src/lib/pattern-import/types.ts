@@ -1338,6 +1338,8 @@ export type RepairRecord = {
     common?: number;
     /** GFIT_LOCAL_CORRIDOR: median leave-one-out p95 the corridor grew to, mm. */
     scatterMm?: number;
+    /** Largest rank span of a pair used to measure that scatter. */
+    scatterGap?: number;
   };
 };
 export type DerivedEdge = {
@@ -1614,6 +1616,8 @@ export type OffsetReport = {
   /** Max deviation between result and the expected parallel curve, mm. */
   maxDeviationMm: Mm;
   reason?: string;
+  /** OFFSET_HULL_POCKETS: a hull collapse that was only narrow bays, kept as a note. */
+  note?: string;
   /** Raw-offset remnants dropped before counting loops (every vertex nearer than the allowance). */
   dropped?: { loops: number; maxAreaMm2: number };
 };

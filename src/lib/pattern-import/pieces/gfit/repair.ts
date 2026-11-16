@@ -147,6 +147,8 @@ export type GfitRepairHole = {
   endOff: [number, number];
   /** The fill as written: the wall point it leaves, the filled samples, the wall point it lands on. */
   pts: PtMm[];
+  /** Both ends snapped to loose walls: the fill is the prediction, not a drawn line. */
+  endsLoose?: boolean;
 };
 
 export type GfitRepair = {
@@ -194,7 +196,15 @@ export type GfitRepair = {
     common?: number;
     /** GFIT_LOCAL_CORRIDOR: median leave-one-out p95 of the trusted anchors, mm. */
     scatterMm?: number;
+    /** Largest rank span of a pair used to measure that scatter. */
+    scatterGap?: number;
   };
+  /** GRADE_P2_LOOSE was ignored: pred is an extrapolation or a local pair, not trusted to a step. */
+  looseSkipped?: 'extrapolated' | 'local';
+  /** Share of the covered perimeter whose snap is a loose wall. */
+  looseShare?: number;
+  /** Loose walls dropped by the off-corridor run audit and not used in the cover. */
+  looseDropped?: number;
   /** Why there is no model ('inconsistent', 'anchors<2', … — fitFamily; 'no-pair-match'). */
   modelWhy?: string;
   /** Draw mode: the prediction came from all anchors (variant D, grade-all.ts), this many sizes. */
@@ -296,10 +306,7 @@ function repairWith(
   // there the drawn share is the pair's line, unchecked by any drawn wall.
   const local =
     inconsistent && typeof process !== 'undefined' && !!process.env?.GFIT_LOCAL && !opts.draw;
-  if (
-    !fam.model ||
-    (inconsistent && !local && (!opts.draw || worstTrusted > C.gradeAllMaxScore))
-  ) {
+  if (!fam.model || (inconsistent && !local && (!opts.draw || worstTrusted > C.gradeAllMaxScore))) {
     res.modelWhy = fam.why ?? 'no-model';
     refuse('no-model');
     return res;
@@ -392,18 +399,23 @@ function repairWith(
   }
   const n = pts.length;
   // GFIT_LOCAL_CORRIDOR (off by default; only with GFIT_LOCAL): the corridor grows to the family's
-  // own leave-one-out scatter, and never as far as the neighbour's line (0.45 of the local step).
+  // own leave-one-out scatter, capped at 0.45 of the local step, and never drops below the design
+  // corridor. min(max(base, scatter), 0.45·s) shrinks it wherever the step is under ~3.5 mm.
   const localCorridor =
     local && typeof process !== 'undefined' && !!process.env?.GFIT_LOCAL_CORRIDOR;
-  const scatter = localCorridor ? familyScatter(ins, fam.trusted, fam.frame) : null;
-  if (scatter != null && res.local) res.local.scatterMm = scatter;
-  const cor = P.stepN.map((s) => {
-    const base = Math.min(
-      C.corridorMm + C.corridorStep * s,
-      Math.max(C.corridorMinMm, C.corridorHalfStep * s),
-    );
-    return scatter == null ? base : Math.min(Math.max(base, scatter), 0.45 * s);
-  });
+  const measured = localCorridor ? familyScatter(ins, fam.trusted, fam.frame) : null;
+  const scatter = measured?.mm ?? null;
+  if (measured && res.local) {
+    res.local.scatterMm = measured.mm;
+    res.local.scatterGap = measured.gap;
+  }
+  const corBase = P.stepN.map((s) =>
+    Math.min(C.corridorMm + C.corridorStep * s, Math.max(C.corridorMinMm, C.corridorHalfStep * s)),
+  );
+  // C2 widens own/common/overlay only. Loose ink stays inside corBase (R2.2).
+  const cor = corBase.map((base, i) =>
+    scatter == null ? base : Math.max(base, Math.min(scatter, 0.45 * P.stepN[i])),
+  );
   res.pred = pts;
   res.corridor = cor;
 
@@ -421,17 +433,19 @@ function repairWith(
   /** Own walls that come within the corridor somewhere (E4 audits them all — Codex r1). */
   const touched = new Set<number>();
   // GRADE_P2_LOOSE: an unranked line covers a sample only inside the corridor and at least a
-  // quarter step from both anchors (where the grade has not separated, that ink is the neighbour's).
+  // quarter step from both anchors, measured at the snapped ink, not at the prediction.
   const looseOn = typeof process !== 'undefined' && !!process.env?.GRADE_P2_LOOSE;
-  let looseOk: boolean[] | null = null;
-  if (looseOn && walls.some((w) => w.kind === 'loose')) {
-    const d1 = ringDistance(ring1);
-    const d2 = ringDistance(ring2);
-    looseOk = pts.map((p, i) => {
-      const lim = 0.25 * P.stepN[i];
-      return d1(p, lim + 1) >= lim && d2(p, lim + 1) >= lim;
-    });
-  }
+  // An edge or a local pair is not trusted to a step: a neighbour's own line can sit in the corridor.
+  const looseBlocked: 'extrapolated' | 'local' | null = res.extrapolated
+    ? 'extrapolated'
+    : local
+      ? 'local'
+      : null;
+  const hasLoose = walls.some((w) => w.kind === 'loose');
+  if (looseOn && looseBlocked && hasLoose) res.looseSkipped = looseBlocked;
+  const looseDist =
+    looseOn && !looseBlocked && hasLoose ? [ringDistance(ring1), ringDistance(ring2)] : null;
+  const looseDrop = new Set<number>();
   const snapAt = (p: PtMm, r: number, i: number): Snap | null => {
     // per wall the TRUE nearest point (over all its segments); a nearest point at a wall's END is
     // no cover beyond the base corridor — past the end the line is not drawn (else the hole shrinks
@@ -451,13 +465,80 @@ function repairWith(
       const w = W[sn.w];
       const atEnd = !w.closed && (sn.arc <= 1e-6 || sn.arc >= w.L - 1e-6);
       if (sn.d > r || (atEnd && sn.d > C.corridorMm)) continue;
-      if (w.kind === 'loose' && (!looseOn || !looseOk?.[i])) continue;
+      if (looseDrop.has(sn.w)) continue;
+      if (w.kind === 'loose') {
+        if (!looseDist || sn.d > corBase[i]) continue;
+        const lim = 0.25 * (P.stepN[i] ?? 0);
+        if (looseDist.some((d) => d(sn.q, lim + 1) < lim)) continue;
+      }
       if (w.kind === 'overlay' && !(onRing(g1, ring1, sn.q) && onRing(g2, ring2, sn.q))) continue;
       if (!best || sn.d < best.d) best = sn;
     }
     return best;
   };
-  const snaps: (Snap | null)[] = pts.map((p, i) => snapAt(p, cor[i], i));
+  let snaps: (Snap | null)[] = pts.map((p, i) => snapAt(p, cor[i], i));
+  // R2.3: a used loose wall that leaves the corridor for > 10 mm is dropped and the snaps redone once.
+  // A sew line lies on pred only for a stretch; the size's own unranked line does not leave it.
+  if (looseDist) {
+    const predDist = ringDistance(pts);
+    const offLen = (k: number): number => {
+      const w = W[k];
+      const rs = ringOrLine(w.p, w.closed);
+      const off = rs.map((p) => {
+        let bi = 0;
+        let bd = Infinity;
+        for (let i = 0; i < n; i++) {
+          const d = hyp(pts[i], p);
+          if (d < bd) {
+            bd = d;
+            bi = i;
+          }
+        }
+        const d = predDist(p, (cor[bi] ?? C.corridorMm) + 2);
+        return { off: d > (cor[bi] ?? C.corridorMm), d };
+      });
+      const m = rs.length;
+      const runs: { a: number; b: number }[] = [];
+      for (let j = 0; j < m; ) {
+        if (!off[j].off) {
+          j++;
+          continue;
+        }
+        let e = j;
+        while (e + 1 < m && off[e + 1].off) e++;
+        runs.push({ a: j, b: e });
+        j = e + 1;
+      }
+      if (w.closed && runs.length > 1 && runs[0].a === 0 && runs[runs.length - 1].b === m - 1) {
+        const last = runs.pop()!;
+        runs[0] = { a: last.a - m, b: runs[0].b };
+      }
+      const at = (j: number) => rs[((j % m) + m) % m];
+      let worst = 0;
+      for (const r of runs) {
+        let len = 0;
+        const j0 = w.closed || r.a > 0 ? r.a - 1 : r.a;
+        const j1 = w.closed || r.b < m - 1 ? r.b + 1 : r.b;
+        for (let j = j0; j < j1; j++) len += hyp(at(j), at(j + 1));
+        const atEnd = !w.closed && (r.a <= 0 || r.b >= m - 1);
+        let notch = false;
+        if (!atEnd && len <= C.notchPathMm) {
+          const pa = at(r.a - 1);
+          const pb = at(r.b + 1);
+          let depth = 0;
+          for (let j = r.a; j <= r.b; j++) depth = Math.max(depth, off[((j % m) + m) % m].d);
+          notch = hyp(pa, pb) <= C.notchMouthMm && depth <= C.notchDepthMm;
+        }
+        if (!notch) worst = Math.max(worst, len);
+      }
+      return worst;
+    };
+    const seen = new Set<number>();
+    for (const s of snaps) if (s && W[s.w].kind === 'loose') seen.add(s.w);
+    for (const k of seen) if (offLen(k) > C.offRunMm) looseDrop.add(k);
+    res.looseDropped = looseDrop.size;
+    if (looseDrop.size) snaps = pts.map((p, i) => snapAt(p, cor[i], i));
+  }
   const segLen = (i: number) => hyp(pts[i], pts[(i + 1) % n]);
   let L = 0;
   for (let i = 0; i < n; i++) L += segLen(i);
@@ -623,6 +704,7 @@ function repairWith(
         endsOk: [isEnd(sp, cor[iPrev]), isEnd(sn, cor[iNext])],
         endOff: [Math.hypot(o0.x, o0.y), Math.hypot(o1.x, o1.y)],
         pts: fill,
+        ...(W[sp.w].kind === 'loose' && W[sn.w].kind === 'loose' ? { endsLoose: true } : {}),
       };
       res.holes.push(hole);
       holeEndAlong.push([along(sp, iPrev, -1), along(sn, iNext, 1)]);
@@ -644,6 +726,12 @@ function repairWith(
   res.outer = out;
   res.derived = derived;
   res.cover = L ? covL / L : 0;
+  if (looseOn) {
+    let looseL = 0;
+    for (let i = 0; i < n; i++)
+      if (snaps[i] && W[snaps[i]!.w].kind === 'loose') looseL += segLen(i);
+    res.looseShare = covL > 0 ? looseL / covL : 0;
+  }
   if (res.local) {
     let cL = 0;
     for (let i = 0; i < n; i++) if (snaps[i] && W[snaps[i]!.w].kind === 'common') cL += segLen(i);
@@ -823,16 +911,13 @@ function repairWith(
     const small = o1.area <= o2.area ? ring1 : ring2;
     const large = o1.area <= o2.area ? ring2 : ring1;
     // insideWithin's 0.5 mm treats a line lying on the larger anchor as inside it. Where the two
-    // anchors have separated, that line is the neighbour's: a quarter step clear of both.
-    const share = neighbourShare(out, pts, P.stepN, [small, large]);
-    if (process.env?.GFIT_NEST_DEBUG)
-      console.log('nest', {
-        inSmall: insideWithin(small, out, 0.5),
-        inLarge: insideWithin(out, large, 0.5),
-        share,
-        areas: [o1.area, o2.area, o.area],
-      });
-    if (!insideWithin(small, out, 0.5) || !insideWithin(out, large, 0.5) || share >= 0.5)
+    // anchors have separated, that line is the neighbour's.
+    if (
+      !insideWithin(small, out, 0.5) ||
+      !insideWithin(out, large, 0.5) ||
+      neighbourShare(out, pts, P.stepN, [small, large]) >= 0.5 ||
+      neighbourRun(out, pts, P.stepN, [small, large])
+    )
       refuse('E5-nest');
   }
   if (draw && res.holes.length) {
@@ -864,9 +949,10 @@ function familyScatter(
   ins: readonly GfitSizeIn[],
   trusted: readonly number[],
   frame: 'stacked' | 'registered',
-): number | null {
+): { mm: number; gap: number } | null {
   const by = new Map(ins.map((s) => [s.rank, s]));
   const vals: number[] = [];
+  let gap = 0;
   for (const k of trusted) {
     const below = trusted.filter((r) => r < k);
     const above = trusted.filter((r) => r > k);
@@ -884,11 +970,12 @@ function familyScatter(
     if (!pred) continue;
     const dist = ringDistance(sk.outer);
     vals.push(p95(pred.pts.map((p) => dist(p))));
+    gap = Math.max(gap, b - a);
   }
   if (vals.length < 2) return null;
   vals.sort((x, y) => x - y);
   const mid = vals.length >> 1;
-  return vals.length % 2 ? vals[mid] : (vals[mid - 1] + vals[mid]) / 2;
+  return { mm: vals.length % 2 ? vals[mid] : (vals[mid - 1] + vals[mid]) / 2, gap };
 }
 
 /**
@@ -925,9 +1012,10 @@ function onEdgeAnchor(
 }
 
 /**
- * Share of `outer` that lies within a quarter step of either anchor, counting only samples where
- * the prediction itself is at least half a step from both (the anchors have separated there).
- * 0 when the grade never separates, so a shared edge is not a neighbour close.
+ * Share of `outer` that lies on either anchor (within the same 0.5 mm the nest test allows),
+ * counting only samples where the prediction itself is at least half a step (and 0.5 mm) from
+ * both. A shared edge is not a neighbour close. A quarter of the local step is too wide here: on an
+ * uneven family the step is inflated by the noise, and a line still between the sizes falls inside it.
  */
 function neighbourShare(
   outer: readonly PtMm[],
@@ -950,14 +1038,74 @@ function neighbourShare(
       }
     }
     const s = stepN[bi] ?? 0;
-    const apart = 0.5 * s;
-    const lim = 0.25 * s;
-    const reach = Math.max(apart, lim, 0.5) + 1;
+    // Half a step, and at least the nest tolerance: a shared edge has step ≈ 0, so half a step
+    // never clears it and the whole edge would count as lying on the neighbour.
+    const apart = Math.max(0.5 * s, 0.5);
+    const lim = 0.5;
+    const reach = apart + 1;
     if (dists.some((d) => d(pred[bi], reach) < apart)) continue;
     seen++;
     if (dists.some((d) => d(q, reach) <= lim)) on++;
   }
   return seen ? on / seen : 0;
+}
+
+/**
+ * True when the accepted outline runs on one anchor for ≥ 20 mm where the prediction has already
+ * left that anchor. A hem can be that run and still stay under the 50 % share.
+ */
+function neighbourRun(
+  outer: readonly PtMm[],
+  pred: readonly PtMm[],
+  stepN: readonly number[],
+  rings: readonly (readonly PtMm[])[],
+): boolean {
+  const dists = rings.map((ring) => ringDistance(ring));
+  const n = pred.length;
+  const m = outer.length;
+  if (m < 2) return false;
+  const onRing = outer.map((q) => {
+    let bi = 0;
+    let bd = Infinity;
+    for (let i = 0; i < n; i++) {
+      const d = hyp(pred[i], q);
+      if (d < bd) {
+        bd = d;
+        bi = i;
+      }
+    }
+    const s = stepN[bi] ?? 0;
+    const apart = Math.max(0.5 * s, 0.5);
+    const reach = apart + 1;
+    let which = -1;
+    dists.forEach((dist, r) => {
+      if (which >= 0) return;
+      if (dist(pred[bi], reach) < apart) return;
+      if (dist(q, 1.5) <= 0.5) which = r;
+    });
+    return which;
+  });
+  for (let r = 0; r < rings.length; r++) {
+    let run = 0;
+    let worst = 0;
+    for (let i = 0; i < m; i++) {
+      if (onRing[i] === r) {
+        run += hyp(outer[i], outer[(i + 1) % m]);
+        worst = Math.max(worst, run);
+      } else run = 0;
+    }
+    // the run may wrap the join
+    if (onRing[0] === r && onRing[m - 1] === r) {
+      let tail = 0;
+      for (let i = m - 1; i >= 0 && onRing[i] === r; i--)
+        tail += hyp(outer[(i - 1 + m) % m], outer[i]);
+      let head = 0;
+      for (let i = 0; i < m && onRing[i] === r; i++) head += hyp(outer[i], outer[(i + 1) % m]);
+      worst = Math.max(worst, tail + head);
+    }
+    if (worst >= 20) return true;
+  }
+  return false;
 }
 
 /**

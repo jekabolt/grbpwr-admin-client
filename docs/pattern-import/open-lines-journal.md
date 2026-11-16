@@ -100,6 +100,7 @@ Probe: the same file with the rule off / on, the fill's outcome per (seed, rank)
 ### Dash trains, second version (10 Nov 2026) — control files, full run pending
 
 Changes to `sizes/dash-train.ts` after the Dyanna analysis:
+
 - a LONE dash counts only when it is ≥ 3 mm (`loneMinMm`): shorter draws are beads of the pen;
 - the way from the end to a dash (and between dashes) must not cross another line (`crosses`);
 - an end with a line within 3 mm (`landedMm`, the radius of the fill's own `wallBridges`) is closed already and takes nothing; 1.2 mm was too tight, host #5069 ended on the TIP of the line of size 00 at 1.2 mm and was laid across.
@@ -118,6 +119,7 @@ Still to do before it is accepted: the full `yarn patimport:regress` (no `--fill
 ## PLAN: no unclosed pieces, no "close the gap" by hand (10 Nov 2026) — SUMMARY
 
 Full text, word for word: `open-lines-journal-archive.md` (section "PLAN"). Goal (owner): every piece of every size closes by itself; no hand "close the gap".
+
 - ACCEPTED: dash trains v2 + the landing rule ("runs into, not beside") + the lone-dash rule (hole ahead, cos ≥ 0.95, or a T-join): full run 0 WORSE, notClosed 1626 → 1623 (`full-tee.json` was the reference). CROSS (a corner inked as a crossing is its own second evidence). Wall-index fix (neutral on the corpus). MARKS (glyph marks; final form: a glyph ahead of a joined line's end is refused when that line runs through it, `drawnBy`): −74 notClosed on 176 files, `full-marks.json` stayed the reference.
 - NOT ACCEPTED: local rival v2 (R = 12 mm): Glinda size 12 loses a piece — a train the rival allows stayed unranked and moved the walls. Lesson: a joined train must also be ranked, or not joined at all.
 - PARKED / NOT APPLIED: E2-hole-end; `GFIT_TOL_PDF` (patch ready, held back); shared corner (WIP patch, unit test failing); clipped dashes (designed on paper, owner's decision recorded in the archive).
@@ -127,12 +129,12 @@ Full text, word for word: `open-lines-journal-archive.md` (section "PLAN"). Goal
 ## Pivot: big changes first, UI is the judge (owner, 11 Nov 2026) — SUMMARY
 
 Full text, word for word, with every probe, number and flag: `open-lines-journal-archive.md` (section "Pivot"). Owner: make the large structural change first, then fix where it breaks; acceptance is the DXF written from the PDF (every piece, every size, closed, no gap), not the wizard steps. Corpus for this phase: `scripts/pattern-import/set40.txt` (40 files).
+
 - BUILT: `dxf-shot.mjs` / `dxf-shot-entry.ts` + `dxf-check.mjs` (the real wizard hook per PDF, matrix of region × size, DXF checked block by block). "Drawing by the grade": `repairPass` with its caps lifted and a guard in their place; peer-review fixes applied.
 - MEASURED on set40: cells closed 3498 → 3575 of 4752 (77 leak → closed, 0 closed → open); 22 of 69 drawn cells crossed another size's outline (≥ 20°), 16 of them the adjacent anchor's — hence D-cross-nest (APPLIED, see 12 Nov sections). Files complete: 0 / 40 (every file stops on the pieces step; Glinda on the sheet).
 - KEPT: corners = trend over the whole run + wide extend (owner chose (a)+(b)): closed 3575 → 3641, leak → closed 68 vs closed → leak 2. Open: the Memoir A wide extend (`MOOD_WIDE_OFF=1` bisects it).
 - FOUND: seam gaps on Leah are corners (the source draws the break, not the tiling); Glinda stops on an unlabelled pattern tile (queue 2a).
 - Owner's decision: draw and mark.
-
 
 ## 3-way hidden-stretch leave-one-out — how to draw a missing stretch (12 Nov 2026)
 
@@ -143,14 +145,14 @@ fitted to the drawn ends, C = interpolation between the bracketing sizes (what `
 Measure: p95 deviation from the real line. Tool: peer scratchpad `loo3/grade-loo3.mjs`, report
 `loo3/out/grade-loo3-report.md`.
 
-| share p95 > 2 mm / > 5 mm | A scale largest | B nearest fitted | C interpolation |
-| --- | --- | --- | --- |
-| inside the run, 20 mm | 5.4 / 1.4 % | 3.3 / 0.6 % | 1.6 / 0.0 % |
-| inside, 40 mm | 12.6 / 7.8 % | 6.4 / 1.6 % | 3.0 / 0.6 % |
-| inside, 80 mm | 27.5 / 19.6 % | 11.1 / 4.3 % | 4.8 / 1.6 % |
-| edge size (C extrapolates), 20 mm | 4.9 / 1.6 % | 3.0 / 0.7 % | 2.0 / 0.0 % |
-| edge, 40 mm | 10.2 / 5.6 % | 5.6 / 1.6 % | 4.6 / 1.6 % |
-| edge, 80 mm | 22.0 / 14.5 % | 10.9 / 4.3 % | 6.6 / 3.0 % |
+| share p95 > 2 mm / > 5 mm         | A scale largest | B nearest fitted | C interpolation |
+| --------------------------------- | --------------- | ---------------- | --------------- |
+| inside the run, 20 mm             | 5.4 / 1.4 %     | 3.3 / 0.6 %      | 1.6 / 0.0 %     |
+| inside, 40 mm                     | 12.6 / 7.8 %    | 6.4 / 1.6 %      | 3.0 / 0.6 %     |
+| inside, 80 mm                     | 27.5 / 19.6 %   | 11.1 / 4.3 %     | 4.8 / 1.6 %     |
+| edge size (C extrapolates), 20 mm | 4.9 / 1.6 %     | 3.0 / 0.7 %      | 2.0 / 0.0 %     |
+| edge, 40 mm                       | 10.2 / 5.6 %    | 5.6 / 1.6 %      | 4.6 / 1.6 %     |
+| edge, 80 mm                       | 22.0 / 14.5 %   | 10.9 / 4.3 %     | 6.6 / 3.0 %     |
 
 Within 2 mm overall (inside / edge): A 84 / 87 %, B 93 / 94 %, C 97 / 96 %. On the 1576 stretches
 where some method misses by > 0.5 mm: median C 0.32, B 0.72, A 3.50 mm; best C 707, B 252, A 98.
@@ -178,10 +180,10 @@ Replay of the 72 drawn tries captured on the 20 drawn files (`drawn-pdfs.txt`, r
 extrapolation off on every side (`--x-off`), `crossings.mjs --before` the unpatched replay
 (`NEST_CROSS_OFF=1`, the bisect switch kept in `repair.ts`).
 
-| variant | steep → gone | steep still drawn | clean kept | clean LOST |
-| --- | --- | --- | --- | --- |
-| bracketing pair (r1, r2) | 16 | 5 | 49 | 0 |
-| every anchor (`ins`) | 20 | 1 | 49 | 0 |
+| variant                  | steep → gone | steep still drawn | clean kept | clean LOST |
+| ------------------------ | ------------ | ----------------- | ---------- | ---------- |
+| bracketing pair (r1, r2) | 16           | 5                 | 49         | 0          |
+| every anchor (`ins`)     | 20           | 1                 | 49         | 0          |
 
 The pair left 4 crossings through a NON-bracketing anchor (Memoir A L SKIRT BACK 10 through r3,
 Paris E BACK a 10 and G FRONT b LINING 18 through r17, Reims J SLEEVES 24 through r8, 21–80°):
@@ -259,13 +261,13 @@ corruption is synthetic. Data and scripts: the peer's scratchpad `loo-d/` (run.t
 
 153 tries, 395 crossed hole ends (19 files, current code). A try goes into the first bucket of any end:
 
-| bucket | tries | D-cross is the only refusal |
-|---|---|---|
-| (a) an own line has a free end ≤ 12 mm from the hole end (reading / joining) | 53 | 8 |
-| (a2) the prediction runs ALONG the wall and turns at the hole end (a corner read as a crossing) | 48 | 14 |
-| (b) crosses an interior line (dart / notch / grain) | 19 | 2 |
-| (c1) crosses a nest outline (common line) | 28 | 4 |
-| (c2) crosses an overlay | 5 | 1 |
+| bucket                                                                                          | tries | D-cross is the only refusal |
+| ----------------------------------------------------------------------------------------------- | ----- | --------------------------- |
+| (a) an own line has a free end ≤ 12 mm from the hole end (reading / joining)                    | 53    | 8                           |
+| (a2) the prediction runs ALONG the wall and turns at the hole end (a corner read as a crossing) | 48    | 14                          |
+| (b) crosses an interior line (dart / notch / grain)                                             | 19    | 2                           |
+| (c1) crosses a nest outline (common line)                                                       | 28    | 4                           |
+| (c2) crosses an overlay                                                                         | 5     | 1                           |
 
 Only 29 of 153 fail on D-cross alone; the rest also fail D-cross-nest (92), D-share (67),
 E2-end-offset (50) or X-hole (14) — the refusal is mostly right. Free ends in (a) are rarely close
@@ -343,6 +345,7 @@ same path G15 uses, through `b.transform`) is laid on the WRITTEN cut ring: the 
 projections of its ends, the way round whose middle is nearest the edge's middle. Copies go to a
 new layer `GRADE_DRAWN` in both dialects, declared only in a file that has one (every other file
 keeps CLO's 8 / AAMA's 9 layers byte for byte). Layer 1 is untouched: still one closed ring.
+
 - Colour ACI 30 (orange), not the red first proposed: CLO's cut layer 1 is ACI 1, a red copy on it
   is invisible. R2000 gives the layer a 0.50 mm lineweight.
 - The card parser (nesting/dxf/pieces.ts) chains EVERY layer into loops on its own (closing gaps
@@ -371,6 +374,7 @@ one line per size 0.1–0.3 mm apart (x 900.1 … 901.5); the knife took the nea
 (900.13, +1 mm) and stopped 0.3 mm short of size 0's own side: `TICKCUT r1 c4893: the knife does not
 part the region`. Without the corner the region leaked out of the strip's other end, the tick was
 ignored and H · 0 "closed" by accident (the part below the tick, top-left corner open).
+
 - Fix: every side-line candidate within `SIDE_SPREAD_MM` 3 of the chosen one along the tick counts;
   the knife reaches past the OUTERMOST, + `OVERSHOOT_MM`. `carried` and `beside` unchanged.
   Dead end: also moving `beside` outward turned 4 closed cells of Memoir A K into leaks.
@@ -393,6 +397,7 @@ query for them, after which they run and fail on their own tech-card assertions 
 
 `dxf-shot … --files set40.txt --par 2` → scratch `shot-m13` (37 min, load low), compared cell by
 cell with `shot-corners` (12 Nov 17:00) by scratch `celldiff.mjs` (a cell = piece label × size).
+
 - Closed 3615 → 3624 of 4698 cells common to both (dxf-check: 3650 / 4752, 107 closed by repair).
   Files complete: still 0 / 40 — every file stops on the pieces step; no DXF written.
 - WORSE 17, all of one kind: cells the reference closed by a grade draw (10–208 mm) that
@@ -441,12 +446,12 @@ each steep crossing sits at a corner of the result, where the sizes' outlines co
 near-common hem (Kalla C COLLAR, Memoir A L SKIRT BACK, Ambrosia F FRONT SKIRT plainly so). The 12 Nov
 "20 of 21 steep gone" counted exactly these as wrong; no picture has shown a true catch yet.
 
-| variant | drawn back of 26 | lost |
-| --- | --- | --- |
-| A end allowance 6 mm | 16 | 0 |
-| B fan (crossed outline turns along the stretch) | 8 | 0 |
-| A + B | 18 | 0 |
-| C corner ≤ 6 / 10 / 15 mm | 12 / 14 / 19 | 0 |
+| variant                                         | drawn back of 26 | lost |
+| ----------------------------------------------- | ---------------- | ---- |
+| A end allowance 6 mm                            | 16               | 0    |
+| B fan (crossed outline turns along the stretch) | 8                | 0    |
+| A + B                                           | 18               | 0    |
+| C corner ≤ 6 / 10 / 15 mm                       | 12 / 14 / 19     | 0    |
 
 Applied C at 15 mm (`nestCornerMm`, corner = ≥ 35° turn over 3 mm arms; `NEST_CORNER_MM=0` restores
 the 12 Nov rule, `NEST_CROSS_OFF=1` still bisects the whole check). The synthetic interior-bump case
@@ -475,19 +480,20 @@ shot-openpass> --canvas <dir with @napi-rs/canvas> --out ink-all3.json` (`INK_PN
 
 Numbers (verdict at r = 1.5 mm):
 
-| verdict | cells | meaning |
-| --- | --- | --- |
-| ink-present | 400 | render and IR both ≥ 0.8 along pred |
-| partial | 48 | ink on part of the stretch |
-| off-page | 38 | whole stretch inside text boxes, not judged |
-| no-ink | 27 | render at r = 3 < 0.3, IR the same |
-| reader-loss | 4 | render − IR ≥ 0.2 — all false, see below |
-| clip-extra | 0 | IR − render ≥ 0.2 |
+| verdict     | cells | meaning                                     |
+| ----------- | ----- | ------------------------------------------- |
+| ink-present | 400   | render and IR both ≥ 0.8 along pred         |
+| partial     | 48    | ink on part of the stretch                  |
+| off-page    | 38    | whole stretch inside text boxes, not judged |
+| no-ink      | 27    | render at r = 3 < 0.3, IR the same          |
+| reader-loss | 4     | render − IR ≥ 0.2 — all false, see below    |
+| clip-extra  | 0     | IR − render ≥ 0.2                           |
 
 By first reason → ink-present: `not-bracketed` 148 of 236, `E1-cover` 130/145, `E2-hole` 50/55,
 `E2-hole-end` 36/40, `E4-off-corridor` 18/19, `E3-*` 18/24.
 
 Verdict:
+
 - The reader loses no geometry: render ≈ IR on every file. The 4 `reader-loss` (Dyanna H 32, Taos
   B 32, Verona E 26, Reims A 28) are pred running 1.5–3 mm beside a dashed line whose thick stroke
   reaches the radius while its centreline does not (Taos crop).
@@ -525,13 +531,13 @@ outlines matches the card order in every file (18/18, Kitchen 9/9) — no rank s
 Pens by stroke style alone (rgb | width | dash) do NOT separate sizes: on closed outlines the
 own-pen share is 0.3–0.5 on the true size vs 0.1–0.4 on the neighbour. Route dropped.
 
-| under pred (210 holes) | cells | meaning |
-| --- | --- | --- |
-| other rank | 100 | the line is there, ranked to another size |
-| mixed own / other | 46 | part own, part foreign |
-| nothing | 34 | no chain; ink usually exists → lost before chains, or pred wrong |
-| own rank | 22 | own chain present; lost later (fill / link) |
-| unranked | 8 | chain dropped as furniture / classify |
+| under pred (210 holes) | cells | meaning                                                          |
+| ---------------------- | ----- | ---------------------------------------------------------------- |
+| other rank             | 100   | the line is there, ranked to another size                        |
+| mixed own / other      | 46    | part own, part foreign                                           |
+| nothing                | 34    | no chain; ink usually exists → lost before chains, or pred wrong |
+| own rank               | 22    | own chain present; lost later (fill / link)                      |
+| unranked               | 8     | chain dropped as furniture / classify                            |
 
 The foreign rank in the 100: ±1 in 50 (nested lines < 1 mm apart with own missing, one stroke for
 two sizes — or a rank swap, see Silverstone 4XL/5XL), ≥ 4 steps in ~30 (almost surely a SHARED
@@ -552,12 +558,12 @@ A scratch script over the same `cells.json` + `corner-probes.json`: an open cell
 (`simClose`) when own ∪ borrowed chains cover ≥ 95 % of the pred stretch and own alone does not.
 125 of 210 would close. Split, exclusive, checks in this order:
 
-| group | cells | test |
-| --- | --- | --- |
-| risk:area | 0 | pred area outside ×0.97 / ×1.03 of the nearest closed smaller / larger size |
-| pred-off | 41 | an own-rank chain runs ≤ 5 mm beside the stretch and covers < 50 % of it: the own line is beside pred, a borrow would anchor on the wrong line |
-| neighbour-line | 53 | ≥ 20 % of borrowed points lie on chains no other CLOSED size runs on (sharedBy < 2) |
-| real shared | 31 | ≥ 80 % of borrowed points lie on chains ≥ 2 other closed sizes run on (≤ 0.3 mm) |
+| group          | cells | test                                                                                                                                           |
+| -------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| risk:area      | 0     | pred area outside ×0.97 / ×1.03 of the nearest closed smaller / larger size                                                                    |
+| pred-off       | 41    | an own-rank chain runs ≤ 5 mm beside the stretch and covers < 50 % of it: the own line is beside pred, a borrow would anchor on the wrong line |
+| neighbour-line | 53    | ≥ 20 % of borrowed points lie on chains no other CLOSED size runs on (sharedBy < 2)                                                            |
+| real shared    | 31    | ≥ 80 % of borrowed points lie on chains ≥ 2 other closed sizes run on (≤ 0.3 mm)                                                               |
 
 - Real shared, by the main borrowed chain's owner: ±1–3 steps 20, ≥ 4 steps 8, unranked 3.
   `borrowed-edges.ts` `isShared` (≥ 3 other ranks' ends land on it, ≥ 80 % of the points) covers
@@ -577,6 +583,7 @@ pred-off (41 here + ink-check's no-ink set): refuse instead of borrowing or draw
 the owner's call; no code changed.
 
 ### Shared edge into rankOf / fill (isShared promoted) — DROPPED (14 Nov 2026)
+
 Hypothesis: the 31 "real shared" borrows of the multi-rank simulation are shared edges given one rank; letting `isShared` (`steps/borrowed-edges.ts`) rank them would close them.
 Change: none (decision before code; owner delegated it, independent critic first).
 Run: no run; critic read the code and `sim.json`.
@@ -585,16 +592,18 @@ Verdict: DROPPED. `splitShared` (`sizes/recover.ts:2608`) already makes shared s
 Lesson: before promoting a display rule into the read, find the read's own rule for the same thing and why it said no.
 
 ### Refuse a draw whose pred lies outside the size bundle — DROPPED (14 Nov 2026)
+
 Hypothesis: ink-check's 27 no-ink cells and the sim's 41 "pred-off" cells show the grade prediction leaves the bundle of the neighbouring sizes; refuse there instead of drawing.
 Change: none (decision before code; independent critic first).
 Run: no run; critic read `pieces/gfit/*` and `ink-all3.json`, `sim.json`.
 Numbers: —
 Verdict: DROPPED as evidenced. All 27 no-ink cells are leaks and were never drawn: 23 are `not-bracketed`, and `repairSize` refuses those before it builds a pred (`repair.ts:~290`). The pred the probes read is the operator HINT (`repair-hook.ts:~200`): two nearest trusted sizes, extrapolated ANY number of steps (Reims J 0–8: five open sizes in a row; Fawn L predMm 44–110). The drawer extrapolates one step only. "pred-off": 32 / 41 have the own line ≤ 1 mm from pred = an ordinary gap, not a misplaced pred. A bracketed pred is a convex lerp of the two anchors, inside the bundle by construction; steep strays are already D-cross-nest. The guard would change no cell on this evidence.
 Follow-ups:
+
 - Probes that score "pred" must label its source (drawn, hint, or extrapolated hint) and keep drawn cells apart from hints.
 - The operator hint extrapolating many steps is a real flaw, but it is operator-facing (owner).
 - If wanted later: a bundle test run with `gfit-replay --drawn` over the DRAWN holes, with a picture of every catch (definition in the critic's report: signed offsets to r1 / r2 ± max(tol, 0.5 mm), skip `nestEndMm` / `nestCornerMm`).
-Lesson: check which code path produced the number before acting on it — the hint is not the drawer.
+  Lesson: check which code path produced the number before acting on it — the hint is not the drawer.
 
 ### DIAGNOSIS — why splitShared does not split the shared chains under open cells
 
@@ -620,11 +629,11 @@ Pred source (cells.json does not carry `gradeHint.from` / `extrapolated`; inferr
 refusal: `not-bracketed` → repair-hook `hint()` from the two nearest anchors, extrapolated;
 otherwise the repair's own pred between anchors, "drawn"):
 
-| probe | drawn | hint, 1 step out | hint, ≥ 2 steps out |
-| --- | --- | --- | --- |
-| rank probe, 210 | 123 (other 63, mixed 28, own 15, none 9, unranked 8) | 53 (other 24, mixed 15, none 11, own 3) | 34 (none 14, other 13, own 4, mixed 3) |
-| sim closes: real shared / neighbour / pred-off | 23 / 38 / 33 | 6 / 9 / 6 | 2 / 6 / 2 |
-| split-why, 28 | 21 | 5 | 2 |
+| probe                                          | drawn                                                | hint, 1 step out                        | hint, ≥ 2 steps out                    |
+| ---------------------------------------------- | ---------------------------------------------------- | --------------------------------------- | -------------------------------------- |
+| rank probe, 210                                | 123 (other 63, mixed 28, own 15, none 9, unranked 8) | 53 (other 24, mixed 15, none 11, own 3) | 34 (none 14, other 13, own 4, mixed 3) |
+| sim closes: real shared / neighbour / pred-off | 23 / 38 / 33                                         | 6 / 9 / 6                               | 2 / 6 / 2                              |
+| split-why, 28                                  | 21                                                   | 5                                       | 2                                      |
 
 The findings rest on drawn cells; `none` concentrates in extrapolated hints (14 of 34 at ≥ 2
 steps). pred-off on drawn cells is mostly an ordinary gap (26 of 33 have own line ≤ 1 mm), not a
@@ -638,11 +647,11 @@ distance ≤ T (0.3 / 0.5 mm) is co-drawing and does not count as accompaniment.
 excused; B: only if the co-drawn set brackets the hole's size (side effects: max − min ≥ 2).
 
 | mode | gains (of 25) | new splits, all chains | len ≥ 100 / 30–100 / < 30 | span ≥ 4 | own rank ≤ 5 mm beside | touching |
-| --- | --- | --- | --- | --- | --- | --- |
-| 0.3A | 0 | 810 | 351 / 293 / 166 | 785 | 7 | 1 |
-| 0.3B | 0 | 804 | 343 / 297 / 164 | 780 | 7 | 0 |
-| 0.5A | 0 | 823 | 351 / 297 / 175 | 797 | 10 | 0 |
-| 0.5B | 0 | 817 | 343 / 299 / 175 | 792 | 10 | 0 |
+| ---- | ------------- | ---------------------- | ------------------------- | -------- | ---------------------- | -------- |
+| 0.3A | 0             | 810                    | 351 / 293 / 166           | 785      | 7                      | 1        |
+| 0.3B | 0             | 804                    | 343 / 297 / 164           | 780      | 7                      | 0        |
+| 0.5A | 0             | 823                    | 351 / 297 / 175           | 797      | 10                     | 0        |
+| 0.5B | 0             | 817                    | 343 / 299 / 175           | 792      | 10                     | 0        |
 
 Why no gains (0.5A, samples ≤ 40 mm from leakAt): the excusal fires (≥ 1 excused companion at 20 / 25
 cells, all under-samples at 15), yet 24 / 25 stay > 50 % accompanied. Still-unexcused companions by
@@ -667,24 +676,25 @@ Axel F COLLAR 10 (closed on size 14's line).
 
 **Offset remnants (`semantics/offset.ts` `dropRemnants`, bisect `OFFSET_TRIM_OFF=1`).** The
 `offset-topology` blocks split two ways on pictures:
+
 - wrong close — the outline itself is wrong, the block is right: Paris C 32 (a strap merged over a
   1.36 mm neck; both loops exactly at the allowance), Verona B 20 (a self-crossing tick square at the
   hem corner), Ambrosia B FRONT TOP 2 (closed across other sizes' lines, a 3 mm strip);
 - artefact — a clean outline: Axel A 10 (1 extra loop, 265 mm²), Axel D 26 (8 extras, 3–615 mm²),
   Dyanna E SLEEVES. The raw offset's positive union keeps swallowtail loops where the source turns
   tighter than the allowance; every vertex of such a loop is nearer the source than |mm|.
-Rule: when there is more than one loop, drop a non-largest loop whose every vertex is nearer than
-|mm| − 0.02 mm; record the count / largest area in `report.dropped` and the piece note. Holes are
-unchanged.
-Critic (independent agent, code + data, not my conclusion): ACCEPT WITH CHANGES. A reversed-arc join
-in `rawOffset` leaves the same loops, so the trim is the standard distance clean-up and not a patch over a
-rawOffset bug. Genuine loops measured ≥ |mm| − 0.01 (Paris; synthetic 0.2–1 mm lobes on a 2 mm neck,
-8–200 vertices, 0.1 mm rounding), remnants ≤ |mm| − 0.05. Vertex sampling is enough (edge midpoints
-never exceed vertex max). The critic asked for: tol 0.02, not 0.05 (0.001 mm of headroom on D 26), a
-recorded drop, holes unchanged. All three are done. The kept loop is still judged by `parallelDeviation`: D 26
-at 12.7 / 15 mm stays blocked (deviation 12.7 / 15 mm, tight cap curve — open).
-Measured on the 18 files with an offset block (`shot-trim`; 13 of them timed out under machine load
-and were retried in `shot-trim2`), against `shot-openpass` (13 Nov):
+  Rule: when there is more than one loop, drop a non-largest loop whose every vertex is nearer than
+  |mm| − 0.02 mm; record the count / largest area in `report.dropped` and the piece note. Holes are
+  unchanged.
+  Critic (independent agent, code + data, not my conclusion): ACCEPT WITH CHANGES. A reversed-arc join
+  in `rawOffset` leaves the same loops, so the trim is the standard distance clean-up and not a patch over a
+  rawOffset bug. Genuine loops measured ≥ |mm| − 0.01 (Paris; synthetic 0.2–1 mm lobes on a 2 mm neck,
+  8–200 vertices, 0.1 mm rounding), remnants ≤ |mm| − 0.05. Vertex sampling is enough (edge midpoints
+  never exceed vertex max). The critic asked for: tol 0.02, not 0.05 (0.001 mm of headroom on D 26), a
+  recorded drop, holes unchanged. All three are done. The kept loop is still judged by `parallelDeviation`: D 26
+  at 12.7 / 15 mm stays blocked (deviation 12.7 / 15 mm, tight cap curve — open).
+  Measured on the 18 files with an offset block (`shot-trim`; 13 of them timed out under machine load
+  and were retried in `shot-trim2`), against `shot-openpass` (13 Nov):
 - 0 files worse. In 9 of the 12 retried files the blocked pieces are unchanged.
 - Ophelia: D SLEEVES offset-topology → no build block; the file now stops only at the cutting-list
   fold question. Asheville: G POCKETS non-monotone → gone (G8 plateau, above); also stops only at the
@@ -702,6 +712,7 @@ and were retried in `shot-trim2`), against `shot-openpass` (13 Nov):
 Question (direction review): non-monotone area (G8) misses a piece that closes partly on a
 neighbour's line when its area still sits between the neighbours. Should a G8 plateau rule
 ("flat across all sizes") close that hole?
+
 - No. Area series from `outer` show genuine group plateaus: Verona F SASH / H BOW CENTER, the Kalla N/O
   pockets, and Asheville/Kitchen/Estoril pockets flat across every size. "Flat for all" would block
   them. The equal-area trap (Silverstone F SKIRT FRONT 4XL = 5XL, 3562 vs 3566 cm²·100) already
@@ -726,6 +737,7 @@ neighbour's line when its area still sits between the neighbours. Should a G8 pl
   review.
 
 ### 15 Nov, later — nest-hole audit after the direction review
+
 - Review findings, all accepted:
   - (B) Blaming the hole misses the diff case: Silverstone 5XL closes on the 3XL line and the hole is
     the already-closed 4XL. The audit now keeps every (hole, by) pair; `nest-diff.js` flags the newly
@@ -747,6 +759,7 @@ neighbour's line when its area still sits between the neighbours. Should a G8 pl
 - Verdict: about 1 in 4 is real. Not a gate; use it as a per-piece diff and as a worklist.
 
 ### 15 Nov, evening — metrics that only diff, the Taos G 0 mechanism, the continuity order guard
+
 - `nest-diff.js` now also prints MOVED: a cell closed in both runs whose outline moved > 0.3 mm
   (symmetric Hausdorff). shot-trim2 → op12: 1287 identical, 0 moved.
 - fc's oth% and the longest other-rank run, measured on 1347 cells: most long runs are lines drawn
@@ -768,7 +781,7 @@ neighbour's line when its area still sits between the neighbours. Should a G8 pl
   it is not a lonePortions problem.
 - **Continuity's tolerance is shape-only; order is the missing axis.** Taos G 0 was kept by
   `continuityVerdicts`. The nearest anchor (size 8) is 4 steps away, so hAllow was 98 mm against
-  a measured 15 mm, and the concave waist makes the far ring the *smaller* area, so growth passed
+  a measured 15 mm, and the concave waist makes the far ring the _smaller_ area, so growth passed
   too. Do not tighten hAllow. Add the order check instead: along the outline, size r lies between
   its closed neighbours r−1 and r+1; an end size does not go past r±1 towards r±2.
   - `pieces/continuity-order.ts` `gradeOrderRun`, switch `CONT_ORDER` (default off).
@@ -847,7 +860,7 @@ neighbour's line when its area still sits between the neighbours. Should a G8 pl
 
 - **Trigger:** Taos 18-pen «▬● ▮» scores 0.83 against its own legend sample (< 0.86). The pen's dot
   abuts the dash, but `signatureOf` measures the gap _before_ a bead to its centre (`dist(prevEnd,
-  centre) − len/2`) and the gap _after_ it from its centre. Walked one way the dot reads as touching,
+centre) − len/2`) and the gap _after_ it from its centre. Walked one way the dot reads as touching,
   walked the other way it reads as a 0.5 mm gap; key and field walk this pen in opposite directions.
 - **Tried:** every bead edge to edge (both sides symmetric). set40 −305 / +70 cells, Memoir A 214 →
   190: a dot loses its radius, so dotted pens collapse toward «solid». Narrow variant (mark beads
@@ -937,7 +950,7 @@ neighbour's line when its area still sits between the neighbours. Should a G8 pl
   - Verona H 0/2/6 (CORRECTED after f3's read of `fill.ts`; an earlier version of this entry
     blamed r0's knife spreading past its corner — wrong: `cutAtTicks` is a mask cut after the flood,
     it can only remove pixels). The cell is refused by the cross-rank check: `TICKCUT r0: runs past
-    c937 (r7)` (also r1/r2/r4/r5/r6). c937 is the right side (x 1163.4, y 1457–1564.5) of the G BOW
+c937 (r7)` (also r1/r2/r4/r5/r6). c937 is the right side (x 1163.4, y 1457–1564.5) of the G BOW
     rectangle below H, accepted as r7's end tick in `m-group` (vetoed in `m-tickord`). Its probe
     points can only be inside r0's mask if r0's flood already runs from H (55×63 at 1060–1117 ×
     1374–1437) into G — `leakAt` (1088, 1401) is inside H. Open: why r0's pre-tick mask holds G
@@ -997,6 +1010,7 @@ owner's OK. Acceptance as before (0 WORSE on both lists, no closed → wrong, ne
 area monotone, f3 review before acceptance).
 
 open-lines-main (bucket G, `pieces/gfit`):
+
 1. `GFIT_LOCAL` commit prep: the unused `grossScore` was dropped from fit.ts; f3's acceptance
    pictures are left; commit on the owner's yes.
 2. Piecewise grade model for E1-cover (137 set40 / 88 holdout): the grade is not linear in rank,
@@ -1055,14 +1069,14 @@ isShared into rankOf stays a dead end).
 
 Open cells by first reason (set40 1068 of 4752 / holdout40 486 of 3052):
 
-| mechanism | set40 | holdout40 | ink on paper along pred (ink-check 13 Nov, set40) |
-| --- | --- | --- | --- |
-| A edge size, no neighbour on one side (`not-bracketed`) | 375 | 167 | 63 % |
-| D own line not along the prediction (`E1-cover`) | 312 | 131 | 90 % |
-| E own line with holes (`E2-*`) | 174 | 41 | ~90 % |
-| F drawn stretch refused (`E3`/`E4`) | 41 | 9 | 75–95 % |
-| B sizes not told apart (`merged` 66/56, `sizes-not-distinguished` 54/45) | 120 | 101 | — |
-| C no model / tiny | 46 | 37 | — |
+| mechanism                                                                | set40 | holdout40 | ink on paper along pred (ink-check 13 Nov, set40) |
+| ------------------------------------------------------------------------ | ----- | --------- | ------------------------------------------------- |
+| A edge size, no neighbour on one side (`not-bracketed`)                  | 375   | 167       | 63 %                                              |
+| D own line not along the prediction (`E1-cover`)                         | 312   | 131       | 90 %                                              |
+| E own line with holes (`E2-*`)                                           | 174   | 41        | ~90 %                                             |
+| F drawn stretch refused (`E3`/`E4`)                                      | 41    | 9         | 75–95 %                                           |
+| B sizes not told apart (`merged` 66/56, `sizes-not-distinguished` 54/45) | 120   | 101       | —                                                 |
+| C no model / tiny                                                        | 46    | 37        | —                                                 |
 
 - Blank paper is rare: ink-check `no-ink` 27 of 517 (5 %), and those were mostly wrong predictions.
   The probe re-split (ranked ink only) found other-rank ink on 26 % / 11 % of the missing length,
@@ -1074,3 +1088,48 @@ Open cells by first reason (set40 1068 of 4752 / holdout40 486 of 3052):
   reasons (offset-hull, duplicate identity, fold list, …), 11 only on operator questions (grain,
   fold), 7 on lines, 5 with no piece blocked (sheet/sizes/check step); holdout40: 4 / 7 / 7 / 16.
   Closing every line does not by itself produce DXF files; the other stops are a separate track.
+
+### C1–C3 — PARKED (16 Nov 2026)
+
+Hypothesis: the three open-line mechanisms in the failure map can be accepted without widening the corridor or closing on a neighbour — an edge size one step past its anchor, a family whose own scatter sets the corridor, and a chain no size owns.
+Change: each behind its own flag, off by default (`GFIT_EDGE_ACCEPT`, `GFIT_LOCAL_CORRIDOR` on top of `GFIT_LOCAL`, `GRADE_P2_LOOSE`). `pieces/gfit/repair.ts`, `repair-hook.ts`, `pieces/fill.ts` (`looseWallIds`), `types.ts` (`RepairRecord.local.scatterMm`). Tests: `pieces/gfit/repair-flags.test.ts`. Flag off leaves the old result; the edge still refuses two steps out and with fewer than three anchors; the corridor never reaches the neighbour (`E5-nest`, and `E5-on-anchor` when the edge close is the neighbour's line); a loose chain counts only inside the corridor and at least a quarter step from both anchors.
+Run: `npx vitest run src/lib/pattern-import`, `yarn build:check`, `npx eslint` and `npx prettier --check` on the changed files, `yarn test`. No archive run from this change.
+Numbers: not re-measured here. The wdall dump already in `cursor-tasks.md` puts C3 first (set40: 244 open sizes at 1.5 mm, 330 at 3 mm, whose pred is covered by own + unranked ink but not by own ink alone).
+Verdict: PARKED. Code for all three is in, flags off, behaviour unchanged until one is set. Not accepted — the flags have not been turned on over the corpus.
+
+## 16 Nov 2026 — wdall: unranked ink along the open sizes (owner's OK, one run, both lists)
+
+- Run: `walls-dump.mjs` with `WD_ALL=1 GFIT_LOCAL=1` over set40 + holdout40.
+  - Output: `/private/tmp/patimport-runs/wdall-{m,h}`.
+  - Analysis script: scratchpad `wdall-map.py`. Along each open size's pred (1 mm samples), it takes
+    the nearest ink within R and classes it as own/common, another size's, unranked (no size and not
+    common), or none.
+  - Caveat: Cursor edits to `pieces/fill.ts` landed in the working tree during the run. They are
+    flag-gated and off, but the run is not on a clean tree.
+- Length share, set40 at R 1.5 mm (own / unranked / other / none):
+
+  | bucket   | own | unranked | other | none |
+  | -------- | --- | -------- | ----- | ---- |
+  | edge     | 47  | 18       | 6     | 28   |
+  | E1-cover | 55  | 21       | 2     | 23   |
+  | E2 holes | 80  | 13       | 1     | 7    |
+
+  Holdout40 is close: E1-cover 55 / 20 / 4 / 22.
+
+- Sizes closable once unranked ink counts:
+  - Definition: own + unranked ≥ 95 % of pred, while own alone < 95 %.
+  - set40: 244 at R 1.5 mm, 330 at R 3 mm (1068 open).
+  - holdout40: 72 at R 1.5 mm, 114 at R 3 mm (486 open).
+- Own ink alone already ≥ 95 % but still refused (E2/E4 details): set40 80–130, holdout40 17–37.
+- Remaining "none" (E1-cover 13–23 %, edge 18–28 %): ink-check found ink on the paper there. So this
+  is mostly prediction error (2–3 mm in inconsistent families) or chains dropped before the walls,
+  not blank paper.
+- Priority set: C3 (unranked lines) first, then C2, then C1 (`cursor-tasks.md`).
+
+### R2 + O1 — PARKED (16 Nov 2026)
+
+Hypothesis: loose ink is safe only where the prediction is trusted to a step, and a hull collapse is a real block only when it bridges a bay wider than two allowances.
+Change: `GRADE_P2_LOOSE` skips loose walls on an extrapolation or a `GFIT_LOCAL` pair, snaps them only inside the base corridor, and drops a used loose wall that leaves the corridor for more than 10 mm. `GFIT_LOCAL_CORRIDOR` also refuses a 20 mm run of the result on an anchor. `OFFSET_HULL_POCKETS` (off by default) demotes a hull collapse whose bridged pockets are narrower than `2·(allowance + 0.2)` mm; `offsetContour`, the fold offset and G6 call the same helper. Readouts: `looseSkipped`, `looseShare`, `looseDropped`, `local.scatterGap`.
+Run: `npx vitest run src/lib/pattern-import`. No archive run.
+Numbers: none.
+Verdict: PARKED. C2 cannot change anything where s ≤ 3 mm and adds at most 0.2s − 0.6 above that, so a small set40 delta is expected, not a bug. How many sizes R2.1 costs is `looseSkipped` on the next owner-gated run.

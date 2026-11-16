@@ -56,7 +56,12 @@ import {
   pointOnRings,
 } from '../semantics/grain-inside';
 import { drillMarkKey, drillMarkKeyOf, drillMarkOf } from './drill-mark';
-import { MITER_LIMIT, parallelDeviation } from '../semantics/offset';
+import {
+  MITER_LIMIT,
+  hullPocketBlocks,
+  hullPocketsOn,
+  parallelDeviation,
+} from '../semantics/offset';
 import { glyphCellKey, undashed } from '../semantics/glyphs';
 import { CHROME_GATE, ChromeIndex, hairpins, onChrome } from './chrome';
 import type { RawDxf, RawEntity } from './reader';
@@ -969,9 +974,10 @@ export function g6(ctx: GateCtx): GateCheck {
       hrBase < OFFSET_HULL_SOURCE_MAX &&
       (hrDerived >= OFFSET_HULL_RATIO || r.hullRatio >= OFFSET_HULL_RATIO)
     ) {
-      bad(
-        `offset collapsed to the convex hull (hull ratio ${hrDerived.toFixed(4)} vs source ${hrBase.toFixed(4)})`,
-      );
+      const msg = `offset collapsed to the convex hull (hull ratio ${hrDerived.toFixed(4)} vs source ${hrBase.toFixed(4)})`;
+      const d = spec.allowance.allowanceMm;
+      if (!hullPocketsOn() || hullPocketBlocks(baseLine, derivedLine, d)) bad(msg);
+      else notes.push(`${b.block}: ${msg} (narrow bays)`);
     }
     // Independent check on the FILE (W2): the DERIVED line, read back, is the mitred allowance
     // offset of the line it came from — never closer than the allowance anywhere (a bitten bay, a

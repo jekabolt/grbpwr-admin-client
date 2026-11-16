@@ -65,6 +65,7 @@ import {
   itemsOf,
   landingPlugs,
   lonePortions,
+  NOT_EDGE_ROLES,
   overlayLines,
   rescuedIgnored,
   copyRanks,
@@ -1523,6 +1524,7 @@ function fillOneSheet(
   // the semantics block the family. Graded sheets on F4's own walls only (never the H1 solver's)
   if (model.mode === 'graded' && !graded?.walls && !solved && !gradeP2Off()) {
     const live = (ids: readonly ChainId[]) => itemsOf(set, ids).filter((it) => !excl.has(it.chain));
+    const looseOn = typeof process !== 'undefined' && !!process.env?.GRADE_P2_LOOSE;
     diag.repair = repairPass(
       cands,
       {
@@ -1538,6 +1540,23 @@ function fillOneSheet(
         ],
         wm: model,
         texts: textCentres,
+        // lines no size owns; absent when the flag is off, so the try is the one it was
+        ...(looseOn
+          ? {
+              loose: live(
+                looseWallIds(
+                  set,
+                  new Set([
+                    ...model.byRank.flat(),
+                    ...model.common,
+                    ...rescued,
+                    ...lone.map((it) => it.chain),
+                  ]),
+                  excl,
+                ),
+              ),
+            }
+          : {}),
       },
       new Set([...dropped, ...(graded?.skip ?? [])]),
     );
@@ -1845,6 +1864,27 @@ function perimeterOf(o: readonly PtMm[]): number {
   let L = 0;
   for (let i = 0; i < o.length; i++) L += dist(o[i], o[(i + 1) % o.length]);
   return L;
+}
+
+/**
+ * GRADE_P2_LOOSE: chains no size owns — not in a size row, not common, not rescued, not a lone
+ * stretch, not excluded, and not an interior role (notch, internal, grain, seam). The repair
+ * counts one only where it lies in the size's place.
+ */
+export function looseWallIds(
+  set: Pick<ChainSet, 'chains' | 'classes'>,
+  taken: ReadonlySet<ChainId>,
+  excl: ReadonlySet<ChainId>,
+): ChainId[] {
+  const roleOf = new Map<ChainId, string>();
+  for (const k of set.classes) for (const id of k.chains) roleOf.set(id, k.role);
+  const ids: ChainId[] = [];
+  for (const c of set.chains) {
+    if (c.pts.length < 2 || taken.has(c.id) || excl.has(c.id)) continue;
+    if (NOT_EDGE_ROLES.has(roleOf.get(c.id) ?? '')) continue;
+    ids.push(c.id);
+  }
+  return ids;
 }
 
 /** An ANCHOR: a rank closed on its own class lines alone — no plug, no rerank, no derived edge. */

@@ -94,6 +94,7 @@ fast-set.txt` screening, `--only <text> --par 1` one file) answers a specific qu
   not while a peer edits); `yarn build:check` (xlsx / `tasks/sheet.ts` errors predate this branch).
 - Env: `DASH_TRAIN_OFF` `ALIKE_NESTS_OFF` `MOOD_MARKS_OFF` `MOOD_WIDE_OFF` `TICK_KNIFE_SPREAD_OFF=1` `GRADE_DRAW_OFF=1` `NEST_CROSS_OFF=1` `NEST_CORNER_MM` `GRADEP2_DEBUG` `CONT_ORDER_OFF=1` `TICK_THROUGH_OFF=1` `TICK_ORDER_OFF=1`
   `TICK_THROUGH_NEAREST_OFF=1` (`MOOD_TICKS_DEBUG=1` + `SHOT_STDOUT=1`: TICK/TICKTHRU/TICKORDER lines; `SHOT_ROWS=1`: `<file>/rows.json`)
+  Off by default, on with `=1`: `GFIT_EDGE_ACCEPT` (one step past the edge, outside draw mode), `GFIT_LOCAL` + `GFIT_LOCAL_CORRIDOR` (corridor from the family's own scatter), `GRADE_P2_LOOSE` (unranked chains), `OFFSET_HULL_POCKETS` (a hull collapse blocks only when it bridges a bay wider than two allowances).
   (`PIECES_OPEN_PASS=1`, `OFFSET_TRIM_OFF=1`: node probes / bisect).
 
 ### Status (13 Nov 2026)
