@@ -2380,6 +2380,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
     readonly gizmoGroup:
       | MakeHumanFullBodyJointOverlayGroupV4
       | MakeHumanFullBodyJointOverlayGroupV5;
+    readonly originalPose: Pose;
     transaction: FullBodyJointRingDraggingV9;
     lastAdmittedPose: Pose;
   } | null>(null);
@@ -3624,6 +3625,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                                   jointRingTransactionRef.current = {
                                     revision: jointRingRevision,
                                     gizmoGroup: rotationGizmoGroup,
+                                    originalPose: startPose,
                                     transaction: ring.begin(
                                       startPose,
                                       jointSelection,
@@ -3660,11 +3662,16 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                                     currentJointRingRevisionRef.current === jointRingRevision
                                       ? 'commit'
                                       : 'cancel';
+                                  const poseChanged = !editor.equalGeometry(
+                                    active.originalPose,
+                                    active.lastAdmittedPose,
+                                  );
                                   const finishedPose = finishActiveJointRing(resolvedOutcome);
                                   if (
                                     resolvedOutcome === 'commit' &&
                                     finishedPose &&
-                                    editor.autoApplyJointRingOnCommit
+                                    editor.autoApplyJointRingOnCommit &&
+                                    poseChanged
                                   ) {
                                     buildFullBodyPreview(finishedPose);
                                   }

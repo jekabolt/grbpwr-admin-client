@@ -511,6 +511,16 @@ async function findHoverMarkerCenter(options: {
     }
   }
   if (!seed) throw new Error(`Could not locate the projected ${groupId} marker.`);
+  const projectedMarkers = JSON.parse(
+    (await canvas.getAttribute('data-projected-joint-markers')) ?? '[]',
+  ) as readonly Readonly<{ id: string; screenX: number; screenY: number }>[];
+  const projectedMarker = projectedMarkers.find(({ id }) => id === groupId);
+  if (projectedMarker) {
+    return {
+      x: bounds.x + projectedMarker.screenX,
+      y: bounds.y + projectedMarker.screenY,
+    };
+  }
   const horizontalHits: number[] = [];
   for (let x = seed.x - 40; x <= seed.x + 40; x += 1) {
     await page.mouse.move(x, seed.y);
