@@ -19,14 +19,15 @@ export type PatternImportDxfPhaseECadTableZeroOperationSourceRouteV1 = Readonly<
 >;
 
 /**
- * A cached card session is only an authority after its detached Phase-E inputs validate. A stale,
- * partial or pre-reload session must not shadow the exact current saved DXF row.
+ * The current saved DXF row is the durable authority for an existing card. A cached import session
+ * is used only while no complete saved row exists yet (the just-imported, not-yet-saved case), so a
+ * stale or partially reconstructed session can never shadow a card that already has its DXF.
  */
 export function routePatternImportDxfPhaseECadTableZeroOperationSourceV1(
   fresh: PatternImportDxfPhaseECadTableZeroOperationFreshChoicesResultV1,
   saved: PatternImportDxfPhaseECadTableZeroOperationSavedChoicesResultV1,
 ): PatternImportDxfPhaseECadTableZeroOperationSourceRouteV1 {
-  return fresh.ok
-    ? Object.freeze({ mode: 'fresh' as const, choices: fresh })
-    : Object.freeze({ mode: 'saved' as const, choices: saved });
+  if (saved.ok) return Object.freeze({ mode: 'saved' as const, choices: saved });
+  if (fresh.ok) return Object.freeze({ mode: 'fresh' as const, choices: fresh });
+  return Object.freeze({ mode: 'saved' as const, choices: saved });
 }
