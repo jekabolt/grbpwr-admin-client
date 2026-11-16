@@ -29,8 +29,15 @@ export const DEFAULT_MESH_PLANE_SECTION_POLICY_V1 = Object.freeze({
   maximumIntersectionSegmentCount: 250_000,
 } satisfies MeshPlaneSectionPolicyV1);
 
+export interface MeshPlaneSectionCrossingV1 {
+  readonly a: number;
+  readonly b: number;
+  readonly t: number;
+}
+
 export interface MeshPlaneSectionLoopV1 {
   readonly pointsM: readonly MeshPlaneSectionVec3V1[];
+  readonly crossings: readonly MeshPlaneSectionCrossingV1[];
   readonly centroidM: MeshPlaneSectionVec3V1;
   readonly perimeterM: number;
 }
@@ -87,9 +94,14 @@ interface MutableStats {
   bucketCandidateComparisons: number;
 }
 
+interface IntersectionPoint {
+  readonly point: MeshPlaneSectionVec3V1;
+  readonly crossing: MeshPlaneSectionCrossingV1;
+}
+
 interface SegmentPoints {
-  readonly a: MeshPlaneSectionVec3V1;
-  readonly b: MeshPlaneSectionVec3V1;
+  readonly a: IntersectionPoint;
+  readonly b: IntersectionPoint;
 }
 
 function frozenStats(stats: MutableStats): MeshPlaneSectionStatsV1 {
@@ -168,14 +180,31 @@ function signedDistance(
 }
 
 function interpolatePlaneEdge(
+  vertexA: number,
+  vertexB: number,
   a: MeshPlaneSectionVec3V1,
   b: MeshPlaneSectionVec3V1,
   distanceA: number,
   distanceB: number,
-): MeshPlaneSectionVec3V1 {
+): IntersectionPoint {
   const denominator = distanceA - distanceB;
   const t = denominator === 0 ? 0.5 : distanceA / denominator;
-  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  const ascending = vertexA < vertexB;
+  return {
+    point: [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t],
+    crossing: Object.freeze({
+      a: ascending ? vertexA : vertexB,
+      b: ascending ? vertexB : vertexA,
+      t: ascending ? t : 1 - t,
+    }),
+  };
+}
+
+function vertexIntersectionPoint(vertex: number, point: MeshPlaneSectionVec3V1): IntersectionPoint {
+  return {
+    point,
+    crossing: Object.freeze({ a: vertex, b: vertex, t: 0 }),
+  };
 }
 
 function distanceSquared(a: MeshPlaneSectionVec3V1, b: MeshPlaneSectionVec3V1): number {
@@ -193,6 +222,7 @@ function distanceSquared(a: MeshPlaneSectionVec3V1, b: MeshPlaneSectionVec3V1): 
  * - tangent point contacts contribute no segment.
  */
 function intersectTriangle(
+  vertices: readonly [number, number, number],
   points: readonly [MeshPlaneSectionVec3V1, MeshPlaneSectionVec3V1, MeshPlaneSectionVec3V1],
   distances: readonly [number, number, number],
   tolerance: number,
@@ -202,15 +232,20 @@ function intersectTriangle(
   if (count === 3) return 'coplanar';
   if (count === 2) {
     const indices = onPlane.flatMap((value, index) => (value ? [index] : []));
-    return { a: points[indices[0]], b: points[indices[1]] };
+    return {
+      a: vertexIntersectionPoint(vertices[indices[0]], points[indices[0]]),
+      b: vertexIntersectionPoint(vertices[indices[1]], points[indices[1]]),
+    };
   }
   if (count === 1) {
     const onIndex = onPlane.findIndex(Boolean);
     const others = [0, 1, 2].filter((index) => index !== onIndex);
     if (distances[others[0]] * distances[others[1]] >= 0) return null;
     return {
-      a: points[onIndex],
+      a: vertexIntersectionPoint(vertices[onIndex], points[onIndex]),
       b: interpolatePlaneEdge(
+        vertices[others[0]],
+        vertices[others[1]],
         points[others[0]],
         points[others[1]],
         distances[others[0]],
@@ -221,7 +256,7 @@ function intersectTriangle(
   const positive = distances.some((value) => value > tolerance);
   const negative = distances.some((value) => value < -tolerance);
   if (!positive || !negative) return null;
-  const intersections: MeshPlaneSectionVec3V1[] = [];
+  const intersections: IntersectionPoint[] = [];
   for (const [aIndex, bIndex] of [
     [0, 1],
     [1, 2],
@@ -229,7 +264,14 @@ function intersectTriangle(
   ] as const) {
     if (distances[aIndex] * distances[bIndex] >= 0) continue;
     intersections.push(
-      interpolatePlaneEdge(points[aIndex], points[bIndex], distances[aIndex], distances[bIndex]),
+      interpolatePlaneEdge(
+        vertices[aIndex],
+        vertices[bIndex],
+        points[aIndex],
+        points[bIndex],
+        distances[aIndex],
+        distances[bIndex],
+      ),
     );
   }
   if (intersections.length !== 2) return null;
@@ -238,6 +280,7 @@ function intersectTriangle(
 
 class SpatialWelder {
   readonly points: MeshPlaneSectionVec3V1[] = [];
+  readonly crossings: MeshPlaneSectionCrossingV1[] = [];
   readonly buckets = new Map<string, number[]>();
   comparisons = 0;
 
@@ -255,7 +298,7 @@ class SpatialWelder {
     return `${x}:${y}:${z}`;
   }
 
-  add(point: MeshPlaneSectionVec3V1): number {
+  add(point: MeshPlaneSectionVec3V1, crossing: MeshPlaneSectionCrossingV1): number {
     const cell = this.cell(point);
     const toleranceSquared = this.tolerance * this.tolerance;
     let match = Number.POSITIVE_INFINITY;
@@ -276,6 +319,7 @@ class SpatialWelder {
     if (Number.isFinite(match)) return match;
     const index = this.points.length;
     this.points.push(Object.freeze([...point]) as unknown as MeshPlaneSectionVec3V1);
+    this.crossings.push(crossing);
     const key = this.key(cell[0], cell[1], cell[2]);
     const bucket = this.buckets.get(key) ?? [];
     bucket.push(index);
@@ -287,8 +331,10 @@ class SpatialWelder {
 function loopFromNodeIds(
   nodeIds: readonly number[],
   points: readonly MeshPlaneSectionVec3V1[],
+  crossings: readonly MeshPlaneSectionCrossingV1[],
 ): MeshPlaneSectionLoopV1 {
   const loopPoints = nodeIds.map((node) => points[node]);
+  const loopCrossings = nodeIds.map((node) => crossings[node]);
   let perimeterM = 0;
   const centroid = [0, 0, 0];
   loopPoints.forEach((point, index) => {
@@ -303,6 +349,7 @@ function loopFromNodeIds(
   ) as unknown as MeshPlaneSectionVec3V1;
   return Object.freeze({
     pointsM: Object.freeze(loopPoints),
+    crossings: Object.freeze(loopCrossings),
     centroidM,
     perimeterM,
   });
@@ -420,15 +467,20 @@ function measureMeshPlaneSectionPerimetersInternalV1(
   const segments: [number, number][] = [];
   for (let triangle = 0; triangle < stats.triangleCount; triangle += 1) {
     const offset = triangle * 3;
+    const vertices = [
+      options.triangleIndices[offset],
+      options.triangleIndices[offset + 1],
+      options.triangleIndices[offset + 2],
+    ] as const;
     const points = [
-      pointAt(options.positionsM, options.triangleIndices[offset]),
-      pointAt(options.positionsM, options.triangleIndices[offset + 1]),
-      pointAt(options.positionsM, options.triangleIndices[offset + 2]),
+      pointAt(options.positionsM, vertices[0]),
+      pointAt(options.positionsM, vertices[1]),
+      pointAt(options.positionsM, vertices[2]),
     ] as const;
     const distances = points.map((point) =>
       signedDistance(point, options.planeOriginM, normal),
     ) as unknown as readonly [number, number, number];
-    const intersection = intersectTriangle(points, distances, policy.planeToleranceM);
+    const intersection = intersectTriangle(vertices, points, distances, policy.planeToleranceM);
     if (intersection === 'coplanar') {
       stats.weldedNodeCount = welder.points.length;
       stats.bucketCandidateComparisons = welder.comparisons;
@@ -440,8 +492,8 @@ function measureMeshPlaneSectionPerimetersInternalV1(
     }
     if (!intersection) continue;
     stats.intersectedTriangleCount += 1;
-    const a = welder.add(intersection.a);
-    const b = welder.add(intersection.b);
+    const a = welder.add(intersection.a.point, intersection.a.crossing);
+    const b = welder.add(intersection.b.point, intersection.b.crossing);
     if (a === b) continue;
     const key = a < b ? `${a}:${b}` : `${b}:${a}`;
     if (segmentKeys.has(key)) continue;
@@ -515,7 +567,7 @@ function measureMeshPlaneSectionPerimetersInternalV1(
         stats,
       );
     }
-    const loop = loopFromNodeIds(nodeIds, welder.points);
+    const loop = loopFromNodeIds(nodeIds, welder.points, welder.crossings);
     if (!Number.isFinite(loop.perimeterM) || loop.perimeterM < policy.minimumLoopPerimeterM) {
       return failure(
         'open-or-branching-section',
