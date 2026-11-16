@@ -3779,7 +3779,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
               <MeasurementWatertightSurfaceV1Stage
                 interactive={!card}
                 exclusiveContextGroup={card ? 'model-card-preview' : undefined}
-                accessibleLabel={card ? '3D mannequin preview for this model' : undefined}
+                accessibleLabel={card ? 'mannequin preview' : undefined}
                 artifact={displayedBuilt.artifact}
                 frame={displayedBuilt.frame}
                 lod='display'
