@@ -2,6 +2,7 @@ import type { BodyArtifact, BodyInput, BodyPoseKind, BodyProvider } from './cont
 import {
   CANONICAL_BODY_MEASUREMENTS_VERSION,
   CANONICAL_MEASUREMENT_PLAUSIBILITY_MM,
+  isCanonicalMeasurementNonFatalPlausibilityKey,
   validateCanonicalMeasurementCorrelations,
   type CanonicalBodyMeasurementsMm,
   type CanonicalMeasurementKey,
@@ -25,9 +26,11 @@ const REQUIRED_MEASUREMENT_KEYS = Object.freeze([
 const OPTIONAL_MEASUREMENT_KEYS = Object.freeze([
   'underBustCircumferenceMm',
   'neckBaseCircumferenceMm',
+  'highHipCircumferenceMm',
   'bicepCircumferenceMm',
   'wristCircumferenceMm',
   'thighCircumferenceMm',
+  'kneeCircumferenceMm',
   'calfCircumferenceMm',
   'ankleCircumferenceMm',
   'hpsToWaistFrontMm',
@@ -145,7 +148,13 @@ function validateCanonicalMeasurements(measurements: CanonicalBodyMeasurementsMm
   ][]) {
     const value = measurements[key];
     if (value == null) continue;
-    if (!Number.isFinite(value) || value < range[0] || value > range[1]) {
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new RangeError(`${key} must be finite and positive.`);
+    }
+    if (
+      !isCanonicalMeasurementNonFatalPlausibilityKey(key) &&
+      (value < range[0] || value > range[1])
+    ) {
       throw new RangeError(`${key} must be within ${range[0]}..${range[1]} mm.`);
     }
   }

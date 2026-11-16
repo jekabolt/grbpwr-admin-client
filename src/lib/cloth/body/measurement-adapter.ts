@@ -8,12 +8,14 @@ export interface CanonicalBodyMeasurementsMm {
   readonly underBustCircumferenceMm?: number;
   readonly waistCircumferenceMm: number;
   readonly hipCircumferenceMm: number;
+  readonly highHipCircumferenceMm?: number;
   readonly armLengthMm: number;
   readonly inseamMm: number;
   readonly neckBaseCircumferenceMm?: number;
   readonly bicepCircumferenceMm?: number;
   readonly wristCircumferenceMm?: number;
   readonly thighCircumferenceMm?: number;
+  readonly kneeCircumferenceMm?: number;
   readonly calfCircumferenceMm?: number;
   readonly ankleCircumferenceMm?: number;
   readonly hpsToWaistFrontMm?: number;
@@ -98,12 +100,14 @@ export const PROJECT_BODY_MEASUREMENT_ALIASES: CanonicalMeasurementAliasMap = {
   underBustCircumferenceMm: ['BODY_MEASUREMENT_NAME_UNDER_BUST'],
   waistCircumferenceMm: ['BODY_MEASUREMENT_NAME_WAIST'],
   hipCircumferenceMm: ['BODY_MEASUREMENT_NAME_HIP'],
+  highHipCircumferenceMm: ['BODY_MEASUREMENT_NAME_HIGH_HIP'],
   armLengthMm: ['BODY_MEASUREMENT_NAME_SLEEVE_LENGTH'],
   inseamMm: ['BODY_MEASUREMENT_NAME_INSEAM'],
   neckBaseCircumferenceMm: ['BODY_MEASUREMENT_NAME_NECK_BASE'],
   bicepCircumferenceMm: ['BODY_MEASUREMENT_NAME_BICEP'],
   wristCircumferenceMm: ['BODY_MEASUREMENT_NAME_WRIST'],
   thighCircumferenceMm: ['BODY_MEASUREMENT_NAME_THIGH'],
+  kneeCircumferenceMm: ['BODY_MEASUREMENT_NAME_KNEE'],
   calfCircumferenceMm: ['BODY_MEASUREMENT_NAME_CALF'],
   ankleCircumferenceMm: ['BODY_MEASUREMENT_NAME_ANKLE'],
   hpsToWaistFrontMm: ['BODY_MEASUREMENT_NAME_HPS_TO_WAIST_FRONT'],
@@ -135,12 +139,14 @@ export const CANONICAL_MEASUREMENT_PLAUSIBILITY_MM: Readonly<
   underBustCircumferenceMm: [500, 1500],
   waistCircumferenceMm: [500, 1600],
   hipCircumferenceMm: [650, 1700],
+  highHipCircumferenceMm: [600, 1600],
   armLengthMm: [400, 850],
   inseamMm: [500, 1100],
   neckBaseCircumferenceMm: [250, 650],
   bicepCircumferenceMm: [180, 650],
   wristCircumferenceMm: [100, 350],
   thighCircumferenceMm: [300, 1000],
+  kneeCircumferenceMm: [250, 600],
   calfCircumferenceMm: [200, 700],
   ankleCircumferenceMm: [120, 450],
   hpsToWaistFrontMm: [250, 700],
@@ -162,6 +168,21 @@ export const CANONICAL_MEASUREMENT_PLAUSIBILITY_MM: Readonly<
   bustApexToApexMm: [80, 400],
   hpsToBustApexMm: [100, 500],
 };
+
+/**
+ * Admission ranges for future bounded proxies are warnings, not whole-preview blockers. The
+ * proxy owns its visual clamp once wired; until then these values remain canonical but unsupported.
+ */
+const CANONICAL_MEASUREMENT_NON_FATAL_PLAUSIBILITY_KEYS = new Set<CanonicalMeasurementKey>([
+  'highHipCircumferenceMm',
+  'kneeCircumferenceMm',
+]);
+
+export function isCanonicalMeasurementNonFatalPlausibilityKey(
+  key: CanonicalMeasurementKey,
+): boolean {
+  return CANONICAL_MEASUREMENT_NON_FATAL_PLAUSIBILITY_KEYS.has(key);
+}
 
 export interface CanonicalMeasurementCorrelationIssue {
   readonly keys: readonly CanonicalMeasurementKey[];
@@ -246,9 +267,12 @@ function validatePlausibility(
   ][]) {
     const value = values[key];
     if (value == null) continue;
-    if (!Number.isFinite(value) || value <= 0 || value < range[0] || value > range[1]) {
+    const invalid = !Number.isFinite(value) || value <= 0;
+    const outsideRange = value < range[0] || value > range[1];
+    if (invalid || outsideRange) {
       diagnostics.push({
-        severity: 'error',
+        severity:
+          !invalid && isCanonicalMeasurementNonFatalPlausibilityKey(key) ? 'warning' : 'error',
         code: 'invalid-value',
         canonicalKey: key,
         message: `${key} must be finite and within ${range[0]}..${range[1]} mm.`,
@@ -393,6 +417,9 @@ export function adaptProjectBodyMeasurements(
       ...(values.neckBaseCircumferenceMm == null
         ? {}
         : { neckBaseCircumferenceMm: values.neckBaseCircumferenceMm }),
+      ...(values.highHipCircumferenceMm == null
+        ? {}
+        : { highHipCircumferenceMm: values.highHipCircumferenceMm }),
       ...(values.bicepCircumferenceMm == null
         ? {}
         : { bicepCircumferenceMm: values.bicepCircumferenceMm }),
@@ -402,6 +429,9 @@ export function adaptProjectBodyMeasurements(
       ...(values.thighCircumferenceMm == null
         ? {}
         : { thighCircumferenceMm: values.thighCircumferenceMm }),
+      ...(values.kneeCircumferenceMm == null
+        ? {}
+        : { kneeCircumferenceMm: values.kneeCircumferenceMm }),
       ...(values.calfCircumferenceMm == null
         ? {}
         : { calfCircumferenceMm: values.calfCircumferenceMm }),

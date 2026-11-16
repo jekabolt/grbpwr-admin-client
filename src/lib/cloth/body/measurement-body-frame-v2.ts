@@ -89,9 +89,11 @@ const REQUIRED_KEYS = Object.freeze([
 const OPTIONAL_KEYS = Object.freeze([
   'underBustCircumferenceMm',
   'neckBaseCircumferenceMm',
+  'highHipCircumferenceMm',
   'bicepCircumferenceMm',
   'wristCircumferenceMm',
   'thighCircumferenceMm',
+  'kneeCircumferenceMm',
   'calfCircumferenceMm',
   'ankleCircumferenceMm',
   'hpsToWaistFrontMm',
