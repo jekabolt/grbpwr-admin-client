@@ -25,7 +25,7 @@ import {
 } from './cad-workbench-mannequin-model-picker-v1';
 import { PATTERN_IMPORT_DXF_PHASE_E_GOLDEN_CARD_SUITE_PROFILES_V1 } from './golden-card-suite-profiles-v1';
 
-const LOCAL_LIVE_SCHEMA = 'pattern-import-dxf-phase-e-card-6-11-local-live-e2e/1' as const;
+const LOCAL_LIVE_SCHEMA = 'pattern-import-dxf-phase-e-card-6-11-local-live-e2e/2' as const;
 const PLANS = process.env.SKELETON_PLANS ?? '';
 const PROD_DATA = resolve(PLANS, 'assembly-3d-doll/prod-data');
 const HAS_LOCAL_CORPUS =
@@ -69,46 +69,88 @@ type GoldFile = Readonly<{
 }>;
 
 const CASES = Object.freeze([
-  Object.freeze({ techCardId: 6, prefix: 'card6-MAIN', category: 'shirt' as const }),
-  Object.freeze({ techCardId: 11, prefix: 'card11-MAIN', category: 'trousers' as const }),
+  Object.freeze({
+    techCardId: 6,
+    category: 'shirt' as const,
+    materialScopes: Object.freeze([
+      Object.freeze({
+        purpose: 'MAIN',
+        scopeKey: 'TECH_CARD_BOM_PURPOSE_MAIN',
+        prefix: 'card6-MAIN',
+      }),
+      Object.freeze({
+        purpose: 'POCKETING',
+        scopeKey: 'TECH_CARD_BOM_PURPOSE_POCKETING',
+        prefix: 'card6-POCKETING',
+      }),
+    ]),
+  }),
+  Object.freeze({
+    techCardId: 11,
+    category: 'trousers' as const,
+    materialScopes: Object.freeze([
+      Object.freeze({
+        purpose: 'MAIN',
+        scopeKey: 'TECH_CARD_BOM_PURPOSE_MAIN',
+        prefix: 'card11-MAIN',
+      }),
+      Object.freeze({
+        purpose: 'LINING',
+        scopeKey: 'TECH_CARD_BOM_PURPOSE_LINING',
+        prefix: 'card11-LINING',
+      }),
+    ]),
+  }),
 ]);
 
 const EXPECTED = Object.freeze({
   6: Object.freeze({
-    dxfFile: 'card6-MAIN-202609061206145330d12-3d55e011ca16331502bde7fd074bc7d9.dxf',
-    dxfBytes: 839_334,
-    dxfSha256: '50e98f9e1f67006bc077230f06e43c1efff6ee0f4aa39dbd97144aa259ec95c5',
+    dxfScopeCount: 2,
+    materialScopePieceCounts: [
+      { purpose: 'MAIN', pieceCount: 21 },
+      { purpose: 'POCKETING', pieceCount: 4 },
+    ] as const,
+    totalDxfBytes: 956_045,
+    dxfSha256: 'ace0e6b38379a56ed9d1cf6cf6b1712fd34bae778ef69e5751e738d07d532455',
     sourcePieceCount: 25,
     sourceOperationCount: 63,
-    connectionRowCount: 19,
-    confirmedConnectionCount: 17,
-    rejectedConnectionCount: 2,
+    exactConnectionCount: 17,
+    negativeGuardCount: 2,
+    unmatchedCatalogPieceKeys: [] as readonly string[],
+    unmatchedStagedPieceKeys: [] as readonly string[],
     modelId: 1,
     modelSha256: 'bd876b0cb332c55e65a76067150fc268f785f35d43f75df118f70734a8084583',
-    stagedPieceCount: 21,
-    stagingSha256: 'a998069bdf10591438979f763baded1d723fe08f2e26a89c1c69ce89f5d4e1cf',
-    connectionSha256: 'b801636953e5b645aa515f10e42deaae9d0a0257905fe79801eda55153d36268',
+    stagedPieceCount: 25,
+    stagingSha256: '7b8ed59fefb4ce416e8734c34025540f5ddc0345435a974c8cd30db1e9e87a20',
+    exactConnectionSha256: '13885dc243ba8093bdd8bfe152cbf397ccd6c1be7e1ae2603b13fc4609b2f642',
+    negativeGuardSha256: '447b4bf3dee2e003b98d56808c121dab53c0f9a1e7c3c83caffa3b4ff01251d3',
     assemblyOrderSha256: '9ab9e50d4eb88a7c1ef0598002a793d2188958e0f0246b90d48caecc959da3b5',
-    saveReceiptSha256: '0f579c7a8eaabd7139329c52160b9f6e393218d58725e619f26167044d77580a',
-    receiptSha256: '8118bb0e257503f41fb02a0b93e5485d919e24d5d77603831fd846602b734771',
+    saveReceiptSha256: 'ba3ebe05ddb231deacd3f3d2fb8de9fda3c770d7eef7500d47f5bb3b6a5a1270',
+    receiptSha256: '5f1657f7aa97d8570c0a971be3fb1b9689490e30f3435694aa618611eb5667aa',
   }),
   11: Object.freeze({
-    dxfFile: 'card11-MAIN-20260904162434087ed79-ecf7631b8767d96b4768ad400755dd2b.dxf',
-    dxfBytes: 390_347,
-    dxfSha256: 'b023e1b467831a12b2ec419503ca1b6676c64ecceb57d9039222c8f37454ea3d',
+    dxfScopeCount: 2,
+    materialScopePieceCounts: [
+      { purpose: 'MAIN', pieceCount: 15 },
+      { purpose: 'LINING', pieceCount: 10 },
+    ] as const,
+    totalDxfBytes: 746_258,
+    dxfSha256: 'fb61ce0affb9298450729f2a086ec50ffdc5add607f4f55d5ff514182fa2517f',
     sourcePieceCount: 25,
     sourceOperationCount: 42,
-    connectionRowCount: 20,
-    confirmedConnectionCount: 14,
-    rejectedConnectionCount: 6,
+    exactConnectionCount: 14,
+    negativeGuardCount: 6,
+    unmatchedCatalogPieceKeys: ['PCK_BACK_R'] as readonly string[],
+    unmatchedStagedPieceKeys: ['PCK_BACK_L_1'] as readonly string[],
     modelId: 1,
     modelSha256: 'bd876b0cb332c55e65a76067150fc268f785f35d43f75df118f70734a8084583',
-    stagedPieceCount: 15,
-    stagingSha256: '3d7c5d6cf9c8db74dba7f5e019b3ed1e9e8f0a8490703be205fd7819eca1fe90',
-    connectionSha256: '974fcf96a8dbf236e90e5d15c761c48fdc2baf1a97f15c53cffcfda79f9651c2',
+    stagedPieceCount: 25,
+    stagingSha256: '3317b020e1092b991d2ccf4e883c1ce86dc69c07e95be94701927c2f03300c13',
+    exactConnectionSha256: '0ebd04b0b18dc59e94a03b47e060bc94050a21ee8ad79067634b8e0ea4594bfe',
+    negativeGuardSha256: '8a609bcd38ee987d1691bd93d325d429dbbb95841beb797a9e6b1e453e1d2353',
     assemblyOrderSha256: 'db2a65e8ba1938c3e6d2e60d18bac8869bc329a9cf89014a76d3b3c462870529',
-    saveReceiptSha256: '01751482ddda91d2a9276476504b79397fc661e9bb753e394fd54903f0c7b910',
-    receiptSha256: '31a7c01cf6273d5a59bdc92ee561bff10ffa9e0f2d8025babcb284160914d31a',
+    saveReceiptSha256: 'd6bfe547d038b2e995a55544c9359886f89adec2b6675ccc552e218bcae87513',
+    receiptSha256: '7899ccdc742e9155740345515aaa493cea515c0408b7fb4fd2bde294f482eede',
   }),
 });
 
@@ -168,31 +210,36 @@ function asProtoModel(model: LocalFitModel): common_Model {
   };
 }
 
-function overlayFromGraphPieces(
-  pieces: Awaited<ReturnType<typeof readSeamGraph>>['pieces'],
+function overlayFromMaterialScopes(
+  scopes: readonly Readonly<{
+    scopeKey: string;
+    pieces: Awaited<ReturnType<typeof readSeamGraph>>['pieces'];
+  }>[],
 ): MeasurementSurfacePatternPieceOverlayV1 {
-  const staged: MeasurementSurfacePatternPieceV1[] = pieces.map((piece, laneIndex) => ({
-    pieceKey: piece.pieceKey,
-    scopeKey: 'TECH_CARD_BOM_PURPOSE_MAIN',
-    pieceId: piece.pieceKey,
-    pieceLineKey: piece.pieceKey,
-    lane: 'front',
-    laneIndex,
-    contours: [
-      {
-        contourId: `${piece.pieceKey}:cut`,
-        role: 'cut-boundary',
-        vertices: piece.rs.map(([x, y], index) => ({
-          vertexId: `${piece.pieceKey}:v${index}`,
-          pointMm: { x, y },
-        })),
-      },
-    ],
-    selected: false,
-    swatchCss: null,
-    transform: null,
-    seams: [],
-  }));
+  const staged: MeasurementSurfacePatternPieceV1[] = scopes.flatMap(({ scopeKey, pieces }) =>
+    pieces.map((piece, laneIndex) => ({
+      pieceKey: piece.pieceKey,
+      scopeKey,
+      pieceId: piece.pieceKey,
+      pieceLineKey: piece.pieceKey,
+      lane: 'front',
+      laneIndex,
+      contours: [
+        {
+          contourId: `${piece.pieceKey}:cut`,
+          role: 'cut-boundary',
+          vertices: piece.rs.map(([x, y], index) => ({
+            vertexId: `${piece.pieceKey}:v${index}`,
+            pointMm: { x, y },
+          })),
+        },
+      ],
+      selected: false,
+      swatchCss: null,
+      transform: null,
+      seams: [],
+    })),
+  );
   return {
     revision: `local-live:${sha256(canonical(staged))}`,
     pieces: staged,
@@ -227,8 +274,8 @@ if (!HAS_LOCAL_CORPUS) {
     ) as LocalFitModel[];
 
     it.each(CASES)(
-      'runs DXF → model → connections → AO → save → reload for card $techCardId',
-      async ({ techCardId, prefix, category }) => {
+      'runs all material DXFs → model → exact connections → AO → save → reload for card $techCardId',
+      async ({ techCardId, materialScopes, category }) => {
         const expected = EXPECTED[techCardId];
         const profile = PATTERN_IMPORT_DXF_PHASE_E_GOLDEN_CARD_SUITE_PROFILES_V1.find(
           (candidate) => candidate.facts.techCardId === techCardId,
@@ -237,12 +284,26 @@ if (!HAS_LOCAL_CORPUS) {
         expect(profile).toBeDefined();
         expect(card).toBeDefined();
 
-        const dxfFile = exactDxf(prefix);
-        const dxf = readFileSync(resolve(PROD_DATA, 'dxf', dxfFile));
-        const bytes = dxf.buffer.slice(dxf.byteOffset, dxf.byteOffset + dxf.byteLength);
-        const loaded = await loadFacts(bytes, 'M', category as SkeletonCategory, {});
-        const graph = await readSeamGraph(loaded.facts);
-        const overlay = overlayFromGraphPieces(graph.pieces);
+        const scopeGraphs = await Promise.all(
+          materialScopes.map(async ({ purpose, scopeKey, prefix }) => {
+            const file = exactDxf(prefix);
+            const dxf = readFileSync(resolve(PROD_DATA, 'dxf', file));
+            const bytes = dxf.buffer.slice(dxf.byteOffset, dxf.byteOffset + dxf.byteLength);
+            const loaded = await loadFacts(bytes, 'M', category as SkeletonCategory, {});
+            return {
+              purpose,
+              scopeKey,
+              file,
+              dxf,
+              graph: await readSeamGraph(loaded.facts),
+            };
+          }),
+        );
+        const graphPieces = scopeGraphs.flatMap(({ graph }) => graph.pieces);
+        expect(new Set(graphPieces.map(({ pieceKey }) => pieceKey)).size).toBe(graphPieces.length);
+        const overlay = overlayFromMaterialScopes(
+          scopeGraphs.map(({ scopeKey, graph }) => ({ scopeKey, pieces: graph.pieces })),
+        );
         const stage = layoutPatternImportDxfPhaseECadMannequinUnboundStageV1(overlay);
         expect(stage).not.toBeNull();
 
@@ -259,22 +320,31 @@ if (!HAS_LOCAL_CORPUS) {
             'utf8',
           ),
         ) as GoldFile;
-        const connections = normalizeGoldRows(gold);
+        const goldRows = normalizeGoldRows(gold);
+        const exactConnections = goldRows.filter(({ status }) => status === 'confirmed');
+        const negativeGuards = goldRows.filter(({ status }) => status === 'rejected');
+        expect(goldRows).toHaveLength(exactConnections.length + negativeGuards.length);
         const availableEdges = new Map(
-          graph.pieces.flatMap(({ pieceKey, edges }) =>
-            edges.map(({ id }) => [id, pieceKey] as const),
+          scopeGraphs.flatMap(({ graph }) =>
+            graph.pieces.flatMap(({ pieceKey, edges }) =>
+              edges.map(({ id }) => [id, pieceKey] as const),
+            ),
           ),
         );
-        for (const connection of connections)
-          for (const side of [...connection.sideA, ...connection.sideB])
+        for (const row of goldRows)
+          for (const side of [...row.sideA, ...row.sideB])
             expect(availableEdges.get(side.edgeHint), side.edgeHint).toBe(side.piece);
 
-        const confirmedConnectionCount = connections.filter(
-          ({ status }) => status === 'confirmed',
-        ).length;
-        const rejectedConnectionCount = connections.filter(
-          ({ status }) => status === 'rejected',
-        ).length;
+        const catalogPieceKeys = card.pieces.map(([, pieceKey]) => pieceKey).sort();
+        const stagedPieceKeys = graphPieces.map(({ pieceKey }) => pieceKey).sort();
+        const catalogPieceKeySet = new Set(catalogPieceKeys);
+        const stagedPieceKeySet = new Set(stagedPieceKeys);
+        const unmatchedCatalogPieceKeys = catalogPieceKeys.filter(
+          (pieceKey) => !stagedPieceKeySet.has(pieceKey),
+        );
+        const unmatchedStagedPieceKeys = stagedPieceKeys.filter(
+          (pieceKey) => !catalogPieceKeySet.has(pieceKey),
+        );
 
         const modelSha256 = sha256(canonical(preview));
         const stagingSha256 = sha256(
@@ -289,7 +359,17 @@ if (!HAS_LOCAL_CORPUS) {
             })),
           }),
         );
-        const connectionSha256 = sha256(canonical(connections));
+        const dxfScopes = scopeGraphs.map(({ purpose, scopeKey, file, dxf, graph }) => ({
+          purpose,
+          scopeKey,
+          file,
+          byteLength: dxf.byteLength,
+          sha256: sha256(dxf),
+          pieceCount: graph.pieces.length,
+        }));
+        const dxfSha256 = sha256(canonical(dxfScopes));
+        const exactConnectionSha256 = sha256(canonical(exactConnections));
+        const negativeGuardSha256 = sha256(canonical(negativeGuards));
         const assemblyOrderSha256 = sha256(canonical(card.ops));
         const snapshot = {
           schemaVersion: LOCAL_LIVE_SCHEMA,
@@ -299,19 +379,25 @@ if (!HAS_LOCAL_CORPUS) {
             name: card.name,
             styleNumber: card.sn,
           },
-          dxf: { file: dxfFile, byteLength: dxf.byteLength, sha256: sha256(dxf) },
+          dxf: { scopes: dxfScopes, canonicalSha256: dxfSha256 },
           model: { id: selectedModel!.id, previewSha256: modelSha256 },
           staging: {
-            pieceCount: graph.pieces.length,
-            edgeCount: graph.pieces.reduce((total, piece) => total + piece.edges.length, 0),
+            sourcePieceCount: card.pieces.length,
+            pieceCount: graphPieces.length,
+            edgeCount: graphPieces.reduce((total, piece) => total + piece.edges.length, 0),
+            unmatchedCatalogPieceKeys,
+            unmatchedStagedPieceKeys,
             canonicalSha256: stagingSha256,
           },
-          connections: {
-            rowCount: connections.length,
-            confirmedCount: confirmedConnectionCount,
-            rejectedCount: rejectedConnectionCount,
-            canonicalSha256: connectionSha256,
-            rows: connections,
+          exactConnections: {
+            count: exactConnections.length,
+            canonicalSha256: exactConnectionSha256,
+            rows: exactConnections,
+          },
+          negativeGuards: {
+            count: negativeGuards.length,
+            canonicalSha256: negativeGuardSha256,
+            rows: negativeGuards,
           },
           assemblyOrder: {
             sourceOperationCount: card.ops.length,
@@ -336,20 +422,26 @@ if (!HAS_LOCAL_CORPUS) {
           schemaVersion: LOCAL_LIVE_SCHEMA,
           techCardId,
           cardRef: profile!.cardRef,
-          dxfFile,
-          dxfBytes: dxf.byteLength,
-          dxfSha256: sha256(dxf),
+          dxfScopeCount: dxfScopes.length,
+          materialScopePieceCounts: dxfScopes.map(({ purpose, pieceCount }) => ({
+            purpose,
+            pieceCount,
+          })),
+          totalDxfBytes: dxfScopes.reduce((total, { byteLength }) => total + byteLength, 0),
+          dxfSha256,
           sourcePieceCount: card.pieces.length,
-          stagedPieceCount: graph.pieces.length,
-          connectionRowCount: connections.length,
-          confirmedConnectionCount,
-          rejectedConnectionCount,
+          stagedPieceCount: graphPieces.length,
+          unmatchedCatalogPieceKeys,
+          unmatchedStagedPieceKeys,
+          exactConnectionCount: exactConnections.length,
+          negativeGuardCount: negativeGuards.length,
           sourceOperationCount: card.ops.length,
           currentServerOperationCount: profile!.facts.operationCount,
           modelId: selectedModel!.id,
           modelSha256,
           stagingSha256,
-          connectionSha256,
+          exactConnectionSha256,
+          negativeGuardSha256,
           assemblyOrderSha256,
           saveReceiptSha256,
           reloadReceiptSha256: sha256(reloadedBytes),
