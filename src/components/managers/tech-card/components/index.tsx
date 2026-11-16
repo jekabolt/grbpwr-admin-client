@@ -231,12 +231,12 @@ const ERROR_TAB: Record<string, TabId> = {
   pieces: 'patterns',
   pieceDxfAliases: 'patterns',
   details: 'studio',
-  construction: 'assembly-table',
+  construction: 'assembly-order',
   // A CARD-level field (it deliberately does not live inside `construction` — see schema.ts), but it
   // RENDERS on the construction tab next to the free-text seam-allowance note it disambiguates.
   // Without this row it would fall through to the header default and the toast would name a field
   // that tab does not contain.
-  requiredSeamAllowanceMm: 'assembly-table',
+  requiredSeamAllowanceMm: 'assembly-order',
   // C-5 (круг 19) → ⚠ ИСПРАВЛЕНО В КРУГЕ 20. Эти четыре строки указывали на `construction` и после
   // круга 20 стали ЛОЖЬЮ — ровно тем видом лжи, от которого предостерегает комментарий выше:
   // нарушение сервера приводило на вкладку, которая этого поля больше не показывает.
@@ -258,7 +258,7 @@ const ERROR_TAB: Record<string, TabId> = {
   categoryId: 'studio',
   baseModelId: 'studio',
   baseSampleSizeId: 'studio',
-  operations: 'assembly-table',
+  operations: 'assembly-order',
   labels: 'labels',
   packaging: 'labels',
   careLabel: 'labels',
@@ -289,7 +289,7 @@ const RELEASE_BLOCKER_TAB: Record<string, TabId> = {
   bom_linked: 'bom',
   costing: 'costing',
   costing_computes: 'costing',
-  construction_graph: 'assembly-table',
+  construction_graph: 'assembly-order',
   colorway_linked: 'colorways',
   lab_dip: 'colorways',
   signoffs: 'signoff',
@@ -1028,7 +1028,7 @@ export function TechCardForm({
     // (isTabVisible), and stating `false` for a section that cannot exist would be a claim about
     // work that is not outstanding.
     colorways: isAux ? undefined : (techCard?.colorways?.length ?? 0) > 0,
-    'assembly-table': len(operationsW) > 0,
+    'assembly-order': len(operationsW) > 0,
     labels: len(labelsW) > 0,
     // "filled" = actually signed off, not merely present — 7 REJECTED rows must not read as done (M10).
     signoff: signoffsApproved,
@@ -1173,7 +1173,7 @@ export function TechCardForm({
   // `tab=construction` в OperationsField и фолбэк `navTo('studio')` выше зациклились бы,
   // бесконечно переписывая адрес друг за другом — каждый прав в своём правиле, и уступить некому.
   useEffect(() => {
-    if (params.get('fs') === '1' && !isTabVisible('assembly-table')) leaveFullscreen();
+    if (params.get('fs') === '1' && !isTabVisible('assembly-order')) leaveFullscreen();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params, isIdea, canReadCosting, isEditMode, isAux, boughtAux]);
 
@@ -3701,7 +3701,7 @@ export function TechCardForm({
               if (canRelease) return void submitWithApproval(RELEASED);
               if (releaseBlockers.length > 0 || markedOperationCount === 0)
                 return setBlockersOpen(true);
-              navTo('assembly-table', {
+              navTo('assembly-order', {
                 opi: String(firstMarkedOperation((operationsW ?? []) as CardOperation[])),
               });
             }}
@@ -3965,7 +3965,7 @@ export function TechCardForm({
                         key={tab.id}
                         type='button'
                         onClick={() => {
-                          if (tab.id === 'assembly-table' && markedOperationCount > 0) {
+                          if (tab.id === 'assembly-order' && markedOperationCount > 0) {
                             const first = firstMarkedOperation(
                               (operationsW ?? []) as CardOperation[],
                             );
@@ -3995,7 +3995,7 @@ export function TechCardForm({
                         </span>
                         {isNext && <span className='sr-only'>(next step)</span>}
                         <span className='min-w-0 flex-1 truncate'>{tab.label}</span>
-                        {tab.id === 'assembly-table' && markedOperationCount > 0 && (
+                        {tab.id === 'assembly-order' && markedOperationCount > 0 && (
                           <span className='shrink-0 font-bold text-error'>
                             ! {markedOperationCount}
                           </span>
@@ -4312,7 +4312,7 @@ export function TechCardForm({
             </SectionStack>
 
             {/* ASSEMBLY TABLE — the only production mount of the CAD/Assembly Order owner. */}
-            <SectionStack hidden={activeTab !== 'assembly-table'}>
+            <SectionStack hidden={activeTab !== 'assembly-table' && activeTab !== 'assembly-order'}>
               {/* No PiecesTab branch here any more. It used to be mounted for an AUXILIARY card,
                   whose colourways tab (the pieces' old home) does not exist — two conditional mounts
                   of one field array, which is exactly the shape that made a piece created from the
@@ -4324,7 +4324,14 @@ export function TechCardForm({
                   шапке. */}
               <AssemblyTableTab
                 techCard={techCard}
-                active={activeTab === 'assembly-table'}
+                active={activeTab === 'assembly-table' || activeTab === 'assembly-order'}
+                view={
+                  activeTab === 'assembly-table'
+                    ? 'workbench'
+                    : activeTab === 'assembly-order'
+                      ? 'assembly-order'
+                      : 'hidden'
+                }
                 // Прокладка до хрома фулскрина: его кнопка save обязана быть той же самой, что в
                 // шапке карточки, — второй путь сохранения разошёлся бы с первым. У карточки, которая
                 // сохраняет себя сама, кнопки нет и там (O-60, D-59): без прокладки хром её не рисует.

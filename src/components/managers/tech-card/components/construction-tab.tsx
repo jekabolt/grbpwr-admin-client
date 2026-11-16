@@ -372,6 +372,7 @@ function sameCloth(a: PieceCloth, b: PieceCloth): boolean {
 export function ConstructionTab({
   techCard,
   active = false,
+  view = 'assembly-order',
   onSave,
   saving = false,
   onGoTab,
@@ -379,6 +380,8 @@ export function ConstructionTab({
   techCard?: common_TechCard;
   /** Вкладка открыта. Вкладки смонтированы все сразу — без этого разбор заказывался бы всегда. */
   active?: boolean;
+  /** One owner, two top-level views: focused CAD Workbench or legacy Assembly Order. */
+  view?: 'workbench' | 'assembly-order' | 'hidden';
   /**
    * Сохранение карточки и его состояние — ПРОКЛАДКА ДО ФУЛСКРИНА. Хром полноэкранной схемы несёт
    * свою кнопку save: оверлей закрывает шапку карточки целиком, и без неё единственным выходом из
@@ -409,7 +412,9 @@ export function ConstructionTab({
   // ONE card-level owner for the saved construction audit. The panel below consumes this exact
   // query result; future whole-card preflight may consume its count-only projection without
   // starting another GetTechCardConstructionAudit request. `active` remains the sole network gate.
-  const constructionAuditOwner = useTechCardConstructionAudit(techCard?.id, active);
+  const assemblyOrderVisible = active && view === 'assembly-order';
+  const workbenchVisible = active && view === 'workbench';
+  const constructionAuditOwner = useTechCardConstructionAudit(techCard?.id, assemblyOrderVisible);
   const subscribeGoldenV2Feed = useCallback(
     (listener: () => void) =>
       subscribePatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1(techCard?.id, listener),
@@ -666,7 +671,7 @@ export function ConstructionTab({
   // подписан: панель читает форму, только пока открыта.
   const frozen = techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED';
   // The tech pack's red marks, from the same saved card and inputs as the PDF (print-page).
-  const print = useTechCardPrint(active ? techCard?.id : undefined);
+  const print = useTechCardPrint(assemblyOrderVisible ? techCard?.id : undefined);
   const pdfGaps = usePdfGaps(print.data?.techCard, {
     patternViewerToken: print.data?.patternViewerToken,
   });
@@ -699,7 +704,7 @@ export function ConstructionTab({
           (`ConstructionAudit`), стандарты карточки (`CardStandards` — припуск и оборудование,
           пункт C-6 их не двигал) и сам рельс операций. То есть вкладка стала тем, чем и
           называлась: КАК это собирают. */}
-      <ConstructionSummary />
+      {assemblyOrderVisible ? <ConstructionSummary /> : null}
 
       {/* The sketch is a reference, not the work: a fixed 320px column reads it fine and leaves the
           assembly sequence the rest of the screen. At 2/5 the drawing was 640px wide on a 1600px
@@ -718,53 +723,64 @@ export function ConstructionTab({
             <StepResultProvider>
               <StepResultUnitPicturesProvider>
                 <div className='flex flex-col gap-3.5 lg:flex-row lg:items-start'>
-                  <AssemblyColumn
-                    techCard={techCard}
-                    mediaById={mediaById}
-                    activePin={pin.active}
-                    onActivePinChange={pin.setActive}
-                  />
+                  {assemblyOrderVisible ? (
+                    <AssemblyColumn
+                      techCard={techCard}
+                      mediaById={mediaById}
+                      activePin={pin.active}
+                      onActivePinChange={pin.setActive}
+                    />
+                  ) : null}
 
                   <div className='flex w-full min-w-0 flex-col gap-2.5 lg:flex-1'>
                     {/* СНАЧАЛА ОТЧЁТ, ПОТОМ ТО, О ЧЁМ ОН. Аудит говорит и про стандарты карточки, и про весь
                     рельс операций под ними, поэтому стоит НАД обоими: под списком из ста двадцати шагов
                     его бы не нашёл никто, а найденное в конце экрана читается как приложение. */}
-                    <SeamHintsBar />
-                    <ConstructionAudit
-                      techCardId={techCard?.id}
-                      auditOwner={constructionAuditOwner}
-                      onGoTab={onGoTab}
-                      // ТОТ ЖЕ ПРЕДИКАТ, ЧТО ГЛУШИТ ВКЛАДКУ ФИЛДСЕТОМ (ниже, у OperationsField, и в
-                      // index.tsx). Панель по нему решает, КУДА уходит поданная претензия: на живой
-                      // карточке — в форму, обычным сохранением; на выпущенной сохранения нет вовсе, и
-                      // претензия идёт на сервер напрямую. Разойдись этот признак с филдсетом — на
-                      // замороженной карточке претензии писались бы в форму, которую уже не сохранить,
-                      // и исчезали бы молча.
-                      frozen={
-                        techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED'
+                    {assemblyOrderVisible ? <SeamHintsBar /> : null}
+                    {assemblyOrderVisible ? (
+                      <ConstructionAudit
+                        techCardId={techCard?.id}
+                        auditOwner={constructionAuditOwner}
+                        onGoTab={onGoTab}
+                        // ТОТ ЖЕ ПРЕДИКАТ, ЧТО ГЛУШИТ ВКЛАДКУ ФИЛДСЕТОМ (ниже, у OperationsField, и в
+                        // index.tsx). Панель по нему решает, КУДА уходит поданная претензия: на живой
+                        // карточке — в форму, обычным сохранением; на выпущенной сохранения нет вовсе, и
+                        // претензия идёт на сервер напрямую. Разойдись этот признак с филдсетом — на
+                        // замороженной карточке претензии писались бы в форму, которую уже не сохранить,
+                        // и исчезали бы молча.
+                        frozen={
+                          techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED'
+                        }
+                        // Шагов на СОХРАНЁННОЙ карточке — для строки «reviewing N operations…». Не из формы:
+                        // разбор гоняется по сохранённым фактам, и число из формы обещало бы разбор
+                        // несохранённых правок.
+                        operationCount={(techCard?.techCard?.operations ?? []).length}
+                        gaps={pdfGaps ?? undefined}
+                        gapSubject={gapSubject}
+                      />
+                    ) : null}
+                    {assemblyOrderVisible ? (
+                      <PatternImportDxfPhaseEGoldenCardPreflightProductionMountV1
+                        techCard={techCard}
+                        active
+                        auditOwner={constructionAuditOwner}
+                        warningFacts={goldenWarningFacts}
+                        orderSizeIds={orderSizeIds}
+                        sizeNameById={sizeNameById}
+                        betaAcceptanceV2Feed={goldenV2Feed}
+                      />
+                    ) : null}
+                    {assemblyOrderVisible ? <CardStandards /> : null}
+                    <section
+                      className={
+                        workbenchVisible ? 'min-w-0' : 'border border-borderColor bg-bgColor p-4'
                       }
-                      // Шагов на СОХРАНЁННОЙ карточке — для строки «reviewing N operations…». Не из формы:
-                      // разбор гоняется по сохранённым фактам, и число из формы обещало бы разбор
-                      // несохранённых правок.
-                      operationCount={(techCard?.techCard?.operations ?? []).length}
-                      gaps={pdfGaps ?? undefined}
-                      gapSubject={gapSubject}
-                    />
-                    <PatternImportDxfPhaseEGoldenCardPreflightProductionMountV1
-                      techCard={techCard}
-                      active={!!active}
-                      auditOwner={constructionAuditOwner}
-                      warningFacts={goldenWarningFacts}
-                      orderSizeIds={orderSizeIds}
-                      sizeNameById={sizeNameById}
-                      betaAcceptanceV2Feed={goldenV2Feed}
-                    />
-                    <CardStandards />
-                    <section className='border border-borderColor bg-bgColor p-4'>
+                    >
                       {/* The block header (title, warnings, the pattern's state, the skeleton door) is drawn
                     by OperationsField: its warnings read the rail's own subscriptions. */}
                       <OperationsField
-                        assemblyTableActive={active}
+                        assemblyTableActive={workbenchVisible}
+                        workbenchOnly={workbenchVisible}
                         onWarningCountChange={setAssemblyWarningCount}
                         activePin={pin.active}
                         onActivePinChange={pin.setActive}
@@ -826,7 +842,7 @@ export function ConstructionTab({
                           />
                         }
                       />
-                      {skeleton.panel}
+                      {assemblyOrderVisible ? skeleton.panel : null}
                     </section>
                   </div>
                 </div>

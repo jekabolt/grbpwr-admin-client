@@ -6605,6 +6605,7 @@ const isKindField = (field: string): field is KindField =>
 
 export function OperationsField({
   assemblyTableActive = false,
+  workbenchOnly = false,
   activePin = null,
   onActivePinChange,
   activeBom = null,
@@ -6634,6 +6635,8 @@ export function OperationsField({
 }: {
   /** The production Assembly Table tab is visible; prepare its single CAD owner without a door. */
   assemblyTableActive?: boolean;
+  /** Render only the focused CAD/mannequin surface; the legacy Assembly Order has its own tab. */
+  workbenchOnly?: boolean;
   /** Несёт ли СОХРАНЁННАЯ карточка разметку — предикат тот же, что у маппера (§7.2 сервера). */
   storedHasUnits?: boolean;
   /** Несёт ли СОХРАНЁННАЯ карточка фотографии шагов — предикат тот же, что у серверного щита. */
@@ -6822,7 +6825,7 @@ export function OperationsField({
   const cadOperationEditorOwnership =
     resolvePatternImportDxfPhaseECadWorkbenchOperationEditorOwnershipV1(
       selectedIndex,
-      cadWorkbenchOpen,
+      assemblyTableActive,
     );
 
   // СПИСОК СМЕНИЛСЯ БЕЗ ЖЕСТА (сервер вставил шаг при записи): редактор остаётся на той же строке.
@@ -8570,7 +8573,7 @@ export function OperationsField({
   const previousPack = useMemo(() => reviewDxfPack(previousRows, scopes), [previousRows, scopes]);
   const previousGeometry = useDxfGeometry(
     previousPack,
-    anyReview && params.get('tab') === 'assembly-table',
+    anyReview && params.get('tab') === 'assembly-order',
   );
   const previousIndex = useDxfIndex(previousGeometry.data);
   const ghostKeys = useMemo(
@@ -10119,7 +10122,7 @@ export function OperationsField({
             // Фулскрин — вид ВКЛАДКИ СБОРКИ. Пришедший по ссылке без `tab` иначе открывал бы
             // оверлей над заголовком карточки, а по выходу оставлял бы человека не там, где он
             // только что работал.
-            p.set('tab', 'assembly-table');
+            p.set('tab', 'assembly-order');
           } else {
             p.delete('fs');
           }
@@ -10140,7 +10143,7 @@ export function OperationsField({
           const p = new URLSearchParams(prev);
           if (on) {
             p.set('walk', '1');
-            p.set('tab', 'assembly-table');
+            p.set('tab', 'assembly-order');
           } else {
             p.delete('walk');
           }
@@ -10182,12 +10185,12 @@ export function OperationsField({
       tabEnforced.current = false;
       return;
     }
-    if (tabEnforced.current || tabParam === 'assembly-table') return;
+    if (tabEnforced.current || tabParam === 'assembly-order') return;
     tabEnforced.current = true;
     setParams(
       (prev) => {
         const p = new URLSearchParams(prev);
-        p.set('tab', 'assembly-table');
+        p.set('tab', 'assembly-order');
         return p;
       },
       { replace: true },
@@ -10331,6 +10334,62 @@ export function OperationsField({
         frozen={editorFrozen}
       />
     ) : null;
+
+  if (workbenchOnly) {
+    return (
+      <div
+        className='min-w-0'
+        data-assembly-workbench-surface=''
+        data-history-owner='construction'
+        onKeyDown={routeHistoryKey}
+      >
+        {selectedIndex >= 0 ? (
+          <div className='min-w-0' data-selected-operation-cad-owner=''>
+            {selectedZeroConnectPending ? (
+              <ZeroConnectPostSaveAction
+                key={selectedZeroConnectPending.historyKey}
+                index={selectedIndex}
+                pending={selectedZeroConnectPending}
+                owner={zeroConnectPostSaveOwner}
+              />
+            ) : null}
+            <PatternImportDxfPhaseEAssemblyOrderEntryMountV1
+              techCardId={techCardId}
+              selectedIndex={selectedIndex}
+              operationsPanel={
+                cadOperationEditorOwnership.renderInWorkbench ? selectedOperationEditor : undefined
+              }
+              operationNavigation={cadOperationNavigation}
+              onSelectOperation={setSelected}
+              cadCommandAuthoringHandoff={cadCommandAuthoringHandoff}
+              zeroConnectAuthoringHandoff={zeroConnectAuthoringHandoff}
+              crossScopeAuthoringHandoff={crossScopeAuthoringHandoff}
+              pressAuthoringHandoff={pressAuthoringHandoff}
+              stitchEditCapabilities={stitchEditCapabilities ?? undefined}
+              onEditStitchField={editStitchField}
+              exactNApplicationOwner={exactNApplicationOwner}
+              exactNSession={exactNSession}
+              workbenchOpen={cadWorkbenchOpen}
+              autoOpen={assemblyTableActive}
+              onOpenChange={setCadWorkbenchOpen}
+              frozen={frozen}
+            />
+          </div>
+        ) : (
+          <div className='min-w-0' data-zero-operation-cad-owner=''>
+            <PatternImportDxfPhaseECadTableZeroOperationProductionMountV1
+              techCardId={techCardId}
+              zeroConnectAuthoringHandoff={zeroConnectAuthoringHandoff}
+              disabled={frozen}
+              savedOnly={(savedCard?.techCard?.patterns ?? []).some((pattern) =>
+                Boolean(pattern?.url),
+              )}
+            />
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className='space-y-2.5' data-history-owner='construction' onKeyDown={routeHistoryKey}>
@@ -10686,41 +10745,6 @@ export function OperationsField({
                   />
                 ) : null}
                 {cadOperationEditorOwnership.renderInline ? selectedOperationEditor : null}
-                <PatternImportDxfPhaseEAssemblyOrderEntryMountV1
-                  techCardId={techCardId}
-                  selectedIndex={selectedIndex}
-                  operationsPanel={
-                    cadOperationEditorOwnership.renderInWorkbench
-                      ? selectedOperationEditor
-                      : undefined
-                  }
-                  operationNavigation={cadOperationNavigation}
-                  onSelectOperation={setSelected}
-                  cadCommandAuthoringHandoff={cadCommandAuthoringHandoff}
-                  zeroConnectAuthoringHandoff={zeroConnectAuthoringHandoff}
-                  crossScopeAuthoringHandoff={crossScopeAuthoringHandoff}
-                  pressAuthoringHandoff={pressAuthoringHandoff}
-                  stitchEditCapabilities={stitchEditCapabilities ?? undefined}
-                  onEditStitchField={editStitchField}
-                  exactNApplicationOwner={exactNApplicationOwner}
-                  exactNSession={exactNSession}
-                  workbenchOpen={cadWorkbenchOpen}
-                  autoOpen={assemblyTableActive}
-                  onOpenChange={setCadWorkbenchOpen}
-                  frozen={frozen}
-                />
-              </div>
-            )}
-            {selectedIndex < 0 && assemblyTableActive && (
-              <div className='min-w-0 lg:flex-1' data-zero-operation-cad-owner=''>
-                <PatternImportDxfPhaseECadTableZeroOperationProductionMountV1
-                  techCardId={techCardId}
-                  zeroConnectAuthoringHandoff={zeroConnectAuthoringHandoff}
-                  disabled={frozen}
-                  savedOnly={(savedCard?.techCard?.patterns ?? []).some((pattern) =>
-                    Boolean(pattern?.url),
-                  )}
-                />
               </div>
             )}
           </div>

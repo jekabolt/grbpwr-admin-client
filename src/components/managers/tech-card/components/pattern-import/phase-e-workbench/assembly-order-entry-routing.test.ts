@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1 } from './assembly-order-entry';
+import {
+  resolvePatternImportDxfPhaseEWorkbenchRequestedV1,
+  shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1,
+} from './assembly-order-entry';
 
 describe('saved Assembly Order workbench routing', () => {
+  it('treats the visible Assembly Table tab as an open request on the first render', () => {
+    expect(resolvePatternImportDxfPhaseEWorkbenchRequestedV1(false, true)).toBe(true);
+    expect(resolvePatternImportDxfPhaseEWorkbenchRequestedV1(false, false)).toBe(false);
+  });
+
   it('keeps non-two-seam operations on the shared CAD table instead of showing a blocker', () => {
     expect(
       shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({

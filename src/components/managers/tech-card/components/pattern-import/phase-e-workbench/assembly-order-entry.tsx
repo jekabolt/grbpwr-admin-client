@@ -97,6 +97,13 @@ export function keepPatternImportDxfPhaseECadWorkbenchHostV1(
   return entryRoute === 'v2' || workbenchOpen;
 }
 
+export function resolvePatternImportDxfPhaseEWorkbenchRequestedV1(
+  workbenchOpen: boolean,
+  autoOpen: boolean,
+): boolean {
+  return workbenchOpen || autoOpen;
+}
+
 export function shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
   workbenchOpen,
   exactNSessionAvailable,
@@ -1436,8 +1443,12 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   const savedBlocker = savedProjection.ok
     ? savedRuntimeResolution.blocker
     : savedProjection.blockers[0];
-  const savedBrowseFallback = shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
+  const workbenchRequested = resolvePatternImportDxfPhaseEWorkbenchRequestedV1(
     workbenchOpen,
+    autoOpen,
+  );
+  const savedBrowseFallback = shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
+    workbenchOpen: workbenchRequested,
     exactNSessionAvailable: exactNBoundarySession !== null,
     savedProjectionBlockerCode: savedProjection.ok
       ? null
@@ -1457,8 +1468,8 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         : routePatternImportDxfPhaseEAssemblyOrderEntryV2(selectedSeamKeys)
       : null;
   useEffect(() => {
-    if (entryRoute !== 'v2' && !workbenchOpen) onOpenChange?.(false);
-  }, [entryRoute, onOpenChange, workbenchOpen]);
+    if (entryRoute !== 'v2' && !workbenchRequested) onOpenChange?.(false);
+  }, [entryRoute, onOpenChange, workbenchRequested]);
   if (!source || !selected) return null;
   if (savedBrowseFallback) {
     const fallbackResult: PatternImportDxfPhaseECadTableDraftOperationSessionBridgeResultV1 = {
@@ -1495,7 +1506,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       />
     );
   }
-  if (keepPatternImportDxfPhaseECadWorkbenchHostV1(entryRoute, workbenchOpen))
+  if (keepPatternImportDxfPhaseECadWorkbenchHostV1(entryRoute, workbenchRequested))
     return (
       <PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2
         source={{

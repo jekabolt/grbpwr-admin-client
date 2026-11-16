@@ -104,16 +104,16 @@ function refTarget(ref: string): RefTarget | null {
   if (!value) return null;
   switch (kind) {
     case 'op':
-      return { tab: 'assembly-table', extra: { op: value } };
+      return { tab: 'assembly-order', extra: { op: value } };
     case 'unit':
-      return { tab: 'assembly-table', extra: { unit: value } };
+      return { tab: 'assembly-order', extra: { unit: value } };
     case 'piece':
       return { tab: 'patterns' };
     case 'bom':
       return { tab: 'bom' };
     // a step's stored seam (PDF gaps): the construction tab, where the steps and their seams are
     case 'seam':
-      return { tab: 'assembly-table' };
+      return { tab: 'assembly-order' };
     default:
       return null;
   }

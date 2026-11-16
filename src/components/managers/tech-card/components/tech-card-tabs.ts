@@ -2,7 +2,8 @@ export const TECH_CARD_TABS = [
   { id: 'studio', label: 'studio' },
   { id: 'artifacts', label: 'artifacts' },
   { id: 'patterns', label: 'patterns' },
-  { id: 'assembly-table', label: 'Assembly Table' },
+  { id: 'assembly-table', label: 'Workbench' },
+  { id: 'assembly-order', label: 'Assembly Order' },
   { id: 'samples', label: 'samples' },
   { id: 'bom', label: 'BOM' },
   { id: 'colorways', label: 'colorways' },
@@ -25,7 +26,7 @@ export const TECH_CARD_TAB_GROUPS: readonly Readonly<{
   { band: 'design', tabs: ['studio', 'artifacts'] },
   {
     band: 'develop',
-    tabs: ['sizes', 'patterns', 'assembly-table', 'bom', 'samples', 'colorways'],
+    tabs: ['sizes', 'patterns', 'assembly-table', 'assembly-order', 'bom', 'samples', 'colorways'],
   },
   { band: 'spec', tabs: ['labels', 'costing', 'issues', 'signoff'] },
   { band: 'produce', tabs: ['production'] },
@@ -40,7 +41,7 @@ export const TECH_CARD_FOLDED_TABS: Readonly<Record<string, TechCardTabId>> = {
   moodboard: 'studio',
   sketch: 'studio',
   header: 'studio',
-  construction: 'assembly-table',
+  construction: 'assembly-order',
 };
 
 export function techCardRailTabIds(): TechCardTabId[] {

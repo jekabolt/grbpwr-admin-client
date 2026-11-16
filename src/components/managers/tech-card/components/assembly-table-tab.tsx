@@ -13,6 +13,7 @@ export const ASSEMBLY_TABLE_TAB_MOUNT_CONTRACT = Object.freeze({
   remainsMountedAfterFirstVisit: true,
   ownsSecondOperationEditor: false,
   legacyConstructionUrlIsAliasOnly: true,
+  separateWorkbenchAndAssemblyOrderViews: true,
 });
 
 export function resolveAssemblyTableVisited(visited: boolean, active: boolean): boolean {
@@ -28,8 +29,12 @@ export function resolveAssemblyTableVisited(visited: boolean, active: boolean): 
  */
 export function AssemblyTableTab({
   active,
+  view,
   ...props
-}: ComponentProps<typeof ConstructionTab> & { active: boolean }) {
+}: ComponentProps<typeof ConstructionTab> & {
+  active: boolean;
+  view: 'workbench' | 'assembly-order' | 'hidden';
+}) {
   const [visited, setVisited] = useState(active);
 
   useEffect(() => {
@@ -46,7 +51,7 @@ export function AssemblyTableTab({
         </Text>
       }
     >
-      <LazyConstructionTab {...props} active={active} />
+      <LazyConstructionTab {...props} active={active} view={view} />
     </Suspense>
   );
 }
