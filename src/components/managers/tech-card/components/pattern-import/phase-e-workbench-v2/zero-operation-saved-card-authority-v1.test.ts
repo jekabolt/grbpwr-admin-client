@@ -167,6 +167,38 @@ describe('zero-operation saved card authority', () => {
     host.dispose();
   });
 
+  it('recovers a missing fresh size only when revision, URL and SHA still match the selector', async () => {
+    const runtime = createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1({
+      orderSizeIds,
+      sizeNameById,
+      readTechCard: vi.fn(async () => cardWithSavedRow({ ...row, sizeBytes: 0 })),
+    });
+
+    await expect(runtime.resolveCurrentRow(row, new AbortController().signal)).resolves.toEqual({
+      row,
+      downloadUrl: '/api/p/token/download',
+    });
+  });
+
+  it('does not borrow a cached size after the saved row identity changes', async () => {
+    const runtime = createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1({
+      orderSizeIds,
+      sizeNameById,
+      readTechCard: vi.fn(async () =>
+        cardWithSavedRow({
+          ...row,
+          revision: row.revision + 1,
+          sizeBytes: 0,
+          sha256: 'b'.repeat(64),
+        }),
+      ),
+    });
+
+    await expect(runtime.resolveCurrentRow(row, new AbortController().signal)).rejects.toThrow(
+      /sizeBytes/i,
+    );
+  });
+
   it('lists only saved scopes with one exact downloadable row', () => {
     const result = listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
       card(),

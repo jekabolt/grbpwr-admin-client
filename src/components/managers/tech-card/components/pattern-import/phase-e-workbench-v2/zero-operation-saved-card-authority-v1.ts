@@ -28,6 +28,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_ZERO_OPERATION_SAVED_CARD_AUTHORITY_CLAI
     exactScopeBindingRequired: true,
     exactLineKeyUrlSizeAndShaRequired: true,
     cachedProjectionUsedOnlyAsStableRowSelector: true,
+    missingSizeRecoveredOnlyForSameRevisionUrlAndSha: true,
     serverDownloadUrlRequired: true,
     byteLengthAndShaVerifiedBySavedReprocessOwner: true,
     currentRowReadRepeatedAfterReprocess: true,
@@ -112,15 +113,28 @@ function selectedCurrentRow(
   if (matches.length !== 1)
     throw new Error('The current card has no unique exact saved DXF row for this scope and key.');
   const pattern = matches[0];
+  const revision = pattern.savedRowRevision ?? 0;
+  const url = pattern.url ?? '';
+  const sha256 = pattern.sha256 ?? '';
+  const currentSizeBytes = pattern.sizeBytes ?? 0;
+  const sizeBytes =
+    (!Number.isSafeInteger(currentSizeBytes) || currentSizeBytes <= 0) &&
+    Number.isSafeInteger(selector.sizeBytes) &&
+    selector.sizeBytes > 0 &&
+    revision === selector.revision &&
+    url === selector.url &&
+    sha256 === selector.sha256
+      ? selector.sizeBytes
+      : currentSizeBytes;
   const current = Object.freeze({
     techCardId: techCard.id,
     scopeKey: selector.scopeKey,
     patternLineKey: pattern.lineKey!.trim(),
-    revision: pattern.savedRowRevision ?? 0,
+    revision,
     cardLockVersion: techCard.lockVersion,
-    url: pattern.url ?? '',
-    sizeBytes: pattern.sizeBytes ?? 0,
-    sha256: pattern.sha256 ?? '',
+    url,
+    sizeBytes,
+    sha256,
   });
   const invalidIdentityFields = [
     ...(!Number.isSafeInteger(current.revision) || current.revision <= 0 ? ['revision'] : []),
