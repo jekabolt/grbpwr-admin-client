@@ -119,7 +119,16 @@ import {
   type ReactNode,
 } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button, CalloutBox, Chip, ChipRow, Pill, SkeletonBlocks, Text } from 'ui';
+import {
+  Button,
+  CalloutBox,
+  Chip,
+  ChipRow,
+  type HeaderWarning,
+  Pill,
+  SkeletonBlocks,
+  Text,
+} from 'ui';
 import {
   resolveModelOpenReferencePreviewInputV1,
   type ModelOpenReferencePreviewInputV1,
@@ -439,6 +448,11 @@ export interface ModelOpenReferencePreviewProps {
   readonly directPoseViewportEditingEnabledV9?: boolean;
   /** Workbench embeds expose their own single pose toggle instead of the model-form toolbar. */
   readonly hideDirectPoseControlV9?: boolean;
+  /**
+   * Desktop model form: the pose state and every body/pose message move into the caller's block
+   * header (pose text + a warnings door), and joint editing hides behind an `edit pose` checkbox.
+   */
+  readonly headerStatusV9?: ModelOpenReferencePreviewHeaderControlV1;
   readonly variant?: 'form' | 'workbench' | 'card';
   /** Existing renderer camera preset. Orbit and wheel zoom remain direct viewport gestures. */
   readonly viewPreset?: MeasurementSurfaceViewPreset;
@@ -448,6 +462,20 @@ export interface ModelOpenReferencePreviewProps {
   readonly activeMeasurementName?: common_BodyMeasurementName;
   /** Internal asset-capture mode: supersample and frame the active 3D guide itself. */
   readonly measurementGuidePresentation?: 'interactive' | 'capture';
+}
+
+export interface ModelOpenReferencePreviewHeaderStatusV1 {
+  /** `pose · saved` and its siblings; null while no pose owner is bound. */
+  readonly pose: string | null;
+  /** Every message the body preview would otherwise print under the mannequin. */
+  readonly warnings: readonly HeaderWarning[];
+}
+
+export interface ModelOpenReferencePreviewHeaderControlV1 {
+  /** UI state only: never saved with the model. Off = camera only, no joint markers. */
+  readonly editPose: boolean;
+  readonly onEditPoseChange: (editPose: boolean) => void;
+  readonly onChange: (status: ModelOpenReferencePreviewHeaderStatusV1 | null) => void;
 }
 
 export interface ModelOpenReferenceDirectPoseBindingV9 {
@@ -2063,6 +2091,8 @@ interface FullBodyPoseEditorRenderProps<Pose extends object> {
     readonly onReset: () => Pose;
     readonly persistence?: ModelOpenReferenceDirectPosePersistenceV1;
   }>;
+  /** Desktop model form: status lives in the block header, tools behind `edit pose`. */
+  readonly editPoseToggle?: Readonly<{ on: boolean; onChange: (on: boolean) => void }>;
 }
 
 interface FullBodyPoseEditorAdapter<Pose extends object> {
@@ -2391,6 +2421,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
   directPoseBindingV9,
   directPoseViewportEditingEnabledV9 = true,
   hideDirectPoseControlV9 = false,
+  headerStatusV9,
   modelId = 'model-form:create',
   modelContentRevision = 'model-form:create:unbound',
   input,
@@ -2436,6 +2467,10 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
   const directPoseControlHidden = editor.version === 'full-body-v9' && hideDirectPoseControlV9;
   const workbench = variant === 'workbench';
   const card = variant === 'card';
+  // Desktop model form: messages go to the caller's header; the text nodes below stay in the DOM
+  // as screen-reader live regions (sr-only) so nothing announced today goes silent.
+  const headerOwned =
+    editor.version === 'full-body-v9' && !workbench && !card && headerStatusV9 != null;
   const [uncontrolledDraftPose, setUncontrolledDraftPose] = useState<Pose>(editor.neutralPose);
   const draftPose = controlledDirectPose ?? uncontrolledDraftPose;
   const [appliedPose, setAppliedPose] = useState<Pose | null>(null);
@@ -3527,6 +3562,60 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
         ]
       : undefined;
 
+  const jointEditingUnavailable =
+    !!currentBuilt?.jointOverlayError || currentBuilt?.jointOverlay?.status === 'unavailable';
+  const headerPersistence = directPoseBindingV9?.persistence;
+  const headerPose =
+    editor.version !== 'full-body-v9' || !directPoseBindingV9
+      ? null
+      : headerPersistence?.statusText ??
+        `session pose · not saved${directPoseBindingV9.dirty ? ' · changed' : ''}`;
+  const headerWarnings: HeaderWarning[] = headerOwned
+    ? [
+        ...(!resolution.ok && displayedBuilt
+          ? resolution.diagnostics.map((diagnostic) => ({
+              text: modelOpenReferencePreviewDiagnosticMessageV1(diagnostic),
+              error: false,
+            }))
+          : []),
+        ...(bodyDisplayMessage
+          ? [{ text: bodyDisplayMessage, error: bodyDisplayOwnership === 'retained-error' }]
+          : []),
+        ...(poseBlockedMessage ? [{ text: poseBlockedMessage, error: true }] : []),
+        ...(measurementApplicationPartial &&
+        measurementApplicationText &&
+        bodyDisplayOwnership === 'current' &&
+        displayedBuilt
+          ? [{ text: measurementApplicationText, error: true }]
+          : []),
+        ...(sideSeamCapability ? [{ text: sideSeamCapability.message, error: false }] : []),
+        ...(measurementGuide && measurementGuide.status !== 'visible' && measurementGuideStatusText
+          ? [{ text: measurementGuideStatusText, error: false }]
+          : []),
+        ...(updateStatus === 'error'
+          ? [{ text: `pose update failed: ${updateError}`, error: true }]
+          : []),
+        ...(stageStatus === 'error'
+          ? [{ text: `preview failed: ${stageError}`, error: true }]
+          : []),
+        ...(jointEditingUnavailable ? [{ text: 'joint editing unavailable', error: true }] : []),
+        ...(headerPersistence?.errorText
+          ? [{ text: headerPersistence.errorText, error: true }]
+          : []),
+      ]
+    : [];
+  const headerKey = headerOwned ? JSON.stringify([headerPose, headerWarnings]) : null;
+  const headerOnChange = headerStatusV9?.onChange;
+  useEffect(() => {
+    if (!headerOnChange || headerKey === null) return;
+    const [pose, warnings] = JSON.parse(headerKey) as [string | null, HeaderWarning[]];
+    headerOnChange({ pose, warnings });
+  }, [headerKey, headerOnChange]);
+  useEffect(() => {
+    if (!headerOnChange) return;
+    return () => headerOnChange(null);
+  }, [headerOnChange]);
+
   return (
     <div
       className={
@@ -3566,7 +3655,10 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
       ) : null}
 
       {!resolution.ok ? (
-        <CalloutBox tone='warning' className={card ? 'sr-only' : undefined}>
+        <CalloutBox
+          tone='warning'
+          className={card || (headerOwned && displayedBuilt) ? 'sr-only' : undefined}
+        >
           <Text component='p' size='micro'>
             <b>{displayedBuilt ? 'measurements need attention' : 'preview blocked'}</b> · enter a
             plausible value for every required mannequin measurement.
@@ -3591,11 +3683,13 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
           size='micro'
           variant={bodyDisplayOwnership === 'retained-error' ? 'errorLabel' : 'label'}
           className={
-            bodyDisplayOwnership === 'retained-error'
-              ? undefined
-              : card
-                ? 'sr-only'
-                : 'text-warning'
+            headerOwned
+              ? 'sr-only'
+              : bodyDisplayOwnership === 'retained-error'
+                ? undefined
+                : card
+                  ? 'sr-only'
+                  : 'text-warning'
           }
           role={bodyDisplayOwnership === 'retained-error' ? 'alert' : 'status'}
           aria-live={bodyDisplayOwnership === 'retained-error' ? 'assertive' : 'polite'}
@@ -3612,6 +3706,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
           component='p'
           size='micro'
           variant='errorLabel'
+          className={headerOwned ? 'sr-only' : undefined}
           role='alert'
           aria-live='assertive'
           aria-atomic='true'
@@ -3626,7 +3721,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
           component='p'
           size='micro'
           variant='label'
-          className={card ? 'sr-only' : undefined}
+          className={card || headerOwned ? 'sr-only' : undefined}
           role='status'
           aria-live='polite'
           aria-atomic='true'
@@ -3656,6 +3751,10 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                         onReset: () => directPoseBindingV9.onReset() as Pose,
                         persistence: directPoseBindingV9.persistence,
                       }
+                    : undefined,
+                editPoseToggle:
+                  headerOwned && headerStatusV9
+                    ? { on: headerStatusV9.editPose, onChange: headerStatusV9.onEditPoseChange }
                     : undefined,
                 jointEditor: {
                   overlay: editor.extendedOverlayV5
@@ -3709,7 +3808,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
               component='p'
               size='micro'
               variant={measurementApplicationPartial ? 'errorLabel' : 'label'}
-              className={card ? 'sr-only' : undefined}
+              className={card || headerOwned ? 'sr-only' : undefined}
               role={measurementApplicationPartial ? 'alert' : 'status'}
               aria-live='polite'
               data-testid='model-open-reference-measurement-application-status'
@@ -3764,7 +3863,9 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
               component='p'
               size='micro'
               variant='label'
-              className={measurementGuide.status === 'visible' ? 'sr-only' : undefined}
+              className={
+                headerOwned || measurementGuide.status === 'visible' ? 'sr-only' : undefined
+              }
               role='status'
               aria-live='polite'
               data-testid='model-open-reference-measurement-guide-status'
@@ -3928,9 +4029,11 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                     ? 'pointer-events-none h-full min-h-0 w-full border border-hairline'
                     : workbench
                       ? 'order-1 h-full min-h-0 w-full border border-hairline'
-                      : editor.minimalViewportUi
-                        ? 'order-1 h-[62vh] min-h-[32rem] max-h-[48rem] border border-hairline'
-                        : 'h-[42vh] min-h-80 max-h-[32rem] border border-hairline'
+                      : headerOwned
+                        ? 'order-1 aspect-[6/5] max-h-[calc(100dvh-17rem)] min-h-80 w-full border border-hairline'
+                        : editor.minimalViewportUi
+                          ? 'order-1 h-[62vh] min-h-[32rem] max-h-[48rem] border border-hairline'
+                          : 'h-[42vh] min-h-80 max-h-[32rem] border border-hairline'
                 }
                 onStatus={(nextStatus, nextError) => {
                   setStageStatus(nextStatus);

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const REQUIRED_CREATE_MEASUREMENTS = [
   ['height', '1720'],
@@ -11,6 +11,23 @@ const REQUIRED_CREATE_MEASUREMENTS = [
 ] as const;
 
 const DEV_ROUTE = '/__model-form-personalized-preview-v1';
+
+// Desktop model form shows one measurement group at a time; hidden groups stay mounted.
+function measurementField(page: Page, label: string): Locator {
+  return page.getByRole('textbox', { name: label, exact: true, includeHidden: true });
+}
+
+async function revealMeasurement(page: Page, input: Locator) {
+  const group = page.locator('[data-measurement-group]', { has: input });
+  if ((await group.count()) === 0 || !(await group.isHidden())) return;
+  const title = await group.getAttribute('aria-label');
+  await page
+    .getByRole('radiogroup', { name: 'measurement group' })
+    .getByRole('radio', { name: new RegExp(`^${title} \\d+/\\d+$`) })
+    .click();
+  await expect(input).toBeVisible();
+}
+
 const PREWARM_QUIET_MS = 1_000;
 const QUALITY_WORKER_MEASURE = 'measurement-open-reference-display-quality-worker/v1';
 const LIMB_COMPOSITION_MEASURE = 'measurement-open-reference-limb-composition/v1';
@@ -166,7 +183,8 @@ test('real ModelForm auto-binds edit/create measurements to its V9 mannequin', a
   await expect(canvas).toHaveAttribute('data-measurement-guide-visual-only', 'true');
   await expect(page.getByTestId('measurement-surface-active-guide-label')).toHaveText('chest');
 
-  const waistGuideInput = page.getByRole('textbox', { name: 'waist', exact: true });
+  const waistGuideInput = measurementField(page, 'waist');
+  await revealMeasurement(page, waistGuideInput);
   await waistGuideInput.focus();
   await expect(canvas).toHaveAttribute(
     'data-active-measurement-guide',
@@ -175,7 +193,8 @@ test('real ModelForm auto-binds edit/create measurements to its V9 mannequin', a
   await expect(canvas).toHaveAttribute('data-measurement-guide-status', 'visible');
   await expect(page.getByTestId('measurement-surface-active-guide-label')).toHaveText('waist');
 
-  await page.getByRole('textbox', { name: 'inseam', exact: true }).focus();
+  await revealMeasurement(page, measurementField(page, 'inseam'));
+  await measurementField(page, 'inseam').focus();
   await expect(canvas).toHaveAttribute(
     'data-active-measurement-guide',
     'BODY_MEASUREMENT_NAME_INSEAM',
@@ -189,6 +208,11 @@ test('real ModelForm auto-binds edit/create measurements to its V9 mannequin', a
     'limited by safe range: arm length centerline proxy',
   );
   await expect(measurementApplication).toContainText('not modeled: inseam');
+  // `edit pose` is off by default: no joint editor on the canvas until the checkbox is on.
+  const editPose = page.getByRole('checkbox', { name: 'edit pose', exact: true });
+  await expect(editPose).not.toBeChecked();
+  await expect(canvas).toHaveAttribute('data-joint-editor-mode', 'off');
+  await editPose.check();
   await expect(canvas).toHaveAttribute('data-joint-editor-mode', 'edit-pose');
   await expect(page.getByRole('button', { name: /apply pose/i })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'camera mode' })).toHaveCount(0);
@@ -204,7 +228,7 @@ test('real ModelForm auto-binds edit/create measurements to its V9 mannequin', a
     ['calf', '370'],
     ['ankle', '230'],
   ] as const) {
-    await expect(page.getByRole('textbox', { name: label, exact: true })).toHaveValue(value);
+    await expect(measurementField(page, label)).toHaveValue(value);
   }
   expect(requests.filter(({ url }) => new URL(url).pathname.startsWith('/api/'))).toEqual([]);
 
@@ -218,7 +242,8 @@ test('real ModelForm auto-binds edit/create measurements to its V9 mannequin', a
   const baselineShape = await canvas.screenshot();
   const baselineFrontTorso = await frontTorsoScreenshot(page, canvas);
 
-  const chest = page.getByRole('textbox', { name: 'chest', exact: true });
+  const chest = measurementField(page, 'chest');
+  await revealMeasurement(page, chest);
   await chest.fill('960');
   await chest.blur();
   await expect
@@ -241,6 +266,7 @@ test('real ModelForm auto-binds edit/create measurements to its V9 mannequin', a
   expect(chestShape.equals(baselineShape)).toBe(false);
   expect(chestFrontTorso.equals(baselineFrontTorso)).toBe(false);
 
+  await revealMeasurement(page, chest);
   await chest.fill('1040');
   await chest.blur();
   await expect
@@ -259,6 +285,7 @@ test('real ModelForm auto-binds edit/create measurements to its V9 mannequin', a
   );
   await expect(measurementApplication).toContainText('limited by safe range');
 
+  await revealMeasurement(page, chest);
   await chest.fill('960');
   await chest.blur();
   await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
@@ -267,7 +294,8 @@ test('real ModelForm auto-binds edit/create measurements to its V9 mannequin', a
   );
   await expect(measurementApplication).toHaveAttribute('data-application-status', 'partial');
 
-  const acrossShoulder = page.getByRole('textbox', { name: 'across shoulder', exact: true });
+  const acrossShoulder = measurementField(page, 'across shoulder');
+  await revealMeasurement(page, acrossShoulder);
   await acrossShoulder.fill('440');
   await acrossShoulder.blur();
   await expect
@@ -286,8 +314,9 @@ test('real ModelForm auto-binds edit/create measurements to its V9 mannequin', a
   const shoulderShape = await canvas.screenshot();
   expect(shoulderShape.equals(chestShape)).toBe(false);
 
-  const sleeveLength = page.getByRole('textbox', { name: 'sleeve length', exact: true });
+  const sleeveLength = measurementField(page, 'sleeve length');
   const beforeArmLengthSourceRevision = await canvas.getAttribute('data-source-revision');
+  await revealMeasurement(page, sleeveLength);
   await sleeveLength.fill('560');
   await sleeveLength.blur();
   await expect
@@ -305,6 +334,7 @@ test('real ModelForm auto-binds edit/create measurements to its V9 mannequin', a
   await page.mouse.move(0, 0);
   const shortArmShape = await canvas.screenshot();
 
+  await revealMeasurement(page, sleeveLength);
   await sleeveLength.fill('640');
   await sleeveLength.blur();
   await expect
@@ -320,6 +350,7 @@ test('real ModelForm auto-binds edit/create measurements to its V9 mannequin', a
   const longArmShape = await canvas.screenshot();
   expect(longArmShape.equals(shortArmShape)).toBe(false);
 
+  await revealMeasurement(page, sleeveLength);
   await sleeveLength.fill('600');
   await sleeveLength.blur();
   await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
@@ -327,8 +358,9 @@ test('real ModelForm auto-binds edit/create measurements to its V9 mannequin', a
     { timeout: 180_000 },
   );
 
-  const thigh = page.getByRole('textbox', { name: 'thigh', exact: true });
+  const thigh = measurementField(page, 'thigh');
   const beforeThighSourceRevision = await canvas.getAttribute('data-source-revision');
+  await revealMeasurement(page, thigh);
   await thigh.fill('560');
   await thigh.blur();
   await expect
@@ -343,6 +375,7 @@ test('real ModelForm auto-binds edit/create measurements to its V9 mannequin', a
   await expect(measurementApplication).toHaveAttribute('data-applied', /thighCircumferenceMm/u);
   await expect(measurementApplication).not.toHaveAttribute('data-limited', /thighCircumferenceMm/u);
 
+  await revealMeasurement(page, thigh);
   await thigh.fill('700');
   await thigh.blur();
   await expect
@@ -364,6 +397,7 @@ test('real ModelForm auto-binds edit/create measurements to its V9 mannequin', a
   );
   await expect(measurementApplication).not.toContainText('not modeled: thigh circumference');
 
+  await revealMeasurement(page, thigh);
   await thigh.fill('560');
   await thigh.blur();
   await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
@@ -376,7 +410,7 @@ test('real ModelForm auto-binds edit/create measurements to its V9 mannequin', a
   await expect(page.getByRole('textbox', { name: 'name', exact: true })).toHaveValue(
     'receipt 84 beta',
   );
-  await expect(page.getByRole('textbox', { name: 'height', exact: true })).toHaveValue('1730');
+  await expect(measurementField(page, 'height')).toHaveValue('1730');
   await expect(page.getByRole('combobox', { name: 'select' })).toContainText('men');
   await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
     'Preview partial: A-rest',
@@ -390,13 +424,14 @@ test('real ModelForm auto-binds edit/create measurements to its V9 mannequin', a
   await expect(page.getByText(/preview blocked/i)).toBeVisible();
   await expect(canvas).toHaveCount(0);
   for (const [label] of REQUIRED_CREATE_MEASUREMENTS) {
-    await expect(page.getByRole('textbox', { name: label, exact: true })).toHaveValue('');
+    await expect(measurementField(page, label)).toHaveValue('');
   }
 
   await page.getByRole('combobox', { name: 'select' }).click();
   await page.getByRole('option', { name: 'women' }).click();
   for (const [label, value] of REQUIRED_CREATE_MEASUREMENTS) {
-    const input = page.getByRole('textbox', { name: label, exact: true });
+    const input = measurementField(page, label);
+    await revealMeasurement(page, input);
     await input.fill(value);
     await input.blur();
   }
@@ -454,7 +489,8 @@ test('continuous measurement typing retains the last-valid V9 canvas until repla
     });
   });
 
-  const chest = page.getByRole('textbox', { name: 'chest', exact: true });
+  const chest = measurementField(page, 'chest');
+  await revealMeasurement(page, chest);
   await chest.focus();
   await chest.selectText();
   await chest.pressSequentially('9');
@@ -571,8 +607,9 @@ test('rapid valid measurement edits coalesce while the quality gate leaves anima
   );
   const startedAt = Date.now();
 
-  const chest = page.getByRole('textbox', { name: 'chest', exact: true });
+  const chest = measurementField(page, 'chest');
   for (const value of ['930', '940', '950', '960']) {
+    await revealMeasurement(page, chest);
     await chest.fill(value);
     await page.waitForTimeout(20);
   }
@@ -718,11 +755,13 @@ test('real ModelForm admits female, male and neutral open-reference bases', asyn
   await page.getByRole('combobox', { name: 'select' }).click();
   await page.getByRole('option', { name: 'unisex' }).click();
   for (const [label, value] of REQUIRED_CREATE_MEASUREMENTS) {
-    const input = page.getByRole('textbox', { name: label, exact: true });
+    const input = measurementField(page, label);
+    await revealMeasurement(page, input);
     await input.fill(value);
     await input.blur();
   }
-  await expect(page.getByRole('textbox', { name: 'under bust', exact: true })).toBeVisible();
+  await revealMeasurement(page, measurementField(page, 'under bust'));
+  await expect(measurementField(page, 'under bust')).toBeVisible();
   await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
   await expect(canvas).toHaveAttribute('data-source-revision', /basisKind=neutral/u);
   await expect(status).not.toContainText('Preview failed');
@@ -833,7 +872,7 @@ async function exerciseHighHipAndKnee(page: import('@playwright/test').Page, bas
   const measurementApplication = page.getByTestId(
     'model-open-reference-measurement-application-status',
   );
-  const inseam = page.getByRole('textbox', { name: 'inseam', exact: true });
+  const inseam = measurementField(page, 'inseam');
   await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
   await expect(canvas).toHaveAttribute(
     'data-source-revision',
@@ -845,6 +884,7 @@ async function exerciseHighHipAndKnee(page: import('@playwright/test').Page, bas
 
   // The inseam guide draws no path, so canvas screenshots compare body geometry only.
   const bodyScreenshot = async () => {
+    await revealMeasurement(page, inseam);
     await inseam.focus();
     await expect(canvas).toHaveAttribute('data-measurement-guide-path-count', '0');
     await page.mouse.move(0, 0);
@@ -854,7 +894,8 @@ async function exerciseHighHipAndKnee(page: import('@playwright/test').Page, bas
     const before = await canvas.getAttribute('data-source-revision');
     const keysBefore = await appliedOrLimitedKeys(measurementApplication);
     await startFrameGapAudit(page);
-    const input = page.getByRole('textbox', { name: label, exact: true });
+    const input = measurementField(page, label);
+    await revealMeasurement(page, input);
     await input.fill(value);
     await input.blur();
     await expect
@@ -883,7 +924,9 @@ async function exerciseHighHipAndKnee(page: import('@playwright/test').Page, bas
   );
   const highHipShape = await bodyScreenshot();
   expect(highHipShape.equals(baselineShape)).toBe(false);
-  await page.getByRole('textbox', { name: 'high hip', exact: true }).focus();
+  const highHipField = measurementField(page, 'high hip');
+  await revealMeasurement(page, highHipField);
+  await highHipField.focus();
   await expect(canvas).toHaveAttribute(
     'data-active-measurement-guide',
     'BODY_MEASUREMENT_NAME_HIGH_HIP',
@@ -899,7 +942,9 @@ async function exerciseHighHipAndKnee(page: import('@playwright/test').Page, bas
   );
   const kneeShape = await bodyScreenshot();
   expect(kneeShape.equals(highHipShape)).toBe(false);
-  await page.getByRole('textbox', { name: 'knee', exact: true }).focus();
+  const kneeField = measurementField(page, 'knee');
+  await revealMeasurement(page, kneeField);
+  await kneeField.focus();
   await expect(canvas).toHaveAttribute(
     'data-active-measurement-guide',
     'BODY_MEASUREMENT_NAME_KNEE',
@@ -946,7 +991,8 @@ test('high hip and knee apply as bounded proxies on female, male and neutral bas
   await page.getByRole('combobox', { name: 'select' }).click();
   await page.getByRole('option', { name: 'unisex' }).click();
   for (const [label, value] of REQUIRED_CREATE_MEASUREMENTS) {
-    const input = page.getByRole('textbox', { name: label, exact: true });
+    const input = measurementField(page, label);
+    await revealMeasurement(page, input);
     await input.fill(value);
     await input.blur();
   }
