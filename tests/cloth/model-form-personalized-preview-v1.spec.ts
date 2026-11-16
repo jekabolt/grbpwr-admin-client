@@ -412,6 +412,85 @@ test('real ModelForm auto-binds edit/create measurements to its V9 mannequin', a
   expect(mainFrameNavigations).toEqual([]);
 });
 
+test('continuous measurement typing retains the last-valid V9 canvas until replacement is ready', async ({
+  page,
+}) => {
+  await prewarmDevRuntime(page);
+  await page.goto(DEV_ROUTE);
+
+  const preview = page.getByTestId('model-open-reference-preview');
+  const status = page.getByTestId('model-open-reference-preview-status');
+  const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
+  await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
+  await expect(preview).toHaveAttribute('data-body-display-ownership', 'current');
+  await expect(canvas).toHaveCSS('opacity', '1');
+  const lastValidSourceRevision = await canvas.getAttribute('data-source-revision');
+  expect(lastValidSourceRevision).toBeTruthy();
+
+  await canvas.evaluate((node) => {
+    const audit = { node, sawOpacityZero: false };
+    (
+      window as typeof window & {
+        __modelFormRetainedCanvasAudit?: typeof audit;
+      }
+    ).__modelFormRetainedCanvasAudit = audit;
+    const recordOpacity = () => {
+      if (getComputedStyle(node).opacity === '0') audit.sawOpacityZero = true;
+    };
+    recordOpacity();
+    new MutationObserver(recordOpacity).observe(node, {
+      attributes: true,
+      attributeFilter: ['style'],
+    });
+  });
+
+  const chest = page.getByRole('textbox', { name: 'chest', exact: true });
+  await chest.focus();
+  await chest.selectText();
+  await chest.pressSequentially('9');
+
+  await expect(preview).toHaveAttribute('data-body-display-ownership', 'retained-invalid');
+  const retainedStatus = page.getByTestId('model-open-reference-body-display-status');
+  await expect(retainedStatus).toContainText('current entered values are not applied');
+  await expect(retainedStatus).toHaveAttribute('role', 'status');
+  await expect(status).toHaveAttribute('aria-hidden', 'true');
+  await expect(status).not.toHaveAttribute('role', /.+/u);
+  await expect(canvas).toHaveCount(1);
+  await expect(canvas).toHaveAttribute('data-source-revision', lastValidSourceRevision ?? '');
+  await expect(canvas).toHaveCSS('opacity', '1');
+  await expect(page.getByTestId('model-open-reference-measurement-application-status')).toHaveCount(
+    0,
+  );
+
+  await chest.pressSequentially('60', { delay: 50 });
+  await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
+  await expect(preview).toHaveAttribute('data-body-display-ownership', 'current');
+  await expect(retainedStatus).toHaveCount(0);
+  await expect(status).toHaveAttribute('role', 'status');
+  await expect(status).not.toHaveAttribute('aria-hidden', 'true');
+  await expect(canvas).toHaveCount(1);
+  await expect(canvas).toHaveCSS('opacity', '1');
+  await expect
+    .poll(() => canvas.getAttribute('data-source-revision'))
+    .not.toBe(lastValidSourceRevision);
+  expect(
+    await canvas.evaluate((node) => {
+      const audit = (
+        window as typeof window & {
+          __modelFormRetainedCanvasAudit?: {
+            node: Element;
+            sawOpacityZero: boolean;
+          };
+        }
+      ).__modelFormRetainedCanvasAudit;
+      return {
+        sameNode: audit?.node === node,
+        sawOpacityZero: audit?.sawOpacityZero ?? true,
+      };
+    }),
+  ).toEqual({ sameNode: true, sawOpacityZero: false });
+});
+
 test('real ModelForm admits female, male and neutral open-reference bases', async ({ page }) => {
   await page.goto(DEV_ROUTE, { waitUntil: 'domcontentloaded' });
   const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');

@@ -1100,6 +1100,11 @@ test('hostile wrist drag keeps the last-valid source and canvas', async ({ page 
     'data-pose-blockers',
     /left-arm-overlap|left-elbow-direction/u,
   );
+  const blockedFeedback = page.getByTestId('model-open-reference-pose-blocked-status');
+  await expect(blockedFeedback).toContainText(
+    /limb would overlap|joint would bend in the wrong direction/u,
+  );
+  await expect(blockedFeedback).not.toContainText(/left-arm-overlap|left-elbow-direction/u);
   await expect(canvas).toHaveAttribute('data-source-revision', sourceBefore ?? '');
   const blockedCanvas = await canvas.screenshot({
     path: '/tmp/model-form-v9-hostile-wrist-blocked.png',
@@ -1205,6 +1210,12 @@ test('rear-view anterior arm stays admitted and uses an occluded-joint X-ray cue
   await expect(preview).toHaveAttribute('data-pose-admissibility', 'blocked');
   await expect(preview).toHaveAttribute(
     'data-pose-blockers',
+    /right-arm-overlap|right-elbow-direction/u,
+  );
+  await expect(page.getByTestId('model-open-reference-pose-blocked-status')).toContainText(
+    /limb would overlap|joint would bend in the wrong direction/u,
+  );
+  await expect(page.getByTestId('model-open-reference-pose-blocked-status')).not.toContainText(
     /right-arm-overlap|right-elbow-direction/u,
   );
   await expect(canvas).toHaveAttribute('data-live-joint-overlay-status', 'updated');

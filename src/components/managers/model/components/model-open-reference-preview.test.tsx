@@ -57,6 +57,8 @@ import {
   modelOpenReferenceFullBodyJointOverlayNextBuiltV5,
   modelOpenReferenceLiveJointOverlaySignatureV10,
   modelOpenReferenceLivePoseFrameNextV10,
+  modelOpenReferenceBodyDisplayOwnershipV11,
+  modelOpenReferencePoseBlockedMessageV11,
   modelOpenReferenceJointEditorEffectiveModeV5,
   modelOpenReferenceFullBodyRuntimePoseV3,
   modelOpenReferenceFullBodyRuntimePoseV4,
@@ -276,6 +278,65 @@ function Harness({
 }
 
 describe('model open-reference preview', () => {
+  it('retains last-valid V9 body ownership until replacement geometry is ready', () => {
+    const base = {
+      builtFingerprint: 'body:old',
+      requestedFingerprint: 'body:new',
+      resolutionOk: true,
+      updateStatus: 'building' as const,
+      stageStatus: 'ready' as const,
+    };
+
+    expect(modelOpenReferenceBodyDisplayOwnershipV11(base)).toBe('retained-pending');
+    expect(
+      modelOpenReferenceBodyDisplayOwnershipV11({
+        ...base,
+        resolutionOk: false,
+        updateStatus: 'idle',
+      }),
+    ).toBe('retained-invalid');
+    expect(
+      modelOpenReferenceBodyDisplayOwnershipV11({
+        ...base,
+        updateStatus: 'error',
+      }),
+    ).toBe('retained-error');
+    expect(
+      modelOpenReferenceBodyDisplayOwnershipV11({
+        ...base,
+        builtFingerprint: 'body:new',
+        stageStatus: 'initializing',
+      }),
+    ).toBe('preparing');
+    expect(
+      modelOpenReferenceBodyDisplayOwnershipV11({
+        ...base,
+        builtFingerprint: 'body:new',
+      }),
+    ).toBe('current');
+    expect(
+      modelOpenReferenceBodyDisplayOwnershipV11({
+        ...base,
+        builtFingerprint: null,
+      }),
+    ).toBe('empty');
+  });
+
+  it('maps typed pose blockers to concise feedback without leaking internal blocker IDs', () => {
+    const overlap = modelOpenReferencePoseBlockedMessageV11([
+      'right-arm-overlap',
+      'right-elbow-direction',
+    ]);
+    expect(overlap).toBe(
+      'Pose blocked: a limb would overlap the body or another limb; a joint would bend in the wrong direction. Showing the last valid pose.',
+    );
+    expect(overlap).not.toMatch(/right-arm|right-elbow/u);
+    expect(modelOpenReferencePoseBlockedMessageV11(['no-grounded-foot', 'foot-below-ground'])).toBe(
+      'Pose blocked: at least one foot must stay grounded; a foot cannot move below the ground. Showing the last valid pose.',
+    );
+    expect(modelOpenReferencePoseBlockedMessageV11([])).toBeNull();
+  });
+
   it('publishes accepted mesh and joint-overlay frames atomically and retains the last valid frame', () => {
     const positions = new Float32Array([1, 2, 3]);
     const accepted = modelOpenReferenceLivePoseFrameNextV10(null, {
