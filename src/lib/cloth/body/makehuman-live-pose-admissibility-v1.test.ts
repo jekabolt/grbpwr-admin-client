@@ -196,6 +196,29 @@ describe('MakeHuman live pose admissibility v1', () => {
     );
   });
 
+  it('blocks a left hand and forearm passing through the contralateral right thigh', () => {
+    const result = evaluateMakeHumanLivePoseAdmissibilityV1({
+      bones: skeleton({
+        'lowerarm01.L': [point(0.42, 1.35), point(-0.2, 0.92)],
+        'wrist.L': [point(-0.2, 0.92), point(-0.12, 0.68)],
+      }),
+      neutralBones: skeleton(),
+      groundReferenceM: 0,
+      baselineAnklesM: BASELINE_ANKLES,
+    });
+
+    expect(result.admissible).toBe(false);
+    expect(result.blockers).toContain('left-arm-overlap');
+    expect(result.contacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          obstacleId: 'left-cross-right-upper-leg',
+          obstacleKind: 'opposite-limb',
+        }),
+      ]),
+    );
+  });
+
   it('admits arms at the sides with the hand close to, but outside, the thigh envelope', () => {
     const result = evaluateMakeHumanLivePoseAdmissibilityV1({
       bones: skeleton({
