@@ -36,6 +36,18 @@ test('mobile guided measurements keep mannequin, field and navigation in one vie
   await expect(staticGuide).toBeInViewport();
   await expect(chest).toBeInViewport();
   await expect(next).toBeInViewport();
+  await expect(page.getByRole('button', { name: 'cancel', exact: true })).toBeHidden();
+  await expect
+    .poll(() =>
+      next.evaluate((button) => {
+        const rect = button.getBoundingClientRect();
+        return (
+          document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) ===
+          button
+        );
+      }),
+    )
+    .toBe(true);
   const scrollBeforeStep = await page.evaluate(() => window.scrollY);
 
   await chest.fill('935');
@@ -53,6 +65,7 @@ test('mobile guided measurements keep mannequin, field and navigation in one vie
   await expect(page.getByRole('textbox', { name: 'chest', exact: true })).toHaveValue('935');
   await expect(form.locator('[data-model-measurement]')).toHaveCount(34);
   await expect(page.getByTestId('model-open-reference-direct-pose-control-v9')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'cancel', exact: true })).toBeVisible();
   await expect(page.getByTestId('measurement-watertight-surface-v1-canvas')).toBeVisible({
     timeout: 180_000,
   });
