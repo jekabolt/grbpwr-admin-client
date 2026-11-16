@@ -35,7 +35,10 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOPOLOGY_SESSION_CLAIMS_V1 = O
 } as const);
 
 export type PatternImportDxfPhaseEDraftCadTopologyToolV1 =
-  'measure-point' | 'measure-line' | 'measure-edge' | 'callout';
+  | 'measure-point'
+  | 'measure-line'
+  | 'measure-edge'
+  | 'callout';
 
 export type PatternImportDxfPhaseEDraftCadTopologySessionV1 = Readonly<{
   schemaVersion: typeof PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOPOLOGY_SESSION_V1;

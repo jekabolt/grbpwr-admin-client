@@ -107,19 +107,19 @@ function validNewPiece(command: RectangleCommand): boolean {
     | undefined;
   return Boolean(
     piece &&
-    stableId(piece.pieceId) &&
-    stableId(piece.pieceLineKey) &&
-    stableId(piece.contourId) &&
-    Array.isArray(piece.vertexIds) &&
-    piece.vertexIds.length === 4 &&
-    piece.vertexIds.every(stableId) &&
-    new Set(piece.vertexIds).size === 4 &&
-    typeof piece.displayName === 'string' &&
-    piece.displayName.trim() === piece.displayName &&
-    piece.displayName.length > 0 &&
-    piece.displayName.length <= 256 &&
-    typeof piece.gradingPolicy === 'string' &&
-    typeof piece.placementPolicy === 'string',
+      stableId(piece.pieceId) &&
+      stableId(piece.pieceLineKey) &&
+      stableId(piece.contourId) &&
+      Array.isArray(piece.vertexIds) &&
+      piece.vertexIds.length === 4 &&
+      piece.vertexIds.every(stableId) &&
+      new Set(piece.vertexIds).size === 4 &&
+      typeof piece.displayName === 'string' &&
+      piece.displayName.trim() === piece.displayName &&
+      piece.displayName.length > 0 &&
+      piece.displayName.length <= 256 &&
+      typeof piece.gradingPolicy === 'string' &&
+      typeof piece.placementPolicy === 'string',
   );
 }
 

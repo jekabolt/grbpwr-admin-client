@@ -258,7 +258,9 @@ async function freshAuthority(
 
 export class PatternImportDxfProductPhaseEAuthorityResolutionErrorV1 extends Error {
   readonly code:
-    'ambiguous-authored-authority' | 'confirmed-scope-missing' | 'authored-authority-moved';
+    | 'ambiguous-authored-authority'
+    | 'confirmed-scope-missing'
+    | 'authored-authority-moved';
 
   constructor(
     code: 'ambiguous-authored-authority' | 'confirmed-scope-missing' | 'authored-authority-moved',

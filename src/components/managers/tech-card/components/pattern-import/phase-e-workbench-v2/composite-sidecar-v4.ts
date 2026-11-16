@@ -57,7 +57,8 @@ const BLOCKED_CLAIMS = Object.freeze({
 });
 
 export type PatternImportDxfProductCompositeSidecarComponentKindV4 =
-  'composite-v3' | 'phase-e-exact-n-seam-consistency-v2';
+  | 'composite-v3'
+  | 'phase-e-exact-n-seam-consistency-v2';
 
 export type PatternImportDxfProductCompositeSidecarComponentV4 = Readonly<{
   kind: PatternImportDxfProductCompositeSidecarComponentKindV4;

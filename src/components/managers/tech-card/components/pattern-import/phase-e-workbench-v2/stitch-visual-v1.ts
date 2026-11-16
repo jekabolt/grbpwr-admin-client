@@ -98,8 +98,8 @@ export function buildPatternImportDxfPhaseEStitchVisualV1(input: {
   const rawTopstitchMode = trimmed(input.operation.topstitchMode);
   const topstitchMode = unknownEnum(rawTopstitchMode) ? null : rawTopstitchMode;
   const modeLabel = topstitchMode
-    ? (topstitchModeOptionsFor(topstitchMode).find(({ value }) => value === topstitchMode)?.label ??
-      null)
+    ? topstitchModeOptionsFor(topstitchMode).find(({ value }) => value === topstitchMode)?.label ??
+      null
     : null;
   const threadKey = resolvePatternImportDxfPhaseECadWorkbenchThreadRefV1(
     input.operation,

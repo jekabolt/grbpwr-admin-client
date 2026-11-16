@@ -44,7 +44,9 @@ const BLOCKED_CLAIMS = Object.freeze({
 
 export type PatternImportDxfPhaseESavedExactPrefillBlockerV1 = Readonly<{
   code:
-    'saved-preparation-unavailable' | 'serialized-exact-restore-blocked' | 'prefill-patch-mismatch';
+    | 'saved-preparation-unavailable'
+    | 'serialized-exact-restore-blocked'
+    | 'prefill-patch-mismatch';
   detail: string;
 }>;
 

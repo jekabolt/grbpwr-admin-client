@@ -177,7 +177,8 @@ function snapshotData(value: unknown, path: string, depth: number, state: Snapsh
       fail('input-shape-invalid', `${path} contains a symbol property.`);
     if (isArray) {
       const length = (descriptors.length as PropertyDescriptor | undefined)?.value as
-        number | undefined;
+        | number
+        | undefined;
       if (!Number.isSafeInteger(length) || length === undefined || keys.length !== length + 1)
         fail('input-shape-invalid', `${path} must be a dense array without extra properties.`);
       state.properties += length;

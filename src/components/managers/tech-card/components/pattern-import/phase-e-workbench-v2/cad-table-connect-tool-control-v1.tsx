@@ -1,7 +1,10 @@
 import { PatternImportDxfPhaseECadWorkbenchToolButtonV1 } from './cad-workbench-tool-button-v1';
 
 export type PatternImportDxfPhaseECadTableConnectToolPhaseV1 =
-  'idle' | 'select-first-edge' | 'select-second-edge' | 'review';
+  | 'idle'
+  | 'select-first-edge'
+  | 'select-second-edge'
+  | 'review';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_CONNECT_TOOL_CONTROL_CONTRACT_V1 = Object.freeze({
   oneRailAction: true,

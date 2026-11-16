@@ -88,7 +88,8 @@ export type GarmentPhase2RefinedVertexProvenanceV1 = Readonly<{
         kind: 'boundary-recovery';
         boundaryVertexId: string;
         boundaryRecoverySource:
-          GarmentPhase2PreservedBoundarySourceV1 | GarmentPhase2RecoveredBoundarySourceV1;
+          | GarmentPhase2PreservedBoundarySourceV1
+          | GarmentPhase2RecoveredBoundarySourceV1;
       }>
     | Readonly<{
         kind: 'interior';
@@ -364,7 +365,8 @@ function snapshotData(value: unknown, path: string, depth: number, state: Snapsh
       fail('input-shape-invalid', `${path} contains a symbol.`);
     if (isArray) {
       const length = (descriptors.length as PropertyDescriptor | undefined)?.value as
-        number | undefined;
+        | number
+        | undefined;
       if (
         !Number.isSafeInteger(length) ||
         length === undefined ||

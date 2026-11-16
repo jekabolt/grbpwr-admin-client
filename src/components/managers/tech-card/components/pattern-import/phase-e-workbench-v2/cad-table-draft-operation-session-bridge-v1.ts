@@ -54,7 +54,11 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_COMMAND_DRAFT_CLAIMS_V1 = Object.fre
 } as const);
 
 export type PatternImportDxfPhaseECadCommandDraftKindV1 =
-  'construct' | 'detail' | 'dart' | 'cut' | 'spread';
+  | 'construct'
+  | 'detail'
+  | 'dart'
+  | 'cut'
+  | 'spread';
 
 export type PatternImportDxfPhaseECadCommandDraftV1 = Readonly<{
   draftOperationId: string;

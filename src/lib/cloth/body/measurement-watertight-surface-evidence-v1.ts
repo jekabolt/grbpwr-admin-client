@@ -489,7 +489,8 @@ function snapshotData(
       throw new Error('Typed-array intrinsic getters are unavailable.');
     }
     const buffer = Reflect.apply(typedArrayBufferGetter, value, []) as
-      ArrayBuffer | SharedArrayBuffer;
+      | ArrayBuffer
+      | SharedArrayBuffer;
     const byteLength = Reflect.apply(typedArrayByteLengthGetter, value, []) as number;
     const byteOffset = Reflect.apply(typedArrayByteOffsetGetter, value, []) as number;
     const length = Reflect.apply(typedArrayLengthGetter, value, []) as number;

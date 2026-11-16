@@ -296,7 +296,7 @@ export function createPatternImportDxfProductCompositeSidecarTransactionV4(
             'restore',
             signal.aborted
               ? 'Transaction was cancelled during fresh readback; no restore authority was minted.'
-              : (restoration.blockers[0]?.detail ?? 'Composite V4 restore failed closed.'),
+              : restoration.blockers[0]?.detail ?? 'Composite V4 restore failed closed.',
             persistence,
             restoration,
           );

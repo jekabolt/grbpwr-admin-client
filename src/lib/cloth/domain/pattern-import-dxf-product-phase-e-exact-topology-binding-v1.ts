@@ -1389,10 +1389,12 @@ function validateChoicesShape(
   text(choices.revision, `${path}.revision`, true);
   const surface = choices.physicalSurface as unknown;
   const physical = record(surface, ['mode', 'seamAllowancePhysical'], `${path}.physicalSurface`);
-  if (!(
-    (physical.mode === 'sewing-surface' && physical.seamAllowancePhysical === false) ||
-    (physical.mode === 'cut-surface' && physical.seamAllowancePhysical === true)
-  ))
+  if (
+    !(
+      (physical.mode === 'sewing-surface' && physical.seamAllowancePhysical === false) ||
+      (physical.mode === 'cut-surface' && physical.seamAllowancePhysical === true)
+    )
+  )
     fail('aggregate-plan-seal-mismatch', `${path}.physicalSurface`, 'Physical surface is invalid.');
   const expectedRole =
     physical.mode === 'sewing-surface' ? ('sewing-boundary' as const) : ('cut-boundary' as const);

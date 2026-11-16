@@ -842,7 +842,7 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
     );
     const expectedPieceIds = feature.derivedPieceIds
       ? feature.derivedPieceIds
-      : (topologyMutation?.derivedPieceIds ?? ([feature.pieceId] as const));
+      : topologyMutation?.derivedPieceIds ?? ([feature.pieceId] as const);
     if (!expectedPieceIds?.length)
       return blocked(
         'writer-output-mismatch',

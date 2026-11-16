@@ -20,7 +20,9 @@ export type PatternImportDxfPhaseEDraftCadArrangementByScopeV1 = Readonly<
 >;
 
 export type PatternImportDxfPhaseEDraftCadArrangementActionV1 =
-  'rotate-90' | 'flip-horizontal' | 'reset';
+  | 'rotate-90'
+  | 'flip-horizontal'
+  | 'reset';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_IDENTITY_TRANSFORM_V1 = Object.freeze({
   x: 0,

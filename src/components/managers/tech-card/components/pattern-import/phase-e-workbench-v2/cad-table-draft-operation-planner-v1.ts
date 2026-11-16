@@ -40,7 +40,16 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_DRAFT_OPERATION_PLANNER_CLAIMS
 );
 
 export type PatternImportDxfPhaseECadTableProcessKindV1 =
-  'sew' | 'connect' | 'cut' | 'dart' | 'spread' | 'gather' | 'pleat' | 'press' | 'iron' | 'finish';
+  | 'sew'
+  | 'connect'
+  | 'cut'
+  | 'dart'
+  | 'spread'
+  | 'gather'
+  | 'pleat'
+  | 'press'
+  | 'iron'
+  | 'finish';
 
 /** Read-only projection of the fields already owned by the selected TechCardOperation row. */
 export type PatternImportDxfPhaseECadTableCurrentOperationV1 = Readonly<
@@ -116,7 +125,9 @@ type MultiConnectionRoute = Readonly<{
 }>;
 
 export type PatternImportDxfPhaseECadTableDraftOperationRouteV1 =
-  ZeroConnectionRoute | OneConnectionRoute | MultiConnectionRoute;
+  | ZeroConnectionRoute
+  | OneConnectionRoute
+  | MultiConnectionRoute;
 
 export type PatternImportDxfPhaseECadTablePlannedOperationV1 = Readonly<{
   operationRef: string;

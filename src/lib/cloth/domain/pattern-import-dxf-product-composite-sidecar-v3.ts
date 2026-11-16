@@ -39,7 +39,9 @@ export type PatternImportDxfProductCompositeSidecarBindingsV3 = Readonly<{
 }>;
 
 export type PatternImportDxfProductCompositeSidecarComponentKindV3 =
-  'semantic-product-v1' | 'multiseam-placement-v2' | 'phase-e-exact-topology-v1';
+  | 'semantic-product-v1'
+  | 'multiseam-placement-v2'
+  | 'phase-e-exact-topology-v1';
 
 export type PatternImportDxfProductCompositeSidecarComponentV3 = Readonly<{
   kind: PatternImportDxfProductCompositeSidecarComponentKindV3;

@@ -123,7 +123,8 @@ type MutableState = {
   attachmentStatus: PatternImportDxfProductSidecarRetrySnapshotV1['attachmentStatus'];
   lastBlocker: PatternImportDxfProductSidecarRetrySnapshotV1['lastBlocker'];
   evidence:
-    Extract<PatternImportDxfProductSidecarLiveCompositionResultV1, { ok: true }>['evidence'] | null;
+    | Extract<PatternImportDxfProductSidecarLiveCompositionResultV1, { ok: true }>['evidence']
+    | null;
 };
 
 const states = new WeakMap<object, MutableState>();
@@ -208,7 +209,8 @@ export function createPatternImportDxfProductSidecarRetryOwnerV1(
   )
     return null;
   const input = exactDataProperty(request, 'compositionInput') as
-    PatternImportDxfProductMappingCompositionInputV1 | undefined;
+    | PatternImportDxfProductMappingCompositionInputV1
+    | undefined;
   if (
     !input ||
     input.schemaVersion !== PATTERN_IMPORT_DXF_PRODUCT_MAPPING_COMPOSITION_V1 ||

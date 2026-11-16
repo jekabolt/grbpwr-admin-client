@@ -166,7 +166,8 @@ export type DxfAssemblyHandoffFailureV1 = {
 };
 
 export type DxfAssemblyHandoffBuildResultV1 =
-  { readonly ok: true; readonly value: DxfAssemblyHandoffV1 } | DxfAssemblyHandoffFailureV1;
+  | { readonly ok: true; readonly value: DxfAssemblyHandoffV1 }
+  | DxfAssemblyHandoffFailureV1;
 
 export type DxfAssemblyHandoffCompileResultV1 =
   | {
@@ -221,7 +222,8 @@ type PreparedCandidate = {
 };
 
 type PreparationResult =
-  { readonly ok: true; readonly prepared: PreparedCandidate } | DxfAssemblyHandoffFailureV1;
+  | { readonly ok: true; readonly prepared: PreparedCandidate }
+  | DxfAssemblyHandoffFailureV1;
 
 function failure(
   code: DxfAssemblyHandoffFailureV1['code'],
@@ -622,17 +624,19 @@ function triangulationInputForPiece(
   const ring = (contour: DxfPatternContourV1, role: BoundaryRing['role']): BoundaryRing => ({
     id: contour.id,
     role,
-    vertices: contour.vertices.map((vertex): BoundaryVertex => ({
-      id: vertex.id,
-      positionMm: vertex.positionMm,
-      source: {
-        contourId: contour.id,
-        sourceCurveId: vertex.source.sourceCurveId,
-        sourceCurveParameterSpace: vertex.source.parameterSpace,
-        sourceCurveT: vertex.source.sourceCurveT,
-        normalizedArc: vertex.source.normalizedArc,
-      },
-    })),
+    vertices: contour.vertices.map(
+      (vertex): BoundaryVertex => ({
+        id: vertex.id,
+        positionMm: vertex.positionMm,
+        source: {
+          contourId: contour.id,
+          sourceCurveId: vertex.source.sourceCurveId,
+          sourceCurveParameterSpace: vertex.source.parameterSpace,
+          sourceCurveT: vertex.source.sourceCurveT,
+          normalizedArc: vertex.source.normalizedArc,
+        },
+      }),
+    ),
   });
   const shell = piece.contours.find((contour) => contour.role !== 'hole');
   if (!shell) throw new TypeError(piece.id + ' has no explicit shell boundary.');

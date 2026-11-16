@@ -605,9 +605,11 @@ export function buildPatternImportDxfPhaseECadTableZeroConnectIdentityPlanV1(
 }
 
 /**
- * Compatibility adapter for the existing connection-draft pipeline. The table may author both
- * edges from zero, but a caller-owned existing Assembly Order row is still required by that older
- * boundary. A genuinely new row uses `build...IdentityPlanV1` and remains honestly Apply-blocked.
+ * Compatibility adapter for the older connection-draft preview pipeline. That pipeline still
+ * references an existing Assembly Order row, but it is not the new-row authoring route. A genuine
+ * zero-operation card uses candidate -> identity plan -> zero-connect row adapter -> the existing
+ * OperationsField handoff, which appends an operationNumber-0 row even when the live row list is
+ * empty. The ordinary tech-card save remains the sole persistence writer and assigns its number.
  */
 export function createPatternImportDxfPhaseECadTableZeroConnectDraftOperationV1(
   session: PatternImportDxfPhaseECadTableZeroConnectSessionV1,

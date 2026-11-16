@@ -1101,7 +1101,8 @@ function captureHost(candidate: unknown): Readonly<{
     'computeCanonicalSha256',
   ]);
   const computeCanonicalSha256 = contractDescriptors.computeCanonicalSha256.value as
-    PatternImportDxfPhaseESavedAssemblyTopologyHashContractV1['computeCanonicalSha256'] | undefined;
+    | PatternImportDxfPhaseESavedAssemblyTopologyHashContractV1['computeCanonicalSha256']
+    | undefined;
   if (typeof computeCanonicalSha256 !== 'function')
     fail('invalid-adapter-host', 'A stable topology hash capability is required.');
   if (

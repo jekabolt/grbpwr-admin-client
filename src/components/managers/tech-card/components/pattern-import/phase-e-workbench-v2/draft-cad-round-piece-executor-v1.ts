@@ -139,15 +139,15 @@ function validNewPiece(command: RoundCommand): boolean {
   const piece = command.payload.newPiece;
   return Boolean(
     piece &&
-    stableId(piece.pieceId) &&
-    stableId(piece.pieceLineKey) &&
-    stableId(piece.contourId) &&
-    stableId(piece.vertexIdPrefix) &&
-    typeof piece.displayName === 'string' &&
-    piece.displayName.trim() === piece.displayName &&
-    piece.displayName.length > 0 &&
-    piece.displayName.length <= 256 &&
-    Number.isFinite(piece.maxChordErrorMm),
+      stableId(piece.pieceId) &&
+      stableId(piece.pieceLineKey) &&
+      stableId(piece.contourId) &&
+      stableId(piece.vertexIdPrefix) &&
+      typeof piece.displayName === 'string' &&
+      piece.displayName.trim() === piece.displayName &&
+      piece.displayName.length > 0 &&
+      piece.displayName.length <= 256 &&
+      Number.isFinite(piece.maxChordErrorMm),
   );
 }
 

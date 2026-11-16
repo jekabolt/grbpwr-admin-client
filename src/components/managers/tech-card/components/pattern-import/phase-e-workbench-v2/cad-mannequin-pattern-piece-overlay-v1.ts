@@ -26,7 +26,9 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_PATTERN_PIECE_OVERLAY_CLAI
   } as const);
 
 export type PatternImportDxfPhaseECadMannequinPatternOverlayToolV1 =
-  'select' | 'translate' | 'rotate';
+  | 'select'
+  | 'translate'
+  | 'rotate';
 
 export type PatternImportDxfPhaseECadMannequinPatternOverlayDecorationV1 = Readonly<{
   seamId: string;
@@ -254,7 +256,7 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
           scopeKey: piece.scopeKey,
           pieceId: piece.pieceId,
           seamId:
-            input.selection?.pieceId === piece.pieceId ? (input.selection?.seamId ?? null) : null,
+            input.selection?.pieceId === piece.pieceId ? input.selection?.seamId ?? null : null,
         }),
       onTransformPiece: input.onTransform,
     }),

@@ -690,9 +690,9 @@ export function buildPatternImportDxfPhaseECadMannequinSceneOverlayFromExactAuth
   const activeOperation =
     request.activeOperationNumber === null
       ? null
-      : (request.authority.operations.find(
+      : request.authority.operations.find(
           ({ operationNumber }) => operationNumber === request.activeOperationNumber,
-        ) ?? null);
+        ) ?? null;
   if (request.activeOperationNumber !== null && !activeOperation)
     return blocked(
       'assembly-graph-stale',

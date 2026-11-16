@@ -14,10 +14,19 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_WORKBENCH_STITCH_EDITOR_HANDOFF_CLAI
   } as const);
 
 export type PatternImportDxfPhaseECadWorkbenchStitchEditorFieldV1 =
-  'type' | 'density' | 'gauge' | 'offset' | 'thread';
+  | 'type'
+  | 'density'
+  | 'gauge'
+  | 'offset'
+  | 'thread';
 
 export type PatternImportDxfPhaseECadWorkbenchStitchEditorTargetV1 =
-  'type' | 'density' | 'gauge' | 'gauge-prerequisite' | 'offset' | 'thread';
+  | 'type'
+  | 'density'
+  | 'gauge'
+  | 'gauge-prerequisite'
+  | 'offset'
+  | 'thread';
 
 export type PatternImportDxfPhaseECadWorkbenchStitchEditorHandoffV1 =
   | Readonly<{
@@ -38,7 +47,9 @@ export type PatternImportDxfPhaseECadWorkbenchStitchEditorHandoffV1 =
       prerequisite: null;
       blocker: Readonly<{
         code:
-          'operation-frozen' | 'field-not-owned-by-operation' | 'topstitch-thread-bom-line-missing';
+          | 'operation-frozen'
+          | 'field-not-owned-by-operation'
+          | 'topstitch-thread-bom-line-missing';
         detail: string;
       }>;
       claims: typeof PATTERN_IMPORT_DXF_PHASE_E_CAD_WORKBENCH_STITCH_EDITOR_HANDOFF_CLAIMS_V1;
