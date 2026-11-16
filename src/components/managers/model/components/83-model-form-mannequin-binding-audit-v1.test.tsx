@@ -255,9 +255,18 @@ describe('receipt 83 model-form mannequin binding audit v1', () => {
     );
     const pageSource = source('src/components/managers/model/page.tsx');
 
-    expect(formSource.indexOf('<Form {...form}>')).toBeLessThan(
-      formSource.indexOf('<ActiveMeasurementBodyPreview'),
+    const formOwner = formSource.indexOf('<Form {...form}>');
+    expect(formOwner).toBeGreaterThan(-1);
+    expect(formOwner).toBeLessThan(
+      formSource.indexOf('preview={renderBodyPreview(true)}', formOwner),
     );
+    expect(formOwner).toBeLessThan(
+      formSource.indexOf(
+        "<Section title='body preview'>{renderBodyPreview(false)}</Section>",
+        formOwner,
+      ),
+    );
+    expect(formSource).toContain('<ActiveMeasurementBodyPreview');
     expect(formSource).toMatch(/modelId=\{[\s\S]*model\?\.id == null \? 'model-form:create'/u);
     expect(formSource).toContain('modelContentRevision={');
     expect(formSource).toContain('modelFormRevisionKeyV1(model)');
@@ -301,7 +310,7 @@ describe('receipt 83 model-form mannequin binding audit v1', () => {
     expect(formSource).not.toContain('SheetMeasurementDiagram');
     expect(focusSource).not.toContain('MeasurementPictogram');
     expect(formSource).toContain(
-      'activeMeasurementName={(active as common_BodyMeasurementName) || undefined}',
+      'activeMeasurementName: (active as common_BodyMeasurementName) || undefined',
     );
     expect(formSource).toContain('<SheetMeasurementMobileStrip />');
     expect(focusSource).toContain('{measurementLabel(focused)}');
