@@ -13,7 +13,11 @@ const VALID = Object.freeze({
 
 describe('model measurement field audit v1', () => {
   it('returns an explicit empty result for a structurally valid profile', () => {
-    const result = auditModelMeasurementFieldsV1(VALID);
+    const result = auditModelMeasurementFieldsV1({
+      ...VALID,
+      BODY_MEASUREMENT_NAME_HIGH_HIP: 900,
+      BODY_MEASUREMENT_NAME_KNEE: 390,
+    });
 
     expect(result).toEqual({
       byMeasurementName: {},
@@ -23,6 +27,21 @@ describe('model measurement field audit v1', () => {
     });
     expect(Object.isFrozen(result)).toBe(true);
     expect(Object.isFrozen(result.byMeasurementName)).toBe(true);
+  });
+
+  it('does not turn bounded-proxy range warnings into field-blocking errors', () => {
+    const result = auditModelMeasurementFieldsV1({
+      ...VALID,
+      BODY_MEASUREMENT_NAME_HIGH_HIP: 1_601,
+      BODY_MEASUREMENT_NAME_KNEE: 601,
+    });
+
+    expect(result).toEqual({
+      byMeasurementName: {},
+      errorCount: 0,
+      fieldCount: 0,
+      unassignedErrorCount: 0,
+    });
   });
 
   it('maps missing required diagnostics to the exact editable fields', () => {

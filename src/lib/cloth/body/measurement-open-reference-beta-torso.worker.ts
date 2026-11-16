@@ -26,6 +26,7 @@ context.onmessage = async (
       sourcePositionsM: request.options.sourcePositionsM,
       triangleIndices: request.options.triangleIndices,
       measurements: request.options.measurements,
+      highHipCircumferenceMm: request.options.highHipCircumferenceMm,
       torsoBundle,
     });
     const response: MeasurementOpenReferenceBetaTorsoWorkerResponseV1 = {
@@ -34,7 +35,15 @@ context.onmessage = async (
       value,
       durationMs: performance.now() - startedAt,
     };
-    context.postMessage(response, [value.positionsM.buffer]);
+    const transfer: Transferable[] = [value.positionsM.buffer];
+    // Listing one buffer twice throws DataCloneError, so the snapshot is added only when distinct.
+    if (
+      value.positionsBeforeHighHipM &&
+      value.positionsBeforeHighHipM.buffer !== value.positionsM.buffer
+    ) {
+      transfer.push(value.positionsBeforeHighHipM.buffer);
+    }
+    context.postMessage(response, transfer);
   } catch (reason: unknown) {
     const response: MeasurementOpenReferenceBetaTorsoWorkerResponseV1 = {
       id: request.id,

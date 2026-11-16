@@ -1,5 +1,7 @@
 import type { common_BodyMeasurementName } from 'api/proto-http/admin';
 import type { MeasurementBodyFrameV2 } from 'lib/cloth/body/measurement-body-frame-v2';
+import { MEASUREMENT_OPEN_REFERENCE_HIGH_HIP_PROTOCOL_WAIST_DROP_MM_V1 } from 'lib/cloth/body/measurement-open-reference-high-hip-proxy-v1';
+import type { MeasurementOpenReferenceKneeRigStationV1 } from 'lib/cloth/body/measurement-open-reference-knee-proxy-v1';
 import type {
   OpenReferenceLimbCircumferenceKeyV1,
   OpenReferenceLimbCircumferenceModeV1,
@@ -306,8 +308,11 @@ export function buildMeasurementSurfaceActiveMeasurementGuideV1(options: {
     chest?: Vec3;
     underBust?: Vec3;
     waist?: Vec3;
+    highHip?: Vec3;
     hip?: Vec3;
   }>;
+  /** Rig knee stations from the beta runtime; the guide draws the positive (left) side. */
+  readonly kneeSectionStations?: readonly MeasurementOpenReferenceKneeRigStationV1[];
 }): MeasurementSurfaceActiveMeasurementGuideV1 {
   const { measurementName, frame, mesh } = options;
   if (!LABELS[measurementName as keyof typeof LABELS]) {
@@ -321,6 +326,27 @@ export function buildMeasurementSurfaceActiveMeasurementGuideV1(options: {
   const underBustY = options.torsoSectionStations?.underBust?.[1];
   const waistY = options.torsoSectionStations?.waist?.[1] ?? waist?.yM;
   const hipY = options.torsoSectionStations?.hip?.[1] ?? hip?.yM;
+  // Same protocol station as the high-hip proxy: `waistToHighHipMm` (default 100 mm) below the
+  // waist, strictly above the hip. The runtime station wins when the proxy resolved one.
+  const highHipDropMm =
+    frame.measurements.waistToHighHipMm ??
+    MEASUREMENT_OPEN_REFERENCE_HIGH_HIP_PROTOCOL_WAIST_DROP_MM_V1;
+  const protocolHighHipY =
+    waistY !== undefined && Number.isFinite(highHipDropMm) && highHipDropMm > 0
+      ? waistY - highHipDropMm / 1000
+      : undefined;
+  const highHipY =
+    options.torsoSectionStations?.highHip?.[1] ??
+    (protocolHighHipY !== undefined &&
+    waistY !== undefined &&
+    hipY !== undefined &&
+    hipY < protocolHighHipY &&
+    protocolHighHipY < waistY
+      ? protocolHighHipY
+      : undefined);
+  if (measurementName === 'BODY_MEASUREMENT_NAME_HIGH_HIP' && highHipY === undefined) {
+    return result(measurementName, 'unavailable-section');
+  }
   const torsoY =
     measurementName === 'BODY_MEASUREMENT_NAME_CHEST'
       ? chestY
@@ -338,8 +364,8 @@ export function buildMeasurementSurfaceActiveMeasurementGuideV1(options: {
             )
         : measurementName === 'BODY_MEASUREMENT_NAME_WAIST'
           ? waistY
-          : measurementName === 'BODY_MEASUREMENT_NAME_HIGH_HIP' && waistY && hipY
-            ? waistY + (hipY - waistY) * 0.45
+          : measurementName === 'BODY_MEASUREMENT_NAME_HIGH_HIP'
+            ? highHipY
             : measurementName === 'BODY_MEASUREMENT_NAME_HIP'
               ? hipY
               : undefined;
@@ -416,12 +442,15 @@ export function buildMeasurementSurfaceActiveMeasurementGuideV1(options: {
     const admittedMode = measurementKey
       ? options.limbSectionModes?.find((candidate) => candidate.measurementKey === measurementKey)
       : undefined;
-    const admittedStation = admittedMode
-      ? deriveOpenReferenceLimbSectionStationsV1({
-          positionsM: mesh.positions,
-          mode: admittedMode,
-        }).find(({ side }) => side === 'positive')
-      : undefined;
+    const admittedStation =
+      measurementName === 'BODY_MEASUREMENT_NAME_KNEE'
+        ? options.kneeSectionStations?.find(({ side }) => side === 'positive')
+        : admittedMode
+          ? deriveOpenReferenceLimbSectionStationsV1({
+              positionsM: mesh.positions,
+              mode: admittedMode,
+            }).find(({ side }) => side === 'positive')
+          : undefined;
     const segment = frame.segments.find(({ id }) => id === limbConfig.segmentId);
     return visibleOrUnavailable(measurementName, [
       admittedStation

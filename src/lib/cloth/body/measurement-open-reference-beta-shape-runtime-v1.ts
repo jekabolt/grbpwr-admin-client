@@ -1,3 +1,8 @@
+import {
+  loadMakeHumanLimbCircumferenceDeltaBundleV1,
+  type MakeHumanLimbCircumferenceDeltaBundleV1,
+} from './makehuman-limb-circumference-delta-bundle-v1';
+import { createMakeHumanLimbCircumferenceUniformModesV1 } from './makehuman-limb-circumference-uniform-modes-v1';
 import { type MakeHumanTorsoShapeDeltaBundleV1 } from './makehuman-torso-shape-delta-bundle-v1';
 import {
   applyMakeHuman2ArmLengthProxyToDisplayPositionsMResearchV1,
@@ -18,6 +23,12 @@ import {
   createMakeHumanDisplayPoseResourceLoaderV1,
   type MeasurementOpenReferenceDisplayPoseResourcesV1,
 } from './measurement-open-reference-display-pose-runtime-v1';
+import {
+  deriveMeasurementOpenReferenceKneeProxyStationsV1,
+  resolveMeasurementOpenReferenceKneeRigStationsV1,
+  type MeasurementOpenReferenceKneeRigStationV1,
+} from './measurement-open-reference-knee-proxy-v1';
+import { solveMeasurementOpenReferenceKneeProxyInWorkerV1 } from './measurement-open-reference-knee-proxy-worker-v1';
 import {
   createMeasurementOpenReferenceLimbSubsetRuntimeV1,
   type MeasurementOpenReferenceLimbSubsetRuntimeResultV1,
@@ -70,6 +81,7 @@ export const MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_KEYS_V1 = Object.freeze([
   'underBustCircumferenceMm',
   'waistCircumferenceMm',
   'hipCircumferenceMm',
+  'highHipCircumferenceMm',
   'chestDepthMm',
   'waistDepthMm',
   'hipDepthMm',
@@ -77,6 +89,7 @@ export const MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_KEYS_V1 = Object.freeze([
   'bicepCircumferenceMm',
   'wristCircumferenceMm',
   'thighCircumferenceMm',
+  'kneeCircumferenceMm',
   'calfCircumferenceMm',
   'ankleCircumferenceMm',
 ] as const);
@@ -101,8 +114,12 @@ export interface MeasurementOpenReferenceBetaShapeRuntimeResultV1 {
     chest?: readonly [number, number, number];
     underBust?: readonly [number, number, number];
     waist?: readonly [number, number, number];
+    /** Protocol high-hip station (waist minus waistToHighHipMm), present when high hip ran. */
+    highHip?: readonly [number, number, number];
     hip?: readonly [number, number, number];
   }>;
+  /** Rig-only knee planes (lowerleg01 heads); present whenever the core rig resolves. */
+  readonly kneeSectionStations?: readonly MeasurementOpenReferenceKneeRigStationV1[];
   readonly sourceRevisionSuffix: string;
   readonly claims: {
     readonly visualReferenceOnly: true;
@@ -112,6 +129,9 @@ export interface MeasurementOpenReferenceBetaShapeRuntimeResultV1 {
     readonly underBustIndependentRibcageBand: true;
     readonly torsoDepthSymmetricSectionProxyOnly: true;
     readonly torsoDepthFrontBackDistributionCalibrated: false;
+    readonly highHipSectionProxyOnly: true;
+    readonly kneeRadialSectionProxyOnly: true;
+    readonly circumferenceRangeCalibrated: false;
     readonly armLengthCenterlineProxyOnly: true;
     readonly sleeveLengthRepresented: false;
     readonly inseamRepresented: false;
@@ -134,6 +154,8 @@ export type MeasurementOpenReferenceBetaShapeLengthPackLoaderV1 =
   () => Promise<MakeHuman2PoseCompatibleLengthPackV1>;
 export type MeasurementOpenReferenceBetaShapePoseResourcesLoaderV1 =
   () => Promise<MeasurementOpenReferenceDisplayPoseResourcesV1>;
+export type MeasurementOpenReferenceBetaShapeLimbBundleLoaderV1 =
+  () => Promise<MakeHumanLimbCircumferenceDeltaBundleV1>;
 export type MeasurementOpenReferenceBetaShapeQualityGateEvaluatorV1 = (options: {
   readonly uniformPositionsM: Float32Array;
   readonly personalizedPositionsM: Float32Array;
@@ -153,6 +175,9 @@ const CLAIMS = Object.freeze({
   underBustIndependentRibcageBand: true as const,
   torsoDepthSymmetricSectionProxyOnly: true as const,
   torsoDepthFrontBackDistributionCalibrated: false as const,
+  highHipSectionProxyOnly: true as const,
+  kneeRadialSectionProxyOnly: true as const,
+  circumferenceRangeCalibrated: false as const,
   armLengthCenterlineProxyOnly: true as const,
   sleeveLengthRepresented: false as const,
   inseamRepresented: false as const,
@@ -186,6 +211,40 @@ function withDisplayPositions(
     qualityGate,
     poseCompatibleArmLengthProxy,
   });
+}
+
+/** A late, locally gated proxy that the final global gate may drop alone (risk R4). */
+interface DroppableBetaShapeStageV1 {
+  readonly key: 'highHipCircumferenceMm' | 'kneeCircumferenceMm';
+  readonly beforeM: Float32Array;
+  readonly afterM: Float32Array;
+}
+
+/** Removes the stages' own displacement; later additive stages (limbs, knee) stay in place. */
+function withoutBetaShapeStages(
+  positionsM: Float32Array,
+  stages: readonly DroppableBetaShapeStageV1[],
+): Float32Array {
+  const next = positionsM.slice();
+  for (const stage of stages) {
+    if (stage.beforeM.length !== next.length || stage.afterM.length !== next.length) {
+      throw new Error(`${stage.key} rollback topology does not match the display mesh.`);
+    }
+    for (let index = 0; index < next.length; index += 1) {
+      const delta = stage.afterM[index] - stage.beforeM[index];
+      if (delta !== 0) next[index] -= delta;
+    }
+  }
+  return next;
+}
+
+function removeKey(
+  keys: MeasurementOpenReferenceBetaShapeKeyV1[],
+  key: MeasurementOpenReferenceBetaShapeKeyV1,
+): void {
+  for (let index = keys.length - 1; index >= 0; index -= 1) {
+    if (keys[index] === key) keys.splice(index, 1);
+  }
 }
 
 function stableKeys(keys: readonly MeasurementOpenReferenceBetaShapeKeyV1[]) {
@@ -279,6 +338,8 @@ async function createBetaShapeRuntimeOnceV1(options: {
   readonly selfIntersectionPolicy?: MeasurementSurfaceSelfIntersectionPolicyV1;
   readonly evaluateQualityGate?: MeasurementOpenReferenceBetaShapeQualityGateEvaluatorV1;
   readonly createTorsoShape?: typeof createMeasurementOpenReferenceBetaTorsoInWorkerV1;
+  readonly loadLimbBundle?: MeasurementOpenReferenceBetaShapeLimbBundleLoaderV1;
+  readonly solveKneeProxy?: typeof solveMeasurementOpenReferenceKneeProxyInWorkerV1;
   readonly signal?: AbortSignal;
 }): Promise<MeasurementOpenReferenceBetaShapeRuntimeResultV1> {
   const admittedBasisRevision =
@@ -294,6 +355,12 @@ async function createBetaShapeRuntimeOnceV1(options: {
   const baselineRepresented = Object.freeze([...represented]);
   let chestStationOriginM: readonly [number, number, number] | undefined;
   let underBustStationOriginM: readonly [number, number, number] | undefined;
+  let highHipStationOriginM: readonly [number, number, number] | undefined;
+  let highHipStage: DroppableBetaShapeStageV1 | undefined;
+  let kneeStage: DroppableBetaShapeStageV1 | undefined;
+  let poseResourcesPromise: Promise<MeasurementOpenReferenceDisplayPoseResourcesV1> | undefined;
+  const poseResources = () =>
+    (poseResourcesPromise ??= (options.loadPoseResources ?? loadBetaShapePoseResourcesV1)());
   let shapedRuntime = withDisplayPositions(
     options.waistHipRuntime,
     options.waistHipRuntime.displayMesh.positions,
@@ -308,6 +375,9 @@ async function createBetaShapeRuntimeOnceV1(options: {
       measurements: options.measurements,
       sourcePositionsM: shapedRuntime.displayMesh.positions,
       triangleIndices: shapedRuntime.displayMesh.indices,
+      ...(options.measurements.highHipCircumferenceMm == null
+        ? {}
+        : { highHipCircumferenceMm: options.measurements.highHipCircumferenceMm }),
       loadTorsoBundle: options.loadTorsoBundle,
       signal: options.signal,
     });
@@ -315,23 +385,39 @@ async function createBetaShapeRuntimeOnceV1(options: {
       ...torso.ribcageDiagnostics,
       ...torso.chestShoulderDiagnostics,
       ...torso.depthDiagnostics.map(({ measurementKey, code }) => `${measurementKey}:${code}`),
+      ...torso.highHipDiagnostics.map(({ code }) => `highHipCircumferenceMm:${code}`),
     );
     chestStationOriginM = torso.chestStationOriginM;
     underBustStationOriginM = torso.underBustStationOriginM;
+    highHipStationOriginM = torso.highHipStationOriginM;
     represented.push(
       ...torso.ribcageRepresentedMeasurements,
       ...torso.chestShoulderRepresentedMeasurements,
       ...torso.depthRepresentedMeasurements,
+      ...(torso.highHipRepresented ? (['highHipCircumferenceMm'] as const) : []),
     );
-    limited.push(...torso.chestShoulderLimitedMeasurements, ...torso.depthLimitedMeasurements);
+    limited.push(
+      ...torso.chestShoulderLimitedMeasurements,
+      ...torso.depthLimitedMeasurements,
+      ...(torso.highHipLimited ? (['highHipCircumferenceMm'] as const) : []),
+    );
+    const highHipApplied = torso.highHipRepresented || torso.highHipLimited;
     if (
       torso.ribcageRepresentedMeasurements.length > 0 ||
       torso.chestShoulderRepresentedMeasurements.length > 0 ||
       torso.chestShoulderLimitedMeasurements.length > 0 ||
       torso.depthRepresentedMeasurements.length > 0 ||
-      torso.depthLimitedMeasurements.length > 0
+      torso.depthLimitedMeasurements.length > 0 ||
+      highHipApplied
     ) {
       shapedRuntime = withDisplayPositions(shapedRuntime, torso.positionsM);
+      if (highHipApplied && torso.positionsBeforeHighHipM) {
+        highHipStage = Object.freeze({
+          key: 'highHipCircumferenceMm' as const,
+          beforeM: torso.positionsBeforeHighHipM,
+          afterM: torso.positionsM,
+        });
+      }
     }
   } catch (reason: unknown) {
     if (reason instanceof Error && reason.name === 'AbortError') throw reason;
@@ -407,21 +493,100 @@ async function createBetaShapeRuntimeOnceV1(options: {
     );
   }
 
+  let kneeSectionStations: readonly MeasurementOpenReferenceKneeRigStationV1[] | undefined;
   try {
-    const [lengthPack, poseResources] = await Promise.all([
+    const { rig } = await poseResources();
+    kneeSectionStations = resolveMeasurementOpenReferenceKneeRigStationsV1({
+      basis: options.basis,
+      heightMm: options.measurements.heightMm,
+      rig,
+    });
+  } catch (reason: unknown) {
+    if (reason instanceof Error && reason.name === 'AbortError') throw reason;
+    // Guide-only data: the guide keeps its analytical knee band when the rig is unavailable.
+  }
+
+  // Knee runs after the limb runtime and its final closure, on the shaped legs (spec §2.2).
+  const kneeTargetMm = options.measurements.kneeCircumferenceMm;
+  if (kneeTargetMm != null) {
+    try {
+      const [{ rig }, limbBundle] = await Promise.all([
+        poseResources(),
+        (options.loadLimbBundle ?? loadMakeHumanLimbCircumferenceDeltaBundleV1)(),
+      ]);
+      const beforeM = shapedRuntime.displayMesh.positions;
+      const stations = measuredBetaShapeStageV1('derive-knee-stations', () => {
+        // Uniform (not localized) protected modes, so the knee stations never depend on which
+        // limb fields happen to be filled in.
+        const { modes } = createMakeHumanLimbCircumferenceUniformModesV1({
+          basis: options.basis,
+          heightMm: options.measurements.heightMm,
+          bundle: limbBundle,
+        });
+        const thighMode = modes.find(
+          ({ measurementKey }) => measurementKey === 'thighCircumferenceMm',
+        );
+        const calfMode = modes.find(
+          ({ measurementKey }) => measurementKey === 'calfCircumferenceMm',
+        );
+        if (!thighMode || !calfMode) throw new Error('Knee protected limb modes are missing.');
+        return deriveMeasurementOpenReferenceKneeProxyStationsV1({
+          positionsM: beforeM,
+          basis: options.basis,
+          heightMm: options.measurements.heightMm,
+          rig,
+          thighMode,
+          calfMode,
+        });
+      });
+      const knee = await (
+        options.solveKneeProxy ?? solveMeasurementOpenReferenceKneeProxyInWorkerV1
+      )(
+        {
+          positionsM: beforeM,
+          triangleIndices: shapedRuntime.displayMesh.indices,
+          pose: shapedRuntime.openReference.pose,
+          targetMm: kneeTargetMm,
+          stations,
+        },
+        options.signal,
+      );
+      diagnostics.push(...knee.diagnostics.map(({ code }) => `kneeCircumferenceMm:${code}`));
+      if (knee.status === 'represented' || knee.status === 'limited') {
+        (knee.status === 'represented' ? represented : limited).push('kneeCircumferenceMm');
+        shapedRuntime = withDisplayPositions(shapedRuntime, knee.positionsM);
+        kneeStage = Object.freeze({
+          key: 'kneeCircumferenceMm' as const,
+          beforeM,
+          afterM: shapedRuntime.displayMesh.positions,
+        });
+      }
+    } catch (reason: unknown) {
+      if (reason instanceof Error && reason.name === 'AbortError') throw reason;
+      diagnostics.push(
+        `kneeCircumferenceMm:runtime-unavailable:${reason instanceof Error ? reason.message : String(reason)}`,
+      );
+    }
+  }
+
+  const positionsBeforeArmLengthM = shapedRuntime.displayMesh.positions;
+  let appliedArmLength: MakeHuman2ArmLengthProxyAppliedV1 | undefined;
+  try {
+    const [lengthPack, { rig }] = await Promise.all([
       (options.loadLengthPack ?? loadMakeHuman2PoseCompatibleLengthPackV1)(),
-      (options.loadPoseResources ?? loadBetaShapePoseResourcesV1)(),
+      poseResources(),
     ]);
     const armLength = measuredBetaShapeStageV1('compile-arm-length', () =>
       (options.createArmLengthRuntime ?? createMakeHuman2ArmLengthProxyRuntimeResearchV1)({
         basis: options.basis,
-        rigBundle: poseResources.rig,
+        rigBundle: rig,
         pack: lengthPack,
         armLengthMm: options.measurements.armLengthMm,
         heightMm: options.measurements.heightMm,
       }),
     );
     if (armLength.ok) {
+      appliedArmLength = armLength;
       const positionsM = measuredBetaShapeStageV1('apply-arm-length', () =>
         applyMakeHuman2ArmLengthProxyToDisplayPositionsMResearchV1({
           basis: options.basis,
@@ -453,7 +618,7 @@ async function createBetaShapeRuntimeOnceV1(options: {
 
   const evaluateQualityGate =
     options.evaluateQualityGate ?? evaluateMeasurementOpenReferenceDisplayQualityInWorkerV1;
-  const finalQualityGate = await evaluateQualityGate({
+  let finalQualityGate = await evaluateQualityGate({
     uniformPositionsM: shapedRuntime.openReference.mesh.positions,
     personalizedPositionsM: shapedRuntime.displayMesh.positions,
     triangleIndices: shapedRuntime.displayMesh.indices,
@@ -461,6 +626,41 @@ async function createBetaShapeRuntimeOnceV1(options: {
     selfIntersectionPolicy: options.selfIntersectionPolicy,
     signal: options.signal,
   });
+  if (!finalQualityGate.safe && (kneeStage || highHipStage)) {
+    // R4: drop the late proxies alone (knee, then high hip, then both) before the global rollback,
+    // so one failing station never wipes waist/hip, depth or limbs.
+    const candidates: (readonly DroppableBetaShapeStageV1[])[] =
+      kneeStage && highHipStage
+        ? [[kneeStage], [highHipStage], [kneeStage, highHipStage]]
+        : [[(kneeStage ?? highHipStage)!]];
+    for (const dropped of candidates) {
+      const withoutStagesM = withoutBetaShapeStages(positionsBeforeArmLengthM, dropped);
+      const candidateM = appliedArmLength
+        ? applyMakeHuman2ArmLengthProxyToDisplayPositionsMResearchV1({
+            basis: options.basis,
+            sourcePositionsM: withoutStagesM,
+            armProxy: appliedArmLength,
+          })
+        : withoutStagesM;
+      const candidateGate = await evaluateQualityGate({
+        uniformPositionsM: shapedRuntime.openReference.mesh.positions,
+        personalizedPositionsM: candidateM,
+        triangleIndices: shapedRuntime.displayMesh.indices,
+        admittedBasisRevision,
+        selfIntersectionPolicy: options.selfIntersectionPolicy,
+        signal: options.signal,
+      });
+      if (!candidateGate.safe) continue;
+      for (const { key } of dropped) {
+        removeKey(represented, key);
+        removeKey(limited, key);
+        diagnostics.push(`${key}:beta-final-quality-rollback`);
+      }
+      shapedRuntime = withDisplayPositions(shapedRuntime, candidateM, candidateGate);
+      finalQualityGate = candidateGate;
+      break;
+    }
+  }
   if (finalQualityGate.safe) {
     shapedRuntime = withDisplayPositions(
       shapedRuntime,
@@ -536,9 +736,11 @@ async function createBetaShapeRuntimeOnceV1(options: {
       options.measurements.chestDepthMm,
       options.measurements.waistDepthMm,
       options.measurements.hipDepthMm,
+      options.measurements.highHipCircumferenceMm,
       options.measurements.bicepCircumferenceMm,
       options.measurements.wristCircumferenceMm,
       options.measurements.thighCircumferenceMm,
+      options.measurements.kneeCircumferenceMm,
       options.measurements.calfCircumferenceMm,
       options.measurements.ankleCircumferenceMm,
     ].filter((value) => value != null).length;
@@ -572,8 +774,10 @@ async function createBetaShapeRuntimeOnceV1(options: {
       chest: chestStationOriginM,
       underBust: underBustStationOriginM,
       waist: waistStationOriginM,
+      highHip: highHipStationOriginM,
       hip: hipStationOriginM,
     }),
+    kneeSectionStations,
     sourceRevisionSuffix: suffix(representedVisualControls, limitedVisualControls),
     claims: CLAIMS,
   });

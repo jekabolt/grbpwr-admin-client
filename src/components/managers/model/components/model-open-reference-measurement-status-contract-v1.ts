@@ -13,7 +13,7 @@ export type ModelOpenReferenceMeasurementStatusV1 =
   | 'notApplied'
   | 'unsupported';
 
-export type ModelOpenReferenceRawMeasurementFieldV1 = 'highHipMm' | 'kneeCircumferenceMm';
+export type ModelOpenReferenceRawMeasurementFieldV1 = never;
 
 export type ModelOpenReferenceMeasurementFieldIdV1 =
   | CanonicalMeasurementKey
@@ -44,6 +44,7 @@ const DIRECT_BOUNDED_PROXY = new Set<CanonicalMeasurementKey>([
   'underBustCircumferenceMm',
   'waistCircumferenceMm',
   'hipCircumferenceMm',
+  'highHipCircumferenceMm',
   'chestDepthMm',
   'waistDepthMm',
   'hipDepthMm',
@@ -51,6 +52,7 @@ const DIRECT_BOUNDED_PROXY = new Set<CanonicalMeasurementKey>([
   'bicepCircumferenceMm',
   'wristCircumferenceMm',
   'thighCircumferenceMm',
+  'kneeCircumferenceMm',
   'calfCircumferenceMm',
   'ankleCircumferenceMm',
 ]);
@@ -68,6 +70,7 @@ const CANONICAL_FIELD_ORDER = Object.freeze([
   'underBustCircumferenceMm',
   'waistCircumferenceMm',
   'hipCircumferenceMm',
+  'highHipCircumferenceMm',
   'chestDepthMm',
   'waistDepthMm',
   'hipDepthMm',
@@ -77,6 +80,7 @@ const CANONICAL_FIELD_ORDER = Object.freeze([
   'bicepCircumferenceMm',
   'wristCircumferenceMm',
   'thighCircumferenceMm',
+  'kneeCircumferenceMm',
   'calfCircumferenceMm',
   'ankleCircumferenceMm',
   'hpsToWaistFrontMm',
@@ -95,21 +99,6 @@ const CANONICAL_FIELD_ORDER = Object.freeze([
   'bustApexToApexMm',
   'hpsToBustApexMm',
 ] as const satisfies readonly CanonicalMeasurementKey[]);
-
-const RAW_FIELDS = Object.freeze([
-  Object.freeze({
-    fieldId: 'highHipMm' as const,
-    label: 'high hip',
-    source: Object.freeze({ kind: 'raw' as const, key: 'BODY_MEASUREMENT_NAME_HIGH_HIP' }),
-    capability: 'unsupported' as const,
-  }),
-  Object.freeze({
-    fieldId: 'kneeCircumferenceMm' as const,
-    label: 'knee',
-    source: Object.freeze({ kind: 'raw' as const, key: 'BODY_MEASUREMENT_NAME_KNEE' }),
-    capability: 'unsupported' as const,
-  }),
-]);
 
 function label(key: string): string {
   return key
@@ -137,7 +126,6 @@ export const MODEL_OPEN_REFERENCE_MEASUREMENT_STATUS_FIELDS_V1 = Object.freeze([
       capability: canonicalCapability(key),
     }),
   ),
-  ...RAW_FIELDS,
 ]) satisfies readonly ModelOpenReferenceMeasurementStatusContractEntryV1[];
 
 function populated(value: number | undefined): boolean {
@@ -145,7 +133,7 @@ function populated(value: number | undefined): boolean {
 }
 
 /**
- * Resolves all 34 project fields on every build. A capability describes what the beta can do;
+ * Resolves all 34 canonical project fields on every build. A capability describes what the beta can do;
  * `notApplied` is reserved for a requested direct control that rolled back or was unavailable.
  * Modifier-only inputs may influence another proxy, but never claim their own measured closure.
  */
