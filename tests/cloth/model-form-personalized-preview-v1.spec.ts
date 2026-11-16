@@ -21,6 +21,7 @@ const LIVE_SESSION_STAGE_MEASURE = 'makehuman-full-body-live-fk-session-stage/v5
 const SIDE_SEAM_WORKER_MEASURE = 'makehuman-arm-side-seam-assist-worker/v1';
 const BETA_SHAPE_STAGE_MEASURE = 'measurement-open-reference-beta-shape-stage/v1';
 const BETA_TORSO_WORKER_MEASURE = 'measurement-open-reference-beta-torso-worker/v1';
+const KNEE_WORKER_MEASURE = 'measurement-open-reference-knee-proxy-worker/v1';
 
 function v9PoseFromSourceRevision(sourceRevision: string | null): Record<string, unknown> {
   const encoded = sourceRevision?.match(/(?:^|;)editorPoseV9=([^;]+)/u)?.[1];
@@ -725,4 +726,229 @@ test('real ModelForm admits female, male and neutral open-reference bases', asyn
   await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
   await expect(canvas).toHaveAttribute('data-source-revision', /basisKind=neutral/u);
   await expect(status).not.toContainText('Preview failed');
+});
+
+type HighHipKneeFrameGapV1 = { startAt: number; endAt: number; gapMs: number };
+
+async function startFrameGapAudit(page: import('@playwright/test').Page) {
+  await page.evaluate(() => {
+    const startedAt = performance.now();
+    const audit = {
+      active: true,
+      startedAt,
+      lastAt: startedAt,
+      maximumGapMs: 0,
+      gaps: [] as HighHipKneeFrameGapV1[],
+    };
+    (window as typeof window & { __highHipKneeFrameAudit?: typeof audit }).__highHipKneeFrameAudit =
+      audit;
+    const frame = (at: number) => {
+      const gapMs = at - audit.lastAt;
+      audit.maximumGapMs = Math.max(audit.maximumGapMs, gapMs);
+      audit.gaps.push({ startAt: audit.lastAt, endAt: at, gapMs });
+      audit.lastAt = at;
+      if (audit.active) requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+  });
+}
+
+/**
+ * Frame evidence for one edit: the torso and knee worker solves it ran, the longest frame gap
+ * while either solve was in flight, and the longest gaps overall with the measures they overlap.
+ */
+async function stopFrameGapAudit(page: import('@playwright/test').Page) {
+  return page.evaluate(
+    ([torsoWorkerMeasureName, kneeWorkerMeasureName]) => {
+      const audit = (
+        window as typeof window & {
+          __highHipKneeFrameAudit?: {
+            active: boolean;
+            startedAt: number;
+            maximumGapMs: number;
+            gaps: HighHipKneeFrameGapV1[];
+          };
+        }
+      ).__highHipKneeFrameAudit;
+      if (!audit) {
+        return {
+          maximumGapMs: Number.POSITIVE_INFINITY,
+          workerSolveGapMs: Number.POSITIVE_INFINITY,
+          torsoWorkerJobs: 0,
+          kneeWorkerJobs: 0,
+          longestGaps: [],
+        };
+      }
+      audit.active = false;
+      const measures = (performance.getEntriesByType('measure') as PerformanceMeasure[]).filter(
+        (measure) => measure.startTime >= audit.startedAt,
+      );
+      const overlaps = (gap: HighHipKneeFrameGapV1, measure: PerformanceMeasure) =>
+        measure.startTime < gap.endAt && measure.startTime + measure.duration > gap.startAt;
+      const workerSolves = measures.filter(
+        ({ name }) => name === torsoWorkerMeasureName || name === kneeWorkerMeasureName,
+      );
+      const longestGaps = audit.gaps
+        .filter(({ gapMs }) => gapMs > 100)
+        .sort((left, right) => right.gapMs - left.gapMs)
+        .slice(0, 3)
+        .map((gap) => ({
+          gapMs: Math.round(gap.gapMs),
+          overlaps: measures
+            .filter((measure) => overlaps(gap, measure))
+            .map((measure) => {
+              const stage = (measure.detail as { stage?: string } | null)?.stage;
+              return `${measure.name}${stage ? `:${stage}` : ''}=${Math.round(measure.duration)}`;
+            }),
+        }));
+      return {
+        maximumGapMs: audit.maximumGapMs,
+        workerSolveGapMs: Math.max(
+          0,
+          ...audit.gaps
+            .filter((gap) => workerSolves.some((measure) => overlaps(gap, measure)))
+            .map(({ gapMs }) => gapMs),
+        ),
+        torsoWorkerJobs: workerSolves.filter(({ name }) => name === torsoWorkerMeasureName).length,
+        kneeWorkerJobs: workerSolves.filter(({ name }) => name === kneeWorkerMeasureName).length,
+        longestGaps,
+      };
+    },
+    [BETA_TORSO_WORKER_MEASURE, KNEE_WORKER_MEASURE],
+  );
+}
+
+async function appliedOrLimitedKeys(
+  measurementApplication: import('@playwright/test').Locator,
+): Promise<Set<string>> {
+  const applied = (await measurementApplication.getAttribute('data-applied')) ?? '';
+  const limited = (await measurementApplication.getAttribute('data-limited')) ?? '';
+  return new Set([...applied.split(','), ...limited.split(',')].filter(Boolean));
+}
+
+async function exerciseHighHipAndKnee(page: import('@playwright/test').Page, basisKind: string) {
+  const preview = page.getByTestId('model-open-reference-preview');
+  const status = page.getByTestId('model-open-reference-preview-status');
+  const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
+  const measurementApplication = page.getByTestId(
+    'model-open-reference-measurement-application-status',
+  );
+  const inseam = page.getByRole('textbox', { name: 'inseam', exact: true });
+  await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
+  await expect(canvas).toHaveAttribute(
+    'data-source-revision',
+    new RegExp(`basisKind=${basisKind}`),
+  );
+  const frameAudits: Array<
+    { edit: string; label: 'high hip' | 'knee' } & Awaited<ReturnType<typeof stopFrameGapAudit>>
+  > = [];
+
+  // The inseam guide draws no path, so canvas screenshots compare body geometry only.
+  const bodyScreenshot = async () => {
+    await inseam.focus();
+    await expect(canvas).toHaveAttribute('data-measurement-guide-path-count', '0');
+    await page.mouse.move(0, 0);
+    return canvas.screenshot();
+  };
+  const edit = async (label: 'high hip' | 'knee', value: string) => {
+    const before = await canvas.getAttribute('data-source-revision');
+    const keysBefore = await appliedOrLimitedKeys(measurementApplication);
+    await startFrameGapAudit(page);
+    const input = page.getByRole('textbox', { name: label, exact: true });
+    await input.fill(value);
+    await input.blur();
+    await expect
+      .poll(() => canvas.getAttribute('data-source-revision'), { timeout: 180_000 })
+      .not.toBe(before);
+    await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
+    await expect(preview).toHaveAttribute('data-body-display-ownership', 'current');
+    frameAudits.push({ edit: `${label}=${value}`, label, ...(await stopFrameGapAudit(page)) });
+    const keysAfter = await appliedOrLimitedKeys(measurementApplication);
+    // Nothing that was applied before rolls back because of the new field.
+    for (const key of keysBefore) expect(keysAfter.has(key), `${label} kept ${key}`).toBe(true);
+    return { revision: await canvas.getAttribute('data-source-revision'), keysAfter };
+  };
+
+  const baselineKeys = await appliedOrLimitedKeys(measurementApplication);
+  expect(baselineKeys.has('waistCircumferenceMm')).toBe(true);
+  expect(baselineKeys.has('hipCircumferenceMm')).toBe(true);
+  const baselineShape = await bodyScreenshot();
+
+  const highHip = await edit('high hip', '870');
+  expect(highHip.revision).toMatch(/(?:represented|limited)=[^;]*highHipCircumferenceMm/u);
+  expect(highHip.keysAfter.has('highHipCircumferenceMm')).toBe(true);
+  await expect(measurementApplication).not.toHaveAttribute(
+    'data-not-applied',
+    /highHipCircumferenceMm/u,
+  );
+  const highHipShape = await bodyScreenshot();
+  expect(highHipShape.equals(baselineShape)).toBe(false);
+  await page.getByRole('textbox', { name: 'high hip', exact: true }).focus();
+  await expect(canvas).toHaveAttribute(
+    'data-active-measurement-guide',
+    'BODY_MEASUREMENT_NAME_HIGH_HIP',
+  );
+  await expect(canvas).toHaveAttribute('data-measurement-guide-status', 'visible');
+
+  const knee = await edit('knee', '380');
+  expect(knee.revision).toMatch(/(?:represented|limited)=[^;]*kneeCircumferenceMm/u);
+  expect(knee.keysAfter.has('kneeCircumferenceMm')).toBe(true);
+  await expect(measurementApplication).not.toHaveAttribute(
+    'data-not-applied',
+    /kneeCircumferenceMm/u,
+  );
+  const kneeShape = await bodyScreenshot();
+  expect(kneeShape.equals(highHipShape)).toBe(false);
+  await page.getByRole('textbox', { name: 'knee', exact: true }).focus();
+  await expect(canvas).toHaveAttribute(
+    'data-active-measurement-guide',
+    'BODY_MEASUREMENT_NAME_KNEE',
+  );
+  await expect(canvas).toHaveAttribute('data-measurement-guide-status', 'visible');
+
+  // Far outside the +/-10% deformation-safety bound: clamped and named, never hidden.
+  await edit('high hip', '1300');
+  await expect(measurementApplication).toHaveAttribute('data-limited', /highHipCircumferenceMm/u);
+  await expect(measurementApplication).toContainText('limited by safe range');
+  await expect(measurementApplication).toContainText('high hip circumference');
+  await edit('knee', '600');
+  await expect(measurementApplication).toHaveAttribute('data-limited', /kneeCircumferenceMm/u);
+  await expect(measurementApplication).toContainText('knee circumference');
+  await expect(measurementApplication).toHaveAttribute('data-limited', /highHipCircumferenceMm/u);
+  await expect(status).not.toContainText('Preview failed');
+
+  console.info(
+    `MANNEQUIN_HIGH_HIP_KNEE_V1=${JSON.stringify({ basisKind, frameAudits, highHip: highHip.revision?.match(/represented=[^;]*/u)?.[0] ?? null })}`,
+  );
+  // Both new section solves ran on the worker path; the worker measure exists only there. Frame
+  // timing is logged above as evidence. The frame budgets belong to the debounce test: across 12
+  // edits on a loaded machine a renderer-wide stall (gaps that overlap no runtime stage) would
+  // fail any per-edit bound here.
+  for (const audit of frameAudits) {
+    if (audit.label === 'high hip') expect(audit.torsoWorkerJobs, audit.edit).toBeGreaterThan(0);
+    else expect(audit.kneeWorkerJobs, audit.edit).toBeGreaterThan(0);
+  }
+}
+
+test('high hip and knee apply as bounded proxies on female, male and neutral bases', async ({
+  page,
+}) => {
+  test.setTimeout(900_000);
+  await prewarmDevRuntime(page);
+  await page.goto(DEV_ROUTE);
+  await exerciseHighHipAndKnee(page, 'female');
+
+  await page.getByRole('button', { name: 'switch to model beta' }).click();
+  await expect(page.getByTestId('model-form-smoke-model-id')).toHaveText('8402');
+  await exerciseHighHipAndKnee(page, 'male');
+
+  await page.getByRole('button', { name: 'show create form' }).click();
+  await page.getByRole('combobox', { name: 'select' }).click();
+  await page.getByRole('option', { name: 'unisex' }).click();
+  for (const [label, value] of REQUIRED_CREATE_MEASUREMENTS) {
+    const input = page.getByRole('textbox', { name: label, exact: true });
+    await input.fill(value);
+    await input.blur();
+  }
+  await exerciseHighHipAndKnee(page, 'neutral');
 });

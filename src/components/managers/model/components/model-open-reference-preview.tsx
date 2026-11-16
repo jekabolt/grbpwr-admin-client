@@ -242,6 +242,7 @@ interface FullBodyBuiltPreviewV3 {
   readonly measurementApplication: ModelOpenReferenceMeasurementApplicationV1 | null;
   readonly limbSectionModes: MeasurementOpenReferenceBetaShapeRuntimeResultV1['limbSectionModes'];
   readonly torsoSectionStations: MeasurementOpenReferenceBetaShapeRuntimeResultV1['torsoSectionStations'];
+  readonly kneeSectionStations: MeasurementOpenReferenceBetaShapeRuntimeResultV1['kneeSectionStations'];
   readonly bodyBuildFingerprint: string;
 }
 
@@ -2434,6 +2435,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
     editor.version !== 'full-body-v9' || directPoseViewportEditingEnabledV9;
   const directPoseControlHidden = editor.version === 'full-body-v9' && hideDirectPoseControlV9;
   const workbench = variant === 'workbench';
+  const card = variant === 'card';
   const [uncontrolledDraftPose, setUncontrolledDraftPose] = useState<Pose>(editor.neutralPose);
   const draftPose = controlledDirectPose ?? uncontrolledDraftPose;
   const [appliedPose, setAppliedPose] = useState<Pose | null>(null);
@@ -2816,6 +2818,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                   : null,
                 limbSectionModes: betaShapeRuntime?.limbSectionModes,
                 torsoSectionStations: betaShapeRuntime?.torsoSectionStations,
+                kneeSectionStations: betaShapeRuntime?.kneeSectionStations,
                 bodyBuildFingerprint: requestedBodyBuildFingerprint,
               } satisfies FullBodyBuiltPreviewV3;
             });
@@ -3047,6 +3050,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
             neutralPose: editor.equalGeometry(draftPose, editor.neutralPose),
             limbSectionModes: displayedBuilt.limbSectionModes,
             torsoSectionStations: displayedBuilt.torsoSectionStations,
+            kneeSectionStations: displayedBuilt.kneeSectionStations,
           })
         : undefined,
     [activeMeasurementName, displayedBuilt, draftPose, editor],
@@ -3525,7 +3529,13 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
 
   return (
     <div
-      className={workbench ? 'flex h-full min-h-0 flex-col gap-1' : 'flex flex-col gap-stack'}
+      className={
+        card
+          ? 'relative flex h-full min-h-0 flex-col'
+          : workbench
+            ? 'flex h-full min-h-0 flex-col gap-1'
+            : 'flex flex-col gap-stack'
+      }
       data-testid='model-open-reference-preview'
       data-pose-controls={editor.version}
       data-pose-admissibility={poseAdmissibility.status}
@@ -3556,7 +3566,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
       ) : null}
 
       {!resolution.ok ? (
-        <CalloutBox tone='warning'>
+        <CalloutBox tone='warning' className={card ? 'sr-only' : undefined}>
           <Text component='p' size='micro'>
             <b>{displayedBuilt ? 'measurements need attention' : 'preview blocked'}</b> · enter a
             plausible value for every required mannequin measurement.
@@ -3580,7 +3590,13 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
           component='p'
           size='micro'
           variant={bodyDisplayOwnership === 'retained-error' ? 'errorLabel' : 'label'}
-          className={bodyDisplayOwnership === 'retained-error' ? undefined : 'text-warning'}
+          className={
+            bodyDisplayOwnership === 'retained-error'
+              ? undefined
+              : card
+                ? 'sr-only'
+                : 'text-warning'
+          }
           role={bodyDisplayOwnership === 'retained-error' ? 'alert' : 'status'}
           aria-live={bodyDisplayOwnership === 'retained-error' ? 'assertive' : 'polite'}
           aria-atomic='true'
@@ -3610,6 +3626,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
           component='p'
           size='micro'
           variant='label'
+          className={card ? 'sr-only' : undefined}
           role='status'
           aria-live='polite'
           aria-atomic='true'
@@ -3692,6 +3709,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
               component='p'
               size='micro'
               variant={measurementApplicationPartial ? 'errorLabel' : 'label'}
+              className={card ? 'sr-only' : undefined}
               role={measurementApplicationPartial ? 'alert' : 'status'}
               aria-live='polite'
               data-testid='model-open-reference-measurement-application-status'
@@ -3758,8 +3776,13 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
           ) : null}
 
           {displayedBuilt ? (
-            <Suspense fallback={<SkeletonBlocks count={1} height={320} className='w-full' />}>
+            <Suspense
+              fallback={<SkeletonBlocks count={1} height={card ? 240 : 320} className='w-full' />}
+            >
               <MeasurementWatertightSurfaceV1Stage
+                interactive={!card}
+                exclusiveContextGroup={card ? 'model-card-preview' : undefined}
+                accessibleLabel={card ? 'mannequin preview' : undefined}
                 artifact={displayedBuilt.artifact}
                 frame={displayedBuilt.frame}
                 lod='display'
@@ -3901,11 +3924,13 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                 patternPieceOverlay={patternPieceOverlay}
                 retainVisibleCanvasOnRebuild={editor.version === 'full-body-v9'}
                 className={
-                  workbench
-                    ? 'order-1 h-full min-h-0 w-full border border-hairline'
-                    : editor.minimalViewportUi
-                      ? 'order-1 h-[62vh] min-h-[32rem] max-h-[48rem] border border-hairline'
-                      : 'h-[42vh] min-h-80 max-h-[32rem] border border-hairline'
+                  card
+                    ? 'pointer-events-none h-full min-h-0 w-full border border-hairline'
+                    : workbench
+                      ? 'order-1 h-full min-h-0 w-full border border-hairline'
+                      : editor.minimalViewportUi
+                        ? 'order-1 h-[62vh] min-h-[32rem] max-h-[48rem] border border-hairline'
+                        : 'h-[42vh] min-h-80 max-h-[32rem] border border-hairline'
                 }
                 onStatus={(nextStatus, nextError) => {
                   setStageStatus(nextStatus);

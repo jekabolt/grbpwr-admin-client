@@ -50,6 +50,12 @@ export type PatternImportDxfPhaseESavedDxfReprocessHostDepsV1 = Readonly<{
   crypto?: Pick<Crypto, 'subtle'>;
   /** Backend origin for server-relative tokenized pattern URLs; defaults to VITE_SERVER_URL. */
   serverUrl?: string;
+  /** Dev-only backend target reached through the browser's same-origin Vite proxy. */
+  apiProxyTarget?: string;
+  /** Injectable browser origin for deterministic proxy transport tests. */
+  browserOrigin?: string;
+  /** Same-origin byte proxy used only after a browser network/CORS failure. */
+  mediaProxyUrl?: string;
   /** Reads the current admin token for downloads served by that backend origin only. */
   readAuthToken?: () => string | null;
 }>;
@@ -60,8 +66,11 @@ export const PATTERN_IMPORT_DXF_PHASE_E_SAVED_DXF_REPROCESS_HOST_CLAIMS_V1 = Obj
   exactByteFetchUsesAbortSignal: true,
   backendDownloadUsesGrpcAuthHeader: true,
   backendCapabilityResolvedWithoutRedirect: true,
+  backendCapabilityNetworkRetryBounded: true,
   presignedDownloadNeverReceivesAdminToken: true,
   crossOriginDownloadNeverReceivesAdminToken: true,
+  localBackendCapabilityUsesSameOriginApiProxy: true,
+  crossOriginCorsFailureUsesMediaProxy: true,
   disposableWorkerPerReprocess: true,
   directDxfOnly: true,
   dxfPathProvenanceOptInRequired: true,
@@ -121,7 +130,8 @@ function validDownloadUrl(value: unknown): value is string {
 
 export function resolvePatternImportDxfPhaseESavedDownloadUrlV1(
   downloadUrl: string,
-  serverUrl = import.meta.env.VITE_SERVER_URL || '',
+  serverUrl = import.meta.env.VITE_SERVER_URL ||
+    (typeof window !== 'undefined' ? window.location.origin : ''),
 ): string {
   if (!validDownloadUrl(downloadUrl)) throw new Error('Saved DXF download URL is invalid.');
   if (/^[a-z][a-z0-9+.-]*:/i.test(downloadUrl)) {
@@ -141,6 +151,36 @@ export function resolvePatternImportDxfPhaseESavedDownloadUrlV1(
   if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:')
     throw new Error('Saved DXF backend origin must use HTTP or HTTPS.');
   return resolved.toString();
+}
+
+export function resolvePatternImportDxfPhaseESavedMediaProxyUrlV1(
+  downloadUrl: string,
+  mediaProxyUrl = (import.meta.env.VITE_MEDIA_PROXY_URL as string | undefined) ||
+    (typeof window !== 'undefined' ? `${window.location.origin}/media-proxy` : '/media-proxy'),
+): string {
+  if (!validDownloadUrl(downloadUrl)) throw new Error('Saved DXF byte URL is invalid.');
+  if (!validDownloadUrl(mediaProxyUrl)) throw new Error('Saved DXF media proxy URL is invalid.');
+  const separator = mediaProxyUrl.includes('?') ? '&' : '?';
+  return `${mediaProxyUrl}${separator}url=${encodeURIComponent(downloadUrl)}`;
+}
+
+async function fetchSavedDxfBytes(
+  fetcher: typeof globalThis.fetch,
+  byteUrl: string,
+  init: NonNullable<Parameters<typeof globalThis.fetch>[1]>,
+  mediaProxyUrl: string,
+  signal: AbortSignal,
+): Promise<Response> {
+  try {
+    return await fetcher(byteUrl, init);
+  } catch (error) {
+    if (signal.aborted) throw error;
+    return fetcher(resolvePatternImportDxfPhaseESavedMediaProxyUrlV1(byteUrl, mediaProxyUrl), {
+      method: 'GET',
+      credentials: 'same-origin',
+      signal,
+    });
+  }
 }
 
 function readBrowserAuthToken(): string | null {
@@ -183,6 +223,28 @@ function backendPatternCapabilityJsonUrl(resolvedUrl: string, serverUrl: string)
   return download.toString();
 }
 
+function rebaseBackendUrlToSameOriginProxy(
+  resolvedUrl: string,
+  backendUrl: string,
+  browserOrigin: string,
+): string {
+  let resolved: URL;
+  let backend: URL;
+  let browser: URL;
+  try {
+    resolved = new URL(resolvedUrl);
+    backend = new URL(backendUrl);
+    browser = new URL(browserOrigin);
+  } catch {
+    throw new Error('Saved DXF local backend proxy configuration is invalid.');
+  }
+  if (resolved.origin !== backend.origin) return resolved.toString();
+  browser.pathname = resolved.pathname;
+  browser.search = resolved.search;
+  browser.hash = '';
+  return browser.toString();
+}
+
 function exactPresignedObjectUrl(value: unknown): string {
   if (!validDownloadUrl(value) || !/^[a-z][a-z0-9+.-]*:/i.test(value))
     throw new Error('Saved DXF capability returned no absolute object URL.');
@@ -208,13 +270,27 @@ async function resolveSavedDxfByteUrl(
   if (!capabilityUrl) return Object.freeze({ url: resolvedUrl, usedCapabilityHop: false });
 
   const authHeaders = backendDownloadAuthHeaders(capabilityUrl, serverUrl, readAuthToken);
-  const response = await fetcher(capabilityUrl, {
+  const init = {
     method: 'GET',
     credentials: 'same-origin',
     redirect: 'error',
     headers: { Accept: 'application/json', ...authHeaders },
     signal,
-  });
+  } as const;
+  let response: Response | null = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    assertLive(signal);
+    try {
+      response = await fetcher(capabilityUrl, init);
+      break;
+    } catch (error) {
+      if (signal.aborted) throw abortError();
+      if (!(error instanceof TypeError)) throw error;
+      if (attempt === 1)
+        throw new Error('Saved DXF capability lookup failed due to a network error.');
+    }
+  }
+  if (!response) throw new Error('Saved DXF capability lookup failed due to a network error.');
   if (!response.ok)
     throw new Error(`Saved DXF capability lookup failed with HTTP ${response.status}.`);
   let payload: unknown;
@@ -355,6 +431,13 @@ function restoreExactSavedWriterPieces(
     const saved = manifest.pieces[manifestIndexes[pieceIndex]];
     return {
       ...piece,
+      // Restore the authoritative written outline semantics from the embedded manifest. The
+      // disposable read may measure a different cut/seam gap after round-tripping the DXF, but
+      // writer replay must reproduce the saved row byte-for-byte rather than re-decide allowance.
+      allowance: buildPatternImportDxfSavedManifestAllowanceV1({
+        cutLayerIsFinal: true,
+        allowanceMm: saved.allowanceMm,
+      }),
       fabrics: [...saved.fabrics],
       sizes: piece.sizes.map((size) => {
         const blockIndexes = manifest.blocks.flatMap((block, blockIndex) =>
@@ -436,7 +519,9 @@ export function restorePatternImportDxfSavedWriterReplayV1(
   manifest: ConversionManifest,
 ): CardDraft {
   if (draft.scopes.length !== 1 || !draft.scopes[0].writerReplay)
-    throw new Error('Saved DXF replay must produce exactly one writer-backed scope.');
+    throw new Error(
+      `Saved DXF replay must produce exactly one writer-backed scope (scopes=${String(draft.scopes.length)}, writerReplay=${String(Boolean(draft.scopes[0]?.writerReplay))}).`,
+    );
   const detached = structuredClone(draft);
   const scope = detached.scopes[0];
   const replay = scope.writerReplay;
@@ -683,7 +768,19 @@ export function createPatternImportDxfPhaseESavedDxfReprocessHostV1(
     dispose: () => void;
   }> {
   const fetcher = deps.fetch ?? globalThis.fetch;
-  const serverUrl = (deps.serverUrl ?? import.meta.env.VITE_SERVER_URL ?? '').trim();
+  const configuredServerUrl = (deps.serverUrl ?? import.meta.env.VITE_SERVER_URL ?? '').trim();
+  const apiProxyTarget = (deps.apiProxyTarget ?? import.meta.env.VITE_API_BASE_URL ?? '').trim();
+  const browserOrigin = (
+    deps.browserOrigin ?? (typeof window !== 'undefined' ? window.location.origin : '')
+  ).trim();
+  const backendServerUrl = configuredServerUrl || apiProxyTarget || browserOrigin;
+  const localBackendProxyEnabled = !configuredServerUrl && Boolean(apiProxyTarget && browserOrigin);
+  const transportServerUrl = localBackendProxyEnabled ? browserOrigin : backendServerUrl;
+  const mediaProxyUrl = (
+    deps.mediaProxyUrl ??
+    (import.meta.env.VITE_MEDIA_PROXY_URL as string | undefined) ??
+    (typeof window !== 'undefined' ? `${window.location.origin}/media-proxy` : '/media-proxy')
+  ).trim();
   const readAuthToken = deps.readAuthToken ?? readBrowserAuthToken;
   if (
     typeof deps.readAuthoritativeRow !== 'function' ||
@@ -715,24 +812,33 @@ export function createPatternImportDxfPhaseESavedDxfReprocessHostV1(
       onProgress(0, 1, 'downloading authoritative saved DXF');
       const resolvedUrl = resolvePatternImportDxfPhaseESavedDownloadUrlV1(
         authority.downloadUrl,
-        serverUrl,
+        backendServerUrl,
       );
+      const transportUrl = localBackendProxyEnabled
+        ? rebaseBackendUrlToSameOriginProxy(resolvedUrl, apiProxyTarget, browserOrigin)
+        : resolvedUrl;
       const byteTarget = await resolveSavedDxfByteUrl(
         fetcher,
-        resolvedUrl,
-        serverUrl,
+        transportUrl,
+        transportServerUrl,
         readAuthToken,
         signal,
       );
       const headers = byteTarget.usedCapabilityHop
         ? undefined
-        : backendDownloadAuthHeaders(byteTarget.url, serverUrl, readAuthToken);
-      const response = await fetcher(byteTarget.url, {
-        method: 'GET',
-        credentials: byteTarget.usedCapabilityHop ? 'omit' : 'same-origin',
-        ...(headers ? { headers } : {}),
+        : backendDownloadAuthHeaders(byteTarget.url, transportServerUrl, readAuthToken);
+      const response = await fetchSavedDxfBytes(
+        fetcher,
+        byteTarget.url,
+        {
+          method: 'GET',
+          credentials: byteTarget.usedCapabilityHop ? 'omit' : 'same-origin',
+          ...(headers ? { headers } : {}),
+          signal,
+        },
+        mediaProxyUrl,
         signal,
-      });
+      );
       if (!response.ok) throw new Error(`Saved DXF download failed with HTTP ${response.status}.`);
       const declaredLength = response.headers.get('content-length');
       if (

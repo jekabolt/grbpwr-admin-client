@@ -1488,7 +1488,6 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         techCardId={techCardId}
         zeroConnectAuthoringHandoff={zeroConnectAuthoringHandoff}
         disabled={frozen}
-        savedOnly
         selection={{ operationNumber: source.selectedOperationNumber }}
         defaultOperationsMode='docked'
         operationsPanel={
