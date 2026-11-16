@@ -3,33 +3,40 @@ import { describe, expect, it } from 'vitest';
 
 import { MODEL_MEASUREMENTS } from './sheet-measurement-focus';
 import {
-  STATIC_MEASUREMENT_GUIDES_V1,
   StaticMeasurementGuide,
-  type StaticMeasurementGuideSourcesV1,
-  staticMeasurementGuideGenderV1,
+  staticMeasurementGuideAssetCountV2,
+  staticMeasurementGuideAssetV2,
+  type StaticMeasurementGuideGenderV2,
+  type StaticMeasurementGuideSourcesV2,
+  staticMeasurementGuideGenderV2,
 } from './static-measurement-guide';
 
-const SOURCES: StaticMeasurementGuideSourcesV1 = {
-  female: { front: '/female.png', back: '/female-back.png', side: '/female-side.png' },
-  male: { front: '/male.png', back: '/male-back.png', side: '/male-side.png' },
-  neutral: { front: '/neutral.png', back: '/neutral-back.png', side: '/neutral-side.png' },
-};
+const source = (gender: StaticMeasurementGuideGenderV2, measurementName: string) =>
+  `/${gender}/${measurementName}.webp`;
+const SOURCES: StaticMeasurementGuideSourcesV2 = Object.fromEntries(
+  (['female', 'male', 'neutral'] as const).map((gender) => [
+    gender,
+    Object.fromEntries(
+      MODEL_MEASUREMENTS.map(({ name }) => [name, source(gender, name as string)]),
+    ),
+  ]),
+) as StaticMeasurementGuideSourcesV2;
 
 describe('static measurement guide', () => {
-  it('defines a visible marker for every model measurement', () => {
-    expect(Object.keys(STATIC_MEASUREMENT_GUIDES_V1)).toHaveLength(MODEL_MEASUREMENTS.length);
-    expect(
-      MODEL_MEASUREMENTS.map(({ name }) => name).filter(
-        (name) => !STATIC_MEASUREMENT_GUIDES_V1[name],
-      ),
-    ).toEqual([]);
+  it('ships one baked image for every gender and model measurement', () => {
+    expect(staticMeasurementGuideAssetCountV2()).toBe(MODEL_MEASUREMENTS.length * 3);
+    for (const gender of ['female', 'male', 'neutral'] as const) {
+      for (const { name } of MODEL_MEASUREMENTS) {
+        expect(staticMeasurementGuideAssetV2(gender, name)).toMatch(/\.webp$/u);
+      }
+    }
   });
 
   it('uses different gender artwork while keeping an explicit neutral fallback', () => {
-    expect(staticMeasurementGuideGenderV1('GENDER_ENUM_FEMALE')).toBe('female');
-    expect(staticMeasurementGuideGenderV1('GENDER_ENUM_MALE')).toBe('male');
-    expect(staticMeasurementGuideGenderV1('GENDER_ENUM_UNISEX')).toBe('neutral');
-    expect(staticMeasurementGuideGenderV1(undefined)).toBe('neutral');
+    expect(staticMeasurementGuideGenderV2('GENDER_ENUM_FEMALE')).toBe('female');
+    expect(staticMeasurementGuideGenderV2('GENDER_ENUM_MALE')).toBe('male');
+    expect(staticMeasurementGuideGenderV2('GENDER_ENUM_UNISEX')).toBe('neutral');
+    expect(staticMeasurementGuideGenderV2(undefined)).toBe('neutral');
 
     const female = renderToStaticMarkup(
       <StaticMeasurementGuide
@@ -46,13 +53,13 @@ describe('static measurement guide', () => {
       />,
     );
 
-    expect(female).toContain('src="/female.png"');
+    expect(female).toContain('src="/female/BODY_MEASUREMENT_NAME_CHEST.webp"');
     expect(female).toContain('data-guide-gender="female"');
-    expect(male).toContain('src="/male.png"');
+    expect(male).toContain('src="/male/BODY_MEASUREMENT_NAME_CHEST.webp"');
     expect(male).toContain('data-guide-gender="male"');
   });
 
-  it('renders only the active measurement marker over the static image', () => {
+  it('renders one baked active-measurement image without an SVG overlay', () => {
     const html = renderToStaticMarkup(
       <StaticMeasurementGuide
         measurementName='BODY_MEASUREMENT_NAME_INSEAM'
@@ -62,9 +69,9 @@ describe('static measurement guide', () => {
     );
 
     expect(html).toContain('data-guide-measurement="BODY_MEASUREMENT_NAME_INSEAM"');
-    expect(html).toContain('data-testid="static-measurement-marker"');
-    expect(html).toContain('M 120 181 L 120 328');
-    expect(html.match(/<svg/g)).toHaveLength(1);
+    expect(html).toContain('data-guide-render="baked-image-v2"');
+    expect(html).toContain('data-testid="static-measurement-image"');
+    expect(html).not.toContain('<svg');
   });
 
   it('uses back and side artwork for measurements that cannot be explained from the front', () => {
@@ -83,9 +90,9 @@ describe('static measurement guide', () => {
       />,
     );
 
-    expect(back).toContain('src="/male-back.png"');
+    expect(back).toContain('src="/male/BODY_MEASUREMENT_NAME_ACROSS_BACK.webp"');
     expect(back).toContain('data-guide-view="back"');
-    expect(side).toContain('src="/neutral-side.png"');
+    expect(side).toContain('src="/neutral/BODY_MEASUREMENT_NAME_CHEST_DEPTH.webp"');
     expect(side).toContain('data-guide-gender="neutral"');
     expect(side).toContain('data-guide-view="side"');
   });

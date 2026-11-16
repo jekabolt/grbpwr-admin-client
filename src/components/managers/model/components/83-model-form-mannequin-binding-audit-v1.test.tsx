@@ -302,6 +302,9 @@ describe('receipt 83 model-form mannequin binding audit v1', () => {
   it('uses gender-aware static guides in the quiz and keeps the live mannequin in table mode', () => {
     const formSource = source('src/components/managers/model/components/index.tsx');
     const fieldsSource = source('src/components/managers/model/components/measurements-fields.tsx');
+    const guideSource = source(
+      'src/components/managers/model/components/static-measurement-guide.tsx',
+    );
     const focusSource = source(
       'src/components/managers/model/components/sheet-measurement-focus.tsx',
     );
@@ -309,8 +312,10 @@ describe('receipt 83 model-form mannequin binding audit v1', () => {
     expect(formSource).not.toContain('SheetMeasurementDiagram');
     expect(focusSource).not.toContain('MeasurementPictogram');
     expect(fieldsSource).toContain('<StaticMeasurementGuide');
-    expect(fieldsSource).toContain('measurementGuideFemaleSrc');
-    expect(fieldsSource).toContain('measurementGuideMaleSrc');
+    expect(guideSource).toContain("'/src/assets/mannequin/measurement-guides-v2/**/*.webp'");
+    expect(guideSource).toContain("data-guide-render='baked-image-v2'");
+    expect(guideSource).toContain("data-testid='static-measurement-image'");
+    expect(guideSource).not.toContain('<svg');
     expect(fieldsSource).toContain("useWatch<ModelFormData>({ name: 'gender' })");
     expect(formSource).toContain(
       "<Section title='body preview'>{renderBodyPreview(false)}</Section>",

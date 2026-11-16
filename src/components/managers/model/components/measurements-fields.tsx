@@ -19,15 +19,6 @@ import {
   type HeaderWarning,
   ViewSwitch,
 } from 'ui';
-import measurementGuideFemaleBackSrc from '@/assets/mannequin/measurement-guide-female-back.png';
-import measurementGuideFemaleSideSrc from '@/assets/mannequin/measurement-guide-female-side.png';
-import measurementGuideFemaleSrc from '@/assets/mannequin/measurement-guide-female.png';
-import measurementGuideMaleBackSrc from '@/assets/mannequin/measurement-guide-male-back.png';
-import measurementGuideMaleSideSrc from '@/assets/mannequin/measurement-guide-male-side.png';
-import measurementGuideMaleSrc from '@/assets/mannequin/measurement-guide-male.png';
-import measurementGuideNeutralBackSrc from '@/assets/mannequin/measurement-guide-neutral-back.png';
-import measurementGuideNeutralSideSrc from '@/assets/mannequin/measurement-guide-neutral-side.png';
-import measurementGuideNeutralSrc from '@/assets/mannequin/measurement-guide-neutral.png';
 import {
   auditModelMeasurementFieldsV1,
   EMPTY_MODEL_MEASUREMENT_FIELD_AUDIT_V1,
@@ -36,10 +27,7 @@ import {
 } from './model-measurement-field-audit';
 import { BODY_MEASUREMENT_GROUPS } from './measurements';
 import { ModelFormData } from './schema';
-import {
-  StaticMeasurementGuide,
-  type StaticMeasurementGuideSourcesV1,
-} from './static-measurement-guide';
+import { StaticMeasurementGuide } from './static-measurement-guide';
 import {
   measurementLabel,
   MOBILE_STRIP_PX,
@@ -61,7 +49,7 @@ const MEASUREMENT_ENTRY_MODE_OPTIONS = [
   {
     value: 'guided',
     label: 'guided',
-    hint: 'One measurement at a time with the active path on the mannequin.',
+    hint: 'One measurement at a time with a matching visual guide.',
   },
   {
     value: 'table',
@@ -69,24 +57,6 @@ const MEASUREMENT_ENTRY_MODE_OPTIONS = [
     hint: 'All measurement fields together for rapid entry and review.',
   },
 ] as const;
-
-const STATIC_MEASUREMENT_GUIDE_SOURCES_V1: StaticMeasurementGuideSourcesV1 = {
-  female: {
-    front: measurementGuideFemaleSrc,
-    back: measurementGuideFemaleBackSrc,
-    side: measurementGuideFemaleSideSrc,
-  },
-  male: {
-    front: measurementGuideMaleSrc,
-    back: measurementGuideMaleBackSrc,
-    side: measurementGuideMaleSideSrc,
-  },
-  neutral: {
-    front: measurementGuideNeutralSrc,
-    back: measurementGuideNeutralBackSrc,
-    side: measurementGuideNeutralSideSrc,
-  },
-};
 
 type MeasurementValues = Record<string, number | undefined>;
 
@@ -479,11 +449,7 @@ export function MeasurementsQuiz({
           className='flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-pageBg p-2 md:border-r md:border-borderColor md:p-4'
           data-testid='measurements-guided-preview'
         >
-          <StaticMeasurementGuide
-            measurementName={name}
-            gender={gender}
-            sources={STATIC_MEASUREMENT_GUIDE_SOURCES_V1}
-          />
+          <StaticMeasurementGuide measurementName={name} gender={gender} />
         </div>
 
         <div className='flex shrink-0 flex-col gap-2 border-t border-borderColor bg-bgColor p-3 md:min-h-0 md:border-t-0 md:p-4'>
