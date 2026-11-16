@@ -6,6 +6,8 @@ import {
   listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1,
   preparePatternImportDxfPhaseECadTableZeroOperationSavedV1,
 } from './cad-table-zero-operation-saved-preparation-v1';
+import { routePatternImportDxfPhaseECadTableZeroOperationSourceV1 } from './cad-table-zero-operation-source-routing-v1';
+import { listPatternImportDxfPhaseECadTableZeroOperationFreshChoicesV1 } from './cad-table-zero-operation-fresh-preparation-v1';
 import { createPatternImportDxfPhaseESavedDxfReprocessHostV1 } from './saved-dxf-reprocess-host-v1';
 import { createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1 } from './zero-operation-saved-card-authority-v1';
 
@@ -216,6 +218,119 @@ describe('zero-operation saved card authority', () => {
     ]);
   });
 
+  it('reports the saved-DXF absence instead of requiring a live Phase-E session', () => {
+    const withoutSavedDxf = card();
+    const pattern = withoutSavedDxf.techCard?.patterns?.[0];
+    if (!pattern) throw new Error('Saved-row test fixture is missing its pattern row.');
+    pattern.url = undefined;
+    pattern.downloadUrl = undefined;
+
+    const result = listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
+      withoutSavedDxf,
+      orderSizeIds,
+      sizeNameById,
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      blocker: { code: 'saved-pattern-unavailable' },
+    });
+  });
+
+  it('does not let a stale partial card session shadow the current saved DXF row', () => {
+    const staleSession = {
+      techCardId: 6,
+      importGeneration: 0,
+      draft: null,
+    } as never;
+    const fresh = listPatternImportDxfPhaseECadTableZeroOperationFreshChoicesV1(staleSession, 0);
+    const saved = listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
+      card(),
+      orderSizeIds,
+      sizeNameById,
+    );
+
+    const routed = routePatternImportDxfPhaseECadTableZeroOperationSourceV1(fresh, saved);
+
+    expect(fresh.ok).toBe(false);
+    expect(routed.mode).toBe('saved');
+    expect(routed.choices.ok).toBe(true);
+  });
+
+  it.each([
+    {
+      label: 'missing detached draft',
+      session: { techCardId: 6, importGeneration: 1, draft: null },
+      expectedGeneration: 1,
+      freshCode: 'fresh-session-invalid',
+    },
+    {
+      label: 'stale import generation',
+      session: { techCardId: 6, importGeneration: 1, draft: { techCardId: 6 } },
+      expectedGeneration: 2,
+      freshCode: 'fresh-session-generation-stale',
+    },
+    {
+      label: 'missing Phase-D replay authority',
+      session: {
+        techCardId: 6,
+        importGeneration: 1,
+        draft: { techCardId: 6, dxfProvenance: null, dxfPhaseDReplay: null },
+      },
+      expectedGeneration: 1,
+      freshCode: 'phase-d-authority-unavailable',
+    },
+  ])(
+    'routes $label through current saved-card choices',
+    ({ session, expectedGeneration, freshCode }) => {
+      const fresh = listPatternImportDxfPhaseECadTableZeroOperationFreshChoicesV1(
+        session as never,
+        expectedGeneration,
+      );
+      const saved = listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
+        card(),
+        orderSizeIds,
+        sizeNameById,
+      );
+
+      const routed = routePatternImportDxfPhaseECadTableZeroOperationSourceV1(fresh, saved);
+
+      expect(fresh).toMatchObject({ ok: false, blocker: { code: freshCode } });
+      expect(routed).toMatchObject({ mode: 'saved', choices: { ok: true } });
+      expect(JSON.stringify(routed)).not.toContain(
+        'A current positive Phase-E card session and its detached draft are required.',
+      );
+    },
+  );
+
+  it('reports the saved-card blocker when neither fresh nor saved input is usable', () => {
+    const withoutSavedDxf = card();
+    const pattern = withoutSavedDxf.techCard?.patterns?.[0];
+    if (!pattern) throw new Error('Saved-row test fixture is missing its pattern row.');
+    pattern.url = undefined;
+    pattern.downloadUrl = undefined;
+
+    const fresh = listPatternImportDxfPhaseECadTableZeroOperationFreshChoicesV1(
+      { techCardId: 6, importGeneration: 1, draft: null } as never,
+      1,
+    );
+    const saved = listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
+      withoutSavedDxf,
+      orderSizeIds,
+      sizeNameById,
+    );
+
+    const routed = routePatternImportDxfPhaseECadTableZeroOperationSourceV1(fresh, saved);
+
+    expect(routed).toMatchObject({
+      mode: 'saved',
+      choices: { ok: false, blocker: { code: 'saved-pattern-unavailable' } },
+    });
+    expect(JSON.stringify(routed)).not.toContain(
+      'A current positive Phase-E card session and its detached draft are required.',
+    );
+  });
+
   it('resolves a server-relative DXF capability before fetching its presigned object', async () => {
     const exactRow = Object.freeze({ ...row, sizeBytes: 3 });
     const capabilityUrl = 'https://api.beta.example/api/p/token/download?dl=1&mode=json';
@@ -270,6 +385,210 @@ describe('zero-operation saved card authority', () => {
     );
     const objectRequest = fetcher.mock.calls[1]?.[1];
     expect(new Headers(objectRequest?.headers).get('Grpc-Metadata-Authorization')).toBeNull();
+    host.dispose();
+  });
+
+  it('retries one transient capability network failure before downloading saved DXF bytes', async () => {
+    const exactRow = Object.freeze({ ...row, sizeBytes: 3 });
+    const capabilityUrl = 'https://api.beta.example/api/p/token/download?mode=json';
+    const objectUrl = 'https://objects.example/pattern-main.dxf?token=storage-token';
+    let capabilityAttempts = 0;
+    const fetcher = vi.fn<typeof globalThis.fetch>(async (input) => {
+      if (String(input) === capabilityUrl) {
+        capabilityAttempts += 1;
+        if (capabilityAttempts === 1) throw new TypeError('Failed to fetch');
+        return new Response(JSON.stringify({ url: objectUrl }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (String(input) === objectUrl)
+        return new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { 'content-length': '3' },
+        });
+      throw new TypeError(`Unexpected test fetch: ${String(input)}`);
+    });
+    const host = createPatternImportDxfPhaseESavedDxfReprocessHostV1({
+      serverUrl: 'https://api.beta.example/',
+      readAuthToken: () => 'beta-token',
+      fetch: fetcher as typeof globalThis.fetch,
+      readAuthoritativeRow: async () => ({
+        row: exactRow,
+        downloadUrl: '/api/p/token/download',
+      }),
+      resolveCard: async () => {
+        throw new Error('Card projection is not used by the byte-read test.');
+      },
+    });
+
+    await expect(
+      host.readAuthoritativeRow(exactRow, new AbortController().signal, () => undefined),
+    ).resolves.toMatchObject({ row: exactRow, bytes: new Uint8Array([1, 2, 3]) });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher).toHaveBeenNthCalledWith(
+      2,
+      capabilityUrl,
+      expect.objectContaining({ redirect: 'error', credentials: 'same-origin' }),
+    );
+    expect(
+      new Headers(fetcher.mock.calls[1]?.[1]?.headers).get('Grpc-Metadata-Authorization'),
+    ).toBe('Bearer beta-token');
+    expect(
+      new Headers(fetcher.mock.calls[2]?.[1]?.headers).get('Grpc-Metadata-Authorization'),
+    ).toBeNull();
+    host.dispose();
+  });
+
+  it('bounds repeated capability network failures and does not expose the secret URL', async () => {
+    const exactRow = Object.freeze({ ...row, sizeBytes: 3 });
+    const fetcher = vi.fn<typeof globalThis.fetch>(async () => {
+      throw new TypeError('Failed to fetch https://api.beta.example/api/p/top-secret/download');
+    });
+    const host = createPatternImportDxfPhaseESavedDxfReprocessHostV1({
+      serverUrl: 'https://api.beta.example/',
+      fetch: fetcher as typeof globalThis.fetch,
+      readAuthoritativeRow: async () => ({
+        row: exactRow,
+        downloadUrl: '/api/p/top-secret/download',
+      }),
+      resolveCard: async () => {
+        throw new Error('Card projection is not used by the byte-read test.');
+      },
+    });
+
+    let failure: unknown;
+    try {
+      await host.readAuthoritativeRow(exactRow, new AbortController().signal, () => undefined);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    if (!(failure instanceof Error)) throw new Error('Expected capability network failure.');
+    expect(failure.message).toBe('Saved DXF capability lookup failed due to a network error.');
+    expect(failure.message).not.toContain('top-secret');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    host.dispose();
+  });
+
+  it('does not retry capability lookup after cancellation', async () => {
+    const exactRow = Object.freeze({ ...row, sizeBytes: 3 });
+    const controller = new AbortController();
+    const fetcher = vi.fn<typeof globalThis.fetch>(async () => {
+      controller.abort();
+      throw new TypeError('Failed to fetch');
+    });
+    const host = createPatternImportDxfPhaseESavedDxfReprocessHostV1({
+      serverUrl: 'https://api.beta.example/',
+      fetch: fetcher as typeof globalThis.fetch,
+      readAuthoritativeRow: async () => ({
+        row: exactRow,
+        downloadUrl: '/api/p/token/download',
+      }),
+      resolveCard: async () => {
+        throw new Error('Card projection is not used by the byte-read test.');
+      },
+    });
+
+    await expect(
+      host.readAuthoritativeRow(exactRow, controller.signal, () => undefined),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    host.dispose();
+  });
+
+  it('routes an absolute beta backend capability through the local same-origin API proxy', async () => {
+    const exactRow = Object.freeze({ ...row, sizeBytes: 3 });
+    const backendCapabilityUrl = 'https://backend-beta.grbpwr.com/api/p/token/download?dl=1';
+    const localCapabilityUrl = 'http://127.0.0.1:4040/api/p/token/download?dl=1&mode=json';
+    const objectUrl = 'https://files.grbpwr.com/pattern-main.dxf?token=storage-token';
+    const fetcher = vi.fn<typeof globalThis.fetch>(async (input) => {
+      if (String(input) === localCapabilityUrl)
+        return new Response(JSON.stringify({ url: objectUrl }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      if (String(input) === objectUrl)
+        return new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { 'content-length': '3' },
+        });
+      throw new TypeError(`Unexpected test fetch: ${String(input)}`);
+    });
+    const host = createPatternImportDxfPhaseESavedDxfReprocessHostV1({
+      serverUrl: '',
+      apiProxyTarget: 'https://backend-beta.grbpwr.com',
+      browserOrigin: 'http://127.0.0.1:4040',
+      readAuthToken: () => 'beta-token',
+      fetch: fetcher as typeof globalThis.fetch,
+      readAuthoritativeRow: async () => ({
+        row: exactRow,
+        downloadUrl: backendCapabilityUrl,
+      }),
+      resolveCard: async () => {
+        throw new Error('Card projection is not used by the byte-read test.');
+      },
+    });
+
+    await expect(
+      host.readAuthoritativeRow(exactRow, new AbortController().signal, () => undefined),
+    ).resolves.toMatchObject({ row: exactRow, bytes: new Uint8Array([1, 2, 3]) });
+    expect(fetcher).toHaveBeenNthCalledWith(
+      1,
+      localCapabilityUrl,
+      expect.objectContaining({ method: 'GET', credentials: 'same-origin' }),
+    );
+    const capabilityRequest = fetcher.mock.calls[0]?.[1];
+    expect(new Headers(capabilityRequest?.headers).get('Grpc-Metadata-Authorization')).toBe(
+      'Bearer beta-token',
+    );
+    expect(fetcher).not.toHaveBeenCalledWith(backendCapabilityUrl, expect.anything());
+    host.dispose();
+  });
+
+  it('retries a cross-origin CORS failure through the media proxy without forwarding auth', async () => {
+    const exactRow = Object.freeze({ ...row, sizeBytes: 3 });
+    const objectUrl = 'https://objects.example/pattern-main.dxf?token=storage-token';
+    const proxyUrl = `https://admin.beta.example/media-proxy?url=${encodeURIComponent(objectUrl)}`;
+    const fetcher = vi.fn<typeof globalThis.fetch>(async (input) => {
+      if (String(input) === objectUrl) throw new TypeError('Failed to fetch');
+      if (String(input) === proxyUrl)
+        return new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { 'content-length': '3' },
+        });
+      throw new TypeError(`Unexpected test fetch: ${String(input)}`);
+    });
+    const host = createPatternImportDxfPhaseESavedDxfReprocessHostV1({
+      serverUrl: 'https://api.beta.example/',
+      mediaProxyUrl: 'https://admin.beta.example/media-proxy',
+      readAuthToken: () => 'beta-token',
+      fetch: fetcher as typeof globalThis.fetch,
+      readAuthoritativeRow: async () => ({
+        row: exactRow,
+        downloadUrl: objectUrl,
+      }),
+      resolveCard: async () => {
+        throw new Error('Card projection is not used by the byte-read test.');
+      },
+    });
+
+    await expect(
+      host.readAuthoritativeRow(exactRow, new AbortController().signal, () => undefined),
+    ).resolves.toMatchObject({ row: exactRow, bytes: new Uint8Array([1, 2, 3]) });
+    expect(fetcher).toHaveBeenNthCalledWith(
+      1,
+      objectUrl,
+      expect.objectContaining({ method: 'GET' }),
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      2,
+      proxyUrl,
+      expect.objectContaining({ method: 'GET', credentials: 'same-origin' }),
+    );
+    expect(
+      new Headers(fetcher.mock.calls[1]?.[1]?.headers).get('Grpc-Metadata-Authorization'),
+    ).toBe(null);
     host.dispose();
   });
 

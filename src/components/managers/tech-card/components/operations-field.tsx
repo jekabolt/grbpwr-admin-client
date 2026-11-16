@@ -10381,9 +10381,6 @@ export function OperationsField({
               techCardId={techCardId}
               zeroConnectAuthoringHandoff={zeroConnectAuthoringHandoff}
               disabled={frozen}
-              savedOnly={(savedCard?.techCard?.patterns ?? []).some((pattern) =>
-                Boolean(pattern?.url),
-              )}
             />
           </div>
         )}

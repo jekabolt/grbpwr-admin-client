@@ -4628,10 +4628,12 @@ export type common_ModelInsert = {
   thumbnailId: number | undefined;
   mediaIds: number[] | undefined;
   defaultSizeIds: number[] | undefined;
-  // Writer-awareness version for BodyMeasurementName. The server emits 1.
+  // Writer-awareness version for BodyMeasurementName. The server emits 2.
   // 0 identifies a legacy writer that only knew values 1..20; on update the
-  // server preserves stored P0 values 21..34 that are absent from its payload.
-  // 1 means the sparse measurements list is authoritative for all values 1..34.
+  // server preserves stored values 21..35 that are absent from its payload.
+  // 1 identifies a P0 writer that knew values 1..34; on update the server
+  // preserves a stored value 35 (NECK) that is absent from its payload.
+  // 2 means the sparse measurements list is authoritative for all values 1..35.
   bodyMeasurementSchemaVersion: number | undefined;
 };
 
@@ -4687,7 +4689,11 @@ export type common_BodyMeasurementName =
   | "BODY_MEASUREMENT_NAME_ARMSCYE_DEPTH"
   | "BODY_MEASUREMENT_NAME_ARMSCYE_CIRCUMFERENCE"
   | "BODY_MEASUREMENT_NAME_BUST_APEX_TO_APEX"
-  | "BODY_MEASUREMENT_NAME_HPS_TO_BUST_APEX";
+  | "BODY_MEASUREMENT_NAME_HPS_TO_BUST_APEX"
+  // P1 (body_measurement_schema_version 2). Mid-neck circumference, taped
+  // around the neck at mid-length. Distinct from NECK_BASE: neither value is
+  // ever derived from the other.
+  | "BODY_MEASUREMENT_NAME_NECK";
 // BodyMeasurementMetadataV1 binds one value to an acquisition method and a
 // caller-owned protocol identifier. Presence is optional for legacy rows. When
 // present, schema_version is exactly 1, source is non-UNKNOWN, and protocol_id
