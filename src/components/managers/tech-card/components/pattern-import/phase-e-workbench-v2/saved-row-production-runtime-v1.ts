@@ -19,6 +19,9 @@ export const PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_PRODUCTION_RUNTIME_CLAIMS_V1 =
   transactionalSnapshotRowReadUsed: true,
   transactionalSnapshotAssemblyReadUsed: true,
   freshDisposableReprocessHostPerPreparation: true,
+  privateSavedNativeSourceCapabilityOwnedByPreparation: true,
+  confirmedCompilerSourceOneShotExposedByRuntime: true,
+  previewCompilerSourceExposed: false,
   generatedSnapshotRpcIntegratedByProductionFactory: true,
   uiIntegrated: false,
   productionReady: false,
@@ -58,6 +61,7 @@ type PreparationOwner = ReturnType<typeof createPatternImportDxfPhaseESavedRowPr
 export type PatternImportDxfPhaseESavedRowProductionRuntimeV1 = Readonly<{
   schemaVersion: typeof PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_PRODUCTION_RUNTIME_V1;
   preparationOwner: PreparationOwner;
+  consumeConfirmedCompilerSource: PreparationOwner['consumeConfirmedCompilerSource'];
   dispose: () => void;
   snapshot: () => Readonly<{
     disposed: boolean;
@@ -179,6 +183,7 @@ export function createPatternImportDxfPhaseESavedRowRuntimeV1(
   return Object.freeze({
     schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_PRODUCTION_RUNTIME_V1,
     preparationOwner,
+    consumeConfirmedCompilerSource: preparationOwner.consumeConfirmedCompilerSource,
     dispose() {
       if (disposed) return;
       disposed = true;

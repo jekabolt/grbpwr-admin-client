@@ -315,15 +315,34 @@ function extractUpgradeRequestParts(value: unknown): Readonly<{
   baselineRequest: unknown;
   samplingRequest: Phase2BoundarySamplingRequestV1;
   samplingArtifact: unknown;
+  sourceIdentityBinding?: GarmentPhase2SampledClothMeshUpgradeRequestV1['sourceIdentityBinding'];
 }> {
+  let hasSourceIdentityBinding = false;
+  try {
+    if (value && typeof value === 'object')
+      hasSourceIdentityBinding = Object.prototype.hasOwnProperty.call(
+        value,
+        'sourceIdentityBinding',
+      );
+  } catch (error) {
+    fail('input-shape-invalid', 'request.phase2UpgradeRequest reflection failed closed.', [
+      error instanceof Error ? error.message : String(error),
+    ]);
+  }
   return exactDataObjectValues(
     value,
-    ['baselineRequest', 'samplingArtifact', 'samplingRequest'],
+    [
+      'baselineRequest',
+      'samplingArtifact',
+      'samplingRequest',
+      ...(hasSourceIdentityBinding ? ['sourceIdentityBinding'] : []),
+    ],
     'request.phase2UpgradeRequest',
   ) as Readonly<{
     baselineRequest: unknown;
     samplingRequest: Phase2BoundarySamplingRequestV1;
     samplingArtifact: unknown;
+    sourceIdentityBinding?: GarmentPhase2SampledClothMeshUpgradeRequestV1['sourceIdentityBinding'];
   }>;
 }
 
@@ -1458,6 +1477,9 @@ function buildRecovery(input: unknown): GarmentPhase2BoundaryRecoveryArtifactV1 
       upgradeParts.baselineRequest as GarmentPhase2SampledClothMeshUpgradeRequestV1['baselineRequest'],
     samplingRequest: samplingEvaluation.canonicalRequest,
     samplingArtifact: samplingEvaluation.canonicalArtifact,
+    ...(upgradeParts.sourceIdentityBinding
+      ? { sourceIdentityBinding: upgradeParts.sourceIdentityBinding }
+      : {}),
   };
   const fresh = freshPhase2Upgrade(ownedUpgradeRequest);
   if (

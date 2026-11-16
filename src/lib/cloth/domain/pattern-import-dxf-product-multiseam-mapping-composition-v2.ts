@@ -189,6 +189,7 @@ export type PatternImportDxfProductMultiseamMappingCompositionResultV2 =
         phaseEPlanSha256: string;
         sourceFileSha256: string;
         productExportSha256: string;
+        sourceManifestMode?: 'saved-product-direct-source';
         handoffCanonicalSha256: string;
         twoSeamMappingAggregateSha256: string;
       }>;
@@ -340,6 +341,64 @@ function manifestView(
     units: manifest.units,
     cutLayerIsFinal: manifest.cutLayerIsFinal,
     source: manifest.source,
+  };
+}
+
+/**
+ * Product-writer replay proves the exact saved export bytes, while Phase D describes the file that
+ * was directly decoded for this composition. On a normal fresh import they are already the same
+ * source descriptor. A saved-row reconstruction is different: its reproducible writer manifest
+ * must retain the original product-export provenance, but Phase D is intentionally rebound to the
+ * verified saved DXF itself. Keep those two facts separate instead of mutating writer replay and
+ * invalidating the exact-byte proof.
+ */
+function handoffManifestView(
+  productManifest: PatternImportDxfManifestBridgeViewV1,
+  scopeFilename: string,
+  productExportSha256: string,
+  productExportByteLength: number,
+  phaseDSourceSha256: string,
+  savedRowSha256: string,
+): PatternImportDxfManifestBridgeViewV1 | null {
+  if (
+    productManifest.source.files.length === 1 &&
+    productManifest.source.files[0]?.kind === 'dxf' &&
+    productManifest.source.files[0].sha256 === phaseDSourceSha256
+  )
+    return productManifest;
+  if (
+    !SHA256.test(phaseDSourceSha256) ||
+    phaseDSourceSha256 !== savedRowSha256 ||
+    phaseDSourceSha256 !== productExportSha256 ||
+    typeof scopeFilename !== 'string' ||
+    scopeFilename.length === 0 ||
+    !Number.isSafeInteger(productExportByteLength) ||
+    productExportByteLength <= 0
+  )
+    return null;
+  return {
+    ...productManifest,
+    source: {
+      files: [
+        {
+          name: scopeFilename,
+          sha256: phaseDSourceSha256,
+          bytes: productExportByteLength,
+          kind: 'dxf',
+          pages: 1,
+        },
+      ],
+      scale: { method: 'none', factor: 1, measuredMm: null, declaredMm: null },
+      sheet: { pages: 1, method: 'single', maxResidualMm: 0 },
+      sizeEncoding: productManifest.source.sizeEncoding,
+      variant: productManifest.source.variant,
+      ...(productManifest.source.generatedFusing === true
+        ? { generatedFusing: true as const }
+        : {}),
+      ...(productManifest.source.presegmentedIdentities
+        ? { presegmentedIdentities: [...productManifest.source.presegmentedIdentities] }
+        : {}),
+    },
   };
 }
 
@@ -543,7 +602,20 @@ export async function buildPatternImportDxfProductMultiseamMappingCompositionV2(
         'writer-replay-mismatch',
         'Fresh production writer bytes or manifest do not exact-match the current saved row.',
       );
-    const currentManifest = manifestView(rerun.manifest);
+    const productExportManifest = manifestView(rerun.manifest);
+    const currentManifest = handoffManifestView(
+      productExportManifest,
+      scope.filename,
+      productExportSha256,
+      textEncoder.encode(rerun.dxfText).byteLength,
+      selection.phaseD.sourceSha256,
+      current.row.dxfSha256,
+    );
+    if (!currentManifest)
+      return blocked(
+        'handoff-blocked',
+        'Direct saved-row source lineage could not be bound without changing the exact product-writer replay.',
+      );
     const selections = selection.pipeline.carrier?.pieces.map(({ pieceId, sizeToken }) => ({
       pieceId,
       sizeToken,
@@ -719,6 +791,9 @@ export async function buildPatternImportDxfProductMultiseamMappingCompositionV2(
       phaseEPlanSha256: choices.aggregatePlanSeal.canonicalSha256,
       sourceFileSha256: selection.phaseD.sourceSha256,
       productExportSha256,
+      ...(currentManifest === productExportManifest
+        ? {}
+        : { sourceManifestMode: 'saved-product-direct-source' as const }),
       handoffCanonicalSha256: handoffResult.handoff.seal.canonicalSha256,
       twoSeamMappingAggregateSha256: aggregateResult.seal.canonicalSha256,
     };

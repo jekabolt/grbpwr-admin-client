@@ -25,6 +25,11 @@ export const PATTERN_IMPORT_DXF_TWO_SIDED_SEAM_MAPPING_SEAL_V2 =
 const SHA256 = /^[0-9a-f]{64}$/;
 const MAX_TEXT_BYTES = 1_024;
 const MAX_CANONICAL_BYTES = 4 * 1024 * 1024;
+const MAX_DETACHED_DEPTH = 32;
+const MAX_DETACHED_NODES = 250_000;
+const MAX_DETACHED_PROPERTIES = 2_000_000;
+const MAX_DETACHED_ARRAY_LENGTH = 100_000;
+const MAX_DETACHED_STRING_BYTES = 64 * 1024;
 const textEncoder = new TextEncoder();
 
 export type PatternImportDxfTwoSidedSeamMappingInputV2 = Readonly<{
@@ -232,6 +237,131 @@ function exactDataRecord(
   return result;
 }
 
+type DetachBudget = { nodes: number; properties: number };
+
+/**
+ * PieceSpec may intentionally reuse an immutable point object for coincident cut/seam vertices.
+ * The lower-level source-path owner rejects every caller alias so that it never has to reason
+ * about mutation through shared references. This composition owner therefore projects a fresh
+ * descriptor-safe tree and duplicates aliases before crossing that boundary; actual cycles stay
+ * invalid and the expansion is bounded.
+ */
+function detachDescriptorData(
+  value: unknown,
+  field: string,
+  depth: number,
+  budget: DetachBudget,
+  ancestors: Set<object>,
+): unknown {
+  if (depth > MAX_DETACHED_DEPTH)
+    fail('invalid-input', field, 'detached source-path request exceeded maximum depth.');
+  if (value === null || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || Object.is(value, -0))
+      fail('invalid-input', field, 'detached source-path number must be canonical.');
+    return value;
+  }
+  if (typeof value === 'string') {
+    if (textEncoder.encode(value).byteLength > MAX_DETACHED_STRING_BYTES)
+      fail('invalid-input', field, 'detached source-path string exceeded its byte bound.');
+    return value;
+  }
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    ArrayBuffer.isView(value) ||
+    value instanceof ArrayBuffer
+  )
+    fail('invalid-input', field, 'detached source-path value must be plain JSON data.');
+  if (ancestors.has(value))
+    fail('invalid-input', field, 'cycles are forbidden in the detached source-path request.');
+  const isArray = Array.isArray(value);
+  let prototype: object | null;
+  let descriptors: PropertyDescriptorMap;
+  let keys: readonly PropertyKey[];
+  try {
+    prototype = Object.getPrototypeOf(value);
+    descriptors = Object.getOwnPropertyDescriptors(value);
+    keys = Reflect.ownKeys(descriptors);
+  } catch {
+    fail('invalid-input', field, 'detached source-path reflection failed.');
+  }
+  if (prototype !== (isArray ? Array.prototype : Object.prototype))
+    fail('invalid-input', field, 'detached source-path prototype is unsupported.');
+  if (keys.some((key) => typeof key !== 'string'))
+    fail('invalid-input', field, 'detached source-path symbol properties are forbidden.');
+  budget.nodes += 1;
+  if (budget.nodes > MAX_DETACHED_NODES)
+    fail('invalid-input', field, 'detached source-path node bound exceeded.');
+  ancestors.add(value);
+  try {
+    if (isArray) {
+      const length = descriptors.length?.value;
+      if (
+        !Number.isSafeInteger(length) ||
+        length < 0 ||
+        length > MAX_DETACHED_ARRAY_LENGTH ||
+        keys.length !== length + 1
+      )
+        fail('invalid-input', field, 'detached source-path array must be dense and bounded.');
+      budget.properties += length;
+      if (budget.properties > MAX_DETACHED_PROPERTIES)
+        fail('invalid-input', field, 'detached source-path property bound exceeded.');
+      return Array.from({ length }, (_, index) => {
+        const descriptor = descriptors[String(index)];
+        if (
+          !descriptor ||
+          !descriptor.enumerable ||
+          !Object.prototype.hasOwnProperty.call(descriptor, 'value') ||
+          descriptor.get !== undefined ||
+          descriptor.set !== undefined
+        )
+          fail(
+            'invalid-input',
+            `${field}[${index}]`,
+            'detached source-path array entry must be an enumerable data property.',
+          );
+        return detachDescriptorData(
+          descriptor.value,
+          `${field}[${index}]`,
+          depth + 1,
+          budget,
+          ancestors,
+        );
+      });
+    }
+    budget.properties += keys.length;
+    if (budget.properties > MAX_DETACHED_PROPERTIES)
+      fail('invalid-input', field, 'detached source-path property bound exceeded.');
+    const output: Record<string, unknown> = {};
+    for (const key of keys as string[]) {
+      const descriptor = descriptors[key];
+      if (
+        !descriptor ||
+        !descriptor.enumerable ||
+        !Object.prototype.hasOwnProperty.call(descriptor, 'value') ||
+        descriptor.get !== undefined ||
+        descriptor.set !== undefined
+      )
+        fail(
+          'invalid-input',
+          `${field}.${key}`,
+          'detached source-path field must be an enumerable data property.',
+        );
+      output[key] = detachDescriptorData(
+        descriptor.value,
+        `${field}.${key}`,
+        depth + 1,
+        budget,
+        ancestors,
+      );
+    }
+    return output;
+  } finally {
+    ancestors.delete(value);
+  }
+}
+
 function canonical(value: unknown): string {
   if (value === null || typeof value === 'boolean' || typeof value === 'string')
     return JSON.stringify(value);
@@ -413,7 +543,7 @@ export async function buildPatternImportDxfTwoSidedSeamMappingV2(
       ],
       'input.base.composition',
     );
-    const carrierResult = await buildDxfPipelineSourcePathCarrierV2(
+    const carrierRequest = detachDescriptorData(
       {
         schemaVersion: DXF_PIPELINE_SOURCE_PATH_CARRIER_REQUEST_V2,
         source: phaseD.source as DxfPieceSpecProvenanceSourceV1,
@@ -422,13 +552,19 @@ export async function buildPatternImportDxfTwoSidedSeamMappingV2(
         pipeline: composition.pipeline as DxfPipelineProvenanceStageOutputV1,
         sourceSha256: phaseD.sourceSha256,
       },
-      crypto,
-    );
+      'sourcePathRequest',
+      0,
+      { nodes: 0, properties: 0 },
+      new Set(),
+    ) as Parameters<typeof buildDxfPipelineSourcePathCarrierV2>[0];
+    const carrierResult = await buildDxfPipelineSourcePathCarrierV2(carrierRequest, crypto);
     if (!carrierResult.ok)
       fail(
         'source-path-carrier-blocked',
         'input.phaseD',
-        carrierResult.blockers.map(({ code, detail }) => `${code}: ${detail}`).join('; '),
+        carrierResult.blockers
+          .map(({ code, field, detail }) => `${code} at ${field}: ${detail}`)
+          .join('; '),
       );
     const artifact = carrierResult.artifact;
     const basePipeline = composition.pipeline as DxfPipelineProvenanceStageOutputV1;

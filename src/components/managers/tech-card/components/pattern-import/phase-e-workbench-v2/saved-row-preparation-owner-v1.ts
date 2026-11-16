@@ -2,6 +2,11 @@ import {
   buildPatternImportDxfProductPhaseEAuthoringCatalogV1,
   type PatternImportDxfProductPhaseEAuthoringCatalogV1,
 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_MULTISEAM_MAPPING_COMPOSITION_REQUEST_V2,
+  type PatternImportDxfProductMultiseamMappingCompositionRequestV2,
+  type PatternImportDxfProductMultiseamSavedRowEvidenceV2,
+} from 'lib/cloth/domain/pattern-import-dxf-product-multiseam-mapping-composition-v2';
 import type {
   PatternImportDxfProductPhaseEExactTopologyBindingCarrierV1,
   PatternImportDxfProductPhaseEExactTopologyBindingSealV1,
@@ -9,10 +14,13 @@ import type {
 import { selectPatternImportDxfProductDraftPhaseDSizeV1 } from 'lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1';
 import {
   DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
-  createDxfProductSavedReprocessOwnerV1,
   type DxfProductSavedReprocessHostV1,
   type DxfProductSavedRowIdentityV1,
 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
+import {
+  createDxfProductSavedNativeReprocessOwnerV1,
+  type DxfProductSavedNativeCompilerSourceOwnerV1,
+} from 'lib/pattern-import/dxf-product-saved-native-reprocess-owner-v1';
 import {
   projectPatternImportDxfProductPhaseEAssemblyV1,
   type PatternImportDxfProductPhaseEAssemblyProjectionV1,
@@ -22,6 +30,7 @@ import type { DxfProductPhaseDSizeSelectionResultV1 } from 'lib/pattern-import/d
 import {
   createPatternImportDxfProductPhaseEMultiseamWorkbenchStateV2,
   proposePatternImportDxfProductPhaseEMultiseamAssemblyV2,
+  type PatternImportDxfProductPhaseEMultiseamChoicesResultV2,
   type PatternImportDxfProductPhaseEMultiseamProposalV2,
   type PatternImportDxfProductPhaseEMultiseamWorkbenchStateV2,
 } from 'lib/pattern-import/dxf-product-phase-e-multiseam-workbench-v2';
@@ -54,6 +63,8 @@ export const PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_PREPARED_V1 =
   'pattern-import-dxf-phase-e-saved-row-prepared/1' as const;
 export const PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_PREPARATION_OWNER_V1 =
   'pattern-import-dxf-phase-e-saved-row-preparation-owner/1' as const;
+export const PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_CONFIRMED_COMPILER_SOURCE_REQUEST_V1 =
+  'pattern-import-dxf-phase-e-saved-row-confirmed-compiler-source-request/1' as const;
 export const PATTERN_IMPORT_DXF_PHASE_E_SERVER_TRANSACTIONAL_SAVED_ASSEMBLY_V1 =
   'pattern-import-dxf-phase-e-server-transactional-saved-assembly/1' as const;
 export { PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_SERVER_TOPOLOGY_SHA256_DOMAIN_V1 } from './saved-assembly-topology-hash-v1';
@@ -138,6 +149,11 @@ export type PatternImportDxfPhaseESavedRowDocumentAuthorityV1 = Readonly<{
 
 export const PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_PREPARATION_CLAIMS_V1 = Object.freeze({
   freshSavedReprocessOwnerCreated: true,
+  nativeSavedReprocessOwnerCreated: true,
+  compilerSourceOwnerHeldPrivately: true,
+  exactReplayDraftIdentityPreserved: true,
+  confirmedCompilerSourceOneShot: true,
+  previewCompilerSourceExposed: false,
   callerSuppliedReprocessOwnerAccepted: false,
   callerSuppliedReprocessResultAccepted: false,
   authoritativeAssemblyReadBeforeAndAfter: true,
@@ -179,6 +195,9 @@ export const PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_PREPARATION_CLAIMS_V1 = Object
 const BLOCKED_CLAIMS = Object.freeze({
   ...PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_PREPARATION_CLAIMS_V1,
   freshSavedReprocessOwnerCreated: false as const,
+  nativeSavedReprocessOwnerCreated: false as const,
+  compilerSourceOwnerHeldPrivately: false as const,
+  exactReplayDraftIdentityPreserved: false as const,
   authoritativeAssemblyReadBeforeAndAfter: false as const,
   verifiedCompositeExactTopologyReadBeforeAndAfter: false as const,
   exactSavedRowEightFieldsBound: false as const,
@@ -269,11 +288,61 @@ export type PatternImportDxfPhaseESavedRowPreparationResultV1 =
       claims: typeof BLOCKED_CLAIMS;
     }>;
 
+export type PatternImportDxfPhaseESavedRowVerifiedPersistenceV1 = Readonly<{
+  status: 'verified-exact-topology-persisted';
+  previewReady: false;
+  persistence: 'verified';
+  composition: null;
+  blockers: readonly [];
+}>;
+
+export type PatternImportDxfPhaseESavedRowConfirmedCompilerSourceRequestV1 = Readonly<{
+  schemaVersion: typeof PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_CONFIRMED_COMPILER_SOURCE_REQUEST_V1;
+  prepared: PatternImportDxfPhaseESavedRowPreparedV1;
+  choices: Extract<PatternImportDxfProductPhaseEMultiseamChoicesResultV2, { ok: true }>;
+  persistence: PatternImportDxfPhaseESavedRowVerifiedPersistenceV1;
+  signal: AbortSignal;
+}>;
+
+export type PatternImportDxfPhaseESavedRowConfirmedCompilerSourceInputV1 = Readonly<{
+  sourceOwner: DxfProductSavedNativeCompilerSourceOwnerV1;
+  compositionRequest: PatternImportDxfProductMultiseamMappingCompositionRequestV2;
+}>;
+
+export type PatternImportDxfPhaseESavedRowConfirmedCompilerSourceBlockerCodeV1 =
+  | 'invalid-confirmation'
+  | 'stale-preparation'
+  | 'source-already-consumed'
+  | 'consumer-failed';
+
+export type PatternImportDxfPhaseESavedRowConfirmedCompilerSourceResultV1<T> =
+  | Readonly<{ ok: true; value: T; blockers: readonly [] }>
+  | Readonly<{
+      ok: false;
+      value: null;
+      blockers: readonly [
+        Readonly<{
+          code: PatternImportDxfPhaseESavedRowConfirmedCompilerSourceBlockerCodeV1;
+          detail: string;
+        }>,
+      ];
+    }>;
+
+export type PatternImportDxfPhaseESavedRowConfirmedCompilerSourceConsumerV1<T> = (
+  input: PatternImportDxfPhaseESavedRowConfirmedCompilerSourceInputV1,
+) => T | Promise<T>;
+
 type ActivePreparation = {
   generation: number;
   controller: AbortController;
   invalidatedBy: 'cancelled' | 'superseded' | 'disposed' | null;
-  reprocessOwner: ReturnType<typeof createDxfProductSavedReprocessOwnerV1> | null;
+  reprocessOwner: ReturnType<typeof createDxfProductSavedNativeReprocessOwnerV1> | null;
+};
+
+type PreparedCompilerSourceState = {
+  status: 'available' | 'revoked' | 'consumed';
+  draft: CardDraft | null;
+  sourceOwner: DxfProductSavedNativeCompilerSourceOwnerV1 | null;
 };
 
 class PreparationFailure extends Error {
@@ -310,6 +379,122 @@ function blocked(
       Object.freeze({ code: failure.code, detail: failure.message }),
     ]) as readonly [PatternImportDxfPhaseESavedRowPreparationBlockerV1],
     claims: BLOCKED_CLAIMS,
+  });
+}
+
+function confirmedCompilerSourceBlocked<T>(
+  code: PatternImportDxfPhaseESavedRowConfirmedCompilerSourceBlockerCodeV1,
+  detail: string,
+): PatternImportDxfPhaseESavedRowConfirmedCompilerSourceResultV1<T> {
+  return Object.freeze({
+    ok: false as const,
+    value: null,
+    blockers: Object.freeze([Object.freeze({ code, detail: detail.slice(0, 2_048) })]) as readonly [
+      Readonly<{
+        code: PatternImportDxfPhaseESavedRowConfirmedCompilerSourceBlockerCodeV1;
+        detail: string;
+      }>,
+    ],
+  });
+}
+
+function savedCompositionRow(
+  row: DxfProductSavedRowIdentityV1,
+): PatternImportDxfProductMultiseamSavedRowEvidenceV2 {
+  return Object.freeze({
+    techCardId: row.techCardId,
+    scopeKey: row.scopeKey,
+    patternLineKey: row.patternLineKey,
+    dxfSha256: row.sha256,
+    patternVersion: row.revision,
+    cardLockVersion: row.cardLockVersion,
+  });
+}
+
+function isVerifiedPersistence(
+  value: unknown,
+): value is PatternImportDxfPhaseESavedRowVerifiedPersistenceV1 {
+  try {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const prototype = Object.getPrototypeOf(value);
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const expected = ['blockers', 'composition', 'persistence', 'previewReady', 'status'].sort();
+    const actual = Object.keys(descriptors).sort();
+    if (
+      (prototype !== Object.prototype && prototype !== null) ||
+      Reflect.ownKeys(descriptors).length !== expected.length ||
+      actual.length !== expected.length ||
+      actual.some((key, index) => key !== expected[index]) ||
+      actual.some((key) => !descriptors[key]?.enumerable || !('value' in descriptors[key]))
+    )
+      return false;
+    const receipt = value as PatternImportDxfPhaseESavedRowVerifiedPersistenceV1;
+    return (
+      receipt.status === 'verified-exact-topology-persisted' &&
+      receipt.previewReady === false &&
+      receipt.persistence === 'verified' &&
+      receipt.composition === null &&
+      Array.isArray(receipt.blockers) &&
+      receipt.blockers.length === 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+function choicesExactMatchPrepared(
+  choices: Extract<PatternImportDxfProductPhaseEMultiseamChoicesResultV2, { ok: true }>,
+  prepared: PatternImportDxfPhaseESavedRowPreparedV1,
+): boolean {
+  try {
+    return (
+      choices.ok === true &&
+      Array.isArray(choices.blockers) &&
+      choices.blockers.length === 0 &&
+      choices.choices.importGeneration === prepared.preparationGeneration &&
+      choices.choices.documentId === prepared.documentAuthority.documentId &&
+      choices.choices.revision === prepared.documentAuthority.revision &&
+      choices.choices.expectedCatalogCanonicalSha256 === prepared.catalog.canonicalSha256 &&
+      choices.choices.expectedProposalFingerprint === prepared.proposal.deterministicFingerprint &&
+      typeof choices.choices.aggregatePlanSeal?.canonicalSha256 === 'string' &&
+      SHA256.test(choices.choices.aggregatePlanSeal.canonicalSha256)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function buildConfirmedCompositionRequest(
+  prepared: PatternImportDxfPhaseESavedRowPreparedV1,
+  choices: Extract<PatternImportDxfProductPhaseEMultiseamChoicesResultV2, { ok: true }>,
+  draft: CardDraft,
+): PatternImportDxfProductMultiseamMappingCompositionRequestV2 {
+  // Chronology deliberately compares two independently captured immutable observations. Reusing
+  // one object would make `prepared.row === current.row` and fail closed even when their canonical
+  // evidence is identical.
+  const preparedRow = savedCompositionRow(prepared.row);
+  const currentRow = savedCompositionRow(prepared.row);
+  return Object.freeze({
+    schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_MULTISEAM_MAPPING_COMPOSITION_REQUEST_V2,
+    draft,
+    selection: prepared.selection,
+    catalog: prepared.catalog,
+    proposal: prepared.proposal,
+    choices: choices.choices,
+    prepared: Object.freeze({
+      importGeneration: prepared.preparationGeneration,
+      row: preparedRow,
+      sizeSelectionSha256: prepared.selection.selection.canonicalSha256,
+      catalogCanonicalSha256: prepared.catalog.canonicalSha256,
+      proposalFingerprint: prepared.proposal.deterministicFingerprint,
+      phaseEPlanSha256: choices.choices.aggregatePlanSeal.canonicalSha256,
+      documentId: prepared.documentAuthority.documentId,
+      revision: prepared.documentAuthority.revision,
+    }),
+    current: Object.freeze({
+      importGeneration: prepared.preparationGeneration,
+      row: currentRow,
+    }),
   });
 }
 
@@ -675,7 +860,8 @@ function validateAssemblyEvidence(
   const row = detachRow(evidence?.row);
   const assembly = detachBoundedAssembly(evidence?.assembly);
   const exactTopology = detachBoundedAssembly(evidence?.exactTopology) as unknown as
-    PatternImportDxfPhaseESavedRowAuthoritativeAssemblyEvidenceV1['exactTopology'] | null;
+    | PatternImportDxfPhaseESavedRowAuthoritativeAssemblyEvidenceV1['exactTopology']
+    | null;
   if (!row)
     fail(
       'assembly-authority-receipt-invalid',
@@ -950,7 +1136,7 @@ export function isPatternImportDxfPhaseESavedRowPreparedV1(
 
 /**
  * Owns saved-row preparations one generation at a time. The only accepted reconstruction input is
- * a fresh genuine `createDxfProductSavedReprocessOwnerV1` invocation over an injected host
+ * a fresh genuine `createDxfProductSavedNativeReprocessOwnerV1` invocation over an injected host
  * capability. No caller-supplied draft, replay result, Assembly snapshot or document authority is
  * accepted.
  */
@@ -964,8 +1150,23 @@ export function createPatternImportDxfPhaseESavedRowPreparationOwnerV1(
   let disposed = false;
   let preparationGeneration = 0;
   let active: ActivePreparation | null = null;
+  const preparedCompilerSources = new WeakMap<object, PreparedCompilerSourceState>();
+  const livePreparedSources = new Set<object>();
+
+  const revokePreparedSources = () => {
+    for (const prepared of livePreparedSources) {
+      const state = preparedCompilerSources.get(prepared);
+      if (state) {
+        state.status = 'revoked';
+        state.draft = null;
+        state.sourceOwner = null;
+      }
+    }
+    livePreparedSources.clear();
+  };
 
   const invalidate = (reason: NonNullable<ActivePreparation['invalidatedBy']>) => {
+    revokePreparedSources();
     if (!active) return;
     active.invalidatedBy = reason;
     active.controller.abort();
@@ -1036,7 +1237,7 @@ export function createPatternImportDxfPhaseESavedRowPreparationOwnerV1(
           'saved-reprocess-host-invalid',
           'A fresh genuine saved-DXF reprocess capability could not be created.',
         );
-      ticket.reprocessOwner = createDxfProductSavedReprocessOwnerV1(reprocessHost);
+      ticket.reprocessOwner = createDxfProductSavedNativeReprocessOwnerV1(reprocessHost);
       const replay = await ticket.reprocessOwner.run({
         schemaVersion: DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
         row: request.row,
@@ -1243,6 +1444,12 @@ export function createPatternImportDxfPhaseESavedRowPreparationOwnerV1(
         claims: PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_PREPARATION_CLAIMS_V1,
       }) as PatternImportDxfPhaseESavedRowPreparedV1;
       genuinePrepared.add(prepared);
+      preparedCompilerSources.set(prepared, {
+        status: 'available',
+        draft: replay.draft,
+        sourceOwner: replay.sourceOwner,
+      });
+      livePreparedSources.add(prepared);
       return Object.freeze({
         ok: true as const,
         preparationGeneration: ticket.generation,
@@ -1259,9 +1466,111 @@ export function createPatternImportDxfPhaseESavedRowPreparationOwnerV1(
     }
   };
 
+  const consumeConfirmedCompilerSource = async <T>(
+    request: PatternImportDxfPhaseESavedRowConfirmedCompilerSourceRequestV1,
+    consumer: PatternImportDxfPhaseESavedRowConfirmedCompilerSourceConsumerV1<T>,
+  ): Promise<PatternImportDxfPhaseESavedRowConfirmedCompilerSourceResultV1<T>> => {
+    let prepared: PatternImportDxfPhaseESavedRowPreparedV1;
+    let choices: Extract<PatternImportDxfProductPhaseEMultiseamChoicesResultV2, { ok: true }>;
+    let persistence: PatternImportDxfPhaseESavedRowVerifiedPersistenceV1;
+    let signal: AbortSignal;
+    try {
+      const captured = descriptorRecord(request, [
+        'schemaVersion',
+        'prepared',
+        'choices',
+        'persistence',
+        'signal',
+      ]);
+      if (
+        !captured ||
+        captured.schemaVersion !==
+          PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_CONFIRMED_COMPILER_SOURCE_REQUEST_V1 ||
+        typeof consumer !== 'function'
+      )
+        return confirmedCompilerSourceBlocked(
+          'invalid-confirmation',
+          'A live signal and the exact confirmed compiler-source request are required.',
+        );
+      prepared = captured.prepared as PatternImportDxfPhaseESavedRowPreparedV1;
+      choices = captured.choices as Extract<
+        PatternImportDxfProductPhaseEMultiseamChoicesResultV2,
+        { ok: true }
+      >;
+      persistence = captured.persistence as PatternImportDxfPhaseESavedRowVerifiedPersistenceV1;
+      signal = captured.signal as AbortSignal;
+      if (signal?.aborted !== false)
+        return confirmedCompilerSourceBlocked(
+          'invalid-confirmation',
+          'A live signal and the exact confirmed compiler-source request are required.',
+        );
+    } catch {
+      return confirmedCompilerSourceBlocked(
+        'invalid-confirmation',
+        'The confirmed compiler-source request could not be inspected safely.',
+      );
+    }
+
+    if (disposed || !genuinePrepared.has(prepared))
+      return confirmedCompilerSourceBlocked(
+        'stale-preparation',
+        'The saved preparation is not a live genuine preparation of this owner.',
+      );
+    const state = preparedCompilerSources.get(prepared);
+    if (!state || state.status === 'revoked')
+      return confirmedCompilerSourceBlocked(
+        'stale-preparation',
+        'The saved source capability was cancelled, superseded or disposed.',
+      );
+    if (state.status === 'consumed')
+      return confirmedCompilerSourceBlocked(
+        'source-already-consumed',
+        'The saved source capability was already handed to its compiler consumer.',
+      );
+    if (!isVerifiedPersistence(persistence) || !choicesExactMatchPrepared(choices, prepared))
+      return confirmedCompilerSourceBlocked(
+        'invalid-confirmation',
+        'Exact verified persistence and confirmed choices bound to this preparation are required.',
+      );
+    if (!state.draft || !state.sourceOwner)
+      return confirmedCompilerSourceBlocked(
+        'stale-preparation',
+        'The saved source capability no longer owns its exact replay draft.',
+      );
+
+    const compositionRequest = buildConfirmedCompositionRequest(prepared, choices, state.draft);
+    const sourceOwner = state.sourceOwner;
+    state.status = 'consumed';
+    state.draft = null;
+    state.sourceOwner = null;
+    livePreparedSources.delete(prepared);
+
+    try {
+      const value = await consumer(Object.freeze({ sourceOwner, compositionRequest }));
+      if (signal.aborted)
+        return confirmedCompilerSourceBlocked(
+          'consumer-failed',
+          'The confirmed compiler consumer was cancelled after one-shot handoff.',
+        );
+      return Object.freeze({
+        ok: true as const,
+        value,
+        blockers: Object.freeze([]) as readonly [],
+      });
+    } catch (error) {
+      return confirmedCompilerSourceBlocked(
+        'consumer-failed',
+        error instanceof Error
+          ? `The confirmed compiler consumer failed after one-shot handoff: ${error.message}`
+          : 'The confirmed compiler consumer failed after one-shot handoff.',
+      );
+    }
+  };
+
   return Object.freeze({
     schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_PREPARATION_OWNER_V1,
     prepare,
+    consumeConfirmedCompilerSource,
     cancel() {
       invalidate('cancelled');
     },

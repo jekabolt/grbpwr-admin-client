@@ -26,6 +26,8 @@ import type {
 
 export const GARMENT_PHASE2_SAMPLED_CLOTH_MESH_UPGRADER_V1 =
   'garment-phase2-sampled-cloth-mesh-upgrader/1' as const;
+export const GARMENT_PHASE2_SOURCE_IDENTITY_BINDING_V1 =
+  'garment-phase2-source-identity-binding/1' as const;
 
 export const GARMENT_PHASE2_SAMPLED_CLOTH_MESH_LIMITS_V1 = Object.freeze({
   maximumDepth: 24,
@@ -78,10 +80,18 @@ export class GarmentPhase2SampledClothMeshErrorV1 extends Error {
   }
 }
 
+export type GarmentPhase2SourceIdentityBindingV1 = Readonly<{
+  schemaVersion: typeof GARMENT_PHASE2_SOURCE_IDENTITY_BINDING_V1;
+  assemblyDocumentId: string;
+  nativeSamplingSourceFileId: string;
+}>;
+
 export type GarmentPhase2SampledClothMeshUpgradeRequestV1 = Readonly<{
   baselineRequest: GarmentPhase1ClothMeshCompileRequestV1;
   samplingRequest: Phase2BoundarySamplingRequestV1;
   samplingArtifact: Phase2BoundarySamplingArtifactV1;
+  /** Additive dual-identity binding. Omitted legacy requests retain the V1 equality requirement. */
+  sourceIdentityBinding?: GarmentPhase2SourceIdentityBindingV1;
 }>;
 
 export type GarmentPhase2BoundaryVertexBindingV1 = Readonly<{
@@ -141,7 +151,11 @@ export type GarmentPhase2SampledClothMeshArtifactV1 = Readonly<{
     assemblyDocumentId: string;
     assemblyRevision: string;
     samplingSourceFileId: string;
-    documentIdMatch: true;
+    identityBindingSchemaVersion: typeof GARMENT_PHASE2_SOURCE_IDENTITY_BINDING_V1 | null;
+    assemblyDocumentIdBound: true;
+    samplingSourceFileIdBound: true;
+    dualIdentityBound: boolean;
+    documentIdMatch: boolean;
     sourceRevisionRepresentedInSamplingContract: false;
   }>;
   baselineCompilerFingerprint: string;
@@ -153,6 +167,7 @@ export type GarmentPhase2SampledClothMeshArtifactV1 = Readonly<{
     requestLocalBoundarySamplingIntegrated: true;
     distributedEqualSeamPairsIntegrated: true;
     sourceDocumentIdBound: true;
+    nativeSamplingSourceFileIdBound: true;
     sourceRevisionBound: false;
     sourceAuthenticityAccepted: false;
     curvedSourceEvaluationIntegrated: false;
@@ -179,6 +194,7 @@ type RequestParts = Readonly<{
   baselineRequest: GarmentPhase1ClothMeshCompileRequestV1;
   samplingRequest: Phase2BoundarySamplingRequestV1;
   samplingArtifact: Phase2BoundarySamplingArtifactV1;
+  sourceIdentityBinding: GarmentPhase2SourceIdentityBindingV1 | null;
 }>;
 
 type BaselineAssemblyBinding = Readonly<{
@@ -209,6 +225,50 @@ function fail(
   throw new GarmentPhase2SampledClothMeshErrorV1(code, message, details);
 }
 
+function extractSourceIdentityBinding(value: unknown): GarmentPhase2SourceIdentityBindingV1 {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  )
+    fail('input-shape-invalid', 'Source identity binding must be one exact plain object.');
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const expected = ['assemblyDocumentId', 'nativeSamplingSourceFileId', 'schemaVersion'];
+  const keys = Reflect.ownKeys(descriptors);
+  const actual = keys.filter((key): key is string => typeof key === 'string').sort();
+  if (
+    actual.length !== keys.length ||
+    actual.length !== expected.length ||
+    actual.some((key, index) => key !== expected[index])
+  )
+    fail('input-shape-invalid', 'Source identity binding has an unsupported property shape.');
+  const values: Record<string, unknown> = {};
+  for (const key of expected) {
+    const descriptor = descriptors[key];
+    if (!descriptor || !('value' in descriptor) || !descriptor.enumerable)
+      fail('input-shape-invalid', `Source identity binding ${key} must be enumerable own data.`);
+    values[key] = descriptor.value;
+  }
+  if (
+    values.schemaVersion !== GARMENT_PHASE2_SOURCE_IDENTITY_BINDING_V1 ||
+    typeof values.assemblyDocumentId !== 'string' ||
+    values.assemblyDocumentId.length === 0 ||
+    values.assemblyDocumentId.length >
+      GARMENT_PHASE2_SAMPLED_CLOTH_MESH_LIMITS_V1.maximumStringLength ||
+    typeof values.nativeSamplingSourceFileId !== 'string' ||
+    values.nativeSamplingSourceFileId.length === 0 ||
+    values.nativeSamplingSourceFileId.length >
+      GARMENT_PHASE2_SAMPLED_CLOTH_MESH_LIMITS_V1.maximumStringLength
+  )
+    fail('input-shape-invalid', 'Source identity binding values are invalid.');
+  return Object.freeze({
+    schemaVersion: GARMENT_PHASE2_SOURCE_IDENTITY_BINDING_V1,
+    assemblyDocumentId: values.assemblyDocumentId,
+    nativeSamplingSourceFileId: values.nativeSamplingSourceFileId,
+  });
+}
+
 function extractRequestParts(input: unknown): RequestParts {
   try {
     if (
@@ -220,8 +280,10 @@ function extractRequestParts(input: unknown): RequestParts {
       fail('input-shape-invalid', 'Upgrade request must be one exact plain object.');
     const descriptors = Object.getOwnPropertyDescriptors(input);
     const keys = Reflect.ownKeys(descriptors);
-    const expected = ['baselineRequest', 'samplingArtifact', 'samplingRequest'];
+    const expectedLegacy = ['baselineRequest', 'samplingArtifact', 'samplingRequest'];
+    const expectedBound = [...expectedLegacy, 'sourceIdentityBinding'].sort();
     const actual = keys.filter((key): key is string => typeof key === 'string').sort();
+    const expected = actual.length === expectedLegacy.length ? expectedLegacy : expectedBound;
     if (
       actual.length !== keys.length ||
       actual.length !== expected.length ||
@@ -235,7 +297,15 @@ function extractRequestParts(input: unknown): RequestParts {
         fail('input-shape-invalid', `Upgrade request ${key} must be enumerable own data.`);
       values[key] = descriptor.value;
     }
-    return values as RequestParts;
+    return {
+      baselineRequest: values.baselineRequest as GarmentPhase1ClothMeshCompileRequestV1,
+      samplingRequest: values.samplingRequest as Phase2BoundarySamplingRequestV1,
+      samplingArtifact: values.samplingArtifact as Phase2BoundarySamplingArtifactV1,
+      sourceIdentityBinding:
+        values.sourceIdentityBinding === undefined
+          ? null
+          : extractSourceIdentityBinding(values.sourceIdentityBinding),
+    };
   } catch (error) {
     if (error instanceof GarmentPhase2SampledClothMeshErrorV1) throw error;
     fail('input-shape-invalid', 'Upgrade request reflection failed closed.', [
@@ -1038,16 +1108,22 @@ function buildUpgrade(
   baseline: GarmentPhase1ClothMeshArtifactV1,
   evaluation: Phase2BoundarySamplingEvaluationV1,
   assemblyBinding: BaselineAssemblyBinding,
+  sourceIdentityBinding: GarmentPhase2SourceIdentityBindingV1 | null,
 ): GarmentPhase2SampledClothMeshArtifactV1 {
   const baselinePieceIds = baseline.mesh.pieceRanges.map(({ pieceId }) => pieceId);
   const requestPieceIds = evaluation.canonicalRequest.pieces.map(({ input }) => input.pieceId);
   const artifactPieceIds = evaluation.canonicalArtifact.pieces.map(({ pieceId }) => pieceId);
   const assemblyPieceIds = assemblyBinding.pieces.map(({ pieceId }) => pieceId);
+  const documentIdMatch = evaluation.canonicalRequest.sourceFileId === assemblyBinding.documentId;
+  const sourceIdentitiesBound = sourceIdentityBinding
+    ? sourceIdentityBinding.assemblyDocumentId === assemblyBinding.documentId &&
+      sourceIdentityBinding.nativeSamplingSourceFileId === evaluation.canonicalRequest.sourceFileId
+    : documentIdMatch;
   if (
     baselinePieceIds.length === 0 ||
     baselinePieceIds.length > GARMENT_PHASE2_SAMPLED_CLOTH_MESH_LIMITS_V1.maximumPieces ||
     duplicateStrings(baselinePieceIds).length > 0 ||
-    evaluation.canonicalRequest.sourceFileId !== assemblyBinding.documentId ||
+    !sourceIdentitiesBound ||
     JSON.stringify(assemblyPieceIds) !== JSON.stringify(baselinePieceIds) ||
     JSON.stringify(requestPieceIds) !== JSON.stringify(baselinePieceIds) ||
     JSON.stringify(artifactPieceIds) !== JSON.stringify(baselinePieceIds)
@@ -1146,7 +1222,11 @@ function buildUpgrade(
     assemblyDocumentId: assemblyBinding.documentId,
     assemblyRevision: assemblyBinding.revision,
     samplingSourceFileId: evaluation.canonicalRequest.sourceFileId,
-    documentIdMatch: true as const,
+    identityBindingSchemaVersion: sourceIdentityBinding?.schemaVersion ?? null,
+    assemblyDocumentIdBound: true as const,
+    samplingSourceFileIdBound: true as const,
+    dualIdentityBound: sourceIdentityBinding !== null,
+    documentIdMatch,
     sourceRevisionRepresentedInSamplingContract: false as const,
   };
   const mesh: ClothMeshIR = {
@@ -1192,6 +1272,7 @@ function buildUpgrade(
       requestLocalBoundarySamplingIntegrated: true,
       distributedEqualSeamPairsIntegrated: true,
       sourceDocumentIdBound: true,
+      nativeSamplingSourceFileIdBound: true,
       sourceRevisionBound: false,
       sourceAuthenticityAccepted: false,
       curvedSourceEvaluationIntegrated: false,
@@ -1229,7 +1310,7 @@ export function upgradeGarmentPhase2SampledClothMeshV1(
     const baseline = compileFreshBaseline(canonicalBaselineRequest);
     const assemblyBinding = baselineAssemblyBinding(canonicalBaselineRequest);
     const evaluation = evaluateSampling(request.samplingRequest, request.samplingArtifact);
-    return buildUpgrade(baseline, evaluation, assemblyBinding);
+    return buildUpgrade(baseline, evaluation, assemblyBinding, request.sourceIdentityBinding);
   } catch (error) {
     if (error instanceof GarmentPhase2SampledClothMeshErrorV1) throw error;
     fail('output-invalid', 'Garment Phase-2 upgrade failed closed.', [

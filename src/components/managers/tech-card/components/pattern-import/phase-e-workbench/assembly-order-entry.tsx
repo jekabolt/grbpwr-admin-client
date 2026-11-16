@@ -16,6 +16,7 @@ import {
   type AssemblyContext,
   type CardDraft,
 } from 'lib/pattern-import/types';
+import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import {
   useCallback,
   useEffect,
@@ -52,6 +53,7 @@ import {
   type PatternImportDxfPhaseEMultiseamAssemblyOrderBlockerV2,
   type PatternImportDxfPhaseEMultiseamFreshConfirmV2,
   type PatternImportDxfPhaseEMultiseamSavedConfirmV2,
+  type PatternImportDxfPhaseEMultiseamSavedDownstreamV2,
   type PatternImportDxfPhaseEMultiseamSavedSessionV2,
 } from '../phase-e-workbench-v2/assembly-order-entry';
 import { createPatternImportDxfPhaseEExactCompositeProductionPersistenceV3 } from '../phase-e-workbench-v2/exact-composite-persistence-v3';
@@ -122,7 +124,101 @@ export const PATTERN_IMPORT_DXF_PHASE_E_ASSEMBLY_ORDER_ENTRY_CONTRACT_V1 = Objec
   stitchThreadRequiresUniqueBomLineIdentity: true,
   exactNCompositeV4OptionalBoundaryForwarded: true,
   exactNFixtureOrFallbackOwnerCreated: false,
+  savedGarmentMeshDownstreamProductionInjected: true,
+  savedGarmentCompileSessionLazyLoadedAfterVerifiedPersistence: true,
+  savedGarmentCompilerReadyBeforeOneShotSourceHandoff: true,
+  savedGarmentCompileSessionKeyedToSavedRowAndOperation: true,
+  previewLoadsOrConsumesSavedCompilerSource: false,
 } as const);
+
+export const PATTERN_IMPORT_DXF_PHASE_E_SAVED_GARMENT_TARGET_EDGE_MM_V1 = 10;
+
+export type PatternImportDxfPhaseESavedGarmentMeshCompileSessionLoaderV1 = () => Promise<
+  Pick<
+    typeof import('lib/cloth/domain/pattern-import-dxf-product-saved-garment-mesh-compile-session-v1'),
+    'createPatternImportDxfProductSavedGarmentMeshCompileSessionV1'
+  >
+>;
+
+type SavedGarmentCompileSessionV1 = ReturnType<
+  (typeof import('lib/cloth/domain/pattern-import-dxf-product-saved-garment-mesh-compile-session-v1'))['createPatternImportDxfProductSavedGarmentMeshCompileSessionV1']
+>;
+
+export type PatternImportDxfPhaseESavedGarmentMeshProductionOwnerV1 = Readonly<{
+  downstream: PatternImportDxfPhaseEMultiseamSavedDownstreamV2;
+  projectLatest: SavedGarmentCompileSessionV1['projectLatest'];
+  snapshot: () => ReturnType<SavedGarmentCompileSessionV1['snapshot']> | null;
+  dispose: () => void;
+}>;
+
+export function patternImportDxfPhaseESavedGarmentMeshOwnerKeyV1(
+  row: DxfProductSavedRowIdentityV1,
+  selectedOperationNumber: number,
+): string {
+  return JSON.stringify([
+    row.techCardId,
+    row.scopeKey,
+    row.patternLineKey,
+    row.revision,
+    row.cardLockVersion,
+    row.url,
+    row.sizeBytes,
+    row.sha256,
+    selectedOperationNumber,
+  ]);
+}
+
+/** Lazy cloth-owned boundary. `ready` loads the chunk before the one-shot source is handed off. */
+export function createPatternImportDxfPhaseESavedGarmentMeshProductionOwnerV1(
+  loadCompileSession: PatternImportDxfPhaseESavedGarmentMeshCompileSessionLoaderV1 = () =>
+    import('lib/cloth/domain/pattern-import-dxf-product-saved-garment-mesh-compile-session-v1'),
+): PatternImportDxfPhaseESavedGarmentMeshProductionOwnerV1 {
+  let disposed = false;
+  let modulePromise: ReturnType<PatternImportDxfPhaseESavedGarmentMeshCompileSessionLoaderV1> | null =
+    null;
+  let session: SavedGarmentCompileSessionV1 | null = null;
+
+  const ready = async (signal: AbortSignal) => {
+    if (disposed) throw new Error('The saved garment compile owner is disposed.');
+    if (signal.aborted) throw new Error('The saved garment compile owner was cancelled.');
+    if (session) return;
+    modulePromise ??= loadCompileSession();
+    let module: Awaited<ReturnType<PatternImportDxfPhaseESavedGarmentMeshCompileSessionLoaderV1>>;
+    try {
+      module = await modulePromise;
+    } catch (error) {
+      modulePromise = null;
+      throw error;
+    }
+    if (disposed) throw new Error('The saved garment compile owner was disposed while loading.');
+    if (signal.aborted)
+      throw new Error('The saved garment compile owner was cancelled while loading.');
+    session ??= module.createPatternImportDxfProductSavedGarmentMeshCompileSessionV1();
+  };
+
+  const downstream: PatternImportDxfPhaseEMultiseamSavedDownstreamV2 = Object.freeze({
+    targetEdgeMm: PATTERN_IMPORT_DXF_PHASE_E_SAVED_GARMENT_TARGET_EDGE_MM_V1,
+    ready,
+    consume: async (request, signal) => {
+      if (disposed) throw new Error('The saved garment compile owner is disposed.');
+      if (!session)
+        throw new Error('The saved garment compiler must be ready before source handoff.');
+      return session.consume(request, signal);
+    },
+  });
+
+  return Object.freeze({
+    downstream,
+    projectLatest: () => session?.projectLatest() ?? null,
+    snapshot: () => session?.snapshot() ?? null,
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      session?.dispose();
+      session = null;
+    },
+  });
+}
 
 export type PatternImportDxfPhaseEAssemblyOrderSourceV1 = Readonly<{
   assembly: AssemblyContext;
@@ -1291,17 +1387,32 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         : undefined,
     [exactPersistenceCapabilities, savedProjection],
   );
+  const savedGarmentCompileOwnerKey = savedProjection.ok
+    ? patternImportDxfPhaseESavedGarmentMeshOwnerKeyV1(
+        savedProjection.row,
+        savedProjection.selectedOperationNumber,
+      )
+    : null;
+  const savedGarmentCompileOwner = useMemo(
+    () =>
+      savedGarmentCompileOwnerKey
+        ? createPatternImportDxfPhaseESavedGarmentMeshProductionOwnerV1()
+        : null,
+    [savedGarmentCompileOwnerKey],
+  );
+  useEffect(() => () => savedGarmentCompileOwner?.dispose(), [savedGarmentCompileOwner]);
   const savedSession = useMemo<PatternImportDxfPhaseEMultiseamSavedSessionV2 | null>(
     () =>
-      savedProjection.ok && savedRuntimeResolution.runtime
+      savedProjection.ok && savedRuntimeResolution.runtime && savedGarmentCompileOwner
         ? Object.freeze({
             runtime: savedRuntimeResolution.runtime,
             row: savedProjection.row,
             selectedOperationNumber: savedProjection.selectedOperationNumber,
+            downstream: savedGarmentCompileOwner.downstream,
             ...(savedConfirm ? { onConfirm: savedConfirm } : {}),
           })
         : null,
-    [savedConfirm, savedProjection, savedRuntimeResolution.runtime],
+    [savedConfirm, savedGarmentCompileOwner, savedProjection, savedRuntimeResolution.runtime],
   );
   const savedBlocker = savedProjection.ok
     ? savedRuntimeResolution.blocker

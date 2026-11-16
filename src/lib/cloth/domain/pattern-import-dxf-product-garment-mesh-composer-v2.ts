@@ -13,6 +13,10 @@ import {
 } from './dxf-product-phase2-fresh-build-owner-v1';
 import type { DxfProductPhase1BuildInputsRequestV1 } from './dxf-product-phase1-build-inputs-v1';
 import type { DxfProductPhaseDNativeStraightEdgesOwnerV3 } from './dxf-product-phase-d-native-straight-edge-binding-v1';
+import {
+  createDxfProductZeroAllowanceCutSurfaceEquivalenceOwnerV1,
+  type DxfProductZeroAllowanceCutSurfaceEquivalenceOwnerV1,
+} from './dxf-product-zero-allowance-cut-surface-equivalence-v1';
 import type { ClothMeshIR } from '../mesh/cloth-mesh-ir';
 import {
   DXF_PRODUCT_PHASE2_REFINED_BUILD_REQUEST_V1,
@@ -55,6 +59,7 @@ export const PATTERN_IMPORT_DXF_PRODUCT_GARMENT_MESH_COMPOSER_CLAIMS_V2 = Object
   deterministicMeshBuiltTwice: true,
   pinnedCdt2dInvocationCount: 8,
   sourceNativeBound: true,
+  cutSurfaceAcceptedOnlyWithZeroAllowanceExactSeamEquivalence: true,
   rowAndImportGenerationBound: true,
   rowChronologyAuthenticated: false,
   rawDxfRetained: false,
@@ -426,6 +431,73 @@ type SuccessfulComposition = Extract<
   { ok: true }
 >;
 
+type ClosureShellRole = 'sewing-boundary' | 'cut-boundary';
+
+function closureShellRole(
+  composition: SuccessfulComposition,
+  request: PatternImportDxfProductMultiseamMappingCompositionRequestV2,
+  pieceIds: readonly [string, string],
+): ClosureShellRole | null {
+  const { handoff } = composition;
+  if (
+    handoff.physicalSurface.mode === 'sewing-surface' &&
+    handoff.physicalSurface.seamAllowancePhysical === false
+  )
+    return 'sewing-boundary';
+  if (
+    handoff.physicalSurface.mode !== 'cut-surface' ||
+    handoff.physicalSurface.seamAllowancePhysical !== true
+  )
+    return null;
+
+  const scopes = request.draft.scopes.filter(
+    ({ target, writerReplay }) =>
+      target.scopeKey === request.catalog.scopeKey && writerReplay !== undefined,
+  );
+  if (scopes.length !== 1) return null;
+  const writerPieces = scopes[0].writerReplay!.job.pieces;
+  for (const pieceId of pieceIds) {
+    const catalogPiece = request.catalog.pieces.find((piece) => piece.pieceId === pieceId);
+    const handoffPiece = handoff.pieces.find((piece) => piece.id === pieceId);
+    const matchingWriterPieces = writerPieces.filter((piece) => piece.identity === pieceId);
+    if (!catalogPiece || !handoffPiece || matchingWriterPieces.length !== 1) return null;
+    const catalogShells = catalogPiece.contours.filter(({ role }) => role === 'cut-boundary');
+    const handoffShells = handoffPiece.contours.filter(({ role }) => role === 'cut-boundary');
+    if (
+      catalogShells.length !== 1 ||
+      handoffShells.length !== 1 ||
+      catalogPiece.contours.some(({ role }) => role === 'sewing-boundary') ||
+      handoffPiece.contours.some(({ role }) => role === 'sewing-boundary') ||
+      catalogShells[0].contourId !== handoffShells[0].id
+    )
+      return null;
+    if (
+      handoff.seams.some((seam) =>
+        seam.sides.some(
+          (side) => side.pieceId === pieceId && side.contourId !== handoffShells[0].id,
+        ),
+      )
+    )
+      return null;
+    const writerPiece = matchingWriterPieces[0];
+    if (writerPiece.allowance.allowanceMm !== 0 || Object.is(writerPiece.allowance.allowanceMm, -0))
+      return null;
+    const matchingSizes = writerPiece.sizes.filter(
+      ({ sizeToken }) => sizeToken === request.catalog.sizeToken,
+    );
+    if (matchingSizes.length !== 1) return null;
+    const size = matchingSizes[0];
+    if (
+      !Array.isArray(size.seam) ||
+      size.seam.length < 3 ||
+      size.cut.length !== size.seam.length ||
+      !sameCanonical(size.cut, size.seam)
+    )
+      return null;
+  }
+  return 'cut-boundary';
+}
+
 function validateExpected(request: DetachedRequest, composition: SuccessfulComposition): void {
   const { expected, compositionRequest } = request;
   const pieceIds = sortedPair(composition.handoff.pieces.map(({ id }) => id));
@@ -495,16 +567,20 @@ class DisjointSet {
 function validateClosure(
   composition: SuccessfulComposition,
   request: PatternImportDxfProductMultiseamMappingCompositionRequestV2,
-): Readonly<{ pieceIds: readonly [string, string]; seamIds: readonly [string, string] }> {
+): Readonly<{
+  pieceIds: readonly [string, string];
+  seamIds: readonly [string, string];
+  shellRole: ClosureShellRole;
+}> {
   const { handoff, aggregate } = composition;
   const pieceIds = sortedPair(handoff.pieces.map(({ id }) => id));
   const seamIds = sortedPair(handoff.seams.map(({ id }) => id));
   const operation = handoff.operations[0];
+  const shellRole = pieceIds ? closureShellRole(composition, request, pieceIds) : null;
   if (
     !pieceIds ||
     !seamIds ||
-    handoff.physicalSurface.mode !== 'sewing-surface' ||
-    handoff.physicalSurface.seamAllowancePhysical !== false ||
+    !shellRole ||
     handoff.operations.length !== 1 ||
     !operation ||
     operation.order !== 0 ||
@@ -549,16 +625,46 @@ function validateClosure(
   )
     fail(
       'topology-unsupported',
-      'C6 supports exactly two pieces, two equal seams and one local-order-zero stitch operation.',
+      `C6 supports exactly two pieces, two equal seams and one local-order-zero stitch operation; observed ${JSON.stringify(
+        {
+          pieceIds,
+          seamIds,
+          physicalSurface: handoff.physicalSurface,
+          operationCount: handoff.operations.length,
+          operation: operation
+            ? {
+                id: operation.id,
+                stage: operation.stage,
+                order: operation.order,
+                kind: operation.kind,
+                seamIds: operation.seamIds,
+              }
+            : null,
+          seams: handoff.seams.map(({ id, mapping, lengthRatio, operationId, sides }) => ({
+            id,
+            mapping,
+            lengthRatio,
+            operationId,
+            pieceIds: sides.map(({ pieceId }) => pieceId),
+          })),
+          aggregateOperation: aggregate.operation,
+          aggregatePieceIds: aggregate.scope.pieceIds,
+          aggregateSource: aggregate.sourceBinding,
+          sourceFileId: request.catalog.sourceFileId,
+          handoffSource: handoff.source,
+          materials: handoff.materials,
+          choiceMaterials: request.choices.materials,
+        },
+      )}`,
     );
 
   const disjoint = new DisjointSet();
   const usedEdges = new Map<string, Set<number>>();
   const usedEndpoints = new Map<string, Set<string>>();
   for (const piece of handoff.pieces) {
-    const shells = piece.contours.filter(({ role }) => role === 'sewing-boundary');
+    const shells = piece.contours.filter(({ role }) => role === shellRole);
     if (shells.length !== 1)
-      fail('topology-unsupported', `${piece.id} must own one sewing contour.`);
+      fail('topology-unsupported', `${piece.id} must own one exact ${shellRole} contour.`);
     usedEdges.set(piece.id, new Set<number>());
     usedEndpoints.set(piece.id, new Set<string>());
     shells[0].vertices.forEach(({ id }) => disjoint.add(`${piece.id}\0${id}`));
@@ -571,7 +677,7 @@ function validateClosure(
     const directed: Array<{ pieceId: string; start: string; end: string }> = [];
     for (const side of seam.sides) {
       const piece = handoff.pieces.find(({ id }) => id === side.pieceId);
-      const shell = piece?.contours.find(({ role }) => role === 'sewing-boundary');
+      const shell = piece?.contours.find(({ role }) => role === shellRole);
       const mappedSide = mapped.sides.find(({ pieceId }) => pieceId === side.pieceId);
       if (!piece || !shell || !mappedSide || side.contourId !== shell.id)
         fail('topology-unsupported', `${seam.id}/${side.pieceId} is not on its one shell.`);
@@ -616,7 +722,7 @@ function validateClosure(
 
   const freeEdges: Array<readonly [string, string]> = [];
   for (const piece of handoff.pieces) {
-    const shell = piece.contours.find(({ role }) => role === 'sewing-boundary')!;
+    const shell = piece.contours.find(({ role }) => role === shellRole)!;
     const consumed = usedEdges.get(piece.id)!;
     if (consumed.size !== 2)
       fail('topology-unsupported', `${piece.id} must contribute two distinct seam edges.`);
@@ -652,7 +758,7 @@ function validateClosure(
   }
   if (components !== 2)
     fail('topology-unsupported', 'The seam quotient must yield exactly two free components.');
-  return { pieceIds, seamIds };
+  return { pieceIds, seamIds, shellRole };
 }
 
 function validatePhase1Request(
@@ -753,6 +859,20 @@ export async function buildPatternImportDxfProductGarmentMeshComposerV2(
       fail('composition-repeat-mismatch', 'Two detached fresh product compositions differ.');
     validateExpected(request, first);
     const topology = validateClosure(first, request.compositionRequest);
+    let zeroAllowanceCutSurfaceEquivalenceOwner: DxfProductZeroAllowanceCutSurfaceEquivalenceOwnerV1 | null =
+      null;
+    if (topology.shellRole === 'cut-boundary') {
+      const equivalence = await createDxfProductZeroAllowanceCutSurfaceEquivalenceOwnerV1(
+        { compositionRequest: request.compositionRequest, handoff: first.handoff },
+        crypto,
+      );
+      if (!equivalence.ok)
+        fail(
+          'topology-unsupported',
+          `Zero-allowance cut-surface equivalence could not be proven: ${equivalence.blockers[0].detail}`,
+        );
+      zeroAllowanceCutSurfaceEquivalenceOwner = equivalence.owner;
+    }
     validatePhase1Request(request.phase1BuildInputsRequest, first);
 
     const phase2 = await buildDxfProductPhase2FreshBuildOwnerV1(
@@ -760,6 +880,7 @@ export async function buildPatternImportDxfProductGarmentMeshComposerV2(
         schemaVersion: DXF_PRODUCT_PHASE2_FRESH_BUILD_REQUEST_V1,
         phase1Request: request.phase1BuildInputsRequest,
         phaseDNativeStraightEdgeOwner: nativeOwner,
+        zeroAllowanceCutSurfaceEquivalenceOwner,
         targetEdgeMm: request.targetEdgeMm,
         documentIdentity: {
           techCardId: first.evidence.techCardId,

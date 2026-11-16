@@ -226,7 +226,7 @@ function sha256Base64Url(sha256: string): string {
   return output;
 }
 
-function sourceFileIdOf(row: DxfProductSavedRowIdentityV1): string {
+export function computeDxfProductSavedSourceFileIdV1(row: DxfProductSavedRowIdentityV1): string {
   // The DXF provenance carrier hex-encodes sourceFileId inside every curve identity. Preserve the
   // complete card and SHA identities while keeping even Number.MAX_SAFE_INTEGER below that carrier's
   // 192-byte stable-id ceiling.
@@ -506,7 +506,7 @@ export function createDxfProductSavedReprocessOwnerV1(host: DxfProductSavedRepro
         `The saved DXF exceeds the ${PATIMPORT.maxInputBytes}-byte importer limit.`,
         row,
       );
-    const sourceFileId = sourceFileIdOf(row);
+    const sourceFileId = computeDxfProductSavedSourceFileIdV1(row);
     const controller = new AbortController();
     active = controller;
     let ownedBytes: Uint8Array | null = null;

@@ -934,7 +934,8 @@ export const DXF_PRODUCT_PHASE_D_NATIVE_STRAIGHT_EDGES_CONTRACT_V3 = Object.free
     'sourceCurveT',
   ] as const),
   admittedContours: 'closed straight-edge contours only',
-  missingDuplicateAndExtraDescriptorsRejected: true,
+  unrelatedSourceDescriptorsAllowed: true,
+  missingDuplicateAndSelectedPathExtraDescriptorsRejected: true,
   contentBindingIncludes: Object.freeze([
     'authoritySha256',
     'sourceSha256',
@@ -1386,12 +1387,12 @@ function v3ValidateDescriptor(
     descriptor.native.periodic !== false ||
     descriptor.native.transform.kind !== 'identity' ||
     descriptor.nativeFrame !== 'page-mm' ||
-    descriptor.path.closed !== true
+    typeof descriptor.path.closed !== 'boolean'
   )
     v3Fail(
       'source-native-incomplete',
       'sourceNativeProjection.descriptors',
-      'only complete closed native line descriptors are admitted.',
+      'only complete native line descriptors are admitted.',
     );
 }
 
@@ -1424,12 +1425,31 @@ function v3JoinEdges(
 ): readonly DxfProductPhaseDNativeStraightEdgeV3[] {
   const descriptorByEdge = new Map<string, DxfSourceNativeStraightEdgeDescriptorV1>();
   const descriptorIdentities = new Set<string>();
+  const selectedPathIds = new Set(
+    artifact.carrier.pieces.flatMap((piece) =>
+      piece.contours.flatMap((contour) =>
+        contour.sourceVertices.map(({ sourcePathId }) => sourcePathId),
+      ),
+    ),
+  );
+  let selectedDescriptorCount = 0;
   for (const descriptor of descriptors) {
     v3ValidateDescriptor(descriptor, sourceFileId);
     const identity = `${descriptor.sourceFileId}\0${descriptor.path.sourcePathId}\0${descriptor.sourceCurveId}\0${descriptor.primitive.primitiveSegmentIndex}`;
     if (descriptorIdentities.has(identity))
       v3Fail('duplicate-descriptor', 'sourceNativeProjection.descriptors', 'duplicate identity.');
     descriptorIdentities.add(identity);
+    // A production pattern DXF contains cut/seam alternatives, internal loops, grain and notch
+    // paths beyond the selected physical contour. They remain content-bound through the complete
+    // sourceNativeAuthoritySha256, but only an exact selected PathId may authorize a garment edge.
+    if (!selectedPathIds.has(descriptor.path.sourcePathId)) continue;
+    if (!descriptor.path.closed)
+      v3Fail(
+        'source-native-incomplete',
+        'sourceNativeProjection.descriptors',
+        'selected source paths must be complete closed native line contours.',
+      );
+    selectedDescriptorCount += 1;
     const edgeKey = v3EdgeKey(
       descriptor.path.sourcePathId,
       descriptor.startVertexId,
@@ -1519,11 +1539,11 @@ function v3JoinEdges(
       }
     }
   }
-  if (consumed.size !== descriptors.length)
+  if (consumed.size !== selectedDescriptorCount)
     v3Fail(
       'extra-descriptor',
       'sourceNativeProjection.descriptors',
-      'the extraction projection contains descriptors outside selected V2 geometry.',
+      'a selected source path contains descriptors outside selected V2 geometry.',
     );
   return Object.freeze(joined);
 }

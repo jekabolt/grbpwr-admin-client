@@ -11,15 +11,22 @@ import {
   type DxfProductPhaseDNativeStraightEdgesOwnerV3,
   type DxfProductPhaseDNativeStraightEdgesProjectionV3,
 } from './dxf-product-phase-d-native-straight-edge-binding-v1';
+import {
+  consumeDxfProductZeroAllowanceCutSurfaceEquivalenceOwnerV1,
+  type DxfProductZeroAllowanceCutSurfaceEquivalenceOwnerV1,
+  type DxfProductZeroAllowanceCutSurfaceEquivalenceV1,
+} from './dxf-product-zero-allowance-cut-surface-equivalence-v1';
 import type { ClothMeshIR } from '../mesh/cloth-mesh-ir';
 import type {
   GarmentPhase1ClothMeshCompileRequestV1,
   GarmentPhase1PieceResultV1,
 } from '../mesh/garment-phase1-cloth-mesh-compiler-v1';
 import {
+  GARMENT_PHASE2_SOURCE_IDENTITY_BINDING_V1,
   upgradeGarmentPhase2SampledClothMeshV1,
   type GarmentPhase2SampledClothMeshArtifactV1,
   type GarmentPhase2SampledClothMeshUpgradeRequestV1,
+  type GarmentPhase2SourceIdentityBindingV1,
 } from '../mesh/garment-phase2-sampled-cloth-mesh-upgrader-v1';
 import {
   GARMENT_PHASE2_BOUNDARY_RECOVERY_REQUEST_V1,
@@ -99,6 +106,7 @@ export type DxfProductPhase2FreshBuildRequestV1 = Readonly<{
   schemaVersion: typeof DXF_PRODUCT_PHASE2_FRESH_BUILD_REQUEST_V1;
   phase1Request: DxfProductPhase1BuildInputsRequestV1;
   phaseDNativeStraightEdgeOwner: DxfProductPhaseDNativeStraightEdgesOwnerV3;
+  zeroAllowanceCutSurfaceEquivalenceOwner: DxfProductZeroAllowanceCutSurfaceEquivalenceOwnerV1 | null;
   targetEdgeMm: number;
   documentIdentity: DxfProductPhase2FreshBuildDocumentIdentityV1;
 }>;
@@ -120,6 +128,10 @@ export const DXF_PRODUCT_PHASE2_FRESH_BUILD_CLAIMS_V1 = Object.freeze({
   callerSuppliedPhase1InputsAccepted: false,
   callerSuppliedSeamProofsAccepted: false,
   callerSuppliedSamplingArtifactAccepted: false,
+  cutSurfaceCompilerProjectionRequiresOneShotExactEquivalence: true,
+  originalCutSurfaceHandoffRetained: true,
+  dualSourceIdentityBoundWithoutRelabel: true,
+  originalDocumentAndSourceIdentitiesRetained: true,
   documentRowChronologyAuthenticated: false,
   sourceAuthenticityAccepted: false,
   sourceRevisionRepresentedInSamplingContract: false,
@@ -148,6 +160,10 @@ const BLOCKED_CLAIMS = Object.freeze({
   callerSuppliedPhase1InputsAccepted: false as const,
   callerSuppliedSeamProofsAccepted: false as const,
   callerSuppliedSamplingArtifactAccepted: false as const,
+  cutSurfaceCompilerProjectionRequiresOneShotExactEquivalence: false as const,
+  originalCutSurfaceHandoffRetained: false as const,
+  dualSourceIdentityBoundWithoutRelabel: false as const,
+  originalDocumentAndSourceIdentitiesRetained: false as const,
   documentRowChronologyAuthenticated: false as const,
   sourceAuthenticityAccepted: false as const,
   sourceRevisionRepresentedInSamplingContract: false as const,
@@ -183,6 +199,9 @@ export type DxfProductPhase2FreshBuildSnapshotV1 = Readonly<{
   sourceNativeAuthoritySha256: string;
   nativeStraightEdgesSha256: string;
   artifactSha256: string;
+  sourceIdentityBindingSha256: string;
+  phase2SourceBinding: GarmentPhase2SampledClothMeshArtifactV1['sourceBinding'];
+  zeroAllowanceCutSurfaceEquivalenceSha256: string | null;
   deterministicFingerprint: string;
   pieceCount: 2;
   seamCount: 2;
@@ -262,6 +281,7 @@ export type DxfProductPhase2FreshBuildBlockerCodeV1 =
   | 'invalid-input'
   | 'cancelled'
   | 'phase1-build-inputs-blocked'
+  | 'cut-surface-equivalence-blocked'
   | 'forged-or-stale-native-edge-owner'
   | 'native-edge-binding-mismatch'
   | 'native-edge-coverage-mismatch'
@@ -300,6 +320,8 @@ export type DxfProductPhase2FreshBuildOptionsV1 = Readonly<{
 export const DXF_PRODUCT_PHASE2_FRESH_BUILD_CONTRACT_V1 = Object.freeze({
   phase1InputOwner: 'buildDxfProductPhase1BuildInputsV1 only',
   nativeEdgeOwner: 'one genuine DxfProductPhaseDNativeStraightEdgesOwnerV3 consumed once',
+  cutSurfaceCompilerProjection:
+    'one genuine exact-zero-allowance equivalence owner consumed once; original handoff retained',
   independentBuilds: 2,
   cdt2dCallsPerBuild: 4,
   cdt2dCallsTotal: 8,
@@ -445,8 +467,12 @@ function snapshotData(
 }
 
 function exactRoot(input: unknown): {
-  request: Omit<DxfProductPhase2FreshBuildRequestV1, 'phaseDNativeStraightEdgeOwner'>;
+  request: Omit<
+    DxfProductPhase2FreshBuildRequestV1,
+    'phaseDNativeStraightEdgeOwner' | 'zeroAllowanceCutSurfaceEquivalenceOwner'
+  >;
   owner: unknown;
+  surfaceOwner: unknown;
 } {
   if (!input || typeof input !== 'object' || Array.isArray(input))
     fail('invalid-input', 'Fresh-build request must be an exact plain record.');
@@ -463,6 +489,7 @@ function exactRoot(input: unknown): {
     'schemaVersion',
     'phase1Request',
     'phaseDNativeStraightEdgeOwner',
+    'zeroAllowanceCutSurfaceEquivalenceOwner',
     'targetEdgeMm',
     'documentIdentity',
   ].sort();
@@ -490,10 +517,17 @@ function exactRoot(input: unknown): {
     0,
     { nodes: 0 },
     new Set(),
-  ) as Omit<DxfProductPhase2FreshBuildRequestV1, 'phaseDNativeStraightEdgeOwner'>;
+  ) as Omit<
+    DxfProductPhase2FreshBuildRequestV1,
+    'phaseDNativeStraightEdgeOwner' | 'zeroAllowanceCutSurfaceEquivalenceOwner'
+  >;
   if (request.schemaVersion !== DXF_PRODUCT_PHASE2_FRESH_BUILD_REQUEST_V1)
     fail('invalid-input', 'Fresh-build request schema is invalid.');
-  return { request, owner: descriptors.phaseDNativeStraightEdgeOwner.value };
+  return {
+    request,
+    owner: descriptors.phaseDNativeStraightEdgeOwner.value,
+    surfaceOwner: descriptors.zeroAllowanceCutSurfaceEquivalenceOwner.value,
+  };
 }
 
 function canonical(value: unknown): string {
@@ -599,7 +633,10 @@ function sameStringSet(left: readonly string[], right: readonly string[]): boole
 }
 
 function assertIdentity(
-  request: Omit<DxfProductPhase2FreshBuildRequestV1, 'phaseDNativeStraightEdgeOwner'>,
+  request: Omit<
+    DxfProductPhase2FreshBuildRequestV1,
+    'phaseDNativeStraightEdgeOwner' | 'zeroAllowanceCutSurfaceEquivalenceOwner'
+  >,
 ): void {
   const { documentIdentity: identity, phase1Request } = request;
   if (
@@ -829,9 +866,7 @@ function samplingRequest(
       const forwardStart = side.direction === 'forward' ? directedStart : directedEnd;
       const forwardEnd = side.direction === 'forward' ? directedEnd : directedStart;
       const edgeId = edgeIdByOccurrence.get(
-        `${side.pieceId}\0${side.contourId}\0${ring.vertices[forwardStart]?.id}\0${
-          ring.vertices[forwardEnd]?.id
-        }`,
+        `${side.pieceId}\0${side.contourId}\0${ring.vertices[forwardStart]?.id}\0${ring.vertices[forwardEnd]?.id}`,
       );
       if (!edgeId)
         fail('native-edge-coverage-mismatch', `${proof.seamId} does not own one native edge.`);
@@ -892,12 +927,15 @@ function countedTriangulator(counter: Counter): ConstrainedTriangulator {
 function buildOnce(
   candidate: DxfProductPhase1BuildInputsCandidateV1,
   request: Phase2BoundarySamplingRequestV1,
+  sourceIdentityBinding: GarmentPhase2SourceIdentityBindingV1,
   counter: Counter,
 ): PrivatePhase2Build {
-  const pieces = candidate.triangulationInputs.map((input): GarmentPhase1PieceResultV1 => ({
-    pieceId: input.pieceId,
-    result: countedTriangulator(counter).triangulate(input),
-  }));
+  const pieces = candidate.triangulationInputs.map(
+    (input): GarmentPhase1PieceResultV1 => ({
+      pieceId: input.pieceId,
+      result: countedTriangulator(counter).triangulate(input),
+    }),
+  );
   const baselineRequest: GarmentPhase1ClothMeshCompileRequestV1 = {
     assembly: candidate.assembly,
     pieces,
@@ -910,10 +948,74 @@ function buildOnce(
     baselineRequest,
     samplingRequest: request,
     samplingArtifact,
+    sourceIdentityBinding,
   } satisfies GarmentPhase2SampledClothMeshUpgradeRequestV1;
   return Object.freeze({
     upgradeRequest,
     artifact: upgradeGarmentPhase2SampledClothMeshV1(upgradeRequest),
+  });
+}
+
+function compilerCandidateForPhysicalSurface(
+  candidate: DxfProductPhase1BuildInputsCandidateV1,
+  request: Omit<
+    DxfProductPhase2FreshBuildRequestV1,
+    'phaseDNativeStraightEdgeOwner' | 'zeroAllowanceCutSurfaceEquivalenceOwner'
+  >,
+  surfaceOwner: unknown,
+): Readonly<{
+  candidate: DxfProductPhase1BuildInputsCandidateV1;
+  equivalence: DxfProductZeroAllowanceCutSurfaceEquivalenceV1 | null;
+}> {
+  if (
+    candidate.assembly.source.documentId !== request.documentIdentity.documentId ||
+    candidate.assembly.source.revision !== request.documentIdentity.revision
+  )
+    fail(
+      'native-edge-binding-mismatch',
+      'The private compiler candidate does not retain the authenticated Assembly Order identity.',
+    );
+  const physicalSurface = candidate.assembly.physicalSurface;
+  if (
+    physicalSurface.mode === 'sewing-surface' &&
+    physicalSurface.seamAllowancePhysical === false
+  ) {
+    if (surfaceOwner !== null)
+      fail(
+        'cut-surface-equivalence-blocked',
+        'A sewing-surface build must not carry a cut-surface equivalence capability.',
+      );
+    return Object.freeze({ candidate, equivalence: null });
+  }
+  if (physicalSurface.mode !== 'cut-surface' || physicalSurface.seamAllowancePhysical !== true)
+    fail(
+      'cut-surface-equivalence-blocked',
+      'Only sewing-surface or explicitly physical cut-surface inputs are supported.',
+    );
+  const consumed = consumeDxfProductZeroAllowanceCutSurfaceEquivalenceOwnerV1(
+    surfaceOwner as DxfProductZeroAllowanceCutSurfaceEquivalenceOwnerV1,
+    {
+      handoffCanonicalSha256: request.phase1Request.handoff.seal.canonicalSha256,
+      sourceFileId: request.documentIdentity.sourceFileId,
+      sizeToken: request.documentIdentity.sizeToken,
+      pieceIds: request.documentIdentity.pieceIds,
+    },
+  );
+  if (!consumed.ok)
+    fail(
+      'cut-surface-equivalence-blocked',
+      `A genuine one-shot zero-allowance cut-surface equivalence is required: ${consumed.blockers[0].code}.`,
+    );
+  const assembly = Object.freeze({
+    ...candidate.assembly,
+    physicalSurface: Object.freeze({
+      mode: 'sewing-surface' as const,
+      seamAllowancePhysical: false as const,
+    }),
+  });
+  return Object.freeze({
+    candidate: Object.freeze({ ...candidate, assembly }),
+    equivalence: consumed.evidence,
   });
 }
 
@@ -928,7 +1030,10 @@ function checkAbort(signal: Readonly<Pick<AbortSignal, 'aborted'>> | undefined):
 
 function validateNativeProjection(
   projection: DxfProductPhaseDNativeStraightEdgesProjectionV3,
-  request: Omit<DxfProductPhase2FreshBuildRequestV1, 'phaseDNativeStraightEdgeOwner'>,
+  request: Omit<
+    DxfProductPhase2FreshBuildRequestV1,
+    'phaseDNativeStraightEdgeOwner' | 'zeroAllowanceCutSurfaceEquivalenceOwner'
+  >,
 ): void {
   const { documentIdentity: identity, phase1Request } = request;
   const { binding, claims } = projection;
@@ -1195,7 +1300,7 @@ export async function buildDxfProductPhase2FreshBuildOwnerV1(
     return blocked(new FreshBuildFailure('invalid-input', 'Reentrant build rejected.'));
   buildActive = true;
   try {
-    const { request, owner } = exactRoot(input);
+    const { request, owner, surfaceOwner } = exactRoot(input);
     assertIdentity(request);
     const signal = options.signal;
     const crypto = options.crypto ?? globalThis.crypto;
@@ -1205,8 +1310,13 @@ export async function buildDxfProductPhase2FreshBuildOwnerV1(
     if (!phase1.ok)
       fail(
         'phase1-build-inputs-blocked',
-        `Fresh Phase-1 input construction failed: ${phase1.blockers[0].code}.`,
+        `Fresh Phase-1 input construction failed: ${phase1.blockers[0].code}: ${phase1.blockers[0].detail}`,
       );
+    const compilerProjection = compilerCandidateForPhysicalSurface(
+      phase1.candidate,
+      request,
+      surfaceOwner,
+    );
 
     checkAbort(signal);
     const consumed = consumeDxfProductPhaseDNativeStraightEdgesV3(owner, {
@@ -1226,15 +1336,30 @@ export async function buildDxfProductPhase2FreshBuildOwnerV1(
       request.documentIdentity,
       request.targetEdgeMm,
     );
+    const sourceIdentityBinding = Object.freeze({
+      schemaVersion: GARMENT_PHASE2_SOURCE_IDENTITY_BINDING_V1,
+      assemblyDocumentId: request.documentIdentity.documentId,
+      nativeSamplingSourceFileId: request.documentIdentity.sourceFileId,
+    } satisfies GarmentPhase2SourceIdentityBindingV1);
 
     checkAbort(signal);
     const counter: Counter = { count: 0 };
     let first: PrivatePhase2Build;
     let second: PrivatePhase2Build;
     try {
-      first = buildOnce(phase1.candidate, phase2Request, counter);
+      first = buildOnce(
+        compilerProjection.candidate,
+        phase2Request,
+        sourceIdentityBinding,
+        counter,
+      );
       checkAbort(signal);
-      second = buildOnce(phase1.candidate, phase2Request, counter);
+      second = buildOnce(
+        compilerProjection.candidate,
+        phase2Request,
+        sourceIdentityBinding,
+        counter,
+      );
     } catch (error) {
       if (error instanceof FreshBuildFailure) throw error;
       fail('phase2-build-failed', errorDetail(error, 'Pinned Phase-2 build failed closed.'));
@@ -1255,11 +1380,16 @@ export async function buildDxfProductPhase2FreshBuildOwnerV1(
         'independent-build-mismatch',
         'The two fresh Phase-1/Phase-2 builds are not byte and fingerprint identical.',
       );
-    const [artifactSha, documentIdentitySha256] = await Promise.all([
+    const [artifactSha, documentIdentitySha256, sourceIdentityBindingSha256] = await Promise.all([
       sha256Bytes('dxf-product-phase2-fresh-build-artifact-v1', firstBytes, crypto),
       sha256Bytes(
         'dxf-product-phase2-fresh-build-document-identity-v1',
         encoder.encode(canonical(request.documentIdentity)),
+        crypto,
+      ),
+      sha256Bytes(
+        'dxf-product-phase2-source-identity-binding-v1',
+        encoder.encode(canonical(sourceIdentityBinding)),
         crypto,
       ),
     ]);
@@ -1286,6 +1416,10 @@ export async function buildDxfProductPhase2FreshBuildOwnerV1(
         sourceNativeAuthoritySha256: consumed.projection.binding.sourceNativeAuthoritySha256,
         nativeStraightEdgesSha256: consumed.projection.binding.nativeStraightEdgesSha256,
         artifactSha256: artifactSha,
+        sourceIdentityBindingSha256,
+        phase2SourceBinding: first.artifact.sourceBinding,
+        zeroAllowanceCutSurfaceEquivalenceSha256:
+          compilerProjection.equivalence?.canonicalSha256 ?? null,
         deterministicFingerprint: first.artifact.deterministicFingerprint,
         pieceCount: 2 as const,
         seamCount: 2 as const,

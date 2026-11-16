@@ -392,17 +392,19 @@ function ring(contour: DxfPatternContourV1, role: BoundaryRing['role']): Boundar
   return {
     id: contour.id,
     role,
-    vertices: contour.vertices.map((vertex): BoundaryVertex => ({
-      id: vertex.id,
-      positionMm: [vertex.positionMm[0], vertex.positionMm[1]],
-      source: {
-        contourId: contour.id,
-        sourceCurveId: vertex.source.sourceCurveId,
-        sourceCurveParameterSpace: vertex.source.parameterSpace,
-        sourceCurveT: vertex.source.sourceCurveT,
-        normalizedArc: vertex.source.normalizedArc,
-      },
-    })),
+    vertices: contour.vertices.map(
+      (vertex): BoundaryVertex => ({
+        id: vertex.id,
+        positionMm: [vertex.positionMm[0], vertex.positionMm[1]],
+        source: {
+          contourId: contour.id,
+          sourceCurveId: vertex.source.sourceCurveId,
+          sourceCurveParameterSpace: vertex.source.parameterSpace,
+          sourceCurveT: vertex.source.sourceCurveT,
+          normalizedArc: vertex.source.normalizedArc,
+        },
+      }),
+    ),
   };
 }
 
@@ -616,7 +618,20 @@ function exactCompatibilityTolerance(
   )
     fail(
       'seam-binding-mismatch',
-      `${seamId} compatibility does not equal the freshly recomputed exact-edge policy.`,
+      `${seamId} compatibility does not equal the freshly recomputed exact-edge policy: ${JSON.stringify(
+        {
+          firstLengthMm,
+          secondLengthMm,
+          maximumEndpointResidualMm,
+          endpointToleranceMm,
+          fullLengthResidualMm,
+          fullLengthResidualRelative,
+          fullLengthToleranceMm,
+          fullLengthToleranceRelative,
+          effectiveFullLengthToleranceMm,
+          compatibility,
+        },
+      )}`,
     );
   return effectiveFullLengthToleranceMm;
 }
