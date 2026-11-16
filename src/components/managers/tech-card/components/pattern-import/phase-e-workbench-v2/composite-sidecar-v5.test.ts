@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
+import { readManifest } from 'lib/pattern-import/manifest';
+import type { ReplayAnswer, WriteJob } from 'lib/pattern-import/types';
+import { writeDxfDetailed } from 'lib/pattern-import/write';
 import {
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V3,
   buildPatternImportDxfProductCompositeSidecarV3,
@@ -68,7 +71,9 @@ const bindings: PatternImportDxfProductCompositeSidecarBindingsV3 = {
   assemblyTopologySha256: hash('b'),
 };
 
-function semanticDocument() {
+function semanticDocument(
+  activeBindings: PatternImportDxfProductCompositeSidecarBindingsV3 = bindings,
+) {
   const sample = (ordinal: number, progress: number) => ({
     ordinal,
     vertexId: `vertex-${ordinal}`,
@@ -100,9 +105,9 @@ function semanticDocument() {
       writerId: 'grbpwr.pattern-import.writeDxfDetailed',
       writerDialect: 'r12',
       format: 'AAMA-DXF-AC1009',
-      scopeKey: bindings.row.scopeKey,
-      exportSha256: bindings.row.sha256,
-      byteLength: bindings.row.sizeBytes,
+      scopeKey: activeBindings.row.scopeKey,
+      exportSha256: activeBindings.row.sha256,
+      byteLength: activeBindings.row.sizeBytes,
       phaseEPlanSha256: hash('c'),
       sizeSelectionSha256: hash('d'),
       mappingCompositionSealSha256: hash('e'),
@@ -147,17 +152,17 @@ function semanticDocument() {
       receiptSealVersion: 'pattern-import-dxf-product-post-save-readback-seal/1',
       receiptSealSha256: hash('4'),
       card: {
-        techCardId: bindings.row.techCardId,
-        previousLockVersion: bindings.row.cardLockVersion - 1,
-        observedLockVersion: bindings.row.cardLockVersion,
+        techCardId: activeBindings.row.techCardId,
+        previousLockVersion: activeBindings.row.cardLockVersion - 1,
+        observedLockVersion: activeBindings.row.cardLockVersion,
       },
       pattern: {
-        lineKey: bindings.row.patternLineKey,
-        url: bindings.row.url,
-        scopeKey: bindings.row.scopeKey,
+        lineKey: activeBindings.row.patternLineKey,
+        url: activeBindings.row.url,
+        scopeKey: activeBindings.row.scopeKey,
         sizeId: 0,
         version: 4,
-        sha256: bindings.row.sha256,
+        sha256: activeBindings.row.sha256,
       },
       pieceLineKeys: ['line:front', 'line:back'],
       aliases: [],
@@ -165,13 +170,15 @@ function semanticDocument() {
   };
 }
 
-function candidate(): PatternImportDxfPhaseEExactNSeamAuthorityCandidateV2 {
+function candidate(
+  activeBindings: PatternImportDxfProductCompositeSidecarBindingsV3 = bindings,
+): PatternImportDxfPhaseEExactNSeamAuthorityCandidateV2 {
   return {
     schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_EXACT_N_SEAM_AUTHORITY_CANDIDATE_V2,
     status: 'untrusted-authority-candidate',
-    row: bindings.row,
-    serverAssemblyRevision: bindings.serverAssemblyRevision,
-    assemblyTopologySha256: bindings.assemblyTopologySha256,
+    row: activeBindings.row,
+    serverAssemblyRevision: activeBindings.serverAssemblyRevision,
+    assemblyTopologySha256: activeBindings.assemblyTopologySha256,
     selectedOperation: {
       sourceOperationNumber: 120,
       authoringOperationId: 'operation:side-seams',
@@ -203,27 +210,31 @@ function candidate(): PatternImportDxfPhaseEExactNSeamAuthorityCandidateV2 {
   };
 }
 
-async function exactEnvelope(): Promise<
-  Extract<PatternImportDxfPhaseEExactNSeamConsistencyResultV2, { ok: true }>
-> {
-  const built = await buildPatternImportDxfPhaseEExactNSeamConsistencyCarrierV2(candidate());
+async function exactEnvelope(
+  activeBindings: PatternImportDxfProductCompositeSidecarBindingsV3 = bindings,
+): Promise<Extract<PatternImportDxfPhaseEExactNSeamConsistencyResultV2, { ok: true }>> {
+  const built = await buildPatternImportDxfPhaseEExactNSeamConsistencyCarrierV2(
+    candidate(activeBindings),
+  );
   if (!built.ok) throw new Error(built.blockers[0].detail);
   return built;
 }
 
-async function v4Bytes(): Promise<Uint8Array<ArrayBuffer>> {
+async function v4Bytes(
+  activeBindings: PatternImportDxfProductCompositeSidecarBindingsV3 = bindings,
+): Promise<Uint8Array<ArrayBuffer>> {
   const v3 = await buildPatternImportDxfProductCompositeSidecarV3({
     schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V3,
-    bindings,
+    bindings: activeBindings,
     expectedPreviousSidecarSha256: null,
-    semanticProductV1Bytes: bytesOf(semanticDocument()),
+    semanticProductV1Bytes: bytesOf(semanticDocument(activeBindings)),
     placementV2Bytes: null,
     exactTopologyBytes: null,
   });
   if (!v3.ok) throw new Error(v3.blockers[0].detail);
   const encodedV3 = encodePatternImportDxfProductCompositeSidecarV3(v3.owner);
   if (!encodedV3.ok) throw new Error('V3 fixture encode failed.');
-  const exact = await exactEnvelope();
+  const exact = await exactEnvelope(activeBindings);
   const encodedExact = await encodePatternImportDxfProductExactNSeamComponentV4({
     carrier: exact.carrier,
     seal: exact.seal,
@@ -231,7 +242,7 @@ async function v4Bytes(): Promise<Uint8Array<ArrayBuffer>> {
   if (!encodedExact.ok) throw new Error(encodedExact.blocker.detail);
   const v4 = await buildPatternImportDxfProductCompositeSidecarV4({
     schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V4,
-    bindings,
+    bindings: activeBindings,
     expectedPreviousSidecarSha256: hash('7'),
     compositeV3Bytes: encodedV3.bytes,
     exactNSeamConsistencyBytes: encodedExact.bytes,
@@ -256,10 +267,12 @@ const pointAnchor = {
   pointMm: { x: 12.5, y: 44.25 },
 };
 
-async function annotationBytes() {
+async function annotationBytes(
+  activeBindings: PatternImportDxfProductCompositeSidecarBindingsV3 = bindings,
+) {
   const encoded = await encodePatternImportDxfPhaseETopologyAnnotationsV1({
     schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATIONS_REQUEST_V1,
-    bindings: derivePatternImportDxfPhaseETopologyAnnotationsBindingsV1(bindings, source),
+    bindings: derivePatternImportDxfPhaseETopologyAnnotationsBindingsV1(activeBindings, source),
     measurements: [
       {
         id: 'measurement:point:1',
@@ -282,17 +295,71 @@ async function annotationBytes() {
   return encoded.bytes;
 }
 
-async function builtV5() {
-  const originalV4 = await v4Bytes();
+async function builtV5(
+  activeBindings: PatternImportDxfProductCompositeSidecarBindingsV3 = bindings,
+) {
+  const originalV4 = await v4Bytes(activeBindings);
   const built = await buildPatternImportDxfProductCompositeSidecarV5({
     schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V5,
-    bindings,
+    bindings: activeBindings,
     expectedPreviousSidecarSha256: hash('8'),
     compositeV4Bytes: originalV4,
-    topologyAnnotationsBytes: await annotationBytes(),
+    topologyAnnotationsBytes: await annotationBytes(activeBindings),
   });
   if (!built.ok) throw new Error(built.blockers[0].detail);
   return { built, originalV4 };
+}
+
+const clothAuthoredFrame: ReplayAnswer = {
+  step: 'cloth-preview',
+  kind: 'cloth-authored-frame',
+  subject: 'front panel · authored frame',
+  value: {
+    frameId: 'cloth:front:authored:0',
+    matrix: [1, 0, 0, 1, 12.5, -3.25],
+    solver: { revision: 9, kind: 'future-cloth-solver' },
+  },
+  strong: true,
+};
+
+function clothReplayDxfText(): string {
+  const job: WriteJob = {
+    techCardId: bindings.row.techCardId,
+    scope: {
+      scopeKey: bindings.row.scopeKey,
+      fabricPurpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
+      bomLineKey: 'bom:main',
+      label: 'main',
+      isInterlining: false,
+      sections: ['TECH_CARD_BOM_SECTION_FABRIC'],
+    },
+    pieces: [],
+    sizes: [],
+    source: {
+      files: [
+        {
+          name: 'cloth-replay-source.dxf',
+          sha256: hash('a'),
+          bytes: 321,
+          kind: 'dxf',
+          pages: 1,
+        },
+      ],
+      scale: { method: 'none', factor: 1, measuredMm: null, declaredMm: null },
+      sheet: { pages: 1, method: 'single', maxResidualMm: 0 },
+      sizeEncoding: 'single',
+      variant: null,
+    },
+    generator: 'composite-v5-cloth-replay-cross-contract-test',
+    dialect: 'r12',
+    replay: { v: 1, answers: [structuredClone(clothAuthoredFrame)] },
+  };
+  return writeDxfDetailed(job, { now: () => new Date('2026-11-16T00:00:00.000Z') }).dxfText;
+}
+
+async function sha256(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 describe('Composite V5 durable topology annotations', () => {
@@ -325,6 +392,50 @@ describe('Composite V5 durable topology annotations', () => {
       measurements: [{ id: 'measurement:point:1', anchors: [{ vertexId: 'vertex:front:0' }] }],
       callouts: [{ id: 'callout:1', text: 'Align notch before sewing.' }],
     });
+  });
+
+  it('keeps cloth-authored-frame outside V5 while binding its exact DXF SHA', async () => {
+    const dxfText = clothReplayDxfText();
+    const dxfBytes = new TextEncoder().encode(dxfText);
+    const dxfSha256 = await sha256(dxfBytes);
+    const replayManifest = readManifest(dxfText);
+    expect(
+      replayManifest?.replay?.answers.find(({ kind }) => kind === 'cloth-authored-frame'),
+    ).toEqual(clothAuthoredFrame);
+
+    const dxfBindings: PatternImportDxfProductCompositeSidecarBindingsV3 = {
+      ...bindings,
+      row: { ...bindings.row, sha256: dxfSha256, sizeBytes: dxfBytes.byteLength },
+    };
+    const { built, originalV4 } = await builtV5(dxfBindings);
+    const encoded = encodePatternImportDxfProductCompositeSidecarV5(built.owner);
+    if (!encoded.ok) throw new Error('V5 fixture encode failed.');
+    expect(new TextDecoder().decode(encoded.bytes)).not.toContain('cloth-authored-frame');
+
+    const decoded = await decodePatternImportDxfProductCompositeSidecarV5(encoded.bytes);
+    if (!decoded.ok) throw new Error(decoded.blockers[0].detail);
+    expect(decoded.document.bindings.row).toMatchObject({
+      sha256: dxfSha256,
+      sizeBytes: dxfBytes.byteLength,
+    });
+    expect(
+      readPatternImportDxfProductCompositeComponentBytesV5(decoded.owner, 'composite-v4'),
+    ).toEqual(originalV4);
+    expect(readManifest(new TextDecoder().decode(dxfBytes))?.replay).toEqual(
+      replayManifest?.replay,
+    );
+
+    expect(
+      restorePatternImportDxfPhaseETopologyAnnotationsV5(decoded.owner, {
+        bindings: {
+          ...dxfBindings,
+          row: { ...dxfBindings.row, sha256: hash('f') },
+        },
+        sourceIdentity: source.identity,
+        sourceRevision: source.revision,
+        sourceSha256: source.sha256,
+      }),
+    ).toMatchObject({ ok: false, blockers: [{ code: 'stale-authority' }] });
   });
 
   it('is not accepted by the V4 reader', async () => {
@@ -398,6 +509,37 @@ describe('Composite V5 durable topology annotations', () => {
       ok: false,
       code: 'invalid-owner',
       bytes: null,
+    });
+  });
+
+  it('fails closed before parsing any component beyond the production 4 MiB store limit', async () => {
+    const overProductionLimit = new Uint8Array(4 * 1024 * 1024 + 1);
+    const common = {
+      schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V5,
+      bindings,
+      expectedPreviousSidecarSha256: hash('8'),
+    } as const;
+
+    expect(
+      await buildPatternImportDxfProductCompositeSidecarV5({
+        ...common,
+        compositeV4Bytes: overProductionLimit,
+        topologyAnnotationsBytes: await annotationBytes(),
+      }),
+    ).toMatchObject({
+      ok: false,
+      blockers: [{ code: 'bounds-exceeded', field: 'request.compositeV4Bytes' }],
+    });
+
+    expect(
+      await buildPatternImportDxfProductCompositeSidecarV5({
+        ...common,
+        compositeV4Bytes: await v4Bytes(),
+        topologyAnnotationsBytes: overProductionLimit,
+      }),
+    ).toMatchObject({
+      ok: false,
+      blockers: [{ code: 'bounds-exceeded', field: 'request.topologyAnnotationsBytes' }],
     });
   });
 });

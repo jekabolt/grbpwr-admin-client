@@ -210,6 +210,17 @@ describe('Composite V5 annotation persistence transaction', () => {
     expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
   });
 
+  it('fails before PUT when the persisted DXF SHA differs from the V5 row binding', async () => {
+    const test = rig({
+      semanticSidecar: storedV4({ dxfSha256: hash('f') }),
+    });
+
+    const result = await test.adapter.persist(request(), new AbortController().signal);
+
+    expect(result).toMatchObject({ ok: false, writeOutcome: 'not-attempted' });
+    expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+  });
+
   it('fails closed when the current V4 is missing or its authority is stale', async () => {
     const missing = rig({});
     expect(await missing.adapter.persist(request(), new AbortController().signal)).toMatchObject({

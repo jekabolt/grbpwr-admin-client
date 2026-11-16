@@ -262,9 +262,15 @@ const MAX_ID_LENGTH = 256;
 const MAX_TEXT_LENGTH = 500;
 const MAX_LABEL_LENGTH = 512;
 const MAX_SOURCE_IDENTITY_LENGTH = 4_096;
-const MAX_COMPONENT_BYTES = 48 * 1024 * 1024;
-const MAX_ANNOTATIONS_BYTES = 16 * 1024 * 1024;
-const MAX_DOCUMENT_BYTES = 64 * 1024 * 1024;
+// The current semantic-sidecar store and its database CHECK both cap the complete opaque payload
+// at 4 MiB. Keep every pre-base64 input bounded by the same production ceiling and enforce the
+// ceiling again on the canonical outer document; base64 overhead means the usable component budget
+// is intentionally smaller. Raising this requires a coordinated database, transport and backend
+// admission change and must never happen in the browser alone.
+const PRODUCTION_SIDECAR_MAX_BYTES = 4 * 1024 * 1024;
+const MAX_COMPONENT_BYTES = PRODUCTION_SIDECAR_MAX_BYTES;
+const MAX_ANNOTATIONS_BYTES = PRODUCTION_SIDECAR_MAX_BYTES;
+const MAX_DOCUMENT_BYTES = PRODUCTION_SIDECAR_MAX_BYTES;
 const MAX_RECORDS = 20_000;
 const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 const encoder = new TextEncoder();
