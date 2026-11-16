@@ -10,6 +10,19 @@ const SOURCE_DIR = resolve(ROOT, 'src/assets/mannequin');
 const OUTPUT_DIR = resolve(SOURCE_DIR, 'measurement-guides-v2');
 const FULL_VIEWBOX = Object.freeze([0, 0, 240, 360]);
 const CORAL = '#e85d4a';
+const THREE_D_SURFACE_GUIDES = new Set([
+  'BODY_MEASUREMENT_NAME_CHEST',
+  'BODY_MEASUREMENT_NAME_UNDER_BUST',
+  'BODY_MEASUREMENT_NAME_WAIST',
+  'BODY_MEASUREMENT_NAME_HIGH_HIP',
+  'BODY_MEASUREMENT_NAME_HIP',
+  'BODY_MEASUREMENT_NAME_BICEP',
+  'BODY_MEASUREMENT_NAME_WRIST',
+  'BODY_MEASUREMENT_NAME_THIGH',
+  'BODY_MEASUREMENT_NAME_KNEE',
+  'BODY_MEASUREMENT_NAME_CALF',
+  'BODY_MEASUREMENT_NAME_ANKLE',
+]);
 
 const point = (x, y) => Object.freeze([x, y]);
 const line = (path, points, view = 'front', arrows = false) =>
@@ -181,20 +194,22 @@ function sourcePath(gender, view) {
 }
 
 function svgFor(baseDataUrl, guide, viewBox) {
+  const sourceUnitsPerOutputPixel = viewBox[2] / 512;
+  const units = (pixels) => Number((pixels * sourceUnitsPerOutputPixel).toFixed(4));
   const arrow = guide.arrows
     ? `<defs><marker id="arrow" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="3.5" markerHeight="3.5" orient="auto-start-reverse"><path d="M 8 0 L 0 4 L 8 8 Z" fill="${CORAL}"/></marker></defs>`
     : '';
-  const halo = `<path d="${guide.path}" fill="none" stroke="#fff" stroke-width="5.4" stroke-linecap="round" stroke-linejoin="round"/>`;
+  const halo = `<path d="${guide.path}" fill="none" stroke="#fff" stroke-width="${units(3.2)}" stroke-linecap="round" stroke-linejoin="round"/>`;
   const rear = guide.rearPath
-    ? `<path d="${guide.rearPath}" fill="none" stroke="#fff" stroke-width="4.6" stroke-linecap="round"/><path d="${guide.rearPath}" fill="none" stroke="${CORAL}" stroke-opacity="0.46" stroke-width="2" stroke-linecap="round" stroke-dasharray="2.4 3.2"/>`
+    ? `<path d="${guide.rearPath}" fill="none" stroke="#fff" stroke-width="${units(2.8)}" stroke-linecap="round"/><path d="${guide.rearPath}" fill="none" stroke="${CORAL}" stroke-opacity="0.46" stroke-width="${units(1)}" stroke-linecap="round" stroke-dasharray="${units(2.4)} ${units(3.2)}"/>`
     : '';
-  const core = `<path d="${guide.path}" fill="none" stroke="${CORAL}" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"${guide.arrows ? ' marker-start="url(#arrow)" marker-end="url(#arrow)"' : ''}/>`;
+  const core = `<path d="${guide.path}" fill="none" stroke="${CORAL}" stroke-width="${units(1.4)}" stroke-linecap="round" stroke-linejoin="round"${guide.arrows ? ' marker-start="url(#arrow)" marker-end="url(#arrow)"' : ''}/>`;
   const points = guide.arrows
     ? ''
     : guide.points
         .map(
           ([x, y]) =>
-            `<circle cx="${x}" cy="${y}" r="3.1" fill="${CORAL}" stroke="#fff" stroke-width="1.5"/>`,
+            `<circle cx="${x}" cy="${y}" r="${units(2.2)}" fill="${CORAL}" stroke="#fff" stroke-width="${units(0.8)}"/>`,
         )
         .join('');
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -237,6 +252,10 @@ async function main() {
     const outputs = [];
     for (const gender of GENDERS) {
       for (const [measurementName, guide] of Object.entries(GUIDES)) {
+        // These exact plane/surface sections are rendered by the 3D capture pass. Keeping them
+        // out of this hand-authored SVG pass prevents a later regeneration from reintroducing
+        // thick, coordinate-authored rings.
+        if (THREE_D_SURFACE_GUIDES.has(measurementName)) continue;
         outputs.push(await renderGuide(tempDirectory, gender, measurementName, guide));
       }
     }

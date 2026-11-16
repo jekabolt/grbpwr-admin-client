@@ -139,6 +139,13 @@ const ModelFormPersonalizedPreviewDevPage = import.meta.env.DEV
       ),
     )
   : null;
+const ModelMeasurementGuideCaptureDevPage = import.meta.env.DEV
+  ? lazyRoute(() =>
+      import('components/managers/model/components/model-measurement-guide-capture-dev-page').then(
+        (m) => ({ default: m.ModelMeasurementGuideCaptureDevPage }),
+      ),
+    )
+  : null;
 const ModelCreatePoseHandoffDevPage = import.meta.env.DEV
   ? lazyRoute(() =>
       import('components/managers/model/components/model-create-pose-handoff-dev-page').then(
@@ -570,6 +577,16 @@ const app = (
                     element={
                       ModelFormPersonalizedPreviewDevPage ? (
                         <ModelFormPersonalizedPreviewDevPage />
+                      ) : null
+                    }
+                  />
+                )}
+                {import.meta.env.DEV && (
+                  <Route
+                    path='/__model-measurement-guide-capture-v1'
+                    element={
+                      ModelMeasurementGuideCaptureDevPage ? (
+                        <ModelMeasurementGuideCaptureDevPage />
                       ) : null
                     }
                   />

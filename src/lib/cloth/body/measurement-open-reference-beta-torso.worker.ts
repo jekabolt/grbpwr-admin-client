@@ -40,8 +40,14 @@ context.onmessage = async (
       measurements: request.options.measurements,
       modes: modes.modes,
     });
+    const chestStationOriginM = modes.modes.find(
+      ({ measurementKey }) => measurementKey === 'chestCircumferenceMm',
+    )?.chestStationOriginM;
+    if (!chestStationOriginM) throw new Error('Chest section station is missing.');
     const value = Object.freeze({
       positionsM: chestShoulder.positionsM,
+      chestStationOriginM,
+      underBustStationOriginM: modes.underBustStationOriginM,
       ribcageRepresentedMeasurements: ribcage.representedMeasurements,
       ribcageDiagnostics: Object.freeze([...modes.diagnostics, ...ribcage.diagnostics]),
       chestShoulderRepresentedMeasurements: chestShoulder.representedMeasurements,

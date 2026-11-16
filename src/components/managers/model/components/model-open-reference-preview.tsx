@@ -240,6 +240,8 @@ interface FullBodyBuiltPreviewV3 {
     | MakeHumanFullBodyLiveFkSessionV5
     | null;
   readonly measurementApplication: ModelOpenReferenceMeasurementApplicationV1 | null;
+  readonly limbSectionModes: MeasurementOpenReferenceBetaShapeRuntimeResultV1['limbSectionModes'];
+  readonly torsoSectionStations: MeasurementOpenReferenceBetaShapeRuntimeResultV1['torsoSectionStations'];
   readonly bodyBuildFingerprint: string;
 }
 
@@ -443,6 +445,8 @@ export interface ModelOpenReferencePreviewProps {
   readonly patternPieceOverlay?: MeasurementSurfacePatternPieceOverlayV1;
   /** Measurement field currently focused or hovered in the model form. */
   readonly activeMeasurementName?: common_BodyMeasurementName;
+  /** Internal asset-capture mode: supersample and frame the active 3D guide itself. */
+  readonly measurementGuidePresentation?: 'interactive' | 'capture';
 }
 
 export interface ModelOpenReferenceDirectPoseBindingV9 {
@@ -2390,6 +2394,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
   modelContentRevision = 'model-form:create:unbound',
   input,
   editor,
+  measurementGuidePresentation = 'interactive',
   patternPieceOverlay,
   variant = 'form',
   viewPreset = 'front',
@@ -2809,6 +2814,8 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                       beta: betaShapeRuntime,
                     })
                   : null,
+                limbSectionModes: betaShapeRuntime?.limbSectionModes,
+                torsoSectionStations: betaShapeRuntime?.torsoSectionStations,
                 bodyBuildFingerprint: requestedBodyBuildFingerprint,
               } satisfies FullBodyBuiltPreviewV3;
             });
@@ -3034,8 +3041,12 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
         ? buildMeasurementSurfaceActiveMeasurementGuideV1({
             measurementName: activeMeasurementName,
             frame: displayedBuilt.frame,
-            mesh: displayedBuilt.measurementGuideSourceMesh,
+            mesh: editor.equalGeometry(draftPose, editor.neutralPose)
+              ? displayedBuilt.runtime.displayMesh
+              : displayedBuilt.measurementGuideSourceMesh,
             neutralPose: editor.equalGeometry(draftPose, editor.neutralPose),
+            limbSectionModes: displayedBuilt.limbSectionModes,
+            torsoSectionStations: displayedBuilt.torsoSectionStations,
           })
         : undefined,
     [activeMeasurementName, displayedBuilt, draftPose, editor],
@@ -3754,6 +3765,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                 lod='display'
                 displayMeshOverride={displayedBuilt.runtime.displayMesh}
                 measurementGuide={measurementGuide}
+                measurementGuidePresentation={measurementGuidePresentation}
                 viewPreset={viewPreset}
                 overlays={DISPLAY_OVERLAYS}
                 jointEditor={

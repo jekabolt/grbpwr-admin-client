@@ -22,6 +22,7 @@ import {
   createMeasurementOpenReferenceLimbSubsetRuntimeV1,
   type MeasurementOpenReferenceLimbSubsetRuntimeResultV1,
 } from './measurement-open-reference-limb-subset-runtime-v1';
+import type { OpenReferenceLimbCircumferenceModeV1 } from './measurement-open-reference-limb-circumference-solver-v1';
 import {
   snapshotMeasurementSurfaceMeshV1,
   type MakeHumanOpenReferenceBasisV1,
@@ -92,6 +93,13 @@ export interface MeasurementOpenReferenceBetaShapeRuntimeResultV1 {
   readonly unrepresentedRequiredControls: readonly 'inseamMm'[];
   readonly chestShoulderDiagnostics: readonly string[];
   readonly limbStatus: MeasurementOpenReferenceLimbSubsetRuntimeResultV1['status'];
+  readonly limbSectionModes?: readonly OpenReferenceLimbCircumferenceModeV1[];
+  readonly torsoSectionStations?: Readonly<{
+    chest?: readonly [number, number, number];
+    underBust?: readonly [number, number, number];
+    waist?: readonly [number, number, number];
+    hip?: readonly [number, number, number];
+  }>;
   readonly sourceRevisionSuffix: string;
   readonly claims: {
     readonly visualReferenceOnly: true;
@@ -223,6 +231,8 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: 
     ),
   );
   const baselineRepresented = Object.freeze([...represented]);
+  let chestStationOriginM: readonly [number, number, number] | undefined;
+  let underBustStationOriginM: readonly [number, number, number] | undefined;
   let shapedRuntime = withDisplayPositions(
     options.waistHipRuntime,
     options.waistHipRuntime.displayMesh.positions,
@@ -241,6 +251,8 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: 
       signal: options.signal,
     });
     diagnostics.push(...torso.ribcageDiagnostics, ...torso.chestShoulderDiagnostics);
+    chestStationOriginM = torso.chestStationOriginM;
+    underBustStationOriginM = torso.underBustStationOriginM;
     represented.push(
       ...torso.ribcageRepresentedMeasurements,
       ...torso.chestShoulderRepresentedMeasurements,
@@ -261,6 +273,7 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: 
   }
 
   let limbStatus: MeasurementOpenReferenceLimbSubsetRuntimeResultV1['status'] = 'unrepresented';
+  let limbSectionModes: readonly OpenReferenceLimbCircumferenceModeV1[] = Object.freeze([]);
   try {
     const limb = await (
       options.createLimbRuntime ?? createMeasurementOpenReferenceLimbSubsetRuntimeV1
@@ -271,6 +284,7 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: 
       signal: options.signal,
     });
     limbStatus = limb.status;
+    limbSectionModes = limb.sectionModes ?? Object.freeze([]);
     represented.push(
       ...limb.representedGeometricProxies.filter(
         (
@@ -319,6 +333,7 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: 
   } catch (reason: unknown) {
     if (reason instanceof Error && reason.name === 'AbortError') throw reason;
     limbStatus = 'error';
+    limbSectionModes = Object.freeze([]);
     diagnostics.push(
       `limb-runtime-unavailable:${reason instanceof Error ? reason.message : String(reason)}`,
     );
@@ -396,6 +411,7 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: 
     represented.push(...baselineRepresented);
     limited.length = 0;
     limbStatus = 'unrepresented';
+    limbSectionModes = Object.freeze([]);
     const rollbackQualityGate = await evaluateQualityGate({
       uniformPositionsM: options.waistHipRuntime.openReference.mesh.positions,
       personalizedPositionsM: options.waistHipRuntime.displayMesh.positions,
@@ -463,6 +479,12 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: 
         : diagnostics.length > 0
           ? ('error' as const)
           : ('unrepresented' as const);
+  const waistStationOriginM = options.waistHipRuntime.sectionModes?.find(
+    ({ measurementKey }) => measurementKey === 'waistCircumferenceMm',
+  )?.stationOriginM;
+  const hipStationOriginM = options.waistHipRuntime.sectionModes?.find(
+    ({ measurementKey }) => measurementKey === 'hipCircumferenceMm',
+  )?.stationOriginM;
 
   return Object.freeze({
     version: MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_RUNTIME_V1,
@@ -474,6 +496,13 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: 
     unrepresentedRequiredControls: Object.freeze(['inseamMm'] as const),
     chestShoulderDiagnostics: Object.freeze(diagnostics),
     limbStatus,
+    limbSectionModes,
+    torsoSectionStations: Object.freeze({
+      chest: chestStationOriginM,
+      underBust: underBustStationOriginM,
+      waist: waistStationOriginM,
+      hip: hipStationOriginM,
+    }),
     sourceRevisionSuffix: suffix(representedVisualControls, limitedVisualControls),
     claims: CLAIMS,
   });

@@ -1,7 +1,15 @@
 import type { common_BodyMeasurementName } from 'api/proto-http/admin';
 import type { MeasurementBodyFrameV2 } from 'lib/cloth/body/measurement-body-frame-v2';
+import type {
+  OpenReferenceLimbCircumferenceKeyV1,
+  OpenReferenceLimbCircumferenceModeV1,
+} from 'lib/cloth/body/measurement-open-reference-limb-circumference-solver-v1';
+import { deriveOpenReferenceLimbSectionStationsV1 } from 'lib/cloth/body/measurement-open-reference-limb-section-station-v1';
 import type { MeasurementSurfaceMeshV1 } from 'lib/cloth/body/measurement-watertight-surface-v1';
-import { measureMeshPlaneSectionPerimetersV1 } from 'lib/cloth/body/mesh-plane-section-perimeter-v1';
+import {
+  measureMeshPlaneSectionPerimetersV1,
+  type MeshPlaneSectionLoopV1,
+} from 'lib/cloth/body/mesh-plane-section-perimeter-v1';
 
 export const MEASUREMENT_SURFACE_ACTIVE_MEASUREMENT_GUIDE_V1 =
   'measurement-surface-active-measurement-guide/v1' as const;
@@ -82,6 +90,14 @@ const LABELS = Object.freeze({
   BODY_MEASUREMENT_NAME_HPS_TO_BUST_APEX: 'hps to bust apex',
 } satisfies Partial<Record<common_BodyMeasurementName, string>>);
 
+const LIMB_MEASUREMENT_KEYS = Object.freeze({
+  BODY_MEASUREMENT_NAME_BICEP: 'bicepCircumferenceMm',
+  BODY_MEASUREMENT_NAME_WRIST: 'wristCircumferenceMm',
+  BODY_MEASUREMENT_NAME_THIGH: 'thighCircumferenceMm',
+  BODY_MEASUREMENT_NAME_CALF: 'calfCircumferenceMm',
+  BODY_MEASUREMENT_NAME_ANKLE: 'ankleCircumferenceMm',
+} satisfies Partial<Record<common_BodyMeasurementName, OpenReferenceLimbCircumferenceKeyV1>>);
+
 type Vec3 = readonly [number, number, number];
 
 function result(
@@ -150,6 +166,7 @@ function sectionPath(options: {
   readonly originM: Vec3;
   readonly normal: Vec3;
   readonly seedM?: Vec3;
+  readonly bindToMesh: boolean;
 }): MeasurementSurfaceMeasurementGuidePathV1 | null {
   const section = measureMeshPlaneSectionPerimetersV1({
     positionsM: options.mesh.positions,
@@ -160,7 +177,34 @@ function sectionPath(options: {
     policy: { weldToleranceM: 0.00002 },
   });
   if (!section.ok || !section.selectedLoop) return null;
-  return vertexPath(options.id, options.mesh, section.selectedLoop.pointsM, true);
+  return pathFromSectionLoop(options.id, options.mesh, section.selectedLoop, options.bindToMesh);
+}
+
+const GUIDE_SURFACE_OFFSET_M = 0.002;
+
+function offsetLoopPointsM(loop: MeshPlaneSectionLoopV1): readonly Vec3[] {
+  return loop.pointsM.map((point) => {
+    const radial = subtract(point, loop.centroidM);
+    const length = Math.hypot(...radial);
+    if (length <= Number.EPSILON) return point;
+    const scale = GUIDE_SURFACE_OFFSET_M / length;
+    return [
+      point[0] + radial[0] * scale,
+      point[1] + radial[1] * scale,
+      point[2] + radial[2] * scale,
+    ] as const;
+  });
+}
+
+function pathFromSectionLoop(
+  id: string,
+  mesh: MeasurementSurfaceMeshV1,
+  loop: MeshPlaneSectionLoopV1,
+  bindToMesh: boolean,
+): MeasurementSurfaceMeasurementGuidePathV1 | null {
+  return bindToMesh
+    ? vertexPath(id, mesh, loop.pointsM, true)
+    : fixedPath(id, offsetLoopPointsM(loop), true);
 }
 
 function subtract(a: Vec3, b: Vec3): Vec3 {
@@ -171,40 +215,65 @@ function mix(a: Vec3, b: Vec3, t: number): Vec3 {
   return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 }
 
-function segmentSectionPath(options: {
+function segmentExtremumSectionPath(options: {
   readonly id: string;
   readonly mesh: MeasurementSurfaceMeshV1;
   readonly aM: Vec3;
   readonly bM: Vec3;
-  readonly t: number;
+  readonly range: readonly [number, number];
+  readonly select: 'minimum' | 'maximum';
+  readonly bindToMesh: boolean;
 }): MeasurementSurfaceMeasurementGuidePathV1 | null {
-  const originM = mix(options.aM, options.bM, options.t);
-  return sectionPath({
-    id: options.id,
-    mesh: options.mesh,
-    originM,
-    normal: subtract(options.bM, options.aM),
-    seedM: originM,
+  const normal = subtract(options.bM, options.aM);
+  const samples = 9;
+  const loops: MeshPlaneSectionLoopV1[] = [];
+  for (let index = 0; index < samples; index += 1) {
+    const t = options.range[0] + ((options.range[1] - options.range[0]) * index) / (samples - 1);
+    const originM = mix(options.aM, options.bM, t);
+    const section = measureMeshPlaneSectionPerimetersV1({
+      positionsM: options.mesh.positions,
+      triangleIndices: options.mesh.indices,
+      planeOriginM: originM,
+      planeNormal: normal,
+      selection: { kind: 'nearest-seed', seedM: originM },
+      policy: { weldToleranceM: 0.00002 },
+    });
+    if (section.ok && section.selectedLoop) loops.push(section.selectedLoop);
+  }
+  if (loops.length === 0) return null;
+  const selected = loops.reduce((best, candidate) => {
+    const candidateWins =
+      options.select === 'maximum'
+        ? candidate.perimeterM > best.perimeterM
+        : candidate.perimeterM < best.perimeterM;
+    return candidateWins ? candidate : best;
   });
+  return pathFromSectionLoop(options.id, options.mesh, selected, options.bindToMesh);
 }
 
 function torsoSectionPath(options: {
   readonly id: string;
   readonly mesh: MeasurementSurfaceMeshV1;
   readonly yM: number;
+  readonly bindToMesh: boolean;
 }): MeasurementSurfaceMeasurementGuidePathV1 | null {
   return sectionPath({
     id: options.id,
     mesh: options.mesh,
     originM: [0, options.yM, 0],
     normal: [0, 1, 0],
+    bindToMesh: options.bindToMesh,
   });
 }
 
-function fixedPath(id: string, pointsM: readonly Vec3[]): MeasurementSurfaceMeasurementGuidePathV1 {
+function fixedPath(
+  id: string,
+  pointsM: readonly Vec3[],
+  closed = false,
+): MeasurementSurfaceMeasurementGuidePathV1 {
   return Object.freeze({
     id,
-    closed: false,
+    closed,
     source: 'fixed-points' as const,
     pointsM: Object.freeze(pointsM.map((point) => Object.freeze([...point]) as Vec3)),
   });
@@ -232,6 +301,13 @@ export function buildMeasurementSurfaceActiveMeasurementGuideV1(options: {
   readonly frame: MeasurementBodyFrameV2;
   readonly mesh: MeasurementSurfaceMeshV1;
   readonly neutralPose: boolean;
+  readonly limbSectionModes?: readonly OpenReferenceLimbCircumferenceModeV1[];
+  readonly torsoSectionStations?: Readonly<{
+    chest?: Vec3;
+    underBust?: Vec3;
+    waist?: Vec3;
+    hip?: Vec3;
+  }>;
 }): MeasurementSurfaceActiveMeasurementGuideV1 {
   const { measurementName, frame, mesh } = options;
   if (!LABELS[measurementName as keyof typeof LABELS]) {
@@ -241,30 +317,40 @@ export function buildMeasurementSurfaceActiveMeasurementGuideV1(options: {
   const waist = station(frame, 'waist');
   const hip = station(frame, 'hip');
   const shoulder = station(frame, 'shoulder');
+  const chestY = options.torsoSectionStations?.chest?.[1] ?? chest?.yM;
+  const underBustY = options.torsoSectionStations?.underBust?.[1];
+  const waistY = options.torsoSectionStations?.waist?.[1] ?? waist?.yM;
+  const hipY = options.torsoSectionStations?.hip?.[1] ?? hip?.yM;
   const torsoY =
     measurementName === 'BODY_MEASUREMENT_NAME_CHEST'
-      ? chest?.yM
-      : measurementName === 'BODY_MEASUREMENT_NAME_UNDER_BUST' && chest
-        ? chest.yM -
-          Math.min(
-            0.095,
-            Math.max(
-              0.045,
-              frame.measurements.hpsToWaistFrontMm
-                ? (frame.measurements.hpsToWaistFrontMm / 1000) * 0.18
-                : (frame.measurements.heightMm / 1000) * 0.04,
-            ),
-          )
+      ? chestY
+      : measurementName === 'BODY_MEASUREMENT_NAME_UNDER_BUST' && chestY !== undefined
+        ? underBustY ??
+          chestY -
+            Math.min(
+              0.095,
+              Math.max(
+                0.045,
+                frame.measurements.hpsToWaistFrontMm
+                  ? (frame.measurements.hpsToWaistFrontMm / 1000) * 0.18
+                  : (frame.measurements.heightMm / 1000) * 0.04,
+              ),
+            )
         : measurementName === 'BODY_MEASUREMENT_NAME_WAIST'
-          ? waist?.yM
-          : measurementName === 'BODY_MEASUREMENT_NAME_HIGH_HIP' && waist && hip
-            ? waist.yM + (hip.yM - waist.yM) * 0.45
+          ? waistY
+          : measurementName === 'BODY_MEASUREMENT_NAME_HIGH_HIP' && waistY && hipY
+            ? waistY + (hipY - waistY) * 0.45
             : measurementName === 'BODY_MEASUREMENT_NAME_HIP'
-              ? hip?.yM
+              ? hipY
               : undefined;
   if (torsoY !== undefined) {
     return visibleOrUnavailable(measurementName, [
-      torsoSectionPath({ id: measurementName, mesh, yM: torsoY }),
+      torsoSectionPath({
+        id: measurementName,
+        mesh,
+        yM: torsoY,
+        bindToMesh: !options.neutralPose,
+      }),
     ]);
   }
 
@@ -291,45 +377,73 @@ export function buildMeasurementSurfaceActiveMeasurementGuideV1(options: {
   }
 
   if (measurementName === 'BODY_MEASUREMENT_NAME_NECK_BASE') {
-    const neck = frame.segments.find(({ id }) => id === 'neck');
+    let minimumY = Number.POSITIVE_INFINITY;
+    let maximumY = Number.NEGATIVE_INFINITY;
+    for (let offset = 1; offset < mesh.positions.length; offset += 3) {
+      minimumY = Math.min(minimumY, mesh.positions[offset]);
+      maximumY = Math.max(maximumY, mesh.positions[offset]);
+    }
     return visibleOrUnavailable(measurementName, [
-      neck
-        ? sectionPath({
-            id: measurementName,
-            mesh,
-            originM: neck.aM,
-            normal: subtract(neck.bM, neck.aM),
-          })
-        : null,
+      segmentExtremumSectionPath({
+        id: measurementName,
+        mesh,
+        aM: [0, minimumY, 0],
+        bM: [0, maximumY, 0],
+        range: [0.84, 0.9],
+        select: 'minimum',
+        bindToMesh: !options.neutralPose,
+      }),
     ]);
   }
 
   const limbConfig =
     measurementName === 'BODY_MEASUREMENT_NAME_BICEP'
-      ? ({ segmentId: 'upper-arm-left', t: 0.38 } as const)
+      ? ({ segmentId: 'upper-arm-left', range: [0.28, 0.72], select: 'maximum' } as const)
       : measurementName === 'BODY_MEASUREMENT_NAME_WRIST'
-        ? ({ segmentId: 'forearm-left', t: 0.9 } as const)
+        ? ({ segmentId: 'forearm-left', range: [0.76, 0.96], select: 'minimum' } as const)
         : measurementName === 'BODY_MEASUREMENT_NAME_THIGH'
-          ? ({ segmentId: 'thigh-left', t: 0.34 } as const)
+          ? ({ segmentId: 'thigh-left', range: [0.16, 0.52], select: 'maximum' } as const)
           : measurementName === 'BODY_MEASUREMENT_NAME_KNEE'
-            ? ({ segmentId: 'thigh-left', t: 0.9 } as const)
+            ? ({ segmentId: 'thigh-left', range: [0.86, 0.94], select: 'minimum' } as const)
             : measurementName === 'BODY_MEASUREMENT_NAME_CALF'
-              ? ({ segmentId: 'calf-left', t: 0.42 } as const)
+              ? ({ segmentId: 'calf-left', range: [0.18, 0.68], select: 'maximum' } as const)
               : measurementName === 'BODY_MEASUREMENT_NAME_ANKLE'
-                ? ({ segmentId: 'calf-left', t: 0.9 } as const)
+                ? ({ segmentId: 'calf-left', range: [0.76, 0.96], select: 'minimum' } as const)
                 : null;
   if (limbConfig) {
+    const measurementKey =
+      LIMB_MEASUREMENT_KEYS[measurementName as keyof typeof LIMB_MEASUREMENT_KEYS];
+    const admittedMode = measurementKey
+      ? options.limbSectionModes?.find((candidate) => candidate.measurementKey === measurementKey)
+      : undefined;
+    const admittedStation = admittedMode
+      ? deriveOpenReferenceLimbSectionStationsV1({
+          positionsM: mesh.positions,
+          mode: admittedMode,
+        }).find(({ side }) => side === 'positive')
+      : undefined;
     const segment = frame.segments.find(({ id }) => id === limbConfig.segmentId);
     return visibleOrUnavailable(measurementName, [
-      segment
-        ? segmentSectionPath({
+      admittedStation
+        ? sectionPath({
             id: measurementName,
             mesh,
-            aM: segment.aM,
-            bM: segment.bM,
-            t: limbConfig.t,
+            originM: admittedStation.originM,
+            normal: admittedStation.normal,
+            seedM: admittedStation.originM,
+            bindToMesh: !options.neutralPose,
           })
-        : null,
+        : segment
+          ? segmentExtremumSectionPath({
+              id: measurementName,
+              mesh,
+              aM: segment.aM,
+              bM: segment.bM,
+              range: limbConfig.range,
+              select: limbConfig.select,
+              bindToMesh: !options.neutralPose,
+            })
+          : null,
     ]);
   }
 
