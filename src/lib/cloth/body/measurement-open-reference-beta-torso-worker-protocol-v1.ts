@@ -11,6 +11,8 @@ export interface MeasurementOpenReferenceBetaTorsoWorkerOptionsV1 {
 
 export interface MeasurementOpenReferenceBetaTorsoWorkerResultV1 {
   readonly positionsM: Float32Array;
+  readonly chestStationOriginM?: readonly [number, number, number];
+  readonly underBustStationOriginM?: readonly [number, number, number];
   readonly ribcageRepresentedMeasurements: readonly 'underBustCircumferenceMm'[];
   readonly ribcageDiagnostics: readonly string[];
   readonly chestShoulderRepresentedMeasurements: readonly UniformChestShoulderResearchKeyV1[];

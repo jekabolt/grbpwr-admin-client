@@ -120,6 +120,8 @@ export interface MeasurementOpenReferenceLimbSubsetRuntimeResultV1 {
   readonly limitedGeometricProxies?: readonly MeasurementOpenReferenceLimbSubsetKeyV1[];
   readonly droppedGeometricProxies: readonly OpenReferenceLimbFinalClosureDropV1[];
   readonly modeResults: readonly OpenReferenceLimbFinalClosureModeResultV1[];
+  /** Internal geometric station source retained so later length morphs can re-project guides. */
+  readonly sectionModes?: readonly OpenReferenceLimbCircumferenceModeV1[];
   readonly diagnostics: readonly MeasurementOpenReferenceLimbSubsetRuntimeDiagnosticV1[];
   readonly qualityGate: MeasurementOpenReferenceDisplayQualityGateResultV1 | null;
   readonly compiledContentRevision: string | null;
@@ -198,6 +200,7 @@ function runtimeResult(options: {
   readonly limitedGeometricProxies?: readonly MeasurementOpenReferenceLimbSubsetKeyV1[];
   readonly droppedGeometricProxies?: readonly OpenReferenceLimbFinalClosureDropV1[];
   readonly modeResults?: readonly OpenReferenceLimbFinalClosureModeResultV1[];
+  readonly sectionModes?: readonly OpenReferenceLimbCircumferenceModeV1[];
   readonly diagnostics?: readonly MeasurementOpenReferenceLimbSubsetRuntimeDiagnosticV1[];
   readonly qualityGate?: MeasurementOpenReferenceDisplayQualityGateResultV1 | null;
   readonly compiledContentRevision?: string | null;
@@ -228,6 +231,7 @@ function runtimeResult(options: {
     modeResults: Object.freeze(
       (options.modeResults ?? []).map((modeResult) => Object.freeze({ ...modeResult })),
     ),
+    sectionModes: options.sectionModes ? Object.freeze([...options.sectionModes]) : undefined,
     diagnostics: Object.freeze(
       (options.diagnostics ?? []).map((diagnostic) =>
         Object.freeze({ ...diagnostic, reasons: Object.freeze([...diagnostic.reasons]) }),
@@ -604,6 +608,7 @@ export async function createMeasurementOpenReferenceLimbSubsetRuntimeV1(options:
       limitedGeometricProxies: appliedLimited,
       droppedGeometricProxies: solved.droppedMeasurements,
       modeResults: solved.modeResults,
+      sectionModes: limbModes,
       diagnostics,
       qualityGate: solved.qualityGate,
       compiledContentRevision: solvedClosure.contentRevision,

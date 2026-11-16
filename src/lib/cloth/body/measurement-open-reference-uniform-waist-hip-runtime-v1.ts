@@ -7,6 +7,7 @@ import {
 import {
   createMakeHumanUniformWaistHipModesV1,
   type UniformWaistHipKeyV1,
+  type UniformWaistHipModeV1,
 } from './makehuman-uniform-waist-hip-modes-v1';
 import {
   snapshotMeasurementOpenReferenceDisplayArtifactV1,
@@ -52,6 +53,7 @@ export interface MeasurementOpenReferenceUniformWaistHipRuntimeResultV1 {
   readonly requestedGeometricProxies: readonly UniformWaistHipKeyV1[];
   readonly representedGeometricProxies: readonly UniformWaistHipKeyV1[];
   readonly modeResults: readonly UniformWaistHipSolverModeResultV1[];
+  readonly sectionModes?: readonly UniformWaistHipModeV1[];
   readonly diagnostics: readonly MeasurementOpenReferenceUniformWaistHipRuntimeDiagnosticV1[];
   readonly qualityGate: MeasurementOpenReferenceDisplayQualityGateResultV1 | null;
   /** Optional helper-backed arm-length proxy binding consumed by pose and joint-overlay runtimes. */
@@ -97,6 +99,7 @@ function runtimeResult(options: {
   readonly displayMesh?: MeasurementSurfaceMeshV1;
   readonly representedGeometricProxies?: readonly UniformWaistHipKeyV1[];
   readonly modeResults?: readonly UniformWaistHipSolverModeResultV1[];
+  readonly sectionModes?: readonly UniformWaistHipModeV1[];
   readonly diagnostics?: readonly MeasurementOpenReferenceUniformWaistHipRuntimeDiagnosticV1[];
   readonly qualityGate?: MeasurementOpenReferenceDisplayQualityGateResultV1 | null;
 }): MeasurementOpenReferenceUniformWaistHipRuntimeResultV1 {
@@ -122,6 +125,7 @@ function runtimeResult(options: {
     modeResults: Object.freeze(
       (options.modeResults ?? []).map((modeResult) => Object.freeze({ ...modeResult })),
     ),
+    sectionModes: options.sectionModes ? Object.freeze([...options.sectionModes]) : undefined,
     diagnostics: Object.freeze(
       (options.diagnostics ?? []).map((diagnostic) => Object.freeze({ ...diagnostic })),
     ),
@@ -277,6 +281,7 @@ export async function createMeasurementOpenReferenceUniformWaistHipRuntimeV1(opt
     displayMesh: mesh,
     representedGeometricProxies: represented,
     modeResults: solved.modeResults,
+    sectionModes: modes.modes,
     diagnostics: solved.diagnostics.map((diagnostic) =>
       Object.freeze({
         code: diagnostic.code,

@@ -73,7 +73,7 @@ const frame = createMeasurementBodyFrameV2({
 });
 
 describe('active mannequin measurement guide v1', () => {
-  it('binds a neutral chest loop to displayed mesh vertices', () => {
+  it('keeps the exact neutral chest section instead of snapping it to coarse mesh vertices', () => {
     const guide = buildMeasurementSurfaceActiveMeasurementGuideV1({
       measurementName: 'BODY_MEASUREMENT_NAME_CHEST',
       frame,
@@ -84,9 +84,9 @@ describe('active mannequin measurement guide v1', () => {
     expect(guide.status).toBe('visible');
     expect(guide.label).toBe('chest');
     expect(guide.paths).toHaveLength(1);
-    expect(guide.paths[0]).toMatchObject({ closed: true, source: 'mesh-vertices' });
+    expect(guide.paths[0]).toMatchObject({ closed: true, source: 'fixed-points' });
     expect(
-      guide.paths[0].source === 'mesh-vertices' ? new Set(guide.paths[0].vertexIndices).size : 0,
+      guide.paths[0].source === 'fixed-points' ? guide.paths[0].pointsM.length : 0,
     ).toBeGreaterThan(20);
   });
 

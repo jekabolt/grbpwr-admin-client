@@ -9,6 +9,7 @@
   "private": true,
   "scripts": {
     "dev": "vite",
+    "mannequin:guides": "node scripts/generate-mannequin-measurement-guides-v2.mjs && node scripts/generate-mannequin-measurement-guides-3d.mjs",
     "test:media-proxy": "node --test tests/media-proxy.test.js",
     "build": "vite build",
     "build:check": "tsc && vite build",

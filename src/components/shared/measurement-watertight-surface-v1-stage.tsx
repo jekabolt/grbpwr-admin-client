@@ -571,6 +571,7 @@ export interface MeasurementSurfaceRendererSizeStateV1 {
 }
 
 export const MEASUREMENT_SURFACE_MAX_DRAWING_BUFFER_PIXELS_V1 = 225_000;
+export const MEASUREMENT_SURFACE_CAPTURE_MAX_DRAWING_BUFFER_PIXELS_V1 = 1_600_000;
 export const MEASUREMENT_SURFACE_JOINT_MARKER_HIT_DIAMETER_CSS_PX_V1 = 56;
 export const MEASUREMENT_SURFACE_JOINT_MARKER_COARSE_HIT_DIAMETER_CSS_PX_V9 = 64;
 
@@ -833,11 +834,10 @@ export function measurementSurfaceDrawingBufferPixelRatioV1(
   width: number,
   height: number,
   devicePixelRatio: number,
+  maximumPixels = MEASUREMENT_SURFACE_MAX_DRAWING_BUFFER_PIXELS_V1,
 ): number {
   const boundedDevicePixelRatio = Math.min(Math.max(devicePixelRatio, 0.25), 2);
-  const pixelBudgetRatio = Math.sqrt(
-    MEASUREMENT_SURFACE_MAX_DRAWING_BUFFER_PIXELS_V1 / Math.max(width * height, 1),
-  );
+  const pixelBudgetRatio = Math.sqrt(maximumPixels / Math.max(width * height, 1));
   return Math.min(boundedDevicePixelRatio, pixelBudgetRatio);
 }
 
@@ -1009,7 +1009,9 @@ function createMeasurementGuideLayerV1(
     );
     const material = new THREE.LineBasicMaterial({
       color: cssColor('--color-highlightColor'),
-      depthTest: false,
+      // Respect the body depth buffer so the rear half of a circumference is hidden by the
+      // mannequin instead of being painted through the mesh like a flat sticker.
+      depthTest: true,
       depthWrite: false,
       opacity: 1,
       transparent: true,
@@ -1514,6 +1516,7 @@ export function MeasurementWatertightSurfaceV1Stage({
   unifiedJointInteraction = false,
   patternPieceOverlay,
   measurementGuide,
+  measurementGuidePresentation = 'interactive',
   retainVisibleCanvasOnRebuild = false,
 }: {
   artifact: MeasurementWatertightSurfaceArtifactV1;
@@ -1542,6 +1545,8 @@ export function MeasurementWatertightSurfaceV1Stage({
   patternPieceOverlay?: MeasurementSurfacePatternPieceOverlayV1;
   /** Focus-driven visual measurement line. It is a guide, never a tape or fit claim. */
   measurementGuide?: MeasurementSurfaceActiveMeasurementGuideV1;
+  /** Capture-only framing renders the exact guide close-up at a supersampled resolution. */
+  measurementGuidePresentation?: 'interactive' | 'capture';
   /** Keeps the last rendered frame visible while replacement geometry warms on the same canvas. */
   retainVisibleCanvasOnRebuild?: boolean;
 }) {
@@ -1646,6 +1651,7 @@ export function MeasurementWatertightSurfaceV1Stage({
     let measurementGuideLayer: THREE.Group | null = null;
     let measurementGuideBindings: readonly MeasurementSurfaceMeasurementGuideSceneBindingV1[] =
       Object.freeze([]);
+    let focusMeasurementGuideFrame: (layer: THREE.Group) => void = () => undefined;
     let patternPiecePointerDownHandler: ((event: PointerEvent) => void) | null = null;
     let patternPiecePointerMoveHandler: ((event: PointerEvent) => void) | null = null;
     let patternPiecePointerFinishHandler: ((event: PointerEvent) => void) | null = null;
@@ -2084,6 +2090,9 @@ export function MeasurementWatertightSurfaceV1Stage({
         runtime.measurementGuideLayer = measurementGuideLayer;
         runtime.measurementGuideBindings = measurementGuideBindings;
       }
+      if (measurementGuidePresentation === 'capture' && measurementGuideLayer) {
+        focusMeasurementGuideFrame(measurementGuideLayer);
+      }
       scheduleRender();
     }
 
@@ -2359,7 +2368,7 @@ export function MeasurementWatertightSurfaceV1Stage({
       }
       renderer = new THREE.WebGLRenderer({
         canvas,
-        antialias: false,
+        antialias: measurementGuidePresentation === 'capture',
         powerPreference: 'high-performance',
       });
       if (exclusiveContextGroup) {
@@ -2747,7 +2756,7 @@ export function MeasurementWatertightSurfaceV1Stage({
       controls.maxDistance = radius * 12;
       controls.target.copy(center);
 
-      const fit = (direction?: THREE.Vector3) => {
+      const fit = (direction?: THREE.Vector3, target = center, targetRadius = radius) => {
         if (!renderer || !controls || !camera) return;
         const width = Math.max(host.clientWidth, 1);
         const height = Math.max(host.clientHeight, 1);
@@ -2755,17 +2764,20 @@ export function MeasurementWatertightSurfaceV1Stage({
           width,
           height,
           window.devicePixelRatio || 1,
+          measurementGuidePresentation === 'capture'
+            ? MEASUREMENT_SURFACE_CAPTURE_MAX_DRAWING_BUFFER_PIXELS_V1
+            : MEASUREMENT_SURFACE_MAX_DRAWING_BUFFER_PIXELS_V1,
         );
         const aspect = width / height;
         camera.aspect = aspect;
         const verticalFov = THREE.MathUtils.degToRad(camera.fov);
         const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * aspect);
-        const distance = (radius / Math.sin(Math.min(verticalFov, horizontalFov) / 2)) * 1.12;
+        const distance = (targetRadius / Math.sin(Math.min(verticalFov, horizontalFov) / 2)) * 1.12;
         const viewDirection =
-          direction ?? camera.position.clone().sub(center).normalize().multiplyScalar(1);
+          direction ?? camera.position.clone().sub(target).normalize().multiplyScalar(1);
         if (viewDirection.lengthSq() === 0) viewDirection.set(0, 0, 1);
         camera.up.set(0, 1, 0);
-        camera.position.copy(center).add(viewDirection.normalize().multiplyScalar(distance));
+        camera.position.copy(target).add(viewDirection.normalize().multiplyScalar(distance));
         camera.near = Math.max(distance / 1000, 0.001);
         camera.far = distance * 100;
         camera.updateProjectionMatrix();
@@ -2776,9 +2788,21 @@ export function MeasurementWatertightSurfaceV1Stage({
           height,
           pixelRatio,
         );
-        controls.target.copy(center);
+        controls.target.copy(target);
         controls.update();
         scheduleRender();
+      };
+
+      focusMeasurementGuideFrame = (layer: THREE.Group) => {
+        const guideBox = new THREE.Box3().setFromObject(layer);
+        const guideSphere = guideBox.getBoundingSphere(new THREE.Sphere());
+        if (guideSphere.radius <= 0 || !bodyRadius) return;
+        const focusRadius = Math.max(guideSphere.radius * 4, bodyRadius * 0.42);
+        const direction =
+          viewPresetRef.current === 'front'
+            ? new THREE.Vector3(0.32, 0.03, 1).normalize()
+            : directionForView(viewPresetRef.current);
+        fit(direction, guideSphere.center, focusRadius);
       };
 
       const resize = () => {
@@ -2789,6 +2813,9 @@ export function MeasurementWatertightSurfaceV1Stage({
           width,
           height,
           window.devicePixelRatio || 1,
+          measurementGuidePresentation === 'capture'
+            ? MEASUREMENT_SURFACE_CAPTURE_MAX_DRAWING_BUFFER_PIXELS_V1
+            : MEASUREMENT_SURFACE_MAX_DRAWING_BUFFER_PIXELS_V1,
         );
         camera.aspect = width / height;
         camera.updateProjectionMatrix();
@@ -2922,6 +2949,7 @@ export function MeasurementWatertightSurfaceV1Stage({
     interactive,
     lod,
     patternPieceOverlayRenderKey,
+    measurementGuidePresentation,
     retainVisibleCanvasOnRebuild,
   ]);
 
