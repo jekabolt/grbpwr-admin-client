@@ -46,6 +46,10 @@ const unitFiles = Object.freeze([
   'src/lib/cloth/body/measurement-open-reference-display-quality-worker-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-beta-torso-worker-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-torso-depth-proxy-v1.test.ts',
+  'src/lib/cloth/body/measurement-open-reference-high-hip-proxy-v1.test.ts',
+  'src/lib/cloth/body/measurement-open-reference-knee-proxy-v1.test.ts',
+  'src/lib/cloth/body/measurement-open-reference-knee-proxy-worker-v1.test.ts',
+  'src/lib/cloth/body/measurement-adapter.test.ts',
   'src/lib/cloth/body/measurement-open-reference-limb-final-closure-worker-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-limb-subset-runtime-loader-v1.test.ts',
   'src/lib/cloth/body/measurement-watertight-surface-worker-v1.test.ts',
@@ -97,6 +101,7 @@ const browserSuites = Object.freeze([
       'continuous measurement typing retains the last-valid V9 canvas until replacement is ready',
       'rapid valid measurement edits coalesce while the quality gate leaves animation frames live',
       'real ModelForm admits female, male and neutral open-reference bases',
+      'high hip and knee apply as bounded proxies on female, male and neutral bases',
     ].join('|'),
   }),
   Object.freeze({
