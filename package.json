@@ -187,6 +187,10 @@
     "patimport:leaks2": "node scripts/pattern-import/leaks2.mjs",
     "seams:score": "node scripts/seams-score/score.mjs",
     "doll:shape": "node scripts/doll/shape.mjs",
+    "test:mannequin:unit": "node scripts/mannequin-ci-gate.mjs unit",
+    "test:mannequin:browser:list": "node scripts/mannequin-ci-gate.mjs browser-list",
+    "test:mannequin:browser": "node scripts/mannequin-ci-gate.mjs browser",
+    "test:mannequin:ci": "node scripts/mannequin-ci-gate.mjs all",
     "pretest": "vite build",
     "test": "vitest run scripts/probes.test.ts --maxWorkers=1"
   },

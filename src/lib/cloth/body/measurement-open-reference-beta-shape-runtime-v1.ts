@@ -15,9 +15,10 @@ import {
 } from './makehuman2-pose-compatible-length-pack-v1';
 import type { CanonicalBodyMeasurementsMm } from './measurement-adapter';
 import {
-  evaluateMeasurementOpenReferenceDisplayQualityV1,
+  evaluateMeasurementOpenReferenceDisplayQualityWithSelfIntersectionV1,
   type MeasurementOpenReferenceDisplayQualityGateResultV1,
 } from './measurement-open-reference-display-quality-gate-v1';
+import type { MeasurementSurfaceSelfIntersectionPolicyV1 } from './measurement-surface-self-intersection-v1';
 import { solveOpenReferenceChestShoulderResearchV1 } from './measurement-open-reference-chest-shoulder-research-v1';
 import { applyOpenReferenceUnderBustRibcageResearchV1 } from './measurement-open-reference-underbust-ribcage-research-v1';
 import {
@@ -36,6 +37,15 @@ import type { MeasurementOpenReferenceUniformWaistHipRuntimeResultV1 } from './m
 
 export const MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_RUNTIME_V1 =
   'measurement-open-reference-beta-shape-runtime/v1' as const;
+
+export class MeasurementOpenReferenceBetaShapeSafetyErrorV1 extends Error {
+  readonly code = 'admitted-basis-self-intersection-evaluation-failed' as const;
+
+  constructor() {
+    super('Admitted basis self-intersection evaluation did not complete safely.');
+    this.name = 'MeasurementOpenReferenceBetaShapeSafetyErrorV1';
+  }
+}
 
 export const MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_KEYS_V1 = Object.freeze([
   'heightMm',
@@ -174,7 +184,10 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: 
   readonly loadLengthPack?: MeasurementOpenReferenceBetaShapeLengthPackLoaderV1;
   readonly loadPoseResources?: MeasurementOpenReferenceBetaShapePoseResourcesLoaderV1;
   readonly createArmLengthRuntime?: typeof createMakeHuman2ArmLengthProxyRuntimeResearchV1;
+  readonly selfIntersectionPolicy?: MeasurementSurfaceSelfIntersectionPolicyV1;
 }): Promise<MeasurementOpenReferenceBetaShapeRuntimeResultV1> {
+  const admittedBasisRevision =
+    options.waistHipRuntime.openReference.provenance.basis.derivedBasisSha256;
   const represented: MeasurementOpenReferenceBetaShapeKeyV1[] = ['heightMm'];
   const limited: MeasurementOpenReferenceBetaShapeKeyV1[] = [];
   represented.push(
@@ -333,10 +346,12 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: 
     );
   }
 
-  const finalQualityGate = evaluateMeasurementOpenReferenceDisplayQualityV1({
+  const finalQualityGate = evaluateMeasurementOpenReferenceDisplayQualityWithSelfIntersectionV1({
     uniformPositionsM: shapedRuntime.openReference.mesh.positions,
     personalizedPositionsM: shapedRuntime.displayMesh.positions,
     triangleIndices: shapedRuntime.displayMesh.indices,
+    admittedBasisRevision,
+    selfIntersectionPolicy: options.selfIntersectionPolicy,
   });
   if (finalQualityGate.safe) {
     shapedRuntime = withDisplayPositions(
@@ -346,20 +361,61 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: 
     );
   } else {
     diagnostics.push('beta-final-global-quality-rollback');
+    if (
+      finalQualityGate.reasons.includes('new-self-intersection') ||
+      finalQualityGate.reasons.includes('self-intersection-evaluation-failed')
+    ) {
+      diagnostics.push('beta-final-self-intersection-rollback');
+    }
     represented.length = 0;
     represented.push(...baselineRepresented);
     limited.length = 0;
     limbStatus = 'unrepresented';
-    const rollbackQualityGate = evaluateMeasurementOpenReferenceDisplayQualityV1({
-      uniformPositionsM: options.waistHipRuntime.openReference.mesh.positions,
-      personalizedPositionsM: options.waistHipRuntime.displayMesh.positions,
-      triangleIndices: options.waistHipRuntime.displayMesh.indices,
-    });
-    shapedRuntime = withDisplayPositions(
-      options.waistHipRuntime,
-      options.waistHipRuntime.displayMesh.positions,
-      rollbackQualityGate,
-    );
+    const rollbackQualityGate =
+      evaluateMeasurementOpenReferenceDisplayQualityWithSelfIntersectionV1({
+        uniformPositionsM: options.waistHipRuntime.openReference.mesh.positions,
+        personalizedPositionsM: options.waistHipRuntime.displayMesh.positions,
+        triangleIndices: options.waistHipRuntime.displayMesh.indices,
+        admittedBasisRevision,
+        selfIntersectionPolicy: options.selfIntersectionPolicy,
+      });
+    if (rollbackQualityGate.safe) {
+      shapedRuntime = withDisplayPositions(
+        options.waistHipRuntime,
+        options.waistHipRuntime.displayMesh.positions,
+        rollbackQualityGate,
+      );
+    } else {
+      diagnostics.push('beta-final-admitted-basis-fallback');
+      represented.length = 0;
+      represented.push('heightMm');
+      const admittedBasisQualityGate =
+        evaluateMeasurementOpenReferenceDisplayQualityWithSelfIntersectionV1({
+          uniformPositionsM: options.waistHipRuntime.openReference.mesh.positions,
+          personalizedPositionsM: options.waistHipRuntime.openReference.mesh.positions,
+          triangleIndices: options.waistHipRuntime.openReference.mesh.indices,
+          admittedBasisRevision,
+          selfIntersectionPolicy: options.selfIntersectionPolicy,
+        });
+      if (
+        !admittedBasisQualityGate.safe ||
+        !admittedBasisQualityGate.claims.selfIntersectionEvaluated
+      ) {
+        throw new MeasurementOpenReferenceBetaShapeSafetyErrorV1();
+      }
+      shapedRuntime = Object.freeze({
+        ...withDisplayPositions(
+          options.waistHipRuntime,
+          options.waistHipRuntime.openReference.mesh.positions,
+          admittedBasisQualityGate,
+          undefined,
+        ),
+        status: 'unrepresented' as const,
+        representedGeometricProxies: Object.freeze([]),
+        modeResults: Object.freeze([]),
+        poseCompatibleArmLengthProxy: undefined,
+      });
+    }
   }
 
   const representedVisualControls = stableKeys(represented);

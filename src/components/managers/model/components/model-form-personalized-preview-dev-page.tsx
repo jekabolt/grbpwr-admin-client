@@ -86,10 +86,13 @@ export function ModelFormPersonalizedPreviewDevPage() {
       canWriteModels: true,
       createModel: async () => {
         setMutationCalls((count) => count + 1);
+        return { id: 8403 };
       },
       updateModel: async () => {
         setMutationCalls((count) => count + 1);
       },
+      durableCreatePoseEnabled: false,
+      saveCreatedModelPose: async () => undefined,
       leaveForm: () => undefined,
       renderMedia: () => (
         <div data-testid='model-form-smoke-media-slot' className='border border-dashed p-3'>

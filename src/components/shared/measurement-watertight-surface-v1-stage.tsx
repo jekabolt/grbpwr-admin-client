@@ -1498,6 +1498,7 @@ export function MeasurementWatertightSurfaceV1Stage({
   unifiedJointInteraction = false,
   patternPieceOverlay,
   measurementGuide,
+  retainVisibleCanvasOnRebuild = false,
 }: {
   artifact: MeasurementWatertightSurfaceArtifactV1;
   frame: MeasurementBodyFrameV2;
@@ -1525,6 +1526,8 @@ export function MeasurementWatertightSurfaceV1Stage({
   patternPieceOverlay?: MeasurementSurfacePatternPieceOverlayV1;
   /** Focus-driven visual measurement line. It is a guide, never a tape or fit claim. */
   measurementGuide?: MeasurementSurfaceActiveMeasurementGuideV1;
+  /** Keeps the last rendered frame visible while replacement geometry warms on the same canvas. */
+  retainVisibleCanvasOnRebuild?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -1532,6 +1535,7 @@ export function MeasurementWatertightSurfaceV1Stage({
   const cameraStateRef = useRef<MeasurementSurfaceCameraStateV10 | null>(null);
   const rendererLifetimeRef = useRef<THREE.WebGLRenderer | null>(null);
   const contextReleaseGenerationRef = useRef(0);
+  const hasReadyCanvasFrameRef = useRef(false);
   const onStatusRef = useRef(onStatus);
   const onRenderCountRef = useRef(onRenderCount);
   const overlaysRef = useRef(overlays);
@@ -2219,6 +2223,7 @@ export function MeasurementWatertightSurfaceV1Stage({
           if (!readyScheduled) {
             readyScheduled = true;
             renderer.domElement.style.opacity = '1';
+            hasReadyCanvasFrameRef.current = true;
             readyFrame = requestAnimationFrame(() => {
               readyFrame = 0;
               if (!disposed) onStatusRef.current('ready');
@@ -2346,7 +2351,8 @@ export function MeasurementWatertightSurfaceV1Stage({
       renderer.domElement.style.display = 'block';
       renderer.domElement.style.width = '100%';
       renderer.domElement.style.height = '100%';
-      renderer.domElement.style.opacity = '0';
+      renderer.domElement.style.opacity =
+        retainVisibleCanvasOnRebuild && hasReadyCanvasFrameRef.current ? '1' : '0';
       renderer.domElement.style.touchAction = 'none';
       renderer.domElement.dataset.lod = dataLod;
       renderer.domElement.dataset.renderCount = '0';
@@ -2886,6 +2892,7 @@ export function MeasurementWatertightSurfaceV1Stage({
     interactive,
     lod,
     patternPieceOverlayRenderKey,
+    retainVisibleCanvasOnRebuild,
   ]);
 
   useEffect(() => {

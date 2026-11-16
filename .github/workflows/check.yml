@@ -37,3 +37,25 @@ jobs:
         run: npm install -g @ast-grep/cli@0.45.1 && ast-grep --version
       - name: Run quality gate
         run: ./scripts/ci-check.sh
+
+  mannequin-beta:
+    name: Mannequin beta gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+      - name: Install Playwright Chromium
+        run: yarn playwright install --with-deps chromium
+      - name: Run mannequin beta gate
+        run: yarn test:mannequin:ci

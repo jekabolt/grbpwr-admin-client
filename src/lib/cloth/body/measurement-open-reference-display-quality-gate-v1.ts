@@ -1,3 +1,10 @@
+import {
+  validateMeasurementSurfaceSelfIntersectionV1,
+  type MeasurementSurfaceIntersectionKindV1,
+  type MeasurementSurfaceSelfIntersectionPolicyV1,
+  type MeasurementSurfaceSelfIntersectionReportV1,
+} from './measurement-surface-self-intersection-v1';
+
 export const MEASUREMENT_OPEN_REFERENCE_DISPLAY_QUALITY_GATE_V1 =
   'measurement-open-reference-display-quality-gate/v1' as const;
 
@@ -28,6 +35,8 @@ export type MeasurementOpenReferenceDisplayQualityFailureCodeV1 =
   | 'edge-compression-unsafe'
   | 'edge-stretch-unsafe'
   | 'input-invalid'
+  | 'new-self-intersection'
+  | 'self-intersection-evaluation-failed'
   | 'triangle-area-compression-unsafe'
   | 'triangle-area-stretch-unsafe'
   | 'triangle-aspect-unsafe'
@@ -53,8 +62,8 @@ export interface MeasurementOpenReferenceDisplayQualityGateResultV1 {
   readonly metrics: MeasurementOpenReferenceDisplayQualityMetricsV1;
   readonly policy: MeasurementOpenReferenceDisplayQualityPolicyV1;
   readonly claims: {
-    readonly localGeometryQualityOnly: true;
-    readonly selfIntersectionEvaluated: false;
+    readonly localGeometryQualityOnly: boolean;
+    readonly selfIntersectionEvaluated: boolean;
     readonly anatomicalAccuracyClaimed: false;
     readonly fitClaimEligible: false;
     readonly runtimeCollisionEligible: false;
@@ -68,6 +77,179 @@ const CLAIMS = Object.freeze({
   fitClaimEligible: false as const,
   runtimeCollisionEligible: false as const,
 });
+
+const SELF_INTERSECTION_CLAIMS = Object.freeze({
+  localGeometryQualityOnly: false as const,
+  selfIntersectionEvaluated: true as const,
+  anatomicalAccuracyClaimed: false as const,
+  fitClaimEligible: false as const,
+  runtimeCollisionEligible: false as const,
+});
+
+const FAILED_SELF_INTERSECTION_CLAIMS = Object.freeze({
+  ...SELF_INTERSECTION_CLAIMS,
+  selfIntersectionEvaluated: false as const,
+});
+
+export interface MeasurementOpenReferenceSelfIntersectionDeltaV1 {
+  readonly safe: boolean;
+  readonly admittedBasisIntersectionCount: number;
+  readonly candidateIntersectionCount: number;
+  readonly admittedInheritedPairCount: number;
+  readonly newPairCount: number;
+  readonly escalatedToProperCrossingCount: number;
+  readonly admittedBasisReport: MeasurementSurfaceSelfIntersectionReportV1;
+  readonly candidateReport: MeasurementSurfaceSelfIntersectionReportV1;
+}
+
+const admittedBasisReportCache = new WeakMap<
+  Float32Array,
+  Map<string, MeasurementSurfaceSelfIntersectionReportV1>
+>();
+const admittedBasisRevisionReportCache = new Map<
+  string,
+  MeasurementSurfaceSelfIntersectionReportV1
+>();
+const MAX_ADMITTED_BASIS_REVISION_CACHE_ENTRIES = 8;
+
+function topologySignature(indices: Uint32Array): string {
+  let hash = 2_166_136_261;
+  for (const vertex of indices) {
+    hash ^= vertex;
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return `${indices.length}:${hash >>> 0}`;
+}
+
+function uniformlyScaledBasisGeometrySignature(positions: Float32Array): string {
+  let minimumY = Number.POSITIVE_INFINITY;
+  let maximumY = Number.NEGATIVE_INFINITY;
+  for (let offset = 1; offset < positions.length; offset += 3) {
+    minimumY = Math.min(minimumY, positions[offset]);
+    maximumY = Math.max(maximumY, positions[offset]);
+  }
+  const height = maximumY - minimumY;
+  if (!Number.isFinite(height) || height <= 0) return 'invalid';
+  let hash = 2_166_136_261;
+  for (let offset = 0; offset < positions.length; offset += 3) {
+    for (const normalized of [
+      positions[offset] / height,
+      (positions[offset + 1] - minimumY) / height,
+      positions[offset + 2] / height,
+    ]) {
+      hash ^= Math.round(normalized * 10_000_000);
+      hash = Math.imul(hash, 16_777_619);
+    }
+  }
+  return `${positions.length}:${hash >>> 0}`;
+}
+
+function admittedBasisReport(
+  positions: Float32Array,
+  indices: Uint32Array,
+  policy: MeasurementSurfaceSelfIntersectionPolicyV1 | undefined,
+  admittedBasisRevision: string | undefined,
+): MeasurementSurfaceSelfIntersectionReportV1 {
+  if (policy !== undefined) {
+    return validateMeasurementSurfaceSelfIntersectionV1(positions, indices, policy);
+  }
+  const signature = `${topologySignature(indices)}:${uniformlyScaledBasisGeometrySignature(positions)}`;
+  const revisionCacheKey = admittedBasisRevision
+    ? `${admittedBasisRevision}:${signature}`
+    : undefined;
+  const revisionCached = revisionCacheKey
+    ? admittedBasisRevisionReportCache.get(revisionCacheKey)
+    : undefined;
+  if (revisionCached) return revisionCached;
+  const cachedByTopology = admittedBasisReportCache.get(positions);
+  const cached = cachedByTopology?.get(signature);
+  if (cached) return cached;
+  const report = validateMeasurementSurfaceSelfIntersectionV1(positions, indices);
+  const next = cachedByTopology ?? new Map<string, MeasurementSurfaceSelfIntersectionReportV1>();
+  next.set(signature, report);
+  if (!cachedByTopology) admittedBasisReportCache.set(positions, next);
+  if (revisionCacheKey) {
+    if (admittedBasisRevisionReportCache.size >= MAX_ADMITTED_BASIS_REVISION_CACHE_ENTRIES) {
+      const oldest = admittedBasisRevisionReportCache.keys().next().value;
+      if (oldest !== undefined) admittedBasisRevisionReportCache.delete(oldest);
+    }
+    admittedBasisRevisionReportCache.set(revisionCacheKey, report);
+  }
+  return report;
+}
+
+function pairKey(triangleA: number, triangleB: number): string {
+  return `${triangleA}:${triangleB}`;
+}
+
+function isProperCrossingEscalation(
+  admittedKind: MeasurementSurfaceIntersectionKindV1,
+  candidateKind: MeasurementSurfaceIntersectionKindV1,
+): boolean {
+  return candidateKind === 'proper-crossing' && admittedKind !== 'proper-crossing';
+}
+
+/**
+ * Compares whole-body intersections against the exact admitted basis topology. Existing basis
+ * contacts are inherited, including harmless classifier movement between touching and coplanar
+ * overlap. A new triangle pair or an inherited pair escalating to a proper crossing is unsafe.
+ */
+export function evaluateMeasurementOpenReferenceSelfIntersectionDeltaV1(options: {
+  readonly admittedBasisPositionsM: Float32Array;
+  readonly candidatePositionsM: Float32Array;
+  readonly triangleIndices: Uint16Array | Uint32Array;
+  readonly policy?: MeasurementSurfaceSelfIntersectionPolicyV1;
+  /** Exact authenticated basis revision; uniform height scaling preserves its pair topology. */
+  readonly admittedBasisRevision?: string;
+}): MeasurementOpenReferenceSelfIntersectionDeltaV1 {
+  const indices =
+    options.triangleIndices instanceof Uint32Array
+      ? options.triangleIndices
+      : Uint32Array.from(options.triangleIndices);
+  const basisReport = admittedBasisReport(
+    options.admittedBasisPositionsM,
+    indices,
+    options.policy,
+    options.admittedBasisRevision,
+  );
+  const candidateReport =
+    options.candidatePositionsM === options.admittedBasisPositionsM
+      ? basisReport
+      : validateMeasurementSurfaceSelfIntersectionV1(
+          options.candidatePositionsM,
+          indices,
+          options.policy,
+        );
+  const admittedByPair = new Map(
+    basisReport.intersections.map(({ triangleA, triangleB, kind }) => [
+      pairKey(triangleA, triangleB),
+      kind,
+    ]),
+  );
+  let admittedInheritedPairCount = 0;
+  let newPairCount = 0;
+  let escalatedToProperCrossingCount = 0;
+  for (const { triangleA, triangleB, kind } of candidateReport.intersections) {
+    const admittedKind = admittedByPair.get(pairKey(triangleA, triangleB));
+    if (admittedKind === undefined) {
+      newPairCount += 1;
+    } else if (isProperCrossingEscalation(admittedKind, kind)) {
+      escalatedToProperCrossingCount += 1;
+    } else {
+      admittedInheritedPairCount += 1;
+    }
+  }
+  return Object.freeze({
+    safe: newPairCount === 0 && escalatedToProperCrossingCount === 0,
+    admittedBasisIntersectionCount: basisReport.intersectionCount,
+    candidateIntersectionCount: candidateReport.intersectionCount,
+    admittedInheritedPairCount,
+    newPairCount,
+    escalatedToProperCrossingCount,
+    admittedBasisReport: basisReport,
+    candidateReport,
+  });
+}
 
 type Point = readonly [number, number, number];
 
@@ -316,4 +498,47 @@ export function evaluateMeasurementOpenReferenceDisplayQualityV1(options: {
     reasons.push('triangle-orientation-unsafe');
   }
   return result(reasons, metrics, policy);
+}
+
+/**
+ * Production final-composition gate. The local deformation checks remain unchanged, then the
+ * complete body is checked for self-intersection regressions relative to its admitted basis.
+ * Validator errors and work-budget exhaustion reject the candidate rather than bypassing it.
+ */
+export function evaluateMeasurementOpenReferenceDisplayQualityWithSelfIntersectionV1(options: {
+  readonly uniformPositionsM: Float32Array;
+  readonly personalizedPositionsM: Float32Array;
+  readonly triangleIndices: Uint16Array | Uint32Array;
+  readonly policy?: Partial<MeasurementOpenReferenceDisplayQualityPolicyV1>;
+  readonly selfIntersectionPolicy?: MeasurementSurfaceSelfIntersectionPolicyV1;
+  /** Exact authenticated basis revision used only for the bounded baseline report cache. */
+  readonly admittedBasisRevision?: string;
+}): MeasurementOpenReferenceDisplayQualityGateResultV1 {
+  const local = evaluateMeasurementOpenReferenceDisplayQualityV1(options);
+  if (!local.safe) return local;
+  try {
+    const delta = evaluateMeasurementOpenReferenceSelfIntersectionDeltaV1({
+      admittedBasisPositionsM: options.uniformPositionsM,
+      candidatePositionsM: options.personalizedPositionsM,
+      triangleIndices: options.triangleIndices,
+      policy: options.selfIntersectionPolicy,
+      admittedBasisRevision: options.admittedBasisRevision,
+    });
+    const reasons = delta.safe
+      ? local.reasons
+      : ([...local.reasons, 'new-self-intersection'] as const);
+    return Object.freeze({
+      ...local,
+      safe: reasons.length === 0,
+      reasons: Object.freeze([...new Set(reasons)]),
+      claims: SELF_INTERSECTION_CLAIMS,
+    });
+  } catch {
+    return Object.freeze({
+      ...local,
+      safe: false,
+      reasons: Object.freeze(['self-intersection-evaluation-failed'] as const),
+      claims: FAILED_SELF_INTERSECTION_CLAIMS,
+    });
+  }
 }

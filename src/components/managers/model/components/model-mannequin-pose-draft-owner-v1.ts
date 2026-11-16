@@ -55,6 +55,7 @@ export interface ModelMannequinPoseDraftSnapshotV1 {
 export interface ModelMannequinPoseDraftOwnerV1 {
   getSnapshot(): ModelMannequinPoseDraftSnapshotV1;
   subscribe(listener: () => void): () => void;
+  bindModelId(modelId: number): void;
   loadRemote(result: ModelMannequinPoseLoadResultV1): Promise<void>;
   beginEdit(): void;
   updateEdit(pose: ModelOpenReferenceDirectPoseV9): void;
@@ -151,10 +152,10 @@ function snapshotOf(state: MutableOwnerStateV1): ModelMannequinPoseDraftSnapshot
 }
 
 export function createModelMannequinPoseDraftOwnerV1(options: {
-  readonly modelId: number;
+  readonly modelId?: number;
   readonly neutralPose: ModelOpenReferenceDirectPoseV9;
 }): ModelMannequinPoseDraftOwnerV1 {
-  const modelId = validModelId(options.modelId);
+  let modelId = options.modelId === undefined ? null : validModelId(options.modelId);
   const neutral = createModelMannequinPoseDocumentV2(options.neutralPose);
   const listeners = new Set<() => void>();
   let operationId = 0;
@@ -198,6 +199,14 @@ export function createModelMannequinPoseDraftOwnerV1(options: {
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+
+    bindModelId(nextModelId) {
+      const valid = validModelId(nextModelId);
+      if (modelId !== null && modelId !== valid) {
+        throw new Error('The mannequin pose owner is already bound to another model.');
+      }
+      modelId = valid;
     },
 
     async loadRemote(result) {
@@ -282,6 +291,8 @@ export function createModelMannequinPoseDraftOwnerV1(options: {
     async beginSave() {
       requireLoaded();
       requireNoEdit();
+      if (modelId === null) throw new Error('Bind the created model ID before saving its pose.');
+      const boundModelId = modelId;
       if (state.phase === 'conflict') throw new Error('Resolve the remote pose conflict first.');
       if (state.inFlight !== null) throw new Error('A mannequin pose save is already in flight.');
       if (state.baseline === null || sameDocument(state.draft, state.baseline)) {
@@ -294,7 +305,7 @@ export function createModelMannequinPoseDraftOwnerV1(options: {
       );
       const request: PutModelMannequinPoseRequestV1 = Object.freeze({
         operationId: ++operationId,
-        modelId,
+        modelId: boundModelId,
         pose,
         canonicalPayload,
         canonicalSha256,
