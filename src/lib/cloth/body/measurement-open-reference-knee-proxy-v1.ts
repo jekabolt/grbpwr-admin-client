@@ -283,6 +283,56 @@ function boneHeadDisplayM(options: {
   ]);
 }
 
+export interface MeasurementOpenReferenceKneeRigStationV1 {
+  readonly side: 'negative' | 'positive';
+  /** Display-space head of core-rig lowerleg01.L/R. */
+  readonly originM: MeshPlaneSectionVec3V1;
+  /** Display-space upperleg01-head to foot-head axis. */
+  readonly normal: MeshPlaneSectionVec3V1;
+}
+
+/**
+ * Rig-only knee planes (no mesh, no limb modes) in the uniformly height-scaled display space,
+ * sorted negative then positive. Shared by the solver stations and the measurement guide.
+ */
+export function resolveMeasurementOpenReferenceKneeRigStationsV1(options: {
+  readonly basis: MakeHumanOpenReferenceBasisV1;
+  readonly heightMm: number;
+  readonly rig: MakeHumanCoreRigBundleV1;
+}): readonly [MeasurementOpenReferenceKneeRigStationV1, MeasurementOpenReferenceKneeRigStationV1] {
+  if (!Number.isFinite(options.heightMm) || options.heightMm <= 0) {
+    throw new RangeError('heightMm must be finite and positive.');
+  }
+  const stations = (['L', 'R'] as const).map((suffix) => {
+    const originM = boneHeadDisplayM({
+      ...options,
+      bundle: options.rig,
+      boneName: `lowerleg01.${suffix}`,
+    });
+    const upperM = boneHeadDisplayM({
+      ...options,
+      bundle: options.rig,
+      boneName: `upperleg01.${suffix}`,
+    });
+    const footM = boneHeadDisplayM({
+      ...options,
+      bundle: options.rig,
+      boneName: `foot.${suffix}`,
+    });
+    const normal = normalize(subtract(footM, upperM), `knee ${suffix} leg axis`);
+    const side = originM[0] < 0 ? ('negative' as const) : ('positive' as const);
+    return Object.freeze({ side, originM, normal });
+  });
+  stations.sort((left, right) => left.side.localeCompare(right.side));
+  if (stations[0].side === stations[1].side) {
+    throw new Error('Core rig knee stations do not split across display X=0.');
+  }
+  return Object.freeze(stations) as unknown as readonly [
+    MeasurementOpenReferenceKneeRigStationV1,
+    MeasurementOpenReferenceKneeRigStationV1,
+  ];
+}
+
 /**
  * Builds the two rig-knee stations in the uniformly height-scaled display space. Thigh and calf
  * station modes are required only as protected geometric stations; no delta is applied here.
@@ -329,24 +379,8 @@ export function deriveMeasurementOpenReferenceKneeProxyStationsV1(options: {
     }).map((station) => [station.side, station]),
   );
 
-  const stations = (['L', 'R'] as const).map((suffix) => {
-    const originM = boneHeadDisplayM({
-      ...options,
-      bundle: options.rig,
-      boneName: `lowerleg01.${suffix}`,
-    });
-    const upperM = boneHeadDisplayM({
-      ...options,
-      bundle: options.rig,
-      boneName: `upperleg01.${suffix}`,
-    });
-    const footM = boneHeadDisplayM({
-      ...options,
-      bundle: options.rig,
-      boneName: `foot.${suffix}`,
-    });
-    const normal = normalize(subtract(footM, upperM), `knee ${suffix} leg axis`);
-    const side = originM[0] < 0 ? ('negative' as const) : ('positive' as const);
+  const rigStations = resolveMeasurementOpenReferenceKneeRigStationsV1(options);
+  const stations = rigStations.map(({ side, originM, normal }) => {
     const thigh = thighBySide.get(side);
     const calf = calfBySide.get(side);
     if (!thigh || !calf) throw new Error(`${side} protected limb stations are incomplete.`);
@@ -368,10 +402,6 @@ export function deriveMeasurementOpenReferenceKneeProxyStationsV1(options: {
       axialRadiusM,
     });
   });
-  stations.sort((left, right) => left.side.localeCompare(right.side));
-  if (stations[0].side === stations[1].side) {
-    throw new Error('Core rig knee stations do not split across display X=0.');
-  }
   return Object.freeze(stations) as unknown as readonly [
     MeasurementOpenReferenceKneeProxyStationV1,
     MeasurementOpenReferenceKneeProxyStationV1,

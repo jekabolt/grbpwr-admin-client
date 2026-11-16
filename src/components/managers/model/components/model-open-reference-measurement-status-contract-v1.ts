@@ -44,6 +44,7 @@ const DIRECT_BOUNDED_PROXY = new Set<CanonicalMeasurementKey>([
   'underBustCircumferenceMm',
   'waistCircumferenceMm',
   'hipCircumferenceMm',
+  'highHipCircumferenceMm',
   'chestDepthMm',
   'waistDepthMm',
   'hipDepthMm',
@@ -51,6 +52,7 @@ const DIRECT_BOUNDED_PROXY = new Set<CanonicalMeasurementKey>([
   'bicepCircumferenceMm',
   'wristCircumferenceMm',
   'thighCircumferenceMm',
+  'kneeCircumferenceMm',
   'calfCircumferenceMm',
   'ankleCircumferenceMm',
 ]);

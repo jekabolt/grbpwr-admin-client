@@ -286,6 +286,7 @@ describe('measurement open-reference beta torso worker v1', () => {
       expect(withDepth.highHipLimited).toBe(false);
       expect(withDepth.highHipDiagnostics).toEqual([]);
       expect(withDepth.highHipStationOriginM).toBeUndefined();
+      expect(withDepth.positionsBeforeHighHipM).toBeUndefined();
 
       const noDepth = solveMeasurementOpenReferenceBetaTorsoV1({
         basis: realBasis,
@@ -372,6 +373,8 @@ describe('measurement open-reference beta torso worker v1', () => {
       expect(result.highHipModeResult!.maximumProtectedPerimeterDriftMm).toBeLessThanOrEqual(0.5);
       expect(result.highHipModeResult!.maximumProtectedDepthDriftMm).toBeLessThanOrEqual(0.5);
       expect(result.positionsM).not.toEqual(depthOnly.positionsM);
+      // The runtime can drop high hip alone: the pre-high-hip snapshot is the depth output.
+      expect(result.positionsBeforeHighHipM).toEqual(depthOnly.positionsM);
       expect(result.depthRepresentedMeasurements).toEqual(depthOnly.depthRepresentedMeasurements);
       expect(result.depthLimitedMeasurements).toEqual(depthOnly.depthLimitedMeasurements);
       expect(result.depthModeResults).toEqual(depthOnly.depthModeResults);
@@ -392,6 +395,7 @@ describe('measurement open-reference beta torso worker v1', () => {
         },
       });
       expect(result.positionsM).toEqual(depthOnly.positionsM);
+      expect(result.positionsBeforeHighHipM).toBeUndefined();
       expect(result.highHipStatus).toBe('notApplied');
       expect(result.highHipDiagnostics).toEqual([{ code: 'section-invalid', message: 'boom' }]);
       expect(result.depthRepresentedMeasurements).toEqual(depthOnly.depthRepresentedMeasurements);

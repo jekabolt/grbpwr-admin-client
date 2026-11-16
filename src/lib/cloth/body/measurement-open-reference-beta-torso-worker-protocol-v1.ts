@@ -18,14 +18,19 @@ export interface MeasurementOpenReferenceBetaTorsoWorkerOptionsV1 {
   readonly triangleIndices: Uint16Array | Uint32Array;
   readonly measurements: CanonicalBodyMeasurementsMm;
   /**
-   * High-hip circumference target. Passed separately until the canonical key exists in
-   * `CanonicalBodyMeasurementsMm`; omitted means the worker keeps its pre-high-hip behaviour.
+   * High-hip circumference target (`measurements.highHipCircumferenceMm`, passed explicitly so the
+   * fast path stays observable); omitted means the worker keeps its pre-high-hip behaviour.
    */
   readonly highHipCircumferenceMm?: number;
 }
 
 export interface MeasurementOpenReferenceBetaTorsoWorkerResultV1 {
   readonly positionsM: Float32Array;
+  /**
+   * Present only when high hip moved the mesh: the positions right before it, so the beta runtime
+   * can drop high hip alone if the final global gate fails.
+   */
+  readonly positionsBeforeHighHipM?: Float32Array;
   readonly chestStationOriginM?: readonly [number, number, number];
   readonly underBustStationOriginM?: readonly [number, number, number];
   readonly ribcageRepresentedMeasurements: readonly 'underBustCircumferenceMm'[];

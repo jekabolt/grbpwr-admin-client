@@ -205,6 +205,7 @@ export function solveMeasurementOpenReferenceBetaTorsoV1(options: {
   }
 
   let positionsM = afterDepthPositionsM;
+  let positionsBeforeHighHipM: Float32Array | undefined;
   let highHipFields: HighHipWorkerFieldsV1;
   try {
     const highHip = (options.solveHighHipProxy ?? solveMeasurementOpenReferenceHighHipProxyV1)({
@@ -221,7 +222,10 @@ export function solveMeasurementOpenReferenceBetaTorsoV1(options: {
       shoulderVertices: stations.shoulderVertices,
     });
     const applied = highHip.status === 'represented' || highHip.status === 'limited';
-    if (applied) positionsM = highHip.positionsM;
+    if (applied) {
+      positionsM = highHip.positionsM;
+      positionsBeforeHighHipM = afterDepthPositionsM;
+    }
     highHipFields = Object.freeze({
       highHipStatus: highHip.status,
       highHipRepresented: highHip.status === 'represented',
@@ -236,6 +240,9 @@ export function solveMeasurementOpenReferenceBetaTorsoV1(options: {
   }
   return Object.freeze({
     positionsM,
+    ...(positionsBeforeHighHipM && positionsBeforeHighHipM !== positionsM
+      ? { positionsBeforeHighHipM }
+      : {}),
     ...common,
     ...depthFields,
     ...highHipFields,

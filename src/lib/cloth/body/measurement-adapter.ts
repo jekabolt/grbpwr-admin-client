@@ -59,6 +59,7 @@ export type MeasurementAdapterDiagnosticCode =
   | 'ambiguous-alias'
   | 'ambiguous-record'
   | 'correlated-impossible'
+  | 'correlated-implausible'
   | 'duplicate-measurement'
   | 'invalid-value'
   | 'missing-required'
@@ -170,8 +171,8 @@ export const CANONICAL_MEASUREMENT_PLAUSIBILITY_MM: Readonly<
 };
 
 /**
- * Admission ranges for future bounded proxies are warnings, not whole-preview blockers. The
- * proxy owns its visual clamp once wired; until then these values remain canonical but unsupported.
+ * Admission ranges for bounded proxies (high hip, knee) are warnings, not whole-preview blockers.
+ * Each proxy owns its own visual deformation-safety clamp and reports `limited` when it applies.
  */
 const CANONICAL_MEASUREMENT_NON_FATAL_PLAUSIBILITY_KEYS = new Set<CanonicalMeasurementKey>([
   'highHipCircumferenceMm',
@@ -232,6 +233,31 @@ export function validateCanonicalMeasurementCorrelations(
       keys: ['waistToHighHipMm', 'waistToHipMm'],
       message: 'waistToHighHipMm must be less than waistToHipMm.',
     });
+  }
+  return issues;
+}
+
+/**
+ * Non-fatal topology hints. A value that trips one still reaches the mannequin, where its bounded
+ * proxy clamps it; these are not population statistics, calibration or fit priors.
+ */
+export function validateCanonicalMeasurementCorrelationWarnings(
+  values: Readonly<Partial<Record<CanonicalMeasurementKey, number>>>,
+): CanonicalMeasurementCorrelationIssue[] {
+  const issues: CanonicalMeasurementCorrelationIssue[] = [];
+  const highHip = values.highHipCircumferenceMm;
+  const waist = values.waistCircumferenceMm;
+  const hip = values.hipCircumferenceMm;
+  if (highHip != null && waist != null && hip != null) {
+    const lower = Math.min(waist, hip);
+    const upper = Math.max(waist, hip);
+    if (highHip < lower || highHip > upper) {
+      issues.push({
+        keys: ['highHipCircumferenceMm', 'waistCircumferenceMm', 'hipCircumferenceMm'],
+        message:
+          'highHipCircumferenceMm is expected between waistCircumferenceMm and hipCircumferenceMm.',
+      });
+    }
   }
   return issues;
 }
@@ -391,6 +417,14 @@ export function adaptProjectBodyMeasurements(
     diagnostics.push({
       severity: 'error',
       code: 'correlated-impossible',
+      canonicalKey: issue.keys[0],
+      message: issue.message,
+    });
+  }
+  for (const issue of validateCanonicalMeasurementCorrelationWarnings(values)) {
+    diagnostics.push({
+      severity: 'warning',
+      code: 'correlated-implausible',
       canonicalKey: issue.keys[0],
       message: issue.message,
     });

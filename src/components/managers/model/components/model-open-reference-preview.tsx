@@ -242,6 +242,7 @@ interface FullBodyBuiltPreviewV3 {
   readonly measurementApplication: ModelOpenReferenceMeasurementApplicationV1 | null;
   readonly limbSectionModes: MeasurementOpenReferenceBetaShapeRuntimeResultV1['limbSectionModes'];
   readonly torsoSectionStations: MeasurementOpenReferenceBetaShapeRuntimeResultV1['torsoSectionStations'];
+  readonly kneeSectionStations: MeasurementOpenReferenceBetaShapeRuntimeResultV1['kneeSectionStations'];
   readonly bodyBuildFingerprint: string;
 }
 
@@ -2816,6 +2817,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                   : null,
                 limbSectionModes: betaShapeRuntime?.limbSectionModes,
                 torsoSectionStations: betaShapeRuntime?.torsoSectionStations,
+                kneeSectionStations: betaShapeRuntime?.kneeSectionStations,
                 bodyBuildFingerprint: requestedBodyBuildFingerprint,
               } satisfies FullBodyBuiltPreviewV3;
             });
@@ -3047,6 +3049,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
             neutralPose: editor.equalGeometry(draftPose, editor.neutralPose),
             limbSectionModes: displayedBuilt.limbSectionModes,
             torsoSectionStations: displayedBuilt.torsoSectionStations,
+            kneeSectionStations: displayedBuilt.kneeSectionStations,
           })
         : undefined,
     [activeMeasurementName, displayedBuilt, draftPose, editor],

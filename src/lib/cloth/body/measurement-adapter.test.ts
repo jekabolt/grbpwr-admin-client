@@ -63,4 +63,37 @@ describe('measurement adapter canonical high hip and knee', () => {
       expect(result.measurements.kneeCircumferenceMm).toBe(601);
     }
   });
+
+  it('warns, never rejects, when high hip falls outside the waist..hip interval', () => {
+    const outside = adaptProjectBodyMeasurements([
+      ...REQUIRED,
+      { name: 'BODY_MEASUREMENT_NAME_HIGH_HIP', valueMm: 1100 },
+    ]);
+    expect(outside.ok).toBe(true);
+    expect(outside.diagnostics).toEqual([
+      expect.objectContaining({
+        severity: 'warning',
+        code: 'correlated-implausible',
+        canonicalKey: 'highHipCircumferenceMm',
+      }),
+    ]);
+    if (outside.ok) expect(outside.measurements.highHipCircumferenceMm).toBe(1100);
+
+    const between = adaptProjectBodyMeasurements([
+      ...REQUIRED,
+      { name: 'BODY_MEASUREMENT_NAME_HIGH_HIP', valueMm: 860 },
+    ]);
+    expect(between.ok).toBe(true);
+    expect(between.diagnostics).toEqual([]);
+
+    // A waist wider than the hip is still a valid interval, in either order.
+    const invertedInterval = adaptProjectBodyMeasurements([
+      ...REQUIRED.map((record) =>
+        record.name === 'BODY_MEASUREMENT_NAME_WAIST' ? { ...record, valueMm: 1000 } : record,
+      ),
+      { name: 'BODY_MEASUREMENT_NAME_HIGH_HIP', valueMm: 990 },
+    ]);
+    expect(invertedInterval.ok).toBe(true);
+    expect(invertedInterval.diagnostics).toEqual([]);
+  });
 });

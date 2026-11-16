@@ -72,7 +72,7 @@ describe('model open-reference measurement status contract v1', () => {
         }),
         {},
       ),
-    ).toEqual({ exact: 1, boundedProxy: 14, unsupported: 16, modifierOnly: 3 });
+    ).toEqual({ exact: 1, boundedProxy: 16, unsupported: 14, modifierOnly: 3 });
     expect(
       MODEL_OPEN_REFERENCE_MEASUREMENT_STATUS_FIELDS_V1.filter(
         ({ capability }) => capability === 'exact' || capability === 'boundedProxy',
@@ -126,13 +126,37 @@ describe('model open-reference measurement status contract v1', () => {
       status: 'unsupported',
       directlyApplied: false,
     });
+    // Bounded proxies that the runtime did not apply surface as notApplied, never unsupported.
     expect(byId.get('highHipCircumferenceMm')).toMatchObject({
-      status: 'unsupported',
+      capability: 'boundedProxy',
+      status: 'notApplied',
       requested: true,
+      directlyApplied: false,
     });
     expect(byId.get('kneeCircumferenceMm')).toMatchObject({
-      status: 'unsupported',
+      capability: 'boundedProxy',
+      status: 'notApplied',
       requested: true,
+      directlyApplied: false,
+    });
+  });
+
+  it('reports high hip and knee as applied when represented or limited', () => {
+    const fields = resolveModelOpenReferenceMeasurementFieldStatusesV1({
+      measurements: allMeasurements,
+      rawMeasurements: {},
+      representedVisualControls: ['heightMm', 'highHipCircumferenceMm'],
+      limitedVisualControls: ['kneeCircumferenceMm'],
+    });
+    const byId = new Map(fields.map((field) => [field.fieldId, field]));
+
+    expect(byId.get('highHipCircumferenceMm')).toMatchObject({
+      status: 'boundedProxy',
+      directlyApplied: true,
+    });
+    expect(byId.get('kneeCircumferenceMm')).toMatchObject({
+      status: 'boundedProxy',
+      directlyApplied: true,
     });
   });
 
