@@ -659,6 +659,24 @@ test('renders the saved pose read-only in the on-demand Models card', async ({
     'Preview partial: custom full-body pose. Some entered measurement morphs were limited or not applied.',
     { timeout: 180_000 },
   );
+  for (const testId of [
+    'model-open-reference-side-seam-status',
+    'model-open-reference-measurement-application-status',
+  ]) {
+    const status = page.getByTestId(testId);
+    if ((await status.count()) > 0) await expect(status).toHaveClass(/\bsr-only\b/u);
+  }
+  const previewBox = await preview.boundingBox();
+  const canvasBox = await preview
+    .getByTestId('measurement-watertight-surface-v1-canvas')
+    .boundingBox();
+  expect(previewBox).not.toBeNull();
+  expect(canvasBox).not.toBeNull();
+  expect(canvasBox!.y - previewBox!.y).toBeLessThanOrEqual(2);
+  expect(canvasBox!.y + canvasBox!.height).toBeLessThanOrEqual(
+    previewBox!.y + previewBox!.height + 1,
+  );
+  expect(canvasBox!.height).toBeGreaterThanOrEqual(previewBox!.height * 0.9);
   await expect(page.getByRole('button', { name: /save pose|reset pose|undo pose/iu })).toHaveCount(
     0,
   );
