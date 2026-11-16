@@ -2465,9 +2465,11 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
     editor.version !== 'full-body-v9' || directPoseViewportEditingEnabledV9;
   const directPoseControlHidden = editor.version === 'full-body-v9' && hideDirectPoseControlV9;
   const workbench = variant === 'workbench';
+  const card = variant === 'card';
   // Desktop model form: messages go to the caller's header; the text nodes below stay in the DOM
   // as screen-reader live regions (sr-only) so nothing announced today goes silent.
-  const headerOwned = editor.version === 'full-body-v9' && !workbench && headerStatusV9 != null;
+  const headerOwned =
+    editor.version === 'full-body-v9' && !workbench && !card && headerStatusV9 != null;
   const [uncontrolledDraftPose, setUncontrolledDraftPose] = useState<Pose>(editor.neutralPose);
   const draftPose = controlledDirectPose ?? uncontrolledDraftPose;
   const [appliedPose, setAppliedPose] = useState<Pose | null>(null);
@@ -3613,7 +3615,13 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
 
   return (
     <div
-      className={workbench ? 'flex h-full min-h-0 flex-col gap-1' : 'flex flex-col gap-stack'}
+      className={
+        card
+          ? 'relative flex h-full min-h-0 flex-col'
+          : workbench
+            ? 'flex h-full min-h-0 flex-col gap-1'
+            : 'flex flex-col gap-stack'
+      }
       data-testid='model-open-reference-preview'
       data-pose-controls={editor.version}
       data-pose-admissibility={poseAdmissibility.status}
@@ -3646,7 +3654,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
       {!resolution.ok ? (
         <CalloutBox
           tone='warning'
-          className={headerOwned && displayedBuilt ? 'sr-only' : undefined}
+          className={card || (headerOwned && displayedBuilt) ? 'sr-only' : undefined}
         >
           <Text component='p' size='micro'>
             <b>{displayedBuilt ? 'measurements need attention' : 'preview blocked'}</b> · enter a
@@ -3676,7 +3684,9 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
               ? 'sr-only'
               : bodyDisplayOwnership === 'retained-error'
                 ? undefined
-                : 'text-warning'
+                : card
+                  ? 'sr-only'
+                  : 'text-warning'
           }
           role={bodyDisplayOwnership === 'retained-error' ? 'alert' : 'status'}
           aria-live={bodyDisplayOwnership === 'retained-error' ? 'assertive' : 'polite'}
@@ -3708,7 +3718,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
           component='p'
           size='micro'
           variant='label'
-          className={headerOwned ? 'sr-only' : undefined}
+          className={card || headerOwned ? 'sr-only' : undefined}
           role='status'
           aria-live='polite'
           aria-atomic='true'
@@ -3795,7 +3805,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
               component='p'
               size='micro'
               variant={measurementApplicationPartial ? 'errorLabel' : 'label'}
-              className={headerOwned ? 'sr-only' : undefined}
+              className={card || headerOwned ? 'sr-only' : undefined}
               role={measurementApplicationPartial ? 'alert' : 'status'}
               aria-live='polite'
               data-testid='model-open-reference-measurement-application-status'
@@ -3864,8 +3874,13 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
           ) : null}
 
           {displayedBuilt ? (
-            <Suspense fallback={<SkeletonBlocks count={1} height={320} className='w-full' />}>
+            <Suspense
+              fallback={<SkeletonBlocks count={1} height={card ? 240 : 320} className='w-full' />}
+            >
               <MeasurementWatertightSurfaceV1Stage
+                interactive={!card}
+                exclusiveContextGroup={card ? 'model-card-preview' : undefined}
+                accessibleLabel={card ? 'mannequin preview' : undefined}
                 artifact={displayedBuilt.artifact}
                 frame={displayedBuilt.frame}
                 lod='display'
@@ -4007,13 +4022,15 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                 patternPieceOverlay={patternPieceOverlay}
                 retainVisibleCanvasOnRebuild={editor.version === 'full-body-v9'}
                 className={
-                  workbench
-                    ? 'order-1 h-full min-h-0 w-full border border-hairline'
-                    : headerOwned
-                      ? 'order-1 aspect-[6/5] max-h-[calc(100dvh-17rem)] min-h-80 w-full border border-hairline'
-                      : editor.minimalViewportUi
-                        ? 'order-1 h-[62vh] min-h-[32rem] max-h-[48rem] border border-hairline'
-                        : 'h-[42vh] min-h-80 max-h-[32rem] border border-hairline'
+                  card
+                    ? 'pointer-events-none h-full min-h-0 w-full border border-hairline'
+                    : workbench
+                      ? 'order-1 h-full min-h-0 w-full border border-hairline'
+                      : headerOwned
+                        ? 'order-1 aspect-[6/5] max-h-[calc(100dvh-17rem)] min-h-80 w-full border border-hairline'
+                        : editor.minimalViewportUi
+                          ? 'order-1 h-[62vh] min-h-[32rem] max-h-[48rem] border border-hairline'
+                          : 'h-[42vh] min-h-80 max-h-[32rem] border border-hairline'
                 }
                 onStatus={(nextStatus, nextError) => {
                   setStageStatus(nextStatus);
