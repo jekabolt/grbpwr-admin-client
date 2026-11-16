@@ -170,6 +170,63 @@ describe('active mannequin measurement guide v1', () => {
     });
   });
 
+  it('places high hip at the protocol station below the waist, or at the runtime station', () => {
+    const waist = frame.torsoStations.find(({ id }) => id === 'waist');
+    expect(waist).toBeDefined();
+    const pathY = (guide: ReturnType<typeof buildMeasurementSurfaceActiveMeasurementGuideV1>) => {
+      const path = guide.paths[0];
+      if (!path || path.source !== 'fixed-points')
+        throw new Error('Expected a fixed section path.');
+      return path.pointsM.reduce((sum, point) => sum + point[1], 0) / path.pointsM.length;
+    };
+    const protocol = buildMeasurementSurfaceActiveMeasurementGuideV1({
+      measurementName: 'BODY_MEASUREMENT_NAME_HIGH_HIP',
+      frame,
+      mesh: cylinderMesh(),
+      neutralPose: true,
+    });
+    expect(protocol).toMatchObject({ status: 'visible', label: 'high hip' });
+    expect(pathY(protocol)).toBeCloseTo((waist?.yM ?? 0) - 0.1, 5);
+
+    const runtime = buildMeasurementSurfaceActiveMeasurementGuideV1({
+      measurementName: 'BODY_MEASUREMENT_NAME_HIGH_HIP',
+      frame,
+      mesh: cylinderMesh(),
+      neutralPose: true,
+      torsoSectionStations: { highHip: [0, 0.93, 0] },
+    });
+    expect(pathY(runtime)).toBeCloseTo(0.93, 5);
+
+    // A protocol drop (100 mm) that leaves the waist..hip interval has no admitted station.
+    const outside = buildMeasurementSurfaceActiveMeasurementGuideV1({
+      measurementName: 'BODY_MEASUREMENT_NAME_HIGH_HIP',
+      frame,
+      mesh: cylinderMesh(),
+      neutralPose: true,
+      torsoSectionStations: { waist: [0, 1, 0], hip: [0, 0.95, 0] },
+    });
+    expect(outside).toMatchObject({ status: 'unavailable-section', paths: [] });
+  });
+
+  it('draws the knee guide on the runtime knee station when one is supplied', () => {
+    const guide = buildMeasurementSurfaceActiveMeasurementGuideV1({
+      measurementName: 'BODY_MEASUREMENT_NAME_KNEE',
+      frame,
+      mesh: cylinderMesh(),
+      neutralPose: true,
+      kneeSectionStations: [
+        { side: 'negative', originM: [-0.1, 0.2, 0], normal: [0, 1, 0] },
+        { side: 'positive', originM: [0, 0.47, 0], normal: [0, 1, 0] },
+      ],
+    });
+    expect(guide).toMatchObject({ status: 'visible', label: 'knee' });
+    const path = guide.paths[0];
+    expect(path?.source).toBe('fixed-points');
+    if (path?.source === 'fixed-points') {
+      for (const point of path.pointsM) expect(point[1]).toBeCloseTo(0.47, 5);
+    }
+  });
+
   it.each([
     'BODY_MEASUREMENT_NAME_HPS_HEIGHT',
     'BODY_MEASUREMENT_NAME_SHOULDER_LENGTH',

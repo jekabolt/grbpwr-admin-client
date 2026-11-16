@@ -38,11 +38,12 @@ describe('model open-reference measurement application v1', () => {
     expect(result.applied).toEqual(['heightMm', 'waistCircumferenceMm', 'hipCircumferenceMm']);
     expect(result.limitedBySafeRange).toEqual(['chestCircumferenceMm', 'armLengthMm']);
     expect(result.notApplied).toEqual(['shoulderBreadthMm']);
-    expect(result.unsupported).toEqual(['inseam', 'neck base circumference', 'high hip', 'knee']);
+    // Raw high-hip/knee entries are gone since both became canonical bounded proxies.
+    expect(result.unsupported).toEqual(['inseam', 'neck base circumference']);
     expect(result.diagnostics).toContain('chestCircumferenceMm:target-limited-to-bounded-endpoint');
     expect(modelOpenReferenceMeasurementApplicationSummaryV1(result)).toEqual({
       status: 'partial',
-      text: 'body shape partial · limited by safe range: chest circumference, arm length centerline proxy · not applied: shoulder breadth · not modeled: inseam, neck base circumference, high hip, knee',
+      text: 'body shape partial · limited by safe range: chest circumference, arm length centerline proxy · not applied: shoulder breadth · not modeled: inseam, neck base circumference',
     });
   });
 
@@ -276,6 +277,57 @@ describe('model open-reference measurement application v1', () => {
     expect(result.notApplied).toContain('hipDepthMm');
     expect(result.unsupported).not.toEqual(
       expect.arrayContaining(['chest depth', 'waist depth', 'hip depth']),
+    );
+  });
+
+  it('reports high hip and knee as applied, limited or not applied from typed runtime state', () => {
+    const base = {
+      representedVisualControls: [
+        'heightMm',
+        'shoulderBreadthMm',
+        'chestCircumferenceMm',
+        'waistCircumferenceMm',
+        'hipCircumferenceMm',
+      ] as const,
+      chestShoulderDiagnostics: [] as string[],
+      fkProxyRuntime: { diagnostics: [] },
+    };
+    const requested = { ...measurements, highHipCircumferenceMm: 900, kneeCircumferenceMm: 390 };
+
+    const appliedAndLimited = modelOpenReferenceMeasurementApplicationV1({
+      measurements: requested,
+      rawMeasurements: {},
+      beta: {
+        ...base,
+        representedVisualControls: [...base.representedVisualControls, 'highHipCircumferenceMm'],
+        limitedVisualControls: ['armLengthMm', 'kneeCircumferenceMm'],
+        chestShoulderDiagnostics: ['kneeCircumferenceMm:target-limited'],
+      },
+    });
+    expect(appliedAndLimited.applied).toContain('highHipCircumferenceMm');
+    expect(appliedAndLimited.limitedBySafeRange).toContain('kneeCircumferenceMm');
+    expect(appliedAndLimited.notApplied).toEqual([]);
+    expect(modelOpenReferenceMeasurementApplicationSummaryV1(appliedAndLimited).text).toContain(
+      'limited by safe range: arm length centerline proxy, knee circumference',
+    );
+
+    const rolledBack = modelOpenReferenceMeasurementApplicationV1({
+      measurements: requested,
+      rawMeasurements: {},
+      beta: {
+        ...base,
+        limitedVisualControls: ['armLengthMm'],
+        chestShoulderDiagnostics: [
+          'highHipCircumferenceMm:station-order',
+          'kneeCircumferenceMm:beta-final-quality-rollback',
+        ],
+      },
+    });
+    expect(rolledBack.applied).not.toContain('highHipCircumferenceMm');
+    expect(rolledBack.notApplied).toEqual(['highHipCircumferenceMm', 'kneeCircumferenceMm']);
+    expect(rolledBack.unsupported).toEqual(['inseam', 'neck base circumference']);
+    expect(modelOpenReferenceMeasurementApplicationSummaryV1(rolledBack).text).toContain(
+      'not applied: high hip circumference, knee circumference',
     );
   });
 });
