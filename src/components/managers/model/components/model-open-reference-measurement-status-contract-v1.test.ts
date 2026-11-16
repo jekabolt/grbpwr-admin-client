@@ -70,7 +70,7 @@ describe('model open-reference measurement status contract v1', () => {
         }),
         {},
       ),
-    ).toEqual({ exact: 1, boundedProxy: 11, unsupported: 19, modifierOnly: 3 });
+    ).toEqual({ exact: 1, boundedProxy: 14, unsupported: 16, modifierOnly: 3 });
     expect(
       MODEL_OPEN_REFERENCE_MEASUREMENT_STATUS_FIELDS_V1.filter(
         ({ capability }) => capability === 'exact' || capability === 'boundedProxy',
