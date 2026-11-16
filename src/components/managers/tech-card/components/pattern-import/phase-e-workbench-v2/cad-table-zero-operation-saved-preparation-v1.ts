@@ -10,6 +10,10 @@ import {
 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import { selectPatternImportDxfProductDraftPhaseDSizeV1 } from 'lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1';
 import {
+  createDxfProductSavedForeignReprocessOwnerV1,
+  DXF_PRODUCT_SAVED_FOREIGN_REPROCESS_REQUEST_V1,
+} from 'lib/pattern-import/dxf-product-saved-foreign-reprocess-owner-v1';
+import {
   createDxfProductSavedReprocessOwnerV1,
   DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
@@ -17,8 +21,10 @@ import {
   projectPatternImportDxfProductPhaseEAssemblyV1,
   type PatternImportDxfProductPhaseEAssemblyProjectionV1,
 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
+import type { CardDraft } from 'lib/pattern-import/types';
 
 import { buildPatternImportDxfPhaseESavedCardContextV1 } from './saved-card-production-projection-v1';
+import { createPatternImportDxfPhaseEForeignSavedDxfReprocessHostV1 } from './foreign-saved-dxf-reprocess-host-v1';
 import { createPatternImportDxfPhaseESavedDxfReprocessHostV1 } from './saved-dxf-reprocess-host-v1';
 import type { PatternImportDxfPhaseECadTableZeroOperationFreshChoiceV1 } from './cad-table-zero-operation-fresh-preparation-v1';
 import type { PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1 } from './zero-operation-saved-card-authority-v1';
@@ -41,6 +47,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_SAVED_PREPARATI
     exactPhaseDSelectionBuilt: true,
     exactAuthoringCatalogBuilt: true,
     exactAssemblyProjectionBuilt: true,
+    manifestAbsentForeignDxfFallback: true,
     rawDxfReturned: false,
     productionReady: true,
   } as const);
@@ -268,12 +275,18 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
       ),
     );
 
-  const host = createPatternImportDxfPhaseESavedDxfReprocessHostV1({
+  const hostDeps = {
     resolveCard: request.authority.resolveCard,
     readAuthoritativeRow: capability.authority.readAuthoritativeRow,
-  });
-  const owner = createDxfProductSavedReprocessOwnerV1(host);
-  const cancel = () => owner.cancel();
+  };
+  const exactOwner = createDxfProductSavedReprocessOwnerV1(
+    createPatternImportDxfPhaseESavedDxfReprocessHostV1(hostDeps),
+  );
+  let foreignOwner: ReturnType<typeof createDxfProductSavedForeignReprocessOwnerV1> | null = null;
+  const cancel = () => {
+    exactOwner.cancel();
+    foreignOwner?.cancel();
+  };
   signal?.addEventListener('abort', cancel, { once: true });
   try {
     if (signal?.aborted)
@@ -289,11 +302,44 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
       capability.row,
       signal ?? new AbortController().signal,
     );
-    const reprocessed = await owner.run({
+    const reprocessed = await exactOwner.run({
       schemaVersion: DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
       row: authoritative.row,
     });
-    if (!reprocessed.ok)
+    if (signal?.aborted)
+      return blockedPreparation(
+        request,
+        choices.choices,
+        blocker('saved-preparation-cancelled', 'Exact saved DXF preparation was cancelled.'),
+      );
+    let draft: CardDraft;
+    if (reprocessed.ok) {
+      draft = reprocessed.draft;
+    } else if (reprocessed.blockers[0]?.code === 'foreign-saved-dxf-detected') {
+      foreignOwner = createDxfProductSavedForeignReprocessOwnerV1(
+        createPatternImportDxfPhaseEForeignSavedDxfReprocessHostV1(hostDeps),
+      );
+      const foreign = await foreignOwner.run({
+        schemaVersion: DXF_PRODUCT_SAVED_FOREIGN_REPROCESS_REQUEST_V1,
+        row: authoritative.row,
+      });
+      if (signal?.aborted)
+        return blockedPreparation(
+          request,
+          choices.choices,
+          blocker('saved-preparation-cancelled', 'Foreign saved DXF preparation was cancelled.'),
+        );
+      if (!foreign.ok)
+        return blockedPreparation(
+          request,
+          choices.choices,
+          blocker(
+            'saved-row-reprocess-blocked',
+            foreign.blockers[0]?.detail ?? 'The foreign saved DXF could not be reconstructed.',
+          ),
+        );
+      draft = foreign.draft;
+    } else {
       return blockedPreparation(
         request,
         choices.choices,
@@ -302,14 +348,11 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
           reprocessed.blockers[0]?.detail ?? 'The exact saved DXF could not be reconstructed.',
         ),
       );
+    }
     const [selection, catalogResult] = await Promise.all([
-      selectPatternImportDxfProductDraftPhaseDSizeV1(
-        reprocessed.draft,
-        request.scopeKey,
-        request.sizeToken,
-      ),
+      selectPatternImportDxfProductDraftPhaseDSizeV1(draft, request.scopeKey, request.sizeToken),
       buildPatternImportDxfProductPhaseEAuthoringCatalogV1(
-        reprocessed.draft,
+        draft,
         request.scopeKey,
         request.sizeToken,
       ),
@@ -389,6 +432,7 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
     );
   } finally {
     signal?.removeEventListener('abort', cancel);
-    owner.dispose();
+    exactOwner.dispose();
+    foreignOwner?.dispose();
   }
 }

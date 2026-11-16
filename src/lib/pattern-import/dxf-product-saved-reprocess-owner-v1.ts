@@ -10,6 +10,17 @@ export const DXF_PRODUCT_SAVED_REPROCESS_OWNER_V1 = 'dxf-product-saved-reprocess
 export const DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1 =
   'dxf-product-saved-reprocess-request/1' as const;
 
+/**
+ * Exact-host signal that the authoritative bytes carry no GRBPWR manifest at all. Corrupt,
+ * partial and unsupported manifests must keep throwing ManifestError and never use this signal.
+ */
+export class DxfProductSavedForeignDxfDetectedErrorV1 extends Error {
+  constructor() {
+    super('The authoritative saved DXF has no GRBPWR product manifest.');
+    this.name = 'DxfProductSavedForeignDxfDetectedErrorV1';
+  }
+}
+
 const STABLE_ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const SYNTHETIC_DXF_NAME = 'authoritative-saved-pattern.dxf' as const;
@@ -50,6 +61,7 @@ export type DxfProductSavedReprocessBlockerV1 = Readonly<{
     | 'sha256-unavailable'
     | 'saved-row-sha256-mismatch'
     | 'reprocessor-unavailable'
+    | 'foreign-saved-dxf-detected'
     | 'saved-dxf-reprocess-failed'
     | 'reprocess-row-binding-mismatch'
     | 'reconstructed-draft-invalid'
@@ -613,12 +625,19 @@ export function createDxfProductSavedReprocessOwnerV1(host: DxfProductSavedRepro
           controller.signal,
           (done, total, note) => progress('reprocess', 2, done, total, note),
         );
-      } catch {
+      } catch (error) {
+        const foreignDxf = error instanceof DxfProductSavedForeignDxfDetectedErrorV1;
         return blocked(
-          aborted(controller.signal) ? 'cancelled' : 'saved-dxf-reprocess-failed',
+          aborted(controller.signal)
+            ? 'cancelled'
+            : foreignDxf
+              ? 'foreign-saved-dxf-detected'
+              : 'saved-dxf-reprocess-failed',
           aborted(controller.signal)
             ? 'Saved-DXF reprocess was cancelled.'
-            : 'The disposable direct-DXF reprocessor failed.',
+            : foreignDxf
+              ? error.message
+              : 'The disposable direct-DXF reprocessor failed.',
           row,
           sourceFileId,
         );
