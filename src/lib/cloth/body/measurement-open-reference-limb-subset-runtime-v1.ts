@@ -20,12 +20,15 @@ import {
   type MeasurementOpenReferenceDisplayArtifactV1,
 } from './measurement-open-reference-display-v1';
 import {
-  compileOpenReferenceLimbFinalClosureContextV1,
-  solveOpenReferenceLimbFinalClosureV1,
   type OpenReferenceLimbCoefficientEnvelopeV1,
   type OpenReferenceLimbFinalClosureDropV1,
   type OpenReferenceLimbFinalClosureModeResultV1,
 } from './measurement-open-reference-limb-final-closure-v1';
+import { solveMeasurementOpenReferenceLimbFinalClosureInWorkerV1 } from './measurement-open-reference-limb-final-closure-worker-v1';
+import type {
+  MeasurementOpenReferenceLimbFinalClosureWorkerOptionsV1,
+  MeasurementOpenReferenceLimbFinalClosureWorkerResultV1,
+} from './measurement-open-reference-limb-final-closure-worker-protocol-v1';
 import type { OpenReferenceLimbCircumferenceKeyV1 } from './measurement-open-reference-limb-circumference-solver-v1';
 import type {
   OpenReferenceLimbCircumferenceModeV1,
@@ -38,6 +41,29 @@ import { measureMeshPlaneSectionPerimetersV1 } from './mesh-plane-section-perime
 
 export const MEASUREMENT_OPEN_REFERENCE_LIMB_SUBSET_RUNTIME_V1 =
   'measurement-open-reference-limb-subset-runtime/v1' as const;
+
+export const MEASUREMENT_OPEN_REFERENCE_LIMB_COMPOSITION_MEASURE_V1 =
+  'measurement-open-reference-limb-composition/v1' as const;
+
+function measuredCompositionStage<T>(stage: string, operation: () => T): T {
+  const clock = globalThis.performance;
+  const startedAt = clock?.now();
+  try {
+    return operation();
+  } finally {
+    if (clock && startedAt != null && typeof clock.measure === 'function') {
+      try {
+        clock.measure(MEASUREMENT_OPEN_REFERENCE_LIMB_COMPOSITION_MEASURE_V1, {
+          start: startedAt,
+          end: clock.now(),
+          detail: Object.freeze({ stage }),
+        });
+      } catch {
+        // Performance evidence must never affect the fail-closed geometry result.
+      }
+    }
+  }
+}
 
 export const MEASUREMENT_OPEN_REFERENCE_LIMB_SUBSET_KEYS_V1 = Object.freeze([
   'bicepCircumferenceMm',
@@ -126,6 +152,10 @@ export type MeasurementOpenReferenceLimbSubsetBundleLoaderV1 =
   () => Promise<MakeHumanLimbCircumferenceDeltaBundleV1>;
 export type MeasurementOpenReferenceLimbSubsetTorsoBundleLoaderV1 =
   () => Promise<MakeHumanTorsoShapeDeltaBundleV1>;
+export type MeasurementOpenReferenceLimbFinalClosureEvaluatorV1 = (
+  options: MeasurementOpenReferenceLimbFinalClosureWorkerOptionsV1,
+  signal?: AbortSignal,
+) => Promise<MeasurementOpenReferenceLimbFinalClosureWorkerResultV1>;
 
 export const MEASUREMENT_OPEN_REFERENCE_LIMB_SUBSET_RUNTIME_CLAIMS_V1 = Object.freeze({
   visualReferenceOnly: true as const,
@@ -354,6 +384,8 @@ export async function createMeasurementOpenReferenceLimbSubsetRuntimeV1(options:
   readonly waistHipRuntime: MeasurementOpenReferenceUniformWaistHipRuntimeResultV1;
   readonly loadLimbBundle?: MeasurementOpenReferenceLimbSubsetBundleLoaderV1;
   readonly loadTorsoBundle?: MeasurementOpenReferenceLimbSubsetTorsoBundleLoaderV1;
+  readonly solveFinalClosure?: MeasurementOpenReferenceLimbFinalClosureEvaluatorV1;
+  readonly signal?: AbortSignal;
 }): Promise<MeasurementOpenReferenceLimbSubsetRuntimeResultV1> {
   const basis: MakeHumanOpenReferenceBasisV1 = Object.freeze({
     ...options.basis,
@@ -419,16 +451,18 @@ export async function createMeasurementOpenReferenceLimbSubsetRuntimeV1(options:
       (options.loadLimbBundle ?? loadMakeHumanLimbCircumferenceDeltaBundleV1)(),
       (options.loadTorsoBundle ?? loadMakeHumanTorsoShapeDeltaBundleV1)(),
     ]);
-    const limb = createMakeHumanLimbCircumferenceUniformModesV1({
-      basis,
-      heightMm: measurements.heightMm,
-      bundle: limbBundle,
-    });
-    const torso = createMakeHumanUniformWaistHipModesV1({
-      basis,
-      heightMm: measurements.heightMm,
-      bundle: torsoBundle,
-    });
+    const { limb, torso } = measuredCompositionStage('compile-modes', () => ({
+      limb: createMakeHumanLimbCircumferenceUniformModesV1({
+        basis,
+        heightMm: measurements.heightMm,
+        bundle: limbBundle,
+      }),
+      torso: createMakeHumanUniformWaistHipModesV1({
+        basis,
+        heightMm: measurements.heightMm,
+        bundle: torsoBundle,
+      }),
+    }));
     const hipMode = torso.modes.find(
       ({ measurementKey }) => measurementKey === 'hipCircumferenceMm',
     );
@@ -438,12 +472,14 @@ export async function createMeasurementOpenReferenceLimbSubsetRuntimeV1(options:
     if (!hipMode || !thighMode) {
       throw new Error('Localized thigh production inputs are missing.');
     }
-    const localizedThigh = createLocalizedThighResearchModeV1({
-      mode: thighMode,
-      positionsM: waistHipDisplayMesh.positions,
-      hipStationYM: hipMode.stationOriginM[1],
-      fadeDepthM: 0.12,
-    });
+    const localizedThigh = measuredCompositionStage('localize-thigh', () =>
+      createLocalizedThighResearchModeV1({
+        mode: thighMode,
+        positionsM: waistHipDisplayMesh.positions,
+        hipStationYM: hipMode.stationOriginM[1],
+        fadeDepthM: 0.12,
+      }),
+    );
     const limbModes = Object.freeze(
       limb.modes
         .map((mode) =>
@@ -455,43 +491,40 @@ export async function createMeasurementOpenReferenceLimbSubsetRuntimeV1(options:
           ),
         ),
     );
-    const compiledContext = compileOpenReferenceLimbFinalClosureContextV1({
-      waistHipPositionsM: waistHipDisplayMesh.positions,
-      triangleIndices: basis.indices,
-      limbModes,
-      torsoModes: torso.modes,
-      measurementKeys: MEASUREMENT_OPEN_REFERENCE_LIMB_SUBSET_KEYS_V1,
-      coefficientEnvelope: MEASUREMENT_OPEN_REFERENCE_LIMB_SUBSET_ENVELOPE_V1,
-    });
     const solveMeasurements = { ...measurements };
     const limited: MeasurementOpenReferenceLimbSubsetKeyV1[] = [];
     if (measurements.thighCircumferenceMm != null) {
-      const baselineMm = measureModeMm({
-        positionsM: waistHipDisplayMesh.positions,
-        stationPositionsM: waistHipDisplayMesh.positions,
-        triangleIndices: basis.indices,
-        mode: localizedThigh.mode,
-      });
-      const decreaseMm = measureModeMm({
-        positionsM: addScaledField(
-          waistHipDisplayMesh.positions,
-          localizedThigh.mode.decrease,
-          MEASUREMENT_OPEN_REFERENCE_LIMB_SUBSET_ENVELOPE_V1.thighCircumferenceMm.decrease,
-        ),
-        stationPositionsM: waistHipDisplayMesh.positions,
-        triangleIndices: basis.indices,
-        mode: localizedThigh.mode,
-      });
-      const increaseMm = measureModeMm({
-        positionsM: addScaledField(
-          waistHipDisplayMesh.positions,
-          localizedThigh.mode.increase,
-          MEASUREMENT_OPEN_REFERENCE_LIMB_SUBSET_ENVELOPE_V1.thighCircumferenceMm.increase,
-        ),
-        stationPositionsM: waistHipDisplayMesh.positions,
-        triangleIndices: basis.indices,
-        mode: localizedThigh.mode,
-      });
+      const { baselineMm, decreaseMm, increaseMm } = measuredCompositionStage(
+        'measure-thigh-envelope',
+        () => ({
+          baselineMm: measureModeMm({
+            positionsM: waistHipDisplayMesh.positions,
+            stationPositionsM: waistHipDisplayMesh.positions,
+            triangleIndices: basis.indices,
+            mode: localizedThigh.mode,
+          }),
+          decreaseMm: measureModeMm({
+            positionsM: addScaledField(
+              waistHipDisplayMesh.positions,
+              localizedThigh.mode.decrease,
+              MEASUREMENT_OPEN_REFERENCE_LIMB_SUBSET_ENVELOPE_V1.thighCircumferenceMm.decrease,
+            ),
+            stationPositionsM: waistHipDisplayMesh.positions,
+            triangleIndices: basis.indices,
+            mode: localizedThigh.mode,
+          }),
+          increaseMm: measureModeMm({
+            positionsM: addScaledField(
+              waistHipDisplayMesh.positions,
+              localizedThigh.mode.increase,
+              MEASUREMENT_OPEN_REFERENCE_LIMB_SUBSET_ENVELOPE_V1.thighCircumferenceMm.increase,
+            ),
+            stationPositionsM: waistHipDisplayMesh.positions,
+            triangleIndices: basis.indices,
+            mode: localizedThigh.mode,
+          }),
+        }),
+      );
       if (!(decreaseMm < baselineMm && baselineMm < increaseMm)) {
         throw new Error('Localized thigh bounded endpoints are not monotonic.');
       }
@@ -511,16 +544,23 @@ export async function createMeasurementOpenReferenceLimbSubsetRuntimeV1(options:
         );
       }
     }
-    const solved = solveOpenReferenceLimbFinalClosureV1({
-      uniformPositionsM: limb.positionsM,
-      waistHipPositionsM: waistHipDisplayMesh.positions,
-      triangleIndices: basis.indices,
-      measurements: solveMeasurements,
-      limbModes,
-      torsoModes: torso.modes,
-      compiledContext,
-      binarySearchIterations: 16,
-    });
+    const solvedClosure = await (
+      options.solveFinalClosure ?? solveMeasurementOpenReferenceLimbFinalClosureInWorkerV1
+    )(
+      {
+        uniformPositionsM: limb.positionsM,
+        waistHipPositionsM: waistHipDisplayMesh.positions,
+        triangleIndices: basis.indices,
+        measurements: solveMeasurements,
+        limbModes,
+        torsoModes: torso.modes,
+        measurementKeys: MEASUREMENT_OPEN_REFERENCE_LIMB_SUBSET_KEYS_V1,
+        coefficientEnvelope: MEASUREMENT_OPEN_REFERENCE_LIMB_SUBSET_ENVELOPE_V1,
+        binarySearchIterations: 16,
+      },
+      options.signal,
+    );
+    const solved = solvedClosure.result;
     const solvedRepresented = solved.representedMeasurements.filter(
       (key): key is MeasurementOpenReferenceLimbSubsetKeyV1 =>
         MEASUREMENT_OPEN_REFERENCE_LIMB_SUBSET_KEYS_V1.includes(
@@ -566,7 +606,7 @@ export async function createMeasurementOpenReferenceLimbSubsetRuntimeV1(options:
       modeResults: solved.modeResults,
       diagnostics,
       qualityGate: solved.qualityGate,
-      compiledContentRevision: compiledContext.contentRevision,
+      compiledContentRevision: solvedClosure.contentRevision,
     });
   } catch (reason: unknown) {
     return runtimeResult({

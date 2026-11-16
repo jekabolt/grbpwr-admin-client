@@ -1,8 +1,4 @@
-import {
-  loadMakeHumanTorsoShapeDeltaBundleV1,
-  type MakeHumanTorsoShapeDeltaBundleV1,
-} from './makehuman-torso-shape-delta-bundle-v1';
-import { createMakeHumanAnteriorChestShoulderModesResearchV1 } from './makehuman-anterior-chest-shoulder-modes-research-v1';
+import { type MakeHumanTorsoShapeDeltaBundleV1 } from './makehuman-torso-shape-delta-bundle-v1';
 import {
   applyMakeHuman2ArmLengthProxyToDisplayPositionsMResearchV1,
   createMakeHuman2ArmLengthProxyRuntimeResearchV1,
@@ -17,8 +13,7 @@ import type { CanonicalBodyMeasurementsMm } from './measurement-adapter';
 import type { MeasurementOpenReferenceDisplayQualityGateResultV1 } from './measurement-open-reference-display-quality-gate-v1';
 import { evaluateMeasurementOpenReferenceDisplayQualityInWorkerV1 } from './measurement-open-reference-display-quality-worker-v1';
 import type { MeasurementSurfaceSelfIntersectionPolicyV1 } from './measurement-surface-self-intersection-v1';
-import { solveOpenReferenceChestShoulderResearchV1 } from './measurement-open-reference-chest-shoulder-research-v1';
-import { applyOpenReferenceUnderBustRibcageResearchV1 } from './measurement-open-reference-underbust-ribcage-research-v1';
+import { createMeasurementOpenReferenceBetaTorsoInWorkerV1 } from './measurement-open-reference-beta-torso-worker-v1';
 import {
   createMakeHumanDisplayPoseResourceLoaderV1,
   type MeasurementOpenReferenceDisplayPoseResourcesV1,
@@ -35,6 +30,28 @@ import type { MeasurementOpenReferenceUniformWaistHipRuntimeResultV1 } from './m
 
 export const MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_RUNTIME_V1 =
   'measurement-open-reference-beta-shape-runtime/v1' as const;
+export const MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_STAGE_MEASURE_V1 =
+  'measurement-open-reference-beta-shape-stage/v1' as const;
+
+function measuredBetaShapeStageV1<T>(stage: string, operation: () => T): T {
+  const clock = globalThis.performance;
+  const startedAt = clock?.now();
+  try {
+    return operation();
+  } finally {
+    if (clock && startedAt != null && typeof clock.measure === 'function') {
+      try {
+        clock.measure(MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_STAGE_MEASURE_V1, {
+          start: startedAt,
+          end: clock.now(),
+          detail: Object.freeze({ stage }),
+        });
+      } catch {
+        // Performance diagnostics must never affect shape admission.
+      }
+    }
+  }
+}
 
 export class MeasurementOpenReferenceBetaShapeSafetyErrorV1 extends Error {
   readonly code = 'admitted-basis-self-intersection-evaluation-failed' as const;
@@ -192,6 +209,7 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: 
   readonly createArmLengthRuntime?: typeof createMakeHuman2ArmLengthProxyRuntimeResearchV1;
   readonly selfIntersectionPolicy?: MeasurementSurfaceSelfIntersectionPolicyV1;
   readonly evaluateQualityGate?: MeasurementOpenReferenceBetaShapeQualityGateEvaluatorV1;
+  readonly createTorsoShape?: typeof createMeasurementOpenReferenceBetaTorsoInWorkerV1;
   readonly signal?: AbortSignal;
 }): Promise<MeasurementOpenReferenceBetaShapeRuntimeResultV1> {
   const admittedBasisRevision =
@@ -212,40 +230,31 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: 
   const diagnostics: string[] = [];
 
   try {
-    const torsoBundle = await (options.loadTorsoBundle ?? loadMakeHumanTorsoShapeDeltaBundleV1)();
-    const modes = createMakeHumanAnteriorChestShoulderModesResearchV1({
+    const torso = await (
+      options.createTorsoShape ?? createMeasurementOpenReferenceBetaTorsoInWorkerV1
+    )({
       basis: options.basis,
       measurements: options.measurements,
-      bundle: torsoBundle,
-    });
-    diagnostics.push(...modes.diagnostics);
-    const ribcage = applyOpenReferenceUnderBustRibcageResearchV1({
       sourcePositionsM: shapedRuntime.displayMesh.positions,
       triangleIndices: shapedRuntime.displayMesh.indices,
-      measurements: options.measurements,
-      stationOriginM: modes.underBustStationOriginM,
+      loadTorsoBundle: options.loadTorsoBundle,
+      signal: options.signal,
     });
-    diagnostics.push(...ribcage.diagnostics);
-    represented.push(...ribcage.representedMeasurements);
-    if (ribcage.representedMeasurements.length > 0) {
-      shapedRuntime = withDisplayPositions(shapedRuntime, ribcage.positionsM);
-    }
-    const chestShoulder = solveOpenReferenceChestShoulderResearchV1({
-      sourcePositionsM: shapedRuntime.displayMesh.positions,
-      triangleIndices: shapedRuntime.displayMesh.indices,
-      measurements: options.measurements,
-      modes: modes.modes,
-    });
-    diagnostics.push(...chestShoulder.diagnostics);
-    represented.push(...chestShoulder.representedMeasurements);
-    limited.push(...chestShoulder.limitedMeasurements);
+    diagnostics.push(...torso.ribcageDiagnostics, ...torso.chestShoulderDiagnostics);
+    represented.push(
+      ...torso.ribcageRepresentedMeasurements,
+      ...torso.chestShoulderRepresentedMeasurements,
+    );
+    limited.push(...torso.chestShoulderLimitedMeasurements);
     if (
-      chestShoulder.representedMeasurements.length > 0 ||
-      chestShoulder.limitedMeasurements.length > 0
+      torso.ribcageRepresentedMeasurements.length > 0 ||
+      torso.chestShoulderRepresentedMeasurements.length > 0 ||
+      torso.chestShoulderLimitedMeasurements.length > 0
     ) {
-      shapedRuntime = withDisplayPositions(shapedRuntime, chestShoulder.positionsM);
+      shapedRuntime = withDisplayPositions(shapedRuntime, torso.positionsM);
     }
   } catch (reason: unknown) {
+    if (reason instanceof Error && reason.name === 'AbortError') throw reason;
     diagnostics.push(
       `chest-shoulder-runtime-unavailable:${reason instanceof Error ? reason.message : String(reason)}`,
     );
@@ -259,6 +268,7 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: 
       basis: options.basis,
       measurements: options.measurements,
       waistHipRuntime: shapedRuntime,
+      signal: options.signal,
     });
     limbStatus = limb.status;
     represented.push(
@@ -307,6 +317,7 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: 
       shapedRuntime = withDisplayPositions(shapedRuntime, limb.displayMesh.positions);
     }
   } catch (reason: unknown) {
+    if (reason instanceof Error && reason.name === 'AbortError') throw reason;
     limbStatus = 'error';
     diagnostics.push(
       `limb-runtime-unavailable:${reason instanceof Error ? reason.message : String(reason)}`,
@@ -318,21 +329,23 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: 
       (options.loadLengthPack ?? loadMakeHuman2PoseCompatibleLengthPackV1)(),
       (options.loadPoseResources ?? loadBetaShapePoseResourcesV1)(),
     ]);
-    const armLength = (
-      options.createArmLengthRuntime ?? createMakeHuman2ArmLengthProxyRuntimeResearchV1
-    )({
-      basis: options.basis,
-      rigBundle: poseResources.rig,
-      pack: lengthPack,
-      armLengthMm: options.measurements.armLengthMm,
-      heightMm: options.measurements.heightMm,
-    });
-    if (armLength.ok) {
-      const positionsM = applyMakeHuman2ArmLengthProxyToDisplayPositionsMResearchV1({
+    const armLength = measuredBetaShapeStageV1('compile-arm-length', () =>
+      (options.createArmLengthRuntime ?? createMakeHuman2ArmLengthProxyRuntimeResearchV1)({
         basis: options.basis,
-        sourcePositionsM: shapedRuntime.displayMesh.positions,
-        armProxy: armLength,
-      });
+        rigBundle: poseResources.rig,
+        pack: lengthPack,
+        armLengthMm: options.measurements.armLengthMm,
+        heightMm: options.measurements.heightMm,
+      }),
+    );
+    if (armLength.ok) {
+      const positionsM = measuredBetaShapeStageV1('apply-arm-length', () =>
+        applyMakeHuman2ArmLengthProxyToDisplayPositionsMResearchV1({
+          basis: options.basis,
+          sourcePositionsM: shapedRuntime.displayMesh.positions,
+          armProxy: armLength,
+        }),
+      );
       limited.push('armLengthMm');
       diagnostics.push(
         armLength.targetStatus === 'bounded-endpoint'
@@ -349,6 +362,7 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: 
       diagnostics.push(`armLengthMm:centerline-proxy-unavailable:${armLength.code}`);
     }
   } catch (reason: unknown) {
+    if (reason instanceof Error && reason.name === 'AbortError') throw reason;
     diagnostics.push(
       `arm-length-runtime-unavailable:${reason instanceof Error ? reason.message : String(reason)}`,
     );

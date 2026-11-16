@@ -37,10 +37,12 @@ const unitFiles = Object.freeze([
   'src/lib/cloth/body/makehuman-arm-body-part-ik-v1.test.ts',
   'src/lib/cloth/body/makehuman-clo-like-pose-display-v3.test.ts',
   'src/lib/cloth/body/makehuman-live-pose-admissibility-v1.test.ts',
+  'src/lib/cloth/body/makehuman-arm-side-seam-assist-worker-v1.test.ts',
   'src/lib/cloth/body/makehuman-third-party-asset-manifest-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-card-detail-shape-parity-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-display-quality-gate-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-display-quality-worker-v1.test.ts',
+  'src/lib/cloth/body/measurement-open-reference-beta-torso-worker-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-limb-subset-runtime-loader-v1.test.ts',
   'src/lib/cloth/body/measurement-protocol-v1.test.ts',
 ]);
