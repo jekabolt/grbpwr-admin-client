@@ -21,7 +21,9 @@ test('mobile guided measurements keep mannequin, field and navigation in one vie
     'data-guide-measurement',
     'BODY_MEASUREMENT_NAME_CHEST',
   );
-  await expect(page.getByTestId('static-measurement-marker')).toBeVisible();
+  await expect(page.getByTestId('static-measurement-image')).toBeVisible();
+  await expect(staticGuide).toHaveAttribute('data-guide-render', 'baked-image-v2');
+  await expect(staticGuide.locator('svg')).toHaveCount(0);
   await expect(page.getByTestId('measurement-watertight-surface-v1-canvas')).toHaveCount(0);
   await expect(page.getByTestId('model-open-reference-direct-pose-control-v9')).toHaveCount(0);
 
@@ -85,7 +87,7 @@ test('mobile guided measurements keep mannequin, field and navigation in one vie
     'data-guide-measurement',
     'BODY_MEASUREMENT_NAME_INSEAM',
   );
-  await expect(page.getByTestId('static-measurement-marker')).toBeVisible();
+  await expect(page.getByTestId('static-measurement-image')).toBeVisible();
 
   await page.getByRole('radio', { name: 'table', exact: true }).click();
   await page.getByRole('textbox', { name: 'chest depth', exact: true }).focus();

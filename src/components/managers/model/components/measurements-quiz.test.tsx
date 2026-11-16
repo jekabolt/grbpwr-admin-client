@@ -47,12 +47,14 @@ describe('guided model measurements', () => {
     expect(preferredMeasurementEntryModeV1(undefined)).toBe('table');
   });
 
-  it('renders one real RHF measurement field with a static marker and progress', () => {
+  it('renders one real RHF measurement field with a baked guide image and progress', () => {
     const html = renderToStaticMarkup(<Harness />);
 
     expect(html).toContain('data-testid="measurements-guided-entry"');
     expect(html).toContain('data-testid="static-measurement-guide"');
-    expect(html).toContain('data-testid="static-measurement-marker"');
+    expect(html).toContain('data-testid="static-measurement-image"');
+    expect(html).toContain('data-guide-render="baked-image-v2"');
+    expect(html).not.toContain('<svg');
     expect(html).toContain('data-guide-gender="neutral"');
     expect(html).toContain('aria-label="measurement entry view"');
     expect(html).toContain('aria-checked="true"');
