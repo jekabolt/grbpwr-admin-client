@@ -70,7 +70,11 @@ import type {
 } from './cad-command-draft-authoring-handoff-v1';
 import { confirmPatternImportDxfPhaseECadSemanticFreshReimportV1 } from './cad-command-semantic-reimport-session-owner-v1';
 import { PatternImportDxfPhaseECadWorkbenchSplitShellV1 } from './cad-workbench-split-shell-v1';
-import { PatternImportDxfPhaseECad2dToolContextSwitchV1 } from './cad-2d-tool-context-switch-v1';
+import {
+  PatternImportDxfPhaseECad2dToolContextSwitchV1,
+  resolvePatternImportDxfPhaseECad2dAvailableToolContextV1,
+  type PatternImportDxfPhaseECad2dToolContextV1,
+} from './cad-2d-tool-context-switch-v1';
 import {
   PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_PRODUCTION_SCENE_OVERLAY_BLOCKED_V1,
   PatternImportDxfPhaseECadMannequinModelPickerV1,
@@ -1424,9 +1428,17 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
   const [activeSeamIndex, setActiveSeamIndex] = useState<0 | 1>(0);
   const [exactNActiveSeamIndex, setExactNActiveSeamIndex] = useState(0);
   const [activePieceIndex, setActivePieceIndex] = useState<0 | 1>(0);
-  const [desktopMode, setDesktopMode] = useState<'assembly' | 'pattern'>('assembly');
+  const [desktopMode, setDesktopMode] =
+    useState<PatternImportDxfPhaseECad2dToolContextV1>('assembly');
   const [draftCadSession, setDraftCadSession] =
     useState<PatternImportDxfPhaseEDraftCadSessionV1 | null>(null);
+  const effectiveDesktopMode = resolvePatternImportDxfPhaseECad2dAvailableToolContextV1(
+    desktopMode,
+    draftCadSession !== null,
+  );
+  useEffect(() => {
+    if (desktopMode !== effectiveDesktopMode) setDesktopMode(effectiveDesktopMode);
+  }, [desktopMode, effectiveDesktopMode]);
   const draftCadSessionRef = useRef(draftCadSession);
   draftCadSessionRef.current = draftCadSession;
   const [materialScopePreparation, setMaterialScopePreparation] =
@@ -2129,7 +2141,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
     };
   const workspaceContextControl = draftCadSession ? (
     <PatternImportDxfPhaseECad2dToolContextSwitchV1
-      context={desktopMode}
+      context={effectiveDesktopMode}
       patternAvailable
       onContextChange={setDesktopMode}
     />
@@ -2151,7 +2163,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
         <Text component='p' size='micro' className='font-bold'>
           {exactNSession
             ? 'Assembly geometry'
-            : desktopMode === 'assembly'
+            : effectiveDesktopMode === 'assembly'
               ? 'Sew & assemble'
               : 'Edit patterns'}
         </Text>
@@ -2396,7 +2408,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                 ) : null}
 
                 <div className='min-h-0 flex-1 overflow-auto'>
-                  {desktopMode === 'assembly' ? (
+                  {effectiveDesktopMode === 'assembly' ? (
                     <Suspense fallback={<Text component='p'>Loading the 2D desktop…</Text>}>
                       <LazyPatternImportDxfProductPhaseEMultiseamWorkbenchV2
                         catalog={prepared.catalog}

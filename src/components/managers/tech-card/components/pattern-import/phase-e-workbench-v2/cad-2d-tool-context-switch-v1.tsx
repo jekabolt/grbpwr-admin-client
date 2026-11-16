@@ -8,7 +8,15 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_2D_TOOL_CONTEXT_SWITCH_CONTRACT_V1 =
   assemblyIsDefaultWorkspace: true,
   patternEditingIsToolContext: true,
   unavailablePatternContextHidden: true,
+  unavailablePatternContextFallsBackToAssembly: true,
 } as const);
+
+export function resolvePatternImportDxfPhaseECad2dAvailableToolContextV1(
+  context: PatternImportDxfPhaseECad2dToolContextV1,
+  patternAvailable: boolean,
+): PatternImportDxfPhaseECad2dToolContextV1 {
+  return patternAvailable ? context : 'assembly';
+}
 
 export function resolvePatternImportDxfPhaseECad2dToolContextToggleV1(
   context: PatternImportDxfPhaseECad2dToolContextV1,
