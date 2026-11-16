@@ -195,6 +195,7 @@
     "test:assembly-table:ao-browser": "node scripts/assembly-table-ao-browser-smoke.mjs",
     "test:assembly-table:mannequin-browser": "node scripts/assembly-table-mannequin-browser-smoke.mjs",
     "test:assembly-table:material-scopes": "node scripts/assembly-table-material-scope-browser-smoke.mjs",
+    "test:assembly-table:browser:all": "yarn test:assembly-table:browser && yarn test:assembly-table:ao-browser && yarn test:assembly-table:mannequin-browser && yarn test:assembly-table:material-scopes",
     "pretest": "vite build",
     "test": "vitest run scripts/probes.test.ts --maxWorkers=1"
   },
