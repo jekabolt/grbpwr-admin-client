@@ -69,6 +69,9 @@ export const MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_KEYS_V1 = Object.freeze([
   'underBustCircumferenceMm',
   'waistCircumferenceMm',
   'hipCircumferenceMm',
+  'chestDepthMm',
+  'waistDepthMm',
+  'hipDepthMm',
   'armLengthMm',
   'bicepCircumferenceMm',
   'wristCircumferenceMm',
@@ -97,8 +100,10 @@ export interface MeasurementOpenReferenceBetaShapeRuntimeResultV1 {
     readonly visualReferenceOnly: true;
     readonly geometricProxyOnly: true;
     readonly exactHeightOnly: true;
-    readonly anteriorChestPosteriorHeldFixed: true;
+    readonly chestCircumferencePosteriorHeldFixed: true;
     readonly underBustIndependentRibcageBand: true;
+    readonly torsoDepthSymmetricSectionProxyOnly: true;
+    readonly torsoDepthFrontBackDistributionCalibrated: false;
     readonly armLengthCenterlineProxyOnly: true;
     readonly sleeveLengthRepresented: false;
     readonly inseamRepresented: false;
@@ -136,8 +141,10 @@ const CLAIMS = Object.freeze({
   visualReferenceOnly: true as const,
   geometricProxyOnly: true as const,
   exactHeightOnly: true as const,
-  anteriorChestPosteriorHeldFixed: true as const,
+  chestCircumferencePosteriorHeldFixed: true as const,
   underBustIndependentRibcageBand: true as const,
+  torsoDepthSymmetricSectionProxyOnly: true as const,
+  torsoDepthFrontBackDistributionCalibrated: false as const,
   armLengthCenterlineProxyOnly: true as const,
   sleeveLengthRepresented: false as const,
   inseamRepresented: false as const,
@@ -240,16 +247,23 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: 
       loadTorsoBundle: options.loadTorsoBundle,
       signal: options.signal,
     });
-    diagnostics.push(...torso.ribcageDiagnostics, ...torso.chestShoulderDiagnostics);
+    diagnostics.push(
+      ...torso.ribcageDiagnostics,
+      ...torso.chestShoulderDiagnostics,
+      ...torso.depthDiagnostics.map(({ measurementKey, code }) => `${measurementKey}:${code}`),
+    );
     represented.push(
       ...torso.ribcageRepresentedMeasurements,
       ...torso.chestShoulderRepresentedMeasurements,
+      ...torso.depthRepresentedMeasurements,
     );
-    limited.push(...torso.chestShoulderLimitedMeasurements);
+    limited.push(...torso.chestShoulderLimitedMeasurements, ...torso.depthLimitedMeasurements);
     if (
       torso.ribcageRepresentedMeasurements.length > 0 ||
       torso.chestShoulderRepresentedMeasurements.length > 0 ||
-      torso.chestShoulderLimitedMeasurements.length > 0
+      torso.chestShoulderLimitedMeasurements.length > 0 ||
+      torso.depthRepresentedMeasurements.length > 0 ||
+      torso.depthLimitedMeasurements.length > 0
     ) {
       shapedRuntime = withDisplayPositions(shapedRuntime, torso.positionsM);
     }
@@ -449,6 +463,9 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: 
     6 +
     (options.measurements.underBustCircumferenceMm == null ? 0 : 1) +
     [
+      options.measurements.chestDepthMm,
+      options.measurements.waistDepthMm,
+      options.measurements.hipDepthMm,
       options.measurements.bicepCircumferenceMm,
       options.measurements.wristCircumferenceMm,
       options.measurements.thighCircumferenceMm,

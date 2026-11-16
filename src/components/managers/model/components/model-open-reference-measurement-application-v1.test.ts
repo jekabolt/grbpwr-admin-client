@@ -246,4 +246,36 @@ describe('model open-reference measurement application v1', () => {
       'not modeled: thigh circumference',
     );
   });
+
+  it('reports torso-depth controls as applied, bounded or not applied from typed runtime state', () => {
+    const result = modelOpenReferenceMeasurementApplicationV1({
+      measurements: {
+        ...measurements,
+        chestDepthMm: 205,
+        waistDepthMm: 500,
+        hipDepthMm: 225,
+      },
+      rawMeasurements: {},
+      beta: {
+        representedVisualControls: [
+          'heightMm',
+          'shoulderBreadthMm',
+          'chestCircumferenceMm',
+          'waistCircumferenceMm',
+          'hipCircumferenceMm',
+          'chestDepthMm',
+        ],
+        limitedVisualControls: ['waistDepthMm', 'armLengthMm'],
+        chestShoulderDiagnostics: ['waistDepthMm:target-limited'],
+        fkProxyRuntime: { diagnostics: [] },
+      },
+    });
+
+    expect(result.applied).toContain('chestDepthMm');
+    expect(result.limitedBySafeRange).toContain('waistDepthMm');
+    expect(result.notApplied).toContain('hipDepthMm');
+    expect(result.unsupported).not.toEqual(
+      expect.arrayContaining(['chest depth', 'waist depth', 'hip depth']),
+    );
+  });
 });

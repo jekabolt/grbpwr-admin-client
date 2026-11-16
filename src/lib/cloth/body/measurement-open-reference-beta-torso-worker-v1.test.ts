@@ -1,13 +1,27 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import process from 'node:process';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { parseMakeHumanTorsoShapeDeltaBundleV1 } from './makehuman-torso-shape-delta-bundle-v1';
+import { createMakeHumanUniformWaistHipModesV1 } from './makehuman-uniform-waist-hip-modes-v1';
 import type { CanonicalBodyMeasurementsMm } from './measurement-adapter';
+import { CANONICAL_MEASUREMENT_SIZE_RECORDS } from './measurement-body-synthetic-corpus';
 import type {
   MeasurementOpenReferenceBetaTorsoWorkerRequestV1,
   MeasurementOpenReferenceBetaTorsoWorkerResponseV1,
   MeasurementOpenReferenceBetaTorsoWorkerResultV1,
 } from './measurement-open-reference-beta-torso-worker-protocol-v1';
-import { createMeasurementOpenReferenceBetaTorsoInWorkerV1 } from './measurement-open-reference-beta-torso-worker-v1';
-import type { MakeHumanOpenReferenceBasisV1 } from './measurement-open-reference-display-v1';
+import {
+  createMeasurementOpenReferenceBetaTorsoInWorkerV1,
+  solveMeasurementOpenReferenceBetaTorsoV1,
+} from './measurement-open-reference-beta-torso-worker-v1';
+import {
+  MAKEHUMAN_OPEN_REFERENCE_BASIS_METADATA_V1,
+  parseMakeHumanOpenReferenceBasisV1,
+  type MakeHumanOpenReferenceBasisV1,
+} from './measurement-open-reference-display-v1';
 
 class FakeWorker {
   readonly posted: Array<{
@@ -66,6 +80,10 @@ describe('measurement open-reference beta torso worker v1', () => {
       chestShoulderRepresentedMeasurements: Object.freeze(['chestCircumferenceMm' as const]),
       chestShoulderLimitedMeasurements: Object.freeze([]),
       chestShoulderDiagnostics: Object.freeze([]),
+      depthRepresentedMeasurements: Object.freeze([]),
+      depthLimitedMeasurements: Object.freeze([]),
+      depthModeResults: Object.freeze([]),
+      depthDiagnostics: Object.freeze([]),
     });
     worker.say({ id: 1, type: 'result', value: result, durationMs: 12 });
 
@@ -93,4 +111,49 @@ describe('measurement open-reference beta torso worker v1', () => {
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
     expect(worker.terminated).toBe(true);
   });
+
+  it('keeps the module-worker pipeline byte-identical to the synchronous fallback', async () => {
+    const realBasis = parseMakeHumanOpenReferenceBasisV1(
+      readFileSync(
+        resolve(process.cwd(), MAKEHUMAN_OPEN_REFERENCE_BASIS_METADATA_V1.neutral.assetPath),
+      ),
+      'neutral',
+    );
+    const torsoBundle = parseMakeHumanTorsoShapeDeltaBundleV1(
+      readFileSync(
+        resolve(process.cwd(), 'src/assets/cloth/makehuman-hm08-torso-shape-deltas-v1.bin'),
+      ),
+    );
+    const realMeasurements = Object.freeze({
+      ...CANONICAL_MEASUREMENT_SIZE_RECORDS[1].measurements,
+      chestDepthMm: 205,
+      waistDepthMm: 195,
+      hipDepthMm: 225,
+    });
+    const sourcePositionsM = createMakeHumanUniformWaistHipModesV1({
+      basis: realBasis,
+      heightMm: realMeasurements.heightMm,
+      bundle: torsoBundle,
+    }).uniformPositionsM;
+    const direct = solveMeasurementOpenReferenceBetaTorsoV1({
+      basis: realBasis,
+      sourcePositionsM,
+      triangleIndices: realBasis.indices,
+      measurements: realMeasurements,
+      torsoBundle,
+    });
+    const fallback = await createMeasurementOpenReferenceBetaTorsoInWorkerV1({
+      basis: realBasis,
+      sourcePositionsM,
+      triangleIndices: realBasis.indices,
+      measurements: realMeasurements,
+      loadTorsoBundle: async () => torsoBundle,
+    });
+
+    expect(fallback.positionsM).toEqual(direct.positionsM);
+    expect(fallback.depthRepresentedMeasurements).toEqual(direct.depthRepresentedMeasurements);
+    expect(fallback.depthLimitedMeasurements).toEqual(direct.depthLimitedMeasurements);
+    expect(fallback.depthModeResults).toEqual(direct.depthModeResults);
+    expect(fallback.depthDiagnostics).toEqual(direct.depthDiagnostics);
+  }, 30_000);
 });
