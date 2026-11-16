@@ -61,6 +61,12 @@ export function solveMeasurementOpenReferenceBetaTorsoV1(options: {
     measurements: options.measurements,
     modes: modes.modes,
   });
+  const chestMode = modes.modes.find(
+    ({ measurementKey }) => measurementKey === 'chestCircumferenceMm',
+  );
+  if (!chestMode?.chestStationOriginM) {
+    throw new Error('Chest section station is missing.');
+  }
   const depthRequested = [
     options.measurements.chestDepthMm,
     options.measurements.waistDepthMm,
@@ -69,6 +75,8 @@ export function solveMeasurementOpenReferenceBetaTorsoV1(options: {
   if (!depthRequested) {
     return Object.freeze({
       positionsM: chestShoulder.positionsM,
+      chestStationOriginM: chestMode.chestStationOriginM,
+      underBustStationOriginM: modes.underBustStationOriginM,
       ribcageRepresentedMeasurements: ribcage.representedMeasurements,
       ribcageDiagnostics: Object.freeze([...modes.diagnostics, ...ribcage.diagnostics]),
       chestShoulderRepresentedMeasurements: chestShoulder.representedMeasurements,
@@ -85,9 +93,6 @@ export function solveMeasurementOpenReferenceBetaTorsoV1(options: {
     heightMm: options.measurements.heightMm,
     bundle: torsoBundle,
   });
-  const chestMode = modes.modes.find(
-    ({ measurementKey }) => measurementKey === 'chestCircumferenceMm',
-  );
   const shoulderMode = modes.modes.find(
     ({ measurementKey }) => measurementKey === 'shoulderBreadthMm',
   );
@@ -97,12 +102,7 @@ export function solveMeasurementOpenReferenceBetaTorsoV1(options: {
   const hipMode = waistHipModes.modes.find(
     ({ measurementKey }) => measurementKey === 'hipCircumferenceMm',
   );
-  if (
-    !chestMode?.chestStationOriginM ||
-    !shoulderMode?.shoulderVertices ||
-    !waistMode ||
-    !hipMode
-  ) {
+  if (!shoulderMode?.shoulderVertices || !waistMode || !hipMode) {
     throw new Error('Torso depth proxy stations are incomplete.');
   }
   const depth = (options.solveDepthProxy ?? solveMeasurementOpenReferenceTorsoDepthProxyV1)({

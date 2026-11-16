@@ -151,6 +151,10 @@ describe('measurement open-reference beta torso worker v1', () => {
     });
 
     expect(fallback.positionsM).toEqual(direct.positionsM);
+    expect(direct.chestStationOriginM).toBeDefined();
+    expect(direct.underBustStationOriginM).toBeDefined();
+    expect(fallback.chestStationOriginM).toEqual(direct.chestStationOriginM);
+    expect(fallback.underBustStationOriginM).toEqual(direct.underBustStationOriginM);
     expect(fallback.depthRepresentedMeasurements).toEqual(direct.depthRepresentedMeasurements);
     expect(fallback.depthLimitedMeasurements).toEqual(direct.depthLimitedMeasurements);
     expect(fallback.depthModeResults).toEqual(direct.depthModeResults);
@@ -177,5 +181,7 @@ describe('measurement open-reference beta torso worker v1', () => {
     expect(noDepth.depthLimitedMeasurements).toEqual([]);
     expect(noDepth.depthModeResults).toEqual([]);
     expect(noDepth.depthDiagnostics).toEqual([]);
+    expect(noDepth.chestStationOriginM).toEqual(direct.chestStationOriginM);
+    expect(noDepth.underBustStationOriginM).toEqual(direct.underBustStationOriginM);
   }, 30_000);
 });
