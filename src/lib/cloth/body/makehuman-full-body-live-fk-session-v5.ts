@@ -1,8 +1,12 @@
 import type { MakeHumanCoreRigBasisKindV1 } from './makehuman-core-rig-pose-research-v1';
-import {
-  createMakeHumanArmSideSeamAssistV1,
-  type MakeHumanArmSideSeamAssistResultV1,
+import type {
+  MakeHumanArmSideSeamAssistOutcomeV1,
+  MakeHumanArmSideSeamAssistResultV1,
 } from './makehuman-arm-side-seam-assist-v1';
+import {
+  availableMakeHumanArmSideSeamAssistsV1,
+  createMakeHumanArmSideSeamAssistsInWorkerV1,
+} from './makehuman-arm-side-seam-assist-worker-v1';
 import { deriveMakeHumanElbowBindNeutralizationV1 } from './makehuman-elbow-bind-neutralization-v1';
 import {
   createNeutralMakeHumanFullBodyLocalFkPoseV4,
@@ -31,6 +35,28 @@ import type { MeasurementOpenReferenceUniformWaistHipRuntimeResultV1 } from './m
 
 export const MAKEHUMAN_FULL_BODY_LIVE_FK_SESSION_V5 =
   'makehuman-full-body-live-fk-session/v5' as const;
+export const MAKEHUMAN_FULL_BODY_LIVE_FK_SESSION_STAGE_MEASURE_V5 =
+  'makehuman-full-body-live-fk-session-stage/v5' as const;
+
+function measuredLiveSessionStageV5<T>(stage: string, operation: () => T): T {
+  const clock = globalThis.performance;
+  const startedAt = clock?.now();
+  try {
+    return operation();
+  } finally {
+    if (clock && startedAt != null && typeof clock.measure === 'function') {
+      try {
+        clock.measure(MAKEHUMAN_FULL_BODY_LIVE_FK_SESSION_STAGE_MEASURE_V5, {
+          start: startedAt,
+          end: clock.now(),
+          detail: Object.freeze({ stage }),
+        });
+      } catch {
+        // Performance diagnostics must never affect session admission.
+      }
+    }
+  }
+}
 
 export interface MakeHumanFullBodyLiveFkFrameV5 {
   readonly pose: MakeHumanFullBodyLocalFkPoseV4;
@@ -52,8 +78,12 @@ export interface MakeHumanFullBodyLiveFkSessionV5 {
   }>;
   readonly neutralJointOverlay: readonly MakeHumanPosedLocalBoneOverlayV4[];
   readonly sideSeamAssists: Readonly<{
-    left: MakeHumanArmSideSeamAssistResultV1;
-    right: MakeHumanArmSideSeamAssistResultV1;
+    left: MakeHumanArmSideSeamAssistResultV1 | null;
+    right: MakeHumanArmSideSeamAssistResultV1 | null;
+  }>;
+  readonly sideSeamAssistOutcomes: Readonly<{
+    left: MakeHumanArmSideSeamAssistOutcomeV1;
+    right: MakeHumanArmSideSeamAssistOutcomeV1;
   }>;
   readonly solve: (pose: unknown) => MakeHumanFullBodyLiveFkFrameV5;
   readonly claims: typeof CLAIMS;
@@ -119,29 +149,35 @@ export async function createMakeHumanFullBodyLiveFkSessionV5(options: {
   readonly measurements: CanonicalBodyMeasurementsMm;
   readonly proxyRuntime: MeasurementOpenReferenceUniformWaistHipRuntimeResultV1;
   readonly sourceRevision: string;
+  readonly signal?: AbortSignal;
   readonly loadResources?: () => Promise<MeasurementOpenReferenceDisplayPoseResourcesV1>;
+  readonly createSideSeamAssists?: typeof createMakeHumanArmSideSeamAssistsInWorkerV1;
 }): Promise<MakeHumanFullBodyLiveFkSessionV5> {
   const resources = await (options.loadResources ?? loadAuthenticatedResourcesV5)();
-  validateBinding({ ...options, resources });
-  const sourceMesh = snapshotMeasurementSurfaceMeshV1(options.proxyRuntime.displayMesh);
-  const anchors = deriveMakeHumanUniformWaistHipRigAnchorsMResearchV1({
-    rigBundle: resources.rig,
-    anchorDeltaBundle: resources.anchors,
-    basisKind: options.basis.kind,
-    sourceMinimumY: options.basis.sourceMinimumY,
-    sourceMaximumY: options.basis.sourceMaximumY,
-    heightMm: options.measurements.heightMm,
-    modeResults: Object.freeze(
-      options.proxyRuntime.modeResults.map((result) => Object.freeze({ ...result })),
-    ),
+  const sourceMesh = measuredLiveSessionStageV5('validate-and-snapshot', () => {
+    validateBinding({ ...options, resources });
+    return snapshotMeasurementSurfaceMeshV1(options.proxyRuntime.displayMesh);
   });
-  const coherentAnchors = applyMakeHuman2ArmLengthProxyToRigAnchorsMResearchV1({
-    armProxy: options.proxyRuntime.poseCompatibleArmLengthProxy,
-    rigBundle: resources.rig,
-    basisKind: options.basis.kind,
-    headsM: anchors.headsM,
-    tailsM: anchors.tailsM,
-    rollDirections: anchors.rollDirections,
+  const coherentAnchors = measuredLiveSessionStageV5('derive-anchors', () => {
+    const anchors = deriveMakeHumanUniformWaistHipRigAnchorsMResearchV1({
+      rigBundle: resources.rig,
+      anchorDeltaBundle: resources.anchors,
+      basisKind: options.basis.kind,
+      sourceMinimumY: options.basis.sourceMinimumY,
+      sourceMaximumY: options.basis.sourceMaximumY,
+      heightMm: options.measurements.heightMm,
+      modeResults: Object.freeze(
+        options.proxyRuntime.modeResults.map((result) => Object.freeze({ ...result })),
+      ),
+    });
+    return applyMakeHuman2ArmLengthProxyToRigAnchorsMResearchV1({
+      armProxy: options.proxyRuntime.poseCompatibleArmLengthProxy,
+      rigBundle: resources.rig,
+      basisKind: options.basis.kind,
+      headsM: anchors.headsM,
+      tailsM: anchors.tailsM,
+      rollDirections: anchors.rollDirections,
+    });
   });
   const elbowNeutralization = deriveMakeHumanElbowBindNeutralizationV1({
     bundle: resources.rig,
@@ -152,50 +188,35 @@ export async function createMakeHumanFullBodyLiveFkSessionV5(options: {
     rigSha256: MEASUREMENT_OPEN_REFERENCE_DISPLAY_POSE_RUNTIME_METADATA_V1.rigSha256,
   });
   const sourceRevision = boundRevision(options.sourceRevision);
-  const sideSeamAssists = Object.freeze({
-    left: createMakeHumanArmSideSeamAssistV1({
-      bundle: resources.rig,
-      basisKind: options.basis.kind,
-      heads: coherentAnchors.headsM,
-      tails: coherentAnchors.tailsM,
-      rollDirections: coherentAnchors.rollDirections,
-      side: 'left',
-      elbowNeutralization,
-      minimumOuterHipClearanceRatio: options.proxyRuntime.poseCompatibleArmLengthProxy
-        ? 0.1
-        : undefined,
-      maximumVerticalErrorRatio: options.proxyRuntime.poseCompatibleArmLengthProxy
-        ? 0.25
-        : undefined,
-    }),
-    right: createMakeHumanArmSideSeamAssistV1({
-      bundle: resources.rig,
-      basisKind: options.basis.kind,
-      heads: coherentAnchors.headsM,
-      tails: coherentAnchors.tailsM,
-      rollDirections: coherentAnchors.rollDirections,
-      side: 'right',
-      elbowNeutralization,
-      minimumOuterHipClearanceRatio: options.proxyRuntime.poseCompatibleArmLengthProxy
-        ? 0.1
-        : undefined,
-      maximumVerticalErrorRatio: options.proxyRuntime.poseCompatibleArmLengthProxy
-        ? 0.25
-        : undefined,
-    }),
-  });
-  const neutralOverlay = poseMakeHumanCoreRigDisplayOverlayLocalResearchV4({
+  const sideSeamAssistOutcomes = await (
+    options.createSideSeamAssists ?? createMakeHumanArmSideSeamAssistsInWorkerV1
+  )({
     bundle: resources.rig,
     basisKind: options.basis.kind,
     heads: coherentAnchors.headsM,
     tails: coherentAnchors.tailsM,
     rollDirections: coherentAnchors.rollDirections,
-    rotations: makeHumanFullBodyLocalFkRotationsV4(
-      createNeutralMakeHumanFullBodyLocalFkPoseV4(),
-      options.basis.kind,
-      elbowNeutralization,
-    ),
+    minimumOuterHipClearanceRatio: options.proxyRuntime.poseCompatibleArmLengthProxy
+      ? 0.1
+      : undefined,
+    maximumVerticalErrorRatio: options.proxyRuntime.poseCompatibleArmLengthProxy ? 0.25 : undefined,
+    signal: options.signal,
   });
+  const sideSeamAssists = availableMakeHumanArmSideSeamAssistsV1(sideSeamAssistOutcomes);
+  const neutralOverlay = measuredLiveSessionStageV5('neutral-overlay', () =>
+    poseMakeHumanCoreRigDisplayOverlayLocalResearchV4({
+      bundle: resources.rig,
+      basisKind: options.basis.kind,
+      heads: coherentAnchors.headsM,
+      tails: coherentAnchors.tailsM,
+      rollDirections: coherentAnchors.rollDirections,
+      rotations: makeHumanFullBodyLocalFkRotationsV4(
+        createNeutralMakeHumanFullBodyLocalFkPoseV4(),
+        options.basis.kind,
+        elbowNeutralization,
+      ),
+    }),
+  );
   const neutralFeet = neutralOverlay.bones.filter(
     ({ bone }) => bone === 'foot.L' || bone === 'foot.R',
   );
@@ -258,6 +279,7 @@ export async function createMakeHumanFullBodyLiveFkSessionV5(options: {
     baselineAnklesM,
     neutralJointOverlay: neutralOverlay.bones,
     sideSeamAssists,
+    sideSeamAssistOutcomes,
     solve,
     claims: CLAIMS,
   });

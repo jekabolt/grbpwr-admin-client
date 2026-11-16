@@ -107,6 +107,7 @@ import {
   type MeasurementSurfaceMeshV1,
   type MeasurementWatertightSurfaceArtifactV1,
 } from 'lib/cloth/body/measurement-watertight-surface-v1';
+import { createMeasurementWatertightSurfaceInWorkerV1 } from 'lib/cloth/body/measurement-watertight-surface-worker-v1';
 import {
   lazy,
   Suspense,
@@ -242,6 +243,27 @@ interface FullBodyBuiltPreviewV3 {
   readonly bodyBuildFingerprint: string;
 }
 
+export interface ModelOpenReferenceSideSeamCapabilityV12 {
+  readonly unavailableSides: readonly MakeHumanArmBodyPartIkSideV1[];
+  readonly message: string;
+}
+
+export function modelOpenReferenceSideSeamCapabilityV12(
+  session: MakeHumanFullBodyLiveFkSessionV4 | MakeHumanFullBodyLiveFkSessionV5 | null,
+): ModelOpenReferenceSideSeamCapabilityV12 | null {
+  if (!session || session.version !== 'makehuman-full-body-live-fk-session/v5') return null;
+  const unavailableSides = (['left', 'right'] as const).filter(
+    (side) => session.sideSeamAssistOutcomes[side].status === 'unavailable',
+  );
+  if (unavailableSides.length === 0) return null;
+  const subject =
+    unavailableSides.length === 2 ? 'the left and right arms' : `the ${unavailableSides[0]} arm`;
+  return Object.freeze({
+    unavailableSides: Object.freeze(unavailableSides),
+    message: `Side-seam snap is unavailable for ${subject}; free anatomical drag remains available.`,
+  });
+}
+
 export type ModelOpenReferenceBodyDisplayOwnershipV11 =
   | 'empty'
   | 'current'
@@ -251,6 +273,48 @@ export type ModelOpenReferenceBodyDisplayOwnershipV11 =
   | 'retained-error';
 
 export const MODEL_OPEN_REFERENCE_MEASUREMENT_BUILD_DEBOUNCE_MS_V12 = 120;
+export const MODEL_OPEN_REFERENCE_BUILD_STAGE_MEASURE_V12 =
+  'model-open-reference-build-stage/v12' as const;
+
+function measureBuildStageV12<T>(stage: string, operation: () => T): T {
+  const clock = globalThis.performance;
+  const startedAt = clock?.now();
+  try {
+    return operation();
+  } finally {
+    if (clock && startedAt != null && typeof clock.measure === 'function') {
+      try {
+        clock.measure(MODEL_OPEN_REFERENCE_BUILD_STAGE_MEASURE_V12, {
+          start: startedAt,
+          end: clock.now(),
+          detail: Object.freeze({ stage }),
+        });
+      } catch {
+        // Performance diagnostics must never affect the preview build.
+      }
+    }
+  }
+}
+
+async function measureAsyncBuildStageV12<T>(stage: string, operation: () => Promise<T>) {
+  const clock = globalThis.performance;
+  const startedAt = clock?.now();
+  try {
+    return await operation();
+  } finally {
+    if (clock && startedAt != null && typeof clock.measure === 'function') {
+      try {
+        clock.measure(MODEL_OPEN_REFERENCE_BUILD_STAGE_MEASURE_V12, {
+          start: startedAt,
+          end: clock.now(),
+          detail: Object.freeze({ stage }),
+        });
+      } catch {
+        // Performance diagnostics must never affect the preview build.
+      }
+    }
+  }
+}
 
 export function modelOpenReferenceFullBodyBuildDelayV12(options: {
   readonly intent: 'immediate' | 'measurement-change';
@@ -787,6 +851,7 @@ export interface ModelOpenReferencePreviewBuildDependenciesV1 {
   readonly buildFullBodyLocalFkDisplayV4: typeof createMeasurementOpenReferenceFullBodyLocalFkRuntimeV4;
   readonly buildFullBodyJointOverlayV5: typeof createMakeHumanFullBodyJointOverlayRuntimeV5;
   readonly buildFullBodyLiveFkSessionV5: typeof createMakeHumanFullBodyLiveFkSessionV5;
+  readonly buildAnalyticalSurface: typeof createMeasurementWatertightSurfaceInWorkerV1;
   readonly scheduleBuild: (callback: () => void, delayMs?: number) => ReturnType<typeof setTimeout>;
 }
 
@@ -805,6 +870,7 @@ const DEFAULT_BUILD_DEPENDENCIES: ModelOpenReferencePreviewBuildDependenciesV1 =
   buildFullBodyLocalFkDisplayV4: createMeasurementOpenReferenceFullBodyLocalFkRuntimeV4,
   buildFullBodyJointOverlayV5: createMakeHumanFullBodyJointOverlayRuntimeV5,
   buildFullBodyLiveFkSessionV5: createMakeHumanFullBodyLiveFkSessionV5,
+  buildAnalyticalSurface: createMeasurementWatertightSurfaceInWorkerV1,
   scheduleBuild: (callback: () => void, delayMs = 0) => setTimeout(callback, delayMs),
 });
 
@@ -2591,35 +2657,52 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
           try {
             const basis = await resolvedBuildDependencies.loadBasis(requestedBasisKind);
             if (stale()) return;
-            const frame = createMeasurementBodyFrameV2({
-              measurements: requestedMeasurements,
-              sourceRevision,
-              pose: 'A',
+            const { frame, openReference } = measureBuildStageV12('uniform-display', () => {
+              const nextFrame = createMeasurementBodyFrameV2({
+                measurements: requestedMeasurements,
+                sourceRevision,
+                pose: 'A',
+              });
+              return {
+                frame: nextFrame,
+                openReference: resolvedBuildDependencies.createUniformHeightDisplay({
+                  basis,
+                  frame: nextFrame,
+                }),
+              };
             });
-            const openReference = resolvedBuildDependencies.createUniformHeightDisplay({
-              basis,
-              frame,
-            });
-            const proxyRuntime = await resolvedBuildDependencies.buildProxyRuntime({
-              basis,
-              measurements: requestedMeasurements,
-              openReference,
-            });
+            const proxyRuntime = await measureAsyncBuildStageV12('waist-hip-runtime', () =>
+              resolvedBuildDependencies.buildProxyRuntime({
+                basis,
+                measurements: requestedMeasurements,
+                openReference,
+              }),
+            );
             if (stale()) return;
             const betaShapeRuntime =
               editor.version === 'full-body-v9'
-                ? await resolvedBuildDependencies.buildBetaShapeRuntime({
-                    basis,
-                    measurements: requestedMeasurements,
-                    waistHipRuntime: proxyRuntime,
-                    signal: buildAbortController.signal,
-                  })
+                ? await measureAsyncBuildStageV12('beta-shape-runtime', () =>
+                    resolvedBuildDependencies.buildBetaShapeRuntime({
+                      basis,
+                      measurements: requestedMeasurements,
+                      waistHipRuntime: proxyRuntime,
+                      signal: buildAbortController.signal,
+                    }),
+                  )
                 : null;
             if (stale()) return;
             const fkProxyRuntime = betaShapeRuntime?.fkProxyRuntime ?? proxyRuntime;
             const shapedSourceRevision = betaShapeRuntime
               ? `${sourceRevision};${betaShapeRuntime.sourceRevisionSuffix}`
               : sourceRevision;
+            const artifactPromise = measureAsyncBuildStageV12('analytical-surface', () =>
+              resolvedBuildDependencies.buildAnalyticalSurface({
+                measurements: requestedMeasurements,
+                sourceRevision,
+                pose: 'A',
+                signal: buildAbortController.signal,
+              }),
+            );
             const runtimePromise = editor.extendedRuntimeV4
               ? resolvedBuildDependencies.buildFullBodyLocalFkDisplayV4({
                   basis,
@@ -2642,6 +2725,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                     measurements: requestedMeasurements,
                     proxyRuntime: fkProxyRuntime,
                     sourceRevision: shapedSourceRevision,
+                    signal: buildAbortController.signal,
                   })
                 : resolvedBuildDependencies.buildFullBodyLiveFkSession({
                     basis,
@@ -2650,44 +2734,56 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                     sourceRevision: shapedSourceRevision,
                   })
               : Promise.resolve(null);
-            const [runtime, liveFkSession] = await Promise.all([
-              runtimePromise,
-              liveSessionPromise,
-            ]);
+            const [runtime, liveFkSession, unboundArtifact] = await measureAsyncBuildStageV12(
+              'pose-runtime-and-live-session',
+              () => Promise.all([runtimePromise, liveSessionPromise, artifactPromise]),
+            );
             if (stale()) return;
-            const finalFrame = createMeasurementBodyFrameV2({
-              measurements: requestedMeasurements,
-              sourceRevision: runtime.sourceRevision,
-              pose: 'A',
+            const bodyBuilt = measureBuildStageV12('snapshot-built-body', () => {
+              const finalFrame = createMeasurementBodyFrameV2({
+                measurements: requestedMeasurements,
+                sourceRevision: runtime.sourceRevision,
+                pose: 'A',
+              });
+              const artifact = Object.freeze({
+                ...unboundArtifact,
+                sourceRevision: runtime.sourceRevision,
+                frameRevision: finalFrame.revision,
+                provenance: Object.freeze({
+                  ...unboundArtifact.provenance,
+                  sources: Object.freeze([
+                    unboundArtifact.provenance.sources[0],
+                    Object.freeze({
+                      ...unboundArtifact.provenance.sources[1],
+                      sourceRevision: runtime.sourceRevision,
+                    }),
+                  ]) as MeasurementWatertightSurfaceArtifactV1['provenance']['sources'],
+                }),
+              }) satisfies MeasurementWatertightSurfaceArtifactV1;
+              return {
+                artifact,
+                frame: finalFrame,
+                runtime,
+                measurementGuideSourceMesh: snapshotMeasurementSurfaceMeshV1(
+                  fkProxyRuntime.displayMesh,
+                ),
+                waistHipStatus: proxyRuntime.status,
+                representedWaistHipProxies: Object.freeze([
+                  ...proxyRuntime.representedGeometricProxies,
+                ]),
+                jointOverlay: null,
+                jointOverlayError: null,
+                liveFkSession,
+                measurementApplication: betaShapeRuntime
+                  ? modelOpenReferenceMeasurementApplicationV1({
+                      measurements: requestedMeasurements,
+                      rawMeasurements: requestedRawMeasurements,
+                      beta: betaShapeRuntime,
+                    })
+                  : null,
+                bodyBuildFingerprint: requestedBodyBuildFingerprint,
+              } satisfies FullBodyBuiltPreviewV3;
             });
-            const artifact = createMeasurementWatertightSurfaceV1({
-              measurements: requestedMeasurements,
-              sourceRevision: runtime.sourceRevision,
-              pose: 'A',
-            });
-            const bodyBuilt: FullBodyBuiltPreviewV3 = {
-              artifact,
-              frame: finalFrame,
-              runtime,
-              measurementGuideSourceMesh: snapshotMeasurementSurfaceMeshV1(
-                fkProxyRuntime.displayMesh,
-              ),
-              waistHipStatus: proxyRuntime.status,
-              representedWaistHipProxies: Object.freeze([
-                ...proxyRuntime.representedGeometricProxies,
-              ]),
-              jointOverlay: null,
-              jointOverlayError: null,
-              liveFkSession,
-              measurementApplication: betaShapeRuntime
-                ? modelOpenReferenceMeasurementApplicationV1({
-                    measurements: requestedMeasurements,
-                    rawMeasurements: requestedRawMeasurements,
-                    beta: betaShapeRuntime,
-                  })
-                : null,
-              bodyBuildFingerprint: requestedBodyBuildFingerprint,
-            };
             if (editor.buildsJointOverlay && !editor.preserveJointEditorModeAfterBuild) {
               setJointEditorMode('camera');
             }
@@ -2702,20 +2798,24 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
             if (editor.buildsJointOverlay) {
               try {
                 const jointOverlay = editor.extendedOverlayV5
-                  ? await resolvedBuildDependencies.buildFullBodyJointOverlayV5({
-                      basis,
-                      measurements: requestedMeasurements,
-                      proxyRuntime: fkProxyRuntime,
-                      input: runtimePose,
-                      sourceRevision: runtime.sourceRevision,
-                    })
-                  : await resolvedBuildDependencies.buildFullBodyJointOverlay({
-                      basis,
-                      measurements: requestedMeasurements,
-                      proxyRuntime: fkProxyRuntime,
-                      input: runtimePose as MakeHumanFullBodyLocalFkPoseV3,
-                      sourceRevision: runtime.sourceRevision,
-                    });
+                  ? await measureAsyncBuildStageV12('joint-overlay', () =>
+                      resolvedBuildDependencies.buildFullBodyJointOverlayV5({
+                        basis,
+                        measurements: requestedMeasurements,
+                        proxyRuntime: fkProxyRuntime,
+                        input: runtimePose,
+                        sourceRevision: runtime.sourceRevision,
+                      }),
+                    )
+                  : await measureAsyncBuildStageV12('joint-overlay', () =>
+                      resolvedBuildDependencies.buildFullBodyJointOverlay({
+                        basis,
+                        measurements: requestedMeasurements,
+                        proxyRuntime: fkProxyRuntime,
+                        input: runtimePose as MakeHumanFullBodyLocalFkPoseV3,
+                        sourceRevision: runtime.sourceRevision,
+                      }),
+                    );
                 if (stale()) return;
                 setBuilt((current) =>
                   modelOpenReferenceFullBodyJointOverlayNextBuiltV5(
@@ -2785,6 +2885,9 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
 
   const currentBuilt = built?.bodyBuildFingerprint === bodyBuildFingerprint ? built : null;
   const displayedBuilt = currentBuilt ?? (editor.version === 'full-body-v9' ? built : null);
+  const sideSeamCapability = modelOpenReferenceSideSeamCapabilityV12(
+    currentBuilt?.liveFkSession ?? null,
+  );
   const bodyDisplayOwnership =
     editor.version === 'full-body-v9'
       ? modelOpenReferenceBodyDisplayOwnershipV11({
@@ -3060,7 +3163,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                   shoulderLocalToWorld: shoulder.localToWorld,
                   targetWristM: targetM,
                   currentArm: transaction.currentArm,
-                  sideSeamAssist: currentBuilt.liveFkSession?.sideSeamAssists[side],
+                  sideSeamAssist: currentBuilt.liveFkSession?.sideSeamAssists[side] ?? undefined,
                 });
                 const nextPose = editor.snapshot(
                   armBodyPartIk.applyArm(transaction.originalPose, side, solved.arm),
@@ -3460,6 +3563,21 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
           data-testid='model-open-reference-pose-blocked-status'
         >
           {poseBlockedMessage}
+        </Text>
+      ) : null}
+
+      {sideSeamCapability ? (
+        <Text
+          component='p'
+          size='micro'
+          variant='label'
+          role='status'
+          aria-live='polite'
+          aria-atomic='true'
+          data-testid='model-open-reference-side-seam-status'
+          data-unavailable-sides={sideSeamCapability.unavailableSides.join(',')}
+        >
+          {sideSeamCapability.message}
         </Text>
       ) : null}
 

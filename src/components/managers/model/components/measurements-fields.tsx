@@ -99,11 +99,13 @@ function MeasurementInput({
   findings,
   onAdvance,
   prominent = false,
+  preserveViewportOnFocus = false,
 }: {
   name: string;
   findings: readonly ModelMeasurementFieldFindingV1[];
   onAdvance?: () => void;
   prominent?: boolean;
+  preserveViewportOnFocus?: boolean;
 }) {
   const { control } = useFormContext<ModelFormData>();
   const { field } = useController({ control, name: `measurements.${name}` });
@@ -148,7 +150,7 @@ function MeasurementInput({
         setFocused(name);
         setDraft(display);
         event.currentTarget.select();
-        keepClearOfMobileStrip(event.currentTarget);
+        if (!preserveViewportOnFocus) keepClearOfMobileStrip(event.currentTarget);
       }}
       onBlur={() => {
         setDraft(null);
@@ -498,6 +500,7 @@ export function MeasurementsQuiz({
               name={name}
               findings={findings}
               prominent
+              preserveViewportOnFocus
               onAdvance={() => (atLast ? onComplete() : move(activeIndex + 1))}
             />
             <MeasurementFindingList name={name} findings={findings} />
