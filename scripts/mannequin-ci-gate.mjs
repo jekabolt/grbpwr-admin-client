@@ -22,6 +22,7 @@ const unitFiles = Object.freeze([
   'src/components/managers/model/components/model-open-reference-direct-pose-control-v9.test.ts',
   'src/components/managers/model/components/model-open-reference-direct-pose-v9.test.ts',
   'src/components/managers/model/components/model-open-reference-measurement-application-v1.test.ts',
+  'src/components/managers/model/components/model-open-reference-measurement-status-contract-v1.test.ts',
   'src/components/managers/model/components/model-open-reference-preview-input-v1.test.ts',
   'src/components/managers/model/components/model-open-reference-preview.test.tsx',
   'src/components/managers/model/components/use-model-mannequin-pose-transport-v1.test.ts',

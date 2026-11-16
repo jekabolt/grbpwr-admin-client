@@ -3491,6 +3491,9 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                 displayedBuilt.measurementApplication?.limitedBySafeRange.join(',') ?? ''
               }
               data-not-applied={displayedBuilt.measurementApplication?.notApplied.join(',') ?? ''}
+              data-modifier-only={
+                displayedBuilt.measurementApplication?.modifierOnly.join(',') ?? ''
+              }
               data-unsupported={displayedBuilt.measurementApplication?.unsupported.join(',') ?? ''}
             >
               {measurementApplicationText}
