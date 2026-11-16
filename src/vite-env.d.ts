@@ -31,6 +31,8 @@ interface ImportMetaEnv {
   readonly VITE_PATTERN_IMPORT_STUB?: string;
   /** 'stub' turns the AI namer off on the real worker (no paid calls, no names). */
   readonly VITE_PATTERN_IMPORT_AI?: string;
+  /** '1' enables durable Get/PutModelMannequinPose transport. Off by default until backend rollout. */
+  readonly VITE_MODEL_MANNEQUIN_POSE_RPC_V1?: string;
   /** Sentry DSN (public by design). Unset: Sentry is never loaded and no request is sent. */
   readonly VITE_SENTRY_DSN?: string;
   /** Sentry contour name. Defaults to the legacy prod/beta inference from VITE_SERVER_URL. */

@@ -1,9 +1,9 @@
 import { cn } from 'lib/utility';
 import { useDockBottom } from 'hooks/useDockBottom';
 import { useTypingOnPhone } from './use-typing-on-phone';
-import { useRef, useState } from 'react';
+import { type ComponentProps, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { common_Model } from 'api/proto-http/admin';
+import { common_BodyMeasurementName, common_Model, common_ModelInsert } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { FittingsReadonlyList } from 'components/managers/fittings/components/fittings-readonly-list';
 import {
@@ -32,30 +32,125 @@ import {
 import { DefaultSizesField } from './default-sizes-field';
 import { MeasurementsFields, MeasurementsHeaderActions } from './measurements-fields';
 import { ModelMedia } from './model-media';
+import type {
+  ModelMannequinPoseDraftOwnerV1,
+  ModelMannequinPoseDraftSnapshotV1,
+} from './model-mannequin-pose-draft-owner-v1';
+import {
+  createModelMannequinPoseSessionBindingV1,
+  modelMannequinPosePersistenceViewV1,
+} from './model-mannequin-pose-session-v1';
+import { ModelOpenReferencePreview } from './model-open-reference-preview';
 import {
   mapFormToModelInsert,
   mapModelToForm,
   ModelFormData,
   modelDefaultData,
+  modelFormRevisionKeyV1,
   modelSchema,
 } from './schema';
 import {
-  SheetMeasurementDiagram,
   SheetMeasurementFocusProvider,
   SheetMeasurementMobileStrip,
+  useSheetMeasurementFocus,
 } from './sheet-measurement-focus';
 import { MeasurementUnitProvider } from './units';
+import type { ModelMannequinPoseTransportControllerV1 } from './use-model-mannequin-pose-transport-v1';
 import './sheet-model-form.css';
 
-export function ModelForm({
-  isEditMode,
-  id,
-  model,
-}: {
+type ModelFormProps = {
   isEditMode: boolean;
   id?: string;
   model?: common_Model;
-}) {
+  poseOwner?: ModelMannequinPoseDraftOwnerV1;
+  poseTransport?: ModelMannequinPoseTransportControllerV1;
+};
+
+function ActiveMeasurementBodyPreview(
+  props: Omit<ComponentProps<typeof ModelOpenReferencePreview>, 'activeMeasurementName'>,
+) {
+  const { active } = useSheetMeasurementFocus();
+  return (
+    <ModelOpenReferencePreview
+      {...props}
+      activeMeasurementName={(active as common_BodyMeasurementName) || undefined}
+    />
+  );
+}
+
+export type ModelFormDevDependenciesV1 = {
+  readonly canWriteModels: boolean;
+  readonly createModel: (model: common_ModelInsert) => Promise<unknown>;
+  readonly updateModel: (input: { id: number; model: common_ModelInsert }) => Promise<unknown>;
+  readonly leaveForm: () => void;
+  readonly renderMedia: (input: {
+    model?: common_Model;
+    canEdit: boolean;
+    onBusyChange: (busy: boolean) => void;
+  }) => ReactNode;
+  readonly renderDefaultSizes: () => ReactNode;
+  readonly renderFittings: (modelId: number) => ReactNode;
+};
+
+type ModelFormRuntimeV1 = ModelFormDevDependenciesV1;
+
+function useModelMannequinPoseSnapshotV1(owner?: ModelMannequinPoseDraftOwnerV1) {
+  const [state, setState] = useState<{
+    readonly owner: ModelMannequinPoseDraftOwnerV1 | undefined;
+    readonly snapshot: ModelMannequinPoseDraftSnapshotV1 | null;
+  }>(() => ({ owner, snapshot: owner ? owner.getSnapshot() : null }));
+  const snapshot = state.owner === owner ? state.snapshot : owner?.getSnapshot() ?? null;
+
+  useEffect(() => {
+    if (!owner) return;
+    setState({ owner, snapshot: owner.getSnapshot() });
+    return owner.subscribe(() => setState({ owner, snapshot: owner.getSnapshot() }));
+  }, [owner]);
+
+  return snapshot;
+}
+
+/**
+ * Production resolves its ordinary hooks and child integrations below. A DEV-only audit surface may
+ * inject local no-op boundaries while still mounting this exact form, its real measurement inputs,
+ * and the production mannequin preview. Production builds ignore the injected branch.
+ */
+export function ModelForm(
+  props: ModelFormProps & { devDependencies?: ModelFormDevDependenciesV1 },
+) {
+  if (import.meta.env.DEV && props.devDependencies) {
+    return <ModelFormRuntime {...props} runtime={props.devDependencies} />;
+  }
+  return <ProductionModelForm {...props} />;
+}
+
+function ProductionModelForm(props: ModelFormProps) {
+  const navigate = useNavigate();
+  const createModel = useCreateModel();
+  const updateModel = useUpdateModel();
+  const { canWrite } = usePermissions();
+  const runtime: ModelFormRuntimeV1 = {
+    canWriteModels: canWrite(SECTION.models),
+    createModel: (model) => createModel.mutateAsync(model),
+    updateModel: (input) => updateModel.mutateAsync(input),
+    leaveForm: () => navigate(ROUTES.models),
+    renderMedia: ({ model, canEdit, onBusyChange }) => (
+      <ModelMedia model={model} canEdit={canEdit} onBusyChange={onBusyChange} />
+    ),
+    renderDefaultSizes: () => <DefaultSizesField />,
+    renderFittings: (modelId) => <FittingsReadonlyList modelId={modelId} />,
+  };
+  return <ModelFormRuntime {...props} runtime={runtime} />;
+}
+
+function ModelFormRuntime({
+  isEditMode,
+  id,
+  model,
+  poseOwner,
+  poseTransport,
+  runtime,
+}: ModelFormProps & { runtime: ModelFormRuntimeV1 }) {
   const saveBarRef = useRef<HTMLDivElement>(null);
   // A white-bg press is out on the photo: saving now would store the photo it is about to replace.
   const [photoBusy, setPhotoBusy] = useState(false);
@@ -64,11 +159,30 @@ export function ModelForm({
   const saved = useDoneFlash();
   // A refused save stands in the save bar until the next attempt.
   const [formError, setFormError] = useState<string | null>(null);
-  const navigate = useNavigate();
-  const createModel = useCreateModel();
-  const updateModel = useUpdateModel();
-  const { canWrite } = usePermissions();
-
+  const poseSnapshot = useModelMannequinPoseSnapshotV1(poseOwner);
+  const directPoseBindingV9 = useMemo(() => {
+    if (!poseOwner || !poseSnapshot || poseSnapshot.phase === 'unloaded') return undefined;
+    if (!poseTransport?.enabled) {
+      return createModelMannequinPoseSessionBindingV1(poseOwner, poseSnapshot);
+    }
+    const view = modelMannequinPosePersistenceViewV1({
+      snapshot: poseSnapshot,
+      canWrite: runtime.canWriteModels,
+      mutationPending: poseTransport.savePending,
+    });
+    return createModelMannequinPoseSessionBindingV1(poseOwner, poseSnapshot, {
+      ...view,
+      onSave: () => void poseTransport.savePose().catch(() => undefined),
+      onKeepMine: () => {
+        poseOwner.rebaseDraftOnConflict();
+        return poseOwner.getSnapshot().draft.pose;
+      },
+      onReloadTheirs: () => {
+        poseOwner.discardDraftForConflict();
+        return poseOwner.getSnapshot().draft.pose;
+      },
+    });
+  }, [poseOwner, poseSnapshot, poseTransport, runtime.canWriteModels]);
   const form = useForm<ModelFormData>({
     resolver: zodResolver(modelSchema),
     defaultValues: model ? mapModelToForm(model) : modelDefaultData,
@@ -81,13 +195,13 @@ export function ModelForm({
     setFormError(null);
     try {
       if (isEditMode) {
-        await updateModel.mutateAsync({ id: parseInt(id || '0', 10), model: modelInsert });
+        await runtime.updateModel({ id: parseInt(id || '0', 10), model: modelInsert });
         saved.flash();
         form.reset(data);
       } else {
-        await createModel.mutateAsync(modelInsert);
+        await runtime.createModel(modelInsert);
         // Leaving for the list is the receipt.
-        navigate(ROUTES.models);
+        runtime.leaveForm();
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to submit model';
@@ -127,14 +241,11 @@ export function ModelForm({
               <Section>
                 <div className='flex flex-col gap-4 md:flex-row md:items-stretch'>
                   <div className='mx-auto w-full max-w-60 shrink-0 md:mx-0'>
-                    <ModelMedia
-                      model={model}
-                      canEdit={canWrite(SECTION.models)}
-                      onBusyChange={setPhotoBusy}
-                    />
-                  </div>
-                  <div className='hidden min-h-0 w-60 shrink-0 border border-hairline md:flex'>
-                    <SheetMeasurementDiagram className='w-full' />
+                    {runtime.renderMedia({
+                      model,
+                      canEdit: runtime.canWriteModels,
+                      onBusyChange: setPhotoBusy,
+                    })}
                   </div>
                   <div className='flex min-w-0 flex-1 flex-col gap-3'>
                     <div className='grid grid-cols-[minmax(0,1fr)_7.5rem] items-end gap-2'>
@@ -146,7 +257,7 @@ export function ModelForm({
                         placeholder='select'
                       />
                     </div>
-                    <DefaultSizesField />
+                    {runtime.renderDefaultSizes()}
                     <div className='sheet-comment-fill flex min-h-20 flex-1 flex-col'>
                       <TextareaField
                         name='comment'
@@ -160,14 +271,53 @@ export function ModelForm({
                 </div>
               </Section>
 
-              <Section title='measurements' action={<MeasurementsHeaderActions />}>
-                <MeasurementsFields />
+              <Section
+                title='measurements'
+                action={<MeasurementsHeaderActions showAudit={isEditMode} />}
+              >
+                <MeasurementsFields showAudit={isEditMode} />
+              </Section>
+
+              <Section title='body preview'>
+                {poseOwner && poseTransport?.enabled && poseTransport.readError ? (
+                  <CalloutBox tone='error'>
+                    <div className='flex flex-wrap items-center justify-between gap-2'>
+                      <Text size='micro' component='p' role='alert'>
+                        <b>saved pose not loaded</b> ·{' '}
+                        {poseTransport.readError instanceof Error
+                          ? poseTransport.readError.message
+                          : 'The saved mannequin pose could not be read.'}
+                      </Text>
+                      <Button
+                        type='button'
+                        variant='underline'
+                        size='xs'
+                        onClick={poseTransport.retryRead}
+                      >
+                        retry pose
+                      </Button>
+                    </div>
+                  </CalloutBox>
+                ) : poseOwner && !directPoseBindingV9 ? (
+                  <Text size='micro' variant='inactive' role='status'>
+                    {poseTransport?.enabled ? 'loading saved pose…' : 'preparing session pose…'}
+                  </Text>
+                ) : (
+                  <ActiveMeasurementBodyPreview
+                    modelId={
+                      model?.id == null ? 'model-form:create' : `model-form:model:${model.id}`
+                    }
+                    modelContentRevision={
+                      model == null ? 'model-form:create:unbound' : modelFormRevisionKeyV1(model)
+                    }
+                    poseControls='full-body-v9'
+                    directPoseBindingV9={directPoseBindingV9}
+                  />
+                )}
               </Section>
 
               {isEditMode && id && (
-                <Section title='fittings'>
-                  <FittingsReadonlyList modelId={parseInt(id, 10)} />
-                </Section>
+                <Section title='fittings'>{runtime.renderFittings(parseInt(id, 10))}</Section>
               )}
             </SectionStack>
           </form>
@@ -196,11 +346,11 @@ export function ModelForm({
                 variant='secondary'
                 size='lg'
                 className='cursor-pointer uppercase'
-                onClick={() => navigate(ROUTES.models)}
+                onClick={runtime.leaveForm}
               >
                 cancel
               </Button>
-              {canWrite(SECTION.models) && (
+              {runtime.canWriteModels && (
                 <Button
                   type='button'
                   variant='main'

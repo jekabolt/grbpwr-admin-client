@@ -125,6 +125,27 @@ const Models = lazyRoute(() =>
 const Model = lazyRoute(() =>
   import('components/managers/model/page').then((m) => ({ default: m.Model })),
 );
+const ModelOpenReferencePreviewDevPage = import.meta.env.DEV
+  ? lazyRoute(() =>
+      import('components/managers/model/components/model-open-reference-preview-dev-page').then(
+        (m) => ({ default: m.ModelOpenReferencePreviewDevPage }),
+      ),
+    )
+  : null;
+const ModelFormPersonalizedPreviewDevPage = import.meta.env.DEV
+  ? lazyRoute(() =>
+      import('components/managers/model/components/model-form-personalized-preview-dev-page').then(
+        (m) => ({ default: m.ModelFormPersonalizedPreviewDevPage }),
+      ),
+    )
+  : null;
+const ModelCardListDevPage = import.meta.env.DEV
+  ? lazyRoute(() =>
+      import('components/managers/models/components/model-card-list-dev-page').then((m) => ({
+        default: m.ModelCardListDevPage,
+      })),
+    )
+  : null;
 const Fittings = lazyRoute(() =>
   import('components/managers/fittings').then((m) => ({ default: m.Fittings })),
 );
@@ -526,6 +547,30 @@ const app = (
                         <PrintSmokePage />
                       </DictionaryProvider>
                     }
+                  />
+                )}
+                {import.meta.env.DEV && (
+                  <Route
+                    path='/__model-open-reference-preview-v1'
+                    element={
+                      ModelOpenReferencePreviewDevPage ? <ModelOpenReferencePreviewDevPage /> : null
+                    }
+                  />
+                )}
+                {import.meta.env.DEV && (
+                  <Route
+                    path='/__model-form-personalized-preview-v1'
+                    element={
+                      ModelFormPersonalizedPreviewDevPage ? (
+                        <ModelFormPersonalizedPreviewDevPage />
+                      ) : null
+                    }
+                  />
+                )}
+                {import.meta.env.DEV && (
+                  <Route
+                    path='/__model-card-list-preview-v1'
+                    element={ModelCardListDevPage ? <ModelCardListDevPage /> : null}
                   />
                 )}
               </Routes>

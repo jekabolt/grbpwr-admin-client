@@ -1,0 +1,438 @@
+import { expect, test } from '@playwright/test';
+
+const REQUIRED_CREATE_MEASUREMENTS = [
+  ['height', '1720'],
+  ['across shoulder', '420'],
+  ['chest', '920'],
+  ['waist', '740'],
+  ['hip', '980'],
+  ['sleeve length', '600'],
+  ['inseam', '800'],
+] as const;
+
+const DEV_ROUTE = '/__model-form-personalized-preview-v1';
+const PREWARM_QUIET_MS = 1_000;
+
+function v9PoseFromSourceRevision(sourceRevision: string | null): Record<string, unknown> {
+  const encoded = sourceRevision?.match(/(?:^|;)editorPoseV9=([^;]+)/u)?.[1];
+  if (!encoded) throw new Error('The V9 editor pose is missing from the source revision.');
+  return JSON.parse(decodeURIComponent(encoded)) as Record<string, unknown>;
+}
+
+function numericLeaves(value: unknown): number[] {
+  if (typeof value === 'number') return [value];
+  if (!value || typeof value !== 'object') return [];
+  return Object.values(value).flatMap(numericLeaves);
+}
+
+function expectArestV9Source(sourceRevision: string | null) {
+  const pose = v9PoseFromSourceRevision(sourceRevision);
+  expect(pose.armMode).toBe('linked');
+  expect(pose.legMode).toBe('linked');
+  expect(numericLeaves(pose).every((value) => value === 0)).toBe(true);
+}
+
+function retryablePrewarmFailure(reason: unknown): boolean {
+  return (
+    reason instanceof Error &&
+    /ERR_NETWORK_IO_SUSPENDED|context|navigation|destroyed|Failed to fetch dynamically imported module|outdated optimize dep/i.test(
+      reason.message,
+    )
+  );
+}
+
+async function mainFrameStayedQuiet(
+  page: import('@playwright/test').Page,
+  quietMs: number,
+): Promise<boolean> {
+  try {
+    await page.waitForEvent('framenavigated', {
+      predicate: (frame) => frame === page.mainFrame(),
+      timeout: quietMs,
+    });
+    return false;
+  } catch (reason: unknown) {
+    if (reason instanceof Error && /timeout/i.test(reason.message)) return true;
+    throw reason;
+  }
+}
+
+async function prewarmDevRuntime(page: import('@playwright/test').Page) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await page.goto(DEV_ROUTE, { waitUntil: 'domcontentloaded' });
+      await page.evaluate(async () => {
+        const paths = [
+          '/src/components/shared/measurement-watertight-surface-v1-stage.tsx',
+          '/src/lib/cloth/body/measurement-open-reference-uniform-waist-hip-runtime-v1.ts',
+          '/src/lib/cloth/body/measurement-open-reference-beta-shape-runtime-v1.ts',
+          '/src/lib/cloth/body/makehuman-torso-shape-delta-bundle-v1.ts',
+          '/src/lib/cloth/body/makehuman-clo-like-pose-display-v3.ts',
+          '/src/lib/cloth/body/makehuman-full-body-local-fk-runtime-v4.ts',
+          '/src/lib/cloth/body/makehuman-full-body-joint-overlay-runtime-v5.ts',
+          '/src/lib/cloth/body/makehuman-full-body-live-fk-session-v5.ts',
+          '/src/lib/cloth/body/makehuman-arm-body-part-ik-v1.ts',
+          '/src/lib/cloth/body/makehuman-leg-body-part-ik-v1.ts',
+          '/src/lib/cloth/body/makehuman-head-aim-ik-v1.ts',
+          '/src/components/managers/model/components/model-open-reference-joint-ring-contract-v6.ts',
+        ];
+        await Promise.all(paths.map((path) => import(/* @vite-ignore */ path)));
+      });
+      if (await mainFrameStayedQuiet(page, PREWARM_QUIET_MS)) return;
+    } catch (reason: unknown) {
+      if (!retryablePrewarmFailure(reason) || attempt === 4) throw reason;
+    }
+  }
+  throw new Error('Unable to prewarm the ModelForm V9 runtime modules deterministically.');
+}
+
+async function frontTorsoScreenshot(
+  page: import('@playwright/test').Page,
+  canvas: import('@playwright/test').Locator,
+) {
+  const box = await canvas.boundingBox();
+  expect(box).not.toBeNull();
+  const bounds = box!;
+  return page.screenshot({
+    clip: {
+      x: bounds.x + bounds.width * 0.29,
+      y: bounds.y + bounds.height * 0.16,
+      width: bounds.width * 0.42,
+      height: bounds.height * 0.42,
+    },
+  });
+}
+
+test('real ModelForm auto-binds edit/create measurements to its V9 mannequin', async ({ page }) => {
+  const mainFrameNavigations: string[] = [];
+  const requests: Array<{ method: string; postData: string | null; url: string }> = [];
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on('request', (request) => {
+    requests.push({
+      method: request.method(),
+      postData: request.postData(),
+      url: request.url(),
+    });
+  });
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  page.on('framenavigated', (frame) => {
+    if (frame === page.mainFrame()) mainFrameNavigations.push(frame.url());
+  });
+  await prewarmDevRuntime(page);
+
+  await page.goto(DEV_ROUTE);
+  mainFrameNavigations.length = 0;
+  requests.length = 0;
+  consoleErrors.length = 0;
+  pageErrors.length = 0;
+  await expect(
+    page.getByTestId('model-form-personalized-preview-dev-page').locator('form'),
+  ).toBeVisible();
+  await expect(page.getByTestId('model-form-smoke-model-id')).toHaveText('8401');
+  await expect(page.getByTestId('model-open-reference-preview')).toHaveAttribute(
+    'data-pose-controls',
+    'full-body-v9',
+  );
+  await expect(page.getByTestId('model-open-reference-direct-pose-control-v9')).toBeVisible();
+  await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
+    'Preview partial: A-rest',
+    { timeout: 180_000 },
+  );
+  const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
+  const measurementApplication = page.getByTestId(
+    'model-open-reference-measurement-application-status',
+  );
+  await expect(canvas).toBeVisible();
+  await expect(canvas).toHaveAttribute(
+    'data-active-measurement-guide',
+    'BODY_MEASUREMENT_NAME_CHEST',
+  );
+  await expect(canvas).toHaveAttribute('data-measurement-guide-status', 'visible');
+  await expect(canvas).toHaveAttribute('data-measurement-guide-path-count', '1');
+  await expect(canvas).toHaveAttribute('data-measurement-guide-visual-only', 'true');
+  await expect(page.getByTestId('measurement-surface-active-guide-label')).toHaveText('chest');
+
+  const waistGuideInput = page.getByRole('textbox', { name: 'waist', exact: true });
+  await waistGuideInput.focus();
+  await expect(canvas).toHaveAttribute(
+    'data-active-measurement-guide',
+    'BODY_MEASUREMENT_NAME_WAIST',
+  );
+  await expect(canvas).toHaveAttribute('data-measurement-guide-status', 'visible');
+  await expect(page.getByTestId('measurement-surface-active-guide-label')).toHaveText('waist');
+
+  await page.getByRole('textbox', { name: 'inseam', exact: true }).focus();
+  await expect(canvas).toHaveAttribute(
+    'data-active-measurement-guide',
+    'BODY_MEASUREMENT_NAME_INSEAM',
+  );
+  await expect(canvas).toHaveAttribute('data-measurement-guide-status', 'unsupported');
+  await expect(canvas).toHaveAttribute('data-measurement-guide-path-count', '0');
+  await expect(page.getByTestId('measurement-surface-active-guide-label')).toHaveCount(0);
+
+  await expect(measurementApplication).toHaveAttribute('data-application-status', 'partial');
+  await expect(measurementApplication).toContainText(
+    'limited by safe range: arm length centerline proxy',
+  );
+  await expect(measurementApplication).toContainText('not modeled: inseam');
+  await expect(canvas).toHaveAttribute('data-joint-editor-mode', 'edit-pose');
+  await expect(page.getByRole('button', { name: /apply pose/i })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'camera mode' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'edit pose mode' })).toHaveCount(0);
+
+  await expect(page.getByRole('textbox', { name: 'name', exact: true })).toHaveValue(
+    'receipt 84 alpha',
+  );
+  await expect(page.getByRole('combobox', { name: 'select' })).toContainText('women');
+  for (const [label, value] of [
+    ['bicep', '300'],
+    ['wrist', '170'],
+    ['calf', '370'],
+    ['ankle', '230'],
+  ] as const) {
+    await expect(page.getByRole('textbox', { name: label, exact: true })).toHaveValue(value);
+  }
+  expect(requests.filter(({ url }) => new URL(url).pathname.startsWith('/api/'))).toEqual([]);
+
+  const alphaSourceRevision = await canvas.getAttribute('data-source-revision');
+  expect(alphaSourceRevision).toMatch(/inputHash=[0-9a-f]{8}/u);
+  expect(alphaSourceRevision).not.toContain('input=');
+  expect(alphaSourceRevision).toContain('measurement-open-reference-beta-shape-runtime/v1');
+  expect(alphaSourceRevision).toMatch(/represented=[^;]*chestCircumferenceMm/u);
+  expectArestV9Source(alphaSourceRevision);
+  await page.mouse.move(0, 0);
+  const baselineShape = await canvas.screenshot();
+  const baselineFrontTorso = await frontTorsoScreenshot(page, canvas);
+
+  const chest = page.getByRole('textbox', { name: 'chest', exact: true });
+  await chest.fill('960');
+  await chest.blur();
+  await expect
+    .poll(() => canvas.getAttribute('data-source-revision'))
+    .not.toBe(alphaSourceRevision);
+  await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
+    'Preview partial: A-rest',
+    { timeout: 180_000 },
+  );
+  await expect(canvas).toBeVisible();
+  const chestSourceRevision = await canvas.getAttribute('data-source-revision');
+  expect(chestSourceRevision).toContain('measurement-open-reference-beta-shape-runtime/v1');
+  expect(chestSourceRevision).toMatch(/represented=[^;]*chestCircumferenceMm/u);
+  expectArestV9Source(chestSourceRevision);
+  await expect(measurementApplication).toHaveAttribute('data-application-status', 'partial');
+  await expect(measurementApplication).toHaveAttribute('data-applied', /chestCircumferenceMm/u);
+  await page.mouse.move(0, 0);
+  const chestShape = await canvas.screenshot();
+  const chestFrontTorso = await frontTorsoScreenshot(page, canvas);
+  expect(chestShape.equals(baselineShape)).toBe(false);
+  expect(chestFrontTorso.equals(baselineFrontTorso)).toBe(false);
+
+  await chest.fill('1040');
+  await chest.blur();
+  await expect
+    .poll(() => canvas.getAttribute('data-source-revision'))
+    .not.toBe(chestSourceRevision);
+  await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
+    'Preview partial: A-rest',
+    { timeout: 180_000 },
+  );
+  await expect(measurementApplication).toHaveAttribute('data-application-status', 'partial');
+  await expect(measurementApplication).not.toHaveAttribute('data-applied', /chestCircumferenceMm/u);
+  await expect(measurementApplication).toHaveAttribute('data-limited', /chestCircumferenceMm/u);
+  await expect(measurementApplication).not.toHaveAttribute(
+    'data-not-applied',
+    /chestCircumferenceMm/u,
+  );
+  await expect(measurementApplication).toContainText('limited by safe range');
+
+  await chest.fill('960');
+  await chest.blur();
+  await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
+    'Preview partial: A-rest',
+    { timeout: 180_000 },
+  );
+  await expect(measurementApplication).toHaveAttribute('data-application-status', 'partial');
+
+  const acrossShoulder = page.getByRole('textbox', { name: 'across shoulder', exact: true });
+  await acrossShoulder.fill('440');
+  await acrossShoulder.blur();
+  await expect
+    .poll(() => canvas.getAttribute('data-source-revision'))
+    .not.toBe(chestSourceRevision);
+  await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
+    'Preview partial: A-rest',
+    { timeout: 180_000 },
+  );
+  const shoulderSourceRevision = await canvas.getAttribute('data-source-revision');
+  expect(shoulderSourceRevision).toContain('measurement-open-reference-beta-shape-runtime/v1');
+  expect(shoulderSourceRevision).toMatch(/represented=[^;]*shoulderBreadthMm/u);
+  expect(shoulderSourceRevision).toMatch(/represented=[^;]*chestCircumferenceMm/u);
+  expectArestV9Source(shoulderSourceRevision);
+  await page.mouse.move(0, 0);
+  const shoulderShape = await canvas.screenshot();
+  expect(shoulderShape.equals(chestShape)).toBe(false);
+
+  const sleeveLength = page.getByRole('textbox', { name: 'sleeve length', exact: true });
+  const beforeArmLengthSourceRevision = await canvas.getAttribute('data-source-revision');
+  await sleeveLength.fill('560');
+  await sleeveLength.blur();
+  await expect
+    .poll(() => canvas.getAttribute('data-source-revision'))
+    .not.toBe(beforeArmLengthSourceRevision);
+  await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
+    'Preview partial: A-rest',
+    { timeout: 180_000 },
+  );
+  const shortArmSourceRevision = await canvas.getAttribute('data-source-revision');
+  expect(shortArmSourceRevision).toContain('armLengthMm=limited-centerline-proxy');
+  await expect(measurementApplication).toHaveAttribute('data-limited', /armLengthMm/u);
+  await expect(measurementApplication).not.toHaveAttribute('data-not-applied', /armLengthMm/u);
+  await expect(measurementApplication).toContainText('arm length centerline proxy');
+  await page.mouse.move(0, 0);
+  const shortArmShape = await canvas.screenshot();
+
+  await sleeveLength.fill('640');
+  await sleeveLength.blur();
+  await expect
+    .poll(() => canvas.getAttribute('data-source-revision'))
+    .not.toBe(shortArmSourceRevision);
+  await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
+    'Preview partial: A-rest',
+    { timeout: 180_000 },
+  );
+  const longArmSourceRevision = await canvas.getAttribute('data-source-revision');
+  expect(longArmSourceRevision).toContain('armLengthMm=limited-centerline-proxy');
+  await page.mouse.move(0, 0);
+  const longArmShape = await canvas.screenshot();
+  expect(longArmShape.equals(shortArmShape)).toBe(false);
+
+  await sleeveLength.fill('600');
+  await sleeveLength.blur();
+  await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
+    'Preview partial: A-rest',
+    { timeout: 180_000 },
+  );
+
+  const thigh = page.getByRole('textbox', { name: 'thigh', exact: true });
+  const beforeThighSourceRevision = await canvas.getAttribute('data-source-revision');
+  await thigh.fill('560');
+  await thigh.blur();
+  await expect
+    .poll(() => canvas.getAttribute('data-source-revision'))
+    .not.toBe(beforeThighSourceRevision);
+  await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
+    'Preview partial: A-rest',
+    { timeout: 180_000 },
+  );
+  const representedThighSourceRevision = await canvas.getAttribute('data-source-revision');
+  expect(representedThighSourceRevision).toMatch(/represented=[^;]*thighCircumferenceMm/u);
+  await expect(measurementApplication).toHaveAttribute('data-applied', /thighCircumferenceMm/u);
+  await expect(measurementApplication).not.toHaveAttribute('data-limited', /thighCircumferenceMm/u);
+
+  await thigh.fill('700');
+  await thigh.blur();
+  await expect
+    .poll(() => canvas.getAttribute('data-source-revision'))
+    .not.toBe(representedThighSourceRevision);
+  await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
+    'Preview partial: A-rest',
+    { timeout: 180_000 },
+  );
+  const limitedThighSourceRevision = await canvas.getAttribute('data-source-revision');
+  expect(limitedThighSourceRevision).toContain('limited=armLengthMm,thighCircumferenceMm');
+  await expect(measurementApplication).toHaveAttribute('data-limited', /thighCircumferenceMm/u);
+  await expect(measurementApplication).not.toHaveAttribute(
+    'data-not-applied',
+    /thighCircumferenceMm/u,
+  );
+  await expect(measurementApplication).toContainText(
+    'arm length centerline proxy, thigh circumference',
+  );
+  await expect(measurementApplication).not.toContainText('not modeled: thigh circumference');
+
+  await thigh.fill('560');
+  await thigh.blur();
+  await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
+    'Preview partial: A-rest',
+    { timeout: 180_000 },
+  );
+
+  await page.getByRole('button', { name: 'switch to model beta' }).click();
+  await expect(page.getByTestId('model-form-smoke-model-id')).toHaveText('8402');
+  await expect(page.getByRole('textbox', { name: 'name', exact: true })).toHaveValue(
+    'receipt 84 beta',
+  );
+  await expect(page.getByRole('textbox', { name: 'height', exact: true })).toHaveValue('1730');
+  await expect(page.getByRole('combobox', { name: 'select' })).toContainText('men');
+  await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
+    'Preview partial: A-rest',
+    { timeout: 180_000 },
+  );
+  await expect(canvas).toBeVisible();
+
+  await page.getByRole('button', { name: 'show create form' }).click();
+  await expect(page.getByTestId('model-form-smoke-model-id')).toHaveText('create');
+  await expect(page.getByRole('textbox', { name: 'name', exact: true })).toHaveValue('');
+  await expect(page.getByText(/preview blocked/i)).toBeVisible();
+  await expect(canvas).toHaveCount(0);
+  for (const [label] of REQUIRED_CREATE_MEASUREMENTS) {
+    await expect(page.getByRole('textbox', { name: label, exact: true })).toHaveValue('');
+  }
+
+  await page.getByRole('combobox', { name: 'select' }).click();
+  await page.getByRole('option', { name: 'women' }).click();
+  for (const [label, value] of REQUIRED_CREATE_MEASUREMENTS) {
+    const input = page.getByRole('textbox', { name: label, exact: true });
+    await input.fill(value);
+    await input.blur();
+  }
+  await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
+    'Preview partial: A-rest',
+    { timeout: 180_000 },
+  );
+  await expect(canvas).toBeVisible();
+
+  expect(requests.filter(({ url }) => new URL(url).pathname.startsWith('/api/'))).toEqual([]);
+  expect(
+    requests.filter(({ method }) => ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)),
+  ).toEqual([]);
+  expect(requests.map(({ postData }) => postData ?? '').join('\n')).not.toMatch(
+    /(?:displayMesh|rendererDisplayMesh|positions|indices)/,
+  );
+  await expect(page.getByTestId('model-form-smoke-mutation-calls')).toHaveText('0');
+  await expect(
+    page.locator('input[name*="mesh"], textarea[name*="mesh"], input[name*="pose"]'),
+  ).toHaveCount(0);
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+  expect(mainFrameNavigations).toEqual([]);
+});
+
+test('real ModelForm admits female, male and neutral open-reference bases', async ({ page }) => {
+  await page.goto(DEV_ROUTE, { waitUntil: 'domcontentloaded' });
+  const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
+  const status = page.getByTestId('model-open-reference-preview-status');
+  await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
+  await expect(canvas).toHaveAttribute('data-source-revision', /basisKind=female/u);
+
+  await page.getByRole('button', { name: 'switch to model beta' }).click();
+  await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
+  await expect(canvas).toHaveAttribute('data-source-revision', /basisKind=male/u);
+
+  await page.getByRole('button', { name: 'show create form' }).click();
+  await page.getByRole('combobox', { name: 'select' }).click();
+  await page.getByRole('option', { name: 'unisex' }).click();
+  for (const [label, value] of REQUIRED_CREATE_MEASUREMENTS) {
+    const input = page.getByRole('textbox', { name: label, exact: true });
+    await input.fill(value);
+    await input.blur();
+  }
+  await expect(page.getByRole('textbox', { name: 'under bust', exact: true })).toBeVisible();
+  await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
+  await expect(canvas).toHaveAttribute('data-source-revision', /basisKind=neutral/u);
+  await expect(status).not.toContainText('Preview failed');
+});
