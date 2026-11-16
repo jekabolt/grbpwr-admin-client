@@ -92,7 +92,8 @@ fast-set.txt` screening, `--only <text> --par 1` one file) answers a specific qu
   run is 9–10 h. Baseline `regress-baseline.json` (fill, dash trains off): never overwrite.
 - Unit: `yarn vitest run src/lib/pattern-import` (CI runs none of it); `yarn lint` (it FIXES files:
   not while a peer edits); `yarn build:check` (xlsx / `tasks/sheet.ts` errors predate this branch).
-- Env: `DASH_TRAIN_OFF` `ALIKE_NESTS_OFF` `MOOD_MARKS_OFF` `MOOD_WIDE_OFF` `TICK_KNIFE_SPREAD_OFF=1` `GRADE_DRAW_OFF=1` `NEST_CROSS_OFF=1` `NEST_CORNER_MM` `GRADEP2_DEBUG` `CONT_ORDER_OFF=1`
+- Env: `DASH_TRAIN_OFF` `ALIKE_NESTS_OFF` `MOOD_MARKS_OFF` `MOOD_WIDE_OFF` `TICK_KNIFE_SPREAD_OFF=1` `GRADE_DRAW_OFF=1` `NEST_CROSS_OFF=1` `NEST_CORNER_MM` `GRADEP2_DEBUG` `CONT_ORDER_OFF=1` `TICK_THROUGH_OFF=1` `TICK_ORDER_OFF=1`
+  `TICK_THROUGH_NEAREST_OFF=1` (`MOOD_TICKS_DEBUG=1` + `SHOT_STDOUT=1`: TICK/TICKTHRU/TICKORDER lines; `SHOT_ROWS=1`: `<file>/rows.json`)
   (`PIECES_OPEN_PASS=1`, `OFFSET_TRIM_OFF=1`: node probes / bisect).
 
 ### Status (13 Nov 2026)
@@ -125,6 +126,10 @@ fast-set.txt` screening, `--only <text> --par 1` one file) answers a specific qu
   set40: 2 wrong closes refused (Taos G 0, Ophelia D 18, pictures), 0 lost, 0 outlines moved —
   `notClosed` +2 is the gain. Stepped grading (areas tie in runs) is NOT the no-model:inconsistent
   cause (6.3 % tied vs 8.4 % control); that cause is unknown — picture the worst families first.
+- 16 Nov: end-tick guards ACCEPTED (`pieces/ticks.ts`, journal 16 Nov): a ladder of per-size marks
+  that the size's own line runs through is not an end (TICK_THROUGH, quorum, group/arc rule), and a
+  ladder whose size order points against the sides is not an end (TICK_ORDER). set40 `m-group`:
+  3664 → 3673, 0 lost vs off, nest-check clean. Queued: Verona H knife spreading past an open corner.
 - Probe switch, default off: `MOOD_LOCAL_BAND`. Designed, no code: clipped dashes. Parked: E2-hole-end.
 
 ### Queue (next first)

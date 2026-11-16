@@ -11,12 +11,96 @@
 // moved more than --moved-mm), changed (both open, different outcome).
 // Drawing: the piece's other sizes in grey (closed outline solid, open prediction dotted); the cell
 // itself green solid when closed, red dashed prediction + a cross at the leak when open.
+// Sheet pictures (`NNN-...-sheet.png`, when both runs were shot with SHOT_ROWS=1 and have rows.json):
+// the whole sheet as the sizes step shows it — every line grey, the shared (common) lines green, the
+// cell's size's own lines blue; the cell's closed outline is drawn over it in thin red, so a size
+// closed on another size's line is visible. One size alone, no diff:
+//   node scripts/pattern-import/media-diff.mjs --sheet <run-dir> <file-substring> <size> <out.png>
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const { createCanvas } = await import(resolve(REPO, 'node_modules/@napi-rs/canvas/index.js'));
+
+const readJson = (p) => (existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')) : null);
+/** The fill's view of one file: { rows: [{chains, byRank, common}], labels, map } or null. */
+const sheetOf = (dir) => {
+  const rows = readJson(resolve(dir, 'rows.json'));
+  const run = readJson(resolve(dir, 'run.json'));
+  if (!rows?.length || !run) return null;
+  const sr = run.sizesRead ?? {};
+  return { rows, labels: sr.labels ?? run.card ?? [], map: sr.map ?? [] };
+};
+/** The sheet rank a card size is drawn in (map "sheet→card"), -1 when unknown. */
+const rankOf = (sh, size) => {
+  const m = sh.map.find((x) => x.split('→')[1] === size);
+  return sh.labels.indexOf(m ? m.split('→')[0] : size);
+};
+/** One panel: the sheet with rank r lit, the cell's outline over it. */
+const sheetPanel = (g, ox, w, h, sh, r, cell, title) => {
+  const sheet = sh.rows.reduce((a, b) => (b.chains.length > a.chains.length ? b : a));
+  const pts = sheet.chains.flat();
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const k = Math.min((w - 20) / (x1 - x0 || 1), (h - 60) / (y1 - y0 || 1));
+  const T = ([x, y]) => [ox + 10 + (x - x0) * k, 50 + (y1 - y) * k];
+  const path = (line, close) => {
+    if (line.length < 2) return;
+    g.beginPath();
+    line.forEach((p, i) => (i ? g.lineTo(...T(p)) : g.moveTo(...T(p))));
+    if (close) g.closePath();
+    g.stroke();
+  };
+  const own = new Set(sheet.byRank[r] ?? []);
+  const common = new Set(sheet.common ?? []);
+  g.setLineDash([]);
+  g.lineWidth = 0.6;
+  g.strokeStyle = '#c8c8c8';
+  sheet.chains.forEach((c, id) => !own.has(id) && !common.has(id) && path(c, false));
+  g.lineWidth = 1.4;
+  g.strokeStyle = '#2a9d4a';
+  for (const id of common) path(sheet.chains[id] ?? [], false);
+  g.lineWidth = 2;
+  g.strokeStyle = '#1f6fe0';
+  for (const id of own) path(sheet.chains[id] ?? [], false);
+  if (cell?.outer?.length > 2 && cell.outcome === 'closed') {
+    g.lineWidth = 1.2;
+    g.strokeStyle = '#e0202088';
+    g.setLineDash([5, 3]);
+    path(cell.outer, true);
+    g.setLineDash([]);
+  }
+  g.fillStyle = '#000';
+  g.font = 'bold 16px sans-serif';
+  g.fillText(title, ox + 10, 22);
+  g.font = '12px sans-serif';
+  g.fillText(
+    r < 0
+      ? 'size not on the sheet'
+      : `blue: size ${sh.labels[r]} own (${own.size}) · green: shared (${common.size}) · red dashed: the closed outline`,
+    ox + 10,
+    40,
+  );
+};
+
+if (process.argv[2] === '--sheet') {
+  const [, , , dir, sub, size, png] = process.argv;
+  const f = readdirSync(dir).find(
+    (x) => x.includes(sub) && existsSync(resolve(dir, x, 'rows.json')),
+  );
+  if (!f) throw new Error(`no rows.json for ${sub} in ${dir}`);
+  const sh = sheetOf(resolve(dir, f));
+  const cv = createCanvas(1400, 1000);
+  const g = cv.getContext('2d');
+  g.fillStyle = '#fff';
+  g.fillRect(0, 0, cv.width, cv.height);
+  sheetPanel(g, 0, 1400, 1000, sh, rankOf(sh, size), null, `${f.slice(0, 60)} · size ${size}`);
+  writeFileSync(png, cv.toBuffer('image/png'));
+  console.log(png);
+  process.exit(0);
+}
 
 const argv = process.argv.slice(2);
 const opt = (k, d) => {
@@ -27,7 +111,9 @@ const MAX = Number(opt('--max', 200));
 const MOVED_MM = Number(opt('--moved-mm', 0.5));
 const [beforeDir, afterDir, name] = argv;
 if (!beforeDir || !afterDir || !name) {
-  console.error('usage: media-diff.mjs <before-run-dir> <after-run-dir> <name> [--max N] [--moved-mm 0.5]');
+  console.error(
+    'usage: media-diff.mjs <before-run-dir> <after-run-dir> <name> [--max N] [--moved-mm 0.5]',
+  );
   process.exit(2);
 }
 const OUT = resolve('/private/tmp/patimport-runs/media', name);
@@ -65,8 +151,11 @@ const totals = { before: 0, after: 0, cells: 0 };
 for (const [file, famsA] of A) {
   const famsB = B.get(file);
   if (!famsB) continue;
+  // a label can repeat (Reims two «M - LOWER SKIRT», Fawn three «L - 2XL»): the n-th with that
+  // label in A is the n-th in B, never the first
+  const nth = (fams, f) => fams.filter((g) => g.label === f.label).indexOf(f);
   for (const fa of famsA) {
-    const fb = famsB.find((f) => f.label === fa.label);
+    const fb = famsB.filter((f) => f.label === fa.label)[nth(famsA, fa)];
     if (!fb) continue;
     for (const ca of fa.cells) {
       const cb = fb.cells.find((c) => c.size === ca.size);
@@ -145,7 +234,8 @@ const draw = (it, png) => {
     g.font = 'bold 16px sans-serif';
     g.fillText(title, ox + 12, 22);
     g.font = '12px sans-serif';
-    const why = cell && !closed(cell) ? String(cell.refusal ?? cell.outcome ?? '-').slice(0, 95) : '';
+    const why =
+      cell && !closed(cell) ? String(cell.refusal ?? cell.outcome ?? '-').slice(0, 95) : '';
     g.fillText(why, ox + 12, 40);
   };
   panel(0, it.fa, it.ca, `ДО: ${it.ca?.outcome ?? '-'}`);
@@ -167,11 +257,52 @@ const draw = (it, png) => {
   return true;
 };
 
-const slug = (s) => s.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+const sheets = new Map();
+const sheetCached = (dir, file) => {
+  const k = `${dir}|${file}`;
+  if (!sheets.has(k)) sheets.set(k, sheetOf(resolve(dir, file)));
+  return sheets.get(k);
+};
+/** before | after, the whole sheet with the cell's size lit; false when a run has no rows.json. */
+const drawSheet = (it, png) => {
+  const a = sheetCached(beforeDir, it.file);
+  const b = sheetCached(afterDir, it.file);
+  if (!a || !b) return false;
+  const SW = 900;
+  const SH = 900;
+  const cv = createCanvas(SW * 2, SH + 30);
+  const g = cv.getContext('2d');
+  g.fillStyle = '#fff';
+  g.fillRect(0, 0, cv.width, cv.height);
+  sheetPanel(g, 0, SW, SH, a, rankOf(a, it.size), it.ca, `ДО: ${it.ca?.outcome ?? '-'}`);
+  sheetPanel(g, SW, SW, SH, b, rankOf(b, it.size), it.cb, `ПОСЛЕ: ${it.cb?.outcome ?? '-'}`);
+  g.strokeStyle = '#888';
+  g.lineWidth = 1;
+  g.beginPath();
+  g.moveTo(SW, 0);
+  g.lineTo(SW, SH + 30);
+  g.stroke();
+  g.fillStyle = '#000';
+  g.font = '13px sans-serif';
+  g.fillText(
+    `${it.kind.toUpperCase()} · ${it.file.slice(0, 60)} · ${it.piece} · size ${it.size}`,
+    12,
+    SH + 20,
+  );
+  writeFileSync(png, cv.toBuffer('image/png'));
+  return true;
+};
+
+const slug = (s) =>
+  s
+    .replace(/[^A-Za-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 40);
 const index = [];
 items.slice(0, MAX).forEach((it, i) => {
   const png = `${String(i + 1).padStart(3, '0')}-${it.kind}-${slug(it.file)}-${slug(it.piece)}-${slug(it.size)}.png`;
   const ok = draw(it, resolve(OUT, png));
+  const sheet = drawSheet(it, resolve(OUT, png.replace(/\.png$/, '-sheet.png')));
   index.push({
     file: it.file,
     piece: it.piece,
@@ -183,6 +314,7 @@ items.slice(0, MAX).forEach((it, i) => {
     refusalBefore: closed(it.ca) ? undefined : it.ca?.refusal,
     refusalAfter: closed(it.cb) ? undefined : it.cb?.refusal,
     png: ok ? png : null,
+    sheet: sheet ? png.replace(/\.png$/, '-sheet.png') : null,
   });
 });
 const count = (k) => items.filter((x) => x.kind === k).length;
@@ -191,7 +323,13 @@ const summary = {
   before: resolve(beforeDir),
   after: resolve(afterDir),
   created: new Date().toISOString(),
-  totals: { ...totals, loss: count('loss'), gain: count('gain'), moved: count('moved'), changed: count('changed') },
+  totals: {
+    ...totals,
+    loss: count('loss'),
+    gain: count('gain'),
+    moved: count('moved'),
+    changed: count('changed'),
+  },
   shown: index.length,
   items: index,
 };
@@ -209,7 +347,7 @@ writeFileSync(
     '|---|---|---|---|---|---|---|',
     ...index.map(
       (x, i) =>
-        `| ${i + 1} | ${x.kind}${x.movedMm ? ` ${x.movedMm} mm` : ''} | ${x.file.slice(0, 40)} | ${x.piece} | ${x.size} | ${x.before} → ${x.after} | ${x.png ? `[png](${x.png})` : '-'} |`,
+        `| ${i + 1} | ${x.kind}${x.movedMm ? ` ${x.movedMm} mm` : ''} | ${x.file.slice(0, 40)} | ${x.piece} | ${x.size} | ${x.before} → ${x.after} | ${x.png ? `[png](${x.png})` : '-'}${x.sheet ? ` · [sheet](${x.sheet})` : ''} |`,
     ),
     '',
   ].join('\n'),

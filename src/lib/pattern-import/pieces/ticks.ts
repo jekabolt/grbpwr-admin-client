@@ -507,8 +507,143 @@ export function endTicks(
     const bodyDir = up ? -1 : 1; // ranks grow with p (up) → the body lies toward −p
     return kept.every((x) => x.s == null || x.s === bodyDir) ? bodyDir : 0;
   };
+  /** o crosses c's strip as a mate: parallel, at another place, both ends on its side lines. */
+  const isMate = (o: Cand, c: Cand): boolean => {
+    if (o === c || Math.abs(pos(o, c) - pos(c, c)) <= 0.5) return false;
+    const e1 = dot(sub(o.a, c.a), c.u);
+    const e2 = dot(sub(o.b, c.a), c.u);
+    return (
+      Math.abs(Math.min(e1, e2)) <= TICK_REACH_MM &&
+      Math.abs(Math.max(e1, e2) - c.L) <= TICK_REACH_MM
+    );
+  };
+  /**
+   * TICK_ORDER: the body side the order of c's strip mates alone names for r (their sides aside):
+   * ranks monotone over ≥ 3 places with r's — the larger sizes farther from the body. 0 = no order.
+   * Mates only (f3): a neighbouring piece's parallel ladder lends no order to this strip.
+   */
+  const orderSide = (c: Cand, r: number): number => {
+    const rows: { p: number; r: number }[] = [{ p: pos(c, c), r }];
+    for (const o of ladderOf(c)) {
+      if (!isMate(o, c)) continue;
+      const t = tentative(o);
+      if (t >= 0) rows.push({ p: pos(o, c), r: t });
+    }
+    rows.sort((x, y) => x.p - y.p);
+    const seq: { p: number; r: number }[] = [];
+    for (let i = 0; i < rows.length; ) {
+      let j = i;
+      while (j + 1 < rows.length && Math.abs(rows[j + 1].p - rows[i].p) <= 0.5) j++;
+      const rs = new Set(rows.slice(i, j + 1).map((x) => x.r));
+      if (rs.size !== 1) return 0; // an overlay among the mates: no order
+      seq.push(rows[i]);
+      i = j + 1;
+    }
+    if (new Set(seq.map((x) => x.r)).size !== seq.length || seq.length < 3) return 0;
+    if (seq.every((x, i) => i === 0 || x.r > seq[i - 1].r)) return -1;
+    if (seq.every((x, i) => i === 0 || x.r < seq[i - 1].r)) return 1;
+    return 0;
+  };
+
+  /** A rung's verdict over both its ends: through beats stops beats none. */
+  const verdictOf = (c: Cand, r: number): 'through' | 'stops' | 'none' => {
+    if (isThrough(c, r)) return 'through';
+    return throughAt(c, r, c.a) === 'stops' || throughAt(c, r, c.b) === 'stops' ? 'stops' : 'none';
+  };
+  const thruMemo = new Map<string, boolean>();
+  const isThrough = (c: Cand, r: number) => {
+    const key = `${c.id}:${r}`;
+    let v = thruMemo.get(key);
+    if (v === undefined) {
+      v = throughAt(c, r, c.a) === 'through' || throughAt(c, r, c.b) === 'through';
+      thruMemo.set(key, v);
+    }
+    return v;
+  };
+  /**
+   * TICK_THROUGH: rank r's own lines (the tick itself aside) near one end of tick c — 'through' when
+   * they lie on both sides of the tick's line (inside the end's window along it), 'stops' when on
+   * one side only, 'none' (abstain) when r draws nothing there.
+   * Only the r lines NEAREST the end along the tick that reach the tick's line (within PAST_MM)
+   * speak, as one group (every such chain within GROUP_MM of the nearest: a side split into two
+   * chains at the mark's T-junction is one line): memoir B L SHOULDER's strap side (pen 0) stops on
+   * the tick, and a long pen-0 line of the next piece 14 mm past the end ran through the window and
+   * refused the strap's real ends. 'through' needs > THRU_MM of the group's ARC on each side (a
+   * stroke's end overshooting a corner — memoir B strap size 8, 3.5 mm — is short; a side that
+   * crosses and turns at a corner is long). No r line on the tick's line: abstain (f3: a far line's
+   * 'stops' is a quorum vote too). Bisect: TICK_THROUGH_NEAREST_OFF=1 (old rule: any line, union).
+   */
+  const GROUP_MM = 1.5;
+  const THRU_MM = 2 * PAST_MM;
+  const throughAt = (c: Cand, r: number, p: PtMm): 'through' | 'stops' | 'none' => {
+    const frame = (q: PtMm) => ({ al: dot(sub(q, c.a), c.u), h: dot(sub(q, c.a), c.nu) });
+    const near = (al: number) =>
+      (al >= -TICK_REACH_MM && al <= 3) || (al >= c.L - 3 && al <= c.L + TICK_REACH_MM);
+    const out = (al: number) => (al < 0 ? -al : al > c.L ? al - c.L : 0);
+    // per chain: arc (mm) more than PAST_MM across the tick's line on each side, the farthest
+    // reach across (old rule), and how far out along the tick it reaches the tick's line
+    const by = new Map<ChainId, { pos: number; neg: number; hp: number; hn: number; on: number }>();
+    for (const { id, i } of segsNear(p, RAD)) {
+      if (id === c.id || rankOfChain.get(id) !== r) continue;
+      const q = set.chains[id].pts;
+      let e = by.get(id);
+      if (!e) by.set(id, (e = { pos: 0, neg: 0, hp: 0, hn: 0, on: Infinity }));
+      // sample the segment: the parts of it in an end window, on either side of the tick's line
+      // (every ~1 mm: a long straight side segment crosses the window in a short stretch)
+      const len = dist(q[i], q[i + 1]);
+      const n = Math.min(2000, Math.max(1, Math.ceil(len)));
+      for (let k = 0; k <= n; k++) {
+        const f = frame({
+          x: q[i].x + ((q[i + 1].x - q[i].x) * k) / n,
+          y: q[i].y + ((q[i + 1].y - q[i].y) * k) / n,
+        });
+        if (!near(f.al) || Math.abs(f.h) > RAD) continue;
+        const w = k === 0 || k === n ? len / n / 2 : len / n;
+        if (f.h > PAST_MM) e.pos += w;
+        if (f.h < -PAST_MM) e.neg += w;
+        e.hp = Math.max(e.hp, f.h);
+        e.hn = Math.max(e.hn, -f.h);
+        if (Math.abs(f.h) <= PAST_MM) e.on = Math.min(e.on, out(f.al));
+      }
+    }
+    if (probeOff('TICK_THROUGH_NEAREST_OFF')) {
+      let pos = false;
+      let neg = false;
+      for (const e of by.values()) {
+        pos ||= e.hp > PAST_MM;
+        neg ||= e.hn > PAST_MM;
+      }
+      return pos && neg ? 'through' : pos || neg ? 'stops' : 'none';
+    }
+    let best = Infinity;
+    for (const e of by.values()) best = Math.min(best, e.on);
+    if (best === Infinity) return 'none';
+    let pos = 0;
+    let neg = 0;
+    let n = 0;
+    let single = false;
+    const parts: string[] = [];
+    for (const [id, e] of by)
+      if (e.on <= best + GROUP_MM) {
+        pos += e.pos;
+        neg += e.neg;
+        n++;
+        single ||= Math.min(e.pos, e.neg) > THRU_MM;
+        parts.push(`${id}:${e.pos.toFixed(1)}/${e.neg.toFixed(1)}`);
+      }
+    const v = Math.min(pos, neg) > THRU_MM ? 'through' : pos > 0 || neg > 0 ? 'stops' : 'none';
+    // f3's check: a group of ≥ 2 chains whose verdict no single chain of it gives (a split side)
+    if (n >= 2 && v === 'through' && !single && probeOff('MOOD_TICKS_DEBUG'))
+      console.log(
+        `TICKGROUP c${c.id} r${r} n=${n} pos=${pos.toFixed(1)} neg=${neg.toFixed(1)} ${parts.join(' ')}`,
+      );
+    return v;
+  };
 
   const debug = probeOff('MOOD_TICKS_DEBUG');
+  // accepted 16 Nov (set40 m-group: 0 lost vs off, +9); bisect TICK_THROUGH_OFF=1 / TICK_ORDER_OFF=1
+  const thruOn = !probeOff('TICK_THROUGH_OFF');
+  const orderOn = !probeOff('TICK_ORDER_OFF');
   const out: EndTick[] = [];
   for (const c of cands) {
     const named = new Set<number>([...c.pen, ...c.sides.keys()]);
@@ -536,6 +671,46 @@ export function endTicks(
     const r0 = pick.r;
     const band = c.passing.every((ids) => [...ids].some((id) => rankOfChain.get(id) !== r0));
     if (!band || stripMates(c) < 2) continue;
+    // TICK_THROUGH: an END tick of size r is where r's own outline stops. A line r's own outline
+    // runs past on both sides of, at either end, is an internal mark of r across its piece (memoir
+    // A BACK CENTER's per-size waist marks, ranked into a ladder): r is not ending there, and the
+    // smaller sizes' outlines rightly run past it. No own line of r near the ends: abstain.
+    // A ladder is one thing: among its rungs of FIRM rank (a unique pen, or ranked) that have a
+    // verdict, when ≥ 2 are such marks and they outnumber the rungs their size stops at, every rung
+    // is (f3: an ANY rule let a waistband's own CB / side marks veto its real ends). The tick
+    // itself is refused on its own verdict
+    if (thruOn || debug) {
+      const self = isThrough(c, pick.r);
+      let thru = 0;
+      let stops = 0;
+      let any = self;
+      for (const o of ladderOf(c)) {
+        if (o === c) continue;
+        const r = o.pen.length === 1 ? o.pen[0] : o.ranked ?? -1;
+        const rt = tentative(o);
+        if (rt >= 0 && isThrough(o, rt)) any = true;
+        if (r < 0) continue;
+        const v = verdictOf(o, r);
+        if (v === 'through') thru++;
+        else if (v === 'stops') stops++;
+      }
+      const veto = self || (thru >= 2 && thru > stops);
+      if (debug)
+        console.log(
+          `TICKTHRU c${c.id} r${pick.r} self=${self} thru=${thru} stops=${stops} veto=${veto}${veto !== any ? ` ANY=${any}` : ''}`,
+        );
+      if (thruOn && veto) continue;
+    }
+    // TICK_ORDER: the ladder's order puts the larger sizes on the side r's own lines run to — the
+    // body side. A strip's larger sizes end farther from the body (D3 trend); a nest's side edges
+    // step the other way at one of its edges (memoir A D/K: a size's straight side among the next
+    // sizes' sides, larger ones inside). The order against the sides: no strip end
+    if (orderOn || debug) {
+      const own = c.sides.get(pick.r);
+      const od = own != null ? orderSide(c, pick.r) : 0;
+      if (debug) console.log(`TICKORDER c${c.id} r${pick.r} sides=${own ?? '-'} order=${od}`);
+      if (orderOn && od && od !== own) continue;
+    }
     // the body side: from r's own sides, else from the ladder's order (toward the smaller sizes)
     const s = c.sides.get(pick.r) ?? trend(c, pick.r);
     if (!s) continue;
