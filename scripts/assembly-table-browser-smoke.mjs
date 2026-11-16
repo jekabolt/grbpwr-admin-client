@@ -125,6 +125,40 @@ check(
   canvasBox ? `${Math.round(canvasBox.width)}×${Math.round(canvasBox.height)} px` : 'no box',
 );
 
+const frontCutContour = page.locator('[data-v2-contour-id="piece-front:cut"] polyline').first();
+check(
+  (await canvas.getAttribute('data-v2-active-colorway-id')) === '1' &&
+    (await canvas.getAttribute('data-v2-active-colorway-label')) === 'Black' &&
+    (await frontCutContour.getAttribute('fill')) === '#111111',
+  'saved default colorway paints the exact cut contour',
+);
+const colorwayPicker = page.getByRole('combobox', { name: 'Colorway' });
+await colorwayPicker.click();
+await page.getByRole('option', { name: 'Natural', exact: true }).click();
+check(
+  (await canvas.getAttribute('data-v2-active-colorway-id')) === '2' &&
+    (await canvas.getAttribute('data-v2-active-colorway-label')) === 'Natural' &&
+    (await frontCutContour.getAttribute('fill')) === '#e5ddc8',
+  'saved colorway picker changes the exact cut preview',
+);
+await colorwayPicker.click();
+await page.getByRole('option', { name: 'Unspecified', exact: true }).click();
+check(
+  (await canvas.getAttribute('data-v2-active-colorway-id')) === '3' &&
+    (await frontCutContour.getAttribute('fill')) === 'none' &&
+    (await page
+      .locator('[data-v2-piece-id="piece-front"]')
+      .getAttribute('data-v2-piece-colorway-swatch')) === null,
+  'colorway without a valid saved swatch stays unpainted',
+);
+await colorwayPicker.click();
+check(
+  (await page.getByRole('option').count()) === 3 &&
+    (await page.getByRole('option', { name: 'Unknown', exact: true }).count()) === 0,
+  'actual picker exposes only bounded saved colorways',
+);
+await page.keyboard.press('Escape');
+
 const layoutSummary = page.locator('[data-cad-layout-menu] > summary');
 await layoutSummary.click();
 await page.getByRole('button', { name: '2D table', exact: true }).click();

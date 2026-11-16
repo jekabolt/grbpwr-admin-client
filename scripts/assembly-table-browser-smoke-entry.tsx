@@ -262,7 +262,11 @@ function BrowserSmoke() {
               proposal={proposal}
               state={state}
               materialOptions={materialOptions}
-              colorwayOptions={[{ id: 1, label: 'Black', swatchHex: '#111111' }]}
+              colorwayOptions={[
+                { id: 1, label: 'Black', swatchHex: '#111111' },
+                { id: 2, label: 'Natural', swatchHex: '#e5ddc8' },
+                { id: 3, label: 'Unspecified' },
+              ]}
               activeSeamIndex={activeSeamIndex}
               activePieceIndex={activePieceIndex}
               onActiveSeamIndexChange={setActiveSeamIndex}
