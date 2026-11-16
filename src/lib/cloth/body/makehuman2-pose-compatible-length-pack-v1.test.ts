@@ -22,6 +22,12 @@ function digest(value: Uint8Array): Promise<string> {
   return Promise.resolve(createHash('sha256').update(value).digest('hex'));
 }
 
+function response(value: Uint8Array): Response {
+  const body = new ArrayBuffer(value.byteLength);
+  new Uint8Array(body).set(value);
+  return new Response(body);
+}
+
 describe('MakeHuman2 pose-compatible length pack v1', () => {
   it('pins and parses the exact deterministic CC0 source pack', () => {
     const input = bytes();
@@ -73,8 +79,8 @@ describe('MakeHuman2 pose-compatible length pack v1', () => {
     const input = bytes();
     const fetchImpl = vi
       .fn()
-      .mockResolvedValueOnce(new Response(input.subarray(0, input.length - 1)))
-      .mockResolvedValue(new Response(input));
+      .mockResolvedValueOnce(response(input.subarray(0, input.length - 1)))
+      .mockResolvedValue(response(input));
     const loader = createMakeHuman2PoseCompatibleLengthPackLoaderV1({ fetchImpl, digest });
     await expect(loader()).rejects.toThrow(/byte length authentication/);
     const first = await loader();
@@ -84,7 +90,7 @@ describe('MakeHuman2 pose-compatible length pack v1', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
 
     const digestFailure = createMakeHuman2PoseCompatibleLengthPackLoaderV1({
-      fetchImpl: vi.fn().mockResolvedValue(new Response(input)),
+      fetchImpl: vi.fn().mockResolvedValue(response(input)),
       digest: () => Promise.resolve('0'.repeat(64)),
     });
     await expect(digestFailure()).rejects.toThrow(/SHA-256 authentication/);
