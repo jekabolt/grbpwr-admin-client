@@ -60,6 +60,7 @@ import {
   modelOpenReferenceLivePoseFrameNextV10,
   modelOpenReferenceBodyDisplayOwnershipV11,
   modelOpenReferenceFullBodyBuildDelayV12,
+  modelOpenReferenceAllBuildsOrAbortSiblingsV13,
   modelOpenReferencePoseBlockedMessageV11,
   modelOpenReferenceSideSeamCapabilityV12,
   modelOpenReferenceJointEditorEffectiveModeV5,
@@ -281,6 +282,31 @@ function Harness({
 }
 
 describe('model open-reference preview', () => {
+  it('aborts sibling workers immediately while preserving the primary parallel-build failure', async () => {
+    const controller = new AbortController();
+    const primaryFailure = new Error('pose runtime failed');
+    let siblingAborted = false;
+    const sibling = new Promise<never>((_resolve, reject) => {
+      controller.signal.addEventListener(
+        'abort',
+        () => {
+          siblingAborted = true;
+          reject(new DOMException('Aborted', 'AbortError'));
+        },
+        { once: true },
+      );
+    });
+
+    const result = modelOpenReferenceAllBuildsOrAbortSiblingsV13(controller, [
+      Promise.reject(primaryFailure),
+      sibling,
+    ] as const);
+
+    await expect(result).rejects.toBe(primaryFailure);
+    expect(controller.signal.aborted).toBe(true);
+    expect(siblingAborted).toBe(true);
+  });
+
   it('reports a partial side-seam capability without blocking free anatomical drag', () => {
     const session = {
       version: 'makehuman-full-body-live-fk-session/v5',

@@ -316,6 +316,20 @@ async function measureAsyncBuildStageV12<T>(stage: string, operation: () => Prom
   }
 }
 
+export async function modelOpenReferenceAllBuildsOrAbortSiblingsV13<
+  const Builds extends readonly unknown[],
+>(
+  controller: AbortController,
+  builds: Builds,
+): Promise<{ -readonly [Index in keyof Builds]: Awaited<Builds[Index]> }> {
+  try {
+    return await Promise.all(builds);
+  } catch (reason: unknown) {
+    controller.abort();
+    throw reason;
+  }
+}
+
 export function modelOpenReferenceFullBodyBuildDelayV12(options: {
   readonly intent: 'immediate' | 'measurement-change';
   readonly retainsLastValidBody: boolean;
@@ -2650,10 +2664,11 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
           return;
         }
         void (async () => {
+          let parallelBuildFailure = false;
           const stale = () =>
             !mountedRef.current ||
             generationRef.current !== requestedGeneration ||
-            buildAbortController.signal.aborted;
+            (buildAbortController.signal.aborted && !parallelBuildFailure);
           try {
             const basis = await resolvedBuildDependencies.loadBasis(requestedBasisKind);
             if (stale()) return;
@@ -2736,7 +2751,20 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
               : Promise.resolve(null);
             const [runtime, liveFkSession, unboundArtifact] = await measureAsyncBuildStageV12(
               'pose-runtime-and-live-session',
-              () => Promise.all([runtimePromise, liveSessionPromise, artifactPromise]),
+              async () => {
+                try {
+                  return await modelOpenReferenceAllBuildsOrAbortSiblingsV13(buildAbortController, [
+                    runtimePromise,
+                    liveSessionPromise,
+                    artifactPromise,
+                  ] as const);
+                } catch (reason: unknown) {
+                  // The controller is also the stale-build cancellation source. Remember that this
+                  // abort belongs to an active build failure so the existing error UI still wins.
+                  parallelBuildFailure = true;
+                  throw reason;
+                }
+              },
             );
             if (stale()) return;
             const bodyBuilt = measureBuildStageV12('snapshot-built-body', () => {
