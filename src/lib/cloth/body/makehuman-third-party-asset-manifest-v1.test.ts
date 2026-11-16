@@ -6,6 +6,7 @@ import { cwd } from 'node:process';
 import { describe, expect, it } from 'vitest';
 
 import { MAKEHUMAN_CORE_RIG_BUNDLE_METADATA_V1 } from './makehuman-core-rig-pose-research-v1';
+import { MAKEHUMAN_FEMALE_BUST_DELTA_PROVENANCE_V1 } from './makehuman-female-bust-delta-bundle-v1';
 import {
   MAKEHUMAN_LIMB_CIRCUMFERENCE_DELTA_PROVENANCE_V1,
   MAKEHUMAN_LIMB_CIRCUMFERENCE_MODE_METADATA_V1,
@@ -132,6 +133,13 @@ const expectedMetadata = new Map<string, Readonly<{ byteLength: number; sha256: 
     }),
   ],
   [
+    MAKEHUMAN_FEMALE_BUST_DELTA_PROVENANCE_V1.assetPath,
+    Object.freeze({
+      byteLength: MAKEHUMAN_FEMALE_BUST_DELTA_PROVENANCE_V1.assetByteLength,
+      sha256: MAKEHUMAN_FEMALE_BUST_DELTA_PROVENANCE_V1.assetSha256,
+    }),
+  ],
+  [
     MAKEHUMAN_LIMB_CIRCUMFERENCE_DELTA_PROVENANCE_V1.assetPath,
     Object.freeze({
       byteLength: MAKEHUMAN_LIMB_CIRCUMFERENCE_DELTA_PROVENANCE_V1.assetByteLength,
@@ -237,16 +245,20 @@ describe('MakeHuman third-party asset manifest v1', () => {
       }
 
       expect(asset.license.identifier).toBe('CC0-1.0');
-      expect(asset.license.receiptStatus).toBe('present');
       expect(asset.license.reason.length).toBeGreaterThan(0);
-      expect(asset.license.receiptPath).not.toBeNull();
-      const receipt = receiptById.get(asset.license.receiptId);
-      expect(receipt, asset.license.receiptId).toBeDefined();
-      expect(receipt?.repository).toBe(asset.upstream.repository);
-      expect(receipt?.commit).toBe(asset.upstream.commit);
-      expect(receipt?.files.map(({ snapshotPath }) => snapshotPath)).toContain(
-        asset.license.receiptPath,
-      );
+      if (asset.license.receiptStatus === 'present') {
+        expect(asset.license.receiptPath).not.toBeNull();
+        const receipt = receiptById.get(asset.license.receiptId);
+        expect(receipt, asset.license.receiptId).toBeDefined();
+        expect(receipt?.repository).toBe(asset.upstream.repository);
+        expect(receipt?.commit).toBe(asset.upstream.commit);
+        expect(receipt?.files.map(({ snapshotPath }) => snapshotPath)).toContain(
+          asset.license.receiptPath,
+        );
+      } else {
+        expect(asset.license.receiptId).toBe('');
+        expect(asset.license.receiptPath).toBeNull();
+      }
 
       expect(asset.generator.reason.length).toBeGreaterThan(0);
       if (asset.generator.status === 'present') {
@@ -261,10 +273,20 @@ describe('MakeHuman third-party asset manifest v1', () => {
       }
     }
 
-    expect(manifest.assets.every(({ license }) => license.receiptStatus === 'present')).toBe(true);
-    expect(manifest.assets.every(({ generator }) => generator.status === 'missingEvidence')).toBe(
-      true,
+    expect(
+      manifest.assets
+        .filter(({ id }) => id !== 'makehuman-female-bust-deltas-v1')
+        .every(({ license }) => license.receiptStatus === 'present'),
+    ).toBe(true);
+    expect(byId.get('makehuman-female-bust-deltas-v1')?.license.receiptStatus).toBe(
+      'missingEvidence',
     );
+    expect(
+      manifest.assets
+        .filter(({ id }) => id !== 'makehuman-female-bust-deltas-v1')
+        .every(({ generator }) => generator.status === 'missingEvidence'),
+    ).toBe(true);
+    expect(byId.get('makehuman-female-bust-deltas-v1')?.generator.status).toBe('present');
 
     for (const basisId of [
       'makehuman-visible-base-v1',
@@ -311,6 +333,18 @@ describe('MakeHuman third-party asset manifest v1', () => {
     );
     expect(byId.get('makehuman-torso-shape-deltas-v1')?.generator.expectedPath).toBe(
       MAKEHUMAN_TORSO_SHAPE_DELTA_PROVENANCE_V1.generator,
+    );
+    expect(byId.get('makehuman-female-bust-deltas-v1')?.upstream.paths).toEqual([
+      MAKEHUMAN_FEMALE_BUST_DELTA_PROVENANCE_V1.sourcePath,
+    ]);
+    expect(byId.get('makehuman-female-bust-deltas-v1')?.upstream.sourceFiles).toEqual([
+      {
+        path: MAKEHUMAN_FEMALE_BUST_DELTA_PROVENANCE_V1.sourcePath,
+        sha256: MAKEHUMAN_FEMALE_BUST_DELTA_PROVENANCE_V1.sourceSha256,
+      },
+    ]);
+    expect(byId.get('makehuman-female-bust-deltas-v1')?.generator.expectedPath).toBe(
+      MAKEHUMAN_FEMALE_BUST_DELTA_PROVENANCE_V1.generator,
     );
     expect(byId.get('makehuman-limb-circumference-deltas-v1')?.upstream.paths).toEqual(
       MAKEHUMAN_LIMB_CIRCUMFERENCE_MODE_METADATA_V1.map(({ sourcePath }) => sourcePath),
