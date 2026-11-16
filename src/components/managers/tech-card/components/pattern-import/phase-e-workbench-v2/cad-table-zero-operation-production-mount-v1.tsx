@@ -37,7 +37,11 @@ import {
   PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_PRODUCTION_SCENE_OVERLAY_BLOCKED_V1,
   PatternImportDxfPhaseECadMannequinModelPickerV1,
 } from './cad-workbench-mannequin-model-picker-v1';
-import { PatternImportDxfPhaseECadWorkbenchSplitShellV1 } from './cad-workbench-split-shell-v1';
+import {
+  PatternImportDxfPhaseECadWorkbenchSplitShellV1,
+  type PatternImportDxfPhaseECadWorkbenchOperationsModeV1,
+  type PatternImportDxfPhaseECadWorkbenchSelectionV1,
+} from './cad-workbench-split-shell-v1';
 import {
   createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1,
   type PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1,
@@ -48,7 +52,8 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_PRODUCTION_MOUN
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_PRODUCTION_MOUNT_CLAIMS_V1 =
   Object.freeze({
-    operationsLengthMustBeZero: true,
+    zeroOperationEntrySupported: true,
+    operationIndependentSavedBrowseFallback: true,
     freshCardSessionRequired: false,
     operationIndependentSavedCardBootstrap: true,
     savedCardRowReadBeforeAndAfterReprocess: true,
@@ -118,6 +123,9 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   orderSizeIds = IDENTITY_SIZE_ORDER,
   sizeNameById = EMPTY_SIZE_NAMES,
   savedAuthority = null,
+  selection = Object.freeze({ operationNumber: null }),
+  operationsPanel = null,
+  defaultOperationsMode = 'collapsed',
 }: Readonly<{
   cardSession: PatternImportDxfPhaseECardSessionV1 | null;
   zeroConnectAuthoringHandoff?: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1;
@@ -128,6 +136,9 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   orderSizeIds?: (ids: number[]) => number[];
   sizeNameById?: ReadonlyMap<number, string>;
   savedAuthority?: PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1 | null;
+  selection?: PatternImportDxfPhaseECadWorkbenchSelectionV1;
+  operationsPanel?: ReactNode;
+  defaultOperationsMode?: PatternImportDxfPhaseECadWorkbenchOperationsModeV1;
 }>) {
   const generation = cardSession?.importGeneration ?? 0;
   const choices = useMemo(
@@ -338,8 +349,8 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
 
   return (
     <PatternImportDxfPhaseECadWorkbenchSplitShellV1
-      selection={{ operationNumber: null }}
-      defaultOperationsMode='collapsed'
+      selection={selection}
+      defaultOperationsMode={defaultOperationsMode}
       desktop={
         <section
           data-cad-zero-operation-production-host-v1=''
@@ -411,12 +422,14 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
         stagingBlocked: mannequinStaging?.key === mannequinStagingKey && mannequinStaging.blocked,
       })}
       operationsPanel={
-        <div className='space-y-1 p-3' data-cad-zero-operation-current-operation='absent'>
-          <p className='text-micro font-bold uppercase'>No current operation</p>
-          <p className='text-micro text-labelColor'>
-            Connect two exact edges on the table to create the first Assembly Order draft.
-          </p>
-        </div>
+        operationsPanel ?? (
+          <div className='space-y-1 p-3' data-cad-zero-operation-current-operation='absent'>
+            <p className='text-micro font-bold uppercase'>No current operation</p>
+            <p className='text-micro text-labelColor'>
+              Connect two exact edges on the table to create the first Assembly Order draft.
+            </p>
+          </div>
+        )
       }
     />
   );
@@ -428,11 +441,17 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
   zeroConnectAuthoringHandoff,
   disabled = false,
   savedOnly = false,
+  selection,
+  operationsPanel,
+  defaultOperationsMode,
 }: Readonly<{
   techCardId?: number;
   zeroConnectAuthoringHandoff?: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1;
   disabled?: boolean;
   savedOnly?: boolean;
+  selection?: PatternImportDxfPhaseECadWorkbenchSelectionV1;
+  operationsPanel?: ReactNode;
+  defaultOperationsMode?: PatternImportDxfPhaseECadWorkbenchOperationsModeV1;
 }>) {
   const subscribe = useCallback(
     (listener: () => void) => subscribePatternImportDxfPhaseECardSessionV1(techCardId, listener),
@@ -464,6 +483,9 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
       orderSizeIds={orderSizeIds}
       sizeNameById={sizeNameById}
       savedAuthority={savedAuthority}
+      selection={selection}
+      operationsPanel={operationsPanel}
+      defaultOperationsMode={defaultOperationsMode}
       mannequin={({ sources, activeScopeKey }) => (
         <PatternImportDxfPhaseECadMannequinModelPickerV1
           disabled={disabled}

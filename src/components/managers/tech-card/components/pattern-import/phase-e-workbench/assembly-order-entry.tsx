@@ -72,6 +72,9 @@ import type { PatternImportDxfPhaseECadWorkbenchStitchEditCapabilitiesV1 } from 
 import type { PatternImportDxfPhaseEExactNAssemblyOrderSessionV2 } from '../phase-e-workbench-v2/exact-n-seam-production-mount-v2';
 import type { PatternImportDxfProductCompositeSidecarApplicationTransactionV4 } from '../phase-e-workbench-v2/composite-sidecar-production-transaction-v4';
 import { projectPatternImportDxfPhaseECadWorkbenchColorwaysV1 } from '../phase-e-workbench-v2/cad-workbench-bom-visual-authority-v1';
+import { PatternImportDxfPhaseECadTableZeroOperationProductionMountV1 } from '../phase-e-workbench-v2/cad-table-zero-operation-production-mount-v1';
+import { PatternImportDxfPhaseECadTableDraftOperationsPanelV1 } from '../phase-e-workbench-v2/cad-table-draft-operations-panel-v1';
+import type { PatternImportDxfPhaseECadTableDraftOperationSessionBridgeResultV1 } from '../phase-e-workbench-v2/cad-table-draft-operation-session-bridge-v1';
 import type { PatternImportDxfProductPhaseEMaterialRevisionOptionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import type { PatternImportDxfProductPhaseEWorkbenchResultV1 } from './contract';
 import {
@@ -92,6 +95,22 @@ export function keepPatternImportDxfPhaseECadWorkbenchHostV1(
   workbenchOpen: boolean,
 ): boolean {
   return entryRoute === 'v2' || workbenchOpen;
+}
+
+export function shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
+  workbenchOpen,
+  exactNSessionAvailable,
+  savedProjectionBlockerCode,
+}: Readonly<{
+  workbenchOpen: boolean;
+  exactNSessionAvailable: boolean;
+  savedProjectionBlockerCode: string | null;
+}>): boolean {
+  return (
+    workbenchOpen &&
+    !exactNSessionAvailable &&
+    savedProjectionBlockerCode === 'saved-operation-not-two-seam'
+  );
 }
 
 export const PATTERN_IMPORT_DXF_PHASE_E_ASSEMBLY_ORDER_ENTRY_CONTRACT_V1 = Object.freeze({
@@ -1417,6 +1436,13 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   const savedBlocker = savedProjection.ok
     ? savedRuntimeResolution.blocker
     : savedProjection.blockers[0];
+  const savedBrowseFallback = shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
+    workbenchOpen,
+    exactNSessionAvailable: exactNBoundarySession !== null,
+    savedProjectionBlockerCode: savedProjection.ok
+      ? null
+      : savedProjection.blockers[0]?.code ?? null,
+  });
   const sessionResolution = useMemo(
     () =>
       source && cardSession && selectedSeamKeys.length === 1
@@ -1434,6 +1460,41 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     if (entryRoute !== 'v2' && !workbenchOpen) onOpenChange?.(false);
   }, [entryRoute, onOpenChange, workbenchOpen]);
   if (!source || !selected) return null;
+  if (savedBrowseFallback) {
+    const fallbackResult: PatternImportDxfPhaseECadTableDraftOperationSessionBridgeResultV1 = {
+      ok: false,
+      plan: null,
+      blocker: {
+        code: 'exact-connection-incomplete',
+        detail:
+          'The table is open for this operation. Select exact edges to create or refine its connection drafts.',
+        operationNumber: source.selectedOperationNumber,
+        processKind: 'connect',
+      },
+    };
+    return (
+      <PatternImportDxfPhaseECadTableZeroOperationProductionMountV1
+        techCardId={techCardId}
+        zeroConnectAuthoringHandoff={zeroConnectAuthoringHandoff}
+        disabled={frozen}
+        savedOnly
+        selection={{ operationNumber: source.selectedOperationNumber }}
+        defaultOperationsMode='docked'
+        operationsPanel={
+          <PatternImportDxfPhaseECadTableDraftOperationsPanelV1
+            editor={operationsPanel}
+            result={fallbackResult}
+            operationNumber={source.selectedOperationNumber}
+            navigation={operationNavigation}
+            stitchVisual={stitchVisual}
+            onSelectOperation={onSelectOperation}
+            stitchEditCapabilities={stitchEditCapabilities}
+            onEditStitchField={onEditStitchField}
+          />
+        }
+      />
+    );
+  }
   if (keepPatternImportDxfPhaseECadWorkbenchHostV1(entryRoute, workbenchOpen))
     return (
       <PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2
