@@ -409,9 +409,10 @@ test('durable pose loads, saves with lossless CAS, survives ordinary Save and re
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   const reloaded = await waitForReadyDurable(page);
-  expect(poseFromSourceRevision(await reloaded.getAttribute('data-source-revision'))).toEqual(
-    changed,
-  );
+  const reloadedPose = poseFromSourceRevision(await reloaded.getAttribute('data-source-revision'));
+  expect(reloadedPose).toEqual(changed);
+  expect(reloadedPose.leftArm.elbowBendDegrees).toBe(0);
+  expect(reloadedPose.rightArm.elbowBendDegrees).toBe(0);
 });
 
 test('successful empty GET alone hydrates a neutral durable baseline', async ({ page }) => {

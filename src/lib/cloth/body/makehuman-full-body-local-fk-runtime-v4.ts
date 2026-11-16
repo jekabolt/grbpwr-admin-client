@@ -3,6 +3,11 @@ import type {
   MakeHumanCoreRigBundleV1,
 } from './makehuman-core-rig-pose-research-v1';
 import {
+  applyMakeHumanElbowBindNeutralizationV1,
+  deriveMakeHumanElbowBindNeutralizationV1,
+  type MakeHumanElbowBindNeutralizationV1,
+} from './makehuman-elbow-bind-neutralization-v1';
+import {
   compileMakeHumanFullBodyPoseV4,
   createNeutralMakeHumanFullBodyPoseV4,
   type MakeHumanFullBodyPoseInputV4,
@@ -78,10 +83,6 @@ const FK_APPLIED_CLAIMS = Object.freeze({
   runtimeCollisionEligible: false as const,
   productionAuthority: false as const,
 });
-const FK_BYPASSED_CLAIMS = Object.freeze({
-  ...FK_APPLIED_CLAIMS,
-  localForwardKinematicsApplied: false as const,
-});
 const loadAuthenticatedResourcesV4 = createMakeHumanDisplayPoseResourceLoaderV1();
 
 export function validateMakeHumanFullBodyLocalFkPoseV4(value: unknown) {
@@ -93,10 +94,14 @@ export { createNeutralMakeHumanFullBodyPoseV4 as createNeutralMakeHumanFullBodyL
 export function makeHumanFullBodyLocalFkRotationsV4(
   value: unknown,
   basisKind?: MakeHumanCoreRigBasisKindV1,
+  elbowNeutralization?: MakeHumanElbowBindNeutralizationV1,
 ) {
-  return compileMakeHumanFullBodyPoseV4(value, {
+  const rotations = compileMakeHumanFullBodyPoseV4(value, {
     basisKind: basisKind === 'base' ? 'neutral' : basisKind,
   }).rotations;
+  return elbowNeutralization
+    ? applyMakeHumanElbowBindNeutralizationV1(rotations, elbowNeutralization)
+    : rotations;
 }
 
 /** Low-level evaluator for an already-shaped mesh and matching authenticated rig anchors. */
@@ -108,6 +113,7 @@ export function poseMakeHumanFullBodyLocalFkV4(options: {
   readonly tails: Float32Array;
   readonly rollDirections: Float32Array;
   readonly pose: unknown;
+  readonly elbowNeutralization?: MakeHumanElbowBindNeutralizationV1;
 }): MakeHumanFullBodyLocalFkResultV4 {
   const compiled = compileMakeHumanFullBodyPoseV4(options.pose, {
     basisKind: options.basisKind === 'base' ? 'neutral' : options.basisKind,
@@ -119,7 +125,9 @@ export function poseMakeHumanFullBodyLocalFkV4(options: {
     heads: options.heads,
     tails: options.tails,
     rollDirections: options.rollDirections,
-    rotations: compiled.rotations,
+    rotations: options.elbowNeutralization
+      ? applyMakeHumanElbowBindNeutralizationV1(compiled.rotations, options.elbowNeutralization)
+      : compiled.rotations,
   });
   return Object.freeze({
     version: MAKEHUMAN_FULL_BODY_LOCAL_FK_RUNTIME_V4,
@@ -205,22 +213,6 @@ export async function createMeasurementOpenReferenceFullBodyLocalFkRuntimeV4(opt
   validateBinding({ ...options, rotationCount: compiled.rotations.length });
   const metadata = MEASUREMENT_OPEN_REFERENCE_DISPLAY_POSE_RUNTIME_METADATA_V1;
   const sourceRevision = boundRevision(options.sourceRevision, compiled.input);
-  if (compiled.rotations.length === 0) {
-    return Object.freeze({
-      version: MAKEHUMAN_FULL_BODY_LOCAL_FK_RUNTIME_V4,
-      input: compiled.input,
-      sourceRevision,
-      displayMesh: snapshotMeasurementSurfaceMeshV1(options.proxyRuntime.displayMesh),
-      maximumJointPivotResidualM: 0,
-      source: Object.freeze({
-        rigSha256: metadata.rigSha256,
-        anchorSha256: metadata.anchorSha256,
-        poseResourcesLoaded: false,
-      }),
-      claims: FK_BYPASSED_CLAIMS,
-    });
-  }
-
   const binding = Object.freeze({
     basisKind: options.basis.kind,
     sourceMinimumY: options.basis.sourceMinimumY,
@@ -249,6 +241,14 @@ export async function createMeasurementOpenReferenceFullBodyLocalFkRuntimeV4(opt
     tailsM: anchors.tailsM,
     rollDirections: anchors.rollDirections,
   });
+  const elbowNeutralization = deriveMakeHumanElbowBindNeutralizationV1({
+    bundle: resources.rig,
+    basisKind: binding.basisKind,
+    heads: coherentAnchors.headsM,
+    tails: coherentAnchors.tailsM,
+    rollDirections: coherentAnchors.rollDirections,
+    rigSha256: metadata.rigSha256,
+  });
   const posed = poseMakeHumanFullBodyLocalFkV4({
     bundle: resources.rig,
     basisKind: binding.basisKind,
@@ -257,6 +257,7 @@ export async function createMeasurementOpenReferenceFullBodyLocalFkRuntimeV4(opt
     tails: coherentAnchors.tailsM,
     rollDirections: coherentAnchors.rollDirections,
     pose: compiled.input,
+    elbowNeutralization,
   });
   if (
     !Number.isFinite(posed.maximumJointPivotResidual) ||

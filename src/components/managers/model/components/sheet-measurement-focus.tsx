@@ -25,6 +25,8 @@ export function measurementLabel(name: string): string {
 
 type SheetMeasurementFocus = {
   active: string;
+  /** Committed field selection. Unlike `active`, transient row hover never changes this value. */
+  selected: string;
   focused: string | null;
   setFocus: (name: string) => void;
   setFocused: (name: string | null) => void;
@@ -38,7 +40,7 @@ export function SheetMeasurementFocusProvider({ children }: { children: ReactNod
   const [focused, setFocused] = useState<string | null>(null);
   const [hover, setHover] = useState<string | null>(null);
   const value = useMemo(
-    () => ({ active: hover ?? focus, focused, setFocus, setFocused, setHover }),
+    () => ({ active: hover ?? focus, selected: focus, focused, setFocus, setFocused, setHover }),
     [focus, focused, hover],
   );
 

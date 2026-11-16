@@ -1,0 +1,382 @@
+{
+  "schemaVersion": "makehuman-third-party-asset-manifest/v1",
+  "scope": "Pinned MakeHuman and MakeHuman2 binary assets committed under src/assets/cloth",
+  "policy": {
+    "licenseIdentifierIsNotReceipt": true,
+    "missingEvidenceBlocksReproducibilityClaim": true,
+    "missingEvidenceBlocksRedistributionAuditClosure": true,
+    "packageLicenseIsNotThirdPartyEvidence": true
+  },
+  "assets": [
+    {
+      "id": "makehuman-visible-base-v1",
+      "derivedAsset": {
+        "path": "src/assets/cloth/makehuman-hm08-visible-v1.bin",
+        "byteLength": 321160,
+        "sha256": "c76480790b8a64227b8ad73834ac60c3594019573adb535cb6fcc0c7aac36668"
+      },
+      "upstream": {
+        "repository": "makehumancommunity/makehuman",
+        "commit": "1f508f6083b2f823dab15de924b3bde72e08d77c",
+        "paths": ["makehuman/data/3dobjs/base.obj"],
+        "evidenceStatus": "partial",
+        "reason": "The base object path and hash are pinned in code; raw upstream files are not vendored."
+      },
+      "generator": {
+        "status": "missingEvidence",
+        "expectedPath": "scripts/cloth/build-makehuman-open-reference-variants-v1.mjs",
+        "reason": "The metadata names this generator, but the script is absent from the repository."
+      },
+      "license": {
+        "identifier": "CC0-1.0",
+        "receiptStatus": "missingEvidence",
+        "receiptPath": null,
+        "reason": "No upstream license snapshot or acquisition receipt is committed."
+      },
+      "claimBoundary": {
+        "runtimeAdmission": "production-display",
+        "visualOnly": true,
+        "canonicalMeasurementSemanticMatchClaimed": false,
+        "anatomicalCalibrationClaimed": false,
+        "tapeMeasurementEquivalent": false,
+        "populationRepresentativenessClaimed": false,
+        "garmentFitEligible": false
+      }
+    },
+    {
+      "id": "makehuman-visible-neutral-v1",
+      "derivedAsset": {
+        "path": "src/assets/cloth/makehuman-hm08-neutral-visible-v1.bin",
+        "byteLength": 321160,
+        "sha256": "ec7f3d1ab0880210f8ff919ec160849b5415c9e03207c4936c200249a7dd24cc"
+      },
+      "upstream": {
+        "repository": "makehumancommunity/makehuman",
+        "commit": "1f508f6083b2f823dab15de924b3bde72e08d77c",
+        "paths": ["makehuman/data/3dobjs/base.obj"],
+        "evidenceStatus": "partial",
+        "reason": "The derived variant formula and source hashes are pinned in code, but target paths and raw inputs are not all vendored."
+      },
+      "generator": {
+        "status": "missingEvidence",
+        "expectedPath": "scripts/cloth/build-makehuman-open-reference-variants-v1.mjs",
+        "reason": "The metadata names this generator, but the script is absent from the repository."
+      },
+      "license": {
+        "identifier": "CC0-1.0",
+        "receiptStatus": "missingEvidence",
+        "receiptPath": null,
+        "reason": "No upstream license snapshot or acquisition receipt is committed."
+      },
+      "claimBoundary": {
+        "runtimeAdmission": "production-display",
+        "visualOnly": true,
+        "canonicalMeasurementSemanticMatchClaimed": false,
+        "anatomicalCalibrationClaimed": false,
+        "tapeMeasurementEquivalent": false,
+        "populationRepresentativenessClaimed": false,
+        "garmentFitEligible": false
+      }
+    },
+    {
+      "id": "makehuman-visible-male-v1",
+      "derivedAsset": {
+        "path": "src/assets/cloth/makehuman-hm08-male-visible-v1.bin",
+        "byteLength": 321160,
+        "sha256": "5535b0ceaae60932ff54d3d18aee1bd2412b6a13db4ad0503ef6118bdb23fb85"
+      },
+      "upstream": {
+        "repository": "makehumancommunity/makehuman",
+        "commit": "1f508f6083b2f823dab15de924b3bde72e08d77c",
+        "paths": ["makehuman/data/3dobjs/base.obj"],
+        "evidenceStatus": "partial",
+        "reason": "The derived variant formula and source hashes are pinned in code, but target paths and raw inputs are not all vendored."
+      },
+      "generator": {
+        "status": "missingEvidence",
+        "expectedPath": "scripts/cloth/build-makehuman-open-reference-variants-v1.mjs",
+        "reason": "The metadata names this generator, but the script is absent from the repository."
+      },
+      "license": {
+        "identifier": "CC0-1.0",
+        "receiptStatus": "missingEvidence",
+        "receiptPath": null,
+        "reason": "No upstream license snapshot or acquisition receipt is committed."
+      },
+      "claimBoundary": {
+        "runtimeAdmission": "production-display",
+        "visualOnly": true,
+        "canonicalMeasurementSemanticMatchClaimed": false,
+        "anatomicalCalibrationClaimed": false,
+        "tapeMeasurementEquivalent": false,
+        "populationRepresentativenessClaimed": false,
+        "garmentFitEligible": false
+      }
+    },
+    {
+      "id": "makehuman-visible-female-v1",
+      "derivedAsset": {
+        "path": "src/assets/cloth/makehuman-hm08-female-visible-v1.bin",
+        "byteLength": 321160,
+        "sha256": "77d5d08438ca3dfdb7c8135457ddcccd0c8184b94a206b3183ca1f289895cc49"
+      },
+      "upstream": {
+        "repository": "makehumancommunity/makehuman",
+        "commit": "1f508f6083b2f823dab15de924b3bde72e08d77c",
+        "paths": ["makehuman/data/3dobjs/base.obj"],
+        "evidenceStatus": "partial",
+        "reason": "The derived variant formula and source hashes are pinned in code, but target paths and raw inputs are not all vendored."
+      },
+      "generator": {
+        "status": "missingEvidence",
+        "expectedPath": "scripts/cloth/build-makehuman-open-reference-variants-v1.mjs",
+        "reason": "The metadata names this generator, but the script is absent from the repository."
+      },
+      "license": {
+        "identifier": "CC0-1.0",
+        "receiptStatus": "missingEvidence",
+        "receiptPath": null,
+        "reason": "No upstream license snapshot or acquisition receipt is committed."
+      },
+      "claimBoundary": {
+        "runtimeAdmission": "production-display",
+        "visualOnly": true,
+        "canonicalMeasurementSemanticMatchClaimed": false,
+        "anatomicalCalibrationClaimed": false,
+        "tapeMeasurementEquivalent": false,
+        "populationRepresentativenessClaimed": false,
+        "garmentFitEligible": false
+      }
+    },
+    {
+      "id": "makehuman-torso-shape-deltas-v1",
+      "derivedAsset": {
+        "path": "src/assets/cloth/makehuman-hm08-torso-shape-deltas-v1.bin",
+        "byteLength": 233472,
+        "sha256": "a59b351473ccb301dc06ec810ee8007c74e9568dfc86bbb60b7a707fd074b4e5"
+      },
+      "upstream": {
+        "repository": "makehumancommunity/makehuman",
+        "commit": "1f508f6083b2f823dab15de924b3bde72e08d77c",
+        "paths": [
+          "makehuman/data/targets/measure/measure-bust-circ-decr.target",
+          "makehuman/data/targets/measure/measure-bust-circ-incr.target",
+          "makehuman/data/targets/measure/measure-waist-circ-decr.target",
+          "makehuman/data/targets/measure/measure-waist-circ-incr.target",
+          "makehuman/data/targets/measure/measure-hips-circ-decr.target",
+          "makehuman/data/targets/measure/measure-hips-circ-incr.target",
+          "makehuman/data/targets/measure/measure-shoulder-dist-decr.target",
+          "makehuman/data/targets/measure/measure-shoulder-dist-incr.target"
+        ],
+        "evidenceStatus": "partial",
+        "reason": "Paths and hashes are pinned in code; raw source assets are explicitly not bundled."
+      },
+      "generator": {
+        "status": "missingEvidence",
+        "expectedPath": "scripts/cloth/build-makehuman-torso-shape-deltas-v1.mjs",
+        "reason": "The metadata names this generator, but the script is absent from the repository."
+      },
+      "license": {
+        "identifier": "CC0-1.0",
+        "receiptStatus": "missingEvidence",
+        "receiptPath": null,
+        "reason": "No upstream license snapshot or acquisition receipt is committed."
+      },
+      "claimBoundary": {
+        "runtimeAdmission": "bounded-visual-proxy",
+        "visualOnly": true,
+        "canonicalMeasurementSemanticMatchClaimed": false,
+        "anatomicalCalibrationClaimed": false,
+        "tapeMeasurementEquivalent": false,
+        "populationRepresentativenessClaimed": false,
+        "garmentFitEligible": false
+      }
+    },
+    {
+      "id": "makehuman-limb-circumference-deltas-v1",
+      "derivedAsset": {
+        "path": "src/assets/cloth/makehuman-hm08-limb-circumference-deltas-v1.bin",
+        "byteLength": 76352,
+        "sha256": "7a852519ce230ac82aa6b8beea404b49f04305532a9ea26cdd30151015464a2c"
+      },
+      "upstream": {
+        "repository": "makehumancommunity/makehuman",
+        "commit": "1f508f6083b2f823dab15de924b3bde72e08d77c",
+        "paths": [
+          "makehuman/data/targets/measure/measure-upperarm-circ-decr.target",
+          "makehuman/data/targets/measure/measure-upperarm-circ-incr.target",
+          "makehuman/data/targets/measure/measure-wrist-circ-decr.target",
+          "makehuman/data/targets/measure/measure-wrist-circ-incr.target",
+          "makehuman/data/targets/measure/measure-thigh-circ-decr.target",
+          "makehuman/data/targets/measure/measure-thigh-circ-incr.target",
+          "makehuman/data/targets/measure/measure-calf-circ-decr.target",
+          "makehuman/data/targets/measure/measure-calf-circ-incr.target",
+          "makehuman/data/targets/measure/measure-ankle-circ-decr.target",
+          "makehuman/data/targets/measure/measure-ankle-circ-incr.target"
+        ],
+        "evidenceStatus": "partial",
+        "reason": "Paths and hashes are pinned in code; raw source assets are explicitly not bundled."
+      },
+      "generator": {
+        "status": "missingEvidence",
+        "expectedPath": "scripts/cloth/build-makehuman-limb-circumference-deltas-v1.mjs",
+        "reason": "The metadata names this generator, but the script is absent from the repository."
+      },
+      "license": {
+        "identifier": "CC0-1.0",
+        "receiptStatus": "missingEvidence",
+        "receiptPath": null,
+        "reason": "No upstream license snapshot or acquisition receipt is committed."
+      },
+      "claimBoundary": {
+        "runtimeAdmission": "bounded-visual-proxy",
+        "visualOnly": true,
+        "canonicalMeasurementSemanticMatchClaimed": false,
+        "anatomicalCalibrationClaimed": false,
+        "tapeMeasurementEquivalent": false,
+        "populationRepresentativenessClaimed": false,
+        "garmentFitEligible": false
+      }
+    },
+    {
+      "id": "makehuman-core-rig-v1",
+      "derivedAsset": {
+        "path": "src/assets/cloth/makehuman-hm08-core-rig-v1.bin",
+        "byteLength": 402738,
+        "sha256": "4fd4364c07ac7cfd5efe0d81a53c007ef3f1941358583307632d427a3012e4ed"
+      },
+      "upstream": {
+        "repository": "makehumancommunity/makehuman",
+        "commit": "1f508f6083b2f823dab15de924b3bde72e08d77c",
+        "paths": [],
+        "evidenceStatus": "missingEvidence",
+        "reason": "The existing metadata does not record the exact upstream rig and weight source paths."
+      },
+      "generator": {
+        "status": "missingEvidence",
+        "expectedPath": null,
+        "reason": "No generator path is recorded for this derived bundle."
+      },
+      "license": {
+        "identifier": "CC0-1.0",
+        "receiptStatus": "missingEvidence",
+        "receiptPath": null,
+        "reason": "No upstream license snapshot or acquisition receipt is committed."
+      },
+      "claimBoundary": {
+        "runtimeAdmission": "research-only",
+        "visualOnly": true,
+        "canonicalMeasurementSemanticMatchClaimed": false,
+        "anatomicalCalibrationClaimed": false,
+        "tapeMeasurementEquivalent": false,
+        "populationRepresentativenessClaimed": false,
+        "garmentFitEligible": false
+      }
+    },
+    {
+      "id": "makehuman-repaired-core-rig-v1",
+      "derivedAsset": {
+        "path": "src/assets/cloth/makehuman-hm08-repaired-core-rig-v1.bin",
+        "byteLength": 402738,
+        "sha256": "be638f3c26e8d2385c2f36c2b5104854629bc080379f369f22c3d720d2bc79f3"
+      },
+      "upstream": {
+        "repository": "makehumancommunity/makehuman",
+        "commit": "1f508f6083b2f823dab15de924b3bde72e08d77c",
+        "paths": [],
+        "evidenceStatus": "missingEvidence",
+        "reason": "The repaired runtime metadata does not record exact source paths or the repair input manifest."
+      },
+      "generator": {
+        "status": "missingEvidence",
+        "expectedPath": null,
+        "reason": "The repair generator and deterministic repair recipe are not committed."
+      },
+      "license": {
+        "identifier": "CC0-1.0",
+        "receiptStatus": "missingEvidence",
+        "receiptPath": null,
+        "reason": "No upstream license snapshot or acquisition receipt is committed."
+      },
+      "claimBoundary": {
+        "runtimeAdmission": "production-display",
+        "visualOnly": true,
+        "canonicalMeasurementSemanticMatchClaimed": false,
+        "anatomicalCalibrationClaimed": false,
+        "tapeMeasurementEquivalent": false,
+        "populationRepresentativenessClaimed": false,
+        "garmentFitEligible": false
+      }
+    },
+    {
+      "id": "makehuman-repaired-waist-hip-rig-anchor-deltas-v1",
+      "derivedAsset": {
+        "path": "src/assets/cloth/makehuman-hm08-repaired-waist-hip-rig-anchor-deltas-v1.bin",
+        "byteLength": 62720,
+        "sha256": "8075c8862f71b9f7a3f698691bee10a9d6a7784f6e91d9d05c2edda6afc1b345"
+      },
+      "upstream": {
+        "repository": "makehumancommunity/makehuman",
+        "commit": "1f508f6083b2f823dab15de924b3bde72e08d77c",
+        "paths": [],
+        "evidenceStatus": "missingEvidence",
+        "reason": "The repaired runtime metadata does not record exact upstream paths or the repair input manifest."
+      },
+      "generator": {
+        "status": "missingEvidence",
+        "expectedPath": null,
+        "reason": "The repair generator and deterministic repair recipe are not committed."
+      },
+      "license": {
+        "identifier": "CC0-1.0",
+        "receiptStatus": "missingEvidence",
+        "receiptPath": null,
+        "reason": "No upstream license snapshot or acquisition receipt is committed."
+      },
+      "claimBoundary": {
+        "runtimeAdmission": "production-display",
+        "visualOnly": true,
+        "canonicalMeasurementSemanticMatchClaimed": false,
+        "anatomicalCalibrationClaimed": false,
+        "tapeMeasurementEquivalent": false,
+        "populationRepresentativenessClaimed": false,
+        "garmentFitEligible": false
+      }
+    },
+    {
+      "id": "makehuman2-pose-compatible-length-v1",
+      "derivedAsset": {
+        "path": "src/assets/cloth/makehuman2-hm08-pose-compatible-length-v1.bin",
+        "byteLength": 643468,
+        "sha256": "6b7ab1609ff411750db1625b7659d93ce3de485283a1444bf9d444e5dea70823"
+      },
+      "upstream": {
+        "repository": "makehumancommunity/makehuman2",
+        "commit": "13b7ff56b388826bee548bc18d78c8d492cf3512",
+        "paths": [],
+        "evidenceStatus": "missingEvidence",
+        "reason": "The metadata pins the repository and commit but not the exact source paths used by the missing generator."
+      },
+      "generator": {
+        "status": "missingEvidence",
+        "expectedPath": "scripts/cloth/build-makehuman2-pose-compatible-length-pack-v1.mjs",
+        "reason": "The metadata names this generator, but the script is absent from the repository."
+      },
+      "license": {
+        "identifier": "CC0-1.0",
+        "receiptStatus": "missingEvidence",
+        "receiptPath": null,
+        "reason": "No upstream license snapshot or acquisition receipt is committed."
+      },
+      "claimBoundary": {
+        "runtimeAdmission": "bounded-visual-proxy",
+        "visualOnly": true,
+        "canonicalMeasurementSemanticMatchClaimed": false,
+        "anatomicalCalibrationClaimed": false,
+        "tapeMeasurementEquivalent": false,
+        "populationRepresentativenessClaimed": false,
+        "garmentFitEligible": false
+      }
+    }
+  ]
+}

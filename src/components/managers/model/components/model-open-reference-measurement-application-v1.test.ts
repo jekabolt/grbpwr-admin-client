@@ -187,6 +187,37 @@ describe('model open-reference measurement application v1', () => {
     );
   });
 
+  it('reports conditional torso inputs as modifier-only instead of unsupported', () => {
+    const result = modelOpenReferenceMeasurementApplicationV1({
+      measurements: {
+        ...measurements,
+        hpsToWaistFrontMm: 430,
+        acrossFrontMm: 360,
+        acrossBackMm: 390,
+      },
+      rawMeasurements: {},
+      beta: {
+        representedVisualControls: [
+          'heightMm',
+          'shoulderBreadthMm',
+          'chestCircumferenceMm',
+          'waistCircumferenceMm',
+          'hipCircumferenceMm',
+        ],
+        limitedVisualControls: ['armLengthMm'],
+        chestShoulderDiagnostics: [],
+        fkProxyRuntime: { diagnostics: [] },
+      },
+    });
+
+    expect(result.modifierOnly).toEqual(['hpsToWaistFrontMm', 'acrossFrontMm', 'acrossBackMm']);
+    expect(result.unsupported).toEqual(['inseam', 'neck base circumference']);
+    expect(modelOpenReferenceMeasurementApplicationSummaryV1(result)).toEqual({
+      status: 'partial',
+      text: 'body shape partial · limited by safe range: arm length centerline proxy · modifier only: hps to waist front, across front, across back · not modeled: inseam, neck base circumference',
+    });
+  });
+
   it('reports a displayed bounded thigh as limited instead of not applied or not modeled', () => {
     const result = modelOpenReferenceMeasurementApplicationV1({
       measurements: { ...measurements, thighCircumferenceMm: 1_000 },

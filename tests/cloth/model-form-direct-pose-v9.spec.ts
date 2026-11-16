@@ -64,6 +64,19 @@ function liveJointDistanceV10(
   return Math.hypot(left[0] - right[0], left[1] - right[1], left[2] - right[2]);
 }
 
+function liveElbowBendDegreesV10(
+  shoulderM: readonly [number, number, number],
+  elbowM: readonly [number, number, number],
+  wristM: readonly [number, number, number],
+) {
+  const upper = shoulderM.map((value, axis) => value - elbowM[axis]);
+  const lower = wristM.map((value, axis) => value - elbowM[axis]);
+  const cosine =
+    upper.reduce((sum, value, axis) => sum + value * lower[axis], 0) /
+    (Math.hypot(...upper) * Math.hypot(...lower));
+  return 180 - (Math.acos(Math.max(-1, Math.min(1, cosine))) * 180) / Math.PI;
+}
+
 function poseFromSourceRevision(sourceRevision: string | null): PoseV9 {
   const encoded = sourceRevision?.match(/(?:^|;)editorPoseV9=([^;]+)/u)?.[1];
   if (!encoded) throw new Error('The committed V9 pose is missing from the body source revision.');
@@ -195,6 +208,31 @@ async function dragPositionTarget(options: {
   );
   await expect.poll(() => canvas.getAttribute('data-source-revision')).not.toBe(sourceBefore);
   return await canvas.getAttribute('data-source-revision');
+}
+
+async function dragPositionTargetWithLiveOverlay(options: {
+  readonly page: Page;
+  readonly canvas: Locator;
+  readonly start: CanvasPoint;
+  readonly deltaX: number;
+  readonly deltaY: number;
+}) {
+  const { page, canvas, start, deltaX, deltaY } = options;
+  const sourceBefore = await canvas.getAttribute('data-source-revision');
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await expect(canvas).toHaveAttribute('data-position-dragging', 'true');
+  await page.mouse.move(start.x + deltaX, start.y + deltaY, { steps: 10 });
+  await expect(canvas).toHaveAttribute('data-live-position-status', 'updated');
+  await expect(canvas).toHaveAttribute('data-live-joint-overlay-status', 'updated');
+  const overlaySignature = await canvas.getAttribute('data-live-joint-overlay-signature');
+  await page.mouse.up();
+  await expect(canvas).toHaveAttribute('data-position-dragging', 'false');
+  await expect.poll(() => canvas.getAttribute('data-source-revision')).not.toBe(sourceBefore);
+  return {
+    sourceRevision: await canvas.getAttribute('data-source-revision'),
+    overlaySignature,
+  };
 }
 
 async function dragPositionTargetWithAnatomicalCandidates(options: {
@@ -473,6 +511,16 @@ async function findHoverMarkerCenter(options: {
     }
   }
   if (!seed) throw new Error(`Could not locate the projected ${groupId} marker.`);
+  const projectedMarkers = JSON.parse(
+    (await canvas.getAttribute('data-projected-joint-markers')) ?? '[]',
+  ) as readonly Readonly<{ id: string; screenX: number; screenY: number }>[];
+  const projectedMarker = projectedMarkers.find(({ id }) => id === groupId);
+  if (projectedMarker) {
+    return {
+      x: bounds.x + projectedMarker.screenX,
+      y: bounds.y + projectedMarker.screenY,
+    };
+  }
   const horizontalHits: number[] = [];
   for (let x = seed.x - 40; x <= seed.x + 40; x += 1) {
     await page.mouse.move(x, seed.y);
@@ -556,6 +604,7 @@ async function dragSelectedRing(options: {
   const during = {
     admissibility: await preview.getAttribute('data-pose-admissibility'),
     blockers: await preview.getAttribute('data-pose-blockers'),
+    overlaySignature: await canvas.getAttribute('data-live-joint-overlay-signature'),
   };
   await page.mouse.up();
   await expect(canvas).toHaveAttribute('data-gizmo-dragging', 'false');
@@ -566,6 +615,77 @@ async function dragSelectedRing(options: {
     ...during,
     sourceRevision: await canvas.getAttribute('data-source-revision'),
   };
+}
+
+async function dragSelectedRingArc(options: {
+  readonly page: Page;
+  readonly canvas: Locator;
+  readonly pivot: CanvasPoint;
+  readonly direction: 1 | -1;
+  readonly angleDegrees?: number;
+}) {
+  const { page, canvas, pivot, direction, angleDegrees = 60 } = options;
+  const points = await ringGesturePoints(page, canvas, pivot);
+  const deltaX = points.start.x - pivot.x;
+  const deltaY = points.start.y - pivot.y;
+  const radius = Math.hypot(deltaX, deltaY);
+  const startAngle = Math.atan2(deltaY, deltaX);
+  await page.mouse.move(points.start.x, points.start.y);
+  await page.mouse.down();
+  await expect(canvas).toHaveAttribute('data-gizmo-dragging', 'true');
+  for (let step = 1; step <= 12; step += 1) {
+    const angle = startAngle + direction * ((angleDegrees * Math.PI) / 180) * (step / 12);
+    await page.mouse.move(pivot.x + Math.cos(angle) * radius, pivot.y + Math.sin(angle) * radius);
+  }
+  const preview = page.getByTestId('model-open-reference-preview');
+  const during = {
+    admissibility: await preview.getAttribute('data-pose-admissibility'),
+    blockers: await preview.getAttribute('data-pose-blockers'),
+    overlaySignature: await canvas.getAttribute('data-live-joint-overlay-signature'),
+  };
+  await page.mouse.up();
+  await expect(canvas).toHaveAttribute('data-gizmo-dragging', 'false');
+  await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
+    'Preview partial',
+  );
+  return {
+    ...during,
+    sourceRevision: await canvas.getAttribute('data-source-revision'),
+  };
+}
+
+async function flexLeftElbowInSideView(options: {
+  readonly page: Page;
+  readonly canvas: Locator;
+  readonly minimumBendDegrees?: number;
+}) {
+  const { page, canvas, minimumBendDegrees = 30 } = options;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const marker = await findHoverMarker({
+      page,
+      canvas,
+      groupId: 'left-elbow',
+      xOffsets: [0, -18, 18, -36, 36, -54, 54, -72, 72],
+      startFraction: 0.2,
+      endFraction: 0.58,
+    });
+    const pivot = await refineHoverMarkerCenter({
+      page,
+      canvas,
+      groupId: 'left-elbow',
+      seed: marker,
+    });
+    await page.mouse.click(pivot.x, pivot.y);
+    const moved = await dragSelectedRingArc({
+      page,
+      canvas,
+      pivot,
+      direction: -1,
+    });
+    const bendDegrees = poseFromSourceRevision(moved.sourceRevision).leftArm.elbowBendDegrees;
+    if (bendDegrees >= minimumBendDegrees) return { ...moved, bendDegrees };
+  }
+  throw new Error(`Could not flex the left elbow to ${minimumBendDegrees} degrees.`);
 }
 
 test('ModelForm V9 live-drags head and leg while empty space remains the camera', async ({
@@ -948,13 +1068,7 @@ test('side-view elbow ring admits anterior flexion and cannot reverse past neutr
   expect(reverse.sourceRevision).toBe(neutralSource);
   expect(poseFromSourceRevision(reverse.sourceRevision).leftArm.elbowBendDegrees).toBe(0);
 
-  const flexed = await dragSelectedRing({
-    page,
-    canvas,
-    pivot,
-    direction: -1,
-    distance: 720,
-  });
+  const flexed = await flexLeftElbowInSideView({ page, canvas });
   expect(flexed.admissibility).toBe('admitted');
   expect(flexed.blockers).toBe('');
   expect(flexed.sourceRevision).not.toBe(neutralSource);
@@ -997,8 +1111,141 @@ test('side-view elbow ring admits anterior flexion and cannot reverse past neutr
     seed: flexedWristSeed,
   });
   expect(flexedWrist.x).toBeLessThan(flexedElbow.x - 8);
+
+  await page.mouse.click(flexedElbow.x, flexedElbow.y);
+  await expect(canvas).toHaveAttribute('data-selected-joint-group', 'left-elbow');
+  const straightened = await dragSelectedRing({
+    page,
+    canvas,
+    pivot: flexedElbow,
+    direction: 1,
+  });
+  const straightenedArm = poseFromSourceRevision(straightened.sourceRevision).leftArm;
+  expect(straightened.admissibility).toBe('admitted');
+  expect(straightened.blockers).toBe('');
+  expect(straightenedArm.elbowBendDegrees).toBe(0);
+  const straightOverlay = liveJointOverlayGroupsFromSignature(straightened.overlaySignature);
+  const straightShoulder = straightOverlay.get('left-shoulder-group');
+  const straightElbowGroup = straightOverlay.get('left-elbow');
+  const straightWrist = straightOverlay.get('left-wrist');
+  expect(straightShoulder).toBeDefined();
+  expect(straightElbowGroup).toBeDefined();
+  expect(straightWrist).toBeDefined();
+  expect(
+    liveElbowBendDegreesV10(
+      straightShoulder!.headM,
+      straightElbowGroup!.headM,
+      straightWrist!.headM,
+    ),
+  ).toBeLessThan(0.1);
   await settlePointerOnEmptyCanvas(page, canvas);
   await canvas.screenshot({ path: '/tmp/model-form-v9-safe-elbow-side.png' });
+});
+
+test('side-view wrist drag detents a visibly straight arm to exact neutral', async ({ page }) => {
+  await page.goto(DEV_ROUTE, { waitUntil: 'domcontentloaded' });
+  const preview = page.getByTestId('model-open-reference-preview');
+  const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
+  await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
+    'Preview partial: A-rest',
+    { timeout: 180_000 },
+  );
+  await page.getByRole('img', { name: /3D mannequin joint editor/i }).press('ArrowLeft');
+  await expect(canvas).toHaveAttribute('data-view-preset', 'side');
+  const elbowSeed = await findHoverMarker({
+    page,
+    canvas,
+    groupId: 'left-elbow',
+    xOffsets: [0, -18, 18, -36, 36, -54, 54, -72, 72],
+    startFraction: 0.2,
+    endFraction: 0.55,
+  });
+  const elbow = await refineHoverMarkerCenter({
+    page,
+    canvas,
+    groupId: 'left-elbow',
+    seed: elbowSeed,
+  });
+  await page.mouse.click(elbow.x, elbow.y);
+  const flexed = await flexLeftElbowInSideView({ page, canvas });
+  expect(
+    poseFromSourceRevision(flexed.sourceRevision).leftArm.elbowBendDegrees,
+  ).toBeGreaterThanOrEqual(30);
+
+  const flexedElbowSeed = await findHoverMarker({
+    page,
+    canvas,
+    groupId: 'left-elbow',
+    xOffsets: [0, -18, 18, -36, 36, -54, 54],
+    startFraction: 0.2,
+    endFraction: 0.55,
+  });
+  const flexedElbow = await refineHoverMarkerCenter({
+    page,
+    canvas,
+    groupId: 'left-elbow',
+    seed: flexedElbowSeed,
+  });
+  const flexedWristSeed = await findHoverMarker({
+    page,
+    canvas,
+    groupId: 'left-wrist',
+    xOffsets: [-36, -54, -18, -72, 0, -90, 18, -108, 36],
+    startFraction: 0.22,
+    endFraction: 0.6,
+  });
+  const flexedWrist = await refineHoverMarkerCenter({
+    page,
+    canvas,
+    groupId: 'left-wrist',
+    seed: flexedWristSeed,
+  });
+  const flexedShoulderSeed = await findHoverMarker({
+    page,
+    canvas,
+    groupId: 'left-shoulder-group',
+    xOffsets: [0, -18, 18, -36, 36, -54, 54],
+    startFraction: 0.12,
+    endFraction: 0.42,
+  });
+  const flexedShoulder = await refineHoverMarkerCenter({
+    page,
+    canvas,
+    groupId: 'left-shoulder-group',
+    seed: flexedShoulderSeed,
+  });
+  const upperScreenX = flexedElbow.x - flexedShoulder.x;
+  const upperScreenY = flexedElbow.y - flexedShoulder.y;
+  const upperScreenLength = Math.hypot(upperScreenX, upperScreenY);
+  const lowerScreenLength = Math.hypot(
+    flexedWrist.x - flexedElbow.x,
+    flexedWrist.y - flexedElbow.y,
+  );
+  const straightTarget = {
+    x: flexedElbow.x + (upperScreenX / upperScreenLength) * lowerScreenLength * 1.25,
+    y: flexedElbow.y + (upperScreenY / upperScreenLength) * lowerScreenLength * 1.25,
+  };
+  const wristStraightened = await dragPositionTargetWithLiveOverlay({
+    page,
+    canvas,
+    start: flexedWrist,
+    deltaX: straightTarget.x - flexedWrist.x,
+    deltaY: straightTarget.y - flexedWrist.y,
+  });
+  expect(poseFromSourceRevision(wristStraightened.sourceRevision).leftArm.elbowBendDegrees).toBe(0);
+  await expect(preview).toHaveAttribute('data-pose-admissibility', 'admitted');
+  await expect(preview).toHaveAttribute('data-pose-blockers', '');
+
+  const straightOverlay = liveJointOverlayGroupsFromSignature(wristStraightened.overlaySignature);
+  const straightShoulder = straightOverlay.get('left-shoulder-group');
+  const straightElbow = straightOverlay.get('left-elbow');
+  const straightWrist = straightOverlay.get('left-wrist');
+  expect(straightShoulder).toBeDefined();
+  expect(straightElbow).toBeDefined();
+  expect(straightWrist).toBeDefined();
+  expect(
+    liveElbowBendDegreesV10(straightShoulder!.headM, straightElbow!.headM, straightWrist!.headM),
+  ).toBeLessThan(0.1);
 });
 
 test('under-bust rebuilds an independent ribcage band without resetting the V9 pose', async ({

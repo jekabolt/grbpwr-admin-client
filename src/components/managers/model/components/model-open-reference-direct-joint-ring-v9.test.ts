@@ -67,6 +67,97 @@ describe('model open-reference direct joint ring v9', () => {
     expect(moved.draftPose.rightArm.elbowBendDegrees).toBe(40);
   });
 
+  it('straightens both linked elbows to exact neutral in one ordinary ring sweep', () => {
+    const maximallyFlexed = snapshotModelOpenReferenceDirectPoseV9({
+      ...MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9,
+      leftArm: {
+        ...MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9.leftArm,
+        elbowBendDegrees: 100,
+      },
+      rightArm: {
+        ...MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9.rightArm,
+        elbowBendDegrees: 100,
+      },
+    });
+    const moved = modelOpenReferenceDirectJointRingMoveV9(
+      modelOpenReferenceDirectJointRingBeginV9({
+        pose: maximallyFlexed,
+        selection: modelOpenReferenceDirectJointSelectionV9('left-elbow'),
+        pointerAngleDegrees: 0,
+      }),
+      55,
+    ).draftPose;
+
+    expect(moved.leftArm.elbowBendDegrees).toBe(0);
+    expect(moved.rightArm.elbowBendDegrees).toBe(0);
+    expect(moved.leftArm.elbowBendDegrees).toBeGreaterThanOrEqual(0);
+    expect(moved.rightArm.elbowBendDegrees).toBeGreaterThanOrEqual(0);
+  });
+
+  it('detents the terminal straightening zone to zero but keeps low flexion selectable', () => {
+    const bent = snapshotModelOpenReferenceDirectPoseV9({
+      ...MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9,
+      leftArm: {
+        ...MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9.leftArm,
+        elbowBendDegrees: 30,
+      },
+      rightArm: {
+        ...MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9.rightArm,
+        elbowBendDegrees: 30,
+      },
+    });
+    const straightened = modelOpenReferenceDirectJointRingMoveV9(
+      modelOpenReferenceDirectJointRingBeginV9({
+        pose: bent,
+        selection: modelOpenReferenceDirectJointSelectionV9('left-elbow'),
+        pointerAngleDegrees: 0,
+      }),
+      2,
+    ).draftPose;
+    const lowFlexion = modelOpenReferenceDirectJointRingMoveV9(
+      modelOpenReferenceDirectJointRingBeginV9({
+        pose: MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9,
+        selection: modelOpenReferenceDirectJointSelectionV9('left-elbow'),
+        pointerAngleDegrees: 0,
+      }),
+      -10,
+    ).draftPose;
+
+    expect(straightened.leftArm.elbowBendDegrees).toBe(0);
+    expect(straightened.rightArm.elbowBendDegrees).toBe(0);
+    expect(lowFlexion.leftArm.elbowBendDegrees).toBe(10);
+    expect(lowFlexion.rightArm.elbowBendDegrees).toBe(10);
+  });
+
+  it.each([
+    ['left', 'left-elbow'],
+    ['right', 'right-elbow'],
+  ] as const)('straightens only the selected %s elbow when arms are independent', (_, selected) => {
+    const independent = snapshotModelOpenReferenceDirectPoseV9({
+      ...MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9,
+      armMode: 'independent',
+      leftArm: {
+        ...MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9.leftArm,
+        elbowBendDegrees: 100,
+      },
+      rightArm: {
+        ...MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9.rightArm,
+        elbowBendDegrees: 100,
+      },
+    });
+    const moved = modelOpenReferenceDirectJointRingMoveV9(
+      modelOpenReferenceDirectJointRingBeginV9({
+        pose: independent,
+        selection: modelOpenReferenceDirectJointSelectionV9(selected),
+        pointerAngleDegrees: 0,
+      }),
+      55,
+    ).draftPose;
+
+    expect(moved[selected.startsWith('left') ? 'leftArm' : 'rightArm'].elbowBendDegrees).toBe(0);
+    expect(moved[selected.startsWith('left') ? 'rightArm' : 'leftArm'].elbowBendDegrees).toBe(100);
+  });
+
   it('applies ankle and knee rings symmetrically or independently and clamps their envelopes', () => {
     const linkedAnkle = modelOpenReferenceDirectJointRingMoveV9(
       modelOpenReferenceDirectJointRingBeginV9({

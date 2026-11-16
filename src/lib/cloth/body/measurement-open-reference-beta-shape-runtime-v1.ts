@@ -14,10 +14,8 @@ import {
   type MakeHuman2PoseCompatibleLengthPackV1,
 } from './makehuman2-pose-compatible-length-pack-v1';
 import type { CanonicalBodyMeasurementsMm } from './measurement-adapter';
-import {
-  evaluateMeasurementOpenReferenceDisplayQualityWithSelfIntersectionV1,
-  type MeasurementOpenReferenceDisplayQualityGateResultV1,
-} from './measurement-open-reference-display-quality-gate-v1';
+import type { MeasurementOpenReferenceDisplayQualityGateResultV1 } from './measurement-open-reference-display-quality-gate-v1';
+import { evaluateMeasurementOpenReferenceDisplayQualityInWorkerV1 } from './measurement-open-reference-display-quality-worker-v1';
 import type { MeasurementSurfaceSelfIntersectionPolicyV1 } from './measurement-surface-self-intersection-v1';
 import { solveOpenReferenceChestShoulderResearchV1 } from './measurement-open-reference-chest-shoulder-research-v1';
 import { applyOpenReferenceUnderBustRibcageResearchV1 } from './measurement-open-reference-underbust-ribcage-research-v1';
@@ -106,6 +104,14 @@ export type MeasurementOpenReferenceBetaShapeLengthPackLoaderV1 =
   () => Promise<MakeHuman2PoseCompatibleLengthPackV1>;
 export type MeasurementOpenReferenceBetaShapePoseResourcesLoaderV1 =
   () => Promise<MeasurementOpenReferenceDisplayPoseResourcesV1>;
+export type MeasurementOpenReferenceBetaShapeQualityGateEvaluatorV1 = (options: {
+  readonly uniformPositionsM: Float32Array;
+  readonly personalizedPositionsM: Float32Array;
+  readonly triangleIndices: Uint16Array | Uint32Array;
+  readonly selfIntersectionPolicy?: MeasurementSurfaceSelfIntersectionPolicyV1;
+  readonly admittedBasisRevision?: string;
+  readonly signal?: AbortSignal;
+}) => Promise<MeasurementOpenReferenceDisplayQualityGateResultV1>;
 
 const loadBetaShapePoseResourcesV1 = createMakeHumanDisplayPoseResourceLoaderV1();
 
@@ -185,6 +191,8 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: 
   readonly loadPoseResources?: MeasurementOpenReferenceBetaShapePoseResourcesLoaderV1;
   readonly createArmLengthRuntime?: typeof createMakeHuman2ArmLengthProxyRuntimeResearchV1;
   readonly selfIntersectionPolicy?: MeasurementSurfaceSelfIntersectionPolicyV1;
+  readonly evaluateQualityGate?: MeasurementOpenReferenceBetaShapeQualityGateEvaluatorV1;
+  readonly signal?: AbortSignal;
 }): Promise<MeasurementOpenReferenceBetaShapeRuntimeResultV1> {
   const admittedBasisRevision =
     options.waistHipRuntime.openReference.provenance.basis.derivedBasisSha256;
@@ -346,12 +354,15 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: 
     );
   }
 
-  const finalQualityGate = evaluateMeasurementOpenReferenceDisplayQualityWithSelfIntersectionV1({
+  const evaluateQualityGate =
+    options.evaluateQualityGate ?? evaluateMeasurementOpenReferenceDisplayQualityInWorkerV1;
+  const finalQualityGate = await evaluateQualityGate({
     uniformPositionsM: shapedRuntime.openReference.mesh.positions,
     personalizedPositionsM: shapedRuntime.displayMesh.positions,
     triangleIndices: shapedRuntime.displayMesh.indices,
     admittedBasisRevision,
     selfIntersectionPolicy: options.selfIntersectionPolicy,
+    signal: options.signal,
   });
   if (finalQualityGate.safe) {
     shapedRuntime = withDisplayPositions(
@@ -371,14 +382,14 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: 
     represented.push(...baselineRepresented);
     limited.length = 0;
     limbStatus = 'unrepresented';
-    const rollbackQualityGate =
-      evaluateMeasurementOpenReferenceDisplayQualityWithSelfIntersectionV1({
-        uniformPositionsM: options.waistHipRuntime.openReference.mesh.positions,
-        personalizedPositionsM: options.waistHipRuntime.displayMesh.positions,
-        triangleIndices: options.waistHipRuntime.displayMesh.indices,
-        admittedBasisRevision,
-        selfIntersectionPolicy: options.selfIntersectionPolicy,
-      });
+    const rollbackQualityGate = await evaluateQualityGate({
+      uniformPositionsM: options.waistHipRuntime.openReference.mesh.positions,
+      personalizedPositionsM: options.waistHipRuntime.displayMesh.positions,
+      triangleIndices: options.waistHipRuntime.displayMesh.indices,
+      admittedBasisRevision,
+      selfIntersectionPolicy: options.selfIntersectionPolicy,
+      signal: options.signal,
+    });
     if (rollbackQualityGate.safe) {
       shapedRuntime = withDisplayPositions(
         options.waistHipRuntime,
@@ -389,14 +400,14 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: 
       diagnostics.push('beta-final-admitted-basis-fallback');
       represented.length = 0;
       represented.push('heightMm');
-      const admittedBasisQualityGate =
-        evaluateMeasurementOpenReferenceDisplayQualityWithSelfIntersectionV1({
-          uniformPositionsM: options.waistHipRuntime.openReference.mesh.positions,
-          personalizedPositionsM: options.waistHipRuntime.openReference.mesh.positions,
-          triangleIndices: options.waistHipRuntime.openReference.mesh.indices,
-          admittedBasisRevision,
-          selfIntersectionPolicy: options.selfIntersectionPolicy,
-        });
+      const admittedBasisQualityGate = await evaluateQualityGate({
+        uniformPositionsM: options.waistHipRuntime.openReference.mesh.positions,
+        personalizedPositionsM: options.waistHipRuntime.openReference.mesh.positions,
+        triangleIndices: options.waistHipRuntime.openReference.mesh.indices,
+        admittedBasisRevision,
+        selfIntersectionPolicy: options.selfIntersectionPolicy,
+        signal: options.signal,
+      });
       if (
         !admittedBasisQualityGate.safe ||
         !admittedBasisQualityGate.claims.selfIntersectionEvaluated
