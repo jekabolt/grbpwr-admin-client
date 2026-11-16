@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   createDxfProductSavedReprocessOwnerV1,
+  DxfProductSavedForeignDxfDetectedErrorV1,
   DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
   type DxfProductSavedReprocessHostV1,
   type DxfProductSavedRowIdentityV1,
@@ -46,6 +47,62 @@ describe('saved DXF reprocess owner read failures', () => {
       ],
     });
     expect(host.reprocess).not.toHaveBeenCalled();
+    owner.dispose();
+  });
+
+  it('publishes the typed foreign-DXF blocker only for the dedicated manifest-absent signal', async () => {
+    const host: DxfProductSavedReprocessHostV1 = {
+      crypto: {
+        subtle: {
+          digest: vi.fn(async () => Uint8Array.from({ length: 32 }, () => 0xaa).buffer),
+        },
+      } as unknown as Pick<Crypto, 'subtle'>,
+      readAuthoritativeRow: vi.fn(async () => ({ row, bytes: new Uint8Array([1, 2, 3]) })),
+      reprocess: vi.fn(async () => {
+        throw new DxfProductSavedForeignDxfDetectedErrorV1();
+      }),
+      readCurrentRowIdentity: vi.fn(async () => row),
+    };
+    const owner = createDxfProductSavedReprocessOwnerV1(host);
+
+    const result = await owner.run({
+      schemaVersion: DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
+      row,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      blockers: [{ code: 'foreign-saved-dxf-detected' }],
+    });
+    expect(host.readCurrentRowIdentity).not.toHaveBeenCalled();
+    owner.dispose();
+  });
+
+  it('keeps every untyped reprocessor error on the exact failure path', async () => {
+    const host: DxfProductSavedReprocessHostV1 = {
+      crypto: {
+        subtle: {
+          digest: vi.fn(async () => Uint8Array.from({ length: 32 }, () => 0xaa).buffer),
+        },
+      } as unknown as Pick<Crypto, 'subtle'>,
+      readAuthoritativeRow: vi.fn(async () => ({ row, bytes: new Uint8Array([1, 2, 3]) })),
+      reprocess: vi.fn(async () => {
+        throw new Error('corrupt manifest');
+      }),
+      readCurrentRowIdentity: vi.fn(async () => row),
+    };
+    const owner = createDxfProductSavedReprocessOwnerV1(host);
+
+    const result = await owner.run({
+      schemaVersion: DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
+      row,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      blockers: [{ code: 'saved-dxf-reprocess-failed' }],
+    });
+    expect(host.readCurrentRowIdentity).not.toHaveBeenCalled();
     owner.dispose();
   });
 });

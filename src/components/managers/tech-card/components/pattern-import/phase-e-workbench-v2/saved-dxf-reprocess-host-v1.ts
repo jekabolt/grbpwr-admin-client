@@ -7,9 +7,10 @@ import {
   DXF_PRODUCT_PHASE_D_REPLAY_REQUEST_V1,
   type DxfProductPhaseDReplayStageOutputV1,
 } from 'lib/pattern-import/dxf-product-phase-d-replay-v1';
-import type {
-  DxfProductSavedReprocessHostV1,
-  DxfProductSavedRowIdentityV1,
+import {
+  DxfProductSavedForeignDxfDetectedErrorV1,
+  type DxfProductSavedReprocessHostV1,
+  type DxfProductSavedRowIdentityV1,
 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import { pinToScope } from 'lib/pattern-import/fabrics/scope';
 import {
@@ -557,8 +558,8 @@ async function reprocessSavedDxf(
   assertLive(signal);
   const bytes = exactArrayBuffer(input.bytes);
   const manifest = readManifestBytes(bytes);
+  if (!manifest) throw new DxfProductSavedForeignDxfDetectedErrorV1();
   if (
-    !manifest ||
     manifest.techCardId !== input.row.techCardId ||
     manifest.scope.fabricPurpose == null ||
     !manifest.createdAt ||
