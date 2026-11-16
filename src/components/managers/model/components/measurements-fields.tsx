@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { useController, useFormContext, useWatch } from 'react-hook-form';
+import { useController, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import {
   Button,
   CalloutBox,
@@ -372,6 +372,212 @@ export function MeasurementsFields({ showAudit = false }: { showAudit?: boolean 
             measurements={group.measurements}
             audit={audit}
           />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// The group switch has eight segments in two rows of four; the two long group names are cut to one
+// word there (approved mockup). The guided view and the narrow table keep their own short names.
+const GROUP_SWITCH_LABEL: Record<string, string> = {
+  'shoulder / armscye': 'shoulder',
+  'bust landmarks': 'bust',
+};
+
+function groupSwitchLabel(title: string): string {
+  return GROUP_SWITCH_LABEL[title] ?? shortMeasurementGroup(title);
+}
+
+function measurementGroupIndex(name: string | null | undefined): number {
+  if (!name) return -1;
+  return BODY_MEASUREMENT_GROUPS.findIndex(({ measurements }) =>
+    measurements.some((measurement) => measurement.name === name),
+  );
+}
+
+/** Where Tab / Shift+Tab leaves a field of the grouped table; null = the browser's own move. */
+export function measurementGroupTabTargetV1(
+  groupIndex: number,
+  name: string,
+  shiftKey: boolean,
+): { groupIndex: number; name: string } | null {
+  const group = BODY_MEASUREMENT_GROUPS[groupIndex];
+  if (!group) return null;
+  const names = group.measurements.map((measurement) => measurement.name as string);
+  if (!shiftKey && name === names[names.length - 1]) {
+    const next = BODY_MEASUREMENT_GROUPS[groupIndex + 1];
+    const first = next?.measurements[0]?.name;
+    return first ? { groupIndex: groupIndex + 1, name: first } : null;
+  }
+  if (shiftKey && name === names[0]) {
+    const previous = BODY_MEASUREMENT_GROUPS[groupIndex - 1];
+    const last = previous?.measurements[previous.measurements.length - 1]?.name;
+    return last ? { groupIndex: groupIndex - 1, name: last } : null;
+  }
+  return null;
+}
+
+/** The counter of one group-switch segment: error beats incomplete beats done. */
+export function measurementGroupCountV1(
+  values: MeasurementValues,
+  names: readonly string[],
+  hasError: (name: string) => boolean,
+): { text: string; tone: 'mut' | 'attention' | 'error' } {
+  const filled = filledCount(values, [...names]);
+  return {
+    text: `${filled}/${names.length}`,
+    tone: names.some(hasError) ? 'error' : filled < names.length ? 'attention' : 'mut',
+  };
+}
+
+/** First field (form order) holding an error — the group a submit opens. */
+export function firstMeasurementWithErrorV1(
+  hasError: (name: string) => boolean,
+): { groupIndex: number; name: string } | null {
+  const first = MODEL_MEASUREMENTS.find((measurement) => hasError(measurement.name));
+  return first ? { groupIndex: measurementGroupIndex(first.name), name: first.name } : null;
+}
+
+function GroupedMeasurementRow({
+  name,
+  findings,
+  onAdvance,
+}: {
+  name: string;
+  findings: readonly ModelMeasurementFieldFindingV1[];
+  onAdvance: () => void;
+}) {
+  const { setHover } = useSheetMeasurementFocus();
+  const measurements = useMeasurements();
+  const empty = !(Number(measurements[name]) > 0);
+  return (
+    <div
+      onMouseEnter={() => setHover(name)}
+      onMouseLeave={() => setHover(null)}
+      className='grid min-h-9 grid-cols-[minmax(0,1fr)_6.5rem] items-center gap-x-2.5 gap-y-1 py-0.5'
+    >
+      <label htmlFor={measurementInputId(name)} className='min-w-0'>
+        <Text
+          component='span'
+          className={cn('block truncate text-textColor', empty && 'font-bold')}
+        >
+          {measurementLabel(name)}
+        </Text>
+      </label>
+      <MeasurementInput name={name} findings={findings} onAdvance={onAdvance} />
+      {findings.length > 0 ? (
+        <div className='col-span-2'>
+          <MeasurementFindingList name={name} findings={findings} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Desktop table view beside the mannequin: one measurement group at a time behind a group switch.
+ * Every group stays mounted (hidden groups are `hidden`), so values, refs and validation are the
+ * same RHF fields as in the narrow table and the guided view. Tab leaves the last field of a group
+ * into the next group's first field and Shift+Tab goes back; a field selected from elsewhere (a
+ * header warning, the guided view) or the first error after a submit opens its own group.
+ */
+export function MeasurementsGroupedTable({ showAudit = false }: { showAudit?: boolean }) {
+  const values = useMeasurements();
+  const audit = useMeasurementFieldAudit(showAudit);
+  const { selected } = useSheetMeasurementFocus();
+  const { control } = useFormContext<ModelFormData>();
+  const { errors, submitCount } = useFormState({ control, name: 'measurements' });
+  const [groupIndex, setGroupIndex] = useState(() => Math.max(0, measurementGroupIndex(selected)));
+  const [focusRequest, setFocusRequest] = useState<{ name: string; tick: number } | null>(null);
+  const fieldErrors = errors.measurements as Record<string, unknown> | undefined;
+  const hasError = (name: string) =>
+    (audit.byMeasurementName[name]?.length ?? 0) > 0 || !!fieldErrors?.[name];
+
+  const open = (index: number, focusName?: string) => {
+    const group = BODY_MEASUREMENT_GROUPS[index];
+    if (!group) return;
+    setGroupIndex(index);
+    const name = focusName ?? (group.measurements[0]?.name as string | undefined);
+    if (name) setFocusRequest((current) => ({ name, tick: (current?.tick ?? 0) + 1 }));
+  };
+
+  useEffect(() => {
+    const index = measurementGroupIndex(selected);
+    if (index >= 0) setGroupIndex(index);
+  }, [selected]);
+
+  useEffect(() => {
+    if (!focusRequest) return;
+    document.getElementById(measurementInputId(focusRequest.name))?.focus();
+  }, [focusRequest]);
+
+  // A submit with an error in a hidden group opens that group on the first such field.
+  const lastSubmitCount = useRef(submitCount);
+  useEffect(() => {
+    if (submitCount === lastSubmitCount.current) return;
+    lastSubmitCount.current = submitCount;
+    const first = firstMeasurementWithErrorV1(hasError);
+    if (first) open(first.groupIndex, first.name);
+    // `hasError` reads the same render's audit and errors; only a new submit re-runs this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submitCount]);
+
+  const advanceFrom = (name: string) => {
+    const index = MODEL_MEASUREMENTS.findIndex((measurement) => measurement.name === name);
+    const next = MODEL_MEASUREMENTS[index + 1];
+    if (next) open(measurementGroupIndex(next.name), next.name);
+  };
+
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Tab') return;
+    const name = (event.target as HTMLElement).dataset?.modelMeasurement;
+    const target = name ? measurementGroupTabTargetV1(groupIndex, name, event.shiftKey) : null;
+    if (!target) return;
+    event.preventDefault();
+    open(target.groupIndex, target.name);
+  };
+
+  const options = BODY_MEASUREMENT_GROUPS.map((group) => ({
+    value: group.title,
+    label: groupSwitchLabel(group.title),
+    count: measurementGroupCountV1(
+      values,
+      group.measurements.map((measurement) => measurement.name as string),
+      hasError,
+    ),
+  }));
+
+  return (
+    <div className='flex flex-col gap-stack' data-testid='measurements-grouped-table'>
+      <ViewSwitch<string>
+        label='measurement group'
+        value={BODY_MEASUREMENT_GROUPS[groupIndex]?.title ?? ''}
+        options={options}
+        columns={4}
+        onChange={(title) =>
+          open(BODY_MEASUREMENT_GROUPS.findIndex((group) => group.title === title))
+        }
+      />
+      <div onKeyDown={onKeyDown}>
+        {BODY_MEASUREMENT_GROUPS.map((group, index) => (
+          <div
+            key={group.title}
+            role='group'
+            aria-label={groupSwitchLabel(group.title)}
+            hidden={index !== groupIndex}
+            data-measurement-group={group.title}
+            className='flex flex-col divide-y divide-hairline'
+          >
+            {group.measurements.map((measurement) => (
+              <GroupedMeasurementRow
+                key={measurement.name}
+                name={measurement.name}
+                findings={audit.byMeasurementName[measurement.name] ?? []}
+                onAdvance={() => advanceFrom(measurement.name)}
+              />
+            ))}
+          </div>
         ))}
       </div>
     </div>

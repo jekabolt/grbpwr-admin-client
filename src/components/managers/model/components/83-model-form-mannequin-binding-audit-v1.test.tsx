@@ -257,7 +257,20 @@ describe('receipt 83 model-form mannequin binding audit v1', () => {
 
     const formOwner = formSource.indexOf('<Form {...form}>');
     expect(formOwner).toBeGreaterThan(-1);
-    expect(formOwner).toBeLessThan(formSource.indexOf('<MeasurementsQuiz', formOwner));
+    // The measurements block (table, grouped table or guided quiz) is one element placed inside
+    // the form in both layouts: stacked, and the desktop pair beside the body preview.
+    const measurementsSection = formSource.indexOf('const measurementsSection = (');
+    expect(measurementsSection).toBeGreaterThan(-1);
+    expect(measurementsSection).toBeLessThan(
+      formSource.indexOf('<MeasurementsQuiz', measurementsSection),
+    );
+    expect(formOwner).toBeLessThan(
+      formSource.indexOf('{paired ? null : measurementsSection}', formOwner),
+    );
+    expect(formOwner).toBeLessThan(formSource.indexOf('{measurementsSection}', formOwner));
+    expect(formOwner).toBeLessThan(
+      formSource.indexOf('{renderBodyPreview(false, true)}', formOwner),
+    );
     expect(formOwner).toBeLessThan(
       formSource.indexOf(
         "<Section title='body preview'>{renderBodyPreview(false)}</Section>",
