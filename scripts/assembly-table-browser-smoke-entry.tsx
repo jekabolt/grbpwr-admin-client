@@ -11,6 +11,11 @@ import type {
   PatternImportDxfProductPhaseEMultiseamProposalV2,
   PatternImportDxfProductPhaseEMultiseamWorkbenchStateV2,
 } from 'lib/pattern-import/dxf-product-phase-e-multiseam-workbench-v2';
+import { PatternImportDxfPhaseECadMannequinDxfStagingV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-mannequin-dxf-staging-v1';
+import {
+  PatternImportDxfPhaseECadWorkbenchSplitShellV1,
+  type PatternImportDxfPhaseECadWorkbenchSelectionV1,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-workbench-split-shell-v1';
 import { PatternImportDxfProductPhaseEMultiseamWorkbenchV2 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/workbench';
 
 const SHA = 'a'.repeat(64);
@@ -235,23 +240,78 @@ function BrowserSmoke() {
   const [state, setState] = useState(initialState);
   const [activeSeamIndex, setActiveSeamIndex] = useState<0 | 1>(0);
   const [activePieceIndex, setActivePieceIndex] = useState<0 | 1>(0);
+  const [shellSelection, setShellSelection] =
+    useState<PatternImportDxfPhaseECadWorkbenchSelectionV1 | null>({
+      operationNumber: 10,
+      pieceId: null,
+      seamId: null,
+    });
 
   return (
     <TooltipProvider>
-      <main className='h-screen min-h-0 overflow-hidden bg-pageBg p-2' data-browser-smoke-root=''>
-        <PatternImportDxfProductPhaseEMultiseamWorkbenchV2
-          catalog={catalog}
-          projection={projection}
-          proposal={proposal}
-          state={state}
-          materialOptions={materialOptions}
-          colorwayOptions={[{ id: 1, label: 'Black', swatchHex: '#111111' }]}
-          activeSeamIndex={activeSeamIndex}
-          activePieceIndex={activePieceIndex}
-          onActiveSeamIndexChange={setActiveSeamIndex}
-          onActivePieceIndexChange={setActivePieceIndex}
-          onStateChange={setState}
-          onConfirm={() => undefined}
+      <main className='h-screen min-h-0 overflow-hidden bg-pageBg' data-browser-smoke-root=''>
+        <PatternImportDxfPhaseECadWorkbenchSplitShellV1
+          selection={shellSelection}
+          onSelectionFocus={({ selection }) => setShellSelection(selection)}
+          defaultSplitPercent={64}
+          defaultOperationsWidthPx={320}
+          desktop={
+            <PatternImportDxfProductPhaseEMultiseamWorkbenchV2
+              catalog={catalog}
+              projection={projection}
+              proposal={proposal}
+              state={state}
+              materialOptions={materialOptions}
+              colorwayOptions={[{ id: 1, label: 'Black', swatchHex: '#111111' }]}
+              activeSeamIndex={activeSeamIndex}
+              activePieceIndex={activePieceIndex}
+              onActiveSeamIndexChange={setActiveSeamIndex}
+              onActivePieceIndexChange={setActivePieceIndex}
+              onStateChange={setState}
+              onConfirm={() => undefined}
+            />
+          }
+          mannequin={({ selection, focusSelection }) => (
+            <div
+              className='relative h-full min-h-0 overflow-hidden bg-pageBg'
+              data-browser-smoke-mannequin='model-free'
+            >
+              <div
+                className='absolute inset-0 flex items-center justify-center text-micro text-labelColor'
+                aria-label='No mannequin selected'
+              >
+                Select a mannequin
+              </div>
+              <PatternImportDxfPhaseECadMannequinDxfStagingV1
+                sources={[
+                  {
+                    scopeKey: 'TECH_CARD_BOM_PURPOSE_MAIN',
+                    label: 'Main fabric',
+                    projection,
+                  },
+                ]}
+                activeScopeKey='TECH_CARD_BOM_PURPOSE_MAIN'
+                selection={{
+                  scopeKey: 'TECH_CARD_BOM_PURPOSE_MAIN',
+                  pieceId: selection?.pieceId ?? null,
+                  seamId: selection?.seamId ?? null,
+                }}
+                onFocus={(next) =>
+                  focusSelection({
+                    operationNumber: selection?.operationNumber ?? 10,
+                    pieceId: next.pieceId ?? null,
+                    seamId: next.seamId ?? null,
+                  })
+                }
+              />
+            </div>
+          )}
+          operationsPanel={
+            <div className='h-full p-3' data-browser-smoke-operation-panel=''>
+              <p className='text-micro font-bold uppercase'>Current operation · 10</p>
+              <p className='mt-2 text-micro text-labelColor'>Join side seams</p>
+            </div>
+          }
         />
       </main>
     </TooltipProvider>

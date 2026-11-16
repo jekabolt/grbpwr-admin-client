@@ -78,7 +78,7 @@ if (!cssName) throw new Error('Production CSS is unavailable; run yarn build:che
 const css = readFileSync(resolve(REPO, 'dist/assets', cssName), 'utf8');
 
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+const page = await browser.newPage({ viewport: { width: 1920, height: 1200 } });
 const pageErrors = [];
 page.on('pageerror', (error) => pageErrors.push(String(error)));
 await page.route('http://probe.local/**', (route) =>
@@ -97,6 +97,14 @@ const check = (condition, label, detail = '') => {
 };
 
 console.log('\nASSEMBLY TABLE BROWSER SMOKE');
+const splitShell = page.locator('[data-cad-workbench-split-shell-v1]');
+check((await splitShell.count()) === 1, 'integrated split shell renders');
+check((await page.locator('[data-cad-desktop-zone]').count()) === 1, '2D desktop zone renders');
+check((await page.locator('[data-cad-mannequin-zone]').count()) === 1, 'mannequin zone renders');
+check(
+  (await page.locator('[data-cad-operations-window="docked"]').count()) === 1,
+  'Current operation starts docked',
+);
 check((await page.locator('[data-v2-piece-id]').count()) === 2, 'two exact DXF pieces render');
 check(
   (await page.locator('[data-cad-object-sidebar="expanded"]').count()) === 1,
@@ -112,8 +120,72 @@ const canvas = page.getByRole('img', {
 });
 const canvasBox = await canvas.boundingBox();
 check(
-  Boolean(canvasBox && canvasBox.width > 800 && canvasBox.height > 700),
+  Boolean(canvasBox && canvasBox.width > 700 && canvasBox.height > 700),
   'canvas uses the desktop work area',
+  canvasBox ? `${Math.round(canvasBox.width)}×${Math.round(canvasBox.height)} px` : 'no box',
+);
+
+const layoutSummary = page.locator('[data-cad-layout-menu] > summary');
+await layoutSummary.click();
+await page.getByRole('button', { name: '2D table', exact: true }).click();
+const focusedCanvasBox = await canvas.boundingBox();
+check(
+  (await page.locator('[data-cad-mannequin-zone]').count()) === 0 &&
+    Boolean(focusedCanvasBox && focusedCanvasBox.width > 1200),
+  'Layout focus gives the 2D canvas the full work area',
+  focusedCanvasBox ? `${Math.round(focusedCanvasBox.width)} px wide` : 'no box',
+);
+await layoutSummary.click();
+await page.getByRole('button', { name: '2D table + mannequin', exact: true }).click();
+check(
+  (await page.locator('[data-cad-mannequin-zone]').count()) === 1,
+  'Layout restores the split mannequin zone',
+);
+
+const splitHandle = page.getByRole('button', { name: 'Resize 2D and mannequin zones' });
+const splitBeforeHover = await splitHandle.getAttribute('aria-valuenow');
+await splitHandle.hover();
+check(
+  (await splitHandle.getAttribute('aria-valuenow')) === splitBeforeHover,
+  'split width does not change on hover',
+);
+const splitHandleBox = await splitHandle.boundingBox();
+if (!splitHandleBox) {
+  check(false, 'split resize handle has geometry');
+} else {
+  const startX = splitHandleBox.x + splitHandleBox.width / 2;
+  const startY = splitHandleBox.y + splitHandleBox.height / 2;
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + 140, startY, { steps: 4 });
+  await page.mouse.up();
+  check(
+    Number(await splitHandle.getAttribute('aria-valuenow')) > Number(splitBeforeHover),
+    'split width changes only after captured drag',
+  );
+  check(
+    (await splitShell.getAttribute('data-active-drag')) === null,
+    'split drag releases cleanly',
+  );
+}
+
+await page.getByRole('button', { name: 'cm', exact: true }).click();
+check(
+  (await page.getByRole('button', { name: 'cm', exact: true }).getAttribute('aria-pressed')) ===
+    'true',
+  'measurement unit control switches to cm',
+);
+
+check(
+  (await page
+    .locator('[data-cad-mannequin-dxf-staging]')
+    .getAttribute('data-cad-mannequin-dxf-piece-count')) === '2',
+  'model-free mannequin zone stages every exact piece',
+);
+await page.getByRole('button', { name: 'Focus BACK' }).click();
+check(
+  (await splitShell.getAttribute('data-selected-piece')) === 'piece-back',
+  'mannequin staged-piece selection reaches shared shell state',
 );
 
 await page.locator('[data-cad-object-piece="piece-back"]').click();
@@ -151,6 +223,19 @@ check(
   'view options open contextually',
 );
 await page.getByRole('button', { name: 'Close view options' }).click();
+
+await page.getByRole('button', { name: 'Collapse Current operation' }).click();
+const collapsedOperation = page.locator('[data-cad-operations-window="collapsed"]');
+const collapsedOperationBox = await collapsedOperation.boundingBox();
+check(
+  Boolean(collapsedOperationBox && collapsedOperationBox.width <= 40),
+  'Current operation collapses to a thin rail',
+);
+await page.getByRole('button', { name: 'Expand Current operation' }).click();
+check(
+  (await page.locator('[data-cad-operations-window="docked"]').count()) === 1,
+  'Current operation expands back to docked mode',
+);
 
 await page.getByLabel('Measure tools').click();
 await page.getByRole('button', { name: 'Measure line' }).click();
