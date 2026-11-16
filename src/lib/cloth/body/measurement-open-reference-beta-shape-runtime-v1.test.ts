@@ -611,6 +611,46 @@ describe('measurement open-reference beta shape runtime v1', () => {
     30_000,
   );
 
+  it('rolls back only the depth subset when male chest depth fails the final global gate', async () => {
+    const measurements = Object.freeze({
+      ...CANONICAL_MEASUREMENT_SIZE_RECORDS[1].measurements,
+      heightMm: 1800,
+      shoulderBreadthMm: 460,
+      chestCircumferenceMm: 1000,
+      waistCircumferenceMm: 860,
+      hipCircumferenceMm: 990,
+      armLengthMm: 640,
+      inseamMm: 820,
+      chestDepthMm: 300,
+    });
+    const current = await fixture('male', measurements);
+    const result = await createMeasurementOpenReferenceBetaShapeRuntimeV1({
+      ...current,
+      loadTorsoBundle: async () => torsoBundle,
+    });
+    const applied = new Set([
+      ...result.representedVisualControls,
+      ...(result.limitedVisualControls ?? []),
+    ]);
+    console.log('DEPTH_SUBSET_ROLLBACK_V1=' + JSON.stringify({
+      status: result.status,
+      represented: result.representedVisualControls,
+      limited: result.limitedVisualControls,
+      diagnostics: result.chestShoulderDiagnostics,
+    }));
+    expect(result.chestShoulderDiagnostics).toContain('beta-final-depth-subset-rollback');
+    expect(result.chestShoulderDiagnostics).not.toContain('beta-final-global-quality-rollback');
+    expect(applied.has('shoulderBreadthMm')).toBe(true);
+    expect(applied.has('chestCircumferenceMm')).toBe(true);
+    expect(applied.has('chestDepthMm')).toBe(false);
+    expect(result.status).toBe('partial');
+    expect(applied.has('armLengthMm')).toBe(true);
+    expect(result.claims).toMatchObject({
+      torsoDepthFrontBackDistributionCalibrated: false,
+      fitClaimEligible: false,
+    });
+  }, 60_000);
+
   it.each(['neutral', 'male', 'female'] as const)(
     '%s admits optional under-bust as an independent research-only visual control',
     async (kind) => {

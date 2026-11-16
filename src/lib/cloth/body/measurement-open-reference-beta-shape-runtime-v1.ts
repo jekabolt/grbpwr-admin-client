@@ -267,12 +267,66 @@ function suffix(
   return `${MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_RUNTIME_V1};represented=${keys.join(',')}${limitedSuffix};${armLengthSuffix};inseamMm=unrepresented`;
 }
 
+type MeasurementOpenReferenceBetaShapeRuntimeOptionsV1 = Parameters<
+  typeof createBetaShapeRuntimeOnceV1
+>[0];
+
+function withoutTorsoDepth(
+  measurements: CanonicalBodyMeasurementsMm,
+): CanonicalBodyMeasurementsMm | undefined {
+  if (
+    measurements.chestDepthMm == null &&
+    measurements.waistDepthMm == null &&
+    measurements.hipDepthMm == null
+  ) {
+    return undefined;
+  }
+  const {
+    chestDepthMm: _chestDepthMm,
+    waistDepthMm: _waistDepthMm,
+    hipDepthMm: _hipDepthMm,
+    ...rest
+  } = measurements;
+  return Object.freeze(rest);
+}
+
 /**
  * Product-visible beta visual response. It promotes only locally bounded CC0 directions that keep
  * the existing quality/closure rollback. armLengthMm is at most a bounded skeleton-centerline
  * visual proxy; inseam stays explicitly unrepresented because no reviewed crotch landmark exists.
+ *
+ * Optional torso depth is the newest, least-calibrated control. When the shaped mesh fails the
+ * final global quality gate while depth was requested, only the depth subset is rolled back: the
+ * runtime is solved again without depth and keeps the chest/shoulder, limb and arm-length
+ * response if that solve passes. Depth controls then stay requested but unapplied.
  */
-export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(options: {
+export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(
+  options: MeasurementOpenReferenceBetaShapeRuntimeOptionsV1,
+): Promise<MeasurementOpenReferenceBetaShapeRuntimeResultV1> {
+  const result = await createBetaShapeRuntimeOnceV1(options);
+  const depthFree = withoutTorsoDepth(options.measurements);
+  if (!depthFree || !result.chestShoulderDiagnostics.includes('beta-final-global-quality-rollback')) {
+    return result;
+  }
+  const retry = await createBetaShapeRuntimeOnceV1({ ...options, measurements: depthFree });
+  if (retry.chestShoulderDiagnostics.includes('beta-final-global-quality-rollback')) {
+    return result;
+  }
+  return Object.freeze({
+    ...retry,
+    // Depth was requested but is not applied, so a fully represented retry is still partial.
+    status: retry.status === 'represented' ? ('partial' as const) : retry.status,
+    chestShoulderDiagnostics: Object.freeze([
+      ...result.chestShoulderDiagnostics.filter((code) =>
+        /^(chestDepthMm|waistDepthMm|hipDepthMm):/.test(code),
+      ),
+      'beta-final-depth-subset-rollback',
+      ...retry.chestShoulderDiagnostics,
+    ]),
+  });
+}
+
+async function createBetaShapeRuntimeOnceV1(options: {
   readonly basis: MakeHumanOpenReferenceBasisV1;
   readonly measurements: CanonicalBodyMeasurementsMm;
   readonly waistHipRuntime: MeasurementOpenReferenceUniformWaistHipRuntimeResultV1;
