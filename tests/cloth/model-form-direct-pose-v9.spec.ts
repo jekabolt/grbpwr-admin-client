@@ -948,7 +948,7 @@ test('clean ModelForm V9 lowers linked arms beside the thighs with a 56 px wrist
   await expect(page.getByTestId('model-form-smoke-mutation-calls')).toHaveText('0');
 });
 
-test('direct ankle and wrist drags retain a non-crossing last-valid pose with ground support', async ({
+test('direct ankle and wrist drags retain a non-crossing last-valid pose across limb families', async ({
   page,
 }) => {
   await page.goto(DEV_ROUTE, { waitUntil: 'domcontentloaded' });
@@ -991,9 +991,13 @@ test('direct ankle and wrist drags retain a non-crossing last-valid pose with gr
     'Preview partial: A-rest',
     { timeout: 180_000 },
   );
-  const freshBox = await canvas.boundingBox();
-  expect(freshBox).not.toBeNull();
-  const freshBounds = freshBox!;
+  const ankleCollisionTarget = await findMarker({
+    page,
+    canvas,
+    groupId: 'left-ankle',
+    region: 'ankles',
+  });
+  await settlePointerOnEmptyCanvas(page, canvas);
   const wristStart = await findMarker({
     page,
     canvas,
@@ -1006,16 +1010,13 @@ test('direct ankle and wrist drags retain a non-crossing last-valid pose with gr
     page,
     canvas,
     start: wristStart,
-    target: {
-      x: freshBounds.x + freshBounds.width / 2,
-      y: freshBounds.y + freshBounds.height * 0.32,
-    },
-    expectedBlocker: /arm-overlap/u,
+    target: ankleCollisionTarget,
+    expectedBlocker: /arm-overlap|leg-overlap/u,
   });
   await settlePointerOnEmptyCanvas(page, canvas);
   const armAfter = await canvas.screenshot();
   expect(armDrag.admissibility).toBe('blocked');
-  expect(armDrag.blockers).toMatch(/arm-overlap/u);
+  expect(armDrag.blockers).toMatch(/arm-overlap|leg-overlap/u);
   expect(armDrag.sourceAfter).toBe(armDrag.sourceBefore);
   expect(armAfter.equals(armBefore)).toBe(true);
   await expect(page.getByTestId('model-form-smoke-mutation-calls')).toHaveText('0');
@@ -1257,32 +1258,11 @@ test('under-bust rebuilds an independent ribcage band without resetting the V9 p
   await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
   await page.getByRole('img', { name: /3D mannequin joint editor/i }).press('ArrowLeft');
   await expect(canvas).toHaveAttribute('data-view-preset', 'side');
-  const marker = await findHoverMarker({
-    page,
-    canvas,
-    groupId: 'left-elbow',
-    xOffsets: [0, -18, 18, -36, 36, -54, 54, -72, 72],
-    startFraction: 0.2,
-    endFraction: 0.55,
-  });
-  const pivot = await refineHoverMarkerCenter({
-    page,
-    canvas,
-    groupId: 'left-elbow',
-    seed: marker,
-  });
-  await page.mouse.click(pivot.x, pivot.y);
-  const flexed = await dragSelectedRing({
-    page,
-    canvas,
-    pivot,
-    direction: -1,
-    distance: 720,
-  });
+  const flexed = await flexLeftElbowInSideView({ page, canvas });
   expect(flexed.admissibility).toBe('admitted');
   const posedSource = flexed.sourceRevision;
   const posedV9 = poseFromSourceRevision(posedSource);
-  expect(posedV9.leftArm.elbowBendDegrees).toBeGreaterThanOrEqual(30);
+  expect(posedV9.leftArm.elbowBendDegrees).toBe(flexed.bendDegrees);
 
   await page.getByRole('img', { name: /3D mannequin joint editor/i }).press('Home');
   await expect(canvas).toHaveAttribute('data-view-preset', 'front');

@@ -127,6 +127,121 @@ describe('MakeHuman live pose admissibility v1', () => {
   });
 
   it.each([
+    [
+      'thigh',
+      'left-cross-left-upper-leg',
+      [point(0.42, 1.35), point(0.24, 0.92)],
+      [point(0.24, 0.92), point(0.12, 0.68)],
+    ],
+    [
+      'lower leg',
+      'left-cross-left-lower-leg',
+      [point(0.42, 1.35), point(0.12, 0.35)],
+      [point(0.12, 0.35), point(0.12, 0.25)],
+    ],
+    [
+      'foot',
+      'left-cross-left-foot',
+      [point(0.42, 1.35), point(0.2, 0.15)],
+      [point(0.2, 0.15), point(0.12, 0.05)],
+    ],
+  ] as const)(
+    'blocks a hand and forearm passing through the %s',
+    (_label, obstacleId, lowerarm, wrist) => {
+      const result = evaluateMakeHumanLivePoseAdmissibilityV1({
+        bones: skeleton({
+          'lowerarm01.L': lowerarm,
+          'wrist.L': wrist,
+        }),
+        neutralBones: skeleton(),
+        groundReferenceM: 0,
+        baselineAnklesM: BASELINE_ANKLES,
+      });
+
+      expect(result.admissible).toBe(false);
+      expect(result.blockers).toContain('left-arm-overlap');
+      expect(result.contacts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            obstacleId,
+            obstacleKind: 'opposite-limb',
+          }),
+        ]),
+      );
+      expect(result.claims.meshCollisionEvaluated).toBe(false);
+      expect(result.claims.clinicalAnatomicalRangeAuthority).toBe(false);
+    },
+  );
+
+  it('blocks a lower leg and foot passing through an arm', () => {
+    const result = evaluateMakeHumanLivePoseAdmissibilityV1({
+      bones: skeleton({
+        'lowerleg01.L': [point(0.12, 0.5), point(0.5, 1.09)],
+        'foot.L': [point(0.5, 1.09), point(0.54, 1.02)],
+      }),
+      neutralBones: skeleton(),
+      groundReferenceM: 0,
+      baselineAnklesM: BASELINE_ANKLES,
+    });
+
+    expect(result.admissible).toBe(false);
+    expect(result.blockers).toContain('left-leg-overlap');
+    expect(result.contacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          obstacleId: 'left-cross-left-lower-arm',
+          obstacleKind: 'opposite-limb',
+        }),
+      ]),
+    );
+  });
+
+  it('blocks a left hand and forearm passing through the contralateral right thigh', () => {
+    const result = evaluateMakeHumanLivePoseAdmissibilityV1({
+      bones: skeleton({
+        'lowerarm01.L': [point(0.42, 1.35), point(-0.2, 0.92)],
+        'wrist.L': [point(-0.2, 0.92), point(-0.12, 0.68)],
+      }),
+      neutralBones: skeleton(),
+      groundReferenceM: 0,
+      baselineAnklesM: BASELINE_ANKLES,
+    });
+
+    expect(result.admissible).toBe(false);
+    expect(result.blockers).toContain('left-arm-overlap');
+    expect(result.contacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          obstacleId: 'left-cross-right-upper-leg',
+          obstacleKind: 'opposite-limb',
+        }),
+      ]),
+    );
+  });
+
+  it('admits arms at the sides with the hand close to, but outside, the thigh envelope', () => {
+    const result = evaluateMakeHumanLivePoseAdmissibilityV1({
+      bones: skeleton({
+        'upperarm01.L': [point(0.24, 1.6), point(0.3, 1.32)],
+        'upperarm02.L': [point(0.27, 1.46), point(0.3, 1.32)],
+        'lowerarm01.L': [point(0.3, 1.32), point(0.29, 0.98)],
+        'wrist.L': [point(0.29, 0.98), point(0.27, 0.88)],
+        'upperarm01.R': [point(-0.24, 1.6), point(-0.3, 1.32)],
+        'upperarm02.R': [point(-0.27, 1.46), point(-0.3, 1.32)],
+        'lowerarm01.R': [point(-0.3, 1.32), point(-0.29, 0.98)],
+        'wrist.R': [point(-0.29, 0.98), point(-0.27, 0.88)],
+      }),
+      neutralBones: skeleton(),
+      groundReferenceM: 0,
+      baselineAnklesM: BASELINE_ANKLES,
+    });
+
+    expect(result.admissible).toBe(true);
+    expect(result.blockers).toEqual([]);
+    expect(result.contacts).toEqual([]);
+  });
+
+  it.each([
     ['negative-depth', -0.13],
     ['positive-depth', 0.13],
   ] as const)(

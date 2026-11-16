@@ -408,6 +408,40 @@ export function evaluateMakeHumanLivePoseAdmissibilityV1(options: {
     const oppositeUpperLength = distance(oppositeUpper.headM, oppositeLower.headM);
     const oppositeLowerLength = distance(oppositeLower.headM, oppositeWrist.headM);
     const oppositeHandLength = distance(oppositeWrist.headM, oppositeWrist.tailM);
+    // Keep cross-family contacts in the existing non-clinical capsule category. Both sides are
+    // obstacles because a dragged hand can cross either leg, not only its ipsilateral leg.
+    const legObstacles = (['left', 'right'] as const).flatMap((legSide) => {
+      const legSuffix = legSide === 'left' ? '.L' : '.R';
+      const legUpper = requiredBone(byName, `upperleg01${legSuffix}`);
+      const legLower = requiredBone(byName, `lowerleg01${legSuffix}`);
+      const legFoot = requiredBone(byName, `foot${legSuffix}`);
+      const legUpperLength = distance(legUpper.headM, legLower.headM);
+      const legLowerLength = distance(legLower.headM, legFoot.headM);
+      const legFootLength = distance(legFoot.headM, legFoot.tailM);
+      return [
+        obstacle({
+          id: `${side}-cross-${legSide}-upper-leg`,
+          kind: 'opposite-limb',
+          startM: legUpper.headM,
+          endM: legLower.headM,
+          radiusM: Math.max(0.015, legUpperLength * 0.1),
+        }),
+        obstacle({
+          id: `${side}-cross-${legSide}-lower-leg`,
+          kind: 'opposite-limb',
+          startM: legLower.headM,
+          endM: legFoot.headM,
+          radiusM: Math.max(0.012, legLowerLength * 0.085),
+        }),
+        obstacle({
+          id: `${side}-cross-${legSide}-foot`,
+          kind: 'opposite-limb',
+          startM: legFoot.headM,
+          endM: legFoot.tailM,
+          radiusM: Math.max(0.01, legFootLength * 0.09),
+        }),
+      ];
+    });
     const result = evaluateMakeHumanLimbGeometricGuardV1({
       candidate: {
         rootM: upper.headM,
@@ -441,6 +475,7 @@ export function evaluateMakeHumanLivePoseAdmissibilityV1(options: {
           endM: oppositeWrist.tailM,
           radiusM: Math.max(0.006, oppositeHandLength * 0.11),
         }),
+        ...legObstacles,
       ],
       clearanceM,
     });
@@ -463,6 +498,40 @@ export function evaluateMakeHumanLivePoseAdmissibilityV1(options: {
     const oppositeUpperLength = distance(oppositeUpper.headM, oppositeLower.headM);
     const oppositeLowerLength = distance(oppositeLower.headM, oppositeFoot.headM);
     const oppositeFootLength = distance(oppositeFoot.headM, oppositeFoot.tailM);
+    // Evaluate the inverse direction too so a leg-driven edit receives a leg blocker and retains
+    // its last-valid pose instead of depending on which limb happened to be evaluated first.
+    const armObstacles = (['left', 'right'] as const).flatMap((armSide) => {
+      const armSuffix = armSide === 'left' ? '.L' : '.R';
+      const armUpper = requiredBone(byName, `upperarm01${armSuffix}`);
+      const armLower = requiredBone(byName, `lowerarm01${armSuffix}`);
+      const armWrist = requiredBone(byName, `wrist${armSuffix}`);
+      const armUpperLength = distance(armUpper.headM, armLower.headM);
+      const armLowerLength = distance(armLower.headM, armWrist.headM);
+      const armHandLength = distance(armWrist.headM, armWrist.tailM);
+      return [
+        obstacle({
+          id: `${side}-cross-${armSide}-upper-arm`,
+          kind: 'opposite-limb',
+          startM: armUpper.headM,
+          endM: armLower.headM,
+          radiusM: Math.max(0.008, armUpperLength * 0.075),
+        }),
+        obstacle({
+          id: `${side}-cross-${armSide}-lower-arm`,
+          kind: 'opposite-limb',
+          startM: armLower.headM,
+          endM: armWrist.headM,
+          radiusM: Math.max(0.007, armLowerLength * 0.07),
+        }),
+        obstacle({
+          id: `${side}-cross-${armSide}-hand`,
+          kind: 'opposite-limb',
+          startM: armWrist.headM,
+          endM: armWrist.tailM,
+          radiusM: Math.max(0.006, armHandLength * 0.11),
+        }),
+      ];
+    });
     const result = evaluateMakeHumanLimbGeometricGuardV1({
       candidate: {
         rootM: upper.headM,
@@ -496,6 +565,7 @@ export function evaluateMakeHumanLivePoseAdmissibilityV1(options: {
           endM: oppositeFoot.tailM,
           radiusM: Math.max(0.01, oppositeFootLength * 0.09),
         }),
+        ...armObstacles,
       ],
       clearanceM,
     });
