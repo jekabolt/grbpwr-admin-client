@@ -609,6 +609,7 @@ export async function createMeasurementOpenReferenceLimbSubsetRuntimeV1(options:
       compiledContentRevision: solvedClosure.contentRevision,
     });
   } catch (reason: unknown) {
+    if (reason instanceof Error && reason.name === 'AbortError') throw reason;
     return runtimeResult({
       status: 'error',
       openReference,

@@ -43,7 +43,9 @@ const unitFiles = Object.freeze([
   'src/lib/cloth/body/measurement-open-reference-display-quality-gate-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-display-quality-worker-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-beta-torso-worker-v1.test.ts',
+  'src/lib/cloth/body/measurement-open-reference-limb-final-closure-worker-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-limb-subset-runtime-loader-v1.test.ts',
+  'src/lib/cloth/body/measurement-watertight-surface-worker-v1.test.ts',
   'src/lib/cloth/body/measurement-protocol-v1.test.ts',
 ]);
 

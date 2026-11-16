@@ -554,6 +554,25 @@ describe('measurement open-reference A-pose limb subset runtime v1', () => {
     );
   });
 
+  it('rethrows an aborted final-closure solve instead of publishing an error runtime', async () => {
+    const current = await fixture('female');
+    const aborted = new DOMException('Aborted', 'AbortError');
+    const solveFinalClosure = vi.fn(async () => {
+      throw aborted;
+    });
+
+    await expect(
+      createMeasurementOpenReferenceLimbSubsetRuntimeV1({
+        basis: current.basis,
+        measurements: Object.freeze({ ...current.measurements, wristCircumferenceMm: 180 }),
+        waistHipRuntime: current.waistHipRuntime,
+        ...loaders,
+        solveFinalClosure,
+      }),
+    ).rejects.toBe(aborted);
+    expect(solveFinalClosure).toHaveBeenCalledOnce();
+  });
+
   it('pins the exact receipt-71 envelope inside the runtime module', () => {
     expect(MEASUREMENT_OPEN_REFERENCE_LIMB_SUBSET_ENVELOPE_V1).toEqual({
       bicepCircumferenceMm: { decrease: 0.75, increase: 1 },

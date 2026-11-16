@@ -59,16 +59,20 @@ export function createMeasurementWatertightSurfaceInWorkerV1(
   return new Promise((resolve, reject) => {
     const worker = createWorker();
     const startedAt = performance.now();
+    let settled = false;
     const cleanup = () => {
       signal?.removeEventListener('abort', abort);
       worker.terminate();
     };
-    const abort = () => {
+    const finish = (operation: () => void) => {
+      if (settled) return;
+      settled = true;
       cleanup();
-      reject(abortError());
+      operation();
     };
+    const abort = () => finish(() => reject(abortError()));
     worker.onmessage = (event: MessageEvent<MeasurementWatertightSurfaceWorkerResponseV1>) => {
-      cleanup();
+      if (settled) return;
       const response = event.data;
       try {
         performance.measure(MEASUREMENT_WATERTIGHT_SURFACE_WORKER_MEASURE_V1, {
@@ -79,13 +83,11 @@ export function createMeasurementWatertightSurfaceInWorkerV1(
       } catch {
         // Timing evidence is diagnostic only.
       }
-      if (response.type === 'result') resolve(response.artifact);
-      else reject(new Error(response.message));
+      if (response.type === 'result') finish(() => resolve(response.artifact));
+      else finish(() => reject(new Error(response.message)));
     };
-    worker.onerror = (event) => {
-      cleanup();
-      reject(new Error((event as ErrorEvent).message || 'surface worker error'));
-    };
+    worker.onerror = (event) =>
+      finish(() => reject(new Error((event as ErrorEvent).message || 'surface worker error')));
     signal?.addEventListener('abort', abort, { once: true });
     const request: MeasurementWatertightSurfaceWorkerRequestV1 = {
       id: 1,

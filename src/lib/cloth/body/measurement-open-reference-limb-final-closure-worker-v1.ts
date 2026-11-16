@@ -62,18 +62,22 @@ export function solveMeasurementOpenReferenceLimbFinalClosureInWorkerV1(
   return new Promise((resolve, reject) => {
     const worker = createWorker();
     const startedAt = performance.now();
+    let settled = false;
     const cleanup = () => {
       signal?.removeEventListener('abort', abort);
       worker.terminate();
     };
-    const abort = () => {
+    const finish = (operation: () => void) => {
+      if (settled) return;
+      settled = true;
       cleanup();
-      reject(abortError());
+      operation();
     };
+    const abort = () => finish(() => reject(abortError()));
     worker.onmessage = (
       event: MessageEvent<MeasurementOpenReferenceLimbFinalClosureWorkerResponseV1>,
     ) => {
-      cleanup();
+      if (settled) return;
       const response = event.data;
       try {
         performance.measure(MEASUREMENT_OPEN_REFERENCE_LIMB_FINAL_CLOSURE_WORKER_MEASURE_V1, {
@@ -84,13 +88,11 @@ export function solveMeasurementOpenReferenceLimbFinalClosureInWorkerV1(
       } catch {
         // Timing evidence is diagnostic only.
       }
-      if (response.type === 'result') resolve(response.value);
-      else reject(new Error(response.message));
+      if (response.type === 'result') finish(() => resolve(response.value));
+      else finish(() => reject(new Error(response.message)));
     };
-    worker.onerror = (event) => {
-      cleanup();
-      reject(new Error((event as ErrorEvent).message || 'limb closure worker error'));
-    };
+    worker.onerror = (event) =>
+      finish(() => reject(new Error((event as ErrorEvent).message || 'limb closure worker error')));
     signal?.addEventListener('abort', abort, { once: true });
     const request: MeasurementOpenReferenceLimbFinalClosureWorkerRequestV1 = {
       id: 1,
