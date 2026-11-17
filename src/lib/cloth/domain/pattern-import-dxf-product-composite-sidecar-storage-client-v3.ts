@@ -39,12 +39,13 @@ export type PatternImportDxfProductCompositeSidecarStorageBlockerV3 = Readonly<{
     | 'current-readback-invalid'
     | 'planning-blocked'
     | 'next-sidecar-invalid'
+    | 'pre-put-blocked'
     | 'put-failed'
     | 'put-readback-invalid'
     | 'get-failed'
     | 'get-readback-invalid'
     | 'dual-readback-mismatch';
-  phase: 'input' | 'current-get' | 'planning' | 'put' | 'get' | 'dual-readback';
+  phase: 'input' | 'current-get' | 'planning' | 'pre-put' | 'put' | 'get' | 'dual-readback';
   detail: string;
 }>;
 
@@ -175,6 +176,11 @@ export type PatternImportDxfProductCompositeSidecarStorageWriterStrategyV3<
     current: PatternImportDxfProductCompositeSidecarStorageVerifiedGetV3,
     crypto: Pick<Crypto, 'subtle'> | undefined,
   ) => Promise<PatternImportDxfProductCompositeSidecarStoragePlannedWriteV3<MediaType>>;
+  beforeRequest?: (
+    request: Request,
+    planned: PatternImportDxfProductCompositeSidecarStoragePlannedWriteV3<MediaType>,
+    signal: AbortSignal,
+  ) => Promise<void>;
   verifyCanonical: (
     bytes: Uint8Array<ArrayBuffer>,
     crypto: Pick<Crypto, 'subtle'> | undefined,
@@ -620,6 +626,7 @@ export function createPatternImportDxfProductCompositeSidecarStorageWriterV3<
     typeof strategy.label !== 'string' ||
     !Array.isArray(strategy.acceptedCurrentMediaTypes) ||
     typeof strategy.prepare !== 'function' ||
+    (strategy.beforeRequest !== undefined && typeof strategy.beforeRequest !== 'function') ||
     typeof strategy.verifyCanonical !== 'function'
   )
     fail('invalid-client', 'input', 'A complete sidecar codec strategy is required.');
@@ -716,6 +723,26 @@ export function createPatternImportDxfProductCompositeSidecarStorageWriterV3<
         checkSignal(signal, 'planning');
       } catch (error) {
         return blocked(error, 'not-attempted');
+      }
+
+      try {
+        checkSignal(signal, 'pre-put');
+        if (strategy.beforeRequest) await strategy.beforeRequest(request, planned, signal);
+        checkSignal(signal, 'pre-put');
+      } catch (error) {
+        if (error instanceof StorageFailure) return blocked(error, 'not-attempted');
+        return blocked(
+          new StorageFailure(
+            signal.aborted ? 'cancelled' : 'pre-put-blocked',
+            'pre-put',
+            signal.aborted
+              ? `${strategy.label} persistence was cancelled before PUT.`
+              : error instanceof Error
+                ? `${strategy.label} pre-PUT currentness check failed: ${error.message}`
+                : `${strategy.label} pre-PUT currentness check failed closed.`,
+          ),
+          'not-attempted',
+        );
       }
 
       let putRow: TechCardPatternSemanticSidecar | undefined;
