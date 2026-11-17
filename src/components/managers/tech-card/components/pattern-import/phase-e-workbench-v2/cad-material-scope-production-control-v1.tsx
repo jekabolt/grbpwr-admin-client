@@ -3,6 +3,7 @@ import { Text } from 'ui';
 import { PatternImportDxfPhaseECadMaterialScopeBrowserV1 } from './cad-material-scope-browser-v1';
 import type { PatternImportDxfPhaseECadMaterialScopeCatalogResultV1 } from './cad-material-scope-catalog-v1';
 import type { PatternImportDxfPhaseECadMaterialScopePreparationResultV1 } from './cad-material-scope-preparation-v1';
+import type { PatternImportDxfPhaseECadSavedMaterialScopeEditorPreparationResultV1 } from './cad-saved-material-scope-editor-preparation-v1';
 import { PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_CROSS_SCOPE_PERSISTENCE_BLOCKER_V1 } from './cad-table-cross-scope-connect-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MATERIAL_SCOPE_PRODUCTION_CONTROL_V1 =
@@ -35,6 +36,10 @@ export type PatternImportDxfPhaseECadMaterialScopeConnectionPolicyResultV1 =
         detail: string;
       }>;
     }>;
+
+export type PatternImportDxfPhaseECadMaterialScopeSelectablePreparationV1 =
+  | PatternImportDxfPhaseECadMaterialScopePreparationResultV1
+  | PatternImportDxfPhaseECadSavedMaterialScopeEditorPreparationResultV1;
 
 /** Accepts only explicit scope identities; it never derives a seam scope from piece names. */
 export function resolvePatternImportDxfPhaseECadMaterialScopeConnectionPolicyV1(
@@ -77,7 +82,7 @@ export function PatternImportDxfPhaseECadMaterialScopeProductionControlV1({
   crossScopeOperationBindingAvailable = false,
 }: Readonly<{
   catalog: PatternImportDxfPhaseECadMaterialScopeCatalogResultV1 | null;
-  preparation: PatternImportDxfPhaseECadMaterialScopePreparationResultV1 | null;
+  preparation: PatternImportDxfPhaseECadMaterialScopeSelectablePreparationV1 | null;
   active: Readonly<{ techCardId: number; scopeKey: string }>;
   preparedScopeKeys: readonly string[];
   onSelectPreparedScope?: (scopeKey: string) => void;

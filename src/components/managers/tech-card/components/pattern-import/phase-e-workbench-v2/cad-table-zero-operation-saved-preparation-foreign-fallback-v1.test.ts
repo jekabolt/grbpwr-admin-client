@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   select: vi.fn(),
   catalog: vi.fn(),
   projection: vi.fn(),
+  compileSource: vi.fn(),
 }));
 
 vi.mock('lib/pattern-import/dxf-product-saved-reprocess-owner-v1', async (load) => {
@@ -78,6 +79,14 @@ vi.mock('lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1', async (l
   const actual =
     await load<typeof import('lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1')>();
   return { ...actual, projectPatternImportDxfProductPhaseEAssemblyV1: mocks.projection };
+});
+
+vi.mock('./draft-cad-compile-source-v1', async (load) => {
+  const actual = await load<typeof import('./draft-cad-compile-source-v1')>();
+  return {
+    ...actual,
+    createPatternImportDxfPhaseEDraftCadCompileSourceV1: mocks.compileSource,
+  };
 });
 
 import { preparePatternImportDxfPhaseECadTableZeroOperationSavedV1 } from './cad-table-zero-operation-saved-preparation-v1';
@@ -199,6 +208,13 @@ beforeEach(() => {
     },
   });
   mocks.projection.mockReturnValue({ ok: true, projection: { kind: 'projection' } });
+  mocks.compileSource.mockReturnValue({
+    schemaVersion: 'pattern-import-dxf-phase-e-draft-cad-compile-source/1',
+    techCardId: 156,
+    scopes: [],
+    dxfProvenance: null,
+    dxfPhaseDReplay: null,
+  });
 });
 
 describe('zero-operation saved preparation foreign fallback', () => {
@@ -208,10 +224,14 @@ describe('zero-operation saved preparation foreign fallback', () => {
     const result = await preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(request());
 
     expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.selection.selection.scopeKey).toBe(MAIN);
+    expect(result.draftCadCompileSource).toMatchObject({ techCardId: 156 });
     expect(mocks.createForeignHost).not.toHaveBeenCalled();
     expect(mocks.createForeignOwner).not.toHaveBeenCalled();
     expect(mocks.select).toHaveBeenCalledWith(exactDraft, MAIN, 'M');
     expect(mocks.catalog).toHaveBeenCalledWith(exactDraft, MAIN, 'M');
+    expect(mocks.compileSource).toHaveBeenCalledWith(exactDraft);
     expect(mocks.exactDispose).toHaveBeenCalledOnce();
   });
 
