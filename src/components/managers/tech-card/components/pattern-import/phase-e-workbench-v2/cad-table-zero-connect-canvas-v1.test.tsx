@@ -156,6 +156,10 @@ describe('zero-operation CAD table rendering', () => {
     );
 
     expect(html).toContain('role="toolbar"');
+    expect(html).toContain('right-2 top-1/2');
+    expect(html).toContain('max-h-[calc(100%-1rem)]');
+    expect(html).toContain('-translate-y-1/2');
+    expect(html).not.toContain('left-2 top-2 z-20 flex flex-col');
     expect(html).toContain('aria-label="Select pieces"');
     expect(html).toContain('aria-label="Move selected pieces"');
     expect(html).toContain('aria-label="Connect edges"');
