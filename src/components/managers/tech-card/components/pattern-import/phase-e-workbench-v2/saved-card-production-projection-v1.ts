@@ -22,8 +22,10 @@ export const PATTERN_IMPORT_DXF_PHASE_E_SAVED_CARD_PRODUCTION_PROJECTION_CLAIMS_
   getTechCardProjectionRequired: true,
   localFormAssemblyUsed: false,
   optimisticSeamOverlayUsed: false,
-  exactSavedOperationAndTwoSeamsRequired: true,
+  exactSavedOperationAndPositiveSeamSetRequired: true,
   exactTwoPiecePairResolvedFromSavedSeams: true,
+  oneSeamCompositeV4AdmissionAvailable: true,
+  exactTwoSeamCompositeV3PathPreserved: true,
   exactSavedRowRevisionRequired: true,
   currentBindingScopeResolutionReused: true,
   assemblyAuthorityProduced: false,
@@ -126,11 +128,15 @@ function exactPiecePair(
       detail: 'The current saved card contains the selected operation more than once.',
     });
   const seamKeys = (selected[0].seamKeys ?? []).map((key) => key.trim()).filter(Boolean);
-  if (seamKeys.length !== 2 || seamKeys[0] === seamKeys[1])
+  if (
+    seamKeys.length < 1 ||
+    new Set(seamKeys).size !== seamKeys.length ||
+    seamKeys.some((seamKey) => !seamKey)
+  )
     return Object.freeze({
       ok: false as const,
       code: 'saved-operation-not-two-seam' as const,
-      detail: 'The current saved operation must own exactly two distinct ordered seams.',
+      detail: 'The current saved operation must own a non-empty set of distinct ordered seams.',
     });
 
   const savedSeams = techCard.seams ?? [];
@@ -179,7 +185,12 @@ function exactPiecePair(
     anchoredSize = nextSize;
     pairs.push([left, right].sort() as [string, string]);
   }
-  if (pairs[0][0] !== pairs[1][0] || pairs[0][1] !== pairs[1][1] || pairs[0][0] === pairs[0][1])
+  const firstPair = pairs[0];
+  if (
+    !firstPair ||
+    firstPair[0] === firstPair[1] ||
+    pairs.some(([left, right]) => left !== firstPair[0] || right !== firstPair[1])
+  )
     return Object.freeze({
       ok: false as const,
       code: 'saved-seam-not-exact' as const,
@@ -187,7 +198,7 @@ function exactPiecePair(
     });
   return Object.freeze({
     ok: true as const,
-    pieceLineKeys: Object.freeze(pairs[0]) as readonly [string, string],
+    pieceLineKeys: Object.freeze(firstPair) as readonly [string, string],
   });
 }
 
