@@ -389,7 +389,7 @@ async function verifyDocument(
   signal?: AbortSignal,
 ) {
   check(signal);
-  const aoSnapshot = projectAoOnlySnapshot(snapshot);
+  const aoSnapshot = projectSavedFullAssemblyAoOnlySnapshotV1(snapshot);
   if (
     !same(document.bindings.row, snapshot.row) ||
     document.bindings.serverAssemblyRevision !== snapshot.serverAssemblyRevision ||
@@ -431,7 +431,7 @@ async function verifyDocument(
   });
 }
 
-function projectAoOnlySnapshot(
+export function projectSavedFullAssemblyAoOnlySnapshotV1(
   snapshot: SavedFullAssemblySnapshotProjectionV1,
 ): DxfExactAssemblyGraphAoSnapshotV1 {
   return {

@@ -14,6 +14,7 @@ import {
   type SavedFullAssemblyPhysicalAuthorityReceiptV1,
 } from './composite-sidecar-v7';
 import {
+  projectSavedFullAssemblyAoOnlySnapshotV1,
   readSavedFullAssemblyPhysicalInitializationBytesV1,
   type SavedFullAssemblyPhysicalComponentDocumentV1,
 } from './saved-full-assembly-physical-component-v1';
@@ -300,7 +301,7 @@ export async function readSavedFullAssemblyPhysicalSnapshotV1(
       {
         bytes: initializationBytes,
         graph: component.graph,
-        assemblySnapshot: fresh,
+        assemblySnapshot: projectSavedFullAssemblyAoOnlySnapshotV1(fresh),
       },
       controller.signal,
     );

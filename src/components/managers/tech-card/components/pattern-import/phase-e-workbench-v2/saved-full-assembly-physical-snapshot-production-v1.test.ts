@@ -143,6 +143,16 @@ describe('fixed Full Assembly physical snapshot production reader', () => {
     expect(mocks.verifyV7).toHaveBeenCalledWith(expect.any(Object), firstReceipt);
     expect(mocks.disposeBase).toHaveBeenCalledWith(confirmationReceipt);
     expect(mocks.disposeBase).not.toHaveBeenCalledWith(firstReceipt);
+    const pureDecodeRequest = mocks.decodeInitialization.mock.calls[0]![0] as {
+      assemblySnapshot: Record<string, unknown>;
+    };
+    expect(Object.keys(pureDecodeRequest.assemblySnapshot).sort()).toEqual([
+      'operations',
+      'row',
+      'seams',
+      'serverAssemblyRevision',
+    ]);
+    expect(pureDecodeRequest.assemblySnapshot.outer).toBeUndefined();
     const projected = projectSavedFullAssemblyPhysicalSnapshotV1(receipt);
     expect(projected).toMatchObject({
       row,
