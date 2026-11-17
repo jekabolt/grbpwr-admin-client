@@ -90,6 +90,18 @@ admission additionally requires the future fixed verified-component reader/issue
 alone do not grant admission. The required reload test proves that the outer SHA changes across
 the first save/read boundary while the graph fingerprint and compile-input SHA remain exact.
 
+The frozen cloth-owned consumer boundary exports:
+
+- `fingerprintDxfExactAssemblyGraphV1({ graph, assemblySnapshot })`;
+- `validateDxfGarmentPhysicalInitializationV1` plus its exact encode/decode pair;
+- `projectDxfGarmentPhysicalInitializationV1({ document, graph, assemblySnapshot, sourceRequest,
+  sourceArtifact }, signal)`.
+
+The projection performs a real recompile and placement projection and must not be advertised as a
+pure-content replay. The future generic physical host remains an explicit dynamic import; no
+eager runtime edge is allowed from the current mannequin or Table route. Registry integration
+waits for the cloth owner's combined reviewed package and private-host freeze.
+
 ## Completion rule
 
 Toolbar presence, session preview, compile receipts, blocker-only tests, status panels, codec
