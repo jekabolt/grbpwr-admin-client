@@ -1,6 +1,7 @@
 import { act, createElement, isValidElement, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { common_Model } from 'api/proto-http/admin';
 
 import {
   PatternImportDxfPhaseECadMannequinModelPickerViewV1,
@@ -33,9 +34,28 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+function model(id: number, name: string): common_Model {
+  return {
+    id,
+    model: {
+      name,
+      comment: '',
+      gender: 'GENDER_ENUM_UNKNOWN',
+      measurements: [],
+      thumbnailId: 0,
+      mediaIds: [],
+      defaultSizeIds: [],
+      bodyMeasurementSchemaVersion: 2,
+    },
+    createdAt: undefined,
+    updatedAt: undefined,
+    thumbnail: undefined,
+    media: [],
+  };
+}
 function props(): PatternImportDxfPhaseECadMannequinModelPickerViewPropsV1 {
   return {
-    models: [{ id: 42, model: { name: 'Current model' } }],
+    models: [model(42, 'Current model')],
     modelId: 42,
     sizeName: String,
     onModelChange: () => undefined,
@@ -160,13 +180,13 @@ describe('mounted mannequin arrangement lifecycle', () => {
   });
 
   it('hydrates current saved transforms through the actual preview overlay', async () => {
-    input.onReadMannequinArrangement = vi.fn().mockResolvedValue(stored);
+    input = { ...input, onReadMannequinArrangement: vi.fn().mockResolvedValue(stored) };
     await render();
     expect(overlay().pieces[0].transform).toEqual(stored[0].transform);
   });
   it('does not overwrite a user move when a deferred saved read finishes', async () => {
     const read = deferred<readonly CadMannequinArrangementPieceV1[]>();
-    input.onReadMannequinArrangement = () => read.promise;
+    input = { ...input, onReadMannequinArrangement: () => read.promise };
     await render();
     const moved = { offsetM: [1, 2, 3] as const, rotationRad: 0.2 };
     await act(async () => {
@@ -182,15 +202,17 @@ describe('mounted mannequin arrangement lifecycle', () => {
     async (change) => {
       const save = deferred<void>();
       let signal: AbortSignal | undefined;
-      input.onSaveMannequinArrangement = (_request, received) => {
-        signal = received;
-        return save.promise;
+      input = {
+        ...input,
+        onSaveMannequinArrangement: (_request, received) => {
+          signal = received;
+          return save.promise;
+        },
       };
       await render();
       await clickSave();
       expect(signal?.aborted).toBe(false);
-      if (change === 'model')
-        input = { ...input, models: [{ id: 43, model: { name: 'Other' } }], modelId: 43 };
+      if (change === 'model') input = { ...input, models: [model(43, 'Other')], modelId: 43 };
       if (change === 'pose')
         input = { ...input, poseBinding: { ...input.poseBinding!, canonicalKey: 'pose-b' } };
       if (change === 'row') input = { ...input, arrangementSourceKey: 'row-4' };
@@ -204,7 +226,7 @@ describe('mounted mannequin arrangement lifecycle', () => {
   );
   it('marks later same-source edits unsaved when the older save completes', async () => {
     const save = deferred<void>();
-    input.onSaveMannequinArrangement = () => save.promise;
+    input = { ...input, onSaveMannequinArrangement: () => save.promise };
     await render();
     await clickSave();
     await act(async () => {
