@@ -265,7 +265,7 @@ describe('receipt 83 model-form mannequin binding audit v1', () => {
       formSource.indexOf('<MeasurementsQuiz', measurementsSection),
     );
     expect(formOwner).toBeLessThan(
-      formSource.indexOf('{paired ? null : measurementsSection}', formOwner),
+      formSource.indexOf('{paired || phone ? null : measurementsSection}', formOwner),
     );
     expect(formOwner).toBeLessThan(formSource.indexOf('{measurementsSection}', formOwner));
     expect(formOwner).toBeLessThan(
@@ -333,8 +333,10 @@ describe('receipt 83 model-form mannequin binding audit v1', () => {
     expect(formSource).toContain(
       "<Section title='body preview'>{renderBodyPreview(false)}</Section>",
     );
-    expect(formSource).toContain('<SheetMeasurementMobileStrip />');
-    expect(focusSource).toContain('{measurementLabel(focused)}');
+    // The phone hint strip became the bar above the keyboard (variant C): it names the field typed.
+    expect(formSource).toContain('phoneTypingName={phoneTypingName}');
+    expect(fieldsSource).toContain('{measurementLabel(name)}');
+    expect(fieldsSource).toContain("data-testid='model-measurement-phone-dock'");
   });
 
   it('keeps create defaults empty and therefore unable to inherit a prior mannequin', () => {

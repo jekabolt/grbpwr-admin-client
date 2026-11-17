@@ -10,6 +10,7 @@ import {
   snapshotModelOpenReferenceDirectPoseV9,
   type ModelOpenReferenceDirectPoseV9,
 } from './model-open-reference-direct-pose-v9';
+import { useTouchTapCommitV1 } from './use-touch-tap-commit';
 
 export const MODEL_OPEN_REFERENCE_DIRECT_POSE_CONTROL_V9 =
   'model-open-reference-direct-pose-control/v9' as const;
@@ -160,6 +161,7 @@ export function ModelOpenReferenceDirectPoseControlV9(
   };
 
   const toggle = props.editPoseToggle;
+  const editPoseTap = useTouchTapCommitV1(() => toggle?.onChange(!toggle.on));
   const tools = (
     <>
       <Chip
@@ -242,7 +244,7 @@ export function ModelOpenReferenceDirectPoseControlV9(
         data-edit-pose={toggle.on ? 'on' : 'off'}
       >
         <legend className='sr-only'>Direct mannequin pose editor</legend>
-        <label className='flex cursor-pointer select-none items-center gap-2'>
+        <label className='flex cursor-pointer select-none items-center gap-2' {...editPoseTap}>
           <CheckboxCommon
             name='mannequin-edit-toggle'
             checked={toggle.on}
