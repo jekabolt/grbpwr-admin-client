@@ -16,7 +16,6 @@ import {
   modelOpenReferenceFullBodyPoseGeometryEqualV4,
   snapshotModelOpenReferenceFullBodyPoseV4,
   type ModelOpenReferenceFullBodyPoseArmSideV4,
-  type ModelOpenReferenceFullBodyPoseV4,
 } from './model-open-reference-full-body-pose-control-v4';
 
 export const MODEL_OPEN_REFERENCE_DIRECT_POSE_V9 = 'model-open-reference-direct-pose/v9' as const;
@@ -31,17 +30,8 @@ export function modelOpenReferenceBeginDirectPoseGestureV9(
   return true;
 }
 
-export interface ModelOpenReferenceDirectPoseV9 extends ModelOpenReferenceFullBodyPoseV4 {
-  readonly headPitchDeg: number;
-  readonly headYawDeg: number;
-  readonly headSideDeg: number;
-  readonly shoulderProtractionDeg: number;
-  readonly shoulderElevationDeg: number;
-  readonly shoulderLevelDeg: number;
-  readonly legMode: 'linked' | 'independent';
-  readonly leftLeg: MakeHumanLegBodyPartIkControlsV1;
-  readonly rightLeg: MakeHumanLegBodyPartIkControlsV1;
-}
+import type { ModelOpenReferenceDirectPoseV9 } from 'lib/cloth/body/model-open-reference-direct-pose-contract-v9';
+export type { ModelOpenReferenceDirectPoseV9 } from 'lib/cloth/body/model-open-reference-direct-pose-contract-v9';
 
 const ZERO_LEG: MakeHumanLegBodyPartIkControlsV1 = Object.freeze({
   hipForwardDeg: 0,
@@ -247,7 +237,11 @@ export function modelOpenReferenceDirectApplyShoulderPostureV9(
 
 function quantizeShoulderPostureChannelV9(
   value: number,
-  definition: Readonly<{ minimumDeg: number; maximumDeg: number; stepDeg: number }>,
+  definition: Readonly<{
+    minimumDeg: number;
+    maximumDeg: number;
+    stepDeg: number;
+  }>,
 ) {
   const clamped = Math.min(definition.maximumDeg, Math.max(definition.minimumDeg, value));
   const quantized =

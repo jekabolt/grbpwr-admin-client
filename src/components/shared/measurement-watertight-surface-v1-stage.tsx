@@ -23,6 +23,15 @@ export type MeasurementSurfaceLodKey = 'display' | 'collisionCandidate';
 export type MeasurementSurfaceViewPreset = 'front' | 'side' | 'back';
 export type MeasurementSurfaceStageStatus = 'initializing' | 'ready' | 'error';
 
+/** Detached accepted buffer values with exact source references; no cloth authority. */
+export interface MeasurementSurfaceDisplayedGeometryAcceptanceV1 {
+  readonly frame: MeasurementBodyFrameV2;
+  readonly mesh: MeasurementSurfaceMeshV1;
+  readonly sourcePositions: Float32Array;
+  readonly positions: Float32Array;
+  readonly indices: Uint32Array;
+}
+
 export interface MeasurementSurfaceOverlays {
   readonly wireframe: boolean;
   readonly normals: boolean;
@@ -1498,6 +1507,43 @@ export function resolveMeasurementSurfaceRenderSelectionV1(
   });
 }
 
+/** Snapshot the buffers actually installed in the existing Three geometry; no viewport authority. */
+export function measurementSurfaceAcceptedGeometryV1(
+  geometry: THREE.BufferGeometry | null,
+  frame: MeasurementBodyFrameV2,
+  mesh: MeasurementSurfaceMeshV1,
+  sourcePositions: Float32Array,
+): MeasurementSurfaceDisplayedGeometryAcceptanceV1 | null {
+  const positions = geometry?.getAttribute('position');
+  const indices = geometry?.getIndex();
+  if (
+    !positions ||
+    positions.itemSize !== 3 ||
+    !(positions.array instanceof Float32Array) ||
+    !indices ||
+    indices.itemSize !== 1 ||
+    !(indices.array instanceof Uint32Array) ||
+    positions.array.length !== sourcePositions.length ||
+    positions.count !== mesh.vertexCount ||
+    indices.array.length !== mesh.indices.length ||
+    indices.count !== mesh.triangleCount * 3 ||
+    !positions.array.every(
+      (value, index) => Number.isFinite(value) && Object.is(value, sourcePositions[index]),
+    ) ||
+    !indices.array.every(
+      (value, index) => value === mesh.indices[index] && value < mesh.vertexCount,
+    )
+  )
+    return null;
+  return Object.freeze({
+    frame,
+    mesh,
+    sourcePositions,
+    positions: positions.array.slice(),
+    indices: indices.array.slice(),
+  });
+}
+
 export function MeasurementWatertightSurfaceV1Stage({
   artifact,
   frame,
@@ -1513,6 +1559,7 @@ export function MeasurementWatertightSurfaceV1Stage({
   accessibleLabel,
   jointEditor,
   liveDisplayPositions,
+  onDisplayedGeometryV1,
   unifiedJointInteraction = false,
   patternPieceOverlay,
   measurementGuide,
@@ -1539,6 +1586,10 @@ export function MeasurementWatertightSurfaceV1Stage({
   jointEditor?: MeasurementSurfaceJointEditorV1;
   /** Retained-topology positions for live pose frames. The existing WebGL context is not replaced. */
   liveDisplayPositions?: Float32Array;
+  /** Accepted existing Stage buffers only; null on rebuild, rejection, loss or teardown. */
+  onDisplayedGeometryV1?: (
+    accepted: MeasurementSurfaceDisplayedGeometryAcceptanceV1 | null,
+  ) => void;
   /** Lets empty-canvas gestures orbit while joint/ring hits remain pose gestures. */
   unifiedJointInteraction?: boolean;
   /** Optional caller-owned exact pattern projection rendered inside this existing Three scene. */
@@ -1563,6 +1614,12 @@ export function MeasurementWatertightSurfaceV1Stage({
   const viewPresetRef = useRef(viewPreset);
   const jointEditorRef = useRef(jointEditor);
   const liveDisplayPositionsRef = useRef(liveDisplayPositions);
+  const onDisplayedGeometryRef = useRef(onDisplayedGeometryV1);
+  const displayedGeometryReadyRef = useRef(false);
+  const captureDisplayedGeometryRef = useRef<
+    (() => MeasurementSurfaceDisplayedGeometryAcceptanceV1 | null) | null
+  >(null);
+  const observesDisplayedGeometryRef = useRef(onDisplayedGeometryV1 !== undefined);
   const patternPieceOverlayRef = useRef(patternPieceOverlay);
   const measurementGuideRef = useRef(measurementGuide);
   onStatusRef.current = onStatus;
@@ -1571,6 +1628,9 @@ export function MeasurementWatertightSurfaceV1Stage({
   viewPresetRef.current = viewPreset;
   jointEditorRef.current = jointEditor;
   liveDisplayPositionsRef.current = liveDisplayPositions;
+  // Keep the last subscriber for its final null when observation is disabled.
+  if (onDisplayedGeometryV1) onDisplayedGeometryRef.current = onDisplayedGeometryV1;
+  observesDisplayedGeometryRef.current = onDisplayedGeometryV1 !== undefined;
   patternPieceOverlayRef.current = patternPieceOverlay;
   measurementGuideRef.current = measurementGuide;
   const patternPieceOverlayRenderKey = patternPieceOverlay
@@ -1590,6 +1650,10 @@ export function MeasurementWatertightSurfaceV1Stage({
     : '';
 
   useEffect(() => {
+    displayedGeometryReadyRef.current = false;
+    captureDisplayedGeometryRef.current = null;
+
+    onDisplayedGeometryRef.current?.(null);
     const host = hostRef.current;
     const canvas = canvasRef.current;
     if (!host || !canvas) return;
@@ -1598,6 +1662,7 @@ export function MeasurementWatertightSurfaceV1Stage({
     let animationFrame = 0;
     let readyFrame = 0;
     let readyScheduled = false;
+    let displayedContextLost = false;
     let warmupRenderCount = 0;
     let disposed = false;
     let renderCount = 0;
@@ -2098,6 +2163,10 @@ export function MeasurementWatertightSurfaceV1Stage({
 
     function cleanup() {
       if (disposed) return;
+      displayedGeometryReadyRef.current = false;
+      captureDisplayedGeometryRef.current = null;
+
+      onDisplayedGeometryRef.current?.(null);
       finishRotationGizmo('cancel');
       finishPositionDrag('cancel');
       patternPieceGesture = null;
@@ -2254,7 +2323,15 @@ export function MeasurementWatertightSurfaceV1Stage({
             hasReadyCanvasFrameRef.current = true;
             readyFrame = requestAnimationFrame(() => {
               readyFrame = 0;
-              if (!disposed) onStatusRef.current('ready');
+              if (!disposed) {
+                displayedGeometryReadyRef.current = !displayedContextLost;
+                if (!displayedContextLost && observesDisplayedGeometryRef.current) {
+                  const accepted = captureDisplayedGeometryRef.current?.() ?? null;
+
+                  onDisplayedGeometryRef.current?.(accepted);
+                }
+                onStatusRef.current('ready');
+              }
             });
           }
         } catch (reason: unknown) {
@@ -2289,6 +2366,20 @@ export function MeasurementWatertightSurfaceV1Stage({
       geometry.computeVertexNormals();
       geometry.computeBoundingBox();
       geometry.computeBoundingSphere();
+
+      let acceptedSourcePositions = renderMesh.positions;
+      const captureAcceptedGeometry = () =>
+        measurementSurfaceAcceptedGeometryV1(geometry, frame, renderMesh, acceptedSourcePositions);
+      captureDisplayedGeometryRef.current = captureAcceptedGeometry;
+      const publishAcceptedGeometry = (sourcePositions: Float32Array) => {
+        acceptedSourcePositions = sourcePositions;
+        if (!displayedContextLost) captureDisplayedGeometryRef.current = captureAcceptedGeometry;
+        // No geometry copies or scans in ordinary preview paths without an observer.
+        if (!observesDisplayedGeometryRef.current) return;
+        const accepted = captureDisplayedGeometryRef.current?.() ?? null;
+
+        if (displayedGeometryReadyRef.current) onDisplayedGeometryRef.current?.(accepted);
+      };
 
       surfaceMaterial = new THREE.MeshLambertMaterial({
         color: cssColor('--color-bgColor'),
@@ -2425,6 +2516,11 @@ export function MeasurementWatertightSurfaceV1Stage({
 
       contextLostHandler = (event) => {
         event.preventDefault();
+        displayedContextLost = true;
+        displayedGeometryReadyRef.current = false;
+        captureDisplayedGeometryRef.current = null;
+
+        onDisplayedGeometryRef.current?.(null);
         if (!disposed) onStatusRef.current('error', 'WebGL context was lost.');
       };
       contextCanvas.addEventListener('webglcontextlost', contextLostHandler);
@@ -2878,6 +2974,8 @@ export function MeasurementWatertightSurfaceV1Stage({
         positions: Float32Array,
       ): MeasurementSurfaceLivePositionUpdateV1 => {
         if (!geometry || !contextCanvas) {
+          captureDisplayedGeometryRef.current = null;
+          onDisplayedGeometryRef.current?.(null);
           return Object.freeze({ status: 'rejected', reason: 'Display geometry is unavailable.' });
         }
         const result = updateMeasurementSurfaceLivePositionsV1({
@@ -2887,10 +2985,13 @@ export function MeasurementWatertightSurfaceV1Stage({
         });
         contextCanvas.dataset.livePositionStatus = result.status;
         if (result.status === 'rejected') {
+          captureDisplayedGeometryRef.current = null;
+          onDisplayedGeometryRef.current?.(null);
           contextCanvas.dataset.livePositionError = result.reason;
           return result;
         }
         delete contextCanvas.dataset.livePositionError;
+        publishAcceptedGeometry(positions);
         if (normals?.visible) normals.update();
         updateMeasurementGuideLayerPositionsV1(measurementGuideBindings, positions);
         scheduleRender();
@@ -3066,6 +3167,16 @@ export function MeasurementWatertightSurfaceV1Stage({
     if (!runtime || !liveDisplayPositions) return;
     runtime.updateLivePositions(liveDisplayPositions);
   }, [liveDisplayPositions]);
+
+  const observesDisplayedGeometry = onDisplayedGeometryV1 !== undefined;
+  useEffect(() => {
+    const accepted =
+      observesDisplayedGeometry && displayedGeometryReadyRef.current
+        ? captureDisplayedGeometryRef.current?.() ?? null
+        : null;
+
+    onDisplayedGeometryRef.current?.(accepted);
+  }, [observesDisplayedGeometry]);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (

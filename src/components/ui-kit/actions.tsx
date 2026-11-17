@@ -157,6 +157,17 @@ function ViewSwitchDemo() {
     { value: 'table' as const, label: 'table' },
     { value: 'board' as const, label: 'board', disabled: true },
   ];
+  const [group, setGroup] = useState('torso');
+  const groupOptions = [
+    { value: 'torso', label: 'torso', count: { text: '3/6', tone: 'attention' as const } },
+    { value: 'arms', label: 'arms', count: { text: '4/4' } },
+    { value: 'legs', label: 'legs', count: { text: '1/5', tone: 'error' as const } },
+    { value: 'vertical', label: 'vertical', count: { text: '1/8', tone: 'attention' as const } },
+    { value: 'widths', label: 'widths', count: { text: '2/2' } },
+    { value: 'depths', label: 'depths', count: { text: '0/3', tone: 'attention' as const } },
+    { value: 'shoulder', label: 'shoulder', count: { text: '0/4', tone: 'attention' as const } },
+    { value: 'bust', label: 'bust', count: { text: '0/2', tone: 'attention' as const } },
+  ];
   return (
     <KitLines
       lines={[
@@ -174,6 +185,19 @@ function ViewSwitchDemo() {
           label: 'disabled',
           content: (
             <ViewSwitch label='view' value={view} options={options} onChange={setView} disabled />
+          ),
+        },
+        {
+          label: 'columns',
+          content: (
+            <ViewSwitch
+              label='group'
+              value={group}
+              options={groupOptions}
+              onChange={setGroup}
+              columns={4}
+              className='w-full max-w-xl'
+            />
           ),
         },
       ]}

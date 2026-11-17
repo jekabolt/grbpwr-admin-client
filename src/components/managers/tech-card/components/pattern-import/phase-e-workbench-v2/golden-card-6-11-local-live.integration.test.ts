@@ -23,6 +23,7 @@ import {
   modelPreviewInputFromSavedModelV1,
   selectedCadWorkbenchModelV1,
 } from './cad-workbench-mannequin-model-picker-v1';
+import { PATTERN_IMPORT_DXF_PHASE_E_GOLDEN_SAVED_CARD_FIXTURES_V1 } from './golden-card-6-11-saved-card-fixtures-v1';
 import { PATTERN_IMPORT_DXF_PHASE_E_GOLDEN_CARD_SUITE_PROFILES_V1 } from './golden-card-suite-profiles-v1';
 
 const LOCAL_LIVE_SCHEMA = 'pattern-import-dxf-phase-e-card-6-11-local-live-e2e/2' as const;
@@ -280,9 +281,22 @@ if (!HAS_LOCAL_CORPUS) {
         const profile = PATTERN_IMPORT_DXF_PHASE_E_GOLDEN_CARD_SUITE_PROFILES_V1.find(
           (candidate) => candidate.facts.techCardId === techCardId,
         );
+        const savedCardFixture = PATTERN_IMPORT_DXF_PHASE_E_GOLDEN_SAVED_CARD_FIXTURES_V1.find(
+          (candidate) => candidate.techCardId === techCardId,
+        );
         const card = cards[String(techCardId)];
         expect(profile).toBeDefined();
+        expect(savedCardFixture).toBeDefined();
         expect(card).toBeDefined();
+        expect(
+          savedCardFixture!.pieces
+            .map(({ lineKey, name }) => [lineKey, name] as const)
+            .sort(([left], [right]) => left.localeCompare(right)),
+        ).toEqual(
+          card.pieces
+            .map(([lineKey, name]) => [lineKey, name] as const)
+            .sort(([left], [right]) => left.localeCompare(right)),
+        );
 
         const scopeGraphs = await Promise.all(
           materialScopes.map(async ({ purpose, scopeKey, prefix }) => {
@@ -367,6 +381,35 @@ if (!HAS_LOCAL_CORPUS) {
           sha256: sha256(dxf),
           pieceCount: graph.pieces.length,
         }));
+        expect(
+          dxfScopes.map(({ file, byteLength, sha256: sourceSha256 }, index) => ({
+            filePrefix: savedCardFixture!.scopes[index].corpusFilePrefix,
+            fileMatches: file.startsWith(savedCardFixture!.scopes[index].corpusFilePrefix),
+            byteLength,
+            sourceSha256,
+            parsedIdentities: [
+              ...scopeGraphs[index].graph.pieces.map(({ pieceKey }) => pieceKey),
+            ].sort(),
+            fixtureIdentities: [...savedCardFixture!.scopes[index].sourceIdentities].sort(),
+            fixtureRanks: [
+              ...new Set(
+                savedCardFixture!.scopes[index].sourceFamilies.flatMap(({ candidates }) =>
+                  candidates.map(({ rank }) => rank),
+                ),
+              ),
+            ].sort(),
+          })),
+        ).toEqual(
+          savedCardFixture!.scopes.map((scope) => ({
+            filePrefix: scope.corpusFilePrefix,
+            fileMatches: true,
+            byteLength: scope.row.sizeBytes,
+            sourceSha256: scope.row.sha256,
+            parsedIdentities: [...scope.sourceIdentities].sort(),
+            fixtureIdentities: [...scope.sourceIdentities].sort(),
+            fixtureRanks: [0, 1, 2, 3, 4],
+          })),
+        );
         const dxfSha256 = sha256(canonical(dxfScopes));
         const exactConnectionSha256 = sha256(canonical(exactConnections));
         const negativeGuardSha256 = sha256(canonical(negativeGuards));

@@ -238,6 +238,8 @@ import {
 import { blankFuse, writeFuseFields } from './nesting/fuse-spec';
 import { fusingBaseRows } from 'lib/grade-map/fusing-base-source';
 import { currentFusingBases, publishFusingBases } from 'lib/grade-map/fusing-base-store';
+import { readPatternImportDxfPhaseECardSessionV1 } from './pattern-import/phase-e-workbench-card-session-v1';
+import { registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwnerV1 } from './pattern-import/phase-e-workbench-v2/patterns-field-compiled-reimport-owner-v1';
 
 // The whole nesting feature (modal + worker + dxf/clipper deps) lives in a lazy chunk —
 // nothing loads until someone actually opens a раскладка.
@@ -929,6 +931,8 @@ export function PatternsField({
   } | null>(null);
   // Non-DXF files dropped on a slot: the import wizard, starting from those files.
   const [importing, setImporting] = useState<{ scopeKey: string; files: File[] } | null>(null);
+  const importingRef = useRef(importing);
+  importingRef.current = importing;
   // Direct uploads in flight, per slot.
   const [uploading, setUploading] = useState<Record<string, number>>({});
   const uploadingRef = useRef<Record<string, number>>({});
@@ -1648,6 +1652,22 @@ export function PatternsField({
         shelfKeys[0] ??
         null;
   const setSelectedKey = setPickedKey;
+  useEffect(() => {
+    if (!techCardId || !Number.isSafeInteger(techCardId) || techCardId < 1) return;
+    return registerPatternImportDxfPhaseEPatternsFieldCompiledReimportOwnerV1({
+      techCardId,
+      // A saved-only card has no in-memory Phase-E session. Generation zero is its explicit,
+      // stable compile identity; a confirmed fresh import advances through the existing session.
+      readConfirmedImportGeneration: () =>
+        readPatternImportDxfPhaseECardSessionV1(techCardId)?.importGeneration ?? 0,
+      scopeAvailable: (scopeKey) => scopesRef.current.some((scope) => scope.key === scopeKey),
+      reviewAlreadyOpen: () => importingRef.current !== null,
+      openExistingImportReview: ({ scopeKey, files }) => {
+        setPickedKey(scopeKey);
+        setImporting({ scopeKey, files: [...files] });
+      },
+    });
+  }, [techCardId]);
   // The remove overlay belongs to the tile it was opened on; another pick closes it.
   useEffect(() => setConfirmScopeKey(null), [selectedKey]);
 

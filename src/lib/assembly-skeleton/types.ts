@@ -95,6 +95,28 @@ export type SkeletonFacts = {
 
 export type EdgeId = string; // `${pieceKey}#${k}`
 
+export const ASSEMBLY_SKELETON_DXF_EXACT_BOUNDARY_EDGE_V1 =
+  'assembly-skeleton-dxf-exact-boundary-edge/1' as const;
+
+/**
+ * Optional sealed DXF identity for an edge that represents one complete Phase-D boundary edge.
+ * Legacy skeleton geometry deliberately leaves it absent: persisted DXF topology must never be
+ * recovered from coordinates, edge names or proximity.
+ */
+export type AssemblySkeletonDxfExactBoundaryEdgeV1 = Readonly<{
+  schemaVersion: typeof ASSEMBLY_SKELETON_DXF_EXACT_BOUNDARY_EDGE_V1;
+  sourceFileId: string;
+  scopeKey: string;
+  sizeToken: string;
+  catalogCanonicalSha256: string;
+  sizeSelectionCanonicalSha256: string;
+  pieceId: string;
+  pieceLineKey: string;
+  contourId: string;
+  boundaryVertexIds: readonly [string, string];
+  fullEdge: true;
+}>;
+
 /** One sewn stretch of a seam side: mm along the edge from its start; no range = the whole edge. */
 export type SeamStretch = { target: EdgeId; range?: readonly [Mm, Mm] };
 
@@ -114,6 +136,8 @@ export type Edge = {
   notchesMm: Mm[];
   /** chain = two neighbouring edges joined across a soft corner. */
   kind: 'edge' | 'chain';
+  /** Exact DXF provenance; absent on legacy and inferred assembly-skeleton geometry. */
+  exactDxfBoundary?: AssemblySkeletonDxfExactBoundaryEdgeV1;
 };
 
 /**

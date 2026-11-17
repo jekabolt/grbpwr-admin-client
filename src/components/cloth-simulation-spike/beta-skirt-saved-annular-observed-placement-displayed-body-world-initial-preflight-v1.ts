@@ -1,0 +1,13 @@
+/** Fixed observed Placement V3 entry; shared source adapters and owner registries remain private. */
+export {
+  BETA_SKIRT_SAVED_ANNULAR_OBSERVED_PLACEMENT_DISPLAYED_BODY_WORLD_INITIAL_PREFLIGHT_V1,
+  buildBetaSkirtSavedAnnularObservedPlacementDisplayedBodyWorldInitialPreflightV1,
+  projectBetaSkirtSavedAnnularObservedPlacementDisplayedBodyWorldInitialPreflightV1,
+  getBetaSkirtSavedAnnularObservedPlacementDisplayedBodyWorldInitialPreflightLifetimeV1,
+  disposeBetaSkirtSavedAnnularObservedPlacementDisplayedBodyWorldInitialPreflightV1,
+  type BetaSkirtSavedAnnularObservedPlacementDisplayedBodyWorldInitialPreflightRequestV1,
+  type BetaSkirtSavedAnnularObservedPlacementDisplayedBodyWorldInitialPreflightReportV1,
+  type BetaSkirtSavedAnnularObservedPlacementDisplayedBodyWorldInitialPreflightOwnerV1,
+  type BetaSkirtSavedAnnularObservedPlacementDisplayedBodyWorldInitialPreflightProjectionV1,
+  type BetaSkirtSavedAnnularObservedPlacementDisplayedBodyWorldInitialPreflightResultV1,
+} from './beta-skirt-saved-annular-displayed-body-world-initial-preflight-v1';

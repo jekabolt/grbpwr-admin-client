@@ -263,7 +263,9 @@ test('mobile touch edits wrist and ankle live while empty canvas stays camera-ow
   const cameraAfter = await canvas.screenshot();
   expect(cameraAfter.equals(cameraBefore)).toBe(false);
 
-  await page.getByRole('radio', { name: 'guided', exact: true }).tap();
+  const guidedRadio = page.getByRole('radio', { name: 'guided', exact: true });
+  await guidedRadio.tap();
+  await expect(guidedRadio).toHaveAttribute('aria-checked', 'true');
   await expect(guided).toBeVisible();
   await expect(form.locator('[data-model-measurement]')).toHaveCount(1);
   await expect(page.getByRole('textbox', { name: 'chest', exact: true })).toHaveValue('920');
@@ -276,4 +278,75 @@ test('mobile touch edits wrist and ankle live while empty canvas stays camera-ow
   await expect(page.getByTestId('model-form-smoke-mutation-calls')).toHaveText('0');
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
+});
+
+test('measurement view admits touch pointerup without relying on a compatibility click', async ({
+  page,
+}) => {
+  await page.goto(DEV_ROUTE, { waitUntil: 'domcontentloaded' });
+  const guided = page.getByTestId('measurements-guided-entry');
+  const tableRadio = page.getByRole('radio', { name: 'table', exact: true });
+  const guidedRadio = page.getByRole('radio', { name: 'guided', exact: true });
+
+  await tableRadio.click();
+  await expect(tableRadio).toHaveAttribute('aria-checked', 'true');
+  await expect(guided).toHaveCount(0);
+
+  const box = await guidedRadio.boundingBox();
+  expect(box).not.toBeNull();
+  const start = { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 };
+  const pointer = {
+    pointerId: 41,
+    pointerType: 'touch',
+    isPrimary: true,
+    button: 0,
+  } as const;
+
+  // Moving beyond tap slop represents a scroll gesture and must not switch the view.
+  await guidedRadio.dispatchEvent('pointerdown', {
+    ...pointer,
+    buttons: 1,
+    clientX: start.x,
+    clientY: start.y,
+  });
+  await guidedRadio.dispatchEvent('pointermove', {
+    ...pointer,
+    buttons: 1,
+    clientX: start.x,
+    clientY: start.y + 24,
+  });
+  await guidedRadio.dispatchEvent('pointerup', {
+    ...pointer,
+    buttons: 0,
+    clientX: start.x,
+    clientY: start.y + 24,
+  });
+  await expect(tableRadio).toHaveAttribute('aria-checked', 'true');
+  await expect(guided).toHaveCount(0);
+
+  // Pointer events are dispatched directly, so no browser compatibility click follows this tap.
+  await guidedRadio.dispatchEvent('pointerdown', {
+    ...pointer,
+    buttons: 1,
+    clientX: start.x,
+    clientY: start.y,
+  });
+  await guidedRadio.dispatchEvent('pointerup', {
+    ...pointer,
+    buttons: 0,
+    clientX: start.x,
+    clientY: start.y,
+  });
+  await expect(guidedRadio).toHaveAttribute('aria-checked', 'true');
+  await expect(guided).toBeVisible();
+
+  // A real browser emits this click after touchend; it is consumed without a second transition.
+  await guidedRadio.dispatchEvent('click', { button: 0, detail: 1 });
+  await expect(guidedRadio).toHaveAttribute('aria-checked', 'true');
+  await expect(guided).toBeVisible();
+
+  // The consumed compatibility click must not poison the next ordinary mouse selection.
+  await tableRadio.click();
+  await expect(tableRadio).toHaveAttribute('aria-checked', 'true');
+  await expect(guided).toHaveCount(0);
 });

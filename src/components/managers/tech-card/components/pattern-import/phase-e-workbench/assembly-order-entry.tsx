@@ -1,3 +1,6 @@
+import { useSavedClothPhysicalHostV1 } from '../phase-e-workbench-v2/use-saved-cloth-physical-host-v1';
+import { SavedClothPhysicalControlsV1 } from 'components/cloth-simulation-spike/saved-cloth-physical-controls-v1';
+import type { CadWorkbenchPhysicalHostV1 } from '../phase-e-workbench-v2/cad-workbench-physical-host-v1';
 import type { TechCardFormData } from 'components/managers/tech-card/components/schema';
 import {
   useSizeNames,
@@ -73,6 +76,14 @@ import type { PatternImportDxfPhaseEExactNAssemblyOrderSessionV2 } from '../phas
 import type { PatternImportDxfProductCompositeSidecarApplicationTransactionV4 } from '../phase-e-workbench-v2/composite-sidecar-production-transaction-v4';
 import { projectPatternImportDxfPhaseECadWorkbenchColorwaysV1 } from '../phase-e-workbench-v2/cad-workbench-bom-visual-authority-v1';
 import { PatternImportDxfPhaseECadTableZeroOperationProductionMountV1 } from '../phase-e-workbench-v2/cad-table-zero-operation-production-mount-v1';
+import { preparePatternImportDxfPhaseECadMannequinSavedAllScopeStagingV1 } from '../phase-e-workbench-v2/cad-mannequin-saved-all-scope-staging-v1';
+import {
+  PATTERN_IMPORT_DXF_PHASE_E_CAD_SAVED_MATERIAL_SCOPE_EDITOR_PREPARATION_CLAIMS_V1,
+  preparePatternImportDxfPhaseECadSavedMaterialScopeEditorsV1,
+} from '../phase-e-workbench-v2/cad-saved-material-scope-editor-preparation-v1';
+import { createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1 } from '../phase-e-workbench-v2/cad-table-zero-operation-generation-owner-v1';
+import { preparePatternImportDxfPhaseECadTableZeroOperationSavedV1 } from '../phase-e-workbench-v2/cad-table-zero-operation-saved-preparation-v1';
+import { createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1 } from '../phase-e-workbench-v2/zero-operation-saved-card-authority-v1';
 import { PatternImportDxfPhaseECadTableDraftOperationsPanelV1 } from '../phase-e-workbench-v2/cad-table-draft-operations-panel-v1';
 import type { PatternImportDxfPhaseECadTableDraftOperationSessionBridgeResultV1 } from '../phase-e-workbench-v2/cad-table-draft-operation-session-bridge-v1';
 import type { PatternImportDxfProductPhaseEMaterialRevisionOptionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
@@ -113,11 +124,10 @@ export function shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
   exactNSessionAvailable: boolean;
   savedProjectionBlockerCode: string | null;
 }>): boolean {
-  return (
-    workbenchOpen &&
-    !exactNSessionAvailable &&
-    savedProjectionBlockerCode === 'saved-operation-not-two-seam'
-  );
+  const operationCanBeCompletedOnTable =
+    savedProjectionBlockerCode === 'saved-operation-missing' ||
+    savedProjectionBlockerCode === 'saved-operation-not-two-seam';
+  return workbenchOpen && !exactNSessionAvailable && operationCanBeCompletedOnTable;
 }
 
 export const PATTERN_IMPORT_DXF_PHASE_E_ASSEMBLY_ORDER_ENTRY_CONTRACT_V1 = Object.freeze({
@@ -157,23 +167,58 @@ export const PATTERN_IMPORT_DXF_PHASE_E_ASSEMBLY_ORDER_ENTRY_CONTRACT_V1 = Objec
   previewLoadsOrConsumesSavedCompilerSource: false,
 } as const);
 
-export const PATTERN_IMPORT_DXF_PHASE_E_SAVED_GARMENT_TARGET_EDGE_MM_V1 = 10;
+// Match the qualified canonical local-frame/actual-body discretization (244 boundary vertices).
+export const PATTERN_IMPORT_DXF_PHASE_E_SAVED_GARMENT_TARGET_EDGE_MM_V1 = 12.5;
 
-export type PatternImportDxfPhaseESavedGarmentMeshCompileSessionLoaderV1 = () => Promise<
-  Pick<
-    typeof import('lib/cloth/domain/pattern-import-dxf-product-saved-garment-mesh-compile-session-v1'),
-    'createPatternImportDxfProductSavedGarmentMeshCompileSessionV1'
-  >
->;
-
-type SavedGarmentCompileSessionV1 = ReturnType<
+type BaseSavedGarmentCompileSessionV1 = ReturnType<
   (typeof import('lib/cloth/domain/pattern-import-dxf-product-saved-garment-mesh-compile-session-v1'))['createPatternImportDxfProductSavedGarmentMeshCompileSessionV1']
 >;
+type SavedCompiledResultV1 = Extract<
+  Awaited<ReturnType<BaseSavedGarmentCompileSessionV1['consume']>>,
+  { ok: true }
+>;
+type SavedPhysicalSessionV1 = ReturnType<
+  (typeof import('components/cloth-simulation-spike/pattern-import-dxf-product-saved-physical-session-v1'))['createPatternImportDxfProductSavedPhysicalSessionV1']
+>;
+type SavedGarmentCompileSessionV1 = Pick<
+  BaseSavedGarmentCompileSessionV1,
+  'consume' | 'projectLatest' | 'snapshot' | 'dispose'
+> &
+  Partial<
+    Pick<
+      SavedPhysicalSessionV1,
+      | 'projectLatestRefined'
+      | 'projectLatestActualBody'
+      | 'physicalStage'
+      | 'buildLatestConfirmedPlacementSidecar'
+      | 'advanceActualBody'
+      | 'invalidateActualBody'
+      | 'buildLatestRuntimeSource'
+      | 'runBetaPreview'
+      | 'stopBetaPreview'
+    >
+  >;
+
+export type PatternImportDxfPhaseESavedGarmentMeshCompileSessionLoaderV1 = () => Promise<{
+  createPatternImportDxfProductSavedGarmentMeshCompileSessionV1: () => SavedGarmentCompileSessionV1;
+}>;
 
 export type PatternImportDxfPhaseESavedGarmentMeshProductionOwnerV1 = Readonly<{
   downstream: PatternImportDxfPhaseEMultiseamSavedDownstreamV2;
   projectLatest: SavedGarmentCompileSessionV1['projectLatest'];
   snapshot: () => ReturnType<SavedGarmentCompileSessionV1['snapshot']> | null;
+  latestCompile: () => SavedCompiledResultV1 | null;
+  subscribe: (listener: () => void) => () => void;
+  version: () => number;
+  projectLatestRefined: () => ReturnType<SavedPhysicalSessionV1['projectLatestRefined']>;
+  projectLatestActualBody: () => ReturnType<SavedPhysicalSessionV1['projectLatestActualBody']>;
+  physicalStage: () => ReturnType<SavedPhysicalSessionV1['physicalStage']> | null;
+  buildLatestConfirmedPlacementSidecar: SavedPhysicalSessionV1['buildLatestConfirmedPlacementSidecar'];
+  advanceActualBody: SavedPhysicalSessionV1['advanceActualBody'];
+  invalidateActualBody: SavedPhysicalSessionV1['invalidateActualBody'];
+  buildLatestRuntimeSource: SavedPhysicalSessionV1['buildLatestRuntimeSource'];
+  runBetaPreview: SavedPhysicalSessionV1['runBetaPreview'];
+  stopBetaPreview: SavedPhysicalSessionV1['stopBetaPreview'];
   dispose: () => void;
 }>;
 
@@ -197,12 +242,21 @@ export function patternImportDxfPhaseESavedGarmentMeshOwnerKeyV1(
 /** Lazy cloth-owned boundary. `ready` loads the chunk before the one-shot source is handed off. */
 export function createPatternImportDxfPhaseESavedGarmentMeshProductionOwnerV1(
   loadCompileSession: PatternImportDxfPhaseESavedGarmentMeshCompileSessionLoaderV1 = () =>
-    import('lib/cloth/domain/pattern-import-dxf-product-saved-garment-mesh-compile-session-v1'),
+    import(
+      'components/cloth-simulation-spike/pattern-import-dxf-product-saved-physical-session-v1'
+    ),
 ): PatternImportDxfPhaseESavedGarmentMeshProductionOwnerV1 {
   let disposed = false;
   let modulePromise: ReturnType<PatternImportDxfPhaseESavedGarmentMeshCompileSessionLoaderV1> | null =
     null;
   let session: SavedGarmentCompileSessionV1 | null = null;
+  let latestCompile: SavedCompiledResultV1 | null = null;
+  let version = 0;
+  const listeners = new Set<() => void>();
+  const publish = () => {
+    version += 1;
+    for (const listener of listeners) listener();
+  };
 
   const ready = async (signal: AbortSignal) => {
     if (disposed) throw new Error('The saved garment compile owner is disposed.');
@@ -224,12 +278,21 @@ export function createPatternImportDxfPhaseESavedGarmentMeshProductionOwnerV1(
 
   const downstream: PatternImportDxfPhaseEMultiseamSavedDownstreamV2 = Object.freeze({
     targetEdgeMm: PATTERN_IMPORT_DXF_PHASE_E_SAVED_GARMENT_TARGET_EDGE_MM_V1,
+    physicalStage: () => session?.physicalStage?.() ?? null,
     ready,
     consume: async (request, signal) => {
       if (disposed) throw new Error('The saved garment compile owner is disposed.');
       if (!session)
         throw new Error('The saved garment compiler must be ready before source handoff.');
-      return session.consume(request, signal);
+      latestCompile = null;
+      publish();
+      try {
+        const result = await session.consume(request, signal);
+        if (!disposed && result.ok) latestCompile = result;
+        return result;
+      } finally {
+        if (!disposed) publish();
+      }
     },
   });
 
@@ -237,11 +300,70 @@ export function createPatternImportDxfPhaseESavedGarmentMeshProductionOwnerV1(
     downstream,
     projectLatest: () => session?.projectLatest() ?? null,
     snapshot: () => session?.snapshot() ?? null,
+    latestCompile: () => (latestCompile ? structuredClone(latestCompile) : null),
+    subscribe: (listener) => {
+      if (disposed) return () => {};
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    version: () => version,
+    projectLatestRefined: () => session?.projectLatestRefined?.() ?? null,
+    projectLatestActualBody: () => session?.projectLatestActualBody?.() ?? null,
+    physicalStage: () => session?.physicalStage?.() ?? null,
+    buildLatestConfirmedPlacementSidecar: async (input, signal) => {
+      if (disposed || !session?.buildLatestConfirmedPlacementSidecar)
+        throw new Error('The saved placement authoring session is unavailable.');
+      return session.buildLatestConfirmedPlacementSidecar(input, signal);
+    },
+    advanceActualBody: async (input, signal) => {
+      if (disposed || !session?.advanceActualBody)
+        throw new Error('The saved actual-body session is unavailable.');
+      try {
+        return await session.advanceActualBody(input, signal);
+      } finally {
+        if (!disposed) publish();
+      }
+    },
+    buildLatestRuntimeSource: async (generation, signal) => {
+      if (disposed || !session?.buildLatestRuntimeSource)
+        throw new Error('The saved runtime-source session is unavailable.');
+      try {
+        return await session.buildLatestRuntimeSource(generation, signal);
+      } finally {
+        if (!disposed) publish();
+      }
+    },
+    invalidateActualBody: (generation) => {
+      if (disposed) return false;
+      const changed = session?.invalidateActualBody?.(generation) ?? false;
+      if (changed) publish();
+      return changed;
+    },
+    runBetaPreview: async (generation, computeCanvas, displayCanvas, signal) => {
+      if (disposed || !session?.runBetaPreview)
+        throw new Error('The saved physical preview session is unavailable.');
+      try {
+        return await session.runBetaPreview(generation, computeCanvas, displayCanvas, signal);
+      } finally {
+        if (!disposed) publish();
+      }
+    },
+    stopBetaPreview: () => {
+      if (disposed) return false;
+      const stopped = session?.stopBetaPreview?.() ?? false;
+      if (stopped) publish();
+      return stopped;
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
       session?.dispose();
       session = null;
+      latestCompile = null;
+      publish();
+      listeners.clear();
     },
   });
 }
@@ -1270,6 +1392,14 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   const savedCard = useTechCard(techCardId);
   const sizeNameById = useSizeNames();
   const orderSizeIds = useSizeOrdering();
+  const savedAllScopeAuthority = useMemo(
+    () =>
+      createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1({
+        orderSizeIds,
+        sizeNameById,
+      }),
+    [orderSizeIds, sizeNameById],
+  );
   const operations = (useWatch<TechCardFormData>({ name: 'operations' }) ?? []) as FormOperation[];
   const selected = operations[selectedIndex];
   const bomItems = (useWatch<TechCardFormData>({ name: 'bomItems' }) ?? []) as NonNullable<
@@ -1413,32 +1543,145 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         : undefined,
     [exactPersistenceCapabilities, savedProjection],
   );
-  const savedGarmentCompileOwnerKey = savedProjection.ok
-    ? patternImportDxfPhaseESavedGarmentMeshOwnerKeyV1(
-        savedProjection.row,
-        savedProjection.selectedOperationNumber,
-      )
-    : null;
-  const savedGarmentCompileOwner = useMemo(
-    () =>
-      savedGarmentCompileOwnerKey
-        ? createPatternImportDxfPhaseESavedGarmentMeshProductionOwnerV1()
-        : null,
-    [savedGarmentCompileOwnerKey],
+  const physicalRow =
+    savedProjection.ok && selectedSeamKeys.length === 2 ? savedProjection.row : null;
+  const savedClothPhysicalHost = useSavedClothPhysicalHostV1({
+    row: physicalRow,
+    selectedOperationNumber: savedProjection.ok ? savedProjection.selectedOperationNumber : 0,
+    createCanonicalOwner: createPatternImportDxfPhaseESavedGarmentMeshProductionOwnerV1,
+  });
+  const savedPhysicalDownstream = savedClothPhysicalHost.selected?.owner.downstream;
+  const physicalHost: CadWorkbenchPhysicalHostV1 = {
+    onDisplayedBodyInputV1: savedClothPhysicalHost.onDisplayedBodyInputV1,
+    panel: (
+      <SavedClothPhysicalControlsV1
+        host={savedClothPhysicalHost}
+        row={physicalRow}
+        disabled={frozen}
+      />
+    ),
+  };
+  const prepareSavedAllMaterialScopeStaging = useCallback<
+    NonNullable<PatternImportDxfPhaseEMultiseamSavedSessionV2['prepareAllMaterialScopeStaging']>
+  >(
+    ({ current, sizeToken, signal }) => {
+      if (!savedProjection.ok || !savedCard.data)
+        return Promise.resolve(
+          Object.freeze({
+            ok: false as const,
+            sources: Object.freeze([current]),
+            blocker: Object.freeze({
+              code: 'saved-material-scope-set-invalid' as const,
+              detail: 'The current saved card projection is unavailable.',
+            }),
+          }),
+        );
+      return preparePatternImportDxfPhaseECadMannequinSavedAllScopeStagingV1({
+        techCard: savedCard.data,
+        orderSizeIds,
+        sizeNameById,
+        sizeToken,
+        current,
+        authority: savedAllScopeAuthority,
+        preparationKey: `saved-ao:${savedProjection.row.techCardId}:${savedProjection.row.cardLockVersion}:${savedProjection.selectedOperationNumber}`,
+        signal,
+      });
+    },
+    [orderSizeIds, savedAllScopeAuthority, savedCard.data, savedProjection, sizeNameById],
   );
-  useEffect(() => () => savedGarmentCompileOwner?.dispose(), [savedGarmentCompileOwner]);
+  const prepareSavedAllMaterialScopeEditors = useCallback<
+    NonNullable<PatternImportDxfPhaseEMultiseamSavedSessionV2['prepareAllMaterialScopeEditors']>
+  >(
+    async ({ scopeKey, sizeToken, signal }) => {
+      const unavailable = (detail: string) =>
+        Object.freeze({
+          ok: false as const,
+          techCardId: savedCard.data?.id ?? null,
+          sizeToken: sizeToken || null,
+          catalog: null,
+          scopes: Object.freeze([]) as readonly [],
+          crossScopeSeamingAvailable: false as const,
+          pressAuthoringAvailable: false as const,
+          blocker: Object.freeze({
+            scopeKey: scopeKey || null,
+            code: 'saved-editor-scope-preparation-blocked' as const,
+            detail,
+          }),
+          claims: PATTERN_IMPORT_DXF_PHASE_E_CAD_SAVED_MATERIAL_SCOPE_EDITOR_PREPARATION_CLAIMS_V1,
+        });
+      if (!savedProjection.ok || !savedCard.data)
+        return unavailable('The current saved card projection is unavailable.');
+      const generationOwner = createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1();
+      try {
+        const generation = generationOwner.beginSaved(
+          `saved-editor-active:${savedCard.data.id}:${savedCard.data.lockVersion}:${sizeToken}:${scopeKey}`,
+        );
+        const active = await preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
+          {
+            techCard: savedCard.data,
+            orderSizeIds,
+            sizeNameById,
+            scopeKey,
+            sizeToken,
+            authority: savedAllScopeAuthority,
+            generation,
+          },
+          signal,
+        );
+        if (!active.ok)
+          return unavailable(
+            `The active saved material slot could not be reconstructed: ${active.blocker.detail}`,
+          );
+        return preparePatternImportDxfPhaseECadSavedMaterialScopeEditorsV1({
+          techCard: savedCard.data,
+          orderSizeIds,
+          sizeNameById,
+          sizeToken,
+          active: {
+            scopeKey: active.scopeKey,
+            sizeToken: active.sizeToken,
+            sourceRevision: active.preparationGeneration,
+            selection: active.selection,
+            catalog: active.catalog,
+            projection: active.projection,
+            compileSource: active.draftCadCompileSource,
+          },
+          authority: savedAllScopeAuthority,
+          signal,
+        });
+      } catch (error) {
+        return unavailable(
+          error instanceof Error
+            ? `Saved material editors could not be prepared: ${error.message}`
+            : 'Saved material editors could not be prepared.',
+        );
+      } finally {
+        generationOwner.dispose();
+      }
+    },
+    [orderSizeIds, savedAllScopeAuthority, savedCard.data, savedProjection, sizeNameById],
+  );
   const savedSession = useMemo<PatternImportDxfPhaseEMultiseamSavedSessionV2 | null>(
     () =>
-      savedProjection.ok && savedRuntimeResolution.runtime && savedGarmentCompileOwner
+      savedProjection.ok && savedRuntimeResolution.runtime
         ? Object.freeze({
             runtime: savedRuntimeResolution.runtime,
             row: savedProjection.row,
             selectedOperationNumber: savedProjection.selectedOperationNumber,
-            downstream: savedGarmentCompileOwner.downstream,
+            prepareAllMaterialScopeStaging: prepareSavedAllMaterialScopeStaging,
+            prepareAllMaterialScopeEditors: prepareSavedAllMaterialScopeEditors,
+            ...(savedPhysicalDownstream ? { downstream: savedPhysicalDownstream } : {}),
             ...(savedConfirm ? { onConfirm: savedConfirm } : {}),
           })
         : null,
-    [savedConfirm, savedGarmentCompileOwner, savedProjection, savedRuntimeResolution.runtime],
+    [
+      prepareSavedAllMaterialScopeStaging,
+      prepareSavedAllMaterialScopeEditors,
+      savedConfirm,
+      savedPhysicalDownstream,
+      savedProjection,
+      savedRuntimeResolution.runtime,
+    ],
   );
   const savedBlocker = savedProjection.ok
     ? savedRuntimeResolution.blocker
@@ -1486,6 +1729,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     return (
       <PatternImportDxfPhaseECadTableZeroOperationProductionMountV1
         techCardId={techCardId}
+        physicalHost={physicalHost}
         zeroConnectAuthoringHandoff={zeroConnectAuthoringHandoff}
         disabled={frozen}
         selection={{ operationNumber: source.selectedOperationNumber }}
@@ -1514,6 +1758,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         }}
         cardSession={cardSession}
         savedSession={savedSession}
+        physicalHost={physicalHost}
         savedBlocker={savedBlocker}
         onFreshConfirm={freshConfirm}
         stitchVisual={stitchVisual}

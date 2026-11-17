@@ -39,6 +39,7 @@ import {
   type MakeHumanOpenReferenceBasisV1,
 } from './measurement-open-reference-display-v1';
 import type { MeasurementOpenReferenceUniformWaistHipRuntimeResultV1 } from './measurement-open-reference-uniform-waist-hip-runtime-v1';
+import { measureMeshPlaneSectionPerimetersV1 } from './mesh-plane-section-perimeter-v1';
 
 export const MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_RUNTIME_V1 =
   'measurement-open-reference-beta-shape-runtime/v1' as const;
@@ -290,6 +291,89 @@ function withoutTorsoDepth(
   return Object.freeze(rest);
 }
 
+function hasFinalGlobalQualityRollback(
+  result: MeasurementOpenReferenceBetaShapeRuntimeResultV1,
+): boolean {
+  return result.chestShoulderDiagnostics.includes('beta-final-global-quality-rollback');
+}
+
+function measureUnshapedBaseChestMm(
+  options: MeasurementOpenReferenceBetaShapeRuntimeOptionsV1,
+  result: MeasurementOpenReferenceBetaShapeRuntimeResultV1,
+): number | undefined {
+  const stationOriginM = result.torsoSectionStations?.chest;
+  if (!stationOriginM) return undefined;
+  const mesh = options.waistHipRuntime.openReference.mesh;
+  try {
+    const section = measureMeshPlaneSectionPerimetersV1({
+      positionsM: mesh.positions,
+      triangleIndices: mesh.indices,
+      planeOriginM: stationOriginM,
+      planeNormal: [0, 1, 0],
+      selection: { kind: 'nearest-seed', seedM: stationOriginM },
+      policy: { weldToleranceM: 0.00002 },
+    });
+    const measuredMm =
+      section.ok && section.selectedLoop ? section.selectedLoop.perimeterM * 1000 : Number.NaN;
+    return Number.isFinite(measuredMm) && measuredMm > 0 ? measuredMm : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function withChestTarget(
+  measurements: CanonicalBodyMeasurementsMm,
+  chestCircumferenceMm: number,
+): CanonicalBodyMeasurementsMm {
+  return Object.freeze({ ...measurements, chestCircumferenceMm });
+}
+
+function chestFallbackResult(options: {
+  readonly original: MeasurementOpenReferenceBetaShapeRuntimeResultV1;
+  readonly retry: MeasurementOpenReferenceBetaShapeRuntimeResultV1;
+  readonly mode: 'halved' | 'removed';
+  readonly depthRemoved: boolean;
+}): MeasurementOpenReferenceBetaShapeRuntimeResultV1 {
+  const represented: MeasurementOpenReferenceBetaShapeKeyV1[] = [];
+  for (const key of options.retry.representedVisualControls) {
+    if (key !== 'chestCircumferenceMm') represented.push(key);
+  }
+  const limited: MeasurementOpenReferenceBetaShapeKeyV1[] = [];
+  for (const key of options.retry.limitedVisualControls ?? []) {
+    if (key !== 'chestCircumferenceMm') limited.push(key);
+  }
+  if (options.mode === 'halved') limited.push('chestCircumferenceMm');
+  const representedVisualControls = stableKeys(represented);
+  const limitedVisualControls = stableKeys(limited);
+  const depthDiagnostics = options.depthRemoved
+    ? [
+        ...options.original.chestShoulderDiagnostics.filter((code) =>
+          /^(chestDepthMm|waistDepthMm|hipDepthMm):/.test(code),
+        ),
+        'beta-final-depth-subset-rollback',
+      ]
+    : [];
+  const retryDiagnostics =
+    options.mode === 'removed'
+      ? options.retry.chestShoulderDiagnostics.filter(
+          (code) => !code.startsWith('chestCircumferenceMm:'),
+        )
+      : options.retry.chestShoulderDiagnostics;
+  return Object.freeze({
+    ...options.retry,
+    status: options.retry.status === 'represented' ? ('partial' as const) : options.retry.status,
+    representedVisualControls,
+    limitedVisualControls,
+    chestShoulderDiagnostics: Object.freeze([
+      ...depthDiagnostics,
+      'beta-final-chest-subset-rollback',
+      `chestCircumferenceMm:beta-final-target-${options.mode}`,
+      ...retryDiagnostics,
+    ]),
+    sourceRevisionSuffix: suffix(representedVisualControls, limitedVisualControls),
+  });
+}
+
 /**
  * Product-visible beta visual response. It promotes only locally bounded CC0 directions that keep
  * the existing quality/closure rollback. armLengthMm is at most a bounded skeleton-centerline
@@ -298,32 +382,73 @@ function withoutTorsoDepth(
  * Optional torso depth is the newest, least-calibrated control. When the shaped mesh fails the
  * final global quality gate while depth was requested, only the depth subset is rolled back: the
  * runtime is solved again without depth and keeps the chest/shoulder, limb and arm-length
- * response if that solve passes. Depth controls then stay requested but unapplied.
+ * response if that solve passes. Depth controls then stay requested but unapplied. If the gate
+ * remains unsafe, chest is retried halfway to the measured unshaped-base girth, then at that base
+ * girth. A passing halfway response is limited; a base-girth response leaves chest unapplied.
  */
 export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(
   options: MeasurementOpenReferenceBetaShapeRuntimeOptionsV1,
 ): Promise<MeasurementOpenReferenceBetaShapeRuntimeResultV1> {
   const result = await createBetaShapeRuntimeOnceV1(options);
+  if (!hasFinalGlobalQualityRollback(result)) return result;
+
   const depthFree = withoutTorsoDepth(options.measurements);
-  if (!depthFree || !result.chestShoulderDiagnostics.includes('beta-final-global-quality-rollback')) {
-    return result;
+  let retryMeasurements = options.measurements;
+  let failedResult = result;
+  if (depthFree) {
+    const retry = await createBetaShapeRuntimeOnceV1({ ...options, measurements: depthFree });
+    if (!hasFinalGlobalQualityRollback(retry)) {
+      return Object.freeze({
+        ...retry,
+        // Depth was requested but is not applied, so a fully represented retry is still partial.
+        status: retry.status === 'represented' ? ('partial' as const) : retry.status,
+        chestShoulderDiagnostics: Object.freeze([
+          ...result.chestShoulderDiagnostics.filter((code) =>
+            /^(chestDepthMm|waistDepthMm|hipDepthMm):/.test(code),
+          ),
+          'beta-final-depth-subset-rollback',
+          ...retry.chestShoulderDiagnostics,
+        ]),
+      });
+    }
+    retryMeasurements = depthFree;
+    failedResult = retry;
   }
-  const retry = await createBetaShapeRuntimeOnceV1({ ...options, measurements: depthFree });
-  if (retry.chestShoulderDiagnostics.includes('beta-final-global-quality-rollback')) {
-    return result;
-  }
-  return Object.freeze({
-    ...retry,
-    // Depth was requested but is not applied, so a fully represented retry is still partial.
-    status: retry.status === 'represented' ? ('partial' as const) : retry.status,
-    chestShoulderDiagnostics: Object.freeze([
-      ...result.chestShoulderDiagnostics.filter((code) =>
-        /^(chestDepthMm|waistDepthMm|hipDepthMm):/.test(code),
-      ),
-      'beta-final-depth-subset-rollback',
-      ...retry.chestShoulderDiagnostics,
-    ]),
+
+  const requestedChestMm = options.measurements.chestCircumferenceMm;
+  const baseChestMm = measureUnshapedBaseChestMm(options, failedResult);
+  if (!Number.isFinite(requestedChestMm) || baseChestMm == null) return result;
+
+  const halfwayChestMm = baseChestMm + (requestedChestMm - baseChestMm) / 2;
+  const halfwayRetry = await createBetaShapeRuntimeOnceV1({
+    ...options,
+    measurements: withChestTarget(retryMeasurements, halfwayChestMm),
   });
+  const halfwayApplied =
+    halfwayRetry.representedVisualControls.includes('chestCircumferenceMm') ||
+    (halfwayRetry.limitedVisualControls ?? []).includes('chestCircumferenceMm');
+  if (!hasFinalGlobalQualityRollback(halfwayRetry) && halfwayApplied) {
+    return chestFallbackResult({
+      original: result,
+      retry: halfwayRetry,
+      mode: 'halved',
+      depthRemoved: depthFree != null,
+    });
+  }
+
+  const removedRetry = await createBetaShapeRuntimeOnceV1({
+    ...options,
+    measurements: withChestTarget(retryMeasurements, baseChestMm),
+  });
+  if (!hasFinalGlobalQualityRollback(removedRetry)) {
+    return chestFallbackResult({
+      original: result,
+      retry: removedRetry,
+      mode: 'removed',
+      depthRemoved: depthFree != null,
+    });
+  }
+  return result;
 }
 
 async function createBetaShapeRuntimeOnceV1(options: {
