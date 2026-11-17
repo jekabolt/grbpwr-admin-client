@@ -3189,6 +3189,9 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
             torsoSectionStations: displayedBuilt.torsoSectionStations,
             kneeSectionStations: displayedBuilt.kneeSectionStations,
             neckSectionStation: displayedBuilt.neckSectionStation,
+            drawnMesh: editor.equalGeometry(draftPose, editor.neutralPose)
+              ? undefined
+              : displayedBuilt.runtime.displayMesh,
           })
         : undefined,
     [activeMeasurementName, displayedBuilt, draftPose, editor],

@@ -199,10 +199,10 @@ test('real ModelForm auto-binds edit/create measurements to its V9 mannequin', a
     'data-active-measurement-guide',
     'BODY_MEASUREMENT_NAME_INSEAM',
   );
-  // Inseam draws an x-ray line from the crotch to the floor: a visual guide, not a measured path.
+  // guide-v5: inseam is a tape down the inner leg to the floor, on the body: no x-ray.
   await expect(canvas).toHaveAttribute('data-measurement-guide-status', 'limited');
   await expect(canvas).toHaveAttribute('data-measurement-guide-path-count', '1');
-  await expect(canvas).toHaveAttribute('data-measurement-guide-air', 'x-ray');
+  await expect(canvas).toHaveAttribute('data-measurement-guide-air', 'none');
   await expect(page.getByTestId('measurement-surface-active-guide-label')).toHaveText('inseam');
 
   await expect(measurementApplication).toHaveAttribute('data-application-status', 'partial');
@@ -1279,7 +1279,7 @@ interface GuideLineCheck {
   readonly label: string;
   readonly name: string;
   readonly status: 'visible' | 'limited';
-  readonly view: 'front' | 'back' | 'side';
+  readonly view: 'front' | 'back' | 'side' | 'back-three-quarter';
   readonly air: string;
   readonly minBlueDesktop: number;
   readonly minBluePhone: number;
@@ -1301,9 +1301,10 @@ const GUIDE_V4_LINES: readonly GuideLineCheck[] = [
     name: 'BODY_MEASUREMENT_NAME_INSEAM',
     status: 'limited',
     view: 'front',
-    air: 'x-ray',
-    minBlueDesktop: 1500,
-    minBluePhone: 1270,
+    air: 'none',
+    // guide-v5: an on-body tape down the inner leg (no x-ray); half of 1460 / 1373 px measured.
+    minBlueDesktop: 730,
+    minBluePhone: 690,
   },
   {
     label: 'hps height',
@@ -1377,6 +1378,97 @@ const GUIDE_V4_LINES: readonly GuideLineCheck[] = [
     minBlueDesktop: 440,
     minBluePhone: 310,
   },
+];
+
+// guide-v5: lines the owner saw nothing of on model 12 (17.11). Rulers touch the floor and the
+// point; the waist-to-hip tapes run down the side seam, seen from behind on the left.
+const GUIDE_V5_LINES: readonly GuideLineCheck[] = [
+  {
+    label: 'height',
+    name: 'BODY_MEASUREMENT_NAME_HEIGHT',
+    status: 'visible',
+    view: 'front',
+    air: 'none',
+    minBlueDesktop: 2550,
+    minBluePhone: 2450,
+  },
+  {
+    label: 'waist height',
+    name: 'BODY_MEASUREMENT_NAME_WAIST_HEIGHT',
+    status: 'visible',
+    view: 'front',
+    air: 'none',
+    minBlueDesktop: 1740,
+    minBluePhone: 1700,
+  },
+  {
+    label: 'waist to high hip',
+    name: 'BODY_MEASUREMENT_NAME_WAIST_TO_HIGH_HIP',
+    status: 'limited',
+    view: 'back-three-quarter',
+    air: 'none',
+    minBlueDesktop: 135,
+    minBluePhone: 113,
+  },
+  {
+    label: 'waist to hip',
+    name: 'BODY_MEASUREMENT_NAME_WAIST_TO_HIP',
+    status: 'limited',
+    view: 'back-three-quarter',
+    air: 'none',
+    minBlueDesktop: 295,
+    minBluePhone: 254,
+  },
+];
+
+function guideLine(
+  label: string,
+  field: string,
+  status: GuideLineCheck['status'],
+  view: GuideLineCheck['view'],
+  air: string,
+  minBlueDesktop: number,
+  minBluePhone: number,
+): GuideLineCheck {
+  return {
+    label,
+    name: `BODY_MEASUREMENT_NAME_${field}`,
+    status,
+    view,
+    air,
+    minBlueDesktop,
+    minBluePhone,
+  };
+}
+
+/**
+ * Model 12 as stored on beta (no gender, seven required values, arms lowered and swung forward):
+ * every field the owner listed on 17.11, on the posed body. Thresholds at about half of the blue px
+ * measured on the m12 fixture at DPR 2.
+ */
+const M12_LINES: readonly GuideLineCheck[] = [
+  guideLine('height', 'HEIGHT', 'visible', 'front', 'none', 2400, 2250),
+  guideLine('hps height', 'HPS_HEIGHT', 'visible', 'front', 'none', 1940, 1840),
+  guideLine('waist height', 'WAIST_HEIGHT', 'visible', 'front', 'none', 1370, 1310),
+  guideLine(
+    'waist to high hip',
+    'WAIST_TO_HIGH_HIP',
+    'limited',
+    'back-three-quarter',
+    'none',
+    120,
+    125,
+  ),
+  guideLine('waist to hip', 'WAIST_TO_HIP', 'limited', 'back-three-quarter', 'none', 255, 250),
+  guideLine('inseam', 'INSEAM', 'limited', 'front', 'none', 795, 710),
+  guideLine('wrist', 'WRIST', 'visible', 'front', 'none', 85, 80),
+  guideLine('neck base', 'NECK_BASE', 'limited', 'front', 'none', 290, 275),
+  guideLine('hps to waist (front)', 'HPS_TO_WAIST_FRONT', 'limited', 'front', 'none', 505, 440),
+  guideLine('shoulder length', 'SHOULDER_LENGTH', 'limited', 'front', 'none', 150, 140),
+  guideLine('shoulder drop', 'SHOULDER_DROP', 'limited', 'front', 'caliper', 375, 320),
+  guideLine('armscye depth', 'ARMSCYE_DEPTH', 'limited', 'back', 'caliper', 375, 365),
+  guideLine('armscye circumference', 'ARMSCYE_CIRCUMFERENCE', 'limited', 'front', 'none', 160, 145),
+  guideLine('hps to bust apex', 'HPS_TO_BUST_APEX', 'limited', 'front', 'none', 315, 280),
 ];
 
 // Lines the owner reported as wrong or barely visible on the phone (17.11), checked there too.
@@ -1490,16 +1582,13 @@ test.describe('guide lines at DPR 2', () => {
     // comes straight after the side-view chest depth: a field without a back/side view faces the
     // front again.
     const newLines: Record<string, number> = {};
-    for (const line of GUIDE_V4_LINES) {
+    for (const line of [...GUIDE_V4_LINES, ...GUIDE_V5_LINES]) {
       await focusField(line.label, line.name);
       await expect(canvas).toHaveAttribute('data-measurement-guide-status', line.status);
       await expect(canvas).toHaveAttribute('data-measurement-guide-view', line.view);
       await expect(canvas).toHaveAttribute('data-measurement-guide-air', line.air);
       await expect(canvas).toHaveAttribute('data-measurement-guide-camera-motion', 'still');
-      await expect(canvas).toHaveAttribute(
-        'data-camera-facing',
-        line.view === 'back' ? 'back' : 'front',
-      );
+      await expect(canvas).toHaveAttribute('data-camera-facing', line.view);
       const stats = await canvasPixelStats(page, canvas);
       newLines[line.label] = stats.blue;
       expect(stats.blue, `${line.label} blue px`).toBeGreaterThanOrEqual(line.minBlueDesktop);
@@ -1538,7 +1627,7 @@ test.describe('guide lines at DPR 2', () => {
 
     const blue: Record<string, number> = {};
     let typingStage: [number, number] | null = null;
-    for (const line of [...PHONE_LINES, ...GUIDE_V4_LINES]) {
+    for (const line of [...PHONE_LINES, ...GUIDE_V4_LINES, ...GUIDE_V5_LINES]) {
       await page.setViewportSize(rest);
       const input = measurementField(page, line.label);
       await revealMeasurement(page, input);
@@ -1657,6 +1746,68 @@ test.describe('guide lines at DPR 2', () => {
     const posedBlue = await wristBlue('posed');
     console.info(`MANNEQUIN_GUIDE_POSED_WRIST=${JSON.stringify({ restBlue, posedBlue })}`);
     expect(posedBlue, 'posed wrist blue px').toBeGreaterThanOrEqual(POSED_WRIST_MIN_BLUE);
+  });
+
+  test('every line the owner missed on model 12 draws on the posed body, desktop and phone', async ({
+    page,
+  }) => {
+    test.setTimeout(900_000);
+    const status = page.getByTestId('model-open-reference-preview-status');
+    const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
+    const openModel12 = async () => {
+      await prewarmDevRuntime(page);
+      await page.goto(`${DEV_ROUTE}?fixture=m12`);
+      await expect(status).toContainText(/Preview (partial|ready): custom full-body pose/u, {
+        timeout: 180_000,
+      });
+      await expect(page.locator('[data-pose-draft]')).toHaveAttribute('data-pose-draft', 'custom');
+      await expect(canvas).toHaveAttribute('data-source-revision', /basisKind=neutral/u);
+    };
+    const lineBlue = async (line: GuideLineCheck) => {
+      await expect(canvas).toHaveAttribute('data-active-measurement-guide', line.name);
+      await expect(canvas).toHaveAttribute('data-measurement-guide-status', line.status);
+      await expect(canvas).toHaveAttribute('data-measurement-guide-view', line.view);
+      await expect(canvas).toHaveAttribute('data-measurement-guide-air', line.air);
+      await expect(canvas).toHaveAttribute('data-measurement-guide-camera-motion', 'still');
+      await expect(canvas).toHaveAttribute('data-camera-facing', line.view);
+      await page.mouse.move(0, 0);
+      return (await canvasPixelStats(page, canvas)).blue;
+    };
+    const blue: Record<'desktop' | 'phone', Record<string, number>> = { desktop: {}, phone: {} };
+
+    await openModel12();
+    for (const line of M12_LINES) {
+      const input = measurementField(page, line.label);
+      await revealMeasurement(page, input);
+      await input.focus();
+      blue.desktop[line.label] = await lineBlue(line);
+    }
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+
+    // Phone: the field is typed with the keyboard up, as in the phone portrait test.
+    const rest = { width: 390, height: 844 };
+    await page.setViewportSize(rest);
+    await openModel12();
+    for (const line of M12_LINES) {
+      await page.setViewportSize(rest);
+      const input = measurementField(page, line.label);
+      await revealMeasurement(page, input);
+      await page.setViewportSize({ width: 390, height: 474 });
+      await input.focus();
+      blue.phone[line.label] = await lineBlue(line);
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    }
+
+    console.info(`MANNEQUIN_GUIDE_LINES_V5_M12=${JSON.stringify(blue)}`);
+    for (const line of M12_LINES) {
+      expect(blue.desktop[line.label], `${line.label} blue px on model 12`).toBeGreaterThanOrEqual(
+        line.minBlueDesktop,
+      );
+      expect(
+        blue.phone[line.label],
+        `${line.label} blue px on model 12, phone`,
+      ).toBeGreaterThanOrEqual(line.minBluePhone);
+    }
   });
 });
 

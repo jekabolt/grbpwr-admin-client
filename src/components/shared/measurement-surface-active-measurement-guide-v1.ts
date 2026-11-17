@@ -291,15 +291,11 @@ let planeDistanceScratch = new Float64Array(0);
  * A plane section of the mesh, handed only the triangles the plane can cut: the section walks
  * every triangle it gets, and the scans below cut dozens of planes per focus on a phone.
  */
-function planeSection(
-  mesh: MeasurementSurfaceMeshV1,
-  originM: Vec3,
-  normal: Vec3,
-  seedM?: Vec3,
-) {
+function planeSection(mesh: MeasurementSurfaceMeshV1, originM: Vec3, normal: Vec3, seedM?: Vec3) {
   const { positions, indices } = mesh;
   const vertexCount = Math.floor(positions.length / 3);
-  if (planeDistanceScratch.length < vertexCount) planeDistanceScratch = new Float64Array(vertexCount);
+  if (planeDistanceScratch.length < vertexCount)
+    planeDistanceScratch = new Float64Array(vertexCount);
   const distances = planeDistanceScratch;
   for (let vertex = 0; vertex < vertexCount; vertex += 1) {
     const offset = vertex * 3;
@@ -357,6 +353,146 @@ function pathFromSectionLoop(
   return bindToMesh
     ? vertexPath(id, mesh, loop.pointsM, true)
     : fixedPath(id, offsetLoopPointsM(loop), true);
+}
+
+/** Lift of a mesh-bound line off the skin (the stage's MESH_VERTEX_LIFT_M). */
+const BOUND_LINE_LIFT_M = 0.002;
+
+/**
+ * Whether `point` lies inside the closed `mesh`: two of three axis rays (+z, -z, +y) cross its
+ * surface an odd number of times. `alongZ` / `alongY` are the triangles that can meet those rays.
+ */
+function insideClosedMesh(
+  mesh: MeasurementSurfaceMeshV1,
+  alongZ: readonly number[],
+  alongY: readonly number[],
+  point: Vec3,
+): boolean {
+  const { positions, indices } = mesh;
+  const crossings = (triangles: readonly number[], axis: 1 | 2, sign: 1 | -1) => {
+    const [u, v] = axis === 2 ? [0, 1] : [0, 2];
+    let count = 0;
+    for (const triangle of triangles) {
+      const a = indices[triangle * 3] * 3;
+      const b = indices[triangle * 3 + 1] * 3;
+      const c = indices[triangle * 3 + 2] * 3;
+      const det =
+        (positions[b + u] - positions[a + u]) * (positions[c + v] - positions[a + v]) -
+        (positions[c + u] - positions[a + u]) * (positions[b + v] - positions[a + v]);
+      if (Math.abs(det) < 1e-14) continue;
+      const pu = point[u] - positions[a + u];
+      const pv = point[v] - positions[a + v];
+      const wb =
+        (pu * (positions[c + v] - positions[a + v]) - (positions[c + u] - positions[a + u]) * pv) /
+        det;
+      const wc =
+        ((positions[b + u] - positions[a + u]) * pv - pu * (positions[b + v] - positions[a + v])) /
+        det;
+      if (wb < 0 || wc < 0 || wb + wc > 1) continue;
+      const hit =
+        positions[a + axis] * (1 - wb - wc) + positions[b + axis] * wb + positions[c + axis] * wc;
+      if ((hit - point[axis]) * sign > 0) count += 1;
+    }
+    return count % 2 === 1;
+  };
+  const votes =
+    Number(crossings(alongZ, 2, 1)) +
+    Number(crossings(alongZ, 2, -1)) +
+    Number(crossings(alongY, 1, 1));
+  return votes >= 2;
+}
+
+/**
+ * A closed loop bound to vertices of the rest body, drawn on the posed one, keeps only its longest
+ * stretch the pose leaves on the skin. A lowered arm folds the armpit shut: the tape there lies
+ * inside the fold, hidden in every view, so the line stops at the fold instead of running through
+ * the body.
+ */
+function withoutPoseBuriedRun(
+  path: MeasurementSurfaceMeasurementGuidePathV1,
+  drawnMesh: MeasurementSurfaceMeshV1,
+): MeasurementSurfaceMeasurementGuidePathV1 {
+  if (path.source !== 'mesh-vertices' || !path.closed) return path;
+  const vertices = path.vertexIndices;
+  const { positions, indices } = drawnMesh;
+  const count = vertices.length;
+  if (count < 3 || vertices.some((vertex) => vertex * 3 + 2 >= positions.length)) return path;
+
+  // Smooth normals of the loop's vertices on the posed body, as the stage lifts them.
+  const loopSlot = new Map<number, number>();
+  vertices.forEach((vertex, slot) => loopSlot.set(vertex, slot));
+  const normals = new Float64Array(count * 3);
+  const minimum = [Infinity, Infinity, Infinity];
+  const maximum = [-Infinity, -Infinity, -Infinity];
+  for (const vertex of vertices) {
+    for (let axis = 0; axis < 3; axis += 1) {
+      minimum[axis] = Math.min(minimum[axis], positions[vertex * 3 + axis] - 0.01);
+      maximum[axis] = Math.max(maximum[axis], positions[vertex * 3 + axis] + 0.01);
+    }
+  }
+  const alongZ: number[] = [];
+  const alongY: number[] = [];
+  for (let triangle = 0; triangle * 3 + 2 < indices.length; triangle += 1) {
+    const corners = [indices[triangle * 3], indices[triangle * 3 + 1], indices[triangle * 3 + 2]];
+    const low = [Infinity, Infinity, Infinity];
+    const high = [-Infinity, -Infinity, -Infinity];
+    for (const corner of corners) {
+      for (let axis = 0; axis < 3; axis += 1) {
+        low[axis] = Math.min(low[axis], positions[corner * 3 + axis]);
+        high[axis] = Math.max(high[axis], positions[corner * 3 + axis]);
+      }
+    }
+    const overlaps = (axis: number) => low[axis] <= maximum[axis] && high[axis] >= minimum[axis];
+    if (overlaps(0) && overlaps(1)) alongZ.push(triangle);
+    if (overlaps(0) && overlaps(2) && high[1] >= minimum[1]) alongY.push(triangle);
+    if (!corners.some((corner) => loopSlot.has(corner))) continue;
+    const [a, b, c] = corners.map((corner) => vertexPositionM(drawnMesh, corner));
+    const face = cross(subtract(b, a), subtract(c, a));
+    for (const corner of corners) {
+      const slot = loopSlot.get(corner);
+      if (slot === undefined) continue;
+      for (let axis = 0; axis < 3; axis += 1) normals[slot * 3 + axis] += face[axis];
+    }
+  }
+  const lifted = vertices.map((vertex, slot): Vec3 => {
+    const point = vertexPositionM(drawnMesh, vertex);
+    const normal: Vec3 = [normals[slot * 3], normals[slot * 3 + 1], normals[slot * 3 + 2]];
+    const length = Math.hypot(...normal);
+    return length > 1e-12
+      ? [
+          point[0] + (normal[0] / length) * BOUND_LINE_LIFT_M,
+          point[1] + (normal[1] / length) * BOUND_LINE_LIFT_M,
+          point[2] + (normal[2] / length) * BOUND_LINE_LIFT_M,
+        ]
+      : point;
+  });
+  const inside = (point: Vec3) => insideClosedMesh(drawnMesh, alongZ, alongY, point);
+  const vertexBuried = lifted.map(inside);
+  // Segment `slot` runs from loop vertex `slot` to the next one.
+  const segmentBuried = lifted.map(
+    (start, slot) =>
+      vertexBuried[slot] ||
+      vertexBuried[(slot + 1) % count] ||
+      [0.25, 0.5, 0.75].some((t) => inside(mix(start, lifted[(slot + 1) % count], t))),
+  );
+  if (!segmentBuried.some(Boolean) || segmentBuried.every(Boolean)) return path;
+
+  // Longest circular run of segments left on the skin.
+  let best = { start: 0, length: 0 };
+  for (let start = 0; start < count; start += 1) {
+    if (segmentBuried[start] || !segmentBuried[(start + count - 1) % count]) continue;
+    let length = 0;
+    while (length < count && !segmentBuried[(start + length) % count]) length += 1;
+    if (length > best.length) best = { start, length };
+  }
+  return Object.freeze({
+    id: path.id,
+    closed: false,
+    source: 'mesh-vertices' as const,
+    vertexIndices: Object.freeze(
+      Array.from({ length: best.length + 1 }, (_, step) => vertices[(best.start + step) % count]),
+    ),
+  });
 }
 
 function subtract(a: Vec3, b: Vec3): Vec3 {
@@ -553,7 +689,9 @@ function sameLimb(
 ): boolean {
   if (!previous) return true;
   const jump = Math.hypot(...subtract(loop.centroidM, previous.centroidM));
-  return jump <= 2 * stepM + LIMB_JUMP_M && loop.perimeterM >= LIMB_GIRTH_KEPT * previous.perimeterM;
+  return (
+    jump <= 2 * stepM + LIMB_JUMP_M && loop.perimeterM >= LIMB_GIRTH_KEPT * previous.perimeterM
+  );
 }
 
 function narrowestLimbLoop(
@@ -653,7 +791,11 @@ function placedPath(
   points: readonly PlacedPoint[],
   bindToMesh: boolean,
 ): MeasurementSurfaceMeasurementGuidePathV1 {
-  if (!bindToMesh) return fixedPath(id, points.map(({ pointM }) => pointM));
+  if (!bindToMesh)
+    return fixedPath(
+      id,
+      points.map(({ pointM }) => pointM),
+    );
   return Object.freeze({
     id,
     closed: false,
@@ -841,7 +983,10 @@ function floorRulerPath(
     id,
     mesh,
     [
-      { pointM: [soleM[0] + GUIDE_SURFACE_OFFSET_M, lineY, soleM[2]], axisVertices: [sole, lowest, sole] },
+      {
+        pointM: [soleM[0] + GUIDE_SURFACE_OFFSET_M, lineY, soleM[2]],
+        axisVertices: [sole, lowest, sole],
+      },
       { pointM: [rulerX, lineY, rulerZ], axisVertices: [shin, lowest, heel] },
       { pointM: [rulerX, topY, rulerZ], axisVertices: [shin, targetY, heel] },
       { pointM: [target.pointM[0], topY, target.pointM[2]], axisVertices: target.axisVertices },
@@ -1136,8 +1281,9 @@ function anchoredGuide(options: {
   readonly anchors: GuideBodyAnchors;
   readonly neutralPose: boolean;
   readonly waistY: number | undefined;
+  readonly drawnMesh?: MeasurementSurfaceMeshV1;
 }): MeasurementSurfaceActiveMeasurementGuideV1 | null {
-  const { measurementName, frame, mesh, anchors, neutralPose, waistY } = options;
+  const { measurementName, frame, mesh, anchors, neutralPose, waistY, drawnMesh } = options;
   const bindToMesh = !neutralPose;
   const { hpsL, acromionL, underarmL, apexL } = anchors;
   const hps = hpsL.positionM;
@@ -1244,8 +1390,11 @@ function anchoredGuide(options: {
       if (!loop || !passes(underarm) || !passes(acromion)) {
         return result(measurementName, 'unavailable-section');
       }
+      const path = pathFromSectionLoop(measurementName, mesh, loop, bindToMesh);
       return drawnOrUnavailable(measurementName, 'limited', [
-        pathFromSectionLoop(measurementName, mesh, loop, bindToMesh),
+        path && bindToMesh && drawnMesh?.positions.length === mesh.positions.length
+          ? withoutPoseBuriedRun(path, drawnMesh)
+          : path,
       ]);
     }
     case 'BODY_MEASUREMENT_NAME_ACROSS_SHOULDER': {
@@ -1426,6 +1575,8 @@ function buildGuide(options: {
   readonly kneeSectionStations?: readonly MeasurementOpenReferenceKneeRigStationV1[];
   /** The neck proxy's rig mid-neck plane from the beta runtime (same helper as the solver). */
   readonly neckSectionStation?: MeasurementOpenReferenceNeckProtectedSectionV1;
+  /** The posed body a mesh-bound guide is drawn on (same vertices as `mesh`), when posed. */
+  readonly drawnMesh?: MeasurementSurfaceMeshV1;
 }): MeasurementSurfaceActiveMeasurementGuideV1 {
   const { measurementName, frame, mesh } = options;
   if (!LABELS[measurementName as keyof typeof LABELS]) {
@@ -1507,6 +1658,7 @@ function buildGuide(options: {
       anchors,
       neutralPose: options.neutralPose,
       waistY,
+      drawnMesh: options.drawnMesh,
     });
     if (anchored) return anchored;
   } else if (ANCHOR_ONLY_FIELDS.has(measurementName)) {

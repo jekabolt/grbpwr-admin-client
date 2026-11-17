@@ -901,6 +901,7 @@ function evaluateEveryField(options: {
       limbSectionModes: body.betaRuntime?.limbSectionModes,
       torsoSectionStations: body.betaRuntime?.torsoSectionStations,
       neckSectionStation: body.betaRuntime?.neckSectionStation,
+      drawnMesh: neutralPose ? undefined : drawnMesh,
     });
     const field = measurementName.replace('BODY_MEASUREMENT_NAME_', '');
     const drawnStatus = guide.status === 'visible' || guide.status === 'limited';
@@ -1326,8 +1327,9 @@ describe('measurement guide visibility v1', () => {
       const guide = wristGuide(body.mesh);
       const restPerimeterMm = perimeterMm(guide.paths, body.mesh.positions);
       checks.push(() => {
-        // Before: on the bind-pose proxy the frame's station cuts a sliver or nothing.
-        expect(bindPerimeterMm, `${base.name} bind pose`).toBeLessThan(40);
+        // Before guide-v5 the frame's station cut a sliver or nothing on the bind-pose proxy; the
+        // station now follows the forearm, so even the bind pose gets a whole ring.
+        expect(bindPerimeterMm, `${base.name} bind pose`).toBeGreaterThan(120);
         // Now: on the A-rest body, a whole wrist ring bound to mesh vertices.
         expect(guide.status, base.name).toBe('visible');
         expect(guide.paths.length, base.name).toBeGreaterThan(0);
@@ -1464,9 +1466,9 @@ describe('measurement guide visibility v1', () => {
     // Waist to hip after waist to high hip keeps the back three-quarter camera; hip depth turns.
     expect(plan('back-three-quarter', null)).toBe('turn');
     expect(plan('back-three-quarter', { view: 'side', ownerCameraSaved: true })).toBe('turn');
-    expect(
-      plan('back-three-quarter', { view: 'back-three-quarter', ownerCameraSaved: true }),
-    ).toBe('none');
+    expect(plan('back-three-quarter', { view: 'back-three-quarter', ownerCameraSaved: true })).toBe(
+      'none',
+    );
     expect(plan('side', { view: 'back-three-quarter', ownerCameraSaved: true })).toBe('turn');
     expect(plan(null, null)).toBe('none');
     expect(plan(null, { view: 'side', ownerCameraSaved: true })).toBe('restore');
