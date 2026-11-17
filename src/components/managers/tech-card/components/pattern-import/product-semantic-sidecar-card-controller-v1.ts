@@ -18,7 +18,9 @@ import type {
   projectPatternImportDxfProductPhaseEAssemblyV1,
   proposePatternImportDxfProductPhaseEAssemblyV1,
 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
+import type { PatternImportDxfProductExpectedSavedRowV1 } from 'lib/cloth/domain/pattern-import-dxf-product-mapping-composition-v1';
 import type { ApplyResult, CardDraft } from 'lib/pattern-import/types';
+import { createPatternImportNativeSewingAuthoringViewV1 } from './native-sewing-authoring-view-v1';
 import {
   derivePatternImportDxfPhaseEDocumentAuthorityV1,
   type PatternImportDxfPhaseEDocumentEvidenceV1,
@@ -56,6 +58,8 @@ export type PatternImportDxfProductPhaseEWorkbenchModuleV1 = Readonly<{
 }>;
 
 export type PatternImportDxfProductPhaseEWorkbenchEntryRequestV1 = Readonly<{
+  /** Explicit opt-in only. Omitted preserves the original import surface. */
+  sourceSurface?: 'explicit-native-drawn-sewing';
   scopeKey: string;
   sizeToken: string;
   /** Monotonic identity of the confirmed import registration that opened this workbench. */
@@ -141,6 +145,8 @@ export const PATTERN_IMPORT_DXF_PRODUCT_SIDECAR_CARD_CONTROLLER_CONTRACT_V1 = Ob
   explicitWorkbenchEntryUsesExistingAssemblyReadOnly: true,
   explicitWorkbenchEntryStartsFromSelectedExistingOperation: true,
   exactTwoPieceOneEqualSeamV1: true,
+  explicitNativeSewingSourceRequiresVerifiedReplay: true,
+  originalImportAndNativeSewingCatalogsNeverCrossMapped: true,
   strictV1SeamDerivedOperationIdentityOwnedByWorkbench: true,
   stableServerOperationIdentityRequiredBeforeSubmit: false,
   operationNumberAcceptedAsImmutableAuthority: false,
@@ -363,10 +369,11 @@ export function createPatternImportDxfProductSidecarCardControllerV1(
   let runtimePromise: Promise<CardRuntime> | null = null;
   let workbench: PatternImportDxfProductPhaseEWorkbenchModuleV1 | null = null;
   let workbenchPromise: Promise<PatternImportDxfProductPhaseEWorkbenchModuleV1> | null = null;
-  let preparedAuthoringContext: Readonly<{
+  type AuthoringContext = Readonly<{
     techCardId: number;
     importGeneration: number;
     catalogCanonicalSha256: string;
+    sizeSelectionCanonicalSha256: string;
     proposalFingerprint: string;
     pieceBindings: readonly [string, string];
     operationId: string;
@@ -374,7 +381,10 @@ export function createPatternImportDxfProductSidecarCardControllerV1(
     seamId: string;
     documentId: string;
     revision: string;
-  }> | null = null;
+    sourceSurface: 'default-import' | 'explicit-native-drawn-sewing';
+  }>;
+  let preparedAuthoringContext: AuthoringContext | null = null;
+  let authoredContext: AuthoringContext | null = null;
   let disposed = false;
   let authored = false;
   let authoredCommitIdentity: string | null = null;
@@ -495,6 +505,18 @@ export function createPatternImportDxfProductSidecarCardControllerV1(
       throw new Error('The product sidecar card controller cannot cross card lifetimes.');
   };
 
+  const sourceDraft = (
+    draft: CardDraft,
+    sourceSurface: 'default-import' | 'explicit-native-drawn-sewing',
+  ): CardDraft => {
+    if (sourceSurface === 'default-import') return draft;
+    return createPatternImportNativeSewingAuthoringViewV1(
+      draft,
+      draft.dxfNativeSewingReplay,
+      draft.dxfProvenance?.contentBinding?.sourceSha256 ?? '',
+    );
+  };
+
   const preparePhaseEWorkbench = async (
     draft: CardDraft,
     request: PatternImportDxfProductPhaseEWorkbenchEntryRequestV1,
@@ -532,6 +554,20 @@ export function createPatternImportDxfProductSidecarCardControllerV1(
         'Explicit scope, size, import generation, verified saved-row document evidence, selected existing operation/seam, operations and seams are required.',
       );
 
+    const requestedSourceSurface = request.sourceSurface ?? 'default-import';
+    let authoringDraft: CardDraft;
+    try {
+      authoringDraft = sourceDraft(draft, requestedSourceSurface);
+    } catch (error) {
+      return entryBlocked(
+        'preflight',
+        'explicit-native-sewing-source-unavailable',
+        error instanceof Error
+          ? error.message
+          : 'The exact native sewing source is unavailable for this confirmed import.',
+      );
+    }
+
     const activeRuntime = await ensureRuntime();
     if (typeof activeRuntime.selectAuthoringPhaseD !== 'function')
       return entryBlocked(
@@ -542,7 +578,7 @@ export function createPatternImportDxfProductSidecarCardControllerV1(
     let selected: Awaited<ReturnType<typeof selectPatternImportDxfProductDraftPhaseDSizeV1>>;
     try {
       selected = await activeRuntime.selectAuthoringPhaseD(
-        draft,
+        authoringDraft,
         request.scopeKey,
         request.sizeToken,
       );
@@ -561,7 +597,11 @@ export function createPatternImportDxfProductSidecarCardControllerV1(
       );
 
     const catalogResult: PatternImportDxfProductPhaseEAuthoringCatalogResultV1 =
-      await activeRuntime.buildAuthoringCatalog(draft, request.scopeKey, request.sizeToken);
+      await activeRuntime.buildAuthoringCatalog(
+        authoringDraft,
+        request.scopeKey,
+        request.sizeToken,
+      );
     if (!catalogResult.ok)
       return entryBlocked(
         'catalog',
@@ -569,6 +609,31 @@ export function createPatternImportDxfProductSidecarCardControllerV1(
         catalogResult.blockers[0].detail,
       );
     const catalog = catalogResult.catalog;
+    if (
+      requestedSourceSurface === 'explicit-native-drawn-sewing' &&
+      catalog.pieces.some(
+        ({ contours }) =>
+          !contours.some(({ role }) => role === 'sewing-boundary') ||
+          contours.some(({ role }) => role === 'cut-boundary'),
+      )
+    )
+      return entryBlocked(
+        'catalog',
+        'explicit-native-sewing-catalog-invalid',
+        'The explicit native source must expose sewing-boundary contours without cut-boundary substitution.',
+        catalog,
+      );
+    if (
+      requestedSourceSurface === 'explicit-native-drawn-sewing' &&
+      request.documentEvidence.dxfSha256 !==
+        authoringDraft.dxfProvenance?.contentBinding?.sourceSha256
+    )
+      return entryBlocked(
+        'catalog',
+        'explicit-native-sewing-source-row-mismatch',
+        'The native sewing replay must be rebuilt from the exact current saved DXF row.',
+        catalog,
+      );
     const documentAuthorityResult = await derivePatternImportDxfPhaseEDocumentAuthorityV1(
       request.documentEvidence,
       selected.selection.selection.canonicalSha256,
@@ -660,6 +725,7 @@ export function createPatternImportDxfProductSidecarCardControllerV1(
       techCardId: draft.techCardId,
       importGeneration: request.importGeneration,
       catalogCanonicalSha256: catalog.canonicalSha256,
+      sizeSelectionCanonicalSha256: catalog.sizeSelectionCanonicalSha256,
       proposalFingerprint: proposal.deterministicFingerprint,
       pieceBindings: Object.freeze(
         proposal.sides.map(({ pieceId, pieceLineKey }) => `${pieceId}\u0000${pieceLineKey}`).sort(),
@@ -669,6 +735,7 @@ export function createPatternImportDxfProductSidecarCardControllerV1(
       seamId: proposal.seam.id,
       documentId: documentAuthority.documentId,
       revision: documentAuthority.revision,
+      sourceSurface: requestedSourceSurface,
     });
     return Object.freeze({
       ok: true as const,
@@ -747,11 +814,32 @@ export function createPatternImportDxfProductSidecarCardControllerV1(
           'phase-e-prepared-context-mismatch',
           'Catalog, bound document revision, sole operation and seam choices must exact-match the last admitted pure V1 proposal.',
         );
+      if (
+        prepared.sourceSurface === 'explicit-native-drawn-sewing' &&
+        (choices.physicalSurface.mode !== 'sewing-surface' ||
+          choices.physicalSurface.seamAllowancePhysical !== false)
+      )
+        return preparedContextBlocked(
+          'phase-e-prepared-context-mismatch',
+          'Native sewing paths require the explicit sewing-surface physical choice.',
+        );
+      let authoringDraft: CardDraft;
+      try {
+        authoringDraft = sourceDraft(draft, prepared.sourceSurface);
+      } catch (error) {
+        return preparedContextBlocked(
+          'phase-e-prepared-context-mismatch',
+          error instanceof Error
+            ? error.message
+            : 'The native sewing source moved before semantic authoring.',
+        );
+      }
       const result = await (
         await ensureRuntime()
-      ).produceCompileAndAuthorPhaseE(draft, catalog, choices);
+      ).produceCompileAndAuthorPhaseE(authoringDraft, catalog, choices);
       if (disposed) throw new Error('The product sidecar card controller is disposed.');
       authored = result.ok;
+      authoredContext = result.ok ? prepared : null;
       authoredCommitIdentity = null;
       publish('ready');
       return result;
@@ -763,6 +851,7 @@ export function createPatternImportDxfProductSidecarCardControllerV1(
       const commitIdentity = confirmedCommitIdentityOf(draft, apply);
       if (!commitIdentity) {
         authored = false;
+        authoredContext = null;
         authoredCommitIdentity = null;
         preparedAuthoringContext = null;
         attachmentSnapshots.clear();
@@ -779,6 +868,7 @@ export function createPatternImportDxfProductSidecarCardControllerV1(
       if (authoredCommitIdentity === commitIdentity)
         return Object.freeze({ status: 'unchanged' as const, blocker: null });
       authored = false;
+      authoredContext = null;
       authoredCommitIdentity = null;
       preparedAuthoringContext = null;
       attachmentSnapshots.clear();
@@ -791,23 +881,26 @@ export function createPatternImportDxfProductSidecarCardControllerV1(
     afterConfirmedSave: async (
       draft: CardDraft,
       apply: ConfirmedApply,
-      expectedSavedRow?: PatternImportDxfPhaseEDocumentEvidenceV1,
+      expectedSavedRow?: PatternImportDxfProductExpectedSavedRowV1,
     ) => {
       if (disposed) throw new Error('The product sidecar card controller is disposed.');
       requireCard(draft);
       if (!runtime && !runtimePromise) {
         preparedAuthoringContext = null;
         authoredCommitIdentity = null;
+        authoredContext = null;
         return NOT_REQUESTED;
       }
       if (!authored) {
         preparedAuthoringContext = null;
         authoredCommitIdentity = null;
+        authoredContext = null;
         return NOT_REQUESTED;
       }
       const commitIdentity = confirmedCommitIdentityOf(draft, apply);
       if (!commitIdentity) {
         authored = false;
+        authoredContext = null;
         authoredCommitIdentity = null;
         preparedAuthoringContext = null;
         attachmentSnapshots.clear();
@@ -824,6 +917,7 @@ export function createPatternImportDxfProductSidecarCardControllerV1(
         );
       if (authoredCommitIdentity !== commitIdentity) {
         authored = false;
+        authoredContext = null;
         authoredCommitIdentity = null;
         preparedAuthoringContext = null;
         attachmentSnapshots.clear();
@@ -833,7 +927,48 @@ export function createPatternImportDxfProductSidecarCardControllerV1(
           'A different confirmed DXF commit requires fresh Phase-E authoring before attachment.',
         );
       }
-      return (await ensureRuntime()).afterConfirmedSave(draft, apply, expectedSavedRow);
+      let authoringDraft: CardDraft;
+      try {
+        authoringDraft = sourceDraft(draft, authoredContext?.sourceSurface ?? 'default-import');
+      } catch (error) {
+        authored = false;
+        authoredContext = null;
+        authoredCommitIdentity = null;
+        preparedAuthoringContext = null;
+        attachmentSnapshots.clear();
+        publish('ready');
+        return confirmedCommitBlocked(
+          'phase-e-authority-invalidated-by-new-commit',
+          error instanceof Error
+            ? error.message
+            : 'The native sewing source moved before semantic attachment.',
+        );
+      }
+      if (expectedSavedRow?.firstAttachmentSavedRowRevision !== undefined) {
+        const prepared = authoredContext;
+        const authority = prepared
+          ? await derivePatternImportDxfPhaseEDocumentAuthorityV1(
+              expectedSavedRow,
+              prepared.sizeSelectionCanonicalSha256,
+              prepared.catalogCanonicalSha256,
+              options.crypto ?? globalThis.crypto,
+            )
+          : null;
+        if (
+          prepared?.sourceSurface !== 'explicit-native-drawn-sewing' ||
+          !authority?.ok ||
+          authority.authority.revision !== prepared.revision ||
+          authority.authority.documentId !== prepared.documentId ||
+          authoredContext !== prepared ||
+          !authored ||
+          authoredCommitIdentity !== commitIdentity
+        )
+          return confirmedCommitBlocked(
+            'phase-e-authority-invalidated-by-new-commit',
+            'The first Semantic V1 attachment requires the current prepared native drawing.',
+          );
+      }
+      return (await ensureRuntime()).afterConfirmedSave(authoringDraft, apply, expectedSavedRow);
     },
     retryAttachment: async (key: string) =>
       runtime
@@ -854,6 +989,7 @@ export function createPatternImportDxfProductSidecarCardControllerV1(
       attachmentSnapshots.clear();
       listeners.clear();
       authored = false;
+      authoredContext = null;
       authoredCommitIdentity = null;
       publish('disposed');
     },

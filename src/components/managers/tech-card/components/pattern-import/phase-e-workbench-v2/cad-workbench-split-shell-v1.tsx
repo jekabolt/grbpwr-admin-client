@@ -1,9 +1,11 @@
 import {
   createContext,
   useContext,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
@@ -50,7 +52,8 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_WORKBENCH_SPLIT_SHELL_CLAIMS_V1 = Ob
   typedSelectionContextForwarded: true,
   selectionAuthorityRemainsCallerOwned: true,
   layoutStateSessionOnly: true,
-  splitChangesOnlyDuringCapturedDrag: true,
+  splitPointerChangesOnlyDuringCapturedDrag: true,
+  splitSupportsKeyboard: true,
   splitHandleHoverDoesNotChangeLayout: true,
   compactLayoutMenu: true,
   redundantWorkbenchTitleRemoved: true,
@@ -58,12 +61,68 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_WORKBENCH_SPLIT_SHELL_CLAIMS_V1 = Ob
   productionReady: false,
 } as const);
 
+const DESKTOP_MIN_WIDTH = 272; // The 2D tool rail, its largest flyout and their two gaps.
+const DESKTOP_PREFERRED_MIN_WIDTH = 544;
+const MANNEQUIN_MIN_WIDTH = 288;
+const MIN_DOCK_WIDTH = 260;
+const SPLIT_TRAVEL = 48;
+const DIVIDER_WIDTH = 1;
+const COLLAPSED_DOCK_WIDTH = 32;
+const MIN_SPLIT_TRACK_WIDTH =
+  DESKTOP_MIN_WIDTH + SPLIT_TRAVEL + DIVIDER_WIDTH + MANNEQUIN_MIN_WIDTH;
+const SPLIT_LIMITS = { min: 28, max: 78 };
+
 export function clampPatternImportDxfPhaseECadWorkbenchSplitPercentV1(value: number): number {
-  return Math.min(78, Math.max(28, value));
+  return Math.min(SPLIT_LIMITS.max, Math.max(SPLIT_LIMITS.min, value));
 }
 
 export function clampPatternImportDxfPhaseECadWorkbenchOperationsWidthV1(value: number): number {
-  return Math.min(520, Math.max(260, value));
+  return Math.min(520, Math.max(MIN_DOCK_WIDTH, value));
+}
+
+export function resolvePatternImportDxfPhaseECadWorkbenchLayoutV1(
+  availableWidth: number | null,
+  view: PatternImportDxfPhaseECadWorkbenchViewModeV1,
+  operations: PatternImportDxfPhaseECadWorkbenchOperationsModeV1,
+  dockWidth: number,
+  splitPercent: number,
+) {
+  const railWidth = operations === 'collapsed' ? COLLAPSED_DOCK_WIDTH : 0;
+  const canSplit = availableWidth === null || availableWidth - railWidth >= MIN_SPLIT_TRACK_WIDTH;
+  const viewMode = view === 'split' && !canSplit ? 'desktop-only' : view;
+  const workspaceMinimum =
+    viewMode === 'split' ? MIN_SPLIT_TRACK_WIDTH : Math.max(DESKTOP_MIN_WIDTH, MANNEQUIN_MIN_WIDTH);
+  const inlineDockLimit =
+    availableWidth === null ? dockWidth : availableWidth - workspaceMinimum - DIVIDER_WIDTH;
+  // The dock opens inside the workspace on narrower screens, where reserving its width would
+  // either make the splitter immovable or hide the canvas and its tools.
+  const compactDock = operations === 'docked' && inlineDockLimit < MIN_DOCK_WIDTH;
+  const docked = operations === 'docked' && !compactDock;
+  const inlineDockWidth = docked ? Math.min(dockWidth, inlineDockLimit) : dockWidth;
+  const trackWidth =
+    availableWidth === null
+      ? null
+      : availableWidth - railWidth - (docked ? inlineDockWidth + DIVIDER_WIDTH : 0);
+  let splitLimits = SPLIT_LIMITS;
+  if (viewMode === 'split' && trackWidth !== null) {
+    const max = Math.min(
+      SPLIT_LIMITS.max,
+      ((trackWidth - MANNEQUIN_MIN_WIDTH - DIVIDER_WIDTH) / trackWidth) * 100,
+    );
+    const minimumWidth = Math.max(
+      DESKTOP_MIN_WIDTH,
+      Math.min(DESKTOP_PREFERRED_MIN_WIDTH, (max / 100) * trackWidth - SPLIT_TRAVEL),
+    );
+    splitLimits = { min: Math.max(SPLIT_LIMITS.min, (minimumWidth / trackWidth) * 100), max };
+  }
+  return {
+    canSplit,
+    viewMode,
+    compactDock,
+    inlineDockWidth,
+    splitLimits,
+    splitPercent: Math.min(splitLimits.max, Math.max(splitLimits.min, splitPercent)),
+  };
 }
 
 export function resolvePatternImportDxfPhaseECadWorkbenchSplitFromPointerV1(
@@ -227,17 +286,20 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
 }: PatternImportDxfPhaseECadWorkbenchSplitShellPropsV1) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const sidebarRef = useRef<HTMLDivElement | null>(null);
   const splitTrackRef = useRef<HTMLDivElement | null>(null);
   const layoutMenuRef = useRef<HTMLDetailsElement | null>(null);
   const floatingOperationsRef = useRef<HTMLElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
-  const [viewMode, setViewMode] =
+  const [requestedViewMode, setViewMode] =
     useState<PatternImportDxfPhaseECadWorkbenchViewModeV1>(defaultViewMode);
+  const [availableWidth, setAvailableWidth] = useState<number | null>(null);
   const [uncontrolledSplitPercent, setUncontrolledSplitPercent] = useState(() =>
     clampPatternImportDxfPhaseECadWorkbenchSplitPercentV1(defaultSplitPercent),
   );
   const [operationsMode, setOperationsMode] =
     useState<PatternImportDxfPhaseECadWorkbenchOperationsModeV1>(defaultOperationsMode);
+  const [compactDockOpen, setCompactDockOpen] = useState(false);
   const [measurementUnit, setMeasurementUnit] =
     useState<PatternImportDxfPhaseEMeasurementUnitV1>('mm');
   const [uncontrolledOperationsWidthPx, setUncontrolledOperationsWidthPx] = useState(() =>
@@ -246,15 +308,40 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
   const [floatingPosition, setFloatingPosition] =
     useState<PatternImportDxfPhaseECadWorkbenchFloatingPositionV1 | null>(null);
   const [dragging, setDragging] = useState<DragState['kind'] | null>(null);
-  const splitPercent = clampPatternImportDxfPhaseECadWorkbenchSplitPercentV1(
-    controlledSplitPercent ?? uncontrolledSplitPercent,
-  );
   const operationsWidthPx = clampPatternImportDxfPhaseECadWorkbenchOperationsWidthV1(
     controlledOperationsWidthPx ?? uncontrolledOperationsWidthPx,
   );
+  const { canSplit, viewMode, compactDock, inlineDockWidth, splitLimits, splitPercent } =
+    resolvePatternImportDxfPhaseECadWorkbenchLayoutV1(
+      availableWidth,
+      requestedViewMode,
+      operationsMode,
+      operationsWidthPx,
+      controlledSplitPercent ?? uncontrolledSplitPercent,
+    );
+  const hasSidebar = Boolean(objectSidebar);
+
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+    const sidebar = sidebarRef.current;
+    const measure = () => {
+      const width = content.clientWidth;
+      if (width > 0) setAvailableWidth(Math.max(0, width - (sidebar?.clientWidth ?? 0)));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', measure);
+      return () => window.removeEventListener('resize', measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(content);
+    if (sidebar) observer.observe(sidebar);
+    return () => observer.disconnect();
+  }, [hasSidebar]);
 
   const updateSplitPercent = (nextSplitPercent: number) => {
-    const next = clampPatternImportDxfPhaseECadWorkbenchSplitPercentV1(nextSplitPercent);
+    const next = Math.min(splitLimits.max, Math.max(splitLimits.min, nextSplitPercent));
     if (controlledSplitPercent === undefined) setUncontrolledSplitPercent(next);
     onSplitPercentChange?.(next);
   };
@@ -384,8 +471,9 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
   const desktopVisible = viewMode !== 'mannequin-only';
   const mannequinVisible = viewMode !== 'desktop-only';
   const split = desktopVisible && mannequinVisible;
-  const dockedOperations = operationsMode === 'docked';
+  const dockedOperations = operationsMode === 'docked' && !compactDock;
   const floatingOperations = operationsMode === 'floating';
+  const compactOperationsVisible = compactDock && compactDockOpen;
 
   return (
     <MeasurementUnitContext.Provider value={{ unit: measurementUnit, setUnit: setMeasurementUnit }}>
@@ -407,9 +495,32 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
         }
       >
         <header
-          className='flex min-h-9 shrink-0 items-center justify-end border-b border-borderColor bg-bgColor px-2 py-1'
+          className='flex min-h-9 shrink-0 flex-wrap items-center justify-end border-b border-borderColor bg-bgColor px-2 py-1'
           aria-label='Workbench layout controls'
         >
+          {dockedOperations || compactDock ? (
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              className='mr-auto'
+              aria-label={
+                compactDock && !compactOperationsVisible
+                  ? 'Open Current operation'
+                  : 'Collapse Current operation'
+              }
+              aria-expanded={dockedOperations || compactOperationsVisible}
+              onClick={() => {
+                if (compactDock && !compactOperationsVisible) setCompactDockOpen(true);
+                else {
+                  setCompactDockOpen(false);
+                  setOperationsMode('collapsed');
+                }
+              }}
+            >
+              Current operation {dockedOperations || compactOperationsVisible ? '›' : '‹'}
+            </Button>
+          ) : null}
           {desktopVisible ? (
             <div className='mr-1 flex items-center' role='group' aria-label='Measurement unit'>
               {(['mm', 'cm', 'in'] as const).map((unit) => (
@@ -459,6 +570,7 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
                   variant='default'
                   className={viewMode === 'split' ? 'bg-textColor text-bgColor' : 'hover:bg-pageBg'}
                   aria-pressed={viewMode === 'split'}
+                  disabled={!canSplit}
                   onClick={() => {
                     setViewMode('split');
                     layoutMenuRef.current?.removeAttribute('open');
@@ -496,6 +608,7 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
                   aria-pressed={operationsMode === 'docked'}
                   onClick={() => {
                     setOperationsMode('docked');
+                    setCompactDockOpen(true);
                     layoutMenuRef.current?.removeAttribute('open');
                   }}
                 >
@@ -536,9 +649,10 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
           </details>
         </header>
 
-        <div ref={contentRef} className='relative flex min-h-0 flex-1 overflow-hidden'>
+        <div ref={contentRef} className='relative isolate flex min-h-0 flex-1 overflow-hidden'>
           {objectSidebar ? (
             <div
+              ref={sidebarRef}
               className='h-full min-h-0 shrink-0 overflow-hidden'
               data-cad-workbench-object-sidebar-slot=''
             >
@@ -551,9 +665,7 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
                 className='h-full min-h-0 min-w-0 overflow-hidden bg-bgColor'
                 data-cad-desktop-zone=''
                 style={{
-                  width: split
-                    ? 'clamp(34rem, var(--cad-split-percent), calc(100% - 18rem))'
-                    : '100%',
+                  width: split ? 'var(--cad-split-percent)' : '100%',
                 }}
               >
                 {renderSlot(desktop, 'desktop', selection, onSelectionFocus)}
@@ -565,11 +677,12 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
                 type='button'
                 variant='default'
                 className='group relative z-10 w-px shrink-0 cursor-col-resize bg-borderColor before:absolute before:-inset-x-2 before:inset-y-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor'
+                role='separator'
                 aria-label='Resize 2D and mannequin zones'
                 aria-orientation='vertical'
-                aria-valuemin={28}
-                aria-valuemax={78}
-                aria-valuenow={Math.round(splitPercent)}
+                aria-valuemin={splitLimits.min}
+                aria-valuemax={splitLimits.max}
+                aria-valuenow={splitPercent}
                 onPointerDown={(event: ReactPointerEvent<HTMLButtonElement>) =>
                   beginDrag('split', event)
                 }
@@ -577,6 +690,27 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
                 onPointerUp={endDrag}
                 onPointerCancel={endDrag}
                 onLostPointerCapture={clearLostPointerCapture}
+                onKeyDown={(event: ReactKeyboardEvent<HTMLButtonElement>) => {
+                  let next: number;
+                  switch (event.key) {
+                    case 'ArrowLeft':
+                      next = splitPercent - 2;
+                      break;
+                    case 'ArrowRight':
+                      next = splitPercent + 2;
+                      break;
+                    case 'Home':
+                      next = splitLimits.min;
+                      break;
+                    case 'End':
+                      next = splitLimits.max;
+                      break;
+                    default:
+                      return;
+                  }
+                  event.preventDefault();
+                  updateSplitPercent(next);
+                }}
                 style={{ touchAction: 'none' }}
               >
                 <span className='absolute left-1/2 top-1/2 h-10 w-px -translate-x-1/2 -translate-y-1/2 bg-labelColor group-hover:bg-textColor' />
@@ -588,7 +722,7 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
                 className='h-full min-h-0 flex-1 overflow-hidden bg-pageBg'
                 data-cad-mannequin-zone=''
                 aria-label='Mannequin and sewn cloth preview'
-                style={{ minWidth: split ? '18rem' : 0 }}
+                style={{ minWidth: split ? MANNEQUIN_MIN_WIDTH : 0 }}
               >
                 {renderSlot(mannequin, 'mannequin', selection, onSelectionFocus)}
               </aside>
@@ -616,20 +750,10 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
               </Button>
               <aside
                 className='relative shrink-0 overflow-hidden bg-bgColor'
-                style={{ width: 'var(--cad-operations-width)' }}
+                style={{ width: inlineDockWidth }}
                 data-cad-operations-window='docked'
                 aria-label='Assembly Order window'
               >
-                <Button
-                  type='button'
-                  variant='default'
-                  className='absolute top-1 right-1 z-30 flex h-7 w-7 items-center justify-center bg-bgColor text-lg leading-none hover:bg-pageBg'
-                  aria-label='Collapse Current operation'
-                  title='Collapse Current operation'
-                  onClick={() => setOperationsMode('collapsed')}
-                >
-                  ›
-                </Button>
                 <div className='h-full overflow-auto'>
                   {renderSlot(operationsPanel, 'operations', selection, onSelectionFocus)}
                 </div>
@@ -637,49 +761,59 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
             </>
           ) : null}
 
-          {floatingOperations ? (
+          {floatingOperations || compactOperationsVisible ? (
             <aside
-              ref={floatingOperationsRef}
-              className='absolute z-20 flex max-h-[calc(100%-1.5rem)] flex-col overflow-hidden border border-borderColor bg-bgColor'
+              ref={floatingOperations ? floatingOperationsRef : undefined}
+              className='absolute z-40 flex max-h-[calc(100%-1.5rem)] flex-col overflow-hidden border border-borderColor bg-bgColor'
               style={{
-                width: 'var(--cad-operations-width)',
+                width: 'min(var(--cad-operations-width), calc(100% - 24px))',
                 height: 'min(640px, calc(100% - 24px))',
-                ...(floatingPosition
-                  ? { left: floatingPosition.x, top: floatingPosition.y }
+                ...(floatingOperations && floatingPosition
+                  ? {
+                      left: `clamp(12px, ${floatingPosition.x}px, calc(100% - min(var(--cad-operations-width), calc(100% - 24px)) - 12px))`,
+                      top: `clamp(12px, ${floatingPosition.y}px, max(12px, calc(100% - 652px)))`,
+                    }
                   : { right: 12, top: 12 }),
               }}
-              data-cad-operations-window='floating'
-              aria-label='Floating Assembly Order window'
+              data-cad-operations-window={floatingOperations ? 'floating' : 'docked'}
+              data-cad-operations-compact={compactOperationsVisible ? '' : undefined}
+              aria-label={
+                floatingOperations ? 'Floating Assembly Order window' : 'Assembly Order window'
+              }
             >
-              <Button
-                type='button'
-                variant='default'
-                className='absolute bottom-0 left-0 top-0 w-2 cursor-col-resize border-r border-borderColor bg-pageBg'
-                aria-label='Resize floating Assembly Order window'
-                onPointerDown={(event: ReactPointerEvent<HTMLButtonElement>) =>
-                  beginDrag('operations', event)
-                }
-                onPointerMove={moveDrag}
-                onPointerUp={endDrag}
-                onPointerCancel={endDrag}
-                onLostPointerCapture={clearLostPointerCapture}
-              >
-                <span className='sr-only'>Resize floating Assembly Order window</span>
-              </Button>
-              <Button
-                type='button'
-                variant='default'
-                className='ml-2 flex min-h-8 shrink-0 cursor-move items-center border-b border-borderColor bg-pageBg px-2 text-left text-micro font-bold uppercase focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor'
-                aria-label='Move floating Assembly Order window'
-                onPointerDown={beginFloatingMove}
-                onPointerMove={moveDrag}
-                onPointerUp={endDrag}
-                onPointerCancel={endDrag}
-                onLostPointerCapture={clearLostPointerCapture}
-              >
-                Assembly Order · move
-              </Button>
-              <div className='min-h-0 flex-1 overflow-auto pl-2'>
+              {floatingOperations ? (
+                <>
+                  <Button
+                    type='button'
+                    variant='default'
+                    className='absolute bottom-0 left-0 top-0 w-2 cursor-col-resize border-r border-borderColor bg-pageBg'
+                    aria-label='Resize floating Assembly Order window'
+                    onPointerDown={(event: ReactPointerEvent<HTMLButtonElement>) =>
+                      beginDrag('operations', event)
+                    }
+                    onPointerMove={moveDrag}
+                    onPointerUp={endDrag}
+                    onPointerCancel={endDrag}
+                    onLostPointerCapture={clearLostPointerCapture}
+                  >
+                    <span className='sr-only'>Resize floating Assembly Order window</span>
+                  </Button>
+                  <Button
+                    type='button'
+                    variant='default'
+                    className='ml-2 flex min-h-8 shrink-0 cursor-move items-center border-b border-borderColor bg-pageBg px-2 text-left text-micro font-bold uppercase focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor'
+                    aria-label='Move floating Assembly Order window'
+                    onPointerDown={beginFloatingMove}
+                    onPointerMove={moveDrag}
+                    onPointerUp={endDrag}
+                    onPointerCancel={endDrag}
+                    onLostPointerCapture={clearLostPointerCapture}
+                  >
+                    Assembly Order · move
+                  </Button>
+                </>
+              ) : null}
+              <div className={`min-h-0 flex-1 overflow-auto ${floatingOperations ? 'pl-2' : ''}`}>
                 {renderSlot(operationsPanel, 'operations', selection, onSelectionFocus)}
               </div>
             </aside>
@@ -697,7 +831,10 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
                 className='flex h-full w-full items-start justify-center pt-3 text-lg leading-none hover:bg-pageBg'
                 aria-label='Expand Current operation'
                 title='Expand Current operation'
-                onClick={() => setOperationsMode('docked')}
+                onClick={() => {
+                  setOperationsMode('docked');
+                  setCompactDockOpen(true);
+                }}
               >
                 ‹
               </Button>

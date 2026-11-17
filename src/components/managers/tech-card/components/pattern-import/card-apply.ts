@@ -32,8 +32,10 @@ export function importRowsLanded(
 }
 
 /** F7 `buildDraft` against the card the wizard read when it opened. */
-export const cardBuildDraft: DraftBuilder = (write, { card, dxfProvenance, dxfPhaseDReplay }) =>
-  buildDraft(write, card, { dxfProvenance, dxfPhaseDReplay });
+export const cardBuildDraft: DraftBuilder = (
+  write,
+  { card, dxfProvenance, dxfPhaseDReplay, dxfNativeSewingReplay },
+) => buildDraft(write, card, { dxfProvenance, dxfPhaseDReplay, dxfNativeSewingReplay });
 
 /**
  * ASCII DXF (the writer guarantees it, write/format.ts) → base64 as UploadPattern takes it. `btoa`

@@ -2163,6 +2163,8 @@ export type DraftScopeTarget = {
 export type FabricAssignment = {
   /** purpose → seeds; a seed may be in several purposes. */
   byPurpose: Record<FabricPurposeKey, SeedId[]>;
+  /** Whole DXF families explicitly omitted on an import opened from a fabric slot. */
+  dxfOmissions?: { scopeKey: string; seeds: SeedId[] };
   /** Interlining exists in BOM → its own DXF; else these seeds get `fused`. */
   interliningInBom: boolean;
   proposals: FabricProposal[];
@@ -2401,6 +2403,8 @@ export type CardDraft = {
   dxfProvenance?: DxfPipelineProvenanceStageOutputV1;
   /** Opt-in detached Phase-D inputs for a later fresh G4F1 V2 replay; never contains raw DXF. */
   dxfPhaseDReplay?: DxfProductPhaseDReplayStageOutputV1;
+  /** Separate explicitly drawn native sewing view; never replaces the writer source draft. */
+  dxfNativeSewingReplay?: DxfNativeSewingReplayStageOutputV1;
   /** Re-import review only: card settings win; a later UI may warn about these differences. */
   pieceDifferences?: DraftPieceDifference[];
   /** Re-import: blocks bound to no piece because nothing proves which card piece they are. */
@@ -2780,7 +2784,13 @@ export type GateCheckId =
  * collapse on the geometry alone. (No GateCheckId of its own: the check step's label map is the UI
  * session's file — G26 rides in G22 / G8 the way KINKS' G25 rides in G22.)
  */
-export type GradeEvidence = { hold?: string; warn?: string; drawsOwn?: boolean };
+export type GradeEvidence = {
+  hold?: string;
+  warn?: string;
+  drawsOwn?: boolean;
+  /** An independently labelled source DXF block draws the same contour at this other rank. */
+  coincidentDxfRank?: number;
+};
 
 /**
  * MOOD Ф0 (G22): per written size block, the lines of its rank's pen near it and the common edges

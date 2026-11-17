@@ -253,12 +253,12 @@ describe('V1 selected durable physical source handoff', () => {
     expect(matches(['seam-b', 'seam-a'], ['seam-a', 'seam-b'])).toBe(false);
   });
 
-  it('routes empty saved operations to the live owner while keeping legacy N1 refusal-only', () => {
+  it('routes empty and qualified existing N1 operations to the live owner', () => {
     const fallbackMount = elements(
       'PatternImportDxfPhaseECadTableZeroOperationProductionMountV1',
     )[0];
     expect(attribute(fallbackMount, 'zeroConnectAuthoringHandoff')).toContain(
-      'savedEmptyOperation && zeroConnectAuthoringHandoff',
+      '(savedEmptyOperation || savedLinkedN1) && zeroConnectAuthoringHandoff',
     );
     expect(attribute(fallbackMount, 'zeroConnectAuthoringHandoff')).toContain(
       'EXISTING_OPERATION_REBUILD_ONLY_HANDOFF',
@@ -269,6 +269,9 @@ describe('V1 selected durable physical source handoff', () => {
       status: 'unavailable',
       blocker: { code: 'zero-connect-authoring-write-refused' },
     });
+    expect(attribute(fallbackMount, 'sourceSurface')).toContain(
+      "savedLinkedN1 ? 'explicit-native-drawn-sewing' : undefined",
+    );
     expect(tree.getFullText()).toContain("data-legacy-n1-rebuild-required=''");
     expect(tree.getFullText()).not.toContain('data-empty-operation-rebuild-required');
     expect(zeroConnectCanvasSource).toContain(

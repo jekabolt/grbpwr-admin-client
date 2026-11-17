@@ -217,6 +217,19 @@ function exactPiecePair(
   });
 }
 
+/** The R12 writer embeds the target label. Use the same BOM label on import and exact replay. */
+export function patternImportSavedScopeLabelV1(scope: {
+  key: string;
+  lines: readonly { name?: string }[];
+}): string {
+  return (
+    scope.lines
+      .map(({ name }) => name?.trim())
+      .filter(Boolean)
+      .join(' · ') || scope.key
+  );
+}
+
 export function buildPatternImportDxfPhaseESavedCardContextV1(
   techCard: common_TechCard,
   orderSizeIds: (ids: number[]) => number[],
@@ -237,11 +250,7 @@ export function buildPatternImportDxfPhaseESavedCardContextV1(
     scopes: scopes.map((scope) => ({
       key: scope.key,
       byPurpose: scope.byPurpose,
-      label:
-        scope.lines
-          .map(({ name }) => name?.trim())
-          .filter((name): name is string => !!name)
-          .join(' · ') || scope.key,
+      label: patternImportSavedScopeLabelV1(scope),
       binding: bindingForScope(scope),
       sections: scope.lines.flatMap(({ section }) => (section ? [section] : [])),
     })),

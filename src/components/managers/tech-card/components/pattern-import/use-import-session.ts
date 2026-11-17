@@ -1,3 +1,7 @@
+import {
+  directDxfAuthoringOpenFileV1,
+  captureDirectDxfAuthoringV1,
+} from './direct-dxf-authoring-capture-v1';
 // The wizard's state machine (08-CONTRACT §4.2). One session per run; every field of
 // `ImportSession` is the latest stage output, and `inputs` are what the operator decided — kept
 // across `back`, so re-entering a step re-runs it with the previous answers (contract: "back{to}
@@ -856,11 +860,9 @@ export function useImportSession(deps: {
     try {
       if (!files.length) throw new Error('the files are no longer at hand');
       const bytes = await Promise.all(
-        files.map(async (f) => ({
-          name: f.name,
-          bytes: await f.arrayBuffer(),
-          ...(generatedFusingFile(f.name) ? { generatedFusing: true } : {}),
-        })),
+        files.map((f, index) =>
+          directDxfAuthoringOpenFileV1(f, index, generatedFusingFile(f.name)),
+        ),
       );
       const opened = await client.open(bytes);
       fresh = opened.sessionId;
@@ -1067,11 +1069,9 @@ export function useImportSession(deps: {
           checkFilesBeforeReading(ev.files);
           setSession({ ...EMPTY_SESSION, busy: { stage: 'extract', done: 0, total: 1 } });
           const bytes = await Promise.all(
-            ev.files.map(async (f) => ({
-              name: f.name,
-              bytes: await f.arrayBuffer(),
-              ...(generatedFusingFile(f.name) ? { generatedFusing: true } : {}),
-            })),
+            ev.files.map((f, index) =>
+              directDxfAuthoringOpenFileV1(f, index, generatedFusingFile(f.name)),
+            ),
           );
           const opened = await client.open(bytes);
           patch({ sessionId: opened.sessionId, files: opened.files });
@@ -1454,6 +1454,11 @@ export function useImportSession(deps: {
           patch({ semantics: sem });
           const open = unansweredAtWrite(sem, sRef.current.names, iRef.current, answersNow());
           if (open.length) throw new UnansweredQuestionsError(open);
+          // A full-source capture includes omitted blocks. This draft gains exact authoring
+          // evidence only after the confirmed save reconstructs the new scope from its bytes.
+          const authoringCapture = a.dxfOmissions?.seeds.length
+            ? {}
+            : await captureDirectDxfAuthoringV1(iRef.current.fileList, run);
           const out = await run('write', {
             scopes: rc().scopes,
             assignment: a,
@@ -1492,7 +1497,7 @@ export function useImportSession(deps: {
             // files reuses them (autopilot/replay.ts); never a reason not to write
             ...replayOf(),
           });
-          const draft = buildDraft(out, { card: rc(), semantics: sem });
+          const draft = buildDraft(out, { card: rc(), semantics: sem, ...authoringCapture });
           const accepted = acceptCurrentFindings(out.gate, draft, rc().existingShapes ?? []);
           patch({ draft: accepted.draft, gate: accepted.gate, step: 'check' });
           return;
@@ -2841,6 +2846,12 @@ export function useImportSession(deps: {
     retryWrite: () =>
       dispatch({ type: 'write-storage', ...(iRef.current.writeStorage ?? { storage: 'blocks' }) }),
     extracted,
+    dxfImportScopeKey:
+      extracted.presegmented &&
+      inputs.fileList.length === 1 &&
+      /\.dxf$/i.test(inputs.fileList[0].name)
+        ? deps.pinScopeKey
+        : undefined,
     errorCode,
     notice,
     /** A9: what the AI page-role call did (answered, unavailable, timed out) — a note, not a stop. */

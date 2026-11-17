@@ -110,6 +110,23 @@ export type PatternImportDxfPhaseEZeroConnectDurablePersistRequestV1 = Readonly<
   row: DxfProductSavedRowIdentityV1;
 }>;
 
+export const PATTERN_IMPORT_DXF_PHASE_E_LINKED_N1_DURABLE_REQUEST_V1 =
+  'pattern-import-dxf-phase-e-linked-n1-durable-request/1' as const;
+
+export type PatternImportDxfPhaseELinkedN1DurableRequestV1 = Readonly<{
+  schemaVersion: typeof PATTERN_IMPORT_DXF_PHASE_E_LINKED_N1_DURABLE_REQUEST_V1;
+  row: DxfProductSavedRowIdentityV1;
+  selectedOperationNumber: number;
+  seamKey: string;
+  catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
+  /** The exact two sides submitted to the existing V1 authoring owner. */
+  sides: readonly [
+    Omit<ExactSide, 'seamId' | 'sideIndex'>,
+    Omit<ExactSide, 'seamId' | 'sideIndex'>,
+  ];
+  verifiedSemanticSha256: string;
+}>;
+
 export type PatternImportDxfPhaseEZeroConnectDurableRestoreRequestV1 = Readonly<{
   schemaVersion: typeof PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_DURABLE_RESTORE_REQUEST_V1;
   row: DxfProductSavedRowIdentityV1;
@@ -426,47 +443,56 @@ export function createPatternImportDxfPhaseEZeroConnectDurableBridgeV1(
   return Object.freeze({
     schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_DURABLE_COMPOSITE_V4,
     async persist(
-      request: PatternImportDxfPhaseEZeroConnectDurablePersistRequestV1,
+      request:
+        | PatternImportDxfPhaseEZeroConnectDurablePersistRequestV1
+        | PatternImportDxfPhaseELinkedN1DurableRequestV1,
       signal: AbortSignal,
     ): Promise<PatternImportDxfPhaseEZeroConnectDurableResultV1> {
       try {
+        const existing =
+          request.schemaVersion === PATTERN_IMPORT_DXF_PHASE_E_LINKED_N1_DURABLE_REQUEST_V1;
         if (
-          request.schemaVersion !==
-            PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_DURABLE_PERSIST_REQUEST_V1 ||
-          request.pending.status !== 'in-memory-final-seam-attached-awaiting-second-save' ||
-          request.pending.candidate.connection.mapping !== 'equal' ||
-          request.pending.candidate.connection.lengthRatio !== 1 ||
-          !sameSourceRow(request.pending.refreshedAuthoringAuthority.row, request.row)
+          signal.aborted ||
+          (existing
+            ? !SHA256.test(request.verifiedSemanticSha256)
+            : request.schemaVersion !==
+                PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_DURABLE_PERSIST_REQUEST_V1 ||
+              request.pending.status !== 'in-memory-final-seam-attached-awaiting-second-save' ||
+              request.pending.candidate.connection.mapping !== 'equal' ||
+              request.pending.candidate.connection.lengthRatio !== 1 ||
+              !sameSourceRow(request.pending.refreshedAuthoringAuthority.row, request.row))
         )
           return blocked(
             'durable-request-invalid',
             'Durable N=1 persistence requires the completed equal-mapping exact gesture.',
           );
+        const selectedOperationNumber = existing
+          ? request.selectedOperationNumber
+          : request.pending.savedOperationNumber;
+        const seamKey = existing ? request.seamKey : request.pending.finalSeamKey;
+        const catalog = existing ? request.catalog : request.pending.catalog;
+        const selected = existing ? request.sides : request.pending.candidate.connection.sides;
+        const verifiedSemanticSha256 = existing ? request.verifiedSemanticSha256 : null;
         const currentTopology = await deps.authorityAdapter.readCurrentAssemblyTopology(
-          {
-            row: request.row,
-            selectedOperationNumber: request.pending.savedOperationNumber,
-          },
+          { row: request.row, selectedOperationNumber },
           signal,
         );
         const operation = currentTopology.topology.operations.find(
-          ({ number }) => number === request.pending.savedOperationNumber,
+          ({ number }) => number === selectedOperationNumber,
         );
-        const expectedInputs = request.pending.candidate.connection.sides.map(
-          ({ pieceLineKey }) => pieceLineKey,
-        );
+        const expectedInputs = selected.map(({ pieceLineKey }) => pieceLineKey);
         if (
           !operation ||
           !sameOrdered(operation.inputKeys, expectedInputs) ||
-          !sameOrdered(operation.seamKeys, [request.pending.finalSeamKey])
+          !sameOrdered(operation.seamKeys, [seamKey])
         )
           return blocked(
             'durable-operation-binding-mismatch',
             'Fresh saved Assembly topology differs from the completed exact connection.',
           );
-        const sides = request.pending.candidate.connection.sides.map((side, sideIndex) =>
+        const sides = selected.map((side, sideIndex) =>
           Object.freeze({
-            seamId: request.pending.finalSeamKey,
+            seamId: seamKey,
             sideIndex: sideIndex as 0 | 1,
             pieceId: side.pieceId,
             pieceLineKey: side.pieceLineKey,
@@ -481,10 +507,10 @@ export function createPatternImportDxfPhaseEZeroConnectDurableBridgeV1(
         const derived = await durableBindings(
           {
             row: request.row,
-            operationNumber: request.pending.savedOperationNumber,
+            operationNumber: selectedOperationNumber,
             inputKeys: operation.inputKeys,
             seamIds: operation.seamKeys,
-            catalogCanonicalSha256: request.pending.catalog.canonicalSha256,
+            catalogCanonicalSha256: catalog.canonicalSha256,
             mapping: 'equal',
             lengthRatio: 1,
             sides,
@@ -496,12 +522,12 @@ export function createPatternImportDxfPhaseEZeroConnectDurableBridgeV1(
           serverAssemblyRevision: currentTopology.serverAssemblyRevision,
           assemblyTopologySha256: currentTopology.assemblyTopologySha256,
           selectedOperation: Object.freeze({
-            sourceOperationNumber: request.pending.savedOperationNumber,
+            sourceOperationNumber: selectedOperationNumber,
             authoringOperationId: derived.compositeOperationBindingId,
             localOperationOrder: 0 as const,
-            seamIds: Object.freeze([request.pending.finalSeamKey]),
+            seamIds: Object.freeze([seamKey]),
           }),
-          catalogCanonicalSha256: request.pending.catalog.canonicalSha256,
+          catalogCanonicalSha256: catalog.canonicalSha256,
           phaseEAggregatePlanSha256: derived.phaseEAggregatePlanSha256,
         });
         const exact = await buildPatternImportDxfPhaseEExactNSeamConsistencyCarrierV2(
@@ -576,13 +602,24 @@ export function createPatternImportDxfPhaseEZeroConnectDurableBridgeV1(
           const existingOperation = decodedV4.exactNSeam.carrier.bindings.selectedOperation;
           if (
             existingOperation.authoringOperationId !== derived.compositeOperationBindingId ||
-            existingOperation.sourceOperationNumber !== request.pending.savedOperationNumber ||
-            !sameOrdered(existingOperation.seamIds, [request.pending.finalSeamKey]) ||
+            existingOperation.sourceOperationNumber !== selectedOperationNumber ||
+            !sameOrdered(existingOperation.seamIds, [seamKey]) ||
             !sameExactSides(existingSides, sides)
           )
             return blocked(
               'durable-existing-operation-conflict',
               'This saved DXF row already carries a different durable exact operation. Composite V4–V7 is never overwritten by the legacy single-operation writer; a fresh fullgraph reissue is required.',
+            );
+          if (
+            verifiedSemanticSha256 &&
+            !decodedV4.nestedCompositeV3.document.components.some(
+              ({ kind, sha256 }) =>
+                kind === 'semantic-product-v1' && sha256 === verifiedSemanticSha256,
+            )
+          )
+            return blocked(
+              'durable-verified-semantic-mismatch',
+              'The saved exact carrier no longer contains the verified Semantic V1 bytes.',
             );
           const restored = await restorePatternImportDxfProductCompositeSidecarDurableV4(
             {
@@ -602,7 +639,25 @@ export function createPatternImportDxfPhaseEZeroConnectDurableBridgeV1(
           );
           if (!restored.ok)
             return blocked('durable-idempotent-restore-blocked', restored.blockers[0].detail);
-          return createSession(restored.owner, request.pending.catalog, true, signal);
+          return createSession(restored.owner, catalog, true, signal);
+        }
+        if (verifiedSemanticSha256) {
+          const digest =
+            currentSidecar.mediaType ===
+              PATTERN_IMPORT_DXF_PRODUCT_SEMANTIC_SIDECAR_MEDIA_TYPE_V1 &&
+            currentSidecar.sha256 === verifiedSemanticSha256
+              ? await crypto?.subtle.digest('SHA-256', currentSidecar.bytes)
+              : null;
+          const actualSha256 = digest
+            ? Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join(
+                '',
+              )
+            : null;
+          if (actualSha256 !== verifiedSemanticSha256)
+            return blocked(
+              'durable-verified-semantic-mismatch',
+              'The current saved sidecar does not match the verified Semantic V1 attachment.',
+            );
         }
         if (
           currentSidecar.mediaType !== PATTERN_IMPORT_DXF_PRODUCT_SEMANTIC_SIDECAR_MEDIA_TYPE_V1 &&
@@ -659,7 +714,7 @@ export function createPatternImportDxfPhaseEZeroConnectDurableBridgeV1(
         );
         if (!transaction.ok)
           return blocked('durable-transaction-blocked', transaction.blockers[0].detail);
-        return createSession(transaction.owner, request.pending.catalog, true, signal);
+        return createSession(transaction.owner, catalog, true, signal);
       } catch (error) {
         if (error instanceof DurableBridgeFailure) return blocked(error.code, error.message);
         return blocked(
@@ -744,14 +799,15 @@ export function createPatternImportDxfPhaseEZeroConnectDurableBridgeV1(
         }
         const carrier = decodedV4.exactNSeam.carrier;
         const sides = carrier.seams.flatMap(({ sides: seamSides }) => seamSides);
-        if (
-          carrier.seams.length !== 1 ||
-          carrier.seams[0]?.seamId !== operation.seamKeys[0] ||
-          carrier.bindings.catalogCanonicalSha256 !== request.catalog.canonicalSha256
-        )
+        if (carrier.seams.length !== 1 || carrier.seams[0]?.seamId !== operation.seamKeys[0])
           return blocked(
             'durable-restore-binding-mismatch',
-            'Composite V4–V7 no longer matches the saved operation or current DXF catalog.',
+            'Composite V4–V7 no longer matches the saved operation.',
+          );
+        if (carrier.bindings.catalogCanonicalSha256 !== request.catalog.canonicalSha256)
+          return blocked(
+            'durable-restore-catalog-mismatch',
+            'Composite V4–V7 no longer matches the current DXF catalog.',
           );
         const derived = await durableBindings(
           {

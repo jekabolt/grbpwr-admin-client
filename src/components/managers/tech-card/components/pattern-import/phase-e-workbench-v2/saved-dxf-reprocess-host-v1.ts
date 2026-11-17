@@ -543,6 +543,9 @@ export function restorePatternImportDxfSavedWriterReplayV1(
   else delete restoredJob.passport;
   if (manifest.replay) restoredJob.replay = structuredClone(manifest.replay);
   else delete restoredJob.replay;
+  // The gate was authored during the saved write. Running it again on the resulting geometry
+  // gives a different report. Keep the saved report while rebuilding and hashing the DXF.
+  scope.manifest = structuredClone(manifest);
   scope.writerReplay = {
     ...replay,
     createdAt: manifest.createdAt,

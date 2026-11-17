@@ -1,4 +1,7 @@
 import type { ReactNode } from 'react';
+import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
+import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
+import { PatternImportDxfPhaseECadTableZeroConnectCanvasV1 } from './cad-table-zero-connect-canvas-v1';
 
 import {
   PatternImportDxfPhaseECadWorkbenchSplitShellV1,
@@ -71,12 +74,35 @@ export type PatternImportDxfProductExactNSeamProductionMannequinSlotV2 =
   | ReactNode
   | ((context: PatternImportDxfProductExactNSeamProductionMannequinContextV2) => ReactNode);
 
+export type PatternImportDxfProductExactNDesktopGeometryV2 = Readonly<{
+  catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
+  projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
+}>;
+
+export function matchesPatternImportDxfProductExactNDesktopGeometryV2(
+  geometry: PatternImportDxfProductExactNDesktopGeometryV2 | null,
+  session: PatternImportDxfPhaseEExactNAssemblyOrderSessionV2,
+): geometry is PatternImportDxfProductExactNDesktopGeometryV2 {
+  if (!geometry) return false;
+  const { catalog, projection } = geometry;
+  return (
+    catalog.techCardId === session.current.row.techCardId &&
+    catalog.scopeKey === session.current.row.scopeKey &&
+    catalog.canonicalSha256 === session.current.catalogCanonicalSha256 &&
+    projection.expectedCatalogCanonicalSha256 === catalog.canonicalSha256 &&
+    projection.sizeSelectionCanonicalSha256 === catalog.sizeSelectionCanonicalSha256 &&
+    projection.sourceFileId === catalog.sourceFileId &&
+    projection.sizeToken === catalog.sizeToken
+  );
+}
+
 export type PatternImportDxfProductExactNSeamProductionMountPropsV2 = Readonly<{
   session: PatternImportDxfPhaseEExactNAssemblyOrderSessionV2;
   activeSeamIndex: number;
   onActiveSeamIndexChange: (index: number) => void;
   mannequin: PatternImportDxfProductExactNSeamProductionMannequinSlotV2;
   operationsPanel: PatternImportDxfPhaseECadWorkbenchSlotV1;
+  desktopGeometry?: PatternImportDxfProductExactNDesktopGeometryV2 | null;
   objectSidebar?: PatternImportDxfPhaseECadWorkbenchSlotV1;
   sceneOverlayInput?: PatternImportDxfProductExactNSeamProductionSceneOverlayInputV2 | null;
   sceneOverlayBlocker?: Readonly<{ code: string; detail: string }> | null;
@@ -156,6 +182,7 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
   onActiveSeamIndexChange,
   mannequin,
   operationsPanel,
+  desktopGeometry = null,
   objectSidebar,
   sceneOverlayInput = null,
   sceneOverlayBlocker = null,
@@ -195,13 +222,24 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
         if (nextIndex >= 0) onActiveSeamIndexChange(nextIndex);
       }}
       desktop={
-        <PatternImportDxfProductExactNSeamWorkbenchHostV2
-          selectionOwner={session.selectionOwner}
-          current={session.current}
-          activeSeamIndex={activeSeamIndex}
-          onActiveSeamIndexChange={onActiveSeamIndexChange}
-          operationWindow={topologyAnnotationAuthoring}
-        />
+        !topologyAnnotationAuthoring &&
+        resolved.model.seamCount === 1 &&
+        matchesPatternImportDxfProductExactNDesktopGeometryV2(desktopGeometry, session) ? (
+          <PatternImportDxfPhaseECadTableZeroConnectCanvasV1
+            catalog={desktopGeometry.catalog}
+            projection={desktopGeometry.projection}
+            savedSeamSides={activeSeam.sides}
+            disabled
+          />
+        ) : (
+          <PatternImportDxfProductExactNSeamWorkbenchHostV2
+            selectionOwner={session.selectionOwner}
+            current={session.current}
+            activeSeamIndex={activeSeamIndex}
+            onActiveSeamIndexChange={onActiveSeamIndexChange}
+            operationWindow={topologyAnnotationAuthoring}
+          />
+        )
       }
       mannequin={mannequinSlot}
       operationsPanel={operationsPanel}

@@ -84,7 +84,7 @@ import {
 import { wallModel } from '../pieces/walls';
 import { hausdorffMm } from '../pieces/fill';
 import { silentRead, type SilentRead } from '../pieces/gfit/silent-inputs';
-import { silentOff } from '../pieces/gfit/silent';
+import { sameDxfRankOutline, silentOff } from '../pieces/gfit/silent';
 import { type Excursion, stripSpikes } from '../spikes';
 import { featuresOf, innerSeamLines, measuredAllowance } from './allowance';
 import { readNotchMarks, type MarkRead } from '../pieces/notch-marks';
@@ -174,6 +174,8 @@ export function resolvePatternImportSemanticsAllowanceMm(
 
 type DxfExtra = {
   dxf?: {
+    block?: string;
+    group?: number;
     identity?: string;
     outerIsSeam?: boolean;
     sizeSource?: 'label' | 'block-name' | 'none';
@@ -187,6 +189,16 @@ type DxfExtra = {
     rulGraded?: boolean;
   };
 };
+
+function isLabelledDxfBlock(
+  dxf: DxfExtra['dxf'],
+): dxf is NonNullable<DxfExtra['dxf']> & { block: string; group: number } {
+  return (
+    !!dxf?.block &&
+    dxf.group != null &&
+    (dxf.sizeSource === 'label' || dxf.sizeSource === 'block-name')
+  );
+}
 type Blocked = SemanticsOutput['blocked'][number];
 
 /** How a written size relates to its source candidate, for the walls the gate compares (G3/G4). */
@@ -984,6 +996,16 @@ export function buildPieceSpecsDetailed(
       name.notes.push(oneFromClosed.note);
     } else if (!ungraded && mapped.length >= 2) {
       ungraded = sameOutline(mapped);
+      // A complete set of independently size-labelled DXF blocks is graded even when the
+      // drafter used the same coordinates at every rank. Keep each drawn contour and its lineage.
+      const explicitDxfRanks =
+        ungraded &&
+        sorted.length === run.sizes.length &&
+        sorted.every(
+          (candidate, rank) =>
+            candidate.rank === run.sizes[rank].rank && isLabelledDxfBlock(candidate.dxf),
+        ) &&
+        new Set(sorted.map(({ dxf }) => dxf!.group)).size === sorted.length;
       // MOOD Ф5: under a size key, one outline in every size is ONE evidence — the drawing (drawn
       // once / by every pen in one place) and the label (no size named) make it one piece for all
       // sizes; one of them alone asks; a size's own line beside it makes it graded (semantics/
@@ -995,7 +1017,8 @@ export function buildPieceSpecsDetailed(
       // equal areas and boxes, but contours apart: not one outline
       if (one && !alike(mapped))
         one = { kind: 'graded', why: 'the sizes close on outlines of one area and box, apart' };
-      if (ungraded && ov.ungraded === false) ungraded = false;
+      if (ungraded && (ov.ungraded === false || (ov.ungraded == null && explicitDxfRanks)))
+        ungraded = false;
       else if (ungraded && ov.ungraded === true)
         name.notes.push('one piece for all sizes: the operator');
       else if (one?.kind === 'proven')
@@ -2920,8 +2943,25 @@ export function buildPieceSpecsDetailed(
   const gradeOf = (identity: string, rank: number): GradeEvidence | undefined => {
     const src = sourceOf(identity, rank);
     if (!src || traced) return undefined;
-    // a DXF's blocks are no drawing of nested size lines: nothing to read
-    if ((src.cand as PieceCandidate & DxfExtra).dxf) return undefined;
+    const dxf = (src.cand as PieceCandidate & DxfExtra).dxf;
+    if (dxf) {
+      const previous = sourceOf(identity, rank - 1);
+      const other = (previous?.cand as (PieceCandidate & DxfExtra) | undefined)?.dxf;
+      // The two ranks must come from separate source blocks. Duplicating one common outline into
+      // missing ranks cannot supply this evidence.
+      if (
+        previous &&
+        previous.cand.rank === rank - 1 &&
+        src.cand.rank === rank &&
+        isLabelledDxfBlock(dxf) &&
+        isLabelledDxfBlock(other) &&
+        dxf.block !== other.block &&
+        dxf.group !== other.group &&
+        sameDxfRankOutline(previous.cand.outer, src.cand.outer)
+      )
+        return { coincidentDxfRank: previous.cand.rank };
+      return undefined;
+    }
     return silentOf().evidence(src.cand.seed, src.cand.rank);
   };
   const alongOf = bandCutSupport(set, run);

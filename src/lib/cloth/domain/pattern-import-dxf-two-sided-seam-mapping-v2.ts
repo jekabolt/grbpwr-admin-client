@@ -17,6 +17,8 @@ import {
   type PatternImportDxfTwoSidedSeamOrderedSampleWitnessV1,
 } from './pattern-import-dxf-two-sided-seam-mapping-v1';
 
+import type { PatternImportDxfProductVerifiedCommitReplayV1 } from './pattern-import-dxf-product-commit-replay-v1';
+
 export const PATTERN_IMPORT_DXF_TWO_SIDED_SEAM_MAPPING_V2 =
   'pattern-import-dxf-two-sided-seam-mapping/2' as const;
 export const PATTERN_IMPORT_DXF_TWO_SIDED_SEAM_MAPPING_SEAL_V2 =
@@ -486,6 +488,7 @@ let claimed = false;
 export async function buildPatternImportDxfTwoSidedSeamMappingV2(
   inputValue: unknown,
   crypto: Pick<Crypto, 'subtle'> | undefined = globalThis.crypto,
+  savedCommit?: PatternImportDxfProductVerifiedCommitReplayV1,
 ): Promise<PatternImportDxfTwoSidedSeamMappingResultV2> {
   if (claimed)
     return blocked(new MappingFailure('reentrant-call', 'input', 'reentrant V2 mapping refused.'));
@@ -504,7 +507,11 @@ export async function buildPatternImportDxfTwoSidedSeamMappingV2(
       fail('invalid-input', 'input.phaseD.sourceSha256', 'must be lowercase SHA-256.');
 
     const base = input.base as PatternImportDxfTwoSidedSeamMappingInputV1;
-    const baseResult = await buildPatternImportDxfTwoSidedSeamMappingV1(base);
+    const baseResult = await buildPatternImportDxfTwoSidedSeamMappingV1(
+      base,
+      { crypto },
+      savedCommit,
+    );
     if (
       baseResult.witness === null ||
       baseResult.mapping !== null ||

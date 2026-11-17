@@ -230,14 +230,14 @@ describe('zero-connect post-save exact StoredSeam link', () => {
           sideA: [
             {
               piece: 'piece-front',
-              edgeHint: 'piece-front#dxf:front%3Asewing:front%3Av0>front%3Av1',
+              edgeHint: 'piece-front#dxf:0:0',
               lenMm: 100,
             },
           ],
           sideB: [
             {
               piece: 'piece-back',
-              edgeHint: 'piece-back#dxf:back%3Asewing:back%3Av0>back%3Av1',
+              edgeHint: 'piece-back#dxf:0:0',
               lenMm: 100,
             },
           ],

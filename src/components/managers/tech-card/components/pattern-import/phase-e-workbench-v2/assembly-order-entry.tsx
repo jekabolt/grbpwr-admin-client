@@ -114,9 +114,11 @@ import type {
   PatternImportDxfPhaseECadSavedPreparedMaterialScopeEditorV1,
 } from './cad-saved-material-scope-editor-preparation-v1';
 import {
+  matchesPatternImportDxfProductExactNDesktopGeometryV2,
   PatternImportDxfProductExactNSeamProductionMountV2,
   resolvePatternImportDxfProductExactNSeamProductionMountV2,
   type PatternImportDxfPhaseEExactNAssemblyOrderSessionV2,
+  type PatternImportDxfProductExactNDesktopGeometryV2,
 } from './exact-n-seam-production-mount-v2';
 import type { PatternImportDxfPhaseECadTableCurrentOperationV1 } from './cad-table-draft-operation-planner-v1';
 import {
@@ -1293,6 +1295,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
   onEditStitchField,
   operationRouteBlocker = null,
   exactNSession = null,
+  exactNDesktop = null,
   exactNApplicationOwner,
   autoOpen = false,
   onOpenChange,
@@ -1332,6 +1335,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
   operationRouteBlocker?: PatternImportDxfPhaseEMultiseamAssemblyOrderBlockerV2 | null;
   /** Optional production-only owner minted by the Composite V4 restore/projection/selection chain. */
   exactNSession?: PatternImportDxfPhaseEExactNAssemblyOrderSessionV2 | null;
+  exactNDesktop?: PatternImportDxfProductExactNDesktopGeometryV2 | null;
   /** The one application-level Composite V4 writer/readback owner, created by OperationsField. */
   exactNApplicationOwner?: PatternImportDxfProductCompositeSidecarApplicationTransactionV4;
   /** The visible production Assembly Table prepares this single owner without an extra open door. */
@@ -1908,10 +1912,17 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
   const mannequinDxfSources = useMemo<
     readonly PatternImportDxfPhaseECadMannequinDxfStagingSourceV1[]
   >(() => {
-    if (exactNSession)
-      return exactNMannequinStaging?.ok
-        ? exactNMannequinStaging.staging.sources
-        : Object.freeze([]);
+    if (exactNSession) {
+      if (exactNMannequinStaging?.ok) return exactNMannequinStaging.staging.sources;
+      if (
+        exactNResolution?.ok &&
+        matchesPatternImportDxfProductExactNDesktopGeometryV2(exactNDesktop, exactNSession)
+      ) {
+        const { scopeKey } = exactNSession.current.row;
+        return Object.freeze([{ scopeKey, label: scopeKey, projection: exactNDesktop.projection }]);
+      }
+      return Object.freeze([]);
+    }
     if (!prepared) return Object.freeze([]);
     const scope = materialScopeCatalog?.ok
       ? materialScopeCatalog.scopes.find(({ scopeKey }) => scopeKey === prepared.scopeKey)
@@ -1936,7 +1947,9 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
       current,
     }).sources;
   }, [
+    exactNDesktop,
     exactNMannequinStaging,
+    exactNResolution,
     exactNSession,
     materialScopeCatalog,
     materialScopePreparation,
@@ -2345,6 +2358,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
           session={exactNSession}
           activeSeamIndex={exactNActiveSeamIndex}
           onActiveSeamIndexChange={setExactNActiveSeamIndex}
+          desktopGeometry={exactNDesktop}
           sceneOverlayInput={
             exactNMannequinStaging?.ok
               ? {
@@ -2413,11 +2427,11 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                     sceneOverlay: sceneOverlay,
                     activeScopeKey: exactNMannequinStaging?.ok
                       ? exactNMannequinStaging.staging.activeScopeKey
-                      : null,
+                      : mannequinDxfSources[0]?.scopeKey ?? null,
                     selection: {
                       scopeKey: exactNMannequinStaging?.ok
                         ? exactNMannequinStaging.staging.activeScopeKey
-                        : null,
+                        : mannequinDxfSources[0]?.scopeKey ?? null,
                       pieceId: selection?.pieceId,
                       seamId: selection?.seamId,
                     },

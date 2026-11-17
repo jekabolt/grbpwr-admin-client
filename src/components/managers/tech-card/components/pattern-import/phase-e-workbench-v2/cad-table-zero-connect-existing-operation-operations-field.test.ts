@@ -103,16 +103,26 @@ describe('existing linked one-physical-seam OperationsField owner', () => {
     expect(owner).not.toContain('upsertWithReceipt(');
   });
 
-  it('offers cancellation only before the retained writer and keeps the semantic-carrier gap visible', () => {
+  it('offers explicit diagnostic material and retries metadata without re-arming the seam write', () => {
     const action = between(
       'function ZeroConnectExistingLinkedN1Action(',
       'function ZeroConnectExistingOperationAction(',
     );
     const clear = between('const clearZeroConnectExistingLinkedN1Pending =', 'useEffect(() => {');
 
+    const owner = between(
+      'const zeroConnectExistingLinkedN1Owner:',
+      '// Phase two is deliberately a separate, user-triggered boundary.',
+    );
+    expect(action).toContain("aria-label='Connection preview material'");
+    expect(action).toContain('Retry pattern metadata');
     expect(action).toContain('owner.cancel(pending)');
-    expect(action).toContain('Durable pattern data still needs a saved carrier.');
-    expect(clear).toContain('readPatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1');
-    expect(clear).toContain('return false');
+    expect(action).toContain("{result ? 'Close' : 'Cancel'}");
+    expect(clear).toContain('canReleasePatternImportDxfPhaseEZeroConnectExistingLinkedN1V1');
+    expect(owner).toContain('await atomicWrite.catch(');
+    expect(
+      owner.indexOf('verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV1'),
+    ).toBeLessThan(owner.indexOf('finalizePatternImportDxfPhaseEExistingLinkedN1V1({'));
+    expect(owner).toContain('persist: durable.persist');
   });
 });

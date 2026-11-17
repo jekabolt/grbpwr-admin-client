@@ -112,13 +112,6 @@ function area(points: readonly Pt2[], closed: boolean): number {
   return Math.abs(twiceArea) / 2;
 }
 
-function exactEdgeTarget(side: CandidateSide): string {
-  const encode = (value: string) => encodeURIComponent(value);
-  return `${side.pieceLineKey}#dxf:${encode(side.contourId)}:${encode(
-    side.boundaryVertexIds[0],
-  )}>${encode(side.boundaryVertexIds[1])}`;
-}
-
 function currentSource(input: {
   candidate: PatternImportDxfPhaseECadTableZeroConnectCandidateV1;
   catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
@@ -302,11 +295,22 @@ function buildSelectedPiece(
       }),
     });
 
-  const target = exactEdgeTarget(side);
   const edgeOrdinal =
     (indexes[0] + 1) % catalogContour.boundaryVertices.length === indexes[1]
       ? indexes[0]
       : indexes[1];
+  // The existing seam writer serializes this edge key into a 64-rune diagnostic hint.
+  // Full native contour and vertex identities remain in exactDxfBoundary and the sidecar.
+  const contourOrdinal = piece.catalogPiece.contours.indexOf(catalogContour);
+  const target = `${side.pieceLineKey}#dxf:${contourOrdinal.toString(36)}:${edgeOrdinal.toString(36)}`;
+  if (Array.from(target).length > 64)
+    return Object.freeze({
+      ok: false as const,
+      blocker: Object.freeze({
+        code: 'exact-anchor-projection-invalid' as const,
+        detail: 'The selected pattern edge cannot be represented by a saved seam locator.',
+      }),
+    });
   const edge: Edge = Object.freeze({
     id: target,
     pieceKey: side.pieceLineKey,

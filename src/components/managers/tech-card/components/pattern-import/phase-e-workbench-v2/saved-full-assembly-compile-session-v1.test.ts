@@ -311,6 +311,26 @@ describe('genuine saved full-assembly source → actual compiler; mocked storage
       seed = three;
     }
   });
+  it('compiles the exact saved wizard export with its gate report and derived grade map', async () => {
+    const plain = seed;
+    seed = await createSavedThreePanelFixtureV1(2, { wizardExport: true });
+    const source = await createSavedThreePanelSourceV1(seed);
+    const session = createSavedFullAssemblyCompileSessionV1();
+    try {
+      expect(seed.written.manifest.gate?.passed).toBe(true);
+      expect(seed.written.manifest.sizes.map(({ token }) => token)).toEqual(['M', 'L']);
+      source.native.draft.scopes[0].writerReplay!.job.pieces[0].aiConfidence = undefined;
+      const result = await session.consume(await savedThreePanelCompileRequestV1(seed, source));
+      expect(result.compiled, JSON.stringify(result.blockers)).toBe(true);
+      expect(result.evidence?.writerSha256).toBe(seed.row.sha256);
+      expect(result.evidence?.writerByteLength).toBe(seed.bytes.length);
+      expect(result.compileResult?.artifact?.assembly.pieces).toHaveLength(2);
+    } finally {
+      session.dispose();
+      source.dispose();
+      seed = plain;
+    }
+  });
   it.each([
     [
       'missing seam',

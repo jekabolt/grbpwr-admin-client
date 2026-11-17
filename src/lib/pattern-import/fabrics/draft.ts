@@ -326,6 +326,7 @@ export function buildDraft(
     mintKey?: () => string;
     dxfProvenance?: CardDraft['dxfProvenance'];
     dxfPhaseDReplay?: CardDraft['dxfPhaseDReplay'];
+    dxfNativeSewingReplay?: CardDraft['dxfNativeSewingReplay'];
   } = {},
 ): CardDraft {
   const mint = opts.mintKey ?? mintLineKey;
@@ -864,6 +865,7 @@ export function buildDraft(
     pieceDifferences,
     ...(opts.dxfProvenance ? { dxfProvenance: opts.dxfProvenance } : {}),
     ...(opts.dxfPhaseDReplay ? { dxfPhaseDReplay: opts.dxfPhaseDReplay } : {}),
+    ...(opts.dxfNativeSewingReplay ? { dxfNativeSewingReplay: opts.dxfNativeSewingReplay } : {}),
     ...(unresolved.length ? { unresolved } : {}),
     downloads: scopes.map((s) => ({ filename: s.filename, dxfText: s.dxfText })),
   };

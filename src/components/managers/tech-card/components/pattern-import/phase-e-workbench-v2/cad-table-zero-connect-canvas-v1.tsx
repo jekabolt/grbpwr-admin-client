@@ -63,6 +63,12 @@ export type PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1 = Readonly<{
   authoringAuthorityRefresh?: PatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1 | null;
   zeroConnectAuthoringHandoff?: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1;
   disabled?: boolean;
+  savedSeamSides?: readonly Readonly<{
+    pieceId: string;
+    pieceLineKey: string;
+    contourId: string | null;
+    boundaryVertexIds: readonly string[];
+  }>[];
 }>;
 
 function layoutFor(
@@ -175,6 +181,7 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
   authoringAuthorityRefresh = null,
   zeroConnectAuthoringHandoff,
   disabled = false,
+  savedSeamSides,
 }: PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1) {
   const authority = useMemo(
     () => ({ catalog, projection, authoringAuthority, authoringAuthorityRefresh }) as const,
@@ -294,22 +301,24 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
               setActiveTool('move');
             }}
           />
-          <PatternImportDxfPhaseECadTableConnectToolControlV1
-            phase={phase}
-            disabled={connectDisabled}
-            onStart={() => {
-              setActiveTool('connect');
-              setController((current) =>
-                startPatternImportDxfPhaseECadTableZeroConnectControllerV1(current, authority),
-              );
-            }}
-            onCancel={() => {
-              setController((current) =>
-                cancelPatternImportDxfPhaseECadTableZeroConnectControllerV1(current),
-              );
-              setActiveTool('select');
-            }}
-          />
+          {!savedSeamSides && (
+            <PatternImportDxfPhaseECadTableConnectToolControlV1
+              phase={phase}
+              disabled={connectDisabled}
+              onStart={() => {
+                setActiveTool('connect');
+                setController((current) =>
+                  startPatternImportDxfPhaseECadTableZeroConnectControllerV1(current, authority),
+                );
+              }}
+              onCancel={() => {
+                setController((current) =>
+                  cancelPatternImportDxfPhaseECadTableZeroConnectControllerV1(current),
+                );
+                setActiveTool('select');
+              }}
+            />
+          )}
           <PatternImportDxfPhaseECadWorkbenchToolButtonV1
             icon='fit'
             label='Fit all pieces'
@@ -479,16 +488,33 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
                   </g>
                 );
               })}
-              {controller.session
+              {controller.session || savedSeamSides
                 ? segments.map((segment) => {
                     const placed = pieceLayout(layout, segment);
                     if (!placed) return null;
-                    const selectedSide = patternImportDxfPhaseECadTableZeroConnectSelectedSideV1(
-                      controller,
-                      segment,
+                    const savedSideIndex = savedSeamSides?.findIndex(
+                      (side) =>
+                        side.pieceId === segment.pieceId &&
+                        side.pieceLineKey === segment.pieceLineKey &&
+                        side.contourId === segment.contourId &&
+                        side.boundaryVertexIds.length === 2 &&
+                        side.boundaryVertexIds.every((vertexId) =>
+                          segment.boundaryVertexIds.includes(vertexId),
+                        ),
                     );
+                    const selectedSide =
+                      savedSideIndex === 0 || savedSideIndex === 1
+                        ? savedSideIndex
+                        : patternImportDxfPhaseECadTableZeroConnectSelectedSideV1(
+                            controller,
+                            segment,
+                          );
+                    if (!controller.session && selectedSide === null) return null;
                     const [from, to] = segment.pointsMm;
-                    const canSelect = !connectDisabled && controller.session?.status !== 'ready';
+                    const canSelect =
+                      !!controller.session &&
+                      !connectDisabled &&
+                      controller.session.status !== 'ready';
                     return (
                       <g
                         key={segment.viewKey}
@@ -503,7 +529,7 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
                           y1={vy(from.y)}
                           x2={to.x}
                           y2={vy(to.y)}
-                          stroke='currentColor'
+                          stroke={savedSeamSides ? 'var(--color-highlightColor)' : 'currentColor'}
                           strokeWidth={selectedSide === null ? 1 : 3}
                           strokeDasharray={selectedSide === 1 ? '6 3' : undefined}
                           opacity={selectedSide === null ? 0.18 : 1}

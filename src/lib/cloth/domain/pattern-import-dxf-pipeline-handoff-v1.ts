@@ -32,6 +32,11 @@ import {
   type PatternImportDxfManifestBridgeViewV1,
 } from './pattern-import-dxf-handoff-bridge-v1';
 
+import {
+  matchesPatternImportDxfProductCommitReplaySourceV1,
+  type PatternImportDxfProductVerifiedCommitReplayV1,
+} from './pattern-import-dxf-product-commit-replay-v1';
+
 export const PATTERN_IMPORT_DXF_PIPELINE_HANDOFF_V1 =
   'pattern-import-dxf-pipeline-handoff/1' as const;
 
@@ -737,6 +742,7 @@ let snapshotClaimed = false;
 
 function snapshotCompositionInput(
   raw: unknown,
+  savedCommit?: PatternImportDxfProductVerifiedCommitReplayV1,
 ):
   | Readonly<{ ok: true; input: SnapshotInput; carrier: CarrierSnapshot }>
   | Readonly<{ ok: false; result: PatternImportDxfPipelineHandoffResultV1 }> {
@@ -801,14 +807,22 @@ function snapshotCompositionInput(
         'compositionInput.manifest.source.files',
         'Phase-D composition requires the same direct single-DXF source set.',
       );
+    const binding = record.binding as PatternImportDxfBridgeBindingV1;
     if (
       !SHA256.test(manifest.source.files[0].sha256) ||
-      manifest.source.files[0].sha256 !== carrier.contentBinding.sourceSha256
+      (manifest.source.files[0].sha256 !== carrier.contentBinding.sourceSha256 &&
+        (!savedCommit ||
+          !matchesPatternImportDxfProductCommitReplaySourceV1(
+            savedCommit,
+            manifest,
+            carrier.contentBinding.sourceSha256,
+            binding?.exportSha256,
+          )))
     )
       fail(
         'source-file-mismatch',
         'compositionInput.manifest.source.files[0].sha256',
-        'manifest source SHA-256 must equal the direct-DXF byte SHA carried by Phase D.',
+        'Phase D must match the direct DXF source or the exact verified committed writer export.',
       );
     return Object.freeze({
       ok: true as const,
@@ -864,8 +878,9 @@ function explicitPiecesFromCarrier(
 export async function buildPatternImportDxfPipelineHandoffV1(
   raw: unknown,
   options: DxfAssemblyHandoffOptionsV1 = {},
+  savedCommit?: PatternImportDxfProductVerifiedCommitReplayV1,
 ): Promise<PatternImportDxfPipelineHandoffResultV1> {
-  const snapped = snapshotCompositionInput(raw);
+  const snapped = snapshotCompositionInput(raw, savedCommit);
   if (!snapped.ok) return snapped.result;
   const { input, carrier } = snapped;
   const recomputedContentBinding = await computeDxfPipelineContentBindingV1(

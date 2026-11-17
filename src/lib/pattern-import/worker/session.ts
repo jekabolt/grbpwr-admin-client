@@ -2686,6 +2686,11 @@ export class Session {
   ): Promise<StageIO['write']['out']> {
     const sem = this.semantics;
     if (!sem) throw new ImportError('out-of-order', 'piece details have not been built', 'write');
+    if (
+      input.assignment.dxfOmissions?.seeds.length &&
+      (!this.fast || !this.dxf || this.files.length !== 1 || this.rul)
+    )
+      throw new ImportError('out-of-order', 'Select pieces from one garment DXF file.', 'write');
     const raster = this.files.some((f) => f.kind === 'raster');
     const presegmentedIdentities = [
       ...new Set([
@@ -2806,8 +2811,8 @@ export class Session {
     // reads a FILL's faces: a DXF's pieces are its blocks, each drawn in its own frame — they are
     // not faces of one drawing, and blocks laid over each other are no outline across two pieces
     const onePiece = this.fast ? null : this.onePieceOf;
-    // SILENT (G26 / G8): the grade model reads the fill's nested size lines, as G24 does
-    const grade = this.fast ? null : this.gradeOf;
+    // G8 consumes source evidence for both drawn DXF blocks and nested size lines.
+    const grade = this.gradeOf;
     const specOf = new Map(sem.pieces.map((p) => [p.identity, p]));
     // The fill's snapped outline votes which segments are this piece's — only where it is in the
     // spec's frame: the first identity of a seed (a derived `_R` is mirrored), not unfolded.

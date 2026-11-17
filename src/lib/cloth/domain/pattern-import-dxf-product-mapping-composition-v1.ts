@@ -43,6 +43,8 @@ export type PatternImportDxfProductExpectedSavedRowV1 = Readonly<{
   dxfSha256: string;
   patternVersion: number;
   cardLockVersion: number;
+  /** First Semantic V1 must not replace an existing carrier on this saved DXF row. */
+  firstAttachmentSavedRowRevision?: number;
 }>;
 
 export type PatternImportDxfProductMappingCompositionInputV1 = Readonly<{
@@ -352,9 +354,27 @@ export async function buildPatternImportDxfProductMappingCompositionV1(
       'writer-piece-binding-blocked',
       'Selected public Phase-D pieces are missing or have different cardinality.',
     );
+  // Writer replay above keeps all graded sizes. The sealed Phase-D selection below contains
+  // exactly one rank, so G4F0 must receive only the matching PieceSpecs and sizes.
+  const selectedWriterPieces = replay.job.pieces.flatMap((piece) => {
+    const selected = selections.find(({ pieceId }) => pieceId === piece.identity);
+    if (!selected) return [];
+    return [
+      { ...piece, sizes: piece.sizes.filter(({ sizeToken }) => sizeToken === selected.sizeToken) },
+    ];
+  });
+  if (
+    selectedWriterPieces.length !== selections.length ||
+    selectedWriterPieces.some(({ sizes }) => sizes.length !== 1) ||
+    new Set(selectedWriterPieces.map(({ identity }) => identity)).size !== selections.length
+  )
+    return blocked(
+      'writer-piece-binding-blocked',
+      'Each selected Phase-D piece must match one exact size in the committed writer job.',
+    );
   const digests = await computePatternImportDxfBridgeBindingDigestsV1(
     currentManifest,
-    replay.job.pieces,
+    selectedWriterPieces,
     selections,
     { crypto },
   );
@@ -389,7 +409,7 @@ export async function buildPatternImportDxfProductMappingCompositionV1(
     admitted.plan,
     input.selection,
     currentManifest,
-    replay.job.pieces,
+    selectedWriterPieces,
     binding,
   );
   const mapped = await buildPatternImportDxfTwoSidedSeamMappingV2(
@@ -399,6 +419,13 @@ export async function buildPatternImportDxfProductMappingCompositionV1(
       phaseD: input.selection.phaseD,
     },
     crypto,
+    input.expectedSavedRow?.firstAttachmentSavedRowRevision !== undefined &&
+      input.expectedSavedRow.scopeKey === input.scopeKey &&
+      input.expectedSavedRow.techCardId === committed.evidence.techCardId &&
+      input.expectedSavedRow.dxfSha256 === committed.evidence.productExportSha256 &&
+      input.expectedSavedRow.patternLineKey === committed.evidence.patternLineKey
+      ? committed
+      : undefined,
   );
   if (!mapped.ok)
     return blocked(

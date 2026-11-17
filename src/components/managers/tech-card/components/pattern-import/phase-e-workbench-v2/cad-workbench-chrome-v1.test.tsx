@@ -6,7 +6,11 @@ import {
   openPatternImportDxfPhaseECadOperationDetailsForEditV1,
   PatternImportDxfPhaseECadTableDraftOperationsPanelV1,
 } from './cad-table-draft-operations-panel-v1';
-import { PatternImportDxfPhaseECadWorkbenchSplitShellV1 } from './cad-workbench-split-shell-v1';
+import {
+  PatternImportDxfPhaseECadWorkbenchSplitShellV1,
+  resolvePatternImportDxfPhaseECadWorkbenchLayoutV1,
+  resolvePatternImportDxfPhaseECadWorkbenchSplitFromDragV1,
+} from './cad-workbench-split-shell-v1';
 
 describe('Assembly Table chrome', () => {
   it('keeps every production 2D tool rail centered inside its canvas', () => {
@@ -48,12 +52,12 @@ describe('Assembly Table chrome', () => {
     expect(draft).toContain('aria-labelledby={`${toolRailId}-tool-summary-measure`}');
   });
 
-  it('keeps only the useful unit and layout controls in the workbench header', () => {
+  it('keeps units by Layout and puts the collapse control outside the operation panel', () => {
     const markup = renderToStaticMarkup(
       <PatternImportDxfPhaseECadWorkbenchSplitShellV1
         desktop={<div>desktop</div>}
         mannequin={<div>mannequin</div>}
-        operationsPanel={<div>operation</div>}
+        operationsPanel={<button aria-label='Next operation'>→</button>}
       />,
     );
 
@@ -61,6 +65,61 @@ describe('Assembly Table chrome', () => {
     expect(markup).toContain('aria-label="Measurement unit"');
     expect(markup).toContain('Layout');
     expect(markup).not.toContain('CAD workbench');
+    expect(markup).toMatch(
+      /<header[^>]*aria-label="Workbench layout controls"[^>]*>[\s\S]*aria-label="Collapse Current operation"[\s\S]*<\/header>/u,
+    );
+    expect(markup).toMatch(
+      /<aside[^>]*data-cad-operations-window="docked"[^>]*>[\s\S]*aria-label="Next operation"[\s\S]*<\/aside>/u,
+    );
+    expect(markup).toContain('role="separator"');
+  });
+
+  it('keeps the dock and a movable splitter when the track is narrower than the old 52rem floor', () => {
+    const layout = resolvePatternImportDxfPhaseECadWorkbenchLayoutV1(
+      1024,
+      'split',
+      'docked',
+      320,
+      64,
+    );
+    expect(layout).toMatchObject({ viewMode: 'split', compactDock: false, inlineDockWidth: 320 });
+    expect(layout.splitLimits.max).toBeGreaterThan(layout.splitLimits.min);
+
+    const trackWidth = 1024 - layout.inlineDockWidth - 1;
+    const nextPercent = resolvePatternImportDxfPhaseECadWorkbenchSplitFromDragV1(
+      layout.splitPercent,
+      -24,
+      trackWidth,
+    );
+    const afterDrag = resolvePatternImportDxfPhaseECadWorkbenchLayoutV1(
+      1024,
+      'split',
+      'docked',
+      320,
+      nextPercent,
+    );
+    const desktopDelta = ((afterDrag.splitPercent - layout.splitPercent) / 100) * trackWidth;
+    expect(desktopDelta).toBeCloseTo(-24);
+  });
+
+  it('uses the full track for compact split and keeps explicit focus modes available', () => {
+    expect(
+      resolvePatternImportDxfPhaseECadWorkbenchLayoutV1(1400, 'split', 'docked', 320, 64),
+    ).toMatchObject({
+      viewMode: 'split',
+      compactDock: false,
+      inlineDockWidth: 320,
+      splitPercent: 64,
+    });
+    expect(
+      resolvePatternImportDxfPhaseECadWorkbenchLayoutV1(768, 'split', 'docked', 320, 64),
+    ).toMatchObject({ viewMode: 'split', compactDock: true, canSplit: true });
+    expect(
+      resolvePatternImportDxfPhaseECadWorkbenchLayoutV1(375, 'split', 'docked', 320, 64),
+    ).toMatchObject({ viewMode: 'desktop-only', compactDock: true, canSplit: false });
+    expect(
+      resolvePatternImportDxfPhaseECadWorkbenchLayoutV1(375, 'mannequin-only', 'docked', 320, 64),
+    ).toMatchObject({ viewMode: 'mannequin-only', compactDock: true });
   });
 
   it('encapsulates context, the real editor and drafts behind one disclosure row', () => {

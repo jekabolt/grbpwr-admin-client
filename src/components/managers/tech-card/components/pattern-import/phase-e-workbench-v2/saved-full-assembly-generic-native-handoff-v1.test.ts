@@ -94,6 +94,29 @@ function physical(pieceCount = 3, operationCount = 1) {
   });
 }
 
+function nativePhysical() {
+  const projection = physical();
+  return {
+    ...projection,
+    graph: {
+      ...projection.graph,
+      source: { handoffSource: { exporterId: 'grbpwr.saved-native-drawn-sewing' } },
+    },
+  };
+}
+
+function nativeReplay(original = draft()) {
+  return {
+    ok: true,
+    row,
+    sourceFileId: 'saved:156:main:pattern-main',
+    draft: original,
+    sourceOwner,
+    nativeSewingReplay: { replayReady: true },
+    blockers: [],
+  };
+}
+
 function draft(pieceCount = 3) {
   return {
     scopes: [
@@ -142,51 +165,86 @@ beforeEach(() => {
 });
 
 describe('saved Full Assembly generic native handoff', () => {
-  it('restores the native sewing profile through the foreign owner with the original draft', async () => {
-    const old = physical();
-    const projection = {
-      ...old,
-      graph: {
-        ...old.graph,
-        source: { handoffSource: { exporterId: 'grbpwr.saved-native-drawn-sewing' } },
-      },
-    };
+  it('restores manifest-bearing native sewing through the exact owner and original draft', async () => {
     const original = draft();
-    mocks.projectPhysical.mockReturnValue(projection);
-    mocks.run.mockResolvedValue({
-      ok: true,
-      row,
-      sourceFileId: 'saved:156:main:pattern-main',
-      draft: original,
-      sourceOwner,
-      nativeSewingReplay: { replayReady: true },
-      blockers: [],
-    });
+    mocks.projectPhysical.mockReturnValue(nativePhysical());
+    mocks.run.mockResolvedValue(nativeReplay(original));
     const result = await prepareSavedFullAssemblyGenericNativeHandoffV1({} as never, {} as never);
     expect(result.sourceRequest.draft).toBe(original);
-    expect(mocks.createForeignHost).toHaveBeenCalledWith(
+    expect(mocks.createHost).toHaveBeenCalledWith(
       expect.objectContaining({ nativeSewingReplay: true }),
     );
-    expect(mocks.createNativeOwner).not.toHaveBeenCalled();
+    expect(mocks.createForeignHost).not.toHaveBeenCalled();
+    expect(mocks.createForeignNativeOwner).not.toHaveBeenCalled();
+    expect(mocks.run).toHaveBeenCalledTimes(1);
     expect(mocks.run).toHaveBeenCalledWith({
-      schemaVersion: 'dxf-product-saved-foreign-reprocess-request/1',
+      schemaVersion: 'dxf-product-saved-reprocess-request/1',
       row,
     });
   });
 
-  it('does not fall back to cut geometry when saved native sewing reconstruction fails', async () => {
-    const old = physical();
-    mocks.projectPhysical.mockReturnValue({
-      ...old,
-      graph: {
-        ...old.graph,
-        source: { handoffSource: { exporterId: 'grbpwr.saved-native-drawn-sewing' } },
-      },
+  it('uses the foreign native owner only after the exact owner classifies a missing manifest', async () => {
+    mocks.projectPhysical.mockReturnValue(nativePhysical());
+    mocks.run
+      .mockResolvedValueOnce({
+        ok: false,
+        blockers: [{ code: 'foreign-saved-dxf-detected', detail: 'The DXF has no manifest.' }],
+      })
+      .mockResolvedValueOnce(nativeReplay());
+    const result = await prepareSavedFullAssemblyGenericNativeHandoffV1({} as never, {} as never);
+    expect(result.sourceOwner).toBe(sourceOwner);
+    expect(mocks.run).toHaveBeenNthCalledWith(1, {
+      schemaVersion: 'dxf-product-saved-reprocess-request/1',
+      row,
     });
+    expect(mocks.run).toHaveBeenNthCalledWith(2, {
+      schemaVersion: 'dxf-product-saved-foreign-reprocess-request/1',
+      row,
+    });
+    expect(mocks.createForeignHost).toHaveBeenCalledWith(
+      expect.objectContaining({ nativeSewingReplay: true }),
+    );
+    expect(mocks.disposeOwner).toHaveBeenCalledTimes(2);
+    expect(mocks.disposeHost).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['saved-row-sha256-mismatch', 'saved-row-became-stale', 'saved-dxf-reprocess-failed'])(
+    'refuses exact native sewing failure %s without a fallback',
+    async (code) => {
+      mocks.projectPhysical.mockReturnValue(nativePhysical());
+      mocks.run.mockResolvedValueOnce({ ok: false, blockers: [{ code, detail: code }] });
+      await expect(
+        prepareSavedFullAssemblyGenericNativeHandoffV1({} as never, {} as never),
+      ).rejects.toMatchObject({ code: 'native-reprocess-blocked', message: code });
+      expect(mocks.createForeignHost).not.toHaveBeenCalled();
+    },
+  );
+
+  it('cancels the exact replay without starting foreign native reconstruction', async () => {
+    const abort = new AbortController();
+    mocks.projectPhysical.mockReturnValue(nativePhysical());
+    mocks.run.mockImplementationOnce(async () => {
+      abort.abort();
+      return {
+        ok: false,
+        blockers: [{ code: 'foreign-saved-dxf-detected', detail: 'The DXF has no manifest.' }],
+      };
+    });
+    await expect(
+      prepareSavedFullAssemblyGenericNativeHandoffV1({} as never, {} as never, abort.signal),
+    ).rejects.toMatchObject({ code: 'cancelled' });
+    expect(mocks.cancel).toHaveBeenCalledTimes(1);
+    expect(mocks.createForeignHost).not.toHaveBeenCalled();
+    expect(mocks.disposeOwner).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fall back to cut geometry when saved native sewing reconstruction fails', async () => {
+    mocks.projectPhysical.mockReturnValue(nativePhysical());
     await expect(
       prepareSavedFullAssemblyGenericNativeHandoffV1({} as never, {} as never),
     ).rejects.toMatchObject({ code: 'native-source-invalid' });
-    expect(mocks.createNativeOwner).not.toHaveBeenCalled();
+    expect(mocks.createNativeOwner).toHaveBeenCalledTimes(1);
+    expect(mocks.createForeignHost).not.toHaveBeenCalled();
   });
 
   it('uses the existing production host/native owner and preserves the original replay draft identity', async () => {

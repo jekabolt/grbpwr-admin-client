@@ -239,7 +239,7 @@ export async function readBackPatternImportDxfProductMappingV1(
         verified.blockers.map(({ code, detail }) => `${code}: ${detail}`).join('; '),
       );
 
-    const expectedSavedRow = input.expectedSavedRow;
+    const expectedSavedRow = input.expectedSavedRow ?? input.compositionInput.expectedSavedRow;
     if (
       expectedSavedRow &&
       (expectedSavedRow.techCardId !== input.compositionInput.draft.techCardId ||

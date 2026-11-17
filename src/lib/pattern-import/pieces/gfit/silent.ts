@@ -126,6 +126,16 @@ export function oneOutline(a: readonly PtMm[], b: readonly PtMm[], tol = SIZE_RU
   return within(a, b, tol, SIZE_RUN.sampleMm) && within(b, a, tol, SIZE_RUN.sampleMm);
 }
 
+/** DXF blocks may use different origins. Allow only rounding at the six-decimal DXF precision. */
+export function sameDxfRankOutline(a: readonly PtMm[], b: readonly PtMm[]): boolean {
+  if (a.length < 3 || b.length < 3) return false;
+  const atOrigin = (ring: readonly PtMm[]) => {
+    const { minX, minY } = bboxOf(ring);
+    return ring.map(({ x, y }) => ({ x: x - minX, y: y - minY }));
+  };
+  return oneOutline(atOrigin(a), atOrigin(b), 0.000002);
+}
+
 const quantile25 = (xs: number[]) => {
   if (!xs.length) return 0;
   const s = xs.slice().sort((x, y) => x - y);

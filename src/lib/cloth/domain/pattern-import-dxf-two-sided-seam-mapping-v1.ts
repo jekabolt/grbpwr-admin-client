@@ -10,6 +10,11 @@ import {
   type PatternImportDxfPipelineHandoffInputV1,
 } from './pattern-import-dxf-pipeline-handoff-v1';
 
+import {
+  readPatternImportDxfProductCommitReplayScopeV1,
+  type PatternImportDxfProductVerifiedCommitReplayV1,
+} from './pattern-import-dxf-product-commit-replay-v1';
+
 export const PATTERN_IMPORT_DXF_TWO_SIDED_SEAM_MAPPING_V1 =
   'pattern-import-dxf-two-sided-seam-mapping/1' as const;
 
@@ -561,6 +566,7 @@ function sideEvidence(
 export async function buildPatternImportDxfTwoSidedSeamMappingV1(
   raw: unknown,
   options: DxfAssemblyHandoffOptionsV1 = {},
+  savedCommit?: PatternImportDxfProductVerifiedCommitReplayV1,
 ): Promise<PatternImportDxfTwoSidedSeamMappingResultV1> {
   let input: Snapshot;
   try {
@@ -584,7 +590,13 @@ export async function buildPatternImportDxfTwoSidedSeamMappingV1(
       ),
     ]);
 
-  const phaseE = await buildPatternImportDxfPipelineHandoffV1(input.composition, options);
+  const phaseE = await buildPatternImportDxfPipelineHandoffV1(
+    input.composition,
+    options,
+    readPatternImportDxfProductCommitReplayScopeV1(savedCommit) === input.scopes[0]?.scopeId
+      ? savedCommit
+      : undefined,
+  );
   if (!phaseE.ok)
     return blocked(
       phaseE.blockers.map((item) =>

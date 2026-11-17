@@ -416,8 +416,12 @@ import {
   type PatternImportDxfPhaseEZeroConnectExistingOperationOwnerV1,
   type PatternImportDxfPhaseEZeroConnectExistingOperationPendingV1,
 } from './pattern-import/phase-e-workbench-v2/cad-table-zero-connect-existing-operation-attach-v1';
+import { readPatternImportDxfPhaseECardSessionV1 } from './pattern-import/phase-e-workbench-card-session-v1';
+import type { PatternImportDxfPhaseELinkedN1ProfileChoiceV1 } from './pattern-import/phase-e-workbench-v2/cad-table-existing-linked-n1-finalize-v1';
+import type { SavedFullAssemblyDiagnosticProfileV1 } from './pattern-import/phase-e-workbench-v2/saved-full-assembly-diagnostic-profile-v1';
 import {
   PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_EXISTING_LINKED_N1_REBIND_CLAIMS_V1,
+  canReleasePatternImportDxfPhaseEZeroConnectExistingLinkedN1V1,
   capturePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1,
   executePatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1,
   preparePatternImportDxfPhaseEZeroConnectExistingLinkedN1RebindV1,
@@ -1193,14 +1197,48 @@ function ZeroConnectExistingLinkedN1Action({
 }) {
   const [direction, setDirection] = useState<'same' | 'reversed' | null>(null);
   const [linking, setLinking] = useState(false);
+  const [profileKey, setProfileKey] = useState('');
+  const [profiles, setProfiles] = useState<readonly SavedFullAssemblyDiagnosticProfileV1[]>([]);
+  const [profileLoadFailed, setProfileLoadFailed] = useState(false);
   const [result, setResult] =
     useState<PatternImportDxfPhaseEZeroConnectExistingLinkedN1OwnerResultV1 | null>(null);
 
+  const canSaveMetadata =
+    pending.target.orderedRowKeys.length === 1 &&
+    pending.request.catalog.pieces.length === 2 &&
+    readPatternImportDxfPhaseECardSessionV1(pending.target.techCardId)?.draft.dxfNativeSewingReplay
+      ?.replayReady === true;
+  useEffect(() => {
+    if (!canSaveMetadata) return;
+    let current = true;
+    void import('./pattern-import/phase-e-workbench-v2/saved-full-assembly-diagnostic-profile-v1')
+      .then(({ SAVED_FULL_ASSEMBLY_DIAGNOSTIC_PROFILES_V1 }) => {
+        if (current) setProfiles(SAVED_FULL_ASSEMBLY_DIAGNOSTIC_PROFILES_V1);
+      })
+      .catch(() => {
+        if (current) setProfileLoadFailed(true);
+      });
+    return () => {
+      current = false;
+    };
+  }, [canSaveMetadata]);
+  const selectedProfile = profiles.find(({ id, revision }) => `${id}@${revision}` === profileKey);
+  const profile: PatternImportDxfPhaseELinkedN1ProfileChoiceV1 | undefined =
+    canSaveMetadata && selectedProfile
+      ? { id: selectedProfile.id, revision: selectedProfile.revision }
+      : undefined;
+  const canSubmit =
+    !linking &&
+    !result?.ok &&
+    direction !== null &&
+    owner.status === 'available' &&
+    (!canSaveMetadata || !!profile);
+
   const rebind = async () => {
-    if (linking || result?.ok || !direction || owner.status !== 'available') return;
+    if (!canSubmit || !direction || owner.status !== 'available') return;
     setLinking(true);
     try {
-      setResult(await owner.rebind(pending, direction));
+      setResult(await owner.rebind(pending, direction, profile));
     } finally {
       setLinking(false);
     }
@@ -1236,23 +1274,40 @@ function ZeroConnectExistingLinkedN1Action({
           {value === 'same' ? 'Same direction' : 'Reversed'}
         </Button>
       ))}
+      {canSaveMetadata ? (
+        <Select
+          name='n1-diagnostic-profile'
+          aria-label='Connection preview material'
+          placeholder='Choose diagnostic preview material'
+          value={profileKey || undefined}
+          items={profiles.map(({ id, revision, label }) => ({
+            value: `${id}@${revision}`,
+            label,
+          }))}
+          readOnly={linking || Boolean(result)}
+          onValueChange={setProfileKey}
+        />
+      ) : null}
       <Button
         type='button'
         size='xs'
         variant='main'
-        className='h-7 border border-textColor bg-textColor px-2 text-micro font-bold text-bgColor disabled:cursor-not-allowed disabled:opacity-40'
-        disabled={linking || Boolean(result?.ok) || !direction || owner.status !== 'available'}
+        disabled={!canSubmit}
         onClick={() => void rebind()}
       >
         {linking
-          ? 'Updating…'
+          ? 'Saving…'
           : result?.ok
-            ? 'Updated'
-            : result
-              ? 'Check saved seam'
-              : 'Update seam'}
+            ? 'Saved'
+            : result?.seamWriteConfirmed
+              ? 'Retry pattern metadata'
+              : result
+                ? 'Check saved seam'
+                : canSaveMetadata
+                  ? 'Save exact connection'
+                  : 'Update seam'}
       </Button>
-      {!result && owner.status === 'available' ? (
+      {!result?.ok && owner.status === 'available' ? (
         <Button
           type='button'
           size='xs'
@@ -1261,17 +1316,25 @@ function ZeroConnectExistingLinkedN1Action({
           disabled={linking}
           onClick={() => owner.cancel(pending)}
         >
-          Cancel
+          {result ? 'Close' : 'Cancel'}
         </Button>
       ) : null}
       <Text component='span' size='micro' variant='label' className='basis-full'>
         {result?.ok
-          ? `Seam ${result.seamKey} now uses the selected exact edges. Durable pattern data still needs a saved carrier.`
+          ? result.durablePatternMetadata
+            ? 'Exact connection and pattern metadata saved.'
+            : `Seam ${result.seamKey} now uses the selected exact edges.`
           : result?.blocker
-            ? result.blocker.detail
+            ? result.seamWriteConfirmed
+              ? `Seam saved. ${result.blocker.detail}`
+              : result.blocker.detail
             : owner.status === 'unavailable'
               ? owner.blocker.detail
-              : 'Choose direction. The existing seam key and all Assembly Order operations stay unchanged.'}
+              : profileLoadFailed
+                ? 'The diagnostic preview material could not be loaded.'
+                : canSaveMetadata
+                  ? 'Choose how the two edges meet and select an uncalibrated preview material.'
+                  : 'Choose how the two exact edges meet.'}
       </Text>
     </div>
   );
@@ -7159,6 +7222,7 @@ export function OperationsField({
     useState<PatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1 | null>(null);
   const zeroConnectExistingOperationPendingRef = useRef(zeroConnectExistingOperationPending);
   const zeroConnectExistingLinkedN1PendingRef = useRef(zeroConnectExistingLinkedN1Pending);
+  const zeroConnectExistingLinkedN1FinalizeRef = useRef<AbortController | null>(null);
   const zeroConnectPendingHandoffRef = useRef(zeroConnectPendingHandoff);
   const zeroConnectPostSaveLifecycleRef =
     useRef<PatternImportDxfPhaseEZeroConnectPostSaveLifecycleOwnerV1 | null>(null);
@@ -7182,6 +7246,10 @@ export function OperationsField({
     setZeroConnectExistingOperationPending(null);
     zeroConnectExistingLinkedN1PendingRef.current = null;
     setZeroConnectExistingLinkedN1Pending(null);
+    return () => {
+      zeroConnectExistingLinkedN1PendingRef.current = null;
+      zeroConnectExistingLinkedN1FinalizeRef.current?.abort();
+    };
   }, [techCardId]);
   const clearZeroConnectExistingOperationPending = useCallback(
     (pending: PatternImportDxfPhaseEZeroConnectExistingOperationPendingV1): boolean => {
@@ -7194,14 +7262,12 @@ export function OperationsField({
   );
   const clearZeroConnectExistingLinkedN1Pending = useCallback(
     (pending: PatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1): boolean => {
-      if (zeroConnectExistingLinkedN1PendingRef.current !== pending) return false;
       if (
-        readPatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1(pending, 'same') !==
-          undefined ||
-        readPatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1(pending, 'reversed') !==
-          undefined
+        zeroConnectExistingLinkedN1PendingRef.current !== pending ||
+        !canReleasePatternImportDxfPhaseEZeroConnectExistingLinkedN1V1(pending)
       )
         return false;
+      zeroConnectExistingLinkedN1FinalizeRef.current?.abort();
       zeroConnectExistingLinkedN1PendingRef.current = null;
       setZeroConnectExistingLinkedN1Pending(null);
       return true;
@@ -8921,7 +8987,7 @@ export function OperationsField({
         : {
             status: 'available',
             cancel: clearZeroConnectExistingLinkedN1Pending,
-            rebind: async (pending, direction) => {
+            rebind: async (pending, direction, profile) => {
               const refuse = (
                 blocker: PatternImportDxfPhaseEZeroConnectExistingLinkedN1BlockerV1,
               ) => zeroConnectExistingLinkedN1Refused(blocker, pending);
@@ -8935,6 +9001,11 @@ export function OperationsField({
                 return refuse({
                   code: 'existing-linked-n1-selection-mismatch',
                   detail: 'A newer exact connection replaced this seam update request.',
+                });
+              if (profile && !exactNApplicationOwner)
+                return refuseBeforeWrite({
+                  code: 'existing-linked-n1-finalize-blocked',
+                  detail: 'The saved pattern metadata writer is unavailable.',
                 });
               const revalidate = () =>
                 revalidatePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1(pending, {
@@ -8991,6 +9062,11 @@ export function OperationsField({
                     code: 'existing-linked-n1-writer-stale',
                     detail: refreshed.blocker.detail,
                   });
+                if (zeroConnectExistingLinkedN1PendingRef.current !== pending || frozenRef.current)
+                  return refuseBeforeWrite({
+                    code: 'existing-linked-n1-selection-mismatch',
+                    detail: 'The exact connection changed before the seam write.',
+                  });
                 const beforeWrite = revalidate();
                 if (!beforeWrite.ok) return refuseBeforeWrite(beforeWrite.blocker);
                 atomicWrite =
@@ -9004,6 +9080,11 @@ export function OperationsField({
                         {
                           expectedLockVersion: pending.target.capturedCardLockVersion,
                           validate: () => {
+                            if (
+                              zeroConnectExistingLinkedN1PendingRef.current !== pending ||
+                              frozenRef.current
+                            )
+                              return { ok: false as const, why: 'The exact connection changed.' };
                             const late = revalidate();
                             return late.ok
                               ? { ok: true as const }
@@ -9018,7 +9099,19 @@ export function OperationsField({
                   code: 'existing-linked-n1-request-invalid',
                   detail: 'The exact seam update could not retain this gesture.',
                 });
-              const accepted = await atomicWrite;
+              const accepted = await atomicWrite.catch(
+                (error): StrictSeamAcceptResult => ({
+                  ok: false,
+                  rows: [],
+                  seamKeys: [],
+                  outcome: 'unknown',
+                  blocker: {
+                    code: 'write-failed',
+                    detail:
+                      error instanceof Error ? error.message : 'The seam write was interrupted.',
+                  },
+                }),
+              );
               if (!accepted.ok && accepted.outcome === 'not-attempted')
                 return refuse({
                   code: 'existing-linked-n1-writer-stale',
@@ -9051,11 +9144,63 @@ export function OperationsField({
                   code: 'existing-linked-n1-selection-mismatch',
                   detail: 'The selected operation changed while reading back the exact seam.',
                 });
-              zeroConnectExistingLinkedN1PendingRef.current = null;
-              setZeroConnectExistingLinkedN1Pending(null);
+              if (profile && exactNApplicationOwner && fresh.techCard) {
+                const failFinalization = (detail: string) =>
+                  Object.freeze({
+                    ...refuse({ code: 'existing-linked-n1-finalize-blocked', detail }),
+                    seamWriteConfirmed: true as const,
+                  });
+                if (zeroConnectExistingLinkedN1FinalizeRef.current)
+                  return failFinalization('Pattern metadata is already saving.');
+                const controller = new AbortController();
+                zeroConnectExistingLinkedN1FinalizeRef.current = controller;
+                try {
+                  const { finalizePatternImportDxfPhaseEExistingLinkedN1V1 } = await import(
+                    './pattern-import/phase-e-workbench-v2/cad-table-existing-linked-n1-finalize-v1'
+                  );
+                  const snapshot = createPatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1(
+                    readback.operationNumber,
+                  );
+                  const durable = createPatternImportDxfPhaseEZeroConnectProductionDurableBridgeV1(
+                    readback.operationNumber,
+                    exactNApplicationOwner,
+                    snapshot.authorityAdapter,
+                  );
+                  const finalized = await finalizePatternImportDxfPhaseEExistingLinkedN1V1({
+                    pending,
+                    profile,
+                    direction,
+                    readback,
+                    freshCard: fresh.techCard,
+                    isCurrent: () =>
+                      !frozenRef.current &&
+                      zeroConnectExistingLinkedN1PendingRef.current === pending,
+                    signal: controller.signal,
+                    persist: durable.persist,
+                  });
+                  if (!finalized.ok)
+                    return failFinalization(
+                      `${finalized.blocker.detail} [${finalized.blocker.code}]`,
+                    );
+                } catch (error) {
+                  return failFinalization(
+                    error instanceof Error ? error.message : 'Pattern metadata could not be saved.',
+                  );
+                } finally {
+                  if (zeroConnectExistingLinkedN1FinalizeRef.current === controller)
+                    zeroConnectExistingLinkedN1FinalizeRef.current = null;
+                }
+              }
+              if (zeroConnectExistingLinkedN1PendingRef.current === pending) {
+                zeroConnectExistingLinkedN1PendingRef.current = null;
+                setZeroConnectExistingLinkedN1Pending(null);
+                if (profile)
+                  notify({ sev: 'ok', subject: 'CONNECTION', text: 'Exact connection saved' });
+              }
               return Object.freeze({
                 ok: true as const,
                 status: 'existing-linked-n1-rebound-exact' as const,
+                durablePatternMetadata: !!profile,
                 historyKey: pending.target.historyKey,
                 operationNumber: readback.operationNumber,
                 seamKey: readback.seamKey,

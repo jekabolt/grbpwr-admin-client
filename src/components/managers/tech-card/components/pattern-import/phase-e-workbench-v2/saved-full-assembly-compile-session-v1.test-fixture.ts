@@ -1,7 +1,10 @@
 import { Buffer } from 'node:buffer';
 import { createThreePanelDxfMaterialCompileFixtureV1 } from 'lib/cloth/domain/dxf-garment-assembly-material-compile-stage-v1.test-fixture';
 import { selectPatternImportDxfProductDraftPhaseDSizeV1 } from 'lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1';
+import { writeAndGate } from 'lib/pattern-import/gate';
 import { writeDxfDetailed } from 'lib/pattern-import/write';
+import { withGradeMap } from 'lib/pattern-import/write/grade-map';
+import * as blockRules from '../../nesting/block-code';
 import { Session } from 'lib/pattern-import/worker/session';
 import type {
   PieceSpec,
@@ -51,7 +54,10 @@ export const fullAssemblyFixtureOperations = [
 ];
 export const digestFullAssemblyFixture = async (bytes: Uint8Array) =>
   Buffer.from(await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes).buffer)).toString('hex');
-export async function createSavedThreePanelFixtureV1(pieceCount: 2 | 3 = 3) {
+export async function createSavedThreePanelFixtureV1(
+  pieceCount: 2 | 3 = 3,
+  options: { wizardExport?: boolean } = {},
+) {
   const original = await createThreePanelDxfMaterialCompileFixtureV1();
   const ids = IDS.slice(0, pieceCount);
   const pieces: PieceSpec[] = ids.map((identity, index) => {
@@ -137,7 +143,38 @@ export async function createSavedThreePanelFixtureV1(pieceCount: 2 | 3 = 3) {
     generator: 'genuine-three-panel-saved-worker-fixture',
     dialect: 'r12',
   };
-  const written = writeDxfDetailed(job, { now: () => new Date('2026-11-17T00:00:00.000Z') });
+  const now = () => new Date('2026-11-17T00:00:00.000Z');
+  if (options.wizardExport) {
+    job.sizes.push({ token: 'L', sizeId: 8, name: 'Large', sourceLabel: 'L', rank: 1 });
+    job.source.sizeEncoding = 'dxf-block';
+    for (const piece of job.pieces) {
+      const first = piece.sizes[0];
+      const grow = (ring: typeof first.cut) => ring.map(({ x, y }) => ({ x, y: y * 1.04 }));
+      piece.sizes.push({
+        ...structuredClone(first),
+        rank: 1,
+        sizeToken: 'L',
+        sizeId: 8,
+        cut: grow(first.cut),
+        seam: grow(first.seam!),
+        bbox: { ...first.bbox, maxY: first.bbox.maxY * 1.04 },
+        areaMm2: first.areaMm2 * 1.04,
+      });
+    }
+  }
+  let written = writeDxfDetailed(job, { now });
+  if (options.wizardExport) {
+    const gated = await writeAndGate(job, {
+      rules: blockRules,
+      sizeTokens: new Set(job.sizes.map(({ token }) => token)),
+      now,
+    });
+    if (!gated.report.passed)
+      throw new Error(JSON.stringify(gated.report.checks.filter(({ ok }) => !ok)));
+    const graded = await withGradeMap(gated.dxfText, job.sizes);
+    if (!graded.file) throw new Error('Graded wizard fixture emitted no grade map.');
+    written = { ...gated.detail, dxfText: graded.text };
+  }
   const bytes = new TextEncoder().encode(written.dxfText);
   const row: DxfProductSavedRowIdentityV1 = {
     techCardId: 156,
@@ -151,7 +188,13 @@ export async function createSavedThreePanelFixtureV1(pieceCount: 2 | 3 = 3) {
   };
   const card: CardContext = {
     techCardId: 156,
-    sizes: [{ sizeId: 7, token: 'M', name: 'Medium', rank: 0, spellings: ['M', 'Medium'] }],
+    sizes: job.sizes.map(({ sizeId, token, name, rank }) => ({
+      sizeId,
+      token,
+      name,
+      rank,
+      spellings: [token, name],
+    })),
     scopes: [job.scope],
     existingPieces: ids.map((name) => ({
       lineKey: `line-${name}`,

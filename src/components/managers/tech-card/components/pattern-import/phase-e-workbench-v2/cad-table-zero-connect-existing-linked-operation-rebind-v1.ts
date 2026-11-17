@@ -1,10 +1,18 @@
 import type { common_TechCard } from 'api/proto-http/admin';
 import type { PieceGeom } from 'lib/assembly-skeleton/types';
-import { fromWire, splitWire, type StoredRow, type StoredSeam } from 'lib/seams';
+import {
+  anchorToWire,
+  fromWire,
+  splitWire,
+  type EdgeAnchor,
+  type StoredRow,
+  type StoredSeam,
+} from 'lib/seams';
 
 import { rowFromHand } from '../../assembly-seams/seam-actions';
 import { rowExactAnchorSig } from '../../assembly-seams/seams-store';
 import type { StrictSeamAcceptResult } from '../../assembly-seams/use-seam-decisions';
+import type { PatternImportDxfPhaseELinkedN1ProfileChoiceV1 } from './cad-table-existing-linked-n1-finalize-v1';
 import type { PatternImportDxfPhaseEZeroConnectAuthoringHandoffRequestV1 } from './cad-table-zero-connect-authoring-handoff-v1';
 import { isPatternImportDxfPhaseECadTableZeroConnectAuthoringRequestV1 } from './cad-table-zero-connect-controller-v1';
 import { buildPatternImportDxfPhaseEZeroConnectExactAnchorGeometryV1 } from './cad-table-zero-connect-exact-anchor-geometry-v1';
@@ -23,11 +31,11 @@ export const PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_EXISTING_LINKED_N1_REBIND_C
     operationsAppended: false,
     operationsRemoved: false,
     operationsReordered: false,
-    semanticCarrierCreated: false,
-    durableV4Claimed: false,
   } as const);
 
 const STABLE_ID = /^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,255}$/;
+
+type AnchorMetadata = Readonly<Pick<EdgeAnchor, 'layer' | 'placement'>>;
 
 type OperationLike = Readonly<{
   historyKey?: string;
@@ -49,6 +57,7 @@ export type PatternImportDxfPhaseEZeroConnectExistingLinkedN1TargetV1 = Readonly
   originalSeamFingerprint: string;
   originalSeamKind: StoredSeam['kind'];
   originalSeamNote: string;
+  originalAnchorMetadata: readonly [readonly AnchorMetadata[], readonly AnchorMetadata[]];
   operationsTopologyFingerprint: string;
   operationCount: number;
 }>;
@@ -77,7 +86,8 @@ export type PatternImportDxfPhaseEZeroConnectExistingLinkedN1BlockerV1 = Readonl
     | 'existing-linked-n1-crosswalk-unavailable'
     | 'existing-linked-n1-row-unavailable'
     | 'existing-linked-n1-row-kind-mismatch'
-    | 'existing-linked-n1-readback-mismatch';
+    | 'existing-linked-n1-readback-mismatch'
+    | 'existing-linked-n1-finalize-blocked';
   detail: string;
 }>;
 
@@ -146,6 +156,7 @@ export type PatternImportDxfPhaseEZeroConnectExistingLinkedN1OwnerResultV1 =
   | Readonly<{
       ok: true;
       status: 'existing-linked-n1-rebound-exact';
+      durablePatternMetadata: boolean;
       historyKey: string;
       operationNumber: number;
       seamKey: string;
@@ -158,6 +169,7 @@ export type PatternImportDxfPhaseEZeroConnectExistingLinkedN1OwnerResultV1 =
       historyKey: string | null;
       operationNumber: number | null;
       seamKey: string | null;
+      seamWriteConfirmed?: boolean;
       blocker: PatternImportDxfPhaseEZeroConnectExistingLinkedN1BlockerV1;
       claims: typeof PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_EXISTING_LINKED_N1_REBIND_CLAIMS_V1;
     }>;
@@ -168,6 +180,7 @@ export type PatternImportDxfPhaseEZeroConnectExistingLinkedN1OwnerV1 =
       rebind: (
         pending: PatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1,
         direction: 'same' | 'reversed',
+        profile?: PatternImportDxfPhaseELinkedN1ProfileChoiceV1,
       ) => Promise<PatternImportDxfPhaseEZeroConnectExistingLinkedN1OwnerResultV1>;
       cancel: (pending: PatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1) => boolean;
     }>
@@ -254,6 +267,17 @@ function seamFingerprint(seam: StoredRow): string {
     seam.note,
     Boolean(seam.stale),
   ]);
+}
+
+function anchorMetadata(anchors: readonly EdgeAnchor[]): readonly AnchorMetadata[] {
+  return Object.freeze(
+    anchors.map(({ layer, placement }) =>
+      Object.freeze({
+        ...(layer ? { layer } : {}),
+        ...(placement ? { placement: Object.freeze({ ...placement }) } : {}),
+      }),
+    ),
+  );
 }
 
 function sidePiece(seam: StoredSeam, side: 'sideA' | 'sideB'): string | null {
@@ -413,6 +437,10 @@ export function resolvePatternImportDxfPhaseEZeroConnectExistingLinkedN1TargetV1
       originalSeamFingerprint: seamFingerprint(savedSeam),
       originalSeamKind: savedSeam.kind,
       originalSeamNote: savedSeam.note,
+      originalAnchorMetadata: Object.freeze([
+        anchorMetadata(savedSeam.sideA),
+        anchorMetadata(savedSeam.sideB),
+      ] as const),
       operationsTopologyFingerprint: operationTopologyFingerprint(savedOperations),
       operationCount: savedOperations.length,
     }),
@@ -557,6 +585,8 @@ export function preparePatternImportDxfPhaseEZeroConnectExistingLinkedN1RebindV1
     storedSeam.seamKey !== pending.target.seamKey ||
     storedSeam.anchoredSize !== pending.sourceSizeToken ||
     storedSeam.kind !== pending.target.originalSeamKind ||
+    storedSeam.sideA.length !== pending.target.originalAnchorMetadata[0].length ||
+    storedSeam.sideB.length !== pending.target.originalAnchorMetadata[1].length ||
     sidePiece(storedSeam, 'sideA') !== pending.target.orderedInputKeys[0] ||
     sidePiece(storedSeam, 'sideB') !== pending.target.orderedInputKeys[1]
   )
@@ -570,7 +600,17 @@ export function preparePatternImportDxfPhaseEZeroConnectExistingLinkedN1RebindV1
       schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_EXISTING_LINKED_N1_REBIND_V1,
       status: 'existing-linked-n1-exact-row-ready' as const,
       pending,
-      storedSeam,
+      storedSeam: {
+        ...storedSeam,
+        sideA: storedSeam.sideA.map((anchor, index) => ({
+          ...anchor,
+          ...pending.target.originalAnchorMetadata[0][index],
+        })),
+        sideB: storedSeam.sideB.map((anchor, index) => ({
+          ...anchor,
+          ...pending.target.originalAnchorMetadata[1][index],
+        })),
+      },
     }),
     blocker: null,
   });
@@ -585,8 +625,10 @@ function storedSemanticsMatch(expected: StoredSeam, actual: StoredSeam): boolean
     expected.source === actual.source &&
     expected.anchoredSize === actual.anchoredSize &&
     expected.note === actual.note &&
-    JSON.stringify(expected.sideA) === JSON.stringify(actual.sideA) &&
-    JSON.stringify(expected.sideB) === JSON.stringify(actual.sideB) &&
+    JSON.stringify(expected.sideA.map(anchorToWire)) ===
+      JSON.stringify(actual.sideA.map(anchorToWire)) &&
+    JSON.stringify(expected.sideB.map(anchorToWire)) ===
+      JSON.stringify(actual.sideB.map(anchorToWire)) &&
     rowExactAnchorSig(expected) === rowExactAnchorSig(actual)
   );
 }
@@ -612,7 +654,8 @@ export function verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV
     freshCard?.id !== target.techCardId ||
     !Number.isSafeInteger(lockVersion) ||
     lockVersion <= target.capturedCardLockVersion ||
-    (accepted.ok && accepted.seamKey !== target.seamKey) ||
+    (accepted.ok &&
+      (accepted.seamKey !== target.seamKey || accepted.lockVersion !== lockVersion)) ||
     operationMatches.length !== 1 ||
     !exactStrings(operationMatches[0]!.inputKeys, target.orderedInputKeys) ||
     !exactStrings(operationMatches[0]!.seamKeys, target.orderedRowKeys) ||
@@ -634,10 +677,11 @@ export function verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV
   });
 }
 
-type RetainedWrite = Readonly<{
+type RetainedWrite = {
   direction: 'same' | 'reversed';
   promise: Promise<StrictSeamAcceptResult>;
-}>;
+  settled: boolean;
+};
 
 const writes = new WeakMap<
   PatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1,
@@ -653,6 +697,12 @@ export function readPatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1
   return retained.direction === direction ? retained.promise : null;
 }
 
+export function canReleasePatternImportDxfPhaseEZeroConnectExistingLinkedN1V1(
+  pending: PatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1,
+): boolean {
+  return writes.get(pending)?.settled !== false;
+}
+
 export function executePatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1(
   pending: PatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1,
   direction: 'same' | 'reversed',
@@ -660,18 +710,18 @@ export function executePatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnc
 ): Promise<StrictSeamAcceptResult> | null {
   const retained = writes.get(pending);
   if (retained) return retained.direction === direction ? retained.promise : null;
-  const promise = write();
-  writes.set(pending, Object.freeze({ direction, promise }));
+  const promise = Promise.resolve().then(write);
+  const entry = { direction, promise, settled: false };
+  writes.set(pending, entry);
   void promise.then(
     (result) => {
-      if (
-        !result.ok &&
-        result.outcome === 'not-attempted' &&
-        writes.get(pending)?.promise === promise
-      )
+      entry.settled = true;
+      if (!result.ok && result.outcome === 'not-attempted' && writes.get(pending) === entry)
         writes.delete(pending);
     },
-    () => undefined,
+    () => {
+      entry.settled = true;
+    },
   );
   return promise;
 }

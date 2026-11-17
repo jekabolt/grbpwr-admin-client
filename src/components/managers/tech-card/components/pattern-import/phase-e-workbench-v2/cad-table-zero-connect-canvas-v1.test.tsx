@@ -213,6 +213,36 @@ describe('zero-operation CAD table rendering', () => {
     expect(open).not.toContain('stroke-dasharray');
   });
 
+  it('renders saved seam sides on the existing canvas without an editable Connect tool', () => {
+    const html = renderToStaticMarkup(
+      <PatternImportDxfPhaseECadTableZeroConnectCanvasV1
+        {...fixture()}
+        disabled
+        savedSeamSides={[
+          {
+            pieceId: 'closed-piece',
+            pieceLineKey: 'closed:M',
+            contourId: 'closed-cut',
+            boundaryVertexIds: ['closed:3', 'closed:0'],
+          },
+          {
+            pieceId: 'open-piece',
+            pieceLineKey: 'open:M',
+            contourId: 'open-cut',
+            boundaryVertexIds: ['open:1', 'open:0'],
+          },
+        ]}
+      />,
+    );
+    expect(html.match(/data-cad-zero-connect-side="[ab]"/g)).toEqual([
+      'data-cad-zero-connect-side="a"',
+      'data-cad-zero-connect-side="b"',
+    ]);
+    expect(html).toContain('stroke="var(--color-highlightColor)"');
+    expect(html).toContain('aria-label="Fit all pieces"');
+    expect(html).not.toContain('aria-label="Connect edges"');
+  });
+
   it('keeps the viewport frozen while pointer movement updates session-only offsets', () => {
     const { projection } = fixture();
     const initial = createPatternImportDxfPhaseECadTableZeroCanvasSessionV1(projection);

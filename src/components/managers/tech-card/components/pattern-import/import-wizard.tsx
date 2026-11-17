@@ -278,6 +278,7 @@ function WizardBody({
       card: apiRef.current.runCard,
       baseSeeds: apiRef.current.baseSeeds,
       presegmented: !!apiRef.current.extracted.presegmented,
+      dxfImportScopeKey: apiRef.current.dxfImportScopeKey,
     });
     const log = {
       miss: (m: ReplayMiss) =>

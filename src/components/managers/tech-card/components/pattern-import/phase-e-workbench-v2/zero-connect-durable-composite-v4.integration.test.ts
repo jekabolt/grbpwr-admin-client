@@ -255,6 +255,20 @@ describe('zero-connect durable N=1 genuine production chain', () => {
 
     clearPatternImportDxfProductExactNSeamProductionSessionV2(row.techCardId);
     expect(readPatternImportDxfProductExactNSeamProductionSessionV2(row.techCardId)).toBeNull();
+    const alternateSurface = await bridge.restore(
+      {
+        schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_DURABLE_RESTORE_REQUEST_V1,
+        row,
+        selectedOperationNumber: 7,
+        catalog: { ...exactCatalog, canonicalSha256: 'f'.repeat(64) },
+      },
+      new AbortController().signal,
+    );
+    expect(alternateSurface).toMatchObject({
+      ok: false,
+      blocker: { code: 'durable-restore-catalog-mismatch' },
+    });
+    expect(readPatternImportDxfProductExactNSeamProductionSessionV2(row.techCardId)).toBeNull();
     const restored = await bridge.restore(
       {
         schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_DURABLE_RESTORE_REQUEST_V1,
@@ -271,7 +285,7 @@ describe('zero-connect durable N=1 genuine production chain', () => {
     });
     if (!restored.ok) return;
     expect(put).toHaveBeenCalledTimes(1);
-    expect(readCurrentAssemblyTopology).toHaveBeenCalledTimes(2);
+    expect(readCurrentAssemblyTopology).toHaveBeenCalledTimes(3);
     const reloaded = readPatternImportDxfProductExactNSeamProductionSessionV2(row.techCardId);
     expect(reloaded).not.toBeNull();
     if (!reloaded) return;

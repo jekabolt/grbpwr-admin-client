@@ -189,11 +189,22 @@ export async function replayPatternImportDxfProductWriterV1(
   }
   if (!isAsciiDxf(completeText))
     return blocked('writer-output-invalid', 'Rebuilt product DXF is not exact ASCII.');
-  const bytes = textEncoder.encode(completeText);
+  let bytes = textEncoder.encode(completeText);
   if (bytes.byteLength === 0 || bytes.byteLength > MAX_BYTES)
     return blocked('writer-output-invalid', 'Rebuilt product DXF exceeds the byte bound.');
-  const exportSha256 = await sha256(crypto, bytes);
+  let exportSha256 = await sha256(crypto, bytes);
   if (!exportSha256) return blocked('sha256-unavailable', 'SHA-256 is unavailable.');
+  if (exportSha256 !== input.expected.exportSha256 && detail.manifest.sizes.length > 1) {
+    const { withGradeMap } = await import('../../pattern-import/write/grade-map');
+    const graded = await withGradeMap(completeText, detail.manifest.sizes);
+    if (graded.file) {
+      bytes = textEncoder.encode(graded.text);
+      if (bytes.byteLength > MAX_BYTES)
+        return blocked('writer-output-invalid', 'Rebuilt product DXF exceeds the byte bound.');
+      exportSha256 = await sha256(crypto, bytes);
+      if (!exportSha256) return blocked('sha256-unavailable', 'SHA-256 is unavailable.');
+    }
+  }
   if (exportSha256 !== input.expected.exportSha256)
     return blocked(
       'export-sha-mismatch',

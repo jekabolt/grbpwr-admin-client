@@ -1,4 +1,12 @@
 import {
+  bindingScopes,
+  fabricScopes,
+  isRollGoodsSection,
+  type BindingScopes,
+} from 'components/managers/tech-card/components/bom-purpose';
+import { savedWorkbenchBindingScopeKeyV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-workbench-scope-v1';
+import { aliasKey } from 'lib/pattern-import/fabrics/draft';
+import {
   PATTERN_IMPORT_DXF_WRITER_BYTE_EXPORT_RECEIPT_V1,
   buildPatternImportDxfWriterByteExportBindingV1,
   type PatternImportDxfWriterByteExportBindingInputV1,
@@ -459,9 +467,7 @@ function parseCardExpectedRecord(
         `${right.scopeKey}\0${right.blockName.toLowerCase()}\0${right.pieceLineKey}`,
       ),
     );
-  const aliasKeys = aliases.map(
-    ({ scopeKey, blockName }) => `${scopeKey}\0${blockName.toLowerCase()}`,
-  );
+  const aliasKeys = aliases.map(({ scopeKey, blockName }) => aliasKey(scopeKey, blockName));
   if (aliases.length === 0 || new Set(aliasKeys).size !== aliases.length)
     fail('invalid-input', `${field}.aliases`, 'must be non-empty with unique scope/block keys.');
   return deepFreeze({
@@ -503,16 +509,29 @@ function optionalReadText(value: unknown, field: string): string {
   return readText(value, field);
 }
 
-function scopeKeyOf(record: Record<string, unknown>, field: string): string {
-  const purpose = optionalReadText(record.fabricPurpose, `${field}.fabricPurpose`);
+function scopeBindingOf(record: Record<string, unknown>, field: string) {
+  return {
+    fabricPurpose: optionalReadText(record.fabricPurpose, `${field}.fabricPurpose`),
+    bomLineKey: optionalReadText(record.bomLineKey, `${field}.bomLineKey`),
+  };
+}
+
+function scopeKeyOf(
+  record: Record<string, unknown>,
+  field: string,
+  bindings: BindingScopes | undefined,
+): string {
+  const { fabricPurpose, bomLineKey } = scopeBindingOf(record, field);
+  if (bindings) return savedWorkbenchBindingScopeKeyV1(fabricPurpose, bomLineKey, bindings);
+  // The narrow legacy readback port predates BOM rows and carries a scope token directly.
   if (
-    purpose &&
-    purpose !== 'TECH_CARD_BOM_PURPOSE_UNKNOWN' &&
-    purpose !== 'TECH_CARD_BOM_PURPOSE_UNSPECIFIED' &&
-    purpose !== 'TECH_CARD_BOM_PURPOSE_UNSET'
+    fabricPurpose &&
+    fabricPurpose !== 'TECH_CARD_BOM_PURPOSE_UNKNOWN' &&
+    fabricPurpose !== 'TECH_CARD_BOM_PURPOSE_UNSPECIFIED' &&
+    fabricPurpose !== 'TECH_CARD_BOM_PURPOSE_UNSET'
   )
-    return purpose;
-  return optionalReadText(record.bomLineKey, `${field}.bomLineKey`);
+    return fabricPurpose;
+  return bomLineKey;
 }
 
 function parseReadback(
@@ -546,6 +565,27 @@ function parseReadback(
     required(insert, 'patterns', 'readback.techCard.techCard'),
     'readback.techCard.techCard.patterns',
   ).map((item, index) => safeRecord(item, `readback.techCard.techCard.patterns[${index}]`));
+  const materialScopes =
+    insert.bomItems === undefined
+      ? undefined
+      : fabricScopes(
+          denseArray(insert.bomItems, 'readback.techCard.techCard.bomItems').flatMap(
+            (item, index) => {
+              const field = `readback.techCard.techCard.bomItems[${index}]`;
+              const row = safeRecord(item, field);
+              const lineKey = optionalReadText(row.lineKey, `${field}.lineKey`);
+              const section = optionalReadText(row.section, `${field}.section`);
+              const purpose = optionalReadText(row.purpose, `${field}.purpose`);
+              return lineKey && isRollGoodsSection(section) ? [{ lineKey, section, purpose }] : [];
+            },
+          ),
+        );
+  const patternBindings = materialScopes
+    ? bindingScopes(
+        materialScopes,
+        patterns.map((row, index) => scopeBindingOf(row, `pattern[${index}]`)),
+      )
+    : undefined;
   const matchingPatterns = patterns.filter(
     (row) => optionalReadText(row.lineKey, 'pattern.lineKey') === expected.pattern.lineKey,
   );
@@ -565,7 +605,7 @@ function parseReadback(
   const observedPattern = {
     lineKey: optionalReadText(patternRow.lineKey, 'pattern.lineKey'),
     url: optionalReadText(patternRow.url, 'pattern.url'),
-    scopeKey: scopeKeyOf(patternRow, 'pattern'),
+    scopeKey: scopeKeyOf(patternRow, 'pattern', patternBindings),
     sizeId: readNonNegativeInteger(patternRow.sizeId, 'pattern.sizeId'),
     version: readNonNegativeInteger(patternRow.version, 'pattern.version'),
     sha256: optionalReadText(patternRow.sha256, 'pattern.sha256'),
@@ -612,39 +652,48 @@ function parseReadback(
     required(insert, 'pieceDxfAliases', 'readback.techCard.techCard'),
     'readback.techCard.techCard.pieceDxfAliases',
   );
-  const aliases = denseArray(
+  const aliasRows = denseArray(
     required(aliasWrapper, 'items', 'readback.techCard.techCard.pieceDxfAliases'),
     'readback.techCard.techCard.pieceDxfAliases.items',
-  ).map((item, index) => {
-    const row = safeRecord(item, `readback.techCard.techCard.pieceDxfAliases.items[${index}]`);
-    return {
-      scopeKey: scopeKeyOf(row, `alias[${index}]`),
-      blockName: optionalReadText(row.blockName, `alias[${index}].blockName`),
-      pieceLineKey: optionalReadText(row.pieceLineKey, `alias[${index}].pieceLineKey`),
-    };
-  });
-  const aliasCounts = new Map<string, number>();
+  ).map((item, index) =>
+    safeRecord(item, `readback.techCard.techCard.pieceDxfAliases.items[${index}]`),
+  );
+  const aliasBindings = materialScopes
+    ? bindingScopes(
+        materialScopes,
+        aliasRows.map((row, index) => scopeBindingOf(row, `alias[${index}]`)),
+      )
+    : undefined;
+  const aliases = aliasRows.map((row, index) => ({
+    scopeKey: scopeKeyOf(row, `alias[${index}]`, aliasBindings),
+    blockName: optionalReadText(row.blockName, `alias[${index}].blockName`),
+    pieceLineKey: optionalReadText(row.pieceLineKey, `alias[${index}].pieceLineKey`),
+  }));
+  const aliasOwners = new Map<string, string[]>();
   for (const alias of aliases) {
-    if (!alias.scopeKey || !alias.blockName || !alias.pieceLineKey) continue;
-    const key = `${alias.scopeKey}\0${alias.blockName.toLowerCase()}\0${alias.pieceLineKey}`;
-    aliasCounts.set(key, (aliasCounts.get(key) ?? 0) + 1);
+    if (!alias.scopeKey || !alias.blockName) continue;
+    const key = aliasKey(alias.scopeKey, alias.blockName);
+    const owners = aliasOwners.get(key) ?? [];
+    owners.push(alias.pieceLineKey);
+    aliasOwners.set(key, owners);
   }
   for (const alias of expected.aliases) {
-    const key = `${alias.scopeKey}\0${alias.blockName.toLowerCase()}\0${alias.pieceLineKey}`;
-    const count = aliasCounts.get(key) ?? 0;
-    if (count === 0)
+    const key = aliasKey(alias.scopeKey, alias.blockName);
+    const owners = aliasOwners.get(key) ?? [];
+    if (owners.length === 0 || !owners.includes(alias.pieceLineKey))
       fail(
         'alias-missing',
         'readback.techCard.techCard.pieceDxfAliases',
-        `alias ${alias.scopeKey}/${alias.blockName} is absent.`,
+        `alias ${alias.scopeKey}/${alias.blockName} no longer names its saved piece.`,
       );
-    if (count !== 1)
+    if (owners.length !== 1)
       fail(
         'alias-ambiguous',
         'readback.techCard.techCard.pieceDxfAliases',
-        `alias ${alias.scopeKey}/${alias.blockName} is duplicated.`,
+        `alias ${alias.scopeKey}/${alias.blockName} has multiple saved owners.`,
       );
   }
+
   return deepFreeze({
     lockVersion,
     pattern: observedPattern,

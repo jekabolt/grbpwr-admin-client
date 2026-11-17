@@ -156,6 +156,7 @@ export type DraftBuilder = (
     dxfProvenance?: StageIO['dxf-provenance']['out'];
     /** Separate exact source/contour replay carrier; contains no raw DXF. */
     dxfPhaseDReplay?: StageIO['dxf-phase-d-replay']['out'];
+    dxfNativeSewingReplay?: StageIO['dxf-native-sewing-replay']['out'];
   },
 ) => CardDraft;
 

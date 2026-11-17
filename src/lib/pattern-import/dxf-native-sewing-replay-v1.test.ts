@@ -1,3 +1,7 @@
+import {
+  captureDirectDxfAuthoringV1,
+  directDxfAuthoringOpenFileV1,
+} from 'components/managers/tech-card/components/pattern-import/direct-dxf-authoring-capture-v1';
 import { describe, expect, it, vi } from 'vitest';
 import * as NativeAuthority from './dxf-source-native-straight-edge-authority-v1';
 import * as SewingReplay from './dxf-native-sewing-replay-v1';
@@ -22,7 +26,7 @@ import {
   consumeDxfProductPhaseDNativeStraightEdgesV3,
 } from '../cloth/domain/dxf-product-phase-d-native-straight-edge-binding-v1';
 import { Session, type StageCtx } from './worker/session';
-import type { StageIO } from './types';
+import type { PatternImportOpenFile, StageIO } from './types';
 import type { PlannedBlock } from './write/plan';
 import { writeR2000 } from './write/r2000';
 
@@ -31,7 +35,7 @@ const sourceFileId = 'native-sewing-test/file';
 const request = { schemaVersion: DXF_NATIVE_SEWING_REPLAY_REQUEST_V1 };
 const ctx: StageCtx = { progress: () => {}, checkCancel: () => {} };
 // Authored DXF fixture geometry. No source reader/provenance/native/semantics port is mocked.
-function fixture(sewing = true, clockwise = false): string {
+function fixture(sewing = true, clockwise = false, sizeTokens = ['S']): string {
   const cut = [
     { x: 30, y: 40 },
     { x: 150, y: 40 },
@@ -74,7 +78,16 @@ function fixture(sewing = true, clockwise = false): string {
     derivedFrom: null,
     size: {}, // writeR2000 only consumes the planned drawing fields above.
   } as unknown as PlannedBlock;
-  return writeR2000([block]);
+  return writeR2000(
+    sizeTokens.map((sizeToken, rank) => ({
+      ...block,
+      name: `FRONT_${sizeToken}`,
+      sizeToken,
+      labelSize: sizeToken,
+      rank,
+      sizeId: rank + 1,
+    })),
+  );
 }
 // Modify one declared L14 DXF entity by group codes, never by finding a coordinate match.
 function modifyNativeSeam(kind: 'curved' | 'multi-path' | 'open' | 'inferred-layer8'): string {
@@ -142,9 +155,14 @@ const semanticsInput: StageIO['semantics']['in'] = {
   pieceOverrides: {},
   operatorGrain: {},
 };
-async function prepared(text = fixture(), factor = 1) {
+async function prepared(
+  text = fixture(),
+  factor = 1,
+  openedFile?: PatternImportOpenFile,
+  sizeTokens = ['S'],
+) {
   const session = new Session(1, [
-    { name: 'fixture.dxf', bytes: bytes(text), dxfPathProvenance: { sourceFileId } },
+    openedFile ?? { name: 'fixture.dxf', bytes: bytes(text), dxfPathProvenance: { sourceFileId } },
   ]);
   await session.runStage('extract', { opts }, ctx);
   await session.runStage(
@@ -160,7 +178,7 @@ async function prepared(text = fixture(), factor = 1) {
   );
   await session.runStage(
     'sizes',
-    { card: [{ sizeId: 1, name: 'Small', token: 'S', rank: 0 }] },
+    { card: sizeTokens.map((token, rank) => ({ sizeId: rank + 1, name: token, token, rank })) },
     ctx,
   );
   await session.runStage(
@@ -184,6 +202,76 @@ async function segmentation(text = fixture()) {
 }
 
 describe('explicit native drawn sewing replay (CPU, genuine DXF source chain)', () => {
+  it('captures genuine original-worker authoring views through the production wizard bridge', async () => {
+    const sizeTokens = ['XS', 'S', 'M', 'L', 'XL'];
+    const text = fixture(true, false, sizeTokens);
+    const file = { name: 'main.dxf', arrayBuffer: async () => bytes(text) };
+    const firstOpen = await directDxfAuthoringOpenFileV1(file, 0);
+    const restoredOpen = await directDxfAuthoringOpenFileV1(file, 0);
+    const secondIndex = await directDxfAuthoringOpenFileV1(file, 1);
+    expect(firstOpen.dxfPathProvenance?.sourceFileId).toMatch(/^dxf:[\w-]{43}:0$/);
+    expect(firstOpen.dxfPathProvenance).toEqual(restoredOpen.dxfPathProvenance);
+    expect(secondIndex.dxfPathProvenance).not.toEqual(firstOpen.dxfPathProvenance);
+    const { session, semantics } = await prepared(text, 1, firstOpen, sizeTokens);
+    try {
+      expect(semantics.blocked).toEqual([]);
+      expect(semantics.pieces).toHaveLength(1);
+      expect(semantics.pieces[0].ungraded).toBe(false);
+      expect(semantics.pieces[0].sizes.map((size) => size.sizeToken)).toEqual(sizeTokens);
+      const captured = await captureDirectDxfAuthoringV1([file], (stage, input) =>
+        session.runStage(stage, input, ctx),
+      );
+      expect(captured.dxfProvenance?.pipelineIntegrated).toBe(true);
+      expect(captured.dxfPhaseDReplay?.replayReady).toBe(true);
+      expect(captured.dxfNativeSewingReplay?.replayReady).toBe(true);
+      if (!captured.dxfNativeSewingReplay?.replayReady) throw new Error('Native replay missing');
+      expect(captured.dxfNativeSewingReplay.pipeline.contentBinding?.sourceSha256).toBe(
+        captured.dxfProvenance?.contentBinding?.sourceSha256,
+      );
+      expect(
+        captured.dxfNativeSewingReplay.pipeline.contentBinding?.selectedGeometrySha256,
+      ).not.toBe(captured.dxfProvenance?.contentBinding?.selectedGeometrySha256);
+
+      const written = await session.runStage(
+        'write',
+        {
+          techCardId: 1,
+          generator: 'grbpwr-admin pattern-import (worker)',
+          dialect: 'r12',
+          scopes: [
+            {
+              scopeKey: 'main',
+              label: 'Main',
+              fabricPurpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
+              bomLineKey: '',
+              isInterlining: false,
+            },
+          ],
+          assignment: {
+            byPurpose: { main: [semantics.pieces[0].seed] },
+            interliningInBom: false,
+            proposals: [],
+          },
+          sizes: sizeTokens.map((token, rank) => ({
+            token,
+            sizeId: rank + 1,
+            name: token,
+            sourceLabel: token,
+            rank,
+          })),
+        },
+        ctx,
+      );
+      expect(written.gate.main.checks.find((check) => check.id === 'G8-monotone')).toMatchObject({
+        ok: true,
+        note: expect.stringContaining('4 identical DXF rank pairs preserved as drawn'),
+      });
+      expect(written.scopes[0].manifest.blocks.map((block) => block.sizeToken)).toEqual(sizeTokens);
+    } finally {
+      session.close();
+    }
+  });
+
   it('claims request capture before Proxy reflection can reenter validation', () => {
     let nested: ReturnType<typeof validateDxfNativeSewingReplayRequestV1> | undefined;
     const proxy = new Proxy(request, {

@@ -5,6 +5,7 @@ import {
   type CardDraft,
   type DraftScope,
 } from './types';
+import { embedManifest } from './manifest';
 import { writeDxfDetailed } from './write';
 
 export const DXF_PRODUCT_SAVED_REPROCESS_OWNER_V1 = 'dxf-product-saved-reprocess-owner/1' as const;
@@ -316,12 +317,14 @@ function writerReplayOutput(scope: DraftScope):
     });
   try {
     const rerun = writeDxfDetailed(replay.job, {
+      embed: null,
       now: () => new Date(createdAt.getTime()),
     });
+    const manifest = { ...rerun.manifest, gate: scope.manifest.gate };
     return Object.freeze({
       ok: true as const,
-      dxfText: rerun.dxfText,
-      manifest: rerun.manifest,
+      dxfText: embedManifest(rerun.bareText, manifest),
+      manifest,
     });
   } catch {
     return Object.freeze({
@@ -440,24 +443,29 @@ async function validateAndRedactDraft(
       code: 'reconstructed-writer-replay-mismatch',
       detail: rerun.detail,
     };
-  const replayBytes = latin1Bytes(rerun.dxfText);
-  if (!replayBytes)
+  const matchesSavedBytes = async (text: string) => {
+    const bytes = latin1Bytes(text);
+    if (!bytes) return false;
+    try {
+      return bytes.byteLength === row.sizeBytes && (await sha256(bytes, crypto)) === row.sha256;
+    } finally {
+      bytes.fill(0);
+    }
+  };
+  let exact = await matchesSavedBytes(rerun.dxfText);
+  if (!exact && rerun.manifest.sizes.length > 1) {
+    // The wizard appends this derived grade map after its writer and gate. Legacy rows may
+    // carry only the gated DXF. Accept either complete production variant solely by row SHA.
+    const { withGradeMap } = await import('./write/grade-map');
+    const graded = await withGradeMap(rerun.dxfText, rerun.manifest.sizes);
+    exact = graded.file !== null && (await matchesSavedBytes(graded.text));
+  }
+  if (!exact)
     return {
       ok: false,
       code: 'reconstructed-writer-byte-replay-mismatch',
-      detail: 'Reconstructed writer output is not the byte-preserving Latin-1 DXF representation.',
+      detail: 'Reconstructed writer bytes do not exact-match the saved row size and SHA-256.',
     };
-  try {
-    const replaySha256 = await sha256(replayBytes, crypto);
-    if (replayBytes.byteLength !== row.sizeBytes || replaySha256 !== row.sha256)
-      return {
-        ok: false,
-        code: 'reconstructed-writer-byte-replay-mismatch',
-        detail: 'Reconstructed writer bytes do not exact-match the saved row size and SHA-256.',
-      };
-  } finally {
-    replayBytes.fill(0);
-  }
   try {
     const detached = structuredClone(draft);
     for (const scope of detached.scopes) {

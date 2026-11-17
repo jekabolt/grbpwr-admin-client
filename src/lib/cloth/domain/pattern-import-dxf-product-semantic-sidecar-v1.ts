@@ -335,9 +335,10 @@ async function checkedCrypto(
   return candidate;
 }
 
-function sameCanonical(left: unknown, right: unknown): boolean {
+function sameCanonicalMembership(left: readonly unknown[], right: readonly unknown[]): boolean {
   try {
-    return canonical(left) === canonical(right);
+    // G4F3 canonically orders the unordered piece and alias membership records.
+    return canonical(left.map(canonical).sort()) === canonical(right.map(canonical).sort());
   } catch {
     return false;
   }
@@ -466,8 +467,8 @@ export async function buildPatternImportDxfProductSemanticSidecarV1(
       receipt.pattern.scopeKey !== evidence.scopeKey ||
       receipt.pattern.sizeId !== evidence.patternSizeId ||
       receipt.pattern.sha256 !== evidence.productExportSha256 ||
-      !sameCanonical(receipt.pieceLineKeys, evidence.pieceLineKeys) ||
-      !sameCanonical(receipt.aliases, evidence.aliases)
+      !sameCanonicalMembership(receipt.pieceLineKeys, evidence.pieceLineKeys) ||
+      !sameCanonicalMembership(receipt.aliases, evidence.aliases)
     )
       fail(
         'binding-mismatch',

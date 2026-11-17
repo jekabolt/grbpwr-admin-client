@@ -26,8 +26,10 @@ import {
   verifyPatternImportDxfPhaseEZeroConnectExistingOperationReadbackV1,
 } from './cad-table-zero-connect-existing-operation-attach-v1';
 import {
+  canReleasePatternImportDxfPhaseEZeroConnectExistingLinkedN1V1,
   capturePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1,
   executePatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1,
+  preparePatternImportDxfPhaseEZeroConnectExistingLinkedN1RebindV1,
   readPatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1,
   resolvePatternImportDxfPhaseEZeroConnectExistingLinkedN1TargetV1,
   verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV1,
@@ -778,6 +780,8 @@ describe('existing saved one-physical-seam operation exact rebind', () => {
           range: [0, 1],
           edgeHint: 'legacy-a',
           contourSig: 'legacy-a-contour',
+          placement: { xMm: 0, yMm: 1, rotDeg: 5, flip: false },
+          layer: 'over',
         },
       ],
       sideB: [
@@ -859,6 +863,22 @@ describe('existing saved one-physical-seam operation exact rebind', () => {
           seamKey: 'existing-edge',
           orderedRowKeys: ['existing-edge', 'existing-pose'],
           operationCount: 71,
+        },
+      },
+    });
+    if (!captured.ok) throw new Error(captured.blocker.detail);
+    const exact = preparePatternImportDxfPhaseEZeroConnectExistingLinkedN1RebindV1(
+      captured.pending,
+      'reversed',
+      { nameOf: (key) => key, grainDeg: null },
+    );
+    expect(exact).toMatchObject({
+      ok: true,
+      receipt: {
+        storedSeam: {
+          sideA: [{ layer: 'over', placement: fixture.seam.sideA[0]?.placement }],
+          seamKey: fixture.seam.seamKey,
+          anchoredSize: 'M',
         },
       },
     });
@@ -976,7 +996,13 @@ describe('existing saved one-physical-seam operation exact rebind', () => {
         'reversed',
       ),
     ).toBe(first);
+    expect(canReleasePatternImportDxfPhaseEZeroConnectExistingLinkedN1V1(captured.pending)).toBe(
+      false,
+    );
     await expect(first!).resolves.toBe(accepted);
+    expect(canReleasePatternImportDxfPhaseEZeroConnectExistingLinkedN1V1(captured.pending)).toBe(
+      true,
+    );
     expect(write).toHaveBeenCalledOnce();
 
     const freshCard = structuredClone(fixture.savedCard);

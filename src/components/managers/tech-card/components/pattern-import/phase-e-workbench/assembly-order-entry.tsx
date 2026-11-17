@@ -112,7 +112,10 @@ import {
   matchesPatternImportDxfProductExactNSessionSavedBindingV1,
   patternImportDxfProductExactNSessionValidationKeyV1,
 } from '../phase-e-workbench-v2/durable-exact-session-current-v1';
-import { preparePatternImportDxfPhaseECadTableZeroOperationSavedV1 } from '../phase-e-workbench-v2/cad-table-zero-operation-saved-preparation-v1';
+import {
+  preparePatternImportDxfPhaseECadTableZeroOperationSavedV1,
+  type PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1,
+} from '../phase-e-workbench-v2/cad-table-zero-operation-saved-preparation-v1';
 import { createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1 } from '../phase-e-workbench-v2/zero-operation-saved-card-authority-v1';
 import { PatternImportDxfPhaseECadTableDraftOperationsPanelV1 } from '../phase-e-workbench-v2/cad-table-draft-operations-panel-v1';
 import type { PatternImportDxfPhaseECadTableDraftOperationSessionBridgeResultV1 } from '../phase-e-workbench-v2/cad-table-draft-operation-session-bridge-v1';
@@ -480,6 +483,7 @@ export type PatternImportDxfPhaseEAssemblyOrderFreshSessionV1 = Readonly<{
   submitChoices: (
     catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1,
     choices: PatternImportDxfProductPhaseEAuthoringChoicesV1,
+    firstAttachment?: Readonly<{ savedRowRevision: number; isCurrent: () => boolean }>,
   ) => Promise<PatternImportDxfPhaseEAssemblyOrderSubmitResultV1>;
 }>;
 
@@ -515,6 +519,7 @@ export type PatternImportDxfPhaseEAssemblyOrderSubmitResultV1 =
         'not-attempted'
       >;
       blockers: readonly PatternImportDxfPhaseEAssemblyOrderSubmitBlockerV1[];
+      verifiedAttachment?: Readonly<{ cardLockVersion: number; sidecarSha256: string }>;
     }>;
 
 export type PatternImportDxfPhaseEAssemblyOrderAsyncTicketV1 = Readonly<{
@@ -716,7 +721,12 @@ export type PatternImportDxfPhaseEAssemblyOrderPreparationV1 =
       blocker: PatternImportDxfPhaseEAssemblyOrderEntryBlockerV1;
     }>;
 
-function operationNumber(operation: FormOperation | undefined): number {
+type AssemblyOrderOperation = Pick<
+  FormOperation,
+  'operationNumber' | 'work' | 'inputKeys' | 'outputUnitKey' | 'outputUnitName' | 'seamKeys'
+>;
+
+function operationNumber(operation: AssemblyOrderOperation | undefined): number {
   const value = Number(operation?.operationNumber ?? 0);
   return Number.isSafeInteger(value) && value > 0 ? value : 0;
 }
@@ -746,7 +756,7 @@ function exactSeamContext(seam: StoredSeam): AssemblyContext['seams'][number] {
 }
 
 export function buildPatternImportDxfPhaseEAssemblyOrderSourceV1(
-  operations: readonly FormOperation[],
+  operations: readonly AssemblyOrderOperation[],
   seams: readonly StoredSeam[],
   selectedIndex: number,
 ): PatternImportDxfPhaseEAssemblyOrderSourceV1 | null {
@@ -915,6 +925,10 @@ export function projectPatternImportDxfPhaseEAssemblyOrderAttachmentResultV1(
       authorityStatus: 'accepted' as const,
       attachmentStatus: 'verified' as const,
       blockers: Object.freeze([]),
+      verifiedAttachment: Object.freeze({
+        cardLockVersion: result.attempt.evidence.cardLockVersion,
+        sidecarSha256: result.attempt.evidence.sidecarSha256,
+      }),
     });
 
   const runtimeBlockers = result.attempt.ok ? [] : result.attempt.blockers;
@@ -1070,7 +1084,11 @@ export function resolvePatternImportDxfPhaseEAssemblyOrderSessionV1(
     loadMaterialOptions: loadPatternImportDxfPhaseEWorkbenchBetaMaterialPresetsV1,
     preparePhaseEWorkbench: (draft, request) =>
       cardSession.controller.preparePhaseEWorkbench(draft, request),
-    submitChoices: async (catalog, choices) => {
+    submitChoices: async (catalog, choices, firstAttachment) => {
+      const superseded = Object.freeze({
+        code: 'semantic-attachment-superseded',
+        detail: 'The current exact connection or imported pattern changed during authoring.',
+      });
       const beforeAuthor = await verifyPatternImportDxfPhaseEAssemblyOrderDocumentBindingV1(
         cardSession,
         scopeKeys[0],
@@ -1082,6 +1100,12 @@ export function resolvePatternImportDxfPhaseEAssemblyOrderSessionV1(
           authorityStatus: 'refused' as const,
           attachmentStatus: 'not-attempted' as const,
           blockers: Object.freeze([beforeAuthor.blocker]),
+        });
+      if (firstAttachment && !firstAttachment.isCurrent())
+        return Object.freeze({
+          authorityStatus: 'refused' as const,
+          attachmentStatus: 'not-attempted' as const,
+          blockers: Object.freeze([superseded]),
         });
       const authored = await cardSession.controller.authorChoices(
         cardSession.draft,
@@ -1117,6 +1141,12 @@ export function resolvePatternImportDxfPhaseEAssemblyOrderSessionV1(
           attachmentStatus: 'blocked' as const,
           blockers: Object.freeze([beforeAttachment.blocker]),
         });
+      if (firstAttachment && !firstAttachment.isCurrent())
+        return Object.freeze({
+          authorityStatus: 'accepted' as const,
+          attachmentStatus: 'blocked' as const,
+          blockers: Object.freeze([superseded]),
+        });
       const binding = cardSession.controller.bindAuthoredAuthorityToConfirmedCommit(
         cardSession.draft,
         cardSession.confirmedApply,
@@ -1138,7 +1168,12 @@ export function resolvePatternImportDxfPhaseEAssemblyOrderSessionV1(
         const attachment = await cardSession.controller.afterConfirmedSave(
           cardSession.draft,
           cardSession.confirmedApply,
-          beforeAttachment.evidence,
+          firstAttachment
+            ? {
+                ...beforeAttachment.evidence,
+                firstAttachmentSavedRowRevision: firstAttachment.savedRowRevision,
+              }
+            : beforeAttachment.evidence,
         );
         return projectPatternImportDxfPhaseEAssemblyOrderAttachmentResultV1(attachment);
       } catch (error) {
@@ -1737,6 +1772,20 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     savedProjection,
     selectedSeamKeys,
   ]);
+  const [durableDesktop, setDurableDesktop] = useState<Readonly<{
+    key: string;
+    geometry: Pick<
+      Extract<PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1, { ok: true }>,
+      'catalog' | 'projection'
+    >;
+  }> | null>(null);
+  const currentDurableDesktop =
+    durableDesktop &&
+    durableDesktop.key === durableReloadBinding?.key &&
+    durableDesktop.geometry.catalog.canonicalSha256 ===
+      exactNBoundarySession?.current.catalogCanonicalSha256
+      ? durableDesktop.geometry
+      : null;
   const [durableReloadRetry, setDurableReloadRetry] =
     useState<PatternImportDxfPhaseEDurableReloadRetryStateV1 | null>(null);
   const durableReloadRetryRef = useRef(durableReloadRetry);
@@ -1745,7 +1794,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   useEffect(() => {
     const current = durableReloadRetryRef.current;
     const next =
-      !durableReloadBinding || exactNBoundarySession
+      !durableReloadBinding || currentDurableDesktop
         ? null
         : current?.key === durableReloadBinding.key
           ? current
@@ -1755,10 +1804,10 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
             );
     durableReloadRetryRef.current = next;
     setDurableReloadRetry(next);
-  }, [durableReloadBinding, exactNBoundarySession]);
+  }, [currentDurableDesktop, durableReloadBinding]);
   useEffect(() => {
     if (
-      exactNBoundarySession ||
+      currentDurableDesktop ||
       !durableReloadBinding ||
       !durableReloadRetry ||
       durableReloadRetry.key !== durableReloadBinding.key ||
@@ -1807,20 +1856,51 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         ticket,
       );
     };
-    void preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
-      {
-        techCard: savedCard.data,
-        orderSizeIds,
-        sizeNameById,
-        scopeKey: savedProjection.row.scopeKey,
-        sizeToken: durableReloadBinding.sizeToken,
-        authority: savedAllScopeAuthority,
-        generation,
-      },
-      controller.signal,
-    )
-      .then(async (prepared) => {
-        if (controller.signal.aborted) return;
+    const prepare = (sourceSurface?: 'explicit-native-drawn-sewing') =>
+      preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
+        {
+          techCard: savedCard.data,
+          orderSizeIds,
+          sizeNameById,
+          scopeKey: savedProjection.row.scopeKey,
+          sizeToken: durableReloadBinding.sizeToken,
+          authority: savedAllScopeAuthority,
+          generation,
+          ...(sourceSurface ? { sourceSurface } : {}),
+        },
+        controller.signal,
+      );
+    const durable = createPatternImportDxfPhaseEZeroConnectProductionDurableBridgeV1(
+      savedProjection.selectedOperationNumber,
+      exactNApplicationOwner,
+      exactPersistenceCapabilities.authorityAdapter,
+    );
+    const reload = async () => {
+      let prepared = await prepare();
+      const restore = (catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1) =>
+        durable.restore(
+          {
+            schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_DURABLE_RESTORE_REQUEST_V1,
+            row: savedProjection.row,
+            selectedOperationNumber: savedProjection.selectedOperationNumber,
+            catalog,
+          },
+          controller.signal,
+        );
+      let restored = prepared.ok ? await restore(prepared.catalog) : null;
+      // Saved V4–V7 select the exact catalog by digest. Legacy cut catalogs retain priority;
+      // only a verified container's catalog mismatch can select the native sewing surface.
+      if (restored?.blocker?.code === 'durable-restore-catalog-mismatch') {
+        prepared = await prepare('explicit-native-drawn-sewing');
+        restored = prepared.ok ? await restore(prepared.catalog) : null;
+      }
+      if (controller.signal.aborted) return;
+      return { prepared, restored };
+    };
+    void reload()
+      .then((result) => {
+        if (!result) return;
+        const { prepared, restored } = result;
         if (!prepared.ok) {
           publishBlocker({
             code: 'durable-restore-prepare-blocked',
@@ -1829,36 +1909,26 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
           });
           return;
         }
-        const durable = createPatternImportDxfPhaseEZeroConnectProductionDurableBridgeV1(
-          savedProjection.selectedOperationNumber,
-          exactNApplicationOwner,
-          exactPersistenceCapabilities.authorityAdapter,
-        );
-        const restored = await durable.restore(
-          {
-            schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_DURABLE_RESTORE_REQUEST_V1,
-            row: savedProjection.row,
-            selectedOperationNumber: savedProjection.selectedOperationNumber,
-            catalog: prepared.catalog,
-          },
-          controller.signal,
-        );
-        if (restored.ok) {
+        if (restored?.ok) {
           const restoredValidationKey = patternImportDxfProductExactNSessionValidationKeyV1(
             restored.session,
           );
+          setDurableDesktop({
+            key: durableReloadBinding.key,
+            geometry: { catalog: prepared.catalog, projection: prepared.projection },
+          });
           durableRestoredValidationKeyRef.current = restoredValidationKey;
           setValidatedExactNSessionKey(restoredValidationKey);
           completePatternImportDxfPhaseEDurableRestoreAttemptV1(
             durableRestoreAttemptRef.current,
             ticket,
           );
-        } else
+        } else if (restored)
           publishBlocker({
             code: restored.blocker.code,
             detail:
               restored.blocker.code === 'durable-restore-sidecar-missing'
-                ? 'No durable exact connection is saved yet. Direct Connect cannot modify this existing legacy one-seam operation safely; remove it and rebuild it from the 2D table.'
+                ? 'No exact connection metadata is saved for this operation.'
                 : restored.blocker.detail,
             retryable: restored.blocker.code === 'durable-restore-failed',
           });
@@ -1884,8 +1954,8 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       );
     };
   }, [
+    currentDurableDesktop,
     exactNApplicationOwner,
-    exactNBoundarySession,
     exactPersistenceCapabilities,
     durableReloadBinding,
     durableReloadRetry,
@@ -2293,6 +2363,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         stitchEditCapabilities={stitchEditCapabilities}
         onEditStitchField={onEditStitchField}
         exactNSession={exactNBoundarySession}
+        exactNDesktop={currentDurableDesktop}
         exactNApplicationOwner={exactNApplicationOwner}
         operationRouteBlocker={
           selectedSeamKeys.length > 2 && !exactNBoundarySession

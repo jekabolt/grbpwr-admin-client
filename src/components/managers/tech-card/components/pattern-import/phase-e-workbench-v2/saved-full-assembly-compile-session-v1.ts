@@ -5,7 +5,10 @@ import {
 } from 'lib/pattern-import/dxf-product-saved-native-reprocess-owner-v1';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import type { CardDraft, PieceSpec } from 'lib/pattern-import/types';
-import { writeDxfDetailed } from 'lib/pattern-import/write';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_V1,
+  replayPatternImportDxfProductWriterV1,
+} from 'lib/cloth/domain/pattern-import-dxf-product-writer-replay-v1';
 import { buildPatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import { selectPatternImportDxfProductDraftPhaseDSizeV1 } from 'lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1';
 import {
@@ -170,7 +173,7 @@ function link(signal: AbortSignal | undefined, child: AbortController): () => vo
   return () => remove.call(signal, 'abort', cancel);
 }
 /** Descriptor-only, bounded data capture; the authentic source owner/draft reference is handled separately. */
-function capture<T>(input: T): T {
+function capture<T>(input: T, { omitUndefinedFields = false } = {}): T {
   let nodes = 0,
     chars = 0;
   const active = new Set<object>();
@@ -206,6 +209,7 @@ function capture<T>(input: T): T {
       const d = ds[k];
       if (!('value' in d) || !d.enumerable || k === '__proto__')
         fail('invalid-input', 'Input accessors/hidden fields are unsupported.');
+      if (!array && omitUndefinedFields && d.value === undefined) continue;
       Object.defineProperty(out, k, {
         value: copy(d.value, depth + 1),
         enumerable: true,
@@ -610,53 +614,62 @@ export function createSavedFullAssemblyCompileSessionV1(): SavedFullAssemblyComp
           fail('writer-replay-unavailable', 'Exact retained writer replay is required.');
         const scope = scopes[0],
           replay = scope.writerReplay!;
-        const date = new Date(replay.createdAt);
+        const reconstruction = source.reconstruction;
         if (
-          !Number.isFinite(date.getTime()) ||
-          date.toISOString() !== replay.createdAt ||
           replay.job.techCardId !== source.row.techCardId ||
-          replay.job.scope.scopeKey !== source.row.scopeKey
+          (reconstruction &&
+            (reconstruction.kind !== 'foreign-saved-dxf' ||
+              reconstruction.originalSourceSha256 !== source.row.sha256))
         )
-          fail('writer-replay-mismatch', 'Writer clock/card/scope differs.');
-        const written = writeDxfDetailed(replay.job, { now: () => new Date(date.getTime()) });
-        check();
-        // The existing saved/foreign owners hash the exact Latin-1 DXF byte representation.
-        const writtenBytes = Uint8Array.from(written.dxfText, (c) => {
-          const value = c.charCodeAt(0);
-          if (value > 255)
-            fail('writer-replay-mismatch', 'Writer output is not byte-preserving Latin-1.');
-          return value;
-        });
-        const writerSha256 = await stage(() => hash(writtenBytes));
-        if (
-          (source.reconstruction
-            ? source.reconstruction.kind !== 'foreign-saved-dxf' ||
-              source.reconstruction.originalSourceSha256 !== source.row.sha256 ||
-              writerSha256 !== source.reconstruction.canonicalWriterSha256
-            : writerSha256 !== source.row.sha256 ||
-              writtenBytes.byteLength !== source.row.sizeBytes) ||
-          canonical(written.manifest) !== canonical(scope.manifest)
-        )
-          fail(
-            'writer-replay-mismatch',
-            'Fresh writer bytes/size/manifest differ from saved source.',
-          );
-        const writerManifestSha256 = await stage(() =>
-          hash(encoder.encode(canonical(written.manifest))),
+          fail('writer-replay-mismatch', 'Writer card or original source differs.');
+        const writer = await stage(() =>
+          replayPatternImportDxfProductWriterV1({
+            schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_V1,
+            replay,
+            finalManifest: scope.manifest,
+            expected: {
+              scopeKey: source.row.scopeKey,
+              exportSha256: reconstruction?.canonicalWriterSha256 ?? source.row.sha256,
+            },
+          }),
         );
-        const allPieces = writerPieces(draft);
+        if (!writer.ok) fail('writer-replay-mismatch', writer.blockers[0].detail);
+        if (!reconstruction && writer.receipt.byteLength !== source.row.sizeBytes)
+          fail('writer-replay-mismatch', 'Fresh writer byte length differs from the saved source.');
+        const { exportSha256: writerSha256, byteLength: writerByteLength } = writer.receipt;
+        const writerManifestSha256 = await stage(() =>
+          hash(encoder.encode(canonical(scope.manifest))),
+        );
+        // Replay verified the complete file. The handoff must contain exactly the piece/size
+        // pairs in the freshly selected Phase-D carrier. Worker records can carry undefined
+        // optional values, while the source-path transport expects absent optional fields.
+        const selectedPieceIds = new Set(selection.selection.pieceIds);
+        const selectedPieces = capture(
+          writerPieces(draft)
+            .filter(({ identity }) => selectedPieceIds.has(identity))
+            .map((piece) => ({
+              ...piece,
+              sizes: piece.sizes.filter(
+                ({ sizeToken }) => sizeToken === selection.selection.sizeToken,
+              ),
+            })),
+          { omitUndefinedFields: true },
+        );
         const carrier = await stage(() =>
           buildDxfPipelineSourcePathCarrierV2({
             schemaVersion: DXF_PIPELINE_SOURCE_PATH_CARRIER_REQUEST_V2,
             source: selection.phaseD.source,
             contours: selection.phaseD.contours,
-            pieces: allPieces,
+            pieces: selectedPieces,
             pipeline: selection.pipeline,
             sourceSha256: selection.phaseD.sourceSha256,
           }),
         );
         if (!carrier.ok)
-          fail('source-path-binding-blocked', carrier.blockers.map((b) => b.detail).join('; '));
+          fail(
+            'source-path-binding-blocked',
+            carrier.blockers.map(({ field, detail }) => `${field}: ${detail}`).join('; '),
+          );
         const nativeExpected = {
           sourceFileId: source.sourceFileId,
           sourceSha256: source.row.sha256,
@@ -675,7 +688,7 @@ export function createSavedFullAssemblyCompileSessionV1(): SavedFullAssemblyComp
         const projected = consumeDxfProductPhaseDNativeStraightEdgesV3(bound.owner, nativeExpected);
         if (!projected.ok) fail('native-binding-blocked', projected.blockers[0].detail);
         const native = projected.projection;
-        const m = written.manifest;
+        const m = scope.manifest;
         const manifest: PatternImportDxfManifestBridgeViewV1 = {
           v: m.v,
           generator: m.generator,
@@ -710,7 +723,7 @@ export function createSavedFullAssemblyCompileSessionV1(): SavedFullAssemblyComp
           sizeToken: p.sizeToken,
         }));
         const digests = await stage(() =>
-          computePatternImportDxfBridgeBindingDigestsV1(manifest, allPieces, selections),
+          computePatternImportDxfBridgeBindingDigestsV1(manifest, selectedPieces, selections),
         );
         if (!digests.ok) fail('handoff-binding-blocked', digests.errors.join('; '));
         const unsigned = {
@@ -771,7 +784,7 @@ export function createSavedFullAssemblyCompileSessionV1(): SavedFullAssemblyComp
             sourceFileId: source.sourceFileId,
             pipeline: selection.pipeline,
             manifest,
-            pieces: allPieces,
+            pieces: selectedPieces,
             binding: { ...unsigned, artifactBindingSha256: binding.artifactBindingSha256 },
             physicalSurface: nativeSewing
               ? intent.physicalSurface
@@ -935,7 +948,7 @@ export function createSavedFullAssemblyCompileSessionV1(): SavedFullAssemblyComp
             row: source.row,
             sourceFileId: source.sourceFileId,
             writerSha256,
-            writerByteLength: writtenBytes.byteLength,
+            writerByteLength,
             writerManifestSha256,
             sizeSelectionSha256: selection.selection.canonicalSha256,
             authoringCatalogSha256: catalog.catalog.canonicalSha256,

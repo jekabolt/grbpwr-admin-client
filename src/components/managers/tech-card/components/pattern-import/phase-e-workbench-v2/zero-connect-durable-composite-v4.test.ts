@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const codec = vi.hoisted(() => ({
@@ -86,12 +87,16 @@ import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4 } from './co
 import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5 } from './composite-sidecar-v5';
 import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V3 } from 'lib/cloth/domain/pattern-import-dxf-product-composite-sidecar-v3';
 import {
+  PATTERN_IMPORT_DXF_PHASE_E_LINKED_N1_DURABLE_REQUEST_V1,
+  type PatternImportDxfPhaseELinkedN1DurableRequestV1,
   PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_DURABLE_PERSIST_REQUEST_V1,
   createPatternImportDxfPhaseEZeroConnectDurableBridgeV1,
 } from './zero-connect-durable-composite-v4';
 
 const digest = (character: string) => character.repeat(64);
 const bindingId = `zero-connect-binding-v1:${digest('a')}`;
+const currentBytes = new Uint8Array([1, 2, 3]);
+const currentSha = createHash('sha256').update(currentBytes).digest('hex');
 const row = Object.freeze({
   techCardId: 11,
   scopeKey: 'fabric:main',
@@ -148,7 +153,6 @@ function pending() {
 }
 
 function sidecar(mediaType: string = PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4) {
-  const bytes = new Uint8Array([1, 2, 3]);
   return {
     semanticSidecar: {
       techCardId: row.techCardId,
@@ -157,9 +161,9 @@ function sidecar(mediaType: string = PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECA
       savedRowRevision: row.revision,
       cardLockVersion: row.cardLockVersion,
       mediaType,
-      sidecarSha256: digest('e'),
-      byteLength: bytes.byteLength,
-      sidecarBytes: btoa(String.fromCharCode(...bytes)),
+      sidecarSha256: currentSha,
+      byteLength: currentBytes.byteLength,
+      sidecarBytes: btoa(String.fromCharCode(...currentBytes)),
     },
   };
 }
@@ -167,6 +171,9 @@ function sidecar(mediaType: string = PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECA
 function decodedV4(authoringOperationId = bindingId) {
   return {
     ok: true,
+    nestedCompositeV3: {
+      document: { components: [{ kind: 'semantic-product-v1', sha256: currentSha }] },
+    },
     exactNSeam: {
       carrier: {
         bindings: {
@@ -350,6 +357,69 @@ describe('zero-connect durable Composite V4 single-operation policy', () => {
     });
     expect(codec.buildExact.mock.calls[0][0].sides).toEqual(durableSides);
     expect(codec.publish).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves the exact freshly verified Semantic V1 hash on first linked N1 persistence', async () => {
+    const test = rig('application/vnd.grbpwr.pattern-dxf-product-semantic.v1+json');
+    const request: PatternImportDxfPhaseELinkedN1DurableRequestV1 = {
+      schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_LINKED_N1_DURABLE_REQUEST_V1,
+      row,
+      selectedOperationNumber: 7,
+      seamKey: 'seam-side',
+      catalog: { canonicalSha256: digest('c') } as never,
+      sides: gestureSides as PatternImportDxfPhaseELinkedN1DurableRequestV1['sides'],
+      verifiedSemanticSha256: currentSha,
+    };
+    const signal = new AbortController().signal;
+    const mismatch = await test.bridge.persist(
+      { ...request, verifiedSemanticSha256: digest('0') },
+      signal,
+    );
+    expect(mismatch).toMatchObject({
+      ok: false,
+      blocker: { code: 'durable-verified-semantic-mismatch' },
+    });
+    expect(test.execute).not.toHaveBeenCalled();
+    const altered = sidecar('application/vnd.grbpwr.pattern-dxf-product-semantic.v1+json');
+    altered.semanticSidecar.sidecarBytes = btoa(String.fromCharCode(4, 5, 6));
+    test.GetTechCardPatternSemanticSidecar.mockResolvedValueOnce(altered);
+    await expect(test.bridge.persist(request, signal)).resolves.toMatchObject({
+      ok: false,
+      blocker: { code: 'durable-verified-semantic-mismatch' },
+    });
+    expect(test.execute).not.toHaveBeenCalled();
+    test.execute.mockImplementationOnce(async (data) => {
+      codec.restoredCurrent = data.current;
+      return { ok: true, owner: { durable: true } };
+    });
+    await expect(test.bridge.persist(request, signal)).resolves.toMatchObject({ ok: true });
+    expect(test.execute).toHaveBeenCalledTimes(1);
+    expect(codec.buildV4).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedPreviousSidecarSha256: currentSha }),
+      expect.anything(),
+    );
+  });
+
+  it('retries linked N1 through an identical V4 while preserving its nested V1 hash', async () => {
+    const test = rig();
+    const request: PatternImportDxfPhaseELinkedN1DurableRequestV1 = {
+      schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_LINKED_N1_DURABLE_REQUEST_V1,
+      row,
+      selectedOperationNumber: 7,
+      seamKey: 'seam-side',
+      catalog: { canonicalSha256: digest('c') } as never,
+      sides: gestureSides as PatternImportDxfPhaseELinkedN1DurableRequestV1['sides'],
+      verifiedSemanticSha256: currentSha,
+    };
+    const signal = new AbortController().signal;
+    await expect(
+      test.bridge.persist({ ...request, verifiedSemanticSha256: digest('f') }, signal),
+    ).resolves.toMatchObject({
+      ok: false,
+      blocker: { code: 'durable-verified-semantic-mismatch' },
+    });
+    await expect(test.bridge.persist(request, signal)).resolves.toMatchObject({ ok: true });
+    expect(test.execute).not.toHaveBeenCalled();
   });
 
   it('checks caller cancellation again immediately before session publication', async () => {
