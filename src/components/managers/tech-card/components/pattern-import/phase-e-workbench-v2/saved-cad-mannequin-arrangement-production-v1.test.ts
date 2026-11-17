@@ -187,6 +187,7 @@ describe('explicit production mannequin arrangement transaction', () => {
   it('adds empty annotations only for V4 and requires fresh verified V5 before V6', async () => {
     mocks.read.mockResolvedValueOnce(snapshot(4)).mockResolvedValueOnce(snapshot(5, 'saved-v5'));
     const input = request();
+    if (!input.source) throw new Error('The V4 fixture requires a source binding.');
     const sourceFromDesktop = { ...input.source, projection: { sizeToken: 'M' } };
     await saveSavedCadMannequinArrangementV1(
       { ...input, source: sourceFromDesktop },
