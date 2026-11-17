@@ -94,7 +94,7 @@ export type SavedClothFirstAuthoringStateV1 =
       error: string;
     }>;
 
-const EMPTY_BODY_SNAPSHOT = Object.freeze({ status: 'idle', generation: 0 });
+const EMPTY_BODY_SNAPSHOT = Object.freeze({ status: 'idle', generation: 0, blocker: null });
 const EMPTY_DURABLE_SNAPSHOT: SavedGenericDurablePhysicalHostSnapshotV1 | null = null;
 const noopSubscribe = () => () => undefined;
 
