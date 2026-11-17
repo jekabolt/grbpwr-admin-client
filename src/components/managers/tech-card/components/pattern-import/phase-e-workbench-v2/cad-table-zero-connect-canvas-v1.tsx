@@ -119,11 +119,12 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
   };
   const phase = patternImportDxfPhaseECadTableZeroConnectControllerPhaseV1(controller);
   const status = patternImportDxfPhaseECadTableZeroConnectControllerStatusV1(controller);
+  const connectDisabled = disabled || zeroConnectAuthoringHandoff?.status === 'unavailable';
   const selectEdge = (
     segment: PatternImportDxfPhaseECadTableConnectEdgeSegmentV1,
     direction: 'forward' | 'reverse',
   ) => {
-    if (disabled) return;
+    if (connectDisabled) return;
     // The second edge may call the caller-owned form handoff. Keep that side effect out of a
     // functional state updater because Strict Mode is allowed to invoke updater functions twice.
     setController(
@@ -157,7 +158,7 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
       <div className='flex min-h-11 items-center border-b border-borderColor px-1'>
         <PatternImportDxfPhaseECadTableConnectToolControlV1
           phase={phase}
-          disabled={disabled}
+          disabled={connectDisabled}
           onStart={() =>
             setController((current) =>
               startPatternImportDxfPhaseECadTableZeroConnectControllerV1(current, authority),
@@ -233,7 +234,7 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
                       segment,
                     );
                     const [from, to] = segment.pointsMm;
-                    const canSelect = !disabled && controller.session?.status !== 'ready';
+                    const canSelect = !connectDisabled && controller.session?.status !== 'ready';
                     return (
                       <g
                         key={segment.viewKey}
