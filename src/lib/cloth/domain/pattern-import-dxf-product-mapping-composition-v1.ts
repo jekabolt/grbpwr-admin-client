@@ -430,7 +430,7 @@ export async function buildPatternImportDxfProductMappingCompositionV1(
   if (!mapped.ok)
     return blocked(
       'g4f1-mapping-blocked',
-      mapped.blockers.map(({ code, detail }) => `${code}: ${detail}`).join('; '),
+      mapped.blockers.map(({ code, field, detail }) => `${code} at ${field}: ${detail}`).join('; '),
     );
   if (
     mapped.mapping.sourceBinding.sourceFileId !== admitted.plan.sourceFileId ||

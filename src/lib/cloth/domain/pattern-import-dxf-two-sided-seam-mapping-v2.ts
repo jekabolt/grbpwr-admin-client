@@ -246,7 +246,8 @@ type DetachBudget = { nodes: number; properties: number };
  * The lower-level source-path owner rejects every caller alias so that it never has to reason
  * about mutation through shared references. This composition owner therefore projects a fresh
  * descriptor-safe tree and duplicates aliases before crossing that boundary; actual cycles stay
- * invalid and the expansion is bounded.
+ * invalid and the expansion is bounded. The writer's undefined optional object fields are omitted
+ * in the detached JSON representation. Array entries must still be present and valid.
  */
 function detachDescriptorData(
   value: unknown,
@@ -343,13 +344,15 @@ function detachDescriptorData(
         !descriptor.enumerable ||
         !Object.prototype.hasOwnProperty.call(descriptor, 'value') ||
         descriptor.get !== undefined ||
-        descriptor.set !== undefined
+        descriptor.set !== undefined ||
+        key === '__proto__'
       )
         fail(
           'invalid-input',
           `${field}.${key}`,
           'detached source-path field must be an enumerable data property.',
         );
+      if (descriptor.value === undefined) continue;
       output[key] = detachDescriptorData(
         descriptor.value,
         `${field}.${key}`,

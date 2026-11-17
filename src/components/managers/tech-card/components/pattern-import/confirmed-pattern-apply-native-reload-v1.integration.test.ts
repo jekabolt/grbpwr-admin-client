@@ -221,6 +221,19 @@ it.each([[['M']], [['XS', 'S', 'M', 'L', 'XL']]])(
           { x: right, y: top },
           { x: left, y: top },
         ];
+        if (tokens.length > 1) {
+          size.internal.push({
+            kind: 'internal',
+            pts: [
+              { x: left + 15, y: bottom + 15 },
+              { x: left + 25, y: bottom + 16 },
+            ],
+            closed: false,
+            origin: 'operator',
+            ranges: [],
+            confidence: 1,
+          });
+        }
       }
     }
     const input = new File([writeDxfDetailed(job, { embed: null }).dxfText], 'original.dxf');
@@ -315,6 +328,12 @@ it.each([[['M']], [['XS', 'S', 'M', 'L', 'XL']]])(
       const savedSha = await digestFullAssemblyFixture(bytes);
       expect(proof.evidence?.productExportSha256).toBe(savedSha);
       expect(session!.draft.dxfNativeSewingReplay?.replayReady).toBe(true);
+      if (tokens.length > 1) {
+        const internal = session!.draft.scopes[0].writerReplay!.job.pieces[0].sizes[0].internal;
+        expect(
+          internal.some((mark) => Object.hasOwn(mark, 'label') && mark.label === undefined),
+        ).toBe(true);
+      }
       expect(session!.draft.dxfNativeSewingReplay?.pipeline?.contentBinding?.sourceSha256).toBe(
         savedSha,
       );
