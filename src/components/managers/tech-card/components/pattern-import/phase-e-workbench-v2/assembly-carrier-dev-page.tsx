@@ -1,9 +1,10 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { abortableAdminService } from 'api/api';
-import type { TechCardPatternSemanticSidecar } from 'api/proto-http/admin';
+import type { common_Model, TechCardPatternSemanticSidecar } from 'api/proto-http/admin';
 import { resolveModelOpenReferencePreviewInputV1 } from 'components/managers/model/components/model-open-reference-preview-input-v1';
 import { modelCardMannequinInputV1 } from 'components/managers/models/components/model-card-mannequin-input-v1';
 import { createSavedModelDisplayedTriangleBodyFreshQueryReaderV2 } from 'components/managers/models/components/saved-model-displayed-triangle-body-query-session-v2';
+import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import {
   bindingScopes,
   scopeKeyOfBinding,
@@ -335,6 +336,61 @@ function AssemblyCarrierDevCardView({ cardId }: Readonly<{ cardId: number }>) {
   );
 }
 
+function savedModelDiagnosticSummary(model: common_Model) {
+  const input = modelCardMannequinInputV1(model);
+  const resolution = resolveModelOpenReferencePreviewInputV1(input);
+  const validGender =
+    input.gender === 'GENDER_ENUM_FEMALE' ||
+    input.gender === 'GENDER_ENUM_MALE' ||
+    input.gender === 'GENDER_ENUM_UNISEX';
+  return {
+    validGender,
+    resolved: resolution.ok,
+    eligibleInput: validGender && resolution.ok && resolution.diagnostics.length === 0,
+    diagnostics: resolution.diagnostics
+      .slice(0, 24)
+      .map(({ severity, code, canonicalKey }) => ({ severity, code, canonicalKey })),
+  };
+}
+
+const MODEL_DIAGNOSTIC_LIMIT = 100;
+
+function SavedModelDiagnosticInventory() {
+  const { data, isPending, isError } = useAllModels(MODEL_DIAGNOSTIC_LIMIT);
+  const candidates = data?.slice(0, MODEL_DIAGNOSTIC_LIMIT).flatMap((model) => {
+    if (!model.id || !model.updatedAt || !savedModelDiagnosticSummary(model).eligibleInput)
+      return [];
+    return [model.id];
+  });
+  return (
+    <pre
+      className='max-h-[75vh] overflow-auto whitespace-pre-wrap text-micro'
+      aria-label='Saved mannequin inventory'
+    >
+      {bounded({
+        status: isPending ? 'reading' : isError ? 'read-failed' : 'listed',
+        writes: 0,
+        limit: MODEL_DIAGNOSTIC_LIMIT,
+        inspected: data && Math.min(data.length, MODEL_DIAGNOSTIC_LIMIT),
+        eligibleModelIds: candidates,
+      })}
+    </pre>
+  );
+}
+
+function SavedModelInventoryPage() {
+  const [requested, setRequested] = useState(false);
+  return (
+    <div className='space-y-4 p-4'>
+      <Text component='h1'>Saved mannequin inventory</Text>
+      <Button type='button' disabled={requested} onClick={() => setRequested(true)}>
+        Inspect saved models
+      </Button>
+      {requested ? <SavedModelDiagnosticInventory /> : null}
+    </div>
+  );
+}
+
 function SavedModelDiagnostic({ modelId }: Readonly<{ modelId: number }>) {
   const queryClient = useQueryClient();
   const [output, setOutput] = useState('No request made.');
@@ -354,25 +410,7 @@ function SavedModelDiagnostic({ modelId }: Readonly<{ modelId: number }>) {
       const model = await readFresh(modelId, current.signal);
       if (current.signal.aborted) return;
       if (model?.id !== modelId) throw new Error('Model read failed.');
-      const input = modelCardMannequinInputV1(model);
-      const resolution = resolveModelOpenReferencePreviewInputV1(input);
-      setOutput(
-        bounded({
-          ...report,
-          validGender:
-            input.gender === 'GENDER_ENUM_FEMALE' ||
-            input.gender === 'GENDER_ENUM_MALE' ||
-            input.gender === 'GENDER_ENUM_UNISEX',
-          resolved: resolution.ok,
-          diagnostics: resolution.diagnostics
-            .slice(0, 24)
-            .map(({ severity, code, canonicalKey }) => ({
-              severity,
-              code,
-              canonicalKey,
-            })),
-        }),
-      );
+      setOutput(bounded({ ...report, ...savedModelDiagnosticSummary(model) }));
     } catch {
       if (!current.signal.aborted) setOutput(bounded({ ...report, status: 'model-read-failed' }));
     } finally {
@@ -400,6 +438,7 @@ export function AssemblyCarrierDevPage() {
   const [params] = useSearchParams();
   if (!import.meta.env.DEV) return null;
   const model = params.get('model');
+  if (model === 'eligible') return <SavedModelInventoryPage />;
   if (model !== null) {
     const modelId = Number(model);
     if (!Number.isSafeInteger(modelId) || modelId < 1)
