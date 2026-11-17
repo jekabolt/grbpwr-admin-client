@@ -9,6 +9,7 @@ import {
   type PatternImportDxfProductPhaseEAuthoringCatalogV1,
 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import { selectPatternImportDxfProductDraftPhaseDSizeV1 } from 'lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1';
+import { capturePatternImportDxfProductCurrentSavedReplayV1 } from 'lib/cloth/domain/pattern-import-dxf-product-commit-replay-v1';
 import type { DxfProductPhaseDSizeSelectionResultV1 } from 'lib/pattern-import/dxf-product-phase-d-size-selection-v1';
 import {
   createDxfProductSavedForeignReprocessOwnerV1,
@@ -495,12 +496,26 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
           'A newer zero-operation preparation superseded this saved-row generation.',
         ),
       );
+    const pattern = request.techCard?.techCard?.patterns?.find(
+      ({ lineKey }) => lineKey === authoritative.row.patternLineKey,
+    );
+    const savedReplay =
+      request.sourceSurface && reprocessed.ok && pattern
+        ? capturePatternImportDxfProductCurrentSavedReplayV1(
+            reprocessed,
+            Number(pattern.sizeId ?? 0),
+          )
+        : null;
     const authoringAuthority = capturePatternImportDxfPhaseEZeroConnectPreparedAuthorityV1({
       row: authoritative.row,
-      draft,
+      draft:
+        savedReplay && nativeSewingReplay
+          ? { ...draft, dxfNativeSewingReplay: nativeSewingReplay }
+          : draft,
       selection: selection.selection,
       catalog: catalogResult.catalog,
       generation: request.generation,
+      ...(savedReplay ? { savedReplay } : {}),
     });
     if (!authoringAuthority)
       return blockedPreparation(

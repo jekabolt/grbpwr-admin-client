@@ -1,6 +1,6 @@
 import type { common_TechCard } from 'api/proto-http/admin';
 import { describe, expect, it, vi } from 'vitest';
-import { toWire, type StoredPose, type StoredSeam } from 'lib/seams';
+import { fromWire, toWire, type StoredPose, type StoredSeam } from 'lib/seams';
 
 import { buildPatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import { selectPatternImportDxfProductDraftPhaseDSizeV1 } from 'lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1';
@@ -1025,6 +1025,60 @@ describe('existing saved one-physical-seam operation exact rebind', () => {
         freshCard,
       }),
     ).toMatchObject({ ok: false, blocker: { code: 'existing-linked-n1-readback-mismatch' } });
+  });
+
+  it('verifies a metadata-only continuation only for the exact saved anchors at the capture lock', async () => {
+    const fixture = await existingLinkedN1Fixture();
+    const { savedCard, selectedIndex, liveOperations } = fixture;
+    savedCard.techCard!.operations![selectedIndex]!.seamKeys = [fixture.seam.seamKey];
+    liveOperations[selectedIndex]!.seamKeys = [fixture.seam.seamKey];
+    const capture = (seam: StoredSeam) => {
+      savedCard.seams = [toWire(seam)] as never;
+      const stored = fromWire(savedCard.seams![0]!);
+      if (!stored) throw new Error('Expected a persisted exact seam.');
+      const captured = capturePatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1({
+        request: fixture.request,
+        techCardId: fixture.prepared.techCardId,
+        selectedIndex,
+        liveOperations,
+        savedCard,
+        currentRows: [stored],
+        seamWriterCardId: fixture.prepared.techCardId,
+        seamWriterLockVersion: savedCard.lockVersion,
+      });
+      if (!captured.ok) throw new Error(captured.blocker.detail);
+      return captured.pending;
+    };
+    const prepared = preparePatternImportDxfPhaseEZeroConnectExistingLinkedN1RebindV1(
+      capture(fixture.seam),
+      'reversed',
+      { nameOf: (key) => key, grainDeg: null },
+    );
+    if (!prepared.ok) throw new Error(prepared.blocker.detail);
+    const seam = prepared.receipt.storedSeam;
+    const pending = capture(seam);
+    const verify = (card: typeof savedCard) =>
+      verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV1({
+        mode: 'resume-metadata',
+        pending,
+        expectedSeam: seam,
+        freshCard: card,
+      });
+    expect(verify(savedCard)).toMatchObject({
+      ok: true,
+      cardLockVersion: savedCard.lockVersion,
+      seamKey: fixture.seam.seamKey,
+    });
+    expect(verify({ ...savedCard, lockVersion: savedCard.lockVersion! + 1 }).ok).toBe(false);
+    const edited = structuredClone(savedCard);
+    edited.seams![0]!.sideB!.parts![0]!.lenMm! += 1;
+    expect(verify(edited).ok).toBe(false);
+    const unanchored = structuredClone(savedCard);
+    unanchored.seams![0]!.anchoredSize = '';
+    expect(verify(unanchored).ok).toBe(false);
+    expect(
+      readPatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1(pending, 'reversed'),
+    ).toBeUndefined();
   });
 
   it('releases a not-attempted writer so the user can cancel or retry safely', async () => {

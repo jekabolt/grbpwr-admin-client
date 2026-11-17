@@ -356,9 +356,18 @@ it.each([[['M']], [['XS', 'S', 'M', 'L', 'XL']]])(
           dxfSha256: savedSha,
         },
       });
-      await verifyLinkedN1FromGenuineImportFixture(card, session!, service);
-      saved.fabricPurpose = 'TECH_CARD_BOM_PURPOSE_LINING';
-      expect(await session!.loadDocumentEvidence('main')).toMatchObject({ ok: false });
+      await verifyLinkedN1FromGenuineImportFixture(
+        card,
+        session!,
+        service,
+        async () => {
+          saved.fabricPurpose = 'TECH_CARD_BOM_PURPOSE_LINING';
+          expect(await session!.loadDocumentEvidence('main')).toMatchObject({ ok: false });
+          saved.fabricPurpose = fabricPurpose;
+          lifecycle.dispose();
+        },
+        new Map(sizes.map(({ sizeId, name }) => [sizeId, name])),
+      );
     } finally {
       lifecycle.dispose();
       upload.mockRestore();

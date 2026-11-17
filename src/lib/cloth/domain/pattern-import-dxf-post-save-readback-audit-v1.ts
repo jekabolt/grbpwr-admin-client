@@ -538,6 +538,7 @@ function parseReadback(
   value: unknown,
   expected: PatternImportDxfPostSaveCardExpectationV1,
   writer: Readonly<{ writer: Readonly<{ exportSha256: string }> }>,
+  lock: 'advanced' | 'current' = 'advanced',
 ): PatternImportDxfPostSaveCardObservationV1 {
   const response = safeRecord(value, 'readback');
   const card = safeRecord(required(response, 'techCard', 'readback'), 'readback.techCard');
@@ -551,7 +552,13 @@ function parseReadback(
     required(card, 'lockVersion', 'readback.techCard'),
     'readback.techCard.lockVersion',
   );
-  if (lockVersion <= expected.previousLockVersion)
+  if (lock === 'current' && lockVersion !== expected.previousLockVersion)
+    fail(
+      'lock-version-not-advanced',
+      'readback.techCard.lockVersion',
+      'The saved card lock moved.',
+    );
+  if (lock === 'advanced' && lockVersion <= expected.previousLockVersion)
     fail(
       'lock-version-not-advanced',
       'readback.techCard.lockVersion',
@@ -724,6 +731,7 @@ export async function verifyPatternImportDxfPostSaveCardV1(
   expectationValue: unknown,
   writerExportSha256: string,
   getTechCard: PatternImportDxfGetTechCardReaderV1,
+  lock: 'advanced' | 'current' = 'advanced',
 ): Promise<PatternImportDxfPostSaveCardVerificationResultV1> {
   if (cardVerificationClaimed)
     return deepFreeze({
@@ -757,9 +765,14 @@ export async function verifyPatternImportDxfPostSaveCardV1(
     }
     return deepFreeze({
       ok: true as const,
-      observation: parseReadback(rawReadback, expectation, {
-        writer: { exportSha256: writerExportSha256 },
-      }),
+      observation: parseReadback(
+        rawReadback,
+        expectation,
+        {
+          writer: { exportSha256: writerExportSha256 },
+        },
+        lock,
+      ),
       blockers: [] as const,
     });
   } catch (error) {

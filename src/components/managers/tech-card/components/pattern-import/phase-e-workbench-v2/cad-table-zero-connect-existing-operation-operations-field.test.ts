@@ -122,10 +122,36 @@ describe('existing linked one-physical-seam OperationsField owner', () => {
     expect(action).toContain('owner.cancel(pending)');
     expect(action).toContain("{result ? 'Close' : 'Cancel'}");
     expect(clear).toContain('canReleasePatternImportDxfPhaseEZeroConnectExistingLinkedN1V1');
-    expect(owner).toContain('await atomicWrite.catch(');
+    expect(owner).toContain('await atomicWrite?.catch(');
     expect(
       owner.indexOf('verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV1'),
     ).toBeLessThan(owner.indexOf('finalizePatternImportDxfPhaseEExistingLinkedN1V1({'));
     expect(owner).toContain('persist: durable.persist');
+  });
+
+  it('routes the explicit saved seam metadata action to same-lock readback outside the seam writer', () => {
+    const action = between(
+      'function ZeroConnectExistingLinkedN1Action(',
+      'function ZeroConnectExistingOperationAction(',
+    );
+    const routing = between(
+      'const targetsExistingLinkedN1Operation =',
+      'if (targetsExistingEmptyOperation) {',
+    );
+    const owner = between(
+      'const zeroConnectExistingLinkedN1Owner:',
+      '// Phase two is deliberately a separate, user-triggered boundary.',
+    );
+    expect(action).toContain('Save pattern metadata');
+    expect(action).toContain("owner.rebind(pending, direction, profile, 'resume-metadata')");
+    expect(routing).toContain('resolvePatternImportDxfPhaseELinkedN1MetadataResumeDirectionV1');
+    const branch = owner.slice(
+      owner.indexOf('if (resumeMetadata) {'),
+      owner.indexOf('executePatternImportDxfPhaseEZeroConnectExistingLinkedN1WriteOnceV1('),
+    );
+    expect(branch).toContain('refreshed.authority.row.cardLockVersion');
+    expect(branch).toMatch(/\}\s*else\s*atomicWrite\s*=/);
+    expect(owner).toContain("{ ...readbackInput, mode: 'resume-metadata' }");
+    expect(owner).toContain('metadataResumeAuthority,');
   });
 });

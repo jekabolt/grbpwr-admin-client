@@ -19,6 +19,7 @@ import {
 import type { StoredSeam } from 'lib/seams';
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import type { PatternImportDxfProductPhaseEAuthoringChoicesV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-producer-v1';
+import type { PatternImportDxfProductVerifiedSavedReplayV1 } from 'lib/cloth/domain/pattern-import-dxf-product-commit-replay-v1';
 import {
   PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_CARRIER_V1,
   type AssemblyContext,
@@ -977,7 +978,7 @@ export function projectPatternImportDxfPhaseEAssemblyOrderAttachmentResultV1(
 }
 
 async function verifyPatternImportDxfPhaseEAssemblyOrderDocumentBindingV1(
-  cardSession: PatternImportDxfPhaseECardSessionV1,
+  cardSession: Pick<PatternImportDxfPhaseECardSessionV1, 'loadDocumentEvidence'>,
   scopeKey: string,
   catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1,
   choices: PatternImportDxfProductPhaseEAuthoringChoicesV1,
@@ -1033,9 +1034,17 @@ async function verifyPatternImportDxfPhaseEAssemblyOrderDocumentBindingV1(
   }
 }
 
+export type PatternImportDxfPhaseECurrentSavedAssemblyOrderSessionV1 = Readonly<
+  Omit<PatternImportDxfPhaseECardSessionV1, 'confirmedApply'> & {
+    savedReplay: PatternImportDxfProductVerifiedSavedReplayV1;
+  }
+>;
+
 export function resolvePatternImportDxfPhaseEAssemblyOrderSessionV1(
   source: PatternImportDxfPhaseEAssemblyOrderSourceV1,
-  cardSession: PatternImportDxfPhaseECardSessionV1,
+  cardSession:
+    | PatternImportDxfPhaseECardSessionV1
+    | PatternImportDxfPhaseECurrentSavedAssemblyOrderSessionV1,
 ): PatternImportDxfPhaseEAssemblyOrderSessionResolutionV1 {
   const seam = source.assembly.seams.find(
     (candidate) => 'seamKey' in candidate && candidate.seamKey === source.selectedSeamKey,
@@ -1147,6 +1156,91 @@ export function resolvePatternImportDxfPhaseEAssemblyOrderSessionV1(
           attachmentStatus: 'blocked' as const,
           blockers: Object.freeze([superseded]),
         });
+      if ('savedReplay' in cardSession) {
+        const unavailable = (blocker: PatternImportDxfPhaseEAssemblyOrderSubmitBlockerV1) => ({
+          authorityStatus: 'accepted' as const,
+          attachmentStatus: 'blocked' as const,
+          blockers: [blocker],
+        });
+        if (!firstAttachment)
+          return unavailable({
+            code: 'current-saved-first-attachment-required',
+            detail:
+              'Metadata recovery requires the exact current saved row and its first attachment CAS.',
+          });
+        try {
+          const [
+            { adminService },
+            { composePatternImportDxfProductSemanticSidecarPersistenceV1 },
+            mapping,
+            { selectPatternImportDxfProductDraftPhaseDSizeV1 },
+            { createPatternImportNativeSewingAuthoringViewV1 },
+          ] = await Promise.all([
+            import('api/api'),
+            import(
+              'lib/cloth/domain/pattern-import-dxf-product-semantic-sidecar-live-composition-v1'
+            ),
+            import('lib/cloth/domain/pattern-import-dxf-product-mapping-composition-v1'),
+            import('lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1'),
+            import('../native-sewing-authoring-view-v1'),
+          ]);
+          const nativeDraft = createPatternImportNativeSewingAuthoringViewV1(
+            cardSession.draft,
+            cardSession.draft.dxfNativeSewingReplay,
+            beforeAttachment.evidence.dxfSha256,
+          );
+          const selection = await selectPatternImportDxfProductDraftPhaseDSizeV1(
+            nativeDraft,
+            freshSession.scopeKey,
+            freshSession.sizeToken,
+          );
+          if (!selection.ok) return unavailable(selection.blockers[0]);
+          if (!firstAttachment.isCurrent()) return unavailable(superseded);
+          const result = await composePatternImportDxfProductSemanticSidecarPersistenceV1(
+            {
+              GetTechCard: (request) => adminService.GetTechCard(request),
+              GetTechCardPatternSemanticSidecar: (request) =>
+                adminService.GetTechCardPatternSemanticSidecar(request),
+              PutTechCardPatternSemanticSidecar: (request) => {
+                if (!firstAttachment.isCurrent()) throw new DOMException('Aborted', 'AbortError');
+                return adminService.PutTechCardPatternSemanticSidecar(request);
+              },
+            },
+            {
+              schemaVersion: mapping.PATTERN_IMPORT_DXF_PRODUCT_MAPPING_COMPOSITION_V1,
+              scopeKey: freshSession.scopeKey,
+              draft: nativeDraft,
+              savedReplay: cardSession.savedReplay,
+              selection: selection.selection,
+              intent: authored.compile.intent,
+              expectedSavedRow: {
+                ...beforeAttachment.evidence,
+                firstAttachmentSavedRowRevision: firstAttachment.savedRowRevision,
+              },
+            },
+          );
+          if (!firstAttachment.isCurrent()) return unavailable(superseded);
+          return result.ok
+            ? {
+                authorityStatus: 'accepted' as const,
+                attachmentStatus: 'verified' as const,
+                blockers: [],
+                verifiedAttachment: {
+                  cardLockVersion: result.evidence.cardLockVersion,
+                  sidecarSha256: result.evidence.sidecarSha256,
+                },
+              }
+            : unavailable(result.blockers[0]);
+        } catch (error) {
+          return unavailable({
+            code: 'current-saved-attachment-failed',
+            detail:
+              error instanceof Error
+                ? error.message
+                : 'The exact saved pattern metadata could not be attached.',
+          });
+        }
+      }
       const binding = cardSession.controller.bindAuthoredAuthorityToConfirmedCommit(
         cardSession.draft,
         cardSession.confirmedApply,

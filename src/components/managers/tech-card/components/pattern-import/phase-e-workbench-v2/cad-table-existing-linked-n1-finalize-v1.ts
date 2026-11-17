@@ -1,3 +1,4 @@
+import { adminService } from 'api/api';
 import type { common_TechCard } from 'api/proto-http/admin';
 import {
   buildPatternImportDxfProductPhaseEAssemblyChoicesV1,
@@ -5,22 +6,33 @@ import {
   type PatternImportDxfProductPhaseEMaterialRevisionOptionV1,
 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import { fromWire, type StoredSeam } from 'lib/seams';
+import { rollGoodsScopes } from '../../piece-block-refs';
 
 import {
   buildPatternImportDxfPhaseEAssemblyOrderSourceV1,
   preparePatternImportDxfPhaseEAssemblyOrderEntryV1,
   resolvePatternImportDxfPhaseEAssemblyOrderSessionV1,
   runPatternImportDxfPhaseEAssemblyOrderSerializedPrepareV1,
+  type PatternImportDxfPhaseECurrentSavedAssemblyOrderSessionV1,
 } from '../phase-e-workbench/assembly-order-entry';
 import {
   readPatternImportDxfPhaseECardSessionV1,
   type PatternImportDxfPhaseECardSessionV1,
 } from '../phase-e-workbench-card-session-v1';
+import {
+  createPatternImportDxfProductSidecarCardControllerV1,
+  PATTERN_IMPORT_DXF_PRODUCT_SIDECAR_CARD_CONTROLLER_V1,
+} from '../product-semantic-sidecar-card-controller-v1';
+import {
+  readPatternImportDxfPhaseEZeroConnectCurrentSavedReplayV1,
+  type PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1,
+} from './cad-table-zero-connect-phase-e-authority-v1';
 import type {
   PatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1,
   PatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackResultV1,
 } from './cad-table-zero-connect-existing-linked-operation-rebind-v1';
 import { resolveSavedFullAssemblyDiagnosticProfileV1 } from './saved-full-assembly-diagnostic-profile-v1';
+import { resolvePatternImportDxfPhaseESavedPatternRowV1 } from './saved-pattern-row-resolver-v1';
 import {
   PATTERN_IMPORT_DXF_PHASE_E_LINKED_N1_DURABLE_REQUEST_V1,
   type PatternImportDxfPhaseELinkedN1DurableRequestV1,
@@ -45,6 +57,8 @@ type PreparedContext = Readonly<{
   direction: 'same' | 'reversed';
   readback: Readback;
   freshCard: common_TechCard;
+  /** Same-lock proof from the existing exact saved DXF refresh, for an already-saved seam. */
+  metadataResumeAuthority?: PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1;
   isCurrent: () => boolean;
   signal: AbortSignal;
   persist: (
@@ -54,7 +68,7 @@ type PreparedContext = Readonly<{
 }>;
 
 type RetainedAttachment = Readonly<{
-  session: PatternImportDxfPhaseECardSessionV1;
+  sessionIdentity: object;
   direction: 'same' | 'reversed';
   profileId: string;
   profileRevision: string;
@@ -71,15 +85,56 @@ function blocked(code: string, detail: string): Result {
   return { ok: false, blocker: { code, detail } };
 }
 
-/**
- * Re-open native authoring against the new seam-write lock. The old gesture provides the exact
- * IDs and ordered span only; the genuine registered import provides the unchanged Apply receipt.
- */
+function resolveMetadataResumeDocument(
+  pending: PatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1,
+  resume: PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1,
+  freshCard: common_TechCard,
+) {
+  const original = pending.request.authoringAuthority.row;
+  const replay = readPatternImportDxfPhaseEZeroConnectCurrentSavedReplayV1(resume);
+  const insert = freshCard.techCard;
+  const current = resolvePatternImportDxfPhaseESavedPatternRowV1({
+    techCardId: pending.target.techCardId,
+    cardLockVersion: original.cardLockVersion,
+    patterns: insert?.patterns ?? [],
+    aliases: insert?.pieceDxfAliases?.items ?? [],
+    scopes: rollGoodsScopes(insert?.bomItems ?? []),
+    pieceLineKeys: pending.target.orderedInputKeys,
+  });
+  const patterns = insert?.patterns?.filter(({ lineKey }) => lineKey === original.patternLineKey);
+  const pattern = patterns?.length === 1 ? patterns[0] : undefined;
+  if (
+    !replay ||
+    !current.ok ||
+    (Object.keys(original) as (keyof typeof original)[]).some(
+      (key) => resume.row[key] !== original[key] || current.row[key] !== original[key],
+    ) ||
+    !pattern?.version ||
+    !Number.isSafeInteger(pattern.version) ||
+    pattern.version < 1 ||
+    Number(pattern.sizeId ?? 0) !== replay.savedReplay.evidence.patternSizeId
+  )
+    return null;
+  return {
+    replay,
+    evidence: Object.freeze({
+      techCardId: original.techCardId,
+      scopeKey: original.scopeKey,
+      patternLineKey: original.patternLineKey,
+      dxfSha256: original.sha256,
+      patternVersion: pattern.version,
+      cardLockVersion: current.row.cardLockVersion,
+    }),
+  };
+}
+
+/** Reprepare from a confirmed import or an independently verified exact saved DXF. */
 export async function finalizePatternImportDxfPhaseEExistingLinkedN1V1(
   context: PreparedContext,
 ): Promise<Result> {
   const { pending, profile, direction, readback, freshCard, signal } = context;
   const currentSession = readPatternImportDxfPhaseECardSessionV1(pending.target.techCardId);
+  const resume = context.metadataResumeAuthority;
   const isCurrent = () =>
     !signal.aborted &&
     context.isCurrent() &&
@@ -90,7 +145,7 @@ export async function finalizePatternImportDxfPhaseEExistingLinkedN1V1(
       'The current card or exact connection changed while saving the pattern metadata.',
     );
   if (!isCurrent()) return superseded();
-  if (!currentSession)
+  if (!resume && !currentSession)
     return blocked(
       'existing-linked-n1-import-required',
       'Apply the current DXF through Patterns before saving the first exact connection.',
@@ -109,17 +164,27 @@ export async function finalizePatternImportDxfPhaseEExistingLinkedN1V1(
     readback.seamKey !== selectedSeamKey ||
     freshCard.id !== pending.target.techCardId ||
     freshCard.lockVersion !== readback.cardLockVersion ||
-    readback.cardLockVersion <= pending.target.capturedCardLockVersion
+    (resume
+      ? pending.metadataResumeDirection !== direction ||
+        readback.cardLockVersion !== pending.target.capturedCardLockVersion
+      : readback.cardLockVersion <= pending.target.capturedCardLockVersion)
   )
     return blocked(
       'existing-linked-n1-finalize-readback-mismatch',
       'The selected operation did not return a current saved single-seam connection.',
     );
 
+  const recovered = resume ? resolveMetadataResumeDocument(pending, resume, freshCard) : null;
+  if (resume && !recovered)
+    return blocked(
+      'existing-linked-n1-finalize-source-moved',
+      'The saved pattern no longer matches the exact native connection.',
+    );
+  const sessionIdentity = resume ? pending.request.authoringAuthority : currentSession!;
   const retained = retainedAttachments.get(pending);
   if (retained) {
     if (
-      retained.session !== currentSession ||
+      retained.sessionIdentity !== sessionIdentity ||
       retained.direction !== direction ||
       retained.request.row.cardLockVersion !== readback.cardLockVersion ||
       retained.profileId !== profile.id ||
@@ -133,6 +198,65 @@ export async function finalizePatternImportDxfPhaseEExistingLinkedN1V1(
     return durable.ok ? { ok: true } : { ok: false, blocker: durable.blocker };
   }
 
+  if (!resume || !recovered)
+    return finalizeNativeChoices(context, currentSession!, sessionIdentity, diagnostic, isCurrent);
+
+  const { evidence, replay } = recovered;
+  const controller = createPatternImportDxfProductSidecarCardControllerV1({
+    schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_SIDECAR_CARD_CONTROLLER_V1,
+    techCardId: evidence.techCardId,
+    service: adminService,
+  });
+  const savedSession: PatternImportDxfPhaseECurrentSavedAssemblyOrderSessionV1 = {
+    techCardId: evidence.techCardId,
+    importGeneration: resume.preparationGeneration,
+    draft: replay.draft,
+    savedReplay: replay.savedReplay,
+    controller,
+    // The owner just resolved this document from a fresh GetTechCard at the gesture lock.
+    // The existing SemanticV1 writer independently reads it again and uses the same lock for CAS.
+    loadDocumentEvidence: async (scopeKey) =>
+      isCurrent() && scopeKey === evidence.scopeKey
+        ? { ok: true, evidence, blocker: null }
+        : {
+            ok: false,
+            evidence: null,
+            blocker: {
+              code: 'existing-linked-n1-finalize-source-moved',
+              detail: 'The saved native document is no longer current.',
+            },
+          },
+  };
+  try {
+    return await finalizeNativeChoices(
+      context,
+      savedSession,
+      sessionIdentity,
+      diagnostic,
+      isCurrent,
+    );
+  } finally {
+    controller.dispose();
+  }
+}
+
+async function finalizeNativeChoices(
+  context: PreparedContext,
+  currentSession:
+    | PatternImportDxfPhaseECardSessionV1
+    | PatternImportDxfPhaseECurrentSavedAssemblyOrderSessionV1,
+  sessionIdentity: object,
+  diagnostic: NonNullable<ReturnType<typeof resolveSavedFullAssemblyDiagnosticProfileV1>>,
+  isCurrent: () => boolean,
+): Promise<Result> {
+  const { pending, profile, direction, readback, freshCard, signal } = context;
+  const superseded = () =>
+    blocked(
+      'existing-linked-n1-finalize-superseded',
+      'The current card or exact connection changed while saving the pattern metadata.',
+    );
+  const selectedOperationNumber = pending.target.operationNumber;
+  const selectedSeamKey = pending.target.seamKey;
   const operations = freshCard.techCard?.operations ?? [];
   const seams = (freshCard.seams ?? [])
     .map(fromWire)
@@ -167,7 +291,7 @@ export async function finalizePatternImportDxfPhaseEExistingLinkedN1V1(
   )
     return blocked(
       'existing-linked-n1-finalize-source-moved',
-      'The post-save pattern document differs from the exact gesture or seam-write lock.',
+      'The saved pattern document differs from the exact gesture or current card lock.',
     );
 
   const prepared = await runPatternImportDxfPhaseEAssemblyOrderSerializedPrepareV1(freshSession, {
@@ -276,7 +400,7 @@ export async function finalizePatternImportDxfPhaseEExistingLinkedN1V1(
       ok: false,
       blocker: submitted.blockers[0] ?? {
         code: 'existing-linked-n1-semantic-unverified',
-        detail: 'The first pattern metadata attachment was not verified at the seam-write lock.',
+        detail: 'The first pattern metadata attachment was not verified at the saved card lock.',
       },
     };
 
@@ -306,7 +430,7 @@ export async function finalizePatternImportDxfPhaseEExistingLinkedN1V1(
     verifiedSemanticSha256: submitted.verifiedAttachment.sidecarSha256,
   };
   retainedAttachments.set(pending, {
-    session: currentSession,
+    sessionIdentity,
     direction,
     profileId: profile.id,
     profileRevision: profile.revision,

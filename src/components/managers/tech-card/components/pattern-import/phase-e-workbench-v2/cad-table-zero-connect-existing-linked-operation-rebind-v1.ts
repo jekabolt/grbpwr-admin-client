@@ -15,6 +15,7 @@ import type { StrictSeamAcceptResult } from '../../assembly-seams/use-seam-decis
 import type { PatternImportDxfPhaseELinkedN1ProfileChoiceV1 } from './cad-table-existing-linked-n1-finalize-v1';
 import type { PatternImportDxfPhaseEZeroConnectAuthoringHandoffRequestV1 } from './cad-table-zero-connect-authoring-handoff-v1';
 import { isPatternImportDxfPhaseECadTableZeroConnectAuthoringRequestV1 } from './cad-table-zero-connect-controller-v1';
+import { readPatternImportDxfPhaseEZeroConnectCurrentSavedReplayV1 } from './cad-table-zero-connect-phase-e-authority-v1';
 import { buildPatternImportDxfPhaseEZeroConnectExactAnchorGeometryV1 } from './cad-table-zero-connect-exact-anchor-geometry-v1';
 import { buildPatternImportDxfPhaseEZeroConnectStoredSeamCrosswalkV1 } from './cad-table-zero-connect-stored-seam-crosswalk-v1';
 
@@ -68,6 +69,7 @@ export type PatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1 = Readonl
   target: PatternImportDxfPhaseEZeroConnectExistingLinkedN1TargetV1;
   sourceSizeToken: string;
   request: PatternImportDxfPhaseEZeroConnectAuthoringHandoffRequestV1;
+  metadataResumeDirection?: 'same' | 'reversed';
 }>;
 
 export type PatternImportDxfPhaseEZeroConnectExistingLinkedN1BlockerV1 = Readonly<{
@@ -181,6 +183,7 @@ export type PatternImportDxfPhaseEZeroConnectExistingLinkedN1OwnerV1 =
         pending: PatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1,
         direction: 'same' | 'reversed',
         profile?: PatternImportDxfPhaseELinkedN1ProfileChoiceV1,
+        mode?: 'resume-metadata',
       ) => Promise<PatternImportDxfPhaseEZeroConnectExistingLinkedN1OwnerResultV1>;
       cancel: (pending: PatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1) => boolean;
     }>
@@ -633,13 +636,62 @@ function storedSemanticsMatch(expected: StoredSeam, actual: StoredSeam): boolean
   );
 }
 
-export function verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV1(input: {
-  pending: PatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1;
-  accepted: StrictSeamAcceptResult;
-  expectedSeam: StoredSeam;
-  freshCard: common_TechCard | null | undefined;
-}): PatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackResultV1 {
-  const { pending, accepted, expectedSeam, freshCard } = input;
+/** Gives the OperationsField a metadata-only action for the exact already-saved seam. */
+export function resolvePatternImportDxfPhaseELinkedN1MetadataResumeDirectionV1(
+  pending: PatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1,
+  freshCard: common_TechCard | null | undefined,
+  context: Parameters<typeof preparePatternImportDxfPhaseEZeroConnectExistingLinkedN1RebindV1>[2],
+): 'same' | 'reversed' | null {
+  if (
+    pending.target.orderedRowKeys.length !== 1 ||
+    pending.request.catalog.pieces.length !== 2 ||
+    pending.request.candidate.connection.mapping !== 'equal' ||
+    pending.request.candidate.connection.lengthRatio !== 1
+  )
+    return null;
+  const savedReplay = readPatternImportDxfPhaseEZeroConnectCurrentSavedReplayV1(
+    pending.request.authoringAuthority,
+  );
+  const native = savedReplay?.draft.dxfNativeSewingReplay;
+  if (
+    !native?.replayReady ||
+    native.pipeline.contentBinding?.sourceSha256 !== pending.request.authoringAuthority.row.sha256
+  )
+    return null;
+
+  const seams = (freshCard?.seams ?? [])
+    .map(fromWire)
+    .filter((seam): seam is StoredSeam => seam?.seamKey === pending.target.seamKey);
+  if (seams.length !== 1) return null;
+  const direction = seams[0].direction;
+  if (direction !== 'same' && direction !== 'reversed') return null;
+  const expected = preparePatternImportDxfPhaseEZeroConnectExistingLinkedN1RebindV1(
+    pending,
+    direction,
+    context,
+  );
+  if (!expected.ok) return null;
+  const verified = verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV1({
+    mode: 'resume-metadata',
+    pending,
+    expectedSeam: expected.receipt.storedSeam,
+    freshCard,
+  });
+  return verified.ok ? direction : null;
+}
+
+export function verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV1(
+  input: {
+    pending: PatternImportDxfPhaseEZeroConnectExistingLinkedN1PendingV1;
+    expectedSeam: StoredSeam;
+    freshCard: common_TechCard | null | undefined;
+  } & (
+    | { mode?: 'rebind'; accepted: StrictSeamAcceptResult }
+    | { mode: 'resume-metadata'; accepted?: never }
+  ),
+): PatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackResultV1 {
+  const { pending, expectedSeam, freshCard } = input;
+  const resume = input.mode === 'resume-metadata';
   const target = pending.target;
   const lockVersion = freshCard?.lockVersion ?? -1;
   const operations = freshCard?.techCard?.operations ?? [];
@@ -653,20 +705,26 @@ export function verifyPatternImportDxfPhaseEZeroConnectExistingLinkedN1ReadbackV
   if (
     freshCard?.id !== target.techCardId ||
     !Number.isSafeInteger(lockVersion) ||
-    lockVersion <= target.capturedCardLockVersion ||
-    (accepted.ok &&
-      (accepted.seamKey !== target.seamKey || accepted.lockVersion !== lockVersion)) ||
+    (resume
+      ? lockVersion !== target.capturedCardLockVersion || target.orderedRowKeys.length !== 1
+      : lockVersion <= target.capturedCardLockVersion ||
+        (input.accepted.ok &&
+          (input.accepted.seamKey !== target.seamKey ||
+            input.accepted.lockVersion !== lockVersion))) ||
     operationMatches.length !== 1 ||
     !exactStrings(operationMatches[0]!.inputKeys, target.orderedInputKeys) ||
     !exactStrings(operationMatches[0]!.seamKeys, target.orderedRowKeys) ||
     operations.length !== target.operationCount ||
     operationTopologyFingerprint(operations) !== target.operationsTopologyFingerprint ||
     !stored ||
+    (resume && (stored.stale || seamFingerprint(stored) !== target.originalSeamFingerprint)) ||
     !storedSemanticsMatch(expectedSeam, stored)
   )
     return blockedReadback(
       'existing-linked-n1-readback-mismatch',
-      'Fresh readback did not preserve the Assembly Order while replacing the same exact seam row.',
+      resume
+        ? 'The saved Assembly Order or exact anchored seam changed before metadata could be saved.'
+        : 'Fresh readback did not preserve the Assembly Order while replacing the same exact seam row.',
     );
   return Object.freeze({
     ok: true as const,

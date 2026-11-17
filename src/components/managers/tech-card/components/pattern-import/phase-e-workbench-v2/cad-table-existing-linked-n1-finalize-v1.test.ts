@@ -14,9 +14,13 @@ const ports = vi.hoisted(() => ({
   resolveSession: vi.fn(),
   prepareSource: vi.fn(),
   prepareNative: vi.fn(),
+  readSavedReplay: vi.fn(),
 }));
 vi.mock('../phase-e-workbench-card-session-v1', () => ({
   readPatternImportDxfPhaseECardSessionV1: ports.readSession,
+}));
+vi.mock('./cad-table-zero-connect-phase-e-authority-v1', () => ({
+  readPatternImportDxfPhaseEZeroConnectCurrentSavedReplayV1: ports.readSavedReplay,
 }));
 vi.mock('../phase-e-workbench/assembly-order-entry', () => ({
   buildPatternImportDxfPhaseEAssemblyOrderSourceV1: () => ({ selectedSeamKey: 'side-open' }),
@@ -150,6 +154,7 @@ async function fixture() {
     verifiedSha,
     gesture,
     catalog,
+    draft: seed.draft,
     submitChoices,
     loadDocumentEvidence,
     persist,
@@ -158,6 +163,114 @@ async function fixture() {
 
 describe('linked N1 post-save continuation', () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it('uses the verified saved replay at the existing lock and retries only durable metadata', async () => {
+    const test = await fixture();
+    const { row, context } = test;
+    ports.readSession.mockReturnValue(null);
+    const metadataResumeAuthority = { row, preparationGeneration: 11 } as NonNullable<
+      Parameters<
+        typeof finalizePatternImportDxfPhaseEExistingLinkedN1V1
+      >[0]['metadataResumeAuthority']
+    >;
+    const savedReplay = {
+      evidence: { patternSizeId: 7 },
+    };
+    ports.readSavedReplay.mockReturnValue({ draft: test.draft, savedReplay });
+    const orderedInputKeys = test.gesture.sides.map(({ pieceLineKey }) => pieceLineKey) as [
+      string,
+      string,
+    ];
+    const pending = {
+      ...context.pending,
+      metadataResumeDirection: 'reversed' as const,
+      target: { ...context.pending.target, orderedInputKeys },
+    };
+    const material = {
+      bomLineKey: 'bom-main',
+      fabricPurpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
+    } as const;
+    const pattern = {
+      ...material,
+      lineKey: row.patternLineKey,
+      url: row.url,
+      sha256: row.sha256,
+      sizeBytes: row.sizeBytes,
+      savedRowRevision: row.revision,
+      sizeId: 7,
+      version: 3,
+    };
+    const evidence = { ...test.evidence, cardLockVersion: row.cardLockVersion };
+    const freshCard = {
+      ...context.freshCard,
+      lockVersion: row.cardLockVersion,
+      techCard: {
+        operations: context.freshCard.techCard?.operations,
+        patterns: [pattern],
+        bomItems: [
+          {
+            lineKey: material.bomLineKey,
+            section: 'TECH_CARD_BOM_SECTION_FABRIC',
+            purpose: material.fabricPurpose,
+          },
+        ],
+        pieceDxfAliases: {
+          items: test.gesture.sides.map(({ pieceId, pieceLineKey }) => ({
+            ...material,
+            blockName: pieceId,
+            pieceLineKey,
+          })),
+        },
+      },
+    } as unknown as typeof context.freshCard;
+    test.loadDocumentEvidence.mockResolvedValue({ ok: true, evidence });
+    test.submitChoices.mockResolvedValue({
+      authorityStatus: 'accepted',
+      attachmentStatus: 'verified',
+      verifiedAttachment: {
+        cardLockVersion: row.cardLockVersion,
+        sidecarSha256: test.verifiedSha,
+      },
+      blockers: [],
+    });
+    test.persist.mockResolvedValueOnce({
+      ok: false,
+      blocker: { code: 'retry-durable', detail: 'retry' },
+    });
+    const resume = {
+      ...context,
+      pending,
+      metadataResumeAuthority,
+      freshCard,
+      readback: { ...context.readback, cardLockVersion: row.cardLockVersion },
+    };
+    await expect(finalizePatternImportDxfPhaseEExistingLinkedN1V1(resume)).resolves.toMatchObject({
+      ok: false,
+      blocker: { code: 'retry-durable' },
+    });
+    const currentSession = ports.resolveSession.mock.calls[0]?.[1];
+    expect(currentSession).toMatchObject({ draft: test.draft, savedReplay, importGeneration: 11 });
+    expect(currentSession).not.toHaveProperty('confirmedApply');
+    expect(await currentSession.loadDocumentEvidence('main')).toMatchObject({ ok: true, evidence });
+    expect(test.persist.mock.calls[0]?.[0]).toMatchObject({
+      row,
+      verifiedSemanticSha256: test.verifiedSha,
+    });
+
+    pattern.savedRowRevision++;
+    await expect(finalizePatternImportDxfPhaseEExistingLinkedN1V1(resume)).resolves.toMatchObject({
+      ok: false,
+      blocker: { code: 'existing-linked-n1-finalize-source-moved' },
+    });
+    expect(test.persist).toHaveBeenCalledTimes(1);
+
+    pattern.savedRowRevision--;
+    await expect(finalizePatternImportDxfPhaseEExistingLinkedN1V1(resume)).resolves.toEqual({
+      ok: true,
+    });
+    expect(test.submitChoices).toHaveBeenCalledTimes(1);
+    expect(test.persist).toHaveBeenCalledTimes(2);
+  });
 
   it('reprepares at the seam-write lock and carries the same directed native span through verified V1 to V4', async () => {
     const test = await fixture();

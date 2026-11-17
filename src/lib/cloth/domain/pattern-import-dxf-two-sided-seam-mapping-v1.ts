@@ -12,7 +12,7 @@ import {
 
 import {
   readPatternImportDxfProductCommitReplayScopeV1,
-  type PatternImportDxfProductVerifiedCommitReplayV1,
+  type PatternImportDxfProductVerifiedReplayV1,
 } from './pattern-import-dxf-product-commit-replay-v1';
 
 export const PATTERN_IMPORT_DXF_TWO_SIDED_SEAM_MAPPING_V1 =
@@ -566,7 +566,7 @@ function sideEvidence(
 export async function buildPatternImportDxfTwoSidedSeamMappingV1(
   raw: unknown,
   options: DxfAssemblyHandoffOptionsV1 = {},
-  savedCommit?: PatternImportDxfProductVerifiedCommitReplayV1,
+  savedCommit?: PatternImportDxfProductVerifiedReplayV1,
 ): Promise<PatternImportDxfTwoSidedSeamMappingResultV1> {
   let input: Snapshot;
   try {

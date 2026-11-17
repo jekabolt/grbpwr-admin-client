@@ -1,4 +1,5 @@
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
+import type { PatternImportDxfProductVerifiedSavedReplayV1 } from 'lib/cloth/domain/pattern-import-dxf-product-commit-replay-v1';
 import type { DxfProductPhaseDSizeSelectionResultV1 } from 'lib/pattern-import/dxf-product-phase-d-size-selection-v1';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import type { CardDraft } from 'lib/pattern-import/types';
@@ -57,6 +58,7 @@ type PreparedAuthorityState = Readonly<{
   catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
   preparationGeneration: number;
   importGeneration: number;
+  savedReplay?: PatternImportDxfProductVerifiedSavedReplayV1;
 }>;
 
 const authorityStates = new WeakMap<object, PreparedAuthorityState>();
@@ -94,6 +96,17 @@ export function isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(
   );
 }
 
+export function readPatternImportDxfPhaseEZeroConnectCurrentSavedReplayV1(
+  authority: PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1,
+): Readonly<{
+  draft: CardDraft;
+  savedReplay: PatternImportDxfProductVerifiedSavedReplayV1;
+}> | null {
+  if (!isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(authority)) return null;
+  const state = authorityStates.get(authority);
+  return state?.savedReplay ? { draft: state.draft, savedReplay: state.savedReplay } : null;
+}
+
 /**
  * Keeps the replay draft and selected Phase-D carrier private while an ordinary card save may
  * replace the preparation. The public token exposes only immutable exact bindings.
@@ -105,6 +118,7 @@ export function capturePatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(
     selection: SuccessfulSelection;
     catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
     generation: PatternImportDxfPhaseECadTableZeroOperationGenerationTicketV1;
+    savedReplay?: PatternImportDxfProductVerifiedSavedReplayV1;
   }>,
 ): PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1 | null {
   const { row, draft, selection, catalog, generation } = input;
@@ -143,6 +157,7 @@ export function capturePatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(
       catalog,
       preparationGeneration: token.preparationGeneration,
       importGeneration: token.importGeneration,
+      ...(input.savedReplay ? { savedReplay: input.savedReplay } : {}),
     }),
   );
   return token;

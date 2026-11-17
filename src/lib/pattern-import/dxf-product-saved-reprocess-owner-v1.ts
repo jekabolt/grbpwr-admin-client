@@ -99,6 +99,16 @@ export type DxfProductSavedReprocessResultV1 =
       blockers: readonly [DxfProductSavedReprocessBlockerV1];
     }>;
 
+type VerifiedSavedReprocess = Extract<DxfProductSavedReprocessResultV1, { ok: true }>;
+const verifiedSavedReprocesses = new WeakSet<VerifiedSavedReprocess>();
+
+/** True only for a result published after exact writer bytes and a fresh row read have matched. */
+export function isDxfProductSavedReprocessVerifiedV1(
+  value: DxfProductSavedReprocessResultV1 | undefined,
+): value is VerifiedSavedReprocess {
+  return value?.ok === true && verifiedSavedReprocesses.has(value);
+}
+
 export type DxfProductSavedReprocessHostV1 = Readonly<{
   /**
    * Reads the current authoritative row and transfers exclusive ownership of `bytes` to this
@@ -701,7 +711,7 @@ export function createDxfProductSavedReprocessOwnerV1(host: DxfProductSavedRepro
           sourceFileId,
         );
       progress('revalidate', 3, 1, 1);
-      return Object.freeze({
+      const verified: VerifiedSavedReprocess = Object.freeze({
         ok: true as const,
         schemaVersion: DXF_PRODUCT_SAVED_REPROCESS_OWNER_V1,
         row,
@@ -712,6 +722,8 @@ export function createDxfProductSavedReprocessOwnerV1(host: DxfProductSavedRepro
           : {}),
         blockers: Object.freeze([]) as readonly [],
       });
+      verifiedSavedReprocesses.add(verified);
+      return verified;
     } finally {
       try {
         disposableReprocessBytes?.fill(0);

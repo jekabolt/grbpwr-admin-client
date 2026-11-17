@@ -461,7 +461,10 @@ export async function buildPatternImportDxfProductSemanticSidecarV1(
       receipt.product.phaseEPlanSha256 !== evidence.phaseEPlanSha256 ||
       receipt.product.sizeSelectionSha256 !== evidence.sizeSelectionSha256 ||
       receipt.card.techCardId !== cleanPostSaveInput.compositionInput.draft.techCardId ||
-      receipt.card.previousLockVersion !== evidence.previousLockVersion ||
+      (receipt.card.lockBasis
+        ? receipt.card.capturedLockVersion
+        : receipt.card.previousLockVersion) !== evidence.previousLockVersion ||
+      receipt.card.lockBasis !== evidence.lockBasis ||
       receipt.pattern.lineKey !== evidence.patternLineKey ||
       receipt.pattern.url !== evidence.patternUrl ||
       receipt.pattern.scopeKey !== evidence.scopeKey ||

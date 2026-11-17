@@ -34,7 +34,7 @@ import {
 
 import {
   matchesPatternImportDxfProductCommitReplaySourceV1,
-  type PatternImportDxfProductVerifiedCommitReplayV1,
+  type PatternImportDxfProductVerifiedReplayV1,
 } from './pattern-import-dxf-product-commit-replay-v1';
 
 export const PATTERN_IMPORT_DXF_PIPELINE_HANDOFF_V1 =
@@ -742,7 +742,7 @@ let snapshotClaimed = false;
 
 function snapshotCompositionInput(
   raw: unknown,
-  savedCommit?: PatternImportDxfProductVerifiedCommitReplayV1,
+  savedCommit?: PatternImportDxfProductVerifiedReplayV1,
 ):
   | Readonly<{ ok: true; input: SnapshotInput; carrier: CarrierSnapshot }>
   | Readonly<{ ok: false; result: PatternImportDxfPipelineHandoffResultV1 }> {
@@ -878,7 +878,7 @@ function explicitPiecesFromCarrier(
 export async function buildPatternImportDxfPipelineHandoffV1(
   raw: unknown,
   options: DxfAssemblyHandoffOptionsV1 = {},
-  savedCommit?: PatternImportDxfProductVerifiedCommitReplayV1,
+  savedCommit?: PatternImportDxfProductVerifiedReplayV1,
 ): Promise<PatternImportDxfPipelineHandoffResultV1> {
   const snapped = snapshotCompositionInput(raw, savedCommit);
   if (!snapped.ok) return snapped.result;
