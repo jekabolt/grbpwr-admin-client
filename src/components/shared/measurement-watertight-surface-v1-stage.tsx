@@ -1002,7 +1002,7 @@ function createMeasurementGuideLayerV1(
   layer: THREE.Group | null;
   bindings: readonly MeasurementSurfaceMeasurementGuideSceneBindingV1[];
 }> {
-  if (!guide || guide.status !== 'visible') {
+  if (!guide || (guide.status !== 'visible' && guide.status !== 'limited')) {
     return Object.freeze({ layer: null, bindings: Object.freeze([]) });
   }
   const layer = new THREE.Group();
@@ -1081,7 +1081,7 @@ export function measurementSurfaceMeasurementGuideDatasetV1(
   return Object.freeze({
     activeMeasurement: guide?.measurementName ?? '',
     status: guide?.status ?? 'off',
-    pathCount: guide?.status === 'visible' ? guide.paths.length : 0,
+    pathCount: guide?.status === 'visible' || guide?.status === 'limited' ? guide.paths.length : 0,
     visualGuideOnly: guide?.claims.visualGuideOnly ?? false,
   });
 }
@@ -3205,7 +3205,7 @@ export function MeasurementWatertightSurfaceV1Stage({
   const sceneLabel = accessibleLabel ?? `3D ${mannequinKind} in ${artifact.pose} pose`;
   const editMode = measurementSurfaceJointEditorEffectiveEditModeV1(jointEditor);
   const measurementGuideDescription =
-    measurementGuide?.status === 'visible'
+    measurementGuide?.status === 'visible' || measurementGuide?.status === 'limited'
       ? ` Visual ${measurementGuide.label} guide is highlighted.`
       : '';
 
@@ -3230,7 +3230,7 @@ export function MeasurementWatertightSurfaceV1Stage({
         data-source-revision={artifact.sourceRevision}
         data-testid='measurement-watertight-surface-v1-canvas'
       />
-      {measurementGuide?.status === 'visible' ? (
+      {measurementGuide?.status === 'visible' || measurementGuide?.status === 'limited' ? (
         <div
           aria-hidden='true'
           className='pointer-events-none absolute left-2 top-2 border border-hairline bg-pageBg px-2 py-1 font-mono text-micro text-textColor'
