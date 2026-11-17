@@ -19,6 +19,7 @@ import {
   type MeasurementSurfaceMeasurementGuidePathV1,
   type MeasurementSurfaceMeasurementGuideViewV1,
 } from 'components/shared/measurement-surface-active-measurement-guide-v1';
+import { measurementSurfaceGuideIsApproximateV1 } from 'components/shared/measurement-surface-guide-precision-v1';
 import {
   measurementSurfaceGuideCameraActionV1,
   measurementSurfaceGuidePassesV1,
@@ -1317,5 +1318,38 @@ describe('measurement guide visibility v1', () => {
     expect(plan('front', { view: 'side', ownerCameraSaved: true }, 'side', true)).toBe('forget');
     // A back/side field still turns, wherever the camera is.
     expect(plan('side', null, 'front')).toBe('turn');
+  });
+  it('marks a form row approx. exactly where the builder draws a limited line, on every base', async () => {
+    const measurementNames = BODY_MEASUREMENT_GROUPS.flatMap((group) =>
+      group.measurements.map(({ name }) => name as common_BodyMeasurementName),
+    );
+    const mismatches: string[] = [];
+    const limitedByBase: Record<string, string[]> = {};
+    for (const base of BASES) {
+      const body = await buildDefaultBody(base);
+      limitedByBase[base.name] = [];
+      for (const measurementName of measurementNames) {
+        const { status } = buildMeasurementSurfaceActiveMeasurementGuideV1({
+          measurementName,
+          frame: body.frame,
+          mesh: body.mesh,
+          neutralPose: true,
+          limbSectionModes: body.betaRuntime?.limbSectionModes,
+          torsoSectionStations: body.betaRuntime?.torsoSectionStations,
+          neckSectionStation: body.betaRuntime?.neckSectionStation,
+        });
+        const field = measurementName.replace('BODY_MEASUREMENT_NAME_', '');
+        expect(['visible', 'limited'], `${field}/${base.name}`).toContain(status);
+        if (status === 'limited') limitedByBase[base.name].push(field);
+        if ((status === 'limited') !== measurementSurfaceGuideIsApproximateV1(measurementName)) {
+          mismatches.push(`${field}/${base.name}: builder ${status}`);
+        }
+      }
+    }
+    console.info(`approx. rows: ${JSON.stringify(limitedByBase)}`);
+    expect(mismatches).toEqual([]);
+    // Both kinds of row exist: the word is not on every field.
+    expect(measurementSurfaceGuideIsApproximateV1('BODY_MEASUREMENT_NAME_CHEST')).toBe(false);
+    expect(measurementSurfaceGuideIsApproximateV1('BODY_MEASUREMENT_NAME_INSEAM')).toBe(true);
   });
 });
