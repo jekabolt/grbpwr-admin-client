@@ -13,10 +13,28 @@ import {
 import type { CardDraft } from 'lib/pattern-import/types';
 import { REBUILD_WRITE_TRIES, writeOverOnlyVersionMoved } from 'lib/fusing-dxf/regenerate';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { rebuildReadOnlyVersionMoved } from './nesting/fusing-sheets-stage';
 import { applyRunningLabel } from './pattern-import/apply-label';
 import { importRowsLanded } from './pattern-import/card-apply';
 import { onlyVersionMoved, type CardBase } from './useTechCardAutosave';
+
+it('keeps explicit DXF review from saving through the persisted Autopilot preference', () => {
+  const patterns = readFileSync(new URL('./patterns-field.tsx', import.meta.url), 'utf8');
+  const wizard = readFileSync(
+    new URL('./pattern-import/import-wizard.tsx', import.meta.url),
+    'utf8',
+  );
+  expect(patterns).toContain('requireManualApply: review');
+  expect(patterns).toContain('requireManualApply={importing.requireManualApply}');
+  expect(wizard).toContain('() => !requireManualApply && readAutopilotPref()');
+  const automaticApply = wizard.slice(
+    wizard.indexOf('// the drive stops on check:'),
+    wizard.indexOf('void autopilotApply('),
+  );
+  expect(automaticApply).toMatch(/if\s*\(\s*requireManualApply\s*\|\|/u);
+  expect(automaticApply).toContain('return;');
+});
 
 type Row = NonNullable<common_TechCardInsert['patterns']>[number];
 

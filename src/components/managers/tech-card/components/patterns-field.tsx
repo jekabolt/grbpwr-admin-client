@@ -966,8 +966,12 @@ export function PatternsField({
     target?: string;
     afterReady?: () => Promise<void> | void;
   } | null>(null);
-  // Non-DXF files dropped on a slot: the import wizard, starting from those files.
-  const [importing, setImporting] = useState<{ scopeKey: string; files: File[] } | null>(null);
+  // Non-DXF files and an explicit DXF review open the import wizard for this slot.
+  const [importing, setImporting] = useState<{
+    scopeKey: string;
+    files: File[];
+    requireManualApply?: boolean;
+  } | null>(null);
   const importingRef = useRef(importing);
   importingRef.current = importing;
   // Direct uploads in flight, per slot.
@@ -2836,7 +2840,7 @@ export function PatternsField({
       return;
     }
     handOff();
-    setImporting({ scopeKey, files: good });
+    setImporting({ scopeKey, files: good, requireManualApply: review });
   }
 
   async function chooseOccupiedFiles(
@@ -4952,6 +4956,7 @@ export function PatternsField({
         <ImportWizard
           initialFiles={importing.files}
           initialScopeKey={importScopeKey(importing.scopeKey)}
+          requireManualApply={importing.requireManualApply}
           card={buildCardContext({
             techCardId,
             orderedSizeIds: orderSizes(sizeIds),

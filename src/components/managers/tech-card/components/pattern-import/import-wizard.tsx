@@ -121,6 +121,8 @@ type WizardProps = {
   initialFiles?: File[];
   /** The slot the files were dropped on: every piece defaults to this fabric scope. */
   initialScopeKey?: string;
+  /** Explicit review entry always requires the operator to confirm the final Apply. */
+  requireManualApply?: boolean;
 };
 
 /**
@@ -185,6 +187,7 @@ function WizardBody({
   onReviewPieces,
   initialFiles,
   initialScopeKey,
+  requireManualApply = false,
   kit,
   onToggleStub,
 }: WizardProps & { kit: StubKit | null; onToggleStub?: () => void }) {
@@ -254,7 +257,7 @@ function WizardBody({
 
   // ── A10 autopilot: read files → the drive with the autopilot's resolver → on a green gate the
   // explicit gated apply. A stop says why on the footer's ask line; the primary resumes it.
-  const [autopilot, setAutopilot] = useState(readAutopilotPref);
+  const [autopilot, setAutopilot] = useState(() => !requireManualApply && readAutopilotPref());
   const apiRef = useRef(api);
   apiRef.current = api;
   const resolve = useMemo(() => resolverFor(card, () => apiRef.current), [card]);
@@ -303,7 +306,14 @@ function WizardBody({
   useEffect(() => {
     // the drive stops on check: a green gate goes to the card by the explicit gated path
     const d = api.driveStop;
-    if (!autopilot || !d || d.why !== 'auto-stop' || session.step !== 'check' || session.busy)
+    if (
+      requireManualApply ||
+      !autopilot ||
+      !d ||
+      d.why !== 'auto-stop' ||
+      session.step !== 'check' ||
+      session.busy
+    )
       return;
     if (applying.current === session.sessionId) return;
     applying.current = session.sessionId;
@@ -311,7 +321,7 @@ function WizardBody({
       if (!o.ok) setApStop(o.reason);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autopilot, api.driveStop, session.step, session.busy, session.sessionId]);
+  }, [autopilot, api.driveStop, requireManualApply, session.step, session.busy, session.sessionId]);
   const autopilotStop =
     autopilot && started.current === session.sessionId
       ? apStop ??
@@ -996,7 +1006,7 @@ function WizardBody({
                     // switched on mid-run: it drives from the next "continue", not at once
                     if (on && session.step !== 'files') started.current = session.sessionId;
                     setAutopilot(on);
-                    writeAutopilotPref(on);
+                    if (!requireManualApply) writeAutopilotPref(on);
                   }}
                 >
                   autopilot {autopilot ? 'on' : 'off'}
