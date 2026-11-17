@@ -29,6 +29,7 @@ function fixture() {
   };
   const bootstrap: SavedFullAssemblyGenericFirstBootstrapV1 = {
     schemaVersion: SAVED_FULL_ASSEMBLY_GENERIC_FIRST_BOOTSTRAP_V1,
+    sourceSurface: 'zero-allowance-cut',
     row,
     sourceOwner,
     sourceRequest: {
@@ -243,7 +244,7 @@ describe('saved full assembly first physical bootstrap', () => {
     };
 
     expect(() => buildSavedFullAssemblyGenericFirstCompileRequestV1(sewingOnly, choices)).toThrow(
-      /exact cut contour/,
+      /exact source-surface contour/,
     );
   });
 
@@ -262,5 +263,50 @@ describe('saved full assembly first physical bootstrap', () => {
       placementInferred: false,
       v6ArrangementPromoted: false,
     });
+  });
+
+  it('requires native sewing IDs in native mode and never promotes exact cut IDs', () => {
+    const { bootstrap, choices } = fixture();
+    const native: SavedFullAssemblyGenericFirstBootstrapV1 = {
+      ...bootstrap,
+      sourceSurface: 'native-drawn-sewing',
+    };
+    expect(() => buildSavedFullAssemblyGenericFirstCompileRequestV1(native, choices)).toThrow(
+      /exact source-surface contour/,
+    );
+    const sewingCatalog: SavedFullAssemblyGenericFirstBootstrapV1 = {
+      ...native,
+      catalog: {
+        ...native.catalog,
+        pieces: native.catalog.pieces.map((piece) => ({
+          ...piece,
+          contours: piece.contours.map((contour) => ({
+            ...contour,
+            contourId: `${contour.contourId}/drawn-seam`,
+            role: 'sewing-boundary',
+            geometry: { kind: 'seam' },
+          })),
+        })),
+      },
+    };
+    expect(() =>
+      buildSavedFullAssemblyGenericFirstCompileRequestV1(sewingCatalog, choices),
+    ).toThrow(/exact source-surface contour/);
+    const nativeChoices: SavedFullAssemblyGenericFirstCompileChoicesV1 = {
+      ...choices,
+      seamChoices: choices.seamChoices.map((seam) => ({
+        ...seam,
+        sides: seam.sides.map((side) => ({
+          ...side,
+          contourId: `${side.contourId}/drawn-seam`,
+        })) as unknown as typeof seam.sides,
+      })),
+    };
+    const request = buildSavedFullAssemblyGenericFirstCompileRequestV1(
+      sewingCatalog,
+      nativeChoices,
+    );
+    expect(request.intent.seams[0]!.sides[0].contourId).toBe('front-shell/drawn-seam');
+    expect(request.sourceRequest.draft).toBe(bootstrap.sourceRequest.draft);
   });
 });

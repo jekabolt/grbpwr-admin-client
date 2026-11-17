@@ -4,9 +4,12 @@ import {
   DXF_PRODUCT_SAVED_NATIVE_COMPILER_SOURCE_OWNER_V1,
   DXF_PRODUCT_SAVED_NATIVE_COMPILER_SOURCE_REQUEST_V1,
   createDxfProductSavedNativeReprocessOwnerV1,
+  createDxfProductSavedForeignNativeReprocessOwnerV1,
+  type DxfProductSavedNativeReprocessResultV1,
   type DxfProductSavedNativeCompilerSourceOwnerV1,
   type DxfProductSavedNativeCompilerSourceRequestV1,
 } from 'lib/pattern-import/dxf-product-saved-native-reprocess-owner-v1';
+import { DXF_PRODUCT_SAVED_FOREIGN_REPROCESS_REQUEST_V1 } from 'lib/pattern-import/dxf-product-saved-foreign-reprocess-owner-v1';
 import {
   DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
   type DxfProductSavedRowIdentityV1,
@@ -23,6 +26,7 @@ import {
 } from './saved-full-assembly-diagnostic-profile-v1';
 import { createPatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1 } from './saved-assembly-snapshot-production-rpc-v1';
 import { createPatternImportDxfPhaseESavedDxfReprocessHostV1 } from './saved-dxf-reprocess-host-v1';
+import { createPatternImportDxfPhaseEForeignSavedDxfReprocessHostV1 } from './foreign-saved-dxf-reprocess-host-v1';
 import type { SavedFullAssemblyCompileRequestV1 } from './saved-full-assembly-compile-session-v1';
 import {
   disposeSavedFullAssemblySnapshotV1,
@@ -56,8 +60,17 @@ type Catalog = Extract<
   { ok: true }
 >['catalog'];
 
+export type SavedFullAssemblyFirstSourceSurfaceV1 = 'zero-allowance-cut' | 'native-drawn-sewing';
+
+export function savedFullAssemblyFirstContourRoleV1(
+  surface: SavedFullAssemblyFirstSourceSurfaceV1,
+) {
+  return surface === 'native-drawn-sewing' ? 'sewing-boundary' : 'cut-boundary';
+}
+
 export type SavedFullAssemblyGenericFirstBootstrapV1 = Readonly<{
   schemaVersion: typeof SAVED_FULL_ASSEMBLY_GENERIC_FIRST_BOOTSTRAP_V1;
+  sourceSurface: SavedFullAssemblyFirstSourceSurfaceV1;
   row: DxfProductSavedRowIdentityV1;
   sourceOwner: DxfProductSavedNativeCompilerSourceOwnerV1;
   sourceRequest: DxfProductSavedNativeCompilerSourceRequestV1;
@@ -207,6 +220,7 @@ function existingExactSeamChoices(
   >,
   snapshot: SavedFullAssemblySnapshotProjectionV1,
   catalog: Catalog,
+  sourceSurface: SavedFullAssemblyFirstSourceSurfaceV1,
 ): SavedFullAssemblyGenericFirstBootstrapV1['existingExactSeamChoices'] {
   const preserved = decoded.nestedCompositeV5.nestedCompositeV4.exactNSeam.restoreProjection.seams;
   const choices: SavedFullAssemblyGenericFirstCompileChoicesV1['seamChoices'][number][] = [];
@@ -221,7 +235,9 @@ function existingExactSeamChoices(
           pieceId === side.pieceId && pieceLineKey === side.pieceLineKey,
       );
       const contour = piece?.contours.find(
-        ({ contourId, role }) => contourId === side.contourId && role === 'cut-boundary',
+        ({ contourId, role }) =>
+          contourId === side.contourId &&
+          role === savedFullAssemblyFirstContourRoleV1(sourceSurface),
       );
       if (
         !contour ||
@@ -316,7 +332,9 @@ function validateSide(
     ({ pieceId, pieceLineKey }) => pieceId === side.pieceId && pieceLineKey === side.pieceLineKey,
   );
   const contour = piece[0]?.contours.filter(
-    ({ contourId, role }) => contourId === side.contourId && role === 'cut-boundary',
+    ({ contourId, role }) =>
+      contourId === side.contourId &&
+      role === savedFullAssemblyFirstContourRoleV1(bootstrap.sourceSurface),
   );
   const vertices = contour?.[0]?.boundaryVertices ?? [];
   if (
@@ -326,7 +344,7 @@ function validateSide(
   )
     fail(
       'invalid-authoring-choices',
-      'A seam side must select exact cut contour and boundary vertex identities.',
+      'A seam side must select exact source-surface contour and boundary vertex identities.',
     );
 }
 
@@ -340,10 +358,16 @@ export const prepareSavedFullAssemblyGenericFirstBootstrapV1 = Object.freeze(
     row: DxfProductSavedRowIdentityV1,
     cardProjection: PatternImportDxfPhaseESavedRowCardProjectionV1,
     signal?: AbortSignal,
+    sourceSurface: SavedFullAssemblyFirstSourceSurfaceV1 = 'zero-allowance-cut',
   ): Promise<SavedFullAssemblyGenericFirstBootstrapV1> {
     check(signal);
+    if (sourceSurface !== 'zero-allowance-cut' && sourceSurface !== 'native-drawn-sewing')
+      fail('native-source-invalid', 'An explicit supported source surface is required.');
     let receipt: Awaited<ReturnType<typeof readSavedFullAssemblySnapshotV1>> | null = null;
-    let owner: ReturnType<typeof createDxfProductSavedNativeReprocessOwnerV1> | null = null;
+    let owner: Pick<
+      ReturnType<typeof createDxfProductSavedNativeReprocessOwnerV1>,
+      'cancel' | 'dispose'
+    > | null = null;
     try {
       // The card projection chooses only a positive transport anchor. The generated bounded reader
       // authenticates the complete current operation/seam payload and independently rejects drift.
@@ -388,19 +412,36 @@ export const prepareSavedFullAssemblyGenericFirstBootstrapV1 = Object.freeze(
         createPatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1(seedOperationNumber);
       const resolveCard =
         createPatternImportDxfPhaseESavedRowCardProjectionResolverV1(cardProjection);
-      const host = createPatternImportDxfPhaseESavedDxfReprocessHostV1({
+      const hostOptions = {
         resolveCard,
         readAuthoritativeRow: sourceSnapshot.bridge.readAuthoritativeRow,
-      });
-      owner = createDxfProductSavedNativeReprocessOwnerV1(host);
+      };
       const cancel = () => owner?.cancel();
       if (signal) add.call(signal, 'abort', cancel, { once: true });
-      let replay: Awaited<ReturnType<typeof owner.run>>;
+      let replay: DxfProductSavedNativeReprocessResultV1;
       try {
-        replay = await owner.run({
-          schemaVersion: DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
-          row,
-        });
+        if (sourceSurface === 'native-drawn-sewing') {
+          const nativeOwner = createDxfProductSavedForeignNativeReprocessOwnerV1(
+            createPatternImportDxfPhaseEForeignSavedDxfReprocessHostV1({
+              ...hostOptions,
+              nativeSewingReplay: true,
+            }),
+          );
+          owner = nativeOwner;
+          replay = await nativeOwner.run({
+            schemaVersion: DXF_PRODUCT_SAVED_FOREIGN_REPROCESS_REQUEST_V1,
+            row,
+          });
+        } else {
+          const canonicalOwner = createDxfProductSavedNativeReprocessOwnerV1(
+            createPatternImportDxfPhaseESavedDxfReprocessHostV1(hostOptions),
+          );
+          owner = canonicalOwner;
+          replay = await canonicalOwner.run({
+            schemaVersion: DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
+            row,
+          });
+        }
       } finally {
         if (signal) remove.call(signal, 'abort', cancel);
       }
@@ -427,8 +468,23 @@ export const prepareSavedFullAssemblyGenericFirstBootstrapV1 = Object.freeze(
       }) satisfies DxfProductSavedNativeCompilerSourceRequestV1;
       if (sourceRequest.draft !== replay.draft)
         fail('native-source-invalid', 'The original replay draft identity was not preserved.');
+      const nativeSewing = replay.nativeSewingReplay;
+      if (sourceSurface === 'native-drawn-sewing' && !nativeSewing?.replayReady)
+        fail(
+          'native-source-invalid',
+          'Exact native drawn sewing replay is required for this source surface.',
+        );
+      // This detached view supplies catalog content, never the private source-owner identity.
+      const catalogDraft =
+        sourceSurface === 'native-drawn-sewing' && nativeSewing?.replayReady
+          ? {
+              ...replay.draft,
+              dxfProvenance: nativeSewing.pipeline,
+              dxfPhaseDReplay: nativeSewing.replay,
+            }
+          : replay.draft;
       const catalogResult = await buildPatternImportDxfProductPhaseEAuthoringCatalogV1(
-        replay.draft,
+        catalogDraft,
         row.scopeKey,
         selectedSize,
       );
@@ -453,6 +509,7 @@ export const prepareSavedFullAssemblyGenericFirstBootstrapV1 = Object.freeze(
         fail('saved-source-drift', 'Saved V6/AO evidence changed during native preparation.');
       return Object.freeze({
         schemaVersion: SAVED_FULL_ASSEMBLY_GENERIC_FIRST_BOOTSTRAP_V1,
+        sourceSurface,
         row,
         sourceOwner: replay.sourceOwner,
         sourceRequest,
@@ -471,6 +528,7 @@ export const prepareSavedFullAssemblyGenericFirstBootstrapV1 = Object.freeze(
           decodedV6,
           snapshot,
           catalogResult.catalog,
+          sourceSurface,
         ),
         diagnosticProfiles: Object.freeze(
           SAVED_FULL_ASSEMBLY_DIAGNOSTIC_PROFILES_V1.map(({ id, revision, label, description }) =>

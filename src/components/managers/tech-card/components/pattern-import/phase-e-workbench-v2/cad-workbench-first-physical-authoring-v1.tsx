@@ -1,7 +1,10 @@
 import { useEffect, useState, type ChangeEvent, type ReactNode } from 'react';
 import { Button, Input, Select, Text } from 'ui';
 
-import type { SavedFullAssemblyGenericFirstCompileChoicesV1 } from './saved-full-assembly-generic-first-bootstrap-v1';
+import {
+  savedFullAssemblyFirstContourRoleV1,
+  type SavedFullAssemblyGenericFirstCompileChoicesV1,
+} from './saved-full-assembly-generic-first-bootstrap-v1';
 import type { SavedFullAssemblyTablePiecePlacementV1 } from './saved-full-assembly-generic-first-authoring-v1';
 import type { useSavedClothPhysicalHostV1 } from './use-saved-cloth-physical-host-v1';
 
@@ -181,7 +184,11 @@ function CompileAuthoring({ state, disabled }: { state: HostState; disabled: boo
                 ({ pieceLineKey }) => pieceLineKey === pieceLineKeys[index],
               );
               const piece = pieces.find(({ pieceId }) => pieceId === side.pieceId);
-              const contours = piece?.contours.filter(({ role }) => role === 'cut-boundary') ?? [];
+              const contours =
+                piece?.contours.filter(
+                  ({ role }) =>
+                    role === savedFullAssemblyFirstContourRoleV1(bootstrap.sourceSurface),
+                ) ?? [];
               const contour = contours.find(({ contourId }) => contourId === side.contourId);
               const vertices = contour?.boundaryVertices ?? [];
               return (
