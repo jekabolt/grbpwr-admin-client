@@ -39,13 +39,34 @@ single acceptance-status table.
 | Area | Executor / evidence | Status | Next action |
 | --- | --- | --- | --- |
 | AC-01 saved table | beta card 156 observed with real saved DXF, AO operation and mannequin | partial | Record final candidate SHA/URL and repeat saved/fresh route acceptance |
-| AC-02 / AC-24 N=1 durable seam | frozen `b27efaa92d400a6ed0cf6a71055942c051780a3c`; genuine codec/CAS/readback/reload chain; independent review running | review | Rebase on current beta, rerun, authenticated save/reload browser acceptance |
-| V6 arrangement/annotations | backend PR `grbpwr-manager#80` head `40be4f8`; frontend draft PR `grbpwr-admin-client#431` head `7bd5e5af1` | review/integration | Add explicit two-lane UI transaction and Save/Reset integration |
-| AC-05–AC-09 visible 2D objects | clean UI branch `codex/assembly-table-ui-cleanup` | active | Always-visible functional toolbar, shape hit/fill, move/fit and visual product smoke |
+| AC-02 / AC-24 N=1 durable seam | frozen `b27efaa92d400a6ed0cf6a71055942c051780a3c` + `ae46587b447fbfa3073e43f16f589a20fc0bd6a4`; genuine codec/CAS/readback/reload chain | P1 follow-up | Require exact saved/live ordered-seam match and prevent duplicate AO append for legacy N=1 fallback; then re-review/rebase/browser acceptance |
+| V6 arrangement/annotations | backend PR `grbpwr-manager#80` head `40be4f8`; frontend draft PR `grbpwr-admin-client#431` includes reviewed two-lane commit `217de79c8bc9c9e36777848cf60f29e50881716a` | reviewed/integration | Add explicit Save/Reset UI integration and real-codec candidate evidence |
+| AC-05–AC-09 visible 2D objects | clean UI branch `codex/assembly-table-ui-cleanup`, commits `91b531bb5` + `2a6a4f8cb` | reviewed | Add component-level pointer/viewBox regression, merge current beta, then product smoke |
 | AC-25 annotations | V5/V6 lossless transition proven at codec/backend boundary | open | Product owner/readback/reload and edit evidence |
 | Joint AC-26–AC-45 | shared cloth ledger and cloth coordinator | open/partial | Consume only verified handoff; coordinate one GPU/browser lane after candidate freeze |
 | AC-43 golden cards | cards 6/11 remain mandatory; card156 is routing evidence only | open | Full existing suite on final integrated candidate |
 | AC-44–AC-48 final acceptance | shared ledger | open | Final build/browser/performance/evidence sweep; no unsupported parity claim |
+
+## Physical initialization boundary
+
+The V6 arrangement component is presentation-only. It must not be reinterpreted as physical
+cloth initialization because the mannequin/body-dependent stage applies scaling, centering,
+axis conversion and lane/body bases that V6 does not persist.
+
+The next canonical full-assembly intent may add an optional, discriminated
+`physicalInitialization` component. A generic physical initialization is accepted only when it
+explicitly confirms, for every exact piece:
+
+- `pieceId`, `sourceOriginM`, a proper row-major rotation matrix with nine finite SI values, and
+  an absolute three-value `translationM`;
+- exact source and compile SHA bindings;
+- `support: none`, the numerical profile, and the current canonical observed-target hash;
+- document identity, revision, size token and sewing-surface intent needed for native replay.
+
+Existing V4/V5/V6 and arrangement bytes remain byte-preserved. Qualified annular two-panel
+PlacementV3 is not a generic carrier and must not be coerced into this role. The outer snapshot
+SHA remains the CAS/read receipt and is not embedded into its own graph. Full AO identity is bound
+inside the graph, and the existing persistence owner remains the sole writer.
 
 ## Completion rule
 
