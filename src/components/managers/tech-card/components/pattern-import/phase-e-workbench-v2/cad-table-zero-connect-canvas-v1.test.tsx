@@ -21,6 +21,9 @@ import {
 } from 'lib/pattern-import/dxf-product-phase-e-multiseam-workbench-v2';
 
 import { SHEET_INK, vy } from '../sheet-viewport';
+import { buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1 } from './cad-mannequin-pattern-piece-overlay-v1';
+import { buildPatternImportDxfPhaseECadMannequinSceneOverlayFromExactAuthorityV2 } from './cad-mannequin-scene-overlay-adapter-v1';
+import { bridgePatternImportDxfPhaseECadMannequinSceneOverlayToRendererV1 } from './cad-mannequin-scene-overlay-renderer-bridge-v1';
 import { projectCadTablePieceFeatures } from './cad-table-piece-features-v1';
 import {
   createPatternImportDxfPhaseECadTablePieceLayoutSessionV1,
@@ -519,32 +522,101 @@ describe('zero-operation CAD table rendering', () => {
     expect(lower.viewportBounds).toBe(initial.viewportBounds);
   });
 
-  it('renders saved seam sides on the existing canvas without an editable Connect tool', () => {
+  it('renders the same saved seam side colors in the 2D canvas and the 3D renderer input', () => {
+    const { catalog, projection } = overlappingFixture();
+    const seamId = 'saved-seam';
+    const sides = [
+      {
+        seamId,
+        sideIndex: 0,
+        pieceId: 'closed-piece',
+        pieceLineKey: 'closed:M',
+        contourId: 'concave',
+        boundaryVertexIds: ['concave:5', 'concave:0'],
+        direction: 'forward',
+      },
+      {
+        seamId,
+        sideIndex: 1,
+        pieceId: 'open-piece',
+        pieceLineKey: 'open:M',
+        contourId: 'rectangle',
+        boundaryVertexIds: ['rectangle:1', 'rectangle:0'],
+        direction: 'reverse',
+      },
+    ] as const;
     const html = renderToStaticMarkup(
       <PatternImportDxfPhaseECadTableZeroConnectCanvasV1
-        {...fixture()}
+        catalog={catalog}
+        projection={projection}
         disabled
-        savedSeamSides={[
-          {
-            pieceId: 'closed-piece',
-            pieceLineKey: 'closed:M',
-            contourId: 'closed-cut',
-            boundaryVertexIds: ['closed:3', 'closed:0'],
-          },
-          {
-            pieceId: 'open-piece',
-            pieceLineKey: 'open:M',
-            contourId: 'open-cut',
-            boundaryVertexIds: ['open:1', 'open:0'],
-          },
-        ]}
+        savedSeamSides={sides}
       />,
     );
-    expect(html.match(/data-cad-zero-connect-side="[ab]"/g)).toEqual([
-      'data-cad-zero-connect-side="a"',
-      'data-cad-zero-connect-side="b"',
+    const operationNumber = 14;
+    const current = {
+      techCardId: catalog.techCardId,
+      cardRef: 'card-6',
+      cardLockVersion: 2,
+      serverAssemblyRevision: 'assembly-2',
+      importGeneration: 1,
+    };
+    const connection = {
+      connectionRef: seamId,
+      operationNumber,
+      authoringOperationId: 'operation-14',
+      row: {
+        techCardId: current.techCardId,
+        scopeKey: catalog.scopeKey,
+        patternLineKey: 'pattern-1',
+        revision: 1,
+        cardLockVersion: current.cardLockVersion,
+        url: '/pattern.dxf',
+        sizeBytes: 100,
+        sha256: 'c'.repeat(64),
+      },
+      serverTopologySha256: 'd'.repeat(64),
+      catalogCanonicalSha256: catalog.canonicalSha256,
+      sides,
+    };
+    const sources = [{ scopeKey: catalog.scopeKey, label: 'Main', projection }];
+    const scene = buildPatternImportDxfPhaseECadMannequinSceneOverlayFromExactAuthorityV2({
+      current,
+      staging: {
+        techCardId: current.techCardId,
+        importGeneration: current.importGeneration,
+        sources,
+      },
+      authority: {
+        ...current,
+        operations: [{ operationNumber, seamKeys: [seamId], exactConnections: [connection] }],
+        connections: [connection],
+      },
+      activeOperationNumber: operationNumber,
+      stitchVisuals: [],
+      bomItems: [],
+    });
+    if (!scene.ok) throw new Error(scene.blocker.detail);
+    const bridge = bridgePatternImportDxfPhaseECadMannequinSceneOverlayToRendererV1(scene.overlay);
+    if (!bridge.ok) throw new Error(bridge.blocker.detail);
+    const rendererInput = buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1({
+      sources,
+      decorations: bridge.bridge.decorations,
+      guides: bridge.bridge.guides,
+    });
+    if (!rendererInput.ok) throw new Error(rendererInput.blocker.detail);
+    const rendererSeams = rendererInput.overlay.pieces.flatMap(({ seams }) => seams);
+    expect(rendererSeams.map(({ side, colorCss }) => [side, colorCss])).toEqual([
+      ['A', '#2563EB'],
+      ['B', '#F97316'],
     ]);
-    expect(html).toContain('stroke="var(--color-highlightColor)"');
+    for (const { side, colorCss } of rendererSeams) {
+      const line = html.match(
+        new RegExp(`data-cad-zero-connect-side="${side.toLowerCase()}">(<line[^>]*>)`),
+      )?.[1];
+      expect(line).toContain(`stroke="${colorCss}"`);
+      expect(line?.includes('stroke-dasharray="6 3"')).toBe(side === 'B');
+    }
     expect(html).toContain('aria-label="Fit all pieces"');
     expect(html).not.toContain('aria-label="Connect edges"');
   });

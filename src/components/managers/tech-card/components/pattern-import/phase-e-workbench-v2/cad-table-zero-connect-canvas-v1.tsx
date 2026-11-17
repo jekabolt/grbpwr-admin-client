@@ -42,6 +42,7 @@ import {
 } from './cad-table-zero-connect-controller-v1';
 import { PatternImportDxfPhaseEDraftCadGridRulersV1 } from './draft-cad-grid-rulers-v1';
 import { PatternImportDxfPhaseECadWorkbenchToolButtonV1 } from './cad-workbench-tool-button-v1';
+import { CAD_WORKBENCH_SEAM_SIDE_COLORS } from './cad-workbench-seam-colors-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_CONNECT_CANVAS_V1 =
   'pattern-import-dxf-phase-e-cad-table-zero-connect-canvas/1' as const;
@@ -643,6 +644,10 @@ function CadTableZeroCanvas({
                       !!controller.session &&
                       !connectDisabled &&
                       controller.session.status !== 'ready';
+                    const savedSideColor =
+                      savedSideIndex === 0 || savedSideIndex === 1
+                        ? CAD_WORKBENCH_SEAM_SIDE_COLORS[savedSideIndex === 0 ? 'A' : 'B']
+                        : 'currentColor';
                     return (
                       <g
                         key={segment.viewKey}
@@ -657,7 +662,7 @@ function CadTableZeroCanvas({
                           y1={vy(from.y)}
                           x2={to.x}
                           y2={vy(to.y)}
-                          stroke={savedSeamSides ? 'var(--color-highlightColor)' : 'currentColor'}
+                          stroke={savedSideColor}
                           strokeWidth={selectedSide === null ? 1 : 3}
                           strokeDasharray={selectedSide === 1 ? '6 3' : undefined}
                           opacity={selectedSide === null ? 0.18 : 1}

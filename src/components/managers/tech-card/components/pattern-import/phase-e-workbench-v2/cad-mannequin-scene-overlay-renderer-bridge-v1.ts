@@ -9,6 +9,7 @@ import {
   type PatternImportDxfPhaseECadMannequinSceneOverlayV1,
   type PatternImportDxfPhaseECadMannequinScenePiecePlaneV1,
 } from './cad-mannequin-scene-overlay-adapter-v1';
+import { CAD_WORKBENCH_SEAM_SIDE_COLORS } from './cad-workbench-seam-colors-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_SCENE_OVERLAY_RENDERER_BRIDGE_V1 =
   'pattern-import-dxf-phase-e-cad-mannequin-scene-overlay-renderer-bridge/1' as const;
@@ -67,7 +68,6 @@ type Code = PatternImportDxfPhaseECadMannequinSceneOverlayRendererBridgeBlockerV
 
 const STABLE_REF = /^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,255}$/;
 const THREAD_COLOR = /^#[0-9A-F]{6}$/;
-const SIDE_COLORS = Object.freeze({ A: '#2563EB', B: '#F97316' } as const);
 
 function blocked(
   code: Code,
@@ -227,7 +227,7 @@ function edgeIssue(
     !stable(edge.primitiveId) ||
     !stable(edge.connectionRef) ||
     edge.primitiveId !== `edge:${edge.connectionRef}:${edge.side}` ||
-    edge.semanticColorHex !== SIDE_COLORS[edge.side] ||
+    edge.semanticColorHex !== CAD_WORKBENCH_SEAM_SIDE_COLORS[edge.side] ||
     edge.operationNumber !== overlay.focus.currentOperationNumber ||
     edge.authoringOperationId !== overlay.focus.currentOperationId
   )

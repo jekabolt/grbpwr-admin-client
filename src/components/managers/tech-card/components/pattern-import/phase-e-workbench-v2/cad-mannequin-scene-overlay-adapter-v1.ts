@@ -7,6 +7,7 @@ import {
 
 import { isTopstitchThreadLine, type TopstitchBomLine } from '../../topstitch-lines';
 import { resolvePatternImportDxfPhaseECadWorkbenchThreadCatalogV1 } from './cad-workbench-bom-visual-authority-v1';
+import { CAD_WORKBENCH_SEAM_SIDE_COLORS } from './cad-workbench-seam-colors-v1';
 import type {
   PatternImportDxfPhaseECadMannequinDxfStagingSelectionV1,
   PatternImportDxfPhaseECadMannequinDxfStagingSourceV1,
@@ -41,7 +42,6 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_SCENE_OVERLAY_CLAIMS_V1 = 
 
 const STABLE_REF = /^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,255}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
-const SIDE_COLORS = Object.freeze({ A: '#2563EB', B: '#F97316' } as const);
 const PIN_AUTHORITY_UNAVAILABLE_REASON =
   'No current exact pin-coordinate owner exists; pin guides are hidden.' as const;
 
@@ -75,7 +75,7 @@ export type PatternImportDxfPhaseECadMannequinSceneEdgeHighlightV1 = Readonly<{
   operationNumber: number;
   authoringOperationId: string;
   side: 'A' | 'B';
-  semanticColorHex: (typeof SIDE_COLORS)[keyof typeof SIDE_COLORS];
+  semanticColorHex: (typeof CAD_WORKBENCH_SEAM_SIDE_COLORS)[keyof typeof CAD_WORKBENCH_SEAM_SIDE_COLORS];
   piecePlaneKey: string;
   scopeKey: string;
   pieceId: string;
@@ -805,7 +805,7 @@ export function buildPatternImportDxfPhaseECadMannequinSceneOverlayFromExactAuth
             operationNumber: connection.operationNumber,
             authoringOperationId: connection.authoringOperationId,
             side: resolved.side,
-            semanticColorHex: SIDE_COLORS[resolved.side],
+            semanticColorHex: CAD_WORKBENCH_SEAM_SIDE_COLORS[resolved.side],
             piecePlaneKey: resolved.candidate.piecePlaneKey,
             scopeKey: resolved.candidate.source.scopeKey,
             pieceId: resolved.binding.pieceId,
