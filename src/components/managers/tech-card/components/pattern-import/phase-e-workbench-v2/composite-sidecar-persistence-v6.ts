@@ -48,6 +48,16 @@ export const PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_PERSISTENCE_CLAIMS_V6 
   productionReady: false,
 } as const);
 
+const BLOCKED_CLAIMS_V6 = Object.freeze({
+  ...PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_PERSISTENCE_CLAIMS_V6,
+  genericSemanticSidecarRpcReused: false as const,
+  freshCurrentGetBeforePut: false as const,
+  exactNestedV5BytesPreserved: false as const,
+  currentAuthorityAndArrangementTargetBound: false as const,
+  putEchoAndFreshGetVerified: false as const,
+  unknownOutcomeFreshGetRecovery: false as const,
+});
+
 export type PatternImportDxfProductCompositeSidecarArrangementTargetV6 = Readonly<{
   sizeToken: string;
   catalogCanonicalSha256: string;
@@ -108,7 +118,7 @@ export type PatternImportDxfProductCompositeSidecarSaveResultV6 =
       writeOutcome: 'not-attempted' | 'unknown' | 'acknowledged-unverified';
       receipt: null;
       blockers: readonly [PatternImportDxfProductCompositeSidecarSaveBlockerV6];
-      claims: typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_PERSISTENCE_CLAIMS_V6;
+      claims: typeof BLOCKED_CLAIMS_V6;
     }>;
 
 type SidecarService = Pick<
@@ -122,6 +132,7 @@ export type PatternImportDxfProductCompositeSidecarPersistenceDepsV6 = Readonly<
 }>;
 
 const SHA256 = /^[0-9a-f]{64}$/;
+const SHA256_ABC = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
 const STABLE_ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
 const MAX_SIDECAR_BYTES = 4 * 1024 * 1024;
 const decoder = new TextDecoder('utf-8', { fatal: true });
@@ -375,8 +386,19 @@ async function sha256(
 ): Promise<string> {
   if (!crypto?.subtle || typeof crypto.subtle.digest !== 'function')
     fail('readback-invalid', 'SHA-256 is unavailable.');
+  let known: ArrayBuffer;
   try {
-    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+    known = await crypto.subtle.digest('SHA-256', encoder.encode('abc'));
+  } catch {
+    fail('readback-invalid', 'SHA-256 self-test failed.');
+  }
+  const knownHex = Array.from(new Uint8Array(known), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('');
+  if (known.byteLength !== 32 || knownHex !== SHA256_ABC)
+    fail('readback-invalid', 'SHA-256 self-test mismatch.');
+  try {
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes.slice().buffer));
     if (digest.byteLength !== 32) throw new TypeError();
     return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
   } catch (error) {
@@ -488,6 +510,15 @@ async function decodedOwner(
 ) {
   const encoded = encodePatternImportDxfProductCompositeSidecarV6(owner);
   if (!encoded.ok) fail('readback-invalid', 'A genuine Composite V6 owner is required.');
+  const actualSha256 = await sha256(encoded.bytes.slice(), crypto);
+  if (
+    encoded.canonicalByteLength !== encoded.bytes.byteLength ||
+    encoded.canonicalByteLength < 1 ||
+    encoded.canonicalByteLength > MAX_SIDECAR_BYTES ||
+    encoded.canonicalSha256 !== actualSha256
+  ) {
+    fail('readback-invalid', 'Composite V6 encoded bytes differ from their canonical seal.');
+  }
   const decoded = await decodePatternImportDxfProductCompositeSidecarV6(encoded.bytes, crypto);
   if (!decoded.ok)
     fail('readback-invalid', `Composite V6 is invalid: ${decoded.blockers[0].detail}`);
@@ -695,7 +726,7 @@ function failed(
     blockers: Object.freeze([blocker(error, 'storage-blocked')]) as readonly [
       PatternImportDxfProductCompositeSidecarSaveBlockerV6,
     ],
-    claims: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_PERSISTENCE_CLAIMS_V6,
+    claims: BLOCKED_CLAIMS_V6,
   });
 }
 
@@ -756,6 +787,12 @@ export function createPatternImportDxfProductCompositeSidecarPersistenceV6(
         return failed(error, 'not-attempted');
       }
       const stored = await adapter.persist(captured, signal);
+      if (signal.aborted) {
+        return failed(
+          new CompositeV6PersistenceFailure('cancelled', 'Composite V6 save was cancelled.'),
+          stored.ok ? 'acknowledged-unverified' : stored.writeOutcome,
+        );
+      }
       if (stored.ok) {
         return Object.freeze({
           ok: true as const,
