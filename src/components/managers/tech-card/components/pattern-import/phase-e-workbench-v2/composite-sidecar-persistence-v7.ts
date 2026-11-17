@@ -15,7 +15,11 @@ import {
   type PatternImportDxfProductCompositeSidecarBindingsV3,
 } from 'lib/cloth/domain/pattern-import-dxf-product-composite-sidecar-v3';
 
-import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6 } from './composite-sidecar-v6';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6,
+  decodePatternImportDxfProductCompositeSidecarV6,
+  readPatternImportDxfProductCompositeComponentBytesV6,
+} from './composite-sidecar-v6';
 import {
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7,
   decodePatternImportDxfProductCompositeSidecarV7,
@@ -23,6 +27,7 @@ import {
   readPatternImportDxfProductCompositeComponentBytesV7,
   type PatternImportDxfProductCompositeSidecarOwnerV7,
 } from './composite-sidecar-v7';
+import { SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_KIND_V1 } from './saved-full-assembly-physical-component-v1';
 
 export const PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V7 =
   'pattern-import-dxf-product-composite-sidecar-storage-request/7' as const;
@@ -34,8 +39,11 @@ export type PatternImportDxfProductCompositeSidecarTransportAnchorV7 = Readonly<
   serverTopologySha256: string;
 }>;
 
+export type PatternImportDxfProductCompositeSidecarTransitionIntentV7 = 'physical' | 'arrangement';
+
 export type PatternImportDxfProductCompositeSidecarStorageRequestV7 = Readonly<{
   schemaVersion: typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V7;
+  transitionIntent: PatternImportDxfProductCompositeSidecarTransitionIntentV7;
   currentAuthority: PatternImportDxfProductCompositeSidecarBindingsV3;
   transportAnchor: PatternImportDxfProductCompositeSidecarTransportAnchorV7;
   nextOwner: PatternImportDxfProductCompositeSidecarOwnerV7;
@@ -121,7 +129,7 @@ function semanticTransport(owner: unknown, selectedOperationNumber: number) {
   });
 }
 
-async function currentNestedV6(
+async function currentV7Components(
   current: Extract<
     PatternImportDxfProductCompositeSidecarStorageVerifiedGetV3,
     { status: 'present' }
@@ -131,18 +139,42 @@ async function currentNestedV6(
   if ((await sha256(current.bytes, crypto)) !== current.sha256)
     fail('Current Composite bytes differ from their digest.');
   if (current.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6)
-    return current.bytes.slice();
+    return Object.freeze({ nestedV6: current.bytes.slice(), physical: null });
   if (current.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7) {
     const decoded = await decodePatternImportDxfProductCompositeSidecarV7(current.bytes, crypto);
     if (!decoded.ok) fail(`Current Composite V7 is invalid: ${decoded.blockers[0].detail}`);
-    const nested = readPatternImportDxfProductCompositeComponentBytesV7(
+    const nestedV6 = readPatternImportDxfProductCompositeComponentBytesV7(
       decoded.owner,
       'composite-v6',
     );
-    if (!nested) fail('Current Composite V7 has no exact nested V6 bytes.');
-    return nested;
+    const physical = readPatternImportDxfProductCompositeComponentBytesV7(
+      decoded.owner,
+      SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_KIND_V1,
+    );
+    if (!nestedV6 || !physical)
+      fail('Current Composite V7 has no exact nested V6 or physical bytes.');
+    return Object.freeze({ nestedV6, physical });
   }
   fail('Current sidecar is not Composite V6 or V7.');
+}
+
+async function arrangementComponentsV6(
+  bytes: Uint8Array,
+  crypto: Pick<Crypto, 'subtle'> | undefined,
+) {
+  const decoded = await decodePatternImportDxfProductCompositeSidecarV6(bytes, crypto);
+  if (!decoded.ok) fail(`Nested Composite V6 is invalid: ${decoded.blockers[0].detail}`);
+  const nestedV5 = readPatternImportDxfProductCompositeComponentBytesV6(
+    decoded.owner,
+    'composite-v5',
+  );
+  const arrangement = readPatternImportDxfProductCompositeComponentBytesV6(
+    decoded.owner,
+    'cad-mannequin-arrangement-v1',
+  );
+  if (!nestedV5 || !arrangement)
+    fail('Nested Composite V6 arrangement components are unavailable.');
+  return Object.freeze({ nestedV5, arrangement });
 }
 
 async function prepareV7(
@@ -166,13 +198,33 @@ async function prepareV7(
     fail('Composite V7 bindings differ from current authority.');
   if (decoded.document.writeCas.expectedPreviousSidecarSha256 !== current.sha256)
     fail('Composite V7 CAS differs from the fresh current GET.');
-  const previousNestedV6 = await currentNestedV6(current, crypto);
+  const previous = await currentV7Components(current, crypto);
   const nextNestedV6 = readPatternImportDxfProductCompositeComponentBytesV7(
     decoded.owner,
     'composite-v6',
   );
-  if (!nextNestedV6 || !sameBytes(previousNestedV6, nextNestedV6))
-    fail('Exact nested Composite V6 bytes changed during the physical transition.');
+  const nextPhysical = readPatternImportDxfProductCompositeComponentBytesV7(
+    decoded.owner,
+    SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_KIND_V1,
+  );
+  if (!nextNestedV6 || !nextPhysical) fail('Composite V7 transition components are unavailable.');
+  if (request.transitionIntent === 'physical') {
+    if (!sameBytes(previous.nestedV6, nextNestedV6))
+      fail('Exact nested Composite V6 bytes changed during the physical transition.');
+  } else if (request.transitionIntent === 'arrangement') {
+    if (current.mediaType !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7)
+      fail('Arrangement transition requires current Composite V7.');
+    if (!previous.physical || !sameBytes(previous.physical, nextPhysical))
+      fail('Exact physical component bytes changed during the arrangement transition.');
+    const [previousV6, nextV6] = await Promise.all([
+      arrangementComponentsV6(previous.nestedV6, crypto),
+      arrangementComponentsV6(nextNestedV6, crypto),
+    ]);
+    if (!sameBytes(previousV6.nestedV5, nextV6.nestedV5))
+      fail('Exact nested Composite V5 bytes changed during the arrangement transition.');
+  } else {
+    fail('Composite V7 transition intent is invalid.');
+  }
   const nestedV3 =
     decoded.nestedCompositeV6.nestedCompositeV5.nestedCompositeV4.nestedCompositeV3.owner;
   const transport = semanticTransport(nestedV3, request.transportAnchor.sourceOperationNumber);
@@ -187,10 +239,15 @@ async function prepareV7(
   });
 }
 
-export function createPatternImportDxfProductCompositeSidecarStorageAdapterV7(
+function createStorageAdapterV7(
   deps: PatternImportDxfProductCompositeSidecarStorageDepsV3,
-  host: unknown,
-  context: SavedGenericObservedPhysicalHostPersistenceContextV1,
+  guard:
+    | Readonly<{
+        intent: 'physical';
+        host: unknown;
+        context: SavedGenericObservedPhysicalHostPersistenceContextV1;
+      }>
+    | Readonly<{ intent: 'arrangement' }>,
 ): PatternImportDxfProductCompositeSidecarStorageAdapterV7 {
   return createPatternImportDxfProductCompositeSidecarStorageWriterV3(deps, {
     requestSchemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V7,
@@ -200,15 +257,38 @@ export function createPatternImportDxfProductCompositeSidecarStorageAdapterV7(
       PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6,
       PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7,
     ]),
-    label: 'Composite V7 Full Assembly physical document',
+    label: `Composite V7 ${guard.intent} transition`,
     prepare: prepareV7,
-    beforeRequest: async (_request, _planned, signal) => {
-      if (!isCurrentSavedGenericObservedPhysicalHostPersistenceContextV1(host, context, signal))
+    beforeRequest: async (request, _planned, signal) => {
+      if (request.transitionIntent !== guard.intent)
+        fail('Composite V7 adapter transition intent differs.');
+      if (
+        guard.intent === 'physical' &&
+        !isCurrentSavedGenericObservedPhysicalHostPersistenceContextV1(
+          guard.host,
+          guard.context,
+          signal,
+        )
+      )
         fail('The genuine physical host changed before its storage PUT.');
     },
     verifyCanonical: async (bytes, crypto) =>
       (await decodePatternImportDxfProductCompositeSidecarV7(bytes, crypto)).ok,
   });
+}
+
+export function createPatternImportDxfProductCompositeSidecarStorageAdapterV7(
+  deps: PatternImportDxfProductCompositeSidecarStorageDepsV3,
+  host: unknown,
+  context: SavedGenericObservedPhysicalHostPersistenceContextV1,
+): PatternImportDxfProductCompositeSidecarStorageAdapterV7 {
+  return createStorageAdapterV7(deps, { intent: 'physical', host, context });
+}
+
+export function createPatternImportDxfProductCompositeSidecarArrangementStorageAdapterV7(
+  deps: PatternImportDxfProductCompositeSidecarStorageDepsV3,
+): PatternImportDxfProductCompositeSidecarStorageAdapterV7 {
+  return createStorageAdapterV7(deps, { intent: 'arrangement' });
 }
 
 export function createPatternImportDxfProductCompositeSidecarProductionStorageAdapterV7(
@@ -224,4 +304,13 @@ export function createPatternImportDxfProductCompositeSidecarProductionStorageAd
     host,
     context,
   );
+}
+
+export function createPatternImportDxfProductCompositeSidecarProductionArrangementStorageAdapterV7(
+  crypto: Pick<Crypto, 'subtle'> | undefined = globalThis.crypto,
+) {
+  return createPatternImportDxfProductCompositeSidecarArrangementStorageAdapterV7({
+    createClient: (signal) => abortableAdminService(signal),
+    crypto,
+  });
 }

@@ -1,6 +1,11 @@
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import type { CadWorkbenchMannequinArrangementSaveV1 } from './cad-workbench-physical-host-v1';
-import { decodePatternImportDxfProductCompositeSidecarV7 } from './composite-sidecar-v7';
+import {
+  buildPatternImportDxfProductCompositeSidecarV7,
+  decodePatternImportDxfProductCompositeSidecarV7,
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V7,
+  readPatternImportDxfProductCompositeComponentBytesV7,
+} from './composite-sidecar-v7';
 
 import {
   createCadMannequinArrangementDocumentV1,
@@ -23,6 +28,7 @@ import {
 import {
   buildPatternImportDxfProductCompositeSidecarV6,
   decodePatternImportDxfProductCompositeSidecarV6,
+  encodePatternImportDxfProductCompositeSidecarV6,
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V6,
   readPatternImportDxfProductCompositeComponentBytesV6,
 } from './composite-sidecar-v6';
@@ -30,6 +36,11 @@ import {
   createPatternImportDxfProductCompositeSidecarProductionPersistenceV6,
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V6,
 } from './composite-sidecar-persistence-v6';
+import {
+  createPatternImportDxfProductCompositeSidecarProductionArrangementStorageAdapterV7,
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V7,
+} from './composite-sidecar-persistence-v7';
+import { SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_KIND_V1 } from './saved-full-assembly-physical-component-v1';
 import {
   disposeSavedFullAssemblySnapshotV1,
   projectSavedFullAssemblySnapshotV1,
@@ -59,6 +70,60 @@ async function readCurrent(
   } finally {
     disposeSavedFullAssemblySnapshotV1(receipt);
   }
+}
+
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return (
+    left.byteLength === right.byteLength && left.every((value, index) => value === right[index])
+  );
+}
+
+function arrangementTransportAnchor(
+  current: Extract<
+    Awaited<ReturnType<typeof decodePatternImportDxfProductCompositeSidecarV7>>,
+    { ok: true }
+  >,
+  snapshot: Awaited<ReturnType<typeof readCurrent>>,
+) {
+  const graph = current.fullAssemblyPhysicalEnvelope.document.graph;
+  const operation = graph.operations.find(
+    (candidate) =>
+      candidate.kind === 'stitch' &&
+      Number.isSafeInteger(candidate.sourceOperationNumber) &&
+      candidate.sourceOperationNumber > 0 &&
+      candidate.seamIds.length > 0,
+  );
+  if (!operation)
+    throw new Error('The saved physical graph has no genuine seam-bearing stitch operation.');
+  const graphSeams = operation.seamIds.map((seamId) => {
+    const matches = graph.seams.filter(
+      (seam) => seam.id === seamId && seam.clientOperationId === operation.clientOperationId,
+    );
+    if (matches.length !== 1)
+      throw new Error('The saved physical graph stitch no longer owns every seam exactly once.');
+    return matches[0].sourceSeamKey;
+  });
+  const savedOperation = snapshot.operations.find(
+    (candidate) => candidate.operationNumber === operation.sourceOperationNumber,
+  );
+  if (
+    !savedOperation ||
+    savedOperation.seamKeys.length !== graphSeams.length ||
+    !savedOperation.seamKeys.every((seamKey, index) => seamKey === graphSeams[index])
+  )
+    throw new Error('The saved physical graph stitch differs from the current Assembly Order.');
+  const receipts = snapshot.selectedTopologyReceipts.filter(
+    (receipt) => receipt.sourceOperationNumber === operation.sourceOperationNumber,
+  );
+  if (
+    receipts.length !== 1 ||
+    receipts[0].sha256 !== current.document.bindings.assemblyTopologySha256
+  )
+    throw new Error('The saved physical graph stitch differs from the current topology receipt.');
+  return Object.freeze({
+    sourceOperationNumber: operation.sourceOperationNumber,
+    serverTopologySha256: receipts[0].sha256,
+  });
 }
 
 /** Read-only hydration. A different source, model or pose never receives stale transforms. */
@@ -200,12 +265,21 @@ export async function saveSavedCadMannequinArrangementV1(
       throw new Error('The saved annotation envelope changed before arrangement save.');
   }
 
-  const nestedBytes = outer.mediaType.endsWith('.v6+json')
-    ? await (async () => {
-        const decoded = await decodePatternImportDxfProductCompositeSidecarV6(outer.bytes);
-        if (!decoded.ok) throw new Error(decoded.blockers[0].detail);
-        return readPatternImportDxfProductCompositeComponentBytesV6(decoded.owner, 'composite-v5');
-      })()
+  const currentV7 = outer.mediaType.endsWith('.v7+json')
+    ? await decodePatternImportDxfProductCompositeSidecarV7(outer.bytes)
+    : null;
+  if (currentV7 && !currentV7.ok) throw new Error(currentV7.blockers[0].detail);
+  const currentV6Bytes = currentV7?.ok
+    ? readPatternImportDxfProductCompositeComponentBytesV7(currentV7.owner, 'composite-v6')
+    : outer.mediaType.endsWith('.v6+json')
+      ? outer.bytes
+      : null;
+  const currentV6 = currentV6Bytes
+    ? await decodePatternImportDxfProductCompositeSidecarV6(currentV6Bytes)
+    : null;
+  if (currentV6 && !currentV6.ok) throw new Error(currentV6.blockers[0].detail);
+  const nestedBytes = currentV6?.ok
+    ? readPatternImportDxfProductCompositeComponentBytesV6(currentV6.owner, 'composite-v5')
     : outer.mediaType.endsWith('.v5+json')
       ? outer.bytes
       : null;
@@ -215,15 +289,87 @@ export async function saveSavedCadMannequinArrangementV1(
   if (!nested.ok) throw new Error(nested.blockers[0].detail);
   if (nested.document.bindings.serverAssemblyRevision !== snapshot.serverAssemblyRevision)
     throw new Error('Assembly Order changed. Reload before saving mannequin arrangement.');
+  const arrangementBytes = new TextEncoder().encode(
+    encodeCadMannequinArrangementDocumentV1(arrangement),
+  );
   const next = await buildPatternImportDxfProductCompositeSidecarV6({
     schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V6,
     expectedPreviousSidecarSha256: outer.sha256,
     compositeV5Bytes: nestedBytes,
-    mannequinArrangementBytes: new TextEncoder().encode(
-      encodeCadMannequinArrangementDocumentV1(arrangement),
-    ),
+    mannequinArrangementBytes: arrangementBytes,
   });
   if (!next.ok) throw new Error(next.blockers[0].detail);
+  if (currentV7?.ok) {
+    const encodedV6 = encodePatternImportDxfProductCompositeSidecarV6(next.owner);
+    if (!encodedV6.ok) throw new Error('The arrangement Composite V6 could not be encoded.');
+    const physicalBytes = readPatternImportDxfProductCompositeComponentBytesV7(
+      currentV7.owner,
+      SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_KIND_V1,
+    );
+    if (!physicalBytes)
+      throw new Error('The current Composite V7 has no exact physical component.');
+    const nextV7 = await buildPatternImportDxfProductCompositeSidecarV7({
+      schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V7,
+      expectedPreviousSidecarSha256: outer.sha256,
+      bindings: currentV7.document.bindings,
+      compositeV6Bytes: encodedV6.bytes,
+      fullAssemblyPhysicalBytes: physicalBytes,
+    });
+    if (!nextV7.ok) throw new Error(nextV7.blockers[0].detail);
+    const anchor = arrangementTransportAnchor(currentV7, snapshot);
+    const saved =
+      await createPatternImportDxfProductCompositeSidecarProductionArrangementStorageAdapterV7().persist(
+        {
+          schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V7,
+          transitionIntent: 'arrangement',
+          currentAuthority: currentV7.document.bindings,
+          transportAnchor: anchor,
+          nextOwner: nextV7.owner,
+        },
+        signal,
+      );
+    if (!saved.ok) throw new Error(saved.blockers[0].detail);
+    const reloaded = await readCurrent(request, signal);
+    if (
+      reloaded.outer.status !== 'present' ||
+      !reloaded.outer.currentRowBound ||
+      !reloaded.outer.mediaType.endsWith('.v7+json') ||
+      reloaded.outer.sha256 !== saved.receipt.sidecarSha256
+    )
+      throw new Error('The saved Composite V7 arrangement changed before fresh readback.');
+    const verified = await decodePatternImportDxfProductCompositeSidecarV7(reloaded.outer.bytes);
+    if (!verified.ok) throw new Error(verified.blockers[0].detail);
+    const verifiedPhysical = readPatternImportDxfProductCompositeComponentBytesV7(
+      verified.owner,
+      SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_KIND_V1,
+    );
+    const verifiedV6Bytes = readPatternImportDxfProductCompositeComponentBytesV7(
+      verified.owner,
+      'composite-v6',
+    );
+    if (!verifiedPhysical || !sameBytes(physicalBytes, verifiedPhysical) || !verifiedV6Bytes)
+      throw new Error('Fresh Composite V7 readback did not preserve physical initialization.');
+    const verifiedV6 = await decodePatternImportDxfProductCompositeSidecarV6(verifiedV6Bytes);
+    if (!verifiedV6.ok) throw new Error(verifiedV6.blockers[0].detail);
+    const verifiedV5 = readPatternImportDxfProductCompositeComponentBytesV6(
+      verifiedV6.owner,
+      'composite-v5',
+    );
+    const verifiedArrangement = readPatternImportDxfProductCompositeComponentBytesV6(
+      verifiedV6.owner,
+      'cad-mannequin-arrangement-v1',
+    );
+    if (
+      !verifiedV5 ||
+      !sameBytes(nestedBytes, verifiedV5) ||
+      !verifiedArrangement ||
+      !sameBytes(arrangementBytes, verifiedArrangement)
+    )
+      throw new Error(
+        'Fresh Composite V7 readback differs from the saved presentation arrangement.',
+      );
+    return saved;
+  }
   const { source, scope, mannequin } = arrangement.bindings;
   const saved = await createPatternImportDxfProductCompositeSidecarProductionPersistenceV6().save(
     {

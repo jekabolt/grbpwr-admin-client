@@ -395,6 +395,7 @@ export async function persistCurrentSavedGenericObservedPhysicalHostV1(
     const stored = await storage.persist(
       {
         schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V7,
+        transitionIntent: 'physical',
         currentAuthority: next.authority,
         transportAnchor: prepared.transportAnchor,
         nextOwner: next.owner,

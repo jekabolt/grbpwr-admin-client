@@ -7,10 +7,16 @@ const mocks = vi.hoisted(() => ({
   decodeV5: vi.fn(),
   decodeV6: vi.fn(),
   decodeV7: vi.fn(),
+  buildV7: vi.fn(),
+  encodeV7: vi.fn(),
+  readV7Component: vi.fn(),
   buildV5: vi.fn(),
   buildV6: vi.fn(),
+  encodeV6: vi.fn(),
+  readV6Component: vi.fn(),
   saveV5: vi.fn(),
   saveV6: vi.fn(),
+  saveV7: vi.fn(),
   annotations: vi.fn(),
   nestedBytes: new Uint8Array([5, 1, 2]),
 }));
@@ -36,11 +42,16 @@ vi.mock('./composite-sidecar-v5', () => ({
 vi.mock('./composite-sidecar-v6', () => ({
   buildPatternImportDxfProductCompositeSidecarV6: mocks.buildV6,
   decodePatternImportDxfProductCompositeSidecarV6: mocks.decodeV6,
-  readPatternImportDxfProductCompositeComponentBytesV6: () => mocks.nestedBytes,
+  encodePatternImportDxfProductCompositeSidecarV6: mocks.encodeV6,
+  readPatternImportDxfProductCompositeComponentBytesV6: mocks.readV6Component,
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V6: 'v6',
 }));
 vi.mock('./composite-sidecar-v7', () => ({
+  buildPatternImportDxfProductCompositeSidecarV7: mocks.buildV7,
   decodePatternImportDxfProductCompositeSidecarV7: mocks.decodeV7,
+  encodePatternImportDxfProductCompositeSidecarV7: mocks.encodeV7,
+  readPatternImportDxfProductCompositeComponentBytesV7: mocks.readV7Component,
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V7: 'v7',
 }));
 vi.mock('./composite-sidecar-persistence-v5', () => ({
   createPatternImportDxfProductCompositeSidecarProductionPersistenceV5: () => ({
@@ -53,6 +64,12 @@ vi.mock('./composite-sidecar-persistence-v6', () => ({
     save: mocks.saveV6,
   }),
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V6: 'store-v6',
+}));
+vi.mock('./composite-sidecar-persistence-v7', () => ({
+  createPatternImportDxfProductCompositeSidecarProductionArrangementStorageAdapterV7: () => ({
+    persist: mocks.saveV7,
+  }),
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V7: 'store-v7',
 }));
 
 import {
@@ -127,11 +144,23 @@ beforeEach(() => {
   mocks.decodeV4.mockResolvedValue(decoded);
   mocks.decodeV5.mockResolvedValue(decoded);
   mocks.decodeV6.mockResolvedValue(decoded);
+  mocks.readV6Component.mockImplementation((_owner, kind) =>
+    kind === 'composite-v5' ? mocks.nestedBytes : new Uint8Array([8]),
+  );
   mocks.buildV5.mockResolvedValue({ ok: true, owner: { v: 5 } });
   mocks.buildV6.mockResolvedValue({ ok: true, owner: { v: 6 } });
+  mocks.encodeV6.mockReturnValue({ ok: true, bytes: new Uint8Array([6, 9]) });
+  mocks.buildV7.mockResolvedValue({ ok: true, owner: { v: 7 } });
+  mocks.encodeV7.mockReturnValue({
+    ok: true,
+    bytes: new Uint8Array([7, 9]),
+    canonicalSha256: 'saved-v7',
+    canonicalByteLength: 2,
+  });
   mocks.annotations.mockResolvedValue({ ok: true, bytes: new Uint8Array([9]) });
   mocks.saveV5.mockResolvedValue({ ok: true, receipt: { sidecarSha256: 'saved-v5' } });
   mocks.saveV6.mockResolvedValue({ ok: true, receipt: { sidecarSha256: 'saved-v6' } });
+  mocks.saveV7.mockResolvedValue({ ok: true, receipt: { sidecarSha256: 'saved-v7' } });
 });
 
 describe('explicit production mannequin arrangement transaction', () => {
@@ -178,16 +207,158 @@ describe('explicit production mannequin arrangement transaction', () => {
     expect(mocks.saveV5).not.toHaveBeenCalled();
     expect(mocks.saveV6).not.toHaveBeenCalled();
   });
-  it('preserves nested V5 when updating V6 and rejects V7 instead of downgrading', async () => {
+  it('preserves nested V5 when updating V6 and rewraps V7 without changing physical bytes', async () => {
     mocks.read.mockResolvedValue(snapshot(6));
     await saveSavedCadMannequinArrangementV1(request(), new AbortController().signal);
     expect(mocks.buildV6.mock.calls[0][0].compositeV5Bytes).toEqual(mocks.nestedBytes);
     mocks.saveV6.mockClear();
-    mocks.read.mockResolvedValue(snapshot(7));
+    mocks.buildV6.mockClear();
+    const topologySha = 'd'.repeat(64);
+    const currentOwner = { id: 'current-v7' };
+    const verifiedOwner = { id: 'verified-v7' };
+    const currentV6Owner = { id: 'current-v6' };
+    const verifiedV6Owner = { id: 'verified-v6' };
+    const currentV6Bytes = new Uint8Array([6, 1]);
+    const verifiedV6Bytes = new Uint8Array([6, 9]);
+    const physicalBytes = new Uint8Array([4, 4, 4]);
+    const initial = {
+      ...snapshot(7),
+      operations: [{ operationNumber: 20, seamKeys: ['side-seam'] }],
+      selectedTopologyReceipts: [{ sourceOperationNumber: 20, sha256: topologySha }],
+    };
+    const reloaded = {
+      ...snapshot(7, 'saved-v7'),
+      operations: initial.operations,
+      selectedTopologyReceipts: initial.selectedTopologyReceipts,
+    };
+    mocks.read.mockResolvedValueOnce(initial).mockResolvedValueOnce(reloaded);
+    const bindings = {
+      row,
+      serverAssemblyRevision: 'current-assembly',
+      assemblyTopologySha256: topologySha,
+    };
+    const graph = {
+      operations: [
+        {
+          kind: 'stitch',
+          sourceOperationNumber: 20,
+          clientOperationId: 'operation-20',
+          seamIds: ['seam-20'],
+        },
+      ],
+      seams: [
+        {
+          id: 'seam-20',
+          clientOperationId: 'operation-20',
+          sourceSeamKey: 'side-seam',
+        },
+      ],
+    };
+    mocks.decodeV7
+      .mockResolvedValueOnce({
+        ok: true,
+        owner: currentOwner,
+        document: { bindings },
+        fullAssemblyPhysicalEnvelope: { document: { graph } },
+      })
+      .mockResolvedValueOnce({ ok: true, owner: verifiedOwner });
+    mocks.readV7Component.mockImplementation((owner, kind) => {
+      if (kind === 'composite-v6') return owner === currentOwner ? currentV6Bytes : verifiedV6Bytes;
+      return physicalBytes.slice();
+    });
+    const decoded = {
+      ok: true,
+      document: { bindings: { row, serverAssemblyRevision: 'current-assembly' } },
+    };
+    mocks.decodeV6
+      .mockResolvedValueOnce({ ...decoded, owner: currentV6Owner })
+      .mockResolvedValueOnce({ ...decoded, owner: verifiedV6Owner });
+    mocks.readV6Component.mockImplementation((owner, kind) => {
+      if (kind === 'composite-v5') return mocks.nestedBytes;
+      if (owner === verifiedV6Owner)
+        return mocks.buildV6.mock.calls[0][0].mannequinArrangementBytes;
+      return new Uint8Array([8]);
+    });
+    mocks.buildV6.mockResolvedValue({ ok: true, owner: { v: 6 } });
+    mocks.encodeV6.mockReturnValue({ ok: true, bytes: verifiedV6Bytes });
+    mocks.buildV7.mockResolvedValue({ ok: true, owner: { v: 7 } });
+    await saveSavedCadMannequinArrangementV1(request(), new AbortController().signal);
+    expect(mocks.buildV7.mock.calls[0][0]).toMatchObject({
+      expectedPreviousSidecarSha256: 'prior',
+      bindings,
+      compositeV6Bytes: verifiedV6Bytes,
+      fullAssemblyPhysicalBytes: physicalBytes,
+    });
+    expect(mocks.saveV7).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transitionIntent: 'arrangement',
+        currentAuthority: bindings,
+        transportAnchor: { sourceOperationNumber: 20, serverTopologySha256: topologySha },
+      }),
+      expect.any(AbortSignal),
+    );
+    expect(mocks.read).toHaveBeenCalledTimes(3);
+    expect(mocks.saveV6).not.toHaveBeenCalled();
+  });
+
+  it('fails V7 save when fresh readback does not preserve the physical component', async () => {
+    const topologySha = 'd'.repeat(64);
+    const currentOwner = { id: 'current-v7' };
+    const verifiedOwner = { id: 'verified-v7' };
+    const initial = {
+      ...snapshot(7),
+      operations: [{ operationNumber: 20, seamKeys: ['side-seam'] }],
+      selectedTopologyReceipts: [{ sourceOperationNumber: 20, sha256: topologySha }],
+    };
+    mocks.read.mockResolvedValueOnce(initial).mockResolvedValueOnce({
+      ...initial,
+      outer: { ...initial.outer, sha256: 'saved-v7', bytes: new Uint8Array([7, 9]) },
+    });
+    const bindings = {
+      row,
+      serverAssemblyRevision: 'current-assembly',
+      assemblyTopologySha256: topologySha,
+    };
+    mocks.decodeV7
+      .mockResolvedValueOnce({
+        ok: true,
+        owner: currentOwner,
+        document: { bindings },
+        fullAssemblyPhysicalEnvelope: {
+          document: {
+            graph: {
+              operations: [
+                {
+                  kind: 'stitch',
+                  sourceOperationNumber: 20,
+                  clientOperationId: 'operation-20',
+                  seamIds: ['seam-20'],
+                },
+              ],
+              seams: [
+                {
+                  id: 'seam-20',
+                  clientOperationId: 'operation-20',
+                  sourceSeamKey: 'side-seam',
+                },
+              ],
+            },
+          },
+        },
+      })
+      .mockResolvedValueOnce({ ok: true, owner: verifiedOwner });
+    mocks.readV7Component.mockImplementation((owner, kind) => {
+      if (kind === 'composite-v6') return new Uint8Array([6, owner === currentOwner ? 1 : 9]);
+      return new Uint8Array([owner === currentOwner ? 4 : 3]);
+    });
+    mocks.decodeV6.mockResolvedValue({
+      ok: true,
+      owner: {},
+      document: { bindings: { row, serverAssemblyRevision: 'current-assembly' } },
+    });
     await expect(
       saveSavedCadMannequinArrangementV1(request(), new AbortController().signal),
-    ).rejects.toThrow();
-    expect(mocks.saveV6).not.toHaveBeenCalled();
+    ).rejects.toThrow('did not preserve physical initialization');
   });
   it('rejects foreign arrangement bindings before any read or partial V5 write', async () => {
     const input = request();
