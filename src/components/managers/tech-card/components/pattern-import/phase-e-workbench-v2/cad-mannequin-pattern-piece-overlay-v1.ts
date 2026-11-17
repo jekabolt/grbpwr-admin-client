@@ -2,7 +2,6 @@ import type {
   MeasurementSurfacePatternPieceOverlayV1,
   MeasurementSurfacePatternPieceSeamV1,
   MeasurementSurfacePatternPieceTransformV1,
-  MeasurementSurfacePatternPieceV1,
 } from 'components/shared/measurement-watertight-surface-v1-stage';
 
 import type {
@@ -150,12 +149,17 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
   }
 
   const selectedScope = input.selection?.scopeKey || input.activeScopeKey || null;
+  const selectedPieces = pieces.filter(
+    ({ source, piece }) =>
+      input.selection?.pieceId === piece.pieceId &&
+      (!selectedScope || selectedScope === source.scopeKey) &&
+      (input.selection.pieceLineKey == null || input.selection.pieceLineKey === piece.pieceLineKey),
+  );
+  const selectedPiece = selectedPieces.length === 1 ? selectedPieces[0] : null;
   const overlayPieces: MeasurementSurfacePatternPieceOverlayV1['pieces'] = Object.freeze(
     pieces.map(({ source, piece }, index) => {
       const pieceKey = `${source.scopeKey}:${piece.pieceId}:${piece.pieceLineKey}`;
-      const selected =
-        input.selection?.pieceId === piece.pieceId &&
-        (!selectedScope || selectedScope === source.scopeKey);
+      const selected = selectedPiece?.source === source && selectedPiece.piece === piece;
       const pieceDecorations = (input.decorations ?? []).filter(
         (decoration) =>
           decoration.scopeKey === source.scopeKey && decoration.pieceId === piece.pieceId,
@@ -256,15 +260,22 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
         thread: true,
       }),
       guides: input.guides,
-      onSelectPiece: (
-        piece: Pick<MeasurementSurfacePatternPieceV1, 'pieceKey' | 'scopeKey' | 'pieceId'>,
-      ) =>
+      onSelectPiece: (hit) => {
+        const piece = overlayPieces.find(
+          ({ pieceKey, scopeKey, pieceId, pieceLineKey }) =>
+            pieceKey === hit.pieceKey &&
+            scopeKey === hit.scopeKey &&
+            pieceId === hit.pieceId &&
+            pieceLineKey === hit.pieceLineKey,
+        );
+        if (!piece) return;
         input.onFocus?.({
           scopeKey: piece.scopeKey,
           pieceId: piece.pieceId,
-          seamId:
-            input.selection?.pieceId === piece.pieceId ? input.selection?.seamId ?? null : null,
-        }),
+          pieceLineKey: piece.pieceLineKey,
+          seamId: piece.selected ? input.selection?.seamId ?? null : null,
+        });
+      },
       onTransformPiece: input.onTransform,
     }),
   });

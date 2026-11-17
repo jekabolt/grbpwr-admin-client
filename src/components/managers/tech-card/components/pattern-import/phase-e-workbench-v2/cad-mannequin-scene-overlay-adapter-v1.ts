@@ -453,7 +453,8 @@ function selectedPiecePlaneKey(
   const matches = candidates.filter(
     ({ source, piece }) =>
       piece.pieceId === selection.pieceId &&
-      (!selection.scopeKey || source.scopeKey === selection.scopeKey),
+      (!selection.scopeKey || source.scopeKey === selection.scopeKey) &&
+      (selection.pieceLineKey == null || piece.pieceLineKey === selection.pieceLineKey),
   );
   return matches.length === 1 ? matches[0].piecePlaneKey : null;
 }

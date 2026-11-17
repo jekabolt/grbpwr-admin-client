@@ -80,6 +80,7 @@ import { confirmPatternImportDxfPhaseECadSemanticFreshReimportV1 } from './cad-c
 import { PatternImportDxfPhaseECadWorkbenchSplitShellV1 } from './cad-workbench-split-shell-v1';
 import type { CadWorkbenchPhysicalHostV1 } from './cad-workbench-physical-host-v1';
 import { CadWorkbenchPhysicalHostPanelV1 } from './cad-workbench-physical-host-panel-v1';
+import { findCadWorkbenchScopedPieceIndexV1 } from './cad-workbench-piece-selection-v1';
 import {
   PatternImportDxfPhaseECad2dToolContextSwitchV1,
   resolvePatternImportDxfPhaseECad2dAvailableToolContextV1,
@@ -2434,19 +2435,12 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                     activeScopeKey: exactNMannequinStaging?.ok
                       ? exactNMannequinStaging.staging.activeScopeKey
                       : mannequinDxfSources[0]?.scopeKey ?? null,
-                    selection: {
-                      scopeKey: exactNMannequinStaging?.ok
-                        ? exactNMannequinStaging.staging.activeScopeKey
-                        : mannequinDxfSources[0]?.scopeKey ?? null,
-                      pieceId: selection?.pieceId,
-                      seamId: selection?.seamId,
-                    },
+                    selection,
                     onFocus: (nextSelection) =>
                       focusSelection({
                         operationNumber:
                           selection?.operationNumber ?? source.selectedOperationNumber,
-                        pieceId: nextSelection.pieceId,
-                        seamId: nextSelection.seamId,
+                        ...nextSelection,
                       }),
                   }}
                   paperDoll={
@@ -2495,9 +2489,8 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
               onSelectOperation={selectOperationFromWorkbench}
               onFocusOperation={(operationNumber) =>
                 focusSelection({
+                  ...selection,
                   operationNumber,
-                  pieceId: selection?.pieceId,
-                  seamId: selection?.seamId,
                 })
               }
             />
@@ -2509,17 +2502,24 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
             prepared && state
               ? {
                   operationNumber: source.selectedOperationNumber,
+                  scopeKey: prepared.scopeKey,
                   pieceId: prepared.projection.pieces[activePieceIndex]?.pieceId,
+                  pieceLineKey: prepared.projection.pieces[activePieceIndex]?.pieceLineKey,
                   seamId: state.seams[activeSeamIndex]?.seamId,
                 }
               : { operationNumber: source.selectedOperationNumber }
           }
           onSelectionFocus={({ selection }) => {
             if (!selection || !prepared || !state) return;
-            const nextPieceIndex = prepared.projection.pieces.findIndex(
-              ({ pieceId }) => pieceId === selection.pieceId,
-            );
-            if (nextPieceIndex === 0 || nextPieceIndex === 1) setActivePieceIndex(nextPieceIndex);
+            if (selection.pieceId || selection.pieceLineKey) {
+              const nextPieceIndex = findCadWorkbenchScopedPieceIndexV1(
+                selection,
+                prepared.scopeKey,
+                prepared.projection.pieces,
+              );
+              if (nextPieceIndex !== 0 && nextPieceIndex !== 1) return;
+              setActivePieceIndex(nextPieceIndex);
+            }
             const nextSeamIndex = state.seams.findIndex(
               ({ seamId }) => seamId === selection.seamId,
             );
@@ -2677,11 +2677,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
             >
               <div className='relative min-h-0 flex-1'>
                 <PatternImportDxfPhaseECadMannequinSavedTwoSeamProductionMountV1
-                  request={savedTwoSeamSceneOverlayRequest({
-                    scopeKey: activePreparedMaterialScope?.scopeKey ?? prepared?.scopeKey ?? null,
-                    pieceId: selection?.pieceId,
-                    seamId: selection?.seamId,
-                  })}
+                  request={savedTwoSeamSceneOverlayRequest(selection)}
                   fallback={
                     PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_PRODUCTION_SCENE_OVERLAY_BLOCKED_V1
                   }
@@ -2699,18 +2695,12 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                         sceneOverlay,
                         activeScopeKey:
                           activePreparedMaterialScope?.scopeKey ?? prepared?.scopeKey ?? null,
-                        selection: {
-                          scopeKey:
-                            activePreparedMaterialScope?.scopeKey ?? prepared?.scopeKey ?? null,
-                          pieceId: selection?.pieceId,
-                          seamId: selection?.seamId,
-                        },
+                        selection,
                         onFocus: (nextSelection) =>
                           focusSelection({
                             operationNumber:
                               selection?.operationNumber ?? source.selectedOperationNumber,
-                            pieceId: nextSelection.pieceId,
-                            seamId: nextSelection.seamId,
+                            ...nextSelection,
                           }),
                       }}
                       paperDoll={
@@ -2778,9 +2768,8 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
               onSelectOperation={selectOperationFromWorkbench}
               onFocusOperation={(operationNumber) =>
                 focusSelection({
+                  ...selection,
                   operationNumber,
-                  pieceId: selection?.pieceId,
-                  seamId: selection?.seamId,
                 })
               }
             />

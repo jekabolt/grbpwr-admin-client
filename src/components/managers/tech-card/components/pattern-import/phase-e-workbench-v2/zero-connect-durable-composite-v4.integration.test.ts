@@ -24,6 +24,8 @@ import { createPatternImportDxfProductSavedRuntimeSeedV1Fixture } from 'lib/clot
 import { PATTERN_IMPORT_DXF_PRODUCT_SEMANTIC_SIDECAR_MEDIA_TYPE_V1 } from 'lib/cloth/domain/pattern-import-dxf-product-semantic-sidecar-v1';
 
 import { bytesOf, semanticDocument } from './composite-placement-read-v1.test-fixture';
+import { buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1 } from './cad-mannequin-pattern-piece-overlay-v1';
+import * as cadTable from './cad-table-zero-connect-canvas-v1';
 import { buildPatternImportDxfPhaseECadMannequinSavedOneSeamSceneOverlayV1 } from './cad-mannequin-saved-one-seam-scene-overlay-v1';
 import {
   capturePatternImportDxfPhaseEZeroConnectPreparedAuthorityV1,
@@ -310,25 +312,93 @@ describe('zero-connect durable N=1 genuine production chain', () => {
         operationSeam: { operationNumber, ordinal: 1 },
       },
     ]);
-    const markup = renderToStaticMarkup(
-      createElement(PatternImportDxfProductExactNSeamProductionMountV2, {
-        session,
-        activeSeamIndex: 0,
-        onActiveSeamIndexChange: () => {},
-        desktopGeometry: {
-          catalog: sealedCatalog,
-          projection,
-          annotationSource: null,
-          savedSceneAuthority: prepared,
-        },
-        mannequin: ({ sceneOverlay }) =>
-          createElement('div', { 'data-restored-scene-status': sceneOverlay.status }),
-        operationsPanel: null,
-      }),
-    );
-    expect(markup).toContain('data-restored-scene-status="available"');
-    expect(markup).toContain('aria-label="Operation 120, seam 1 side A"');
-    expect(markup).toContain('aria-label="Operation 120, seam 1 side B"');
+    let table = cadTable.createPatternImportDxfPhaseECadTableZeroCanvasSessionV1(projection);
+    const tableHook = vi.spyOn(cadTable, 'useCadTableZeroCanvasOwner').mockImplementation(() => ({
+      session: table,
+      update(next) {
+        table = typeof next === 'function' ? next(table) : next;
+      },
+    }));
+    try {
+      const onActiveSeamIndexChange = vi.fn();
+      const renderWorkbench = () => {
+        type View = {
+          overlay: Extract<
+            ReturnType<typeof buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1>,
+            { ok: true }
+          >['overlay'];
+          sendFocus: (piece: { scopeKey: string; pieceId: string; pieceLineKey: string }) => void;
+        };
+        let view: View | null = null;
+        const markup = renderToStaticMarkup(
+          createElement(PatternImportDxfProductExactNSeamProductionMountV2, {
+            session,
+            activeSeamIndex: 0,
+            onActiveSeamIndexChange,
+            desktopGeometry: {
+              catalog: sealedCatalog,
+              projection,
+              annotationSource: null,
+              savedSceneAuthority: prepared,
+            },
+            mannequin: ({ selection, focusSelection, sceneOverlay }) => {
+              const sendFocus = (piece: {
+                scopeKey: string;
+                pieceId: string;
+                pieceLineKey: string;
+              }) => focusSelection({ operationNumber, ...piece, seamId });
+              const staged = buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1({
+                sources: [{ scopeKey: savedRow.scopeKey, label: savedRow.scopeKey, projection }],
+                selection,
+                onFocus: (piece) => focusSelection({ operationNumber, ...piece }),
+              });
+              if (!staged.ok) throw new Error(staged.blocker.detail);
+              view = { overlay: staged.overlay, sendFocus };
+              return createElement('div', { 'data-restored-scene-status': sceneOverlay.status });
+            },
+            operationsPanel: null,
+          }),
+        );
+        if (view === null) throw new Error('The exact N1 mannequin slot did not mount.');
+        return { markup, view: view as View };
+      };
+
+      const mounted = renderWorkbench();
+      expect(mounted.markup).toContain('data-restored-scene-status="available"');
+      expect(mounted.markup).toContain('aria-label="Operation 120, seam 1 side A"');
+      expect(mounted.markup).toContain('aria-label="Operation 120, seam 1 side B"');
+      const [front, back] = mounted.view.overlay.pieces;
+      const [frontLayout, backLayout] = table.layout.pieces;
+      if (!front || !back || !frontLayout || !backLayout)
+        throw new Error('The exact two-piece fixture is incomplete.');
+
+      // The 2D pointer and object tree both commit this table-owned selection.
+      table = cadTable.activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(
+        table,
+        frontLayout.identity.key,
+        false,
+      );
+      const focused = renderWorkbench().view;
+      expect(
+        focused.overlay.pieces.filter(({ selected }) => selected).map(({ pieceKey }) => pieceKey),
+      ).toEqual([front.pieceKey]);
+
+      focused.overlay.onSelectPiece?.({ ...back, pieceLineKey: front.pieceLineKey });
+      focused.sendFocus({ ...back, scopeKey: 'fabric:another' });
+      focused.sendFocus({ ...back, pieceLineKey: front.pieceLineKey });
+      expect(table.layout.selectedPieceKeys).toEqual([frontLayout.identity.key]);
+      expect(onActiveSeamIndexChange).not.toHaveBeenCalled();
+
+      focused.overlay.onSelectPiece?.(back);
+      expect(table.layout.selectedPieceKeys).toEqual([backLayout.identity.key]);
+      expect(
+        renderWorkbench()
+          .view.overlay.pieces.filter(({ selected }) => selected)
+          .map(({ pieceKey }) => pieceKey),
+      ).toEqual([back.pieceKey]);
+    } finally {
+      tableHook.mockRestore();
+    }
     const copied = structuredClone(projection);
     const alteredCoordinates = {
       ...projection,

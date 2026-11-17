@@ -121,7 +121,10 @@ export interface MeasurementSurfacePatternPieceOverlayV1 {
   }>;
   readonly guides?: readonly MeasurementSurfacePatternPieceGuideV1[];
   readonly onSelectPiece?: (
-    piece: Pick<MeasurementSurfacePatternPieceV1, 'pieceKey' | 'scopeKey' | 'pieceId'>,
+    piece: Pick<
+      MeasurementSurfacePatternPieceV1,
+      'pieceKey' | 'scopeKey' | 'pieceId' | 'pieceLineKey'
+    >,
   ) => void;
   readonly onTransformPiece?: (
     pieceKey: string,

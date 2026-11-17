@@ -178,7 +178,9 @@ export function resolvePatternImportDxfPhaseECadWorkbenchFloatingPositionV1(
 
 export type PatternImportDxfPhaseECadWorkbenchSelectionV1 = Readonly<{
   operationNumber: number | null;
+  scopeKey?: string | null;
   pieceId?: string | null;
+  pieceLineKey?: string | null;
   seamId?: string | null;
 }>;
 

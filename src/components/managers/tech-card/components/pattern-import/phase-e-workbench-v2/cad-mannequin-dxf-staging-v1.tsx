@@ -26,6 +26,7 @@ export type PatternImportDxfPhaseECadMannequinDxfStagingSourceV1 = Readonly<{
 export type PatternImportDxfPhaseECadMannequinDxfStagingSelectionV1 = Readonly<{
   scopeKey?: string | null;
   pieceId?: string | null;
+  pieceLineKey?: string | null;
   seamId?: string | null;
 }>;
 
@@ -108,7 +109,8 @@ export function PatternImportDxfPhaseECadMannequinDxfStagingV1({
         const selectedScope = selection?.scopeKey || activeScopeKey;
         const active =
           selection?.pieceId === item.piece.pieceId &&
-          (!selectedScope || selectedScope === item.scopeKey);
+          (!selectedScope || selectedScope === item.scopeKey) &&
+          (selection.pieceLineKey == null || selection.pieceLineKey === item.piece.pieceLineKey);
         return (
           <li key={item.key}>
             <Button
@@ -131,8 +133,8 @@ export function PatternImportDxfPhaseECadMannequinDxfStagingV1({
                 onFocus?.({
                   scopeKey: item.scopeKey,
                   pieceId: item.piece.pieceId,
-                  seamId:
-                    selection?.pieceId === item.piece.pieceId ? selection.seamId ?? null : null,
+                  pieceLineKey: item.piece.pieceLineKey,
+                  seamId: active ? selection?.seamId ?? null : null,
                 })
               }
             >

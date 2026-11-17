@@ -15,6 +15,7 @@ import {
 import {
   PatternImportDxfPhaseECadWorkbenchSplitShellV1,
   type PatternImportDxfPhaseECadWorkbenchSlotContextV1,
+  type PatternImportDxfPhaseECadWorkbenchSelectionV1,
   type PatternImportDxfPhaseECadWorkbenchSlotV1,
 } from './cad-workbench-split-shell-v1';
 import {
@@ -25,6 +26,7 @@ import { buildPatternImportDxfPhaseECadMannequinSavedOneSeamSceneOverlayV1 } fro
 import { bridgePatternImportDxfPhaseECadMannequinSceneOverlayToRendererV1 } from './cad-mannequin-scene-overlay-renderer-bridge-v1';
 import type { PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1 } from './cad-table-zero-connect-phase-e-authority-v1';
 import type { PatternImportDxfPhaseECadMannequinSceneOverlayCapabilityV1 } from './cad-workbench-mannequin-model-picker-v1';
+import { findCadWorkbenchScopedPieceIndexV1 } from './cad-workbench-piece-selection-v1';
 import { cadWorkbenchOperationSeamOrdinal } from './cad-workbench-seam-ordinal-v1';
 import type { PatternImportDxfProductExactNSeamUiSelectionOwnerV2 } from './exact-n-seam-atomic-ui-selection-v2';
 import type { PatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1 } from './golden-card-production-v2-snapshot-feed-v1';
@@ -143,7 +145,10 @@ export function resolvePatternImportDxfProductExactNSeamProductionSceneOverlayV2
   activeSeamIndex: number,
   input: PatternImportDxfProductExactNSeamProductionSceneOverlayInputV2 | null | undefined,
   unavailableBlocker?: Readonly<{ code: string; detail: string }> | null,
-  focusedPieceId?: string | null,
+  focus?: Pick<
+    PatternImportDxfPhaseECadWorkbenchSelectionV1,
+    'scopeKey' | 'pieceId' | 'pieceLineKey'
+  >,
 ): PatternImportDxfPhaseECadMannequinSceneOverlayCapabilityV1 {
   if (!input)
     return sceneOverlayBlocked(
@@ -165,7 +170,11 @@ export function resolvePatternImportDxfProductExactNSeamProductionSceneOverlayV2
     importGeneration: input.staging.importGeneration,
     staging: input.staging,
     selection: {
-      pieceId: focusedPieceId === undefined ? activeSeam.sides[0]?.pieceId ?? null : focusedPieceId,
+      ...(focus ?? {
+        scopeKey: session.current.row.scopeKey,
+        pieceId: activeSeam.sides[0]?.pieceId ?? null,
+        pieceLineKey: activeSeam.sides[0]?.pieceLineKey ?? null,
+      }),
       seamId: activeSeam.seamId,
     },
     stitchVisuals: input.stitchVisuals,
@@ -229,9 +238,13 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
       : null;
   const selection = Object.freeze({
     operationNumber: session.current.selectedOperation.sourceOperationNumber,
+    scopeKey: session.current.row.scopeKey,
     pieceId: exactDesktop
       ? activePiece?.identity.pieceId ?? null
       : activeSeam.sides[0]?.pieceId ?? null,
+    pieceLineKey: exactDesktop
+      ? activePiece?.identity.pieceLineKey ?? null
+      : activeSeam.sides[0]?.pieceLineKey ?? null,
     seamId: activeSeam.seamId,
   });
   const sceneOverlay =
@@ -241,13 +254,14 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
           prepared: exactDesktop.savedSceneAuthority,
           projection: exactDesktop.projection,
           focusedPieceId: selection.pieceId,
+          focusedPieceLineKey: selection.pieceLineKey,
         })
       : resolvePatternImportDxfProductExactNSeamProductionSceneOverlayV2(
           session,
           activeSeamIndex,
           sceneOverlayInput,
           sceneOverlayBlocker,
-          exactDesktop ? selection.pieceId : undefined,
+          selection,
         );
   const mannequinSlot: PatternImportDxfPhaseECadWorkbenchSlotV1 =
     typeof mannequin === 'function'
@@ -271,18 +285,21 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
       }}
       selection={selection}
       onSelectionFocus={({ selection: nextSelection }) => {
-        if (nextSelection?.pieceId && tableSessionOwner) {
-          const matches = tableSessionOwner.session.layout.pieces.filter(
-            ({ identity }) => identity.pieceId === nextSelection.pieceId,
+        if ((nextSelection?.pieceId || nextSelection?.pieceLineKey) && tableSessionOwner) {
+          const pieces = tableSessionOwner.session.layout.pieces;
+          const index = findCadWorkbenchScopedPieceIndexV1(
+            nextSelection,
+            session.current.row.scopeKey,
+            pieces.map(({ identity }) => identity),
           );
-          if (matches.length === 1)
-            tableSessionOwner.update((current) =>
-              activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(
-                current,
-                matches[0]!.identity.key,
-                false,
-              ),
-            );
+          if (index < 0) return;
+          tableSessionOwner.update((current) =>
+            activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(
+              current,
+              pieces[index]!.identity.key,
+              false,
+            ),
+          );
         }
         if (!nextSelection?.seamId) return;
         const nextIndex = resolved.model.state.seams.findIndex(

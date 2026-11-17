@@ -32,11 +32,13 @@ export function buildPatternImportDxfPhaseECadMannequinSavedOneSeamSceneOverlayV
   prepared,
   projection,
   focusedPieceId,
+  focusedPieceLineKey,
 }: Readonly<{
   session: PatternImportDxfPhaseEExactNAssemblyOrderSessionV2;
   prepared: PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1;
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
   focusedPieceId: string | null;
+  focusedPieceLineKey?: string | null;
 }>): PatternImportDxfPhaseECadMannequinSceneOverlayCapabilityV1 {
   const resolved = resolvePatternImportDxfProductExactNSeamWorkbenchHostV2({
     selectionOwner: session.selectionOwner,
@@ -98,7 +100,12 @@ export function buildPatternImportDxfPhaseECadMannequinSavedOneSeamSceneOverlayV
     },
     authority,
     activeOperationNumber: operationNumber,
-    selection: { scopeKey: row.scopeKey, pieceId: focusedPieceId, seamId: seam.seamId },
+    selection: {
+      scopeKey: row.scopeKey,
+      pieceId: focusedPieceId,
+      pieceLineKey: focusedPieceLineKey,
+      seamId: seam.seamId,
+    },
     stitchVisuals: [],
     bomItems: [],
   });
