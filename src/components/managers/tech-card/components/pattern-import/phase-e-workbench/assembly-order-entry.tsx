@@ -73,6 +73,8 @@ import type { PatternImportDxfPhaseEExactNAssemblyOrderSessionV2 } from '../phas
 import type { PatternImportDxfProductCompositeSidecarApplicationTransactionV4 } from '../phase-e-workbench-v2/composite-sidecar-production-transaction-v4';
 import { projectPatternImportDxfPhaseECadWorkbenchColorwaysV1 } from '../phase-e-workbench-v2/cad-workbench-bom-visual-authority-v1';
 import { PatternImportDxfPhaseECadTableZeroOperationProductionMountV1 } from '../phase-e-workbench-v2/cad-table-zero-operation-production-mount-v1';
+import { preparePatternImportDxfPhaseECadMannequinSavedAllScopeStagingV1 } from '../phase-e-workbench-v2/cad-mannequin-saved-all-scope-staging-v1';
+import { createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1 } from '../phase-e-workbench-v2/zero-operation-saved-card-authority-v1';
 import { PatternImportDxfPhaseECadTableDraftOperationsPanelV1 } from '../phase-e-workbench-v2/cad-table-draft-operations-panel-v1';
 import type { PatternImportDxfPhaseECadTableDraftOperationSessionBridgeResultV1 } from '../phase-e-workbench-v2/cad-table-draft-operation-session-bridge-v1';
 import type { PatternImportDxfProductPhaseEMaterialRevisionOptionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
@@ -113,11 +115,10 @@ export function shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
   exactNSessionAvailable: boolean;
   savedProjectionBlockerCode: string | null;
 }>): boolean {
-  return (
-    workbenchOpen &&
-    !exactNSessionAvailable &&
-    savedProjectionBlockerCode === 'saved-operation-not-two-seam'
-  );
+  const operationCanBeCompletedOnTable =
+    savedProjectionBlockerCode === 'saved-operation-missing' ||
+    savedProjectionBlockerCode === 'saved-operation-not-two-seam';
+  return workbenchOpen && !exactNSessionAvailable && operationCanBeCompletedOnTable;
 }
 
 export const PATTERN_IMPORT_DXF_PHASE_E_ASSEMBLY_ORDER_ENTRY_CONTRACT_V1 = Object.freeze({
@@ -1270,6 +1271,14 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   const savedCard = useTechCard(techCardId);
   const sizeNameById = useSizeNames();
   const orderSizeIds = useSizeOrdering();
+  const savedAllScopeAuthority = useMemo(
+    () =>
+      createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1({
+        orderSizeIds,
+        sizeNameById,
+      }),
+    [orderSizeIds, sizeNameById],
+  );
   const operations = (useWatch<TechCardFormData>({ name: 'operations' }) ?? []) as FormOperation[];
   const selected = operations[selectedIndex];
   const bomItems = (useWatch<TechCardFormData>({ name: 'bomItems' }) ?? []) as NonNullable<
@@ -1427,6 +1436,34 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     [savedGarmentCompileOwnerKey],
   );
   useEffect(() => () => savedGarmentCompileOwner?.dispose(), [savedGarmentCompileOwner]);
+  const prepareSavedAllMaterialScopeStaging = useCallback<
+    NonNullable<PatternImportDxfPhaseEMultiseamSavedSessionV2['prepareAllMaterialScopeStaging']>
+  >(
+    ({ current, sizeToken, signal }) => {
+      if (!savedProjection.ok || !savedCard.data)
+        return Promise.resolve(
+          Object.freeze({
+            ok: false as const,
+            sources: Object.freeze([current]),
+            blocker: Object.freeze({
+              code: 'saved-material-scope-set-invalid' as const,
+              detail: 'The current saved card projection is unavailable.',
+            }),
+          }),
+        );
+      return preparePatternImportDxfPhaseECadMannequinSavedAllScopeStagingV1({
+        techCard: savedCard.data,
+        orderSizeIds,
+        sizeNameById,
+        sizeToken,
+        current,
+        authority: savedAllScopeAuthority,
+        preparationKey: `saved-ao:${savedProjection.row.techCardId}:${savedProjection.row.cardLockVersion}:${savedProjection.selectedOperationNumber}`,
+        signal,
+      });
+    },
+    [orderSizeIds, savedAllScopeAuthority, savedCard.data, savedProjection, sizeNameById],
+  );
   const savedSession = useMemo<PatternImportDxfPhaseEMultiseamSavedSessionV2 | null>(
     () =>
       savedProjection.ok && savedRuntimeResolution.runtime && savedGarmentCompileOwner
@@ -1434,11 +1471,18 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
             runtime: savedRuntimeResolution.runtime,
             row: savedProjection.row,
             selectedOperationNumber: savedProjection.selectedOperationNumber,
+            prepareAllMaterialScopeStaging: prepareSavedAllMaterialScopeStaging,
             downstream: savedGarmentCompileOwner.downstream,
             ...(savedConfirm ? { onConfirm: savedConfirm } : {}),
           })
         : null,
-    [savedConfirm, savedGarmentCompileOwner, savedProjection, savedRuntimeResolution.runtime],
+    [
+      prepareSavedAllMaterialScopeStaging,
+      savedConfirm,
+      savedGarmentCompileOwner,
+      savedProjection,
+      savedRuntimeResolution.runtime,
+    ],
   );
   const savedBlocker = savedProjection.ok
     ? savedRuntimeResolution.blocker
