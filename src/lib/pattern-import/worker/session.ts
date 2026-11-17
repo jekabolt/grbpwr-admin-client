@@ -6,6 +6,11 @@
 // polupalto at 777 MB RSS in node with docs + sheet alive). Once a sheet is assembled the docs are
 // dropped; the file bytes stay in the blob store (Blob, not a JS ArrayBuffer), so re-assembling a
 // different sheet or with a hand grid re-reads them (seconds) instead of keeping them (hundreds MB).
+import { readManifestBytes } from '../manifest';
+import { sha256Hex as hashNativeOutput } from '../adapters/vector/builder';
+import { readProtectedLineSplit } from '../write/read-protected-line-split';
+import { identifyReviewedAddPoint } from './reviewed-add-point';
+import type { ReviewedAddPointOpen, ReviewedAddPointAtWrite } from '../types';
 import type {
   AllowanceDecision,
   BackgroundKind,
@@ -269,6 +274,7 @@ const ORDER: StageName[] = [
 ];
 
 export type StageCtx = {
+  reviewedAddPointAtWrite?: ReviewedAddPointAtWrite;
   progress: Progress;
   /** Throws `cancelled` when the operator stopped the stage (checked at every progress tick). */
   checkCancel: () => void;
@@ -615,10 +621,14 @@ export class Session {
   /** sha256 per file id, computed once when the bytes are first read (provenance, error report). */
   private sha = new Map<string, string>();
 
-  constructor(id: number, input: SessionOpenFile[]) {
+  private readonly reviewedAddPoint?: ReviewedAddPointOpen;
+  private readonly protectedInput: boolean;
+  constructor(id: number, input: SessionOpenFile[], reviewedAddPoint?: ReviewedAddPointOpen) {
     let files = input;
     this.id = id;
     this.dxfOpenProvenance = captureDxfOpenProvenance(input);
+    this.reviewedAddPoint =
+      reviewedAddPoint === undefined ? undefined : structuredClone(reviewedAddPoint);
     this.dxfProvenanceSetupBlockers = [...this.dxfOpenProvenance.blockers];
     if (!files.length) throw new ImportError('out-of-order', 'no files given');
     // M6: the main thread checked the File sizes already; the worker re-checks what it received.
@@ -698,6 +708,14 @@ export class Session {
     // Several DXF files = one file per size: merged into one drawing by the read stage (R4: the
     // set is guarded, decoded and merged there — cancellable, after its size checks), read as one
     // DXF after.
+    this.protectedInput = files.some((f, index) => {
+      if (routes[index]?.route !== 'dxf') return false;
+      try {
+        return !!readManifestBytes(f.bytes)?.blocks.some((b) => b.protectedLineSplit);
+      } catch (error) {
+        return error instanceof Error && error.message.includes('.protectedLineSplit');
+      }
+    });
     this.isDxfSet = routes[0].route === 'dxf' && files.length > 1;
     this.files = files.map((f, i) => ({
       id: String(i),
@@ -2862,6 +2880,34 @@ export class Session {
         });
       }
     const sheets = this.sheetCover(sem.pieces.map((p) => p.seed));
+    const reviewed = this.reviewedAddPoint;
+    const contours = this.dxfProvenanceContours,
+      sourceBlob = this.blobs.get('file:0');
+    const checkReviewedPhase = () => {
+      ctx.checkCancel();
+      if (
+        this.semantics !== sem ||
+        this.dxfProvenanceContours !== contours ||
+        this.blobs.get('file:0') !== sourceBlob
+      )
+        throw new Error('Reviewed Add point worker phase changed during write.');
+    };
+    if (this.protectedInput && !reviewed)
+      throw new Error('Protected Add point requires an explicit current review File.');
+    if (
+      reviewed &&
+      (!this.protectedInput ||
+        this.files.length !== 1 ||
+        plan.scopes.length !== 1 ||
+        !this.dxfOpenProvenance.sourceFileId ||
+        this.dxfOpenProvenance.fileIndex !== 0 ||
+        input.storage === 'rul' ||
+        !this.blobs.has('file:0'))
+    ) {
+      throw new Error(
+        'Reviewed Add point requires its exact single DXF, native source and material scope.',
+      );
+    }
     const scopes: DraftScope[] = [];
     const gate: Record<string, GateReport> = {};
     let k = 0;
@@ -2881,7 +2927,19 @@ export class Session {
         ...(this.passportBound ? { passport: passportDigest(this.passportBound) } : {}),
         ...(input.replay ? { replay: input.replay } : {}),
       };
+      const retainedLineSplit = reviewed
+        ? await identifyReviewedAddPoint({
+            bytes: await sourceBlob!.arrayBuffer(),
+            fileId: this.dxfOpenProvenance.sourceFileId!,
+            wire: reviewed,
+            atWrite: ctx.reviewedAddPointAtWrite,
+            job: writerJob,
+            sourceOf: sp.sourceOf,
+            contours,
+          })
+        : undefined;
       const res = await writeAndGate(writerJob, {
+        ...(retainedLineSplit ? { retainedLineSplit } : {}),
         rules: cardRules,
         sizeTokens,
         wallsOf: rawWalls ? (id, rank) => rawWalls(sp.sourceOf[id] ?? id, rank) : undefined,
@@ -2907,6 +2965,15 @@ export class Session {
         input.sizes,
         this.rul && !this.rulSkipped ? this.rulGrades : null,
       );
+      if (retainedLineSplit) {
+        const outputBytes = new TextEncoder().encode(mapped.text).buffer;
+        await readProtectedLineSplit(outputBytes, 'reviewed-add-point-output', {
+          fileSha256: await hashNativeOutput(outputBytes),
+          block: retainedLineSplit.block,
+          record: retainedLineSplit.record,
+        });
+        checkReviewedPhase();
+      }
       scopes.push({
         target: scope,
         filename,
@@ -2916,6 +2983,7 @@ export class Session {
         manifest: res.detail.manifest,
         writerReplay: {
           schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_CARRIER_V1,
+          ...(retainedLineSplit ? { retainedLineSplit } : {}),
           job: writerJob,
           createdAt: res.detail.manifest.createdAt,
         },

@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import {
   createSavedThreePanelFixtureV1,
   createSavedThreePanelSourceV1,
@@ -24,8 +24,18 @@ import {
   isCurrentSavedAddPointReviewClaimV1,
 } from './draft-cad-saved-add-point-review-v1';
 
-async function fixture() {
+async function fixture(stable = false) {
   const seed = await createSavedThreePanelFixtureV1(2);
+  if (stable) {
+    const ids: Record<string, string> = { FRONT: 'FP', BACK: 'BP' };
+    for (const piece of seed.job.pieces) {
+      piece.identity = ids[piece.identity]!;
+      piece.code = piece.identity;
+      piece.displayName = piece.identity;
+    }
+    for (const piece of seed.card.existingPieces) piece.name = ids[piece.name]!;
+    for (const alias of seed.card.existingAliases!) alias.blockName = ids[alias.blockName]!;
+  }
   for (const piece of seed.job.pieces) {
     const size = piece.sizes[0]!,
       sx = size.cut.reduce((n, p) => n + p.x, 0) / size.cut.length,
@@ -250,6 +260,199 @@ it('rejects an ambiguous current card alias even when the saved row and catalog 
     });
     expect(() => takeSavedAddPointReviewV1(owner)).toThrow('changed');
   } finally {
+    f.source.dispose();
+  }
+});
+
+import { draftThroughWizardStages } from '../ordinary-dxf-wizard.test-fixture';
+import { ImportWorkerClient } from 'lib/pattern-import/worker/client';
+import { Session } from 'lib/pattern-import/worker/session';
+
+import type { ImportWorkerRequest, ImportWorkerResponse } from 'lib/pattern-import/types';
+import {
+  replayPatternImportDxfProductWriterV1,
+  PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_V1,
+} from 'lib/cloth/domain/pattern-import-dxf-product-writer-replay-v1';
+
+class InProcessTransport {
+  onmessage?: (event: { data: ImportWorkerResponse }) => void;
+  session?: Session;
+  static afterWrite?: () => void;
+  static changeWire?: (msg: ImportWorkerRequest) => void;
+  constructor() {
+    queueMicrotask(() => this.onmessage?.({ data: { type: 'closed', id: -1, sessionId: -1 } }));
+  }
+  postMessage(message: ImportWorkerRequest, transfer: Transferable[]) {
+    const msg = structuredClone(message, { transfer });
+    InProcessTransport.changeWire?.(msg);
+    void this.respond(msg)
+      .then((data) => this.onmessage?.({ data }))
+      .catch((error) =>
+        this.onmessage?.({
+          data: { type: 'error', id: msg.id, code: 'internal', message: String(error) },
+        }),
+      );
+  }
+  async respond(msg: ImportWorkerRequest): Promise<ImportWorkerResponse> {
+    if (msg.type === 'open') {
+      this.session = new Session(7, msg.files, msg.reviewedAddPoint);
+      return { type: 'opened', id: msg.id, sessionId: 7, files: this.session.files };
+    }
+    if (msg.type === 'run') {
+      const output = await this.session!.runStage(msg.stage, msg.input, {
+        reviewedAddPointAtWrite: msg.reviewedAddPointAtWrite,
+        checkCancel() {},
+        progress() {},
+      });
+      if (msg.stage === 'write') InProcessTransport.afterWrite?.();
+      return { type: 'result', id: msg.id, stage: msg.stage, output } as ImportWorkerResponse;
+    }
+    this.session?.close();
+    return { type: 'closed', id: msg.id, sessionId: 7 };
+  }
+  terminate() {
+    this.session?.close();
+  }
+}
+it.each([true, false])(
+  'runs the normal Worker protocol with stable block identity %s',
+  async (stable) => {
+    const f = await fixture(stable);
+    vi.stubGlobal('Worker', InProcessTransport);
+    try {
+      const { file } = takeSavedAddPointReviewV1(await prepareSavedAddPointReviewV1(f.request));
+      const result = draftThroughWizardStages(file, f.current.card, new ImportWorkerClient());
+      if (!stable) {
+        await expect(result).rejects.toThrow('block identities differ');
+        return;
+      }
+      const second = await result,
+        scope = second.scopes[0]!,
+        replay = scope.writerReplay!;
+      expect(scope.manifest.gate?.passed).toBe(true);
+      const tagged = scope.manifest.blocks.filter((b) => b.protectedLineSplit);
+      expect(tagged).toHaveLength(1);
+      const block = tagged[0]!,
+        record = block.protectedLineSplit!;
+      const bytes = new TextEncoder().encode(scope.dxfText),
+        sha = await digestFullAssemblyFixture(bytes);
+      const native = await readProtectedLineSplit(bytes.buffer, 'independent-final', {
+        block: block.block,
+        record,
+        fileSha256: sha,
+      });
+      expect(record.ringPointCount).toBe(5);
+      expect(native.left.endMm).toEqual(native.right.startMm);
+      expect(sha).not.toBe(
+        await digestFullAssemblyFixture(new Uint8Array(await file.arrayBuffer())),
+      );
+      const reproduced = await replayPatternImportDxfProductWriterV1({
+        schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_V1,
+        replay,
+        finalManifest: scope.manifest,
+        expected: { scopeKey: 'main', exportSha256: sha },
+      });
+      expect(reproduced.ok).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+      f.source.dispose();
+    }
+  },
+);
+
+it.each(['copy', 'missing-record', 'late-row'] as const)(
+  'refuses a worker result for %s',
+  async (kind) => {
+    const f = await fixture(true);
+    vi.stubGlobal('Worker', InProcessTransport);
+    try {
+      const { file } = takeSavedAddPointReviewV1(await prepareSavedAddPointReviewV1(f.request));
+      const { directDxfAuthoringOpenFileV1 } = await import('../direct-dxf-authoring-capture-v1');
+      const chosen = kind === 'copy' ? new File([await file.arrayBuffer()], file.name) : file;
+      const opened = await directDxfAuthoringOpenFileV1(chosen, 0);
+      if (kind === 'copy')
+        Object.assign(opened, { reviewedAddPoint: { entityId: 'split-42', scopeKey: 'main' } });
+      if (kind === 'missing-record') {
+        const text = await file.text(),
+          m = readManifest(text)!;
+        for (const block of m.blocks) delete block.protectedLineSplit;
+        opened.bytes = new TextEncoder().encode(embedManifest(text, m)).buffer;
+      }
+      if (kind === 'late-row')
+        InProcessTransport.afterWrite = () => {
+          f.current.row = { ...f.current.row, cardLockVersion: f.current.row.cardLockVersion + 1 };
+        };
+      await expect(
+        draftThroughWizardStages(chosen, f.current.card, new ImportWorkerClient(), opened),
+      ).rejects.toThrow(
+        kind === 'late-row'
+          ? 'selection is stale'
+          : kind === 'copy'
+            ? 'explicit current review'
+            : 'exact single DXF',
+      );
+    } finally {
+      InProcessTransport.afterWrite = undefined;
+      vi.unstubAllGlobals();
+      f.source.dispose();
+    }
+  },
+);
+
+it.each(['missing', 'alias', 'opening-line'] as const)(
+  'independently refuses %s write authorization in the worker',
+  async (attack) => {
+    const f = await fixture(true);
+    vi.stubGlobal('Worker', InProcessTransport);
+    try {
+      const { file } = takeSavedAddPointReviewV1(await prepareSavedAddPointReviewV1(f.request));
+      InProcessTransport.changeWire = (msg) => {
+        if (attack === 'opening-line' && msg.type === 'open' && msg.reviewedAddPoint)
+          msg.reviewedAddPoint = { ...msg.reviewedAddPoint, pieceLineKey: 'forged-line' };
+        if (msg.type !== 'run' || msg.stage !== 'write') return;
+        if (attack === 'missing') delete msg.reviewedAddPointAtWrite;
+        if (attack === 'alias')
+          msg.reviewedAddPointAtWrite = {
+            ...msg.reviewedAddPointAtWrite!,
+            aliases: msg.reviewedAddPointAtWrite!.aliases.map((a) => ({
+              ...a,
+              pieceLineKey: 'forged-line',
+            })),
+          };
+      };
+      await expect(
+        draftThroughWizardStages(file, f.current.card, new ImportWorkerClient()),
+      ).rejects.toThrow(attack === 'alias' ? 'ambiguous current card alias' : 'current phase');
+    } finally {
+      InProcessTransport.changeWire = undefined;
+      vi.unstubAllGlobals();
+      f.source.dispose();
+    }
+  },
+);
+
+it('rebinds a restarted worker only after releasing the prior session and rechecking the same File', async () => {
+  const f = await fixture(true);
+  vi.stubGlobal('Worker', InProcessTransport);
+  const a = new ImportWorkerClient(),
+    b = new ImportWorkerClient();
+  try {
+    const { file } = takeSavedAddPointReviewV1(await prepareSavedAddPointReviewV1(f.request));
+    const { directDxfAuthoringOpenFileV1 } = await import('../direct-dxf-authoring-capture-v1');
+    const session = await a.open([await directDxfAuthoringOpenFileV1(file, 0)]);
+    await expect(b.open([await directDxfAuthoringOpenFileV1(file, 0)])).rejects.toThrow(
+      'active worker session',
+    );
+    await a.close(session.sessionId);
+    const result = await draftThroughWizardStages(file, f.current.card, b);
+    expect(
+      result.scopes[0]!.manifest.blocks.find((e) => e.protectedLineSplit)?.protectedLineSplit
+        ?.ringPointCount,
+    ).toBe(5);
+  } finally {
+    a.dispose();
+    b.dispose();
+    vi.unstubAllGlobals();
     f.source.dispose();
   }
 });

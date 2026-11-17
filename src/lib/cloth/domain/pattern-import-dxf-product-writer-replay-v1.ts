@@ -1,6 +1,6 @@
 import { embedManifest } from '../../pattern-import/manifest';
 import { isAsciiDxf } from '../../pattern-import/write/format';
-import { writeDxfDetailed } from '../../pattern-import/write';
+import { writeDxfDetailed, writeDxfWithRetainedLineSplit } from '../../pattern-import/write';
 import {
   PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_CARRIER_V1,
   type ConversionManifest,
@@ -164,7 +164,14 @@ export async function replayPatternImportDxfProductWriterV1(
 
   let detail: ReturnType<typeof writeDxfDetailed>;
   try {
-    detail = writeDxfDetailed(input.replay.job, { embed: null, now: () => date });
+    const options = { embed: null, now: () => date };
+    detail = input.replay.retainedLineSplit
+      ? await writeDxfWithRetainedLineSplit(
+          input.replay.job,
+          input.replay.retainedLineSplit,
+          options,
+        )
+      : writeDxfDetailed(input.replay.job, options);
   } catch {
     return blocked('writer-replay-failed', 'The production writer could not replay the typed job.');
   }

@@ -1,3 +1,4 @@
+import { bindReviewedAddPointWorkerOpen } from 'lib/pattern-import/worker/reviewed-add-point-main';
 import { sha256Hex } from 'lib/features/sha256';
 import type { PatternImportOpenFile, StageIO, StageName } from 'lib/pattern-import/types';
 
@@ -19,12 +20,14 @@ export async function directDxfAuthoringOpenFileV1(
       .replace(/=+$/, '');
     dxfPathProvenance = { sourceFileId: `dxf:${contentId}:${index.toString(36)}` };
   }
-  return {
+  const opened = {
     name: file.name,
     bytes,
     ...(generatedFusing ? { generatedFusing: true } : {}),
     ...(dxfPathProvenance ? { dxfPathProvenance } : {}),
   };
+  await bindReviewedAddPointWorkerOpen(file, opened, index);
+  return opened;
 }
 
 type Run = <S extends StageName>(stage: S, input: StageIO[S]['in']) => Promise<StageIO[S]['out']>;

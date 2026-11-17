@@ -1,5 +1,11 @@
+import { markReviewedAddPointFile } from 'lib/pattern-import/worker/reviewed-add-point-main';
 import { readProtectedLineSplit } from 'lib/pattern-import/write/read-protected-line-split';
-import type { CardDraft, ManifestProtectedLineSplit } from 'lib/pattern-import/types';
+import type {
+  CardDraft,
+  ManifestProtectedLineSplit,
+  ReviewedAddPointOpen,
+  ReviewedAddPointAtWrite,
+} from 'lib/pattern-import/types';
 import type { CardContext } from '../client';
 import { sha256Hex } from 'lib/pattern-import/adapters/vector/builder';
 import {
@@ -44,12 +50,14 @@ type ReviewState = {
   sha256: string;
   block: string;
   record: ManifestProtectedLineSplit;
+  wire: ReviewedAddPointOpen;
+  atWrite: () => ReviewedAddPointAtWrite;
   current: () => boolean;
 };
 const owners = new WeakMap<SavedAddPointReviewOwner, ReviewState>();
 const opened = new WeakMap<File, ReviewState>();
 type NativeReviewProof = Awaited<ReturnType<typeof readProtectedLineSplit>>;
-const checked = new WeakMap<NativeReviewProof, () => boolean>();
+const checked = new WeakMap<NativeReviewProof, ReviewState>();
 
 function requireReview(claim: unknown, reason: string): asserts claim {
   if (!claim) throw new Error(`Added vertex review refused: ${reason}.`);
@@ -92,7 +100,7 @@ export async function prepareSavedAddPointReviewV1(input: {
     command.tool === 'add-point' && command.payload.edge,
     'an explicit directed Add point command is required',
   );
-  const isCurrent = () => {
+  const currentAliases = () => {
     const now = readCurrent();
     const aliases =
       now?.card.existingAliases?.filter(
@@ -102,7 +110,7 @@ export async function prepareSavedAddPointReviewV1(input: {
             alias.blockName === `${command.target.pieceId}_${sizeToken}`),
       ) ?? [];
     const uniqueSpellings = new Set(aliases.map((alias) => alias.blockName));
-    return (
+    const valid =
       !!now &&
       now.card.techCardId === row.techCardId &&
       aliases.length > 0 &&
@@ -113,9 +121,10 @@ export async function prepareSavedAddPointReviewV1(input: {
       now.session === session &&
       now.generation === generation &&
       now.sizeToken === sizeToken &&
-      sameRow(row, now.row)
-    );
+      sameRow(row, now.row);
+    return valid ? aliases : null;
   };
+  const isCurrent = () => currentAliases() !== null;
   requireReview(isCurrent(), 'current card piece or scope alias differs');
   const source = consumeDxfProductSavedNativeCompilerSourceV1(
     input.sourceOwner,
@@ -259,6 +268,31 @@ export async function prepareSavedAddPointReviewV1(input: {
     sha256,
     block: blocks[0]!.block,
     record: blocks[0]!.protectedLineSplit,
+    wire: {
+      fileSha256: sha256,
+      rowSha256: row.sha256,
+      ringSha256: blocks[0]!.protectedLineSplit.ringSha256,
+      entityId: command.payload.entityId,
+      techCardId: row.techCardId,
+      scopeKey: row.scopeKey,
+      block: blocks[0]!.block,
+      identity: command.target.pieceId,
+      sizeId: size.sizeId,
+      sizeToken,
+      rank: size.rank,
+      pieceLineKey: command.target.pieceLineKey,
+    },
+    atWrite: () => {
+      const aliases = currentAliases();
+      requireReview(aliases, 'current card or alias changed before worker write');
+      return Object.freeze({
+        fileSha256: sha256,
+        techCardId: row.techCardId,
+        scopeKey: row.scopeKey,
+        pieceLineKey: command.target.pieceLineKey,
+        aliases: Object.freeze(aliases.map((a) => Object.freeze({ ...a }))),
+      });
+    },
     current: isCurrent,
   });
   return owner;
@@ -297,6 +331,7 @@ export function takeSavedAddPointReviewV1(owner: SavedAddPointReviewOwner) {
   owners.delete(owner);
   requireReview(state.current(), 'current saved row or Draft selection changed');
   opened.set(state.file, state);
+  markReviewedAddPointFile(state.file);
   return Object.freeze({ file: state.file, sha256: state.sha256 });
 }
 
@@ -312,14 +347,29 @@ export async function claimSavedAddPointReviewFileV1(file: File) {
     { fileSha256: state.sha256, block: state.block, record: state.record },
   );
   requireReview(state.current(), 'current row or Draft changed during review');
-  checked.set(proof, state.current);
+  checked.set(proof, state);
   return proof;
 }
 
 /** The main-thread host can reject a late worker result when the originating selection has changed. */
 export function isCurrentSavedAddPointReviewClaimV1(proof: NativeReviewProof): boolean {
   const current = checked.get(proof);
-  if (current?.()) return true;
+  if (current?.current()) return true;
   checked.delete(proof);
   return false;
+}
+
+/** Only a live proof from the actual review File can reach the private worker-client transport. */
+export function savedAddPointWorkerBindingV1(proof: NativeReviewProof): ReviewedAddPointOpen {
+  const state = checked.get(proof);
+  requireReview(state && state.current(), 'missing or stale worker review claim');
+  return Object.freeze(structuredClone(state.wire));
+}
+
+export function savedAddPointCurrentWorkerAliasesV1(
+  proof: NativeReviewProof,
+): ReviewedAddPointAtWrite {
+  const state = checked.get(proof);
+  requireReview(state, 'unrecognized worker review');
+  return state.atWrite();
 }

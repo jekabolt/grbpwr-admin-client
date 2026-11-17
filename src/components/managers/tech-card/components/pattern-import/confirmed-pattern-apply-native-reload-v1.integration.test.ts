@@ -2,24 +2,11 @@ import { adminService } from 'api/api';
 import type { AdminService, common_TechCard } from 'api/proto-http/admin';
 import { replayCommittedPatternImportDxfProductScopeV1 } from 'lib/cloth/domain/pattern-import-dxf-product-commit-replay-v1';
 import type { LiveCard } from 'lib/pattern-import/fabrics/apply';
-import { pinToScope } from 'lib/pattern-import/fabrics/scope';
 import { readGradeMapBlock } from 'lib/pattern-import/manifest/grade-map-block';
-import {
-  PATIMPORT,
-  type PatternImportOpenFile,
-  type StageIO,
-  type StageName,
-} from 'lib/pattern-import/types';
-import { Session } from 'lib/pattern-import/worker/session';
 import { writeDxfDetailed } from 'lib/pattern-import/write';
 import { expect, it, vi } from 'vitest';
-import { cardBuildDraft, createCardApply } from './card-apply';
-import type { CardContext, ImportClient } from './client';
-import {
-  captureDirectDxfAuthoringV1,
-  directDxfAuthoringOpenFileV1,
-} from './direct-dxf-authoring-capture-v1';
-import { cardPresegmentedIdentities } from './entry';
+import { createCardApply } from './card-apply';
+import { DirectClient, draftThroughWizardStages } from './ordinary-dxf-wizard.test-fixture';
 import { createPatternsConfirmedSessionLifecycleV1 } from './patterns-confirmed-session-lifecycle-v1';
 import { readPatternImportDxfPhaseECardSessionV1 } from './phase-e-workbench-card-session-v1';
 import { preparePatternImportDxfPhaseECadTableZeroOperationFreshV1 } from './phase-e-workbench-v2/cad-table-zero-operation-fresh-preparation-v1';
@@ -32,45 +19,6 @@ import {
   createSavedThreePanelFixtureV1,
   digestFullAssemblyFixture,
 } from './phase-e-workbench-v2/saved-full-assembly-compile-session-v1.test-fixture';
-
-class DirectClient implements ImportClient {
-  readonly kind = 'worker' as const;
-  private next = 1;
-  private sessions = new Map<number, Session>();
-  private cancelled = false;
-
-  async open(files: PatternImportOpenFile[]) {
-    const sessionId = this.next++;
-    const session = new Session(sessionId, files);
-    this.sessions.set(sessionId, session);
-    return { sessionId, files: session.files };
-  }
-
-  async run<S extends StageName>(sessionId: number, stage: S, input: StageIO[S]['in']) {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error('Missing in-process worker session.');
-    return session.runStage(stage, input, {
-      checkCancel: () => {
-        if (this.cancelled) throw new DOMException('Cancelled', 'AbortError');
-      },
-      progress() {},
-    });
-  }
-
-  cancel() {
-    this.cancelled = true;
-  }
-
-  async close(sessionId: number) {
-    this.sessions.get(sessionId)?.close();
-    this.sessions.delete(sessionId);
-  }
-
-  dispose() {
-    for (const session of this.sessions.values()) session.close();
-    this.sessions.clear();
-  }
-}
 
 vi.mock('./phase-e-workbench-v2/saved-dxf-reprocess-host-v1', async (importOriginal) => {
   const original =
@@ -86,77 +34,6 @@ vi.mock('./phase-e-workbench-v2/saved-dxf-reprocess-host-v1', async (importOrigi
       }),
   };
 });
-
-async function draftThroughWizardStages(file: File, card: CardContext) {
-  const client = new DirectClient();
-  const { sessionId } = await client.open([await directDxfAuthoringOpenFileV1(file, 0)]);
-  const run = <S extends StageName>(stage: S, input: StageIO[S]['in']) =>
-    client.run(sessionId, stage, input);
-  try {
-    await run('extract', { opts: { sagittaMm: PATIMPORT.sagittaMm, keepFills: true } });
-    await run('clean', { edits: [] });
-    await run('scale', { decision: { factor: 1, method: 'manual', operatorConfirmed: true } });
-    await run('assemble', { sheet: 0 });
-    await run('chains', {
-      opts: {
-        joinGapMm: PATIMPORT.joinGapMm,
-        joinAngleDeg: PATIMPORT.joinAngleDeg,
-        joinLateralMm: PATIMPORT.joinLateralMm,
-      },
-    });
-    const sizes = await run('sizes', { card: card.sizes });
-    await run('pieces', {
-      edits: [],
-      sheetAnswers: {},
-      opts: {
-        cellMm: PATIMPORT.fillCellMm,
-        snapMm: PATIMPORT.snapMm,
-        variant: null,
-        ...(sizes.expected ? { expectedSizes: sizes.expected } : {}),
-      },
-    });
-    const semanticsInput: StageIO['semantics']['in'] = {
-      fileAllowance: { meaning: 'cut', allowanceMm: 10, origin: 'operator', evidence: [] },
-      pieceOverrides: {},
-      presegmentedIdentities: cardPresegmentedIdentities(card, 'main'),
-      operatorGrain: {},
-    };
-    const initial = await run('semantics', semanticsInput);
-    const assignment = pinToScope(
-      await run('fabrics', { bom: card.scopes }),
-      'main',
-      initial.pieces.map(({ seed }) => seed),
-      card.scopes,
-    );
-    const semantics = await run('semantics', semanticsInput);
-    expect(semantics.blocked).toEqual([]);
-    const capture = await captureDirectDxfAuthoringV1([file], run);
-    expect(capture.dxfNativeSewingReplay?.replayReady).toBe(true);
-    const written = await run('write', {
-      techCardId: card.techCardId,
-      scopes: card.scopes,
-      assignment,
-      sizes: sizes.map.entries.flatMap(({ source, card }) =>
-        card
-          ? [
-              {
-                token: card.token,
-                sizeId: card.sizeId,
-                name: card.name,
-                sourceLabel: source.label,
-                rank: source.rank,
-              },
-            ]
-          : [],
-      ),
-      dialect: 'r12',
-      generator: 'grbpwr-admin pattern-import (worker)',
-    });
-    return cardBuildDraft(written, { card, semantics, ...capture });
-  } finally {
-    client.dispose();
-  }
-}
 
 it.each([[['M']], [['XS', 'S', 'M', 'L', 'XL']]])(
   'replays genuine wizard apply bytes and receipt for sizes %j through the saved-row session',

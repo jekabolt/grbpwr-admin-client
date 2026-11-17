@@ -15,6 +15,7 @@ import type {
   ManifestSize,
   ManifestSource,
   PieceSpec,
+  RetainedLineSplit,
   WriteDxfFn,
   WriteJob,
   WriteResult,
@@ -61,6 +62,20 @@ export async function writeDxfWithAuthoredLineSplit(
   const { preserveAuthoredLineSplit } = await import('./protected-line-split');
   await preserveAuthoredLineSplit(job, plan, args);
   return emitPlannedDxf(job, plan, { now: opts.now });
+}
+
+/** Replays exactly one existing native vertex after independent worker verification of the reviewed file. */
+export async function writeDxfWithRetainedLineSplit(
+  sourceJob: WriteJob,
+  occurrence: RetainedLineSplit,
+  opts: WriteOptions = {},
+): Promise<WriteDetail> {
+  const job = structuredClone(sourceJob),
+    retained = structuredClone(occurrence);
+  const plan = planBlocks(job.pieces, job.scope);
+  const { retainReviewedLineSplit } = await import('./retained-line-split');
+  await retainReviewedLineSplit(job, plan, retained);
+  return emitPlannedDxf(job, plan, opts);
 }
 
 function emitPlannedDxf(job: WriteJob, plan: Plan, opts: WriteOptions): WriteDetail {

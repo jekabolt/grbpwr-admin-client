@@ -2235,7 +2235,43 @@ export const PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_CARRIER_V1 =
  * no caller-supplied replacement bytes or digest: a later owner must rerun the production writer,
  * embed the scope's final manifest and hash that rebuilt text itself.
  */
+/** Selected occurrence necessary to reproduce an already verified ordinary writer output. */
+export type RetainedLineSplit = {
+  block: string;
+  identity: string;
+  sizeId: number;
+  sizeToken: string;
+  rank: number;
+  record: ManifestProtectedLineSplit;
+};
+
+/** Private host-to-worker open message. A file or per-stage input cannot opt into this channel. */
+export type ReviewedAddPointOpen = Readonly<{
+  fileSha256: string;
+  rowSha256: string;
+  ringSha256: string;
+  entityId: string;
+  techCardId: number;
+  scopeKey: string;
+  block: string;
+  identity: string;
+  sizeId: number;
+  sizeToken: string;
+  rank: number;
+  pieceLineKey: string;
+}>;
+
+/** Current card projection supplied only by the host at the ordinary write phase. */
+export type ReviewedAddPointAtWrite = Readonly<{
+  fileSha256: string;
+  techCardId: number;
+  scopeKey: string;
+  pieceLineKey: string;
+  aliases: readonly Readonly<{ scopeKey: string; blockName: string; pieceLineKey: string }>[];
+}>;
+
 export type DraftWriterReplayV1 = {
+  retainedLineSplit?: RetainedLineSplit;
   schemaVersion: typeof PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_CARRIER_V1;
   job: WriteJob;
   createdAt: string;
@@ -3516,6 +3552,7 @@ export type ImportWorkerRequest =
   | {
       type: 'open';
       id: number;
+      reviewedAddPoint?: ReviewedAddPointOpen;
       files: {
         name: string;
         bytes: ArrayBuffer;
@@ -3530,6 +3567,7 @@ export type ImportWorkerRequest =
         id: number;
         sessionId: number;
         stage: S;
+        reviewedAddPointAtWrite?: ReviewedAddPointAtWrite;
         input: StageIO[S]['in'];
       };
     }[StageName]
