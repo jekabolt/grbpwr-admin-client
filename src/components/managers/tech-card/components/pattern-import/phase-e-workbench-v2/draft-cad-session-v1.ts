@@ -504,12 +504,22 @@ function eligibility(cursor: number): PatternImportDxfPhaseEDraftCadApplyEligibi
   });
 }
 
+const recordedSessions = new WeakSet<object>();
+
+/** A structural copy cannot authorize an authored-geometry review. */
+export function isRecordedDraftCadSessionV1(
+  value: PatternImportDxfPhaseEDraftCadSessionV1,
+): boolean {
+  return recordedSessions.has(value);
+}
+
 function session(
   source: PatternImportDxfPhaseEDraftCadSourceV1,
   history: readonly PatternImportDxfPhaseEDraftCadTransactionV1[],
   cursor: number,
+  parent?: PatternImportDxfPhaseEDraftCadSessionV1,
 ): PatternImportDxfPhaseEDraftCadSessionV1 {
-  return deepFreeze({
+  const next: PatternImportDxfPhaseEDraftCadSessionV1 = deepFreeze({
     schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_SESSION_V1,
     source,
     history,
@@ -517,6 +527,8 @@ function session(
     dirty: cursor > 0,
     apply: eligibility(cursor),
   });
+  if (!parent || recordedSessions.has(parent)) recordedSessions.add(next);
+  return next;
 }
 
 export function createPatternImportDxfPhaseEDraftCadSessionV1(
@@ -600,7 +612,12 @@ export function recordPatternImportDxfPhaseEDraftCadTransactionV1(
     commands: structuredClone(input.commands),
   });
   const active = current.history.slice(0, current.cursor);
-  const next = session(current.source, Object.freeze([...active, transaction]), active.length + 1);
+  const next = session(
+    current.source,
+    Object.freeze([...active, transaction]),
+    active.length + 1,
+    current,
+  );
   return Object.freeze({ ok: true, session: next, blocker: null });
 }
 
@@ -615,7 +632,7 @@ export function undoPatternImportDxfPhaseEDraftCadSessionV1(
     });
   return Object.freeze({
     ok: true,
-    session: session(current.source, current.history, current.cursor - 1),
+    session: session(current.source, current.history, current.cursor - 1, current),
     blocker: null,
   });
 }
@@ -631,7 +648,7 @@ export function redoPatternImportDxfPhaseEDraftCadSessionV1(
     });
   return Object.freeze({
     ok: true,
-    session: session(current.source, current.history, current.cursor + 1),
+    session: session(current.source, current.history, current.cursor + 1, current),
     blocker: null,
   });
 }

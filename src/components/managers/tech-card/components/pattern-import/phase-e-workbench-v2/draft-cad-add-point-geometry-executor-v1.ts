@@ -24,6 +24,7 @@ export type PatternImportDxfPhaseEDraftCadAddPointGeometryResultV1 =
       ok: true;
       job: WriteJob;
       sourcePieceIdentity: string;
+      insertedVertexIndex: number;
       contourRole: 'cut-boundary' | 'sewing-boundary';
       insertedSizeTokens: readonly string[];
       blockers: readonly [];
@@ -376,6 +377,7 @@ export function executePatternImportDxfPhaseEDraftCadAddPointGeometryV1(
     ok: true as const,
     job,
     sourcePieceIdentity: piece.identity,
+    insertedVertexIndex: edgeIndex + 1,
     contourRole: contour.role,
     insertedSizeTokens: updatedSizes.map(({ sizeToken }) => sizeToken),
     blockers: [] as const,
