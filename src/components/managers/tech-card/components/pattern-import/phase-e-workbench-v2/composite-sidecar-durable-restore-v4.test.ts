@@ -1,4 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_AUTHORING_CATALOG_V1,
+  computePatternImportDxfProductPhaseEAuthoringCatalogSha256V1,
+  type PatternImportDxfProductPhaseEAuthoringCatalogV1,
+} from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 
 const codecs = vi.hoisted(() => ({ decodeV4: vi.fn(), decodeV5: vi.fn() }));
 
@@ -18,6 +23,12 @@ import {
   restorePatternImportDxfProductCompositeSidecarDurableV4,
 } from './composite-sidecar-restore-authority-v4';
 import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4 } from './composite-sidecar-v4';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_PREPARED_PROPOSAL_V3,
+  PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_SAVED_CARD_PROJECTION_REQUEST_V2,
+  projectPatternImportDxfProductExactNSeamSavedCardV2,
+  readPatternImportDxfProductExactNSeamSavedCardProjectionV2,
+} from './exact-n-seam-saved-card-projection-v2';
 
 const digest = (character: string) => character.repeat(64);
 
@@ -83,6 +94,129 @@ async function sha256(bytes: Uint8Array): Promise<string> {
 
 describe('durable Composite V4 reload restore snapshot', () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it.each([
+    { pair: ['back:v1', 'back:v2'], matches: true },
+    { pair: ['back:v2', 'back:v1'], matches: true },
+    { pair: ['back:v1', 'back:v3'], matches: false },
+  ])('restores the exact reverse arc for stored IDs $pair', async ({ pair, matches }) => {
+    const current = currentBindings();
+    const seams = exactSeams();
+    seams[0].sides[0].boundaryVertexIds = ['front:v3', 'front:v0'];
+    seams[0].sides[1].boundaryVertexIds = pair;
+    const unsigned: Omit<PatternImportDxfProductPhaseEAuthoringCatalogV1, 'canonicalSha256'> = {
+      schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_AUTHORING_CATALOG_V1,
+      techCardId: current.row.techCardId,
+      scopeKey: current.row.scopeKey,
+      sizeToken: 'M',
+      sourceFileId: 'saved-source',
+      sizeSelectionCanonicalSha256: digest('e'),
+      pieces: seams[0].sides.map(({ pieceId, pieceLineKey, contourId }, index) => ({
+        pieceId,
+        pieceLineKey,
+        contours: [
+          {
+            contourId,
+            role: 'sewing-boundary',
+            geometry: { kind: 'seam' },
+            closed: true,
+            boundaryVertices: [0, 0.25, 0.5, 0.75].map((normalizedArc, ordinal) => ({
+              ordinal,
+              vertexId: `${index === 0 ? 'front' : 'back'}:v${ordinal}`,
+              normalizedArc,
+            })),
+          },
+        ],
+      })),
+      requiredExplicitFields: [
+        'documentId-and-revision',
+        'physical-surface',
+        'two-seam-sides-and-anchor-ranges',
+        'side-directions',
+        'mapping-and-length-ratio',
+        'operation-stage-and-order',
+        'immutable-material-revisions',
+        'tolerances',
+      ],
+      geometryCoordinatesExposed: false,
+      rawDxfExposed: false,
+      assemblyInferred: false,
+      productionReady: false,
+    };
+    const sha = await computePatternImportDxfProductPhaseEAuthoringCatalogSha256V1(
+      unsigned,
+      globalThis.crypto,
+    );
+    expect(sha).toBeTruthy();
+    current.catalogCanonicalSha256 = sha!;
+    const bytes = new TextEncoder().encode('{"durable":"v4"}');
+    codecs.decodeV4.mockResolvedValue({
+      ok: true,
+      document: { bindings: current },
+      exactNSeam: { carrier: { bindings: current, seams } },
+    });
+    const restored = await restorePatternImportDxfProductCompositeSidecarDurableV4({
+      schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_DURABLE_RESTORE_REQUEST_V4,
+      current: {
+        ...current,
+        selectedOperation: { ...current.selectedOperation, localOperationOrder: 0 },
+      },
+      readback: {
+        status: 'present',
+        source: 'fresh-current-sidecar-get',
+        mediaType: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V4,
+        sha256: await sha256(bytes),
+        byteLength: bytes.byteLength,
+        bytes,
+      },
+    });
+    if (!restored.ok) throw new Error(restored.blockers[0].detail);
+    const projected = await projectPatternImportDxfProductExactNSeamSavedCardV2({
+      schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_SAVED_CARD_PROJECTION_REQUEST_V2,
+      restoreOwner: restored.owner,
+      catalog: { ...unsigned, canonicalSha256: sha! },
+      preparedProposal: {
+        schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_PREPARED_PROPOSAL_V3,
+        status: 'current-saved-card-proposal',
+        expectedCatalogCanonicalSha256: sha!,
+        phaseEAggregatePlanSha256: current.phaseEAggregatePlanSha256,
+        operation: { ...current.selectedOperation, localOperationOrder: 0 },
+        seams: [
+          {
+            seamId: seams[0].seamId,
+            sides: [
+              { pieceId: 'front-id', pieceLineKey: 'piece-front', requiredDirection: 'forward' },
+              { pieceId: 'back-id', pieceLineKey: 'piece-back', requiredDirection: 'reverse' },
+            ],
+          },
+        ],
+      },
+    });
+    if (!matches) {
+      expect(projected).toMatchObject({
+        ok: false,
+        blockers: [{ code: 'catalog-boundary-order-mismatch' }],
+      });
+      return;
+    }
+    if (!projected.ok) throw new Error(projected.blockers[0].detail);
+    expect(
+      readPatternImportDxfProductExactNSeamSavedCardProjectionV2(projected.owner),
+    ).toMatchObject({
+      seams: [
+        {
+          sides: [
+            { boundaryVertexIds: ['front:v3', 'front:v0'], directedArc: { start: 0.75, end: 1 } },
+            {
+              boundaryVertexIds: pair,
+              direction: 'reverse',
+              directedArc: { start: 0.5, end: 0.75 },
+            },
+          ],
+        },
+      ],
+    });
+  });
 
   it('captures getter-free current bindings before the first digest await', async () => {
     const current = currentBindings();
