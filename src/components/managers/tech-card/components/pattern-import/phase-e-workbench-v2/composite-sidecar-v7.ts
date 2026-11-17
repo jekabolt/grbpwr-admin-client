@@ -79,6 +79,7 @@ export type PatternImportDxfProductCompositeSidecarComponentV7 = Readonly<{
 export type PatternImportDxfProductCompositeSidecarRequestV7 = Readonly<{
   schemaVersion: typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V7;
   expectedPreviousSidecarSha256: string | null;
+  bindings: PatternImportDxfProductCompositeSidecarBindingsV3;
   compositeV6Bytes: Uint8Array;
   fullAssemblyPhysicalBytes: Uint8Array;
 }>;
@@ -390,6 +391,62 @@ function samePhysicalAuthority(
   );
 }
 
+function captureBindings(value: unknown): PatternImportDxfProductCompositeSidecarBindingsV3 {
+  const bindings = exactRecord(
+    value,
+    ['row', 'serverAssemblyRevision', 'assemblyTopologySha256'],
+    'document.bindings',
+  );
+  const row = exactRecord(
+    bindings.row,
+    [
+      'techCardId',
+      'scopeKey',
+      'patternLineKey',
+      'revision',
+      'cardLockVersion',
+      'url',
+      'sizeBytes',
+      'sha256',
+    ],
+    'document.bindings.row',
+  );
+  if (
+    !Number.isSafeInteger(row.techCardId) ||
+    (row.techCardId as number) <= 0 ||
+    typeof row.scopeKey !== 'string' ||
+    !row.scopeKey ||
+    typeof row.patternLineKey !== 'string' ||
+    !row.patternLineKey ||
+    !Number.isSafeInteger(row.revision) ||
+    (row.revision as number) <= 0 ||
+    !Number.isSafeInteger(row.cardLockVersion) ||
+    (row.cardLockVersion as number) < 0 ||
+    typeof row.url !== 'string' ||
+    !row.url ||
+    !Number.isSafeInteger(row.sizeBytes) ||
+    (row.sizeBytes as number) <= 0 ||
+    typeof row.sha256 !== 'string' ||
+    !SHA256.test(row.sha256) ||
+    typeof bindings.serverAssemblyRevision !== 'string' ||
+    !bindings.serverAssemblyRevision ||
+    typeof bindings.assemblyTopologySha256 !== 'string' ||
+    !SHA256.test(bindings.assemblyTopologySha256)
+  )
+    fail('invalid-input', 'document.bindings', 'Composite V7 bindings are invalid.');
+  return bindings as PatternImportDxfProductCompositeSidecarBindingsV3;
+}
+
+function sameSavedRowAndRevisionAuthority(
+  left: PatternImportDxfProductCompositeSidecarBindingsV3,
+  right: PatternImportDxfProductCompositeSidecarBindingsV3,
+): boolean {
+  return (
+    canonical(left.row) === canonical(right.row) &&
+    left.serverAssemblyRevision === right.serverAssemblyRevision
+  );
+}
+
 async function verifyComponents(
   components: readonly [
     PatternImportDxfProductCompositeSidecarComponentV7,
@@ -423,8 +480,12 @@ async function verifyComponents(
       'components.composite-v6',
       nestedCompositeV6.blockers[0].detail,
     );
-  if (canonical(nestedCompositeV6.document.bindings) !== canonical(bindings))
-    fail('component-binding-mismatch', 'components.composite-v6', 'Nested V6 authority differs.');
+  if (!sameSavedRowAndRevisionAuthority(nestedCompositeV6.document.bindings, bindings))
+    fail(
+      'component-binding-mismatch',
+      'components.composite-v6',
+      'Nested V6 saved row or server Assembly revision differs.',
+    );
   const fullAssemblyPhysicalEnvelope = await inspectSavedFullAssemblyPhysicalComponentEnvelopeV1(
     bytes[1]!,
   );
@@ -515,6 +576,7 @@ export async function buildPatternImportDxfProductCompositeSidecarV7(
       [
         'schemaVersion',
         'expectedPreviousSidecarSha256',
+        'bindings',
         'compositeV6Bytes',
         'fullAssemblyPhysicalBytes',
       ],
@@ -536,6 +598,13 @@ export async function buildPatternImportDxfProductCompositeSidecarV7(
     const nested = await decodePatternImportDxfProductCompositeSidecarV6(v6Bytes, crypto);
     if (!nested.ok)
       fail('nested-composite-v6-invalid', 'request.compositeV6Bytes', nested.blockers[0].detail);
+    const bindings = captureBindings(request.bindings);
+    if (!sameSavedRowAndRevisionAuthority(nested.document.bindings, bindings))
+      fail(
+        'component-binding-mismatch',
+        'request.bindings',
+        'Requested transport anchor names another saved row or server Assembly revision.',
+      );
     const components = Object.freeze([
       await makeComponent(
         PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_COMPONENT_REGISTRY_V7[0],
@@ -548,12 +617,12 @@ export async function buildPatternImportDxfProductCompositeSidecarV7(
         crypto,
       ),
     ]) as PatternImportDxfProductCompositeSidecarDocumentV7['components'];
-    const verified = await verifyComponents(components, nested.document.bindings, crypto);
+    const verified = await verifyComponents(components, bindings, crypto);
     const document = deepFreeze({
       schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_DOCUMENT_V7,
       mediaType: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7,
       encoding: 'canonical-json-utf8' as const,
-      bindings: structuredClone(nested.document.bindings),
+      bindings: structuredClone(bindings),
       writeCas: {
         expectedPreviousSidecarSha256: request.expectedPreviousSidecarSha256 as string | null,
       },
@@ -592,6 +661,7 @@ function validateDocument(value: unknown): PatternImportDxfProductCompositeSidec
     document.encoding !== 'canonical-json-utf8'
   )
     fail('unsupported-schema', 'document', 'Composite V7 schema, media type, or encoding differs.');
+  captureBindings(document.bindings);
   const writeCas = exactRecord(
     document.writeCas,
     ['expectedPreviousSidecarSha256'],

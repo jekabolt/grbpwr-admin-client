@@ -27,6 +27,7 @@ import {
 } from './composite-sidecar-v7';
 import { SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_KIND_V1 } from './saved-full-assembly-physical-component-v1';
 import type { SavedFullAssemblySnapshotProjectionV1 } from './saved-full-assembly-snapshot-production-v1';
+import type { PatternImportDxfProductCompositeSidecarBindingsV3 } from 'lib/cloth/domain/pattern-import-dxf-product-composite-sidecar-v3';
 
 const encoder = new TextEncoder();
 const sha = (character: string) => character.repeat(64);
@@ -42,7 +43,7 @@ const row = Object.freeze({
   sizeBytes: 4096,
   sha256: sha('a'),
 });
-const bindings = Object.freeze({
+const bindings: PatternImportDxfProductCompositeSidecarBindingsV3 = Object.freeze({
   row,
   serverAssemblyRevision: 'asm:r4',
   assemblyTopologySha256: sha('b'),
@@ -70,11 +71,12 @@ function acceptStructural() {
   });
 }
 
-async function build() {
+async function build(outerBindings: PatternImportDxfProductCompositeSidecarBindingsV3 = bindings) {
   acceptStructural();
   return buildPatternImportDxfProductCompositeSidecarV7({
     schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V7,
     expectedPreviousSidecarSha256: sha('e'),
+    bindings: outerBindings,
     compositeV6Bytes: V6_BYTES,
     fullAssemblyPhysicalBytes: PHYSICAL_BYTES,
   });
@@ -105,6 +107,27 @@ describe('Composite sidecar V7', () => {
         SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_KIND_V1,
       ) ?? []),
     ]).toEqual([...PHYSICAL_BYTES]);
+  });
+
+  it('preserves exact V6 while allowing the fullgraph transport anchor topology SHA to differ', async () => {
+    const transportBindings = { ...bindings, assemblyTopologySha256: sha('f') };
+    const result = await build(transportBindings);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.document.bindings.assemblyTopologySha256).toBe(sha('f'));
+    expect([
+      ...(readPatternImportDxfProductCompositeComponentBytesV7(result.owner, 'composite-v6') ?? []),
+    ]).toEqual([...V6_BYTES]);
+  });
+
+  it('rejects nested V6 saved-row or server revision drift', async () => {
+    const result = await build({
+      ...bindings,
+      row: { ...row, patternLineKey: 'pattern-other' },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.blockers[0].code).toBe('component-binding-mismatch');
   });
 
   it('structurally unwraps V6 without AO read and never mints physical authority', async () => {
@@ -163,6 +186,7 @@ describe('Composite sidecar V7', () => {
     const result = await buildPatternImportDxfProductCompositeSidecarV7({
       schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V7,
       expectedPreviousSidecarSha256: null,
+      bindings,
       compositeV6Bytes: V6_BYTES,
       fullAssemblyPhysicalBytes: PHYSICAL_BYTES,
     });
