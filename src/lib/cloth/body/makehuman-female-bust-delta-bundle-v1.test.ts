@@ -40,6 +40,9 @@ describe('MakeHuman female bust delta bundle v1', () => {
       circumferenceRangeCalibrated: false,
       fitClaimEligible: false,
     });
+    expect(bundle.provenance.use).toBe(
+      'signed; c < 0 is the MakeHuman min-cup field as authored; c > 0 reverses it (our extrapolation) and at runtime is faded to zero from the bust plane up to the armpit line and down to the under-bust station',
+    );
   });
 
   it('rejects a record whose vertex index escapes the visible basis', () => {

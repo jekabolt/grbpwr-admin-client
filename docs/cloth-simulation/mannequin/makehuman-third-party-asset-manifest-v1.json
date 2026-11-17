@@ -389,7 +389,7 @@
           }
         ],
         "evidenceStatus": "complete",
-        "reason": "The fetched target matches the pinned source path and SHA-256. It is used signed; the positive side is an extrapolation of the MakeHuman min-cup field."
+        "reason": "The fetched target matches the pinned source path and SHA-256. It is used signed; c < 0 is the MakeHuman min-cup field as authored; c > 0 reverses it (our extrapolation) and at runtime is faded to zero from the bust plane up to the armpit line and down to the under-bust station; max-cup targets at the same commit were measured and rejected (under-bust coupling 2.9–3.6× the bust gain); not vendored."
       },
       "generator": {
         "status": "present",

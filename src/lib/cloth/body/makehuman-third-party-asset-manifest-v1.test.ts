@@ -335,6 +335,9 @@ describe('MakeHuman third-party asset manifest v1', () => {
     expect(byId.get('makehuman-female-bust-deltas-v1')?.generator.expectedPath).toBe(
       MAKEHUMAN_FEMALE_BUST_DELTA_PROVENANCE_V1.generator,
     );
+    expect(byId.get('makehuman-female-bust-deltas-v1')?.upstream.reason).toBe(
+      `The fetched target matches the pinned source path and SHA-256. It is used ${MAKEHUMAN_FEMALE_BUST_DELTA_PROVENANCE_V1.use}; max-cup targets at the same commit were measured and rejected (under-bust coupling 2.9–3.6× the bust gain); not vendored.`,
+    );
     expect(byId.get('makehuman-limb-circumference-deltas-v1')?.upstream.paths).toEqual(
       MAKEHUMAN_LIMB_CIRCUMFERENCE_MODE_METADATA_V1.map(({ sourcePath }) => sourcePath),
     );

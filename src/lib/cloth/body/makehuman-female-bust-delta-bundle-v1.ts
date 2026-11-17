@@ -32,7 +32,7 @@ export const MAKEHUMAN_FEMALE_BUST_DELTA_PROVENANCE_V1 = Object.freeze({
   assetPath: 'src/assets/cloth/makehuman-hm08-female-bust-deltas-v1.bin',
   assetByteLength: EXPECTED_BYTE_LENGTH,
   assetSha256: '604999167aff3654575f87eece98b1c4645ee588abe7381001b0d30f4fc3c6af',
-  use: 'signed; the positive side is an extrapolation of the MakeHuman min-cup field',
+  use: 'signed; c < 0 is the MakeHuman min-cup field as authored; c > 0 reverses it (our extrapolation) and at runtime is faded to zero from the bust plane up to the armpit line and down to the under-bust station',
 });
 
 export interface MakeHumanFemaleBustDeltaBundleV1 {
