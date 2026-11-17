@@ -2403,7 +2403,12 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                   disabled={frozen}
                   onDisplayedBodyInputV1={physicalHost?.onDisplayedBodyInputV1}
                   onSaveMannequinArrangement={physicalHost?.onSaveMannequinArrangement}
+                  onReadMannequinArrangement={physicalHost?.onReadMannequinArrangement}
+                  arrangementSourceKey={physicalHost?.arrangementSourceKey}
                   patternPieceScene={{
+                    annotationSource: exactNMannequinStaging?.ok
+                      ? exactNMannequinStaging.staging.annotationSource
+                      : undefined,
                     sources: mannequinDxfSources,
                     sceneOverlay: sceneOverlay,
                     activeScopeKey: exactNMannequinStaging?.ok
@@ -2666,6 +2671,8 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                       disabled={frozen}
                       onDisplayedBodyInputV1={physicalHost?.onDisplayedBodyInputV1}
                       onSaveMannequinArrangement={physicalHost?.onSaveMannequinArrangement}
+                      onReadMannequinArrangement={physicalHost?.onReadMannequinArrangement}
+                      arrangementSourceKey={physicalHost?.arrangementSourceKey}
                       patternPieceScene={{
                         sources: mannequinDxfSources,
                         sceneOverlay,

@@ -1144,6 +1144,8 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
               disabled={disabled}
               onDisplayedBodyInputV1={physicalHost?.onDisplayedBodyInputV1}
               onSaveMannequinArrangement={physicalHost?.onSaveMannequinArrangement}
+              onReadMannequinArrangement={physicalHost?.onReadMannequinArrangement}
+              arrangementSourceKey={physicalHost?.arrangementSourceKey}
               patternPieceScene={{
                 sources,
                 activeScopeKey,

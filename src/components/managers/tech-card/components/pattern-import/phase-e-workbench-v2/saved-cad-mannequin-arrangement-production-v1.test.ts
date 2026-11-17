@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   decodeV4: vi.fn(),
   decodeV5: vi.fn(),
   decodeV6: vi.fn(),
+  decodeV7: vi.fn(),
   buildV5: vi.fn(),
   buildV6: vi.fn(),
   saveV5: vi.fn(),
@@ -38,6 +39,9 @@ vi.mock('./composite-sidecar-v6', () => ({
   readPatternImportDxfProductCompositeComponentBytesV6: () => mocks.nestedBytes,
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V6: 'v6',
 }));
+vi.mock('./composite-sidecar-v7', () => ({
+  decodePatternImportDxfProductCompositeSidecarV7: mocks.decodeV7,
+}));
 vi.mock('./composite-sidecar-persistence-v5', () => ({
   createPatternImportDxfProductCompositeSidecarProductionPersistenceV5: () => ({
     adapter: { persist: mocks.saveV5 },
@@ -52,9 +56,12 @@ vi.mock('./composite-sidecar-persistence-v6', () => ({
 }));
 
 import {
+  readSavedCadMannequinArrangementV1,
   saveSavedCadMannequinArrangementV1,
   type SavedCadMannequinArrangementSaveRequestV1,
 } from './saved-cad-mannequin-arrangement-production-v1';
+import { createCadMannequinArrangementDocumentV1 } from './cad-mannequin-arrangement-document-v1';
+import type { CadWorkbenchMannequinArrangementSaveV1 } from './cad-workbench-physical-host-v1';
 
 const row = {
   techCardId: 11,
@@ -160,6 +167,17 @@ describe('explicit production mannequin arrangement transaction', () => {
     ).rejects.toThrow('changed before arrangement save');
     expect(mocks.saveV6).not.toHaveBeenCalled();
   });
+  it('requires the exact annotation source before upgrading V4', async () => {
+    mocks.read.mockResolvedValue(snapshot(4));
+    await expect(
+      saveSavedCadMannequinArrangementV1(
+        { ...request(), source: undefined },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow('Prepare the current exact source');
+    expect(mocks.saveV5).not.toHaveBeenCalled();
+    expect(mocks.saveV6).not.toHaveBeenCalled();
+  });
   it('preserves nested V5 when updating V6 and rejects V7 instead of downgrading', async () => {
     mocks.read.mockResolvedValue(snapshot(6));
     await saveSavedCadMannequinArrangementV1(request(), new AbortController().signal);
@@ -181,5 +199,94 @@ describe('explicit production mannequin arrangement transaction', () => {
     ).rejects.toThrow('another saved DXF revision');
     expect(mocks.read).not.toHaveBeenCalled();
     expect(mocks.saveV5).not.toHaveBeenCalled();
+  });
+});
+
+describe('saved arrangement hydration', () => {
+  function hydration() {
+    const input = request();
+    const document = createCadMannequinArrangementDocumentV1(input.arrangement);
+    const decoded = {
+      ok: true,
+      document: { bindings: { serverAssemblyRevision: 'current-assembly' } },
+      mannequinArrangement: document,
+    };
+    mocks.decodeV6.mockResolvedValue(decoded);
+    mocks.decodeV7.mockResolvedValue({ ok: true, nestedCompositeV6: decoded });
+    const expected: Omit<CadWorkbenchMannequinArrangementSaveV1, 'pieces'> = {
+      scopeKey: 'main',
+      mannequin: input.arrangement.bindings.mannequin,
+      projection: {
+        schemaVersion: 'pattern-import-dxf-product-phase-e-assembly-projection/1',
+        expectedCatalogCanonicalSha256: 'b'.repeat(64),
+        sizeSelectionCanonicalSha256: 'c'.repeat(64),
+        sourceFileId: 'saved-pattern-main',
+        sizeToken: 'M',
+        joinMode: 'catalog-ordinal-to-phase-d-point',
+        geometryPlacementApplied: false,
+        pieces: [
+          {
+            pieceId: 'front',
+            pieceLineKey: 'piece-front',
+            contours: [],
+            cameraMm: { minX: 0, minY: 0, maxX: 1, maxY: 1, padding: 0 },
+          },
+        ],
+      },
+    };
+    return { row, seedOperationNumber: 30, expected };
+  }
+  it.each([6, 7])(
+    'restores exact presentation transforms from V%i without writes',
+    async (version) => {
+      const input = hydration();
+      mocks.read.mockResolvedValue(snapshot(version));
+      const result = await readSavedCadMannequinArrangementV1(input, new AbortController().signal);
+      expect(result?.[0].transform).toEqual({ offsetM: [0.1, 0, 0], rotationRad: 0.4 });
+      expect(mocks.saveV6).not.toHaveBeenCalled();
+      expect(mocks.saveV5).not.toHaveBeenCalled();
+    },
+  );
+  it('does not hydrate a different pose or piece set', async () => {
+    const input = hydration();
+    mocks.read.mockResolvedValue(snapshot(6));
+    expect(
+      await readSavedCadMannequinArrangementV1(
+        {
+          ...input,
+          expected: {
+            ...input.expected,
+            mannequin: {
+              ...input.expected.mannequin,
+              poseBinding: { canonicalKey: 'changed-pose' },
+            },
+          },
+        },
+        new AbortController().signal,
+      ),
+    ).toBeNull();
+    expect(
+      await readSavedCadMannequinArrangementV1(
+        {
+          ...input,
+          expected: { ...input.expected, projection: { ...input.expected.projection, pieces: [] } },
+        },
+        new AbortController().signal,
+      ),
+    ).toBeNull();
+  });
+  it('leaves absent and stale arrangements empty without a write', async () => {
+    const input = hydration();
+    mocks.read.mockResolvedValue({ outer: { status: 'absent' } });
+    expect(
+      await readSavedCadMannequinArrangementV1(input, new AbortController().signal),
+    ).toBeNull();
+    const stale = snapshot(6);
+    stale.outer.currentRowBound = false;
+    mocks.read.mockResolvedValue(stale);
+    expect(
+      await readSavedCadMannequinArrangementV1(input, new AbortController().signal),
+    ).toBeNull();
+    expect(mocks.saveV6).not.toHaveBeenCalled();
   });
 });

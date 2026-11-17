@@ -191,6 +191,8 @@ export type PatternImportDxfPhaseECadMannequinModelPickerViewPropsV1 = Readonly<
   onRetryPose?: () => void;
   onDisplayedBodyInputV1?: CadMannequinDisplayedBodyInputObserverV1;
   onSaveMannequinArrangement?: CadWorkbenchPhysicalHostV1['onSaveMannequinArrangement'];
+  onReadMannequinArrangement?: CadWorkbenchPhysicalHostV1['onReadMannequinArrangement'];
+  arrangementSourceKey?: string;
 }>;
 
 export type PatternImportDxfPhaseECadMannequinPoseSessionV1 = Readonly<{
@@ -246,6 +248,7 @@ export function usePatternImportDxfPhaseECadMannequinPoseSessionV1(
 }
 
 export type PatternImportDxfPhaseECadMannequinPatternPieceSceneV1 = Readonly<{
+  annotationSource?: Readonly<{ identity: string; revision: string; sha256: string }>;
   sources: readonly PatternImportDxfPhaseECadMannequinDxfStagingSourceV1[];
   activeScopeKey?: string | null;
   selection?: PatternImportDxfPhaseECadMannequinDxfStagingSelectionV1 | null;
@@ -444,6 +447,8 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
   onRetryPose,
   onDisplayedBodyInputV1,
   onSaveMannequinArrangement,
+  onReadMannequinArrangement,
+  arrangementSourceKey,
 }: PatternImportDxfPhaseECadMannequinModelPickerViewPropsV1) {
   const selected = selectedCadWorkbenchModelV1(models, modelId);
   const selectedRevision = selected ? modelFormRevisionKeyV1(selected) : null;
@@ -514,8 +519,80 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
     patternPieceScene?.sources.find(
       ({ scopeKey }) => scopeKey === patternPieceScene.activeScopeKey,
     ) ?? (patternPieceScene?.sources.length === 1 ? patternPieceScene.sources[0] : null);
+  const arrangementExpected =
+    arrangementSource && selected?.id && selectedRevision && poseBinding
+      ? {
+          scopeKey: arrangementSource.scopeKey,
+          projection: arrangementSource.projection,
+          mannequin: {
+            baseModelId: selected.id,
+            modelFormRevisionKeyV1: selectedRevision,
+            poseBinding: { canonicalKey: poseBinding.canonicalKey },
+          },
+        }
+      : null;
+  const arrangementKey = arrangementExpected
+    ? JSON.stringify([
+        arrangementSourceKey,
+        arrangementExpected.scopeKey,
+        arrangementExpected.projection.sourceFileId,
+        arrangementExpected.projection.expectedCatalogCanonicalSha256,
+        arrangementExpected.projection.sizeSelectionCanonicalSha256,
+        arrangementExpected.projection.sizeToken,
+        arrangementExpected.mannequin,
+      ])
+    : null;
+  const arrangementCurrent = useRef({
+    key: arrangementKey,
+    expected: arrangementExpected,
+    read: onReadMannequinArrangement,
+  });
+  arrangementCurrent.current = {
+    key: arrangementKey,
+    expected: arrangementExpected,
+    read: onReadMannequinArrangement,
+  };
+  const arrangementEdits = useRef(0);
+  const arrangementSaveController = useRef<AbortController | null>(null);
+  useEffect(() => {
+    arrangementSaveController.current?.abort();
+    const controller = new AbortController();
+    const current = arrangementCurrent.current;
+    const edits = arrangementEdits.current;
+    setPatternTransforms({});
+    setArrangementMessage(null);
+    setArrangementSaving(false);
+    if (current.expected && current.read) {
+      void current
+        .read(current.expected, controller.signal)
+        .then((pieces) => {
+          if (
+            !controller.signal.aborted &&
+            arrangementCurrent.current.key === current.key &&
+            arrangementEdits.current === edits &&
+            pieces
+          ) {
+            setPatternTransforms(
+              Object.fromEntries(pieces.map(({ pieceKey, transform }) => [pieceKey, transform])),
+            );
+          }
+        })
+        .catch((error: unknown) => {
+          if (!controller.signal.aborted && arrangementCurrent.current.key === current.key)
+            setArrangementMessage(
+              error instanceof Error ? error.message : 'Saved arrangement could not be read.',
+            );
+        });
+    }
+    return () => {
+      controller.abort();
+      arrangementSaveController.current?.abort();
+    };
+  }, [arrangementKey]);
   const saveArrangement = async () => {
     const source = arrangementSource;
+    const key = arrangementKey;
+    const editGeneration = arrangementEdits.current;
     if (
       !source ||
       !selected?.id ||
@@ -526,44 +603,58 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
       return;
     setArrangementSaving(true);
     setArrangementMessage(null);
+    const controller = new AbortController();
+    arrangementSaveController.current = controller;
     try {
-      await onSaveMannequinArrangement({
-        scopeKey: source.scopeKey,
-        projection: source.projection,
-        mannequin: {
-          baseModelId: selected.id,
-          modelFormRevisionKeyV1: selectedRevision,
-          poseBinding: { canonicalKey: poseBinding.canonicalKey },
+      await onSaveMannequinArrangement(
+        {
+          annotationSource: patternPieceScene?.annotationSource,
+          scopeKey: source.scopeKey,
+          projection: source.projection,
+          mannequin: {
+            baseModelId: selected.id,
+            modelFormRevisionKeyV1: selectedRevision,
+            poseBinding: { canonicalKey: poseBinding.canonicalKey },
+          },
+          pieces: source.projection.pieces.map(({ pieceId, pieceLineKey }) => {
+            const pieceKey = `${source.scopeKey}:${pieceId}:${pieceLineKey}`;
+            const transform = patternTransforms[pieceKey];
+            return {
+              pieceKey,
+              scopeKey: source.scopeKey,
+              pieceId,
+              pieceLineKey,
+              transform: transform
+                ? {
+                    offsetM: [...transform.offsetM] as [number, number, number],
+                    rotationRad: transform.rotationRad,
+                  }
+                : { offsetM: [0, 0, 0] as const, rotationRad: 0 },
+            };
+          }),
         },
-        pieces: source.projection.pieces.map(({ pieceId, pieceLineKey }) => {
-          const pieceKey = `${source.scopeKey}:${pieceId}:${pieceLineKey}`;
-          const transform = patternTransforms[pieceKey];
-          return {
-            pieceKey,
-            scopeKey: source.scopeKey,
-            pieceId,
-            pieceLineKey,
-            transform: transform
-              ? {
-                  offsetM: [...transform.offsetM] as [number, number, number],
-                  rotationRad: transform.rotationRad,
-                }
-              : { offsetM: [0, 0, 0] as const, rotationRad: 0 },
-          };
-        }),
-      });
-      setArrangementMessage('Arrangement saved.');
-    } catch (error) {
-      setArrangementMessage(
-        error instanceof Error ? error.message : 'Arrangement could not be saved.',
+        controller.signal,
       );
+      if (!controller.signal.aborted && arrangementCurrent.current.key === key)
+        setArrangementMessage(
+          arrangementEdits.current === editGeneration
+            ? 'Arrangement saved.'
+            : 'Earlier arrangement saved. Current changes are not saved.',
+        );
+    } catch (error) {
+      if (!controller.signal.aborted && arrangementCurrent.current.key === key)
+        setArrangementMessage(
+          error instanceof Error ? error.message : 'Arrangement could not be saved.',
+        );
     } finally {
-      setArrangementSaving(false);
+      if (arrangementCurrent.current.key === key) setArrangementSaving(false);
     }
   };
   const handlePatternTransform = useCallback(
-    (pieceKey: string, transform: MeasurementSurfacePatternPieceTransformV1) =>
-      setPatternTransforms((current) => Object.freeze({ ...current, [pieceKey]: transform })),
+    (pieceKey: string, transform: MeasurementSurfacePatternPieceTransformV1) => {
+      arrangementEdits.current += 1;
+      setPatternTransforms((current) => Object.freeze({ ...current, [pieceKey]: transform }));
+    },
     [],
   );
   const patternOverlayResult = useMemo(
@@ -820,6 +911,8 @@ export function PatternImportDxfPhaseECadMannequinModelPickerV1({
   patternPieceScene = null,
   onDisplayedBodyInputV1,
   onSaveMannequinArrangement,
+  onReadMannequinArrangement,
+  arrangementSourceKey,
 }: Readonly<{
   disabled?: boolean;
   paperDoll?: ReactNode;
@@ -827,6 +920,8 @@ export function PatternImportDxfPhaseECadMannequinModelPickerV1({
   patternPieceScene?: PatternImportDxfPhaseECadMannequinPatternPieceSceneV1 | null;
   onDisplayedBodyInputV1?: CadMannequinDisplayedBodyInputObserverV1;
   onSaveMannequinArrangement?: CadWorkbenchPhysicalHostV1['onSaveMannequinArrangement'];
+  onReadMannequinArrangement?: CadWorkbenchPhysicalHostV1['onReadMannequinArrangement'];
+  arrangementSourceKey?: string;
 }>) {
   const form = useFormContext<TechCardFormData>();
   const modelId =
@@ -868,6 +963,8 @@ export function PatternImportDxfPhaseECadMannequinModelPickerV1({
       onRetryPose={poseSession.retry}
       onDisplayedBodyInputV1={onDisplayedBodyInputV1}
       onSaveMannequinArrangement={onSaveMannequinArrangement}
+      onReadMannequinArrangement={onReadMannequinArrangement}
+      arrangementSourceKey={arrangementSourceKey}
     />
   );
 }

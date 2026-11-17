@@ -11,12 +11,21 @@ export type CadWorkbenchMannequinArrangementSaveV1 = Readonly<{
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
   mannequin: CadMannequinArrangementBindingsV1['mannequin'];
   pieces: readonly CadMannequinArrangementPieceV1[];
+  annotationSource?: Readonly<{ identity: string; revision: string; sha256: string }>;
 }>;
 
 /** One mounted CAD route supplies the current picker input and its in-viewport cloth preview. */
 export type CadWorkbenchPhysicalHostV1 = Readonly<{
   onDisplayedBodyInputV1: (input: ModelDisplayedTriangleBodyOwnedInputV1 | null) => void;
-  onSaveMannequinArrangement?: (input: CadWorkbenchMannequinArrangementSaveV1) => Promise<void>;
+  arrangementSourceKey?: string;
+  onSaveMannequinArrangement?: (
+    input: CadWorkbenchMannequinArrangementSaveV1,
+    signal: AbortSignal,
+  ) => Promise<void>;
+  onReadMannequinArrangement?: (
+    input: Omit<CadWorkbenchMannequinArrangementSaveV1, 'pieces'>,
+    signal: AbortSignal,
+  ) => Promise<readonly CadMannequinArrangementPieceV1[] | null>;
   viewport?: ReactNode;
   /** Transitional read-only compatibility for the separate zero-operation route. */
   panel?: ReactNode;
