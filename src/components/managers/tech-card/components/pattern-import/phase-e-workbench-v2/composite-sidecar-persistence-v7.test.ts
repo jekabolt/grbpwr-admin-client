@@ -7,10 +7,14 @@ const mocks = vi.hoisted(() => ({
   decodeV7: vi.fn(),
   readV7Component: vi.fn(),
   readV3Component: vi.fn(),
+  isCurrentHostContext: vi.fn(),
   strategy: null as Record<string, unknown> | null,
 }));
 
 vi.mock('api/api', () => ({ abortableAdminService: vi.fn() }));
+vi.mock('components/cloth-simulation-spike/saved-generic-observed-physical-host-v1', () => ({
+  isCurrentSavedGenericObservedPhysicalHostPersistenceContextV1: mocks.isCurrentHostContext,
+}));
 vi.mock('lib/cloth/domain/pattern-import-dxf-product-composite-sidecar-storage-client-v3', () => ({
   createPatternImportDxfProductCompositeSidecarStorageWriterV3: mocks.createWriter,
 }));
@@ -77,6 +81,7 @@ beforeEach(() => {
     canonicalByteLength: 3,
   });
   mocks.readV3Component.mockReturnValue(semanticBytes);
+  mocks.isCurrentHostContext.mockReturnValue(true);
 });
 
 describe('Composite V7 storage strategy', () => {
@@ -106,10 +111,16 @@ describe('Composite V7 storage strategy', () => {
     mocks.readV7Component.mockImplementation((owner) =>
       owner === currentOwner || owner === nextOwner ? nestedV6.slice() : null,
     );
-    createPatternImportDxfProductCompositeSidecarStorageAdapterV7({
-      createClient: vi.fn(),
-      crypto,
-    });
+    const host = {};
+    const context = { sourceGeneration: 4 };
+    createPatternImportDxfProductCompositeSidecarStorageAdapterV7(
+      {
+        createClient: vi.fn(),
+        crypto,
+      },
+      host,
+      context as never,
+    );
     expect(mocks.createWriter).toHaveBeenCalledTimes(1);
     const prepare = mocks.strategy?.prepare as (
       request: unknown,
@@ -148,6 +159,14 @@ describe('Composite V7 storage strategy', () => {
     });
     expect(mocks.readV7Component).toHaveBeenCalledWith(currentOwner, 'composite-v6');
     expect(mocks.readV7Component).toHaveBeenCalledWith(nextOwner, 'composite-v6');
+    const beforeRequest = mocks.strategy?.beforeRequest as (
+      request: unknown,
+      planned: unknown,
+      signal: AbortSignal,
+    ) => Promise<void>;
+    const controller = new AbortController();
+    await beforeRequest({}, planned, controller.signal);
+    expect(mocks.isCurrentHostContext).toHaveBeenCalledWith(host, context, controller.signal);
   });
 
   it('rejects a V7 reissue that changes the exact nested V6 bytes', async () => {
@@ -176,10 +195,14 @@ describe('Composite V7 storage strategy', () => {
     mocks.readV7Component.mockImplementation((owner) =>
       owner === currentOwner ? new Uint8Array([6]) : new Uint8Array([5]),
     );
-    createPatternImportDxfProductCompositeSidecarStorageAdapterV7({
-      createClient: vi.fn(),
-      crypto,
-    });
+    createPatternImportDxfProductCompositeSidecarStorageAdapterV7(
+      {
+        createClient: vi.fn(),
+        crypto,
+      },
+      {},
+      { sourceGeneration: 4 } as never,
+    );
     const prepare = mocks.strategy?.prepare as (
       request: unknown,
       current: unknown,
@@ -207,5 +230,27 @@ describe('Composite V7 storage strategy', () => {
         crypto,
       ),
     ).rejects.toThrow('Exact nested Composite V6 bytes changed');
+  });
+
+  it('fails the separate pre-PUT phase when the genuine host context is no longer current', async () => {
+    const host = {};
+    const context = { sourceGeneration: 4 };
+    mocks.isCurrentHostContext.mockReturnValue(false);
+    createPatternImportDxfProductCompositeSidecarStorageAdapterV7(
+      { createClient: vi.fn(), crypto },
+      host,
+      context as never,
+    );
+    const beforeRequest = mocks.strategy?.beforeRequest as (
+      request: unknown,
+      planned: unknown,
+      signal: AbortSignal,
+    ) => Promise<void>;
+    const controller = new AbortController();
+
+    await expect(beforeRequest({}, {}, controller.signal)).rejects.toThrow(
+      'genuine physical host changed',
+    );
+    expect(mocks.isCurrentHostContext).toHaveBeenCalledWith(host, context, controller.signal);
   });
 });

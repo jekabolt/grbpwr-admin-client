@@ -218,14 +218,14 @@ function link(parent: AbortSignal | undefined, child: AbortController): () => vo
 function localWait<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
     let done = false;
+    let cancel: () => void;
     const finish = (f: () => void) => {
       if (done) return;
       done = true;
       remove.call(signal, 'abort', cancel);
       f();
     };
-    const cancel = () =>
-      finish(() => reject(new DOMException('Host wait cancelled.', 'AbortError')));
+    cancel = () => finish(() => reject(new DOMException('Host wait cancelled.', 'AbortError')));
     work.then(
       (v) => finish(() => resolve(v)),
       (e) => finish(() => reject(e)),
@@ -280,6 +280,10 @@ type PersistenceProjector = (
   signal?: AbortSignal,
 ) => Promise<SavedGenericObservedPhysicalHostPersistenceContextResultV1>;
 const persistenceHosts = new WeakMap<object, PersistenceProjector>();
+const persistenceContexts = new WeakMap<
+  object,
+  Readonly<{ host: object; current: () => void; retained: Set<object> }>
+>();
 class PersistenceContextFailure extends Error {
   constructor(
     readonly code: Extract<
@@ -307,6 +311,36 @@ export function projectSavedGenericObservedPhysicalHostPersistenceContextV1(
           detail: 'A genuine live saved generic physical host is required.',
         }),
       );
+}
+
+/** Local in-process currentness of the exact published context identity only. This does not
+ * authenticate mutated DTO fields or re-read server/AO/outer state; a successful CAS may change
+ * the outer bytes without changing this local binding. The writer must perform its own fresh read. */
+export function isCurrentSavedGenericObservedPhysicalHostPersistenceContextV1(
+  host: unknown,
+  context: unknown,
+  signal?: AbortSignal,
+): boolean {
+  if (!host || typeof host !== 'object' || !context || typeof context !== 'object') return false;
+  const record = persistenceContexts.get(context);
+  if (!record || record.host !== host || !persistenceHosts.has(host)) return false;
+  try {
+    checkSignal(signal);
+    record.current();
+    checkSignal(signal);
+    // The authentic body poll can synchronously dispose/rebind the host or revoke this record.
+    return persistenceContexts.get(context) === record && persistenceHosts.has(host);
+  } catch {
+    // A caller-local cancellation or invalid signal never revokes an otherwise current context.
+    try {
+      checkSignal(signal);
+    } catch {
+      return false;
+    }
+    persistenceContexts.delete(context);
+    record.retained.delete(context);
+    return false;
+  }
 }
 
 /** Owns one real fixed source session. No source/session/reader/executor callback can be injected. */
@@ -338,6 +372,12 @@ export function createSavedGenericObservedPhysicalHostV1(
     finished: Promise<void>;
   } | null = null;
   const listeners = new Set<() => void>();
+  let persistenceHostIdentity: object | null = null;
+  const retainedPersistenceContexts = new Set<object>();
+  const releasePersistenceContexts = () => {
+    for (const context of retainedPersistenceContexts) persistenceContexts.delete(context);
+    retainedPersistenceContexts.clear();
+  };
   let snapshot: SavedGenericObservedPhysicalHostSnapshotV1 = Object.freeze({
     version: SAVED_GENERIC_OBSERVED_PHYSICAL_HOST_V1,
     status: 'idle',
@@ -400,6 +440,7 @@ export function createSavedGenericObservedPhysicalHostV1(
     checkSignal(signal);
   };
   const revokePhysical = () => {
+    releasePersistenceContexts();
     releaseFrames();
     initialization = null;
   };
@@ -469,6 +510,7 @@ export function createSavedGenericObservedPhysicalHostV1(
   const sourceLost = (detail: string) => {
     const lostController = sourceController,
       lostEpoch = epoch;
+    releasePersistenceContexts();
     sourceUnlink();
     lostController.abort();
     clearLostSource(lostController, lostEpoch, detail);
@@ -627,6 +669,7 @@ export function createSavedGenericObservedPhysicalHostV1(
     const lifetime = frameLifetime(owner, current);
     if (!lifetime) throw new Error('Frame lifetime expired.');
     const invalidate = () => {
+      releasePersistenceContexts();
       releaseFrames();
       initialization = null;
       if (!disposed)
@@ -881,6 +924,13 @@ export function createSavedGenericObservedPhysicalHostV1(
       // work() has its own await/finally. Recheck after that continuation, without publishing state.
       if (!currentTarget) throw new Error('Current observed target projection is absent.');
       publicationCurrent();
+      if (!persistenceHostIdentity) throw new Error('Persistence host identity is unavailable.');
+      persistenceContexts.set(result.context, {
+        host: persistenceHostIdentity,
+        current: publicationCurrent,
+        retained: retainedPersistenceContexts,
+      });
+      retainedPersistenceContexts.add(result.context);
       return result;
     } catch (error) {
       return Object.freeze({
@@ -934,6 +984,7 @@ export function createSavedGenericObservedPhysicalHostV1(
           throw new Error('Host row differs from genuine source request.');
         accepted = true;
         acceptedEpoch = ++epoch;
+        releasePersistenceContexts();
         sourceUnlink();
         sourceController.abort();
         if (disposed || epoch !== acceptedEpoch)
@@ -1205,6 +1256,7 @@ export function createSavedGenericObservedPhysicalHostV1(
     async dispose() {
       if (disposed) return false;
       disposed = true;
+      releasePersistenceContexts();
       persistenceHosts.delete(host);
       epoch++;
       sourceController.abort();
@@ -1218,6 +1270,7 @@ export function createSavedGenericObservedPhysicalHostV1(
       return true;
     },
   };
+  persistenceHostIdentity = host;
   persistenceHosts.set(host, projectPersistenceContext);
   return Object.freeze(host);
 }

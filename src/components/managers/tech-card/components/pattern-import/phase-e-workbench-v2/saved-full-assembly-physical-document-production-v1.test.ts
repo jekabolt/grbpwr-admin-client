@@ -2,12 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   projectHost: vi.fn(),
+  isCurrentHostContext: vi.fn(),
   readSnapshot: vi.fn(),
   projectSnapshot: vi.fn(),
   disposeSnapshot: vi.fn(),
   encodeInitialization: vi.fn(),
   buildComponent: vi.fn(),
   encodeComponent: vi.fn(),
+  projectAoSnapshot: vi.fn(),
   buildV7: vi.fn(),
   encodeV7: vi.fn(),
   decodeV7: vi.fn(),
@@ -15,11 +17,13 @@ const mocks = vi.hoisted(() => ({
   verifyV7: vi.fn(),
   isAuthorityReceipt: vi.fn(),
   disposeAuthorityReceipt: vi.fn(),
+  createStorage: vi.fn(),
   persist: vi.fn(),
 }));
 
 vi.mock('components/cloth-simulation-spike/saved-generic-observed-physical-host-v1', () => ({
   projectSavedGenericObservedPhysicalHostPersistenceContextV1: mocks.projectHost,
+  isCurrentSavedGenericObservedPhysicalHostPersistenceContextV1: mocks.isCurrentHostContext,
 }));
 vi.mock('lib/cloth/domain/dxf-garment-physical-initialization-v1', () => ({
   encodeDxfGarmentPhysicalInitializationV1: mocks.encodeInitialization,
@@ -32,13 +36,12 @@ vi.mock('./saved-full-assembly-snapshot-production-v1', () => ({
 vi.mock('./saved-full-assembly-physical-component-v1', () => ({
   buildSavedFullAssemblyPhysicalComponentV1: mocks.buildComponent,
   encodeSavedFullAssemblyPhysicalComponentV1: mocks.encodeComponent,
+  projectSavedFullAssemblyAoOnlySnapshotV1: mocks.projectAoSnapshot,
 }));
 vi.mock('./composite-sidecar-persistence-v7', () => ({
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V7:
     'pattern-import-dxf-product-composite-sidecar-storage-request/7',
-  createPatternImportDxfProductCompositeSidecarProductionStorageAdapterV7: () => ({
-    persist: mocks.persist,
-  }),
+  createPatternImportDxfProductCompositeSidecarProductionStorageAdapterV7: mocks.createStorage,
 }));
 vi.mock('./composite-sidecar-v6', () => ({
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6:
@@ -174,6 +177,8 @@ function freshSnapshot(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.isCurrentHostContext.mockReturnValue(true);
+  mocks.createStorage.mockReturnValue({ persist: mocks.persist });
   mocks.readSnapshot.mockResolvedValue({ receipt: 'genuine' });
   mocks.projectSnapshot.mockReturnValueOnce(freshSnapshot()).mockReturnValueOnce(
     freshSnapshot('2'.repeat(64), {
@@ -197,6 +202,12 @@ beforeEach(() => {
     blockers: [],
   });
   mocks.encodeComponent.mockReturnValue({ ok: true, bytes: new Uint8Array([4, 4, 4]) });
+  mocks.projectAoSnapshot.mockImplementation((snapshot) => ({
+    row: snapshot.row,
+    serverAssemblyRevision: snapshot.serverAssemblyRevision,
+    operations: snapshot.operations,
+    seams: snapshot.seams,
+  }));
   mocks.buildV7.mockResolvedValue({
     ok: true,
     owner: { outer: 'owner' },
@@ -235,8 +246,9 @@ describe('saved full-assembly physical document production consumer', () => {
 
   it('derives the seed from the first graph stitch, never from the selected fuse operation', async () => {
     const projected = context();
+    const host = {};
     mocks.projectHost.mockResolvedValue({ ok: true, context: projected });
-    const result = await persistCurrentSavedGenericObservedPhysicalHostV1({}, 4);
+    const result = await persistCurrentSavedGenericObservedPhysicalHostV1(host, 4);
     expect(mocks.readSnapshot).toHaveBeenCalledWith(
       { row, seedOperationNumber: 20 },
       expect.any(AbortSignal),
@@ -246,7 +258,12 @@ describe('saved full-assembly physical document production consumer', () => {
       {
         document: projected.physicalInitialization.document,
         graph: projected.graph,
-        assemblySnapshot: freshSnapshot(),
+        assemblySnapshot: {
+          row,
+          serverAssemblyRevision: projected.graph.serverAssemblyRevision,
+          operations: freshSnapshot().operations,
+          seams: [],
+        },
       },
       expect.any(AbortSignal),
     );
@@ -277,8 +294,14 @@ describe('saved full-assembly physical document production consumer', () => {
       }),
       expect.any(AbortSignal),
     );
+    expect(mocks.createStorage).toHaveBeenCalledWith(host, projected);
     expect(mocks.verifyV7).toHaveBeenCalledWith({ readback: 'owner' }, { receipt: 'genuine' });
     expect(mocks.disposeAuthorityReceipt).toHaveBeenCalledWith({ authority: 'genuine' });
+    expect(mocks.isCurrentHostContext).toHaveBeenCalledWith(
+      host,
+      projected,
+      expect.any(AbortSignal),
+    );
     expect(result).toMatchObject({ ok: true, writeOutcome: 'verified' });
   });
 
@@ -351,5 +374,25 @@ describe('saved full-assembly physical document production consumer', () => {
     const result = await persistCurrentSavedGenericObservedPhysicalHostV1({}, 4);
     expect(result).toMatchObject({ ok: false, blockers: [{ code: 'unrecognized-host' }] });
     expect(mocks.readSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('never reports success when the genuine host changes while PUT is in flight', async () => {
+    mocks.projectHost.mockResolvedValue({ ok: true, context: context() });
+    let current = true;
+    mocks.isCurrentHostContext.mockImplementation(() => current);
+    mocks.persist.mockImplementation(async () => {
+      current = false;
+      return { ok: true, writeOutcome: 'verified', receipt: {}, blockers: [] };
+    });
+
+    const result = await persistCurrentSavedGenericObservedPhysicalHostV1({}, 4);
+
+    expect(mocks.persist).toHaveBeenCalledTimes(1);
+    expect(mocks.verifyV7).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      ok: false,
+      writeOutcome: 'acknowledged-unverified',
+      blockers: [{ code: 'host-context-drift' }],
+    });
   });
 });

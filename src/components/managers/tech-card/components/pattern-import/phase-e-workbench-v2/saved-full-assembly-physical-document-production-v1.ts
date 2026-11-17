@@ -1,4 +1,5 @@
 import {
+  isCurrentSavedGenericObservedPhysicalHostPersistenceContextV1,
   projectSavedGenericObservedPhysicalHostPersistenceContextV1,
   type SavedGenericObservedPhysicalHostPersistenceContextV1,
 } from 'components/cloth-simulation-spike/saved-generic-observed-physical-host-v1';
@@ -8,6 +9,7 @@ import type { PatternImportDxfProductCompositeSidecarBindingsV3 } from 'lib/clot
 import {
   buildSavedFullAssemblyPhysicalComponentV1,
   encodeSavedFullAssemblyPhysicalComponentV1,
+  projectSavedFullAssemblyAoOnlySnapshotV1,
   type SavedFullAssemblyPhysicalComponentOwnerV1,
 } from './saved-full-assembly-physical-component-v1';
 import {
@@ -202,11 +204,12 @@ async function preparePhysicalDocument(
       'The Assembly Order or current outer sidecar changed after the generic physical projection.',
     );
   const anchor = transportAnchor(context, snapshot);
+  const aoSnapshot = projectSavedFullAssemblyAoOnlySnapshotV1(snapshot);
   const encodedInitialization = await encodeDxfGarmentPhysicalInitializationV1(
     {
       document: context.physicalInitialization.document,
       graph: context.graph,
-      assemblySnapshot: snapshot,
+      assemblySnapshot: aoSnapshot,
     },
     signal,
   );
@@ -369,9 +372,9 @@ function blocked(
 }
 
 /**
- * Sole non-injectable TABLE persistence entrypoint. The V7 outer transaction is connected below
- * once its registered codec/persistence owner is available; every authority input above is
- * projected or reread internally rather than accepted from a caller.
+ * Sole non-injectable TABLE persistence entrypoint. The registered V7 codec and the existing
+ * StorageWriterV3 perform the exact current V6/V7 CAS; every authority input is projected or
+ * reread internally rather than accepted from a caller.
  */
 export async function persistCurrentSavedGenericObservedPhysicalHostV1(
   host: unknown,
@@ -385,7 +388,10 @@ export async function persistCurrentSavedGenericObservedPhysicalHostV1(
     if (signal?.aborted) controller.abort();
     const prepared = await preparePhysicalDocument(host, expectedGeneration, controller.signal);
     const next = await buildNextOuter(prepared, controller.signal);
-    const storage = createPatternImportDxfProductCompositeSidecarProductionStorageAdapterV7();
+    const storage = createPatternImportDxfProductCompositeSidecarProductionStorageAdapterV7(
+      host,
+      prepared.context,
+    );
     const stored = await storage.persist(
       {
         schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V7,
@@ -406,6 +412,17 @@ export async function persistCurrentSavedGenericObservedPhysicalHostV1(
       );
     try {
       const receipt = await verifyDurableReadback(prepared, next.encoded, controller.signal);
+      if (
+        !isCurrentSavedGenericObservedPhysicalHostPersistenceContextV1(
+          host,
+          prepared.context,
+          controller.signal,
+        )
+      )
+        fail(
+          'host-context-drift',
+          'The genuine physical host changed while the storage transaction was in flight.',
+        );
       return Object.freeze({
         ok: true as const,
         schemaVersion: SAVED_FULL_ASSEMBLY_PHYSICAL_DOCUMENT_PERSISTENCE_V1,

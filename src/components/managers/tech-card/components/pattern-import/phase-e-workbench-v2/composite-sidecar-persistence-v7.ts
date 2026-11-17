@@ -1,5 +1,9 @@
 import { abortableAdminService } from 'api/api';
 import {
+  isCurrentSavedGenericObservedPhysicalHostPersistenceContextV1,
+  type SavedGenericObservedPhysicalHostPersistenceContextV1,
+} from 'components/cloth-simulation-spike/saved-generic-observed-physical-host-v1';
+import {
   createPatternImportDxfProductCompositeSidecarStorageWriterV3,
   type PatternImportDxfProductCompositeSidecarStorageDepsV3,
   type PatternImportDxfProductCompositeSidecarStorageVerifiedGetV3,
@@ -185,6 +189,8 @@ async function prepareV7(
 
 export function createPatternImportDxfProductCompositeSidecarStorageAdapterV7(
   deps: PatternImportDxfProductCompositeSidecarStorageDepsV3,
+  host: unknown,
+  context: SavedGenericObservedPhysicalHostPersistenceContextV1,
 ): PatternImportDxfProductCompositeSidecarStorageAdapterV7 {
   return createPatternImportDxfProductCompositeSidecarStorageWriterV3(deps, {
     requestSchemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V7,
@@ -196,16 +202,26 @@ export function createPatternImportDxfProductCompositeSidecarStorageAdapterV7(
     ]),
     label: 'Composite V7 Full Assembly physical document',
     prepare: prepareV7,
+    beforeRequest: async (_request, _planned, signal) => {
+      if (!isCurrentSavedGenericObservedPhysicalHostPersistenceContextV1(host, context, signal))
+        fail('The genuine physical host changed before its storage PUT.');
+    },
     verifyCanonical: async (bytes, crypto) =>
       (await decodePatternImportDxfProductCompositeSidecarV7(bytes, crypto)).ok,
   });
 }
 
 export function createPatternImportDxfProductCompositeSidecarProductionStorageAdapterV7(
+  host: unknown,
+  context: SavedGenericObservedPhysicalHostPersistenceContextV1,
   crypto: Pick<Crypto, 'subtle'> | undefined = globalThis.crypto,
 ) {
-  return createPatternImportDxfProductCompositeSidecarStorageAdapterV7({
-    createClient: (signal) => abortableAdminService(signal),
-    crypto,
-  });
+  return createPatternImportDxfProductCompositeSidecarStorageAdapterV7(
+    {
+      createClient: (signal) => abortableAdminService(signal),
+      crypto,
+    },
+    host,
+    context,
+  );
 }

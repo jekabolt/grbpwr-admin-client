@@ -25,10 +25,17 @@ const authority = Object.freeze({
 });
 
 describe('StorageWriterV3 pre-PUT currentness phase', () => {
-  it('returns not-attempted and performs zero PUTs when beforeRequest fails closed', async () => {
-    const get = vi.fn().mockRejectedValue(Object.assign(new Error('absent'), { status: 404 }));
+  it('holds the current GET, then rejects a replacement with zero PUTs', async () => {
+    let releaseCurrentGet!: () => void;
+    let current = true;
+    const currentGet = new Promise<never>((_resolve, reject) => {
+      releaseCurrentGet = () => reject(Object.assign(new Error('absent'), { status: 404 }));
+    });
+    const get = vi.fn().mockReturnValue(currentGet);
     const put = vi.fn();
-    const beforeRequest = vi.fn().mockRejectedValue(new Error('host generation changed'));
+    const beforeRequest = vi.fn(async () => {
+      if (!current) throw new Error('host generation changed');
+    });
     const client = {
       GetTechCardPatternSemanticSidecar: get,
       PutTechCardPatternSemanticSidecar: put,
@@ -63,10 +70,14 @@ describe('StorageWriterV3 pre-PUT currentness phase', () => {
     );
     const controller = new AbortController();
 
-    const result = await writer.persist(
+    const inFlight = writer.persist(
       Object.freeze({ schemaVersion: REQUEST, currentAuthority: authority }),
       controller.signal,
     );
+    await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+    current = false;
+    releaseCurrentGet();
+    const result = await inFlight;
 
     expect(result).toMatchObject({
       ok: false,

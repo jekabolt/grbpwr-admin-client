@@ -37,6 +37,7 @@ import {
 import {
   createSavedGenericObservedPhysicalHostV1,
   projectSavedGenericObservedPhysicalHostPersistenceContextV1,
+  isCurrentSavedGenericObservedPhysicalHostPersistenceContextV1,
   SAVED_GENERIC_OBSERVED_NUMERIC_PROFILE_V1,
 } from './saved-generic-observed-physical-host-v1';
 
@@ -880,6 +881,237 @@ describe('factory-authenticated fresh persistence context (no durable write auth
     beforeModelRead = null;
     expect(await project(f.host, 1)).toMatchObject({ ok: false, code: 'unrecognized-host' });
     expect(historical.context.claims.productAuthority).toBe(false);
+    expect((await f.body.projectCurrentBody()).status).toBe('projected');
+  }, 60000);
+});
+
+describe('exact persistence-context local currentness (no server freshness authority)', () => {
+  const project = projectSavedGenericObservedPhysicalHostPersistenceContextV1;
+  const current = isCurrentSavedGenericObservedPhysicalHostPersistenceContextV1;
+  async function issued(f: Awaited<ReturnType<typeof fixture>>, signal?: AbortSignal) {
+    const result = await project(f.host, 1, signal);
+    if (!result.ok) throw new Error(JSON.stringify(result));
+    return result.context;
+  }
+
+  it('recognizes only the exact genuine context and host, without reading caller getters or doing RPC', async () => {
+    const f = await fixture();
+    await initialize(f);
+    const context = await issued(f);
+    const count = readCount;
+    const invoked = vi.fn(() => {
+      throw new Error('No caller property may authenticate a context.');
+    });
+    const traps = { get: invoked, getPrototypeOf: invoked, ownKeys: invoked };
+    const revoked = Proxy.revocable(context, traps);
+    revoked.revoke();
+    const wrongHost = createSavedGenericObservedPhysicalHostV1({
+      row: seed.row,
+      bodySession: f.body,
+    });
+    cleanup.push(() => wrongHost.dispose().then(() => {}));
+    expect(current(f.host, context)).toBe(true);
+    for (const value of [
+      null,
+      7,
+      {},
+      structuredClone(context),
+      { ...context },
+      Object.defineProperty({}, 'sourceGeneration', { get: invoked }),
+      new Proxy(context, traps),
+      revoked.proxy,
+    ])
+      expect(current(f.host, value)).toBe(false);
+    for (const host of [wrongHost, { ...f.host }, new Proxy(f.host, traps)])
+      expect(current(host, context)).toBe(false);
+    expect(invoked).not.toHaveBeenCalled();
+    expect(readCount).toBe(count);
+    expect(current(f.host, context)).toBe(true);
+  }, 60000);
+
+  it.each(['null', 'same-content-rebound', 'disposed'] as const)(
+    'revokes an issued context after observed body %s while retaining the source compile',
+    async (mode) => {
+      const f = await fixture();
+      await initialize(f);
+      const context = await issued(f);
+      if (mode === 'disposed') f.body.dispose();
+      else {
+        await f.body.observe(null);
+        if (mode === 'same-content-rebound') {
+          await f.body.observe(f.observed.input);
+          const target = await bodySessionApi.projectCurrentSavedModelGenericObservedTargetV1(
+            f.body,
+          );
+          if (!target.ok) throw new Error(target.detail);
+          expect(target.canonicalSha256).toBe(
+            context.physicalInitialization.document.observedTarget.canonicalSha256,
+          );
+        }
+      }
+      const count = readCount;
+      expect(current(f.host, context)).toBe(false);
+      expect(readCount).toBe(count);
+      expect(f.host.getSnapshot()).toMatchObject({
+        sourceGeneration: 1,
+        initializationSha256: null,
+      });
+      if (mode === 'same-content-rebound')
+        expect((await f.host.projectAuthoringContext(1)).ok).toBe(true);
+    },
+    60000,
+  );
+
+  it('invalidates prior context identities on accepted initialization rebind and source generation replacement', async () => {
+    const f = await fixture();
+    const { doc } = await initialize(f);
+    const first = await issued(f);
+    const pending = f.host.bindInitialization(doc, 1);
+    expect(current(f.host, first)).toBe(false);
+    expect((await pending).ok).toBe(true);
+    const second = await issued(f);
+    expect(current(f.host, second)).toBe(true);
+    expect(current(f.host, first)).toBe(false);
+    const next = await createSavedThreePanelSourceV1(seed);
+    cleanup.push(next.dispose);
+    const raw = await savedThreePanelCompileRequestV1(seed, next);
+    const replacement = f.host.consume({ ...raw, intent: f.request.intent });
+    expect(current(f.host, second)).toBe(false);
+    expect((await replacement).ok).toBe(true);
+    expect(f.host.getSnapshot().sourceGeneration).toBe(2);
+    expect(current(f.host, second)).toBe(false);
+  }, 60000);
+
+  it('keeps source/body/init live on local abort or invalid signal and observes the original context read lifetime', async () => {
+    const f = await fixture();
+    await initialize(f);
+    const original = new AbortController();
+    const context = await issued(f, original.signal);
+    const before = f.host.getSnapshot();
+    const caller = new AbortController();
+    caller.abort();
+    const getter = vi.fn();
+    const invalid = Object.defineProperty({}, 'aborted', { get: getter });
+    expect(current(f.host, context, caller.signal)).toBe(false);
+    expect(current(f.host, context, invalid as AbortSignal)).toBe(false);
+    expect(getter).not.toHaveBeenCalled();
+    expect(current(f.host, context)).toBe(true);
+    original.abort();
+    expect(current(f.host, context)).toBe(false);
+    expect(f.host.getSnapshot()).toBe(before);
+    expect((await f.body.projectCurrentBody()).status).toBe('projected');
+    expect(current(f.host, await issued(f))).toBe(true);
+  }, 60000);
+
+  it('revokes context records on the original source lifetime abort without disposing the borrowed body', async () => {
+    const f = await fixture();
+    const sourceCaller = new AbortController();
+    await initialize(f, sourceCaller.signal);
+    const context = await issued(f);
+    sourceCaller.abort();
+    expect(current(f.host, context)).toBe(false);
+    expect(f.host.getSnapshot()).toMatchObject({ status: 'blocked', initializationSha256: null });
+    expect((await f.body.projectCurrentBody()).status).toBe('projected');
+  }, 60000);
+
+  it('refuses true after reentrant host disposal from the genuine synchronous body poll', async () => {
+    const f = await fixture();
+    await initialize(f);
+    const context = await issued(f);
+    const original = bodySessionApi.isCurrentSavedModelGenericObservedTargetV1;
+    let disposing: Promise<boolean> | null = null;
+    const spy = vi
+      .spyOn(bodySessionApi, 'isCurrentSavedModelGenericObservedTargetV1')
+      .mockImplementation((...args) => {
+        const value = original(...args);
+        disposing = f.host.dispose();
+        return value;
+      });
+    try {
+      expect(current(f.host, context)).toBe(false);
+      expect(disposing).not.toBeNull();
+      await disposing;
+      expect(current(f.host, context)).toBe(false);
+      expect((await f.body.projectCurrentBody()).status).toBe('projected');
+    } finally {
+      spy.mockRestore();
+    }
+  }, 60000);
+
+  it('checks caller cancellation after the real body poll without revoking its current context', async () => {
+    const f = await fixture();
+    await initialize(f);
+    const context = await issued(f);
+    const before = f.host.getSnapshot();
+    const caller = new AbortController();
+    const original = bodySessionApi.isCurrentSavedModelGenericObservedTargetV1;
+    const spy = vi
+      .spyOn(bodySessionApi, 'isCurrentSavedModelGenericObservedTargetV1')
+      .mockImplementation((...args) => {
+        const value = original(...args);
+        caller.abort();
+        return value;
+      });
+    try {
+      expect(current(f.host, context, caller.signal)).toBe(false);
+      expect(f.host.getSnapshot()).toBe(before);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(current(f.host, context)).toBe(true);
+    expect((await f.body.projectCurrentBody()).status).toBe('projected');
+  }, 60000);
+
+  it('allows a valid fixture outer-only update locally, then rejects after the fixed fresh reader observes it', async () => {
+    const f = await fixture();
+    await initialize(f);
+    const context = await issued(f);
+    // Real canonical Composite bytes model the fixture's accepted absent→present CAS; no backend write claim.
+    const outer = await presentFixtureOuter();
+    editWire = (wire) => {
+      wire.semanticSidecar = outer;
+    };
+    const count = readCount;
+    expect(current(f.host, context)).toBe(true);
+    expect(readCount).toBe(count);
+    expect((await project(f.host, 1)).ok).toBe(false);
+    expect(current(f.host, context)).toBe(false);
+    expect(f.host.getSnapshot()).toMatchObject({ status: 'blocked', initializationSha256: null });
+    expect((await f.body.projectCurrentBody()).status).toBe('projected');
+  }, 60000);
+
+  it('deletes issued context before sibling-frame abort callouts during numeric lifetime revocation', async () => {
+    const f = await fixture();
+    await initialize(f);
+    const { lease } = await borrowedLease();
+    expect((await f.host.runNumeric16(lease)).ok).toBe(true);
+    expect((await f.host.runNumeric32(lease)).ok).toBe(true);
+    const context = await issued(f);
+    expect(current(f.host, context)).toBe(true);
+    const frames = [...ports.live.entries()];
+    const frame16 = frames.find(
+      ([owner]) => (owner as { syntheticNumericFrame: number }).syntheticNumericFrame === 16,
+    )?.[1];
+    const frame32 = frames.find(
+      ([owner]) => (owner as { syntheticNumericFrame: number }).syntheticNumericFrame === 32,
+    )?.[1];
+    if (!frame16 || !frame32)
+      throw new Error('Expected both declared synthetic numeric lifetimes.');
+    expect(frame16.signal.aborted).toBe(false);
+    expect(frame32.signal.aborted).toBe(false);
+    let duringSiblingAbort: boolean | null = null;
+    frame16.signal.addEventListener(
+      'abort',
+      () => {
+        // This callout runs while releaseFrames is disposing the sibling and before init is cleared.
+        duringSiblingAbort = current(f.host, context);
+      },
+      { once: true },
+    );
+    frame32.abort();
+    expect(duringSiblingAbort).toBe(false);
+    expect(current(f.host, context)).toBe(false);
+    expect(f.host.getSnapshot()).toMatchObject({ status: 'blocked', initializationSha256: null });
     expect((await f.body.projectCurrentBody()).status).toBe('projected');
   }, 60000);
 });
