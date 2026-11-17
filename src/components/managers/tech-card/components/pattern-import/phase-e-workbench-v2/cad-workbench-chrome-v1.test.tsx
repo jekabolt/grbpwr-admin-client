@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -8,6 +9,26 @@ import {
 import { PatternImportDxfPhaseECadWorkbenchSplitShellV1 } from './cad-workbench-split-shell-v1';
 
 describe('Assembly Table chrome', () => {
+  it('keeps every production 2D tool rail centered inside its canvas', () => {
+    const source = (file: string) => readFileSync(new URL(file, import.meta.url), 'utf8');
+    const centeredRail =
+      'right-2 top-1/2 z-30 flex h-[calc(100%-1rem)] w-12 -translate-y-1/2 items-center overflow-visible';
+    const workbench = source('./workbench.tsx');
+    const draft = source('./draft-cad-editor-shell-v1.tsx');
+
+    expect(workbench).toContain(centeredRail);
+    expect(draft).toContain(centeredRail);
+    expect(source('./cad-table-zero-connect-canvas-v1.tsx')).toContain(
+      'right-2 top-1/2 z-20 flex max-h-[calc(100%-1rem)] -translate-y-1/2 flex-col',
+    );
+    expect(workbench).toContain('overflow-y-auto border border-borderColor');
+    expect(draft).toContain('overflow-y-auto border border-borderColor');
+    expect(workbench).toContain('right-[calc(100%+0.5rem)]');
+    expect(draft).toContain('right-[calc(100%+0.5rem)]');
+    expect(workbench).toMatch(/<\/nav>[\s\S]*data-cad-tool-flyout='measure'/u);
+    expect(draft).toMatch(/<\/nav>[\s\S]*data-draft-cad-tool-flyout=/u);
+  });
+
   it('keeps only the useful unit and layout controls in the workbench header', () => {
     const markup = renderToStaticMarkup(
       <PatternImportDxfPhaseECadWorkbenchSplitShellV1

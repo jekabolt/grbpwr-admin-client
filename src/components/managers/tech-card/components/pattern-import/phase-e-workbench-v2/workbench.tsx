@@ -1632,7 +1632,7 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
       className='flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-pageBg'
     >
       <div className='min-h-0 flex-1'>
-        <div className='grid h-full min-h-0 gap-0 lg:grid-cols-[auto_3rem_minmax(0,1fr)]'>
+        <div className='grid h-full min-h-0 grid-cols-[auto_minmax(0,1fr)] gap-0'>
           <PatternImportDxfPhaseECadWorkbenchObjectSidebarV1
             pieces={catalog.pieces.map((piece) => ({
               objectKey: patternImportDxfPhaseECadTablePieceKeyV1(
@@ -1659,94 +1659,104 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                 onActiveSeamIndexChange(nextIndex as SeamIndex);
             }}
           />
-          <nav
-            className='flex gap-1 overflow-x-auto border-r border-borderColor bg-bgColor p-1 lg:flex-col lg:overflow-visible'
-            aria-label='Assembly tools'
-          >
-            <PatternImportDxfPhaseECadWorkbenchToolButtonV1
-              icon='select'
-              label='Select'
-              active={measurementTool === null && !calloutToolActive && !panToolActive}
-              pressed={measurementTool === null && !calloutToolActive && !panToolActive}
-              onClick={() => selectMeasurementTool(null)}
-            />
-            <PatternImportDxfPhaseECadWorkbenchToolButtonV1
-              icon='hand'
-              label='Hand'
-              active={panToolActive}
-              pressed={panToolActive}
-              onClick={selectPanTool}
-            />
-            <PatternImportDxfPhaseECadTableConnectToolControlV1
-              phase={zeroConnectToolPhase}
-              disabled={disabled || !projectionReady}
-              onStart={startZeroConnect}
-              onCancel={cancelZeroConnect}
-            />
-            <details
-              className='group relative border-t border-hairline pt-1'
-              open={measureMenuOpen}
-              data-draft-cad-tool-group='measure'
-              data-tool-group-open={measureMenuOpen}
-              onToggle={(event) => setMeasureMenuOpen(event.currentTarget.open)}
+          <div className='relative flex h-full min-h-0 min-w-0 flex-col'>
+            <div
+              className='absolute right-2 top-1/2 z-30 flex h-[calc(100%-1rem)] w-12 -translate-y-1/2 items-center overflow-visible'
+              data-cad-assembly-tool-rail-wrapper=''
             >
-              <summary
-                className={`flex h-10 w-10 cursor-pointer list-none items-center justify-center marker:hidden ${
-                  measurementTool
-                    ? 'bg-textColor text-bgColor'
-                    : 'bg-transparent text-textColor hover:bg-pageBg'
-                }`}
-                aria-label='Measure tools'
-                title='Measure tools'
+              <nav
+                className='flex max-h-full w-12 flex-col gap-0.5 overflow-y-auto border border-borderColor bg-bgColor/95 p-0.5'
+                aria-label='Assembly tools'
+                data-cad-assembly-tool-rail=''
               >
-                <RulerSquareIcon aria-hidden width='16' height='16' />
-              </summary>
-              <div className='absolute top-0 left-[calc(100%+0.5rem)] z-30 grid w-40 grid-cols-3 gap-1 border border-borderColor bg-bgColor p-1.5'>
-                <Text component='p' size='micro' className='col-span-3 px-1 font-bold'>
-                  Measure
-                </Text>
-                {(['point', 'line', 'edge'] as const).map((tool) => (
+                <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+                  icon='select'
+                  label='Select'
+                  active={measurementTool === null && !calloutToolActive && !panToolActive}
+                  pressed={measurementTool === null && !calloutToolActive && !panToolActive}
+                  onClick={() => selectMeasurementTool(null)}
+                />
+                <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+                  icon='hand'
+                  label='Hand'
+                  active={panToolActive}
+                  pressed={panToolActive}
+                  onClick={selectPanTool}
+                />
+                <PatternImportDxfPhaseECadTableConnectToolControlV1
+                  phase={zeroConnectToolPhase}
+                  disabled={disabled || !projectionReady}
+                  onStart={startZeroConnect}
+                  onCancel={cancelZeroConnect}
+                />
+                <details
+                  className='group relative border-t border-hairline pt-1'
+                  open={measureMenuOpen}
+                  data-draft-cad-tool-group='measure'
+                  data-tool-group-open={measureMenuOpen}
+                  onToggle={(event) => setMeasureMenuOpen(event.currentTarget.open)}
+                >
+                  <summary
+                    className={`flex h-10 w-10 cursor-pointer list-none items-center justify-center marker:hidden ${
+                      measurementTool
+                        ? 'bg-textColor text-bgColor'
+                        : 'bg-transparent text-textColor hover:bg-pageBg'
+                    }`}
+                    aria-label='Measure tools'
+                    title='Measure tools'
+                  >
+                    <RulerSquareIcon aria-hidden width='16' height='16' />
+                  </summary>
+                </details>
+                <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+                  icon='callout'
+                  label='Callout'
+                  active={calloutToolActive}
+                  pressed={calloutToolActive}
+                  onClick={selectCalloutTool}
+                />
+                <div className='flex flex-col gap-1 border-t border-hairline pt-1'>
                   <PatternImportDxfPhaseECadWorkbenchToolButtonV1
-                    key={tool}
-                    icon={`measure-${tool}`}
-                    label={`Measure ${tool}`}
-                    active={measurementTool === tool}
-                    pressed={measurementTool === tool}
-                    onClick={() => {
-                      selectMeasurementTool(tool);
-                      setMeasureMenuOpen(false);
-                    }}
+                    icon='view-options'
+                    label='View options'
+                    active={viewOptionsOpen}
+                    expanded={viewOptionsOpen}
+                    onClick={() => setViewOptionsOpen((value) => !value)}
                   />
-                ))}
-              </div>
-            </details>
-            <PatternImportDxfPhaseECadWorkbenchToolButtonV1
-              icon='callout'
-              label='Callout'
-              active={calloutToolActive}
-              pressed={calloutToolActive}
-              onClick={selectCalloutTool}
-            />
-            <div className='flex gap-1 border-l border-hairline pl-1 lg:flex-col lg:border-t lg:border-l-0 lg:pt-1 lg:pl-0'>
-              <PatternImportDxfPhaseECadWorkbenchToolButtonV1
-                icon='view-options'
-                label='View options'
-                active={viewOptionsOpen}
-                expanded={viewOptionsOpen}
-                onClick={() => setViewOptionsOpen((value) => !value)}
-              />
+                </div>
+                {workspaceContextControl ? (
+                  <div
+                    className='flex flex-col gap-1 border-t border-hairline pt-1'
+                    data-cad-2d-tool-context-slot=''
+                  >
+                    {workspaceContextControl}
+                  </div>
+                ) : null}
+              </nav>
+              {measureMenuOpen ? (
+                <div
+                  className='absolute top-1/2 right-[calc(100%+0.5rem)] z-30 grid w-40 -translate-y-1/2 grid-cols-3 gap-1 border border-borderColor bg-bgColor p-1.5'
+                  data-cad-tool-flyout='measure'
+                >
+                  <Text component='p' size='micro' className='col-span-3 px-1 font-bold'>
+                    Measure
+                  </Text>
+                  {(['point', 'line', 'edge'] as const).map((tool) => (
+                    <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+                      key={tool}
+                      icon={`measure-${tool}`}
+                      label={`Measure ${tool}`}
+                      active={measurementTool === tool}
+                      pressed={measurementTool === tool}
+                      onClick={() => {
+                        selectMeasurementTool(tool);
+                        setMeasureMenuOpen(false);
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : null}
             </div>
-            {workspaceContextControl ? (
-              <div
-                className='flex gap-1 border-l border-hairline pl-1 lg:flex-col lg:border-t lg:border-l-0 lg:pt-1 lg:pl-0'
-                data-cad-2d-tool-context-slot=''
-              >
-                {workspaceContextControl}
-              </div>
-            ) : null}
-          </nav>
-
-          <div className='flex h-full min-h-0 min-w-0 flex-col'>
             {!ready ? (
               <div
                 ref={validationActionRef}

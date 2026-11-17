@@ -211,6 +211,9 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
     ),
   );
   const pieceCount = session.source.catalog.pieces.length + draftRectanglePieces.length;
+  const openProductiveToolGroup = PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOL_GROUPS_V1.find(
+    ({ id }) => id === openToolGroupId,
+  );
 
   return (
     <section
@@ -356,165 +359,185 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
           />
         </div>
         <div className='relative min-h-[42rem] min-w-0'>
-          <nav
-            className={`absolute top-0 z-20 flex w-12 min-w-0 flex-col gap-1 overflow-visible border border-borderColor bg-bgColor/95 p-1 ${
-              objectSidebarCollapsed ? 'left-[3.25rem]' : 'left-[14.5rem]'
-            }`}
-            aria-label='Pattern Draft tools'
-            data-draft-cad-surface-tools='2d'
+          <div
+            className='absolute right-2 top-1/2 z-30 flex h-[calc(100%-1rem)] w-12 -translate-y-1/2 items-center overflow-visible'
+            data-draft-cad-tool-rail-wrapper=''
           >
-            {onArrangeChange ? (
-              <div className='flex flex-col gap-1 pb-1' data-draft-cad-tool-group='select'>
-                <PatternImportDxfPhaseECadWorkbenchToolButtonV1
-                  icon='select'
-                  label='Arrange pieces'
-                  active={arrangeActive}
-                  pressed={arrangeActive}
-                  dataAttributes={{ 'data-draft-cad-arrange-tool': '' }}
-                  onClick={() => {
-                    onPanChange?.(false);
-                    onArrangeChange(!arrangeActive);
-                  }}
-                />
-                {onPanChange ? (
+            <nav
+              className='flex max-h-full w-12 flex-col gap-0.5 overflow-y-auto border border-borderColor bg-bgColor/95 p-0.5'
+              aria-label='Pattern Draft tools'
+              data-draft-cad-surface-tools='2d'
+            >
+              {onArrangeChange ? (
+                <div className='flex flex-col gap-1 pb-1' data-draft-cad-tool-group='select'>
                   <PatternImportDxfPhaseECadWorkbenchToolButtonV1
-                    icon='hand'
-                    label='Hand'
-                    active={panActive}
-                    pressed={panActive}
-                    dataAttributes={{ 'data-draft-cad-pan-tool': '' }}
+                    icon='select'
+                    label='Arrange pieces'
+                    active={arrangeActive}
+                    pressed={arrangeActive}
+                    dataAttributes={{ 'data-draft-cad-arrange-tool': '' }}
                     onClick={() => {
-                      onArrangeChange(false);
-                      onPanChange(!panActive);
-                    }}
-                  />
-                ) : null}
-                {onConnectChange ? (
-                  <PatternImportDxfPhaseECadWorkbenchToolButtonV1
-                    icon='connect'
-                    label='Connect material edges'
-                    active={connectActive}
-                    pressed={connectActive}
-                    dataAttributes={{ 'data-draft-cad-cross-scope-connect-tool': '' }}
-                    onClick={() => {
-                      onArrangeChange(false);
                       onPanChange?.(false);
-                      onTopologyToolChange?.(null);
-                      onConnectChange(!connectActive);
+                      onArrangeChange(!arrangeActive);
                     }}
                   />
-                ) : null}
+                  {onPanChange ? (
+                    <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+                      icon='hand'
+                      label='Hand'
+                      active={panActive}
+                      pressed={panActive}
+                      dataAttributes={{ 'data-draft-cad-pan-tool': '' }}
+                      onClick={() => {
+                        onArrangeChange(false);
+                        onPanChange(!panActive);
+                      }}
+                    />
+                  ) : null}
+                  {onConnectChange ? (
+                    <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+                      icon='connect'
+                      label='Connect material edges'
+                      active={connectActive}
+                      pressed={connectActive}
+                      dataAttributes={{ 'data-draft-cad-cross-scope-connect-tool': '' }}
+                      onClick={() => {
+                        onArrangeChange(false);
+                        onPanChange?.(false);
+                        onTopologyToolChange?.(null);
+                        onConnectChange(!connectActive);
+                      }}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
+              {PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOL_GROUPS_V1.map((group) => {
+                const GroupIcon = TOOL_GROUP_ICONS[group.id] ?? BoxIcon;
+                const open = openToolGroupId === group.id;
+                return (
+                  <details
+                    key={group.id}
+                    open={open}
+                    data-draft-cad-tool-group={group.id}
+                    data-tool-group-open={open}
+                    onToggle={(event) => {
+                      const nextOpen = event.currentTarget.open;
+                      setOpenToolGroupId((current) =>
+                        nextOpen ? group.id : current === group.id ? null : current,
+                      );
+                    }}
+                    className='group relative border-t border-hairline pt-1 first:border-t-0 first:pt-0'
+                  >
+                    <summary
+                      className={`flex h-10 w-10 cursor-pointer list-none items-center justify-center marker:hidden ${
+                        (group.tools as readonly PatternImportDxfPhaseEDraftCadToolV1[]).includes(
+                          activeTool,
+                        ) &&
+                        !panActive &&
+                        !activeTopologyTool &&
+                        !arrangeActive
+                          ? 'bg-textColor text-bgColor'
+                          : 'bg-transparent text-textColor hover:bg-pageBg'
+                      }`}
+                      aria-label={`${group.label} tools`}
+                      title={`${group.label} tools`}
+                    >
+                      <GroupIcon aria-hidden width='16' height='16' />
+                    </summary>
+                  </details>
+                );
+              })}
+              {onTopologyToolChange ? (
+                <div className='flex flex-col gap-1 border-t border-hairline pt-1'>
+                  <details
+                    className='group relative'
+                    data-draft-cad-tool-group='measure'
+                    data-tool-group-open={openToolGroupId === 'measure'}
+                    open={openToolGroupId === 'measure'}
+                    onToggle={(event) => {
+                      const nextOpen = event.currentTarget.open;
+                      setOpenToolGroupId((current) =>
+                        nextOpen ? 'measure' : current === 'measure' ? null : current,
+                      );
+                    }}
+                  >
+                    <summary
+                      className={`flex h-10 w-10 cursor-pointer list-none items-center justify-center marker:hidden ${
+                        activeTopologyTool?.startsWith('measure-')
+                          ? 'bg-textColor text-bgColor'
+                          : 'bg-transparent text-textColor hover:bg-pageBg'
+                      }`}
+                      aria-label='Measure tools'
+                      title='Measure tools'
+                    >
+                      <RulerSquareIcon aria-hidden width='16' height='16' />
+                    </summary>
+                  </details>
+                  {(['callout'] as const).map((tool) => (
+                    <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+                      key={tool}
+                      icon={tool}
+                      label={TOPOLOGY_TOOL_LABELS[tool]}
+                      active={activeTopologyTool === tool}
+                      pressed={activeTopologyTool === tool}
+                      dataAttributes={{ 'data-draft-cad-topology-tool': tool }}
+                      onClick={() => {
+                        onArrangeChange?.(false);
+                        onPanChange?.(false);
+                        onTopologyToolChange(activeTopologyTool === tool ? null : tool);
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : null}
+              {workspaceContextControl ? (
+                <div
+                  className='flex flex-col gap-1 border-t border-hairline pt-1'
+                  data-cad-2d-tool-context-slot=''
+                >
+                  {workspaceContextControl}
+                </div>
+              ) : null}
+            </nav>
+            {openProductiveToolGroup ? (
+              <div
+                className='absolute top-1/2 right-[calc(100%+0.5rem)] grid w-52 -translate-y-1/2 grid-cols-4 gap-1 border border-borderColor bg-bgColor p-1.5'
+                data-draft-cad-tool-flyout={openProductiveToolGroup.id}
+              >
+                <Text component='p' size='micro' className='col-span-4 px-1 font-bold'>
+                  {openProductiveToolGroup.label}
+                </Text>
+                {openProductiveToolGroup.tools.map((tool) => (
+                  <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+                    key={tool}
+                    icon={tool}
+                    label={TOOL_LABELS[tool]}
+                    active={
+                      !panActive && !arrangeActive && !activeTopologyTool && activeTool === tool
+                    }
+                    pressed={
+                      !panActive && !arrangeActive && !activeTopologyTool && activeTool === tool
+                    }
+                    dataAttributes={{ 'data-draft-cad-tool': tool }}
+                    onClick={() => {
+                      onArrangeChange?.(false);
+                      onPanChange?.(false);
+                      onToolChange(tool);
+                      setOpenToolGroupId(null);
+                    }}
+                  />
+                ))}
               </div>
             ) : null}
-            {PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOL_GROUPS_V1.map((group) => {
-              const GroupIcon = TOOL_GROUP_ICONS[group.id] ?? BoxIcon;
-              const open = openToolGroupId === group.id;
-              return (
-                <details
-                  key={group.id}
-                  open={open}
-                  data-draft-cad-tool-group={group.id}
-                  data-tool-group-open={open}
-                  onToggle={(event) => {
-                    const nextOpen = event.currentTarget.open;
-                    setOpenToolGroupId((current) =>
-                      nextOpen ? group.id : current === group.id ? null : current,
-                    );
-                  }}
-                  className='group relative border-t border-hairline pt-1 first:border-t-0 first:pt-0'
-                >
-                  <summary
-                    className={`flex h-10 w-10 cursor-pointer list-none items-center justify-center marker:hidden ${
-                      (group.tools as readonly PatternImportDxfPhaseEDraftCadToolV1[]).includes(
-                        activeTool,
-                      ) &&
-                      !panActive &&
-                      !activeTopologyTool &&
-                      !arrangeActive
-                        ? 'bg-textColor text-bgColor'
-                        : 'bg-transparent text-textColor hover:bg-pageBg'
-                    }`}
-                    aria-label={`${group.label} tools`}
-                    title={`${group.label} tools`}
-                  >
-                    <GroupIcon aria-hidden width='16' height='16' />
-                  </summary>
-                  <div className='absolute top-0 left-[calc(100%+0.5rem)] grid w-52 grid-cols-4 gap-1 border border-borderColor bg-bgColor p-1.5'>
-                    <Text component='p' size='micro' className='col-span-4 px-1 font-bold'>
-                      {group.label}
-                    </Text>
-                    {group.tools.map((tool) => (
-                      <PatternImportDxfPhaseECadWorkbenchToolButtonV1
-                        key={tool}
-                        icon={tool}
-                        label={TOOL_LABELS[tool]}
-                        active={
-                          !panActive && !arrangeActive && !activeTopologyTool && activeTool === tool
-                        }
-                        pressed={
-                          !panActive && !arrangeActive && !activeTopologyTool && activeTool === tool
-                        }
-                        dataAttributes={{ 'data-draft-cad-tool': tool }}
-                        onClick={() => {
-                          onArrangeChange?.(false);
-                          onPanChange?.(false);
-                          onToolChange(tool);
-                          setOpenToolGroupId(null);
-                        }}
-                      />
-                    ))}
-                  </div>
-                </details>
-              );
-            })}
-            {onTopologyToolChange ? (
-              <div className='flex flex-col gap-1 border-t border-hairline pt-1'>
-                <details
-                  className='group relative'
-                  data-draft-cad-tool-group='measure'
-                  data-tool-group-open={openToolGroupId === 'measure'}
-                  open={openToolGroupId === 'measure'}
-                  onToggle={(event) => {
-                    const nextOpen = event.currentTarget.open;
-                    setOpenToolGroupId((current) =>
-                      nextOpen ? 'measure' : current === 'measure' ? null : current,
-                    );
-                  }}
-                >
-                  <summary
-                    className={`flex h-10 w-10 cursor-pointer list-none items-center justify-center marker:hidden ${
-                      activeTopologyTool?.startsWith('measure-')
-                        ? 'bg-textColor text-bgColor'
-                        : 'bg-transparent text-textColor hover:bg-pageBg'
-                    }`}
-                    aria-label='Measure tools'
-                    title='Measure tools'
-                  >
-                    <RulerSquareIcon aria-hidden width='16' height='16' />
-                  </summary>
-                  <div className='absolute top-0 left-[calc(100%+0.5rem)] grid w-40 grid-cols-3 gap-1 border border-borderColor bg-bgColor p-1.5'>
-                    <Text component='p' size='micro' className='col-span-3 px-1 font-bold'>
-                      Measure
-                    </Text>
-                    {(['measure-point', 'measure-line', 'measure-edge'] as const).map((tool) => (
-                      <PatternImportDxfPhaseECadWorkbenchToolButtonV1
-                        key={tool}
-                        icon={tool}
-                        label={TOPOLOGY_TOOL_LABELS[tool]}
-                        active={activeTopologyTool === tool}
-                        pressed={activeTopologyTool === tool}
-                        dataAttributes={{ 'data-draft-cad-topology-tool': tool }}
-                        onClick={() => {
-                          onArrangeChange?.(false);
-                          onPanChange?.(false);
-                          onTopologyToolChange(activeTopologyTool === tool ? null : tool);
-                          setOpenToolGroupId(null);
-                        }}
-                      />
-                    ))}
-                  </div>
-                </details>
-                {(['callout'] as const).map((tool) => (
+            {openToolGroupId === 'measure' && onTopologyToolChange ? (
+              <div
+                className='absolute top-1/2 right-[calc(100%+0.5rem)] grid w-40 -translate-y-1/2 grid-cols-3 gap-1 border border-borderColor bg-bgColor p-1.5'
+                data-draft-cad-tool-flyout='measure'
+              >
+                <Text component='p' size='micro' className='col-span-3 px-1 font-bold'>
+                  Measure
+                </Text>
+                {(['measure-point', 'measure-line', 'measure-edge'] as const).map((tool) => (
                   <PatternImportDxfPhaseECadWorkbenchToolButtonV1
                     key={tool}
                     icon={tool}
@@ -526,20 +549,13 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
                       onArrangeChange?.(false);
                       onPanChange?.(false);
                       onTopologyToolChange(activeTopologyTool === tool ? null : tool);
+                      setOpenToolGroupId(null);
                     }}
                   />
                 ))}
               </div>
             ) : null}
-            {workspaceContextControl ? (
-              <div
-                className='flex flex-col gap-1 border-t border-hairline pt-1'
-                data-cad-2d-tool-context-slot=''
-              >
-                {workspaceContextControl}
-              </div>
-            ) : null}
-          </nav>
+          </div>
 
           <main
             className={`relative flex min-h-[42rem] min-w-0 flex-col overflow-hidden bg-pageBg ${
