@@ -12,7 +12,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
-import { CalloutBox, Select } from 'ui';
+import { CalloutBox, Select, Text } from 'ui';
 
 import {
   readPatternImportDxfPhaseECardSessionV1,
@@ -57,6 +57,7 @@ import {
 } from './cad-table-zero-operation-source-routing-v1';
 import { preparePatternImportDxfPhaseECadMannequinAllScopeStagingV1 } from './cad-mannequin-all-scope-staging-v1';
 import type { PatternImportDxfPhaseECadMannequinDxfStagingSourceV1 } from './cad-mannequin-dxf-staging-v1';
+import { preparePatternImportDxfPhaseECadMannequinSavedAllScopeStagingV1 } from './cad-mannequin-saved-all-scope-staging-v1';
 import {
   PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_PRODUCTION_SCENE_OVERLAY_BLOCKED_V1,
   PatternImportDxfPhaseECadMannequinModelPickerV1,
@@ -957,48 +958,25 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
         );
       });
     } else if (resolvedSavedCard && savedAuthority) {
-      void (async () => {
-        const sources: PatternImportDxfPhaseECadMannequinDxfStagingSourceV1[] = [
-          currentMannequinSource,
-        ];
-        let blocked = false;
-        for (const choice of resolvedChoices.choices) {
-          if (!current || choice.scopeKey === currentMannequinSource.scopeKey) continue;
-          const stagingGenerationOwner =
-            createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1();
-          const stagingGeneration = stagingGenerationOwner.beginSaved(
-            `${mannequinStagingKey}:scope:${choice.scopeKey}`,
-          );
-          const saved = await preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
-            {
-              techCard: resolvedSavedCard,
-              orderSizeIds,
-              sizeNameById,
-              scopeKey: choice.scopeKey,
-              sizeToken,
-              authority: savedAuthority,
-              generation: stagingGeneration,
-            },
-            controller.signal,
-          );
-          stagingGenerationOwner.dispose();
-          if (!saved.ok) {
-            blocked = true;
-            continue;
-          }
-          sources.push(
-            Object.freeze({
-              scopeKey: saved.scopeKey,
-              label: choice.label,
-              projection: saved.projection,
-            }),
-          );
-        }
+      void preparePatternImportDxfPhaseECadMannequinSavedAllScopeStagingV1({
+        techCard: resolvedSavedCard,
+        orderSizeIds,
+        sizeNameById,
+        sizeToken,
+        current: currentMannequinSource,
+        authority: savedAuthority,
+        preparationKey: mannequinStagingKey,
+        signal: controller.signal,
+      }).then((result) => {
         if (!current) return;
         setMannequinStaging(
-          Object.freeze({ key: mannequinStagingKey, sources: Object.freeze(sources), blocked }),
+          Object.freeze({
+            key: mannequinStagingKey,
+            sources: result.sources,
+            blocked: !result.ok,
+          }),
         );
-      })();
+      });
     } else {
       setMannequinStaging(null);
     }
@@ -1163,16 +1141,31 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
       selection={selection}
       operationsPanel={operationsPanel}
       defaultOperationsMode={defaultOperationsMode}
-      mannequin={({ sources, activeScopeKey }) => (
-        <PatternImportDxfPhaseECadMannequinModelPickerV1
-          disabled={disabled}
-          patternPieceScene={{
-            sources,
-            activeScopeKey,
-            sceneOverlay:
-              PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_PRODUCTION_SCENE_OVERLAY_BLOCKED_V1,
-          }}
-        />
+      mannequin={({ sources, activeScopeKey, stagingBlocked }) => (
+        <div className='flex h-full min-h-0 flex-col'>
+          <div className='min-h-0 flex-1'>
+            <PatternImportDxfPhaseECadMannequinModelPickerV1
+              disabled={disabled}
+              patternPieceScene={{
+                sources,
+                activeScopeKey,
+                sceneOverlay:
+                  PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_PRODUCTION_SCENE_OVERLAY_BLOCKED_V1,
+              }}
+            />
+          </div>
+          {stagingBlocked ? (
+            <Text
+              component='p'
+              size='micro'
+              variant='errorLabel'
+              role='alert'
+              className='shrink-0 border-t border-borderColor px-2 py-1'
+            >
+              Some saved pattern sets could not be opened. Only the active set is shown.
+            </Text>
+          ) : null}
+        </div>
       )}
     />
   );
