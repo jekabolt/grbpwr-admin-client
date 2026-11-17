@@ -81,6 +81,7 @@ vi.mock('lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1', async (l
 });
 
 import { preparePatternImportDxfPhaseECadTableZeroOperationSavedV1 } from './cad-table-zero-operation-saved-preparation-v1';
+import { createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1 } from './cad-table-zero-operation-generation-owner-v1';
 
 const MAIN = 'TECH_CARD_BOM_PURPOSE_MAIN';
 const SHA = 'a'.repeat(64);
@@ -133,6 +134,7 @@ const exactDraft = { techCardId: 156, marker: 'exact' } as unknown as CardDraft;
 const foreignDraft = { techCardId: 156, marker: 'foreign' } as unknown as CardDraft;
 
 function request() {
+  const generationOwner = createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1();
   return {
     techCard: card(),
     orderSizeIds: (ids: number[]) => [...ids],
@@ -144,6 +146,7 @@ function request() {
       resolveCard: vi.fn(),
       resolveCurrentRow: vi.fn(async () => ({ row: ROW, downloadUrl: '/api/p/token/download' })),
     },
+    generation: generationOwner.beginSaved('foreign-fallback-test'),
   } as never;
 }
 
@@ -293,5 +296,28 @@ describe('zero-operation saved preparation foreign fallback', () => {
     expect(mocks.foreignRun).toHaveBeenCalledOnce();
     expect(mocks.foreignDispose).toHaveBeenCalledOnce();
     expect(mocks.select).not.toHaveBeenCalled();
+  });
+
+  it('rejects a preparation superseded while exact reconstruction is running', async () => {
+    const generationOwner = createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1();
+    const first = generationOwner.beginSaved('saved-refresh:first');
+    mocks.exactRun.mockImplementation(async () => {
+      generationOwner.beginSaved('saved-refresh:second');
+      return { ok: true, draft: exactDraft, blockers: [] };
+    });
+
+    const result = await preparePatternImportDxfPhaseECadTableZeroOperationSavedV1({
+      ...(request() as object),
+      generation: first,
+    } as never);
+
+    expect(result).toMatchObject({
+      ok: false,
+      preparationGeneration: null,
+      importGeneration: null,
+      blocker: { code: 'saved-preparation-generation-stale' },
+    });
+    expect(mocks.createForeignHost).not.toHaveBeenCalled();
+    expect(mocks.foreignRun).not.toHaveBeenCalled();
   });
 });

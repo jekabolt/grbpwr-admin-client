@@ -26,7 +26,15 @@ import type { CardDraft } from 'lib/pattern-import/types';
 import { buildPatternImportDxfPhaseESavedCardContextV1 } from './saved-card-production-projection-v1';
 import { createPatternImportDxfPhaseEForeignSavedDxfReprocessHostV1 } from './foreign-saved-dxf-reprocess-host-v1';
 import { createPatternImportDxfPhaseESavedDxfReprocessHostV1 } from './saved-dxf-reprocess-host-v1';
+import {
+  isPatternImportDxfPhaseECadTableZeroOperationGenerationTicketCurrentV1,
+  type PatternImportDxfPhaseECadTableZeroOperationGenerationTicketV1,
+} from './cad-table-zero-operation-generation-owner-v1';
 import type { PatternImportDxfPhaseECadTableZeroOperationFreshChoiceV1 } from './cad-table-zero-operation-fresh-preparation-v1';
+import {
+  capturePatternImportDxfPhaseEZeroConnectPreparedAuthorityV1,
+  type PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1,
+} from './cad-table-zero-connect-phase-e-authority-v1';
 import type { PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1 } from './zero-operation-saved-card-authority-v1';
 import { resolvePatternImportDxfPhaseEZeroOperationSavedDxfCapabilityV1 } from './zero-operation-saved-dxf-capability-v1';
 
@@ -48,6 +56,9 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_SAVED_PREPARATI
     exactAuthoringCatalogBuilt: true,
     exactAssemblyProjectionBuilt: true,
     manifestAbsentForeignDxfFallback: true,
+    privateZeroConnectAuthoringAuthorityRetained: true,
+    monotonicPreparationGenerationRequired: true,
+    genuineImportGenerationBound: true,
     rawDxfReturned: false,
     productionReady: true,
   } as const);
@@ -65,6 +76,7 @@ export type PatternImportDxfPhaseECadTableZeroOperationSavedBlockerV1 = Readonly
     | 'preparation-binding-stale'
     | 'projection-unavailable'
     | 'saved-preparation-cancelled'
+    | 'saved-preparation-generation-stale'
     | 'saved-preparation-failed';
   detail: string;
 }>;
@@ -89,9 +101,12 @@ export type PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1 
       techCardId: number;
       scopeKey: string;
       sizeToken: string;
+      preparationGeneration: number;
+      importGeneration: number;
       choices: readonly PatternImportDxfPhaseECadTableZeroOperationFreshChoiceV1[];
       catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
       projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
+      authoringAuthority: PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1;
       blocker: null;
       claims: typeof PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_SAVED_PREPARATION_CLAIMS_V1;
     }>
@@ -100,9 +115,12 @@ export type PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1 
       techCardId: number | null;
       scopeKey: string | null;
       sizeToken: string | null;
+      preparationGeneration: number | null;
+      importGeneration: number | null;
       choices: readonly PatternImportDxfPhaseECadTableZeroOperationFreshChoiceV1[];
       catalog: null;
       projection: null;
+      authoringAuthority: null;
       blocker: PatternImportDxfPhaseECadTableZeroOperationSavedBlockerV1;
       claims: typeof PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_SAVED_PREPARATION_CLAIMS_V1;
     }>;
@@ -114,6 +132,7 @@ type Request = Readonly<{
   scopeKey: string;
   sizeToken: string;
   authority: PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1;
+  generation: PatternImportDxfPhaseECadTableZeroOperationGenerationTicketV1;
 }>;
 
 function blocker(
@@ -214,9 +233,20 @@ function blockedPreparation(
     techCardId: request.techCard?.id ?? null,
     scopeKey: request.scopeKey || null,
     sizeToken: request.sizeToken || null,
+    preparationGeneration: isPatternImportDxfPhaseECadTableZeroOperationGenerationTicketCurrentV1(
+      request.generation,
+    )
+      ? request.generation.preparationGeneration
+      : null,
+    importGeneration: isPatternImportDxfPhaseECadTableZeroOperationGenerationTicketCurrentV1(
+      request.generation,
+    )
+      ? request.generation.importGeneration
+      : null,
     choices: Object.freeze([...choices]),
     catalog: null,
     projection: null,
+    authoringAuthority: null,
     blocker: issue,
     claims: PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_SAVED_PREPARATION_CLAIMS_V1,
   });
@@ -226,6 +256,15 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
   request: Request,
   signal?: AbortSignal,
 ): Promise<PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1> {
+  if (!isPatternImportDxfPhaseECadTableZeroOperationGenerationTicketCurrentV1(request.generation))
+    return blockedPreparation(
+      request,
+      [],
+      blocker(
+        'saved-preparation-generation-stale',
+        'A current monotonic saved-row preparation generation is required.',
+      ),
+    );
   const choices = listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
     request.techCard,
     request.orderSizeIds,
@@ -406,14 +445,51 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
           projection.blockers[0]?.detail ?? 'Exact saved Assembly projection is unavailable.',
         ),
       );
+    if (!isPatternImportDxfPhaseECadTableZeroOperationGenerationTicketCurrentV1(request.generation))
+      return blockedPreparation(
+        request,
+        choices.choices,
+        blocker(
+          'saved-preparation-generation-stale',
+          'A newer zero-operation preparation superseded this saved-row generation.',
+        ),
+      );
+    const authoringAuthority = capturePatternImportDxfPhaseEZeroConnectPreparedAuthorityV1({
+      row: authoritative.row,
+      draft,
+      selection: selection.selection,
+      catalog: catalogResult.catalog,
+      generation: request.generation,
+    });
+    if (!authoringAuthority)
+      return blockedPreparation(
+        request,
+        choices.choices,
+        blocker(
+          'preparation-binding-stale',
+          'Saved row, replay draft, Phase-D selection and authoring catalog no longer share one exact authority.',
+        ),
+      );
+    if (!isPatternImportDxfPhaseECadTableZeroOperationGenerationTicketCurrentV1(request.generation))
+      return blockedPreparation(
+        request,
+        choices.choices,
+        blocker(
+          'saved-preparation-generation-stale',
+          'A newer zero-operation preparation superseded this saved-row generation.',
+        ),
+      );
     return Object.freeze({
       ok: true as const,
       techCardId: request.techCard.id!,
       scopeKey: request.scopeKey,
       sizeToken: request.sizeToken,
+      preparationGeneration: request.generation.preparationGeneration,
+      importGeneration: request.generation.importGeneration,
       choices: choices.choices,
       catalog: catalogResult.catalog,
       projection: projection.projection,
+      authoringAuthority,
       blocker: null,
       claims: PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_SAVED_PREPARATION_CLAIMS_V1,
     });

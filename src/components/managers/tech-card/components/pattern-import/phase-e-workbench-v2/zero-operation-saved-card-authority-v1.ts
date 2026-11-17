@@ -32,6 +32,9 @@ export const PATTERN_IMPORT_DXF_PHASE_E_ZERO_OPERATION_SAVED_CARD_AUTHORITY_CLAI
     serverDownloadUrlRequired: true,
     byteLengthAndShaVerifiedBySavedReprocessOwner: true,
     currentRowReadRepeatedAfterReprocess: true,
+    freshPreparationFollowedByIndependentCurrentCardRead: true,
+    ordinarySaveCardLockAdvanceRevalidated: true,
+    ordinarySaveCardLockMustStrictlyAdvance: true,
     localFormProjectionAccepted: false,
     filenameOrDisplayNameUsedAsAuthority: false,
     productionReady: true,
@@ -46,6 +49,16 @@ export type PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1 = Rea
     selector: DxfProductSavedRowIdentityV1,
     signal: AbortSignal,
   ) => Promise<PatternImportDxfPhaseESavedDxfAuthorityReadV1>;
+  /** Independently re-reads the card after a confirmed import save before saved preparation. */
+  resolveLatestCommittedCard: (
+    expected: Readonly<{ techCardId: number; previousLockVersion: number }>,
+    signal: AbortSignal,
+  ) => Promise<common_TechCard>;
+  /** Re-reads the immutable DXF row after an ordinary save advances only the card lock. */
+  resolveLatestCard: (
+    selector: DxfProductSavedRowIdentityV1,
+    signal: AbortSignal,
+  ) => Promise<Readonly<{ techCard: common_TechCard; row: DxfProductSavedRowIdentityV1 }>>;
   resolveCard: (
     expected: DxfProductSavedRowIdentityV1,
     signal: AbortSignal,
@@ -224,6 +237,50 @@ export function createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1(
     async resolveCurrentRow(selector, signal) {
       const current = await readSelected(selector, signal);
       return Object.freeze({ row: current.row, downloadUrl: current.downloadUrl });
+    },
+    async resolveLatestCommittedCard(expected, signal) {
+      assertLive(signal);
+      if (
+        !Number.isSafeInteger(expected.techCardId) ||
+        expected.techCardId <= 0 ||
+        !Number.isSafeInteger(expected.previousLockVersion) ||
+        expected.previousLockVersion < 0
+      )
+        throw new Error('A valid confirmed import card identity is required.');
+      const techCard = await readTechCard(expected.techCardId);
+      assertLive(signal);
+      if (
+        techCard.id !== expected.techCardId ||
+        !Number.isSafeInteger(techCard.lockVersion) ||
+        Number(techCard.lockVersion) <= expected.previousLockVersion
+      )
+        throw new Error('The confirmed import save did not strictly advance the card lock.');
+      return techCard;
+    },
+    async resolveLatestCard(selector, signal) {
+      assertLive(signal);
+      const techCard = await readTechCard(selector.techCardId);
+      assertLive(signal);
+      if (
+        !Number.isSafeInteger(techCard.lockVersion) ||
+        Number(techCard.lockVersion) <= selector.cardLockVersion
+      )
+        throw new Error('The ordinary save did not strictly advance the card lock.');
+      const current = selectedCurrentRow(techCard, {
+        ...selector,
+        cardLockVersion: techCard.lockVersion!,
+      });
+      if (
+        current.row.techCardId !== selector.techCardId ||
+        current.row.scopeKey !== selector.scopeKey ||
+        current.row.patternLineKey !== selector.patternLineKey ||
+        current.row.revision !== selector.revision ||
+        current.row.url !== selector.url ||
+        current.row.sizeBytes !== selector.sizeBytes ||
+        current.row.sha256 !== selector.sha256
+      )
+        throw new Error('The saved DXF row changed while the ordinary card save advanced.');
+      return Object.freeze({ techCard, row: current.row });
     },
     async resolveCard(expected, signal) {
       const current = await readCurrent(expected, signal);
