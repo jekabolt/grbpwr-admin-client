@@ -5,7 +5,8 @@ import { useCallback, useEffect, useMemo, useState, type SetStateAction } from '
 
 import { SHEET_INK, SheetViewport, ptsAttr, vy } from '../sheet-viewport';
 import {
-  derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1,
+  visiblePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1,
+  type PatternImportDxfPhaseECadTableBoundaryVisibilityV1,
   type PatternImportDxfPhaseECadTableConnectEdgeSegmentV1,
 } from './cad-table-connect-edge-segments-v1';
 import { PatternImportDxfPhaseECadTableConnectToolControlV1 } from './cad-table-connect-tool-control-v1';
@@ -278,12 +279,15 @@ function CadTableZeroCanvas({
   );
   const [hoveredPieceKey, setHoveredPieceKey] = useState<string | null>(null);
   const [focusedPieceKey, setFocusedPieceKey] = useState<string | null>(null);
+  const [boundaryVisibility, setBoundaryVisibility] =
+    useState<PatternImportDxfPhaseECadTableBoundaryVisibilityV1>({
+      'cut-boundary': true,
+      'sewing-boundary': true,
+    });
   const segments = useMemo(
     () =>
-      derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(projection).filter(
-        ({ contourRole }) => contourRole !== 'hole',
-      ),
-    [projection],
+      visiblePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(projection, boundaryVisibility),
+    [boundaryVisibility, projection],
   );
   const [controller, setController] = useState(() =>
     createPatternImportDxfPhaseECadTableZeroConnectControllerStateV1(),
@@ -300,6 +304,30 @@ function CadTableZeroCanvas({
   const status = patternImportDxfPhaseECadTableZeroConnectControllerStatusV1(controller);
   const selectsPieces = activeTool === 'select' || activeTool === 'lasso';
   const connectDisabled = disabled || zeroConnectAuthoringHandoff?.status === 'unavailable';
+  const toggleBoundary = (role: keyof PatternImportDxfPhaseECadTableBoundaryVisibilityV1) => {
+    const visible = !boundaryVisibility[role];
+    setBoundaryVisibility({ ...boundaryVisibility, [role]: visible });
+    const firstSide = controller.session?.sides[0];
+    if (
+      !visible &&
+      controller.session?.status === 'select-side-b' &&
+      firstSide &&
+      segments.some(
+        (segment) =>
+          segment.contourRole === role &&
+          segment.pieceId === firstSide.pieceId &&
+          segment.pieceLineKey === firstSide.pieceLineKey &&
+          segment.contourId === firstSide.contourId,
+      )
+    ) {
+      setController((current) =>
+        startPatternImportDxfPhaseECadTableZeroConnectControllerV1(
+          cancelPatternImportDxfPhaseECadTableZeroConnectControllerV1(current),
+          authority,
+        ),
+      );
+    }
+  };
   const selectEdge = (
     segment: PatternImportDxfPhaseECadTableConnectEdgeSegmentV1,
     direction: 'forward' | 'reverse',
@@ -445,6 +473,20 @@ function CadTableZeroCanvas({
               setFitRequest((current) => current + 1);
             }}
           />
+          <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+            icon='pattern-line'
+            label='Show cut outlines'
+            active={boundaryVisibility['cut-boundary']}
+            pressed={boundaryVisibility['cut-boundary']}
+            onClick={() => toggleBoundary('cut-boundary')}
+          />
+          <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+            icon='connect'
+            label='Show sewing outlines'
+            active={boundaryVisibility['sewing-boundary']}
+            pressed={boundaryVisibility['sewing-boundary']}
+            onClick={() => toggleBoundary('sewing-boundary')}
+          />
           {availableFeatureLayers.map(({ key, label, icon }) => (
             <PatternImportDxfPhaseECadWorkbenchToolButtonV1
               key={key}
@@ -576,6 +618,9 @@ function CadTableZeroCanvas({
                       />
                     ) : null}
                     {piece.contours.map((contour) => {
+                      const visibilityRole =
+                        contour.role === 'hole' ? 'cut-boundary' : contour.role;
+                      if (!boundaryVisibility[visibilityRole]) return null;
                       const points = contour.vertices.map(({ pointMm }) => pointMm);
                       const closed =
                         contour.closed && points.length > 0 ? [...points, points[0]] : points;
@@ -595,6 +640,7 @@ function CadTableZeroCanvas({
                                   : SHEET_INK.mut
                           }
                           strokeWidth={focused || selected ? 1.6 : hovered ? 1.4 : 1.2}
+                          strokeDasharray={contour.role === 'sewing-boundary' ? '4 3' : undefined}
                           vectorEffect='non-scaling-stroke'
                           pointerEvents={
                             keyboardEnabled &&

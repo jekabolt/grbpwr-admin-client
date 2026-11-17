@@ -991,6 +991,22 @@ describe('zero-operation CAD table rendering', () => {
       expect(await treePiece.getAttribute('aria-pressed')).toBe('true');
       expect(await treeSecond.getAttribute('aria-pressed')).toBe('true');
       expect(await selected.count()).toBe(2);
+
+      await page.getByRole('button', { name: 'Connect edges' }).click();
+      const edgeTargets = page.getByRole('button', { name: /^Choose .* edge .*hold Shift/ });
+      const originalEdgeCount = await edgeTargets.count();
+      expect(originalEdgeCount).toBeGreaterThan(1);
+      await edgeTargets.first().press('Enter');
+      expect(await page.locator('[data-cad-zero-connect-side="a"]').count()).toBe(1);
+      const cutVisibility = page.getByRole('button', { name: 'Show cut outlines' });
+      await cutVisibility.click();
+      expect(await cutVisibility.getAttribute('aria-pressed')).toBe('false');
+      expect(await edgeTargets.count()).toBe(0);
+      expect(await page.locator('[data-cad-zero-connect-contour]').count()).toBe(0);
+      expect(await page.locator('[data-cad-zero-connect-material]').count()).toBe(2);
+      await cutVisibility.click();
+      expect(await edgeTargets.count()).toBe(originalEdgeCount);
+      expect(await page.locator('[data-cad-zero-connect-side="a"]').count()).toBe(0);
     } finally {
       await browser.close();
       await server.close();
