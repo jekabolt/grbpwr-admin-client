@@ -7385,6 +7385,11 @@ export function OperationsField({
   useEffect(() => {
     const retry = zeroConnectDurableRetry;
     if (!retry) return;
+    if (retry.pending !== zeroConnectPendingHandoff || retry.row.techCardId !== techCardId) {
+      if (zeroConnectDurableRetryRef.current === retry) zeroConnectDurableRetryRef.current = null;
+      setZeroConnectDurableRetry((current) => (current === retry ? null : current));
+      return;
+    }
     if (retry.status === 'ready') {
       const started = startPatternImportDxfPhaseEZeroConnectDurableRetryV1(retry);
       if (started) {
@@ -7417,7 +7422,7 @@ export function OperationsField({
         controller.signal.aborted ||
         zeroConnectDurablePersistenceRef.current?.attempt !== retry.attempt ||
         zeroConnectDurablePersistenceRef.current?.controller !== controller ||
-        zeroConnectDurableRetryRef.current?.attempt !== retry.attempt ||
+        zeroConnectDurableRetryRef.current !== retry ||
         zeroConnectPendingHandoffRef.current !== retry.pending
       )
         return;
@@ -7438,15 +7443,20 @@ export function OperationsField({
       if (zeroConnectDurablePersistenceRef.current?.controller === controller)
         zeroConnectDurablePersistenceRef.current = null;
     };
-  }, [exactNApplicationOwner, zeroConnectDurableRetry]);
+  }, [exactNApplicationOwner, techCardId, zeroConnectDurableRetry, zeroConnectPendingHandoff]);
   const retryZeroConnectDurablePersistence = useCallback(() => {
     setZeroConnectDurableRetry((current) => {
-      if (!current) return null;
+      if (
+        !current ||
+        current.pending !== zeroConnectPendingHandoffRef.current ||
+        current.row.techCardId !== techCardId
+      )
+        return current;
       const next = retryPatternImportDxfPhaseEZeroConnectDurableRetryV1(current);
       zeroConnectDurableRetryRef.current = next;
       return next;
     });
-  }, []);
+  }, [techCardId]);
   const selected = selection.index;
   const setSelected = useCallback((next: number | ((current: number) => number)) => {
     setSelection((cur) => ({ index: typeof next === 'function' ? next(cur.index) : next }));

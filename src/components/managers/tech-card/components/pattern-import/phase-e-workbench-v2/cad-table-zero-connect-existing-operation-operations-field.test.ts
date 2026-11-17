@@ -172,3 +172,26 @@ describe('existing linked one-physical-seam OperationsField owner', () => {
     expect(owner).toContain('metadataResumeAuthority,');
   });
 });
+
+describe('durable retry lifecycle in OperationsField', () => {
+  it('rejects a replaced pending gesture or card before starting its durable writer', () => {
+    const effect = between(
+      'const retry = zeroConnectDurableRetry;',
+      'const retryZeroConnectDurablePersistence = useCallback',
+    );
+    expect(effect).toContain('retry.pending !== zeroConnectPendingHandoff');
+    expect(effect.indexOf('retry.row.techCardId !== techCardId')).toBeLessThan(
+      effect.indexOf('durable.persist,'),
+    );
+    expect(effect).toContain('controller.abort();');
+    expect(effect).toContain(
+      '[exactNApplicationOwner, techCardId, zeroConnectDurableRetry, zeroConnectPendingHandoff]',
+    );
+    expect(effect).toContain('zeroConnectDurableRetryRef.current !== retry');
+    const retryAction = between(
+      'const retryZeroConnectDurablePersistence = useCallback',
+      'const selected = selection.index;',
+    );
+    expect(retryAction).toContain('current.pending !== zeroConnectPendingHandoffRef.current');
+  });
+});
