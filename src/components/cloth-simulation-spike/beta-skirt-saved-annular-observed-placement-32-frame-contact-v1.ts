@@ -1,0 +1,13 @@
+/** Fixed observed 0→32 rerun with a genuine observed16 checkpoint; shared GPU bodies stay private. */
+export {
+  BETA_SKIRT_SAVED_ANNULAR_OBSERVED_PLACEMENT_32_FRAME_CONTACT_V1,
+  runBetaSkirtSavedAnnularObservedPlacement32FrameContactV1,
+  projectBetaSkirtSavedAnnularObservedPlacement32FrameContactV1,
+  getBetaSkirtSavedAnnularObservedPlacement32FrameContactLifetimeV1,
+  disposeBetaSkirtSavedAnnularObservedPlacement32FrameContactV1,
+  type BetaSkirtSavedAnnularObservedPlacement32FrameContactReportV1,
+  type BetaSkirtSavedAnnularObservedPlacement32FrameContactOwnerV1,
+  type BetaSkirtSavedAnnularObservedPlacement32FrameContactProjectionV1,
+  type BetaSkirtSavedAnnularObservedPlacement32FrameContactResultV1,
+  type BetaSkirtCanonicalMediumSavedWebgpu32FrameContactRunnerOptionsV4 as BetaSkirtSavedAnnularObservedPlacement32FrameContactOptionsV1,
+} from './beta-skirt-canonical-medium-saved-webgpu-32-frame-contact-runner-v4';

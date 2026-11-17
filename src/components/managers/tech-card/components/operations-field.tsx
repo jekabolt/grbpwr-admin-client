@@ -352,7 +352,11 @@ import { TechCardFormData } from './schema';
 import { posesOf, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
 import type { SeamWrites, StrictSeamUpsertResult } from './assembly-seams/use-seam-decisions';
 import { foldRowsOf, useFoldsStore } from './assembly-folds/folds-store';
-import { PatternImportDxfPhaseEAssemblyOrderEntryMountV1 } from './pattern-import/phase-e-workbench/assembly-order-entry';
+import {
+  PatternImportDxfPhaseEAssemblyOrderEntryMountV1,
+  createPatternImportDxfPhaseESavedGarmentMeshProductionOwnerV1,
+} from './pattern-import/phase-e-workbench/assembly-order-entry';
+import { SavedClothPhysicalControlsV1 } from 'components/cloth-simulation-spike/saved-cloth-physical-controls-v1';
 import { createPatternImportDxfProductCompositeSidecarProductionTransactionV4 } from './pattern-import/phase-e-workbench-v2/composite-sidecar-production-transaction-v4';
 import {
   readPatternImportDxfProductExactNSeamProductionSessionV2,
@@ -415,6 +419,8 @@ import {
   type PatternImportDxfPhaseEZeroConnectSecondSaveCompletionOwnerV1,
 } from './pattern-import/phase-e-workbench-v2/zero-connect-second-save-completion-v1';
 import { PatternImportDxfPhaseECadTableZeroOperationProductionMountV1 } from './pattern-import/phase-e-workbench-v2/cad-table-zero-operation-production-mount-v1';
+import type { CadWorkbenchPhysicalHostV1 } from './pattern-import/phase-e-workbench-v2/cad-workbench-physical-host-v1';
+import { useSavedClothPhysicalHostV1 } from './pattern-import/phase-e-workbench-v2/use-saved-cloth-physical-host-v1';
 import { projectPatternImportDxfPhaseECadTableCurrentOperationV1 } from './pattern-import/phase-e-workbench-v2/cad-table-current-operation-projection-v1';
 import {
   PATTERN_IMPORT_DXF_PHASE_E_CAD_OPERATION_NAVIGATION_V1,
@@ -6631,6 +6637,38 @@ type KindField = (typeof KIND_FIELDS)[number];
 const isKindField = (field: string): field is KindField =>
   (KIND_FIELDS as readonly string[]).includes(field);
 
+/** The no-operation route owns only displayed-body observation; nested fallbacks borrow V1's host. */
+function PatternImportDxfPhaseECadTableTopLevelZeroOperationMountV1({
+  techCardId,
+  zeroConnectAuthoringHandoff,
+  disabled,
+}: Readonly<{
+  techCardId?: number;
+  zeroConnectAuthoringHandoff: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1;
+  disabled: boolean;
+}>) {
+  const savedClothPhysicalHost = useSavedClothPhysicalHostV1({
+    row: null,
+    selectedOperationNumber: 0,
+    createCanonicalOwner: createPatternImportDxfPhaseESavedGarmentMeshProductionOwnerV1,
+  });
+  const physicalHost: CadWorkbenchPhysicalHostV1 = {
+    onDisplayedBodyInputV1: savedClothPhysicalHost.onDisplayedBodyInputV1,
+    panel: (
+      <SavedClothPhysicalControlsV1 host={savedClothPhysicalHost} row={null} disabled={disabled} />
+    ),
+  };
+
+  return (
+    <PatternImportDxfPhaseECadTableZeroOperationProductionMountV1
+      techCardId={techCardId}
+      physicalHost={physicalHost}
+      zeroConnectAuthoringHandoff={zeroConnectAuthoringHandoff}
+      disabled={disabled}
+    />
+  );
+}
+
 export function OperationsField({
   assemblyTableActive = false,
   workbenchOnly = false,
@@ -10628,7 +10666,7 @@ export function OperationsField({
           </div>
         ) : (
           <div className='min-w-0' data-zero-operation-cad-owner=''>
-            <PatternImportDxfPhaseECadTableZeroOperationProductionMountV1
+            <PatternImportDxfPhaseECadTableTopLevelZeroOperationMountV1
               techCardId={techCardId}
               zeroConnectAuthoringHandoff={zeroConnectAuthoringHandoff}
               disabled={frozen}

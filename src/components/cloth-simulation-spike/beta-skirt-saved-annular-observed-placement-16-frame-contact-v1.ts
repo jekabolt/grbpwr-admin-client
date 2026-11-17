@@ -1,0 +1,13 @@
+/** Fixed observed V3 entry. Shared source adapters, GPU executor and kind registries are private. */
+export {
+  BETA_SKIRT_SAVED_ANNULAR_OBSERVED_PLACEMENT_16_FRAME_CONTACT_V1,
+  runBetaSkirtSavedAnnularObservedPlacement16FrameContactV1,
+  projectBetaSkirtSavedAnnularObservedPlacement16FrameContactV1,
+  getBetaSkirtSavedAnnularObservedPlacement16FrameContactLifetimeV1,
+  disposeBetaSkirtSavedAnnularObservedPlacement16FrameContactV1,
+  type BetaSkirtSavedAnnularObservedPlacement16FrameContactReportV1,
+  type BetaSkirtSavedAnnularObservedPlacement16FrameContactOwnerV1,
+  type BetaSkirtSavedAnnularObservedPlacement16FrameContactProjectionV1,
+  type BetaSkirtSavedAnnularObservedPlacement16FrameContactResultV1,
+  type BetaSkirtCanonicalMediumWebgpu16FrameContactRunnerOptionsV2 as BetaSkirtSavedAnnularObservedPlacement16FrameContactOptionsV1,
+} from './beta-skirt-canonical-medium-webgpu-16-frame-contact-runner-v2';

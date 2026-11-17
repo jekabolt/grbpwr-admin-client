@@ -79,6 +79,8 @@ import type {
 } from './cad-command-draft-authoring-handoff-v1';
 import { confirmPatternImportDxfPhaseECadSemanticFreshReimportV1 } from './cad-command-semantic-reimport-session-owner-v1';
 import { PatternImportDxfPhaseECadWorkbenchSplitShellV1 } from './cad-workbench-split-shell-v1';
+import type { CadWorkbenchPhysicalHostV1 } from './cad-workbench-physical-host-v1';
+import { CadWorkbenchPhysicalHostPanelV1 } from './cad-workbench-physical-host-panel-v1';
 import {
   PatternImportDxfPhaseECad2dToolContextSwitchV1,
   resolvePatternImportDxfPhaseECad2dAvailableToolContextV1,
@@ -1392,6 +1394,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
   source,
   cardSession,
   savedSession = null,
+  physicalHost,
   savedBlocker = null,
   onFreshConfirm,
   stitchVisual = null,
@@ -1417,6 +1420,8 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
   source: PatternImportDxfPhaseEMultiseamAssemblyOrderSourceV2;
   cardSession: PatternImportDxfPhaseECardSessionV1 | null;
   savedSession?: PatternImportDxfPhaseEMultiseamSavedSessionV2 | null;
+  /** Route-local displayed-body observer and physical controls; never owns another form. */
+  physicalHost?: CadWorkbenchPhysicalHostV1;
   savedBlocker?: PatternImportDxfPhaseEMultiseamAssemblyOrderBlockerV2 | null;
   onFreshConfirm?: PatternImportDxfPhaseEMultiseamFreshConfirmV2;
   stitchVisual?: PatternImportDxfPhaseEStitchVisualV1 | null;
@@ -2515,6 +2520,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
               <div className='min-h-0 flex-1'>
                 <PatternImportDxfPhaseECadMannequinModelPickerV1
                   disabled={frozen}
+                  onDisplayedBodyInputV1={physicalHost?.onDisplayedBodyInputV1}
                   patternPieceScene={{
                     sources: mannequinDxfSources,
                     sceneOverlay: sceneOverlay,
@@ -2562,6 +2568,11 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                   }
                 />
               </div>
+              {physicalHost?.panel ? (
+                <CadWorkbenchPhysicalHostPanelV1>
+                  {physicalHost.panel}
+                </CadWorkbenchPhysicalHostPanelV1>
+              ) : null}
             </div>
           )}
           operationsPanel={({ selection, focusSelection }) => (
@@ -2771,6 +2782,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                   {(sceneOverlay) => (
                     <PatternImportDxfPhaseECadMannequinModelPickerV1
                       disabled={frozen}
+                      onDisplayedBodyInputV1={physicalHost?.onDisplayedBodyInputV1}
                       patternPieceScene={{
                         sources: mannequinDxfSources,
                         sceneOverlay,
@@ -2820,6 +2832,11 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                   )}
                 </PatternImportDxfPhaseECadMannequinSavedTwoSeamProductionMountV1>
               </div>
+              {physicalHost?.panel ? (
+                <CadWorkbenchPhysicalHostPanelV1>
+                  {physicalHost.panel}
+                </CadWorkbenchPhysicalHostPanelV1>
+              ) : null}
               {savedAllScopeMannequinStaging?.key === savedAllScopeMannequinStagingKey &&
               !savedAllScopeMannequinStaging.result.ok ? (
                 <Text

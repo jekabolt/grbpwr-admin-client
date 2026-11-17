@@ -9,6 +9,7 @@ import {
   type PatternImportDxfProductGarmentMeshNativeIngressReportV1,
 } from './pattern-import-dxf-product-garment-mesh-native-ingress-v1';
 import type { PatternImportDxfProductGarmentMeshComposerRequestV2 } from './pattern-import-dxf-product-garment-mesh-composer-v2';
+import type { DxfProductSavedRowIdentityV1 } from '../../pattern-import/dxf-product-saved-reprocess-owner-v1';
 import {
   PATTERN_IMPORT_DXF_PRODUCT_MULTISEAM_MAPPING_COMPOSITION_REQUEST_V2,
   type PatternImportDxfProductMultiseamMappingCompositionRequestV2,
@@ -66,6 +67,8 @@ export type PatternImportDxfProductSavedGarmentMeshIngressResultV1 =
       ok: true;
       schemaVersion: typeof PATTERN_IMPORT_DXF_PRODUCT_SAVED_GARMENT_MESH_INGRESS_V1;
       request: PatternImportDxfProductGarmentMeshComposerRequestV2;
+      /** Present on production ingress; injected test ingress cannot authenticate a saved row. */
+      sourceRow?: DxfProductSavedRowIdentityV1;
       report: PatternImportDxfProductGarmentMeshNativeIngressReportV1;
       blockers: readonly [];
       claims: typeof PATTERN_IMPORT_DXF_PRODUCT_SAVED_GARMENT_MESH_INGRESS_CLAIMS_V1;
@@ -208,6 +211,7 @@ export async function buildPatternImportDxfProductSavedGarmentMeshIngressV1(
     ok: true as const,
     schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_SAVED_GARMENT_MESH_INGRESS_V1,
     request: native.request,
+    sourceRow: source.value.row,
     report: native.report,
     blockers: Object.freeze([]) as readonly [],
     claims: PATTERN_IMPORT_DXF_PRODUCT_SAVED_GARMENT_MESH_INGRESS_CLAIMS_V1,
