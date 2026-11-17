@@ -25,6 +25,8 @@ const COUNT_TONE = {
 } as const;
 
 const GRID_COLUMNS = { 2: 'grid-cols-2', 3: 'grid-cols-3', 4: 'grid-cols-4' } as const;
+const TOUCH_TAP_SLOP_PX = 10;
+const TOUCH_CLICK_DEDUPE_MS = 1_000;
 
 /**
  * Exclusive view switch — the non-form counterpart of `SegmentedField`.
@@ -73,6 +75,14 @@ export function ViewSwitch<T extends string>({
   columns?: keyof typeof GRID_COLUMNS;
 }) {
   const refs = useRef<(HTMLSpanElement | null)[]>([]);
+  const touchPointer = useRef<{
+    pointerId: number;
+    value: T;
+    startX: number;
+    startY: number;
+    moved: boolean;
+  } | null>(null);
+  const committedTouch = useRef<{ value: T; at: number } | null>(null);
   // Клавиатурный вход в группу — ровно один сегмент, и он обязан существовать всегда. Если
   // текущее значение ни одному не соответствует (чужая запись в предпочтениях, снятый вид),
   // табом в полосу было бы не попасть вовсе — тогда вход берёт первый сегмент.
@@ -138,7 +148,78 @@ export function ViewSwitch<T extends string>({
             aria-disabled={off || undefined}
             tabIndex={disabled ? undefined : i === entry ? 0 : -1}
             title={o.hint}
-            onClick={off ? undefined : () => onChange(o.value)}
+            onPointerDown={
+              off
+                ? undefined
+                : (event) => {
+                    if (event.pointerType !== 'touch') return;
+                    touchPointer.current = {
+                      pointerId: event.pointerId,
+                      value: o.value,
+                      startX: event.clientX,
+                      startY: event.clientY,
+                      moved: false,
+                    };
+                  }
+            }
+            onPointerMove={
+              off
+                ? undefined
+                : (event) => {
+                    const active = touchPointer.current;
+                    if (
+                      event.pointerType !== 'touch' ||
+                      !active ||
+                      active.pointerId !== event.pointerId
+                    )
+                      return;
+                    if (
+                      Math.hypot(event.clientX - active.startX, event.clientY - active.startY) >
+                      TOUCH_TAP_SLOP_PX
+                    )
+                      active.moved = true;
+                  }
+            }
+            onPointerCancel={
+              off
+                ? undefined
+                : (event) => {
+                    if (
+                      event.pointerType === 'touch' &&
+                      touchPointer.current?.pointerId === event.pointerId
+                    )
+                      touchPointer.current = null;
+                  }
+            }
+            onPointerUp={
+              off
+                ? undefined
+                : (event) => {
+                    if (event.pointerType !== 'touch') return;
+                    const active = touchPointer.current;
+                    if (active?.pointerId === event.pointerId) touchPointer.current = null;
+                    if (
+                      !active ||
+                      active.pointerId !== event.pointerId ||
+                      active.value !== o.value ||
+                      active.moved
+                    )
+                      return;
+                    committedTouch.current = { value: o.value, at: Date.now() };
+                    onChange(o.value);
+                  }
+            }
+            onClick={
+              off
+                ? undefined
+                : () => {
+                    const touch = committedTouch.current;
+                    committedTouch.current = null;
+                    if (touch?.value === o.value && Date.now() - touch.at <= TOUCH_CLICK_DEDUPE_MS)
+                      return;
+                    onChange(o.value);
+                  }
+            }
             onKeyDown={(e) => onKeyDown(e, i)}
             className={cn(
               quiet
