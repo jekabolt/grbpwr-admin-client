@@ -1611,3 +1611,133 @@ test('joints do not drag while edit pose is off', async ({ page }) => {
   await expect(canvas).toHaveAttribute('data-joint-editor-mode', 'edit-pose');
   await expect(page.getByRole('toolbar', { name: 'Mannequin pose tools' })).toBeVisible();
 });
+
+interface PoseToolSampleV1 {
+  readonly undoDisabled: boolean;
+  readonly resetDisabled: boolean;
+  readonly sourceRevision: string | null;
+  readonly status: string;
+}
+
+async function samplePoseToolsUntilSourceMoves(
+  page: Page,
+  canvas: Locator,
+  sourceBefore: string | null,
+): Promise<readonly PoseToolSampleV1[]> {
+  const samples: PoseToolSampleV1[] = [];
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    const sample = await page.evaluate(() => {
+      const button = (name: string) =>
+        [
+          ...document.querySelectorAll<HTMLButtonElement>(
+            '[aria-label="Mannequin pose tools"] button',
+          ),
+        ].find((candidate) => candidate.textContent?.trim() === name);
+      return {
+        undoDisabled: button('undo')?.disabled ?? true,
+        resetDisabled: button('reset')?.disabled ?? true,
+        sourceRevision:
+          document
+            .querySelector('[data-testid="measurement-watertight-surface-v1-canvas"]')
+            ?.getAttribute('data-source-revision') ?? null,
+        status:
+          document
+            .querySelector('[data-testid="model-open-reference-preview"]')
+            ?.getAttribute('data-body-display-ownership') ?? '',
+      };
+    });
+    samples.push(sample);
+    if (sample.sourceRevision !== sourceBefore && sample.status === 'current') break;
+    await page.waitForTimeout(40);
+  }
+  expect(await canvas.getAttribute('data-source-revision')).not.toBe(sourceBefore);
+  return samples;
+}
+
+test('undo and reset stay usable while a committed wrist drag rebuilds', async ({ page }) => {
+  await openPoseEditor(page);
+  const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
+  await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
+    'Preview partial: A-rest',
+    { timeout: 180_000 },
+  );
+  await pinPreviewAboveSaveBar(page);
+  const undo = page.getByRole('button', { name: 'undo', exact: true });
+  const reset = page.getByRole('button', { name: 'reset', exact: true });
+  await expect(undo).toBeDisabled();
+  await expect(reset).toBeDisabled();
+  const neutralSource = await canvas.getAttribute('data-source-revision');
+  const neutralPose = poseFromSourceRevision(neutralSource);
+
+  const wrist = await findHoverMarker({
+    page,
+    canvas,
+    groupId: 'left-wrist',
+    xOffsets: [150, 132, 168, 114, 186, 96, 204],
+    startFraction: 0.2,
+    endFraction: 0.6,
+  });
+  await page.mouse.move(wrist.x, wrist.y);
+  await page.mouse.down();
+  await expect(canvas).toHaveAttribute('data-position-dragging', 'true');
+  await page.mouse.move(wrist.x + 36, wrist.y - 48, { steps: 10 });
+  await expect(page.getByTestId('model-open-reference-preview')).toHaveAttribute(
+    'data-pose-admissibility',
+    'admitted',
+  );
+  await page.mouse.up();
+  const samples = await samplePoseToolsUntilSourceMoves(page, canvas, neutralSource);
+  expect(
+    samples.filter(({ undoDisabled, resetDisabled }) => undoDisabled || resetDisabled),
+  ).toEqual([]);
+  const posedSource = await canvas.getAttribute('data-source-revision');
+  const posed = poseFromSourceRevision(posedSource);
+  expect(posed.leftArm).not.toEqual(neutralPose.leftArm);
+
+  await undo.click();
+  await expect.poll(() => canvas.getAttribute('data-source-revision')).not.toBe(posedSource);
+  expect(poseFromSourceRevision(await canvas.getAttribute('data-source-revision'))).toEqual(
+    neutralPose,
+  );
+});
+
+test('a measurement edit on a posed mannequin moves the canvas source revision', async ({
+  page,
+}) => {
+  await openPoseEditor(page);
+  const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
+  const status = page.getByTestId('model-open-reference-preview-status');
+  await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
+  await pinPreviewAboveSaveBar(page);
+  const wrist = await findHoverMarker({
+    page,
+    canvas,
+    groupId: 'left-wrist',
+    xOffsets: [150, 132, 168, 114, 186, 96, 204],
+    startFraction: 0.2,
+    endFraction: 0.6,
+  });
+  const posedSource = await dragPositionTarget({
+    page,
+    canvas,
+    start: wrist,
+    deltaX: 36,
+    deltaY: -48,
+  });
+  const posed = poseFromSourceRevision(posedSource);
+  for (const [label, value] of [
+    ['chest', '960'],
+    ['waist', '760'],
+  ] as const) {
+    const field = page.getByRole('textbox', { name: label, exact: true });
+    const before = await canvas.getAttribute('data-source-revision');
+    await field.fill(value);
+    await field.blur();
+    await expect.poll(() => canvas.getAttribute('data-source-revision')).not.toBe(before);
+    await expect(status).toContainText('Preview partial', { timeout: 180_000 });
+    expect(poseFromSourceRevision(await canvas.getAttribute('data-source-revision'))).toEqual(
+      posed,
+    );
+  }
+});
