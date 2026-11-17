@@ -360,6 +360,14 @@ describe('Composite V6 arrangement persistence', () => {
       ok: false,
       writeOutcome: 'not-attempted',
       blockers: [{ code: 'cancelled' }],
+      claims: {
+        genericSemanticSidecarRpcReused: false,
+        freshCurrentGetBeforePut: false,
+        exactNestedV5BytesPreserved: false,
+        currentAuthorityAndArrangementTargetBound: false,
+        putEchoAndFreshGetVerified: false,
+        unknownOutcomeFreshGetRecovery: false,
+      },
     });
     expect(before.GetTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
 
@@ -375,6 +383,73 @@ describe('Composite V6 arrangement persistence', () => {
       blockers: [{ code: 'cancelled' }],
     });
     expect(during.GetTechCardPatternSemanticSidecar).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not publish success when abort occurs during the final adapter decode', async () => {
+    const controller = new AbortController();
+    let decodeCalls = 0;
+    codec.decodeV6.mockImplementation(async () => {
+      decodeCalls += 1;
+      if (decodeCalls === 4) {
+        await Promise.resolve();
+        controller.abort();
+      }
+      return decodedV6();
+    });
+    const test = rig();
+
+    const result = await test.persistence.save(request(), controller.signal);
+
+    expect(result).toMatchObject({
+      ok: false,
+      writeOutcome: 'acknowledged-unverified',
+      blockers: [{ code: 'cancelled' }],
+      claims: {
+        putEchoAndFreshGetVerified: false,
+        unknownOutcomeFreshGetRecovery: false,
+      },
+    });
+    expect(test.PutTechCardPatternSemanticSidecar).toHaveBeenCalledTimes(1);
+    expect(test.GetTechCardPatternSemanticSidecar).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects a SHA-256 provider that fails the known-answer self-test', async () => {
+    const digest = vi.fn(async () => new Uint8Array(32).buffer);
+    const test = rig({
+      crypto: { subtle: { digest } as unknown as SubtleCrypto },
+    });
+
+    const result = await test.persistence.save(request(), new AbortController().signal);
+
+    expect(result).toMatchObject({
+      ok: false,
+      writeOutcome: 'not-attempted',
+      claims: { exactNestedV5BytesPreserved: false },
+    });
+    expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+  });
+
+  it('recomputes encoded V6 bytes instead of trusting the encoder seal', async () => {
+    const digest = vi.fn(async (...args: Parameters<SubtleCrypto['digest']>) => {
+      const [algorithm, data] = args;
+      const input =
+        data instanceof ArrayBuffer
+          ? new Uint8Array(data)
+          : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      if (base64(input) === base64(V6_BYTES)) {
+        return globalThis.crypto.subtle.digest(algorithm, V5_BYTES);
+      }
+      return globalThis.crypto.subtle.digest(algorithm, data);
+    });
+    const test = rig({
+      crypto: { subtle: { digest } as unknown as SubtleCrypto },
+    });
+
+    const result = await test.persistence.save(request(), new AbortController().signal);
+
+    expect(result).toMatchObject({ ok: false, writeOutcome: 'not-attempted' });
+    expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+    expect(codec.decodeV6).not.toHaveBeenCalled();
   });
 
   it('returns cancelled when direct readback aborts during SHA-256', async () => {
