@@ -3,7 +3,12 @@ import { createServer } from 'vite';
 const server = await createServer({
   cacheDir: 'node_modules/.cache/model-form-personalized-preview-vite',
   optimizeDeps: {
-    include: ['three/examples/jsm/controls/TransformControls.js'],
+    include: [
+      'three/examples/jsm/controls/TransformControls.js',
+      'three/examples/jsm/lines/LineMaterial.js',
+      'three/examples/jsm/lines/LineSegments2.js',
+      'three/examples/jsm/lines/LineSegmentsGeometry.js',
+    ],
     esbuildOptions: { target: 'esnext' },
   },
   server: {

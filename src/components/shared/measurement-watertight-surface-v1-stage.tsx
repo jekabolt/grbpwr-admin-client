@@ -14,10 +14,17 @@ import type {
   MeasurementSurfaceMeshV1,
   MeasurementWatertightSurfaceArtifactV1,
 } from 'lib/cloth/body/measurement-watertight-surface-v1';
-import type {
-  MeasurementSurfaceActiveMeasurementGuideV1,
-  MeasurementSurfaceMeasurementGuidePathV1,
-} from './measurement-surface-active-measurement-guide-v1';
+import type { MeasurementSurfaceActiveMeasurementGuideV1 } from './measurement-surface-active-measurement-guide-v1';
+import {
+  createMeasurementSurfaceGuideLayerV1,
+  disposeMeasurementSurfaceGuideLayerV1,
+  measurementSurfaceGuideAirDatasetV1,
+  measurementSurfaceGuideCameraActionV1,
+  syncMeasurementSurfaceGuideResolutionV1,
+  type MeasurementSurfaceGuideCameraViewV1,
+  updateMeasurementSurfaceGuideLayerPositionsV1,
+  type MeasurementSurfaceGuideSceneBindingV1,
+} from './measurement-surface-guide-lines-v1';
 
 export type MeasurementSurfaceLodKey = 'display' | 'collisionCandidate';
 export type MeasurementSurfaceViewPreset = 'front' | 'side' | 'back';
@@ -354,11 +361,6 @@ interface MeasurementSurfacePatternPieceSceneGuideBindingV1 {
   readonly toLocal: THREE.Vector3;
 }
 
-interface MeasurementSurfaceMeasurementGuideSceneBindingV1 {
-  readonly line: THREE.Line;
-  readonly path: MeasurementSurfaceMeasurementGuidePathV1;
-}
-
 interface StageRuntime {
   readonly applyView: (view: MeasurementSurfaceViewPreset) => void;
   readonly restoreCamera: (state: MeasurementSurfaceCameraStateV10) => void;
@@ -376,11 +378,13 @@ interface StageRuntime {
   readonly syncMeasurementGuide: (
     guide: MeasurementSurfaceActiveMeasurementGuideV1 | undefined,
   ) => void;
+  readonly syncGuideCamera: () => void;
+  readonly releaseGuideCamera: () => void;
   jointLayer: THREE.Group | null;
   jointMarkers: ReadonlyMap<string, THREE.Mesh>;
   jointGroupsSignature: string;
   measurementGuideLayer: THREE.Group | null;
-  measurementGuideBindings: readonly MeasurementSurfaceMeasurementGuideSceneBindingV1[];
+  measurementGuideBindings: readonly MeasurementSurfaceGuideSceneBindingV1[];
   readonly syncRotationGizmo: (editor: MeasurementSurfaceJointEditorV1 | undefined) => void;
   readonly syncPositionDragTargets: (
     targets: readonly MeasurementSurfacePositionDragTargetV8[],
@@ -870,6 +874,8 @@ export function resizeMeasurementSurfaceRendererIfNeededV1(
 
 export const MEASUREMENT_SURFACE_WARMUP_RENDER_COUNT_V1 = 5;
 
+const GUIDE_CAMERA_TURN_MS_V1 = 400;
+
 export const MEASUREMENT_SURFACE_STAGE_DEFAULT_CLASS_NAME_V1 =
   'relative h-[68vh] min-h-96 w-full overflow-hidden bg-pageBg';
 
@@ -966,104 +972,6 @@ function createSectionPlanes(frame: MeasurementBodyFrameV2, box: THREE.Box3): TH
 function disposeSectionPlanes(group: THREE.Group | null): void {
   group?.traverse((object) => {
     if (object instanceof THREE.Mesh || object instanceof THREE.LineSegments) {
-      object.geometry.dispose();
-      disposeMaterial(object.material);
-    }
-  });
-}
-
-function measurementGuidePathPositionsV1(
-  path: MeasurementSurfaceMeasurementGuidePathV1,
-  meshPositions: Float32Array,
-): Float32Array | null {
-  const points: number[] = [];
-  if (path.source === 'fixed-points') {
-    for (const point of path.pointsM) {
-      if (point.length !== 3 || !point.every(Number.isFinite)) return null;
-      points.push(...point);
-    }
-  } else {
-    const vertexCount = meshPositions.length / 3;
-    for (const vertex of path.vertexIndices) {
-      if (!Number.isSafeInteger(vertex) || vertex < 0 || vertex >= vertexCount) return null;
-      const offset = vertex * 3;
-      points.push(meshPositions[offset], meshPositions[offset + 1], meshPositions[offset + 2]);
-    }
-  }
-  if (points.length < 6) return null;
-  if (path.closed) points.push(points[0], points[1], points[2]);
-  return Float32Array.from(points);
-}
-
-function createMeasurementGuideLayerV1(
-  guide: MeasurementSurfaceActiveMeasurementGuideV1 | undefined,
-  meshPositions: Float32Array,
-): Readonly<{
-  layer: THREE.Group | null;
-  bindings: readonly MeasurementSurfaceMeasurementGuideSceneBindingV1[];
-}> {
-  if (!guide || (guide.status !== 'visible' && guide.status !== 'limited')) {
-    return Object.freeze({ layer: null, bindings: Object.freeze([]) });
-  }
-  const layer = new THREE.Group();
-  layer.name = `measurement-guide:${guide.measurementName}`;
-  const bindings: MeasurementSurfaceMeasurementGuideSceneBindingV1[] = [];
-  for (const path of guide.paths) {
-    const positions = measurementGuidePathPositionsV1(path, meshPositions);
-    if (!positions) continue;
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute(
-      'position',
-      new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage),
-    );
-    const material = new THREE.LineBasicMaterial({
-      color: cssColor('--color-highlightColor'),
-      // Respect the body depth buffer so the rear half of a circumference is hidden by the
-      // mannequin instead of being painted through the mesh like a flat sticker.
-      depthTest: true,
-      depthWrite: false,
-      opacity: 1,
-      transparent: true,
-    });
-    const line = new THREE.Line(geometry, material);
-    line.name = `measurement-guide-path:${path.id}`;
-    line.renderOrder = 8;
-    line.userData.measurementName = guide.measurementName;
-    line.userData.visualGuideOnly = true;
-    layer.add(line);
-    bindings.push(Object.freeze({ line, path }));
-  }
-  if (bindings.length === 0) {
-    disposeMeasurementGuideLayerV1(layer);
-    return Object.freeze({ layer: null, bindings: Object.freeze([]) });
-  }
-  return Object.freeze({ layer, bindings: Object.freeze(bindings) });
-}
-
-function updateMeasurementGuideLayerPositionsV1(
-  bindings: readonly MeasurementSurfaceMeasurementGuideSceneBindingV1[],
-  meshPositions: Float32Array,
-): void {
-  for (const { line, path } of bindings) {
-    const positions = measurementGuidePathPositionsV1(path, meshPositions);
-    if (!positions) continue;
-    const attribute = line.geometry.getAttribute('position');
-    if (!(attribute instanceof THREE.BufferAttribute) || attribute.count * 3 !== positions.length) {
-      line.geometry.setAttribute(
-        'position',
-        new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage),
-      );
-    } else {
-      (attribute.array as Float32Array).set(positions);
-      attribute.needsUpdate = true;
-    }
-    line.geometry.computeBoundingSphere();
-  }
-}
-
-function disposeMeasurementGuideLayerV1(group: THREE.Group | null): void {
-  group?.traverse((object) => {
-    if (object instanceof THREE.Line) {
       object.geometry.dispose();
       disposeMaterial(object.material);
     }
@@ -1564,6 +1472,7 @@ export function MeasurementWatertightSurfaceV1Stage({
   patternPieceOverlay,
   measurementGuide,
   measurementGuidePresentation = 'interactive',
+  measurementGuideCameraView,
   retainVisibleCanvasOnRebuild = false,
 }: {
   artifact: MeasurementWatertightSurfaceArtifactV1;
@@ -1598,6 +1507,8 @@ export function MeasurementWatertightSurfaceV1Stage({
   measurementGuide?: MeasurementSurfaceActiveMeasurementGuideV1;
   /** Capture-only framing renders the exact guide close-up at a supersampled resolution. */
   measurementGuidePresentation?: 'interactive' | 'capture';
+  /** View the focused field's guide reads from; the camera turns there and back on blur. */
+  measurementGuideCameraView?: MeasurementSurfaceGuideCameraViewV1;
   /** Keeps the last rendered frame visible while replacement geometry warms on the same canvas. */
   retainVisibleCanvasOnRebuild?: boolean;
 }) {
@@ -1622,6 +1533,12 @@ export function MeasurementWatertightSurfaceV1Stage({
   const observesDisplayedGeometryRef = useRef(onDisplayedGeometryV1 !== undefined);
   const patternPieceOverlayRef = useRef(patternPieceOverlay);
   const measurementGuideRef = useRef(measurementGuide);
+  const measurementGuideCameraViewRef = useRef(measurementGuideCameraView);
+  // Survives stage rebuilds so a blur after a rebuild still restores the owner's camera.
+  const guideCameraTurnRef = useRef<{
+    view: MeasurementSurfaceGuideCameraViewV1;
+    saved: MeasurementSurfaceCameraStateV10 | null;
+  } | null>(null);
   onStatusRef.current = onStatus;
   onRenderCountRef.current = onRenderCount;
   overlaysRef.current = overlays;
@@ -1633,6 +1550,7 @@ export function MeasurementWatertightSurfaceV1Stage({
   observesDisplayedGeometryRef.current = onDisplayedGeometryV1 !== undefined;
   patternPieceOverlayRef.current = patternPieceOverlay;
   measurementGuideRef.current = measurementGuide;
+  measurementGuideCameraViewRef.current = measurementGuideCameraView;
   const patternPieceOverlayRenderKey = patternPieceOverlay
     ? JSON.stringify([
         patternPieceOverlay.revision,
@@ -1714,8 +1632,13 @@ export function MeasurementWatertightSurfaceV1Stage({
     let bodyRadius = 0;
     let patternPieceLayer: THREE.Group | null = null;
     let measurementGuideLayer: THREE.Group | null = null;
-    let measurementGuideBindings: readonly MeasurementSurfaceMeasurementGuideSceneBindingV1[] =
-      Object.freeze([]);
+    let measurementGuideBindings: readonly MeasurementSurfaceGuideSceneBindingV1[] = Object.freeze(
+      [],
+    );
+    let guideCameraAnimation = 0;
+    let guideCameraAnimationEnd: (() => void) | null = null;
+    let syncGuideCamera: (jump?: boolean) => void = () => undefined;
+    let controlsStartHandler: (() => void) | null = null;
     let focusMeasurementGuideFrame: (layer: THREE.Group) => void = () => undefined;
     let patternPiecePointerDownHandler: ((event: PointerEvent) => void) | null = null;
     let patternPiecePointerMoveHandler: ((event: PointerEvent) => void) | null = null;
@@ -2134,14 +2057,18 @@ export function MeasurementWatertightSurfaceV1Stage({
     ): void {
       if (!scene || !geometry || !contextCanvas) return;
       if (measurementGuideLayer) scene.remove(measurementGuideLayer);
-      disposeMeasurementGuideLayerV1(measurementGuideLayer);
+      disposeMeasurementSurfaceGuideLayerV1(measurementGuideLayer);
       const positionAttribute = geometry.getAttribute('position');
       const positions =
         positionAttribute instanceof THREE.BufferAttribute &&
         positionAttribute.array instanceof Float32Array
           ? positionAttribute.array
           : new Float32Array();
-      const next = createMeasurementGuideLayerV1(guide, positions);
+      const next = createMeasurementSurfaceGuideLayerV1(
+        guide,
+        positions,
+        cssColor('--color-highlightColor'),
+      );
       measurementGuideLayer = next.layer;
       measurementGuideBindings = next.bindings;
       if (measurementGuideLayer) scene.add(measurementGuideLayer);
@@ -2150,6 +2077,9 @@ export function MeasurementWatertightSurfaceV1Stage({
       contextCanvas.dataset.measurementGuideStatus = dataset.status;
       contextCanvas.dataset.measurementGuidePathCount = String(dataset.pathCount);
       contextCanvas.dataset.measurementGuideVisualOnly = String(dataset.visualGuideOnly);
+      contextCanvas.dataset.measurementGuideAir = measurementSurfaceGuideAirDatasetV1(guide);
+      contextCanvas.dataset.measurementGuideView =
+        guide?.status === 'visible' || guide?.status === 'limited' ? guide.view ?? 'front' : 'none';
       const runtime = runtimeRef.current;
       if (runtime) {
         runtime.measurementGuideLayer = measurementGuideLayer;
@@ -2161,6 +2091,47 @@ export function MeasurementWatertightSurfaceV1Stage({
       scheduleRender();
     }
 
+    function snapshotStageCamera(): MeasurementSurfaceCameraStateV10 | null {
+      if (!camera || !controls || !bodyCenter || bodyRadius <= 0 || !contextCanvas) return null;
+      return measurementSurfaceSnapshotCameraV10({
+        positionM: camera.position.toArray() as [number, number, number],
+        targetM: controls.target.toArray() as [number, number, number],
+        centerM: bodyCenter.toArray() as [number, number, number],
+        up: camera.up.toArray() as [number, number, number],
+        radiusM: bodyRadius,
+        viewPreset:
+          contextCanvas.dataset.viewPreset === 'side' || contextCanvas.dataset.viewPreset === 'back'
+            ? contextCanvas.dataset.viewPreset
+            : 'front',
+      });
+    }
+
+    function stopGuideCameraAnimation(finish: boolean): void {
+      if (guideCameraAnimation !== 0) cancelAnimationFrame(guideCameraAnimation);
+      guideCameraAnimation = 0;
+      const end = guideCameraAnimationEnd;
+      guideCameraAnimationEnd = null;
+      if (finish) end?.();
+      if (contextCanvas) contextCanvas.dataset.measurementGuideCameraMotion = 'still';
+    }
+
+    function publishGuideCameraDataset(): void {
+      if (!contextCanvas) return;
+      const turn = guideCameraTurnRef.current;
+      contextCanvas.dataset.measurementGuideCamera = turn
+        ? `${turn.saved ? 'turned' : 'owner'}-${turn.view}`
+        : 'owner';
+      if (guideCameraAnimation === 0) contextCanvas.dataset.measurementGuideCameraMotion = 'still';
+    }
+
+    /** The owner took the camera (orbit, preset): keep it on blur, never swing it back. */
+    function releaseGuideCamera(): void {
+      stopGuideCameraAnimation(false);
+      const turn = guideCameraTurnRef.current;
+      if (turn) turn.saved = null;
+      publishGuideCameraDataset();
+    }
+
     function cleanup() {
       if (disposed) return;
       displayedGeometryReadyRef.current = false;
@@ -2170,19 +2141,11 @@ export function MeasurementWatertightSurfaceV1Stage({
       finishRotationGizmo('cancel');
       finishPositionDrag('cancel');
       patternPieceGesture = null;
-      if (interactive && camera && controls && bodyCenter && bodyRadius > 0 && contextCanvas) {
-        cameraStateRef.current = measurementSurfaceSnapshotCameraV10({
-          positionM: camera.position.toArray() as [number, number, number],
-          targetM: controls.target.toArray() as [number, number, number],
-          centerM: bodyCenter.toArray() as [number, number, number],
-          up: camera.up.toArray() as [number, number, number],
-          radiusM: bodyRadius,
-          viewPreset:
-            contextCanvas.dataset.viewPreset === 'side' ||
-            contextCanvas.dataset.viewPreset === 'back'
-              ? contextCanvas.dataset.viewPreset
-              : 'front',
-        });
+      // A rebuild mid-turn keeps the turned end pose, so the rebuilt stage does not swing again.
+      stopGuideCameraAnimation(true);
+      if (interactive) {
+        const snapshot = snapshotStageCamera();
+        if (snapshot) cameraStateRef.current = snapshot;
       }
       disposed = true;
       const runtime = runtimeRef.current;
@@ -2192,6 +2155,7 @@ export function MeasurementWatertightSurfaceV1Stage({
       resizeObserver?.disconnect();
       if (controls) {
         controls.removeEventListener('change', scheduleRender);
+        if (controlsStartHandler) controls.removeEventListener('start', controlsStartHandler);
         controls.dispose();
       }
       if (contextCanvas && contextLostHandler) {
@@ -2253,7 +2217,7 @@ export function MeasurementWatertightSurfaceV1Stage({
       transformAnchor?.removeFromParent();
       disposeJointEditorLayer(runtime?.jointLayer ?? null);
       disposePatternPieceLayerV1(patternPieceLayer);
-      disposeMeasurementGuideLayerV1(measurementGuideLayer);
+      disposeMeasurementSurfaceGuideLayerV1(measurementGuideLayer);
       geometry?.dispose();
       surfaceMaterial?.dispose();
       wireMaterial?.dispose();
@@ -2295,6 +2259,11 @@ export function MeasurementWatertightSurfaceV1Stage({
             }
           }
           publishSelectedJointVisibility();
+          syncMeasurementSurfaceGuideResolutionV1(
+            measurementGuideLayer,
+            rendererSize.width,
+            rendererSize.height,
+          );
           renderer.render(scene, controls.object);
           renderCount += 1;
           renderer.domElement.dataset.renderCount = String(renderCount);
@@ -2319,6 +2288,8 @@ export function MeasurementWatertightSurfaceV1Stage({
           }
           if (!readyScheduled) {
             readyScheduled = true;
+            // A focus that arrived during warmup turns without animation once the stage is ready.
+            syncGuideCamera(true);
             renderer.domElement.style.opacity = '1';
             hasReadyCanvasFrameRef.current = true;
             readyFrame = requestAnimationFrame(() => {
@@ -2965,6 +2936,101 @@ export function MeasurementWatertightSurfaceV1Stage({
         scheduleRender();
       };
 
+      const animateGuideCamera = (
+        toPosition: THREE.Vector3,
+        toTarget: THREE.Vector3,
+        finish: () => void,
+        jump: boolean,
+      ) => {
+        stopGuideCameraAnimation(false);
+        if (!camera || !controls) return;
+        const reducedMotion =
+          window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+        if (jump || reducedMotion) {
+          finish();
+          return;
+        }
+        const fromTarget = controls.target.clone();
+        const from = new THREE.Spherical().setFromVector3(camera.position.clone().sub(fromTarget));
+        const to = new THREE.Spherical().setFromVector3(toPosition.clone().sub(toTarget));
+        let deltaTheta = to.theta - from.theta;
+        if (deltaTheta > Math.PI) deltaTheta -= Math.PI * 2;
+        if (deltaTheta < -Math.PI) deltaTheta += Math.PI * 2;
+        const started = performance.now();
+        const target = new THREE.Vector3();
+        const offset = new THREE.Spherical();
+        guideCameraAnimationEnd = finish;
+        if (contextCanvas) contextCanvas.dataset.measurementGuideCameraMotion = 'moving';
+        const step = (now: number) => {
+          guideCameraAnimation = 0;
+          if (disposed || !camera || !controls) return;
+          const t = THREE.MathUtils.clamp((now - started) / GUIDE_CAMERA_TURN_MS_V1, 0, 1);
+          if (t >= 1) {
+            stopGuideCameraAnimation(true);
+            return;
+          }
+          const eased = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+          target.lerpVectors(fromTarget, toTarget, eased);
+          offset.set(
+            THREE.MathUtils.lerp(from.radius, to.radius, eased),
+            THREE.MathUtils.lerp(from.phi, to.phi, eased),
+            from.theta + deltaTheta * eased,
+          );
+          camera.up.set(0, 1, 0);
+          camera.position.setFromSpherical(offset).add(target);
+          controls.target.copy(target);
+          scheduleRender();
+          guideCameraAnimation = requestAnimationFrame(step);
+        };
+        guideCameraAnimation = requestAnimationFrame(step);
+      };
+
+      syncGuideCamera = (jump = false) => {
+        if (!readyScheduled || measurementGuidePresentation === 'capture' || !camera) return;
+        const turn = guideCameraTurnRef.current;
+        const targetView = measurementGuideCameraViewRef.current ?? null;
+        const action = measurementSurfaceGuideCameraActionV1({
+          targetView,
+          turn: turn ? { view: turn.view, ownerCameraSaved: turn.saved !== null } : null,
+          editPose: measurementSurfaceJointEditorEffectiveEditModeV1(jointEditorRef.current),
+          interactive,
+        });
+        if (action === 'forget') {
+          stopGuideCameraAnimation(false);
+          guideCameraTurnRef.current = null;
+        } else if (action === 'turn' && targetView) {
+          guideCameraTurnRef.current = {
+            view: targetView,
+            saved: turn?.saved ?? snapshotStageCamera(),
+          };
+          const verticalFov = THREE.MathUtils.degToRad(camera.fov);
+          const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect);
+          const distance = (radius / Math.sin(Math.min(verticalFov, horizontalFov) / 2)) * 1.12;
+          animateGuideCamera(
+            center.clone().add(directionForView(targetView).multiplyScalar(distance)),
+            center,
+            () => fit(directionForView(targetView)),
+            jump,
+          );
+        } else if (action === 'restore' && turn?.saved) {
+          const saved = turn.saved;
+          guideCameraTurnRef.current = null;
+          const restored = measurementSurfaceRestoreCameraV10({
+            state: saved,
+            centerM: center.toArray() as [number, number, number],
+            radiusM: radius,
+          });
+          animateGuideCamera(
+            new THREE.Vector3(...restored.positionM),
+            new THREE.Vector3(...restored.targetM),
+            () => restoreCamera(saved),
+            jump,
+          );
+        }
+        publishGuideCameraDataset();
+      };
+      controlsStartHandler = releaseGuideCamera;
+
       const initialEditor = jointEditorRef.current;
       const initialJointLayer = initialEditor?.groups.length
         ? createJointEditorLayer(initialEditor.groups)
@@ -2993,7 +3059,7 @@ export function MeasurementWatertightSurfaceV1Stage({
         delete contextCanvas.dataset.livePositionError;
         publishAcceptedGeometry(positions);
         if (normals?.visible) normals.update();
-        updateMeasurementGuideLayerPositionsV1(measurementGuideBindings, positions);
+        updateMeasurementSurfaceGuideLayerPositionsV1(measurementGuideBindings, positions);
         scheduleRender();
         return result;
       };
@@ -3012,6 +3078,8 @@ export function MeasurementWatertightSurfaceV1Stage({
         patternPieceGuides: patternPieceScene.guides,
         updateLivePositions,
         syncMeasurementGuide,
+        syncGuideCamera: () => syncGuideCamera(),
+        releaseGuideCamera,
         jointLayer: initialJointLayer?.layer ?? null,
         jointMarkers: initialJointLayer?.markers ?? new Map(),
         jointGroupsSignature: measurementSurfaceJointGroupsSignatureV1(initialEditor?.groups ?? []),
@@ -3031,6 +3099,7 @@ export function MeasurementWatertightSurfaceV1Stage({
       landmarks.visible = overlays.landmarks;
       sectionPlanes.visible = overlays.sectionPlanes;
       controls.addEventListener('change', scheduleRender);
+      controls.addEventListener('start', controlsStartHandler);
       syncRotationGizmo(initialEditor);
       resizeObserver = new ResizeObserver(resize);
       resizeObserver.observe(host);
@@ -3075,6 +3144,7 @@ export function MeasurementWatertightSurfaceV1Stage({
   }, [exclusiveContextGroup]);
 
   useEffect(() => {
+    runtimeRef.current?.releaseGuideCamera();
     runtimeRef.current?.applyView(viewPreset);
   }, [viewPreset]);
 
@@ -3091,6 +3161,10 @@ export function MeasurementWatertightSurfaceV1Stage({
   useEffect(() => {
     runtimeRef.current?.syncMeasurementGuide(measurementGuide);
   }, [measurementGuide]);
+
+  useEffect(() => {
+    runtimeRef.current?.syncGuideCamera();
+  }, [measurementGuideCameraView]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;
@@ -3144,6 +3218,7 @@ export function MeasurementWatertightSurfaceV1Stage({
     }
     runtime.syncRotationGizmo(editor);
     runtime.syncPositionDragTargets(editor?.positionDragTargets ?? []);
+    runtime.syncGuideCamera();
     runtime.scheduleRender();
   }, [
     interactive,

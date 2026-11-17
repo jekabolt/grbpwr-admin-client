@@ -1061,3 +1061,163 @@ test('female chest and under bust reshape the bust; male keeps its chest path', 
   await expect(page.getByTestId('model-form-smoke-model-id')).toHaveText('8402');
   await exerciseBust(page, 'male');
 });
+
+// Report section 8: a line "reads" when at least 90 highlight-blue px show in the 1440x1000 canvas.
+async function canvasPixelStats(
+  page: import('@playwright/test').Page,
+  canvas: import('@playwright/test').Locator,
+  baseline?: string,
+) {
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  const png = (await canvas.screenshot()).toString('base64');
+  return page.evaluate(
+    async ({ png, baseline }) => {
+      const decode = async (data: string) => {
+        const bitmap = await createImageBitmap(
+          await (await fetch(`data:image/png;base64,${data}`)).blob(),
+        );
+        const scratch = document.createElement('canvas');
+        scratch.width = bitmap.width;
+        scratch.height = bitmap.height;
+        const context = scratch.getContext('2d')!;
+        context.drawImage(bitmap, 0, 0);
+        return context.getImageData(0, 0, bitmap.width, bitmap.height);
+      };
+      const image = await decode(png);
+      const margin = 10;
+      let blue = 0;
+      for (let y = margin; y < image.height - margin; y += 1) {
+        for (let x = margin; x < image.width - margin; x += 1) {
+          const offset = (y * image.width + x) * 4;
+          const [r, g, b] = [image.data[offset], image.data[offset + 1], image.data[offset + 2]];
+          if (b > 140 && b - r > 70 && b - g > 70) blue += 1;
+        }
+      }
+      let changedFraction = null as number | null;
+      if (baseline) {
+        const other = await decode(baseline);
+        let changed = 0;
+        for (let offset = 0; offset < image.data.length; offset += 4) {
+          const delta =
+            Math.abs(image.data[offset] - other.data[offset]) +
+            Math.abs(image.data[offset + 1] - other.data[offset + 1]) +
+            Math.abs(image.data[offset + 2] - other.data[offset + 2]);
+          if (delta > 48) changed += 1;
+        }
+        changedFraction = changed / (image.data.length / 4);
+      }
+      return { blue, changedFraction, png };
+    },
+    { png, baseline },
+  );
+}
+
+async function guideFrameGaps(
+  page: import('@playwright/test').Page,
+  canvas: import('@playwright/test').Locator,
+) {
+  const box = (await canvas.boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.85, box.y + box.height * 0.5);
+  return page.evaluate(async () => {
+    const target = document.querySelector<HTMLCanvasElement>(
+      '[data-testid="measurement-watertight-surface-v1-canvas"]',
+    )!;
+    const gaps: number[] = [];
+    let last = performance.now();
+    for (let frame = 0; frame < 90; frame += 1) {
+      target.dispatchEvent(
+        new WheelEvent('wheel', { deltaY: frame % 2 ? 40 : -40, bubbles: true, cancelable: true }),
+      );
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const now = performance.now();
+      gaps.push(now - last);
+      last = now;
+    }
+    gaps.sort((a, b) => a - b);
+    return {
+      p50: Number(gaps[Math.floor(gaps.length * 0.5)].toFixed(2)),
+      p95: Number(gaps[Math.floor(gaps.length * 0.95)].toFixed(2)),
+    };
+  });
+}
+
+test.describe('guide lines at DPR 2', () => {
+  test.use({ deviceScaleFactor: 2 });
+
+  test('hidden measurement lines read through the body and from their own view', async ({
+    page,
+  }) => {
+    test.setTimeout(600_000);
+    await prewarmDevRuntime(page);
+    await page.goto(DEV_ROUTE);
+    const status = page.getByTestId('model-open-reference-preview-status');
+    const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
+    await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
+    await expect(canvas).toHaveAttribute('data-source-revision', /basisKind=female/u);
+    await expect(canvas).toHaveAttribute('data-view-preset', 'front');
+
+    const focusField = async (label: string, name: string) => {
+      const input = measurementField(page, label);
+      await revealMeasurement(page, input);
+      await input.focus();
+      await expect(canvas).toHaveAttribute('data-active-measurement-guide', name);
+      await page.mouse.move(0, 0);
+      return input;
+    };
+
+    // No guide: the owner's own camera, for the blur comparison and the frame-time baseline.
+    await focusField('inseam', 'BODY_MEASUREMENT_NAME_INSEAM');
+    await expect(canvas).toHaveAttribute('data-measurement-guide-path-count', '0');
+    const ownerFrame = await canvasPixelStats(page, canvas);
+    const framesWithoutGuide = await guideFrameGaps(page, canvas);
+    await page.mouse.move(0, 0);
+
+    // X-ray class: the chord through the torso reads, the camera stays where the owner left it.
+    await focusField('across shoulder', 'BODY_MEASUREMENT_NAME_ACROSS_SHOULDER');
+    await expect(canvas).toHaveAttribute('data-measurement-guide-air', 'x-ray');
+    await expect(canvas).toHaveAttribute('data-measurement-guide-view', 'front');
+    await expect(canvas).toHaveAttribute('data-measurement-guide-camera', 'owner');
+    const acrossShoulder = await canvasPixelStats(page, canvas);
+    expect(acrossShoulder.blue, 'across shoulder blue px').toBeGreaterThanOrEqual(90);
+    const framesWithXRay = await guideFrameGaps(page, canvas);
+    await page.mouse.move(0, 0);
+
+    // Back-view class: focus turns to the back, blur returns to the owner's front camera.
+    const cbField = await focusField('cb neck to waist', 'BODY_MEASUREMENT_NAME_CB_NECK_TO_WAIST');
+    await expect(canvas).toHaveAttribute('data-measurement-guide-view', 'back');
+    await expect(canvas).toHaveAttribute('data-measurement-guide-camera', 'turned-back');
+    await expect(canvas).toHaveAttribute('data-measurement-guide-camera-motion', 'still');
+    await expect(canvas).toHaveAttribute('data-view-preset', 'front');
+    const cbNeckToWaist = await canvasPixelStats(page, canvas);
+    expect(cbNeckToWaist.blue, 'cb neck to waist blue px').toBeGreaterThanOrEqual(90);
+    await cbField.blur();
+    await expect(canvas).toHaveAttribute('data-measurement-guide-camera', 'owner');
+    await expect(canvas).toHaveAttribute('data-measurement-guide-camera-motion', 'still');
+    await focusField('inseam', 'BODY_MEASUREMENT_NAME_INSEAM');
+    const restored = await canvasPixelStats(page, canvas, ownerFrame.png);
+    expect(restored.changedFraction, 'camera back where the owner left it').toBeLessThan(0.005);
+
+    // Side-view caliper class: the depth reads across the body from the side.
+    await focusField('chest depth', 'BODY_MEASUREMENT_NAME_CHEST_DEPTH');
+    await expect(canvas).toHaveAttribute('data-measurement-guide-air', 'caliper');
+    await expect(canvas).toHaveAttribute('data-measurement-guide-camera', 'turned-side');
+    await expect(canvas).toHaveAttribute('data-measurement-guide-camera-motion', 'still');
+    const chestDepth = await canvasPixelStats(page, canvas);
+    expect(chestDepth.blue, 'chest depth blue px').toBeGreaterThanOrEqual(90);
+    const framesWithCaliper = await guideFrameGaps(page, canvas);
+
+    console.info(
+      `MANNEQUIN_GUIDE_LINES_V3=${JSON.stringify({
+        blue: {
+          acrossShoulder: acrossShoulder.blue,
+          cbNeckToWaist: cbNeckToWaist.blue,
+          chestDepth: chestDepth.blue,
+        },
+        restoredChangedFraction: restored.changedFraction,
+        frameGapsMs: { framesWithoutGuide, framesWithXRay, framesWithCaliper },
+      })}`,
+    );
+  });
+});

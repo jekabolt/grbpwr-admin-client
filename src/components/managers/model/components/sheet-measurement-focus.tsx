@@ -50,3 +50,8 @@ export function useSheetMeasurementFocus() {
   if (!value) throw new Error('no SheetMeasurementFocusProvider');
   return value;
 }
+
+/** For views that may render outside the measurement sheet (previews, capture pages). */
+export function useOptionalSheetMeasurementFocus() {
+  return useContext(SheetMeasurementFocusContext);
+}
