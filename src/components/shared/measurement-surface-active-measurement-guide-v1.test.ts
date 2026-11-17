@@ -84,6 +84,61 @@ const frame = createMeasurementBodyFrameV2({
 });
 
 describe('active mannequin measurement guide v1', () => {
+  it('spans hip depth across the torso section on the hip plane, never a hand below it', () => {
+    // A thin torso (z radius 0.24 m * 0.5) and a hand-sized box just below the hip plane, in front
+    // of the body where the analytic half depth (135 mm) lands.
+    const torso = cylinderMesh();
+    const torsoVertexCount = torso.positions.length / 3;
+    const positions = Array.from(torso.positions);
+    for (let offset = 2; offset < positions.length; offset += 3) positions[offset] *= 0.5;
+    const hipY = 0.9;
+    const [x0, x1, y0, y1, z0, z1] = [-0.03, 0.03, hipY - 0.06, hipY - 0.01, 0.12, 0.16];
+    for (const x of [x0, x1])
+      for (const y of [y0, y1]) for (const z of [z0, z1]) positions.push(x, y, z);
+    const b = torsoVertexCount;
+    const indices = Array.from(torso.indices);
+    // prettier-ignore
+    indices.push(
+      b, b + 1, b + 3, b, b + 3, b + 2, b + 4, b + 6, b + 7, b + 4, b + 7, b + 5,
+      b, b + 4, b + 5, b, b + 5, b + 1, b + 2, b + 3, b + 7, b + 2, b + 7, b + 6,
+      b, b + 2, b + 6, b, b + 6, b + 4, b + 1, b + 5, b + 7, b + 1, b + 7, b + 3,
+    );
+    const positionArray = Float32Array.from(positions);
+    const indexArray = Uint32Array.from(indices);
+    const mesh: MeasurementSurfaceMeshV1 = {
+      positions: positionArray,
+      indices: indexArray,
+      vertexCount: positionArray.length / 3,
+      triangleCount: indexArray.length / 3,
+      byteLength: positionArray.byteLength + indexArray.byteLength,
+    };
+
+    const guide = buildMeasurementSurfaceActiveMeasurementGuideV1({
+      measurementName: 'BODY_MEASUREMENT_NAME_HIP_DEPTH',
+      frame,
+      mesh,
+      neutralPose: true,
+      torsoSectionStations: { hip: [0, hipY, 0] },
+    });
+
+    expect(guide.status).toBe('limited');
+    expect(guide.paths).toHaveLength(1);
+    const path = guide.paths[0];
+    expect(path.source).toBe('mesh-vertices');
+    if (path.source !== 'mesh-vertices') return;
+    expect(path.vertexIndices).toHaveLength(2);
+    const [front, back] = path.vertexIndices.map((vertex) => [
+      positionArray[vertex * 3],
+      positionArray[vertex * 3 + 1],
+      positionArray[vertex * 3 + 2],
+    ]);
+    expect(Math.max(...path.vertexIndices)).toBeLessThan(torsoVertexCount);
+    expect(Math.abs(front[1] - hipY)).toBeLessThan(0.02);
+    expect(Math.abs(back[1] - hipY)).toBeLessThan(0.02);
+    expect(front[2]).toBeCloseTo(0.12, 2);
+    expect(back[2]).toBeCloseTo(-0.12, 2);
+  });
+
   it('keeps the exact neutral chest section instead of snapping it to coarse mesh vertices', () => {
     const guide = buildMeasurementSurfaceActiveMeasurementGuideV1({
       measurementName: 'BODY_MEASUREMENT_NAME_CHEST',
@@ -187,9 +242,11 @@ describe('active mannequin measurement guide v1', () => {
       index % 3 === 1 ? value + 0.1 : value,
     );
     const raisedLine = measurementSurfaceGuidePolylineV1(posedRuler, raised);
-    ruler.pointsM.flat().forEach((value, index) =>
-      expect(raisedLine![index]).toBeCloseTo(index % 3 === 1 ? value + 0.1 : value, 5),
-    );
+    ruler.pointsM
+      .flat()
+      .forEach((value, index) =>
+        expect(raisedLine![index]).toBeCloseTo(index % 3 === 1 ? value + 0.1 : value, 5),
+      );
 
     // No HM08 crotch landmark on a cylinder: the inseam line needs the reference-mesh anchors.
     expect(inseam).toMatchObject({ status: 'unavailable-section', label: 'inseam', paths: [] });
