@@ -8,6 +8,7 @@ import {
 import { PATTERN_IMPORT_DXF_PHASE_E_CALLOUT_SESSION_V1 } from './callout-session-v1';
 import {
   selectPatternImportDxfPhaseEDraftCadTopologyToolV1,
+  startPatternImportDxfPhaseEDraftCadAnnotationReanchorV1,
   type PatternImportDxfPhaseEDraftCadTopologySessionV1,
 } from './draft-cad-topology-session-v1';
 import {
@@ -130,6 +131,71 @@ describe('exact-N topology annotation editor', () => {
     state = selectPatternImportDxfPhaseEExactNTopologyVertexV1(projection, state, anchor('v1'));
     expect(state.blocker).toBeNull();
     expect(state.measurements[0]).toMatchObject({ kind: 'edge', valueMm: 30 });
+  });
+
+  it('replaces a saved edge only after a complete exact ordered pick and preserves its ID', () => {
+    const edge = {
+      id: 'edge:kept',
+      kind: 'edge' as const,
+      anchors: [anchor('v0'), anchor('v1')],
+      valueMm: 40,
+      label: '40.0 mm',
+    };
+    const original = createPatternImportDxfPhaseEExactNTopologyEditorSessionV1('source:exact', {
+      measurements: [edge],
+      callouts: [],
+    });
+    const start = () =>
+      startPatternImportDxfPhaseEDraftCadAnnotationReanchorV1(original, {
+        collection: 'measurement',
+        id: edge.id,
+      });
+    const invalidFirst = selectPatternImportDxfPhaseEExactNTopologyVertexV1(projection, start(), {
+      ...anchor('v3'),
+      pieceLineKey: 'stale-line',
+    });
+    expect(invalidFirst.pendingAnchors).toEqual([]);
+    expect(invalidFirst.measurements).toEqual([edge]);
+    let active = selectPatternImportDxfPhaseEExactNTopologyVertexV1(
+      projection,
+      start(),
+      anchor('v3'),
+    );
+    expect(active.measurements).toEqual([edge]);
+    const invalidSecond = selectPatternImportDxfPhaseEExactNTopologyVertexV1(
+      projection,
+      active,
+      anchor('v1'),
+    );
+    expect(invalidSecond.blocker).toContain('adjacent exact vertices');
+    expect(invalidSecond.pendingAnchors).toEqual([anchor('v3')]);
+    expect(invalidSecond.measurements).toEqual([edge]);
+    const cancelled = selectPatternImportDxfPhaseEDraftCadTopologyToolV1(invalidSecond, null);
+    expect(cancelled).toMatchObject({
+      measurements: [edge],
+      pendingAnchors: [],
+      reanchorTarget: null,
+    });
+
+    active = selectPatternImportDxfPhaseEExactNTopologyVertexV1(
+      projection,
+      invalidSecond,
+      anchor('v0'),
+    );
+    expect(active).toMatchObject({
+      measurements: [
+        {
+          id: edge.id,
+          kind: 'edge',
+          anchors: [anchor('v3'), anchor('v0')],
+          valueMm: 30,
+          label: '30.0 mm',
+        },
+      ],
+      pendingAnchors: [],
+      reanchorTarget: null,
+      sequence: original.sequence,
+    });
   });
 
   it('hydrates durable annotations and propagates new callouts without replacing their owner', () => {

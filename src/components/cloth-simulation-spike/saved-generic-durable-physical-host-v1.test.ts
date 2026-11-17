@@ -1060,26 +1060,37 @@ describe('mounted exact annotation Save and remount', () => {
         props as Parameters<typeof PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1>[0],
       );
     }
+    async function pickAnnotationVertex(vertexId: string) {
+      const viewport = visitMountedTree(editor.output(), (props) => !!props.onPick);
+      expect(viewport).toBeTruthy();
+      const geometry = (viewport!.children as (props: { unit: number }) => ReactNode)({
+        unit: 1,
+      });
+      const vertex = visitMountedTree(
+        geometry,
+        (props) => props['data-exact-n-topology-vertex'] === vertexId,
+      );
+      expect(vertex).toBeTruthy();
+      await act(async () =>
+        (viewport!.onPick as (key: string) => void)(vertex!['data-key'] as string),
+      );
+    }
     async function addLineMeasurement() {
       await renderEditor();
       const tool = visitMountedTree(editor.output(), (props) => props.children === 'Line');
       expect(tool).toBeTruthy();
       await act(async () => (tool!.onClick as () => void)());
-      for (const vertexId of ['vertex:0:front:0', 'vertex:0:front:1']) {
-        const viewport = visitMountedTree(editor.output(), (props) => !!props.onPick);
-        expect(viewport).toBeTruthy();
-        const geometry = (viewport!.children as (props: { unit: number }) => ReactNode)({
-          unit: 1,
-        });
-        const vertex = visitMountedTree(
-          geometry,
-          (props) => props['data-exact-n-topology-vertex'] === vertexId,
-        );
-        expect(vertex).toBeTruthy();
-        await act(async () =>
-          (viewport!.onPick as (key: string) => void)(vertex!['data-key'] as string),
-        );
-      }
+      await pickAnnotationVertex('vertex:0:front:0');
+      await pickAnnotationVertex('vertex:0:front:1');
+    }
+    async function startReanchor(kind: 'measurement' | 'callout', ordinal: number) {
+      await renderEditor();
+      const button = visitMountedTree(
+        editor.output(),
+        (props) => props['aria-label'] === `Re-anchor annotation ${kind} ${ordinal}`,
+      );
+      expect(button).toBeTruthy();
+      await act(async () => (button!.onClick as () => void)());
     }
     async function typeCallout(text: string) {
       await renderEditor();
@@ -1129,6 +1140,8 @@ describe('mounted exact annotation Save and remount', () => {
       desktopOf,
       button,
       addLineMeasurement,
+      startReanchor,
+      pickAnnotationVertex,
       deleteAnnotation,
       typeCallout,
     };
@@ -1194,6 +1207,83 @@ describe('mounted exact annotation Save and remount', () => {
       expect(view.put).toHaveBeenCalledTimes(1);
     },
   );
+
+  it('cancels an incomplete replacement and saves exact re-anchors through V7 and remount', async () => {
+    const view = await mountedFixture('v7');
+    const starting = view.desktopOf(view.route.output()).props.savedAnnotations!;
+    await view.addLineMeasurement();
+    await view.startReanchor('measurement', 2);
+    await view.pickAnnotationVertex('vertex:0:front:1');
+    expect(view.button('Save annotations').disabled).toBe(true);
+    const dialogContent = visitMountedTree(
+      view.control.output(),
+      (props) => !!props.onEscapeKeyDown,
+    );
+    const preventDefault = vi.fn();
+    await act(async () =>
+      (dialogContent!.onEscapeKeyDown as (event: { preventDefault(): void }) => void)({
+        preventDefault,
+      }),
+    );
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(view.button('Save annotations').disabled).toBe(false);
+    expect(view.put).not.toHaveBeenCalled();
+    const draftAfterCancel = visitMountedTree(
+      view.control.output(),
+      (props) => !!props.draft,
+    )?.draft;
+    expect(draftAfterCancel).toMatchObject({
+      measurements: [
+        { id: 'measurement:1', anchors: [{ vertexId: 'vertex:0:front:0' }] },
+        { anchors: [{ vertexId: 'vertex:0:front:0' }, { vertexId: 'vertex:0:front:1' }] },
+      ],
+      callouts: starting.callouts,
+    });
+
+    await view.startReanchor('callout', 1);
+    await view.pickAnnotationVertex('vertex:0:front:1');
+    await view.startReanchor('measurement', 1);
+    await view.pickAnnotationVertex('vertex:0:front:1');
+    expect(view.desktopOf(view.route.output()).props.savedAnnotations).toBe(starting);
+    expect(view.put).not.toHaveBeenCalled();
+
+    const click = view.button('Save annotations').onClick as () => void;
+    await act(async () => {
+      click();
+      await view.save.mock.results[0].value;
+    });
+    expect(view.put).toHaveBeenCalledTimes(1);
+    const stored = outer!;
+    const before = await unwrapAnnotationSaveFixture('v7', view.current);
+    const after = await unwrapAnnotationSaveFixture('v7', stored);
+    expect(after.exactV4).toEqual(before.exactV4);
+    expect(after.arrangement).toEqual(before.arrangement);
+    expect(after.physical).toEqual(before.physical);
+    await view.editor.unmount();
+    await view.control.unmount();
+    await view.route.unmount();
+    const session = await openExactAnnotationFixture(view.storage, 'v7', stored);
+    const fresh = mountAnnotationFixtureView(PatternImportDxfProductExactNSeamProductionMountV2);
+    await fresh.render({ ...view.routeProps, session });
+    await act(async () => {
+      await view.read.mock.results.at(-1)!.value;
+    });
+    const restored = view.desktopOf(fresh.output()).props.savedAnnotations;
+    expect(restored).toMatchObject({
+      measurements: [
+        {
+          id: 'measurement:1',
+          anchors: [{ vertexId: 'vertex:0:front:1' }],
+          label: 'x 10.0 · y 10.0 mm',
+        },
+        { anchors: [{ vertexId: 'vertex:0:front:0' }, { vertexId: 'vertex:0:front:1' }] },
+      ],
+      callouts: [
+        { id: 'callout:1', anchor: { vertexId: 'vertex:0:front:1' }, text: 'Controllo cucitura' },
+      ],
+    });
+    expect(view.put).toHaveBeenCalledTimes(1);
+  });
 
   it('deletes both saved annotations from V7 through Save and a fresh exact remount', async () => {
     const view = await mountedFixture('v7');

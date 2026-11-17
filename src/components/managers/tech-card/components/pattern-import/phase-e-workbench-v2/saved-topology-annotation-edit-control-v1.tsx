@@ -8,7 +8,10 @@ import type {
   PatternImportDxfPhaseEExactNAssemblyOrderSessionV2,
   PatternImportDxfProductExactNDesktopGeometryV2,
 } from './exact-n-seam-production-mount-v2';
-import { PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1 } from './exact-n-topology-annotation-editor-v1';
+import {
+  PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1,
+  type PatternImportDxfPhaseEExactNTopologyAnnotationEditorHandleV1,
+} from './exact-n-topology-annotation-editor-v1';
 import type { PatternImportDxfPhaseERestoredTopologyAnnotationReadbackV1 } from './restored-topology-annotation-reader-v1';
 import type { PatternImportDxfPhaseETopologyAnnotationDraftV5 } from './topology-annotation-save-control-v5';
 import type { PatternImportDxfPhaseEWrappedTopologyAnnotationSaveV1 } from './wrapped-topology-annotation-save-v1';
@@ -37,6 +40,8 @@ export function PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1({
   onReload: () => void;
 }>) {
   const [edit, setEdit] = useState<EditState | null>(null);
+  const [reanchoring, setReanchoring] = useState(false);
+  const editorRef = useRef<PatternImportDxfPhaseEExactNTopologyAnnotationEditorHandleV1>(null);
   const pendingRef = useRef<AbortController | null>(null);
   useEffect(() => () => pendingRef.current?.abort(), []);
   const { annotationSource, projection } = geometry;
@@ -49,7 +54,15 @@ export function PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1({
 
   const dirty = edit !== null && JSON.stringify(edit.draft) !== JSON.stringify(edit.baseline.draft);
   const submit = async () => {
-    if (!edit || !dirty || edit.status === 'blocked' || pendingRef.current) return;
+    if (
+      !edit ||
+      !dirty ||
+      reanchoring ||
+      editorRef.current?.isReanchoring() ||
+      edit.status === 'blocked' ||
+      pendingRef.current
+    )
+      return;
     const controller = new AbortController();
     pendingRef.current = controller;
     setEdit({ ...edit, status: 'saving', detail: 'Saving and verifying annotations…' });
@@ -103,6 +116,7 @@ export function PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1({
         if (open && !edit) setEdit({ baseline: saved, draft: saved.draft, status: 'editing' });
         if (!open) {
           setEdit(null);
+          setReanchoring(false);
           if (edit?.status === 'blocked') onReload();
         }
       }}
@@ -126,7 +140,7 @@ export function PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1({
             className='fixed left-1/2 top-1/2 z-[211] max-h-[90vh] w-[min(46rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-auto border border-borderColor bg-bgColor shadow-xl'
             aria-describedby={undefined}
             onEscapeKeyDown={(event) => {
-              if (pendingRef.current) event.preventDefault();
+              if (pendingRef.current || editorRef.current?.cancelReanchor()) event.preventDefault();
             }}
             onInteractOutside={(event) => event.preventDefault()}
           >
@@ -134,6 +148,9 @@ export function PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1({
               Edit saved annotations
             </Dialog.Title>
             <PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1
+              ref={editorRef}
+              enableReanchor
+              onReanchorChange={setReanchoring}
               source={{ ...annotationSource, projection }}
               draft={edit.draft}
               onDraftChange={(draft) =>
@@ -179,7 +196,9 @@ export function PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1({
                 type='button'
                 size='xs'
                 variant='main'
-                disabled={!dirty || edit.status === 'saving' || edit.status === 'blocked'}
+                disabled={
+                  !dirty || reanchoring || edit.status === 'saving' || edit.status === 'blocked'
+                }
                 onClick={() => void submit()}
               >
                 Save annotations

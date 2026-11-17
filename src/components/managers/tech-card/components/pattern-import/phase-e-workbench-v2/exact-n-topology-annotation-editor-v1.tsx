@@ -1,6 +1,15 @@
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import type { BoxMm } from 'lib/pattern-import/types';
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type Ref,
+} from 'react';
 import { Button, Input, Select, Text } from 'ui';
 
 import { SHEET_INK, SheetViewport, ptsAttr, vy } from '../sheet-viewport';
@@ -14,6 +23,7 @@ import {
   selectPatternImportDxfPhaseEDraftCadTopologyAnchorV1,
   selectPatternImportDxfPhaseEDraftCadTopologyToolV1,
   setPatternImportDxfPhaseEDraftCadTopologyUnitV1,
+  startPatternImportDxfPhaseEDraftCadAnnotationReanchorV1,
   updatePatternImportDxfPhaseEDraftCadCalloutV1,
   type PatternImportDxfPhaseEDraftCadTopologySessionV1,
   type PatternImportDxfPhaseEDraftCadTopologyToolV1,
@@ -127,15 +137,26 @@ function guidance(state: PatternImportDxfPhaseEDraftCadTopologySessionV1): strin
     : 'Pick two vertices on one piece.';
 }
 
+export type PatternImportDxfPhaseEExactNTopologyAnnotationEditorHandleV1 = Readonly<{
+  cancelReanchor: () => boolean;
+  isReanchoring: () => boolean;
+}>;
+
 export function PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1({
   source,
   draft,
   onDraftChange,
+  onReanchorChange,
+  enableReanchor = false,
+  ref,
   disabled = false,
 }: Readonly<{
   source: PatternImportDxfPhaseETopologyAnnotationSourceV5;
   draft: PatternImportDxfPhaseETopologyAnnotationDraftV5;
   onDraftChange: (draft: PatternImportDxfPhaseETopologyAnnotationDraftV5) => void;
+  onReanchorChange?: (active: boolean) => void;
+  enableReanchor?: boolean;
+  ref?: Ref<PatternImportDxfPhaseEExactNTopologyAnnotationEditorHandleV1>;
   disabled?: boolean;
 }>) {
   const measurementUnit = usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1();
@@ -163,6 +184,27 @@ export function PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1({
       setPatternImportDxfPhaseEDraftCadTopologyUnitV1(current, measurementUnit.unit),
     );
   }, [measurementUnit?.unit, state.unit]);
+
+  const reanchoring = state.reanchorTarget !== null;
+  const cancelReanchor = useCallback(
+    () => setState((current) => selectPatternImportDxfPhaseEDraftCadTopologyToolV1(current, null)),
+    [],
+  );
+  useImperativeHandle(
+    ref,
+    () => ({
+      isReanchoring: () => reanchoring,
+      cancelReanchor: () => {
+        if (!reanchoring) return false;
+        cancelReanchor();
+        return true;
+      },
+    }),
+    [cancelReanchor, reanchoring],
+  );
+  useEffect(() => {
+    onReanchorChange?.(reanchoring);
+  }, [onReanchorChange, reanchoring]);
 
   const activePiece = source.projection.pieces.find(({ pieceId }) => pieceId === activePieceId);
   const vertices = useMemo(
@@ -226,9 +268,9 @@ export function PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1({
                 key={tool}
                 type='button'
                 size='xs'
-                variant={state.activeTool === tool ? 'main' : 'secondary'}
-                aria-pressed={state.activeTool === tool}
-                disabled={disabled}
+                variant={!reanchoring && state.activeTool === tool ? 'main' : 'secondary'}
+                aria-pressed={!reanchoring && state.activeTool === tool}
+                disabled={disabled || reanchoring}
                 onClick={() =>
                   setState((current) =>
                     selectPatternImportDxfPhaseEDraftCadTopologyToolV1(
@@ -242,6 +284,17 @@ export function PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1({
               </Button>
             ),
           )}
+          {reanchoring ? (
+            <Button
+              type='button'
+              size='xs'
+              variant='underline'
+              disabled={disabled}
+              onClick={cancelReanchor}
+            >
+              Cancel re-anchor
+            </Button>
+          ) : null}
         </div>
       </header>
 
@@ -251,7 +304,7 @@ export function PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1({
         variant={state.blocker ? 'errorLabel' : 'label'}
         className='px-2 py-1'
       >
-        {state.blocker ?? guidance(state)}
+        {state.blocker ?? (reanchoring ? `Re-anchor. ${guidance(state)}` : guidance(state))}
       </Text>
 
       <div className='h-64 min-h-0 border-y border-hairline bg-bgColor'>
@@ -297,6 +350,7 @@ export function PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1({
                     const selected = state.pendingAnchors.some(
                       (anchor) =>
                         anchor.pieceId === option.anchor.pieceId &&
+                        anchor.pieceLineKey === option.anchor.pieceLineKey &&
                         anchor.contourId === option.anchor.contourId &&
                         anchor.vertexId === option.anchor.vertexId,
                     );
@@ -357,11 +411,31 @@ export function PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1({
                   state.unit,
                 )}
               </Text>
+              {enableReanchor ? (
+                <Button
+                  type='button'
+                  size='xs'
+                  variant='underline'
+                  disabled={disabled || reanchoring}
+                  aria-label={`Re-anchor annotation measurement ${index + 1}`}
+                  onClick={() => {
+                    setActivePieceId(measurement.anchors[0]?.pieceId ?? activePieceId);
+                    update((current) =>
+                      startPatternImportDxfPhaseEDraftCadAnnotationReanchorV1(current, {
+                        collection: 'measurement',
+                        id: measurement.id,
+                      }),
+                    );
+                  }}
+                >
+                  Re-anchor
+                </Button>
+              ) : null}
               <Button
                 type='button'
                 size='xs'
                 variant='underline'
-                disabled={disabled}
+                disabled={disabled || reanchoring}
                 aria-label={`Delete annotation measurement ${index + 1}`}
                 onClick={() =>
                   update((current) =>
@@ -383,7 +457,7 @@ export function PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1({
                 aria-label={`Annotation callout ${index + 1} text`}
                 className='min-w-0 flex-1 text-micro'
                 value={callout.text}
-                disabled={disabled}
+                disabled={disabled || reanchoring}
                 onChange={(event: ChangeEvent<HTMLInputElement>) =>
                   update((current) =>
                     updatePatternImportDxfPhaseEDraftCadCalloutV1(
@@ -395,11 +469,31 @@ export function PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1({
                   )
                 }
               />
+              {enableReanchor ? (
+                <Button
+                  type='button'
+                  size='xs'
+                  variant='underline'
+                  disabled={disabled || reanchoring}
+                  aria-label={`Re-anchor annotation callout ${index + 1}`}
+                  onClick={() => {
+                    setActivePieceId(callout.anchor.pieceId);
+                    update((current) =>
+                      startPatternImportDxfPhaseEDraftCadAnnotationReanchorV1(current, {
+                        collection: 'callout',
+                        id: callout.id,
+                      }),
+                    );
+                  }}
+                >
+                  Re-anchor
+                </Button>
+              ) : null}
               <Button
                 type='button'
                 size='xs'
                 variant='underline'
-                disabled={disabled}
+                disabled={disabled || reanchoring}
                 aria-label={`Delete annotation callout ${index + 1}`}
                 onClick={() =>
                   update((current) =>
