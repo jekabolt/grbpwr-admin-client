@@ -16,6 +16,19 @@ import { decodePatternImportDxfProductCompositeSidecarV6 } from './composite-sid
 import { decodePatternImportDxfProductCompositeSidecarV7 } from './composite-sidecar-v7';
 
 const MAX_BYTES = 4 * 1024 * 1024;
+// Diagnostic only: mirrors internal/dto/techcard.go purpose map and entity/techcard.go values.
+// Apply exclusively to resolver-confirmed purpose groups; arbitrary BOM line keys stay exact.
+const SERVER_PURPOSE_SCOPE: Readonly<Record<string, string>> = {
+  TECH_CARD_BOM_PURPOSE_MAIN: 'main',
+  TECH_CARD_BOM_PURPOSE_LINING: 'lining',
+  TECH_CARD_BOM_PURPOSE_POCKETING: 'pocketing',
+  TECH_CARD_BOM_PURPOSE_INTERFACING: 'interfacing',
+  TECH_CARD_BOM_PURPOSE_INSULATION: 'insulation',
+  TECH_CARD_BOM_PURPOSE_CONTRAST: 'contrast',
+  TECH_CARD_BOM_PURPOSE_BINDING: 'binding',
+  TECH_CARD_BOM_PURPOSE_MESH: 'mesh',
+  TECH_CARD_BOM_PURPOSE_OTHER: 'other',
+};
 function safeError(error: unknown) {
   return (error instanceof Error ? error.message : 'Read failed')
     .replace(/https?:\/\/[^\s"']+/g, '[URL omitted]')
@@ -155,21 +168,50 @@ export function AssemblyCarrierDevPage() {
         type: op.operationType,
         seamKeys: op.seamKeys,
       }));
-      const rows = patterns.slice(0, 20).map((row) => ({
-        patternLineKey: row.lineKey,
-        scopeKey: scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, bindings),
-        savedRowRevision: row.savedRowRevision,
-        sha256: row.sha256,
-        sizeBytes: row.sizeBytes,
-        filename: row.filename,
-        urlPresent: !!row.url,
-        carrier: { status: 'not-read' } as unknown,
-      }));
+      const rows = patterns.slice(0, 20).map((row) => {
+        const uiScopeKey = scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, bindings);
+        const byPurpose = scopes.some((scope) => scope.key === uiScopeKey && scope.byPurpose);
+        return {
+          patternLineKey: row.lineKey,
+          uiScopeKey,
+          scopeKey: byPurpose ? SERVER_PURPOSE_SCOPE[uiScopeKey] ?? uiScopeKey : uiScopeKey,
+          scopeMapping: byPurpose ? 'diagnostic-enum-to-entity-purpose' : 'exact-line-key',
+          savedRowRevision: row.savedRowRevision,
+          sha256: row.sha256,
+          sizeBytes: row.sizeBytes,
+          filename: row.filename,
+          urlPresent: !!row.url,
+          carrier: { status: 'not-read' } as unknown,
+          storedCarrierDiagnostic: { status: 'not-read' } as unknown,
+        };
+      });
       report.rows = rows;
       show();
       for (let index = 0; index < rows.length; index++) {
         const row = patterns[index];
         const summary = rows[index];
+        try {
+          if (!row.lineKey) throw new Error('Pattern line key is missing.');
+          const saved = await client.GetTechCardPatternSemanticSidecar({
+            techCardId: cardId,
+            patternLineKey: row.lineKey,
+          });
+          summary.storedCarrierDiagnostic = {
+            currentRowBound: false,
+            AOFreshnessVerified: false,
+            carrier: await carrier(saved.semanticSidecar),
+          };
+        } catch (error) {
+          const status =
+            error && typeof error === 'object' && 'status' in error ? error.status : null;
+          summary.storedCarrierDiagnostic = {
+            status: status === 404 ? 'not-found' : 'read-error',
+            currentRowBound: false,
+            AOFreshnessVerified: false,
+            error: safeError(error),
+          };
+        }
+        show();
         try {
           if (!operation) {
             summary.carrier = { status: 'no-seam-bearing-operation' };
@@ -198,6 +240,7 @@ export function AssemblyCarrierDevPage() {
             selectedOperationNumber: operation.operationNumber,
           });
           summary.carrier = {
+            returnedScopeKey: snapshot.row?.scopeKey,
             snapshotRevision: snapshot.serverAssemblyRevision,
             selectedOperationNumber: snapshot.selectedOperationNumber,
             selectedSeamKeys: snapshot.selectedSeams?.map((seam) => seam.seamKey),
