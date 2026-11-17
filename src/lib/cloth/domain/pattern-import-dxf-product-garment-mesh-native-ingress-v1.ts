@@ -201,11 +201,10 @@ function sourcePathCarrier(
 ): DxfPipelineSourcePathArtifactV2 {
   const sourceFileId = request.catalog.sourceFileId;
   const sourceSha256 = nativeRead.read.doc.file.sha256;
-  const pipeline = request.selection.pipeline;
-  const selection = request.selection.selection;
-  if (!pipeline || !selection)
-    fail('source-path-binding-mismatch', 'Phase-D selection is unavailable.');
-  const phaseDCarrier = pipeline.carrier;
+  const selection = request.selection;
+  if (!selection.ok)
+    fail('source-path-binding-mismatch', 'A successful Phase-D selection is required.');
+  const phaseDCarrier = selection.pipeline.carrier;
   if (!phaseDCarrier) fail('source-path-binding-mismatch', 'Phase-D carrier is unavailable.');
   const pathsById = new Map(nativeRead.provenance.paths.map((path) => [path.pathId, path]));
   if (pathsById.size !== nativeRead.provenance.paths.length)
@@ -231,7 +230,8 @@ function sourcePathCarrier(
     if (!path)
       fail('source-path-binding-mismatch', `Native path is missing for ${piece.id}/${contour.id}.`);
     const carriedPiece = phaseDCarrier.pieces.find(
-      (candidate) => candidate.pieceId === piece.id && candidate.sizeToken === selection.sizeToken,
+      (candidate) =>
+        candidate.pieceId === piece.id && candidate.sizeToken === selection.selection.sizeToken,
     );
     const carriedContour = carriedPiece?.contours.find((candidate) => candidate.id === contour.id);
     if (!carriedContour)
@@ -251,7 +251,7 @@ function sourcePathCarrier(
       );
     return Object.freeze({
       pieceId: piece.id,
-      sizeToken: selection.sizeToken,
+      sizeToken: selection.selection.sizeToken,
       contours: Object.freeze([
         Object.freeze({
           id: contour.id,

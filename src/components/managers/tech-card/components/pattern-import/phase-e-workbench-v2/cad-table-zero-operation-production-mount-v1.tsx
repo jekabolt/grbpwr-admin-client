@@ -67,6 +67,8 @@ import {
   type PatternImportDxfPhaseECadWorkbenchOperationsModeV1,
   type PatternImportDxfPhaseECadWorkbenchSelectionV1,
 } from './cad-workbench-split-shell-v1';
+import type { CadWorkbenchPhysicalHostV1 } from './cad-workbench-physical-host-v1';
+import { CadWorkbenchPhysicalHostPanelV1 } from './cad-workbench-physical-host-panel-v1';
 import {
   createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1,
   type PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1,
@@ -1089,6 +1091,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
 /** Production subscription shell; the host never reads or writes the operation form itself. */
 export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
   techCardId,
+  physicalHost,
   zeroConnectAuthoringHandoff,
   disabled = false,
   selection,
@@ -1096,6 +1099,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
   defaultOperationsMode,
 }: Readonly<{
   techCardId?: number;
+  physicalHost?: CadWorkbenchPhysicalHostV1;
   zeroConnectAuthoringHandoff?: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1;
   disabled?: boolean;
   selection?: PatternImportDxfPhaseECadWorkbenchSelectionV1;
@@ -1138,6 +1142,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
           <div className='min-h-0 flex-1'>
             <PatternImportDxfPhaseECadMannequinModelPickerV1
               disabled={disabled}
+              onDisplayedBodyInputV1={physicalHost?.onDisplayedBodyInputV1}
               patternPieceScene={{
                 sources,
                 activeScopeKey,
@@ -1146,6 +1151,9 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
               }}
             />
           </div>
+          {physicalHost?.panel ? (
+            <CadWorkbenchPhysicalHostPanelV1>{physicalHost.panel}</CadWorkbenchPhysicalHostPanelV1>
+          ) : null}
           {stagingBlocked ? (
             <Text
               component='p'

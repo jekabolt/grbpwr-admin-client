@@ -143,6 +143,7 @@ import {
   compose,
   dist,
   reflection,
+  signedArea,
 } from './geom';
 import { identityCheck, isTitleLabel, readName } from './names';
 import {
@@ -154,6 +155,22 @@ import {
 } from './offset';
 import { repairMinorityKinks, kinkRepairOff, ownLineOn, type KinkDone } from './kink-repair';
 import { PAIR_WORDS, mirrorSizeAcrossGrain, planPair } from './pairs';
+import type {
+  DxfPipelineMutationEventV1,
+  DxfSemanticsProvenanceTraceV1,
+} from '../dxf-pipeline-provenance-v1';
+
+export function resolvePatternImportSemanticsAllowanceMm(
+  decision: Pick<AllowanceDecision, 'meaning' | 'allowanceMm' | 'origin'>,
+): Readonly<{ allowanceMm: number; defaulted: boolean }> {
+  const preservesExplicitCutZero =
+    decision.allowanceMm === 0 && decision.meaning === 'cut' && decision.origin === 'operator';
+  const defaulted = !(decision.allowanceMm > 0) && !preservesExplicitCutZero;
+  return {
+    allowanceMm: defaulted ? PATIMPORT.defaultAllowanceMm : decision.allowanceMm,
+    defaulted,
+  };
+}
 
 type DxfExtra = {
   dxf?: {
@@ -215,6 +232,8 @@ export type SemanticsDetail = {
    * walls (same frame as `wallsOf`). undefined = none.
    */
   notchChordsOf: (identity: string, rank: number) => NotchChord[] | undefined;
+  /** Internal opt-in trace for the exact DXF lineage side stage; never added to SemanticsOutput. */
+  dxfProvenanceOf: (identity: string, rank: number) => DxfSemanticsProvenanceTraceV1 | undefined;
   /** Per piece: the offset reports and measured numbers the probe and the wizard show. */
   notes: Record<PieceKey, string[]>;
 };
@@ -760,6 +779,15 @@ export function buildPieceSpecsDetailed(
   const refusedSeed = new Map<string, SeedId>();
   /** GRADE P1: per `${seed}:${rank}`, the notch bumps crossed by their chord (source frame). */
   const notchChords = new Map<string, NotchChord[]>();
+  /** Known outline mutations, keyed before written identities can mirror or rename a candidate. */
+  const dxfMutations = new Map<string, Set<DxfPipelineMutationEventV1>>();
+  const markDxfMutation = (c: PieceCandidate & DxfExtra, mutation: DxfPipelineMutationEventV1) => {
+    if (!c.dxf) return;
+    const key = `${c.seed}:${c.rank}`;
+    const events = dxfMutations.get(key) ?? new Set<DxfPipelineMutationEventV1>();
+    events.add(mutation);
+    dxfMutations.set(key, events);
+  };
   const notes: Record<PieceKey, string[]> = {};
   const textById = new Map(sheet.texts.map((t) => [t.id, t]));
 
@@ -1205,8 +1233,9 @@ export function buildPieceSpecsDetailed(
         ],
       };
     }
-    let allowMm = A.allowanceMm > 0 ? A.allowanceMm : PATIMPORT.defaultAllowanceMm;
-    if (!(A.allowanceMm > 0))
+    const resolvedAllowance = resolvePatternImportSemanticsAllowanceMm(A);
+    const allowMm = resolvedAllowance.allowanceMm;
+    if (resolvedAllowance.defaulted)
       pieceNotes.push(`no allowance known: the other line is ${allowMm} mm (default)`);
     // D3: the sheet's word (text), two drawn lines (measured), the operator, or a DXF layer 14
     // outline (a seam line by the format; decision 7 gives its amount). Else the run asks.
@@ -1546,6 +1575,10 @@ export function buildPieceSpecsDetailed(
         tr = cleanTracedOutline(outer);
         outer = tr.pts;
       }
+      if (mr?.cleaned.length || nb?.length) markDxfMutation(c, 'clean');
+      if (kk) markDxfMutation(c, 'repair');
+      if (st?.spikes) markDxfMutation(c, 'simplify');
+      if (tr?.report.cleaned) markDxfMutation(c, 'clean');
       const out = { outer, st, tr };
       cleanedByCand.set(c, out);
       return out;
@@ -1713,6 +1746,7 @@ export function buildPieceSpecsDetailed(
           halfEdge = e;
           // its fold edge exactly straight (a drawn wobble ≤ 0.5 mm), as an unfold's fold line is
           outer = snapOntoFold(outer, e, FOLD_TOL_MM);
+          markDxfMutation(c, 'clean');
           if (c === p.cands[p.cands.length - 1].c)
             pieceNotes.push(
               `half on fold: the ${e.lenMm.toFixed(0)} mm straight edge — exported as drawn, its fold line on the mirror layer (the cutter folds the fabric)`,
@@ -1815,6 +1849,7 @@ export function buildPieceSpecsDetailed(
           if (c === p.cands[p.cands.length - 1].c)
             pieceNotes.push(`unfolded: ${foldFeat ? 'fold line in the source' : refWhy}`);
           outer = u.pts;
+          markDxfMutation(c, 'unfold');
           foldEdge = u.edge;
           anyFold = true;
           if (drawnSeam) {
@@ -1857,6 +1892,8 @@ export function buildPieceSpecsDetailed(
 
       // ── lines
       const meaning = dxfSeamOuter || A.meaning === 'seam' ? 'seam' : 'cut';
+      const sourceGeometry = c.dxf?.outerIsSeam ? 'seam' : 'cut';
+      if (c.dxf && sourceGeometry !== meaning) markDxfMutation(c, 'offset');
       let cut: PtMm[];
       let seam: PtMm[] | null;
       let offset: OffsetReport | null = null;
@@ -2044,6 +2081,9 @@ export function buildPieceSpecsDetailed(
             }
           : {}),
       };
+      if (c.rankFrom === 'repair' || c.rankFrom === 'continuity') markDxfMutation(c, 'repair');
+      if (c.dxf?.rulGraded) markDxfMutation(c, 'rul');
+      if (c.dxf?.generatedFusing) markDxfMutation(c, 'synthetic');
       sizes.push(spec);
       // GRADE P2 (D5): a size repaired from the grade is recorded, never presented as drawn
       if (c.rankFrom === 'repair' && c.repair) {
@@ -2589,6 +2629,66 @@ export function buildPieceSpecsDetailed(
     const cand = famBySeed.get(w.seed)?.candidates.find((c) => c.rank === w.rank);
     return cand ? { w, cand } : undefined;
   };
+  const dxfProvenanceOf = (
+    identity: string,
+    rank: number,
+  ): DxfSemanticsProvenanceTraceV1 | undefined => {
+    const src = sourceOf(identity, rank);
+    if (!src || !(src.cand as PieceCandidate & DxfExtra).dxf) return undefined;
+    const cand = src.cand as PieceCandidate & DxfExtra;
+    const geometry = cand.dxf!.outerIsSeam ? ('seam' as const) : ('cut' as const);
+    const spec = unique.find((piece) => piece.identity === identity);
+    const matches = spec?.sizes.filter((size) => size.rank === rank) ?? [];
+    const events = new Set(dxfMutations.get(`${cand.seed}:${cand.rank}`) ?? []);
+    if (
+      src.w.t.a !== 1 ||
+      src.w.t.b !== 0 ||
+      src.w.t.c !== 0 ||
+      src.w.t.d !== 1 ||
+      src.w.t.e !== 0 ||
+      src.w.t.f !== 0
+    )
+      events.add('mirror');
+    if (src.w.fold) events.add('unfold');
+    const direction = signedArea(cand.outer) < 0 ? ('reverse' as const) : ('forward' as const);
+    if (matches.length !== 1) events.add('unknown');
+    else if (events.size === 0) {
+      const target = geometry === 'cut' ? matches[0].cut : matches[0].seam;
+      const expected = direction === 'reverse' ? [...cand.outer].reverse() : [...cand.outer];
+      if (
+        !target ||
+        target.length !== expected.length ||
+        target.some(
+          (point, index) =>
+            Math.abs(point.x - expected[index].x) > 1e-9 ||
+            Math.abs(point.y - expected[index].y) > 1e-9,
+        )
+      )
+        events.add('unknown');
+    }
+    const mutationOrder: readonly DxfPipelineMutationEventV1[] = [
+      'delete',
+      'merge',
+      'split',
+      'clean',
+      'offset',
+      'simplify',
+      'repair',
+      'unfold',
+      'mirror',
+      'rul',
+      'synthetic',
+      'unknown',
+    ];
+    return Object.freeze({
+      seed: cand.seed,
+      rank: cand.rank,
+      geometry,
+      cyclicShift: 0 as const,
+      direction,
+      mutations: Object.freeze(mutationOrder.filter((mutation) => events.has(mutation))),
+    });
+  };
   /** Source-frame lines → the identity's frame: the fold edge dropped and mirrored, then `t`. */
   const toFrame = (w: WallMap, lines: PtMm[][]): PtMm[][] => {
     if (w.fold) {
@@ -2857,6 +2957,7 @@ export function buildPieceSpecsDetailed(
     onePieceOf,
     gradeOf,
     notchChordsOf,
+    dxfProvenanceOf,
     notes,
   };
 }
