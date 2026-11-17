@@ -3,7 +3,10 @@ import {
   fingerprintDxfExactAssemblyGraphV1,
   type DxfGarmentPhysicalInitializationV1,
 } from 'lib/cloth/domain/dxf-garment-physical-initialization-v1';
-import type { DxfExactAssemblyGraphV1 } from 'lib/cloth/domain/dxf-exact-assembly-graph-v1';
+import type {
+  DxfExactAssemblyGraphAoSnapshotV1,
+  DxfExactAssemblyGraphV1,
+} from 'lib/cloth/domain/dxf-exact-assembly-graph-v1';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 
 import type { SavedFullAssemblySnapshotProjectionV1 } from './saved-full-assembly-snapshot-production-v1';
@@ -386,6 +389,7 @@ async function verifyDocument(
   signal?: AbortSignal,
 ) {
   check(signal);
+  const aoSnapshot = projectAoOnlySnapshot(snapshot);
   if (
     !same(document.bindings.row, snapshot.row) ||
     document.bindings.serverAssemblyRevision !== snapshot.serverAssemblyRevision ||
@@ -397,7 +401,7 @@ async function verifyDocument(
   if (document.bindings.aoContentSha256 !== aoContentSha256)
     fail('assembly-order-digest-mismatch', 'Complete Assembly Order content digest differs.');
   const fingerprint = await fingerprintDxfExactAssemblyGraphV1(
-    { graph: document.graph, assemblySnapshot: snapshot },
+    { graph: document.graph, assemblySnapshot: aoSnapshot },
     signal,
   );
   if (fingerprint.canonicalSha256 !== document.graphCanonicalSha256)
@@ -409,7 +413,7 @@ async function verifyDocument(
   if ((await digest(physicalBytes, signal)) !== document.physicalInitialization.canonicalSha256)
     fail('physical-digest-mismatch', 'Physical initialization digest differs from its bytes.');
   const physical = await decodeDxfGarmentPhysicalInitializationV1(
-    { bytes: physicalBytes, graph: document.graph, assemblySnapshot: snapshot },
+    { bytes: physicalBytes, graph: document.graph, assemblySnapshot: aoSnapshot },
     signal,
   );
   if (
@@ -425,6 +429,17 @@ async function verifyDocument(
     physicalInitialization: physical.document,
     physicalBytes: physicalBytes.slice(),
   });
+}
+
+function projectAoOnlySnapshot(
+  snapshot: SavedFullAssemblySnapshotProjectionV1,
+): DxfExactAssemblyGraphAoSnapshotV1 {
+  return {
+    row: structuredClone(snapshot.row),
+    serverAssemblyRevision: snapshot.serverAssemblyRevision,
+    operations: structuredClone(snapshot.operations),
+    seams: structuredClone(snapshot.seams),
+  };
 }
 
 function makeOwner(

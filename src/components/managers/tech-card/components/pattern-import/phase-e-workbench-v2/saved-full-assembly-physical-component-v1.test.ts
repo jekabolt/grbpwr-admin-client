@@ -61,7 +61,16 @@ const snapshot = Object.freeze({
   selectedTopologyReceipts: [
     Object.freeze({ sourceOperationNumber: 10, sha256: sha('d'), canonicalJson: '{"seam":10}' }),
   ],
-  outer: Object.freeze({ status: 'absent' }),
+  outer: Object.freeze({
+    status: 'present',
+    mediaType: 'application/vnd.grbpwr.pattern-dxf-product-composite.v7+json',
+    sha256: sha('8'),
+    byteLength: 4,
+    bytes: new Uint8Array([1, 2, 3, 4]),
+    persistedCardLockVersion: row.cardLockVersion,
+    persistedSavedRowRevision: row.revision,
+    currentRowBound: true,
+  }),
   snapshotSha256: sha('e'),
   rpcReadCount: 3,
   claims: {},
@@ -70,15 +79,30 @@ const snapshot = Object.freeze({
 async function build() {
   const physicalBytes = encoder.encode('{"physical":"fixture"}');
   const physicalSha = await digest(physicalBytes);
-  fingerprintMock.mockResolvedValue({ graph, canonicalSha256: sha('b'), claims: {} });
-  physicalDecodeMock.mockResolvedValue({
-    canonicalSha256: physicalSha,
-    document: {
-      graphCanonicalSha256: sha('b'),
-      compileInputSha256: sha('c'),
-      support: 'none',
-      replayProfile: 'garment-material-contact-replay/1',
-    },
+  const expectAoOnly = (value: unknown) => {
+    expect(Object.keys(value as Record<string, unknown>).sort()).toEqual([
+      'operations',
+      'row',
+      'seams',
+      'serverAssemblyRevision',
+    ]);
+    expect((value as Record<string, unknown>).outer).toBeUndefined();
+  };
+  fingerprintMock.mockImplementation(({ assemblySnapshot }) => {
+    expectAoOnly(assemblySnapshot);
+    return Promise.resolve({ graph, canonicalSha256: sha('b'), claims: {} });
+  });
+  physicalDecodeMock.mockImplementation(({ assemblySnapshot }) => {
+    expectAoOnly(assemblySnapshot);
+    return Promise.resolve({
+      canonicalSha256: physicalSha,
+      document: {
+        graphCanonicalSha256: sha('b'),
+        compileInputSha256: sha('c'),
+        support: 'none',
+        replayProfile: 'garment-material-contact-replay/1',
+      },
+    });
   });
   return buildSavedFullAssemblyPhysicalComponentV1({
     bindings: { row, serverAssemblyRevision: 'asm:r4' },
