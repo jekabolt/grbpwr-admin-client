@@ -26,6 +26,7 @@ import type {
   FoldFeature,
   GrainFeature,
   InternalFeature,
+  ManifestProtectedLineSplit,
   NotchFeature,
   PieceSizeSpec,
   PieceSpec,
@@ -76,6 +77,7 @@ export type PlannedDrill = { at: PtMm; form: 'square' | 'circle' | 'point'; size
 export type PlannedGrain = { tail: PtMm; tip: PtMm; barb: PtMm; u: PtMm };
 
 export type PlannedBlock = {
+  protectedLineSplit?: ManifestProtectedLineSplit;
   name: string;
   identity: string;
   /** Card token, or 'UNI' for an ungraded piece. */

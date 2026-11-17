@@ -64,6 +64,7 @@ export function manifestBlock(b: PlannedBlock, sigPts?: number): ManifestBlock {
   }
   return {
     block: b.name,
+    ...(b.protectedLineSplit ? { protectedLineSplit: b.protectedLineSplit } : {}),
     identity: b.identity,
     sizeToken: b.sizeToken,
     sizeId: b.sizeId,

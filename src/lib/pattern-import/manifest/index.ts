@@ -32,6 +32,7 @@
 // Main-thread safe by contract: JSON, string and fflate (pure JS) operations only, no imports beyond
 // `types.ts` (and the siblings `identity.ts`, the G11 identity grammar the wizard and the gate share,
 // and `contour-sig.ts`, the F14f cut-ring signature the writer embeds and the card checks).
+import { parseProtectedLineSplit } from './protected-line-split';
 import { Inflate, deflateSync } from 'fflate';
 import {
   MANIFEST_TAG,
@@ -791,6 +792,7 @@ export function validateManifest(x: unknown): ConversionManifest {
 
   if (!Array.isArray(x.blocks)) fail('blocks', 'not an array');
   const blockNames = new Set<string>();
+  let sawProtectedSplit = false;
   const blocks: ManifestBlock[] = x.blocks.map((b, i) => {
     const p = `blocks[${i}]`;
     if (!isObj(b)) fail(p, 'not an object');
@@ -911,9 +913,17 @@ export function validateManifest(x: unknown): ConversionManifest {
     if (!piece.ungraded && !sizeTokens.has(b.sizeToken.trim().toLowerCase())) {
       fail(`${p}.sizeToken`, `"${b.sizeToken}" is not a size of this manifest`);
     }
+    const split =
+      b.protectedLineSplit === undefined ? null : parseProtectedLineSplit(b.protectedLineSplit);
+    if (b.protectedLineSplit !== undefined) {
+      if (!split || sawProtectedSplit || (split.role === 'seam' && !b.hasSeam))
+        fail(`${p}.protectedLineSplit`, 'invalid or repeated protected vertex');
+      sawProtectedSplit = true;
+    }
     const [x0, y0, x1, y1] = b.bboxMm as number[];
     return {
       block: b.block,
+      ...(split ? { protectedLineSplit: split } : {}),
       identity: b.identity,
       sizeToken: b.sizeToken,
       sizeId: b.sizeId,

@@ -2601,7 +2601,25 @@ export type ManifestPiece = {
   halfFold?: true;
 };
 
+// Describes one actual vertex in an emitted ring. This metadata does not authorize an edit.
+export type ManifestProtectedLineSplit = {
+  v: 1;
+  entityId: string;
+  role: 'cut' | 'seam';
+  sourceSha256: string;
+  sourcePathId: number;
+  sourceStartPointIndex: number;
+  pointIndex: number;
+  ringPointCount: number;
+  ringSha256: string;
+  fromMm: [number, number];
+  pointMm: [number, number];
+  toMm: [number, number];
+  progress: number;
+};
+
 export type ManifestBlock = {
+  protectedLineSplit?: ManifestProtectedLineSplit;
   block: string;
   identity: PieceKey;
   sizeToken: string;

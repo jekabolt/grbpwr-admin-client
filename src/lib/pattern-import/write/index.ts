@@ -23,6 +23,7 @@ import { isAsciiDxf } from './format';
 import { buildManifest } from './manifest-build';
 import { embedManifest as embedManifestLocal } from '../manifest';
 import { type Plan, pieceInScope, planBlocks } from './plan';
+import type { AuthoredLineSplitInput } from './protected-line-split';
 import { writeR12 } from './r12';
 import { writeR2000 } from './r2000';
 
@@ -45,8 +46,24 @@ export type WriteDetail = WriteResult & {
 };
 
 export function writeDxfDetailed(job: WriteJob, opts: WriteOptions = {}): WriteDetail {
-  const warnings: string[] = [];
-  const plan = planBlocks(job.pieces, job.scope, warnings);
+  return emitPlannedDxf(job, planBlocks(job.pieces, job.scope), opts);
+}
+
+/** First compile only. The caller owns the current card and selection. No Apply or worker authority is implied. */
+export async function writeDxfWithAuthoredLineSplit(
+  sourceJob: WriteJob,
+  input: AuthoredLineSplitInput,
+  opts: Pick<WriteOptions, 'now'> = {},
+): Promise<WriteDetail> {
+  const job = structuredClone(sourceJob);
+  const args = structuredClone(input);
+  const plan = planBlocks(job.pieces, job.scope);
+  const { preserveAuthoredLineSplit } = await import('./protected-line-split');
+  await preserveAuthoredLineSplit(job, plan, args);
+  return emitPlannedDxf(job, plan, { now: opts.now });
+}
+
+function emitPlannedDxf(job: WriteJob, plan: Plan, opts: WriteOptions): WriteDetail {
   const createdAt = (opts.now ?? (() => new Date()))().toISOString();
   const manifest = buildManifest(job, plan.specs, plan.blocks, createdAt);
   const sample = job.sizes.length
@@ -65,7 +82,7 @@ export function writeDxfDetailed(job: WriteJob, opts: WriteOptions = {}): WriteD
   const dxfText = embed ? embed(bareText, manifest) : bareText;
   const transforms: Record<string, Affine> = {};
   for (const b of plan.blocks) transforms[b.name] = b.transform;
-  return { dxfText, manifest, warnings, plan, bareText, transforms };
+  return { dxfText, manifest, warnings: plan.warnings, plan, bareText, transforms };
 }
 
 export const writeDxf: WriteDxfFn = (job) => {
