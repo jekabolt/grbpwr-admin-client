@@ -5,7 +5,9 @@ const mocks = vi.hoisted(() => ({
   createSnapshot: vi.fn(),
   createResolver: vi.fn(),
   createHost: vi.fn(),
+  createForeignHost: vi.fn(),
   createNativeOwner: vi.fn(),
+  createForeignNativeOwner: vi.fn(),
   run: vi.fn(),
   cancel: vi.fn(),
   disposeOwner: vi.fn(),
@@ -24,12 +26,16 @@ vi.mock('./saved-row-production-runtime-v1', () => ({
 vi.mock('./saved-dxf-reprocess-host-v1', () => ({
   createPatternImportDxfPhaseESavedDxfReprocessHostV1: mocks.createHost,
 }));
+vi.mock('./foreign-saved-dxf-reprocess-host-v1', () => ({
+  createPatternImportDxfPhaseEForeignSavedDxfReprocessHostV1: mocks.createForeignHost,
+}));
 vi.mock('lib/pattern-import/dxf-product-saved-native-reprocess-owner-v1', () => ({
   DXF_PRODUCT_SAVED_NATIVE_COMPILER_SOURCE_OWNER_V1:
     'dxf-product-saved-native-compiler-source-owner/1',
   DXF_PRODUCT_SAVED_NATIVE_COMPILER_SOURCE_REQUEST_V1:
     'dxf-product-saved-native-compiler-source-request/1',
   createDxfProductSavedNativeReprocessOwnerV1: mocks.createNativeOwner,
+  createDxfProductSavedForeignNativeReprocessOwnerV1: mocks.createForeignNativeOwner,
 }));
 vi.mock('lib/pattern-import/dxf-product-saved-reprocess-owner-v1', () => ({
   DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1: 'dxf-product-saved-reprocess-request/1',
@@ -113,8 +119,14 @@ beforeEach(() => {
   mocks.createSnapshot.mockReturnValue({ bridge: { readAuthoritativeRow: vi.fn() } });
   mocks.createResolver.mockReturnValue(vi.fn());
   mocks.createHost.mockReturnValue({ dispose: mocks.disposeHost });
+  mocks.createForeignHost.mockReturnValue({ dispose: mocks.disposeHost });
   mocks.disposeOwner.mockImplementation(() => mocks.disposeHost());
   mocks.createNativeOwner.mockReturnValue({
+    run: mocks.run,
+    cancel: mocks.cancel,
+    dispose: mocks.disposeOwner,
+  });
+  mocks.createForeignNativeOwner.mockReturnValue({
     run: mocks.run,
     cancel: mocks.cancel,
     dispose: mocks.disposeOwner,
@@ -130,6 +142,53 @@ beforeEach(() => {
 });
 
 describe('saved Full Assembly generic native handoff', () => {
+  it('restores the native sewing profile through the foreign owner with the original draft', async () => {
+    const old = physical();
+    const projection = {
+      ...old,
+      graph: {
+        ...old.graph,
+        source: { handoffSource: { exporterId: 'grbpwr.saved-native-drawn-sewing' } },
+      },
+    };
+    const original = draft();
+    mocks.projectPhysical.mockReturnValue(projection);
+    mocks.run.mockResolvedValue({
+      ok: true,
+      row,
+      sourceFileId: 'saved:156:main:pattern-main',
+      draft: original,
+      sourceOwner,
+      nativeSewingReplay: { replayReady: true },
+      blockers: [],
+    });
+    const result = await prepareSavedFullAssemblyGenericNativeHandoffV1({} as never, {} as never);
+    expect(result.sourceRequest.draft).toBe(original);
+    expect(mocks.createForeignHost).toHaveBeenCalledWith(
+      expect.objectContaining({ nativeSewingReplay: true }),
+    );
+    expect(mocks.createNativeOwner).not.toHaveBeenCalled();
+    expect(mocks.run).toHaveBeenCalledWith({
+      schemaVersion: 'dxf-product-saved-foreign-reprocess-request/1',
+      row,
+    });
+  });
+
+  it('does not fall back to cut geometry when saved native sewing reconstruction fails', async () => {
+    const old = physical();
+    mocks.projectPhysical.mockReturnValue({
+      ...old,
+      graph: {
+        ...old.graph,
+        source: { handoffSource: { exporterId: 'grbpwr.saved-native-drawn-sewing' } },
+      },
+    });
+    await expect(
+      prepareSavedFullAssemblyGenericNativeHandoffV1({} as never, {} as never),
+    ).rejects.toMatchObject({ code: 'native-source-invalid' });
+    expect(mocks.createNativeOwner).not.toHaveBeenCalled();
+  });
+
   it('uses the existing production host/native owner and preserves the original replay draft identity', async () => {
     const receipt = {};
     const projection = { card: { techCardId: 156 }, cardLockVersion: 8 };

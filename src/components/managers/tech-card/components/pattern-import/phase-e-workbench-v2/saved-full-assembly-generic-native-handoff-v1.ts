@@ -2,6 +2,7 @@ import {
   DXF_PRODUCT_SAVED_NATIVE_COMPILER_SOURCE_OWNER_V1,
   DXF_PRODUCT_SAVED_NATIVE_COMPILER_SOURCE_REQUEST_V1,
   createDxfProductSavedNativeReprocessOwnerV1,
+  createDxfProductSavedForeignNativeReprocessOwnerV1,
   type DxfProductSavedNativeCompilerSourceOwnerV1,
   type DxfProductSavedNativeCompilerSourceRequestV1,
 } from 'lib/pattern-import/dxf-product-saved-native-reprocess-owner-v1';
@@ -9,6 +10,7 @@ import {
   DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
   type DxfProductSavedRowIdentityV1,
 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
+import { DXF_PRODUCT_SAVED_FOREIGN_REPROCESS_REQUEST_V1 } from 'lib/pattern-import/dxf-product-saved-foreign-reprocess-owner-v1';
 
 import {
   projectSavedFullAssemblyPhysicalSnapshotV1,
@@ -17,6 +19,7 @@ import {
 } from './saved-full-assembly-physical-snapshot-production-v1';
 import { createPatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1 } from './saved-assembly-snapshot-production-rpc-v1';
 import { createPatternImportDxfPhaseESavedDxfReprocessHostV1 } from './saved-dxf-reprocess-host-v1';
+import { createPatternImportDxfPhaseEForeignSavedDxfReprocessHostV1 } from './foreign-saved-dxf-reprocess-host-v1';
 import {
   createPatternImportDxfPhaseESavedRowCardProjectionResolverV1,
   type PatternImportDxfPhaseESavedRowCardProjectionV1,
@@ -184,26 +187,50 @@ export const prepareSavedFullAssemblyGenericNativeHandoffV1 = Object.freeze(
       createPatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1(seedOperationNumber);
     const resolveCard =
       createPatternImportDxfPhaseESavedRowCardProjectionResolverV1(cardProjection);
-    const host = createPatternImportDxfPhaseESavedDxfReprocessHostV1({
+    const nativeSewing =
+      physical.graph.source?.handoffSource?.exporterId === 'grbpwr.saved-native-drawn-sewing';
+    const hostInputs = {
       resolveCard,
       readAuthoritativeRow: snapshot.bridge.readAuthoritativeRow,
-    });
-    let owner: ReturnType<typeof createDxfProductSavedNativeReprocessOwnerV1> | null = null;
+    };
+    const host = nativeSewing
+      ? createPatternImportDxfPhaseEForeignSavedDxfReprocessHostV1({
+          ...hostInputs,
+          nativeSewingReplay: true,
+        })
+      : createPatternImportDxfPhaseESavedDxfReprocessHostV1(hostInputs);
+    let owner:
+      | ReturnType<typeof createDxfProductSavedNativeReprocessOwnerV1>
+      | ReturnType<typeof createDxfProductSavedForeignNativeReprocessOwnerV1>
+      | null = null;
     const cancel = () => owner?.cancel();
     try {
-      owner = createDxfProductSavedNativeReprocessOwnerV1(host);
+      const foreignOwner = nativeSewing
+        ? createDxfProductSavedForeignNativeReprocessOwnerV1(host)
+        : null;
+      const canonicalOwner = nativeSewing
+        ? null
+        : createDxfProductSavedNativeReprocessOwnerV1(host);
+      owner = foreignOwner ?? canonicalOwner;
       if (signal) add.call(signal, 'abort', cancel, { once: true });
       check(signal);
-      const replay = await owner.run({
-        schemaVersion: DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
-        row: physical.row,
-      });
+      const replay = foreignOwner
+        ? await foreignOwner.run({
+            schemaVersion: DXF_PRODUCT_SAVED_FOREIGN_REPROCESS_REQUEST_V1,
+            row: physical.row,
+          })
+        : await canonicalOwner!.run({
+            schemaVersion: DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
+            row: physical.row,
+          });
       check(signal);
       if (!replay.ok)
         fail(
           'native-reprocess-blocked',
           replay.blockers[0]?.detail ?? 'The genuine saved native replay was blocked.',
         );
+      if (nativeSewing && !replay.nativeSewingReplay?.replayReady)
+        fail('native-source-invalid', 'The saved native sewing paths could not be reconstructed.');
       if (
         replay.sourceOwner.version !== DXF_PRODUCT_SAVED_NATIVE_COMPILER_SOURCE_OWNER_V1 ||
         !sameRow(replay.row, physical.row)

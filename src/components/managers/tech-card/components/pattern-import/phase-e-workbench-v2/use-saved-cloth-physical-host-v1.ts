@@ -369,6 +369,7 @@ export function useSavedClothPhysicalHostV1({
         savedRow,
         cardProjection,
         controller.signal,
+        'native-drawn-sewing',
       );
       if (firstControllerRef.current !== controller || controller.signal.aborted) return;
       setFirstAuthoring({
