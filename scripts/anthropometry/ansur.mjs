@@ -347,7 +347,9 @@ function failureClasses(row) {
     if (row.qualitySafe === false) out.push('quality-unsafe');
     if (row.qualityReasons?.some((r) => /intersect/i.test(r))) out.push('self-intersection');
     if (row.implausible?.length) out.push('implausible');
-    if (row.anchorFailure) out.push('shaped mesh not exactly mirror-symmetric (guide anchors order-dependent)');
+    if (row.anchorFailure) out.push('shaped mesh not bit-exact mirror (float drift)');
+    const drawn = row.measured?.guideAnchorOnlyDrawn;
+    if (drawn != null && drawn < 10) out.push('guide: anchor-only line missing');
   }
   return out;
 }

@@ -85,6 +85,23 @@ describe('mesh surface topology v1', () => {
     expect(coldBuildMs[0]).toBeLessThanOrEqual(40);
   });
 
+  it('derives the mirror map from the given positions, never from what was built before', () => {
+    // A shaped body 0.1 mm off mirror used to get the cached map of whatever exactly symmetric HM08
+    // mesh was built first, and no map at all when it came first: anchors depended on build order.
+    const { basis, positionsM } = fixture('male');
+    const drifted = Float32Array.from(positionsM);
+    const midline = drifted.findIndex((value, index) => index % 3 === 0 && value === 0) / 3;
+    drifted[midline * 3] = 0.0001;
+    const runs = [positionsM, drifted, positionsM, drifted].map((positions) =>
+      createMeshSurfaceTopologyV1({ positionsM: positions, triangleIndices: basis.indices }),
+    );
+    expect(runs.map(({ ok }) => ok)).toEqual([true, false, true, false]);
+    expect(runs[1]).toMatchObject({ ok: false, code: 'symmetry-mismatch' });
+    // Same positions, same topology object: the cache still serves the repeated call.
+    expect(runs[0].ok && runs[2].ok && runs[2].topology).toBe(runs[0].ok && runs[0].topology);
+    expect(runs[2].ok && runs[2].cached).toBe(true);
+  });
+
   it('rejects an index buffer that is not the topology it cached', () => {
     const { basis, positionsM } = fixture('base');
     const result = createMeshSurfaceTopologyV1({ positionsM, triangleIndices: basis.indices });

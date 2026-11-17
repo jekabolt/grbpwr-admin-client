@@ -342,10 +342,13 @@ describe('measurement open-reference beta shape runtime v1', () => {
     ).rejects.toEqual(expect.any(MeasurementOpenReferenceBetaShapeSafetyErrorV1));
   }, 30_000);
 
+  // Male rows moved from chest 800/860 when the male chest started solving at the chest point:
+  // those inputs no longer trip the initial final gate (800 is now a bounded limit, 860 is
+  // represented), so they could not exercise this rollback. 1150/1200 still trip it.
   it.each([
     ['female', 1_020, 760],
-    ['male', 800, 760],
-    ['male', 860, 760],
+    ['male', 1_150, 760],
+    ['male', 1_200, 760],
     ['neutral', 1_100, 760],
     ['female', 800, undefined],
   ] as const)(
@@ -771,16 +774,18 @@ describe('measurement open-reference beta shape runtime v1', () => {
   );
 
   it('rolls back only the depth subset when male chest depth fails the final global gate', async () => {
+    // Chest 1000 / depth 300 stopped tripping the final gate once the male chest solved at the
+    // chest point (depth became a target limit instead); 1100 / 360 still trips it.
     const measurements = Object.freeze({
       ...CANONICAL_MEASUREMENT_SIZE_RECORDS[1].measurements,
       heightMm: 1800,
       shoulderBreadthMm: 460,
-      chestCircumferenceMm: 1000,
+      chestCircumferenceMm: 1100,
       waistCircumferenceMm: 860,
       hipCircumferenceMm: 990,
       armLengthMm: 640,
       inseamMm: 820,
-      chestDepthMm: 300,
+      chestDepthMm: 360,
     });
     const current = await fixture('male', measurements);
     const result = await createMeasurementOpenReferenceBetaShapeRuntimeV1({

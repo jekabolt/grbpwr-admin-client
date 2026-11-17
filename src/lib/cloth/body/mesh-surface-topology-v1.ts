@@ -74,12 +74,24 @@ export type MeshSurfaceTopologyResultV1 =
       buildMs: number;
     }>;
 
-interface CachedTopology {
+type MeshSurfaceConnectivityV1 = Omit<
+  MeshSurfaceTopologyV1,
+  'mirrorVertexMap' | 'midlineVertexOrder'
+>;
+
+/**
+ * The cache holds only what depends on the triangle indices. The mirror map and the midline order
+ * depend on the positions, so they are recomputed on every call; a finished topology is reused
+ * only when those are equal too, so the result never depends on what was built before.
+ */
+interface CachedConnectivity {
   readonly triangleIndices: Uint32Array;
-  readonly topology: MeshSurfaceTopologyV1;
+  readonly connectivity: MeshSurfaceConnectivityV1;
+  readonly variants: MeshSurfaceTopologyV1[];
 }
 
-const topologyCache = new Map<string, CachedTopology[]>();
+const MAXIMUM_CACHED_VARIANTS = 8;
+const topologyCache = new Map<string, CachedConnectivity[]>();
 
 function elapsed(startedAt: number): number {
   return performance.now() - startedAt;
@@ -99,6 +111,14 @@ function topologyHash(vertexCount: number, indices: Uint16Array | Uint32Array): 
 }
 
 function sameIndices(left: Uint32Array, right: Uint16Array | Uint32Array): boolean {
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
+}
+
+function sameArray(left: Uint32Array, right: Uint32Array): boolean {
   if (left.length !== right.length) return false;
   for (let index = 0; index < left.length; index += 1) {
     if (left[index] !== right[index]) return false;
@@ -214,43 +234,13 @@ export function meshSurfaceTopologyMatchesIndicesV1(
   return sameIndices(topology.triangleIndices, triangleIndices);
 }
 
-export function createMeshSurfaceTopologyV1(
-  input: MeshSurfaceTopologyInputV1,
-): MeshSurfaceTopologyResultV1 {
-  const startedAt = performance.now();
-  if (!(input.positionsM instanceof Float32Array) || input.positionsM.length % 3 !== 0) {
-    return failure(startedAt, 'input-invalid', ['positionsM must be a complete XYZ Float32Array.']);
-  }
-  if (
-    (!(input.triangleIndices instanceof Uint16Array) &&
-      !(input.triangleIndices instanceof Uint32Array)) ||
-    input.triangleIndices.length === 0 ||
-    input.triangleIndices.length % 3 !== 0
-  ) {
-    return failure(startedAt, 'input-invalid', [
-      'triangleIndices must be a non-empty triangle index array.',
-    ]);
-  }
-  for (let index = 0; index < input.positionsM.length; index += 1) {
-    if (!Number.isFinite(input.positionsM[index])) {
-      return failure(startedAt, 'input-invalid', ['positionsM contains a non-finite coordinate.']);
-    }
-  }
-
-  const vertexCount = input.positionsM.length / 3;
-  const hash = topologyHash(vertexCount, input.triangleIndices);
-  for (const cached of topologyCache.get(hash) ?? []) {
-    if (sameIndices(cached.triangleIndices, input.triangleIndices)) {
-      return Object.freeze({
-        ok: true as const,
-        topology: cached.topology,
-        buildMs: elapsed(startedAt),
-        cached: true,
-      });
-    }
-  }
-
-  const triangleIndices = Uint32Array.from(input.triangleIndices);
+function buildConnectivity(
+  sourceIndices: Uint16Array | Uint32Array,
+  vertexCount: number,
+  hash: string,
+  startedAt: number,
+): MeshSurfaceConnectivityV1 | MeshSurfaceTopologyResultV1 {
+  const triangleIndices = Uint32Array.from(sourceIndices);
   const triangleCount = triangleIndices.length / 3;
   // Validate and count vertex -> triangle incidence in one pass.
   const vertexTriangleOffsets = new Uint32Array(vertexCount + 1);
@@ -382,22 +372,7 @@ export function createMeshSurfaceTopologyV1(
     }
   }
 
-  // Mirror map: open-addressing hash over exact float bit patterns (no string keys).
-  const mirrorVertexMap = mirrorMap(input.positionsM, vertexCount);
-  if (typeof mirrorVertexMap === 'string') {
-    return failure(startedAt, 'symmetry-mismatch', [mirrorVertexMap]);
-  }
-
-  const midlineVertexOrder = orderedMidlineComponents(
-    input.positionsM,
-    vertexEdgeOffsets,
-    vertexNeighbourData,
-  );
-  if (!midlineVertexOrder) {
-    return failure(startedAt, 'symmetry-mismatch', ['The exact midline graph branches.']);
-  }
-
-  const topology = Object.freeze({
+  return Object.freeze({
     version: MESH_SURFACE_TOPOLOGY_V1,
     topologyHash: hash,
     vertexCount,
@@ -413,16 +388,84 @@ export function createMeshSurfaceTopologyV1(
     vertexEdgeOffsets,
     vertexEdges: vertexEdgeData,
     vertexNeighbours: vertexNeighbourData,
-    mirrorVertexMap,
-    midlineVertexOrder,
-  } satisfies MeshSurfaceTopologyV1);
-  const entries = topologyCache.get(hash) ?? [];
-  entries.push({ triangleIndices, topology });
-  topologyCache.set(hash, entries);
+  } satisfies MeshSurfaceConnectivityV1);
+}
+
+export function createMeshSurfaceTopologyV1(
+  input: MeshSurfaceTopologyInputV1,
+): MeshSurfaceTopologyResultV1 {
+  const startedAt = performance.now();
+  if (!(input.positionsM instanceof Float32Array) || input.positionsM.length % 3 !== 0) {
+    return failure(startedAt, 'input-invalid', ['positionsM must be a complete XYZ Float32Array.']);
+  }
+  if (
+    (!(input.triangleIndices instanceof Uint16Array) &&
+      !(input.triangleIndices instanceof Uint32Array)) ||
+    input.triangleIndices.length === 0 ||
+    input.triangleIndices.length % 3 !== 0
+  ) {
+    return failure(startedAt, 'input-invalid', [
+      'triangleIndices must be a non-empty triangle index array.',
+    ]);
+  }
+  for (let index = 0; index < input.positionsM.length; index += 1) {
+    if (!Number.isFinite(input.positionsM[index])) {
+      return failure(startedAt, 'input-invalid', ['positionsM contains a non-finite coordinate.']);
+    }
+  }
+
+  const vertexCount = input.positionsM.length / 3;
+  const hash = topologyHash(vertexCount, input.triangleIndices);
+  let entry = (topologyCache.get(hash) ?? []).find((cached) =>
+    sameIndices(cached.triangleIndices, input.triangleIndices),
+  );
+  const cached = entry !== undefined;
+  if (!entry) {
+    const built = buildConnectivity(input.triangleIndices, vertexCount, hash, startedAt);
+    if ('ok' in built) return built;
+    entry = { triangleIndices: built.triangleIndices, connectivity: built, variants: [] };
+    const entries = topologyCache.get(hash) ?? [];
+    entries.push(entry);
+    topologyCache.set(hash, entries);
+  }
+  const { connectivity } = entry;
+
+  // Mirror map: open-addressing hash over exact float bit patterns (no string keys).
+  const mirrorVertexMap = mirrorMap(input.positionsM, vertexCount);
+  if (typeof mirrorVertexMap === 'string') {
+    return failure(startedAt, 'symmetry-mismatch', [mirrorVertexMap]);
+  }
+
+  const midlineVertexOrder = orderedMidlineComponents(
+    input.positionsM,
+    connectivity.vertexEdgeOffsets,
+    connectivity.vertexNeighbours,
+  );
+  if (!midlineVertexOrder) {
+    return failure(startedAt, 'symmetry-mismatch', ['The exact midline graph branches.']);
+  }
+
+  let topology = entry.variants.find(
+    (variant) =>
+      sameArray(variant.mirrorVertexMap, mirrorVertexMap) &&
+      variant.midlineVertexOrder.length === midlineVertexOrder.length &&
+      variant.midlineVertexOrder.every((component, index) =>
+        sameArray(component, midlineVertexOrder[index]),
+      ),
+  );
+  if (!topology) {
+    topology = Object.freeze({
+      ...connectivity,
+      mirrorVertexMap,
+      midlineVertexOrder,
+    } satisfies MeshSurfaceTopologyV1);
+    entry.variants.push(topology);
+    if (entry.variants.length > MAXIMUM_CACHED_VARIANTS) entry.variants.shift();
+  }
   return Object.freeze({
     ok: true as const,
     topology,
     buildMs: elapsed(startedAt),
-    cached: false,
+    cached,
   });
 }

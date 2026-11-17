@@ -13,6 +13,7 @@ import {
   type SurfaceAnchorIdV1,
 } from 'lib/cloth/body/measurement-surface-anchors-v1';
 import type { MeasurementSurfaceMeshV1 } from 'lib/cloth/body/measurement-watertight-surface-v1';
+import { snapMeshMirrorPairsV1 } from 'lib/cloth/body/mesh-mirror-pair-snap-v1';
 import {
   measureMeshPlaneSectionPerimetersV1,
   type MeshPlaneSectionLoopV1,
@@ -1062,25 +1063,36 @@ function surfacePointPositionM(point: MeshSurfacePointV1, positionsM: Float32Arr
   ];
 }
 
-/** Farther than this from x = 0 a vertex is a left/right point, never a drifted midline one. */
-const MIDLINE_SNAP_M = 0.00005;
-
 /**
- * The topology's mirror map needs exact float symmetry. Shaped HM08 bodies keep every left/right
- * pair exact but let some midline vertices drift off x = 0 (1e-20 m on the female base, 0.02 mm on
- * the male), so the topology is built from a copy with those vertices put back on the midline.
- * Paths are still traced on the mesh's own positions.
+ * The topology's mirror map needs exact float symmetry. Shaped HM08 bodies are symmetric by
+ * construction but carry float drift: some midline vertices sit up to 0.11 mm off x = 0 and rare
+ * left/right pairs differ by 1e-10 m. The topology is built from a copy with every drifted pair put
+ * back on its exact mirror (a pure function of the positions, so anchors never depend on what was
+ * built before); a body that is not symmetric within a millimetre gets no anchors. Paths are still
+ * traced on the mesh's own positions.
  */
-function midlineSnappedPositions(positionsM: Float32Array): Float32Array {
-  let snapped: Float32Array | null = null;
-  for (let offset = 0; offset < positionsM.length; offset += 3) {
-    const x = positionsM[offset];
-    if (x !== 0 && Math.abs(x) < MIDLINE_SNAP_M) {
-      snapped ??= Float32Array.from(positionsM);
-      snapped[offset] = 0;
-    }
-  }
-  return snapped ?? positionsM;
+function mirrorSnappedPositions(positionsM: Float32Array): Float32Array | null {
+  const snapped = snapMeshMirrorPairsV1(positionsM);
+  return snapped.ok ? snapped.positionsM : null;
+}
+
+/** The engine's shoulder chord on an HM08 mesh, `+x` (positive) end first; else null. */
+function shoulderChordPath(
+  id: string,
+  mesh: MeasurementSurfaceMeshV1,
+  vertices: Readonly<{ negative: number; positive: number }> | undefined,
+): MeasurementSurfaceMeasurementGuidePathV1 | null {
+  if (!vertices || mesh.positions.length !== HM08_VERTEX_COUNT * 3) return null;
+  const { negative, positive } = vertices;
+  const valid = (vertex: number) =>
+    Number.isInteger(vertex) && vertex >= 0 && vertex < HM08_VERTEX_COUNT;
+  if (!valid(negative) || !valid(positive) || negative === positive) return null;
+  return Object.freeze({
+    id,
+    closed: false,
+    source: 'mesh-vertices' as const,
+    vertexIndices: Object.freeze([positive, negative]),
+  });
 }
 
 /** Anchors exist only on the HM08 topology; any other mesh gets no guessed landmark. */
@@ -1088,8 +1100,10 @@ function guideBodyAnchors(mesh: MeasurementSurfaceMeshV1): GuideBodyAnchors | nu
   if (mesh.positions.length !== HM08_VERTEX_COUNT * 3 || mesh.indices.length !== HM08_INDEX_COUNT) {
     return null;
   }
+  const symmetricPositionsM = mirrorSnappedPositions(mesh.positions);
+  if (!symmetricPositionsM) return null;
   const created = createMeshSurfaceTopologyV1({
-    positionsM: midlineSnappedPositions(mesh.positions),
+    positionsM: symmetricPositionsM,
     triangleIndices: mesh.indices,
   });
   if (!created.ok) return null;
@@ -1247,7 +1261,9 @@ function anchoredChestY(anchors: GuideBodyAnchors): number {
 
 /**
  * Inframammary level: walking down from 3 cm below the apex, the first local minimum of the front
- * surface under the apex (the fold). Null when the scan finds no fold within 8 cm.
+ * surface under the apex (the fold). A flat chest can still rise just under its start (the lower
+ * edge of the pectoral); the fold is then the first minimum after the surface turns down, and the
+ * start stays the answer only when it never does. Null when the scan finds no fold within 8 cm.
  */
 function anchoredUnderBustY(
   anchors: GuideBodyAnchors,
@@ -1264,14 +1280,21 @@ function anchoredUnderBustY(
     return near.length > 0 ? Math.max(...near.map((point) => point[2])) : null;
   };
   let previous: { yM: number; zM: number } | null = null;
+  let firstStopY: number | null = null;
+  let descended = false;
   for (let step = 3; step <= 9; step += 1) {
     const yM = chestY - step * 0.01;
     const zM = frontZ(yM);
-    if (zM === null) return null;
-    if (previous && zM >= previous.zM) return previous.yM;
+    if (zM === null) return firstStopY;
+    if (previous && zM >= previous.zM) {
+      if (descended) return previous.yM;
+      firstStopY ??= previous.yM;
+    } else if (previous) {
+      descended = true;
+    }
     previous = { yM, zM };
   }
-  return null;
+  return firstStopY;
 }
 
 function anchoredGuide(options: {
@@ -1577,6 +1600,8 @@ function buildGuide(options: {
   readonly neckSectionStation?: MeasurementOpenReferenceNeckProtectedSectionV1;
   /** The posed body a mesh-bound guide is drawn on (same vertices as `mesh`), when posed. */
   readonly drawnMesh?: MeasurementSurfaceMeshV1;
+  /** The display vertices the beta shoulder-breadth stage solves its chord between. */
+  readonly shoulderChordVertices?: Readonly<{ negative: number; positive: number }>;
 }): MeasurementSurfaceActiveMeasurementGuideV1 {
   const { measurementName, frame, mesh } = options;
   if (!LABELS[measurementName as keyof typeof LABELS]) {
@@ -1648,6 +1673,15 @@ function buildGuide(options: {
         bindToMesh: !options.neutralPose,
       }),
     ]);
+  }
+
+  const solvedShoulderChord =
+    measurementName === 'BODY_MEASUREMENT_NAME_ACROSS_SHOULDER'
+      ? shoulderChordPath(measurementName, mesh, options.shoulderChordVertices)
+      : null;
+  if (solvedShoulderChord) {
+    // The straight chord the shoulder-breadth stage solves; hidden part reads through the body.
+    return result(measurementName, 'limited', [airPath(solvedShoulderChord, 'x-ray')]);
   }
 
   if (anchors) {

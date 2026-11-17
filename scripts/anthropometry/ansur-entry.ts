@@ -10,6 +10,10 @@
 import type { common_GenderEnum } from 'api/proto-http/admin';
 import { modelOpenReferenceMeasurementApplicationV1 } from 'components/managers/model/components/model-open-reference-measurement-application-v1';
 import { resolveModelOpenReferencePreviewInputV1 } from 'components/managers/model/components/model-open-reference-preview-input-v1';
+import {
+  buildMeasurementSurfaceActiveMeasurementGuideV1,
+  type MeasurementSurfaceMeasurementGuidePathV1,
+} from 'components/shared/measurement-surface-active-measurement-guide-v1';
 import { loadMakeHumanLimbCircumferenceDeltaBundleV1 } from 'lib/cloth/body/makehuman-limb-circumference-delta-bundle-v1';
 import { createMakeHumanLimbCircumferenceUniformModesV1 } from 'lib/cloth/body/makehuman-limb-circumference-uniform-modes-v1';
 import { loadMakeHumanTorsoShapeDeltaBundleV1 } from 'lib/cloth/body/makehuman-torso-shape-delta-bundle-v1';
@@ -72,7 +76,10 @@ export interface AnsurMeasuredBody {
   cervicaleHeightMm: number | null;
   acromialHeightMm: number | null;
   crotchHeightMm: number | null;
+  /** Length of the product guide's across-shoulder line, as the guide builder draws it. */
   shoulderBreadthMm: number | null;
+  /** Chord between the acromion template points (the guide's line before it drew the engine chord). */
+  acromionBreadthMm: number | null;
   shoulderLengthMm: number | null;
   neckCircMm: number | null;
   neckBaseCircMm: number | null;
@@ -90,6 +97,8 @@ export interface AnsurMeasuredBody {
   shoulderBreadthEngineMm: number | null;
   chestEngineDepthMm: number | null;
   maxAsymmetryMm: number | null;
+  /** Anchor-only fields (of 10) the product guide draws a line for on this body. */
+  guideAnchorOnlyDrawn: number | null;
 }
 
 export interface AnsurSubjectResult {
@@ -234,9 +243,9 @@ const anchorTemplate = (id: string) =>
   SURFACE_ANCHOR_TABLE_V1.find((anchor) => anchor.id === id)?.template ?? null;
 
 /**
- * What the product guide would get: `createMeshSurfaceTopologyV1` on the shaped body itself. The
- * topology module caches by triangle indices only, so in a live session the result depends on
- * whether any exactly symmetric HM08 mesh was built earlier. Recorded per run, never fatal here.
+ * Whether the shaped body itself is bit-exact mirror-symmetric (after the old midline snap). The
+ * guide no longer needs it (it snaps drifted mirror pairs before its topology build); recorded so
+ * the float drift stays visible. Never fatal here.
  */
 function exactMirrorFailure(positionsM: Float32Array): string {
   const snapped = midlineSnapped(positionsM);
@@ -303,6 +312,39 @@ function anchorsOf(mesh: MeasurementSurfaceMeshV1, symmetricMesh: MeasurementSur
   return { at, geodesicM, maxAsymmetryM };
 }
 
+/** The guide's anchor-only fields: drawn from HM08 anchors or not at all. */
+const GUIDE_ANCHOR_ONLY_FIELDS = Object.freeze([
+  'BODY_MEASUREMENT_NAME_NECK_BASE',
+  'BODY_MEASUREMENT_NAME_SHOULDER_LENGTH',
+  'BODY_MEASUREMENT_NAME_SHOULDER_DROP',
+  'BODY_MEASUREMENT_NAME_ARMSCYE_DEPTH',
+  'BODY_MEASUREMENT_NAME_ARMSCYE_CIRCUMFERENCE',
+  'BODY_MEASUREMENT_NAME_HPS_TO_BUST_APEX',
+  'BODY_MEASUREMENT_NAME_BUST_APEX_TO_APEX',
+  'BODY_MEASUREMENT_NAME_HPS_TO_WAIST_FRONT',
+  'BODY_MEASUREMENT_NAME_INSEAM',
+  'BODY_MEASUREMENT_NAME_HPS_HEIGHT',
+] as const);
+
+function guidePathLengthM(
+  path: MeasurementSurfaceMeasurementGuidePathV1 | undefined,
+  positionsM: Float32Array,
+): number | null {
+  if (!path) return null;
+  const points: Vec3[] =
+    path.source === 'mesh-vertices'
+      ? path.vertexIndices.map((vertex) => pointPosition(meshSurfaceVertexPointV1(vertex), positionsM))
+      : path.source === 'fixed-points'
+        ? path.pointsM.map((point) => [point[0], point[1], point[2]] as const)
+        : [];
+  if (points.length < 2) return null;
+  let lengthM = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    lengthM += distance(points[index - 1], points[index]);
+  }
+  return lengthM;
+}
+
 function limbStationCirc(
   mesh: MeasurementSurfaceMeshV1,
   modes: readonly OpenReferenceLimbCircumferenceModeV1[],
@@ -331,8 +373,28 @@ function measureBody(options: {
   limbModes: readonly OpenReferenceLimbCircumferenceModeV1[];
   symmetricMesh: MeasurementSurfaceMeshV1;
   shoulderVertices: { negative: number; positive: number } | null;
+  frame: ReturnType<typeof createMeasurementBodyFrameV2>;
 }): AnsurMeasuredBody {
   const { mesh, beta, waistHip } = options;
+  // The product guide builder on this body, with the runtime inputs the preview passes.
+  const guide = (measurementName: Parameters<
+    typeof buildMeasurementSurfaceActiveMeasurementGuideV1
+  >[0]['measurementName']) =>
+    buildMeasurementSurfaceActiveMeasurementGuideV1({
+      measurementName,
+      frame: options.frame,
+      mesh,
+      neutralPose: true,
+      limbSectionModes: beta?.limbSectionModes,
+      torsoSectionStations: beta?.torsoSectionStations,
+      neckSectionStation: beta?.neckSectionStation,
+      shoulderChordVertices: beta?.shoulderChordVertices,
+    });
+  const shoulderGuide = guide('BODY_MEASUREMENT_NAME_ACROSS_SHOULDER');
+  const guideAnchorOnlyDrawn = GUIDE_ANCHOR_ONLY_FIELDS.filter((name) => {
+    const drawn = guide(name);
+    return (drawn.status === 'visible' || drawn.status === 'limited') && drawn.paths.length > 0;
+  }).length;
   let maxY = -Infinity;
   let minY = Infinity;
   for (let o = 1; o < mesh.positions.length; o += 3) {
@@ -394,7 +456,8 @@ function measureBody(options: {
       ? ((anchors.at('acromion-l')[1] + anchors.at('acromion-r')[1]) / 2 - floorY) * 1000
       : null,
     crotchHeightMm: height('crotch'),
-    shoulderBreadthMm: anchors
+    shoulderBreadthMm: mm(guidePathLengthM(shoulderGuide.paths[0], mesh.positions)),
+    acromionBreadthMm: anchors
       ? distance(anchors.at('acromion-l'), anchors.at('acromion-r')) * 1000
       : null,
     shoulderLengthMm: mm(shoulderLengthM),
@@ -422,6 +485,7 @@ function measureBody(options: {
       : null,
     chestEngineDepthMm: extent(chestEngineLoop, 2),
     maxAsymmetryMm: anchors ? anchors.maxAsymmetryM * 1000 : null,
+    guideAnchorOnlyDrawn,
   };
 }
 
@@ -550,6 +614,7 @@ export async function runAnsurSubject(request: AnsurSubjectRequest): Promise<Ans
     limbModes,
     symmetricMesh: openReference.mesh,
     shoulderVertices: await engineShoulderVertices(basisKind, basis, measurements.heightMm),
+    frame,
   });
   const quality = fkProxyRuntime.qualityGate;
   const rollbacks = [

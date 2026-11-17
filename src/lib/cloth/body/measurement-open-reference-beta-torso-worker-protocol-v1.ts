@@ -53,6 +53,11 @@ export interface MeasurementOpenReferenceBetaTorsoWorkerResultV1 {
   readonly positionsBeforeNeckM?: Float32Array;
   readonly chestStationOriginM?: readonly [number, number, number];
   readonly underBustStationOriginM?: readonly [number, number, number];
+  /**
+   * The two display vertices whose straight chord the shoulder-breadth stage solves; the guide
+   * draws its across-shoulder line between exactly these.
+   */
+  readonly shoulderChordVertices?: Readonly<{ negative: number; positive: number }>;
   readonly ribcageRepresentedMeasurements: readonly 'underBustCircumferenceMm'[];
   /** Female bust proxy only: under bust reached its band bound or a cross-talk limit. */
   readonly ribcageLimitedMeasurements?: readonly 'underBustCircumferenceMm'[];
