@@ -361,6 +361,73 @@ describe('lock_version_moved', () => {
     expect(useSeamsStore.getState().serverVersion).toBe(10);
   });
 
+  it('a strict captured gesture refuses the moved version without reread or replay', async () => {
+    const f = fakeBridge();
+    const reread = vi.spyOn(f.bridge, 'reread');
+    const call = vi.fn(async () => {
+      throw lockMoved();
+    });
+    const res = await runSeamChange(
+      CARD,
+      { upsert: [b], link: [{ step, seamKey: b.seamKey }] },
+      { verb: 'decision', retryLockMoved: false },
+      depsOf(f.bridge, call),
+    );
+    expect(res).toEqual({ ok: false, why: 'the card moved', outcome: 'not-attempted' });
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(reread).not.toHaveBeenCalled();
+    expect(useSeamsStore.getState().pending).toEqual({});
+  });
+
+  it('a late captured-version guard sees lock drift after hold and sends no request', async () => {
+    const f = fakeBridge();
+    f.bridge.hold = async () => {
+      f.setVersion(8);
+      return { release: () => f.log.push('release') };
+    };
+    const call = vi.fn();
+    const res = await runSeamChange(
+      CARD,
+      { upsert: [b], link: [{ step, seamKey: b.seamKey }] },
+      {
+        verb: 'decision',
+        retryLockMoved: false,
+        beforeRequest: ({ expectedLockVersion }) =>
+          expectedLockVersion === 7 ? null : 'captured card version moved',
+      },
+      depsOf(f.bridge, call),
+    );
+    expect(res).toEqual({
+      ok: false,
+      why: 'captured card version moved',
+      outcome: 'not-attempted',
+    });
+    expect(call).not.toHaveBeenCalled();
+    expect(f.log).toEqual(['release']);
+  });
+
+  it('a late live-operation guard refuses after hold and sends no request', async () => {
+    const f = fakeBridge();
+    const call = vi.fn();
+    const res = await runSeamChange(
+      CARD,
+      { upsert: [b], link: [{ step, seamKey: b.seamKey }] },
+      {
+        verb: 'decision',
+        retryLockMoved: false,
+        beforeRequest: () => 'captured operation is no longer empty',
+      },
+      depsOf(f.bridge, call),
+    );
+    expect(res).toEqual({
+      ok: false,
+      why: 'captured operation is no longer empty',
+      outcome: 'not-attempted',
+    });
+    expect(call).not.toHaveBeenCalled();
+    expect(f.log).toEqual(['hold', 'release']);
+  });
+
   it('a change given as a function is built again for the retry, after the read', async () => {
     const f = fakeBridge();
     f.bridge.reread = async () => {

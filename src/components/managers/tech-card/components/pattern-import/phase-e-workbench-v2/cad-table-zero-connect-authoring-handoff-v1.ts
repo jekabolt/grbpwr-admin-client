@@ -131,6 +131,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_AUTHORING_HANDOFF_CLAIMS_V1
   existingOperationsFieldIsSoleWriter: true,
   candidateAndCurrentSessionRequired: true,
   appendReceiptRequired: true,
+  existingSavedEmptyOperationMayBeTargetedWithoutAppend: true,
   createsNetworkWriter: false,
   requestsAutosave: false,
   createsSeamAuthority: false,
@@ -162,7 +163,7 @@ export type PatternImportDxfPhaseEZeroConnectAuthoringHandoffBlockerV1 = Readonl
 export type PatternImportDxfPhaseEZeroConnectAuthoringHandoffResultV1 =
   | Readonly<{
       ok: true;
-      inserted: 1;
+      inserted: 0 | 1;
       historyKey: string;
       sessionRevision: number;
       blocker: null;

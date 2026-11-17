@@ -36,7 +36,12 @@ export type SeamChangeResult =
       /** Exact server rows returned by this write; strict CAD callers verify their receipt. */
       echo?: readonly TechCardSeamWire[];
     }
-  | { ok: false; why: string };
+  | {
+      ok: false;
+      why: string;
+      /** Present for strict callers that must know whether a new gesture is safe. */
+      outcome?: 'not-attempted' | 'unknown';
+    };
 
 export type SeamChangeOpts = {
   /** What the inbox says was not saved: `${verb} not saved`. */
@@ -55,6 +60,22 @@ export type SeamChangeOpts = {
    * (a DXF's dropped rows, undo, the step removal) needs the form saved first.
    */
   pastInvalidForm?: boolean;
+  /**
+   * The ordinary editor recovers once from an optimistic-lock conflict by reading the card and
+   * rebuilding the same gesture. Strict callers that captured one exact saved operation disable
+   * that recovery: a moved version invalidates the capture and must not be replayed.
+   */
+  retryLockMoved?: boolean;
+  /**
+   * Final synchronous admission check after the form is flushed and held, immediately before the
+   * request is built. Returning a reason refuses without issuing an RPC.
+   */
+  beforeRequest?: (
+    input: Readonly<{
+      cardId: number;
+      expectedLockVersion: number;
+    }>,
+  ) => string | null;
 };
 
 export type SeamChangeDeps = {
@@ -152,18 +173,23 @@ export function runSeamChange(
     });
   }
 
-  const fail = (why: string): SeamChangeResult => {
+  const fail = (
+    why: string,
+    outcome?: Extract<SeamChangeResult, { ok: false }>['outcome'],
+  ): SeamChangeResult => {
     settleSeamWrite(cardId, keys, undefined, why, opts.errorAt);
     if (!opts.quiet) deps.refused?.(opts.verb, why);
-    return { ok: false, why };
+    return { ok: false, why, ...(outcome ? { outcome } : {}) };
   };
+  const strictNotAttempted = opts.retryLockMoved === false ? 'not-attempted' : undefined;
   const bridgeOf = deps.bridge ?? seamFormBridge;
 
   return serializeSeamWrite(cardId, async (): Promise<SeamChangeResult> => {
     const bridge = bridgeOf(cardId);
-    if (!bridge) return fail(NOT_SAVED);
+    if (!bridge) return fail(NOT_SAVED, strictNotAttempted);
     const flushed = await bridge.flush('seam');
-    if (!flushed.ok && !(flushed.invalid && opts.pastInvalidForm)) return fail(flushed.why);
+    if (!flushed.ok && !(flushed.invalid && opts.pastInvalidForm))
+      return fail(flushed.why, strictNotAttempted);
     // Past a form that does not validate, the door judges its steps by the saved baseline (C9).
     const door = flushed.ok ? undefined : { pastInvalidForm: true };
     // Past that form, a step the door or the request cannot address (never stored, deleted, the
@@ -172,10 +198,19 @@ export function runSeamChange(
     const why = (w: string) => (!flushed.ok && w === NOT_SAVED ? flushed.why : w);
     const held = await bridge.hold(door);
     try {
-      if (held.refused) return fail(why(held.refused));
+      if (held.refused) return fail(why(held.refused), strictNotAttempted);
       for (let attempt = 0; ; attempt += 1) {
         // The card left this page while the write waited its turn.
-        if (bridgeOf(cardId) !== bridge) return fail(NOT_SAVED);
+        if (bridgeOf(cardId) !== bridge) return fail(NOT_SAVED, strictNotAttempted);
+        const expectedLockVersion = bridge.version();
+        let admissionRefusal: string | null = null;
+        try {
+          admissionRefusal =
+            opts.beforeRequest?.(Object.freeze({ cardId, expectedLockVersion })) ?? null;
+        } catch (e) {
+          admissionRefusal = message(e);
+        }
+        if (admissionRefusal) return fail(admissionRefusal, 'not-attempted');
         const built = build();
         // Rebuilt to nothing (every row it named was taken meanwhile): no request, nothing to say.
         if (emptyChange(built)) {
@@ -188,19 +223,26 @@ export function runSeamChange(
             echo: [],
           };
         }
-        const req = changeRequest(cardId, bridge.version(), built, bridge.operationNumber);
-        if (!req) return fail(why(NOT_SAVED));
+        const req = changeRequest(cardId, expectedLockVersion, built, bridge.operationNumber);
+        if (!req) return fail(why(NOT_SAVED), strictNotAttempted);
         let res: ChangeTechCardSeamsResponse;
         try {
           res = await deps.call(req);
         } catch (e) {
-          if (attempt === 0 && isLockMoved(e)) {
+          if (attempt === 0 && isLockMoved(e) && opts.retryLockMoved !== false) {
             const fresh = await bridge.reread(door);
             if (!fresh.ok) return fail(why(fresh.why));
             takeRead(cardId, fresh.card);
             continue;
           }
-          return fail(message(e));
+          return fail(
+            message(e),
+            opts.retryLockMoved === false
+              ? isLockMoved(e)
+                ? 'not-attempted'
+                : 'unknown'
+              : undefined,
+          );
         }
         const lockVersion = res.lockVersion ?? req.expectedLockVersion ?? 0;
         // The form first: the store's «row gone» subscriber then finds the steps already right.
