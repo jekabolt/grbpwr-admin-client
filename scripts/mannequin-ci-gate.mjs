@@ -58,6 +58,11 @@ const unitFiles = Object.freeze([
   'src/lib/cloth/body/measurement-open-reference-limb-subset-runtime-loader-v1.test.ts',
   'src/lib/cloth/body/measurement-watertight-surface-worker-v1.test.ts',
   'src/lib/cloth/body/measurement-protocol-v1.test.ts',
+  'src/lib/cloth/body/mesh-surface-topology-v1.test.ts',
+  'src/lib/cloth/body/mesh-surface-path-v1.test.ts',
+  'src/lib/cloth/body/mesh-surface-geodesic-v1.test.ts',
+  'src/lib/cloth/body/measurement-surface-anchors-v1.test.ts',
+  'src/lib/cloth/body/measurement-surface-anchors-morph-v1.test.ts',
 ]);
 
 const browserSuites = Object.freeze([

@@ -29,8 +29,17 @@ export const DEFAULT_MESH_PLANE_SECTION_POLICY_V1 = Object.freeze({
   maximumIntersectionSegmentCount: 250_000,
 } satisfies MeshPlaneSectionPolicyV1);
 
+/** Where a section point lies on the mesh: edge `a < b` at `t`; a vertex hit is `{ a: v, b: v, t: 0 }`. */
+export interface MeshPlaneSectionCrossingV1 {
+  readonly a: number;
+  readonly b: number;
+  readonly t: number;
+}
+
 export interface MeshPlaneSectionLoopV1 {
   readonly pointsM: readonly MeshPlaneSectionVec3V1[];
+  /** Present only when the call asked for `includeCrossings`; aligned with `pointsM`. */
+  readonly crossings?: readonly MeshPlaneSectionCrossingV1[];
   readonly centroidM: MeshPlaneSectionVec3V1;
   readonly perimeterM: number;
 }
@@ -236,35 +245,107 @@ function intersectTriangle(
   return { a: intersections[0], b: intersections[1] };
 }
 
+function edgeCrossing(
+  vertexA: number,
+  vertexB: number,
+  distanceA: number,
+  distanceB: number,
+): MeshPlaneSectionCrossingV1 {
+  const denominator = distanceA - distanceB;
+  const t = denominator === 0 ? 0.5 : distanceA / denominator;
+  return vertexA < vertexB
+    ? Object.freeze({ a: vertexA, b: vertexB, t })
+    : Object.freeze({ a: vertexB, b: vertexA, t: 1 - t });
+}
+
+function vertexCrossing(vertex: number): MeshPlaneSectionCrossingV1 {
+  return Object.freeze({ a: vertex, b: vertex, t: 0 });
+}
+
+/**
+ * Opt-in companion of `intersectTriangle`: the same branches in the same order, returning where the
+ * segment's `a` and `b` lie on the mesh. Called only for a triangle `intersectTriangle` accepted.
+ */
+function intersectTriangleCrossings(
+  vertices: readonly [number, number, number],
+  distances: readonly [number, number, number],
+  tolerance: number,
+): readonly [MeshPlaneSectionCrossingV1, MeshPlaneSectionCrossingV1] {
+  const onPlane = distances.map((value) => Math.abs(value) <= tolerance);
+  const count = onPlane.filter(Boolean).length;
+  if (count === 2) {
+    const indices = onPlane.flatMap((value, index) => (value ? [index] : []));
+    return [vertexCrossing(vertices[indices[0]]), vertexCrossing(vertices[indices[1]])];
+  }
+  if (count === 1) {
+    const onIndex = onPlane.findIndex(Boolean);
+    const others = [0, 1, 2].filter((index) => index !== onIndex);
+    return [
+      vertexCrossing(vertices[onIndex]),
+      edgeCrossing(
+        vertices[others[0]],
+        vertices[others[1]],
+        distances[others[0]],
+        distances[others[1]],
+      ),
+    ];
+  }
+  const crossings: MeshPlaneSectionCrossingV1[] = [];
+  for (const [aIndex, bIndex] of [
+    [0, 1],
+    [1, 2],
+    [2, 0],
+  ] as const) {
+    if (distances[aIndex] * distances[bIndex] >= 0) continue;
+    crossings.push(
+      edgeCrossing(vertices[aIndex], vertices[bIndex], distances[aIndex], distances[bIndex]),
+    );
+  }
+  return [crossings[0], crossings[1]];
+}
+
+/**
+ * Weld grid with cell size = tolerance. Buckets are keyed by a numeric hash of the integer cell;
+ * every entry keeps its exact cell and only same-cell entries are visited, so candidates, their
+ * order, the chosen (lowest) index and `comparisons` are identical to a per-cell string key.
+ */
 class SpatialWelder {
   readonly points: MeshPlaneSectionVec3V1[] = [];
-  readonly buckets = new Map<string, number[]>();
+  readonly buckets = new Map<number, number[]>();
+  private readonly cellX: number[] = [];
+  private readonly cellY: number[] = [];
+  private readonly cellZ: number[] = [];
   comparisons = 0;
 
   constructor(readonly tolerance: number) {}
 
-  private cell(point: MeshPlaneSectionVec3V1): readonly [number, number, number] {
-    return [
-      Math.floor(point[0] / this.tolerance),
-      Math.floor(point[1] / this.tolerance),
-      Math.floor(point[2] / this.tolerance),
-    ];
-  }
-
-  private key(x: number, y: number, z: number): string {
-    return `${x}:${y}:${z}`;
+  private static hash(x: number, y: number, z: number): number {
+    return (
+      (Math.imul(x | 0, 73_856_093) ^ Math.imul(y | 0, 19_349_663) ^ Math.imul(z | 0, 83_492_791)) |
+      0
+    );
   }
 
   add(point: MeshPlaneSectionVec3V1): number {
-    const cell = this.cell(point);
+    // `+ 0` folds -0 into 0, matching the old `${x}` key where both printed as "0".
+    const x = Math.floor(point[0] / this.tolerance) + 0;
+    const y = Math.floor(point[1] / this.tolerance) + 0;
+    const z = Math.floor(point[2] / this.tolerance) + 0;
     const toleranceSquared = this.tolerance * this.tolerance;
     let match = Number.POSITIVE_INFINITY;
     for (let dx = -1; dx <= 1; dx += 1) {
       for (let dy = -1; dy <= 1; dy += 1) {
         for (let dz = -1; dz <= 1; dz += 1) {
-          for (const candidate of this.buckets.get(
-            this.key(cell[0] + dx, cell[1] + dy, cell[2] + dz),
-          ) ?? []) {
+          const bucket = this.buckets.get(SpatialWelder.hash(x + dx, y + dy, z + dz));
+          if (!bucket) continue;
+          for (const candidate of bucket) {
+            if (
+              this.cellX[candidate] !== x + dx ||
+              this.cellY[candidate] !== y + dy ||
+              this.cellZ[candidate] !== z + dz
+            ) {
+              continue;
+            }
             this.comparisons += 1;
             if (distanceSquared(point, this.points[candidate]) <= toleranceSquared) {
               match = Math.min(match, candidate);
@@ -276,10 +357,13 @@ class SpatialWelder {
     if (Number.isFinite(match)) return match;
     const index = this.points.length;
     this.points.push(Object.freeze([...point]) as unknown as MeshPlaneSectionVec3V1);
-    const key = this.key(cell[0], cell[1], cell[2]);
-    const bucket = this.buckets.get(key) ?? [];
-    bucket.push(index);
-    this.buckets.set(key, bucket);
+    this.cellX.push(x);
+    this.cellY.push(y);
+    this.cellZ.push(z);
+    const key = SpatialWelder.hash(x, y, z);
+    const bucket = this.buckets.get(key);
+    if (bucket) bucket.push(index);
+    else this.buckets.set(key, [index]);
     return index;
   }
 }
@@ -287,6 +371,7 @@ class SpatialWelder {
 function loopFromNodeIds(
   nodeIds: readonly number[],
   points: readonly MeshPlaneSectionVec3V1[],
+  crossings: readonly MeshPlaneSectionCrossingV1[] | null,
 ): MeshPlaneSectionLoopV1 {
   const loopPoints = nodeIds.map((node) => points[node]);
   let perimeterM = 0;
@@ -301,6 +386,14 @@ function loopFromNodeIds(
   const centroidM = Object.freeze(
     centroid.map((value) => value / loopPoints.length),
   ) as unknown as MeshPlaneSectionVec3V1;
+  if (crossings) {
+    return Object.freeze({
+      pointsM: Object.freeze(loopPoints),
+      crossings: Object.freeze(nodeIds.map((node) => crossings[node])),
+      centroidM,
+      perimeterM,
+    });
+  }
   return Object.freeze({
     pointsM: Object.freeze(loopPoints),
     centroidM,
@@ -354,6 +447,7 @@ function measureMeshPlaneSectionPerimetersInternalV1(
     readonly planeNormal: MeshPlaneSectionVec3V1;
     readonly selection?: MeshPlaneSectionSelectionV1;
     readonly policy?: Partial<MeshPlaneSectionPolicyV1>;
+    readonly includeCrossings?: boolean;
   },
   preparedVertexCount?: number,
 ): MeshPlaneSectionResultV1 {
@@ -416,6 +510,7 @@ function measureMeshPlaneSectionPerimetersInternalV1(
   }
 
   const welder = new SpatialWelder(policy.weldToleranceM);
+  const nodeCrossings: MeshPlaneSectionCrossingV1[] | null = options.includeCrossings ? [] : null;
   const segmentKeys = new Set<string>();
   const segments: [number, number][] = [];
   for (let triangle = 0; triangle < stats.triangleCount; triangle += 1) {
@@ -440,8 +535,26 @@ function measureMeshPlaneSectionPerimetersInternalV1(
     }
     if (!intersection) continue;
     stats.intersectedTriangleCount += 1;
-    const a = welder.add(intersection.a);
-    const b = welder.add(intersection.b);
+    let a: number;
+    let b: number;
+    if (nodeCrossings) {
+      const [crossingA, crossingB] = intersectTriangleCrossings(
+        [
+          options.triangleIndices[offset],
+          options.triangleIndices[offset + 1],
+          options.triangleIndices[offset + 2],
+        ],
+        distances,
+        policy.planeToleranceM,
+      );
+      a = welder.add(intersection.a);
+      if (a === nodeCrossings.length) nodeCrossings.push(crossingA);
+      b = welder.add(intersection.b);
+      if (b === nodeCrossings.length) nodeCrossings.push(crossingB);
+    } else {
+      a = welder.add(intersection.a);
+      b = welder.add(intersection.b);
+    }
     if (a === b) continue;
     const key = a < b ? `${a}:${b}` : `${b}:${a}`;
     if (segmentKeys.has(key)) continue;
@@ -515,7 +628,7 @@ function measureMeshPlaneSectionPerimetersInternalV1(
         stats,
       );
     }
-    const loop = loopFromNodeIds(nodeIds, welder.points);
+    const loop = loopFromNodeIds(nodeIds, welder.points, nodeCrossings);
     if (!Number.isFinite(loop.perimeterM) || loop.perimeterM < policy.minimumLoopPerimeterM) {
       return failure(
         'open-or-branching-section',
@@ -563,6 +676,8 @@ export function measureMeshPlaneSectionPerimetersV1(options: {
   readonly planeNormal: MeshPlaneSectionVec3V1;
   readonly selection?: MeshPlaneSectionSelectionV1;
   readonly policy?: Partial<MeshPlaneSectionPolicyV1>;
+  /** Opt-in: attach `crossings` to every loop. Off by default; the default path allocates nothing extra. */
+  readonly includeCrossings?: boolean;
 }): MeshPlaneSectionResultV1 {
   return measureMeshPlaneSectionPerimetersInternalV1(options);
 }
