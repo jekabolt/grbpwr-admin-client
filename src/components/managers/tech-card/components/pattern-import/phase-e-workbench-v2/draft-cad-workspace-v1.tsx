@@ -25,8 +25,10 @@ import {
   type PatternImportDxfPhaseEDraftCadArrangementScopeV1,
 } from './draft-cad-arrangement-v1';
 import type { PatternImportDxfPhaseECadMaterialScopeCatalogResultV1 } from './cad-material-scope-catalog-v1';
-import type { PatternImportDxfPhaseECadMaterialScopePreparationResultV1 } from './cad-material-scope-preparation-v1';
-import { PatternImportDxfPhaseECadMaterialScopeProductionControlV1 } from './cad-material-scope-production-control-v1';
+import {
+  PatternImportDxfPhaseECadMaterialScopeProductionControlV1,
+  type PatternImportDxfPhaseECadMaterialScopeSelectablePreparationV1,
+} from './cad-material-scope-production-control-v1';
 import { usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1 } from './cad-workbench-split-shell-v1';
 import type { PatternImportDxfPhaseECadTableCrossScopeAuthoringHandoffResultV1 } from './cad-table-cross-scope-authoring-handoff-v1';
 import type { PatternImportDxfPhaseECadTableCrossScopeConnectSideV1 } from './cad-table-cross-scope-connect-v1';
@@ -148,7 +150,7 @@ export type PatternImportDxfPhaseEDraftCadWorkspacePropsV1 = Readonly<{
   selection: Extract<DxfProductPhaseDSizeSelectionResultV1, { ok: true }>;
   compileSource: PatternImportDxfPhaseEDraftCadCompileSourceV1;
   materialScopeCatalog?: PatternImportDxfPhaseECadMaterialScopeCatalogResultV1 | null;
-  materialScopePreparation?: PatternImportDxfPhaseECadMaterialScopePreparationResultV1 | null;
+  materialScopePreparation?: PatternImportDxfPhaseECadMaterialScopeSelectablePreparationV1 | null;
   preparedMaterialScopeKeys?: readonly string[];
   activeMaterialScopeKey?: string;
   /** Confirmed import generation visible when this compile starts; zero for saved-only sources. */

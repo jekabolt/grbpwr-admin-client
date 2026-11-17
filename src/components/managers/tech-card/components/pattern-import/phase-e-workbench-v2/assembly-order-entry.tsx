@@ -108,6 +108,10 @@ import {
   type PatternImportDxfPhaseECadMaterialScopePreparationResultV1,
   type PatternImportDxfPhaseECadPreparedMaterialScopeV1,
 } from './cad-material-scope-preparation-v1';
+import type {
+  PatternImportDxfPhaseECadSavedMaterialScopeEditorPreparationResultV1,
+  PatternImportDxfPhaseECadSavedPreparedMaterialScopeEditorV1,
+} from './cad-saved-material-scope-editor-preparation-v1';
 import {
   PatternImportDxfProductExactNSeamProductionMountV2,
   resolvePatternImportDxfProductExactNSeamProductionMountV2,
@@ -216,6 +220,11 @@ export const PATTERN_IMPORT_DXF_PHASE_E_MULTISEAM_ASSEMBLY_ORDER_ENTRY_CONTRACT_
   freshUnconfirmedSceneOverlayFailsClosed: true,
   materialScopePreparationProductionMounted: true,
   exactPreparedMaterialScopeSwitchingMounted: true,
+  savedReloadMaterialScopeEditorsUseOperationIndependentPreparation: true,
+  savedReloadMaterialScopeEditorsRawFree: true,
+  savedReloadCrossScopeSewDisabled: true,
+  savedReloadPressDisabled: true,
+  savedReloadAoCadHandoffLimitedToPrimaryScope: true,
   topologyStateCallerOwnedPerMaterialScope: true,
   topologyStateRetainedAcrossWorkspaceRemount: true,
   topologyStaleSourceResetsOnlyActiveScope: true,
@@ -362,6 +371,13 @@ export type PatternImportDxfPhaseEMultiseamSavedSessionV2 = Readonly<{
       signal: AbortSignal;
     }>,
   ) => Promise<PatternImportDxfPhaseECadMannequinSavedAllScopeStagingResultV1>;
+  prepareAllMaterialScopeEditors?: (
+    input: Readonly<{
+      scopeKey: string;
+      sizeToken: string;
+      signal: AbortSignal;
+    }>,
+  ) => Promise<PatternImportDxfPhaseECadSavedMaterialScopeEditorPreparationResultV1>;
   onConfirm?: PatternImportDxfPhaseEMultiseamSavedConfirmV2;
   downstream?: PatternImportDxfPhaseEMultiseamSavedDownstreamV2;
 }>;
@@ -463,7 +479,10 @@ export function createPatternImportDxfPhaseEBoundDraftCadForPreparedV1(
 }
 
 export function createPatternImportDxfPhaseEBoundDraftCadForMaterialScopeV1(
-  prepared: PatternImportDxfPhaseECadPreparedMaterialScopeV1,
+  prepared: Pick<
+    PatternImportDxfPhaseECadPreparedMaterialScopeV1,
+    'sourceRevision' | 'selection' | 'catalog' | 'projection'
+  >,
 ): ReturnType<typeof createPatternImportDxfPhaseEBoundDraftCadSessionV1> {
   return createPatternImportDxfPhaseEBoundDraftCadSessionV1({
     source: {
@@ -1466,6 +1485,8 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
   draftCadSessionRef.current = draftCadSession;
   const [materialScopePreparation, setMaterialScopePreparation] =
     useState<PatternImportDxfPhaseECadMaterialScopePreparationResultV1 | null>(null);
+  const [savedMaterialScopePreparation, setSavedMaterialScopePreparation] =
+    useState<PatternImportDxfPhaseECadSavedMaterialScopeEditorPreparationResultV1 | null>(null);
   const [activeDraftMaterialScopeKey, setActiveDraftMaterialScopeKey] = useState<string | null>(
     null,
   );
@@ -1576,6 +1597,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
     setDesktopMode('assembly');
     setDraftCadSession(null);
     setMaterialScopePreparation(null);
+    setSavedMaterialScopePreparation(null);
     setActiveDraftMaterialScopeKey(null);
     setMaterialScopeDraftSessions({});
     setDraftCadBlocker(null);
@@ -1616,13 +1638,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
     setSavedPreparedResult(result);
     setState(result.ok ? result.state : null);
     if (result.ok) {
-      const draft = createPatternImportDxfPhaseEBoundDraftCadForPreparedV1(result.prepared);
-      setDraftCadSession(draft.ok ? draft.session : null);
-      setDraftCadBlocker(draft.ok ? null : draft.blocker);
       setActiveDraftMaterialScopeKey(result.prepared.scopeKey);
-      setMaterialScopeDraftSessions(
-        draft.ok ? Object.freeze({ [result.prepared.scopeKey]: draft.session }) : {},
-      );
     }
     setLoading(false);
   };
@@ -1664,6 +1680,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
     setDesktopMode('assembly');
     setDraftCadSession(null);
     setMaterialScopePreparation(null);
+    setSavedMaterialScopePreparation(null);
     setActiveDraftMaterialScopeKey(null);
     setMaterialScopeDraftSessions({});
     setDraftCadBlocker(null);
@@ -1733,6 +1750,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
     setDesktopMode('assembly');
     setDraftCadSession(null);
     setMaterialScopePreparation(null);
+    setSavedMaterialScopePreparation(null);
     setActiveDraftMaterialScopeKey(null);
     setMaterialScopeDraftSessions({});
     setDraftCadBlocker(null);
@@ -1864,11 +1882,74 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
       current = false;
     };
   }, [preparedResult]);
+  useEffect(() => {
+    if (!savedPreparedResult?.ok || !savedSession?.prepareAllMaterialScopeEditors) {
+      setSavedMaterialScopePreparation(null);
+      return;
+    }
+    const saved = savedPreparedResult.prepared;
+    let current = true;
+    const controller = new AbortController();
+    setSavedMaterialScopePreparation(null);
+    void savedSession
+      .prepareAllMaterialScopeEditors({
+        scopeKey: saved.scopeKey,
+        sizeToken: saved.sizeToken,
+        signal: controller.signal,
+      })
+      .then((result) => {
+        if (!current || controller.signal.aborted) return;
+        if (!result.ok) {
+          setSavedMaterialScopePreparation(result);
+          setDraftCadSession(null);
+          setMaterialScopeDraftSessions({});
+          return;
+        }
+        const sessions: Record<string, PatternImportDxfPhaseEDraftCadSessionV1> = {};
+        for (const scope of result.scopes) {
+          const bound = createPatternImportDxfPhaseEBoundDraftCadForMaterialScopeV1(scope);
+          if (!bound.ok) {
+            setDraftCadBlocker(bound.blocker);
+            setSavedMaterialScopePreparation(null);
+            setDraftCadSession(null);
+            setMaterialScopeDraftSessions({});
+            return;
+          }
+          sessions[scope.scopeKey] = bound.session;
+        }
+        const active = result.scopes[0];
+        const activeSession = active ? sessions[active.scopeKey] : null;
+        if (!active || !activeSession) return;
+        setSavedMaterialScopePreparation(result);
+        setMaterialScopeDraftSessions(Object.freeze(sessions));
+        setActiveDraftMaterialScopeKey(active.scopeKey);
+        setDraftCadSession(activeSession);
+        setDraftCadBlocker(null);
+      })
+      .catch((error) => {
+        if (!current || controller.signal.aborted) return;
+        setSavedMaterialScopePreparation(null);
+        setDraftCadSession(null);
+        setMaterialScopeDraftSessions({});
+        setDraftCadBlocker({
+          code: 'invalid-source-binding',
+          detail:
+            error instanceof Error
+              ? `Saved material editors could not be prepared: ${error.message}`
+              : 'Saved material editors could not be prepared.',
+        });
+      });
+    return () => {
+      current = false;
+      controller.abort();
+    };
+  }, [savedPreparedResult, savedSession]);
   const materialScopeCatalog = useMemo(() => {
     if (preparedResult?.ok)
       return buildPatternImportDxfPhaseECadMaterialScopeCatalogV1(
         preparedResult.prepared.cardSession.draft,
       );
+    if (savedMaterialScopePreparation?.ok) return savedMaterialScopePreparation.catalog;
     if (!savedPreparedResult?.ok) return null;
     const saved = savedPreparedResult.prepared;
     const scope = saved.draftCadCompileSource.scopes.find(
@@ -1887,7 +1968,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
       },
       pieces: saved.catalog.pieces,
     });
-  }, [preparedResult, savedPreparedResult]);
+  }, [preparedResult, savedMaterialScopePreparation, savedPreparedResult]);
   const savedAllScopeMannequinStagingKey = savedPreparedResult?.ok
     ? JSON.stringify({
         row: savedPreparedResult.prepared.row,
@@ -1987,11 +2068,20 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
           bomItems,
         }
       : null;
-  const activePreparedMaterialScope = materialScopePreparation?.ok
+  const activeFreshPreparedMaterialScope = materialScopePreparation?.ok
     ? materialScopePreparation.scopes.find(
         ({ scopeKey }) => scopeKey === activeDraftMaterialScopeKey,
       ) ?? null
     : null;
+  const activeSavedPreparedMaterialScope = savedMaterialScopePreparation?.ok
+    ? savedMaterialScopePreparation.scopes.find(
+        ({ scopeKey }) => scopeKey === activeDraftMaterialScopeKey,
+      ) ?? null
+    : null;
+  const activePreparedMaterialScope:
+    | PatternImportDxfPhaseECadPreparedMaterialScopeV1
+    | PatternImportDxfPhaseECadSavedPreparedMaterialScopeEditorV1
+    | null = activeFreshPreparedMaterialScope ?? activeSavedPreparedMaterialScope;
   const activeDraftTopologyScopeKey =
     activePreparedMaterialScope?.scopeKey ?? prepared?.scopeKey ?? null;
   const activeDraftTopologyProjection =
@@ -2033,15 +2123,17 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
       updatePatternImportDxfPhaseEDraftCadTopologyScopeMapV1(current, scope),
     );
   };
-  const preparedMaterialScopeKeys = materialScopePreparation?.ok
-    ? materialScopePreparation.scopes
+  const selectableMaterialScopePreparation =
+    materialScopePreparation ?? savedMaterialScopePreparation;
+  const preparedMaterialScopeKeys = selectableMaterialScopePreparation?.ok
+    ? selectableMaterialScopePreparation.scopes
         .map(({ scopeKey }) => scopeKey)
         .filter((scopeKey) => Boolean(materialScopeDraftSessions[scopeKey]))
     : prepared?.scopeKey
       ? [prepared.scopeKey]
       : [];
   const selectDraftMaterialScope = (scopeKey: string) => {
-    if (!materialScopePreparation?.ok || scopeKey === activeDraftMaterialScopeKey) return;
+    if (!selectableMaterialScopePreparation?.ok || scopeKey === activeDraftMaterialScopeKey) return;
     const next = materialScopeDraftSessions[scopeKey];
     if (!next) return;
     const currentScopeKey = activeDraftMaterialScopeKey ?? prepared?.scopeKey ?? '';
@@ -2578,7 +2670,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                             prepared.draftCadCompileSource
                           }
                           materialScopeCatalog={materialScopeCatalog}
-                          materialScopePreparation={materialScopePreparation}
+                          materialScopePreparation={selectableMaterialScopePreparation}
                           preparedMaterialScopeKeys={preparedMaterialScopeKeys}
                           activeMaterialScopeKey={
                             activePreparedMaterialScope?.scopeKey ?? prepared.scopeKey
@@ -2602,6 +2694,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                           onSelectMaterialScope={selectDraftMaterialScope}
                           crossScopeConnectDisabled={
                             frozen ||
+                            !preparedResult?.ok ||
                             source.selectedOperationNumber <= 0 ||
                             crossScopeAuthoringHandoff?.status !== 'available' ||
                             !materialScopePreparation?.ok ||
@@ -2609,9 +2702,11 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                           }
                           onCrossScopeConnect={linkCrossScopeConnection}
                           pressDraftDisabled={
-                            frozen || pressAuthoringHandoff?.status !== 'available'
+                            frozen ||
+                            !preparedResult?.ok ||
+                            pressAuthoringHandoff?.status !== 'available'
                           }
-                          onCreatePressDraft={createPressDraft}
+                          onCreatePressDraft={preparedResult?.ok ? createPressDraft : undefined}
                           onSessionChange={publishDraftCadSession}
                           workspaceContextControl={workspaceContextControl}
                         />

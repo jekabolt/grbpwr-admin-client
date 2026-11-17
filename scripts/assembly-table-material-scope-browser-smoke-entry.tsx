@@ -18,6 +18,29 @@ import {
   type PatternImportDxfPhaseECadMannequinDxfStagingSourceV1,
 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-mannequin-dxf-staging-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
+import {
+  applyPatternImportDxfPhaseEDraftCadArrangementActionV1,
+  reconcilePatternImportDxfPhaseEDraftCadArrangementScopeV1,
+  selectPatternImportDxfPhaseEDraftCadArrangementPiecesV1,
+  updatePatternImportDxfPhaseEDraftCadArrangementScopeMapV1,
+  type PatternImportDxfPhaseEDraftCadArrangementByScopeV1,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/draft-cad-arrangement-v1';
+import {
+  createPatternImportDxfPhaseEDraftCadSessionV1,
+  recordPatternImportDxfPhaseEDraftCadTransactionV1,
+  type PatternImportDxfPhaseEDraftCadSessionV1,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/draft-cad-session-v1';
+import {
+  derivePatternImportDxfPhaseEDraftCadTopologySourceIdentityV1,
+  selectPatternImportDxfPhaseEDraftCadTopologyAnchorV1,
+  selectPatternImportDxfPhaseEDraftCadTopologyToolV1,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/draft-cad-topology-session-v1';
+import {
+  publishPatternImportDxfPhaseEDraftCadTopologyScopeV1,
+  reconcilePatternImportDxfPhaseEDraftCadTopologyScopeMapV1,
+  updatePatternImportDxfPhaseEDraftCadTopologyScopeMapV1,
+  type PatternImportDxfPhaseEDraftCadTopologyByScopeV1,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/draft-cad-topology-scope-v1';
 
 const TECH_CARD_ID = 6;
 const IMPORT_GENERATION = 12;
@@ -79,6 +102,7 @@ const mainProjection = projection('card6-MAIN.dxf', [
   piece('back', 'BACK', 60),
 ]);
 const pocketingProjection = projection('card6-POCKETING.dxf', [piece('pocket', 'PCK_L', 0)]);
+const liningProjection = projection('card11-LINING.dxf', [piece('lining', 'LINING_FRONT', 0)]);
 
 const scope = (
   scopeKey: string,
@@ -118,6 +142,7 @@ const preparedCatalogScopes: readonly PatternImportDxfPhaseECadMannequinMaterial
   Object.freeze([
     Object.freeze({ scopeKey: MAIN, label: 'Main' }),
     Object.freeze({ scopeKey: POCKETING, label: 'Pocketing' }),
+    Object.freeze({ scopeKey: LINING, label: 'Lining' }),
   ]);
 
 const current: PatternImportDxfPhaseECadMannequinDxfStagingSourceV1 = Object.freeze({
@@ -142,15 +167,140 @@ const allScope = collectPatternImportDxfPhaseECadMannequinPreparedScopeStagingV1
       documentEvidence: { techCardId: TECH_CARD_ID, scopeKey: POCKETING },
       projection: pocketingProjection,
     },
+    {
+      scopeKey: LINING,
+      sourceRevision: IMPORT_GENERATION,
+      documentEvidence: { techCardId: TECH_CARD_ID, scopeKey: LINING },
+      projection: liningProjection,
+    },
   ],
   current,
 });
 if (!allScope.ok) throw new Error(allScope.blocker.detail);
 
+function draftSession(
+  scopeKey: string,
+  scopeProjection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
+): PatternImportDxfPhaseEDraftCadSessionV1 {
+  const result = createPatternImportDxfPhaseEDraftCadSessionV1({
+    phaseD: {
+      sourceFileId: scopeProjection.sourceFileId,
+      sourceSha256: SHA,
+      selectedGeometrySha256: SHA,
+    },
+    catalog: {
+      canonicalSha256: SHA,
+      sizeSelectionCanonicalSha256: SHA,
+      pieces: scopeProjection.pieces.map(({ pieceId, pieceLineKey }) => ({
+        pieceId,
+        pieceLineKey,
+      })) as never,
+    },
+    revision: IMPORT_GENERATION,
+  });
+  if (!result.ok) throw new Error(`${scopeKey}: ${result.blocker.detail}`);
+  return result.session;
+}
+
+const initialDraftSessions = Object.freeze({
+  [MAIN]: draftSession(MAIN, mainProjection),
+  [POCKETING]: draftSession(POCKETING, pocketingProjection),
+  [LINING]: draftSession(LINING, liningProjection),
+});
+
+const projectionByScope = Object.freeze({
+  [MAIN]: mainProjection,
+  [POCKETING]: pocketingProjection,
+  [LINING]: liningProjection,
+});
+
 function MaterialScopeBrowserSmoke() {
   const [activeScopeKey, setActiveScopeKey] = useState(MAIN);
   const [selection, setSelection] =
     useState<PatternImportDxfPhaseECadMannequinDxfStagingSelectionV1 | null>(null);
+  const [draftSessions, setDraftSessions] = useState(initialDraftSessions);
+  const [arrangements, setArrangements] =
+    useState<PatternImportDxfPhaseEDraftCadArrangementByScopeV1>({});
+  const [topology, setTopology] = useState<PatternImportDxfPhaseEDraftCadTopologyByScopeV1>({});
+  const activeProjection = projectionByScope[activeScopeKey as keyof typeof projectionByScope];
+  const activeSession = draftSessions[activeScopeKey as keyof typeof draftSessions];
+
+  const recordActiveEdit = () => {
+    const target = activeSession.source.catalog.pieces[0];
+    if (!target) return;
+    const recorded = recordPatternImportDxfPhaseEDraftCadTransactionV1(activeSession, {
+      transactionId: `${activeScopeKey}:browser-edit:${activeSession.cursor + 1}`,
+      label: 'Browser saved-scope edit',
+      commands: [
+        {
+          commandId: `${activeScopeKey}:mark:${activeSession.cursor + 1}`,
+          tool: 'mark',
+          target,
+          payload: {
+            entityId: `${activeScopeKey}:entity:${activeSession.cursor + 1}`,
+            pointMm: { x: 10, y: 10 },
+            kind: 'drill',
+          },
+        },
+      ],
+    });
+    if (!recorded.ok) throw new Error(recorded.blocker.detail);
+    setDraftSessions((current) =>
+      Object.freeze({ ...current, [activeScopeKey]: recorded.session }),
+    );
+  };
+
+  const arrangeActive = () => {
+    const pieceIds = activeProjection.pieces.map(({ pieceId }) => pieceId);
+    const current = reconcilePatternImportDxfPhaseEDraftCadArrangementScopeV1(
+      arrangements[activeScopeKey],
+      activeScopeKey,
+      pieceIds,
+    );
+    const selected = selectPatternImportDxfPhaseEDraftCadArrangementPiecesV1(
+      current,
+      pieceIds.slice(0, 1),
+      pieceIds,
+    );
+    setArrangements((map) =>
+      updatePatternImportDxfPhaseEDraftCadArrangementScopeMapV1(
+        map,
+        applyPatternImportDxfPhaseEDraftCadArrangementActionV1(selected, 'rotate-90'),
+      ),
+    );
+  };
+
+  const annotateActive = () => {
+    const sourceIdentity = derivePatternImportDxfPhaseEDraftCadTopologySourceIdentityV1(
+      activeSession,
+      activeProjection,
+    );
+    const resolved = reconcilePatternImportDxfPhaseEDraftCadTopologyScopeMapV1(
+      topology,
+      activeScopeKey,
+      sourceIdentity,
+    );
+    const vertex = activeProjection.pieces[0]?.contours[0]?.vertices[0];
+    const piece = activeProjection.pieces[0];
+    const contour = piece?.contours[0];
+    if (!piece || !contour || !vertex) return;
+    const selected = selectPatternImportDxfPhaseEDraftCadTopologyAnchorV1(
+      activeProjection,
+      selectPatternImportDxfPhaseEDraftCadTopologyToolV1(resolved.scope.session, 'callout'),
+      {
+        pieceId: piece.pieceId,
+        pieceLineKey: piece.pieceLineKey,
+        contourId: contour.contourId,
+        vertexId: vertex.vertexId,
+      },
+    );
+    setTopology(
+      updatePatternImportDxfPhaseEDraftCadTopologyScopeMapV1(
+        resolved.map,
+        publishPatternImportDxfPhaseEDraftCadTopologyScopeV1(resolved.scope, selected),
+      ),
+    );
+  };
 
   return (
     <TooltipProvider>
@@ -160,15 +310,41 @@ function MaterialScopeBrowserSmoke() {
         data-active-scope={activeScopeKey}
         data-selected-scope={selection?.scopeKey ?? undefined}
         data-selected-piece={selection?.pieceId ?? undefined}
+        data-main-session-cursor={draftSessions[MAIN].cursor}
+        data-pocketing-session-cursor={draftSessions[POCKETING].cursor}
+        data-main-arrangement-quarter-turns={
+          arrangements[MAIN]?.transforms.front?.quarterTurns ?? 0
+        }
+        data-pocketing-arrangement-quarter-turns={
+          arrangements[POCKETING]?.transforms.pocket?.quarterTurns ?? 0
+        }
+        data-main-topology-callouts={topology[MAIN]?.session.callouts.length ?? 0}
+        data-pocketing-topology-callouts={topology[POCKETING]?.session.callouts.length ?? 0}
+        data-lining-session-cursor={draftSessions[LINING].cursor}
+        data-lining-arrangement-quarter-turns={
+          arrangements[LINING]?.transforms.lining?.quarterTurns ?? 0
+        }
+        data-lining-topology-callouts={topology[LINING]?.session.callouts.length ?? 0}
       >
         <section className='flex h-full min-h-0 flex-col border border-borderColor bg-bgColor'>
           <header className='border-b border-borderColor p-2'>
-            <PatternImportDxfPhaseECadMaterialScopeBrowserV1
-              catalog={uiCatalog}
-              active={{ techCardId: TECH_CARD_ID, scopeKey: activeScopeKey }}
-              preparedScopeKeys={[MAIN, POCKETING]}
-              onSelectPreparedScope={setActiveScopeKey}
-            />
+            <div className='flex items-center gap-2'>
+              <PatternImportDxfPhaseECadMaterialScopeBrowserV1
+                catalog={uiCatalog}
+                active={{ techCardId: TECH_CARD_ID, scopeKey: activeScopeKey }}
+                preparedScopeKeys={[MAIN, POCKETING, LINING]}
+                onSelectPreparedScope={setActiveScopeKey}
+              />
+              <button type='button' data-smoke-edit-active='' onClick={recordActiveEdit}>
+                Edit active
+              </button>
+              <button type='button' data-smoke-arrange-active='' onClick={arrangeActive}>
+                Arrange active
+              </button>
+              <button type='button' data-smoke-topology-active='' onClick={annotateActive}>
+                Annotate active
+              </button>
+            </div>
           </header>
           <div className='relative min-h-0 flex-1 bg-pageBg' data-material-scope-stage=''>
             <PatternImportDxfPhaseECadMannequinDxfStagingV1

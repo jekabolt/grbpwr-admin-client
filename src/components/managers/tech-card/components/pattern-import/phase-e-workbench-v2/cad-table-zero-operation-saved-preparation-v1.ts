@@ -9,6 +9,7 @@ import {
   type PatternImportDxfProductPhaseEAuthoringCatalogV1,
 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import { selectPatternImportDxfProductDraftPhaseDSizeV1 } from 'lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1';
+import type { DxfProductPhaseDSizeSelectionResultV1 } from 'lib/pattern-import/dxf-product-phase-d-size-selection-v1';
 import {
   createDxfProductSavedForeignReprocessOwnerV1,
   DXF_PRODUCT_SAVED_FOREIGN_REPROCESS_REQUEST_V1,
@@ -37,6 +38,10 @@ import {
 } from './cad-table-zero-connect-phase-e-authority-v1';
 import type { PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1 } from './zero-operation-saved-card-authority-v1';
 import { resolvePatternImportDxfPhaseEZeroOperationSavedDxfCapabilityV1 } from './zero-operation-saved-dxf-capability-v1';
+import {
+  createPatternImportDxfPhaseEDraftCadCompileSourceV1,
+  type PatternImportDxfPhaseEDraftCadCompileSourceV1,
+} from './draft-cad-compile-source-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_SAVED_PREPARATION_V1 =
   'pattern-import-dxf-phase-e-cad-table-zero-operation-saved-preparation/1' as const;
@@ -55,6 +60,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_SAVED_PREPARATI
     exactPhaseDSelectionBuilt: true,
     exactAuthoringCatalogBuilt: true,
     exactAssemblyProjectionBuilt: true,
+    rawFreeDraftCadCompileSourceBuilt: true,
     manifestAbsentForeignDxfFallback: true,
     privateZeroConnectAuthoringAuthorityRetained: true,
     monotonicPreparationGenerationRequired: true,
@@ -74,6 +80,7 @@ export type PatternImportDxfPhaseECadTableZeroOperationSavedBlockerV1 = Readonly
     | 'saved-row-reprocess-blocked'
     | 'phase-d-selection-unavailable'
     | 'authoring-catalog-unavailable'
+    | 'draft-cad-compile-source-unavailable'
     | 'preparation-binding-stale'
     | 'projection-unavailable'
     | 'saved-preparation-cancelled'
@@ -96,6 +103,8 @@ export type PatternImportDxfPhaseECadTableZeroOperationSavedChoicesResultV1 =
       blocker: PatternImportDxfPhaseECadTableZeroOperationSavedBlockerV1;
     }>;
 
+type SuccessfulSelection = Extract<DxfProductPhaseDSizeSelectionResultV1, { ok: true }>;
+
 export type PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1 =
   | Readonly<{
       ok: true;
@@ -105,8 +114,10 @@ export type PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1 
       preparationGeneration: number;
       importGeneration: number;
       choices: readonly PatternImportDxfPhaseECadTableZeroOperationFreshChoiceV1[];
+      selection: SuccessfulSelection;
       catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
       projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
+      draftCadCompileSource: PatternImportDxfPhaseEDraftCadCompileSourceV1;
       authoringAuthority: PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1;
       blocker: null;
       claims: typeof PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_SAVED_PREPARATION_CLAIMS_V1;
@@ -119,8 +130,10 @@ export type PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1 
       preparationGeneration: number | null;
       importGeneration: number | null;
       choices: readonly PatternImportDxfPhaseECadTableZeroOperationFreshChoiceV1[];
+      selection: null;
       catalog: null;
       projection: null;
+      draftCadCompileSource: null;
       authoringAuthority: null;
       blocker: PatternImportDxfPhaseECadTableZeroOperationSavedBlockerV1;
       claims: typeof PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_SAVED_PREPARATION_CLAIMS_V1;
@@ -245,8 +258,10 @@ function blockedPreparation(
       ? request.generation.importGeneration
       : null,
     choices: Object.freeze([...choices]),
+    selection: null,
     catalog: null,
     projection: null,
+    draftCadCompileSource: null,
     authoringAuthority: null,
     blocker: issue,
     claims: PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_SAVED_PREPARATION_CLAIMS_V1,
@@ -446,6 +461,16 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
           projection.blockers[0]?.detail ?? 'Exact saved Assembly projection is unavailable.',
         ),
       );
+    const draftCadCompileSource = createPatternImportDxfPhaseEDraftCadCompileSourceV1(draft);
+    if (!draftCadCompileSource)
+      return blockedPreparation(
+        request,
+        choices.choices,
+        blocker(
+          'draft-cad-compile-source-unavailable',
+          'The verified saved DXF has no detached raw-free Draft CAD compile source.',
+        ),
+      );
     if (!isPatternImportDxfPhaseECadTableZeroOperationGenerationTicketCurrentV1(request.generation))
       return blockedPreparation(
         request,
@@ -488,8 +513,10 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
       preparationGeneration: request.generation.preparationGeneration,
       importGeneration: request.generation.importGeneration,
       choices: choices.choices,
+      selection: selection.selection,
       catalog: catalogResult.catalog,
       projection: projection.projection,
+      draftCadCompileSource,
       authoringAuthority,
       blocker: null,
       claims: PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_SAVED_PREPARATION_CLAIMS_V1,

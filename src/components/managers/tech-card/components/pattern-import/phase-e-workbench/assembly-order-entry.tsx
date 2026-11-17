@@ -74,6 +74,12 @@ import type { PatternImportDxfProductCompositeSidecarApplicationTransactionV4 } 
 import { projectPatternImportDxfPhaseECadWorkbenchColorwaysV1 } from '../phase-e-workbench-v2/cad-workbench-bom-visual-authority-v1';
 import { PatternImportDxfPhaseECadTableZeroOperationProductionMountV1 } from '../phase-e-workbench-v2/cad-table-zero-operation-production-mount-v1';
 import { preparePatternImportDxfPhaseECadMannequinSavedAllScopeStagingV1 } from '../phase-e-workbench-v2/cad-mannequin-saved-all-scope-staging-v1';
+import {
+  PATTERN_IMPORT_DXF_PHASE_E_CAD_SAVED_MATERIAL_SCOPE_EDITOR_PREPARATION_CLAIMS_V1,
+  preparePatternImportDxfPhaseECadSavedMaterialScopeEditorsV1,
+} from '../phase-e-workbench-v2/cad-saved-material-scope-editor-preparation-v1';
+import { createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1 } from '../phase-e-workbench-v2/cad-table-zero-operation-generation-owner-v1';
+import { preparePatternImportDxfPhaseECadTableZeroOperationSavedV1 } from '../phase-e-workbench-v2/cad-table-zero-operation-saved-preparation-v1';
 import { createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1 } from '../phase-e-workbench-v2/zero-operation-saved-card-authority-v1';
 import { PatternImportDxfPhaseECadTableDraftOperationsPanelV1 } from '../phase-e-workbench-v2/cad-table-draft-operations-panel-v1';
 import type { PatternImportDxfPhaseECadTableDraftOperationSessionBridgeResultV1 } from '../phase-e-workbench-v2/cad-table-draft-operation-session-bridge-v1';
@@ -1464,6 +1470,78 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     },
     [orderSizeIds, savedAllScopeAuthority, savedCard.data, savedProjection, sizeNameById],
   );
+  const prepareSavedAllMaterialScopeEditors = useCallback<
+    NonNullable<PatternImportDxfPhaseEMultiseamSavedSessionV2['prepareAllMaterialScopeEditors']>
+  >(
+    async ({ scopeKey, sizeToken, signal }) => {
+      const unavailable = (detail: string) =>
+        Object.freeze({
+          ok: false as const,
+          techCardId: savedCard.data?.id ?? null,
+          sizeToken: sizeToken || null,
+          catalog: null,
+          scopes: Object.freeze([]) as readonly [],
+          crossScopeSeamingAvailable: false as const,
+          pressAuthoringAvailable: false as const,
+          blocker: Object.freeze({
+            scopeKey: scopeKey || null,
+            code: 'saved-editor-scope-preparation-blocked' as const,
+            detail,
+          }),
+          claims: PATTERN_IMPORT_DXF_PHASE_E_CAD_SAVED_MATERIAL_SCOPE_EDITOR_PREPARATION_CLAIMS_V1,
+        });
+      if (!savedProjection.ok || !savedCard.data)
+        return unavailable('The current saved card projection is unavailable.');
+      const generationOwner = createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1();
+      try {
+        const generation = generationOwner.beginSaved(
+          `saved-editor-active:${savedCard.data.id}:${savedCard.data.lockVersion}:${sizeToken}:${scopeKey}`,
+        );
+        const active = await preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
+          {
+            techCard: savedCard.data,
+            orderSizeIds,
+            sizeNameById,
+            scopeKey,
+            sizeToken,
+            authority: savedAllScopeAuthority,
+            generation,
+          },
+          signal,
+        );
+        if (!active.ok)
+          return unavailable(
+            `The active saved material slot could not be reconstructed: ${active.blocker.detail}`,
+          );
+        return preparePatternImportDxfPhaseECadSavedMaterialScopeEditorsV1({
+          techCard: savedCard.data,
+          orderSizeIds,
+          sizeNameById,
+          sizeToken,
+          active: {
+            scopeKey: active.scopeKey,
+            sizeToken: active.sizeToken,
+            sourceRevision: active.preparationGeneration,
+            selection: active.selection,
+            catalog: active.catalog,
+            projection: active.projection,
+            compileSource: active.draftCadCompileSource,
+          },
+          authority: savedAllScopeAuthority,
+          signal,
+        });
+      } catch (error) {
+        return unavailable(
+          error instanceof Error
+            ? `Saved material editors could not be prepared: ${error.message}`
+            : 'Saved material editors could not be prepared.',
+        );
+      } finally {
+        generationOwner.dispose();
+      }
+    },
+    [orderSizeIds, savedAllScopeAuthority, savedCard.data, savedProjection, sizeNameById],
+  );
   const savedSession = useMemo<PatternImportDxfPhaseEMultiseamSavedSessionV2 | null>(
     () =>
       savedProjection.ok && savedRuntimeResolution.runtime && savedGarmentCompileOwner
@@ -1472,12 +1550,14 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
             row: savedProjection.row,
             selectedOperationNumber: savedProjection.selectedOperationNumber,
             prepareAllMaterialScopeStaging: prepareSavedAllMaterialScopeStaging,
+            prepareAllMaterialScopeEditors: prepareSavedAllMaterialScopeEditors,
             downstream: savedGarmentCompileOwner.downstream,
             ...(savedConfirm ? { onConfirm: savedConfirm } : {}),
           })
         : null,
     [
       prepareSavedAllMaterialScopeStaging,
+      prepareSavedAllMaterialScopeEditors,
       savedConfirm,
       savedGarmentCompileOwner,
       savedProjection,
