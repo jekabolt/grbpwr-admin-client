@@ -48,6 +48,29 @@ type SourceReadOptions = Readonly<{
   expectedCompleteSourceSha256?: string;
 }>;
 
+function exactRowOf(row: ExactPatternRow): ExactPatternRow {
+  const {
+    techCardId,
+    scopeKey,
+    patternLineKey,
+    revision,
+    cardLockVersion,
+    url,
+    sizeBytes,
+    sha256,
+  } = row;
+  return Object.freeze({
+    techCardId,
+    scopeKey,
+    patternLineKey,
+    revision,
+    cardLockVersion,
+    url,
+    sizeBytes,
+    sha256,
+  });
+}
+
 function positiveInteger(value: unknown): number {
   const parsed =
     typeof value === 'string' && /^[1-9][0-9]{0,15}$/.test(value) ? Number(value) : value;
@@ -169,7 +192,7 @@ export async function readCompleteSavedAssemblySourceV1(
   signal: AbortSignal,
 ): Promise<CompleteSavedAssemblySourceV1> {
   signal.throwIfAborted();
-  const anchorRow = { ...expectedAnchor };
+  const anchorRow = exactRowOf(expectedAnchor);
   const options = { ...expectedSource };
   const request: GetTechCardSavedAssemblySnapshotRequest = {
     techCardId: anchorRow.techCardId,
@@ -244,4 +267,37 @@ export async function readCompleteSavedAssemblySourceV1(
   });
   verifiedSources.add(verified);
   return verified;
+}
+
+/** Refreshes a member row against the same complete Assembly snapshot before its DXF is fetched. */
+export function createCompleteSavedAssemblyRowReaderV1(
+  source: CompleteSavedAssemblySourceV1,
+  createClient: (signal: AbortSignal) => Pick<AdminService, 'GetTechCardSavedAssemblySnapshot'>,
+) {
+  if (!isVerifiedCompleteSavedAssemblySourceV1(source))
+    throw new TypeError('A fresh verified complete Assembly source is required.');
+  const expectedSource = {
+    expectedServerAssemblyRevision: source.serverAssemblyRevision,
+    expectedCompleteSourceSha256: source.sourceSha256,
+  };
+  return async (expected: ExactPatternRow, signal: AbortSignal) => {
+    const currentExpected = exactRowOf(expected);
+    const rowMatches = (row: SourcePatternRow) =>
+      Object.entries(currentExpected).every(
+        ([key, value]) => row[key as keyof ExactPatternRow] === value,
+      );
+    if (!source.rows.some(rowMatches))
+      throw new TypeError(
+        'The requested pattern row is outside the verified complete Assembly source.',
+      );
+    const fresh = await readCompleteSavedAssemblySourceV1(
+      createClient(signal),
+      currentExpected,
+      expectedSource,
+      signal,
+    );
+    const row = fresh.rows.find(rowMatches);
+    if (!row) throw new TypeError('The requested Assembly pattern row changed before download.');
+    return Object.freeze({ row: currentExpected, downloadUrl: row.downloadUrl });
+  };
 }
