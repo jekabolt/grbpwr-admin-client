@@ -322,6 +322,84 @@ describe('Composite V6 arrangement persistence', () => {
       expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
     });
 
+    it('rejects a hostile row accessor without invoking its getter', async () => {
+      const row = storedV6();
+      let getterCalls = 0;
+      Object.defineProperty(row, 'sidecarSha256', {
+        enumerable: true,
+        get() {
+          getterCalls += 1;
+          return V6_SHA;
+        },
+      });
+      const test = rig({ gets: [{ semanticSidecar: row }] });
+
+      const result = await test.persistence.restore(restoreRequest(), new AbortController().signal);
+
+      expect(result).toMatchObject({ ok: false, blocker: { code: 'readback-invalid' } });
+      expect(getterCalls).toBe(0);
+      expect(codec.decodeV6).not.toHaveBeenCalled();
+      expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+    });
+
+    it('rejects symbols and unexpected fields on the stored row', async () => {
+      const row = { ...storedV6(), unexpected: 'field' };
+      Object.defineProperty(row, Symbol('hostile'), { enumerable: true, value: 'symbol' });
+      const test = rig({ gets: [{ semanticSidecar: row }] });
+
+      const result = await test.persistence.restore(restoreRequest(), new AbortController().signal);
+
+      expect(result).toMatchObject({ ok: false, blocker: { code: 'readback-invalid' } });
+      expect(codec.decodeV6).not.toHaveBeenCalled();
+      expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+    });
+
+    it('uses the immediate row snapshot when the caller mutates during digest', async () => {
+      const row = storedV6();
+      let digestCalls = 0;
+      const digest = vi.fn(async (...args: Parameters<SubtleCrypto['digest']>) => {
+        const value = await globalThis.crypto.subtle.digest(...args);
+        digestCalls += 1;
+        if (digestCalls === 2) {
+          Object.assign(row, {
+            sidecarSha256: hash('f'),
+            patternVersion: 999,
+            postSaveReceiptSha256: hash('f'),
+          });
+        }
+        return value;
+      });
+      const test = rig({
+        gets: [{ semanticSidecar: row }],
+        crypto: { subtle: { digest } as unknown as SubtleCrypto },
+      });
+
+      const result = await test.persistence.restore(restoreRequest(), new AbortController().signal);
+
+      expect(result).toMatchObject({ ok: true, sidecarSha256: V6_SHA });
+      expect(row.sidecarSha256).toBe(hash('f'));
+      expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+    });
+
+    it('uses the immediate row snapshot when the caller mutates during decode', async () => {
+      const row = storedV6();
+      codec.decodeV6.mockImplementationOnce(async () => {
+        Object.assign(row, {
+          sidecarSha256: hash('f'),
+          patternVersion: 999,
+          postSaveReceiptSha256: hash('f'),
+        });
+        return decodedV6();
+      });
+      const test = rig({ gets: [{ semanticSidecar: row }] });
+
+      const result = await test.persistence.restore(restoreRequest(), new AbortController().signal);
+
+      expect(result).toMatchObject({ ok: true, sidecarSha256: V6_SHA });
+      expect(row.patternVersion).toBe(999);
+      expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+    });
+
     it('rejects a stored SHA that differs from the exact bytes', async () => {
       const test = rig({
         gets: [
