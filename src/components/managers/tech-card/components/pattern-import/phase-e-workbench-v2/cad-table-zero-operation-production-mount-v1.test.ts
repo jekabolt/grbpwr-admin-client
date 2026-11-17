@@ -21,7 +21,10 @@ import {
   createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefreshV1,
   isPatternImportDxfPhaseECadTableZeroOperationAuthoringReadyV1,
   preparePatternImportDxfPhaseECadTableZeroOperationSavedFailoverV1,
+  readPatternImportDxfPhaseECurrentSavedCardGateV1,
   resolvePatternImportDxfPhaseECadTableZeroOperationAfterFreshV1,
+  resolvePatternImportDxfPhaseECadTableZeroOperationVisibleBlockerV1,
+  routePatternImportDxfPhaseECadTableAfterCurrentSavedCardGateV1,
 } from './cad-table-zero-operation-production-mount-v1';
 import { listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1 } from './cad-table-zero-operation-saved-preparation-v1';
 import type { PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1 } from './cad-table-zero-operation-saved-preparation-v1';
@@ -139,6 +142,269 @@ function cachedCardWithoutRow(techCardId: number): common_TechCard {
     },
   } as unknown as common_TechCard;
 }
+
+function freshChoices(techCardId: number, ok = true) {
+  return ok
+    ? (Object.freeze({
+        ok: true as const,
+        techCardId,
+        importGeneration: 37,
+        choices: Object.freeze([
+          Object.freeze({
+            scopeKey: 'main',
+            sizes: Object.freeze([Object.freeze({ sizeToken: 'M' })]),
+          }),
+        ]),
+        blocker: null,
+      }) as never)
+    : (Object.freeze({
+        ok: false as const,
+        techCardId,
+        importGeneration: null,
+        choices: Object.freeze([]),
+        blocker: Object.freeze({ code: 'fresh-session-invalid', detail: FRESH_DETAIL }),
+      }) as never);
+}
+
+describe('zero-operation current saved-card gate', () => {
+  it('replaces a stale cached projection with the independently read saved DXF', async () => {
+    const prepared = await genuineSavedPrepared();
+    const currentCard = savedCardWithRow(prepared);
+    const sizeNameById = new Map([[7, 'M']]);
+    const cachedChoices = listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
+      cachedCardWithoutRow(prepared.techCardId),
+      (ids) => ids,
+      sizeNameById,
+    );
+    const resolveCurrentCard = vi.fn(async () => currentCard);
+
+    const gate = await readPatternImportDxfPhaseECurrentSavedCardGateV1({
+      techCardId: prepared.techCardId,
+      savedAuthority: { resolveCurrentCard } as never,
+      orderSizeIds: (ids) => ids,
+      sizeNameById,
+      signal: new AbortController().signal,
+    });
+    const routed = routePatternImportDxfPhaseECadTableAfterCurrentSavedCardGateV1({
+      techCardId: prepared.techCardId,
+      freshChoices: freshChoices(prepared.techCardId),
+      cachedSavedChoices: cachedChoices,
+      currentSavedCardGate: gate,
+    });
+
+    expect(resolveCurrentCard).toHaveBeenCalledOnce();
+    expect(gate).toMatchObject({ ok: true, techCard: currentCard, choices: { ok: true } });
+    expect(routed).toMatchObject({ mode: 'saved', choices: { ok: true } });
+  });
+
+  it('opens a saved DXF after reload without any Phase-E card session', async () => {
+    const prepared = await genuineSavedPrepared();
+    const currentCard = savedCardWithRow(prepared);
+    const sizeNameById = new Map([[7, 'M']]);
+    const cachedChoices = listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
+      null,
+      (ids) => ids,
+      sizeNameById,
+    );
+    const gate = await readPatternImportDxfPhaseECurrentSavedCardGateV1({
+      techCardId: prepared.techCardId,
+      savedAuthority: { resolveCurrentCard: vi.fn(async () => currentCard) } as never,
+      orderSizeIds: (ids) => ids,
+      sizeNameById,
+      signal: new AbortController().signal,
+    });
+
+    const routed = routePatternImportDxfPhaseECadTableAfterCurrentSavedCardGateV1({
+      techCardId: prepared.techCardId,
+      freshChoices: freshChoices(prepared.techCardId, false),
+      cachedSavedChoices: cachedChoices,
+      currentSavedCardGate: gate,
+    });
+
+    expect(routed).toMatchObject({ mode: 'saved', choices: { ok: true } });
+    expect(JSON.stringify(routed)).not.toContain(FRESH_DETAIL);
+  });
+
+  it('reports the authoritative saved-row blocker when the current card has no DXF', async () => {
+    const techCardId = 6;
+    const sizeNameById = new Map([[7, 'M']]);
+    const cachedChoices = listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
+      null,
+      (ids) => ids,
+      sizeNameById,
+    );
+    const gate = await readPatternImportDxfPhaseECurrentSavedCardGateV1({
+      techCardId,
+      savedAuthority: {
+        resolveCurrentCard: vi.fn(async () => cachedCardWithoutRow(techCardId)),
+      } as never,
+      orderSizeIds: (ids) => ids,
+      sizeNameById,
+      signal: new AbortController().signal,
+    });
+    const routed = routePatternImportDxfPhaseECadTableAfterCurrentSavedCardGateV1({
+      techCardId,
+      freshChoices: freshChoices(techCardId, false),
+      cachedSavedChoices: cachedChoices,
+      currentSavedCardGate: gate,
+    });
+
+    expect(gate).toMatchObject({ ok: true, choices: { ok: false } });
+    expect(routed).toMatchObject({
+      mode: 'saved',
+      choices: { ok: false, blocker: { code: 'saved-pattern-unavailable' } },
+    });
+    expect(JSON.stringify(routed)).not.toContain(FRESH_DETAIL);
+  });
+
+  it('remaps the final fresh-session blocker to the authoritative saved-pattern blocker', () => {
+    const techCardId = 6;
+    const choices = listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
+      cachedCardWithoutRow(techCardId),
+      (ids) => ids,
+      new Map([[7, 'M']]),
+    );
+    const blocker = resolvePatternImportDxfPhaseECadTableZeroOperationVisibleBlockerV1({
+      techCardId,
+      savedCardGateLoading: false,
+      preparationBlocker: { code: 'fresh-session-invalid', detail: FRESH_DETAIL },
+      currentSavedCardGate: {
+        ok: true,
+        techCard: cachedCardWithoutRow(techCardId),
+        hasCompleteSavedDxfRow: false,
+        choices,
+      },
+    });
+
+    expect(blocker).toMatchObject({ code: 'saved-pattern-unavailable' });
+    expect(JSON.stringify(blocker)).not.toContain(FRESH_DETAIL);
+  });
+
+  it('never renders a fresh-session blocker after the current card proves a saved row exists', async () => {
+    const prepared = await genuineSavedPrepared();
+    const techCard = savedCardWithRow(prepared);
+    const choices = listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
+      techCard,
+      (ids) => ids,
+      new Map([[7, 'M']]),
+    );
+    const blocker = resolvePatternImportDxfPhaseECadTableZeroOperationVisibleBlockerV1({
+      techCardId: prepared.techCardId,
+      savedCardGateLoading: false,
+      preparationBlocker: { code: 'fresh-session-invalid', detail: FRESH_DETAIL },
+      currentSavedCardGate: { ok: true, techCard, hasCompleteSavedDxfRow: true, choices },
+    });
+
+    expect(choices.ok).toBe(true);
+    expect(blocker).toBeNull();
+  });
+
+  it('admits a valid fresh session only after the current card proves it has no saved DXF', async () => {
+    const techCardId = 6;
+    const sizeNameById = new Map([[7, 'M']]);
+    const cachedChoices = listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
+      cachedCardWithoutRow(techCardId),
+      (ids) => ids,
+      sizeNameById,
+    );
+    const pendingRoute = routePatternImportDxfPhaseECadTableAfterCurrentSavedCardGateV1({
+      techCardId,
+      freshChoices: freshChoices(techCardId),
+      cachedSavedChoices: cachedChoices,
+      currentSavedCardGate: null,
+    });
+    const gate = await readPatternImportDxfPhaseECurrentSavedCardGateV1({
+      techCardId,
+      savedAuthority: {
+        resolveCurrentCard: vi.fn(async () => cachedCardWithoutRow(techCardId)),
+      } as never,
+      orderSizeIds: (ids) => ids,
+      sizeNameById,
+      signal: new AbortController().signal,
+    });
+    const admittedRoute = routePatternImportDxfPhaseECadTableAfterCurrentSavedCardGateV1({
+      techCardId,
+      freshChoices: freshChoices(techCardId),
+      cachedSavedChoices: cachedChoices,
+      currentSavedCardGate: gate,
+    });
+
+    expect(pendingRoute).toMatchObject({ mode: 'saved' });
+    expect(admittedRoute).toMatchObject({ mode: 'fresh' });
+  });
+
+  it('does not admit fresh when the current card has a complete saved row but saved choices are blocked', async () => {
+    const prepared = await genuineSavedPrepared();
+    const withRow = savedCardWithRow(prepared);
+    const currentCard = {
+      ...withRow,
+      techCard: { ...withRow.techCard!, sizeIds: [] },
+    } as common_TechCard;
+    const cachedChoices = listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
+      null,
+      (ids) => ids,
+      new Map([[7, 'M']]),
+    );
+    const gate = await readPatternImportDxfPhaseECurrentSavedCardGateV1({
+      techCardId: prepared.techCardId,
+      savedAuthority: {
+        resolveCurrentCard: vi.fn(async () => currentCard),
+      } as never,
+      orderSizeIds: (ids) => ids,
+      sizeNameById: new Map([[7, 'M']]),
+      signal: new AbortController().signal,
+    });
+    const routed = routePatternImportDxfPhaseECadTableAfterCurrentSavedCardGateV1({
+      techCardId: prepared.techCardId,
+      freshChoices: freshChoices(prepared.techCardId),
+      cachedSavedChoices: cachedChoices,
+      currentSavedCardGate: gate,
+    });
+
+    expect(gate).toMatchObject({
+      ok: true,
+      hasCompleteSavedDxfRow: true,
+      choices: { ok: false, blocker: { code: 'size-token-unavailable' } },
+    });
+    expect(routed).toMatchObject({
+      mode: 'saved',
+      choices: { ok: false, blocker: { code: 'size-token-unavailable' } },
+    });
+  });
+
+  it('keeps fresh blocked when the independent read is aborted', async () => {
+    const techCardId = 6;
+    const sizeNameById = new Map([[7, 'M']]);
+    const controller = new AbortController();
+    controller.abort();
+    const cachedChoices = listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
+      cachedCardWithoutRow(techCardId),
+      (ids) => ids,
+      sizeNameById,
+    );
+    const gate = await readPatternImportDxfPhaseECurrentSavedCardGateV1({
+      techCardId,
+      savedAuthority: {
+        resolveCurrentCard: vi.fn(async () => cachedCardWithoutRow(techCardId)),
+      } as never,
+      orderSizeIds: (ids) => ids,
+      sizeNameById,
+      signal: controller.signal,
+    });
+    const routed = routePatternImportDxfPhaseECadTableAfterCurrentSavedCardGateV1({
+      techCardId,
+      freshChoices: freshChoices(techCardId),
+      cachedSavedChoices: cachedChoices,
+      currentSavedCardGate: gate,
+    });
+
+    expect(gate).toMatchObject({
+      ok: false,
+      choices: { blocker: { code: 'saved-card-current-read-failed' } },
+    });
+    expect(routed).toMatchObject({ mode: 'saved' });
+  });
+});
 
 async function genuineControllerAuthority() {
   const prepared = await genuineSavedPrepared(37, 12);

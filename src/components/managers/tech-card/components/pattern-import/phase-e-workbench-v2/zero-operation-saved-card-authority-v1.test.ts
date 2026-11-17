@@ -160,6 +160,38 @@ describe('zero-operation saved card authority', () => {
     expect(readTechCard).toHaveBeenCalledTimes(2);
   });
 
+  it('independently reads a positive current card without requiring a Phase-E commit receipt', async () => {
+    const current = card();
+    const readTechCard = vi.fn(async () => current);
+    const runtime = createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1({
+      orderSizeIds,
+      sizeNameById,
+      readTechCard,
+    });
+
+    await expect(runtime.resolveCurrentCard(6, new AbortController().signal)).resolves.toBe(
+      current,
+    );
+    expect(readTechCard).toHaveBeenCalledWith(6);
+  });
+
+  it('rejects an invalid id and an aborted independent current-card read', async () => {
+    const readTechCard = vi.fn(async () => card());
+    const runtime = createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1({
+      orderSizeIds,
+      sizeNameById,
+      readTechCard,
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(runtime.resolveCurrentCard(0, new AbortController().signal)).rejects.toThrow(
+      /positive saved card id/i,
+    );
+    await expect(runtime.resolveCurrentCard(6, controller.signal)).rejects.toThrow(/cancelled/i);
+    expect(readTechCard).not.toHaveBeenCalled();
+  });
+
   it('fails closed when row revision or card lock changes between reads', async () => {
     const reads = [card(), card(8, 14)];
     const runtime = createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1({
