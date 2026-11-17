@@ -3,7 +3,7 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 import { ROUTES } from 'constants/routes';
 import { useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { BackLink, Text } from 'ui';
+import { BackLink, Button, Text } from 'ui';
 import { TechCardForm } from './components';
 import { TechCardStagingProvider } from './components/useTechCardStaging';
 
@@ -11,11 +11,16 @@ import { TechCardStagingProvider } from './components/useTechCardStaging';
 // start a new form, not keep the one that created it.
 let newCardSeq = 0;
 
+function requestStatus(error: unknown): number | null {
+  if (!error || typeof error !== 'object' || !('status' in error)) return null;
+  return typeof error.status === 'number' ? error.status : null;
+}
+
 export function TechCard() {
   const { id } = useParams<{ id: string }>();
   const isEditMode = !!id;
   const numId = id ? parseInt(id, 10) : undefined;
-  const { data, isLoading } = useTechCard(numId);
+  const { data, error, isError, isFetching, isLoading, refetch } = useTechCard(numId);
 
   /* ═══ A CARD CREATED ON THIS PAGE KEEPS ITS FORM (onboarding S4, amendment A3) ═════════════════
      The router keeps this element mounted from /add-tech-card to /tech-cards/:id (both routes render
@@ -43,6 +48,28 @@ export function TechCard() {
         <Text variant='inactive' className='animate-pulse'>
           loading tech card…
         </Text>
+      </div>
+    );
+  }
+
+  // A gateway timeout, expired upstream or offline backend is not a missing card. Keep the real
+  // 404 empty state below, but give transport/server failures an explicit retry instead of lying
+  // that the card does not exist. `!data` is essential: a failed background refetch must leave an
+  // already-open editor (and its unsaved work) mounted.
+  if (isEditMode && !data && isError && requestStatus(error) !== 404) {
+    return (
+      <div className='flex flex-col items-center gap-3 py-20'>
+        <Text variant='error'>couldn&apos;t load this tech card.</Text>
+        <Button
+          type='button'
+          variant='secondary'
+          size='lg'
+          disabled={isFetching}
+          onClick={() => void refetch()}
+        >
+          retry
+        </Button>
+        <BackLink to={ROUTES.techCards}>tech cards</BackLink>
       </div>
     );
   }
