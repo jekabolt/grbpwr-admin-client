@@ -1,5 +1,9 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { abortableAdminService } from 'api/api';
 import type { TechCardPatternSemanticSidecar } from 'api/proto-http/admin';
+import { resolveModelOpenReferencePreviewInputV1 } from 'components/managers/model/components/model-open-reference-preview-input-v1';
+import { modelCardMannequinInputV1 } from 'components/managers/models/components/model-card-mannequin-input-v1';
+import { createSavedModelDisplayedTriangleBodyFreshQueryReaderV2 } from 'components/managers/models/components/saved-model-displayed-triangle-body-query-session-v2';
 import {
   bindingScopes,
   scopeKeyOfBinding,
@@ -128,9 +132,7 @@ async function carrier(sidecar: TechCardPatternSemanticSidecar | undefined) {
   }
 }
 
-export function AssemblyCarrierDevPage() {
-  const [params] = useSearchParams();
-  const cardId = Number(params.get('card') ?? 156);
+function AssemblyCarrierDevCardView({ cardId }: Readonly<{ cardId: number }>) {
   const [output, setOutput] = useState('No request made.');
   const [pending, setPending] = useState(false);
   const controller = useRef<AbortController | null>(null);
@@ -331,4 +333,78 @@ export function AssemblyCarrierDevPage() {
       </pre>
     </div>
   );
+}
+
+function SavedModelDiagnostic({ modelId }: Readonly<{ modelId: number }>) {
+  const queryClient = useQueryClient();
+  const [output, setOutput] = useState('No request made.');
+  const [pending, setPending] = useState(false);
+  const controller = useRef<AbortController | null>(null);
+  useEffect(() => () => controller.current?.abort(), []);
+
+  async function read() {
+    if (!import.meta.env.DEV || !Number.isSafeInteger(modelId) || modelId < 1) return;
+    controller.current?.abort();
+    const current = new AbortController();
+    controller.current = current;
+    setPending(true);
+    const report = { modelId, readAt: new Date().toISOString(), writes: 0 };
+    try {
+      const readFresh = createSavedModelDisplayedTriangleBodyFreshQueryReaderV2(queryClient);
+      const model = await readFresh(modelId, current.signal);
+      if (current.signal.aborted) return;
+      if (model?.id !== modelId) throw new Error('Model read failed.');
+      const input = modelCardMannequinInputV1(model);
+      const resolution = resolveModelOpenReferencePreviewInputV1(input);
+      setOutput(
+        bounded({
+          ...report,
+          validGender:
+            input.gender === 'GENDER_ENUM_FEMALE' ||
+            input.gender === 'GENDER_ENUM_MALE' ||
+            input.gender === 'GENDER_ENUM_UNISEX',
+          resolved: resolution.ok,
+          diagnostics: resolution.diagnostics
+            .slice(0, 24)
+            .map(({ severity, code, canonicalKey }) => ({
+              severity,
+              code,
+              canonicalKey,
+            })),
+        }),
+      );
+    } catch {
+      if (!current.signal.aborted) setOutput(bounded({ ...report, status: 'model-read-failed' }));
+    } finally {
+      if (!current.signal.aborted) setPending(false);
+    }
+  }
+
+  return (
+    <div className='space-y-4 p-4'>
+      <Text component='h1'>Saved mannequin diagnostic · model {modelId}</Text>
+      <Button type='button' disabled={pending} onClick={() => void read()}>
+        {pending ? 'Reading…' : 'Read saved model'}
+      </Button>
+      <pre
+        className='max-h-[75vh] overflow-auto whitespace-pre-wrap text-micro'
+        aria-label='Saved mannequin diagnostic'
+      >
+        {output}
+      </pre>
+    </div>
+  );
+}
+
+export function AssemblyCarrierDevPage() {
+  const [params] = useSearchParams();
+  if (!import.meta.env.DEV) return null;
+  const model = params.get('model');
+  if (model !== null) {
+    const modelId = Number(model);
+    if (!Number.isSafeInteger(modelId) || modelId < 1)
+      return <Text component='p'>Enter a positive model ID.</Text>;
+    return <SavedModelDiagnostic key={modelId} modelId={modelId} />;
+  }
+  return <AssemblyCarrierDevCardView cardId={Number(params.get('card') ?? 156)} />;
 }
