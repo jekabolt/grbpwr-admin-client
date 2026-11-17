@@ -57,6 +57,10 @@ export interface AnsurSubjectRequest {
   /** Wire-name form fields in mm, exactly as the model form would send them. */
   readonly fields: Readonly<Record<string, number>>;
   readonly sourceRevision: string;
+  /** Mirrors production (true): untyped fields get ANSUR II guesses. false = typed fields only. */
+  readonly estimateUntypedFields?: boolean;
+  /** Mirrors production (true): waist/hip widened behind the self-intersection gate. */
+  readonly widenSafeRange?: boolean;
 }
 
 /** Everything is in mm; null = could not be measured on this body. */
@@ -121,6 +125,9 @@ export interface AnsurSubjectResult {
   readonly anchorFailure: string;
   /** Neck stage codes from the beta runtime, to explain a notApplied neck. */
   readonly neckCodes?: readonly string[];
+  /** Untyped fields shaped from an ANSUR II guess, and the runtime's estimate codes. */
+  readonly estimated?: readonly string[];
+  readonly estimateCodes?: readonly string[];
   readonly elapsedMs: number;
 }
 
@@ -138,7 +145,10 @@ function basisFor(kind: AnsurBasisKind) {
 }
 
 /** The engine's own shoulder-breadth chord vertices (fixed per base; see chest-shoulder research). */
-const shoulderVertexCache = new Map<AnsurBasisKind, { negative: number; positive: number } | null>();
+const shoulderVertexCache = new Map<
+  AnsurBasisKind,
+  { negative: number; positive: number } | null
+>();
 let torsoBundlePromise: ReturnType<typeof loadMakeHumanTorsoShapeDeltaBundleV1> | null = null;
 async function engineShoulderVertices(
   kind: AnsurBasisKind,
@@ -152,22 +162,29 @@ async function engineShoulderVertices(
       heightMm,
       bundle: await torsoBundlePromise,
     }).modes;
-    const pair = modes.find(({ measurementKey }) => measurementKey === 'shoulderBreadthMm')
-      ?.shoulderVertices;
-    shoulderVertexCache.set(kind, pair ? { negative: pair.negative, positive: pair.positive } : null);
+    const pair = modes.find(
+      ({ measurementKey }) => measurementKey === 'shoulderBreadthMm',
+    )?.shoulderVertices;
+    shoulderVertexCache.set(
+      kind,
+      pair ? { negative: pair.negative, positive: pair.positive } : null,
+    );
   }
   return shoulderVertexCache.get(kind) ?? null;
 }
 
-let limbBundlePromise: ReturnType<typeof loadMakeHumanLimbCircumferenceDeltaBundleV1> | null =
-  null;
+let limbBundlePromise: ReturnType<typeof loadMakeHumanLimbCircumferenceDeltaBundleV1> | null = null;
 
 /** Exact copy of the preview's `buildModelOpenReferenceProxyRuntimeV1` catch contract. */
 async function buildProxyRuntime(options: {
   basis: Awaited<ReturnType<typeof loadMakeHumanOpenReferenceBasisV1>>;
   measurements: Parameters<typeof createMeasurementBodyFrameV2>[0]['measurements'];
   openReference: ReturnType<typeof createMeasurementOpenReferenceUniformHeightDisplayV1>;
-}): Promise<{ runtime: MeasurementOpenReferenceUniformWaistHipRuntimeResultV1 | null; error: string }> {
+  widenSafeRange: boolean;
+}): Promise<{
+  runtime: MeasurementOpenReferenceUniformWaistHipRuntimeResultV1 | null;
+  error: string;
+}> {
   try {
     return {
       runtime: await createMeasurementOpenReferenceUniformWaistHipRuntimeV1(options),
@@ -251,7 +268,8 @@ function exactMirrorFailure(positionsM: Float32Array): string {
   const snapped = midlineSnapped(positionsM);
   const key = (x: number, y: number, z: number) => `${x === 0 ? 0 : x},${y},${z}`;
   const all = new Set<string>();
-  for (let o = 0; o < snapped.length; o += 3) all.add(key(snapped[o], snapped[o + 1], snapped[o + 2]));
+  for (let o = 0; o < snapped.length; o += 3)
+    all.add(key(snapped[o], snapped[o + 1], snapped[o + 2]));
   let missing = 0;
   let first = -1;
   for (let o = 0; o < snapped.length; o += 3) {
@@ -406,7 +424,10 @@ function measureBody(options: {
 
   // Chest: the guide's plane (bust apex level, at least 3 cm under the underarm).
   const chestY = anchors
-    ? Math.min((anchors.at('apex-l')[1] + anchors.at('apex-r')[1]) / 2, anchors.at('underarm-l')[1] - 0.03)
+    ? Math.min(
+        (anchors.at('apex-l')[1] + anchors.at('apex-r')[1]) / 2,
+        anchors.at('underarm-l')[1] - 0.03,
+      )
     : beta?.torsoSectionStations?.chest?.[1];
   const chestLoop = horizontal(mesh, chestY);
   const chestEngineLoop = horizontal(mesh, beta?.torsoSectionStations?.chest?.[1]);
@@ -421,7 +442,12 @@ function measureBody(options: {
 
   const neckStation = beta?.neckSectionStation;
   const neckLoop = neckStation
-    ? section(mesh, neckStation.originM as Vec3, neckStation.normal as Vec3, neckStation.originM as Vec3)
+    ? section(
+        mesh,
+        neckStation.originM as Vec3,
+        neckStation.normal as Vec3,
+        neckStation.originM as Vec3,
+      )
     : null;
 
   const modes = beta?.limbSectionModes?.length ? beta.limbSectionModes : options.limbModes;
@@ -474,13 +500,21 @@ function measureBody(options: {
       beta?.torsoSectionStations?.chest == null
         ? null
         : (beta.torsoSectionStations.chest[1] - floorY) * 1000,
-    apexYMm: anchors ? ((anchors.at('apex-l')[1] + anchors.at('apex-r')[1]) / 2 - floorY) * 1000 : null,
+    apexYMm: anchors
+      ? ((anchors.at('apex-l')[1] + anchors.at('apex-r')[1]) / 2 - floorY) * 1000
+      : null,
     underarmYMm: anchors ? (anchors.at('underarm-l')[1] - floorY) * 1000 : null,
     chestEngineBreadthMm: extent(chestEngineLoop, 0),
     shoulderBreadthEngineMm: options.shoulderVertices
       ? distance(
-          pointPosition(meshSurfaceVertexPointV1(options.shoulderVertices.negative), mesh.positions),
-          pointPosition(meshSurfaceVertexPointV1(options.shoulderVertices.positive), mesh.positions),
+          pointPosition(
+            meshSurfaceVertexPointV1(options.shoulderVertices.negative),
+            mesh.positions,
+          ),
+          pointPosition(
+            meshSurfaceVertexPointV1(options.shoulderVertices.positive),
+            mesh.positions,
+          ),
         ) * 1000
       : null,
     chestEngineDepthMm: extent(chestEngineLoop, 2),
@@ -504,7 +538,10 @@ function implausibleChecks(body: AnsurMeasuredBody, heightMm: number): string[] 
   for (const key of need) if (body[key] == null) out.push(`missing:${key}`);
   if (body.statureMm != null && Math.abs(body.statureMm - heightMm) > 2) out.push('stature-off');
   const s = body.statureMm ?? heightMm;
-  if (body.crotchHeightMm != null && (body.crotchHeightMm < 0.35 * s || body.crotchHeightMm > 0.56 * s))
+  if (
+    body.crotchHeightMm != null &&
+    (body.crotchHeightMm < 0.35 * s || body.crotchHeightMm > 0.56 * s)
+  )
     out.push('crotch-height');
   if (
     body.cervicaleHeightMm != null &&
@@ -567,7 +604,12 @@ export async function runAnsurSubject(request: AnsurSubjectRequest): Promise<Ans
     pose: 'A',
   });
   const openReference = createMeasurementOpenReferenceUniformHeightDisplayV1({ basis, frame });
-  const proxy = await buildProxyRuntime({ basis, measurements, openReference });
+  const proxy = await buildProxyRuntime({
+    basis,
+    measurements,
+    openReference,
+    widenSafeRange: request.widenSafeRange ?? true,
+  });
   if (!proxy.runtime) {
     return done({ outcome: 'waist-hip-error', message: proxy.error });
   }
@@ -580,6 +622,7 @@ export async function runAnsurSubject(request: AnsurSubjectRequest): Promise<Ans
       basis,
       measurements,
       waistHipRuntime: proxy.runtime,
+      estimateUntypedFields: request.estimateUntypedFields ?? true,
     });
   } catch (reason: unknown) {
     if (reason instanceof MeasurementOpenReferenceBetaShapeSafetyErrorV1) {
@@ -639,6 +682,10 @@ export async function runAnsurSubject(request: AnsurSubjectRequest): Promise<Ans
     anchorFailure: exactMirrorFailure(fkProxyRuntime.displayMesh.positions),
     neckCodes: (beta?.chestShoulderDiagnostics ?? []).filter((code) =>
       code.startsWith('neckCircumferenceMm:'),
+    ),
+    estimated: [...(beta?.estimatedVisualControls ?? [])],
+    estimateCodes: (beta?.chestShoulderDiagnostics ?? []).filter((code) =>
+      code.startsWith('ansur-'),
     ),
   });
 }

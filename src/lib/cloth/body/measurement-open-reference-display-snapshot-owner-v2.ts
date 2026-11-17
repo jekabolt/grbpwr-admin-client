@@ -646,11 +646,19 @@ const DEFAULT_LINKED_DEPENDENCIES = Object.freeze({
   createUniformHeightDisplay: createMeasurementOpenReferenceUniformHeightDisplayV1,
   createWaistHipRuntime: async (options) => {
     const runtime = await import('./measurement-open-reference-uniform-waist-hip-runtime-v1');
-    return runtime.createMeasurementOpenReferenceUniformWaistHipRuntimeV1(options);
+    // Same as the model-form preview: waist/hip widened only behind the self-intersection gate.
+    return runtime.createMeasurementOpenReferenceUniformWaistHipRuntimeV1({
+      ...options,
+      widenSafeRange: true,
+    });
   },
   createBetaShapeRuntime: async (options) => {
     const runtime = await import('./measurement-open-reference-beta-shape-runtime-v1');
-    return runtime.createMeasurementOpenReferenceBetaShapeRuntimeV1(options);
+    // Same as the model-form preview: untyped fields get ANSUR II guesses, typed fields win.
+    return runtime.createMeasurementOpenReferenceBetaShapeRuntimeV1({
+      ...options,
+      estimateUntypedFields: true,
+    });
   },
   createLinkedPoseRuntime: async (options) => {
     const runtime = await import(

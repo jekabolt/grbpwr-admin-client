@@ -25,6 +25,13 @@ export interface UniformWaistHipSolverPolicyV1 {
   readonly minimumMonotonicStepMm: number;
   readonly maximumCrossTalkMm: number;
   readonly sectionTriangleStrategy: 'bounded-candidate' | 'full-mesh';
+  /**
+   * Largest mode coefficient. 1 = the finite morph asset. Above 1 the same linear field is
+   * extrapolated; callers must prove the result (self-intersection) before admitting it.
+   */
+  readonly maximumCoefficient: number;
+  /** Per-key override of `maximumCoefficient`, so only a limited key is extrapolated. */
+  readonly maximumCoefficientByKey?: Readonly<Partial<Record<UniformWaistHipKeyV1, number>>>;
 }
 
 export const DEFAULT_UNIFORM_WAIST_HIP_SOLVER_POLICY_V1 = Object.freeze({
@@ -34,7 +41,10 @@ export const DEFAULT_UNIFORM_WAIST_HIP_SOLVER_POLICY_V1 = Object.freeze({
   minimumMonotonicStepMm: 0.01,
   maximumCrossTalkMm: 0.1,
   sectionTriangleStrategy: 'bounded-candidate',
+  maximumCoefficient: 1,
 } satisfies UniformWaistHipSolverPolicyV1);
+
+export const UNIFORM_WAIST_HIP_MAXIMUM_EXTRAPOLATION_COEFFICIENT_V1 = 3;
 
 export type UniformWaistHipSolverDiagnosticCodeV1 =
   | 'combined-quality-unsafe'
@@ -127,7 +137,26 @@ function snapshotPolicy(
   ) {
     throw new RangeError('sectionTriangleStrategy must be bounded-candidate or full-mesh.');
   }
-  return Object.freeze(policy);
+  for (const value of [
+    policy.maximumCoefficient,
+    ...Object.values(policy.maximumCoefficientByKey ?? {}),
+  ]) {
+    if (
+      !Number.isFinite(value) ||
+      value < 1 ||
+      value > UNIFORM_WAIST_HIP_MAXIMUM_EXTRAPOLATION_COEFFICIENT_V1
+    ) {
+      throw new RangeError(
+        `maximumCoefficient must be within 1..${UNIFORM_WAIST_HIP_MAXIMUM_EXTRAPOLATION_COEFFICIENT_V1}.`,
+      );
+    }
+  }
+  return Object.freeze({
+    ...policy,
+    ...(policy.maximumCoefficientByKey
+      ? { maximumCoefficientByKey: Object.freeze({ ...policy.maximumCoefficientByKey }) }
+      : {}),
+  });
 }
 
 function validateMesh(positionsM: Float32Array, indices: Uint16Array | Uint32Array): void {
@@ -208,8 +237,9 @@ interface SectionTrianglePlanV1 {
 
 /**
  * The section plane is horizontal and every sparse vertex follows an affine path while its
- * coefficient moves through [0,1]. Baseline/decrease/increase Y extrema therefore conservatively
- * contain every triangle that can cross the fixed plane during either bounded solve.
+ * coefficient moves through [0,maximumCoefficient]. Baseline and decrease/increase endpoint Y
+ * extrema therefore conservatively contain every triangle that can cross the fixed plane during
+ * either bounded solve.
  */
 function buildSectionTrianglePlanV1(options: {
   readonly baselinePositionsM: Float32Array;
@@ -308,9 +338,16 @@ function monotonicSeries(
   positionsM: Float32Array,
   plan: SectionTrianglePlanV1,
   field: UniformWaistHipSparseFieldV1,
+  maximumCoefficient: number,
 ): readonly number[] {
+  const steps =
+    maximumCoefficient === 1
+      ? [0, 0.25, 0.5, 0.75, 1]
+      : Array.from({ length: Math.ceil(maximumCoefficient * 4) + 1 }, (_, index) =>
+          Math.min(index / 4, maximumCoefficient),
+        );
   return Object.freeze(
-    [0, 0.25, 0.5, 0.75, 1].map((coefficient) =>
+    steps.map((coefficient) =>
       measureSectionMm(
         coefficient === 0 ? positionsM : addScaledField(positionsM, field, coefficient),
         plan,
@@ -418,6 +455,7 @@ export function solveOpenReferenceUniformWaistHipV1(options: {
     const otherKey =
       measurementKey === 'waistCircumferenceMm' ? 'hipCircumferenceMm' : 'waistCircumferenceMm';
     const otherMode = modeByKey.get(otherKey);
+    const ceiling = policy.maximumCoefficientByKey?.[measurementKey] ?? policy.maximumCoefficient;
     if (!mode) {
       if (!diagnostics.some((value) => value.measurementKey === measurementKey)) {
         diagnostics.push(
@@ -443,8 +481,8 @@ export function solveOpenReferenceUniformWaistHipV1(options: {
     let modePlan: SectionTrianglePlanV1;
     let otherModePlan: SectionTrianglePlanV1;
     try {
-      const decreasePositionsM = addScaledField(positionsM, mode.decrease, 1);
-      const increasePositionsM = addScaledField(positionsM, mode.increase, 1);
+      const decreasePositionsM = addScaledField(positionsM, mode.decrease, ceiling);
+      const increasePositionsM = addScaledField(positionsM, mode.increase, ceiling);
       modePlan = buildSectionTrianglePlanV1({
         baselinePositionsM: positionsM,
         decreasePositionsM,
@@ -462,8 +500,8 @@ export function solveOpenReferenceUniformWaistHipV1(options: {
         strategy: policy.sectionTriangleStrategy,
       });
       baselineMm = measureSectionMm(positionsM, modePlan);
-      decreaseSeries = monotonicSeries(positionsM, modePlan, mode.decrease);
-      increaseSeries = monotonicSeries(positionsM, modePlan, mode.increase);
+      decreaseSeries = monotonicSeries(positionsM, modePlan, mode.decrease, ceiling);
+      increaseSeries = monotonicSeries(positionsM, modePlan, mode.increase, ceiling);
     } catch (reason: unknown) {
       diagnostics.push(
         diagnostic(
@@ -525,7 +563,7 @@ export function solveOpenReferenceUniformWaistHipV1(options: {
         continue;
       }
       const field = direction === 'decrease' ? mode.decrease : mode.increase;
-      const candidate = addScaledField(positionsM, field, 1);
+      const candidate = addScaledField(positionsM, field, ceiling);
       let crossTalkMm: number;
       try {
         crossTalkMm = Math.abs(
@@ -565,7 +603,7 @@ export function solveOpenReferenceUniformWaistHipV1(options: {
 
     const field = direction === 'decrease' ? mode.decrease : mode.increase;
     let lower = 0;
-    let upper = 1;
+    let upper = ceiling;
     let failed = false;
     for (let iteration = 0; iteration < policy.binarySearchIterations; iteration += 1) {
       const coefficient = (lower + upper) / 2;

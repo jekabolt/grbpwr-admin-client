@@ -17,10 +17,13 @@ import {
 } from './measurement-open-reference-display-v1';
 import {
   solveOpenReferenceUniformWaistHipV1,
+  type UniformWaistHipSolverResultV1,
   type UniformWaistHipSolverDiagnosticCodeV1,
   type UniformWaistHipSolverModeResultV1,
 } from './measurement-open-reference-uniform-waist-hip-solver-v1';
 import type { MeasurementOpenReferenceDisplayQualityGateResultV1 } from './measurement-open-reference-display-quality-gate-v1';
+import { evaluateMeasurementOpenReferenceDisplayQualityInWorkerV1 } from './measurement-open-reference-display-quality-worker-v1';
+import type { MeasurementOpenReferenceDisplayQualityWorkerOptionsV1 } from './measurement-open-reference-display-quality-worker-protocol-v1';
 import type { MeasurementSurfaceMeshV1 } from './measurement-watertight-surface-v1';
 
 export const MEASUREMENT_OPEN_REFERENCE_UNIFORM_WAIST_HIP_RUNTIME_V1 =
@@ -37,6 +40,8 @@ export interface MeasurementOpenReferenceUniformWaistHipRuntimeDiagnosticV1 {
     | UniformWaistHipSolverDiagnosticCodeV1
     | 'base-mismatch'
     | 'base-not-uniform'
+    | 'range-widened'
+    | 'range-widening-rejected'
     | 'runtime-unavailable';
   readonly measurementKey: UniformWaistHipKeyV1 | null;
   readonly message: string;
@@ -207,6 +212,15 @@ export async function createMeasurementOpenReferenceUniformWaistHipRuntimeV1(opt
   readonly measurements: CanonicalBodyMeasurementsMm;
   readonly openReference: MeasurementOpenReferenceDisplayArtifactV1;
   readonly loadBundle?: MeasurementOpenReferenceUniformWaistHipBundleLoaderV1;
+  /**
+   * Opt-in (the model-form preview passes true): a waist or hip beyond the finite morph asset is
+   * re-solved with only that key's field extrapolated, and admitted only when the whole body passes
+   * the quality gate including self-intersection against the admitted basis. Otherwise `limited`.
+   */
+  readonly widenSafeRange?: boolean;
+  readonly evaluateWidenedQualityGate?: (
+    options: MeasurementOpenReferenceDisplayQualityWorkerOptionsV1,
+  ) => Promise<MeasurementOpenReferenceDisplayQualityGateResultV1>;
 }): Promise<MeasurementOpenReferenceUniformWaistHipRuntimeResultV1> {
   const basis: MakeHumanOpenReferenceBasisV1 = Object.freeze({
     ...options.basis,
@@ -254,15 +268,30 @@ export async function createMeasurementOpenReferenceUniformWaistHipRuntimeV1(opt
     heightMm: measurements.heightMm,
     bundle,
   });
-  const solved = solveOpenReferenceUniformWaistHipV1({
-    uniformPositionsM: modes.uniformPositionsM,
-    triangleIndices: basis.indices,
-    measurements: {
-      waistCircumferenceMm: measurements.waistCircumferenceMm,
-      hipCircumferenceMm: measurements.hipCircumferenceMm,
-    },
-    modes: modes.modes,
-  });
+  const solve = (maximumCoefficientByKey?: Partial<Record<UniformWaistHipKeyV1, number>>) =>
+    solveOpenReferenceUniformWaistHipV1({
+      uniformPositionsM: modes.uniformPositionsM,
+      triangleIndices: basis.indices,
+      measurements: {
+        waistCircumferenceMm: measurements.waistCircumferenceMm,
+        hipCircumferenceMm: measurements.hipCircumferenceMm,
+      },
+      modes: modes.modes,
+      ...(maximumCoefficientByKey ? { policy: { maximumCoefficientByKey } } : {}),
+    });
+  const bounded = solve();
+  const widened = options.widenSafeRange
+    ? await widenLimitedWaistHipV1({
+        bounded,
+        solve,
+        openReference,
+        triangleIndices: basis.indices,
+        evaluate:
+          options.evaluateWidenedQualityGate ??
+          evaluateMeasurementOpenReferenceDisplayQualityInWorkerV1,
+      })
+    : null;
+  const solved = widened?.solved ?? bounded;
   const represented = solved.representedMeasurements;
   const status =
     represented.length === REQUESTED_PROXIES.length
@@ -282,13 +311,105 @@ export async function createMeasurementOpenReferenceUniformWaistHipRuntimeV1(opt
     representedGeometricProxies: represented,
     modeResults: solved.modeResults,
     sectionModes: modes.modes,
-    diagnostics: solved.diagnostics.map((diagnostic) =>
-      Object.freeze({
-        code: diagnostic.code,
-        measurementKey: diagnostic.measurementKey,
-        message: diagnostic.message,
-      }),
-    ),
+    diagnostics: [
+      ...solved.diagnostics.map((diagnostic) =>
+        Object.freeze({
+          code: diagnostic.code,
+          measurementKey: diagnostic.measurementKey,
+          message: diagnostic.message,
+        }),
+      ),
+      ...(widened?.diagnostics ?? []),
+    ],
+    // The local gate stays the bound receipt (pose runtime v2 recomputes and compares it).
     qualityGate: solved.qualityGate,
   });
+}
+
+/**
+ * Coefficients tried, largest first, for a key the finite asset cannot reach. Checked through the
+ * full preview pipeline on the ANSUR II p1/p99 waist and hip subjects of every base: no new
+ * self-intersection and the local gate passes up to 3; 2 keeps that margin.
+ */
+export const UNIFORM_WAIST_HIP_WIDENED_COEFFICIENTS_V1 = Object.freeze([2, 1.5] as const);
+
+async function widenLimitedWaistHipV1(options: {
+  readonly bounded: UniformWaistHipSolverResultV1;
+  readonly solve: (
+    maximumCoefficientByKey: Partial<Record<UniformWaistHipKeyV1, number>>,
+  ) => UniformWaistHipSolverResultV1;
+  readonly openReference: MeasurementOpenReferenceDisplayArtifactV1;
+  readonly triangleIndices: Uint16Array | Uint32Array;
+  readonly evaluate: (
+    options: MeasurementOpenReferenceDisplayQualityWorkerOptionsV1,
+  ) => Promise<MeasurementOpenReferenceDisplayQualityGateResultV1>;
+}): Promise<{
+  readonly solved?: UniformWaistHipSolverResultV1;
+  readonly diagnostics: readonly MeasurementOpenReferenceUniformWaistHipRuntimeDiagnosticV1[];
+} | null> {
+  const limitedKeys = [
+    ...new Set(
+      options.bounded.diagnostics
+        .filter(({ code }) => code === 'target-limited')
+        .map(({ measurementKey }) => measurementKey),
+    ),
+  ];
+  if (limitedKeys.length === 0 || !options.bounded.qualityGate.safe) return null;
+  // A limited key progresses when the wider solve represents it or limits it again at the farther
+  // endpoint (the solver checks the field is monotonic up to the ceiling). Anything else, such as
+  // a section that no longer measures, would drop the key, so the candidate is refused.
+  const progressed = (result: UniformWaistHipSolverResultV1, key: UniformWaistHipKeyV1) =>
+    result.representedMeasurements.includes(key) ||
+    result.diagnostics.some(
+      (diagnostic) => diagnostic.code === 'target-limited' && diagnostic.measurementKey === key,
+    );
+  const rejected: string[] = [];
+  for (const coefficient of UNIFORM_WAIST_HIP_WIDENED_COEFFICIENTS_V1) {
+    try {
+      const candidate = options.solve(
+        Object.fromEntries(limitedKeys.map((key) => [key, coefficient])),
+      );
+      const keepsRepresented = options.bounded.representedMeasurements.every((key) =>
+        candidate.representedMeasurements.includes(key),
+      );
+      const moved =
+        limitedKeys.every((key) => progressed(candidate, key)) &&
+        candidate.positionsM.some((value, index) => value !== options.bounded.positionsM[index]);
+      if (!candidate.qualityGate.safe || !keepsRepresented || !moved) {
+        rejected.push(`${coefficient}:solve`);
+        continue;
+      }
+      const qualityGate = await options.evaluate({
+        uniformPositionsM: options.openReference.mesh.positions,
+        personalizedPositionsM: candidate.positionsM,
+        triangleIndices: options.triangleIndices,
+        admittedBasisRevision: options.openReference.provenance.basis.derivedBasisSha256,
+      });
+      if (!qualityGate.safe || !qualityGate.claims.selfIntersectionEvaluated) {
+        rejected.push(`${coefficient}:${qualityGate.reasons.join('+') || 'unevaluated'}`);
+        continue;
+      }
+      return {
+        solved: candidate,
+        diagnostics: limitedKeys.map((key) =>
+          Object.freeze({
+            code: 'range-widened' as const,
+            measurementKey: key,
+            message: `${key} solved with its morph field extrapolated up to ${coefficient}x the finite asset; admitted after the self-intersection gate.`,
+          }),
+        ),
+      };
+    } catch (reason: unknown) {
+      rejected.push(`${coefficient}:${reason instanceof Error ? reason.message : String(reason)}`);
+    }
+  }
+  return {
+    diagnostics: [
+      Object.freeze({
+        code: 'range-widening-rejected' as const,
+        measurementKey: null,
+        message: `Widened waist/hip range rejected (${rejected.join(', ')}); the bounded endpoint is kept.`,
+      }),
+    ],
+  };
 }
