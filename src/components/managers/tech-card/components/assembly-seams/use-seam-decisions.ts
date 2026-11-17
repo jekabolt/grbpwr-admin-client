@@ -33,7 +33,8 @@ import {
   hydrateSeams,
   readWire,
   reuseKeys,
-  rowPairRangeSig,
+  reuseExactKeys,
+  rowExactAnchorSig,
   rowsOf,
   useSeamsStore,
 } from './seams-store';
@@ -104,6 +105,7 @@ export type StrictSeamUpsertResult =
       ok: true;
       rows: readonly StoredRow[];
       seamKeys: readonly string[];
+      lockVersion: number;
       outcome: 'verified-echo';
       blocker: null;
     }>
@@ -133,7 +135,14 @@ function strictUpsertBlocked(
 export function resolveStrictSeamUpsertReceipt(
   submitted: readonly StoredRow[],
   echo: readonly TechCardSeamWire[],
+  lockVersion: number,
 ): StrictSeamUpsertResult {
+  if (!Number.isSafeInteger(lockVersion) || lockVersion < 0)
+    return strictUpsertBlocked(
+      'receipt-missing',
+      'The strict seam write echo has no exact committed card lock version.',
+      'acknowledged-unverified',
+    );
   const decoded = readWire(echo);
   const resolved: StoredRow[] = [];
   const seenSeamPairs = new Set<string>();
@@ -163,7 +172,7 @@ export function resolveStrictSeamUpsertReceipt(
       resolved.push(matches[0]);
       continue;
     }
-    const pair = rowPairRangeSig(row);
+    const pair = rowExactAnchorSig(row);
     if (seenSeamPairs.has(pair))
       return strictUpsertBlocked(
         'receipt-ambiguous',
@@ -171,7 +180,7 @@ export function resolveStrictSeamUpsertReceipt(
         'acknowledged-unverified',
       );
     seenSeamPairs.add(pair);
-    const matches = decoded.rows.filter((candidate) => rowPairRangeSig(candidate) === pair);
+    const matches = decoded.rows.filter((candidate) => rowExactAnchorSig(candidate) === pair);
     if (matches.length === 0)
       return strictUpsertBlocked(
         'receipt-missing',
@@ -190,6 +199,7 @@ export function resolveStrictSeamUpsertReceipt(
     ok: true as const,
     rows: Object.freeze(resolved),
     seamKeys: Object.freeze(resolved.map(({ seamKey }) => seamKey)),
+    lockVersion,
     outcome: 'verified-echo' as const,
     blocker: null,
   });
@@ -329,7 +339,7 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
           'The open tech card changed before the seam write started.',
           'not-attempted',
         );
-      const seams = reuseKeys(
+      const seams = reuseExactKeys(
         rows0.filter((row): row is StoredSeam => row.kind !== 'pose'),
         rowsOf(useSeamsStore.getState()),
       );
@@ -357,7 +367,7 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
           'The seam write was acknowledged without a row echo.',
           'acknowledged-unverified',
         );
-      return resolveStrictSeamUpsertReceipt(rows, result.echo);
+      return resolveStrictSeamUpsertReceipt(rows, result.echo, result.lockVersion);
     },
     [cardId, change, fresh, frozen],
   );
