@@ -150,6 +150,13 @@ export function AssemblyCarrierDevPage() {
       if (!current.signal.aborted) setOutput(bounded(report));
     };
     try {
+      try {
+        const lastImport = localStorage.getItem(`dev.workbenchImport.${cardId}`);
+        if (lastImport && lastImport.length < 2048)
+          report.lastManualImport = JSON.parse(lastImport);
+      } catch {
+        // This diagnostic is optional and local to this browser.
+      }
       const client = abortableAdminService(current.signal);
       const response = await client.GetTechCard({ id: cardId, vatCountryCode: undefined });
       const card = response.techCard;

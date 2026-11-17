@@ -3320,6 +3320,7 @@ export function PatternsField({
   // 'ok' и только если применение что-то записало: повторное применение того же импорта остаётся
   // нулевым (F7).
   const importScopeRef = useRef('');
+  const importWorkbenchFailure = useRef<string | null>(null);
   /** The fusing rebuild run counter when the import's save started (T5). */
   const importSaveRun = useRef(0);
   importScopeRef.current = importing?.scopeKey ?? '';
@@ -3328,7 +3329,27 @@ export function PatternsField({
   );
   function followUpApply(apply: ApplyDraftFn): ApplyDraftFn {
     return async (draft, onProgress, options) => {
+      importWorkbenchFailure.current = null;
       const result = await apply(draft, onProgress, options);
+      if (import.meta.env.DEV && techCardId && importing?.requireManualApply && result.ok) {
+        try {
+          const report = {
+            savedAt: new Date().toISOString(),
+            save: result.save ?? null,
+            uploads: result.uploaded.length,
+            claimedScopeKeys: result.commitReceipt?.scopes.map(({ scopeKey }) => scopeKey) ?? [],
+            previousLock: result.commitReceipt?.previousLockVersion ?? null,
+            blockers: result.commitReceiptBlockers?.map(({ code }) => code) ?? [],
+            workbenchFailure: importWorkbenchFailure.current,
+            registeredNativeSha:
+              readPatternImportDxfPhaseECardSessionV1(techCardId)?.draft.dxfNativeSewingReplay
+                ?.pipeline?.contentBinding?.sourceSha256 ?? null,
+          };
+          localStorage.setItem(`dev.workbenchImport.${techCardId}`, JSON.stringify(report));
+        } catch {
+          // An unavailable local diagnostic must not change the saved import.
+        }
+      }
       const targets =
         followUpTargets(draft, result)?.map((target) => ({
           ...target,
@@ -5023,14 +5044,18 @@ export function PatternsField({
                 );
               },
               onPatternSemanticAttachmentHostError: (error) => {
+                const detail =
+                  error instanceof Error
+                    ? error.message
+                    : 'The exact DXF authoring session could not be opened.';
+                importWorkbenchFailure.current = detail
+                  .replace(/https?:\/\/[^\s"']+/gu, '[URL omitted]')
+                  .slice(0, 450);
                 notify({
                   sev: 'error',
                   subject: 'DXF IMPORT',
                   text: 'Workbench session unavailable',
-                  detail:
-                    error instanceof Error
-                      ? error.message
-                      : 'The exact DXF authoring session could not be opened.',
+                  detail,
                 });
               },
               read: () => ({

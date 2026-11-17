@@ -416,7 +416,10 @@ import {
   type PatternImportDxfPhaseEZeroConnectExistingOperationOwnerV1,
   type PatternImportDxfPhaseEZeroConnectExistingOperationPendingV1,
 } from './pattern-import/phase-e-workbench-v2/cad-table-zero-connect-existing-operation-attach-v1';
-import { readPatternImportDxfPhaseECardSessionV1 } from './pattern-import/phase-e-workbench-card-session-v1';
+import {
+  readPatternImportDxfPhaseECardSessionV1,
+  subscribePatternImportDxfPhaseECardSessionV1,
+} from './pattern-import/phase-e-workbench-card-session-v1';
 import type { PatternImportDxfPhaseELinkedN1ProfileChoiceV1 } from './pattern-import/phase-e-workbench-v2/cad-table-existing-linked-n1-finalize-v1';
 import type { SavedFullAssemblyDiagnosticProfileV1 } from './pattern-import/phase-e-workbench-v2/saved-full-assembly-diagnostic-profile-v1';
 import {
@@ -1203,11 +1206,19 @@ function ZeroConnectExistingLinkedN1Action({
   const [result, setResult] =
     useState<PatternImportDxfPhaseEZeroConnectExistingLinkedN1OwnerResultV1 | null>(null);
 
+  const techCardId = pending.target.techCardId;
+  const importSession = useSyncExternalStore(
+    useCallback(
+      (listener) => subscribePatternImportDxfPhaseECardSessionV1(techCardId, listener),
+      [techCardId],
+    ),
+    useCallback(() => readPatternImportDxfPhaseECardSessionV1(techCardId), [techCardId]),
+    () => null,
+  );
   const canSaveMetadata =
     pending.target.orderedRowKeys.length === 1 &&
     pending.request.catalog.pieces.length === 2 &&
-    readPatternImportDxfPhaseECardSessionV1(pending.target.techCardId)?.draft.dxfNativeSewingReplay
-      ?.replayReady === true;
+    importSession?.draft.dxfNativeSewingReplay?.replayReady === true;
   useEffect(() => {
     if (!canSaveMetadata) return;
     let current = true;

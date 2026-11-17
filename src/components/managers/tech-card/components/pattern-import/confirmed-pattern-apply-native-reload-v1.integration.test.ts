@@ -245,8 +245,13 @@ it.each([[['M']], [['XS', 'S', 'M', 'L', 'XL']]])(
         async () => ({ semanticSidecar: undefined }),
       ),
     };
+    let areaFollowUpLanded = false;
     const fetcher = vi.fn(async (url: string) => {
       expect(url).toBe(downloadUrl);
+      if (tokens.length > 1 && !areaFollowUpLanded) {
+        areaFollowUpLanded = true;
+        card.lockVersion!++;
+      }
       return new Response(bytes.slice(), { headers: { 'content-length': String(bytes.length) } });
     });
     vi.stubGlobal('fetch', fetcher);
@@ -320,7 +325,7 @@ it.each([[['M']], [['XS', 'S', 'M', 'L', 'XL']]])(
       );
       expect(savedSha).not.toBe(originalSha);
       expect(upload).toHaveBeenCalledTimes(1);
-      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(fetcher).toHaveBeenCalledTimes(tokens.length > 1 ? 2 : 1);
       expect(service.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
       card.lockVersion!++;
       expect(await session!.loadDocumentEvidence('main')).toMatchObject({
