@@ -134,6 +134,11 @@ export interface MeasurementOpenReferenceBetaShapeRuntimeResultV1 {
    * whenever the core rig resolves, so the guide draws the same section the proxy solves.
    */
   readonly neckSectionStation?: MeasurementOpenReferenceNeckProtectedSectionV1;
+  /**
+   * The display vertices whose chord the shoulder-breadth stage solves (+x side first is
+   * `positive`); present whenever the torso stage ran, so the guide draws the solved chord.
+   */
+  readonly shoulderChordVertices?: Readonly<{ negative: number; positive: number }>;
   readonly sourceRevisionSuffix: string;
   readonly claims: {
     readonly visualReferenceOnly: true;
@@ -562,6 +567,7 @@ async function createBetaShapeRuntimeOnceV1(options: {
   const baselineRepresented = Object.freeze([...represented]);
   let chestStationOriginM: readonly [number, number, number] | undefined;
   let underBustStationOriginM: readonly [number, number, number] | undefined;
+  let shoulderChordVertices: Readonly<{ negative: number; positive: number }> | undefined;
   let highHipStationOriginM: readonly [number, number, number] | undefined;
   let highHipStage: DroppableBetaShapeStageV1 | undefined;
   let kneeStage: DroppableBetaShapeStageV1 | undefined;
@@ -625,6 +631,7 @@ async function createBetaShapeRuntimeOnceV1(options: {
     );
     chestStationOriginM = torso.chestStationOriginM;
     underBustStationOriginM = torso.underBustStationOriginM;
+    shoulderChordVertices = torso.shoulderChordVertices;
     highHipStationOriginM = torso.highHipStationOriginM;
     represented.push(
       ...torso.ribcageRepresentedMeasurements,
@@ -1045,6 +1052,7 @@ async function createBetaShapeRuntimeOnceV1(options: {
     }),
     kneeSectionStations,
     neckSectionStation,
+    ...(shoulderChordVertices ? { shoulderChordVertices } : {}),
     sourceRevisionSuffix: suffix(representedVisualControls, limitedVisualControls),
     claims: CLAIMS,
   });

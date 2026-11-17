@@ -901,6 +901,7 @@ function evaluateEveryField(options: {
       limbSectionModes: body.betaRuntime?.limbSectionModes,
       torsoSectionStations: body.betaRuntime?.torsoSectionStations,
       neckSectionStation: body.betaRuntime?.neckSectionStation,
+      shoulderChordVertices: body.betaRuntime?.shoulderChordVertices,
       drawnMesh: neutralPose ? undefined : drawnMesh,
     });
     const field = measurementName.replace('BODY_MEASUREMENT_NAME_', '');
@@ -1035,6 +1036,7 @@ describe('measurement guide visibility v1', () => {
         limbSectionModes: body.betaRuntime?.limbSectionModes,
         torsoSectionStations: body.betaRuntime?.torsoSectionStations,
         neckSectionStation: body.betaRuntime?.neckSectionStation,
+        shoulderChordVertices: body.betaRuntime?.shoulderChordVertices,
       });
       expect(['visible', 'limited'], measurementName).toContain(guide.status);
       expect(guide.paths.length, measurementName).toBeGreaterThan(0);
@@ -1048,6 +1050,7 @@ describe('measurement guide visibility v1', () => {
       limbSectionModes: body.betaRuntime?.limbSectionModes,
       torsoSectionStations: body.betaRuntime?.torsoSectionStations,
       neckSectionStation: body.betaRuntime?.neckSectionStation,
+      shoulderChordVertices: body.betaRuntime?.shoulderChordVertices,
     });
     const chestY = chest.paths.flatMap((path) => pathPolyline(path, positions))[0][1];
     expect(Math.abs(chestY - positions[8454 * 3 + 1])).toBeLessThan(0.005);
@@ -1202,6 +1205,7 @@ describe('measurement guide visibility v1', () => {
           limbSectionModes: body.betaRuntime?.limbSectionModes,
           torsoSectionStations: body.betaRuntime?.torsoSectionStations,
           neckSectionStation: body.betaRuntime?.neckSectionStation,
+          shoulderChordVertices: body.betaRuntime?.shoulderChordVertices,
         });
       const pointsOf = (measurementName: common_BodyMeasurementName) => {
         const guide = guideFor(measurementName);
@@ -1318,6 +1322,7 @@ describe('measurement guide visibility v1', () => {
           limbSectionModes: body.betaRuntime?.limbSectionModes,
           torsoSectionStations: body.betaRuntime?.torsoSectionStations,
           neckSectionStation: body.betaRuntime?.neckSectionStation,
+          shoulderChordVertices: body.betaRuntime?.shoulderChordVertices,
         });
       const bindGuide = wristGuide(body.bindPoseMesh);
       const bindPerimeterMm =
@@ -1533,6 +1538,7 @@ describe('measurement guide visibility v1', () => {
           limbSectionModes: body.betaRuntime?.limbSectionModes,
           torsoSectionStations: body.betaRuntime?.torsoSectionStations,
           neckSectionStation: body.betaRuntime?.neckSectionStation,
+          shoulderChordVertices: body.betaRuntime?.shoulderChordVertices,
         });
         const field = measurementName.replace('BODY_MEASUREMENT_NAME_', '');
         expect(['visible', 'limited'], `${field}/${base.name}`).toContain(status);

@@ -263,6 +263,7 @@ interface FullBodyBuiltPreviewV3 {
   readonly torsoSectionStations: MeasurementOpenReferenceBetaShapeRuntimeResultV1['torsoSectionStations'];
   readonly kneeSectionStations: MeasurementOpenReferenceBetaShapeRuntimeResultV1['kneeSectionStations'];
   readonly neckSectionStation: MeasurementOpenReferenceBetaShapeRuntimeResultV1['neckSectionStation'];
+  readonly shoulderChordVertices: MeasurementOpenReferenceBetaShapeRuntimeResultV1['shoulderChordVertices'];
   readonly bodyBuildFingerprint: string;
 }
 
@@ -2914,6 +2915,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                 torsoSectionStations: betaShapeRuntime?.torsoSectionStations,
                 kneeSectionStations: betaShapeRuntime?.kneeSectionStations,
                 neckSectionStation: betaShapeRuntime?.neckSectionStation,
+                shoulderChordVertices: betaShapeRuntime?.shoulderChordVertices,
                 bodyBuildFingerprint: requestedBodyBuildFingerprint,
               } satisfies FullBodyBuiltPreviewV3;
             });
@@ -3189,6 +3191,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
             torsoSectionStations: displayedBuilt.torsoSectionStations,
             kneeSectionStations: displayedBuilt.kneeSectionStations,
             neckSectionStation: displayedBuilt.neckSectionStation,
+            shoulderChordVertices: displayedBuilt.shoulderChordVertices,
             drawnMesh: editor.equalGeometry(draftPose, editor.neutralPose)
               ? undefined
               : displayedBuilt.runtime.displayMesh,

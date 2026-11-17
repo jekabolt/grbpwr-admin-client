@@ -30,14 +30,19 @@ import { createMeasurementOpenReferenceUniformWaistHipRuntimeV1 } from './measur
  * The female bust wiring must leave male and neutral byte for byte as before. The expected hashes
  * were produced by this exact file run against the pre-bust tree (86a3b0659); a change here means
  * the male/neutral path moved, which the bust lane must never do.
+ *
+ * Re-baselined once by the ANSUR fix lane, on purpose: the male/neutral chest now solves at the
+ * chest-point plane the guide draws (station Y moved, new `chest-station:chest-point-template`
+ * diagnostic), and the worker result carries the solved `shoulderChordVertices` for the guide.
+ * Female is untouched by that lane; any other drift here is still a regression.
  */
 const EXPECTED_WORKER_SHA256 = {
-  male: '109a11bc94e7e4629525e2fcfe13957337dabb4a3f895f525d9f4a2c33830f22',
-  neutral: 'fa1a7d082b07b9fdff8dfacbccabb74eee1ad29f4ab7ef2f0d87dfe7755acc6a',
+  male: 'ce63667f697af486a35b359901308dd4c57d8a8160017d01834b34accf813051',
+  neutral: '225eab424de16bb34e14e34a16d0b68534de5a89f28664eff7fad27da60b5109',
 } as const;
 const EXPECTED_RUNTIME_SHA256 = {
-  male: '7d5c0910e6038dc7ffb0cce4390604ba8967a87cc4b6ecfeedfe267ccf443e06',
-  neutral: 'd873bdea52222298ff5949b6379d0b520c2882b40eeb4130072ce35dcefe48ba',
+  male: 'a55a5aa2bf71cef88941f38c98bfd428f4972fad6d563c1657acb67a96bfaa73',
+  neutral: 'c1da43ca2afa83be308e5f9446646bb4d0f274b83e294f1f9f65db6bfaa5dc28',
 } as const;
 
 const torsoBundle = parseMakeHumanTorsoShapeDeltaBundleV1(

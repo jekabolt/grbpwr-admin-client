@@ -311,6 +311,17 @@ function solveTorsoBeforeNeckV1(
     | keyof NeckWorkerFieldsV1
     | 'positionsBeforeNeckM'
   >;
+  const shoulderVertices = modes.modes.find(
+    ({ measurementKey }) => measurementKey === 'shoulderBreadthMm',
+  )?.shoulderVertices;
+  const shoulderChordFields = shoulderVertices
+    ? {
+        shoulderChordVertices: Object.freeze({
+          negative: shoulderVertices.negative,
+          positive: shoulderVertices.positive,
+        }),
+      }
+    : {};
   if (options.basis.kind === 'female' && options.femaleBustBundle) {
     const chestMode = modes.modes.find(
       ({ measurementKey }) => measurementKey === 'chestCircumferenceMm',
@@ -334,6 +345,7 @@ function solveTorsoBeforeNeckV1(
     common = {
       chestStationOriginM,
       underBustStationOriginM: modes.underBustStationOriginM,
+      ...shoulderChordFields,
       ribcageRepresentedMeasurements: female.ribcageRepresentedMeasurements,
       ribcageLimitedMeasurements: female.ribcageLimitedMeasurements,
       ribcageDiagnostics: Object.freeze([...modes.diagnostics, ...female.ribcageDiagnostics]),
@@ -366,6 +378,7 @@ function solveTorsoBeforeNeckV1(
     common = {
       chestStationOriginM: chestMode.chestStationOriginM,
       underBustStationOriginM: modes.underBustStationOriginM,
+      ...shoulderChordFields,
       ribcageRepresentedMeasurements: ribcage.representedMeasurements,
       ribcageDiagnostics: Object.freeze([
         ...modes.diagnostics,

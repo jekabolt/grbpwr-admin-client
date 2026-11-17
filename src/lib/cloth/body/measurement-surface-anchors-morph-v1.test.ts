@@ -26,6 +26,7 @@ import {
   checkSurfaceAnchorsV1,
   type SurfaceAnchorFailureCodeV1,
 } from './measurement-surface-anchors-v1';
+import { snapMeshMirrorPairsV1 } from './mesh-mirror-pair-snap-v1';
 import { createMeshSurfaceTopologyV1 } from './mesh-surface-topology-v1';
 
 const torsoBundle = parseMakeHumanTorsoShapeDeltaBundleV1(
@@ -104,7 +105,12 @@ async function shapedMesh(
     loadPoseResources: async () => poseResources,
   });
   const mesh = result.fkProxyRuntime.displayMesh;
-  const positionsM = Float32Array.from(mesh.positions);
+  // A shaped body carries float drift off its exact mirror (sub-0.1 mm); the topology now derives
+  // its mirror map from the positions it is given, so the pairs are snapped first, as the guide does.
+  const snapped = snapMeshMirrorPairsV1(mesh.positions);
+  if (!snapped.ok) throw new Error(`${kind} ${record.id} mirror snap failed: ${snapped.reason}`);
+  expect(snapped.maxOffsetM).toBeLessThan(0.0002);
+  const positionsM = Float32Array.from(snapped.positionsM);
   const built = createMeshSurfaceTopologyV1({
     positionsM,
     triangleIndices: Uint32Array.from(mesh.indices),

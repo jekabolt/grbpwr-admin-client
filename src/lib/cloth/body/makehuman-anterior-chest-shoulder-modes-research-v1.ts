@@ -8,6 +8,7 @@ import type {
   UniformChestShoulderResearchSparseFieldV1,
 } from './makehuman-uniform-chest-shoulder-modes-research-v1';
 import type { CanonicalBodyMeasurementsMm } from './measurement-adapter';
+import { resolveMeasurementOpenReferenceChestPointYV1 } from './measurement-open-reference-chest-point-station-v1';
 import type { MakeHumanOpenReferenceBasisV1 } from './measurement-open-reference-display-v1';
 import { measureMeshPlaneSectionPerimetersV1 } from './mesh-plane-section-perimeter-v1';
 
@@ -169,16 +170,34 @@ export function createMakeHumanAnteriorChestShoulderModesResearchV1(options: {
     heightMm: options.measurements.heightMm,
     bundle: options.bundle,
   });
-  const chest = source.modes.find(
+  const sourceChest = source.modes.find(
     ({ measurementKey }) => measurementKey === 'chestCircumferenceMm',
   );
   const shoulder = source.modes.find(
     ({ measurementKey }) => measurementKey === 'shoulderBreadthMm',
   );
-  if (!chest?.chestStationOriginM || !shoulder?.shoulderVertices) {
+  if (!sourceChest?.chestStationOriginM || !shoulder?.shoulderVertices) {
     throw new Error('Chest/shoulder research landmarks are incomplete.');
   }
   const diagnostics: string[] = [];
+  // The uniform chest support centres at armpit height. On male/neutral the chest girth grows
+  // toward the armpit, so a plane there measures a different, larger ring than the chest point
+  // the guide draws. Their chest is solved on the guide's chest-point plane instead; the
+  // under-bust plane keeps its offset below it, so the anterior field keeps its designed shape.
+  // Female keeps the armpit-line station: its bust stage finds the apex plane on its own.
+  const chest =
+    options.basis.kind === 'female'
+      ? sourceChest
+      : Object.freeze({
+          ...sourceChest,
+          chestStationOriginM: Object.freeze([
+            sourceChest.chestStationOriginM[0],
+            resolveMeasurementOpenReferenceChestPointYV1(source.uniformPositionsM),
+            sourceChest.chestStationOriginM[2],
+          ]) as readonly [number, number, number],
+        });
+  if (chest !== sourceChest) diagnostics.push('chest-station:chest-point-template');
+  if (!chest.chestStationOriginM) throw new Error('Chest station is missing.');
   const underBustStationY =
     chest.chestStationOriginM[1] - underBustOffsetM(options.measurements, diagnostics);
   const shoulderStationY = Math.min(
@@ -199,7 +218,7 @@ export function createMakeHumanAnteriorChestShoulderModesResearchV1(options: {
       source.modes.map((mode) =>
         mode.measurementKey === 'chestCircumferenceMm'
           ? anteriorChestMode({
-              source: mode,
+              source: chest,
               positionsM: source.uniformPositionsM,
               triangleIndices: options.basis.indices,
               shoulderStationY,
