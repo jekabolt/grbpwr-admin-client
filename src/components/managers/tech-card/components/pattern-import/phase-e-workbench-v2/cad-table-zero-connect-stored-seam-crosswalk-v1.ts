@@ -1,4 +1,8 @@
-import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
+import {
+  ASSEMBLY_SKELETON_DXF_EXACT_BOUNDARY_EDGE_V1,
+  type PieceGeom,
+  type Pt2,
+} from 'lib/assembly-skeleton/types';
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import type { SidePart } from 'lib/seams';
@@ -19,6 +23,9 @@ export const PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_STORED_SEAM_CROSSWALK_CLAIM
     sewingBoundaryOnly: true,
     equalMappingOnly: true,
     uniqueSingleSkeletonEdgeRequired: true,
+    zeroConnectExactSourceEdgeIdentityRequired: true,
+    zeroConnectNearestGeometryRecoveryUsed: false,
+    legacyCrossScopeGeometricFallbackPreserved: true,
     sidePartsUseSkeletonEdgeMillimetres: true,
     storedSeamDirectionInferred: false,
     seamIdentityMinted: false,
@@ -64,6 +71,23 @@ export type PatternImportDxfPhaseEStoredSeamExactSideCrosswalkInputV1 = Readonly
   toleranceMm?: number;
 }>;
 
+export type PatternImportDxfPhaseEZeroConnectStoredSeamCrosswalkBlockerV1 = Readonly<{
+  code:
+    | 'crosswalk-envelope-invalid'
+    | 'crosswalk-source-stale'
+    | 'crosswalk-size-mismatch'
+    | 'crosswalk-mapping-unsupported'
+    | 'crosswalk-piece-not-exact'
+    | 'crosswalk-contour-not-sewing-boundary'
+    | 'crosswalk-edge-not-exact'
+    | 'crosswalk-geometry-piece-not-exact'
+    | 'legacy-skeleton-exact-identity-unavailable'
+    | 'crosswalk-edge-identity-ambiguous'
+    | 'crosswalk-segment-off-geometry'
+    | 'crosswalk-segment-ambiguous';
+  detail: string;
+}>;
+
 export type PatternImportDxfPhaseEStoredSeamExactSideCrosswalkResultV1 =
   | Readonly<{
       ok: true;
@@ -88,21 +112,6 @@ export type PatternImportDxfPhaseEZeroConnectStoredSeamCrosswalkReceiptV1 = Read
   /** `rowFromHand` still needs an explicit caller-owned decision. */
   storedSeamDirectionRequired: true;
   claims: typeof PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_STORED_SEAM_CROSSWALK_CLAIMS_V1;
-}>;
-
-export type PatternImportDxfPhaseEZeroConnectStoredSeamCrosswalkBlockerV1 = Readonly<{
-  code:
-    | 'crosswalk-envelope-invalid'
-    | 'crosswalk-source-stale'
-    | 'crosswalk-size-mismatch'
-    | 'crosswalk-mapping-unsupported'
-    | 'crosswalk-piece-not-exact'
-    | 'crosswalk-contour-not-sewing-boundary'
-    | 'crosswalk-edge-not-exact'
-    | 'crosswalk-geometry-piece-not-exact'
-    | 'crosswalk-segment-off-geometry'
-    | 'crosswalk-segment-ambiguous';
-  detail: string;
 }>;
 
 export type PatternImportDxfPhaseEZeroConnectStoredSeamCrosswalkResultV1 =
@@ -403,6 +412,162 @@ function exactSide(
   });
 }
 
+/**
+ * Zero-connect uses geometry produced from the retained exact candidate, so only a sealed boundary
+ * identity is accepted here. The older one-side cross-scope caller continues through `exactSide`
+ * above until its own authorities can produce the same sealed provenance.
+ */
+function exactIdentitySide(
+  input: Omit<PatternImportDxfPhaseEStoredSeamExactSideCrosswalkInputV1, 'side'>,
+  selected: PatternImportDxfPhaseEStoredSeamExactSideCrosswalkInputV1['side'],
+  sideLabel: 'A' | 'B',
+):
+  | Readonly<{ ok: true; side: PatternImportDxfPhaseEZeroConnectStoredSeamCrosswalkSideV1 }>
+  | Readonly<{
+      ok: false;
+      blocker: PatternImportDxfPhaseEZeroConnectStoredSeamCrosswalkBlockerV1;
+    }> {
+  const catalogPieces = input.catalog.pieces.filter(
+    ({ pieceId, pieceLineKey }) =>
+      pieceId === selected.pieceId && pieceLineKey === selected.pieceLineKey,
+  );
+  const projectedPieces = input.projection.pieces.filter(
+    ({ pieceId, pieceLineKey }) =>
+      pieceId === selected.pieceId && pieceLineKey === selected.pieceLineKey,
+  );
+  if (catalogPieces.length !== 1 || projectedPieces.length !== 1)
+    return Object.freeze({
+      ok: false as const,
+      blocker: Object.freeze({
+        code: 'crosswalk-piece-not-exact' as const,
+        detail: `Side ${sideLabel} does not identify one current catalog/projection piece.`,
+      }),
+    });
+  const catalogContours = catalogPieces[0]!.contours.filter(
+    ({ contourId }) => contourId === selected.contourId,
+  );
+  const projectedContours = projectedPieces[0]!.contours.filter(
+    ({ contourId }) => contourId === selected.contourId,
+  );
+  if (
+    catalogContours.length !== 1 ||
+    projectedContours.length !== 1 ||
+    catalogContours[0]!.role !== 'sewing-boundary' ||
+    projectedContours[0]!.role !== 'sewing-boundary'
+  )
+    return Object.freeze({
+      ok: false as const,
+      blocker: Object.freeze({
+        code: 'crosswalk-contour-not-sewing-boundary' as const,
+        detail: `Side ${sideLabel} must use one current sewing-boundary contour.`,
+      }),
+    });
+  const catalogContour = catalogContours[0]!;
+  const projectedContour = projectedContours[0]!;
+  const vertexIndexes = selected.boundaryVertexIds.map((vertexId) =>
+    catalogContour.boundaryVertices.findIndex((vertex) => vertex.vertexId === vertexId),
+  );
+  const projectedVertices = selected.boundaryVertexIds.map((vertexId) =>
+    projectedContour.vertices.find((vertex) => vertex.vertexId === vertexId),
+  );
+  const delta = Math.abs(vertexIndexes[0]! - vertexIndexes[1]!);
+  const adjacent =
+    vertexIndexes.every((index) => index >= 0) &&
+    (delta === 1 ||
+      (catalogContour.closed &&
+        catalogContour.boundaryVertices.length > 2 &&
+        delta === catalogContour.boundaryVertices.length - 1));
+  if (
+    !adjacent ||
+    projectedVertices.some((vertex) => !vertex) ||
+    projectedVertices[0]?.ordinal !== vertexIndexes[0] ||
+    projectedVertices[1]?.ordinal !== vertexIndexes[1]
+  )
+    return Object.freeze({
+      ok: false as const,
+      blocker: Object.freeze({
+        code: 'crosswalk-edge-not-exact' as const,
+        detail: `Side ${sideLabel} is not one exact adjacent current Phase-D edge.`,
+      }),
+    });
+  const geometryPieces = input.geometry.filter(
+    ({ pieceKey }) => pieceKey === selected.pieceLineKey,
+  );
+  if (geometryPieces.length !== 1)
+    return Object.freeze({
+      ok: false as const,
+      blocker: Object.freeze({
+        code: 'crosswalk-geometry-piece-not-exact' as const,
+        detail: `Side ${sideLabel} does not identify one current anchor geometry piece.`,
+      }),
+    });
+  const evidencedEdges = geometryPieces[0]!.edges.filter(
+    ({ exactDxfBoundary }) => exactDxfBoundary !== undefined,
+  );
+  if (!evidencedEdges.length)
+    return Object.freeze({
+      ok: false as const,
+      blocker: Object.freeze({
+        code: 'legacy-skeleton-exact-identity-unavailable' as const,
+        detail: `Side ${sideLabel} has no sealed DXF boundary identity.`,
+      }),
+    });
+  const matches = evidencedEdges.filter(({ pieceKey, kind, lenMm, exactDxfBoundary }) => {
+    if (!exactDxfBoundary) return false;
+    return (
+      pieceKey === selected.pieceLineKey &&
+      kind === 'edge' &&
+      Number.isFinite(lenMm) &&
+      lenMm > 0 &&
+      exactDxfBoundary.schemaVersion === ASSEMBLY_SKELETON_DXF_EXACT_BOUNDARY_EDGE_V1 &&
+      exactDxfBoundary.fullEdge === true &&
+      exactDxfBoundary.sourceFileId === input.catalog.sourceFileId &&
+      exactDxfBoundary.scopeKey === input.catalog.scopeKey &&
+      exactDxfBoundary.sizeToken === input.catalog.sizeToken &&
+      exactDxfBoundary.catalogCanonicalSha256 === input.catalog.canonicalSha256 &&
+      exactDxfBoundary.sizeSelectionCanonicalSha256 ===
+        input.catalog.sizeSelectionCanonicalSha256 &&
+      exactDxfBoundary.pieceId === selected.pieceId &&
+      exactDxfBoundary.pieceLineKey === selected.pieceLineKey &&
+      exactDxfBoundary.contourId === selected.contourId &&
+      exactDxfBoundary.boundaryVertexIds[0] === selected.boundaryVertexIds[0] &&
+      exactDxfBoundary.boundaryVertexIds[1] === selected.boundaryVertexIds[1]
+    );
+  });
+  if (!matches.length)
+    return Object.freeze({
+      ok: false as const,
+      blocker: Object.freeze({
+        code: 'crosswalk-edge-not-exact' as const,
+        detail: `Side ${sideLabel} has no edge with the same sealed DXF boundary identity.`,
+      }),
+    });
+  if (matches.length !== 1)
+    return Object.freeze({
+      ok: false as const,
+      blocker: Object.freeze({
+        code: 'crosswalk-edge-identity-ambiguous' as const,
+        detail: `Side ${sideLabel} has more than one edge claiming the exact DXF identity.`,
+      }),
+    });
+  const match = matches[0]!;
+  return Object.freeze({
+    ok: true as const,
+    side: Object.freeze({
+      pieceId: selected.pieceId,
+      pieceLineKey: selected.pieceLineKey,
+      contourId: selected.contourId,
+      boundaryVertexIds: Object.freeze([
+        selected.boundaryVertexIds[0],
+        selected.boundaryVertexIds[1],
+      ]) as readonly [string, string],
+      sourceDirection: selected.direction,
+      parts: Object.freeze([Object.freeze({ target: match.id })]) as readonly [SidePart],
+      maxErrorMm: 0,
+    }),
+  });
+}
+
 /** Exact one-authority edge → one current skeleton SidePart; no operation/seam identity is minted. */
 export function buildPatternImportDxfPhaseEStoredSeamExactSideCrosswalkV1(
   input: PatternImportDxfPhaseEStoredSeamExactSideCrosswalkInputV1,
@@ -521,10 +686,10 @@ export function buildPatternImportDxfPhaseEZeroConnectStoredSeamCrosswalkV1(
         'crosswalk-mapping-unsupported',
         'The first StoredSeam crosswalk slice accepts only explicit equal mapping with ratio 1.',
       );
-    const sideA = exactSide(input, candidate.connection.sides[0], 'A');
+    const sideA = exactIdentitySide(input, candidate.connection.sides[0], 'A');
     if (!sideA.ok)
       return Object.freeze({ ok: false as const, receipt: null, blocker: sideA.blocker });
-    const sideB = exactSide(input, candidate.connection.sides[1], 'B');
+    const sideB = exactIdentitySide(input, candidate.connection.sides[1], 'B');
     if (!sideB.ok)
       return Object.freeze({ ok: false as const, receipt: null, blocker: sideB.blocker });
     return Object.freeze({

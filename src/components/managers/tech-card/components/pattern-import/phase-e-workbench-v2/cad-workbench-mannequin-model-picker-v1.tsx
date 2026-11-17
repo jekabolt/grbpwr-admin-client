@@ -1,3 +1,9 @@
+import type { ModelOpenReferenceDisplayedBodySnapshotV1 } from 'components/managers/model/components/model-open-reference-displayed-body-snapshot-v1';
+import {
+  createCadMannequinDisplayedBodyInputSessionV1,
+  type CadMannequinDisplayedBodyInputObserverV1,
+  type CadMannequinDisplayedBodySourceV1,
+} from './cad-mannequin-displayed-body-input-session-v1';
 import type { common_Model } from 'api/proto-http/admin';
 import { createModelMannequinPoseDraftOwnerV1 } from 'components/managers/model/components/model-mannequin-pose-draft-owner-v1';
 import { createModelMannequinPoseSessionBindingV1 } from 'components/managers/model/components/model-mannequin-pose-session-v1';
@@ -17,7 +23,7 @@ import type {
 } from 'components/shared/measurement-watertight-surface-v1-stage';
 import { ROUTES } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { Button, CheckboxCommon, Pill, Text } from 'ui';
@@ -182,6 +188,7 @@ export type PatternImportDxfPhaseECadMannequinModelPickerViewPropsV1 = Readonly<
   poseLoading?: boolean;
   poseError?: unknown;
   onRetryPose?: () => void;
+  onDisplayedBodyInputV1?: CadMannequinDisplayedBodyInputObserverV1;
 }>;
 
 export type PatternImportDxfPhaseECadMannequinPoseSessionV1 = Readonly<{
@@ -433,9 +440,64 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
   poseLoading = false,
   poseError = null,
   onRetryPose,
+  onDisplayedBodyInputV1,
 }: PatternImportDxfPhaseECadMannequinModelPickerViewPropsV1) {
   const selected = selectedCadWorkbenchModelV1(models, modelId);
   const selectedRevision = selected ? modelFormRevisionKeyV1(selected) : null;
+  const observesBody = onDisplayedBodyInputV1 !== undefined;
+  const currentBodySourceRef = useRef<CadMannequinDisplayedBodySourceV1 | null>(null);
+  currentBodySourceRef.current =
+    observesBody &&
+    selected &&
+    selectedRevision &&
+    poseBinding &&
+    !loading &&
+    !error &&
+    !poseLoading &&
+    !poseError
+      ? {
+          modelId: `tech-card-base-model:${selected.id ?? 0}`,
+          modelContentRevision: selectedRevision,
+          poseDocumentCanonicalKey: poseBinding.canonicalKey,
+        }
+      : null;
+  const bodySourceKey = currentBodySourceRef.current
+    ? JSON.stringify(currentBodySourceRef.current)
+    : null;
+  const bodyInputCallbackRef = useRef(onDisplayedBodyInputV1);
+  // Inline consumer callback changes do not rebuild/copy the same accepted body.
+  // Retain the last observer so removing it still receives its final null revocation.
+  if (onDisplayedBodyInputV1) bodyInputCallbackRef.current = onDisplayedBodyInputV1;
+  const bodyInputSessionRef = useRef<ReturnType<
+    typeof createCadMannequinDisplayedBodyInputSessionV1
+  > | null>(null);
+  const latestDisplayedBodyRef = useRef<ModelOpenReferenceDisplayedBodySnapshotV1 | null>(null);
+  const handleDisplayedBodySnapshot = useCallback(
+    (snapshot: ModelOpenReferenceDisplayedBodySnapshotV1 | null) => {
+      latestDisplayedBodyRef.current = snapshot;
+      void bodyInputSessionRef.current?.observe(snapshot);
+    },
+    [],
+  );
+  useEffect(() => {
+    const source = currentBodySourceRef.current;
+    if (!source) {
+      latestDisplayedBodyRef.current = null;
+      return;
+    }
+    const session = createCadMannequinDisplayedBodyInputSessionV1({
+      source,
+      readCurrentSource: () => currentBodySourceRef.current,
+      onInput: (input) => bodyInputCallbackRef.current?.(input),
+    });
+    bodyInputSessionRef.current = session;
+    // Child acceptance effects may run first; consume their actual latest observation once.
+    void session.observe(latestDisplayedBodyRef.current);
+    return () => {
+      if (bodyInputSessionRef.current === session) bodyInputSessionRef.current = null;
+      session.dispose();
+    };
+  }, [bodySourceKey]);
   const [viewPreset, setViewPreset] = useState<MeasurementSurfaceViewPreset>('front');
   const [patternTool, setPatternTool] =
     useState<PatternImportDxfPhaseECadMannequinPatternOverlayToolV1>('select');
@@ -638,6 +700,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
               modelContentRevision={selectedRevision ?? 'tech-card-base-model:unbound'}
               poseControls='full-body-v9'
               directPoseBindingV9={poseBinding}
+              onDisplayedBodySnapshotV1={observesBody ? handleDisplayedBodySnapshot : undefined}
               directPoseViewportEditingEnabledV9={poseEditing}
               hideDirectPoseControlV9
               variant='workbench'
@@ -674,11 +737,13 @@ export function PatternImportDxfPhaseECadMannequinModelPickerV1({
   paperDoll = null,
   stagedPieces = null,
   patternPieceScene = null,
+  onDisplayedBodyInputV1,
 }: Readonly<{
   disabled?: boolean;
   paperDoll?: ReactNode;
   stagedPieces?: ReactNode;
   patternPieceScene?: PatternImportDxfPhaseECadMannequinPatternPieceSceneV1 | null;
+  onDisplayedBodyInputV1?: CadMannequinDisplayedBodyInputObserverV1;
 }>) {
   const form = useFormContext<TechCardFormData>();
   const modelId =
@@ -718,6 +783,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerV1({
       poseLoading={poseSession.loading}
       poseError={poseSession.error}
       onRetryPose={poseSession.retry}
+      onDisplayedBodyInputV1={onDisplayedBodyInputV1}
     />
   );
 }

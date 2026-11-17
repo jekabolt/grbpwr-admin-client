@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "cloth-observed-placement-original-evaluators/1",
+  "testOnly": true,
+  "capturedAt": "2026-11-17",
+  "purpose": "Immutable pre-refactor evaluators for complete legacy report and detached typed-array parity. Never a production import. Relative dependencies resolve to the current original source locations under src.",
+  "files": [
+    {
+      "alias": "cloth-observed-pair-original",
+      "archiveFile": "beta-skirt-personalized-displayed-body-product-placement-v2.ts",
+      "originalSourcePath": "src/components/cloth-simulation-spike/beta-skirt-personalized-displayed-body-product-placement-v2.ts",
+      "sha256": "623aa15186b12895087e87c91db2458cae1e8962011a8b2a208b4d2981338490"
+    },
+    {
+      "alias": "cloth-world-preflight-original",
+      "archiveFile": "beta-skirt-saved-annular-displayed-body-world-initial-preflight-v1.ts",
+      "originalSourcePath": "src/components/cloth-simulation-spike/beta-skirt-saved-annular-displayed-body-world-initial-preflight-v1.ts",
+      "sha256": "752a58acae8c34d1cc51d1d2aa3df932a53bfbe36126515701d35379f704decf"
+    }
+  ]
+}

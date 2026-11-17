@@ -18,7 +18,9 @@ const MAX_PROPERTIES = 200_000;
 const MAX_ARRAY = 4_096;
 const MAX_STRING = 1_024;
 const MAX_CANONICAL_BYTES = 4 * 1024 * 1024;
-const MAX_SELECTED_CURVES = 32;
+// The exact canonical-medium fixture authors 50 hem curves per piece; keep the admission bounded
+// while allowing that explicit source-curve partition without merging or geometric inference.
+const MAX_SELECTED_CURVES = 64;
 const MAX_SELECTED_SAMPLES = 4_096;
 const STABLE_ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -462,6 +464,39 @@ function sameStringSet(left: readonly string[], right: readonly string[]): boole
   return first.every((value, index) => value === second[index]);
 }
 
+function validatePolicyShape(policy: DetachedRequest['policy']): void {
+  requireExactKeys(
+    policy,
+    ['id', 'revision', 'mapping', 'authoredClearanceM', 'clothThicknessM', 'retention'],
+    'request.policy',
+  );
+  requireExactKeys(policy.mapping, ['kind', 'id', 'revision'], 'request.policy.mapping');
+  requireExactKeys(policy.retention, ['id', 'revision', 'kind'], 'request.policy.retention');
+}
+
+function validatePolicyValues(policy: DetachedRequest['policy']): void {
+  stableId(policy.id, 'request.policy.id');
+  stableId(policy.revision, 'request.policy.revision');
+  stableId(policy.mapping.id, 'request.policy.mapping.id');
+  stableId(policy.mapping.revision, 'request.policy.mapping.revision');
+  stableId(policy.retention.id, 'request.policy.retention.id');
+  stableId(policy.retention.revision, 'request.policy.retention.revision');
+  if (
+    policy.mapping.kind !== 'authored-annular-sector-conical' ||
+    policy.retention.kind !== 'waist-boundary-support' ||
+    !Number.isFinite(policy.authoredClearanceM) ||
+    policy.authoredClearanceM < 0 ||
+    policy.authoredClearanceM > 0.1 ||
+    !Number.isFinite(policy.clothThicknessM) ||
+    policy.clothThicknessM <= 0 ||
+    policy.clothThicknessM > 0.02
+  )
+    fail(
+      'placement-policy-invalid',
+      'Placement policy must select the authored annular-sector conical family, bounded clearance, positive thickness and waist support.',
+    );
+}
+
 function validateBodyAndPolicy(request: DetachedRequest): void {
   requireExactKeys(
     request.body,
@@ -482,17 +517,7 @@ function validateBodyAndPolicy(request: DetachedRequest): void {
     ['revision', 'waistCenterId', 'hipLeftId', 'hipRightId'],
     'request.body.landmarks',
   );
-  requireExactKeys(
-    request.policy,
-    ['id', 'revision', 'mapping', 'authoredClearanceM', 'clothThicknessM', 'retention'],
-    'request.policy',
-  );
-  requireExactKeys(request.policy.mapping, ['kind', 'id', 'revision'], 'request.policy.mapping');
-  requireExactKeys(
-    request.policy.retention,
-    ['id', 'revision', 'kind'],
-    'request.policy.retention',
-  );
+  validatePolicyShape(request.policy);
   const bodyIds = [
     request.body.providerId,
     request.body.providerRevision,
@@ -515,26 +540,7 @@ function validateBodyAndPolicy(request: DetachedRequest): void {
     ]).size !== 3
   )
     fail('body-identity-invalid', 'A-pose and distinct waist/hip landmark IDs are required.');
-  stableId(request.policy.id, 'request.policy.id');
-  stableId(request.policy.revision, 'request.policy.revision');
-  stableId(request.policy.mapping.id, 'request.policy.mapping.id');
-  stableId(request.policy.mapping.revision, 'request.policy.mapping.revision');
-  stableId(request.policy.retention.id, 'request.policy.retention.id');
-  stableId(request.policy.retention.revision, 'request.policy.retention.revision');
-  if (
-    request.policy.mapping.kind !== 'authored-annular-sector-conical' ||
-    request.policy.retention.kind !== 'waist-boundary-support' ||
-    !Number.isFinite(request.policy.authoredClearanceM) ||
-    request.policy.authoredClearanceM < 0 ||
-    request.policy.authoredClearanceM > 0.1 ||
-    !Number.isFinite(request.policy.clothThicknessM) ||
-    request.policy.clothThicknessM <= 0 ||
-    request.policy.clothThicknessM > 0.02
-  )
-    fail(
-      'placement-policy-invalid',
-      'Placement policy must select the authored annular-sector conical family, bounded clearance, positive thickness and waist support.',
-    );
+  validatePolicyValues(request.policy);
 }
 
 type MeshProjection = NonNullable<
@@ -569,7 +575,7 @@ function physicalEdgeKey(first: number, second: number): string {
 }
 
 function validateBoundaryRoles(
-  request: DetachedRequest,
+  request: Pick<DetachedRequest, 'garment'>,
   projection: MeshProjection,
 ): Readonly<{ selectedSourceCurveCount: number; selectedBoundarySampleCount: number }> {
   const { garment } = request;
@@ -826,6 +832,43 @@ function validateBoundaryRoles(
     selectedSourceCurveCount: allSelectedCurves.size,
     selectedBoundarySampleCount,
   };
+}
+
+/**
+ * Shared body-free validation only. A caller-provided projection does not authenticate a composer;
+ * producers must project their genuine owner themselves. No owner or receipt is issued here.
+ */
+export function validateDxfProductTwoPanelSkirtGarmentAndPolicyV1(
+  input: Pick<DetachedRequest, 'garment' | 'policy'>,
+  projection: MeshProjection,
+):
+  | Readonly<{
+      ok: true;
+      counts: Readonly<{ selectedSourceCurveCount: number; selectedBoundarySampleCount: number }>;
+      validationOnly: true;
+    }>
+  | Readonly<{
+      ok: false;
+      blocker: Readonly<{
+        code: DxfProductTwoPanelSkirtPlacementSemanticsBlockerCodeV1;
+        detail: string;
+      }>;
+      validationOnly: true;
+    }> {
+  try {
+    scanPlain(input, 'request', 0, { nodes: 0, properties: 0, seen: new Set<object>() });
+    requireExactKeys(input, ['garment', 'policy'], 'request');
+    if (!clone) fail('invalid-input', 'Native structuredClone is required.');
+    const request = clone(input);
+    validatePolicyShape(request.policy);
+    validatePolicyValues(request.policy);
+    const counts = validateBoundaryRoles(request, projection);
+    return Object.freeze({ ok: true, counts: Object.freeze(counts), validationOnly: true });
+  } catch (error) {
+    const result = blocked(error);
+    if (result.ok) throw new Error('Unreachable successful blocked result.');
+    return Object.freeze({ ok: false, blocker: result.blockers[0], validationOnly: true });
+  }
 }
 
 function deepFreeze<T>(value: T, seen = new Set<object>()): T {

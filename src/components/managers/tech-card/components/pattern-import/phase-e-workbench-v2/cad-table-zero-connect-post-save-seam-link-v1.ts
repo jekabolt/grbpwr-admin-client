@@ -1,10 +1,14 @@
-import type { PieceGeom } from 'lib/assembly-skeleton/types';
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import type { StoredSeam, StoredSeamDirection } from 'lib/seams';
 
 import { rowFromHand } from '../../assembly-seams/seam-actions';
 import type { StrictSeamUpsertResult } from '../../assembly-seams/use-seam-decisions';
+import { rowExactAnchorSig } from '../../assembly-seams/seams-store';
+import {
+  buildPatternImportDxfPhaseEZeroConnectExactAnchorGeometryV1,
+  type PatternImportDxfPhaseEZeroConnectExactAnchorGeometryBlockerV1,
+} from './cad-table-zero-connect-exact-anchor-geometry-v1';
 import type { PatternImportDxfPhaseECadTableZeroConnectCandidateV1 } from './cad-table-zero-connect-session-v1';
 import {
   buildPatternImportDxfPhaseEZeroConnectStoredSeamCrosswalkV1,
@@ -27,6 +31,9 @@ export const PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_POST_SAVE_SEAM_LINK_CLAIMS_
   preWriteSeamKeyAcceptedAsFinal: false,
   existingOperationSeamKeysAttachRequired: true,
   operationAttachmentPerformed: false,
+  exactAnchorGeometryDerivedFromCurrentAuthority: true,
+  legacySkeletonGeometryUsedAsAuthority: false,
+  storedSeamCarriesExactDxfBoundary: false,
   exactSidecarCreated: false,
   operationAndSeamWritesAtomic: false,
   formMutationPerformed: false,
@@ -50,14 +57,11 @@ export type PatternImportDxfPhaseEZeroConnectPostSaveSeamLinkInputV1 = Readonly<
   candidate: PatternImportDxfPhaseECadTableZeroConnectCandidateV1;
   catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
-  geometry: readonly PieceGeom[];
-  geometrySizeToken: string;
   direction: StoredSeamDirection;
   /** Explicit context required by the existing `rowFromHand` anchor path. */
   nameOf: (pieceLineKey: string) => string;
   /** Explicit context required by the existing `rowFromHand` anchor path. */
   grainDeg: ReadonlyMap<string, number> | null;
-  toleranceMm?: number;
   note?: string;
 }>;
 
@@ -90,6 +94,7 @@ export type PatternImportDxfPhaseEZeroConnectPostSaveSeamPreparedReceiptV1 = Rea
 export type PatternImportDxfPhaseEZeroConnectPostSaveSeamLinkBlockerV1 = Readonly<{
   code:
     | PatternImportDxfPhaseEZeroConnectStoredSeamCrosswalkBlockerV1['code']
+    | PatternImportDxfPhaseEZeroConnectExactAnchorGeometryBlockerV1['code']
     | 'post-save-envelope-invalid'
     | 'saved-operation-receipt-invalid'
     | 'saved-operation-correlation-mismatch'
@@ -127,6 +132,7 @@ export type PatternImportDxfPhaseEZeroConnectPostSaveSeamFinalReceiptV1 = Readon
   operation: PatternImportDxfPhaseEZeroConnectPostSaveCrosswalkReadyReceiptV1['operation'];
   echoedSeam: StoredSeam;
   finalSeamKey: string;
+  seamWriteLockVersion: number;
   nextCommand: PatternImportDxfPhaseEZeroConnectOperationSeamKeyAttachCommandV1;
   claims: typeof PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_POST_SAVE_SEAM_LINK_CLAIMS_V1;
 }>;
@@ -142,6 +148,44 @@ export type PatternImportDxfPhaseEZeroConnectPostSaveSeamCompleteResultV1 =
       receipt: null;
       blocker: PatternImportDxfPhaseEZeroConnectPostSaveSeamLinkBlockerV1;
     }>;
+
+const strictSeamWriteByPending = new WeakMap<
+  object,
+  Promise<PatternImportDxfPhaseEZeroConnectPostSaveSeamCompleteResultV1>
+>();
+
+/** Delegates to the existing strict writer at most once for one retained pending identity. */
+export function executePatternImportDxfPhaseEZeroConnectStrictSeamWriteOnceV1(
+  pendingIdentity: object,
+  prepared: PatternImportDxfPhaseEZeroConnectPostSaveSeamPreparedReceiptV1,
+  strictUpsert: (rows: readonly StoredSeam[]) => Promise<StrictSeamUpsertResult | null | undefined>,
+): Promise<PatternImportDxfPhaseEZeroConnectPostSaveSeamCompleteResultV1> {
+  const existing = strictSeamWriteByPending.get(pendingIdentity);
+  if (existing) return existing;
+  let safelyRetryable = false;
+  const execution = (async () => {
+    const strictReceipt = await strictUpsert(prepared.nextCommand.rows);
+    const completed = completePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1(
+      prepared,
+      strictReceipt,
+    );
+    // A safe local gate proves that no write was attempted, so the same retained pending may retry.
+    // Unknown or acknowledged outcomes remain cached: retrying those could duplicate a committed RPC.
+    safelyRetryable = Boolean(
+      strictReceipt && !strictReceipt.ok && strictReceipt.outcome === 'not-attempted',
+    );
+    return completed;
+  })();
+  strictSeamWriteByPending.set(pendingIdentity, execution);
+  void execution.then(
+    () => {
+      if (safelyRetryable && strictSeamWriteByPending.get(pendingIdentity) === execution)
+        strictSeamWriteByPending.delete(pendingIdentity);
+    },
+    () => undefined,
+  );
+  return execution;
+}
 
 const STABLE_ID = /^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,255}$/;
 const SAVED_OPERATION_KEYS = Object.freeze(['historyKey', 'operationNumber', 'status']);
@@ -187,15 +231,6 @@ function savedOperationValid(
   );
 }
 
-function pairRangeSignature(row: StoredSeam): string {
-  const side = (anchors: StoredSeam['sideA']) =>
-    anchors
-      .map((anchor) => `${anchor.piece}:${anchor.edgeHint}@${anchor.range[0]}-${anchor.range[1]}`)
-      .sort()
-      .join('+');
-  return `${row.kind}|${[side(row.sideA), side(row.sideB)].sort().join('~')}`;
-}
-
 function echoedSemanticsMatch(expected: StoredSeam, echoed: StoredSeam): boolean {
   return (
     echoed.status === expected.status &&
@@ -206,7 +241,7 @@ function echoedSemanticsMatch(expected: StoredSeam, echoed: StoredSeam): boolean
     echoed.anchoredSize === expected.anchoredSize &&
     echoed.note === expected.note &&
     echoed.stale !== true &&
-    pairRangeSignature(echoed) === pairRangeSignature(expected)
+    rowExactAnchorSig(echoed) === rowExactAnchorSig(expected)
   );
 }
 
@@ -221,15 +256,12 @@ export function preparePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1(
   try {
     if (
       !input ||
-      !Array.isArray(input.geometry) ||
-      typeof input.geometrySizeToken !== 'string' ||
-      !input.geometrySizeToken ||
       typeof input.nameOf !== 'function' ||
       (input.grainDeg !== null && typeof input.grainDeg?.get !== 'function')
     )
       return blocked(
         'post-save-envelope-invalid',
-        'Post-save seam linking requires current geometry and explicit rowFromHand name/grain context.',
+        'Post-save seam linking requires current exact authority and explicit rowFromHand context.',
       );
     if (!savedOperationValid(input.savedOperation))
       return blocked(
@@ -251,26 +283,34 @@ export function preparePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1(
         'StoredSeam direction must be an explicit caller-owned reversed, same or unknown decision.',
       );
 
+    const exactGeometry = buildPatternImportDxfPhaseEZeroConnectExactAnchorGeometryV1({
+      candidate: input.candidate,
+      catalog: input.catalog,
+      projection: input.projection,
+    });
+    if (!exactGeometry.ok) return blocked(exactGeometry.blocker.code, exactGeometry.blocker.detail);
+
     const crosswalk = buildPatternImportDxfPhaseEZeroConnectStoredSeamCrosswalkV1({
       candidate: input.candidate,
       catalog: input.catalog,
       projection: input.projection,
-      geometry: input.geometry,
-      geometrySizeToken: input.geometrySizeToken,
-      ...(input.toleranceMm === undefined ? {} : { toleranceMm: input.toleranceMm }),
+      geometry: exactGeometry.geometry.pieces,
+      geometrySizeToken: exactGeometry.geometry.geometrySizeToken,
     });
     if (!crosswalk.ok) return blocked(crosswalk.blocker.code, crosswalk.blocker.detail);
 
-    const geometryByPiece = new Map(input.geometry.map((piece) => [piece.pieceKey, piece]));
+    const geometryByPiece = new Map(
+      exactGeometry.geometry.pieces.map((piece) => [piece.pieceKey, piece]),
+    );
     const storedSeam = rowFromHand(
       crosswalk.receipt.sides[0].parts,
       crosswalk.receipt.sides[1].parts,
       geometryByPiece,
       {
-        pieces: input.geometry,
+        pieces: exactGeometry.geometry.pieces,
         grainDeg: input.grainDeg,
         nameOf: input.nameOf,
-        size: input.geometrySizeToken,
+        size: exactGeometry.geometry.geometrySizeToken,
       },
       { direction: input.direction, note: input.note },
     );
@@ -318,7 +358,7 @@ export function preparePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1(
 
 /**
  * Accepts only the strict writer's single verified echoed seam. The submitted key is deliberately
- * ignored: `reuseKeys` or the server may have selected another final key for this geometric pair.
+ * ignored: exact-anchor key reuse or the server may have selected another final key.
  */
 export function completePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1(
   prepared: PatternImportDxfPhaseEZeroConnectPostSaveSeamPreparedReceiptV1,
@@ -347,7 +387,9 @@ export function completePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1(
     if (
       strictReceipt.outcome !== 'verified-echo' ||
       strictReceipt.rows.length !== 1 ||
-      strictReceipt.seamKeys.length !== 1
+      strictReceipt.seamKeys.length !== 1 ||
+      !Number.isSafeInteger(strictReceipt.lockVersion) ||
+      strictReceipt.lockVersion < 0
     )
       return blocked(
         'strict-seam-receipt-mismatch',
@@ -381,6 +423,7 @@ export function completePatternImportDxfPhaseEZeroConnectPostSaveSeamLinkV1(
         operation,
         echoedSeam: echoed,
         finalSeamKey: echoed.seamKey,
+        seamWriteLockVersion: strictReceipt.lockVersion,
         nextCommand,
         claims: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_POST_SAVE_SEAM_LINK_CLAIMS_V1,
       }),

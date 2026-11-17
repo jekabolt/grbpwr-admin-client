@@ -11,7 +11,22 @@ export type ViewSwitchOption<T extends string> = {
   hint?: string;
   /** This one segment cannot be chosen now (its `hint` says why); the others stay live. */
   disabled?: boolean;
+  /**
+   * A short tally at the segment's right edge (`2/6`). Only with `columns`. `attention` while the
+   * thing behind the segment is incomplete, `error` while it holds an error, `mut` when done.
+   */
+  count?: { text: string; tone?: 'mut' | 'attention' | 'error' };
 };
+
+const COUNT_TONE = {
+  mut: 'text-labelColor',
+  attention: 'text-highlightColor',
+  error: 'text-error',
+} as const;
+
+const GRID_COLUMNS = { 2: 'grid-cols-2', 3: 'grid-cols-3', 4: 'grid-cols-4' } as const;
+const TOUCH_TAP_SLOP_PX = 10;
+const TOUCH_CLICK_DEDUPE_MS = 1_000;
 
 /**
  * Exclusive view switch — the non-form counterpart of `SegmentedField`.
@@ -39,6 +54,7 @@ export function ViewSwitch<T extends string>({
   className,
   disabled,
   quiet,
+  columns,
 }: {
   value: T;
   options: readonly ViewSwitchOption<T>[];
@@ -52,13 +68,28 @@ export function ViewSwitch<T extends string>({
    * ink text, the others are underlined words — the header door's own metric.
    */
   quiet?: boolean;
+  /**
+   * MANY SEGMENTS: lay them on an equal-width grid that wraps into rows (8 measurement groups →
+   * 2 rows of 4). Every segment then fills its cell and may carry a `count`. Not with `quiet`.
+   */
+  columns?: keyof typeof GRID_COLUMNS;
 }) {
   const refs = useRef<(HTMLSpanElement | null)[]>([]);
+  const touchPointer = useRef<{
+    pointerId: number;
+    value: T;
+    startX: number;
+    startY: number;
+    moved: boolean;
+  } | null>(null);
+  const committedTouch = useRef<{ value: T; at: number } | null>(null);
   // Клавиатурный вход в группу — ровно один сегмент, и он обязан существовать всегда. Если
   // текущее значение ни одному не соответствует (чужая запись в предпочтениях, снятый вид),
   // табом в полосу было бы не попасть вовсе — тогда вход берёт первый сегмент.
   const current = options.findIndex((o) => o.value === value);
   const entry = current >= 0 ? current : 0;
+  // Сетка — только для рамочных сегментов: тихий вариант живёт в шапке и сеткой не бывает.
+  const grid = columns !== undefined && !quiet;
 
   const go = (i: number) => {
     const next = options[(i + options.length) % options.length];
@@ -91,7 +122,10 @@ export function ViewSwitch<T extends string>({
     <div
       role='radiogroup'
       aria-label={label}
-      className={cn('inline-flex items-stretch', className)}
+      className={cn(
+        grid ? cn('grid pl-px pt-px', GRID_COLUMNS[columns]) : 'inline-flex items-stretch',
+        className,
+      )}
     >
       {options.map((o, i) => {
         const on = o.value === value;
@@ -110,10 +144,82 @@ export function ViewSwitch<T extends string>({
             }}
             role='radio'
             aria-checked={on}
+            aria-label={grid && o.count ? `${o.label} ${o.count.text}` : undefined}
             aria-disabled={off || undefined}
             tabIndex={disabled ? undefined : i === entry ? 0 : -1}
             title={o.hint}
-            onClick={off ? undefined : () => onChange(o.value)}
+            onPointerDown={
+              off
+                ? undefined
+                : (event) => {
+                    if (event.pointerType !== 'touch') return;
+                    touchPointer.current = {
+                      pointerId: event.pointerId,
+                      value: o.value,
+                      startX: event.clientX,
+                      startY: event.clientY,
+                      moved: false,
+                    };
+                  }
+            }
+            onPointerMove={
+              off
+                ? undefined
+                : (event) => {
+                    const active = touchPointer.current;
+                    if (
+                      event.pointerType !== 'touch' ||
+                      !active ||
+                      active.pointerId !== event.pointerId
+                    )
+                      return;
+                    if (
+                      Math.hypot(event.clientX - active.startX, event.clientY - active.startY) >
+                      TOUCH_TAP_SLOP_PX
+                    )
+                      active.moved = true;
+                  }
+            }
+            onPointerCancel={
+              off
+                ? undefined
+                : (event) => {
+                    if (
+                      event.pointerType === 'touch' &&
+                      touchPointer.current?.pointerId === event.pointerId
+                    )
+                      touchPointer.current = null;
+                  }
+            }
+            onPointerUp={
+              off
+                ? undefined
+                : (event) => {
+                    if (event.pointerType !== 'touch') return;
+                    const active = touchPointer.current;
+                    if (active?.pointerId === event.pointerId) touchPointer.current = null;
+                    if (
+                      !active ||
+                      active.pointerId !== event.pointerId ||
+                      active.value !== o.value ||
+                      active.moved
+                    )
+                      return;
+                    committedTouch.current = { value: o.value, at: Date.now() };
+                    onChange(o.value);
+                  }
+            }
+            onClick={
+              off
+                ? undefined
+                : () => {
+                    const touch = committedTouch.current;
+                    committedTouch.current = null;
+                    if (touch?.value === o.value && Date.now() - touch.at <= TOUCH_CLICK_DEDUPE_MS)
+                      return;
+                    onChange(o.value);
+                  }
+            }
             onKeyDown={(e) => onKeyDown(e, i)}
             className={cn(
               quiet
@@ -121,7 +227,11 @@ export function ViewSwitch<T extends string>({
                     'inline-flex select-none items-center px-1.5 py-px transition-colors',
                     HEADER_TEXT,
                   )
-                : '-ml-px inline-flex select-none items-center border px-2 py-px text-micro uppercase tracking-label transition-colors first:ml-0',
+                : grid
+                  ? // Рамки склеены в один пиксель по обеим осям: каждый сегмент заходит на
+                    // соседа слева и сверху, а `pl-px pt-px` полосы возвращает этот пиксель.
+                    '-ml-px -mt-px flex h-8 min-w-0 select-none items-center justify-between gap-2 border px-2 text-micro uppercase tracking-label transition-colors'
+                  : '-ml-px inline-flex select-none items-center border px-2 py-px text-micro uppercase tracking-label transition-colors first:ml-0',
               'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor',
               off ? 'cursor-not-allowed' : 'cursor-pointer',
               // `relative` НА ВЫБРАННОМ — не украшение. Сегменты склеены `-ml-px`, то есть их
@@ -142,7 +252,17 @@ export function ViewSwitch<T extends string>({
               o.disabled && !on && 'text-borderColor',
             )}
           >
-            {o.label}
+            {grid ? <span className='min-w-0 truncate'>{o.label}</span> : o.label}
+            {grid && o.count ? (
+              <span
+                className={cn(
+                  'shrink-0 tabular-nums',
+                  on ? 'text-bgColor' : COUNT_TONE[o.count.tone ?? 'mut'],
+                )}
+              >
+                {o.count.text}
+              </span>
+            ) : null}
           </span>
         );
       })}

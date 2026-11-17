@@ -157,6 +157,47 @@ export function rowPairRangeSig(r: StoredSeam): string {
   return `${r.kind}|${[side(r.sideA), side(r.sideB)].sort().join('~')}`;
 }
 
+function exactAnchorSig(anchor: StoredSeam['sideA'][number]): string {
+  return JSON.stringify([
+    anchor.piece,
+    anchor.edgeHint,
+    anchor.contourSig,
+    anchor.samples,
+    anchor.perimShare,
+    anchor.lenMm,
+    anchor.notches,
+    anchor.turnDeg,
+    anchor.range,
+    anchor.placement
+      ? [anchor.placement.xMm, anchor.placement.yMm, anchor.placement.rotDeg, anchor.placement.flip]
+      : null,
+    anchor.layer ?? null,
+  ]);
+}
+
+/** Exact order-free pair identity used only by strict writers and their verified echo. */
+export function rowExactAnchorSig(row: StoredSeam): string {
+  const side = (anchors: StoredSeam['sideA']) => JSON.stringify(anchors.map(exactAnchorSig).sort());
+  return JSON.stringify([row.kind, row.anchoredSize, [side(row.sideA), side(row.sideB)].sort()]);
+}
+
+/** Strict writes reuse a key only when every persisted anchor fact is identical. */
+export function reuseExactKeys(
+  rows: readonly StoredSeam[],
+  have: readonly StoredSeam[],
+): StoredSeam[] {
+  const keys = new Set(have.map((row) => row.seamKey));
+  const bySignature = new Map<string, string>();
+  for (const row of have)
+    if (!bySignature.has(rowExactAnchorSig(row)))
+      bySignature.set(rowExactAnchorSig(row), row.seamKey);
+  return rows.map((row) => {
+    if (keys.has(row.seamKey)) return row;
+    const seamKey = bySignature.get(rowExactAnchorSig(row));
+    return seamKey ? { ...row, seamKey } : row;
+  });
+}
+
 /**
  * New rows onto the key of a row already stored for the same pair (another client confirmed it a
  * moment ago, or a write of this tab is still in flight): one pair, one row — never two keys.
