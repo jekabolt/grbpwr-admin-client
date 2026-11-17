@@ -719,6 +719,7 @@ describe('measurement guide visibility v1', () => {
           neutralPose: true,
           limbSectionModes: body.betaRuntime?.limbSectionModes,
           torsoSectionStations: body.betaRuntime?.torsoSectionStations,
+          neckSectionStation: body.betaRuntime?.neckSectionStation,
         });
         const field = measurementName.replace('BODY_MEASUREMENT_NAME_', '');
         const drawnStatus = guide.status === 'visible' || guide.status === 'limited';

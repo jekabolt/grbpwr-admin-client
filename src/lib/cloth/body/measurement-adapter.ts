@@ -12,6 +12,8 @@ export interface CanonicalBodyMeasurementsMm {
   readonly armLengthMm: number;
   readonly inseamMm: number;
   readonly neckBaseCircumferenceMm?: number;
+  /** Mid-neck girth: a separate field, never derived from or mapped onto neckBase. */
+  readonly neckCircumferenceMm?: number;
   readonly bicepCircumferenceMm?: number;
   readonly wristCircumferenceMm?: number;
   readonly thighCircumferenceMm?: number;
@@ -105,6 +107,7 @@ export const PROJECT_BODY_MEASUREMENT_ALIASES: CanonicalMeasurementAliasMap = {
   armLengthMm: ['BODY_MEASUREMENT_NAME_SLEEVE_LENGTH'],
   inseamMm: ['BODY_MEASUREMENT_NAME_INSEAM'],
   neckBaseCircumferenceMm: ['BODY_MEASUREMENT_NAME_NECK_BASE'],
+  neckCircumferenceMm: ['BODY_MEASUREMENT_NAME_NECK'],
   bicepCircumferenceMm: ['BODY_MEASUREMENT_NAME_BICEP'],
   wristCircumferenceMm: ['BODY_MEASUREMENT_NAME_WRIST'],
   thighCircumferenceMm: ['BODY_MEASUREMENT_NAME_THIGH'],
@@ -144,6 +147,8 @@ export const CANONICAL_MEASUREMENT_PLAUSIBILITY_MM: Readonly<
   armLengthMm: [400, 850],
   inseamMm: [500, 1100],
   neckBaseCircumferenceMm: [250, 650],
+  // Broad "not a typo" guard with no data behind it; non-fatal like the other bounded proxies.
+  neckCircumferenceMm: [250, 550],
   bicepCircumferenceMm: [180, 650],
   wristCircumferenceMm: [100, 350],
   thighCircumferenceMm: [300, 1000],
@@ -171,12 +176,13 @@ export const CANONICAL_MEASUREMENT_PLAUSIBILITY_MM: Readonly<
 };
 
 /**
- * Admission ranges for bounded proxies (high hip, knee) are warnings, not whole-preview blockers.
+ * Admission ranges for bounded proxies (high hip, knee, neck) are warnings, not whole-preview blockers.
  * Each proxy owns its own visual deformation-safety clamp and reports `limited` when it applies.
  */
 const CANONICAL_MEASUREMENT_NON_FATAL_PLAUSIBILITY_KEYS = new Set<CanonicalMeasurementKey>([
   'highHipCircumferenceMm',
   'kneeCircumferenceMm',
+  'neckCircumferenceMm',
 ]);
 
 export function isCanonicalMeasurementNonFatalPlausibilityKey(
@@ -237,6 +243,8 @@ export function validateCanonicalMeasurementCorrelations(
   return issues;
 }
 
+const NECK_ABOVE_NECK_BASE_TOLERANCE_MM = 20;
+
 /**
  * Non-fatal topology hints. A value that trips one still reaches the mannequin, where its bounded
  * proxy clamps it; these are not population statistics, calibration or fit priors.
@@ -258,6 +266,15 @@ export function validateCanonicalMeasurementCorrelationWarnings(
           'highHipCircumferenceMm is expected between waistCircumferenceMm and hipCircumferenceMm.',
       });
     }
+  }
+  // Topology hint only: neck is never derived from neck base, and neck base never from neck.
+  const neck = values.neckCircumferenceMm;
+  const neckBase = values.neckBaseCircumferenceMm;
+  if (neck != null && neckBase != null && neck > neckBase + NECK_ABOVE_NECK_BASE_TOLERANCE_MM) {
+    issues.push({
+      keys: ['neckCircumferenceMm', 'neckBaseCircumferenceMm'],
+      message: `neckCircumferenceMm is expected at most ${NECK_ABOVE_NECK_BASE_TOLERANCE_MM} mm above neckBaseCircumferenceMm.`,
+    });
   }
   return issues;
 }
@@ -451,6 +468,9 @@ export function adaptProjectBodyMeasurements(
       ...(values.neckBaseCircumferenceMm == null
         ? {}
         : { neckBaseCircumferenceMm: values.neckBaseCircumferenceMm }),
+      ...(values.neckCircumferenceMm == null
+        ? {}
+        : { neckCircumferenceMm: values.neckCircumferenceMm }),
       ...(values.highHipCircumferenceMm == null
         ? {}
         : { highHipCircumferenceMm: values.highHipCircumferenceMm }),

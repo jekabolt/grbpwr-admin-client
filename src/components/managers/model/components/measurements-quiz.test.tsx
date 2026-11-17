@@ -61,7 +61,7 @@ describe('guided model measurements', () => {
     expect(html).toContain('guided');
     expect(html).toContain('table');
     expect(html).toContain('chest');
-    expect(html).toContain('1/34 · 2 filled');
+    expect(html).toContain('1/35 · 2 filled');
     expect(html).toContain('value · mm');
     expect(html).not.toContain('Horizontal torso circumference');
     expect(html).not.toContain('two independent readings');

@@ -31,6 +31,12 @@ import {
 } from './measurement-open-reference-knee-proxy-v1';
 import { solveMeasurementOpenReferenceKneeProxyInWorkerV1 } from './measurement-open-reference-knee-proxy-worker-v1';
 import {
+  resolveMeasurementOpenReferenceNeckRigHeadsV1,
+  resolveMeasurementOpenReferenceNeckSectionStationV1,
+  type MeasurementOpenReferenceNeckProtectedSectionV1,
+  type MeasurementOpenReferenceNeckRigHeadsV1,
+} from './measurement-open-reference-neck-proxy-v1';
+import {
   createMeasurementOpenReferenceLimbSubsetRuntimeV1,
   type MeasurementOpenReferenceLimbSubsetRuntimeResultV1,
 } from './measurement-open-reference-limb-subset-runtime-v1';
@@ -88,6 +94,7 @@ export const MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_KEYS_V1 = Object.freeze([
   'waistDepthMm',
   'hipDepthMm',
   'armLengthMm',
+  'neckCircumferenceMm',
   'bicepCircumferenceMm',
   'wristCircumferenceMm',
   'thighCircumferenceMm',
@@ -122,6 +129,11 @@ export interface MeasurementOpenReferenceBetaShapeRuntimeResultV1 {
   }>;
   /** Rig-only knee planes (lowerleg01 heads); present whenever the core rig resolves. */
   readonly kneeSectionStations?: readonly MeasurementOpenReferenceKneeRigStationV1[];
+  /**
+   * The neck proxy's own rig mid-neck plane (origin neck02 head, normal neck01->head); present
+   * whenever the core rig resolves, so the guide draws the same section the proxy solves.
+   */
+  readonly neckSectionStation?: MeasurementOpenReferenceNeckProtectedSectionV1;
   readonly sourceRevisionSuffix: string;
   readonly claims: {
     readonly visualReferenceOnly: true;
@@ -133,6 +145,7 @@ export interface MeasurementOpenReferenceBetaShapeRuntimeResultV1 {
     readonly torsoDepthFrontBackDistributionCalibrated: false;
     readonly highHipSectionProxyOnly: true;
     readonly kneeRadialSectionProxyOnly: true;
+    readonly neckRadialSectionProxyOnly: true;
     readonly circumferenceRangeCalibrated: false;
     readonly armLengthCenterlineProxyOnly: true;
     readonly sleeveLengthRepresented: false;
@@ -181,6 +194,7 @@ const CLAIMS = Object.freeze({
   torsoDepthFrontBackDistributionCalibrated: false as const,
   highHipSectionProxyOnly: true as const,
   kneeRadialSectionProxyOnly: true as const,
+  neckRadialSectionProxyOnly: true as const,
   circumferenceRangeCalibrated: false as const,
   armLengthCenterlineProxyOnly: true as const,
   sleeveLengthRepresented: false as const,
@@ -219,9 +233,26 @@ function withDisplayPositions(
 
 /** A late, locally gated proxy that the final global gate may drop alone (risk R4). */
 interface DroppableBetaShapeStageV1 {
-  readonly key: 'highHipCircumferenceMm' | 'kneeCircumferenceMm';
+  readonly key: 'highHipCircumferenceMm' | 'kneeCircumferenceMm' | 'neckCircumferenceMm';
   readonly beforeM: Float32Array;
   readonly afterM: Float32Array;
+}
+
+/**
+ * Every non-empty subset of the droppable stages, singles first, keeping the input order inside a
+ * size class (two stages: [a], [b], [a, b]).
+ */
+function droppableStageCandidates(
+  stages: readonly DroppableBetaShapeStageV1[],
+): (readonly DroppableBetaShapeStageV1[])[] {
+  const subsets: DroppableBetaShapeStageV1[][] = [];
+  for (let mask = 1; mask < 1 << stages.length; mask += 1) {
+    subsets.push(stages.filter((_, index) => (mask & (1 << index)) !== 0));
+  }
+  return subsets
+    .map((subset, order) => ({ subset, order }))
+    .sort((left, right) => left.subset.length - right.subset.length || left.order - right.order)
+    .map(({ subset }) => subset);
 }
 
 /** Removes the stages' own displacement; later additive stages (limbs, knee) stay in place. */
@@ -533,6 +564,7 @@ async function createBetaShapeRuntimeOnceV1(options: {
   let highHipStationOriginM: readonly [number, number, number] | undefined;
   let highHipStage: DroppableBetaShapeStageV1 | undefined;
   let kneeStage: DroppableBetaShapeStageV1 | undefined;
+  let neckStage: DroppableBetaShapeStageV1 | undefined;
   let poseResourcesPromise: Promise<MeasurementOpenReferenceDisplayPoseResourcesV1> | undefined;
   const poseResources = () =>
     (poseResourcesPromise ??= (options.loadPoseResources ?? loadBetaShapePoseResourcesV1)());
@@ -541,6 +573,23 @@ async function createBetaShapeRuntimeOnceV1(options: {
     options.waistHipRuntime.displayMesh.positions,
   );
   const diagnostics: string[] = [];
+
+  // Neck needs the rig rest heads before the torso worker runs; resolved only when requested.
+  const neckTargetMm = options.measurements.neckCircumferenceMm;
+  let neckRigHeads: MeasurementOpenReferenceNeckRigHeadsV1 | undefined;
+  if (neckTargetMm != null) {
+    try {
+      const { rig } = await poseResources();
+      neckRigHeads = resolveMeasurementOpenReferenceNeckRigHeadsV1({
+        basis: options.basis,
+        heightMm: options.measurements.heightMm,
+        rig,
+      });
+    } catch (reason: unknown) {
+      if (reason instanceof Error && reason.name === 'AbortError') throw reason;
+      // The torso worker reports neck as notApplied without rig heads.
+    }
+  }
 
   try {
     const torso = await (
@@ -553,6 +602,13 @@ async function createBetaShapeRuntimeOnceV1(options: {
       ...(options.measurements.highHipCircumferenceMm == null
         ? {}
         : { highHipCircumferenceMm: options.measurements.highHipCircumferenceMm }),
+      ...(neckTargetMm == null
+        ? {}
+        : {
+            neckCircumferenceMm: neckTargetMm,
+            neckPose: shapedRuntime.openReference.pose,
+            ...(neckRigHeads ? { neckRigHeads } : {}),
+          }),
       loadTorsoBundle: options.loadTorsoBundle,
       ...(options.loadFemaleBustBundle
         ? { loadFemaleBustBundle: options.loadFemaleBustBundle }
@@ -564,6 +620,7 @@ async function createBetaShapeRuntimeOnceV1(options: {
       ...torso.chestShoulderDiagnostics,
       ...torso.depthDiagnostics.map(({ measurementKey, code }) => `${measurementKey}:${code}`),
       ...torso.highHipDiagnostics.map(({ code }) => `highHipCircumferenceMm:${code}`),
+      ...torso.neckDiagnostics.map(({ code }) => `neckCircumferenceMm:${code}`),
     );
     chestStationOriginM = torso.chestStationOriginM;
     underBustStationOriginM = torso.underBustStationOriginM;
@@ -573,14 +630,17 @@ async function createBetaShapeRuntimeOnceV1(options: {
       ...torso.chestShoulderRepresentedMeasurements,
       ...torso.depthRepresentedMeasurements,
       ...(torso.highHipRepresented ? (['highHipCircumferenceMm'] as const) : []),
+      ...(torso.neckRepresented ? (['neckCircumferenceMm'] as const) : []),
     );
     limited.push(
       ...(torso.ribcageLimitedMeasurements ?? []),
       ...torso.chestShoulderLimitedMeasurements,
       ...torso.depthLimitedMeasurements,
       ...(torso.highHipLimited ? (['highHipCircumferenceMm'] as const) : []),
+      ...(torso.neckLimited ? (['neckCircumferenceMm'] as const) : []),
     );
     const highHipApplied = torso.highHipRepresented || torso.highHipLimited;
+    const neckApplied = torso.neckRepresented || torso.neckLimited;
     if (
       torso.ribcageRepresentedMeasurements.length > 0 ||
       (torso.ribcageLimitedMeasurements?.length ?? 0) > 0 ||
@@ -588,13 +648,22 @@ async function createBetaShapeRuntimeOnceV1(options: {
       torso.chestShoulderLimitedMeasurements.length > 0 ||
       torso.depthRepresentedMeasurements.length > 0 ||
       torso.depthLimitedMeasurements.length > 0 ||
-      highHipApplied
+      highHipApplied ||
+      neckApplied
     ) {
       shapedRuntime = withDisplayPositions(shapedRuntime, torso.positionsM);
       if (highHipApplied && torso.positionsBeforeHighHipM) {
         highHipStage = Object.freeze({
           key: 'highHipCircumferenceMm' as const,
           beforeM: torso.positionsBeforeHighHipM,
+          // Neck runs after high hip: end the high-hip delta where neck starts.
+          afterM: torso.positionsBeforeNeckM ?? torso.positionsM,
+        });
+      }
+      if (neckApplied && torso.positionsBeforeNeckM) {
+        neckStage = Object.freeze({
+          key: 'neckCircumferenceMm' as const,
+          beforeM: torso.positionsBeforeNeckM,
           afterM: torso.positionsM,
         });
       }
@@ -684,6 +753,22 @@ async function createBetaShapeRuntimeOnceV1(options: {
   } catch (reason: unknown) {
     if (reason instanceof Error && reason.name === 'AbortError') throw reason;
     // Guide-only data: the guide keeps its analytical knee band when the rig is unavailable.
+  }
+  let neckSectionStation: MeasurementOpenReferenceNeckProtectedSectionV1 | undefined;
+  try {
+    const { rig } = await poseResources();
+    neckSectionStation =
+      resolveMeasurementOpenReferenceNeckSectionStationV1(
+        neckRigHeads ??
+          resolveMeasurementOpenReferenceNeckRigHeadsV1({
+            basis: options.basis,
+            heightMm: options.measurements.heightMm,
+            rig,
+          }),
+      ) ?? undefined;
+  } catch (reason: unknown) {
+    if (reason instanceof Error && reason.name === 'AbortError') throw reason;
+    // Guide-only data: without the rig the neck guide is simply not drawn.
   }
 
   // Knee runs after the limb runtime and its final closure, on the shaped legs (spec §2.2).
@@ -806,14 +891,13 @@ async function createBetaShapeRuntimeOnceV1(options: {
     selfIntersectionPolicy: options.selfIntersectionPolicy,
     signal: options.signal,
   });
-  if (!finalQualityGate.safe && (kneeStage || highHipStage)) {
-    // R4: drop the late proxies alone (knee, then high hip, then both) before the global rollback,
-    // so one failing station never wipes waist/hip, depth or limbs.
-    const candidates: (readonly DroppableBetaShapeStageV1[])[] =
-      kneeStage && highHipStage
-        ? [[kneeStage], [highHipStage], [kneeStage, highHipStage]]
-        : [[(kneeStage ?? highHipStage)!]];
-    for (const dropped of candidates) {
+  const droppableStages = [kneeStage, neckStage, highHipStage].filter(
+    (stage): stage is DroppableBetaShapeStageV1 => stage != null,
+  );
+  if (!finalQualityGate.safe && droppableStages.length > 0) {
+    // R4: drop the late proxies alone (knee, neck, high hip; then pairs; then all) before the
+    // global rollback, so one failing station never wipes waist/hip, depth or limbs.
+    for (const dropped of droppableStageCandidates(droppableStages)) {
       const withoutStagesM = withoutBetaShapeStages(positionsBeforeArmLengthM, dropped);
       const candidateM = appliedArmLength
         ? applyMakeHuman2ArmLengthProxyToDisplayPositionsMResearchV1({
@@ -917,6 +1001,7 @@ async function createBetaShapeRuntimeOnceV1(options: {
       options.measurements.waistDepthMm,
       options.measurements.hipDepthMm,
       options.measurements.highHipCircumferenceMm,
+      options.measurements.neckCircumferenceMm,
       options.measurements.bicepCircumferenceMm,
       options.measurements.wristCircumferenceMm,
       options.measurements.thighCircumferenceMm,
@@ -958,6 +1043,7 @@ async function createBetaShapeRuntimeOnceV1(options: {
       hip: hipStationOriginM,
     }),
     kneeSectionStations,
+    neckSectionStation,
     sourceRevisionSuffix: suffix(representedVisualControls, limitedVisualControls),
     claims: CLAIMS,
   });

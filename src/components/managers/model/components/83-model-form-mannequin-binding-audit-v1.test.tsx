@@ -195,7 +195,7 @@ describe('receipt 83 model-form mannequin binding audit v1', () => {
       boundValueMm: 240,
     });
     expect(mapFormToModelInsert(form)).toMatchObject({
-      bodyMeasurementSchemaVersion: 1,
+      bodyMeasurementSchemaVersion: 2,
       measurements: expect.arrayContaining([p0]),
     });
     const edited = mapFormToModelInsert({
@@ -238,7 +238,7 @@ describe('receipt 83 model-form mannequin binding audit v1', () => {
       thumbnailId: 0,
       mediaIds: [],
       defaultSizeIds: [],
-      bodyMeasurementSchemaVersion: 1,
+      bodyMeasurementSchemaVersion: 2,
     });
     expect(payload).not.toHaveProperty('posePresetId');
     expect(payload).not.toHaveProperty('mesh');

@@ -97,3 +97,58 @@ describe('measurement adapter canonical high hip and knee', () => {
     expect(invertedInterval.diagnostics).toEqual([]);
   });
 });
+
+describe('measurement adapter canonical neck', () => {
+  it('maps neck separately and never derives neck base from it', () => {
+    expect(CANONICAL_MEASUREMENT_PLAUSIBILITY_MM.neckCircumferenceMm).toEqual([250, 550]);
+    const result = adaptProjectBodyMeasurements([
+      ...REQUIRED,
+      { name: 'BODY_MEASUREMENT_NAME_NECK', valueMm: 340 },
+    ]);
+
+    expect(result.ok).toBe(true);
+    expect(result.diagnostics).toEqual([]);
+    if (result.ok) {
+      expect(result.measurements.neckCircumferenceMm).toBe(340);
+      expect(result.measurements.neckBaseCircumferenceMm).toBeUndefined();
+    }
+  });
+
+  it('keeps an out-of-range neck as a warning and warns when neck exceeds neck base', () => {
+    const outOfRange = adaptProjectBodyMeasurements([
+      ...REQUIRED,
+      { name: 'BODY_MEASUREMENT_NAME_NECK', valueMm: 600 },
+    ]);
+    expect(outOfRange.ok).toBe(true);
+    expect(outOfRange.diagnostics).toEqual([
+      expect.objectContaining({
+        severity: 'warning',
+        code: 'invalid-value',
+        canonicalKey: 'neckCircumferenceMm',
+      }),
+    ]);
+    if (outOfRange.ok) expect(outOfRange.measurements.neckCircumferenceMm).toBe(600);
+
+    const aboveBase = adaptProjectBodyMeasurements([
+      ...REQUIRED,
+      { name: 'BODY_MEASUREMENT_NAME_NECK_BASE', valueMm: 360 },
+      { name: 'BODY_MEASUREMENT_NAME_NECK', valueMm: 400 },
+    ]);
+    expect(aboveBase.ok).toBe(true);
+    expect(aboveBase.diagnostics).toEqual([
+      expect.objectContaining({
+        severity: 'warning',
+        code: 'correlated-implausible',
+        canonicalKey: 'neckCircumferenceMm',
+      }),
+    ]);
+
+    const belowBase = adaptProjectBodyMeasurements([
+      ...REQUIRED,
+      { name: 'BODY_MEASUREMENT_NAME_NECK_BASE', valueMm: 360 },
+      { name: 'BODY_MEASUREMENT_NAME_NECK', valueMm: 340 },
+    ]);
+    expect(belowBase.ok).toBe(true);
+    expect(belowBase.diagnostics).toEqual([]);
+  });
+});

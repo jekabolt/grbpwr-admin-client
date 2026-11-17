@@ -76,7 +76,7 @@ test.describe('tablet guided entry', () => {
     await page.getByRole('radio', { name: 'table', exact: true }).click();
     await expect(guided).toHaveCount(0);
     await expect(page.getByRole('textbox', { name: 'chest', exact: true })).toHaveValue('935');
-    await expect(form.locator('[data-model-measurement]')).toHaveCount(34);
+    await expect(form.locator('[data-model-measurement]')).toHaveCount(35);
     await expect(page.locator('[data-measurement-protocol-guide]')).toHaveCount(0);
     await expect(page.getByText(/repeat tolerance/iu)).toHaveCount(0);
     await expect(
@@ -199,7 +199,7 @@ test.describe('phone layout (variant C)', () => {
       page.getByRole('radiogroup', { name: 'measurement group' }).getByRole('radio'),
     ).toHaveCount(8);
     await expect(form.locator('[data-measurement-group]:visible')).toHaveCount(1);
-    await expect(form.locator('[data-model-measurement]')).toHaveCount(34);
+    await expect(form.locator('[data-model-measurement]')).toHaveCount(35);
     await expect(editPose).not.toBeChecked();
     await expect(canvas).toHaveCSS('touch-action', 'pan-y');
     await expect(cancel).toBeVisible();

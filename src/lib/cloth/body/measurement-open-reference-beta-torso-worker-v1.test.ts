@@ -94,6 +94,10 @@ describe('measurement open-reference beta torso worker v1', () => {
       highHipRepresented: false,
       highHipLimited: false,
       highHipDiagnostics: Object.freeze([]),
+      neckStatus: 'unrequested' as const,
+      neckRepresented: false,
+      neckLimited: false,
+      neckDiagnostics: Object.freeze([]),
     });
     worker.say({ id: 1, type: 'result', value: result, durationMs: 12 });
 

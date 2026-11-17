@@ -25,7 +25,7 @@ describe('body measurement protocol v1 registry', () => {
       provenanceMetadataSupportedByCurrentBackend: true,
     });
     expect(BODY_MEASUREMENT_PROTOCOL_V1_ID).toBe('grbpwr-body-measurement-protocol-v1');
-    expect(BODY_MEASUREMENT_PROTOCOL_V1_VERSION).toBe('1.1.0');
+    expect(BODY_MEASUREMENT_PROTOCOL_V1_VERSION).toBe('1.2.0');
 
     const projectedFields = [...protocolRegistryJson.fields, ...protocolExtensionJson.fields].map(
       (field) => ({
@@ -46,12 +46,12 @@ describe('body measurement protocol v1 registry', () => {
     expect(Object.values(BODY_MEASUREMENT_PROTOCOL_FIELDS_V1)).toEqual(projectedFields);
   });
 
-  it('covers each of the 34 UI wire fields exactly once and excludes UNKNOWN', () => {
+  it('covers each of the 35 UI wire fields exactly once and excludes UNKNOWN', () => {
     const registryWireFields = Object.keys(BODY_MEASUREMENT_PROTOCOL_FIELDS_V1);
-    expect(registryWireFields).toHaveLength(34);
-    expect(new Set(registryWireFields).size).toBe(34);
+    expect(registryWireFields).toHaveLength(35);
+    expect(new Set(registryWireFields).size).toBe(35);
     expect(new Set(registryWireFields)).toEqual(new Set(uiWireFields));
-    expect(uiWireFields).toHaveLength(34);
+    expect(uiWireFields).toHaveLength(35);
     expect(getBodyMeasurementProtocolFieldV1('BODY_MEASUREMENT_NAME_UNKNOWN')).toBeUndefined();
   });
 

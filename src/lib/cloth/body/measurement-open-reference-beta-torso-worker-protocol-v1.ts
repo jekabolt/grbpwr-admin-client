@@ -1,3 +1,4 @@
+import type { BodyPoseKind } from './contracts';
 import type { CanonicalBodyMeasurementsMm } from './measurement-adapter';
 import type { UniformChestShoulderResearchKeyV1 } from './makehuman-uniform-chest-shoulder-modes-research-v1';
 import type { MakeHumanOpenReferenceBasisKindV1 } from './measurement-open-reference-display-v1';
@@ -7,6 +8,11 @@ import type {
   MeasurementOpenReferenceHighHipModeResultV1,
   MeasurementOpenReferenceHighHipStatusV1,
 } from './measurement-open-reference-high-hip-proxy-v1';
+import type {
+  MeasurementOpenReferenceNeckDiagnosticV1,
+  MeasurementOpenReferenceNeckRigHeadsV1,
+  MeasurementOpenReferenceNeckStatusV1,
+} from './measurement-open-reference-neck-proxy-v1';
 import type {
   MeasurementOpenReferenceTorsoDepthDiagnosticV1,
   MeasurementOpenReferenceTorsoDepthKeyV1,
@@ -23,6 +29,14 @@ export interface MeasurementOpenReferenceBetaTorsoWorkerOptionsV1 {
    * fast path stays observable); omitted means the worker keeps its pre-high-hip behaviour.
    */
   readonly highHipCircumferenceMm?: number;
+  /**
+   * Mid-neck circumference target (`measurements.neckCircumferenceMm`). Runs after high hip and
+   * needs `neckRigHeads` (core-rig rest heads, display space); omitted keeps the pre-neck path.
+   */
+  readonly neckCircumferenceMm?: number;
+  readonly neckRigHeads?: MeasurementOpenReferenceNeckRigHeadsV1;
+  /** Display pose of the source mesh; the neck proxy is A-pose only (defaults to 'A'). */
+  readonly neckPose?: BodyPoseKind;
 }
 
 export interface MeasurementOpenReferenceBetaTorsoWorkerResultV1 {
@@ -32,6 +46,11 @@ export interface MeasurementOpenReferenceBetaTorsoWorkerResultV1 {
    * can drop high hip alone if the final global gate fails.
    */
   readonly positionsBeforeHighHipM?: Float32Array;
+  /**
+   * Present only when neck moved the mesh: the positions right before it (after high hip), so the
+   * beta runtime can drop neck alone and keep each late stage's own delta separate.
+   */
+  readonly positionsBeforeNeckM?: Float32Array;
   readonly chestStationOriginM?: readonly [number, number, number];
   readonly underBustStationOriginM?: readonly [number, number, number];
   readonly ribcageRepresentedMeasurements: readonly 'underBustCircumferenceMm'[];
@@ -51,6 +70,12 @@ export interface MeasurementOpenReferenceBetaTorsoWorkerResultV1 {
   readonly highHipStationOriginM?: readonly [number, number, number];
   readonly highHipModeResult?: MeasurementOpenReferenceHighHipModeResultV1;
   readonly highHipDiagnostics: readonly MeasurementOpenReferenceHighHipDiagnosticV1[];
+  readonly neckStatus: MeasurementOpenReferenceNeckStatusV1;
+  readonly neckRepresented: boolean;
+  readonly neckLimited: boolean;
+  readonly neckBaselineCircumferenceMm?: number;
+  readonly neckAchievedCircumferenceMm?: number;
+  readonly neckDiagnostics: readonly MeasurementOpenReferenceNeckDiagnosticV1[];
   /** Female basis only: the joint under-bust/chest proxy summary (diagnostic, not a claim). */
   readonly femaleBust?: MeasurementOpenReferenceFemaleTorsoBustSummaryV1;
 }

@@ -40,8 +40,9 @@ export function ModelMeasurementGuideCaptureDevPage() {
   const viewPreset = captureView(query.get('view'));
 
   // The capture route is development-only. Set the token before the Three stage mounts so the
-  // screenshot uses the same restrained coral as the baked mobile guides.
-  document.documentElement.style.setProperty('--color-highlightColor', 'rgb(232 93 74)');
+  // screenshot uses the same restrained coral as the baked mobile guides. Commas, because
+  // THREE.Color does not parse the space-separated rgb() form and silently draws white.
+  document.documentElement.style.setProperty('--color-highlightColor', 'rgb(232, 93, 74)');
 
   return (
     <>

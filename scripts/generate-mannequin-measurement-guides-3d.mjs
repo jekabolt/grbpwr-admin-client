@@ -23,7 +23,16 @@ const MEASUREMENTS = Object.freeze([
   'BODY_MEASUREMENT_NAME_KNEE',
   'BODY_MEASUREMENT_NAME_CALF',
   'BODY_MEASUREMENT_NAME_ANKLE',
+  'BODY_MEASUREMENT_NAME_NECK',
 ]);
+// `--only=NAME,NAME` re-renders a subset and leaves the other committed images untouched.
+const ONLY = process.argv
+  .find((argument) => argument.startsWith('--only='))
+  ?.slice('--only='.length)
+  .split(',')
+  .filter(Boolean);
+const SELECTED = ONLY ? MEASUREMENTS.filter((name) => ONLY.includes(name)) : MEASUREMENTS;
+if (SELECTED.length === 0) throw new Error('--only selected no known measurement.');
 
 const server = await createServer({
   cacheDir: 'node_modules/.cache/mannequin-measurement-guide-capture-vite',
@@ -51,7 +60,7 @@ try {
   for (const gender of GENDERS) {
     const genderDirectory = resolve(OUTPUT_DIR, gender);
     await mkdir(genderDirectory, { recursive: true });
-    for (const measurement of MEASUREMENTS) {
+    for (const measurement of SELECTED) {
       const url = new URL('/__model-measurement-guide-capture-v1', origin);
       url.searchParams.set('gender', gender);
       url.searchParams.set('measurement', measurement);
@@ -87,7 +96,7 @@ try {
         webpPath,
       ]);
       count += 1;
-      process.stdout.write(`captured ${count}/${GENDERS.length * MEASUREMENTS.length}\r`);
+      process.stdout.write(`captured ${count}/${GENDERS.length * SELECTED.length}\r`);
     }
   }
   process.stdout.write(`\n${count} exact 3D surface guide images written\n`);

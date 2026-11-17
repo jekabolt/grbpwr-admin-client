@@ -359,6 +359,7 @@ function betaShapeRuntime(
       torsoDepthFrontBackDistributionCalibrated: false as const,
       highHipSectionProxyOnly: true as const,
       kneeRadialSectionProxyOnly: true as const,
+      neckRadialSectionProxyOnly: true as const,
       circumferenceRangeCalibrated: false as const,
       armLengthCenterlineProxyOnly: true as const,
       sleeveLengthRepresented: false as const,

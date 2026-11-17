@@ -3,7 +3,7 @@ import protocolRegistryJson from '../../../../docs/cloth-simulation/mannequin/32
 import protocolExtensionJson from '../../../../docs/cloth-simulation/mannequin/p0-body-measurement-protocol-extension-v1.json';
 
 export const BODY_MEASUREMENT_PROTOCOL_V1_ID = 'grbpwr-body-measurement-protocol-v1' as const;
-export const BODY_MEASUREMENT_PROTOCOL_V1_VERSION = '1.1.0' as const;
+export const BODY_MEASUREMENT_PROTOCOL_V1_VERSION = '1.2.0' as const;
 
 export type BodyMeasurementProtocolWireFieldV1 = Exclude<
   common_BodyMeasurementName,
@@ -103,8 +103,8 @@ if (
 if (!Array.isArray(protocolRegistryJson.fields) || protocolRegistryJson.fields.length !== 20) {
   throw new Error('Measurement protocol v1 base must contain exactly 20 wire fields.');
 }
-if (!Array.isArray(protocolExtensionJson.fields) || protocolExtensionJson.fields.length !== 14) {
-  throw new Error('Measurement protocol v1 P0 extension must contain exactly 14 wire fields.');
+if (!Array.isArray(protocolExtensionJson.fields) || protocolExtensionJson.fields.length !== 15) {
+  throw new Error('Measurement protocol v1 P0 extension must contain exactly 15 wire fields.');
 }
 
 const parsedFields = [...protocolRegistryJson.fields, ...protocolExtensionJson.fields].map(

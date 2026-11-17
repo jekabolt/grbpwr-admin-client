@@ -1554,13 +1554,13 @@ test('desktop pair keeps the mannequin and the focused field on screen', async (
   await expectInsideViewport(page, chest);
 
   // Tab from the last torso field opens the next group on its first field.
-  await page.getByRole('textbox', { name: 'neck base', exact: true }).focus();
+  await page.getByRole('textbox', { name: 'neck', exact: true }).focus();
   await page.keyboard.press('Tab');
   const acrossShoulder = page.getByRole('textbox', { name: 'across shoulder', exact: true });
   await expect(acrossShoulder).toBeFocused();
   await expect(page.locator('[data-measurement-group="torso"]')).toBeHidden();
   await page.keyboard.press('Shift+Tab');
-  await expect(page.getByRole('textbox', { name: 'neck base', exact: true })).toBeFocused();
+  await expect(page.getByRole('textbox', { name: 'neck', exact: true })).toBeFocused();
 
   await groups.getByRole('radio', { name: /^legs \d+\/\d+$/ }).click();
   const thigh = page.getByRole('textbox', { name: 'thigh', exact: true });

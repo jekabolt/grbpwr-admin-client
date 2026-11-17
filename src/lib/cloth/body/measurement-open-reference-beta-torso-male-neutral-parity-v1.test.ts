@@ -116,7 +116,22 @@ describe('beta torso: male and neutral unchanged by the female bust wiring', () 
       expect(result.chestShoulderRepresentedMeasurements.length).toBeGreaterThan(0);
       expect(result.depthRepresentedMeasurements.length).toBeGreaterThan(0);
       expect(result).not.toHaveProperty('femaleBust');
-      expect(digest(result)).toBe(EXPECTED_WORKER_SHA256[kind]);
+      // Neck is unrequested here: its fields are the inert defaults and the rest is pinned.
+      const {
+        neckStatus,
+        neckRepresented,
+        neckLimited,
+        neckDiagnostics,
+        ...preNeckResult
+      } = result;
+      expect({ neckStatus, neckRepresented, neckLimited, neckDiagnostics }).toEqual({
+        neckStatus: 'unrequested',
+        neckRepresented: false,
+        neckLimited: false,
+        neckDiagnostics: [],
+      });
+      expect(result).not.toHaveProperty('positionsBeforeNeckM');
+      expect(digest(preNeckResult)).toBe(EXPECTED_WORKER_SHA256[kind]);
     },
     120_000,
   );
@@ -151,6 +166,9 @@ describe('beta torso: male and neutral unchanged by the female bust wiring', () 
         ...result.representedVisualControls,
         ...(result.limitedVisualControls ?? []),
       ]).toContain('chestCircumferenceMm');
+      // The neck claim is a new constant; the pinned digest covers every pre-neck field.
+      const { neckRadialSectionProxyOnly, ...preNeckClaims } = result.claims;
+      expect(neckRadialSectionProxyOnly).toBe(true);
       expect(
         digest({
           positions: result.fkProxyRuntime.displayMesh.positions,
@@ -160,7 +178,7 @@ describe('beta torso: male and neutral unchanged by the female bust wiring', () 
           chestShoulderDiagnostics: result.chestShoulderDiagnostics,
           torsoSectionStations: result.torsoSectionStations,
           sourceRevisionSuffix: result.sourceRevisionSuffix,
-          claims: result.claims,
+          claims: preNeckClaims,
         }),
       ).toBe(EXPECTED_RUNTIME_SHA256[kind]);
     },
