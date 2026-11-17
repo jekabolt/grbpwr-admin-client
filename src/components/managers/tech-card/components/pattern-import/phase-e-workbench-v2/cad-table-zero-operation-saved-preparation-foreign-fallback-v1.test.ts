@@ -218,6 +218,21 @@ beforeEach(() => {
 });
 
 describe('zero-operation saved preparation foreign fallback', () => {
+  it('requests native sewing explicitly and refuses absent replay without selecting cut geometry', async () => {
+    mocks.exactRun.mockResolvedValue(exactFailure('foreign-saved-dxf-detected'));
+    mocks.foreignRun.mockResolvedValue({ ok: true, draft: foreignDraft, blockers: [] });
+    const result = await preparePatternImportDxfPhaseECadTableZeroOperationSavedV1({
+      ...request(),
+      sourceSurface: 'explicit-native-drawn-sewing',
+    });
+    expect(result.ok).toBe(false);
+    expect(mocks.createForeignHost).toHaveBeenCalledWith(
+      expect.objectContaining({ nativeSewingReplay: true }),
+    );
+    expect(mocks.select).not.toHaveBeenCalled();
+    expect(mocks.catalog).not.toHaveBeenCalled();
+  });
+
   it('uses an exact reconstructed draft without constructing the foreign path', async () => {
     mocks.exactRun.mockResolvedValue({ ok: true, draft: exactDraft, blockers: [] });
 

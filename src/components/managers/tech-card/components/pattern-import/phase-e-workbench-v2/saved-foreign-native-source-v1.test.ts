@@ -1,3 +1,5 @@
+import { createSavedNativeSewingAuthoringViewV1 } from './saved-native-sewing-authoring-view-v1';
+import { buildPatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import { compileDxfGarmentAssemblyMaterialStageV1 } from 'lib/cloth/domain/dxf-garment-assembly-material-compile-stage-v1';
 import {
   buildDxfGarmentAssemblyExplicitPlacementStageV1,
@@ -233,6 +235,64 @@ describe('foreign native source capability', () => {
           dxfProvenance: fresh.nativeSewingReplay.pipeline,
           dxfPhaseDReplay: fresh.nativeSewingReplay.replay,
         };
+        const originalDraft = JSON.stringify(fresh.draft);
+        const authoringView = createSavedNativeSewingAuthoringViewV1(
+          fresh.draft,
+          fresh.nativeSewingReplay,
+          row.sha256,
+        );
+        const sizeToken = fresh.draft.scopes[0].writerReplay!.job.pieces[0].sizes[0].sizeToken;
+        const [tableCatalog, physicalCatalog, originalCatalog] = await Promise.all([
+          buildPatternImportDxfProductPhaseEAuthoringCatalogV1(
+            authoringView,
+            row.scopeKey,
+            sizeToken,
+          ),
+          buildPatternImportDxfProductPhaseEAuthoringCatalogV1(
+            catalogDraft,
+            row.scopeKey,
+            sizeToken,
+          ),
+          buildPatternImportDxfProductPhaseEAuthoringCatalogV1(
+            fresh.draft,
+            row.scopeKey,
+            sizeToken,
+          ),
+        ]);
+        expect(tableCatalog.ok, JSON.stringify(tableCatalog)).toBe(true);
+        expect(physicalCatalog.ok).toBe(true);
+        expect(originalCatalog.ok).toBe(true);
+        if (!tableCatalog.ok || !physicalCatalog.ok || !originalCatalog.ok)
+          throw new Error('Catalog unavailable');
+        expect(tableCatalog.catalog).toEqual(physicalCatalog.catalog);
+        expect(tableCatalog.catalog.canonicalSha256).not.toBe(
+          originalCatalog.catalog.canonicalSha256,
+        );
+        expect(
+          tableCatalog.catalog.pieces
+            .flatMap((p) => p.contours)
+            .every((c) => c.role === 'sewing-boundary'),
+        ).toBe(true);
+        const cutIds = new Set(
+          originalCatalog.catalog.pieces.flatMap((p) => p.contours).map((c) => c.contourId),
+        );
+        expect(
+          tableCatalog.catalog.pieces
+            .flatMap((p) => p.contours)
+            .every((c) => !cutIds.has(c.contourId)),
+        ).toBe(true);
+        expect(JSON.stringify(fresh.draft)).toBe(originalDraft);
+        expect(authoringView).not.toBe(fresh.draft);
+        expect(() =>
+          createSavedNativeSewingAuthoringViewV1(fresh.draft, undefined, row.sha256),
+        ).toThrow('Exact native sewing');
+        expect(() =>
+          createSavedNativeSewingAuthoringViewV1(
+            fresh.draft,
+            fresh.nativeSewingReplay,
+            'f'.repeat(64),
+          ),
+        ).toThrow('Exact native sewing');
         const compileRequest = await savedThreePanelCompileRequestV1(foreignSeed, {
           native: { ...fresh, draft: catalogDraft },
           dispose: () => {},

@@ -1,3 +1,5 @@
+import { createSavedNativeSewingAuthoringViewV1 } from './saved-native-sewing-authoring-view-v1';
+import type { DxfNativeSewingReplayStageOutputV1 } from 'lib/pattern-import/dxf-native-sewing-replay-v1';
 import { savedWorkbenchBindingScopeKeyV1 } from './saved-workbench-scope-v1';
 import type { common_TechCard } from 'api/proto-http/admin';
 import { bindingScopes } from 'components/managers/tech-card/components/bom-purpose';
@@ -112,6 +114,7 @@ export type PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1 
       preparationGeneration: number;
       importGeneration: number;
       choices: readonly PatternImportDxfPhaseECadTableZeroOperationFreshChoiceV1[];
+      sourceSurface?: 'explicit-native-drawn-sewing';
       selection: SuccessfulSelection;
       catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
       projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
@@ -138,6 +141,8 @@ export type PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1 
     }>;
 
 type Request = Readonly<{
+  /** Explicit sewing authoring only; omitted keeps the existing import surface. */
+  sourceSurface?: 'explicit-native-drawn-sewing';
   techCard: common_TechCard | null | undefined;
   orderSizeIds: (ids: number[]) => number[];
   sizeNameById: ReadonlyMap<number, string>;
@@ -329,6 +334,7 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
     );
 
   const hostDeps = {
+    ...(request.sourceSurface ? { nativeSewingReplay: true } : {}),
     resolveCard: request.authority.resolveCard,
     readAuthoritativeRow: capability.authority.readAuthoritativeRow,
   };
@@ -366,8 +372,10 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
         blocker('saved-preparation-cancelled', 'Exact saved DXF preparation was cancelled.'),
       );
     let draft: CardDraft;
+    let nativeSewingReplay: DxfNativeSewingReplayStageOutputV1 | undefined;
     if (reprocessed.ok) {
       draft = reprocessed.draft;
+      nativeSewingReplay = reprocessed.nativeSewingReplay;
     } else if (reprocessed.blockers[0]?.code === 'foreign-saved-dxf-detected') {
       foreignOwner = createDxfProductSavedForeignReprocessOwnerV1(
         createPatternImportDxfPhaseEForeignSavedDxfReprocessHostV1(hostDeps),
@@ -392,6 +400,7 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
           ),
         );
       draft = foreign.draft;
+      nativeSewingReplay = foreign.nativeSewingReplay;
     } else {
       return blockedPreparation(
         request,
@@ -402,10 +411,17 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
         ),
       );
     }
+    const authoringDraft = request.sourceSurface
+      ? createSavedNativeSewingAuthoringViewV1(draft, nativeSewingReplay, authoritative.row.sha256)
+      : draft;
     const [selection, catalogResult] = await Promise.all([
-      selectPatternImportDxfProductDraftPhaseDSizeV1(draft, request.scopeKey, request.sizeToken),
+      selectPatternImportDxfProductDraftPhaseDSizeV1(
+        authoringDraft,
+        request.scopeKey,
+        request.sizeToken,
+      ),
       buildPatternImportDxfProductPhaseEAuthoringCatalogV1(
-        draft,
+        authoringDraft,
         request.scopeKey,
         request.sizeToken,
       ),
@@ -459,7 +475,8 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
           projection.blockers[0]?.detail ?? 'Exact saved Assembly projection is unavailable.',
         ),
       );
-    const draftCadCompileSource = createPatternImportDxfPhaseEDraftCadCompileSourceV1(draft);
+    const draftCadCompileSource =
+      createPatternImportDxfPhaseEDraftCadCompileSourceV1(authoringDraft);
     if (!draftCadCompileSource)
       return blockedPreparation(
         request,
@@ -511,6 +528,7 @@ export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
       preparationGeneration: request.generation.preparationGeneration,
       importGeneration: request.generation.importGeneration,
       choices: choices.choices,
+      ...(request.sourceSurface ? { sourceSurface: request.sourceSurface } : {}),
       selection: selection.selection,
       catalog: catalogResult.catalog,
       projection: projection.projection,
