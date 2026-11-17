@@ -367,7 +367,10 @@ export const prepareSavedFullAssemblyGenericFirstBootstrapV1 = Object.freeze(
           'application/vnd.grbpwr.pattern-dxf-product-composite.v6+json' ||
         !snapshot.outer.currentRowBound
       )
-        fail('current-v6-required', 'First physical authoring requires the current saved V6 row.');
+        fail(
+          'current-v6-required',
+          'Save the mannequin arrangement first, then choose Place pieces.',
+        );
       const decodedV6 = await decodePatternImportDxfProductCompositeSidecarV6(snapshot.outer.bytes);
       if (
         !decodedV6.ok ||

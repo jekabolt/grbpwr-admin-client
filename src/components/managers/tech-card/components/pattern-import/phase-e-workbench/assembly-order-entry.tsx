@@ -1,6 +1,10 @@
 import { useSavedClothPhysicalHostV1 } from '../phase-e-workbench-v2/use-saved-cloth-physical-host-v1';
 import { CadWorkbenchPhysicalHostProductionMountV1 } from '../phase-e-workbench-v2/cad-workbench-physical-host-production-mount-v1';
 import type { CadWorkbenchPhysicalHostV1 } from '../phase-e-workbench-v2/cad-workbench-physical-host-v1';
+import {
+  readSavedCadMannequinArrangementV1,
+  saveSavedCadMannequinArrangementV1,
+} from '../phase-e-workbench-v2/saved-cad-mannequin-arrangement-production-v1';
 import type { TechCardFormData } from 'components/managers/tech-card/components/schema';
 import {
   useSizeNames,
@@ -1908,8 +1912,77 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     selectedOperationNumber: savedProjection.ok ? savedProjection.selectedOperationNumber : 0,
     cardProjection: savedProjection.ok ? savedProjection.projection : null,
   });
+  const arrangementSaveRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    return () => {
+      arrangementSaveRef.current?.abort();
+      arrangementSaveRef.current = null;
+    };
+  }, [physicalRow]);
+  const saveMannequinArrangement = useCallback<
+    NonNullable<CadWorkbenchPhysicalHostV1['onSaveMannequinArrangement']>
+  >(
+    async (input, signal) => {
+      if (frozen || !savedProjection.ok)
+        throw new Error('Save the Assembly Order before saving placement.');
+      const row = savedProjection.row;
+      if (input.scopeKey !== row.scopeKey)
+        throw new Error('Select the current material pattern set before saving placement.');
+      if (arrangementSaveRef.current) throw new Error('Placement is already being saved.');
+      const controller = new AbortController();
+      const cancel = () => controller.abort();
+      signal.addEventListener('abort', cancel, { once: true });
+      if (signal.aborted) controller.abort();
+      arrangementSaveRef.current = controller;
+      try {
+        await saveSavedCadMannequinArrangementV1(
+          {
+            row,
+            seedOperationNumber: savedProjection.selectedOperationNumber,
+            source: input.annotationSource,
+            arrangement: {
+              bindings: {
+                card: { techCardId: row.techCardId, cardLockVersion: row.cardLockVersion },
+                scope: {
+                  scopeKey: row.scopeKey,
+                  patternLineKey: row.patternLineKey,
+                  sizeToken: input.projection.sizeToken,
+                },
+                savedRow: { revision: row.revision, dxfSha256: row.sha256 },
+                source: {
+                  catalogCanonicalSha256: input.projection.expectedCatalogCanonicalSha256,
+                  sizeSelectionCanonicalSha256: input.projection.sizeSelectionCanonicalSha256,
+                },
+                mannequin: input.mannequin,
+              },
+              pieces: input.pieces,
+            },
+          },
+          controller.signal,
+        );
+        if (!controller.signal.aborted) savedClothPhysicalHost.retry();
+      } finally {
+        signal.removeEventListener('abort', cancel);
+        if (arrangementSaveRef.current === controller) arrangementSaveRef.current = null;
+      }
+    },
+    [frozen, savedProjection, savedClothPhysicalHost.retry],
+  );
   const physicalHost: CadWorkbenchPhysicalHostV1 = {
     onDisplayedBodyInputV1: savedClothPhysicalHost.onDisplayedBodyInputV1,
+    arrangementSourceKey: JSON.stringify(physicalRow),
+    onSaveMannequinArrangement: saveMannequinArrangement,
+    onReadMannequinArrangement: async (input, signal) => {
+      if (!savedProjection.ok || input.scopeKey !== savedProjection.row.scopeKey) return null;
+      return readSavedCadMannequinArrangementV1(
+        {
+          row: savedProjection.row,
+          seedOperationNumber: savedProjection.selectedOperationNumber,
+          expected: input,
+        },
+        signal,
+      );
+    },
     viewport: (
       <CadWorkbenchPhysicalHostProductionMountV1 state={savedClothPhysicalHost} disabled={frozen} />
     ),

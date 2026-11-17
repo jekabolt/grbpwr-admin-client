@@ -479,7 +479,7 @@ function PlacementAuthoring({ state, disabled }: { state: HostState; disabled: b
         </Text>
       ) : null}
       <Button type='button' size='xs' variant='main' disabled={busy} onClick={submit}>
-        {authoring.status === 'saving' ? 'Saving…' : 'Save placement & preview'}
+        {authoring.status === 'saving' ? 'Saving…' : 'Save placement'}
       </Button>
     </div>
   );
