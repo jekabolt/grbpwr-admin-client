@@ -21,7 +21,7 @@ import { useCardSeamGraph } from '../card-unit-pictures';
 import { FROZEN_REFUSAL } from '../assembly-fullscreen';
 import { useUndoHistory } from '../undo-history';
 import { buildReview, type Review } from './review-model';
-import { poseChange, type SeamChange, type StepRef } from './seam-change-plan';
+import { poseChange, type StepRef } from './seam-change-plan';
 import {
   NOT_SAVED,
   runSeamChange,
@@ -116,6 +116,29 @@ export type StrictSeamUpsertResult =
       outcome: 'not-attempted' | 'unknown' | 'acknowledged-unverified';
       blocker: Readonly<{ code: StrictSeamUpsertFailureCode; detail: string }>;
     }>;
+
+export type StrictSeamAcceptResult =
+  | Readonly<{
+      ok: true;
+      /** Exact persisted row echoed by the atomic seam + operation-link write. */
+      row: StoredSeam;
+      seamKey: string;
+      lockVersion: number;
+      outcome: 'verified-echo';
+      blocker: null;
+    }>
+  | Extract<StrictSeamUpsertResult, { ok: false }>;
+
+export type StrictSeamAcceptGuardResult =
+  | Readonly<{ ok: true }>
+  | Readonly<{ ok: false; why: string }>;
+
+export type StrictSeamAcceptGuard = Readonly<{
+  /** Exact saved-card version captured together with the empty target operation. */
+  expectedLockVersion: number;
+  /** Re-check the live selected operation synchronously at the final request boundary. */
+  validate: () => StrictSeamAcceptGuardResult;
+}>;
 
 function strictUpsertBlocked(
   code: StrictSeamUpsertFailureCode,
@@ -228,6 +251,15 @@ export type SeamWrites = {
   // the strip teardown — they keep the form saved first.
   /** ACCEPT: one seam row written AND linked to the step in one change; the key it is stored under. */
   acceptSeam: (row: StoredSeam, step: StepRef) => Promise<{ ok: true; key: string } | Refused>;
+  /**
+   * Exact ACCEPT for a captured saved operation. It never retries after a lock move, and succeeds
+   * only when the RPC echoes the submitted exact row.
+   */
+  acceptSeamStrict: (
+    row: StoredSeam,
+    step: StepRef,
+    guard?: StrictSeamAcceptGuard,
+  ) => Promise<StrictSeamAcceptResult>;
   /**
    * A seam taken off a step. The server deletes the row with its last link; `gone`: this page expects
    * that (no other step links it), so the row leaves the list at once.
@@ -415,6 +447,98 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
     [cardId, change, fresh],
   );
 
+  const acceptSeamStrict = useCallback(
+    async (
+      row0: StoredSeam,
+      step: StepRef,
+      guard?: StrictSeamAcceptGuard,
+    ): Promise<StrictSeamAcceptResult> => {
+      if (frozen) return strictUpsertBlocked('frozen', FROZEN_REFUSAL, 'not-attempted');
+      if (!cardId)
+        return strictUpsertBlocked(
+          'card-unsaved',
+          'Save the card before linking an exact seam.',
+          'not-attempted',
+        );
+      if (!(await fresh()))
+        return strictUpsertBlocked(
+          'write-failed',
+          'The seam list did not load before the exact link write.',
+          'not-attempted',
+        );
+      if (useSeamsStore.getState().cardId !== cardId)
+        return strictUpsertBlocked(
+          'card-changed',
+          'The open tech card changed before the exact link write started.',
+          'not-attempted',
+        );
+      const [row] = reuseExactKeys([row0], rowsOf(useSeamsStore.getState()));
+      const result = await change(
+        { upsert: [row], link: [{ step, seamKey: row.seamKey }] },
+        {
+          verb: 'decision',
+          pastInvalidForm: true,
+          retryLockMoved: false,
+          beforeRequest: ({ expectedLockVersion }) => {
+            if (!guard) return null;
+            if (expectedLockVersion !== guard.expectedLockVersion)
+              return 'The saved card moved after the exact operation was captured.';
+            const validation = guard.validate();
+            return validation.ok ? null : validation.why;
+          },
+          ...(row.seamKey !== row0.seamKey ? { errorAt: row0.seamKey } : {}),
+        },
+      );
+      if (!result.ok)
+        return strictUpsertBlocked(
+          result.why === 'still saving' ? 'write-in-flight' : 'write-failed',
+          result.why,
+          result.why === 'still saving' ? 'not-attempted' : result.outcome ?? 'unknown',
+        );
+      if (useSeamsStore.getState().cardId !== cardId)
+        return strictUpsertBlocked(
+          'card-changed',
+          'The open tech card changed before the exact link write echo arrived.',
+          'acknowledged-unverified',
+        );
+      if (!result.echo || result.echo.length === 0)
+        return strictUpsertBlocked(
+          'echo-missing',
+          'The exact link write was acknowledged without a seam row echo.',
+          'acknowledged-unverified',
+        );
+      const receipt = resolveStrictSeamUpsertReceipt([row], result.echo, result.lockVersion);
+      if (!receipt.ok) return receipt;
+      const echoed = receipt.rows[0];
+      if (
+        !echoed ||
+        echoed.kind === 'pose' ||
+        echoed.status !== row.status ||
+        echoed.kind !== row.kind ||
+        echoed.direction !== row.direction ||
+        echoed.source !== row.source ||
+        echoed.anchoredSize !== row.anchoredSize ||
+        echoed.note !== row.note ||
+        JSON.stringify(echoed.sideA) !== JSON.stringify(row.sideA) ||
+        JSON.stringify(echoed.sideB) !== JSON.stringify(row.sideB)
+      )
+        return strictUpsertBlocked(
+          'receipt-missing',
+          'The exact link write echoed a different seam row.',
+          'acknowledged-unverified',
+        );
+      return Object.freeze({
+        ok: true as const,
+        row: echoed,
+        seamKey: echoed.seamKey,
+        lockVersion: receipt.lockVersion,
+        outcome: 'verified-echo' as const,
+        blocker: null,
+      });
+    },
+    [cardId, change, fresh, frozen],
+  );
+
   const detachSeam = useCallback(
     async (step: StepRef, seamKey: string, gone: boolean) => {
       if (gone) undoHistory.cut('seam-delete');
@@ -452,6 +576,7 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
       upsertPoses,
       removePoses,
       acceptSeam,
+      acceptSeamStrict,
       detachSeam,
       placePoses,
       frozen,
@@ -465,6 +590,7 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
       upsertPoses,
       removePoses,
       acceptSeam,
+      acceptSeamStrict,
       detachSeam,
       placePoses,
       frozen,

@@ -1,5 +1,6 @@
 import type { common_TechCard } from 'api/proto-http/admin';
 import { describe, expect, it, vi } from 'vitest';
+import { toWire, type StoredSeam } from 'lib/seams';
 
 import { buildPatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import { selectPatternImportDxfProductDraftPhaseDSizeV1 } from 'lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1';
@@ -17,6 +18,13 @@ import { capturePatternImportDxfPhaseEZeroConnectPreparedAuthorityV1 } from './c
 import type { PatternImportDxfPhaseECadTableZeroOperationFreshPreparationResultV1 } from './cad-table-zero-operation-fresh-preparation-v1';
 import { createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1 } from './cad-table-zero-operation-generation-owner-v1';
 import { createPatternImportDxfPhaseEZeroConnectPendingHandoffV1 } from './cad-table-zero-connect-post-save-owner-v1';
+import {
+  capturePatternImportDxfPhaseEZeroConnectExistingOperationPendingV1,
+  executePatternImportDxfPhaseEZeroConnectExistingOperationAttachOnceV1,
+  readPatternImportDxfPhaseEZeroConnectExistingOperationAttachOnceV1,
+  revalidatePatternImportDxfPhaseEZeroConnectExistingOperationPendingV1,
+  verifyPatternImportDxfPhaseEZeroConnectExistingOperationReadbackV1,
+} from './cad-table-zero-connect-existing-operation-attach-v1';
 import {
   createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefreshV1,
   isPatternImportDxfPhaseECadTableZeroOperationAuthoringReadyV1,
@@ -479,6 +487,268 @@ async function genuineControllerAuthority() {
     }),
   };
 }
+
+async function genuineZeroConnectRequest() {
+  const { prepared, authority } = await genuineControllerAuthority();
+  const segments = derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(prepared.projection);
+  const first = segments[0]!;
+  const second = segments.find(({ pieceId }) => pieceId !== first.pieceId)!;
+  type GenuineRequest = Parameters<
+    Extract<
+      import('./cad-table-zero-connect-authoring-handoff-v1').PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1,
+      { status: 'available' }
+    >['ingest']
+  >[0];
+  let request: GenuineRequest | null = null;
+  const handoff = {
+    status: 'available' as const,
+    ingest: (current: NonNullable<typeof request>) => {
+      request = current;
+      return {
+        ok: true as const,
+        inserted: 0 as const,
+        historyKey: 'existing-op',
+        sessionRevision: current.session.revision,
+        blocker: null,
+      };
+    },
+  };
+  let state = startPatternImportDxfPhaseECadTableZeroConnectControllerV1(
+    createPatternImportDxfPhaseECadTableZeroConnectControllerStateV1(),
+    authority,
+  );
+  state = selectPatternImportDxfPhaseECadTableZeroConnectControllerEdgeV1(
+    state,
+    authority,
+    first,
+    'forward',
+    handoff,
+  );
+  selectPatternImportDxfPhaseECadTableZeroConnectControllerEdgeV1(
+    state,
+    authority,
+    second,
+    'reverse',
+    handoff,
+  );
+  const capturedRequest = request as unknown as GenuineRequest | null;
+  if (!capturedRequest) throw new Error('The genuine zero-connect request was not captured.');
+  return { prepared, request: capturedRequest };
+}
+
+describe('existing saved empty operation zero-connect attach', () => {
+  it('captures only the exact empty saved operation and rejects live or saved drift', async () => {
+    const { prepared, request } = await genuineZeroConnectRequest();
+    const inputKeys = request.candidate.connection.sides.map(({ pieceLineKey }) => pieceLineKey);
+    const liveOperations = [
+      { historyKey: 'existing-op', operationNumber: 41, inputKeys, seamKeys: [] },
+    ];
+    const savedCard = savedCardWithRow(prepared);
+    savedCard.techCard!.operations = [{ operationNumber: 41, inputKeys, seamKeys: [] } as never];
+    const captured = capturePatternImportDxfPhaseEZeroConnectExistingOperationPendingV1({
+      request,
+      techCardId: prepared.techCardId,
+      selectedIndex: 0,
+      liveOperations,
+      savedCard,
+      seamWriterCardId: prepared.techCardId,
+      seamWriterLockVersion: savedCard.lockVersion,
+    });
+
+    expect(captured).toMatchObject({
+      ok: true,
+      operationIndex: 0,
+      pending: { operationNumber: 41, historyKey: 'existing-op' },
+    });
+    if (!captured.ok) throw new Error(captured.blocker.detail);
+    expect(
+      revalidatePatternImportDxfPhaseEZeroConnectExistingOperationPendingV1(captured.pending, {
+        techCardId: prepared.techCardId,
+        selectedIndex: 0,
+        liveOperations: [{ ...liveOperations[0]!, seamKeys: ['stale-seam'] }],
+        savedCard,
+        seamWriterCardId: prepared.techCardId,
+        seamWriterLockVersion: savedCard.lockVersion,
+      }),
+    ).toMatchObject({ ok: false, blocker: { code: 'existing-operation-not-empty' } });
+    savedCard.techCard!.operations = [
+      { operationNumber: 41, inputKeys, seamKeys: [] } as never,
+      { operationNumber: 41, inputKeys, seamKeys: [] } as never,
+    ];
+    expect(
+      revalidatePatternImportDxfPhaseEZeroConnectExistingOperationPendingV1(captured.pending, {
+        techCardId: prepared.techCardId,
+        selectedIndex: 0,
+        liveOperations,
+        savedCard,
+        seamWriterCardId: prepared.techCardId,
+        seamWriterLockVersion: savedCard.lockVersion,
+      }),
+    ).toMatchObject({ ok: false, blocker: { code: 'existing-operation-ambiguous' } });
+  });
+
+  it('issues one atomic writer call and requires a fresh exact operation-link readback', async () => {
+    const { prepared, request } = await genuineZeroConnectRequest();
+    const inputKeys = request.candidate.connection.sides.map(({ pieceLineKey }) => pieceLineKey);
+    const savedCard = savedCardWithRow(prepared);
+    savedCard.techCard!.operations = [{ operationNumber: 41, inputKeys, seamKeys: [] } as never];
+    const captured = capturePatternImportDxfPhaseEZeroConnectExistingOperationPendingV1({
+      request,
+      techCardId: prepared.techCardId,
+      selectedIndex: 0,
+      liveOperations: [{ historyKey: 'existing-op', operationNumber: 41, inputKeys, seamKeys: [] }],
+      savedCard,
+      seamWriterCardId: prepared.techCardId,
+      seamWriterLockVersion: savedCard.lockVersion,
+    });
+    if (!captured.ok) throw new Error(captured.blocker.detail);
+    const atomicWrite = vi.fn(async () => ({ ok: true as const, key: 'seam-final' }));
+    expect(
+      readPatternImportDxfPhaseEZeroConnectExistingOperationAttachOnceV1(captured.pending, 'same'),
+    ).toBeUndefined();
+    const first = executePatternImportDxfPhaseEZeroConnectExistingOperationAttachOnceV1(
+      captured.pending,
+      'same',
+      atomicWrite,
+    );
+    const second = executePatternImportDxfPhaseEZeroConnectExistingOperationAttachOnceV1(
+      captured.pending,
+      'same',
+      atomicWrite,
+    );
+    const conflicting = executePatternImportDxfPhaseEZeroConnectExistingOperationAttachOnceV1(
+      captured.pending,
+      'reversed',
+      atomicWrite,
+    );
+    expect(first).not.toBeNull();
+    expect(second).not.toBeNull();
+    expect(conflicting).toBeNull();
+    expect(
+      readPatternImportDxfPhaseEZeroConnectExistingOperationAttachOnceV1(captured.pending, 'same'),
+    ).toBe(first);
+    await expect(first!).resolves.toEqual({ ok: true, key: 'seam-final' });
+    await expect(second!).resolves.toEqual({ ok: true, key: 'seam-final' });
+    expect(atomicWrite).toHaveBeenCalledOnce();
+
+    const freshCard = savedCardWithRow(prepared);
+    freshCard.lockVersion = (savedCard.lockVersion ?? 0) + 1;
+    const expectedSeam: StoredSeam = {
+      seamKey: 'submitted-seam',
+      status: 'confirmed',
+      kind: 'edge',
+      direction: 'same',
+      source: 'manual',
+      sideA: [
+        {
+          piece: inputKeys[0]!,
+          samples: [[0, 0]],
+          perimShare: 0.5,
+          lenMm: 120,
+          notches: 0,
+          turnDeg: 0,
+          range: [0, 1],
+          edgeHint: 'front:v0-v1',
+          contourSig: 'front-contour',
+        },
+      ],
+      sideB: [
+        {
+          piece: inputKeys[1]!,
+          samples: [[1, 0]],
+          perimShare: 0.5,
+          lenMm: 120,
+          notches: 0,
+          turnDeg: 0,
+          range: [0, 1],
+          edgeHint: 'back:v1-v0',
+          contourSig: 'back-contour',
+        },
+      ],
+      anchoredSize: 'M',
+      note: '2D table exact connection',
+    };
+    freshCard.seams = [toWire({ ...expectedSeam, seamKey: 'seam-final' })] as never;
+    freshCard.techCard!.operations = [
+      { operationNumber: 41, inputKeys, seamKeys: ['seam-final'] } as never,
+    ];
+    expect(
+      verifyPatternImportDxfPhaseEZeroConnectExistingOperationReadbackV1({
+        pending: captured.pending,
+        accepted: { ok: true, key: 'seam-final' },
+        expectedSeam,
+        freshCard,
+      }),
+    ).toMatchObject({ ok: true, seamKey: 'seam-final' });
+    expect(
+      verifyPatternImportDxfPhaseEZeroConnectExistingOperationReadbackV1({
+        pending: captured.pending,
+        accepted: { ok: false, why: 'the server answer was lost' },
+        expectedSeam,
+        freshCard,
+      }),
+    ).toMatchObject({ ok: true, seamKey: 'seam-final' });
+    freshCard.seams = [];
+    expect(
+      verifyPatternImportDxfPhaseEZeroConnectExistingOperationReadbackV1({
+        pending: captured.pending,
+        accepted: { ok: true, key: 'seam-final' },
+        expectedSeam,
+        freshCard,
+      }),
+    ).toMatchObject({
+      ok: false,
+      blocker: { code: 'existing-operation-readback-mismatch' },
+    });
+    freshCard.seams = [toWire({ ...expectedSeam, seamKey: 'seam-final' })] as never;
+    freshCard.techCard!.operations![0]!.seamKeys = ['seam-final', 'duplicate'];
+    expect(
+      verifyPatternImportDxfPhaseEZeroConnectExistingOperationReadbackV1({
+        pending: captured.pending,
+        accepted: { ok: true, key: 'seam-final' },
+        expectedSeam,
+        freshCard,
+      }),
+    ).toMatchObject({
+      ok: false,
+      blocker: { code: 'existing-operation-readback-mismatch' },
+    });
+    freshCard.techCard!.operations![0]!.seamKeys = ['seam-final'];
+    freshCard.seams = [
+      toWire({ ...expectedSeam, seamKey: 'seam-final', direction: 'reversed' }),
+    ] as never;
+    expect(
+      verifyPatternImportDxfPhaseEZeroConnectExistingOperationReadbackV1({
+        pending: captured.pending,
+        accepted: { ok: true, key: 'seam-final' },
+        expectedSeam,
+        freshCard,
+      }),
+    ).toMatchObject({
+      ok: false,
+      blocker: { code: 'existing-operation-readback-mismatch' },
+    });
+    freshCard.seams = [
+      toWire({
+        ...expectedSeam,
+        seamKey: 'seam-final',
+        sideA: expectedSeam.sideB,
+        sideB: expectedSeam.sideA,
+      }),
+    ] as never;
+    expect(
+      verifyPatternImportDxfPhaseEZeroConnectExistingOperationReadbackV1({
+        pending: captured.pending,
+        accepted: { ok: true, key: 'seam-final' },
+        expectedSeam,
+        freshCard,
+      }),
+    ).toMatchObject({
+      ok: false,
+      blocker: { code: 'existing-operation-readback-mismatch' },
+    });
+  });
+});
 
 describe('zero-operation production mount fresh-to-saved race failover', () => {
   it('re-reads the saved card after fresh preparation when the row appeared after Host routing', async () => {

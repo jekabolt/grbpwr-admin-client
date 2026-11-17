@@ -2093,7 +2093,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       blocker: {
         code: 'exact-connection-incomplete',
         detail: savedEmptyOperation
-          ? 'This empty saved operation is available for inspection only. Remove it and rebuild it from the 2D table before using Direct Connect.'
+          ? 'Choose two exact edges on the table, then confirm their seam direction to link this saved operation.'
           : 'This legacy one-seam operation is available for inspection only. Remove it and rebuild it from the 2D table before using Direct Connect.',
         operationNumber: source.selectedOperationNumber,
         processKind: 'connect',
@@ -2103,25 +2103,29 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       <PatternImportDxfPhaseECadTableZeroOperationProductionMountV1
         techCardId={techCardId}
         physicalHost={physicalHost}
-        zeroConnectAuthoringHandoff={EXISTING_OPERATION_REBUILD_ONLY_HANDOFF}
+        zeroConnectAuthoringHandoff={
+          savedEmptyOperation && zeroConnectAuthoringHandoff
+            ? zeroConnectAuthoringHandoff
+            : EXISTING_OPERATION_REBUILD_ONLY_HANDOFF
+        }
         disabled={frozen}
         selection={{ operationNumber: source.selectedOperationNumber }}
         defaultOperationsMode='docked'
         operationsPanel={
           <>
-            <CalloutBox
-              tone='note'
-              className='mb-2'
-              data-existing-operation-rebuild-required=''
-              data-legacy-n1-rebuild-required={savedEmptyOperation ? undefined : ''}
-              data-empty-operation-rebuild-required={savedEmptyOperation ? '' : undefined}
-            >
-              <Text component='p' size='micro'>
-                {savedEmptyOperation
-                  ? 'Direct Connect is disabled for this existing empty operation. Remove the operation and rebuild it from the 2D table to create a durable exact connection.'
-                  : 'Direct Connect is disabled for this existing legacy one-seam operation. Remove the operation and rebuild it from the 2D table to create a durable exact connection.'}
-              </Text>
-            </CalloutBox>
+            {!savedEmptyOperation ? (
+              <CalloutBox
+                tone='note'
+                className='mb-2'
+                data-existing-operation-rebuild-required=''
+                data-legacy-n1-rebuild-required=''
+              >
+                <Text component='p' size='micro'>
+                  Direct Connect is disabled for this existing legacy one-seam operation. Remove the
+                  operation and rebuild it from the 2D table to create a durable exact connection.
+                </Text>
+              </CalloutBox>
+            ) : null}
             {durableReloadBlocker ? (
               <CalloutBox
                 tone={durableReloadBlocker.retryable ? 'error' : 'note'}
