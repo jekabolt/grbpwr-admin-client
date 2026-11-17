@@ -146,11 +146,15 @@ describe('complete saved Assembly native row preparation', () => {
       signal,
     );
     expect(
-      actual.map(({ row, nativeSewingAvailable }) => [row.scopeKey, nativeSewingAvailable]),
+      actual.nativeRows.map(({ row, nativeSewingAvailable }) => [
+        row.scopeKey,
+        nativeSewingAvailable,
+      ]),
     ).toEqual([
       ['main', true],
       ['pocketing', false],
     ]);
+    expect(actual.fusingLayers).toEqual([]);
     expect(mocked.foreignRun).toHaveBeenCalledOnce();
     expect(mocked.foreignRun.mock.calls[0]?.[0].row).toEqual(pocket);
     expect(mocked.canonicalDispose).toHaveBeenCalledTimes(2);

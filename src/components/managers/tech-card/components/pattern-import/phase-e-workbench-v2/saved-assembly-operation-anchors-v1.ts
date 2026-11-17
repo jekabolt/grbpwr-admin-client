@@ -2,7 +2,7 @@ import type { TechCardSeam, TechCardSeamAnchor } from 'api/proto-http/common';
 import {
   isVerifiedCompleteSavedAssemblySourceV1,
   type CompleteSavedAssemblySourceV1,
-} from './saved-assembly-complete-source-rpc-v1.ts';
+} from './saved-assembly-complete-source-rpc-v1';
 
 type ScopedAlias = NonNullable<CompleteSavedAssemblySourceV1['aliases'][number]>;
 type Label = CompleteSavedAssemblySourceV1['garmentLabels'][number];
@@ -40,7 +40,10 @@ const physicalKinds = new Set([
   'TECH_CARD_SEAM_KIND_CLOSURE',
 ]);
 
-export function bindSavedAssemblyOperationAnchorsV1(source: CompleteSavedAssemblySourceV1) {
+export function bindSavedAssemblyOperationAnchorsV1(
+  source: CompleteSavedAssemblySourceV1,
+  generatedCutScopes: ReadonlySet<string> = new Set(),
+) {
   if (!isVerifiedCompleteSavedAssemblySourceV1(source))
     throw new TypeError('Operation anchors require a verified complete saved Assembly source.');
   const physical: PhysicalSeam[] = [];
@@ -58,6 +61,9 @@ export function bindSavedAssemblyOperationAnchorsV1(source: CompleteSavedAssembl
   for (const alias of source.aliases) {
     if (!alias.pieceLineKey || !alias.scopeKey || !rowScopes.has(alias.scopeKey))
       throw new TypeError('Saved Assembly alias has no current pattern row.');
+    // The generated sheet covers the already bound host detail. Its cut-only paths are not
+    // alternative authorities for the original garment stitch.
+    if (generatedCutScopes.has(alias.scopeKey)) continue;
     const list = aliases.get(alias.pieceLineKey);
     if (list) list.push(alias);
     else aliases.set(alias.pieceLineKey, [alias]);

@@ -1,4 +1,6 @@
 import { abortableAdminService } from 'api/api';
+import type { common_Size, common_TechCard } from 'api/proto-http/admin';
+import { isGenerated } from 'lib/fusing-dxf/regenerate';
 import {
   DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
   computeDxfProductSavedSourceFileIdV1,
@@ -17,21 +19,39 @@ import {
   readCompleteSavedAssemblySourceV1,
   type CompleteSavedAssemblySourceV1,
 } from './saved-assembly-complete-source-rpc-v1';
+import { bindSavedAssemblyOperationAnchorsV1 } from './saved-assembly-operation-anchors-v1';
 import { createSavedFullAssemblyCompleteDxfHostsV1 } from './saved-full-assembly-complete-dxf-host-v1';
+import { replaySavedFullAssemblyGeneratedFusingV1 } from './saved-full-assembly-generated-fusing-v1';
 import type { PatternImportDxfPhaseESavedRowCardProjectionV1 } from './saved-row-production-runtime-v1';
 
-/** Prepares one genuine native compiler source per exact scoped row, all from one Assembly seal. */
+type GeneratedFusingInputs = Readonly<{
+  card: common_TechCard;
+  sizeDictionary: readonly common_Size[];
+  selectedSizeId: number;
+}>;
+
+/** Prepares garment sources and verified generated cut layers from the same saved Assembly seal. */
 export async function prepareSavedFullAssemblyCompleteNativeRowsV1(
   source: CompleteSavedAssemblySourceV1,
   cardProjection: PatternImportDxfPhaseESavedRowCardProjectionV1,
   signal: AbortSignal,
+  generatedFusing?: GeneratedFusingInputs,
 ) {
   signal.throwIfAborted();
+  const fusingInput = generatedFusing ? structuredClone(generatedFusing) : null;
+  const generatedPatterns = new Set(
+    fusingInput?.card.techCard?.patterns?.filter(isGenerated).map(({ lineKey }) => lineKey),
+  );
   const hosts = createSavedFullAssemblyCompleteDxfHostsV1(source, cardProjection);
   const members = [];
+  const generatedRows = [];
   for (const member of source.rows) {
     signal.throwIfAborted();
     const row = completeSavedAssemblyRowIdentityV1(member);
+    if (generatedPatterns.has(row.patternLineKey)) {
+      generatedRows.push(row);
+      continue;
+    }
     const canonicalHost = hosts.createCanonical();
     const canonicalOwner = createDxfProductSavedNativeReprocessOwnerV1(canonicalHost);
     const cancelCanonical = () => canonicalOwner.cancel();
@@ -96,7 +116,42 @@ export async function prepareSavedFullAssemblyCompleteNativeRowsV1(
     );
   }
   const [first] = members;
-  if (!first) throw new Error('The complete Assembly has no saved DXF member rows.');
+  if (!first) throw new Error('The complete Assembly has no native garment member rows.');
+  const fusingLayers = [];
+  if (fusingInput && generatedRows.length) {
+    const main = members.find(({ row }) => row.scopeKey === 'main');
+    if (!main) throw new Error('Generated fusing requires the exact main garment row.');
+    const host = hosts.createCanonical();
+    let mainBytes: Uint8Array | undefined;
+    try {
+      ({ bytes: mainBytes } = await host.readAuthoritativeRow(main.row, signal, () => {}));
+      for (const row of generatedRows) {
+        signal.throwIfAborted();
+        const { bytes: fusingBytes } = await host.readAuthoritativeRow(row, signal, () => {});
+        try {
+          fusingLayers.push(
+            await replaySavedFullAssemblyGeneratedFusingV1(
+              {
+                source,
+                card: fusingInput.card,
+                sizeDictionary: fusingInput.sizeDictionary,
+                sizeId: fusingInput.selectedSizeId,
+                fusingScopeKey: row.scopeKey,
+                mainBytes,
+                fusingBytes,
+              },
+              signal,
+            ),
+          );
+        } finally {
+          fusingBytes.fill(0);
+        }
+      }
+    } finally {
+      mainBytes?.fill(0);
+      host.dispose();
+    }
+  }
   await readCompleteSavedAssemblySourceV1(
     abortableAdminService(signal),
     first.row,
@@ -107,5 +162,14 @@ export async function prepareSavedFullAssemblyCompleteNativeRowsV1(
     signal,
   );
   signal.throwIfAborted();
-  return Object.freeze(members);
+  return Object.freeze({
+    sourceSha256: source.sourceSha256,
+    serverAssemblyRevision: source.serverAssemblyRevision,
+    nativeRows: Object.freeze(members),
+    fusingLayers: Object.freeze(fusingLayers),
+    operationAnchors: bindSavedAssemblyOperationAnchorsV1(
+      source,
+      new Set(fusingLayers.map(({ fusingRow }) => fusingRow.scopeKey)),
+    ),
+  });
 }
