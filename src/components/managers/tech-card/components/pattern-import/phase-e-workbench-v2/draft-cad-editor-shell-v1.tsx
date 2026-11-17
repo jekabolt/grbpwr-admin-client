@@ -1,4 +1,4 @@
-import { useState, type ElementType, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ElementType, type ReactNode } from 'react';
 import { BoxIcon, Button, DrawingPinIcon, Pill, RulerSquareIcon, SewingPinIcon, Text } from 'ui';
 
 import type { PatternImportDxfPhaseEDraftCadCompileUiStateV1 } from './draft-cad-compile-ui-v1';
@@ -190,6 +190,10 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
   const [objectSidebarCollapsed, setObjectSidebarCollapsed] = useState(false);
   const [openToolGroupId, setOpenToolGroupId] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(defaultHistoryOpen);
+  const toolRailId = useId();
+  const keyboardOpenedToolGroupRef = useRef<string | null>(null);
+  const toolGroupSummaryRefs = useRef(new Map<string, HTMLElement>());
+  const toolFlyoutRef = useRef<HTMLDivElement | null>(null);
   const activeCommandCount = activeTransactions.reduce(
     (count, transaction) => count + transaction.commands.length,
     0,
@@ -214,6 +218,21 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
   const openProductiveToolGroup = PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOL_GROUPS_V1.find(
     ({ id }) => id === openToolGroupId,
   );
+  const toolFlyoutId = openToolGroupId ? `${toolRailId}-tool-flyout-${openToolGroupId}` : undefined;
+
+  useEffect(() => {
+    if (!openToolGroupId || keyboardOpenedToolGroupRef.current !== openToolGroupId) return;
+    keyboardOpenedToolGroupRef.current = null;
+    toolFlyoutRef.current?.querySelector<HTMLElement>('button:not(:disabled)')?.focus();
+  }, [openToolGroupId]);
+
+  const closeToolFlyoutFromKeyboard = () => {
+    const groupId = openToolGroupId;
+    if (!groupId) return;
+    keyboardOpenedToolGroupRef.current = null;
+    toolGroupSummaryRefs.current.get(groupId)?.focus();
+    setOpenToolGroupId(null);
+  };
 
   return (
     <section
@@ -429,6 +448,11 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
                     className='group relative border-t border-hairline pt-1 first:border-t-0 first:pt-0'
                   >
                     <summary
+                      id={`${toolRailId}-tool-summary-${group.id}`}
+                      ref={(node) => {
+                        if (node) toolGroupSummaryRefs.current.set(group.id, node);
+                        else toolGroupSummaryRefs.current.delete(group.id);
+                      }}
                       className={`flex h-10 w-10 cursor-pointer list-none items-center justify-center marker:hidden ${
                         (group.tools as readonly PatternImportDxfPhaseEDraftCadToolV1[]).includes(
                           activeTool,
@@ -440,7 +464,16 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
                           : 'bg-transparent text-textColor hover:bg-pageBg'
                       }`}
                       aria-label={`${group.label} tools`}
+                      aria-controls={`${toolRailId}-tool-flyout-${group.id}`}
+                      aria-expanded={open}
                       title={`${group.label} tools`}
+                      onPointerDown={() => {
+                        keyboardOpenedToolGroupRef.current = null;
+                      }}
+                      onKeyDown={(event) => {
+                        if ((event.key === 'Enter' || event.key === ' ') && !open)
+                          keyboardOpenedToolGroupRef.current = group.id;
+                      }}
                     >
                       <GroupIcon aria-hidden width='16' height='16' />
                     </summary>
@@ -462,13 +495,30 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
                     }}
                   >
                     <summary
+                      id={`${toolRailId}-tool-summary-measure`}
+                      ref={(node) => {
+                        if (node) toolGroupSummaryRefs.current.set('measure', node);
+                        else toolGroupSummaryRefs.current.delete('measure');
+                      }}
                       className={`flex h-10 w-10 cursor-pointer list-none items-center justify-center marker:hidden ${
                         activeTopologyTool?.startsWith('measure-')
                           ? 'bg-textColor text-bgColor'
                           : 'bg-transparent text-textColor hover:bg-pageBg'
                       }`}
                       aria-label='Measure tools'
+                      aria-controls={`${toolRailId}-tool-flyout-measure`}
+                      aria-expanded={openToolGroupId === 'measure'}
                       title='Measure tools'
+                      onPointerDown={() => {
+                        keyboardOpenedToolGroupRef.current = null;
+                      }}
+                      onKeyDown={(event) => {
+                        if (
+                          (event.key === 'Enter' || event.key === ' ') &&
+                          openToolGroupId !== 'measure'
+                        )
+                          keyboardOpenedToolGroupRef.current = 'measure';
+                      }}
                     >
                       <RulerSquareIcon aria-hidden width='16' height='16' />
                     </summary>
@@ -501,8 +551,19 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
             </nav>
             {openProductiveToolGroup ? (
               <div
+                id={toolFlyoutId}
+                ref={toolFlyoutRef}
                 className='absolute top-1/2 right-[calc(100%+0.5rem)] grid w-52 -translate-y-1/2 grid-cols-4 gap-1 border border-borderColor bg-bgColor p-1.5'
                 data-draft-cad-tool-flyout={openProductiveToolGroup.id}
+                role='group'
+                aria-labelledby={`${toolRailId}-tool-summary-${openProductiveToolGroup.id}`}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    closeToolFlyoutFromKeyboard();
+                  }
+                }}
               >
                 <Text component='p' size='micro' className='col-span-4 px-1 font-bold'>
                   {openProductiveToolGroup.label}
@@ -531,8 +592,19 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
             ) : null}
             {openToolGroupId === 'measure' && onTopologyToolChange ? (
               <div
+                id={toolFlyoutId}
+                ref={toolFlyoutRef}
                 className='absolute top-1/2 right-[calc(100%+0.5rem)] grid w-40 -translate-y-1/2 grid-cols-3 gap-1 border border-borderColor bg-bgColor p-1.5'
                 data-draft-cad-tool-flyout='measure'
+                role='group'
+                aria-labelledby={`${toolRailId}-tool-summary-measure`}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    closeToolFlyoutFromKeyboard();
+                  }
+                }}
               >
                 <Text component='p' size='micro' className='col-span-3 px-1 font-bold'>
                   Measure

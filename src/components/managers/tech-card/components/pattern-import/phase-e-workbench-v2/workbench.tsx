@@ -13,6 +13,7 @@ import {
 import type { BoxMm } from 'lib/pattern-import/types';
 import {
   useEffect,
+  useId,
   useRef,
   useState,
   type ChangeEvent,
@@ -1229,6 +1230,10 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
   const [measurementTool, setMeasurementTool] =
     useState<PatternImportDxfPhaseEMeasurementKindV1 | null>(null);
   const [measureMenuOpen, setMeasureMenuOpen] = useState(false);
+  const measureToolId = useId();
+  const measureMenuSummaryRef = useRef<HTMLElement | null>(null);
+  const measureFlyoutRef = useRef<HTMLDivElement | null>(null);
+  const keyboardOpenedMeasureRef = useRef(false);
   const [calloutToolActive, setCalloutToolActive] = useState(false);
   const [measurementDraft, setMeasurementDraft] = useState<
     readonly PatternImportDxfPhaseEVertexAnchorV1[]
@@ -1262,6 +1267,18 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
     y: number;
     originBounds: BoxMm;
   } | null>(null);
+
+  useEffect(() => {
+    if (!measureMenuOpen || !keyboardOpenedMeasureRef.current) return;
+    keyboardOpenedMeasureRef.current = false;
+    measureFlyoutRef.current?.querySelector<HTMLElement>('button:not(:disabled)')?.focus();
+  }, [measureMenuOpen]);
+
+  const closeMeasureFlyoutFromKeyboard = () => {
+    keyboardOpenedMeasureRef.current = false;
+    measureMenuSummaryRef.current?.focus();
+    setMeasureMenuOpen(false);
+  };
   const pieceArrangeGestureRef = useRef<{
     pieceKey: string;
     pointerId: number;
@@ -1697,13 +1714,24 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                   onToggle={(event) => setMeasureMenuOpen(event.currentTarget.open)}
                 >
                   <summary
+                    id={`${measureToolId}-summary`}
+                    ref={measureMenuSummaryRef}
                     className={`flex h-10 w-10 cursor-pointer list-none items-center justify-center marker:hidden ${
                       measurementTool
                         ? 'bg-textColor text-bgColor'
                         : 'bg-transparent text-textColor hover:bg-pageBg'
                     }`}
                     aria-label='Measure tools'
+                    aria-controls={`${measureToolId}-flyout`}
+                    aria-expanded={measureMenuOpen}
                     title='Measure tools'
+                    onPointerDown={() => {
+                      keyboardOpenedMeasureRef.current = false;
+                    }}
+                    onKeyDown={(event) => {
+                      if ((event.key === 'Enter' || event.key === ' ') && !measureMenuOpen)
+                        keyboardOpenedMeasureRef.current = true;
+                    }}
                   >
                     <RulerSquareIcon aria-hidden width='16' height='16' />
                   </summary>
@@ -1735,8 +1763,19 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
               </nav>
               {measureMenuOpen ? (
                 <div
+                  id={`${measureToolId}-flyout`}
+                  ref={measureFlyoutRef}
                   className='absolute top-1/2 right-[calc(100%+0.5rem)] z-30 grid w-40 -translate-y-1/2 grid-cols-3 gap-1 border border-borderColor bg-bgColor p-1.5'
                   data-cad-tool-flyout='measure'
+                  role='group'
+                  aria-labelledby={`${measureToolId}-summary`}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      closeMeasureFlyoutFromKeyboard();
+                    }
+                  }}
                 >
                   <Text component='p' size='micro' className='col-span-3 px-1 font-bold'>
                     Measure

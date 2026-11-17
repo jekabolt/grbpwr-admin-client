@@ -29,6 +29,25 @@ describe('Assembly Table chrome', () => {
     expect(draft).toMatch(/<\/nav>[\s\S]*data-draft-cad-tool-flyout=/u);
   });
 
+  it('keeps detached tool flyouts keyboard-connected to their summaries', () => {
+    const source = (file: string) => readFileSync(new URL(file, import.meta.url), 'utf8');
+    const workbench = source('./workbench.tsx');
+    const draft = source('./draft-cad-editor-shell-v1.tsx');
+
+    for (const implementation of [workbench, draft]) {
+      expect(implementation).toContain('aria-controls=');
+      expect(implementation).toContain('aria-expanded=');
+      expect(implementation).toContain("querySelector<HTMLElement>('button:not(:disabled)')");
+      expect(implementation).toContain("event.key === 'Escape'");
+      expect(implementation).toContain('.focus()');
+    }
+    expect(workbench).toContain('aria-labelledby={`${measureToolId}-summary`}');
+    expect(draft).toContain(
+      'aria-labelledby={`${toolRailId}-tool-summary-${openProductiveToolGroup.id}`}',
+    );
+    expect(draft).toContain('aria-labelledby={`${toolRailId}-tool-summary-measure`}');
+  });
+
   it('keeps only the useful unit and layout controls in the workbench header', () => {
     const markup = renderToStaticMarkup(
       <PatternImportDxfPhaseECadWorkbenchSplitShellV1
