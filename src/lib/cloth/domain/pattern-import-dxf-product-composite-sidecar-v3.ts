@@ -1,3 +1,8 @@
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_MULTISEAM_PLACEMENT_SIDECAR_MEDIA_TYPE_V3,
+  decodePatternImportDxfProductMultiseamPlacementSidecarV3,
+  type PatternImportDxfProductMultiseamPlacementSidecarDocumentV3,
+} from './pattern-import-dxf-product-multiseam-placement-sidecar-v3';
 import type { DxfProductSavedRowIdentityV1 } from '../../pattern-import/dxf-product-saved-reprocess-owner-v1';
 import {
   PATTERN_IMPORT_DXF_PRODUCT_MULTISEAM_PLACEMENT_SIDECAR_MEDIA_TYPE_V2,
@@ -41,6 +46,7 @@ export type PatternImportDxfProductCompositeSidecarBindingsV3 = Readonly<{
 export type PatternImportDxfProductCompositeSidecarComponentKindV3 =
   | 'semantic-product-v1'
   | 'multiseam-placement-v2'
+  | 'multiseam-placement-v3'
   | 'phase-e-exact-topology-v1';
 
 export type PatternImportDxfProductCompositeSidecarComponentV3 = Readonly<{
@@ -48,6 +54,7 @@ export type PatternImportDxfProductCompositeSidecarComponentV3 = Readonly<{
   mediaType:
     | typeof PATTERN_IMPORT_DXF_PRODUCT_SEMANTIC_SIDECAR_MEDIA_TYPE_V1
     | typeof PATTERN_IMPORT_DXF_PRODUCT_MULTISEAM_PLACEMENT_SIDECAR_MEDIA_TYPE_V2
+    | typeof PATTERN_IMPORT_DXF_PRODUCT_MULTISEAM_PLACEMENT_SIDECAR_MEDIA_TYPE_V3
     | typeof PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_EXACT_TOPOLOGY_COMPONENT_MEDIA_TYPE_V1;
   sha256: string;
   byteLength: number;
@@ -97,6 +104,8 @@ export type PatternImportDxfProductCompositeSidecarRequestV3 = Readonly<{
   expectedPreviousSidecarSha256: string | null;
   semanticProductV1Bytes: Uint8Array;
   placementV2Bytes: Uint8Array | null;
+  /** Mutually exclusive with placementV2Bytes; omission preserves legacy request/bytes. */
+  placementV3Bytes?: Uint8Array | null;
   exactTopologyBytes: Uint8Array | null;
 }>;
 
@@ -157,6 +166,7 @@ export type PatternImportDxfProductCompositeSidecarResultV3 =
       document: PatternImportDxfProductCompositeSidecarDocumentV3;
       seal: PatternImportDxfProductCompositeSidecarSealV3;
       placementDocument: PatternImportDxfProductMultiseamPlacementSidecarDocumentV2 | null;
+      observedPlacementDocument: PatternImportDxfProductMultiseamPlacementSidecarDocumentV3 | null;
       exactTopology: Readonly<{
         carrier: PatternImportDxfProductPhaseEExactTopologyBindingCarrierV1;
         seal: PatternImportDxfProductPhaseEExactTopologyBindingSealV1;
@@ -171,6 +181,7 @@ export type PatternImportDxfProductCompositeSidecarResultV3 =
       document: null;
       seal: null;
       placementDocument: null;
+      observedPlacementDocument: null;
       exactTopology: null;
       blockers: readonly [PatternImportDxfProductCompositeSidecarBlockerV3];
       claims: typeof BLOCKED_CLAIMS;
@@ -206,6 +217,7 @@ type ExactTopologyProjection = Readonly<{
 
 type VerifiedComponents = Readonly<{
   placementDocument: PatternImportDxfProductMultiseamPlacementSidecarDocumentV2 | null;
+  observedPlacementDocument: PatternImportDxfProductMultiseamPlacementSidecarDocumentV3 | null;
   exactTopology: ExactTopologyProjection | null;
   bytes: ReadonlyMap<
     PatternImportDxfProductCompositeSidecarComponentKindV3,
@@ -277,6 +289,7 @@ function blocked(error: unknown): PatternImportDxfProductCompositeSidecarResultV
     document: null,
     seal: null,
     placementDocument: null,
+    observedPlacementDocument: null,
     exactTopology: null,
     blockers: Object.freeze([blocker(error)]) as readonly [
       PatternImportDxfProductCompositeSidecarBlockerV3,
@@ -675,13 +688,19 @@ function validateLegacyCrossBinding(
   const persistence = document.persistence as Record<string, unknown>;
   const card = persistence.card as Record<string, unknown>;
   const pattern = persistence.pattern as Record<string, unknown>;
+  const previousLockVersion = card.previousLockVersion;
+  const observedLockVersion = card.observedLockVersion;
   if (
     document.schemaVersion !== PATTERN_IMPORT_DXF_PRODUCT_SEMANTIC_SIDECAR_DOCUMENT_V1 ||
     product.scopeKey !== bindings.row.scopeKey ||
     product.exportSha256 !== bindings.row.sha256 ||
     product.byteLength !== bindings.row.sizeBytes ||
     card.techCardId !== bindings.row.techCardId ||
-    card.observedLockVersion !== bindings.row.cardLockVersion ||
+    !Number.isSafeInteger(previousLockVersion) ||
+    (previousLockVersion as number) < 0 ||
+    !Number.isSafeInteger(observedLockVersion) ||
+    (observedLockVersion as number) <= (previousLockVersion as number) ||
+    (observedLockVersion as number) > bindings.row.cardLockVersion ||
     pattern.lineKey !== bindings.row.patternLineKey ||
     pattern.url !== bindings.row.url ||
     pattern.scopeKey !== bindings.row.scopeKey ||
@@ -695,7 +714,9 @@ function validateLegacyCrossBinding(
 }
 
 function validatePlacementCrossBinding(
-  document: PatternImportDxfProductMultiseamPlacementSidecarDocumentV2,
+  document:
+    | PatternImportDxfProductMultiseamPlacementSidecarDocumentV2
+    | PatternImportDxfProductMultiseamPlacementSidecarDocumentV3,
   bindings: PatternImportDxfProductCompositeSidecarBindingsV3,
 ): void {
   const row = document.bindings.row;
@@ -919,7 +940,14 @@ async function verifyComponents(
   const expected = [
     'semantic-product-v1',
   ] as PatternImportDxfProductCompositeSidecarComponentKindV3[];
+  if (kinds.includes('multiseam-placement-v2') && kinds.includes('multiseam-placement-v3'))
+    fail(
+      'component-order-mismatch',
+      'document.components',
+      'Only one placement version may be active.',
+    );
   if (kinds.includes('multiseam-placement-v2')) expected.push('multiseam-placement-v2');
+  if (kinds.includes('multiseam-placement-v3')) expected.push('multiseam-placement-v3');
   if (kinds.includes('phase-e-exact-topology-v1')) expected.push('phase-e-exact-topology-v1');
   if (kinds.length !== expected.length || kinds.some((kind, index) => kind !== expected[index]))
     fail(
@@ -929,6 +957,8 @@ async function verifyComponents(
     );
   let total = 0;
   let placementDocument: PatternImportDxfProductMultiseamPlacementSidecarDocumentV2 | null = null;
+  let observedPlacementDocument: PatternImportDxfProductMultiseamPlacementSidecarDocumentV3 | null =
+    null;
   let exactTopology: ExactTopologyProjection | null = null;
   const byteMap = new Map<
     PatternImportDxfProductCompositeSidecarComponentKindV3,
@@ -944,7 +974,9 @@ async function verifyComponents(
         ? PATTERN_IMPORT_DXF_PRODUCT_SEMANTIC_SIDECAR_MEDIA_TYPE_V1
         : component.kind === 'multiseam-placement-v2'
           ? PATTERN_IMPORT_DXF_PRODUCT_MULTISEAM_PLACEMENT_SIDECAR_MEDIA_TYPE_V2
-          : PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_EXACT_TOPOLOGY_COMPONENT_MEDIA_TYPE_V1;
+          : component.kind === 'multiseam-placement-v3'
+            ? PATTERN_IMPORT_DXF_PRODUCT_MULTISEAM_PLACEMENT_SIDECAR_MEDIA_TYPE_V3
+            : PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_EXACT_TOPOLOGY_COMPONENT_MEDIA_TYPE_V1;
     if (component.mediaType !== expectedMedia)
       fail(
         'component-media-mismatch',
@@ -989,10 +1021,25 @@ async function verifyComponents(
         );
       validatePlacementCrossBinding(decoded.document, bindings);
       placementDocument = decoded.document;
+    } else if (component.kind === 'multiseam-placement-v3') {
+      const decoded = await decodePatternImportDxfProductMultiseamPlacementSidecarV3(bytes, crypto);
+      if (!decoded.ok)
+        fail(
+          'component-media-mismatch',
+          `document.components[${index}]`,
+          'Optional observed placement component is not V3.',
+        );
+      validatePlacementCrossBinding(decoded.document, bindings);
+      observedPlacementDocument = decoded.document;
     } else exactTopology = await verifyExactTopologyBytes(bytes, bindings, crypto);
     byteMap.set(component.kind, bytes.slice());
   }
-  return Object.freeze({ placementDocument, exactTopology, bytes: byteMap });
+  return Object.freeze({
+    placementDocument,
+    observedPlacementDocument,
+    exactTopology,
+    bytes: byteMap,
+  });
 }
 
 function validateComponentMetadata(
@@ -1007,6 +1054,7 @@ function validateComponentMetadata(
   if (
     component.kind !== 'semantic-product-v1' &&
     component.kind !== 'multiseam-placement-v2' &&
+    component.kind !== 'multiseam-placement-v3' &&
     component.kind !== 'phase-e-exact-topology-v1'
   )
     fail('invalid-input', `${path}.kind`, 'Unsupported component kind.');
@@ -1144,6 +1192,7 @@ function captureBuildRequest(input: unknown): Readonly<{
   expectedPreviousSidecarSha256: string | null;
   semanticProductV1Bytes: Uint8Array<ArrayBuffer>;
   placementV2Bytes: Uint8Array<ArrayBuffer> | null;
+  placementV3Bytes: Uint8Array<ArrayBuffer> | null;
   exactTopologyBytes: Uint8Array<ArrayBuffer> | null;
 }> {
   const request = exactRecord(
@@ -1155,6 +1204,9 @@ function captureBuildRequest(input: unknown): Readonly<{
       'semanticProductV1Bytes',
       'placementV2Bytes',
       'exactTopologyBytes',
+      ...(input && typeof input === 'object' && Object.hasOwn(input, 'placementV3Bytes')
+        ? ['placementV3Bytes']
+        : []),
     ],
     'request',
   );
@@ -1164,6 +1216,8 @@ function captureBuildRequest(input: unknown): Readonly<{
   const bindings = validateBindings(detachedBindings, 'request.bindings');
   if (request.expectedPreviousSidecarSha256 !== null)
     sha(request.expectedPreviousSidecarSha256, 'request.expectedPreviousSidecarSha256');
+  if (request.placementV3Bytes != null && request.placementV2Bytes !== null)
+    fail('component-order-mismatch', 'request', 'Only one placement version may be active.');
   return Object.freeze({
     bindings,
     expectedPreviousSidecarSha256: request.expectedPreviousSidecarSha256 as string | null,
@@ -1176,6 +1230,10 @@ function captureBuildRequest(input: unknown): Readonly<{
       request.placementV2Bytes === null
         ? null
         : copyBytes(request.placementV2Bytes, 'request.placementV2Bytes', MAX_COMPONENT_BYTES),
+    placementV3Bytes:
+      request.placementV3Bytes === undefined || request.placementV3Bytes === null
+        ? null
+        : copyBytes(request.placementV3Bytes, 'request.placementV3Bytes', MAX_COMPONENT_BYTES),
     exactTopologyBytes:
       request.exactTopologyBytes === null
         ? null
@@ -1207,6 +1265,15 @@ export async function buildPatternImportDxfProductCompositeSidecarV3(
           'multiseam-placement-v2',
           PATTERN_IMPORT_DXF_PRODUCT_MULTISEAM_PLACEMENT_SIDECAR_MEDIA_TYPE_V2,
           request.placementV2Bytes,
+          crypto,
+        ),
+      );
+    if (request.placementV3Bytes)
+      components.push(
+        await component(
+          'multiseam-placement-v3',
+          PATTERN_IMPORT_DXF_PRODUCT_MULTISEAM_PLACEMENT_SIDECAR_MEDIA_TYPE_V3,
+          request.placementV3Bytes,
           crypto,
         ),
       );
@@ -1242,6 +1309,7 @@ export async function buildPatternImportDxfProductCompositeSidecarV3(
       document,
       seal,
       placementDocument: verified.placementDocument,
+      observedPlacementDocument: verified.observedPlacementDocument,
       exactTopology: verified.exactTopology,
       blockers: Object.freeze([]) as readonly [],
       claims: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_CLAIMS_V3,
@@ -1272,6 +1340,7 @@ export async function decodePatternImportDxfProductCompositeSidecarV3(
       document: frozenDocument,
       seal,
       placementDocument: verified.placementDocument,
+      observedPlacementDocument: verified.observedPlacementDocument,
       exactTopology: verified.exactTopology,
       blockers: Object.freeze([]) as readonly [],
       claims: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_CLAIMS_V3,
