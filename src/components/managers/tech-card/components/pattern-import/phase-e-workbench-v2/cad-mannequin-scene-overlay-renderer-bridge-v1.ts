@@ -372,6 +372,7 @@ export function bridgePatternImportDxfPhaseECadMannequinSceneOverlayToRendererV1
           operationNumber: edge.operationNumber,
           ordinal: edge.seamOrdinal,
         }),
+        ordinalBadgeVisible: overlay.focus.selectedConnectionRef === edge.connectionRef,
         semanticColorCss: edge.semanticColorHex,
         orderedVertexIds: Object.freeze([...edge.orderedVertexIds]),
         thread: null,

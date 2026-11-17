@@ -8,6 +8,10 @@ import {
   updateMeasurementSurfaceLivePositionsV1,
   type MeasurementSurfaceLivePositionUpdateV1,
 } from './measurement-surface-live-positions-v1';
+import {
+  createMeasurementSurfaceSeamOrdinalBadgeBuilderV1,
+  disposeMeasurementSurfaceSeamOrdinalBadgeV1,
+} from './measurement-surface-seam-ordinal-badges-v1';
 import type { MeasurementBodyFrameV2 } from 'lib/cloth/body/measurement-body-frame-v2';
 import type {
   MeasurementSurfaceLodV1,
@@ -67,6 +71,7 @@ export interface MeasurementSurfacePatternPieceSeamV1 {
   readonly contourId: string;
   readonly colorCss: string | null;
   readonly operationSeam?: Readonly<{ operationNumber: number; ordinal: number }>;
+  readonly ordinalBadgeVisible?: boolean;
   readonly orderedVertexIds: readonly string[];
   readonly thread: Readonly<{ bomLineKey: string; colorCss: string }> | null;
   readonly pins: readonly Readonly<{ pinId: string; vertexId: string }>[];
@@ -1133,6 +1138,7 @@ function disposePatternPieceLayerV1(layer: THREE.Group | null): void {
       object.geometry.dispose();
       disposeMaterial(object.material);
     }
+    if (object instanceof THREE.Sprite) disposeMeasurementSurfaceSeamOrdinalBadgeV1(object);
   });
 }
 
@@ -1166,6 +1172,7 @@ function createPatternPieceLayerV1(
   const layer = new THREE.Group();
   layer.name = 'measurement-surface-pattern-pieces-v1';
   const bindings = new Map<string, MeasurementSurfacePatternPieceSceneBindingV1>();
+  const addOrdinalBadge = createMeasurementSurfaceSeamOrdinalBadgeBuilderV1();
 
   for (const piece of overlay.pieces) {
     const piecePoints = piece.contours.flatMap((contour) =>
@@ -1304,6 +1311,8 @@ function createPatternPieceLayerV1(
         seamLine.userData.contourId = seam.contourId;
         seamLine.userData.orderedVertexIds = seam.orderedVertexIds;
         content.add(seamLine);
+        if (seam.ordinalBadgeVisible)
+          addOrdinalBadge(seamLine, seam, seamPoints, seamColor, cssColor('--color-bgColor'));
         if (overlay.visibility.thread && seam.thread) {
           const threadLine = patternPieceLine(
             seamPoints.map((point) => point.clone().setZ(0.015)),

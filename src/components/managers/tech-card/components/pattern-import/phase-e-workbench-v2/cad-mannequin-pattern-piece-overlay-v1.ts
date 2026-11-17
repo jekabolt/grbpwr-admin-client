@@ -38,6 +38,7 @@ export type PatternImportDxfPhaseECadMannequinPatternOverlayDecorationV1 = Reado
   pieceId: string;
   contourId: string;
   operationSeam?: MeasurementSurfacePatternPieceSeamV1['operationSeam'];
+  ordinalBadgeVisible?: boolean;
   semanticColorCss?: string | null;
   /** Exact ordered Phase-D boundary identities. Empty or missing identities fail closed. */
   orderedVertexIds: readonly string[];
@@ -178,6 +179,7 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
             contourId: decoration.contourId,
             ...(decoration.operationSeam && {
               operationSeam: Object.freeze({ ...decoration.operationSeam }),
+              ordinalBadgeVisible: decoration.ordinalBadgeVisible === true,
             }),
             colorCss: stableCssColor(decoration.semanticColorCss),
             orderedVertexIds: Object.freeze([...decoration.orderedVertexIds]),

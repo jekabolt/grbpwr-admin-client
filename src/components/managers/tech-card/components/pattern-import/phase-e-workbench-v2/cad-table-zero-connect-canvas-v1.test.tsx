@@ -603,6 +603,7 @@ describe('zero-operation CAD table rendering', () => {
         connections: [connection],
       },
       activeOperationNumber: operationNumber,
+      selection: { seamId },
       stitchVisuals: [],
       bomItems: [],
     });
@@ -643,6 +644,18 @@ describe('zero-operation CAD table rendering', () => {
       expect(label).toContain(`fill="${colorCss}"`);
       expect(label).toContain('pointer-events="none"');
     }
+    expect(rendererSeams.map(({ ordinalBadgeVisible }) => ordinalBadgeVisible)).toEqual([
+      true,
+      true,
+    ]);
+    const withoutSelectedSeam = bridgePatternImportDxfPhaseECadMannequinSceneOverlayToRendererV1({
+      ...scene.overlay,
+      focus: { ...scene.overlay.focus, selectedConnectionRef: null },
+    });
+    if (!withoutSelectedSeam.ok) throw new Error(withoutSelectedSeam.blocker.detail);
+    expect(
+      withoutSelectedSeam.bridge.decorations.map(({ ordinalBadgeVisible }) => ordinalBadgeVisible),
+    ).toEqual([false, false]);
     expect(html).toContain('aria-label="Fit all pieces"');
     expect(html).not.toContain('aria-label="Connect edges"');
   });
