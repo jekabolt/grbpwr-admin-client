@@ -2,6 +2,7 @@ import type {
   MeasurementSurfacePatternPieceOverlayV1,
   MeasurementSurfacePatternPieceSeamV1,
   MeasurementSurfacePatternPieceTransformV1,
+  MeasurementSurfacePatternPieceV1,
 } from 'components/shared/measurement-watertight-surface-v1-stage';
 
 import type {
@@ -260,7 +261,12 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
         thread: true,
       }),
       guides: input.guides,
-      onSelectPiece: (hit) => {
+      onSelectPiece: (
+        hit: Pick<
+          MeasurementSurfacePatternPieceV1,
+          'pieceKey' | 'scopeKey' | 'pieceId' | 'pieceLineKey'
+        >,
+      ) => {
         const piece = overlayPieces.find(
           ({ pieceKey, scopeKey, pieceId, pieceLineKey }) =>
             pieceKey === hit.pieceKey &&
