@@ -33,6 +33,7 @@ import type {
 } from '../types';
 import { PATIMPORT } from '../types';
 import { stripSpikes } from '../spikes';
+import { transformCutLoops } from '../semantics/geom';
 import { fitGrainInside, pointOnRings } from '../semantics/grain-inside';
 import {
   IDENTITY,
@@ -162,7 +163,7 @@ function transformSize(s: PieceSizeSpec, t: Affine): PieceSizeSpec {
   return {
     ...s,
     cut,
-    cutLoops: s.cutLoops?.map((loop) => mapPts(t, loop)),
+    cutLoops: transformCutLoops(t, s.cutLoops),
     seam: s.seam ? mapPts(t, s.seam) : null,
     grain,
     notches,

@@ -19,7 +19,16 @@ import type {
   PieceSizeSpec,
   PtMm,
 } from '../types';
-import { applyAffine, areaOf, bboxOf, ccw, dist, reflection } from './geom';
+import {
+  applyAffine,
+  areaOf,
+  bboxOf,
+  ccw,
+  dist,
+  reflection,
+  signedArea,
+  transformCutLoops,
+} from './geom';
 
 /** Mirror of a polyline across the grain line (a→b, infinite). */
 export function mirrorAcross(pts: readonly PtMm[], grain: { a: PtMm; b: PtMm }): PtMm[] {
@@ -46,17 +55,19 @@ export function transformSizeSpec(s: PieceSizeSpec, t: Affine): PieceSizeSpec {
   const internal: InternalFeature[] = s.internal.map((f) => ({ ...f, pts: f.pts.map(P) }));
   const fold: FoldFeature | null = s.fold ? { ...s.fold, a: P(s.fold.a), b: P(s.fold.b) } : null;
   const cut = ccw(s.cut.map(P));
+  const cutLoops = transformCutLoops(t, s.cutLoops);
   return {
     ...s,
     cut,
+    ...(cutLoops && { cutLoops }),
     seam: s.seam ? ccw(s.seam.map(P)) : null,
     grain,
     notches,
     drills,
     internal,
     fold,
-    bbox: bboxOf(cut),
-    areaMm2: areaOf(cut),
+    bbox: bboxOf(cutLoops?.length ? [...cut, ...cutLoops.flat()] : cut),
+    areaMm2: areaOf(cut) + (cutLoops?.reduce((total, loop) => total + signedArea(loop), 0) ?? 0),
   };
 }
 
