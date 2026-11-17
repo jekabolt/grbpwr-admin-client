@@ -199,9 +199,11 @@ test('real ModelForm auto-binds edit/create measurements to its V9 mannequin', a
     'data-active-measurement-guide',
     'BODY_MEASUREMENT_NAME_INSEAM',
   );
-  await expect(canvas).toHaveAttribute('data-measurement-guide-status', 'unsupported');
-  await expect(canvas).toHaveAttribute('data-measurement-guide-path-count', '0');
-  await expect(page.getByTestId('measurement-surface-active-guide-label')).toHaveCount(0);
+  // Inseam draws an x-ray line from the crotch to the floor: a visual guide, not a measured path.
+  await expect(canvas).toHaveAttribute('data-measurement-guide-status', 'limited');
+  await expect(canvas).toHaveAttribute('data-measurement-guide-path-count', '1');
+  await expect(canvas).toHaveAttribute('data-measurement-guide-air', 'x-ray');
+  await expect(page.getByTestId('measurement-surface-active-guide-label')).toHaveText('inseam');
 
   await expect(measurementApplication).toHaveAttribute('data-application-status', 'partial');
   await expect(measurementApplication).toContainText(
@@ -874,7 +876,7 @@ async function exerciseHighHipAndKnee(page: import('@playwright/test').Page, bas
   const measurementApplication = page.getByTestId(
     'model-open-reference-measurement-application-status',
   );
-  const inseam = measurementField(page, 'inseam');
+  const wrist = measurementField(page, 'wrist');
   await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
   await expect(canvas).toHaveAttribute(
     'data-source-revision',
@@ -884,11 +886,16 @@ async function exerciseHighHipAndKnee(page: import('@playwright/test').Page, bas
     { edit: string; label: 'high hip' | 'knee' } & Awaited<ReturnType<typeof stopFrameGapAudit>>
   > = [];
 
-  // The inseam guide draws no path, so canvas screenshots compare body geometry only.
+  // Every field draws a line now; the wrist ring sits far from every edited region and follows
+  // the same mesh, so canvas screenshots still differ only where the body geometry does.
   const bodyScreenshot = async () => {
-    await revealMeasurement(page, inseam);
-    await inseam.focus();
-    await expect(canvas).toHaveAttribute('data-measurement-guide-path-count', '0');
+    await revealMeasurement(page, wrist);
+    await wrist.focus();
+    await expect(canvas).toHaveAttribute(
+      'data-active-measurement-guide',
+      'BODY_MEASUREMENT_NAME_WRIST',
+    );
+    await expect(canvas).toHaveAttribute('data-measurement-guide-view', 'front');
     await page.mouse.move(0, 0);
     return canvas.screenshot();
   };
@@ -1010,17 +1017,22 @@ async function exerciseNeck(page: import('@playwright/test').Page, basisKind: st
   const measurementApplication = page.getByTestId(
     'model-open-reference-measurement-application-status',
   );
-  const inseam = measurementField(page, 'inseam');
+  const wrist = measurementField(page, 'wrist');
   await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
   await expect(canvas).toHaveAttribute(
     'data-source-revision',
     new RegExp(`basisKind=${basisKind}`),
   );
-  // The inseam guide draws no path, so canvas screenshots compare body geometry only.
+  // Every field draws a line now; the wrist ring sits far from every edited region and follows
+  // the same mesh, so canvas screenshots still differ only where the body geometry does.
   const bodyScreenshot = async () => {
-    await revealMeasurement(page, inseam);
-    await inseam.focus();
-    await expect(canvas).toHaveAttribute('data-measurement-guide-path-count', '0');
+    await revealMeasurement(page, wrist);
+    await wrist.focus();
+    await expect(canvas).toHaveAttribute(
+      'data-active-measurement-guide',
+      'BODY_MEASUREMENT_NAME_WRIST',
+    );
+    await expect(canvas).toHaveAttribute('data-measurement-guide-view', 'front');
     await page.mouse.move(0, 0);
     return canvas.screenshot();
   };
@@ -1263,6 +1275,149 @@ async function guideFrameGaps(
   });
 }
 
+interface GuideLineCheck {
+  readonly label: string;
+  readonly name: string;
+  readonly status: 'visible' | 'limited';
+  readonly view: 'front' | 'back' | 'side';
+  readonly air: string;
+  readonly minBlueDesktop: number;
+  readonly minBluePhone: number;
+}
+
+// Thresholds sit at about half of the female blue px measured for guide-v4 at DPR 2 (shots JSON).
+const GUIDE_V4_LINES: readonly GuideLineCheck[] = [
+  {
+    label: 'neck base',
+    name: 'BODY_MEASUREMENT_NAME_NECK_BASE',
+    status: 'limited',
+    view: 'front',
+    air: 'none',
+    minBlueDesktop: 330,
+    minBluePhone: 240,
+  },
+  {
+    label: 'inseam',
+    name: 'BODY_MEASUREMENT_NAME_INSEAM',
+    status: 'limited',
+    view: 'front',
+    air: 'x-ray',
+    minBlueDesktop: 1500,
+    minBluePhone: 1270,
+  },
+  {
+    label: 'hps height',
+    name: 'BODY_MEASUREMENT_NAME_HPS_HEIGHT',
+    status: 'visible',
+    view: 'front',
+    air: 'none',
+    minBlueDesktop: 2650,
+    minBluePhone: 1870,
+  },
+  {
+    label: 'hps to waist (front)',
+    name: 'BODY_MEASUREMENT_NAME_HPS_TO_WAIST_FRONT',
+    status: 'limited',
+    view: 'front',
+    air: 'none',
+    minBlueDesktop: 560,
+    minBluePhone: 390,
+  },
+  {
+    label: 'shoulder length',
+    name: 'BODY_MEASUREMENT_NAME_SHOULDER_LENGTH',
+    status: 'limited',
+    view: 'front',
+    air: 'none',
+    minBlueDesktop: 190,
+    minBluePhone: 150,
+  },
+  {
+    label: 'shoulder drop',
+    name: 'BODY_MEASUREMENT_NAME_SHOULDER_DROP',
+    status: 'limited',
+    view: 'front',
+    air: 'caliper',
+    minBlueDesktop: 450,
+    minBluePhone: 360,
+  },
+  {
+    label: 'armscye depth',
+    name: 'BODY_MEASUREMENT_NAME_ARMSCYE_DEPTH',
+    status: 'limited',
+    view: 'back',
+    air: 'caliper',
+    minBlueDesktop: 480,
+    minBluePhone: 370,
+  },
+  {
+    label: 'armscye circumference',
+    name: 'BODY_MEASUREMENT_NAME_ARMSCYE_CIRCUMFERENCE',
+    status: 'limited',
+    view: 'front',
+    air: 'none',
+    minBlueDesktop: 225,
+    minBluePhone: 175,
+  },
+  {
+    label: 'hps to bust apex',
+    name: 'BODY_MEASUREMENT_NAME_HPS_TO_BUST_APEX',
+    status: 'limited',
+    view: 'front',
+    air: 'none',
+    minBlueDesktop: 330,
+    minBluePhone: 245,
+  },
+  {
+    label: 'bust apex to apex',
+    name: 'BODY_MEASUREMENT_NAME_BUST_APEX_TO_APEX',
+    status: 'limited',
+    view: 'front',
+    air: 'none',
+    minBlueDesktop: 440,
+    minBluePhone: 310,
+  },
+];
+
+// Lines the owner reported as wrong or barely visible on the phone (17.11), checked there too.
+const PHONE_LINES: readonly GuideLineCheck[] = [
+  {
+    label: 'chest',
+    name: 'BODY_MEASUREMENT_NAME_CHEST',
+    status: 'visible',
+    view: 'front',
+    air: 'none',
+    minBlueDesktop: 600,
+    minBluePhone: 420,
+  },
+  {
+    label: 'across shoulder',
+    name: 'BODY_MEASUREMENT_NAME_ACROSS_SHOULDER',
+    status: 'limited',
+    view: 'front',
+    air: 'x-ray',
+    minBlueDesktop: 480,
+    minBluePhone: 445,
+  },
+  {
+    label: 'sleeve length',
+    name: 'BODY_MEASUREMENT_NAME_SLEEVE_LENGTH',
+    status: 'limited',
+    view: 'back',
+    air: 'x-ray',
+    minBlueDesktop: 900,
+    minBluePhone: 780,
+  },
+];
+
+/**
+ * Posed wrist ring at DPR 2 on the dev page: 183 px with the 2 mm lift off the skin, 150 px with
+ * bare vertices tied in depth with the skin. The floor sits between them so a lost lift fails.
+ */
+const POSED_WRIST_MIN_BLUE = 165;
+const PHONE_REST_STAGE = [318, 328] as const;
+const PHONE_TYPING_STAGE = [390, 410] as const;
+
 test.describe('guide lines at DPR 2', () => {
   test.use({ deviceScaleFactor: 2 });
 
@@ -1287,9 +1442,12 @@ test.describe('guide lines at DPR 2', () => {
       return input;
     };
 
-    // No guide: the owner's own camera, for the blur comparison and the frame-time baseline.
-    await focusField('inseam', 'BODY_MEASUREMENT_NAME_INSEAM');
-    await expect(canvas).toHaveAttribute('data-measurement-guide-path-count', '0');
+    // Front surface ring: the owner's own camera, for the blur comparison and the frame-time
+    // baseline (every field draws a line now, so no guide-free field is left).
+    await focusField('wrist', 'BODY_MEASUREMENT_NAME_WRIST');
+    await expect(canvas).toHaveAttribute('data-measurement-guide-view', 'front');
+    await expect(canvas).toHaveAttribute('data-measurement-guide-camera', 'owner');
+    await expect(canvas).toHaveAttribute('data-measurement-guide-air', 'none');
     const ownerFrame = await canvasPixelStats(page, canvas);
     const framesWithoutGuide = await guideFrameGaps(page, canvas);
     await page.mouse.move(0, 0);
@@ -1315,7 +1473,7 @@ test.describe('guide lines at DPR 2', () => {
     await cbField.blur();
     await expect(canvas).toHaveAttribute('data-measurement-guide-camera', 'owner');
     await expect(canvas).toHaveAttribute('data-measurement-guide-camera-motion', 'still');
-    await focusField('inseam', 'BODY_MEASUREMENT_NAME_INSEAM');
+    await focusField('wrist', 'BODY_MEASUREMENT_NAME_WRIST');
     const restored = await canvasPixelStats(page, canvas, ownerFrame.png);
     expect(restored.changedFraction, 'camera back where the owner left it').toBeLessThan(0.005);
 
@@ -1328,16 +1486,176 @@ test.describe('guide lines at DPR 2', () => {
     expect(chestDepth.blue, 'chest depth blue px').toBeGreaterThanOrEqual(90);
     const framesWithCaliper = await guideFrameGaps(page, canvas);
 
+    // guide-v4: the lines the owner could not see on 17.11, each from its own view. The first one
+    // comes straight after the side-view chest depth: a field without a back/side view faces the
+    // front again.
+    const newLines: Record<string, number> = {};
+    for (const line of GUIDE_V4_LINES) {
+      await focusField(line.label, line.name);
+      await expect(canvas).toHaveAttribute('data-measurement-guide-status', line.status);
+      await expect(canvas).toHaveAttribute('data-measurement-guide-view', line.view);
+      await expect(canvas).toHaveAttribute('data-measurement-guide-air', line.air);
+      await expect(canvas).toHaveAttribute('data-measurement-guide-camera-motion', 'still');
+      await expect(canvas).toHaveAttribute(
+        'data-camera-facing',
+        line.view === 'back' ? 'back' : 'front',
+      );
+      const stats = await canvasPixelStats(page, canvas);
+      newLines[line.label] = stats.blue;
+      expect(stats.blue, `${line.label} blue px`).toBeGreaterThanOrEqual(line.minBlueDesktop);
+    }
+
     console.info(
       `MANNEQUIN_GUIDE_LINES_V3=${JSON.stringify({
         blue: {
           acrossShoulder: acrossShoulder.blue,
           cbNeckToWaist: cbNeckToWaist.blue,
           chestDepth: chestDepth.blue,
+          ...newLines,
         },
         restoredChangedFraction: restored.changedFraction,
         frameGapsMs: { framesWithoutGuide, framesWithXRay, framesWithCaliper },
       })}`,
     );
+  });
+
+  test('measurement lines read on a phone portrait stage while a field is typed', async ({
+    page,
+  }) => {
+    test.setTimeout(600_000);
+    const rest = { width: 390, height: 844 };
+    await page.setViewportSize(rest);
+    await prewarmDevRuntime(page);
+    await page.goto(DEV_ROUTE);
+    const status = page.getByTestId('model-open-reference-preview-status');
+    const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
+    await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
+    await expect(canvas).toHaveAttribute('data-source-revision', /basisKind=female/u);
+    // Keyboard down: the dev page's phone stage at rest (the unit test's phone stage).
+    const restBox = (await canvas.boundingBox())!;
+    expect(Math.round(restBox.width)).toBe(PHONE_REST_STAGE[0]);
+    expect(Math.round(restBox.height)).toBe(PHONE_REST_STAGE[1]);
+
+    const blue: Record<string, number> = {};
+    let typingStage: [number, number] | null = null;
+    for (const line of [...PHONE_LINES, ...GUIDE_V4_LINES]) {
+      await page.setViewportSize(rest);
+      const input = measurementField(page, line.label);
+      await revealMeasurement(page, input);
+      // Keyboard up, emulated as in the quiz spec: about 474 px stay visible above it.
+      await page.setViewportSize({ width: 390, height: 474 });
+      await input.focus();
+      await expect(canvas).toHaveAttribute('data-active-measurement-guide', line.name);
+      await expect(canvas).toHaveAttribute('data-measurement-guide-status', line.status);
+      await expect(canvas).toHaveAttribute('data-measurement-guide-view', line.view);
+      await expect(canvas).toHaveAttribute('data-measurement-guide-camera-motion', 'still');
+      await page.mouse.move(0, 0);
+      const box = (await canvas.boundingBox())!;
+      typingStage ??= [Math.round(box.width), Math.round(box.height)];
+      const stats = await canvasPixelStats(page, canvas);
+      blue[line.label] = stats.blue;
+      expect(stats.blue, `${line.label} blue px on the phone`).toBeGreaterThanOrEqual(
+        line.minBluePhone,
+      );
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    }
+
+    // Live beta 17.11: chest depth turns the camera to the side, a tap on the stage hands it to the
+    // owner, and the next field without a back/side view still faces the front.
+    await page.setViewportSize(rest);
+    const chestDepth = measurementField(page, 'chest depth');
+    await revealMeasurement(page, chestDepth);
+    await page.setViewportSize({ width: 390, height: 474 });
+    await chestDepth.focus();
+    await expect(canvas).toHaveAttribute('data-measurement-guide-camera', 'turned-side');
+    await expect(canvas).toHaveAttribute('data-measurement-guide-camera-motion', 'still');
+    await expect(canvas).toHaveAttribute('data-camera-facing', 'side');
+    const typingBox = (await canvas.boundingBox())!;
+    await page.mouse.click(typingBox.x + typingBox.width / 2, typingBox.y + typingBox.height / 2);
+    await expect(canvas).toHaveAttribute('data-measurement-guide-camera', /^owner/u);
+    await expect(canvas).toHaveAttribute('data-camera-facing', 'side');
+    await page.setViewportSize(rest);
+    const shoulderLength = measurementField(page, 'shoulder length');
+    await revealMeasurement(page, shoulderLength);
+    await page.setViewportSize({ width: 390, height: 474 });
+    await shoulderLength.focus();
+    await expect(canvas).toHaveAttribute(
+      'data-active-measurement-guide',
+      'BODY_MEASUREMENT_NAME_SHOULDER_LENGTH',
+    );
+    await expect(canvas).toHaveAttribute('data-measurement-guide-camera-motion', 'still');
+    await expect(canvas).toHaveAttribute('data-camera-facing', 'front');
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+
+    // Typing: the stage spans the width above the keyboard bar (the unit test's typing stage).
+    expect(typingStage![0]).toBe(PHONE_TYPING_STAGE[0]);
+    expect(Math.abs(typingStage![1] - PHONE_TYPING_STAGE[1])).toBeLessThanOrEqual(2);
+    console.info(
+      `MANNEQUIN_GUIDE_LINES_V4_PHONE=${JSON.stringify({
+        restStage: [Math.round(restBox.width), Math.round(restBox.height)],
+        typingStage,
+        blue,
+      })}`,
+    );
+  });
+
+  test('a posed wrist ring draws on the posed body', async ({ page }) => {
+    test.setTimeout(600_000);
+    await prewarmDevRuntime(page);
+    await page.goto(DEV_ROUTE);
+    const status = page.getByTestId('model-open-reference-preview-status');
+    const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
+    const poseDraft = page.locator('[data-pose-draft]');
+    await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
+    await expect(canvas).toHaveAttribute('data-view-preset', 'front');
+
+    const wrist = measurementField(page, 'wrist');
+    const wristBlue = async (shot: string) => {
+      await revealMeasurement(page, wrist);
+      await wrist.focus();
+      await expect(canvas).toHaveAttribute(
+        'data-active-measurement-guide',
+        'BODY_MEASUREMENT_NAME_WRIST',
+      );
+      await expect(canvas).toHaveAttribute('data-measurement-guide-status', 'visible');
+      await expect(canvas).toHaveAttribute('data-measurement-guide-camera-motion', 'still');
+      await expect(canvas).toHaveAttribute('data-camera-facing', 'front');
+      await page.mouse.move(0, 0);
+      const stats = await canvasPixelStats(page, canvas);
+      await canvas.screenshot({ path: `${NECK_SHOTS_DIR}/guide-v4-wrist-${shot}-female.png` });
+      await wrist.blur();
+      return stats.blue;
+    };
+    const restBlue = await wristBlue('rest');
+
+    // Raise the left arm by its wrist marker, then put edit pose away so no marker is drawn.
+    const editPose = page.getByRole('checkbox', { name: 'edit pose', exact: true });
+    await editPose.check();
+    await expect(canvas).toHaveAttribute('data-joint-editor-mode', 'edit-pose');
+    const box = (await canvas.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    const markers = JSON.parse(
+      (await canvas.getAttribute('data-projected-joint-markers')) ?? '[]',
+    ) as readonly Readonly<{ id: string; screenX: number; screenY: number }>[];
+    const marker = markers.find(({ id }) => id === 'left-wrist');
+    expect(marker, 'left wrist marker').toBeDefined();
+    const start = { x: box.x + marker!.screenX, y: box.y + marker!.screenY };
+    const sourceBefore = await canvas.getAttribute('data-source-revision');
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await expect(canvas).toHaveAttribute('data-position-dragging', 'true');
+    await page.mouse.move(start.x + 40, start.y - 60, { steps: 10 });
+    await page.mouse.up();
+    await expect(canvas).toHaveAttribute('data-position-dragging', 'false');
+    await expect.poll(() => canvas.getAttribute('data-source-revision')).not.toBe(sourceBefore);
+    await expect(status).toContainText('Preview partial', { timeout: 180_000 });
+    await expect(poseDraft).toHaveAttribute('data-pose-draft', 'custom');
+    await editPose.uncheck();
+    await expect(canvas).toHaveAttribute('data-joint-editor-mode', 'off');
+    await expect(poseDraft).toHaveAttribute('data-pose-draft', 'custom');
+
+    const posedBlue = await wristBlue('posed');
+    console.info(`MANNEQUIN_GUIDE_POSED_WRIST=${JSON.stringify({ restBlue, posedBlue })}`);
+    expect(posedBlue, 'posed wrist blue px').toBeGreaterThanOrEqual(POSED_WRIST_MIN_BLUE);
   });
 });

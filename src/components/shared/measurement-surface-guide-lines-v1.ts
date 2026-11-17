@@ -102,9 +102,18 @@ export interface MeasurementSurfaceGuideSceneBindingV1 {
   }>[];
 }
 
-function pathPolylineV1(
+/**
+ * A line bound to mesh vertices (a posed body) stands this far off the skin along the displayed
+ * vertex normal, as the fixed lines do; on the vertices themselves it ties with the surface in the
+ * depth test and the posed wrist read 0 px.
+ */
+const MESH_VERTEX_LIFT_M = 0.002;
+
+/** The polyline a guide path draws on the displayed mesh (closed paths repeat their first point). */
+export function measurementSurfaceGuidePolylineV1(
   path: MeasurementSurfaceMeasurementGuidePathV1,
   meshPositions: Float32Array,
+  meshNormals?: Float32Array | null,
 ): Float32Array | null {
   const points: number[] = [];
   if (path.source === 'fixed-points') {
@@ -114,10 +123,19 @@ function pathPolylineV1(
     }
   } else {
     const vertexCount = meshPositions.length / 3;
+    const normals = meshNormals?.length === meshPositions.length ? meshNormals : null;
     for (const vertex of path.vertexIndices) {
       if (!Number.isSafeInteger(vertex) || vertex < 0 || vertex >= vertexCount) return null;
       const offset = vertex * 3;
-      points.push(meshPositions[offset], meshPositions[offset + 1], meshPositions[offset + 2]);
+      const normal = normals ? normals.subarray(offset, offset + 3) : null;
+      const normalLength = normal ? Math.hypot(normal[0], normal[1], normal[2]) : 0;
+      for (let axis = 0; axis < 3; axis += 1) {
+        points.push(
+          normal && Number.isFinite(normalLength) && normalLength > 1e-9
+            ? meshPositions[offset + axis] + (normal[axis] / normalLength) * MESH_VERTEX_LIFT_M
+            : meshPositions[offset + axis],
+        );
+      }
     }
   }
   if (points.length < 6) return null;
@@ -297,6 +315,7 @@ export function createMeasurementSurfaceGuideLayerV1(
   guide: MeasurementSurfaceActiveMeasurementGuideV1 | undefined,
   meshPositions: Float32Array,
   color: string,
+  meshNormals?: Float32Array | null,
 ): Readonly<{
   layer: THREE.Group | null;
   bindings: readonly MeasurementSurfaceGuideSceneBindingV1[];
@@ -308,7 +327,7 @@ export function createMeasurementSurfaceGuideLayerV1(
   layer.name = `measurement-guide:${guide.measurementName}`;
   const bindings: MeasurementSurfaceGuideSceneBindingV1[] = [];
   for (const path of guide.paths) {
-    const polyline = pathPolylineV1(path, meshPositions);
+    const polyline = measurementSurfaceGuidePolylineV1(path, meshPositions, meshNormals);
     if (!polyline) continue;
     const passes = measurementSurfaceGuidePassesV1(path).map((pass) => {
       const object = new LineSegments2(new LineSegmentsGeometry(), createPassMaterial(pass, color));
@@ -333,9 +352,10 @@ export function createMeasurementSurfaceGuideLayerV1(
 export function updateMeasurementSurfaceGuideLayerPositionsV1(
   bindings: readonly MeasurementSurfaceGuideSceneBindingV1[],
   meshPositions: Float32Array,
+  meshNormals?: Float32Array | null,
 ): void {
   for (const { path, passes } of bindings) {
-    const polyline = pathPolylineV1(path, meshPositions);
+    const polyline = measurementSurfaceGuidePolylineV1(path, meshPositions, meshNormals);
     if (!polyline) continue;
     for (const { pass, object } of passes) {
       writePassGeometry(object, pass, passSegments(pass, polyline));
@@ -375,26 +395,46 @@ export function measurementSurfaceGuideAirDatasetV1(
 
 export type MeasurementSurfaceGuideCameraViewV1 = 'back' | 'side';
 
-export type MeasurementSurfaceGuideCameraActionV1 = 'none' | 'turn' | 'restore' | 'forget';
+/** The focused field's camera view: its own back/side view, otherwise `front`. */
+export type MeasurementSurfaceGuideCameraTargetV1 = MeasurementSurfaceGuideCameraViewV1 | 'front';
+
+export type MeasurementSurfaceGuideCameraActionV1 =
+  | 'none'
+  | 'turn'
+  | 'restore'
+  | 'forget'
+  | 'front';
+
+/** Where the camera looks at the body from; `free` is an orbit of the owner's own. */
+export type MeasurementSurfaceGuideCameraFacingV1 = 'front' | 'back' | 'side' | 'free';
 
 /**
- * Per-field camera turn (approved mockup, variant C). Only the fields whose guide declares a view
- * turn the camera; blur restores the camera the owner left. Edit pose never moves the camera by
- * itself, and a camera the owner took over during a turn is not taken back on blur.
+ * Per-field camera turn (approved mockup, variant C). A field whose guide declares a back/side view
+ * turns the camera there; leaving it restores the camera the owner left. A focused field without a
+ * view faces the front again when the camera still looks from the back or side after the turn was
+ * let go (a tap on the stage, a blur in between); an orbit of the owner's own stays. Edit pose never
+ * moves the camera by itself, and a camera the owner took over during a turn is not taken back on
+ * blur.
  */
 export function measurementSurfaceGuideCameraActionV1(options: {
-  readonly targetView: MeasurementSurfaceGuideCameraViewV1 | null;
+  readonly targetView: MeasurementSurfaceGuideCameraTargetV1 | null;
   readonly turn: Readonly<{
     view: MeasurementSurfaceGuideCameraViewV1;
     ownerCameraSaved: boolean;
   }> | null;
   readonly editPose: boolean;
   readonly interactive: boolean;
+  readonly cameraFacing?: MeasurementSurfaceGuideCameraFacingV1;
 }): MeasurementSurfaceGuideCameraActionV1 {
-  const { targetView, turn, editPose, interactive } = options;
+  const { targetView, turn, editPose, interactive, cameraFacing = 'front' } = options;
   if (!interactive) return 'none';
   if (editPose) return turn ? 'forget' : 'none';
-  if (targetView) return turn?.view === targetView ? 'none' : 'turn';
-  if (!turn) return 'none';
-  return turn.ownerCameraSaved ? 'restore' : 'forget';
+  if (targetView === 'back' || targetView === 'side') {
+    return turn?.view === targetView ? 'none' : 'turn';
+  }
+  if (turn?.ownerCameraSaved) return 'restore';
+  if (targetView === 'front' && (cameraFacing === 'back' || cameraFacing === 'side')) {
+    return 'front';
+  }
+  return turn ? 'forget' : 'none';
 }

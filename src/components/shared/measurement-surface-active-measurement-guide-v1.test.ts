@@ -161,7 +161,8 @@ describe('active mannequin measurement guide v1', () => {
     expect(height).toMatchObject({ status: 'visible', label: 'height' });
     expect(height.paths[0]).toMatchObject({ source: 'fixed-points', closed: false });
     expect(posedHeight).toMatchObject({ status: 'unavailable-pose', paths: [] });
-    expect(inseam).toMatchObject({ status: 'unsupported', label: 'inseam', paths: [] });
+    // No HM08 crotch landmark on a cylinder: the inseam line needs the reference-mesh anchors.
+    expect(inseam).toMatchObject({ status: 'unavailable-section', label: 'inseam', paths: [] });
   });
 
   it.each(['BODY_MEASUREMENT_NAME_WAIST_HEIGHT'] as const)(
@@ -380,6 +381,7 @@ describe('active mannequin measurement guide v1', () => {
     'BODY_MEASUREMENT_NAME_ARMSCYE_CIRCUMFERENCE',
     'BODY_MEASUREMENT_NAME_BUST_APEX_TO_APEX',
     'BODY_MEASUREMENT_NAME_HPS_TO_BUST_APEX',
+    'BODY_MEASUREMENT_NAME_INSEAM',
   ] as const)('does not invent a missing landmark for %s', (name) => {
     expect(
       buildMeasurementSurfaceActiveMeasurementGuideV1({
@@ -388,6 +390,6 @@ describe('active mannequin measurement guide v1', () => {
         mesh: cylinderMesh(),
         neutralPose: true,
       }),
-    ).toMatchObject({ status: 'unsupported', paths: [] });
+    ).toMatchObject({ status: 'unavailable-section', paths: [] });
   });
 });
