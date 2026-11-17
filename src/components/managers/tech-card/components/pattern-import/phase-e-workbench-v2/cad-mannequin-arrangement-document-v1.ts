@@ -124,6 +124,17 @@ function boundedText(value: unknown, label: string, maximum: number): string {
   }
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) {
+        throw new RangeError(`${label} contains an unpaired UTF-16 surrogate.`);
+      }
+      index += 1;
+      continue;
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      throw new RangeError(`${label} contains an unpaired UTF-16 surrogate.`);
+    }
     if (code <= 0x08 || code === 0x0b || code === 0x0c || (code >= 0x0e && code <= 0x1f)) {
       throw new RangeError(`${label} contains a disallowed control character.`);
     }

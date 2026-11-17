@@ -240,6 +240,38 @@ describe('CAD mannequin arrangement document V1', () => {
     ).toThrow(/bounded/);
   });
 
+  it('rejects unpaired UTF-16 surrogates while preserving valid astral pairs', () => {
+    const loneHigh = String.fromCharCode(0xd83d);
+    const loneLow = String.fromCharCode(0xdc00);
+    const astral = String.fromCodePoint(0x1f680);
+    expect(() =>
+      create(undefined, {
+        ...BINDINGS,
+        mannequin: {
+          ...BINDINGS.mannequin,
+          modelFormRevisionKeyV1: `model-revision:${loneHigh}`,
+        },
+      }),
+    ).toThrow(/unpaired UTF-16 surrogate/);
+    expect(() =>
+      create(undefined, {
+        ...BINDINGS,
+        mannequin: {
+          ...BINDINGS.mannequin,
+          poseBinding: { canonicalKey: `pose:${loneLow}` },
+        },
+      }),
+    ).toThrow(/unpaired UTF-16 surrogate/);
+    expect(() => create([{ ...FRONT, pieceId: `front:${loneHigh}x${loneLow}` }])).toThrow(
+      /unpaired UTF-16 surrogate/,
+    );
+
+    const astralPiece = { ...FRONT, pieceId: `front:${astral}` };
+    const document = create([astralPiece]);
+    expect(document.pieces[0]?.pieceId).toBe(`front:${astral}`);
+    expect(parseCadMannequinArrangementDocumentV1(JSON.stringify(document))).toEqual(document);
+  });
+
   it('rejects unknown schemas, altered authority claims, malformed digests and malformed JSON', () => {
     const document = create();
     expect(() =>
