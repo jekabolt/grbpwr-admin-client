@@ -1,16 +1,10 @@
-import { createContext, ReactNode, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Text } from 'ui';
+import { createContext, ReactNode, useContext, useMemo, useState } from 'react';
 import { BODY_MEASUREMENT_GROUPS } from './measurements';
 
 export const MODEL_MEASUREMENTS = BODY_MEASUREMENT_GROUPS.flatMap((group) => group.measurements);
 
 const LABEL_BY_NAME = new Map(
   MODEL_MEASUREMENTS.map((measurement) => [measurement.name as string, measurement.label]),
-);
-const GROUP_BY_NAME = new Map(
-  BODY_MEASUREMENT_GROUPS.flatMap((group) =>
-    group.measurements.map((measurement) => [measurement.name as string, group.title] as const),
-  ),
 );
 
 export function shortMeasurementGroup(title: string): string {
@@ -55,49 +49,4 @@ export function useSheetMeasurementFocus() {
   const value = useContext(SheetMeasurementFocusContext);
   if (!value) throw new Error('no SheetMeasurementFocusProvider');
   return value;
-}
-
-// Phone hint while a measurement is typed. iOS opens the keyboard by shrinking only the VISIBLE
-// viewport and scrolling it inside the layout one, so a `sticky`/`fixed; top` strip drifts off the
-// top of the screen. The strip is pinned to `visualViewport.offsetTop` instead, written straight to
-// the node on every resize/scroll (as the note format bar does), and the focused field is scrolled
-// clear of it.
-export const MOBILE_STRIP_PX = 56;
-
-export function SheetMeasurementMobileStrip() {
-  const { focused } = useSheetMeasurementFocus();
-  const strip = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const vv = window.visualViewport;
-    const node = strip.current;
-    if (!focused || !vv || !node) return;
-    const place = () => {
-      node.style.top = `${vv.offsetTop}px`;
-    };
-    place();
-    vv.addEventListener('resize', place);
-    vv.addEventListener('scroll', place);
-    return () => {
-      vv.removeEventListener('resize', place);
-      vv.removeEventListener('scroll', place);
-    };
-  }, [focused]);
-
-  if (!focused) return null;
-
-  return (
-    <div
-      ref={strip}
-      style={{ height: MOBILE_STRIP_PX }}
-      className='fixed inset-x-0 top-0 z-[calc(var(--z-nav)+1)] flex items-center border-b border-borderColor bg-bgColor px-4 md:hidden'
-    >
-      <div className='min-w-0'>
-        <Text className='truncate text-textColor'>{measurementLabel(focused)}</Text>
-        <Text size='micro' variant='label' className='uppercase'>
-          {shortMeasurementGroup(GROUP_BY_NAME.get(focused) ?? '')}
-        </Text>
-      </div>
-    </div>
-  );
 }

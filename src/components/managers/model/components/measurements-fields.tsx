@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { flushSync } from 'react-dom';
 import { useController, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import {
   Button,
@@ -30,7 +31,6 @@ import { ModelFormData } from './schema';
 import { StaticMeasurementGuide } from './static-measurement-guide';
 import {
   measurementLabel,
-  MOBILE_STRIP_PX,
   MODEL_MEASUREMENTS,
   shortMeasurementGroup,
   useSheetMeasurementFocus,
@@ -95,13 +95,11 @@ function MeasurementInput({
   findings,
   onAdvance,
   prominent = false,
-  preserveViewportOnFocus = false,
 }: {
   name: string;
   findings: readonly ModelMeasurementFieldFindingV1[];
   onAdvance?: () => void;
   prominent?: boolean;
-  preserveViewportOnFocus?: boolean;
 }) {
   const { control } = useFormContext<ModelFormData>();
   const { field } = useController({ control, name: `measurements.${name}` });
@@ -146,7 +144,6 @@ function MeasurementInput({
         setFocused(name);
         setDraft(display);
         event.currentTarget.select();
-        if (!preserveViewportOnFocus) keepClearOfMobileStrip(event.currentTarget);
       }}
       onBlur={() => {
         setDraft(null);
@@ -289,17 +286,25 @@ export function MeasurementsHeaderActions({
   showAudit = false,
   mode,
   onModeChange,
+  extraWarnings = [],
 }: {
   showAudit?: boolean;
   mode?: MeasurementEntryModeV1;
   onModeChange?: (mode: MeasurementEntryModeV1) => void;
+  /** Warnings of a block merged into this header (the phone mannequin): one `! N` per block. */
+  extraWarnings?: readonly HeaderWarning[];
 }) {
   const audit = useMeasurementFieldAudit(showAudit);
   const { setFocus } = useSheetMeasurementFocus();
-  const warnings = buildMeasurementHeaderWarnings(audit, (name) => {
-    setFocus(name);
-    window.requestAnimationFrame(() => document.getElementById(measurementInputId(name))?.focus());
-  });
+  const warnings = [
+    ...buildMeasurementHeaderWarnings(audit, (name) => {
+      setFocus(name);
+      window.requestAnimationFrame(() =>
+        document.getElementById(measurementInputId(name))?.focus(),
+      );
+    }),
+    ...extraWarnings,
+  ];
   return (
     <div className='flex flex-wrap items-center justify-end gap-2'>
       {mode && onModeChange ? (
@@ -439,6 +444,80 @@ export function firstMeasurementWithErrorV1(
   return first ? { groupIndex: measurementGroupIndex(first.name), name: first.name } : null;
 }
 
+/** The field the phone bar's ‹ / › moves to, across group boundaries; null past either end. */
+export function measurementStepV1(
+  name: string,
+  direction: -1 | 1,
+): { groupIndex: number; name: string } | null {
+  const index = MODEL_MEASUREMENTS.findIndex((measurement) => measurement.name === name);
+  if (index < 0) return null;
+  const next = MODEL_MEASUREMENTS[index + direction];
+  return next ? { groupIndex: measurementGroupIndex(next.name), name: next.name } : null;
+}
+
+/** `torso · 1/6`: the group as the group switch names it, and the field's place in that group. */
+export function measurementDockGroupLabelV1(name: string): string {
+  const group = BODY_MEASUREMENT_GROUPS[measurementGroupIndex(name)];
+  if (!group) return '';
+  const position = group.measurements.findIndex((measurement) => measurement.name === name) + 1;
+  return `${groupSwitchLabel(group.title)} · ${position}/${group.measurements.length}`;
+}
+
+const keepKeyboardOpen = (event: ReactPointerEvent<HTMLButtonElement>) => event.preventDefault();
+
+/**
+ * Phone bar right above the keyboard while a field is typed: ‹ · group / label · value · ›. The
+ * focused input itself is placed into the value slot (sheet-model-form.css), so the caret, the
+ * selection and the digit pad stay the real field's. The iPhone digit pad has no Return key: ›
+ * is the way forward and is never disabled; on the very last field it closes the keyboard.
+ */
+function PhoneMeasurementDock({
+  name,
+  onStep,
+}: {
+  name: string;
+  onStep: (direction: -1 | 1) => void;
+}) {
+  return (
+    <div
+      data-mq-phone-dock=''
+      data-testid='model-measurement-phone-dock'
+      className='fixed inset-x-0 z-[calc(var(--z-nav)+2)] grid grid-cols-[3rem_minmax(0,1fr)_6.875rem_3rem] items-center gap-2 border-t border-textColor bg-bgColor px-2'
+    >
+      <Button
+        type='button'
+        variant='secondary'
+        className='h-11'
+        aria-label='previous field'
+        disabled={!measurementStepV1(name, -1)}
+        onPointerDown={keepKeyboardOpen}
+        onClick={() => onStep(-1)}
+      >
+        ‹
+      </Button>
+      <div className='min-w-0'>
+        <Text component='p' size='micro' variant='label' className='uppercase tabular-nums'>
+          {measurementDockGroupLabelV1(name)}
+        </Text>
+        <Text component='p' className='truncate text-textColor'>
+          {measurementLabel(name)}
+        </Text>
+      </div>
+      <span aria-hidden='true' />
+      <Button
+        type='button'
+        variant='secondary'
+        className='h-11'
+        aria-label='next field'
+        onPointerDown={keepKeyboardOpen}
+        onClick={() => onStep(1)}
+      >
+        ›
+      </Button>
+    </div>
+  );
+}
+
 function GroupedMeasurementRow({
   name,
   findings,
@@ -482,7 +561,14 @@ function GroupedMeasurementRow({
  * into the next group's first field and Shift+Tab goes back; a field selected from elsewhere (a
  * header warning, the guided view) or the first error after a submit opens its own group.
  */
-export function MeasurementsGroupedTable({ showAudit = false }: { showAudit?: boolean }) {
+export function MeasurementsGroupedTable({
+  showAudit = false,
+  phoneTypingName,
+}: {
+  showAudit?: boolean;
+  /** Phone layout only: the field being typed (null when none); shows the bar above the keyboard. */
+  phoneTypingName?: string | null;
+}) {
   const values = useMeasurements();
   const audit = useMeasurementFieldAudit(showAudit);
   const { selected } = useSheetMeasurementFocus();
@@ -527,6 +613,19 @@ export function MeasurementsGroupedTable({ showAudit = false }: { showAudit?: bo
     const index = MODEL_MEASUREMENTS.findIndex((measurement) => measurement.name === name);
     const next = MODEL_MEASUREMENTS[index + 1];
     if (next) open(measurementGroupIndex(next.name), next.name);
+  };
+
+  // The bar's ‹ / ›: the next field is focused inside the tap, so the open keyboard stays open
+  // (iOS keeps it only for a focus made in the gesture); its group is rendered visible first.
+  const step = (direction: -1 | 1) => {
+    if (!phoneTypingName) return;
+    const target = measurementStepV1(phoneTypingName, direction);
+    if (!target) {
+      if (direction === 1) document.getElementById(measurementInputId(phoneTypingName))?.blur();
+      return;
+    }
+    flushSync(() => setGroupIndex(target.groupIndex));
+    document.getElementById(measurementInputId(target.name))?.focus({ preventScroll: true });
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -580,6 +679,7 @@ export function MeasurementsGroupedTable({ showAudit = false }: { showAudit?: bo
           </div>
         ))}
       </div>
+      {phoneTypingName ? <PhoneMeasurementDock name={phoneTypingName} onStep={step} /> : null}
     </div>
   );
 }
@@ -684,7 +784,6 @@ export function MeasurementsQuiz({
               name={name}
               findings={findings}
               prominent
-              preserveViewportOnFocus
               onAdvance={() => (atLast ? onComplete() : move(activeIndex + 1))}
             />
             <MeasurementFindingList name={name} findings={findings} />
@@ -719,16 +818,4 @@ export function MeasurementsQuiz({
       </div>
     </div>
   );
-}
-
-// On a phone the hint strip covers the top of the visible viewport; once the keyboard has settled,
-// move a field that ended up under it down into view.
-function keepClearOfMobileStrip(input: HTMLInputElement) {
-  const vv = window.visualViewport;
-  if (!vv || window.matchMedia('(min-width: 768px)').matches) return;
-  window.setTimeout(() => {
-    const top = input.getBoundingClientRect().top - vv.offsetTop;
-    const clear = MOBILE_STRIP_PX + 12;
-    if (top < clear) window.scrollBy({ top: top - clear });
-  }, 300);
 }
