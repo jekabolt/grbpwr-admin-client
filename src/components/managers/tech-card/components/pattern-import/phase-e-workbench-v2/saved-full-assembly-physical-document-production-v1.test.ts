@@ -176,7 +176,7 @@ function freshSnapshot(
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   mocks.isCurrentHostContext.mockReturnValue(true);
   mocks.createStorage.mockReturnValue({ persist: mocks.persist });
   mocks.readSnapshot.mockResolvedValue({ receipt: 'genuine' });
@@ -394,5 +394,23 @@ describe('saved full-assembly physical document production consumer', () => {
       writeOutcome: 'acknowledged-unverified',
       blockers: [{ code: 'host-context-drift' }],
     });
+  });
+
+  it.each([
+    { ok: true, writeOutcome: 'verified', expected: 'acknowledged-unverified' },
+    { ok: false, writeOutcome: 'unknown', expected: 'unknown' },
+  ])('preserves $expected when cancelled after storage returns', async (stored) => {
+    const controller = new AbortController();
+    mocks.projectHost.mockResolvedValue({ ok: true, context: context() });
+    mocks.persist.mockImplementation(async () => {
+      controller.abort();
+      return { ...stored, receipt: {}, blockers: [] };
+    });
+
+    const result = await persistCurrentSavedGenericObservedPhysicalHostV1({}, 4, controller.signal);
+
+    expect(mocks.persist).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ ok: false, writeOutcome: stored.expected });
+    expect(mocks.verifyV7).not.toHaveBeenCalled();
   });
 });

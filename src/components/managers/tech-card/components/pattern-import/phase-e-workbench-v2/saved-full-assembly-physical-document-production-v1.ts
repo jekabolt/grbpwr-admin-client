@@ -401,7 +401,6 @@ export async function persistCurrentSavedGenericObservedPhysicalHostV1(
       },
       controller.signal,
     );
-    checkSignal(controller.signal);
     if (!stored.ok && stored.writeOutcome === 'not-attempted')
       return blocked(
         new PhysicalDocumentPersistenceFailureV1(
@@ -411,6 +410,9 @@ export async function persistCurrentSavedGenericObservedPhysicalHostV1(
         stored.writeOutcome,
       );
     try {
+      // Once storage has dispatched the write, cancellation cannot mean it was never attempted.
+      // Keep its outcome even when the source/body is replaced before durable readback.
+      checkSignal(controller.signal);
       const receipt = await verifyDurableReadback(prepared, next.encoded, controller.signal);
       if (
         !isCurrentSavedGenericObservedPhysicalHostPersistenceContextV1(
