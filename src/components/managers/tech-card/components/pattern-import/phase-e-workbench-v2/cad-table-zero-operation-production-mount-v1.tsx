@@ -295,14 +295,12 @@ export function resolvePatternImportDxfPhaseECadTableZeroOperationVisibleBlocker
   currentSavedCardGate: PatternImportDxfPhaseECurrentSavedCardGateResultV1 | null;
 }): VisibleBlocker | null {
   if (input.savedCardGateLoading) return null;
-  if (
-    input.techCardId &&
-    input.preparationBlocker?.code === 'fresh-session-invalid' &&
-    input.currentSavedCardGate?.ok
-  )
+  if (input.techCardId && input.preparationBlocker?.code === 'fresh-session-invalid') {
+    if (!input.currentSavedCardGate) return null;
     return input.currentSavedCardGate.choices.ok
       ? null
       : input.currentSavedCardGate.choices.blocker;
+  }
   return input.preparationBlocker;
 }
 
@@ -718,17 +716,6 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     resolvedSource: null,
     resolvedSavedCard: null,
   }));
-  const preparationGenerationOwner = useMemo(
-    createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1,
-    [],
-  );
-  useEffect(
-    () => () => {
-      preparationGenerationOwner.dispose();
-    },
-    [preparationGenerationOwner],
-  );
-
   useEffect(() => {
     if (!choices.ok || !scopeKey || !sizeToken) {
       setPreparation({
@@ -756,6 +743,11 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     }
     let current = true;
     const controller = new AbortController();
+    // The owner belongs to this preparation attempt. A component-wide memo is unsafe in React
+    // StrictMode because its effect cleanup is intentionally replayed while the same memoized
+    // object remains mounted, leaving the next setup with an already disposed owner.
+    const preparationGenerationOwner =
+      createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1();
     const generationTicket =
       useFreshSession && cardSession
         ? preparationGenerationOwner.beginFresh(preparationKey, generation)
@@ -834,6 +826,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
       current = false;
       controller.abort();
       preparationGenerationOwner.invalidate(generationTicket);
+      preparationGenerationOwner.dispose();
     };
   }, [
     cardSession,
@@ -841,7 +834,6 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     effectiveSavedCard,
     generation,
     orderSizeIds,
-    preparationGenerationOwner,
     preparationKey,
     savedAuthority,
     scopeKey,

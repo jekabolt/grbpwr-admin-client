@@ -299,6 +299,44 @@ describe('zero-operation current saved-card gate', () => {
     expect(blocker).toBeNull();
   });
 
+  it('never renders a fresh-session blocker when the authoritative saved-card read fails', () => {
+    const techCardId = 6;
+    const savedReadBlocker = {
+      ok: false as const,
+      techCard: null,
+      hasCompleteSavedDxfRow: null,
+      choices: {
+        ok: false as const,
+        techCardId,
+        choices: Object.freeze([]) as readonly [],
+        blocker: {
+          code: 'saved-card-current-read-failed' as const,
+          detail: 'The current saved card could not be read before opening the table.',
+        },
+      },
+    };
+    const blocker = resolvePatternImportDxfPhaseECadTableZeroOperationVisibleBlockerV1({
+      techCardId,
+      savedCardGateLoading: false,
+      preparationBlocker: { code: 'fresh-session-invalid', detail: FRESH_DETAIL },
+      currentSavedCardGate: savedReadBlocker,
+    });
+
+    expect(blocker).toMatchObject({ code: 'saved-card-current-read-failed' });
+    expect(JSON.stringify(blocker)).not.toContain(FRESH_DETAIL);
+  });
+
+  it('keeps the internal fresh-session blocker hidden until the saved-card gate settles', () => {
+    const blocker = resolvePatternImportDxfPhaseECadTableZeroOperationVisibleBlockerV1({
+      techCardId: 6,
+      savedCardGateLoading: false,
+      preparationBlocker: { code: 'fresh-session-invalid', detail: FRESH_DETAIL },
+      currentSavedCardGate: null,
+    });
+
+    expect(blocker).toBeNull();
+  });
+
   it('admits a valid fresh session only after the current card proves it has no saved DXF', async () => {
     const techCardId = 6;
     const sizeNameById = new Map([[7, 'M']]);
