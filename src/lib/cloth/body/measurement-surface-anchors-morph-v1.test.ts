@@ -63,6 +63,15 @@ const HONEST_CODES: readonly SurfaceAnchorFailureCodeV1[] = Object.freeze([
   'height-order-broken',
 ]);
 
+/**
+ * Pinned outcomes in both directions. Female "large" is a known honest failure of the 10 mm
+ * underarm band (13.5 mm, coordinator decision 2026-11-17: keep the band, keep the failure). If it
+ * starts passing, or any other end starts failing, this test must notice.
+ */
+const KNOWN_FAILURES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  'female:canonical-size-large': Object.freeze(['underarm-l', 'underarm-r']),
+});
+
 async function shapedMesh(
   kind: 'female' | 'neutral' | 'male',
   record: (typeof CANONICAL_MEASUREMENT_SIZE_RECORDS)[number],
@@ -124,6 +133,14 @@ describe('measurement surface anchors v1 under the beta shape morph', () => {
               : full.failures.map((failure) => [failure.id, failure.code, failure.distanceMm]),
           )}`,
         );
+
+        const knownFailure = KNOWN_FAILURES[`${kind}:${record.id}`];
+        expect(full.ok, `${kind} ${record.id}`).toBe(!knownFailure);
+        if (knownFailure && !full.ok) {
+          expect(full.code).toBe('anchor-check-failed');
+          expect(full.failures.map((failure) => failure.id).sort()).toEqual([...knownFailure]);
+          for (const failure of full.failures) expect(failure.distanceMm).toBeGreaterThan(10);
+        }
 
         if (full.ok) {
           // Never ok on a broken order: re-check the order on the returned rule positions.

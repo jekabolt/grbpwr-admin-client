@@ -92,6 +92,10 @@ export const SURFACE_ANCHOR_TABLE_V1: readonly SurfaceAnchorV1[] = Object.freeze
     id: 'underarm-l',
     rule: 'last-3-loop-gap-midpoint/left',
     template: meshSurfaceEdgePointV1(8336, 8340, 0.4),
+    // Known honest failure, kept on purpose (coordinator decision 2026-11-17): on the beta shape
+    // runtime at the canonical "large" size (1900 mm) the female underarm rule lands 13.5 mm from
+    // this template, so the check fails there; neutral/male "large" sit at 9.1/9.2 mm. The band is
+    // not widened without data. Pinned in measurement-surface-anchors-morph-v1.test.ts.
     checkBandMm: 10,
     class: 'robust',
   }),
