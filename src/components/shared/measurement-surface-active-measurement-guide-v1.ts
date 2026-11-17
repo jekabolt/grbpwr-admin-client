@@ -1,6 +1,6 @@
 import type { common_BodyMeasurementName } from 'api/proto-http/admin';
 import type { MeasurementBodyFrameV2 } from 'lib/cloth/body/measurement-body-frame-v2';
-import { MEASUREMENT_OPEN_REFERENCE_HIGH_HIP_PROTOCOL_WAIST_DROP_MM_V1 } from 'lib/cloth/body/measurement-open-reference-high-hip-proxy-v1';
+import { resolveMeasurementOpenReferenceHighHipStationV1 } from 'lib/cloth/body/measurement-open-reference-high-hip-proxy-v1';
 import type { MeasurementOpenReferenceKneeRigStationV1 } from 'lib/cloth/body/measurement-open-reference-knee-proxy-v1';
 import type {
   OpenReferenceLimbCircumferenceKeyV1,
@@ -18,6 +18,7 @@ export const MEASUREMENT_SURFACE_ACTIVE_MEASUREMENT_GUIDE_V1 =
 
 export type MeasurementSurfaceMeasurementGuideStatusV1 =
   | 'visible'
+  | 'limited'
   | 'unavailable-pose'
   | 'unavailable-section'
   | 'unsupported';
@@ -170,6 +171,17 @@ function sectionPath(options: {
   readonly seedM?: Vec3;
   readonly bindToMesh: boolean;
 }): MeasurementSurfaceMeasurementGuidePathV1 | null {
+  const loop = sectionLoop(options);
+  if (!loop) return null;
+  return pathFromSectionLoop(options.id, options.mesh, loop, options.bindToMesh);
+}
+
+function sectionLoop(options: {
+  readonly mesh: MeasurementSurfaceMeshV1;
+  readonly originM: Vec3;
+  readonly normal: Vec3;
+  readonly seedM?: Vec3;
+}): MeshPlaneSectionLoopV1 | null {
   const section = measureMeshPlaneSectionPerimetersV1({
     positionsM: options.mesh.positions,
     triangleIndices: options.mesh.indices,
@@ -179,7 +191,7 @@ function sectionPath(options: {
     policy: { weldToleranceM: 0.00002 },
   });
   if (!section.ok || !section.selectedLoop) return null;
-  return pathFromSectionLoop(options.id, options.mesh, section.selectedLoop, options.bindToMesh);
+  return section.selectedLoop;
 }
 
 const GUIDE_SURFACE_OFFSET_M = 0.002;
@@ -213,8 +225,143 @@ function subtract(a: Vec3, b: Vec3): Vec3 {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 }
 
+function cross(a: Vec3, b: Vec3): Vec3 {
+  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+}
+
 function mix(a: Vec3, b: Vec3, t: number): Vec3 {
   return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+}
+
+interface LoopAnchor {
+  readonly segment: number;
+  readonly t: number;
+  readonly pointM: Vec3;
+}
+
+function loopCoordinateAnchor(
+  pointsM: readonly Vec3[],
+  coordinate: 0 | 1 | 2,
+  value: number,
+  zSide: -1 | 1,
+): LoopAnchor | null {
+  const candidates: LoopAnchor[] = [];
+  for (let segment = 0; segment < pointsM.length; segment += 1) {
+    const start = pointsM[segment];
+    const end = pointsM[(segment + 1) % pointsM.length];
+    const delta = end[coordinate] - start[coordinate];
+    if (Math.abs(delta) <= Number.EPSILON) continue;
+    const t = (value - start[coordinate]) / delta;
+    if (t < -1e-9 || t > 1 + 1e-9) continue;
+    candidates.push({
+      segment,
+      t: Math.min(1, Math.max(0, t)),
+      pointM: mix(start, end, Math.min(1, Math.max(0, t))),
+    });
+  }
+  if (candidates.length === 0) return null;
+  return candidates.reduce((best, candidate) =>
+    zSide * candidate.pointM[2] > zSide * best.pointM[2] ? candidate : best,
+  );
+}
+
+function dedupeAdjacentPoints(pointsM: readonly Vec3[]): readonly Vec3[] {
+  return pointsM.filter((point, index) => {
+    const previous = pointsM[index - 1];
+    return !previous || Math.hypot(...subtract(point, previous)) > 1e-9;
+  });
+}
+
+function forwardLoopArc(
+  pointsM: readonly Vec3[],
+  start: LoopAnchor,
+  end: LoopAnchor,
+): readonly Vec3[] {
+  if (start.segment === end.segment && end.t >= start.t) {
+    return dedupeAdjacentPoints([start.pointM, end.pointM]);
+  }
+  const result: Vec3[] = [start.pointM];
+  let segment = start.segment;
+  for (let traversed = 0; traversed <= pointsM.length; traversed += 1) {
+    result.push(pointsM[(segment + 1) % pointsM.length]);
+    segment = (segment + 1) % pointsM.length;
+    if (segment === end.segment) {
+      result.push(end.pointM);
+      return dedupeAdjacentPoints(result);
+    }
+  }
+  return [];
+}
+
+function selectSidedLoopArc(
+  pointsM: readonly Vec3[],
+  start: LoopAnchor,
+  end: LoopAnchor,
+  zSide: -1 | 1,
+): readonly Vec3[] {
+  const forward = forwardLoopArc(pointsM, start, end);
+  const backward = [...forwardLoopArc(pointsM, end, start)].reverse();
+  const sideScore = (points: readonly Vec3[]) =>
+    points.reduce((minimum, point) => Math.min(minimum, zSide * point[2]), Infinity);
+  return sideScore(forward) >= sideScore(backward) ? forward : backward;
+}
+
+function offsetSectionPolylinePointsM(
+  pointsM: readonly Vec3[],
+  planeNormal: Vec3,
+  zSide: -1 | 1,
+): readonly Vec3[] {
+  return pointsM.map((point, index) => {
+    const previous = pointsM[Math.max(0, index - 1)];
+    const next = pointsM[Math.min(pointsM.length - 1, index + 1)];
+    const tangent = subtract(next, previous);
+    let normal = cross(planeNormal, tangent);
+    const length = Math.hypot(...normal);
+    if (length <= Number.EPSILON) return point;
+    normal = [normal[0] / length, normal[1] / length, normal[2] / length];
+    if (zSide * normal[2] < 0) {
+      normal = [-normal[0], -normal[1], -normal[2]];
+    }
+    return [
+      point[0] + normal[0] * GUIDE_SURFACE_OFFSET_M,
+      point[1] + normal[1] * GUIDE_SURFACE_OFFSET_M,
+      point[2] + normal[2] * GUIDE_SURFACE_OFFSET_M,
+    ];
+  });
+}
+
+function sidedSectionArcPath(options: {
+  readonly id: string;
+  readonly mesh: MeasurementSurfaceMeshV1;
+  readonly originM: Vec3;
+  readonly normal: Vec3;
+  readonly seedM: Vec3;
+  readonly coordinate: 0 | 1 | 2;
+  readonly startValue: number;
+  readonly endValue: number;
+  readonly zSide: -1 | 1;
+  readonly bindToMesh: boolean;
+}): MeasurementSurfaceMeasurementGuidePathV1 | null {
+  const loop = sectionLoop(options);
+  if (!loop) return null;
+  const start = loopCoordinateAnchor(
+    loop.pointsM,
+    options.coordinate,
+    options.startValue,
+    options.zSide,
+  );
+  const end = loopCoordinateAnchor(
+    loop.pointsM,
+    options.coordinate,
+    options.endValue,
+    options.zSide,
+  );
+  if (!start || !end) return null;
+  const pointsM = selectSidedLoopArc(loop.pointsM, start, end, options.zSide);
+  if (pointsM.length < 2) return null;
+  return options.bindToMesh
+    ? vertexPath(options.id, options.mesh, pointsM, false)
+    : fixedPath(options.id, offsetSectionPolylinePointsM(pointsM, options.normal, options.zSide));
 }
 
 function segmentExtremumSectionPath(options: {
@@ -281,15 +428,16 @@ function fixedPath(
   });
 }
 
-function visibleOrUnavailable(
+function drawnOrUnavailable(
   measurementName: common_BodyMeasurementName,
+  status: 'visible' | 'limited',
   paths: readonly (MeasurementSurfaceMeasurementGuidePathV1 | null)[],
 ) {
-  const visible = paths.filter(
+  const drawn = paths.filter(
     (path): path is MeasurementSurfaceMeasurementGuidePathV1 => path !== null,
   );
-  return visible.length > 0
-    ? result(measurementName, 'visible', visible)
+  return drawn.length > 0
+    ? result(measurementName, status, drawn)
     : result(measurementName, 'unavailable-section');
 }
 
@@ -326,24 +474,17 @@ export function buildMeasurementSurfaceActiveMeasurementGuideV1(options: {
   const underBustY = options.torsoSectionStations?.underBust?.[1];
   const waistY = options.torsoSectionStations?.waist?.[1] ?? waist?.yM;
   const hipY = options.torsoSectionStations?.hip?.[1] ?? hip?.yM;
-  // Same protocol station as the high-hip proxy: `waistToHighHipMm` (default 100 mm) below the
-  // waist, strictly above the hip. The runtime station wins when the proxy resolved one.
-  const highHipDropMm =
-    frame.measurements.waistToHighHipMm ??
-    MEASUREMENT_OPEN_REFERENCE_HIGH_HIP_PROTOCOL_WAIST_DROP_MM_V1;
-  const protocolHighHipY =
-    waistY !== undefined && Number.isFinite(highHipDropMm) && highHipDropMm > 0
-      ? waistY - highHipDropMm / 1000
-      : undefined;
+  const highHipStationResolution =
+    waistY !== undefined && hipY !== undefined
+      ? resolveMeasurementOpenReferenceHighHipStationV1({
+          waistStationOriginM: options.torsoSectionStations?.waist ?? [0, waistY, 0],
+          hipStationOriginM: options.torsoSectionStations?.hip ?? [0, hipY, 0],
+          waistToHighHipMm: frame.measurements.waistToHighHipMm,
+        })
+      : null;
   const highHipY =
     options.torsoSectionStations?.highHip?.[1] ??
-    (protocolHighHipY !== undefined &&
-    waistY !== undefined &&
-    hipY !== undefined &&
-    hipY < protocolHighHipY &&
-    protocolHighHipY < waistY
-      ? protocolHighHipY
-      : undefined);
+    (highHipStationResolution?.ok ? highHipStationResolution.station.originM[1] : undefined);
   if (measurementName === 'BODY_MEASUREMENT_NAME_HIGH_HIP' && highHipY === undefined) {
     return result(measurementName, 'unavailable-section');
   }
@@ -370,7 +511,11 @@ export function buildMeasurementSurfaceActiveMeasurementGuideV1(options: {
               ? hipY
               : undefined;
   if (torsoY !== undefined) {
-    return visibleOrUnavailable(measurementName, [
+    const status =
+      measurementName === 'BODY_MEASUREMENT_NAME_UNDER_BUST' && underBustY === undefined
+        ? 'limited'
+        : 'visible';
+    return drawnOrUnavailable(measurementName, status, [
       torsoSectionPath({
         id: measurementName,
         mesh,
@@ -389,7 +534,7 @@ export function buildMeasurementSurfaceActiveMeasurementGuideV1(options: {
           ? hip
           : null;
   if (depthStation) {
-    return visibleOrUnavailable(measurementName, [
+    return drawnOrUnavailable(measurementName, 'limited', [
       vertexPath(
         measurementName,
         mesh,
@@ -403,23 +548,7 @@ export function buildMeasurementSurfaceActiveMeasurementGuideV1(options: {
   }
 
   if (measurementName === 'BODY_MEASUREMENT_NAME_NECK_BASE') {
-    let minimumY = Number.POSITIVE_INFINITY;
-    let maximumY = Number.NEGATIVE_INFINITY;
-    for (let offset = 1; offset < mesh.positions.length; offset += 3) {
-      minimumY = Math.min(minimumY, mesh.positions[offset]);
-      maximumY = Math.max(maximumY, mesh.positions[offset]);
-    }
-    return visibleOrUnavailable(measurementName, [
-      segmentExtremumSectionPath({
-        id: measurementName,
-        mesh,
-        aM: [0, minimumY, 0],
-        bM: [0, maximumY, 0],
-        range: [0.84, 0.9],
-        select: 'minimum',
-        bindToMesh: !options.neutralPose,
-      }),
-    ]);
+    return result(measurementName, 'unsupported');
   }
 
   const limbConfig =
@@ -452,7 +581,7 @@ export function buildMeasurementSurfaceActiveMeasurementGuideV1(options: {
             }).find(({ side }) => side === 'positive')
           : undefined;
     const segment = frame.segments.find(({ id }) => id === limbConfig.segmentId);
-    return visibleOrUnavailable(measurementName, [
+    return drawnOrUnavailable(measurementName, 'visible', [
       admittedStation
         ? sectionPath({
             id: measurementName,
@@ -485,7 +614,7 @@ export function buildMeasurementSurfaceActiveMeasurementGuideV1(options: {
   ) {
     const path = vertexPath(measurementName, mesh, [shoulderLeft, shoulderRight], false);
     if (!path && !options.neutralPose) return result(measurementName, 'unavailable-pose');
-    return result(measurementName, 'visible', [
+    return result(measurementName, 'limited', [
       path ?? fixedPath(measurementName, [shoulderLeft, shoulderRight]),
     ]);
   }
@@ -519,80 +648,58 @@ export function buildMeasurementSurfaceActiveMeasurementGuideV1(options: {
     if (!shoulderLeft || !elbow || !wrist) return result(measurementName, 'unavailable-section');
     const path = vertexPath(measurementName, mesh, [shoulderLeft, elbow, wrist], false);
     if (!path && !options.neutralPose) return result(measurementName, 'unavailable-pose');
-    return result(measurementName, 'visible', [
+    return result(measurementName, 'limited', [
       path ?? fixedPath(measurementName, [shoulderLeft, elbow, wrist]),
     ]);
   }
 
-  if (measurementName === 'BODY_MEASUREMENT_NAME_ACROSS_FRONT' && chest) {
-    return visibleOrUnavailable(measurementName, [
-      vertexPath(
-        measurementName,
+  if (
+    (measurementName === 'BODY_MEASUREMENT_NAME_ACROSS_FRONT' ||
+      measurementName === 'BODY_MEASUREMENT_NAME_ACROSS_BACK') &&
+    chest &&
+    chestY !== undefined
+  ) {
+    const zSide = measurementName === 'BODY_MEASUREMENT_NAME_ACROSS_FRONT' ? 1 : -1;
+    return drawnOrUnavailable(measurementName, 'limited', [
+      sidedSectionArcPath({
+        id: measurementName,
         mesh,
-        [
-          [-chest.halfWidthM * 0.78, chest.yM, chest.halfDepthM],
-          [chest.halfWidthM * 0.78, chest.yM, chest.halfDepthM],
-        ],
-        false,
-      ),
+        originM: [0, chestY, 0],
+        normal: [0, 1, 0],
+        seedM: [0, chestY, zSide * chest.halfDepthM],
+        coordinate: 0,
+        startValue: -chest.halfWidthM * 0.78,
+        endValue: chest.halfWidthM * 0.78,
+        zSide,
+        bindToMesh: !options.neutralPose,
+      }),
     ]);
   }
-  if (measurementName === 'BODY_MEASUREMENT_NAME_ACROSS_BACK' && chest) {
-    return visibleOrUnavailable(measurementName, [
-      vertexPath(
-        measurementName,
-        mesh,
-        [
-          [-chest.halfWidthM * 0.78, chest.yM, -chest.halfDepthM],
-          [chest.halfWidthM * 0.78, chest.yM, -chest.halfDepthM],
-        ],
-        false,
-      ),
-    ]);
+  if (measurementName === 'BODY_MEASUREMENT_NAME_HPS_TO_WAIST_FRONT') {
+    return result(measurementName, 'unsupported');
   }
-  if (measurementName === 'BODY_MEASUREMENT_NAME_HPS_TO_WAIST_FRONT' && waist) {
+  if (
+    (measurementName === 'BODY_MEASUREMENT_NAME_CF_NECK_TO_WAIST' ||
+      measurementName === 'BODY_MEASUREMENT_NAME_CB_NECK_TO_WAIST') &&
+    waist &&
+    waistY !== undefined
+  ) {
     const neckBase = landmark(frame, 'neck-base');
     if (!neckBase) return result(measurementName, 'unavailable-section');
-    return visibleOrUnavailable(measurementName, [
-      vertexPath(
-        measurementName,
+    const zSide = measurementName === 'BODY_MEASUREMENT_NAME_CF_NECK_TO_WAIST' ? 1 : -1;
+    return drawnOrUnavailable(measurementName, 'limited', [
+      sidedSectionArcPath({
+        id: measurementName,
         mesh,
-        [
-          [neckBase[0], neckBase[1], shoulder?.halfDepthM ?? 0],
-          [0, waist.yM, waist.halfDepthM],
-        ],
-        false,
-      ),
-    ]);
-  }
-  if (measurementName === 'BODY_MEASUREMENT_NAME_CF_NECK_TO_WAIST' && waist) {
-    const neckBase = landmark(frame, 'neck-base');
-    if (!neckBase) return result(measurementName, 'unavailable-section');
-    return visibleOrUnavailable(measurementName, [
-      vertexPath(
-        measurementName,
-        mesh,
-        [
-          [0, neckBase[1], shoulder?.halfDepthM ?? 0],
-          [0, waist.yM, waist.halfDepthM],
-        ],
-        false,
-      ),
-    ]);
-  }
-  if (measurementName === 'BODY_MEASUREMENT_NAME_CB_NECK_TO_WAIST' && waist) {
-    const neckBase = landmark(frame, 'neck-base');
-    if (!neckBase) return result(measurementName, 'unavailable-section');
-    return visibleOrUnavailable(measurementName, [
-      vertexPath(
-        measurementName,
-        mesh,
-        [
-          [0, neckBase[1], -(shoulder?.halfDepthM ?? 0)],
-          [0, waist.yM, -waist.halfDepthM],
-        ],
-        false,
-      ),
+        originM: [0, (neckBase[1] + waistY) / 2, 0],
+        normal: [1, 0, 0],
+        seedM: [0, (neckBase[1] + waistY) / 2, zSide * (shoulder?.halfDepthM ?? 0.1)],
+        coordinate: 1,
+        startValue: neckBase[1],
+        endValue: waistY,
+        zSide,
+        bindToMesh: !options.neutralPose,
+      }),
     ]);
   }
 
@@ -602,21 +709,17 @@ export function buildMeasurementSurfaceActiveMeasurementGuideV1(options: {
     waist &&
     hip
   ) {
-    const t = measurementName === 'BODY_MEASUREMENT_NAME_WAIST_TO_HIGH_HIP' ? 0.45 : 1;
-    return visibleOrUnavailable(measurementName, [
-      vertexPath(
-        measurementName,
-        mesh,
-        [
-          [waist.halfWidthM, waist.yM, 0],
-          [
-            waist.halfWidthM + (hip.halfWidthM - waist.halfWidthM) * t,
-            waist.yM + (hip.yM - waist.yM) * t,
-            0,
-          ],
-        ],
-        false,
-      ),
+    if (!options.neutralPose) return result(measurementName, 'unavailable-pose');
+    const endY = measurementName === 'BODY_MEASUREMENT_NAME_WAIST_TO_HIGH_HIP' ? highHipY : hipY;
+    if (waistY === undefined || endY === undefined) {
+      return result(measurementName, 'unavailable-section');
+    }
+    const offsetX = Math.max(waist.halfWidthM, hip.halfWidthM) + 0.1;
+    return result(measurementName, 'limited', [
+      fixedPath(measurementName, [
+        [offsetX, waistY, 0],
+        [offsetX, endY, 0],
+      ]),
     ]);
   }
 

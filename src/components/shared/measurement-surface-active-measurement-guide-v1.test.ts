@@ -16,6 +16,10 @@ function cylinderMesh(heightM = 1.72): MeasurementSurfaceMeshV1 {
       positions.push(Math.cos(angle) * 0.32, y, Math.sin(angle) * 0.24);
     }
   }
+  const bottomCenter = positions.length / 3;
+  positions.push(0, 0, 0);
+  const topCenter = positions.length / 3;
+  positions.push(0, heightM, 0);
   const indices: number[] = [];
   for (let ring = 0; ring < rings; ring += 1) {
     for (let side = 0; side < sides; side += 1) {
@@ -26,6 +30,12 @@ function cylinderMesh(heightM = 1.72): MeasurementSurfaceMeshV1 {
       const d = (ring + 1) * sides + next;
       indices.push(a, c, b, b, c, d);
     }
+  }
+  for (let side = 0; side < sides; side += 1) {
+    const next = (side + 1) % sides;
+    const topRing = rings * sides;
+    indices.push(bottomCenter, next, side);
+    indices.push(topCenter, topRing + side, topRing + next);
   }
   const positionArray = Float32Array.from(positions);
   const indexArray = Uint32Array.from(indices);
@@ -90,7 +100,7 @@ describe('active mannequin measurement guide v1', () => {
     ).toBeGreaterThan(20);
   });
 
-  it('uses the bounded under-bust station and exposes no fit claim', () => {
+  it('marks the under-bust fallback limited and exposes no fit claim', () => {
     const guide = buildMeasurementSurfaceActiveMeasurementGuideV1({
       measurementName: 'BODY_MEASUREMENT_NAME_UNDER_BUST',
       frame,
@@ -98,12 +108,21 @@ describe('active mannequin measurement guide v1', () => {
       neutralPose: true,
     });
 
-    expect(guide.status).toBe('visible');
+    expect(guide.status).toBe('limited');
     expect(guide.claims).toEqual({
       visualGuideOnly: true,
       measurementProtocolEquivalent: false,
       fitClaimEligible: false,
     });
+
+    const admittedStation = buildMeasurementSurfaceActiveMeasurementGuideV1({
+      measurementName: 'BODY_MEASUREMENT_NAME_UNDER_BUST',
+      frame,
+      mesh: cylinderMesh(),
+      neutralPose: true,
+      torsoSectionStations: { underBust: [0, 1.1, 0] },
+    });
+    expect(admittedStation.status).toBe('visible');
   });
 
   it('keeps a vertex-bound circumference guide available for live posed positions', () => {
@@ -145,15 +164,39 @@ describe('active mannequin measurement guide v1', () => {
     expect(inseam).toMatchObject({ status: 'unsupported', label: 'inseam', paths: [] });
   });
 
+  it.each(['BODY_MEASUREMENT_NAME_WAIST_HEIGHT'] as const)(
+    'draws an exact visual-only P0 guide for %s from admitted frame geometry',
+    (name) => {
+      const guide = buildMeasurementSurfaceActiveMeasurementGuideV1({
+        measurementName: name,
+        frame,
+        mesh: cylinderMesh(),
+        neutralPose: true,
+      });
+
+      expect(guide.status).toBe('visible');
+      expect(guide.paths).toHaveLength(1);
+      expect(guide.claims).toEqual({
+        visualGuideOnly: true,
+        measurementProtocolEquivalent: false,
+        fitClaimEligible: false,
+      });
+    },
+  );
+
   it.each([
+    'BODY_MEASUREMENT_NAME_ACROSS_FRONT',
+    'BODY_MEASUREMENT_NAME_ACROSS_BACK',
+    'BODY_MEASUREMENT_NAME_ACROSS_SHOULDER',
+    'BODY_MEASUREMENT_NAME_SLEEVE_LENGTH',
     'BODY_MEASUREMENT_NAME_CF_NECK_TO_WAIST',
-    'BODY_MEASUREMENT_NAME_WAIST_HEIGHT',
+    'BODY_MEASUREMENT_NAME_CB_NECK_TO_WAIST',
     'BODY_MEASUREMENT_NAME_WAIST_TO_HIGH_HIP',
     'BODY_MEASUREMENT_NAME_WAIST_TO_HIP',
     'BODY_MEASUREMENT_NAME_CHEST_DEPTH',
     'BODY_MEASUREMENT_NAME_WAIST_DEPTH',
     'BODY_MEASUREMENT_NAME_HIP_DEPTH',
-  ] as const)('draws a visual-only P0 guide for %s from admitted frame geometry', (name) => {
+  ] as const)('marks the approximate guide for %s limited', (name) => {
     const guide = buildMeasurementSurfaceActiveMeasurementGuideV1({
       measurementName: name,
       frame,
@@ -161,13 +204,56 @@ describe('active mannequin measurement guide v1', () => {
       neutralPose: true,
     });
 
-    expect(guide.status).toBe('visible');
+    expect(guide.status).toBe('limited');
     expect(guide.paths).toHaveLength(1);
     expect(guide.claims).toEqual({
       visualGuideOnly: true,
       measurementProtocolEquivalent: false,
       fitClaimEligible: false,
     });
+  });
+
+  it.each([
+    ['BODY_MEASUREMENT_NAME_CF_NECK_TO_WAIST', 1],
+    ['BODY_MEASUREMENT_NAME_CB_NECK_TO_WAIST', -1],
+  ] as const)('draws %s as an offset midsagittal section arc', (name, zSide) => {
+    const guide = buildMeasurementSurfaceActiveMeasurementGuideV1({
+      measurementName: name,
+      frame,
+      mesh: cylinderMesh(),
+      neutralPose: true,
+    });
+    const path = guide.paths[0];
+    expect(path).toMatchObject({ source: 'fixed-points', closed: false });
+    if (path?.source !== 'fixed-points') throw new Error('Expected a fixed section arc.');
+    expect(path.pointsM.length).toBeGreaterThan(2);
+    for (const point of path.pointsM) {
+      expect(point[0]).toBeCloseTo(0, 6);
+      expect(zSide * point[2]).toBeGreaterThan(0);
+    }
+    const neckBase = frame.landmarks.find(({ id }) => id === 'neck-base');
+    const waist = frame.torsoStations.find(({ id }) => id === 'waist');
+    expect(path.pointsM[0][1]).toBeCloseTo(neckBase?.positionM[1] ?? 0, 5);
+    expect(path.pointsM.at(-1)?.[1]).toBeCloseTo(waist?.yM ?? 0, 5);
+  });
+
+  it.each([
+    ['BODY_MEASUREMENT_NAME_ACROSS_FRONT', 1],
+    ['BODY_MEASUREMENT_NAME_ACROSS_BACK', -1],
+  ] as const)('draws %s around the requested side of the chest section', (name, zSide) => {
+    const guide = buildMeasurementSurfaceActiveMeasurementGuideV1({
+      measurementName: name,
+      frame,
+      mesh: cylinderMesh(),
+      neutralPose: true,
+    });
+    const path = guide.paths[0];
+    expect(path).toMatchObject({ source: 'fixed-points', closed: false });
+    if (path?.source !== 'fixed-points') throw new Error('Expected a fixed section arc.');
+    expect(path.pointsM.length).toBeGreaterThan(2);
+    for (const point of path.pointsM) expect(zSide * point[2]).toBeGreaterThan(0);
+    expect(path.pointsM[0][0]).toBeLessThan(0);
+    expect(path.pointsM.at(-1)?.[0]).toBeGreaterThan(0);
   });
 
   it('places high hip at the protocol station below the waist, or at the runtime station', () => {
@@ -196,6 +282,24 @@ describe('active mannequin measurement guide v1', () => {
       torsoSectionStations: { highHip: [0, 0.93, 0] },
     });
     expect(pathY(runtime)).toBeCloseTo(0.93, 5);
+
+    const waistToHighHip = buildMeasurementSurfaceActiveMeasurementGuideV1({
+      measurementName: 'BODY_MEASUREMENT_NAME_WAIST_TO_HIGH_HIP',
+      frame,
+      mesh: cylinderMesh(),
+      neutralPose: true,
+    });
+    const vertical = waistToHighHip.paths[0];
+    expect(vertical).toMatchObject({ source: 'fixed-points', closed: false });
+    if (vertical?.source !== 'fixed-points') throw new Error('Expected a fixed vertical guide.');
+    expect(vertical.pointsM).toHaveLength(2);
+    expect(vertical.pointsM[0][0]).toBe(vertical.pointsM[1][0]);
+    const hip = frame.torsoStations.find(({ id }) => id === 'hip');
+    expect(vertical.pointsM[0][0]).toBeGreaterThan(
+      Math.max(waist?.halfWidthM ?? 0, hip?.halfWidthM ?? 0),
+    );
+    expect(vertical.pointsM[0][1]).toBeCloseTo(waist?.yM ?? 0, 5);
+    expect(vertical.pointsM[1][1]).toBeCloseTo(pathY(protocol), 5);
 
     // A protocol drop (100 mm) that leaves the waist..hip interval has no admitted station.
     const outside = buildMeasurementSurfaceActiveMeasurementGuideV1({
@@ -228,6 +332,8 @@ describe('active mannequin measurement guide v1', () => {
   });
 
   it.each([
+    'BODY_MEASUREMENT_NAME_NECK_BASE',
+    'BODY_MEASUREMENT_NAME_HPS_TO_WAIST_FRONT',
     'BODY_MEASUREMENT_NAME_HPS_HEIGHT',
     'BODY_MEASUREMENT_NAME_SHOULDER_LENGTH',
     'BODY_MEASUREMENT_NAME_SHOULDER_DROP',

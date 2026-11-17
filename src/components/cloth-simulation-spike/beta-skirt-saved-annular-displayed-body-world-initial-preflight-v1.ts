@@ -45,6 +45,12 @@ import {
   type BetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementReportV1,
 } from './beta-skirt-saved-annular-observed-placement-displayed-body-product-placement-v1';
 import { savedModelObservedPlacementTargetCodecInternalsV1 } from 'lib/cloth/domain/saved-model-observed-placement-target-codec-v1';
+import {
+  buildObservedBoundedRadialInitializationV1,
+  assertObservedBoundedRadialInitializationPolicyV1,
+  isObservedBoundedRadialInitializationPolicyV1,
+  type ObservedBoundedRadialInitializationReportV1,
+} from 'lib/cloth/domain/observed-bounded-radial-initialization-v1';
 
 export const BETA_SKIRT_SAVED_ANNULAR_DISPLAYED_BODY_WORLD_INITIAL_PREFLIGHT_V1 =
   'beta-skirt-saved-annular-displayed-body-world-initial-preflight/1' as const;
@@ -197,11 +203,20 @@ export type BetaSkirtSavedAnnularObservedPlacementDisplayedBodyWorldInitialPrefl
   Readonly<
     Omit<
       BetaSkirtSavedAnnularDisplayedBodyWorldInitialPreflightReportV1,
-      'version' | 'upstreamPair' | 'claims'
+      'version' | 'upstreamPair' | 'claims' | 'rigidPlacement'
     > & {
       version: typeof BETA_SKIRT_SAVED_ANNULAR_OBSERVED_PLACEMENT_DISPLAYED_BODY_WORLD_INITIAL_PREFLIGHT_V1;
       sourceKind: 'saved-annular-observed-placement-garment-v1';
       upstreamPair: BetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementReportV1;
+      rigidPlacement:
+        | BetaSkirtSavedAnnularDisplayedBodyWorldInitialPreflightReportV1['rigidPlacement']
+        | null;
+      boundedRadialPlacement?: Readonly<{
+        localWaistOriginM: readonly [0, 0, 0];
+        translationM: readonly [number, number, number];
+        float32RecipeReplayedByteExactly: true;
+        recipe: ObservedBoundedRadialInitializationReportV1;
+      }>;
       claims: typeof OBSERVED_CLAIMS;
     }
   >;
@@ -295,6 +310,7 @@ type Retained = {
   worldPhysical: Float32Array;
   bindings: Report['bindings'];
   physical: Report['physicalState'];
+  boundedInitialization: ObservedBoundedRadialInitializationReportV1 | null;
 };
 type Work = {
   kind: Kind;
@@ -504,7 +520,6 @@ async function capture(work: Work, sources: Sources): Promise<Retained> {
     garmentReport.mappingFrame !== 'garment-local-waist-origin' ||
     garmentReport.mappingSpec.waistCenterM.some((value) => value !== 0) ||
     pairReport.source.mappedOriginM.some((value) => value !== 0) ||
-    pairReport.candidate.uniformScale !== 1 ||
     pairReport.claims.observedBodyTargetConfirmed !== (work.kind === 'observed')
   )
     fail(
@@ -595,12 +610,70 @@ async function capture(work: Work, sources: Sources): Promise<Retained> {
   const translation = pairReport.candidate.translationM;
   if (translation.length !== 3 || !translation.every(Number.isFinite))
     fail('binding-mismatch', 'Invalid rigid translation.');
+  const boundedPolicy =
+    work.kind === 'observed' &&
+    isObservedBoundedRadialInitializationPolicyV1(
+      garmentReport.persistedPlacement.authoring.semantics.policy,
+    );
+  if (boundedPolicy)
+    assertObservedBoundedRadialInitializationPolicyV1(
+      garmentReport.persistedPlacement.authoring.semantics.policy,
+    );
+  const boundedInitialization = boundedPolicy
+    ? buildObservedBoundedRadialInitializationV1({
+        localPositions3M: mapping.positions3M,
+        garmentTriangles: triangles,
+        bodyPositions3M: pair.collisionInput.bodyPositionsM,
+        bodyTriangles: pair.collisionInput.bodyTriangles,
+        translationM: translation,
+        garmentWaistYM: translation[1],
+        garmentHemYM:
+          translation[1] -
+          (Math.sqrt(1 - (garmentReport.mappingSpec.sectorSpanRadPerPiece / Math.PI) ** 2) *
+            (garmentReport.mappingSpec.hemSlantRadiusMm -
+              garmentReport.mappingSpec.waistSlantRadiusMm)) /
+            1000,
+        triangleRestFrames: material.normalizedV5.simulation.material.triangleRestFrames,
+        acceptance: garmentReport.persistedPlacement.authoring.annular.parameters.acceptance,
+      })
+    : null;
+  if (boundedInitialization) {
+    if (
+      pairReport.candidate.uniformScale !== null ||
+      !('boundedRadialInitialization' in pairReport.candidate) ||
+      JSON.stringify(pairReport.candidate.boundedRadialInitialization) !==
+        JSON.stringify(boundedInitialization.report) ||
+      JSON.stringify(pairReport.sectionCompatibility) !==
+        JSON.stringify(boundedInitialization.report.candidateSection) ||
+      pairReport.claims.rigidTranslationOnly !== false ||
+      pairReport.claims.garmentScaleChanged !== (boundedInitialization.report.radialScale !== 1) ||
+      !equalBytes(world, boundedInitialization.positions3M)
+    )
+      fail(
+        'world-radial-replay-mismatch',
+        'Confirmed bounded initialization did not replay exactly.',
+      );
+  } else if (
+    pairReport.candidate.uniformScale !== 1 ||
+    'boundedRadialInitialization' in pairReport.candidate ||
+    !pairReport.claims.rigidTranslationOnly ||
+    pairReport.claims.garmentScaleChanged
+  )
+    fail(
+      'world-translation-mismatch',
+      'The saved policy permits only the original rigid translation.',
+    );
   for (let v = 0; v < VERTICES; v++) {
     for (let axis = 0; axis < 3; axis++) {
       const local = mapping.positions3M[v * 3 + axis];
       if (
         !Object.is(local, material.initialPhysicalPositionsInvMassKg[v * 4 + axis]) ||
-        !Object.is(world[v * 3 + axis], Math.fround(local + translation[axis]))
+        !Object.is(
+          world[v * 3 + axis],
+          boundedInitialization
+            ? boundedInitialization.positions3M[v * 3 + axis]
+            : Math.fround(local + translation[axis]),
+        )
       )
         fail(
           'world-translation-mismatch',
@@ -662,6 +735,7 @@ async function capture(work: Work, sources: Sources): Promise<Retained> {
   return {
     sources,
     worldPhysical,
+    boundedInitialization: boundedInitialization?.report ?? null,
     bindings: {
       garmentReportSha256: garmentReport.canonicalSha256,
       pairReportSha256: pairReport.reportSha256,
@@ -753,7 +827,10 @@ function dispose(work: Work): boolean {
 async function recheck(work: Work, retained: Retained): Promise<void> {
   const renewed = await capture(work, await fresh(work));
   current(work);
-  if (JSON.stringify(renewed.bindings) !== JSON.stringify(retained.bindings))
+  if (
+    JSON.stringify(renewed.bindings) !== JSON.stringify(retained.bindings) ||
+    JSON.stringify(renewed.boundedInitialization) !== JSON.stringify(retained.boundedInitialization)
+  )
     fail('source-binding-mismatch', 'Fresh source bytes changed during preflight.');
 }
 
@@ -859,6 +936,7 @@ async function buildPreflight(value: unknown, kind: Kind, signal?: AbortSignal):
         : {}),
       status: 'diagnostic-preflight-blocked' as const,
       worldInitialChecksPassed:
+        (!retained.boundedInitialization || retained.boundedInitialization.passed) &&
         selfIntersection.passed &&
         orientationPassed &&
         envelopePassed &&
@@ -873,12 +951,24 @@ async function buildPreflight(value: unknown, kind: Kind, signal?: AbortSignal):
         positiveInverseMassParticles: 498 as const,
       },
       physicalState: retained.physical,
-      rigidPlacement: {
-        localWaistOriginM: [0, 0, 0] as const,
-        translationM: sources.pair.report.candidate.translationM,
-        uniformScale: 1 as const,
-        float32TranslationReplayedByteExactly: true as const,
-      },
+      ...(retained.boundedInitialization
+        ? {
+            rigidPlacement: null,
+            boundedRadialPlacement: {
+              localWaistOriginM: [0, 0, 0] as const,
+              translationM: sources.pair.report.candidate.translationM,
+              float32RecipeReplayedByteExactly: true as const,
+              recipe: retained.boundedInitialization,
+            },
+          }
+        : {
+            rigidPlacement: {
+              localWaistOriginM: [0, 0, 0] as const,
+              translationM: sources.pair.report.candidate.translationM,
+              uniformScale: 1 as const,
+              float32TranslationReplayedByteExactly: true as const,
+            },
+          }),
       selfIntersection,
       envelope,
       envelopeFailure,
