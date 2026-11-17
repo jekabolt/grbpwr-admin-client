@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { Button } from 'ui';
 
 import {
   openPatternImportDxfPhaseECadOperationDetailsForEditV1,
@@ -57,7 +58,7 @@ describe('Assembly Table chrome', () => {
       <PatternImportDxfPhaseECadWorkbenchSplitShellV1
         desktop={<div>desktop</div>}
         mannequin={<div>mannequin</div>}
-        operationsPanel={<button aria-label='Next operation'>→</button>}
+        operationsPanel={<Button aria-label='Next operation'>→</Button>}
       />,
     );
 
