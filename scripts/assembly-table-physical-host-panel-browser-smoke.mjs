@@ -71,69 +71,77 @@ const cssName = readdirSync(resolve(REPO, 'dist/assets')).find((name) =>
 if (!cssName) throw new Error('Production CSS is unavailable; run yarn build:check first.');
 const css = readFileSync(resolve(REPO, 'dist/assets', cssName), 'utf8');
 
-const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
-const pageErrors = [];
-page.on('pageerror', (error) => pageErrors.push(String(error)));
-await page.route('http://probe.local/**', (route) =>
-  route.fulfill({ status: 200, contentType: 'text/html', body: '<div id="root"></div>' }),
-);
-await page.goto('http://probe.local/');
-await page.addStyleTag({ content: css });
-await page.addScriptTag({ content: bundle, type: 'module' });
-await page.waitForSelector('[data-physical-host-layout-smoke]', { timeout: 15_000 });
-
-const metrics = await page.evaluate(() => {
-  const root = document.querySelector('[data-physical-host-layout-smoke]');
-  const viewport = document.querySelector('[data-physical-host-mannequin-viewport]');
-  const panel = document.querySelector('[data-cad-physical-host-panel]');
-  const action = document.querySelector('[data-physical-host-bottom-action]');
-  if (!(root instanceof HTMLElement)) throw new Error('Layout root is missing.');
-  if (!(viewport instanceof HTMLElement)) throw new Error('Mannequin viewport is missing.');
-  if (!(panel instanceof HTMLElement)) throw new Error('Physical panel is missing.');
-  if (!(action instanceof HTMLElement)) throw new Error('Bottom authoring action is missing.');
-  const beforePanel = panel.getBoundingClientRect();
-  const beforeAction = action.getBoundingClientRect();
-  panel.scrollTop = panel.scrollHeight;
-  const afterPanel = panel.getBoundingClientRect();
-  const afterAction = action.getBoundingClientRect();
-  return {
-    rootHeight: root.getBoundingClientRect().height,
-    viewportHeight: viewport.getBoundingClientRect().height,
-    panelHeight: panel.clientHeight,
-    panelScrollHeight: panel.scrollHeight,
-    panelScrollTop: panel.scrollTop,
-    actionInitiallyBelowPanel: beforeAction.bottom > beforePanel.bottom,
-    actionReachable:
-      afterAction.top >= afterPanel.top - 1 && afterAction.bottom <= afterPanel.bottom + 1,
-  };
+const browser = await chromium.launch({
+  args: ['--disable-gpu', '--disable-software-rasterizer', '--disable-webgl'],
 });
-
-const checks = [
-  [metrics.rootHeight === 720, 'ordinary workbench pane keeps its requested height'],
-  [metrics.viewportHeight >= 300, 'mannequin viewport retains useful visible height'],
-  [metrics.panelHeight <= metrics.rootHeight * 0.51, 'physical controls use at most half the pane'],
-  [metrics.panelScrollHeight > metrics.panelHeight, 'open authoring controls scroll internally'],
-  [
-    metrics.actionInitiallyBelowPanel,
-    'bottom action starts inside the overflowed authoring content',
-  ],
-  [
-    metrics.panelScrollTop > 0 && metrics.actionReachable,
-    'bottom action is reachable after scrolling',
-  ],
-  [pageErrors.length === 0, 'browser reports no runtime exceptions'],
-];
-
-console.log('\nASSEMBLY TABLE PHYSICAL-HOST PANEL BROWSER SMOKE');
-const failures = [];
-for (const [ok, label] of checks) {
-  console.log(`${ok ? '  ok  ' : '  FAIL'} ${label}`);
-  if (!ok) failures.push(label);
-}
-await browser.close();
-if (failures.length)
-  throw new Error(
-    `${failures.length} physical-host layout check(s) failed: ${failures.join(', ')}`,
+try {
+  const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
+  const pageErrors = [];
+  page.on('pageerror', (error) => pageErrors.push(String(error)));
+  await page.route('http://probe.local/**', (route) =>
+    route.fulfill({ status: 200, contentType: 'text/html', body: '<div id="root"></div>' }),
   );
-console.log('\nASSEMBLY TABLE PHYSICAL-HOST PANEL BROWSER SMOKE PASSED');
+  await page.goto('http://probe.local/');
+  await page.addStyleTag({ content: css });
+  await page.addScriptTag({ content: bundle, type: 'module' });
+  await page.waitForSelector('[data-physical-host-layout-smoke]', { timeout: 15_000 });
+
+  const metrics = await page.evaluate(() => {
+    const root = document.querySelector('[data-physical-host-layout-smoke]');
+    const viewport = document.querySelector('[data-physical-host-mannequin-viewport]');
+    const panel = document.querySelector('[data-cad-physical-host-panel]');
+    const action = document.querySelector('[data-physical-host-bottom-action]');
+    if (!(root instanceof HTMLElement)) throw new Error('Layout root is missing.');
+    if (!(viewport instanceof HTMLElement)) throw new Error('Mannequin viewport is missing.');
+    if (!(panel instanceof HTMLElement)) throw new Error('Physical panel is missing.');
+    if (!(action instanceof HTMLElement)) throw new Error('Bottom authoring action is missing.');
+    const beforePanel = panel.getBoundingClientRect();
+    const beforeAction = action.getBoundingClientRect();
+    panel.scrollTop = panel.scrollHeight;
+    const afterPanel = panel.getBoundingClientRect();
+    const afterAction = action.getBoundingClientRect();
+    return {
+      rootHeight: root.getBoundingClientRect().height,
+      viewportHeight: viewport.getBoundingClientRect().height,
+      panelHeight: panel.clientHeight,
+      panelScrollHeight: panel.scrollHeight,
+      panelScrollTop: panel.scrollTop,
+      actionInitiallyBelowPanel: beforeAction.bottom > beforePanel.bottom,
+      actionReachable:
+        afterAction.top >= afterPanel.top - 1 && afterAction.bottom <= afterPanel.bottom + 1,
+    };
+  });
+
+  const checks = [
+    [metrics.rootHeight === 720, 'ordinary workbench pane keeps its requested height'],
+    [metrics.viewportHeight >= 300, 'mannequin viewport retains useful visible height'],
+    [
+      metrics.panelHeight <= metrics.rootHeight * 0.51,
+      'physical controls use at most half the pane',
+    ],
+    [metrics.panelScrollHeight > metrics.panelHeight, 'open authoring controls scroll internally'],
+    [
+      metrics.actionInitiallyBelowPanel,
+      'bottom action starts inside the overflowed authoring content',
+    ],
+    [
+      metrics.panelScrollTop > 0 && metrics.actionReachable,
+      'bottom action is reachable after scrolling',
+    ],
+    [pageErrors.length === 0, 'browser reports no runtime exceptions'],
+  ];
+
+  console.log('\nASSEMBLY TABLE PHYSICAL-HOST PANEL BROWSER SMOKE');
+  const failures = [];
+  for (const [ok, label] of checks) {
+    console.log(`${ok ? '  ok  ' : '  FAIL'} ${label}`);
+    if (!ok) failures.push(label);
+  }
+  if (failures.length)
+    throw new Error(
+      `${failures.length} physical-host layout check(s) failed: ${failures.join(', ')}`,
+    );
+  console.log('\nASSEMBLY TABLE PHYSICAL-HOST PANEL BROWSER SMOKE PASSED');
+} finally {
+  await browser.close();
+}
