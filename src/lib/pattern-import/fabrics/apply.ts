@@ -36,6 +36,11 @@ import {
 import { FUSING_FULL, FUSING_UNKNOWN, IDENTICAL, aliasKey, mintLineKey, normBlock } from './draft';
 import { FOLD_CUT_SYMMETRY } from 'components/managers/tech-card/components/piece-codes';
 import { NEW_PIECE, withAnswers } from './assembly-impact';
+import {
+  checkApplyNewPieceIntent,
+  planPreservesNewPiece,
+  type ApplyNewPieceIntent,
+} from './apply-new-piece-intent';
 
 /** 40 MiB — `MAX_PATTERN_BYTES` (utils/pattern.ts), the server's hard limit. */
 export const MAX_PATTERN_BYTES = 40 * 1024 * 1024;
@@ -125,6 +130,8 @@ export type ApplyDeps = {
   rebuilding?: () => boolean;
   /** An explicit Review DXF action requesting a new revision of the exact matching file. */
   replaceMatchingFile?: true;
+  /** Optional exact new-piece decision from the review. No ordinary matching fallback is allowed. */
+  newPieceIntent?: ApplyNewPieceIntent;
   mintKey?: () => string;
   /**
    * The card scope a live sheet or link belongs to (bom-purpose `scopeKeyOfBinding` over the card's
@@ -619,6 +626,19 @@ export async function applyDraft(
   const uploaded: ApplyUploaded[] = [];
   const reused: string[] = [];
   const scopeOf = deps.scopeOf ?? scopeKeyOf;
+  const newPieceIntent = deps.newPieceIntent;
+  const newPiece =
+    newPieceIntent === undefined
+      ? null
+      : checkApplyNewPieceIntent(newPieceIntent, draft, deps.read(), scopeOf);
+  const newPieceMoved = (): ApplyResult => ({
+    ok: false,
+    failedScope: newPiece?.scopeKey ?? '',
+    message:
+      'The approved new piece could no longer be created under its own key. Reopen the DXF review.',
+    uploaded,
+  });
+  if (newPieceIntent !== undefined && !newPiece) return newPieceMoved();
   const repeatScope =
     deps.replaceMatchingFile && draft.scopes.length === 1 ? draft.scopes[0] : null;
   const matchingPattern = (live: LiveCard) => {
@@ -705,6 +725,13 @@ export async function applyDraft(
 
   // 2. one ordered batch against the live form
   const live = deps.read();
+  if (
+    newPiece &&
+    (!newPieceIntent ||
+      !checkApplyNewPieceIntent(newPieceIntent, draft, live, scopeOf) ||
+      uploaded.filter(({ scopeKey }) => scopeKey === newPiece.scopeKey).length !== 1)
+  )
+    return newPieceMoved();
   let commitDraft = draft;
   if (replacement && repeatScope) {
     const current = matchingPattern(live);
@@ -745,6 +772,7 @@ export async function applyDraft(
     mintKey,
     scopeOf: deps.scopeOf,
   });
+  if (newPiece && !planPreservesNewPiece(plan, newPiece)) return newPieceMoved();
   // No await occurs between this read and the writes/save request below. It is the editing base the
   // host is about to claim, not a lock value reconstructed from the later response.
   const previousLockVersion = deps.readPreviousLockVersion?.();
