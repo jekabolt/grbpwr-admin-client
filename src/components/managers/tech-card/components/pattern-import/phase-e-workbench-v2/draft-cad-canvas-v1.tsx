@@ -1273,35 +1273,36 @@ function PreviewPrimitive({
   }
 }
 
-function toolInstruction(tool: PatternImportDxfPhaseEDraftCadToolV1): string {
+function toolInstruction(tool: PatternImportDxfPhaseEDraftCadToolV1, sizeToken: string): string {
   if (tool === 'pen') return 'Click two points to record one open Pen path intent.';
-  if (tool === 'cut')
-    return 'Click two points to record one dashed split intent; no source contour is changed.';
+  if (tool === 'cut') return 'Click two points to split the piece across its grade.';
   if (tool === 'dart')
-    return 'Select an exact highlighted boundary edge, click the apex, then click along the edge direction to set intake.';
+    return `For size ${sizeToken}, pick an exact edge, then click the apex and intake.`;
   if (tool === 'guideline') return 'Click two points to record one dashed construction guideline.';
-  if (tool === 'internal-line') return 'Click two points to record one internal line intent.';
-  if (tool === 'pattern-line') return 'Click two points to record one pattern line intent.';
+  if (tool === 'internal-line')
+    return `Click two points to add an internal line in size ${sizeToken}.`;
+  if (tool === 'pattern-line')
+    return `Click two points to add a pattern line in size ${sizeToken}.`;
   if (tool === 'french-curve')
-    return 'Click the start, control and end points to record one quadratic French curve intent.';
+    return `Click the start, control and end points to add a French curve in size ${sizeToken}.`;
   if (tool === 'ellipse')
     return 'Click the centre, major-axis point and minor-radius point to record one ellipse intent.';
   if (tool === 'add-point')
-    return 'Select an exact highlighted boundary edge to insert one midpoint intent after its first vertex.';
+    return 'Select an exact edge to insert its midpoint across the piece’s grade.';
   if (tool === 'fish-eye')
     return 'Click the centre, axis end and intake side to record one fish-eye dart intent.';
   if (tool === 'spread')
-    return 'After an active Cut intent, click its pivot and a second point to set the spread amount.';
+    return 'After a cut, click the pivot and a second point to set the spread across the grade.';
   if (tool === 'gather')
     return 'Select an exact highlighted boundary edge to record a visible default 1.5 gather ratio.';
   if (tool === 'pleat')
     return 'Click both fold-line ends and an intake-side point to record a left/right pleat intent.';
   if (tool === 'notch')
-    return 'Select an exact highlighted boundary edge to record one single notch with bounded depth.';
+    return `Select an exact boundary edge to add a single notch in size ${sizeToken}.`;
   if (tool === 'rectangle')
-    return 'Click two exact opposite corners to create one ungraded piece for this size.';
+    return `Click opposite corners to create an ungraded piece in size ${sizeToken}.`;
   if (tool === 'circle') return 'Click a centre and then its radius to record one circle intent.';
-  if (tool === 'mark') return 'Click the active pattern to place a drill mark in this size.';
+  if (tool === 'mark') return `Click the piece to place a drill mark in size ${sizeToken}.`;
   if (tool === 'point-only' || tool === 'draft-point')
     return 'Click the exact sheet to record one local Draft intent.';
   return `${tool} input is unavailable until a verified pattern geometry kernel is integrated. No command will be recorded.`;
@@ -1384,7 +1385,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   const unavailable = !piece
     ? 'The active exact piece is not available in the projection sealed to this Draft session.'
     : !activeTopologyTool && !INPUT_TOOLS.has(activeTool)
-      ? toolInstruction(activeTool)
+      ? toolInstruction(activeTool, projection.sizeToken)
       : sourceMismatch
         ? 'The exact projection does not match this Draft session source.'
         : null;
@@ -1818,7 +1819,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
               unavailable ??
               (activeTopologyTool
                 ? 'Choose an exact highlighted vertex from the sealed projection.'
-                : toolInstruction(activeTool))}
+                : toolInstruction(activeTool, projection.sizeToken))}
       </div>
       {preview.blockers.length > 0 && (
         <ul data-draft-cad-preview-blockers='' className='space-y-1 text-small text-warning'>

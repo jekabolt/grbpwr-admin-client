@@ -72,6 +72,13 @@ it('keeps Arrange rotation, flip and translation out of exact geometry picks and
     onTopologyAnchor: vi.fn(),
   };
   const editing = renderToStaticMarkup(<PatternImportDxfPhaseEDraftCadCanvasV1 {...props} />);
+  expect(editing).toContain('Select an exact boundary edge to add a single notch in size M.');
+  const gradeEdit = renderToStaticMarkup(
+    <PatternImportDxfPhaseEDraftCadCanvasV1 {...props} activeTool='add-point' />,
+  );
+  expect(gradeEdit).toContain(
+    'Select an exact edge to insert its midpoint across the piece’s grade.',
+  );
   const untouched = renderToStaticMarkup(
     <PatternImportDxfPhaseEDraftCadCanvasV1 {...props} arrangement={null} />,
   );
