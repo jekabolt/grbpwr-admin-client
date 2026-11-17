@@ -62,7 +62,8 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_MODEL_PICKER_CLAIMS_V1 = O
   createsCameraAuthority: false,
   createsModelWriteOwner: false,
   paperDollClaimsMeasurementShape: false,
-  selectionPersistsThroughExistingTechCardSave: true,
+  ordinarySelectionPersistsThroughExistingTechCardSave: true,
+  workbenchSelectionPersistsThroughExistingArrangementSave: true,
   neutralPoseCreatesSessionOwner: true,
   sessionPoseNeverWritesFromAssemblyTable: true,
 } as const);
@@ -901,8 +902,8 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
 }
 
 /**
- * Production adapter. `baseModelId` remains the existing TechCard RHF field and is persisted by the
- * ordinary card save; the picker owns neither another form nor a model mutation.
+ * A saved Workbench arrangement owns its preview model. Beyond that context, model selection
+ * continues to use the ordinary TechCard form.
  */
 export function PatternImportDxfPhaseECadMannequinModelPickerV1({
   disabled = false,
@@ -912,6 +913,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerV1({
   onDisplayedBodyInputV1,
   onSaveMannequinArrangement,
   onReadMannequinArrangement,
+  onReadSavedMannequinModelId,
   arrangementSourceKey,
 }: Readonly<{
   disabled?: boolean;
@@ -921,11 +923,37 @@ export function PatternImportDxfPhaseECadMannequinModelPickerV1({
   onDisplayedBodyInputV1?: CadMannequinDisplayedBodyInputObserverV1;
   onSaveMannequinArrangement?: CadWorkbenchPhysicalHostV1['onSaveMannequinArrangement'];
   onReadMannequinArrangement?: CadWorkbenchPhysicalHostV1['onReadMannequinArrangement'];
+  onReadSavedMannequinModelId?: CadWorkbenchPhysicalHostV1['onReadSavedMannequinModelId'];
   arrangementSourceKey?: string;
 }>) {
   const form = useFormContext<TechCardFormData>();
-  const modelId =
+  const cardModelId =
     (useWatch({ control: form.control, name: 'baseModelId' }) as number | undefined) ?? 0;
+  const sourceKey = onReadSavedMannequinModelId ? arrangementSourceKey ?? null : null;
+  const [pickedModel, setPickedModel] = useState<{ sourceKey: string; modelId: number } | null>(
+    null,
+  );
+  const [savedModel, setSavedModel] = useState<{
+    sourceKey: string;
+    modelId: number | null;
+  } | null>(null);
+  useEffect(() => {
+    if (sourceKey === null || !onReadSavedMannequinModelId) return;
+    const controller = new AbortController();
+    const settle = (modelId: number | null) => {
+      if (!controller.signal.aborted) setSavedModel({ sourceKey, modelId });
+    };
+    void onReadSavedMannequinModelId(controller.signal).then(settle, () => settle(null));
+    return () => controller.abort();
+  }, [onReadSavedMannequinModelId, sourceKey]);
+  const modelId =
+    sourceKey === null
+      ? cardModelId
+      : pickedModel?.sourceKey === sourceKey
+        ? pickedModel.modelId
+        : savedModel?.sourceKey === sourceKey
+          ? savedModel.modelId ?? cardModelId
+          : 0;
   const { data: models, isLoading, isError } = useAllModels();
   const poseSession = usePatternImportDxfPhaseECadMannequinPoseSessionV1(modelId);
   const { dictionary } = useDictionary();
@@ -947,13 +975,17 @@ export function PatternImportDxfPhaseECadMannequinModelPickerV1({
       modelId={modelId}
       disabled={disabled}
       sizeName={(id) => sizeNames.get(id) ?? `#${id}`}
-      onModelChange={(nextModelId) =>
+      onModelChange={(nextModelId) => {
+        if (sourceKey !== null) {
+          setPickedModel({ sourceKey, modelId: nextModelId });
+          return;
+        }
         form.setValue('baseModelId', nextModelId, {
           shouldDirty: true,
           shouldTouch: true,
           shouldValidate: true,
-        })
-      }
+        });
+      }}
       paperDoll={paperDoll}
       stagedPieces={stagedPieces}
       patternPieceScene={patternPieceScene}

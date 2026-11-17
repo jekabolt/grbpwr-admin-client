@@ -3,6 +3,7 @@ import { CadWorkbenchPhysicalHostProductionMountV1 } from '../phase-e-workbench-
 import type { CadWorkbenchPhysicalHostV1 } from '../phase-e-workbench-v2/cad-workbench-physical-host-v1';
 import {
   readSavedCadMannequinArrangementV1,
+  readSavedCadMannequinModelIdV1,
   saveSavedCadMannequinArrangementV1,
 } from '../phase-e-workbench-v2/saved-cad-mannequin-arrangement-production-v1';
 import type { TechCardFormData } from 'components/managers/tech-card/components/schema';
@@ -2104,6 +2105,19 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     [exactPersistenceCapabilities, savedProjection],
   );
   const physicalRow = savedProjection.ok ? savedProjection.row : null;
+  const readSavedMannequinModelId = useCallback(
+    (signal: AbortSignal) =>
+      savedProjection.ok
+        ? readSavedCadMannequinModelIdV1(
+            {
+              row: savedProjection.row,
+              seedOperationNumber: savedProjection.selectedOperationNumber,
+            },
+            signal,
+          )
+        : Promise.resolve(null),
+    [savedProjection],
+  );
   const savedClothPhysicalHost = useSavedClothPhysicalHostV1({
     row: physicalRow,
     selectedOperationNumber: savedProjection.ok ? savedProjection.selectedOperationNumber : 0,
@@ -2167,7 +2181,11 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   );
   const physicalHost: CadWorkbenchPhysicalHostV1 = {
     onDisplayedBodyInputV1: savedClothPhysicalHost.onDisplayedBodyInputV1,
-    arrangementSourceKey: JSON.stringify(physicalRow),
+    arrangementSourceKey: JSON.stringify([
+      physicalRow,
+      savedProjection.ok ? savedProjection.selectedOperationNumber : null,
+    ]),
+    onReadSavedMannequinModelId: readSavedMannequinModelId,
     onSaveMannequinArrangement: saveMannequinArrangement,
     onReadMannequinArrangement: async (input, signal) => {
       if (!savedProjection.ok || input.scopeKey !== savedProjection.row.scopeKey) return null;

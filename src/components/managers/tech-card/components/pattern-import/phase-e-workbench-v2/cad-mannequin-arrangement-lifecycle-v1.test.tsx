@@ -4,11 +4,27 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type { common_Model } from 'api/proto-http/admin';
 
 import {
+  PatternImportDxfPhaseECadMannequinModelPickerV1,
   PatternImportDxfPhaseECadMannequinModelPickerViewV1,
   type PatternImportDxfPhaseECadMannequinModelPickerViewPropsV1,
 } from './cad-workbench-mannequin-model-picker-v1';
 import type { MeasurementSurfacePatternPieceOverlayV1 } from 'components/shared/measurement-watertight-surface-v1-stage';
 import type { CadMannequinArrangementPieceV1 } from './cad-mannequin-arrangement-document-v1';
+
+const cardModel = vi.hoisted(() => ({ id: 0, setValue: vi.fn() }));
+vi.mock('react-hook-form', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('react-hook-form')>()),
+  useFormContext: () => ({ control: {}, setValue: cardModel.setValue }),
+  useWatch: () => cardModel.id,
+}));
+vi.mock('components/managers/models/components/useModelQuery', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('components/managers/models/components/useModelQuery')>()),
+  useAllModels: () => ({ data: [], isLoading: false, isError: false }),
+}));
+vi.mock('lib/providers/dictionary-provider', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('lib/providers/dictionary-provider')>()),
+  useDictionary: () => ({ dictionary: null }),
+}));
 
 const globals = globalThis as Record<string, unknown>;
 const listeners = { addEventListener: () => undefined, removeEventListener: () => undefined };
@@ -242,5 +258,82 @@ describe('mounted mannequin arrangement lifecycle', () => {
       save.resolve();
     });
     expect(strings(tree)).toContain('Current changes are not saved.');
+  });
+});
+
+describe('mounted Workbench mannequin model selection', () => {
+  let root: ReturnType<typeof createRoot>;
+  let input: Parameters<typeof PatternImportDxfPhaseECadMannequinModelPickerV1>[0];
+  let tree: ReturnType<typeof PatternImportDxfPhaseECadMannequinModelPickerV1>;
+
+  function Harness() {
+    tree = PatternImportDxfPhaseECadMannequinModelPickerV1(input);
+    return null;
+  }
+  const render = async () => {
+    await act(async () => root.render(createElement(Harness)));
+  };
+  const choose = async (id: number) => {
+    await act(async () => tree.props.onModelChange(id));
+  };
+
+  beforeEach(() => {
+    root = createRoot(container() as never);
+    cardModel.id = 0;
+    cardModel.setValue.mockClear();
+    input = {};
+  });
+  afterEach(async () => {
+    await act(async () => root.unmount());
+  });
+
+  it('opens a saved arrangement model on a fresh mount with an empty card model', async () => {
+    input = {
+      arrangementSourceKey: 'row-3',
+      onReadSavedMannequinModelId: vi.fn().mockResolvedValue(42),
+    };
+    await render();
+    expect(tree.props.modelId).toBe(42);
+    expect(cardModel.setValue).not.toHaveBeenCalled();
+  });
+
+  it('keeps Workbench picks out of autosave and gives an explicit pick priority over reload', async () => {
+    const saved = deferred<number>();
+    input = { arrangementSourceKey: 'row-3', onReadSavedMannequinModelId: () => saved.promise };
+    await render();
+    expect(tree.props.modelId).toBe(0);
+    await choose(43);
+    await act(async () => saved.resolve(42));
+    expect(tree.props.modelId).toBe(43);
+    expect(cardModel.setValue).not.toHaveBeenCalled();
+    await choose(0);
+    expect(tree.props.modelId).toBe(0);
+  });
+
+  it('aborts pending hydration when the current pattern source changes', async () => {
+    const stale = deferred<number>();
+    const read = vi
+      .fn<(signal: AbortSignal) => Promise<number | null>>()
+      .mockImplementationOnce(() => stale.promise)
+      .mockResolvedValue(43);
+    input = { arrangementSourceKey: 'row-3', onReadSavedMannequinModelId: read };
+    await render();
+    input = { ...input, arrangementSourceKey: 'row-4' };
+    await render();
+    expect(read.mock.calls[0][0].aborted).toBe(true);
+    await act(async () => stale.resolve(42));
+    expect(tree.props.modelId).toBe(43);
+  });
+
+  it('keeps the ordinary TechCard picker on its form writer', async () => {
+    cardModel.id = 42;
+    await render();
+    expect(tree.props.modelId).toBe(42);
+    await choose(43);
+    expect(cardModel.setValue).toHaveBeenCalledWith('baseModelId', 43, {
+      shouldDirty: true,
+      shouldTouch: true,
+      shouldValidate: true,
+    });
   });
 });

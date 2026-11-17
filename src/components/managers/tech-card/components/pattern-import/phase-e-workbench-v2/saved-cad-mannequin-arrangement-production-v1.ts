@@ -3,6 +3,7 @@ import type { CadWorkbenchMannequinArrangementSaveV1 } from './cad-workbench-phy
 import {
   buildPatternImportDxfProductCompositeSidecarV7,
   decodePatternImportDxfProductCompositeSidecarV7,
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7,
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V7,
   readPatternImportDxfProductCompositeComponentBytesV7,
 } from './composite-sidecar-v7';
@@ -29,6 +30,7 @@ import {
   buildPatternImportDxfProductCompositeSidecarV6,
   decodePatternImportDxfProductCompositeSidecarV6,
   encodePatternImportDxfProductCompositeSidecarV6,
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6,
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V6,
   readPatternImportDxfProductCompositeComponentBytesV6,
 } from './composite-sidecar-v6';
@@ -56,8 +58,13 @@ export type SavedCadMannequinArrangementSaveRequestV1 = Readonly<{
   arrangement: CadMannequinArrangementRequestV1;
 }>;
 
+type SavedCadMannequinArrangementReadRequestV1 = Pick<
+  SavedCadMannequinArrangementSaveRequestV1,
+  'row' | 'seedOperationNumber'
+>;
+
 async function readCurrent(
-  request: Pick<SavedCadMannequinArrangementSaveRequestV1, 'row' | 'seedOperationNumber'>,
+  request: SavedCadMannequinArrangementReadRequestV1,
   signal: AbortSignal,
 ) {
   const receipt = await readSavedFullAssemblySnapshotV1(
@@ -126,40 +133,69 @@ function arrangementTransportAnchor(
   });
 }
 
-/** Read-only hydration. A different source, model or pose never receives stale transforms. */
-export async function readSavedCadMannequinArrangementV1(
-  request: Readonly<{
-    row: DxfProductSavedRowIdentityV1;
-    seedOperationNumber: number;
-    expected: Omit<CadWorkbenchMannequinArrangementSaveV1, 'pieces'>;
-  }>,
+async function readCurrentArrangement(
+  request: SavedCadMannequinArrangementReadRequestV1,
   signal: AbortSignal,
 ) {
-  const snapshot = await readCurrent(request, signal);
+  if (signal.aborted) return null;
+  const row = { ...request.row };
+  const snapshot = await readCurrent(
+    { row, seedOperationNumber: request.seedOperationNumber },
+    signal,
+  );
   const outer = snapshot.outer;
-  if (outer.status !== 'present' || !outer.currentRowBound) return null;
-  const decoded = outer.mediaType.endsWith('.v7+json')
-    ? await (async () => {
-        const v7 = await decodePatternImportDxfProductCompositeSidecarV7(outer.bytes);
-        return v7.ok ? v7.nestedCompositeV6 : null;
-      })()
-    : outer.mediaType.endsWith('.v6+json')
-      ? await decodePatternImportDxfProductCompositeSidecarV6(outer.bytes)
-      : null;
-  if (!decoded?.ok) return null;
-  const arrangement = decoded.mannequinArrangement;
-  const { bindings } = arrangement;
-  const { expected, row } = request;
+  if (signal.aborted || outer.status !== 'present' || !outer.currentRowBound) return null;
+  let decoded;
+  if (outer.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7) {
+    const v7 = await decodePatternImportDxfProductCompositeSidecarV7(outer.bytes);
+    if (!v7.ok) return null;
+    decoded = v7.nestedCompositeV6;
+  } else if (outer.mediaType === PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6) {
+    decoded = await decodePatternImportDxfProductCompositeSidecarV6(outer.bytes);
+    if (!decoded.ok) return null;
+  } else {
+    return null;
+  }
+  const { document, mannequinArrangement: arrangement } = decoded;
+  const savedRow = document.bindings.row;
+  // V6 decoding has already bound the arrangement to this envelope's exact row.
   if (
     signal.aborted ||
-    decoded.document.bindings.serverAssemblyRevision !== snapshot.serverAssemblyRevision ||
-    bindings.card.techCardId !== row.techCardId ||
-    bindings.card.cardLockVersion !== row.cardLockVersion ||
-    bindings.scope.scopeKey !== row.scopeKey ||
-    expected.scopeKey !== row.scopeKey ||
-    bindings.scope.patternLineKey !== row.patternLineKey ||
-    bindings.savedRow.revision !== row.revision ||
-    bindings.savedRow.dxfSha256 !== row.sha256 ||
+    document.bindings.serverAssemblyRevision !== snapshot.serverAssemblyRevision ||
+    savedRow.techCardId !== row.techCardId ||
+    savedRow.cardLockVersion !== row.cardLockVersion ||
+    savedRow.scopeKey !== row.scopeKey ||
+    savedRow.patternLineKey !== row.patternLineKey ||
+    savedRow.revision !== row.revision ||
+    savedRow.sha256 !== row.sha256 ||
+    savedRow.url !== row.url ||
+    savedRow.sizeBytes !== row.sizeBytes
+  )
+    return null;
+  return arrangement;
+}
+
+/** Returns the saved presentation model selection. The displayed body still binds independently. */
+export async function readSavedCadMannequinModelIdV1(
+  request: SavedCadMannequinArrangementReadRequestV1,
+  signal: AbortSignal,
+): Promise<number | null> {
+  const arrangement = await readCurrentArrangement(request, signal);
+  return signal.aborted ? null : arrangement?.bindings.mannequin.baseModelId ?? null;
+}
+
+/** Read-only hydration. A different source, model or pose never receives stale transforms. */
+export async function readSavedCadMannequinArrangementV1(
+  request: SavedCadMannequinArrangementReadRequestV1 &
+    Readonly<{ expected: Omit<CadWorkbenchMannequinArrangementSaveV1, 'pieces'> }>,
+  signal: AbortSignal,
+) {
+  const arrangement = await readCurrentArrangement(request, signal);
+  if (!arrangement || signal.aborted) return null;
+  const { bindings } = arrangement;
+  const { expected } = request;
+  if (
+    expected.scopeKey !== bindings.scope.scopeKey ||
     bindings.scope.sizeToken !== expected.projection.sizeToken ||
     bindings.source.catalogCanonicalSha256 !== expected.projection.expectedCatalogCanonicalSha256 ||
     bindings.source.sizeSelectionCanonicalSha256 !==

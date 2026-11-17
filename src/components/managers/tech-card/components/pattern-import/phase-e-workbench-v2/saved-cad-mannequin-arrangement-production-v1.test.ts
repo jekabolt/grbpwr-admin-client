@@ -44,6 +44,8 @@ vi.mock('./composite-sidecar-v6', () => ({
   decodePatternImportDxfProductCompositeSidecarV6: mocks.decodeV6,
   encodePatternImportDxfProductCompositeSidecarV6: mocks.encodeV6,
   readPatternImportDxfProductCompositeComponentBytesV6: mocks.readV6Component,
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6:
+    'application/vnd.grbpwr.pattern-dxf-product-composite.v6+json',
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V6: 'v6',
 }));
 vi.mock('./composite-sidecar-v7', () => ({
@@ -51,6 +53,8 @@ vi.mock('./composite-sidecar-v7', () => ({
   decodePatternImportDxfProductCompositeSidecarV7: mocks.decodeV7,
   encodePatternImportDxfProductCompositeSidecarV7: mocks.encodeV7,
   readPatternImportDxfProductCompositeComponentBytesV7: mocks.readV7Component,
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7:
+    'application/vnd.grbpwr.pattern-dxf-product-composite.v7+json',
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V7: 'v7',
 }));
 vi.mock('./composite-sidecar-persistence-v5', () => ({
@@ -74,6 +78,7 @@ vi.mock('./composite-sidecar-persistence-v7', () => ({
 
 import {
   readSavedCadMannequinArrangementV1,
+  readSavedCadMannequinModelIdV1,
   saveSavedCadMannequinArrangementV1,
   type SavedCadMannequinArrangementSaveRequestV1,
 } from './saved-cad-mannequin-arrangement-production-v1';
@@ -374,12 +379,12 @@ describe('explicit production mannequin arrangement transaction', () => {
 });
 
 describe('saved arrangement hydration', () => {
-  function hydration() {
+  function hydration(savedRow = row, serverAssemblyRevision = 'current-assembly') {
     const input = request();
     const document = createCadMannequinArrangementDocumentV1(input.arrangement);
     const decoded = {
       ok: true,
-      document: { bindings: { serverAssemblyRevision: 'current-assembly' } },
+      document: { bindings: { row: savedRow, serverAssemblyRevision } },
       mannequinArrangement: document,
     };
     mocks.decodeV6.mockResolvedValue(decoded);
@@ -418,6 +423,45 @@ describe('saved arrangement hydration', () => {
       expect(mocks.saveV5).not.toHaveBeenCalled();
     },
   );
+  it.each([6, 7])('reads only the current saved model ID from V%i', async (version) => {
+    hydration();
+    mocks.read.mockResolvedValue(snapshot(version));
+    const expected = { row, seedOperationNumber: 30 };
+    const signal = new AbortController().signal;
+    await expect(readSavedCadMannequinModelIdV1(expected, signal)).resolves.toBe(42);
+    expect(mocks.read).toHaveBeenCalledWith(expected, signal);
+    expect(mocks.saveV5).not.toHaveBeenCalled();
+    expect(mocks.saveV6).not.toHaveBeenCalled();
+    expect(mocks.saveV7).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['saved revision', { ...row, revision: row.revision - 1 }, 'current-assembly'],
+    ['scope', { ...row, scopeKey: 'lining' }, 'current-assembly'],
+    ['DXF hash', { ...row, sha256: 'f'.repeat(64) }, 'current-assembly'],
+    ['Assembly revision', row, 'old-assembly'],
+  ])('refuses a model hint with stale %s', async (_label, savedRow, assemblyRevision) => {
+    hydration(savedRow, assemblyRevision);
+    mocks.read.mockResolvedValue(snapshot(7));
+    await expect(
+      readSavedCadMannequinModelIdV1(
+        { row, seedOperationNumber: 30 },
+        new AbortController().signal,
+      ),
+    ).resolves.toBeNull();
+  });
+  it('does not decode arrangements for an outdated card lock or a cancelled selection', async () => {
+    hydration();
+    const stale = snapshot(6);
+    stale.outer.currentRowBound = false;
+    mocks.read.mockResolvedValue(stale);
+    const request = { row, seedOperationNumber: 30 };
+    const controller = new AbortController();
+    await expect(readSavedCadMannequinModelIdV1(request, controller.signal)).resolves.toBeNull();
+    controller.abort();
+    await expect(readSavedCadMannequinModelIdV1(request, controller.signal)).resolves.toBeNull();
+    expect(mocks.read).toHaveBeenCalledTimes(1);
+    expect(mocks.decodeV6).not.toHaveBeenCalled();
+  });
   it('does not hydrate a different pose or piece set', async () => {
     const input = hydration();
     mocks.read.mockResolvedValue(snapshot(6));

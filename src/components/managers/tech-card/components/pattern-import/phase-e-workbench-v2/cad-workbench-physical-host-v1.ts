@@ -18,6 +18,7 @@ export type CadWorkbenchMannequinArrangementSaveV1 = Readonly<{
 export type CadWorkbenchPhysicalHostV1 = Readonly<{
   onDisplayedBodyInputV1: (input: ModelDisplayedTriangleBodyOwnedInputV1 | null) => void;
   arrangementSourceKey?: string;
+  onReadSavedMannequinModelId?: (signal: AbortSignal) => Promise<number | null>;
   onSaveMannequinArrangement?: (
     input: CadWorkbenchMannequinArrangementSaveV1,
     signal: AbortSignal,
