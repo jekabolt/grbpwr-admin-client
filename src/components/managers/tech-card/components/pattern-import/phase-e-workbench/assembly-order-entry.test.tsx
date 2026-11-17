@@ -196,20 +196,42 @@ describe('V1 selected physical source handoff (actual source fragments, no physi
         workbenchOpen: boolean;
         exactNSessionAvailable: boolean;
         savedProjectionBlockerCode: string | null;
+        selectedSeamCount: number;
       }) => boolean
     >(declaration('shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1').getText(tree));
     const input = {
       workbenchOpen: true,
       exactNSessionAvailable: false,
-      savedProjectionBlockerCode: 'saved-operation-not-two-seam',
+      savedProjectionBlockerCode: null,
+      selectedSeamCount: 1,
     };
     expect(fallback(input)).toBe(true);
-    expect(fallback({ ...input, savedProjectionBlockerCode: 'saved-operation-missing' })).toBe(
-      true,
-    );
+    expect(
+      fallback({
+        ...input,
+        selectedSeamCount: 0,
+        savedProjectionBlockerCode: 'saved-operation-missing',
+      }),
+    ).toBe(true);
     expect(fallback({ ...input, exactNSessionAvailable: true })).toBe(false);
     expect(fallback({ ...input, workbenchOpen: false })).toBe(false);
     expect(fallback({ ...input, savedProjectionBlockerCode: 'different-failure' })).toBe(false);
+  });
+
+  it('keeps durable reload retry read-only and renders its refusal inside the N1 table', () => {
+    const retry = variable('retryDurableReload').getText(tree);
+    expect(retry).toContain('retryPatternImportDxfPhaseEDurableReloadRetryV1');
+    expect(retry).not.toMatch(/persist|save|seamWrite|onConfirm/);
+    const fallbackCall = nodes(ts.isCallExpression).find(
+      (call) =>
+        call.expression.getText(tree) ===
+        'shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1',
+    );
+    expect(fallbackCall?.arguments[0]?.getText(tree)).toContain(
+      'selectedSeamCount: selectedSeamKeys.length',
+    );
+    expect(tree.getFullText()).toContain('data-durable-reload-blocker={durableReloadBlocker.code}');
+    expect(tree.getFullText()).toContain('onClick={retryDurableReload}');
   });
 
   it('retains the caf373 saved-card staging authority without requiring a physical profile', async () => {
