@@ -50,6 +50,7 @@ const unitFiles = Object.freeze([
   'src/lib/cloth/body/measurement-open-reference-female-bust-proxy-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-beta-torso-female-bust-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-beta-torso-male-neutral-parity-v1.test.ts',
+  'src/lib/cloth/body/measurement-open-reference-beta-shape-bust-drop-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-torso-depth-proxy-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-high-hip-proxy-v1.test.ts',
   'src/lib/cloth/body/measurement-open-reference-knee-proxy-v1.test.ts',
