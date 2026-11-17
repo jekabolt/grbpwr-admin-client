@@ -453,7 +453,7 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
                     tabIndex={keyboardEnabled ? 0 : -1}
                     aria-disabled={!keyboardEnabled}
                     aria-pressed={selected}
-                    aria-label={`${piece.pieceLineKey} pattern piece`}
+                    aria-label={`${features?.pieceLabel ?? piece.pieceLineKey} pattern piece`}
                     aria-keyshortcuts='Enter Space ArrowUp ArrowDown ArrowLeft ArrowRight'
                     onPointerEnter={() => setHoveredPieceKey(pieceLayout.identity.key)}
                     onPointerLeave={() => setHoveredPieceKey(null)}
@@ -535,6 +535,7 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
                         features={features}
                         hiddenLayers={hiddenFeatureLayers}
                         unit={unit}
+                        materialRings={pieceLayout.sourceMaterialRings}
                       />
                     ) : null}
                   </g>

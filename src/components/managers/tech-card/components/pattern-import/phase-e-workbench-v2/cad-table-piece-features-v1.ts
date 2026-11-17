@@ -10,7 +10,10 @@ import type { PatternImportDxfPhaseECadWorkbenchIconV1 } from './cad-workbench-t
 import { patternImportDxfPhaseECadTablePieceKeyV1 } from './cad-table-piece-layout-session-v1';
 
 export type CadTablePieceFeatures = Readonly<
-  Pick<PieceSizeSpec, 'grain' | 'internal' | 'fold' | 'notches' | 'drills'>
+  Pick<PieceSizeSpec, 'grain' | 'internal' | 'fold' | 'notches' | 'drills'> & {
+    pieceLabel: string;
+    materialLabel: string | null;
+  }
 >;
 export type CadTablePieceFeatureLayer = keyof CadTablePieceFeatures;
 export type CadTablePieceFeaturesByKey = ReadonlyMap<string, CadTablePieceFeatures>;
@@ -21,6 +24,8 @@ export const CAD_TABLE_PIECE_FEATURE_LAYERS = [
   { key: 'fold', label: 'Show fold lines', icon: 'guideline' },
   { key: 'notches', label: 'Show notches', icon: 'notch' },
   { key: 'drills', label: 'Show drill marks', icon: 'mark' },
+  { key: 'pieceLabel', label: 'Show piece names', icon: 'callout' },
+  { key: 'materialLabel', label: 'Show material names', icon: 'view-options' },
 ] as const satisfies readonly {
   key: CadTablePieceFeatureLayer;
   label: string;
@@ -40,6 +45,7 @@ export function projectCadTablePieceFeatures(
   catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1,
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
   scopes: readonly Readonly<Pick<DraftScope, 'target' | 'writerReplay'>>[],
+  materialLabel?: string,
 ): CadTablePieceFeaturesByKey {
   const features = new Map<string, CadTablePieceFeatures>();
   const matchingScopes = scopes.filter(({ target }) => target.scopeKey === catalog.scopeKey);
@@ -62,9 +68,8 @@ export function projectCadTablePieceFeatures(
     );
     const writerPieces = replay.job.pieces.filter(({ identity }) => identity === projected.pieceId);
     if (!catalogPiece || writerPieces.length !== 1) continue;
-    const sizes = writerPieces[0]!.sizes.filter(
-      ({ sizeToken }) => sizeToken === projection.sizeToken,
-    );
+    const writerPiece = writerPieces[0]!;
+    const sizes = writerPiece.sizes.filter(({ sizeToken }) => sizeToken === projection.sizeToken);
     if (sizes.length !== 1) continue;
     const size = sizes[0]!;
     // Both regular and native-sewing views copy contours from the same PieceSizeSpec. Require
@@ -100,6 +105,8 @@ export function projectCadTablePieceFeatures(
         fold,
         notches,
         drills,
+        pieceLabel: writerPiece.displayName?.trim() || writerPiece.identity,
+        materialLabel: materialLabel?.trim() || null,
       },
     );
   }

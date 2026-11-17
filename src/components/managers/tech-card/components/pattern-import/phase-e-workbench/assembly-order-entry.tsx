@@ -2022,6 +2022,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
                 prepared.catalog,
                 prepared.projection,
                 prepared.draftCadCompileSource.scopes,
+                prepared.choices.find(({ scopeKey }) => scopeKey === prepared.scopeKey)?.label,
               ),
             },
           });

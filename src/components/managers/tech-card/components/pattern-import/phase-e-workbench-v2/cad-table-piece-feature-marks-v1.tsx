@@ -1,3 +1,5 @@
+import { labelAnchor } from 'lib/nesting/render/label-fit';
+import type { PtMm } from 'lib/pattern-import/types';
 import { SHEET_INK, ptsAttr, vy } from '../sheet-viewport';
 import type {
   CadTablePieceFeatureLayer,
@@ -8,12 +10,18 @@ export function CadTablePieceFeatureMarks({
   features,
   hiddenLayers,
   unit,
+  materialRings,
 }: Readonly<{
   features: CadTablePieceFeatures;
   hiddenLayers: ReadonlySet<CadTablePieceFeatureLayer>;
   unit: number;
+  materialRings: readonly (readonly PtMm[])[];
 }>) {
-  const { grain, internal, fold, notches, drills } = features;
+  const { grain, internal, fold, notches, drills, pieceLabel, materialLabel } = features;
+  const firstRing = materialRings[0];
+  const showName = !hiddenLayers.has('pieceLabel') && !!pieceLabel;
+  const showMaterial = !hiddenLayers.has('materialLabel') && !!materialLabel;
+  const anchor = firstRing && (showName || showMaterial) ? labelAnchor(firstRing) : null;
   return (
     <g fill='none' aria-hidden='true' pointerEvents='none'>
       {!hiddenLayers.has('grain') && grain ? (
@@ -78,6 +86,33 @@ export function CadTablePieceFeatureMarks({
             vectorEffect='non-scaling-stroke'
           />
         ))}
+      {anchor ? (
+        <text
+          x={anchor.x}
+          y={vy(anchor.y)}
+          textAnchor='middle'
+          fontSize={12 * unit}
+          fill={SHEET_INK.ink}
+          stroke='#fff'
+          strokeWidth={3 * unit}
+          strokeLinejoin='round'
+          paintOrder='stroke'
+          pointerEvents='none'
+        >
+          {showName ? <tspan data-cad-zero-connect-piece-label=''>{pieceLabel}</tspan> : null}
+          {showMaterial ? (
+            <tspan
+              data-cad-zero-connect-material-label=''
+              x={anchor.x}
+              dy={showName ? 13 * unit : 0}
+              fontSize={10 * unit}
+              fill={SHEET_INK.mut}
+            >
+              {materialLabel}
+            </tspan>
+          ) : null}
+        </text>
+      ) : null}
     </g>
   );
 }

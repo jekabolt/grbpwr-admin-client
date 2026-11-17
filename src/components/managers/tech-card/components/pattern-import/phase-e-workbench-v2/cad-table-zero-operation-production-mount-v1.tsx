@@ -901,8 +901,16 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
       'draftCadCompileSource' in prepared
         ? prepared.draftCadCompileSource.scopes
         : cardSession?.draft.scopes;
-    return scopes && projectCadTablePieceFeatures(prepared.catalog, prepared.projection, scopes);
-  }, [cardSession, prepared]);
+    return (
+      scopes &&
+      projectCadTablePieceFeatures(
+        prepared.catalog,
+        prepared.projection,
+        scopes,
+        selectedScope?.label,
+      )
+    );
+  }, [cardSession, prepared, selectedScope?.label]);
   const resolvedSavedCard = currentPreparation?.resolvedSavedCard ?? effectiveSavedCard;
   const resolvedSavedChoices = useMemo(
     () =>
