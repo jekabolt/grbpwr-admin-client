@@ -1,6 +1,10 @@
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import type { PatternImportDxfProductVerifiedSavedReplayV1 } from 'lib/cloth/domain/pattern-import-dxf-product-commit-replay-v1';
 import type { DxfProductPhaseDSizeSelectionResultV1 } from 'lib/pattern-import/dxf-product-phase-d-size-selection-v1';
+import {
+  projectPatternImportDxfProductPhaseEAssemblyV1,
+  type PatternImportDxfProductPhaseEAssemblyProjectionV1,
+} from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
 import type { CardDraft } from 'lib/pattern-import/types';
 
@@ -59,6 +63,7 @@ type PreparedAuthorityState = Readonly<{
   preparationGeneration: number;
   importGeneration: number;
   savedReplay?: PatternImportDxfProductVerifiedSavedReplayV1;
+  savedSceneProjection?: PatternImportDxfProductPhaseEAssemblyProjectionV1;
 }>;
 
 const authorityStates = new WeakMap<object, PreparedAuthorityState>();
@@ -105,6 +110,22 @@ export function readPatternImportDxfPhaseEZeroConnectCurrentSavedReplayV1(
   if (!isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(authority)) return null;
   const state = authorityStates.get(authority);
   return state?.savedReplay ? { draft: state.draft, savedReplay: state.savedReplay } : null;
+}
+
+/** Returns the issued display projection of this verified saved row's private selected Phase D. */
+export function readPatternImportDxfPhaseEZeroConnectSavedSceneProjectionV1(
+  authority: PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1,
+): PatternImportDxfProductPhaseEAssemblyProjectionV1 | null {
+  if (!isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(authority)) return null;
+  const state = authorityStates.get(authority)!;
+  if (state.savedSceneProjection) return state.savedSceneProjection;
+  const result = projectPatternImportDxfProductPhaseEAssemblyV1(state.catalog, state.selection);
+  if (!result.ok) return null;
+  authorityStates.set(
+    authority,
+    Object.freeze({ ...state, savedSceneProjection: result.projection }),
+  );
+  return result.projection;
 }
 
 /**

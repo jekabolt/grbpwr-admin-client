@@ -21,7 +21,9 @@ import {
   buildPatternImportDxfPhaseECadMannequinProductionSceneOverlayV2,
   type PatternImportDxfPhaseECadMannequinProductionSceneOverlayRequestV2,
 } from './cad-mannequin-production-scene-overlay-adapter-v2';
+import { buildPatternImportDxfPhaseECadMannequinSavedOneSeamSceneOverlayV1 } from './cad-mannequin-saved-one-seam-scene-overlay-v1';
 import { bridgePatternImportDxfPhaseECadMannequinSceneOverlayToRendererV1 } from './cad-mannequin-scene-overlay-renderer-bridge-v1';
+import type { PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1 } from './cad-table-zero-connect-phase-e-authority-v1';
 import type { PatternImportDxfPhaseECadMannequinSceneOverlayCapabilityV1 } from './cad-workbench-mannequin-model-picker-v1';
 import { cadWorkbenchOperationSeamOrdinal } from './cad-workbench-seam-ordinal-v1';
 import type { PatternImportDxfProductExactNSeamUiSelectionOwnerV2 } from './exact-n-seam-atomic-ui-selection-v2';
@@ -89,6 +91,7 @@ export type PatternImportDxfProductExactNDesktopGeometryV2 = Readonly<{
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
   annotationSource: Readonly<{ identity: string; revision: string; sha256: string }> | null;
   pieceFeatures?: CadTablePieceFeaturesByKey;
+  savedSceneAuthority?: PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1;
 }>;
 
 export function matchesPatternImportDxfProductExactNDesktopGeometryV2(
@@ -231,13 +234,21 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
       : activeSeam.sides[0]?.pieceId ?? null,
     seamId: activeSeam.seamId,
   });
-  const sceneOverlay = resolvePatternImportDxfProductExactNSeamProductionSceneOverlayV2(
-    session,
-    activeSeamIndex,
-    sceneOverlayInput,
-    sceneOverlayBlocker,
-    exactDesktop ? selection.pieceId : undefined,
-  );
+  const sceneOverlay =
+    !session.productionFeed && exactDesktop?.savedSceneAuthority
+      ? buildPatternImportDxfPhaseECadMannequinSavedOneSeamSceneOverlayV1({
+          session,
+          prepared: exactDesktop.savedSceneAuthority,
+          projection: exactDesktop.projection,
+          focusedPieceId: selection.pieceId,
+        })
+      : resolvePatternImportDxfProductExactNSeamProductionSceneOverlayV2(
+          session,
+          activeSeamIndex,
+          sceneOverlayInput,
+          sceneOverlayBlocker,
+          exactDesktop ? selection.pieceId : undefined,
+        );
   const mannequinSlot: PatternImportDxfPhaseECadWorkbenchSlotV1 =
     typeof mannequin === 'function'
       ? (context) => mannequin(Object.freeze({ ...context, sceneOverlay }))

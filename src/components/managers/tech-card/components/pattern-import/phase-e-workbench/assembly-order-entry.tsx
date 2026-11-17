@@ -120,6 +120,7 @@ import {
   patternImportDxfProductExactNSessionValidationKeyV1,
 } from '../phase-e-workbench-v2/durable-exact-session-current-v1';
 import { preparePatternImportDxfPhaseECadTableZeroOperationSavedV1 } from '../phase-e-workbench-v2/cad-table-zero-operation-saved-preparation-v1';
+import { readPatternImportDxfPhaseEZeroConnectSavedSceneProjectionV1 } from '../phase-e-workbench-v2/cad-table-zero-connect-phase-e-authority-v1';
 import { createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1 } from '../phase-e-workbench-v2/zero-operation-saved-card-authority-v1';
 import { PatternImportDxfPhaseECadTableDraftOperationsPanelV1 } from '../phase-e-workbench-v2/cad-table-draft-operations-panel-v1';
 import type { PatternImportDxfPhaseECadTableDraftOperationSessionBridgeResultV1 } from '../phase-e-workbench-v2/cad-table-draft-operation-session-bridge-v1';
@@ -2007,20 +2008,30 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
           const restoredValidationKey = patternImportDxfProductExactNSessionValidationKeyV1(
             restored.session,
           );
+          const savedSceneProjection =
+            restored.session.current.selectedOperation.seamIds.length === 1 &&
+            prepared.choices.length === 1 &&
+            prepared.choices[0]?.scopeKey === prepared.scopeKey
+              ? readPatternImportDxfPhaseEZeroConnectSavedSceneProjectionV1(
+                  prepared.authoringAuthority,
+                )
+              : null;
+          const projection = savedSceneProjection ?? prepared.projection;
           setDurableDesktop({
             key: durableReloadBinding.key,
             geometry: {
               catalog: prepared.catalog,
-              projection: prepared.projection,
+              projection,
+              ...(savedSceneProjection && { savedSceneAuthority: prepared.authoringAuthority }),
               annotationSource: bindPatternImportDxfPhaseECadMannequinAnnotationSourceV1(
                 prepared.selection,
                 prepared.catalog,
-                prepared.projection,
+                projection,
                 savedProjection.row.revision,
               ),
               pieceFeatures: projectCadTablePieceFeatures(
                 prepared.catalog,
-                prepared.projection,
+                projection,
                 prepared.draftCadCompileSource.scopes,
                 prepared.choices.find(({ scopeKey }) => scopeKey === prepared.scopeKey)?.label,
               ),
