@@ -34,6 +34,7 @@ import {
   type PatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1,
 } from './golden-card-production-v2-snapshot-feed-v1';
 import { createPatternImportDxfPhaseETopologyAnnotationApplicationTransactionV5 } from './topology-annotation-application-transaction-v5';
+import { createPatternImportDxfPhaseEWrappedTopologyAnnotationSaveV1 } from './wrapped-topology-annotation-save-v1';
 
 export const PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_APPLICATION_TRANSACTION_V4 =
   'pattern-import-dxf-product-composite-sidecar-application-transaction/4' as const;
@@ -177,6 +178,8 @@ export function createPatternImportDxfProductCompositeSidecarApplicationTransact
     schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_APPLICATION_TRANSACTION_V4,
     transaction,
     topologyAnnotations,
+    saveWrappedTopologyAnnotations:
+      createPatternImportDxfPhaseEWrappedTopologyAnnotationSaveV1(storageDeps),
     async confirmRestoredSelection(
       session: PatternImportDxfPhaseEExactNAssemblyOrderSessionV2,
       feed: PatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1,

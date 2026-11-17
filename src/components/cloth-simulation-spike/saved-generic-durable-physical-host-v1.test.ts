@@ -96,7 +96,9 @@ import {
 import { createPatternImportDxfPhaseERestoredTopologyAnnotationReaderV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/restored-topology-annotation-reader-v1';
 import { createPatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-assembly-snapshot-production-rpc-v1';
 
-import { createPatternImportDxfPhaseEWrappedTopologyAnnotationSaveV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/wrapped-topology-annotation-save-v1';
+import { createPatternImportDxfProductCompositeSidecarApplicationTransactionV4 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/composite-sidecar-production-transaction-v4';
+import { PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-topology-annotation-edit-control-v1';
+import { PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/exact-n-topology-annotation-editor-v1';
 
 // Real native DXF/worker/compiler, V3→V7 encoders, fixed fresh reader and genuine body session.
 // HTTP storage, declared synthetic observed triangle geometry, and GPU/preview lifecycle ports are fixtures.
@@ -652,9 +654,9 @@ async function borrowedLease() {
 async function openExactAnnotationFixture(
   storage: Awaited<ReturnType<typeof encodedStorage>>,
   version: 'v6' | 'v7',
+  row = storage[version],
 ) {
   const { catalog, current } = storage;
-  const row = storage[version];
   const restored = requireOk(
     await restorePatternImportDxfProductCompositeSidecarDurableV4({
       schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_DURABLE_RESTORE_REQUEST_V4,
@@ -751,6 +753,31 @@ function reactMountContainer() {
   };
 }
 
+function mountAnnotationFixtureView<Props>(View: (props: Props) => ReactNode) {
+  const root = createRoot(reactMountContainer() as never);
+  let props: Props;
+  let output: ReactNode;
+  let mounted = true;
+  function Harness() {
+    output = View(props);
+    return null;
+  }
+  const unmount = async () => {
+    if (!mounted) return;
+    mounted = false;
+    await act(async () => root.unmount());
+  };
+  cleanup.push(unmount);
+  return {
+    async render(next: Props) {
+      props = next;
+      await act(async () => root.render(createElement(Harness)));
+    },
+    output: () => output,
+    unmount,
+  };
+}
+
 async function wrappedAnnotationSaveFixture(version: 'v6' | 'v7') {
   const { storage } = await fixture(true);
   const session = await openExactAnnotationFixture(storage, version);
@@ -784,7 +811,7 @@ async function wrappedAnnotationSaveFixture(version: 'v6' | 'v7') {
     };
     return { semanticSidecar: structuredClone(outer) };
   });
-  const save = createPatternImportDxfPhaseEWrappedTopologyAnnotationSaveV1({
+  const application = createPatternImportDxfProductCompositeSidecarApplicationTransactionV4({
     createClient: () => ({
       GetTechCardPatternSemanticSidecar: get,
       PutTechCardPatternSemanticSidecar: put,
@@ -825,7 +852,16 @@ async function wrappedAnnotationSaveFixture(version: 'v6' | 'v7') {
     },
   };
   const signal = new AbortController().signal;
-  return { current, get, input, put, save, signal };
+  return {
+    current,
+    get,
+    input,
+    put,
+    signal,
+    storage,
+    application,
+    save: application.saveWrappedTopologyAnnotations,
+  };
 }
 
 async function unwrapAnnotationSaveFixture(
@@ -960,6 +996,201 @@ describe('same-row wrapped annotation CAS', () => {
       expect(put).toHaveBeenCalledTimes(1);
     },
   );
+});
+
+describe('mounted exact annotation Save and remount', () => {
+  async function mountedFixture(version: 'v6' | 'v7') {
+    const saved = await wrappedAnnotationSaveFixture(version);
+    const read = vi.fn(
+      createPatternImportDxfPhaseERestoredTopologyAnnotationReaderV1(
+        createPatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1(
+          saved.input.session.current.selectedOperation.sourceOperationNumber,
+        ).authorityAdapter,
+        saved.application.topologyAnnotations,
+      ),
+    );
+    const save = vi.fn(saved.save);
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    vi.stubGlobal('window', { event: undefined });
+    cleanup.push(() => vi.unstubAllGlobals());
+    const routeProps = {
+      session: saved.input.session,
+      desktopGeometry: saved.input.geometry,
+      activeSeamIndex: 0,
+      onActiveSeamIndexChange: () => {},
+      mannequin: null,
+      operationsPanel: null,
+      readSavedTopologyAnnotations: read,
+      saveWrappedTopologyAnnotations: save,
+    };
+    const route = mountAnnotationFixtureView(PatternImportDxfProductExactNSeamProductionMountV2);
+    const control = mountAnnotationFixtureView(
+      PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1,
+    );
+    const editor = mountAnnotationFixtureView(
+      PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1,
+    );
+    function desktopOf(view: ReactNode) {
+      expect(
+        isValidElement<{
+          desktop: ReactElement<PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1>;
+        }>(view),
+      ).toBe(true);
+      return (
+        view as ReactElement<{
+          desktop: ReactElement<PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1>;
+        }>
+      ).props.desktop;
+    }
+    function button(label: string) {
+      const button = visitMountedTree(control.output(), (props) => props.children === label);
+      expect(button).toBeTruthy();
+      return button!;
+    }
+    async function typeCallout(text: string) {
+      const props = visitMountedTree(
+        control.output(),
+        (props) => !!props.source && !!props.onDraftChange,
+      );
+      await editor.render(
+        props as Parameters<typeof PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1>[0],
+      );
+      const input = visitMountedTree(
+        editor.output(),
+        (props) => props['aria-label'] === 'Annotation callout 1 text',
+      );
+      expect(input).toBeTruthy();
+      await act(async () =>
+        (input!.onChange as (event: { target: { value: string } }) => void)({
+          target: { value: text },
+        }),
+      );
+    }
+    await route.render(routeProps);
+    await act(async () => {
+      await read.mock.results[0].value;
+    });
+    const desktop = desktopOf(route.output());
+    expect(desktop.type).toBe(PatternImportDxfPhaseECadTableZeroConnectCanvasV1);
+    const controlElement = desktop.props.savedAnnotationEditControl as ReactElement<
+      Parameters<typeof PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1>[0]
+    >;
+    expect(controlElement.type).toBe(PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1);
+    await control.render(controlElement.props);
+    expect(renderToStaticMarkup(control.output())).toContain('aria-label="Edit annotations"');
+    const dialog = control.output() as ReactElement<{ onOpenChange(open: boolean): void }>;
+    await act(async () => dialog.props.onOpenChange(true));
+
+    return {
+      ...saved,
+      read,
+      save,
+      routeProps,
+      route,
+      control,
+      editor,
+      desktopOf,
+      button,
+      typeCallout,
+    };
+  }
+
+  it.each(['v6', 'v7'] as const)(
+    'saves an edited %s callout explicitly and restores it under a freshly rebuilt exact owner',
+    async (version) => {
+      const view = await mountedFixture(version);
+      expect(view.button('Save annotations').disabled).toBe(true);
+      await view.typeCallout('Filo di controllo');
+      expect(view.button('Save annotations').disabled).toBe(false);
+      expect(view.put).not.toHaveBeenCalled();
+      const click = view.button('Save annotations').onClick as () => void;
+      await act(async () => {
+        click();
+        click();
+        await view.save.mock.results[0].value;
+      });
+      expect(view.save).toHaveBeenCalledTimes(1);
+      expect(view.put).toHaveBeenCalledTimes(1);
+      expect(view.save.mock.calls[0][0].expectedPreviousSidecarSha256).toBe(
+        view.current.sidecarSha256,
+      );
+      expect(
+        visitMountedTree(
+          view.control.output(),
+          (props) => props.children === 'Saved and verified by fresh readback.',
+        ),
+      ).toBeTruthy();
+      expect(view.button('Save annotations').disabled).toBe(true);
+      expect(view.desktopOf(view.route.output()).props.savedAnnotations?.callouts[0].text).toBe(
+        'Filo di controllo',
+      );
+      expect(view.get.mock.calls.length).toBeGreaterThanOrEqual(3);
+
+      const savedRow = outer!;
+      expect(savedRow.sidecarSha256).not.toBe(view.current.sidecarSha256);
+      const before = await unwrapAnnotationSaveFixture(version, view.current);
+      const after = await unwrapAnnotationSaveFixture(version, savedRow);
+      expect(after.exactV4).toEqual(before.exactV4);
+      expect(after.arrangement).toEqual(before.arrangement);
+      expect(after.physical).toEqual(before.physical);
+
+      await view.editor.unmount();
+      await view.control.unmount();
+      await view.route.unmount();
+      const session = await openExactAnnotationFixture(view.storage, version, savedRow);
+      expect(session.selectionOwner).not.toBe(view.routeProps.session.selectionOwner);
+      const fresh = mountAnnotationFixtureView(PatternImportDxfProductExactNSeamProductionMountV2);
+      await fresh.render({ ...view.routeProps, session });
+      await act(async () => {
+        await view.read.mock.results.at(-1)!.value;
+      });
+      const desktop = view.desktopOf(fresh.output());
+      const markup = renderToStaticMarkup(desktop);
+      expect(markup).toContain('Filo di controllo');
+      expect(markup).toContain('data-draft-cad-measurement="point"');
+      expect(markup).toContain('aria-label="Show callouts" aria-pressed="true"');
+      expect(view.put).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('retains the local draft on a stale captured digest and reloads the concurrent V7 edit without a second PUT', async () => {
+    const view = await mountedFixture('v7');
+    await view.typeCallout('Local draft');
+    const concurrent = requireOk(
+      await view.application.saveWrappedTopologyAnnotations(view.input, view.signal),
+    );
+    expect(concurrent.readback.callouts[0].text).toBe('Misura aggiornata');
+    const click = view.button('Save annotations').onClick as () => void;
+    await act(async () => {
+      click();
+      await view.save.mock.results[0].value;
+    });
+    expect(view.put).toHaveBeenCalledTimes(1);
+    expect(view.save.mock.calls[0][0].expectedPreviousSidecarSha256).toBe(
+      view.current.sidecarSha256,
+    );
+    expect(view.button('Save annotations').disabled).toBe(true);
+    expect(visitMountedTree(view.control.output(), (props) => !!props.draft)?.draft).toMatchObject({
+      callouts: [{ text: 'Local draft' }],
+    });
+    expect(
+      visitMountedTree(
+        view.control.output(),
+        (props) =>
+          typeof props.children === 'string' && props.children.includes('envelope changed'),
+      ),
+    ).toBeTruthy();
+
+    const reload = view.button('Reload saved annotations').onClick as () => void;
+    await act(async () => reload());
+    await act(async () => {
+      await view.read.mock.results.at(-1)!.value;
+    });
+    expect(view.desktopOf(view.route.output()).props.savedAnnotations?.callouts[0].text).toBe(
+      'Misura aggiornata',
+    );
+    expect(view.put).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('exact saved annotations in durable Composite envelopes', () => {

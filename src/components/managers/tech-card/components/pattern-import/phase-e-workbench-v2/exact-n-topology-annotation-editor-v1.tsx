@@ -183,16 +183,14 @@ export function PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1({
       current: PatternImportDxfPhaseEDraftCadTopologySessionV1,
     ) => PatternImportDxfPhaseEDraftCadTopologySessionV1,
   ) => {
-    setState((current) => {
-      const next = reducer(current);
-      const nextDraft = projectPatternImportDxfPhaseEExactNTopologyAnnotationDraftV1(next);
-      const nextFingerprint = draftFingerprint(nextDraft);
-      if (nextFingerprint !== publishedFingerprint.current) {
-        publishedFingerprint.current = nextFingerprint;
-        onDraftChange(nextDraft);
-      }
-      return next;
-    });
+    const next = reducer(state);
+    setState(next);
+    const nextDraft = projectPatternImportDxfPhaseEExactNTopologyAnnotationDraftV1(next);
+    const nextFingerprint = draftFingerprint(nextDraft);
+    if (nextFingerprint !== publishedFingerprint.current) {
+      publishedFingerprint.current = nextFingerprint;
+      onDraftChange(nextDraft);
+    }
   };
 
   return (

@@ -1,7 +1,14 @@
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 import type { BoxMm, PtMm } from 'lib/pattern-import/types';
-import { useCallback, useEffect, useMemo, useState, type SetStateAction } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type SetStateAction,
+  type ReactNode,
+} from 'react';
 
 import { SHEET_INK, SheetViewport, ptsAttr, vy } from '../sheet-viewport';
 import {
@@ -82,6 +89,7 @@ export type PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1 = Readonly<{
   disabled?: boolean;
   savedAnnotations?: PatternImportDxfPhaseETopologyAnnotationDraftV5;
   savedAnnotationBlocker?: string;
+  savedAnnotationEditControl?: ReactNode;
   savedSeam?: Readonly<{
     seamId: string;
     operationNumber: number;
@@ -266,6 +274,7 @@ function CadTableZeroCanvas({
   savedSeam,
   savedAnnotations,
   savedAnnotationBlocker,
+  savedAnnotationEditControl,
   owner,
 }: PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1 & { owner: CadTableZeroCanvasOwner }) {
   const authority = useMemo(
@@ -503,6 +512,7 @@ function CadTableZeroCanvas({
             pressed={boundaryVisibility['sewing-boundary']}
             onClick={() => toggleBoundary('sewing-boundary')}
           />
+          {savedAnnotationEditControl}
           {!!savedAnnotations?.measurements.length && (
             <PatternImportDxfPhaseECadWorkbenchToolButtonV1
               icon='measure-line'

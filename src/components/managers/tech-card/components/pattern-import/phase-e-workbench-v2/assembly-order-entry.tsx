@@ -2367,6 +2367,9 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
           onActiveSeamIndexChange={setExactNActiveSeamIndex}
           desktopGeometry={exactNDesktop}
           readSavedTopologyAnnotations={readSavedTopologyAnnotations}
+          saveWrappedTopologyAnnotations={
+            frozen ? undefined : exactNApplicationOwner?.saveWrappedTopologyAnnotations
+          }
           sceneOverlayInput={
             exactNMannequinStaging?.ok
               ? {

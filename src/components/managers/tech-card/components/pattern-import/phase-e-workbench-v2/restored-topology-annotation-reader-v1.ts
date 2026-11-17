@@ -13,11 +13,23 @@ import {
   resolvePatternImportDxfPhaseEVertexV1,
 } from './measurement-v1';
 import type { PatternImportDxfPhaseESavedAssemblyAuthorityTransportAdapterV1 } from './saved-assembly-authority-transport-v1';
-import type { PatternImportDxfPhaseETopologyAnnotationApplicationTransactionV5 } from './topology-annotation-application-transaction-v5';
+import type {
+  PatternImportDxfPhaseETopologyAnnotationApplicationResultV5,
+  PatternImportDxfPhaseETopologyAnnotationApplicationTransactionV5,
+} from './topology-annotation-application-transaction-v5';
 import type { PatternImportDxfPhaseETopologyAnnotationDraftV5 } from './topology-annotation-save-control-v5';
 
 type Session = PatternImportDxfPhaseEExactNAssemblyOrderSessionV2;
 type Geometry = PatternImportDxfProductExactNDesktopGeometryV2;
+
+export type PatternImportDxfPhaseERestoredTopologyAnnotationReadbackV1 = Readonly<{
+  mediaType: Extract<
+    PatternImportDxfPhaseETopologyAnnotationApplicationResultV5,
+    { ok: true }
+  >['mediaType'];
+  sidecarSha256: string;
+  draft: PatternImportDxfPhaseETopologyAnnotationDraftV5;
+}>;
 
 export function createPatternImportDxfPhaseERestoredTopologyAnnotationReaderV1(
   authority: Pick<
@@ -30,7 +42,7 @@ export function createPatternImportDxfPhaseERestoredTopologyAnnotationReaderV1(
     session: Session,
     geometry: Geometry,
     signal: AbortSignal,
-  ): Promise<PatternImportDxfPhaseETopologyAnnotationDraftV5> => {
+  ): Promise<PatternImportDxfPhaseERestoredTopologyAnnotationReadbackV1> => {
     const { current } = session;
     const { row } = current;
     const { annotationSource, projection } = geometry;
@@ -66,7 +78,11 @@ export function createPatternImportDxfPhaseERestoredTopologyAnnotationReaderV1(
     if (!matchesPatternImportDxfProductExactNSessionFreshAuthorityV1(session, fresh))
       throw new TypeError('Assembly Order changed while reading saved annotations.');
 
-    return Object.freeze({ measurements: Object.freeze(measurements), callouts });
+    return Object.freeze({
+      mediaType: loaded.mediaType,
+      sidecarSha256: loaded.readback.sidecarSha256,
+      draft: Object.freeze({ measurements: Object.freeze(measurements), callouts }),
+    });
   };
 }
 
@@ -75,7 +91,10 @@ export type PatternImportDxfPhaseERestoredTopologyAnnotationReaderV1 = ReturnTyp
 >;
 
 type Readback =
-  | Readonly<{ status: 'ready'; draft: PatternImportDxfPhaseETopologyAnnotationDraftV5 }>
+  | Readonly<{
+      status: 'ready';
+      readback: PatternImportDxfPhaseERestoredTopologyAnnotationReadbackV1;
+    }>
   | Readonly<{ status: 'blocked'; detail: string }>;
 
 export function usePatternImportDxfPhaseERestoredTopologyAnnotationsV1(
@@ -83,9 +102,11 @@ export function usePatternImportDxfPhaseERestoredTopologyAnnotationsV1(
   geometry: Geometry | null,
   read: PatternImportDxfPhaseERestoredTopologyAnnotationReaderV1 | undefined,
 ) {
+  const [generation, setGeneration] = useState(0);
   const [readback, setReadback] = useState<Readonly<{
     session: Session;
     geometry: Geometry;
+    generation: number;
     read: PatternImportDxfPhaseERestoredTopologyAnnotationReaderV1;
     result: Readback;
   }> | null>(null);
@@ -95,9 +116,15 @@ export function usePatternImportDxfPhaseERestoredTopologyAnnotationsV1(
     if (!available || !geometry || !read) return;
     const controller = new AbortController();
     void read(session, geometry, controller.signal).then(
-      (draft) => {
+      (loaded) => {
         if (!controller.signal.aborted)
-          setReadback({ session, geometry, read, result: { status: 'ready', draft } });
+          setReadback({
+            session,
+            geometry,
+            read,
+            generation,
+            result: { status: 'ready', readback: loaded },
+          });
       },
       (error: unknown) => {
         if (!controller.signal.aborted)
@@ -105,6 +132,7 @@ export function usePatternImportDxfPhaseERestoredTopologyAnnotationsV1(
             session,
             geometry,
             read,
+            generation,
             result: {
               status: 'blocked',
               detail:
@@ -114,14 +142,31 @@ export function usePatternImportDxfPhaseERestoredTopologyAnnotationsV1(
       },
     );
     return () => controller.abort();
-  }, [available, geometry, read, session]);
+  }, [available, generation, geometry, read, session]);
 
-  if (
-    !available ||
-    readback?.session !== session ||
-    readback.geometry !== geometry ||
-    readback.read !== read
-  )
-    return null;
-  return readback.result;
+  const current =
+    available &&
+    readback?.session === session &&
+    readback.geometry === geometry &&
+    readback.read === read &&
+    readback.generation === generation
+      ? readback.result
+      : null;
+  const publish = (
+    expectedPreviousSidecarSha256: string,
+    next: PatternImportDxfPhaseERestoredTopologyAnnotationReadbackV1,
+  ) => {
+    setReadback((stored) =>
+      stored?.session === session &&
+      stored.geometry === geometry &&
+      stored.read === read &&
+      stored.generation === generation &&
+      stored.result.status === 'ready' &&
+      stored.result.readback.sidecarSha256 === expectedPreviousSidecarSha256 &&
+      stored.result.readback.mediaType === next.mediaType
+        ? { ...stored, result: { status: 'ready', readback: next } }
+        : stored,
+    );
+  };
+  return { current, publish, reload: () => setGeneration((value) => value + 1) };
 }

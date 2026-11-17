@@ -371,3 +371,7 @@ export function createPatternImportDxfPhaseEWrappedTopologyAnnotationSaveV1(
     }
   };
 }
+
+export type PatternImportDxfPhaseEWrappedTopologyAnnotationSaveV1 = ReturnType<
+  typeof createPatternImportDxfPhaseEWrappedTopologyAnnotationSaveV1
+>;

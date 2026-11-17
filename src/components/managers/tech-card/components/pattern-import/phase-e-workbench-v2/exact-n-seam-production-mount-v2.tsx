@@ -34,6 +34,8 @@ import {
   usePatternImportDxfPhaseERestoredTopologyAnnotationsV1,
   type PatternImportDxfPhaseERestoredTopologyAnnotationReaderV1,
 } from './restored-topology-annotation-reader-v1';
+import { PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1 } from './saved-topology-annotation-edit-control-v1';
+import type { PatternImportDxfPhaseEWrappedTopologyAnnotationSaveV1 } from './wrapped-topology-annotation-save-v1';
 import type { PatternImportDxfProductExactNSeamUiSelectionOwnerV2 } from './exact-n-seam-atomic-ui-selection-v2';
 import type { PatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1 } from './golden-card-production-v2-snapshot-feed-v1';
 import {
@@ -121,6 +123,7 @@ export type PatternImportDxfProductExactNSeamProductionMountPropsV2 = Readonly<{
   /** Mounted only by the caller that owns the genuine V4/V5 annotation transaction. */
   topologyAnnotationAuthoring?: ReactNode;
   readSavedTopologyAnnotations?: PatternImportDxfPhaseERestoredTopologyAnnotationReaderV1;
+  saveWrappedTopologyAnnotations?: PatternImportDxfPhaseEWrappedTopologyAnnotationSaveV1;
 }>;
 
 function sceneOverlayBlocked(
@@ -209,6 +212,7 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
   sceneOverlayBlocker = null,
   topologyAnnotationAuthoring = null,
   readSavedTopologyAnnotations,
+  saveWrappedTopologyAnnotations,
 }: PatternImportDxfProductExactNSeamProductionMountPropsV2): ReactNode {
   const resolved = resolvePatternImportDxfProductExactNSeamProductionMountV2(
     session,
@@ -222,11 +226,12 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
       ? desktopGeometry
       : null;
   const tableSessionOwner = useCadTableZeroCanvasOwner(exactDesktop?.projection ?? null);
-  const savedAnnotations = usePatternImportDxfPhaseERestoredTopologyAnnotationsV1(
+  const annotationRead = usePatternImportDxfPhaseERestoredTopologyAnnotationsV1(
     session,
     exactDesktop,
     readSavedTopologyAnnotations,
   );
+  const savedAnnotations = annotationRead.current;
   if (!resolved.ok) return null;
   const activeSeam = resolved.model.state.seams[activeSeamIndex];
   const operation = resolved.model.state.bindings.selectedOperation;
@@ -324,10 +329,24 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
             pieceFeatures={exactDesktop.pieceFeatures}
             tableSessionOwner={tableSessionOwner}
             savedAnnotations={
-              savedAnnotations?.status === 'ready' ? savedAnnotations.draft : undefined
+              savedAnnotations?.status === 'ready' ? savedAnnotations.readback.draft : undefined
             }
             savedAnnotationBlocker={
               savedAnnotations?.status === 'blocked' ? savedAnnotations.detail : undefined
+            }
+            savedAnnotationEditControl={
+              !session.productionFeed &&
+              saveWrappedTopologyAnnotations &&
+              savedAnnotations?.status === 'ready' ? (
+                <PatternImportDxfPhaseESavedTopologyAnnotationEditControlV1
+                  session={session}
+                  geometry={exactDesktop}
+                  saved={savedAnnotations.readback}
+                  save={saveWrappedTopologyAnnotations}
+                  onReadback={annotationRead.publish}
+                  onReload={annotationRead.reload}
+                />
+              ) : null
             }
             savedSeam={{
               seamId: activeSeam.seamId,
