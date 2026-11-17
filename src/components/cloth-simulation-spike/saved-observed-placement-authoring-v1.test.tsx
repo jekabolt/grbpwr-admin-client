@@ -1,7 +1,11 @@
+import { Children, isValidElement, type ReactElement, type ReactNode } from 'react';
+import { CheckboxCommon } from 'ui';
+import { OBSERVED_BOUNDED_RADIAL_INITIALIZATION_POLICY_V1 } from 'lib/cloth/domain/observed-bounded-radial-initialization-v1';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   SavedObservedPlacementAuthoringV1,
+  SavedObservedRadialInitializationChoiceV1,
   createSavedObservedPlacementSubmissionV1,
   savedObservedPlacementAuthoringKeyV1,
   type SavedObservedPlacementAuthoringPropsV1,
@@ -9,6 +13,7 @@ import {
 import { SavedPlacementGarmentRoleEditorV1 } from './saved-placement-garment-role-editor-v1';
 import {
   createQualifiedTwoPanelObservedPlacementDraftV1 as create,
+  confirmQualifiedTwoPanelObservedPlacementDraftV1 as confirm,
   type QualifiedTwoPanelObservedPlacementAuthoringInputV1 as Input,
   type QualifiedTwoPanelObservedPlacementDraftV1 as Draft,
 } from './qualified-two-panel-observed-placement-authoring-v1';
@@ -143,7 +148,9 @@ describe('observed placement authoring UI and submission', () => {
       expect(html).toMatch(/<button[^>]*disabled[^>]*>Confirm target and save placement/);
       expect(html).toContain('data-placement-choice="placement-front"');
       expect(html).not.toContain('A-rest');
-      expect(html).not.toContain('type="checkbox"');
+      expect(html).toMatch(/<button[^>]*role="checkbox"[^>]*aria-checked="false"[^>]*disabled/);
+      expect(html).toContain('Allow up to 1% initial stretch for clearance');
+      expect(html).toContain('Saved with placement. Pattern dimensions stay unchanged.');
       expect(html).not.toContain('data-source-curve-id=');
       const controls = html.match(/<button[^>]*role="combobox"[^>]*>/g) ?? [];
       expect(controls.length).toBeGreaterThan(4);
@@ -159,6 +166,74 @@ describe('observed placement authoring UI and submission', () => {
       f.body.dispose();
     }
   });
+  it('uses the existing pointer/keyboard checkbox contract and clears confirmation before submitting the changed allowance', async () => {
+    const f = await fixture();
+    const submission = createSavedObservedPlacementSubmissionV1(() => true);
+    let draft = confirm(f.input.draft);
+    const update = (apply: (previous: Draft) => Draft) => {
+      draft = apply(draft);
+    };
+    const checkbox = (disabled: boolean) => {
+      const choice = SavedObservedRadialInitializationChoiceV1({
+        draft,
+        disabled,
+        onChange: update,
+      });
+      const label = Children.toArray(choice.props.children).find(
+        (child): child is ReactElement<{ children: ReactNode }> =>
+          isValidElement<{ children: ReactNode }>(child) && child.type === 'label',
+      );
+      if (!label) throw new Error('Expected associated visible checkbox label.');
+      const control = Children.toArray(label.props.children).find(
+        (child): child is ReactElement<Parameters<typeof CheckboxCommon>[0]> =>
+          isValidElement<Parameters<typeof CheckboxCommon>[0]>(child) &&
+          child.type === CheckboxCommon,
+      );
+      if (!control) throw new Error('Expected the existing accessible checkbox primitive.');
+      return control;
+    };
+    try {
+      const initial = checkbox(false);
+      expect(initial.props.checked).toBe(false);
+      expect(initial.props.disabled).toBe(false);
+      expect(initial.props['aria-label']).toBe('Allow up to 1% initial stretch for clearance');
+      const html = renderToStaticMarkup(initial);
+      expect(html).toContain('role="checkbox"');
+      expect(html).toContain('aria-checked="false"');
+      // Exercise the real shared checked-change entry supplied to Radix for click/Space. This is
+      // CPU component/event-contract evidence, not a browser-generated keyboard or pointer event.
+      const nativeControl = CheckboxCommon(initial.props);
+      expect(nativeControl.props.onKeyDown).toBeUndefined();
+      nativeControl.props.onCheckedChange(true);
+      expect(draft.allowBoundedRadialInitialization).toBe(true);
+      expect(draft.confirmation).toBeNull();
+      expect(draft.boundaries).toEqual(f.input.draft.boundaries);
+      expect(draft.observedTargetSha256).toBe(f.target.canonicalSha256);
+      expect(renderToStaticMarkup(checkbox(false))).toContain('aria-checked="true"');
+      const publish = vi.fn<SavedObservedPlacementAuthoringPropsV1['onConfirmedIntent']>(
+        async () => {},
+      );
+      expect(await submission.submit({ ...f.input, draft }, publish)).toEqual({
+        status: 'submitted',
+      });
+      expect(publish.mock.calls[0]![0].policy).toMatchObject(
+        OBSERVED_BOUNDED_RADIAL_INITIALIZATION_POLICY_V1,
+      );
+      draft = confirm(draft);
+      CheckboxCommon(checkbox(false).props).props.onCheckedChange(false);
+      expect(draft.allowBoundedRadialInitialization).toBe(false);
+      expect(draft.confirmation).toBeNull();
+      const unchanged = draft;
+      const locked = checkbox(true);
+      expect(locked.props.disabled).toBe(true);
+      CheckboxCommon(locked.props).props.onCheckedChange(true);
+      expect(draft).toBe(unchanged);
+    } finally {
+      submission.dispose();
+      f.body.dispose();
+    }
+  });
+
   it('keeps detached-read keys stable but resets choices for changed source or target seals', async () => {
     const f = await fixture();
     try {

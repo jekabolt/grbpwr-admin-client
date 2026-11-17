@@ -80,7 +80,10 @@ const weakMapDelete = WeakMap.prototype.delete;
 const stringSlice = String.prototype.slice;
 
 export type PatternImportDxfProductSavedCanonicalMediumRuntimeSourceIssuanceStateV2 =
-  'available' | 'issuing' | 'issued' | 'invalidated';
+  | 'available'
+  | 'issuing'
+  | 'issued'
+  | 'invalidated';
 
 export type PatternImportDxfProductSavedCanonicalMediumRuntimeSourceTransferV2<T> = Readonly<{
   value: T;
@@ -512,7 +515,8 @@ export function createPatternImportDxfProductSavedCanonicalMediumActualBodySessi
         const projection =
           projectPatternImportDxfProductSavedCanonicalMediumActualBodyBridgeV2(owner);
         const composerV3Owner = reflectApply(weakMapGet, pendingComposerV3Owners, [owner]) as
-          PatternImportDxfProductGarmentMeshComposerOwnerV3 | undefined;
+          | PatternImportDxfProductGarmentMeshComposerOwnerV3
+          | undefined;
         if (!projection || !composerV3Owner) return null;
         bindRuntimeSourceIssuance(owner);
         currentBridgeOwner = owner;

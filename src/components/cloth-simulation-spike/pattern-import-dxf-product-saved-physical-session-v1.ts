@@ -80,7 +80,8 @@ export function createPatternImportDxfProductSavedPhysicalSessionV1() {
   let previewAbort: AbortController | null = null;
   let receipt: PatternImportDxfProductSavedAnnularWriterFrameReceiptV2 | null = null;
   let composition:
-    PatternImportDxfProductSavedGarmentMeshIngressRequestV1['compositionRequest'] | null = null;
+    | PatternImportDxfProductSavedGarmentMeshIngressRequestV1['compositionRequest']
+    | null = null;
   let displayedBodyOwner: BetaSkirtCanonicalMediumDisplayedBodyOwnerV2 | null = null;
   let physicalStage: PatternImportDxfProductSavedPhysicalStageV1 = Object.freeze({
     status: 'idle',

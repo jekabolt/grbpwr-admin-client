@@ -369,6 +369,52 @@
       }
     },
     {
+      "id": "makehuman-female-bust-deltas-v1",
+      "derivedAsset": {
+        "path": "src/assets/cloth/makehuman-hm08-female-bust-deltas-v1.bin",
+        "byteLength": 6496,
+        "sha256": "604999167aff3654575f87eece98b1c4645ee588abe7381001b0d30f4fc3c6af"
+      },
+      "upstream": {
+        "repository": "makehumancommunity/makehuman",
+        "repositoryUrl": "https://github.com/makehumancommunity/makehuman.git",
+        "commit": "1f508f6083b2f823dab15de924b3bde72e08d77c",
+        "paths": [
+          "makehuman/data/targets/breast/female-young-averagemuscle-averageweight-mincup-averagefirmness.target"
+        ],
+        "sourceFiles": [
+          {
+            "path": "makehuman/data/targets/breast/female-young-averagemuscle-averageweight-mincup-averagefirmness.target",
+            "sha256": "65e4ca16353f6c0e23b420cf5d9b31d8993943b76e6cd3a6961943371dd6bc2f"
+          }
+        ],
+        "evidenceStatus": "complete",
+        "reason": "The fetched target matches the pinned source path and SHA-256. It is used signed; c < 0 is the MakeHuman min-cup field as authored; c > 0 reverses it (our extrapolation) and at runtime is faded to zero from the bust plane up to the armpit line and down to the under-bust station; max-cup targets at the same commit were measured and rejected (under-bust coupling 2.9–3.6× the bust gain); not vendored."
+      },
+      "generator": {
+        "status": "present",
+        "expectedPath": "scripts/cloth/build-makehuman-female-bust-deltas-v1.mjs",
+        "command": "node scripts/cloth/build-makehuman-female-bust-deltas-v1.mjs",
+        "reason": "The generator fetches the pinned target, verifies its SHA-256, removes indices outside the visible body, and writes deterministic bytes."
+      },
+      "license": {
+        "identifier": "CC0-1.0",
+        "receiptStatus": "present",
+        "receiptId": "makehuman-assets-cc0-1f508f6083b2f823dab15de924b3bde72e08d77c",
+        "receiptPath": "docs/cloth-simulation/mannequin/makehuman-license-1f508f6083b2f823dab15de924b3bde72e08d77c.md",
+        "reason": "The pinned upstream statement defines targets as bundled assets released under CC0 1.0 Universal; the breast target is fetched from the same pinned commit, and its own header also states CC0."
+      },
+      "claimBoundary": {
+        "runtimeAdmission": "bounded-visual-proxy",
+        "visualOnly": true,
+        "canonicalMeasurementSemanticMatchClaimed": false,
+        "anatomicalCalibrationClaimed": false,
+        "tapeMeasurementEquivalent": false,
+        "populationRepresentativenessClaimed": false,
+        "garmentFitEligible": false
+      }
+    },
+    {
       "id": "makehuman-limb-circumference-deltas-v1",
       "derivedAsset": {
         "path": "src/assets/cloth/makehuman-hm08-limb-circumference-deltas-v1.bin",

@@ -37,8 +37,7 @@ describe('persisted V3 observed target → genuine pair; explicit synthetic cube
         ports.realDiagnostics = true;
         const before = (await projectGarment(garmentOwner))!;
         const rest = new Uint8Array(
-          before.normalizedMaterial!.normalizedV5.simulation.constraints.continuumStrain
-            .triangleRestFrames,
+          before.normalizedMaterial!.normalizedV5.simulation.constraints.continuumStrain.triangleRestFrames,
         ).slice();
         const result = await build(pairRequest);
         if (!result.ok) throw new Error(JSON.stringify(result));
@@ -85,8 +84,7 @@ describe('persisted V3 observed target → genuine pair; explicit synthetic cube
           expect(after.mapping.positions3M).toEqual(before.mapping.positions3M);
           expect(
             new Uint8Array(
-              after.normalizedMaterial!.normalizedV5.simulation.constraints.continuumStrain
-                .triangleRestFrames,
+              after.normalizedMaterial!.normalizedV5.simulation.constraints.continuumStrain.triangleRestFrames,
             ),
           ).toEqual(rest);
           expect(state.reads).toBeGreaterThan(8);

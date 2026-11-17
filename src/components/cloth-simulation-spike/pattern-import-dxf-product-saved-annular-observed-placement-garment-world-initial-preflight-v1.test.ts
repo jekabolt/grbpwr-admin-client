@@ -92,8 +92,7 @@ describe('private minted observed pair → world preflight', () => {
         const local = await f.session.projectLatestGarment(f.generation);
         if (!local?.projection.normalizedMaterial) throw new Error('Missing real local material.');
         const rest = new Uint8Array(
-          local.projection.normalizedMaterial.normalizedV5.simulation.constraints.continuumStrain
-            .triangleRestFrames,
+          local.projection.normalizedMaterial.normalizedV5.simulation.constraints.continuumStrain.triangleRestFrames,
         ).slice();
         const result = await world(f.session, request(f, p));
         if (!result.ok) throw new Error(JSON.stringify(result));

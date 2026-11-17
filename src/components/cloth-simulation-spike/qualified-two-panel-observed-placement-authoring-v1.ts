@@ -1,3 +1,4 @@
+import { OBSERVED_BOUNDED_RADIAL_INITIALIZATION_POLICY_V1 } from 'lib/cloth/domain/observed-bounded-radial-initialization-v1';
 import type {
   PatternImportDxfProductGarmentMeshComposerProjectionV2,
   PatternImportDxfProductGarmentMeshComposerSnapshotV2,
@@ -17,9 +18,12 @@ export type QualifiedTwoPanelObservedPlacementDraftV1 = QualifiedTwoPanelGarment
     observedTargetSha256: string | null;
     /** Review of the existing FRONT/BACK, 700/900 mm, 0.64 rad annular profile only. */
     annularProfileReviewed: boolean;
+    /** Explicit initial WORLD placement allowance only; local garment rest dimensions stay exact. */
+    allowBoundedRadialInitialization: boolean;
     confirmation: Readonly<{
       composerCanonicalSha256: string;
       observedTargetSha256: string;
+      allowBoundedRadialInitialization: boolean;
     }> | null;
   }>;
 export type QualifiedTwoPanelObservedPlacementIntentV1 = QualifiedTwoPanelGarmentProfileIntentV1 &
@@ -132,6 +136,7 @@ export function createQualifiedTwoPanelObservedPlacementDraftV1(
     ...qualifiedTwoPanelPlacementAuthoringInternalsV1.createRoleDraft(composerCanonicalSha256),
     observedTargetSha256,
     annularProfileReviewed: false,
+    allowBoundedRadialInitialization: false,
     confirmation: null,
   };
 }
@@ -141,6 +146,8 @@ export function confirmQualifiedTwoPanelObservedPlacementDraftV1(
   value: QualifiedTwoPanelObservedPlacementDraftV1,
 ): QualifiedTwoPanelObservedPlacementDraftV1 {
   const draft = capture(value);
+  if (typeof draft.allowBoundedRadialInitialization !== 'boolean')
+    throw new TypeError('Choose an explicit initial radial placement allowance.');
   if (
     !digest(draft.composerCanonicalSha256) ||
     !draft.observedTargetSha256 ||
@@ -152,6 +159,7 @@ export function confirmQualifiedTwoPanelObservedPlacementDraftV1(
     confirmation: Object.freeze({
       composerCanonicalSha256: draft.composerCanonicalSha256,
       observedTargetSha256: draft.observedTargetSha256,
+      allowBoundedRadialInitialization: draft.allowBoundedRadialInitialization,
     }),
   };
 }
@@ -179,12 +187,17 @@ export async function buildQualifiedTwoPanelObservedPlacementIntentV1(
     throw new TypeError(
       'The observed target changed. Select and confirm its current identity again.',
     );
+  if (typeof draft.allowBoundedRadialInitialization !== 'boolean')
+    throw new TypeError('Choose an explicit initial radial placement allowance.');
   if (
     !draft.confirmation ||
     draft.confirmation.composerCanonicalSha256 !== draft.composerCanonicalSha256 ||
-    draft.confirmation.observedTargetSha256 !== draft.observedTargetSha256
+    draft.confirmation.observedTargetSha256 !== draft.observedTargetSha256 ||
+    draft.confirmation.allowBoundedRadialInitialization !== draft.allowBoundedRadialInitialization
   )
-    throw new TypeError('Explicitly confirm this exact source and observed target.');
+    throw new TypeError(
+      'Explicitly confirm this exact source, observed target and placement allowance.',
+    );
   const profile = shared.buildGarmentProfile(
     snapshot,
     projection,
@@ -198,7 +211,9 @@ export async function buildQualifiedTwoPanelObservedPlacementIntentV1(
   if (!target.ok) throw new TypeError(`The observed target metadata is invalid: ${target.detail}`);
   return {
     garment: profile.garment,
-    policy: profile.policy,
+    policy: draft.allowBoundedRadialInitialization
+      ? { ...profile.policy, ...OBSERVED_BOUNDED_RADIAL_INITIALIZATION_POLICY_V1 }
+      : profile.policy,
     annularParameters: profile.annularParameters,
     confirmedTargetSha256: target.canonicalSha256,
   };

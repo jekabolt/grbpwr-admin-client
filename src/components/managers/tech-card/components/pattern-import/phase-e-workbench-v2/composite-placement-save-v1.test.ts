@@ -47,8 +47,8 @@ const decodeBytes = (row: TechCardPatternSemanticSidecar) =>
 // This fixture proves storage composition and lifecycle, never backend or cloth acceptance.
 async function fixture(version: 3 | 4, seamCount = 1) {
   let authority:
-    typeof baseBindings | PatternImportDxfProductCompositePlacementSaveCurrentV1['authority'] =
-    baseBindings;
+    | typeof baseBindings
+    | PatternImportDxfProductCompositePlacementSaveCurrentV1['authority'] = baseBindings;
   let exactTopologyBytes: Uint8Array | null = null;
   let exactNCurrent: PatternImportDxfProductCompositePlacementSaveCurrentV1['exactNCurrent'] = null;
   let exactNBytes: Uint8Array | null = null;

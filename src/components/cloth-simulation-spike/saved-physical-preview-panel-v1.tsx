@@ -366,13 +366,13 @@ function SavedPhysicalPreviewCurrentV1({ owner, row, compiled }: Props & { compi
     physical?.status === 'blocked' && physical.stage === 'saved-local-frame-refinement';
   const canRun = Boolean(
     canonical &&
-    body &&
-    placement === 'ready' &&
-    !editing &&
-    !saving &&
-    !busy &&
-    !consumed &&
-    !compileBlocked,
+      body &&
+      placement === 'ready' &&
+      !editing &&
+      !saving &&
+      !busy &&
+      !consumed &&
+      !compileBlocked,
   );
   const progress =
     run === 'checking'

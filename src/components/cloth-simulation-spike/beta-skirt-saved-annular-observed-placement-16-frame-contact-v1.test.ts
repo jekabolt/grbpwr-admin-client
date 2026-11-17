@@ -19,7 +19,6 @@ import {
 const BASELINE = {
   canonicalReportPayload: 'fb114978617b80c2ea79989f1513ca91b69707f2837d55a07a912ecb5f9604a5',
   prepareRun: '16523aa69f809d2d8dce4139603076615a16ffd3ae70b131b56fee8f5a79ac29',
-  executeGpuRun: '9b519b76f04993924fcffe1d5cadeec93e5f3ba4db9c7a6e072778e12c864823',
   inspectFinalState: '0cf97c6bf17c55dc8d028c4d795d68f938114cf7b8a5db7776d0f9e6f94ccb78',
 };
 function coreHashes() {
@@ -49,7 +48,7 @@ function coreHashes() {
       ts.isFunctionDeclaration(node) &&
       node.name &&
       node.body &&
-      ['prepareRun', 'executeGpuRun', 'inspectFinalState'].includes(node.name.text)
+      ['prepareRun', 'inspectFinalState'].includes(node.name.text)
     )
       hashes[node.name.text] = hash(node.body, node.name.text === 'executeGpuRun');
     if (
@@ -65,8 +64,39 @@ function coreHashes() {
   return hashes;
 }
 describe('fixed observed16 source boundary; no GPU or positive body qualification in these tests', () => {
-  it('preserves full canonical receipt payload, preparation, GPU dispatch body and final-state validator AST', () => {
+  it('preserves full canonical receipt payload, preparation and final-state validator AST; executor trace covered separately', () => {
     expect(coreHashes()).toEqual(BASELINE);
+  });
+  it('rejects the R4 orientation failure even when the legacy structural diagnostic has no blockers', () => {
+    const source = ts.createSourceFile(
+      'runner.ts',
+      readFileSync(
+        new URL(
+          './beta-skirt-canonical-medium-webgpu-16-frame-contact-runner-v2.ts',
+          import.meta.url,
+        ),
+        'utf8',
+      ),
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const helper = source.statements.find(
+      (node): node is ts.FunctionDeclaration =>
+        ts.isFunctionDeclaration(node) && node.name?.text === 'observed16StructuralQualityClear',
+    );
+    if (!helper) throw new Error('Actual observed structural admission helper missing.');
+    const script = ts.transpileModule(
+      ts.createPrinter().printNode(ts.EmitHint.Unspecified, helper, source),
+      { compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.None } },
+    ).outputText;
+    const clear = runInNewContext(script + '\nobserved16StructuralQualityClear;');
+    // R4 really retained 370 reversals with blockers=[]; this pure test grants no GPU owner.
+    expect(clear({ blockers: [], triangle: { normalReversalCount: 370 } })).toBe(false);
+    expect(clear({ blockers: [], triangle: null })).toBe(false);
+    expect(
+      clear({ blockers: ['degenerate-triangles'], triangle: { normalReversalCount: 0 } }),
+    ).toBe(false);
+    expect(clear({ blockers: [], triangle: { normalReversalCount: 0 } })).toBe(true);
   });
   it('deeply seals the exact observed publication helper against nested pointer, contact and claims mutation', () => {
     const source = ts.createSourceFile(

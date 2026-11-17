@@ -39,15 +39,26 @@ it('preserves original legacy garment report bytes and all six physical buffer d
           ),
         },
       };
-      expect(JSON.stringify(result, null, 2) + '\n').toBe(
-        readFileSync(
-          new URL(
-            './pattern-import-dxf-product-saved-annular-garment-v1.legacy-baseline.json',
-            import.meta.url,
+      // Repository formatting may reflow JSON arrays. Restore its original serialization, then
+      // pin the historical bytes before comparing the full report and all physical buffer hashes.
+      const baseline =
+        JSON.stringify(
+          JSON.parse(
+            readFileSync(
+              new URL(
+                './pattern-import-dxf-product-saved-annular-garment-v1.legacy-baseline.json',
+                import.meta.url,
+              ),
+              'utf8',
+            ),
           ),
-          'utf8',
-        ),
+          null,
+          2,
+        ) + '\n';
+      expect(createHash('sha256').update(baseline).digest('hex')).toBe(
+        'e965a0c2fa6684be6f80d9ef8b023fe21e47030d7162d9fba5dbb8ac387f4639',
       );
+      expect(JSON.stringify(result, null, 2) + '\n').toBe(baseline);
     } finally {
       disposePatternImportDxfProductSavedAnnularGarmentV1(built.owner);
     }

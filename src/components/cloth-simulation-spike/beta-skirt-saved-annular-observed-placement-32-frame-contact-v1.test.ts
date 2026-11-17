@@ -14,6 +14,7 @@ import {
   projectBetaSkirtCanonicalMediumSavedWebgpu32FrameContactV4 as canonicalProject,
   disposeBetaSkirtCanonicalMediumSavedWebgpu32FrameContactV4 as canonicalDispose,
 } from './beta-skirt-canonical-medium-saved-webgpu-32-frame-contact-runner-v4';
+import { evaluateBetaSkirtCoherentEnvelopeQualityV1 } from './beta-skirt-coherent-envelope-quality-evidence-v1';
 import { betaSkirtSaved32SelfOrientationValidationV1 as physicalValidators } from './beta-skirt-canonical-medium-saved-webgpu-32-frame-self-orientation-v1';
 
 import { withObservedPlacementDisplayedBodyPairSourceV1 } from './beta-skirt-saved-annular-observed-placement-displayed-body-product-placement-v1.test-fixture';
@@ -47,7 +48,6 @@ const BASELINE: Record<string, string> = {
     '2c85ffb61f1601f58b45f7aa498a2d12002d32ce7af195451465eefab885ef77',
   canonicalReportPayload: '63a55512026cfa45374cf888e5fe58a6e0d580b0960cc6ed306ae9fc0ade28e0',
   prepareRun: '16523aa69f809d2d8dce4139603076615a16ffd3ae70b131b56fee8f5a79ac29',
-  executeGpuRun: 'db0e78bd67b3b9dbb3bc69fa243d26dc5410bb473dd332be20787657c084693a',
   inspectFinalState: '0cf97c6bf17c55dc8d028c4d795d68f938114cf7b8a5db7776d0f9e6f94ccb78',
   projectBetaSkirtCanonicalMediumSavedWebgpu32FrameContactV4:
     'be19db141cb3d742ec183f1c20bab2e63c41da2e04eb19b44ac36cd1a1a60994',
@@ -128,7 +128,7 @@ function privateHelpers(names: string[], globals: Record<string, unknown> = {}) 
 }
 
 describe('observed32 fixed source/16 boundary, shared kernel compatibility; CPU only', () => {
-  it('preserves complete canonical run/report/project/dispose, preparation, GPU body, checkpoint ABI and physical validator AST', () => {
+  it('preserves canonical run/report/project/dispose, preparation, checkpoint ABI and validators; executor trace covered separately', () => {
     expect(coreHashes()).toEqual(BASELINE);
   });
   it('rejects every structural/cross-kind owner before GPU provider access and without invoking getters', async () => {
@@ -193,7 +193,7 @@ describe('observed32 fixed source/16 boundary, shared kernel compatibility; CPU 
     expect(await project({}, invalid)).toBeNull();
     expect(touches).toBe(0);
   });
-  it('compares all 9280 vec4 bytes,6960 vec3 bytes and3724 ABI bytes including signed zero and final words', () => {
+  it('compares all 9280 vec4 bytes,6960 vec3 bytes and3728 ABI bytes including signed zero and final words', () => {
     const { observed32CheckpointMatches: matches } = privateHelpers(
       ['observed32CheckpointMatches', 'bytesEqual'],
       { PARTICLE_COUNT: 580, CapturedUint8Array: Uint8Array },
@@ -207,7 +207,7 @@ describe('observed32 fixed source/16 boundary, shared kernel compatibility; CPU 
       return {
         positions4: new Float32Array(580 * 4),
         positions3: new Float32Array(580 * 3),
-        diagnostics: new Uint8Array(3724),
+        diagnostics: new Uint8Array(3728),
       };
     }
     const expected = tuple();
@@ -219,10 +219,65 @@ describe('observed32 fixed source/16 boundary, shared kernel compatibility; CPU 
     xyz.positions3[xyz.positions3.length - 1] = -0;
     expect(matches(xyz, expected)).toBe(false);
     const abi = tuple();
-    abi.diagnostics[3723] = 1;
+    abi.diagnostics[3727] = 1;
     expect(matches(abi, expected)).toBe(false);
-    expect(matches({ ...tuple(), diagnostics: new Uint8Array(3723) }, expected)).toBe(false);
+    expect(matches({ ...tuple(), diagnostics: new Uint8Array(3727) }, expected)).toBe(false);
     expect(matches({ ...tuple(), positions4: new Float32Array(2319) }, expected)).toBe(false);
+  });
+  it('rejects saturated, out-of-workload and decreasing cumulative bend limiter counts', () => {
+    const { observed32BendCountersValid: valid } = privateHelpers(['observed32BendCountersValid'], {
+      BEND_COUNT: 1246,
+      FIXED_ITERATIONS: 8,
+      FRAME_16_CHECKPOINT_COUNT: 16,
+      FRAME_COUNT: 32,
+    }) as { observed32BendCountersValid: (checkpoint: number, final: number) => boolean };
+    expect(valid(0, 0)).toBe(true);
+    expect(valid(159488, 318976)).toBe(true);
+    expect(valid(1272, 1544)).toBe(true);
+    for (const [checkpoint, final] of [
+      [1, 0],
+      [159489, 159489],
+      [0, 318977],
+      [0, 0xffffffff],
+      [NaN, 0],
+      [-1, 0],
+      [0.5, 1],
+    ])
+      expect(valid(checkpoint!, final!)).toBe(false);
+  });
+  it('copies source and candidate topology separately for the real non-aliasing quality diagnostic', () => {
+    const { evaluateObserved32Quality: evaluate } = privateHelpers(['evaluateObserved32Quality'], {
+      CapturedFloat32Array: Float32Array,
+      CapturedUint32Array: Uint32Array,
+      // The private helper runs in a VM realm; only normalize its outer record prototype.
+      // Its actual arrays are passed unchanged to the genuine strict diagnostic.
+      evaluateBetaSkirtCoherentEnvelopeQualityV1: (
+        input: Parameters<typeof evaluateBetaSkirtCoherentEnvelopeQualityV1>[0],
+      ) => evaluateBetaSkirtCoherentEnvelopeQualityV1({ ...input }),
+    }) as {
+      evaluateObserved32Quality: (
+        source: Float32Array,
+        triangles: Uint32Array,
+        final: Float32Array,
+      ) => ReturnType<typeof evaluateBetaSkirtCoherentEnvelopeQualityV1>;
+    };
+    const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    const triangles = new Uint32Array([0, 1, 2]);
+    expect(() =>
+      evaluateBetaSkirtCoherentEnvelopeQualityV1({
+        sourcePositionsM: positions,
+        sourceTriangles: triangles,
+        candidatePositionsM: positions,
+        candidateTriangles: triangles,
+      }),
+    ).toThrow('must not alias storage');
+    const before = [...positions],
+      topologyBefore = [...triangles];
+    const report = evaluate(positions, triangles, positions);
+    expect(report.blockers).toEqual([]);
+    expect(report.triangle?.normalReversalCount).toBe(0);
+    expect([...positions]).toEqual(before);
+    expect([...triangles]).toEqual(topologyBefore);
   });
   it('deeply freezes receipt claims and nested actual-body/self/strain reports while keeping binary outside the seal', () => {
     const { freezeObserved32: seal } = privateHelpers(['freezeObserved32']) as {

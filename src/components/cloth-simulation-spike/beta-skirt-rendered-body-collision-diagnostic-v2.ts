@@ -79,7 +79,11 @@ export interface BetaSkirtRenderedBodyCollisionDiagnosticReportV2 {
 }
 
 export type BetaSkirtRenderedBodyCollisionDiagnosticErrorCodeV2 =
-  'input-invalid' | 'policy-mismatch' | 'budget-exhausted' | 'sha256-unavailable' | 'engine-failed';
+  | 'input-invalid'
+  | 'policy-mismatch'
+  | 'budget-exhausted'
+  | 'sha256-unavailable'
+  | 'engine-failed';
 
 export class BetaSkirtRenderedBodyCollisionDiagnosticErrorV2 extends Error {
   constructor(

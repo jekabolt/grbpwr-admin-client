@@ -104,8 +104,9 @@ beforeAll(async () => {
   remove = vi.spyOn(EventTarget.prototype, 'removeEventListener');
   geometryDispose = vi.spyOn(THREE.BufferGeometry.prototype, 'dispose');
   materialDispose = vi.spyOn(THREE.Material.prototype, 'dispose');
-  ({ createSavedObservedStrainHeatmapPreviewV1: create } =
-    await import('./beta-skirt-saved-annular-observed-placement-strain-heatmap-preview-v1'));
+  ({ createSavedObservedStrainHeatmapPreviewV1: create } = await import(
+    './beta-skirt-saved-annular-observed-placement-strain-heatmap-preview-v1'
+  ));
 });
 beforeEach(() => {
   ports.sourceController = new AbortController();

@@ -1,5 +1,13 @@
 /* global GPUBindGroup, GPUBuffer, GPUComputePipeline, GPUDevice, GPUShaderModuleDescriptor */
 
+import {
+  XPBD_EMBEDDED_SCALAR_BEND_KERNEL_V2,
+  XPBD_EMBEDDED_SCALAR_BEND_SOURCE_SHA256_V2,
+  XPBD_EMBEDDED_SCALAR_BEND_DIAGNOSTICS_BYTES_V2,
+  getXpbdEmbeddedScalarBendPipelineIdentityV2,
+  xpbdEmbeddedScalarBendShaderDescriptorV2,
+} from 'lib/cloth/runtime/webgpu/xpbd-embedded-scalar-bend-kernel-v2';
+
 import { decodeClothMaterialGpuV1 } from '../../lib/cloth/compiler/material-package';
 import {
   ACTUAL_BODY_TRIANGLE_MESH_CONTACT_DIAGNOSTICS_BYTES_V2,
@@ -380,6 +388,13 @@ export type BetaSkirtSavedAnnularObservedPlacement16FrameContactReportV1 = Reado
   > & {
     schemaVersion: typeof BETA_SKIRT_SAVED_ANNULAR_OBSERVED_PLACEMENT_16_FRAME_CONTACT_V1;
     sourceKind: 'saved-annular-observed-placement-v3';
+    bendSolver: Readonly<{
+      kernel: typeof XPBD_EMBEDDED_SCALAR_BEND_KERNEL_V2;
+      sourceSha256: typeof XPBD_EMBEDDED_SCALAR_BEND_SOURCE_SHA256_V2;
+      stepBound: 'minimum-current-triangle-altitude-divided-by-eight';
+      limitedStepCount: number;
+      diagnosticsByteLength: 8;
+    }>;
     sourceReport: BetaSkirtSavedAnnularObservedPlacementRuntimeSourceReportV1;
     observedPostgate: Readonly<{
       collision: BetaSkirtRenderedBodyCollisionDiagnosticReportV2;
@@ -781,6 +796,13 @@ export async function runBetaSkirtCanonicalMediumWebgpu16FrameContactV2(
   ) as Promise<BetaSkirtCanonicalMediumWebgpu16FrameContactRunnerResultV2>;
 }
 
+/** Structural orientation admission only; this does not establish a calibrated strain budget. */
+function observed16StructuralQualityClear(
+  report: BetaSkirtCoherentEnvelopeQualityReportV1,
+): boolean {
+  return report.blockers.length === 0 && report.triangle?.normalReversalCount === 0;
+}
+
 async function runBound16(
   canvas: HTMLCanvasElement,
   projection: CoreProjection,
@@ -823,6 +845,7 @@ async function runBound16(
   let finalPositions: Float32Array | null = null;
   let velocityDiagnostics: Uint32Array | null = null;
   let bendInvalidCount = 0;
+  let bendLimitedStepCount = 0;
   let continuumStatuses: Uint32Array | null = null;
   let contactDiagnostics: Uint32Array | null = null;
   let totalFrameExecutionWallTimeMs = 0;
@@ -841,7 +864,7 @@ async function runBound16(
     await validateDigestAuthority();
     observed?.current();
     try {
-      pipelineIdentities = await resolvePipelineIdentities();
+      pipelineIdentities = await resolvePipelineIdentities(observed !== undefined);
       observed?.current();
     } catch (error) {
       return Object.freeze({
@@ -867,11 +890,13 @@ async function runBound16(
       pipelineIdentities,
       options.signal,
       observed?.current,
+      observed !== undefined,
     );
     observed?.current();
     finalPositions = observation.finalPositions;
     velocityDiagnostics = observation.velocityDiagnostics;
     bendInvalidCount = observation.bendInvalidCount;
+    bendLimitedStepCount = observation.bendLimitedStepCount;
     continuumStatuses = observation.continuumStatuses;
     contactDiagnostics = observation.contactDiagnostics;
     totalFrameExecutionWallTimeMs = observation.totalFrameExecutionWallTimeMs;
@@ -932,6 +957,7 @@ async function runBound16(
   );
   if (
     !state.valid ||
+    (observed && bendLimitedStepCount > BEND_COUNT * FIXED_ITERATIONS * FRAME_COUNT) ||
     validationMessages.length !== 0 ||
     deviceLossMessages.length !== 0 ||
     !cleanupResult.leaseReleased ||
@@ -1055,7 +1081,9 @@ async function runBound16(
     (!observed ||
       (collisionReport.intersections.bodySelfIntersectionCount === 0 &&
         observedSigned?.contacts.length === 0));
-  const qualityClear = qualityReport.blockers.length === 0;
+  const qualityClear = observed
+    ? observed16StructuralQualityClear(qualityReport)
+    : qualityReport.blockers.length === 0;
   const contactMaximumCorrectionM = positiveFloatFromBits(contactDiagnostics[4]!);
   const contactCorrectionCapHit =
     contactMaximumCorrectionM >= Math.fround(CONTACT_MAXIMUM_CORRECTION_M);
@@ -1179,6 +1207,17 @@ async function runBound16(
       ...reportWithoutSeal,
       schemaVersion: BETA_SKIRT_SAVED_ANNULAR_OBSERVED_PLACEMENT_16_FRAME_CONTACT_V1,
       sourceKind: 'saved-annular-observed-placement-v3' as const,
+      execution: {
+        ...reportWithoutSeal.execution,
+        diagnosticReadbackByteLength: reportWithoutSeal.execution.diagnosticReadbackByteLength + 4,
+      },
+      bendSolver: {
+        kernel: XPBD_EMBEDDED_SCALAR_BEND_KERNEL_V2,
+        sourceSha256: XPBD_EMBEDDED_SCALAR_BEND_SOURCE_SHA256_V2,
+        stepBound: 'minimum-current-triangle-altitude-divided-by-eight' as const,
+        limitedStepCount: bendLimitedStepCount,
+        diagnosticsByteLength: 8 as const,
+      },
       sourceReport: observed.sourceReport,
       observedPostgate: {
         collision: collisionReport as BetaSkirtRenderedBodyCollisionDiagnosticReportV2,
@@ -1592,7 +1631,7 @@ function prepareRun(projection: CoreProjection) {
   });
 }
 
-async function resolvePipelineIdentities() {
+async function resolvePipelineIdentities(safeguardedBend = false) {
   const crypto = cryptoShim();
   const resetNames = ['distance', 'seam-all-active', 'bend', 'continuum'] as const;
   const [predict, distance, seam, bend, continuum, velocity, contact, ...resets] =
@@ -1600,7 +1639,9 @@ async function resolvePipelineIdentities() {
       getXpbdPredictPipelineIdentityV1({ crypto }),
       getXpbdDistancePipelineIdentityV1({ crypto }),
       getXpbdSeamSolvePipelineIdentityV1({ crypto }),
-      getXpbdEmbeddedScalarBendPipelineIdentityV1({ crypto }),
+      safeguardedBend
+        ? getXpbdEmbeddedScalarBendPipelineIdentityV2({ crypto })
+        : getXpbdEmbeddedScalarBendPipelineIdentityV1({ crypto }),
       getContinuumStrainVNextPipelineIdentityV1({ crypto }),
       getXpbdVelocityDiagnosticPipelineIdentityV1({ crypto }),
       getActualBodyTriangleMeshContactPipelineIdentityV2({ crypto }),
@@ -1632,6 +1673,7 @@ async function executeGpuRun(
   identities: Awaited<ReturnType<typeof resolvePipelineIdentities>>,
   signal: AbortSignal | undefined,
   currentSource?: () => void,
+  safeguardedBend = false,
 ) {
   throwIfAborted(signal);
   currentSource?.();
@@ -1648,7 +1690,13 @@ async function executeGpuRun(
     createPipeline(device, xpbdPredictShaderDescriptorV1(), identities.predict.entryPoint),
     createPipeline(device, xpbdDistanceShaderDescriptorV1(), identities.distance.entryPoint),
     createPipeline(device, xpbdSeamSolveShaderDescriptorV1(), identities.seam.entryPoint),
-    createPipeline(device, xpbdEmbeddedScalarBendShaderDescriptorV1(), identities.bend.entryPoint),
+    createPipeline(
+      device,
+      safeguardedBend
+        ? xpbdEmbeddedScalarBendShaderDescriptorV2()
+        : xpbdEmbeddedScalarBendShaderDescriptorV1(),
+      identities.bend.entryPoint,
+    ),
     createPipeline(
       device,
       continuumStrainVNextShaderDescriptorV1(),
@@ -1840,11 +1888,12 @@ async function executeGpuRun(
     prepared.bendLambdas,
     STORAGE,
   );
+  const bendDiagnosticsBytes = safeguardedBend ? XPBD_EMBEDDED_SCALAR_BEND_DIAGNOSTICS_BYTES_V2 : 4;
   const bendInvalidBuffer = createEmptyGpuBuffer(
     device,
     trackedBuffers,
     'canonical-medium bend invalid counter',
-    4,
+    bendDiagnosticsBytes,
     STORAGE | COPY_SRC,
   );
   const bendColorParamBuffers = prepared.bendSchedule.map((color, index) =>
@@ -2106,7 +2155,7 @@ async function executeGpuRun(
   const positionBytes = prepared.physical.byteLength;
   const velocityDiagnosticsOffset = positionBytes;
   const bendInvalidOffset = velocityDiagnosticsOffset + 32;
-  const continuumStatusesOffset = bendInvalidOffset + 4;
+  const continuumStatusesOffset = bendInvalidOffset + bendDiagnosticsBytes;
   const contactDiagnosticsOffset = continuumStatusesOffset + CONTINUUM_COUNT * 4;
   const totalReadbackBytes =
     contactDiagnosticsOffset + ACTUAL_BODY_TRIANGLE_MESH_CONTACT_DIAGNOSTICS_BYTES_V2;
@@ -2127,7 +2176,13 @@ async function executeGpuRun(
     velocityDiagnosticsOffset,
     32,
   );
-  readbackEncoder.copyBufferToBuffer(bendInvalidBuffer, 0, readbackBuffer, bendInvalidOffset, 4);
+  readbackEncoder.copyBufferToBuffer(
+    bendInvalidBuffer,
+    0,
+    readbackBuffer,
+    bendInvalidOffset,
+    bendDiagnosticsBytes,
+  );
   readbackEncoder.copyBufferToBuffer(
     continuumStatusesBuffer,
     0,
@@ -2161,6 +2216,9 @@ async function executeGpuRun(
       readback.buffer.slice(velocityDiagnosticsOffset, bendInvalidOffset),
     ),
     bendInvalidCount: new DataView(readback.buffer).getUint32(bendInvalidOffset, true),
+    bendLimitedStepCount: safeguardedBend
+      ? new DataView(readback.buffer).getUint32(bendInvalidOffset + 4, true)
+      : 0,
     continuumStatuses: new CapturedUint32Array(
       readback.buffer.slice(continuumStatusesOffset, contactDiagnosticsOffset),
     ),
