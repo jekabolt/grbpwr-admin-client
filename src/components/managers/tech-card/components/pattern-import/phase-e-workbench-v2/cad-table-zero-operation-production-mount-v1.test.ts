@@ -4,12 +4,21 @@ import { describe, expect, it, vi } from 'vitest';
 import { buildPatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import { selectPatternImportDxfProductDraftPhaseDSizeV1 } from 'lib/cloth/domain/pattern-import-dxf-product-draft-phase-d-selection-v1';
 import { createPatternImportDxfProductSavedRuntimeSeedV1Fixture } from 'lib/cloth/domain/pattern-import-dxf-product-garment-mesh-composer-v2.test-fixture';
+import { projectPatternImportDxfProductPhaseEAssemblyV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 
+import { derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1 } from './cad-table-connect-edge-segments-v1';
 import { capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1 } from './cad-table-zero-operation-authority-rebind-v1';
+import {
+  createPatternImportDxfPhaseECadTableZeroConnectControllerStateV1,
+  selectPatternImportDxfPhaseECadTableZeroConnectControllerEdgeV1,
+  startPatternImportDxfPhaseECadTableZeroConnectControllerV1,
+} from './cad-table-zero-connect-controller-v1';
 import { capturePatternImportDxfPhaseEZeroConnectPreparedAuthorityV1 } from './cad-table-zero-connect-phase-e-authority-v1';
 import type { PatternImportDxfPhaseECadTableZeroOperationFreshPreparationResultV1 } from './cad-table-zero-operation-fresh-preparation-v1';
 import { createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1 } from './cad-table-zero-operation-generation-owner-v1';
+import { createPatternImportDxfPhaseEZeroConnectPendingHandoffV1 } from './cad-table-zero-connect-post-save-owner-v1';
 import {
+  createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefreshV1,
   isPatternImportDxfPhaseECadTableZeroOperationAuthoringReadyV1,
   preparePatternImportDxfPhaseECadTableZeroOperationSavedFailoverV1,
   resolvePatternImportDxfPhaseECadTableZeroOperationAfterFreshV1,
@@ -29,7 +38,10 @@ type FreshPrepared = Extract<
   { ok: true }
 >;
 
-async function genuineSavedPrepared(importGeneration = 37): Promise<SavedPrepared> {
+async function genuineSavedPrepared(
+  importGeneration = 37,
+  cardLockVersion = 12,
+): Promise<SavedPrepared> {
   const seed = await createPatternImportDxfProductSavedRuntimeSeedV1Fixture();
   const selection = await selectPatternImportDxfProductDraftPhaseDSizeV1(seed.draft, 'main', 'M');
   if (!selection.ok) throw new Error(selection.blockers[0].detail);
@@ -39,10 +51,15 @@ async function genuineSavedPrepared(importGeneration = 37): Promise<SavedPrepare
     'M',
   );
   if (!catalog.ok) throw new Error(catalog.blockers[0].detail);
+  const projection = projectPatternImportDxfProductPhaseEAssemblyV1(
+    catalog.catalog,
+    selection.selection,
+  );
+  if (!projection.ok) throw new Error(projection.blockers[0].detail);
   const row = Object.freeze({
     ...seed.row,
     sha256: selection.selection.pipeline.contentBinding!.sourceSha256,
-    cardLockVersion: 12,
+    cardLockVersion,
   });
   const owner = createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1();
   const generation = owner.beginFresh('production-mount:genuine', importGeneration);
@@ -63,7 +80,7 @@ async function genuineSavedPrepared(importGeneration = 37): Promise<SavedPrepare
     importGeneration,
     choices: Object.freeze([]),
     catalog: catalog.catalog,
-    projection: Object.freeze({}),
+    projection: projection.projection,
     authoringAuthority,
     blocker: null,
   }) as unknown as SavedPrepared;
@@ -121,6 +138,37 @@ function cachedCardWithoutRow(techCardId: number): common_TechCard {
       pieceDxfAliases: { items: [] },
     },
   } as unknown as common_TechCard;
+}
+
+async function genuineControllerAuthority() {
+  const prepared = await genuineSavedPrepared(37, 12);
+  const refreshed = await genuineSavedPrepared(37, 13);
+  const expectation =
+    capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1(prepared);
+  const refreshOwner = createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefreshV1({
+    prepared,
+    expectation,
+    savedAuthority: {
+      resolveLatestCard: vi.fn(async () => ({
+        techCard: savedCardWithRow(refreshed),
+        row: refreshed.authoringAuthority.row,
+      })),
+    } as never,
+    preparationKey: 'card:6:main:M',
+    orderSizeIds: (ids) => ids,
+    sizeNameById: new Map([[7, 'M']]),
+    prepareSaved: vi.fn(async () => refreshed) as never,
+  });
+  if (!refreshOwner) throw new Error('The opaque refresh capability was not minted.');
+  return {
+    prepared,
+    authority: Object.freeze({
+      catalog: prepared.catalog,
+      projection: prepared.projection,
+      authoringAuthority: prepared.authoringAuthority,
+      authoringAuthorityRefresh: refreshOwner,
+    }),
+  };
 }
 
 describe('zero-operation production mount fresh-to-saved race failover', () => {
@@ -241,5 +289,344 @@ describe('zero-operation production mount fresh-to-saved race failover', () => {
         sourceFileId: 'drifted-source',
       }),
     ).toBe(false);
+  });
+
+  it('refreshes through a strictly newer saved row and returns only the new genuine token', async () => {
+    const prepared = await genuineSavedPrepared(37, 12);
+    const refreshed = await genuineSavedPrepared(37, 13);
+    const expectation =
+      capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1(prepared);
+    const resolveLatestCard = vi.fn(async () => ({
+      techCard: savedCardWithRow(refreshed),
+      row: refreshed.authoringAuthority.row,
+    }));
+    const prepareSaved = vi.fn(async () => refreshed);
+    const owner = createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefreshV1({
+      prepared,
+      expectation,
+      savedAuthority: { resolveLatestCard } as never,
+      preparationKey: 'card:6:main:M',
+      orderSizeIds: (ids) => ids,
+      sizeNameById: new Map([[7, 'M']]),
+      prepareSaved: prepareSaved as never,
+    });
+
+    expect(owner).not.toBeNull();
+    const result = await owner!.refresh(new AbortController().signal);
+    expect(resolveLatestCard).toHaveBeenCalledWith(
+      prepared.authoringAuthority.row,
+      expect.any(AbortSignal),
+    );
+    expect(prepareSaved).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({
+      ok: true,
+      authority: refreshed.authoringAuthority,
+      importGeneration: 37,
+      blocker: null,
+    });
+  });
+
+  it('fails closed before reading when refresh is aborted and rejects structural authority', async () => {
+    const prepared = await genuineSavedPrepared(37, 12);
+    const refreshed = await genuineSavedPrepared(37, 13);
+    const expectation =
+      capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1(prepared);
+    const resolveLatestCard = vi.fn(async () => ({
+      techCard: savedCardWithRow(refreshed),
+      row: refreshed.authoringAuthority.row,
+    }));
+    const prepareSaved = vi.fn(async () => ({
+      ...refreshed,
+      authoringAuthority: { ...refreshed.authoringAuthority },
+    }));
+    const owner = createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefreshV1({
+      prepared,
+      expectation,
+      savedAuthority: { resolveLatestCard } as never,
+      preparationKey: 'card:6:main:M',
+      orderSizeIds: (ids) => ids,
+      sizeNameById: new Map([[7, 'M']]),
+      prepareSaved: prepareSaved as never,
+    });
+    const controller = new AbortController();
+    controller.abort();
+    await expect(owner!.refresh(controller.signal)).resolves.toMatchObject({
+      ok: false,
+      blocker: { code: 'fresh-saved-authority-unavailable' },
+    });
+    expect(resolveLatestCard).not.toHaveBeenCalled();
+
+    const drifted = await owner!.refresh(new AbortController().signal);
+    expect(drifted).toMatchObject({
+      ok: false,
+      blocker: { code: 'fresh-saved-authority-unavailable' },
+    });
+  });
+
+  it('rejects a prepared token that resolves after its signal was aborted', async () => {
+    const prepared = await genuineSavedPrepared(37, 12);
+    const refreshed = await genuineSavedPrepared(37, 13);
+    const expectation =
+      capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1(prepared);
+    let releasePreparation: ((value: SavedPrepared) => void) | null = null;
+    const delayedPreparation = new Promise<SavedPrepared>((resolve) => {
+      releasePreparation = resolve;
+    });
+    const prepareSaved = vi.fn(async () => delayedPreparation);
+    const owner = createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefreshV1({
+      prepared,
+      expectation,
+      savedAuthority: {
+        resolveLatestCard: vi.fn(async () => ({
+          techCard: savedCardWithRow(refreshed),
+          row: refreshed.authoringAuthority.row,
+        })),
+      } as never,
+      preparationKey: 'card:6:main:M',
+      orderSizeIds: (ids) => ids,
+      sizeNameById: new Map([[7, 'M']]),
+      prepareSaved: prepareSaved as never,
+    });
+    const controller = new AbortController();
+    const pending = owner!.refresh(controller.signal);
+    await vi.waitFor(() => expect(prepareSaved).toHaveBeenCalledOnce());
+    controller.abort();
+    releasePreparation!(refreshed);
+
+    await expect(pending).resolves.toMatchObject({
+      ok: false,
+      authority: null,
+      blocker: { code: 'fresh-saved-authority-unavailable' },
+    });
+  });
+
+  it('lets only the latest concurrent refresh return authority and consumes it once', async () => {
+    const prepared = await genuineSavedPrepared(37, 12);
+    const refreshed = await genuineSavedPrepared(37, 13);
+    const expectation =
+      capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1(prepared);
+    let releaseSlow: ((value: SavedPrepared) => void) | null = null;
+    const slowPreparation = new Promise<SavedPrepared>((resolve) => {
+      releaseSlow = resolve;
+    });
+    let preparationCalls = 0;
+    const prepareSaved = vi.fn(async () => {
+      preparationCalls += 1;
+      return preparationCalls === 1 ? slowPreparation : refreshed;
+    });
+    const owner = createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefreshV1({
+      prepared,
+      expectation,
+      savedAuthority: {
+        resolveLatestCard: vi.fn(async () => ({
+          techCard: savedCardWithRow(refreshed),
+          row: refreshed.authoringAuthority.row,
+        })),
+      } as never,
+      preparationKey: 'card:6:main:M',
+      orderSizeIds: (ids) => ids,
+      sizeNameById: new Map([[7, 'M']]),
+      prepareSaved: prepareSaved as never,
+    });
+    const slow = owner!.refresh(new AbortController().signal);
+    await vi.waitFor(() => expect(prepareSaved).toHaveBeenCalledTimes(1));
+    const fast = owner!.refresh(new AbortController().signal);
+
+    await expect(fast).resolves.toMatchObject({
+      ok: true,
+      authority: refreshed.authoringAuthority,
+    });
+    releaseSlow!(refreshed);
+    await expect(slow).resolves.toMatchObject({ ok: false, authority: null });
+    await expect(owner!.refresh(new AbortController().signal)).resolves.toMatchObject({
+      ok: false,
+      authority: null,
+      blocker: { code: 'fresh-saved-authority-unavailable' },
+    });
+  });
+
+  it('captures one exact edge-pair request, appends once and selects the appended row', async () => {
+    const { prepared, authority } = await genuineControllerAuthority();
+    const segments = derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(prepared.projection);
+    const first = segments[0]!;
+    const second = segments.find(({ pieceId }) => pieceId !== first.pieceId)!;
+    let appendCount = 0;
+    let selectedIndex = -1;
+    let capturedRequest:
+      | Parameters<
+          Extract<
+            import('./cad-table-zero-connect-authoring-handoff-v1').PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1,
+            { status: 'available' }
+          >['ingest']
+        >[0]
+      | null = null;
+    const handoff = {
+      status: 'available' as const,
+      ingest: (request: NonNullable<typeof capturedRequest>) => {
+        capturedRequest = request;
+        const pending = createPatternImportDxfPhaseEZeroConnectPendingHandoffV1({
+          historyKey: request.candidate.operation.sessionOperationId,
+          request,
+        });
+        if (!pending)
+          return {
+            ok: false as const,
+            inserted: 0 as const,
+            historyKey: null,
+            sessionRevision: request.session.revision,
+            blocker: {
+              code: 'zero-connect-authoring-write-refused' as const,
+              detail: 'Rejected test request.',
+            },
+          };
+        selectedIndex = appendCount;
+        appendCount += 1;
+        return {
+          ok: true as const,
+          inserted: 1 as const,
+          historyKey: pending.historyKey,
+          sessionRevision: request.session.revision,
+          blocker: null,
+        };
+      },
+    };
+    let state = startPatternImportDxfPhaseECadTableZeroConnectControllerV1(
+      createPatternImportDxfPhaseECadTableZeroConnectControllerStateV1(),
+      authority,
+    );
+    state = selectPatternImportDxfPhaseECadTableZeroConnectControllerEdgeV1(
+      state,
+      authority,
+      first,
+      'forward',
+      handoff,
+    );
+    state = selectPatternImportDxfPhaseECadTableZeroConnectControllerEdgeV1(
+      state,
+      authority,
+      second,
+      'reverse',
+      handoff,
+    );
+
+    expect(state.handoffResult).toMatchObject({ ok: true, inserted: 1 });
+    expect(appendCount).toBe(1);
+    expect(selectedIndex).toBe(0);
+    expect(capturedRequest).not.toBeNull();
+  });
+
+  it('rejects genuine authority with a fake refresh and a foreign coherent request', async () => {
+    const { prepared, authority } = await genuineControllerAuthority();
+    const segments = derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(prepared.projection);
+    const first = segments[0]!;
+    const second = segments.find(({ pieceId }) => pieceId !== first.pieceId)!;
+    const ingest = vi.fn();
+    const handoff = { status: 'available' as const, ingest };
+    const fakeAuthority = {
+      ...authority,
+      authoringAuthorityRefresh: { refresh: vi.fn() } as never,
+    };
+    let state = startPatternImportDxfPhaseECadTableZeroConnectControllerV1(
+      createPatternImportDxfPhaseECadTableZeroConnectControllerStateV1(),
+      fakeAuthority,
+    );
+    state = selectPatternImportDxfPhaseECadTableZeroConnectControllerEdgeV1(
+      state,
+      fakeAuthority,
+      first,
+      'forward',
+      handoff,
+    );
+    state = selectPatternImportDxfPhaseECadTableZeroConnectControllerEdgeV1(
+      state,
+      fakeAuthority,
+      second,
+      'reverse',
+      handoff,
+    );
+    expect(ingest).not.toHaveBeenCalled();
+    expect(state.handoffResult).toMatchObject({ ok: false, inserted: 0 });
+
+    let genuineRequest: unknown = null;
+    const capture = {
+      status: 'available' as const,
+      ingest: (request: unknown) => {
+        genuineRequest = request;
+        return {
+          ok: true as const,
+          inserted: 1 as const,
+          historyKey: 'captured',
+          sessionRevision: 2,
+          blocker: null,
+        };
+      },
+    } as never;
+    state = startPatternImportDxfPhaseECadTableZeroConnectControllerV1(
+      createPatternImportDxfPhaseECadTableZeroConnectControllerStateV1(),
+      authority,
+    );
+    state = selectPatternImportDxfPhaseECadTableZeroConnectControllerEdgeV1(
+      state,
+      authority,
+      first,
+      'forward',
+      capture,
+    );
+    selectPatternImportDxfPhaseECadTableZeroConnectControllerEdgeV1(
+      state,
+      authority,
+      second,
+      'reverse',
+      capture,
+    );
+    expect(genuineRequest).not.toBeNull();
+    const request = genuineRequest as Parameters<
+      typeof createPatternImportDxfPhaseEZeroConnectPendingHandoffV1
+    >[0]['request'];
+    const foreignRequests = [
+      {
+        ...request,
+        candidate: {
+          ...request.candidate,
+          source: { ...request.candidate.source, sourceFileId: 'foreign-source' },
+        },
+      },
+      {
+        ...request,
+        session: {
+          ...request.session,
+          source: { ...request.session.source, scopeKey: 'foreign-scope' },
+        },
+      },
+      {
+        ...request,
+        catalog: {
+          ...request.catalog,
+          canonicalSha256: 'f'.repeat(64),
+          sizeSelectionCanonicalSha256: 'e'.repeat(64),
+        },
+      },
+      {
+        ...request,
+        projection: {
+          ...request.projection,
+          sourceFileId: 'foreign-source',
+          sizeSelectionCanonicalSha256: 'd'.repeat(64),
+        },
+      },
+      {
+        ...request,
+        candidate: structuredClone(request.candidate),
+        session: structuredClone(request.session),
+        projection: structuredClone(request.projection),
+      },
+    ] as readonly (typeof request)[];
+    for (const foreignRequest of foreignRequests)
+      expect(
+        createPatternImportDxfPhaseEZeroConnectPendingHandoffV1({
+          historyKey: request.candidate.operation.sessionOperationId,
+          request: foreignRequest,
+        }),
+      ).toBeNull();
   });
 });

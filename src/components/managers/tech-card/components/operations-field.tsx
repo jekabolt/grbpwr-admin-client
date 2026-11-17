@@ -8039,9 +8039,7 @@ export function OperationsField({
             const row = prepared.row;
             const pending = createPatternImportDxfPhaseEZeroConnectPendingHandoffV1({
               historyKey: row.historyKey,
-              candidate: request.candidate,
-              catalog: request.catalog,
-              projection: request.projection,
+              request,
             });
             if (!pending)
               return {
@@ -8061,6 +8059,7 @@ export function OperationsField({
                 inputKeys: [...row.inputKeys],
               }),
             );
+            setSelected(liveOperations.length);
             setZeroConnectPendingHandoff(pending);
             return {
               ok: true,

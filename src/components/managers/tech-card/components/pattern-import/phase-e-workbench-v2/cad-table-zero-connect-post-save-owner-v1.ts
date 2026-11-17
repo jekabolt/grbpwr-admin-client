@@ -1,6 +1,8 @@
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 
+import type { PatternImportDxfPhaseEZeroConnectAuthoringHandoffRequestV1 } from './cad-table-zero-connect-authoring-handoff-v1';
+import { isPatternImportDxfPhaseECadTableZeroConnectAuthoringRequestV1 } from './cad-table-zero-connect-controller-v1';
 import type { PatternImportDxfPhaseECadTableZeroConnectCandidateV1 } from './cad-table-zero-connect-session-v1';
 import type {
   PatternImportDxfPhaseEZeroConnectPostSaveSeamFinalReceiptV1,
@@ -35,6 +37,8 @@ export type PatternImportDxfPhaseEZeroConnectPendingHandoffV1 = Readonly<{
   candidate: PatternImportDxfPhaseECadTableZeroConnectCandidateV1;
   catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
+  authoringAuthority: PatternImportDxfPhaseEZeroConnectAuthoringHandoffRequestV1['authoringAuthority'];
+  authoringAuthorityRefresh: PatternImportDxfPhaseEZeroConnectAuthoringHandoffRequestV1['authoringAuthorityRefresh'];
   durableOperationId: null;
 }>;
 
@@ -102,24 +106,26 @@ type OperationLike = Readonly<{
 /** Retains the exact gesture evidence above a zero-operation host that is about to unmount. */
 export function createPatternImportDxfPhaseEZeroConnectPendingHandoffV1(input: {
   historyKey: string;
-  candidate: PatternImportDxfPhaseECadTableZeroConnectCandidateV1;
-  catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
-  projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
+  request: PatternImportDxfPhaseEZeroConnectAuthoringHandoffRequestV1;
 }): PatternImportDxfPhaseEZeroConnectPendingHandoffV1 | null {
+  const { request } = input;
   if (
     !input.historyKey ||
-    input.historyKey !== input.candidate?.operation?.sessionOperationId ||
-    input.candidate.operation.operationNumber !== 0 ||
-    input.candidate.operation.authoringOperationId !== null
+    !isPatternImportDxfPhaseECadTableZeroConnectAuthoringRequestV1(request) ||
+    input.historyKey !== request.candidate.operation.sessionOperationId ||
+    request.candidate.operation.operationNumber !== 0 ||
+    request.candidate.operation.authoringOperationId !== null
   )
     return null;
   return Object.freeze({
     schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_PENDING_HANDOFF_V1,
     status: 'in-memory-awaiting-save-direction-and-seam-link' as const,
     historyKey: input.historyKey,
-    candidate: input.candidate,
-    catalog: input.catalog,
-    projection: input.projection,
+    candidate: request.candidate,
+    catalog: request.catalog,
+    projection: request.projection,
+    authoringAuthority: request.authoringAuthority,
+    authoringAuthorityRefresh: request.authoringAuthorityRefresh,
     durableOperationId: null,
   });
 }
