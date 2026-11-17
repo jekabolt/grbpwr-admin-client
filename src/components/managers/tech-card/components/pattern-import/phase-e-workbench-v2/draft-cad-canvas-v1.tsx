@@ -1378,7 +1378,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
     setPendingPoints([]);
     setPendingDartBase(null);
     setInputError(null);
-  }, [resetKey]);
+  }, [arrangeActive, resetKey]);
 
   const unavailable = !piece
     ? 'The active exact piece is not available in the projection sealed to this Draft session.'
@@ -1390,6 +1390,8 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   const bbox = arrangeActive
     ? arrangementViewportBounds(projection, arrangement?.transforms ?? {})
     : viewportBounds(piece, primitives, pendingPoints);
+  const displayTransforms = arrangeActive ? arrangement?.transforms : undefined;
+  const overlayTransform = piece && displayTransforms?.[piece.pieceId];
   const renderedPieces = arrangeActive ? projection.pieces : piece ? [piece] : [];
 
   return (
@@ -1420,10 +1422,11 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
           }}
           className='min-h-0'
           onPick={(key, modifiers) => {
-            if (arrangeActive && !key) {
-              onSelectedPieceIdsChange?.([]);
+            if (arrangeActive) {
+              if (!key) onSelectedPieceIdsChange?.([]);
               return;
             }
+            if (!interactionEnabled) return;
             if (crossScopeConnectActive) {
               const base = dartBases.find((candidate) => candidate.key === key);
               if (base && sourcePiece && scopeKey)
@@ -1467,7 +1470,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
             );
           }}
           onPoint={(pointMm) => {
-            if (activeTopologyTool) return;
+            if (!interactionEnabled || activeTopologyTool) return;
             const result = recordPatternImportDxfPhaseEDraftCadCanvasPointV1({
               session,
               projection,
@@ -1502,7 +1505,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
               />
               {renderedPieces.map((renderedPiece) => {
                 const transform =
-                  arrangement?.transforms[renderedPiece.pieceId] ??
+                  displayTransforms?.[renderedPiece.pieceId] ??
                   PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_IDENTITY_TRANSFORM_V1;
                 const projectionIndex = projection.pieces.findIndex(
                   (candidate) => candidate.pieceId === renderedPiece.pieceId,
@@ -1630,7 +1633,8 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                   </g>
                 );
               })}
-              {!activeTopologyTool &&
+              {interactionEnabled &&
+                !activeTopologyTool &&
                 (crossScopeConnectActive || EXACT_EDGE_TOOLS.has(activeTool)) && (
                   <g
                     data-draft-cad-exact-edge-options=''
@@ -1680,7 +1684,7 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                     })}
                   </g>
                 )}
-              {activeTopologyTool ? (
+              {interactionEnabled && activeTopologyTool ? (
                 <g data-draft-cad-exact-vertex-options=''>
                   {exactVertexOptions.map((option) => {
                     const selected = topologySession.pendingAnchors.some(
@@ -1720,24 +1724,39 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                   })}
                 </g>
               ) : null}
-              <g data-draft-cad-committed-preview=''>
-                {primitives.map((primitive) => (
-                  <PreviewPrimitive
-                    key={`${primitive.commandId}:${primitive.entityId}`}
-                    primitive={primitive}
+              <g
+                transform={
+                  piece && overlayTransform
+                    ? patternImportDxfPhaseEDraftCadArrangementSvgTransformV1(
+                        piece,
+                        overlayTransform,
+                      )
+                    : undefined
+                }
+              >
+                <g data-draft-cad-committed-preview=''>
+                  {primitives.map((primitive) => (
+                    <PreviewPrimitive
+                      key={`${primitive.commandId}:${primitive.entityId}`}
+                      primitive={primitive}
+                      unit={unit}
+                    />
+                  ))}
+                </g>
+                {piece ? (
+                  <PatternImportDxfPhaseEDraftCadTopologyOverlayV1
+                    projection={projection}
+                    state={topologySession}
+                    pieceId={piece.pieceId}
                     unit={unit}
                   />
-                ))}
+                ) : null}
               </g>
-              {piece ? (
-                <PatternImportDxfPhaseEDraftCadTopologyOverlayV1
-                  projection={projection}
-                  state={topologySession}
-                  pieceId={piece.pieceId}
-                  unit={unit}
-                />
-              ) : null}
-              <g data-draft-cad-pending-input='' pointerEvents='none'>
+              <g
+                data-draft-cad-pending-input=''
+                pointerEvents='none'
+                visibility={arrangeActive ? 'hidden' : undefined}
+              >
                 {pendingPoints.length > 1 ? (
                   <polyline
                     data-draft-cad-stage-path=''
