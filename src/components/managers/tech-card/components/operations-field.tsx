@@ -358,6 +358,16 @@ import {
 } from './pattern-import/phase-e-workbench/assembly-order-entry';
 import { SavedClothPhysicalControlsV1 } from 'components/cloth-simulation-spike/saved-cloth-physical-controls-v1';
 import { createPatternImportDxfProductCompositeSidecarProductionTransactionV4 } from './pattern-import/phase-e-workbench-v2/composite-sidecar-production-transaction-v4';
+import { createPatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1 } from './pattern-import/phase-e-workbench-v2/saved-assembly-snapshot-production-rpc-v1';
+import { createPatternImportDxfPhaseEZeroConnectProductionDurableBridgeV1 } from './pattern-import/phase-e-workbench-v2/zero-connect-durable-composite-v4';
+import {
+  capturePatternImportDxfPhaseEZeroConnectDurableRetryV1,
+  executePatternImportDxfPhaseEZeroConnectDurableRetryV1,
+  isPatternImportDxfPhaseEZeroConnectDurableRetryableV1,
+  retryPatternImportDxfPhaseEZeroConnectDurableRetryV1,
+  startPatternImportDxfPhaseEZeroConnectDurableRetryV1,
+  type PatternImportDxfPhaseEZeroConnectDurableRetryStateV1,
+} from './pattern-import/phase-e-workbench-v2/zero-connect-durable-retry-v1';
 import {
   readPatternImportDxfProductExactNSeamProductionSessionV2,
   subscribePatternImportDxfProductExactNSeamProductionSessionV2,
@@ -1119,10 +1129,14 @@ function ZeroConnectPostSaveAction({
   index,
   pending,
   owner,
+  durablePersistence,
+  onRetryDurablePersistence,
 }: {
   index: number;
   pending: PatternImportDxfPhaseEZeroConnectPendingHandoffV1;
   owner: PatternImportDxfPhaseEZeroConnectPostSaveOwnerV1;
+  durablePersistence: PatternImportDxfPhaseEZeroConnectDurableRetryStateV1 | null;
+  onRetryDurablePersistence: () => void;
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const operationNumber =
@@ -1152,7 +1166,28 @@ function ZeroConnectPostSaveAction({
     }
   };
 
-  if (pending.status === 'in-memory-final-seam-attached-awaiting-second-save')
+  if (pending.status === 'in-memory-final-seam-attached-awaiting-second-save') {
+    if (durablePersistence?.status === 'blocked')
+      return (
+        <div
+          className='mb-2 flex flex-wrap items-center gap-1 border border-borderColor bg-bgColor p-1.5'
+          data-zero-connect-durable-blocker={durablePersistence.blocker?.code ?? 'unknown'}
+        >
+          <Text component='span' size='micro' variant='label' className='min-w-0 flex-1'>
+            {durablePersistence.blocker?.detail ??
+              'The exact connection could not be persisted durably.'}
+          </Text>
+          {isPatternImportDxfPhaseEZeroConnectDurableRetryableV1(durablePersistence) ? (
+            <button
+              type='button'
+              className='h-7 border border-textColor bg-textColor px-2 text-micro font-bold text-bgColor'
+              onClick={onRetryDurablePersistence}
+            >
+              Retry durable save
+            </button>
+          ) : null}
+        </div>
+      );
     return (
       <Text
         component='p'
@@ -1161,10 +1196,12 @@ function ZeroConnectPostSaveAction({
         className='mb-2'
         data-zero-connect-pending-handoff={pending.historyKey}
       >
-        Seam linked · save the card once more to persist it on operation{' '}
-        {pending.savedOperationNumber}.
+        {durablePersistence
+          ? `Seam linked · verifying durable exact geometry for operation ${pending.savedOperationNumber}…`
+          : `Seam linked · save the card once more to persist it on operation ${pending.savedOperationNumber}.`}
       </Text>
     );
+  }
 
   return (
     <div
@@ -6882,8 +6919,16 @@ export function OperationsField({
     useRef<PatternImportDxfPhaseEZeroConnectPostSaveLifecycleOwnerV1 | null>(null);
   const zeroConnectSecondSaveCompletionRef =
     useRef<PatternImportDxfPhaseEZeroConnectSecondSaveCompletionOwnerV1 | null>(null);
+  const [zeroConnectDurableRetry, setZeroConnectDurableRetry] =
+    useState<PatternImportDxfPhaseEZeroConnectDurableRetryStateV1 | null>(null);
+  const zeroConnectDurableRetryRef = useRef(zeroConnectDurableRetry);
+  const zeroConnectDurablePersistenceRef = useRef<Readonly<{
+    attempt: number;
+    controller: AbortController;
+  }> | null>(null);
   const autosaveLastSavedAtRef = useRef(autosave.lastSavedAt);
   zeroConnectPendingHandoffRef.current = zeroConnectPendingHandoff;
+  zeroConnectDurableRetryRef.current = zeroConnectDurableRetry;
   autosaveLastSavedAtRef.current = autosave.lastSavedAt;
   useEffect(() => {
     const lifecycle = activatePatternImportDxfPhaseEZeroConnectPostSaveLifecycleV1(
@@ -6896,6 +6941,8 @@ export function OperationsField({
       autosaveLastSavedAtRef.current,
     );
     return () => {
+      zeroConnectDurablePersistenceRef.current?.controller.abort();
+      zeroConnectDurablePersistenceRef.current = null;
       deactivatePatternImportDxfPhaseEZeroConnectPostSaveLifecycleV1(
         zeroConnectPostSaveLifecycleRef,
         lifecycle,
@@ -6922,6 +6969,7 @@ export function OperationsField({
       pending.status !== 'in-memory-final-seam-attached-awaiting-second-save'
     )
       return;
+    if (zeroConnectDurableRetryRef.current?.pending === pending) return;
     const seamState = useSeamsStore.getState();
     const completed = completion.complete({
       pending,
@@ -6945,10 +6993,84 @@ export function OperationsField({
     });
     if (!completed.ok || zeroConnectPendingHandoffRef.current !== completed.completedPending)
       return;
-    zeroConnectPendingHandoffRef.current = null;
-    zeroConnectPostSaveLifecycleRef.current?.bindCurrent(null);
-    setZeroConnectPendingHandoff(null);
+    const completedPending = completed.completedPending;
+    if (completedPending.status !== 'in-memory-final-seam-attached-awaiting-second-save') return;
+    const row = Object.freeze({
+      ...completedPending.refreshedAuthoringAuthority.row,
+      cardLockVersion: savedCard!.lockVersion!,
+    });
+    const durableRetry = capturePatternImportDxfPhaseEZeroConnectDurableRetryV1(
+      completedPending,
+      row,
+    );
+    zeroConnectDurableRetryRef.current = durableRetry;
+    setZeroConnectDurableRetry(durableRetry);
   }, [autosave.lastSavedAt, autosave.status, getValues, savedCard, techCardId]);
+  useEffect(() => {
+    const retry = zeroConnectDurableRetry;
+    if (!retry) return;
+    if (retry.status === 'ready') {
+      const started = startPatternImportDxfPhaseEZeroConnectDurableRetryV1(retry);
+      if (started) {
+        zeroConnectDurableRetryRef.current = started;
+        setZeroConnectDurableRetry(started);
+      }
+      return;
+    }
+    if (retry.status !== 'persisting') return;
+    zeroConnectDurablePersistenceRef.current?.controller.abort();
+    const controller = new AbortController();
+    zeroConnectDurablePersistenceRef.current = Object.freeze({
+      attempt: retry.attempt,
+      controller,
+    });
+    const snapshot = createPatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1(
+      retry.pending.savedOperationNumber,
+    );
+    const durable = createPatternImportDxfPhaseEZeroConnectProductionDurableBridgeV1(
+      retry.pending.savedOperationNumber,
+      exactNApplicationOwner,
+      snapshot.authorityAdapter,
+    );
+    void executePatternImportDxfPhaseEZeroConnectDurableRetryV1(
+      retry,
+      durable.persist,
+      controller.signal,
+    ).then((outcome) => {
+      if (
+        controller.signal.aborted ||
+        zeroConnectDurablePersistenceRef.current?.attempt !== retry.attempt ||
+        zeroConnectDurablePersistenceRef.current?.controller !== controller ||
+        zeroConnectDurableRetryRef.current?.attempt !== retry.attempt ||
+        zeroConnectPendingHandoffRef.current !== retry.pending
+      )
+        return;
+      zeroConnectDurablePersistenceRef.current = null;
+      if (!outcome.ok) {
+        zeroConnectDurableRetryRef.current = outcome.next;
+        setZeroConnectDurableRetry(outcome.next);
+        return;
+      }
+      zeroConnectDurableRetryRef.current = null;
+      setZeroConnectDurableRetry(null);
+      zeroConnectPendingHandoffRef.current = null;
+      zeroConnectPostSaveLifecycleRef.current?.bindCurrent(null);
+      setZeroConnectPendingHandoff(null);
+    });
+    return () => {
+      controller.abort();
+      if (zeroConnectDurablePersistenceRef.current?.controller === controller)
+        zeroConnectDurablePersistenceRef.current = null;
+    };
+  }, [exactNApplicationOwner, zeroConnectDurableRetry]);
+  const retryZeroConnectDurablePersistence = useCallback(() => {
+    setZeroConnectDurableRetry((current) => {
+      if (!current) return null;
+      const next = retryPatternImportDxfPhaseEZeroConnectDurableRetryV1(current);
+      zeroConnectDurableRetryRef.current = next;
+      return next;
+    });
+  }, []);
   const selected = selection.index;
   const setSelected = useCallback((next: number | ((current: number) => number)) => {
     setSelection((cur) => ({ index: typeof next === 'function' ? next(cur.index) : next }));
@@ -10640,6 +10762,12 @@ export function OperationsField({
                 index={selectedIndex}
                 pending={selectedZeroConnectPending}
                 owner={zeroConnectPostSaveOwner}
+                durablePersistence={
+                  zeroConnectDurableRetry?.pending === selectedZeroConnectPending
+                    ? zeroConnectDurableRetry
+                    : null
+                }
+                onRetryDurablePersistence={retryZeroConnectDurablePersistence}
               />
             ) : null}
             <PatternImportDxfPhaseEAssemblyOrderEntryMountV1
@@ -11028,6 +11156,12 @@ export function OperationsField({
                     index={selectedIndex}
                     pending={selectedZeroConnectPending}
                     owner={zeroConnectPostSaveOwner}
+                    durablePersistence={
+                      zeroConnectDurableRetry?.pending === selectedZeroConnectPending
+                        ? zeroConnectDurableRetry
+                        : null
+                    }
+                    onRetryDurablePersistence={retryZeroConnectDurablePersistence}
                   />
                 ) : null}
                 {cadOperationEditorOwnership.renderInline ? selectedOperationEditor : null}

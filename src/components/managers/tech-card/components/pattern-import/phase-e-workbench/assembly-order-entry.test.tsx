@@ -3,6 +3,10 @@ import * as ts from 'typescript';
 import { describe, expect, it, vi } from 'vitest';
 
 const source = readFileSync(new URL('./assembly-order-entry.tsx', import.meta.url), 'utf8');
+const zeroConnectCanvasSource = readFileSync(
+  new URL('../phase-e-workbench-v2/cad-table-zero-connect-canvas-v1.tsx', import.meta.url),
+  'utf8',
+);
 const tree = ts.createSourceFile(
   'assembly-order-entry.tsx',
   source,
@@ -196,20 +200,82 @@ describe('V1 selected physical source handoff (actual source fragments, no physi
         workbenchOpen: boolean;
         exactNSessionAvailable: boolean;
         savedProjectionBlockerCode: string | null;
+        selectedSeamKeys: readonly string[];
+        savedOrderedSeamKeys: readonly string[] | null;
       }) => boolean
     >(declaration('shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1').getText(tree));
     const input = {
       workbenchOpen: true,
       exactNSessionAvailable: false,
-      savedProjectionBlockerCode: 'saved-operation-not-two-seam',
+      savedProjectionBlockerCode: null,
+      selectedSeamKeys: ['seam-a'],
+      savedOrderedSeamKeys: ['seam-a'],
     };
     expect(fallback(input)).toBe(true);
-    expect(fallback({ ...input, savedProjectionBlockerCode: 'saved-operation-missing' })).toBe(
-      true,
+    expect(
+      fallback({
+        ...input,
+        savedProjectionBlockerCode: 'saved-operation-missing',
+        savedOrderedSeamKeys: null,
+      }),
+    ).toBe(false);
+    expect(fallback({ ...input, savedOrderedSeamKeys: ['saved-a', 'saved-b'] })).toBe(false);
+    expect(fallback({ ...input, savedOrderedSeamKeys: ['saved-a', 'saved-b', 'saved-c'] })).toBe(
+      false,
     );
     expect(fallback({ ...input, exactNSessionAvailable: true })).toBe(false);
     expect(fallback({ ...input, workbenchOpen: false })).toBe(false);
     expect(fallback({ ...input, savedProjectionBlockerCode: 'different-failure' })).toBe(false);
+  });
+
+  it('keeps durable reload retry read-only and renders its refusal inside the N1 table', () => {
+    const retry = variable('retryDurableReload').getText(tree);
+    expect(retry).toContain('retryPatternImportDxfPhaseEDurableReloadRetryV1');
+    expect(retry).not.toMatch(/persist|save|seamWrite|onConfirm/);
+    const fallbackCall = nodes(ts.isCallExpression).find(
+      (call) =>
+        call.expression.getText(tree) ===
+        'shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1',
+    );
+    expect(fallbackCall?.arguments[0]?.getText(tree)).toContain(
+      'savedOrderedSeamKeys: savedProjection.ok ? savedProjection.orderedSeamKeys : null',
+    );
+    expect(tree.getFullText()).toContain('data-durable-reload-blocker={durableReloadBlocker.code}');
+    expect(tree.getFullText()).toContain('onClick={retryDurableReload}');
+  });
+
+  it('admits legacy N1 only when live and authoritative saved ordered seam keys match exactly', () => {
+    const expression = variable('savedOperationSeamsMatch').getText(tree);
+    const matches = (selectedSeamKeys: readonly string[], orderedSeamKeys: readonly string[]) =>
+      evaluate<boolean>(expression, {
+        selectedSeamKeys,
+        savedProjection: { ok: true, seamCount: orderedSeamKeys.length, orderedSeamKeys },
+      });
+    expect(matches(['seam-a'], ['seam-a'])).toBe(true);
+    expect(matches(['stale-live'], ['saved-a', 'saved-b'])).toBe(false);
+    expect(matches(['stale-live'], ['saved-a', 'saved-b', 'saved-c'])).toBe(false);
+    expect(matches(['seam-b', 'seam-a'], ['seam-a', 'seam-b'])).toBe(false);
+  });
+
+  it('mounts legacy N1 with a refusal-only handoff that cannot append an AO row or write a seam', () => {
+    const fallbackMount = elements(
+      'PatternImportDxfPhaseECadTableZeroOperationProductionMountV1',
+    )[0];
+    expect(attribute(fallbackMount, 'zeroConnectAuthoringHandoff')).toBe(
+      'LEGACY_N1_REBUILD_ONLY_HANDOFF',
+    );
+    const expression = variable('LEGACY_N1_REBUILD_ONLY_HANDOFF').getText(tree);
+    expect(expression).not.toMatch(/ingest|append|seamWrite|zeroConnectAuthoringHandoff/u);
+    expect(evaluate<Record<string, unknown>>(expression)).toMatchObject({
+      status: 'unavailable',
+      blocker: { code: 'zero-connect-authoring-write-refused' },
+    });
+    expect(tree.getFullText()).toContain("data-legacy-n1-rebuild-required=''");
+    expect(zeroConnectCanvasSource).toContain(
+      "const connectDisabled = disabled || zeroConnectAuthoringHandoff?.status === 'unavailable';",
+    );
+    expect(zeroConnectCanvasSource).toContain('disabled={connectDisabled}');
+    expect(zeroConnectCanvasSource).toContain('if (connectDisabled) return;');
   });
 
   it('retains the caf373 saved-card staging authority without requiring a physical profile', async () => {

@@ -9,6 +9,7 @@ import {
   CursorArrowIcon,
   DimensionsIcon,
   DrawingPinIcon,
+  EnterFullScreenIcon,
   EyeOpenIcon,
   FileTextIcon,
   HandIcon,
@@ -27,6 +28,9 @@ import {
 export type PatternImportDxfPhaseECadWorkbenchIconV1 =
   | 'select'
   | 'hand'
+  | 'move'
+  | 'fit'
+  | 'reset-layout'
   | 'connect'
   | 'measure-point'
   | 'measure-line'
@@ -58,6 +62,9 @@ const ICONS: Readonly<Record<PatternImportDxfPhaseECadWorkbenchIconV1, ElementTy
   Object.freeze({
     select: CursorArrowIcon,
     hand: HandIcon,
+    move: DimensionsIcon,
+    fit: EnterFullScreenIcon,
+    'reset-layout': LayersIcon,
     connect: SewingPinIcon,
     'measure-point': TargetIcon,
     'measure-line': RulerHorizontalIcon,

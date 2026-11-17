@@ -22,8 +22,11 @@ export const PATTERN_IMPORT_DXF_PHASE_E_SAVED_CARD_PRODUCTION_PROJECTION_CLAIMS_
   getTechCardProjectionRequired: true,
   localFormAssemblyUsed: false,
   optimisticSeamOverlayUsed: false,
-  exactSavedOperationAndTwoSeamsRequired: true,
+  exactSavedOperationAndPositiveSeamSetRequired: true,
+  authoritativeOrderedSavedSeamIdentityProjected: true,
   exactTwoPiecePairResolvedFromSavedSeams: true,
+  oneSeamCompositeV4AdmissionAvailable: true,
+  exactTwoSeamCompositeV3PathPreserved: true,
   exactSavedRowRevisionRequired: true,
   currentBindingScopeResolutionReused: true,
   assemblyAuthorityProduced: false,
@@ -50,6 +53,8 @@ export type PatternImportDxfPhaseESavedCardProjectionResultV1 =
   | Readonly<{
       ok: true;
       selectedOperationNumber: number;
+      orderedSeamKeys: readonly string[];
+      seamCount: number;
       pieceLineKeys: readonly [string, string];
       row: Extract<PatternImportDxfPhaseESavedPatternRowResolverResultV1, { ok: true }>['row'];
       projection: PatternImportDxfPhaseESavedRowCardProjectionV1;
@@ -59,6 +64,8 @@ export type PatternImportDxfPhaseESavedCardProjectionResultV1 =
   | Readonly<{
       ok: false;
       selectedOperationNumber: number;
+      orderedSeamKeys: null;
+      seamCount: null;
       pieceLineKeys: null;
       row: null;
       projection: null;
@@ -81,6 +88,8 @@ function blocked(
   return Object.freeze({
     ok: false as const,
     selectedOperationNumber,
+    orderedSeamKeys: null,
+    seamCount: null,
     pieceLineKeys: null,
     row: null,
     projection: null,
@@ -103,7 +112,11 @@ function exactPiecePair(
   techCard: common_TechCard,
   selectedOperationNumber: number,
 ):
-  | Readonly<{ ok: true; pieceLineKeys: readonly [string, string] }>
+  | Readonly<{
+      ok: true;
+      orderedSeamKeys: readonly string[];
+      pieceLineKeys: readonly [string, string];
+    }>
   | Readonly<{
       ok: false;
       code: PatternImportDxfPhaseESavedCardProjectionBlockerV1['code'];
@@ -126,11 +139,15 @@ function exactPiecePair(
       detail: 'The current saved card contains the selected operation more than once.',
     });
   const seamKeys = (selected[0].seamKeys ?? []).map((key) => key.trim()).filter(Boolean);
-  if (seamKeys.length !== 2 || seamKeys[0] === seamKeys[1])
+  if (
+    seamKeys.length < 1 ||
+    new Set(seamKeys).size !== seamKeys.length ||
+    seamKeys.some((seamKey) => !seamKey)
+  )
     return Object.freeze({
       ok: false as const,
       code: 'saved-operation-not-two-seam' as const,
-      detail: 'The current saved operation must own exactly two distinct ordered seams.',
+      detail: 'The current saved operation must own a non-empty set of distinct ordered seams.',
     });
 
   const savedSeams = techCard.seams ?? [];
@@ -179,7 +196,12 @@ function exactPiecePair(
     anchoredSize = nextSize;
     pairs.push([left, right].sort() as [string, string]);
   }
-  if (pairs[0][0] !== pairs[1][0] || pairs[0][1] !== pairs[1][1] || pairs[0][0] === pairs[0][1])
+  const firstPair = pairs[0];
+  if (
+    !firstPair ||
+    firstPair[0] === firstPair[1] ||
+    pairs.some(([left, right]) => left !== firstPair[0] || right !== firstPair[1])
+  )
     return Object.freeze({
       ok: false as const,
       code: 'saved-seam-not-exact' as const,
@@ -187,7 +209,8 @@ function exactPiecePair(
     });
   return Object.freeze({
     ok: true as const,
-    pieceLineKeys: Object.freeze(pairs[0]) as readonly [string, string],
+    orderedSeamKeys: Object.freeze([...seamKeys]),
+    pieceLineKeys: Object.freeze(firstPair) as readonly [string, string],
   });
 }
 
@@ -291,6 +314,8 @@ export function buildPatternImportDxfPhaseESavedCardProductionProjectionV1(
   return Object.freeze({
     ok: true as const,
     selectedOperationNumber,
+    orderedSeamKeys: pair.orderedSeamKeys,
+    seamCount: pair.orderedSeamKeys.length,
     pieceLineKeys: pair.pieceLineKeys,
     row: row.row,
     projection: Object.freeze({ card, cardLockVersion: techCard.lockVersion }),

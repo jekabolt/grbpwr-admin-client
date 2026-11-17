@@ -11,7 +11,7 @@ import type { BoxMm, PtMm } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
 
 export type ViewBox = { x: number; y: number; w: number; h: number };
-export type ViewTool = 'pan' | 'point' | 'lasso';
+export type ViewTool = 'pan' | 'point' | 'lasso' | 'move';
 export type ViewModifiers = Readonly<{ shiftKey: boolean }>;
 
 export const vy = (y: number) => -y;
@@ -89,10 +89,12 @@ export function SheetViewport({
   onPick,
   onPoint,
   onLasso,
+  onMove,
   className,
   children,
   focus,
   reveal,
+  fitRequest = 0,
 }: {
   bbox: BoxMm;
   tool?: ViewTool;
@@ -102,6 +104,8 @@ export function SheetViewport({
   onPoint?: (pt: PtMm) => void;
   /** 'lasso' tool: the closed polygon the operator drew, in mm. */
   onLasso?: (pts: PtMm[], modifiers: ViewModifiers) => void;
+  /** 'move' tool: incremental, finite millimetre delta for the keyed SVG element being dragged. */
+  onMove?: (key: string, deltaMm: PtMm, modifiers: ViewModifiers) => void;
   className?: string;
   /** Zoom to this box when it changes (e.g. the selected piece). null = leave the view alone. */
   focus?: BoxMm | null;
@@ -110,6 +114,8 @@ export function SheetViewport({
    * the box is off-screen, and fits it when it is larger than the view. null = leave it alone.
    */
   reveal?: BoxMm | null;
+  /** Reset to the complete fitted sheet whenever this caller-owned request changes. */
+  fitRequest?: number;
   children: (v: { box: ViewBox; unit: number }) => ReactNode;
 }) {
   const rawFit = boxOf(bbox, 0.03);
@@ -136,6 +142,8 @@ export function SheetViewport({
     key: string;
     moved: boolean;
     shiftKey: boolean;
+    lastPx: number;
+    lastPy: number;
   } | null>(null);
   const [panning, setPanning] = useState(false);
   const [lasso, setLassoState] = useState<PtMm[] | null>(null);
@@ -189,6 +197,10 @@ export function SheetViewport({
     // revealKey stands for `reveal` (same numbers, no pan)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revealKey]);
+
+  useEffect(() => {
+    if (fitRequest > 0) setView(null);
+  }, [fitRequest]);
 
   const metricsOf = (b: ViewBox) => {
     const svg = svgRef.current;
@@ -249,9 +261,11 @@ export function SheetViewport({
       ? 'cursor-crosshair'
       : tool === 'point'
         ? 'cursor-cell'
-        : panning
-          ? 'cursor-grabbing'
-          : 'cursor-grab';
+        : tool === 'move'
+          ? 'cursor-move'
+          : panning
+            ? 'cursor-grabbing'
+            : 'cursor-grab';
 
   return (
     <svg
@@ -277,6 +291,8 @@ export function SheetViewport({
           key,
           moved: false,
           shiftKey: e.shiftKey,
+          lastPx: e.clientX,
+          lastPy: e.clientY,
         };
         e.currentTarget.setPointerCapture(e.pointerId);
       }}
@@ -291,6 +307,25 @@ export function SheetViewport({
         }
         const dx = e.clientX - st.px;
         const dy = e.clientY - st.py;
+        if (tool === 'move') {
+          if (!st.key) return;
+          if (!st.moved) {
+            if (Math.abs(dx) + Math.abs(dy) < DRAG_SLOP) return;
+            st.moved = true;
+          }
+          const m = metricsOf(st.box);
+          if (!m) return;
+          const moveDx = e.clientX - st.lastPx;
+          const moveDy = e.clientY - st.lastPy;
+          st.lastPx = e.clientX;
+          st.lastPy = e.clientY;
+          onMove?.(
+            st.key,
+            { x: moveDx / m.scale, y: -moveDy / m.scale },
+            { shiftKey: st.shiftKey },
+          );
+          return;
+        }
         if (!st.moved) {
           if (Math.abs(dx) + Math.abs(dy) < DRAG_SLOP) return;
           st.moved = true;
@@ -307,7 +342,10 @@ export function SheetViewport({
           const done = lassoRef.current;
           if (done && done.length >= 3)
             onLasso?.(done, { shiftKey: gesture.current?.shiftKey ?? false });
-          else onPick?.('', { shiftKey: gesture.current?.shiftKey ?? false });
+          else
+            onPick?.(gesture.current?.key ?? '', {
+              shiftKey: gesture.current?.shiftKey ?? false,
+            });
           setLasso(null);
         } else if (st && !st.moved) {
           if (st.key && onPick) onPick(st.key, { shiftKey: st.shiftKey });

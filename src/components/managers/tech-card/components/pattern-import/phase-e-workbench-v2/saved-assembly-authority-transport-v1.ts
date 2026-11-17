@@ -1,4 +1,5 @@
 import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
+import type { PatternImportDxfProductPhaseEMultiseamExistingAssemblyInputV2 } from 'lib/pattern-import/dxf-product-phase-e-multiseam-workbench-v2';
 import type { AssemblyContext } from 'lib/pattern-import/types';
 import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V3 } from 'lib/cloth/domain/pattern-import-dxf-product-composite-sidecar-v3';
 import {
@@ -12,6 +13,7 @@ import {
   adaptPatternImportDxfPhaseEWorkbenchExistingAssemblyMultiseamV2,
   type PatternImportDxfPhaseEWorkbenchExistingAssemblyMultiseamAdapterResultV2,
 } from '../phase-e-workbench-existing-assembly-multiseam-adapter-v2';
+import { patternImportDxfPhaseEKindForWorkTokenV1 } from '../phase-e-workbench-existing-assembly-adapter-v1';
 import {
   PATTERN_IMPORT_DXF_PHASE_E_SERVER_TRANSACTIONAL_SAVED_ASSEMBLY_V1,
   type PatternImportDxfPhaseESavedRowAuthoritativeAssemblyEvidenceV1,
@@ -194,7 +196,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_SAVED_ASSEMBLY_AUTHORITY_TRANSPORT_CLAIM
     exactSavedRowEightFieldsRequested: true,
     exactSavedRowEightFieldsRevalidated: true,
     allPersistedOperationsProjected: true,
-    exactlyTwoSelectedExactSeamsRequired: true,
+    exactAuthoritativeRestoreRequiresTwoSelectedSeams: true,
     secondSeamOwnerRejected: true,
     rawCompositeV3Required: true,
     rawCompositeV3CodecVerified: true,
@@ -202,6 +204,8 @@ export const PATTERN_IMPORT_DXF_PHASE_E_SAVED_ASSEMBLY_AUTHORITY_TRANSPORT_CLAIM
     serverDecodedCarrierSummaryTrusted: false,
     legacyOrAbsentCompositeAccepted: false,
     transactionalTopologyReadAvailable: true,
+    transactionalTopologyReadAcceptsPositiveSeamCardinality: true,
+    exactTwoSeamAuthoritativeRestoreUnchanged: true,
     topologyReadAcceptsLegacyOrAbsentComposite: true,
     topologyReadDecodesExactCarrier: false,
     versionedTopologyHashContractInjected: true,
@@ -252,10 +256,10 @@ export type PatternImportDxfPhaseESavedAssemblyCurrentTopologyV1 = Readonly<{
   serverAssemblyRevision: string;
   assemblyTopologySha256: string;
   selectedOperationNumber: number;
-  /** Full normalized persisted operation list plus the selected two exact seam rows. */
+  /** Full normalized persisted operation list plus the selected operation's exact seam rows. */
   assembly: AssemblyContext;
-  /** The existing Assembly Order projection admitted by the same bounded V2 adapter as restore. */
-  topology: SuccessfulAdapter['existingAssembly'];
+  /** Canonical current topology; exact N=2 restore still uses the bounded V2 adapter below. */
+  topology: PatternImportDxfProductPhaseEMultiseamExistingAssemblyInputV2;
 }>;
 
 export type PatternImportDxfPhaseESavedAssemblyAuthorityTransportAdapterV1 = Readonly<{
@@ -1016,6 +1020,157 @@ function normalizeAssembly(
   return Object.freeze({ assembly, adapted });
 }
 
+function normalizeCurrentAssembly(
+  operations: readonly PatternImportDxfPhaseESavedAssemblyTransportOperationV1[],
+  selectedSeams: readonly PatternImportDxfPhaseESavedAssemblyTransportSeamV1[],
+  selectedOperationNumber: number,
+): Readonly<{
+  assembly: AssemblyContext;
+  topology: PatternImportDxfProductPhaseEMultiseamExistingAssemblyInputV2;
+}> {
+  if (operations.length === 0)
+    fail('assembly-topology-invalid', 'The persisted Assembly operation list is empty.');
+  const operationNumbers = new Set<number>();
+  for (const operation of operations) {
+    if (operationNumbers.has(operation.operationNumber))
+      fail('assembly-topology-invalid', 'Persisted Assembly operation numbers are not unique.');
+    operationNumbers.add(operation.operationNumber);
+  }
+  const selected = operations.find(
+    ({ operationNumber }) => operationNumber === selectedOperationNumber,
+  );
+  if (!selected)
+    fail('assembly-topology-invalid', 'The selected persisted Assembly operation is absent.');
+  if (
+    selected.seamKeys.length < 1 ||
+    new Set(selected.seamKeys).size !== selected.seamKeys.length ||
+    selected.seamKeys.some((key) => !key)
+  )
+    fail(
+      'assembly-topology-invalid',
+      'The selected operation must own a non-empty set of distinct ordered seams.',
+    );
+  if (
+    operations.some(
+      (operation) =>
+        operation !== selected &&
+        operation.seamKeys.some((seamKey) => selected.seamKeys.includes(seamKey)),
+    )
+  )
+    fail('assembly-topology-invalid', 'A selected seam is also owned by another operation.');
+  if (
+    selectedSeams.length !== selected.seamKeys.length ||
+    selectedSeams.some((seam, index) => seam.seamKey !== selected.seamKeys[index])
+  )
+    fail(
+      'assembly-topology-invalid',
+      'The exact seam rows must match the selected operation seam order.',
+    );
+  const pairs = selectedSeams.map((seam) =>
+    [seam.sideA[0]?.pieceLineKey ?? '', seam.sideB[0]?.pieceLineKey ?? ''].sort(),
+  );
+  const firstPair = pairs[0];
+  const firstSize = selectedSeams[0]?.anchoredSize;
+  if (
+    !firstPair ||
+    !firstPair[0] ||
+    !firstPair[1] ||
+    firstPair[0] === firstPair[1] ||
+    !firstSize ||
+    selectedSeams.some(
+      (seam, index) =>
+        seam.status !== 'confirmed' ||
+        seam.stale ||
+        seam.direction === 'unknown' ||
+        seam.sideA.length !== 1 ||
+        seam.sideB.length !== 1 ||
+        seam.anchoredSize !== firstSize ||
+        pairs[index]?.[0] !== firstPair[0] ||
+        pairs[index]?.[1] !== firstPair[1],
+    )
+  )
+    fail(
+      'assembly-topology-invalid',
+      'Every selected seam must be current and bind the same two exact piece lines and size.',
+    );
+
+  const copyAnchor = (anchor: PatternImportDxfPhaseESavedAssemblyTransportAnchorV1) =>
+    Object.freeze({
+      pieceLineKey: anchor.pieceLineKey,
+      edgeHint: anchor.edgeHint,
+      range: Object.freeze([anchor.rangeFrom, anchor.rangeTo]) as readonly [number, number],
+      lenMm: anchor.lenMm,
+      contourSig: anchor.contourSig,
+      samples: Object.freeze(
+        anchor.samples.map(({ u, v }) => Object.freeze([u, v]) as readonly [number, number]),
+      ),
+      ...(anchor.layer ? { layer: anchor.layer } : {}),
+    });
+  const topology = Object.freeze({
+    operations: Object.freeze(
+      operations.map((operation) =>
+        Object.freeze({
+          authoringOperationId: null,
+          number: operation.operationNumber,
+          work: operation.work,
+          phaseEKind: patternImportDxfPhaseEKindForWorkTokenV1(operation.work),
+          inputKeys: Object.freeze([...operation.inputKeys]),
+          outputUnitKey: operation.outputUnitKey,
+          outputUnitName: operation.outputUnitName,
+          seamKeys: Object.freeze([...operation.seamKeys]),
+        }),
+      ),
+    ),
+    seams: Object.freeze(
+      selectedSeams.map((seam) =>
+        Object.freeze({
+          seamKey: seam.seamKey,
+          confirmed: true,
+          stale: false,
+          kind: seam.kind,
+          direction: seam.direction,
+          source: seam.source,
+          anchoredSize: seam.anchoredSize,
+          sideA: Object.freeze(seam.sideA.map(copyAnchor)),
+          sideB: Object.freeze(seam.sideB.map(copyAnchor)),
+        }),
+      ),
+    ),
+    selectedOperationNumber,
+  }) satisfies PatternImportDxfProductPhaseEMultiseamExistingAssemblyInputV2;
+  const assembly = Object.freeze({
+    ops: Object.freeze(
+      operations.map((operation) =>
+        Object.freeze({
+          number: operation.operationNumber,
+          work: operation.work,
+          inputKeys: Object.freeze([...operation.inputKeys]),
+          outputUnitKey: operation.outputUnitKey,
+          outputUnitName: operation.outputUnitName,
+          seamKeys: Object.freeze([...operation.seamKeys]),
+        }),
+      ),
+    ),
+    seams: Object.freeze(
+      selectedSeams.map((seam) =>
+        Object.freeze({
+          seamKey: seam.seamKey,
+          pieces: Object.freeze([seam.sideA[0]!.pieceLineKey, seam.sideB[0]!.pieceLineKey]),
+          confirmed: true,
+          stale: false,
+          kind: seam.kind,
+          direction: seam.direction,
+          source: seam.source,
+          anchoredSize: seam.anchoredSize,
+          sideA: Object.freeze(seam.sideA.map(copyAnchor)),
+          sideB: Object.freeze(seam.sideB.map(copyAnchor)),
+        }),
+      ),
+    ),
+  }) as unknown as AssemblyContext;
+  return Object.freeze({ assembly, topology });
+}
+
 function validateExpected(
   candidate: unknown,
 ): Readonly<{ row: DxfProductSavedRowIdentityV1; selectedOperationNumber: number }> {
@@ -1221,7 +1376,11 @@ export function createPatternImportDxfPhaseESavedAssemblyAuthorityTransportAdapt
         validateSeam(seam, `response.selectedSeams[${index}]`),
       ),
     );
-    const normalized = normalizeAssembly(operations, selectedSeams, selectedOperationNumber);
+    const normalizedCurrent = normalizeCurrentAssembly(
+      operations,
+      selectedSeams,
+      selectedOperationNumber,
+    );
     const sidecar = validateOptionalCompositeSidecar(response.sidecar);
     return Object.freeze({
       row,
@@ -1229,7 +1388,8 @@ export function createPatternImportDxfPhaseESavedAssemblyAuthorityTransportAdapt
       serverTopologySha256,
       selectedOperationNumber,
       selectedSeams,
-      normalized,
+      operations,
+      normalizedCurrent,
       sidecar,
     });
   };
@@ -1241,7 +1401,7 @@ export function createPatternImportDxfPhaseESavedAssemblyAuthorityTransportAdapt
     let computedSha256: unknown;
     try {
       computedSha256 = await Reflect.apply(captured.computeCanonicalSha256, undefined, [
-        snapshot.normalized.adapted.existingAssembly,
+        snapshot.normalizedCurrent.topology,
         signal,
       ]);
     } catch {
@@ -1274,8 +1434,8 @@ export function createPatternImportDxfPhaseESavedAssemblyAuthorityTransportAdapt
       serverAssemblyRevision: snapshot.serverAssemblyRevision,
       assemblyTopologySha256: snapshot.serverTopologySha256,
       selectedOperationNumber: snapshot.selectedOperationNumber,
-      assembly: snapshot.normalized.assembly,
-      topology: snapshot.normalized.adapted.existingAssembly,
+      assembly: snapshot.normalizedCurrent.assembly,
+      topology: snapshot.normalizedCurrent.topology,
     });
   };
 
@@ -1287,6 +1447,11 @@ export function createPatternImportDxfPhaseESavedAssemblyAuthorityTransportAdapt
     signal: AbortSignal,
   ): Promise<PatternImportDxfPhaseESavedRowAuthoritativeAssemblyEvidenceV1> => {
     const snapshot = await readSnapshot(expectedCandidate, signal);
+    const normalized = normalizeAssembly(
+      snapshot.operations,
+      snapshot.selectedSeams,
+      snapshot.selectedOperationNumber,
+    );
     const sidecar = snapshot.sidecar;
     if (!sidecar)
       fail(
@@ -1332,7 +1497,7 @@ export function createPatternImportDxfPhaseESavedAssemblyAuthorityTransportAdapt
       serverTopologySha256: snapshot.serverTopologySha256,
       row: snapshot.row,
       selectedOperationNumber: snapshot.selectedOperationNumber,
-      assembly: snapshot.normalized.assembly,
+      assembly: normalized.assembly,
       exactTopology,
     });
   };

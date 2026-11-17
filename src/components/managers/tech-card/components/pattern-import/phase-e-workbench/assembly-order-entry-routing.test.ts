@@ -11,44 +11,51 @@ describe('saved Assembly Order workbench routing', () => {
     expect(resolvePatternImportDxfPhaseEWorkbenchRequestedV1(false, false)).toBe(false);
   });
 
-  it('keeps non-two-seam operations on the shared CAD table instead of showing a blocker', () => {
+  it('routes a saved legacy N1 operation with no durable session to zero-connect authoring', () => {
     expect(
       shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
         workbenchOpen: true,
         exactNSessionAvailable: false,
-        savedProjectionBlockerCode: 'saved-operation-not-two-seam',
+        savedProjectionBlockerCode: null,
+        selectedSeamKeys: ['seam-a'],
+        savedOrderedSeamKeys: ['seam-a'],
       }),
     ).toBe(true);
   });
 
-  it('keeps a local operation missing from the latest saved read on the shared CAD table', () => {
+  it('fails closed when the local operation is missing from the authoritative saved read', () => {
     expect(
       shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
         workbenchOpen: true,
         exactNSessionAvailable: false,
         savedProjectionBlockerCode: 'saved-operation-missing',
+        selectedSeamKeys: ['seam-a'],
+        savedOrderedSeamKeys: null,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it.each([
     {
       label: 'zero seams',
       seamKeys: [],
+      savedSeamKeys: null,
       entryRoute: 'v2',
       blocker: 'saved-operation-not-two-seam',
-      fallback: true,
+      fallback: false,
     },
     {
       label: 'one seam',
       seamKeys: ['seam-a'],
+      savedSeamKeys: ['seam-a'],
       entryRoute: 'v1',
-      blocker: 'saved-operation-not-two-seam',
+      blocker: null,
       fallback: true,
     },
     {
       label: 'two seams',
       seamKeys: ['seam-a', 'seam-b'],
+      savedSeamKeys: ['seam-a', 'seam-b'],
       entryRoute: 'v2',
       blocker: null,
       fallback: false,
@@ -56,19 +63,22 @@ describe('saved Assembly Order workbench routing', () => {
     {
       label: 'more than two seams',
       seamKeys: ['seam-a', 'seam-b', 'seam-c'],
+      savedSeamKeys: ['seam-a', 'seam-b', 'seam-c'],
       entryRoute: 'v2',
-      blocker: 'saved-operation-not-two-seam',
-      fallback: true,
+      blocker: null,
+      fallback: false,
     },
   ])(
     'routes $label without exposing the legacy exactly-two-seam blocker',
-    ({ seamKeys, entryRoute, blocker, fallback }) => {
+    ({ seamKeys, savedSeamKeys, entryRoute, blocker, fallback }) => {
       expect(routePatternImportDxfPhaseEAssemblyOrderEntryV2(seamKeys)).toBe(entryRoute);
       expect(
         shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
           workbenchOpen: true,
           exactNSessionAvailable: false,
           savedProjectionBlockerCode: blocker,
+          selectedSeamKeys: seamKeys,
+          savedOrderedSeamKeys: savedSeamKeys,
         }),
       ).toBe(fallback);
     },
@@ -79,7 +89,9 @@ describe('saved Assembly Order workbench routing', () => {
       shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
         workbenchOpen: true,
         exactNSessionAvailable: true,
-        savedProjectionBlockerCode: 'saved-operation-not-two-seam',
+        savedProjectionBlockerCode: null,
+        selectedSeamKeys: ['seam-a'],
+        savedOrderedSeamKeys: ['seam-a'],
       }),
     ).toBe(false);
     expect(
@@ -87,6 +99,8 @@ describe('saved Assembly Order workbench routing', () => {
         workbenchOpen: true,
         exactNSessionAvailable: false,
         savedProjectionBlockerCode: 'saved-operation-ambiguous',
+        selectedSeamKeys: ['seam-a'],
+        savedOrderedSeamKeys: null,
       }),
     ).toBe(false);
     expect(
@@ -94,6 +108,23 @@ describe('saved Assembly Order workbench routing', () => {
         workbenchOpen: true,
         exactNSessionAvailable: false,
         savedProjectionBlockerCode: 'saved-seam-not-exact',
+        selectedSeamKeys: ['seam-a'],
+        savedOrderedSeamKeys: null,
+      }),
+    ).toBe(false);
+  });
+
+  it.each([
+    ['saved N2', ['saved-a', 'saved-b']],
+    ['saved N3', ['saved-a', 'saved-b', 'saved-c']],
+  ])('does not route stale live N1 over %s into zero-connect', (_label, savedOrderedSeamKeys) => {
+    expect(
+      shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
+        workbenchOpen: true,
+        exactNSessionAvailable: false,
+        savedProjectionBlockerCode: null,
+        selectedSeamKeys: ['stale-live-a'],
+        savedOrderedSeamKeys,
       }),
     ).toBe(false);
   });
