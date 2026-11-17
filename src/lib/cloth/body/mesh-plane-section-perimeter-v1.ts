@@ -304,35 +304,48 @@ function intersectTriangleCrossings(
   return [crossings[0], crossings[1]];
 }
 
+/**
+ * Weld grid with cell size = tolerance. Buckets are keyed by a numeric hash of the integer cell;
+ * every entry keeps its exact cell and only same-cell entries are visited, so candidates, their
+ * order, the chosen (lowest) index and `comparisons` are identical to a per-cell string key.
+ */
 class SpatialWelder {
   readonly points: MeshPlaneSectionVec3V1[] = [];
-  readonly buckets = new Map<string, number[]>();
+  readonly buckets = new Map<number, number[]>();
+  private readonly cellX: number[] = [];
+  private readonly cellY: number[] = [];
+  private readonly cellZ: number[] = [];
   comparisons = 0;
 
   constructor(readonly tolerance: number) {}
 
-  private cell(point: MeshPlaneSectionVec3V1): readonly [number, number, number] {
-    return [
-      Math.floor(point[0] / this.tolerance),
-      Math.floor(point[1] / this.tolerance),
-      Math.floor(point[2] / this.tolerance),
-    ];
-  }
-
-  private key(x: number, y: number, z: number): string {
-    return `${x}:${y}:${z}`;
+  private static hash(x: number, y: number, z: number): number {
+    return (
+      (Math.imul(x | 0, 73_856_093) ^ Math.imul(y | 0, 19_349_663) ^ Math.imul(z | 0, 83_492_791)) |
+      0
+    );
   }
 
   add(point: MeshPlaneSectionVec3V1): number {
-    const cell = this.cell(point);
+    // `+ 0` folds -0 into 0, matching the old `${x}` key where both printed as "0".
+    const x = Math.floor(point[0] / this.tolerance) + 0;
+    const y = Math.floor(point[1] / this.tolerance) + 0;
+    const z = Math.floor(point[2] / this.tolerance) + 0;
     const toleranceSquared = this.tolerance * this.tolerance;
     let match = Number.POSITIVE_INFINITY;
     for (let dx = -1; dx <= 1; dx += 1) {
       for (let dy = -1; dy <= 1; dy += 1) {
         for (let dz = -1; dz <= 1; dz += 1) {
-          for (const candidate of this.buckets.get(
-            this.key(cell[0] + dx, cell[1] + dy, cell[2] + dz),
-          ) ?? []) {
+          const bucket = this.buckets.get(SpatialWelder.hash(x + dx, y + dy, z + dz));
+          if (!bucket) continue;
+          for (const candidate of bucket) {
+            if (
+              this.cellX[candidate] !== x + dx ||
+              this.cellY[candidate] !== y + dy ||
+              this.cellZ[candidate] !== z + dz
+            ) {
+              continue;
+            }
             this.comparisons += 1;
             if (distanceSquared(point, this.points[candidate]) <= toleranceSquared) {
               match = Math.min(match, candidate);
@@ -344,10 +357,13 @@ class SpatialWelder {
     if (Number.isFinite(match)) return match;
     const index = this.points.length;
     this.points.push(Object.freeze([...point]) as unknown as MeshPlaneSectionVec3V1);
-    const key = this.key(cell[0], cell[1], cell[2]);
-    const bucket = this.buckets.get(key) ?? [];
-    bucket.push(index);
-    this.buckets.set(key, bucket);
+    this.cellX.push(x);
+    this.cellY.push(y);
+    this.cellZ.push(z);
+    const key = SpatialWelder.hash(x, y, z);
+    const bucket = this.buckets.get(key);
+    if (bucket) bucket.push(index);
+    else this.buckets.set(key, [index]);
     return index;
   }
 }
