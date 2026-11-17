@@ -143,19 +143,32 @@ export function shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
   workbenchOpen,
   exactNSessionAvailable,
   savedProjectionBlockerCode,
-  selectedSeamCount,
+  selectedSeamKeys,
+  savedOrderedSeamKeys,
 }: Readonly<{
   workbenchOpen: boolean;
   exactNSessionAvailable: boolean;
   savedProjectionBlockerCode: string | null;
-  selectedSeamCount: number;
+  selectedSeamKeys: readonly string[];
+  savedOrderedSeamKeys: readonly string[] | null;
 }>): boolean {
-  const operationCanBeCompletedOnTable =
-    (selectedSeamCount === 1 && savedProjectionBlockerCode === null) ||
-    savedProjectionBlockerCode === 'saved-operation-missing' ||
-    savedProjectionBlockerCode === 'saved-operation-not-two-seam';
-  return workbenchOpen && !exactNSessionAvailable && operationCanBeCompletedOnTable;
+  const exactSavedLegacyN1 =
+    savedProjectionBlockerCode === null &&
+    selectedSeamKeys.length === 1 &&
+    savedOrderedSeamKeys?.length === 1 &&
+    selectedSeamKeys[0] === savedOrderedSeamKeys[0];
+  return workbenchOpen && !exactNSessionAvailable && exactSavedLegacyN1;
 }
+
+const LEGACY_N1_REBUILD_ONLY_HANDOFF: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1 =
+  Object.freeze({
+    status: 'unavailable' as const,
+    blocker: Object.freeze({
+      code: 'zero-connect-authoring-write-refused' as const,
+      detail:
+        'Direct Connect cannot modify an existing legacy one-seam operation safely. Remove that operation and rebuild it from the 2D table.',
+    }),
+  });
 
 export const PATTERN_IMPORT_DXF_PHASE_E_ASSEMBLY_ORDER_ENTRY_CONTRACT_V1 = Object.freeze({
   mountedFromSelectedAssemblyOrderOperation: true,
@@ -1490,6 +1503,10 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       }),
     [orderSizeIds, savedCard.data, selectedOperationNumber, sizeNameById],
   );
+  const savedOperationSeamsMatch =
+    savedProjection.ok &&
+    selectedSeamKeys.length === savedProjection.seamCount &&
+    selectedSeamKeys.every((seamKey, index) => seamKey === savedProjection.orderedSeamKeys[index]);
   const savedRuntimeResolution = useMemo(() => {
     if (!savedProjection.ok) return Object.freeze({ runtime: null, blocker: null });
     try {
@@ -1534,6 +1551,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   }, [savedProjection]);
   const savedBindingExactNSession =
     (selectedSeamKeys.length === 1 || selectedSeamKeys.length > 2) &&
+    savedOperationSeamsMatch &&
     savedProjection.ok &&
     exactNSession &&
     matchesPatternImportDxfProductExactNSessionSavedBindingV1(
@@ -1614,6 +1632,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   const durableReloadBinding = useMemo(() => {
     if (
       selectedSeamKeys.length !== 1 ||
+      !savedOperationSeamsMatch ||
       !savedProjection.ok ||
       !savedCard.data ||
       !exactNApplicationOwner ||
@@ -1639,6 +1658,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
     exactNApplicationOwner,
     exactPersistenceCapabilities,
     savedCard.data,
+    savedOperationSeamsMatch,
     savedProjection,
     selectedSeamKeys,
   ]);
@@ -1763,7 +1783,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
             code: restored.blocker.code,
             detail:
               restored.blocker.code === 'durable-restore-sidecar-missing'
-                ? 'No durable exact connection is saved yet. Continue on the 2D table and select the two exact edges to create it.'
+                ? 'No durable exact connection is saved yet. Direct Connect cannot modify this existing legacy one-seam operation safely; remove it and rebuild it from the 2D table.'
                 : restored.blocker.detail,
             retryable: restored.blocker.code === 'durable-restore-failed',
           });
@@ -1994,7 +2014,8 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
   const savedBrowseFallback = shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
     workbenchOpen: workbenchRequested,
     exactNSessionAvailable: exactNBoundarySession !== null,
-    selectedSeamCount: selectedSeamKeys.length,
+    selectedSeamKeys,
+    savedOrderedSeamKeys: savedProjection.ok ? savedProjection.orderedSeamKeys : null,
     savedProjectionBlockerCode: savedProjection.ok
       ? null
       : savedProjection.blockers[0]?.code ?? null,
@@ -2029,7 +2050,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       blocker: {
         code: 'exact-connection-incomplete',
         detail:
-          'The table is open for this operation. Select exact edges to create or refine its connection drafts.',
+          'This legacy one-seam operation is available for inspection only. Remove it and rebuild it from the 2D table before using Direct Connect.',
         operationNumber: source.selectedOperationNumber,
         processKind: 'connect',
       },
@@ -2038,12 +2059,18 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       <PatternImportDxfPhaseECadTableZeroOperationProductionMountV1
         techCardId={techCardId}
         physicalHost={physicalHost}
-        zeroConnectAuthoringHandoff={zeroConnectAuthoringHandoff}
+        zeroConnectAuthoringHandoff={LEGACY_N1_REBUILD_ONLY_HANDOFF}
         disabled={frozen}
         selection={{ operationNumber: source.selectedOperationNumber }}
         defaultOperationsMode='docked'
         operationsPanel={
           <>
+            <CalloutBox tone='note' className='mb-2' data-legacy-n1-rebuild-required=''>
+              <Text component='p' size='micro'>
+                Direct Connect is disabled for this existing legacy one-seam operation. Remove the
+                operation and rebuild it from the 2D table to create a durable exact connection.
+              </Text>
+            </CalloutBox>
             {durableReloadBlocker ? (
               <CalloutBox
                 tone={durableReloadBlocker.retryable ? 'error' : 'note'}
