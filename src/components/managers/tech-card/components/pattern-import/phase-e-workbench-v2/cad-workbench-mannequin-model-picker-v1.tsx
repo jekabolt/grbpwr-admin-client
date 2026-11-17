@@ -721,6 +721,17 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
       data-cad-mannequin-scene-overlay-edges={sceneOverlayBridge?.decorations
         .map(({ seamId, side, semanticColorCss }) => `${seamId}:${side}:${semanticColorCss}`)
         .join('|')}
+      data-cad-mannequin-scene-overlay-seam-ordinals={
+        sceneOverlayBridge?.decorations.length
+          ? JSON.stringify(
+              sceneOverlayBridge.decorations.map(({ seamId, side, operationSeam }) => ({
+                seamId,
+                side,
+                ...operationSeam,
+              })),
+            )
+          : undefined
+      }
       data-cad-mannequin-scene-overlay-correspondences={
         sceneOverlayBridge
           ? correspondenceGuides

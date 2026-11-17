@@ -1,5 +1,6 @@
 import type {
   MeasurementSurfacePatternPieceOverlayV1,
+  MeasurementSurfacePatternPieceSeamV1,
   MeasurementSurfacePatternPieceTransformV1,
   MeasurementSurfacePatternPieceV1,
 } from 'components/shared/measurement-watertight-surface-v1-stage';
@@ -36,6 +37,7 @@ export type PatternImportDxfPhaseECadMannequinPatternOverlayDecorationV1 = Reado
   scopeKey: string;
   pieceId: string;
   contourId: string;
+  operationSeam?: MeasurementSurfacePatternPieceSeamV1['operationSeam'];
   semanticColorCss?: string | null;
   /** Exact ordered Phase-D boundary identities. Empty or missing identities fail closed. */
   orderedVertexIds: readonly string[];
@@ -174,6 +176,9 @@ export function buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1(
             seamId: decoration.seamId,
             side: decoration.side,
             contourId: decoration.contourId,
+            ...(decoration.operationSeam && {
+              operationSeam: Object.freeze({ ...decoration.operationSeam }),
+            }),
             colorCss: stableCssColor(decoration.semanticColorCss),
             orderedVertexIds: Object.freeze([...decoration.orderedVertexIds]),
             thread:

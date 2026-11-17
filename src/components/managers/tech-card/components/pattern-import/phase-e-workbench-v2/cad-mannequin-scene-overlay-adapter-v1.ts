@@ -8,6 +8,7 @@ import {
 import { isTopstitchThreadLine, type TopstitchBomLine } from '../../topstitch-lines';
 import { resolvePatternImportDxfPhaseECadWorkbenchThreadCatalogV1 } from './cad-workbench-bom-visual-authority-v1';
 import { CAD_WORKBENCH_SEAM_SIDE_COLORS } from './cad-workbench-seam-colors-v1';
+import { cadWorkbenchOperationSeamOrdinal } from './cad-workbench-seam-ordinal-v1';
 import type {
   PatternImportDxfPhaseECadMannequinDxfStagingSelectionV1,
   PatternImportDxfPhaseECadMannequinDxfStagingSourceV1,
@@ -73,6 +74,7 @@ export type PatternImportDxfPhaseECadMannequinSceneEdgeHighlightV1 = Readonly<{
   primitiveId: string;
   connectionRef: string;
   operationNumber: number;
+  seamOrdinal: number;
   authoringOperationId: string;
   side: 'A' | 'B';
   semanticColorHex: (typeof CAD_WORKBENCH_SEAM_SIDE_COLORS)[keyof typeof CAD_WORKBENCH_SEAM_SIDE_COLORS];
@@ -796,6 +798,15 @@ export function buildPatternImportDxfPhaseECadMannequinSceneOverlayFromExactAuth
     } else {
       exactLayerAvailable = true;
       for (const { connection, sides } of compiled) {
+        const seamOrdinal = cadWorkbenchOperationSeamOrdinal(
+          activeOperation.seamKeys,
+          connection.connectionRef,
+        );
+        if (seamOrdinal === null)
+          return blocked(
+            'assembly-graph-invalid',
+            'The exact seam has no unique operation position.',
+          );
         const focused =
           !selectedConnectionRef || selectedConnectionRef === connection.connectionRef;
         for (const resolved of sides)
@@ -803,6 +814,7 @@ export function buildPatternImportDxfPhaseECadMannequinSceneOverlayFromExactAuth
             primitiveId: `edge:${connection.connectionRef}:${resolved.side}`,
             connectionRef: connection.connectionRef,
             operationNumber: connection.operationNumber,
+            seamOrdinal,
             authoringOperationId: connection.authoringOperationId,
             side: resolved.side,
             semanticColorHex: CAD_WORKBENCH_SEAM_SIDE_COLORS[resolved.side],

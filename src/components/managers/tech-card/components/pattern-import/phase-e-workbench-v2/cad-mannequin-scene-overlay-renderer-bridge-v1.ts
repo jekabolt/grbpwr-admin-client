@@ -229,6 +229,8 @@ function edgeIssue(
     edge.primitiveId !== `edge:${edge.connectionRef}:${edge.side}` ||
     edge.semanticColorHex !== CAD_WORKBENCH_SEAM_SIDE_COLORS[edge.side] ||
     edge.operationNumber !== overlay.focus.currentOperationNumber ||
+    !Number.isSafeInteger(edge.seamOrdinal) ||
+    edge.seamOrdinal < 1 ||
     edge.authoringOperationId !== overlay.focus.currentOperationId
   )
     return { code: 'stale-overlay', detail: `Edge ${edge.primitiveId} is stale or recoloured.` };
@@ -366,6 +368,10 @@ export function bridgePatternImportDxfPhaseECadMannequinSceneOverlayToRendererV1
         scopeKey: edge.scopeKey,
         pieceId: edge.pieceId,
         contourId: edge.contourId,
+        operationSeam: Object.freeze({
+          operationNumber: edge.operationNumber,
+          ordinal: edge.seamOrdinal,
+        }),
         semanticColorCss: edge.semanticColorHex,
         orderedVertexIds: Object.freeze([...edge.orderedVertexIds]),
         thread: null,
@@ -373,9 +379,22 @@ export function bridgePatternImportDxfPhaseECadMannequinSceneOverlayToRendererV1
       }),
     );
   }
+  const seamOrdinals = new Set<number>();
   for (const [connectionRef, sides] of edgesByConnection) {
-    if (sides.size !== 2 || !sides.has('A') || !sides.has('B'))
+    const a = sides.get('A');
+    const b = sides.get('B');
+    if (sides.size !== 2 || !a || !b)
       return blocked('stale-overlay', `Connection ${connectionRef} does not have exact A/B edges.`);
+    if (
+      a.seamOrdinal !== b.seamOrdinal ||
+      a.seamOrdinal > edgesByConnection.size ||
+      seamOrdinals.has(a.seamOrdinal)
+    )
+      return blocked(
+        'stale-overlay',
+        `Connection ${connectionRef} has an inconsistent operation position.`,
+      );
+    seamOrdinals.add(a.seamOrdinal);
   }
 
   const guides: Guide[] = [];

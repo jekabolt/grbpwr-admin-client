@@ -24,6 +24,7 @@ import { SHEET_INK, vy } from '../sheet-viewport';
 import { buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1 } from './cad-mannequin-pattern-piece-overlay-v1';
 import { buildPatternImportDxfPhaseECadMannequinSceneOverlayFromExactAuthorityV2 } from './cad-mannequin-scene-overlay-adapter-v1';
 import { bridgePatternImportDxfPhaseECadMannequinSceneOverlayToRendererV1 } from './cad-mannequin-scene-overlay-renderer-bridge-v1';
+import { cadWorkbenchOperationSeamOrdinal } from './cad-workbench-seam-ordinal-v1';
 import { projectCadTablePieceFeatures } from './cad-table-piece-features-v1';
 import {
   createPatternImportDxfPhaseECadTablePieceLayoutSessionV1,
@@ -522,9 +523,19 @@ describe('zero-operation CAD table rendering', () => {
     expect(lower.viewportBounds).toBe(initial.viewportBounds);
   });
 
-  it('renders the same saved seam side colors in the 2D canvas and the 3D renderer input', () => {
+  it('uses the verified operation order for the saved seam position', () => {
+    expect(cadWorkbenchOperationSeamOrdinal(['seam-z', 'seam-a'], 'seam-z')).toBe(1);
+    expect(cadWorkbenchOperationSeamOrdinal(['seam-z', 'seam-a'], 'seam-a')).toBe(2);
+    expect(cadWorkbenchOperationSeamOrdinal(['seam-z', 'seam-a'], 'seam-missing')).toBeNull();
+    expect(cadWorkbenchOperationSeamOrdinal(['seam-z', 'seam-z'], 'seam-z')).toBeNull();
+  });
+
+  it('shares the saved operation seam ordinal and A/B palette between 2D and 3D', () => {
     const { catalog, projection } = overlappingFixture();
     const seamId = 'saved-seam';
+    const operationNumber = 14;
+    const seamKeys = [seamId];
+    const ordinal = cadWorkbenchOperationSeamOrdinal(seamKeys, seamId)!;
     const sides = [
       {
         seamId,
@@ -550,10 +561,9 @@ describe('zero-operation CAD table rendering', () => {
         catalog={catalog}
         projection={projection}
         disabled
-        savedSeamSides={sides}
+        savedSeam={{ seamId, operationNumber, ordinal, sides }}
       />,
     );
-    const operationNumber = 14;
     const current = {
       techCardId: catalog.techCardId,
       cardRef: 'card-6',
@@ -589,7 +599,7 @@ describe('zero-operation CAD table rendering', () => {
       },
       authority: {
         ...current,
-        operations: [{ operationNumber, seamKeys: [seamId], exactConnections: [connection] }],
+        operations: [{ operationNumber, seamKeys, exactConnections: [connection] }],
         connections: [connection],
       },
       activeOperationNumber: operationNumber,
@@ -599,6 +609,14 @@ describe('zero-operation CAD table rendering', () => {
     if (!scene.ok) throw new Error(scene.blocker.detail);
     const bridge = bridgePatternImportDxfPhaseECadMannequinSceneOverlayToRendererV1(scene.overlay);
     if (!bridge.ok) throw new Error(bridge.blocker.detail);
+    expect(
+      bridgePatternImportDxfPhaseECadMannequinSceneOverlayToRendererV1({
+        ...scene.overlay,
+        edgeHighlights: scene.overlay.edgeHighlights.map((edge) =>
+          edge.side === 'B' ? { ...edge, seamOrdinal: 2 } : edge,
+        ),
+      }),
+    ).toMatchObject({ ok: false, blocker: { code: 'stale-overlay' } });
     const rendererInput = buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1({
       sources,
       decorations: bridge.bridge.decorations,
@@ -610,12 +628,20 @@ describe('zero-operation CAD table rendering', () => {
       ['A', '#2563EB'],
       ['B', '#F97316'],
     ]);
-    for (const { side, colorCss } of rendererSeams) {
+    for (const { side, colorCss, operationSeam } of rendererSeams) {
+      expect(operationSeam).toEqual({ operationNumber, ordinal: 1 });
       const line = html.match(
         new RegExp(`data-cad-zero-connect-side="${side.toLowerCase()}">(<line[^>]*>)`),
       )?.[1];
       expect(line).toContain(`stroke="${colorCss}"`);
       expect(line?.includes('stroke-dasharray="6 3"')).toBe(side === 'B');
+      const label = html.match(
+        new RegExp(
+          `<text[^>]*aria-label="Operation ${operationNumber}, seam 1 side ${side}"[^>]*>1 ${side}</text>`,
+        ),
+      )?.[0];
+      expect(label).toContain(`fill="${colorCss}"`);
+      expect(label).toContain('pointer-events="none"');
     }
     expect(html).toContain('aria-label="Fit all pieces"');
     expect(html).not.toContain('aria-label="Connect edges"');

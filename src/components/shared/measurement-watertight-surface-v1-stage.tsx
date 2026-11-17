@@ -66,6 +66,7 @@ export interface MeasurementSurfacePatternPieceSeamV1 {
   readonly side: 'A' | 'B';
   readonly contourId: string;
   readonly colorCss: string | null;
+  readonly operationSeam?: Readonly<{ operationNumber: number; ordinal: number }>;
   readonly orderedVertexIds: readonly string[];
   readonly thread: Readonly<{ bomLineKey: string; colorCss: string }> | null;
   readonly pins: readonly Readonly<{ pinId: string; vertexId: string }>[];
@@ -1296,6 +1297,10 @@ function createPatternPieceLayerV1(
         seamLine.userData.patternPieceKey = piece.pieceKey;
         seamLine.userData.seamId = seam.seamId;
         seamLine.userData.seamSide = seam.side;
+        if (seam.operationSeam) {
+          seamLine.userData.operationNumber = seam.operationSeam.operationNumber;
+          seamLine.userData.seamOrdinal = seam.operationSeam.ordinal;
+        }
         seamLine.userData.contourId = seam.contourId;
         seamLine.userData.orderedVertexIds = seam.orderedVertexIds;
         content.add(seamLine);

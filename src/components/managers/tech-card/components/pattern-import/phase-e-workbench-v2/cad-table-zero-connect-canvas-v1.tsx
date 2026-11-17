@@ -78,12 +78,17 @@ export type PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1 = Readonly<{
   authoringAuthorityRefresh?: PatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1 | null;
   zeroConnectAuthoringHandoff?: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1;
   disabled?: boolean;
-  savedSeamSides?: readonly Readonly<{
-    pieceId: string;
-    pieceLineKey: string;
-    contourId: string | null;
-    boundaryVertexIds: readonly string[];
-  }>[];
+  savedSeam?: Readonly<{
+    seamId: string;
+    operationNumber: number;
+    ordinal: number;
+    sides: readonly Readonly<{
+      pieceId: string;
+      pieceLineKey: string;
+      contourId: string | null;
+      boundaryVertexIds: readonly string[];
+    }>[];
+  }>;
 }>;
 
 function layoutFor(
@@ -254,7 +259,7 @@ function CadTableZeroCanvas({
   authoringAuthorityRefresh = null,
   zeroConnectAuthoringHandoff,
   disabled = false,
-  savedSeamSides,
+  savedSeam,
   owner,
 }: PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1 & { owner: CadTableZeroCanvasOwner }) {
   const authority = useMemo(
@@ -436,7 +441,7 @@ function CadTableZeroCanvas({
               setActiveTool('move');
             }}
           />
-          {!savedSeamSides && (
+          {!savedSeam && (
             <PatternImportDxfPhaseECadTableConnectToolControlV1
               phase={phase}
               disabled={connectDisabled}
@@ -666,11 +671,11 @@ function CadTableZeroCanvas({
                   </g>
                 );
               })}
-              {controller.session || savedSeamSides
+              {controller.session || savedSeam
                 ? segments.map((segment) => {
                     const placed = pieceLayout(layout, segment);
                     if (!placed) return null;
-                    const savedSideIndex = savedSeamSides?.findIndex(
+                    const savedSideIndex = savedSeam?.sides.findIndex(
                       (side) =>
                         side.pieceId === segment.pieceId &&
                         side.pieceLineKey === segment.pieceLineKey &&
@@ -680,6 +685,8 @@ function CadTableZeroCanvas({
                           segment.boundaryVertexIds.includes(vertexId),
                         ),
                     );
+                    const savedSide =
+                      savedSideIndex === 0 ? 'A' : savedSideIndex === 1 ? 'B' : null;
                     const selectedSide =
                       savedSideIndex === 0 || savedSideIndex === 1
                         ? savedSideIndex
@@ -693,15 +700,23 @@ function CadTableZeroCanvas({
                       !!controller.session &&
                       !connectDisabled &&
                       controller.session.status !== 'ready';
-                    const savedSideColor =
-                      savedSideIndex === 0 || savedSideIndex === 1
-                        ? CAD_WORKBENCH_SEAM_SIDE_COLORS[savedSideIndex === 0 ? 'A' : 'B']
-                        : 'currentColor';
+                    const savedSideColor = savedSide
+                      ? CAD_WORKBENCH_SEAM_SIDE_COLORS[savedSide]
+                      : 'currentColor';
+                    const labelX = (from.x + to.x) / 2;
+                    const labelY = vy((from.y + to.y) / 2);
                     return (
                       <g
                         key={segment.viewKey}
                         transform={cadTablePieceSvgTransformV1(placed, 'inverted')}
                         data-cad-zero-connect-edge={segment.viewKey}
+                        data-cad-zero-connect-seam-id={savedSide ? savedSeam?.seamId : undefined}
+                        data-cad-zero-connect-seam-operation={
+                          savedSide ? savedSeam?.operationNumber : undefined
+                        }
+                        data-cad-zero-connect-seam-ordinal={
+                          savedSide ? savedSeam?.ordinal : undefined
+                        }
                         data-cad-zero-connect-side={
                           selectedSide === null ? undefined : selectedSide === 0 ? 'a' : 'b'
                         }
@@ -739,6 +754,29 @@ function CadTableZeroCanvas({
                             selectEdge(segment, event.shiftKey ? 'reverse' : 'forward');
                           }}
                         />
+                        {savedSeam && savedSide ? (
+                          <text
+                            data-cad-zero-connect-seam-label=''
+                            x={labelX}
+                            y={labelY - 4 * unit}
+                            transform={
+                              placed.rotationDegrees
+                                ? `rotate(${placed.rotationDegrees} ${labelX} ${labelY})`
+                                : undefined
+                            }
+                            fill={savedSideColor}
+                            stroke='var(--color-bgColor)'
+                            strokeWidth={2 * unit}
+                            paintOrder='stroke'
+                            textAnchor='middle'
+                            fontSize={11 * unit}
+                            fontWeight='bold'
+                            pointerEvents='none'
+                            aria-label={`Operation ${savedSeam.operationNumber}, seam ${savedSeam.ordinal} side ${savedSide}`}
+                          >
+                            {`${savedSeam.ordinal} ${savedSide}`}
+                          </text>
+                        ) : null}
                       </g>
                     );
                   })

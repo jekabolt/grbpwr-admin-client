@@ -23,6 +23,7 @@ import {
 } from './cad-mannequin-production-scene-overlay-adapter-v2';
 import { bridgePatternImportDxfPhaseECadMannequinSceneOverlayToRendererV1 } from './cad-mannequin-scene-overlay-renderer-bridge-v1';
 import type { PatternImportDxfPhaseECadMannequinSceneOverlayCapabilityV1 } from './cad-workbench-mannequin-model-picker-v1';
+import { cadWorkbenchOperationSeamOrdinal } from './cad-workbench-seam-ordinal-v1';
 import type { PatternImportDxfProductExactNSeamUiSelectionOwnerV2 } from './exact-n-seam-atomic-ui-selection-v2';
 import type { PatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1 } from './golden-card-production-v2-snapshot-feed-v1';
 import {
@@ -214,6 +215,8 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
   const tableSessionOwner = useCadTableZeroCanvasOwner(exactDesktop?.projection ?? null);
   if (!resolved.ok) return null;
   const activeSeam = resolved.model.state.seams[activeSeamIndex];
+  const operation = resolved.model.state.bindings.selectedOperation;
+  const seamOrdinal = cadWorkbenchOperationSeamOrdinal(operation.seamIds, activeSeam.seamId);
   const selectedPieceKeys = tableSessionOwner?.session.layout.selectedPieceKeys ?? [];
   const activePiece =
     selectedPieceKeys.length === 1
@@ -277,13 +280,18 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
         if (nextIndex >= 0) onActiveSeamIndexChange(nextIndex);
       }}
       desktop={
-        exactDesktop && tableSessionOwner ? (
+        exactDesktop && tableSessionOwner && seamOrdinal !== null ? (
           <PatternImportDxfPhaseECadTableZeroConnectCanvasV1
             catalog={exactDesktop.catalog}
             projection={exactDesktop.projection}
             pieceFeatures={exactDesktop.pieceFeatures}
             tableSessionOwner={tableSessionOwner}
-            savedSeamSides={activeSeam.sides}
+            savedSeam={{
+              seamId: activeSeam.seamId,
+              operationNumber: operation.sourceOperationNumber,
+              ordinal: seamOrdinal,
+              sides: activeSeam.sides,
+            }}
             disabled
           />
         ) : (
