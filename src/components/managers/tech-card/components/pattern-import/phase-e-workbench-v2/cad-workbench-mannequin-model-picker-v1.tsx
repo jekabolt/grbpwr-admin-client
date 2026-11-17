@@ -40,6 +40,7 @@ import type {
   PatternImportDxfPhaseECadMannequinDxfStagingSourceV1,
 } from './cad-mannequin-dxf-staging-v1';
 import type { PatternImportDxfPhaseECadMannequinSceneOverlayRendererBridgeV1 } from './cad-mannequin-scene-overlay-renderer-bridge-v1';
+import type { CadWorkbenchPhysicalHostV1 } from './cad-workbench-physical-host-v1';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_MODEL_PICKER_V1 =
   'pattern-import-dxf-phase-e-cad-mannequin-model-picker/1' as const;
@@ -189,6 +190,7 @@ export type PatternImportDxfPhaseECadMannequinModelPickerViewPropsV1 = Readonly<
   poseError?: unknown;
   onRetryPose?: () => void;
   onDisplayedBodyInputV1?: CadMannequinDisplayedBodyInputObserverV1;
+  onSaveMannequinArrangement?: CadWorkbenchPhysicalHostV1['onSaveMannequinArrangement'];
 }>;
 
 export type PatternImportDxfPhaseECadMannequinPoseSessionV1 = Readonly<{
@@ -441,6 +443,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
   poseError = null,
   onRetryPose,
   onDisplayedBodyInputV1,
+  onSaveMannequinArrangement,
 }: PatternImportDxfPhaseECadMannequinModelPickerViewPropsV1) {
   const selected = selectedCadWorkbenchModelV1(models, modelId);
   const selectedRevision = selected ? modelFormRevisionKeyV1(selected) : null;
@@ -505,6 +508,59 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
   const [patternTransforms, setPatternTransforms] = useState<
     Readonly<Record<string, MeasurementSurfacePatternPieceTransformV1>>
   >({});
+  const [arrangementSaving, setArrangementSaving] = useState(false);
+  const [arrangementMessage, setArrangementMessage] = useState<string | null>(null);
+  const arrangementSource =
+    patternPieceScene?.sources.find(
+      ({ scopeKey }) => scopeKey === patternPieceScene.activeScopeKey,
+    ) ?? (patternPieceScene?.sources.length === 1 ? patternPieceScene.sources[0] : null);
+  const saveArrangement = async () => {
+    const source = arrangementSource;
+    if (
+      !source ||
+      !selected?.id ||
+      !selectedRevision ||
+      !poseBinding ||
+      !onSaveMannequinArrangement
+    )
+      return;
+    setArrangementSaving(true);
+    setArrangementMessage(null);
+    try {
+      await onSaveMannequinArrangement({
+        scopeKey: source.scopeKey,
+        projection: source.projection,
+        mannequin: {
+          baseModelId: selected.id,
+          modelFormRevisionKeyV1: selectedRevision,
+          poseBinding: { canonicalKey: poseBinding.canonicalKey },
+        },
+        pieces: source.projection.pieces.map(({ pieceId, pieceLineKey }) => {
+          const pieceKey = `${source.scopeKey}:${pieceId}:${pieceLineKey}`;
+          const transform = patternTransforms[pieceKey];
+          return {
+            pieceKey,
+            scopeKey: source.scopeKey,
+            pieceId,
+            pieceLineKey,
+            transform: transform
+              ? {
+                  offsetM: [...transform.offsetM] as [number, number, number],
+                  rotationRad: transform.rotationRad,
+                }
+              : { offsetM: [0, 0, 0] as const, rotationRad: 0 },
+          };
+        }),
+      });
+      setArrangementMessage('Arrangement saved.');
+    } catch (error) {
+      setArrangementMessage(
+        error instanceof Error ? error.message : 'Arrangement could not be saved.',
+      );
+    } finally {
+      setArrangementSaving(false);
+    }
+  };
   const handlePatternTransform = useCallback(
     (pieceKey: string, transform: MeasurementSurfacePatternPieceTransformV1) =>
       setPatternTransforms((current) => Object.freeze({ ...current, [pieceKey]: transform })),
@@ -638,6 +694,31 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
           onPoseEditingChange={setPoseEditing}
         />
       ) : null}
+      {onSaveMannequinArrangement && selected && patternPieceScene ? (
+        <div className='flex shrink-0 items-center gap-2 px-2 py-1'>
+          <Button
+            type='button'
+            size='xs'
+            variant='secondary'
+            disabled={
+              disabled ||
+              arrangementSaving ||
+              !arrangementSource ||
+              !poseBinding ||
+              poseLoading ||
+              Boolean(poseError)
+            }
+            onClick={() => void saveArrangement()}
+          >
+            {arrangementSaving ? 'Saving…' : 'Save arrangement'}
+          </Button>
+          {arrangementMessage ? (
+            <Text component='span' size='micro' role='status'>
+              {arrangementMessage}
+            </Text>
+          ) : null}
+        </div>
+      ) : null}
 
       {error ? (
         <div className='relative min-h-[20rem] flex-1 overflow-hidden'>
@@ -738,12 +819,14 @@ export function PatternImportDxfPhaseECadMannequinModelPickerV1({
   stagedPieces = null,
   patternPieceScene = null,
   onDisplayedBodyInputV1,
+  onSaveMannequinArrangement,
 }: Readonly<{
   disabled?: boolean;
   paperDoll?: ReactNode;
   stagedPieces?: ReactNode;
   patternPieceScene?: PatternImportDxfPhaseECadMannequinPatternPieceSceneV1 | null;
   onDisplayedBodyInputV1?: CadMannequinDisplayedBodyInputObserverV1;
+  onSaveMannequinArrangement?: CadWorkbenchPhysicalHostV1['onSaveMannequinArrangement'];
 }>) {
   const form = useFormContext<TechCardFormData>();
   const modelId =
@@ -784,6 +867,7 @@ export function PatternImportDxfPhaseECadMannequinModelPickerV1({
       poseError={poseSession.error}
       onRetryPose={poseSession.retry}
       onDisplayedBodyInputV1={onDisplayedBodyInputV1}
+      onSaveMannequinArrangement={onSaveMannequinArrangement}
     />
   );
 }

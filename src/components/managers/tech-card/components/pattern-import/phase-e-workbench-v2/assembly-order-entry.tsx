@@ -2402,6 +2402,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                 <PatternImportDxfPhaseECadMannequinModelPickerV1
                   disabled={frozen}
                   onDisplayedBodyInputV1={physicalHost?.onDisplayedBodyInputV1}
+                  onSaveMannequinArrangement={physicalHost?.onSaveMannequinArrangement}
                   patternPieceScene={{
                     sources: mannequinDxfSources,
                     sceneOverlay: sceneOverlay,
@@ -2664,6 +2665,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                     <PatternImportDxfPhaseECadMannequinModelPickerV1
                       disabled={frozen}
                       onDisplayedBodyInputV1={physicalHost?.onDisplayedBodyInputV1}
+                      onSaveMannequinArrangement={physicalHost?.onSaveMannequinArrangement}
                       patternPieceScene={{
                         sources: mannequinDxfSources,
                         sceneOverlay,
