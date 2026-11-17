@@ -34,7 +34,10 @@ export const XPBD_CONTINUUM_RESET_SOURCE_SHA256_V1 =
   '76b1d4865069128a747a795207307f73acff533d88a63cf3360220c54ece6b2c' as const;
 
 export type XpbdInitializationCoreResetKernelV1 =
-  'distance' | 'seam-all-active' | 'bend' | 'continuum';
+  | 'distance'
+  | 'seam-all-active'
+  | 'bend'
+  | 'continuum';
 
 const RESET_KERNELS = Object.freeze({
   distance: Object.freeze({

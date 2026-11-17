@@ -175,7 +175,12 @@ interface OperationBudget {
 }
 
 type JsonValue =
-  null | boolean | number | string | JsonValue[] | { readonly [key: string]: JsonValue };
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { readonly [key: string]: JsonValue };
 
 const SHA256 = /^[0-9a-f]{64}$/u;
 const SHA256_EMPTY = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';

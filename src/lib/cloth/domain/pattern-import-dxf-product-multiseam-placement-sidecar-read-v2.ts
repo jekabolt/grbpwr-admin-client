@@ -45,7 +45,8 @@ const nativeSubtle = nativeCryptoSubtleGetter
 const nativeSubtlePrototype = nativeSubtle ? Object.getPrototypeOf(nativeSubtle) : null;
 const nativeSubtleDigest = nativeSubtlePrototype
   ? (Object.getOwnPropertyDescriptor(nativeSubtlePrototype, 'digest')?.value as
-      SubtleCrypto['digest'] | undefined)
+      | SubtleCrypto['digest']
+      | undefined)
   : undefined;
 
 export type PatternImportDxfProductMultiseamPlacementSidecarReadCurrentEvidenceV2 = Readonly<{
@@ -781,7 +782,8 @@ type VerifiedEnvelope = Readonly<{
 }>;
 
 type CapturedReadback =
-  Readonly<{ status: 'absent' }> | Readonly<{ status: 'found'; row: unknown }>;
+  | Readonly<{ status: 'absent' }>
+  | Readonly<{ status: 'found'; row: unknown }>;
 
 function captureReadback(candidate: unknown): CapturedReadback {
   const readback = snapshotDataRecord(

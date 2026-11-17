@@ -320,7 +320,9 @@ export interface BetaSkirtPrimitiveContactWitnessV4 {
   readonly ordinal: number;
   readonly extractionRound: number;
   readonly kind:
-    'signed-vertex-nearest' | 'garment-edge-body-triangle' | 'triangle-intersection-barycentric';
+    | 'signed-vertex-nearest'
+    | 'garment-edge-body-triangle'
+    | 'triangle-intersection-barycentric';
   readonly activeGarmentVertexCount: 1 | 2 | 3;
   readonly bodyTriangleIndex: number;
   readonly bodyVertexIndices: readonly [number, number, number];
@@ -406,7 +408,9 @@ export type BetaSkirtPrimitiveContactRelaxationBlockerV4 =
   | 'structural-quality-blocked';
 
 export type BetaSkirtPrimitiveContactRelaxationErrorCodeV4 =
-  'input-invalid' | 'resource-cap-exceeded' | 'source-geometry-invalid';
+  | 'input-invalid'
+  | 'resource-cap-exceeded'
+  | 'source-geometry-invalid';
 
 export class BetaSkirtPrimitiveContactRelaxationErrorV4 extends Error {
   constructor(

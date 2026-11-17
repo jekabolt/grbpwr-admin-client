@@ -39,7 +39,9 @@ export type BetaSkirtRenderedBodyCollisionDiagnosticBlockerV1 =
   | 'ambiguous-sign';
 
 export type BetaSkirtRenderedBodyCollisionDiagnosticErrorCodeV1 =
-  'input-invalid' | 'budget-exhausted' | 'sha256-unavailable';
+  | 'input-invalid'
+  | 'budget-exhausted'
+  | 'sha256-unavailable';
 
 export class BetaSkirtRenderedBodyCollisionDiagnosticErrorV1 extends Error {
   constructor(

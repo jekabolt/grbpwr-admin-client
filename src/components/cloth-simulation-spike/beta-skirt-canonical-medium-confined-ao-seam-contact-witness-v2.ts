@@ -92,7 +92,9 @@ export type BetaSkirtCanonicalMediumContactFeatureV2 = Readonly<{
       }>
     | null;
   nonConfinedRelation:
-    'authenticated-carrier-adjacent-but-not-confined' | 'non-seam-contact-feature' | null;
+    | 'authenticated-carrier-adjacent-but-not-confined'
+    | 'non-seam-contact-feature'
+    | null;
   nearestIncidentAuthenticatedCarrierDistanceM: number | null;
 }>;
 

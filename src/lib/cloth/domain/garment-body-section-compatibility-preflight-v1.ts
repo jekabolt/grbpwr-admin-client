@@ -74,7 +74,9 @@ export type GarmentBodySectionCompatibilityInputV1 = Readonly<{
 }>;
 
 export type GarmentBodySectionCompatibilityFailureCodeV1 =
-  'input-invalid' | 'body-section-failed' | 'garment-section-failed';
+  | 'input-invalid'
+  | 'body-section-failed'
+  | 'garment-section-failed';
 
 export type GarmentBodySectionCompatibilityEnvelopeV1 = Readonly<{
   minimumRadiusM: number;

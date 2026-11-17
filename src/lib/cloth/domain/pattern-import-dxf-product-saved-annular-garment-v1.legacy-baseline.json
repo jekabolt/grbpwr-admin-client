@@ -45,23 +45,11 @@
           "assemblyTopologySha256": "fb6082b264998a0a42b0068083b95152aa9878cf198fdf8eafbb8ff948f7ed39",
           "documentId": "saved-document:canonical-medium-annular:card-120",
           "localOperationOrder": 0,
-          "pieceIds": [
-            "BACK",
-            "FRONT"
-          ],
-          "pieceLineKeys": [
-            "piece-back",
-            "piece-front"
-          ],
+          "pieceIds": ["BACK", "FRONT"],
+          "pieceLineKeys": ["piece-back", "piece-front"],
           "revision": "saved-revision:7",
-          "seamIds": [
-            "side-close",
-            "side-open"
-          ],
-          "seamKeys": [
-            "side-close",
-            "side-open"
-          ],
+          "seamIds": ["side-close", "side-open"],
+          "seamKeys": ["side-close", "side-open"],
           "sourceOperationNumber": 120
         }
       },
@@ -91,14 +79,8 @@
                 "hemSlantRadiusMm": 900,
                 "pieceId": "FRONT",
                 "planarAngularDirection": -1,
-                "planarApexMm": [
-                  0,
-                  0
-                ],
-                "planarStartRayUnit2": [
-                  0.8020957578842927,
-                  0.5971954413623921
-                ],
+                "planarApexMm": [0, 0],
+                "planarStartRayUnit2": [0.8020957578842927, 0.5971954413623921],
                 "planarStartSeamId": "side-close",
                 "sectorSpanRad": 0.64,
                 "waistSlantRadiusMm": 700
@@ -107,14 +89,8 @@
                 "hemSlantRadiusMm": 900,
                 "pieceId": "BACK",
                 "planarAngularDirection": -1,
-                "planarApexMm": [
-                  0,
-                  0
-                ],
-                "planarStartRayUnit2": [
-                  -0.8020957578842927,
-                  -0.5971954413623921
-                ],
+                "planarApexMm": [0, 0],
+                "planarStartRayUnit2": [-0.8020957578842927, -0.5971954413623921],
                 "planarStartSeamId": "side-close",
                 "sectorSpanRad": 0.64,
                 "waistSlantRadiusMm": 700
@@ -158,57 +134,10 @@
               {
                 "hem": {
                   "boundaryVertexIndices": [
-                    138,
-                    139,
-                    140,
-                    141,
-                    142,
-                    143,
-                    144,
-                    145,
-                    146,
-                    147,
-                    148,
-                    149,
-                    150,
-                    151,
-                    152,
-                    153,
-                    154,
-                    155,
-                    156,
-                    157,
-                    158,
-                    159,
-                    160,
-                    161,
-                    162,
-                    163,
-                    164,
-                    165,
-                    166,
-                    167,
-                    168,
-                    169,
-                    170,
-                    171,
-                    172,
-                    173,
-                    174,
-                    175,
-                    176,
-                    177,
-                    178,
-                    179,
-                    180,
-                    181,
-                    182,
-                    183,
-                    184,
-                    185,
-                    186,
-                    187,
-                    188
+                    138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153,
+                    154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169,
+                    170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185,
+                    186, 187, 188
                   ],
                   "contourId": "dxf-piece-v1/p/46524f4e54/s/4d/g/cut",
                   "sourceCurveIds": [
@@ -266,22 +195,7 @@
                 },
                 "leftSeam": {
                   "boundaryVertexIndices": [
-                    188,
-                    189,
-                    190,
-                    191,
-                    192,
-                    193,
-                    194,
-                    195,
-                    196,
-                    197,
-                    198,
-                    199,
-                    200,
-                    201,
-                    202,
-                    203,
+                    188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203,
                     204
                   ],
                   "contourId": "dxf-piece-v1/p/46524f4e54/s/4d/g/cut",
@@ -292,22 +206,7 @@
                 "pieceId": "FRONT",
                 "rightSeam": {
                   "boundaryVertexIndices": [
-                    122,
-                    123,
-                    124,
-                    125,
-                    126,
-                    127,
-                    128,
-                    129,
-                    130,
-                    131,
-                    132,
-                    133,
-                    134,
-                    135,
-                    136,
-                    137,
+                    122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137,
                     138
                   ],
                   "contourId": "dxf-piece-v1/p/46524f4e54/s/4d/g/cut",
@@ -317,47 +216,9 @@
                 },
                 "waist": {
                   "boundaryVertexIndices": [
-                    204,
-                    205,
-                    206,
-                    207,
-                    208,
-                    209,
-                    210,
-                    211,
-                    212,
-                    213,
-                    214,
-                    215,
-                    216,
-                    217,
-                    218,
-                    219,
-                    220,
-                    221,
-                    222,
-                    223,
-                    224,
-                    225,
-                    226,
-                    227,
-                    228,
-                    229,
-                    230,
-                    231,
-                    232,
-                    233,
-                    234,
-                    235,
-                    236,
-                    237,
-                    238,
-                    239,
-                    240,
-                    241,
-                    242,
-                    243,
-                    122
+                    204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219,
+                    220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235,
+                    236, 237, 238, 239, 240, 241, 242, 243, 122
                   ],
                   "contourId": "dxf-piece-v1/p/46524f4e54/s/4d/g/cut",
                   "sourceCurveIds": [
@@ -407,57 +268,9 @@
               {
                 "hem": {
                   "boundaryVertexIndices": [
-                    16,
-                    17,
-                    18,
-                    19,
-                    20,
-                    21,
-                    22,
-                    23,
-                    24,
-                    25,
-                    26,
-                    27,
-                    28,
-                    29,
-                    30,
-                    31,
-                    32,
-                    33,
-                    34,
-                    35,
-                    36,
-                    37,
-                    38,
-                    39,
-                    40,
-                    41,
-                    42,
-                    43,
-                    44,
-                    45,
-                    46,
-                    47,
-                    48,
-                    49,
-                    50,
-                    51,
-                    52,
-                    53,
-                    54,
-                    55,
-                    56,
-                    57,
-                    58,
-                    59,
-                    60,
-                    61,
-                    62,
-                    63,
-                    64,
-                    65,
-                    66
+                    16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
+                    36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55,
+                    56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66
                   ],
                   "contourId": "dxf-piece-v1/p/4241434b/s/4d/g/cut",
                   "sourceCurveIds": [
@@ -515,23 +328,7 @@
                 },
                 "leftSeam": {
                   "boundaryVertexIndices": [
-                    66,
-                    67,
-                    68,
-                    69,
-                    70,
-                    71,
-                    72,
-                    73,
-                    74,
-                    75,
-                    76,
-                    77,
-                    78,
-                    79,
-                    80,
-                    81,
-                    82
+                    66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82
                   ],
                   "contourId": "dxf-piece-v1/p/4241434b/s/4d/g/cut",
                   "sourceCurveIds": [
@@ -541,23 +338,7 @@
                 "pieceId": "BACK",
                 "rightSeam": {
                   "boundaryVertexIndices": [
-                    0,
-                    1,
-                    2,
-                    3,
-                    4,
-                    5,
-                    6,
-                    7,
-                    8,
-                    9,
-                    10,
-                    11,
-                    12,
-                    13,
-                    14,
-                    15,
-                    16
+                    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16
                   ],
                   "contourId": "dxf-piece-v1/p/4241434b/s/4d/g/cut",
                   "sourceCurveIds": [
@@ -566,47 +347,9 @@
                 },
                 "waist": {
                   "boundaryVertexIndices": [
-                    82,
-                    83,
-                    84,
-                    85,
-                    86,
-                    87,
-                    88,
-                    89,
-                    90,
-                    91,
-                    92,
-                    93,
-                    94,
-                    95,
-                    96,
-                    97,
-                    98,
-                    99,
-                    100,
-                    101,
-                    102,
-                    103,
-                    104,
-                    105,
-                    106,
-                    107,
-                    108,
-                    109,
-                    110,
-                    111,
-                    112,
-                    113,
-                    114,
-                    115,
-                    116,
-                    117,
-                    118,
-                    119,
-                    120,
-                    121,
-                    0
+                    82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100,
+                    101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116,
+                    117, 118, 119, 120, 121, 0
                   ],
                   "contourId": "dxf-piece-v1/p/4241434b/s/4d/g/cut",
                   "sourceCurveIds": [
@@ -656,10 +399,7 @@
             ],
             "circumferentialOrder": {
               "direction": "clockwise-seen-from-above",
-              "pieceIds": [
-                "FRONT",
-                "BACK"
-              ]
+              "pieceIds": ["FRONT", "BACK"]
             },
             "frontPieceId": "FRONT",
             "kind": "two-panel-skirt",
@@ -692,19 +432,13 @@
       "pieces": [
         {
           "pieceId": "FRONT",
-          "planarApexMm": [
-            -561.461727,
-            0
-          ],
+          "planarApexMm": [-561.461727, 0],
           "planarMirrorSign": 1,
           "bodyAngularSign": -1
         },
         {
           "pieceId": "BACK",
-          "planarApexMm": [
-            1288.5382730000001,
-            537.466677
-          ],
+          "planarApexMm": [1288.5382730000001, 537.466677],
           "planarMirrorSign": -1,
           "bodyAngularSign": 1
         }
@@ -712,11 +446,7 @@
       "waistSlantRadiusMm": 700,
       "hemSlantRadiusMm": 900,
       "sectorSpanRadPerPiece": 0.64,
-      "waistCenterM": [
-        0,
-        0,
-        0
-      ],
+      "waistCenterM": [0, 0, 0],
       "seamAnchorAngleRad": 0,
       "parameterResidualMm": 0.01,
       "parameterResidualRad": 0.000001

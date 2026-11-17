@@ -312,16 +312,17 @@ export type PatternImportDxfProductSavedAnnularObservedPlacementGarmentWorldInit
     expectedPairReportSha256: string;
   }>;
 export type PatternImportDxfProductSavedAnnularObservedPlacementGarmentWorldInitialPreflightResultV1 =
-  | (Extract<
-      BetaSkirtSavedAnnularObservedPlacementDisplayedBodyWorldInitialPreflightResultV1,
-      { ok: true }
-    > &
-      Readonly<{ generation: number; sourceContextBound: true }>)
-  | (Extract<
-      BetaSkirtSavedAnnularObservedPlacementDisplayedBodyWorldInitialPreflightResultV1,
-      { ok: false }
-    > &
-      Readonly<{ generation: number; sourceContextBound: boolean }>);
+
+    | (Extract<
+        BetaSkirtSavedAnnularObservedPlacementDisplayedBodyWorldInitialPreflightResultV1,
+        { ok: true }
+      > &
+        Readonly<{ generation: number; sourceContextBound: true }>)
+    | (Extract<
+        BetaSkirtSavedAnnularObservedPlacementDisplayedBodyWorldInitialPreflightResultV1,
+        { ok: false }
+      > &
+        Readonly<{ generation: number; sourceContextBound: boolean }>);
 type WorldRequest =
   PatternImportDxfProductSavedAnnularObservedPlacementGarmentWorldInitialPreflightRequestV1;
 type WorldResult =
@@ -534,8 +535,9 @@ export function buildPatternImportDxfProductSavedAnnularObservedPlacementGarment
 }
 async function loadPairApi(kind: Kind): Promise<PairApi> {
   if (kind === 'observed') {
-    const api =
-      await import('./beta-skirt-saved-annular-observed-placement-displayed-body-product-placement-v1');
+    const api = await import(
+      './beta-skirt-saved-annular-observed-placement-displayed-body-product-placement-v1'
+    );
     return {
       build: api.buildBetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementV1,
       dispose: api.disposeBetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementV1,
@@ -1883,8 +1885,9 @@ function createSession(kind: Kind): Session {
         },
       );
       pendingPair = scope;
-      const pairApi =
-        await import('./beta-skirt-saved-annular-observed-placement-displayed-body-product-placement-v1');
+      const pairApi = await import(
+        './beta-skirt-saved-annular-observed-placement-displayed-body-product-placement-v1'
+      );
       if (
         disposed ||
         issueSignalAborted(signal) ||
@@ -1962,8 +1965,9 @@ function createSession(kind: Kind): Session {
       };
       await fresh();
       current();
-      api =
-        await import('./beta-skirt-saved-annular-observed-placement-displayed-body-world-initial-preflight-v1');
+      api = await import(
+        './beta-skirt-saved-annular-observed-placement-displayed-body-world-initial-preflight-v1'
+      );
       current();
       const result =
         await api.buildBetaSkirtSavedAnnularObservedPlacementDisplayedBodyWorldInitialPreflightV1(
@@ -2226,7 +2230,9 @@ function createSession(kind: Kind): Session {
       terminal();
       const [pairApi, worldApi] = await Promise.all([
         import('./beta-skirt-saved-annular-observed-placement-displayed-body-product-placement-v1'),
-        import('./beta-skirt-saved-annular-observed-placement-displayed-body-world-initial-preflight-v1'),
+        import(
+          './beta-skirt-saved-annular-observed-placement-displayed-body-world-initial-preflight-v1'
+        ),
       ]);
       terminal();
       const garmentLife = garmentLifetime(captured.garment);

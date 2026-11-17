@@ -254,7 +254,7 @@ function validateModelDisplay(
     );
 }
 function stateFor(owner: unknown): OwnerState | null {
-  return owner && typeof owner === 'object' ? (owners.get(owner) ?? null) : null;
+  return owner && typeof owner === 'object' ? owners.get(owner) ?? null : null;
 }
 function revoke(state: OwnerState, work = state.active): void {
   if (!work || state.active !== work) return;

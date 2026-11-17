@@ -199,7 +199,8 @@ export type BetaSkirtCanonicalMediumSavedWebgpu35FrameContinuationBlockerV8 =
 export type BetaSkirtCanonicalMediumSavedWebgpu35FrameContinuationReportV8 = Readonly<{
   schemaVersion: typeof BETA_SKIRT_CANONICAL_MEDIUM_SAVED_WEBGPU_35_FRAME_CONTINUATION_REPORT_V8;
   status:
-    'saved-35-frame-rehydrated-postgates-clear' | 'saved-35-frame-rehydrated-postgate-blocked';
+    | 'saved-35-frame-rehydrated-postgates-clear'
+    | 'saved-35-frame-rehydrated-postgate-blocked';
   decision:
     | 'PASS_EXACT_REHYDRATED_FRAME35_WITHOUT_CONTINUATION_AUTHORITY'
     | 'BLOCK_FRAME35_POSTGATES_AFTER_EXACT_REHYDRATION';
