@@ -13,9 +13,10 @@ export type CadTablePieceFeatures = Readonly<
   Pick<PieceSizeSpec, 'grain' | 'internal' | 'fold' | 'notches' | 'drills'> & {
     pieceLabel: string;
     materialLabel: string | null;
+    quantity: number;
   }
 >;
-export type CadTablePieceFeatureLayer = keyof CadTablePieceFeatures;
+export type CadTablePieceFeatureLayer = Exclude<keyof CadTablePieceFeatures, 'quantity'>;
 export type CadTablePieceFeaturesByKey = ReadonlyMap<string, CadTablePieceFeatures>;
 
 export const CAD_TABLE_PIECE_FEATURE_LAYERS = [
@@ -107,6 +108,7 @@ export function projectCadTablePieceFeatures(
         drills,
         pieceLabel: writerPiece.displayName?.trim() || writerPiece.identity,
         materialLabel: materialLabel?.trim() || null,
+        quantity: writerPiece.piecesPerGarment,
       },
     );
   }

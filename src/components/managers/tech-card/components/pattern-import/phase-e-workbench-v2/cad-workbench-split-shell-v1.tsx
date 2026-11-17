@@ -9,6 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
+import type { KeyboardEventHandler } from 'react';
 import { Button, Text } from 'ui';
 
 import type { PatternImportDxfPhaseEMeasurementUnitV1 } from './measurement-units-v1';
@@ -236,6 +237,7 @@ export type PatternImportDxfPhaseECadWorkbenchSplitShellPropsV1 = Readonly<{
   operationsPanel: PatternImportDxfPhaseECadWorkbenchSlotV1;
   selection?: PatternImportDxfPhaseECadWorkbenchSelectionV1 | null;
   onSelectionFocus?: (event: PatternImportDxfPhaseECadWorkbenchSelectionEventV1) => void;
+  onContentKeyDown?: KeyboardEventHandler<HTMLDivElement>;
   defaultViewMode?: PatternImportDxfPhaseECadWorkbenchViewModeV1;
   defaultSplitPercent?: number;
   splitPercent?: number;
@@ -275,6 +277,7 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
   operationsPanel,
   selection = null,
   onSelectionFocus,
+  onContentKeyDown,
   defaultViewMode = 'split',
   defaultSplitPercent = 64,
   splitPercent: controlledSplitPercent,
@@ -649,7 +652,11 @@ export function PatternImportDxfPhaseECadWorkbenchSplitShellV1({
           </details>
         </header>
 
-        <div ref={contentRef} className='relative isolate flex min-h-0 flex-1 overflow-hidden'>
+        <div
+          ref={contentRef}
+          className='relative isolate flex min-h-0 flex-1 overflow-hidden'
+          onKeyDown={onContentKeyDown}
+        >
           {objectSidebar ? (
             <div
               ref={sidebarRef}

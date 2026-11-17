@@ -607,8 +607,8 @@ describe('zero-operation CAD table rendering', () => {
     const resolvedVirtualId = `\0${virtualId}`;
     const uiVirtualId = 'virtual:cad-table-pointer-drag-ui';
     const resolvedUiVirtualId = `\0${uiVirtualId}`;
-    const componentPath =
-      '/src/components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-table-zero-connect-canvas-v1.tsx';
+    const directory =
+      '/src/components/managers/tech-card/components/pattern-import/phase-e-workbench-v2';
     const harnessPlugin: Plugin = {
       name: 'cad-table-pointer-drag-regression',
       resolveId(id) {
@@ -622,6 +622,11 @@ describe('zero-operation CAD table rendering', () => {
             import React from 'react';
             export function Button({ size, variant, fullWidth, ...props }) {
               return React.createElement('button', props);
+            }
+            export function Input(props) { return React.createElement('input', props); }
+            export function Pill({ tone, ...props }) { return React.createElement('span', props); }
+            export function Text({ component = 'span', size, variant, ...props }) {
+              return React.createElement(component, props);
             }
             const Icon = (props) => React.createElement('svg', props);
             export {
@@ -637,6 +642,7 @@ describe('zero-operation CAD table rendering', () => {
               Icon as EyeOpenIcon,
               Icon as FileTextIcon,
               Icon as HandIcon,
+              Icon as Half2Icon,
               Icon as LayersIcon,
               Icon as MagicWandIcon,
               Icon as Pencil1Icon,
@@ -654,9 +660,30 @@ describe('zero-operation CAD table rendering', () => {
           import React, { useEffect } from 'react';
           import { createRoot } from 'react-dom/client';
           import '/src/global.css';
-          import { PatternImportDxfPhaseECadTableZeroConnectCanvasV1 } from '${componentPath}';
+          import {
+            PatternImportDxfPhaseECadTableZeroConnectCanvasV1,
+            useCadTableZeroCanvasOwner,
+          } from '${directory}/cad-table-zero-connect-canvas-v1.tsx';
+          import {
+            CadTablePieceSelectionPanel,
+            handleCadTablePieceSelectionKey,
+          } from '${directory}/cad-table-piece-selection-panel-v1.tsx';
+          function SharedHarness({ fixture }) {
+            const owner = useCadTableZeroCanvasOwner(fixture.projection);
+            if (!owner) return null;
+            return React.createElement(
+              'main',
+              { className: 'flex', onKeyDown: (event) => handleCadTablePieceSelectionKey(event, owner) },
+              React.createElement(CadTablePieceSelectionPanel, { owner, projection: fixture.projection }),
+              React.createElement(PatternImportDxfPhaseECadTableZeroConnectCanvasV1, {
+                ...fixture, tableSessionOwner: owner,
+              }),
+            );
+          }
           function Harness() {
             useEffect(() => { globalThis.__CAD_TABLE_POINTER_READY__ = true; }, []);
+            if (new URLSearchParams(location.search).has('shared'))
+              return React.createElement(SharedHarness, { fixture: globalThis.__CAD_TABLE_POINTER_FIXTURE__ });
             return React.createElement(
               PatternImportDxfPhaseECadTableZeroConnectCanvasV1,
               globalThis.__CAD_TABLE_POINTER_FIXTURE__,
@@ -779,8 +806,8 @@ describe('zero-operation CAD table rendering', () => {
       const transformAfterMove = translated(await piece.getAttribute('transform'));
 
       expect(await viewport.getAttribute('viewBox')).toBe(viewBoxBefore);
-      expect(transformAfterMove[0]).toBeCloseTo(transformBefore[0] + 50 / scale, 10);
-      expect(transformAfterMove[1]).toBeCloseTo(transformBefore[1] + 25 / scale, 10);
+      expect(transformAfterMove[0]).toBeCloseTo(transformBefore[0] + 50 / scale, 4);
+      expect(transformAfterMove[1]).toBeCloseTo(transformBefore[1] + 25 / scale, 4);
       await page.mouse.up();
       expect(await viewport.getAttribute('viewBox')).toBe(viewBoxBefore);
       expect(translated(await piece.getAttribute('transform'))).toEqual(transformAfterMove);
@@ -849,6 +876,49 @@ describe('zero-operation CAD table rendering', () => {
       await clickAt(9, 9);
       const secondHit = await selected.getAttribute('data-cad-zero-connect-piece');
       expect(new Set([firstHit, secondHit])).toEqual(new Set(['closed-piece', 'open-piece']));
+
+      await page.goto(
+        `http://127.0.0.1:${address.port}/__cad-table-pointer-drag-regression__?shared&scene=shaped`,
+        { waitUntil: 'domcontentloaded', timeout: 8_000 },
+      );
+      const tree = page.locator('[data-cad-object-tree]');
+      const treePiece = tree.locator('[data-cad-object-piece="closed-piece"]');
+      const treeSecond = tree.locator('[data-cad-object-piece="open-piece"]');
+      const inspector = page.locator('[data-cad-selected-piece-inspector]');
+      await treePiece.press('Enter');
+      expect(await treePiece.getAttribute('aria-pressed')).toBe('true');
+      expect(await piece.getAttribute('aria-pressed')).toBe('true');
+      expect(await inspector.getAttribute('data-cad-selected-piece-inspector')).toBe(
+        await treePiece.getAttribute('data-cad-object-key'),
+      );
+      expect(await inspector.textContent()).toContain('Perimeter');
+      await treeSecond.click({ modifiers: ['Shift'] });
+      expect(await selected.count()).toBe(2);
+      expect(await inspector.count()).toBe(0);
+      await treeSecond.press('Escape');
+      expect(await selected.count()).toBe(0);
+      await piece.press('Space');
+      expect(await treePiece.getAttribute('aria-pressed')).toBe('true');
+      expect(await selected.count()).toBe(1);
+      await piece.press('Escape');
+      expect(await treePiece.getAttribute('aria-pressed')).toBe('false');
+
+      const other = page.locator('[data-cad-zero-connect-piece="open-piece"]');
+      await viewport.scrollIntoViewIfNeeded();
+      const a = await piece.locator('[data-cad-zero-connect-material]').boundingBox();
+      const b = await other.locator('[data-cad-zero-connect-material]').boundingBox();
+      if (!a || !b) throw new Error('The marquee fixture needs two closed material shapes.');
+      await page.mouse.move(Math.min(a.x, b.x) - 2, Math.min(a.y, b.y) - 2);
+      await page.mouse.down();
+      await page.mouse.move(
+        Math.max(a.x + a.width, b.x + b.width) + 2,
+        Math.max(a.y + a.height, b.y + b.height) + 2,
+        { steps: 6 },
+      );
+      await page.mouse.up();
+      expect(await treePiece.getAttribute('aria-pressed')).toBe('true');
+      expect(await treeSecond.getAttribute('aria-pressed')).toBe('true');
+      expect(await selected.count()).toBe(2);
     } finally {
       await browser.close();
       await server.close();

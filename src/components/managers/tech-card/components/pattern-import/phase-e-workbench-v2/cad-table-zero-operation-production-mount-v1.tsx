@@ -24,7 +24,14 @@ import {
   type PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1,
   type PatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1,
 } from './cad-table-zero-connect-authoring-handoff-v1';
-import { PatternImportDxfPhaseECadTableZeroConnectCanvasV1 } from './cad-table-zero-connect-canvas-v1';
+import {
+  PatternImportDxfPhaseECadTableZeroConnectCanvasV1,
+  useCadTableZeroCanvasOwner,
+} from './cad-table-zero-connect-canvas-v1';
+import {
+  CadTablePieceSelectionPanel,
+  handleCadTablePieceSelectionKey,
+} from './cad-table-piece-selection-panel-v1';
 import { projectCadTablePieceFeatures } from './cad-table-piece-features-v1';
 import {
   bindPatternImportDxfPhaseECadTableZeroOperationFreshToSavedAuthorityV1,
@@ -894,6 +901,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     currentPreparation?.status === 'settled' && currentPreparation.result?.ok
       ? (currentPreparation.result as Prepared)
       : null;
+  const tableSessionOwner = useCadTableZeroCanvasOwner(prepared?.projection ?? null);
   const resolvedSource = currentPreparation?.resolvedSource ?? null;
   const pieceFeatures = useMemo(() => {
     if (!prepared) return undefined;
@@ -1067,6 +1075,18 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   return (
     <PatternImportDxfPhaseECadWorkbenchSplitShellV1
       selection={selection}
+      objectSidebar={
+        prepared && tableSessionOwner ? (
+          <CadTablePieceSelectionPanel
+            owner={tableSessionOwner}
+            projection={prepared.projection}
+            features={pieceFeatures}
+          />
+        ) : null
+      }
+      onContentKeyDown={(event) => {
+        if (tableSessionOwner) handleCadTablePieceSelectionKey(event, tableSessionOwner);
+      }}
       defaultOperationsMode={defaultOperationsMode}
       desktop={
         <section
@@ -1126,11 +1146,12 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
             </div>
           )}
 
-          {prepared && (
+          {prepared && tableSessionOwner && (
             <PatternImportDxfPhaseECadTableZeroConnectCanvasV1
               catalog={prepared.catalog}
               projection={prepared.projection}
               pieceFeatures={pieceFeatures}
+              tableSessionOwner={tableSessionOwner}
               authoringAuthority={authoringReady ? authoringPrepared?.authoringAuthority : null}
               authoringAuthorityRefresh={authoringReady ? authoringAuthorityRefresh : null}
               zeroConnectAuthoringHandoff={authoringReady ? zeroConnectAuthoringHandoff : undefined}
