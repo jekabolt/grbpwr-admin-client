@@ -69,8 +69,10 @@ function filledCount(values: MeasurementValues, names: string[]): number {
   return names.filter((name) => Number(values[name]) > 0).length;
 }
 
+// iOS Safari offers contact AutoFill on a field whose id reads like a person's details: the proto
+// enum carries the word NAME, so the DOM id is the bare field (`mq-hps-height`), never the enum.
 function measurementInputId(name: string): string {
-  return `model-measurement-${name}`;
+  return `mq-${name.replace('BODY_MEASUREMENT_NAME_', '').toLowerCase().replace(/_/g, '-')}`;
 }
 
 function measurementFindingListId(name: string): string {
@@ -128,10 +130,13 @@ function MeasurementInput({
       data-model-measurement={name}
       data-mm={field.value ?? ''}
       data-unit={unit}
-      inputMode={unit === 'mm' ? 'numeric' : 'decimal'}
+      inputMode='decimal'
       pattern={unit === 'mm' ? '[0-9]*' : '[0-9]*[.,]?[0-9]*'}
       enterKeyHint='next'
       autoComplete='off'
+      autoCorrect='off'
+      autoCapitalize='off'
+      spellCheck={false}
       aria-label={measurementLabel(name)}
       aria-invalid={findings.length > 0}
       aria-describedby={findings.length > 0 ? measurementFindingListId(name) : undefined}
