@@ -31,6 +31,10 @@ export const PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_RECEIPT_V6 =
   'pattern-import-dxf-product-composite-sidecar-storage-receipt/6' as const;
 export const PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_SAVE_V6 =
   'pattern-import-dxf-product-composite-sidecar-save/6' as const;
+export const PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_RESTORE_REQUEST_V6 =
+  'pattern-import-dxf-product-composite-sidecar-restore-request/6' as const;
+export const PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_RESTORE_V6 =
+  'pattern-import-dxf-product-composite-sidecar-restore/6' as const;
 
 export const PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_PERSISTENCE_CLAIMS_V6 = Object.freeze({
   explicitUserActionRequired: true,
@@ -58,6 +62,27 @@ const BLOCKED_CLAIMS_V6 = Object.freeze({
   unknownOutcomeFreshGetRecovery: false as const,
 });
 
+export const PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_RESTORE_CLAIMS_V6 = Object.freeze({
+  readOnly: true,
+  putAllowed: false,
+  autosaveAllowed: false,
+  localStorageAllowed: false,
+  futureOwnerRequired: false,
+  futureArrangementTargetRequired: false,
+  freshCurrentGet: true,
+  exactCurrentAuthorityBound: true,
+  storedBytesShaAndCanonicalV6Verified: true,
+  nestedCompositeV5BytesReturned: true,
+} as const);
+
+const BLOCKED_RESTORE_CLAIMS_V6 = Object.freeze({
+  ...PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_RESTORE_CLAIMS_V6,
+  freshCurrentGet: false as const,
+  exactCurrentAuthorityBound: false as const,
+  storedBytesShaAndCanonicalV6Verified: false as const,
+  nestedCompositeV5BytesReturned: false as const,
+});
+
 export type PatternImportDxfProductCompositeSidecarArrangementTargetV6 = Readonly<{
   sizeToken: string;
   catalogCanonicalSha256: string;
@@ -72,6 +97,11 @@ export type PatternImportDxfProductCompositeSidecarStorageRequestV6 = Readonly<{
   currentAuthority: PatternImportDxfProductCompositeSidecarBindingsV3;
   arrangementTarget: PatternImportDxfProductCompositeSidecarArrangementTargetV6;
   nextOwner: PatternImportDxfProductCompositeSidecarOwnerV6;
+}>;
+
+export type PatternImportDxfProductCompositeSidecarRestoreRequestV6 = Readonly<{
+  schemaVersion: typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_RESTORE_REQUEST_V6;
+  currentAuthority: PatternImportDxfProductCompositeSidecarBindingsV3;
 }>;
 
 export type PatternImportDxfProductCompositeSidecarStorageResultV6 =
@@ -119,6 +149,32 @@ export type PatternImportDxfProductCompositeSidecarSaveResultV6 =
       receipt: null;
       blockers: readonly [PatternImportDxfProductCompositeSidecarSaveBlockerV6];
       claims: typeof BLOCKED_CLAIMS_V6;
+    }>;
+
+type DecodedCompositeV6Success = Extract<
+  Awaited<ReturnType<typeof decodePatternImportDxfProductCompositeSidecarV6>>,
+  { ok: true }
+>;
+
+export type PatternImportDxfProductCompositeSidecarRestoreResultV6 =
+  | Readonly<{
+      ok: true;
+      schemaVersion: typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_RESTORE_V6;
+      sidecarSha256: string;
+      canonicalByteLength: number;
+      mediaType: typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6;
+      owner: DecodedCompositeV6Success['owner'];
+      arrangement: DecodedCompositeV6Success['mannequinArrangement'];
+      nestedCompositeV5: DecodedCompositeV6Success['nestedCompositeV5'];
+      nestedCompositeV5Bytes: Uint8Array<ArrayBuffer>;
+      blocker: null;
+      claims: typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_RESTORE_CLAIMS_V6;
+    }>
+  | Readonly<{
+      ok: false;
+      schemaVersion: typeof PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_RESTORE_V6;
+      blocker: PatternImportDxfProductCompositeSidecarSaveBlockerV6;
+      claims: typeof BLOCKED_RESTORE_CLAIMS_V6;
     }>;
 
 type SidecarService = Pick<
@@ -335,6 +391,19 @@ function captureRequest(value: unknown): PatternImportDxfProductCompositeSidecar
     currentAuthority: authoritySnapshot(request.currentAuthority),
     arrangementTarget: arrangementTarget(request.arrangementTarget),
     nextOwner: request.nextOwner as PatternImportDxfProductCompositeSidecarOwnerV6,
+  });
+}
+
+function captureRestoreRequest(
+  value: unknown,
+): PatternImportDxfProductCompositeSidecarRestoreRequestV6 {
+  const request = exactRecord(value, ['schemaVersion', 'currentAuthority'], 'restore request');
+  if (request.schemaVersion !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_RESTORE_REQUEST_V6) {
+    fail('readback-invalid', 'Composite V6 restore request schema differs.');
+  }
+  return Object.freeze({
+    schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_RESTORE_REQUEST_V6,
+    currentAuthority: authoritySnapshot(request.currentAuthority),
   });
 }
 
@@ -642,7 +711,10 @@ function sameStoredRow(
 
 async function readExactStoredV6(
   deps: PatternImportDxfProductCompositeSidecarPersistenceDepsV6,
-  request: PatternImportDxfProductCompositeSidecarStorageRequestV6,
+  request: Readonly<{
+    currentAuthority: PatternImportDxfProductCompositeSidecarBindingsV3;
+    arrangementTarget?: PatternImportDxfProductCompositeSidecarArrangementTargetV6;
+  }>,
   signal: AbortSignal,
 ) {
   checkReadbackSignal(signal);
@@ -683,10 +755,17 @@ async function readExactStoredV6(
   if (
     !decoded.ok ||
     !sameAuthority(request.currentAuthority, decoded.document.bindings) ||
-    !sameTarget(arrangementTarget(request.arrangementTarget), decoded)
+    (request.arrangementTarget !== undefined &&
+      !sameTarget(arrangementTarget(request.arrangementTarget), decoded))
   ) {
     fail('readback-drift', 'Stored Composite V6 authority or arrangement target drifted.');
   }
+  const nestedCompositeV5Bytes = readPatternImportDxfProductCompositeComponentBytesV6(
+    decoded.owner,
+    'composite-v5',
+  );
+  if (!nestedCompositeV5Bytes)
+    fail('readback-invalid', 'Stored Composite V6 has no verified nested V5 bytes.');
   const transport = await readbackStep(transportFromDecoded(decoded), signal);
   if (
     row.patternVersion !== transport.patternVersion ||
@@ -695,7 +774,7 @@ async function readExactStoredV6(
     fail('readback-drift', 'Stored row receipt differs from nested semantic-product-v1.');
   }
   checkReadbackSignal(signal);
-  return Object.freeze({ row, bytes, decoded, transport });
+  return Object.freeze({ row, bytes, decoded, transport, nestedCompositeV5Bytes });
 }
 
 function blocker(
@@ -730,6 +809,15 @@ function failed(
   });
 }
 
+function restoreFailed(error: unknown): PatternImportDxfProductCompositeSidecarRestoreResultV6 {
+  return Object.freeze({
+    ok: false as const,
+    schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_RESTORE_V6,
+    blocker: blocker(error, 'readback-failed'),
+    claims: BLOCKED_RESTORE_CLAIMS_V6,
+  });
+}
+
 async function recoveredReceipt(
   request: PatternImportDxfProductCompositeSidecarStorageRequestV6,
   stored: Awaited<ReturnType<typeof readExactStoredV6>>,
@@ -760,6 +848,32 @@ export function createPatternImportDxfProductCompositeSidecarPersistenceV6(
   return Object.freeze({
     adapter,
     claims: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_PERSISTENCE_CLAIMS_V6,
+    restoreClaims: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_RESTORE_CLAIMS_V6,
+    async restore(
+      request: PatternImportDxfProductCompositeSidecarRestoreRequestV6,
+      signal: AbortSignal,
+    ): Promise<PatternImportDxfProductCompositeSidecarRestoreResultV6> {
+      try {
+        const captured = captureRestoreRequest(request);
+        const stored = await readExactStoredV6(deps, captured, signal);
+        checkReadbackSignal(signal);
+        return Object.freeze({
+          ok: true as const,
+          schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_RESTORE_V6,
+          sidecarSha256: stored.row.sidecarSha256 as string,
+          canonicalByteLength: stored.bytes.byteLength,
+          mediaType: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6,
+          owner: stored.decoded.owner,
+          arrangement: stored.decoded.mannequinArrangement,
+          nestedCompositeV5: stored.decoded.nestedCompositeV5,
+          nestedCompositeV5Bytes: stored.nestedCompositeV5Bytes.slice(),
+          blocker: null,
+          claims: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_RESTORE_CLAIMS_V6,
+        });
+      } catch (error) {
+        return restoreFailed(error);
+      }
+    },
     async read(
       request: PatternImportDxfProductCompositeSidecarStorageRequestV6,
       signal: AbortSignal,

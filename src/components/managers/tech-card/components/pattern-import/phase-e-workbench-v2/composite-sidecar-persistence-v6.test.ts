@@ -26,6 +26,7 @@ vi.mock('lib/cloth/domain/pattern-import-dxf-product-composite-sidecar-v3', () =
 }));
 
 import {
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_RESTORE_REQUEST_V6,
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V6,
   createPatternImportDxfProductCompositeSidecarPersistenceV6,
   type PatternImportDxfProductCompositeSidecarArrangementTargetV6,
@@ -181,6 +182,13 @@ function request() {
   } as never;
 }
 
+function restoreRequest() {
+  return {
+    schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_RESTORE_REQUEST_V6,
+    currentAuthority: authority,
+  } as const;
+}
+
 function rig(
   options: {
     gets?: unknown[];
@@ -227,6 +235,172 @@ describe('Composite V6 arrangement persistence', () => {
     codec.decodeV6.mockResolvedValue(decodedV6());
     codec.readV6Component.mockReturnValue(V5_BYTES);
     codec.readV3Component.mockReturnValue(semanticBytes);
+  });
+
+  describe('read-only restore', () => {
+    it('restores verified V6 arrangement and nested V5 bytes through one fresh GET and no PUT', async () => {
+      const test = rig({ gets: [{ semanticSidecar: storedV6() }] });
+
+      const result = await test.persistence.restore(restoreRequest(), new AbortController().signal);
+
+      expect(result).toMatchObject({
+        ok: true,
+        sidecarSha256: V6_SHA,
+        canonicalByteLength: V6_BYTES.byteLength,
+        mediaType: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6,
+        arrangement: decodedV6().mannequinArrangement,
+        nestedCompositeV5: decodedV6().nestedCompositeV5,
+        blocker: null,
+        claims: {
+          readOnly: true,
+          putAllowed: false,
+          futureOwnerRequired: false,
+          futureArrangementTargetRequired: false,
+          freshCurrentGet: true,
+          exactCurrentAuthorityBound: true,
+          storedBytesShaAndCanonicalV6Verified: true,
+          nestedCompositeV5BytesReturned: true,
+        },
+      });
+      expect(result.ok && result.nestedCompositeV5Bytes).toEqual(V5_BYTES);
+      expect(test.GetTechCardPatternSemanticSidecar).toHaveBeenCalledTimes(1);
+      expect(test.GetTechCardPatternSemanticSidecar).toHaveBeenCalledWith({
+        techCardId: authority.row.techCardId,
+        patternLineKey: authority.row.patternLineKey,
+      });
+      expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when the current sidecar is absent', async () => {
+      const test = rig({ gets: [{}] });
+
+      const result = await test.persistence.restore(restoreRequest(), new AbortController().signal);
+
+      expect(result).toMatchObject({
+        ok: false,
+        blocker: { code: 'readback-missing' },
+        claims: {
+          freshCurrentGet: false,
+          exactCurrentAuthorityBound: false,
+          storedBytesShaAndCanonicalV6Verified: false,
+          nestedCompositeV5BytesReturned: false,
+        },
+      });
+      expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+    });
+
+    it('rejects stored-row identity drift before decoding', async () => {
+      const test = rig({
+        gets: [
+          {
+            semanticSidecar: {
+              ...storedV6(),
+              savedRowRevision: authority.row.revision + 1,
+            },
+          },
+        ],
+      });
+
+      const result = await test.persistence.restore(restoreRequest(), new AbortController().signal);
+
+      expect(result).toMatchObject({ ok: false, blocker: { code: 'readback-drift' } });
+      expect(codec.decodeV6).not.toHaveBeenCalled();
+      expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+    });
+
+    it('rejects decoded full-authority drift that stored row metadata cannot express', async () => {
+      const decoded = decodedV6();
+      decoded.document.bindings = {
+        ...authority,
+        serverAssemblyRevision: 'assembly-revision:changed',
+      } as never;
+      const test = rig({ gets: [{ semanticSidecar: storedV6() }], decoded });
+
+      const result = await test.persistence.restore(restoreRequest(), new AbortController().signal);
+
+      expect(result).toMatchObject({ ok: false, blocker: { code: 'readback-drift' } });
+      expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+    });
+
+    it('rejects a stored SHA that differs from the exact bytes', async () => {
+      const test = rig({
+        gets: [
+          {
+            semanticSidecar: {
+              ...storedV6(),
+              sidecarSha256: hash('f'),
+            },
+          },
+        ],
+      });
+
+      const result = await test.persistence.restore(restoreRequest(), new AbortController().signal);
+
+      expect(result).toMatchObject({ ok: false, blocker: { code: 'readback-invalid' } });
+      expect(codec.decodeV6).not.toHaveBeenCalled();
+      expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+    });
+
+    it('rejects malformed or noncanonical V6 bytes reported by the strict decoder', async () => {
+      codec.decodeV6.mockResolvedValue({
+        ok: false,
+        blockers: [
+          {
+            code: 'noncanonical-bytes',
+            field: 'bytes',
+            detail: 'Composite V6 bytes are not canonical.',
+          },
+        ],
+      });
+      const test = rig({ gets: [{ semanticSidecar: storedV6() }] });
+
+      const result = await test.persistence.restore(restoreRequest(), new AbortController().signal);
+
+      expect(result).toMatchObject({ ok: false, blocker: { code: 'readback-drift' } });
+      expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+    });
+
+    it('does not dispatch GET when already aborted', async () => {
+      const controller = new AbortController();
+      controller.abort();
+      const test = rig({ gets: [{ semanticSidecar: storedV6() }] });
+
+      const result = await test.persistence.restore(restoreRequest(), controller.signal);
+
+      expect(result).toMatchObject({ ok: false, blocker: { code: 'cancelled' } });
+      expect(test.GetTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+      expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+    });
+
+    it('stops after GET when cancellation arrives with the response', async () => {
+      const controller = new AbortController();
+      const test = rig({ gets: [] });
+      test.GetTechCardPatternSemanticSidecar.mockImplementationOnce(async () => {
+        controller.abort();
+        return { semanticSidecar: storedV6() };
+      });
+
+      const result = await test.persistence.restore(restoreRequest(), controller.signal);
+
+      expect(result).toMatchObject({ ok: false, blocker: { code: 'cancelled' } });
+      expect(codec.decodeV6).not.toHaveBeenCalled();
+      expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+    });
+
+    it('does not publish restore success when cancellation arrives during decode', async () => {
+      const controller = new AbortController();
+      codec.decodeV6.mockImplementationOnce(async () => {
+        controller.abort();
+        return decodedV6();
+      });
+      const test = rig({ gets: [{ semanticSidecar: storedV6() }] });
+
+      const result = await test.persistence.restore(restoreRequest(), controller.signal);
+
+      expect(result).toMatchObject({ ok: false, blocker: { code: 'cancelled' } });
+      expect(codec.readV6Component).not.toHaveBeenCalled();
+      expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+    });
   });
 
   it('uses the generic fresh GET/CAS/PUT/dual-readback path for explicit Save', async () => {
