@@ -35,6 +35,10 @@ export type PatternImportDxfPhaseECadTablePieceLayoutV1 = Readonly<{
   sourceMaterialRings: readonly (readonly PtMm[])[];
   /** Session-only display translation. It is not part of Phase-D or card geometry. */
   offsetMm: PtMm;
+  /** Counterclockwise in source millimetres about the source-bounds centre. Legacy layouts use 0. */
+  rotationDegrees?: number;
+  /** All rendered contour points, including open paths outside the material. */
+  sourceContourPoints?: readonly PtMm[];
 }>;
 
 export type PatternImportDxfPhaseECadTablePieceLayoutSessionV1 = Readonly<{
@@ -117,6 +121,8 @@ function freezePiece(
     identity: Object.freeze({ ...piece.identity }),
     sourceBounds: normalizeBounds(piece.sourceBounds),
     sourceMaterialRings: piece.sourceMaterialRings,
+    sourceContourPoints: piece.sourceContourPoints,
+    rotationDegrees: piece.rotationDegrees ?? 0,
     offsetMm: Object.freeze({ ...piece.offsetMm }),
   });
 }
@@ -151,6 +157,9 @@ function validatedPieces(
         identity,
         sourceBounds: projectionBounds(piece),
         sourceMaterialRings: materialRings(piece),
+        sourceContourPoints: Object.freeze(
+          piece.contours.flatMap(({ vertices }) => vertices.map(({ pointMm }) => pointMm)),
+        ),
         offsetMm: ZERO_OFFSET,
       });
     }),
@@ -173,6 +182,7 @@ export function reconcilePatternImportDxfPhaseECadTablePieceLayoutSessionV1(
   const next = validatedPieces(pieces).map((piece) => ({
     ...piece,
     offsetMm: previous.get(piece.identity.key)?.offsetMm ?? ZERO_OFFSET,
+    rotationDegrees: previous.get(piece.identity.key)?.rotationDegrees ?? 0,
   }));
   return freezeSession(next, session.selectedPieceKeys);
 }
@@ -200,15 +210,94 @@ export function selectPatternImportDxfPhaseECadTablePiecesV1(
   return freezeSession(session.pieces, selectedKeys(session, pieceKeys, mode));
 }
 
+function centre(bounds: BoxMm): PtMm {
+  return { x: (bounds.minX + bounds.maxX) / 2, y: (bounds.minY + bounds.maxY) / 2 };
+}
+
+function normalizedDegrees(degrees: number) {
+  if (!finite(degrees)) throw new TypeError('CAD table rotation must be finite.');
+  const remainder = degrees % 360;
+  return remainder < 0 ? (remainder + 360) % 360 : remainder || 0;
+}
+
+function rotation(degrees: number) {
+  const radians = (degrees * Math.PI) / 180;
+  // Exact quarter turns preserve boundary comparisons on axis-aligned contours.
+  const quadrant = degrees % 90 === 0;
+  const cos = quadrant ? Math.round(Math.cos(radians)) : Math.cos(radians);
+  const sin = quadrant ? Math.round(Math.sin(radians)) : Math.sin(radians);
+  return { cos, sin };
+}
+
+/** The same rigid map drives SVG contours, exact seam hits, material selection and fitted bounds. */
+export function cadTablePieceRigidTransformV1(piece: PatternImportDxfPhaseECadTablePieceLayoutV1) {
+  const pivot = centre(piece.sourceBounds);
+  const offset = piece.offsetMm;
+  const angle = normalizedDegrees(piece.rotationDegrees ?? 0);
+  const { cos, sin } = rotation(angle);
+  return {
+    toDisplay(point: PtMm): PtMm {
+      if (!angle) return { x: point.x + offset.x, y: point.y + offset.y };
+      const x = point.x - pivot.x;
+      const y = point.y - pivot.y;
+      return {
+        x: pivot.x + offset.x + cos * x - sin * y,
+        y: pivot.y + offset.y + sin * x + cos * y,
+      };
+    },
+    toSource(point: PtMm): PtMm {
+      if (!angle) return { x: point.x - offset.x, y: point.y - offset.y };
+      const x = point.x - offset.x - pivot.x;
+      const y = point.y - offset.y - pivot.y;
+      return { x: pivot.x + cos * x + sin * y, y: pivot.y - sin * x + cos * y };
+    },
+    svgTransform(yAxis: 'source' | 'inverted') {
+      const sign = yAxis === 'inverted' ? -1 : 1;
+      const translation = `translate(${offset.x} ${sign * offset.y})`;
+      return angle
+        ? `${translation} rotate(${sign * angle} ${pivot.x} ${sign * pivot.y})`
+        : translation;
+    },
+  };
+}
+
+export function cadTablePieceSvgTransformV1(
+  piece: PatternImportDxfPhaseECadTablePieceLayoutV1,
+  yAxis: 'source' | 'inverted',
+) {
+  return cadTablePieceRigidTransformV1(piece).svgTransform(yAxis);
+}
+
 export function displayedPatternImportDxfPhaseECadTablePieceBoundsV1(
   piece: PatternImportDxfPhaseECadTablePieceLayoutV1,
 ): BoxMm {
-  return Object.freeze({
-    minX: piece.sourceBounds.minX + piece.offsetMm.x,
-    minY: piece.sourceBounds.minY + piece.offsetMm.y,
-    maxX: piece.sourceBounds.maxX + piece.offsetMm.x,
-    maxY: piece.sourceBounds.maxY + piece.offsetMm.y,
-  });
+  const { minX, maxX, minY, maxY } = piece.sourceBounds;
+  if (!piece.rotationDegrees)
+    return Object.freeze({
+      minX: minX + piece.offsetMm.x,
+      minY: minY + piece.offsetMm.y,
+      maxX: maxX + piece.offsetMm.x,
+      maxY: maxY + piece.offsetMm.y,
+    });
+  const { toDisplay } = cadTablePieceRigidTransformV1(piece);
+  const points = piece.sourceContourPoints?.length
+    ? piece.sourceContourPoints
+    : [
+        { x: minX, y: minY },
+        { x: minX, y: maxY },
+        { x: maxX, y: minY },
+        { x: maxX, y: maxY },
+      ];
+  const first = toDisplay(points[0]!);
+  const bounds = { minX: first.x, maxX: first.x, minY: first.y, maxY: first.y };
+  for (const point of points) {
+    const { x, y } = toDisplay(point);
+    bounds.minX = Math.min(bounds.minX, x);
+    bounds.maxX = Math.max(bounds.maxX, x);
+    bounds.minY = Math.min(bounds.minY, y);
+    bounds.maxY = Math.max(bounds.maxY, y);
+  }
+  return Object.freeze(bounds);
 }
 
 function boundsIntersect(left: BoxMm, right: BoxMm): boolean {
@@ -256,7 +345,10 @@ function pointInPolygon(point: PtMm, polygon: readonly PtMm[]): boolean {
 }
 
 function pointInMaterial(point: PtMm, rings: readonly (readonly PtMm[])[]): boolean {
-  return rings.reduce((inside, ring) => inside !== pointInPolygon(point, ring), false);
+  if (rings.reduce((inside, ring) => inside !== pointInPolygon(point, ring), false)) return true;
+  return rings.some((ring) =>
+    ring.some((start, i) => onSegment(start, point, ring[(i + 1) % ring.length]!)),
+  );
 }
 
 /** The first click follows SVG paint order. A repeated click can reach pieces underneath. */
@@ -272,7 +364,7 @@ export function nextPatternImportDxfPhaseECadTablePieceHitV1(
       (piece) =>
         boundsIntersect(displayedPatternImportDxfPhaseECadTablePieceBoundsV1(piece), bounds) &&
         pointInMaterial(
-          { x: point.x - piece.offsetMm.x, y: point.y - piece.offsetMm.y },
+          cadTablePieceRigidTransformV1(piece).toSource(point),
           piece.sourceMaterialRings,
         ),
     )
@@ -289,11 +381,26 @@ function orientation(a: PtMm, b: PtMm, c: PtMm): number {
 }
 
 function onSegment(a: PtMm, b: PtMm, c: PtMm): boolean {
+  // Inverting a free-angle display rotation can move an exact boundary point by a few ulps.
+  const tolerance =
+    16 *
+    Number.EPSILON *
+    Math.max(
+      1,
+      Math.abs(a.x),
+      Math.abs(a.y),
+      Math.abs(b.x),
+      Math.abs(b.y),
+      Math.abs(c.x),
+      Math.abs(c.y),
+    );
   return (
-    b.x >= Math.min(a.x, c.x) &&
-    b.x <= Math.max(a.x, c.x) &&
-    b.y >= Math.min(a.y, c.y) &&
-    b.y <= Math.max(a.y, c.y)
+    b.x >= Math.min(a.x, c.x) - tolerance &&
+    b.x <= Math.max(a.x, c.x) + tolerance &&
+    b.y >= Math.min(a.y, c.y) - tolerance &&
+    b.y <= Math.max(a.y, c.y) + tolerance &&
+    Math.abs(orientation(a, b, c)) <=
+      tolerance * Math.max(1, Math.abs(c.x - a.x), Math.abs(c.y - a.y))
   );
 }
 
@@ -303,20 +410,15 @@ function segmentsIntersect(a: PtMm, b: PtMm, c: PtMm, d: PtMm): boolean {
   const cdA = orientation(c, d, a);
   const cdB = orientation(c, d, b);
   if (abC * abD < 0 && cdA * cdB < 0) return true;
-  return (
-    (abC === 0 && onSegment(a, c, b)) ||
-    (abD === 0 && onSegment(a, d, b)) ||
-    (cdA === 0 && onSegment(c, a, d)) ||
-    (cdB === 0 && onSegment(c, b, d))
-  );
+  return onSegment(a, c, b) || onSegment(a, d, b) || onSegment(c, a, d) || onSegment(c, b, d);
 }
 
 function polygonIntersectsMaterial(
   polygon: readonly PtMm[],
   piece: PatternImportDxfPhaseECadTablePieceLayoutV1,
 ): boolean {
-  const { sourceMaterialRings: rings, offsetMm } = piece;
-  const local = polygon.map(({ x, y }) => ({ x: x - offsetMm.x, y: y - offsetMm.y }));
+  const rings = piece.sourceMaterialRings;
+  const local = polygon.map(cadTablePieceRigidTransformV1(piece).toSource);
   if (local.some((point) => pointInMaterial(point, rings))) return true;
 
   return rings.some((ring) =>
@@ -384,6 +486,112 @@ export function translateSelectedPatternImportDxfPhaseECadTablePiecesV1(
   );
 }
 
+/** Rotates the selection as a rigid group about its mean displayed piece centre. */
+export function rotateSelectedCadTablePiecesV1(
+  session: PatternImportDxfPhaseECadTablePieceLayoutSessionV1,
+  deltaDegrees: number,
+): PatternImportDxfPhaseECadTablePieceLayoutSessionV1 {
+  const angle = normalizedDegrees(deltaDegrees);
+  if (!angle || !session.selectedPieceKeys.length) return session;
+  const selected = new Set(session.selectedPieceKeys);
+  const centres = new Map(
+    session.pieces
+      .filter((piece) => selected.has(piece.identity.key))
+      .map((piece) => {
+        const point = centre(piece.sourceBounds);
+        return [
+          piece.identity.key,
+          { x: point.x + piece.offsetMm.x, y: point.y + piece.offsetMm.y },
+        ] as const;
+      }),
+  );
+  const pivot = { x: 0, y: 0 };
+  for (const point of centres.values()) {
+    pivot.x += point.x / centres.size;
+    pivot.y += point.y / centres.size;
+  }
+  const { cos, sin } = rotation(angle);
+  return freezeSession(
+    session.pieces.map((piece) => {
+      const point = centres.get(piece.identity.key);
+      if (!point) return piece;
+      const x = point.x - pivot.x;
+      const y = point.y - pivot.y;
+      return {
+        ...piece,
+        rotationDegrees: normalizedDegrees((piece.rotationDegrees ?? 0) + angle),
+        offsetMm: {
+          x: piece.offsetMm.x + ((cos - 1) * x - sin * y),
+          y: piece.offsetMm.y + (sin * x + (cos - 1) * y),
+        },
+      };
+    }),
+    session.selectedPieceKeys,
+  );
+}
+
+export type CadTablePieceAlignmentV1 =
+  | 'left'
+  | 'center-x'
+  | 'right'
+  | 'bottom'
+  | 'center-y'
+  | 'top';
+
+/** Aligns selected displayed bounds in source millimetres (top is maximum Y). */
+export function alignSelectedCadTablePiecesV1(
+  session: PatternImportDxfPhaseECadTablePieceLayoutSessionV1,
+  alignment: CadTablePieceAlignmentV1,
+): PatternImportDxfPhaseECadTablePieceLayoutSessionV1 {
+  if (session.selectedPieceKeys.length < 2) return session;
+  const selected = new Set(session.selectedPieceKeys);
+  const boxes = new Map(
+    session.pieces
+      .filter((piece) => selected.has(piece.identity.key))
+      .map(
+        (piece) =>
+          [
+            piece.identity.key,
+            displayedPatternImportDxfPhaseECadTablePieceBoundsV1(piece),
+          ] as const,
+      ),
+  );
+  const group = unionBounds([...boxes.values()]);
+  const horizontal = alignment === 'left' || alignment === 'center-x' || alignment === 'right';
+  const edge = (box: BoxMm) => {
+    switch (alignment) {
+      case 'left':
+        return box.minX;
+      case 'right':
+        return box.maxX;
+      case 'bottom':
+        return box.minY;
+      case 'top':
+        return box.maxY;
+      case 'center-x':
+        return (box.minX + box.maxX) / 2;
+      case 'center-y':
+        return (box.minY + box.maxY) / 2;
+    }
+  };
+  const target = edge(group);
+  return freezeSession(
+    session.pieces.map((piece) => {
+      const box = boxes.get(piece.identity.key);
+      if (!box) return piece;
+      const delta = target - edge(box);
+      return {
+        ...piece,
+        offsetMm: {
+          x: piece.offsetMm.x + (horizontal ? delta : 0),
+          y: piece.offsetMm.y + (horizontal ? 0 : delta),
+        },
+      };
+    }),
+    session.selectedPieceKeys,
+  );
+}
+
 export function resetPatternImportDxfPhaseECadTablePieceOffsetsV1(
   session: PatternImportDxfPhaseECadTablePieceLayoutSessionV1,
 ): PatternImportDxfPhaseECadTablePieceLayoutSessionV1 {
@@ -404,10 +612,13 @@ export function compactPatternImportDxfPhaseECadTablePieceOffsetsV1(
   if (!finite(gapMm) || gapMm < 0)
     throw new TypeError('CAD table compact-layout gap must be a finite non-negative number.');
   if (session.pieces.length < 2) return session;
-  const dimensions = session.pieces.map(({ sourceBounds }) => ({
-    width: Math.max(sourceBounds.maxX - sourceBounds.minX, 1),
-    height: Math.max(sourceBounds.maxY - sourceBounds.minY, 1),
-  }));
+  const dimensions = session.pieces
+    .map(displayedPatternImportDxfPhaseECadTablePieceBoundsV1)
+    .map((bounds) => ({
+      bounds,
+      width: Math.max(bounds.maxX - bounds.minX, 1),
+      height: Math.max(bounds.maxY - bounds.minY, 1),
+    }));
   const totalArea = dimensions.reduce((sum, { width, height }) => sum + width * height, 0);
   const widest = Math.max(...dimensions.map(({ width }) => width));
   const targetRowWidth = Math.max(widest, Math.sqrt(totalArea * 1.6));
@@ -428,12 +639,24 @@ export function compactPatternImportDxfPhaseECadTablePieceOffsetsV1(
     return {
       ...piece,
       offsetMm: {
-        x: targetMinX - piece.sourceBounds.minX,
-        y: targetMinY - piece.sourceBounds.minY,
+        x: piece.offsetMm.x + (targetMinX - size.bounds.minX),
+        y: piece.offsetMm.y + (targetMinY - size.bounds.minY),
       },
     };
   });
   return freezeSession(compacted, session.selectedPieceKeys);
+}
+
+function unionBounds(boxes: readonly BoxMm[]): BoxMm {
+  return boxes.reduce(
+    (bounds, box) => ({
+      minX: Math.min(bounds.minX, box.minX),
+      minY: Math.min(bounds.minY, box.minY),
+      maxX: Math.max(bounds.maxX, box.maxX),
+      maxY: Math.max(bounds.maxY, box.maxY),
+    }),
+    boxes[0]!,
+  );
 }
 
 export function fitPatternImportDxfPhaseECadTablePieceBoundsV1(
@@ -443,11 +666,13 @@ export function fitPatternImportDxfPhaseECadTablePieceBoundsV1(
   if (!finite(paddingMm) || paddingMm < 0)
     throw new TypeError('CAD table fit padding must be a finite non-negative number.');
   if (!session.pieces.length) return null;
-  const displayed = session.pieces.map(displayedPatternImportDxfPhaseECadTablePieceBoundsV1);
+  const bounds = unionBounds(
+    session.pieces.map(displayedPatternImportDxfPhaseECadTablePieceBoundsV1),
+  );
   return Object.freeze({
-    minX: Math.min(...displayed.map(({ minX }) => minX)) - paddingMm,
-    minY: Math.min(...displayed.map(({ minY }) => minY)) - paddingMm,
-    maxX: Math.max(...displayed.map(({ maxX }) => maxX)) + paddingMm,
-    maxY: Math.max(...displayed.map(({ maxY }) => maxY)) + paddingMm,
+    minX: bounds.minX - paddingMm,
+    minY: bounds.minY - paddingMm,
+    maxX: bounds.maxX + paddingMm,
+    maxY: bounds.maxY + paddingMm,
   });
 }

@@ -80,6 +80,7 @@ import {
   startPatternImportDxfPhaseECadTableZeroConnectControllerV1,
 } from './cad-table-zero-connect-controller-v1';
 import {
+  cadTablePieceSvgTransformV1,
   compactPatternImportDxfPhaseECadTablePieceOffsetsV1,
   createPatternImportDxfPhaseECadTablePieceLayoutSessionV1,
   fitPatternImportDxfPhaseECadTablePieceBoundsV1,
@@ -90,6 +91,7 @@ import {
   selectPatternImportDxfPhaseECadTablePiecesV1,
   translateSelectedPatternImportDxfPhaseECadTablePiecesV1,
   type PatternImportDxfPhaseECadTablePieceLayoutSessionV1,
+  type PatternImportDxfPhaseECadTablePieceLayoutV1,
 } from './cad-table-piece-layout-session-v1';
 import {
   fitPatternImportDxfPhaseECadTableViewportAspectV1,
@@ -395,9 +397,7 @@ function ProjectedPiece({
   measurements,
   callouts,
   layoutKey,
-  sourceBounds,
-  sourceMaterialRings,
-  displayOffset,
+  layout,
   pieceSelectActive,
   unit,
   disabled,
@@ -430,9 +430,7 @@ function ProjectedPiece({
   measurements: readonly PatternImportDxfPhaseEMeasurementV1[];
   callouts: readonly PatternImportDxfPhaseECalloutV1[];
   layoutKey: string;
-  sourceBounds: BoxMm;
-  sourceMaterialRings: readonly (readonly PtMm[])[];
-  displayOffset: PtMm;
+  layout: PatternImportDxfPhaseECadTablePieceLayoutV1;
   pieceSelectActive: boolean;
   unit: number;
   disabled?: boolean;
@@ -445,6 +443,7 @@ function ProjectedPiece({
   onMeasurementVertex: (anchor: PatternImportDxfPhaseEVertexAnchorV1) => void;
   onStateChange: (state: WorkbenchState) => void;
 }) {
+  const { sourceBounds, sourceMaterialRings, offsetMm: displayOffset } = layout;
   const activeProposalSeam = proposal.seams[activeSeamIndex];
   const activeSideIndex = activeProposalSeam.sides.findIndex(
     ({ pieceId, pieceLineKey }) => pieceId === piece.pieceId && pieceLineKey === piece.pieceLineKey,
@@ -486,7 +485,7 @@ function ProjectedPiece({
       onPointerUp={onArrangePointerUp}
       onPointerCancel={onArrangePointerCancel}
       className='cursor-pointer'
-      transform={`translate(${displayOffset.x} ${displayOffset.y})`}
+      transform={cadTablePieceSvgTransformV1(layout, 'source')}
     >
       <title>{`Piece ${piece.pieceId}; bounded proposal layers appear only when this piece participates in the active operation.`}</title>
       <rect
@@ -2060,9 +2059,7 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                             measurements={proposalBound ? measurements : []}
                             callouts={proposalBound ? callouts : []}
                             layoutKey={layout.identity.key}
-                            sourceBounds={layout.sourceBounds}
-                            sourceMaterialRings={layout.sourceMaterialRings}
-                            displayOffset={layout.offsetMm}
+                            layout={layout}
                             pieceSelectActive={canvasSelectActive}
                             unit={canvasMmPerPixel}
                             disabled={disabled || panToolActive}
@@ -2096,7 +2093,7 @@ export function PatternImportDxfProductPhaseEMultiseamWorkbenchV2({
                             return (
                               <g
                                 key={segment.viewKey}
-                                transform={`translate(${layout.offsetMm.x} ${layout.offsetMm.y})`}
+                                transform={cadTablePieceSvgTransformV1(layout, 'source')}
                                 data-cad-zero-connect-edge={segment.viewKey}
                                 data-cad-zero-connect-piece={segment.pieceId}
                                 data-cad-zero-connect-contour={segment.contourId}
