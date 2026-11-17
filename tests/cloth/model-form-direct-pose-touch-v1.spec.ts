@@ -176,15 +176,12 @@ test('mobile touch edits wrist and ankle live while empty canvas stays camera-ow
 
   await page.goto(DEV_ROUTE, { waitUntil: 'domcontentloaded' });
   const form = page.getByTestId('model-form-personalized-preview-dev-page').locator('form');
-  const guided = page.getByTestId('measurements-guided-entry');
   const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
-  await expect(guided).toBeVisible();
-  await expect(form.locator('[data-model-measurement]')).toHaveCount(1);
-  await expect(page.getByRole('textbox', { name: 'chest', exact: true })).toHaveValue('920');
-  await expect(page.getByTestId('model-open-reference-direct-pose-control-v9')).toHaveCount(0);
-
-  await page.getByRole('radio', { name: 'table', exact: true }).tap();
-  await expect(guided).toHaveCount(0);
+  const editPose = page.getByRole('checkbox', { name: 'edit pose', exact: true });
+  // Phone layout (variant C): no guided / table; the mannequin sits over one measurement group.
+  await expect(page.getByTestId('measurements-guided-entry')).toHaveCount(0);
+  await expect(page.getByRole('radio', { name: 'guided', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('radio', { name: 'table', exact: true })).toHaveCount(0);
   await expect(form.locator('[data-model-measurement]')).toHaveCount(34);
   await expect(page.getByRole('textbox', { name: 'chest', exact: true })).toHaveValue('920');
   await expect(page.getByTestId('model-open-reference-direct-pose-control-v9')).toBeVisible();
@@ -193,7 +190,6 @@ test('mobile touch edits wrist and ankle live while empty canvas stays camera-ow
     'Preview partial: A-rest',
     { timeout: 180_000 },
   );
-  await expect(canvas).toHaveAttribute('data-joint-editor-mode', 'edit-pose');
 
   await page.evaluate(() => {
     const pointerTypes: string[] = [];
@@ -207,6 +203,31 @@ test('mobile touch edits wrist and ankle live while empty canvas stays camera-ow
     document.addEventListener('pointerup', record, true);
   });
   const session = await page.context().newCDPSession(page);
+
+  // edit pose is off by default: a touch drag from the wrist marker leaves the pose alone.
+  await expect(editPose).not.toBeChecked();
+  await expect(canvas).toHaveAttribute('data-joint-editor-mode', 'off');
+  await editPose.tap();
+  await expect(canvas).toHaveAttribute('data-joint-editor-mode', 'edit-pose');
+  const wristOn = await projectedJointPoint({ session, canvas, groupId: 'left-wrist' });
+  const boxOn = (await canvas.boundingBox())!;
+  await editPose.tap();
+  await expect(editPose).not.toBeChecked();
+  await expect(canvas).toHaveAttribute('data-joint-editor-mode', 'off');
+  const boxOff = (await canvas.boundingBox())!;
+  const wristOff = { x: wristOn.x - boxOn.x + boxOff.x, y: wristOn.y - boxOn.y + boxOff.y };
+  const offSource = await canvas.getAttribute('data-source-revision');
+  await dispatchTouch(session, 'touchStart', wristOff);
+  for (let index = 1; index <= 8; index += 1) {
+    await dispatchTouch(session, 'touchMove', { x: wristOff.x + index * 6, y: wristOff.y });
+  }
+  await expect(canvas).not.toHaveAttribute('data-position-dragging', 'true');
+  await dispatchTouch(session, 'touchEnd');
+  await expect(canvas).toHaveAttribute('data-source-revision', offSource ?? '');
+
+  await editPose.tap();
+  await expect(editPose).toBeChecked();
+  await expect(canvas).toHaveAttribute('data-joint-editor-mode', 'edit-pose');
 
   const wristRevision = await dragJointWithCandidates({
     page,
@@ -263,13 +284,12 @@ test('mobile touch edits wrist and ankle live while empty canvas stays camera-ow
   const cameraAfter = await canvas.screenshot();
   expect(cameraAfter.equals(cameraBefore)).toBe(false);
 
-  const guidedRadio = page.getByRole('radio', { name: 'guided', exact: true });
-  await guidedRadio.tap();
-  await expect(guidedRadio).toHaveAttribute('aria-checked', 'true');
-  await expect(guided).toBeVisible();
-  await expect(form.locator('[data-model-measurement]')).toHaveCount(1);
+  // Leaving edit pose hands the canvas back to the camera; the form keeps every field and value.
+  await editPose.tap();
+  await expect(canvas).toHaveAttribute('data-joint-editor-mode', 'off');
+  await expect(form.locator('[data-model-measurement]')).toHaveCount(34);
   await expect(page.getByRole('textbox', { name: 'chest', exact: true })).toHaveValue('920');
-  await expect(page.getByTestId('model-open-reference-direct-pose-control-v9')).toHaveCount(0);
+  await expect(page.getByTestId('model-open-reference-direct-pose-control-v9')).toBeVisible();
 
   expect(
     requests.filter(({ method }) => ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)),
@@ -280,17 +300,19 @@ test('mobile touch edits wrist and ankle live while empty canvas stays camera-ow
   expect(pageErrors).toEqual([]);
 });
 
-test('measurement view admits touch pointerup without relying on a compatibility click', async ({
+test('measurement group switch admits touch pointerup without relying on a compatibility click', async ({
   page,
 }) => {
   await page.goto(DEV_ROUTE, { waitUntil: 'domcontentloaded' });
-  const guided = page.getByTestId('measurements-guided-entry');
-  const tableRadio = page.getByRole('radio', { name: 'table', exact: true });
-  const guidedRadio = page.getByRole('radio', { name: 'guided', exact: true });
+  // Phone layout (variant C) has no guided / table switch; the same ViewSwitch picks the group.
+  const groups = page.getByRole('radiogroup', { name: 'measurement group' });
+  const guided = page.locator('[data-measurement-group="arms"]');
+  const tableRadio = groups.getByRole('radio', { name: /^legs /u });
+  const guidedRadio = groups.getByRole('radio', { name: /^arms /u });
 
   await tableRadio.click();
   await expect(tableRadio).toHaveAttribute('aria-checked', 'true');
-  await expect(guided).toHaveCount(0);
+  await expect(guided).toBeHidden();
 
   const box = await guidedRadio.boundingBox();
   expect(box).not.toBeNull();
@@ -322,7 +344,7 @@ test('measurement view admits touch pointerup without relying on a compatibility
     clientY: start.y + 24,
   });
   await expect(tableRadio).toHaveAttribute('aria-checked', 'true');
-  await expect(guided).toHaveCount(0);
+  await expect(guided).toBeHidden();
 
   // Pointer events are dispatched directly, so no browser compatibility click follows this tap.
   await guidedRadio.dispatchEvent('pointerdown', {
@@ -348,5 +370,5 @@ test('measurement view admits touch pointerup without relying on a compatibility
   // The consumed compatibility click must not poison the next ordinary mouse selection.
   await tableRadio.click();
   await expect(tableRadio).toHaveAttribute('aria-checked', 'true');
-  await expect(guided).toHaveCount(0);
+  await expect(guided).toBeHidden();
 });
