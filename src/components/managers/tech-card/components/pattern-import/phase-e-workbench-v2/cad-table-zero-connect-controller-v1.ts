@@ -3,16 +3,19 @@ import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/patt
 
 import type { PatternImportDxfPhaseECadTableConnectToolPhaseV1 } from './cad-table-connect-tool-control-v1';
 import type { PatternImportDxfPhaseECadTableConnectEdgeSegmentV1 } from './cad-table-connect-edge-segments-v1';
+import type { PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1 } from './cad-table-zero-connect-phase-e-authority-v1';
 import {
+  isPatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1,
   PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_AUTHORING_HANDOFF_V1,
+  type PatternImportDxfPhaseEZeroConnectAuthoringHandoffRequestV1,
   type PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1,
   type PatternImportDxfPhaseEZeroConnectAuthoringHandoffResultV1,
+  type PatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1,
 } from './cad-table-zero-connect-authoring-handoff-v1';
 import {
   buildPatternImportDxfPhaseECadTableZeroConnectCandidateV1,
   createPatternImportDxfPhaseECadTableZeroConnectSessionV1,
   selectPatternImportDxfPhaseECadTableZeroConnectEdgeV1,
-  type PatternImportDxfPhaseECadTableZeroConnectAuthorityV1,
   type PatternImportDxfPhaseECadTableZeroConnectCandidateV1,
   type PatternImportDxfPhaseECadTableZeroConnectSessionV1,
 } from './cad-table-zero-connect-session-v1';
@@ -48,7 +51,53 @@ export type PatternImportDxfPhaseECadTableZeroConnectControllerStateV1 = Readonl
 export type PatternImportDxfPhaseECadTableZeroConnectControllerAuthorityV1 = Readonly<{
   catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
+  authoringAuthority?: PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1 | null;
+  authoringAuthorityRefresh?: PatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1 | null;
 }>;
+
+const controllerSessionAuthorities = new WeakMap<
+  object,
+  PatternImportDxfPhaseECadTableZeroConnectControllerAuthorityV1
+>();
+const controllerHandoffRequests = new WeakMap<
+  object,
+  Readonly<{
+    authority: PatternImportDxfPhaseECadTableZeroConnectControllerAuthorityV1;
+    session: PatternImportDxfPhaseECadTableZeroConnectSessionV1;
+    candidate: PatternImportDxfPhaseECadTableZeroConnectCandidateV1;
+  }>
+>();
+
+export function isPatternImportDxfPhaseECadTableZeroConnectAuthoringRequestV1(
+  request: PatternImportDxfPhaseEZeroConnectAuthoringHandoffRequestV1,
+): boolean {
+  const state = request && controllerHandoffRequests.get(request);
+  const authority = state?.authority;
+  return Boolean(
+    state &&
+      authority &&
+      request.session === state.session &&
+      request.candidate === state.candidate &&
+      request.catalog === authority.catalog &&
+      request.projection === authority.projection &&
+      request.authoringAuthority === authority.authoringAuthority &&
+      request.authoringAuthorityRefresh === authority.authoringAuthorityRefresh &&
+      controllerSessionAuthorities.get(request.session) === authority &&
+      request.session.status === 'ready' &&
+      request.session.source === request.candidate.source &&
+      request.session.operation === request.candidate.operation &&
+      request.session.sides[0] === request.candidate.connection.sides[0] &&
+      request.session.sides[1] === request.candidate.connection.sides[1] &&
+      isPatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1(
+        request.authoringAuthorityRefresh,
+        {
+          authority: request.authoringAuthority,
+          catalog: request.catalog,
+          projection: request.projection,
+        },
+      ),
+  );
+}
 
 function state(
   patch: Omit<
@@ -120,6 +169,7 @@ export function startPatternImportDxfPhaseECadTableZeroConnectControllerV1(
       handoffResult: null,
       error: created.blocker.detail,
     });
+  controllerSessionAuthorities.set(created.session, authority);
   return state({
     sequence,
     session: created.session,
@@ -145,18 +195,38 @@ function refusedHandoff(
   });
 }
 
+function invalidAuthorityHandoff(
+  session: PatternImportDxfPhaseECadTableZeroConnectSessionV1,
+): PatternImportDxfPhaseEZeroConnectAuthoringHandoffResultV1 {
+  return Object.freeze({
+    ok: false as const,
+    inserted: 0 as const,
+    historyKey: null,
+    sessionRevision: session.revision,
+    blocker: Object.freeze({
+      code: 'zero-connect-authoring-write-refused' as const,
+      detail: 'The exact saved-DXF authoring capability is absent or stale.',
+    }),
+  });
+}
+
 /**
  * Advances one exact edge selection and performs the existing OperationsField handoff only after
  * both sides form a current candidate. No operation, seam proposal or form owner is synthesized.
  */
 export function selectPatternImportDxfPhaseECadTableZeroConnectControllerEdgeV1(
   current: PatternImportDxfPhaseECadTableZeroConnectControllerStateV1,
-  authority: PatternImportDxfPhaseECadTableZeroConnectAuthorityV1,
+  authority: PatternImportDxfPhaseECadTableZeroConnectControllerAuthorityV1,
   segment: PatternImportDxfPhaseECadTableConnectEdgeSegmentV1,
   direction: 'forward' | 'reverse',
   handoff?: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1,
 ): PatternImportDxfPhaseECadTableZeroConnectControllerStateV1 {
   if (!current.session || current.session.status === 'ready') return current;
+  if (controllerSessionAuthorities.get(current.session) !== authority)
+    return state({
+      ...current,
+      error: 'The zero-connect session moved to a different exact authoring authority.',
+    });
   const selected = selectPatternImportDxfPhaseECadTableZeroConnectEdgeV1(
     current.session,
     authority,
@@ -172,6 +242,7 @@ export function selectPatternImportDxfPhaseECadTableZeroConnectControllerEdgeV1(
       ...current,
       error: selected.blocker.detail,
     });
+  controllerSessionAuthorities.set(selected.session, authority);
   if (selected.session.status !== 'ready')
     return state({
       sequence: current.sequence,
@@ -193,18 +264,41 @@ export function selectPatternImportDxfPhaseECadTableZeroConnectControllerEdgeV1(
       handoffResult: null,
       error: candidate.blocker.detail,
     });
-  const handoffResult =
-    handoff?.status === 'available'
-      ? handoff.ingest({
-          schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_AUTHORING_HANDOFF_V1,
-          candidate: candidate.candidate,
-          session: selected.session,
+  let handoffResult: PatternImportDxfPhaseEZeroConnectAuthoringHandoffResultV1 | null = null;
+  if (handoff?.status === 'available') {
+    if (
+      !authority.authoringAuthority ||
+      !isPatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1(
+        authority.authoringAuthorityRefresh,
+        {
+          authority: authority.authoringAuthority,
           catalog: authority.catalog,
           projection: authority.projection,
-        })
-      : handoff
-        ? refusedHandoff(handoff, selected.session)
-        : null;
+        },
+      )
+    )
+      handoffResult = invalidAuthorityHandoff(selected.session);
+    else {
+      const request = Object.freeze({
+        schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_ZERO_CONNECT_AUTHORING_HANDOFF_V1,
+        candidate: candidate.candidate,
+        session: selected.session,
+        catalog: authority.catalog,
+        projection: authority.projection,
+        authoringAuthority: authority.authoringAuthority,
+        authoringAuthorityRefresh: authority.authoringAuthorityRefresh,
+      }) satisfies PatternImportDxfPhaseEZeroConnectAuthoringHandoffRequestV1;
+      controllerHandoffRequests.set(
+        request,
+        Object.freeze({
+          authority,
+          session: selected.session,
+          candidate: candidate.candidate,
+        }),
+      );
+      handoffResult = handoff.ingest(request);
+    }
+  } else if (handoff) handoffResult = refusedHandoff(handoff, selected.session);
   return state({
     sequence: current.sequence,
     session: selected.session,

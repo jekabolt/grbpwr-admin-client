@@ -19,7 +19,11 @@ import {
   subscribePatternImportDxfPhaseECardSessionV1,
   type PatternImportDxfPhaseECardSessionV1,
 } from '../phase-e-workbench-card-session-v1';
-import type { PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1 } from './cad-table-zero-connect-authoring-handoff-v1';
+import {
+  createPatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1,
+  type PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1,
+  type PatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1,
+} from './cad-table-zero-connect-authoring-handoff-v1';
 import { PatternImportDxfPhaseECadTableZeroConnectCanvasV1 } from './cad-table-zero-connect-canvas-v1';
 import {
   bindPatternImportDxfPhaseECadTableZeroOperationFreshToSavedAuthorityV1,
@@ -34,6 +38,7 @@ import {
 } from './cad-table-zero-operation-fresh-preparation-v1';
 import {
   createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1,
+  isPatternImportDxfPhaseECadTableZeroOperationGenerationTicketCurrentV1,
   type PatternImportDxfPhaseECadTableZeroOperationGenerationTicketV1,
 } from './cad-table-zero-operation-generation-owner-v1';
 import {
@@ -170,6 +175,141 @@ export function isPatternImportDxfPhaseECadTableZeroOperationAuthoringReadyV1(
         prepared,
       ).ok,
   );
+}
+
+/** Creates the one-shot fresh saved-authority reader retained with a zero-connect draft. */
+export function createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefreshV1(input: {
+  prepared: SavedPrepared | null;
+  expectation: PatternImportDxfPhaseECadTableZeroOperationAuthorityRebindExpectationV1 | null;
+  savedAuthority: PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1 | null;
+  preparationKey: string;
+  orderSizeIds: (ids: number[]) => number[];
+  sizeNameById: ReadonlyMap<number, string>;
+  prepareSaved?: typeof preparePatternImportDxfPhaseECadTableZeroOperationSavedV1;
+}): PatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1 | null {
+  const { prepared, expectation, savedAuthority } = input;
+  if (
+    !prepared ||
+    !expectation ||
+    !savedAuthority ||
+    !isPatternImportDxfPhaseECadTableZeroOperationAuthoringReadyV1(prepared, expectation)
+  )
+    return null;
+  const selector = prepared.authoringAuthority.row;
+  const failed = (detail: string) =>
+    Object.freeze({
+      ok: false as const,
+      authority: null,
+      preparationGeneration: null,
+      importGeneration: null,
+      blocker: Object.freeze({
+        code: 'fresh-saved-authority-unavailable' as const,
+        detail,
+      }),
+    });
+  const generationOwner = createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1();
+  let nextAttempt = 0;
+  let activeAttempt = 0;
+  let activeTicket: PatternImportDxfPhaseECadTableZeroOperationGenerationTicketV1 | null = null;
+  let consumed = false;
+  let disposed = false;
+  const isCurrent = (
+    attempt: number,
+    ticket: PatternImportDxfPhaseECadTableZeroOperationGenerationTicketV1,
+    signal: AbortSignal,
+  ) =>
+    !disposed &&
+    !consumed &&
+    !signal.aborted &&
+    activeAttempt === attempt &&
+    activeTicket === ticket &&
+    isPatternImportDxfPhaseECadTableZeroOperationGenerationTicketCurrentV1(ticket);
+  const refreshOwner = Object.freeze({
+    async refresh(signal: AbortSignal) {
+      if (disposed || consumed)
+        return failed('The saved DXF authoring authority capability is already consumed.');
+      const attempt = nextAttempt + 1;
+      if (!Number.isSafeInteger(attempt) || attempt <= 0) {
+        disposed = true;
+        generationOwner.dispose();
+        return failed('The saved DXF authoring authority capability is disposed.');
+      }
+      nextAttempt = attempt;
+      if (activeTicket) generationOwner.invalidate(activeTicket);
+      const refreshKey = `${input.preparationKey}:authoring-refresh`;
+      let generationTicket: PatternImportDxfPhaseECadTableZeroOperationGenerationTicketV1 | null =
+        null;
+      try {
+        generationTicket =
+          expectation.source === 'fresh-card-session'
+            ? generationOwner.beginFresh(refreshKey, expectation.importGeneration)
+            : generationOwner.beginSaved(refreshKey);
+        activeAttempt = attempt;
+        activeTicket = generationTicket;
+        if (!isCurrent(attempt, generationTicket, signal))
+          return failed('The saved DXF authoring authority refresh was cancelled.');
+        const latest = await savedAuthority.resolveLatestCard(selector, signal);
+        if (!isCurrent(attempt, generationTicket, signal))
+          return failed('The saved DXF authoring authority refresh was cancelled or superseded.');
+        const refreshed = await (
+          input.prepareSaved ?? preparePatternImportDxfPhaseECadTableZeroOperationSavedV1
+        )(
+          {
+            techCard: latest.techCard,
+            orderSizeIds: input.orderSizeIds,
+            sizeNameById: input.sizeNameById,
+            scopeKey: selector.scopeKey,
+            sizeToken: prepared.sizeToken,
+            authority: savedAuthority,
+            generation: generationTicket,
+          },
+          signal,
+        );
+        if (!isCurrent(attempt, generationTicket, signal))
+          return failed('The saved DXF authoring authority refresh was cancelled or superseded.');
+        if (!refreshed.ok) return failed(refreshed.blocker.detail);
+        const verified = verifyPatternImportDxfPhaseECadTableZeroOperationSavedAuthorityRefreshV1(
+          expectation,
+          refreshed,
+        );
+        if (!verified.ok) return failed(verified.blocker.detail);
+        if (!isCurrent(attempt, generationTicket, signal))
+          return failed('The saved DXF authoring authority refresh was cancelled or superseded.');
+        consumed = true;
+        disposed = true;
+        generationOwner.invalidate(generationTicket);
+        activeTicket = null;
+        activeAttempt = 0;
+        generationOwner.dispose();
+        return Object.freeze({
+          ok: true as const,
+          authority: refreshed.authoringAuthority,
+          preparationGeneration: refreshed.preparationGeneration,
+          importGeneration: refreshed.importGeneration,
+          blocker: null,
+        });
+      } catch (error) {
+        return failed(
+          error instanceof Error
+            ? error.message
+            : 'The saved DXF authoring authority could not be refreshed.',
+        );
+      } finally {
+        if (generationTicket && activeTicket === generationTicket) {
+          generationOwner.invalidate(generationTicket);
+          activeTicket = null;
+          activeAttempt = 0;
+        }
+      }
+    },
+  });
+  return createPatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1({
+    authority: prepared.authoringAuthority,
+    expectation,
+    catalog: prepared.catalog,
+    projection: prepared.projection,
+    refreshOwner,
+  });
 }
 
 /**
@@ -501,10 +641,34 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
       ),
     [orderSizeIds, resolvedSavedCard, sizeNameById],
   );
-  const authoringReady = isPatternImportDxfPhaseECadTableZeroOperationAuthoringReadyV1(
-    currentPreparation?.status === 'settled' ? currentPreparation.authoringPrepared : null,
-    currentPreparation?.status === 'settled' ? currentPreparation.rebindExpectation : null,
+  const authoringPrepared =
+    currentPreparation?.status === 'settled' ? currentPreparation.authoringPrepared : null;
+  const rebindExpectation =
+    currentPreparation?.status === 'settled' ? currentPreparation.rebindExpectation : null;
+  const authoringAuthorityRefresh = useMemo(
+    () =>
+      createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefreshV1({
+        prepared: authoringPrepared,
+        expectation: rebindExpectation,
+        savedAuthority,
+        preparationKey,
+        orderSizeIds,
+        sizeNameById,
+      }),
+    [
+      authoringPrepared,
+      orderSizeIds,
+      preparationKey,
+      rebindExpectation,
+      savedAuthority,
+      sizeNameById,
+    ],
   );
+  const authoringReady =
+    isPatternImportDxfPhaseECadTableZeroOperationAuthoringReadyV1(
+      authoringPrepared,
+      rebindExpectation,
+    ) && authoringAuthorityRefresh !== null;
   const blocker = !choices.ok
     ? choices.blocker
     : currentPreparation?.status === 'settled' && currentPreparation.result?.ok === false
@@ -695,6 +859,8 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
             <PatternImportDxfPhaseECadTableZeroConnectCanvasV1
               catalog={prepared.catalog}
               projection={prepared.projection}
+              authoringAuthority={authoringReady ? authoringPrepared?.authoringAuthority : null}
+              authoringAuthorityRefresh={authoringReady ? authoringAuthorityRefresh : null}
               zeroConnectAuthoringHandoff={authoringReady ? zeroConnectAuthoringHandoff : undefined}
               disabled={disabled || !authoringReady}
             />

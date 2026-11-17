@@ -14,7 +14,11 @@ import {
   fitPatternImportDxfPhaseECadTablePieceBoundsV1,
   type PatternImportDxfPhaseECadTablePieceLayoutSessionV1,
 } from './cad-table-piece-layout-session-v1';
-import type { PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1 } from './cad-table-zero-connect-authoring-handoff-v1';
+import type {
+  PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1,
+  PatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1,
+} from './cad-table-zero-connect-authoring-handoff-v1';
+import type { PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1 } from './cad-table-zero-connect-phase-e-authority-v1';
 import {
   cancelPatternImportDxfPhaseECadTableZeroConnectControllerV1,
   createPatternImportDxfPhaseECadTableZeroConnectControllerStateV1,
@@ -50,6 +54,8 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_CONNECT_CANVAS_CLAIMS_V1 
 export type PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1 = Readonly<{
   catalog: PatternImportDxfProductPhaseEAuthoringCatalogV1;
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
+  authoringAuthority?: PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1 | null;
+  authoringAuthorityRefresh?: PatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1 | null;
   zeroConnectAuthoringHandoff?: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1;
   disabled?: boolean;
 }>;
@@ -79,10 +85,15 @@ function pieceLayout(
 export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
   catalog,
   projection,
+  authoringAuthority = null,
+  authoringAuthorityRefresh = null,
   zeroConnectAuthoringHandoff,
   disabled = false,
 }: PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1) {
-  const authority = useMemo(() => ({ catalog, projection }) as const, [catalog, projection]);
+  const authority = useMemo(
+    () => ({ catalog, projection, authoringAuthority, authoringAuthorityRefresh }) as const,
+    [authoringAuthority, authoringAuthorityRefresh, catalog, projection],
+  );
   const layout = useMemo(() => layoutFor(projection), [projection]);
   const segments = useMemo(
     () =>
