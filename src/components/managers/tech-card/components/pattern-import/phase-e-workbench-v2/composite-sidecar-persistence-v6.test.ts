@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const codec = vi.hoisted(() => ({
   decodeV5: vi.fn(),
+  readV5Component: vi.fn(),
   decodeV6: vi.fn(),
   encodeV6: vi.fn(),
   readV6Component: vi.fn(),
@@ -13,6 +14,7 @@ vi.mock('./composite-sidecar-v5', () => ({
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V5:
     'application/vnd.grbpwr.pattern-dxf-product-composite.v5+json',
   decodePatternImportDxfProductCompositeSidecarV5: codec.decodeV5,
+  readPatternImportDxfProductCompositeComponentBytesV5: codec.readV5Component,
 }));
 vi.mock('./composite-sidecar-v6', () => ({
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6:
@@ -37,6 +39,11 @@ import { PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6 } from './co
 const encoder = new TextEncoder();
 const hash = (character: string) => character.repeat(64);
 const V5_BYTES = encoder.encode('{"fixture":"v5"}');
+const ANNOTATED_V5_BYTES = encoder.encode('{"fixture":"v5-annotations-changed"}');
+const V4_BYTES = encoder.encode('{"fixture":"v4"}');
+const CHANGED_V4_BYTES = encoder.encode('{"fixture":"v4-changed"}');
+const ARRANGEMENT_BYTES = encoder.encode('{"fixture":"arrangement"}');
+const CHANGED_ARRANGEMENT_BYTES = encoder.encode('{"fixture":"arrangement-changed"}');
 const V5_SHA = 'c51b90f0e11ca020e391eb4d866f1f14e7a81b42fcad82af0b32ff68d4973639';
 const V6_BYTES = encoder.encode('{"fixture":"v6"}');
 const V6_SHA = '301d2ad0638b595dbae37b465668d813499cc4e3394f344a9181fe75ac8d3be1';
@@ -91,11 +98,12 @@ function decodedV6(
   overrides: {
     expectedPreviousSidecarSha256?: string;
     arrangement?: Partial<typeof target>;
+    owner?: object;
   } = {},
 ) {
   return {
     ok: true,
-    owner: decodedOwner,
+    owner: overrides.owner ?? decodedOwner,
     document: {
       bindings: authority,
       writeCas: {
@@ -173,9 +181,10 @@ function storedV6(bytes = V6_BYTES) {
   };
 }
 
-function request() {
+function request(transitionIntent: 'arrangement' | 'annotations' = 'arrangement') {
   return {
     schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V6,
+    transitionIntent,
     currentAuthority: authority,
     arrangementTarget: target,
     nextOwner,
@@ -222,7 +231,48 @@ function rig(
   };
 }
 
-describe('Composite V6 arrangement persistence', () => {
+function configureV6Transition(options: {
+  nextNestedV5: Uint8Array;
+  currentArrangement: Uint8Array;
+  nextArrangement: Uint8Array;
+  currentNestedV4?: Uint8Array;
+  nextNestedV4?: Uint8Array;
+}) {
+  const currentV6Owner = Object.freeze({ currentV6: true });
+  const nextV6Owner = Object.freeze({ nextV6: true });
+  const currentV5Owner = Object.freeze({ currentV5: true });
+  const nextV5Owner = Object.freeze({ nextV5: true });
+  let decodeV6Calls = 0;
+  codec.decodeV6.mockImplementation(async () => {
+    decodeV6Calls += 1;
+    return decodedV6({
+      expectedPreviousSidecarSha256: V6_SHA,
+      owner: decodeV6Calls === 2 ? currentV6Owner : nextV6Owner,
+    });
+  });
+  codec.readV6Component.mockImplementation((owner: object, kind: string) => {
+    if (owner === currentV6Owner) {
+      return kind === 'composite-v5' ? V5_BYTES.slice() : options.currentArrangement.slice();
+    }
+    return kind === 'composite-v5' ? options.nextNestedV5.slice() : options.nextArrangement.slice();
+  });
+  codec.decodeV5.mockImplementation(async (bytes: Uint8Array) => ({
+    ok: true,
+    owner:
+      bytes.byteLength === V5_BYTES.byteLength &&
+      bytes.every((byte, index) => byte === V5_BYTES[index])
+        ? currentV5Owner
+        : nextV5Owner,
+    document: { bindings: authority },
+  }));
+  codec.readV5Component.mockImplementation((owner: object) =>
+    owner === currentV5Owner
+      ? (options.currentNestedV4 ?? V4_BYTES).slice()
+      : (options.nextNestedV4 ?? V4_BYTES).slice(),
+  );
+}
+
+describe('Composite V6 two-lane persistence', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     codec.encodeV6.mockReturnValue({
@@ -234,6 +284,7 @@ describe('Composite V6 arrangement persistence', () => {
     codec.decodeV5.mockResolvedValue({ ok: true, document: { bindings: authority } });
     codec.decodeV6.mockResolvedValue(decodedV6());
     codec.readV6Component.mockReturnValue(V5_BYTES);
+    codec.readV5Component.mockReturnValue(V4_BYTES);
     codec.readV3Component.mockReturnValue(semanticBytes);
   });
 
@@ -481,7 +532,7 @@ describe('Composite V6 arrangement persistence', () => {
     });
   });
 
-  it('uses the generic fresh GET/CAS/PUT/dual-readback path for explicit Save', async () => {
+  it('permits an exact V5 to V6 arrangement transition through the fresh GET/CAS path', async () => {
     const test = rig();
 
     const result = await test.persistence.save(request(), new AbortController().signal);
@@ -506,6 +557,221 @@ describe('Composite V6 arrangement persistence', () => {
     expect(test.GetTechCardPatternSemanticSidecar).toHaveBeenCalledTimes(2);
   });
 
+  it('permits an arrangement-only V6 transition while preserving exact nested V5 bytes', async () => {
+    configureV6Transition({
+      nextNestedV5: V5_BYTES,
+      currentArrangement: ARRANGEMENT_BYTES,
+      nextArrangement: CHANGED_ARRANGEMENT_BYTES,
+    });
+    const test = rig({
+      gets: [{ semanticSidecar: storedV6() }, { semanticSidecar: storedV6() }],
+      put: vi.fn().mockResolvedValue({ semanticSidecar: storedV6() }),
+    });
+
+    const result = await test.persistence.save(
+      request('arrangement'),
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ ok: true, writeOutcome: 'verified' });
+    expect(test.PutTechCardPatternSemanticSidecar).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedPreviousSidecarSha256: V6_SHA }),
+    );
+  });
+
+  it('permits an annotation-only V6 transition with exact arrangement and nested V4 bytes', async () => {
+    configureV6Transition({
+      nextNestedV5: ANNOTATED_V5_BYTES,
+      currentArrangement: ARRANGEMENT_BYTES,
+      nextArrangement: ARRANGEMENT_BYTES,
+    });
+    const test = rig({
+      gets: [{ semanticSidecar: storedV6() }, { semanticSidecar: storedV6() }],
+      put: vi.fn().mockResolvedValue({ semanticSidecar: storedV6() }),
+    });
+
+    const result = await test.persistence.save(
+      request('annotations'),
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ ok: true, writeOutcome: 'verified' });
+    expect(codec.readV5Component).toHaveBeenCalledTimes(2);
+    expect(test.PutTechCardPatternSemanticSidecar).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an annotation transition that also changes arrangement bytes', async () => {
+    configureV6Transition({
+      nextNestedV5: ANNOTATED_V5_BYTES,
+      currentArrangement: ARRANGEMENT_BYTES,
+      nextArrangement: CHANGED_ARRANGEMENT_BYTES,
+    });
+    const test = rig({ gets: [{ semanticSidecar: storedV6() }] });
+
+    const result = await test.persistence.save(
+      request('annotations'),
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ ok: false, writeOutcome: 'not-attempted' });
+    expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+  });
+
+  it('rejects an annotation transition with nested V4 byte drift', async () => {
+    configureV6Transition({
+      nextNestedV5: ANNOTATED_V5_BYTES,
+      currentArrangement: ARRANGEMENT_BYTES,
+      nextArrangement: ARRANGEMENT_BYTES,
+      nextNestedV4: CHANGED_V4_BYTES,
+    });
+    const test = rig({ gets: [{ semanticSidecar: storedV6() }] });
+
+    const result = await test.persistence.save(
+      request('annotations'),
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ ok: false, writeOutcome: 'not-attempted' });
+    expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+  });
+
+  it('rejects the annotations lane when the fresh current row is V5', async () => {
+    const test = rig({ gets: [{ semanticSidecar: storedV5() }] });
+
+    const result = await test.persistence.save(
+      request('annotations'),
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ ok: false, writeOutcome: 'not-attempted' });
+    expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+  });
+
+  it('rejects nested V5 drift in the arrangement lane', async () => {
+    codec.readV6Component.mockImplementation((_owner: object, kind: string) =>
+      kind === 'composite-v5' ? ANNOTATED_V5_BYTES : ARRANGEMENT_BYTES,
+    );
+    const test = rig({ gets: [{ semanticSidecar: storedV5() }] });
+
+    const result = await test.persistence.save(
+      request('arrangement'),
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ ok: false, writeOutcome: 'not-attempted' });
+    expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+  });
+
+  it('rejects a corrupt current V6 before dispatching PUT', async () => {
+    let decodeCalls = 0;
+    codec.decodeV6.mockImplementation(async () => {
+      decodeCalls += 1;
+      if (decodeCalls === 2) return { ok: false, blockers: [{ detail: 'corrupt current V6' }] };
+      return decodedV6({ expectedPreviousSidecarSha256: V6_SHA });
+    });
+    const test = rig({ gets: [{ semanticSidecar: storedV6() }] });
+
+    const result = await test.persistence.save(
+      request('arrangement'),
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ ok: false, writeOutcome: 'not-attempted' });
+    expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+  });
+
+  it('rejects current V6 full-authority drift and an unaccepted current media type', async () => {
+    let decodeCalls = 0;
+    codec.decodeV6.mockImplementation(async () => {
+      decodeCalls += 1;
+      const decoded = decodedV6({ expectedPreviousSidecarSha256: V6_SHA });
+      if (decodeCalls === 2) {
+        decoded.document.bindings = {
+          ...authority,
+          serverAssemblyRevision: 'assembly-revision:drifted',
+        } as never;
+      }
+      return decoded;
+    });
+    const authorityDrift = rig({ gets: [{ semanticSidecar: storedV6() }] });
+
+    expect(
+      await authorityDrift.persistence.save(request('arrangement'), new AbortController().signal),
+    ).toMatchObject({ ok: false, writeOutcome: 'not-attempted' });
+    expect(authorityDrift.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+
+    codec.decodeV6.mockResolvedValue(decodedV6());
+    const wrongMedia = rig({
+      gets: [
+        {
+          semanticSidecar: {
+            ...storedV5(),
+            mediaType: 'application/octet-stream',
+          },
+        },
+      ],
+    });
+    expect(
+      await wrongMedia.persistence.save(request('arrangement'), new AbortController().signal),
+    ).toMatchObject({ ok: false, writeOutcome: 'not-attempted' });
+    expect(wrongMedia.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+  });
+
+  it('uses the captured current V6 when the GET row mutates during current decode', async () => {
+    const currentRow = storedV6();
+    configureV6Transition({
+      nextNestedV5: V5_BYTES,
+      currentArrangement: ARRANGEMENT_BYTES,
+      nextArrangement: CHANGED_ARRANGEMENT_BYTES,
+    });
+    const decode = codec.decodeV6.getMockImplementation();
+    let decodeCalls = 0;
+    codec.decodeV6.mockImplementation(async (...args: unknown[]) => {
+      decodeCalls += 1;
+      if (decodeCalls === 2) {
+        Object.assign(currentRow, {
+          sidecarSha256: hash('f'),
+          sidecarBytes: base64(encoder.encode('mutated')),
+          mediaType: 'application/octet-stream',
+        });
+      }
+      return Reflect.apply(decode!, undefined, args);
+    });
+    const test = rig({
+      gets: [{ semanticSidecar: currentRow }, { semanticSidecar: storedV6() }],
+      put: vi.fn().mockResolvedValue({ semanticSidecar: storedV6() }),
+    });
+
+    const result = await test.persistence.save(
+      request('arrangement'),
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ ok: true, writeOutcome: 'verified' });
+    expect(currentRow.mediaType).toBe('application/octet-stream');
+    expect(test.PutTechCardPatternSemanticSidecar).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an accessor transition intent without invoking its getter', async () => {
+    const hostile = request() as unknown as Record<string, unknown>;
+    let getterCalls = 0;
+    Object.defineProperty(hostile, 'transitionIntent', {
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        return 'arrangement';
+      },
+    });
+    const test = rig();
+
+    const result = await test.persistence.save(hostile as never, new AbortController().signal);
+
+    expect(result).toMatchObject({ ok: false, writeOutcome: 'not-attempted' });
+    expect(getterCalls).toBe(0);
+    expect(test.GetTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+    expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+  });
+
   it('rejects accessor authority without invoking its getter or issuing transport', async () => {
     let getterCalls = 0;
     const hostileRow = { ...authority.row };
@@ -521,6 +787,7 @@ describe('Composite V6 arrangement persistence', () => {
     const result = await test.persistence.save(
       {
         schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V6,
+        transitionIntent: 'arrangement',
         currentAuthority: { ...authority, row: hostileRow },
         arrangementTarget: target,
         nextOwner,
@@ -542,6 +809,7 @@ describe('Composite V6 arrangement persistence', () => {
     const mutableAuthority = structuredClone(authority);
     const mutableRequest = {
       schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V6,
+      transitionIntent: 'arrangement',
       currentAuthority: mutableAuthority,
       arrangementTarget: target,
       nextOwner,
@@ -615,7 +883,7 @@ describe('Composite V6 arrangement persistence', () => {
       claims: {
         genericSemanticSidecarRpcReused: false,
         freshCurrentGetBeforePut: false,
-        exactNestedV5BytesPreserved: false,
+        exactNestedV5BytesPreservedOnArrangementTransition: false,
         currentAuthorityAndArrangementTargetBound: false,
         putEchoAndFreshGetVerified: false,
         unknownOutcomeFreshGetRecovery: false,
@@ -676,7 +944,7 @@ describe('Composite V6 arrangement persistence', () => {
     expect(result).toMatchObject({
       ok: false,
       writeOutcome: 'not-attempted',
-      claims: { exactNestedV5BytesPreserved: false },
+      claims: { exactNestedV5BytesPreservedOnArrangementTransition: false },
     });
     expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
   });
