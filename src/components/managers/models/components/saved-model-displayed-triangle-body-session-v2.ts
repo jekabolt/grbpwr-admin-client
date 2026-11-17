@@ -88,8 +88,12 @@ const observedPlacementGarmentPairSessions = new WeakMap<
 async function loadGarmentPairHandoff(kind: GarmentPairKind) {
   if (kind === 'observed-placement') {
     const [handoff, pair] = await Promise.all([
-      import('components/cloth-simulation-spike/pattern-import-dxf-product-saved-annular-observed-placement-garment-session-v1'),
-      import('components/cloth-simulation-spike/beta-skirt-saved-annular-observed-placement-displayed-body-product-placement-v1'),
+      import(
+        'components/cloth-simulation-spike/pattern-import-dxf-product-saved-annular-observed-placement-garment-session-v1'
+      ),
+      import(
+        'components/cloth-simulation-spike/beta-skirt-saved-annular-observed-placement-displayed-body-product-placement-v1'
+      ),
     ]);
     return {
       build:
@@ -101,8 +105,12 @@ async function loadGarmentPairHandoff(kind: GarmentPairKind) {
     };
   }
   const [handoff, pair] = await Promise.all([
-    import('components/cloth-simulation-spike/pattern-import-dxf-product-saved-annular-garment-session-v1'),
-    import('components/cloth-simulation-spike/beta-skirt-saved-annular-displayed-body-product-placement-v1'),
+    import(
+      'components/cloth-simulation-spike/pattern-import-dxf-product-saved-annular-garment-session-v1'
+    ),
+    import(
+      'components/cloth-simulation-spike/beta-skirt-saved-annular-displayed-body-product-placement-v1'
+    ),
   ]);
   return {
     build: handoff.buildPatternImportDxfProductSavedAnnularGarmentObservedBodyPairV1,
@@ -655,10 +663,12 @@ export function createSavedModelDisplayedTriangleBodySessionV2(
       const before = await projectCurrentBody(operation.signal);
       if (before.status === 'blocked') return pairBlocked(before.code, before.detail);
       requireCurrent(turn, signal);
-      const handoff =
-        await import('components/cloth-simulation-spike/beta-skirt-canonical-medium-saved-writer-frame-placement-v2');
-      const pair =
-        await import('components/cloth-simulation-spike/beta-skirt-personalized-displayed-body-product-placement-v2');
+      const handoff = await import(
+        'components/cloth-simulation-spike/beta-skirt-canonical-medium-saved-writer-frame-placement-v2'
+      );
+      const pair = await import(
+        'components/cloth-simulation-spike/beta-skirt-personalized-displayed-body-product-placement-v2'
+      );
       requireCurrent(turn, signal);
       const result =
         await handoff.buildBetaSkirtCanonicalMediumSavedWriterFrameDisplayedBodyHandoffV2(
@@ -689,8 +699,9 @@ export function createSavedModelDisplayedTriangleBodySessionV2(
     } catch (error) {
       operation.abort();
       if (created) {
-        const pair =
-          await import('components/cloth-simulation-spike/beta-skirt-personalized-displayed-body-product-placement-v2');
+        const pair = await import(
+          'components/cloth-simulation-spike/beta-skirt-personalized-displayed-body-product-placement-v2'
+        );
         pair.disposeBetaSkirtPersonalizedDisplayedBodyProductPlacementV2(created.owner);
       }
       return pairBlocked('saved-observed-pair-handoff-failed', reason(error));
@@ -817,8 +828,9 @@ export function createSavedModelDisplayedTriangleBodySessionV2(
       });
     try {
       requireCurrent(turn, signal);
-      const target =
-        await import('components/cloth-simulation-spike/saved-model-observed-placement-target-v1');
+      const target = await import(
+        'components/cloth-simulation-spike/saved-model-observed-placement-target-v1'
+      );
       requireCurrent(turn, signal);
       const projected = await target.projectSavedModelObservedPlacementTargetV1(
         turn.owner,
@@ -880,7 +892,9 @@ export function createSavedModelDisplayedTriangleBodySessionV2(
           'The confirmed target differs from the current observed body.',
         );
       const [source, issuer] = await Promise.all([
-        import('components/cloth-simulation-spike/pattern-import-dxf-product-saved-annular-observed-placement-garment-session-v1'),
+        import(
+          'components/cloth-simulation-spike/pattern-import-dxf-product-saved-annular-observed-placement-garment-session-v1'
+        ),
         import('components/cloth-simulation-spike/observed-placement-sidecar-issuer-v3'),
       ]);
       issuerApi = issuer;
@@ -1016,9 +1030,15 @@ export function createSavedModelDisplayedTriangleBodySessionV2(
       if (nativeCaller)
         EventTarget.prototype.addEventListener.call(nativeCaller, 'abort', cancel, { once: true });
       const [source, pair, preflight] = await Promise.all([
-        import('components/cloth-simulation-spike/pattern-import-dxf-product-saved-annular-observed-placement-garment-session-v1'),
-        import('components/cloth-simulation-spike/beta-skirt-saved-annular-observed-placement-displayed-body-product-placement-v1'),
-        import('components/cloth-simulation-spike/beta-skirt-saved-annular-observed-placement-displayed-body-world-initial-preflight-v1'),
+        import(
+          'components/cloth-simulation-spike/pattern-import-dxf-product-saved-annular-observed-placement-garment-session-v1'
+        ),
+        import(
+          'components/cloth-simulation-spike/beta-skirt-saved-annular-observed-placement-displayed-body-product-placement-v1'
+        ),
+        import(
+          'components/cloth-simulation-spike/beta-skirt-saved-annular-observed-placement-displayed-body-world-initial-preflight-v1'
+        ),
       ]);
       pairApi = pair;
       preflightApi = preflight;
@@ -1066,8 +1086,9 @@ export function createSavedModelDisplayedTriangleBodySessionV2(
       if (!lifetime) throw new Error('World preflight lifetime ended before publication.');
       checkSignal(lifetime);
       if (kind === 'runtime') {
-        const runtimeModule =
-          await import('components/cloth-simulation-spike/beta-skirt-saved-annular-observed-placement-runtime-source-v1');
+        const runtimeModule = await import(
+          'components/cloth-simulation-spike/beta-skirt-saved-annular-observed-placement-runtime-source-v1'
+        );
         runtimeApi = runtimeModule;
         requireCurrent(turn, signal);
         checkSignal(operation.signal);

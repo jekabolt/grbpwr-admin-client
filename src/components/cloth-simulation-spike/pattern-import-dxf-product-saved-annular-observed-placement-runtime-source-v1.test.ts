@@ -114,8 +114,7 @@ describe('private minted garment/pair/world → observed runtime source', () => 
       const before = await f.session.projectLatestGarment(f.generation);
       if (!before?.projection.normalizedMaterial) throw new Error('Missing retained material.');
       const rest = new Uint8Array(
-        before.projection.normalizedMaterial.normalizedV5.simulation.constraints.continuumStrain
-          .triangleRestFrames,
+        before.projection.normalizedMaterial.normalizedV5.simulation.constraints.continuumStrain.triangleRestFrames,
       ).slice();
       const result = await runtime(f.session, runtimeRequest(f, p, w));
       expect(result).toMatchObject({
@@ -137,8 +136,7 @@ describe('private minted garment/pair/world → observed runtime source', () => 
       const after = await f.session.projectLatestGarment(f.generation);
       expect(
         new Uint8Array(
-          after!.projection.normalizedMaterial!.normalizedV5.simulation.constraints.continuumStrain
-            .triangleRestFrames,
+          after!.projection.normalizedMaterial!.normalizedV5.simulation.constraints.continuumStrain.triangleRestFrames,
         ),
       ).toEqual(rest);
       expect(pairLife(p.owner)).not.toBeNull();

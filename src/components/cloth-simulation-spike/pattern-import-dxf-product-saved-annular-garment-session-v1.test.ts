@@ -176,7 +176,7 @@ async function withSyntheticPair<T>(
   const lifetime = vi
     .spyOn(pair, 'getBetaSkirtSavedAnnularDisplayedBodyProductPlacementLifetimeV1')
     .mockImplementation((owner) =>
-      owner && typeof owner === 'object' ? (children.get(owner)?.signal ?? null) : null,
+      owner && typeof owner === 'object' ? children.get(owner)?.signal ?? null : null,
     );
   const disposer = vi
     .spyOn(pair, 'disposeBetaSkirtSavedAnnularDisplayedBodyProductPlacementV1')

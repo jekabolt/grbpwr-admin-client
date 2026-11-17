@@ -30,12 +30,15 @@ export interface BetaSkirtRenderedBodyCollisionWorkerFailureV1 {
   readonly type: 'failure';
   readonly jobId: string;
   readonly code:
-    BetaSkirtRenderedBodyCollisionDiagnosticErrorCodeV1 | 'invalid-request' | 'unexpected-failure';
+    | BetaSkirtRenderedBodyCollisionDiagnosticErrorCodeV1
+    | 'invalid-request'
+    | 'unexpected-failure';
   readonly message: string;
 }
 
 export type BetaSkirtRenderedBodyCollisionWorkerResponseV1 =
-  BetaSkirtRenderedBodyCollisionWorkerSuccessV1 | BetaSkirtRenderedBodyCollisionWorkerFailureV1;
+  | BetaSkirtRenderedBodyCollisionWorkerSuccessV1
+  | BetaSkirtRenderedBodyCollisionWorkerFailureV1;
 
 const SHA256 = /^[0-9a-f]{64}$/u;
 const REQUEST_KEYS = Object.freeze(['version', 'type', 'jobId', 'input'] as const);

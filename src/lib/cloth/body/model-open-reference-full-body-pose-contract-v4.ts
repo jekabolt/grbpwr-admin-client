@@ -39,9 +39,14 @@ export const MODEL_OPEN_REFERENCE_FULL_BODY_POSE_LIMITS_V4 = Object.freeze({
 } as const);
 
 export type ModelOpenReferenceFullBodyPoseBodyFieldV4 =
-  'bodyFlexionDegrees' | 'bodySideBendDegrees' | 'bodyTwistDegrees';
+  | 'bodyFlexionDegrees'
+  | 'bodySideBendDegrees'
+  | 'bodyTwistDegrees';
 export type ModelOpenReferenceFullBodyPoseArmFieldV4 =
-  'shoulderRaiseDegrees' | 'shoulderForwardDegrees' | 'elbowBendDegrees' | 'wristBendDegrees';
+  | 'shoulderRaiseDegrees'
+  | 'shoulderForwardDegrees'
+  | 'elbowBendDegrees'
+  | 'wristBendDegrees';
 export type ModelOpenReferenceFullBodyPoseArmSideV4 = 'left' | 'right';
 
 export interface ModelOpenReferenceFullBodyArmPoseV4 {

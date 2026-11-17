@@ -59,7 +59,8 @@ export type PatternImportDxfProductSavedAnnularLocalFramePreflightRequestV2 = Re
 export type PatternImportDxfProductSavedAnnularLocalFramePreflightReportV2 = Readonly<{
   schemaVersion: typeof PATTERN_IMPORT_DXF_PRODUCT_SAVED_ANNULAR_LOCAL_FRAME_PREFLIGHT_V2;
   status:
-    'canonical-medium-local-geometry-compatible' | 'canonical-medium-local-geometry-incompatible';
+    | 'canonical-medium-local-geometry-compatible'
+    | 'canonical-medium-local-geometry-incompatible';
   origin: PatternImportDxfProductGarmentMeshComposerSnapshotV2['origin'];
   counts: Readonly<{
     vertexCount: number;

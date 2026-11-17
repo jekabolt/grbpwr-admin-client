@@ -77,9 +77,7 @@ export async function runPatternImportDxfProductSavedPhysicalBetaPreviewV1(
   signal?: AbortSignal,
 ): Promise<PatternImportDxfProductSavedPhysicalBetaPreviewResultV1> {
   const receipts: {
-    -readonly [
-      K in keyof PatternImportDxfProductSavedPhysicalBetaPreviewReceiptsV1
-    ]?: PatternImportDxfProductSavedPhysicalBetaPreviewReceiptsV1[K];
+    -readonly [K in keyof PatternImportDxfProductSavedPhysicalBetaPreviewReceiptsV1]?: PatternImportDxfProductSavedPhysicalBetaPreviewReceiptsV1[K];
   } = {};
   const fail = (
     stage: PatternImportDxfProductSavedPhysicalBetaPreviewStageV1,

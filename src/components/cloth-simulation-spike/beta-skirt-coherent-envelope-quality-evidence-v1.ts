@@ -22,7 +22,9 @@ export type BetaSkirtCoherentEnvelopeQualityBlockerV1 =
   | 'candidate-degenerate-triangle';
 
 export type BetaSkirtCoherentEnvelopeQualityErrorCodeV1 =
-  'input-invalid' | 'resource-cap-exceeded' | 'source-geometry-invalid';
+  | 'input-invalid'
+  | 'resource-cap-exceeded'
+  | 'source-geometry-invalid';
 
 export class BetaSkirtCoherentEnvelopeQualityErrorV1 extends Error {
   constructor(

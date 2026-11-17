@@ -87,8 +87,7 @@ describe('V3 observed world-initial preflight, genuine chain with explicit synth
           garmentOwner,
         ))!;
       const restBefore = new Uint8Array(
-        garment.normalizedMaterial!.normalizedV5.simulation.constraints.continuumStrain
-          .triangleRestFrames,
+        garment.normalizedMaterial!.normalizedV5.simulation.constraints.continuumStrain.triangleRestFrames,
       ).slice();
       const result = await build(request);
       if (!result.ok) throw new Error(JSON.stringify(result));

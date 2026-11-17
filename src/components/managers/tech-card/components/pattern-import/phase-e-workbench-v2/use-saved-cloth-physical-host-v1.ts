@@ -186,7 +186,7 @@ export function useSavedClothPhysicalHostV1({
       : null;
   const selected = current?.status === 'ready' ? current.selected : null;
   const sourceStatus: SavedClothPhysicalSourceStatusV1 =
-    !profile || !savedRow ? 'idle' : (current?.status ?? 'loading');
+    !profile || !savedRow ? 'idle' : current?.status ?? 'loading';
   const sourceError = current?.status === 'blocked' ? current.error : null;
   return {
     profile,
