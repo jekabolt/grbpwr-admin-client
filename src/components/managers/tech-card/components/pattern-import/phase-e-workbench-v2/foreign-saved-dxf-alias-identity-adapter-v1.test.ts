@@ -121,8 +121,8 @@ describe('foreign saved DXF exact alias identity adapter', () => {
       pairHand: null,
       piecesPerGarment: 2,
     });
-    expect(result.pieceOverrides[2].pairHand).toBeUndefined();
-    expect(result.pieceOverrides[2].piecesPerGarment).toBeUndefined();
+    expect(result.pieceOverrides[2]?.pairHand).toBeUndefined();
+    expect(result.pieceOverrides[2]?.piecesPerGarment).toBeUndefined();
     expect(result.bindings.map(({ pieceLineKey }) => pieceLineKey)).toEqual([
       'piece:0',
       'piece:1',
