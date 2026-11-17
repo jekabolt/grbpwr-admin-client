@@ -50,8 +50,13 @@ import type {
   SourceFileInfo,
   StageIO,
   StageName,
+  WriteJob,
 } from '../types';
-import { MODELS_MAX, PATIMPORT } from '../types';
+import {
+  MODELS_MAX,
+  PATIMPORT,
+  PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_CARRIER_V1,
+} from '../types';
 import type { GarmentPassport } from '../passport/types';
 import {
   bindPassport,
@@ -73,6 +78,7 @@ import {
   dxfWrittenPresegmentedIdentities,
   dxfScaleCandidates,
   readDxf,
+  readDxfWithPathProvenanceV1,
   settleSeamPair,
   segmentDxf,
   type DxfFastPath,
@@ -80,6 +86,34 @@ import {
   type DxfRead,
   type DxfSegmentation,
 } from '../adapters/dxf';
+import {
+  createDxfPieceSpecProvenanceSourceV1,
+  projectDxfPieceSpecContourBoundaryV1,
+  type DxfPieceSpecContourBoundaryV1,
+  type DxfPieceSpecProvenanceSourceV1,
+  type DxfPieceSpecTopologyMutationV1,
+} from '../dxf-piece-spec-provenance-bridge-v1';
+import {
+  attachDxfPipelineContentBindingV1,
+  blockedDxfPipelineProvenanceV1,
+  bridgeDxfPipelineProvenanceV1,
+  computeDxfPipelineContentBindingV1,
+  createDxfCandidateLineageSidecarV1,
+  createDxfPipelineContourIdV1,
+  dxfPipelineBlockerV1,
+  phaseCBlockersToPipelineV1,
+  validateDxfPipelineProvenanceRequestV1,
+  type DxfCandidateLineageSidecarV1,
+  type DxfPipelineProvenanceBlockerV1,
+  type DxfPipelineProvenanceStageOutputV1,
+} from '../dxf-pipeline-provenance-v1';
+import {
+  blockedDxfProductPhaseDReplayV1,
+  buildDxfProductPhaseDReplayV1,
+  validateDxfProductPhaseDReplayRequestV1,
+  type DxfProductPhaseDReplayStageOutputV1,
+} from '../dxf-product-phase-d-replay-v1';
+import { createDxfSourceCurveIdV1 } from '../dxf-path-provenance-v1';
 import { extractRasterImageDetailed } from '../adapters/raster';
 import { pdfHasNoCurves } from '../etalon/junk';
 import { extractHpgl } from '../adapters/hpgl';
@@ -237,6 +271,116 @@ const PREVIEW_MASK_BUDGET = 60_000;
 /** Points all page previews of the files step carry together. */
 const PREVIEW_PAGES_BUDGET = 250_000;
 
+type SessionOpenFile = {
+  name: string;
+  bytes: ArrayBuffer;
+  generatedFusing?: boolean;
+  dxfPathProvenance?: Readonly<{ sourceFileId: string }> | null;
+};
+
+type DxfOpenProvenance = Readonly<{
+  requested: boolean;
+  fileIndex: number | null;
+  sourceFileId: string | null;
+  blockers: readonly DxfPipelineProvenanceBlockerV1[];
+}>;
+
+function captureDxfOpenProvenance(input: readonly SessionOpenFile[]): DxfOpenProvenance {
+  const found: { fileIndex: number; sourceFileId: string | null }[] = [];
+  const blockers: DxfPipelineProvenanceBlockerV1[] = [];
+  for (let fileIndex = 0; fileIndex < input.length; fileIndex += 1) {
+    let optionDescriptor: PropertyDescriptor | undefined;
+    try {
+      optionDescriptor = Object.getOwnPropertyDescriptor(input[fileIndex], 'dxfPathProvenance');
+    } catch {
+      found.push({ fileIndex, sourceFileId: null });
+      blockers.push(
+        dxfPipelineBlockerV1(
+          'invalid-input',
+          `file index ${fileIndex} has an inaccessible DXF provenance option.`,
+        ),
+      );
+      continue;
+    }
+    if (!optionDescriptor) continue;
+    if (
+      !optionDescriptor.enumerable ||
+      !Object.prototype.hasOwnProperty.call(optionDescriptor, 'value')
+    ) {
+      found.push({ fileIndex, sourceFileId: null });
+      blockers.push(
+        dxfPipelineBlockerV1(
+          'invalid-input',
+          `file index ${fileIndex} has an accessor-backed DXF provenance option.`,
+        ),
+      );
+      continue;
+    }
+    const option = optionDescriptor.value;
+    let sourceFileId: string | null = null;
+    try {
+      if (
+        (typeof option !== 'object' && typeof option !== 'function') ||
+        option === null ||
+        Object.getPrototypeOf(option) !== Object.prototype
+      )
+        throw new TypeError('invalid option');
+      const keys = Reflect.ownKeys(option);
+      const descriptor = Object.getOwnPropertyDescriptor(option, 'sourceFileId');
+      if (
+        keys.length !== 1 ||
+        keys[0] !== 'sourceFileId' ||
+        !descriptor?.enumerable ||
+        !Object.prototype.hasOwnProperty.call(descriptor, 'value') ||
+        typeof descriptor.value !== 'string'
+      )
+        throw new TypeError('invalid option');
+      sourceFileId = descriptor.value;
+      const identityProbe = createDxfSourceCurveIdV1({
+        sourceFileId,
+        instancePath: [],
+        entityHandle: null,
+        entityOp: 0,
+        sub: 0,
+        primitiveSegmentIndex: 0,
+      });
+      if (!identityProbe.ok) throw new TypeError('invalid sourceFileId');
+    } catch {
+      blockers.push(
+        dxfPipelineBlockerV1(
+          'invalid-input',
+          `file index ${fileIndex} has an invalid descriptor-safe DXF provenance option.`,
+        ),
+      );
+    }
+    found.push({ fileIndex, sourceFileId });
+  }
+  if (found.length > 1) {
+    const nonNull = found.flatMap((entry) =>
+      entry.sourceFileId === null ? [] : [entry.sourceFileId],
+    );
+    blockers.push(
+      dxfPipelineBlockerV1(
+        new Set(nonNull).size < nonNull.length ? 'duplicate-identity' : 'source-file-mismatch',
+        'DXF provenance V1 binds one sourceFileId to one exact session file index.',
+      ),
+    );
+  }
+  if (found.length && input.length !== 1)
+    blockers.push(
+      dxfPipelineBlockerV1(
+        'unsupported-source-set',
+        'DXF provenance V1 supports exactly one direct source file per session.',
+      ),
+    );
+  return Object.freeze({
+    requested: found.length > 0,
+    fileIndex: found.length === 1 ? found[0].fileIndex : null,
+    sourceFileId: found.length === 1 ? found[0].sourceFileId : null,
+    blockers: Object.freeze(blockers),
+  });
+}
+
 /** A8: each masked page drawn — live lines and masked lines by kind (the files step's strip). */
 function cleanPreviews(docs: SourceDoc[], masks: PageMask[]): CleanPreview[] {
   // every page: the tiles with their mask, the pages set aside as thumbnails (their live lines)
@@ -353,6 +497,17 @@ export class Session {
   private scaleCands: ScaleCandidate[] = [];
   private extractWarnings: string[] = [];
   private dxf: { read: DxfRead; seg: DxfSegmentation } | null = null;
+  /** Explicit caller opt-in captured before ZIP/RUL/source-set rewriting. */
+  private readonly dxfOpenProvenance: DxfOpenProvenance;
+  private dxfProvenanceSetupBlockers: DxfPipelineProvenanceBlockerV1[] = [];
+  private dxfProvenanceRunBlockers: DxfPipelineProvenanceBlockerV1[] = [];
+  /** Exact Phase-B source; only the explicit replay side-stage may return a detached copy. */
+  private dxfProvenanceSource: DxfPieceSpecProvenanceSourceV1 | null = null;
+  /** Exact projected Phase-C contours; only the explicit replay side-stage may detach them. */
+  private dxfProvenanceContours: readonly DxfPieceSpecContourBoundaryV1[] | null = null;
+  /** Private pre-candidate PathId selection; never returned by any worker stage. */
+  private dxfCandidateLineage: DxfCandidateLineageSidecarV1 | null = null;
+  private dxfPipelineProvenance: DxfPipelineProvenanceStageOutputV1 | null = null;
   /** Several DXF files, one per size (owner decision 5): merged into one drawing by the first read
    * (R4: in the cancellable read stage, never at open), kept for the rereads. */
   private isDxfSet = false;
@@ -443,12 +598,11 @@ export class Session {
   /** sha256 per file id, computed once when the bytes are first read (provenance, error report). */
   private sha = new Map<string, string>();
 
-  constructor(
-    id: number,
-    input: { name: string; bytes: ArrayBuffer; generatedFusing?: boolean }[],
-  ) {
+  constructor(id: number, input: SessionOpenFile[]) {
     let files = input;
     this.id = id;
+    this.dxfOpenProvenance = captureDxfOpenProvenance(input);
+    this.dxfProvenanceSetupBlockers = [...this.dxfOpenProvenance.blockers];
     if (!files.length) throw new ImportError('out-of-order', 'no files given');
     // M6: the main thread checked the File sizes already; the worker re-checks what it received.
     const refusal = checkInputSet(files.map((f) => ({ name: f.name, bytes: f.bytes.byteLength })));
@@ -467,6 +621,13 @@ export class Session {
       }
       if (pair) files = [pair.dxf, pair.rul];
     }
+    if (files !== input && this.dxfOpenProvenance.requested)
+      this.dxfProvenanceSetupBlockers.push(
+        dxfPipelineBlockerV1(
+          'unsupported-source-set',
+          'the opted-in file was a container; V1 cannot rebind its sourceFileId to an extracted member.',
+        ),
+      );
     const ruls = files.filter((f) => looksLikeRul(f.bytes));
     if (ruls.length) {
       const rest = files.filter((f) => !ruls.includes(f));
@@ -488,6 +649,13 @@ export class Session {
         );
       rulFile = ruls[0];
       files = rest;
+      if (this.dxfOpenProvenance.requested)
+        this.dxfProvenanceSetupBlockers.push(
+          dxfPipelineBlockerV1(
+            'rul-derived-source',
+            'RUL expansion changes source geometry before the detailed DXF read.',
+          ),
+        );
     }
     const routes = files.map((f) => {
       const sn = sniffFormat(f.bytes, f.name);
@@ -502,6 +670,13 @@ export class Session {
       throw new ImportError(
         'unsupported-format',
         `one run reads one format — got ${[...kinds].join(' + ')}. Import each format on its own.`,
+      );
+    if (this.dxfOpenProvenance.requested && routes[0].route !== 'dxf')
+      this.dxfProvenanceSetupBlockers.push(
+        dxfPipelineBlockerV1(
+          'unsupported-source-set',
+          'the opted-in session source is not a direct DXF file.',
+        ),
       );
     // Several DXF files = one file per size: merged into one drawing by the read stage (R4: the
     // set is guarded, decoded and merged there — cancellable, after its size checks), read as one
@@ -531,6 +706,10 @@ export class Session {
     this.fast = null;
     this.dxf = null;
     this.dxfSet = null;
+    this.dxfProvenanceSource = null;
+    this.dxfProvenanceContours = null;
+    this.dxfCandidateLineage = null;
+    this.dxfPipelineProvenance = null;
   }
 
   /** Running stage S drops every output after S (render-som drops nothing). */
@@ -546,6 +725,7 @@ export class Session {
     if (at < ORDER.indexOf('scale')) {
       this.decision = null;
       this.fast = null;
+      this.dxfCandidateLineage = null;
     }
     if (at < ORDER.indexOf('assemble')) this.sheet = null;
     if (at < ORDER.indexOf('chains')) {
@@ -582,6 +762,8 @@ export class Session {
       this.identityOf = null;
       this.onePieceOf = null;
       this.gradeOf = null;
+      this.dxfPipelineProvenance = null;
+      this.dxfProvenanceContours = null;
     }
   }
 
@@ -609,6 +791,10 @@ export class Session {
           return this.piecesStage(input as StageIO['pieces']['in'], ctx);
         case 'semantics':
           return this.semanticsStage(input as StageIO['semantics']['in'], ctx);
+        case 'dxf-provenance':
+          return this.dxfProvenanceStage(input as StageIO['dxf-provenance']['in']);
+        case 'dxf-phase-d-replay':
+          return this.dxfPhaseDReplayStage(input as StageIO['dxf-phase-d-replay']['in']);
         case 'render-som':
           return this.renderSomStage(input as StageIO['render-som']['in']);
         case 'render-pages':
@@ -630,9 +816,23 @@ export class Session {
     const docs: SourceDoc[] = [];
     this.calibrations = [];
     this.dxf = null;
+    this.dxfProvenanceSource = null;
+    this.dxfProvenanceContours = null;
+    this.dxfCandidateLineage = null;
+    this.dxfPipelineProvenance = null;
+    this.dxfProvenanceRunBlockers = [...this.dxfProvenanceSetupBlockers];
     // C4: one work budget for all files of this read (adapters/budget.ts)
     const runOpts: ExtractOpts = { ...opts, budget: new WorkBudget() };
-    if (this.isDxfSet) return [await this.readDxfSet(ctx, runOpts)];
+    if (this.isDxfSet) {
+      if (this.dxfOpenProvenance.requested)
+        this.dxfProvenanceRunBlockers.push(
+          dxfPipelineBlockerV1(
+            'unsupported-source-set',
+            'a per-size DXF set is merged before reading; V1 cannot rebind exact file identity.',
+          ),
+        );
+      return [await this.readDxfSet(ctx, runOpts)];
+    }
     const n = this.files.length;
     for (let i = 0; i < n; i++) {
       ctx.checkCancel();
@@ -683,13 +883,48 @@ export class Session {
                   skipped: `${this.rul.name} not applied: base size only`,
                 }
               : await this.gradeByRul(f);
-          const read = await readDxf(
+          const dxfFile =
             graded && !graded.skipped
               ? { ...f, bytes: graded.bytes, generatedFusing: info.generatedFusing }
-              : { ...f, generatedFusing: info.generatedFusing },
-            o,
-            p,
-          );
+              : { ...f, generatedFusing: info.generatedFusing };
+          if (info.generatedFusing && this.dxfOpenProvenance.requested)
+            this.dxfProvenanceRunBlockers.push(
+              dxfPipelineBlockerV1(
+                'synthetic-source',
+                'generated fusing geometry is synthetic and cannot carry original DXF identity.',
+              ),
+            );
+          let read: DxfRead | null = null;
+          if (
+            !graded &&
+            this.dxfOpenProvenance.requested &&
+            this.dxfOpenProvenance.fileIndex === i &&
+            this.dxfOpenProvenance.sourceFileId !== null &&
+            this.dxfProvenanceRunBlockers.length === 0
+          ) {
+            const detailed = await readDxfWithPathProvenanceV1(
+              dxfFile,
+              o,
+              { sourceFileId: this.dxfOpenProvenance.sourceFileId },
+              p,
+            );
+            if (detailed.ok) {
+              read = detailed.value.read;
+              const source = createDxfPieceSpecProvenanceSourceV1(detailed.value);
+              if (source.ok) this.dxfProvenanceSource = source.value;
+              else
+                this.dxfProvenanceRunBlockers.push(...phaseCBlockersToPipelineV1(source.blockers));
+            } else
+              this.dxfProvenanceRunBlockers.push(
+                ...detailed.blockers.map((blocker) =>
+                  dxfPipelineBlockerV1(
+                    'detailed-read-blocked',
+                    `${blocker.code}: ${blocker.detail}`,
+                  ),
+                ),
+              );
+          }
+          read ??= await readDxf(dxfFile, o, p);
           const seg = segmentDxf(read);
           this.rulSkipped = !!graded?.skipped;
           if (graded?.skipped) read.doc.warnings.unshift(graded.skipped);
@@ -976,13 +1211,24 @@ export class Session {
     if (this.dxf) {
       // The fast path is built in the confirmed units; the docs are only re-scaled when needed.
       const { read, seg } = this.dxf;
+      const appliedDxfFactor = Math.abs(d.factor - 1) < 1e-12 ? 1 : d.factor;
       const scaled =
-        Math.abs(d.factor - 1) < 1e-12
+        appliedDxfFactor === 1
           ? { read, seg }
           : (() => {
               const r2: DxfRead = { doc: applyScale(read.doc, d), meta: read.meta };
               return { read: r2, seg: segmentDxf(r2) };
             })();
+      this.dxfCandidateLineage = null;
+      if (this.dxfProvenanceSource && this.dxfProvenanceRunBlockers.length === 0) {
+        const lineage = createDxfCandidateLineageSidecarV1(
+          scaled.seg,
+          this.dxfProvenanceSource,
+          appliedDxfFactor,
+        );
+        if (lineage.ok) this.dxfCandidateLineage = lineage.value;
+        else this.dxfProvenanceRunBlockers.push(...lineage.blockers);
+      }
       this.fast = dxfFastPath(scaled.read, scaled.seg, !!this.rul && !this.rulSkipped);
       if (this.dxfSet) this.fast = attributeSizes(this.fast, this.setSizes);
       ctx.progress(1, 1);
@@ -1808,10 +2054,10 @@ export class Session {
     };
   }
 
-  private semanticsStage(
+  private async semanticsStage(
     input: StageIO['semantics']['in'],
     ctx: StageCtx,
-  ): StageIO['semantics']['out'] {
+  ): Promise<StageIO['semantics']['out']> {
     const sheet = this.sheet;
     const set = this.wallSet ?? this.chains;
     if (!sheet || !set || !this.families || !this.run)
@@ -1915,7 +2161,273 @@ export class Session {
     this.identityOf = detail.identityOf;
     this.onePieceOf = detail.onePieceOf;
     this.gradeOf = detail.gradeOf;
+    this.dxfPipelineProvenance = await this.buildDxfPipelineProvenance(detail, output);
     return output;
+  }
+
+  private async buildDxfPipelineProvenance(
+    detail: SemanticsDetail,
+    output: SemanticsOutput,
+  ): Promise<DxfPipelineProvenanceStageOutputV1 | null> {
+    // Every semantics pass must either publish a freshly proven contour set or leave none behind.
+    // In particular, a blocked rerun must never make the replay side stage observe contours from
+    // an earlier successful pass in the same worker session.
+    this.dxfProvenanceContours = null;
+    if (!this.dxfOpenProvenance.requested) return null;
+    if (this.dxfProvenanceRunBlockers.length)
+      return blockedDxfPipelineProvenanceV1(this.dxfProvenanceRunBlockers);
+    const lineage = this.dxfCandidateLineage;
+    if (!lineage)
+      return blockedDxfPipelineProvenanceV1([
+        dxfPipelineBlockerV1(
+          'candidate-lineage-missing',
+          'scale did not publish an exact DXF candidate-lineage sidecar.',
+        ),
+      ]);
+
+    const blockers: DxfPipelineProvenanceBlockerV1[] = [];
+    const boundaries: DxfPieceSpecContourBoundaryV1[] = [];
+    const byCandidate = new Map<string, DxfCandidateLineageSidecarV1['entries'][number]>(
+      lineage.entries.map((entry) => [`${entry.seed}:${entry.rank}`, entry] as const),
+    );
+    const usedCandidates = new Set<string>();
+    let traceCount = 0;
+    let finalSizeCount = 0;
+
+    for (const piece of output.pieces) {
+      for (const size of piece.sizes) {
+        finalSizeCount += 1;
+        const trace = detail.dxfProvenanceOf(piece.identity, size.rank);
+        if (!trace) {
+          blockers.push(
+            dxfPipelineBlockerV1(
+              'candidate-lineage-missing',
+              'a final PieceSpec size has no exact DXF semantics trace.',
+              piece.identity,
+              size.sizeToken,
+            ),
+          );
+          continue;
+        }
+        traceCount += 1;
+        const candidateKey = `${trace.seed}:${trace.rank}`;
+        const candidate = byCandidate.get(candidateKey);
+        if (!candidate) {
+          blockers.push(
+            dxfPipelineBlockerV1(
+              'candidate-lineage-missing',
+              `semantics trace ${candidateKey} has no pre-flatten candidate lineage.`,
+              piece.identity,
+              size.sizeToken,
+            ),
+          );
+          continue;
+        }
+        if (usedCandidates.has(candidateKey)) {
+          blockers.push(
+            dxfPipelineBlockerV1(
+              'split-lineage-not-preserved',
+              `candidate lineage ${candidateKey} feeds more than one final contour.`,
+              piece.identity,
+              size.sizeToken,
+            ),
+          );
+          continue;
+        }
+        usedCandidates.add(candidateKey);
+        if (trace.geometry !== candidate.sourceGeometry) {
+          blockers.push(
+            dxfPipelineBlockerV1(
+              'ambiguous-final-locator',
+              `candidate ${candidateKey} selected ${candidate.sourceGeometry}, but semantics declared ${trace.geometry}.`,
+              piece.identity,
+              size.sizeToken,
+            ),
+          );
+          continue;
+        }
+        if (trace.mutations.includes('unknown')) {
+          blockers.push(
+            dxfPipelineBlockerV1(
+              'unclassified-mutation',
+              `candidate ${candidateKey} changed in an unclassified semantics branch.`,
+              piece.identity,
+              size.sizeToken,
+            ),
+          );
+          continue;
+        }
+        if (trace.mutations.includes('synthetic')) {
+          blockers.push(
+            dxfPipelineBlockerV1(
+              'synthetic-source',
+              `candidate ${candidateKey} is synthetic geometry.`,
+              piece.identity,
+              size.sizeToken,
+            ),
+          );
+          continue;
+        }
+        const contourId = createDxfPipelineContourIdV1(
+          piece.identity,
+          size.sizeToken,
+          trace.geometry,
+        );
+        if (!contourId) {
+          blockers.push(
+            dxfPipelineBlockerV1(
+              'bounds-exceeded',
+              'the deterministic final contour identity exceeds 256 UTF-8 bytes.',
+              piece.identity,
+              size.sizeToken,
+            ),
+          );
+          continue;
+        }
+        const mutations = Object.freeze(
+          trace.mutations.filter(
+            (mutation): mutation is DxfPieceSpecTopologyMutationV1 =>
+              mutation !== 'unknown' && mutation !== 'synthetic',
+          ),
+        );
+        const projected = projectDxfPieceSpecContourBoundaryV1(
+          piece,
+          size.sizeToken,
+          Object.freeze({
+            contourId,
+            role:
+              trace.geometry === 'cut' ? ('cut-boundary' as const) : ('sewing-boundary' as const),
+            geometry: Object.freeze({ kind: trace.geometry }),
+            lineage: Object.freeze({
+              sourcePathIds: candidate.sourcePathIds,
+              uniformPositiveScale: lineage.uniformPositiveScale,
+              cyclicShift: trace.cyclicShift,
+              direction: trace.direction,
+              mutations,
+            }),
+          }),
+        );
+        if (projected.ok) boundaries.push(projected.value);
+        else blockers.push(...phaseCBlockersToPipelineV1(projected.blockers));
+      }
+    }
+    for (const entry of lineage.entries) {
+      const key = `${entry.seed}:${entry.rank}`;
+      if (!usedCandidates.has(key))
+        blockers.push(
+          dxfPipelineBlockerV1(
+            'delete-lineage-not-preserved',
+            `candidate lineage ${key} has no unique final PieceSpec contour.`,
+          ),
+        );
+    }
+    if (traceCount !== finalSizeCount || traceCount !== lineage.entries.length)
+      blockers.push(
+        dxfPipelineBlockerV1(
+          'candidate-lineage-missing',
+          `candidate/semantics/final cardinality mismatch (${lineage.entries.length}/${traceCount}/${finalSizeCount}).`,
+        ),
+      );
+    if (blockers.length) return blockedDxfPipelineProvenanceV1(blockers);
+    const carried = bridgeDxfPipelineProvenanceV1(lineage.source, Object.freeze(boundaries));
+    if (!carried.pipelineIntegrated || !carried.carrier) return carried;
+    const sourceIndex = this.dxfOpenProvenance.fileIndex;
+    const sourceSha256 = sourceIndex === null ? null : this.sha.get(String(sourceIndex));
+    if (!sourceSha256)
+      return blockedDxfPipelineProvenanceV1([
+        dxfPipelineBlockerV1(
+          'content-binding-unavailable',
+          'the exact direct-DXF byte SHA-256 is unavailable for content binding.',
+        ),
+      ]);
+    const contentBinding = await computeDxfPipelineContentBindingV1(
+      carried.carrier,
+      output.pieces,
+      sourceSha256,
+    );
+    if (!contentBinding.ok) return blockedDxfPipelineProvenanceV1([contentBinding.blocker]);
+    const bound = attachDxfPipelineContentBindingV1(carried, contentBinding.value);
+    if (bound.pipelineIntegrated && bound.carrier && !bound.blockers.length)
+      this.dxfProvenanceContours = Object.freeze([...boundaries]);
+    return bound;
+  }
+
+  private dxfProvenanceStage(
+    input: StageIO['dxf-provenance']['in'],
+  ): StageIO['dxf-provenance']['out'] {
+    const invalid = validateDxfPipelineProvenanceRequestV1(input);
+    if (invalid) return blockedDxfPipelineProvenanceV1([invalid]);
+    if (!this.dxfOpenProvenance.requested)
+      return blockedDxfPipelineProvenanceV1([
+        dxfPipelineBlockerV1(
+          'not-opted-in',
+          'the open request did not carry an explicit caller-owned sourceFileId.',
+        ),
+      ]);
+    if (this.dxfProvenanceSetupBlockers.length)
+      return blockedDxfPipelineProvenanceV1(this.dxfProvenanceSetupBlockers);
+    if (!this.semantics)
+      return blockedDxfPipelineProvenanceV1([
+        dxfPipelineBlockerV1(
+          'semantics-not-ready',
+          'run semantics before reading the DXF provenance side stage.',
+        ),
+      ]);
+    return (
+      this.dxfPipelineProvenance ??
+      blockedDxfPipelineProvenanceV1([
+        dxfPipelineBlockerV1(
+          'candidate-lineage-missing',
+          'the automatic semantics handoff did not publish a provenance result.',
+        ),
+      ])
+    );
+  }
+
+  private async dxfPhaseDReplayStage(
+    input: StageIO['dxf-phase-d-replay']['in'],
+  ): Promise<DxfProductPhaseDReplayStageOutputV1> {
+    const invalid = validateDxfProductPhaseDReplayRequestV1(input);
+    if (invalid) return blockedDxfProductPhaseDReplayV1([invalid]);
+    if (!this.dxfOpenProvenance.requested)
+      return blockedDxfProductPhaseDReplayV1([
+        dxfPipelineBlockerV1(
+          'not-opted-in',
+          'the open request did not carry an explicit caller-owned sourceFileId.',
+        ),
+      ]);
+    if (this.dxfProvenanceSetupBlockers.length)
+      return blockedDxfProductPhaseDReplayV1(this.dxfProvenanceSetupBlockers);
+    if (!this.semantics)
+      return blockedDxfProductPhaseDReplayV1([
+        dxfPipelineBlockerV1(
+          'semantics-not-ready',
+          'run semantics before reading the Phase-D replay side stage.',
+        ),
+      ]);
+    const expected = this.dxfPipelineProvenance;
+    if (!expected)
+      return blockedDxfProductPhaseDReplayV1([
+        dxfPipelineBlockerV1(
+          'candidate-lineage-missing',
+          'the automatic semantics handoff did not publish a provenance result.',
+        ),
+      ]);
+    if (!expected.pipelineIntegrated || !expected.carrier || expected.blockers.length)
+      return blockedDxfProductPhaseDReplayV1(expected.blockers);
+    if (!this.dxfProvenanceSource || !this.dxfProvenanceContours)
+      return blockedDxfProductPhaseDReplayV1([
+        dxfPipelineBlockerV1(
+          'candidate-lineage-missing',
+          'the exact source/contour replay inputs are unavailable.',
+        ),
+      ]);
+    return buildDxfProductPhaseDReplayV1(
+      this.dxfProvenanceSource,
+      this.dxfProvenanceContours,
+      this.semantics.pieces,
+      expected,
+    );
   }
 
   /**
@@ -2231,38 +2743,36 @@ export class Session {
       ctx.checkCancel();
       const scope = sp.target;
       ctx.progress(k++, plan.scopes.length, scope.label);
-      const res = await writeAndGate(
-        {
-          techCardId: input.techCardId,
-          scope,
-          pieces: sp.specs,
-          sizes: input.sizes,
-          source: sourceFor(sp.specs),
-          generator: input.generator,
-          dialect: input.dialect,
-          ...(input.autopilot ? { autopilot: input.autopilot } : {}),
-          ...(this.passportBound ? { passport: passportDigest(this.passportBound) } : {}),
-          ...(input.replay ? { replay: input.replay } : {}),
-        },
-        {
-          rules: cardRules,
-          sizeTokens,
-          wallsOf: rawWalls ? (id, rank) => rawWalls(sp.sourceOf[id] ?? id, rank) : undefined,
-          wallsUsedOf: wallsUsed ? (id, rank) => wallsUsed(sp.sourceOf[id] ?? id, rank) : undefined,
-          derivedOf: derived ? (id, rank) => derived(sp.sourceOf[id] ?? id, rank) : undefined,
-          notchChordsOf: chords ? (id, rank) => chords(sp.sourceOf[id] ?? id, rank) : undefined,
-          continuityOf: continuity
-            ? (id, rank) => continuity(sp.sourceOf[id] ?? id, rank)
-            : undefined,
-          identityOf: identity ? (id, rank) => identity(sp.sourceOf[id] ?? id, rank) : undefined,
-          onePieceOf: onePiece ? (id, rank) => onePiece(sp.sourceOf[id] ?? id, rank) : undefined,
-          gradeOf: grade ? (id, rank) => grade(sp.sourceOf[id] ?? id, rank) : undefined,
-          chrome,
-          openFolds,
-          ...(sheets ? { sheets } : {}),
-          hausdorffP95Mm: raster ? PATIMPORT.hausdorffP95RasterMm : PATIMPORT.hausdorffP95VectorMm,
-        },
-      );
+      const writerJob: WriteJob = {
+        techCardId: input.techCardId,
+        scope,
+        pieces: sp.specs,
+        sizes: input.sizes,
+        source: sourceFor(sp.specs),
+        generator: input.generator,
+        dialect: input.dialect,
+        ...(input.autopilot ? { autopilot: input.autopilot } : {}),
+        ...(this.passportBound ? { passport: passportDigest(this.passportBound) } : {}),
+        ...(input.replay ? { replay: input.replay } : {}),
+      };
+      const res = await writeAndGate(writerJob, {
+        rules: cardRules,
+        sizeTokens,
+        wallsOf: rawWalls ? (id, rank) => rawWalls(sp.sourceOf[id] ?? id, rank) : undefined,
+        wallsUsedOf: wallsUsed ? (id, rank) => wallsUsed(sp.sourceOf[id] ?? id, rank) : undefined,
+        derivedOf: derived ? (id, rank) => derived(sp.sourceOf[id] ?? id, rank) : undefined,
+        notchChordsOf: chords ? (id, rank) => chords(sp.sourceOf[id] ?? id, rank) : undefined,
+        continuityOf: continuity
+          ? (id, rank) => continuity(sp.sourceOf[id] ?? id, rank)
+          : undefined,
+        identityOf: identity ? (id, rank) => identity(sp.sourceOf[id] ?? id, rank) : undefined,
+        onePieceOf: onePiece ? (id, rank) => onePiece(sp.sourceOf[id] ?? id, rank) : undefined,
+        gradeOf: grade ? (id, rank) => grade(sp.sourceOf[id] ?? id, rank) : undefined,
+        chrome,
+        openFolds,
+        ...(sheets ? { sheets } : {}),
+        hausdorffP95Mm: raster ? PATIMPORT.hausdorffP95RasterMm : PATIMPORT.hausdorffP95VectorMm,
+      });
       const base = (this.files[0]?.name ?? 'pattern').replace(/\.[^.]+$/, '');
       const filename = `${base}-${purposeWord(scope)}.dxf`;
       // GRADEMAP-DESIGN §2: the grade map rides in the written file, built from that file itself.
@@ -2278,6 +2788,11 @@ export class Session {
         dxfText: mapped.text,
         ...(mapped.notes.length ? { gradeMapNotes: mapped.notes } : {}),
         manifest: res.detail.manifest,
+        writerReplay: {
+          schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_CARRIER_V1,
+          job: writerJob,
+          createdAt: res.detail.manifest.createdAt,
+        },
         ...(input.storage === 'rul'
           ? {
               rul: rulPackageOf(
