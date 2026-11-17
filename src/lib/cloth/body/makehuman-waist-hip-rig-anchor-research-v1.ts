@@ -1,4 +1,7 @@
-import type { UniformWaistHipSolverModeResultV1 } from './measurement-open-reference-uniform-waist-hip-solver-v1';
+import {
+  UNIFORM_WAIST_HIP_MAXIMUM_EXTRAPOLATION_COEFFICIENT_V1,
+  type UniformWaistHipSolverModeResultV1,
+} from './measurement-open-reference-uniform-waist-hip-solver-v1';
 import {
   MAKEHUMAN_CORE_RIG_BUNDLE_METADATA_V1,
   MAKEHUMAN_CORE_RIG_POSE_RESEARCH_V1,
@@ -283,9 +286,13 @@ export function deriveMakeHumanUniformWaistHipRigAnchorsMResearchV1(options: {
       if (
         !Number.isFinite(result.coefficient) ||
         result.coefficient < 0 ||
-        result.coefficient > 1
+        // The mesh solve may extrapolate a limited key past the asset (1); anchors follow the
+        // same linear field, so they extrapolate by the same coefficient.
+        result.coefficient > UNIFORM_WAIST_HIP_MAXIMUM_EXTRAPOLATION_COEFFICIENT_V1
       ) {
-        throw new RangeError('Waist/hip rig-anchor coefficient must be within 0..1.');
+        throw new RangeError(
+          `Waist/hip rig-anchor coefficient must be within 0..${UNIFORM_WAIST_HIP_MAXIMUM_EXTRAPOLATION_COEFFICIENT_V1}.`,
+        );
       }
       const id = modeId(result)!;
       const mode = anchorDeltaBundle.modes.find((candidate) => candidate.id === id);

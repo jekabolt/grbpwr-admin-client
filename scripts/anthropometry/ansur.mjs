@@ -257,6 +257,10 @@ async function run(options) {
             gender: GENDER[base],
             fields,
             sourceRevision: `ansur:${subject.subjectid}:${experiment}:${base}`,
+            // --estimates off: typed fields only (the pre-ANSUR-guess engine behaviour).
+            // --widen off: waist/hip stop at the finite morph asset (the pre-widening behaviour).
+            estimateUntypedFields: options.estimates !== 'off',
+            widenSafeRange: options.widen !== 'off',
           });
         } catch (reason) {
           // Anything that escapes the preview's own catch boundaries fails the preview build.

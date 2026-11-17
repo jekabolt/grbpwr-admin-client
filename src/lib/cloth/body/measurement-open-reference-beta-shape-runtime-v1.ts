@@ -47,6 +47,12 @@ import {
 } from './measurement-open-reference-display-v1';
 import type { MeasurementOpenReferenceUniformWaistHipRuntimeResultV1 } from './measurement-open-reference-uniform-waist-hip-runtime-v1';
 import { measureMeshPlaneSectionPerimetersV1 } from './mesh-plane-section-perimeter-v1';
+import {
+  ANSUR_UNTYPED_FIELD_ESTIMATES_V1,
+  ANSUR_UNTYPED_FIELD_ESTIMATE_KEYS_V1,
+  estimateUntypedMeasurementsFromAnsurV1,
+  type AnsurUntypedFieldEstimateKeyV1,
+} from './ansur-untyped-field-estimates-v1';
 
 export const MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_RUNTIME_V1 =
   'measurement-open-reference-beta-shape-runtime/v1' as const;
@@ -139,6 +145,15 @@ export interface MeasurementOpenReferenceBetaShapeRuntimeResultV1 {
    * `positive`); present whenever the torso stage ran, so the guide draws the solved chord.
    */
   readonly shoulderChordVertices?: Readonly<{ negative: number; positive: number }>;
+  /**
+   * Untyped fields shaped from an ANSUR II guess (`estimateUntypedFields`). Never part of
+   * represented/limited, which describe only what the user typed.
+   */
+  readonly estimatedVisualControls?: readonly MeasurementOpenReferenceBetaShapeKeyV1[];
+  /** The guessed values (mm) that were fed for `estimatedVisualControls`. */
+  readonly untypedFieldEstimatesMm?: Readonly<
+    Partial<Record<AnsurUntypedFieldEstimateKeyV1, number>>
+  >;
   readonly sourceRevisionSuffix: string;
   readonly claims: {
     readonly visualReferenceOnly: true;
@@ -312,6 +327,37 @@ type MeasurementOpenReferenceBetaShapeRuntimeOptionsV1 = Parameters<
   typeof createBetaShapeRuntimeOnceV1
 >[0];
 
+// Same rule as the inline status at the end of createBetaShapeRuntimeOnceV1; keep the two in sync.
+function betaShapeStatusV1(
+  measurements: CanonicalBodyMeasurementsMm,
+  representedVisualControls: readonly MeasurementOpenReferenceBetaShapeKeyV1[],
+  diagnostics: readonly string[],
+): MeasurementOpenReferenceBetaShapeRuntimeResultV1['status'] {
+  const requestedCount =
+    6 +
+    (measurements.underBustCircumferenceMm == null ? 0 : 1) +
+    [
+      measurements.chestDepthMm,
+      measurements.waistDepthMm,
+      measurements.hipDepthMm,
+      measurements.highHipCircumferenceMm,
+      measurements.neckCircumferenceMm,
+      measurements.bicepCircumferenceMm,
+      measurements.wristCircumferenceMm,
+      measurements.thighCircumferenceMm,
+      measurements.kneeCircumferenceMm,
+      measurements.calfCircumferenceMm,
+      measurements.ankleCircumferenceMm,
+    ].filter((value) => value != null).length;
+  return representedVisualControls.length === requestedCount
+    ? ('represented' as const)
+    : representedVisualControls.length > 1
+      ? ('partial' as const)
+      : diagnostics.length > 0
+        ? ('error' as const)
+        : ('unrepresented' as const);
+}
+
 function withoutTorsoDepth(
   measurements: CanonicalBodyMeasurementsMm,
 ): CanonicalBodyMeasurementsMm | undefined {
@@ -425,8 +471,219 @@ function chestFallbackResult(options: {
  * response if that solve passes. Depth controls then stay requested but unapplied. If the gate
  * remains unsafe, chest is retried halfway to the measured unshaped-base girth, then at that base
  * girth. A passing halfway response is limited; a base-girth response leaves chest unapplied.
+ *
+ * `estimateUntypedFields` (production callers) first shapes the fields the user left empty from
+ * ANSUR II relations (`ansur-untyped-field-estimates-v1`). A guess never costs a typed field: see
+ * `createBetaShapeRuntimeWithUntypedEstimatesV1`.
  */
 export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(
+  options: MeasurementOpenReferenceBetaShapeRuntimeOptionsV1 & {
+    readonly estimateUntypedFields?: boolean;
+  },
+): Promise<MeasurementOpenReferenceBetaShapeRuntimeResultV1> {
+  const { estimateUntypedFields = false, ...runtimeOptions } = options;
+  return estimateUntypedFields
+    ? createBetaShapeRuntimeWithUntypedEstimatesV1(runtimeOptions)
+    : createBetaShapeRuntimeTypedOnlyV1(runtimeOptions);
+}
+
+/**
+ * Typed fields the guesses could still disturb: they are solved after (or jointly with) a guessed
+ * stage. Height, shoulder, waist, hip and arm length are settled before any guessed stage runs.
+ */
+const UNTYPED_ESTIMATE_SENSITIVE_TYPED_KEYS_V1: ReadonlySet<MeasurementOpenReferenceBetaShapeKeyV1> =
+  new Set([
+    'chestCircumferenceMm',
+    'underBustCircumferenceMm',
+    'highHipCircumferenceMm',
+    'chestDepthMm',
+    'waistDepthMm',
+    'hipDepthMm',
+    'neckCircumferenceMm',
+    'bicepCircumferenceMm',
+    'wristCircumferenceMm',
+    'thighCircumferenceMm',
+    'kneeCircumferenceMm',
+    'calfCircumferenceMm',
+    'ankleCircumferenceMm',
+  ]);
+
+const TORSO_DEPTH_KEYS_V1 = Object.freeze(['chestDepthMm', 'waistDepthMm', 'hipDepthMm'] as const);
+
+function typedBetaShapeKeys(
+  measurements: CanonicalBodyMeasurementsMm,
+): readonly MeasurementOpenReferenceBetaShapeKeyV1[] {
+  return MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_KEYS_V1.filter((key) => measurements[key] != null);
+}
+
+function typedStatusRank(
+  result: MeasurementOpenReferenceBetaShapeRuntimeResultV1,
+  key: MeasurementOpenReferenceBetaShapeKeyV1,
+): number {
+  if (result.representedVisualControls.includes(key)) return 2;
+  return (result.limitedVisualControls ?? []).includes(key) ? 1 : 0;
+}
+
+/**
+ * Solves once with the guesses. When the final gate fails and depth was guessed, solves once more
+ * with the guessed depths dropped (typed depth stays). If no guessed solve passes the gate, or a
+ * typed field the guesses could disturb is not represented, the typed-only runtime runs as well
+ * and wins unless the guessed result keeps every typed field at least as applied
+ * (represented > limited > not applied).
+ */
+async function createBetaShapeRuntimeWithUntypedEstimatesV1(
+  options: MeasurementOpenReferenceBetaShapeRuntimeOptionsV1,
+): Promise<MeasurementOpenReferenceBetaShapeRuntimeResultV1> {
+  const typed = options.measurements;
+  const { estimates, clamped } = estimateUntypedMeasurementsFromAnsurV1({
+    basisKind: options.basis.kind,
+    measurements: typed,
+  });
+  const allEstimated = ANSUR_UNTYPED_FIELD_ESTIMATE_KEYS_V1.filter((key) => estimates[key] != null);
+  if (allEstimated.length === 0) return createBetaShapeRuntimeTypedOnlyV1(options);
+
+  const candidates: (readonly AnsurUntypedFieldEstimateKeyV1[])[] = [allEstimated];
+  const withoutDepth = allEstimated.filter(
+    (key) => !(TORSO_DEPTH_KEYS_V1 as readonly string[]).includes(key),
+  );
+  if (withoutDepth.length > 0 && withoutDepth.length < allEstimated.length) {
+    candidates.push(withoutDepth);
+  }
+  const typedKeys = typedBetaShapeKeys(typed);
+  let guessed: MeasurementOpenReferenceBetaShapeRuntimeResultV1 | undefined;
+  let guessedKeys: readonly AnsurUntypedFieldEstimateKeyV1[] = [];
+  for (const keys of candidates) {
+    const fed: Partial<Record<AnsurUntypedFieldEstimateKeyV1, number>> = {};
+    for (const key of keys) fed[key] = estimates[key];
+    const attempt = await createBetaShapeRuntimeOnceV1({
+      ...options,
+      measurements: Object.freeze({ ...typed, ...fed }),
+    });
+    if (hasFinalGlobalQualityRollback(attempt)) continue;
+    guessed = attempt;
+    guessedKeys = keys;
+    break;
+  }
+  if (guessed && guessed.status !== 'error') {
+    const accept = (result: MeasurementOpenReferenceBetaShapeRuntimeResultV1) =>
+      withUntypedEstimatesV1({
+        result,
+        typed,
+        estimates,
+        fedKeys: guessedKeys,
+        clamped,
+        depthDropped: guessedKeys.length < allEstimated.length,
+      });
+    const guessedResult = guessed;
+    const disturbed = typedKeys.some(
+      (key) =>
+        UNTYPED_ESTIMATE_SENSITIVE_TYPED_KEYS_V1.has(key) &&
+        !guessedResult.representedVisualControls.includes(key),
+    );
+    if (!disturbed) return accept(guessedResult);
+    const typedOnly = await createBetaShapeRuntimeTypedOnlyV1(options);
+    const keepsTypedFields = typedKeys.every(
+      (key) => typedStatusRank(guessedResult, key) >= typedStatusRank(typedOnly, key),
+    );
+    return keepsTypedFields
+      ? accept(guessedResult)
+      : withEstimateDiagnostic(typedOnly, 'ansur-untyped-estimates:dropped-for-typed-field');
+  }
+  return withEstimateDiagnostic(
+    await createBetaShapeRuntimeTypedOnlyV1(options),
+    'ansur-untyped-estimates:dropped-for-quality',
+  );
+}
+
+function withEstimateDiagnostic(
+  result: MeasurementOpenReferenceBetaShapeRuntimeResultV1,
+  diagnostic: string,
+): MeasurementOpenReferenceBetaShapeRuntimeResultV1 {
+  return Object.freeze({
+    ...result,
+    chestShoulderDiagnostics: Object.freeze([...result.chestShoulderDiagnostics, diagnostic]),
+  });
+}
+
+/**
+ * Strips the guessed keys out of the typed status lists (they were never requested), prefixes their
+ * stage diagnostics so no consumer reads them as a typed field's, and recomputes the status from
+ * the typed fields only.
+ */
+function withUntypedEstimatesV1(options: {
+  readonly result: MeasurementOpenReferenceBetaShapeRuntimeResultV1;
+  readonly typed: CanonicalBodyMeasurementsMm;
+  readonly estimates: Readonly<Partial<Record<AnsurUntypedFieldEstimateKeyV1, number>>>;
+  readonly fedKeys: readonly AnsurUntypedFieldEstimateKeyV1[];
+  readonly clamped: readonly AnsurUntypedFieldEstimateKeyV1[];
+  readonly depthDropped: boolean;
+}): MeasurementOpenReferenceBetaShapeRuntimeResultV1 {
+  const { result } = options;
+  const fed = new Set<string>(options.fedKeys);
+  const resultLimited = result.limitedVisualControls ?? [];
+  const representedVisualControls = stableKeys(
+    result.representedVisualControls.filter((key) => !fed.has(key)),
+  );
+  const limitedVisualControls = stableKeys(resultLimited.filter((key) => !fed.has(key)));
+  const estimatedVisualControls = stableKeys(
+    options.fedKeys.filter(
+      (key) => result.representedVisualControls.includes(key) || resultLimited.includes(key),
+    ),
+  );
+  const untypedFieldEstimatesMm: Partial<Record<AnsurUntypedFieldEstimateKeyV1, number>> = {};
+  for (const key of options.fedKeys) untypedFieldEstimatesMm[key] = options.estimates[key];
+  const diagnostics = [
+    ...result.chestShoulderDiagnostics.map((code) =>
+      fed.has(code.split(':', 1)[0]) ? `ansur-estimate:${code}` : code,
+    ),
+    `ansur-untyped-estimates:applied:${estimatedVisualControls.join(',')}`,
+    ...(options.clamped.length > 0
+      ? [`ansur-untyped-estimates:clamped-to-ansur-range:${options.clamped.join(',')}`]
+      : []),
+    ...(options.depthDropped ? ['ansur-untyped-estimates:depth-dropped-for-quality'] : []),
+  ];
+  const typedLimbKeys = MEASUREMENT_OPEN_REFERENCE_BETA_SHAPE_KEYS_V1.filter(
+    (key) =>
+      (
+        [
+          'bicepCircumferenceMm',
+          'wristCircumferenceMm',
+          'thighCircumferenceMm',
+          'calfCircumferenceMm',
+          'ankleCircumferenceMm',
+        ] as const as readonly string[]
+      ).includes(key) && options.typed[key] != null,
+  );
+  const typedLimbsRepresented = typedLimbKeys.filter((key) =>
+    representedVisualControls.includes(key),
+  ).length;
+  const typedLimbsApplied =
+    typedLimbsRepresented +
+    typedLimbKeys.filter((key) => limitedVisualControls.includes(key)).length;
+  const limbStatus =
+    typedLimbKeys.length === 0
+      ? ('unrepresented' as const)
+      : typedLimbsRepresented === typedLimbKeys.length
+        ? ('represented' as const)
+        : typedLimbsApplied > 0
+          ? ('partial' as const)
+          : result.limbStatus === 'error'
+            ? ('error' as const)
+            : ('unrepresented' as const);
+  return Object.freeze({
+    ...result,
+    status: betaShapeStatusV1(options.typed, representedVisualControls, diagnostics),
+    representedVisualControls,
+    limitedVisualControls,
+    estimatedVisualControls,
+    untypedFieldEstimatesMm: Object.freeze(untypedFieldEstimatesMm),
+    limbStatus,
+    chestShoulderDiagnostics: Object.freeze(diagnostics),
+    sourceRevisionSuffix: `${suffix(representedVisualControls, limitedVisualControls)};estimated=${ANSUR_UNTYPED_FIELD_ESTIMATES_V1}:${estimatedVisualControls.join(',')}`,
+  });
+}
+
+async function createBetaShapeRuntimeTypedOnlyV1(
   options: MeasurementOpenReferenceBetaShapeRuntimeOptionsV1,
 ): Promise<MeasurementOpenReferenceBetaShapeRuntimeResultV1> {
   const result = await createBetaShapeRuntimeOnceV1(options);

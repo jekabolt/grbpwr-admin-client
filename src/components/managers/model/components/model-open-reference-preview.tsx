@@ -885,6 +885,7 @@ interface ModelOpenReferenceProxyRuntimeModuleV1 {
     readonly basis: MakeHumanOpenReferenceBasisV1;
     readonly measurements: CanonicalBodyMeasurementsMm;
     readonly openReference: MeasurementOpenReferenceDisplayArtifactV1;
+    readonly widenSafeRange?: boolean;
   }) => Promise<MeasurementOpenReferenceUniformWaistHipRuntimeResultV1>;
 }
 
@@ -1468,6 +1469,8 @@ export async function buildModelOpenReferenceProxyRuntimeV1(options: {
       basis: options.basis,
       measurements: options.measurements,
       openReference: options.openReference,
+      // Waist/hip past the finite asset: extrapolated only when the self-intersection gate passes.
+      widenSafeRange: true,
     });
   } catch (reason: unknown) {
     return failedProxyRuntime(options.openReference, reason);
@@ -1485,7 +1488,11 @@ export async function buildModelOpenReferenceBetaShapeRuntimeV1(options: {
     'lib/cloth/body/measurement-open-reference-beta-shape-runtime-v1'
   );
   try {
-    return await runtimeModule.createMeasurementOpenReferenceBetaShapeRuntimeV1(options);
+    // Untyped fields get ANSUR II guesses (ansur-untyped-field-estimates-v1); typed fields win.
+    return await runtimeModule.createMeasurementOpenReferenceBetaShapeRuntimeV1({
+      ...options,
+      estimateUntypedFields: true,
+    });
   } catch (reason: unknown) {
     if (reason instanceof runtimeModule.MeasurementOpenReferenceBetaShapeSafetyErrorV1) {
       throw reason;
