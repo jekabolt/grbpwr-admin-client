@@ -1,5 +1,6 @@
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
+import type { BoxMm, PtMm } from 'lib/pattern-import/types';
 import { useEffect, useMemo, useState } from 'react';
 
 import { SHEET_INK, SheetViewport, ptsAttr, vy } from '../sheet-viewport';
@@ -72,6 +73,87 @@ function layoutFor(
   );
 }
 
+const FALLBACK_TABLE_BOUNDS = Object.freeze({
+  minX: 0,
+  minY: 0,
+  maxX: 100,
+  maxY: 100,
+}) satisfies BoxMm;
+
+function boundsFor(layout: PatternImportDxfPhaseECadTablePieceLayoutSessionV1): BoxMm {
+  return fitPatternImportDxfPhaseECadTablePieceBoundsV1(layout, 20) ?? FALLBACK_TABLE_BOUNDS;
+}
+
+export type PatternImportDxfPhaseECadTableZeroCanvasSessionV1 = Readonly<{
+  layout: PatternImportDxfPhaseECadTablePieceLayoutSessionV1;
+  /**
+   * Caller-owned fitted view. It intentionally does not follow session-only piece offsets until
+   * the operator explicitly asks to fit the table again.
+   */
+  viewportBounds: BoxMm;
+}>;
+
+export function createPatternImportDxfPhaseECadTableZeroCanvasSessionV1(
+  projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
+): PatternImportDxfPhaseECadTableZeroCanvasSessionV1 {
+  const layout = layoutFor(projection);
+  return Object.freeze({ layout, viewportBounds: boundsFor(layout) });
+}
+
+export function movePatternImportDxfPhaseECadTableZeroCanvasSessionV1(
+  session: PatternImportDxfPhaseECadTableZeroCanvasSessionV1,
+  pieceKey: string,
+  deltaMm: PtMm,
+): PatternImportDxfPhaseECadTableZeroCanvasSessionV1 {
+  const selected = session.layout.selectedPieceKeys.includes(pieceKey)
+    ? session.layout
+    : selectPatternImportDxfPhaseECadTablePiecesV1(session.layout, [pieceKey], 'replace');
+  return Object.freeze({
+    ...session,
+    layout: translateSelectedPatternImportDxfPhaseECadTablePiecesV1(selected, deltaMm),
+  });
+}
+
+export function fitPatternImportDxfPhaseECadTableZeroCanvasSessionV1(
+  session: PatternImportDxfPhaseECadTableZeroCanvasSessionV1,
+): PatternImportDxfPhaseECadTableZeroCanvasSessionV1 {
+  return Object.freeze({ ...session, viewportBounds: boundsFor(session.layout) });
+}
+
+export function activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(
+  session: PatternImportDxfPhaseECadTableZeroCanvasSessionV1,
+  pieceKey: string,
+  toggle: boolean,
+): PatternImportDxfPhaseECadTableZeroCanvasSessionV1 {
+  return Object.freeze({
+    ...session,
+    layout: selectPatternImportDxfPhaseECadTablePiecesV1(
+      session.layout,
+      [pieceKey],
+      toggle ? 'toggle' : 'replace',
+    ),
+  });
+}
+
+export function patternImportDxfPhaseECadTableZeroKeyboardMoveDeltaV1(
+  key: string,
+  largeStep: boolean,
+): PtMm | null {
+  const step = largeStep ? 10 : 1;
+  switch (key) {
+    case 'ArrowLeft':
+      return Object.freeze({ x: -step, y: 0 });
+    case 'ArrowRight':
+      return Object.freeze({ x: step, y: 0 });
+    case 'ArrowUp':
+      return Object.freeze({ x: 0, y: step });
+    case 'ArrowDown':
+      return Object.freeze({ x: 0, y: -step });
+    default:
+      return null;
+  }
+}
+
 function pieceLayout(
   layout: PatternImportDxfPhaseECadTablePieceLayoutSessionV1,
   segment: PatternImportDxfPhaseECadTableConnectEdgeSegmentV1,
@@ -98,10 +180,14 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
     () => ({ catalog, projection, authoringAuthority, authoringAuthorityRefresh }) as const,
     [authoringAuthority, authoringAuthorityRefresh, catalog, projection],
   );
-  const [layout, setLayout] = useState(() => layoutFor(projection));
+  const [tableSession, setTableSession] = useState(() =>
+    createPatternImportDxfPhaseECadTableZeroCanvasSessionV1(projection),
+  );
+  const { layout, viewportBounds } = tableSession;
   const [activeTool, setActiveTool] = useState<'select' | 'pan' | 'move' | 'connect'>('select');
   const [fitRequest, setFitRequest] = useState(0);
   const [hoveredPieceKey, setHoveredPieceKey] = useState<string | null>(null);
+  const [focusedPieceKey, setFocusedPieceKey] = useState<string | null>(null);
   const segments = useMemo(
     () =>
       derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(projection).filter(
@@ -115,17 +201,12 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
   const sourceIdentity = `${catalog.canonicalSha256}|${catalog.sizeSelectionCanonicalSha256}|${projection.expectedCatalogCanonicalSha256}|${projection.sizeSelectionCanonicalSha256}|${projection.sourceFileId}|${projection.sizeToken}`;
   useEffect(() => {
     setController(createPatternImportDxfPhaseECadTableZeroConnectControllerStateV1());
-    setLayout(layoutFor(projection));
+    setTableSession(createPatternImportDxfPhaseECadTableZeroCanvasSessionV1(projection));
     setActiveTool('select');
     setHoveredPieceKey(null);
+    setFocusedPieceKey(null);
+    setFitRequest((current) => current + 1);
   }, [projection, sourceIdentity]);
-
-  const bounds = fitPatternImportDxfPhaseECadTablePieceBoundsV1(layout, 20) ?? {
-    minX: 0,
-    minY: 0,
-    maxX: 100,
-    maxY: 100,
-  };
   const phase = patternImportDxfPhaseECadTableZeroConnectControllerPhaseV1(controller);
   const status = patternImportDxfPhaseECadTableZeroConnectControllerStatusV1(controller);
   const connectDisabled = disabled || zeroConnectAuthoringHandoff?.status === 'unavailable';
@@ -233,32 +314,40 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
             icon='fit'
             label='Fit all pieces'
             dataAttributes={{ 'data-cad-zero-connect-fit-tool': '' }}
-            onClick={() => setFitRequest((current) => current + 1)}
+            onClick={() => {
+              setTableSession((current) =>
+                fitPatternImportDxfPhaseECadTableZeroCanvasSessionV1(current),
+              );
+              setFitRequest((current) => current + 1);
+            }}
           />
           <PatternImportDxfPhaseECadWorkbenchToolButtonV1
             icon='reset-layout'
             label='Reset piece layout'
             dataAttributes={{ 'data-cad-zero-connect-reset-layout': '' }}
             onClick={() => {
-              setLayout(layoutFor(projection));
+              setTableSession(createPatternImportDxfPhaseECadTableZeroCanvasSessionV1(projection));
+              setHoveredPieceKey(null);
+              setFocusedPieceKey(null);
               setFitRequest((current) => current + 1);
             }}
           />
         </div>
         <SheetViewport
-          bbox={bounds}
+          bbox={viewportBounds}
           tool={activeTool === 'select' ? 'lasso' : activeTool === 'move' ? 'move' : 'pan'}
           fitRequest={fitRequest}
           className='min-h-0'
           onPick={(viewKey, modifiers) => {
             if (activeTool === 'select' || activeTool === 'move') {
-              setLayout((current) =>
-                selectPatternImportDxfPhaseECadTablePiecesV1(
-                  current,
+              setTableSession((current) => ({
+                ...current,
+                layout: selectPatternImportDxfPhaseECadTablePiecesV1(
+                  current.layout,
                   viewKey ? [viewKey] : [],
                   modifiers.shiftKey ? 'toggle' : 'replace',
                 ),
-              );
+              }));
               return;
             }
             if (!controller.session || controller.session.status === 'ready') return;
@@ -266,21 +355,19 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
             if (segment) selectEdge(segment, modifiers.shiftKey ? 'reverse' : 'forward');
           }}
           onLasso={(points, modifiers) =>
-            setLayout((current) =>
-              selectPatternImportDxfPhaseECadTablePiecesInLassoV1(
-                current,
+            setTableSession((current) => ({
+              ...current,
+              layout: selectPatternImportDxfPhaseECadTablePiecesInLassoV1(
+                current.layout,
                 points,
                 modifiers.shiftKey ? 'toggle' : 'replace',
               ),
-            )
+            }))
           }
           onMove={(pieceKey, deltaMm) => {
-            setLayout((current) => {
-              const selected = current.selectedPieceKeys.includes(pieceKey)
-                ? current
-                : selectPatternImportDxfPhaseECadTablePiecesV1(current, [pieceKey], 'replace');
-              return translateSelectedPatternImportDxfPhaseECadTablePiecesV1(selected, deltaMm);
-            });
+            setTableSession((current) =>
+              movePatternImportDxfPhaseECadTableZeroCanvasSessionV1(current, pieceKey, deltaMm),
+            );
           }}
         >
           {({ box, unit }) => (
@@ -295,6 +382,8 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
                 if (!pieceLayout) return null;
                 const selected = layout.selectedPieceKeys.includes(pieceLayout.identity.key);
                 const hovered = hoveredPieceKey === pieceLayout.identity.key;
+                const focused = focusedPieceKey === pieceLayout.identity.key;
+                const keyboardEnabled = activeTool === 'select' || activeTool === 'move';
                 return (
                   <g
                     key={pieceLayout.identity.key}
@@ -303,7 +392,44 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
                     data-cad-zero-connect-piece-line={piece.pieceLineKey}
                     data-cad-zero-connect-piece-selected={selected || undefined}
                     data-cad-zero-connect-piece-hovered={hovered || undefined}
+                    data-cad-zero-connect-piece-focused={focused || undefined}
                     transform={`translate(${pieceLayout.offsetMm.x} ${vy(pieceLayout.offsetMm.y)})`}
+                    role='button'
+                    tabIndex={keyboardEnabled ? 0 : -1}
+                    aria-disabled={!keyboardEnabled}
+                    aria-pressed={selected}
+                    aria-label={`${piece.pieceLineKey} pattern piece`}
+                    aria-keyshortcuts='Enter Space ArrowUp ArrowDown ArrowLeft ArrowRight'
+                    onFocus={() => setFocusedPieceKey(pieceLayout.identity.key)}
+                    onBlur={() => setFocusedPieceKey(null)}
+                    onKeyDown={(event) => {
+                      if (!keyboardEnabled) return;
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setTableSession((current) =>
+                          activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(
+                            current,
+                            pieceLayout.identity.key,
+                            event.shiftKey,
+                          ),
+                        );
+                        return;
+                      }
+                      if (activeTool !== 'move') return;
+                      const deltaMm = patternImportDxfPhaseECadTableZeroKeyboardMoveDeltaV1(
+                        event.key,
+                        event.shiftKey,
+                      );
+                      if (!deltaMm) return;
+                      event.preventDefault();
+                      setTableSession((current) =>
+                        movePatternImportDxfPhaseECadTableZeroCanvasSessionV1(
+                          current,
+                          pieceLayout.identity.key,
+                          deltaMm,
+                        ),
+                      );
+                    }}
                   >
                     <rect
                       x={pieceLayout.sourceBounds.minX}
@@ -336,13 +462,15 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
                               : 'none'
                           }
                           stroke={
-                            contour.role === 'hole'
-                              ? SHEET_INK.mut
-                              : selected || hovered
-                                ? SHEET_INK.ink
-                                : SHEET_INK.mut
+                            focused
+                              ? SHEET_INK.blue
+                              : contour.role === 'hole'
+                                ? SHEET_INK.mut
+                                : selected || hovered
+                                  ? SHEET_INK.ink
+                                  : SHEET_INK.mut
                           }
-                          strokeWidth={selected ? 1.6 : hovered ? 1.4 : 1.2}
+                          strokeWidth={focused || selected ? 1.6 : hovered ? 1.4 : 1.2}
                           vectorEffect='non-scaling-stroke'
                           pointerEvents='none'
                         />
