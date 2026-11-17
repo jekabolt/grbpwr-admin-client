@@ -420,25 +420,37 @@ export const prepareSavedFullAssemblyGenericFirstBootstrapV1 = Object.freeze(
       if (signal) add.call(signal, 'abort', cancel, { once: true });
       let replay: DxfProductSavedNativeReprocessResultV1;
       try {
-        if (sourceSurface === 'native-drawn-sewing') {
-          const nativeOwner = createDxfProductSavedForeignNativeReprocessOwnerV1(
+        const canonicalOwner = createDxfProductSavedNativeReprocessOwnerV1(
+          createPatternImportDxfPhaseESavedDxfReprocessHostV1({
+            ...hostOptions,
+            ...(sourceSurface === 'native-drawn-sewing' ? { nativeSewingReplay: true } : {}),
+          }),
+        );
+        owner = canonicalOwner;
+        replay = await canonicalOwner.run({
+          schemaVersion: DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
+          row,
+        });
+        check(signal);
+        // Manifest-bearing wizard output is an exact saved product. Only the owner's typed
+        // manifest-absent classification may open the foreign native lane, never a parse/hash error.
+        if (
+          sourceSurface === 'native-drawn-sewing' &&
+          !replay.ok &&
+          replay.blockers[0]?.code === 'foreign-saved-dxf-detected'
+        ) {
+          canonicalOwner.dispose();
+          owner = null;
+          check(signal);
+          const foreignOwner = createDxfProductSavedForeignNativeReprocessOwnerV1(
             createPatternImportDxfPhaseEForeignSavedDxfReprocessHostV1({
               ...hostOptions,
               nativeSewingReplay: true,
             }),
           );
-          owner = nativeOwner;
-          replay = await nativeOwner.run({
+          owner = foreignOwner;
+          replay = await foreignOwner.run({
             schemaVersion: DXF_PRODUCT_SAVED_FOREIGN_REPROCESS_REQUEST_V1,
-            row,
-          });
-        } else {
-          const canonicalOwner = createDxfProductSavedNativeReprocessOwnerV1(
-            createPatternImportDxfPhaseESavedDxfReprocessHostV1(hostOptions),
-          );
-          owner = canonicalOwner;
-          replay = await canonicalOwner.run({
-            schemaVersion: DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
             row,
           });
         }
