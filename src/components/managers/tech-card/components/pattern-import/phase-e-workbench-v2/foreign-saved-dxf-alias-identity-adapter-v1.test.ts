@@ -95,6 +95,41 @@ describe('foreign saved DXF exact alias identity adapter', () => {
     });
   });
 
+  it('preserves the explicit saved quantity of an identical-handed piece without deriving a twin', () => {
+    const input = request(['PCK_L', 'PCK_R', 'PCK_L_1']);
+    const result = buildPatternImportDxfPhaseEForeignSavedAliasIdentityOverridesV1({
+      ...input,
+      pieces: input.pieces.map((piece, index) => ({
+        ...piece,
+        cutSymmetry:
+          index < 2
+            ? 'TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL'
+            : 'TECH_CARD_PIECE_CUT_SYMMETRY_MIRRORED',
+        piecesPerGarment: index + 1,
+      })),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.pieceOverrides[0]).toMatchObject({
+      code: 'PCK_L',
+      pairHand: null,
+      piecesPerGarment: 1,
+    });
+    expect(result.pieceOverrides[1]).toMatchObject({
+      code: 'PCK_R',
+      pairHand: null,
+      piecesPerGarment: 2,
+    });
+    expect(result.pieceOverrides[2].pairHand).toBeUndefined();
+    expect(result.pieceOverrides[2].piecesPerGarment).toBeUndefined();
+    expect(result.bindings.map(({ pieceLineKey }) => pieceLineKey)).toEqual([
+      'piece:0',
+      'piece:1',
+      'piece:2',
+    ]);
+  });
+
   it('keeps a single-rank source family eligible for true ungraded semantics', () => {
     const input = request(['BLT']);
     const result = buildPatternImportDxfPhaseEForeignSavedAliasIdentityOverridesV1({
