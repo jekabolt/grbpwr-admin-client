@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button, Chip, Text } from 'ui';
+import { Button, CheckboxCommon, Chip, Text } from 'ui';
 
 import type { ModelOpenReferenceFullBodyPoseControlStatusV4 } from './model-open-reference-full-body-pose-control-v4';
 import type { ModelOpenReferenceDirectPosePersistenceV1 } from './model-open-reference-preview';
@@ -29,6 +29,11 @@ export interface ModelOpenReferenceDirectPoseControlPropsV9 {
     readonly onReset: () => ModelOpenReferenceDirectPoseV9;
     readonly persistence?: ModelOpenReferenceDirectPosePersistenceV1;
   }>;
+  /**
+   * Desktop model form: an `edit pose` checkbox leads the bar and the tools follow it only while it
+   * is on. Pose status and messages are in the block header, so none of them print here.
+   */
+  readonly editPoseToggle?: Readonly<{ on: boolean; onChange: (on: boolean) => void }>;
 }
 
 function sameTemporaryPose(
@@ -154,6 +159,125 @@ export function ModelOpenReferenceDirectPoseControlV9(
     else applyImmediately(MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9);
   };
 
+  const toggle = props.editPoseToggle;
+  const tools = (
+    <>
+      <Chip
+        selected={symmetry}
+        pressed={symmetry}
+        className={toggle ? 'min-h-8 px-2' : 'min-h-11 px-2'}
+        disabled={building}
+        onClick={() => applyImmediately(modelOpenReferenceDirectToggleSymmetryV9(draftPose))}
+      >
+        symmetry
+      </Chip>
+      <Button
+        type='button'
+        variant='underline'
+        size='xs'
+        className={toggle ? 'min-h-8 px-2' : 'min-h-11 px-2'}
+        disabled={
+          (props.sessionPose ? !props.sessionPose.canUndo : temporaryUndoDepth === 0) || building
+        }
+        onClick={undo}
+      >
+        undo
+      </Button>
+      <Button
+        type='button'
+        variant='underline'
+        size='xs'
+        className={toggle ? 'min-h-8 px-2' : 'min-h-11 px-2'}
+        disabled={neutral || building}
+        onClick={reset}
+      >
+        reset
+      </Button>
+      {persistence?.conflict ? (
+        <>
+          <Button
+            type='button'
+            variant='underline'
+            size='xs'
+            className={toggle ? 'min-h-8 px-2' : 'min-h-11 px-2'}
+            disabled={building}
+            onClick={() => onApply(persistence.onReloadTheirs())}
+          >
+            reload theirs
+          </Button>
+          {persistence.showSave ? (
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              className={toggle ? 'min-h-8 px-2' : 'min-h-11 px-2'}
+              disabled={building}
+              onClick={() => onApply(persistence.onKeepMine())}
+            >
+              keep mine
+            </Button>
+          ) : null}
+        </>
+      ) : persistence?.showSave ? (
+        <Button
+          type='button'
+          variant='underline'
+          size='xs'
+          className={toggle ? 'min-h-8 px-2' : 'min-h-11 px-2'}
+          disabled={!persistence.canSave || building}
+          loading={persistence.saving}
+          onClick={persistence.onSave}
+        >
+          save pose
+        </Button>
+      ) : null}
+    </>
+  );
+
+  if (toggle) {
+    return (
+      <fieldset
+        className='flex min-h-8 flex-wrap items-center gap-2'
+        data-testid='model-open-reference-direct-pose-control-v9'
+        data-edit-pose={toggle.on ? 'on' : 'off'}
+      >
+        <legend className='sr-only'>Direct mannequin pose editor</legend>
+        <label className='flex cursor-pointer select-none items-center gap-2'>
+          <CheckboxCommon
+            name='mannequin-edit-toggle'
+            checked={toggle.on}
+            onChange={(checked: boolean) => toggle.onChange(checked === true)}
+          />
+          <Text component='span'>edit pose</Text>
+        </label>
+        {toggle.on ? (
+          <div
+            className='ml-2 flex flex-wrap items-center gap-1'
+            role='toolbar'
+            aria-label='Mannequin pose tools'
+          >
+            {tools}
+          </div>
+        ) : null}
+        {persistence?.errorText ? (
+          <Text component='p' size='micro' className='sr-only' role='alert'>
+            {persistence.errorText}
+          </Text>
+        ) : null}
+        <Text
+          component='p'
+          size='micro'
+          className='sr-only'
+          role='status'
+          aria-live='polite'
+          aria-atomic='true'
+        >
+          {building ? 'Updating the mannequin pose.' : toggle.on ? instruction(props) : ''}
+        </Text>
+      </fieldset>
+    );
+  }
+
   return (
     <fieldset
       className='flex flex-col gap-2 border-y border-hairline py-2'
@@ -178,76 +302,7 @@ export function ModelOpenReferenceDirectPoseControlV9(
                 props.sessionPose?.dirty ? ' · changed' : ''
               }`}
           </Text>
-          <Chip
-            selected={symmetry}
-            pressed={symmetry}
-            className='min-h-11 px-2'
-            disabled={building}
-            onClick={() => applyImmediately(modelOpenReferenceDirectToggleSymmetryV9(draftPose))}
-          >
-            symmetry
-          </Chip>
-          <Button
-            type='button'
-            variant='underline'
-            size='xs'
-            className='min-h-11 px-2'
-            disabled={
-              (props.sessionPose ? !props.sessionPose.canUndo : temporaryUndoDepth === 0) ||
-              building
-            }
-            onClick={undo}
-          >
-            undo
-          </Button>
-          <Button
-            type='button'
-            variant='underline'
-            size='xs'
-            className='min-h-11 px-2'
-            disabled={neutral || building}
-            onClick={reset}
-          >
-            reset
-          </Button>
-          {persistence?.conflict ? (
-            <>
-              <Button
-                type='button'
-                variant='underline'
-                size='xs'
-                className='min-h-11 px-2'
-                disabled={building}
-                onClick={() => onApply(persistence.onReloadTheirs())}
-              >
-                reload theirs
-              </Button>
-              {persistence.showSave ? (
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  className='min-h-11 px-2'
-                  disabled={building}
-                  onClick={() => onApply(persistence.onKeepMine())}
-                >
-                  keep mine
-                </Button>
-              ) : null}
-            </>
-          ) : persistence?.showSave ? (
-            <Button
-              type='button'
-              variant='underline'
-              size='xs'
-              className='min-h-11 px-2'
-              disabled={!persistence.canSave || building}
-              loading={persistence.saving}
-              onClick={persistence.onSave}
-            >
-              save pose
-            </Button>
-          ) : null}
+          {tools}
         </div>
       </div>
       {persistence?.errorText ? (

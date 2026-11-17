@@ -1,0 +1,13 @@
+/** Fixed V3-target pair entry. Source adapters and owner registries stay private to the shared evaluator. */
+export {
+  BETA_SKIRT_SAVED_ANNULAR_OBSERVED_PLACEMENT_DISPLAYED_BODY_PRODUCT_PLACEMENT_V1,
+  buildBetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementV1,
+  projectBetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementV1,
+  getBetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementLifetimeV1,
+  disposeBetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementV1,
+  type BetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementRequestV1,
+  type BetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementReportV1,
+  type BetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementOwnerV1,
+  type BetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementProjectionV1,
+  type BetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementResultV1,
+} from './beta-skirt-personalized-displayed-body-product-placement-v2';

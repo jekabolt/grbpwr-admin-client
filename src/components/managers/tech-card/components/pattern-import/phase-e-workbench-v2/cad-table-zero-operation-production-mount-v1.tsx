@@ -12,28 +12,52 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
-import { CalloutBox, Select } from 'ui';
+import { CalloutBox, Select, Text } from 'ui';
 
 import {
   readPatternImportDxfPhaseECardSessionV1,
   subscribePatternImportDxfPhaseECardSessionV1,
   type PatternImportDxfPhaseECardSessionV1,
 } from '../phase-e-workbench-card-session-v1';
-import type { PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1 } from './cad-table-zero-connect-authoring-handoff-v1';
+import {
+  createPatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1,
+  type PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1,
+  type PatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1,
+} from './cad-table-zero-connect-authoring-handoff-v1';
 import { PatternImportDxfPhaseECadTableZeroConnectCanvasV1 } from './cad-table-zero-connect-canvas-v1';
+import {
+  bindPatternImportDxfPhaseECadTableZeroOperationFreshToSavedAuthorityV1,
+  capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1,
+  verifyPatternImportDxfPhaseECadTableZeroOperationSavedAuthorityRefreshV1,
+  type PatternImportDxfPhaseECadTableZeroOperationAuthorityRebindExpectationV1,
+} from './cad-table-zero-operation-authority-rebind-v1';
 import {
   listPatternImportDxfPhaseECadTableZeroOperationFreshChoicesV1,
   preparePatternImportDxfPhaseECadTableZeroOperationFreshV1,
+  type PatternImportDxfPhaseECadTableZeroOperationFreshBlockerV1,
+  type PatternImportDxfPhaseECadTableZeroOperationFreshChoicesResultV1,
   type PatternImportDxfPhaseECadTableZeroOperationFreshPreparationResultV1,
 } from './cad-table-zero-operation-fresh-preparation-v1';
 import {
+  createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1,
+  isPatternImportDxfPhaseECadTableZeroOperationGenerationTicketCurrentV1,
+  type PatternImportDxfPhaseECadTableZeroOperationGenerationTicketV1,
+} from './cad-table-zero-operation-generation-owner-v1';
+import {
   listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1,
   preparePatternImportDxfPhaseECadTableZeroOperationSavedV1,
+  type PatternImportDxfPhaseECadTableZeroOperationSavedBlockerV1,
+  type PatternImportDxfPhaseECadTableZeroOperationSavedChoicesResultV1,
   type PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1,
 } from './cad-table-zero-operation-saved-preparation-v1';
-import { routePatternImportDxfPhaseECadTableZeroOperationSourceV1 } from './cad-table-zero-operation-source-routing-v1';
+import { isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1 } from './cad-table-zero-connect-phase-e-authority-v1';
+import {
+  routePatternImportDxfPhaseECadTableZeroOperationSourceV1,
+  type PatternImportDxfPhaseECadTableZeroOperationSourceRouteV1,
+} from './cad-table-zero-operation-source-routing-v1';
 import { preparePatternImportDxfPhaseECadMannequinAllScopeStagingV1 } from './cad-mannequin-all-scope-staging-v1';
 import type { PatternImportDxfPhaseECadMannequinDxfStagingSourceV1 } from './cad-mannequin-dxf-staging-v1';
+import { preparePatternImportDxfPhaseECadMannequinSavedAllScopeStagingV1 } from './cad-mannequin-saved-all-scope-staging-v1';
 import {
   PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_PRODUCTION_SCENE_OVERLAY_BLOCKED_V1,
   PatternImportDxfPhaseECadMannequinModelPickerV1,
@@ -43,6 +67,8 @@ import {
   type PatternImportDxfPhaseECadWorkbenchOperationsModeV1,
   type PatternImportDxfPhaseECadWorkbenchSelectionV1,
 } from './cad-workbench-split-shell-v1';
+import type { CadWorkbenchPhysicalHostV1 } from './cad-workbench-physical-host-v1';
+import { CadWorkbenchPhysicalHostPanelV1 } from './cad-workbench-physical-host-panel-v1';
 import {
   createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1,
   type PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1,
@@ -58,6 +84,8 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_PRODUCTION_MOUN
     freshCardSessionRequired: false,
     operationIndependentSavedCardBootstrap: true,
     savedCardRowReadBeforeAndAfterReprocess: true,
+    latestSavedCardReadAfterFreshPreparation: true,
+    cachedSavedChoicesUsedForFreshFailover: false,
     savedCardByteLengthAndShaVerified: true,
     explicitReplayScopeAndSizeUsed: true,
     exactCatalogAndProjectionOnly: true,
@@ -66,6 +94,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_PRODUCTION_MOUN
     proposalCreated: false,
     authoringOperationIdCreated: false,
     existingOperationsFieldWriterOnly: true,
+    authoringHandoffRequiresGenuinePreparedAuthority: true,
     createsSecondFormOwner: false,
     realTechCardModelPickerMountedInEveryState: true,
     blockedSavedDxfKeepsMannequinPane: true,
@@ -81,17 +110,42 @@ type Prepared =
   | Extract<PatternImportDxfPhaseECadTableZeroOperationFreshPreparationResultV1, { ok: true }>
   | Extract<PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1, { ok: true }>;
 
+type SavedPrepared = Extract<
+  PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1,
+  { ok: true }
+>;
+
 type PreparationResult =
   | PatternImportDxfPhaseECadTableZeroOperationFreshPreparationResultV1
   | PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1;
 
 type PreparationState =
-  | Readonly<{ status: 'idle'; key: string; result: null }>
-  | Readonly<{ status: 'loading'; key: string; result: null }>
+  | Readonly<{
+      status: 'idle';
+      key: string;
+      result: null;
+      authoringPrepared: null;
+      rebindExpectation: null;
+      resolvedSource: null;
+      resolvedSavedCard: null;
+    }>
+  | Readonly<{
+      status: 'loading';
+      key: string;
+      result: null;
+      authoringPrepared: null;
+      rebindExpectation: null;
+      resolvedSource: null;
+      resolvedSavedCard: null;
+    }>
   | Readonly<{
       status: 'settled';
       key: string;
       result: PreparationResult;
+      authoringPrepared: SavedPrepared | null;
+      rebindExpectation: PatternImportDxfPhaseECadTableZeroOperationAuthorityRebindExpectationV1 | null;
+      resolvedSource: 'fresh' | 'saved';
+      resolvedSavedCard: common_TechCard | null;
     }>;
 
 type MannequinStagingState = Readonly<{
@@ -109,12 +163,414 @@ export type PatternImportDxfPhaseECadTableZeroOperationMannequinContextV1 = Read
   stagingBlocked: boolean;
 }>;
 
+type SavedFailoverResult = Readonly<{
+  result: PatternImportDxfPhaseECadTableZeroOperationSavedPreparationResultV1;
+  resolvedSavedCard: common_TechCard;
+  authoringPrepared: SavedPrepared | null;
+  rebindExpectation: PatternImportDxfPhaseECadTableZeroOperationAuthorityRebindExpectationV1 | null;
+  resolvedSource: 'saved';
+}>;
+
+export type PatternImportDxfPhaseECurrentSavedCardGateResultV1 = Readonly<
+  | {
+      ok: true;
+      techCard: common_TechCard;
+      hasCompleteSavedDxfRow: boolean;
+      choices: PatternImportDxfPhaseECadTableZeroOperationSavedChoicesResultV1;
+    }
+  | {
+      ok: false;
+      techCard: null;
+      hasCompleteSavedDxfRow: null;
+      choices: Extract<
+        PatternImportDxfPhaseECadTableZeroOperationSavedChoicesResultV1,
+        { ok: false }
+      >;
+    }
+>;
+
+type CurrentSavedCardGateState = Readonly<
+  | { status: 'idle'; key: string; result: null }
+  | { status: 'loading'; key: string; result: null }
+  | {
+      status: 'settled';
+      key: string;
+      result: PatternImportDxfPhaseECurrentSavedCardGateResultV1;
+    }
+>;
+
+function currentSavedCardReadFailed(
+  techCardId: number,
+  detail: string,
+): Extract<PatternImportDxfPhaseECadTableZeroOperationSavedChoicesResultV1, { ok: false }> {
+  return Object.freeze({
+    ok: false as const,
+    techCardId,
+    choices: Object.freeze([]) as readonly [],
+    blocker: Object.freeze({
+      code: 'saved-card-current-read-failed' as const,
+      detail,
+    }),
+  });
+}
+
+/** Reads the current positive card independently before a cached miss may admit fresh authority. */
+export async function readPatternImportDxfPhaseECurrentSavedCardGateV1(input: {
+  techCardId: number;
+  savedAuthority: PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1;
+  orderSizeIds: (ids: number[]) => number[];
+  sizeNameById: ReadonlyMap<number, string>;
+  signal: AbortSignal;
+}): Promise<PatternImportDxfPhaseECurrentSavedCardGateResultV1> {
+  try {
+    const techCard = await input.savedAuthority.resolveCurrentCard(input.techCardId, input.signal);
+    if (input.signal.aborted)
+      return Object.freeze({
+        ok: false as const,
+        techCard: null,
+        hasCompleteSavedDxfRow: null,
+        choices: currentSavedCardReadFailed(
+          input.techCardId,
+          'The independent current saved card read was cancelled.',
+        ),
+      });
+    return Object.freeze({
+      ok: true as const,
+      techCard,
+      hasCompleteSavedDxfRow: (techCard.techCard?.patterns ?? []).some(
+        ({ lineKey, url, downloadUrl }) => Boolean(lineKey && url && downloadUrl),
+      ),
+      choices: listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
+        techCard,
+        input.orderSizeIds,
+        input.sizeNameById,
+      ),
+    });
+  } catch {
+    return Object.freeze({
+      ok: false as const,
+      techCard: null,
+      hasCompleteSavedDxfRow: null,
+      choices: currentSavedCardReadFailed(
+        input.techCardId,
+        input.signal.aborted
+          ? 'The independent current saved card read was cancelled.'
+          : 'The current saved card could not be read before opening the table.',
+      ),
+    });
+  }
+}
+
+/** A positive existing card may use fresh authority only after one successful current-card read. */
+export function routePatternImportDxfPhaseECadTableAfterCurrentSavedCardGateV1(input: {
+  techCardId: number | null;
+  freshChoices: PatternImportDxfPhaseECadTableZeroOperationFreshChoicesResultV1;
+  cachedSavedChoices: PatternImportDxfPhaseECadTableZeroOperationSavedChoicesResultV1;
+  currentSavedCardGate: PatternImportDxfPhaseECurrentSavedCardGateResultV1 | null;
+}): PatternImportDxfPhaseECadTableZeroOperationSourceRouteV1 {
+  if (!input.techCardId || input.cachedSavedChoices.ok)
+    return routePatternImportDxfPhaseECadTableZeroOperationSourceV1(
+      input.freshChoices,
+      input.cachedSavedChoices,
+    );
+  if (!input.currentSavedCardGate)
+    return Object.freeze({ mode: 'saved' as const, choices: input.cachedSavedChoices });
+  if (!input.currentSavedCardGate.ok)
+    return Object.freeze({ mode: 'saved' as const, choices: input.currentSavedCardGate.choices });
+  if (input.currentSavedCardGate.hasCompleteSavedDxfRow)
+    return Object.freeze({ mode: 'saved' as const, choices: input.currentSavedCardGate.choices });
+  return routePatternImportDxfPhaseECadTableZeroOperationSourceV1(
+    input.freshChoices,
+    input.currentSavedCardGate.choices,
+  );
+}
+
+type VisibleBlocker =
+  | PatternImportDxfPhaseECadTableZeroOperationFreshBlockerV1
+  | PatternImportDxfPhaseECadTableZeroOperationSavedBlockerV1;
+
+/** Keeps a positive saved card from ever exposing a fresh-session admission failure. */
+export function resolvePatternImportDxfPhaseECadTableZeroOperationVisibleBlockerV1(input: {
+  techCardId: number | null;
+  savedCardGateLoading: boolean;
+  preparationBlocker: VisibleBlocker | null;
+  currentSavedCardGate: PatternImportDxfPhaseECurrentSavedCardGateResultV1 | null;
+}): VisibleBlocker | null {
+  if (input.savedCardGateLoading) return null;
+  if (input.techCardId && input.preparationBlocker?.code === 'fresh-session-invalid') {
+    if (!input.currentSavedCardGate) return null;
+    return input.currentSavedCardGate.choices.ok
+      ? null
+      : input.currentSavedCardGate.choices.blocker;
+  }
+  return input.preparationBlocker;
+}
+
+/** Prevents the live OperationsField handoff from seeing structural or drifted saved authority. */
+export function isPatternImportDxfPhaseECadTableZeroOperationAuthoringReadyV1(
+  prepared: SavedPrepared | null,
+  expectation: PatternImportDxfPhaseECadTableZeroOperationAuthorityRebindExpectationV1 | null,
+): boolean {
+  return Boolean(
+    prepared &&
+      expectation &&
+      isPatternImportDxfPhaseEZeroConnectPreparedAuthorityV1(prepared.authoringAuthority) &&
+      verifyPatternImportDxfPhaseECadTableZeroOperationSavedAuthorityRefreshV1(
+        expectation,
+        prepared,
+      ).ok,
+  );
+}
+
+/** Creates the one-shot fresh saved-authority reader retained with a zero-connect draft. */
+export function createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefreshV1(input: {
+  prepared: SavedPrepared | null;
+  expectation: PatternImportDxfPhaseECadTableZeroOperationAuthorityRebindExpectationV1 | null;
+  savedAuthority: PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1 | null;
+  preparationKey: string;
+  orderSizeIds: (ids: number[]) => number[];
+  sizeNameById: ReadonlyMap<number, string>;
+  prepareSaved?: typeof preparePatternImportDxfPhaseECadTableZeroOperationSavedV1;
+}): PatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1 | null {
+  const { prepared, expectation, savedAuthority } = input;
+  if (
+    !prepared ||
+    !expectation ||
+    !savedAuthority ||
+    !isPatternImportDxfPhaseECadTableZeroOperationAuthoringReadyV1(prepared, expectation)
+  )
+    return null;
+  const selector = prepared.authoringAuthority.row;
+  const failed = (detail: string) =>
+    Object.freeze({
+      ok: false as const,
+      authority: null,
+      preparationGeneration: null,
+      importGeneration: null,
+      blocker: Object.freeze({
+        code: 'fresh-saved-authority-unavailable' as const,
+        detail,
+      }),
+    });
+  const generationOwner = createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1();
+  let nextAttempt = 0;
+  let activeAttempt = 0;
+  let activeTicket: PatternImportDxfPhaseECadTableZeroOperationGenerationTicketV1 | null = null;
+  let consumed = false;
+  let disposed = false;
+  const isCurrent = (
+    attempt: number,
+    ticket: PatternImportDxfPhaseECadTableZeroOperationGenerationTicketV1,
+    signal: AbortSignal,
+  ) =>
+    !disposed &&
+    !consumed &&
+    !signal.aborted &&
+    activeAttempt === attempt &&
+    activeTicket === ticket &&
+    isPatternImportDxfPhaseECadTableZeroOperationGenerationTicketCurrentV1(ticket);
+  const refreshOwner = Object.freeze({
+    async refresh(signal: AbortSignal) {
+      if (disposed || consumed)
+        return failed('The saved DXF authoring authority capability is already consumed.');
+      const attempt = nextAttempt + 1;
+      if (!Number.isSafeInteger(attempt) || attempt <= 0) {
+        disposed = true;
+        generationOwner.dispose();
+        return failed('The saved DXF authoring authority capability is disposed.');
+      }
+      nextAttempt = attempt;
+      if (activeTicket) generationOwner.invalidate(activeTicket);
+      const refreshKey = `${input.preparationKey}:authoring-refresh`;
+      let generationTicket: PatternImportDxfPhaseECadTableZeroOperationGenerationTicketV1 | null =
+        null;
+      try {
+        generationTicket =
+          expectation.source === 'fresh-card-session'
+            ? generationOwner.beginFresh(refreshKey, expectation.importGeneration)
+            : generationOwner.beginSaved(refreshKey);
+        activeAttempt = attempt;
+        activeTicket = generationTicket;
+        if (!isCurrent(attempt, generationTicket, signal))
+          return failed('The saved DXF authoring authority refresh was cancelled.');
+        const latest = await savedAuthority.resolveLatestCard(selector, signal);
+        if (!isCurrent(attempt, generationTicket, signal))
+          return failed('The saved DXF authoring authority refresh was cancelled or superseded.');
+        const refreshed = await (
+          input.prepareSaved ?? preparePatternImportDxfPhaseECadTableZeroOperationSavedV1
+        )(
+          {
+            techCard: latest.techCard,
+            orderSizeIds: input.orderSizeIds,
+            sizeNameById: input.sizeNameById,
+            scopeKey: selector.scopeKey,
+            sizeToken: prepared.sizeToken,
+            authority: savedAuthority,
+            generation: generationTicket,
+          },
+          signal,
+        );
+        if (!isCurrent(attempt, generationTicket, signal))
+          return failed('The saved DXF authoring authority refresh was cancelled or superseded.');
+        if (!refreshed.ok) return failed(refreshed.blocker.detail);
+        const verified = verifyPatternImportDxfPhaseECadTableZeroOperationSavedAuthorityRefreshV1(
+          expectation,
+          refreshed,
+        );
+        if (!verified.ok) return failed(verified.blocker.detail);
+        if (!isCurrent(attempt, generationTicket, signal))
+          return failed('The saved DXF authoring authority refresh was cancelled or superseded.');
+        consumed = true;
+        disposed = true;
+        generationOwner.invalidate(generationTicket);
+        activeTicket = null;
+        activeAttempt = 0;
+        generationOwner.dispose();
+        return Object.freeze({
+          ok: true as const,
+          authority: refreshed.authoringAuthority,
+          preparationGeneration: refreshed.preparationGeneration,
+          importGeneration: refreshed.importGeneration,
+          blocker: null,
+        });
+      } catch (error) {
+        return failed(
+          error instanceof Error
+            ? error.message
+            : 'The saved DXF authoring authority could not be refreshed.',
+        );
+      } finally {
+        if (generationTicket && activeTicket === generationTicket) {
+          generationOwner.invalidate(generationTicket);
+          activeTicket = null;
+          activeAttempt = 0;
+        }
+      }
+    },
+  });
+  return createPatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1({
+    authority: prepared.authoringAuthority,
+    expectation,
+    catalog: prepared.catalog,
+    projection: prepared.projection,
+    refreshOwner,
+  });
+}
+
+/**
+ * Recovers from a fresh-session race only when the current saved card exposes the exact same
+ * scope/size choice. The saved preparation remains the source rendered by the canvas and staged
+ * beside the mannequin; the stale fresh blocker is never returned after failover was attempted.
+ */
+export async function preparePatternImportDxfPhaseECadTableZeroOperationSavedFailoverV1(input: {
+  fresh: PatternImportDxfPhaseECadTableZeroOperationFreshPreparationResultV1;
+  expectedCommit: Readonly<{ techCardId: number; previousLockVersion: number }>;
+  savedAuthority: PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1 | null;
+  orderSizeIds: (ids: number[]) => number[];
+  sizeNameById: ReadonlyMap<number, string>;
+  scopeKey: string;
+  sizeToken: string;
+  generation: PatternImportDxfPhaseECadTableZeroOperationGenerationTicketV1;
+  signal: AbortSignal;
+  prepareSaved?: typeof preparePatternImportDxfPhaseECadTableZeroOperationSavedV1;
+}): Promise<SavedFailoverResult | null> {
+  if (
+    !input.savedAuthority ||
+    input.signal.aborted ||
+    input.fresh.techCardId !== input.expectedCommit.techCardId ||
+    (input.fresh.scopeKey !== null && input.fresh.scopeKey !== input.scopeKey) ||
+    (input.fresh.sizeToken !== null && input.fresh.sizeToken !== input.sizeToken)
+  )
+    return null;
+  let latestSavedCard: common_TechCard;
+  try {
+    latestSavedCard = await input.savedAuthority.resolveLatestCommittedCard(
+      input.expectedCommit,
+      input.signal,
+    );
+  } catch {
+    return null;
+  }
+  const latestSavedChoices = listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
+    latestSavedCard,
+    input.orderSizeIds,
+    input.sizeNameById,
+  );
+  const matchingSavedChoice = latestSavedChoices.ok
+    ? latestSavedChoices.choices.find(
+        (choice) =>
+          choice.scopeKey === input.scopeKey &&
+          choice.sizes.some((size) => size.sizeToken === input.sizeToken),
+      )
+    : null;
+  if (!matchingSavedChoice || input.signal.aborted) return null;
+  const saved = await (
+    input.prepareSaved ?? preparePatternImportDxfPhaseECadTableZeroOperationSavedV1
+  )(
+    {
+      techCard: latestSavedCard,
+      orderSizeIds: input.orderSizeIds,
+      sizeNameById: input.sizeNameById,
+      scopeKey: input.scopeKey,
+      sizeToken: input.sizeToken,
+      authority: input.savedAuthority,
+      generation: input.generation,
+    },
+    input.signal,
+  );
+  return Object.freeze({
+    result: saved,
+    resolvedSavedCard: latestSavedCard,
+    authoringPrepared: saved.ok ? saved : null,
+    rebindExpectation: saved.ok
+      ? capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1(saved)
+      : null,
+    resolvedSource: 'saved' as const,
+  });
+}
+
+/** Applies the Host's fail-closed fresh/saved decision only after the independent saved read. */
+export function resolvePatternImportDxfPhaseECadTableZeroOperationAfterFreshV1(
+  fresh: PatternImportDxfPhaseECadTableZeroOperationFreshPreparationResultV1,
+  latestSaved: SavedFailoverResult | null,
+) {
+  if (!latestSaved)
+    return Object.freeze({
+      result: fresh,
+      authoringPrepared: null,
+      rebindExpectation: null,
+      resolvedSource: 'fresh' as const,
+      resolvedSavedCard: null,
+    });
+  if (!fresh.ok) return latestSaved;
+  if (!latestSaved.result.ok)
+    return Object.freeze({
+      result: fresh,
+      authoringPrepared: null,
+      rebindExpectation: null,
+      resolvedSource: 'fresh' as const,
+      resolvedSavedCard: latestSaved.resolvedSavedCard,
+    });
+  const rebound = bindPatternImportDxfPhaseECadTableZeroOperationFreshToSavedAuthorityV1(
+    fresh,
+    latestSaved.result,
+  );
+  return Object.freeze({
+    result: fresh,
+    authoringPrepared: rebound.ok ? latestSaved.result : null,
+    rebindExpectation: rebound.ok ? rebound.expectation : null,
+    resolvedSource: 'fresh' as const,
+    resolvedSavedCard: latestSaved.resolvedSavedCard,
+  });
+}
+
 /**
  * The zero-row view has no selected Assembly operation to borrow. It accepts either the confirmed
  * import session or an operation-independent, revalidated saved-row authority plus the existing
  * OperationsField handoff. Neither path invents an operation or geometry.
  */
 export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
+  techCardId,
   cardSession,
   zeroConnectAuthoringHandoff,
   mannequin,
@@ -127,6 +583,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   operationsPanel = null,
   defaultOperationsMode = 'collapsed',
 }: Readonly<{
+  techCardId?: number;
   cardSession: PatternImportDxfPhaseECardSessionV1 | null;
   zeroConnectAuthoringHandoff?: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1;
   mannequin: (context: PatternImportDxfPhaseECadTableZeroOperationMannequinContextV1) => ReactNode;
@@ -153,10 +610,88 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
       ),
     [orderSizeIds, savedCard, sizeNameById],
   );
+  const positiveTechCardId = useMemo(() => {
+    for (const candidate of [techCardId, savedCard?.id, cardSession?.techCardId])
+      if (Number.isSafeInteger(candidate) && Number(candidate) > 0) return Number(candidate);
+    return null;
+  }, [cardSession?.techCardId, savedCard?.id, techCardId]);
+  const savedCardGateKey =
+    positiveTechCardId && !savedChoices.ok
+      ? `${positiveTechCardId}:${savedCard?.lockVersion ?? -1}:${savedChoices.blocker.code}`
+      : '';
+  const [savedCardGate, setSavedCardGate] = useState<CurrentSavedCardGateState>(() => ({
+    status: 'idle',
+    key: '',
+    result: null,
+  }));
+  useEffect(() => {
+    if (!savedCardGateKey || !positiveTechCardId || savedChoices.ok) {
+      setSavedCardGate((current) =>
+        current.status === 'idle' && current.key === ''
+          ? current
+          : { status: 'idle', key: '', result: null },
+      );
+      return;
+    }
+    if (!savedAuthority) {
+      setSavedCardGate({
+        status: 'settled',
+        key: savedCardGateKey,
+        result: Object.freeze({
+          ok: false as const,
+          techCard: null,
+          hasCompleteSavedDxfRow: null,
+          choices: currentSavedCardReadFailed(
+            positiveTechCardId,
+            'The independent saved-card authority is unavailable.',
+          ),
+        }),
+      });
+      return;
+    }
+    let current = true;
+    const controller = new AbortController();
+    setSavedCardGate({ status: 'loading', key: savedCardGateKey, result: null });
+    void readPatternImportDxfPhaseECurrentSavedCardGateV1({
+      techCardId: positiveTechCardId,
+      savedAuthority,
+      orderSizeIds,
+      sizeNameById,
+      signal: controller.signal,
+    }).then((result) => {
+      if (current) setSavedCardGate({ status: 'settled', key: savedCardGateKey, result });
+    });
+    return () => {
+      current = false;
+      controller.abort();
+    };
+  }, [
+    orderSizeIds,
+    positiveTechCardId,
+    savedAuthority,
+    savedCardGateKey,
+    savedChoices.ok,
+    sizeNameById,
+  ]);
+  const currentSavedCardGate =
+    savedCardGate.key === savedCardGateKey && savedCardGate.status === 'settled'
+      ? savedCardGate.result
+      : null;
+  const savedCardGateLoading =
+    Boolean(savedCardGateKey) &&
+    (savedCardGate.key !== savedCardGateKey || savedCardGate.status !== 'settled');
   const sourceRoute = useMemo(
-    () => routePatternImportDxfPhaseECadTableZeroOperationSourceV1(freshChoices, savedChoices),
-    [freshChoices, savedChoices],
+    () =>
+      routePatternImportDxfPhaseECadTableAfterCurrentSavedCardGateV1({
+        techCardId: positiveTechCardId,
+        freshChoices,
+        cachedSavedChoices: savedChoices,
+        currentSavedCardGate,
+      }),
+    [currentSavedCardGate, freshChoices, positiveTechCardId, savedChoices],
   );
+  const effectiveSavedCard =
+    !savedChoices.ok && currentSavedCardGate?.ok ? currentSavedCardGate.techCard : savedCard;
   const { choices } = sourceRoute;
   const useFreshSession = sourceRoute.mode === 'fresh';
   const [chosenScopeKey, setChosenScopeKey] = useState('');
@@ -173,59 +708,136 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
   const preparationKey =
     useFreshSession && cardSession
       ? `fresh:${cardSession.techCardId}:${generation}:${scopeKey}:${sizeToken}`
-      : `saved:${savedCard?.id ?? 0}:${savedCard?.lockVersion ?? -1}:${scopeKey}:${sizeToken}`;
+      : `saved:${effectiveSavedCard?.id ?? 0}:${effectiveSavedCard?.lockVersion ?? -1}:${scopeKey}:${sizeToken}`;
   const [preparation, setPreparation] = useState<PreparationState>(() => ({
     status: 'idle',
     key: '',
     result: null,
+    authoringPrepared: null,
+    rebindExpectation: null,
+    resolvedSource: null,
+    resolvedSavedCard: null,
   }));
-
   useEffect(() => {
     if (!choices.ok || !scopeKey || !sizeToken) {
-      setPreparation({ status: 'idle', key: preparationKey, result: null });
+      setPreparation({
+        status: 'idle',
+        key: preparationKey,
+        result: null,
+        authoringPrepared: null,
+        rebindExpectation: null,
+        resolvedSource: null,
+        resolvedSavedCard: null,
+      });
       return;
     }
     if (!useFreshSession && !savedAuthority) {
-      setPreparation({ status: 'idle', key: preparationKey, result: null });
+      setPreparation({
+        status: 'idle',
+        key: preparationKey,
+        result: null,
+        authoringPrepared: null,
+        rebindExpectation: null,
+        resolvedSource: null,
+        resolvedSavedCard: null,
+      });
       return;
     }
     let current = true;
     const controller = new AbortController();
-    setPreparation({ status: 'loading', key: preparationKey, result: null });
-    const next =
+    // The owner belongs to this preparation attempt. A component-wide memo is unsafe in React
+    // StrictMode because its effect cleanup is intentionally replayed while the same memoized
+    // object remains mounted, leaving the next setup with an already disposed owner.
+    const preparationGenerationOwner =
+      createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1();
+    const generationTicket =
       useFreshSession && cardSession
-        ? preparePatternImportDxfPhaseECadTableZeroOperationFreshV1({
-            cardSession,
-            expectedImportGeneration: generation,
+        ? preparationGenerationOwner.beginFresh(preparationKey, generation)
+        : preparationGenerationOwner.beginSaved(preparationKey);
+    setPreparation({
+      status: 'loading',
+      key: preparationKey,
+      result: null,
+      authoringPrepared: null,
+      rebindExpectation: null,
+      resolvedSource: null,
+      resolvedSavedCard: null,
+    });
+    void (async () => {
+      if (useFreshSession && cardSession) {
+        const fresh = await preparePatternImportDxfPhaseECadTableZeroOperationFreshV1({
+          cardSession,
+          expectedImportGeneration: generation,
+          scopeKey,
+          sizeToken,
+        });
+        const latestSaved = await preparePatternImportDxfPhaseECadTableZeroOperationSavedFailoverV1(
+          {
+            fresh,
+            expectedCommit: {
+              techCardId: cardSession.confirmedApply.commitReceipt.techCardId,
+              previousLockVersion: cardSession.confirmedApply.commitReceipt.previousLockVersion,
+            },
+            savedAuthority,
+            orderSizeIds,
+            sizeNameById,
             scopeKey,
             sizeToken,
-          })
-        : preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
-            {
-              techCard: savedCard,
-              orderSizeIds,
-              sizeNameById,
-              scopeKey,
-              sizeToken,
-              authority: savedAuthority!,
-            },
-            controller.signal,
-          );
-    void next.then((result) => {
-      if (current) setPreparation({ status: 'settled', key: preparationKey, result });
-    });
+            generation: generationTicket,
+            signal: controller.signal,
+          },
+        );
+        return resolvePatternImportDxfPhaseECadTableZeroOperationAfterFreshV1(fresh, latestSaved);
+      }
+      const saved = await preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
+        {
+          techCard: effectiveSavedCard,
+          orderSizeIds,
+          sizeNameById,
+          scopeKey,
+          sizeToken,
+          authority: savedAuthority!,
+          generation: generationTicket,
+        },
+        controller.signal,
+      );
+      return Object.freeze({
+        result: saved,
+        authoringPrepared: saved.ok ? saved : null,
+        rebindExpectation: saved.ok
+          ? capturePatternImportDxfPhaseECadTableZeroOperationSavedRebindExpectationV1(saved)
+          : null,
+        resolvedSource: 'saved' as const,
+        resolvedSavedCard: effectiveSavedCard,
+      });
+    })().then(
+      ({ result, authoringPrepared, rebindExpectation, resolvedSource, resolvedSavedCard }) => {
+        if (current)
+          setPreparation({
+            status: 'settled',
+            key: preparationKey,
+            result,
+            authoringPrepared,
+            rebindExpectation,
+            resolvedSource,
+            resolvedSavedCard,
+          });
+      },
+    );
     return () => {
       current = false;
       controller.abort();
+      preparationGenerationOwner.invalidate(generationTicket);
+      preparationGenerationOwner.dispose();
     };
   }, [
     cardSession,
     choices.ok,
+    effectiveSavedCard,
     generation,
     orderSizeIds,
     preparationKey,
     savedAuthority,
-    savedCard,
     scopeKey,
     sizeNameById,
     sizeToken,
@@ -237,11 +849,56 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     currentPreparation?.status === 'settled' && currentPreparation.result?.ok
       ? (currentPreparation.result as Prepared)
       : null;
-  const blocker = !choices.ok
+  const resolvedSource = currentPreparation?.resolvedSource ?? null;
+  const resolvedSavedCard = currentPreparation?.resolvedSavedCard ?? effectiveSavedCard;
+  const resolvedSavedChoices = useMemo(
+    () =>
+      listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1(
+        resolvedSavedCard,
+        orderSizeIds,
+        sizeNameById,
+      ),
+    [orderSizeIds, resolvedSavedCard, sizeNameById],
+  );
+  const authoringPrepared =
+    currentPreparation?.status === 'settled' ? currentPreparation.authoringPrepared : null;
+  const rebindExpectation =
+    currentPreparation?.status === 'settled' ? currentPreparation.rebindExpectation : null;
+  const authoringAuthorityRefresh = useMemo(
+    () =>
+      createPatternImportDxfPhaseECadTableZeroOperationAuthoringRefreshV1({
+        prepared: authoringPrepared,
+        expectation: rebindExpectation,
+        savedAuthority,
+        preparationKey,
+        orderSizeIds,
+        sizeNameById,
+      }),
+    [
+      authoringPrepared,
+      orderSizeIds,
+      preparationKey,
+      rebindExpectation,
+      savedAuthority,
+      sizeNameById,
+    ],
+  );
+  const authoringReady =
+    isPatternImportDxfPhaseECadTableZeroOperationAuthoringReadyV1(
+      authoringPrepared,
+      rebindExpectation,
+    ) && authoringAuthorityRefresh !== null;
+  const preparationBlocker = !choices.ok
     ? choices.blocker
     : currentPreparation?.status === 'settled' && currentPreparation.result?.ok === false
       ? currentPreparation.result.blocker
       : null;
+  const blocker = resolvePatternImportDxfPhaseECadTableZeroOperationVisibleBlockerV1({
+    techCardId: positiveTechCardId,
+    savedCardGateLoading,
+    preparationBlocker,
+    currentSavedCardGate,
+  });
 
   const currentMannequinSource =
     useMemo<PatternImportDxfPhaseECadMannequinDxfStagingSourceV1 | null>(
@@ -258,25 +915,27 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
       [prepared],
     );
   const mannequinStagingKey = currentMannequinSource
-    ? useFreshSession && cardSession
+    ? resolvedSource === 'fresh' && cardSession
       ? `fresh:${cardSession.techCardId}:${generation}:${currentMannequinSource.scopeKey}:${sizeToken}`
-      : `saved:${savedCard?.id ?? 0}:${savedCard?.lockVersion ?? -1}:${currentMannequinSource.scopeKey}:${sizeToken}`
+      : `saved:${resolvedSavedCard?.id ?? 0}:${resolvedSavedCard?.lockVersion ?? -1}:${currentMannequinSource.scopeKey}:${sizeToken}`
     : '';
   const [mannequinStaging, setMannequinStaging] = useState<MannequinStagingState | null>(null);
   useEffect(() => {
-    if (!choices.ok || !currentMannequinSource || !mannequinStagingKey) {
+    const resolvedChoices =
+      resolvedSource === 'saved' && resolvedSavedChoices.ok ? resolvedSavedChoices : choices;
+    if (!resolvedChoices.ok || !currentMannequinSource || !mannequinStagingKey) {
       setMannequinStaging(null);
       return;
     }
     let current = true;
     const controller = new AbortController();
-    if (useFreshSession && cardSession) {
+    if (resolvedSource === 'fresh' && cardSession) {
       void preparePatternImportDxfPhaseECadMannequinAllScopeStagingV1({
         draft: cardSession.draft,
         techCardId: cardSession.techCardId,
         expectedImportGeneration: generation,
         currentImportGeneration: cardSession.importGeneration,
-        scopes: choices.choices.map(({ scopeKey: candidate, label }) => ({
+        scopes: resolvedChoices.choices.map(({ scopeKey: candidate, label }) => ({
           scopeKey: candidate,
           label,
         })),
@@ -292,42 +951,26 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
           }),
         );
       });
-    } else if (savedCard && savedAuthority) {
-      void (async () => {
-        const sources: PatternImportDxfPhaseECadMannequinDxfStagingSourceV1[] = [
-          currentMannequinSource,
-        ];
-        let blocked = false;
-        for (const choice of choices.choices) {
-          if (!current || choice.scopeKey === currentMannequinSource.scopeKey) continue;
-          const saved = await preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
-            {
-              techCard: savedCard,
-              orderSizeIds,
-              sizeNameById,
-              scopeKey: choice.scopeKey,
-              sizeToken,
-              authority: savedAuthority,
-            },
-            controller.signal,
-          );
-          if (!saved.ok) {
-            blocked = true;
-            continue;
-          }
-          sources.push(
-            Object.freeze({
-              scopeKey: saved.scopeKey,
-              label: choice.label,
-              projection: saved.projection,
-            }),
-          );
-        }
+    } else if (resolvedSavedCard && savedAuthority) {
+      void preparePatternImportDxfPhaseECadMannequinSavedAllScopeStagingV1({
+        techCard: resolvedSavedCard,
+        orderSizeIds,
+        sizeNameById,
+        sizeToken,
+        current: currentMannequinSource,
+        authority: savedAuthority,
+        preparationKey: mannequinStagingKey,
+        signal: controller.signal,
+      }).then((result) => {
         if (!current) return;
         setMannequinStaging(
-          Object.freeze({ key: mannequinStagingKey, sources: Object.freeze(sources), blocked }),
+          Object.freeze({
+            key: mannequinStagingKey,
+            sources: result.sources,
+            blocked: !result.ok,
+          }),
         );
-      })();
+      });
     } else {
       setMannequinStaging(null);
     }
@@ -343,10 +986,11 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
     mannequinStagingKey,
     orderSizeIds,
     savedAuthority,
-    savedCard,
+    resolvedSavedCard,
+    resolvedSavedChoices,
     sizeNameById,
     sizeToken,
-    useFreshSession,
+    resolvedSource,
   ]);
   const mannequinSources = currentMannequinSource
     ? mannequinStaging?.key === mannequinStagingKey
@@ -417,8 +1061,10 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
             <PatternImportDxfPhaseECadTableZeroConnectCanvasV1
               catalog={prepared.catalog}
               projection={prepared.projection}
-              zeroConnectAuthoringHandoff={zeroConnectAuthoringHandoff}
-              disabled={disabled}
+              authoringAuthority={authoringReady ? authoringPrepared?.authoringAuthority : null}
+              authoringAuthorityRefresh={authoringReady ? authoringAuthorityRefresh : null}
+              zeroConnectAuthoringHandoff={authoringReady ? zeroConnectAuthoringHandoff : undefined}
+              disabled={disabled || !authoringReady}
             />
           )}
         </section>
@@ -445,6 +1091,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationHostV1({
 /** Production subscription shell; the host never reads or writes the operation form itself. */
 export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
   techCardId,
+  physicalHost,
   zeroConnectAuthoringHandoff,
   disabled = false,
   selection,
@@ -452,6 +1099,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
   defaultOperationsMode,
 }: Readonly<{
   techCardId?: number;
+  physicalHost?: CadWorkbenchPhysicalHostV1;
   zeroConnectAuthoringHandoff?: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1;
   disabled?: boolean;
   selection?: PatternImportDxfPhaseECadWorkbenchSelectionV1;
@@ -478,6 +1126,7 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
 
   return (
     <PatternImportDxfPhaseECadTableZeroOperationHostV1
+      techCardId={techCardId}
       cardSession={cardSession}
       zeroConnectAuthoringHandoff={zeroConnectAuthoringHandoff}
       disabled={disabled}
@@ -488,16 +1137,35 @@ export function PatternImportDxfPhaseECadTableZeroOperationProductionMountV1({
       selection={selection}
       operationsPanel={operationsPanel}
       defaultOperationsMode={defaultOperationsMode}
-      mannequin={({ sources, activeScopeKey }) => (
-        <PatternImportDxfPhaseECadMannequinModelPickerV1
-          disabled={disabled}
-          patternPieceScene={{
-            sources,
-            activeScopeKey,
-            sceneOverlay:
-              PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_PRODUCTION_SCENE_OVERLAY_BLOCKED_V1,
-          }}
-        />
+      mannequin={({ sources, activeScopeKey, stagingBlocked }) => (
+        <div className='flex h-full min-h-0 flex-col'>
+          <div className='min-h-0 flex-1'>
+            <PatternImportDxfPhaseECadMannequinModelPickerV1
+              disabled={disabled}
+              onDisplayedBodyInputV1={physicalHost?.onDisplayedBodyInputV1}
+              patternPieceScene={{
+                sources,
+                activeScopeKey,
+                sceneOverlay:
+                  PATTERN_IMPORT_DXF_PHASE_E_CAD_MANNEQUIN_PRODUCTION_SCENE_OVERLAY_BLOCKED_V1,
+              }}
+            />
+          </div>
+          {physicalHost?.panel ? (
+            <CadWorkbenchPhysicalHostPanelV1>{physicalHost.panel}</CadWorkbenchPhysicalHostPanelV1>
+          ) : null}
+          {stagingBlocked ? (
+            <Text
+              component='p'
+              size='micro'
+              variant='errorLabel'
+              role='alert'
+              className='shrink-0 border-t border-borderColor px-2 py-1'
+            >
+              Some saved pattern sets could not be opened. Only the active set is shown.
+            </Text>
+          ) : null}
+        </div>
       )}
     />
   );

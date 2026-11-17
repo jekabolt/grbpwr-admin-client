@@ -358,7 +358,15 @@ async function findHead(page: Page, canvas: Locator): Promise<CanvasPoint> {
   throw new Error('Could not hover the head position target.');
 }
 
+// Desktop model form: joints drag and pose tools show only with `edit pose` on (off by default).
+async function turnOnEditPose(page: Page) {
+  const editPose = page.getByRole('checkbox', { name: 'edit pose', exact: true });
+  if (!(await editPose.isChecked())) await editPose.check();
+  await expect(editPose).toBeChecked();
+}
+
 async function commitPoseDrag(page: Page, canvas: Locator) {
+  await turnOnEditPose(page);
   const sourceBefore = await canvas.getAttribute('data-source-revision');
   const head = await findHead(page, canvas);
   await page.mouse.move(head.x, head.y);
@@ -478,5 +486,7 @@ test('read-only model access never exposes the durable save action', async ({ pa
   await installBackend(page, { canWrite: false });
   await page.goto(DETAIL_ROUTE, { waitUntil: 'domcontentloaded' });
   await waitForReadyDurable(page);
+  await turnOnEditPose(page);
+  await expect(page.getByRole('toolbar', { name: 'Mannequin pose tools' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'save pose', exact: true })).toHaveCount(0);
 });

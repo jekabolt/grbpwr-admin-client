@@ -41,6 +41,9 @@ import {
   evaluateGarmentPhase2InteriorRefinementArtifactV1,
   refineGarmentPhase2InteriorV1,
   type GarmentPhase2InteriorRefinementArtifactV1,
+  refineGarmentPhase2InteriorInSavedLocalFrameV2,
+  type GarmentPhase2SavedLocalFrameRefinementArtifactV2,
+  type GarmentPhase2SavedLocalFrameTranslationV2,
 } from '../mesh/garment-phase2-interior-refinement-v1';
 import { createCdt2dConstrainedTriangulatorV1 } from '../mesh/triangulation/cdt2d-adapter-v1';
 import {
@@ -66,6 +69,8 @@ export const DXF_PRODUCT_PHASE2_FRESH_BUILD_PROJECTION_V1 =
   'dxf-product-phase2-fresh-build-projection/1' as const;
 export const DXF_PRODUCT_PHASE2_REFINEMENT_HANDOFF_V1 =
   'dxf-product-phase2-refinement-handoff/1' as const;
+export const DXF_PRODUCT_PHASE2_SAVED_LOCAL_FRAME_REFINEMENT_HANDOFF_V2 =
+  'dxf-product-phase2-saved-local-frame-refinement-handoff/2' as const;
 
 /** Product-beta budgets stay intentionally far below the reusable Phase-2 sampler ceilings. */
 export const DXF_PRODUCT_PHASE2_FRESH_BUILD_LIMITS_V1 = Object.freeze({
@@ -263,6 +268,40 @@ export type DxfProductPhase2RefinementHandoffV1 = Readonly<{
 
 export type DxfProductPhase2RefinementHandoffResultV1 =
   | Readonly<{ ok: true; handoff: DxfProductPhase2RefinementHandoffV1 }>
+  | Readonly<{
+      ok: false;
+      handoff: null;
+      blocker: Readonly<{
+        code:
+          | 'owner-unavailable'
+          | 'refinement-capability-consumed'
+          | 'material-range-unsatisfiable'
+          | 'refinement-failed'
+          | 'independent-refinement-mismatch';
+        detail: string;
+      }>;
+    }>;
+
+export type DxfProductPhase2SavedLocalFrameRefinementHandoffV2 = Readonly<{
+  schemaVersion: typeof DXF_PRODUCT_PHASE2_SAVED_LOCAL_FRAME_REFINEMENT_HANDOFF_V2;
+  phase2OwnerCanonicalSha256: string;
+  phase2ArtifactSha256: string;
+  phase2UpgradeFingerprint: string;
+  boundaryRecoveryFingerprint: string;
+  boundaryRecoveryEvaluationFingerprint: string;
+  firstRefinementFingerprint: string;
+  independentRepeatFingerprint: string;
+  independentEvaluationFingerprint: string;
+  independentRefinementBuildCount: 3;
+  artifact: GarmentPhase2SavedLocalFrameRefinementArtifactV2;
+  sourceAuthenticityAccepted: false;
+  placementAuthority: false;
+  runtimeAuthority: false;
+  productionAuthority: false;
+}>;
+
+export type DxfProductPhase2SavedLocalFrameRefinementHandoffResultV2 =
+  | Readonly<{ ok: true; handoff: DxfProductPhase2SavedLocalFrameRefinementHandoffV2 }>
   | Readonly<{
       ok: false;
       handoff: null;
@@ -1282,6 +1321,121 @@ export function consumeDxfProductPhase2FreshBuildRefinementV1(
     );
   } finally {
     burnPrivateBinary(capability);
+  }
+}
+
+function savedLocalFrameRefinementBlocked(
+  code: Extract<
+    DxfProductPhase2SavedLocalFrameRefinementHandoffResultV2,
+    { ok: false }
+  >['blocker']['code'],
+  detail: string,
+): DxfProductPhase2SavedLocalFrameRefinementHandoffResultV2 {
+  return Object.freeze({
+    ok: false as const,
+    handoff: null,
+    blocker: Object.freeze({ code, detail: detail.slice(0, 2_048) }),
+  });
+}
+
+/**
+ * One-shot saved-frame refinement seam. Invalid frame input and failed local refinement do not
+ * consume the legacy V1 capability; consumption happens only after three byte-identical builds.
+ */
+export function consumeDxfProductPhase2FreshBuildSavedLocalFrameRefinementV2(
+  owner: unknown,
+  materialPolicy: GarmentBoundaryMeshPolicyV1,
+  translations: readonly GarmentPhase2SavedLocalFrameTranslationV2[],
+): DxfProductPhase2SavedLocalFrameRefinementHandoffResultV2 {
+  if ((typeof owner !== 'object' && typeof owner !== 'function') || owner === null)
+    return savedLocalFrameRefinementBlocked(
+      'owner-unavailable',
+      'A genuine C5.2 owner is required.',
+    );
+  const record = ownerRecords.get(owner);
+  if (!record || record.disposed)
+    return savedLocalFrameRefinementBlocked('owner-unavailable', 'The C5.2 owner is unavailable.');
+  if (record.refinementConsumed || !record.refinementCapability)
+    return savedLocalFrameRefinementBlocked(
+      'refinement-capability-consumed',
+      'The C5.2 refinement capability is one-shot and has already been consumed.',
+    );
+
+  const capability = record.refinementCapability;
+  let first: GarmentPhase2SavedLocalFrameRefinementArtifactV2 | null = null;
+  let second: GarmentPhase2SavedLocalFrameRefinementArtifactV2 | null = null;
+  let third: GarmentPhase2SavedLocalFrameRefinementArtifactV2 | null = null;
+  try {
+    const boundaryRecoveryRequest = createGarmentPhase2BoundaryRecoveryRequestV1({
+      version: GARMENT_PHASE2_BOUNDARY_RECOVERY_REQUEST_V1,
+      phase2UpgradeRequest: capability.upgradeRequest,
+      phase2Artifact: capability.artifact,
+      materialPolicy,
+    });
+    const boundaryRecoveryArtifact = recoverGarmentPhase2BoundariesV1(boundaryRecoveryRequest);
+    const refinementRequest = createGarmentPhase2InteriorRefinementRequestV1({
+      version: GARMENT_PHASE2_INTERIOR_REFINEMENT_REQUEST_V1,
+      boundaryRecoveryRequest,
+      boundaryRecoveryArtifact,
+    });
+    first = refineGarmentPhase2InteriorInSavedLocalFrameV2(refinementRequest, translations);
+    second = refineGarmentPhase2InteriorInSavedLocalFrameV2(refinementRequest, translations);
+    third = refineGarmentPhase2InteriorInSavedLocalFrameV2(refinementRequest, translations);
+    const firstBytes = structuredArtifactBytes(first, 'First saved local-frame refinement');
+    const secondBytes = structuredArtifactBytes(second, 'Second saved local-frame refinement');
+    const thirdBytes = structuredArtifactBytes(third, 'Third saved local-frame refinement');
+    if (
+      first.deterministicFingerprint !== second.deterministicFingerprint ||
+      first.deterministicFingerprint !== third.deterministicFingerprint ||
+      !sameBytes(firstBytes, secondBytes) ||
+      !sameBytes(firstBytes, thirdBytes)
+    )
+      return savedLocalFrameRefinementBlocked(
+        'independent-refinement-mismatch',
+        'Three independent saved local-frame refinements differ in bytes or fingerprint.',
+      );
+    const publicOwner = owner as DxfProductPhase2FreshBuildOwnerV1;
+    const handoff = Object.freeze({
+      schemaVersion: DXF_PRODUCT_PHASE2_SAVED_LOCAL_FRAME_REFINEMENT_HANDOFF_V2,
+      phase2OwnerCanonicalSha256: publicOwner.snapshot.seal.canonicalSha256,
+      phase2ArtifactSha256: publicOwner.snapshot.artifactSha256,
+      phase2UpgradeFingerprint: capability.artifact.deterministicFingerprint,
+      boundaryRecoveryFingerprint: boundaryRecoveryArtifact.deterministicFingerprint,
+      boundaryRecoveryEvaluationFingerprint:
+        third.writtenFrameDiagnosticArtifact.boundaryRecoveryEvaluationFingerprint,
+      firstRefinementFingerprint: first.deterministicFingerprint,
+      independentRepeatFingerprint: second.deterministicFingerprint,
+      independentEvaluationFingerprint: third.deterministicFingerprint,
+      independentRefinementBuildCount: 3 as const,
+      artifact: third,
+      sourceAuthenticityAccepted: false as const,
+      placementAuthority: false as const,
+      runtimeAuthority: false as const,
+      productionAuthority: false as const,
+    });
+    record.refinementConsumed = true;
+    record.refinementCapability = null;
+    burnPrivateBinary(capability);
+    burnPrivateBinary(first);
+    burnPrivateBinary(second);
+    first = null;
+    second = null;
+    third = null;
+    return Object.freeze({ ok: true as const, handoff });
+  } catch (error) {
+    if (
+      error instanceof GarmentPhase2BoundaryRecoveryErrorV1 &&
+      error.code === 'material-range-unsatisfiable'
+    )
+      return savedLocalFrameRefinementBlocked('material-range-unsatisfiable', error.message);
+    return savedLocalFrameRefinementBlocked(
+      'refinement-failed',
+      error instanceof Error ? error.message : 'Saved local-frame refinement failed closed.',
+    );
+  } finally {
+    if (first) burnPrivateBinary(first);
+    if (second) burnPrivateBinary(second);
+    if (third) burnPrivateBinary(third);
   }
 }
 

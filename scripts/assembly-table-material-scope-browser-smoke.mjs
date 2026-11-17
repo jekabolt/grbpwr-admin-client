@@ -104,24 +104,36 @@ check(
   'MAIN starts as the active prepared scope',
 );
 check(
-  (await staging.getAttribute('data-cad-mannequin-dxf-piece-count')) === '3',
+  (await staging.getAttribute('data-cad-mannequin-dxf-piece-count')) === '4',
   'all prepared material scopes remain staged',
+);
+await page.locator('[data-smoke-edit-active]').click();
+await page.locator('[data-smoke-arrange-active]').click();
+await page.locator('[data-smoke-topology-active]').click();
+check(
+  (await root.getAttribute('data-main-session-cursor')) === '1' &&
+    (await root.getAttribute('data-main-arrangement-quarter-turns')) === '1' &&
+    (await root.getAttribute('data-main-topology-callouts')) === '1',
+  'MAIN owns its Draft CAD session, arrangement and topology state',
 );
 check(
   (await page.locator('[data-cad-mannequin-staged-scope="TECH_CARD_BOM_PURPOSE_MAIN"]').count()) ===
     2 &&
     (await page
       .locator('[data-cad-mannequin-staged-scope="TECH_CARD_BOM_PURPOSE_POCKETING"]')
+      .count()) === 1 &&
+    (await page
+      .locator('[data-cad-mannequin-staged-scope="TECH_CARD_BOM_PURPOSE_LINING"]')
       .count()) === 1,
-  'MAIN and POCKETING preserve their exact piece counts',
+  'MAIN, POCKETING and LINING preserve their exact piece counts',
 );
 
 const materialPicker = page.locator('[data-cad-material-scope-browser] button').first();
 check((await materialPicker.count()) === 1, 'prepared material picker renders');
 await materialPicker.click();
 check(
-  (await page.getByRole('option').count()) === 2 &&
-    (await page.getByRole('option', { name: 'Lining', exact: true }).count()) === 0,
+  (await page.getByRole('option').count()) === 3 &&
+    (await page.getByRole('option', { name: 'Lining', exact: true }).count()) === 1,
   'picker exposes only bounded prepared scopes',
 );
 await page.getByRole('option', { name: 'Pocketing', exact: true }).click();
@@ -132,7 +144,22 @@ check(
   'switching scope updates the caller-owned active material slot',
 );
 check(
-  (await staging.getAttribute('data-cad-mannequin-dxf-piece-count')) === '3',
+  (await root.getAttribute('data-pocketing-session-cursor')) === '0' &&
+    (await root.getAttribute('data-pocketing-arrangement-quarter-turns')) === '0' &&
+    (await root.getAttribute('data-pocketing-topology-callouts')) === '0',
+  'POCKETING starts with an independent Draft CAD lifecycle',
+);
+await page.locator('[data-smoke-edit-active]').click();
+await page.locator('[data-smoke-arrange-active]').click();
+await page.locator('[data-smoke-topology-active]').click();
+check(
+  (await root.getAttribute('data-pocketing-session-cursor')) === '1' &&
+    (await root.getAttribute('data-pocketing-arrangement-quarter-turns')) === '1' &&
+    (await root.getAttribute('data-pocketing-topology-callouts')) === '1',
+  'POCKETING edits stay in its own session, arrangement and topology state',
+);
+check(
+  (await staging.getAttribute('data-cad-mannequin-dxf-piece-count')) === '4',
   'switching material scope does not drop staged geometry',
 );
 
@@ -143,20 +170,50 @@ check(
   'staged pocket selection retains its material-scope identity',
 );
 
-await page.locator('[data-cad-linked-material-scopes] > summary').click();
+await materialPicker.click();
+await page.getByRole('option', { name: 'Lining', exact: true }).click();
 check(
-  (await page
-    .locator('[data-cad-linked-material-scope="TECH_CARD_BOM_PURPOSE_LINING"]')
-    .count()) === 1,
-  'linked but unprepared LINING remains visible and non-selectable',
+  (await root.getAttribute('data-active-scope')) === 'TECH_CARD_BOM_PURPOSE_LINING' &&
+    (await root.getAttribute('data-lining-session-cursor')) === '0' &&
+    (await root.getAttribute('data-lining-arrangement-quarter-turns')) === '0' &&
+    (await root.getAttribute('data-lining-topology-callouts')) === '0',
+  'LINING starts with an independent Draft CAD lifecycle',
+);
+await page.locator('[data-smoke-edit-active]').click();
+await page.locator('[data-smoke-arrange-active]').click();
+await page.locator('[data-smoke-topology-active]').click();
+check(
+  (await root.getAttribute('data-lining-session-cursor')) === '1' &&
+    (await root.getAttribute('data-lining-arrangement-quarter-turns')) === '1' &&
+    (await root.getAttribute('data-lining-topology-callouts')) === '1',
+  'LINING edits stay in its own session, arrangement and topology state',
 );
 
 await materialPicker.click();
 await page.getByRole('option', { name: 'Main', exact: true }).click();
 check(
   (await root.getAttribute('data-active-scope')) === 'TECH_CARD_BOM_PURPOSE_MAIN' &&
-    (await staging.getAttribute('data-cad-mannequin-dxf-piece-count')) === '3',
+    (await staging.getAttribute('data-cad-mannequin-dxf-piece-count')) === '4',
   'returning to MAIN preserves the all-scope staging set',
+);
+check(
+  (await root.getAttribute('data-main-session-cursor')) === '1' &&
+    (await root.getAttribute('data-main-arrangement-quarter-turns')) === '1' &&
+    (await root.getAttribute('data-main-topology-callouts')) === '1' &&
+    (await root.getAttribute('data-pocketing-session-cursor')) === '1' &&
+    (await root.getAttribute('data-pocketing-arrangement-quarter-turns')) === '1' &&
+    (await root.getAttribute('data-pocketing-topology-callouts')) === '1' &&
+    (await root.getAttribute('data-lining-session-cursor')) === '1' &&
+    (await root.getAttribute('data-lining-arrangement-quarter-turns')) === '1' &&
+    (await root.getAttribute('data-lining-topology-callouts')) === '1',
+  'MAIN, POCKETING and LINING caller-owned Draft CAD state survives switching without transfer',
+);
+await page.locator('[data-smoke-compile-secondary]').click();
+check(
+  (await root.getAttribute('data-compiled-review-scope')) === 'TECH_CARD_BOM_PURPOSE_LINING' &&
+    (await root.getAttribute('data-compiled-review-file')) ===
+      'TECH_CARD_BOM_PURPOSE_LINING-cad-compiled.dxf',
+  'secondary saved scope compile opens the existing pattern import review route',
 );
 check(pageErrors.length === 0, 'browser reports no runtime exceptions', pageErrors.join(' | '));
 

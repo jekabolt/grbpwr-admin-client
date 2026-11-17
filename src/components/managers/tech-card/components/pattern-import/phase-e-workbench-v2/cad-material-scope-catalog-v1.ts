@@ -16,6 +16,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_MATERIAL_SCOPE_CATALOG_CLAIMS_V1 = O
   createsPieceAuthority: false,
   writerReplayRequired: true,
   verifiedSavedPreparedScopeAccepted: true,
+  verifiedSavedPreparedScopeSetAccepted: true,
 } as const);
 
 export type PatternImportDxfPhaseECadMaterialScopeV1 = Readonly<{
@@ -168,49 +169,98 @@ export function buildPatternImportDxfPhaseECadSavedPreparedMaterialScopeCatalogV
     pieces: readonly Readonly<{ pieceId: string; pieceLineKey: string }>[];
   }>,
 ): PatternImportDxfPhaseECadMaterialScopeCatalogResultV1 {
+  return buildPatternImportDxfPhaseECadSavedPreparedMaterialScopesCatalogV1({
+    techCardId: input.techCardId,
+    scopes: Object.freeze([input]),
+  });
+}
+
+/** Raw-free adapter for a complete set of independently verified saved-row preparations. */
+export function buildPatternImportDxfPhaseECadSavedPreparedMaterialScopesCatalogV1(
+  input: Readonly<{
+    techCardId: number;
+    scopes: readonly Readonly<{
+      scope: Readonly<{
+        scopeKey: string;
+        label: string;
+        fabricPurpose: string;
+        bomLineKey: string;
+        isInterlining: boolean;
+        filename?: string;
+        writerReplaySchemaVersion: string | null;
+      }>;
+      pieces: readonly Readonly<{ pieceId: string; pieceLineKey: string }>[];
+    }>[];
+  }>,
+): PatternImportDxfPhaseECadMaterialScopeCatalogResultV1 {
   if (!Number.isSafeInteger(input.techCardId) || input.techCardId <= 0)
     return blocked(
       'invalid-card-draft',
       'A current positive saved tech-card identity is required.',
     );
+  const scopeKeys = input.scopes.map(({ scope }) => scope.scopeKey.trim());
   if (
-    !stableText(input.scope.scopeKey) ||
-    input.scope.writerReplaySchemaVersion !== PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_CARRIER_V1
+    !input.scopes.length ||
+    scopeKeys.some((scopeKey) => !scopeKey) ||
+    new Set(scopeKeys).size !== scopeKeys.length
+  )
+    return blocked(
+      'duplicate-material-scope',
+      'Every verified saved material slot must have one distinct current scope identity.',
+    );
+  if (
+    input.scopes.some(
+      ({ scope }) =>
+        !stableText(scope.scopeKey) ||
+        scope.writerReplaySchemaVersion !== PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_CARRIER_V1,
+    )
   )
     return blocked(
       'material-scope-writer-unavailable',
-      'The verified saved material slot has no exact writer replay carrier.',
+      'A verified saved material slot has no exact writer replay carrier.',
     );
   if (
-    !input.pieces.length ||
-    input.pieces.some(
-      ({ pieceId, pieceLineKey }) => !stableText(pieceId) || !stableText(pieceLineKey),
+    input.scopes.some(
+      ({ pieces }) =>
+        !pieces.length ||
+        pieces.some(
+          ({ pieceId, pieceLineKey }) => !stableText(pieceId) || !stableText(pieceLineKey),
+        ),
     )
   )
     return blocked(
       'material-scope-alias-unavailable',
-      'The verified saved material slot has no exact DXF-piece to card-piece binding.',
+      'A verified saved material slot has no exact DXF-piece to card-piece binding.',
     );
-  const pieceLineKeys = Object.freeze([
-    ...new Set(input.pieces.map(({ pieceLineKey }) => pieceLineKey)),
-  ]);
-  const scope = Object.freeze({
-    scopeKey: input.scope.scopeKey,
-    label: input.scope.label.trim() || input.scope.scopeKey,
-    fabricPurpose: input.scope.fabricPurpose,
-    bomLineKey: input.scope.bomLineKey,
-    isInterlining: input.scope.isInterlining,
-    filename: '',
-    pieceLineKeys,
-    blockNames: Object.freeze([...new Set(input.pieces.map(({ pieceId }) => pieceId))]),
-  });
+  const scopes = Object.freeze(
+    input.scopes.map(({ scope, pieces }) =>
+      Object.freeze({
+        scopeKey: scope.scopeKey,
+        label: scope.label.trim() || scope.scopeKey,
+        fabricPurpose: scope.fabricPurpose,
+        bomLineKey: scope.bomLineKey,
+        isInterlining: scope.isInterlining,
+        filename: scope.filename?.trim() ?? '',
+        pieceLineKeys: Object.freeze([...new Set(pieces.map(({ pieceLineKey }) => pieceLineKey))]),
+        blockNames: Object.freeze([...new Set(pieces.map(({ pieceId }) => pieceId))]),
+      }),
+    ),
+  );
+  const pieceLineKeys = [...new Set(scopes.flatMap((scope) => scope.pieceLineKeys))];
   return Object.freeze({
     ok: true as const,
     techCardId: input.techCardId,
-    scopes: Object.freeze([scope]),
+    scopes,
     pieceScopeKeys: Object.freeze(
       Object.fromEntries(
-        pieceLineKeys.map((pieceLineKey) => [pieceLineKey, Object.freeze([scope.scopeKey])]),
+        pieceLineKeys.map((pieceLineKey) => [
+          pieceLineKey,
+          Object.freeze(
+            scopes
+              .filter((scope) => scope.pieceLineKeys.includes(pieceLineKey))
+              .map((scope) => scope.scopeKey),
+          ),
+        ]),
       ),
     ),
     blocker: null,

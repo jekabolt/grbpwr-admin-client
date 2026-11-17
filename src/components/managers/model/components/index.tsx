@@ -1,6 +1,7 @@
 import { cn } from 'lib/utility';
 import { useDockBottom } from 'hooks/useDockBottom';
 import { useTypingOnPhone } from './use-typing-on-phone';
+import { useModelFormWide } from './use-model-form-wide';
 import { type ComponentProps, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { adminService } from 'api/api';
@@ -27,6 +28,7 @@ import {
   BackLink,
   Button,
   CalloutBox,
+  HeaderWarnings,
   Section,
   SectionStack,
   Text,
@@ -40,6 +42,7 @@ import { DefaultSizesField } from './default-sizes-field';
 import {
   type MeasurementEntryModeV1,
   MeasurementsFields,
+  MeasurementsGroupedTable,
   MeasurementsHeaderActions,
   MeasurementsQuiz,
   preferredMeasurementEntryModeV1,
@@ -66,6 +69,7 @@ import { resolveModelGuidedMeasurementPreviewInputV1 } from './model-guided-meas
 import {
   ModelOpenReferencePreview,
   ModelOpenReferencePreviewFromInput,
+  type ModelOpenReferencePreviewHeaderStatusV1,
 } from './model-open-reference-preview';
 import {
   mapFormToModelInsert,
@@ -119,7 +123,11 @@ function ActiveMeasurementBodyPreview({
     ...props,
     activeMeasurementName: (active as common_BodyMeasurementName) || undefined,
     variant: compact ? ('workbench' as const) : ('form' as const),
-    directPoseViewportEditingEnabledV9: !compact,
+    directPoseViewportEditingEnabledV9: compact
+      ? false
+      : props.headerStatusV9
+        ? props.headerStatusV9.editPose
+        : true,
     hideDirectPoseControlV9: compact,
   };
 
@@ -218,6 +226,16 @@ function ModelFormRuntime({
   const typingOnPhone = useTypingOnPhone();
   const [measurementEntryMode, setMeasurementEntryMode] = useState<MeasurementEntryModeV1>(() =>
     preferredMeasurementEntryModeV1(typeof window === 'undefined' ? undefined : window.innerWidth),
+  );
+  const wide = useModelFormWide();
+  const paired = wide && measurementEntryMode === 'table';
+  // `edit pose` is UI state of this page only: never part of the form, never saved with the model.
+  const [editPose, setEditPose] = useState(false);
+  const [previewHeader, setPreviewHeader] =
+    useState<ModelOpenReferencePreviewHeaderStatusV1 | null>(null);
+  const previewHeaderControl = useMemo(
+    () => ({ editPose, onEditPoseChange: setEditPose, onChange: setPreviewHeader }),
+    [editPose],
   );
   const saved = useDoneFlash();
   // A refused save stands in the save bar until the next attempt.
@@ -333,7 +351,7 @@ function ModelFormRuntime({
     }
   }
 
-  const renderBodyPreview = (compact: boolean) => {
+  const renderBodyPreview = (compact: boolean, headerOwned = false) => {
     if (activePoseOwner && poseTransport?.enabled && poseTransport.readError) {
       return (
         <CalloutBox tone='error'>
@@ -367,9 +385,34 @@ function ModelFormRuntime({
         }
         poseControls='full-body-v9'
         directPoseBindingV9={directPoseBindingV9}
+        headerStatusV9={headerOwned ? previewHeaderControl : undefined}
       />
     );
   };
+
+  const measurementsSection = (
+    <Section
+      title='measurements'
+      action={
+        <MeasurementsHeaderActions
+          showAudit={isEditMode}
+          mode={measurementEntryMode}
+          onModeChange={setMeasurementEntryMode}
+        />
+      }
+    >
+      {measurementEntryMode === 'guided' ? (
+        <MeasurementsQuiz
+          showAudit={isEditMode}
+          onComplete={() => setMeasurementEntryMode('table')}
+        />
+      ) : paired ? (
+        <MeasurementsGroupedTable showAudit={isEditMode} />
+      ) : (
+        <MeasurementsFields showAudit={isEditMode} />
+      )}
+    </Section>
+  );
 
   return (
     <Form {...form}>
@@ -436,28 +479,37 @@ function ModelFormRuntime({
                   </div>
                 </Section>
 
-                <Section
-                  title='measurements'
-                  action={
-                    <MeasurementsHeaderActions
-                      showAudit={isEditMode}
-                      mode={measurementEntryMode}
-                      onModeChange={setMeasurementEntryMode}
-                    />
-                  }
-                >
-                  {measurementEntryMode === 'table' ? (
-                    <MeasurementsFields showAudit={isEditMode} />
-                  ) : (
-                    <MeasurementsQuiz
-                      showAudit={isEditMode}
-                      onComplete={() => setMeasurementEntryMode('table')}
-                    />
-                  )}
-                </Section>
+                {paired ? null : measurementsSection}
               </fieldset>
 
-              {measurementEntryMode === 'table' ? (
+              {paired ? (
+                <div
+                  className='grid grid-cols-[minmax(0,5fr)_minmax(0,6fr)] items-start gap-gutter'
+                  data-testid='model-form-pair'
+                >
+                  <Section
+                    title='body preview'
+                    className='sticky top-16'
+                    question={
+                      previewHeader?.pose ? (
+                        <span data-testid='model-mannequin-pose-session-status'>
+                          {previewHeader.pose}
+                        </span>
+                      ) : undefined
+                    }
+                    action={<HeaderWarnings items={previewHeader?.warnings ?? []} countOnly />}
+                  >
+                    {renderBodyPreview(false, true)}
+                  </Section>
+                  <fieldset
+                    disabled={modelFieldsLocked}
+                    className='contents'
+                    aria-label='Model measurements'
+                  >
+                    {measurementsSection}
+                  </fieldset>
+                </div>
+              ) : measurementEntryMode === 'table' ? (
                 <Section title='body preview'>{renderBodyPreview(false)}</Section>
               ) : null}
 

@@ -2,6 +2,29 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const DEV_ROUTE = '/__model-form-personalized-preview-v1';
 
+// Desktop model form: joints drag only with `edit pose` on (off by default, never saved).
+async function openPoseEditor(page: Page) {
+  await page.goto(DEV_ROUTE, { waitUntil: 'domcontentloaded' });
+  const editPose = page.getByRole('checkbox', { name: 'edit pose', exact: true });
+  await editPose.check({ timeout: 180_000 });
+  await expect(editPose).toBeChecked();
+}
+
+// Desktop pair: scroll to the sticky preview so the whole canvas sits above the save bar.
+async function pinPreviewAboveSaveBar(page: Page) {
+  const pair = page.getByTestId('model-form-pair');
+  if ((await pair.count()) === 0) return;
+  await pair.evaluate((element) =>
+    window.scrollTo(0, element.getBoundingClientRect().top + window.scrollY - 64),
+  );
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+}
+
 interface PoseLegV9 {
   readonly hipForwardDeg: number;
   readonly hipSideDeg: number;
@@ -312,7 +335,7 @@ async function expectPositionHit(options: {
 test('shoulder marker live-drags posture without taking wrist, torso, or camera controls', async ({
   page,
 }) => {
-  await page.goto(DEV_ROUTE, { waitUntil: 'domcontentloaded' });
+  await openPoseEditor(page);
   const preview = page.getByTestId('model-open-reference-preview');
   const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
   await expect(canvas).toBeVisible({ timeout: 180_000 });
@@ -700,7 +723,7 @@ test('ModelForm V9 live-drags head and leg while empty space remains the camera'
   });
   page.on('pageerror', (error) => pageErrors.push(error.message));
 
-  await page.goto(DEV_ROUTE, { waitUntil: 'domcontentloaded' });
+  await openPoseEditor(page);
   const preview = page.getByTestId('model-open-reference-preview');
   await expect(preview).toHaveAttribute('data-pose-controls', 'full-body-v9');
   await expect(page.getByTestId('model-open-reference-direct-pose-control-v9')).toBeVisible();
@@ -829,7 +852,7 @@ test('clean ModelForm V9 lowers linked arms beside the thighs with a 56 px wrist
   const requests: Array<{ method: string; url: string }> = [];
   page.on('request', (request) => requests.push({ method: request.method(), url: request.url() }));
 
-  await page.goto(DEV_ROUTE, { waitUntil: 'domcontentloaded' });
+  await openPoseEditor(page);
   const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
   await expect(canvas).toBeVisible({ timeout: 180_000 });
   await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
@@ -951,13 +974,14 @@ test('clean ModelForm V9 lowers linked arms beside the thighs with a 56 px wrist
 test('direct ankle and wrist drags retain a non-crossing last-valid pose across limb families', async ({
   page,
 }) => {
-  await page.goto(DEV_ROUTE, { waitUntil: 'domcontentloaded' });
+  await openPoseEditor(page);
   const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
   await expect(canvas).toBeVisible({ timeout: 180_000 });
   await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
     'Preview partial: A-rest',
     { timeout: 180_000 },
   );
+  await pinPreviewAboveSaveBar(page);
   const box = await canvas.boundingBox();
   expect(box).not.toBeNull();
   const bounds = box!;
@@ -987,10 +1011,12 @@ test('direct ankle and wrist drags retain a non-crossing last-valid pose across 
   expect(legAfter.equals(legBefore)).toBe(true);
 
   await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.getByRole('checkbox', { name: 'edit pose', exact: true }).check({ timeout: 180_000 });
   await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
     'Preview partial: A-rest',
     { timeout: 180_000 },
   );
+  await pinPreviewAboveSaveBar(page);
   const ankleCollisionTarget = await findMarker({
     page,
     canvas,
@@ -1006,11 +1032,15 @@ test('direct ankle and wrist drags retain a non-crossing last-valid pose across 
   });
   await settlePointerOnEmptyCanvas(page, canvas);
   const armBefore = await canvas.screenshot();
+  // Aim between the feet at ankle height: the arm must cross the leg at any canvas scale,
+  // while a marker-edge pixel on the ankle itself can leave the wrist beside the thigh.
+  const armBox = await canvas.boundingBox();
+  expect(armBox).not.toBeNull();
   const armDrag = await attemptExtremePositionDrag({
     page,
     canvas,
     start: wristStart,
-    target: ankleCollisionTarget,
+    target: { x: armBox!.x + armBox!.width / 2, y: ankleCollisionTarget.y },
     expectedBlocker: /arm-overlap|leg-overlap/u,
   });
   await settlePointerOnEmptyCanvas(page, canvas);
@@ -1025,7 +1055,7 @@ test('direct ankle and wrist drags retain a non-crossing last-valid pose across 
 test('side-view elbow ring admits anterior flexion and cannot reverse past neutral', async ({
   page,
 }) => {
-  await page.goto(DEV_ROUTE, { waitUntil: 'domcontentloaded' });
+  await openPoseEditor(page);
   const preview = page.getByTestId('model-open-reference-preview');
   const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
   await expect(canvas).toBeVisible({ timeout: 180_000 });
@@ -1144,7 +1174,7 @@ test('side-view elbow ring admits anterior flexion and cannot reverse past neutr
 });
 
 test('side-view wrist drag detents a visibly straight arm to exact neutral', async ({ page }) => {
-  await page.goto(DEV_ROUTE, { waitUntil: 'domcontentloaded' });
+  await openPoseEditor(page);
   const preview = page.getByTestId('model-open-reference-preview');
   const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
   await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
@@ -1252,7 +1282,7 @@ test('side-view wrist drag detents a visibly straight arm to exact neutral', asy
 test('under-bust rebuilds an independent ribcage band without resetting the V9 pose', async ({
   page,
 }) => {
-  await page.goto(DEV_ROUTE, { waitUntil: 'domcontentloaded' });
+  await openPoseEditor(page);
   const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
   const status = page.getByTestId('model-open-reference-preview-status');
   await expect(status).toContainText('Preview partial: A-rest', { timeout: 180_000 });
@@ -1289,7 +1319,7 @@ test('under-bust rebuilds an independent ribcage band without resetting the V9 p
 });
 
 test('hostile wrist drag keeps the last-valid source and canvas', async ({ page }) => {
-  await page.goto(DEV_ROUTE, { waitUntil: 'domcontentloaded' });
+  await openPoseEditor(page);
   const preview = page.getByTestId('model-open-reference-preview');
   const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
   await expect(canvas).toBeVisible({ timeout: 180_000 });
@@ -1360,7 +1390,7 @@ test('hostile wrist drag keeps the last-valid source and canvas', async ({ page 
 test('rear-view anterior arm stays admitted and uses an occluded-joint X-ray cue', async ({
   page,
 }) => {
-  await page.goto(DEV_ROUTE, { waitUntil: 'domcontentloaded' });
+  await openPoseEditor(page);
   const preview = page.getByTestId('model-open-reference-preview');
   const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
   await expect(canvas).toBeVisible({ timeout: 180_000 });
@@ -1483,4 +1513,101 @@ test('rear-view anterior arm stays admitted and uses an occluded-joint X-ray cue
     .toBeGreaterThan(cameraRenderCount);
   const cameraAfter = await canvas.screenshot();
   expect(cameraAfter.equals(cameraBefore)).toBe(false);
+});
+
+async function expectInsideViewport(page: Page, target: Locator) {
+  const viewport = page.viewportSize();
+  const box = await target.boundingBox();
+  expect(viewport).not.toBeNull();
+  expect(box).not.toBeNull();
+  expect(box!.y).toBeGreaterThanOrEqual(0);
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width);
+}
+
+test('desktop pair keeps the mannequin and the focused field on screen', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(DEV_ROUTE, { waitUntil: 'domcontentloaded' });
+  const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
+  await expect(canvas).toBeVisible({ timeout: 180_000 });
+  await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
+    'Preview partial: A-rest',
+    { timeout: 180_000 },
+  );
+  const pair = page.getByTestId('model-form-pair');
+  await expect(pair).toBeVisible();
+  // The user scrolls down to the measurements; from there the preview stays stuck beside them.
+  await pair.evaluate((element) =>
+    window.scrollTo(0, element.getBoundingClientRect().top + window.scrollY - 64),
+  );
+  const groups = page.getByRole('radiogroup', { name: 'measurement group' });
+  await expect(groups.getByRole('radio')).toHaveCount(8);
+
+  const chest = page.getByRole('textbox', { name: 'chest', exact: true });
+  await chest.focus();
+  await expect(canvas).toHaveAttribute(
+    'data-active-measurement-guide',
+    'BODY_MEASUREMENT_NAME_CHEST',
+  );
+  await expectInsideViewport(page, canvas);
+  await expectInsideViewport(page, chest);
+
+  // Tab from the last torso field opens the next group on its first field.
+  await page.getByRole('textbox', { name: 'neck base', exact: true }).focus();
+  await page.keyboard.press('Tab');
+  const acrossShoulder = page.getByRole('textbox', { name: 'across shoulder', exact: true });
+  await expect(acrossShoulder).toBeFocused();
+  await expect(page.locator('[data-measurement-group="torso"]')).toBeHidden();
+  await page.keyboard.press('Shift+Tab');
+  await expect(page.getByRole('textbox', { name: 'neck base', exact: true })).toBeFocused();
+
+  await groups.getByRole('radio', { name: /^legs \d+\/\d+$/ }).click();
+  const thigh = page.getByRole('textbox', { name: 'thigh', exact: true });
+  await thigh.focus();
+  await expect(canvas).toHaveAttribute(
+    'data-active-measurement-guide',
+    'BODY_MEASUREMENT_NAME_THIGH',
+  );
+  await expectInsideViewport(page, canvas);
+  await expectInsideViewport(page, thigh);
+});
+
+test('joints do not drag while edit pose is off', async ({ page }) => {
+  await page.goto(DEV_ROUTE, { waitUntil: 'domcontentloaded' });
+  const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
+  await expect(canvas).toBeVisible({ timeout: 180_000 });
+  await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
+    'Preview partial: A-rest',
+    { timeout: 180_000 },
+  );
+  const editPose = page.getByRole('checkbox', { name: 'edit pose', exact: true });
+  await expect(editPose).not.toBeChecked();
+  await expect(canvas).toHaveAttribute('data-joint-editor-mode', 'off');
+  await expect(page.getByRole('toolbar', { name: 'Mannequin pose tools' })).toHaveCount(0);
+
+  const box = (await canvas.boundingBox())!;
+  const sourceBefore = await canvas.getAttribute('data-source-revision');
+  const renderCount = Number(await canvas.getAttribute('data-render-count'));
+  for (const [fx, fy] of [
+    [0.5, 0.14],
+    [0.62, 0.3],
+    [0.45, 0.75],
+  ] as const) {
+    const start = { x: box.x + box.width * fx, y: box.y + box.height * fy };
+    await page.mouse.move(start.x, start.y);
+    await expect(canvas).not.toHaveAttribute('data-hovered-joint-group', /.+/);
+    await page.mouse.down();
+    await page.mouse.move(start.x + 48, start.y - 24, { steps: 8 });
+    await expect(canvas).not.toHaveAttribute('data-position-dragging', 'true');
+    await page.mouse.up();
+  }
+  await expect(canvas).toHaveAttribute('data-source-revision', sourceBefore ?? '');
+  await expect
+    .poll(async () => Number(await canvas.getAttribute('data-render-count')))
+    .toBeGreaterThan(renderCount);
+
+  await editPose.check();
+  await expect(canvas).toHaveAttribute('data-joint-editor-mode', 'edit-pose');
+  await expect(page.getByRole('toolbar', { name: 'Mannequin pose tools' })).toBeVisible();
 });

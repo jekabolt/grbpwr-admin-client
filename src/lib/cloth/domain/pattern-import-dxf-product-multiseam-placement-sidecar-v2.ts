@@ -22,10 +22,8 @@ export const PATTERN_IMPORT_DXF_PRODUCT_MULTISEAM_PLACEMENT_SIDECAR_OWNER_V2 =
 export const PATTERN_IMPORT_DXF_PRODUCT_MULTISEAM_PLACEMENT_SIDECAR_MEDIA_TYPE_V2 =
   'application/vnd.grbpwr.pattern-dxf-product-multiseam-placement.v2+json' as const;
 
-// These wire tags are repeated deliberately at this read-only persistence boundary. Importing
-// their producer modules as values pulls body-admission and mesh-build research into the Assembly
-// Table chunk even though sidecar validation never executes either owner. The type annotations keep
-// the literals pinned to the producer contracts while allowing both imports above to erase.
+// Keep these read-only wire tags local so persistence validation does not value-load body/mesh
+// producer owners into the Assembly Table bundle.
 const ANNULAR_MAPPING_PARAMETERS_REQUEST_SCHEMA_VERSION_V1: typeof DXF_PRODUCT_TWO_PANEL_SKIRT_ANNULAR_MAPPING_PARAMETERS_REQUEST_V1 =
   'dxf-product-two-panel-skirt-annular-mapping-parameters-request/1';
 const PLACEMENT_SEMANTICS_REQUEST_SCHEMA_VERSION_V1: typeof DXF_PRODUCT_TWO_PANEL_SKIRT_PLACEMENT_SEMANTICS_REQUEST_V1 =
@@ -554,8 +552,8 @@ function validateSelection(value: unknown, path: string, pieceCurves: Set<string
   const item = record(value, ['contourId', 'sourceCurveIds', 'boundaryVertexIndices'], path);
   authoredStableId(item.contourId, `${path}.contourId`);
   const curves = item.sourceCurveIds;
-  if (!Array.isArray(curves) || curves.length < 1 || curves.length > 32)
-    fail('invalid-input', `${path}.sourceCurveIds`, 'Expected 1..32 source curves.');
+  if (!Array.isArray(curves) || curves.length < 1 || curves.length > 64)
+    fail('invalid-input', `${path}.sourceCurveIds`, 'Expected 1..64 source curves.');
   curves.forEach((entry, index) => {
     const curveId = sourceCurveId(entry, `${path}.sourceCurveIds[${index}]`);
     if (pieceCurves.has(curveId))
@@ -578,26 +576,9 @@ function validateSelection(value: unknown, path: string, pieceCurves: Set<string
   });
 }
 
-function validateSemantics(
-  value: unknown,
-  path: string,
-): PlacementSemanticsIntentV1 & {
-  originalCanonicalSha256: string;
-} {
-  const semantics = record(
-    value,
-    ['schemaVersion', 'garment', 'body', 'policy', 'originalCanonicalSha256'],
-    path,
-  );
-  literal(
-    semantics.schemaVersion,
-    PLACEMENT_SEMANTICS_REQUEST_SCHEMA_VERSION_V1,
-    `${path}.schemaVersion`,
-  );
-  sha(semantics.originalCanonicalSha256, `${path}.originalCanonicalSha256`);
-
+function validateWireGarment(value: unknown, path: string): void {
   const garment = record(
-    semantics.garment,
+    value,
     [
       'kind',
       'frontPieceId',
@@ -643,6 +624,53 @@ function validateSemantics(
       ),
     );
   });
+}
+
+function validateWirePolicy(value: unknown, path: string): void {
+  const policy = record(
+    value,
+    ['id', 'revision', 'mapping', 'authoredClearanceM', 'clothThicknessM', 'retention'],
+    `${path}.policy`,
+  );
+  authoredStableId(policy.id, `${path}.policy.id`);
+  authoredStableId(policy.revision, `${path}.policy.revision`);
+  const mapping = record(policy.mapping, ['kind', 'id', 'revision'], `${path}.policy.mapping`);
+  literal(mapping.kind, 'authored-annular-sector-conical', `${path}.policy.mapping.kind`);
+  authoredStableId(mapping.id, `${path}.policy.mapping.id`);
+  authoredStableId(mapping.revision, `${path}.policy.mapping.revision`);
+  finite(policy.authoredClearanceM, `${path}.policy.authoredClearanceM`, 0, 0.1);
+  const thickness = finite(policy.clothThicknessM, `${path}.policy.clothThicknessM`, 0, 0.02);
+  if (thickness <= 0)
+    fail('invalid-input', `${path}.policy.clothThicknessM`, 'Cloth thickness must be positive.');
+  const retention = record(
+    policy.retention,
+    ['id', 'revision', 'kind'],
+    `${path}.policy.retention`,
+  );
+  authoredStableId(retention.id, `${path}.policy.retention.id`);
+  authoredStableId(retention.revision, `${path}.policy.retention.revision`);
+  literal(retention.kind, 'waist-boundary-support', `${path}.policy.retention.kind`);
+}
+
+function validateSemantics(
+  value: unknown,
+  path: string,
+): PlacementSemanticsIntentV1 & {
+  originalCanonicalSha256: string;
+} {
+  const semantics = record(
+    value,
+    ['schemaVersion', 'garment', 'body', 'policy', 'originalCanonicalSha256'],
+    path,
+  );
+  literal(
+    semantics.schemaVersion,
+    PLACEMENT_SEMANTICS_REQUEST_SCHEMA_VERSION_V1,
+    `${path}.schemaVersion`,
+  );
+  sha(semantics.originalCanonicalSha256, `${path}.originalCanonicalSha256`);
+
+  validateWireGarment(semantics.garment, path);
 
   const body = record(
     semantics.body,
@@ -678,29 +706,7 @@ function validateSemantics(
   if (new Set([landmarks.waistCenterId, landmarks.hipLeftId, landmarks.hipRightId]).size !== 3)
     fail('invalid-input', `${path}.body.landmarks`, 'Waist and hip landmark IDs must be distinct.');
 
-  const policy = record(
-    semantics.policy,
-    ['id', 'revision', 'mapping', 'authoredClearanceM', 'clothThicknessM', 'retention'],
-    `${path}.policy`,
-  );
-  authoredStableId(policy.id, `${path}.policy.id`);
-  authoredStableId(policy.revision, `${path}.policy.revision`);
-  const mapping = record(policy.mapping, ['kind', 'id', 'revision'], `${path}.policy.mapping`);
-  literal(mapping.kind, 'authored-annular-sector-conical', `${path}.policy.mapping.kind`);
-  authoredStableId(mapping.id, `${path}.policy.mapping.id`);
-  authoredStableId(mapping.revision, `${path}.policy.mapping.revision`);
-  finite(policy.authoredClearanceM, `${path}.policy.authoredClearanceM`, 0, 0.1);
-  const thickness = finite(policy.clothThicknessM, `${path}.policy.clothThicknessM`, 0, 0.02);
-  if (thickness <= 0)
-    fail('invalid-input', `${path}.policy.clothThicknessM`, 'Cloth thickness must be positive.');
-  const retention = record(
-    policy.retention,
-    ['id', 'revision', 'kind'],
-    `${path}.policy.retention`,
-  );
-  authoredStableId(retention.id, `${path}.policy.retention.id`);
-  authoredStableId(retention.revision, `${path}.policy.retention.revision`);
-  literal(retention.kind, 'waist-boundary-support', `${path}.policy.retention.kind`);
+  validateWirePolicy(semantics.policy, path);
   return semantics as PlacementSemanticsIntentV1 & { originalCanonicalSha256: string };
 }
 
@@ -924,7 +930,10 @@ function validateAuthoring(
   value: unknown,
   bindings: PatternImportDxfProductMultiseamPlacementBindingsV2,
   path: string,
-): PatternImportDxfProductMultiseamPlacementAuthoringV2 {
+  bodyFree = false,
+):
+  | PatternImportDxfProductMultiseamPlacementAuthoringV2
+  | PatternImportDxfProductBodyFreePlacementAuthoringWireV1 {
   const authoring = record(
     value,
     ['authoredOrigin', 'authoredImportGeneration', 'semantics', 'annular'],
@@ -936,7 +945,9 @@ function validateAuthoring(
   )
     fail('invalid-input', `${path}.authoredOrigin`, 'Unsupported authored origin.');
   integer(authoring.authoredImportGeneration, `${path}.authoredImportGeneration`, 1);
-  const semantics = validateSemantics(authoring.semantics, `${path}.semantics`);
+  const semantics = bodyFree
+    ? validateBodyFreeWireSemantics(authoring.semantics, `${path}.semantics`)
+    : validateSemantics(authoring.semantics, `${path}.semantics`);
   const annular = record(
     authoring.annular,
     [
@@ -1009,7 +1020,9 @@ function validateAuthoring(
       `${path}.annular.parameters`,
       'D2 piece start seams must equal the topology-bound seam anchor.',
     );
-  return authoring as PatternImportDxfProductMultiseamPlacementAuthoringV2;
+  return authoring as
+    | PatternImportDxfProductMultiseamPlacementAuthoringV2
+    | PatternImportDxfProductBodyFreePlacementAuthoringWireV1;
 }
 
 function validateRequest(
@@ -1551,3 +1564,61 @@ export async function decodePatternImportDxfProductMultiseamPlacementSidecarV2(
     return blockedDecode(error);
   }
 }
+
+/** Shared storage-only validation. A body-free wire intent is never promoted to a D0 owner. */
+export type PatternImportDxfProductBodyFreePlacementAuthoringWireV1 = Omit<
+  PatternImportDxfProductMultiseamPlacementAuthoringV2,
+  'semantics'
+> &
+  Readonly<{
+    semantics: Omit<
+      PatternImportDxfProductMultiseamPlacementAuthoringV2['semantics'],
+      'body' | 'schemaVersion'
+    > &
+      Readonly<{ schemaVersion: 'dxf-product-two-panel-skirt-garment-semantics-request/1' }>;
+  }>;
+function validateBodyFreeWireSemantics(
+  value: unknown,
+  path: string,
+): PatternImportDxfProductBodyFreePlacementAuthoringWireV1['semantics'] {
+  const semantics = record(
+    value,
+    ['schemaVersion', 'garment', 'policy', 'originalCanonicalSha256'],
+    path,
+  );
+  literal(
+    semantics.schemaVersion,
+    'dxf-product-two-panel-skirt-garment-semantics-request/1',
+    `${path}.schemaVersion`,
+  );
+  sha(semantics.originalCanonicalSha256, `${path}.originalCanonicalSha256`);
+  validateWireGarment(semantics.garment, path);
+  validateWirePolicy(semantics.policy, path);
+  return semantics as PatternImportDxfProductBodyFreePlacementAuthoringWireV1['semantics'];
+}
+export function capturePatternImportDxfProductBodyFreePlacementWireV1(value: unknown): Readonly<{
+  bindings: PatternImportDxfProductMultiseamPlacementBindingsV2;
+  placementAuthoring: PatternImportDxfProductBodyFreePlacementAuthoringWireV1;
+}> {
+  const candidate = record(
+    detachPlain(value),
+    ['bindings', 'placementAuthoring'],
+    'bodyFreePlacement',
+  );
+  const bindings = validateBindings(candidate.bindings, 'bindings');
+  validateAuthoring(candidate.placementAuthoring, bindings, 'placementAuthoring', true);
+  return deepFreeze(
+    candidate as {
+      bindings: PatternImportDxfProductMultiseamPlacementBindingsV2;
+      placementAuthoring: PatternImportDxfProductBodyFreePlacementAuthoringWireV1;
+    },
+  );
+}
+
+/** Internal pure codec primitives shared by the next wire version, not authority validators. */
+export const patternImportDxfProductPlacementWireCodecV1 = Object.freeze({
+  detachPlain,
+  canonical,
+  deepFreeze,
+  sha256,
+});

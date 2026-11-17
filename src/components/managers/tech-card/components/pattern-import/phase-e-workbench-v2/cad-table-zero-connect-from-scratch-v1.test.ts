@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_AUTHORING_CATALOG_V1,
@@ -11,6 +11,12 @@ import {
 
 import { resolvePatternImportDxfPhaseEZeroConnectSavedOperationV1 } from './cad-table-zero-connect-post-save-owner-v1';
 import { preparePatternImportDxfPhaseEZeroConnectCardOperationRowV1 } from './cad-table-zero-connect-row-adapter-v1';
+import { derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1 } from './cad-table-connect-edge-segments-v1';
+import {
+  createPatternImportDxfPhaseECadTableZeroConnectControllerStateV1,
+  selectPatternImportDxfPhaseECadTableZeroConnectControllerEdgeV1,
+  startPatternImportDxfPhaseECadTableZeroConnectControllerV1,
+} from './cad-table-zero-connect-controller-v1';
 import {
   buildPatternImportDxfPhaseECadTableZeroConnectCandidateV1,
   buildPatternImportDxfPhaseECadTableZeroConnectIdentityPlanV1,
@@ -205,6 +211,59 @@ describe('zero-connect from-scratch Assembly Order route', () => {
         historyKey: 'cad-connect-1',
         operationNumber: 10,
       },
+    });
+  });
+
+  it('refuses a structural refresh function before calling the handoff owner', () => {
+    const currentAuthority = authority();
+    const authoringAuthority = Object.freeze({ opaque: 'genuine-owner-token' }) as never;
+    const authoringAuthorityRefresh = Object.freeze({ refresh: vi.fn() }) as never;
+    const controllerAuthority = {
+      ...currentAuthority,
+      authoringAuthority,
+      authoringAuthorityRefresh,
+    };
+    const ingest = vi.fn(() => {
+      return {
+        ok: true as const,
+        inserted: 1 as const,
+        historyKey: 'connect:bbbbbbbbbbbb:1',
+        sessionRevision: 2,
+        blocker: null,
+      };
+    });
+    const handoff = { status: 'available' as const, ingest };
+    const segments = derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(
+      currentAuthority.projection,
+    );
+    const front = segments.find(({ pieceId }) => pieceId === 'front')!;
+    const back = segments.find(({ pieceId }) => pieceId === 'back')!;
+
+    let state = startPatternImportDxfPhaseECadTableZeroConnectControllerV1(
+      createPatternImportDxfPhaseECadTableZeroConnectControllerStateV1(),
+      controllerAuthority,
+    );
+    state = selectPatternImportDxfPhaseECadTableZeroConnectControllerEdgeV1(
+      state,
+      controllerAuthority,
+      front,
+      'forward',
+      handoff,
+    );
+    expect(ingest).not.toHaveBeenCalled();
+    state = selectPatternImportDxfPhaseECadTableZeroConnectControllerEdgeV1(
+      state,
+      controllerAuthority,
+      back,
+      'reverse',
+      handoff,
+    );
+
+    expect(ingest).not.toHaveBeenCalled();
+    expect(state.handoffResult).toMatchObject({
+      ok: false,
+      inserted: 0,
+      blocker: { code: 'zero-connect-authoring-write-refused' },
     });
   });
 });
