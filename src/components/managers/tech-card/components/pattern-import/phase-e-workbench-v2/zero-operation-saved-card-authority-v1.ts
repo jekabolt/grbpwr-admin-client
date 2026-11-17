@@ -33,6 +33,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_ZERO_OPERATION_SAVED_CARD_AUTHORITY_CLAI
     byteLengthAndShaVerifiedBySavedReprocessOwner: true,
     currentRowReadRepeatedAfterReprocess: true,
     freshPreparationFollowedByIndependentCurrentCardRead: true,
+    positiveCardBootstrapUsesIndependentCurrentCardRead: true,
     ordinarySaveCardLockAdvanceRevalidated: true,
     ordinarySaveCardLockMustStrictlyAdvance: true,
     localFormProjectionAccepted: false,
@@ -54,6 +55,8 @@ export type PatternImportDxfPhaseEZeroOperationSavedCardAuthorityRuntimeV1 = Rea
     expected: Readonly<{ techCardId: number; previousLockVersion: number }>,
     signal: AbortSignal,
   ) => Promise<common_TechCard>;
+  /** Independently reads a positive existing card before the Host may admit a fresh session. */
+  resolveCurrentCard: (techCardId: number, signal: AbortSignal) => Promise<common_TechCard>;
   /** Re-reads the immutable DXF row after an ordinary save advances only the card lock. */
   resolveLatestCard: (
     selector: DxfProductSavedRowIdentityV1,
@@ -255,6 +258,21 @@ export function createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1(
         Number(techCard.lockVersion) <= expected.previousLockVersion
       )
         throw new Error('The confirmed import save did not strictly advance the card lock.');
+      return techCard;
+    },
+    async resolveCurrentCard(techCardId, signal) {
+      assertLive(signal);
+      if (!Number.isSafeInteger(techCardId) || techCardId <= 0)
+        throw new Error('A positive saved card id is required.');
+      const techCard = await readTechCard(techCardId);
+      assertLive(signal);
+      if (
+        techCard.id !== techCardId ||
+        !Number.isSafeInteger(techCard.lockVersion) ||
+        Number(techCard.lockVersion) < 0 ||
+        !techCard.techCard
+      )
+        throw new Error('The independent current saved card read is invalid.');
       return techCard;
     },
     async resolveLatestCard(selector, signal) {

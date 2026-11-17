@@ -66,6 +66,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_OPERATION_SAVED_PREPARATI
 export type PatternImportDxfPhaseECadTableZeroOperationSavedBlockerV1 = Readonly<{
   code:
     | 'saved-card-invalid'
+    | 'saved-card-current-read-failed'
     | 'saved-pattern-unavailable'
     | 'material-scope-unavailable'
     | 'size-token-unavailable'
