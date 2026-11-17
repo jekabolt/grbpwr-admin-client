@@ -186,6 +186,7 @@ function rig(
     gets?: unknown[];
     put?: ReturnType<typeof vi.fn>;
     decoded?: ReturnType<typeof decodedV6>;
+    crypto?: Pick<Crypto, 'subtle'>;
   } = {},
 ) {
   const GetTechCardPatternSemanticSidecar = vi.fn();
@@ -203,7 +204,10 @@ function rig(
   }));
   if (options.decoded) codec.decodeV6.mockResolvedValue(options.decoded);
   return {
-    persistence: createPatternImportDxfProductCompositeSidecarPersistenceV6({ createClient }),
+    persistence: createPatternImportDxfProductCompositeSidecarPersistenceV6({
+      createClient,
+      crypto: options.crypto,
+    }),
     GetTechCardPatternSemanticSidecar,
     PutTechCardPatternSemanticSidecar,
     createClient,
@@ -248,6 +252,79 @@ describe('Composite V6 arrangement persistence', () => {
       sidecarBytes: base64(V6_BYTES),
     });
     expect(test.GetTechCardPatternSemanticSidecar).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects accessor authority without invoking its getter or issuing transport', async () => {
+    let getterCalls = 0;
+    const hostileRow = { ...authority.row };
+    Object.defineProperty(hostileRow, 'techCardId', {
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        return authority.row.techCardId;
+      },
+    });
+    const test = rig();
+
+    const result = await test.persistence.save(
+      {
+        schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V6,
+        currentAuthority: { ...authority, row: hostileRow },
+        arrangementTarget: target,
+        nextOwner,
+      } as never,
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      writeOutcome: 'not-attempted',
+      blockers: [{ code: 'readback-invalid' }],
+    });
+    expect(getterCalls).toBe(0);
+    expect(test.GetTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+    expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+  });
+
+  it('uses an immutable authority snapshot when the caller mutates during the first GET', async () => {
+    const mutableAuthority = structuredClone(authority);
+    const mutableRequest = {
+      schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V6,
+      currentAuthority: mutableAuthority,
+      arrangementTarget: target,
+      nextOwner,
+    } as never;
+    const test = rig();
+    test.GetTechCardPatternSemanticSidecar.mockReset();
+    test.GetTechCardPatternSemanticSidecar.mockImplementationOnce(async () => {
+      Object.assign(mutableAuthority.row, {
+        techCardId: 999,
+        patternLineKey: 'pattern:mutated',
+        sha256: hash('f'),
+      });
+      Object.assign(mutableAuthority, {
+        serverAssemblyRevision: 'assembly-revision:mutated',
+        assemblyTopologySha256: hash('f'),
+      });
+      return { semanticSidecar: storedV5() };
+    }).mockResolvedValueOnce({ semanticSidecar: storedV6() });
+
+    const result = await test.persistence.save(mutableRequest, new AbortController().signal);
+
+    expect(result).toMatchObject({ ok: true, writeOutcome: 'verified' });
+    expect(test.GetTechCardPatternSemanticSidecar).toHaveBeenNthCalledWith(1, {
+      techCardId: authority.row.techCardId,
+      patternLineKey: authority.row.patternLineKey,
+    });
+    expect(test.PutTechCardPatternSemanticSidecar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        techCardId: authority.row.techCardId,
+        patternLineKey: authority.row.patternLineKey,
+        expectedDxfSha256: authority.row.sha256,
+        expectedServerAssemblyRevision: authority.serverAssemblyRevision,
+        expectedAssemblyTopologySha256: authority.assemblyTopologySha256,
+      }),
+    );
   });
 
   it('fails before PUT when the next V6 CAS is stale', async () => {
@@ -298,6 +375,50 @@ describe('Composite V6 arrangement persistence', () => {
       blockers: [{ code: 'cancelled' }],
     });
     expect(during.GetTechCardPatternSemanticSidecar).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns cancelled when direct readback aborts during SHA-256', async () => {
+    const controller = new AbortController();
+    const digest = vi.fn(async (...args: Parameters<SubtleCrypto['digest']>) => {
+      const result = await globalThis.crypto.subtle.digest(...args);
+      controller.abort();
+      return result;
+    });
+    const test = rig({
+      gets: [{ semanticSidecar: storedV6() }],
+      crypto: { subtle: { digest } as unknown as SubtleCrypto },
+    });
+
+    const result = await test.persistence.read(request(), controller.signal);
+
+    expect(result).toMatchObject({ ok: false, blocker: { code: 'cancelled' } });
+    expect(test.GetTechCardPatternSemanticSidecar).toHaveBeenCalledTimes(1);
+    expect(codec.decodeV6).not.toHaveBeenCalled();
+    expect(test.PutTechCardPatternSemanticSidecar).not.toHaveBeenCalled();
+  });
+
+  it('stops unknown-outcome recovery when abort occurs during V6 decode', async () => {
+    const controller = new AbortController();
+    let decodeCalls = 0;
+    codec.decodeV6.mockImplementation(async () => {
+      decodeCalls += 1;
+      if (decodeCalls === 3) controller.abort();
+      return decodedV6();
+    });
+    const test = rig({
+      gets: [{ semanticSidecar: storedV5() }, { semanticSidecar: storedV6() }],
+      put: vi.fn().mockRejectedValue(new Error('connection dropped after commit')),
+    });
+
+    const result = await test.persistence.save(request(), controller.signal);
+
+    expect(result).toMatchObject({
+      ok: false,
+      writeOutcome: 'unknown',
+      blockers: [{ code: 'cancelled' }],
+    });
+    expect(test.GetTechCardPatternSemanticSidecar).toHaveBeenCalledTimes(2);
+    expect(codec.readV3Component).toHaveBeenCalledTimes(1);
   });
 
   it('rejects restore for every arrangement-owned source/model/pose drift', async () => {

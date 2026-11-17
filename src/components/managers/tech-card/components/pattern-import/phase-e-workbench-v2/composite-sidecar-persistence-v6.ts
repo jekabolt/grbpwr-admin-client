@@ -122,8 +122,10 @@ export type PatternImportDxfProductCompositeSidecarPersistenceDepsV6 = Readonly<
 }>;
 
 const SHA256 = /^[0-9a-f]{64}$/;
+const STABLE_ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
 const MAX_SIDECAR_BYTES = 4 * 1024 * 1024;
 const decoder = new TextDecoder('utf-8', { fatal: true });
+const encoder = new TextEncoder();
 
 class CompositeV6PersistenceFailure extends Error {
   constructor(
@@ -217,6 +219,94 @@ function arrangementTarget(
   }) as PatternImportDxfProductCompositeSidecarArrangementTargetV6;
 }
 
+function authoritySnapshot(value: unknown): PatternImportDxfProductCompositeSidecarBindingsV3 {
+  const authority = exactRecord(
+    value,
+    ['row', 'serverAssemblyRevision', 'assemblyTopologySha256'],
+    'currentAuthority',
+  );
+  const row = exactRecord(
+    authority.row,
+    [
+      'techCardId',
+      'scopeKey',
+      'patternLineKey',
+      'revision',
+      'cardLockVersion',
+      'url',
+      'sizeBytes',
+      'sha256',
+    ],
+    'currentAuthority.row',
+  );
+  if (
+    !Number.isSafeInteger(row.techCardId) ||
+    (row.techCardId as number) < 1 ||
+    !Number.isSafeInteger(row.revision) ||
+    (row.revision as number) < 1 ||
+    !Number.isSafeInteger(row.cardLockVersion) ||
+    (row.cardLockVersion as number) < 0 ||
+    !Number.isSafeInteger(row.sizeBytes) ||
+    (row.sizeBytes as number) < 1
+  ) {
+    fail('readback-invalid', 'Current authority row integers are invalid.');
+  }
+  for (const field of ['scopeKey', 'patternLineKey'] as const) {
+    const fieldValue = row[field];
+    if (
+      typeof fieldValue !== 'string' ||
+      fieldValue.length === 0 ||
+      fieldValue.length > 256 ||
+      !STABLE_ID.test(fieldValue)
+    ) {
+      fail('readback-invalid', `Current authority ${field} is invalid.`);
+    }
+  }
+  if (
+    typeof row.url !== 'string' ||
+    row.url.length === 0 ||
+    row.url.length > 4_096 ||
+    Array.from(row.url).some((character) => character.charCodeAt(0) <= 0x1f) ||
+    /^(?:data|javascript):/i.test(row.url.trimStart()) ||
+    typeof row.sha256 !== 'string' ||
+    !SHA256.test(row.sha256)
+  ) {
+    fail('readback-invalid', 'Current authority saved-row URL or SHA is invalid.');
+  }
+  const revision = authority.serverAssemblyRevision;
+  if (
+    typeof revision !== 'string' ||
+    revision.length === 0 ||
+    revision.length > 512 ||
+    revision.trim() !== revision ||
+    /^[0-9]+$/.test(revision) ||
+    encoder.encode(revision).byteLength > 512 ||
+    Array.from(revision).some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 0x1f || code === 0x7f;
+    }) ||
+    typeof authority.assemblyTopologySha256 !== 'string' ||
+    !SHA256.test(authority.assemblyTopologySha256)
+  ) {
+    fail('readback-invalid', 'Current Assembly revision or topology SHA is invalid.');
+  }
+  const rowSnapshot = Object.freeze({
+    techCardId: row.techCardId as number,
+    scopeKey: row.scopeKey as string,
+    patternLineKey: row.patternLineKey as string,
+    revision: row.revision as number,
+    cardLockVersion: row.cardLockVersion as number,
+    url: row.url,
+    sizeBytes: row.sizeBytes as number,
+    sha256: row.sha256,
+  });
+  return Object.freeze({
+    row: rowSnapshot,
+    serverAssemblyRevision: revision,
+    assemblyTopologySha256: authority.assemblyTopologySha256,
+  }) as PatternImportDxfProductCompositeSidecarBindingsV3;
+}
+
 function captureRequest(value: unknown): PatternImportDxfProductCompositeSidecarStorageRequestV6 {
   const request = exactRecord(
     value,
@@ -226,15 +316,12 @@ function captureRequest(value: unknown): PatternImportDxfProductCompositeSidecar
   if (request.schemaVersion !== PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V6) {
     fail('readback-invalid', 'Composite V6 persistence request schema differs.');
   }
-  if (!request.currentAuthority || typeof request.currentAuthority !== 'object') {
-    fail('readback-invalid', 'Composite V6 current authority is missing.');
-  }
   if (!request.nextOwner || typeof request.nextOwner !== 'object') {
     fail('readback-invalid', 'Composite V6 owner is missing.');
   }
   return Object.freeze({
     schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_STORAGE_REQUEST_V6,
-    currentAuthority: request.currentAuthority as PatternImportDxfProductCompositeSidecarBindingsV3,
+    currentAuthority: authoritySnapshot(request.currentAuthority),
     arrangementTarget: arrangementTarget(request.arrangementTarget),
     nextOwner: request.nextOwner as PatternImportDxfProductCompositeSidecarOwnerV6,
   });
@@ -353,6 +440,21 @@ function isNotFound(error: unknown): boolean {
     return !!descriptor && 'value' in descriptor && descriptor.value === 404;
   } catch {
     return false;
+  }
+}
+
+function checkReadbackSignal(signal: AbortSignal): void {
+  if (signal.aborted) fail('cancelled', 'Composite V6 readback was cancelled.');
+}
+
+async function readbackStep<T>(step: Promise<T>, signal: AbortSignal): Promise<T> {
+  try {
+    const value = await step;
+    checkReadbackSignal(signal);
+    return value;
+  } catch (error) {
+    checkReadbackSignal(signal);
+    throw error;
   }
 }
 
@@ -512,7 +614,7 @@ async function readExactStoredV6(
   request: PatternImportDxfProductCompositeSidecarStorageRequestV6,
   signal: AbortSignal,
 ) {
-  if (signal.aborted) fail('cancelled', 'Composite V6 readback was cancelled.');
+  checkReadbackSignal(signal);
   const client = deps.createClient(signal);
   let response: Awaited<ReturnType<SidecarService['GetTechCardPatternSemanticSidecar']>>;
   try {
@@ -525,7 +627,7 @@ async function readExactStoredV6(
     if (isNotFound(error)) fail('readback-missing', 'Composite V6 readback is absent.');
     fail('readback-failed', 'Composite V6 readback GET failed.');
   }
-  if (signal.aborted) fail('cancelled', 'Composite V6 readback was cancelled.');
+  checkReadbackSignal(signal);
   const row = responseRow(response);
   if (!row) fail('readback-missing', 'Composite V6 readback is absent.');
   if (
@@ -540,11 +642,12 @@ async function readExactStoredV6(
     fail('readback-drift', 'Stored Composite V6 row differs from current authority.');
   }
   const bytes = base64ToBytes(row.sidecarBytes, row.byteLength as number);
-  if (row.sidecarSha256 !== (await sha256(bytes, deps.crypto ?? globalThis.crypto)))
+  const storedSha256 = await readbackStep(sha256(bytes, deps.crypto ?? globalThis.crypto), signal);
+  if (row.sidecarSha256 !== storedSha256)
     fail('readback-invalid', 'Stored Composite V6 SHA differs from its bytes.');
-  const decoded = await decodePatternImportDxfProductCompositeSidecarV6(
-    bytes,
-    deps.crypto ?? globalThis.crypto,
+  const decoded = await readbackStep(
+    decodePatternImportDxfProductCompositeSidecarV6(bytes, deps.crypto ?? globalThis.crypto),
+    signal,
   );
   if (
     !decoded.ok ||
@@ -553,13 +656,14 @@ async function readExactStoredV6(
   ) {
     fail('readback-drift', 'Stored Composite V6 authority or arrangement target drifted.');
   }
-  const transport = await transportFromDecoded(decoded);
+  const transport = await readbackStep(transportFromDecoded(decoded), signal);
   if (
     row.patternVersion !== transport.patternVersion ||
     row.postSaveReceiptSha256 !== transport.postSaveReceiptSha256
   ) {
     fail('readback-drift', 'Stored row receipt differs from nested semantic-product-v1.');
   }
+  checkReadbackSignal(signal);
   return Object.freeze({ row, bytes, decoded, transport });
 }
 
@@ -631,9 +735,11 @@ export function createPatternImportDxfProductCompositeSidecarPersistenceV6(
     ) {
       try {
         const captured = captureRequest(request);
+        const stored = await readExactStoredV6(deps, captured, signal);
+        checkReadbackSignal(signal);
         return Object.freeze({
           ok: true as const,
-          ...(await readExactStoredV6(deps, captured, signal)),
+          ...stored,
         });
       } catch (error) {
         return Object.freeze({ ok: false as const, blocker: blocker(error, 'readback-failed') });
@@ -670,15 +776,18 @@ export function createPatternImportDxfProductCompositeSidecarPersistenceV6(
       }
       try {
         const recovered = await readExactStoredV6(deps, captured, signal);
+        checkReadbackSignal(signal);
         const intended = encodePatternImportDxfProductCompositeSidecarV6(captured.nextOwner);
         if (!intended.ok || !sameBytes(intended.bytes, recovered.bytes)) {
           fail('readback-drift', 'Unknown write outcome resolved to different Composite V6 bytes.');
         }
+        const receipt = await recoveredReceipt(captured, recovered);
+        checkReadbackSignal(signal);
         return Object.freeze({
           ok: true as const,
           schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_SAVE_V6,
           writeOutcome: 'verified-after-unknown' as const,
-          receipt: await recoveredReceipt(captured, recovered),
+          receipt,
           blockers: Object.freeze([]) as readonly [],
           claims: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_PERSISTENCE_CLAIMS_V6,
         });
