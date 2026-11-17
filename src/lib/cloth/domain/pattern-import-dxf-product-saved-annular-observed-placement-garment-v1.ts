@@ -1,0 +1,13 @@
+/** Fixed observed-placement entry; the private evaluator is shared with historical V2 garments. */
+export {
+  PATTERN_IMPORT_DXF_PRODUCT_SAVED_ANNULAR_OBSERVED_PLACEMENT_GARMENT_V1,
+  buildPatternImportDxfProductSavedAnnularObservedPlacementGarmentV1,
+  projectPatternImportDxfProductSavedAnnularObservedPlacementGarmentV1,
+  getPatternImportDxfProductSavedAnnularObservedPlacementGarmentLifetimeV1,
+  disposePatternImportDxfProductSavedAnnularObservedPlacementGarmentV1,
+  type PatternImportDxfProductSavedAnnularObservedPlacementGarmentRequestV1,
+  type PatternImportDxfProductSavedAnnularObservedPlacementGarmentReportV1,
+  type PatternImportDxfProductSavedAnnularObservedPlacementGarmentOwnerV1,
+  type PatternImportDxfProductSavedAnnularObservedPlacementGarmentProjectionV1,
+  type PatternImportDxfProductSavedAnnularObservedPlacementGarmentResultV1,
+} from './pattern-import-dxf-product-saved-annular-garment-v1';

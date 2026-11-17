@@ -1,3 +1,9 @@
+import {
+  createModelOpenReferenceDisplayedBodySnapshotObserverV1,
+  type ModelOpenReferenceDisplayedBodyObservationInputV1,
+  type ModelOpenReferenceDisplayedBodyObserverV1,
+} from './model-open-reference-displayed-body-snapshot-v1';
+import type { MeasurementSurfaceDisplayedGeometryAcceptanceV1 } from 'components/shared/measurement-watertight-surface-v1-stage';
 import type { common_BodyMeasurementName, common_GenderEnum } from 'api/proto-http/admin';
 import type {
   MeasurementSurfacePatternPieceOverlayV1,
@@ -444,6 +450,8 @@ export interface ModelOpenReferencePreviewProps {
     | 'full-body-v8'
     | 'full-body-v9';
   readonly directPoseBindingV9?: ModelOpenReferenceDirectPoseBindingV9;
+  /** Observe current accepted display buffers; no body or runtime admission. */
+  readonly onDisplayedBodySnapshotV1?: ModelOpenReferenceDisplayedBodyObserverV1;
   /** Workbench-only boundary: keep the V9 owner mounted while direct viewport posing is off. */
   readonly directPoseViewportEditingEnabledV9?: boolean;
   /** Workbench embeds expose their own single pose toggle instead of the model-form toolbar. */
@@ -2416,6 +2424,7 @@ const FULL_BODY_EDITOR_V9: FullBodyPoseEditorAdapter<ModelOpenReferenceDirectPos
   });
 
 function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
+  onDisplayedBodySnapshotV1,
   activeMeasurementName,
   buildDependencies,
   directPoseBindingV9,
@@ -2477,6 +2486,25 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
   const [built, setBuilt] = useState<FullBodyBuiltPreviewV3 | null>(null);
   const [livePoseFrame, setLivePoseFrame] = useState<ModelOpenReferenceLivePoseFrameV10 | null>(
     null,
+  );
+  const [, setStageDisplayedGeometry] =
+    useState<MeasurementSurfaceDisplayedGeometryAcceptanceV1 | null>(null);
+  // Read the synchronous Stage callback, not an older render during effect replay/rebuild.
+  const stageDisplayedGeometryRef = useRef<MeasurementSurfaceDisplayedGeometryAcceptanceV1 | null>(
+    null,
+  );
+  const acceptedLivePoseRef =
+    useRef<ModelOpenReferenceDisplayedBodyObservationInputV1['acceptedLivePose']>(null);
+  const displayedBodyObserverRef = useRef<ReturnType<
+    typeof createModelOpenReferenceDisplayedBodySnapshotObserverV1
+  > | null>(null);
+  const handleDisplayedGeometry = useCallback(
+    (accepted: MeasurementSurfaceDisplayedGeometryAcceptanceV1 | null) => {
+      stageDisplayedGeometryRef.current = accepted;
+      if (!accepted) displayedBodyObserverRef.current?.invalidate();
+      setStageDisplayedGeometry(accepted);
+    },
+    [],
   );
   const [jointEditorMode, setJointEditorMode] = useState<ModelOpenReferenceJointEditorModeV5>(
     editor.initialJointEditorMode ?? 'camera',
@@ -2601,6 +2629,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
     bodyOwnerRef.current = bodyOwner;
     autoBuildAttemptRef.current = null;
     cancelBuild();
+    acceptedLivePoseRef.current = null;
     if (controlledGestureActiveRef.current) {
       controlledGestureActiveRef.current = false;
       directPoseBindingRef.current?.onFinishGesture(
@@ -2861,6 +2890,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
               setJointEditorMode('camera');
             }
             setBuilt(bodyBuilt);
+            acceptedLivePoseRef.current = null;
             setLivePoseFrame(null);
             setAppliedPose(requestedPose);
             setStageStatus('initializing');
@@ -3017,15 +3047,18 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
         } else {
           positions = liveFkSession.solve(editor.runtimePose(pose)).positions;
         }
-        setLivePoseFrame((current) =>
-          modelOpenReferenceLivePoseFrameNextV10(current, {
-            status: 'accepted',
-            bodyBuildFingerprint: currentBuilt.bodyBuildFingerprint,
-            bodySourceRevision: currentBuilt.runtime.sourceRevision,
-            positions,
-            groups,
-          }),
-        );
+        const nextFrame = modelOpenReferenceLivePoseFrameNextV10(null, {
+          status: 'accepted',
+          bodyBuildFingerprint: currentBuilt.bodyBuildFingerprint,
+          bodySourceRevision: currentBuilt.runtime.sourceRevision,
+          positions,
+          groups,
+        })!;
+        acceptedLivePoseRef.current =
+          editor.version === 'full-body-v9'
+            ? { frame: nextFrame, pose: editor.snapshot(pose) as ModelOpenReferenceDirectPoseV9 }
+            : null;
+        setLivePoseFrame(nextFrame);
         return 'applied';
       } catch {
         setLivePoseFrame((current) =>
@@ -3073,6 +3106,44 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
     livePoseFrame.bodySourceRevision === currentBuilt.runtime.sourceRevision
       ? livePoseFrame
       : null;
+  useEffect(() => {
+    const observer = createModelOpenReferenceDisplayedBodySnapshotObserverV1();
+    displayedBodyObserverRef.current = observer;
+    return () => {
+      observer.dispose();
+      if (displayedBodyObserverRef.current === observer) displayedBodyObserverRef.current = null;
+    };
+  }, []);
+  useEffect(() => {
+    displayedBodyObserverRef.current?.observe(
+      {
+        modelId,
+        modelContentRevision,
+        basisKind: resolution.ok ? resolution.basis.basisKind : null,
+        inputFingerprint,
+        bodyBuildFingerprint,
+        editorVersion: editor.version,
+        bodyDisplayOwnership,
+        stageStatus,
+        updateStatus,
+        resolutionOk: resolution.ok,
+        poseBlocked: poseAdmissibility.status === 'blocked',
+        currentBuilt,
+        displayedBuilt,
+        stageAcceptance: stageDisplayedGeometryRef.current,
+        matchingLivePoseFrame,
+        acceptedLivePose: acceptedLivePoseRef.current,
+        appliedPose:
+          editor.version === 'full-body-v9'
+            ? (appliedPose as ModelOpenReferenceDirectPoseV9 | null)
+            : null,
+        draftPose:
+          editor.version === 'full-body-v9' ? (draftPose as ModelOpenReferenceDirectPoseV9) : null,
+        directPoseBinding: directPoseBindingV9 ?? null,
+      },
+      onDisplayedBodySnapshotV1,
+    );
+  });
   const measurementGuide = useMemo(
     () =>
       activeMeasurementName && displayedBuilt
@@ -3888,6 +3959,9 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                 frame={displayedBuilt.frame}
                 lod='display'
                 displayMeshOverride={displayedBuilt.runtime.displayMesh}
+                onDisplayedGeometryV1={
+                  onDisplayedBodySnapshotV1 ? handleDisplayedGeometry : undefined
+                }
                 measurementGuide={measurementGuide}
                 measurementGuidePresentation={measurementGuidePresentation}
                 viewPreset={viewPreset}

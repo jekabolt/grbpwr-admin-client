@@ -7,8 +7,10 @@ import type { PatternImportDxfProductGarmentComposerExpectedV1 } from './pattern
 import {
   DXF_PRODUCT_PHASE2_FRESH_BUILD_REQUEST_V1,
   buildDxfProductPhase2FreshBuildOwnerV1,
+  consumeDxfProductPhase2FreshBuildSavedLocalFrameRefinementV2,
   disposeDxfProductPhase2FreshBuildOwnerV1,
   projectDxfProductPhase2FreshBuildOwnerV1,
+  type DxfProductPhase2SavedLocalFrameRefinementHandoffResultV2,
   type DxfProductPhase2FreshBuildOwnerV1,
 } from './dxf-product-phase2-fresh-build-owner-v1';
 import type { DxfProductPhase1BuildInputsRequestV1 } from './dxf-product-phase1-build-inputs-v1';
@@ -18,7 +20,9 @@ import {
   type DxfProductZeroAllowanceCutSurfaceEquivalenceOwnerV1,
 } from './dxf-product-zero-allowance-cut-surface-equivalence-v1';
 import type { ClothMeshIR } from '../mesh/cloth-mesh-ir';
+import type { GarmentPhase2SavedLocalFrameTranslationV2 } from '../mesh/garment-phase2-interior-refinement-v1';
 import {
+  DXF_PRODUCT_PHASE2_REFINED_BUILD_MATERIAL_POLICY_V1,
   DXF_PRODUCT_PHASE2_REFINED_BUILD_REQUEST_V1,
   buildDxfProductPhase2RefinedBuildOwnerV1,
   type DxfProductPhase2RefinedBuildResultV1,
@@ -1054,6 +1058,35 @@ export async function consumePatternImportDxfProductGarmentMeshComposerRefinemen
       phase2Owner: record.nested,
     },
     options,
+  );
+}
+
+/**
+ * Narrow one-shot saved-frame seam. The private nested Phase-2 owner never crosses this module;
+ * callers receive only the detached typed refinement handoff.
+ */
+export function consumePatternImportDxfProductGarmentMeshComposerSavedLocalFrameRefinementV2(
+  owner: unknown,
+  translations: readonly GarmentPhase2SavedLocalFrameTranslationV2[],
+): DxfProductPhase2SavedLocalFrameRefinementHandoffResultV2 | null {
+  if (!owner || (typeof owner !== 'object' && typeof owner !== 'function')) return null;
+  const record = owners.get(owner);
+  if (!record || record.disposed) return null;
+  const publicOwner = owner as PatternImportDxfProductGarmentMeshComposerOwnerV2;
+  const nestedProjection = projectDxfProductPhase2FreshBuildOwnerV1(record.nested);
+  if (
+    !nestedProjection ||
+    publicOwner.snapshot.schemaVersion !== PATTERN_IMPORT_DXF_PRODUCT_GARMENT_MESH_COMPOSER_V2 ||
+    publicOwner.snapshot.origin !== 'verified-saved-row' ||
+    publicOwner.snapshot.seals.phase2OwnerCanonicalSha256 !==
+      nestedProjection.ownerCanonicalSha256 ||
+    publicOwner.snapshot.seals.phase2ArtifactSha256 !== nestedProjection.artifactSha256
+  )
+    return null;
+  return consumeDxfProductPhase2FreshBuildSavedLocalFrameRefinementV2(
+    record.nested,
+    DXF_PRODUCT_PHASE2_REFINED_BUILD_MATERIAL_POLICY_V1,
+    translations,
   );
 }
 

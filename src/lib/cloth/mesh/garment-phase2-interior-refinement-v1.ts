@@ -47,6 +47,8 @@ export const GARMENT_PHASE2_INTERIOR_REFINEMENT_V1 =
   'garment-phase2-interior-refinement/1' as const;
 export const GARMENT_PHASE2_INTERIOR_REFINEMENT_EVALUATION_V1 =
   'garment-phase2-interior-refinement-evaluation/1' as const;
+export const GARMENT_PHASE2_SAVED_LOCAL_FRAME_REFINEMENT_V2 =
+  'garment-phase2-saved-local-frame-refinement/2' as const;
 
 export const GARMENT_PHASE2_INTERIOR_REFINEMENT_LIMITS_V1 = Object.freeze({
   maximumDepth: 32,
@@ -178,6 +180,55 @@ export type GarmentPhase2InteriorRefinementEvaluationV1 = Readonly<{
   }>;
 }>;
 
+export type GarmentPhase2SavedLocalFrameTranslationV2 = Readonly<{
+  pieceId: string;
+  /** Exact persisted writer translation [e,f] in sourceToWrittenAffine=[1,0,0,1,e,f]. */
+  sourceToWrittenTranslationMm: readonly [number, number];
+}>;
+
+export type GarmentPhase2SavedLocalFrameRefinementArtifactV2 = Readonly<{
+  version: typeof GARMENT_PHASE2_SAVED_LOCAL_FRAME_REFINEMENT_V2;
+  status: 'accepted';
+  translations: readonly GarmentPhase2SavedLocalFrameTranslationV2[];
+  /** Existing V1 refinement run in the source-local lattice frame. Never a V1 authority. */
+  localArtifact: GarmentPhase2InteriorRefinementArtifactV1;
+  /** Same local topology translated back into the exact persisted writer frame. */
+  writtenArtifact: GarmentPhase2InteriorRefinementArtifactV1;
+  writtenFrameDiagnosticArtifact: GarmentPhase2InteriorRefinementArtifactV1;
+  phaseEvidence: Readonly<{
+    pieces: readonly Readonly<{
+      pieceId: string;
+      writtenFrameInteriorVertexCount: number;
+      localFrameInteriorVertexCount: number;
+      writtenFrameSourceIds: readonly string[];
+      localFrameSourceIds: readonly string[];
+      sourceIdOverlapCount: number;
+      fullLatticePhaseChange: boolean;
+    }>[];
+    writtenMeshValidation: Readonly<{
+      minimumTriangleEdgeMm: number;
+      maximumTriangleEdgeMm: number;
+      maximumForwardTranslationEdgeLengthDriftMm: number;
+      maximumAllowedEdgeLengthDriftMm: 0.001;
+      clothMeshIrValidated: true;
+      strictMaterialRangeAccepted: true;
+    }>;
+  }>;
+  claims: Readonly<{
+    originalGenuineWrittenFrameEvaluationAccepted: true;
+    localBoundaryViewDerivedAfterEvaluation: true;
+    existingV1LatticeAndCdtUsed: true;
+    writtenCoordinatesRestoredAfterRefinement: true;
+    boundaryAndAoSourceIdentityOrderPreserved: true;
+    geometryExtremaInferenceUsed: false;
+    sourceAuthenticityAccepted: false;
+    placementAuthority: false;
+    runtimeAuthority: false;
+    productionAuthority: false;
+  }>;
+  deterministicFingerprint: string;
+}>;
+
 export type GarmentPhase2InteriorRefinementErrorCodeV1 =
   | 'reentrant-call'
   | 'input-shape-invalid'
@@ -235,6 +286,18 @@ const capturedStructuredClone =
   typeof globalThis.structuredClone === 'function'
     ? globalThis.structuredClone.bind(globalThis)
     : null;
+const capturedNumberIsFinite = Number.isFinite;
+const capturedNumberIsSafeInteger = Number.isSafeInteger;
+const capturedObjectIs = Object.is;
+const capturedMathAbs = Math.abs;
+const capturedMathFround = Math.fround;
+const capturedMathHypot = Math.hypot;
+const capturedObjectGetPrototypeOf = Object.getPrototypeOf;
+const capturedObjectGetOwnPropertyDescriptors = Object.getOwnPropertyDescriptors;
+const capturedReflectOwnKeys = Reflect.ownKeys;
+const capturedArrayIsArray = Array.isArray;
+const capturedArrayPrototype = Array.prototype;
+const capturedObjectPrototype = Object.prototype;
 const typedArrayPrototype = Object.getPrototypeOf(Uint8Array.prototype) as object;
 const typedArrayLengthGetter = Object.getOwnPropertyDescriptor(typedArrayPrototype, 'length')?.get;
 const typedArrayBufferGetter = Object.getOwnPropertyDescriptor(typedArrayPrototype, 'buffer')?.get;
@@ -617,9 +680,323 @@ type PreparedPiece = Readonly<{
   latticePlan: GarmentInteriorLatticePlanV1;
 }>;
 
-function buildArtifact(
-  privateRequest: PrivateRefinementRequest,
+type LocalFrameContext = Readonly<{
+  translations: readonly GarmentPhase2SavedLocalFrameTranslationV2[];
+  byPieceId: ReadonlyMap<string, readonly [number, number]>;
+}>;
+
+type InternalRefinementBuild = Readonly<{
+  localArtifact: GarmentPhase2InteriorRefinementArtifactV1 | null;
+  writtenArtifact: GarmentPhase2InteriorRefinementArtifactV1;
+  writtenBoundary: GarmentPhase2BoundaryRecoveryArtifactV1;
+}>;
+
+function exactLocalFrameContext(
+  input: unknown,
+  boundary: GarmentPhase2BoundaryRecoveryArtifactV1,
+): LocalFrameContext {
+  if (!capturedArrayIsArray(input))
+    fail('input-shape-invalid', 'Saved local-frame translations must be one exact dense array.');
+  let descriptors: PropertyDescriptorMap;
+  try {
+    if (capturedObjectGetPrototypeOf(input) !== capturedArrayPrototype)
+      fail('input-shape-invalid', 'Saved local-frame translations must use Array.prototype.');
+    descriptors = capturedObjectGetOwnPropertyDescriptors(input as object);
+  } catch (error) {
+    if (error instanceof GarmentPhase2InteriorRefinementErrorV1) throw error;
+    fail('input-shape-invalid', 'Saved local-frame translations could not be inspected safely.');
+  }
+  const length =
+    descriptors.length && 'value' in descriptors.length ? descriptors.length.value : -1;
+  const keys = capturedReflectOwnKeys(descriptors);
+  if (
+    !capturedNumberIsSafeInteger(length) ||
+    length !== boundary.pieces.length ||
+    keys.length !== length + 1 ||
+    keys.some(
+      (key) =>
+        key !== 'length' &&
+        (typeof key !== 'string' || !/^(?:0|[1-9][0-9]*)$/u.test(key) || Number(key) >= length),
+    )
+  )
+    fail('input-shape-invalid', 'Saved local-frame translations must be dense and exact.');
+  const translations: GarmentPhase2SavedLocalFrameTranslationV2[] = [];
+  const byPieceId = new Map<string, readonly [number, number]>();
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = descriptors[String(index)];
+    if (!descriptor || !descriptor.enumerable || !('value' in descriptor))
+      fail('input-shape-invalid', `Saved local-frame translation ${String(index)} is not data.`);
+    const value = descriptor.value;
+    if (
+      !value ||
+      typeof value !== 'object' ||
+      capturedArrayIsArray(value) ||
+      capturedObjectGetPrototypeOf(value) !== capturedObjectPrototype
+    )
+      fail('input-shape-invalid', `Saved local-frame translation ${String(index)} is invalid.`);
+    const item = capturedObjectGetOwnPropertyDescriptors(value);
+    const itemKeys = capturedReflectOwnKeys(item);
+    if (
+      itemKeys.length !== 2 ||
+      !itemKeys.includes('pieceId') ||
+      !itemKeys.includes('sourceToWrittenTranslationMm') ||
+      itemKeys.some((key) => typeof key !== 'string')
+    )
+      fail(
+        'input-shape-invalid',
+        `Saved local-frame translation ${String(index)} has extra fields.`,
+      );
+    const pieceIdDescriptor = item.pieceId;
+    const tupleDescriptor = item.sourceToWrittenTranslationMm;
+    if (
+      !pieceIdDescriptor ||
+      !pieceIdDescriptor.enumerable ||
+      !('value' in pieceIdDescriptor) ||
+      typeof pieceIdDescriptor.value !== 'string' ||
+      !tupleDescriptor ||
+      !tupleDescriptor.enumerable ||
+      !('value' in tupleDescriptor)
+    )
+      fail('input-shape-invalid', `Saved local-frame translation ${String(index)} is not data.`);
+    const tuple = tupleDescriptor.value;
+    if (
+      !capturedArrayIsArray(tuple) ||
+      capturedObjectGetPrototypeOf(tuple) !== capturedArrayPrototype
+    )
+      fail('input-shape-invalid', `${pieceIdDescriptor.value} translation must be a tuple.`);
+    const tupleDescriptors = capturedObjectGetOwnPropertyDescriptors(tuple);
+    const tupleKeys = capturedReflectOwnKeys(tupleDescriptors);
+    if (
+      tupleKeys.length !== 3 ||
+      tupleKeys.some((key) => key !== 'length' && key !== '0' && key !== '1') ||
+      !('value' in tupleDescriptors[0]!) ||
+      !('value' in tupleDescriptors[1]!)
+    )
+      fail(
+        'input-shape-invalid',
+        `${pieceIdDescriptor.value} translation must be one exact tuple.`,
+      );
+    const x = tupleDescriptors[0]!.value;
+    const y = tupleDescriptors[1]!.value;
+    if (
+      typeof x !== 'number' ||
+      typeof y !== 'number' ||
+      !capturedNumberIsFinite(x) ||
+      !capturedNumberIsFinite(y) ||
+      capturedObjectIs(x, -0) ||
+      capturedObjectIs(y, -0) ||
+      capturedMathAbs(x) > 1_000_000 ||
+      capturedMathAbs(y) > 1_000_000 ||
+      byPieceId.has(pieceIdDescriptor.value)
+    )
+      fail(
+        'input-shape-invalid',
+        `${pieceIdDescriptor.value} translation is invalid or duplicate.`,
+      );
+    const pair = Object.freeze([x, y] as const);
+    byPieceId.set(pieceIdDescriptor.value, pair);
+    translations.push(
+      Object.freeze({
+        pieceId: pieceIdDescriptor.value,
+        sourceToWrittenTranslationMm: pair,
+      }),
+    );
+  }
+  const expectedPieceIds = new Set(boundary.pieces.map(({ pieceId }) => pieceId));
+  if (
+    byPieceId.size !== expectedPieceIds.size ||
+    [...byPieceId.keys()].some((pieceId) => !expectedPieceIds.has(pieceId))
+  )
+    fail('upstream-binding-mismatch', 'Saved local-frame translations do not exact-cover pieces.');
+  const orderedTranslations = boundary.pieces.map(({ pieceId }) => {
+    const pair = byPieceId.get(pieceId);
+    if (!pair) fail('upstream-binding-mismatch', `${pieceId} has no persisted writer translation.`);
+    return Object.freeze({ pieceId, sourceToWrittenTranslationMm: pair });
+  });
+  return Object.freeze({ translations: Object.freeze(orderedTranslations), byPieceId });
+}
+
+function localBoundaryView(
+  written: GarmentPhase2BoundaryRecoveryArtifactV1,
+  context: LocalFrameContext,
+): GarmentPhase2BoundaryRecoveryArtifactV1 {
+  const pieces = written.pieces.map((piece) => {
+    const translation = context.byPieceId.get(piece.pieceId);
+    if (!translation)
+      fail('upstream-binding-mismatch', `${piece.pieceId} has no persisted writer translation.`);
+    return Object.freeze({
+      ...piece,
+      loops: Object.freeze(
+        piece.loops.map((loop) =>
+          Object.freeze({
+            ...loop,
+            vertices: Object.freeze(
+              loop.vertices.map((vertex) =>
+                Object.freeze({
+                  ...vertex,
+                  positionMm: Object.freeze([
+                    capturedMathFround(vertex.positionMm[0] - translation[0]),
+                    capturedMathFround(vertex.positionMm[1] - translation[1]),
+                  ] as const),
+                }),
+              ),
+            ),
+          }),
+        ),
+      ),
+    });
+  });
+  const { deterministicFingerprint: _writtenFingerprint, ...writtenPayload } = written;
+  void _writtenFingerprint;
+  const payload = {
+    ...writtenPayload,
+    pieces: Object.freeze(pieces),
+  };
+  return freezePlainData({
+    ...payload,
+    deterministicFingerprint: fingerprint({
+      version: GARMENT_PHASE2_SAVED_LOCAL_FRAME_REFINEMENT_V2,
+      writtenBoundaryFingerprint: written.deterministicFingerprint,
+      translations: context.translations,
+      localBoundary: payload,
+    }),
+  }) as GarmentPhase2BoundaryRecoveryArtifactV1;
+}
+
+function forwardWrittenArtifact(
+  local: GarmentPhase2InteriorRefinementArtifactV1,
+  writtenBoundary: GarmentPhase2BoundaryRecoveryArtifactV1,
+  context: LocalFrameContext,
 ): GarmentPhase2InteriorRefinementArtifactV1 {
+  const positions = new Float32Array(local.mesh.restPositions2Mm.length);
+  for (const range of local.mesh.pieceRanges) {
+    const translation = context.byPieceId.get(range.pieceId);
+    if (!translation)
+      fail('upstream-binding-mismatch', `${range.pieceId} has no persisted writer translation.`);
+    for (let localIndex = 0; localIndex < range.vertexCount; localIndex += 1) {
+      const globalIndex = range.vertexOffset + localIndex;
+      positions[globalIndex * 2] = capturedMathFround(
+        local.mesh.restPositions2Mm[globalIndex * 2]! + translation[0],
+      );
+      positions[globalIndex * 2 + 1] = capturedMathFround(
+        local.mesh.restPositions2Mm[globalIndex * 2 + 1]! + translation[1],
+      );
+    }
+  }
+  const writtenBoundaryById = new Map<string, readonly [number, number]>();
+  for (const piece of writtenBoundary.pieces)
+    for (const loop of piece.loops)
+      for (const vertex of loop.vertices)
+        writtenBoundaryById.set(
+          `${piece.pieceId}\u0000${vertex.boundaryVertexId}`,
+          vertex.positionMm,
+        );
+  for (const item of local.vertexProvenance) {
+    if (item.source.kind !== 'boundary-recovery') continue;
+    const written = writtenBoundaryById.get(`${item.pieceId}\u0000${item.source.boundaryVertexId}`);
+    if (!written)
+      fail('boundary-preservation-failed', `${item.pieceId} lost written boundary identity.`);
+    positions[item.globalVertexIndex * 2] = written[0];
+    positions[item.globalVertexIndex * 2 + 1] = written[1];
+  }
+  const mesh = Object.freeze({ ...local.mesh, restPositions2Mm: positions });
+  const meshErrors = validateClothMeshIR(mesh);
+  if (meshErrors.length > 0)
+    fail('output-invalid', 'Forward-translated written ClothMeshIR failed validation.', meshErrors);
+  const { deterministicFingerprint: _localFingerprint, ...localPayload } = local;
+  void _localFingerprint;
+  const payload = {
+    ...localPayload,
+    mesh,
+    boundaryRecoveryEvidence: Object.freeze({
+      pieces: writtenBoundary.pieces,
+      seams: writtenBoundary.seams,
+    }),
+  };
+  return freezePlainData({
+    ...payload,
+    deterministicFingerprint: fingerprint({
+      version: GARMENT_PHASE2_SAVED_LOCAL_FRAME_REFINEMENT_V2,
+      frame: 'persisted-written',
+      translations: context.translations,
+      artifact: payload,
+    }),
+  }) as GarmentPhase2InteriorRefinementArtifactV1;
+}
+
+function writtenMeshEdgeValidation(
+  local: GarmentPhase2InteriorRefinementArtifactV1,
+  written: GarmentPhase2InteriorRefinementArtifactV1,
+): GarmentPhase2SavedLocalFrameRefinementArtifactV2['phaseEvidence']['writtenMeshValidation'] {
+  if (!sameCanonical(local.mesh.triangles, written.mesh.triangles))
+    fail('output-invalid', 'Written mesh topology differs from its local refinement topology.');
+  let minimumTriangleEdgeMm = Number.POSITIVE_INFINITY;
+  let maximumTriangleEdgeMm = 0;
+  let maximumForwardTranslationEdgeLengthDriftMm = 0;
+  for (let offset = 0; offset < written.mesh.triangles.length; offset += 3) {
+    const indices = [
+      written.mesh.triangles[offset]!,
+      written.mesh.triangles[offset + 1]!,
+      written.mesh.triangles[offset + 2]!,
+    ] as const;
+    for (const [left, right] of [
+      [indices[0], indices[1]],
+      [indices[1], indices[2]],
+      [indices[2], indices[0]],
+    ] as const) {
+      const localLength = capturedMathHypot(
+        local.mesh.restPositions2Mm[left * 2]! - local.mesh.restPositions2Mm[right * 2]!,
+        local.mesh.restPositions2Mm[left * 2 + 1]! - local.mesh.restPositions2Mm[right * 2 + 1]!,
+      );
+      const writtenLength = capturedMathHypot(
+        written.mesh.restPositions2Mm[left * 2]! - written.mesh.restPositions2Mm[right * 2]!,
+        written.mesh.restPositions2Mm[left * 2 + 1]! -
+          written.mesh.restPositions2Mm[right * 2 + 1]!,
+      );
+      if (
+        !capturedNumberIsFinite(localLength) ||
+        !capturedNumberIsFinite(writtenLength) ||
+        !(localLength > 0) ||
+        !(writtenLength > 0)
+      )
+        fail('output-invalid', 'Forward translation produced a non-finite or collapsed edge.');
+      minimumTriangleEdgeMm = Math.min(minimumTriangleEdgeMm, writtenLength);
+      maximumTriangleEdgeMm = Math.max(maximumTriangleEdgeMm, writtenLength);
+      maximumForwardTranslationEdgeLengthDriftMm = Math.max(
+        maximumForwardTranslationEdgeLengthDriftMm,
+        capturedMathAbs(writtenLength - localLength),
+      );
+    }
+  }
+  const maximumAllowedEdgeLengthDriftMm = 0.001 as const;
+  if (
+    minimumTriangleEdgeMm < local.materialPolicy.minEdgeMm ||
+    maximumTriangleEdgeMm > local.materialPolicy.maxEdgeMm ||
+    maximumForwardTranslationEdgeLengthDriftMm > maximumAllowedEdgeLengthDriftMm
+  )
+    fail(
+      'material-range-violation',
+      'Forward-translated written mesh exceeded the bounded f32 edge/chord drift envelope.',
+      [
+        `min=${String(minimumTriangleEdgeMm)}`,
+        `max=${String(maximumTriangleEdgeMm)}`,
+        `drift=${String(maximumForwardTranslationEdgeLengthDriftMm)}`,
+      ],
+    );
+  return Object.freeze({
+    minimumTriangleEdgeMm,
+    maximumTriangleEdgeMm,
+    maximumForwardTranslationEdgeLengthDriftMm,
+    maximumAllowedEdgeLengthDriftMm,
+    clothMeshIrValidated: true as const,
+    strictMaterialRangeAccepted: true as const,
+  });
+}
+
+function buildArtifactInternal(
+  privateRequest: PrivateRefinementRequest,
+  translations?: unknown,
+): InternalRefinementBuild {
   let boundaryEvaluation;
   try {
     boundaryEvaluation = evaluateGarmentPhase2BoundaryRecoveryArtifactV1(
@@ -631,7 +1008,10 @@ function buildArtifact(
       error instanceof Error ? error.message : String(error),
     ]);
   }
-  const boundary = boundaryEvaluation.canonicalArtifact;
+  const writtenBoundary = boundaryEvaluation.canonicalArtifact;
+  const localFrame =
+    translations === undefined ? null : exactLocalFrameContext(translations, writtenBoundary);
+  const boundary = localFrame ? localBoundaryView(writtenBoundary, localFrame) : writtenBoundary;
   if (boundary.materialPolicy.minEdgeMm !== 10 || boundary.materialPolicy.maxEdgeMm !== 50)
     fail(
       'unsupported-material-policy',
@@ -900,7 +1280,14 @@ function buildArtifact(
     status: 'accepted' as const,
     boundaryRecoveryVersion: GARMENT_PHASE2_BOUNDARY_RECOVERY_V1,
     boundaryRecoveryFingerprint: boundary.deterministicFingerprint,
-    boundaryRecoveryEvaluationFingerprint: boundaryEvaluation.deterministicFingerprint,
+    boundaryRecoveryEvaluationFingerprint: localFrame
+      ? fingerprint({
+          version: GARMENT_PHASE2_SAVED_LOCAL_FRAME_REFINEMENT_V2,
+          writtenEvaluationFingerprint: boundaryEvaluation.deterministicFingerprint,
+          localBoundaryFingerprint: boundary.deterministicFingerprint,
+          translations: localFrame.translations,
+        })
+      : boundaryEvaluation.deterministicFingerprint,
     phase2UpgradeFingerprint: boundary.phase2UpgradeFingerprint,
     sourceBinding: { ...boundary.sourceBinding },
     sourceAssemblyFingerprint: privateRequest.sourceAssemblyFingerprint,
@@ -944,7 +1331,27 @@ function buildArtifact(
       'production-qualification-not-run',
     ] as const,
   };
-  return freezePlainData({ ...payload, deterministicFingerprint: fingerprint(payload) });
+  const localOrWrittenArtifact = freezePlainData({
+    ...payload,
+    deterministicFingerprint: fingerprint(payload),
+  });
+  if (!localFrame)
+    return Object.freeze({
+      localArtifact: null,
+      writtenArtifact: localOrWrittenArtifact,
+      writtenBoundary,
+    });
+  return Object.freeze({
+    localArtifact: localOrWrittenArtifact,
+    writtenArtifact: forwardWrittenArtifact(localOrWrittenArtifact, writtenBoundary, localFrame),
+    writtenBoundary,
+  });
+}
+
+function buildArtifact(
+  privateRequest: PrivateRefinementRequest,
+): GarmentPhase2InteriorRefinementArtifactV1 {
+  return buildArtifactInternal(privateRequest).writtenArtifact;
 }
 
 let active = false;
@@ -1057,6 +1464,149 @@ export function refineGarmentPhase2InteriorV1(
     if (!privateRequest)
       fail('input-shape-invalid', 'Interior refinement requires its owned request capability.');
     return buildArtifact(privateRequest);
+  });
+}
+
+/**
+ * Additive saved-frame seam. The genuine written-frame request/artifact is evaluated first and is
+ * never rewritten. Only the private boundary view presented to the existing V1 lattice/CDT is
+ * inverse-translated; the accepted topology is then translated back into the persisted frame.
+ */
+export function refineGarmentPhase2InteriorInSavedLocalFrameV2(
+  request: GarmentPhase2InteriorRefinementRequestV1,
+  translations: readonly GarmentPhase2SavedLocalFrameTranslationV2[],
+): GarmentPhase2SavedLocalFrameRefinementArtifactV2 {
+  return guarded(() => {
+    const privateRequest =
+      request && typeof request === 'object' ? privateRequests.get(request) : undefined;
+    if (!privateRequest)
+      fail(
+        'input-shape-invalid',
+        'Saved local-frame refinement requires its genuine owned V1 request capability.',
+      );
+    const writtenFrameDiagnosticArtifact = buildArtifact(privateRequest);
+    const framed = buildArtifactInternal(privateRequest, translations);
+    const localArtifact = framed.localArtifact;
+    if (!localArtifact)
+      fail('output-invalid', 'Saved local-frame refinement did not produce its local artifact.');
+    if (
+      !sameCanonical(localArtifact.mesh.triangles, framed.writtenArtifact.mesh.triangles) ||
+      !sameCanonical(localArtifact.mesh.pieceRanges, framed.writtenArtifact.mesh.pieceRanges) ||
+      !sameCanonical(
+        localArtifact.mesh.boundarySamples,
+        framed.writtenArtifact.mesh.boundarySamples,
+      ) ||
+      !sameCanonical(localArtifact.mesh.seams, framed.writtenArtifact.mesh.seams) ||
+      !sameCanonical(localArtifact.vertexProvenance, framed.writtenArtifact.vertexProvenance) ||
+      !sameCanonical(
+        localArtifact.triangleMaterialFrames2,
+        framed.writtenArtifact.triangleMaterialFrames2,
+      ) ||
+      !sameCanonical(
+        framed.writtenArtifact.boundaryRecoveryEvidence,
+        writtenFrameDiagnosticArtifact.boundaryRecoveryEvidence,
+      )
+    )
+      fail(
+        'output-invalid',
+        'Saved local-frame forward translation changed topology, AO/source order, or boundary evidence.',
+      );
+    const context = exactLocalFrameContext(translations, framed.writtenBoundary);
+    const phasePieces = framed.writtenArtifact.mesh.pieceRanges.map(({ pieceId }) => {
+      const writtenFrameSourceIds = writtenFrameDiagnosticArtifact.vertexProvenance
+        .filter((item) => item.pieceId === pieceId && item.source.kind === 'interior')
+        .map((item) => (item.source.kind === 'interior' ? item.source.sourceId : ''));
+      const localFrameSourceIds = localArtifact.vertexProvenance
+        .filter((item) => item.pieceId === pieceId && item.source.kind === 'interior')
+        .map((item) => (item.source.kind === 'interior' ? item.source.sourceId : ''));
+      const writtenSet = new Set(writtenFrameSourceIds);
+      const sourceIdOverlapCount = localFrameSourceIds.reduce(
+        (count, sourceId) => count + (writtenSet.has(sourceId) ? 1 : 0),
+        0,
+      );
+      return Object.freeze({
+        pieceId,
+        writtenFrameInteriorVertexCount: writtenFrameSourceIds.length,
+        localFrameInteriorVertexCount: localFrameSourceIds.length,
+        writtenFrameSourceIds: Object.freeze(writtenFrameSourceIds),
+        localFrameSourceIds: Object.freeze(localFrameSourceIds),
+        sourceIdOverlapCount,
+        fullLatticePhaseChange:
+          writtenFrameSourceIds.length > 0 &&
+          localFrameSourceIds.length > 0 &&
+          sourceIdOverlapCount === 0,
+      });
+    });
+    let localInteriorVertexCount = 0;
+    let writtenInteriorVertexCount = 0;
+    if (
+      phasePieces.length !== localArtifact.mesh.pieceRanges.length ||
+      phasePieces.length !== writtenFrameDiagnosticArtifact.mesh.pieceRanges.length
+    )
+      fail(
+        'output-invalid',
+        'Saved local-frame phase evidence does not cover every written and local piece.',
+      );
+    for (let index = 0; index < phasePieces.length; index += 1) {
+      const piece = phasePieces[index]!;
+      if (
+        piece.pieceId !== localArtifact.mesh.pieceRanges[index]!.pieceId ||
+        piece.pieceId !== writtenFrameDiagnosticArtifact.mesh.pieceRanges[index]!.pieceId ||
+        piece.localFrameInteriorVertexCount <= 0 ||
+        piece.writtenFrameInteriorVertexCount <= 0 ||
+        piece.sourceIdOverlapCount !== 0 ||
+        !piece.fullLatticePhaseChange
+      )
+        fail(
+          'output-invalid',
+          'Saved local-frame phase evidence must prove zero-overlap lattice phase change for every ordered piece.',
+        );
+      localInteriorVertexCount += piece.localFrameInteriorVertexCount;
+      writtenInteriorVertexCount += piece.writtenFrameInteriorVertexCount;
+    }
+    const localInteriorProvenanceCount = localArtifact.vertexProvenance.filter(
+      ({ source }) => source.kind === 'interior',
+    ).length;
+    const writtenInteriorProvenanceCount = writtenFrameDiagnosticArtifact.vertexProvenance.filter(
+      ({ source }) => source.kind === 'interior',
+    ).length;
+    if (
+      localInteriorVertexCount !== localInteriorProvenanceCount ||
+      writtenInteriorVertexCount !== writtenInteriorProvenanceCount
+    )
+      fail(
+        'output-invalid',
+        'Saved local-frame phase evidence aggregate interior counts differ from artifact provenance.',
+      );
+    const writtenMeshValidation = writtenMeshEdgeValidation(localArtifact, framed.writtenArtifact);
+    const payload = {
+      version: GARMENT_PHASE2_SAVED_LOCAL_FRAME_REFINEMENT_V2,
+      status: 'accepted' as const,
+      translations: context.translations,
+      localArtifact,
+      writtenArtifact: framed.writtenArtifact,
+      writtenFrameDiagnosticArtifact,
+      phaseEvidence: Object.freeze({
+        pieces: Object.freeze(phasePieces),
+        writtenMeshValidation,
+      }),
+      claims: Object.freeze({
+        originalGenuineWrittenFrameEvaluationAccepted: true as const,
+        localBoundaryViewDerivedAfterEvaluation: true as const,
+        existingV1LatticeAndCdtUsed: true as const,
+        writtenCoordinatesRestoredAfterRefinement: true as const,
+        boundaryAndAoSourceIdentityOrderPreserved: true as const,
+        geometryExtremaInferenceUsed: false as const,
+        sourceAuthenticityAccepted: false as const,
+        placementAuthority: false as const,
+        runtimeAuthority: false as const,
+        productionAuthority: false as const,
+      }),
+    };
+    return freezePlainData({
+      ...payload,
+      deterministicFingerprint: fingerprint(payload),
+    });
   });
 }
 
