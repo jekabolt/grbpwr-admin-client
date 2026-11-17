@@ -166,6 +166,17 @@ export function AssemblyCarrierDevPage() {
       );
       report.cardLockVersion = card.lockVersion;
       report.patternCount = patterns.length;
+      report.sizeIds = card.techCard.sizeIds;
+      report.materials = scopes.slice(0, 20).map(({ key, byPurpose, lines }) => ({
+        key,
+        byPurpose,
+        lines: lines.slice(0, 20).map(({ lineKey, name, purpose, section }) => ({
+          lineKey,
+          name,
+          purpose,
+          section,
+        })),
+      }));
       report.pieceCount = pieces.length;
       report.pieces = pieces.slice(0, 100).map(({ lineKey, name, ungraded }) => ({
         lineKey,
@@ -214,10 +225,13 @@ export function AssemblyCarrierDevPage() {
           scopeKey: byPurpose ? SERVER_PURPOSE_SCOPE[uiScopeKey] ?? uiScopeKey : uiScopeKey,
           scopeMapping: byPurpose ? 'diagnostic-enum-to-entity-purpose' : 'exact-line-key',
           savedRowRevision: row.savedRowRevision,
+          version: row.version,
+          sizeId: row.sizeId,
           sha256: row.sha256,
           sizeBytes: row.sizeBytes,
           filename: row.filename,
           urlPresent: !!row.url,
+          downloadUrlPresent: !!row.downloadUrl,
           carrier: { status: 'not-read' } as unknown,
           storedCarrierDiagnostic: { status: 'not-read' } as unknown,
         };

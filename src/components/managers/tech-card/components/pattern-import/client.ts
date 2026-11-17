@@ -170,4 +170,5 @@ export type ApplyProgress = { scopeKey: string; state: 'uploading' | 'uploaded' 
 export type ApplyDraftFn = (
   draft: CardDraft,
   onProgress?: (p: ApplyProgress) => void,
+  options?: Readonly<{ replaceMatchingFile?: true }>,
 ) => Promise<ApplyResult>;

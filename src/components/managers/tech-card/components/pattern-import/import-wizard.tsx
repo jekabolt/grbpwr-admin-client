@@ -1148,6 +1148,23 @@ function WizardBody({
                   base size only
                 </Button>
               )}
+              {requireManualApply &&
+              session.step === 'apply' &&
+              !applied &&
+              !card.downloadOnly &&
+              draft?.scopes.length === 1 &&
+              draft.scopes[0]?.alreadyOnCard ? (
+                <Button
+                  variant='secondary'
+                  size='sm'
+                  className='shrink-0'
+                  title='Replace the matching DXF in the same pattern row and save a new revision'
+                  disabled={applyRunning || Boolean(session.busy) || Boolean(blocker)}
+                  onClick={() => void api.dispatch({ type: 'apply', replaceMatchingFile: true })}
+                >
+                  Save new DXF revision
+                </Button>
+              ) : null}
               {(nextStep || session.step === 'apply') && (
                 <Button
                   ref={primaryRef}

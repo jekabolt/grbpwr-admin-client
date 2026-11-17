@@ -1548,10 +1548,14 @@ export function useImportSession(deps: {
           // failed result with its reason — the step never stays 'running'
           let result: ApplyResult;
           try {
-            result = await applyDraft(built, (p) => {
-              progress[p.scopeKey] = p.state;
-              setApply({ phase: 'running', progress: { ...progress } });
-            });
+            result = await applyDraft(
+              built,
+              (p) => {
+                progress[p.scopeKey] = p.state;
+                setApply({ phase: 'running', progress: { ...progress } });
+              },
+              ev.replaceMatchingFile ? { replaceMatchingFile: true } : undefined,
+            );
           } catch (e) {
             result = {
               ok: false,

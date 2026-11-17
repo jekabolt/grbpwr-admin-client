@@ -85,7 +85,7 @@ export function createCardApply(deps: {
   /** Best-effort observability for the additive post-save seam; this callback is also fail-open. */
   onPatternSemanticAttachmentHostError?: (error: unknown) => void;
 }): ApplyDraftFn {
-  return async (draft, onProgress) => {
+  return async (draft, onProgress, options) => {
     const result = await applyDraft(
       draft,
       {
@@ -112,14 +112,22 @@ export function createCardApply(deps: {
         save: deps.save,
         readPreviousLockVersion: deps.readPreviousLockVersion,
         onReplaced: deps.onReplaced,
+        replaceMatchingFile: options?.replaceMatchingFile,
         unsaved: deps.unsaved,
         landed: deps.landed,
         rebuilding: deps.rebuilding,
       },
       onProgress,
     );
-    if (result.ok && result.commitReceipt && deps.afterConfirmedPatternImportSave) {
+    if (result.ok && result.uploaded.length && deps.afterConfirmedPatternImportSave) {
       try {
+        if (!result.commitReceipt) {
+          const details = result.commitReceiptBlockers?.map(({ detail }) => detail).join(' ');
+          throw new Error(
+            details ||
+              `No exact import receipt was issued by the card save (${result.save ?? 'no save result'}).`,
+          );
+        }
         await deps.afterConfirmedPatternImportSave(draft, {
           ...result,
           commitReceipt: result.commitReceipt,

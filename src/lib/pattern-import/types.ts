@@ -3618,7 +3618,7 @@ export type WizardEvent =
    */
   | { type: 'shape-fix'; identity: string; size: string; action: ShapeFixAction | 'clear' }
   /** `token`: the apply lock the caller took (`lockApply`) — the autopilot's gated path. */
-  | { type: 'apply'; token?: number }
+  | { type: 'apply'; token?: number; replaceMatchingFile?: true }
   /** T4: the operator's answers about the assembly at the apply step (`CardDraft.answers`). */
   | { type: 'impact-answer'; answers: ImpactAnswers }
   | { type: 'download' }

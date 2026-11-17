@@ -3327,8 +3327,8 @@ export function PatternsField({
     null,
   );
   function followUpApply(apply: ApplyDraftFn): ApplyDraftFn {
-    return async (draft, onProgress) => {
-      const result = await apply(draft, onProgress);
+    return async (draft, onProgress, options) => {
+      const result = await apply(draft, onProgress, options);
       const targets =
         followUpTargets(draft, result)?.map((target) => ({
           ...target,
@@ -5023,14 +5023,15 @@ export function PatternsField({
                 );
               },
               onPatternSemanticAttachmentHostError: (error) => {
-                useSnackBarStore
-                  .getState()
-                  .showMessage(
+                notify({
+                  sev: 'error',
+                  subject: 'DXF IMPORT',
+                  text: 'Workbench session unavailable',
+                  detail:
                     error instanceof Error
                       ? error.message
-                      : 'The DXF was saved, but its authoring session could not be opened.',
-                    'error',
-                  );
+                      : 'The exact DXF authoring session could not be opened.',
+                });
               },
               read: () => ({
                 patterns: (getValues('patterns') ?? []) as LiveCard['patterns'],

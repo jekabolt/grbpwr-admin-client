@@ -123,6 +123,8 @@ export type ApplyDeps = {
    * card's own save finishes the rebuild in the background (its chip, its error line).
    */
   rebuilding?: () => boolean;
+  /** An explicit Review DXF action requesting a new revision of the exact matching file. */
+  replaceMatchingFile?: true;
   mintKey?: () => string;
   /**
    * The card scope a live sheet or link belongs to (bom-purpose `scopeKeyOfBinding` over the card's
@@ -362,7 +364,7 @@ export function planFormWrites(
         ungraded: !!p.ungraded,
         grainline: p.grainline,
         fused: p.fused,
-        fusingMode: p.fused ? (p.fusingMode ?? FUSING_FULL) : FUSING_UNKNOWN,
+        fusingMode: p.fused ? p.fusingMode ?? FUSING_FULL : FUSING_UNKNOWN,
         fusingWidthMm: '',
         calloutNumber: 0,
         note: '',
@@ -616,6 +618,30 @@ export async function applyDraft(
   const mintKey = deps.mintKey ?? mintLineKey;
   const uploaded: ApplyUploaded[] = [];
   const reused: string[] = [];
+  const scopeOf = deps.scopeOf ?? scopeKeyOf;
+  const repeatScope =
+    deps.replaceMatchingFile && draft.scopes.length === 1 ? draft.scopes[0] : null;
+  const matchingPattern = (live: LiveCard) => {
+    if (!repeatScope?.alreadyOnCard) return undefined;
+    const matching = live.patterns.filter(
+      (row) =>
+        scopeOf(row, 'sheet') === repeatScope.target.scopeKey &&
+        row.filename === repeatScope.filename,
+    );
+    const row = matching[0];
+    return matching.length === 1 && row?.lineKey && row.url === repeatScope.alreadyOnCard.url
+      ? row
+      : undefined;
+  };
+  const previousMatch = deps.replaceMatchingFile ? matchingPattern(deps.read()) : undefined;
+  if (deps.replaceMatchingFile && !previousMatch)
+    return {
+      ok: false,
+      failedScope: '',
+      message: 'The matching saved pattern row changed. Reopen the DXF review.',
+      uploaded,
+    };
+  const replacement = previousMatch ? { ...previousMatch } : undefined;
 
   // T4 (Codex HIGH, T1): a block nothing binds is answered first — never applied unbound
   const open = (draft.unresolved ?? []).filter((u) => {
@@ -650,7 +676,7 @@ export async function applyDraft(
   // 1. uploads — all of them, or the form is not touched
   for (const s of draft.scopes) {
     const scopeKey = s.target.scopeKey;
-    if (onCard(draft, deps.read(), scopeKey, deps.scopeOf)) {
+    if (!replacement && onCard(draft, deps.read(), scopeKey, deps.scopeOf)) {
       reused.push(scopeKey);
       onProgress?.({ scopeKey, state: 'uploaded' });
       continue;
@@ -678,7 +704,43 @@ export async function applyDraft(
   }
 
   // 2. one ordered batch against the live form
-  const plan = planFormWrites(draft, deps.read(), uploaded, {
+  const live = deps.read();
+  let commitDraft = draft;
+  if (replacement && repeatScope) {
+    const current = matchingPattern(live);
+    if (
+      !current ||
+      current.lineKey !== replacement.lineKey ||
+      current.version !== replacement.version ||
+      current.sha256 !== replacement.sha256 ||
+      current.sizeId !== replacement.sizeId ||
+      current.sizeBytes !== replacement.sizeBytes ||
+      uploaded[0]?.url === replacement.url
+    )
+      return {
+        ok: false,
+        failedScope: repeatScope.target.label || repeatScope.target.scopeKey,
+        message: 'The current pattern row moved or the upload returned the same URL.',
+        uploaded,
+      };
+    commitDraft = {
+      ...draft,
+      scopes: [
+        {
+          ...repeatScope,
+          replaces: {
+            lineKey: replacement.lineKey!,
+            url: replacement.url!,
+            filename: repeatScope.filename,
+            name: replacement.name ?? '',
+            matchedBy: 'scope',
+            convertedAt: '',
+          },
+        },
+      ],
+    };
+  }
+  const plan = planFormWrites(commitDraft, live, uploaded, {
     storageSizeId: deps.storageSizeId,
     mintKey,
     scopeOf: deps.scopeOf,
@@ -724,7 +786,7 @@ export async function applyDraft(
   if (save !== undefined) {
     const fine = retry ? save === 'ok' : save === 'ok' || save === 'nothing' || save === 'off';
     // T3: the rows are the saved card's — the card saved; a later write is what is owed.
-    const landed = fine ? null : (deps.landed?.(urls) ?? null);
+    const landed = fine ? null : deps.landed?.(urls) ?? null;
     if (landed) {
       deps.unsaved?.set(false);
       return {
