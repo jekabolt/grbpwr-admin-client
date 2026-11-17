@@ -1,0 +1,763 @@
+import type { DxfProductSavedRowIdentityV1 } from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
+import type {
+  DxfProductSavedNativeCompilerSourceOwnerV1,
+  DxfProductSavedNativeCompilerSourceRequestV1,
+} from 'lib/pattern-import/dxf-product-saved-native-reprocess-owner-v1';
+import {
+  inspectOwnedActiveXpbdDeviceLeaseV1,
+  type XpbdDeviceLease,
+} from 'lib/cloth/runtime/webgpu/xpbd-device-session';
+import type { SavedFullAssemblyCompileIntentV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-full-assembly-compile-session-v1';
+import {
+  readSavedFullAssemblyPhysicalSnapshotV1,
+  projectSavedFullAssemblyPhysicalSnapshotV1,
+  disposeSavedFullAssemblyPhysicalSnapshotV1,
+  type SavedFullAssemblyPhysicalSnapshotProjectionV1,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-full-assembly-physical-snapshot-production-v1';
+import {
+  projectCurrentSavedModelGenericObservedTargetV1,
+  isCurrentSavedModelGenericObservedTargetV1,
+} from 'components/managers/models/components/saved-model-displayed-triangle-body-session-v2';
+import {
+  createSavedGenericObservedPhysicalHostV1,
+  projectSavedGenericObservedPhysicalHostPersistenceContextV1,
+  isCurrentSavedGenericObservedPhysicalHostPersistenceContextV1,
+  type SavedGenericObservedPhysicalHostPersistenceContextV1,
+} from './saved-generic-observed-physical-host-v1';
+
+export const SAVED_GENERIC_DURABLE_PHYSICAL_HOST_V1 =
+  'saved-generic-durable-physical-host/1' as const;
+const CLAIMS = Object.freeze({
+  fixedDurableReaderRequired: true,
+  freshDurableContentAtReadOnly: true,
+  numericReplayOnly: true,
+  numericSnapshotIsCurrentAdmission: false,
+  productUiIntegrated: false,
+  fitQualified: false,
+  continuationQualified: false,
+  stressPaComputed: false,
+});
+type NumericHost = ReturnType<typeof createSavedGenericObservedPhysicalHostV1>;
+type NumericSnapshot = ReturnType<NumericHost['getSnapshot']>;
+type Target = Extract<
+  Awaited<ReturnType<typeof projectCurrentSavedModelGenericObservedTargetV1>>,
+  { ok: true }
+>;
+type Durable = Omit<
+  SavedFullAssemblyPhysicalSnapshotProjectionV1,
+  'authorityReceipt' | 'physicalComponentDocument'
+>;
+export type SavedGenericDurablePhysicalRestoreRequestV1 = Readonly<{
+  verifiedReceipt: unknown;
+  sourceOwner: DxfProductSavedNativeCompilerSourceOwnerV1;
+  sourceRequest: DxfProductSavedNativeCompilerSourceRequestV1;
+}>;
+export type SavedGenericDurablePhysicalBindingV1 = Readonly<{
+  sourceGeneration: number;
+  graphCanonicalSha256: string;
+  compileInputSha256: string;
+  physicalInitializationCanonicalSha256: string;
+  outerSha256: string;
+  /** Ephemeral same-read join; never persist this digest inside its own outer component. */
+  freshSnapshotSha256: string;
+}>;
+export type SavedGenericDurablePhysicalHostSnapshotV1 = Readonly<{
+  version: typeof SAVED_GENERIC_DURABLE_PHYSICAL_HOST_V1;
+  status:
+    | 'idle'
+    | 'restoring'
+    | 'ready'
+    | 'running16'
+    | 'frame16-ready'
+    | 'running32'
+    | 'frame32-ready'
+    | 'preview-ready'
+    | 'blocked'
+    | 'disposed';
+  binding: SavedGenericDurablePhysicalBindingV1 | null;
+  /** Historical numeric diagnostics; only the top-level current binding admits a facade action. */
+  numeric: NumericSnapshot;
+  detail: string | null;
+  claims: typeof CLAIMS;
+}>;
+const aborted = Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'aborted')!.get!;
+const add = EventTarget.prototype.addEventListener,
+  remove = EventTarget.prototype.removeEventListener;
+function checkSignal(signal?: AbortSignal) {
+  if (signal !== undefined && aborted.call(signal))
+    throw new DOMException('Durable physical operation cancelled.', 'AbortError');
+}
+function record(value: unknown, keys: readonly string[]) {
+  if (!value || Object.getPrototypeOf(value) !== Object.prototype)
+    throw new TypeError('Exact plain own data request required.');
+  const ds = Object.getOwnPropertyDescriptors(value);
+  if (
+    Reflect.ownKeys(ds).length !== keys.length ||
+    keys.some((k) => !ds[k]?.enumerable || !('value' in ds[k]))
+  )
+    throw new TypeError('Request accessors, hidden fields and extra fields are refused.');
+  return Object.fromEntries(keys.map((k) => [k, ds[k].value]));
+}
+/** Detached metadata only. Native owner/draft/receipt and signals never enter this copier. */
+function capture<T>(input: T): T {
+  let nodes = 0,
+    chars = 0;
+  const active = new Set<object>();
+  const copy = (v: unknown, depth: number): unknown => {
+    if (++nodes > 3000000 || depth > 48) throw new TypeError('Metadata exceeds bounded shape.');
+    if (v === null || v === undefined || typeof v === 'boolean') return v;
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string') {
+      chars += v.length;
+      if (v.length > 65536 || chars > 16 * 1024 * 1024)
+        throw new TypeError('Metadata exceeds text bound.');
+      return v;
+    }
+    if (!v || typeof v !== 'object' || active.has(v))
+      throw new TypeError('Plain finite acyclic metadata required.');
+    const array = Array.isArray(v);
+    if (Object.getPrototypeOf(v) !== (array ? Array.prototype : Object.prototype))
+      throw new TypeError('Opaque metadata refused.');
+    const ds = Object.getOwnPropertyDescriptors(v);
+    if (array && (ds.length.value > 250000 || Reflect.ownKeys(ds).length !== ds.length.value + 1))
+      throw new TypeError('Dense bounded array required.');
+    active.add(v);
+    const result: Record<string, unknown> | unknown[] = array ? [] : {};
+    for (const key of Reflect.ownKeys(ds)) {
+      if (array && key === 'length') continue;
+      const d = ds[key as string];
+      if (
+        typeof key !== 'string' ||
+        key === '__proto__' ||
+        !d.enumerable ||
+        !('value' in d) ||
+        (array && !/^(0|[1-9][0-9]*)$/.test(key))
+      )
+        throw new TypeError('Metadata accessors and non-data fields refused.');
+      (result as Record<string, unknown>)[key] = copy(d.value, depth + 1);
+    }
+    active.delete(v);
+    return result;
+  };
+  return copy(input, 0) as T;
+}
+function canonical(v: unknown): string {
+  if (Array.isArray(v)) return '[' + v.map(canonical).join(',') + ']';
+  if (v && typeof v === 'object')
+    return (
+      '{' +
+      Object.keys(v)
+        .sort()
+        .map((k) => JSON.stringify(k) + ':' + canonical((v as Record<string, unknown>)[k]))
+        .join(',') +
+      '}'
+    );
+  return JSON.stringify(v) ?? 'undefined';
+}
+const reason = (error: unknown) =>
+  error instanceof Error ? error.message.slice(0, 2048) : 'Durable physical operation failed.';
+const blocked = (error: unknown) => Object.freeze({ ok: false as const, detail: reason(error) });
+function link(parent: AbortSignal | undefined, controller: AbortController) {
+  checkSignal(parent);
+  if (!parent) return () => {};
+  const cancel = () => controller.abort();
+  add.call(parent, 'abort', cancel, { once: true });
+  if (aborted.call(parent)) cancel();
+  return () => remove.call(parent, 'abort', cancel);
+}
+/** Cancellation owns this wait only; late fixed-reader results still run their finally cleanup. */
+function localWait<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const finish = (f: () => void) => {
+      if (done) return;
+      done = true;
+      remove.call(signal, 'abort', cancel);
+      f();
+    };
+    const cancel = () =>
+      finish(() => reject(new DOMException('Durable read cancelled.', 'AbortError')));
+    promise.then(
+      (v) => finish(() => resolve(v)),
+      (e) => finish(() => reject(e)),
+    );
+    add.call(signal, 'abort', cancel, { once: true });
+    if (aborted.call(signal)) cancel();
+  });
+}
+function detachedProjection(receipt: unknown): Durable {
+  const p = projectSavedFullAssemblyPhysicalSnapshotV1(receipt);
+  return capture({
+    version: p.version,
+    row: p.row,
+    seedOperationNumber: p.seedOperationNumber,
+    serverAssemblyRevision: p.serverAssemblyRevision,
+    freshSnapshotSha256: p.freshSnapshotSha256,
+    outer: p.outer,
+    graph: p.graph,
+    graphCanonicalSha256: p.graphCanonicalSha256,
+    compileInputSha256: p.compileInputSha256,
+    physicalInitialization: p.physicalInitialization,
+    physicalInitializationCanonicalSha256: p.physicalInitializationCanonicalSha256,
+  });
+}
+function restoredIntent(d: Durable): SavedFullAssemblyCompileIntentV1 {
+  return capture({
+    documentId: d.graph.source.handoffSource.documentId,
+    revision: d.graph.source.handoffSource.revision,
+    sizeToken: d.graph.source.sizeToken,
+    physicalSurface: { mode: 'sewing-surface' as const, seamAllowancePhysical: false as const },
+    pieces: d.graph.pieces,
+    operations: d.graph.operations,
+    seams: d.graph.seams,
+    compile: d.graph.compile,
+  });
+}
+
+/** Fixed restore/execute composition. No downloader, Worker, callback reader or public numeric owner. */
+export function createSavedGenericDurablePhysicalHostV1(
+  input: Readonly<{
+    row: DxfProductSavedRowIdentityV1;
+    bodySession: unknown;
+  }>,
+) {
+  const fields = record(input, ['row', 'bodySession']);
+  const row = capture(fields.row) as DxfProductSavedRowIdentityV1,
+    bodySession = fields.bodySession;
+  const host = createSavedGenericObservedPhysicalHostV1({ row, bodySession });
+  let disposed = false,
+    stopping = false,
+    epoch = 0,
+    serial = 0;
+  let sourceLife = new AbortController(),
+    unlinkSource = () => {};
+  type Admission = {
+    durable: Durable;
+    generation: number;
+    epoch: number;
+    sourceLife: AbortController;
+    publicBinding: SavedGenericDurablePhysicalBindingV1;
+  };
+  type Operation = {
+    id: number;
+    kind: 'restore' | 'physical';
+    controller: AbortController;
+    finished: Promise<void>;
+    unlink: () => void;
+    retained: boolean;
+    stoppedByHost: boolean;
+    receipts: Set<unknown>;
+    borrowedReceipt: unknown | null;
+    context: SavedGenericObservedPhysicalHostPersistenceContextV1 | null;
+  };
+  let admission: Admission | null = null,
+    operation: Operation | null = null;
+  let lease16: XpbdDeviceLease | null = null;
+  const bridges = new Map<'16' | '32' | 'preview', Operation>();
+  const listeners = new Set<() => void>();
+  let snapshot: SavedGenericDurablePhysicalHostSnapshotV1 = Object.freeze({
+    version: SAVED_GENERIC_DURABLE_PHYSICAL_HOST_V1,
+    status: 'idle',
+    binding: null,
+    numeric: host.getSnapshot(),
+    detail: null,
+    claims: CLAIMS,
+  });
+  const publish = (change: Partial<SavedGenericDurablePhysicalHostSnapshotV1>) => {
+    snapshot = Object.freeze({ ...snapshot, ...change, numeric: host.getSnapshot() });
+    for (const listener of [...listeners])
+      try {
+        listener();
+      } catch {
+        /* observers cannot veto cleanup */
+      }
+  };
+  const dropBridge = (kind: '16' | '32' | 'preview') => {
+    const old = bridges.get(kind);
+    bridges.delete(kind);
+    old?.unlink();
+  };
+  const dropBridges = () => {
+    lease16 = null;
+    for (const kind of [...bridges.keys()]) dropBridge(kind);
+  };
+  const releaseReads = (op: Operation | null) => {
+    if (!op) return;
+    for (const receipt of op.receipts) disposeSavedFullAssemblyPhysicalSnapshotV1(receipt);
+    op.receipts.clear();
+    op.borrowedReceipt = null;
+    op.context = null;
+  };
+  const check = (op: Operation, expectedEpoch: number, finished = false) => {
+    checkSignal(op.controller.signal);
+    checkSignal(sourceLife.signal);
+    if (disposed || epoch !== expectedEpoch || serial !== op.id || (!finished && operation !== op))
+      throw new DOMException('Durable host generation or operation changed.', 'AbortError');
+  };
+  const bound = (op: Operation, a: Admission, finished = false) => {
+    check(op, a.epoch, finished);
+    if (
+      admission !== a ||
+      sourceLife !== a.sourceLife ||
+      host.getSnapshot().sourceGeneration !== a.generation ||
+      host.getSnapshot().initializationSha256 !== a.durable.physicalInitializationCanonicalSha256
+    )
+      throw new Error('Durable admission or numeric initialization is no longer current.');
+    check(op, a.epoch, finished);
+  };
+  const invalidate = (a: Admission, detail: string) => {
+    if (disposed || admission !== a || epoch !== a.epoch) return;
+    admission = null;
+    dropBridges();
+    void host.stopPreview().catch(() => {});
+    publish({ status: 'blocked', binding: null, detail });
+  };
+  const unsubscribe = host.subscribe(() => {
+    const current = host.getSnapshot();
+    if (!current.previewReceipt) dropBridge('preview');
+    if (current.status === 'blocked' || current.status === 'disposed') dropBridges();
+    if (disposed) return;
+    const a = admission;
+    if (
+      a &&
+      (current.sourceGeneration !== a.generation ||
+        current.initializationSha256 !== a.durable.physicalInitializationCanonicalSha256)
+    ) {
+      admission = null;
+      dropBridges();
+      publish({
+        status: 'blocked',
+        binding: null,
+        detail: current.detail ?? 'Numeric source/body binding ended.',
+      });
+    } else if (a && snapshot.status === 'preview-ready' && !current.previewReceipt) {
+      publish({
+        status:
+          current.status === 'frame32-ready'
+            ? 'frame32-ready'
+            : current.status === 'frame16-ready'
+              ? 'frame16-ready'
+              : 'ready',
+      });
+    } else publish({});
+  });
+  async function work<T>(
+    signal: AbortSignal | undefined,
+    action: (op: Operation) => Promise<T>,
+    replacesSource = false,
+  ) {
+    checkSignal(signal);
+    if (disposed || stopping || operation || host.getSnapshot().cleanupPending)
+      throw new Error(
+        disposed ? 'Durable host is disposed.' : 'Durable host is busy or GPU work is draining.',
+      );
+    const controller = new AbortController();
+    let finish!: () => void;
+    const finished = new Promise<void>((r) => {
+      finish = r;
+    });
+    const unlinks: Array<() => void> = [];
+    const op: Operation = {
+      id: ++serial,
+      kind: replacesSource ? 'restore' : 'physical',
+      controller,
+      finished,
+      retained: false,
+      stoppedByHost: false,
+      receipts: new Set(),
+      borrowedReceipt: null,
+      context: null,
+      unlink: () => {
+        unlinks.splice(0).forEach((f) => f());
+      },
+    };
+    operation = op;
+    try {
+      unlinks.push(link(signal, controller));
+      if (!replacesSource) unlinks.push(link(sourceLife.signal, controller));
+      return { value: await action(op), op };
+    } finally {
+      if (!op.retained || aborted.call(controller.signal)) op.unlink();
+      if (operation === op) operation = null;
+      finish();
+    }
+  }
+  async function fresh(durable: Durable, op: Operation) {
+    const signal = op.controller.signal;
+    let receipt: Awaited<ReturnType<typeof readSavedFullAssemblyPhysicalSnapshotV1>> | null = null;
+    try {
+      receipt = await readSavedFullAssemblyPhysicalSnapshotV1(
+        { row, seedOperationNumber: durable.seedOperationNumber },
+        signal,
+      );
+      checkSignal(signal);
+      const value = detachedProjection(receipt);
+      if (canonical(value) !== canonical(durable))
+        throw new Error('Verified saved full graph/physical outer changed.');
+      checkSignal(signal);
+      op.receipts.add(receipt);
+      receipt = null;
+      return value;
+    } finally {
+      if (receipt) disposeSavedFullAssemblyPhysicalSnapshotV1(receipt);
+    }
+  }
+  async function target(a: Admission, op: Operation) {
+    const t = await projectCurrentSavedModelGenericObservedTargetV1(
+      bodySession,
+      op.controller.signal,
+    );
+    bound(op, a);
+    if (
+      !t.ok ||
+      t.canonicalSha256 !== a.durable.physicalInitialization.observedTarget.canonicalSha256 ||
+      canonical(t.target) !== canonical(a.durable.physicalInitialization.observedTarget.target)
+    )
+      throw new Error('Current genuine displayed body differs from saved physical initialization.');
+    return t;
+  }
+  const terminal = (a: Admission, op: Operation, t: Target, finished = false) => {
+    bound(op, a, finished);
+    for (const receipt of op.receipts) {
+      if (canonical(detachedProjection(receipt)) !== canonical(a.durable))
+        throw new Error('Owned verified read receipt expired or changed before publication.');
+      bound(op, a, finished);
+    }
+    if (
+      op.borrowedReceipt &&
+      canonical(detachedProjection(op.borrowedReceipt)) !== canonical(a.durable)
+    )
+      throw new Error('Borrowed restore receipt expired or changed before publication.');
+    bound(op, a, finished);
+    if (
+      !isCurrentSavedGenericObservedPhysicalHostPersistenceContextV1(
+        host,
+        op.context,
+        op.controller.signal,
+      )
+    ) {
+      check(op, a.epoch, finished);
+      throw new Error('Private source/initialization context expired before durable publication.');
+    }
+    bound(op, a, finished);
+    if (!isCurrentSavedModelGenericObservedTargetV1(bodySession, t, op.controller.signal)) {
+      check(op, a.epoch, finished);
+      throw new Error('Displayed body changed before durable publication.');
+    }
+    bound(op, a, finished);
+  };
+  async function verify(a: Admission, op: Operation) {
+    bound(op, a);
+    await localWait(fresh(a.durable, op), op.controller.signal);
+    bound(op, a);
+    const context = await projectSavedGenericObservedPhysicalHostPersistenceContextV1(
+      host,
+      a.generation,
+      op.controller.signal,
+    );
+    bound(op, a);
+    if (!context.ok) throw new Error(context.detail);
+    const c = context.context;
+    op.context = c;
+    if (
+      c.graphCanonicalSha256 !== a.durable.graphCanonicalSha256 ||
+      c.compileInputSha256 !== a.durable.compileInputSha256 ||
+      c.physicalInitialization.canonicalSha256 !==
+        a.durable.physicalInitializationCanonicalSha256 ||
+      c.readEvidence.fullAssemblySnapshotSha256 !== a.durable.freshSnapshotSha256 ||
+      canonical(c.graph) !== canonical(a.durable.graph) ||
+      canonical(c.physicalInitialization.document) !==
+        canonical(a.durable.physicalInitialization) ||
+      canonical(c.assemblySnapshot.row) !== canonical(row) ||
+      c.assemblySnapshot.serverAssemblyRevision !== a.durable.serverAssemblyRevision
+    )
+      throw new Error('Private numeric host differs from verified saved content.');
+    const t = await target(a, op);
+    terminal(a, op, t);
+    return t;
+  }
+  const failAccepted = (
+    a: Admission | null,
+    op: Operation | null,
+    error: unknown,
+    signal?: AbortSignal,
+  ) => {
+    if (
+      a &&
+      op &&
+      !disposed &&
+      serial === op.id &&
+      admission === a &&
+      !op.stoppedByHost &&
+      !(signal && aborted.call(signal))
+    )
+      invalidate(a, reason(error));
+    return blocked(error);
+  };
+  async function run(frame: 16 | 32, lease: XpbdDeviceLease, signal?: AbortSignal) {
+    let accepted: Admission | null = null,
+      ticket: Operation | null = null;
+    try {
+      const done = await work(signal, async (op) => {
+        ticket = op;
+        const a = admission;
+        if (!a) throw new Error('A verified restored durable binding is required.');
+        if (!inspectOwnedActiveXpbdDeviceLeaseV1(lease).ok)
+          throw new Error('A genuine active borrowed device lease is required.');
+        if (frame === 32 && lease16 !== lease)
+          throw new Error('32 requires the current genuine16 on the same borrowed lease.');
+        accepted = a;
+        await verify(a, op);
+        bound(op, a);
+        if (frame === 16) dropBridges();
+        else {
+          dropBridge('preview');
+          dropBridge('32');
+        }
+        publish({ status: frame === 16 ? 'running16' : 'running32', detail: null });
+        bound(op, a);
+        const result =
+          frame === 16
+            ? await host.runNumeric16(lease, op.controller.signal)
+            : await host.runNumeric32(lease, op.controller.signal);
+        bound(op, a);
+        if (!result.ok) throw new Error(result.detail);
+        // Underlying fixed host has drained the same borrowed queue before successful return.
+        const t = await verify(a, op);
+        terminal(a, op, t);
+        if (frame === 16) lease16 = lease;
+        op.retained = true;
+        bridges.set(frame === 16 ? '16' : '32', op);
+        return { a, t, result };
+      });
+      terminal(done.value.a, done.op, done.value.t, true);
+      publish({ status: frame === 16 ? 'frame16-ready' : 'frame32-ready', detail: null });
+      terminal(done.value.a, done.op, done.value.t, true);
+      return { ...done.value.result, durableBinding: done.value.a.publicBinding, claims: CLAIMS };
+    } catch (error) {
+      return failAccepted(accepted, ticket, error, signal);
+    } finally {
+      releaseReads(ticket);
+    }
+  }
+  return Object.freeze({
+    getSnapshot: () => snapshot,
+    subscribe(listener: () => void) {
+      if (disposed) return () => {};
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    async restore(input: SavedGenericDurablePhysicalRestoreRequestV1, signal?: AbortSignal) {
+      let ticket: Operation | null = null,
+        a: Admission | null = null;
+      try {
+        checkSignal(signal);
+        const r = record(input, ['verifiedReceipt', 'sourceOwner', 'sourceRequest']);
+        const sr = record(r.sourceRequest, [
+          'schemaVersion',
+          'sourceFileId',
+          'sourceSha256',
+          'techCardId',
+          'scopeKey',
+          'patternLineKey',
+          'cardLockVersion',
+          'draft',
+        ]);
+        const sourceRequest = {
+          ...capture({ ...sr, draft: null }),
+          draft: sr.draft,
+        } as unknown as DxfProductSavedNativeCompilerSourceRequestV1;
+        const durable = detachedProjection(r.verifiedReceipt);
+        if (
+          canonical(durable.row) !== canonical(row) ||
+          sourceRequest.sourceFileId !== durable.graph.source.sourceFileId ||
+          sourceRequest.sourceSha256 !== row.sha256 ||
+          sourceRequest.techCardId !== row.techCardId ||
+          sourceRequest.scopeKey !== row.scopeKey ||
+          sourceRequest.patternLineKey !== row.patternLineKey ||
+          sourceRequest.cardLockVersion !== row.cardLockVersion
+        )
+          throw new Error('Verified durable/native source row bindings differ.');
+        const done = await work(
+          signal,
+          async (op) => {
+            ticket = op;
+            op.borrowedReceipt = r.verifiedReceipt;
+            admission = null;
+            dropBridges();
+            unlinkSource();
+            const precedingLife = sourceLife;
+            epoch++;
+            const expectedEpoch = epoch;
+            sourceLife = new AbortController();
+            const ownedLife = sourceLife;
+            unlinkSource = link(signal, ownedLife);
+            const current = () => check(op, expectedEpoch);
+            current();
+            publish({ status: 'restoring', binding: null, detail: null });
+            current();
+            precedingLife.abort();
+            current();
+            await localWait(fresh(durable, op), op.controller.signal);
+            current();
+            const compiled = await host.consume(
+              {
+                sourceOwner: r.sourceOwner as DxfProductSavedNativeCompilerSourceOwnerV1,
+                sourceRequest,
+                expected: {
+                  row,
+                  serverAssemblyRevision: durable.serverAssemblyRevision,
+                  fullAssemblySnapshotSha256: durable.freshSnapshotSha256,
+                },
+                seedOperationNumber: durable.seedOperationNumber,
+                intent: restoredIntent(durable),
+              },
+              ownedLife.signal,
+            );
+            current();
+            if (!compiled.ok || !compiled.result.compiled)
+              throw new Error('Genuine native/full assembly compile refused the restored source.');
+            const generation = compiled.result.generation;
+            const initial = await host.bindInitialization(
+              durable.physicalInitialization,
+              generation,
+              op.controller.signal,
+            );
+            current();
+            if (!initial.ok) throw new Error(initial.detail);
+            const publicBinding = Object.freeze({
+              sourceGeneration: generation,
+              graphCanonicalSha256: durable.graphCanonicalSha256,
+              compileInputSha256: durable.compileInputSha256,
+              physicalInitializationCanonicalSha256: durable.physicalInitializationCanonicalSha256,
+              outerSha256: durable.outer.sha256,
+              freshSnapshotSha256: durable.freshSnapshotSha256,
+            });
+            a = { durable, generation, epoch: expectedEpoch, sourceLife: ownedLife, publicBinding };
+            admission = a;
+            const t = await verify(a, op);
+            terminal(a, op, t);
+            return { a, t };
+          },
+          true,
+        );
+        terminal(done.value.a, done.op, done.value.t, true);
+        publish({ status: 'ready', binding: done.value.a.publicBinding, detail: null });
+        terminal(done.value.a, done.op, done.value.t, true);
+        return { ok: true as const, binding: done.value.a.publicBinding, claims: CLAIMS };
+      } catch (error) {
+        // The admitted async closure assigns this ticket before any owned mutation.
+        const admittedTicket = ticket as Operation | null;
+        if (!a && admittedTicket && !disposed && serial === admittedTicket.id) {
+          publish({ status: 'blocked', binding: null, detail: reason(error) });
+        }
+        return failAccepted(a, ticket, error, signal);
+      } finally {
+        releaseReads(ticket);
+      }
+    },
+    run16: (lease: XpbdDeviceLease, signal?: AbortSignal) => run(16, lease, signal),
+    run32: (lease: XpbdDeviceLease, signal?: AbortSignal) => run(32, lease, signal),
+    async projectLatestRender(signal?: AbortSignal) {
+      let accepted: Admission | null = null,
+        ticket: Operation | null = null;
+      try {
+        const done = await work(signal, async (op) => {
+          ticket = op;
+          const a = admission;
+          if (!a) throw new Error('No current durable binding.');
+          accepted = a;
+          await verify(a, op);
+          bound(op, a);
+          const result = await host.projectLatestRender(op.controller.signal);
+          bound(op, a);
+          if (!result.ok) throw new Error(result.detail);
+          const t = await verify(a, op);
+          return { a, t, result };
+        });
+        terminal(done.value.a, done.op, done.value.t, true);
+        return { ...done.value.result, durableBinding: done.value.a.publicBinding, claims: CLAIMS };
+      } catch (error) {
+        return failAccepted(accepted, ticket, error, signal);
+      } finally {
+        releaseReads(ticket);
+      }
+    },
+    async mountPreview(canvas: HTMLCanvasElement, signal?: AbortSignal) {
+      let accepted: Admission | null = null,
+        ticket: Operation | null = null;
+      try {
+        const done = await work(signal, async (op) => {
+          ticket = op;
+          const a = admission;
+          if (!a) throw new Error('No current durable binding.');
+          accepted = a;
+          await verify(a, op);
+          bound(op, a);
+          dropBridge('preview');
+          const result = await host.mountPreview(canvas, op.controller.signal);
+          bound(op, a);
+          if (!result.ok) throw new Error(result.detail);
+          const t = await verify(a, op);
+          terminal(a, op, t);
+          op.retained = true;
+          bridges.set('preview', op);
+          return { a, t, result };
+        });
+        terminal(done.value.a, done.op, done.value.t, true);
+        publish({ status: 'preview-ready', detail: null });
+        terminal(done.value.a, done.op, done.value.t, true);
+        return { ...done.value.result, durableBinding: done.value.a.publicBinding, claims: CLAIMS };
+      } catch (error) {
+        return failAccepted(accepted, ticket, error, signal);
+      } finally {
+        releaseReads(ticket);
+      }
+    },
+    async stopPreview() {
+      // Preview effect cleanup must not cancel the separately owned source restore/compile.
+      if (disposed || stopping || operation?.kind === 'restore') return;
+      stopping = true;
+      const ownEpoch = epoch;
+      try {
+        if (operation) {
+          operation.stoppedByHost = true;
+          operation.controller.abort();
+          await operation.finished;
+        }
+        dropBridges();
+        await host.stopPreview();
+        if (!disposed && epoch === ownEpoch)
+          publish({
+            status: admission ? 'ready' : 'blocked',
+            detail: host.getSnapshot().cleanupPending
+              ? 'Submitted GPU work is still draining.'
+              : null,
+          });
+      } finally {
+        stopping = false;
+      }
+    },
+    async dispose() {
+      if (disposed) return false;
+      disposed = true;
+      epoch++;
+      admission = null;
+      unlinkSource();
+      sourceLife.abort();
+      operation?.controller.abort();
+      unsubscribe();
+      dropBridges();
+      await host.dispose();
+      if (operation) await operation.finished;
+      publish({ status: 'disposed', binding: null });
+      listeners.clear();
+      return true;
+    },
+  });
+}
+export type SavedGenericDurablePhysicalHostV1 = ReturnType<
+  typeof createSavedGenericDurablePhysicalHostV1
+>;
