@@ -102,7 +102,7 @@ export type PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1 = Readonly<{
       pieceLineKey: string;
       contourId: string | null;
       boundaryVertexIds: readonly string[];
-      direction?: 'forward' | 'reverse';
+      direction?: 'forward' | 'reverse' | null;
     }>[];
   }>;
 }>;
