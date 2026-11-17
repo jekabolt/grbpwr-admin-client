@@ -156,6 +156,9 @@ export function AssemblyCarrierDevPage() {
       if (!card?.techCard) throw new Error('Card missing in response.');
       const patterns = card.techCard.patterns ?? [];
       const operations = card.techCard.operations ?? [];
+      const pieces = card.techCard.pieces ?? [];
+      const aliases = card.techCard.pieceDxfAliases?.items ?? [];
+      const seams = card.seams ?? [];
       const scopes = rollGoodsScopes(card.techCard.bomItems ?? []);
       const bindings = bindingScopes(scopes, patterns);
       const operation = operations.find(
@@ -163,10 +166,44 @@ export function AssemblyCarrierDevPage() {
       );
       report.cardLockVersion = card.lockVersion;
       report.patternCount = patterns.length;
+      report.pieceCount = pieces.length;
+      report.pieces = pieces.slice(0, 100).map(({ lineKey, name, ungraded }) => ({
+        lineKey,
+        name,
+        ungraded,
+      }));
+      report.aliasCount = aliases.length;
+      report.aliases = aliases.slice(0, 100).map((alias) => ({
+        pieceLineKey: alias.pieceLineKey,
+        fabricPurpose: alias.fabricPurpose,
+        bomLineKey: alias.bomLineKey,
+        blockName: alias.blockName,
+      }));
       report.operations = operations.slice(0, 100).map((op) => ({
         number: op.operationNumber,
         type: op.operationType,
+        pieceLineKeys: op.pieceLineKeys,
+        bomLineKeys: op.bomLineKeys,
         seamKeys: op.seamKeys,
+      }));
+      report.seamCount = seams.length;
+      report.seams = seams.slice(0, 100).map((seam) => ({
+        seamKey: seam.seamKey,
+        kind: seam.kind,
+        status: seam.status,
+        direction: seam.direction,
+        anchoredSize: seam.anchoredSize,
+        stale: seam.stale,
+        sideA: seam.sideA?.parts?.slice(0, 8).map((part) => ({
+          pieceLineKey: part.pieceLineKey,
+          edgeHint: part.edgeHint,
+          lenMm: part.lenMm,
+        })),
+        sideB: seam.sideB?.parts?.slice(0, 8).map((part) => ({
+          pieceLineKey: part.pieceLineKey,
+          edgeHint: part.edgeHint,
+          lenMm: part.lenMm,
+        })),
       }));
       const rows = patterns.slice(0, 20).map((row) => {
         const uiScopeKey = scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, bindings);
