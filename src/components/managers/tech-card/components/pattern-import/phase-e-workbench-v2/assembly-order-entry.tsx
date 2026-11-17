@@ -148,6 +148,7 @@ import {
 } from './cad-table-press-authoring-v1';
 import type { PatternImportDxfProductCompositeSidecarApplicationTransactionV4 } from './composite-sidecar-production-transaction-v4';
 import { PatternImportDxfPhaseEExactNTopologyAnnotationEditorV1 } from './exact-n-topology-annotation-editor-v1';
+import type { PatternImportDxfPhaseERestoredTopologyAnnotationReaderV1 } from './restored-topology-annotation-reader-v1';
 import {
   PatternImportDxfPhaseETopologyAnnotationSaveControlV5,
   type PatternImportDxfPhaseETopologyAnnotationDraftV5,
@@ -1297,6 +1298,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
   operationRouteBlocker = null,
   exactNSession = null,
   exactNDesktop = null,
+  readSavedTopologyAnnotations,
   exactNApplicationOwner,
   autoOpen = false,
   onOpenChange,
@@ -1337,6 +1339,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
   /** Optional production-only owner minted by the Composite V4 restore/projection/selection chain. */
   exactNSession?: PatternImportDxfPhaseEExactNAssemblyOrderSessionV2 | null;
   exactNDesktop?: PatternImportDxfProductExactNDesktopGeometryV2 | null;
+  readSavedTopologyAnnotations?: PatternImportDxfPhaseERestoredTopologyAnnotationReaderV1;
   /** The one application-level Composite V4 writer/readback owner, created by OperationsField. */
   exactNApplicationOwner?: PatternImportDxfProductCompositeSidecarApplicationTransactionV4;
   /** The visible production Assembly Table prepares this single owner without an extra open door. */
@@ -2360,6 +2363,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
           activeSeamIndex={exactNActiveSeamIndex}
           onActiveSeamIndexChange={setExactNActiveSeamIndex}
           desktopGeometry={exactNDesktop}
+          readSavedTopologyAnnotations={readSavedTopologyAnnotations}
           sceneOverlayInput={
             exactNMannequinStaging?.ok
               ? {
@@ -2425,9 +2429,9 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                     annotationSource: exactNMannequinStaging?.ok
                       ? exactNMannequinStaging.staging.annotationSource
                       : matchesPatternImportDxfProductExactNDesktopGeometryV2(
-                          exactNDesktop,
-                          exactNSession,
-                        )
+                            exactNDesktop,
+                            exactNSession,
+                          )
                         ? exactNDesktop.annotationSource ?? undefined
                         : undefined,
                     sources: mannequinDxfSources,

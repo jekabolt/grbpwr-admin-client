@@ -46,6 +46,8 @@ import {
 import { PatternImportDxfPhaseEDraftCadGridRulersV1 } from './draft-cad-grid-rulers-v1';
 import { PatternImportDxfPhaseECadWorkbenchToolButtonV1 } from './cad-workbench-tool-button-v1';
 import { CAD_WORKBENCH_SEAM_SIDE_COLORS } from './cad-workbench-seam-colors-v1';
+import { PatternImportDxfPhaseEDraftCadTopologyOverlayV1 } from './draft-cad-topology-overlay-v1';
+import type { PatternImportDxfPhaseETopologyAnnotationDraftV5 } from './topology-annotation-save-control-v5';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_CONNECT_CANVAS_V1 =
   'pattern-import-dxf-phase-e-cad-table-zero-connect-canvas/1' as const;
@@ -78,6 +80,8 @@ export type PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1 = Readonly<{
   authoringAuthorityRefresh?: PatternImportDxfPhaseEZeroConnectAuthoringRefreshOwnerV1 | null;
   zeroConnectAuthoringHandoff?: PatternImportDxfPhaseEZeroConnectAuthoringHandoffOwnerV1;
   disabled?: boolean;
+  savedAnnotations?: PatternImportDxfPhaseETopologyAnnotationDraftV5;
+  savedAnnotationBlocker?: string;
   savedSeam?: Readonly<{
     seamId: string;
     operationNumber: number;
@@ -260,6 +264,8 @@ function CadTableZeroCanvas({
   zeroConnectAuthoringHandoff,
   disabled = false,
   savedSeam,
+  savedAnnotations,
+  savedAnnotationBlocker,
   owner,
 }: PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1 & { owner: CadTableZeroCanvasOwner }) {
   const authority = useMemo(
@@ -272,6 +278,8 @@ function CadTableZeroCanvas({
     'select',
   );
   const [fitRequest, setFitRequest] = useState(0);
+  const [measurementsVisible, setMeasurementsVisible] = useState(true);
+  const [calloutsVisible, setCalloutsVisible] = useState(true);
   const [hiddenFeatureLayers, setHiddenFeatureLayers] = useState<
     ReadonlySet<CadTablePieceFeatureLayer>
   >(() => new Set());
@@ -495,6 +503,24 @@ function CadTableZeroCanvas({
             pressed={boundaryVisibility['sewing-boundary']}
             onClick={() => toggleBoundary('sewing-boundary')}
           />
+          {!!savedAnnotations?.measurements.length && (
+            <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+              icon='measure-line'
+              label='Show measurements'
+              active={measurementsVisible}
+              pressed={measurementsVisible}
+              onClick={() => setMeasurementsVisible((visible) => !visible)}
+            />
+          )}
+          {!!savedAnnotations?.callouts.length && (
+            <PatternImportDxfPhaseECadWorkbenchToolButtonV1
+              icon='callout'
+              label='Show callouts'
+              active={calloutsVisible}
+              pressed={calloutsVisible}
+              onClick={() => setCalloutsVisible((visible) => !visible)}
+            />
+          )}
           {availableFeatureLayers.map(({ key, label, icon }) => (
             <PatternImportDxfPhaseECadWorkbenchToolButtonV1
               key={key}
@@ -668,6 +694,20 @@ function CadTableZeroCanvas({
                         materialRings={pieceLayout.sourceMaterialRings}
                       />
                     ) : null}
+                    {savedAnnotations ? (
+                      <PatternImportDxfPhaseEDraftCadTopologyOverlayV1
+                        projection={projection}
+                        state={{
+                          sourceIdentity,
+                          unit: 'mm',
+                          measurements: measurementsVisible ? savedAnnotations.measurements : [],
+                          callouts: calloutsVisible ? savedAnnotations.callouts : [],
+                        }}
+                        pieceId={piece.pieceId}
+                        pieceLineKey={piece.pieceLineKey}
+                        unit={unit}
+                      />
+                    ) : null}
                   </g>
                 );
               })}
@@ -793,7 +833,8 @@ function CadTableZeroCanvas({
         data-cad-zero-connect-status={controller.session?.status ?? 'idle'}
         className='min-h-8 border-t border-borderColor px-2 py-1 text-micro text-labelColor'
       >
-        {status ??
+        {savedAnnotationBlocker ??
+          status ??
           (selectsPieces
             ? `${layout.selectedPieceKeys.length} selected · click or drag to select; Shift toggles. Wheel zooms and double-click fits.`
             : activeTool === 'pan'

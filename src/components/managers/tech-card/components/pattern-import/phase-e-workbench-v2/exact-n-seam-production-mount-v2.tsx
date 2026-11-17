@@ -28,6 +28,11 @@ import type { PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1 } from './cad
 import type { PatternImportDxfPhaseECadMannequinSceneOverlayCapabilityV1 } from './cad-workbench-mannequin-model-picker-v1';
 import { findCadWorkbenchScopedPieceIndexV1 } from './cad-workbench-piece-selection-v1';
 import { cadWorkbenchOperationSeamOrdinal } from './cad-workbench-seam-ordinal-v1';
+import { matchesPatternImportDxfProductExactNDesktopGeometryV2 } from './durable-exact-session-current-v1';
+import {
+  usePatternImportDxfPhaseERestoredTopologyAnnotationsV1,
+  type PatternImportDxfPhaseERestoredTopologyAnnotationReaderV1,
+} from './restored-topology-annotation-reader-v1';
 import type { PatternImportDxfProductExactNSeamUiSelectionOwnerV2 } from './exact-n-seam-atomic-ui-selection-v2';
 import type { PatternImportDxfPhaseEGoldenCardProductionV2SnapshotFeedV1 } from './golden-card-production-v2-snapshot-feed-v1';
 import {
@@ -55,6 +60,7 @@ export const PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_PRODUCTION_MOUNT_CLAIMS_V2 
   readOnlyHost: true,
   exactNEditOrApplyControlsRendered: false,
   topologyAnnotationAuthoringSlotAvailable: true,
+  savedAnnotationReaderCallerOwned: true,
   topologyAnnotationPersistenceCallerOwned: true,
   createsSecondWriter: false,
   fixtureAuthorityAccepted: false,
@@ -96,22 +102,7 @@ export type PatternImportDxfProductExactNDesktopGeometryV2 = Readonly<{
   savedSceneAuthority?: PatternImportDxfPhaseEZeroConnectPreparedAuthorityV1;
 }>;
 
-export function matchesPatternImportDxfProductExactNDesktopGeometryV2(
-  geometry: PatternImportDxfProductExactNDesktopGeometryV2 | null,
-  session: PatternImportDxfPhaseEExactNAssemblyOrderSessionV2,
-): geometry is PatternImportDxfProductExactNDesktopGeometryV2 {
-  if (!geometry) return false;
-  const { catalog, projection } = geometry;
-  return (
-    catalog.techCardId === session.current.row.techCardId &&
-    catalog.scopeKey === session.current.row.scopeKey &&
-    catalog.canonicalSha256 === session.current.catalogCanonicalSha256 &&
-    projection.expectedCatalogCanonicalSha256 === catalog.canonicalSha256 &&
-    projection.sizeSelectionCanonicalSha256 === catalog.sizeSelectionCanonicalSha256 &&
-    projection.sourceFileId === catalog.sourceFileId &&
-    projection.sizeToken === catalog.sizeToken
-  );
-}
+export { matchesPatternImportDxfProductExactNDesktopGeometryV2 } from './durable-exact-session-current-v1';
 
 export type PatternImportDxfProductExactNSeamProductionMountPropsV2 = Readonly<{
   session: PatternImportDxfPhaseEExactNAssemblyOrderSessionV2;
@@ -125,6 +116,7 @@ export type PatternImportDxfProductExactNSeamProductionMountPropsV2 = Readonly<{
   sceneOverlayBlocker?: Readonly<{ code: string; detail: string }> | null;
   /** Mounted only by the caller that owns the genuine V4/V5 annotation transaction. */
   topologyAnnotationAuthoring?: ReactNode;
+  readSavedTopologyAnnotations?: PatternImportDxfPhaseERestoredTopologyAnnotationReaderV1;
 }>;
 
 function sceneOverlayBlocked(
@@ -198,8 +190,8 @@ export function resolvePatternImportDxfProductExactNSeamProductionMountV2(
 }
 
 /**
- * Layout-only production boundary. It never prepares, restores, persists or edits exact-N data;
- * invalid/stale/forged inputs render nothing, leaving the caller to show the typed blocker.
+ * Mounts the already verified Exact-N selection. The optional annotation readback supplies only
+ * the saved presentation layer for its matching desktop geometry.
  */
 export function PatternImportDxfProductExactNSeamProductionMountV2({
   session,
@@ -212,6 +204,7 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
   sceneOverlayInput = null,
   sceneOverlayBlocker = null,
   topologyAnnotationAuthoring = null,
+  readSavedTopologyAnnotations,
 }: PatternImportDxfProductExactNSeamProductionMountPropsV2): ReactNode {
   const resolved = resolvePatternImportDxfProductExactNSeamProductionMountV2(
     session,
@@ -225,6 +218,11 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
       ? desktopGeometry
       : null;
   const tableSessionOwner = useCadTableZeroCanvasOwner(exactDesktop?.projection ?? null);
+  const savedAnnotations = usePatternImportDxfPhaseERestoredTopologyAnnotationsV1(
+    session,
+    exactDesktop,
+    readSavedTopologyAnnotations,
+  );
   if (!resolved.ok) return null;
   const activeSeam = resolved.model.state.seams[activeSeamIndex];
   const operation = resolved.model.state.bindings.selectedOperation;
@@ -314,6 +312,12 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
             projection={exactDesktop.projection}
             pieceFeatures={exactDesktop.pieceFeatures}
             tableSessionOwner={tableSessionOwner}
+            savedAnnotations={
+              savedAnnotations?.status === 'ready' ? savedAnnotations.draft : undefined
+            }
+            savedAnnotationBlocker={
+              savedAnnotations?.status === 'blocked' ? savedAnnotations.detail : undefined
+            }
             savedSeam={{
               seamId: activeSeam.seamId,
               operationNumber: operation.sourceOperationNumber,

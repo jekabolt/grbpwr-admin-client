@@ -1,5 +1,8 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Buffer } from 'node:buffer';
+import { act, createElement, isValidElement, type ReactElement, type ReactNode } from 'react';
+import { createRoot } from 'react-dom/client';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { abortableAdminService } from 'api/api';
 import type {
   GetTechCardSavedAssemblySnapshotRequest,
@@ -45,6 +48,41 @@ import {
   projectSavedGenericObservedPhysicalHostPersistenceContextV1,
 } from './saved-generic-observed-physical-host-v1';
 import { createSavedGenericDurablePhysicalHostV1 } from './saved-generic-durable-physical-host-v1';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_AUTHORING_CATALOG_V1,
+  computePatternImportDxfProductPhaseEAuthoringCatalogSha256V1,
+  type PatternImportDxfProductPhaseEAuthoringCatalogV1,
+} from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
+import { PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_ASSEMBLY_PROJECTION_V1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_DURABLE_RESTORE_REQUEST_V4,
+  restorePatternImportDxfProductCompositeSidecarDurableV4,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/composite-sidecar-restore-authority-v4';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_PREPARED_PROPOSAL_V3,
+  PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_SAVED_CARD_PROJECTION_REQUEST_V2,
+  projectPatternImportDxfProductExactNSeamSavedCardV2,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/exact-n-seam-saved-card-projection-v2';
+import {
+  PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_UI_SELECTION_REQUEST_V2,
+  applyPatternImportDxfProductExactNSeamUiSelectionV2,
+  createPatternImportDxfProductExactNSeamInitialUiStateV2,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/exact-n-seam-atomic-ui-selection-v2';
+import {
+  createPatternImportDxfPhaseETopologyAnnotationApplicationTransactionV5,
+  type PatternImportDxfPhaseETopologyAnnotationSourceV5,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/topology-annotation-application-transaction-v5';
+import { PATTERN_IMPORT_DXF_PHASE_E_CALLOUT_SESSION_V1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/callout-session-v1';
+import {
+  PatternImportDxfProductExactNSeamProductionMountV2,
+  type PatternImportDxfProductExactNDesktopGeometryV2,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/exact-n-seam-production-mount-v2';
+import {
+  PatternImportDxfPhaseECadTableZeroConnectCanvasV1,
+  type PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1,
+} from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-table-zero-connect-canvas-v1';
+import { createPatternImportDxfPhaseERestoredTopologyAnnotationReaderV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/restored-topology-annotation-reader-v1';
+import { createPatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1 } from 'components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/saved-assembly-snapshot-production-rpc-v1';
 
 // Real native DXF/worker/compiler, V3→V7 encoders, fixed fresh reader and genuine body session.
 // HTTP storage, declared synthetic observed triangle geometry, and GPU/preview lifecycle ports are fixtures.
@@ -189,6 +227,7 @@ async function encodedStorage(
     Awaited<ReturnType<typeof projectSavedGenericObservedPhysicalHostPersistenceContextV1>>,
     { ok: true }
   >['context'],
+  withAnnotations: boolean,
 ) {
   const fullReceipt = await snapshotApi.readSavedFullAssemblySnapshotV1({
     row: seed.row,
@@ -200,11 +239,12 @@ async function encodedStorage(
   } finally {
     snapshotApi.disposeSavedFullAssemblySnapshotV1(fullReceipt);
   }
+  const selectedOperationNumber = withAnnotations ? 20 : 10;
   const bindings = {
     row: seed.row,
     serverAssemblyRevision: full.serverAssemblyRevision,
     assemblyTopologySha256: full.selectedTopologyReceipts.find(
-      (x) => x.sourceOperationNumber === 10,
+      (x) => x.sourceOperationNumber === selectedOperationNumber,
     )!.sha256,
   };
   const v3 = requireOk(
@@ -218,10 +258,72 @@ async function encodedStorage(
     }),
   );
   const e3 = requireOk(V3.encodePatternImportDxfProductCompositeSidecarV3(v3.owner));
+  const exactCandidate = candidate(1);
+  const unsignedCatalog = {
+    schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_AUTHORING_CATALOG_V1,
+    techCardId: seed.row.techCardId,
+    scopeKey: seed.row.scopeKey,
+    sizeToken: 'M',
+    sourceFileId: 'saved-source',
+    sizeSelectionCanonicalSha256: 'e'.repeat(64),
+    pieces: exactCandidate.sides.map((side) => ({
+      pieceId: side.pieceId,
+      pieceLineKey: side.pieceLineKey,
+      contours: [
+        {
+          contourId: side.contourId,
+          role: 'sewing-boundary',
+          geometry: { kind: 'seam' },
+          closed: true,
+          boundaryVertices: [...side.boundaryVertexIds, `${side.pieceId}:third-vertex`].map(
+            (vertexId, ordinal) => ({
+              ordinal,
+              vertexId,
+              normalizedArc: ordinal / 3,
+            }),
+          ),
+        },
+      ],
+    })),
+    requiredExplicitFields: [
+      'documentId-and-revision',
+      'physical-surface',
+      'two-seam-sides-and-anchor-ranges',
+      'side-directions',
+      'mapping-and-length-ratio',
+      'operation-stage-and-order',
+      'immutable-material-revisions',
+      'tolerances',
+    ],
+    geometryCoordinatesExposed: false,
+    rawDxfExposed: false,
+    assemblyInferred: false,
+    productionReady: false,
+  } satisfies Omit<PatternImportDxfProductPhaseEAuthoringCatalogV1, 'canonicalSha256'>;
+  const canonicalSha256 = await computePatternImportDxfProductPhaseEAuthoringCatalogSha256V1(
+    unsignedCatalog,
+    globalThis.crypto,
+  );
+  if (!canonicalSha256) throw new Error('Could not bind the storage fixture catalog');
+  const catalog = { ...unsignedCatalog, canonicalSha256 };
   const exact = requireOk(
     await buildPatternImportDxfPhaseEExactNSeamConsistencyCarrierV2({
-      ...candidate(1),
+      ...exactCandidate,
       ...bindings,
+      catalogCanonicalSha256: catalog.canonicalSha256,
+      selectedOperation: {
+        ...exactCandidate.selectedOperation,
+        sourceOperationNumber: selectedOperationNumber,
+        seamIds: seed.operations.find(
+          ({ operationNumber }) => operationNumber === selectedOperationNumber,
+        )!.seamKeys,
+      },
+      sides: exactCandidate.sides.map((side) => ({
+        ...side,
+        seamId: seed.operations.find(
+          ({ operationNumber }) => operationNumber === selectedOperationNumber,
+        )!.seamKeys[0],
+      })),
     }),
   );
   const eExact = requireOk(
@@ -240,16 +342,63 @@ async function encodedStorage(
     }),
   );
   const e4 = requireOk(V4.encodePatternImportDxfProductCompositeSidecarV4(v4.owner));
+  const source: PatternImportDxfPhaseETopologyAnnotationSourceV5 = {
+    identity: 'declared-storage-anchor',
+    revision: String(seed.row.revision),
+    sha256: seed.row.sha256,
+    projection: {
+      schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_PHASE_E_ASSEMBLY_PROJECTION_V1,
+      expectedCatalogCanonicalSha256: catalog.canonicalSha256,
+      sourceFileId: catalog.sourceFileId,
+      sizeSelectionCanonicalSha256: catalog.sizeSelectionCanonicalSha256,
+      sizeToken: catalog.sizeToken,
+      joinMode: 'catalog-ordinal-to-phase-d-point',
+      geometryPlacementApplied: false,
+      pieces: catalog.pieces.map((piece) => ({
+        pieceId: piece.pieceId,
+        pieceLineKey: piece.pieceLineKey,
+        cameraMm: { minX: 0, minY: 0, maxX: 20, maxY: 20, padding: 1 },
+        contours: piece.contours.map((contour) => ({
+          contourId: contour.contourId,
+          closed: contour.closed,
+          role: contour.role,
+          vertices: contour.boundaryVertices.map((vertex) => ({
+            ...vertex,
+            pointMm: { x: 10 * vertex.ordinal, y: 10 * (vertex.ordinal % 2) },
+          })),
+        })),
+      })),
+    },
+  };
+  const [side] = exactCandidate.sides;
+  const anchor = {
+    pieceId: side.pieceId,
+    pieceLineKey: side.pieceLineKey,
+    contourId: side.contourId,
+    vertexId: side.boundaryVertexIds[0],
+    pointMm: { x: 0, y: 0 },
+  };
   const annotation = requireOk(
     await V5.encodePatternImportDxfPhaseETopologyAnnotationsV1({
       schemaVersion: V5.PATTERN_IMPORT_DXF_PHASE_E_TOPOLOGY_ANNOTATIONS_REQUEST_V1,
       bindings: V5.derivePatternImportDxfPhaseETopologyAnnotationsBindingsV1(bindings, {
-        identity: 'declared-storage-anchor',
-        revision: '1',
-        sha256: seed.row.sha256,
+        identity: source.identity,
+        revision: source.revision,
+        sha256: source.sha256,
       }),
-      measurements: [],
-      callouts: [],
+      measurements: withAnnotations
+        ? [{ id: 'measurement:1', kind: 'point', anchors: [anchor], valueMm: null, label: 'Point' }]
+        : [],
+      callouts: withAnnotations
+        ? [
+            {
+              schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_CALLOUT_SESSION_V1,
+              id: 'callout:1',
+              anchor,
+              text: 'Controllo cucitura',
+            },
+          ]
+        : [],
     }),
   );
   const v5 = requireOk(
@@ -321,13 +470,21 @@ async function encodedStorage(
     await V7.buildPatternImportDxfProductCompositeSidecarV7({
       schemaVersion: V7.PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V7,
       expectedPreviousSidecarSha256: e6.canonicalSha256,
-      bindings,
+      bindings: {
+        ...bindings,
+        assemblyTopologySha256: full.selectedTopologyReceipts.find(
+          (receipt) => receipt.sourceOperationNumber === 10,
+        )!.sha256,
+      },
       compositeV6Bytes: e6.bytes,
       fullAssemblyPhysicalBytes: encodedPart.bytes,
     }),
   );
-  const encoded = requireOk(V7.encodePatternImportDxfProductCompositeSidecarV7(v7.owner));
-  return {
+  const e7 = requireOk(V7.encodePatternImportDxfProductCompositeSidecarV7(v7.owner));
+  const stored = (
+    mediaType: string,
+    encoded: Readonly<{ canonicalSha256: string; bytes: Uint8Array }>,
+  ): TechCardPatternSemanticSidecar => ({
     techCardId: seed.row.techCardId,
     patternLineKey: seed.row.patternLineKey,
     dxfSha256: seed.row.sha256,
@@ -335,15 +492,23 @@ async function encodedStorage(
     cardLockVersion: seed.row.cardLockVersion,
     savedRowRevision: seed.row.revision,
     sidecarSha256: encoded.canonicalSha256,
-    mediaType: V7.PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7,
+    mediaType,
     byteLength: encoded.bytes.length,
     sidecarBytes: Buffer.from(encoded.bytes).toString('base64'),
     postSaveReceiptSha256: undefined,
     createdAt: undefined,
     createdBy: undefined,
-  } satisfies TechCardPatternSemanticSidecar;
+  });
+  return {
+    v6: stored(V6.PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6, e6),
+    v7: stored(V7.PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7, e7),
+    v7TopologySha256: v7.document.bindings.assemblyTopologySha256,
+    catalog,
+    source,
+    current: exact.carrier.bindings,
+  };
 }
-async function fixture() {
+async function fixture(withAnnotations = false) {
   const observed = await sessionFixture();
   cleanup.push(() => observed.input.dispose());
   const body = createSavedModelDisplayedTriangleBodySessionV2(async () =>
@@ -398,7 +563,8 @@ async function fixture() {
   const context = requireOk(
     await projectSavedGenericObservedPhysicalHostPersistenceContextV1(pre, 1),
   ).context;
-  outer = await encodedStorage(context);
+  const storage = await encodedStorage(context, withAnnotations);
+  outer = storage.v7;
   // Real persisted outer changes the full snapshot; old source is correctly no longer usable.
   expect((await pre.projectAuthoringContext(1)).ok).toBe(false);
   await pre.dispose();
@@ -419,6 +585,7 @@ async function fixture() {
     native: nextNative,
     context,
     reader,
+    storage,
     request: {
       verifiedReceipt: reader,
       sourceOwner: next.sourceOwner,
@@ -458,6 +625,315 @@ async function borrowedLease() {
   cleanup.push(() => lease.release());
   return { lease, device };
 }
+
+async function openExactAnnotationFixture(
+  storage: Awaited<ReturnType<typeof encodedStorage>>,
+  version: 'v6' | 'v7',
+) {
+  const { catalog, current } = storage;
+  const row = storage[version];
+  const restored = requireOk(
+    await restorePatternImportDxfProductCompositeSidecarDurableV4({
+      schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_DURABLE_RESTORE_REQUEST_V4,
+      current,
+      readback: {
+        status: 'present',
+        source: 'fresh-current-sidecar-get',
+        mediaType:
+          version === 'v6'
+            ? V6.PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V6
+            : V7.PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_MEDIA_TYPE_V7,
+        sha256: row.sidecarSha256!,
+        byteLength: row.byteLength!,
+        bytes: new Uint8Array(Buffer.from(row.sidecarBytes!, 'base64')),
+      },
+    }),
+  );
+  const projection = requireOk(
+    await projectPatternImportDxfProductExactNSeamSavedCardV2({
+      schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_SAVED_CARD_PROJECTION_REQUEST_V2,
+      restoreOwner: restored.owner,
+      catalog,
+      preparedProposal: {
+        schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_PREPARED_PROPOSAL_V3,
+        status: 'current-saved-card-proposal',
+        expectedCatalogCanonicalSha256: catalog.canonicalSha256,
+        phaseEAggregatePlanSha256: current.phaseEAggregatePlanSha256,
+        operation: current.selectedOperation,
+        seams: [
+          {
+            seamId: current.selectedOperation.seamIds[0],
+            sides: candidate(1).sides.map(({ pieceId, pieceLineKey, direction }) => ({
+              pieceId,
+              pieceLineKey,
+              requiredDirection: direction,
+            })) as unknown as readonly [
+              {
+                pieceId: string;
+                pieceLineKey: string;
+                requiredDirection: 'forward' | 'reverse';
+              },
+              {
+                pieceId: string;
+                pieceLineKey: string;
+                requiredDirection: 'forward' | 'reverse';
+              },
+            ],
+          },
+        ],
+      },
+    }),
+  );
+  const selected = requireOk(
+    applyPatternImportDxfProductExactNSeamUiSelectionV2({
+      schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_EXACT_N_SEAM_UI_SELECTION_REQUEST_V2,
+      projectionOwner: projection.owner,
+      current,
+      currentState: createPatternImportDxfProductExactNSeamInitialUiStateV2(projection.owner)!,
+    }),
+  );
+  return { selectionOwner: selected.owner, current };
+}
+
+function visitMountedTree(
+  tree: ReactNode,
+  predicate: (props: Record<string, unknown>) => boolean,
+): Record<string, unknown> | null {
+  if (Array.isArray(tree)) {
+    for (const item of tree) {
+      const result = visitMountedTree(item, predicate);
+      if (result) return result;
+    }
+  } else if (isValidElement<Record<string, unknown>>(tree)) {
+    if (predicate(tree.props)) return tree.props;
+    return visitMountedTree(tree.props.children as ReactNode, predicate);
+  }
+  return null;
+}
+
+function reactMountContainer() {
+  const listeners = { addEventListener: () => undefined, removeEventListener: () => undefined };
+  class HTMLIFrameElement {}
+  return {
+    nodeType: 1,
+    nodeName: 'DIV',
+    tagName: 'DIV',
+    namespaceURI: 'http://www.w3.org/1999/xhtml',
+    ownerDocument: {
+      nodeType: 9,
+      defaultView: { document: { activeElement: null }, HTMLIFrameElement },
+      ...listeners,
+    },
+    ...listeners,
+  };
+}
+
+describe('exact saved annotations in durable Composite envelopes', () => {
+  it('renders genuine saved V6 annotations on the restored exact desktop and keeps visibility local', async () => {
+    const { storage } = await fixture(true);
+    const session = await openExactAnnotationFixture(storage, 'v6');
+    outer = storage.v6;
+    const { catalog, source } = storage;
+    const originalGeometry = { catalog, projection: source.projection, annotationSource: source };
+    let geometry: PatternImportDxfProductExactNDesktopGeometryV2 = originalGeometry;
+    const persist = vi.fn();
+    const get = vi.fn().mockResolvedValue({ semanticSidecar: storage.v6 });
+    const transaction = createPatternImportDxfPhaseETopologyAnnotationApplicationTransactionV5({
+      createClient: () => ({ GetTechCardPatternSemanticSidecar: get }),
+      persistence: { adapter: { persist } } as never,
+    });
+    const read = vi.fn(
+      createPatternImportDxfPhaseERestoredTopologyAnnotationReaderV1(
+        createPatternImportDxfPhaseESavedAssemblySnapshotProductionRpcV1(
+          session.current.selectedOperation.sourceOperationNumber,
+        ).authorityAdapter,
+        transaction,
+      ),
+    );
+
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    vi.stubGlobal('window', { event: undefined });
+    let route = createRoot(reactMountContainer() as never);
+    const canvas = createRoot(reactMountContainer() as never);
+    let desktop: ReactElement<PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1> | undefined;
+    let mountedCanvas: ReactNode;
+    cleanup.push(async () => {
+      await act(async () => {
+        canvas.unmount();
+        route.unmount();
+      });
+      vi.unstubAllGlobals();
+    });
+
+    function Route() {
+      const view = PatternImportDxfProductExactNSeamProductionMountV2({
+        session,
+        desktopGeometry: geometry,
+        activeSeamIndex: 0,
+        onActiveSeamIndexChange: () => {},
+        mannequin: null,
+        operationsPanel: null,
+        readSavedTopologyAnnotations: read,
+      });
+      if (!isValidElement<{ desktop: typeof desktop }>(view))
+        throw new Error('Exact view is absent');
+      desktop = view.props.desktop;
+      return null;
+    }
+    function Canvas() {
+      // Mount the actual canvas hooks and inspect the resulting JSX. No actual DOM or WebGPU.
+      const child = PatternImportDxfPhaseECadTableZeroConnectCanvasV1(desktop!.props);
+      const Present = child.type as (props: typeof child.props) => ReactNode;
+      mountedCanvas = Present(child.props);
+      return null;
+    }
+    async function renderRoute() {
+      await act(async () => route.render(createElement(Route)));
+      await act(async () => {
+        await read.mock.results.at(-1)?.value.catch(() => {});
+      });
+      expect(desktop?.type).toBe(PatternImportDxfPhaseECadTableZeroConnectCanvasV1);
+      await act(async () => canvas.render(createElement(Canvas)));
+    }
+    async function toggle(label: string) {
+      const tool = visitMountedTree(mountedCanvas, (props) => props.label === label);
+      expect(tool).not.toBeNull();
+      await act(async () => (tool!.onClick as () => void)());
+    }
+    function markup() {
+      return renderToStaticMarkup(mountedCanvas);
+    }
+
+    await renderRoute();
+    expect(markup()).toContain('data-draft-cad-measurement="point"');
+    expect(markup()).toContain('Controllo cucitura');
+    expect(markup()).toContain('aria-label="Show measurements" aria-pressed="true"');
+    await toggle('Show measurements');
+    expect(markup()).not.toContain('data-draft-cad-measurement="point"');
+    expect(markup()).toContain('Controllo cucitura');
+    await toggle('Show callouts');
+    expect(markup()).not.toContain('Controllo cucitura');
+    expect(markup()).toContain('aria-label="Show callouts" aria-pressed="false"');
+    await toggle('Show measurements');
+    await toggle('Show callouts');
+    expect(markup()).toContain('data-draft-cad-measurement="point"');
+    expect(markup()).toContain('Controllo cucitura');
+    expect(get).toHaveBeenCalledTimes(1);
+
+    const oldGeometry = geometry;
+    geometry = {
+      ...oldGeometry,
+      projection: {
+        ...oldGeometry.projection,
+        pieces: oldGeometry.projection.pieces.map((piece) => ({
+          ...piece,
+          contours: piece.contours.map((contour) => ({
+            ...contour,
+            vertices: contour.vertices.filter(({ vertexId }) => vertexId !== 'vertex:0:front:0'),
+          })),
+        })),
+      },
+    };
+    await renderRoute();
+    expect(markup()).not.toContain('Controllo cucitura');
+    expect(markup()).toContain('no longer present in the exact Phase-D projection');
+
+    geometry = originalGeometry;
+    editWire = (wire) => {
+      wire.serverAssemblyRevision += ':advanced';
+    };
+    await renderRoute();
+    expect(markup()).not.toContain('Controllo cucitura');
+    expect(markup()).toContain('Assembly Order changed while reading saved annotations');
+
+    editWire = null;
+    const pending = deferredSessionValue<{ semanticSidecar: TechCardPatternSemanticSidecar }>();
+    get.mockImplementationOnce(() => pending.promise);
+    geometry = { ...originalGeometry };
+    await act(async () => route.render(createElement(Route)));
+    const held = read.mock.lastCall![2];
+    await act(async () => route.unmount());
+    route = createRoot(reactMountContainer() as never);
+    expect(held.aborted).toBe(true);
+    await act(async () => {
+      pending.resolve({ semanticSidecar: storage.v6 });
+      await read.mock.results.at(-1)!.value.catch(() => {});
+    });
+
+    await renderRoute();
+    expect(markup()).toContain('data-draft-cad-measurement="point"');
+    expect(markup()).toContain('Controllo cucitura');
+    expect(persist).not.toHaveBeenCalled();
+  });
+
+  it('hydrates saved exact annotations from genuine V6 and V7 without writing', async () => {
+    const { storage, context } = await fixture(true);
+    const otherOperation = await encodedStorage(context, false);
+    const { current, source } = storage;
+    expect(storage.v7TopologySha256).not.toBe(current.assemblyTopologySha256);
+    const persist = vi.fn();
+    const get = vi.fn();
+    const transaction = createPatternImportDxfPhaseETopologyAnnotationApplicationTransactionV5({
+      createClient: () => ({ GetTechCardPatternSemanticSidecar: get }),
+      persistence: { adapter: { persist } } as never,
+    });
+    const signal = new AbortController().signal;
+
+    for (const [version, row] of [
+      ['v6', storage.v6],
+      ['v7', storage.v7],
+    ] as const) {
+      const session = await openExactAnnotationFixture(storage, version);
+      get.mockResolvedValue({ semanticSidecar: row });
+
+      expect(requireOk(await transaction.load(session, source, signal))).toMatchObject({
+        mediaType: row.mediaType,
+        readback: {
+          sidecarSha256: row.sidecarSha256,
+          measurements: [
+            { id: 'measurement:1', label: 'Point', anchors: [{ vertexId: 'vertex:0:front:0' }] },
+          ],
+          callouts: [
+            {
+              id: 'callout:1',
+              text: 'Controllo cucitura',
+              anchor: { vertexId: 'vertex:0:front:0' },
+            },
+          ],
+        },
+      });
+      for (const stale of [
+        { ...source, revision: '999' },
+        { ...source, identity: 'foreign-import-session' },
+        { ...source, sha256: 'f'.repeat(64) },
+      ]) {
+        expect(await transaction.load(session, stale, signal)).toMatchObject({
+          ok: false,
+          readback: null,
+          blockers: [{ detail: expect.stringContaining('source revision or SHA') }],
+        });
+      }
+      expect(
+        await transaction.save(session, source, { measurements: [], callouts: [] }, signal),
+      ).toMatchObject({ ok: false, readback: null });
+      get.mockResolvedValue({
+        semanticSidecar: { ...row, savedRowRevision: seed.row.revision + 1 },
+      });
+      expect(await transaction.load(session, source, signal)).toMatchObject({
+        ok: false,
+        readback: null,
+        blockers: [{ detail: expect.stringContaining('differs from exact authority') }],
+      });
+      get.mockResolvedValue({ semanticSidecar: otherOperation[version] });
+      expect(await transaction.load(session, source, signal)).toMatchObject({
+        ok: false,
+        readback: null,
+        blockers: [{ detail: expect.stringContaining('readback is invalid') }],
+      });
+    }
+    expect(persist).not.toHaveBeenCalled();
+  });
+});
 
 describe('durable facade refusal before any stored V7 authority exists', () => {
   it('rejects arbitrary receipt DTOs, proxies and getters before source work or RPC', async () => {

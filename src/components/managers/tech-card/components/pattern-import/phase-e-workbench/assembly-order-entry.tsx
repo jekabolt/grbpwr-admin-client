@@ -84,6 +84,7 @@ import type {
   PatternImportDxfProductExactNDesktopGeometryV2,
 } from '../phase-e-workbench-v2/exact-n-seam-production-mount-v2';
 import { bindPatternImportDxfPhaseECadMannequinAnnotationSourceV1 } from '../phase-e-workbench-v2/cad-mannequin-exact-n-production-staging-v1';
+import { createPatternImportDxfPhaseERestoredTopologyAnnotationReaderV1 } from '../phase-e-workbench-v2/restored-topology-annotation-reader-v1';
 import { projectCadTablePieceFeatures } from '../phase-e-workbench-v2/cad-table-piece-features-v1';
 import { clearPatternImportDxfProductExactNSeamProductionSessionV2 } from '../phase-e-workbench-v2/exact-n-seam-production-session-v2';
 import type { PatternImportDxfProductCompositeSidecarApplicationTransactionV4 } from '../phase-e-workbench-v2/composite-sidecar-production-transaction-v4';
@@ -1881,6 +1882,16 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       exactNBoundarySession?.current.catalogCanonicalSha256
       ? durableDesktop.geometry
       : null;
+  const readSavedTopologyAnnotations = useMemo(
+    () =>
+      exactPersistenceCapabilities && exactNApplicationOwner
+        ? createPatternImportDxfPhaseERestoredTopologyAnnotationReaderV1(
+            exactPersistenceCapabilities.authorityAdapter,
+            exactNApplicationOwner.topologyAnnotations,
+          )
+        : undefined,
+    [exactNApplicationOwner, exactPersistenceCapabilities],
+  );
   const [durableReloadRetry, setDurableReloadRetry] =
     useState<PatternImportDxfPhaseEDurableReloadRetryStateV1 | null>(null);
   const durableReloadRetryRef = useRef(durableReloadRetry);
@@ -2501,6 +2512,7 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         onEditStitchField={onEditStitchField}
         exactNSession={exactNBoundarySession}
         exactNDesktop={currentDurableDesktop}
+        readSavedTopologyAnnotations={readSavedTopologyAnnotations}
         exactNApplicationOwner={exactNApplicationOwner}
         operationRouteBlocker={
           selectedSeamKeys.length > 2 && !exactNBoundarySession
