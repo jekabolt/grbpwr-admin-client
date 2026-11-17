@@ -77,9 +77,15 @@
   visibility: hidden;
 }
 
+/* `manipulation`: iOS ignores user-scalable=no, so without it a quick second tap on ‹ / › is read
+   as a double-tap zoom and never clicks. No text selection: a long press on the label would open
+   the selection callout and take focus off the field. */
 [data-mq-phone-dock] {
   top: calc(var(--mq-vv-top, 0px) + var(--mq-vv-height, 100dvh) - 64px);
   height: 64px;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 [data-mq-phone-typing] input[data-model-measurement]:focus {

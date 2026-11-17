@@ -42,9 +42,17 @@ export function measurementNameOfV1(target: EventTarget | null): string | null {
     : null;
 }
 
+/** Inside the phone keyboard bar (`data-mq-phone-dock`): its ‹ › hand focus on themselves. */
+export function inPhoneMeasurementDockV1(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest('[data-mq-phone-dock]') !== null;
+}
+
 /**
  * Name of the measurement field holding focus while `enabled`. A move from one measurement field to
  * the next (the bar's ‹ ›, Tab) never passes through null, so the typing layout does not flicker.
+ * Focus that drops to the page inside one tap (a touch the busy main thread could no longer keep
+ * off the bar, a stray tap on the bar) and is back on a field before that task ends does not leave
+ * the layout either: it leaves only when no field and not the bar holds focus once the task is over.
  */
 export function usePhoneMeasurementTyping(enabled: boolean): string | null {
   const [name, setName] = useState<string | null>(null);
@@ -54,14 +62,31 @@ export function usePhoneMeasurementTyping(enabled: boolean): string | null {
       setName(null);
       return;
     }
+    let leave = 0;
+    const stay = () => {
+      window.clearTimeout(leave);
+      leave = 0;
+    };
     setName(measurementNameOfV1(document.activeElement));
-    const onIn = (event: FocusEvent) => setName(measurementNameOfV1(event.target));
+    const onIn = (event: FocusEvent) => {
+      if (inPhoneMeasurementDockV1(event.target)) return;
+      stay();
+      setName(measurementNameOfV1(event.target));
+    };
     const onOut = (event: FocusEvent) => {
-      if (!measurementNameOfV1(event.relatedTarget)) setName(null);
+      const next = event.relatedTarget;
+      if (measurementNameOfV1(next) || inPhoneMeasurementDockV1(next)) return;
+      stay();
+      leave = window.setTimeout(() => {
+        leave = 0;
+        const active = document.activeElement;
+        if (!measurementNameOfV1(active) && !inPhoneMeasurementDockV1(active)) setName(null);
+      }, 0);
     };
     document.addEventListener('focusin', onIn);
     document.addEventListener('focusout', onOut);
     return () => {
+      stay();
       document.removeEventListener('focusin', onIn);
       document.removeEventListener('focusout', onOut);
     };

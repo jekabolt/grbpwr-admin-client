@@ -261,4 +261,178 @@ test.describe('phone layout (variant C)', () => {
     await expect(editPose).toBeVisible();
     expect(pageErrors).toEqual([]);
   });
+
+  // Live beta 17.11, model 12 on a phone: › / ‹ sometimes did nothing and sometimes the typing
+  // layout dropped away. Taps come back to back (each lands while the posed guide of the last step
+  // is still being built), off the 44 px buttons, on the bar's label, on the first field's ‹ and
+  // while the camera turns; the walk must visit every field once per tap, in order, and never
+  // leave the typing layout except when the keyboard is put down on purpose.
+  test('the keyboard bar walks every field there and back twice under fast, stray and early taps', async ({
+    page,
+  }) => {
+    test.setTimeout(900_000);
+    const pageErrors: string[] = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+    await page.goto(`${DEV_ROUTE}?fixture=m12`, { waitUntil: 'domcontentloaded' });
+    await page.addStyleTag({ content: HIDE_DEVTOOLS });
+    const form = page.getByTestId('model-form-personalized-preview-dev-page').locator('form');
+    const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
+    const dock = page.getByTestId('model-measurement-phone-dock');
+    const fields = form.locator('[data-model-measurement]');
+    await expect(canvas).toBeVisible({ timeout: 180_000 });
+    const names = await fields.evaluateAll((inputs) =>
+      inputs.map((input) => (input as HTMLInputElement).dataset.modelMeasurement ?? ''),
+    );
+    expect(names).toHaveLength(35);
+
+    type BarLog = {
+      focus: string[];
+      leaves: number;
+      dockRemovals: number;
+      clicks: number;
+      clicksWhileTurning: number;
+    };
+    await form.evaluate((element) => {
+      const log: BarLog = {
+        focus: [],
+        leaves: 0,
+        dockRemovals: 0,
+        clicks: 0,
+        clicksWhileTurning: 0,
+      };
+      (window as unknown as { __bar: BarLog }).__bar = log;
+      // Every removal counts, also one undone within the same task.
+      new MutationObserver((records) => {
+        for (const record of records) if (record.oldValue !== null) log.leaves += 1;
+      }).observe(element, {
+        attributes: true,
+        attributeFilter: ['data-mq-phone-typing'],
+        attributeOldValue: true,
+      });
+      new MutationObserver((records) => {
+        for (const record of records)
+          for (const node of record.removedNodes)
+            if (
+              node instanceof Element &&
+              (node.matches('[data-mq-phone-dock]') || node.querySelector('[data-mq-phone-dock]'))
+            )
+              log.dockRemovals += 1;
+      }).observe(element, { childList: true, subtree: true });
+      document.addEventListener('focusin', (event) => {
+        const name = (event.target as HTMLElement | null)?.dataset?.modelMeasurement;
+        if (name) log.focus.push(name);
+      });
+      document.addEventListener(
+        'click',
+        (event) => {
+          if (!(event.target instanceof Element) || !event.target.closest('[data-mq-phone-dock]'))
+            return;
+          log.clicks += 1;
+          const stage = document.querySelector<HTMLElement>(
+            '[data-testid="measurement-watertight-surface-v1-canvas"]',
+          );
+          if (stage?.dataset.measurementGuideCameraMotion === 'moving') log.clicksWhileTurning += 1;
+        },
+        true,
+      );
+    });
+    const barLog = () => page.evaluate(() => (window as unknown as { __bar: BarLog }).__bar);
+
+    // Keyboard up, emulated: about 474 px stay visible above it.
+    await page.setViewportSize({ width: 390, height: 474 });
+    await fields.first().tap();
+    await expect(dock).toBeVisible();
+    await expect(dock).toHaveCSS('touch-action', 'manipulation');
+    // The posed model's own guide is drawn, so every step below builds a posed guide.
+    await expect(canvas).toHaveAttribute('data-active-measurement-guide', names[0]!, {
+      timeout: 180_000,
+    });
+    const expected = [names[0]!];
+
+    const dockBox = (await dock.boundingBox())!;
+    const nextBox = (await page
+      .getByRole('button', { name: 'next field', exact: true })
+      .boundingBox())!;
+    const previousBox = (await page
+      .getByRole('button', { name: 'previous field', exact: true })
+      .boundingBox())!;
+    const middleY = dockBox.y + dockBox.height / 2;
+    // Thumb spots per arrow: the button's middle, 4 px under the bar's top edge (above the 44 px
+    // button), the screen edge beside it, the bar's bottom corner on the inner side.
+    const nextSpots = [
+      { x: nextBox.x + nextBox.width / 2, y: middleY },
+      { x: nextBox.x + nextBox.width / 2, y: dockBox.y + 4 },
+      { x: dockBox.x + dockBox.width - 3, y: middleY },
+      { x: nextBox.x + 3, y: dockBox.y + dockBox.height - 4 },
+    ];
+    const previousSpots = [
+      { x: previousBox.x + previousBox.width / 2, y: middleY },
+      { x: previousBox.x + previousBox.width / 2, y: dockBox.y + 4 },
+      { x: dockBox.x + 3, y: middleY },
+      { x: previousBox.x + previousBox.width - 3, y: dockBox.y + dockBox.height - 4 },
+    ];
+    const labelSpot = { x: previousBox.x + previousBox.width + 40, y: middleY };
+
+    // ‹ on the first field and a tap on the label: nothing moves, nothing closes.
+    await page.touchscreen.tap(previousSpots[0]!.x, previousSpots[0]!.y);
+    await page.touchscreen.tap(labelSpot.x, labelSpot.y);
+    await page.touchscreen.tap(labelSpot.x, labelSpot.y);
+    await expect(fields.first()).toBeFocused();
+    await expect(dock).toBeVisible();
+
+    let at = 0;
+    const walk = async (direction: 1 | -1) => {
+      const spots = direction === 1 ? nextSpots : previousSpots;
+      for (let step = 0; step < names.length - 1; step += 1) {
+        const spot = spots[step % spots.length]!;
+        await page.touchscreen.tap(spot.x, spot.y);
+        at += direction;
+        expected.push(names[at]!);
+        // When this step turns the camera, the next tap lands mid-turn.
+        await page
+          .waitForFunction(
+            () =>
+              document.querySelector<HTMLElement>(
+                '[data-testid="measurement-watertight-surface-v1-canvas"]',
+              )?.dataset.measurementGuideCameraMotion === 'moving',
+            undefined,
+            { polling: 'raf', timeout: 400 },
+          )
+          .catch(() => undefined);
+      }
+      await expect(fields.nth(at)).toBeFocused();
+      await expect(dock).toBeVisible();
+    };
+
+    await walk(1);
+    await walk(-1);
+
+    // Keyboard down on purpose and up again: the only leave the walk allows.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(dock).toHaveCount(0);
+    await page.setViewportSize({ width: 390, height: 474 });
+    await fields.first().tap();
+    expected.push(names[0]!);
+    await expect(dock).toBeVisible();
+
+    await walk(1);
+    await walk(-1);
+
+    const log = await barLog();
+    console.info(
+      `MANNEQUIN_PHONE_BAR_WALK=${JSON.stringify({
+        taps: log.clicks,
+        tapsWhileTurning: log.clicksWhileTurning,
+        leaves: log.leaves,
+        dockRemovals: log.dockRemovals,
+        focusMoves: log.focus.length,
+      })}`,
+    );
+    expect(log.focus, 'one field per tap, in order, none skipped or repeated').toEqual(expected);
+    expect(log.leaves, 'typing layout left only when the keyboard went down').toBe(1);
+    expect(log.dockRemovals, 'bar unmounted only when the keyboard went down').toBe(1);
+    expect(log.clicksWhileTurning, 'taps landed while the camera turned').toBeGreaterThan(0);
+    expect(pageErrors).toEqual([]);
+  });
 });
