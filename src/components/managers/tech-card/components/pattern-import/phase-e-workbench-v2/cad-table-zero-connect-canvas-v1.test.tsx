@@ -1007,6 +1007,37 @@ describe('zero-operation CAD table rendering', () => {
       await cutVisibility.click();
       expect(await edgeTargets.count()).toBe(originalEdgeCount);
       expect(await page.locator('[data-cad-zero-connect-side="a"]').count()).toBe(0);
+
+      const piecePath = piece.locator('[data-cad-zero-connect-material]');
+      const pathBeforeRotation = await piecePath.getAttribute('d');
+      const firstExactEdge = edgeTargets.first();
+      const firstExactGroup = firstExactEdge.locator('..');
+      const firstEdgeIdentity = await firstExactGroup.getAttribute('data-cad-zero-connect-edge');
+      const firstEdgeEndpoints = await firstExactEdge.evaluate((edge) =>
+        ['x1', 'y1', 'x2', 'y2'].map((name) => edge.getAttribute(name)),
+      );
+      const arrange = page.getByRole('button', { name: 'Arrange selected pieces' });
+      await arrange.click();
+      await page.getByLabel('Rotation (°)').fill('27.5');
+      await page.getByRole('button', { name: 'Rotate', exact: true }).click();
+      expect(await piece.getAttribute('transform')).toContain('rotate(-27.5');
+      expect(await firstExactGroup.getAttribute('transform')).toBe(
+        await piece.getAttribute('transform'),
+      );
+      expect(await firstExactGroup.getAttribute('data-cad-zero-connect-edge')).toBe(
+        firstEdgeIdentity,
+      );
+      expect(
+        await firstExactEdge.evaluate((edge) =>
+          ['x1', 'y1', 'x2', 'y2'].map((name) => edge.getAttribute(name)),
+        ),
+      ).toEqual(firstEdgeEndpoints);
+      expect(await piecePath.getAttribute('d')).toBe(pathBeforeRotation);
+      await page.getByRole('button', { name: 'Left', exact: true }).click();
+      const firstAligned = await piecePath.boundingBox();
+      const secondAligned = await other.locator('[data-cad-zero-connect-material]').boundingBox();
+      if (!firstAligned || !secondAligned) throw new Error('Aligned pieces must remain visible.');
+      expect(firstAligned.x).toBeCloseTo(secondAligned.x, 1);
     } finally {
       await browser.close();
       await server.close();

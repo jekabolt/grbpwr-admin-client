@@ -10,6 +10,7 @@ import {
   type PatternImportDxfPhaseECadTableConnectEdgeSegmentV1,
 } from './cad-table-connect-edge-segments-v1';
 import { PatternImportDxfPhaseECadTableConnectToolControlV1 } from './cad-table-connect-tool-control-v1';
+import { CadTableLayoutTools } from './cad-table-layout-tools-v1';
 import {
   CAD_TABLE_PIECE_FEATURE_LAYERS,
   hasCadTablePieceFeature,
@@ -18,6 +19,7 @@ import {
 } from './cad-table-piece-features-v1';
 import { CadTablePieceFeatureMarks } from './cad-table-piece-feature-marks-v1';
 import {
+  cadTablePieceSvgTransformV1,
   compactPatternImportDxfPhaseECadTablePieceOffsetsV1,
   createPatternImportDxfPhaseECadTablePieceLayoutSessionV1,
   fitPatternImportDxfPhaseECadTablePieceBoundsV1,
@@ -372,6 +374,7 @@ function CadTableZeroCanvas({
       className='grid min-h-[30rem] min-w-0 grid-rows-[minmax(0,1fr)_auto] overflow-hidden bg-bgColor'
     >
       <div className='relative min-h-0 overflow-hidden'>
+        <CadTableLayoutTools owner={owner} />
         <div
           className='absolute right-2 top-1/2 z-20 flex max-h-[calc(100%-1rem)] -translate-y-1/2 flex-col gap-0.5 overflow-y-auto border border-borderColor bg-bgColor p-0.5'
           role='toolbar'
@@ -566,7 +569,7 @@ function CadTableZeroCanvas({
                     data-cad-zero-connect-piece-selected={selected || undefined}
                     data-cad-zero-connect-piece-hovered={hovered || undefined}
                     data-cad-zero-connect-piece-focused={focused || undefined}
-                    transform={`translate(${pieceLayout.offsetMm.x} ${vy(pieceLayout.offsetMm.y)})`}
+                    transform={cadTablePieceSvgTransformV1(pieceLayout, 'inverted')}
                     role='button'
                     tabIndex={keyboardEnabled ? 0 : -1}
                     aria-disabled={!keyboardEnabled}
@@ -697,7 +700,7 @@ function CadTableZeroCanvas({
                     return (
                       <g
                         key={segment.viewKey}
-                        transform={`translate(${placed.offsetMm.x} ${vy(placed.offsetMm.y)})`}
+                        transform={cadTablePieceSvgTransformV1(placed, 'inverted')}
                         data-cad-zero-connect-edge={segment.viewKey}
                         data-cad-zero-connect-side={
                           selectedSide === null ? undefined : selectedSide === 0 ? 'a' : 'b'
