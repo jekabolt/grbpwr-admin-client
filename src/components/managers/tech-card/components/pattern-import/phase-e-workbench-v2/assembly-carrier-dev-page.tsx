@@ -1,7 +1,16 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { abortableAdminService } from 'api/api';
-import type { common_Model, TechCardPatternSemanticSidecar } from 'api/proto-http/admin';
+import type {
+  common_Model,
+  common_ModelMeasurement,
+  TechCardPatternSemanticSidecar,
+} from 'api/proto-http/admin';
 import { resolveModelOpenReferencePreviewInputV1 } from 'components/managers/model/components/model-open-reference-preview-input-v1';
+import {
+  mapFormToModelInsert,
+  mapModelToForm,
+  modelSchema,
+} from 'components/managers/model/components/schema';
 import { modelCardMannequinInputV1 } from 'components/managers/models/components/model-card-mannequin-input-v1';
 import { createSavedModelDisplayedTriangleBodyFreshQueryReaderV2 } from 'components/managers/models/components/saved-model-displayed-triangle-body-query-session-v2';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
@@ -353,6 +362,41 @@ function savedModelDiagnosticSummary(model: common_Model) {
   };
 }
 
+function diagnoseModelCreateCopy(source: common_Model) {
+  const draft = modelSchema.safeParse({
+    ...mapModelToForm(source),
+    name: 'B1 169 diagnostic mannequin',
+    comment: 'Diagnostic copy for B1.',
+    gender: 'GENDER_ENUM_UNISEX',
+    mediaIds: [],
+  });
+  if (!draft.success) return { validCreateForm: false };
+  const candidate = mapFormToModelInsert(draft.data);
+  const originalMeasurements = source.model?.measurements ?? [];
+  const copiedMeasurements = candidate.measurements ?? [];
+  const canonical = (rows: common_ModelMeasurement[], includeMetadata: boolean) =>
+    rows
+      .map(({ name, valueMm, metadata }) =>
+        JSON.stringify(
+          includeMetadata
+            ? [name, valueMm, metadata?.schemaVersion, metadata?.source, metadata?.protocolId]
+            : [name, valueMm],
+        ),
+      )
+      .sort();
+  const equalMeasurements = (includeMetadata: boolean) =>
+    JSON.stringify(canonical(originalMeasurements, includeMetadata)) ===
+    JSON.stringify(canonical(copiedMeasurements, includeMetadata));
+  return {
+    validCreateForm: true,
+    measurementCount: originalMeasurements.length,
+    exactMeasurementValues: equalMeasurements(false),
+    exactMeasurementProvenance: equalMeasurements(true),
+    photoFree: candidate.thumbnailId === 0 && candidate.mediaIds?.length === 0,
+    inputStatus: savedModelDiagnosticSummary({ ...source, model: candidate }),
+  };
+}
+
 const MODEL_DIAGNOSTIC_LIMIT = 100;
 
 function SavedModelDiagnosticInventory() {
@@ -391,7 +435,10 @@ function SavedModelInventoryPage() {
   );
 }
 
-function SavedModelDiagnostic({ modelId }: Readonly<{ modelId: number }>) {
+function SavedModelDiagnostic({
+  modelId,
+  checkCopy,
+}: Readonly<{ modelId: number; checkCopy: boolean }>) {
   const queryClient = useQueryClient();
   const [output, setOutput] = useState('No request made.');
   const [pending, setPending] = useState(false);
@@ -410,7 +457,13 @@ function SavedModelDiagnostic({ modelId }: Readonly<{ modelId: number }>) {
       const model = await readFresh(modelId, current.signal);
       if (current.signal.aborted) return;
       if (model?.id !== modelId) throw new Error('Model read failed.');
-      setOutput(bounded({ ...report, ...savedModelDiagnosticSummary(model) }));
+      setOutput(
+        bounded({
+          ...report,
+          ...savedModelDiagnosticSummary(model),
+          createCopyPreflight: checkCopy ? diagnoseModelCreateCopy(model) : undefined,
+        }),
+      );
     } catch {
       if (!current.signal.aborted) setOutput(bounded({ ...report, status: 'model-read-failed' }));
     } finally {
@@ -443,7 +496,14 @@ export function AssemblyCarrierDevPage() {
     const modelId = Number(model);
     if (!Number.isSafeInteger(modelId) || modelId < 1)
       return <Text component='p'>Enter a positive model ID.</Text>;
-    return <SavedModelDiagnostic key={modelId} modelId={modelId} />;
+    const checkCopy = params.get('copy-check') === '1';
+    return (
+      <SavedModelDiagnostic
+        key={`${modelId}:${checkCopy}`}
+        modelId={modelId}
+        checkCopy={checkCopy}
+      />
+    );
   }
   return <AssemblyCarrierDevCardView cardId={Number(params.get('card') ?? 156)} />;
 }
