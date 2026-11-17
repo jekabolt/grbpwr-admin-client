@@ -11,6 +11,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOLS_V1 = Object.freeze([
   'circle',
   'ellipse',
   'add-point',
+  'edge-length',
   'internal-line',
   'french-curve',
   'draft-point',
@@ -43,6 +44,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PRODUCTIVE_TOOLS_V1 = Object.f
   'pattern-line',
   'french-curve',
   'add-point',
+  'edge-length',
   'dart',
   'cut',
   'spread',
@@ -145,6 +147,16 @@ export type PatternImportDxfPhaseEDraftCadCommandV1 =
         pointMm: PtMm;
         /** Exact ordered source edge. Absent only on legacy session evidence and never compiles. */
         edge?: PatternImportDxfPhaseEDraftCadBoundaryAnchorV1;
+      }
+    >
+  | Command<
+      'edge-length',
+      {
+        entityId: string;
+        edge: PatternImportDxfPhaseEDraftCadBoundaryAnchorV1;
+        fixed: 'start' | 'end';
+        lengthMm: number;
+        sizeToken: string;
       }
     >
   | Command<'internal-line', { entityId: string; pointsMm: readonly PtMm[] }>
@@ -424,6 +436,13 @@ function validCommand(value: unknown): value is PatternImportDxfPhaseEDraftCadCo
               payload.contourId &&
             (payload.edge as PatternImportDxfPhaseEDraftCadBoundaryAnchorV1)
               .boundaryVertexIds[0] === payload.afterVertexId))
+      );
+    case 'edge-length':
+      return (
+        boundaryAnchor(payload.edge) &&
+        (payload.fixed === 'start' || payload.fixed === 'end') &&
+        finitePositive(payload.lengthMm) &&
+        stableId(payload.sizeToken)
       );
     case 'internal-line':
       return points(payload.pointsMm, 2);

@@ -31,6 +31,7 @@ export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_TOOL_GROUPS_V1 = Object.freeze
       'pattern-line',
       'french-curve',
       'add-point',
+      'edge-length',
     ] as const),
   }),
   Object.freeze({
@@ -51,6 +52,7 @@ const TOOL_LABELS = Object.freeze({
   circle: 'Circle',
   ellipse: 'Ellipse',
   'add-point': 'Add point',
+  'edge-length': 'Edge length',
   'internal-line': 'Internal line',
   'french-curve': 'French curve',
   'draft-point': 'Draft point',
@@ -571,7 +573,7 @@ export function PatternImportDxfPhaseEDraftCadEditorShellV1({
                 {openProductiveToolGroup.tools.map((tool) => (
                   <PatternImportDxfPhaseECadWorkbenchToolButtonV1
                     key={tool}
-                    icon={tool}
+                    icon={tool === 'edge-length' ? 'measure-edge' : tool}
                     label={TOOL_LABELS[tool]}
                     active={
                       !panActive && !arrangeActive && !activeTopologyTool && activeTool === tool

@@ -49,6 +49,7 @@ const INPUT_TOOLS = new Set<PatternImportDxfPhaseEDraftCadToolV1>([
   'french-curve',
   'ellipse',
   'add-point',
+  'edge-length',
   'fish-eye',
   'spread',
   'gather',
@@ -77,6 +78,7 @@ const THREE_POINT_TOOLS = new Set<PatternImportDxfPhaseEDraftCadToolV1>([
 const EXACT_EDGE_TOOLS = new Set<PatternImportDxfPhaseEDraftCadToolV1>([
   'dart',
   'add-point',
+  'edge-length',
   'gather',
   'notch',
 ]);
@@ -136,6 +138,7 @@ type BoundaryPickInput = Readonly<{
   activeTool: PatternImportDxfPhaseEDraftCadToolV1;
   baseKey: string;
   sequence: number;
+  resize?: Readonly<{ fixed: 'start' | 'end'; lengthMm: number }>;
 }>;
 
 type PointInput = Readonly<{
@@ -392,7 +395,31 @@ export function recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1(
 
   let command: PatternImportDxfPhaseEDraftCadCommandV1;
   let label: string;
-  if (input.activeTool === 'add-point') {
+  if (input.activeTool === 'edge-length') {
+    const resize = input.resize;
+    if (!resize || !Number.isFinite(resize.lengthMm) || resize.lengthMm <= 0)
+      return {
+        session: input.session,
+        pendingPoints: [],
+        pendingDartBase: null,
+        sequence: input.sequence,
+        recorded: false,
+        blocker: 'Enter a positive edge length in millimetres.',
+      };
+    label = 'Set edge length';
+    command = {
+      commandId: ids.commandId,
+      tool: 'edge-length',
+      target,
+      payload: {
+        entityId: ids.entityId,
+        edge: base.anchor,
+        fixed: resize.fixed,
+        lengthMm: resize.lengthMm,
+        sizeToken: input.projection.sizeToken,
+      },
+    };
+  } else if (input.activeTool === 'add-point') {
     label = 'Add exact boundary point intent';
     command = {
       commandId: ids.commandId,
@@ -1287,6 +1314,7 @@ function toolInstruction(tool: PatternImportDxfPhaseEDraftCadToolV1, sizeToken: 
     return `Click the start, control and end points to add a French curve in size ${sizeToken}.`;
   if (tool === 'ellipse')
     return 'Click the centre, major-axis point and minor-radius point to record one ellipse intent.';
+  if (tool === 'edge-length') return `Choose an exact edge to set its length in size ${sizeToken}.`;
   if (tool === 'add-point')
     return 'Select an exact edge to insert its midpoint across the piece’s grade.';
   if (tool === 'fish-eye')
@@ -1331,6 +1359,9 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
   const [pendingPoints, setPendingPoints] = useState<readonly PtMm[]>([]);
   const [pendingDartBase, setPendingDartBase] =
     useState<PatternImportDxfPhaseEDraftCadCanvasDartBaseV1 | null>(null);
+  const [resizeLength, setResizeLength] = useState('');
+  const [resizeFixed, setResizeFixed] = useState<'start' | 'end'>('start');
+
   const [inputError, setInputError] = useState<string | null>(null);
   const arrangeGesture = useRef<{
     pieceId: string;
@@ -1449,6 +1480,17 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
             }
             if (!EXACT_EDGE_TOOLS.has(activeTool)) return;
             const base = dartBases.find((candidate) => candidate.key === key) ?? null;
+            if (activeTool === 'edge-length') {
+              setPendingDartBase(base);
+              setResizeLength(
+                base
+                  ? String(Math.hypot(base.toMm.x - base.fromMm.x, base.toMm.y - base.fromMm.y))
+                  : '',
+              );
+              setResizeFixed('start');
+              setInputError(base ? null : 'Choose an exact edge from the current size.');
+              return;
+            }
             if (activeTool !== 'dart') {
               const result = recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1({
                 session,
@@ -1662,6 +1704,16 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                             vectorEffect='non-scaling-stroke'
                             pointerEvents='none'
                           />
+                          {selected && activeTool === 'edge-length' ? (
+                            <circle
+                              data-draft-cad-fixed-edge-endpoint={resizeFixed}
+                              cx={(resizeFixed === 'start' ? base.fromMm : base.toMm).x}
+                              cy={vy((resizeFixed === 'start' ? base.fromMm : base.toMm).y)}
+                              r={unit * 4}
+                              fill={SHEET_INK.green}
+                              pointerEvents='none'
+                            />
+                          ) : null}
                           <line
                             data-key={base.key}
                             data-draft-cad-dart-edge={
@@ -1821,6 +1873,63 @@ export function PatternImportDxfPhaseEDraftCadCanvasV1({
                 ? 'Choose an exact highlighted vertex from the sealed projection.'
                 : toolInstruction(activeTool, projection.sizeToken))}
       </div>
+      {activeTool === 'edge-length' && pendingDartBase && interactionEnabled && (
+        <div
+          className='flex flex-wrap items-end gap-2'
+          onKeyDown={(event) => {
+            if (event.key !== 'Escape') return;
+            event.stopPropagation();
+            setPendingDartBase(null);
+            setInputError(null);
+          }}
+        >
+          <label className='grid gap-1 text-small'>
+            Edge length (mm)
+            <input
+              className='w-28 border border-borderColor bg-bgColor p-1'
+              type='number'
+              min='0'
+              step='any'
+              value={resizeLength}
+              onChange={(event) => setResizeLength(event.target.value)}
+            />
+          </label>
+          <label className='grid gap-1 text-small'>
+            Fixed endpoint
+            <select
+              className='border border-borderColor bg-bgColor p-1'
+              value={resizeFixed}
+              onChange={(event) => setResizeFixed(event.target.value === 'end' ? 'end' : 'start')}
+            >
+              <option value='start'>Start</option>
+              <option value='end'>End</option>
+            </select>
+          </label>
+          <button
+            type='button'
+            className='border border-borderColor px-2 py-1 text-small'
+            onClick={() => {
+              const result = recordPatternImportDxfPhaseEDraftCadCanvasBoundaryPickV1({
+                session,
+                projection,
+                activePieceIndex,
+                activeTool,
+                baseKey: pendingDartBase.key,
+                sequence: sequence.current,
+                resize: { fixed: resizeFixed, lengthMm: Number(resizeLength) },
+              });
+              setInputError(result.blocker);
+              if (result.recorded) {
+                sequence.current = result.sequence;
+                setPendingDartBase(null);
+                onSessionChange(result.session);
+              }
+            }}
+          >
+            Set edge length
+          </button>
+        </div>
+      )}
       {preview.blockers.length > 0 && (
         <ul data-draft-cad-preview-blockers='' className='space-y-1 text-small text-warning'>
           {preview.blockers.map((blocker, index) => (

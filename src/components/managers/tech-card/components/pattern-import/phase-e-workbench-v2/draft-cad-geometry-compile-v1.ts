@@ -15,6 +15,7 @@ import {
   buildPatternImportDxfPhaseEDraftCadPreviewV1,
   type PatternImportDxfPhaseEDraftCadPreviewPrimitiveV1,
 } from './draft-cad-preview-v1';
+import { resizeDraftCadSelectedSizeEdgeV1 } from './draft-cad-edge-length-geometry-v1';
 import { executePatternImportDxfPhaseEDraftCadAddPointGeometryV1 } from './draft-cad-add-point-geometry-executor-v1';
 import { executePatternImportDxfPhaseEDraftCadCutGeometryV1 } from './draft-cad-cut-geometry-executor-v1';
 import { executePatternImportDxfPhaseEDraftCadRectanglePieceV1 } from './draft-cad-rectangle-piece-executor-v1';
@@ -41,6 +42,7 @@ export type PatternImportDxfPhaseEDraftCadGeometryCompileBlockerCodeV1 =
   | 'writer-piece-unavailable'
   | 'writer-size-unavailable'
   | 'preview-blocked'
+  | 'edge-length-geometry-blocked'
   | 'add-point-geometry-blocked'
   | 'rectangle-geometry-blocked'
   | 'round-piece-geometry-blocked'
@@ -69,6 +71,7 @@ export type PatternImportDxfPhaseEDraftCadCompiledFeatureV1 = Readonly<{
     | 'drill'
     | 'notch'
     | 'boundary-point'
+    | 'edge-length'
     | 'piece-create'
     | 'split'
     | 'slash-guide'
@@ -216,6 +219,7 @@ function supported(command: PatternImportDxfPhaseEDraftCadCommandV1): boolean {
     return Boolean(command.payload.newPiece);
   if (INTERNAL_TOOLS.has(command.tool)) return true;
   if (command.tool === 'add-point') return Boolean(command.payload.edge);
+  if (command.tool === 'edge-length') return true;
   if (command.tool === 'cut') return command.payload.keepSide === 'both';
   if (command.tool === 'spread') return command.payload.amountMm > 0;
   if (command.tool === 'mark') return command.payload.kind === 'drill';
@@ -741,6 +745,21 @@ function compilePatternImportDxfPhaseEDraftCadGeometryUnsafeV1(
           derivedPieceIds: spreadResult.derivedPieceIdentities,
         },
       );
+      continue;
+    }
+
+    if (command.tool === 'edge-length') {
+      const resized = resizeDraftCadSelectedSizeEdgeV1(size, command, projection, selection.phaseD);
+      if (!resized.ok) return blocked('edge-length-geometry-blocked', resized.detail, command);
+      Object.assign(size, resized.size);
+      compiledFeatures.push({
+        commandId: command.commandId,
+        entityId: command.payload.entityId,
+        tool: command.tool,
+        pieceId: command.target.pieceId,
+        sizeToken: selected.sizeToken,
+        output: 'edge-length',
+      });
       continue;
     }
 

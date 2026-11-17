@@ -9,6 +9,8 @@ import type {
   PatternImportDxfPhaseEDraftCadToolV1,
 } from './draft-cad-session-v1';
 
+import { resizeDraftStraightEdgeV1 } from './draft-cad-edge-length-geometry-v1';
+
 export const PATTERN_IMPORT_DXF_PHASE_E_DRAFT_CAD_PREVIEW_V1 =
   'pattern-import-dxf-phase-e-draft-cad-preview/1' as const;
 
@@ -495,6 +497,36 @@ export function buildPatternImportDxfPhaseEDraftCadPreviewV1(
           }),
         );
         bounds = extendPoints(bounds, [baseLeftMm, baseRightMm, apexMm]);
+        break;
+      }
+      case 'edge-length': {
+        const { edge, fixed, lengthMm, sizeToken } = command.payload;
+        const segment = exactAnchorSegment(session, projection, command.target, edge);
+        const resized =
+          segment && projection.sizeToken === sizeToken
+            ? resizeDraftStraightEdgeV1(segment.fromMm, segment.toMm, fixed, lengthMm)
+            : null;
+        if (!resized) {
+          blockers.push(
+            commandBlocker(
+              command,
+              'anchor-unavailable',
+              'Edge length requires its exact endpoints in the current size.',
+            ),
+          );
+          break;
+        }
+        primitives.push(
+          deepFreeze({
+            ...base,
+            kind: 'path' as const,
+            pointsMm: resized.map(clonePoint),
+            closed: false,
+            role: 'outline' as const,
+            stroke: 'dashed' as const,
+          }),
+        );
+        bounds = extendPoints(bounds, resized);
         break;
       }
       case 'add-point': {
