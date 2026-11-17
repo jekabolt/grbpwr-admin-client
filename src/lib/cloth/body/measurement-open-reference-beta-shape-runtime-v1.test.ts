@@ -839,7 +839,7 @@ describe('measurement open-reference beta shape runtime v1', () => {
       );
       expect(result.claims).toMatchObject({
         chestCircumferencePosteriorHeldFixed: true,
-        underBustIndependentRibcageBand: true,
+        underBustIndependentRibcageBand: false,
         torsoDepthSymmetricSectionProxyOnly: true,
         torsoDepthFrontBackDistributionCalibrated: false,
         canonicalMeasurementSemanticMatchClaimed: false,

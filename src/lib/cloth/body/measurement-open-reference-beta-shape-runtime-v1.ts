@@ -140,7 +140,8 @@ export interface MeasurementOpenReferenceBetaShapeRuntimeResultV1 {
     readonly geometricProxyOnly: true;
     readonly exactHeightOnly: true;
     readonly chestCircumferencePosteriorHeldFixed: true;
-    readonly underBustIndependentRibcageBand: true;
+    /** No test proves under bust is independent of bust: female solves them jointly, and male/neutral re-run the chest field over the band. */
+    readonly underBustIndependentRibcageBand: false;
     readonly torsoDepthSymmetricSectionProxyOnly: true;
     readonly torsoDepthFrontBackDistributionCalibrated: false;
     readonly highHipSectionProxyOnly: true;
@@ -189,7 +190,7 @@ const CLAIMS = Object.freeze({
   geometricProxyOnly: true as const,
   exactHeightOnly: true as const,
   chestCircumferencePosteriorHeldFixed: true as const,
-  underBustIndependentRibcageBand: true as const,
+  underBustIndependentRibcageBand: false as const,
   torsoDepthSymmetricSectionProxyOnly: true as const,
   torsoDepthFrontBackDistributionCalibrated: false as const,
   highHipSectionProxyOnly: true as const,

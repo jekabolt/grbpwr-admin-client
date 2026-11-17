@@ -167,8 +167,12 @@ describe('beta torso: male and neutral unchanged by the female bust wiring', () 
         ...(result.limitedVisualControls ?? []),
       ]).toContain('chestCircumferenceMm');
       // The neck claim is a new constant; the pinned digest covers every pre-neck field.
-      const { neckRadialSectionProxyOnly, ...preNeckClaims } = result.claims;
+      const { neckRadialSectionProxyOnly, ...rest } = result.claims;
       expect(neckRadialSectionProxyOnly).toBe(true);
+      // The under-bust claim was lowered to false (no proof of independence); only the claim
+      // changed, so the digest pins the pre-bust value and the geometry stays byte-identical.
+      expect(rest.underBustIndependentRibcageBand).toBe(false);
+      const preNeckClaims = { ...rest, underBustIndependentRibcageBand: true as const };
       expect(
         digest({
           positions: result.fkProxyRuntime.displayMesh.positions,

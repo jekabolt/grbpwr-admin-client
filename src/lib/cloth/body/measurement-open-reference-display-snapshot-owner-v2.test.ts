@@ -354,7 +354,7 @@ function betaShapeRuntime(
       geometricProxyOnly: true as const,
       exactHeightOnly: true as const,
       chestCircumferencePosteriorHeldFixed: true as const,
-      underBustIndependentRibcageBand: true as const,
+      underBustIndependentRibcageBand: false as const,
       torsoDepthSymmetricSectionProxyOnly: true as const,
       torsoDepthFrontBackDistributionCalibrated: false as const,
       highHipSectionProxyOnly: true as const,
