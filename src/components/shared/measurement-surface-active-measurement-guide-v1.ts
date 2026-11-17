@@ -8,11 +8,28 @@ import type {
   OpenReferenceLimbCircumferenceModeV1,
 } from 'lib/cloth/body/measurement-open-reference-limb-circumference-solver-v1';
 import { deriveOpenReferenceLimbSectionStationsV1 } from 'lib/cloth/body/measurement-open-reference-limb-section-station-v1';
+import {
+  SURFACE_ANCHOR_TABLE_V1,
+  type SurfaceAnchorIdV1,
+} from 'lib/cloth/body/measurement-surface-anchors-v1';
 import type { MeasurementSurfaceMeshV1 } from 'lib/cloth/body/measurement-watertight-surface-v1';
 import {
   measureMeshPlaneSectionPerimetersV1,
   type MeshPlaneSectionLoopV1,
 } from 'lib/cloth/body/mesh-plane-section-perimeter-v1';
+import { computeMeshSurfaceGeodesicV1 } from 'lib/cloth/body/mesh-surface-geodesic-v1';
+import {
+  meshSurfaceVertexPointV1,
+  mirrorMeshSurfacePathV1,
+  mirrorMeshSurfacePointV1,
+  type MeshSurfacePathV1,
+  type MeshSurfacePointV1,
+} from 'lib/cloth/body/mesh-surface-path-v1';
+import {
+  createMeshSurfaceTopologyV1,
+  meshSurfaceVertexTrianglesV1,
+  type MeshSurfaceTopologyV1,
+} from 'lib/cloth/body/mesh-surface-topology-v1';
 
 export const MEASUREMENT_SURFACE_ACTIVE_MEASUREMENT_GUIDE_V1 =
   'measurement-surface-active-measurement-guide/v1' as const;
@@ -141,6 +158,7 @@ const FIELD_VIEWS = Object.freeze({
   BODY_MEASUREMENT_NAME_CHEST_DEPTH: 'side',
   BODY_MEASUREMENT_NAME_WAIST_DEPTH: 'side',
   BODY_MEASUREMENT_NAME_HIP_DEPTH: 'side',
+  BODY_MEASUREMENT_NAME_ARMSCYE_DEPTH: 'back',
 } satisfies Partial<Record<common_BodyMeasurementName, MeasurementSurfaceMeasurementGuideViewV1>>);
 
 export function measurementSurfaceMeasurementGuideViewV1(
@@ -487,6 +505,553 @@ function drawnOrUnavailable(
     : result(measurementName, 'unavailable-section');
 }
 
+/** MakeHuman HM08 display topology: every anchor below is a vertex or edge of this mesh. */
+const HM08_VERTEX_COUNT = 13_380;
+const HM08_INDEX_COUNT = 80_268;
+
+/**
+ * Template points the anchor table does not hold yet (probe of the default female/male/neutral
+ * display meshes, 17.11). Acromion-L: vertex 8280 sits where the front-view shoulder contour turns
+ * down into the arm on all three bases (female 0.253/1.388, male 0.220/1.402, neutral 0.227/1.395
+ * m). Bust apex-L: vertex 8454 is the female breast's most anterior vertex; on male and neutral the
+ * same vertex is the nipple point 1 cm behind the pectoral maximum. Right points are topology
+ * mirrors (1608, 1782).
+ */
+const GUIDE_TEMPLATE_POINTS = Object.freeze({
+  'acromion-l': meshSurfaceVertexPointV1(8280),
+  'apex-l': meshSurfaceVertexPointV1(8454),
+});
+
+function anchorTemplate(id: SurfaceAnchorIdV1): MeshSurfacePointV1 | null {
+  return SURFACE_ANCHOR_TABLE_V1.find((anchor) => anchor.id === id)?.template ?? null;
+}
+
+interface GuideAnchor {
+  readonly point: MeshSurfacePointV1;
+  readonly positionM: Vec3;
+}
+
+interface GuideBodyAnchors {
+  readonly topology: MeshSurfaceTopologyV1;
+  readonly ssn: GuideAnchor;
+  readonly c7: GuideAnchor;
+  readonly hpsL: GuideAnchor;
+  readonly hpsR: GuideAnchor;
+  readonly underarmL: GuideAnchor;
+  readonly crotch: GuideAnchor;
+  readonly acromionL: GuideAnchor;
+  readonly acromionR: GuideAnchor;
+  readonly apexL: GuideAnchor;
+  readonly apexR: GuideAnchor;
+}
+
+function surfacePointPositionM(point: MeshSurfacePointV1, positionsM: Float32Array): Vec3 {
+  if (point.kind === 'vertex') {
+    const offset = point.vertex * 3;
+    return [positionsM[offset], positionsM[offset + 1], positionsM[offset + 2]];
+  }
+  const a = point.a * 3;
+  const b = point.b * 3;
+  return [
+    positionsM[a] + (positionsM[b] - positionsM[a]) * point.t,
+    positionsM[a + 1] + (positionsM[b + 1] - positionsM[a + 1]) * point.t,
+    positionsM[a + 2] + (positionsM[b + 2] - positionsM[a + 2]) * point.t,
+  ];
+}
+
+/** Farther than this from x = 0 a vertex is a left/right point, never a drifted midline one. */
+const MIDLINE_SNAP_M = 0.00005;
+
+/**
+ * The topology's mirror map needs exact float symmetry. Shaped HM08 bodies keep every left/right
+ * pair exact but let some midline vertices drift off x = 0 (1e-20 m on the female base, 0.02 mm on
+ * the male), so the topology is built from a copy with those vertices put back on the midline.
+ * Paths are still traced on the mesh's own positions.
+ */
+function midlineSnappedPositions(positionsM: Float32Array): Float32Array {
+  let snapped: Float32Array | null = null;
+  for (let offset = 0; offset < positionsM.length; offset += 3) {
+    const x = positionsM[offset];
+    if (x !== 0 && Math.abs(x) < MIDLINE_SNAP_M) {
+      snapped ??= Float32Array.from(positionsM);
+      snapped[offset] = 0;
+    }
+  }
+  return snapped ?? positionsM;
+}
+
+/** Anchors exist only on the HM08 topology; any other mesh gets no guessed landmark. */
+function guideBodyAnchors(mesh: MeasurementSurfaceMeshV1): GuideBodyAnchors | null {
+  if (mesh.positions.length !== HM08_VERTEX_COUNT * 3 || mesh.indices.length !== HM08_INDEX_COUNT) {
+    return null;
+  }
+  const created = createMeshSurfaceTopologyV1({
+    positionsM: midlineSnappedPositions(mesh.positions),
+    triangleIndices: mesh.indices,
+  });
+  if (!created.ok) return null;
+  const topology = created.topology;
+  const at = (point: MeshSurfacePointV1 | null): GuideAnchor | null =>
+    point ? { point, positionM: surfacePointPositionM(point, mesh.positions) } : null;
+  const ssn = at(anchorTemplate('ssn'));
+  const c7 = at(anchorTemplate('c7'));
+  const hpsL = at(anchorTemplate('hps-l'));
+  const hpsR = at(anchorTemplate('hps-r'));
+  const underarmL = at(anchorTemplate('underarm-l'));
+  const crotch = at(anchorTemplate('crotch'));
+  const acromionL = at(GUIDE_TEMPLATE_POINTS['acromion-l']);
+  const acromionR = at(mirrorMeshSurfacePointV1(GUIDE_TEMPLATE_POINTS['acromion-l'], topology));
+  const apexL = at(GUIDE_TEMPLATE_POINTS['apex-l']);
+  const apexR = at(mirrorMeshSurfacePointV1(GUIDE_TEMPLATE_POINTS['apex-l'], topology));
+  if (!ssn || !c7 || !hpsL || !hpsR || !underarmL || !crotch) return null;
+  if (!acromionL || !acromionR || !apexL || !apexR) return null;
+  // Plausibility: left points on +x, shoulder point lateral to and below HPS, apex in front.
+  if (
+    hpsL.positionM[0] <= 0 ||
+    acromionL.positionM[0] <= hpsL.positionM[0] ||
+    acromionL.positionM[1] >= hpsL.positionM[1] ||
+    acromionL.positionM[1] <= underarmL.positionM[1] ||
+    apexL.positionM[1] >= underarmL.positionM[1] ||
+    apexL.positionM[2] <= underarmL.positionM[2]
+  ) {
+    return null;
+  }
+  return {
+    topology,
+    ssn,
+    c7,
+    hpsL,
+    hpsR,
+    underarmL,
+    crotch,
+    acromionL,
+    acromionR,
+    apexL,
+    apexR,
+  };
+}
+
+function surfaceGeodesic(
+  anchors: GuideBodyAnchors,
+  mesh: MeasurementSurfaceMeshV1,
+  start: GuideAnchor,
+  end: GuideAnchor,
+): MeshSurfacePathV1 | null {
+  const geodesic = computeMeshSurfaceGeodesicV1({
+    topology: anchors.topology,
+    positionsM: mesh.positions,
+    triangleIndices: mesh.indices,
+    start: start.point,
+    end: end.point,
+  });
+  return geodesic.ok ? geodesic.path : null;
+}
+
+function surfacePointNormal(
+  point: MeshSurfacePointV1,
+  topology: MeshSurfaceTopologyV1,
+  positionsM: Float32Array,
+): Vec3 | null {
+  const triangles =
+    point.kind === 'vertex'
+      ? [...meshSurfaceVertexTrianglesV1(topology, point.vertex)]
+      : [...meshSurfaceVertexTrianglesV1(topology, point.a)].filter((triangle) =>
+          meshSurfaceVertexTrianglesV1(topology, point.b).includes(triangle),
+        );
+  let normal: Vec3 = [0, 0, 0];
+  for (const triangle of triangles) {
+    const corners = [0, 1, 2].map((corner) =>
+      surfacePointPositionM(
+        meshSurfaceVertexPointV1(topology.triangleIndices[triangle * 3 + corner]),
+        positionsM,
+      ),
+    );
+    const face = cross(subtract(corners[1], corners[0]), subtract(corners[2], corners[0]));
+    normal = [normal[0] + face[0], normal[1] + face[1], normal[2] + face[2]];
+  }
+  const length = Math.hypot(...normal);
+  return length > Number.EPSILON
+    ? [normal[0] / length, normal[1] / length, normal[2] / length]
+    : null;
+}
+
+/** Joins surface segments end to start; each segment's first point repeats the previous end. */
+function joinSurfacePoints(segments: readonly (readonly MeshSurfacePointV1[])[]) {
+  return segments.flatMap((points, index) => (index === 0 ? points : points.slice(1)));
+}
+
+/**
+ * A surface-point path drawn 2 mm off the body along the surface normal (neutral pose) or bound to
+ * the nearest edge vertex of every point (posed: follows live positions, slightly coarser).
+ */
+function surfaceGuidePath(options: {
+  readonly id: string;
+  readonly anchors: GuideBodyAnchors;
+  readonly mesh: MeasurementSurfaceMeshV1;
+  readonly points: readonly MeshSurfacePointV1[];
+  readonly closed: boolean;
+  readonly bindToMesh: boolean;
+}): MeasurementSurfaceMeasurementGuidePathV1 | null {
+  const { id, anchors, mesh, closed } = options;
+  const points =
+    closed && options.points.length > 1 && samePoint(options.points[0], options.points.at(-1))
+      ? options.points.slice(0, -1)
+      : options.points;
+  if (options.bindToMesh) {
+    const vertexIndices = points
+      .map((point) => (point.kind === 'vertex' ? point.vertex : point.t < 0.5 ? point.a : point.b))
+      .filter((vertex, index, all) => vertex !== all[index - 1]);
+    if (closed && vertexIndices.length > 1 && vertexIndices.at(-1) === vertexIndices[0]) {
+      vertexIndices.pop();
+    }
+    if (new Set(vertexIndices).size < (closed ? 3 : 2)) return null;
+    return Object.freeze({
+      id,
+      closed,
+      source: 'mesh-vertices' as const,
+      vertexIndices: Object.freeze(vertexIndices),
+    });
+  }
+  const pointsM = dedupeAdjacentPoints(
+    points.map((point) => {
+      const positionM = surfacePointPositionM(point, mesh.positions);
+      const normal = surfacePointNormal(point, anchors.topology, mesh.positions);
+      return normal
+        ? ([
+            positionM[0] + normal[0] * GUIDE_SURFACE_OFFSET_M,
+            positionM[1] + normal[1] * GUIDE_SURFACE_OFFSET_M,
+            positionM[2] + normal[2] * GUIDE_SURFACE_OFFSET_M,
+          ] as const)
+        : positionM;
+    }),
+  );
+  if (pointsM.length < (closed ? 3 : 2)) return null;
+  return fixedPath(id, pointsM, closed);
+}
+
+function samePoint(a: MeshSurfacePointV1 | undefined, b: MeshSurfacePointV1 | undefined): boolean {
+  if (!a || !b || a.kind !== b.kind) return false;
+  return a.kind === 'vertex'
+    ? a.vertex === (b as typeof a).vertex
+    : a.a === (b as typeof a).a && a.b === (b as typeof a).b && a.t === (b as typeof a).t;
+}
+
+/** Chest plane: bust apex level, kept below the underarm so the arms stay separate loops. */
+function anchoredChestY(anchors: GuideBodyAnchors): number {
+  const apexY = (anchors.apexL.positionM[1] + anchors.apexR.positionM[1]) / 2;
+  return Math.min(apexY, anchors.underarmL.positionM[1] - 0.03);
+}
+
+/**
+ * Inframammary level: walking down from 3 cm below the apex, the first local minimum of the front
+ * surface under the apex (the fold). Null when the scan finds no fold within 8 cm.
+ */
+function anchoredUnderBustY(
+  anchors: GuideBodyAnchors,
+  mesh: MeasurementSurfaceMeshV1,
+): number | null {
+  const apexX = Math.abs(anchors.apexL.positionM[0]);
+  const chestY = anchoredChestY(anchors);
+  const frontZ = (yM: number) => {
+    const loop = sectionLoop({ mesh, originM: [0, yM, 0], normal: [0, 1, 0] });
+    if (!loop) return null;
+    const near = loop.pointsM.filter(
+      (point) => Math.abs(Math.abs(point[0]) - apexX) < 0.015 && point[2] > loop.centroidM[2],
+    );
+    return near.length > 0 ? Math.max(...near.map((point) => point[2])) : null;
+  };
+  let previous: { yM: number; zM: number } | null = null;
+  for (let step = 3; step <= 9; step += 1) {
+    const yM = chestY - step * 0.01;
+    const zM = frontZ(yM);
+    if (zM === null) return null;
+    if (previous && zM >= previous.zM) return previous.yM;
+    previous = { yM, zM };
+  }
+  return null;
+}
+
+function anchoredFixedPath(
+  id: string,
+  pointsM: readonly Vec3[],
+  air?: MeasurementSurfaceMeasurementGuideAirV1,
+): MeasurementSurfaceMeasurementGuidePathV1 {
+  const path = fixedPath(id, pointsM);
+  return air ? airPath(path, air) : path;
+}
+
+function anchoredGuide(options: {
+  readonly measurementName: common_BodyMeasurementName;
+  readonly frame: MeasurementBodyFrameV2;
+  readonly mesh: MeasurementSurfaceMeshV1;
+  readonly anchors: GuideBodyAnchors;
+  readonly neutralPose: boolean;
+  readonly waistY: number | undefined;
+}): MeasurementSurfaceActiveMeasurementGuideV1 | null {
+  const { measurementName, frame, mesh, anchors, neutralPose, waistY } = options;
+  const bindToMesh = !neutralPose;
+  const { hpsL, acromionL, underarmL, apexL } = anchors;
+  const hps = hpsL.positionM;
+  const acromion = acromionL.positionM;
+  const underarm = underarmL.positionM;
+  const surface = (id: string, points: readonly MeshSurfacePointV1[], closed = false) =>
+    surfaceGuidePath({ id, anchors, mesh, points, closed, bindToMesh });
+  const geodesic = (start: GuideAnchor, end: GuideAnchor) =>
+    surfaceGeodesic(anchors, mesh, start, end);
+  const vertexAnchor = (vertex: number): GuideAnchor => ({
+    point: meshSurfaceVertexPointV1(vertex),
+    positionM: surfacePointPositionM(meshSurfaceVertexPointV1(vertex), mesh.positions),
+  });
+  const vertexOf = (anchor: GuideAnchor) =>
+    anchor.point.kind === 'vertex'
+      ? anchor.point.vertex
+      : nearestVertex(mesh.positions, anchor.positionM);
+
+  switch (measurementName) {
+    case 'BODY_MEASUREMENT_NAME_NECK_BASE': {
+      // C7 -> HPS-L -> SSN on the surface, mirrored for the right half. The neck-base shape is not
+      // solved, so the ring is a limited guide.
+      const back = geodesic(anchors.c7, hpsL);
+      const front = geodesic(hpsL, anchors.ssn);
+      if (!back || !front) return result(measurementName, 'unavailable-section');
+      const backRight = mirrorMeshSurfacePathV1(back, anchors.topology).points;
+      const frontRight = mirrorMeshSurfacePathV1(front, anchors.topology).points;
+      return drawnOrUnavailable(measurementName, 'limited', [
+        surface(
+          measurementName,
+          joinSurfacePoints([
+            back.points,
+            front.points,
+            [...frontRight].reverse(),
+            [...backRight].reverse(),
+          ]),
+          true,
+        ),
+      ]);
+    }
+    case 'BODY_MEASUREMENT_NAME_SHOULDER_LENGTH': {
+      const path = geodesic(hpsL, acromionL);
+      return drawnOrUnavailable(measurementName, 'limited', [
+        path ? surface(measurementName, path.points) : null,
+      ]);
+    }
+    case 'BODY_MEASUREMENT_NAME_HPS_TO_BUST_APEX': {
+      const path = geodesic(hpsL, apexL);
+      return drawnOrUnavailable(measurementName, 'limited', [
+        path ? surface(measurementName, path.points) : null,
+      ]);
+    }
+    case 'BODY_MEASUREMENT_NAME_HPS_TO_WAIST_FRONT': {
+      // HPS over the bust apex, then down the front to the waist plane below the apex.
+      if (waistY === undefined) return result(measurementName, 'unavailable-section');
+      const loop = sectionLoop({ mesh, originM: [0, waistY, 0], normal: [0, 1, 0] });
+      const toApex = geodesic(hpsL, apexL);
+      if (!loop || !toApex) return result(measurementName, 'unavailable-section');
+      const apexX = apexL.positionM[0];
+      const waistFront = loop.pointsM
+        .filter((point) => point[2] > loop.centroidM[2])
+        .reduce<Vec3 | null>(
+          (best, point) =>
+            !best || Math.abs(point[0] - apexX) < Math.abs(best[0] - apexX) ? point : best,
+          null,
+        );
+      const down = waistFront
+        ? geodesic(apexL, vertexAnchor(nearestVertex(mesh.positions, waistFront)))
+        : null;
+      if (!down) return result(measurementName, 'unavailable-section');
+      return drawnOrUnavailable(measurementName, 'limited', [
+        surface(measurementName, joinSurfacePoints([toApex.points, down.points])),
+      ]);
+    }
+    case 'BODY_MEASUREMENT_NAME_BUST_APEX_TO_APEX': {
+      // Front arc of the horizontal section through both apexes (mirror vertices share one level).
+      const apexY = (apexL.positionM[1] + anchors.apexR.positionM[1]) / 2;
+      return drawnOrUnavailable(measurementName, 'limited', [
+        sidedSectionArcPath({
+          id: measurementName,
+          mesh,
+          originM: [0, apexY, 0],
+          normal: [0, 1, 0],
+          seedM: [0, apexY, apexL.positionM[2]],
+          coordinate: 0,
+          startValue: anchors.apexR.positionM[0],
+          endValue: apexL.positionM[0],
+          zSide: 1,
+          bindToMesh,
+        }),
+      ]);
+    }
+    case 'BODY_MEASUREMENT_NAME_ARMSCYE_CIRCUMFERENCE': {
+      // Section around the shoulder joint in the front-back plane through underarm and shoulder
+      // point; the loop must pass both landmarks, otherwise nothing is drawn.
+      const direction = subtract(acromion, underarm);
+      const length = Math.hypot(direction[0], direction[1]);
+      if (length <= Number.EPSILON) return result(measurementName, 'unavailable-section');
+      const normal: Vec3 = [direction[1] / length, -direction[0] / length, 0];
+      const originM = mix(underarm, acromion, 0.5);
+      const loop = sectionLoop({ mesh, originM, normal, seedM: originM });
+      const passes = (target: Vec3) =>
+        loop?.pointsM.some((point) => Math.hypot(...subtract(point, target)) < 0.015) ?? false;
+      if (!loop || !passes(underarm) || !passes(acromion)) {
+        return result(measurementName, 'unavailable-section');
+      }
+      return drawnOrUnavailable(measurementName, 'limited', [
+        pathFromSectionLoop(measurementName, mesh, loop, bindToMesh),
+      ]);
+    }
+    case 'BODY_MEASUREMENT_NAME_ACROSS_SHOULDER': {
+      // Straight breadth between the two shoulder points: hidden part reads through the body.
+      return drawnOrUnavailable(measurementName, 'limited', [
+        airPath(
+          Object.freeze({
+            id: measurementName,
+            closed: false,
+            source: 'mesh-vertices' as const,
+            vertexIndices: Object.freeze([vertexOf(acromionL), vertexOf(anchors.acromionR)]),
+          }),
+          'x-ray',
+        ),
+      ]);
+    }
+    case 'BODY_MEASUREMENT_NAME_SLEEVE_LENGTH': {
+      // Shoulder point -> elbow -> wrist on the back of the arm (the field's view is the back).
+      const elbow = landmark(frame, 'elbow-left');
+      const wrist = landmark(frame, 'wrist-left');
+      if (!elbow || !wrist) return result(measurementName, 'unavailable-section');
+      const back = (point: Vec3): Vec3 => [point[0], point[1], point[2] - 0.06];
+      const vertexIndices = [
+        vertexOf(acromionL),
+        nearestVertex(mesh.positions, back(elbow)),
+        nearestVertex(mesh.positions, back(wrist)),
+      ].filter((vertex, index, all) => vertex !== all[index - 1]);
+      if (new Set(vertexIndices).size < 2) return result(measurementName, 'unavailable-section');
+      return result(measurementName, 'limited', [
+        airPath(
+          Object.freeze({
+            id: measurementName,
+            closed: false,
+            source: 'mesh-vertices' as const,
+            vertexIndices: Object.freeze(vertexIndices),
+          }),
+          'x-ray',
+        ),
+      ]);
+    }
+    case 'BODY_MEASUREMENT_NAME_CHEST_DEPTH': {
+      // Caliper from the bust apex straight back on the chest plane.
+      const chestY = anchoredChestY(anchors);
+      const loop = sectionLoop({ mesh, originM: [0, chestY, 0], normal: [0, 1, 0] });
+      if (!loop) return result(measurementName, 'unavailable-section');
+      const apexX = apexL.positionM[0];
+      const backPoint = loop.pointsM
+        .filter((point) => point[2] < loop.centroidM[2])
+        .reduce<Vec3 | null>(
+          (best, point) =>
+            !best || Math.abs(point[0] - apexX) < Math.abs(best[0] - apexX) ? point : best,
+          null,
+        );
+      if (!backPoint) return result(measurementName, 'unavailable-section');
+      const frontVertex = nearestVertex(mesh.positions, [apexX, chestY, apexL.positionM[2]]);
+      const backVertex = nearestVertex(mesh.positions, backPoint);
+      if (frontVertex === backVertex) return result(measurementName, 'unavailable-section');
+      return result(measurementName, 'limited', [
+        airPath(
+          Object.freeze({
+            id: measurementName,
+            closed: false,
+            source: 'mesh-vertices' as const,
+            vertexIndices: Object.freeze([frontVertex, backVertex]),
+          }),
+          'caliper',
+        ),
+      ]);
+    }
+    default:
+      break;
+  }
+
+  // The rest are straight or vertical lines placed in space; they cannot follow a posed body.
+  const fixedFields: readonly common_BodyMeasurementName[] = [
+    'BODY_MEASUREMENT_NAME_SHOULDER_DROP',
+    'BODY_MEASUREMENT_NAME_ARMSCYE_DEPTH',
+    'BODY_MEASUREMENT_NAME_INSEAM',
+    'BODY_MEASUREMENT_NAME_HPS_HEIGHT',
+  ];
+  if (!fixedFields.includes(measurementName)) return null;
+  if (!neutralPose) return result(measurementName, 'unavailable-pose');
+
+  switch (measurementName) {
+    case 'BODY_MEASUREMENT_NAME_SHOULDER_DROP': {
+      // HPS level carried out over the shoulder point, then the vertical drop to it.
+      const top: Vec3 = [acromion[0], hps[1], acromion[2]];
+      return result(measurementName, 'limited', [
+        anchoredFixedPath(`${measurementName}:level`, [hps, top], 'caliper'),
+        anchoredFixedPath(measurementName, [top, acromion], 'caliper'),
+      ]);
+    }
+    case 'BODY_MEASUREMENT_NAME_ARMSCYE_DEPTH': {
+      // HPS level down to the underarm level on the same side.
+      const top: Vec3 = [underarm[0], hps[1], underarm[2]];
+      return result(measurementName, 'limited', [
+        anchoredFixedPath(`${measurementName}:level`, [hps, top], 'caliper'),
+        anchoredFixedPath(measurementName, [top, underarm], 'caliper'),
+      ]);
+    }
+    case 'BODY_MEASUREMENT_NAME_INSEAM': {
+      // Crotch point straight down to the floor; dashed where it passes the inner thighs.
+      const crotch = anchors.crotch.positionM;
+      return result(measurementName, 'limited', [
+        anchoredFixedPath(measurementName, [crotch, [crotch[0], 0, crotch[2]]], 'x-ray'),
+      ]);
+    }
+    case 'BODY_MEASUREMENT_NAME_HPS_HEIGHT': {
+      // External ruler like height, with a level leader to the HPS point.
+      const offsetX = frame.measurements.shoulderBreadthMm / 2000 + 0.14;
+      const topY = hps[1] + 0.003;
+      return result(measurementName, 'visible', [
+        fixedPath(measurementName, [
+          [offsetX, 0, 0],
+          [offsetX, topY, 0],
+        ]),
+        fixedPath(`${measurementName}:leader`, [
+          [offsetX, topY, 0],
+          [hps[0], topY, hps[2]],
+        ]),
+      ]);
+    }
+    default:
+      return null;
+  }
+}
+
+/** Fields drawn only from HM08 anchors; any other mesh gets no line rather than a guessed one. */
+const ANCHOR_ONLY_FIELDS: ReadonlySet<common_BodyMeasurementName> = new Set([
+  'BODY_MEASUREMENT_NAME_NECK_BASE',
+  'BODY_MEASUREMENT_NAME_SHOULDER_LENGTH',
+  'BODY_MEASUREMENT_NAME_SHOULDER_DROP',
+  'BODY_MEASUREMENT_NAME_ARMSCYE_DEPTH',
+  'BODY_MEASUREMENT_NAME_ARMSCYE_CIRCUMFERENCE',
+  'BODY_MEASUREMENT_NAME_HPS_TO_BUST_APEX',
+  'BODY_MEASUREMENT_NAME_BUST_APEX_TO_APEX',
+  'BODY_MEASUREMENT_NAME_HPS_TO_WAIST_FRONT',
+  'BODY_MEASUREMENT_NAME_INSEAM',
+  'BODY_MEASUREMENT_NAME_HPS_HEIGHT',
+]);
+
+/** Fields that read an anchor when the mesh has them (placement or the whole line). */
+const ANCHORED_FIELDS: ReadonlySet<common_BodyMeasurementName> = new Set([
+  ...ANCHOR_ONLY_FIELDS,
+  'BODY_MEASUREMENT_NAME_CHEST',
+  'BODY_MEASUREMENT_NAME_UNDER_BUST',
+  'BODY_MEASUREMENT_NAME_ACROSS_FRONT',
+  'BODY_MEASUREMENT_NAME_ACROSS_BACK',
+  'BODY_MEASUREMENT_NAME_CF_NECK_TO_WAIST',
+  'BODY_MEASUREMENT_NAME_CB_NECK_TO_WAIST',
+  'BODY_MEASUREMENT_NAME_ACROSS_SHOULDER',
+  'BODY_MEASUREMENT_NAME_SLEEVE_LENGTH',
+  'BODY_MEASUREMENT_NAME_CHEST_DEPTH',
+]);
+
 /**
  * Builds a visual guide from the shaped neutral mesh. Vertex-bound guides follow live posed
  * positions without rebuilding the Three scene. Fixed-coordinate guides fail soft outside the
@@ -524,8 +1089,17 @@ function buildGuide(options: {
   const waist = station(frame, 'waist');
   const hip = station(frame, 'hip');
   const shoulder = station(frame, 'shoulder');
-  const chestY = options.torsoSectionStations?.chest?.[1] ?? chest?.yM;
-  const underBustY = options.torsoSectionStations?.underBust?.[1];
+  const anchors = ANCHORED_FIELDS.has(measurementName) ? guideBodyAnchors(mesh) : null;
+  // With anchors the chest plane is the bust apex level (below the underarm, arms excluded);
+  // the runtime's chest station is kept only for meshes without them.
+  const chestY = anchors
+    ? anchoredChestY(anchors)
+    : options.torsoSectionStations?.chest?.[1] ?? chest?.yM;
+  const foldY =
+    anchors && measurementName === 'BODY_MEASUREMENT_NAME_UNDER_BUST'
+      ? anchoredUnderBustY(anchors, mesh)
+      : null;
+  const underBustY = anchors ? foldY ?? undefined : options.torsoSectionStations?.underBust?.[1];
   const waistY = options.torsoSectionStations?.waist?.[1] ?? waist?.yM;
   const hipY = options.torsoSectionStations?.hip?.[1] ?? hip?.yM;
   const highHipStationResolution =
@@ -579,6 +1153,21 @@ function buildGuide(options: {
     ]);
   }
 
+  if (anchors) {
+    const anchored = anchoredGuide({
+      measurementName,
+      frame,
+      mesh,
+      anchors,
+      neutralPose: options.neutralPose,
+      waistY,
+    });
+    if (anchored) return anchored;
+  } else if (ANCHOR_ONLY_FIELDS.has(measurementName)) {
+    // HPS, shoulder point, underarm, apex, C7 and crotch exist only as anchors of the HM08 mesh.
+    return result(measurementName, 'unavailable-section');
+  }
+
   const depthStation =
     measurementName === 'BODY_MEASUREMENT_NAME_CHEST_DEPTH'
       ? chest
@@ -602,10 +1191,6 @@ function buildGuide(options: {
         'caliper',
       ),
     ]);
-  }
-
-  if (measurementName === 'BODY_MEASUREMENT_NAME_NECK_BASE') {
-    return result(measurementName, 'unsupported');
   }
 
   if (measurementName === 'BODY_MEASUREMENT_NAME_NECK') {
@@ -735,23 +1320,25 @@ function buildGuide(options: {
     chestY !== undefined
   ) {
     const zSide = measurementName === 'BODY_MEASUREMENT_NAME_ACROSS_FRONT' ? 1 : -1;
+    // Upper-chest level just above the underarm, between the axillary folds (2 cm inside it).
+    const acrossY = anchors ? anchors.underarmL.positionM[1] + 0.03 : chestY;
+    const halfSpanM = anchors
+      ? Math.abs(anchors.underarmL.positionM[0]) - 0.02
+      : chest.halfWidthM * 0.78;
     return drawnOrUnavailable(measurementName, 'limited', [
       sidedSectionArcPath({
         id: measurementName,
         mesh,
-        originM: [0, chestY, 0],
+        originM: [0, acrossY, 0],
         normal: [0, 1, 0],
-        seedM: [0, chestY, zSide * chest.halfDepthM],
+        seedM: [0, acrossY, zSide * chest.halfDepthM],
         coordinate: 0,
-        startValue: -chest.halfWidthM * 0.78,
-        endValue: chest.halfWidthM * 0.78,
+        startValue: -halfSpanM,
+        endValue: halfSpanM,
         zSide,
         bindToMesh: !options.neutralPose,
       }),
     ]);
-  }
-  if (measurementName === 'BODY_MEASUREMENT_NAME_HPS_TO_WAIST_FRONT') {
-    return result(measurementName, 'unsupported');
   }
   if (
     (measurementName === 'BODY_MEASUREMENT_NAME_CF_NECK_TO_WAIST' ||
@@ -759,9 +1346,11 @@ function buildGuide(options: {
     waist &&
     waistY !== undefined
   ) {
-    const neckBase = landmark(frame, 'neck-base');
-    if (!neckBase) return result(measurementName, 'unavailable-section');
+    const frameNeckBase = landmark(frame, 'neck-base');
     const zSide = measurementName === 'BODY_MEASUREMENT_NAME_CF_NECK_TO_WAIST' ? 1 : -1;
+    // Centre front starts at the suprasternal notch, centre back at C7 (not the frame's prior).
+    const neckBase = anchors ? (zSide > 0 ? anchors.ssn : anchors.c7).positionM : frameNeckBase;
+    if (!neckBase) return result(measurementName, 'unavailable-section');
     return drawnOrUnavailable(measurementName, 'limited', [
       sidedSectionArcPath({
         id: measurementName,
@@ -798,7 +1387,5 @@ function buildGuide(options: {
     ]);
   }
 
-  // There is no admitted crotch, HPS, bust-apex or armscye landmark. A guessed path would teach
-  // the wrong protocol, so those guides remain explicitly unsupported.
-  return result(measurementName, 'unsupported');
+  return result(measurementName, 'unavailable-section');
 }

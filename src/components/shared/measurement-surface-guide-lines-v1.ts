@@ -375,26 +375,46 @@ export function measurementSurfaceGuideAirDatasetV1(
 
 export type MeasurementSurfaceGuideCameraViewV1 = 'back' | 'side';
 
-export type MeasurementSurfaceGuideCameraActionV1 = 'none' | 'turn' | 'restore' | 'forget';
+/** The focused field's camera view: its own back/side view, otherwise `front`. */
+export type MeasurementSurfaceGuideCameraTargetV1 = MeasurementSurfaceGuideCameraViewV1 | 'front';
+
+export type MeasurementSurfaceGuideCameraActionV1 =
+  | 'none'
+  | 'turn'
+  | 'restore'
+  | 'forget'
+  | 'front';
+
+/** Where the camera looks at the body from; `free` is an orbit of the owner's own. */
+export type MeasurementSurfaceGuideCameraFacingV1 = 'front' | 'back' | 'side' | 'free';
 
 /**
- * Per-field camera turn (approved mockup, variant C). Only the fields whose guide declares a view
- * turn the camera; blur restores the camera the owner left. Edit pose never moves the camera by
- * itself, and a camera the owner took over during a turn is not taken back on blur.
+ * Per-field camera turn (approved mockup, variant C). A field whose guide declares a back/side view
+ * turns the camera there; leaving it restores the camera the owner left. A focused field without a
+ * view faces the front again when the camera still looks from the back or side after the turn was
+ * let go (a tap on the stage, a blur in between); an orbit of the owner's own stays. Edit pose never
+ * moves the camera by itself, and a camera the owner took over during a turn is not taken back on
+ * blur.
  */
 export function measurementSurfaceGuideCameraActionV1(options: {
-  readonly targetView: MeasurementSurfaceGuideCameraViewV1 | null;
+  readonly targetView: MeasurementSurfaceGuideCameraTargetV1 | null;
   readonly turn: Readonly<{
     view: MeasurementSurfaceGuideCameraViewV1;
     ownerCameraSaved: boolean;
   }> | null;
   readonly editPose: boolean;
   readonly interactive: boolean;
+  readonly cameraFacing?: MeasurementSurfaceGuideCameraFacingV1;
 }): MeasurementSurfaceGuideCameraActionV1 {
-  const { targetView, turn, editPose, interactive } = options;
+  const { targetView, turn, editPose, interactive, cameraFacing = 'front' } = options;
   if (!interactive) return 'none';
   if (editPose) return turn ? 'forget' : 'none';
-  if (targetView) return turn?.view === targetView ? 'none' : 'turn';
-  if (!turn) return 'none';
-  return turn.ownerCameraSaved ? 'restore' : 'forget';
+  if (targetView === 'back' || targetView === 'side') {
+    return turn?.view === targetView ? 'none' : 'turn';
+  }
+  if (turn?.ownerCameraSaved) return 'restore';
+  if (targetView === 'front' && (cameraFacing === 'back' || cameraFacing === 'side')) {
+    return 'front';
+  }
+  return turn ? 'forget' : 'none';
 }

@@ -3181,8 +3181,13 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
       : measurementSurfaceMeasurementGuideViewV1(
           focusedMeasurementName as common_BodyMeasurementName,
         );
-  const measurementGuideCameraView =
-    focusedGuideView === 'back' || focusedGuideView === 'side' ? focusedGuideView : undefined;
+  // Every focused field names a view: its own back/side one, otherwise the front (also when its
+  // line is not drawn), so leaving a side field never leaves the camera turned.
+  const measurementGuideCameraView = !focusedMeasurementName
+    ? undefined
+    : focusedGuideView === 'back' || focusedGuideView === 'side'
+      ? focusedGuideView
+      : ('front' as const);
   const measurementGuideStatusText =
     measurementGuide?.status === 'visible' || measurementGuide?.status === 'limited'
       ? `visual guide visible for ${measurementGuide.label}`

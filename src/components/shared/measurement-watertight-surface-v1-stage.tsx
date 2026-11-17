@@ -21,6 +21,7 @@ import {
   measurementSurfaceGuideAirDatasetV1,
   measurementSurfaceGuideCameraActionV1,
   syncMeasurementSurfaceGuideResolutionV1,
+  type MeasurementSurfaceGuideCameraTargetV1,
   type MeasurementSurfaceGuideCameraViewV1,
   updateMeasurementSurfaceGuideLayerPositionsV1,
   type MeasurementSurfaceGuideSceneBindingV1,
@@ -1508,7 +1509,7 @@ export function MeasurementWatertightSurfaceV1Stage({
   /** Capture-only framing renders the exact guide close-up at a supersampled resolution. */
   measurementGuidePresentation?: 'interactive' | 'capture';
   /** View the focused field's guide reads from; the camera turns there and back on blur. */
-  measurementGuideCameraView?: MeasurementSurfaceGuideCameraViewV1;
+  measurementGuideCameraView?: MeasurementSurfaceGuideCameraTargetV1;
   /** Keeps the last rendered frame visible while replacement geometry warms on the same canvas. */
   retainVisibleCanvasOnRebuild?: boolean;
 }) {
@@ -2091,6 +2092,15 @@ export function MeasurementWatertightSurfaceV1Stage({
       scheduleRender();
     }
 
+    /** Where the camera looks at the body from, within 10 degrees; `free` anywhere else. */
+    function stageCameraFacing(): 'front' | 'back' | 'side' | 'free' {
+      if (!camera || !controls) return 'free';
+      const direction = camera.position.clone().sub(controls.target).normalize();
+      if (direction.z > 0.985) return 'front';
+      if (direction.z < -0.985) return 'back';
+      return Math.abs(direction.x) > 0.985 ? 'side' : 'free';
+    }
+
     function snapshotStageCamera(): MeasurementSurfaceCameraStateV10 | null {
       if (!camera || !controls || !bodyCenter || bodyRadius <= 0 || !contextCanvas) return null;
       return measurementSurfaceSnapshotCameraV10({
@@ -2267,6 +2277,7 @@ export function MeasurementWatertightSurfaceV1Stage({
           renderer.render(scene, controls.object);
           renderCount += 1;
           renderer.domElement.dataset.renderCount = String(renderCount);
+          renderer.domElement.dataset.cameraFacing = stageCameraFacing();
           publishPatternPieceAcceptanceReceipts(renderCount);
           onRenderCountRef.current(renderCount);
           warmupRenderCount += 1;
@@ -2994,24 +3005,33 @@ export function MeasurementWatertightSurfaceV1Stage({
           turn: turn ? { view: turn.view, ownerCameraSaved: turn.saved !== null } : null,
           editPose: measurementSurfaceJointEditorEffectiveEditModeV1(jointEditorRef.current),
           interactive,
+          // A running guide animation already carries the camera to the front or the owner's camera.
+          cameraFacing: guideCameraAnimation !== 0 ? 'free' : stageCameraFacing(),
         });
-        if (action === 'forget') {
-          stopGuideCameraAnimation(false);
-          guideCameraTurnRef.current = null;
-        } else if (action === 'turn' && targetView) {
-          guideCameraTurnRef.current = {
-            view: targetView,
-            saved: turn?.saved ?? snapshotStageCamera(),
-          };
+        const animateToView = (view: MeasurementSurfaceViewPreset) => {
+          if (!camera) return;
           const verticalFov = THREE.MathUtils.degToRad(camera.fov);
           const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect);
           const distance = (radius / Math.sin(Math.min(verticalFov, horizontalFov) / 2)) * 1.12;
           animateGuideCamera(
-            center.clone().add(directionForView(targetView).multiplyScalar(distance)),
+            center.clone().add(directionForView(view).multiplyScalar(distance)),
             center,
-            () => fit(directionForView(targetView)),
+            () => fit(directionForView(view)),
             jump,
           );
+        };
+        if (action === 'forget') {
+          stopGuideCameraAnimation(false);
+          guideCameraTurnRef.current = null;
+        } else if (action === 'front') {
+          guideCameraTurnRef.current = null;
+          animateToView('front');
+        } else if (action === 'turn' && (targetView === 'back' || targetView === 'side')) {
+          guideCameraTurnRef.current = {
+            view: targetView,
+            saved: turn?.saved ?? snapshotStageCamera(),
+          };
+          animateToView(targetView);
         } else if (action === 'restore' && turn?.saved) {
           const saved = turn.saved;
           guideCameraTurnRef.current = null;

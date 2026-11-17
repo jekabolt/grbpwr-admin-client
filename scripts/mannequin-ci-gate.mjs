@@ -116,6 +116,7 @@ const browserSuites = Object.freeze([
       'neck applies as a bounded proxy on female and neutral, and is honestly not applied on male',
       'female chest and under bust reshape the bust; male keeps its chest path',
       'hidden measurement lines read through the body and from their own view',
+      'measurement lines read on a phone portrait stage while a field is typed',
     ].join('|'),
   }),
   Object.freeze({
