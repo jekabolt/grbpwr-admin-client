@@ -59,3 +59,13 @@ jobs:
         run: yarn playwright install --with-deps chromium
       - name: Run mannequin beta gate
         run: yarn test:mannequin:ci
+      # The gate stops at the first red browser suite, so test-results/ then holds exactly that
+      # suite's trace, screenshot and error context. Without them a CI-only flake is a guess.
+      - name: Upload mannequin gate failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mannequin-gate-test-results-${{ github.run_attempt }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
