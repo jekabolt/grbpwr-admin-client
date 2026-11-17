@@ -323,19 +323,21 @@ function verticalRadiusM(options: {
   readonly allStations: readonly MeasurementOpenReferenceTorsoDepthStationV1[];
   readonly protectedStationOriginsM: readonly MeshPlaneSectionVec3V1[];
   readonly maximumVerticalRadiusM: number;
+  readonly protectedSupportFraction: number;
 }): number {
-  const distances = [
-    ...options.allStations
-      .filter(({ measurementKey }) => measurementKey !== options.station.measurementKey)
-      .map(({ originM }) => Math.abs(originM[1] - options.station.originM[1])),
-    ...options.protectedStationOriginsM.map((originM) =>
-      Math.abs(originM[1] - options.station.originM[1]),
-    ),
-  ].filter((distance) => distance > 0.001);
-  return Math.min(
-    options.maximumVerticalRadiusM,
-    (distances.length ? Math.min(...distances) : 0.16) * 0.45,
-  );
+  const siblingDistances = options.allStations
+    .filter(({ measurementKey }) => measurementKey !== options.station.measurementKey)
+    .map(({ originM }) => Math.abs(originM[1] - options.station.originM[1]))
+    .filter((distance) => distance > 0.001);
+  const protectedDistances = options.protectedStationOriginsM
+    .map((originM) => Math.abs(originM[1] - options.station.originM[1]))
+    .filter((distance) => distance > 0.001);
+  // Rounding is monotone, so min(d) * 0.45 === min(d * 0.45): the default stays byte-identical.
+  const radii = [
+    ...siblingDistances.map((distance) => distance * 0.45),
+    ...protectedDistances.map((distance) => distance * options.protectedSupportFraction),
+  ];
+  return Math.min(options.maximumVerticalRadiusM, radii.length ? Math.min(...radii) : 0.16 * 0.45);
 }
 
 /**
@@ -352,10 +354,22 @@ export function solveMeasurementOpenReferenceTorsoDepthProxyV1(options: {
   readonly stations: readonly MeasurementOpenReferenceTorsoDepthStationV1[];
   readonly protectedStationOriginsM?: readonly MeshPlaneSectionVec3V1[];
   readonly shoulderVertices?: Readonly<{ negative: number; positive: number }>;
+  /**
+   * Share of the distance to a protected station that the vertical support may reach (default
+   * 0.45, as for sibling stations). The female bust path raises it to let the support end at the
+   * under-bust plane; the protected-drift check still holds that plane within tolerance.
+   */
+  readonly protectedSupportFraction?: number;
   readonly policy?: Partial<MeasurementOpenReferenceTorsoDepthProxyPolicyV1>;
 }): MeasurementOpenReferenceTorsoDepthProxyResultV1 {
   validateMesh(options.sourcePositionsM, options.triangleIndices);
   const policy = policySnapshot(options.policy);
+  if (
+    options.protectedSupportFraction != null &&
+    !(options.protectedSupportFraction > 0 && options.protectedSupportFraction <= 1)
+  ) {
+    throw new RangeError('protectedSupportFraction must be in (0, 1].');
+  }
   const original = options.sourcePositionsM.slice();
   let positionsM: Float32Array = original.slice();
   const represented: MeasurementOpenReferenceTorsoDepthKeyV1[] = [];
@@ -393,6 +407,7 @@ export function solveMeasurementOpenReferenceTorsoDepthProxyV1(options: {
       allStations: [...stationByKey.values()],
       protectedStationOriginsM: protectedOrigins,
       maximumVerticalRadiusM: policy.maximumVerticalRadiusM,
+      protectedSupportFraction: options.protectedSupportFraction ?? 0.45,
     });
     if (!Number.isFinite(radiusM) || radiusM < 0.006) {
       diagnostics.push(

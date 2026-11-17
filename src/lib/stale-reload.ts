@@ -66,31 +66,136 @@ export function staleRecoveryOf(s: {
   online: boolean;
   reloadedFromBuild: string | null;
   build: string;
+  remoteBuild?: string;
   holdsWork: boolean;
   windowOpen: boolean;
 }): StaleRecovery {
   if (!s.online) return 'none';
-  if (s.reloadedFromBuild === s.build) return 'none';
+  const remoteBuildIsNewer = Boolean(s.remoteBuild && s.remoteBuild !== s.build);
+  if (s.reloadedFromBuild === s.build && !remoteBuildIsNewer) return 'none';
   return s.holdsWork || !s.windowOpen ? 'ask' : 'reload';
 }
 
-/** The error of a worker that did not load, after one retry; the tab recovers as a stale chunk does. */
-export function workerLoadFailed(): WorkerLoadError {
+function showOldVersionWarning(): void {
+  notify({
+    sev: 'warn',
+    subject: 'PAGE',
+    text: 'old version',
+    key: 'page-old-version',
+    action: { label: 'reload', onClick: reloadForNewVersion },
+  });
+}
+
+/**
+ * The shared side-effecting recovery decision for routes, workers and the build probe. Keeping the
+ * unsaved-work check here is important: callers must not grow a second, less safe reload path.
+ */
+export function recoverStaleBuild(remoteBuild?: string): StaleRecovery {
   const recovery = staleRecoveryOf({
     online: navigator.onLine !== false,
     reloadedFromBuild: read(RELOAD_BUILD),
     build: currentBuild(),
+    remoteBuild,
     holdsWork: pageHoldsUnsavedWork(),
     windowOpen: reloadWindowOpen(),
   });
   if (recovery === 'reload') reloadForNewVersion();
-  else if (recovery === 'ask')
-    notify({
-      sev: 'warn',
-      subject: 'PAGE',
-      text: 'old version',
-      key: 'page-old-version',
-      action: { label: 'reload', onClick: reloadForNewVersion },
-    });
+  else if (recovery === 'ask') showOldVersionWarning();
+  return recovery;
+}
+
+function htmlAttribute(attributes: string, name: string): string | null {
+  const match = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'i').exec(
+    attributes,
+  );
+  return match?.[1] ?? match?.[2] ?? null;
+}
+
+/** The deployed entry module from an index document, independent of attribute order. */
+export function entryModuleFromIndexHtml(html: string, baseUrl: string): string | null {
+  for (const match of html.matchAll(/<script\b([^>]*)>/gi)) {
+    const attributes = match[1] ?? '';
+    if (htmlAttribute(attributes, 'type')?.toLowerCase() !== 'module') continue;
+    const source = htmlAttribute(attributes, 'src');
+    if (!source) continue;
+    try {
+      return new URL(source, baseUrl).href;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+type IndexResponse = Readonly<{
+  ok: boolean;
+  url?: string;
+  text: () => Promise<string>;
+}>;
+
+export type StaleBuildProbeInput = Readonly<{
+  online: boolean;
+  currentEntry: string;
+  indexUrl: string;
+  fetchIndex: (url: string) => Promise<IndexResponse>;
+  recover: (remoteEntry: string) => StaleRecovery;
+}>;
+
+/**
+ * A focus probe catches the stale case that cannot throw a chunk error: an old route module that
+ * is already resident in memory. Network and parsing failures deliberately do nothing; they are
+ * not evidence that a newer build exists.
+ */
+export async function probeForStaleBuild(input: StaleBuildProbeInput): Promise<StaleRecovery> {
+  if (!input.online || !input.currentEntry) return 'none';
+  try {
+    const response = await input.fetchIndex(input.indexUrl);
+    if (!response.ok) return 'none';
+    const remoteEntry = entryModuleFromIndexHtml(
+      await response.text(),
+      response.url || input.indexUrl,
+    );
+    if (!remoteEntry || remoteEntry === input.currentEntry) return 'none';
+    return input.recover(remoteEntry);
+  } catch {
+    return 'none';
+  }
+}
+
+let buildProbeInFlight: Promise<StaleRecovery> | null = null;
+
+function runBuildProbe(): Promise<StaleRecovery> {
+  if (buildProbeInFlight) return buildProbeInFlight;
+  const indexUrl = new URL('/', window.location.href).href;
+  buildProbeInFlight = probeForStaleBuild({
+    online: navigator.onLine !== false,
+    currentEntry: currentBuild(),
+    indexUrl,
+    fetchIndex: (url) =>
+      fetch(url, { cache: 'no-store', credentials: 'same-origin' }).then((response) => response),
+    recover: recoverStaleBuild,
+  }).finally(() => {
+    buildProbeInFlight = null;
+  });
+  return buildProbeInFlight;
+}
+
+/** Probe only when the user returns to the tab; no polling and no background network churn. */
+export function registerStaleBuildProbe(): () => void {
+  const onFocus = () => void runBuildProbe();
+  const onVisibilityChange = () => {
+    if (document.visibilityState === 'visible') void runBuildProbe();
+  };
+  window.addEventListener('focus', onFocus);
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  return () => {
+    window.removeEventListener('focus', onFocus);
+    document.removeEventListener('visibilitychange', onVisibilityChange);
+  };
+}
+
+/** The error of a worker that did not load, after one retry; the tab recovers as a stale chunk does. */
+export function workerLoadFailed(): WorkerLoadError {
+  recoverStaleBuild();
   return new WorkerLoadError();
 }
