@@ -121,6 +121,8 @@ const PROXY_RUNTIME_KEYS = Object.freeze([
   'requestedGeometricProxies',
   'representedGeometricProxies',
   'modeResults',
+  // Optional waist/hip section origins; always set (possibly undefined) by the waist/hip runtime.
+  'sectionModes',
   'diagnostics',
   'qualityGate',
   'poseCompatibleArmLengthProxy',
@@ -292,6 +294,10 @@ const REQUIRED_MEASUREMENT_KEYS = Object.freeze([
 const ALLOWED_MEASUREMENT_KEYS = Object.freeze([
   ...REQUIRED_MEASUREMENT_KEYS,
   'neckBaseCircumferenceMm',
+  // Bounded-proxy keys (high hip, knee, mid-neck) admitted by the canonical adapter.
+  'highHipCircumferenceMm',
+  'kneeCircumferenceMm',
+  'neckCircumferenceMm',
   'underBustCircumferenceMm',
   'bicepCircumferenceMm',
   'wristCircumferenceMm',
@@ -683,7 +689,10 @@ function snapshotProxyRuntime(
   const keys = Object.keys(values);
   if (
     PROXY_RUNTIME_KEYS.some(
-      (key) => key !== 'poseCompatibleArmLengthProxy' && !Object.hasOwn(values, key),
+      (key) =>
+        key !== 'poseCompatibleArmLengthProxy' &&
+        key !== 'sectionModes' &&
+        !Object.hasOwn(values, key),
     ) ||
     keys.some((key) => !PROXY_RUNTIME_KEYS.includes(key as (typeof PROXY_RUNTIME_KEYS)[number]))
   ) {

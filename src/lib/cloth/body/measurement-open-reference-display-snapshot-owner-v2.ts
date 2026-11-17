@@ -86,6 +86,10 @@ const MEASUREMENT_KEYS = Object.freeze([
   'inseamMm',
   'underBustCircumferenceMm',
   'neckBaseCircumferenceMm',
+  // Bounded-proxy keys (high hip, knee, mid-neck) admitted by the canonical adapter.
+  'highHipCircumferenceMm',
+  'kneeCircumferenceMm',
+  'neckCircumferenceMm',
   'bicepCircumferenceMm',
   'wristCircumferenceMm',
   'thighCircumferenceMm',
