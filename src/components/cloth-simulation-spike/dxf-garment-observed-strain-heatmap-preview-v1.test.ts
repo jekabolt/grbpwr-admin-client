@@ -1,0 +1,257 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as THREE from 'three';
+
+// Synthetic display/lifecycle ports only. No GPU kernels, genuine body or product admission is
+// claimed here. The separate encoder suite exercises the real private projection registry.
+const ports = vi.hoisted(() => ({
+  owner: Object.freeze({ syntheticDisplayFixture: true }),
+  controller: new AbortController(),
+  onRender: null as (() => void) | null,
+  onLifetimeRead: null as (() => void) | null,
+  renderers: [] as { renders: number; clears: number; disposals: number }[],
+  throwDispose: false,
+  clothZ: 0,
+  frustumViolations: 0,
+}));
+const positions = (z = 0) => new Float32Array([0, 0, z, 1, 0, z, 0, 1, z, 1, 1, z]);
+const input = () => ({
+  finalPositions3M: positions(ports.clothZ),
+  garmentTriangles: new Uint32Array([0, 1, 2, 1, 3, 2]),
+  strain: {
+    // GPU order [render1, render0], deliberately not the render ordinal order.
+    values: new Float32Array([0, 0, 0, 2.5, 0, 0, 0, 0.25]),
+    flags: new Uint32Array([0, 0]),
+    renderTriangleIndices: new Uint32Array([1, 0]),
+  },
+});
+vi.mock('./dxf-garment-observed-webgpu-replay-v1', () => ({
+  getDxfGarmentObservedWebgpuReplayLifetimeV1: (owner: unknown) => {
+    ports.onLifetimeRead?.();
+    return owner === ports.owner && !ports.controller.signal.aborted
+      ? ports.controller.signal
+      : null;
+  },
+  projectDxfGarmentObservedWebgpuRenderV1: async () => ({
+    ...input(),
+    frameCount: 32,
+    report: {
+      status: 'diagnostic-completed',
+      reportSha256: 'a'.repeat(64),
+      sourceBindingSha256: 'b'.repeat(64),
+      finalStateSha256: 'c'.repeat(64),
+      finalValidation: { ok: true },
+      checkpoint16Matched: true,
+    },
+    bodyPositionsM: positions(),
+    bodyTriangles: new Uint32Array([0, 1, 2, 1, 3, 2]),
+    strain: {
+      ...input().strain,
+      passed: true,
+      units: 'dimensionless',
+      stressPaComputed: false,
+      renderMappingSha256: 'd'.repeat(64),
+    },
+  }),
+}));
+vi.mock('three', async (original) => {
+  const actual = await original<typeof import('three')>();
+  class SyntheticRenderer {
+    renders = 0;
+    clears = 0;
+    disposals = 0;
+    constructor() {
+      ports.renderers.push(this);
+    }
+    setPixelRatio() {}
+    setSize() {}
+    render(scene: THREE.Scene, camera: THREE.Camera) {
+      this.renders++;
+      scene.updateMatrixWorld(true);
+      camera.updateMatrixWorld(true);
+      scene.traverse((node) => {
+        if (!(node instanceof actual.Mesh)) return;
+        const attribute = node.geometry.getAttribute('position');
+        for (let index = 0; index < attribute.count; index++) {
+          const v = new actual.Vector3()
+            .fromBufferAttribute(attribute, index)
+            .applyMatrix4(node.matrixWorld)
+            .project(camera);
+          if ([v.x, v.y, v.z].some((value) => !Number.isFinite(value) || Math.abs(value) > 1))
+            ports.frustumViolations++;
+        }
+      });
+      ports.onRender?.();
+    }
+    clear() {
+      this.clears++;
+    }
+    dispose() {
+      this.disposals++;
+      if (ports.throwDispose) throw new Error('Synthetic renderer disposal failure.');
+    }
+  }
+  return { ...actual, WebGLRenderer: SyntheticRenderer };
+});
+import {
+  buildDxfGarmentObservedStrainHeatmapGeometryV1 as build,
+  createDxfGarmentObservedStrainHeatmapPreviewV1 as create,
+  projectDxfGarmentObservedStrainHeatmapV1 as project,
+} from './dxf-garment-observed-strain-heatmap-preview-v1';
+import { betaSkirtStrainUtilizationColorV1 } from './beta-skirt-canonical-medium-webgpu-16-frame-strain-heatmap-preview-v1';
+
+class SyntheticCanvas extends EventTarget {
+  readonly dataset: Record<string, string> = {};
+  readonly clientWidth = 640;
+  readonly clientHeight = 720;
+  width = 640;
+  height = 720;
+  readonly getContext = vi.fn(() => {
+    throw new Error('No actual GPU in a lifecycle test.');
+  });
+}
+const active: { dispose(): void }[] = [];
+beforeEach(() => {
+  ports.controller = new AbortController();
+  ports.onRender = null;
+  ports.onLifetimeRead = null;
+  ports.renderers = [];
+  ports.throwDispose = false;
+  ports.clothZ = 0;
+  ports.frustumViolations = 0;
+  vi.stubGlobal('HTMLCanvasElement', SyntheticCanvas);
+});
+afterEach(() => {
+  active.splice(0).forEach((view) => view.dispose());
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+async function open(signal?: AbortSignal) {
+  const canvas = new SyntheticCanvas();
+  const view = await create(canvas as unknown as HTMLCanvasElement, ports.owner, signal);
+  active.push(view);
+  return { canvas, view };
+}
+
+describe('generic continuum-to-render strain mapping (pure content only)', () => {
+  it('maps colored GPU order to exact render faces while retaining unclamped statistics', () => {
+    const source = input();
+    const before = source.strain.values.slice();
+    const result = build(source);
+    expect(result.positions).toHaveLength(18);
+    expect(Array.from(result.colors.slice(0, 3))).toEqual(
+      Array.from(new Float32Array(betaSkirtStrainUtilizationColorV1(0.25))),
+    );
+    expect(Array.from(result.colors.slice(9, 12))).toEqual(
+      Array.from(new Float32Array(betaSkirtStrainUtilizationColorV1(2.5))),
+    );
+    expect(result.minimumUtilization).toBe(0.25);
+    expect(result.maximumUtilization).toBe(2.5);
+    expect(result.triangleCountAtOrAboveDisplayClamp).toBe(1);
+    expect(source.strain.values).toEqual(before);
+    result.positions.fill(99);
+    expect(source.finalPositions3M[0]).toBe(0);
+  });
+  it.each([[0, 0], [1, 1], [2, 0], [0]])('refuses invalid mapping %j', (...mapping) => {
+    const source = input();
+    source.strain.renderTriangleIndices = new Uint32Array(mapping);
+    expect(() => build(source)).toThrow();
+  });
+  it('refuses invalid strain flags, NaNs and out-of-range topology', () => {
+    const flagged = input();
+    flagged.strain.flags[0] = 1;
+    expect(() => build(flagged)).toThrow(/validity/);
+    const nonfinite = input();
+    nonfinite.strain.values[0] = NaN;
+    expect(() => build(nonfinite)).toThrow(/finite/);
+    const topology = input();
+    topology.garmentTriangles[0] = 99;
+    expect(() => build(topology)).toThrow(/range/);
+  });
+});
+
+describe('synthetic renderer lifecycle (not visual or physical acceptance)', () => {
+  it('renders once, binds the frame receipt and releases only its display on caller abort', async () => {
+    const caller = new AbortController();
+    const { canvas, view } = await open(caller.signal);
+    expect(view.receipt).toMatchObject({
+      frames: 32,
+      units: 'dimensionless',
+      stressPaComputed: false,
+      productAuthority: false,
+      maximumUtilization: 2.5,
+    });
+    expect(canvas.dataset.genericObservedStrainFrameSha256).toBe('a'.repeat(64));
+    expect(ports.renderers[0]?.renders).toBe(1);
+    caller.abort();
+    view.dispose();
+    expect(view.lifetime.aborted).toBe(true);
+    expect(ports.renderers[0]?.disposals).toBe(1);
+    expect(canvas.dataset.genericObservedStrainFrameSha256).toBeUndefined();
+    expect(ports.controller.signal.aborted).toBe(false);
+  });
+  it('clears the display immediately on frame revocation and refuses lookalikes', async () => {
+    const { view } = await open();
+    ports.controller.abort();
+    expect(view.lifetime.aborted).toBe(true);
+    expect(ports.renderers[0]?.clears).toBe(1);
+    await expect(project({ ...ports.owner })).rejects.toThrow(/genuine/);
+  });
+  it('handles context loss and disposal failures while releasing both geometries and materials', async () => {
+    const geometry = vi.spyOn(THREE.BufferGeometry.prototype, 'dispose');
+    const material = vi.spyOn(THREE.Material.prototype, 'dispose');
+    const { canvas, view } = await open();
+    ports.throwDispose = true;
+    const event = new Event('webglcontextlost', { cancelable: true });
+    canvas.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(view.lifetime.aborted).toBe(true);
+    expect(geometry).toHaveBeenCalledTimes(2);
+    expect(material).toHaveBeenCalledTimes(2);
+    expect(ports.controller.signal.aborted).toBe(false);
+  });
+  it('cleans up a frame revoked inside render without publishing a successful receipt', async () => {
+    ports.onRender = () => ports.controller.abort();
+    await expect(open()).rejects.toThrow(/current/);
+    expect(ports.renderers[0]?.disposals).toBe(1);
+  });
+  it('pre-aborted callers never allocate a renderer', async () => {
+    const caller = new AbortController();
+    caller.abort();
+    await expect(open(caller.signal)).rejects.toThrow(/current/);
+    expect(ports.renderers).toHaveLength(0);
+    expect(ports.controller.signal.aborted).toBe(false);
+  });
+  it.each([10, -10, 50])(
+    'fits the complete depth of a garment explicitly placed at z=%s m',
+    async (depth) => {
+      ports.clothZ = depth;
+      const projection = await project(ports.owner);
+      expect(projection.finalPositions3M[2]).toBe(depth);
+      expect(projection.bodyPositionsM[2]).toBe(0);
+      await open();
+      expect(ports.frustumViolations).toBe(0);
+    },
+  );
+  it('refuses publication when genuine lifetime polling synchronously aborts only the display caller', async () => {
+    const caller = new AbortController();
+    ports.onRender = () => {
+      ports.onLifetimeRead = () => caller.abort();
+    };
+    await expect(open(caller.signal)).rejects.toThrow(/current/);
+    expect(ports.renderers[0]?.disposals).toBe(1);
+    expect(ports.controller.signal.aborted).toBe(false);
+  });
+  it('never allocates a renderer after a reentrant abort at the pre-allocation lifetime poll', async () => {
+    const caller = new AbortController();
+    const normal = THREE.BufferGeometry.prototype.computeVertexNormals;
+    vi.spyOn(THREE.BufferGeometry.prototype, 'computeVertexNormals').mockImplementation(function (
+      this: THREE.BufferGeometry,
+    ) {
+      normal.call(this);
+      ports.onLifetimeRead = () => caller.abort();
+    });
+    await expect(open(caller.signal)).rejects.toThrow(/current/);
+    expect(ports.renderers).toHaveLength(0);
+    expect(ports.controller.signal.aborted).toBe(false);
+  });
+});
