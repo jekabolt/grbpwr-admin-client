@@ -210,7 +210,7 @@ describe('workbench preview lifecycle', () => {
     await lifecycle.start(physicalHost, computeCanvas, previewCanvas, publish);
 
     create.mock.calls[0]![1].onDeviceLost?.(
-      { message: 'Test device lost', reason: 'unknown' },
+      { __brand: 'GPUDeviceLostInfo', message: 'Test device lost', reason: 'unknown' },
       {} as XpbdRuntimeIdentity,
     );
     await vi.waitFor(() =>
