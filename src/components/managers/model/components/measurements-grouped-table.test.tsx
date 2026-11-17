@@ -5,8 +5,10 @@ import { Form } from 'ui';
 import {
   firstMeasurementWithErrorV1,
   measurementGroupCountV1,
+  measurementDockGroupLabelV1,
   measurementGroupTabTargetV1,
   MeasurementsGroupedTable,
+  measurementStepV1,
 } from './measurements-fields';
 import { BODY_MEASUREMENT_GROUPS } from './measurements';
 import { modelDefaultData, type ModelFormData } from './schema';
@@ -16,9 +18,11 @@ import { MeasurementUnitProvider } from './units';
 function Harness({
   measurements,
   showAudit = true,
+  phoneTypingName,
 }: {
   measurements: ModelFormData['measurements'];
   showAudit?: boolean;
+  phoneTypingName?: string | null;
 }) {
   const form = useForm<ModelFormData>({
     defaultValues: { ...modelDefaultData, name: 'test', measurements },
@@ -27,7 +31,7 @@ function Harness({
     <Form {...form}>
       <MeasurementUnitProvider>
         <SheetMeasurementFocusProvider>
-          <MeasurementsGroupedTable showAudit={showAudit} />
+          <MeasurementsGroupedTable showAudit={showAudit} phoneTypingName={phoneTypingName} />
         </SheetMeasurementFocusProvider>
       </MeasurementUnitProvider>
     </Form>
@@ -113,5 +117,53 @@ describe('desktop measurement group switch', () => {
     const verticalGroup =
       html.match(/<div[^>]*data-measurement-group="vertical \/ lengths"[^>]*>/)?.[0] ?? '';
     expect(verticalGroup).toContain('hidden');
+  });
+});
+
+describe('phone bar above the keyboard (variant C)', () => {
+  it('shows only while a field is typed: ‹ · group / label · ›', () => {
+    const closed = renderToStaticMarkup(<Harness measurements={{}} phoneTypingName={null} />);
+    expect(closed).not.toContain('model-measurement-phone-dock');
+    const desktop = renderToStaticMarkup(<Harness measurements={{}} />);
+    expect(desktop).not.toContain('model-measurement-phone-dock');
+
+    const open = renderToStaticMarkup(
+      <Harness measurements={{}} phoneTypingName='BODY_MEASUREMENT_NAME_CHEST' />,
+    );
+    const dock = open.match(/<div[^>]*data-testid="model-measurement-phone-dock"[\s\S]*$/)?.[0];
+    expect(dock).toBeDefined();
+    expect(dock).toContain('data-mq-phone-dock=""');
+    expect(dock).toContain(`torso · 1/${names(0).length}`);
+    expect(dock).toContain('>chest<');
+    expect(dock).toMatch(/aria-label="previous field"[^>]*>/);
+    // › is never disabled: the iPhone digit pad has no Return key.
+    expect(dock?.match(/<button[^>]*aria-label="next field"[^>]*>/)?.[0]).not.toMatch(
+      / disabled=""/,
+    );
+    // The first field of the form has nowhere to go back to.
+    expect(dock?.match(/<button[^>]*aria-label="previous field"[^>]*>/)?.[0]).toMatch(
+      / disabled=""/,
+    );
+  });
+
+  it('‹ / › walk every field and cross group boundaries both ways', () => {
+    const torso = names(0);
+    const arms = names(1);
+    expect(measurementStepV1(torso[0]!, 1)).toEqual({ groupIndex: 0, name: torso[1] });
+    expect(measurementStepV1(torso[torso.length - 1]!, 1)).toEqual({
+      groupIndex: 1,
+      name: arms[0],
+    });
+    expect(measurementStepV1(arms[0]!, -1)).toEqual({
+      groupIndex: 0,
+      name: torso[torso.length - 1],
+    });
+    expect(measurementStepV1(torso[0]!, -1)).toBeNull();
+    const lastIndex = BODY_MEASUREMENT_GROUPS.length - 1;
+    const last = names(lastIndex);
+    expect(measurementStepV1(last[last.length - 1]!, 1)).toBeNull();
+    expect(measurementStepV1('not-a-measurement', 1)).toBeNull();
+    expect(measurementDockGroupLabelV1(arms[0]!)).toBe(`arms · 1/${arms.length}`);
+    expect(measurementDockGroupLabelV1('not-a-measurement')).toBe('');
   });
 });

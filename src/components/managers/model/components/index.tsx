@@ -1,7 +1,12 @@
 import { cn } from 'lib/utility';
 import { useDockBottom } from 'hooks/useDockBottom';
 import { useTypingOnPhone } from './use-typing-on-phone';
-import { useModelFormWide } from './use-model-form-wide';
+import {
+  useModelFormPhone,
+  useModelFormWide,
+  usePhoneMeasurementTyping,
+  useVisualViewportPin,
+} from './use-model-form-wide';
 import { type ComponentProps, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { adminService } from 'api/api';
@@ -79,11 +84,7 @@ import {
   modelFormRevisionKeyV1,
   modelSchema,
 } from './schema';
-import {
-  SheetMeasurementFocusProvider,
-  SheetMeasurementMobileStrip,
-  useSheetMeasurementFocus,
-} from './sheet-measurement-focus';
+import { SheetMeasurementFocusProvider, useSheetMeasurementFocus } from './sheet-measurement-focus';
 import { MeasurementUnitProvider } from './units';
 import type { ModelMannequinPoseTransportControllerV1 } from './use-model-mannequin-pose-transport-v1';
 import './sheet-model-form.css';
@@ -228,14 +229,28 @@ function ModelFormRuntime({
     preferredMeasurementEntryModeV1(typeof window === 'undefined' ? undefined : window.innerWidth),
   );
   const wide = useModelFormWide();
-  const paired = wide && measurementEntryMode === 'table';
+  // Phone (variant C) has neither guided nor table: the mannequin over one measurement group.
+  const phone = useModelFormPhone();
+  const paired = !phone && wide && measurementEntryMode === 'table';
+  const phoneTypingName = usePhoneMeasurementTyping(phone);
+  const formRef = useRef<HTMLFormElement>(null);
+  useVisualViewportPin(phoneTypingName !== null, ({ top, height }) => {
+    formRef.current?.style.setProperty('--mq-vv-top', `${top}px`);
+    formRef.current?.style.setProperty('--mq-vv-height', `${height}px`);
+  });
   // `edit pose` is UI state of this page only: never part of the form, never saved with the model.
+  // While the phone keyboard is up the pose cannot change (the checkbox is hidden then).
   const [editPose, setEditPose] = useState(false);
+  const effectiveEditPose = editPose && phoneTypingName === null;
   const [previewHeader, setPreviewHeader] =
     useState<ModelOpenReferencePreviewHeaderStatusV1 | null>(null);
   const previewHeaderControl = useMemo(
-    () => ({ editPose, onEditPoseChange: setEditPose, onChange: setPreviewHeader }),
-    [editPose],
+    () => ({
+      editPose: effectiveEditPose,
+      onEditPoseChange: setEditPose,
+      onChange: setPreviewHeader,
+    }),
+    [effectiveEditPose],
   );
   const saved = useDoneFlash();
   // A refused save stands in the save bar until the next attempt.
@@ -414,12 +429,40 @@ function ModelFormRuntime({
     </Section>
   );
 
+  const poseStatus = previewHeader?.pose ? (
+    <span data-testid='model-mannequin-pose-session-status'>{previewHeader.pose}</span>
+  ) : undefined;
+
+  const phoneMeasurementsSection = (
+    <Section
+      title='measurements'
+      question={poseStatus}
+      action={
+        <MeasurementsHeaderActions
+          showAudit={isEditMode}
+          extraWarnings={previewHeader?.warnings ?? []}
+        />
+      }
+    >
+      <div className='flex flex-col gap-stack'>
+        <div data-mq-phone-stage=''>{renderBodyPreview(false, true)}</div>
+        <fieldset disabled={modelFieldsLocked} className='contents' aria-label='Model measurements'>
+          <MeasurementsGroupedTable showAudit={isEditMode} phoneTypingName={phoneTypingName} />
+        </fieldset>
+      </div>
+    </Section>
+  );
+
   return (
     <Form {...form}>
       <MeasurementUnitProvider>
         <SheetMeasurementFocusProvider>
           <form
+            ref={formRef}
             className='flex flex-col gap-6 px-2 pt-2 pb-24 lg:px-6'
+            data-mq-phone={phone ? '' : undefined}
+            data-mq-phone-typing={phoneTypingName === null ? undefined : ''}
+            data-mq-edit-pose={effectiveEditPose ? '' : undefined}
             onSubmit={form.handleSubmit(handleSubmit)}
           >
             <div className='flex flex-wrap items-center justify-between gap-3 border-b border-borderColor pb-3'>
@@ -430,14 +473,6 @@ function ModelFormRuntime({
                 </Text>
               </div>
             </div>
-
-            <fieldset
-              disabled={modelFieldsLocked}
-              className='contents'
-              aria-label='Model measurement navigation'
-            >
-              <SheetMeasurementMobileStrip />
-            </fieldset>
 
             <SectionStack>
               <fieldset
@@ -479,10 +514,12 @@ function ModelFormRuntime({
                   </div>
                 </Section>
 
-                {paired ? null : measurementsSection}
+                {paired || phone ? null : measurementsSection}
               </fieldset>
 
-              {paired ? (
+              {phone ? (
+                phoneMeasurementsSection
+              ) : paired ? (
                 <div
                   className='grid grid-cols-[minmax(0,5fr)_minmax(0,6fr)] items-start gap-gutter'
                   data-testid='model-form-pair'
@@ -490,13 +527,7 @@ function ModelFormRuntime({
                   <Section
                     title='body preview'
                     className='sticky top-16'
-                    question={
-                      previewHeader?.pose ? (
-                        <span data-testid='model-mannequin-pose-session-status'>
-                          {previewHeader.pose}
-                        </span>
-                      ) : undefined
-                    }
+                    question={poseStatus}
                     action={<HeaderWarnings items={previewHeader?.warnings ?? []} countOnly />}
                   >
                     {renderBodyPreview(false, true)}
@@ -522,8 +553,7 @@ function ModelFormRuntime({
           <div
             ref={saveBarRef}
             className={cn(
-              'fixed inset-x-0 bottom-0 z-40 items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2',
-              measurementEntryMode === 'guided' ? 'hidden md:flex' : 'flex',
+              'fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2',
               typingOnPhone && 'hidden',
             )}
           >

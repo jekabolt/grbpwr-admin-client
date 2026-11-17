@@ -27,3 +27,66 @@
     border: 0;
   }
 }
+
+/* Phone layout (approved variant C). `edit pose` off: a vertical swipe on the mannequin scrolls the
+   page, a sideways one orbits, a pinch zooms; on: the mannequin takes every touch. The stage sets
+   `touch-action: none` inline, hence !important. */
+[data-mq-phone]
+  [data-mq-phone-stage]
+  canvas[data-testid='measurement-watertight-surface-v1-canvas'] {
+  touch-action: pan-y !important;
+}
+
+[data-mq-phone][data-mq-edit-pose]
+  [data-mq-phone-stage]
+  canvas[data-testid='measurement-watertight-surface-v1-canvas'],
+[data-mq-phone-typing]
+  [data-mq-phone-stage]
+  canvas[data-testid='measurement-watertight-surface-v1-canvas'] {
+  touch-action: none !important;
+}
+
+/* Keyboard down: the mannequin over the group switch, 330 px as drawn in the approved mockup. */
+[data-mq-phone] [data-mq-phone-stage] [role='img']:has(> canvas[data-testid='measurement-watertight-surface-v1-canvas']) {
+  height: 330px;
+  min-height: 0;
+  max-height: none;
+  aspect-ratio: auto;
+}
+
+/* Keyboard up: the mannequin fills the visible viewport above the 64 px bar; the bar sits right on
+   the keyboard; the focused field moves into the bar's value slot. --mq-vv-* is the visual
+   viewport, written by useVisualViewportPin. */
+[data-mq-phone-typing]
+  [data-mq-phone-stage]
+  [role='img']:has(> canvas[data-testid='measurement-watertight-surface-v1-canvas']) {
+  position: fixed;
+  top: var(--mq-vv-top, 0px);
+  right: 0;
+  left: 0;
+  z-index: calc(var(--z-nav) + 1);
+  width: auto;
+  height: calc(var(--mq-vv-height, 100dvh) - 64px);
+  min-height: 0;
+  max-height: none;
+  aspect-ratio: auto;
+  border: 0;
+}
+
+[data-mq-phone-typing] [data-testid='model-open-reference-direct-pose-control-v9'] {
+  visibility: hidden;
+}
+
+[data-mq-phone-dock] {
+  top: calc(var(--mq-vv-top, 0px) + var(--mq-vv-height, 100dvh) - 64px);
+  height: 64px;
+}
+
+[data-mq-phone-typing] input[data-model-measurement]:focus {
+  position: fixed;
+  top: calc(var(--mq-vv-top, 0px) + var(--mq-vv-height, 100dvh) - 54px);
+  right: 64px;
+  z-index: calc(var(--z-nav) + 3);
+  width: 110px;
+  height: 44px;
+}
