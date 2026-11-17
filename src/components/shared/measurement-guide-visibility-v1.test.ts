@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import process from 'node:process';
 
+import { BufferAttribute, BufferGeometry } from 'three';
 import { describe, expect, it } from 'vitest';
 
 import type { common_BodyMeasurementName } from 'api/proto-http/admin';
@@ -9,6 +10,7 @@ import { BODY_MEASUREMENT_GROUPS } from 'components/managers/model/components/me
 import { resolveModelGuidedMeasurementPreviewInputV1 } from 'components/managers/model/components/model-guided-measurement-preview-input-v1';
 import {
   MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9,
+  type ModelOpenReferenceDirectPoseV9,
   modelOpenReferenceDirectRuntimePoseV9,
 } from 'components/managers/model/components/model-open-reference-direct-pose-v9';
 import { resolveModelOpenReferencePreviewInputV1 } from 'components/managers/model/components/model-open-reference-preview-input-v1';
@@ -17,9 +19,11 @@ import {
   type MeasurementSurfaceMeasurementGuidePathV1,
   type MeasurementSurfaceMeasurementGuideViewV1,
 } from 'components/shared/measurement-surface-active-measurement-guide-v1';
+import { measurementSurfaceGuideIsApproximateV1 } from 'components/shared/measurement-surface-guide-precision-v1';
 import {
   measurementSurfaceGuideCameraActionV1,
   measurementSurfaceGuidePassesV1,
+  measurementSurfaceGuidePolylineV1,
 } from 'components/shared/measurement-surface-guide-lines-v1';
 import { getBodyMeasurementProtocolFieldV1 } from 'lib/cloth/body/measurement-protocol-v1';
 import { createMeasurementOpenReferenceFullBodyLocalFkRuntimeV4 } from 'lib/cloth/body/makehuman-full-body-local-fk-runtime-v4';
@@ -42,17 +46,27 @@ import {
 import { createMeasurementOpenReferenceLimbSubsetRuntimeV1 } from 'lib/cloth/body/measurement-open-reference-limb-subset-runtime-v1';
 import { createMeasurementOpenReferenceUniformWaistHipRuntimeV1 } from 'lib/cloth/body/measurement-open-reference-uniform-waist-hip-runtime-v1';
 import type { MeasurementSurfaceMeshV1 } from 'lib/cloth/body/measurement-watertight-surface-v1';
+import { measureMeshPlaneSectionPerimetersV1 } from 'lib/cloth/body/mesh-plane-section-perimeter-v1';
+import { createMeshSurfaceTopologyV1 } from 'lib/cloth/body/mesh-surface-topology-v1';
 
 type Vec3 = [number, number, number];
 type BaseName = 'female' | 'male' | 'neutral';
 
 const CSS_SIZE = Object.freeze([1336, 618] as const);
+/** Phone portrait stage at rest (390 x 844 viewport, keyboard down), as measured on the dev page. */
+const PHONE_CSS_SIZE = Object.freeze([318, 328] as const);
+/** Phone while a field is typed: full width above the keyboard (474 px visible minus the bar). */
+const PHONE_TYPING_CSS_SIZE = Object.freeze([390, 410] as const);
 const MAX_DRAWING_BUFFER_PIXELS = 225_000;
-const BUFFER_PIXEL_RATIO = Math.sqrt(MAX_DRAWING_BUFFER_PIXELS / (CSS_SIZE[0] * CSS_SIZE[1]));
-const BUFFER_SIZE = Object.freeze([
-  Math.floor(CSS_SIZE[0] * BUFFER_PIXEL_RATIO),
-  Math.floor(CSS_SIZE[1] * BUFFER_PIXEL_RATIO),
-] as const);
+
+function bufferSize(cssSize: readonly [number, number]): readonly [number, number] {
+  const ratio = Math.sqrt(MAX_DRAWING_BUFFER_PIXELS / (cssSize[0] * cssSize[1]));
+  return Object.freeze([Math.floor(cssSize[0] * ratio), Math.floor(cssSize[1] * ratio)] as const);
+}
+
+const BUFFER_SIZE = bufferSize(CSS_SIZE);
+const PHONE_BUFFER_SIZE = bufferSize(PHONE_CSS_SIZE);
+const PHONE_TYPING_BUFFER_SIZE = bufferSize(PHONE_TYPING_CSS_SIZE);
 const FOV_DEGREES = 32;
 const FIT_PADDING = 1.12;
 const SAMPLE_STEP_M = 0.002;
@@ -62,6 +76,12 @@ const MAX_INSIDE_PERCENT = 1;
 const MAX_DEPTH_MM = 2;
 const MIN_VISIBLE_FRACTION = 0.4;
 const MIN_VISIBLE_BUFFER_PX = 6;
+/**
+ * A depth-tested line closer to the skin than this ties with it in the depth buffer and draws as
+ * nothing or as dots: the stage's depth step at the fitted distance is about 0.2 mm (near is
+ * distance / 1000, 24-bit depth).
+ */
+const DEPTH_TIE_M = 0.0005;
 
 const BASES = Object.freeze([
   Object.freeze({ name: 'female' as const, gender: 'GENDER_ENUM_FEMALE' as const }),
@@ -72,14 +92,26 @@ const BASES = Object.freeze([
 const EXTERNAL_RULER_FIELDS = new Set<common_BodyMeasurementName>([
   'BODY_MEASUREMENT_NAME_HEIGHT',
   'BODY_MEASUREMENT_NAME_WAIST_HEIGHT',
+  'BODY_MEASUREMENT_NAME_HPS_HEIGHT',
 ]);
 
 type FailureRule = 'status' | 'surface' | 'visibility' | 'air';
 
-const KNOWN_FAILURE_RULES = new Map<common_BodyMeasurementName, readonly FailureRule[]>([
-  // Empty since guidevis-v3: across shoulder / sleeve length are x-ray air paths, chest / waist /
-  // hip depth are caliper air paths read from the side, CB neck-to-waist / across back are read
-  // from the back. Each is measured below at its own stage view V(F).
+/**
+ * A field that still fails: the exact rules, the bases and stages it fails on, the numbers measured
+ * when it was listed, and why. Asserted both ways: it must keep failing with exactly these rules,
+ * and every listed base/stage must be observed.
+ */
+interface KnownFailure {
+  readonly rules: readonly FailureRule[];
+  readonly where: readonly string[];
+  readonly measured: string;
+  readonly reason: string;
+}
+
+const KNOWN_FAILURES = new Map<common_BodyMeasurementName, KnownFailure>([
+  // Empty since guide-v4: every form field draws a line on every base, and `unsupported` is no
+  // longer a pass.
 ]);
 
 /** V(F) — the stage turns the camera to this view while the field is focused (mockup C). */
@@ -90,15 +122,19 @@ const FIELD_VIEWS = new Map<common_BodyMeasurementName, MeasurementSurfaceMeasur
   ['BODY_MEASUREMENT_NAME_CHEST_DEPTH', 'side'],
   ['BODY_MEASUREMENT_NAME_WAIST_DEPTH', 'side'],
   ['BODY_MEASUREMENT_NAME_HIP_DEPTH', 'side'],
+  ['BODY_MEASUREMENT_NAME_ARMSCYE_DEPTH', 'back'],
 ]);
 
 /** Fields whose straight chord legitimately runs through the body (report section 8.3). */
 const AIR_FIELDS = new Map<common_BodyMeasurementName, 'x-ray' | 'caliper'>([
   ['BODY_MEASUREMENT_NAME_ACROSS_SHOULDER', 'x-ray'],
   ['BODY_MEASUREMENT_NAME_SLEEVE_LENGTH', 'x-ray'],
+  ['BODY_MEASUREMENT_NAME_INSEAM', 'x-ray'],
   ['BODY_MEASUREMENT_NAME_CHEST_DEPTH', 'caliper'],
   ['BODY_MEASUREMENT_NAME_WAIST_DEPTH', 'caliper'],
   ['BODY_MEASUREMENT_NAME_HIP_DEPTH', 'caliper'],
+  ['BODY_MEASUREMENT_NAME_SHOULDER_DROP', 'caliper'],
+  ['BODY_MEASUREMENT_NAME_ARMSCYE_DEPTH', 'caliper'],
 ]);
 
 const readAsset = (path: string) => readFileSync(resolve(process.cwd(), path));
@@ -455,7 +491,9 @@ function cross(left: Vec3, right: Vec3): Vec3 {
 function stageCamera(
   positions: Float32Array,
   view: MeasurementSurfaceMeasurementGuideViewV1,
+  cssSize: readonly [number, number] = CSS_SIZE,
 ): StageCamera {
+  const buffer = bufferSize(cssSize);
   const minimum: Vec3 = [Infinity, Infinity, Infinity];
   const maximum: Vec3 = [-Infinity, -Infinity, -Infinity];
   for (let offset = 0; offset < positions.length; offset += 3) {
@@ -477,7 +515,7 @@ function stageCamera(
     );
   }
   radius = Math.max(radius, 0.1);
-  const aspect = CSS_SIZE[0] / CSS_SIZE[1];
+  const aspect = cssSize[0] / cssSize[1];
   const verticalFov = (FOV_DEGREES * Math.PI) / 180;
   const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * aspect);
   const distance = (radius / Math.sin(Math.min(verticalFov, horizontalFov) / 2)) * FIT_PADDING;
@@ -500,27 +538,36 @@ function stageCamera(
       const y = dot(offset, up);
       const z = dot(offset, forward);
       return [
-        ((x / (z * tangent * aspect)) * 0.5 + 0.5) * BUFFER_SIZE[0],
-        (0.5 - (y / (z * tangent)) * 0.5) * BUFFER_SIZE[1],
+        ((x / (z * tangent * aspect)) * 0.5 + 0.5) * buffer[0],
+        (0.5 - (y / (z * tangent)) * 0.5) * buffer[1],
       ];
     },
   };
 }
 
+/** The polyline the stage draws for a path (closed paths repeat their first point). */
 function pathPolyline(
   path: MeasurementSurfaceMeasurementGuidePathV1,
   positions: Float32Array,
+  normals?: Float32Array,
 ): Vec3[] {
-  const points: Vec3[] =
-    path.source === 'fixed-points'
-      ? path.pointsM.map((point) => [point[0], point[1], point[2]])
-      : path.vertexIndices.map((vertex) => [
-          positions[vertex * 3],
-          positions[vertex * 3 + 1],
-          positions[vertex * 3 + 2],
-        ]);
-  if (path.closed && points.length > 0) points.push(points[0]);
+  const polyline = measurementSurfaceGuidePolylineV1(path, positions, normals);
+  const points: Vec3[] = [];
+  for (let offset = 0; polyline && offset < polyline.length; offset += 3) {
+    points.push([polyline[offset], polyline[offset + 1], polyline[offset + 2]]);
+  }
   return points;
+}
+
+/** Smooth vertex normals exactly as the stage computes them for the displayed body. */
+function vertexNormals(mesh: MeasurementSurfaceMeshV1): Float32Array {
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(mesh.positions.slice(), 3));
+  geometry.setIndex(new BufferAttribute(mesh.indices.slice(), 1));
+  geometry.computeVertexNormals();
+  const normals = Float32Array.from(geometry.getAttribute('normal').array);
+  geometry.dispose();
+  return normals;
 }
 
 interface GuideMetrics {
@@ -528,6 +575,11 @@ interface GuideMetrics {
   readonly maxDepthMm: number;
   readonly visiblePx: number;
   readonly projectedPx: number;
+  /** Visible px that also stand off the skin by DEPTH_TIE_M: what a depth-tested line draws. */
+  readonly drawnPx: number;
+  /** Signed distance to the skin over all samples (negative inside), mm. */
+  readonly minClearanceMm: number;
+  readonly maxClearanceMm: number;
 }
 
 function measureGuide(
@@ -535,15 +587,19 @@ function measureGuide(
   mesh: MeasurementSurfaceMeshV1,
   index: MeshIndex,
   camera: StageCamera,
+  normals?: Float32Array,
 ): GuideMetrics {
   let totalLengthM = 0;
   let insideLengthM = 0;
   let maxDepthM = 0;
   let visiblePx = 0;
   let projectedPx = 0;
+  let drawnPx = 0;
+  let minClearanceM = Infinity;
+  let maxClearanceM = -Infinity;
 
   for (const path of paths) {
-    const polyline = pathPolyline(path, mesh.positions);
+    const polyline = pathPolyline(path, mesh.positions, normals);
     for (let segment = 0; segment + 1 < polyline.length; segment += 1) {
       const start = polyline[segment];
       const end = polyline[segment + 1];
@@ -558,10 +614,14 @@ function measureGuide(
         totalLengthM += sampleLengthM;
 
         const distance = index.distance(point);
-        if (distance > INSIDE_EPSILON_M && index.inside(point)) {
+        const inside = distance > INSIDE_EPSILON_M && index.inside(point);
+        if (inside) {
           insideLengthM += sampleLengthM;
           maxDepthM = Math.max(maxDepthM, distance);
         }
+        const clearance = inside ? -distance : distance;
+        minClearanceM = Math.min(minClearanceM, clearance);
+        maxClearanceM = Math.max(maxClearanceM, clearance);
 
         const projectedStart = camera.project(interpolate(start, end, t0));
         const projectedEnd = camera.project(interpolate(start, end, t1));
@@ -580,6 +640,7 @@ function measureGuide(
         const ray = toCamera.map((value) => value / cameraDistance) as Vec3;
         if (index.hits(point, ray, OCCLUSION_EPSILON_M, cameraDistance).length === 0) {
           visiblePx += projectedLength;
+          if (clearance >= DEPTH_TIE_M) drawnPx += projectedLength;
         }
       }
     }
@@ -590,6 +651,9 @@ function measureGuide(
     maxDepthMm: maxDepthM * 1000,
     visiblePx,
     projectedPx,
+    drawnPx,
+    minClearanceMm: minClearanceM * 1000,
+    maxClearanceMm: maxClearanceM * 1000,
   };
 }
 
@@ -601,7 +665,15 @@ function interpolate(start: Vec3, end: Vec3, t: number): Vec3 {
   ];
 }
 
-async function buildDefaultBody(base: (typeof BASES)[number]) {
+const bodyCache = new Map<BaseName, ReturnType<typeof buildDefaultBodyUncached>>();
+
+function buildDefaultBody(base: (typeof BASES)[number]) {
+  const cached = bodyCache.get(base.name) ?? buildDefaultBodyUncached(base);
+  bodyCache.set(base.name, cached);
+  return cached;
+}
+
+async function buildDefaultBodyUncached(base: (typeof BASES)[number]) {
   const guided = resolveModelGuidedMeasurementPreviewInputV1({
     gender: base.gender,
     measurements: {},
@@ -657,12 +729,28 @@ async function buildDefaultBody(base: (typeof BASES)[number]) {
     sourceRevision: runtime.sourceRevision,
     pose: 'A',
   });
-  return { betaRuntime, frame, mesh: runtime.displayMesh };
+  const posedRuntime = (pose: ModelOpenReferenceDirectPoseV9) =>
+    createMeasurementOpenReferenceFullBodyLocalFkRuntimeV4({
+      basis,
+      measurements,
+      proxyRuntime: betaRuntime?.fkProxyRuntime ?? waistHipRuntime,
+      input: modelOpenReferenceDirectRuntimePoseV9(pose),
+      sourceRevision: `guide-visibility:${base.name}:posed`,
+      loadResources: async () => poseResources as never,
+    });
+  return {
+    betaRuntime,
+    frame,
+    mesh: runtime.displayMesh,
+    // The bind-pose proxy every FK runtime poses (bent elbows); posed guides were cut on it.
+    bindPoseMesh: (betaRuntime?.fkProxyRuntime ?? waistHipRuntime).displayMesh,
+    posedRuntime,
+  };
 }
 
 interface TableRow {
   readonly field: string;
-  readonly base: BaseName;
+  readonly base: string;
   readonly inside: string;
   readonly depth: string;
   readonly visible: string;
@@ -688,8 +776,70 @@ function printTable(rows: readonly TableRow[]): void {
 }
 
 describe('measurement guide visibility v1', () => {
-  it('keeps every canonical field visible or honestly unsupported on every real reference base', async () => {
+  // First in the file on purpose: the topology cache is keyed by the triangle indices, so once any
+  // exactly symmetric body has been seen, an asymmetric one is served from the cache and passes.
+  // The browser female and male bodies were the first ones seen and drew none of these lines.
+  it('draws the landmark lines on a body whose midline vertices drifted off x = 0', async () => {
+    const body = await buildDefaultBody(BASES[1]);
+    const positions = Float32Array.from(body.mesh.positions);
+    let drifted = 0;
+    for (let offset = 0; offset < positions.length; offset += 3) {
+      if (Math.abs(positions[offset]) >= 0.00005) continue;
+      // The drift seen in the browser: 1e-20 m on the female base, up to 0.02 mm on the male.
+      positions[offset] = [1e-20, 0.00002, -0.00002][drifted % 3];
+      drifted += 1;
+    }
+    expect(drifted).toBeGreaterThan(100);
+    const mesh = { ...body.mesh, positions };
+    const raw = createMeshSurfaceTopologyV1({
+      positionsM: positions,
+      triangleIndices: mesh.indices,
+    });
+    expect(raw.ok ? 'built' : raw.code).toBe('symmetry-mismatch');
+    const landmarkFields: readonly common_BodyMeasurementName[] = [
+      'BODY_MEASUREMENT_NAME_NECK_BASE',
+      'BODY_MEASUREMENT_NAME_INSEAM',
+      'BODY_MEASUREMENT_NAME_HPS_HEIGHT',
+      'BODY_MEASUREMENT_NAME_HPS_TO_WAIST_FRONT',
+      'BODY_MEASUREMENT_NAME_SHOULDER_LENGTH',
+      'BODY_MEASUREMENT_NAME_SHOULDER_DROP',
+      'BODY_MEASUREMENT_NAME_ARMSCYE_DEPTH',
+      'BODY_MEASUREMENT_NAME_ARMSCYE_CIRCUMFERENCE',
+      'BODY_MEASUREMENT_NAME_BUST_APEX_TO_APEX',
+      'BODY_MEASUREMENT_NAME_HPS_TO_BUST_APEX',
+      'BODY_MEASUREMENT_NAME_CHEST',
+    ];
+    for (const measurementName of landmarkFields) {
+      const guide = buildMeasurementSurfaceActiveMeasurementGuideV1({
+        measurementName,
+        frame: body.frame,
+        mesh,
+        neutralPose: true,
+        limbSectionModes: body.betaRuntime?.limbSectionModes,
+        torsoSectionStations: body.betaRuntime?.torsoSectionStations,
+        neckSectionStation: body.betaRuntime?.neckSectionStation,
+      });
+      expect(['visible', 'limited'], measurementName).toContain(guide.status);
+      expect(guide.paths.length, measurementName).toBeGreaterThan(0);
+    }
+    // The chest ring is the anchored one, at apex level, not the old station under the armpit.
+    const chest = buildMeasurementSurfaceActiveMeasurementGuideV1({
+      measurementName: 'BODY_MEASUREMENT_NAME_CHEST',
+      frame: body.frame,
+      mesh,
+      neutralPose: true,
+      limbSectionModes: body.betaRuntime?.limbSectionModes,
+      torsoSectionStations: body.betaRuntime?.torsoSectionStations,
+      neckSectionStation: body.betaRuntime?.neckSectionStation,
+    });
+    const chestY = chest.paths.flatMap((path) => pathPolyline(path, positions))[0][1];
+    expect(Math.abs(chestY - positions[8454 * 3 + 1])).toBeLessThan(0.005);
+  }, 60_000);
+
+  it('draws a visible line for every form field on every real reference base, desktop and phone', async () => {
     expect(BUFFER_SIZE).toEqual([697, 322]);
+    expect(PHONE_BUFFER_SIZE).toEqual([467, 481]);
+    expect(PHONE_TYPING_BUFFER_SIZE).toEqual([462, 486]);
     const measurementNames = BODY_MEASUREMENT_GROUPS.flatMap((group) =>
       group.measurements.map(({ name }) => name),
     );
@@ -700,16 +850,29 @@ describe('measurement guide visibility v1', () => {
     const unexpectedFailures: string[] = [];
     const knownFailuresNowPassing: string[] = [];
     const knownFailureRuleMismatches: string[] = [];
-    const observedKnownFailures = new Set<common_BodyMeasurementName>();
+    const observedKnownFailures = new Set<string>();
 
     for (const base of BASES) {
       const body = await buildDefaultBody(base);
       const meshIndex = new MeshIndex(body.mesh.positions, body.mesh.indices);
-      const cameras = {
-        front: stageCamera(body.mesh.positions, 'front'),
-        back: stageCamera(body.mesh.positions, 'back'),
-        side: stageCamera(body.mesh.positions, 'side'),
-      } as const;
+      const stages = [
+        { name: 'desktop', cssSize: CSS_SIZE },
+        { name: 'phone', cssSize: PHONE_CSS_SIZE },
+        { name: 'phone-typing', cssSize: PHONE_TYPING_CSS_SIZE },
+      ] as const;
+      const cameras = Object.fromEntries(
+        stages.map((stage) => [
+          stage.name,
+          {
+            front: stageCamera(body.mesh.positions, 'front', stage.cssSize),
+            back: stageCamera(body.mesh.positions, 'back', stage.cssSize),
+            side: stageCamera(body.mesh.positions, 'side', stage.cssSize),
+          },
+        ]),
+      ) as Record<
+        (typeof stages)[number]['name'],
+        Record<MeasurementSurfaceMeasurementGuideViewV1, StageCamera>
+      >;
 
       for (const measurementName of measurementNames) {
         const guide = buildMeasurementSurfaceActiveMeasurementGuideV1({
@@ -723,88 +886,102 @@ describe('measurement guide visibility v1', () => {
         });
         const field = measurementName.replace('BODY_MEASUREMENT_NAME_', '');
         const drawnStatus = guide.status === 'visible' || guide.status === 'limited';
-        const statusPass = guide.paths.length === 0 ? guide.status === 'unsupported' : drawnStatus;
+        // guide-v4: every field must draw; `unsupported` is a failure, not a pass.
+        const statusPass = guide.paths.length > 0 && drawnStatus;
         // Section 8.3: V(F) is the view the stage turns to on focus; front for every other field.
         const expectedView = drawnStatus ? FIELD_VIEWS.get(measurementName) : undefined;
         if (guide.view !== expectedView) {
           viewMismatches.push(`${field}/${base.name}: ${guide.view ?? 'none'} != ${expectedView}`);
         }
         const view = guide.view ?? 'front';
-        const camera = cameras[view];
         const surfacePaths = guide.paths.filter((path) => !path.air);
         const airPaths = guide.paths.filter((path) => path.air);
-        const metrics =
-          surfacePaths.length > 0 ? measureGuide(surfacePaths, body.mesh, meshIndex, camera) : null;
-        const airMetrics =
-          airPaths.length > 0 ? measureGuide(airPaths, body.mesh, meshIndex, camera) : null;
-        const isSurfacePath = !EXTERNAL_RULER_FIELDS.has(measurementName);
-        const surfacePass =
-          metrics === null ||
-          !isSurfacePath ||
-          (metrics.insidePercent <= MAX_INSIDE_PERCENT && metrics.maxDepthMm <= MAX_DEPTH_MM);
-        const visibilityPass =
-          metrics === null ||
-          (metrics.projectedPx > 0 &&
-            metrics.visiblePx / metrics.projectedPx >= MIN_VISIBLE_FRACTION &&
-            metrics.visiblePx >= MIN_VISIBLE_BUFFER_PX);
-        // An air path is drawn through the body (no depth test), so its whole projection reads.
         const geometryKind = getBodyMeasurementProtocolFieldV1(measurementName)?.geometryKind ?? '';
-        const airPass =
-          airPaths.every(
-            (path) =>
-              path.air === AIR_FIELDS.get(measurementName) &&
-              measurementSurfaceGuidePassesV1(path).some((pass) => !pass.depthTest),
-          ) &&
-          (airMetrics === null ||
-            (airMetrics.projectedPx >= MIN_VISIBLE_BUFFER_PX &&
-              (/^(straight|vertical)-/.test(geometryKind) || guide.status === 'limited'))) &&
-          (!AIR_FIELDS.has(measurementName) || !drawnStatus || airPaths.length > 0);
-        const passed = statusPass && surfacePass && visibilityPass && airPass;
-        const failedRules: FailureRule[] = [];
-        if (!statusPass) failedRules.push('status');
-        if (!surfacePass) failedRules.push('surface');
-        if (!visibilityPass) failedRules.push('visibility');
-        if (!airPass) failedRules.push('air');
-        const expectedKnownFailureRules = KNOWN_FAILURE_RULES.get(measurementName);
-        const isKnownFailure = expectedKnownFailureRules !== undefined;
+        const isSurfacePath = !EXTERNAL_RULER_FIELDS.has(measurementName);
 
-        if (expectedKnownFailureRules) {
-          observedKnownFailures.add(measurementName);
-          if (passed) knownFailuresNowPassing.push(`${field}/${base.name}`);
-          else if (failedRules.join(',') !== expectedKnownFailureRules.join(',')) {
-            knownFailureRuleMismatches.push(
-              `${field}/${base.name}: expected ${expectedKnownFailureRules.join('+')}, got ${failedRules.join('+')}`,
-            );
+        for (const stage of stages) {
+          const camera = cameras[stage.name][view];
+          const metrics =
+            surfacePaths.length > 0
+              ? measureGuide(surfacePaths, body.mesh, meshIndex, camera)
+              : null;
+          const airMetrics =
+            airPaths.length > 0 ? measureGuide(airPaths, body.mesh, meshIndex, camera) : null;
+          const surfacePass =
+            metrics === null ||
+            !isSurfacePath ||
+            (metrics.insidePercent <= MAX_INSIDE_PERCENT && metrics.maxDepthMm <= MAX_DEPTH_MM);
+          const visibilityPass =
+            metrics === null ||
+            (metrics.projectedPx > 0 &&
+              metrics.visiblePx / metrics.projectedPx >= MIN_VISIBLE_FRACTION &&
+              metrics.visiblePx >= MIN_VISIBLE_BUFFER_PX);
+          // An air path is drawn through the body (no depth test), so its whole projection reads.
+          const airPass =
+            airPaths.every(
+              (path) =>
+                path.air === AIR_FIELDS.get(measurementName) &&
+                measurementSurfaceGuidePassesV1(path).some((pass) => !pass.depthTest),
+            ) &&
+            (airMetrics === null ||
+              (airMetrics.projectedPx >= MIN_VISIBLE_BUFFER_PX &&
+                (/^(straight|vertical)-/.test(geometryKind) || guide.status === 'limited'))) &&
+            (!AIR_FIELDS.has(measurementName) || !drawnStatus || airPaths.length > 0);
+          const passed = statusPass && surfacePass && visibilityPass && airPass;
+          const failedRules: FailureRule[] = [];
+          if (!statusPass) failedRules.push('status');
+          if (!surfacePass) failedRules.push('surface');
+          if (!visibilityPass) failedRules.push('visibility');
+          if (!airPass) failedRules.push('air');
+          const where = `${base.name}/${stage.name}`;
+          const known = KNOWN_FAILURES.get(measurementName);
+          const isKnownFailure = known?.where.includes(where) ?? false;
+
+          if (known && isKnownFailure) {
+            observedKnownFailures.add(`${field}@${where}`);
+            if (passed) knownFailuresNowPassing.push(`${field}/${where}`);
+            else if (failedRules.join(',') !== known.rules.join(',')) {
+              knownFailureRuleMismatches.push(
+                `${field}/${where}: expected ${known.rules.join('+')}, got ${failedRules.join('+')}`,
+              );
+            }
+          } else if (!passed) {
+            unexpectedFailures.push(`${field}/${where}: ${failedRules.join(', ')}`);
           }
-        } else if (!passed) {
-          unexpectedFailures.push(`${field}/${base.name}: ${failedRules.join(', ')}`);
-        }
 
-        rows.push({
-          field: `${field}${view === 'front' ? '' : ` @${view}`}${airPaths.length ? ' air' : ''}`,
-          base: base.name,
-          inside: metrics ? fixed(metrics.insidePercent) : '—',
-          depth: metrics ? fixed(metrics.maxDepthMm) : '—',
-          visible: metrics
-            ? `${Math.round(metrics.visiblePx)} / ${Math.round(metrics.projectedPx)}`
-            : airMetrics
-              ? `air ${Math.round(airMetrics.projectedPx)}`
-              : '—',
-          verdict:
-            guide.paths.length === 0 && guide.status === 'unsupported'
-              ? 'PASS unsupported'
-              : passed
-                ? 'PASS'
-                : `${isKnownFailure ? 'KNOWN FAIL' : 'FAIL'} ${failedRules.join('+')}`,
-        });
+          rows.push({
+            field: `${field}${view === 'front' ? '' : ` @${view}`}${airPaths.length ? ' air' : ''}`,
+            base: stage.name === 'desktop' ? base.name : `${base.name} ${stage.name}`,
+            inside: metrics ? fixed(metrics.insidePercent) : '—',
+            depth: metrics ? fixed(metrics.maxDepthMm) : '—',
+            visible:
+              [
+                metrics
+                  ? `${Math.round(metrics.visiblePx)} / ${Math.round(metrics.projectedPx)}`
+                  : '',
+                airMetrics ? `air ${Math.round(airMetrics.projectedPx)}` : '',
+              ]
+                .filter(Boolean)
+                .join(' + ') || '—',
+            verdict: passed
+              ? `PASS ${guide.status}`
+              : `${isKnownFailure ? 'KNOWN FAIL' : 'FAIL'} ${failedRules.join('+')} (${guide.status})`,
+          });
+        }
       }
     }
 
     printTable(rows);
 
-    const unobservedKnownFailures = [...KNOWN_FAILURE_RULES.keys()]
-      .filter((field) => !observedKnownFailures.has(field))
-      .map((field) => field.replace('BODY_MEASUREMENT_NAME_', ''));
+    const unobservedKnownFailures = [...KNOWN_FAILURES.entries()].flatMap(([name, known]) =>
+      known.where
+        .map((where) => `${name.replace('BODY_MEASUREMENT_NAME_', '')}@${where}`)
+        .filter((key) => !observedKnownFailures.has(key)),
+    );
+    for (const known of KNOWN_FAILURES.values()) {
+      expect(known.measured.length).toBeGreaterThan(0);
+      expect(known.reason.length).toBeGreaterThan(0);
+    }
     expect({
       viewMismatches,
       unexpectedFailures,
@@ -818,7 +995,263 @@ describe('measurement guide visibility v1', () => {
       knownFailureRuleMismatches: [],
       unobservedKnownFailures: [],
     });
-  }, 90_000);
+  }, 180_000);
+
+  it('keeps the chest ring on the torso at bust level, under bust and across front off the arms', async () => {
+    const summaries: string[] = [];
+    for (const base of BASES) {
+      const body = await buildDefaultBody(base);
+      const positions = body.mesh.positions;
+      const vertex = (index: number): Vec3 => [
+        positions[index * 3],
+        positions[index * 3 + 1],
+        positions[index * 3 + 2],
+      ];
+      const underarm = interpolate(vertex(8336), vertex(8340), 0.4);
+      const apex = vertex(8454);
+      const guideFor = (measurementName: common_BodyMeasurementName) =>
+        buildMeasurementSurfaceActiveMeasurementGuideV1({
+          measurementName,
+          frame: body.frame,
+          mesh: body.mesh,
+          neutralPose: true,
+          limbSectionModes: body.betaRuntime?.limbSectionModes,
+          torsoSectionStations: body.betaRuntime?.torsoSectionStations,
+          neckSectionStation: body.betaRuntime?.neckSectionStation,
+        });
+      const pointsOf = (measurementName: common_BodyMeasurementName) => {
+        const guide = guideFor(measurementName);
+        expect(guide.status, `${measurementName}/${base.name}`).not.toBe('unsupported');
+        expect(guide.paths.length, `${measurementName}/${base.name}`).toBeGreaterThan(0);
+        return guide.paths.flatMap((path) => pathPolyline(path, positions));
+      };
+
+      const chest = pointsOf('BODY_MEASUREMENT_NAME_CHEST');
+      const chestY = chest[0][1];
+      const chestXs = chest.map((point) => point[0]);
+      const centroidX = chestXs.reduce((sum, x) => sum + x, 0) / chestXs.length;
+      // Bust level, clearly below the armpit, so a horizontal plane cuts the arms as separate loops.
+      expect(Math.abs(chestY - apex[1]), `chest at apex/${base.name}`).toBeLessThan(0.005);
+      expect(chestY, `chest below underarm/${base.name}`).toBeLessThan(underarm[1] - 0.025);
+      const section = measureMeshPlaneSectionPerimetersV1({
+        positionsM: positions,
+        triangleIndices: body.mesh.indices,
+        planeOriginM: [0, chestY, 0],
+        planeNormal: [0, 1, 0],
+        selection: { kind: 'nearest-seed', seedM: [0, chestY, 0] },
+        policy: { weldToleranceM: 0.00002 },
+      });
+      if (!section.ok || !section.selectedLoop) throw new Error(`no chest section/${base.name}`);
+      const torso = section.selectedLoop;
+      const torsoHalfWidth = Math.max(...torso.pointsM.map((point) => Math.abs(point[0])));
+      // The torso loop is centred and narrower than the underarm; the arm loops are separate and
+      // centred outside it.
+      expect(Math.abs(torso.centroidM[0]), `torso centred/${base.name}`).toBeLessThan(0.01);
+      expect(torsoHalfWidth, `torso inside underarm/${base.name}`).toBeLessThan(
+        Math.abs(underarm[0]),
+      );
+      const armLoops = section.loops.filter((loop) => loop !== torso);
+      expect(armLoops.length, `arm loops/${base.name}`).toBeGreaterThanOrEqual(2);
+      for (const arm of armLoops) {
+        expect(Math.abs(arm.centroidM[0]), `arm loop outside torso/${base.name}`).toBeGreaterThan(
+          torsoHalfWidth,
+        );
+      }
+      // The drawn ring is that torso loop: centred, as wide as the torso, nowhere near an arm loop.
+      expect(Math.abs(centroidX), `ring centred/${base.name}`).toBeLessThan(0.01);
+      const ringHalfWidth = Math.max(...chestXs.map(Math.abs));
+      expect(Math.abs(ringHalfWidth - torsoHalfWidth), `ring width/${base.name}`).toBeLessThan(
+        0.005,
+      );
+
+      const underBust = pointsOf('BODY_MEASUREMENT_NAME_UNDER_BUST');
+      const underBustY = underBust[0][1];
+      expect(underBustY, `under bust below apex/${base.name}`).toBeLessThan(apex[1] - 0.03);
+      expect(underBustY, `under bust above waist band/${base.name}`).toBeGreaterThan(apex[1] - 0.1);
+      expect(Math.max(...underBust.map((point) => Math.abs(point[0])))).toBeLessThan(
+        Math.abs(underarm[0]),
+      );
+
+      for (const name of [
+        'BODY_MEASUREMENT_NAME_ACROSS_FRONT',
+        'BODY_MEASUREMENT_NAME_ACROSS_BACK',
+      ] as const) {
+        const across = pointsOf(name);
+        expect(
+          Math.max(...across.map((point) => Math.abs(point[0]))),
+          `${name}/${base.name}`,
+        ).toBeLessThan(Math.abs(underarm[0]));
+      }
+      summaries.push(
+        `${base.name}: chest y ${chestY.toFixed(3)} (underarm ${underarm[1].toFixed(3)}), torso half ${torsoHalfWidth.toFixed(3)}, arms ${armLoops.length}, under bust y ${underBustY.toFixed(3)}`,
+      );
+    }
+    console.log(summaries.join('\n'));
+  }, 120_000);
+
+  // The posed wrist drew 0 px for two reasons, both asserted both ways: the posed guide was cut on
+  // the bind-pose proxy, whose bent elbow the frame's wrist station misses (a sliver or no ring),
+  // and its vertices sit exactly on the skin, so the depth-tested line tied with the body. The
+  // preview now cuts it on the A-rest body and the stage lifts it along the displayed normals.
+  it('draws the posed wrist ring on every base, desktop and phone', async () => {
+    const arm = (raise: number, elbow: number, wrist: number) =>
+      Object.freeze({
+        shoulderRaiseDegrees: raise,
+        shoulderForwardDegrees: 0,
+        elbowBendDegrees: elbow,
+        wristBendDegrees: wrist,
+      });
+    const poses = [
+      { name: 'raised-bent', arm: arm(30, 45, 0) },
+      { name: 'wrist-bent', arm: arm(0, 0, 10) },
+    ] as const;
+    const stages = [
+      { name: 'desktop', cssSize: CSS_SIZE },
+      { name: 'phone', cssSize: PHONE_CSS_SIZE },
+    ] as const;
+    const perimeterMm = (
+      paths: readonly MeasurementSurfaceMeasurementGuidePathV1[],
+      positions: Float32Array,
+    ) =>
+      paths.reduce((total, path) => {
+        const points = pathPolyline(path, positions);
+        let length = 0;
+        for (let point = 0; point + 1 < points.length; point += 1) {
+          length += Math.hypot(...subtract(points[point + 1], points[point]));
+        }
+        return total + length * 1000;
+      }, 0);
+    const rows: string[] = [];
+    const checks: (() => void)[] = [];
+    for (const base of BASES) {
+      const body = await buildDefaultBody(base);
+      const wristGuide = (mesh: MeasurementSurfaceMeshV1) =>
+        buildMeasurementSurfaceActiveMeasurementGuideV1({
+          measurementName: 'BODY_MEASUREMENT_NAME_WRIST',
+          frame: body.frame,
+          mesh,
+          neutralPose: false,
+          limbSectionModes: body.betaRuntime?.limbSectionModes,
+          torsoSectionStations: body.betaRuntime?.torsoSectionStations,
+          neckSectionStation: body.betaRuntime?.neckSectionStation,
+        });
+      const bindGuide = wristGuide(body.bindPoseMesh);
+      const bindPerimeterMm =
+        bindGuide.status === 'visible'
+          ? perimeterMm(bindGuide.paths, body.bindPoseMesh.positions)
+          : 0;
+      const guide = wristGuide(body.mesh);
+      const restPerimeterMm = perimeterMm(guide.paths, body.mesh.positions);
+      checks.push(() => {
+        // Before: on the bind-pose proxy the frame's station cuts a sliver or nothing.
+        expect(bindPerimeterMm, `${base.name} bind pose`).toBeLessThan(40);
+        // Now: on the A-rest body, a whole wrist ring bound to mesh vertices.
+        expect(guide.status, base.name).toBe('visible');
+        expect(guide.paths.length, base.name).toBeGreaterThan(0);
+        expect(
+          guide.paths.every((path) => path.source === 'mesh-vertices'),
+          base.name,
+        ).toBe(true);
+        expect(restPerimeterMm, base.name).toBeGreaterThan(120);
+      });
+      for (const pose of poses) {
+        const posed = (
+          await body.posedRuntime({
+            ...MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9,
+            armMode: 'linked',
+            leftArm: pose.arm,
+            rightArm: pose.arm,
+          })
+        ).displayMesh;
+        const where = `${base.name}/${pose.name}`;
+        expect(posed.positions.length, where).toBe(body.mesh.positions.length);
+        let wristMovedM = 0;
+        for (const path of guide.paths) {
+          if (path.source !== 'mesh-vertices') continue;
+          for (const vertex of path.vertexIndices) {
+            const offset = vertex * 3;
+            wristMovedM = Math.max(
+              wristMovedM,
+              Math.hypot(
+                posed.positions[offset] - body.mesh.positions[offset],
+                posed.positions[offset + 1] - body.mesh.positions[offset + 1],
+                posed.positions[offset + 2] - body.mesh.positions[offset + 2],
+              ),
+            );
+          }
+        }
+        const posedPerimeterMm = perimeterMm(guide.paths, posed.positions);
+        const normals = vertexNormals(posed);
+        const index = new MeshIndex(posed.positions, posed.indices);
+        for (const stage of stages) {
+          const camera = stageCamera(posed.positions, guide.view ?? 'front', stage.cssSize);
+          const lifted = measureGuide(guide.paths, posed, index, camera, normals);
+          const bare = measureGuide(guide.paths, posed, index, camera);
+          const at = `${where}/${stage.name}`;
+          rows.push(
+            `| ${at} | ${fixed(bindPerimeterMm, 0)} | ${fixed(posedPerimeterMm, 0)} | ${fixed(wristMovedM * 1000, 0)} | ${fixed(bare.drawnPx)} / ${fixed(bare.projectedPx)} | ${fixed(bare.maxClearanceMm, 2)} | ${fixed(lifted.drawnPx)} / ${fixed(lifted.projectedPx)} | ${fixed(lifted.minClearanceMm, 2)} |`,
+          );
+          checks.push(() => {
+            expect(posedPerimeterMm, at).toBeGreaterThan(120);
+            // Bare: on or under the skin, so the depth test draws less than the threshold.
+            expect(bare.maxClearanceMm, at).toBeLessThan(1);
+            expect(bare.drawnPx, at).toBeLessThan(MIN_VISIBLE_BUFFER_PX);
+            // Lifted: clear of the skin everywhere and drawn past the visibility threshold.
+            expect(lifted.insidePercent, at).toBe(0);
+            expect(lifted.minClearanceMm, at).toBeGreaterThanOrEqual(DEPTH_TIE_M * 1000);
+            expect(lifted.drawnPx, at).toBeGreaterThanOrEqual(MIN_VISIBLE_BUFFER_PX);
+            expect(lifted.drawnPx / lifted.projectedPx, at).toBeGreaterThanOrEqual(
+              MIN_VISIBLE_FRACTION,
+            );
+          });
+        }
+        // Raised and bent, the forearm really moved; a wrist bend alone still binds to the mesh.
+        if (pose.name === 'raised-bent') {
+          checks.push(() => expect(wristMovedM, where).toBeGreaterThan(0.05));
+        }
+      }
+    }
+    console.log(
+      [
+        '',
+        '| posed wrist | bind-pose ring mm | posed ring mm | moved mm | bare drawn / projected px | bare max clearance mm | lifted drawn / projected px | lifted min clearance mm |',
+        '|---|---:|---:|---:|---:|---:|---:|---:|',
+        ...rows,
+      ].join('\n'),
+    );
+    for (const check of checks) check();
+  }, 240_000);
+
+  it('lifts mesh-bound guide vertices 2 mm along the displayed normals, never fixed points', () => {
+    const positions = Float32Array.from([0, 1, 0.1, 0.05, 1, 0.1, 0.05, 1.05, 0.1]);
+    const normals = Float32Array.from([0, 0, 2, 0, 0, 1, 0, 0, 0]);
+    const bound: MeasurementSurfaceMeasurementGuidePathV1 = {
+      id: 'bound',
+      closed: false,
+      source: 'mesh-vertices',
+      vertexIndices: [0, 1, 2],
+    };
+    const lifted = measurementSurfaceGuidePolylineV1(bound, positions, normals)!;
+    expect(lifted[2]).toBeCloseTo(0.102, 6);
+    expect(lifted[5]).toBeCloseTo(0.102, 6);
+    // A degenerate normal leaves the vertex where it is.
+    expect(lifted[8]).toBeCloseTo(0.1, 6);
+    expect(Array.from(measurementSurfaceGuidePolylineV1(bound, positions)!)).toEqual(
+      Array.from(positions),
+    );
+    const fixedPath: MeasurementSurfaceMeasurementGuidePathV1 = {
+      id: 'fixed',
+      closed: false,
+      source: 'fixed-points',
+      pointsM: [
+        [0, 1, 0.1],
+        [0.05, 1, 0.1],
+      ],
+    };
+    expect(Array.from(measurementSurfaceGuidePolylineV1(fixedPath, positions, normals)!)).toEqual(
+      Array.from(Float32Array.from([0, 1, 0.1, 0.05, 1, 0.1])),
+    );
+  });
 
   it('draws air paths through the body: dashed x-ray with end dots, caliper with ticks', () => {
     expect(measurementSurfaceGuidePassesV1({ closed: false })).toEqual([
@@ -851,5 +1284,72 @@ describe('measurement guide visibility v1', () => {
     expect(plan('back', null, true)).toBe('none');
     expect(plan('back', { view: 'back', ownerCameraSaved: true }, true)).toBe('forget');
     expect(plan('back', null, false, false)).toBe('none');
+  });
+
+  it('faces the front again for a focused field without a back or side view', () => {
+    const plan = (
+      targetView: 'front' | 'side' | null,
+      turn: { view: 'back' | 'side'; ownerCameraSaved: boolean } | null,
+      cameraFacing: 'front' | 'back' | 'side' | 'free',
+      editPose = false,
+    ) =>
+      measurementSurfaceGuideCameraActionV1({
+        targetView,
+        turn,
+        editPose,
+        interactive: true,
+        cameraFacing,
+      });
+    // Chest depth turned the camera to the side; the next field goes back to the owner's camera.
+    expect(plan('front', { view: 'side', ownerCameraSaved: true }, 'side')).toBe('restore');
+    // Live beta 17.11: a tap on the stage let the turn go, the camera still looks from the side ...
+    expect(plan('front', { view: 'side', ownerCameraSaved: false }, 'side')).toBe('front');
+    // ... or a blur in between already dropped the turn: the field faces the front all the same.
+    expect(plan('front', null, 'side')).toBe('front');
+    expect(plan('front', null, 'back')).toBe('front');
+    // Already front, or an orbit of the owner's own: the camera stays.
+    expect(plan('front', null, 'front')).toBe('none');
+    expect(plan('front', null, 'free')).toBe('none');
+    expect(plan('front', { view: 'side', ownerCameraSaved: false }, 'free')).toBe('forget');
+    // Blur alone keeps the camera the owner took; edit pose never moves it.
+    expect(plan(null, { view: 'side', ownerCameraSaved: false }, 'side')).toBe('forget');
+    expect(plan(null, null, 'side')).toBe('none');
+    expect(plan('front', null, 'side', true)).toBe('none');
+    expect(plan('front', { view: 'side', ownerCameraSaved: true }, 'side', true)).toBe('forget');
+    // A back/side field still turns, wherever the camera is.
+    expect(plan('side', null, 'front')).toBe('turn');
+  });
+  it('marks a form row approx. exactly where the builder draws a limited line, on every base', async () => {
+    const measurementNames = BODY_MEASUREMENT_GROUPS.flatMap((group) =>
+      group.measurements.map(({ name }) => name as common_BodyMeasurementName),
+    );
+    const mismatches: string[] = [];
+    const limitedByBase: Record<string, string[]> = {};
+    for (const base of BASES) {
+      const body = await buildDefaultBody(base);
+      limitedByBase[base.name] = [];
+      for (const measurementName of measurementNames) {
+        const { status } = buildMeasurementSurfaceActiveMeasurementGuideV1({
+          measurementName,
+          frame: body.frame,
+          mesh: body.mesh,
+          neutralPose: true,
+          limbSectionModes: body.betaRuntime?.limbSectionModes,
+          torsoSectionStations: body.betaRuntime?.torsoSectionStations,
+          neckSectionStation: body.betaRuntime?.neckSectionStation,
+        });
+        const field = measurementName.replace('BODY_MEASUREMENT_NAME_', '');
+        expect(['visible', 'limited'], `${field}/${base.name}`).toContain(status);
+        if (status === 'limited') limitedByBase[base.name].push(field);
+        if ((status === 'limited') !== measurementSurfaceGuideIsApproximateV1(measurementName)) {
+          mismatches.push(`${field}/${base.name}: builder ${status}`);
+        }
+      }
+    }
+    console.info(`approx. rows: ${JSON.stringify(limitedByBase)}`);
+    expect(mismatches).toEqual([]);
+    // Both kinds of row exist: the word is not on every field.
+    expect(measurementSurfaceGuideIsApproximateV1('BODY_MEASUREMENT_NAME_CHEST')).toBe(false);
+    expect(measurementSurfaceGuideIsApproximateV1('BODY_MEASUREMENT_NAME_INSEAM')).toBe(true);
   });
 });

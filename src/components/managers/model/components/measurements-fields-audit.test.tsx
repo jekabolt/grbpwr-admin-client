@@ -58,9 +58,16 @@ describe('measurements field audit guidance', () => {
     expect(html).toContain('aria-invalid="true"');
     expect(html).toContain('role="button"');
     expect(html).toMatch(/aria-label="! [1-9][0-9]* errors?"/);
-    expect(html).toContain(
-      'aria-describedby="model-measurement-BODY_MEASUREMENT_NAME_HEIGHT-audit"',
-    );
+    expect(html).toContain('aria-describedby="mq-height-audit"');
+    // iOS contact AutoFill keys on ids that read like personal details; the enum's NAME never
+    // reaches a DOM id, and the keyboard stays a plain decimal pad without suggestions.
+    expect(html).toContain('id="mq-height"');
+    expect(html).not.toMatch(/id="[^"]*NAME[^"]*"/i);
+    expect(html).toContain('inputMode="decimal"');
+    expect(html).not.toContain('inputMode="numeric"');
+    expect(html).toContain('autoComplete="off"');
+    expect(html).toContain('autoCorrect="off"');
+    expect(html).toContain('spellCheck="false"');
     expect(html).toContain('outside supported adult range');
   });
 

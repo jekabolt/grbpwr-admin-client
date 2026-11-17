@@ -22,6 +22,7 @@ const unitFiles = Object.freeze([
   'src/components/managers/model/components/model-measurement-field-audit.test.ts',
   'src/components/managers/model/components/model-open-reference-direct-joint-ring-v9.test.ts',
   'src/components/managers/model/components/model-open-reference-direct-pose-control-v9.test.ts',
+  'src/components/managers/model/components/model-open-reference-direct-pose-control-v9-building.test.tsx',
   'src/components/managers/model/components/model-open-reference-direct-pose-edit-toggle.test.tsx',
   'src/components/managers/model/components/model-open-reference-direct-pose-v9.test.ts',
   'src/components/managers/model/components/model-open-reference-measurement-application-v1.test.ts',
@@ -85,6 +86,8 @@ const browserSuites = Object.freeze([
       'hostile wrist drag keeps the last-valid source and canvas',
       'desktop pair keeps the mannequin and the focused field on screen',
       'joints do not drag while edit pose is off',
+      'undo and reset stay usable while a committed wrist drag rebuilds',
+      'a measurement edit on a posed mannequin moves the canvas source revision',
     ].join('|'),
   }),
   Object.freeze({
@@ -116,6 +119,9 @@ const browserSuites = Object.freeze([
       'neck applies as a bounded proxy on female and neutral, and is honestly not applied on male',
       'female chest and under bust reshape the bust; male keeps its chest path',
       'hidden measurement lines read through the body and from their own view',
+      'measurement lines read on a phone portrait stage while a field is typed',
+      'a posed wrist ring draws on the posed body',
+      'approximate measurement rows say approx., precise rows do not',
     ].join('|'),
   }),
   Object.freeze({

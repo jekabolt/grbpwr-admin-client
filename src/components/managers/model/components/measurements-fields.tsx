@@ -1,3 +1,4 @@
+import { measurementSurfaceGuideIsApproximateV1 } from 'components/shared/measurement-surface-guide-precision-v1';
 import { cn } from 'lib/utility';
 import {
   ChangeEvent,
@@ -69,8 +70,10 @@ function filledCount(values: MeasurementValues, names: string[]): number {
   return names.filter((name) => Number(values[name]) > 0).length;
 }
 
+// iOS Safari offers contact AutoFill on a field whose id reads like a person's details: the proto
+// enum carries the word NAME, so the DOM id is the bare field (`mq-hps-height`), never the enum.
 function measurementInputId(name: string): string {
-  return `model-measurement-${name}`;
+  return `mq-${name.replace('BODY_MEASUREMENT_NAME_', '').toLowerCase().replace(/_/g, '-')}`;
 }
 
 function measurementFindingListId(name: string): string {
@@ -128,10 +131,13 @@ function MeasurementInput({
       data-model-measurement={name}
       data-mm={field.value ?? ''}
       data-unit={unit}
-      inputMode={unit === 'mm' ? 'numeric' : 'decimal'}
+      inputMode='decimal'
       pattern={unit === 'mm' ? '[0-9]*' : '[0-9]*[.,]?[0-9]*'}
       enterKeyHint='next'
       autoComplete='off'
+      autoCorrect='off'
+      autoCapitalize='off'
+      spellCheck={false}
       aria-label={measurementLabel(name)}
       aria-invalid={findings.length > 0}
       aria-describedby={findings.length > 0 ? measurementFindingListId(name) : undefined}
@@ -197,6 +203,22 @@ function MeasurementFindingList({
         </li>
       ))}
     </ul>
+  );
+}
+
+/** `approx.` beside a field whose line on the mannequin is an approximate picture. */
+function ApproxMark({ name }: { name: string }) {
+  if (!measurementSurfaceGuideIsApproximateV1(name)) return null;
+  return (
+    <Text
+      component='span'
+      size='micro'
+      variant='label'
+      className='shrink-0'
+      data-testid='measurement-approx'
+    >
+      approx.
+    </Text>
   );
 }
 
@@ -499,9 +521,12 @@ function PhoneMeasurementDock({
         <Text component='p' size='micro' variant='label' className='uppercase tabular-nums'>
           {measurementDockGroupLabelV1(name)}
         </Text>
-        <Text component='p' className='truncate text-textColor'>
-          {measurementLabel(name)}
-        </Text>
+        <div className='flex min-w-0 items-baseline gap-1.5'>
+          <Text component='p' className='truncate text-textColor'>
+            {measurementLabel(name)}
+          </Text>
+          <ApproxMark name={name} />
+        </div>
       </div>
       <span aria-hidden='true' />
       <Button
@@ -536,14 +561,17 @@ function GroupedMeasurementRow({
       onMouseLeave={() => setHover(null)}
       className='grid min-h-9 grid-cols-[minmax(0,1fr)_6.5rem] items-center gap-x-2.5 gap-y-1 py-0.5'
     >
-      <label htmlFor={measurementInputId(name)} className='min-w-0'>
-        <Text
-          component='span'
-          className={cn('block truncate text-textColor', empty && 'font-bold')}
-        >
-          {measurementLabel(name)}
-        </Text>
-      </label>
+      <div className='flex min-w-0 items-baseline gap-1.5'>
+        <label htmlFor={measurementInputId(name)} className='min-w-0'>
+          <Text
+            component='span'
+            className={cn('block truncate text-textColor', empty && 'font-bold')}
+          >
+            {measurementLabel(name)}
+          </Text>
+        </label>
+        <ApproxMark name={name} />
+      </div>
       <MeasurementInput name={name} findings={findings} onAdvance={onAdvance} />
       {findings.length > 0 ? (
         <div className='col-span-2'>
