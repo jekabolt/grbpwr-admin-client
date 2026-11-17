@@ -1459,7 +1459,9 @@ function anchoredGuide(options: {
       ]);
     }
     case 'BODY_MEASUREMENT_NAME_CHEST_DEPTH': {
-      // Caliper from the bust apex straight back on the chest plane.
+      // Caliper from the bust apex straight back, level on the chest-ring plane: both ends sit at
+      // the chest ring's height. Snapping the back end to its nearest vertex tilted the caliper up
+      // to 7 mm off that plane. Each end rides its own vertex, so a posed body keeps it on the ring.
       const chestY = anchoredChestY(anchors);
       const loop = sectionLoop({ mesh, originM: [0, chestY, 0], normal: [0, 1, 0] });
       if (!loop) return result(measurementName, 'unavailable-section');
@@ -1475,14 +1477,18 @@ function anchoredGuide(options: {
       const frontVertex = nearestVertex(mesh.positions, [apexX, chestY, apexL.positionM[2]]);
       const backVertex = nearestVertex(mesh.positions, backPoint);
       if (frontVertex === backVertex) return result(measurementName, 'unavailable-section');
+      const front = vertexPositionM(mesh, frontVertex);
       return result(measurementName, 'limited', [
         airPath(
-          Object.freeze({
-            id: measurementName,
-            closed: false,
-            source: 'mesh-vertices' as const,
-            vertexIndices: Object.freeze([frontVertex, backVertex]),
-          }),
+          placedPath(
+            measurementName,
+            mesh,
+            [
+              onVertex(frontVertex, [front[0], chestY, front[2]]),
+              onVertex(backVertex, [backPoint[0], chestY, backPoint[2]]),
+            ],
+            bindToMesh,
+          ),
           'caliper',
         ),
       ]);

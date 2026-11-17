@@ -1277,6 +1277,81 @@ describe('measurement guide visibility v1', () => {
     console.log(summaries.join('\n'));
   }, 120_000);
 
+  // guide-v3 started cb neck to waist at the frame's neck-base prior, below the cervicale, and put
+  // chest depth below the bust apex. Both now read the mesh anchors: C7 (857) and the apex (8454).
+  it('starts cb neck to waist at the cervicale and holds chest depth level at the apex', async () => {
+    const summaries: string[] = [];
+    const cases = [
+      ...BASES.map((base) => ({ label: base.name, body: buildDefaultBody(base) })),
+      { label: 'm12', body: buildDefaultBody(BASES[2], MODEL_12_MEASUREMENTS) },
+    ];
+    for (const { label, body: pending } of cases) {
+      const body = await pending;
+      const positions = body.mesh.positions;
+      const vertex = (index: number): Vec3 => [
+        positions[index * 3],
+        positions[index * 3 + 1],
+        positions[index * 3 + 2],
+      ];
+      const distance = (left: Vec3, right: Vec3) => Math.hypot(...subtract(left, right));
+      const guideFor = (measurementName: common_BodyMeasurementName, neutralPose = true) =>
+        buildMeasurementSurfaceActiveMeasurementGuideV1({
+          measurementName,
+          frame: body.frame,
+          mesh: body.mesh,
+          neutralPose,
+          limbSectionModes: body.betaRuntime?.limbSectionModes,
+          torsoSectionStations: body.betaRuntime?.torsoSectionStations,
+          neckSectionStation: body.betaRuntime?.neckSectionStation,
+          shoulderChordVertices: body.betaRuntime?.shoulderChordVertices,
+        });
+      const pointsOf = (measurementName: common_BodyMeasurementName, neutralPose = true) => {
+        const guide = guideFor(measurementName, neutralPose);
+        expect(guide.status, `${measurementName}/${label}`).not.toBe('unsupported');
+        if (measurementName !== 'BODY_MEASUREMENT_NAME_CHEST')
+          expect(guide.status, `${measurementName} stays approx./${label}`).toBe('limited');
+        return guide.paths.flatMap((path) => pathPolyline(path, positions));
+      };
+
+      // CB starts where the neck-base ring crosses the back midline, on the C7 vertex.
+      const c7 = vertex(857);
+      const cb = pointsOf('BODY_MEASUREMENT_NAME_CB_NECK_TO_WAIST');
+      const cbStart = cb[0];
+      const ringBack = pointsOf('BODY_MEASUREMENT_NAME_NECK_BASE')
+        .filter((point) => point[2] < 0)
+        .reduce((best, point) => (Math.abs(point[0]) < Math.abs(best[0]) ? point : best));
+      expect(Math.abs(ringBack[0]), `neck ring back midline/${label}`).toBeLessThan(0.001);
+      expect(distance(cbStart, ringBack), `cb start on neck ring/${label}`).toBeLessThan(0.0015);
+      expect(distance(cbStart, c7), `cb start at C7/${label}`).toBeLessThan(0.003);
+      expect(Math.max(...cb.map((point) => point[1])), `cb starts at its top/${label}`).toBeCloseTo(
+        cbStart[1],
+        6,
+      );
+
+      // Chest depth: front on the apex, back straight behind it, both ends on the chest-ring plane.
+      const apex = vertex(8454);
+      const chestY = pointsOf('BODY_MEASUREMENT_NAME_CHEST')[0][1];
+      const depth = pointsOf('BODY_MEASUREMENT_NAME_CHEST_DEPTH');
+      expect(depth, `chest depth ends/${label}`).toHaveLength(2);
+      const [front, back] = depth;
+      expect(Math.abs(front[1] - chestY), `depth front at chest ring/${label}`).toBeLessThan(0.0005);
+      expect(Math.abs(back[1] - chestY), `depth back at chest ring/${label}`).toBeLessThan(0.0005);
+      expect(distance(front, apex), `depth front on apex/${label}`).toBeLessThan(0.002);
+      expect(Math.abs(back[0] - apex[0]), `depth back behind apex/${label}`).toBeLessThan(0.01);
+      expect(back[2], `depth back on the back/${label}`).toBeLessThan(0);
+      // Bound to the mesh (posed bodies), the caliper rebuilds exactly on the rest vertices.
+      const bound = pointsOf('BODY_MEASUREMENT_NAME_CHEST_DEPTH', false);
+      expect(bound).toHaveLength(2);
+      for (const [index, point] of bound.entries()) {
+        expect(distance(point, depth[index]), `depth bound/${label}`).toBeLessThan(1e-6);
+      }
+      summaries.push(
+        `${label}: cb start ${cbStart.map((value) => (value * 1000).toFixed(1)).join(', ')} mm (C7 ${(distance(cbStart, c7) * 1000).toFixed(1)} mm, ring ${(distance(cbStart, ringBack) * 1000).toFixed(1)} mm); chest depth y ${(front[1] * 1000).toFixed(1)} / ${(back[1] * 1000).toFixed(1)} mm, chest ring ${(chestY * 1000).toFixed(1)} mm, apex ${(apex[1] * 1000).toFixed(1)} mm`,
+      );
+    }
+    console.log(summaries.join('\n'));
+  }, 120_000);
+
   // The posed wrist drew 0 px for two reasons, both asserted both ways: the posed guide was cut on
   // the bind-pose proxy, whose bent elbow the frame's wrist station misses (a sliver or no ring),
   // and its vertices sit exactly on the skin, so the depth-tested line tied with the body. The
