@@ -1,5 +1,5 @@
 import { useSavedClothPhysicalHostV1 } from '../phase-e-workbench-v2/use-saved-cloth-physical-host-v1';
-import { SavedClothPhysicalControlsV1 } from 'components/cloth-simulation-spike/saved-cloth-physical-controls-v1';
+import { CadWorkbenchPhysicalHostProductionMountV1 } from '../phase-e-workbench-v2/cad-workbench-physical-host-production-mount-v1';
 import type { CadWorkbenchPhysicalHostV1 } from '../phase-e-workbench-v2/cad-workbench-physical-host-v1';
 import type { TechCardFormData } from 'components/managers/tech-card/components/schema';
 import {
@@ -229,11 +229,11 @@ export const PATTERN_IMPORT_DXF_PHASE_E_ASSEMBLY_ORDER_ENTRY_CONTRACT_V1 = Objec
   stitchThreadRequiresUniqueBomLineIdentity: true,
   exactNCompositeV4OptionalBoundaryForwarded: true,
   exactNFixtureOrFallbackOwnerCreated: false,
-  savedGarmentMeshDownstreamProductionInjected: true,
-  savedGarmentCompileSessionLazyLoadedAfterVerifiedPersistence: true,
-  savedGarmentCompilerReadyBeforeOneShotSourceHandoff: true,
-  savedGarmentCompileSessionKeyedToSavedRowAndOperation: true,
-  previewLoadsOrConsumesSavedCompilerSource: false,
+  savedGarmentMeshDownstreamProductionInjected: false,
+  savedFullAssemblyPhysicalSnapshotRequired: true,
+  savedFullAssemblyNativeSourcePreparedAfterVerification: true,
+  durablePhysicalHostKeyedToSavedRowOperationAndBody: true,
+  clothPreviewMountedInsideMannequinViewport: true,
 } as const);
 
 // Match the qualified canonical local-frame/actual-body discretization (244 boundary vertices).
@@ -1902,22 +1902,16 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
         : undefined,
     [exactPersistenceCapabilities, savedProjection],
   );
-  const physicalRow =
-    savedProjection.ok && selectedSeamKeys.length === 2 ? savedProjection.row : null;
+  const physicalRow = savedProjection.ok ? savedProjection.row : null;
   const savedClothPhysicalHost = useSavedClothPhysicalHostV1({
     row: physicalRow,
     selectedOperationNumber: savedProjection.ok ? savedProjection.selectedOperationNumber : 0,
-    createCanonicalOwner: createPatternImportDxfPhaseESavedGarmentMeshProductionOwnerV1,
+    cardProjection: savedProjection.ok ? savedProjection.projection : null,
   });
-  const savedPhysicalDownstream = savedClothPhysicalHost.selected?.owner.downstream;
   const physicalHost: CadWorkbenchPhysicalHostV1 = {
     onDisplayedBodyInputV1: savedClothPhysicalHost.onDisplayedBodyInputV1,
-    panel: (
-      <SavedClothPhysicalControlsV1
-        host={savedClothPhysicalHost}
-        row={physicalRow}
-        disabled={frozen}
-      />
+    viewport: (
+      <CadWorkbenchPhysicalHostProductionMountV1 state={savedClothPhysicalHost} disabled={frozen} />
     ),
   };
   const prepareSavedAllMaterialScopeStaging = useCallback<
@@ -2029,7 +2023,6 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
             selectedOperationNumber: savedProjection.selectedOperationNumber,
             prepareAllMaterialScopeStaging: prepareSavedAllMaterialScopeStaging,
             prepareAllMaterialScopeEditors: prepareSavedAllMaterialScopeEditors,
-            ...(savedPhysicalDownstream ? { downstream: savedPhysicalDownstream } : {}),
             ...(savedConfirm ? { onConfirm: savedConfirm } : {}),
           })
         : null,
@@ -2037,7 +2030,6 @@ export function PatternImportDxfPhaseEAssemblyOrderEntryMountV1({
       prepareSavedAllMaterialScopeStaging,
       prepareSavedAllMaterialScopeEditors,
       savedConfirm,
-      savedPhysicalDownstream,
       savedProjection,
       savedRuntimeResolution.runtime,
     ],

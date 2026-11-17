@@ -38,7 +38,7 @@ function attribute(tree: ts.SourceFile, node: ts.JsxOpeningLikeElement, name: st
 }
 
 describe('physical host production receivers', () => {
-  it('forwards one borrowed host into both mutually exclusive V2 mannequin pickers', () => {
+  it('keeps one borrowed host and its compact preview inside both mannequin viewports', () => {
     const entry = source('./assembly-order-entry.tsx');
     const pickers = elements(entry.tree, 'PatternImportDxfPhaseECadMannequinModelPickerV1');
 
@@ -47,9 +47,43 @@ describe('physical host production receivers', () => {
       expect(attribute(entry.tree, picker, 'onDisplayedBodyInputV1')).toBe(
         'physicalHost?.onDisplayedBodyInputV1',
       );
-    expect(entry.text.match(/physicalHost\?\.panel \?/gu)).toHaveLength(2);
-    expect(entry.text.match(/\{physicalHost\.panel\}/gu)).toHaveLength(2);
+    expect(entry.text.match(/physicalHost\?\.viewport \?/gu)).toHaveLength(2);
+    expect(entry.text.match(/\{physicalHost\.viewport\}/gu)).toHaveLength(2);
+    expect(entry.text).not.toContain('physicalHost?.panel ?');
     expect(elements(entry.tree, 'CadWorkbenchPhysicalHostPanelV1')).toHaveLength(2);
+  });
+
+  it('mounts only Preview/Retry controls and a cloth canvas over the base model', () => {
+    const mount = source('./cad-workbench-physical-host-production-mount-v1.tsx');
+    const controls = source('./cad-workbench-physical-host-controls-v1.tsx');
+    const panel = source('./cad-workbench-physical-host-panel-v1.tsx');
+
+    expect(elements(mount.tree, 'CadWorkbenchPhysicalHostControlsV1')).toHaveLength(1);
+    expect(controls.text).toContain("'Preview'");
+    expect(controls.text).toContain('Retry');
+    expect(controls.text).toContain('Place pieces on mannequin.');
+    expect(controls.text).toContain("data-cad-physical-host-viewport=''");
+    expect(controls.text).not.toContain('Canonical reference mannequin');
+    expect(controls.text).not.toContain('Choose a mannequin profile');
+    expect(panel.text).toContain("className='pointer-events-none absolute inset-0");
+    expect(panel.text).not.toContain('max-h-[50%]');
+    expect(panel.text).not.toContain('overflow-y-auto');
+  });
+
+  it('reports verified persistence directly instead of a removed legacy downstream failure', () => {
+    const entry = source('./assembly-order-entry.tsx');
+    const hook = source('./use-saved-cloth-physical-host-v1.ts');
+    const submit = nodes(entry.tree, ts.isFunctionDeclaration).find(
+      (node) => node.name?.text === 'submitPatternImportDxfPhaseEMultiseamSavedChoicesV2',
+    );
+    expect(submit).toBeDefined();
+    const body = submit!.getText(entry.tree);
+    expect(body).toContain('return persisted;');
+    expect(body).not.toContain('savedSession.downstream');
+    expect(body).not.toContain('savedDownstreamBlocked');
+    expect(body).not.toContain('consumeConfirmedCompilerSource');
+    expect(hook.text).not.toContain('SavedObservedPhysicalHostV1');
+    expect(hook.text).not.toContain('createSavedObservedPhysicalHostV1');
   });
 
   it('lets the zero-operation mount borrow a host without creating another owner', () => {

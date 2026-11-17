@@ -47,7 +47,6 @@ import { PATTERN_IMPORT_DXF_PHASE_E_EXACT_COMPOSITE_PERSISTENCE_REQUEST_V3 } fro
 import type { PatternImportDxfPhaseEExactCompositePersistenceAdapterV3 } from './exact-composite-persistence-v3';
 import type { PatternImportDxfPhaseESavedAssemblyAuthorityTransportAdapterV1 } from './saved-assembly-authority-transport-v1';
 import {
-  PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_CONFIRMED_COMPILER_SOURCE_REQUEST_V1,
   PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_PREPARATION_REQUEST_V1,
   type PatternImportDxfPhaseESavedRowPreparedV1,
 } from './saved-row-preparation-owner-v1';
@@ -272,9 +271,9 @@ export const PATTERN_IMPORT_DXF_PHASE_E_MULTISEAM_ASSEMBLY_ORDER_ENTRY_CONTRACT_
   savedConfirmationCallbackOptionalAndFailClosed: true,
   stalePrepareOrSubmitPublishesUiState: false,
   atomicCompositionOwnerCalledOnce: true,
-  savedNativeSourceConsumedOnlyAfterVerifiedPersistence: true,
-  savedNativeSourceConsumerInjected: true,
-  downstreamFailurePreservesVerifiedPersistence: true,
+  savedNativeSourceConsumedBySubmission: false,
+  savedNativeSourceConsumerInjected: false,
+  verifiedPersistenceReportedWithoutLegacyDownstream: true,
   v1SidecarPersistenceUsed: false,
   inMemoryMappingAuthorityOnly: false,
   previewRequiresPhase1Proofs: true,
@@ -381,7 +380,6 @@ export type PatternImportDxfPhaseEMultiseamSavedSessionV2 = Readonly<{
     }>,
   ) => Promise<PatternImportDxfPhaseECadSavedMaterialScopeEditorPreparationResultV1>;
   onConfirm?: PatternImportDxfPhaseEMultiseamSavedConfirmV2;
-  downstream?: PatternImportDxfPhaseEMultiseamSavedDownstreamV2;
 }>;
 
 export type PatternImportDxfPhaseEMultiseamSavedPreparationResultV2 =
@@ -576,37 +574,6 @@ function savedSubmissionBlocked(
   });
 }
 
-const SAVED_GARMENT_MESH_INGRESS_SCHEMA_VERSION: PatternImportDxfProductSavedGarmentMeshIngressRequestV1['schemaVersion'] =
-  'pattern-import-dxf-product-saved-garment-mesh-ingress-request/1';
-const MAXIMUM_SAVED_GARMENT_TARGET_EDGE_MM = 1_000;
-
-function savedDownstreamBlocked(
-  blocker: PatternImportDxfPhaseEMultiseamAssemblyOrderBlockerV2,
-): PatternImportDxfPhaseEMultiseamSavedSubmissionV2 {
-  return Object.freeze({
-    status: 'verified-exact-topology-persisted-downstream-blocked' as const,
-    previewReady: false as const,
-    persistence: 'verified' as const,
-    composition: null,
-    blockers: Object.freeze([Object.freeze({ ...blocker })]),
-  });
-}
-
-function isVerifiedSavedPersistence(
-  value: PatternImportDxfPhaseEMultiseamSavedSubmissionV2,
-): value is Extract<
-  PatternImportDxfPhaseEMultiseamSavedSubmissionV2,
-  { status: 'verified-exact-topology-persisted' }
-> {
-  return (
-    value.status === 'verified-exact-topology-persisted' &&
-    value.previewReady === false &&
-    value.persistence === 'verified' &&
-    value.composition === null &&
-    value.blockers.length === 0
-  );
-}
-
 type SavedExactRestore = typeof restorePatternImportDxfPhaseESavedExactPrefillV1;
 
 /** Prepares a saved row through its owner, then restores only its sealed four exact topology sides. */
@@ -702,92 +669,6 @@ export async function submitPatternImportDxfPhaseEMultiseamSavedChoicesV2(
       'unknown',
     );
   }
-  if (!isVerifiedSavedPersistence(persisted)) return persisted;
-  if (signal.aborted)
-    return savedDownstreamBlocked({
-      code: 'saved-garment-mesh-downstream-cancelled',
-      detail:
-        'Exact topology was persisted and verified, but garment-mesh ingress was cancelled before source handoff.',
-    });
-  const downstream = savedSession.downstream;
-  if (!downstream)
-    return savedDownstreamBlocked({
-      code: 'saved-garment-mesh-downstream-unavailable',
-      detail:
-        'Exact topology was persisted and verified, but no saved garment-mesh ingress consumer is connected.',
-    });
-  if (
-    !Number.isFinite(downstream.targetEdgeMm) ||
-    downstream.targetEdgeMm <= 0 ||
-    downstream.targetEdgeMm > MAXIMUM_SAVED_GARMENT_TARGET_EDGE_MM
-  )
-    return savedDownstreamBlocked({
-      code: 'saved-garment-mesh-target-edge-invalid',
-      detail:
-        'Exact topology was persisted and verified, but the garment target edge is outside the supported range.',
-    });
-
-  try {
-    await downstream.ready(signal);
-  } catch (error) {
-    return savedDownstreamBlocked({
-      code: signal.aborted
-        ? 'saved-garment-mesh-downstream-cancelled'
-        : 'saved-garment-mesh-downstream-load-failed',
-      detail: signal.aborted
-        ? 'Exact topology was persisted and verified, but garment compilation was cancelled before source handoff.'
-        : error instanceof Error
-          ? `Exact topology was persisted and verified, but the garment compiler could not load: ${error.message}`
-          : 'Exact topology was persisted and verified, but the garment compiler could not load.',
-    });
-  }
-  if (signal.aborted)
-    return savedDownstreamBlocked({
-      code: 'saved-garment-mesh-downstream-cancelled',
-      detail:
-        'Exact topology was persisted and verified, but garment compilation was cancelled before source handoff.',
-    });
-
-  let consumed;
-  try {
-    consumed = await savedSession.runtime.consumeConfirmedCompilerSource(
-      {
-        schemaVersion: PATTERN_IMPORT_DXF_PHASE_E_SAVED_ROW_CONFIRMED_COMPILER_SOURCE_REQUEST_V1,
-        prepared,
-        choices: result,
-        persistence: persisted,
-        signal,
-      },
-      ({ sourceOwner, compositionRequest }) =>
-        downstream.consume(
-          Object.freeze({
-            schemaVersion: SAVED_GARMENT_MESH_INGRESS_SCHEMA_VERSION,
-            sourceOwner,
-            compositionRequest,
-            targetEdgeMm: downstream.targetEdgeMm,
-          }),
-          signal,
-        ),
-    );
-  } catch (error) {
-    return savedDownstreamBlocked({
-      code: 'saved-garment-mesh-source-handoff-failed',
-      detail:
-        error instanceof Error
-          ? `Exact topology was persisted and verified, but source handoff failed: ${error.message}`
-          : 'Exact topology was persisted and verified, but source handoff failed.',
-    });
-  }
-  if (!consumed.ok)
-    return savedDownstreamBlocked({
-      code: `saved-garment-mesh-${consumed.blockers[0].code}`,
-      detail: `Exact topology was persisted and verified, but source handoff was blocked: ${consumed.blockers[0].detail}`,
-    });
-  if (!consumed.value.ok)
-    return savedDownstreamBlocked({
-      code: `saved-garment-mesh-${consumed.value.blockers[0].code}`,
-      detail: `Exact topology was persisted and verified, but garment-mesh ingress was blocked: ${consumed.value.blockers[0].detail}`,
-    });
   return persisted;
 }
 
@@ -2517,7 +2398,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
           }
           mannequin={({ selection, focusSelection, sceneOverlay }) => (
             <div className='flex h-full min-h-0 flex-col'>
-              <div className='min-h-0 flex-1'>
+              <div className='relative min-h-0 flex-1'>
                 <PatternImportDxfPhaseECadMannequinModelPickerV1
                   disabled={frozen}
                   onDisplayedBodyInputV1={physicalHost?.onDisplayedBodyInputV1}
@@ -2567,12 +2448,12 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                     </Suspense>
                   }
                 />
+                {physicalHost?.viewport ? (
+                  <CadWorkbenchPhysicalHostPanelV1>
+                    {physicalHost.viewport}
+                  </CadWorkbenchPhysicalHostPanelV1>
+                ) : null}
               </div>
-              {physicalHost?.panel ? (
-                <CadWorkbenchPhysicalHostPanelV1>
-                  {physicalHost.panel}
-                </CadWorkbenchPhysicalHostPanelV1>
-              ) : null}
             </div>
           )}
           operationsPanel={({ selection, focusSelection }) => (
@@ -2768,7 +2649,7 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                   : undefined
               }
             >
-              <div className='min-h-0 flex-1'>
+              <div className='relative min-h-0 flex-1'>
                 <PatternImportDxfPhaseECadMannequinSavedTwoSeamProductionMountV1
                   request={savedTwoSeamSceneOverlayRequest({
                     scopeKey: activePreparedMaterialScope?.scopeKey ?? prepared?.scopeKey ?? null,
@@ -2831,12 +2712,12 @@ export function PatternImportDxfPhaseEMultiseamAssemblyOrderEntryV2({
                     />
                   )}
                 </PatternImportDxfPhaseECadMannequinSavedTwoSeamProductionMountV1>
+                {physicalHost?.viewport ? (
+                  <CadWorkbenchPhysicalHostPanelV1>
+                    {physicalHost.viewport}
+                  </CadWorkbenchPhysicalHostPanelV1>
+                ) : null}
               </div>
-              {physicalHost?.panel ? (
-                <CadWorkbenchPhysicalHostPanelV1>
-                  {physicalHost.panel}
-                </CadWorkbenchPhysicalHostPanelV1>
-              ) : null}
               {savedAllScopeMannequinStaging?.key === savedAllScopeMannequinStagingKey &&
               !savedAllScopeMannequinStaging.result.ok ? (
                 <Text

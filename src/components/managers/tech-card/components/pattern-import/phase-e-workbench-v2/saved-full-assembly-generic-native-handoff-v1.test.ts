@@ -51,6 +51,10 @@ const row = Object.freeze({
   sizeBytes: 1234,
   sha256: 'a'.repeat(64),
 });
+const sourceOwner = Object.freeze({
+  version: 'dxf-product-saved-native-compiler-source-owner/1',
+  opaque: 'module-private-weak-owner',
+});
 
 function physical(pieceCount = 3, operationCount = 1) {
   const pieceIds = Array.from({ length: pieceCount }, (_, index) => `piece-${index + 1}`);
@@ -105,10 +109,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   const projection = physical();
   const replayDraft = draft();
-  const sourceOwner = Object.freeze({
-    version: 'dxf-product-saved-native-compiler-source-owner/1',
-    opaque: 'module-private-weak-owner',
-  });
   mocks.projectPhysical.mockReturnValue(projection);
   mocks.createSnapshot.mockReturnValue({ bridge: { readAuthoritativeRow: vi.fn() } });
   mocks.createResolver.mockReturnValue(vi.fn());
@@ -169,8 +169,29 @@ describe('saved Full Assembly generic native handoff', () => {
     expect(mocks.disposeHost).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps exact-two preparation out of the generic lane before downloader or worker creation', async () => {
+  it('admits exact N2 only through the same verified physical/native lane', async () => {
     mocks.projectPhysical.mockReturnValue(physical(2));
+    mocks.run.mockResolvedValueOnce({
+      ok: true,
+      row,
+      sourceFileId: 'saved:156:main:pattern-main',
+      draft: draft(2),
+      sourceOwner,
+      blockers: [],
+    });
+
+    const handoff = await prepareSavedFullAssemblyGenericNativeHandoffV1({} as never, {} as never);
+    expect(handoff.sourceOwner).toBe(sourceOwner);
+    expect(handoff.sourceRequest.draft.scopes[0].writerReplay?.job.pieces).toHaveLength(2);
+    expect(mocks.createNativeOwner).toHaveBeenCalledTimes(1);
+    expect(SAVED_FULL_ASSEMBLY_GENERIC_NATIVE_FIRST_AUTHORING_REQUIREMENTS_V1).toMatchObject({
+      verifiedPhysicalSnapshotRequired: true,
+      minimumExactPieceCount: 2,
+    });
+  });
+
+  it.each([0, 1])('rejects %i-piece input before downloader or worker creation', async (count) => {
+    mocks.projectPhysical.mockReturnValue(physical(count));
 
     await expect(
       prepareSavedFullAssemblyGenericNativeHandoffV1({} as never, {} as never),
@@ -208,12 +229,12 @@ describe('saved Full Assembly generic native handoff', () => {
     expect(mocks.createHost).not.toHaveBeenCalled();
   });
 
-  it('rejects a non-generic native replay', async () => {
+  it('rejects a native replay with fewer than two genuine writer pieces', async () => {
     mocks.run.mockResolvedValueOnce({
       ok: true,
       row,
       sourceFileId: 'saved:156:main:pattern-main',
-      draft: draft(2),
+      draft: draft(1),
       sourceOwner: Object.freeze({
         version: 'dxf-product-saved-native-compiler-source-owner/1',
         opaque: 'module-private-weak-owner',

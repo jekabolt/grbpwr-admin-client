@@ -27,7 +27,7 @@ export const SAVED_FULL_ASSEMBLY_GENERIC_NATIVE_HANDOFF_V1 =
 
 export const SAVED_FULL_ASSEMBLY_GENERIC_NATIVE_FIRST_AUTHORING_REQUIREMENTS_V1 = Object.freeze({
   verifiedPhysicalSnapshotRequired: true,
-  minimumExactPieceCount: 3,
+  minimumExactPieceCount: 2,
   explicitMetrePlacementsRequired: true,
   physicalInitializationRequired: true,
   v6VisualArrangementAutoPromotion: false,
@@ -101,10 +101,10 @@ function projectVerifiedPhysical(
 
 function validateFullGraphLane(projection: SavedFullAssemblyPhysicalSnapshotProjectionV1): number {
   const graphPieceIds = projection.graph.pieces.map(({ pieceId }) => pieceId);
-  if (graphPieceIds.length < 3 || new Set(graphPieceIds).size !== graphPieceIds.length)
+  if (graphPieceIds.length < 2 || new Set(graphPieceIds).size !== graphPieceIds.length)
     fail(
       'generic-fullgraph-required',
-      'The generic native handoff requires a verified Full Assembly graph with at least three distinct pieces.',
+      'The native handoff requires a verified Full Assembly graph with at least two distinct pieces.',
     );
   const stitch = projection.graph.operations.find(
     (operation) =>
@@ -141,12 +141,12 @@ function verifyReplayPieceLane(
   const pieces = scopes.length === 1 ? scopes[0].writerReplay?.job.pieces : undefined;
   if (
     !pieces ||
-    pieces.length < 3 ||
+    pieces.length < 2 ||
     new Set(pieces.map(({ identity }) => identity)).size !== pieces.length
   )
     fail(
       'native-source-invalid',
-      'The genuine saved replay must expose one writer-backed row scope with at least three distinct pieces.',
+      'The genuine saved replay must expose one writer-backed row scope with at least two distinct pieces.',
     );
 }
 
@@ -166,7 +166,8 @@ function sameVerifiedPhysical(
 }
 
 /**
- * TABLE-owned production handoff for generic (3+ piece) saved Full Assembly. It reuses the single
+ * TABLE-owned production handoff for verified saved Full Assembly (exact N2 and generic N>=3). It
+ * reuses the single
  * saved-DXF production host, its downloader, disposable ImportWorker and native source owner. The
  * existing exact-two preparation owner and the non-native zero-operation path remain untouched.
  */

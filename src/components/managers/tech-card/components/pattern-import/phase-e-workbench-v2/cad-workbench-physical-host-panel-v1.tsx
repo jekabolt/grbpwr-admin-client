@@ -1,11 +1,11 @@
 import type { ReactNode } from 'react';
 
-/** Keeps the physical authoring controls scrollable without collapsing the displayed mannequin. */
+/** Positions the compact physical controls over the mannequin without consuming viewport height. */
 export function CadWorkbenchPhysicalHostPanelV1({ children }: { children: ReactNode }) {
   return (
     <div
-      className='min-h-0 max-h-[50%] shrink-0 overflow-y-auto border-t border-borderColor p-2'
-      data-cad-physical-host-panel=''
+      className='pointer-events-none absolute inset-0 z-20 overflow-hidden'
+      data-cad-physical-host-viewport-layer=''
     >
       {children}
     </div>
