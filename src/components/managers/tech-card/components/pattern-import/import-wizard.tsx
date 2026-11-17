@@ -831,6 +831,8 @@ function WizardBody({
           className='fixed inset-0 z-[var(--z-modal)] bg-pageBg p-4 focus:outline-none'
           data-testid='pattern-import-wizard'
           data-step={session.step}
+          data-initial-scope-key={initialScopeKey || undefined}
+          data-initial-file-count={initialFiles?.length ?? 0}
           // The screen itself takes the focus, not the first control: "close" lit up as the
           // focused thing on open read as a prompt to leave.
           onOpenAutoFocus={(e) => {
