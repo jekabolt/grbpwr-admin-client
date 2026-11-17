@@ -6,6 +6,7 @@ import {
 import { Button, Text } from 'ui';
 
 import type { useSavedClothPhysicalHostV1 } from './use-saved-cloth-physical-host-v1';
+import { CadWorkbenchFirstPhysicalAuthoringV1 } from './cad-workbench-first-physical-authoring-v1';
 
 type HostState = ReturnType<typeof useSavedClothPhysicalHostV1>;
 type ActivePreview = Readonly<{
@@ -105,6 +106,16 @@ export function CadWorkbenchPhysicalHostControlsV1({
           >
             {pending ? 'Preparing…' : previewReady ? 'Refresh preview' : 'Preview'}
           </Button>
+        ) : state.sourceStatus === 'placement-required' ? (
+          <Button
+            type='button'
+            size='xs'
+            variant='main'
+            disabled={disabled || state.firstAuthoring.status === 'preparing'}
+            onClick={() => void state.startFirstAuthoring()}
+          >
+            {state.firstAuthoring.status === 'preparing' ? 'Opening…' : 'Place pieces'}
+          </Button>
         ) : state.sourceStatus === 'blocked' ? (
           <Button
             type='button'
@@ -134,6 +145,7 @@ export function CadWorkbenchPhysicalHostControlsV1({
                     (previewReady ? 'Cloth preview' : 'Cloth ready')}
         </Text>
       </div>
+      <CadWorkbenchFirstPhysicalAuthoringV1 state={state} disabled={disabled} />
     </div>
   );
 }

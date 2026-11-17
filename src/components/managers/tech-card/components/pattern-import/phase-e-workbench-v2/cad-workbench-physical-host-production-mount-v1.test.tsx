@@ -53,7 +53,7 @@ describe('physical host production receivers', () => {
     expect(elements(entry.tree, 'CadWorkbenchPhysicalHostPanelV1')).toHaveLength(2);
   });
 
-  it('mounts only Preview/Retry controls and a cloth canvas over the base model', () => {
+  it('mounts compact preview/placement controls and a cloth canvas over the base model', () => {
     const mount = source('./cad-workbench-physical-host-production-mount-v1.tsx');
     const controls = source('./cad-workbench-physical-host-controls-v1.tsx');
     const panel = source('./cad-workbench-physical-host-panel-v1.tsx');
@@ -62,12 +62,25 @@ describe('physical host production receivers', () => {
     expect(controls.text).toContain("'Preview'");
     expect(controls.text).toContain('Retry');
     expect(controls.text).toContain('Place pieces on mannequin.');
+    expect(controls.text).toContain('CadWorkbenchFirstPhysicalAuthoringV1');
     expect(controls.text).toContain("data-cad-physical-host-viewport=''");
     expect(controls.text).not.toContain('Canonical reference mannequin');
     expect(controls.text).not.toContain('Choose a mannequin profile');
     expect(panel.text).toContain("className='pointer-events-none absolute inset-0");
     expect(panel.text).not.toContain('max-h-[50%]');
     expect(panel.text).not.toContain('overflow-y-auto');
+  });
+
+  it('keeps first authoring focused on exact edges, profile and placements', () => {
+    const authoring = source('./cad-workbench-first-physical-authoring-v1.tsx');
+
+    expect(authoring.text).toContain("aria-label='Diagnostic preview profile'");
+    expect(authoring.text).toContain('restored exact edges');
+    expect(authoring.text).toContain('pivot contour');
+    expect(authoring.text).not.toContain('Mesh policy ID');
+    expect(authoring.text).not.toContain('Solver iterations');
+    expect(authoring.text).not.toContain('Calibration/provenance ID');
+    expect(authoring.text).not.toContain('Operation {operationNumber} ID');
   });
 
   it('reports verified persistence directly instead of a removed legacy downstream failure', () => {

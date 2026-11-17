@@ -4,6 +4,11 @@ import {
   createSavedGenericDurablePhysicalHostV1,
   type SavedGenericDurablePhysicalHostSnapshotV1,
 } from 'components/cloth-simulation-spike/saved-generic-durable-physical-host-v1';
+import {
+  createSavedGenericObservedPhysicalHostV1,
+  projectSavedGenericObservedPhysicalHostAuthoringContextV1,
+} from 'components/cloth-simulation-spike/saved-generic-observed-physical-host-v1';
+import type { SavedGenericObservedSourceGeometryV1 } from 'components/cloth-simulation-spike/saved-generic-observed-source-geometry-v1';
 import type { ModelDisplayedTriangleBodyOwnedInputV1 } from 'components/cloth-simulation-spike/model-displayed-triangle-body-input-v1';
 import { createSavedModelDisplayedTriangleBodyQuerySessionV2 } from 'components/managers/models/components/saved-model-displayed-triangle-body-query-session-v2';
 import type { SavedModelDisplayedTriangleBodySessionV2 } from 'components/managers/models/components/saved-model-displayed-triangle-body-session-v2';
@@ -15,6 +20,17 @@ import {
   SavedFullAssemblyPhysicalSnapshotErrorV1,
 } from './saved-full-assembly-physical-snapshot-production-v1';
 import { prepareSavedFullAssemblyGenericNativeHandoffV1 } from './saved-full-assembly-generic-native-handoff-v1';
+import {
+  buildSavedFullAssemblyGenericFirstCompileRequestV1,
+  prepareSavedFullAssemblyGenericFirstBootstrapV1,
+  type SavedFullAssemblyGenericFirstBootstrapV1,
+  type SavedFullAssemblyGenericFirstCompileChoicesV1,
+} from './saved-full-assembly-generic-first-bootstrap-v1';
+import {
+  bindSavedFullAssemblyGenericFirstAuthoringV1,
+  type SavedFullAssemblyTablePiecePlacementV1,
+} from './saved-full-assembly-generic-first-authoring-v1';
+import { persistCurrentSavedGenericObservedPhysicalHostV1 } from './saved-full-assembly-physical-document-production-v1';
 import type { PatternImportDxfPhaseESavedRowCardProjectionV1 } from './saved-row-production-runtime-v1';
 
 type BodySession = SavedModelDisplayedTriangleBodySessionV2;
@@ -43,6 +59,40 @@ type Mounted = Readonly<{
   status: Exclude<SavedClothPhysicalSourceStatusV1, 'idle' | 'awaiting-mannequin'>;
   error: string | null;
 }>;
+
+export type SavedClothFirstAuthoringStateV1 =
+  | Readonly<{ status: 'idle'; bootstrap: null; sourceGeometry: null; error: null }>
+  | Readonly<{ status: 'preparing'; bootstrap: null; sourceGeometry: null; error: null }>
+  | Readonly<{
+      status: 'compile-required';
+      bootstrap: SavedFullAssemblyGenericFirstBootstrapV1;
+      sourceGeometry: null;
+      error: null;
+    }>
+  | Readonly<{
+      status: 'compiling';
+      bootstrap: SavedFullAssemblyGenericFirstBootstrapV1;
+      sourceGeometry: null;
+      error: null;
+    }>
+  | Readonly<{
+      status: 'placement-required';
+      bootstrap: SavedFullAssemblyGenericFirstBootstrapV1;
+      sourceGeometry: SavedGenericObservedSourceGeometryV1;
+      error: null;
+    }>
+  | Readonly<{
+      status: 'saving';
+      bootstrap: SavedFullAssemblyGenericFirstBootstrapV1;
+      sourceGeometry: SavedGenericObservedSourceGeometryV1;
+      error: null;
+    }>
+  | Readonly<{
+      status: 'blocked';
+      bootstrap: SavedFullAssemblyGenericFirstBootstrapV1 | null;
+      sourceGeometry: SavedGenericObservedSourceGeometryV1 | null;
+      error: string;
+    }>;
 
 const EMPTY_BODY_SNAPSHOT = Object.freeze({ status: 'idle', generation: 0 });
 const EMPTY_DURABLE_SNAPSHOT: SavedGenericDurablePhysicalHostSnapshotV1 | null = null;
@@ -199,6 +249,34 @@ export function useSavedClothPhysicalHostV1({
         ])
       : null;
   const [mounted, setMounted] = useState<Mounted | null>(null);
+  const firstHostRef = useRef<ReturnType<typeof createSavedGenericObservedPhysicalHostV1> | null>(
+    null,
+  );
+  const firstControllerRef = useRef<AbortController | null>(null);
+  const firstGenerationRef = useRef(0);
+  const [firstAuthoring, setFirstAuthoring] = useState<SavedClothFirstAuthoringStateV1>({
+    status: 'idle',
+    bootstrap: null,
+    sourceGeometry: null,
+    error: null,
+  });
+
+  const releaseFirstAuthoring = useCallback(async () => {
+    firstControllerRef.current?.abort();
+    firstControllerRef.current = null;
+    const host = firstHostRef.current;
+    firstHostRef.current = null;
+    firstGenerationRef.current = 0;
+    if (host) await host.dispose();
+  }, []);
+
+  useEffect(() => {
+    setFirstAuthoring({ status: 'idle', bootstrap: null, sourceGeometry: null, error: null });
+    void releaseFirstAuthoring();
+    return () => {
+      void releaseFirstAuthoring();
+    };
+  }, [releaseFirstAuthoring, sourceKey]);
 
   useEffect(() => {
     if (
@@ -269,10 +347,175 @@ export function useSavedClothPhysicalHostV1({
         ? 'awaiting-mannequin'
         : current?.status ?? 'loading';
 
+  const startFirstAuthoring = useCallback(async () => {
+    if (
+      sourceStatus !== 'placement-required' ||
+      !savedRow ||
+      !cardProjection ||
+      !bodySession ||
+      !sourceKey ||
+      firstAuthoring.status === 'preparing'
+    )
+      return;
+    await releaseFirstAuthoring();
+    const controller = new AbortController();
+    firstControllerRef.current = controller;
+    setFirstAuthoring({ status: 'preparing', bootstrap: null, sourceGeometry: null, error: null });
+    try {
+      const bootstrap = await prepareSavedFullAssemblyGenericFirstBootstrapV1(
+        savedRow,
+        cardProjection,
+        controller.signal,
+      );
+      if (firstControllerRef.current !== controller || controller.signal.aborted) return;
+      setFirstAuthoring({
+        status: 'compile-required',
+        bootstrap,
+        sourceGeometry: null,
+        error: null,
+      });
+    } catch (error) {
+      if (firstControllerRef.current !== controller || controller.signal.aborted) return;
+      setFirstAuthoring({
+        status: 'blocked',
+        bootstrap: null,
+        sourceGeometry: null,
+        error: detail(error),
+      });
+    }
+  }, [
+    bodySession,
+    cardProjection,
+    firstAuthoring.status,
+    releaseFirstAuthoring,
+    savedRow,
+    sourceKey,
+    sourceStatus,
+  ]);
+
+  const compileFirstAuthoring = useCallback(
+    async (choices: SavedFullAssemblyGenericFirstCompileChoicesV1) => {
+      if (firstAuthoring.status !== 'compile-required' || !bodySession || !savedRow || !sourceKey)
+        return;
+      const bootstrap = firstAuthoring.bootstrap;
+      setFirstAuthoring({ status: 'compiling', bootstrap, sourceGeometry: null, error: null });
+      await releaseFirstAuthoring();
+      const controller = new AbortController();
+      firstControllerRef.current = controller;
+      const authoringHost = createSavedGenericObservedPhysicalHostV1({
+        row: savedRow,
+        bodySession,
+      });
+      firstHostRef.current = authoringHost;
+      try {
+        const compiled = await authoringHost.consume(
+          buildSavedFullAssemblyGenericFirstCompileRequestV1(bootstrap, choices),
+          controller.signal,
+        );
+        if (!compiled.ok)
+          throw new Error(
+            'detail' in compiled
+              ? compiled.detail
+              : compiled.result.blockers
+                  .map(({ detail: blockerDetail }) => blockerDetail)
+                  .join('; '),
+          );
+        const generation = compiled.result.generation;
+        const context = await projectSavedGenericObservedPhysicalHostAuthoringContextV1(
+          authoringHost,
+          generation,
+          controller.signal,
+        );
+        if (!context.ok) throw new Error(context.detail);
+        if (
+          firstHostRef.current !== authoringHost ||
+          firstControllerRef.current !== controller ||
+          controller.signal.aborted
+        )
+          throw new Error('Authoring source changed.');
+        firstGenerationRef.current = generation;
+        setFirstAuthoring({
+          status: 'placement-required',
+          bootstrap,
+          sourceGeometry: context.sourceGeometry,
+          error: null,
+        });
+      } catch (error) {
+        if (
+          firstHostRef.current === authoringHost &&
+          firstControllerRef.current === controller &&
+          !controller.signal.aborted
+        ) {
+          await releaseFirstAuthoring();
+          setFirstAuthoring({
+            status: 'blocked',
+            bootstrap,
+            sourceGeometry: null,
+            error: detail(error),
+          });
+        }
+      }
+    },
+    [bodySession, firstAuthoring, releaseFirstAuthoring, savedRow, sourceKey],
+  );
+
+  const saveFirstAuthoring = useCallback(
+    async (placements: readonly SavedFullAssemblyTablePiecePlacementV1[]) => {
+      if (firstAuthoring.status !== 'placement-required') return;
+      const authoringHost = firstHostRef.current;
+      const generation = firstGenerationRef.current;
+      if (!authoringHost || generation < 1) return;
+      const { bootstrap, sourceGeometry } = firstAuthoring;
+      setFirstAuthoring({
+        status: 'saving',
+        bootstrap,
+        sourceGeometry,
+        error: null,
+      });
+      firstControllerRef.current?.abort();
+      const controller = new AbortController();
+      firstControllerRef.current = controller;
+      try {
+        const bound = await bindSavedFullAssemblyGenericFirstAuthoringV1(
+          authoringHost,
+          {
+            expectedGeneration: generation,
+            placements,
+          },
+          controller.signal,
+        );
+        if (!bound.ok) throw new Error(bound.detail);
+        const persisted = await persistCurrentSavedGenericObservedPhysicalHostV1(
+          authoringHost,
+          generation,
+          controller.signal,
+        );
+        if (!persisted.ok) throw new Error(persisted.blockers[0].detail);
+        await releaseFirstAuthoring();
+        setFirstAuthoring({ status: 'idle', bootstrap: null, sourceGeometry: null, error: null });
+        retry();
+      } catch (error) {
+        if (
+          firstHostRef.current !== authoringHost ||
+          firstControllerRef.current !== controller ||
+          controller.signal.aborted
+        )
+          return;
+        setFirstAuthoring({
+          status: 'blocked',
+          bootstrap,
+          sourceGeometry,
+          error: detail(error),
+        });
+      }
+    },
+    [firstAuthoring, releaseFirstAuthoring, retry],
+  );
+
   return {
     /** Rowless zero-operation compatibility only; saved routes no longer expose profile selection. */
     profile: '' as '' | 'canonical-reference' | 'observed-saved-model',
-    setProfile: (_profile: '' | 'canonical-reference' | 'observed-saved-model') => undefined,
+    setProfile: () => undefined,
     selected: null,
     bodySession,
     onDisplayedBodyInputV1,
@@ -281,5 +524,9 @@ export function useSavedClothPhysicalHostV1({
     sourceStatus,
     sourceError: current?.error ?? null,
     retry,
+    firstAuthoring,
+    startFirstAuthoring,
+    compileFirstAuthoring,
+    saveFirstAuthoring,
   } as const;
 }
