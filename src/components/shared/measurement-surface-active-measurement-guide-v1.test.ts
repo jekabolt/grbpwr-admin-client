@@ -4,6 +4,7 @@ import { CANONICAL_BODY_MEASUREMENTS_VERSION } from 'lib/cloth/body/measurement-
 import { createMeasurementBodyFrameV2 } from 'lib/cloth/body/measurement-body-frame-v2';
 import type { MeasurementSurfaceMeshV1 } from 'lib/cloth/body/measurement-watertight-surface-v1';
 import { buildMeasurementSurfaceActiveMeasurementGuideV1 } from './measurement-surface-active-measurement-guide-v1';
+import { measurementSurfaceGuidePolylineV1 } from './measurement-surface-guide-lines-v1';
 
 function cylinderMesh(heightM = 1.72): MeasurementSurfaceMeshV1 {
   const sides = 32;
@@ -137,7 +138,7 @@ describe('active mannequin measurement guide v1', () => {
     expect(guide.paths[0]).toMatchObject({ source: 'mesh-vertices' });
   });
 
-  it('shows height directly and refuses an invented inseam landmark', () => {
+  it('draws height as a floor ruler, posed too, and refuses an invented inseam landmark', () => {
     const mesh = cylinderMesh();
     const height = buildMeasurementSurfaceActiveMeasurementGuideV1({
       measurementName: 'BODY_MEASUREMENT_NAME_HEIGHT',
@@ -159,8 +160,37 @@ describe('active mannequin measurement guide v1', () => {
     });
 
     expect(height).toMatchObject({ status: 'visible', label: 'height' });
-    expect(height.paths[0]).toMatchObject({ source: 'fixed-points', closed: false });
-    expect(posedHeight).toMatchObject({ status: 'unavailable-pose', paths: [] });
+    expect(height.paths).toHaveLength(1);
+    const ruler = height.paths[0];
+    expect(ruler).toMatchObject({ source: 'fixed-points', closed: false });
+    if (ruler?.source !== 'fixed-points') throw new Error('Expected a fixed floor ruler.');
+    // Starts on the floor, stands clear of the body (x radius 0.32 m), ends on the crown plate.
+    expect(ruler.pointsM[0][1]).toBeCloseTo(0.002, 6);
+    expect(ruler.pointsM[1][1]).toBeCloseTo(0.002, 6);
+    expect(ruler.pointsM[1][0]).toBeGreaterThan(0.32);
+    expect(ruler.pointsM[2][0]).toBe(ruler.pointsM[1][0]);
+    expect(ruler.pointsM[2][2]).toBe(ruler.pointsM[1][2]);
+    expect(ruler.pointsM.at(-1)?.[1]).toBeCloseTo(1.722, 5);
+    expect(Math.hypot(ruler.pointsM.at(-1)![0], ruler.pointsM.at(-1)![2])).toBeLessThanOrEqual(
+      0.32,
+    );
+
+    // A posed body (guide-v5, model #12 has a stored pose): the same ruler, every coordinate
+    // riding a vertex, so it lands on the same points and follows the body when it moves.
+    expect(posedHeight).toMatchObject({ status: 'visible', label: 'height' });
+    const posedRuler = posedHeight.paths[0];
+    expect(posedRuler).toMatchObject({ source: 'mesh-offset-points', closed: false });
+    const posedLine = measurementSurfaceGuidePolylineV1(posedRuler, mesh.positions);
+    expect(posedLine).not.toBeNull();
+    ruler.pointsM.flat().forEach((value, index) => expect(posedLine![index]).toBeCloseTo(value, 6));
+    const raised = Float32Array.from(mesh.positions, (value, index) =>
+      index % 3 === 1 ? value + 0.1 : value,
+    );
+    const raisedLine = measurementSurfaceGuidePolylineV1(posedRuler, raised);
+    ruler.pointsM.flat().forEach((value, index) =>
+      expect(raisedLine![index]).toBeCloseTo(index % 3 === 1 ? value + 0.1 : value, 5),
+    );
+
     // No HM08 crotch landmark on a cylinder: the inseam line needs the reference-mesh anchors.
     expect(inseam).toMatchObject({ status: 'unavailable-section', label: 'inseam', paths: [] });
   });
@@ -182,6 +212,15 @@ describe('active mannequin measurement guide v1', () => {
         measurementProtocolEquivalent: false,
         fitClaimEligible: false,
       });
+      const posed = buildMeasurementSurfaceActiveMeasurementGuideV1({
+        measurementName: name,
+        frame,
+        mesh: cylinderMesh(),
+        neutralPose: false,
+      });
+      expect(posed.status).toBe('visible');
+      expect(posed.paths).toHaveLength(1);
+      expect(posed.paths[0]).toMatchObject({ source: 'mesh-offset-points', closed: false });
     },
   );
 
@@ -290,17 +329,31 @@ describe('active mannequin measurement guide v1', () => {
       mesh: cylinderMesh(),
       neutralPose: true,
     });
-    const vertical = waistToHighHip.paths[0];
-    expect(vertical).toMatchObject({ source: 'fixed-points', closed: false });
-    if (vertical?.source !== 'fixed-points') throw new Error('Expected a fixed vertical guide.');
-    expect(vertical.pointsM).toHaveLength(2);
-    expect(vertical.pointsM[0][0]).toBe(vertical.pointsM[1][0]);
-    const hip = frame.torsoStations.find(({ id }) => id === 'hip');
-    expect(vertical.pointsM[0][0]).toBeGreaterThan(
-      Math.max(waist?.halfWidthM ?? 0, hip?.halfWidthM ?? 0),
-    );
-    expect(vertical.pointsM[0][1]).toBeCloseTo(waist?.yM ?? 0, 5);
-    expect(vertical.pointsM[1][1]).toBeCloseTo(pathY(protocol), 5);
+    // guide-v5: a tape down the left side seam on the body, not a vertical in the air beside it.
+    const seam = waistToHighHip.paths[0];
+    expect(seam).toMatchObject({ source: 'fixed-points', closed: false });
+    if (seam?.source !== 'fixed-points') throw new Error('Expected a fixed side-seam tape.');
+    expect(seam.pointsM.length).toBeGreaterThan(2);
+    for (const point of seam.pointsM) {
+      expect(point[0]).toBeCloseTo(0.322, 4);
+      expect(point[2]).toBeCloseTo(0, 4);
+    }
+    expect(seam.pointsM[0][1]).toBeCloseTo(waist?.yM ?? 0, 5);
+    expect(seam.pointsM.at(-1)?.[1]).toBeCloseTo(pathY(protocol), 5);
+    const posedSeam = buildMeasurementSurfaceActiveMeasurementGuideV1({
+      measurementName: 'BODY_MEASUREMENT_NAME_WAIST_TO_HIGH_HIP',
+      frame,
+      mesh: cylinderMesh(),
+      neutralPose: false,
+    });
+    expect(posedSeam).toMatchObject({ status: 'limited', view: 'back-three-quarter' });
+    const posedPath = posedSeam.paths[0];
+    expect(posedPath).toMatchObject({ source: 'mesh-vertices', closed: false });
+    if (posedPath?.source !== 'mesh-vertices') throw new Error('Expected a vertex-bound tape.');
+    expect(posedPath.vertexIndices.length).toBeGreaterThan(1);
+    for (const vertex of posedPath.vertexIndices) {
+      expect(cylinderMesh().positions[vertex * 3]).toBeCloseTo(0.32, 5);
+    }
 
     // A protocol drop (100 mm) that leaves the waist..hip interval has no admitted station.
     const outside = buildMeasurementSurfaceActiveMeasurementGuideV1({

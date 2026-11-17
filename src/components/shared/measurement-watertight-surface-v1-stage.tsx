@@ -21,6 +21,7 @@ import {
   measurementSurfaceGuideAirDatasetV1,
   measurementSurfaceGuideCameraActionV1,
   syncMeasurementSurfaceGuideResolutionV1,
+  type MeasurementSurfaceGuideCameraFacingV1,
   type MeasurementSurfaceGuideCameraTargetV1,
   type MeasurementSurfaceGuideCameraViewV1,
   updateMeasurementSurfaceGuideLayerPositionsV1,
@@ -1391,7 +1392,10 @@ function createPatternPieceLayerV1(
   return Object.freeze({ layer, bindings, guides: Object.freeze(guides) });
 }
 
-function directionForView(view: MeasurementSurfaceViewPreset): THREE.Vector3 {
+function directionForView(
+  view: MeasurementSurfaceViewPreset | MeasurementSurfaceGuideCameraViewV1,
+): THREE.Vector3 {
+  if (view === 'back-three-quarter') return new THREE.Vector3(Math.SQRT1_2, 0, -Math.SQRT1_2);
   if (view === 'side') return new THREE.Vector3(1, 0, 0);
   if (view === 'back') return new THREE.Vector3(0, 0, -1);
   return new THREE.Vector3(0, 0, 1);
@@ -1646,6 +1650,8 @@ export function MeasurementWatertightSurfaceV1Stage({
     );
     let guideCameraAnimation = 0;
     let guideCameraAnimationEnd: (() => void) | null = null;
+    /** The owner's camera a running restore swings back to; a turn started mid-swing keeps it. */
+    let guideCameraRestoreTarget: MeasurementSurfaceCameraStateV10 | null = null;
     let syncGuideCamera: (jump?: boolean) => void = () => undefined;
     let controlsStartHandler: (() => void) | null = null;
     let focusMeasurementGuideFrame: (layer: THREE.Group) => void = () => undefined;
@@ -2102,11 +2108,13 @@ export function MeasurementWatertightSurfaceV1Stage({
     }
 
     /** Where the camera looks at the body from, within 10 degrees; `free` anywhere else. */
-    function stageCameraFacing(): 'front' | 'back' | 'side' | 'free' {
+    function stageCameraFacing(): MeasurementSurfaceGuideCameraFacingV1 {
       if (!camera || !controls) return 'free';
       const direction = camera.position.clone().sub(controls.target).normalize();
       if (direction.z > 0.985) return 'front';
       if (direction.z < -0.985) return 'back';
+      if (direction.dot(directionForView('back-three-quarter')) > 0.985)
+        return 'back-three-quarter';
       return Math.abs(direction.x) > 0.985 ? 'side' : 'free';
     }
 
@@ -2128,6 +2136,7 @@ export function MeasurementWatertightSurfaceV1Stage({
     function stopGuideCameraAnimation(finish: boolean): void {
       if (guideCameraAnimation !== 0) cancelAnimationFrame(guideCameraAnimation);
       guideCameraAnimation = 0;
+      guideCameraRestoreTarget = null;
       const end = guideCameraAnimationEnd;
       guideCameraAnimationEnd = null;
       if (finish) end?.();
@@ -3017,7 +3026,9 @@ export function MeasurementWatertightSurfaceV1Stage({
           // A running guide animation already carries the camera to the front or the owner's camera.
           cameraFacing: guideCameraAnimation !== 0 ? 'free' : stageCameraFacing(),
         });
-        const animateToView = (view: MeasurementSurfaceViewPreset) => {
+        const animateToView = (
+          view: MeasurementSurfaceViewPreset | MeasurementSurfaceGuideCameraViewV1,
+        ) => {
           if (!camera) return;
           const verticalFov = THREE.MathUtils.degToRad(camera.fov);
           const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect);
@@ -3035,10 +3046,11 @@ export function MeasurementWatertightSurfaceV1Stage({
         } else if (action === 'front') {
           guideCameraTurnRef.current = null;
           animateToView('front');
-        } else if (action === 'turn' && (targetView === 'back' || targetView === 'side')) {
+        } else if (action === 'turn' && targetView !== null && targetView !== 'front') {
           guideCameraTurnRef.current = {
             view: targetView,
-            saved: turn?.saved ?? snapshotStageCamera(),
+            // Mid-restore the camera is half way back; the owner's camera is the restore target.
+            saved: turn?.saved ?? guideCameraRestoreTarget ?? snapshotStageCamera(),
           };
           animateToView(targetView);
         } else if (action === 'restore' && turn?.saved) {
@@ -3052,9 +3064,16 @@ export function MeasurementWatertightSurfaceV1Stage({
           animateGuideCamera(
             new THREE.Vector3(...restored.positionM),
             new THREE.Vector3(...restored.targetM),
-            () => restoreCamera(saved),
+            () => {
+              restoreCamera(saved);
+              // A front field focused mid-swing read the camera as free; check it once it lands.
+              queueMicrotask(() => {
+                if (!disposed) syncGuideCamera();
+              });
+            },
             jump,
           );
+          if (guideCameraAnimation !== 0) guideCameraRestoreTarget = saved;
         }
         publishGuideCameraDataset();
       };

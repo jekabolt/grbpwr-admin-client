@@ -5,7 +5,9 @@ import {
   FocusEvent,
   KeyboardEvent,
   PointerEvent as ReactPointerEvent,
+  SyntheticEvent,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from 'react';
@@ -485,13 +487,22 @@ export function measurementDockGroupLabelV1(name: string): string {
   return `${groupSwitchLabel(group.title)} · ${position}/${group.measurements.length}`;
 }
 
-const keepKeyboardOpen = (event: ReactPointerEvent<HTMLButtonElement>) => event.preventDefault();
+// A press anywhere on the bar keeps focus (and the keyboard) on the typed field: pointerdown for
+// Chrome, mousedown for a WebKit tap whose compatibility mouse events still come.
+const keepKeyboardOpen = (event: SyntheticEvent) => event.preventDefault();
+
+// ‹ and › answer over the bar's full height and out to the screen edge / the gap: a thumb that
+// lands a few px off the 44 px button still steps instead of falling on the bar.
+const DOCK_STEP_HIT_AREA =
+  "relative after:absolute after:-inset-x-2 after:-inset-y-2.5 after:content-['']";
 
 /**
  * Phone bar right above the keyboard while a field is typed: ‹ · group / label · value · ›. The
  * focused input itself is placed into the value slot (sheet-model-form.css), so the caret, the
  * selection and the digit pad stay the real field's. The iPhone digit pad has no Return key: ›
- * is the way forward and is never disabled; on the very last field it closes the keyboard.
+ * is the way forward and is never disabled; on the very last field it closes the keyboard. ‹ on
+ * the first field is `aria-disabled`, not `disabled`: a disabled button drops the press to the
+ * page, and the field with it.
  */
 function PhoneMeasurementDock({
   name,
@@ -505,14 +516,18 @@ function PhoneMeasurementDock({
       data-mq-phone-dock=''
       data-testid='model-measurement-phone-dock'
       className='fixed inset-x-0 z-[calc(var(--z-nav)+2)] grid grid-cols-[3rem_minmax(0,1fr)_6.875rem_3rem] items-center gap-2 border-t border-textColor bg-bgColor px-2'
+      onPointerDown={keepKeyboardOpen}
+      onMouseDown={keepKeyboardOpen}
     >
       <Button
         type='button'
         variant='secondary'
-        className='h-11'
+        className={cn(
+          'h-11 aria-disabled:cursor-not-allowed aria-disabled:text-borderColor aria-disabled:hover:bg-bgColor aria-disabled:hover:text-borderColor',
+          DOCK_STEP_HIT_AREA,
+        )}
         aria-label='previous field'
-        disabled={!measurementStepV1(name, -1)}
-        onPointerDown={keepKeyboardOpen}
+        aria-disabled={measurementStepV1(name, -1) ? undefined : true}
         onClick={() => onStep(-1)}
       >
         ‹
@@ -532,9 +547,8 @@ function PhoneMeasurementDock({
       <Button
         type='button'
         variant='secondary'
-        className='h-11'
+        className={cn('h-11', DOCK_STEP_HIT_AREA)}
         aria-label='next field'
-        onPointerDown={keepKeyboardOpen}
         onClick={() => onStep(1)}
       >
         ›
@@ -604,6 +618,14 @@ export function MeasurementsGroupedTable({
   const { errors, submitCount } = useFormState({ control, name: 'measurements' });
   const [groupIndex, setGroupIndex] = useState(() => Math.max(0, measurementGroupIndex(selected)));
   const [focusRequest, setFocusRequest] = useState<{ name: string; tick: number } | null>(null);
+  // Group of the field the bar is leaving, kept shown until the next field holds focus.
+  const [leavingGroupIndex, setLeavingGroupIndex] = useState<number | null>(null);
+  // The field the bar steps from: the last step's target right away, before React renders it, so
+  // taps that arrive back to back on a busy main thread each move one field.
+  const typingRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    typingRef.current = phoneTypingName ?? null;
+  }, [phoneTypingName]);
   const fieldErrors = errors.measurements as Record<string, unknown> | undefined;
   const hasError = (name: string) =>
     (audit.byMeasurementName[name]?.length ?? 0) > 0 || !!fieldErrors?.[name];
@@ -644,16 +666,25 @@ export function MeasurementsGroupedTable({
   };
 
   // The bar's ‹ / ›: the next field is focused inside the tap, so the open keyboard stays open
-  // (iOS keeps it only for a focus made in the gesture); its group is rendered visible first.
+  // (iOS keeps it only for a focus made in the gesture); its group is rendered visible first. The
+  // group being left stays shown until then: a focused input turned `hidden` drops focus to the
+  // page, and the keyboard with it.
   const step = (direction: -1 | 1) => {
-    if (!phoneTypingName) return;
-    const target = measurementStepV1(phoneTypingName, direction);
+    const current = typingRef.current;
+    if (!current) return;
+    const target = measurementStepV1(current, direction);
     if (!target) {
-      if (direction === 1) document.getElementById(measurementInputId(phoneTypingName))?.blur();
+      if (direction === 1) document.getElementById(measurementInputId(current))?.blur();
       return;
     }
-    flushSync(() => setGroupIndex(target.groupIndex));
+    typingRef.current = target.name;
+    const leaving = measurementGroupIndex(current);
+    flushSync(() => {
+      setGroupIndex(target.groupIndex);
+      setLeavingGroupIndex(leaving === target.groupIndex ? null : leaving);
+    });
     document.getElementById(measurementInputId(target.name))?.focus({ preventScroll: true });
+    setLeavingGroupIndex(null);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -692,7 +723,7 @@ export function MeasurementsGroupedTable({
             key={group.title}
             role='group'
             aria-label={groupSwitchLabel(group.title)}
-            hidden={index !== groupIndex}
+            hidden={index !== groupIndex && index !== leavingGroupIndex}
             data-measurement-group={group.title}
             className='flex flex-col divide-y divide-hairline'
           >

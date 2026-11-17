@@ -121,6 +121,7 @@ const browserSuites = Object.freeze([
       'hidden measurement lines read through the body and from their own view',
       'measurement lines read on a phone portrait stage while a field is typed',
       'a posed wrist ring draws on the posed body',
+      'every line the owner missed on model 12 draws on the posed body, desktop and phone',
       'approximate measurement rows say approx., precise rows do not',
     ].join('|'),
   }),

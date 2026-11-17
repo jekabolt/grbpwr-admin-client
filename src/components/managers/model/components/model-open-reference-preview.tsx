@@ -3189,6 +3189,9 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
             torsoSectionStations: displayedBuilt.torsoSectionStations,
             kneeSectionStations: displayedBuilt.kneeSectionStations,
             neckSectionStation: displayedBuilt.neckSectionStation,
+            drawnMesh: editor.equalGeometry(draftPose, editor.neutralPose)
+              ? undefined
+              : displayedBuilt.runtime.displayMesh,
           })
         : undefined,
     [activeMeasurementName, displayedBuilt, draftPose, editor],
@@ -3206,13 +3209,11 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
       : measurementSurfaceMeasurementGuideViewV1(
           focusedMeasurementName as common_BodyMeasurementName,
         );
-  // Every focused field names a view: its own back/side one, otherwise the front (also when its
-  // line is not drawn), so leaving a side field never leaves the camera turned.
+  // Every focused field names a view: its own back/side/back-three-quarter one, otherwise the front
+  // (also when its line is not drawn), so leaving a side field never leaves the camera turned.
   const measurementGuideCameraView = !focusedMeasurementName
     ? undefined
-    : focusedGuideView === 'back' || focusedGuideView === 'side'
-      ? focusedGuideView
-      : ('front' as const);
+    : focusedGuideView ?? ('front' as const);
   const measurementGuideStatusText =
     measurementGuide?.status === 'visible' || measurementGuide?.status === 'limited'
       ? `visual guide visible for ${measurementGuide.label}`

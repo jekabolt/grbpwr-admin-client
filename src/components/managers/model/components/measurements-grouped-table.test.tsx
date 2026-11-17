@@ -140,10 +140,16 @@ describe('phone bar above the keyboard (variant C)', () => {
     expect(dock?.match(/<button[^>]*aria-label="next field"[^>]*>/)?.[0]).not.toMatch(
       / disabled=""/,
     );
-    // The first field of the form has nowhere to go back to.
-    expect(dock?.match(/<button[^>]*aria-label="previous field"[^>]*>/)?.[0]).toMatch(
-      / disabled=""/,
-    );
+    // The first field of the form has nowhere to go back to. `aria-disabled`, not `disabled`: a
+    // press on a disabled button falls to the page and takes focus off the typed field.
+    const previous = dock?.match(/<button[^>]*aria-label="previous field"[^>]*>/)?.[0];
+    expect(previous).toMatch(/ aria-disabled="true"/);
+    expect(previous).not.toMatch(/ disabled=""/);
+    // Not on the first field: ‹ is live.
+    const second = renderToStaticMarkup(
+      <Harness measurements={{}} phoneTypingName={names(0)[1]!} />,
+    ).match(/<button[^>]*aria-label="previous field"[^>]*>/)?.[0];
+    expect(second).not.toMatch(/ aria-disabled="/);
   });
 
   it('‹ / › walk every field and cross group boundaries both ways', () => {
