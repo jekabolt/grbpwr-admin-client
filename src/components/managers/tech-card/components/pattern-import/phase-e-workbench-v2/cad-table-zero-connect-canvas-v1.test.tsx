@@ -1,4 +1,6 @@
+import { chromium } from '@playwright/test';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { createServer, type Plugin } from 'vite';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -131,6 +133,12 @@ function contourTag(html: string, contourId: string): string {
   return tag;
 }
 
+function translated(value: string | null): readonly [number, number] {
+  const match = value?.match(/^translate\(([-+\d.eE]+) ([-+\d.eE]+)\)$/);
+  if (!match) throw new Error(`Expected translate(x y), received ${String(value)}.`);
+  return [Number(match[1]), Number(match[2])];
+}
+
 describe('zero-operation CAD table rendering', () => {
   it('keeps the production CAD controls visible without dashing real cut boundaries', () => {
     const html = renderToStaticMarkup(
@@ -215,4 +223,191 @@ describe('zero-operation CAD table rendering', () => {
     expect(selected.viewportBounds).toBe(initial.viewportBounds);
     expect(toggled.layout.selectedPieceKeys).toEqual([]);
   });
+
+  it('keeps the mounted SVG viewBox byte-identical through a real piece pointer drag', async () => {
+    const browserFixture = JSON.stringify(fixture()).replaceAll('<', '\\u003c');
+    const virtualId = 'virtual:cad-table-pointer-drag-regression';
+    const resolvedVirtualId = `\0${virtualId}`;
+    const uiVirtualId = 'virtual:cad-table-pointer-drag-ui';
+    const resolvedUiVirtualId = `\0${uiVirtualId}`;
+    const componentPath =
+      '/src/components/managers/tech-card/components/pattern-import/phase-e-workbench-v2/cad-table-zero-connect-canvas-v1.tsx';
+    const harnessPlugin: Plugin = {
+      name: 'cad-table-pointer-drag-regression',
+      resolveId(id) {
+        if (id === virtualId) return resolvedVirtualId;
+        if (id === uiVirtualId) return resolvedUiVirtualId;
+        return null;
+      },
+      load(id) {
+        if (id === resolvedUiVirtualId)
+          return `
+            import React from 'react';
+            export function Button({ size, variant, fullWidth, ...props }) {
+              return React.createElement('button', props);
+            }
+            const Icon = (props) => React.createElement('svg', props);
+            export {
+              Icon as BorderDashedIcon,
+              Icon as BoxIcon,
+              Icon as CircleIcon,
+              Icon as Component1Icon,
+              Icon as Crosshair2Icon,
+              Icon as CursorArrowIcon,
+              Icon as DimensionsIcon,
+              Icon as DrawingPinIcon,
+              Icon as EnterFullScreenIcon,
+              Icon as EyeOpenIcon,
+              Icon as FileTextIcon,
+              Icon as HandIcon,
+              Icon as LayersIcon,
+              Icon as MagicWandIcon,
+              Icon as Pencil1Icon,
+              Icon as PlusIcon,
+              Icon as RulerHorizontalIcon,
+              Icon as RulerSquareIcon,
+              Icon as ScissorsIcon,
+              Icon as SewingPinIcon,
+              Icon as TargetIcon,
+              Icon as ValueIcon,
+            };
+          `;
+        if (id !== resolvedVirtualId) return null;
+        return `
+          import React, { useEffect } from 'react';
+          import { createRoot } from 'react-dom/client';
+          import '/src/global.css';
+          import { PatternImportDxfPhaseECadTableZeroConnectCanvasV1 } from '${componentPath}';
+          function Harness() {
+            useEffect(() => { globalThis.__CAD_TABLE_POINTER_READY__ = true; }, []);
+            return React.createElement(
+              PatternImportDxfPhaseECadTableZeroConnectCanvasV1,
+              globalThis.__CAD_TABLE_POINTER_FIXTURE__,
+            );
+          }
+          createRoot(document.getElementById('root')).render(React.createElement(Harness));
+        `;
+      },
+      configureServer(server) {
+        server.middlewares.use(async (request, response, next) => {
+          if (request.url !== '/__cad-table-pointer-drag-regression__') {
+            next();
+            return;
+          }
+          const html = await server.transformIndexHtml(
+            request.url,
+            `<!doctype html>
+              <html>
+                <head>
+                  <style>
+                    html, body, #root { width: 900px; height: 650px; margin: 0; }
+                  </style>
+                </head>
+                <body>
+                  <div id="root"></div>
+                  <script>globalThis.__CAD_TABLE_POINTER_FIXTURE__ = ${browserFixture};</script>
+                  <script type="module">import '${virtualId}';</script>
+                </body>
+              </html>`,
+          );
+          response.statusCode = 200;
+          response.setHeader('Content-Type', 'text/html');
+          response.end(html);
+        });
+      },
+    };
+    const server = await createServer({
+      appType: 'custom',
+      logLevel: 'error',
+      optimizeDeps: { noDiscovery: true, include: ['react', 'react-dom/client'] },
+      plugins: [harnessPlugin],
+      resolve: { alias: { ui: uiVirtualId } },
+      server: { host: '127.0.0.1', port: 0, strictPort: false },
+    });
+    const browser = await chromium.launch({ headless: true });
+    try {
+      await server.listen();
+      const address = server.httpServer?.address();
+      if (!address || typeof address === 'string') throw new Error('Vite test server has no port.');
+      const page = await browser.newPage({ viewport: { width: 900, height: 650 } });
+      await page.addInitScript(() => {
+        Object.defineProperties(SVGSVGElement.prototype, {
+          setPointerCapture: {
+            configurable: true,
+            value: () => undefined,
+          },
+          hasPointerCapture: { configurable: true, value: () => true },
+          releasePointerCapture: { configurable: true, value: () => undefined },
+        });
+      });
+      const browserErrors: string[] = [];
+      page.on('console', (message) => {
+        if (message.type() === 'error') browserErrors.push(message.text());
+      });
+      page.on('pageerror', (error) => browserErrors.push(error.message));
+      await page.goto(`http://127.0.0.1:${address.port}/__cad-table-pointer-drag-regression__`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 15_000,
+      });
+      try {
+        await page.waitForFunction(
+          () =>
+            (globalThis as typeof globalThis & { __CAD_TABLE_POINTER_READY__?: boolean })
+              .__CAD_TABLE_POINTER_READY__ === true,
+          undefined,
+          { timeout: 15_000 },
+        );
+      } catch {
+        throw new Error(`CAD browser harness did not mount: ${browserErrors.join(' | ')}`);
+      }
+      const moveTool = page.locator('[data-cad-zero-connect-move-tool]');
+      try {
+        await moveTool.click({ timeout: 5_000 });
+      } catch {
+        throw new Error(`CAD move tool did not mount: ${browserErrors.join(' | ')}`);
+      }
+      expect(await moveTool.getAttribute('aria-pressed')).toBe('true');
+
+      const viewport = page.locator('[data-sheet-viewport]');
+      const piece = page.locator('[data-cad-zero-connect-piece="closed-piece"]');
+      const hitSurface = piece.locator('rect').first();
+      await viewport.waitFor({ timeout: 5_000 });
+      await piece.waitFor({ timeout: 5_000 });
+      expect(await viewport.getAttribute('class')).toContain('cursor-move');
+      const viewBoxBefore = await viewport.getAttribute('viewBox');
+      const transformAttributeBefore = await piece.getAttribute('transform');
+      const transformBefore = translated(transformAttributeBefore);
+      if (!viewBoxBefore) throw new Error('Mounted CAD viewport has no viewBox.');
+      const [, , viewWidth, viewHeight] = viewBoxBefore.split(' ').map(Number);
+      await hitSurface.scrollIntoViewIfNeeded();
+      const viewportRect = await viewport.boundingBox();
+      const hitRect = await hitSurface.boundingBox();
+      if (!viewportRect || !hitRect) throw new Error('Mounted CAD geometry has no browser bounds.');
+      const scale = Math.min(viewportRect.width / viewWidth!, viewportRect.height / viewHeight!);
+      const startX = hitRect.x + hitRect.width / 2;
+      const startY = hitRect.y + hitRect.height / 2;
+      await page.mouse.move(startX, startY);
+      await page.mouse.down();
+      await page.mouse.move(startX + 50, startY + 25);
+      await page.waitForFunction(
+        (before) =>
+          document
+            .querySelector('[data-cad-zero-connect-piece="closed-piece"]')
+            ?.getAttribute('transform') !== before,
+        transformAttributeBefore,
+        { timeout: 5_000 },
+      );
+      const transformAfterMove = translated(await piece.getAttribute('transform'));
+
+      expect(await viewport.getAttribute('viewBox')).toBe(viewBoxBefore);
+      expect(transformAfterMove[0]).toBeCloseTo(transformBefore[0] + 50 / scale, 10);
+      expect(transformAfterMove[1]).toBeCloseTo(transformBefore[1] + 25 / scale, 10);
+      await page.mouse.up();
+      expect(await viewport.getAttribute('viewBox')).toBe(viewBoxBefore);
+      expect(translated(await piece.getAttribute('transform'))).toEqual(transformAfterMove);
+    } finally {
+      await browser.close();
+      await server.close();
+    }
+  }, 30_000);
 });
