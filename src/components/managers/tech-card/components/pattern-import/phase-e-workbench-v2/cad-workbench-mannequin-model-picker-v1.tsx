@@ -638,8 +638,8 @@ export function PatternImportDxfPhaseECadMannequinModelPickerViewV1({
       if (!controller.signal.aborted && arrangementCurrent.current.key === key)
         setArrangementMessage(
           arrangementEdits.current === editGeneration
-            ? 'Arrangement saved.'
-            : 'Earlier arrangement saved. Current changes are not saved.',
+            ? 'Placement saved. Cloth preview is unchanged.'
+            : 'Earlier placement saved. Cloth preview is unchanged. Current changes are not saved.',
         );
     } catch (error) {
       if (!controller.signal.aborted && arrangementCurrent.current.key === key)

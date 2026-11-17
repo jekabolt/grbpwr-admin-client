@@ -221,9 +221,15 @@ describe('mounted mannequin arrangement lifecycle', () => {
       await act(async () => {
         save.resolve();
       });
-      expect(strings(tree)).not.toContain('Arrangement saved.');
+      expect(strings(tree)).not.toContain('Placement saved. Cloth preview is unchanged.');
     },
   );
+  it('states that saving visual placement leaves the cloth preview unchanged', async () => {
+    input = { ...input, onSaveMannequinArrangement: vi.fn().mockResolvedValue(undefined) };
+    await render();
+    await clickSave();
+    expect(strings(tree)).toContain('Placement saved. Cloth preview is unchanged.');
+  });
   it('marks later same-source edits unsaved when the older save completes', async () => {
     const save = deferred<void>();
     input = { ...input, onSaveMannequinArrangement: () => save.promise };
