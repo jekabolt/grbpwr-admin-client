@@ -133,6 +133,16 @@ function contourTag(html: string, contourId: string): string {
   return tag;
 }
 
+function buttonTag(html: string, label: string): string {
+  const tag = html.match(new RegExp(`<button[^>]*aria-label="${label}"[^>]*>`))?.[0];
+  if (!tag) throw new Error(`Missing rendered tool button ${label}.`);
+  return tag;
+}
+
+function hasDisabledAttribute(tag: string): boolean {
+  return /\sdisabled(?:=""|(?=[\s>]))/u.test(tag);
+}
+
 function translated(value: string | null): readonly [number, number] {
   const match = value?.match(/^translate\(([-+\d.eE]+) ([-+\d.eE]+)\)$/);
   if (!match) throw new Error(`Expected translate(x y), received ${String(value)}.`);
@@ -146,6 +156,10 @@ describe('zero-operation CAD table rendering', () => {
     );
 
     expect(html).toContain('role="toolbar"');
+    expect(html).toContain('right-2 top-1/2');
+    expect(html).toContain('max-h-[calc(100%-1rem)]');
+    expect(html).toContain('-translate-y-1/2');
+    expect(html).not.toContain('left-2 top-2 z-20 flex flex-col');
     expect(html).toContain('aria-label="Select pieces"');
     expect(html).toContain('aria-label="Move selected pieces"');
     expect(html).toContain('aria-label="Connect edges"');
@@ -155,6 +169,32 @@ describe('zero-operation CAD table rendering', () => {
       'aria-keyshortcuts="Enter Space ArrowUp ArrowDown ArrowLeft ArrowRight"',
     );
     expect(html).toContain('role="button" tabindex="0" aria-disabled="false" aria-pressed="false"');
+  });
+
+  it('keeps the full toolbar usable while refusing only Connect for an existing empty operation', () => {
+    const html = renderToStaticMarkup(
+      <PatternImportDxfPhaseECadTableZeroConnectCanvasV1
+        {...fixture()}
+        zeroConnectAuthoringHandoff={{
+          status: 'unavailable',
+          blocker: {
+            code: 'zero-connect-authoring-write-refused',
+            detail: 'An existing empty operation needs a dedicated attach writer.',
+          },
+        }}
+      />,
+    );
+
+    expect(html).toContain('role="toolbar"');
+    for (const label of [
+      'Select pieces',
+      'Pan canvas',
+      'Move selected pieces',
+      'Fit all pieces',
+      'Reset piece layout',
+    ])
+      expect(hasDisabledAttribute(buttonTag(html, label))).toBe(false);
+    expect(hasDisabledAttribute(buttonTag(html, 'Connect edges'))).toBe(true);
   });
 
   it('fills and closes only contours explicitly declared closed by the saved projection', () => {

@@ -247,7 +247,7 @@ export function PatternImportDxfPhaseECadTableZeroConnectCanvasV1({
     >
       <div className='relative min-h-0 overflow-hidden'>
         <div
-          className='absolute left-2 top-2 z-20 flex flex-col gap-0.5 border border-borderColor bg-bgColor p-0.5'
+          className='absolute right-2 top-1/2 z-20 flex max-h-[calc(100%-1rem)] -translate-y-1/2 flex-col gap-0.5 overflow-y-auto border border-borderColor bg-bgColor p-0.5'
           role='toolbar'
           aria-label='2D table tools'
           data-cad-zero-connect-toolbar=''

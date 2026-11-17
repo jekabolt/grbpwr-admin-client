@@ -339,7 +339,10 @@ export function patternImportDxfPhaseECadTableZeroConnectControllerStatusV1(
   if (current.error) return current.error;
   if (current.candidate) {
     const pair = `${current.candidate.connection.sides[0].pieceLineKey} ↔ ${current.candidate.connection.sides[1].pieceLineKey}`;
-    if (current.handoffResult?.ok) return `${pair} · added to Assembly Order as draft`;
+    if (current.handoffResult?.ok)
+      return current.handoffResult.inserted === 0
+        ? `${pair} · choose seam direction in the current operation`
+        : `${pair} · added to Assembly Order as draft`;
     if (current.handoffResult) return current.handoffResult.blocker.detail;
     return `${pair} · draft ready; Add to Assembly Order awaits card identity owner`;
   }

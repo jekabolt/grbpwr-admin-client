@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isPatternImportDxfPhaseEExactSavedEmptyOperationV1,
   resolvePatternImportDxfPhaseEWorkbenchRequestedV1,
   routePatternImportDxfPhaseEAssemblyOrderEntryV2,
   shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1,
@@ -19,6 +20,7 @@ describe('saved Assembly Order workbench routing', () => {
         savedProjectionBlockerCode: null,
         selectedSeamKeys: ['seam-a'],
         savedOrderedSeamKeys: ['seam-a'],
+        exactSavedEmptyOperation: false,
       }),
     ).toBe(true);
   });
@@ -31,6 +33,7 @@ describe('saved Assembly Order workbench routing', () => {
         savedProjectionBlockerCode: 'saved-operation-missing',
         selectedSeamKeys: ['seam-a'],
         savedOrderedSeamKeys: null,
+        exactSavedEmptyOperation: false,
       }),
     ).toBe(false);
   });
@@ -42,7 +45,8 @@ describe('saved Assembly Order workbench routing', () => {
       savedSeamKeys: null,
       entryRoute: 'v2',
       blocker: 'saved-operation-not-two-seam',
-      fallback: false,
+      exactSavedEmptyOperation: true,
+      fallback: true,
     },
     {
       label: 'one seam',
@@ -50,6 +54,7 @@ describe('saved Assembly Order workbench routing', () => {
       savedSeamKeys: ['seam-a'],
       entryRoute: 'v1',
       blocker: null,
+      exactSavedEmptyOperation: false,
       fallback: true,
     },
     {
@@ -58,6 +63,7 @@ describe('saved Assembly Order workbench routing', () => {
       savedSeamKeys: ['seam-a', 'seam-b'],
       entryRoute: 'v2',
       blocker: null,
+      exactSavedEmptyOperation: false,
       fallback: false,
     },
     {
@@ -66,11 +72,12 @@ describe('saved Assembly Order workbench routing', () => {
       savedSeamKeys: ['seam-a', 'seam-b', 'seam-c'],
       entryRoute: 'v2',
       blocker: null,
+      exactSavedEmptyOperation: false,
       fallback: false,
     },
   ])(
     'routes $label without exposing the legacy exactly-two-seam blocker',
-    ({ seamKeys, savedSeamKeys, entryRoute, blocker, fallback }) => {
+    ({ seamKeys, savedSeamKeys, entryRoute, blocker, exactSavedEmptyOperation, fallback }) => {
       expect(routePatternImportDxfPhaseEAssemblyOrderEntryV2(seamKeys)).toBe(entryRoute);
       expect(
         shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
@@ -79,6 +86,7 @@ describe('saved Assembly Order workbench routing', () => {
           savedProjectionBlockerCode: blocker,
           selectedSeamKeys: seamKeys,
           savedOrderedSeamKeys: savedSeamKeys,
+          exactSavedEmptyOperation,
         }),
       ).toBe(fallback);
     },
@@ -92,6 +100,17 @@ describe('saved Assembly Order workbench routing', () => {
         savedProjectionBlockerCode: null,
         selectedSeamKeys: ['seam-a'],
         savedOrderedSeamKeys: ['seam-a'],
+        exactSavedEmptyOperation: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldUsePatternImportDxfPhaseESavedCardBrowseFallbackV1({
+        workbenchOpen: true,
+        exactNSessionAvailable: false,
+        savedProjectionBlockerCode: 'saved-operation-not-two-seam',
+        selectedSeamKeys: ['stale-live-a'],
+        savedOrderedSeamKeys: null,
+        exactSavedEmptyOperation: true,
       }),
     ).toBe(false);
     expect(
@@ -101,6 +120,7 @@ describe('saved Assembly Order workbench routing', () => {
         savedProjectionBlockerCode: 'saved-operation-ambiguous',
         selectedSeamKeys: ['seam-a'],
         savedOrderedSeamKeys: null,
+        exactSavedEmptyOperation: false,
       }),
     ).toBe(false);
     expect(
@@ -110,6 +130,7 @@ describe('saved Assembly Order workbench routing', () => {
         savedProjectionBlockerCode: 'saved-seam-not-exact',
         selectedSeamKeys: ['seam-a'],
         savedOrderedSeamKeys: null,
+        exactSavedEmptyOperation: false,
       }),
     ).toBe(false);
   });
@@ -125,6 +146,39 @@ describe('saved Assembly Order workbench routing', () => {
         savedProjectionBlockerCode: null,
         selectedSeamKeys: ['stale-live-a'],
         savedOrderedSeamKeys,
+        exactSavedEmptyOperation: false,
+      }),
+    ).toBe(false);
+  });
+
+  it('admits only a raw-empty live operation matching one raw-empty saved operation', () => {
+    const savedOperations = [{ operationNumber: 41, seamKeys: [] }];
+    expect(
+      isPatternImportDxfPhaseEExactSavedEmptyOperationV1({
+        liveOperationNumber: 41,
+        liveSeamKeys: [],
+        savedOperations,
+      }),
+    ).toBe(true);
+    expect(
+      isPatternImportDxfPhaseEExactSavedEmptyOperationV1({
+        liveOperationNumber: 41,
+        liveSeamKeys: [' '],
+        savedOperations,
+      }),
+    ).toBe(false);
+    expect(
+      isPatternImportDxfPhaseEExactSavedEmptyOperationV1({
+        liveOperationNumber: 41,
+        liveSeamKeys: [],
+        savedOperations: [...savedOperations, ...savedOperations],
+      }),
+    ).toBe(false);
+    expect(
+      isPatternImportDxfPhaseEExactSavedEmptyOperationV1({
+        liveOperationNumber: 42,
+        liveSeamKeys: [],
+        savedOperations,
       }),
     ).toBe(false);
   });
