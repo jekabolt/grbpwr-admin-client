@@ -12,6 +12,7 @@ import {
 
 import { SHEET_INK, SheetViewport, ptsAttr, vy } from '../sheet-viewport';
 import {
+  derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1,
   visiblePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1,
   type PatternImportDxfPhaseECadTableBoundaryVisibilityV1,
   type PatternImportDxfPhaseECadTableConnectEdgeSegmentV1,
@@ -54,6 +55,8 @@ import { PatternImportDxfPhaseEDraftCadGridRulersV1 } from './draft-cad-grid-rul
 import { PatternImportDxfPhaseECadWorkbenchToolButtonV1 } from './cad-workbench-tool-button-v1';
 import { CAD_WORKBENCH_SEAM_SIDE_COLORS } from './cad-workbench-seam-colors-v1';
 import { PatternImportDxfPhaseEDraftCadTopologyOverlayV1 } from './draft-cad-topology-overlay-v1';
+import { usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1 } from './cad-workbench-split-shell-v1';
+import { formatPatternImportDxfPhaseEMeasurementValueV1 } from './measurement-units-v1';
 import type { PatternImportDxfPhaseETopologyAnnotationDraftV5 } from './topology-annotation-save-control-v5';
 
 export const PATTERN_IMPORT_DXF_PHASE_E_CAD_TABLE_ZERO_CONNECT_CANVAS_V1 =
@@ -99,9 +102,69 @@ export type PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1 = Readonly<{
       pieceLineKey: string;
       contourId: string | null;
       boundaryVertexIds: readonly string[];
+      direction?: 'forward' | 'reverse';
     }>[];
   }>;
 }>;
+
+type SavedSeam = NonNullable<PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1['savedSeam']>;
+
+function sameSavedSeamEdge(
+  side: SavedSeam['sides'][number],
+  segment: PatternImportDxfPhaseECadTableConnectEdgeSegmentV1,
+) {
+  const [first, second] = side.boundaryVertexIds;
+  const [from, to] = segment.boundaryVertexIds;
+  return (
+    side.pieceId === segment.pieceId &&
+    side.pieceLineKey === segment.pieceLineKey &&
+    side.contourId === segment.contourId &&
+    side.boundaryVertexIds.length === 2 &&
+    ((first === from && second === to) || (first === to && second === from))
+  );
+}
+
+function SavedSeamMeasurements({
+  seam,
+  projection,
+}: {
+  seam: SavedSeam;
+  projection: PatternImportDxfProductPhaseEAssemblyProjectionV1;
+}) {
+  const unit = usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1()?.unit ?? 'mm';
+  const lengths = useMemo(() => {
+    if (seam.sides.length !== 2) return [];
+    const segments = derivePatternImportDxfPhaseECadTableConnectEdgeSegmentsV1(projection);
+    return seam.sides.flatMap((side) => {
+      const matches = segments.filter((segment) => sameSavedSeamEdge(side, segment));
+      if (matches.length !== 1) return [];
+      const [from, to] = matches[0]!.pointsMm;
+      const length = Math.hypot(to.x - from.x, to.y - from.y);
+      return Number.isFinite(length) ? [length] : [];
+    });
+  }, [projection, seam]);
+  const [a, b] = lengths;
+  if (a === undefined || b === undefined) return null;
+  const [sideA, sideB] = seam.sides;
+  const same = sideA?.direction === sideB?.direction;
+  return (
+    <span className='flex flex-wrap items-center gap-x-3' aria-label='Selected seam dimensions'>
+      <span>
+        Operation {seam.operationNumber} · Seam {seam.ordinal}
+      </span>
+      <span style={{ color: CAD_WORKBENCH_SEAM_SIDE_COLORS.A }}>
+        A {formatPatternImportDxfPhaseEMeasurementValueV1(a, unit).formatted}
+      </span>
+      <span style={{ color: CAD_WORKBENCH_SEAM_SIDE_COLORS.B }}>
+        B {formatPatternImportDxfPhaseEMeasurementValueV1(b, unit).formatted}
+      </span>
+      <span>
+        Difference {formatPatternImportDxfPhaseEMeasurementValueV1(Math.abs(a - b), unit).formatted}
+      </span>
+      {sideA?.direction && sideB?.direction && <span>{same ? 'Same direction' : 'Reversed'}</span>}
+    </span>
+  );
+}
 
 function layoutFor(
   projection: PatternImportDxfProductPhaseEAssemblyProjectionV1,
@@ -725,15 +788,8 @@ function CadTableZeroCanvas({
                 ? segments.map((segment) => {
                     const placed = pieceLayout(layout, segment);
                     if (!placed) return null;
-                    const savedSideIndex = savedSeam?.sides.findIndex(
-                      (side) =>
-                        side.pieceId === segment.pieceId &&
-                        side.pieceLineKey === segment.pieceLineKey &&
-                        side.contourId === segment.contourId &&
-                        side.boundaryVertexIds.length === 2 &&
-                        side.boundaryVertexIds.every((vertexId) =>
-                          segment.boundaryVertexIds.includes(vertexId),
-                        ),
+                    const savedSideIndex = savedSeam?.sides.findIndex((side) =>
+                      sameSavedSeamEdge(side, segment),
                     );
                     const savedSide =
                       savedSideIndex === 0 ? 'A' : savedSideIndex === 1 ? 'B' : null;
@@ -843,6 +899,7 @@ function CadTableZeroCanvas({
         data-cad-zero-connect-status={controller.session?.status ?? 'idle'}
         className='min-h-8 border-t border-borderColor px-2 py-1 text-micro text-labelColor'
       >
+        {savedSeam ? <SavedSeamMeasurements seam={savedSeam} projection={projection} /> : null}
         {savedAnnotationBlocker ??
           status ??
           (selectsPieces

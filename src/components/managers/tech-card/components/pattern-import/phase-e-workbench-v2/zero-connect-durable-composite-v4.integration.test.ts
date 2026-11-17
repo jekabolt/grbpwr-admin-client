@@ -367,6 +367,11 @@ describe('zero-connect durable N=1 genuine production chain', () => {
       expect(mounted.markup).toContain('data-restored-scene-status="available"');
       expect(mounted.markup).toContain('aria-label="Operation 120, seam 1 side A"');
       expect(mounted.markup).toContain('aria-label="Operation 120, seam 1 side B"');
+      expect(mounted.markup).toContain('aria-label="Selected seam dimensions"');
+      expect(mounted.markup).toMatch(/>A\s+[0-9.]+ mm</);
+      expect(mounted.markup).toMatch(/>B\s+[0-9.]+ mm</);
+      expect(mounted.markup).toContain('Difference 0.0 mm');
+      expect(mounted.markup).toContain('Reversed');
       const [front, back] = mounted.view.overlay.pieces;
       const [frontLayout, backLayout] = table.layout.pieces;
       if (!front || !back || !frontLayout || !backLayout)
