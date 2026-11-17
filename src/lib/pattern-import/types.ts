@@ -25,6 +25,10 @@ import type {
   DxfProductPhaseDReplayRequestV1,
   DxfProductPhaseDReplayStageOutputV1,
 } from './dxf-product-phase-d-replay-v1';
+import type {
+  DxfNativeSewingReplayRequestV1,
+  DxfNativeSewingReplayStageOutputV1,
+} from './dxf-native-sewing-replay-v1';
 export type { SheetAnswer, SheetLegend, SheetPieces } from './pieces/sheets';
 
 // The garment passport (auto/PASSPORT.md): its own module, re-exported here for the UI.
@@ -3203,6 +3207,8 @@ export type StageName =
   | 'dxf-provenance'
   /** Separate opt-in source/contour replay carrier; the public provenance stage stays path-id-free. */
   | 'dxf-phase-d-replay'
+  /** Additive explicit L14 native sewing replay; never substitutes the outer contour stage. */
+  | 'dxf-native-sewing-replay'
   | 'fabrics'
   | 'render-som'
   /** A9 side stage: page thumbnails + stats for the AI page-role call (invalidates nothing). */
@@ -3394,6 +3400,10 @@ export type StageIO = {
   'dxf-phase-d-replay': {
     in: DxfProductPhaseDReplayRequestV1;
     out: DxfProductPhaseDReplayStageOutputV1;
+  };
+  'dxf-native-sewing-replay': {
+    in: DxfNativeSewingReplayRequestV1;
+    out: DxfNativeSewingReplayStageOutputV1;
   };
   fabrics: {
     in: {

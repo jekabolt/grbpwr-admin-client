@@ -234,6 +234,11 @@ export type SemanticsDetail = {
   notchChordsOf: (identity: string, rank: number) => NotchChord[] | undefined;
   /** Internal opt-in trace for the exact DXF lineage side stage; never added to SemanticsOutput. */
   dxfProvenanceOf: (identity: string, rank: number) => DxfSemanticsProvenanceTraceV1 | undefined;
+  /** Separate native drawn sewing trace; never substitutes for the legacy outer trace. */
+  dxfSewingProvenanceOf: (
+    identity: string,
+    rank: number,
+  ) => DxfSemanticsProvenanceTraceV1 | undefined;
   /** Per piece: the offset reports and measured numbers the probe and the wizard show. */
   notes: Record<PieceKey, string[]>;
 };
@@ -2689,6 +2694,54 @@ export function buildPieceSpecsDetailed(
       mutations: Object.freeze(mutationOrder.filter((mutation) => events.has(mutation))),
     });
   };
+  const dxfSewingProvenanceOf = (
+    identity: string,
+    rank: number,
+  ): DxfSemanticsProvenanceTraceV1 | undefined => {
+    const src = sourceOf(identity, rank);
+    if (!src || !(src.cand as PieceCandidate & DxfExtra).dxf) return undefined;
+    const cand = src.cand as PieceCandidate & DxfExtra;
+    const seams = cand.dxf!.features?.filter((feature) => feature.kind === 'seam') ?? [];
+    const drawn = seams.length === 1 && seams[0].kind === 'seam' ? seams[0].pts : null;
+    const events = new Set<DxfPipelineMutationEventV1>();
+    if (!drawn || drawn.length < 3) events.add('unknown');
+    if (cand.dxf!.rulGraded) events.add('rul');
+    if (src.w.fold) events.add('unfold');
+    if (
+      src.w.t.a !== 1 ||
+      src.w.t.b !== 0 ||
+      src.w.t.c !== 0 ||
+      src.w.t.d !== 1 ||
+      src.w.t.e !== 0 ||
+      src.w.t.f !== 0
+    )
+      events.add('mirror');
+    const direction = drawn && signedArea(drawn) < 0 ? ('reverse' as const) : ('forward' as const);
+    const expected = drawn ? (direction === 'reverse' ? [...drawn].reverse() : drawn) : null;
+    const matches = unique.filter((piece) => piece.identity === identity);
+    const sizes = matches.length === 1 ? matches[0].sizes.filter((size) => size.rank === rank) : [];
+    const actual = sizes.length === 1 ? sizes[0].seam : null;
+    // Only compare the declared sample order. Never search coordinates or transfer cut IDs.
+    if (
+      !expected ||
+      !actual ||
+      actual.length !== expected.length ||
+      actual.some(
+        (point, index) =>
+          Math.abs(point.x - expected[index].x) > 1e-9 ||
+          Math.abs(point.y - expected[index].y) > 1e-9,
+      )
+    )
+      events.add('unknown');
+    return Object.freeze({
+      seed: cand.seed,
+      rank: cand.rank,
+      geometry: 'seam' as const,
+      cyclicShift: 0 as const,
+      direction,
+      mutations: Object.freeze([...events]),
+    });
+  };
   /** Source-frame lines → the identity's frame: the fold edge dropped and mirrored, then `t`. */
   const toFrame = (w: WallMap, lines: PtMm[][]): PtMm[][] => {
     if (w.fold) {
@@ -2958,6 +3011,7 @@ export function buildPieceSpecsDetailed(
     gradeOf,
     notchChordsOf,
     dxfProvenanceOf,
+    dxfSewingProvenanceOf,
     notes,
   };
 }

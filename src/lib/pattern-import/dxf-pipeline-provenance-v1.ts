@@ -455,10 +455,38 @@ export function createDxfCandidateLineageSidecarV1(
   }
 }
 
+/** Additive selected-surface capture. Only a single explicitly labelled L14 path is eligible;
+ * the legacy outer contour choice above is unchanged. No coordinate search establishes its role. */
+export function createDxfNativeSewingCandidateLineageV1(
+  segmentation: DxfSegmentation,
+  source: DxfPieceSpecProvenanceSourceV1,
+  uniformPositiveScale: number,
+): ReturnType<typeof createDxfCandidateLineageSidecarV1> {
+  if (candidateSnapshotClaimed)
+    return Object.freeze({
+      ok: false as const,
+      blockers: Object.freeze([
+        dxfPipelineBlockerV1('invalid-input', 'reentrant native sewing capture was refused.'),
+      ]),
+    });
+  candidateSnapshotClaimed = true;
+  try {
+    return createDxfCandidateLineageSidecarUnclaimedV1(
+      segmentation,
+      source,
+      uniformPositiveScale,
+      true,
+    );
+  } finally {
+    candidateSnapshotClaimed = false;
+  }
+}
+
 function createDxfCandidateLineageSidecarUnclaimedV1(
   segmentation: DxfSegmentation,
   source: DxfPieceSpecProvenanceSourceV1,
   uniformPositiveScale: number,
+  nativeSewing = false,
 ):
   | Readonly<{ ok: true; value: DxfCandidateLineageSidecarV1 }>
   | Readonly<{ ok: false; blockers: readonly DxfPipelineProvenanceBlockerV1[] }> {
@@ -466,7 +494,7 @@ function createDxfCandidateLineageSidecarUnclaimedV1(
   let snapshot: ReturnType<typeof snapshotSegmentationSelection>;
   let exactSource: DxfPieceSpecProvenanceSourceV1;
   try {
-    snapshot = snapshotSegmentationSelection(segmentation);
+    snapshot = snapshotSegmentationSelection(segmentation, nativeSewing);
     const validatedSource = createDxfPieceSpecProvenanceBridgeInputV1(source, Object.freeze([]));
     if (!validatedSource.ok)
       return Object.freeze({
@@ -528,7 +556,7 @@ function createDxfCandidateLineageSidecarUnclaimedV1(
         );
         continue;
       }
-      const ranks = piece.size ? (tokenRanks.get(piece.size) ?? []) : [0];
+      const ranks = piece.size ? tokenRanks.get(piece.size) ?? [] : [0];
       if (ranks.length !== 1) {
         blockers.push(
           dxfPipelineBlockerV1(
@@ -554,17 +582,37 @@ function createDxfCandidateLineageSidecarUnclaimedV1(
         continue;
       }
       keys.add(key);
-      const selected = preferSeam
-        ? piece.seam
-          ? { contour: piece.seam, geometry: 'seam' as const }
+      if (
+        nativeSewing &&
+        (piece.seamSource !== 'L14' ||
+          !piece.seam ||
+          piece.seam.paths.length !== 1 ||
+          piece.seamRolePathIds?.length !== 1 ||
+          piece.seamRolePathIds[0] !== piece.seam.paths[0])
+      ) {
+        blockers.push(
+          dxfPipelineBlockerV1(
+            'candidate-lineage-missing',
+            `candidate ${key} requires one unambiguous explicitly labelled L14 seam path; inferred, absent or merged seams are unsupported.`,
+            identity.identity,
+            piece.size,
+          ),
+        );
+        continue;
+      }
+      const selected = nativeSewing
+        ? { contour: piece.seam!, geometry: 'seam' as const }
+        : preferSeam
+          ? piece.seam
+            ? { contour: piece.seam, geometry: 'seam' as const }
+            : piece.cut
+              ? { contour: piece.cut, geometry: 'cut' as const }
+              : null
           : piece.cut
             ? { contour: piece.cut, geometry: 'cut' as const }
-            : null
-        : piece.cut
-          ? { contour: piece.cut, geometry: 'cut' as const }
-          : piece.seam
-            ? { contour: piece.seam, geometry: 'seam' as const }
-            : null;
+            : piece.seam
+              ? { contour: piece.seam, geometry: 'seam' as const }
+              : null;
       const outer = selected?.contour ?? null;
       if (!outer) {
         blockers.push(
@@ -657,6 +705,8 @@ type SelectionSnapshot = Readonly<{
     size: string;
     cut: Readonly<{ paths: readonly number[] }> | null;
     seam: Readonly<{ paths: readonly number[] }> | null;
+    seamSource?: string | null;
+    seamRolePathIds?: readonly number[];
   }>[];
 }>;
 
@@ -736,7 +786,7 @@ function snapshotPathRef(value: unknown, label: string): Readonly<{ paths: reado
   return Object.freeze({ paths: Object.freeze(paths) });
 }
 
-function snapshotSegmentationSelection(value: unknown): SelectionSnapshot {
+function snapshotSegmentationSelection(value: unknown, nativeSewing = false): SelectionSnapshot {
   const root = dataRecord(value, 'segmentation');
   const rawIdentities = dataArray(
     field(root, 'identities', 'segmentation'),
@@ -793,8 +843,28 @@ function snapshotSegmentationSelection(value: unknown): SelectionSnapshot {
     const cut = field(descriptors, 'cut', `segmentation.pieces[${index}]`);
     const seam = field(descriptors, 'seam', `segmentation.pieces[${index}]`);
     const exactSize = strictBoundedLabel(size, `segmentation.pieces[${index}].size`);
+    let selectedSeam: { seamSource: string | null; seamRolePathIds: readonly number[] } | undefined;
+    if (nativeSewing) {
+      const label = `segmentation.pieces[${index}]`;
+      const rawSource = field(descriptors, 'seamSource', label);
+      const seamSource =
+        rawSource === null ? null : strictBoundedLabel(rawSource, `${label}.seamSource`);
+      const roles = dataRecord(field(descriptors, 'roles', label), `${label}.roles`);
+      if (Reflect.ownKeys(roles).length > 100_000)
+        throw new TypeError('too many native path roles');
+      const seamRolePathIds = Object.keys(roles)
+        .filter((key) => roles[key].value === 'seam')
+        .map((key) => {
+          const id = Number(key);
+          if (!Number.isSafeInteger(id) || id < 0 || String(id) !== key)
+            throw new TypeError('invalid native seam role PathId');
+          return id;
+        });
+      selectedSeam = { seamSource, seamRolePathIds: Object.freeze(seamRolePathIds) };
+    }
     return Object.freeze({
       size: exactSize,
+      ...selectedSeam,
       cut: cut === null ? null : snapshotPathRef(cut, `segmentation.pieces[${index}].cut`),
       seam: seam === null ? null : snapshotPathRef(seam, `segmentation.pieces[${index}].seam`),
     });

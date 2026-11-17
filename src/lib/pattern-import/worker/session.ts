@@ -99,6 +99,7 @@ import {
   bridgeDxfPipelineProvenanceV1,
   computeDxfPipelineContentBindingV1,
   createDxfCandidateLineageSidecarV1,
+  createDxfNativeSewingCandidateLineageV1,
   createDxfPipelineContourIdV1,
   dxfPipelineBlockerV1,
   phaseCBlockersToPipelineV1,
@@ -113,6 +114,17 @@ import {
   validateDxfProductPhaseDReplayRequestV1,
   type DxfProductPhaseDReplayStageOutputV1,
 } from '../dxf-product-phase-d-replay-v1';
+import {
+  blockedDxfNativeSewingReplayV1,
+  buildDxfNativeSewingReplayV1,
+  validateDxfNativeSewingReplayRequestV1,
+  type DxfNativeSewingReplayStageOutputV1,
+} from '../dxf-native-sewing-replay-v1';
+import {
+  readDxfWithSourceNativeStraightEdgeAuthorityV1,
+  projectDxfSourceNativeStraightEdgeAuthorityV1,
+  DXF_SOURCE_NATIVE_STRAIGHT_EDGE_PROJECTION_REQUEST_V1,
+} from '../dxf-source-native-straight-edge-authority-v1';
 import { createDxfSourceCurveIdV1 } from '../dxf-path-provenance-v1';
 import { extractRasterImageDetailed } from '../adapters/raster';
 import { pdfHasNoCurves } from '../etalon/junk';
@@ -508,6 +520,11 @@ export class Session {
   /** Private pre-candidate PathId selection; never returned by any worker stage. */
   private dxfCandidateLineage: DxfCandidateLineageSidecarV1 | null = null;
   private dxfPipelineProvenance: DxfPipelineProvenanceStageOutputV1 | null = null;
+  private dxfSewingLineage: DxfCandidateLineageSidecarV1 | null = null;
+  private dxfSewingBlockers: readonly DxfPipelineProvenanceBlockerV1[] = [];
+  private dxfSewingTrace: SemanticsDetail['dxfSewingProvenanceOf'] | null = null;
+  private dxfSewingEpoch = 0;
+
   /** Several DXF files, one per size (owner decision 5): merged into one drawing by the first read
    * (R4: in the cancellable read stage, never at open), kept for the rereads. */
   private isDxfSet = false;
@@ -700,6 +717,10 @@ export class Session {
   }
 
   close() {
+    this.dxfSewingEpoch += 1;
+    this.dxfSewingLineage = null;
+    this.dxfSewingTrace = null;
+    this.dxfSewingBlockers = [];
     this.blobs.clear();
     this.docs = null;
     this.sheet = null;
@@ -716,6 +737,8 @@ export class Session {
   private invalidateAfter(stage: StageName) {
     const at = ORDER.indexOf(stage);
     if (at < 0) return;
+    this.dxfSewingEpoch += 1;
+    if (at <= ORDER.indexOf('semantics')) this.dxfSewingTrace = null;
     if (at < ORDER.indexOf('clean')) {
       this.masks = null;
       this.cleanEdits = [];
@@ -726,6 +749,8 @@ export class Session {
       this.decision = null;
       this.fast = null;
       this.dxfCandidateLineage = null;
+      this.dxfSewingLineage = null;
+      this.dxfSewingBlockers = [];
     }
     if (at < ORDER.indexOf('assemble')) this.sheet = null;
     if (at < ORDER.indexOf('chains')) {
@@ -795,6 +820,11 @@ export class Session {
           return this.dxfProvenanceStage(input as StageIO['dxf-provenance']['in']);
         case 'dxf-phase-d-replay':
           return this.dxfPhaseDReplayStage(input as StageIO['dxf-phase-d-replay']['in']);
+        case 'dxf-native-sewing-replay':
+          return this.dxfNativeSewingReplayStage(
+            input as StageIO['dxf-native-sewing-replay']['in'],
+            ctx,
+          );
         case 'render-som':
           return this.renderSomStage(input as StageIO['render-som']['in']);
         case 'render-pages':
@@ -820,6 +850,9 @@ export class Session {
     this.dxfProvenanceContours = null;
     this.dxfCandidateLineage = null;
     this.dxfPipelineProvenance = null;
+    this.dxfSewingLineage = null;
+    this.dxfSewingTrace = null;
+    this.dxfSewingBlockers = [];
     this.dxfProvenanceRunBlockers = [...this.dxfProvenanceSetupBlockers];
     // C4: one work budget for all files of this read (adapters/budget.ts)
     const runOpts: ExtractOpts = { ...opts, budget: new WorkBudget() };
@@ -1220,7 +1253,16 @@ export class Session {
               return { read: r2, seg: segmentDxf(r2) };
             })();
       this.dxfCandidateLineage = null;
+      this.dxfSewingLineage = null;
+      this.dxfSewingBlockers = [];
       if (this.dxfProvenanceSource && this.dxfProvenanceRunBlockers.length === 0) {
+        const sewing = createDxfNativeSewingCandidateLineageV1(
+          scaled.seg,
+          this.dxfProvenanceSource,
+          appliedDxfFactor,
+        );
+        if (sewing.ok) this.dxfSewingLineage = sewing.value;
+        else this.dxfSewingBlockers = sewing.blockers;
         const lineage = createDxfCandidateLineageSidecarV1(
           scaled.seg,
           this.dxfProvenanceSource,
@@ -2162,6 +2204,7 @@ export class Session {
     this.onePieceOf = detail.onePieceOf;
     this.gradeOf = detail.gradeOf;
     this.dxfPipelineProvenance = await this.buildDxfPipelineProvenance(detail, output);
+    this.dxfSewingTrace = detail.dxfSewingProvenanceOf;
     return output;
   }
 
@@ -2382,6 +2425,84 @@ export class Session {
         ),
       ])
     );
+  }
+
+  private async dxfNativeSewingReplayStage(
+    input: StageIO['dxf-native-sewing-replay']['in'],
+    ctx: StageCtx,
+  ): Promise<DxfNativeSewingReplayStageOutputV1> {
+    const invalid = validateDxfNativeSewingReplayRequestV1(input);
+    if (invalid) return blockedDxfNativeSewingReplayV1([invalid]);
+    const refuse = (detail: string) =>
+      blockedDxfNativeSewingReplayV1([dxfPipelineBlockerV1('candidate-lineage-missing', detail)]);
+    if (!this.dxfOpenProvenance.requested)
+      return refuse('Native sewing requires exact original-source opt-in.');
+    if (this.dxfProvenanceRunBlockers.length)
+      return blockedDxfNativeSewingReplayV1(this.dxfProvenanceRunBlockers);
+    if (this.dxfSewingBlockers.length)
+      return blockedDxfNativeSewingReplayV1(this.dxfSewingBlockers);
+    const lineage = this.dxfSewingLineage,
+      semantics = this.semantics,
+      trace = this.dxfSewingTrace;
+    const sourceIndex = this.dxfOpenProvenance.fileIndex;
+    const sourceFileId = this.dxfOpenProvenance.sourceFileId;
+    if (!lineage || !semantics || !trace || sourceIndex === null || sourceFileId === null)
+      return refuse('Native sewing needs a current pre-flatten lineage and semantics pass.');
+    const blob = this.blobs.get(`file:${sourceIndex}`),
+      sourceSha256 = this.sha.get(String(sourceIndex));
+    if (!blob || !sourceSha256)
+      return refuse('Exact retained original bytes and digest are unavailable.');
+    const epoch = this.dxfSewingEpoch;
+    const current = () => {
+      ctx.checkCancel();
+      if (
+        epoch !== this.dxfSewingEpoch ||
+        lineage !== this.dxfSewingLineage ||
+        semantics !== this.semantics ||
+        trace !== this.dxfSewingTrace ||
+        blob !== this.blobs.get(`file:${sourceIndex}`)
+      )
+        throw new ImportError(
+          'out-of-order',
+          'Native sewing source changed during replay.',
+          'dxf-native-sewing-replay',
+        );
+    };
+    current();
+    const traces = semantics.pieces.flatMap((piece) =>
+      piece.sizes.map((size) => ({
+        pieceId: piece.identity,
+        sizeToken: size.sizeToken,
+        trace: trace(piece.identity, size.rank) ?? null,
+      })),
+    );
+    const bytes = await blob.arrayBuffer();
+    current();
+    // Extra opt-in decode is intentional: parameter-space labels alone never prove a straight line.
+    const nativeRead = await readDxfWithSourceNativeStraightEdgeAuthorityV1(
+      { id: String(sourceIndex), name: this.files[sourceIndex].name, bytes },
+      DEFAULT_OPTS,
+      { sourceFileId },
+      () => current(),
+    );
+    current();
+    if (!nativeRead.ok)
+      return refuse(nativeRead.blockers.map((blocker) => blocker.detail).join('; '));
+    const native = projectDxfSourceNativeStraightEdgeAuthorityV1(nativeRead.value.owner, {
+      schemaVersion: DXF_SOURCE_NATIVE_STRAIGHT_EDGE_PROJECTION_REQUEST_V1,
+      sourceFileId,
+      sourceSha256,
+    });
+    if (!native.ok) return refuse(native.blockers.map((blocker) => blocker.detail).join('; '));
+    current();
+    const result = await buildDxfNativeSewingReplayV1(
+      lineage,
+      semantics.pieces,
+      traces,
+      native.projection,
+    );
+    current();
+    return result;
   }
 
   private async dxfPhaseDReplayStage(
