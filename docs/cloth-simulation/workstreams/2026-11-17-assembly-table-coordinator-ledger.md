@@ -68,6 +68,13 @@ PlacementV3 is not a generic carrier and must not be coerced into this role. The
 SHA remains the CAS/read receipt and is not embedded into its own graph. Full AO identity is bound
 inside the graph, and the existing persistence owner remains the sole writer.
 
+Ownership is split once: the Table workstream owns the outer full-graph container, component
+registry, persistence/CAS/backend admission and authoring UI. The cloth workstream owns the new
+generic physical-initialization DTO/codec/projection and physical host/body dispatcher/runtime.
+The Table integration consumes those exports; it does not implement a second mapping codec,
+physical host, solver or runtime. No component version is reserved before both owners freeze the
+shared payload contract.
+
 ## Completion rule
 
 Toolbar presence, session preview, compile receipts, blocker-only tests, status panels, codec
