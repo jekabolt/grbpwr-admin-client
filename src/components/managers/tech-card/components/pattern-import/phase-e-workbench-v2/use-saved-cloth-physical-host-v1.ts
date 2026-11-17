@@ -253,6 +253,7 @@ export function useSavedClothPhysicalHostV1({
     null,
   );
   const firstControllerRef = useRef<AbortController | null>(null);
+  const firstSaveControllerRef = useRef<AbortController | null>(null);
   const firstGenerationRef = useRef(0);
   const [firstAuthoring, setFirstAuthoring] = useState<SavedClothFirstAuthoringStateV1>({
     status: 'idle',
@@ -264,6 +265,8 @@ export function useSavedClothPhysicalHostV1({
   const releaseFirstAuthoring = useCallback(async () => {
     firstControllerRef.current?.abort();
     firstControllerRef.current = null;
+    firstSaveControllerRef.current?.abort();
+    firstSaveControllerRef.current = null;
     const host = firstHostRef.current;
     firstHostRef.current = null;
     firstGenerationRef.current = 0;
@@ -472,9 +475,13 @@ export function useSavedClothPhysicalHostV1({
         sourceGeometry,
         error: null,
       });
-      firstControllerRef.current?.abort();
+      // The controller stored in `firstControllerRef` owns the compiled source lifetime. Aborting
+      // it here revokes the genuine observed-host source before bind/persist can consume it. A
+      // save has its own operation controller; release/replacement still aborts both lifetimes.
+      firstSaveControllerRef.current?.abort();
       const controller = new AbortController();
-      firstControllerRef.current = controller;
+      firstSaveControllerRef.current = controller;
+      const sourceController = firstControllerRef.current;
       try {
         const bound = await bindSavedFullAssemblyGenericFirstAuthoringV1(
           authoringHost,
@@ -497,8 +504,11 @@ export function useSavedClothPhysicalHostV1({
       } catch (error) {
         if (
           firstHostRef.current !== authoringHost ||
-          firstControllerRef.current !== controller ||
-          controller.signal.aborted
+          firstSaveControllerRef.current !== controller ||
+          controller.signal.aborted ||
+          sourceController === null ||
+          firstControllerRef.current !== sourceController ||
+          sourceController.signal.aborted
         )
           return;
         setFirstAuthoring({
