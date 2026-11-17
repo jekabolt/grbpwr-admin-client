@@ -57,6 +57,11 @@ export function useSheetMeasurementFocus() {
   return value;
 }
 
+/** For views that may render outside the measurement sheet (previews, capture pages). */
+export function useOptionalSheetMeasurementFocus() {
+  return useContext(SheetMeasurementFocusContext);
+}
+
 // Phone hint while a measurement is typed. iOS opens the keyboard by shrinking only the VISIBLE
 // viewport and scrolling it inside the layout one, so a `sticky`/`fixed; top` strip drifts off the
 // top of the screen. The strip is pinned to `visualViewport.offsetTop` instead, written straight to

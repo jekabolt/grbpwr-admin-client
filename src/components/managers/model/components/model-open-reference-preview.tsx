@@ -144,7 +144,10 @@ import {
   modelOpenReferenceMeasurementApplicationV1,
   type ModelOpenReferenceMeasurementApplicationV1,
 } from './model-open-reference-measurement-application-v1';
-import { buildMeasurementSurfaceActiveMeasurementGuideV1 } from 'components/shared/measurement-surface-active-measurement-guide-v1';
+import {
+  buildMeasurementSurfaceActiveMeasurementGuideV1,
+  measurementSurfaceMeasurementGuideViewV1,
+} from 'components/shared/measurement-surface-active-measurement-guide-v1';
 import {
   MODEL_OPEN_REFERENCE_FULL_BODY_NEUTRAL_POSE_V3,
   ModelOpenReferenceFullBodyPoseControlV3,
@@ -209,6 +212,7 @@ import {
   type ModelOpenReferenceLinkedPoseControlStatusV2,
 } from './model-open-reference-linked-pose-control-v2';
 import type { ModelFormData } from './schema';
+import { useOptionalSheetMeasurementFocus } from './sheet-measurement-focus';
 
 type PreviewStatus = 'idle' | 'building' | MeasurementSurfaceStageStatus;
 
@@ -3163,6 +3167,19 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
   );
   const measurementGuideIsDrawn =
     measurementGuide?.status === 'visible' || measurementGuide?.status === 'limited';
+  // The camera follows the focused field only; a row hover shows its line without turning.
+  const focusedMeasurementName = useOptionalSheetMeasurementFocus()?.focused ?? null;
+  const focusedGuideView = !focusedMeasurementName
+    ? undefined
+    : measurementGuide?.measurementName === focusedMeasurementName
+      ? measurementGuideIsDrawn
+        ? measurementGuide.view
+        : undefined
+      : measurementSurfaceMeasurementGuideViewV1(
+          focusedMeasurementName as common_BodyMeasurementName,
+        );
+  const measurementGuideCameraView =
+    focusedGuideView === 'back' || focusedGuideView === 'side' ? focusedGuideView : undefined;
   const measurementGuideStatusText =
     measurementGuide?.status === 'visible' || measurementGuide?.status === 'limited'
       ? `visual guide visible for ${measurementGuide.label}`
@@ -3964,6 +3981,7 @@ function ModelOpenReferenceFullBodyPreviewEditor<Pose extends object>({
                 }
                 measurementGuide={measurementGuide}
                 measurementGuidePresentation={measurementGuidePresentation}
+                measurementGuideCameraView={measurementGuideCameraView}
                 viewPreset={viewPreset}
                 overlays={DISPLAY_OVERLAYS}
                 jointEditor={

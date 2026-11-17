@@ -23,18 +23,29 @@ export type MeasurementSurfaceMeasurementGuideStatusV1 =
   | 'unavailable-section'
   | 'unsupported';
 
+/**
+ * A straight or depth line that runs through the body by definition. `x-ray` draws the hidden part
+ * through the body (dashed, lighter, end dots); `caliper` draws the whole line over the body.
+ */
+export type MeasurementSurfaceMeasurementGuideAirV1 = 'x-ray' | 'caliper';
+
+/** Where the camera looks while the field is focused; absent means the owner's camera. */
+export type MeasurementSurfaceMeasurementGuideViewV1 = 'front' | 'back' | 'side';
+
 export type MeasurementSurfaceMeasurementGuidePathV1 =
   | Readonly<{
       readonly id: string;
       readonly closed: boolean;
       readonly source: 'mesh-vertices';
       readonly vertexIndices: readonly number[];
+      readonly air?: MeasurementSurfaceMeasurementGuideAirV1;
     }>
   | Readonly<{
       readonly id: string;
       readonly closed: boolean;
       readonly source: 'fixed-points';
       readonly pointsM: readonly (readonly [number, number, number])[];
+      readonly air?: MeasurementSurfaceMeasurementGuideAirV1;
     }>;
 
 export interface MeasurementSurfaceActiveMeasurementGuideV1 {
@@ -43,6 +54,8 @@ export interface MeasurementSurfaceActiveMeasurementGuideV1 {
   readonly label: string;
   readonly status: MeasurementSurfaceMeasurementGuideStatusV1;
   readonly paths: readonly MeasurementSurfaceMeasurementGuidePathV1[];
+  /** Per-field camera view (back or side) for lines that only read from there. */
+  readonly view?: MeasurementSurfaceMeasurementGuideViewV1;
   readonly claims: Readonly<{
     readonly visualGuideOnly: true;
     readonly measurementProtocolEquivalent: false;
@@ -116,6 +129,37 @@ function result(
     paths: Object.freeze([...paths]),
     claims: CLAIMS,
   });
+}
+
+/** Fields whose line reads only from the back or the side (owner-approved mockup, variant C). */
+const FIELD_VIEWS = Object.freeze({
+  BODY_MEASUREMENT_NAME_CB_NECK_TO_WAIST: 'back',
+  BODY_MEASUREMENT_NAME_ACROSS_BACK: 'back',
+  BODY_MEASUREMENT_NAME_SLEEVE_LENGTH: 'back',
+  BODY_MEASUREMENT_NAME_CHEST_DEPTH: 'side',
+  BODY_MEASUREMENT_NAME_WAIST_DEPTH: 'side',
+  BODY_MEASUREMENT_NAME_HIP_DEPTH: 'side',
+} satisfies Partial<Record<common_BodyMeasurementName, MeasurementSurfaceMeasurementGuideViewV1>>);
+
+export function measurementSurfaceMeasurementGuideViewV1(
+  measurementName: common_BodyMeasurementName,
+): MeasurementSurfaceMeasurementGuideViewV1 | undefined {
+  return FIELD_VIEWS[measurementName as keyof typeof FIELD_VIEWS];
+}
+
+function withView(
+  guide: MeasurementSurfaceActiveMeasurementGuideV1,
+): MeasurementSurfaceActiveMeasurementGuideV1 {
+  const view = measurementSurfaceMeasurementGuideViewV1(guide.measurementName);
+  if (!view || (guide.status !== 'visible' && guide.status !== 'limited')) return guide;
+  return Object.freeze({ ...guide, view });
+}
+
+function airPath<T extends MeasurementSurfaceMeasurementGuidePathV1 | null>(
+  path: T,
+  air: MeasurementSurfaceMeasurementGuideAirV1,
+): T {
+  return (path ? Object.freeze({ ...path, air }) : null) as T;
 }
 
 function landmark(frame: MeasurementBodyFrameV2, id: string): Vec3 | null {
@@ -446,7 +490,13 @@ function drawnOrUnavailable(
  * positions without rebuilding the Three scene. Fixed-coordinate guides fail soft outside the
  * neutral pose because they cannot truthfully follow the deformed body.
  */
-export function buildMeasurementSurfaceActiveMeasurementGuideV1(options: {
+export function buildMeasurementSurfaceActiveMeasurementGuideV1(
+  options: Parameters<typeof buildGuide>[0],
+): MeasurementSurfaceActiveMeasurementGuideV1 {
+  return withView(buildGuide(options));
+}
+
+function buildGuide(options: {
   readonly measurementName: common_BodyMeasurementName;
   readonly frame: MeasurementBodyFrameV2;
   readonly mesh: MeasurementSurfaceMeshV1;
@@ -535,14 +585,17 @@ export function buildMeasurementSurfaceActiveMeasurementGuideV1(options: {
           : null;
   if (depthStation) {
     return drawnOrUnavailable(measurementName, 'limited', [
-      vertexPath(
-        measurementName,
-        mesh,
-        [
-          [0, depthStation.yM, depthStation.halfDepthM],
-          [0, depthStation.yM, -depthStation.halfDepthM],
-        ],
-        false,
+      airPath(
+        vertexPath(
+          measurementName,
+          mesh,
+          [
+            [0, depthStation.yM, depthStation.halfDepthM],
+            [0, depthStation.yM, -depthStation.halfDepthM],
+          ],
+          false,
+        ),
+        'caliper',
       ),
     ]);
   }
@@ -615,7 +668,7 @@ export function buildMeasurementSurfaceActiveMeasurementGuideV1(options: {
     const path = vertexPath(measurementName, mesh, [shoulderLeft, shoulderRight], false);
     if (!path && !options.neutralPose) return result(measurementName, 'unavailable-pose');
     return result(measurementName, 'limited', [
-      path ?? fixedPath(measurementName, [shoulderLeft, shoulderRight]),
+      airPath(path ?? fixedPath(measurementName, [shoulderLeft, shoulderRight]), 'x-ray'),
     ]);
   }
 
@@ -649,7 +702,7 @@ export function buildMeasurementSurfaceActiveMeasurementGuideV1(options: {
     const path = vertexPath(measurementName, mesh, [shoulderLeft, elbow, wrist], false);
     if (!path && !options.neutralPose) return result(measurementName, 'unavailable-pose');
     return result(measurementName, 'limited', [
-      path ?? fixedPath(measurementName, [shoulderLeft, elbow, wrist]),
+      airPath(path ?? fixedPath(measurementName, [shoulderLeft, elbow, wrist]), 'x-ray'),
     ]);
   }
 
