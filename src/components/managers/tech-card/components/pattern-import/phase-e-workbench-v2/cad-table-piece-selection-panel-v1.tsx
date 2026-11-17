@@ -3,6 +3,11 @@ import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/patt
 import { areaOf, perimeter } from 'lib/pattern-import/semantics/geom';
 
 import { PatternImportDxfPhaseECadWorkbenchObjectSidebarV1 } from './cad-workbench-object-sidebar-v1';
+import { usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1 } from './cad-workbench-split-shell-v1';
+import {
+  formatPatternImportDxfPhaseEMeasurementAreaV1,
+  formatPatternImportDxfPhaseEMeasurementValueV1,
+} from './measurement-units-v1';
 import {
   patternImportDxfPhaseECadTablePieceKeyV1,
   selectPatternImportDxfPhaseECadTablePiecesV1,
@@ -48,6 +53,7 @@ export function CadTablePieceSelectionPanel({
   features?: CadTablePieceFeaturesByKey;
 }>) {
   const { selectedPieceKeys } = owner.session.layout;
+  const unit = usePatternImportDxfPhaseECadWorkbenchMeasurementUnitV1()?.unit ?? 'mm';
   const rows = projection.pieces.map((piece) => {
     const objectKey = patternImportDxfPhaseECadTablePieceKeyV1(piece.pieceId, piece.pieceLineKey);
     const feature = features?.get(objectKey);
@@ -66,7 +72,7 @@ export function CadTablePieceSelectionPanel({
       ? rows.find(({ objectKey }) => objectKey === selectedPieceKeys[0])
       : undefined;
 
-  let measurements: { areaMm2: number; perimeterMm: number } | null = null;
+  let measurements: { areaMm2: number; perimeterMm: number; sewingOnly: boolean } | null = null;
   if (active) {
     const closed = active.piece.contours.filter(
       ({ closed, vertices }) => closed && vertices.length >= 3,
@@ -83,7 +89,8 @@ export function CadTablePieceSelectionPanel({
         areaMm2 += (role === 'hole' ? -1 : 1) * areaOf(points);
         perimeterMm += perimeter(points);
       }
-      if (areaMm2 > 0) measurements = { areaMm2, perimeterMm };
+      if (areaMm2 > 0)
+        measurements = { areaMm2, perimeterMm, sewingOnly: outer === 'sewing-boundary' };
     }
   }
 
@@ -107,10 +114,15 @@ export function CadTablePieceSelectionPanel({
             {active.material ? <p className='text-labelColor'>{active.material}</p> : null}
             {measurements ? (
               <dl className='grid grid-cols-[1fr_auto] gap-x-2 tabular-nums'>
-                <dt>Area</dt>
-                <dd>{measurements.areaMm2.toFixed(1)} mm²</dd>
-                <dt>Perimeter</dt>
-                <dd>{measurements.perimeterMm.toFixed(1)} mm</dd>
+                <dt>{measurements.sewingOnly ? 'Sewing area' : 'Area'}</dt>
+                <dd>{formatPatternImportDxfPhaseEMeasurementAreaV1(measurements.areaMm2, unit)}</dd>
+                <dt>{measurements.sewingOnly ? 'Sewing perimeter' : 'Perimeter'}</dt>
+                <dd>
+                  {
+                    formatPatternImportDxfPhaseEMeasurementValueV1(measurements.perimeterMm, unit)
+                      .formatted
+                  }
+                </dd>
               </dl>
             ) : null}
           </section>

@@ -67,6 +67,20 @@ export function formatPatternImportDxfPhaseEMeasurementValueV1(
   });
 }
 
+export function formatPatternImportDxfPhaseEMeasurementAreaV1(
+  squareMm: number,
+  unit: PatternImportDxfPhaseEMeasurementUnitV1,
+): string {
+  finiteMm(squareMm, 'squareMm');
+  const definition = UNIT[unit];
+  if (!definition) throw new TypeError(`Unsupported measurement unit: ${String(unit)}.`);
+  const area = roundPatternImportDxfPhaseEMeasurementV1(
+    squareMm / definition.mmPerUnit ** 2,
+    definition.decimals,
+  );
+  return `${area.toFixed(definition.decimals)} ${unit}²`;
+}
+
 /**
  * Formats one measurement readout without changing geometric authority. Straight and along-edge
  * distances stay separate because they answer different questions even when their values coincide.
