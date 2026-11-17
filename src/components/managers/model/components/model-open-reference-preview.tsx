@@ -4679,7 +4679,14 @@ function ModelOpenReferenceLinkedPreviewV2({
           <Text
             component='p'
             size='micro'
-            className={card && status !== 'error' ? 'sr-only' : undefined}
+            className={
+              card
+                ? status === 'error'
+                  ? // Below the card's top-left toggle; long tokens wrap and the text stays in the tile.
+                    'line-clamp-4 min-w-0 break-words px-2 pt-14'
+                  : 'sr-only'
+                : undefined
+            }
             variant={status === 'error' ? 'errorLabel' : 'label'}
             role={status === 'error' ? 'alert' : 'status'}
             aria-live={status === 'error' ? 'assertive' : 'polite'}
