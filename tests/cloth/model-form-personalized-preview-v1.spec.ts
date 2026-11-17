@@ -1659,3 +1659,61 @@ test.describe('guide lines at DPR 2', () => {
     expect(posedBlue, 'posed wrist blue px').toBeGreaterThanOrEqual(POSED_WRIST_MIN_BLUE);
   });
 });
+
+// Owner 16.11 (variant A): an approximate line is drawn like a precise one; only its row says
+// `approx.`. The canvas's own guide status ties the word to the builder, desktop and phone.
+test('approximate measurement rows say approx., precise rows do not', async ({ page }) => {
+  test.setTimeout(420_000);
+  const shotDir = process.env.APPROX_SHOT_DIR;
+  const canvas = page.getByTestId('measurement-watertight-surface-v1-canvas');
+  const rowOf = (input: Locator) => page.locator('[data-measurement-group] > div', { has: input });
+
+  for (const viewport of [
+    { name: 'desktop', size: { width: 1440, height: 900 } },
+    { name: 'phone', size: { width: 390, height: 844 } },
+  ] as const) {
+    await page.setViewportSize(viewport.size);
+    await prewarmDevRuntime(page);
+    await page.goto(DEV_ROUTE);
+    await expect(page.getByTestId('model-open-reference-preview-status')).toContainText(
+      'Preview partial: A-rest',
+      { timeout: 180_000 },
+    );
+
+    const chest = measurementField(page, 'chest');
+    await revealMeasurement(page, chest);
+    // Phone: keyboard up, emulated as in the phone guide test, so the bar above it shows.
+    if (viewport.name === 'phone') await page.setViewportSize({ width: 390, height: 474 });
+    await chest.focus();
+    await expect(canvas).toHaveAttribute('data-measurement-guide-status', 'visible');
+    await expect(rowOf(chest).getByTestId('measurement-approx')).toHaveCount(0);
+    if (viewport.name === 'phone') {
+      await expect(
+        page.getByTestId('model-measurement-phone-dock').getByTestId('measurement-approx'),
+      ).toHaveCount(0);
+    }
+
+    const across = measurementField(page, 'across shoulder');
+    if (viewport.name === 'phone') {
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await page.setViewportSize(viewport.size);
+    }
+    await revealMeasurement(page, across);
+    if (viewport.name === 'phone') await page.setViewportSize({ width: 390, height: 474 });
+    await across.focus();
+    await expect(canvas).toHaveAttribute(
+      'data-active-measurement-guide',
+      'BODY_MEASUREMENT_NAME_ACROSS_SHOULDER',
+    );
+    await expect(canvas).toHaveAttribute('data-measurement-guide-status', 'limited');
+    await expect(rowOf(across).getByTestId('measurement-approx')).toHaveText('approx.');
+    if (viewport.name === 'phone') {
+      await expect(
+        page.getByTestId('model-measurement-phone-dock').getByTestId('measurement-approx'),
+      ).toHaveText('approx.');
+    }
+    await expect(canvas).toHaveAttribute('data-measurement-guide-camera-motion', 'still');
+    await page.mouse.move(0, 0);
+    if (shotDir) await page.screenshot({ path: `${shotDir}/approx-${viewport.name}.png` });
+  }
+});
