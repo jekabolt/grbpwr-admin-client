@@ -70,6 +70,10 @@ import {
   TRIANGLE_STRAIN_UTILIZATION_DIAGNOSTIC_WGSL_V1,
 } from './beta-skirt-canonical-medium-strain-utilization-diagnostic-v1';
 import {
+  buildDxfGarmentObservedSeamEdgesV1,
+  type DxfGarmentObservedSeamEdgeV1,
+} from './dxf-garment-observed-seam-edges-v1';
+import {
   evaluateDxfGarmentObservedFrameValidationV1,
   DXF_GARMENT_OBSERVED_FRAME_VALIDATION_V1,
 } from './dxf-garment-observed-frame-validation-v1';
@@ -431,6 +435,7 @@ type Receipt = {
   /** Private already-owned V5 topology; no caller geometry may replace it for rendering. */
   renderTriangles: Uint32Array;
   pieceRanges: CorePlan['report']['pieceRanges'];
+  seamEdges: readonly DxfGarmentObservedSeamEdgeV1[];
   strain: Strain;
   sourceBindingSha256: string;
   report: DxfGarmentObservedWebgpuReplayReportV1;
@@ -1354,6 +1359,10 @@ async function run(
       // The exact placement preserved source topology. The prefix plan already verified unique,
       // disjoint piece coverage and triangle vertices against that same sealed package.
       pieceRanges: prefix.plan.report.pieceRanges,
+      seamEdges: buildDxfGarmentObservedSeamEdgesV1(
+        placement.artifact.localSourceArtifact.refinement.mesh,
+        placement.artifact.localSourceArtifact.sourceEvidence.handoff.seams,
+      ),
       strain,
       sourceBindingSha256,
       report: terminal,
@@ -1489,6 +1498,7 @@ export async function projectDxfGarmentObservedWebgpuRenderV1(
       finalPositions3M: xyz(r.finalState.positions),
       garmentTriangles: r.renderTriangles.slice(),
       pieceRanges: r.pieceRanges.map((range) => ({ ...range })),
+      seamEdges: r.seamEdges,
       bodyPositionsM: body.snapshot.bodyPositionsM.slice(),
       bodyTriangles: body.snapshot.bodyTriangles.slice(),
       strain: capture(r.strain) as Strain,

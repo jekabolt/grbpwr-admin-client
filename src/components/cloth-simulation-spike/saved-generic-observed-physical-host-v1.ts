@@ -1351,9 +1351,14 @@ export function createSavedGenericObservedPhysicalHostV1(
         return failed(e);
       }
     },
-    pickPreview(canvas: HTMLCanvasElement, clientX: number, clientY: number) {
+    pickPreview(
+      canvas: HTMLCanvasElement,
+      clientX: number,
+      clientY: number,
+      runtimeSeamId?: string,
+    ) {
       return withMountedPreview(canvas, (view) => {
-        const hit = view.pick(clientX, clientY);
+        const hit = view.pick(clientX, clientY, runtimeSeamId);
         return hit && hit.frameReportSha256 === view.receipt.frameReportSha256 ? hit : null;
       });
     },

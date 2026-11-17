@@ -35,6 +35,7 @@ export function handleCadTablePieceSelectionKey(
   event.preventDefault();
   owner.update((current) => ({
     ...current,
+    savedSeamSide: null,
     layout: selectPatternImportDxfPhaseECadTablePiecesV1(
       current.layout,
       selectAll ? current.layout.pieces.map(({ identity }) => identity.key) : [],

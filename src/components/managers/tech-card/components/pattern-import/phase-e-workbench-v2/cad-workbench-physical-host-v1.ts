@@ -3,6 +3,7 @@ import type {
   SavedGenericDurablePhysicalPreviewHitV1,
   SavedGenericDurablePhysicalPreviewPieceV1,
   SavedGenericDurablePhysicalPreviewScopeV1,
+  SavedGenericDurablePhysicalPreviewSeamV1,
 } from 'components/cloth-simulation-spike/saved-generic-durable-physical-host-v1';
 import type { PatternImportDxfPhaseECadWorkbenchSlotContextV1 } from './cad-workbench-split-shell-v1';
 import type { ModelDisplayedTriangleBodyOwnedInputV1 } from 'components/cloth-simulation-spike/model-displayed-triangle-body-input-v1';
@@ -23,6 +24,7 @@ export type CadWorkbenchMannequinArrangementSaveV1 = Readonly<{
 export type CadWorkbenchPhysicalPreviewInteractionV1 = Readonly<{
   scope: SavedGenericDurablePhysicalPreviewScopeV1;
   selectedPiece: SavedGenericDurablePhysicalPreviewPieceV1 | null;
+  savedSeam?: SavedGenericDurablePhysicalPreviewSeamV1;
   onPick: (hit: SavedGenericDurablePhysicalPreviewHitV1) => void;
 }>;
 
@@ -31,10 +33,12 @@ export function bindCadWorkbenchPhysicalPreviewSelectionV1(
   operationNumber: number,
   focusSelection: PatternImportDxfPhaseECadWorkbenchSlotContextV1['focusSelection'],
   selection: PatternImportDxfPhaseECadWorkbenchSlotContextV1['selection'] = null,
+  savedSeam?: SavedGenericDurablePhysicalPreviewSeamV1,
 ): CadWorkbenchPhysicalPreviewInteractionV1 | null {
   if (!scope) return null;
   return {
     scope,
+    savedSeam,
     selectedPiece:
       selection?.scopeKey && selection.pieceId && selection.pieceLineKey
         ? {
@@ -50,6 +54,10 @@ export function bindCadWorkbenchPhysicalPreviewSelectionV1(
           scopeKey: hit.scopeKey,
           pieceId: hit.pieceId,
           pieceLineKey: hit.pieceLineKey,
+          ...(hit.seamSide && {
+            seamId: hit.seamSide.seamId,
+            seamSideIndex: hit.seamSide.sideIndex,
+          }),
         });
     },
   };

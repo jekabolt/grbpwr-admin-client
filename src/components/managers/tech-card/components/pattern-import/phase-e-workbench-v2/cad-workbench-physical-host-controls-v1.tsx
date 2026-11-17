@@ -115,6 +115,7 @@ export function CadWorkbenchPhysicalHostControlsV1({
       interaction.scope,
       event.clientX,
       event.clientY,
+      interaction.savedSeam,
     );
     if (hit) interaction.onPick(hit);
   };

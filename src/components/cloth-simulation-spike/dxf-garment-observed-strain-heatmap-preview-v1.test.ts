@@ -80,6 +80,22 @@ vi.mock('./dxf-garment-observed-webgpu-replay-v1', () => ({
     ports.projectionReads++;
     return {
       ...input(),
+      seamEdges: [
+        {
+          runtimeSeamId: 'runtime-seam',
+          sideIndex: 0,
+          pieceId: 'first-panel',
+          triangleIndex: 0,
+          vertexIndices: [0, 1],
+        },
+        {
+          runtimeSeamId: 'runtime-seam',
+          sideIndex: 1,
+          pieceId: 'second-panel',
+          triangleIndex: 1,
+          vertexIndices: [4, 5],
+        },
+      ],
       frameCount: 32,
       report: {
         status: 'diagnostic-completed',
@@ -315,11 +331,34 @@ describe('synthetic renderer lifecycle (not visual or physical acceptance)', () 
     expect(ports.renderers[0]?.renders).toBe(1);
   });
 
+  it('selects only the inspected seam side on the frontmost exact deformed face', async () => {
+    ports.clothZ = 0.2;
+    const { canvas, view } = await open();
+    const a = clientPoint(canvas, 0.45, 0.003, ports.clothZ);
+    const b = clientPoint(canvas, 0.45, 0.997, ports.clothZ);
+    for (const [index, point] of [a, b].entries()) {
+      const hit = view.pick(...point, 'runtime-seam');
+      expect(hit).toMatchObject({
+        kind: 'garment',
+        triangleIndex: index,
+        seamSide: { runtimeSeamId: 'runtime-seam', sideIndex: index },
+      });
+      expect(view.pick(...point, 'different-seam')).not.toHaveProperty('seamSide');
+    }
+    expect(view.pick(...clientPoint(canvas, 0.2, 0.2, ports.clothZ), 'runtime-seam')).toMatchObject(
+      { kind: 'garment', triangleIndex: 0 },
+    );
+    expect(
+      view.pick(...clientPoint(canvas, 0.2, 0.2, ports.clothZ), 'runtime-seam'),
+    ).not.toHaveProperty('seamSide');
+    expect(ports.renderers[0]?.renders).toBe(1);
+  });
+
   it('picks frontmost body identity and refuses a hit once the rendered frame expires', async () => {
     ports.clothZ = -0.15;
     const { canvas, view } = await open();
     const bodyPoint = clientPoint(canvas, 0.2, 0.2, 0);
-    expect(view.pick(...bodyPoint)).toEqual({
+    expect(view.pick(...bodyPoint, 'runtime-seam')).toEqual({
       kind: 'body',
       frameReportSha256: view.receipt.frameReportSha256,
       triangleIndex: 0,

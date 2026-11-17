@@ -97,6 +97,7 @@ export type PatternImportDxfPhaseECadTableZeroConnectCanvasPropsV1 = Readonly<{
     seamId: string;
     operationNumber: number;
     ordinal: number;
+    focusedSideIndex?: 0 | 1 | null;
     sides: readonly Readonly<{
       pieceId: string;
       pieceLineKey: string;
@@ -187,6 +188,7 @@ function boundsFor(layout: PatternImportDxfPhaseECadTablePieceLayoutSessionV1): 
 
 export type PatternImportDxfPhaseECadTableZeroCanvasSessionV1 = Readonly<{
   layout: PatternImportDxfPhaseECadTablePieceLayoutSessionV1;
+  savedSeamSide?: Readonly<{ seamId: string; sideIndex: 0 | 1; pieceKey: string }> | null;
   /**
    * Caller-owned fitted view. It intentionally does not follow session-only piece offsets until
    * the operator explicitly asks to fit the table again.
@@ -248,6 +250,7 @@ export function movePatternImportDxfPhaseECadTableZeroCanvasSessionV1(
     : selectPatternImportDxfPhaseECadTablePiecesV1(session.layout, [pieceKey], 'replace');
   return Object.freeze({
     ...session,
+    savedSeamSide: selected === session.layout ? session.savedSeamSide : null,
     layout: translateSelectedPatternImportDxfPhaseECadTablePiecesV1(selected, deltaMm),
   });
 }
@@ -270,6 +273,7 @@ export function activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(
       : pieceKey;
   return Object.freeze({
     ...session,
+    savedSeamSide: null,
     layout: selectPatternImportDxfPhaseECadTablePiecesV1(
       session.layout,
       resolvedKey ? [resolvedKey] : [],
@@ -636,6 +640,7 @@ function CadTableZeroCanvas({
           onLasso={(points, modifiers) =>
             setTableSession((current) => ({
               ...current,
+              savedSeamSide: null,
               layout: selectPatternImportDxfPhaseECadTablePiecesInLassoV1(
                 current.layout,
                 points,
@@ -806,6 +811,8 @@ function CadTableZeroCanvas({
                       !!controller.session &&
                       !connectDisabled &&
                       controller.session.status !== 'ready';
+                    const savedSideFocused =
+                      !!savedSide && savedSideIndex === savedSeam?.focusedSideIndex;
                     const savedSideColor = savedSide
                       ? CAD_WORKBENCH_SEAM_SIDE_COLORS[savedSide]
                       : 'currentColor';
@@ -817,6 +824,9 @@ function CadTableZeroCanvas({
                         transform={cadTablePieceSvgTransformV1(placed, 'inverted')}
                         data-cad-zero-connect-edge={segment.viewKey}
                         data-cad-zero-connect-seam-id={savedSide ? savedSeam?.seamId : undefined}
+                        data-cad-zero-connect-saved-side-focused={
+                          savedSideFocused ? savedSide : undefined
+                        }
                         data-cad-zero-connect-seam-operation={
                           savedSide ? savedSeam?.operationNumber : undefined
                         }
@@ -833,7 +843,7 @@ function CadTableZeroCanvas({
                           x2={to.x}
                           y2={vy(to.y)}
                           stroke={savedSideColor}
-                          strokeWidth={selectedSide === null ? 1 : 3}
+                          strokeWidth={savedSideFocused ? 5 : selectedSide === null ? 1 : 3}
                           strokeDasharray={selectedSide === 1 ? '6 3' : undefined}
                           opacity={selectedSide === null ? 0.18 : 1}
                           vectorEffect='non-scaling-stroke'

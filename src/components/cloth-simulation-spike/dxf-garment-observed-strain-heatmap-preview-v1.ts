@@ -131,7 +131,11 @@ export type DxfGarmentObservedPreviewHitV1 = Readonly<{
   triangleIndex: number;
 }> &
   (
-    | Readonly<{ kind: 'garment'; pieceId: string }>
+    | Readonly<{
+        kind: 'garment';
+        pieceId: string;
+        seamSide?: Readonly<{ runtimeSeamId: string; sideIndex: 0 | 1 }>;
+      }>
     | Readonly<{
         kind: 'body';
         persistedModel: Readonly<{ id: number; updatedAt: string; revision: string }>;
@@ -366,7 +370,11 @@ export async function createDxfGarmentObservedStrainHeatmapPreviewV1(
     const frameReportSha256 = input.report.reportSha256!;
     canvas.dataset.genericObservedStrainFrameSha256 = frameReportSha256;
     const raycaster = new THREE.Raycaster();
-    const pick = (clientX: number, clientY: number): DxfGarmentObservedPreviewHitV1 | null => {
+    const pick = (
+      clientX: number,
+      clientY: number,
+      runtimeSeamId?: string,
+    ): DxfGarmentObservedPreviewHitV1 | null => {
       try {
         current();
         if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
@@ -389,14 +397,45 @@ export async function createDxfGarmentObservedStrainHeatmapPreviewV1(
             ({ triangleOffset, triangleCount }) =>
               triangleIndex >= triangleOffset && triangleIndex < triangleOffset + triangleCount,
           );
-          return range
-            ? Object.freeze({
-                kind: 'garment',
-                frameReportSha256,
-                triangleIndex,
-                pieceId: range.pieceId,
+          if (!range) return null;
+          // Test only a compiler-identified boundary of the frontmost hit face. Screen distance
+          // sets the input tolerance; identity never comes from a closest CAD or mesh match.
+          const seamEdge = runtimeSeamId
+            ? input.seamEdges.find((edge) => {
+                if (
+                  edge.runtimeSeamId !== runtimeSeamId ||
+                  edge.triangleIndex !== triangleIndex ||
+                  edge.pieceId !== range.pieceId
+                )
+                  return false;
+                const from = new THREE.Vector3()
+                  .fromArray(input.finalPositions3M, edge.vertexIndices[0] * 3)
+                  .project(camera);
+                const to = new THREE.Vector3()
+                  .fromArray(input.finalPositions3M, edge.vertexIndices[1] * 3)
+                  .project(camera);
+                const dx = ((to.x - from.x) * contentWidth) / 2;
+                const dy = ((from.y - to.y) * contentHeight) / 2;
+                const px = (x - (from.x + 1) / 2) * contentWidth;
+                const py = (y - (1 - from.y) / 2) * contentHeight;
+                const lengthSquared = dx * dx + dy * dy;
+                if (lengthSquared === 0) return false;
+                const t = THREE.MathUtils.clamp((px * dx + py * dy) / lengthSquared, 0, 1);
+                return Math.hypot(px - t * dx, py - t * dy) <= 6;
               })
             : null;
+          return Object.freeze({
+            kind: 'garment',
+            frameReportSha256,
+            triangleIndex,
+            pieceId: range.pieceId,
+            ...(seamEdge && {
+              seamSide: Object.freeze({
+                runtimeSeamId: seamEdge.runtimeSeamId,
+                sideIndex: seamEdge.sideIndex,
+              }),
+            }),
+          });
         }
         const body = input.report.bodyBinding;
         return body

@@ -113,7 +113,9 @@ const ports = vi.hoisted(() => ({
   previewDisposed: 0,
   previewEvents: [] as string[],
   previewSignals: [] as AbortSignal[],
-  previewPick: null as ((x: number, y: number) => DxfGarmentObservedPreviewHitV1 | null) | null,
+  previewPick: null as
+    | ((x: number, y: number, runtimeSeamId?: string) => DxfGarmentObservedPreviewHitV1 | null)
+    | null,
   previewSelect: null as ((pieceId: string | null) => boolean) | null,
 }));
 vi.mock('./dxf-garment-observed-webgpu-replay-v1', () => {
@@ -195,7 +197,8 @@ vi.mock('./dxf-garment-observed-strain-heatmap-preview-v1', () => ({
     return {
       receipt: { declaredSyntheticPreview: true, frameReportSha256: '2'.repeat(64) },
       lifetime: controller.signal,
-      pick: (x: number, y: number) => ports.previewPick?.(x, y) ?? null,
+      pick: (x: number, y: number, runtimeSeamId?: string) =>
+        ports.previewPick?.(x, y, runtimeSeamId) ?? null,
       setSelectedPiece: (pieceId: string | null) => ports.previewSelect?.(pieceId) ?? true,
       dispose,
     };
@@ -1933,7 +1936,18 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
       sourceFileId: graph.source.sourceFileId,
       sizeToken: graph.source.sizeToken,
     };
-    const piece = graph.pieces[0]!;
+    const operation = graph.operations.find(({ seamIds }) => seamIds.length === 1)!;
+    const runtimeSeam = graph.seams.find(({ id }) => id === operation.seamIds[0])!;
+    const side = runtimeSeam.sides[0];
+    const piece = graph.pieces.find(({ pieceId }) => pieceId === side.pieceId)!;
+    const savedSeam = {
+      operationNumber: operation.sourceOperationNumber,
+      seamId: runtimeSeam.sourceSeamKey,
+      sides: runtimeSeam.sides.map(({ anchors, ...identity }) => ({
+        ...identity,
+        boundaryVertexIds: anchors,
+      })),
+    };
     const canvas = { setPointerCapture: vi.fn() } as unknown as HTMLCanvasElement;
     const caller = new AbortController();
     const mounted = requireOk(await f.host.mountPreview(canvas, caller.signal));
@@ -1944,9 +1958,9 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
       triangleIndex: 7,
       pieceId: piece.pieceId,
     } as const;
-    const pick = vi.fn<(x: number, y: number) => DxfGarmentObservedPreviewHitV1 | null>(
-      () => garment,
-    );
+    const pick = vi.fn<
+      (x: number, y: number, runtimeSeamId?: string) => DxfGarmentObservedPreviewHitV1 | null
+    >(() => garment);
     ports.previewPick = pick;
     for (const wrongScope of [
       { ...scope, row: { ...row, scopeKey: 'different-scope' } },
@@ -1962,10 +1976,46 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     pick.mockReturnValueOnce({ ...garment, pieceId: 'another-piece' });
     expect(f.host.pickPreview(canvas, scope, 100, 200)).toBeNull();
 
+    const seamHit = {
+      ...garment,
+      seamSide: { runtimeSeamId: runtimeSeam.id, sideIndex: 0 as const },
+    };
+    pick.mockReturnValueOnce(seamHit);
+    expect(f.host.pickPreview(canvas, scope, 100, 200, savedSeam)).toMatchObject({
+      seamSide: {
+        seamId: savedSeam.seamId,
+        sideIndex: 0,
+        contourId: side.contourId,
+        boundaryVertexIds: side.anchors,
+      },
+    });
+    expect(pick).toHaveBeenLastCalledWith(100, 200, runtimeSeam.id);
+    for (const forged of [
+      { ...savedSeam, operationNumber: -1 },
+      { ...savedSeam, sides: [...savedSeam.sides].reverse() },
+      {
+        ...savedSeam,
+        sides: [
+          { ...savedSeam.sides[0]!, boundaryVertexIds: ['wrong', 'anchor'] },
+          savedSeam.sides[1]!,
+        ],
+      },
+    ]) {
+      pick.mockReturnValueOnce(seamHit);
+      expect(f.host.pickPreview(canvas, scope, 100, 200, forged)).not.toHaveProperty('seamSide');
+      expect(pick).toHaveBeenLastCalledWith(100, 200, undefined);
+    }
+
     const focusSelection = vi.fn();
     const selectOutline = vi.fn<(pieceId: string | null) => boolean>(() => true);
     ports.previewSelect = selectOutline;
-    let interaction = bindCadWorkbenchPhysicalPreviewSelectionV1(scope, 120, focusSelection);
+    let interaction = bindCadWorkbenchPhysicalPreviewSelectionV1(
+      scope,
+      savedSeam.operationNumber,
+      focusSelection,
+      null,
+      savedSeam,
+    );
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     vi.stubGlobal('window', { event: undefined });
     const route = createRoot(reactMountContainer() as never);
@@ -2017,13 +2067,16 @@ describe('fixed durable generic host, real encoded V7 and genuine fresh receipts
     const hit = f.host.pickPreview(canvas, scope, 100, 200);
     expect(hit).toEqual({ ...garment, scopeKey: row.scopeKey, pieceLineKey: piece.pieceLineKey });
     expect(readCount).toBe(readCountBeforeClick);
+    pick.mockReturnValueOnce(seamHit);
     canvasProps.onPointerDown?.(pointer(100));
     canvasProps.onPointerUp?.(pointer(100));
     expect(focusSelection).toHaveBeenCalledExactlyOnceWith({
-      operationNumber: 120,
+      operationNumber: savedSeam.operationNumber,
       scopeKey: row.scopeKey,
       pieceId: piece.pieceId,
       pieceLineKey: piece.pieceLineKey,
+      seamId: savedSeam.seamId,
+      seamSideIndex: 0,
     });
 
     const body = {

@@ -182,6 +182,7 @@ export type PatternImportDxfPhaseECadWorkbenchSelectionV1 = Readonly<{
   pieceId?: string | null;
   pieceLineKey?: string | null;
   seamId?: string | null;
+  seamSideIndex?: 0 | 1 | null;
 }>;
 
 export type PatternImportDxfPhaseECadWorkbenchSelectionSourceV1 =

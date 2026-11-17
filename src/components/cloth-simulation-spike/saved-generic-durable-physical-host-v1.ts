@@ -39,9 +39,29 @@ export type SavedGenericDurablePhysicalPreviewPieceV1 = Readonly<{
   pieceLineKey: string;
 }>;
 
+export type SavedGenericDurablePhysicalPreviewSeamV1 = Readonly<{
+  operationNumber: number;
+  seamId: string;
+  sides: readonly Readonly<{
+    pieceId: string;
+    pieceLineKey: string;
+    contourId: string;
+    boundaryVertexIds: readonly string[];
+    direction: 'forward' | 'reverse';
+  }>[];
+}>;
+
 export type SavedGenericDurablePhysicalPreviewHitV1 =
-  | (Extract<DxfGarmentObservedPreviewHitV1, { kind: 'garment' }> &
-      Readonly<{ scopeKey: string; pieceLineKey: string }>)
+  | (Omit<Extract<DxfGarmentObservedPreviewHitV1, { kind: 'garment' }>, 'seamSide'> &
+      SavedGenericDurablePhysicalPreviewPieceV1 &
+      Readonly<{
+        seamSide?: Readonly<{
+          seamId: string;
+          sideIndex: 0 | 1;
+          contourId: string;
+          boundaryVertexIds: readonly [string, string];
+        }>;
+      }>)
   | Extract<DxfGarmentObservedPreviewHitV1, { kind: 'body' }>;
 
 export const SAVED_GENERIC_DURABLE_PHYSICAL_HOST_V1 =
@@ -307,6 +327,43 @@ export function createSavedGenericDurablePhysicalHostV1(
       );
     } catch {
       return false;
+    }
+  };
+  const currentN1Seam = (requested: SavedGenericDurablePhysicalPreviewSeamV1, durable: Durable) => {
+    try {
+      const exact = capture(
+        record(requested, ['operationNumber', 'seamId', 'sides']),
+      ) as SavedGenericDurablePhysicalPreviewSeamV1;
+      const { graph } = durable;
+      const operation = graph.operations.find(
+        ({ sourceOperationNumber }) => sourceOperationNumber === exact.operationNumber,
+      );
+      if (operation?.seamIds.length !== 1 || exact.sides.length !== 2) return null;
+      const seam = graph.seams.find(
+        ({ id, sourceSeamKey, clientOperationId }) =>
+          id === operation.seamIds[0] &&
+          sourceSeamKey === exact.seamId &&
+          clientOperationId === operation.clientOperationId,
+      );
+      if (
+        !seam?.sides.every((side, index) => {
+          const requestedSide = exact.sides[index];
+          return (
+            side.pieceId === requestedSide?.pieceId &&
+            side.pieceLineKey === requestedSide.pieceLineKey &&
+            side.contourId === requestedSide.contourId &&
+            side.direction === requestedSide.direction &&
+            requestedSide.boundaryVertexIds.length === 2 &&
+            side.anchors.every(
+              (anchor, ordinal) => anchor === requestedSide.boundaryVertexIds[ordinal],
+            )
+          );
+        })
+      )
+        return null;
+      return seam;
+    } catch {
+      return null;
     }
   };
   const listeners = new Set<() => void>();
@@ -776,21 +833,40 @@ export function createSavedGenericDurablePhysicalHostV1(
       scope: SavedGenericDurablePhysicalPreviewScopeV1,
       clientX: number,
       clientY: number,
+      savedSeam?: SavedGenericDurablePhysicalPreviewSeamV1,
     ): SavedGenericDurablePhysicalPreviewHitV1 | null {
       const preview = previewAdmission();
       if (!preview || !matchesPreviewScope(scope, preview.durable) || !preview.current())
         return null;
-      const hit = host.pickPreview(canvas, clientX, clientY);
+      const seam = savedSeam ? currentN1Seam(savedSeam, preview.durable) : null;
+      if (!preview.current()) return null;
+      const hit = host.pickPreview(canvas, clientX, clientY, seam?.id);
       if (!hit || !preview.current()) return null;
       if (hit.kind === 'body') return hit;
+      const { seamSide: runtimeSide, ...garment } = hit;
       const piece = preview.durable.graph.pieces.find(({ pieceId }) => pieceId === hit.pieceId);
-      return piece
-        ? Object.freeze({
-            ...hit,
-            scopeKey: preview.durable.row.scopeKey,
-            pieceLineKey: piece.pieceLineKey,
-          })
-        : null;
+      if (!piece) return null;
+      const sideIndex = runtimeSide?.sideIndex;
+      const side =
+        seam && runtimeSide?.runtimeSeamId === seam.id && (sideIndex === 0 || sideIndex === 1)
+          ? seam.sides[sideIndex]
+          : null;
+      return Object.freeze({
+        ...garment,
+        scopeKey: preview.durable.row.scopeKey,
+        pieceLineKey: piece.pieceLineKey,
+        ...(side &&
+          sideIndex !== undefined &&
+          side.pieceId === piece.pieceId &&
+          side.pieceLineKey === piece.pieceLineKey && {
+            seamSide: Object.freeze({
+              seamId: seam!.sourceSeamKey,
+              sideIndex,
+              contourId: side.contourId,
+              boundaryVertexIds: side.anchors,
+            }),
+          }),
+      });
     },
     setPreviewSelectedPiece(
       canvas: HTMLCanvasElement,

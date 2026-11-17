@@ -1,4 +1,7 @@
-import type { SavedGenericDurablePhysicalPreviewScopeV1 } from 'components/cloth-simulation-spike/saved-generic-durable-physical-host-v1';
+import type {
+  SavedGenericDurablePhysicalPreviewScopeV1,
+  SavedGenericDurablePhysicalPreviewSeamV1,
+} from 'components/cloth-simulation-spike/saved-generic-durable-physical-host-v1';
 import type { ReactNode } from 'react';
 import type { PatternImportDxfProductPhaseEAuthoringCatalogV1 } from 'lib/cloth/domain/pattern-import-dxf-product-phase-e-authoring-catalog-v1';
 import type { PatternImportDxfProductPhaseEAssemblyProjectionV1 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
@@ -94,6 +97,7 @@ export type PatternImportDxfProductExactNSeamProductionMannequinContextV2 =
     Readonly<{
       sceneOverlay: PatternImportDxfPhaseECadMannequinSceneOverlayCapabilityV1;
       previewScope: SavedGenericDurablePhysicalPreviewScopeV1 | null;
+      previewSeam?: SavedGenericDurablePhysicalPreviewSeamV1;
     }>;
 
 export type PatternImportDxfProductExactNSeamProductionMannequinSlotV2 =
@@ -234,6 +238,7 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
   const savedAnnotations = annotationRead.current;
   if (!resolved.ok) return null;
   const activeSeam = resolved.model.state.seams[activeSeamIndex];
+  const activeSeamChoice = resolved.model.choices.seams[activeSeamIndex]!;
   const operation = resolved.model.state.bindings.selectedOperation;
   const seamOrdinal = cadWorkbenchOperationSeamOrdinal(operation.seamIds, activeSeam.seamId);
   const selectedPieceKeys = tableSessionOwner?.session.layout.selectedPieceKeys ?? [];
@@ -242,6 +247,12 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
       ? tableSessionOwner?.session.layout.pieces.find(
           ({ identity }) => identity.key === selectedPieceKeys[0],
         )
+      : null;
+  const savedSideFocus = tableSessionOwner?.session.savedSeamSide;
+  const focusedSeamSide =
+    savedSideFocus?.seamId === activeSeam.seamId &&
+    activePiece?.identity.key === savedSideFocus.pieceKey
+      ? savedSideFocus.sideIndex
       : null;
   const selection = Object.freeze({
     operationNumber: session.current.selectedOperation.sourceOperationNumber,
@@ -253,6 +264,7 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
       ? activePiece?.identity.pieceLineKey ?? null
       : activeSeam.sides[0]?.pieceLineKey ?? null,
     seamId: activeSeam.seamId,
+    seamSideIndex: focusedSeamSide,
   });
   const sceneOverlay =
     !session.productionFeed && exactDesktop?.savedSceneAuthority
@@ -277,9 +289,17 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
         sizeToken: exactDesktop.projection.sizeToken,
       }
     : null;
+  const previewSeam = previewScope
+    ? {
+        operationNumber: operation.sourceOperationNumber,
+        seamId: activeSeam.seamId,
+        sides: activeSeamChoice.sides,
+      }
+    : undefined;
   const mannequinSlot: PatternImportDxfPhaseECadWorkbenchSlotV1 =
     typeof mannequin === 'function'
-      ? (context) => mannequin(Object.freeze({ ...context, sceneOverlay, previewScope }))
+      ? (context) =>
+          mannequin(Object.freeze({ ...context, sceneOverlay, previewScope, previewSeam }))
       : mannequin;
 
   return (
@@ -307,13 +327,32 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
             pieces.map(({ identity }) => identity),
           );
           if (index < 0) return;
-          tableSessionOwner.update((current) =>
-            activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(
+          const pieceKey = pieces[index]!.identity.key;
+          const sideIndex = nextSelection.seamSideIndex;
+          if (sideIndex != null) {
+            const side = activeSeam.sides[sideIndex];
+            if (
+              !side ||
+              nextSelection.seamId !== activeSeam.seamId ||
+              nextSelection.operationNumber !== operation.sourceOperationNumber ||
+              side.pieceId !== nextSelection.pieceId ||
+              side.pieceLineKey !== nextSelection.pieceLineKey
+            )
+              return;
+          }
+          tableSessionOwner.update((current) => {
+            const activated = activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(
               current,
-              pieces[index]!.identity.key,
+              pieceKey,
               false,
-            ),
-          );
+            );
+            return sideIndex == null
+              ? activated
+              : Object.freeze({
+                  ...activated,
+                  savedSeamSide: { seamId: activeSeam.seamId, sideIndex, pieceKey },
+                });
+          });
         }
         if (!nextSelection?.seamId) return;
         const nextIndex = resolved.model.state.seams.findIndex(
@@ -352,7 +391,8 @@ export function PatternImportDxfProductExactNSeamProductionMountV2({
               seamId: activeSeam.seamId,
               operationNumber: operation.sourceOperationNumber,
               ordinal: seamOrdinal,
-              sides: activeSeam.sides,
+              focusedSideIndex: focusedSeamSide,
+              sides: activeSeamChoice.sides,
             }}
             disabled
           />

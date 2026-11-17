@@ -453,6 +453,32 @@ describe('actual encoder with explicitly scripted GPU transport (not physics evi
     expect(render.pieceRanges[0]).not.toBe(expectedRanges[0]);
     expect(Object.isFrozen(render.pieceRanges)).toBe(true);
     expect(Object.isFrozen(render.pieceRanges[0])).toBe(true);
+    const { mesh } = placementRequest.sourceArtifact.refinement;
+    const handoffSeams = placementRequest.sourceArtifact.sourceEvidence.handoff.seams;
+    expect(render.seamEdges.length).toBeGreaterThan(0);
+    for (const seam of mesh.seams) {
+      const source = handoffSeams.find(({ id }) => id === seam.seamId)!;
+      for (const sideIndex of [0, 1] as const) {
+        const edges = render.seamEdges.filter(
+          (edge) => edge.runtimeSeamId === seam.seamId && edge.sideIndex === sideIndex,
+        );
+        expect(edges.map(({ vertexIndices }) => vertexIndices)).toEqual(
+          Array.from({ length: seam.vertexPairs.length / 2 - 1 }, (_, index) => [
+            seam.vertexPairs[index * 2 + sideIndex],
+            seam.vertexPairs[(index + 1) * 2 + sideIndex],
+          ]),
+        );
+        for (const edge of edges) {
+          expect(edge.pieceId).toBe(source.sides[sideIndex].pieceId);
+          const triangle = mesh.triangles.slice(
+            edge.triangleIndex * 3,
+            (edge.triangleIndex + 1) * 3,
+          );
+          expect([...triangle]).toEqual(expect.arrayContaining([...edge.vertexIndices]));
+        }
+      }
+    }
+    expect(Object.isFrozen(render.seamEdges[0]?.vertexIndices)).toBe(true);
     const expectedTopology = render.garmentTriangles.slice();
     render.finalPositions3M.fill(77);
     render.garmentTriangles.fill(77);

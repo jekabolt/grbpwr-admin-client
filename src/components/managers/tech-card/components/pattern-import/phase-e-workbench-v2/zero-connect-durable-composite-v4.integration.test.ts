@@ -327,7 +327,12 @@ describe('zero-connect durable N=1 genuine production chain', () => {
             ReturnType<typeof buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1>,
             { ok: true }
           >['overlay'];
-          sendFocus: (piece: { scopeKey: string; pieceId: string; pieceLineKey: string }) => void;
+          sendFocus: (piece: {
+            scopeKey: string;
+            pieceId: string;
+            pieceLineKey: string;
+            seamSideIndex?: 0 | 1;
+          }) => void;
         };
         let view: View | null = null;
         const markup = renderToStaticMarkup(
@@ -346,6 +351,7 @@ describe('zero-connect durable N=1 genuine production chain', () => {
                 scopeKey: string;
                 pieceId: string;
                 pieceLineKey: string;
+                seamSideIndex?: 0 | 1;
               }) => focusSelection({ operationNumber, ...piece, seamId });
               const staged = buildPatternImportDxfPhaseECadMannequinPatternPieceOverlayV1({
                 sources: [{ scopeKey: savedRow.scopeKey, label: savedRow.scopeKey, projection }],
@@ -401,6 +407,20 @@ describe('zero-connect durable N=1 genuine production chain', () => {
           .view.overlay.pieces.filter(({ selected }) => selected)
           .map(({ pieceKey }) => pieceKey),
       ).toEqual([back.pieceKey]);
+
+      const side = exactSides[0]!.pieceId === back.pieceId ? 0 : 1;
+      focused.sendFocus({ ...back, seamSideIndex: side === 0 ? 1 : 0 });
+      expect(renderWorkbench().markup).not.toContain('data-cad-zero-connect-saved-side-focused');
+      focused.sendFocus({ ...back, seamSideIndex: side });
+      expect(renderWorkbench().markup).toContain(
+        `data-cad-zero-connect-saved-side-focused="${side === 0 ? 'A' : 'B'}"`,
+      );
+      table = cadTable.activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(
+        table,
+        backLayout.identity.key,
+        false,
+      );
+      expect(renderWorkbench().markup).not.toContain('data-cad-zero-connect-saved-side-focused');
     } finally {
       tableHook.mockRestore();
     }
