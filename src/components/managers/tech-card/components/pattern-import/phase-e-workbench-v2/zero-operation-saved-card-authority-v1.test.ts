@@ -6,6 +6,7 @@ import {
   listPatternImportDxfPhaseECadTableZeroOperationSavedChoicesV1,
   preparePatternImportDxfPhaseECadTableZeroOperationSavedV1,
 } from './cad-table-zero-operation-saved-preparation-v1';
+import { createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1 } from './cad-table-zero-operation-generation-owner-v1';
 import { routePatternImportDxfPhaseECadTableZeroOperationSourceV1 } from './cad-table-zero-operation-source-routing-v1';
 import { listPatternImportDxfPhaseECadTableZeroOperationFreshChoicesV1 } from './cad-table-zero-operation-fresh-preparation-v1';
 import { createPatternImportDxfPhaseESavedDxfReprocessHostV1 } from './saved-dxf-reprocess-host-v1';
@@ -95,6 +96,67 @@ describe('zero-operation saved card authority', () => {
       cardLockVersion: 13,
       card: { techCardId: 6, sizes: [{ token: 'M' }] },
     });
+    expect(readTechCard).toHaveBeenCalledTimes(2);
+  });
+
+  it('recognizes an ordinary save only when the card lock advances without moving the DXF row', async () => {
+    const reads = [card(7, 15), cardWithSavedRow({ ...row, sha256: 'b'.repeat(64) }, 16)];
+    const runtime = createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1({
+      orderSizeIds,
+      sizeNameById,
+      readTechCard: vi.fn(async () => reads.shift()!),
+    });
+    const signal = new AbortController().signal;
+
+    await expect(runtime.resolveLatestCard(row, signal)).resolves.toMatchObject({
+      techCard: { lockVersion: 15 },
+      row: { ...row, cardLockVersion: 15 },
+    });
+    await expect(runtime.resolveLatestCard(row, signal)).rejects.toThrow(/saved DXF row changed/i);
+  });
+
+  it.each([
+    ['equal', 13],
+    ['backward', 12],
+  ])(
+    'fails closed when the ordinary-save lock is %s instead of advancing',
+    async (_, lockVersion) => {
+      const runtime = createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1({
+        orderSizeIds,
+        sizeNameById,
+        readTechCard: vi.fn(async () => card(7, lockVersion)),
+      });
+
+      await expect(runtime.resolveLatestCard(row, new AbortController().signal)).rejects.toThrow(
+        /strictly advance/i,
+      );
+    },
+  );
+
+  it('independently reads the post-import card and rejects a save with no lock advance', async () => {
+    const readTechCard = vi
+      .fn<() => Promise<common_TechCard>>()
+      .mockResolvedValueOnce(card(7, 14))
+      .mockResolvedValueOnce(card(7, 13));
+    const runtime = createPatternImportDxfPhaseEZeroOperationSavedCardAuthorityV1({
+      orderSizeIds,
+      sizeNameById,
+      readTechCard,
+    });
+    const signal = new AbortController().signal;
+
+    await expect(
+      runtime.resolveLatestCommittedCard(
+        { techCardId: row.techCardId, previousLockVersion: row.cardLockVersion },
+        signal,
+      ),
+    ).resolves.toMatchObject({ lockVersion: 14 });
+    await expect(
+      runtime.resolveLatestCommittedCard(
+        { techCardId: row.techCardId, previousLockVersion: row.cardLockVersion },
+        signal,
+      ),
+    ).rejects.toThrow(/strictly advance/i);
     expect(readTechCard).toHaveBeenCalledTimes(2);
   });
 
@@ -684,6 +746,7 @@ describe('zero-operation saved card authority', () => {
     });
     const controller = new AbortController();
     controller.abort();
+    const generationOwner = createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1();
 
     const result = await preparePatternImportDxfPhaseECadTableZeroOperationSavedV1(
       {
@@ -693,6 +756,7 @@ describe('zero-operation saved card authority', () => {
         scopeKey: 'TECH_CARD_BOM_PURPOSE_MAIN',
         sizeToken: 'M',
         authority,
+        generation: generationOwner.beginSaved('cancelled-saved-preparation'),
       },
       controller.signal,
     );
@@ -710,6 +774,7 @@ describe('zero-operation saved card authority', () => {
         throw new Error('Fresh saved-row authority is unavailable.');
       }),
     });
+    const generationOwner = createPatternImportDxfPhaseECadTableZeroOperationGenerationOwnerV1();
 
     const result = await preparePatternImportDxfPhaseECadTableZeroOperationSavedV1({
       techCard: card(),
@@ -718,6 +783,7 @@ describe('zero-operation saved card authority', () => {
       scopeKey: 'TECH_CARD_BOM_PURPOSE_MAIN',
       sizeToken: 'M',
       authority,
+      generation: generationOwner.beginSaved('failed-saved-preparation'),
     });
 
     expect(result.ok).toBe(false);
