@@ -45,6 +45,11 @@ import {
   type DxfGarmentObservedWebgpuReplayReportV1,
 } from './dxf-garment-observed-webgpu-replay-v1';
 
+import {
+  projectSavedGenericObservedSourceGeometryV1,
+  type SavedGenericObservedSourceGeometryV1,
+} from './saved-generic-observed-source-geometry-v1';
+
 export const SAVED_GENERIC_OBSERVED_PHYSICAL_HOST_V1 =
   'saved-generic-observed-physical-host/1' as const;
 /** A single explicit numeric profile; no UI-provided solver/budget override is accepted. */
@@ -238,6 +243,43 @@ function reason(e: unknown) {
   return e instanceof Error ? e.message.slice(0, 2048) : 'Generic physical operation failed.';
 }
 const failed = (e: unknown) => Object.freeze({ ok: false as const, detail: reason(e) });
+
+type AuthoringObservedTarget = Extract<
+  Awaited<ReturnType<typeof projectCurrentSavedModelGenericObservedTargetV1>>,
+  { ok: true }
+>;
+export type SavedGenericObservedPhysicalHostAuthoringContextResultV1 =
+  | Readonly<{
+      ok: true;
+      sourceGeneration: number;
+      graph: DxfExactAssemblyGraphV1;
+      graphCanonicalSha256: string;
+      compileInputSha256: string;
+      observedTarget: Readonly<{
+        target: AuthoringObservedTarget['target'];
+        canonicalSha256: string;
+      }>;
+      sourceGeometry: SavedGenericObservedSourceGeometryV1;
+      claims: typeof CLAIMS;
+    }>
+  | Readonly<{ ok: false; detail: string }>;
+type AuthoringProjector = (
+  expectedGeneration: number,
+  signal?: AbortSignal,
+) => Promise<SavedGenericObservedPhysicalHostAuthoringContextResultV1>;
+const authoringHosts = new WeakMap<object, AuthoringProjector>();
+/** Fixed factory registry dispatch, including first authoring before initialization is bound.
+ * No property or method on the supplied host is inspected or called. */
+export function projectSavedGenericObservedPhysicalHostAuthoringContextV1(
+  host: unknown,
+  expectedGeneration: number,
+  signal?: AbortSignal,
+): Promise<SavedGenericObservedPhysicalHostAuthoringContextResultV1> {
+  const project = host && typeof host === 'object' ? authoringHosts.get(host) : undefined;
+  return project
+    ? project(expectedGeneration, signal)
+    : Promise.resolve(failed(new Error('A genuine live saved generic physical host is required.')));
+}
 
 export const SAVED_GENERIC_OBSERVED_PHYSICAL_HOST_PERSISTENCE_CONTEXT_V1 =
   'saved-generic-observed-physical-host-persistence-context/1' as const;
@@ -940,6 +982,81 @@ export function createSavedGenericObservedPhysicalHostV1(
       });
     }
   };
+  const projectAuthoringContext: AuthoringProjector = async (expectedGeneration, signal) => {
+    const expectedEpoch = epoch;
+    let capturedSource: SavedFullAssemblyCompileResultV1 | null = null;
+    let observed: AuthoringObservedTarget | null = null;
+    let operationSignal: AbortSignal | undefined;
+    const publicationCurrent = () => {
+      checkSignal(operationSignal);
+      check(signal, expectedEpoch);
+      if (!capturedSource || latest !== capturedSource || sourceGeneration !== expectedGeneration)
+        throw new Error('Authoring source generation changed.');
+      if (observed && !isCurrentSavedModelGenericObservedTargetV1(bodySession, observed, signal))
+        throw new Error('The genuine observed authoring target is no longer current.');
+      // The genuine body currentness poll may synchronously replace/dispose this host.
+      checkSignal(operationSignal);
+      check(signal, expectedEpoch);
+      if (latest !== capturedSource || sourceGeneration !== expectedGeneration)
+        throw new Error('Authoring source changed during the body poll.');
+    };
+    try {
+      const result = await work('physical', signal, async (s, current) => {
+        operationSignal = s;
+        if (
+          !Number.isSafeInteger(expectedGeneration) ||
+          expectedGeneration < 1 ||
+          expectedGeneration !== sourceGeneration
+        )
+          throw new Error('Stale source generation.');
+        capturedSource = latest;
+        const stillCurrent = () => {
+          current();
+          check(s, expectedEpoch);
+          publicationCurrent();
+          current();
+        };
+        const { value, assemblySnapshot } = await localWait(fresh(s, stillCurrent), s);
+        stillCurrent();
+        const graph = await fingerprintDxfExactAssemblyGraphV1(
+          { graph: value.graph!, assemblySnapshot },
+          s,
+        );
+        stillCurrent();
+        const artifact = value.compileResult!.artifact!;
+        const sourceGeometry = projectSavedGenericObservedSourceGeometryV1({
+          handoffPieces: value.compileRequest!.handoff.pieces,
+          pieceBindings: graph.graph.pieces,
+          pieceRanges: artifact.refinement.mesh.pieceRanges,
+          vertexProvenance: artifact.refinement.vertexProvenance,
+          restPositions2Mm: artifact.refinement.mesh.restPositions2Mm,
+          restPositionsInvMass: artifact.compiledSimulation.mesh.restPositionsInvMass,
+        });
+        stillCurrent();
+        observed = await localWait(target(s), s);
+        stillCurrent();
+        await localWait(fresh(s, stillCurrent), s);
+        stillCurrent();
+        return {
+          ok: true as const,
+          sourceGeneration: expectedGeneration,
+          graph: graph.graph,
+          graphCanonicalSha256: graph.canonicalSha256,
+          compileInputSha256: artifact.sourceEvidence.inputSha256,
+          observedTarget: { target: observed.target, canonicalSha256: observed.canonicalSha256 },
+          sourceGeometry,
+          claims: CLAIMS,
+        };
+      });
+      // work() clears its operation in an awaited finally: this final continuation must not
+      // publish an old source/body merely because its detached data still compares equal.
+      if (!observed) throw new Error('Current observed authoring target is absent.');
+      publicationCurrent();
+      return result;
+    } catch (error) {
+      return failed(error);
+    }
+  };
   const host = {
     getSnapshot: () => snapshot,
     subscribe(listener: () => void) {
@@ -1038,38 +1155,7 @@ export function createSavedGenericObservedPhysicalHostV1(
         return failed(e);
       }
     },
-    async projectAuthoringContext(expectedGeneration: number, signal?: AbortSignal) {
-      try {
-        return await work('physical', signal, async (s, current) => {
-          if (
-            expectedGeneration !== sourceGeneration ||
-            !Number.isSafeInteger(expectedGeneration) ||
-            expectedGeneration < 1
-          )
-            throw new Error('Stale source generation.');
-          const { value, assemblySnapshot } = await fresh(s, current);
-          const graph = await fingerprintDxfExactAssemblyGraphV1(
-            { graph: value.graph!, assemblySnapshot },
-            s,
-          );
-          current();
-          const observed = await target(s);
-          current();
-          check(s);
-          return {
-            ok: true as const,
-            sourceGeneration,
-            graph: graph.graph,
-            graphCanonicalSha256: graph.canonicalSha256,
-            compileInputSha256: value.compileResult!.artifact!.sourceEvidence.inputSha256,
-            observedTarget: { target: observed.target, canonicalSha256: observed.canonicalSha256 },
-            claims: CLAIMS,
-          };
-        });
-      } catch (e) {
-        return failed(e);
-      }
-    },
+    projectAuthoringContext,
     async bindInitialization(
       document: DxfGarmentPhysicalInitializationV1,
       expectedGeneration: number,
@@ -1258,6 +1344,7 @@ export function createSavedGenericObservedPhysicalHostV1(
       disposed = true;
       releasePersistenceContexts();
       persistenceHosts.delete(host);
+      authoringHosts.delete(host);
       epoch++;
       sourceController.abort();
       sourceUnlink();
@@ -1272,6 +1359,7 @@ export function createSavedGenericObservedPhysicalHostV1(
   };
   persistenceHostIdentity = host;
   persistenceHosts.set(host, projectPersistenceContext);
+  authoringHosts.set(host, projectAuthoringContext);
   return Object.freeze(host);
 }
 export type SavedGenericObservedPhysicalHostV1 = ReturnType<

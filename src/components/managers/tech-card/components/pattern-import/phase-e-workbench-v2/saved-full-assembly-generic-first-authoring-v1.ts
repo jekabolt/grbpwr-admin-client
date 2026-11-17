@@ -4,49 +4,10 @@ import {
   type DxfGarmentPhysicalInitializationV1,
 } from 'lib/cloth/domain/dxf-garment-physical-initialization-v1';
 import type { DxfGarmentExplicitPiecePlacementV1 } from 'lib/cloth/domain/dxf-garment-assembly-explicit-placement-stage-v1';
-import type { DxfExactAssemblyGraphV1 } from 'lib/cloth/domain/dxf-exact-assembly-graph-v1';
-import type { SavedModelObservedPlacementTargetV1 } from 'lib/cloth/domain/saved-model-observed-placement-target-codec-v1';
-import type { SavedGenericObservedPhysicalHostV1 } from 'components/cloth-simulation-spike/saved-generic-observed-physical-host-v1';
-
-export type SavedFullAssemblyGenericAuthoringContextV1 = Readonly<{
-  sourceGeneration: number;
-  graph: DxfExactAssemblyGraphV1;
-  graphCanonicalSha256: string;
-  compileInputSha256: string;
-  observedTarget: Readonly<{
-    target: SavedModelObservedPlacementTargetV1;
-    canonicalSha256: string;
-  }>;
-  sourceGeometry: Readonly<{
-    schemaVersion: string;
-    convention: unknown;
-    pieces: readonly Readonly<{
-      pieceId: string;
-      pieceLineKey: string;
-      contours: readonly Readonly<{
-        contourId: string;
-        vertices: readonly Readonly<{
-          vertexId: string;
-          positionMm: readonly [number, number];
-          /** Exact compiled Float32 source position. Never recompute this from millimetres. */
-          positionM: readonly [number, number, number];
-          globalVertexIndex: number;
-        }>[];
-      }>[];
-    }>[];
-    claims: unknown;
-  }>;
-}>;
-
-/** Narrow seam for the genuine host projector owned by saved-generic-observed-physical-host-v1. */
-export type SavedFullAssemblyGenericAuthoringProjectorV1 = (
-  host: unknown,
-  expectedGeneration: number,
-  signal?: AbortSignal,
-) => Promise<
-  | Readonly<{ ok: true; context: SavedFullAssemblyGenericAuthoringContextV1 }>
-  | Readonly<{ ok: false; detail: string }>
->;
+import {
+  projectSavedGenericObservedPhysicalHostAuthoringContextV1,
+  type SavedGenericObservedPhysicalHostV1,
+} from 'components/cloth-simulation-spike/saved-generic-observed-physical-host-v1';
 
 /** Explicit selected pivot plus rigid table transform; no presentation-derived fallback exists. */
 export type SavedFullAssemblyTablePiecePlacementV1 = Readonly<{
@@ -202,12 +163,12 @@ function sameTuple(left: readonly number[], right: readonly number[]): boolean {
 }
 
 /**
- * First-V7 boundary. The injected projector must be the genuine host projector; this adapter never
- * obtains pivots from mannequin overlays, bbox centers, automatic lanes or caller-invented origins.
+ * First-V7 boundary. Only the registry-backed genuine host projector supplies pivot evidence; this
+ * adapter never obtains pivots from mannequin overlays, bbox centers, automatic lanes or
+ * caller-invented origins.
  */
 export async function bindSavedFullAssemblyGenericFirstAuthoringV1(
   host: Pick<SavedGenericObservedPhysicalHostV1, 'bindInitialization'>,
-  projectAuthoringContext: SavedFullAssemblyGenericAuthoringProjectorV1,
   request: BindSavedFullAssemblyGenericFirstAuthoringRequestV1,
   signal?: AbortSignal,
 ): Promise<BindSavedFullAssemblyGenericFirstAuthoringResultV1> {
@@ -224,10 +185,13 @@ export async function bindSavedFullAssemblyGenericFirstAuthoringV1(
     const authoredPlacements = capturePlacements(captured.placements);
     checkSignal(signal);
 
-    const projected = await projectAuthoringContext(host, expectedGeneration, signal);
+    const context = await projectSavedGenericObservedPhysicalHostAuthoringContextV1(
+      host,
+      expectedGeneration,
+      signal,
+    );
     checkSignal(signal);
-    if (!projected.ok) throw new Error(projected.detail);
-    const context = projected.context;
+    if (!context.ok) throw new Error(context.detail);
     if (
       context.sourceGeneration !== expectedGeneration ||
       !SHA256.test(context.graphCanonicalSha256) ||

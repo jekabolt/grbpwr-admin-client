@@ -36,6 +36,7 @@ import {
 } from 'lib/cloth/domain/dxf-garment-physical-initialization-v1';
 import {
   createSavedGenericObservedPhysicalHostV1,
+  projectSavedGenericObservedPhysicalHostAuthoringContextV1,
   projectSavedGenericObservedPhysicalHostPersistenceContextV1,
   isCurrentSavedGenericObservedPhysicalHostPersistenceContextV1,
   SAVED_GENERIC_OBSERVED_NUMERIC_PROFILE_V1,
@@ -134,6 +135,7 @@ vi.mock('./dxf-garment-observed-strain-heatmap-preview-v1', () => ({
   },
 }));
 let seed: SavedThreePanelFixtureV1;
+let defaultSeed: SavedThreePanelFixtureV1;
 let editWire:
   | ((
       wire: Awaited<ReturnType<typeof fullAssemblyFixtureWireV1>> & {
@@ -146,9 +148,10 @@ let beforeWireRead: (() => void | Promise<void>) | null = null;
 let beforeModelRead: (() => void | Promise<void>) | null = null;
 const cleanup: Array<() => void | Promise<void>> = [];
 beforeAll(async () => {
-  seed = await createSavedThreePanelFixtureV1();
+  defaultSeed = seed = await createSavedThreePanelFixtureV1();
 });
 beforeEach(() => {
+  seed = defaultSeed;
   readCount = 0;
   beforeWireRead = null;
   beforeModelRead = null;
@@ -1112,6 +1115,254 @@ describe('exact persistence-context local currentness (no server freshness autho
     expect(duringSiblingAbort).toBe(false);
     expect(current(f.host, context)).toBe(false);
     expect(f.host.getSnapshot()).toMatchObject({ status: 'blocked', initializationSha256: null });
+    expect((await f.body.projectCurrentBody()).status).toBe('projected');
+  }, 60000);
+});
+
+describe('factory-only first authoring with authentic saved native corner geometry', () => {
+  const project = projectSavedGenericObservedPhysicalHostAuthoringContextV1;
+  it.each([2, 3] as const)(
+    'projects every exact corner for genuine %i pieces before initialization, retaining native order and compiled offsets',
+    async (pieceCount) => {
+      seed = await createSavedThreePanelFixtureV1(pieceCount);
+      const f = await fixture();
+      const consumed = await f.host.consume(f.request);
+      if (
+        !consumed.ok ||
+        !consumed.result.compileResult?.compiled ||
+        !consumed.result.compileRequest
+      )
+        throw new Error(JSON.stringify(consumed));
+      expect(f.host.getSnapshot().initializationSha256).toBeNull();
+      const result = await project(f.host, 1);
+      if (!result.ok) throw new Error(result.detail);
+      const handoff = consumed.result.compileRequest.handoff;
+      const artifact = consumed.result.compileResult.artifact;
+      expect(result.sourceGeometry.pieces.map((p) => p.pieceId)).toEqual(
+        handoff.pieces.map((p) => p.id),
+      );
+      expect(result.graph.seams).toHaveLength(pieceCount - 1);
+      for (const [i, piece] of result.sourceGeometry.pieces.entries()) {
+        expect(piece.pieceLineKey).toBe(
+          result.graph.pieces.find((p) => p.pieceId === piece.pieceId)!.pieceLineKey,
+        );
+        for (const [j, contour] of piece.contours.entries()) {
+          expect(contour.contourId).toBe(handoff.pieces[i].contours[j].id);
+          expect(contour.vertices.map((v) => v.vertexId)).toEqual(
+            handoff.pieces[i].contours[j].vertices.map((v) => v.id),
+          );
+          for (const [k, corner] of contour.vertices.entries()) {
+            expect(corner.positionMm).toEqual(handoff.pieces[i].contours[j].vertices[k].positionMm);
+            expect(corner.positionM).toEqual(
+              Array.from(
+                artifact.compiledSimulation.mesh.restPositionsInvMass.slice(
+                  corner.globalVertexIndex * 4,
+                  corner.globalVertexIndex * 4 + 3,
+                ),
+              ),
+            );
+            expect(corner.positionM[0]).toBe(
+              Math.fround(Math.fround(corner.positionMm[0]) * 0.001),
+            );
+          }
+        }
+      }
+      expect(
+        result.sourceGeometry.pieces.some((p) =>
+          p.contours.some((c) => c.vertices.some((v) => v.positionMm[0] >= 150)),
+        ),
+      ).toBe(true);
+      expect(result.sourceGeometry.claims).toMatchObject({
+        defaultPivotSelected: false,
+        runtimeAuthority: false,
+        sourceAuthority: false,
+      });
+      const expectedGeometry = structuredClone(result.sourceGeometry);
+      Object.defineProperty(
+        result.sourceGeometry.pieces[0].contours[0].vertices[0].positionM,
+        '0',
+        { value: 999 },
+      );
+      const next = await f.host.projectAuthoringContext(1);
+      if (!next.ok) throw new Error(next.detail);
+      expect(next.sourceGeometry).toEqual(expectedGeometry);
+      expect(ports.calls).toHaveLength(0);
+    },
+    60000,
+  );
+
+  it('does not invoke caller properties, proxy traps or copied methods to authenticate a host', async () => {
+    const f = await fixture();
+    expect((await f.host.consume(f.request)).ok).toBe(true);
+    const invoked = vi.fn(() => {
+      throw new Error('Must not inspect caller host');
+    });
+    const traps = { get: invoked, getPrototypeOf: invoked, ownKeys: invoked };
+    const revoked = Proxy.revocable(f.host, traps);
+    revoked.revoke();
+    const before = readCount;
+    for (const bad of [
+      null,
+      7,
+      {},
+      { ...f.host },
+      new Proxy(f.host, traps),
+      revoked.proxy,
+      Object.defineProperty({}, 'projectAuthoringContext', { get: invoked }),
+    ])
+      expect((await project(bad, 1)).ok).toBe(false);
+    expect(invoked).not.toHaveBeenCalled();
+    expect(readCount).toBe(before);
+    expect((await project(f.host, 1)).ok).toBe(true);
+    await f.host.dispose();
+    expect((await project(f.host, 1)).ok).toBe(false);
+    expect((await f.body.projectCurrentBody()).status).toBe('projected');
+  }, 60000);
+
+  it('rejects stale generations without consuming or revoking the current source/body', async () => {
+    const f = await fixture();
+    expect((await f.host.consume(f.request)).ok).toBe(true);
+    expect((await project(f.host, 2)).ok).toBe(false);
+    const next = await createSavedThreePanelSourceV1(seed);
+    cleanup.push(next.dispose);
+    const raw = await savedThreePanelCompileRequestV1(seed, next);
+    expect((await f.host.consume({ ...raw, intent: f.request.intent })).ok).toBe(true);
+    expect((await project(f.host, 1)).ok).toBe(false);
+    expect((await project(f.host, 2)).ok).toBe(true);
+    expect((await f.body.projectCurrentBody()).status).toBe('projected');
+  }, 60000);
+
+  it('returns on local cancellation during a real pending source read and allows retry', async () => {
+    const f = await fixture();
+    expect((await f.host.consume(f.request)).ok).toBe(true);
+    const pause = deferredSessionValue<void>();
+    let entered = false;
+    beforeWireRead = () => {
+      entered = true;
+      return pause.promise;
+    };
+    const caller = new AbortController();
+    const pending = project(f.host, 1, caller.signal);
+    await vi.waitFor(() => expect(entered).toBe(true));
+    caller.abort();
+    expect((await pending).ok).toBe(false);
+    beforeWireRead = null;
+    pause.resolve();
+    await Promise.resolve();
+    expect((await project(f.host, 1)).ok).toBe(true);
+    expect((await f.body.projectCurrentBody()).status).toBe('projected');
+  }, 60000);
+
+  it('refuses fresh outer drift rather than returning remembered corner geometry', async () => {
+    const f = await fixture();
+    expect((await f.host.consume(f.request)).ok).toBe(true);
+    expect((await project(f.host, 1)).ok).toBe(true);
+    const outer = await presentFixtureOuter();
+    editWire = (w) => {
+      w.semanticSidecar = outer;
+    };
+    expect((await project(f.host, 1)).ok).toBe(false);
+    expect(f.host.getSnapshot().status).toBe('blocked');
+    expect((await f.body.projectCurrentBody()).status).toBe('projected');
+  }, 60000);
+
+  it.each(['null', 'rebound', 'dispose'] as const)(
+    'rejects body %s after a genuine target resolves, including identical target metadata',
+    async (mode) => {
+      const f = await fixture();
+      expect((await f.host.consume(f.request)).ok).toBe(true);
+      const original = bodySessionApi.projectCurrentSavedModelGenericObservedTargetV1;
+      const spy = vi
+        .spyOn(bodySessionApi, 'projectCurrentSavedModelGenericObservedTargetV1')
+        .mockImplementation(async (...args) => {
+          const value = await original(...args);
+          if (mode === 'dispose') f.body.dispose();
+          else {
+            await f.body.observe(null);
+            if (mode === 'rebound') {
+              await f.body.observe(f.observed.input);
+              const rebound = await original(...args);
+              if (!value.ok || !rebound.ok) throw new Error('Real targets required');
+              expect(rebound.canonicalSha256).toBe(value.canonicalSha256);
+            }
+          }
+          return value;
+        });
+      try {
+        expect((await project(f.host, 1)).ok).toBe(false);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(f.host.getSnapshot().sourceGeneration).toBe(1);
+      if (mode === 'rebound') expect((await project(f.host, 1)).ok).toBe(true);
+    },
+    60000,
+  );
+
+  it.each(['host-dispose', 'caller-abort'] as const)(
+    'rechecks %s after the final synchronous genuine body poll',
+    async (mode) => {
+      const f = await fixture();
+      expect((await f.host.consume(f.request)).ok).toBe(true);
+      const original = bodySessionApi.isCurrentSavedModelGenericObservedTargetV1;
+      let polls = 0,
+        terminal = Infinity;
+      let disposing: Promise<boolean> | null = null;
+      const caller = new AbortController();
+      const spy = vi
+        .spyOn(bodySessionApi, 'isCurrentSavedModelGenericObservedTargetV1')
+        .mockImplementation((...args) => {
+          const value = original(...args);
+          if (++polls === terminal) {
+            if (mode === 'host-dispose') disposing = f.host.dispose();
+            else caller.abort();
+          }
+          return value;
+        });
+      try {
+        expect((await project(f.host, 1)).ok).toBe(true);
+        terminal = polls;
+        expect(terminal).toBeGreaterThan(0);
+        polls = 0;
+        expect((await project(f.host, 1, caller.signal)).ok).toBe(false);
+        if (disposing) await disposing;
+      } finally {
+        spy.mockRestore();
+      }
+      if (mode === 'caller-abort') expect((await project(f.host, 1)).ok).toBe(true);
+      expect((await f.body.projectCurrentBody()).status).toBe('projected');
+    },
+    60000,
+  );
+  it('refuses a result stopped between the final inner body poll and outer work continuation', async () => {
+    const f = await fixture();
+    expect((await f.host.consume(f.request)).ok).toBe(true);
+    const original = bodySessionApi.isCurrentSavedModelGenericObservedTargetV1;
+    let polls = 0,
+      penultimate = Infinity;
+    let stopping: Promise<void> | null = null;
+    const spy = vi
+      .spyOn(bodySessionApi, 'isCurrentSavedModelGenericObservedTargetV1')
+      .mockImplementation((...args) => {
+        const value = original(...args);
+        if (++polls === penultimate)
+          queueMicrotask(() => {
+            stopping = f.host.stopPreview();
+          });
+        return value;
+      });
+    try {
+      expect((await project(f.host, 1)).ok).toBe(true);
+      penultimate = polls - 1;
+      expect(penultimate).toBeGreaterThan(0);
+      polls = 0;
+      expect((await project(f.host, 1)).ok).toBe(false);
+      expect(stopping).not.toBeNull();
+      if (stopping) await stopping;
+    } finally {
+      spy.mockRestore();
+    }
+    expect((await project(f.host, 1)).ok).toBe(true);
     expect((await f.body.projectCurrentBody()).status).toBe('projected');
   }, 60000);
 });

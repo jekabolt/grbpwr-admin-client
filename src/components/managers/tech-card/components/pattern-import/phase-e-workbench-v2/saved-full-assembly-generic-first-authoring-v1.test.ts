@@ -1,4 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
+
+const hostProjector = vi.hoisted(() => ({ project: vi.fn() }));
+vi.mock('components/cloth-simulation-spike/saved-generic-observed-physical-host-v1', async () => {
+  const actual = await vi.importActual<
+    typeof import('components/cloth-simulation-spike/saved-generic-observed-physical-host-v1')
+  >('components/cloth-simulation-spike/saved-generic-observed-physical-host-v1');
+  return {
+    ...actual,
+    projectSavedGenericObservedPhysicalHostAuthoringContextV1: hostProjector.project,
+  };
+});
+
 import { bindSavedFullAssemblyGenericFirstAuthoringV1 } from './saved-full-assembly-generic-first-authoring-v1';
 
 const sha = (character: string) => character.repeat(64);
@@ -68,7 +80,9 @@ function fixture() {
       claims: { detachedFreshProjection: true },
     },
   };
-  const projectAuthoringContext = vi.fn(async () => ({ ok: true as const, context }));
+  hostProjector.project.mockReset();
+  hostProjector.project.mockResolvedValue({ ok: true as const, ...context });
+  const projectAuthoringContext = hostProjector.project;
   const bindInitialization = vi.fn(async () => ({
     ok: true as const,
     sourceGeneration: 7,
@@ -119,7 +133,6 @@ describe('saved full assembly generic first authoring', () => {
     const f = fixture();
     const result = await bindSavedFullAssemblyGenericFirstAuthoringV1(
       f.host as never,
-      f.projectAuthoringContext as never,
       f.request,
     );
     expect(result.ok).toBe(true);
@@ -175,7 +188,6 @@ describe('saved full assembly generic first authoring', () => {
     mutate(request);
     const result = await bindSavedFullAssemblyGenericFirstAuthoringV1(
       f.host as never,
-      f.projectAuthoringContext as never,
       request,
     );
     expect(result.ok).toBe(false);
@@ -205,7 +217,6 @@ describe('saved full assembly generic first authoring', () => {
     mutate(request);
     const result = await bindSavedFullAssemblyGenericFirstAuthoringV1(
       f.host as never,
-      f.projectAuthoringContext as never,
       request,
     );
     expect(result.ok).toBe(false);
@@ -224,7 +235,6 @@ describe('saved full assembly generic first authoring', () => {
       mutate(request);
       const result = await bindSavedFullAssemblyGenericFirstAuthoringV1(
         f.host as never,
-        f.projectAuthoringContext as never,
         request,
       );
       expect(result.ok).toBe(false);
@@ -237,13 +247,12 @@ describe('saved full assembly generic first authoring', () => {
       const f = fixture();
       f.projectAuthoringContext.mockResolvedValueOnce({
         ok: true,
-        context: { ...f.context, sourceGeneration: 8 },
+        ...f.context, sourceGeneration: 8,
       });
       expect(
         (
           await bindSavedFullAssemblyGenericFirstAuthoringV1(
             f.host as never,
-            f.projectAuthoringContext as never,
             f.request,
           )
         ).ok,
@@ -260,7 +269,6 @@ describe('saved full assembly generic first authoring', () => {
         (
           await bindSavedFullAssemblyGenericFirstAuthoringV1(
             f.host as never,
-            f.projectAuthoringContext as never,
             f.request,
           )
         ).ok,
@@ -272,7 +280,6 @@ describe('saved full assembly generic first authoring', () => {
     const f = fixture();
     const result = await bindSavedFullAssemblyGenericFirstAuthoringV1(
       f.host as never,
-      f.projectAuthoringContext as never,
       { ...f.request, arrangement: { presentationOnly: true } } as never,
     );
     expect(result.ok).toBe(false);
