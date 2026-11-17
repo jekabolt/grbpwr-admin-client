@@ -4,6 +4,7 @@ import {
 } from './makehuman-limb-circumference-delta-bundle-v1';
 import { createMakeHumanLimbCircumferenceUniformModesV1 } from './makehuman-limb-circumference-uniform-modes-v1';
 import { type MakeHumanTorsoShapeDeltaBundleV1 } from './makehuman-torso-shape-delta-bundle-v1';
+import type { MakeHumanFemaleBustDeltaBundleV1 } from './makehuman-female-bust-delta-bundle-v1';
 import {
   applyMakeHuman2ArmLengthProxyToDisplayPositionsMResearchV1,
   createMakeHuman2ArmLengthProxyRuntimeResearchV1,
@@ -151,6 +152,8 @@ export interface MeasurementOpenReferenceBetaShapeRuntimeResultV1 {
 
 export type MeasurementOpenReferenceBetaShapeTorsoBundleLoaderV1 =
   () => Promise<MakeHumanTorsoShapeDeltaBundleV1>;
+export type MeasurementOpenReferenceBetaShapeFemaleBustBundleLoaderV1 =
+  () => Promise<MakeHumanFemaleBustDeltaBundleV1>;
 export type MeasurementOpenReferenceBetaShapeLengthPackLoaderV1 =
   () => Promise<MakeHuman2PoseCompatibleLengthPackV1>;
 export type MeasurementOpenReferenceBetaShapePoseResourcesLoaderV1 =
@@ -448,7 +451,53 @@ export async function createMeasurementOpenReferenceBetaShapeRuntimeV1(
       depthRemoved: depthFree != null,
     });
   }
+  // Female: the bust proxy also carries the ribcage band. Before the whole body is rolled back,
+  // drop the band too (no under-bust target, chest at the unshaped base girth).
+  const { underBustCircumferenceMm: _underBust, ...withoutUnderBust } = retryMeasurements;
+  if (options.basis.kind === 'female' && retryMeasurements.underBustCircumferenceMm != null) {
+    const bustDroppedRetry = await createBetaShapeRuntimeOnceV1({
+      ...options,
+      measurements: withChestTarget(withoutUnderBust as CanonicalBodyMeasurementsMm, baseChestMm),
+    });
+    if (!hasFinalGlobalQualityRollback(bustDroppedRetry)) {
+      return bustDroppedResult({
+        original: result,
+        retry: chestFallbackResult({
+          original: result,
+          retry: bustDroppedRetry,
+          mode: 'removed',
+          depthRemoved: depthFree != null,
+        }),
+      });
+    }
+  }
   return result;
+}
+
+function bustDroppedResult(options: {
+  readonly original: MeasurementOpenReferenceBetaShapeRuntimeResultV1;
+  readonly retry: MeasurementOpenReferenceBetaShapeRuntimeResultV1;
+}): MeasurementOpenReferenceBetaShapeRuntimeResultV1 {
+  const representedVisualControls = stableKeys(
+    options.retry.representedVisualControls.filter((key) => key !== 'underBustCircumferenceMm'),
+  );
+  const limitedVisualControls = stableKeys(
+    (options.retry.limitedVisualControls ?? []).filter((key) => key !== 'underBustCircumferenceMm'),
+  );
+  return Object.freeze({
+    ...options.retry,
+    status: options.retry.status === 'represented' ? ('partial' as const) : options.retry.status,
+    representedVisualControls,
+    limitedVisualControls,
+    chestShoulderDiagnostics: Object.freeze([
+      'beta-final-bust-subset-rollback',
+      'underBustCircumferenceMm:beta-final-target-removed',
+      ...options.retry.chestShoulderDiagnostics.filter(
+        (code) => code !== 'underbust-missing:proportional-ribcage',
+      ),
+    ]),
+    sourceRevisionSuffix: suffix(representedVisualControls, limitedVisualControls),
+  });
 }
 
 async function createBetaShapeRuntimeOnceV1(options: {
@@ -456,6 +505,7 @@ async function createBetaShapeRuntimeOnceV1(options: {
   readonly measurements: CanonicalBodyMeasurementsMm;
   readonly waistHipRuntime: MeasurementOpenReferenceUniformWaistHipRuntimeResultV1;
   readonly loadTorsoBundle?: MeasurementOpenReferenceBetaShapeTorsoBundleLoaderV1;
+  readonly loadFemaleBustBundle?: MeasurementOpenReferenceBetaShapeFemaleBustBundleLoaderV1;
   readonly createLimbRuntime?: typeof createMeasurementOpenReferenceLimbSubsetRuntimeV1;
   readonly loadLengthPack?: MeasurementOpenReferenceBetaShapeLengthPackLoaderV1;
   readonly loadPoseResources?: MeasurementOpenReferenceBetaShapePoseResourcesLoaderV1;
@@ -504,6 +554,9 @@ async function createBetaShapeRuntimeOnceV1(options: {
         ? {}
         : { highHipCircumferenceMm: options.measurements.highHipCircumferenceMm }),
       loadTorsoBundle: options.loadTorsoBundle,
+      ...(options.loadFemaleBustBundle
+        ? { loadFemaleBustBundle: options.loadFemaleBustBundle }
+        : {}),
       signal: options.signal,
     });
     diagnostics.push(
@@ -522,6 +575,7 @@ async function createBetaShapeRuntimeOnceV1(options: {
       ...(torso.highHipRepresented ? (['highHipCircumferenceMm'] as const) : []),
     );
     limited.push(
+      ...(torso.ribcageLimitedMeasurements ?? []),
       ...torso.chestShoulderLimitedMeasurements,
       ...torso.depthLimitedMeasurements,
       ...(torso.highHipLimited ? (['highHipCircumferenceMm'] as const) : []),
@@ -529,6 +583,7 @@ async function createBetaShapeRuntimeOnceV1(options: {
     const highHipApplied = torso.highHipRepresented || torso.highHipLimited;
     if (
       torso.ribcageRepresentedMeasurements.length > 0 ||
+      (torso.ribcageLimitedMeasurements?.length ?? 0) > 0 ||
       torso.chestShoulderRepresentedMeasurements.length > 0 ||
       torso.chestShoulderLimitedMeasurements.length > 0 ||
       torso.depthRepresentedMeasurements.length > 0 ||
