@@ -1,23 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  createXpbdDeviceSession,
-  type XpbdDeviceLease,
-} from 'lib/cloth/runtime/webgpu/xpbd-device-session';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Button, Text } from 'ui';
 
 import type { useSavedClothPhysicalHostV1 } from './use-saved-cloth-physical-host-v1';
 import { CadWorkbenchFirstPhysicalAuthoringV1 } from './cad-workbench-first-physical-authoring-v1';
+import {
+  createCadWorkbenchPreviewLifecycleV1,
+  type CadWorkbenchPreviewStatusV1,
+} from './cad-workbench-preview-lifecycle-v1';
 
 type HostState = ReturnType<typeof useSavedClothPhysicalHostV1>;
-type ActivePreview = Readonly<{
-  controller: AbortController;
-  lease: XpbdDeviceLease;
-  session: Awaited<ReturnType<typeof createXpbdDeviceSession>>;
-}>;
-
-function resultDetail(result: Readonly<{ ok: boolean; detail?: string }>): string {
-  return result.ok ? '' : result.detail?.slice(0, 600) || 'The cloth preview could not complete.';
-}
 
 /** Compact viewport-only controls. The underlying mannequin remains mounted and visible. */
 export function CadWorkbenchPhysicalHostControlsV1({
@@ -29,52 +20,27 @@ export function CadWorkbenchPhysicalHostControlsV1({
 }>) {
   const computeCanvas = useRef<HTMLCanvasElement>(null);
   const previewCanvas = useRef<HTMLCanvasElement>(null);
-  const active = useRef<ActivePreview | null>(null);
-  const [pending, setPending] = useState(false);
-  const [localError, setLocalError] = useState<string | null>(null);
+  const { host } = state;
+  const [lifecycle] = useState(() => createCadWorkbenchPreviewLifecycleV1());
+  const [previewStatus, setPreviewStatus] = useState<
+    (CadWorkbenchPreviewStatusV1 & Readonly<{ host: HostState['host'] }>) | null
+  >(null);
+  const localStatus = previewStatus?.host === host ? previewStatus : null;
+  const pending = localStatus?.pending ?? false;
+  const localError = localStatus?.error;
 
-  const stop = useCallback(async () => {
-    const current = active.current;
-    active.current = null;
-    current?.controller.abort();
-    await state.host?.stopPreview();
-    current?.lease.release();
-    if (current) await current.session.dispose();
-  }, [state.host]);
-
-  useEffect(
+  useLayoutEffect(
     () => () => {
-      void stop();
+      void lifecycle.cancel(host);
     },
-    [stop],
+    [host, lifecycle],
   );
 
-  const preview = async () => {
-    if (pending || disabled || !state.host || !computeCanvas.current || !previewCanvas.current)
-      return;
-    await stop();
-    const controller = new AbortController();
-    setPending(true);
-    setLocalError(null);
-    try {
-      const session = await createXpbdDeviceSession(computeCanvas.current);
-      const lease = session.acquireExclusive();
-      active.current = { controller, lease, session };
-      const frame16 = await state.host.run16(lease, controller.signal);
-      if (!frame16.ok) throw new Error(resultDetail(frame16));
-      const frame32 = await state.host.run32(lease, controller.signal);
-      if (!frame32.ok) throw new Error(resultDetail(frame32));
-      const mounted = await state.host.mountPreview(previewCanvas.current, controller.signal);
-      if (!mounted.ok) throw new Error(resultDetail(mounted));
-    } catch (error) {
-      if (!controller.signal.aborted)
-        setLocalError(
-          error instanceof Error ? error.message.slice(0, 600) : 'Cloth preview failed.',
-        );
-      await stop();
-    } finally {
-      setPending(false);
-    }
+  const preview = () => {
+    if (disabled || !host || !computeCanvas.current || !previewCanvas.current) return;
+    void lifecycle.start(host, computeCanvas.current, previewCanvas.current, (status) =>
+      setPreviewStatus({ ...status, host }),
+    );
   };
 
   const ready = state.sourceStatus === 'ready' && state.host !== null;
@@ -105,7 +71,7 @@ export function CadWorkbenchPhysicalHostControlsV1({
             size='xs'
             variant='main'
             disabled={disabled || pending}
-            onClick={() => void preview()}
+            onClick={preview}
           >
             {pending ? 'Preparing…' : previewReady ? 'Refresh preview' : 'Preview'}
           </Button>
@@ -133,7 +99,7 @@ export function CadWorkbenchPhysicalHostControlsV1({
         <Text
           component='span'
           size='micro'
-          variant={state.sourceStatus === 'blocked' ? 'errorLabel' : 'label'}
+          variant={state.sourceStatus === 'blocked' || localError ? 'errorLabel' : 'label'}
         >
           {state.sourceStatus === 'idle'
             ? 'Save the assembly to preview cloth.'
