@@ -430,6 +430,7 @@ type Receipt = {
   finalState: GarmentMaterialContactCheckpointV1;
   /** Private already-owned V5 topology; no caller geometry may replace it for rendering. */
   renderTriangles: Uint32Array;
+  pieceRanges: CorePlan['report']['pieceRanges'];
   strain: Strain;
   sourceBindingSha256: string;
   report: DxfGarmentObservedWebgpuReplayReportV1;
@@ -1350,6 +1351,9 @@ async function run(
       checkpoint16: gpu.checkpoint16.slice(),
       finalState: gpu.final,
       renderTriangles: simulation.mesh.triangles,
+      // The exact placement preserved source topology. The prefix plan already verified unique,
+      // disjoint piece coverage and triangle vertices against that same sealed package.
+      pieceRanges: prefix.plan.report.pieceRanges,
       strain,
       sourceBindingSha256,
       report: terminal,
@@ -1484,6 +1488,7 @@ export async function projectDxfGarmentObservedWebgpuRenderV1(
       report: r.report,
       finalPositions3M: xyz(r.finalState.positions),
       garmentTriangles: r.renderTriangles.slice(),
+      pieceRanges: r.pieceRanges.map((range) => ({ ...range })),
       bodyPositionsM: body.snapshot.bodyPositionsM.slice(),
       bodyTriangles: body.snapshot.bodyTriangles.slice(),
       strain: capture(r.strain) as Strain,

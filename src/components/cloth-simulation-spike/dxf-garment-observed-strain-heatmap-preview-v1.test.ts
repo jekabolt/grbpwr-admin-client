@@ -7,6 +7,7 @@ const ports = vi.hoisted(() => ({
   owner: Object.freeze({ syntheticDisplayFixture: true }),
   controller: new AbortController(),
   onRender: null as (() => void) | null,
+  currentCamera: null as THREE.Camera | null,
   onLifetimeRead: null as (() => void) | null,
   renderers: [] as { renders: number; clears: number; disposals: number }[],
   throwDispose: false,
@@ -15,8 +16,35 @@ const ports = vi.hoisted(() => ({
 }));
 const positions = (z = 0) => new Float32Array([0, 0, z, 1, 0, z, 0, 1, z, 1, 1, z]);
 const input = () => ({
-  finalPositions3M: positions(ports.clothZ),
-  garmentTriangles: new Uint32Array([0, 1, 2, 1, 3, 2]),
+  finalPositions3M: new Float32Array([
+    ...positions(ports.clothZ).slice(0, 9),
+    1,
+    0,
+    ports.clothZ,
+    1,
+    1,
+    ports.clothZ,
+    0,
+    1,
+    ports.clothZ,
+  ]),
+  garmentTriangles: new Uint32Array([0, 1, 2, 3, 4, 5]),
+  pieceRanges: [
+    {
+      pieceId: 'first-panel',
+      vertexOffset: 0,
+      vertexCount: 3,
+      triangleOffset: 0,
+      triangleCount: 1,
+    },
+    {
+      pieceId: 'second-panel',
+      vertexOffset: 3,
+      vertexCount: 3,
+      triangleOffset: 1,
+      triangleCount: 1,
+    },
+  ],
   strain: {
     // GPU order [render1, render0], deliberately not the render ordinal order.
     values: new Float32Array([0, 0, 0, 2.5, 0, 0, 0, 0.25]),
@@ -41,6 +69,10 @@ vi.mock('./dxf-garment-observed-webgpu-replay-v1', () => ({
       finalStateSha256: 'c'.repeat(64),
       finalValidation: { ok: true },
       checkpoint16Matched: true,
+      bodyBinding: {
+        persistedModel: Object.freeze({ id: 5, updatedAt: '2026-11-01T12:00:00Z', revision: 'r1' }),
+        observedBodyContentSha256: 'e'.repeat(64),
+      },
     },
     bodyPositionsM: positions(),
     bodyTriangles: new Uint32Array([0, 1, 2, 1, 3, 2]),
@@ -68,6 +100,7 @@ vi.mock('three', async (original) => {
       this.renders++;
       scene.updateMatrixWorld(true);
       camera.updateMatrixWorld(true);
+      ports.currentCamera = camera;
       scene.traverse((node) => {
         if (!(node instanceof actual.Mesh)) return;
         const attribute = node.geometry.getAttribute('position');
@@ -105,6 +138,9 @@ class SyntheticCanvas extends EventTarget {
   readonly clientHeight = 720;
   width = 640;
   height = 720;
+  getBoundingClientRect() {
+    return { left: 25, top: 50, width: 1280, height: 720 };
+  }
   readonly getContext = vi.fn(() => {
     throw new Error('No actual GPU in a lifecycle test.');
   });
@@ -113,6 +149,7 @@ const active: { dispose(): void }[] = [];
 beforeEach(() => {
   ports.controller = new AbortController();
   ports.onRender = null;
+  ports.currentCamera = null;
   ports.onLifetimeRead = null;
   ports.renderers = [];
   ports.throwDispose = false;
@@ -170,6 +207,50 @@ describe('generic continuum-to-render strain mapping (pure content only)', () =>
 });
 
 describe('synthetic renderer lifecycle (not visual or physical acceptance)', () => {
+  function clientPoint(canvas: SyntheticCanvas, x: number, y: number, z: number) {
+    if (!ports.currentCamera) throw new Error('No camera rendered.');
+    const projected = new THREE.Vector3(x, y, z).project(ports.currentCamera);
+    const { left, top, width, height } = canvas.getBoundingClientRect();
+    const contentLeft = left + (width - canvas.width) / 2;
+    return [
+      contentLeft + ((projected.x + 1) * canvas.width) / 2,
+      top + ((1 - projected.y) * height) / 2,
+    ] as const;
+  }
+
+  it('picks visible garments by exact render triangle instead of strain schedule order', async () => {
+    ports.clothZ = 0.15;
+    const { canvas, view } = await open();
+    expect(view.pick(...clientPoint(canvas, 0.2, 0.2, ports.clothZ))).toEqual({
+      kind: 'garment',
+      frameReportSha256: view.receipt.frameReportSha256,
+      triangleIndex: 0,
+      pieceId: 'first-panel',
+    });
+    expect(view.pick(...clientPoint(canvas, 0.8, 0.8, ports.clothZ))).toMatchObject({
+      kind: 'garment',
+      triangleIndex: 1,
+      pieceId: 'second-panel',
+    });
+    expect(view.pick(canvas.getBoundingClientRect().left + 1, 400)).toBeNull();
+    expect(view.pick(...clientPoint(canvas, -0.2, 0.2, ports.clothZ))).toBeNull();
+    expect(ports.renderers[0]?.renders).toBe(1);
+  });
+
+  it('picks frontmost body identity and refuses a hit once the rendered frame expires', async () => {
+    ports.clothZ = -0.15;
+    const { canvas, view } = await open();
+    const bodyPoint = clientPoint(canvas, 0.2, 0.2, 0);
+    expect(view.pick(...bodyPoint)).toEqual({
+      kind: 'body',
+      frameReportSha256: view.receipt.frameReportSha256,
+      triangleIndex: 0,
+      persistedModel: { id: 5, updatedAt: '2026-11-01T12:00:00Z', revision: 'r1' },
+      observedBodyContentSha256: 'e'.repeat(64),
+    });
+    ports.controller.abort();
+    expect(view.pick(...bodyPoint)).toBeNull();
+  });
   it('renders once, binds the frame receipt and releases only its display on caller abort', async () => {
     const caller = new AbortController();
     const { canvas, view } = await open(caller.signal);

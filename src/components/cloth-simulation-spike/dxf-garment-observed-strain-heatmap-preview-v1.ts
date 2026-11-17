@@ -92,6 +92,19 @@ export async function projectDxfGarmentObservedStrainHeatmapV1(
   return Object.freeze({ ...input, heatmap });
 }
 
+export type DxfGarmentObservedPreviewHitV1 = Readonly<{
+  frameReportSha256: string;
+  triangleIndex: number;
+}> &
+  (
+    | Readonly<{ kind: 'garment'; pieceId: string }>
+    | Readonly<{
+        kind: 'body';
+        persistedModel: Readonly<{ id: number; updatedAt: string; revision: string }>;
+        observedBodyContentSha256: string;
+      }>
+  );
+
 /** One static view of a genuine16/32 numeric frame. Does not start another solver or GPU device.
  * The WebGL display belongs to this preview and is released independently of the borrowed replay.
  * A product host must additionally retain its durable source and edit-generation lifetimes. */
@@ -237,10 +250,58 @@ export async function createDxfGarmentObservedStrainHeatmapPreviewV1(
     current();
     renderer.render(scene, camera);
     current();
-    canvas.dataset.genericObservedStrainFrameSha256 = input.report.reportSha256!;
+    const frameReportSha256 = input.report.reportSha256!;
+    canvas.dataset.genericObservedStrainFrameSha256 = frameReportSha256;
+    const raycaster = new THREE.Raycaster();
+    const pick = (clientX: number, clientY: number): DxfGarmentObservedPreviewHitV1 | null => {
+      try {
+        current();
+        if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+        const rect = canvas.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return null;
+        // The preview bitmap keeps the aspect of the camera used for its sole rendered frame.
+        const scale = Math.min(rect.width / width, rect.height / height);
+        const contentWidth = width * scale;
+        const contentHeight = height * scale;
+        const x = (clientX - rect.left - (rect.width - contentWidth) / 2) / contentWidth;
+        const y = (clientY - rect.top - (rect.height - contentHeight) / 2) / contentHeight;
+        if (x < 0 || x > 1 || y < 0 || y > 1) return null;
+        raycaster.setFromCamera(new THREE.Vector2(x * 2 - 1, 1 - y * 2), camera);
+        const hit = raycaster.intersectObjects([bodyMesh, garmentMesh], false)[0];
+        current();
+        if (!hit || hit.faceIndex == null) return null;
+        const triangleIndex = hit.faceIndex;
+        if (hit.object === garmentMesh) {
+          const range = input.pieceRanges.find(
+            ({ triangleOffset, triangleCount }) =>
+              triangleIndex >= triangleOffset && triangleIndex < triangleOffset + triangleCount,
+          );
+          return range
+            ? Object.freeze({
+                kind: 'garment',
+                frameReportSha256,
+                triangleIndex,
+                pieceId: range.pieceId,
+              })
+            : null;
+        }
+        const body = input.report.bodyBinding;
+        return body
+          ? Object.freeze({
+              kind: 'body',
+              frameReportSha256,
+              triangleIndex,
+              persistedModel: body.persistedModel,
+              observedBodyContentSha256: body.observedBodyContentSha256,
+            })
+          : null;
+      } catch {
+        return null;
+      }
+    };
     return Object.freeze({
       receipt: Object.freeze({
-        frameReportSha256: input.report.reportSha256!,
+        frameReportSha256,
         sourceBindingSha256: input.report.sourceBindingSha256!,
         finalStateSha256: input.report.finalStateSha256!,
         strainRenderMappingSha256: input.strain.renderMappingSha256,
@@ -258,6 +319,7 @@ export async function createDxfGarmentObservedStrainHeatmapPreviewV1(
         fitAuthority: false as const,
       }),
       lifetime: lifetime.signal,
+      pick,
       dispose,
     });
   } catch (error) {

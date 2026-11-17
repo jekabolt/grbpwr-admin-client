@@ -447,6 +447,12 @@ describe('actual encoder with explicitly scripted GPU transport (not physics evi
         expect(render.finalPositions3M[particle * 3 + axis]).toBe(
           projection!.finalState.positions[particle * 4 + axis],
         );
+    const expectedRanges = placementRequest.sourceArtifact.refinement.mesh.pieceRanges;
+    expect(render.pieceRanges).toEqual(expectedRanges);
+    expect(render.pieceRanges).not.toBe(expectedRanges);
+    expect(render.pieceRanges[0]).not.toBe(expectedRanges[0]);
+    expect(Object.isFrozen(render.pieceRanges)).toBe(true);
+    expect(Object.isFrozen(render.pieceRanges[0])).toBe(true);
     const expectedTopology = render.garmentTriangles.slice();
     render.finalPositions3M.fill(77);
     render.garmentTriangles.fill(77);
@@ -456,6 +462,7 @@ describe('actual encoder with explicitly scripted GPU transport (not physics evi
     render.strain.renderTriangleIndices.fill(77);
     const again = await projectDxfGarmentObservedWebgpuRenderV1(r32.owner);
     expect(again?.garmentTriangles).toEqual(expectedTopology);
+    expect(again?.pieceRanges).toEqual(expectedRanges);
     expect(again?.finalPositions3M[0]).not.toBe(77);
     expect(again?.bodyPositionsM).toEqual(actualBody.snapshot.bodyPositionsM);
     expect(again?.bodyTriangles).toEqual(actualBody.snapshot.bodyTriangles);
