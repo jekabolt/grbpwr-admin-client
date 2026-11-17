@@ -10,7 +10,15 @@ import {
   type PatternImportDxfProductPhaseEAssemblyProjectionV1,
 } from 'lib/pattern-import/dxf-product-phase-e-assembly-workbench-v1';
 
-import { PatternImportDxfPhaseECadTableZeroConnectCanvasV1 } from './cad-table-zero-connect-canvas-v1';
+import { SHEET_INK } from '../sheet-viewport';
+import {
+  activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1,
+  createPatternImportDxfPhaseECadTableZeroCanvasSessionV1,
+  fitPatternImportDxfPhaseECadTableZeroCanvasSessionV1,
+  movePatternImportDxfPhaseECadTableZeroCanvasSessionV1,
+  patternImportDxfPhaseECadTableZeroKeyboardMoveDeltaV1,
+  PatternImportDxfPhaseECadTableZeroConnectCanvasV1,
+} from './cad-table-zero-connect-canvas-v1';
 
 const REQUIRED_FIELDS = [
   'documentId-and-revision',
@@ -134,6 +142,11 @@ describe('zero-operation CAD table rendering', () => {
     expect(html).toContain('aria-label="Move selected pieces"');
     expect(html).toContain('aria-label="Connect edges"');
     expect(html).toContain('aria-label="Fit all pieces"');
+    expect(html).toContain('aria-label="closed:M pattern piece"');
+    expect(html).toContain(
+      'aria-keyshortcuts="Enter Space ArrowUp ArrowDown ArrowLeft ArrowRight"',
+    );
+    expect(html).toContain('role="button" tabindex="0" aria-disabled="false" aria-pressed="false"');
   });
 
   it('fills and closes only contours explicitly declared closed by the saved projection', () => {
@@ -144,11 +157,62 @@ describe('zero-operation CAD table rendering', () => {
     const open = contourTag(html, 'open-cut');
 
     expect(closed).toContain('points="0,0 40,0 40,-30 0,-30 0,0"');
-    expect(closed).toContain('fill="#f2f2f2"');
+    expect(closed).toContain(`fill="${SHEET_INK.fill}"`);
     expect(closed).not.toContain('stroke-dasharray');
 
     expect(open).toContain('points="0,0 40,0 40,-30 0,-30"');
     expect(open).toContain('fill="none"');
     expect(open).not.toContain('stroke-dasharray');
+  });
+
+  it('keeps the viewport frozen while pointer movement updates session-only offsets', () => {
+    const { projection } = fixture();
+    const initial = createPatternImportDxfPhaseECadTableZeroCanvasSessionV1(projection);
+    const first = initial.layout.pieces[0]!;
+    const moved = movePatternImportDxfPhaseECadTableZeroCanvasSessionV1(
+      initial,
+      first.identity.key,
+      { x: 15, y: 5 },
+    );
+
+    expect(moved.layout.pieces[0]?.offsetMm).toEqual({
+      x: first.offsetMm.x + 15,
+      y: first.offsetMm.y + 5,
+    });
+    expect(moved.viewportBounds).toBe(initial.viewportBounds);
+
+    const fitted = fitPatternImportDxfPhaseECadTableZeroCanvasSessionV1(moved);
+    expect(fitted.viewportBounds).not.toEqual(initial.viewportBounds);
+  });
+
+  it('maps keyboard arrows to precise and coarse millimetre movement', () => {
+    expect(patternImportDxfPhaseECadTableZeroKeyboardMoveDeltaV1('ArrowLeft', false)).toEqual({
+      x: -1,
+      y: 0,
+    });
+    expect(patternImportDxfPhaseECadTableZeroKeyboardMoveDeltaV1('ArrowUp', true)).toEqual({
+      x: 0,
+      y: 10,
+    });
+    expect(patternImportDxfPhaseECadTableZeroKeyboardMoveDeltaV1('Enter', false)).toBeNull();
+  });
+
+  it('selects and Shift-toggles a keyboard-activated piece without changing the viewport', () => {
+    const initial = createPatternImportDxfPhaseECadTableZeroCanvasSessionV1(fixture().projection);
+    const pieceKey = initial.layout.pieces[0]!.identity.key;
+    const selected = activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(
+      initial,
+      pieceKey,
+      false,
+    );
+    const toggled = activatePatternImportDxfPhaseECadTableZeroCanvasPieceV1(
+      selected,
+      pieceKey,
+      true,
+    );
+
+    expect(selected.layout.selectedPieceKeys).toEqual([pieceKey]);
+    expect(selected.viewportBounds).toBe(initial.viewportBounds);
+    expect(toggled.layout.selectedPieceKeys).toEqual([]);
   });
 });
