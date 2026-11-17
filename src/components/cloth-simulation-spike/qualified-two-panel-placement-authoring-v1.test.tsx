@@ -142,10 +142,9 @@ describe('qualified explicit source-curve authoring', () => {
       }),
     ).toThrow('one exact piece and contour');
     const repeated = projection();
-    Object.assign(
-      repeated.mesh.boundarySamples.find((sample) => sample.vertexIndex === 3)!,
-      { sourceCurveId: 'c0' },
-    );
+    Object.assign(repeated.mesh.boundarySamples.find((sample) => sample.vertexIndex === 3)!, {
+      sourceCurveId: 'c0',
+    });
     expect(() => listQualifiedTwoPanelBoundaryCurvesV1(repeated, 'FRONT')).toThrow('disconnected');
     const ambiguous = projection();
     Object.assign(ambiguous.mesh.boundarySamples[0]!, {

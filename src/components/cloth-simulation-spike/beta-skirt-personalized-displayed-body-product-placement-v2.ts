@@ -209,15 +209,16 @@ type AnnularSourceGarment = Readonly<{
     continuumRestFramesBytesSha256: string;
   }>;
 }>;
-export interface BetaSkirtSavedAnnularDisplayedBodyProductPlacementReportV1 extends Omit<
-  BetaSkirtPersonalizedDisplayedBodyProductPlacementReportV2,
-  | 'version'
-  | 'status'
-  | 'compositionGeneration'
-  | 'canonicalPlacementSha256'
-  | 'sourceGarment'
-  | 'claims'
-> {
+export interface BetaSkirtSavedAnnularDisplayedBodyProductPlacementReportV1
+  extends Omit<
+    BetaSkirtPersonalizedDisplayedBodyProductPlacementReportV2,
+    | 'version'
+    | 'status'
+    | 'compositionGeneration'
+    | 'canonicalPlacementSha256'
+    | 'sourceGarment'
+    | 'claims'
+  > {
   readonly version: typeof BETA_SKIRT_SAVED_ANNULAR_DISPLAYED_BODY_PRODUCT_PLACEMENT_V1;
   readonly status: 'diagnostic-placement-blocked';
   readonly hostCompileBinding: Readonly<{
@@ -234,10 +235,11 @@ export type BetaSkirtSavedAnnularDisplayedBodyProductPlacementOwnerV1 = Readonly
   version: typeof BETA_SKIRT_SAVED_ANNULAR_DISPLAYED_BODY_PRODUCT_PLACEMENT_V1;
   readonly [annularBrand]: true;
 }>;
-export interface BetaSkirtSavedAnnularDisplayedBodyProductPlacementProjectionV1 extends Omit<
-  BetaSkirtPersonalizedDisplayedBodyProductPlacementProjectionV2,
-  'report' | 'claims'
-> {
+export interface BetaSkirtSavedAnnularDisplayedBodyProductPlacementProjectionV1
+  extends Omit<
+    BetaSkirtPersonalizedDisplayedBodyProductPlacementProjectionV2,
+    'report' | 'claims'
+  > {
   readonly report: BetaSkirtSavedAnnularDisplayedBodyProductPlacementReportV1;
   readonly claims: typeof ANNULAR_CLAIMS;
 }
@@ -277,10 +279,11 @@ type ObservedAnnularSourceBinding = Omit<
     }>;
     garmentReport: PatternImportDxfProductSavedAnnularObservedPlacementGarmentReportV1;
   }>;
-export interface BetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementReportV1 extends Omit<
-  BetaSkirtSavedAnnularDisplayedBodyProductPlacementReportV1,
-  'version' | 'status' | 'source' | 'claims'
-> {
+export interface BetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementReportV1
+  extends Omit<
+    BetaSkirtSavedAnnularDisplayedBodyProductPlacementReportV1,
+    'version' | 'status' | 'source' | 'claims'
+  > {
   readonly version: typeof BETA_SKIRT_SAVED_ANNULAR_OBSERVED_PLACEMENT_DISPLAYED_BODY_PRODUCT_PLACEMENT_V1;
   readonly status: 'diagnostic-placement-clear' | 'diagnostic-placement-blocked';
   readonly source: ObservedAnnularSourceBinding;
@@ -291,10 +294,11 @@ export type BetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementO
   version: typeof BETA_SKIRT_SAVED_ANNULAR_OBSERVED_PLACEMENT_DISPLAYED_BODY_PRODUCT_PLACEMENT_V1;
   readonly [observedAnnularBrand]: true;
 }>;
-export interface BetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementProjectionV1 extends Omit<
-  BetaSkirtPersonalizedDisplayedBodyProductPlacementProjectionV2,
-  'report' | 'claims'
-> {
+export interface BetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementProjectionV1
+  extends Omit<
+    BetaSkirtPersonalizedDisplayedBodyProductPlacementProjectionV2,
+    'report' | 'claims'
+  > {
   readonly report: BetaSkirtSavedAnnularObservedPlacementDisplayedBodyProductPlacementReportV1;
   readonly claims: typeof OBSERVED_ANNULAR_CLAIMS;
 }
@@ -313,7 +317,8 @@ type SavedAnnularProjection =
   | PatternImportDxfProductSavedAnnularGarmentProjectionV1
   | PatternImportDxfProductSavedAnnularObservedPlacementGarmentProjectionV1;
 type PairRequest =
-  BetaSkirtPersonalizedDisplayedBodyProductPlacementRequestV2 | SavedAnnularRequest;
+  | BetaSkirtPersonalizedDisplayedBodyProductPlacementRequestV2
+  | SavedAnnularRequest;
 type PairReport =
   | BetaSkirtPersonalizedDisplayedBodyProductPlacementReportV2
   | BetaSkirtSavedAnnularDisplayedBodyProductPlacementReportV1

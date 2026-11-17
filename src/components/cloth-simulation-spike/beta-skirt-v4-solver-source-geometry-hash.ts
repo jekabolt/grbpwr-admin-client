@@ -44,10 +44,12 @@ const TYPED_ARRAY_BYTE_LENGTH = OBJECT_GET_OWN_PROPERTY_DESCRIPTOR(
 )?.get;
 const DATA_VIEW_SET_UINT32 = OBJECT_GET_OWN_PROPERTY_DESCRIPTOR(DataView.prototype, 'setUint32')
   ?.value as
-  ((this: DataView, byteOffset: number, value: number, littleEndian?: boolean) => void) | undefined;
+  | ((this: DataView, byteOffset: number, value: number, littleEndian?: boolean) => void)
+  | undefined;
 const DATA_VIEW_SET_FLOAT32 = OBJECT_GET_OWN_PROPERTY_DESCRIPTOR(DataView.prototype, 'setFloat32')
   ?.value as
-  ((this: DataView, byteOffset: number, value: number, littleEndian?: boolean) => void) | undefined;
+  | ((this: DataView, byteOffset: number, value: number, littleEndian?: boolean) => void)
+  | undefined;
 const SUBTLE_DIGEST =
   typeof SubtleCrypto === 'undefined'
     ? null

@@ -124,9 +124,11 @@ type Blocked = Readonly<{
   detail: string;
 }>;
 export type BetaSkirtCanonicalMediumBodyBuildResultV2 =
-  Readonly<{ ok: true; owner: BetaSkirtCanonicalMediumBodyOwnerV2 }> | Blocked;
+  | Readonly<{ ok: true; owner: BetaSkirtCanonicalMediumBodyOwnerV2 }>
+  | Blocked;
 export type BetaSkirtCanonicalMediumDisplayedBodyAdmissionResultV2 =
-  Readonly<{ ok: true; owner: BetaSkirtCanonicalMediumDisplayedBodyOwnerV2 }> | Blocked;
+  | Readonly<{ ok: true; owner: BetaSkirtCanonicalMediumDisplayedBodyOwnerV2 }>
+  | Blocked;
 
 class BodyFailure extends Error {
   constructor(
