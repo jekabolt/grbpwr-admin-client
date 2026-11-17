@@ -267,7 +267,9 @@ test('real ModelForm auto-binds edit/create measurements to its V9 mannequin', a
   expect(chestFrontTorso.equals(baselineFrontTorso)).toBe(false);
 
   await revealMeasurement(page, chest);
-  await chest.fill('1040');
+  // The female bust proxy with a proportional ribcage reaches ~1100 mm without an under bust, so
+  // the safe-range probe sits above that (it was 1040 on the pre-bust legacy chest path).
+  await chest.fill('1200');
   await chest.blur();
   await expect
     .poll(() => canvas.getAttribute('data-source-revision'))
