@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 const decodeV6Mock = vi.hoisted(() => vi.fn());
 const inspectPhysicalMock = vi.hoisted(() => vi.fn());
 const decodePhysicalMock = vi.hoisted(() => vi.fn());
+const projectSnapshotMock = vi.hoisted(() => vi.fn());
+const disposeSnapshotMock = vi.hoisted(() => vi.fn());
 
 vi.mock('./composite-sidecar-v6', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./composite-sidecar-v6')>()),
@@ -13,6 +15,11 @@ vi.mock('./saved-full-assembly-physical-component-v1', async (importOriginal) =>
   inspectSavedFullAssemblyPhysicalComponentEnvelopeV1: inspectPhysicalMock,
   decodeSavedFullAssemblyPhysicalComponentV1: decodePhysicalMock,
 }));
+vi.mock('./saved-full-assembly-snapshot-production-v1', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./saved-full-assembly-snapshot-production-v1')>()),
+  projectSavedFullAssemblySnapshotV1: projectSnapshotMock,
+  disposeSavedFullAssemblySnapshotV1: disposeSnapshotMock,
+}));
 
 import {
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_COMPONENT_REGISTRY_V7,
@@ -20,6 +27,7 @@ import {
   PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V7,
   buildPatternImportDxfProductCompositeSidecarV7,
   decodePatternImportDxfProductCompositeSidecarV7,
+  disposeSavedFullAssemblyPhysicalAuthorityReceiptV1,
   encodePatternImportDxfProductCompositeSidecarV7,
   isSavedFullAssemblyPhysicalAuthorityReceiptV1,
   readPatternImportDxfProductCompositeComponentBytesV7,
@@ -27,6 +35,10 @@ import {
 } from './composite-sidecar-v7';
 import { SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_KIND_V1 } from './saved-full-assembly-physical-component-v1';
 import type { SavedFullAssemblySnapshotProjectionV1 } from './saved-full-assembly-snapshot-production-v1';
+import {
+  disposeSavedFullAssemblySnapshotV1,
+  type SavedFullAssemblySnapshotReceiptV1,
+} from './saved-full-assembly-snapshot-production-v1';
 import type { PatternImportDxfProductCompositeSidecarBindingsV3 } from 'lib/cloth/domain/pattern-import-dxf-product-composite-sidecar-v3';
 
 const encoder = new TextEncoder();
@@ -54,9 +66,30 @@ const physicalDocument = Object.freeze({
 const snapshot = Object.freeze({
   row,
   serverAssemblyRevision: 'asm:r4',
+  operationsPayloadCanonicalJson: '[]',
+  selectedTopologyReceipts: [],
+  snapshotSha256: sha('9'),
+  outer: Object.freeze({ status: 'absent' }),
 }) as unknown as SavedFullAssemblySnapshotProjectionV1;
+const snapshotReceipt = Object.freeze({
+  version: 'saved-full-assembly-snapshot/1',
+  opaque: 'module-private-ao-read-receipt',
+}) as SavedFullAssemblySnapshotReceiptV1;
+let snapshotLive = true;
+
+function acceptSnapshotReceipt() {
+  snapshotLive = true;
+  projectSnapshotMock.mockImplementation((candidate) => {
+    if (candidate !== snapshotReceipt || !snapshotLive) throw new Error('forged-receipt');
+    return structuredClone(snapshot);
+  });
+  disposeSnapshotMock.mockImplementation((candidate) => {
+    if (candidate === snapshotReceipt) snapshotLive = false;
+  });
+}
 
 function acceptStructural() {
+  acceptSnapshotReceipt();
   decodeV6Mock.mockResolvedValue({
     ok: true,
     document: { bindings },
@@ -160,13 +193,47 @@ describe('Composite sidecar V7', () => {
     });
     const verified = await verifyPatternImportDxfProductCompositeSidecarV7PhysicalAuthority(
       built.owner,
-      snapshot,
+      snapshotReceipt,
     );
     expect(verified.ok).toBe(true);
     if (!verified.ok) return;
     expect(isSavedFullAssemblyPhysicalAuthorityReceiptV1(verified.receipt)).toBe(true);
     expect(isSavedFullAssemblyPhysicalAuthorityReceiptV1({ ...verified.receipt })).toBe(false);
     expect(decodePhysicalMock).toHaveBeenCalledWith(expect.any(Uint8Array), snapshot);
+    disposeSavedFullAssemblySnapshotV1(snapshotReceipt);
+    expect(isSavedFullAssemblyPhysicalAuthorityReceiptV1(verified.receipt)).toBe(false);
+
+    acceptSnapshotReceipt();
+    const verifiedAgain = await verifyPatternImportDxfProductCompositeSidecarV7PhysicalAuthority(
+      built.owner,
+      snapshotReceipt,
+    );
+    expect(verifiedAgain.ok).toBe(true);
+    if (!verifiedAgain.ok) return;
+    disposeSavedFullAssemblyPhysicalAuthorityReceiptV1(verifiedAgain.receipt);
+    expect(isSavedFullAssemblyPhysicalAuthorityReceiptV1(verifiedAgain.receipt)).toBe(false);
+    expect(() => projectSnapshotMock(snapshotReceipt)).not.toThrow();
+  });
+
+  it('rejects a fabricated projection DTO and a disposed snapshot receipt', async () => {
+    const built = await build();
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    decodePhysicalMock.mockClear();
+    const fabricated = await verifyPatternImportDxfProductCompositeSidecarV7PhysicalAuthority(
+      built.owner,
+      // @ts-expect-error detached projection DTO is deliberately not a durable receipt
+      snapshot,
+    );
+    expect(fabricated.ok).toBe(false);
+
+    disposeSavedFullAssemblySnapshotV1(snapshotReceipt);
+    const disposed = await verifyPatternImportDxfProductCompositeSidecarV7PhysicalAuthority(
+      built.owner,
+      snapshotReceipt,
+    );
+    expect(disposed.ok).toBe(false);
+    expect(decodePhysicalMock).not.toHaveBeenCalled();
   });
 
   it('fails closed when the registered physical envelope names another saved row', async () => {

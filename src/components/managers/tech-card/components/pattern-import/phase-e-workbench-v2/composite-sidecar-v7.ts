@@ -13,7 +13,11 @@ import {
   type SavedFullAssemblyPhysicalComponentDocumentV1,
   type SavedFullAssemblyPhysicalComponentOwnerV1,
 } from './saved-full-assembly-physical-component-v1';
-import type { SavedFullAssemblySnapshotProjectionV1 } from './saved-full-assembly-snapshot-production-v1';
+import {
+  projectSavedFullAssemblySnapshotV1,
+  type SavedFullAssemblySnapshotProjectionV1,
+  type SavedFullAssemblySnapshotReceiptV1,
+} from './saved-full-assembly-snapshot-production-v1';
 
 export const PATTERN_IMPORT_DXF_PRODUCT_COMPOSITE_SIDECAR_REQUEST_V7 =
   'pattern-import-dxf-product-composite-sidecar-request/7' as const;
@@ -163,7 +167,13 @@ const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
 const ownerStates = new WeakMap<object, OwnerState>();
-const physicalAuthorityReceipts = new WeakSet<object>();
+type PhysicalAuthorityState = Readonly<{
+  outerOwner: PatternImportDxfProductCompositeSidecarOwnerV7;
+  borrowedSnapshotReceipt: SavedFullAssemblySnapshotReceiptV1;
+  expectedSnapshotIdentity: string;
+  expectedOuterIdentity: string;
+}>;
+const physicalAuthorityReceipts = new WeakMap<object, PhysicalAuthorityState>();
 
 declare const physicalAuthorityBrand: unique symbol;
 export type SavedFullAssemblyPhysicalAuthorityReceiptV1 = Readonly<{
@@ -739,13 +749,36 @@ export function readPatternImportDxfProductCompositeComponentBytesV7(
   return ownerStates.get(candidate)?.components.get(kind)?.slice() ?? null;
 }
 
+function snapshotIdentity(snapshot: SavedFullAssemblySnapshotProjectionV1): string {
+  return canonical({
+    row: snapshot.row,
+    serverAssemblyRevision: snapshot.serverAssemblyRevision,
+    operationsPayloadCanonicalJson: snapshot.operationsPayloadCanonicalJson,
+    selectedTopologyReceipts: snapshot.selectedTopologyReceipts,
+    snapshotSha256: snapshot.snapshotSha256,
+  });
+}
+
+function outerIdentity(snapshot: SavedFullAssemblySnapshotProjectionV1): string {
+  if (snapshot.outer.status === 'absent') return 'absent';
+  return canonical({
+    status: snapshot.outer.status,
+    mediaType: snapshot.outer.mediaType,
+    sha256: snapshot.outer.sha256,
+    byteLength: snapshot.outer.byteLength,
+    persistedCardLockVersion: snapshot.outer.persistedCardLockVersion,
+    persistedSavedRowRevision: snapshot.outer.persistedSavedRowRevision,
+    currentRowBound: snapshot.outer.currentRowBound,
+  });
+}
+
 /**
  * The only durable V7 verification lane. Structural decode above remains usable by legacy
  * transition routes and never authenticates the embedded graph/physical document.
  */
 export async function verifyPatternImportDxfProductCompositeSidecarV7PhysicalAuthority(
   candidate: unknown,
-  assemblySnapshot: SavedFullAssemblySnapshotProjectionV1,
+  snapshotReceipt: SavedFullAssemblySnapshotReceiptV1,
 ): Promise<VerifyPatternImportDxfProductCompositeSidecarV7PhysicalResult> {
   try {
     if (!candidate || typeof candidate !== 'object')
@@ -753,6 +786,9 @@ export async function verifyPatternImportDxfProductCompositeSidecarV7PhysicalAut
     const state = ownerStates.get(candidate);
     if (!state) fail('invalid-owner', 'owner', 'A genuine Composite V7 owner is required.');
     const outer = candidate as PatternImportDxfProductCompositeSidecarOwnerV7;
+    const initialSnapshot = projectSavedFullAssemblySnapshotV1(snapshotReceipt);
+    const expectedSnapshotIdentity = snapshotIdentity(initialSnapshot);
+    const expectedOuterIdentity = outerIdentity(initialSnapshot);
     const physicalBytes = state.components.get(SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_KIND_V1);
     if (!physicalBytes)
       fail(
@@ -762,7 +798,7 @@ export async function verifyPatternImportDxfProductCompositeSidecarV7PhysicalAut
       );
     const verified = await decodeSavedFullAssemblyPhysicalComponentV1(
       physicalBytes,
-      assemblySnapshot,
+      initialSnapshot,
     );
     if (!verified.ok)
       fail(
@@ -776,6 +812,16 @@ export async function verifyPatternImportDxfProductCompositeSidecarV7PhysicalAut
         `components.${SAVED_FULL_ASSEMBLY_PHYSICAL_COMPONENT_KIND_V1}`,
         'Verified Full Assembly physical authority differs from Composite V7.',
       );
+    const currentSnapshot = projectSavedFullAssemblySnapshotV1(snapshotReceipt);
+    if (
+      snapshotIdentity(currentSnapshot) !== expectedSnapshotIdentity ||
+      outerIdentity(currentSnapshot) !== expectedOuterIdentity
+    )
+      fail(
+        'stale-snapshot-receipt',
+        'snapshotReceipt',
+        'Full Assembly snapshot or exact outer identity moved during physical verification.',
+      );
     const receipt = Object.freeze({
       schemaVersion: SAVED_FULL_ASSEMBLY_PHYSICAL_AUTHORITY_RECEIPT_V1,
       outerCanonicalSha256: outer.seal.canonicalSha256,
@@ -783,7 +829,12 @@ export async function verifyPatternImportDxfProductCompositeSidecarV7PhysicalAut
       aoContentSha256: verified.document.bindings.aoContentSha256,
       durableFullAssemblyPhysicalAuthorityVerified: true as const,
     }) as SavedFullAssemblyPhysicalAuthorityReceiptV1;
-    physicalAuthorityReceipts.add(receipt);
+    physicalAuthorityReceipts.set(receipt, {
+      outerOwner: outer,
+      borrowedSnapshotReceipt: snapshotReceipt,
+      expectedSnapshotIdentity,
+      expectedOuterIdentity,
+    });
     return Object.freeze({
       ok: true as const,
       receipt,
@@ -817,5 +868,21 @@ export async function verifyPatternImportDxfProductCompositeSidecarV7PhysicalAut
 export function isSavedFullAssemblyPhysicalAuthorityReceiptV1(
   candidate: unknown,
 ): candidate is SavedFullAssemblyPhysicalAuthorityReceiptV1 {
-  return !!candidate && typeof candidate === 'object' && physicalAuthorityReceipts.has(candidate);
+  if (!candidate || typeof candidate !== 'object') return false;
+  const state = physicalAuthorityReceipts.get(candidate);
+  if (!state || !ownerStates.has(state.outerOwner)) return false;
+  try {
+    const current = projectSavedFullAssemblySnapshotV1(state.borrowedSnapshotReceipt);
+    return (
+      snapshotIdentity(current) === state.expectedSnapshotIdentity &&
+      outerIdentity(current) === state.expectedOuterIdentity
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function disposeSavedFullAssemblyPhysicalAuthorityReceiptV1(receipt: unknown): void {
+  if (!receipt || typeof receipt !== 'object') return;
+  physicalAuthorityReceipts.delete(receipt);
 }
