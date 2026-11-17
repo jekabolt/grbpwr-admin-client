@@ -237,11 +237,14 @@ export function solveMeasurementOpenReferenceBetaTorsoV1(options: {
   readonly solveDepthProxy?: typeof solveMeasurementOpenReferenceTorsoDepthProxyV1;
   readonly solveHighHipProxy?: typeof solveMeasurementOpenReferenceHighHipProxyV1;
   readonly solveNeckProxy?: typeof solveMeasurementOpenReferenceNeckProxyV1;
+  readonly underBustBoundedPlane?: true;
 }): MeasurementOpenReferenceBetaTorsoWorkerResultV1 {
   const modes = createMakeHumanAnteriorChestShoulderModesResearchV1({
     basis: options.basis,
     measurements: options.measurements,
     bundle: options.torsoBundle,
+    underBustAtFemaleFold:
+      options.femaleBustBundle != null && options.underBustBoundedPlane !== true,
   });
   const beforeNeck = solveTorsoBeforeNeckV1(options, modes);
   // Fast path: no neck request performs no neck mesh work and keeps array identity.
@@ -636,6 +639,7 @@ async function solveSynchronously(
       : { neckCircumferenceMm: options.neckCircumferenceMm }),
     ...(options.neckRigHeads ? { neckRigHeads: options.neckRigHeads } : {}),
     ...(options.neckPose ? { neckPose: options.neckPose } : {}),
+    ...(options.underBustBoundedPlane ? { underBustBoundedPlane: true as const } : {}),
     torsoBundle,
   });
 }
@@ -662,6 +666,7 @@ function transferableRequest(
           : { neckCircumferenceMm: options.neckCircumferenceMm }),
         ...(options.neckRigHeads ? { neckRigHeads: options.neckRigHeads } : {}),
         ...(options.neckPose ? { neckPose: options.neckPose } : {}),
+        ...(options.underBustBoundedPlane ? { underBustBoundedPlane: true as const } : {}),
       },
     },
     [sourcePositionsM.buffer, triangleIndices.buffer],

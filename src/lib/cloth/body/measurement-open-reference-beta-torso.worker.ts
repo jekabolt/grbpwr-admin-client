@@ -35,6 +35,7 @@ context.onmessage = async (
       neckCircumferenceMm: request.options.neckCircumferenceMm,
       neckRigHeads: request.options.neckRigHeads,
       neckPose: request.options.neckPose,
+      underBustBoundedPlane: request.options.underBustBoundedPlane,
       torsoBundle,
     });
     const response: MeasurementOpenReferenceBetaTorsoWorkerResponseV1 = {

@@ -50,6 +50,7 @@ import {
   type MakeHumanOpenReferenceBasisV1,
 } from './measurement-open-reference-display-v1';
 import type { MeasurementOpenReferenceUniformWaistHipRuntimeResultV1 } from './measurement-open-reference-uniform-waist-hip-runtime-v1';
+import { FEMALE_UNDERBUST_FOLD_DIAGNOSTIC_V1 } from './measurement-open-reference-female-underbust-fold-station-v1';
 import { measureMeshPlaneSectionPerimetersV1 } from './mesh-plane-section-perimeter-v1';
 import {
   ANSUR_UNTYPED_FIELD_ESTIMATES_V1,
@@ -690,8 +691,44 @@ function withUntypedEstimatesV1(options: {
   });
 }
 
+/**
+ * The female under-bust fold plane is only a default for an untyped under bust, so it never leaves
+ * a typed field unapplied that the bounded plane keeps: when the fold result drops a typed field,
+ * the typed-only chain runs once more on the bounded plane, and the fold result stays only if it
+ * keeps every typed field at least as applied (represented > limited > not applied).
+ */
 async function createBetaShapeRuntimeTypedOnlyV1(
   options: MeasurementOpenReferenceBetaShapeRuntimeOptionsV1,
+): Promise<MeasurementOpenReferenceBetaShapeRuntimeResultV1> {
+  const onFold = await createBetaShapeRuntimeTypedOnlyChainV1(options);
+  if (
+    options.measurements.underBustCircumferenceMm != null ||
+    !onFold.chestShoulderDiagnostics.includes(FEMALE_UNDERBUST_FOLD_DIAGNOSTIC_V1)
+  ) {
+    return onFold;
+  }
+  const typedKeys = typedBetaShapeKeys(options.measurements);
+  if (typedKeys.every((key) => typedStatusRank(onFold, key) > 0)) return onFold;
+  const bounded = await createBetaShapeRuntimeTypedOnlyChainV1({
+    ...options,
+    underBustBoundedPlane: true,
+  });
+  if (typedKeys.every((key) => typedStatusRank(onFold, key) >= typedStatusRank(bounded, key))) {
+    return onFold;
+  }
+  return Object.freeze({
+    ...bounded,
+    chestShoulderDiagnostics: Object.freeze([
+      'underbust-station:fold-yielded-to-typed-field',
+      ...bounded.chestShoulderDiagnostics,
+    ]),
+  });
+}
+
+async function createBetaShapeRuntimeTypedOnlyChainV1(
+  options: MeasurementOpenReferenceBetaShapeRuntimeOptionsV1 & {
+    readonly underBustBoundedPlane?: true;
+  },
 ): Promise<MeasurementOpenReferenceBetaShapeRuntimeResultV1> {
   const result = await createBetaShapeRuntimeOnceV1(options);
   if (!hasFinalGlobalQualityRollback(result)) return result;
@@ -817,6 +854,8 @@ async function createBetaShapeRuntimeOnceV1(options: {
   readonly loadLimbBundle?: MeasurementOpenReferenceBetaShapeLimbBundleLoaderV1;
   readonly solveKneeProxy?: typeof solveMeasurementOpenReferenceKneeProxyInWorkerV1;
   readonly signal?: AbortSignal;
+  /** Set by the runtime's own retry when the fold plane left a typed field unapplied. */
+  readonly underBustBoundedPlane?: true;
 }): Promise<MeasurementOpenReferenceBetaShapeRuntimeResultV1> {
   const admittedBasisRevision =
     options.waistHipRuntime.openReference.provenance.basis.derivedBasisSha256;
@@ -884,6 +923,7 @@ async function createBetaShapeRuntimeOnceV1(options: {
       ...(options.loadFemaleBustBundle
         ? { loadFemaleBustBundle: options.loadFemaleBustBundle }
         : {}),
+      ...(options.underBustBoundedPlane ? { underBustBoundedPlane: true as const } : {}),
       signal: options.signal,
     });
     diagnostics.push(

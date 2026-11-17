@@ -10,6 +10,10 @@ import type {
 import type { CanonicalBodyMeasurementsMm } from './measurement-adapter';
 import { resolveMeasurementOpenReferenceChestPointYV1 } from './measurement-open-reference-chest-point-station-v1';
 import type { MakeHumanOpenReferenceBasisV1 } from './measurement-open-reference-display-v1';
+import {
+  FEMALE_UNDERBUST_FOLD_DIAGNOSTIC_V1,
+  resolveMeasurementOpenReferenceFemaleUnderBustFoldYV1,
+} from './measurement-open-reference-female-underbust-fold-station-v1';
 import { measureMeshPlaneSectionPerimetersV1 } from './mesh-plane-section-perimeter-v1';
 
 export const MAKEHUMAN_ANTERIOR_CHEST_SHOULDER_MODES_RESEARCH_V1 =
@@ -96,6 +100,35 @@ function underBustOffsetM(
   return clamp((measurements.heightMm / 1000) * 0.04, 0.045, 0.085);
 }
 
+/**
+ * Female bust path without a typed under-bust: the base's own inframammary fold, where the guide
+ * draws the ring. A typed under-bust and the legacy chest path keep the bounded plane above it
+ * (see the fold-station module).
+ */
+function femaleFoldY(
+  options: {
+    readonly basis: MakeHumanOpenReferenceBasisV1;
+    readonly measurements: CanonicalBodyMeasurementsMm;
+    readonly underBustAtFemaleFold?: boolean;
+  },
+  uniformPositionsM: Float32Array,
+  diagnostics: string[],
+): number | null {
+  if (
+    options.underBustAtFemaleFold !== true ||
+    options.basis.kind !== 'female' ||
+    options.measurements.underBustCircumferenceMm != null
+  ) {
+    return null;
+  }
+  const foldY = resolveMeasurementOpenReferenceFemaleUnderBustFoldYV1({
+    positionsM: uniformPositionsM,
+    triangleIndices: options.basis.indices,
+  });
+  if (foldY !== null) diagnostics.push(FEMALE_UNDERBUST_FOLD_DIAGNOSTIC_V1);
+  return foldY;
+}
+
 function anteriorChestMode(options: {
   readonly source: UniformChestShoulderResearchModeV1;
   readonly positionsM: Float32Array;
@@ -164,6 +197,8 @@ export function createMakeHumanAnteriorChestShoulderModesResearchV1(options: {
   readonly basis: MakeHumanOpenReferenceBasisV1;
   readonly measurements: CanonicalBodyMeasurementsMm;
   readonly bundle: MakeHumanTorsoShapeDeltaBundleV1;
+  /** Female bust path only: with no under-bust typed, put the under-bust plane on the fold. */
+  readonly underBustAtFemaleFold?: boolean;
 }): MakeHumanAnteriorChestShoulderModesResearchResultV1 {
   const source = createMakeHumanLocalizedChestShoulderModesResearchV2({
     basis: options.basis,
@@ -199,6 +234,7 @@ export function createMakeHumanAnteriorChestShoulderModesResearchV1(options: {
   if (chest !== sourceChest) diagnostics.push('chest-station:chest-point-template');
   if (!chest.chestStationOriginM) throw new Error('Chest station is missing.');
   const underBustStationY =
+    femaleFoldY(options, source.uniformPositionsM, diagnostics) ??
     chest.chestStationOriginM[1] - underBustOffsetM(options.measurements, diagnostics);
   const shoulderStationY = Math.min(
     source.uniformPositionsM[shoulder.shoulderVertices.negative * 3 + 1],
