@@ -191,6 +191,13 @@ type OwnerState = {
   authoritySha256: string;
   descriptors: readonly DxfSourceNativeStraightEdgeDescriptorV1[];
   blockers: readonly DxfSourceNativeStraightEdgeBlockerV1[];
+  selectedPathCoverage: Readonly<{
+    globalFailure: boolean;
+    paths: ReadonlyMap<
+      number,
+      Readonly<{ pointCount: number; closed: boolean; rejected: boolean }>
+    >;
+  }>;
 };
 
 const ownerState = new WeakMap<object, OwnerState>();
@@ -442,6 +449,16 @@ export async function readDxfWithSourceNativeStraightEdgeAuthorityV1(
         );
       seen.add(identity);
     }
+    // Retain the decoder's independent coverage ledger before returning its mutable public read.
+    const selectedPathCoverage = Object.freeze({
+      globalFailure: decoded.selectedPathCoverage.globalFailure,
+      paths: new Map(
+        decoded.selectedPathCoverage.paths.map(
+          ({ sourcePathId, ...coverage }) =>
+            [sourcePathId, Object.freeze({ ...coverage })] as const,
+        ),
+      ),
+    });
     const sourceSha256 = decoded.read.doc.file.sha256;
     if (!SHA256.test(sourceSha256))
       return failure('sha256-unavailable', 'Fresh source SHA-256 is unavailable.', sourceFileId);
@@ -470,6 +487,7 @@ export async function readDxfWithSourceNativeStraightEdgeAuthorityV1(
       authoritySha256,
       descriptors,
       blockers,
+      selectedPathCoverage,
     });
     return Object.freeze({
       ok: true as const,
@@ -539,4 +557,257 @@ export function projectDxfSourceNativeStraightEdgeAuthorityV1(
     }),
   });
   return Object.freeze({ ok: true as const, projection });
+}
+
+export const DXF_SOURCE_NATIVE_STRAIGHT_EDGE_SELECTED_PATHS_REQUEST_V1 =
+  'dxf-source-native-straight-edge-selected-paths-request/1' as const;
+export const DXF_SOURCE_NATIVE_STRAIGHT_EDGE_SELECTED_PATHS_V1 =
+  'dxf-source-native-straight-edge-selected-paths/1' as const;
+
+export type DxfSourceNativeStraightEdgeSelectedPathsRequestV1 = Readonly<{
+  schemaVersion: typeof DXF_SOURCE_NATIVE_STRAIGHT_EDGE_SELECTED_PATHS_REQUEST_V1;
+  sourceFileId: string;
+  sourceSha256: string;
+  /** Strictly increasing, unique exact native path IDs; no geometry-based selection. */
+  sourcePathIds: readonly number[];
+}>;
+
+export type DxfSourceNativeStraightEdgeSelectedPathsProjectionV1 = Readonly<{
+  schemaVersion: typeof DXF_SOURCE_NATIVE_STRAIGHT_EDGE_SELECTED_PATHS_V1;
+  sourceFileId: string;
+  sourceSha256: string;
+  authoritySha256: string;
+  scope: Readonly<{
+    kind: 'exact-selected-source-paths';
+    sourcePathIds: readonly number[];
+    wholeFileCompletenessClaimed: false;
+  }>;
+  descriptors: readonly DxfSourceNativeStraightEdgeDescriptorV1[];
+  blockers: readonly DxfSourceNativeStraightEdgeBlockerV1[];
+  /** Complete only for every exact path in scope, never for the entire source file. */
+  complete: boolean;
+  claims: DxfSourceNativeStraightEdgeProjectionV1['claims'] &
+    Readonly<{
+      completenessScope: 'exact-selected-source-paths';
+      fullSelectedPathSegmentCoverageChecked: true;
+      diagnosticTruncationCannotHideSelectedRejection: true;
+      wholeFileCompletenessClaimed: false;
+    }>;
+}>;
+
+export type DxfSourceNativeStraightEdgeSelectedPathsProjectionResultV1 =
+  | Readonly<{ ok: true; projection: DxfSourceNativeStraightEdgeSelectedPathsProjectionV1 }>
+  | Extract<DxfSourceNativeStraightEdgeProjectionResultV1, { ok: false }>;
+
+function selectedFailure(
+  code: DxfSourceNativeStraightEdgeBlockerCodeV1,
+  detail: string,
+  sourceFileId: string | null = null,
+): Extract<DxfSourceNativeStraightEdgeProjectionResultV1, { ok: false }> {
+  return Object.freeze({
+    ok: false,
+    projection: null,
+    blockers: Object.freeze([blocker(code, detail, sourceFileId)]),
+  });
+}
+
+function captureSelectedPathIds(input: unknown): readonly number[] | null {
+  try {
+    if (!Array.isArray(input) || Object.getPrototypeOf(input) !== Array.prototype) return null;
+    const length = Object.getOwnPropertyDescriptor(input, 'length')?.value;
+    if (
+      !Number.isSafeInteger(length) ||
+      length < 1 ||
+      length > DXF_SOURCE_NATIVE_STRAIGHT_EDGE_LIMITS_V1.maximumDescriptors
+    )
+      return null;
+    const descriptors = Object.getOwnPropertyDescriptors(input);
+    if (Reflect.ownKeys(descriptors).length !== length + 1) return null;
+    const output: number[] = [];
+    for (let i = 0; i < length; i++) {
+      const d = descriptors[String(i)];
+      if (
+        !d ||
+        !d.enumerable ||
+        !Object.hasOwn(d, 'value') ||
+        d.get ||
+        d.set ||
+        !Number.isSafeInteger(d.value) ||
+        d.value < 0 ||
+        Object.is(d.value, -0) ||
+        (i > 0 && d.value <= output[i - 1])
+      )
+        return null;
+      output.push(d.value);
+    }
+    return Object.freeze(output);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Consumes the same genuine one-shot decoder capability as V1, but seals an explicitly bounded
+ * path scope. The decoder's private coverage ledger, not a filtered public V1 projection, proves
+ * coverage. Diagnostic truncation is harmless only when this independent ledger is complete.
+ */
+export async function projectDxfSourceNativeStraightEdgeSelectedPathsV1(
+  owner: unknown,
+  requestInput: unknown,
+): Promise<DxfSourceNativeStraightEdgeSelectedPathsProjectionResultV1> {
+  if ((typeof owner !== 'object' && typeof owner !== 'function') || owner === null)
+    return selectedFailure('forged-owner', 'Straight-edge owner is not genuine.');
+  const state = ownerState.get(owner);
+  if (!state) return selectedFailure('forged-owner', 'Straight-edge owner is not genuine.');
+  if (state.consumed)
+    return selectedFailure(
+      'stale-owner',
+      'Straight-edge owner was already consumed.',
+      state.sourceFileId,
+    );
+  // Claim before any request reflection, including adversarial proxy traps/reentrant calls.
+  state.consumed = true;
+  const request = exactRecord(requestInput, [
+    'schemaVersion',
+    'sourceFileId',
+    'sourceSha256',
+    'sourcePathIds',
+  ]);
+  if (
+    !request ||
+    request.schemaVersion !== DXF_SOURCE_NATIVE_STRAIGHT_EDGE_SELECTED_PATHS_REQUEST_V1 ||
+    request.sourceFileId !== state.sourceFileId ||
+    request.sourceSha256 !== state.sourceSha256
+  )
+    return selectedFailure(
+      'source-identity-mismatch',
+      'Selected projection must exact-match the fresh source identity.',
+      state.sourceFileId,
+    );
+  const sourcePathIds = captureSelectedPathIds(request.sourcePathIds);
+  if (!sourcePathIds)
+    return selectedFailure(
+      'bounds-exceeded',
+      'Selected paths must be bounded, strictly increasing unique native path IDs.',
+      state.sourceFileId,
+    );
+
+  const selected = new Set(sourcePathIds);
+  const grouped = new Map<number, DxfSourceNativeStraightEdgeDescriptorV1[]>();
+  for (const descriptor of state.descriptors) {
+    const id = descriptor.path.sourcePathId;
+    if (!selected.has(id)) continue;
+    const group = grouped.get(id) ?? [];
+    group.push(descriptor);
+    grouped.set(id, group);
+  }
+  const blockers: DxfSourceNativeStraightEdgeBlockerV1[] = [];
+  const reject = (sourcePathId: number | null, detail: string) => {
+    // Reserve one summary if a large requested scope itself exceeds presentation diagnostics.
+    if (blockers.length >= DXF_SOURCE_NATIVE_STRAIGHT_EDGE_LIMITS_V1.maximumBlockers) return;
+    blockers.push(
+      freezeBlocker({
+        ...blocker('path-provenance-unavailable', detail, state.sourceFileId),
+        sourcePathId,
+      }),
+    );
+  };
+  if (state.selectedPathCoverage.globalFailure)
+    reject(null, 'Global source/descriptor/coverage loss prevents selected-path completeness.');
+  const descriptors: DxfSourceNativeStraightEdgeDescriptorV1[] = [];
+  for (const id of sourcePathIds) {
+    const coverage = state.selectedPathCoverage.paths.get(id);
+    const group = grouped.get(id) ?? [];
+    if (!coverage || coverage.rejected) {
+      reject(
+        id,
+        'The exact selected native path is missing or decoder-rejected (independent of diagnostic truncation).',
+      );
+      continue;
+    }
+    const expected = coverage.closed ? coverage.pointCount : coverage.pointCount - 1;
+    const byStart = new Map(group.map((d) => [d.path.startPointIndex, d]));
+    let valid = expected > 0 && group.length === expected && byStart.size === expected;
+    for (let i = 0; valid && i < expected; i++) {
+      const edge = byStart.get(i);
+      const end = coverage.closed ? (i + 1) % coverage.pointCount : i + 1;
+      valid = !!edge && edge.path.closed === coverage.closed && edge.path.endPointIndex === end;
+      if (!valid || !edge) break;
+      const next = byStart.get(end);
+      // Equality confirms exact adjacent endpoint identity; it never selects or recovers an edge.
+      if (
+        next &&
+        (edge.endVertexId !== next.startVertexId ||
+          edge.endMm[0] !== next.startMm[0] ||
+          edge.endMm[1] !== next.startMm[1])
+      )
+        valid = false;
+    }
+    if (!valid) {
+      reject(id, 'Selected path does not have complete ordered native segment coverage.');
+      continue;
+    }
+    descriptors.push(...group.map(freezeDescriptor));
+  }
+  const scope = Object.freeze({
+    kind: 'exact-selected-source-paths' as const,
+    sourcePathIds,
+    wholeFileCompletenessClaimed: false as const,
+  });
+  const content = Object.freeze({
+    schemaVersion: DXF_SOURCE_NATIVE_STRAIGHT_EDGE_SELECTED_PATHS_V1,
+    sourceFileId: state.sourceFileId,
+    sourceSha256: state.sourceSha256,
+    scope,
+    descriptors: Object.freeze(descriptors),
+    blockers: Object.freeze(blockers),
+    complete: blockers.length === 0 && descriptors.length > 0,
+  });
+  let authoritySha256: string;
+  try {
+    const bytes = textEncoder.encode(
+      `dxf-source-native-straight-edge-selected-paths-v1\0${canonical(content)}`,
+    );
+    if (bytes.byteLength > DXF_SOURCE_NATIVE_STRAIGHT_EDGE_LIMITS_V1.maximumCanonicalUtf8Bytes)
+      return selectedFailure(
+        'bounds-exceeded',
+        'Selected metadata canonical byte bound exceeded.',
+        state.sourceFileId,
+      );
+    const digest = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', bytes));
+    if (digest.byteLength !== 32) throw new Error('Invalid digest');
+    authoritySha256 = Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return selectedFailure(
+      'sha256-unavailable',
+      'Selected metadata SHA-256 is unavailable.',
+      state.sourceFileId,
+    );
+  }
+  return Object.freeze({
+    ok: true,
+    projection: Object.freeze({
+      ...content,
+      authoritySha256,
+      claims: Object.freeze({
+        freshExtractionReplay: true,
+        curveKindLineMintedByDecoder: true,
+        endpointInferenceUsed: false,
+        parameterSpaceInferenceUsed: false,
+        pageMmNormalizationExactForAffineLines: true,
+        descriptorTransformIdentity: true,
+        includesRawDxf: false,
+        includesTags: false,
+        includesAst: false,
+        includesBytes: false,
+        phaseDIntegrated: false,
+        phase2RequestIntegrated: false,
+        productionReady: false,
+        completenessScope: 'exact-selected-source-paths',
+        fullSelectedPathSegmentCoverageChecked: true,
+        diagnosticTruncationCannotHideSelectedRejection: true,
+        wholeFileCompletenessClaimed: false,
+      } as const),
+    }),
+  });
 }

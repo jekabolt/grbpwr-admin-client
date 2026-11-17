@@ -227,10 +227,14 @@ type StraightEdgeCapture = {
   readonly identities: Set<string>;
   descriptorOverflow: boolean;
   blockerOverflow: boolean;
+  /** Completeness ledger is independent of the capped presentation diagnostics. */
+  readonly pathCoverage: Map<PathId, { pointCount: number; closed: boolean; rejected: boolean }>;
+  globalCoverageFailure: boolean;
 };
 
 const MAX_STRAIGHT_EDGE_DESCRIPTORS = 100_000;
 const MAX_STRAIGHT_EDGE_BLOCKERS = 4_096;
+const MAX_STRAIGHT_EDGE_PATH_COVERAGE = 100_000;
 const MAX_STRAIGHT_EDGE_COORDINATE_ABS_MM = 1_000_000_000;
 
 class Builder {
@@ -462,7 +466,12 @@ class Builder {
     primitiveSegmentIndex: number | null = null,
   ): void {
     const capture = this.straightEdgeCapture;
-    if (!capture || capture.blockerOverflow) return;
+    if (!capture) return;
+    // Never let the diagnostic cap erase a rejection on a later selected path.
+    const coverage = pathId === null ? undefined : capture.pathCoverage.get(pathId);
+    if (coverage) coverage.rejected = true;
+    else capture.globalCoverageFailure = true;
+    if (capture.blockerOverflow) return;
     if (capture.blockers.length >= MAX_STRAIGHT_EDGE_BLOCKERS) {
       capture.blockerOverflow = true;
       return;
@@ -506,6 +515,17 @@ class Builder {
   ): void {
     const capture = this.straightEdgeCapture;
     if (!capture) return;
+    if (
+      capture.pathCoverage.size >= MAX_STRAIGHT_EDGE_PATH_COVERAGE ||
+      capture.pathCoverage.has(pathId)
+    )
+      capture.globalCoverageFailure = true;
+    else
+      capture.pathCoverage.set(pathId, {
+        pointCount: em.pts.length,
+        closed: em.closed,
+        rejected: false,
+      });
     if (e.handle && this.duplicateEntityHandles.has(e.handle.toUpperCase())) {
       this.straightEdgeBlocker(
         'identity-rejected',
@@ -809,7 +829,13 @@ class Builder {
   }
 
   drop(key: string, reason: string) {
-    if (!this.rendered.has(key) && !this.structural.has(key)) this.dropped.set(key, reason);
+    if (!this.rendered.has(key) && !this.structural.has(key)) {
+      this.dropped.set(key, reason);
+      // Paper-space exclusion is explicit. Any other unscoped source loss has no path identity
+      // against which a selected-path consumer could prove completeness.
+      if (this.straightEdgeCapture && reason !== 'paper-space entity (layout, not the drawing)')
+        this.straightEdgeCapture.globalCoverageFailure = true;
+    }
   }
 }
 
@@ -1475,6 +1501,7 @@ function walk(list: RawEntity[], ctx: Ctx, b: Builder, newGroupPerInsert: boolea
         continue;
       }
       if (ctx.depth >= MAX_DEPTH) {
+        if (b.straightEdgeCapture) b.straightEdgeCapture.globalCoverageFailure = true;
         b.drop(key, `nested deeper than ${MAX_DEPTH} levels`);
         continue;
       }
@@ -1567,6 +1594,7 @@ function walk(list: RawEntity[], ctx: Ctx, b: Builder, newGroupPerInsert: boolea
         }
       }
       if (placed < cols * rows) {
+        if (b.straightEdgeCapture) b.straightEdgeCapture.globalCoverageFailure = true;
         if (!b.budgetWarned) {
           b.budgetWarned = true;
           b.warnings.push(`more than ${MAX_INSTANCES} block instances — the rest are not expanded`);
@@ -1895,6 +1923,9 @@ async function readDxfInternal(
     straightEdgeCapture,
   );
   b.warnings.push(...raw.warnings);
+  // Unscoped parser recovery cannot establish selected-path completeness.
+  if (straightEdgeCapture && raw.warnings.length > 0)
+    straightEdgeCapture.globalCoverageFailure = true;
   if (dec.fallback) b.warnings.push(`the file is not UTF-8 — decoded as ${dec.encoding}`);
   if (units.source === 'guess') b.warnings.push(units.evidence);
   const M0 = scale(units.mmPerUnit, units.mmPerUnit);
@@ -1955,7 +1986,10 @@ async function readDxfInternal(
     r.pageCover = pageW * pageH > 0 ? Math.min(1, a / (pageW * pageH)) : 0;
   }
   const tally = tallyOf(raw, b, tok.innerComments);
-  if (!tally.balanced) b.warnings.push('entity tally does not balance — see meta.tally');
+  if (!tally.balanced) {
+    b.warnings.push('entity tally does not balance — see meta.tally');
+    if (straightEdgeCapture) straightEdgeCapture.globalCoverageFailure = true;
+  }
   const dialect = detectDialect(raw, modelLabels, manifest, version);
   // A10: piece blocks with a boundary on layer 1 (AAMA / ASTM: 1 = cut line, 14 = sew line)
   const cutBlocks = raw.blockOrder.filter((bl) =>
@@ -2134,6 +2168,16 @@ export type DxfSourceNativeStraightEdgesInternalReadV1 = Readonly<{
   provenance: DxfPathProvenanceReadArtifactV1;
   candidates: readonly DxfSourceNativeStraightEdgeDecodedCandidateV1[];
   blockers: readonly DxfSourceNativeStraightEdgeDecodedBlockerV1[];
+  /** Internal exact ledger; no public projection/capability can manufacture it. */
+  selectedPathCoverage: Readonly<{
+    globalFailure: boolean;
+    paths: readonly Readonly<{
+      sourcePathId: number;
+      pointCount: number;
+      closed: boolean;
+      rejected: boolean;
+    }>[];
+  }>;
 }>;
 
 export async function decodeDxfSourceNativeStraightEdgesInternalV1(
@@ -2150,6 +2194,8 @@ export async function decodeDxfSourceNativeStraightEdgesInternalV1(
     identities: new Set(),
     descriptorOverflow: false,
     blockerOverflow: false,
+    pathCoverage: new Map(),
+    globalCoverageFailure: false,
   };
   const read = await readDxfInternal(file, opts, progress, provenanceCapture, straightEdgeCapture);
   const livePathIds = new Set(read.doc.pages.flatMap((page) => page.paths.map(({ id }) => id)));
@@ -2176,6 +2222,15 @@ export async function decodeDxfSourceNativeStraightEdgesInternalV1(
         ({ sourcePathId }) => sourcePathId === null || livePathIds.has(sourcePathId),
       ),
     ),
+    selectedPathCoverage: Object.freeze({
+      globalFailure:
+        straightEdgeCapture.globalCoverageFailure || straightEdgeCapture.descriptorOverflow,
+      paths: Object.freeze(
+        [...straightEdgeCapture.pathCoverage]
+          .filter(([id]) => livePathIds.has(id))
+          .map(([sourcePathId, path]) => Object.freeze({ sourcePathId, ...path })),
+      ),
+    }),
   });
 }
 
