@@ -22,6 +22,7 @@ import {
   type PieceSpec,
   type StageIO,
 } from 'lib/pattern-import/types';
+import { bindProtectedSavedReadWorkerOpen } from 'lib/pattern-import/worker/reviewed-add-point-main';
 import { ImportWorkerClient } from 'lib/pattern-import/worker/client';
 
 import { cardBuildDraft } from '../card-apply';
@@ -598,13 +599,18 @@ async function reprocessSavedDxf(
   signal.addEventListener('abort', cancel, { once: true });
   try {
     report(onProgress, 0, 13, 'opening saved DXF', 0, 1);
-    const opened = await client.open([
-      {
-        name: input.syntheticFilename,
-        bytes,
-        dxfPathProvenance: { sourceFileId: input.sourceFileId },
-      },
-    ]);
+    const file = {
+      name: input.syntheticFilename,
+      bytes,
+      dxfPathProvenance: { sourceFileId: input.sourceFileId },
+    };
+    const authorizeProtectedWrite = await bindProtectedSavedReadWorkerOpen(
+      input,
+      file,
+      manifest,
+      resolvedCard,
+    );
+    const opened = await client.open([file]);
     sessionId = opened.sessionId;
     assertLive(signal);
 
@@ -727,6 +733,10 @@ async function reprocessSavedDxf(
           'reading exact native sewing paths',
         )
       : undefined;
+    if (authorizeProtectedWrite) {
+      authorizeProtectedWrite(await deps.resolveCard(input.row, signal));
+      assertLive(signal);
+    }
     const written = await run(
       'write',
       {

@@ -6,7 +6,7 @@ import {
   type DraftScope,
 } from './types';
 import { embedManifest } from './manifest';
-import { writeDxfDetailed } from './write';
+import { writeDxfDetailed, writeDxfWithRetainedLineSplit } from './write';
 
 export const DXF_PRODUCT_SAVED_REPROCESS_OWNER_V1 = 'dxf-product-saved-reprocess-owner/1' as const;
 export const DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1 =
@@ -147,6 +147,21 @@ export type DxfProductSavedReprocessHostV1 = Readonly<{
   crypto?: Pick<Crypto, 'subtle'>;
   dispose?: () => void;
 }>;
+
+type VerifiedReadInput = Parameters<DxfProductSavedReprocessHostV1['reprocess']>[0];
+const activeReads = new WeakMap<VerifiedReadInput, { signal: AbortSignal; claimed: boolean }>();
+
+/** Single use, bounded to this exact host call after the transactional row and downloaded hash match. */
+export function claimProtectedSavedReadV1(input: VerifiedReadInput): () => void {
+  const active = activeReads.get(input);
+  if (!active || active.claimed || active.signal.aborted)
+    throw new Error('The protected DXF requires an active verified saved-row read.');
+  active.claimed = true;
+  return () => {
+    if (activeReads.get(input) !== active || active.signal.aborted)
+      throw new Error('The protected saved-row read has expired.');
+  };
+}
 
 export const DXF_PRODUCT_SAVED_REPROCESS_OWNER_CLAIMS_V1 = Object.freeze({
   authoritativeRowReadRequired: true,
@@ -306,13 +321,14 @@ function exactReplayDate(value: unknown): Date | null {
   }
 }
 
-function writerReplayOutput(scope: DraftScope):
+async function writerReplayOutput(scope: DraftScope): Promise<
   | Readonly<{
       ok: true;
       dxfText: string;
       manifest: DraftScope['manifest'];
     }>
-  | Readonly<{ ok: false; detail: string }> {
+  | Readonly<{ ok: false; detail: string }>
+> {
   const replay = scope.writerReplay;
   if (!replay)
     return Object.freeze({
@@ -326,10 +342,10 @@ function writerReplayOutput(scope: DraftScope):
       detail: 'The product writer replay carrier has no exact canonical createdAt timestamp.',
     });
   try {
-    const rerun = writeDxfDetailed(replay.job, {
-      embed: null,
-      now: () => new Date(createdAt.getTime()),
-    });
+    const options = { embed: null, now: () => new Date(createdAt.getTime()) };
+    const rerun = replay.retainedLineSplit
+      ? await writeDxfWithRetainedLineSplit(replay.job, replay.retainedLineSplit, options)
+      : writeDxfDetailed(replay.job, options);
     const manifest = { ...rerun.manifest, gate: scope.manifest.gate };
     return Object.freeze({
       ok: true as const,
@@ -446,7 +462,7 @@ async function validateAndRedactDraft(
       code: 'reconstructed-writer-replay-mismatch',
       detail: 'The writer replay job scope does not exact-match the reconstructed draft scope.',
     };
-  const rerun = writerReplayOutput(draft.scopes[0]);
+  const rerun = await writerReplayOutput(draft.scopes[0]);
   if (!rerun.ok)
     return {
       ok: false,
@@ -640,16 +656,16 @@ export function createDxfProductSavedReprocessOwnerV1(host: DxfProductSavedRepro
       // cleanup remains reliable even when the disposable worker detaches its own copy.
       disposableReprocessBytes = ownedBytes.slice();
       let rebuilt: Awaited<ReturnType<DxfProductSavedReprocessHostV1['reprocess']>>;
+      const reprocessInput = Object.freeze({
+        row,
+        sourceFileId,
+        syntheticFilename: SYNTHETIC_DXF_NAME,
+        bytes: disposableReprocessBytes,
+      });
+      activeReads.set(reprocessInput, { signal: controller.signal, claimed: false });
       try {
-        rebuilt = await host.reprocess(
-          {
-            row,
-            sourceFileId,
-            syntheticFilename: SYNTHETIC_DXF_NAME,
-            bytes: disposableReprocessBytes,
-          },
-          controller.signal,
-          (done, total, note) => progress('reprocess', 2, done, total, note),
+        rebuilt = await host.reprocess(reprocessInput, controller.signal, (done, total, note) =>
+          progress('reprocess', 2, done, total, note),
         );
       } catch (error) {
         const foreignDxf = error instanceof DxfProductSavedForeignDxfDetectedErrorV1;
@@ -667,6 +683,8 @@ export function createDxfProductSavedReprocessOwnerV1(host: DxfProductSavedRepro
           row,
           sourceFileId,
         );
+      } finally {
+        activeReads.delete(reprocessInput);
       }
       if (aborted(controller.signal))
         return blocked('cancelled', 'Saved-DXF reprocess was cancelled.', row, sourceFileId);

@@ -2247,6 +2247,7 @@ export type RetainedLineSplit = {
 
 /** Private host-to-worker open message. A file or per-stage input cannot opt into this channel. */
 export type ReviewedAddPointOpen = Readonly<{
+  authority?: 'verified-saved-read';
   fileSha256: string;
   rowSha256: string;
   ringSha256: string;
@@ -2263,6 +2264,7 @@ export type ReviewedAddPointOpen = Readonly<{
 
 /** Current card projection supplied only by the host at the ordinary write phase. */
 export type ReviewedAddPointAtWrite = Readonly<{
+  authority?: 'verified-saved-read';
   fileSha256: string;
   techCardId: number;
   scopeKey: string;

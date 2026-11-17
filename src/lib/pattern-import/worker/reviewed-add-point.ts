@@ -46,7 +46,9 @@ export async function identifyReviewedAddPoint(input: {
       entry.identity === w.identity &&
       entry.sizeId === w.sizeId &&
       entry.sizeToken === w.sizeToken &&
-      record.sourceSha256 === w.rowSha256 &&
+      (w.authority === 'verified-saved-read'
+        ? w.fileSha256 === w.rowSha256
+        : w.authority === undefined && record.sourceSha256 === w.rowSha256) &&
       record.ringSha256 === w.ringSha256 &&
       record.entityId === w.entityId,
     'card, scope, size, input block or locked occurrence changed',
@@ -54,6 +56,7 @@ export async function identifyReviewedAddPoint(input: {
   const auth = input.atWrite;
   requireReview(
     auth &&
+      auth.authority === w.authority &&
       auth.fileSha256 === w.fileSha256 &&
       auth.techCardId === w.techCardId &&
       auth.scopeKey === w.scopeKey &&

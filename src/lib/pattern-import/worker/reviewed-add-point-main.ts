@@ -1,5 +1,8 @@
+import type { CardContext } from 'components/managers/tech-card/components/pattern-import/client';
+import type { DxfProductSavedReprocessHostV1 } from '../dxf-product-saved-reprocess-owner-v1';
 import type {
   PatternImportOpenFile,
+  ConversionManifest,
   ReviewedAddPointOpen,
   ReviewedAddPointAtWrite,
 } from '../types';
@@ -58,6 +61,105 @@ export async function bindReviewedAddPointWorkerOpen(
   const grant = await ready;
   grant.check();
   pending.set(input, grant);
+}
+
+type SavedRead = Parameters<DxfProductSavedReprocessHostV1['reprocess']>[0];
+type SavedCard = Readonly<{ card: CardContext; cardLockVersion: number }>;
+
+/** Bind only a disposable verified saved-row read. Its authorization expires with the host call. */
+export async function bindProtectedSavedReadWorkerOpen(
+  read: SavedRead,
+  input: PatternImportOpenFile,
+  manifest: ConversionManifest,
+  snapshot: SavedCard,
+): Promise<((fresh: SavedCard) => void) | undefined> {
+  const marked = manifest.blocks.filter((block) => block.protectedLineSplit);
+  if (!marked.length) return;
+  const { claimProtectedSavedReadV1 } = await import('../dxf-product-saved-reprocess-owner-v1');
+  const check = claimProtectedSavedReadV1(read);
+  if (
+    input.bytes !== read.bytes.buffer ||
+    read.bytes.byteOffset !== 0 ||
+    input.bytes.byteLength !== read.row.sizeBytes
+  )
+    throw new Error('The protected worker requires the verified saved-row buffer.');
+  const row = read.row,
+    entry = marked[0]!,
+    record = entry.protectedLineSplit!,
+    size = manifest.sizes[0];
+  if (
+    marked.length !== 1 ||
+    manifest.sizes.length !== 1 ||
+    !size ||
+    manifest.techCardId !== row.techCardId ||
+    size.sizeId !== entry.sizeId ||
+    size.token !== entry.sizeToken ||
+    input.dxfPathProvenance?.sourceFileId !== read.sourceFileId
+  )
+    throw new Error('The saved protected DXF has no unique block and size.');
+  const resolve = ({ card, cardLockVersion }: SavedCard): ReviewedAddPointAtWrite => {
+    check();
+    const targets = card.scopes.filter((scope) => scope.scopeKey === row.scopeKey);
+    const aliases =
+      card.existingAliases?.filter(
+        (a) =>
+          a.scopeKey === row.scopeKey &&
+          (a.blockName === entry.identity || a.blockName === entry.block),
+      ) ?? [];
+    const key = aliases[0]?.pieceLineKey;
+    if (
+      cardLockVersion !== row.cardLockVersion ||
+      card.techCardId !== row.techCardId ||
+      targets.length !== 1 ||
+      targets[0]!.fabricPurpose !== manifest.scope.fabricPurpose ||
+      targets[0]!.bomLineKey !== manifest.scope.bomLineKey ||
+      !key ||
+      aliases.length !== new Set(aliases.map((a) => a.blockName)).size ||
+      aliases.some((a) => a.pieceLineKey !== key) ||
+      card.existingPieces.filter((p) => p.lineKey === key).length !== 1
+    )
+      throw new Error('The protected saved DXF no longer resolves to one current card piece.');
+    return {
+      authority: 'verified-saved-read',
+      fileSha256: row.sha256,
+      techCardId: row.techCardId,
+      scopeKey: row.scopeKey,
+      pieceLineKey: key,
+      aliases: aliases.map((a) => ({ ...a })),
+    };
+  };
+  const opening = resolve(snapshot);
+  let atWrite: ReviewedAddPointAtWrite | undefined;
+  pending.set(input, {
+    active: false,
+    check,
+    wire: {
+      authority: 'verified-saved-read',
+      fileSha256: row.sha256,
+      rowSha256: row.sha256,
+      techCardId: row.techCardId,
+      scopeKey: row.scopeKey,
+      pieceLineKey: opening.pieceLineKey,
+      block: entry.block,
+      identity: entry.identity,
+      sizeId: size.sizeId,
+      sizeToken: size.token,
+      rank: size.rank,
+      entityId: record.entityId,
+      ringSha256: record.ringSha256,
+    },
+    atWrite: () => {
+      check();
+      if (!atWrite) throw new Error('The protected saved DXF requires a fresh card read at write.');
+      return atWrite;
+    },
+  });
+  return (fresh) => {
+    const next = resolve(fresh);
+    if (next.pieceLineKey !== opening.pieceLineKey)
+      throw new Error('The protected saved DXF changed its current card piece.');
+    atWrite = next;
+  };
 }
 
 export function takeReviewedAddPointWorkerOpen(

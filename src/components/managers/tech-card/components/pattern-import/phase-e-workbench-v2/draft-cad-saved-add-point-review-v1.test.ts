@@ -456,3 +456,223 @@ it('rebinds a restarted worker only after releasing the prior session and rechec
     f.source.dispose();
   }
 });
+
+import { adminService } from 'api/api';
+import { createCardApply } from '../card-apply';
+import type { LiveCard } from 'lib/pattern-import/fabrics/apply';
+import {
+  claimProtectedSavedReadV1,
+  DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
+  type DxfProductSavedRowIdentityV1,
+} from 'lib/pattern-import/dxf-product-saved-reprocess-owner-v1';
+import { createDxfProductSavedNativeReprocessOwnerV1 } from 'lib/pattern-import/dxf-product-saved-native-reprocess-owner-v1';
+import { createPatternImportDxfPhaseESavedDxfReprocessHostV1 } from './saved-dxf-reprocess-host-v1';
+
+it('reopens the protected saved row through the normal worker and rejects stale or foreign evidence', async () => {
+  const f = await fixture(true);
+  vi.stubGlobal('Worker', InProcessTransport);
+  let stored = new Uint8Array(),
+    savedRow: DxfProductSavedRowIdentityV1 | undefined;
+  const url = 'https://saved-full-assembly.invalid/new-protected.dxf';
+  const upload = vi
+    .spyOn(adminService, 'UploadPattern')
+    .mockImplementation(async ({ raw, filename }) => {
+      stored = Uint8Array.from(atob(raw!), (c) => c.charCodeAt(0));
+      return { url, filename, sizeBytes: stored.length };
+    });
+  try {
+    const { file } = takeSavedAddPointReviewV1(await prepareSavedAddPointReviewV1(f.request));
+    const card = structuredClone(f.current.card),
+      prior = f.current.row,
+      scope = card.scopes[0]!;
+    const draft = await draftThroughWizardStages(file, card, new ImportWorkerClient());
+    const live: LiveCard = {
+      patterns: [
+        {
+          ...card.existingPatterns![0]!,
+          fabricPurpose: scope.fabricPurpose,
+          bomLineKey: scope.bomLineKey,
+          sizeId: 7,
+        },
+      ],
+      pieces: card.existingPieces,
+      aliases: card.existingAliases!.map((a) => ({
+        ...a,
+        fabricPurpose: scope.fabricPurpose,
+        bomLineKey: scope.bomLineKey,
+      })),
+    };
+    const applied = await createCardApply({
+      read: () => live,
+      write: (path, value) => {
+        if (!Array.isArray(value)) throw Error('unexpected form edit');
+        if (path === 'patterns') live.patterns = value;
+        else if (path === 'pieces') live.pieces = value;
+        else if (path === 'pieceDxfAliases') live.aliases = value;
+        else throw Error(path);
+      },
+      scopeOf: (row) =>
+        row.bomLineKey === scope.bomLineKey && row.fabricPurpose === scope.fabricPurpose
+          ? scope.scopeKey
+          : '',
+      storageSizeId: 7,
+      readPreviousLockVersion: () => prior.cardLockVersion,
+      save: async () => {
+        const committed = live.patterns.find((p) => p.url === url)!;
+        savedRow = {
+          techCardId: card.techCardId,
+          scopeKey: scope.scopeKey,
+          patternLineKey: committed.lineKey!,
+          revision: prior.revision + 1,
+          cardLockVersion: prior.cardLockVersion + 1,
+          url: committed.url!,
+          sizeBytes: committed.sizeBytes!,
+          sha256: committed.sha256!,
+        };
+        return 'ok';
+      },
+    })(draft);
+    expect(applied.ok && applied.commitReceipt, JSON.stringify(applied)).toBeTruthy();
+    const row = savedRow!;
+    expect(row.revision).toBeGreaterThan(prior.revision);
+    expect(row.cardLockVersion).toBeGreaterThan(prior.cardLockVersion);
+    if (!applied.ok || !applied.commitReceipt) throw Error('expected confirmed save');
+    expect(applied.commitReceipt.previousLockVersion).toBe(prior.cardLockVersion);
+    expect(applied.commitReceipt.scopes).toMatchObject([
+      { patternLineKey: row.patternLineKey, patternUrl: row.url },
+    ]);
+    expect(row.sha256).toBe(await digestFullAssemblyFixture(stored));
+    expect(row.sha256).not.toBe(prior.sha256);
+    const saved = readManifest(new TextDecoder().decode(stored))!;
+    card.existingPatterns = [
+      { ...card.existingPatterns![0]!, url: row.url, lineKey: row.patternLineKey, manifest: saved },
+    ];
+    card.existingAliases = live.aliases.map((a) => ({
+      scopeKey: scope.scopeKey,
+      blockName: a.blockName!,
+      pieceLineKey: a.pieceLineKey!,
+    }));
+    const run = async (
+      expected: DxfProductSavedRowIdentityV1,
+      bytes: Uint8Array,
+      mode: 'exact' | 'copy' | 'late-row' | 'late-alias' = 'exact',
+    ) => {
+      let projections = 0,
+        rowReads = 0;
+      const host = createPatternImportDxfPhaseESavedDxfReprocessHostV1({
+        resolveCard: async () => ({
+          card:
+            ++projections > 1 && mode === 'late-alias' ? { ...card, existingAliases: [] } : card,
+          cardLockVersion: expected.cardLockVersion,
+        }),
+        readAuthoritativeRow: async () => ({
+          row:
+            ++rowReads > 1 && mode === 'late-row'
+              ? {
+                  ...expected,
+                  patternLineKey: 'next-row',
+                  revision: expected.revision + 1,
+                  cardLockVersion: expected.cardLockVersion + 1,
+                }
+              : expected,
+          downloadUrl: url,
+        }),
+        fetch: async () => new Response(Uint8Array.from(bytes)),
+      });
+      let expired: Parameters<typeof claimProtectedSavedReadV1>[0] | undefined;
+      const owner = createDxfProductSavedNativeReprocessOwnerV1({
+        ...host,
+        reprocess: async (input, signal, progress) => {
+          expired = input;
+          return host.reprocess(mode === 'copy' ? { ...input } : input, signal, progress);
+        },
+      });
+      try {
+        const result = await owner.run({
+          schemaVersion: DXF_PRODUCT_SAVED_REPROCESS_REQUEST_V1,
+          row: expected,
+        });
+        if (expired) expect(() => claimProtectedSavedReadV1(expired!)).toThrow('active verified');
+        return result;
+      } finally {
+        owner.dispose();
+        host.dispose();
+      }
+    };
+    const verified = await run(row, stored);
+    expect(verified.ok, JSON.stringify(verified.blockers)).toBe(true);
+    if (!verified.ok) throw Error('expected verified row');
+    const restored = verified.draft.scopes[0]!;
+    const kept = restored.writerReplay!.retainedLineSplit!;
+    expect(verified.row).toEqual(row);
+    expect(kept.record.sourceSha256).toBe(prior.sha256);
+    expect(kept.record.ringPointCount).toBe(5);
+    expect(kept.block).toBe('BP_M');
+    const proof = await readProtectedLineSplit(stored.slice().buffer, verified.sourceFileId, {
+      fileSha256: row.sha256,
+      block: kept.block,
+      record: kept.record,
+    });
+    expect(proof.left.endVertexId).toBe(proof.right.startVertexId);
+    expect([proof.left.startMm, proof.left.endMm, proof.right.endMm]).toEqual([
+      kept.record.fromMm,
+      kept.record.pointMm,
+      kept.record.toMm,
+    ]);
+    expect(
+      restored.writerReplay!.job.pieces.find((p) => p.identity === kept.identity)!.sizes[0]![
+        kept.record.role
+      ],
+    ).toHaveLength(5);
+    expect(
+      (
+        await replayPatternImportDxfProductWriterV1({
+          schemaVersion: PATTERN_IMPORT_DXF_PRODUCT_WRITER_REPLAY_V1,
+          replay: restored.writerReplay!,
+          finalManifest: restored.manifest,
+          expected: { scopeKey: row.scopeKey, exportSha256: row.sha256 },
+        })
+      ).ok,
+    ).toBe(true);
+    for (const mode of ['copy', 'late-alias', 'late-row'] as const) {
+      const refused = await run(row, stored, mode);
+      expect(refused.ok).toBe(false);
+      expect(refused.blockers[0]?.code).toBe(
+        mode === 'late-row' ? 'saved-row-revalidation-failed' : 'saved-dxf-reprocess-failed',
+      );
+    }
+    const badRaw = stored.slice();
+    badRaw[0] ^= 1;
+    expect((await run(row, badRaw)).blockers[0]?.code).toBe('saved-row-sha256-mismatch');
+    const copy = structuredClone(saved);
+    copy.blocks.find((b) => b.protectedLineSplit)!.protectedLineSplit!.ringSha256 = 'f'.repeat(64);
+    const tampered = new TextEncoder().encode(
+      embedManifest(new TextDecoder().decode(stored), copy),
+    );
+    expect(
+      (
+        await run(
+          { ...row, sizeBytes: tampered.length, sha256: await digestFullAssemblyFixture(tampered) },
+          tampered,
+        )
+      ).blockers[0]?.code,
+    ).toBe('saved-dxf-reprocess-failed');
+    const missing = structuredClone(saved);
+    delete missing.blocks.find((b) => b.protectedLineSplit)!.protectedLineSplit;
+    const unmarked = new TextEncoder().encode(
+      embedManifest(new TextDecoder().decode(stored), missing),
+    );
+    expect(
+      (
+        await run(
+          { ...row, sizeBytes: unmarked.length, sha256: await digestFullAssemblyFixture(unmarked) },
+          unmarked,
+        )
+      ).ok,
+    ).toBe(false);
+  } finally {
+    upload.mockRestore();
+    vi.unstubAllGlobals();
+    f.source.dispose();
+  }
+});
