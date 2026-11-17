@@ -111,6 +111,10 @@ export function ModelOpenReferenceDirectPoseControlV9(
     draftPose,
     MODEL_OPEN_REFERENCE_DIRECT_NEUTRAL_POSE_V9,
   );
+  // A committed temporary pose is in the draft before its rebuild lands in appliedPose; undo must
+  // reach it while the mannequin is still rebuilding.
+  const pendingTemporaryCommit =
+    !sessionOwned && props.appliedPose !== null && !sameTemporaryPose(draftPose, props.appliedPose);
   const symmetry = draftPose.armMode === 'linked' && draftPose.legMode === 'linked';
   const persistence = props.sessionPose?.persistence;
 
@@ -146,6 +150,10 @@ export function ModelOpenReferenceDirectPoseControlV9(
       onApply(props.sessionPose.onUndo());
       return;
     }
+    if (pendingTemporaryCommit && props.appliedPose) {
+      applyImmediately(snapshotModelOpenReferenceDirectPoseV9(props.appliedPose));
+      return;
+    }
     const previous = temporaryHistoryRef.current.pop();
     if (!previous) return;
     suppressNextTemporaryHistoryRef.current = true;
@@ -179,7 +187,9 @@ export function ModelOpenReferenceDirectPoseControlV9(
         size='xs'
         className={toggle ? 'min-h-8 px-2' : 'min-h-11 px-2'}
         disabled={
-          (props.sessionPose ? !props.sessionPose.canUndo : temporaryUndoDepth === 0) || building
+          props.sessionPose
+            ? !props.sessionPose.canUndo
+            : temporaryUndoDepth === 0 && !pendingTemporaryCommit
         }
         onClick={undo}
       >
@@ -190,7 +200,7 @@ export function ModelOpenReferenceDirectPoseControlV9(
         variant='underline'
         size='xs'
         className={toggle ? 'min-h-8 px-2' : 'min-h-11 px-2'}
-        disabled={neutral || building}
+        disabled={neutral}
         onClick={reset}
       >
         reset
